@@ -10,7 +10,7 @@ import {
 
 const MAX_OWNED_SESSIONS = 256;
 const MAX_SESSION_ID_CHARS = 512;
-const MAX_ACTIVITY_EVENT_IDS = 8_192;
+const MAX_ACTIVITY_EVENT_KEYS = 8_192;
 
 function safeSessionId(value: unknown): string | undefined {
   const candidate = stringValue(value);
@@ -42,6 +42,48 @@ function safeFields(
   return fields.every((field) => safeSessionId(properties[field]) !== undefined);
 }
 
+function validModelRef(value: unknown): boolean {
+  const model = objectValue(value);
+  return safeSessionId(model?.providerID) !== undefined
+    && safeSessionId(model?.modelID) !== undefined;
+}
+
+function finiteNumber(value: unknown): boolean {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function validPrompt(value: unknown): boolean {
+  const prompt = objectValue(value);
+  return typeof prompt?.text === "string"
+    && (prompt.files === undefined || Array.isArray(prompt.files))
+    && (prompt.agents === undefined || Array.isArray(prompt.agents));
+}
+
+function validStepTokens(value: unknown): boolean {
+  const tokens = objectValue(value);
+  const cache = objectValue(tokens?.cache);
+  return finiteNumber(tokens?.input)
+    && finiteNumber(tokens?.output)
+    && finiteNumber(tokens?.reasoning)
+    && finiteNumber(cache?.read)
+    && finiteNumber(cache?.write);
+}
+
+function validUnknownError(value: unknown): boolean {
+  const error = objectValue(value);
+  return error?.type === "unknown" && typeof error.message === "string";
+}
+
+function validRetryError(value: unknown): boolean {
+  const error = objectValue(value);
+  return typeof error?.message === "string"
+    && typeof error.isRetryable === "boolean";
+}
+
+function validProviderExecution(value: unknown): boolean {
+  return typeof objectValue(value)?.executed === "boolean";
+}
+
 function activeNextDescendantEvent(
   type: string,
   properties: Record<string, unknown>,
@@ -54,10 +96,16 @@ function activeNextDescendantEvent(
     || !Number.isFinite(properties.timestamp)
   ) return false;
   switch (type) {
+    case "session.next.agent.switched":
+      return safeFields(properties, "messageID")
+        && stringValue(properties.agent) !== undefined;
+    case "session.next.model.switched":
+      return safeFields(properties, "messageID")
+        && validModelRef(properties.model);
     case "session.next.prompted":
     case "session.next.prompt.admitted":
       return safeFields(properties, "messageID")
-        && objectValue(properties.prompt) !== undefined
+        && validPrompt(properties.prompt)
         && (properties.delivery === "steer" || properties.delivery === "queue");
     case "session.next.context.updated":
     case "session.next.synthetic":
@@ -72,16 +120,15 @@ function activeNextDescendantEvent(
     case "session.next.step.started":
       return safeFields(properties, "assistantMessageID")
         && stringValue(properties.agent) !== undefined
-        && objectValue(properties.model) !== undefined;
+        && validModelRef(properties.model);
     case "session.next.step.ended":
       return safeFields(properties, "assistantMessageID")
         && typeof properties.finish === "string"
-        && typeof properties.cost === "number"
-        && Number.isFinite(properties.cost)
-        && objectValue(properties.tokens) !== undefined;
+        && finiteNumber(properties.cost)
+        && validStepTokens(properties.tokens);
     case "session.next.step.failed":
       return safeFields(properties, "assistantMessageID")
-        && objectValue(properties.error) !== undefined;
+        && validUnknownError(properties.error);
     case "session.next.text.started":
       return safeFields(properties, "assistantMessageID", "textID");
     case "session.next.text.delta":
@@ -111,7 +158,7 @@ function activeNextDescendantEvent(
       return safeFields(properties, "assistantMessageID", "callID")
         && stringValue(properties.tool) !== undefined
         && objectValue(properties.input) !== undefined
-        && objectValue(properties.provider) !== undefined;
+        && validProviderExecution(properties.provider);
     case "session.next.tool.progress":
       return safeFields(properties, "assistantMessageID", "callID")
         && objectValue(properties.structured) !== undefined
@@ -120,15 +167,14 @@ function activeNextDescendantEvent(
       return safeFields(properties, "assistantMessageID", "callID")
         && objectValue(properties.structured) !== undefined
         && Array.isArray(properties.content)
-        && objectValue(properties.provider) !== undefined;
+        && validProviderExecution(properties.provider);
     case "session.next.tool.failed":
       return safeFields(properties, "assistantMessageID", "callID")
-        && objectValue(properties.error) !== undefined
-        && objectValue(properties.provider) !== undefined;
+        && validUnknownError(properties.error)
+        && validProviderExecution(properties.provider);
     case "session.next.retried":
-      return typeof properties.attempt === "number"
-        && Number.isFinite(properties.attempt)
-        && objectValue(properties.error) !== undefined;
+      return finiteNumber(properties.attempt)
+        && validRetryError(properties.error);
     case "session.next.compaction.started":
       return safeFields(properties, "messageID")
         && (properties.reason === "auto" || properties.reason === "manual");
@@ -211,11 +257,24 @@ function activityEventKey(event: Event): string | undefined {
   try {
     const { id: _eventId, ...payload } = event as Event & { id?: unknown };
     return `hash:${createHash("sha256")
-      .update(JSON.stringify(payload))
+      .update(canonicalJson(payload))
       .digest("base64url")}`;
   } catch {
     return undefined;
   }
+}
+
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalJson).join(",")}]`;
+  }
+  return `{${Object.entries(value as Record<string, unknown>)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, child]) => `${JSON.stringify(key)}:${canonicalJson(child)}`)
+    .join(",")}}`;
 }
 
 /**
@@ -224,7 +283,7 @@ function activityEventKey(event: Event): string | undefined {
  */
 export class OpenCodeSessionOwnership {
   private readonly sessions = new Set<string>();
-  private readonly activityEventIds = new Set<string>();
+  private readonly activityEventKeys = new Set<string>();
 
   constructor(private readonly rootSessionId: string) {
     this.sessions.add(rootSessionId);
@@ -264,11 +323,11 @@ export class OpenCodeSessionOwnership {
     const active = added || activeDescendantEvent(event, eventSessionId!);
     const eventKey = active ? activityEventKey(event) : undefined;
     if (!eventKey) return { scope, active };
-    if (this.activityEventIds.has(eventKey)) return { scope, active: false };
-    this.activityEventIds.add(eventKey);
-    if (this.activityEventIds.size > MAX_ACTIVITY_EVENT_IDS) {
-      const oldest = this.activityEventIds.values().next().value;
-      if (oldest) this.activityEventIds.delete(oldest);
+    if (this.activityEventKeys.has(eventKey)) return { scope, active: false };
+    this.activityEventKeys.add(eventKey);
+    if (this.activityEventKeys.size > MAX_ACTIVITY_EVENT_KEYS) {
+      const oldest = this.activityEventKeys.values().next().value;
+      if (oldest) this.activityEventKeys.delete(oldest);
     }
     return { scope, active };
   }

@@ -83,8 +83,16 @@ describe("OpenCode descendant session ownership", () => {
     expect(ownership.observe(activeMessage))
       .toEqual({ scope: "descendant", active: true });
     expect(ownership.observe(event({
-      ...activeMessage,
       id: "replayed-with-a-new-envelope-id",
+      properties: {
+        info: {
+          role: "assistant",
+          sessionID: "child-session",
+          id: "child-message",
+        },
+        sessionID: "child-session",
+      },
+      type: "message.updated",
     })))
       .toEqual({ scope: "descendant", active: false });
     expect(ownership.observe(event({
@@ -121,6 +129,61 @@ describe("OpenCode descendant session ownership", () => {
         assistantMessageID: "child-assistant",
         textID: "child-text",
         delta: "working",
+      },
+    }))).toEqual({ scope: "descendant", active: true });
+    expect(ownership.observe(event({
+      id: "invalid-step-model",
+      type: "session.next.step.started",
+      properties: {
+        sessionID: "child-session",
+        timestamp: Date.now(),
+        assistantMessageID: "child-assistant",
+        agent: "general",
+        model: {},
+      },
+    }))).toEqual({ scope: "descendant", active: false });
+    expect(ownership.observe(event({
+      id: "invalid-prompt-payload",
+      type: "session.next.prompted",
+      properties: {
+        sessionID: "child-session",
+        timestamp: Date.now(),
+        messageID: "child-message",
+        prompt: {},
+        delivery: "queue",
+      },
+    }))).toEqual({ scope: "descendant", active: false });
+    expect(ownership.observe(event({
+      id: "invalid-tool-provider",
+      type: "session.next.tool.called",
+      properties: {
+        sessionID: "child-session",
+        timestamp: Date.now(),
+        assistantMessageID: "child-assistant",
+        callID: "child-call",
+        tool: "read",
+        input: {},
+        provider: {},
+      },
+    }))).toEqual({ scope: "descendant", active: false });
+    expect(ownership.observe(event({
+      id: "agent-switch",
+      type: "session.next.agent.switched",
+      properties: {
+        sessionID: "child-session",
+        timestamp: Date.now(),
+        messageID: "child-message",
+        agent: "general",
+      },
+    }))).toEqual({ scope: "descendant", active: true });
+    expect(ownership.observe(event({
+      id: "model-switch",
+      type: "session.next.model.switched",
+      properties: {
+        sessionID: "child-session",
+        timestamp: Date.now(),
+        messageID: "child-message",
+        model: { providerID: "opencode", modelID: "x-preview" },
       },
     }))).toEqual({ scope: "descendant", active: true });
   });

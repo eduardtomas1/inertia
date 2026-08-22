@@ -6,8 +6,8 @@ import {
   type AgentApprovalRequest,
   type AgentInputRequest,
   type AgentPlan,
+  type AgentRunState,
   type AgentTurn,
-  type AgentTurnStatus,
   type AgentTurnTerminalStatus,
   type ChatAttachment,
   type ChatMessage,
@@ -62,6 +62,7 @@ import { TurnNativeGoalMutationGate } from "./turn-native-goal-mutation-gate";
 import { providerFailureCause } from "./turn-provider-result";
 import { TurnFollowUpCoordinator } from "./turn-follow-up-coordinator";
 import { TurnTimeoutCoordinator } from "./turn-timeout-coordinator";
+import { TurnRunStateCoordinator } from "./turn-run-state-coordinator";
 
 export type {
   QueuedTurn,
@@ -94,6 +95,7 @@ export class TurnController {
   private readonly artifacts: TurnArtifactSequencer;
   private readonly interactions: TurnInteractionCoordinator;
   private readonly settlement: TurnSettlementCoordinator;
+  private readonly runStates: TurnRunStateCoordinator;
   private readonly providerEvents: TurnProviderEventProjector;
   private readonly nativeGoals: TurnNativeGoalCoordinator;
   private readonly settlementTasks = new Set<Promise<unknown>>();
@@ -184,6 +186,20 @@ export class TurnController {
       cleanup: (active) => this.cleanup(active),
       track: (value) => this.track(value),
     });
+    this.runStates = new TurnRunStateCoordinator({
+      store: this.store,
+      providers: this.providers,
+      hooks: this.hooks,
+      scheduler: this.scheduler,
+      pendingApprovals: this.pendingApprovals,
+      pendingInputs: this.pendingInputs,
+      settlement: this.settlement,
+      providerRunOwnershipBarriers: this.providerRunOwnershipBarriers,
+      now: () => this.now(),
+      activity: (active) => this.timeouts.activity(active),
+      release: (active) => this.releaseTurnAttachmentsWithRetry(active),
+      track: (value) => this.track(value),
+    });
     this.interactions = new TurnInteractionCoordinator({
       store: this.store,
       providers: this.providers,
@@ -208,7 +224,12 @@ export class TurnController {
       activities: this.activities,
       interactions: this.interactions,
       now: () => this.now(),
-      transition: (active, status) => this.transition(active, status),
+      transition: (active, status, providerState) => this.transition(
+        active,
+        status,
+        providerState,
+      ),
+      observeSubagent: (active, event) => this.observeSubagent(active, event),
     });
     this.nativeGoals = new TurnNativeGoalCoordinator({
       store: this.store,
@@ -366,7 +387,7 @@ export class TurnController {
       },
     );
     if (cleanup !== "confirmed") return false;
-    if (exactActive && !exactActive.settled) {
+    if (exactActive && !exactActive.runState.isTerminal()) {
       this.settle(exactActive, "cancelled", "user-cancelled", "Stopped");
     }
     if (exactActive) await this.releaseTurnAttachmentsWithRetry(exactActive);
@@ -456,7 +477,7 @@ export class TurnController {
    */
   flushActiveStreamsForHydration(): void {
     for (const active of this.activeByConversation.values()) {
-      if (active.settled) continue;
+      if (active.runState.isTerminal()) continue;
       try {
         // A pending high surrogate is an incomplete provider delta, not text
         // that can be projected. Keep that single code unit across renderer
@@ -600,8 +621,8 @@ export class TurnController {
       this.closing
       || !active[0]
       || !active[1]
-      || active[0].settled
-      || active[1].settled
+      || active[0].runState.isTerminal()
+      || active[1].runState.isTerminal()
     ) return [false, false];
     const firstActive = active[0];
     const secondActive = active[1];
@@ -614,7 +635,7 @@ export class TurnController {
     ]);
     if (!ready[0] || !ready[1]) {
       for (const sibling of [firstActive, secondActive]) {
-        if (!sibling.settled) {
+        if (!sibling.runState.isTerminal()) {
           this.settle(
             sibling,
             "cancelled",
@@ -628,7 +649,7 @@ export class TurnController {
 
     const first = this.startProvider(firstActive);
     if (!first.accepted) {
-      if (!secondActive.settled) {
+      if (!secondActive.runState.isTerminal()) {
         this.settle(
           secondActive,
           "failed",
@@ -640,7 +661,7 @@ export class TurnController {
     }
     const second = this.startProvider(secondActive);
     if (!second.accepted) {
-      if (!firstActive.settled) {
+      if (!firstActive.runState.isTerminal()) {
         this.providers.cancel(firstActive.conversation.id);
         this.settle(
           firstActive,
@@ -653,7 +674,7 @@ export class TurnController {
     const started = await Promise.all([first.started, second.started]);
     if (!started.every(Boolean)) {
       [firstActive, secondActive].forEach((sibling, ordinal) => {
-        if (sibling.settled) return;
+        if (sibling.runState.isTerminal()) return;
         if (started[ordinal]) this.providers.cancel(sibling.conversation.id);
         this.settle(
           sibling,
@@ -668,7 +689,7 @@ export class TurnController {
 
   start(turnId: string): boolean {
     const active = this.activeByTurn.get(turnId);
-    if (!active || active.settled || this.closing) return false;
+    if (!active || active.runState.isTerminal() || this.closing) return false;
     this.beginStart(active);
 
     const priorProviderCleanup = this.providerRunOwnershipBarriers.get(
@@ -686,12 +707,7 @@ export class TurnController {
   }
 
   private beginStart(active: ActiveTurn): void {
-    const now = this.now();
-    active.turn = this.store.updateAgentTurnLifecycle(active.turn.id, {
-      status: "starting",
-      startedAt: now,
-      updatedAt: now,
-    });
+    this.transition(active, "starting");
     this.store.createWorkspaceRun({
       id: active.turn.runId,
       kind: "agent",
@@ -721,17 +737,17 @@ export class TurnController {
       active.conversation.id,
     );
     if (priorProviderCleanup) await priorProviderCleanup.catch(() => undefined);
-    if (active.settled || this.closing) return false;
+    if (active.runState.isTerminal() || this.closing) return false;
     const preCapture = this.artifacts.captureBefore(active);
     if (preCapture) {
       active.gitBeforeCapture = preCapture;
       await preCapture;
     }
-    return !active.settled && !this.closing;
+    return !active.runState.isTerminal() && !this.closing;
   }
 
   private captureBeforeAndStartProvider(active: ActiveTurn): boolean {
-    if (active.settled || this.closing) return false;
+    if (active.runState.isTerminal() || this.closing) return false;
     const preCapture = this.artifacts.captureBefore(active);
     if (preCapture) {
       active.gitBeforeCapture = preCapture;
@@ -745,7 +761,7 @@ export class TurnController {
   }
 
   private startProvider(active: ActiveTurn): ProviderStartAttempt {
-    if (active.settled || this.closing) {
+    if (active.runState.isTerminal() || this.closing) {
       return { accepted: false, started: Promise.resolve(false) };
     }
     let startSettled = false;
@@ -781,7 +797,7 @@ export class TurnController {
           turn: active.turn,
         }),
         onStarted: () => {
-          if (active.settled || this.closing) {
+          if (active.runState.isTerminal() || this.closing) {
             this.providers.cancel(active.conversation.id);
             acknowledge(false);
             return;
@@ -856,14 +872,14 @@ export class TurnController {
 
   cancel(conversationId: string, cause: TurnTerminalCause = "user-cancelled"): boolean {
     const active = this.activeByConversation.get(conversationId);
-    if (!active || active.settled) return false;
+    if (!active || active.runState.isTerminal()) return false;
     this.providers.cancel(conversationId);
     return this.settle(active, "cancelled", cause, "Stopped");
   }
 
   failBeforeStart(conversationId: string, message: string): boolean {
     const active = this.activeByConversation.get(conversationId);
-    if (!active || active.settled) return false;
+    if (!active || active.runState.isTerminal()) return false;
     this.providers.cancel(conversationId);
     return this.settle(active, "failed", "turn-start-failed", message);
   }
@@ -894,8 +910,7 @@ export class TurnController {
     const active = this.activeByConversation.get(conversationId);
     if (
       !active
-      || active.settled
-      || !active.acceptingProviderEvents
+      || !active.runState.acceptsProviderEvents()
       || !this.providers.stopSubagent
     ) return false;
     let trace: SubagentTrace;
@@ -940,8 +955,7 @@ export class TurnController {
     const currentActive = this.activeByConversation.get(conversationId);
     if (
       currentActive !== active
-      || currentActive.settled
-      || !currentActive.acceptingProviderEvents
+      || !currentActive.runState.acceptsProviderEvents()
       || currentActive.turn.runId !== trace.runId
       || currentActive.turn.id !== trace.turnId
     ) return false;
@@ -1001,7 +1015,7 @@ export class TurnController {
 
   unsupportedInteraction(conversationId: string, message: string): boolean {
     const active = this.activeByConversation.get(conversationId);
-    if (!active || active.settled) return false;
+    if (!active || active.runState.isTerminal()) return false;
     this.providers.cancel(conversationId);
     return this.settle(active, "failed", "unsupported-interaction", message);
   }
@@ -1037,6 +1051,19 @@ export class TurnController {
     if (!active || !this.accepts(active, event)) return false;
     try {
       this.timeouts.activity(active);
+      const currentRunState = active.runState.snapshot().state;
+      if (
+        (currentRunState === "retrying" || currentRunState === "delegated")
+        && (
+          event.type === "text"
+          || event.type === "text-snapshot"
+          || event.type === "reasoning-summary"
+          || (event.type === "activity" && event.phase === "started")
+          || event.type === "plan"
+        )
+      ) {
+        this.transition(active, "running");
+      }
       if (event.type === "text") {
         this.hooks.testOnlyStreamingTrace?.mark("provider-delta-received");
       }
@@ -1055,8 +1082,7 @@ export class TurnController {
     event: Pick<ProviderEvent, "providerId" | "conversationId" | "runId" | "turnId">,
   ): boolean {
     if (
-      !active.acceptingProviderEvents
-      || active.settled
+      !active.runState.acceptsProviderEvents()
       || event.providerId !== active.turn.providerId
       || event.conversationId !== active.conversation.id
       || event.runId !== active.turn.runId
@@ -1075,18 +1101,26 @@ export class TurnController {
   }
 
   private handleProviderResult(active: ActiveTurn, result: ProviderRunResult): void {
-    if (active.settled) return;
+    if (active.runState.isTerminal()) return;
+    if (result.cleanupConfirmed) {
+      // A result carrying cleanup confirmation is the provider manager's
+      // exact-process exit receipt. It is stronger than a potentially stale
+      // lookup projection and permits immediate root settlement.
+      active.providerRunStarted = false;
+      this.store.providerRunOwnership.clear(active.turn.id, active.turn.runId);
+    }
     if (result.status === "completed") {
       this.hooks.testOnlyStreamingTrace?.mark("provider-completion-received");
     }
-    if (result.sessionId) {
+    const outcomeAlreadyRequested = active.deferredSettlement !== null;
+    if (!outcomeAlreadyRequested && result.sessionId) {
       updateActiveTurnProviderSession(active, result.sessionId);
       this.store.updateConversation(active.conversation.id, {
         providerSessionId: result.sessionId,
         continuationIdentity: active.turn.continuationIdentity,
       });
     }
-    this.streams.reconcileAssistant(active, result);
+    if (!outcomeAlreadyRequested) this.streams.reconcileAssistant(active, result);
     if (result.status === "completed") {
       this.settle(active, "completed", "provider-completed");
     } else if (result.status === "cancelled") {
@@ -1097,22 +1131,19 @@ export class TurnController {
     }
   }
 
-  private transition(active: ActiveTurn, status: Exclude<AgentTurnStatus, AgentTurnTerminalStatus>): boolean {
-    if (active.settled) return false;
-    const current = this.store.agentTurn(active.turn.id);
-    if (isAgentTurnTerminalStatus(current.status) || current.status === status) return false;
-    if (status === "starting" && current.status !== "queued") return false;
-    if (
-      status === "running"
-      && (current.status === "waiting-for-approval" || current.status === "waiting-for-input")
-      && (active.approvalIds.size > 0 || active.inputIds.size > 0)
-    ) return false;
-    active.turn = this.store.updateAgentTurnLifecycle(active.turn.id, {
-      status,
-      updatedAt: this.now(),
-    });
-    this.timeouts.activity(active);
-    return true;
+  private transition(
+    active: ActiveTurn,
+    state: Exclude<AgentRunState, AgentTurnTerminalStatus>,
+    providerState?: string | null,
+  ): boolean {
+    return this.runStates.transition(active, state, providerState);
+  }
+
+  private observeSubagent(
+    active: ActiveTurn,
+    event: Extract<ProviderEvent, { type: "subagent" }>,
+  ): boolean {
+    return this.runStates.observeSubagent(active, event);
   }
 
   private settle(
@@ -1122,52 +1153,7 @@ export class TurnController {
     message?: string,
     failure?: ProviderRunFailure,
   ): boolean {
-    active.providerStartAcknowledgement?.(false);
-    const requiresOwnedStop = active.providerRunStarted
-      && this.providers.isRunning(active.conversation.id);
-    const wasSettled = active.settled;
-    const settled = this.settlement.settle(
-      active,
-      status,
-      cause,
-      message,
-      failure,
-    );
-    if (wasSettled) return settled;
-    if (!active.providerRunStarted) {
-      this.track(this.releaseTurnAttachmentsWithRetry(active));
-    } else if (requiresOwnedStop) {
-      this.stopOwnedProviderAndRelease(active);
-    }
-    return settled;
-  }
-
-  private stopOwnedProviderAndRelease(active: ActiveTurn): void {
-    const conversationId = active.conversation.id;
-    const task = (async () => {
-      let cleanupConfirmed = false;
-      try {
-        const result = await this.providers.stopOwned(conversationId, {
-          runId: active.turn.runId,
-          turnId: active.turn.id,
-        });
-        cleanupConfirmed = result === "settled"
-          || (result === "missing" && !this.providers.isRunning(conversationId));
-      } catch {
-        // The durable pre-stop marker intentionally remains fail-closed.
-      }
-      if (cleanupConfirmed) {
-        this.store.providerRunOwnership.clear(active.turn.id, active.turn.runId);
-        await this.releaseTurnAttachmentsWithRetry(active);
-      }
-    })();
-    const barrier = task.finally(() => {
-      if (this.providerRunOwnershipBarriers.get(conversationId) === barrier) {
-        this.providerRunOwnershipBarriers.delete(conversationId);
-      }
-    });
-    this.providerRunOwnershipBarriers.set(conversationId, barrier);
-    this.track(barrier);
+    return this.runStates.settle(active, status, cause, message, failure);
   }
 
   private async releaseTurnAttachments(active: ActiveTurn): Promise<void> {

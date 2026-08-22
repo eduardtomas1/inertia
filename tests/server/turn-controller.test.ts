@@ -1227,19 +1227,17 @@ describe("TurnController authoritative lifecycle", () => {
 
     releaseSettlement();
     expect(await observed).toBe(cleanupError);
-    expect(runtime.store.agentTurn(queued.turn.id)).toMatchObject({
-      status: "interrupted",
-      terminalReason: "runtime-shutdown",
-    });
+    expect(runtime.store.agentTurn(queued.turn.id)).toMatchObject({ status: "running", runState: { state: "cancelling" }, terminalReason: null });
 
     runtime.provider.resolve({ status: "cancelled" });
     await flushPromises();
     await flushPromises();
+    expect(runtime.store.agentTurn(queued.turn.id)).toMatchObject({ status: "interrupted", runState: { state: "interrupted" }, terminalReason: "runtime-shutdown" });
     runtime.store.close();
   });
 
   it.each(["cancel", "timeout"] as const)(
-    "settles %s immediately but retains cleanup authority until provider exit",
+    "keeps %s visibly stopping until exact provider cleanup is confirmed",
     async (scenario) => {
       const runtime = await testRuntime();
       runtime.provider.deferOwnedStop();
@@ -1265,10 +1263,8 @@ describe("TurnController authoritative lifecycle", () => {
         runtime.scheduler.runAll();
       }
 
-      expect(runtime.store.agentTurn(first.turn.id)).toMatchObject({
-        status: scenario === "cancel" ? "cancelled" : "failed",
-        terminalReason: scenario === "cancel" ? "user-cancelled" : "turn-timeout",
-      });
+      expect(runtime.store.agentTurn(first.turn.id)).toMatchObject({ status: "running", runState: { state: "cancelling" }, terminalReason: null });
+      expect(runtime.store.conversation(runtime.conversationId).status).toBe("running");
       expect(runtime.controller.isActive(runtime.conversationId)).toBe(true);
       expect(runtime.controller.hasActiveCheckout(runtime.workspace)).toBe(true);
       expect(runtime.attachmentReleases).toEqual([]);
@@ -1300,9 +1296,14 @@ describe("TurnController authoritative lifecycle", () => {
 
       expect(runtime.attachmentReleases).toEqual([]);
       expect(runtime.controller.isActive(runtime.conversationId)).toBe(true);
+      expect(runtime.store.agentTurn(first.turn.id)).toMatchObject({ status: "running", runState: { state: "cancelling" } });
 
       runtime.provider.resolve({ status: "cancelled", text: "" });
       await flushPromises();
+      expect(runtime.store.agentTurn(first.turn.id)).toMatchObject({
+        status: scenario === "cancel" ? "cancelled" : "failed", runState: { state: scenario === "cancel" ? "cancelled" : "failed" },
+        terminalReason: scenario === "cancel" ? "user-cancelled" : "turn-timeout",
+      });
       expect(runtime.attachmentReleases).toEqual([[attachment.id]]);
       expect(runtime.controller.isActive(runtime.conversationId)).toBe(false);
       const retry = runtime.controller.queue({ conversationId: runtime.conversationId,
@@ -1418,10 +1419,7 @@ describe("TurnController authoritative lifecycle", () => {
     });
 
     expect(runtime.controller.start(first.turn.id)).toBe(true);
-    expect(runtime.store.agentTurn(first.turn.id)).toMatchObject({
-      status: "failed",
-      terminalReason: expect.stringContaining("stream-persistence-failed"),
-    });
+    expect(runtime.store.agentTurn(first.turn.id)).toMatchObject({ status: "running", runState: { state: "cancelling" }, terminalReason: null });
     expect(runtime.provider.stopOwnedCalls).toEqual([{
       conversationId: runtime.conversationId,
       identity: {
@@ -1443,6 +1441,7 @@ describe("TurnController authoritative lifecycle", () => {
     expect(runtime.provider.runCount).toBe(1);
     runtime.provider.resolve({ status: "cancelled", text: "" });
     await flushPromises();
+    expect(runtime.store.agentTurn(first.turn.id)).toMatchObject({ status: "failed", runState: { state: "failed" }, terminalReason: expect.stringContaining("stream-persistence-failed") });
     expect(runtime.attachmentReleases).toEqual([[attachment.id]]);
     const retry = runtime.controller.queue({ conversationId: runtime.conversationId,
       content: "Retry after exact-run cleanup." });
@@ -2146,16 +2145,14 @@ describe("TurnController authoritative lifecycle", () => {
       text: "stale",
     })).toBe(false);
     expect(runtime.controller.cancel(runtime.conversationId)).toBe(true);
-    const cancelled = runtime.store.agentTurn(queued.turn.id);
-    expect(cancelled).toMatchObject({
-      status: "cancelled",
-      terminalReason: "user-cancelled",
-    });
+    const cancelling = runtime.store.agentTurn(queued.turn.id);
+    expect(cancelling).toMatchObject({ status: "running", runState: { state: "cancelling" }, terminalReason: null });
     expect(runtime.controller.cancel(runtime.conversationId)).toBe(false);
     runtime.provider.emit({ ...base, type: "text", text: "late" });
     runtime.provider.resolve({ status: "completed", text: "late completion" });
     await flushPromises();
-    expect(runtime.store.agentTurn(queued.turn.id)).toEqual(cancelled);
+    const cancelled = runtime.store.agentTurn(queued.turn.id);
+    expect(cancelled).toMatchObject({ status: "cancelled", runState: { state: "cancelled" }, terminalReason: "user-cancelled" });
     expect(runtime.store.settleAgentTurn(queued.turn.id, {
       status: "failed",
       terminalReason: "late-process-exit",
@@ -2208,12 +2205,18 @@ describe("TurnController authoritative lifecycle", () => {
 
     expect(runtime.store.agentTurn(queued.turn.id)).toEqual(cancelled);
     expect(runtime.store.conversation(runtime.conversationId)).toMatchObject({
-      status: "idle",
+      status: "running",
       attentionKind: null,
     });
     expect(runtime.events.filter(({ type }) =>
       type === "agent.approval.requested" || type === "agent.input.requested"))
       .toEqual([]);
+    runtime.provider.resolve({ status: "cancelled", text: "" });
+    await flushPromises();
+    expect(runtime.store.conversation(runtime.conversationId)).toMatchObject({
+      status: "idle",
+      attentionKind: null,
+    });
     runtime.store.close();
   });
 
@@ -2465,11 +2468,13 @@ describe("TurnController authoritative lifecycle", () => {
       expect.objectContaining({
         id: queued.turn.id,
         status: "interrupted",
+        runState: { state: "interrupted", providerState: "runtime-restart", revision: expect.any(Number) },
         terminalReason: "runtime-restart",
       }),
       expect.objectContaining({
         id: neverStarted.turn.id,
         status: "interrupted",
+        runState: { state: "interrupted", providerState: "runtime-restart", revision: expect.any(Number) },
         terminalReason: "runtime-restart",
       }),
     ]));

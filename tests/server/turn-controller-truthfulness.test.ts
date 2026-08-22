@@ -155,6 +155,21 @@ describe("TurnController terminal truthfulness", () => {
 
     expect(value.controller.cancel(value.conversationId)).toBe(true);
 
+    const stoppingTurn = value.store.agentTurn(queued.turn.id);
+    expect(stoppingTurn).toMatchObject({
+      status: "running",
+      runState: { state: "cancelling" },
+      terminalReason: null,
+    });
+    const stoppingActivity = value.store.conversationDetail(value.conversationId)
+      ?.activities.find(({ turnId }) => turnId === queued.turn.id);
+    expect(stoppingActivity).toMatchObject({ status: "running", title: "npm test" });
+    expect(value.events).not.toContainEqual(expect.objectContaining({
+      type: "agent.completed",
+      turnId: queued.turn.id,
+    }));
+
+    await flushPromises();
     const activity = value.store.conversationDetail(value.conversationId)
       ?.activities.find(({ turnId }) => turnId === queued.turn.id);
     expect(activity).toMatchObject({ status: "failed", title: "Interrupted · npm test" });

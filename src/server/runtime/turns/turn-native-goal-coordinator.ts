@@ -32,7 +32,7 @@ export class TurnNativeGoalCoordinator {
     tokenBudget?: number | null;
   }): Promise<ProviderGoalSnapshot | null> {
     const active = this.options.activeForConversation(input.conversationId);
-    if (active && !active.settled) {
+    if (active && !active.runState.isTerminal()) {
       if (!active.providerRunStarted) {
         throw new Error(
           "The active Codex turn must finish starting before updating its goal.",
@@ -81,7 +81,7 @@ export class TurnNativeGoalCoordinator {
     });
     const goal = new Promise<ProviderGoalSnapshot>((resolve, reject) => {
       const owned = this.options.activeForTurn(queued.turn.id);
-      if (!owned || owned.settled) {
+      if (!owned || owned.runState.isTerminal()) {
         reject(new Error("The Codex goal run could not be prepared."));
         return;
       }
@@ -119,7 +119,7 @@ export class TurnNativeGoalCoordinator {
     conversationId: string,
   ): Promise<boolean | "superseded" | null> {
     const active = this.options.activeForConversation(conversationId);
-    if (!active || active.settled) return null;
+    if (!active || active.runState.isTerminal()) return null;
     if (!active.providerRunStarted) {
       throw new Error(
         "The active Codex turn must finish starting before clearing its goal.",

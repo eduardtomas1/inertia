@@ -18,7 +18,7 @@ export function quarantineActiveDuoTurn(
     hooks: TurnControllerHooks;
   },
 ): void {
-  active.acceptingProviderEvents = false;
+  active.runState.quarantine("duo-quarantine");
   active.providerStartAcknowledgement?.(false);
   if (active.timeoutTimer !== null) {
     dependencies.scheduler.clearTimeout(active.timeoutTimer);

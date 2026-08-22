@@ -223,6 +223,11 @@ describe("conversation detail projection", () => {
         id: agentTurn.id,
         runId: agentTurn.runId,
         status: "waiting-for-approval",
+        runState: {
+          state: "waiting-for-approval",
+          providerState: "approval/requested",
+          revision: 7,
+        },
         providerId: agentTurn.providerId,
         harnessId: agentTurn.harnessId,
         backendProfileId: agentTurn.backendProfileId,
@@ -244,6 +249,11 @@ describe("conversation detail projection", () => {
     expect(merged.agentTurns[0]).toMatchObject({
       id: agentTurn.id,
       status: "waiting-for-approval",
+      runState: {
+        state: "waiting-for-approval",
+        providerState: "approval/requested",
+        revision: 7,
+      },
       updatedAt,
     });
     expect(merged.messages).toBe(loadedDetail.messages);

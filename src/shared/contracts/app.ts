@@ -17,6 +17,7 @@ import {
   type AppKeybindings,
 } from "../keybindings";
 import type { AgentTurnStatus } from "../turn-lifecycle";
+import type { AgentRunStateSnapshot } from "../run-state";
 import type { PromptPreset } from "../prompt-presets";
 
 export type { ProviderId } from "../provider";
@@ -45,6 +46,8 @@ export interface ConversationLatestTurnSummary {
   id: string;
   runId: string;
   status: AgentTurnStatus;
+  /** Optional only for legacy snapshots. */
+  runState?: AgentRunStateSnapshot;
   providerId: ProviderId;
   harnessId: ContinuationIdentity["harnessId"];
   backendProfileId: ModelSelection["backendProfileId"];

@@ -27,9 +27,7 @@ import {
   type ClaudeProjectedFailure,
   type ClaudeCommandLifecycleMessage,
 } from "./claude-message-projector-support";
-import {
-  ClaudeMessageStreamCorrelation,
-} from "./claude-message-stream-correlation";
+import { ClaudeMessageStreamCorrelation } from "./claude-message-stream-correlation";
 
 export {
   MAX_CLAUDE_STREAM_CORRELATION_BLOCKS,
@@ -601,6 +599,7 @@ export class ClaudeMessageProjector {
         );
         return;
       case "api_retry":
+        this.options.emitter.status("retrying", undefined, `system/api_retry attempt ${safePositiveInteger(message.attempt)}`);
         this.options.emitter.activity(
           "system",
           "info",
@@ -618,6 +617,9 @@ export class ClaudeMessageProjector {
         );
         return;
       case "control_request_progress":
+        if (message.status === "api_retry") {
+          this.options.emitter.status("retrying", undefined, `control_request/api_retry attempt ${safePositiveInteger(message.attempt)}`);
+        }
         this.options.emitter.activity(
           "system",
           "info",

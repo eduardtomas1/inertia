@@ -22,6 +22,7 @@ import { LEGACY_SCHEMA_SQL } from "./legacy-schema";
 import { nativeKimiProviderMigration } from "./native-kimi-provider";
 import { promptPresetMigrationDefinition } from "./prompt-presets";
 import { providerRunOwnershipMigration } from "./provider-run-ownership";
+import { authoritativeRunStateMigration } from "./authoritative-run-state";
 import { persistFinalAnswerAutoScroll, roadmapSettingsMigrationDefinitions } from "./roadmap-settings";
 import { quotedSqlIdentifier } from "./sql-identifiers";
 import { ensureTurnAssociationColumns } from "./turn-association-columns";
@@ -1224,6 +1225,7 @@ export function migrateRuntimeDatabase(database: Database.Database, maximumVersi
       conversationContextPacketsMigration,
       nativeKimiProviderMigration,
       persistDiscordReleaseRepositoryUrl,
+      authoritativeRunStateMigration,
     );
     const runtimeMigrations = createRuntimeMigrationCatalog(
       legacyMigrations,

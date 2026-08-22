@@ -134,7 +134,7 @@ describe("generated turn attachment lifecycle", () => {
     expect(controller.cancel(conversation.id)).toBe(true);
     settleProvider("cancelled");
     await flush();
-    await expect(access(cancelledPage)).resolves.toBeUndefined();
+    await expect(access(cancelledPage)).rejects.toThrow();
     resolveStop();
     await controller.waitForProviderCleanup([conversation.id]);
     await expect(access(cancelledPage)).rejects.toThrow();

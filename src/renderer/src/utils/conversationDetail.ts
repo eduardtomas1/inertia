@@ -25,6 +25,7 @@ export function mergeConversationShell(
   const turn = detail.agentTurns[turnIndex]!;
   if (
     turn.status === latestTurn.status
+    && turn.runState === latestTurn.runState
     && turn.startedAt === latestTurn.startedAt
     && turn.completedAt === latestTurn.completedAt
     && turn.terminalReason === latestTurn.terminalReason
@@ -36,6 +37,7 @@ export function mergeConversationShell(
   agentTurns[turnIndex] = {
     ...turn,
     status: latestTurn.status,
+    runState: latestTurn.runState,
     startedAt: latestTurn.startedAt,
     completedAt: latestTurn.completedAt,
     terminalReason: latestTurn.terminalReason,

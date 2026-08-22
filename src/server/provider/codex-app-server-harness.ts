@@ -144,7 +144,10 @@ function startCodexRun(
       onText: emitter.text,
       onActivity: emitter.activity,
       onSession: emitter.session,
-      onStatus: emitRunning,
+      onStatus: (status, providerState) => {
+        if (status === "running") emitRunning();
+        else emitter.status(status, undefined, providerState);
+      },
       onApproval: (request) => emitter.codex({ type: "approval", request }),
       onApprovalResolved: (requestId, decision) => emitter.codex({ type: "approval-resolved", requestId, decision }),
       onInputRequest: (request) => emitter.codex({ type: "input", request }),

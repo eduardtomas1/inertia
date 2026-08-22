@@ -22,7 +22,7 @@ export class TurnTimeoutCoordinator {
   start(active: ActiveTurn): void {
     active.lifetimeTimer = this.options.scheduler.setTimeout(() => {
       active.lifetimeTimer = null;
-      if (active.settled) return;
+      if (active.runState.isTerminal()) return;
       this.options.cancel(active);
       this.options.fail(
         active,
@@ -38,13 +38,13 @@ export class TurnTimeoutCoordinator {
       this.options.scheduler.clearTimeout(active.timeoutTimer);
       active.timeoutTimer = null;
     }
-    if (active.settled || HUMAN_WAIT_STATUSES.has(this.options.status(active))) {
+    if (active.runState.isTerminal() || HUMAN_WAIT_STATUSES.has(this.options.status(active))) {
       return;
     }
     active.timeoutTimer = this.options.scheduler.setTimeout(() => {
       active.timeoutTimer = null;
       if (
-        active.settled
+        active.runState.isTerminal()
         || HUMAN_WAIT_STATUSES.has(this.options.status(active))
       ) return;
       this.options.cancel(active);

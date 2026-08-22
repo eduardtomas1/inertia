@@ -283,6 +283,7 @@ describe.sequential("Codex App Server runtime", () => {
     }> = [];
     const reasoning: string[] = [];
     const plans: string[] = [];
+    const statuses: Array<{ status: string; providerState?: string }> = [];
 
     const result = await manager.run(nativeProviderRunInput({
       providerId: "codex",
@@ -293,12 +294,17 @@ describe.sequential("Codex App Server runtime", () => {
       access: "full",
     }), {
       onActivity: (event) => activities.push(event),
+      onStatus: (event) => statuses.push(event),
       onReasoning: (event) => reasoning.push(event.text),
       onPlan: (event) => plans.push(event.explanation ?? ""),
     });
 
     expect(result).toMatchObject({ status: "completed", text: "Done" });
     expect(result).not.toHaveProperty("failure");
+    expect(statuses).toContainEqual(expect.objectContaining({
+      status: "retrying",
+      providerState: "error/willRetry",
+    }));
     expect(reasoning).toEqual(["Verified the provider surface."]);
     expect(plans).toContain("1. Inspect\n2. Verify");
     expect(activities).toEqual(expect.arrayContaining([

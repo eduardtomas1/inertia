@@ -1,4 +1,5 @@
 import {
+  AGENT_RUN_STATES,
   type AgentActivity,
   type AgentGoal,
   type AgentPlan,
@@ -283,6 +284,7 @@ function conversationTurnSummary(
     id: turn.id,
     runId: turn.runId,
     status: turn.status,
+    runState: turn.runState,
     providerId: turn.providerId,
     harnessId: turn.harnessId,
     backendProfileId: turn.backendProfileId,
@@ -484,6 +486,16 @@ export function agentTurnFromRow(row: AgentTurnRow): AgentTurn {
     startedAt: row.started_at,
     completedAt: row.completed_at,
     status: row.status,
+    runState: {
+      state: AGENT_RUN_STATES.includes(row.run_state)
+        ? row.run_state
+        : row.status,
+      providerState: row.provider_state,
+      revision: Number.isSafeInteger(row.run_state_revision)
+        && row.run_state_revision >= 0
+        ? row.run_state_revision
+        : 0,
+    },
     terminalReason: row.terminal_reason,
     checkpointId: row.checkpoint_id,
     usageAtStart: parseAgentTurnUsage(row.usage_start_json),

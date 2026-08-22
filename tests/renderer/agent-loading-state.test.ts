@@ -54,9 +54,10 @@ function turn(
   status: AgentTurnStatus,
   activities: AgentActivity[] = [],
   currentReasoning: AgentReasoning | null = null,
+  runState?: AgentTurn["runState"],
 ): Pick<ResponseTurn, "agentTurn" | "activities" | "reasoning"> {
   return {
-    agentTurn: { status } as AgentTurn,
+    agentTurn: { status, ...(runState ? { runState } : {}) } as AgentTurn,
     activities,
     reasoning: currentReasoning,
   };
@@ -91,7 +92,30 @@ describe("truthful active agent presentation", () => {
         turn: turn(status, [activity("ignored", "Web search")]),
         providerLabel: "Claude · Anthropic",
         streamingChannel: "text",
-      })).toEqual({ phase, label, detail: null, animated });
+      })).toEqual({ phase, label, animated });
+    }
+  });
+
+  it("does not let inferred activity hide delegated, retry, or stopping truth", () => {
+    for (const [state, phase, label, providerState] of [
+      ["delegated", "delegated", "OpenCode delegating", "verified descendant"],
+      ["retrying", "retrying", "OpenCode retrying", "session.status/retry"],
+      ["cancelling", "cancelling", "OpenCode stopping", "cancel/requested"],
+    ] as const) {
+      expect(activeAgentPresentation({
+        turn: turn(
+          "running",
+          [activity("ignored", "Web search")],
+          null,
+          { state, providerState, revision: 2 },
+        ),
+        providerLabel: "OpenCode",
+        streamingChannel: "text",
+      })).toEqual({
+        phase,
+        label,
+        animated: true,
+      });
     }
   });
 
@@ -264,7 +288,11 @@ describe("terminal turn projection", () => {
       [first, second],
       projections,
       null,
-    ).map(({ status }) => status)).toEqual(["completed", "failed"]);
+    ).map(({ status, runState }) => ({ status, state: runState?.state })))
+      .toEqual([
+        { status: "completed", state: undefined },
+        { status: "failed", state: undefined },
+      ]);
     expect(reconcileTerminalTurnProjections(projections, [{
       ...first,
       status: "completed",

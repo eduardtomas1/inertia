@@ -322,6 +322,11 @@ describe("Claude Agent SDK message projection", () => {
       event.type === "activity" ? [event] : []);
 
     expect(result).toMatchObject({ status: "completed", text: "Command summary" });
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "status",
+      status: "retrying",
+      providerState: "system/api_retry attempt 2",
+    }));
     expect(activities).toEqual(expect.arrayContaining([
       expect.objectContaining({
         phase: "started",

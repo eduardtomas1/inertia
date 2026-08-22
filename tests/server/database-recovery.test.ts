@@ -1434,6 +1434,32 @@ describe("database backup and startup recovery", () => {
     primary.close();
   });
 
+  it("validates the exact authoritative run-state index off thread", async () => {
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { store } = seed(databasePath, "run-state index validation");
+    store.close();
+    const primary = new Database(databasePath);
+    primary.exec(`
+      DROP INDEX agent_turns_run_state_requested_idx;
+      CREATE INDEX agent_turns_run_state_requested_idx
+      ON agent_turns(run_state, requested_at COLLATE NOCASE, id);
+    `);
+    const manager = new DatabaseBackupManager(primary, databasePath);
+
+    await expect(manager.createBackup()).rejects.toThrow(/failed validation/u);
+    expect(backupNames(databasePath)).toEqual([]);
+    primary.exec(`
+      DROP INDEX agent_turns_run_state_requested_idx;
+      CREATE INDEX agent_turns_run_state_requested_idx
+      ON agent_turns(run_state, requested_at ASC, id ASC);
+    `);
+    await expect(manager.createBackup()).resolves.toMatchObject({
+      filename: expect.stringMatching(/\.sqlite$/u),
+    });
+    primary.close();
+  });
+
   it("skips incomplete migration history and restores the next coherent backup", async () => {
     const directory = temporaryDirectory();
     const databasePath = join(directory, "inertia.sqlite");

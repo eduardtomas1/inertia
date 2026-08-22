@@ -647,10 +647,10 @@ describe("Duo third-model comparison", () => {
 
     expect(runtime.provider.ownedStopResolvers.has(cancelledConversationId))
       .toBe(true);
-    expect(cleanupWait).toHaveBeenCalledWith(expect.arrayContaining([
-      cancelledConversationId,
-      prepared.sides[1].conversationId,
-    ]));
+    // A cancelling source is not terminal comparison input until its exact
+    // owned provider has stopped, so comparison cleanup admission has not yet
+    // begun.
+    expect(cleanupWait).not.toHaveBeenCalled();
     expect(launches.status(prepared.launchId).comparison).toMatchObject({
       state: "waiting",
       attempt: 0,

@@ -29,6 +29,7 @@ const EXPECTED_INDEXES = [
   "provider_metadata_scoped_identity_idx",
   "agent_turns_conversation_requested_idx",
   "agent_turns_status_requested_idx",
+  "agent_turns_run_state_requested_idx",
   "agent_turns_provider_run_identity_idx",
   "agent_turns_usage_dashboard_completed_idx",
   "subagent_traces_turn_order_idx",
@@ -46,10 +47,20 @@ async function temporaryDirectory(): Promise<string> {
   return directory;
 }
 
-function rowsByTable(database: Database.Database): Record<string, unknown[]> {
+function tableColumns(database: Database.Database, table: string): string[] {
+  return (database.pragma(`table_info(${table})`) as Array<{ name: string }>)
+    .map(({ name }) => name);
+}
+
+function rowsByTable(
+  database: Database.Database,
+  agentTurnColumns?: string[],
+): Record<string, unknown[]> {
   return Object.fromEntries(PRESERVED_TABLES.map((table) => [
     table,
-    database.prepare(`SELECT * FROM ${table} ORDER BY 1`).all(),
+    database.prepare(`SELECT ${table === "agent_turns" && agentTurnColumns
+      ? agentTurnColumns.join(", ")
+      : "*"} FROM ${table} ORDER BY 1`).all(),
   ]));
 }
 
@@ -79,7 +90,8 @@ function copyPopulatedRowsToV61(
       ...REBUILT_TABLES,
       ...AGENT_THREAD_TABLES,
     ]) {
-      database.exec(`INSERT INTO main.${table} SELECT * FROM populated.${table}`);
+      const columns = tableColumns(database, table).join(", ");
+      database.exec(`INSERT INTO main.${table} (${columns}) SELECT ${columns} FROM populated.${table}`);
     }
   })();
   database.exec("DETACH DATABASE populated");
@@ -264,15 +276,19 @@ describe.sequential("native Kimi provider migration", () => {
 
     const database = new Database(fixture.databasePath);
     database.pragma("foreign_keys = ON");
-    const before = rowsByTable(database);
+    const agentTurnColumns = tableColumns(database, "agent_turns");
+    const before = rowsByTable(database, agentTurnColumns);
     const beforeTriggers = pairedDeletionTriggers(database);
     migrateRuntimeDatabase(database);
-    expect(rowsByTable(database)).toEqual(before);
+    expect(rowsByTable(database, agentTurnColumns)).toEqual(before);
+    expect(database.prepare(`
+      SELECT run_state, provider_state, run_state_revision FROM agent_turns
+    `).get()).toEqual({ run_state: "queued", provider_state: null, run_state_revision: 0 });
     expect(database.pragma("foreign_key_check")).toEqual([]);
     expect(database.pragma("foreign_keys", { simple: true })).toBe(1);
     expect((database.prepare(
       "SELECT MAX(version) AS version FROM schema_migrations",
-    ).get() as { version: number }).version).toBe(63);
+    ).get() as { version: number }).version).toBe(64);
 
     const indexes = (database.prepare(`
       SELECT name FROM sqlite_master

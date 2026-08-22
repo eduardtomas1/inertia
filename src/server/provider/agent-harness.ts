@@ -315,7 +315,11 @@ export interface AgentHarnessEmitter {
     label: string,
     detail?: Pick<ProviderActivityEvent, "activityId" | "detail">,
   ) => void;
-  status: (status: ProviderStatusEvent["status"], message?: string) => void;
+  status: (
+    status: ProviderStatusEvent["status"],
+    message?: string,
+    providerState?: string,
+  ) => void;
   session: (sessionId: string) => void;
   goalUpdated: (sessionId: string, goal: ProviderGoalSnapshot) => void;
   goalCleared: (sessionId: string) => void;
@@ -386,7 +390,13 @@ export function createAgentHarnessEmitter(
         ...(safeDetail ? { detail: safeDetail } : {}),
       });
     },
-    status: (status, message) => emit({ ...base, type: "status", status, ...(message ? { message } : {}) }),
+    status: (status, message, providerState) => emit({
+      ...base,
+      type: "status",
+      status,
+      ...(message ? { message } : {}),
+      ...(providerState ? { providerState } : {}),
+    }),
     session: (sessionId) => emit({ ...base, type: "session", sessionId }),
     goalUpdated: (sessionId, goal) => emit({
       ...base,

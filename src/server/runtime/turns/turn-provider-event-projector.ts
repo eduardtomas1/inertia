@@ -1,6 +1,6 @@
 import type {
   AgentPlan,
-  AgentTurnStatus,
+  AgentRunState,
   AgentTurnTerminalStatus,
 } from "../../../shared/contracts";
 import type { RuntimeStore } from "../../database";
@@ -31,7 +31,12 @@ export interface TurnProviderEventProjectorOptions {
   now(): string;
   transition(
     active: ActiveTurn,
-    status: Exclude<AgentTurnStatus, AgentTurnTerminalStatus>,
+    status: Exclude<AgentRunState, AgentTurnTerminalStatus>,
+    providerState?: string | null,
+  ): boolean;
+  observeSubagent(
+    active: ActiveTurn,
+    event: Extract<ProviderEvent, { type: "subagent" }>,
   ): boolean;
 }
 
@@ -126,9 +131,16 @@ export class TurnProviderEventProjector {
       case "status":
         if (
           (event.status === "starting"
-            && this.options.transition(active, "starting"))
-          || (event.status === "running"
-            && this.options.transition(active, "running"))
+            && this.options.transition(active, "starting", event.providerState))
+          || ((event.status === "running"
+            || event.status === "delegated"
+            || event.status === "retrying"
+            || event.status === "cancelling")
+            && this.options.transition(
+              active,
+              event.status,
+              event.providerState,
+            ))
         ) {
           this.broadcastConversationShell(active);
         }
@@ -271,6 +283,7 @@ export class TurnProviderEventProjector {
             trace: persisted.trace,
           });
         }
+        this.options.observeSubagent(active, event);
         break;
       }
     }

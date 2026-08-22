@@ -70,6 +70,7 @@ describe("TurnProviderEventProjector delegated-agent state", () => {
       interactions: {} as never,
       now: () => "2030-01-01T00:00:01.000Z",
       transition: () => false,
+      observeSubagent: () => false,
     });
     const active = {
       conversation: { id: "conversation-1" },

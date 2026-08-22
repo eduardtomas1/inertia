@@ -587,6 +587,11 @@ export function handleOpenCodeEvent(
       failureState.pending = undefined;
       const attempt = finite(status.attempt);
       const action = objectValue(status.action);
+      emitter.status(
+        "retrying",
+        undefined,
+        attempt === null ? "session.status/retry" : `session.status/retry attempt ${attempt}`,
+      );
       emitter.activity(
         "system",
         "info",
@@ -606,6 +611,7 @@ export function handleOpenCodeEvent(
     } else if (status?.type === "busy") {
       if (!ownership.markActivePromptWork()) return;
       promptLifecycle.activityObserved = true;
+      emitter.status("running", undefined, "session.status/busy");
       emitter.activity("turn", "started", "OpenCode is working");
     }
   } else if (event.type === "session.error") {

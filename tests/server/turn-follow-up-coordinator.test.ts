@@ -5,6 +5,7 @@ import type { RuntimeStore } from "../../src/server/database";
 import type { TurnProviderRuntime } from "../../src/server/runtime/turns/turn-controller-types";
 import type { ActiveTurn } from "../../src/server/runtime/turns/turn-controller-types";
 import { TurnFollowUpCoordinator } from "../../src/server/runtime/turns/turn-follow-up-coordinator";
+import { AuthoritativeRunStateEngine } from "../../src/server/runtime/run-state-engine";
 
 const flushPromises = async (): Promise<void> => {
   await Promise.resolve();
@@ -19,12 +20,16 @@ function activeTurn(): ActiveTurn {
       runId: "run-1",
       harnessId: "codex-app-server",
     },
-    acceptingProviderEvents: true,
-    settled: false,
+    runState: new AuthoritativeRunStateEngine({
+      conversationId: "conversation-1",
+      runId: "run-1",
+      turnId: "turn-1",
+      providerId: "codex",
+    }),
     supportsFollowUpImages: true,
     followUpAdmissions: new Set<Promise<void>>(),
     followUpAdmissionTail: Promise.resolve(),
-  } as ActiveTurn;
+  } as unknown as ActiveTurn;
 }
 
 describe("TurnFollowUpCoordinator", () => {
@@ -182,8 +187,7 @@ describe("TurnFollowUpCoordinator", () => {
 
     await flushPromises();
     expect(steer).toHaveBeenCalledTimes(1);
-    active.acceptingProviderEvents = false;
-    active.settled = true;
+    active.runState.requestTerminal("cancelled", "test-cancelled");
     accept(true);
 
     await expect(pending).resolves.toBeNull();

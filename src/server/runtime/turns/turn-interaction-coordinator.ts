@@ -76,7 +76,7 @@ export class TurnInteractionCoordinator {
     if (
       !pending
       || !active
-      || active.settled
+      || !active.runState.acceptsProviderEvents()
       || pending.conversationId !== conversationId
       || pending.runId !== active.turn.runId
       || pending.turnId !== active.turn.id
@@ -122,7 +122,7 @@ export class TurnInteractionCoordinator {
     if (
       !pending
       || !active
-      || active.settled
+      || !active.runState.acceptsProviderEvents()
       || pending.conversationId !== conversationId
       || pending.runId !== active.turn.runId
       || pending.turnId !== active.turn.id
@@ -286,7 +286,7 @@ export class TurnInteractionCoordinator {
   }
 
   private refreshWaitingState(active: ActiveTurn): void {
-    if (active.settled) return;
+    if (!active.runState.acceptsProviderEvents()) return;
     const approval = [...active.approvalIds]
       .map((id) => this.options.pendingApprovals.get(id))
       .find(Boolean);

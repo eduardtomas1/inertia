@@ -236,6 +236,7 @@ export function projectConversationTerminal(
     latestTurn: {
       ...latestTurn,
       status: projection.status,
+      runState: undefined,
       terminalReason: projection.terminalReason,
     },
   };
@@ -259,6 +260,7 @@ export function applyTerminalTurnProjections(
       ...turn,
       completedAt: settlement?.completedAt ?? turn.completedAt,
       status: settlement?.status ?? projection.status,
+      runState: undefined,
       terminalReason: settlement
         ? settlement.terminalReason
         : projection.terminalReason,

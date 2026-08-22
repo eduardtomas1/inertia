@@ -41,7 +41,11 @@ export interface ProviderEmitter {
     label: string,
     detail?: Pick<ProviderActivityEvent, "activityId" | "detail">,
   ) => void;
-  status: (status: ProviderRunStatus, message?: string) => void;
+  status: (
+    status: ProviderRunStatus,
+    message?: string,
+    providerState?: string,
+  ) => void;
   session: (sessionId: string) => void;
   goalUpdated: (sessionId: string, goal: ProviderGoalSnapshot) => void;
   goalCleared: (sessionId: string) => void;
@@ -144,7 +148,13 @@ export function createProviderEmitter(
       label,
       ...detail,
     }),
-    status: (status, message) => event({ ...base, type: "status", status, ...(message ? { message } : {}) }),
+    status: (status, message, providerState) => event({
+      ...base,
+      type: "status",
+      status,
+      ...(message ? { message } : {}),
+      ...(providerState ? { providerState } : {}),
+    }),
     session: (sessionId) => event({ ...base, type: "session", sessionId }),
     goalUpdated: (sessionId, goal) => event({
       ...base,

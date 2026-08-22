@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 
 import {
+  agentTurnStatusForRunState,
   canTransitionAgentTurnStatus,
   isAgentTurnTerminalStatus,
   type AgentTurn,
@@ -154,6 +155,11 @@ export class TurnLedgerRepository {
       startedAt: null,
       completedAt: null,
       status: "queued",
+      runState: {
+        state: "queued",
+        providerState: null,
+        revision: 0,
+      },
       terminalReason: null,
       checkpointId: null,
       usageAtStart,
@@ -178,7 +184,8 @@ export class TurnLedgerRepository {
         provider_id, model_selection_json, continuation_identity_json,
         harness_id, backend_profile_id, model, model_alias, reasoning_effort,
         interaction_mode, access_mode, provider_session_before, provider_session_after,
-        requested_at, started_at, completed_at, status, terminal_reason, checkpoint_id,
+        requested_at, started_at, completed_at, status, run_state,
+        provider_state, run_state_revision, terminal_reason, checkpoint_id,
         usage_start_json, usage_completion_json, configuration_revision, association,
         created_at, updated_at
       ) VALUES (
@@ -186,7 +193,8 @@ export class TurnLedgerRepository {
         @providerId, @modelSelectionJson, @continuationIdentityJson,
         @harnessId, @backendProfileId, @model, @modelAlias, @reasoningEffort,
         @interactionMode, @accessMode, @providerSessionBefore, @providerSessionAfter,
-        @requestedAt, @startedAt, @completedAt, @status, @terminalReason, @checkpointId,
+        @requestedAt, @startedAt, @completedAt, @status, @runStateValue,
+        @providerState, @runStateRevision, @terminalReason, @checkpointId,
         @usageStartJson, NULL, @configurationRevision, @association, @createdAt, @updatedAt
       )
     `);
@@ -196,6 +204,9 @@ export class TurnLedgerRepository {
         usageStartJson,
         modelSelectionJson,
         continuationIdentityJson,
+        runStateValue: turn.runState?.state ?? turn.status,
+        providerState: turn.runState?.providerState ?? null,
+        runStateRevision: turn.runState?.revision ?? 0,
       });
       this.context.database.prepare("UPDATE messages SET turn_id = ? WHERE id = ?").run(turn.id, turn.userMessageId);
     })();
@@ -370,6 +381,34 @@ export class TurnLedgerRepository {
     if (!canTransitionAgentTurnStatus(current.status, update.status)) {
       throw new Error(`Agent turn cannot transition from ${current.status} to ${update.status}.`);
     }
+    const requestedRunState = update.runState ?? {
+      state: update.status,
+      providerState: current.runState?.providerState ?? null,
+      revision: (current.runState?.revision ?? 0) + 1,
+    };
+    if (agentTurnStatusForRunState(requestedRunState.state) !== update.status) {
+      throw new Error("The authoritative run state does not match its turn projection.");
+    }
+    const currentRunState = current.runState ?? {
+      state: current.status,
+      providerState: null,
+      revision: 0,
+    };
+    const runStateChanged = requestedRunState.state !== currentRunState.state
+      || requestedRunState.providerState !== currentRunState.providerState;
+    if (
+      !Number.isSafeInteger(requestedRunState.revision)
+      || requestedRunState.revision < currentRunState.revision
+      || (runStateChanged && requestedRunState.revision <= currentRunState.revision)
+      || requestedRunState.revision > 2_147_483_647
+      || (requestedRunState.providerState !== null
+        && (requestedRunState.providerState.length < 1
+          || requestedRunState.providerState.length > 200
+          || requestedRunState.providerState !== requestedRunState.providerState.trim()
+          || /[\u0000-\u001f\u007f]/u.test(requestedRunState.providerState)))
+    ) {
+      throw new Error("The authoritative run state is invalid.");
+    }
 
     const updatedAt = requireTimestamp(update.updatedAt ?? new Date().toISOString(), "Turn update time");
     if (Date.parse(updatedAt) < Date.parse(current.updatedAt)) {
@@ -466,6 +505,7 @@ export class TurnLedgerRepository {
       startedAt,
       completedAt,
       status: update.status,
+      runState: requestedRunState,
       terminalReason,
       checkpointId,
       usageAtCompletion,
@@ -492,16 +532,28 @@ export class TurnLedgerRepository {
         started_at = @startedAt,
         completed_at = @completedAt,
         status = @status,
+        run_state = @runStateValue,
+        provider_state = @providerState,
+        run_state_revision = @runStateRevision,
         terminal_reason = @terminalReason,
         checkpoint_id = @checkpointId,
         usage_completion_json = @usageCompletionJson,
         updated_at = @updatedAt
       WHERE id = @id
         AND status = @previousStatus
+        AND run_state_revision = @previousRunStateRevision
         AND status NOT IN ('completed', 'failed', 'cancelled', 'interrupted')
     `);
     this.context.database.transaction(() => {
-      const result = updateTurn.run({ ...next, usageCompletionJson, previousStatus: current.status });
+      const result = updateTurn.run({
+        ...next,
+        usageCompletionJson,
+        previousStatus: current.status,
+        previousRunStateRevision: current.runState?.revision ?? 0,
+        runStateValue: requestedRunState.state,
+        providerState: requestedRunState.providerState,
+        runStateRevision: requestedRunState.revision,
+      });
       if (result.changes !== 1) {
         throw new Error("Agent turn lifecycle changed concurrently or was already settled.");
       }

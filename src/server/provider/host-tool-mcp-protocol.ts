@@ -171,8 +171,21 @@ export async function handleProviderMcpBody(
     ids.add(key);
   }
 
+  const batchedToolCalls = Array.isArray(body)
+    && rawMessages.length > 1
+    && messages.some((message) => (
+      message.kind === "request" && message.method === "tools/call"
+    ));
+
   const slots = messages.map((message) => {
     if (message.kind === "request") {
+      if (batchedToolCalls && message.method === "tools/call") {
+        return Promise.resolve(error(
+          message.id,
+          -32600,
+          "Send batched tools/call requests as separate MCP messages.",
+        ));
+      }
       return handleRequest(message, runtime, signal);
     }
     if (message.kind === "invalid") {

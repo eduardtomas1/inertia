@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
 import type {
@@ -387,6 +387,64 @@ describe("provider host-tool MCP transport", () => {
         ],
       },
     });
+  });
+
+  it("rejects batched screenshot calls before the ACP stdio response is constructed", async () => {
+    const invoke = vi.fn(async () => ({
+      success: true,
+      text: "captured",
+      image: {
+        mimeType: "image/png" as const,
+        data: Buffer.alloc(4 * 1024 * 1024, 0x5a).toString("base64"),
+      },
+    }));
+    const { connection } = await started({ invoke });
+    const fallback = acpHostMcpServers(connection, false)[0]!;
+    if (!("command" in fallback)) throw new Error("Expected the shared ACP stdio fallback.");
+    const child = spawn(fallback.command, fallback.args, {
+      env: {
+        ...process.env,
+        ...Object.fromEntries(fallback.env.map(({ name, value }) => [name, value])),
+      },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    let stdout = "";
+    child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString("utf8"); });
+    child.stdin.end(`${JSON.stringify([
+      {
+        jsonrpc: "2.0",
+        id: "stdio-image-a",
+        method: "tools/call",
+        params: { name: "inertia_list_conversations", arguments: {} },
+      },
+      {
+        jsonrpc: "2.0",
+        id: "stdio-image-b",
+        method: "tools/call",
+        params: { name: "inertia_list_conversations", arguments: {} },
+      },
+    ])}\n`);
+    const [code] = await once(child, "close") as [number | null, NodeJS.Signals | null];
+    expect(code).toBe(0);
+    expect(JSON.parse(stdout.trim())).toEqual([
+      {
+        jsonrpc: "2.0",
+        id: "stdio-image-a",
+        error: {
+          code: -32600,
+          message: "Send batched tools/call requests as separate MCP messages.",
+        },
+      },
+      {
+        jsonrpc: "2.0",
+        id: "stdio-image-b",
+        error: {
+          code: -32600,
+          message: "Send batched tools/call requests as separate MCP messages.",
+        },
+      },
+    ]);
+    expect(invoke).not.toHaveBeenCalled();
   });
 
   it("shares a concurrent close failure instead of falsely confirming cleanup", async () => {

@@ -200,6 +200,30 @@ describe("OpenCode descendant session ownership", () => {
       .toThrow("bounded owned-session budget");
   });
 
+  it("deduplicates replay payloads with canonically equivalent Unicode keys", () => {
+    const ownership = new OpenCodeSessionOwnership("root-session");
+    expect(ownership.observe(created("child-session", "root-session")))
+      .toEqual({ scope: "descendant", active: true });
+    const toolEvent = (input: Record<string, unknown>, id: string): Event => event({
+      id,
+      type: "session.next.tool.called",
+      properties: {
+        sessionID: "child-session",
+        timestamp: 1,
+        assistantMessageID: "child-assistant",
+        callID: "child-call",
+        tool: "read",
+        input,
+        provider: { executed: false },
+      },
+    });
+
+    expect(ownership.observe(toolEvent({ "é": 1, "e\u0301": 2 }, "first")))
+      .toEqual({ scope: "descendant", active: true });
+    expect(ownership.observe(toolEvent({ "e\u0301": 2, "é": 1 }, "replay")))
+      .toEqual({ scope: "descendant", active: false });
+  });
+
   it("fails closed when descendant activity cannot be canonicalized", () => {
     const ownership = new OpenCodeSessionOwnership("root-session");
     expect(ownership.observe(created("child-session", "root-session")))

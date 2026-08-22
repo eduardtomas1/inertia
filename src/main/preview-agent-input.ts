@@ -6,6 +6,8 @@ import { locateAgentPageRef, type PreviewAgentTarget, waitForAgentPageHover } fr
 const INPUT_NAVIGATION_GRACE_MS = 250;
 const HOVER_INPUT_TIMEOUT_MS = 15_000;
 const NAVIGATION_TIMEOUT_MS = 30_000;
+const FILE_CHOOSER_ACTIVATION_POLL_MS = 100;
+const FILE_CHOOSER_ACTIVATION_LIMIT_MS = 10_000;
 
 interface AgentPageBoundaryState {
   mainFrameId: string | null;
@@ -126,8 +128,7 @@ export async function installAgentFileChooserBlock(contents: WebContents): Promi
     await contents.debugger.sendCommand("Page.enable");
     await contents.debugger.sendCommand("DOM.enable");
     await contents.debugger.sendCommand("Page.setInterceptFileChooserDialog", {
-      enabled: true,
-      cancel: true,
+      enabled: false,
     });
   } catch (error) {
     try {
@@ -148,15 +149,76 @@ export function settleAgentPageDebuggerBootstrap(contents: WebContents): void {
   }
 }
 
-const fileChooserBlocks = new WeakMap<WebContents, Promise<void>>();
+interface AgentFileChooserBlock {
+  generation: number;
+  ready: Promise<void>;
+}
 
-export function ensureAgentFileChooserBlock(contents: WebContents): Promise<void> {
+const fileChooserBlocks = new WeakMap<WebContents, AgentFileChooserBlock>();
+
+function agentFileChooserBlock(contents: WebContents): AgentFileChooserBlock {
   const existing = fileChooserBlocks.get(contents);
   if (existing) return existing;
-  const ready = installAgentFileChooserBlock(contents);
-  fileChooserBlocks.set(contents, ready);
-  void ready.catch(() => undefined);
-  return ready;
+  const state: AgentFileChooserBlock = {
+    generation: 0,
+    ready: installAgentFileChooserBlock(contents),
+  };
+  fileChooserBlocks.set(contents, state);
+  void state.ready.catch(() => undefined);
+  return state;
+}
+
+export function ensureAgentFileChooserBlock(contents: WebContents): Promise<void> {
+  return agentFileChooserBlock(contents).ready;
+}
+
+export async function beginAgentFileChooserBlock(contents: WebContents): Promise<number> {
+  const state = agentFileChooserBlock(contents);
+  await state.ready;
+  state.generation += 1;
+  const generation = state.generation;
+  await contents.debugger.sendCommand("Page.setInterceptFileChooserDialog", {
+    enabled: true,
+    cancel: true,
+  });
+  return generation;
+}
+
+function chooserPollDelay(): Promise<void> {
+  return new Promise((resolve) => {
+    const timeout = setTimeout(resolve, FILE_CHOOSER_ACTIVATION_POLL_MS);
+    timeout.unref();
+  });
+}
+
+/**
+ * Keep indirect chooser callbacks blocked only while Chromium can still use
+ * the transient activation created by this exact agent input. Once that
+ * causal capability expires, restore the ordinary native chooser for human
+ * interaction without detaching the debugger used by the evidence boundary.
+ */
+export async function releaseAgentFileChooserBlock(
+  contents: WebContents,
+  generation: number,
+  hasTransientUserActivation: () => Promise<boolean>,
+): Promise<void> {
+  const state = fileChooserBlocks.get(contents);
+  if (!state) return;
+  const deadline = Date.now() + FILE_CHOOSER_ACTIVATION_LIMIT_MS;
+  while (state.generation === generation && !contents.isDestroyed()) {
+    let active = true;
+    try {
+      active = await hasTransientUserActivation();
+    } catch {
+      // Keep the boundary fail-closed until the bounded activation window ends.
+    }
+    if (!active || Date.now() >= deadline) break;
+    await chooserPollDelay();
+  }
+  if (state.generation !== generation || contents.isDestroyed()) return;
+  await contents.debugger.sendCommand("Page.setInterceptFileChooserDialog", {
+    enabled: false,
+  });
 }
 
 function objectRecord(value: unknown): Record<string, unknown> | null {

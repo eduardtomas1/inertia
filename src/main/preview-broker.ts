@@ -25,11 +25,11 @@ import {
 import type { PreviewState } from "../shared/desktop.js";
 import { previewNavigationTarget } from "../shared/preview-url.js";
 import {
-  agentPageActivationBlocked, agentPageHasSensitiveEvidence, installAgentPagePrivacyGuard,
+  agentPageActivationBlocked, agentPageHasSensitiveEvidence, agentPageHasTransientUserActivation, installAgentPagePrivacyGuard,
   locateAgentPageRef, semanticPageSnapshot, setAgentPageInputGuard, showAgentPageCursor,
 } from "./preview-agent-page.js";
 import {
-  agentPageHasUnguardedNestedContent, ensureAgentFileChooserBlock, hoverAgentPageRef, setAgentPageFrozen, settleAgentPageDebuggerBootstrap, settleAgentPageInput,
+  agentPageHasUnguardedNestedContent, beginAgentFileChooserBlock, ensureAgentFileChooserBlock, hoverAgentPageRef, releaseAgentFileChooserBlock, setAgentPageFrozen, settleAgentPageDebuggerBootstrap, settleAgentPageInput,
 } from "./preview-agent-input.js";
 import { boundedAgentScreenshot } from "./preview-agent-screenshot.js";
 type PreviewOwner = "primary" | "secondary";
@@ -1221,17 +1221,17 @@ export class PreviewBroker {
     signal?: AbortSignal,
   ): Promise<void> {
     stopForAbort(signal);
-    await this.#rendererOperation(
+    const chooserGeneration = await this.#rendererOperation(
       contents,
-      () => ensureAgentFileChooserBlock(contents),
-      { signal },
-    );
-    await this.#rendererOperation(
-      contents,
-      () => setAgentPageInputGuard(contents, true),
+      () => beginAgentFileChooserBlock(contents),
       { signal },
     );
     try {
+      await this.#rendererOperation(
+        contents,
+        () => setAgentPageInputGuard(contents, true),
+        { signal },
+      );
       await settleAgentPageInput(contents, dispatch, signal);
     } finally {
       if (!contents.isDestroyed()) {
@@ -1239,9 +1239,9 @@ export class PreviewBroker {
           contents,
           () => setAgentPageInputGuard(contents, false),
         ).catch(() => undefined);
+        void releaseAgentFileChooserBlock(contents, chooserGeneration,
+          () => agentPageHasTransientUserActivation(contents)).catch(() => undefined);
       }
-      // Privileged file-chooser interception remains attached for the complete
-      // tab lifetime, including delayed callbacks after this action settles.
     }
   }
 

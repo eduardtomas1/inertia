@@ -188,6 +188,7 @@ vi.mock("electron", () => {
 const pageTools = vi.hoisted(() => ({
   agentPageActivationBlocked: vi.fn(async () => false),
   agentPageHasSensitiveEvidence: vi.fn(async () => false),
+  agentPageHasTransientUserActivation: vi.fn(async () => false),
   installAgentPagePrivacyGuard: vi.fn(async () => undefined),
   locateAgentPageRef: vi.fn<() => Promise<PreviewAgentTarget>>(async () => ({
     found: true, blocked: false, disabled: false, editable: true,
@@ -278,7 +279,7 @@ describe("agent-owned native Browser", () => {
       .resolves.toMatchObject({ ok: true });
     expect(electronState.contents[0]!.debugger.sendCommand).toHaveBeenCalledWith(
       "Page.setInterceptFileChooserDialog",
-      { enabled: true, cancel: true },
+      { enabled: false },
     );
     expect(electronState.contents[0]!.debugger.isAttached()).toBe(true);
     expect((electronState.viewOptions[0]!.webPreferences as { partition: string }).partition)

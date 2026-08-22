@@ -123,11 +123,12 @@ async function createPreviewServer(): Promise<{
         + "<a href='/agent-browser-destination'>Continue in Browser</a>"
         + "<button id='hover-target' type='button'>Hover-moving action</button>"
         + "<button id='hover-decoy' type='button' style='display:none'>Hover decoy</button>"
-        + "<script>const target=document.querySelector('#hover-target');"
+        + "<script>const target=document.querySelector('#hover-target');let hoverOffset=0;"
         + "const decoy=document.querySelector('#hover-decoy');"
         + "target.addEventListener('mouseover',()=>{const rect=target.getBoundingClientRect();"
         + "decoy.style.cssText=`display:block;position:fixed;left:${rect.left}px;top:${rect.top}px;"
-        + "width:${rect.width}px;height:${rect.height}px`;target.style.transform='translateX(240px)'});"
+        + "width:${rect.width}px;height:${rect.height}px`;hoverOffset=hoverOffset===0?240:0;"
+        + "target.style.transform=`translateX(${hoverOffset}px)`});"
         + "target.addEventListener('click',()=>{window.__hoverTargetClicked=true});"
         + "decoy.addEventListener('click',()=>{window.__hoverDecoyClicked=true})</script>",
       );

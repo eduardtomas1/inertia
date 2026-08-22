@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   agentPageActivationBlocked,
   agentPageHasSensitiveEvidence,
+  agentPageHasTransientUserActivation,
   installAgentPagePrivacyGuard,
   locateAgentPageRef,
   semanticPageSnapshot,
@@ -15,6 +16,20 @@ import { MAX_AGENT_BROWSER_TEXT_BYTES } from "../../src/shared/agent-browser";
 import { installPreviewAgentShadowBoundarySignal } from "../../src/shared/preview-agent-privacy-guard";
 
 describe("agent browser semantic snapshots", () => {
+  it("reads transient activation only from the isolated browser world", async () => {
+    const contents = {
+      executeJavaScriptInIsolatedWorld: vi.fn(async () => true),
+    };
+
+    await expect(agentPageHasTransientUserActivation(contents as never))
+      .resolves.toBe(true);
+    expect(contents.executeJavaScriptInIsolatedWorld).toHaveBeenCalledWith(
+      999,
+      [{ code: "navigator.userActivation?.isActive === true" }],
+      true,
+    );
+  });
+
   it("signals a parser-created closed shadow root when page code retrieves its internals", () => {
     const dispatched: string[] = [];
     class FakeEvent {

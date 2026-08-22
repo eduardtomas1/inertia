@@ -3,7 +3,9 @@ import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  beginAgentFileChooserBlock,
   hasUnguardedAgentPageContent,
+  releaseAgentFileChooserBlock,
   settleAgentPageInput,
 } from "../../src/main/preview-agent-input";
 
@@ -69,5 +71,62 @@ describe("agent Browser input settlement", () => {
     contents.emit("did-stop-loading");
     await expect(settlement).rejects.toThrow("Execution context was destroyed.");
     expect(contents.stop).not.toHaveBeenCalled();
+  });
+});
+
+describe("agent Browser file chooser boundary", () => {
+  function chooserContents() {
+    let attached = false;
+    const sendCommand = vi.fn(async () => undefined);
+    return {
+      contents: Object.assign(new EventEmitter(), {
+        debugger: {
+          attach: vi.fn(() => { attached = true; }),
+          detach: vi.fn(() => { attached = false; }),
+          isAttached: vi.fn(() => attached),
+          on: vi.fn(),
+          sendCommand,
+        },
+        getURL: () => "http://127.0.0.1:3000/",
+        isDestroyed: () => false,
+        navigationHistory: {
+          getActiveIndex: () => 0,
+          getEntryAtIndex: () => ({ url: "http://127.0.0.1:3000/" }),
+        },
+      }),
+      sendCommand,
+    };
+  }
+
+  it("restores native human choosers when the agent activation is gone", async () => {
+    const { contents, sendCommand } = chooserContents();
+    const generation = await beginAgentFileChooserBlock(contents as never);
+
+    await releaseAgentFileChooserBlock(contents as never, generation, async () => false);
+
+    expect(sendCommand).toHaveBeenNthCalledWith(
+      4,
+      "Page.setInterceptFileChooserDialog",
+      { enabled: true, cancel: true },
+    );
+    expect(sendCommand).toHaveBeenLastCalledWith(
+      "Page.setInterceptFileChooserDialog",
+      { enabled: false },
+    );
+  });
+
+  it("does not let an older release disable a newer agent action", async () => {
+    const { contents, sendCommand } = chooserContents();
+    const first = await beginAgentFileChooserBlock(contents as never);
+    const second = await beginAgentFileChooserBlock(contents as never);
+
+    await releaseAgentFileChooserBlock(contents as never, first, async () => false);
+
+    expect(first).toBe(1);
+    expect(second).toBe(2);
+    expect(sendCommand).not.toHaveBeenLastCalledWith(
+      "Page.setInterceptFileChooserDialog",
+      { enabled: false },
+    );
   });
 });

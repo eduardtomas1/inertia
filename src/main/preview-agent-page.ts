@@ -313,6 +313,15 @@ export async function setAgentPageInputGuard(
   if (updated !== true) throw new Error("The Browser privacy guard is unavailable.");
 }
 
+export async function agentPageHasTransientUserActivation(
+  contents: WebContents,
+): Promise<boolean> {
+  return await execute(
+    contents,
+    "navigator.userActivation?.isActive === true",
+  ) === true;
+}
+
 export async function locateAgentPageRef(
   contents: WebContents,
   ref: string,

@@ -90,6 +90,7 @@ exact provider turn
 The agent cannot use this surface to read arbitrary files, upload a file,
 grant a browser permission, start a download, retain cookies across ownership,
 or control a page belonging to another conversation. File inputs never receive
-semantic refs, focused activation is rejected, and a document-start capture
-guard cancels file-input clicks triggered indirectly during agent input while
-leaving deliberate human interaction outside an agent action unchanged.
+semantic refs, focused activation is rejected, and a privileged chooser
+boundary cancels direct or delayed selection while the exact agent-created
+transient activation remains live. Native human selection is restored once
+that causal capability expires.

@@ -52,7 +52,7 @@ export async function expectDocumentStartPrivacyGuard(
     },
     { conversationId, url },
   );
-  expect(evidence).toMatchObject({
+  expect(evidence, `privacy evidence remained available for ${url}`).toMatchObject({
     opened: { ok: true },
     snapshot: { ok: false, code: "invalid" },
     screenshot: { ok: false, code: "invalid" },

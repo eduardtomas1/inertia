@@ -110,7 +110,18 @@ vi.mock("electron", () => {
       emitMessage: (method: string, params: Record<string, unknown>): void => {
         for (const handler of this.debuggerMessageHandlers) handler({}, method, params);
       },
-      sendCommand: vi.fn(async () => undefined),
+      sendCommand: vi.fn(async (method: string) => {
+        if (method === "Page.createIsolatedWorld") return { executionContextId: 9 };
+        if (method === "Runtime.evaluate") {
+          return { result: { type: "object", subtype: "array", objectId: "boundary-hosts" } };
+        }
+        if (method === "Runtime.getProperties") {
+          return {
+            result: [{ name: "length", value: { type: "number", value: 0 } }],
+          };
+        }
+        return undefined;
+      }),
     };
 
     constructor() {
@@ -142,6 +153,9 @@ vi.mock("electron", () => {
     async loadURL(url: string): Promise<void> {
       this.url = url;
       this.title = new URL(url).pathname === "/" ? "Local app" : new URL(url).pathname.slice(1);
+      this.debugger.emitMessage("Page.frameNavigated", {
+        frame: { id: "main", url },
+      });
       this.emit("dom-ready");
       this.emit("did-navigate", {}, url);
     }

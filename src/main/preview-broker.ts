@@ -11,13 +11,7 @@ import {
   type Session,
 } from "electron";
 
-import type {
-  AgentBrowserActivity,
-  AgentBrowserCommand,
-  AgentBrowserResult,
-  AgentBrowserState,
-  AgentBrowserTab,
-} from "../shared/agent-browser.js";
+import type { AgentBrowserActivity, AgentBrowserCommand, AgentBrowserResult, AgentBrowserState, AgentBrowserTab } from "../shared/agent-browser.js";
 import { MAX_AGENT_BROWSER_TEXT_BYTES } from "../shared/agent-browser.js";
 import type { PreviewState } from "../shared/desktop.js";
 import { previewNavigationTarget } from "../shared/preview-url.js";
@@ -30,6 +24,7 @@ import {
   agentPageHasUnguardedNestedContent, beginAgentFileChooserBlock, ensureAgentFileChooserBlock, hoverAgentPageRef, releaseAgentFileChooserBlock, setAgentPageFrozen, settleAgentPageDebuggerBootstrap, settleAgentPageInput,
 } from "./preview-agent-input.js";
 import { capturedAgentScreenshotResult } from "./preview-agent-screenshot.js";
+import { failedAgentBrowserResult as failure, successfulAgentBrowserResult } from "./preview-agent-result.js";
 type PreviewOwner = "primary" | "secondary";
 
 interface PreviewTab {
@@ -123,13 +118,6 @@ function previewTabId(value: unknown): string {
     throw new Error("Invalid preview tab");
   }
   return value;
-}
-
-function failure(
-  code: Extract<AgentBrowserResult, { ok: false }>["code"],
-  message: string,
-): AgentBrowserResult {
-  return { ok: false, code, message };
 }
 
 class AgentBrowserRefusal extends Error {
@@ -324,7 +312,7 @@ export class PreviewBroker {
           case "scroll":
             return await this.#scroll(ownerId, slot, command.deltaY, signal);
           case "tabs":
-            return this.#success(slot, this.#agentStateText(slot));
+            return successfulAgentBrowserResult(this.#agentStateText(slot), this.#agentState(slot));
           case "tab-open":
             return await this.#agentOpenTab(ownerId, slot, command.url, signal);
           case "tab-activate":
@@ -333,7 +321,7 @@ export class PreviewBroker {
             }
             this.#activateTab(ownerId, slot, command.tabId);
             this.#record(ownerId, slot, "tab-activate", "Agent switched pages");
-            return this.#success(slot, this.#agentStateText(slot));
+            return successfulAgentBrowserResult(this.#agentStateText(slot), this.#agentState(slot));
           case "tab-close":
             if (!slot.tabs.has(command.tabId)) {
               return failure("not-found", "That Inertia Browser tab no longer exists.");
@@ -347,7 +335,7 @@ export class PreviewBroker {
               undefined,
               command.tabId,
             );
-            return this.#success(slot, this.#agentStateText(slot));
+            return successfulAgentBrowserResult(this.#agentStateText(slot), this.#agentState(slot));
         }
       });
     } catch (error) {
@@ -775,43 +763,51 @@ export class PreviewBroker {
     this.#publish(ownerId, slot.contextId);
   }
 
-  #success(
-    slot: PreviewSlot,
-    text: string,
-    image?: { mimeType: "image/png"; data: string },
-  ): AgentBrowserResult {
-    if (Buffer.byteLength(text, "utf8") > MAX_AGENT_BROWSER_TEXT_BYTES) {
-      return failure(
-        "too-large",
-        "The Browser result exceeded its bounded text size.",
-      );
-    }
-    return {
-      ok: true,
-      text,
-      state: this.#agentState(slot),
-      ...(image ? { image } : {}),
-    };
-  }
-
   async #snapshot(ownerId: PreviewOwner, slot: PreviewSlot, signal?: AbortSignal): Promise<AgentBrowserResult> {
-    const contents = this.#active(slot).view.webContents;
+    const tab = this.#active(slot);
+    const tabId = tab.id;
+    const contents = tab.view.webContents;
     if (!contents.getURL()) return failure("not-found", "The active Browser tab has no page.");
     await this.#prepareAgentPage(contents, signal);
-    if (await this.#rendererOperation(contents, () => agentPageHasSensitiveEvidence(contents), { signal })) {
-      return failure("invalid", "Page evidence is unavailable until the password-bearing document navigates away.");
+    this.#captureLocked.add(contents);
+    let text = "";
+    let capturedState: AgentBrowserState | null = null;
+    try {
+      await this.#rendererOperation(contents, () => setAgentPageFrozen(contents, true), { signal });
+      if (await this.#rendererOperation(contents, () => agentPageHasSensitiveEvidence(contents), { signal })) {
+        return failure("invalid", "Page evidence is unavailable until the password-bearing document navigates away.");
+      }
+      if (await this.#rendererOperation(contents, () => agentPageHasUnguardedNestedContent(contents), { signal })) {
+        return failure("invalid", "Page evidence is unavailable for nested page content.");
+      }
+      text = await this.#rendererOperation(contents, () => semanticPageSnapshot(contents), {
+        signal,
+      });
+      if (await this.#rendererOperation(contents, () => agentPageHasSensitiveEvidence(contents), { signal })) return failure("invalid", "Page evidence is unavailable until the password-bearing document navigates away.");
+      if (await this.#rendererOperation(contents, () => agentPageHasUnguardedNestedContent(contents), { signal })) return failure("invalid", "Page evidence is unavailable for nested page content.");
+      stopForAbort(signal);
+      this.#record(ownerId, slot, "snapshot", "Agent inspected this page");
+      capturedState = this.#agentState(slot);
+    } finally {
+      try {
+        if (!contents.isDestroyed()) {
+          await this.#rendererOperation(
+            contents,
+            () => setAgentPageFrozen(contents, false),
+          );
+        }
+      } finally {
+        this.#captureLocked.delete(contents);
+      }
     }
-    if (await this.#rendererOperation(contents, () => agentPageHasUnguardedNestedContent(contents), { signal })) {
-      return failure("invalid", "Page evidence is unavailable for nested page content.");
-    }
-    const text = await this.#rendererOperation(contents, () => semanticPageSnapshot(contents), {
-      signal,
-    });
-    if (await this.#rendererOperation(contents, () => agentPageHasSensitiveEvidence(contents), { signal })) return failure("invalid", "Page evidence is unavailable until the password-bearing document navigates away.");
-    if (await this.#rendererOperation(contents, () => agentPageHasUnguardedNestedContent(contents), { signal })) return failure("invalid", "Page evidence is unavailable for nested page content.");
     stopForAbort(signal);
-    this.#record(ownerId, slot, "snapshot", "Agent inspected this page");
-    return this.#success(slot, text);
+    if (!capturedState) {
+      return failure("unavailable", "The Browser snapshot state could not be captured.");
+    }
+    if (slot.tabs.get(tabId) !== tab || contents.isDestroyed()) {
+      return failure("not-found", "The Browser tab was closed before its snapshot completed.");
+    }
+    return successfulAgentBrowserResult(text, capturedState);
   }
 
   async #screenshot(ownerId: PreviewOwner, slot: PreviewSlot, signal?: AbortSignal): Promise<AgentBrowserResult> {
@@ -882,7 +878,7 @@ export class PreviewBroker {
     await this.#loadURL(contents, target.url.toString(), signal);
     stopForAbort(signal);
     this.#record(ownerId, slot, "navigate", `Agent opened ${target.url.host}`);
-    return this.#success(slot, this.#agentStateText(slot));
+    return successfulAgentBrowserResult(this.#agentStateText(slot), this.#agentState(slot));
   }
 
   async #agentOpenTab(
@@ -911,7 +907,7 @@ export class PreviewBroker {
     }
     stopForAbort(signal);
     this.#record(ownerId, slot, "tab-open", "Agent opened a new page");
-    return this.#success(slot, this.#agentStateText(slot));
+    return successfulAgentBrowserResult(this.#agentStateText(slot), this.#agentState(slot));
   }
 
   async #click(ownerId: PreviewOwner, slot: PreviewSlot, ref: string, signal?: AbortSignal): Promise<AgentBrowserResult> {
@@ -986,7 +982,10 @@ export class PreviewBroker {
       throw error;
     }
     this.#record(ownerId, slot, "click", `Agent clicked ${located.label || ref}`, { x, y });
-    return this.#success(slot, this.#agentStateText(slot, { clicked: ref }));
+    return successfulAgentBrowserResult(
+      this.#agentStateText(slot, { clicked: ref }),
+      this.#agentState(slot),
+    );
   }
 
   async #type(
@@ -1082,7 +1081,10 @@ export class PreviewBroker {
     }
     stopForAbort(signal);
     this.#record(ownerId, slot, "type", `Agent typed in ${located.label || ref}`, { x, y });
-    return this.#success(slot, JSON.stringify({ typed: ref, characters: text.length }));
+    return successfulAgentBrowserResult(
+      JSON.stringify({ typed: ref, characters: text.length }),
+      this.#agentState(slot),
+    );
   }
 
   async #press(
@@ -1110,7 +1112,7 @@ export class PreviewBroker {
       contents.sendInputEvent({ type: "keyUp", keyCode });
     }, signal);
     this.#record(ownerId, slot, "press", `Agent pressed ${key}`);
-    return this.#success(slot, JSON.stringify({ pressed: key }));
+    return successfulAgentBrowserResult(JSON.stringify({ pressed: key }), this.#agentState(slot));
   }
 
   async #scroll(ownerId: PreviewOwner, slot: PreviewSlot, deltaY: number, signal?: AbortSignal): Promise<AgentBrowserResult> {
@@ -1126,7 +1128,7 @@ export class PreviewBroker {
       deltaY,
     }), signal);
     this.#record(ownerId, slot, "scroll", `Agent scrolled ${deltaY > 0 ? "down" : "up"}`);
-    return this.#success(slot, JSON.stringify({ scrolled: deltaY }));
+    return successfulAgentBrowserResult(JSON.stringify({ scrolled: deltaY }), this.#agentState(slot));
   }
 
   #guardNavigation(event: { preventDefault: () => void }, url: string): void {
@@ -1244,5 +1246,4 @@ export class PreviewBroker {
       }
     }
   }
-
 }

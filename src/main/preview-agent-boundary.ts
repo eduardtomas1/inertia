@@ -1,5 +1,13 @@
 import type { WebContents } from "electron";
 
+const MAX_AGENT_PAGE_BOUNDARY_ELEMENTS = 4_000;
+const MAX_AGENT_PAGE_SHADOW_HOSTS = 2_000;
+const MAX_AGENT_PAGE_ATTRIBUTES = 64;
+const MAX_AGENT_PAGE_ATTRIBUTE_CHARS = 16_384;
+const MAX_AGENT_PAGE_ATTRIBUTE_VALUE_CHARS = 4_096;
+const AGENT_PAGE_BOUNDARY_OBJECT_GROUP = "inertia-agent-page-boundary";
+const AGENT_PAGE_SHADOW_HOST_BATCH = 16;
+
 interface AgentPageBoundaryState {
   mainFrameId: string | null;
   nestedContentObserved: boolean;
@@ -85,6 +93,144 @@ export function hasUnguardedAgentPageContent(boundaryState: unknown): boolean {
   return objectRecord(boundaryState)?.nestedContentObserved !== false;
 }
 
+/**
+ * Inspect only bounded, depth-zero host descriptors while the broker has the
+ * page frozen. The isolated-world prepass caps DOM traversal and the exact
+ * attribute material that a descriptor can return before CDP sees any host.
+ * No descendant node, text node, or child attribute is requested.
+ */
+async function hasPrivilegedAgentPageShadowRoot(
+  contents: WebContents,
+  frameId: string,
+): Promise<boolean | null> {
+  const world = objectRecord(await contents.debugger.sendCommand("Page.createIsolatedWorld", {
+    frameId,
+    worldName: AGENT_PAGE_BOUNDARY_OBJECT_GROUP,
+    grantUniveralAccess: false,
+  }));
+  const executionContextId = world?.executionContextId;
+  if (typeof executionContextId !== "number" || !Number.isInteger(executionContextId)) return null;
+
+  try {
+    const evaluated = objectRecord(await contents.debugger.sendCommand("Runtime.evaluate", {
+      expression: `(() => { // __inertia_bounded_shadow_hosts__
+        const root = document.documentElement;
+        const iterator = root && typeof document.createNodeIterator === "function"
+          ? document.createNodeIterator(root, 1)
+          : null;
+        if (!iterator) return null;
+        const hostNames = new Set([
+          "article", "aside", "blockquote", "body", "div", "footer", "h1", "h2",
+          "h3", "h4", "h5", "h6", "header", "main", "nav", "p", "section", "span",
+        ]);
+        const candidates = [];
+        let attributeCharacters = 0;
+        let elements = 0;
+        while (true) {
+          const element = iterator.nextNode();
+          if (!element) break;
+          elements += 1;
+          if (elements > ${MAX_AGENT_PAGE_BOUNDARY_ELEMENTS}) return null;
+          const attributes = element.attributes;
+          if (!attributes || attributes.length > ${MAX_AGENT_PAGE_ATTRIBUTES}) return null;
+          for (let index = 0; index < attributes.length; index += 1) {
+            const attribute = attributes[index];
+            const nameLength = String(attribute?.name ?? "").length;
+            const valueLength = String(attribute?.value ?? "").length;
+            if (nameLength > ${MAX_AGENT_PAGE_ATTRIBUTE_VALUE_CHARS}
+              || valueLength > ${MAX_AGENT_PAGE_ATTRIBUTE_VALUE_CHARS}) return null;
+            attributeCharacters += nameLength + valueLength;
+            if (attributeCharacters > ${MAX_AGENT_PAGE_ATTRIBUTE_CHARS}) return null;
+          }
+          if (element.shadowRoot) return null;
+          const name = String(element.localName || "").toLowerCase();
+          if (hostNames.has(name) || name.includes("-")) {
+            candidates.push(element);
+            if (candidates.length > ${MAX_AGENT_PAGE_SHADOW_HOSTS}) return null;
+          }
+        }
+        return candidates;
+      })()`,
+      contextId: executionContextId,
+      objectGroup: AGENT_PAGE_BOUNDARY_OBJECT_GROUP,
+      returnByValue: false,
+      generatePreview: false,
+      awaitPromise: false,
+      userGesture: false,
+      timeout: 3_000,
+    }));
+    const result = objectRecord(evaluated?.result);
+    const objectId = result?.objectId;
+    if (evaluated?.exceptionDetails || result?.subtype !== "array" || typeof objectId !== "string") {
+      return null;
+    }
+
+    const properties = objectRecord(await contents.debugger.sendCommand("Runtime.getProperties", {
+      objectId,
+      ownProperties: true,
+      accessorPropertiesOnly: false,
+      generatePreview: false,
+    }));
+    if (!Array.isArray(properties?.result)) return null;
+    const descriptors = new Map<string, Record<string, unknown>>();
+    for (const candidate of properties.result) {
+      const descriptor = objectRecord(candidate);
+      if (!descriptor || typeof descriptor.name !== "string" || descriptors.has(descriptor.name)) {
+        return null;
+      }
+      descriptors.set(descriptor.name, descriptor);
+    }
+    const lengthValue = objectRecord(descriptors.get("length")?.value)?.value;
+    if (typeof lengthValue !== "number"
+      || !Number.isInteger(lengthValue)
+      || lengthValue < 0
+      || lengthValue > MAX_AGENT_PAGE_SHADOW_HOSTS
+      || descriptors.size !== lengthValue + 1) return null;
+
+    const hostObjectIds: string[] = [];
+    for (let index = 0; index < lengthValue; index += 1) {
+      const remote = objectRecord(descriptors.get(String(index))?.value);
+      if (remote?.subtype !== "node" || typeof remote.objectId !== "string") return null;
+      hostObjectIds.push(remote.objectId);
+    }
+
+    let describedAttributeCharacters = 0;
+    for (let offset = 0; offset < hostObjectIds.length; offset += AGENT_PAGE_SHADOW_HOST_BATCH) {
+      const descriptions = await Promise.all(
+        hostObjectIds.slice(offset, offset + AGENT_PAGE_SHADOW_HOST_BATCH).map(
+          async (hostObjectId) => objectRecord(await contents.debugger.sendCommand(
+            "DOM.describeNode",
+            { objectId: hostObjectId, depth: 0, pierce: true },
+          )),
+        ),
+      );
+      for (const description of descriptions) {
+        const node = objectRecord(description?.node);
+        if (node?.nodeType !== 1 || !Array.isArray(node.attributes)) return null;
+        if (node.attributes.length > MAX_AGENT_PAGE_ATTRIBUTES * 2
+          || node.attributes.length % 2 !== 0) return null;
+        for (const part of node.attributes) {
+          if (typeof part !== "string" || part.length > MAX_AGENT_PAGE_ATTRIBUTE_VALUE_CHARS) {
+            return null;
+          }
+          describedAttributeCharacters += part.length;
+          if (describedAttributeCharacters > MAX_AGENT_PAGE_ATTRIBUTE_CHARS) return null;
+        }
+        if (!Array.isArray(node.shadowRoots)) {
+          if (node.shadowRoots !== undefined) return null;
+          continue;
+        }
+        if (node.shadowRoots.length > 0) return true;
+      }
+    }
+    return false;
+  } finally {
+    await contents.debugger.sendCommand("Runtime.releaseObjectGroup", {
+      objectGroup: AGENT_PAGE_BOUNDARY_OBJECT_GROUP,
+    });
+  }
+}
+
 export async function agentPageHasUnguardedNestedContent(
   contents: WebContents,
 ): Promise<boolean> {
@@ -92,6 +238,16 @@ export async function agentPageHasUnguardedNestedContent(
   if (state?.nestedContentObserved !== false) return true;
   if (!contents.debugger.isAttached()) {
     throw new Error("The Browser security debugger is unavailable.");
+  }
+  const frameId = state.mainFrameId;
+  if (typeof frameId !== "string") return true;
+  try {
+    const hasShadowRoot = await hasPrivilegedAgentPageShadowRoot(contents, frameId);
+    if (state.mainFrameId !== frameId) return true;
+    if (hasShadowRoot === null) return true;
+    if (hasShadowRoot) state.nestedContentObserved = true;
+  } catch {
+    return true;
   }
   return hasUnguardedAgentPageContent(state);
 }

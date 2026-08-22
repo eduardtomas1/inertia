@@ -35,6 +35,20 @@ function bodyWithText(text: string): {
   return body;
 }
 
+function withSemanticIterator<
+  T extends { querySelectorAll: (selector: string) => Iterable<unknown> },
+>(document: T): T & {
+  createNodeIterator: () => { nextNode: () => unknown | null };
+} {
+  return Object.assign(document, {
+    createNodeIterator: () => {
+      const nodes = Array.from(document.querySelectorAll("__semantic_candidates__"));
+      let index = 0;
+      return { nextNode: () => nodes[index++] ?? null };
+    },
+  });
+}
+
 describe("agent browser semantic snapshots", () => {
   it("signals a parser-created closed shadow root when page code retrieves its internals", () => {
     const dispatched: string[] = [];
@@ -128,11 +142,11 @@ describe("agent browser semantic snapshots", () => {
       get: () => { throw new Error("semantic collection must not read unbounded innerText"); },
     });
     const context = {
-      document: {
+      document: withSemanticIterator({
         title: "Long local page",
         body,
         querySelectorAll: () => [],
-      },
+      }),
       location: { href: "http://127.0.0.1:3000/long?private=value#secret" },
       URL,
       encodeURIComponent,
@@ -161,6 +175,115 @@ describe("agent browser semantic snapshots", () => {
     expect(parsed.text).toHaveLength(12_000);
   });
 
+  it("bounds semantic element discovery before a dense page can materialize candidates", async () => {
+    let nextNodeCalls = 0;
+    const body = bodyWithText("");
+    const document = {
+      title: "Dense controls",
+      body,
+      documentElement: {},
+      querySelectorAll: () => [],
+      createNodeIterator: () => ({
+        nextNode: () => {
+          nextNodeCalls += 1;
+          return {
+            tagName: "DIV",
+            getAttribute: () => null,
+          };
+        },
+      }),
+    };
+    const context = {
+      document,
+      location: { href: "http://127.0.0.1:3000/dense" },
+      URL,
+      encodeURIComponent,
+      innerWidth: 1_200,
+      innerHeight: 800,
+      scrollX: 0,
+      scrollY: 0,
+      getComputedStyle: () => ({ visibility: "visible", display: "block", opacity: "1" }),
+    };
+    const contents = {
+      executeJavaScriptInIsolatedWorld: vi.fn(async (
+        _worldId: number,
+        scripts: Array<{ code: string }>,
+      ) => runInNewContext(scripts[0]!.code, context)),
+    };
+
+    const parsed = JSON.parse(await semanticPageSnapshot(contents as never)) as {
+      elements: unknown[];
+      truncated: boolean;
+    };
+    expect(parsed).toMatchObject({ elements: [], truncated: true });
+    expect(nextNodeCalls).toBe(4_001);
+  });
+
+  it("includes visible descendant text beneath a visibility-hidden ancestor", async () => {
+    const body = {
+      firstChild: null as unknown,
+      parentElement: null,
+      tagName: "BODY",
+    };
+    const hiddenParent = {
+      firstChild: null as unknown,
+      nextSibling: null,
+      nodeType: 1,
+      parentElement: body,
+      parentNode: body,
+      tagName: "DIV",
+    };
+    const visibleChild = {
+      firstChild: null as unknown,
+      nextSibling: null,
+      nodeType: 1,
+      parentElement: hiddenParent,
+      parentNode: hiddenParent,
+      tagName: "SPAN",
+    };
+    const textNode = {
+      nodeType: 3,
+      nodeValue: "Visible descendant",
+      nextSibling: null,
+      parentElement: visibleChild,
+      parentNode: visibleChild,
+    };
+    body.firstChild = hiddenParent;
+    hiddenParent.firstChild = visibleChild;
+    visibleChild.firstChild = textNode;
+    const document = withSemanticIterator({
+      title: "Visibility override",
+      body,
+      querySelectorAll: () => [],
+    });
+    const context = {
+      document,
+      location: { href: "http://127.0.0.1:3000/visibility" },
+      URL,
+      encodeURIComponent,
+      innerWidth: 1_200,
+      innerHeight: 800,
+      scrollX: 0,
+      scrollY: 0,
+      getComputedStyle: (element: unknown) => ({
+        visibility: element === hiddenParent ? "hidden" : "visible",
+        display: "block",
+        opacity: "1",
+      }),
+    };
+    const contents = {
+      executeJavaScriptInIsolatedWorld: vi.fn(async (
+        _worldId: number,
+        scripts: Array<{ code: string }>,
+      ) => runInNewContext(scripts[0]!.code, context)),
+    };
+
+    const parsed = JSON.parse(await semanticPageSnapshot(contents as never)) as {
+      text: string;
+    };
+    expect(parsed.text).toBe("Visible descendant");
+  });
+
   it("tracks password identity before the first agent inspection", async () => {
     const secret = "revealed-before-first-snapshot";
     const input = {
@@ -184,7 +307,7 @@ describe("agent browser semantic snapshots", () => {
     let clickListener: ((event: Record<string, unknown>) => void) | undefined;
     let inputListener: ((event: Record<string, unknown>) => void) | undefined;
     let nestedBoundaryListener: ((event: Record<string, unknown>) => void) | undefined;
-    const document = {
+    const document = withSemanticIterator({
       title: "Sign in",
       body: bodyWithText("Password"),
       documentElement: { nodeType: 1, tagName: "HTML", querySelectorAll: () => [input] },
@@ -196,7 +319,7 @@ describe("agent browser semantic snapshots", () => {
       }),
       querySelectorAll: () => [input],
       elementFromPoint: () => input,
-    };
+    });
     class MutationObserver {
       constructor(_callback: (records: unknown[]) => void) {}
       observe(): void {}
@@ -257,7 +380,7 @@ describe("agent browser semantic snapshots", () => {
     const secret = "token-that-must-never-leave-the-page";
     const callbackSecret = "oauth-code-that-never-enters-a-password-field";
     let replacement: typeof input | null = null;
-    const document = {
+    const document = withSemanticIterator({
       title: `Account ${secret}`,
       body: bodyWithText(`Sign in\n${secret}\nKeep this account secure`),
       activeElement: null as unknown,
@@ -265,7 +388,7 @@ describe("agent browser semantic snapshots", () => {
         ? [replacement ?? input]
         : [replacement ?? input, mirror],
       elementFromPoint: (_x: number, y: number) => y < 80 ? input : mirror,
-    };
+    });
     const focus = vi.fn(() => { document.activeElement = input; });
     const select = vi.fn();
     const inlineStyle = new Map<string, { priority: string; value: string }>();
@@ -423,11 +546,11 @@ describe("agent browser semantic snapshots", () => {
       (selector: string) => selector === "input" ? [] : editors,
     );
     const context = {
-      document: {
+      document: withSemanticIterator({
         title: "Editors",
         body: bodyWithText("rich text plaintext-only"),
         querySelectorAll,
-      },
+      }),
       location: { href: "http://127.0.0.1:3000/editors" },
       innerWidth: 1_200,
       innerHeight: 800,
@@ -449,7 +572,6 @@ describe("agent browser semantic snapshots", () => {
       "rich text",
       "plaintext-only",
     ]);
-    expect(querySelectorAll).toHaveBeenCalledWith(expect.stringContaining("[contenteditable]"));
   });
 
   it("recognizes controls disabled by an ancestor fieldset", async () => {
@@ -470,13 +592,13 @@ describe("agent browser semantic snapshots", () => {
       contains: (candidate: unknown) => candidate === button,
     };
     const context = {
-      document: {
+      document: withSemanticIterator({
         title: "Disabled controls",
         body: bodyWithText("Submit"),
         activeElement: null,
         querySelectorAll: (selector: string) => selector === "input" ? [] : [button],
         elementFromPoint: () => button,
-      },
+      }),
       location: { href: "http://127.0.0.1:3000/disabled" },
       URL,
       encodeURIComponent,
@@ -524,12 +646,12 @@ describe("agent browser semantic snapshots", () => {
       contains: (candidate: unknown) => candidate === button,
     };
     const context = {
-      document: {
+      document: withSemanticIterator({
         title: "ARIA disabled controls",
         body: bodyWithText("Managed action"),
         querySelectorAll: (selector: string) => selector === "input" ? [] : [button],
         elementFromPoint: () => button,
-      },
+      }),
       location: { href: "http://127.0.0.1:3000/aria-disabled" },
       URL,
       encodeURIComponent,
@@ -574,13 +696,13 @@ describe("agent browser semantic snapshots", () => {
       contains: (candidate: unknown) => candidate === input,
     };
     const context = {
-      document: {
+      document: withSemanticIterator({
         title: "Upload",
         body: bodyWithText("Upload private file"),
         activeElement: input,
         querySelectorAll: () => [input],
         elementFromPoint: () => input,
-      },
+      }),
       location: { href: "http://127.0.0.1:3000/upload" },
       URL,
       encodeURIComponent,

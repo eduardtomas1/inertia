@@ -7,6 +7,7 @@ import { installPreviewAgentPrivacyGuard } from "../shared/preview-agent-privacy
 // credential identity; the untrusted page cannot read or mutate its state.
 export const AGENT_BROWSER_WORLD_ID = 999;
 const MAX_SEMANTIC_ELEMENTS = 200;
+const MAX_SEMANTIC_SCAN_NODES = 4_000;
 const MAX_PAGE_TEXT_CHARS = 12_000;
 const MAX_BODY_TEXT_SOURCE_CHARS = 24_000;
 const MAX_BODY_TEXT_NODES = 4_000;
@@ -238,13 +239,30 @@ export async function semanticPageSnapshot(
           || element.value,
           300,
         );
-    const selector = [
-      "a[href]", "button", "input", "textarea", "select", "summary",
-      "[role]", "[contenteditable]", "[tabindex]",
-    ].join(",");
+    const semanticTags = new Set(["BUTTON", "INPUT", "TEXTAREA", "SELECT", "SUMMARY"]);
+    const hasAttribute = (element, name) => element.hasAttribute?.(name) === true
+      || (typeof element.getAttribute === "function" && element.getAttribute(name) !== null);
+    const semanticCandidate = (element) => semanticTags.has(element.tagName)
+      || (element.tagName === "A" && hasAttribute(element, "href"))
+      || hasAttribute(element, "role")
+      || hasAttribute(element, "contenteditable")
+      || hasAttribute(element, "tabindex");
     const elements = [];
-    for (const element of document.querySelectorAll(selector)) {
-      if (elements.length >= ${MAX_SEMANTIC_ELEMENTS}) break;
+    let elementScanTruncated = false;
+    const elementRoot = document.documentElement || document.body;
+    const elementIterator = elementRoot
+      ? document.createNodeIterator(elementRoot, 1)
+      : null;
+    let scannedElements = 0;
+    while (elementIterator && scannedElements < ${MAX_SEMANTIC_SCAN_NODES}) {
+      const element = elementIterator.nextNode();
+      if (!element) break;
+      scannedElements += 1;
+      if (!semanticCandidate(element)) continue;
+      if (elements.length >= ${MAX_SEMANTIC_ELEMENTS}) {
+        elementScanTruncated = true;
+        break;
+      }
       if (element.tagName === "INPUT"
         && String(element.type || "").toLowerCase() === "file") continue;
       const rect = element.getBoundingClientRect();
@@ -274,27 +292,31 @@ export async function semanticPageSnapshot(
         },
       });
     }
-    const textVisibility = new WeakMap();
-    const textVisible = (element) => {
+    if (!elementScanTruncated && scannedElements >= ${MAX_SEMANTIC_SCAN_NODES}
+      && elementIterator?.nextNode()) elementScanTruncated = true;
+    const textStructureVisibility = new WeakMap();
+    const textStructureVisible = (element) => {
       const chain = [];
       let current = element;
-      while (current && !textVisibility.has(current)) {
+      while (current && !textStructureVisibility.has(current)) {
         chain.push(current);
         current = current.parentElement;
       }
-      let allowed = current ? textVisibility.get(current) !== false : true;
+      let allowed = current ? textStructureVisibility.get(current) !== false : true;
       for (let index = chain.length - 1; index >= 0; index -= 1) {
         const candidate = chain[index];
         const style = getComputedStyle(candidate);
         allowed = allowed
           && !["SCRIPT", "STYLE", "TEMPLATE", "NOSCRIPT"].includes(candidate.tagName)
           && candidate.hidden !== true
-          && style.visibility !== "hidden" && style.display !== "none"
+          && style.display !== "none"
           && Number(style.opacity || "1") > 0;
-        textVisibility.set(candidate, allowed);
+        textStructureVisibility.set(candidate, allowed);
       }
       return allowed;
     };
+    const textVisible = (element) => textStructureVisible(element)
+      && getComputedStyle(element).visibility !== "hidden";
     const textChunks = [];
     let sourceCharacters = 0;
     let visitedNodes = 0;
@@ -316,7 +338,7 @@ export async function semanticPageSnapshot(
           textChunks.push(value);
           sourceCharacters += value.length;
         }
-      } else if (node.nodeType === 1 && textVisible(node) && node.firstChild) {
+      } else if (node.nodeType === 1 && textStructureVisible(node) && node.firstChild) {
         node = node.firstChild;
         continue;
       }
@@ -332,7 +354,8 @@ export async function semanticPageSnapshot(
       viewport: { width: innerWidth, height: innerHeight, scrollX, scrollY },
       text: redact(bodyText, ${MAX_PAGE_TEXT_CHARS}),
       elements,
-      truncated: elements.length >= ${MAX_SEMANTIC_ELEMENTS}
+      truncated: elementScanTruncated
+        || elements.length >= ${MAX_SEMANTIC_ELEMENTS}
         || bodyTruncated,
     };
   })()`);

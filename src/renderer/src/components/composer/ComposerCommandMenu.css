@@ -78,7 +78,7 @@
 
 .composer-command-list button:disabled {
   cursor: not-allowed;
-  opacity: 0.42;
+  opacity: var(--disabled-opacity);
 }
 
 .composer-command-copy {

@@ -93,10 +93,10 @@
   width: 100%;
   min-height: 32px;
   padding: 0 9px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--interactive-border);
   border-radius: 8px;
   color: var(--text);
-  background: var(--input-bg);
+  background: var(--surface-strong);
   font: inherit;
   font-size: 11px;
 }
@@ -119,6 +119,8 @@
   text-align: left;
 }
 .c-w > aside:first-child > button:hover { color: var(--text); background: var(--surface-hover); }
+.c-w > aside:first-child > button:hover small,
+.c-w > aside:first-child > button[aria-current="true"] small { color: var(--text-muted); }
 .c-w > aside:first-child > button[aria-current="true"] {
   color: var(--text);
   background: color-mix(in srgb, var(--accent-soft) 58%, var(--surface));
@@ -181,9 +183,10 @@
 }
 .c-x.is-selectable { grid-template-columns: 18px minmax(0, 1fr); }
 .c-x.is-selectable:hover { border-color: var(--border-strong); background: var(--surface-hover); }
+.c-x.is-selectable:hover .c-xm :is(time, em) { color: var(--text-muted); }
 .c-x.is-selectable[aria-pressed="true"] { border-color: color-mix(in srgb, var(--accent) 58%, var(--border)); background: color-mix(in srgb, var(--accent-soft) 44%, var(--surface)); }
 .c-x.is-selectable > span:last-child { display: grid; min-width: 0; gap: 6px; }
-.c-xk { display: grid; width: 16px; height: 16px; place-items: center; border: 1px solid var(--border-strong); border-radius: 5px; color: var(--accent-contrast); background: transparent; }
+.c-xk { display: grid; width: 16px; height: 16px; place-items: center; border: 1px solid var(--border-strong); border-radius: 5px; color: var(--accent-text); background: transparent; }
 .c-x.is-selectable[aria-pressed="true"] .c-xk { border-color: var(--accent); background: var(--accent); }
 .c-xm { display: flex; align-items: baseline; gap: 7px; }
 .c-xm strong { color: var(--text); font-size: 11px; }
@@ -197,10 +200,10 @@
   min-height: 64px;
   padding: 9px 10px;
   resize: vertical;
-  border: 1px solid var(--border);
+  border: 1px solid var(--interactive-border);
   border-radius: 9px;
   color: var(--text);
-  background: var(--input-bg);
+  background: var(--surface-strong);
   font: inherit;
   font-size: 11px;
   line-height: 1.4;

@@ -88,31 +88,41 @@ describe("GitHub pre-merge confidence", () => {
         },
       },
     }];
-    const runCli = vi.fn<typeof runRestrictedCli>(async (_executable, args) => ({
-      stdout: args[0] === "api" && args[1] === "--method"
-        ? JSON.stringify(associated)
-        : args[0] === "pr" && args[1] === "view"
-          ? JSON.stringify(pullRequest)
-          : JSON.stringify({
-            data: {
-              repository: {
-                pullRequest: {
-                  number: 42,
-                  headRefOid: head,
-                  updatedAt: pullRequest.updatedAt,
-                  reviewThreads: {
-                    nodes: [],
-                    pageInfo: { hasNextPage: false },
+    let collectionComplete = false;
+    let pullRequestViews = 0;
+    const runCli = vi.fn<typeof runRestrictedCli>(async (_executable, args) => {
+      if (args[0] === "pr") {
+        pullRequestViews += 1;
+        if (pullRequestViews === 2) collectionComplete = true;
+      }
+      return {
+        stdout: args[0] === "api" && args[1] === "--method"
+          ? JSON.stringify(associated)
+          : args[0] === "pr" && args[1] === "view"
+            ? JSON.stringify(pullRequest)
+            : JSON.stringify({
+              data: {
+                repository: {
+                  pullRequest: {
+                    number: 42,
+                    headRefOid: head,
+                    updatedAt: pullRequest.updatedAt,
+                    reviewThreads: {
+                      nodes: [],
+                      pageInfo: { hasNextPage: false },
+                    },
                   },
                 },
               },
-            },
-          }),
-      stderr: "",
-    }));
+            }),
+        stderr: "",
+      };
+    });
 
     const confidence = await inspectGitHubPreMergeConfidence(root, {}, {
-      now: () => new Date("2026-08-22T15:01:00Z"),
+      now: () => new Date(collectionComplete
+        ? "2026-08-22T15:02:30Z"
+        : "2026-08-22T15:00:00Z"),
       environment: async () => ({ env: { PATH: "/fake" }, pathEntries: ["/fake"] }),
       executableCandidates: async () => ["/fake/gh"],
       runCli,
@@ -120,6 +130,7 @@ describe("GitHub pre-merge confidence", () => {
 
     expect(confidence).toMatchObject({
       state: "ready",
+      generatedAt: "2026-08-22T15:02:30.000Z",
       local: { branch: "feature/confidence", head, dirty: false },
       github: { number: 42, head, repository: "openai/codex" },
       identity: { state: "exact" },
@@ -535,6 +546,7 @@ describe("GitHub pre-merge confidence", () => {
         url: "https://github.com/openai/codex/pull/9",
         state: "OPEN",
         isDraft: false,
+        reviewDecision: "",
         headRefName: "feature/confidence",
         headRefOid: "c".repeat(40),
         updatedAt: "2026-08-22T15:00:00Z",
@@ -560,6 +572,7 @@ describe("GitHub pre-merge confidence", () => {
       url: "https://github.com/openai/codex/pull/9",
       state: "OPEN",
       isDraft: false,
+      reviewDecision: "",
       headRefName: "feature/confidence",
       headRefOid: "c".repeat(40),
       updatedAt: "2026-08-22T15:00:00Z",
@@ -598,6 +611,7 @@ describe("GitHub pre-merge confidence", () => {
       url: "https://github.com/openai/codex/pull/9",
       state: "OPEN",
       isDraft: false,
+      reviewDecision: "",
       headRefName: "feature/confidence",
       headRefOid: "c".repeat(40),
       updatedAt: "2026-08-22T15:00:00Z",
@@ -627,6 +641,7 @@ describe("GitHub pre-merge confidence", () => {
         url: "https://github.com/openai/codex/pull/9",
         state: "OPEN",
         isDraft: "false",
+        reviewDecision: "",
         headRefName: "feature/confidence",
         headRefOid: "c".repeat(40),
         updatedAt: "2026-08-22T15:00:00Z",
@@ -639,6 +654,29 @@ describe("GitHub pre-merge confidence", () => {
     );
 
     expect(details).toBeNull();
+  });
+
+  it("rejects missing, non-string, and unknown review decisions", () => {
+    for (const reviewDecision of [undefined, 42, "UNKNOWN"]) {
+      const details = gitHubPreMergeTestSupport.parsePullRequestList(
+        JSON.stringify([{
+          number: 9,
+          url: "https://github.com/openai/codex/pull/9",
+          state: "OPEN",
+          isDraft: false,
+          reviewDecision,
+          headRefName: "feature/confidence",
+          headRefOid: "c".repeat(40),
+          updatedAt: "2026-08-22T15:00:00Z",
+          changedFiles: 0,
+          files: [],
+          statusCheckRollup: [],
+        }]),
+        "https://github.com/openai/codex",
+        "feature/confidence",
+      );
+      expect(details).toBeNull();
+    }
   });
 
   it("treats skipped and missing platform checks as visibly incomplete", () => {

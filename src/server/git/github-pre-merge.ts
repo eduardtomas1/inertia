@@ -30,6 +30,7 @@ const MAX_REVIEW_THREADS = 100;
 const MAX_ASSOCIATED_PULL_REQUESTS = 100;
 const MAX_REVIEW_BODY_CHARS = 2_000;
 const MAX_AUTHOR_CLAIM_CHARS = 6_000;
+const REVIEW_DECISIONS = new Set(["APPROVED", "CHANGES_REQUESTED", "REVIEW_REQUIRED"]);
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -77,6 +78,11 @@ function record(value: unknown): value is UnknownRecord {
 
 function text(value: unknown, fallback = ""): string {
   return typeof value === "string" ? value : fallback;
+}
+
+function parseReviewDecision(value: unknown): PullRequestDetails["reviewDecision"] | undefined {
+  return value === null || value === "" ? null
+    : typeof value === "string" && REVIEW_DECISIONS.has(value) ? value : undefined;
 }
 
 function integer(value: unknown, fallback = 0): number {
@@ -214,13 +220,11 @@ function parsePullRequest(
 ): PullRequestDetails | null {
   if (!record(value)) return null;
   const number = integer(value.number);
-  const url = verifiedGitHubPullRequestUrl(
-    text(value.url),
-    repositoryBaseUrl,
-  );
+  const url = verifiedGitHubPullRequestUrl(text(value.url), repositoryBaseUrl);
   const head = text(value.headRefOid).toLowerCase();
   const headBranch = text(value.headRefName);
   const updatedAt = text(value.updatedAt).trim();
+  const reviewDecision = parseReviewDecision(value.reviewDecision);
   if (
     number < 1
     || !url
@@ -228,6 +232,7 @@ function parsePullRequest(
     || !/^[0-9a-f]{40,64}$/u.test(head)
     || !Number.isFinite(Date.parse(updatedAt))
     || typeof value.isDraft !== "boolean"
+    || reviewDecision === undefined
   ) {
     return null;
   }
@@ -263,9 +268,7 @@ function parsePullRequest(
       text(value.mergeStateStatus, "UNKNOWN"),
       64,
     ).value.toUpperCase(),
-    reviewDecision: text(value.reviewDecision).trim()
-      ? boundedText(text(value.reviewDecision).trim(), 64).value.toUpperCase()
-      : null,
+    reviewDecision,
     updatedAt: boundedText(updatedAt, 64).value,
     body: text(value.body),
     changedFiles: value.changedFiles,
@@ -687,14 +690,14 @@ export async function inspectGitHubPreMergeConfidence(
   options: { signal?: AbortSignal } = {},
   dependencies: GitHubPreMergeDependencies = {},
 ): Promise<GitPreMergeConfidence> {
-  const now = (dependencies.now ?? (() => new Date()))();
+  const now = dependencies.now ?? (() => new Date());
   const initialStatus = await getRepositoryStatus(repositoryPath, {
     signal: options.signal,
   });
   const initialHead = await currentHead(repositoryPath, options.signal);
   if (!initialStatus.branch || !initialHead) {
     return emptyConfidence(
-      now,
+      now(),
       initialStatus,
       initialHead,
       "unavailable",
@@ -704,7 +707,7 @@ export async function inspectGitHubPreMergeConfidence(
   const routing = await inspectGitRemoteRouting(repositoryPath, initialStatus.branch, { signal: options.signal });
   if (!routing.target || routing.target.forge !== "github") {
     return emptyConfidence(
-      now,
+      now(),
       initialStatus,
       initialHead,
       "unavailable",
@@ -718,7 +721,7 @@ export async function inspectGitHubPreMergeConfidence(
     gh = await resolveGitHubCli(dependencies, { signal: options.signal });
   } catch (error) {
     return emptyConfidence(
-      now,
+      now(),
       initialStatus,
       initialHead,
       "unavailable",
@@ -755,7 +758,7 @@ export async function inspectGitHubPreMergeConfidence(
     );
   } catch (error) {
     return emptyConfidence(
-      now,
+      now(),
       initialStatus,
       initialHead,
       "unavailable",
@@ -774,7 +777,7 @@ export async function inspectGitHubPreMergeConfidence(
       || finalSourceRepositorySlug?.toLocaleLowerCase("en-US")
         !== sourceRepositorySlug.toLocaleLowerCase("en-US");
     const confidence = emptyConfidence(
-      now,
+      now(),
       finalStatus,
       finalHead,
       changed ? "unavailable" : "no-pull-request",
@@ -812,7 +815,7 @@ export async function inspectGitHubPreMergeConfidence(
     );
   } catch (error) {
     return emptyConfidence(
-      now,
+      now(),
       initialStatus,
       initialHead,
       "unavailable",
@@ -939,7 +942,7 @@ export async function inspectGitHubPreMergeConfidence(
     completeEvidence,
   );
   return {
-    generatedAt: now.toISOString(),
+    generatedAt: now().toISOString(),
     state: completeEvidence ? "ready" : "unavailable",
     unavailableReason: incompleteReason,
     local: localEvidence(finalStatus, finalHead),

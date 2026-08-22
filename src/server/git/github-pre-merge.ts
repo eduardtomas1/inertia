@@ -15,7 +15,7 @@ import {
   type GitHubPullRequestDependencies,
 } from "./github-pull-request";
 import { inspectGitRemoteRouting } from "./remote-routing";
-import { runGitInspection } from "./runner";
+import { runGitInspection, settleGitInspections } from "./runner";
 import { getRepositoryStatus } from "./status";
 import { GitError, type GitRepositoryStatus } from "./types";
 
@@ -766,11 +766,10 @@ export async function inspectGitHubPreMergeConfidence(
     );
   }
   if (!discovery) {
-    const [finalStatus, finalHead, finalRouting] = await Promise.all([
-      getRepositoryStatus(repositoryPath, { signal: options.signal }),
-      currentHead(repositoryPath, options.signal),
-      inspectGitRemoteRouting(repositoryPath, initialStatus.branch, { signal: options.signal }),
-    ]);
+    const [finalStatus, finalHead, finalRouting] = await settleGitInspections(options.signal ?? new AbortController().signal,
+      (signal) => getRepositoryStatus(repositoryPath, { signal }),
+      (signal) => currentHead(repositoryPath, signal),
+      (signal) => inspectGitRemoteRouting(repositoryPath, initialStatus.branch, { signal }));
     const finalSourceRepositorySlug = finalRouting.target?.forge === "github" ? githubRepositorySlug(finalRouting.target.baseUrl) : null;
     const changed = initialHead !== finalHead
       || initialStatus.branch !== finalStatus.branch
@@ -886,11 +885,10 @@ export async function inspectGitHubPreMergeConfidence(
   } catch (error) {
     reviewEvidenceReason ??= githubUnavailableReason(error);
   }
-  const [finalStatus, finalHead, finalRouting] = await Promise.all([
-    getRepositoryStatus(repositoryPath, { signal: options.signal }),
-    currentHead(repositoryPath, options.signal),
-    inspectGitRemoteRouting(repositoryPath, initialStatus.branch, { signal: options.signal }),
-  ]);
+  const [finalStatus, finalHead, finalRouting] = await settleGitInspections(options.signal ?? new AbortController().signal,
+    (signal) => getRepositoryStatus(repositoryPath, { signal }),
+    (signal) => currentHead(repositoryPath, signal),
+    (signal) => inspectGitRemoteRouting(repositoryPath, initialStatus.branch, { signal }));
   const finalSourceRepositorySlug = finalRouting.target?.forge === "github" ? githubRepositorySlug(finalRouting.target.baseUrl) : null;
   const localChanged = initialHead !== finalHead
     || initialStatus.branch !== finalStatus.branch

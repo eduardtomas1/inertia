@@ -125,8 +125,10 @@ export async function semanticPageSnapshot(
       next: 1,
     };
     state.refs.clear();
-    const normalize = (value, maximum = 300) => String(value ?? "")
-      .replace(/\\s+/gu, " ").trim().slice(0, maximum);
+    const normalizeText = (value) => String(value ?? "")
+      .replace(/\\s+/gu, " ").trim();
+    const normalize = (value, maximum = 300) => normalizeText(value)
+      .slice(0, maximum);
     const visible = (element, rect) => {
       const style = getComputedStyle(element);
       return rect.width > 0 && rect.height > 0
@@ -154,6 +156,18 @@ export async function semanticPageSnapshot(
           || element.innerText
           || element.value,
         );
+    const pageText = () => {
+      let text = normalizeText(document.body?.innerText);
+      const redact = (candidate) => {
+        const sensitive = normalizeText(candidate);
+        if (sensitive) text = text.split(sensitive).join("[redacted]");
+      };
+      for (const input of document.querySelectorAll("input[type='password']")) {
+        for (const label of Array.from(input.labels || [])) redact(label.innerText);
+        redact(input.value);
+      }
+      return text.slice(0, ${MAX_PAGE_TEXT_CHARS});
+    };
     const selector = [
       "a[href]", "button", "input", "textarea", "select", "summary",
       "[role]", "[contenteditable='true']", "[tabindex]",
@@ -188,7 +202,7 @@ export async function semanticPageSnapshot(
       title: normalize(document.title, 300),
       url: location.href,
       viewport: { width: innerWidth, height: innerHeight, scrollX, scrollY },
-      text: normalize(document.body?.innerText, ${MAX_PAGE_TEXT_CHARS}),
+      text: pageText(),
       elements,
       truncated: elements.length >= ${MAX_SEMANTIC_ELEMENTS},
     };

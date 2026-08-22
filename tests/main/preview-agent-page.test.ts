@@ -64,7 +64,7 @@ describe("agent browser semantic snapshots", () => {
     const context = {
       document: {
         title: "Secure form",
-        body: { innerText: "Sign in" },
+        body: { innerText: `Sign in\n${secret}\nKeep this account secure` },
         querySelectorAll: () => [input],
         elementFromPoint: () => input,
       },
@@ -89,6 +89,7 @@ describe("agent browser semantic snapshots", () => {
     const serialized = await semanticPageSnapshot(contents as never);
     expect(serialized).not.toContain(secret);
     expect(JSON.parse(serialized)).toMatchObject({
+      text: "Sign in [redacted] Keep this account secure",
       elements: [{
         role: "input",
         name: "Password field",

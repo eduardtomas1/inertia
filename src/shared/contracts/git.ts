@@ -62,6 +62,7 @@ export interface GitPreMergeReviewThread {
   body: string;
   url: string | null;
   codex: boolean;
+  outdated: boolean;
 }
 
 export interface GitPreMergeFile {

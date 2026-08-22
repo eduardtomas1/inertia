@@ -57,7 +57,8 @@ function reviewThread(value: unknown): boolean {
   return strings(value, "id", "path", "author", "body")
     && (value.line === null || typeof value.line === "number" && Number.isFinite(value.line))
     && nullableString(value, "url")
-    && typeof value.codex === "boolean";
+    && typeof value.codex === "boolean"
+    && typeof value.outdated === "boolean";
 }
 
 function file(value: unknown): boolean {

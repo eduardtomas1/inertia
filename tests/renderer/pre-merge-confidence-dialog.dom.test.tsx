@@ -165,6 +165,31 @@ describe("PreMergeConfidenceDialog", () => {
     expect(screen.getByText(/older than one minute/iu)).toBeInTheDocument();
   });
 
+  it("invalidates a prior green result when exact-head refresh fails", async () => {
+    const run = vi.fn()
+      .mockResolvedValueOnce(result(confidence()))
+      .mockRejectedValueOnce(new Error("GitHub revalidation failed."));
+    render(<PreMergeConfidenceDialog
+      open
+      projectId="11111111-1111-4111-8111-111111111111"
+      repositoryPath="."
+      authorityRef="33333333-3333-4333-8333-333333333333"
+      run={run}
+      onClose={vi.fn()}
+    />);
+
+    const initial = await screen.findByRole("dialog", { name: "Exact-head green" });
+    fireEvent.click(within(initial).getByRole("button", {
+      name: "Refresh pre-merge evidence",
+    }));
+
+    expect(await screen.findByRole("heading", { name: "Evidence unavailable" }))
+      .toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Exact-head green" }))
+      .not.toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("GitHub revalidation failed.");
+  });
+
   it("keeps an unresolved Codex thread and skipped platform unmistakably blocking", async () => {
     const thread = {
       id: "thread-1",
@@ -174,6 +199,7 @@ describe("PreMergeConfidenceDialog", () => {
       body: "Revalidate the GitHub head after loading review threads.",
       url: "https://github.com/openai/codex/pull/42#discussion_r1",
       codex: true,
+      outdated: true,
     } as const;
     const openExternal = vi.fn(async () => undefined);
     Object.defineProperty(window, "inertia", {
@@ -208,6 +234,7 @@ describe("PreMergeConfidenceDialog", () => {
     expect(within(dialog).getByText("1 Codex · 0 other unresolved"))
       .toBeInTheDocument();
     expect(within(dialog).getByText(thread.body)).toBeInTheDocument();
+    expect(within(dialog).getByText("Outdated position")).toBeInTheDocument();
     expect(within(dialog).getAllByText("Skipped").length).toBeGreaterThan(0);
     expect(within(dialog).getAllByText("Missing").length).toBeGreaterThan(0);
     expect(within(dialog).getByText("1 actionable review thread remains."))

@@ -7860,6 +7860,12 @@ button.environment-row:focus-visible,
 }
 .pre-merge-thread-list li > div { display: flex; min-width: 0; align-items: center; gap: 7px; }
 .pre-merge-thread-list strong { font-size: max(var(--ui-font-secondary), 8.5px); }
+.pre-merge-thread-list em {
+  flex: 0 0 auto;
+  color: var(--warning);
+  font-size: max(var(--ui-font-micro), 7.5px);
+  font-style: normal;
+}
 .pre-merge-thread-list code {
   overflow: hidden;
   color: var(--text-muted);

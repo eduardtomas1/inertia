@@ -204,7 +204,7 @@ describe("GitHub pre-merge confidence", () => {
                   {
                     id: "actionable",
                     isResolved: false,
-                    isOutdated: false,
+                    isOutdated: true,
                     path: "src/current.ts",
                     line: 12,
                     comments: { nodes: [{ author: { login: "chatgpt-codex-connector" }, body: "Revalidate the exact head.", url: "https://github.com/openai/codex/pull/7#discussion_r2" }] },
@@ -228,8 +228,26 @@ describe("GitHub pre-merge confidence", () => {
         path: "src/current.ts",
         line: 12,
         url: "https://github.com/openai/codex/pull/7#discussion_r2",
+        outdated: true,
       }),
     ]);
+  });
+
+  it("rejects malformed review-thread collections instead of treating them as empty", () => {
+    const malformed = JSON.stringify({
+      data: { repository: { pullRequest: {
+        number: 7,
+        headRefOid: "b".repeat(40),
+        updatedAt: "2026-08-22T15:00:00Z",
+        reviewThreads: { pageInfo: { hasNextPage: false } },
+      } } },
+    });
+
+    expect(() => gitHubPreMergeTestSupport.parseReviewThreads(
+      malformed,
+      "https://github.com/openai/codex",
+      7,
+    )).toThrowError("GitHub returned incomplete review evidence.");
   });
 
   it("treats a full bounded check page as truncated", () => {

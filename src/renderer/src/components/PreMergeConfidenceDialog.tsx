@@ -184,6 +184,7 @@ export function PreMergeConfidenceDialog({
       }
     } catch (reason) {
       if (revision === requestRevision.current) {
+        setConfidence(null);
         setError(reason instanceof Error
           ? reason.message
           : "Pre-merge evidence could not be loaded.");
@@ -361,7 +362,11 @@ export function PreMergeConfidenceDialog({
                   <ul className="pre-merge-thread-list">
                     {confidence.reviewThreads.map((thread) => (
                       <li key={thread.id}>
-                        <div><strong>{thread.codex ? "Codex" : thread.author}</strong><code>{thread.path}{thread.line ? `:${thread.line}` : ""}</code></div>
+                        <div>
+                          <strong>{thread.codex ? "Codex" : thread.author}</strong>
+                          <code>{thread.path}{thread.line ? `:${thread.line}` : ""}</code>
+                          {thread.outdated && <em>Outdated position</em>}
+                        </div>
                         <p>{thread.body}</p>
                         {thread.url && <button type="button" onClick={() => void openExternal(thread.url!)}><ExternalLink size={11} />Open thread</button>}
                       </li>

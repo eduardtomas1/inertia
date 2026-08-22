@@ -325,9 +325,15 @@ function parseReviewThreads(
   if (!/^[0-9a-f]{40,64}$/u.test(head) || !record(pullRequest.reviewThreads)) {
     throw new GitError("operation-failed", "GitHub returned incomplete review evidence.");
   }
-  const nodes = Array.isArray(pullRequest.reviewThreads.nodes)
-    ? pullRequest.reviewThreads.nodes
-    : [];
+  const pageInfo = pullRequest.reviewThreads.pageInfo;
+  if (
+    !Array.isArray(pullRequest.reviewThreads.nodes)
+    || !record(pageInfo)
+    || typeof pageInfo.hasNextPage !== "boolean"
+  ) {
+    throw new GitError("operation-failed", "GitHub returned incomplete review evidence.");
+  }
+  const nodes = pullRequest.reviewThreads.nodes;
   const updatedAt = text(pullRequest.updatedAt).trim();
   if (!Number.isFinite(Date.parse(updatedAt))) {
     throw new GitError("operation-failed", "GitHub returned incomplete review evidence.");
@@ -347,7 +353,7 @@ function parseReviewThreads(
       incomplete = true;
       continue;
     }
-    if (node.isResolved || node.isOutdated) continue;
+    if (node.isResolved) continue;
     const path = safePath(node.path);
     const comments = record(node.comments) && Array.isArray(node.comments.nodes)
       ? node.comments.nodes.filter(record)
@@ -380,18 +386,16 @@ function parseReviewThreads(
       body,
       url: safeGitHubUrl(source.url, repositoryBaseUrl),
       codex: Boolean(codexComment),
+      outdated: node.isOutdated,
     });
   }
   threads.sort((left, right) => Number(right.codex) - Number(left.codex));
-  const pageInfo = record(pullRequest.reviewThreads.pageInfo)
-    ? pullRequest.reviewThreads.pageInfo
-    : null;
   return {
     head,
     updatedAt,
     threads,
     truncated: incomplete
-      || pageInfo?.hasNextPage === true
+      || pageInfo.hasNextPage
       || nodes.length > MAX_REVIEW_THREADS,
   };
 }

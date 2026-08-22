@@ -282,14 +282,13 @@ function visibleDirectoryEntries(
     [...pages].map(([path, page]) => [path, page.entries]),
   );
   if (!selectedPath || !isSafeWorkspaceEntryPath(selectedPath)) return entries;
-  const chain = directoryChain(selectedPath);
-  for (const [index, path] of chain.entries()) {
+  for (const path of directoryChain(selectedPath)) {
     const parent = workspaceParentPath(path);
     const page = pages.get(parent);
     if (page?.truncated && !page.entries.some((entry) => entry.path === path)) {
       entries.set(parent, [...page.entries, {
         path,
-        kind: index === chain.length - 1 ? "file" : "directory",
+        kind: path === selectedPath ? "file" : "directory",
       }]);
     }
   }
@@ -648,7 +647,7 @@ export function FilesPanel({
         ...[...expandedPathsRef.current].filter((path) =>
           rootDirectories.has(path.split("/")[0] ?? "")
         ),
-        ...(selectedParent ? directoryChain(selectedParent) : []),
+        ...directoryChain(selectedParent),
       ],
     );
     expandedPathsRef.current = retainedExpandedPaths;
@@ -665,7 +664,7 @@ export function FilesPanel({
   const updateQuery = useCallback((value: string): void => {
     searchGeneration.current += 1;
     setQuery(value);
-    if (!value.trim()) setSearch(EMPTY_SEARCH);
+    setSearch(EMPTY_SEARCH);
   }, []);
 
   useEffect(() => {
@@ -796,15 +795,12 @@ export function FilesPanel({
 
   useEffect(() => {
     if (previousSelectedPathRef.current === selectedPath) return;
+    if (searchActive && selectedPath && isSafeWorkspaceEntryPath(selectedPath)) {
+      if (search.entries === null) return;
+      if (!visiblePaths.has(selectedPath)) updateQuery("");
+    }
     previousSelectedPathRef.current = selectedPath;
-    if (
-      !query.trim()
-      || !selectedPath
-      || !isSafeWorkspaceEntryPath(selectedPath)
-      || visiblePaths.has(selectedPath)
-    ) return;
-    updateQuery("");
-  }, [query, selectedPath, updateQuery, visiblePaths]);
+  }, [search.entries, searchActive, selectedPath, updateQuery, visiblePaths]);
 
   useEffect(() => {
     if (!selectedPath || !isSafeWorkspaceEntryPath(selectedPath)) return;

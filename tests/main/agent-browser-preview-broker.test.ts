@@ -298,6 +298,37 @@ describe("agent-owned native Browser", () => {
     await expect(queued).resolves.toMatchObject({ ok: true });
   });
 
+  it("holds queued work until key-triggered main-frame navigation settles", async () => {
+    const contentsOffset = electronState.contents.length;
+    const { broker } = harness();
+    await broker.navigate({
+      ownerId: "primary",
+      contextId: conversationId,
+      url: "http://127.0.0.1:3000/form",
+    });
+    const contents = electronState.contents[contentsOffset]!;
+    const press = broker.perform(conversationId, { action: "press", key: "Enter" });
+    await vi.waitFor(() => expect(contents.sentInputs)
+      .toContainEqual(expect.objectContaining({ type: "char", keyCode: "\r" })));
+    contents.emit("did-start-navigation", {
+      isMainFrame: true,
+      isSameDocument: false,
+      url: "http://127.0.0.1:3000/results",
+    });
+    let pressSettled = false;
+    let queuedSettled = false;
+    void press.finally(() => { pressSettled = true; });
+    const queued = broker.perform(conversationId, { action: "tabs" })
+      .finally(() => { queuedSettled = true; });
+    await Promise.resolve();
+    expect(pressSettled).toBe(false);
+    expect(queuedSettled).toBe(false);
+
+    contents.emit("did-stop-loading");
+    await expect(press).resolves.toMatchObject({ ok: true });
+    await expect(queued).resolves.toMatchObject({ ok: true });
+  });
+
   it("omits page-controlled tab metadata from provider-visible state", async () => {
     const contentsOffset = electronState.contents.length;
     const { broker } = harness();

@@ -472,6 +472,44 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
     ),
     browserDestinationUrl,
   )).toBe(true);
+  expect(await app.electronApp.evaluate(
+    async ({ webContents }, url) => {
+      const contents = webContents.getAllWebContents().find(
+        (candidate) => candidate.getURL() === url,
+      );
+      return await contents?.executeJavaScript(`(() => {
+        const input = document.querySelector("input[name='query']");
+        if (!(input instanceof HTMLInputElement)) return false;
+        input.value = "inertia";
+        input.focus();
+        return document.activeElement === input;
+      })()`);
+    },
+    browserDestinationUrl,
+  )).toBe(true);
+  await expect(app.electronApp.evaluate(
+    async (_electron, conversationId) => {
+      const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
+        agentBrowser: (
+          id: string,
+          command: { action: "press"; key: "Enter" },
+        ) => Promise<{ ok: boolean }>;
+      };
+      return await runtime.agentBrowser(conversationId, {
+        action: "press",
+        key: "Enter",
+      });
+    },
+    primaryConversationId,
+  )).resolves.toMatchObject({ ok: true });
+  const keyDestinationUrl = `${app.previewUrl}agent-browser-key-destination?query=inertia`;
+  const currentPreviewUrls = await app.electronApp.evaluate(
+    ({ webContents }, origin) => webContents.getAllWebContents()
+      .map((contents) => contents.getURL())
+      .filter((url) => url.startsWith(origin)),
+    app.previewUrl,
+  );
+  expect(currentPreviewUrls).toContain(keyDestinationUrl);
   const browserPagesScreenshot = testInfo.outputPath("inertia-browser-pages.png");
   await page.screenshot({ animations: "disabled", path: browserPagesScreenshot });
   await testInfo.attach("inertia-browser-pages", {

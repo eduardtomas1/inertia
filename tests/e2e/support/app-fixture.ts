@@ -133,7 +133,23 @@ async function createPreviewServer(): Promise<{
         response.end(
           "<!doctype html><title>Agent browser destination</title>"
           + "<style>body{font-family:sans-serif;padding:40px}</style>"
-          + "<h1>Browser navigation settled</h1>",
+          + "<h1>Browser navigation settled</h1>"
+          + "<form action='/agent-browser-key-destination'>"
+          + "<label>Search destination <input name='query' aria-label='Search destination'></label>"
+          + "</form>",
+        );
+      }, 450);
+      return;
+    }
+    if (request.url?.startsWith("/agent-browser-key-destination")) {
+      setTimeout(() => {
+        response.writeHead(200, {
+          "Content-Type": "text/html",
+          "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",
+        });
+        response.end(
+          "<!doctype html><title>Agent browser key destination</title>"
+          + "<h1>Keyboard navigation settled</h1>",
         );
       }, 450);
       return;

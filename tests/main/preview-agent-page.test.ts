@@ -96,7 +96,7 @@ describe("agent browser semantic snapshots", () => {
       title: `Account ${secret}`,
       body: { innerText: `Sign in\n${secret}\nKeep this account secure` },
       activeElement: null as unknown,
-      querySelectorAll: (selector: string) => selector === "input[type='password']"
+      querySelectorAll: (selector: string) => selector === "input"
         ? [input]
         : [input, mirror],
       elementFromPoint: (_x: number, y: number) => y < 80 ? input : mirror,
@@ -197,6 +197,21 @@ describe("agent browser semantic snapshots", () => {
     mirror.innerText = changedSecret;
     await expect(locateAgentPageRef(contents as never, "e2"))
       .resolves.toMatchObject({ found: true, label: "[redacted]" });
+
+    input.value = secret;
+    input.labels[0]!.innerText = secret;
+    input.type = "text";
+    mirror.innerText = secret;
+    const revealedSnapshot = await semanticPageSnapshot(contents as never);
+    expect(revealedSnapshot).not.toContain(secret);
+    const revealed = JSON.parse(revealedSnapshot) as {
+      elements: Array<{ role: string; name: string; value: string }>;
+    };
+    expect(revealed.elements[0]).toMatchObject({
+      role: "input",
+      name: "Password field",
+      value: "[redacted]",
+    });
   });
 
   it("includes every valid contenteditable form in semantic refs", async () => {
@@ -214,7 +229,7 @@ describe("agent browser semantic snapshots", () => {
       }),
     }));
     const querySelectorAll = vi.fn(
-      (selector: string) => selector === "input[type='password']" ? [] : editors,
+      (selector: string) => selector === "input" ? [] : editors,
     );
     const context = {
       document: {
@@ -244,6 +259,55 @@ describe("agent browser semantic snapshots", () => {
       "plaintext-only",
     ]);
     expect(querySelectorAll).toHaveBeenCalledWith(expect.stringContaining("[contenteditable]"));
+  });
+
+  it("recognizes controls disabled by an ancestor fieldset", async () => {
+    const button = {
+      tagName: "BUTTON",
+      type: "button",
+      value: "",
+      disabled: false,
+      checked: undefined,
+      innerText: "Submit",
+      isConnected: true,
+      matches: (selector: string) => selector === ":disabled",
+      getAttribute: () => null,
+      getBoundingClientRect: () => ({
+        x: 20, y: 30, left: 20, top: 30,
+        right: 220, bottom: 70, width: 200, height: 40,
+      }),
+      contains: (candidate: unknown) => candidate === button,
+    };
+    const context = {
+      document: {
+        title: "Disabled controls",
+        body: { innerText: "Submit" },
+        activeElement: null,
+        querySelectorAll: (selector: string) => selector === "input" ? [] : [button],
+        elementFromPoint: () => button,
+      },
+      location: { href: "http://127.0.0.1:3000/disabled" },
+      URL,
+      encodeURIComponent,
+      innerWidth: 1_200,
+      innerHeight: 800,
+      scrollX: 0,
+      scrollY: 0,
+      getComputedStyle: () => ({ visibility: "visible", display: "block", opacity: "1" }),
+    };
+    const contents = {
+      executeJavaScriptInIsolatedWorld: vi.fn(async (
+        _worldId: number,
+        scripts: Array<{ code: string }>,
+      ) => runInNewContext(scripts[0]!.code, context)),
+    };
+
+    const snapshot = JSON.parse(await semanticPageSnapshot(contents as never)) as {
+      elements: Array<{ disabled: boolean }>;
+    };
+    expect(snapshot.elements[0]?.disabled).toBe(true);
+    await expect(locateAgentPageRef(contents as never, "e1"))
+      .resolves.toMatchObject({ found: true, disabled: true });
   });
 
   it("rejects editable refs whose focus handler redirects ownership", async () => {

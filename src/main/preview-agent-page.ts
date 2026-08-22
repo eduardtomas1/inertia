@@ -123,9 +123,11 @@ export async function semanticPageSnapshot(
     const state = owner.__inertiaAgentBrowser ??= {
       refs: new Map(),
       nodes: new WeakMap(),
+      passwordNodes: new WeakSet(),
       next: 1,
     };
     state.refs.clear();
+    const passwordNodes = state.passwordNodes ??= new WeakSet();
     const normalizeText = (value) => String(value ?? "")
       .replace(/\\s+/gu, " ").trim();
     const normalize = (value, maximum = 300) => normalizeText(value)
@@ -138,11 +140,19 @@ export async function semanticPageSnapshot(
         && style.visibility !== "hidden" && style.display !== "none"
         && Number(style.opacity || "1") > 0;
     };
-    const passwordField = (element) =>
-      element.tagName === "INPUT"
-      && String(element.type || "").toLowerCase() === "password";
+    for (const input of document.querySelectorAll?.("input") || []) {
+      if (String(input.type || "").toLowerCase() === "password") {
+        passwordNodes.add(input);
+      }
+    }
+    const passwordField = (element) => element.tagName === "INPUT"
+      && (
+        String(element.type || "").toLowerCase() === "password"
+        || passwordNodes.has(element)
+      );
     const sensitiveText = [];
-    for (const input of document.querySelectorAll?.("input[type='password']") || []) {
+    for (const input of document.querySelectorAll?.("input") || []) {
+      if (!passwordField(input)) continue;
       for (const label of Array.from(input.labels || [])) {
         sensitiveText.push(normalizeText(label.innerText));
       }
@@ -204,7 +214,11 @@ export async function semanticPageSnapshot(
         ref,
         role: roleFor(element),
         name: nameFor(element),
-        disabled: Boolean(element.disabled || element.getAttribute("aria-disabled") === "true"),
+        disabled: Boolean(
+          element.matches?.(":disabled")
+          || element.disabled
+          || element.getAttribute("aria-disabled") === "true"
+        ),
         checked: typeof element.checked === "boolean" ? element.checked : undefined,
         value: typeof element.value === "string"
           ? passwordField(element) ? "[redacted]" : redact(element.value, 500)
@@ -257,8 +271,16 @@ export async function locateAgentPageRef(
     if (!hit || (hit !== element && !element.contains(hit))) {
       return { found: false };
     }
-    const password = element.tagName === "INPUT"
-      && String(element.type || "").toLowerCase() === "password";
+    const passwordNodes = state.passwordNodes ??= new WeakSet();
+    for (const input of document.querySelectorAll?.("input") || []) {
+      if (String(input.type || "").toLowerCase() === "password") {
+        passwordNodes.add(input);
+      }
+    }
+    const password = element.tagName === "INPUT" && (
+      String(element.type || "").toLowerCase() === "password"
+      || passwordNodes.has(element)
+    );
     const inputType = element.tagName === "INPUT"
       ? String(element.type || "text").toLowerCase()
       : "";
@@ -269,7 +291,9 @@ export async function locateAgentPageRef(
         && ["text", "search", "email", "url", "tel", "password", "number"].includes(inputType))
     );
     const disabled = Boolean(
-      element.disabled || element.getAttribute("aria-disabled") === "true"
+      element.matches?.(":disabled")
+      || element.disabled
+      || element.getAttribute("aria-disabled") === "true"
     );
     if (${focus ? "true" : "false"} && editable && !disabled) {
       element.focus({ preventScroll: false });
@@ -288,7 +312,8 @@ export async function locateAgentPageRef(
     const normalizeText = (value) => String(value ?? "")
       .replace(/\\s+/gu, " ").trim();
     const sensitiveText = [];
-    for (const input of document.querySelectorAll?.("input[type='password']") || []) {
+    for (const input of document.querySelectorAll?.("input") || []) {
+      if (!passwordNodes.has(input)) continue;
       for (const label of Array.from(input.labels || [])) {
         sensitiveText.push(normalizeText(label.innerText));
       }

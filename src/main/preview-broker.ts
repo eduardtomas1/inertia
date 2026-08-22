@@ -60,7 +60,7 @@ const APP_SHORTCUT_KEYS = new Set(["b", "j", "k", "n"]);
 const MAX_BROWSER_TABS = 8;
 const PREVIEW_RENDERER_OPERATION_TIMEOUT_MS = 15_000;
 const PREVIEW_NAVIGATION_COMMAND_TIMEOUT_MS = 30_000;
-const PREVIEW_CLICK_NAVIGATION_GRACE_MS = 250;
+const PREVIEW_INPUT_NAVIGATION_GRACE_MS = 250;
 
 export function previewAppShortcutKey(input: Pick<
   Input,
@@ -313,7 +313,7 @@ export class PreviewBroker {
           case "type":
             return await this.#type(ownerId, slot, command.ref, command.text, command.replace, signal);
           case "press":
-            return this.#press(ownerId, slot, command.key, signal);
+            return await this.#press(ownerId, slot, command.key, signal);
           case "scroll":
             return this.#scroll(ownerId, slot, command.deltaY, signal);
           case "tabs":
@@ -925,7 +925,11 @@ export class PreviewBroker {
     }
     if (revalidated.disabled) return failure("invalid", "That page element is disabled.");
     stopForAbort(signal);
-    await this.#sendClickAndWait(contents, x, y, signal);
+    await this.#sendInputAndWait(contents, () => {
+      contents.sendInputEvent({ type: "mouseMove", x, y });
+      contents.sendInputEvent({ type: "mouseDown", x, y, button: "left", clickCount: 1 });
+      contents.sendInputEvent({ type: "mouseUp", x, y, button: "left", clickCount: 1 });
+    }, signal);
     this.#record(ownerId, slot, "click", `Agent clicked ${located.label || ref}`, { x, y });
     return this.#success(slot, this.#agentStateText(slot, { clicked: ref }));
   }
@@ -982,12 +986,22 @@ export class PreviewBroker {
     return this.#success(slot, JSON.stringify({ typed: ref, characters: text.length }));
   }
 
-  #press(ownerId: PreviewOwner, slot: PreviewSlot, key: string, signal?: AbortSignal): AgentBrowserResult {
+  async #press(
+    ownerId: PreviewOwner,
+    slot: PreviewSlot,
+    key: string,
+    signal?: AbortSignal,
+  ): Promise<AgentBrowserResult> {
     stopForAbort(signal);
     const contents = this.#active(slot).view.webContents;
     const keyCode = key === "Space" ? " " : key;
-    contents.sendInputEvent({ type: "keyDown", keyCode });
-    contents.sendInputEvent({ type: "keyUp", keyCode });
+    await this.#sendInputAndWait(contents, () => {
+      contents.sendInputEvent({ type: "keyDown", keyCode });
+      if (key === "Enter" || key === "Space") {
+        contents.sendInputEvent({ type: "char", keyCode: key === "Enter" ? "\r" : " " });
+      }
+      contents.sendInputEvent({ type: "keyUp", keyCode });
+    }, signal);
     this.#record(ownerId, slot, "press", `Agent pressed ${key}`);
     return this.#success(slot, JSON.stringify({ pressed: key }));
   }
@@ -1078,10 +1092,9 @@ export class PreviewBroker {
     });
   }
 
-  async #sendClickAndWait(
+  async #sendInputAndWait(
     contents: PreviewTab["view"]["webContents"],
-    x: number,
-    y: number,
+    dispatch: () => void,
     signal?: AbortSignal,
   ): Promise<void> {
     stopForAbort(signal);
@@ -1151,17 +1164,17 @@ export class PreviewBroker {
         isMainFrame: boolean,
       ): void => {
         if (navigationStarted && isMainFrame) {
-          finish(new Error(`The Browser page failed after the click: ${description}`));
+          finish(new Error(`The Browser page failed after the input: ${description}`));
         }
       };
       const onDestroyed = (): void => finish(
-        new Error("The active Browser tab was closed after the click."),
+        new Error("The active Browser tab was closed after the input."),
       );
       const onAbort = (): void => finish(new Error("browser-action-cancelled"), true);
-      const grace = setTimeout(() => finish(), PREVIEW_CLICK_NAVIGATION_GRACE_MS);
+      const grace = setTimeout(() => finish(), PREVIEW_INPUT_NAVIGATION_GRACE_MS);
       grace.unref();
       const timeout = setTimeout(() => finish(
-        new Error("The Browser page did not settle after the click."),
+        new Error("The Browser page did not settle after the input."),
         true,
       ), PREVIEW_NAVIGATION_COMMAND_TIMEOUT_MS);
       timeout.unref();
@@ -1173,14 +1186,12 @@ export class PreviewBroker {
       signal?.addEventListener("abort", onAbort, { once: true });
       try {
         if (contents.isDestroyed()) {
-          finish(new Error("The active Browser tab was closed before the click."));
+          finish(new Error("The active Browser tab was closed before the input."));
           return;
         }
-        contents.sendInputEvent({ type: "mouseMove", x, y });
-        contents.sendInputEvent({ type: "mouseDown", x, y, button: "left", clickCount: 1 });
-        contents.sendInputEvent({ type: "mouseUp", x, y, button: "left", clickCount: 1 });
+        dispatch();
       } catch (error) {
-        finish(error instanceof Error ? error : new Error("The Browser click failed."));
+        finish(error instanceof Error ? error : new Error("The Browser input failed."));
       }
     });
   }

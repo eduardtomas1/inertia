@@ -49,10 +49,10 @@ describe("agent browser semantic snapshots", () => {
       value: secret,
       disabled: false,
       checked: false,
-      labels: [],
+      labels: [{ innerText: secret }],
       innerText: "",
       isConnected: true,
-      getAttribute: () => null,
+      getAttribute: (name: string) => name === "aria-label" ? secret : null,
       getBoundingClientRect: () => ({
         x: 20, y: 30, left: 20, top: 30,
         right: 220, bottom: 70, width: 200, height: 40,
@@ -99,6 +99,7 @@ describe("agent browser semantic snapshots", () => {
     await expect(locateAgentPageRef(contents as never, "e1", true, true))
       .resolves.toMatchObject({
         found: true,
+        editable: true,
         label: "Password field",
         x: 120,
         y: 50,
@@ -151,5 +152,43 @@ describe("agent browser semantic snapshots", () => {
     await expect(locateAgentPageRef(contents as never, "e1"))
       .resolves.toMatchObject({ found: true, x: 5, y: 35 });
     expect(context.document.elementFromPoint).toHaveBeenLastCalledWith(5, 35);
+  });
+
+  it("reports non-editable refs without focusing them", async () => {
+    const focus = vi.fn();
+    const button = {
+      tagName: "BUTTON",
+      type: "button",
+      value: "",
+      disabled: false,
+      readOnly: false,
+      isContentEditable: false,
+      innerText: "Continue",
+      isConnected: true,
+      getAttribute: () => null,
+      getBoundingClientRect: () => ({
+        x: 20, y: 30, left: 20, top: 30,
+        right: 220, bottom: 70, width: 200, height: 40,
+      }),
+      contains: (candidate: unknown) => candidate === button,
+      focus,
+    };
+    const context = {
+      __inertiaAgentBrowser: { refs: new Map([["e1", button]]) },
+      document: { elementFromPoint: () => button },
+      innerWidth: 1_200,
+      innerHeight: 800,
+      getComputedStyle: () => ({ visibility: "visible", display: "block", opacity: "1" }),
+    };
+    const contents = {
+      executeJavaScriptInIsolatedWorld: vi.fn(async (
+        _worldId: number,
+        scripts: Array<{ code: string }>,
+      ) => runInNewContext(scripts[0]!.code, context)),
+    };
+
+    await expect(locateAgentPageRef(contents as never, "e1", true, true))
+      .resolves.toMatchObject({ found: true, editable: false, label: "Continue" });
+    expect(focus).not.toHaveBeenCalled();
   });
 });

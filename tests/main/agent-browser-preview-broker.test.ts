@@ -100,7 +100,7 @@ vi.mock("electron", () => {
 
 const pageTools = vi.hoisted(() => ({
   locateAgentPageRef: vi.fn(async () => ({
-    found: true, disabled: false, label: "Run checks", x: 42, y: 28,
+    found: true, disabled: false, editable: true, label: "Run checks", x: 42, y: 28,
   })),
   semanticPageSnapshot: vi.fn(async () => JSON.stringify({ title: "Local app", elements: [] })),
   showAgentPageCursor: vi.fn(async () => undefined),
@@ -268,8 +268,10 @@ describe("agent-owned native Browser", () => {
     const screenshotPromise = broker.perform(conversationId, { action: "screenshot" });
     await started;
     let activationSettled = false;
-    const activationPromise = broker.perform(conversationId, {
-      action: "tab-activate",
+    const activationPromise = broker.tab({
+      ownerId: "primary",
+      contextId: conversationId,
+      action: "activate",
       tabId: secondTabId,
     }).finally(() => { activationSettled = true; });
     await Promise.resolve();
@@ -287,10 +289,31 @@ describe("agent-owned native Browser", () => {
       expect(screenshot.state.activeTabId).toBe(firstTabId);
       expect(screenshot.state.activity?.tabId).toBe(firstTabId);
     }
-    await expect(activationPromise).resolves.toMatchObject({
-      ok: true,
-      state: { activeTabId: secondTabId },
+    await expect(activationPromise).resolves.toMatchObject({ activeTabId: secondTabId });
+  });
+
+  it("rejects typing into a non-editable semantic ref", async () => {
+    const { broker, children } = harness();
+    await broker.navigate({
+      ownerId: "primary",
+      contextId: conversationId,
+      url: "http://127.0.0.1:3000/",
     });
+    pageTools.locateAgentPageRef.mockResolvedValueOnce({
+      found: true, disabled: false, editable: false,
+      label: "Continue", x: 42, y: 28,
+    });
+    const cursorCalls = pageTools.showAgentPageCursor.mock.calls.length;
+
+    await expect(broker.perform(conversationId, {
+      action: "type", ref: "e1", text: "not delivered", replace: true,
+    })).resolves.toMatchObject({
+      ok: false,
+      code: "invalid",
+      message: "That page element does not accept text input.",
+    });
+    expect(children[0]!.webContents.insertedText).toEqual([]);
+    expect(pageTools.showAgentPageCursor).toHaveBeenCalledTimes(cursorCalls);
   });
 
   it("keeps maximum tab state valid within the broker text boundary", async () => {

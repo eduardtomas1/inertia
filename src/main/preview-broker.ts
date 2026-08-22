@@ -198,32 +198,37 @@ export class PreviewBroker {
     const ownerId = previewOwner(request.ownerId);
     const contextId = previewContext(request.contextId);
     const slot = this.#ensure(ownerId, contextId);
-    if (request.action === "open") {
-      const target = request.url === undefined
-        ? null
-        : previewNavigationTarget(request.url);
-      if (target?.kind === "external") {
-        throw new Error("Only local development pages can open in Inertia Browser tabs.");
+    return await this.#serializeSlotAction(slot, async () => {
+      if (this.#ownedSlot(ownerId, contextId) !== slot) {
+        return this.#state(ownerId, contextId);
       }
-      const tab = this.#openTab(ownerId, slot);
-      this.#activateTab(ownerId, slot, tab.id);
-      if (target?.kind === "embed") {
-        try {
-          await tab.view.webContents.loadURL(target.url.toString());
-        } catch (error) {
-          this.#closeTab(ownerId, slot, tab.id);
-          throw error;
+      if (request.action === "open") {
+        const target = request.url === undefined
+          ? null
+          : previewNavigationTarget(request.url);
+        if (target?.kind === "external") {
+          throw new Error("Only local development pages can open in Inertia Browser tabs.");
         }
+        const tab = this.#openTab(ownerId, slot);
+        this.#activateTab(ownerId, slot, tab.id);
+        if (target?.kind === "embed") {
+          try {
+            await tab.view.webContents.loadURL(target.url.toString());
+          } catch (error) {
+            this.#closeTab(ownerId, slot, tab.id);
+            throw error;
+          }
+        }
+      } else if (request.action === "activate") {
+        this.#activateTab(ownerId, slot, previewTabId(request.tabId));
+      } else if (request.action === "close") {
+        this.#closeTab(ownerId, slot, previewTabId(request.tabId));
+      } else {
+        throw new Error("Invalid preview tab action");
       }
-    } else if (request.action === "activate") {
-      this.#activateTab(ownerId, slot, previewTabId(request.tabId));
-    } else if (request.action === "close") {
-      this.#closeTab(ownerId, slot, previewTabId(request.tabId));
-    } else {
-      throw new Error("Invalid preview tab action");
-    }
-    this.#publish(ownerId, contextId);
-    return this.#state(ownerId, contextId);
+      this.#publish(ownerId, contextId);
+      return this.#state(ownerId, contextId);
+    });
   }
 
   async perform(
@@ -241,12 +246,7 @@ export class PreviewBroker {
         );
       }
       const [ownerId, slot] = owned;
-      const previous = slot.agentQueue;
-      let release = (): void => undefined;
-      const current = new Promise<void>((resolve) => { release = resolve; });
-      slot.agentQueue = previous.then(() => current);
-      await previous;
-      try {
+      return await this.#serializeSlotAction(slot, async () => {
         if (this.#ownedSlot(ownerId, contextId) !== slot) {
           return failure("unavailable", "This chat's Inertia Browser was closed.");
         }
@@ -285,9 +285,7 @@ export class PreviewBroker {
             this.#record(ownerId, slot, "tab-close", "Agent closed a page");
             return this.#success(slot, this.#agentStateText(slot));
         }
-      } finally {
-        release();
-      }
+      });
     } catch (error) {
       return error instanceof Error && error.message === "browser-action-cancelled"
         ? failure("cancelled", "The browser action was cancelled.")
@@ -374,6 +372,22 @@ export class PreviewBroker {
       void browserSession?.clearStorageData().catch(() => {
         // The non-persistent session is destroyed with its owning slot.
       });
+    }
+  }
+
+  async #serializeSlotAction<Result>(
+    slot: PreviewSlot,
+    action: () => Result | Promise<Result>,
+  ): Promise<Result> {
+    const previous = slot.agentQueue;
+    let release = (): void => undefined;
+    const current = new Promise<void>((resolve) => { release = resolve; });
+    slot.agentQueue = previous.then(() => current);
+    await previous;
+    try {
+      return await action();
+    } finally {
+      release();
     }
   }
 
@@ -762,6 +776,7 @@ export class PreviewBroker {
       return failure("not-found", "That page element is stale. Inspect the page again for current refs.");
     }
     if (located.disabled) return failure("invalid", "That page element is disabled.");
+    if (!located.editable) return failure("invalid", "That page element does not accept text input.");
     stopForAbort(signal);
     await showAgentPageCursor(contents, located.x, located.y, `Agent typing · ${located.label || ref}`);
     stopForAbort(signal);

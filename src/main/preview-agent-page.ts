@@ -9,6 +9,7 @@ const MAX_PAGE_TEXT_CHARS = 12_000;
 export interface PreviewAgentTarget {
   found: boolean;
   disabled?: boolean;
+  editable?: boolean;
   label?: string;
   x?: number;
   y?: number;
@@ -98,6 +99,7 @@ function target(value: unknown): PreviewAgentTarget {
   return {
     found: true,
     disabled: value.disabled === true,
+    editable: value.editable === true,
     label: boundedString(value.label, 300),
     ...(x === undefined ? {} : { x }),
     ...(y === undefined ? {} : { y }),
@@ -142,14 +144,16 @@ export async function semanticPageSnapshot(
     const passwordField = (element) =>
       element.tagName === "INPUT"
       && String(element.type || "").toLowerCase() === "password";
-    const nameFor = (element) => normalize(
-      element.getAttribute("aria-label")
-      || element.getAttribute("title")
-      || element.getAttribute("placeholder")
-      || (element.labels && element.labels[0]?.innerText)
-      || element.innerText
-      || (passwordField(element) ? "Password field" : element.value),
-    );
+    const nameFor = (element) => passwordField(element)
+      ? "Password field"
+      : normalize(
+          element.getAttribute("aria-label")
+          || element.getAttribute("title")
+          || element.getAttribute("placeholder")
+          || (element.labels && element.labels[0]?.innerText)
+          || element.innerText
+          || element.value,
+        );
     const selector = [
       "a[href]", "button", "input", "textarea", "select", "summary",
       "[role]", "[contenteditable='true']", "[tabindex]",
@@ -219,7 +223,18 @@ export async function locateAgentPageRef(
     if (!hit || (hit !== element && !element.contains(hit))) {
       return { found: false };
     }
-    if (${focus ? "true" : "false"}) {
+    const password = element.tagName === "INPUT"
+      && String(element.type || "").toLowerCase() === "password";
+    const inputType = element.tagName === "INPUT"
+      ? String(element.type || "text").toLowerCase()
+      : "";
+    const editable = !element.readOnly && (
+      element.tagName === "TEXTAREA"
+      || element.isContentEditable
+      || (element.tagName === "INPUT"
+        && ["text", "search", "email", "url", "tel", "password", "number"].includes(inputType))
+    );
+    if (${focus ? "true" : "false"} && editable) {
       element.focus({ preventScroll: false });
       if (${replace ? "true" : "false"}) {
         if (typeof element.select === "function") element.select();
@@ -232,12 +247,13 @@ export async function locateAgentPageRef(
     return {
       found: true,
       disabled: Boolean(element.disabled || element.getAttribute("aria-disabled") === "true"),
+      editable,
       label: String(
-        element.getAttribute("aria-label")
-        || element.innerText
-        || (element.tagName === "INPUT" && String(element.type || "").toLowerCase() === "password"
+        password
           ? "Password field"
-          : element.value)
+          : element.getAttribute("aria-label")
+            || element.innerText
+            || element.value
         || "element"
       )
         .replace(/\\s+/gu, " ").trim().slice(0, 300),

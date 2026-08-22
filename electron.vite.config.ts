@@ -34,6 +34,7 @@ export default defineConfig({
         input: {
           index: resolve("src/preload/index.ts"),
           "detached-chat": resolve("src/preload/detached-chat.ts"),
+          "preview-agent-privacy": resolve("src/preload/preview-agent-privacy.ts"),
         },
         output: {
           format: "cjs",

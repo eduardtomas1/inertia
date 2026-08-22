@@ -14,7 +14,7 @@ import type { AgentApprovalDecision } from "../../src/server/provider/interactio
 
 const roots: string[] = [];
 
-async function runtime() {
+async function runtime(agentBrowser?: { perform: ReturnType<typeof vi.fn> }) {
   const root = await mkdtemp(join(tmpdir(), "inertia-agent-thread-manager-"));
   roots.push(root);
   const workspace = join(root, "workspace");
@@ -143,6 +143,7 @@ async function runtime() {
     turns: turns as never,
     providerTerminalResumes,
     contextRequests,
+    agentBrowser: agentBrowser as never,
     providerInfo: () => [{
       id: "codex",
       canRun: true,
@@ -212,10 +213,9 @@ afterEach(async () => {
 
 describe("AgentThreadManager", () => {
   it("exposes the same real host bridge to every audited provider harness", async () => {
-    const { manager, source, sourceTurn, store } = await runtime();
+    const browser = { perform: vi.fn() };
+    const { manager, source, sourceTurn, store } = await runtime(browser);
     try {
-      expect(manager.bridgeFor({ conversation: source, turn: sourceTurn }))
-        .toBeDefined();
       for (const harnessId of [
         "codex-app-server",
         "claude-agent-sdk",
@@ -223,10 +223,19 @@ describe("AgentThreadManager", () => {
         "kimi-acp",
         "opencode-sdk",
       ] as const) {
-        expect(manager.bridgeFor({
+        const bridge = manager.bridgeFor({
           conversation: source,
           turn: { ...sourceTurn, harnessId },
-        })).toBeDefined();
+        });
+        expect(bridge?.definitions.map(({ name }) => name)).toEqual(
+          expect.arrayContaining([
+            "inertia_browser_snapshot",
+            "inertia_browser_screenshot",
+            "inertia_browser_navigate",
+            "inertia_browser_interact",
+            "inertia_browser_tabs",
+          ]),
+        );
       }
     } finally {
       store.close();

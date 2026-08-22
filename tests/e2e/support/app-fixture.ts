@@ -112,6 +112,251 @@ async function createPreviewServer(): Promise<{
       }, 450);
       return;
     }
+    if (request.url === "/agent-browser-page") {
+      response.writeHead(200, {
+        "Content-Type": "text/html",
+        "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'",
+      });
+      response.end(
+        "<!doctype html><title>Agent browser source</title>"
+        + "<style>body{font-family:sans-serif;padding:40px}</style>"
+        + "<a href='/agent-browser-destination'>Continue in Browser</a>"
+        + "<button id='hover-target' type='button'>Hover-moving action</button>"
+        + "<button id='hover-decoy' type='button' style='display:none'>Hover decoy</button>"
+        + "<div id='outer-action' role='button' aria-label='Outer nested action' "
+        + "style='display:flex;width:240px;height:56px;align-items:center;justify-content:center'>"
+        + "<button id='inner-action' type='button'>Inner nested action</button></div>"
+        + "<div style='display:flex'><div id='opacity-parent'><button id='opacity-action' type='button'>Temporarily visible action</button></div>"
+        + "<div aria-disabled='true'><button id='aria-disabled-action' type='button'>Inherited disabled action</button></div></div>"
+        + "<script>const target=document.querySelector('#hover-target');let hoverOffset=0;"
+        + "const decoy=document.querySelector('#hover-decoy');"
+        + "target.addEventListener('mousemove',()=>{const rect=target.getBoundingClientRect();"
+        + "decoy.style.cssText=`display:block;position:fixed;left:${rect.left}px;top:${rect.top}px;"
+        + "width:${rect.width}px;height:${rect.height}px`;hoverOffset=hoverOffset===0?240:0;"
+        + "target.style.transform=`translateX(${hoverOffset}px)`});"
+        + "target.addEventListener('click',()=>{window.__hoverTargetClicked=true});"
+        + "decoy.addEventListener('click',()=>{window.__hoverDecoyClicked=true});"
+        + "document.querySelector('#outer-action').addEventListener('click',()=>{window.__outerActionClicked=true});"
+        + "document.querySelector('#inner-action').addEventListener('click',()=>{window.__innerActionClicked=true});"
+        + "document.querySelector('#opacity-action').addEventListener('click',()=>{window.__opacityActionClicked=true});"
+        + "document.querySelector('#aria-disabled-action').addEventListener('click',()=>{window.__ariaDisabledActionClicked=true})</script>",
+      );
+      return;
+    }
+    if (request.url === "/agent-browser-privacy-start") {
+      const secret = "document-start-password-sentinel";
+      response.writeHead(200, {
+        "Content-Type": "text/html",
+        "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline'",
+      });
+      response.end(
+        "<!doctype html><html><head><title>Privacy preload probe</title>"
+        + "<script>const input=document.createElement('input');"
+        + "input.type='password';document.documentElement.append(input);"
+        + `input.value=${JSON.stringify(secret)};input.type='text';input.remove();`
+        + `document.title=${JSON.stringify(secret)}</script></head>`
+        + `<body>${secret}</body></html>`,
+      );
+      return;
+    }
+    if (request.url === "/agent-browser-nested-privacy-start") {
+      const secret = "nested-password-sentinel";
+      response.writeHead(200, {
+        "Content-Type": "text/html",
+        "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline'; frame-src 'self'",
+      });
+      response.end(
+        "<!doctype html><title>Nested privacy probe</title>"
+        + "<div id='closed-host'></div>"
+        + "<iframe title='Credential frame' src='/agent-browser-nested-privacy-frame'></iframe>"
+        + "<script>const root=document.querySelector('#closed-host').attachShadow({mode:'closed'});"
+        + "const input=document.createElement('input');input.type='password';"
+        + `input.value=${JSON.stringify(secret)};root.append(input)</script>`,
+      );
+      return;
+    }
+    if (request.url === "/agent-browser-nested-privacy-frame") {
+      const secret = "nested-password-sentinel";
+      response.writeHead(200, {
+        "Content-Type": "text/html",
+        "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline'",
+      });
+      response.end(
+        "<!doctype html><title>Nested credential frame</title>"
+        + "<input id='credential' type='password'>"
+        + `<script>document.querySelector('#credential').value=${JSON.stringify(secret)}</script>`,
+      );
+      return;
+    }
+    if (request.url === "/agent-browser-frame-lifetime-privacy") {
+      const secret = "removed-frame-password-sentinel";
+      response.writeHead(200, {
+        "Content-Type": "text/html",
+        "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline'",
+      });
+      response.end(
+        "<!doctype html><title>Removed frame privacy probe</title><body></body>"
+        + "<script>const frame=document.createElement('iframe');document.body.append(frame);"
+        + "const input=frame.contentDocument.createElement('input');input.type='password';"
+        + `input.value=${JSON.stringify(secret)};frame.contentDocument.body.append(input);`
+        + "const mirror=document.createElement('p');mirror.textContent=input.value;"
+        + "document.body.append(mirror);frame.remove()</script>",
+      );
+      return;
+    }
+    if (request.url === "/agent-browser-shadow-lifetime-privacy") {
+      const secret = "removed-shadow-password-sentinel";
+      response.writeHead(200, {
+        "Content-Type": "text/html",
+        "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline'",
+      });
+      response.end(
+        "<!doctype html><title>Removed shadow privacy probe</title><body></body>"
+        + "<script>const host=document.createElement('div');document.body.append(host);"
+        + "const root=host.attachShadow({mode:'closed'});const input=document.createElement('input');"
+        + `input.type='password';input.value=${JSON.stringify(secret)};root.append(input);`
+        + "const mirror=document.createElement('p');mirror.textContent=input.value;"
+        + "document.body.append(mirror);host.remove()</script>",
+      );
+      return;
+    }
+    if (request.url === "/agent-browser-declarative-shadow-privacy") {
+      response.writeHead(200, {
+        "Content-Type": "text/html",
+        "Content-Security-Policy": "default-src 'none'; frame-src 'self'",
+      });
+      response.end(
+        "<!doctype html><title>Declarative shadow privacy probe</title><body>"
+        + "<div><template shadowrootmode='closed'>"
+        + "<iframe src='/agent-browser-declarative-shadow-frame'></iframe>"
+        + "</template></div>",
+      );
+      return;
+    }
+    if (request.url === "/agent-browser-declarative-closed-privacy") {
+      const secret = "declarative-closed-password-sentinel";
+      response.writeHead(200, {
+        "Content-Type": "text/html",
+        "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",
+      });
+      response.end(
+        "<!doctype html><title>Closed declarative privacy probe</title><body>"
+        + "<div><template shadowrootmode='closed'><style>p{font:20px sans-serif}</style>"
+        + `<p>${secret}</p></template></div>`,
+      );
+      return;
+    }
+    if (request.url === "/agent-browser-declarative-detached-privacy") {
+      const secret = "detached-declarative-password-sentinel";
+      response.writeHead(200, {
+        "Content-Type": "text/html",
+        "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline'",
+      });
+      response.end(
+        "<!doctype html><title>Detached declarative privacy probe</title><body>"
+        + "<script>const host=document.createElement('div');"
+        + "host.setHTML(\"<template shadowrootmode='closed'><p>private</p></template>\");"
+        + "document.body.append(host);const mirror=document.createElement('p');"
+        + `mirror.textContent=${JSON.stringify(secret)};document.body.replaceChildren(mirror)</script>`,
+      );
+      return;
+    }
+    if (request.url === "/agent-browser-declarative-shadow-frame") {
+      const secret = "declarative-shadow-password-sentinel";
+      response.writeHead(200, {
+        "Content-Type": "text/html",
+        "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline'",
+      });
+      response.end(
+        "<!doctype html><input id='credential' type='password'>"
+        + "<script>const input=document.querySelector('#credential');"
+        + `input.value=${JSON.stringify(secret)};`
+        + "const mirror=parent.document.createElement('p');mirror.textContent=input.value;"
+        + "parent.document.body.append(mirror);frameElement.getRootNode().host.remove()</script>",
+      );
+      return;
+    }
+    if (request.url === "/agent-browser-destination") {
+      setTimeout(() => {
+        response.writeHead(200, {
+          "Content-Type": "text/html",
+          "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",
+        });
+        response.end(
+          "<!doctype html><title>Agent browser destination</title>"
+          + "<style>body{font-family:sans-serif;padding:40px}</style>"
+          + "<h1>Browser navigation settled</h1>"
+          + "<form action='/agent-browser-key-destination'>"
+          + "<label>Search destination <input name='query' aria-label='Search destination'></label>"
+          + "</form>",
+        );
+      }, 450);
+      return;
+    }
+    if (request.url?.startsWith("/agent-browser-key-destination")) {
+      setTimeout(() => {
+        response.writeHead(200, {
+          "Content-Type": "text/html",
+          "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'",
+        });
+        response.end(
+          "<!doctype html><title>Agent browser key destination</title>"
+          + "<h1>Keyboard navigation settled</h1>"
+          + "<label>Type destination <input name='type-query' aria-label='Type destination'></label>"
+          + "<script>document.querySelector('[name=type-query]').addEventListener('input',event=>{"
+          + "location.href='/agent-browser-type-destination?query='"
+          + "+encodeURIComponent(event.currentTarget.value)})</script>",
+        );
+      }, 450);
+      return;
+    }
+    if (request.url?.startsWith("/agent-browser-type-destination")) {
+      setTimeout(() => {
+        response.writeHead(200, {
+          "Content-Type": "text/html",
+          "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline'",
+        });
+        response.end(
+          "<!doctype html><title>Agent browser type destination</title>"
+          + "<h1>Typing navigation settled</h1>"
+          + "<label>Microtask focus target <input aria-label='Microtask focus target'></label>"
+          + "<label>Microtask focus decoy <input aria-label='Microtask focus decoy'></label>"
+          + "<div contenteditable='true' aria-label='Nested focus target'>"
+          + "<input aria-label='Nested focus decoy'></div>"
+          + "<label>Focus navigation <input aria-label='Focus navigation'></label>"
+          + "<label>Private upload <input type='file' aria-label='Private upload'></label>"
+          + "<button type='button'>Choose through page handler</button>"
+          + "<script>document.querySelector('[aria-label=\"Focus navigation\"]')"
+          + ".addEventListener('focus',()=>{location.href='/agent-browser-focus-destination'});"
+          + "document.querySelector('[aria-label=\"Microtask focus target\"]')"
+          + ".addEventListener('focus',()=>queueMicrotask(()=>document.querySelector("
+          + "'[aria-label=\"Microtask focus decoy\"]')?.focus()));"
+          + "document.querySelector('[aria-label=\"Nested focus target\"]')"
+          + ".addEventListener('focus',()=>queueMicrotask(()=>document.querySelector("
+          + "'[aria-label=\"Nested focus decoy\"]')?.focus()));"
+          + "document.querySelector('button').addEventListener('click',()=>{"
+          + "setTimeout(()=>{const input=document.querySelector('input[type=file]');"
+          + "window.__delayedPickerInvoked=true;"
+          + "try{if(typeof input.showPicker==='function')input.showPicker();else input.click()}"
+          + "catch(error){window.__delayedPickerRejected=String(error)}"
+          + "},600)})</script>",
+        );
+      }, 450);
+      return;
+    }
+    if (request.url === "/agent-browser-focus-destination") {
+      setTimeout(() => {
+        response.writeHead(200, {
+          "Content-Type": "text/html",
+          "Content-Security-Policy": "default-src 'none'",
+        });
+        response.end(
+          "<!doctype html><title>Agent browser focus destination</title>"
+          + "<h1>Focus navigation settled</h1>",
+        );
+      }, 450);
+      return;
+    }
     response.writeHead(200, {
       "Content-Type": "text/html",
       "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",

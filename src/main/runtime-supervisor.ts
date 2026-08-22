@@ -155,6 +155,7 @@ export class RuntimeSupervisor {
         options.conversationAttachmentStoreRunner,
       conversationAttachmentStoreAuthority:
         options.conversationAttachmentStoreAuthority,
+      agentBrowserBroker: options.agentBrowserBroker,
       accepts: (record) => this.acceptsBrokerRequests(record),
       post: (record, command) => this.post(record.child, command),
     });
@@ -573,6 +574,7 @@ export class RuntimeSupervisor {
       reportedFailure: null,
       credentialRequestIds: new Set(),
       secureFileRequestIds: new Set(),
+      agentBrowserRequestIds: new Set(),
       attachmentRequestIds: new Set(),
       attachmentClaimCounts: new Map(),
       deferredAttachmentReleaseIds: new Set(),
@@ -620,7 +622,6 @@ export class RuntimeSupervisor {
     }, this.startupTimeoutMs);
     this.emitState();
   }
-
   private handleMessage(record: RuntimeProcessRecord, message: unknown): void {
     if (this.current !== record) return;
     const event = parseRuntimeWorkerEvent(message);
@@ -637,12 +638,11 @@ export class RuntimeSupervisor {
       this.handleCredentialRequest(record, event);
       return;
     }
-    if (event.type === "runtime.secure-file-request") {
-      this.secureFiles.handle(record, event);
-      return;
-    }
     if (
-      event.type === "runtime.conversation-attachment-store-request"
+      event.type === "runtime.secure-file-request"
+      || event.type === "runtime.agent-browser-request"
+      || event.type === "runtime.agent-browser-cancel"
+      || event.type === "runtime.conversation-attachment-store-request"
       || event.type === "runtime.conversation-attachment-store-cancel"
     ) {
       this.secureFiles.handle(record, event);

@@ -50,4 +50,38 @@ describe("preview panel URL routing", () => {
     expect(html).toContain('aria-label="Open in system browser"');
     expect(html).toContain("localhost:3000 or https://example.com");
   });
+
+  it("renders bounded browser pages and visible agent activity", () => {
+    const activeTabId = "11111111-1111-4111-8111-111111111111";
+    const html = renderToStaticMarkup(createElement(PreviewPanel, {
+      owner: "primary",
+      url: "http://127.0.0.1:4173/",
+      tabs: [{
+        id: activeTabId,
+        title: "Local dashboard",
+        url: "http://127.0.0.1:4173/",
+        loading: false,
+      }],
+      activeTabId,
+      agentActivity: {
+        action: "click",
+        label: "Agent clicked Run checks",
+        tabId: activeTabId,
+        at: "2026-08-22T08:00:00.000Z",
+      },
+      onNavigate: () => undefined,
+      onOpenExternal: () => undefined,
+      onOpenTab: () => undefined,
+      onActivateTab: () => undefined,
+      onCloseTab: () => undefined,
+    }));
+
+    expect(html).toContain('aria-label="Inertia Browser pages"');
+    expect(html).toContain('role="tablist"');
+    expect(html).toContain('aria-selected="true"');
+    expect(html).toContain("Local dashboard");
+    expect(html).toContain("Agent clicked Run checks");
+    expect(html).toContain('aria-label="Open browser page"');
+    expect(html).toContain('aria-label="Close Local dashboard"');
+  });
 });

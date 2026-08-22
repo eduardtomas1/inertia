@@ -2,14 +2,13 @@ import { expect, test, type Locator } from "@playwright/test";
 import { join } from "node:path";
 
 import { RuntimeStore } from "../../src/server/database";
-import {
-  createAppFixture,
-  type AppFixture,
-} from "./support/app-fixture";
+import { createAppFixture, type AppFixture } from "./support/app-fixture";
+import { expectDocumentStartPrivacyGuard, expectFocusNavigationSettlement, expectHoverRetargetingGuard, expectMicrotaskFocusTheftBlocked, expectSemanticClickBoundaries } from "./support/agent-browser-security";
 import { selectWorkspaceTool } from "./support/workspace-tools";
 
 let app!: AppFixture;
 let page!: AppFixture["page"];
+let primaryConversationId = "";
 
 test.beforeAll(async () => {
   app = await createAppFixture({
@@ -27,6 +26,7 @@ test.beforeAll(async () => {
         const pane = conversation.title.endsWith("companion")
           ? "secondary"
           : "primary";
+        if (pane === "primary") primaryConversationId = conversation.id;
         store.createMessage(
           conversation.id,
           `\`\`\`ts\nconst pane = "${pane}";\n\`\`\``,
@@ -375,6 +375,11 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
         contents.getURL() === url)),
     [primaryPreviewUrl, secondaryPreviewUrl],
   )).toBe(true);
+  await expect.poll(() => app.electronApp.evaluate(
+    ({ webContents }, urls) => urls.map((url) => webContents.getAllWebContents()
+      .find((contents) => contents.getURL() === url)?.navigationHistory.canGoBack()),
+    [primaryPreviewUrl, secondaryPreviewUrl],
+  )).toEqual([false, false]);
   const previewStorageIsolation = await app.electronApp.evaluate(
     async ({ BrowserWindow }, urls) => {
       const window = BrowserWindow.getAllWindows()[0];
@@ -411,6 +416,232 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
     cookie: "",
   });
 
+  await primaryPreview.getByRole("button", { name: "Open browser page" }).click();
+  const browserTabs = primaryPreview.locator(".preview-tabs").getByRole("tab");
+  await expect(browserTabs).toHaveCount(2);
+  const secondPrimaryPreviewUrl = `${app.previewUrl}agent-browser-page`;
+  await primaryPreview.getByRole("textbox", {
+    name: "Preview address",
+  }).fill(secondPrimaryPreviewUrl);
+  await primaryPreview.getByRole("button", { name: "Go", exact: true }).click();
+  await expect.poll(() => app.electronApp.evaluate(
+    ({ webContents }, url) => webContents.getAllWebContents().some(
+      (contents) => contents.getURL() === url,
+    ),
+    secondPrimaryPreviewUrl,
+  )).toBe(true);
+  await expect(primaryPreview.locator(".preview-tab-shell.active"))
+    .toContainText("Agent browser source");
+  const semanticSnapshot = await app.electronApp.evaluate(
+    async (_electron, conversationId) => {
+      const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
+        agentBrowser: (
+          id: string,
+          command: { action: "snapshot" },
+        ) => Promise<{ ok: boolean; text?: string }>;
+      };
+      return await runtime.agentBrowser(conversationId, { action: "snapshot" });
+    },
+    primaryConversationId,
+  );
+  expect(semanticSnapshot.ok).toBe(true);
+  const semanticElements = JSON.parse(semanticSnapshot.text ?? "{}") as {
+    elements?: Array<{ ref?: string; name?: string }>;
+  };
+  const hoverRef = semanticElements.elements?.find((element) => element.name === "Hover-moving action")?.ref;
+  expect(hoverRef).toMatch(/^e\d+$/u);
+  await expectHoverRetargetingGuard(app, primaryConversationId, secondPrimaryPreviewUrl, hoverRef!);
+  await expectSemanticClickBoundaries(app, primaryConversationId, secondPrimaryPreviewUrl);
+  const navigationRef = semanticElements.elements?.find(
+    (element) => element.name === "Continue in Browser",
+  )?.ref;
+  expect(navigationRef).toMatch(/^e\d+$/u);
+  const clickResult = await app.electronApp.evaluate(
+    async (_electron, request) => {
+      const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
+        agentBrowser: (
+          id: string,
+          command: { action: "click"; ref: string },
+        ) => Promise<{ ok: boolean }>;
+      };
+      return await runtime.agentBrowser(request.conversationId, {
+        action: "click",
+        ref: request.ref,
+      });
+    },
+    { conversationId: primaryConversationId, ref: navigationRef! },
+  );
+  expect(clickResult.ok).toBe(true);
+  const browserDestinationUrl = `${app.previewUrl}agent-browser-destination`;
+  expect(await app.electronApp.evaluate(
+    ({ webContents }, url) => webContents.getAllWebContents().some(
+      (contents) => contents.getURL() === url,
+    ),
+    browserDestinationUrl,
+  )).toBe(true);
+  expect(await app.electronApp.evaluate(
+    async ({ webContents }, url) => {
+      const contents = webContents.getAllWebContents().find(
+        (candidate) => candidate.getURL() === url,
+      );
+      return await contents?.executeJavaScript(`(() => {
+        const input = document.querySelector("input[name='query']");
+        if (!(input instanceof HTMLInputElement)) return false;
+        input.value = "inertia";
+        input.focus();
+        return document.activeElement === input;
+      })()`);
+    },
+    browserDestinationUrl,
+  )).toBe(true);
+  await expect(app.electronApp.evaluate(
+    async (_electron, conversationId) => {
+      const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
+        agentBrowser: (
+          id: string,
+          command: { action: "press"; key: "Enter" },
+        ) => Promise<{ ok: boolean }>;
+      };
+      return await runtime.agentBrowser(conversationId, {
+        action: "press",
+        key: "Enter",
+      });
+    },
+    primaryConversationId,
+  )).resolves.toMatchObject({ ok: true });
+  const keyDestinationUrl = `${app.previewUrl}agent-browser-key-destination?query=inertia`;
+  const currentPreviewUrls = await app.electronApp.evaluate(
+    ({ webContents }, origin) => webContents.getAllWebContents()
+      .map((contents) => contents.getURL())
+      .filter((url) => url.startsWith(origin)),
+    app.previewUrl,
+  );
+  expect(currentPreviewUrls).toContain(keyDestinationUrl);
+  const typeResult = await app.electronApp.evaluate(
+    async (_electron, conversationId) => {
+      type Command =
+        | { action: "snapshot" }
+        | { action: "type"; ref: string; text: string; replace: boolean };
+      type Result = { ok: boolean; text?: string };
+      const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
+        agentBrowser: (id: string, command: Command) => Promise<Result>;
+      };
+      const snapshot = await runtime.agentBrowser(conversationId, { action: "snapshot" });
+      if (!snapshot.ok || !snapshot.text) return { ok: false, stage: "snapshot" };
+      const parsed = JSON.parse(snapshot.text) as {
+        elements: Array<{ name: string; ref: string }>;
+      };
+      const ref = parsed.elements.find((element) => element.name === "Type destination")?.ref;
+      if (!ref) return { ok: false, stage: "ref" };
+      return await runtime.agentBrowser(conversationId, {
+        action: "type",
+        ref,
+        text: "inertia",
+        replace: true,
+      });
+    },
+    primaryConversationId,
+  );
+  expect(typeResult).toMatchObject({ ok: true });
+  const typeDestinationUrl = `${app.previewUrl}agent-browser-type-destination?query=inertia`;
+  await expect.poll(() => app.electronApp.evaluate(
+    ({ webContents }, url) => webContents.getAllWebContents().some(
+      (contents) => contents.getURL() === url
+        && contents.getTitle() === "Agent browser type destination",
+    ),
+    typeDestinationUrl,
+  )).toBe(true);
+  await expectMicrotaskFocusTheftBlocked(app, primaryConversationId, typeDestinationUrl);
+  expect(await app.electronApp.evaluate(
+    async ({ webContents }, url) => {
+      const contents = webContents.getAllWebContents().find(
+        (candidate) => candidate.getURL() === url,
+      );
+      return await contents?.executeJavaScript(`(() => {
+        const input = document.querySelector("input[type='file']");
+        if (!(input instanceof HTMLInputElement)) return false;
+        input.focus();
+        return document.activeElement === input;
+      })()`);
+    },
+    typeDestinationUrl,
+  )).toBe(true);
+  await expect(app.electronApp.evaluate(
+    async (_electron, conversationId) => {
+      const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
+        agentBrowser: (
+          id: string,
+          command: { action: "press"; key: "Enter" },
+        ) => Promise<{ code?: string; ok: boolean }>;
+      };
+      return await runtime.agentBrowser(conversationId, {
+        action: "press",
+        key: "Enter",
+      });
+    },
+    primaryConversationId,
+  )).resolves.toMatchObject({ ok: false, code: "invalid" });
+  await expect(app.electronApp.evaluate(
+    async (_electron, conversationId) => {
+      type Command =
+        | { action: "snapshot" }
+        | { action: "click"; ref: string };
+      type Result = { ok: boolean; text?: string };
+      const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
+        agentBrowser: (id: string, command: Command) => Promise<Result>;
+      };
+      const snapshot = await runtime.agentBrowser(conversationId, { action: "snapshot" });
+      if (!snapshot.ok || !snapshot.text) return { ok: false, stage: "snapshot" };
+      const parsed = JSON.parse(snapshot.text) as {
+        elements: Array<{ name: string; ref: string }>;
+      };
+      const ref = parsed.elements.find(
+        (element) => element.name === "Choose through page handler",
+      )?.ref;
+      if (!ref) return { ok: false, stage: "ref" };
+      return await runtime.agentBrowser(conversationId, { action: "click", ref });
+    },
+    primaryConversationId,
+  )).resolves.toMatchObject({ ok: true });
+  await expect.poll(() => app.electronApp.evaluate(
+    async ({ webContents }, url) => {
+      const contents = webContents.getAllWebContents().find(
+        (candidate) => candidate.getURL() === url,
+      );
+      if (!contents) return null;
+      return {
+        attached: contents.debugger.isAttached(),
+        invoked: await contents.executeJavaScript(
+          "window.__delayedPickerInvoked === true",
+        ),
+        selectedFiles: await contents.executeJavaScript(
+          "document.querySelector('input[type=file]')?.files?.length ?? -1",
+        ),
+      };
+    },
+    typeDestinationUrl,
+  )).toEqual({ attached: true, invoked: true, selectedFiles: 0 });
+  await expectFocusNavigationSettlement(app, primaryConversationId,
+    `${app.previewUrl}agent-browser-focus-destination`);
+  const privacyUrl = `${app.previewUrl}agent-browser-privacy-start`;
+  await expectDocumentStartPrivacyGuard(app, primaryConversationId, privacyUrl);
+  for (const [path, secret] of [
+    ["agent-browser-nested-privacy-start", "nested-password-sentinel"],
+    ["agent-browser-frame-lifetime-privacy", "removed-frame-password-sentinel"],
+    ["agent-browser-shadow-lifetime-privacy", "removed-shadow-password-sentinel"],
+    ["agent-browser-declarative-shadow-privacy", "declarative-shadow-password-sentinel"],
+    ["agent-browser-declarative-closed-privacy", "declarative-closed-password-sentinel"],
+    ["agent-browser-declarative-detached-privacy", "detached-declarative-password-sentinel"],
+  ]) await expectDocumentStartPrivacyGuard(app, primaryConversationId, `${app.previewUrl}${path}`, secret);
+  const browserPagesScreenshot = testInfo.outputPath("inertia-browser-pages.png");
+  await page.screenshot({ animations: "disabled", path: browserPagesScreenshot });
+  await testInfo.attach("inertia-browser-pages", {
+    path: browserPagesScreenshot,
+    contentType: "image/png",
+  });
+  await primaryPreview.locator(".preview-tab-shell.active .preview-tab-close").click();
+  await expect(browserTabs).toHaveCount(1);
+  await expect.poll(() => app.nativePreviewIsVisible(primaryPreviewUrl)).toBe(true);
   await app.electronApp.evaluate(({ dialog }, path) => {
     Reflect.set(dialog, "showOpenDialog", async () => ({
       canceled: false,

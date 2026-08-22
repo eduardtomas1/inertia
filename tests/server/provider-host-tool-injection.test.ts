@@ -211,7 +211,7 @@ const server=http.createServer((req,res)=>{const url=new URL(req.url,"http://127
   secretToken=auth?.replace(/^Bearer /,"");secretUrl=parsed?.config?.url;
   ${(leakPath ?? echoPath) ? `fs.writeFileSync(${JSON.stringify(leakPath ?? echoPath)},JSON.stringify({token:secretToken,url:secretUrl}));` : ""}
   ${leakPath ? `process.stderr.write("provider diagnostic "+secretToken+" "+secretUrl+"\\n");` : ""}
-  captured.push({kind:"mcp-add",name:parsed?.name,directory:url.searchParams.get("directory"),type:parsed?.config?.type,urlIsLoopback:parsed?.config?.url?.startsWith("http://127.0.0.1:"),hasAuthorization:typeof auth==="string"&&auth.startsWith("Bearer "),oauth:parsed?.config?.oauth});save();
+  captured.push({kind:"mcp-add",name:parsed?.name,directory:url.searchParams.get("directory"),type:parsed?.config?.type,urlIsLoopback:parsed?.config?.url?.startsWith("http://127.0.0.1:"),hasAuthorization:typeof auth==="string"&&auth.startsWith("Bearer "),oauth:parsed?.config?.oauth,timeout:parsed?.config?.timeout});save();
   return json(res,{"inertia-chat-manager":{status:"connected"}});
  }
  if(req.method==="POST"&&url.pathname==="/mcp/inertia-chat-manager/disconnect"){
@@ -557,6 +557,7 @@ describe.sequential("provider host-tool injection", () => {
       urlIsLoopback: true,
       hasAuthorization: true,
       oauth: false,
+      timeout: 30_000,
     });
     expect(capture.captured.at(-1)).toMatchObject({
       kind: "mcp-disconnect",

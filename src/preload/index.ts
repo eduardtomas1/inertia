@@ -41,6 +41,7 @@ const IPC = {
   clearAppCache: "inertia:clear-app-cache",
   previewNavigate: "inertia:preview-navigate",
   previewCommand: "inertia:preview-command",
+  previewTab: "inertia:preview-tab",
   previewSetBounds: "inertia:preview-set-bounds",
   previewClose: "inertia:preview-close",
   previewState: "inertia:preview-state",
@@ -254,6 +255,10 @@ const bridge: DesktopBridge = Object.freeze({
   previewCommand: (request: Parameters<DesktopBridge["previewCommand"]>[0]) =>
     ipcRenderer.invoke(IPC.previewCommand, request) as ReturnType<
       DesktopBridge["previewCommand"]
+    >,
+  previewTab: (request: Parameters<DesktopBridge["previewTab"]>[0]) =>
+    ipcRenderer.invoke(IPC.previewTab, request) as ReturnType<
+      DesktopBridge["previewTab"]
     >,
   previewSetBounds: (request: Parameters<DesktopBridge["previewSetBounds"]>[0]) =>
     ipcRenderer.invoke(IPC.previewSetBounds, request) as Promise<void>,

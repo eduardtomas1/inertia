@@ -389,6 +389,11 @@ export interface ProviderHostToolResult {
   success: boolean;
   /** Bounded model-visible JSON or plain text. */
   text: string;
+  /** Optional bounded host-owned visual evidence returned directly to the model. */
+  image?: {
+    mimeType: "image/png";
+    data: string;
+  };
 }
 
 /** Owned by one exact active Inertia run; never persisted or provider-authored. */

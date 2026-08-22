@@ -20,6 +20,9 @@ import type { AgentHarnessRegistry } from "./provider/agent-harness-registry.js"
 import type { DatabaseRecoveryImportResult } from "./persistence/database-export.js";
 import type { RuntimeAttachmentBroker } from "./runtime/attachments/trusted-attachment-resolver.js";
 import type { RuntimeSecureFileBroker } from "./secure-files.js";
+import type {
+  RuntimeAgentBrowserBroker,
+} from "./runtime/agent-browser-broker-client.js";
 
 export interface RuntimeOptions {
   dataDirectory: string;
@@ -34,6 +37,7 @@ export interface RuntimeOptions {
   conversationAttachmentStoreOperations?: ConversationAttachmentStoreAnyOperationRunner;
   agentHarnessRegistry?: AgentHarnessRegistry;
   secureFiles?: RuntimeSecureFileBroker;
+  agentBrowser?: RuntimeAgentBrowserBroker;
   recoveryImportFault?: {
     phase: "after-staging-publish" | "during-message-import";
     markerPath: string;

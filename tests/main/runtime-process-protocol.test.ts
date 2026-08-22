@@ -28,6 +28,45 @@ const runtimeGenerationId = "33333333-3333-4333-8333-333333333333:1";
 const systemBootId = "test:44444444-4444-4444-8444-444444444444";
 
 describe("runtime process protocol", () => {
+  it("strictly correlates bounded agent browser requests, cancellation, and results", () => {
+    const requestId = crypto.randomUUID();
+    const request = {
+      type: "runtime.agent-browser-request" as const,
+      requestId,
+      conversationId,
+      command: { action: "click" as const, ref: "e7" },
+    };
+    expect(parseRuntimeWorkerEvent(request)).toEqual(request);
+    expect(parseRuntimeWorkerEvent({ ...request, command: { ...request.command, x: 12 } }))
+      .toBeNull();
+    expect(parseRuntimeWorkerEvent({
+      type: "runtime.agent-browser-cancel",
+      requestId,
+      conversationId,
+    })).toEqual({
+      type: "runtime.agent-browser-cancel",
+      requestId,
+      conversationId,
+    });
+    expect(parseRuntimeWorkerEvent({
+      type: "runtime.agent-browser-cancel",
+      requestId,
+      conversationId: projectId,
+      extra: true,
+    })).toBeNull();
+
+    const result = {
+      type: "runtime.agent-browser-result" as const,
+      requestId,
+      result: { ok: false as const, code: "not-found" as const, message: "No page" },
+    };
+    expect(parseRuntimeWorkerCommand(result)).toEqual(result);
+    expect(parseRuntimeWorkerCommand({
+      ...result,
+      result: { ...result.result, path: "/private/page.png" },
+    })).toBeNull();
+  });
+
   it("strictly binds update preparation and release messages", () => {
     const operationId = crypto.randomUUID();
     expect(parseRuntimeWorkerCommand({

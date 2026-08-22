@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 
+import { MAX_AGENT_BROWSER_SCREENSHOT_BYTES } from "../../shared/agent-browser";
+import { MAX_PROVIDER_HOST_TOOL_RESULT_BYTES } from "../../shared/provider-host-tools";
 import type {
   ProviderHostToolApprovalRequest,
   ProviderHostToolBridge,
@@ -14,7 +16,6 @@ const HOST_TOOL_APPROVAL_ID_PREFIX = "inertia-host-tool:";
 const HOST_TOOL_APPROVAL_TIMEOUT_MS = 5 * 60_000;
 const MAX_HOST_TOOL_CALLS = 128;
 const MAX_PENDING_HOST_TOOL_CALLS = 8;
-const MAX_HOST_TOOL_RESULT_BYTES = 32 * 1024;
 
 interface PendingApproval {
   callId: string;
@@ -67,7 +68,7 @@ function boundedUtf8(value: string, maximumBytes: number): string {
 function failure(message: string): ProviderHostToolResult {
   return {
     success: false,
-    text: boundedUtf8(JSON.stringify({ error: { code: "host_tool_rejected", message } }), MAX_HOST_TOOL_RESULT_BYTES),
+    text: boundedUtf8(JSON.stringify({ error: { code: "host_tool_rejected", message } }), MAX_PROVIDER_HOST_TOOL_RESULT_BYTES),
   };
 }
 
@@ -75,6 +76,24 @@ function validIdentity(value: string, maximum: number): boolean {
   return value.length > 0
     && value.length <= maximum
     && !/[\u0000-\u001f\u007f]/u.test(value);
+}
+
+function boundedHostImage(
+  image: ProviderHostToolResult["image"],
+): ProviderHostToolResult["image"] | null | undefined {
+  if (!image) return undefined;
+  const maximumBase64 = Math.ceil(MAX_AGENT_BROWSER_SCREENSHOT_BYTES / 3) * 4;
+  if (
+    image.mimeType !== "image/png"
+    || image.data.length === 0
+    || image.data.length > maximumBase64
+    || image.data.length % 4 !== 0
+    || !/^[A-Za-z0-9+/]*={0,2}$/u.test(image.data)
+  ) return null;
+  const padding = image.data.endsWith("==") ? 2 : image.data.endsWith("=") ? 1 : 0;
+  return image.data.length / 4 * 3 - padding <= MAX_AGENT_BROWSER_SCREENSHOT_BYTES
+    ? image
+    : null;
 }
 
 /**
@@ -146,12 +165,19 @@ export class ProviderHostToolRuntime {
       signal: controller.signal,
       requestApproval: (request) => this.requestApproval(input.callId, request),
     }).then(
-      (result) => this.settled || controller.signal.aborted
-        ? failure("The Inertia chat-tool call was cancelled.")
-        : {
-            success: result.success,
-            text: boundedUtf8(result.text, MAX_HOST_TOOL_RESULT_BYTES),
-          },
+      (result) => {
+        if (this.settled || controller.signal.aborted) {
+          return failure("The Inertia chat-tool call was cancelled.");
+        }
+        const image = boundedHostImage(result.image);
+        return image === null
+          ? failure("The Inertia chat-tool returned invalid visual evidence.")
+          : {
+              success: result.success,
+              text: boundedUtf8(result.text, MAX_PROVIDER_HOST_TOOL_RESULT_BYTES),
+              ...(image ? { image } : {}),
+            };
+      },
       (error: unknown) => failure(
         error instanceof Error && error.message
           ? error.message.slice(0, 1_000)

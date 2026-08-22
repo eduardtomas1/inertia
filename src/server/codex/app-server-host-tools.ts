@@ -3,6 +3,7 @@ import { type JsonObject, type RpcId } from "./protocol";
 import type { ProviderHostToolResult } from "../provider/contracts";
 import type { AgentApprovalDecision } from "../provider/interactions";
 import { ProviderHostToolRuntime } from "../provider/host-tool-runtime";
+import { MAX_PROVIDER_HOST_TOOL_RESULT_BYTES } from "../../shared/provider-host-tools";
 import type { CodexAppServerOptions } from "./types";
 
 interface PendingHostToolCall {
@@ -22,13 +23,11 @@ export interface CodexHostToolRuntimeHost {
 }
 
 const HOST_TOOL_APPROVAL_ID_PREFIX = "inertia-host-tool:";
-const MAX_HOST_TOOL_RESULT_BYTES = 32 * 1024;
-
 function boundedHostToolResult(value: string): string {
   const bytes = Buffer.from(value.replaceAll("\0", ""), "utf8");
-  if (bytes.length <= MAX_HOST_TOOL_RESULT_BYTES) return bytes.toString("utf8");
+  if (bytes.length <= MAX_PROVIDER_HOST_TOOL_RESULT_BYTES) return bytes.toString("utf8");
   const decoder = new TextDecoder("utf-8", { fatal: true });
-  let end = MAX_HOST_TOOL_RESULT_BYTES;
+  let end = MAX_PROVIDER_HOST_TOOL_RESULT_BYTES;
   while (end > 0) {
     try {
       return decoder.decode(bytes.subarray(0, end));
@@ -162,10 +161,18 @@ export class CodexHostToolRuntime {
     const written = this.host.writeMessage({
       id: pending.rpcId,
       result: {
-        contentItems: [{
-          type: "inputText",
-          text: boundedHostToolResult(result.text),
-        }],
+        contentItems: [
+          {
+            type: "inputText",
+            text: boundedHostToolResult(result.text),
+          },
+          ...(result.image
+            ? [{
+                type: "inputImage",
+                imageUrl: `data:${result.image.mimeType};base64,${result.image.data}`,
+              }]
+            : []),
+        ],
         success: result.success,
       },
     });

@@ -123,6 +123,7 @@ const IPC = {
   clearAppCache: "inertia:clear-app-cache",
   previewNavigate: "inertia:preview-navigate",
   previewCommand: "inertia:preview-command",
+  previewTab: "inertia:preview-tab",
   previewSetBounds: "inertia:preview-set-bounds",
   previewClose: "inertia:preview-close",
   previewState: "inertia:preview-state",
@@ -765,11 +766,14 @@ function registerIpcHandlers(): void {
     return previewBroker.navigate(args[0]);
   });
 
-  ipcMain.handle(IPC.previewCommand, (event, ...args) => {
+  ipcMain.handle(IPC.previewCommand, async (event, ...args) => {
     assertTrustedIpc(event, args.length, 1);
-    return previewBroker.command(args[0]);
+    return await previewBroker.command(args[0]);
   });
 
+  ipcMain.handle(IPC.previewTab, async (event, ...args) => {
+    assertTrustedIpc(event, args.length, 1); return previewBroker.tab(args[0]);
+  });
   ipcMain.handle(IPC.previewSetBounds, (event, ...args) => {
     assertTrustedIpc(event, args.length, 1);
     previewBroker.setBounds(args[0]);
@@ -1047,6 +1051,7 @@ async function bootstrap(): Promise<void> {
   } = packageSmoke;
   let packageSmokeScheduled = false;
   runtimeSupervisor = new RuntimeSupervisor({
+    agentBrowserBroker: previewBroker,
     systemBootId: bootstrapSafety.systemBootId,
     conversationAttachmentStoreRunner,
     conversationAttachmentStoreAuthority:
@@ -1180,6 +1185,7 @@ async function bootstrap(): Promise<void> {
         },
         recycle: () => runtimeSupervisor?.testOnlyRecycle()
           ?? Promise.reject(new Error("The test runtime is not running")),
+        agentBrowser: (id: string, command: Parameters<PreviewBroker["perform"]>[1]) => previewBroker.perform(id, command),
         quit: () => {
           const snapshot = runtimeSupervisor?.snapshot() ?? null;
           setTimeout(() => app.quit(), 100);
@@ -1191,7 +1197,6 @@ async function bootstrap(): Promise<void> {
 }
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
-
 if (!hasSingleInstanceLock) {
   app.quit();
 } else {

@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -10,7 +10,10 @@ import {
   gitHubPreMergeTestSupport,
   inspectGitHubPreMergeConfidence,
 } from "../../src/server/git/github-pre-merge";
-import type { runRestrictedCli } from "../../src/server/restricted-cli-runner";
+import {
+  RestrictedCliError,
+  type runRestrictedCli,
+} from "../../src/server/restricted-cli-runner";
 
 const execFileAsync = promisify(execFile);
 const directories: string[] = [];
@@ -336,6 +339,43 @@ describe("GitHub pre-merge confidence", () => {
       identity: { state: "changed" },
       unavailableReason: "The local identity or selected GitHub repository changed while GitHub was checked. Refresh before relying on this result.",
     });
+  });
+
+  it("propagates an unconfirmed GitHub CLI process-tree cleanup", async () => {
+    const { root } = await repository();
+    const cleanupFailure = new RestrictedCliError(
+      "cleanup",
+      "gh stopped responding and its process tree could not be confirmed stopped.",
+    );
+    const runCli = vi.fn<typeof runRestrictedCli>(async () => {
+      throw cleanupFailure;
+    });
+
+    await expect(inspectGitHubPreMergeConfidence(root, {}, {
+      environment: async () => ({ env: { PATH: "/fake" }, pathEntries: ["/fake"] }),
+      executableCandidates: async () => ["/fake/gh"],
+      runCli,
+    })).rejects.toBe(cleanupFailure);
+  });
+
+  it("records a final Git inspection failure before settlement completes", async () => {
+    const { root } = await repository();
+    const recordedFailure = vi.fn();
+    const runCli = vi.fn<typeof runRestrictedCli>(async () => {
+      await rename(join(root, ".git"), join(root, ".git-moved"));
+      return { stdout: "[]", stderr: "" };
+    });
+
+    await expect(inspectGitHubPreMergeConfidence(
+      root,
+      { recordTriggeringFailure: recordedFailure },
+      {
+        environment: async () => ({ env: { PATH: "/fake" }, pathEntries: ["/fake"] }),
+        executableCandidates: async () => ["/fake/gh"],
+        runCli,
+      },
+    )).rejects.toBeInstanceOf(Error);
+    expect(recordedFailure).toHaveBeenCalledTimes(1);
   });
 
   it("withholds no-PR evidence when the selected GitHub repository changes", async () => {

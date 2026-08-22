@@ -3,6 +3,7 @@ import {
   gitInspectionSettlementValues,
   isGitProcessTreeTerminationFailure,
 } from "../../git/runner";
+import { RestrictedCliError } from "../../restricted-cli-runner";
 
 export type SourceControlDeadlineKind = "read" | "workspace-discovery";
 
@@ -18,6 +19,11 @@ function deadlineError(kind: SourceControlDeadlineKind): GitError {
       "Workspace repository discovery took too long.",
     )
     : new GitError("timeout", "Git inspection took too long.");
+}
+
+function isProcessTreeTerminationFailure(error: unknown): boolean {
+  return isGitProcessTreeTerminationFailure(error)
+    || error instanceof RestrictedCliError && error.code === "cleanup";
 }
 
 /**
@@ -100,7 +106,7 @@ export class SourceControlDeadline {
             if (
               retainOwnershipOnAbort
               && result.status === "rejected"
-              && isGitProcessTreeTerminationFailure(result.reason)
+              && isProcessTreeTerminationFailure(result.reason)
             ) {
               reject(result.reason);
             } else if (

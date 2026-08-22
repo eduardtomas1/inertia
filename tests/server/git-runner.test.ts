@@ -61,6 +61,8 @@ describe("Git inspection settlement", () => {
     const releaseCleanup = deferred();
     let cleaningSiblings = 0;
     let aggregateSettled = false;
+    let triggeringFailure: unknown;
+    const statusFailure = new GitError("operation-failed", "Status parsing failed.");
     const sibling = async (signal: AbortSignal): Promise<string> => {
       if (!signal.aborted) {
         await new Promise<void>((resolve) => {
@@ -74,9 +76,10 @@ describe("Git inspection settlement", () => {
     };
     const aggregate = settleGitInspections(
       controller.signal,
-      async () => await Promise.reject(new GitError("operation-failed", "Status parsing failed.")),
+      async () => await Promise.reject(statusFailure),
       sibling,
       sibling,
+      (reason) => { triggeringFailure = reason; },
     );
     void aggregate.then(
       () => { aggregateSettled = true; },
@@ -85,6 +88,7 @@ describe("Git inspection settlement", () => {
 
     await cleanupStarted.promise;
     expect(aggregateSettled).toBe(false);
+    expect(triggeringFailure).toBe(statusFailure);
     releaseCleanup.resolve();
     await expect(aggregate).rejects.toThrow("Status parsing failed.");
     expect(aggregateSettled).toBe(true);

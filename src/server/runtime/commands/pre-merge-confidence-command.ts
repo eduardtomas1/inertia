@@ -63,7 +63,7 @@ export async function handlePreMergeConfidenceCommand<Repository>({
           return await runVerified(
             repository,
             async (root): Promise<GitPreMergeConfidence> =>
-              await inspectGitHubPreMergeConfidence(root, { signal }),
+              await inspectGitHubPreMergeConfidence(root, { signal, recordTriggeringFailure }),
             { deadlineAt: deadline.deadlineAt, signal },
           );
         } catch (error) {

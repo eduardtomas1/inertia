@@ -679,6 +679,7 @@ function readiness(
 
 function githubUnavailableReason(error: unknown): string {
   if (error instanceof GitError) return error.message;
+  if (error instanceof RestrictedCliError && error.code === "cleanup") throw error;
   if (error instanceof RestrictedCliError && error.code === "unavailable") {
     return "GitHub CLI is not installed or could not be started.";
   }
@@ -687,7 +688,7 @@ function githubUnavailableReason(error: unknown): string {
 
 export async function inspectGitHubPreMergeConfidence(
   repositoryPath: string,
-  options: { signal?: AbortSignal } = {},
+  options: { signal?: AbortSignal; recordTriggeringFailure?: (reason: unknown) => void } = {},
   dependencies: GitHubPreMergeDependencies = {},
 ): Promise<GitPreMergeConfidence> {
   const now = dependencies.now ?? (() => new Date());
@@ -715,6 +716,10 @@ export async function inspectGitHubPreMergeConfidence(
     );
   }
   const sourceRepositorySlug = githubRepositorySlug(routing.target.baseUrl);
+  const settleFinalGit = () => settleGitInspections(options.signal ?? new AbortController().signal,
+    (signal) => getRepositoryStatus(repositoryPath, { signal }),
+    (signal) => currentHead(repositoryPath, signal),
+    (signal) => inspectGitRemoteRouting(repositoryPath, initialStatus.branch, { signal }), options.recordTriggeringFailure);
   const runCli = dependencies.runCli ?? runRestrictedCli;
   let gh: Awaited<ReturnType<typeof resolveGitHubCli>>;
   try {
@@ -766,10 +771,7 @@ export async function inspectGitHubPreMergeConfidence(
     );
   }
   if (!discovery) {
-    const [finalStatus, finalHead, finalRouting] = await settleGitInspections(options.signal ?? new AbortController().signal,
-      (signal) => getRepositoryStatus(repositoryPath, { signal }),
-      (signal) => currentHead(repositoryPath, signal),
-      (signal) => inspectGitRemoteRouting(repositoryPath, initialStatus.branch, { signal }));
+    const [finalStatus, finalHead, finalRouting] = await settleFinalGit();
     const finalSourceRepositorySlug = finalRouting.target?.forge === "github" ? githubRepositorySlug(finalRouting.target.baseUrl) : null;
     const changed = initialHead !== finalHead
       || initialStatus.branch !== finalStatus.branch
@@ -885,10 +887,7 @@ export async function inspectGitHubPreMergeConfidence(
   } catch (error) {
     reviewEvidenceReason ??= githubUnavailableReason(error);
   }
-  const [finalStatus, finalHead, finalRouting] = await settleGitInspections(options.signal ?? new AbortController().signal,
-    (signal) => getRepositoryStatus(repositoryPath, { signal }),
-    (signal) => currentHead(repositoryPath, signal),
-    (signal) => inspectGitRemoteRouting(repositoryPath, initialStatus.branch, { signal }));
+  const [finalStatus, finalHead, finalRouting] = await settleFinalGit();
   const finalSourceRepositorySlug = finalRouting.target?.forge === "github" ? githubRepositorySlug(finalRouting.target.baseUrl) : null;
   const localChanged = initialHead !== finalHead
     || initialStatus.branch !== finalStatus.branch

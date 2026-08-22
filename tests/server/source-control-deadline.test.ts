@@ -6,6 +6,7 @@ import {
   SourceControlDeadline,
 } from "../../src/server/runtime/commands/source-control-deadline";
 import { GitError } from "../../src/server/git/types";
+import { RestrictedCliError } from "../../src/server/restricted-cli-runner";
 
 function deferred<T>(): {
   promise: Promise<T>;
@@ -160,6 +161,26 @@ describe("source-control aggregate deadlines", () => {
     const cleanupFailure = new GitError(
       "operation-failed",
       "Git stopped responding, and its process tree could not be confirmed stopped.",
+    );
+    try {
+      await expect(deadline.runToSettlement(async (signal) => {
+        if (!signal.aborted) {
+          await new Promise<void>((resolve) => {
+            signal.addEventListener("abort", () => resolve(), { once: true });
+          });
+        }
+        throw cleanupFailure;
+      })).rejects.toBe(cleanupFailure);
+    } finally {
+      deadline.dispose();
+    }
+  });
+
+  it("preserves failed restricted CLI cleanup beyond the outer deadline", async () => {
+    const deadline = new SourceControlDeadline(Date.now() + 20, "read");
+    const cleanupFailure = new RestrictedCliError(
+      "cleanup",
+      "gh stopped responding and its process tree could not be confirmed stopped.",
     );
     try {
       await expect(deadline.runToSettlement(async (signal) => {

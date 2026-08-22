@@ -27,6 +27,7 @@ const MAX_LOCAL_FILES = 100;
 const MAX_REMOTE_FILES = 200;
 const MAX_CHECKS = 100;
 const MAX_REVIEW_THREADS = 100;
+const MAX_ASSOCIATED_PULL_REQUESTS = 100;
 const MAX_REVIEW_BODY_CHARS = 2_000;
 const MAX_AUTHOR_CLAIM_CHARS = 6_000;
 
@@ -54,6 +55,13 @@ interface PullRequestDetails {
   checks: GitPreMergeCheck[];
   checksTruncated: boolean;
   files: GitPreMergeFile[];
+  filesTruncated: boolean;
+}
+
+interface PullRequestDiscovery {
+  number: number;
+  repositorySlug: string;
+  repositoryBaseUrl: string;
 }
 
 interface ReviewThreadResult {
@@ -75,6 +83,10 @@ function integer(value: unknown, fallback = 0): number {
   return Number.isSafeInteger(value) && Number(value) >= 0
     ? Number(value)
     : fallback;
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && Number(value) >= 0;
 }
 
 function boundedText(value: string, maxCharacters: number): {
@@ -183,12 +195,16 @@ function parseCheck(value: unknown, repositoryBaseUrl: string): GitPreMergeCheck
 function parseFile(value: unknown): GitPreMergeFile | null {
   if (!record(value)) return null;
   const path = safePath(value.path);
-  if (!path) return null;
+  if (
+    !path
+    || !isNonNegativeInteger(value.additions)
+    || !isNonNegativeInteger(value.deletions)
+  ) return null;
   return {
     path,
     area: affectedArea(path),
-    insertions: integer(value.additions),
-    deletions: integer(value.deletions),
+    insertions: value.additions,
+    deletions: value.deletions,
   };
 }
 
@@ -214,6 +230,12 @@ function parsePullRequest(
   ) {
     return null;
   }
+  if (!Array.isArray(value.files) || !isNonNegativeInteger(value.changedFiles)) {
+    throw new GitError(
+      "operation-failed",
+      "GitHub returned incomplete changed-file evidence.",
+    );
+  }
   const rawChecks = Array.isArray(value.statusCheckRollup)
     ? value.statusCheckRollup
     : [];
@@ -221,12 +243,11 @@ function parsePullRequest(
       .map((entry) => parseCheck(entry, repositoryBaseUrl))
       .filter((entry): entry is GitPreMergeCheck => entry !== null)
       .slice(0, MAX_CHECKS);
-  const files = Array.isArray(value.files)
-    ? value.files
-      .map(parseFile)
-      .filter((entry): entry is GitPreMergeFile => entry !== null)
-      .slice(0, MAX_REMOTE_FILES)
-    : [];
+  const rawFiles = value.files;
+  const files = rawFiles
+    .map(parseFile)
+    .filter((entry): entry is GitPreMergeFile => entry !== null)
+    .slice(0, MAX_REMOTE_FILES);
   return {
     number,
     url,
@@ -245,10 +266,13 @@ function parsePullRequest(
       : null,
     updatedAt: boundedText(updatedAt, 64).value,
     body: text(value.body),
-    changedFiles: Math.max(integer(value.changedFiles, files.length), files.length),
+    changedFiles: value.changedFiles,
     checks,
     checksTruncated: rawChecks.length >= MAX_CHECKS || rawChecks.length > checks.length,
     files,
+    filesTruncated: rawFiles.length >= MAX_REMOTE_FILES
+      || rawFiles.length > files.length
+      || value.changedFiles > files.length,
   };
 }
 
@@ -298,6 +322,78 @@ function parsePullRequestList(
     throw new GitError(
       "operation-failed",
       "GitHub returned multiple open pull requests for this exact branch.",
+    );
+  }
+  return matches[0] ?? null;
+}
+
+function parseAssociatedPullRequests(
+  source: string,
+  sourceRepositorySlug: string,
+  branch: string,
+): PullRequestDiscovery | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(source);
+  } catch {
+    throw new GitError("operation-failed", "GitHub returned malformed pull request discovery evidence.");
+  }
+  if (!Array.isArray(parsed)) {
+    throw new GitError("operation-failed", "GitHub returned malformed pull request discovery evidence.");
+  }
+  if (parsed.length >= MAX_ASSOCIATED_PULL_REQUESTS) {
+    throw new GitError("operation-failed", "GitHub pull request discovery evidence is truncated.");
+  }
+
+  const matches: PullRequestDiscovery[] = [];
+  for (const value of parsed) {
+    if (!record(value) || !record(value.head) || !record(value.base)) {
+      throw new GitError("operation-failed", "GitHub returned incomplete pull request discovery evidence.");
+    }
+    const headRepository = record(value.head.repo) ? value.head.repo : null;
+    const baseRepository = record(value.base.repo) ? value.base.repo : null;
+    if (!headRepository || !baseRepository) {
+      throw new GitError("operation-failed", "GitHub returned incomplete pull request discovery evidence.");
+    }
+    const discoveredHead = text(value.head.sha).toLowerCase();
+    const discoveredBranch = text(value.head.ref);
+    const discoveredSourceSlug = text(headRepository.full_name);
+    const state = text(value.state).toUpperCase();
+    if (
+      !/^[0-9a-f]{40,64}$/u.test(discoveredHead)
+      || !discoveredBranch
+      || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u.test(discoveredSourceSlug)
+      || !state
+    ) {
+      throw new GitError("operation-failed", "GitHub returned incomplete pull request discovery evidence.");
+    }
+    if (
+      state !== "OPEN"
+      || discoveredBranch !== branch
+      || discoveredSourceSlug.toLowerCase() !== sourceRepositorySlug.toLowerCase()
+    ) continue;
+
+    const number = integer(value.number);
+    const repositoryBaseUrl = text(baseRepository.html_url).replace(/\/+$/u, "");
+    const reportedSlug = text(baseRepository.full_name);
+    let repositorySlug: string;
+    try {
+      repositorySlug = githubRepositorySlug(repositoryBaseUrl);
+    } catch {
+      throw new GitError("operation-failed", "GitHub returned incomplete pull request discovery evidence.");
+    }
+    if (
+      number < 1
+      || repositorySlug.toLowerCase() !== reportedSlug.toLowerCase()
+    ) {
+      throw new GitError("operation-failed", "GitHub returned incomplete pull request discovery evidence.");
+    }
+    matches.push({ number, repositorySlug, repositoryBaseUrl });
+  }
+  if (matches.length > 1) {
+    throw new GitError(
+      "operation-failed",
+      "GitHub returned multiple open pull requests for this exact head.",
     );
   }
   return matches[0] ?? null;
@@ -576,6 +672,7 @@ function readiness(
 }
 
 function githubUnavailableReason(error: unknown): string {
+  if (error instanceof GitError) return error.message;
   if (error instanceof RestrictedCliError && error.code === "unavailable") {
     return "GitHub CLI is not installed or could not be started.";
   }
@@ -615,7 +712,7 @@ export async function inspectGitHubPreMergeConfidence(
       "Authoritative pre-merge evidence is currently available for GitHub repositories.",
     );
   }
-  const repositorySlug = githubRepositorySlug(routing.target.baseUrl);
+  const sourceRepositorySlug = githubRepositorySlug(routing.target.baseUrl);
   const runCli = dependencies.runCli ?? runRestrictedCli;
   let gh: Awaited<ReturnType<typeof resolveGitHubCli>>;
   try {
@@ -634,14 +731,13 @@ export async function inspectGitHubPreMergeConfidence(
     "headRefOid", "baseRefName", "mergeStateStatus", "reviewDecision",
     "updatedAt", "statusCheckRollup", "files", "changedFiles", "body",
   ].join(",");
-  let details: PullRequestDetails | null;
+  let discovery: PullRequestDiscovery | null;
   try {
     const result = await runCli(
       gh.executable,
       [
-        "pr", "list", "--repo", repositorySlug, "--head",
-        initialStatus.branch, "--state", "open", "--limit", "10",
-        "--json", listFields,
+        "api", "--method", "GET",
+        `repos/${sourceRepositorySlug}/commits/${initialHead}/pulls?per_page=${MAX_ASSOCIATED_PULL_REQUESTS}`,
       ],
       {
         cwd: repositoryPath,
@@ -649,13 +745,13 @@ export async function inspectGitHubPreMergeConfidence(
         signal: options.signal,
         timeoutMs: 30_000,
         maxOutputBytes: MAX_GITHUB_OUTPUT_BYTES,
-        failureMessage: "GitHub could not load pull request evidence.",
+        failureMessage: "GitHub could not discover pull requests for this exact head.",
       },
       dependencies,
     );
-    details = parsePullRequestList(
+    discovery = parseAssociatedPullRequests(
       result.stdout,
-      routing.target.baseUrl,
+      sourceRepositorySlug,
       initialStatus.branch,
     );
   } catch (error) {
@@ -667,7 +763,7 @@ export async function inspectGitHubPreMergeConfidence(
       githubUnavailableReason(error),
     );
   }
-  if (!details) {
+  if (!discovery) {
     const [finalStatus, finalHead] = await Promise.all([
       getRepositoryStatus(repositoryPath, { signal: options.signal }),
       currentHead(repositoryPath, options.signal),
@@ -681,10 +777,44 @@ export async function inspectGitHubPreMergeConfidence(
       "no-pull-request",
       changed
         ? "The local head changed while GitHub was checked. Refresh before relying on this result."
-        : `GitHub has no open pull request for ${initialStatus.branch}.`,
+        : `GitHub has no open pull request for ${initialStatus.branch} at ${initialHead.slice(0, 8)}.`,
     );
     if (changed) confidence.identity.state = "changed";
     return confidence;
+  }
+
+  const { repositorySlug, repositoryBaseUrl } = discovery;
+  let details: PullRequestDetails;
+  try {
+    const result = await runCli(
+      gh.executable,
+      [
+        "pr", "view", String(discovery.number), "--repo", repositorySlug,
+        "--json", listFields,
+      ],
+      {
+        cwd: repositoryPath,
+        environment: gh.environment,
+        signal: options.signal,
+        timeoutMs: 30_000,
+        maxOutputBytes: MAX_GITHUB_OUTPUT_BYTES,
+        failureMessage: "GitHub could not load pull request evidence.",
+      },
+      dependencies,
+    );
+    details = parsePullRequestObject(
+      result.stdout,
+      repositoryBaseUrl,
+      discovery.number,
+    );
+  } catch (error) {
+    return emptyConfidence(
+      now,
+      initialStatus,
+      initialHead,
+      "unavailable",
+      githubUnavailableReason(error),
+    );
   }
 
   const [owner = "", name = ""] = repositorySlug.split("/");
@@ -717,7 +847,7 @@ export async function inspectGitHubPreMergeConfidence(
     );
     reviewEvidence = parseReviewThreads(
       result.stdout,
-      routing.target.baseUrl,
+      repositoryBaseUrl,
       details.number,
     );
   } catch (error) {
@@ -743,7 +873,7 @@ export async function inspectGitHubPreMergeConfidence(
     );
     details = parsePullRequestObject(
       result.stdout,
-      routing.target.baseUrl,
+      repositoryBaseUrl,
       details.number,
     );
     finalDetailsLoaded = true;
@@ -781,13 +911,13 @@ export async function inspectGitHubPreMergeConfidence(
     && finalDetailsLoaded
     && !reviewEvidence.truncated
     && !details.checksTruncated
-    && details.changedFiles <= details.files.length;
+    && !details.filesTruncated;
   const incompleteReason = reviewEvidenceReason
     ?? (reviewEvidence?.truncated
       ? "GitHub review-thread evidence is truncated."
       : details.checksTruncated
         ? "GitHub check evidence is truncated."
-        : details.changedFiles > details.files.length
+        : details.filesTruncated
           ? "GitHub changed-file evidence is truncated."
           : !finalDetailsLoaded
             ? "GitHub final-state revalidation did not complete."
@@ -828,7 +958,7 @@ export async function inspectGitHubPreMergeConfidence(
     reviewThreadsTruncated: reviewEvidence?.truncated ?? false,
     files: details.files,
     totalFiles: details.changedFiles,
-    filesTruncated: details.changedFiles > details.files.length,
+    filesTruncated: details.filesTruncated,
     areas,
     changedTestFiles: details.files.filter(({ path }) => isTestFile(path))
       .map(({ path }) => path),
@@ -852,6 +982,7 @@ export async function inspectGitHubPreMergeConfidence(
 
 export const gitHubPreMergeTestSupport = {
   affectedArea,
+  parseAssociatedPullRequests,
   parsePullRequestList,
   parseReviewThreads,
   platformCoverage,

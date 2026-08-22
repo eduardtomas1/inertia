@@ -60,6 +60,25 @@ const { existsSync, readFileSync } = require("node:fs");
 const head = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
 const attention = existsSync(".pre-merge-state")
   && readFileSync(".pre-merge-state", "utf8").trim() === "attention";
+if (!process.argv.includes("graphql")) {
+  process.stdout.write(JSON.stringify([{
+    number: 160,
+    state: "open",
+    head: {
+      ref: "codex/pre-merge-confidence-cockpit",
+      sha: head,
+      repo: { full_name: "eduardtomas1/inertia" }
+    },
+    base: {
+      ref: "main",
+      repo: {
+        full_name: "eduardtomas1/inertia",
+        html_url: "https://github.com/eduardtomas1/inertia"
+      }
+    }
+  }]));
+  process.exit(0);
+}
 const nodes = attention ? [{
   id: "codex-thread-1",
   isResolved: false,

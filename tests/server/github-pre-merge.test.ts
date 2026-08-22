@@ -72,9 +72,25 @@ describe("GitHub pre-merge confidence", () => {
         { name: "macOS arm64", workflowName: "CI", status: "COMPLETED", conclusion: "SUCCESS" },
       ],
     };
+    const associated = [{
+      number: 42,
+      state: "open",
+      head: {
+        ref: "feature/confidence",
+        sha: head,
+        repo: { full_name: "openai/codex" },
+      },
+      base: {
+        ref: "main",
+        repo: {
+          full_name: "openai/codex",
+          html_url: "https://github.com/openai/codex",
+        },
+      },
+    }];
     const runCli = vi.fn<typeof runRestrictedCli>(async (_executable, args) => ({
-      stdout: args[0] === "pr" && args[1] === "list"
-        ? JSON.stringify([pullRequest])
+      stdout: args[0] === "api" && args[1] === "--method"
+        ? JSON.stringify(associated)
         : args[0] === "pr" && args[1] === "view"
           ? JSON.stringify(pullRequest)
           : JSON.stringify({
@@ -120,12 +136,16 @@ describe("GitHub pre-merge confidence", () => {
     expect(confidence.changedTestFiles).toEqual([
       "tests/server/github-pre-merge.test.ts",
     ]);
-    expect(runCli).toHaveBeenCalledTimes(3);
-    expect(runCli.mock.calls[1]?.[1]).toEqual([
+    expect(runCli).toHaveBeenCalledTimes(4);
+    expect(runCli.mock.calls[0]?.[1]).toEqual([
+      "api", "--method", "GET",
+      `repos/openai/codex/commits/${head}/pulls?per_page=100`,
+    ]);
+    expect(runCli.mock.calls[2]?.[1]).toEqual([
       "api", "graphql", "--input", "-",
     ]);
-    expect(runCli.mock.calls[1]?.[2].input).not.toContain("token");
-    expect(runCli.mock.calls[2]?.[1].slice(0, 3)).toEqual([
+    expect(runCli.mock.calls[2]?.[2].input).not.toContain("token");
+    expect(runCli.mock.calls[3]?.[1].slice(0, 3)).toEqual([
       "pr", "view", "42",
     ]);
   });
@@ -151,9 +171,27 @@ describe("GitHub pre-merge confidence", () => {
         { name: "macOS arm64", conclusion: "SUCCESS" },
       ],
     };
+    const associated = [{
+      number: 42,
+      state: "open",
+      head: {
+        ref: "feature/confidence",
+        sha: head,
+        repo: { full_name: "openai/codex" },
+      },
+      base: {
+        ref: "main",
+        repo: {
+          full_name: "openai/codex",
+          html_url: "https://github.com/openai/codex",
+        },
+      },
+    }];
     const runCli = vi.fn<typeof runRestrictedCli>(async (_executable, args) => ({
-      stdout: args[0] === "pr"
-        ? JSON.stringify(args[1] === "list" ? [pullRequest] : pullRequest)
+      stdout: args[0] === "api" && args[1] === "--method"
+        ? JSON.stringify(associated)
+        : args[0] === "pr"
+          ? JSON.stringify(pullRequest)
         : JSON.stringify({
           data: { repository: { pullRequest: {
             number: 42,
@@ -179,6 +217,119 @@ describe("GitHub pre-merge confidence", () => {
         state: "blocked",
         blockers: expect.arrayContaining(["GitHub evidence is incomplete or truncated."]),
       },
+    });
+  });
+
+  it("discovers a fork branch pull request in its authoritative base repository", async () => {
+    const { root, head } = await repository();
+    await execFileAsync("git", [
+      "remote", "set-url", "origin", "https://github.com/contributor/codex.git",
+    ], { cwd: root });
+    const pullRequest = {
+      number: 73,
+      url: "https://github.com/openai/codex/pull/73",
+      title: "Cross-repository confidence",
+      state: "OPEN",
+      isDraft: false,
+      headRefName: "feature/confidence",
+      headRefOid: head,
+      baseRefName: "main",
+      mergeStateStatus: "CLEAN",
+      reviewDecision: "APPROVED",
+      updatedAt: "2026-08-22T15:00:00Z",
+      changedFiles: 1,
+      body: "",
+      files: [{ path: "src/server/git/github-pre-merge.ts", additions: 4, deletions: 1 }],
+      statusCheckRollup: [
+        { name: "Linux x64", conclusion: "SUCCESS" },
+        { name: "Windows x64", conclusion: "SUCCESS" },
+        { name: "macOS arm64", conclusion: "SUCCESS" },
+      ],
+    };
+    const associated = [{
+      number: 73,
+      state: "open",
+      head: {
+        ref: "feature/confidence",
+        sha: head,
+        repo: { full_name: "contributor/codex" },
+      },
+      base: {
+        ref: "main",
+        repo: {
+          full_name: "openai/codex",
+          html_url: "https://github.com/openai/codex",
+        },
+      },
+    }];
+    const runCli = vi.fn<typeof runRestrictedCli>(async (_executable, args) => ({
+      stdout: args[0] === "api" && args[1] === "--method"
+        ? JSON.stringify(associated)
+        : args[0] === "pr"
+          ? JSON.stringify(pullRequest)
+          : JSON.stringify({
+            data: { repository: { pullRequest: {
+              number: 73,
+              headRefOid: head,
+              updatedAt: pullRequest.updatedAt,
+              reviewThreads: { nodes: [], pageInfo: { hasNextPage: false } },
+            } } },
+          }),
+      stderr: "",
+    }));
+
+    const confidence = await inspectGitHubPreMergeConfidence(root, {}, {
+      environment: async () => ({ env: { PATH: "/fake" }, pathEntries: ["/fake"] }),
+      executableCandidates: async () => ["/fake/gh"],
+      runCli,
+    });
+
+    expect(confidence).toMatchObject({
+      state: "ready",
+      github: {
+        repository: "openai/codex",
+        number: 73,
+        head,
+      },
+      identity: { state: "exact" },
+    });
+    expect(runCli.mock.calls[0]?.[1]).toEqual([
+      "api", "--method", "GET",
+      `repos/contributor/codex/commits/${head}/pulls?per_page=100`,
+    ]);
+    expect(runCli.mock.calls[1]?.[1]).toContain("openai/codex");
+    expect(runCli.mock.calls[3]?.[1]).toContain("openai/codex");
+    expect(JSON.parse(runCli.mock.calls[2]?.[2].input ?? "{}")).toMatchObject({
+      variables: { owner: "openai", name: "codex", number: 73 },
+    });
+  });
+
+  it("keeps an associated open PR discoverable when its remote head moved", () => {
+    const discovery = gitHubPreMergeTestSupport.parseAssociatedPullRequests(
+      JSON.stringify([{
+        number: 73,
+        state: "open",
+        head: {
+          ref: "feature/confidence",
+          sha: "d".repeat(40),
+          repo: { full_name: "contributor/codex" },
+        },
+        base: {
+          ref: "main",
+          repo: {
+            full_name: "openai/codex",
+            html_url: "https://github.com/openai/codex",
+          },
+        },
+      }]),
+      "contributor/codex",
+      "feature/confidence",
+    );
+
+    expect(discovery).toEqual({
+      number: 73,
+      repositorySlug: "openai/codex",
+      repositoryBaseUrl: "https://github.com/openai/codex",
     });
   });
 
@@ -259,6 +410,8 @@ describe("GitHub pre-merge confidence", () => {
         headRefName: "feature/confidence",
         headRefOid: "c".repeat(40),
         updatedAt: "2026-08-22T15:00:00Z",
+        changedFiles: 0,
+        files: [],
         statusCheckRollup: Array.from({ length: 100 }, (_, index) => ({
           name: `check-${index}`,
           status: "COMPLETED",
@@ -271,6 +424,43 @@ describe("GitHub pre-merge confidence", () => {
 
     expect(details?.checks).toHaveLength(100);
     expect(details?.checksTruncated).toBe(true);
+  });
+
+  it("rejects missing file collections and marks rejected file rows incomplete", () => {
+    const identity = {
+      number: 9,
+      url: "https://github.com/openai/codex/pull/9",
+      state: "OPEN",
+      headRefName: "feature/confidence",
+      headRefOid: "c".repeat(40),
+      updatedAt: "2026-08-22T15:00:00Z",
+      statusCheckRollup: [],
+    };
+
+    expect(() => gitHubPreMergeTestSupport.parsePullRequestList(
+      JSON.stringify([{ ...identity, changedFiles: 1 }]),
+      "https://github.com/openai/codex",
+      "feature/confidence",
+    )).toThrowError("GitHub returned incomplete changed-file evidence.");
+
+    const details = gitHubPreMergeTestSupport.parsePullRequestList(
+      JSON.stringify([{
+        ...identity,
+        changedFiles: 1,
+        files: [{
+          path: "src/server/git/github-pre-merge.ts",
+          additions: "4",
+          deletions: 1,
+        }],
+      }]),
+      "https://github.com/openai/codex",
+      "feature/confidence",
+    );
+    expect(details).toMatchObject({
+      changedFiles: 1,
+      files: [],
+      filesTruncated: true,
+    });
   });
 
   it("treats skipped and missing platform checks as visibly incomplete", () => {

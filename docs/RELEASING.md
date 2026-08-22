@@ -21,6 +21,10 @@ For a signed Windows release, configure:
 - `WINDOWS_CSC_LINK`
 - `WINDOWS_CSC_KEY_PASSWORD`
 
+For Discord release notifications, configure:
+
+- `DISCORD_WEBHOOK_URL`
+
 The workflow writes the Apple API key to a temporary runner file, never to the
 repository or an uploaded artifact. Complete macOS credentials enable hardened
 runtime, Developer ID signing, notarization, and fail-closed signature checks.
@@ -55,6 +59,11 @@ identical assets are retained and missing assets are uploaded, while unexpected
 assets or any size/digest mismatch stop the release. The workflow downloads and
 hashes the complete draft before publishing it. It never overwrites an asset or
 modifies an already-published release.
+
+The release workflow sends the Discord notification after the exact-tag release
+is published. This is intentionally part of the release workflow because
+GitHub-created release events from the workflow token do not reliably start a
+separate `release.published` workflow.
 
 The first update-capable version must still be installed manually. Validate a
 packaged update from that version to the following version on each eligible

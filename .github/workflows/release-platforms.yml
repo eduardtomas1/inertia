@@ -482,3 +482,54 @@ jobs:
           done
 
           gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+
+  notify-discord:
+    name: Notify Discord
+    needs: upload
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Send Discord release notification
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+          REPO_NAME: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${DISCORD_WEBHOOK_URL:-}" ]]; then
+            echo "Discord release notifications are not configured; skipping."
+            exit 0
+          fi
+
+          release_json="$(gh api -H "Cache-Control: no-cache" "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG")"
+          release_name="$(jq -r '.name // empty' <<< "$release_json")"
+          release_url="$(jq -r '.html_url // empty' <<< "$release_json")"
+          if [[ -z "$release_name" ]]; then
+            release_name="Inertia $RELEASE_TAG"
+          fi
+          if [[ -z "$release_url" ]]; then
+            release_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$RELEASE_TAG"
+          fi
+
+          RELEASE_NAME="$release_name" RELEASE_URL="$release_url" node <<'NODE'
+          const content = [
+            `Nova versio publicada a **${process.env.REPO_NAME}**:`,
+            `**${process.env.RELEASE_NAME}** (${process.env.RELEASE_TAG})`,
+            process.env.RELEASE_URL,
+          ].join("\n");
+          const response = await fetch(process.env.DISCORD_WEBHOOK_URL, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ content }),
+          });
+          if (!response.ok) {
+            throw new Error(`Discord webhook returned HTTP ${response.status}.`);
+          }
+          NODE

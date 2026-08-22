@@ -12,38 +12,6 @@ const MAX_OWNED_SESSIONS = 256;
 const MAX_SESSION_ID_CHARS = 512;
 const MAX_ACTIVITY_EVENT_IDS = 8_192;
 
-const ACTIVE_NEXT_EVENTS = new Set([
-  "session.next.prompted",
-  "session.next.prompt.admitted",
-  "session.next.context.updated",
-  "session.next.synthetic",
-  "session.next.shell.started",
-  "session.next.shell.ended",
-  "session.next.step.started",
-  "session.next.step.ended",
-  "session.next.step.failed",
-  "session.next.text.started",
-  "session.next.text.delta",
-  "session.next.text.ended",
-  "session.next.reasoning.started",
-  "session.next.reasoning.delta",
-  "session.next.reasoning.ended",
-  "session.next.tool.input.started",
-  "session.next.tool.input.delta",
-  "session.next.tool.input.ended",
-  "session.next.tool.called",
-  "session.next.tool.progress",
-  "session.next.tool.success",
-  "session.next.tool.failed",
-  "session.next.retried",
-  "session.next.compaction.started",
-  "session.next.compaction.delta",
-  "session.next.compaction.ended",
-  "session.next.revert.staged",
-  "session.next.revert.cleared",
-  "session.next.revert.committed",
-]);
-
 function safeSessionId(value: unknown): string | undefined {
   const candidate = stringValue(value);
   return candidate
@@ -67,13 +35,124 @@ function exactSession(value: unknown, sessionId: string): boolean {
   return safeSessionId(value) === sessionId;
 }
 
+function safeFields(
+  properties: Record<string, unknown>,
+  ...fields: string[]
+): boolean {
+  return fields.every((field) => safeSessionId(properties[field]) !== undefined);
+}
+
+function activeNextDescendantEvent(
+  type: string,
+  properties: Record<string, unknown>,
+  sessionId: string,
+): boolean | undefined {
+  if (!type.startsWith("session.next.")) return undefined;
+  if (
+    !exactSession(properties.sessionID, sessionId)
+    || typeof properties.timestamp !== "number"
+    || !Number.isFinite(properties.timestamp)
+  ) return false;
+  switch (type) {
+    case "session.next.prompted":
+    case "session.next.prompt.admitted":
+      return safeFields(properties, "messageID")
+        && objectValue(properties.prompt) !== undefined
+        && (properties.delivery === "steer" || properties.delivery === "queue");
+    case "session.next.context.updated":
+    case "session.next.synthetic":
+      return safeFields(properties, "messageID")
+        && typeof properties.text === "string";
+    case "session.next.shell.started":
+      return safeFields(properties, "messageID", "callID")
+        && stringValue(properties.command) !== undefined;
+    case "session.next.shell.ended":
+      return safeFields(properties, "callID")
+        && typeof properties.output === "string";
+    case "session.next.step.started":
+      return safeFields(properties, "assistantMessageID")
+        && stringValue(properties.agent) !== undefined
+        && objectValue(properties.model) !== undefined;
+    case "session.next.step.ended":
+      return safeFields(properties, "assistantMessageID")
+        && typeof properties.finish === "string"
+        && typeof properties.cost === "number"
+        && Number.isFinite(properties.cost)
+        && objectValue(properties.tokens) !== undefined;
+    case "session.next.step.failed":
+      return safeFields(properties, "assistantMessageID")
+        && objectValue(properties.error) !== undefined;
+    case "session.next.text.started":
+      return safeFields(properties, "assistantMessageID", "textID");
+    case "session.next.text.delta":
+      return safeFields(properties, "assistantMessageID", "textID")
+        && stringValue(properties.delta) !== undefined;
+    case "session.next.text.ended":
+      return safeFields(properties, "assistantMessageID", "textID")
+        && typeof properties.text === "string";
+    case "session.next.reasoning.started":
+      return safeFields(properties, "assistantMessageID", "reasoningID");
+    case "session.next.reasoning.delta":
+      return safeFields(properties, "assistantMessageID", "reasoningID")
+        && stringValue(properties.delta) !== undefined;
+    case "session.next.reasoning.ended":
+      return safeFields(properties, "assistantMessageID", "reasoningID")
+        && typeof properties.text === "string";
+    case "session.next.tool.input.started":
+      return safeFields(properties, "assistantMessageID", "callID")
+        && stringValue(properties.name) !== undefined;
+    case "session.next.tool.input.delta":
+      return safeFields(properties, "assistantMessageID", "callID")
+        && stringValue(properties.delta) !== undefined;
+    case "session.next.tool.input.ended":
+      return safeFields(properties, "assistantMessageID", "callID")
+        && typeof properties.text === "string";
+    case "session.next.tool.called":
+      return safeFields(properties, "assistantMessageID", "callID")
+        && stringValue(properties.tool) !== undefined
+        && objectValue(properties.input) !== undefined
+        && objectValue(properties.provider) !== undefined;
+    case "session.next.tool.progress":
+      return safeFields(properties, "assistantMessageID", "callID")
+        && objectValue(properties.structured) !== undefined
+        && Array.isArray(properties.content);
+    case "session.next.tool.success":
+      return safeFields(properties, "assistantMessageID", "callID")
+        && objectValue(properties.structured) !== undefined
+        && Array.isArray(properties.content)
+        && objectValue(properties.provider) !== undefined;
+    case "session.next.tool.failed":
+      return safeFields(properties, "assistantMessageID", "callID")
+        && objectValue(properties.error) !== undefined
+        && objectValue(properties.provider) !== undefined;
+    case "session.next.retried":
+      return typeof properties.attempt === "number"
+        && Number.isFinite(properties.attempt)
+        && objectValue(properties.error) !== undefined;
+    case "session.next.compaction.started":
+      return safeFields(properties, "messageID")
+        && (properties.reason === "auto" || properties.reason === "manual");
+    case "session.next.compaction.delta":
+      return safeFields(properties, "messageID")
+        && stringValue(properties.text) !== undefined;
+    case "session.next.compaction.ended":
+      return safeFields(properties, "messageID")
+        && (properties.reason === "auto" || properties.reason === "manual")
+        && typeof properties.text === "string"
+        && typeof properties.recent === "string";
+    default:
+      return false;
+  }
+}
+
 function activeDescendantEvent(event: Event, sessionId: string): boolean {
   const properties = event.properties as Record<string, unknown>;
-  if (ACTIVE_NEXT_EVENTS.has(event.type)) {
-    return exactSession(properties.sessionID, sessionId)
-      && typeof properties.timestamp === "number"
-      && Number.isFinite(properties.timestamp);
-  }
+  const nextActivity = activeNextDescendantEvent(
+    event.type,
+    properties,
+    sessionId,
+  );
+  if (nextActivity !== undefined) return nextActivity;
   switch (event.type) {
     case "session.status": {
       const status = objectValue(properties.status);
@@ -129,11 +208,10 @@ function activeDescendantEvent(event: Event, sessionId: string): boolean {
 }
 
 function activityEventKey(event: Event): string | undefined {
-  const eventId = safeSessionId((event as { id?: unknown }).id);
-  if (eventId) return `id:${eventId}`;
   try {
+    const { id: _eventId, ...payload } = event as Event & { id?: unknown };
     return `hash:${createHash("sha256")
-      .update(JSON.stringify(event))
+      .update(JSON.stringify(payload))
       .digest("base64url")}`;
   } catch {
     return undefined;

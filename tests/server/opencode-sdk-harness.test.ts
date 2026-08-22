@@ -191,6 +191,11 @@ const server = http.createServer((req, res) => {
               type: "session.telemetry",
               properties: { sessionID: childID },
             });
+            sendEvent({
+              id: "child-malformed-work-" + inactiveEvent,
+              type: "session.next.text.delta",
+              properties: { sessionID: childID, timestamp: Date.now() },
+            });
           }, 80);
           return;
         }
@@ -206,6 +211,7 @@ const server = http.createServer((req, res) => {
                 parentID: "child-prompt",
                 sessionID: childID,
                 role: "assistant",
+                tokens: { output: childEvent },
               },
             },
           }), 80);

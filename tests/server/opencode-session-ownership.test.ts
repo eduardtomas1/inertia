@@ -82,7 +82,10 @@ describe("OpenCode descendant session ownership", () => {
       .toEqual({ scope: "descendant", active: false });
     expect(ownership.observe(activeMessage))
       .toEqual({ scope: "descendant", active: true });
-    expect(ownership.observe(activeMessage))
+    expect(ownership.observe(event({
+      ...activeMessage,
+      id: "replayed-with-a-new-envelope-id",
+    })))
       .toEqual({ scope: "descendant", active: false });
     expect(ownership.observe(event({
       id: "idle-event",
@@ -101,6 +104,25 @@ describe("OpenCode descendant session ownership", () => {
       type: "session.telemetry",
       properties: { sessionID: "child-session" },
     }))).toEqual({ scope: "descendant", active: false });
+    expect(ownership.observe(event({
+      id: "malformed-known-event",
+      type: "session.next.text.delta",
+      properties: {
+        sessionID: "child-session",
+        timestamp: Date.now(),
+      },
+    }))).toEqual({ scope: "descendant", active: false });
+    expect(ownership.observe(event({
+      id: "valid-next-event",
+      type: "session.next.text.delta",
+      properties: {
+        sessionID: "child-session",
+        timestamp: Date.now(),
+        assistantMessageID: "child-assistant",
+        textID: "child-text",
+        delta: "working",
+      },
+    }))).toEqual({ scope: "descendant", active: true });
   });
 
   it("rejects unsafe identities and bounds the verified session graph", () => {

@@ -60,6 +60,12 @@ interface CodexCompactionCandidate {
   turnId: string;
 }
 
+interface CodexCompactionTurnState {
+  itemCompleted: boolean;
+  itemId: string | null;
+  startedAtMs: number | null;
+}
+
 function codexServiceTier(
   input: AgentHarnessStartOptions["input"],
 ): "priority" | null | undefined {
@@ -316,10 +322,8 @@ function startCodexCompaction(
       });
       const serviceTier = codexServiceTier(options.input);
       let compactionRequested = false;
-      let compactionItemId: string | null = null;
-      let compactionItemCompleted = false;
-      let compactionTurnId: string | null = null;
-      let compactionStartedAtMs: number | null = null;
+      const compactionTurns = new Map<string, CodexCompactionTurnState>();
+      const observedCompactionTurnIds = new Set<string>();
       const candidates: CodexCompactionCandidate[] = [];
       let observedCandidateCount = 0;
       let candidateFailure: Error | undefined;
@@ -383,12 +387,22 @@ function startCodexCompaction(
           if (method === "turn/started") {
             if (params.threadId !== sessionId) return;
             const turnId = exactCodexLifecycleId(objectValue(params.turn)?.id);
-            if (turnId) {
-              compactionTurnId = turnId;
-              compactionItemId = null;
-              compactionItemCompleted = false;
-              compactionStartedAtMs = null;
+            if (!turnId || observedCompactionTurnIds.has(turnId)) return;
+            if (
+              observedCompactionTurnIds.size
+              >= MAX_CODEX_COMPACTION_CANDIDATES
+            ) {
+              failCandidates(new Error(
+                "Codex context compaction returned too many lifecycle turns.",
+              ));
+              return;
             }
+            observedCompactionTurnIds.add(turnId);
+            compactionTurns.set(turnId, {
+              itemCompleted: false,
+              itemId: null,
+              startedAtMs: null,
+            });
             return;
           }
           if (method === "turn/completed") {
@@ -396,20 +410,18 @@ function startCodexCompaction(
             const turn = objectValue(params.turn);
             const turnId = exactCodexLifecycleId(turn?.id);
             const status = turn?.status;
+            if (!turnId) return;
+            const turnState = compactionTurns.get(turnId);
+            if (!turnState) return;
+            compactionTurns.delete(turnId);
             if (
-              !turnId
-              || turnId !== compactionTurnId
-              || !compactionItemCompleted
+              !turnState.itemCompleted
               || (
                 status !== "completed"
                 && status !== "failed"
                 && status !== "interrupted"
               )
             ) return;
-            compactionTurnId = null;
-            compactionItemId = null;
-            compactionItemCompleted = false;
-            compactionStartedAtMs = null;
             enqueueCandidate({
               successful: status === "completed",
               turnId,
@@ -422,27 +434,28 @@ function startCodexCompaction(
           if (item?.type !== "contextCompaction") return;
           const itemId = exactCodexLifecycleId(item.id);
           const turnId = exactCodexLifecycleId(params.turnId);
-          if (!itemId || !turnId || turnId !== compactionTurnId) return;
+          if (!itemId || !turnId) return;
+          const turnState = compactionTurns.get(turnId);
+          if (!turnState) return;
           if (method === "item/started") {
             const startedAtMs = params.startedAtMs;
             if (
               typeof startedAtMs !== "number"
               || !Number.isSafeInteger(startedAtMs)
             ) return;
-            compactionItemId ??= itemId;
-            compactionStartedAtMs ??= startedAtMs;
+            turnState.itemId ??= itemId;
+            turnState.startedAtMs ??= startedAtMs;
             return;
           }
           const completedAtMs = params.completedAtMs;
           if (
-            itemId === compactionItemId
-            && turnId === compactionTurnId
-            && compactionStartedAtMs !== null
+            itemId === turnState.itemId
+            && turnState.startedAtMs !== null
             && typeof completedAtMs === "number"
             && Number.isSafeInteger(completedAtMs)
-            && completedAtMs >= compactionStartedAtMs
+            && completedAtMs >= turnState.startedAtMs
           ) {
-            compactionItemCompleted = true;
+            turnState.itemCompleted = true;
           }
         },
       }, async (client) => {

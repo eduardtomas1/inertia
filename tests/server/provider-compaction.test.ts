@@ -981,7 +981,359 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     }))).resolves.toMatchObject({ status: "completed" });
   });
 
-  it("fails closed when Codex exceeds the bounded lifecycle candidate queue", async () => {
+  it("keeps interleaved real and stale Codex lifecycle state independent", async () => {
+    let turnListRequests = 0;
+    const withControlClient: NonNullable<
+      CodexAppServerHarnessDependencies["withControlClient"]
+    > = async (options, runWithClient) => {
+      const notify = options.onNotification;
+      if (!notify) throw new Error("Missing notifications.");
+      return await runWithClient({
+        request: async (method, params = {}) => {
+          if (method === "thread/resume") {
+            return {
+              thread: { id: params.threadId },
+              initialTurnsPage: { data: [{ id: "previous-turn" }] },
+            };
+          }
+          if (method === "thread/compact/start") {
+            notify("turn/started", {
+              threadId: params.threadId,
+              turn: {
+                id: "compact-turn-real",
+                status: "inProgress",
+                items: [],
+                error: null,
+              },
+            });
+            notify("item/started", {
+              threadId: params.threadId,
+              turnId: "compact-turn-real",
+              startedAtMs: 1,
+              item: { id: "compact-shared", type: "contextCompaction" },
+            });
+            emitCodexCompactionLifecycle(notify, {
+              itemId: "compact-shared",
+              threadId: "thread-existing",
+              turnId: "older-turn",
+            });
+            return {};
+          }
+          if (method === "thread/turns/list") {
+            turnListRequests += 1;
+            if (turnListRequests === 1) {
+              setImmediate(() => {
+                notify("item/completed", {
+                  threadId: "thread-existing",
+                  turnId: "compact-turn-real",
+                  completedAtMs: 2,
+                  item: { id: "compact-shared", type: "contextCompaction" },
+                });
+                notify("turn/completed", {
+                  threadId: "thread-existing",
+                  turn: {
+                    id: "compact-turn-real",
+                    status: "completed",
+                    items: [],
+                    error: null,
+                  },
+                });
+              });
+              return {
+                data: [{ id: "previous-turn" }, { id: "older-turn" }],
+              };
+            }
+            return {
+              data: [
+                { id: "compact-turn-real" },
+                { id: "previous-turn" },
+                { id: "older-turn" },
+              ],
+            };
+          }
+          throw new Error(`Unexpected control request: ${method}`);
+        },
+      });
+    };
+    const manager = trackManager(new ProviderManager(
+      { commands: { codex: process.execPath } },
+      new AgentHarnessRegistry([
+        createCodexAppServerHarness({
+          compactionTimeoutMs: 2_000,
+          withControlClient,
+        }),
+      ]),
+    ));
+
+    await expect(manager.compact(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "codex-compact-interleaved-stale-lifecycle",
+      cwd: process.cwd(),
+      prompt: "/compact",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: "thread-existing",
+    }))).resolves.toMatchObject({ status: "completed" });
+    expect(turnListRequests).toBe(2);
+  });
+
+  it("does not reset or recount a duplicate Codex turn start", async () => {
+    let turnListRequests = 0;
+    const withControlClient: NonNullable<
+      CodexAppServerHarnessDependencies["withControlClient"]
+    > = async (options, runWithClient) => {
+      const notify = options.onNotification;
+      if (!notify) throw new Error("Missing notifications.");
+      return await runWithClient({
+        request: async (method, params = {}) => {
+          if (method === "thread/resume") {
+            return {
+              thread: { id: params.threadId },
+              initialTurnsPage: { data: [{ id: "previous-turn" }] },
+            };
+          }
+          if (method === "thread/compact/start") {
+            notify("turn/started", {
+              threadId: params.threadId,
+              turn: {
+                id: "compact-turn-real",
+                status: "inProgress",
+                items: [],
+                error: null,
+              },
+            });
+            notify("item/started", {
+              threadId: params.threadId,
+              turnId: "compact-turn-real",
+              startedAtMs: 1,
+              item: { id: "compact-real", type: "contextCompaction" },
+            });
+            for (let duplicate = 0; duplicate < 40; duplicate += 1) {
+              notify("turn/started", {
+                threadId: params.threadId,
+                turn: {
+                  id: "compact-turn-real",
+                  status: "inProgress",
+                  items: [],
+                  error: null,
+                },
+              });
+            }
+            notify("item/completed", {
+              threadId: params.threadId,
+              turnId: "compact-turn-real",
+              completedAtMs: 2,
+              item: { id: "compact-real", type: "contextCompaction" },
+            });
+            notify("turn/completed", {
+              threadId: params.threadId,
+              turn: {
+                id: "compact-turn-real",
+                status: "completed",
+                items: [],
+                error: null,
+              },
+            });
+            return {};
+          }
+          if (method === "thread/turns/list") {
+            turnListRequests += 1;
+            return {
+              data: [{ id: "compact-turn-real" }, { id: "previous-turn" }],
+            };
+          }
+          throw new Error(`Unexpected control request: ${method}`);
+        },
+      });
+    };
+    const manager = trackManager(new ProviderManager(
+      { commands: { codex: process.execPath } },
+      new AgentHarnessRegistry([
+        createCodexAppServerHarness({ withControlClient }),
+      ]),
+    ));
+
+    await expect(manager.compact(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "codex-compact-duplicate-turn-start",
+      cwd: process.cwd(),
+      prompt: "/compact",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: "thread-existing",
+    }))).resolves.toMatchObject({ status: "completed" });
+    expect(turnListRequests).toBe(1);
+  });
+
+  it("does not reopen a turn after a malformed terminal notification", async () => {
+    let turnListRequests = 0;
+    const withControlClient: NonNullable<
+      CodexAppServerHarnessDependencies["withControlClient"]
+    > = async (options, runWithClient) => {
+      const notify = options.onNotification;
+      if (!notify) throw new Error("Missing notifications.");
+      return await runWithClient({
+        request: async (method, params = {}) => {
+          if (method === "thread/resume") {
+            return {
+              thread: { id: params.threadId },
+              initialTurnsPage: { data: [{ id: "previous-turn" }] },
+            };
+          }
+          if (method === "thread/compact/start") {
+            notify("turn/started", {
+              threadId: params.threadId,
+              turn: {
+                id: "compact-turn-out-of-order",
+                status: "inProgress",
+                items: [],
+                error: null,
+              },
+            });
+            notify("item/started", {
+              threadId: params.threadId,
+              turnId: "compact-turn-out-of-order",
+              startedAtMs: 1,
+              item: { id: "compact-late", type: "contextCompaction" },
+            });
+            notify("item/completed", {
+              threadId: params.threadId,
+              turnId: "compact-turn-out-of-order",
+              completedAtMs: 2,
+              item: { id: "compact-late", type: "contextCompaction" },
+            });
+            notify("turn/completed", {
+              threadId: params.threadId,
+              turn: {
+                id: "compact-turn-out-of-order",
+                status: "completed ",
+                items: [],
+                error: null,
+              },
+            });
+            notify("turn/started", {
+              threadId: params.threadId,
+              turn: {
+                id: "compact-turn-out-of-order",
+                status: "inProgress",
+                items: [],
+                error: null,
+              },
+            });
+            notify("item/started", {
+              threadId: params.threadId,
+              turnId: "compact-turn-out-of-order",
+              startedAtMs: 3,
+              item: { id: "compact-late", type: "contextCompaction" },
+            });
+            notify("item/completed", {
+              threadId: params.threadId,
+              turnId: "compact-turn-out-of-order",
+              completedAtMs: 4,
+              item: { id: "compact-late", type: "contextCompaction" },
+            });
+            notify("turn/completed", {
+              threadId: params.threadId,
+              turn: {
+                id: "compact-turn-out-of-order",
+                status: "completed",
+                items: [],
+                error: null,
+              },
+            });
+            return {};
+          }
+          if (method === "thread/turns/list") {
+            turnListRequests += 1;
+            return {
+              data: [
+                { id: "compact-turn-out-of-order" },
+                { id: "previous-turn" },
+              ],
+            };
+          }
+          throw new Error(`Unexpected control request: ${method}`);
+        },
+      });
+    };
+    const manager = trackManager(new ProviderManager(
+      { commands: { codex: process.execPath } },
+      new AgentHarnessRegistry([
+        createCodexAppServerHarness({
+          compactionTimeoutMs: 25,
+          withControlClient,
+        }),
+      ]),
+    ));
+
+    await expect(manager.compact(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "codex-compact-terminal-before-item",
+      cwd: process.cwd(),
+      prompt: "/compact",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: "thread-existing",
+    }))).resolves.toMatchObject({
+      status: "failed",
+      message: "Codex context compaction timed out.",
+    });
+    expect(turnListRequests).toBe(0);
+  });
+
+  it("fails closed when started-only Codex turns exceed the lifecycle bound", async () => {
+    const withControlClient: NonNullable<
+      CodexAppServerHarnessDependencies["withControlClient"]
+    > = async (options, runWithClient) => await runWithClient({
+      request: async (method, params = {}) => {
+        if (method === "thread/resume") {
+          return {
+            thread: { id: params.threadId },
+            initialTurnsPage: { data: [{ id: "previous-turn" }] },
+          };
+        }
+        if (method === "thread/compact/start") {
+          for (let index = 0; index < 33; index += 1) {
+            options.onNotification?.("turn/started", {
+              threadId: params.threadId,
+              turn: {
+                id: `started-only-${index}`,
+                status: "inProgress",
+                items: [],
+                error: null,
+              },
+            });
+          }
+          return {};
+        }
+        throw new Error(`Unexpected control request: ${method}`);
+      },
+    });
+    const manager = trackManager(new ProviderManager(
+      { commands: { codex: process.execPath } },
+      new AgentHarnessRegistry([
+        createCodexAppServerHarness({
+          compactionTimeoutMs: 100,
+          withControlClient,
+        }),
+      ]),
+    ));
+
+    await expect(manager.compact(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "codex-compact-started-only-overflow",
+      cwd: process.cwd(),
+      prompt: "/compact",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: "thread-existing",
+    }))).resolves.toMatchObject({
+      status: "failed",
+      message: expect.stringContaining("too many lifecycle turns"),
+    });
+  });
+
+  it("fails closed when Codex exceeds the bounded lifecycle turn count", async () => {
     const withControlClient: NonNullable<
       CodexAppServerHarnessDependencies["withControlClient"]
     > = async (options, runWithClient) => await runWithClient({
@@ -1049,11 +1401,11 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       sessionId: "thread-existing",
     }))).resolves.toMatchObject({
       status: "failed",
-      message: expect.stringContaining("too many lifecycle candidates"),
+      message: expect.stringContaining("too many lifecycle turns"),
     });
   });
 
-  it("applies the lifecycle candidate cap across paced durable checks", async () => {
+  it("applies the lifecycle turn cap across paced durable checks", async () => {
     let emittedCandidates = 0;
     let turnListRequests = 0;
     const withControlClient: NonNullable<
@@ -1117,7 +1469,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       sessionId: "thread-existing",
     }))).resolves.toMatchObject({
       status: "failed",
-      message: expect.stringContaining("too many lifecycle candidates"),
+      message: expect.stringContaining("too many lifecycle turns"),
     });
     expect(emittedCandidates).toBe(33);
     expect(turnListRequests).toBe(32);

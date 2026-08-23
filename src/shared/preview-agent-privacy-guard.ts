@@ -272,7 +272,7 @@ export function installPreviewAgentPrivacyGuard(): void {
     })
   );
   activationTarget.addEventListener("keydown", (event) => {
-    if (!state.agentInputActive) return;
+    if (!state.agentInputActive || event.isTrusted !== true) return;
     const key = activationKey(event);
     if (!key) return;
     state.agentActivationKey = key;
@@ -282,7 +282,7 @@ export function installPreviewAgentPrivacyGuard(): void {
   }, true);
   for (const eventName of ["keypress", "keyup"] as const) {
     activationTarget.addEventListener(eventName, (event) => {
-      if (!state.agentInputActive) return;
+      if (!state.agentInputActive || event.isTrusted !== true) return;
       const key = activationKey(event);
       if (!key || key !== state.agentActivationKey) return;
       if (state.blockedAgentActivationKey === key || activationEventBlocked(event)) {
@@ -297,7 +297,7 @@ export function installPreviewAgentPrivacyGuard(): void {
   }
   for (const eventName of ["beforeinput", "input"] as const) {
     activationTarget.addEventListener(eventName, (event) => {
-      if (!state.agentInputActive || !state.agentActivationKey) return;
+      if (!state.agentInputActive || event.isTrusted !== true || !state.agentActivationKey) return;
       if (!state.blockedAgentActivationKey && !activationEventBlocked(event)) return;
       state.blockedAgentActivationKey = state.agentActivationKey;
       stopActivationEvent(event);

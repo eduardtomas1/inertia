@@ -166,11 +166,11 @@ async function createPreviewServer(): Promise<{
       });
       response.end(
         "<!doctype html><title>Activation phase focus interleave</title>"
-        + "<button id='safe-focus' type='button'>Safe focus</button>"
-        + "<button id='late-disabled' type='button' aria-disabled='true'>Late disabled</button>"
+        + "<button id='safe-focus' type='button'>Safe focus</button><button id='late-disabled' type='button' aria-disabled='true'>Late disabled</button>"
         + "<script>const safe=document.querySelector('#safe-focus');const disabled=document.querySelector('#late-disabled');"
         + "disabled.addEventListener('click',()=>{window.__lateDisabledClicked=true});"
-        + "safe.addEventListener('keydown',()=>disabled.focus());"
+        + "safe.addEventListener('keydown',event=>{window.__trustedKeydown=event.isTrusted;safe.dispatchEvent(new KeyboardEvent('keyup',{bubbles:true,cancelable:true,composed:true,key:'Enter'}));"
+        + "disabled.focus()});"
         + "for(const name of ['keypress','keyup','beforeinput','input'])window.addEventListener(name,event=>{"
         + "if(document.activeElement===disabled)disabled.click()},true)</script>",
       );

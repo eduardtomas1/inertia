@@ -930,6 +930,7 @@ describe("agent browser semantic snapshots", () => {
         getAttribute: (name: string) => name === "aria-disabled" ? "true" : null,
         matches: () => false,
       }],
+      isTrusted: true,
       key: "Enter",
       preventDefault: keyPrevented,
       stopImmediatePropagation: keyStopped,
@@ -940,6 +941,7 @@ describe("agent browser semantic snapshots", () => {
       const sequencePrevented = vi.fn();
       const sequenceStopped = vi.fn();
       activationListeners.get(name)?.({
+        isTrusted: true,
         key,
         preventDefault: sequencePrevented,
         stopImmediatePropagation: sequenceStopped,
@@ -960,16 +962,27 @@ describe("agent browser semantic snapshots", () => {
     const allowedKeydownPrevented = vi.fn();
     activationListeners.get("keydown")?.({
       composedPath: () => [safeTarget],
+      isTrusted: true,
       key: "Enter",
       preventDefault: allowedKeydownPrevented,
       stopImmediatePropagation: vi.fn(),
     });
     expect(allowedKeydownPrevented).not.toHaveBeenCalled();
+    const syntheticKeyupPrevented = vi.fn();
+    activationListeners.get("keyup")?.({
+      composedPath: () => [safeTarget],
+      isTrusted: false,
+      key: "Enter",
+      preventDefault: syntheticKeyupPrevented,
+      stopImmediatePropagation: vi.fn(),
+    });
+    expect(syntheticKeyupPrevented).not.toHaveBeenCalled();
     for (const [name, key] of [["keypress", "Enter"], ["beforeinput", ""], ["input", ""], ["keyup", "Enter"]]) {
       const sequencePrevented = vi.fn();
       const sequenceStopped = vi.fn();
       activationListeners.get(name)?.({
         composedPath: () => [lateDisabledTarget],
+        isTrusted: true,
         key,
         preventDefault: sequencePrevented,
         stopImmediatePropagation: sequenceStopped,

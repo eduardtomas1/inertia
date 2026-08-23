@@ -66,6 +66,10 @@ describe("Browser evidence sanitization", () => {
     "passphrase=hunter2",
     "passcode: hunter2",
     "clientPasscode=hunter2",
+    "PGPASSWORD=hunter2",
+    "\"PGPASSWORD\": \"hunter2\"",
+    "MYSQL_PWD=hunter2",
+    "REDIS_PASSWORD=hunter2",
     "pwd%3Dhunter2",
     "request_body: private-value",
     "token%3Dprivate-value",
@@ -100,6 +104,54 @@ describe("Browser evidence sanitization", () => {
     "The passcode prompt is visible.",
     "The passphrase prompt is visible.",
   ])("does not treat a password alias in ordinary prose as an assignment: %s", (value) => {
+    expect(sanitizeBrowserEvidenceText(value, "hidden"))
+      .toEqual({ text: value, redacted: false });
+  });
+
+  it.each([
+    "PGPASSWORD is unset after setup.",
+    "MYSQL_PWD is documented by the adapter.",
+    "MONGODB_URI is configured separately.",
+  ])("does not treat an environment key in ordinary prose as an assignment: %s", (value) => {
+    expect(sanitizeBrowserEvidenceText(value, "hidden"))
+      .toEqual({ text: value, redacted: false });
+  });
+
+  it.each([
+    "postgres://alice:hunter2@localhost/private",
+    "PoStGrEs://alice:hunter2@localhost/private",
+    "postgresql://alice:hunter2@localhost/private",
+    "mysql://alice:hunter2@localhost/private",
+    "mongodb://alice:hunter2@localhost/private",
+    "redis://alice:hunter2@localhost/private",
+    "amqp://alice:hunter2@localhost/private",
+    "ssh://alice:hunter2@localhost/private",
+    "//alice:hunter2@localhost/private",
+    "postgres%3A%2F%2Falice%3Ahunter2%40localhost%2Fprivate",
+    "postgres://alice%3Ahunter2%40localhost/private",
+    "MONGODB_URI=MoNgOdB://alice:hunter2@localhost/private",
+    "\"MONGODB_URI\":\"mongodb://alice:hunter2@localhost/private\"",
+  ])("fails closed for credential-bearing hierarchical URI: %s", (value) => {
+    expect(sanitizeBrowserEvidenceText(value, "hidden"))
+      .toEqual({ text: "hidden", redacted: true });
+  });
+
+  it.each([
+    ["postgres://localhost/private", "postgres://localhost"],
+    ["postgresql://localhost:5432/private", "postgresql://localhost:5432"],
+    ["ssh://git@github.com/project/repository", "ssh://github.com"],
+    ["//localhost/private", "//localhost"],
+    ["MONGODB_URI=mongodb://localhost/private", "MONGODB_URI=mongodb://localhost"],
+  ])("projects a credential-free hierarchical URI without failing closed: %s", (value, projected) => {
+    const result = sanitizeBrowserEvidenceText(value, "hidden");
+    expect(result).toEqual({ text: projected, redacted: true });
+  });
+
+  it.each([
+    "The worker reported ratio: 2@home.",
+    "Contact alice@example.com after the pass.",
+    "Namespace::member rendered normally.",
+  ])("keeps ordinary colon and at-sign prose: %s", (value) => {
     expect(sanitizeBrowserEvidenceText(value, "hidden"))
       .toEqual({ text: value, redacted: false });
   });

@@ -57,6 +57,9 @@ describe("Browser evidence ledger", () => {
     "databasePwd=hunter2",
     "passphrase=hunter2",
     "passcode=hunter2",
+    "PGPASSWORD=hunter2",
+    "postgres://alice:hunter2@localhost/private",
+    "MONGODB_URI=mongodb://alice:hunter2@localhost/private",
   ])("fails closed before storing page-authored credential assignment: %s", (message) => {
     const ledger = new BrowserEvidenceLedger();
     ledger.recordConsoleError({ ...location, message });
@@ -75,6 +78,7 @@ describe("Browser evidence ledger", () => {
     "The pwd field is empty",
     "The pass completed normally",
     "The passcode prompt is visible",
+    "PGPASSWORD is unset",
   ])("keeps a non-credential page-authored identifier: %s", (message) => {
     const ledger = new BrowserEvidenceLedger();
     ledger.recordConsoleError({ ...location, message });
@@ -82,6 +86,19 @@ describe("Browser evidence ledger", () => {
     expect(ledger.snapshot().entries).toMatchObject([{
       detail: message,
       redacted: false,
+    }]);
+  });
+
+  it("keeps only the authority of a credential-free non-HTTP URI", () => {
+    const ledger = new BrowserEvidenceLedger();
+    ledger.recordConsoleError({
+      ...location,
+      message: "postgres://localhost/private?mode=public#setup",
+    });
+
+    expect(ledger.snapshot().entries).toMatchObject([{
+      detail: "postgres://localhost",
+      redacted: true,
     }]);
   });
 

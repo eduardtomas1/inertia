@@ -56,6 +56,7 @@ const CONTROL_OR_BIDI =
   /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u206f]+/gu;
 const HTTP_SCHEME = /https?:\/\//iu;
 const URL_TOKEN = /https?:\/\/[^\s<>"'`]+/giu;
+const AUTHORITY_URI_TOKEN = /(?:[A-Za-z][A-Za-z0-9+.-]*:)?\/\/[^\s<>"'`]+/giu;
 const FILE_URL = /(?<![A-Za-z0-9])file:\/\/[^\s<>"'`]+/giu;
 const POSIX_PATH = /(?<![A-Za-z0-9])\/(?:[^/\s,;:)"']+\/)+[^/\s,;:)"']+/gu;
 const RELATIVE_FILE_PATH = /(^|[\s(=:"'])(?:(?:\.{1,2}|[^/\s,;:)"']+)\/)+[^/\s,;:)"']+\.[A-Za-z0-9]{1,12}(?=$|[\s,;:)"'])/gu;
@@ -63,7 +64,7 @@ const WINDOWS_PATH = /\b[A-Za-z]:\\(?:[^\\\s,;:)"']+\\)*[^\\\s,;:)"']*/gu;
 const UNC_OR_HOME_PATH = /(?:\\\\[^\\\s]+\\[^\s,;:)"']+|~\/(?:[^\s,;:)"']+\/)*[^\s,;:)"']+)/gu;
 const WINDOWS_OR_UNC_PATH_PREFIX = /(?:(?:^|[^A-Za-z0-9])[A-Za-z]:[\\/]|\\\\|(?:^|[\s(="'])\/\/)/u;
 const CREDENTIAL_ASSIGNMENT =
-  /(?<![A-Za-z0-9])(api[-_ ]?key|authorization|proxy[-_ ]?authorization|cookie|set[-_ ]?cookie|credential|passcode|passphrase|password|passwd|pwd|secret|session|token)(?![A-Za-z0-9])["']?\s*[:=]\s*(?:(?:Bearer|Basic)\s+[^\s,;]+|"[^"]*"|'[^']*'|[^\s,;]+)/giu;
+  /(?<![A-Za-z0-9])(api[-_ ]?key|authorization|proxy[-_ ]?authorization|cookie|set[-_ ]?cookie|credential|passcode|passphrase|password|passwd|pgpassword|pwd|secret|session|token)(?![A-Za-z0-9])["']?\s*[:=]\s*(?:(?:Bearer|Basic)\s+[^\s,;]+|"[^"]*"|'[^']*'|[^\s,;]+)/giu;
 const AUTHORIZATION_VALUE = /(?<![A-Za-z0-9])(Bearer|Basic)\s+[^\s,;]+/giu;
 const PREFIXED_SECRET =
   /(?<![A-Za-z0-9])(?:(?:sk|rk|pk|ghp|github_pat|glpat|npm|pypi|hf|xox[baprs]|api|key|token)[-_][A-Za-z0-9_-]{8,}|(?:AKIA|ASIA)[A-Z0-9]{16}|AIza[A-Za-z0-9_-]{20,})(?![A-Za-z0-9])/gu;
@@ -73,9 +74,9 @@ const LONG_OPAQUE_VALUE = /(?<![A-Za-z0-9])(?=[A-Za-z0-9+/_=-]{32,}(?![A-Za-z0-9
 const TRAILING_SECRET_FRAGMENT =
   /(?<![A-Za-z0-9])(?:(?:sk|rk|pk|ghp|github_pat|xox[baprs]|api|key|token)[-_][A-Za-z0-9_-]*|eyJ[A-Za-z0-9_.-]*|(?:Bearer|Basic)\s+\S*)$/iu;
 const SENSITIVE_FIELD =
-  /(?<![A-Za-z0-9])(?:(?:access|auth|id|refresh)[-_ ]?token|api[-_ ]?key|authorization|proxy[-_ ]?authorization|cookie|set[-_ ]?cookie|credential|password|passwd|(?:passcode|passphrase|pwd)(?=\s*["']?\s*[:=])|private[-_ ]?key|request[-_ ]?body|secret|session|token)(?![A-Za-z0-9])/iu;
+  /(?<![A-Za-z0-9])(?:(?:access|auth|id|refresh)[-_ ]?token|api[-_ ]?key|authorization|proxy[-_ ]?authorization|cookie|set[-_ ]?cookie|credential|password|passwd|(?:passcode|passphrase|pgpassword|pwd)(?=\s*["']?\s*[:=])|private[-_ ]?key|request[-_ ]?body|secret|session|token)(?![A-Za-z0-9])/iu;
 const CAMEL_CASE_CREDENTIAL_ASSIGNMENT =
-  /(?<![A-Za-z0-9])(?:[A-Za-z][A-Za-z0-9]*?)?(?:AccessKey|AccessToken|APIKey|ApiKey|AuthHeader|AuthToken|Authorization|AuthorizationHeader|Cookie|Credential|Credentials|EncryptionKey|IDToken|IdToken|PAT|Pat|Passcode|Passphrase|Password|Passwd|PrivateKey|Pwd|RefreshToken|RequestBody|Secret|SecretKey|Session|SessionId|SigningKey|Token)(?:Value|Values)?(?![A-Za-z0-9])["']?\s*[:=]/giu;
+  /(?<![A-Za-z0-9])(?:[A-Za-z][A-Za-z0-9]*?)?(?:AccessKey|AccessToken|APIKey|ApiKey|AuthHeader|AuthToken|Authorization|AuthorizationHeader|Cookie|Credential|Credentials|EncryptionKey|IDToken|IdToken|PAT|Pat|PGPassword|Passcode|Passphrase|Password|Passwd|PrivateKey|Pwd|RefreshToken|RequestBody|Secret|SecretKey|Session|SessionId|SigningKey|Token)(?:Value|Values)?(?![A-Za-z0-9])["']?\s*[:=]/giu;
 const SECRET_HOST_FRAGMENT =
   /(?:(?:sk|rk|pk|ghp|github[-_]?pat|glpat|npm|pypi|hf|xox[baprs]|api|key|token)[-_][a-z0-9_-]{8,}|(?:akia|asia)[a-z0-9]{16}|aiza[a-z0-9_-]{20,})/iu;
 const MAX_PERCENT_DECODE_PASSES = 4;
@@ -95,6 +96,34 @@ function withoutHttpUrls(value: string): string {
   URL_TOKEN.lastIndex = 0;
   const remaining = value.replace(URL_TOKEN, "");
   URL_TOKEN.lastIndex = 0;
+  return remaining;
+}
+
+function parsedAuthorityUri(value: string): URL | null {
+  const candidate = value.replace(/[),.;!?]+$/u, "");
+  try {
+    return new URL(candidate.startsWith("//") ? `evidence:${candidate}` : candidate);
+  } catch {
+    return null;
+  }
+}
+
+function hasCredentialBearingUri(value: string): boolean {
+  AUTHORITY_URI_TOKEN.lastIndex = 0;
+  for (const match of value.matchAll(AUTHORITY_URI_TOKEN)) {
+    if (parsedAuthorityUri(match[0])?.password) {
+      AUTHORITY_URI_TOKEN.lastIndex = 0;
+      return true;
+    }
+  }
+  AUTHORITY_URI_TOKEN.lastIndex = 0;
+  return false;
+}
+
+function withoutAuthorityUris(value: string): string {
+  AUTHORITY_URI_TOKEN.lastIndex = 0;
+  const remaining = value.replace(AUTHORITY_URI_TOKEN, "");
+  AUTHORITY_URI_TOKEN.lastIndex = 0;
   return remaining;
 }
 
@@ -164,6 +193,25 @@ function replaceUrl(value: string): { value: string; redacted: boolean } {
   return { value: replaced, redacted };
 }
 
+function replaceAuthorityUri(value: string): { value: string; redacted: boolean } {
+  let redacted = false;
+  AUTHORITY_URI_TOKEN.lastIndex = 0;
+  const replaced = value.replace(AUTHORITY_URI_TOKEN, (match) => {
+    const url = parsedAuthorityUri(match);
+    if (!url || url.password || !url.hostname || suspiciousHostname(url.hostname)) {
+      redacted = true;
+      return "<redacted-url>";
+    }
+    const directHttp = url.protocol === "http:" || url.protocol === "https:";
+    if (directHttp) return match;
+    redacted = true;
+    const protocol = match.startsWith("//") ? "" : url.protocol;
+    return `${protocol}//${url.host}`;
+  });
+  AUTHORITY_URI_TOKEN.lastIndex = 0;
+  return { value: replaced, redacted };
+}
+
 /**
  * Sanitizes page-authored evidence before it enters main-process storage.
  * This is intentionally lossy: uncertain credential-bearing fields fail
@@ -192,14 +240,17 @@ export function sanitizeBrowserEvidenceText(
   ) {
     return { text: fallback.slice(0, limit), redacted: true };
   }
-  const decodedWithoutHttpUrls = decoded === inspected
-    ? inspectedWithoutHttpUrls
-    : withoutHttpUrls(decoded);
+  const inspectedWithoutAuthorityUris = withoutAuthorityUris(inspected);
+  const decodedWithoutAuthorityUris = decoded === inspected
+    ? inspectedWithoutAuthorityUris
+    : withoutAuthorityUris(decoded);
   if (
     SENSITIVE_FIELD.test(inspected)
     || patternMatches(CAMEL_CASE_CREDENTIAL_ASSIGNMENT, inspected)
     || patternMatches(AUTHORIZATION_VALUE, inspected)
-    || hasFilesystemPathCandidate(inspectedWithoutHttpUrls)
+    || hasCredentialBearingUri(inspected)
+    || patternMatches(FILE_URL, inspected)
+    || hasFilesystemPathCandidate(inspectedWithoutAuthorityUris)
     || (
       decoded !== inspected
       && (
@@ -209,7 +260,9 @@ export function sanitizeBrowserEvidenceText(
         || patternMatches(PREFIXED_SECRET, decoded)
         || patternMatches(JWT, decoded)
         || patternMatches(PRIVATE_KEY, decoded)
-        || hasFilesystemPathCandidate(decodedWithoutHttpUrls)
+        || hasCredentialBearingUri(decoded)
+        || patternMatches(FILE_URL, decoded)
+        || hasFilesystemPathCandidate(decodedWithoutAuthorityUris)
       )
     )
   ) {
@@ -223,6 +276,9 @@ export function sanitizeBrowserEvidenceText(
   const url = replaceUrl(text);
   text = url.value;
   redacted ||= url.redacted;
+  const authorityUri = replaceAuthorityUri(text);
+  text = authorityUri.value;
+  redacted ||= authorityUri.redacted;
   const replacements: ReadonlyArray<readonly [RegExp, string]> = [
     [FILE_URL, "<path>"],
     [POSIX_PATH, "$1<path>"],

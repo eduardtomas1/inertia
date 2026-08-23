@@ -605,6 +605,13 @@ describe("agent-owned native Browser", () => {
       preventDefault: pwdPreventDefault,
     });
     expect(pwdPreventDefault).toHaveBeenCalledOnce();
+    const uriPreventDefault = vi.fn();
+    contents.emit("console-message", {
+      level: "error",
+      message: "MONGODB_URI=mongodb://alice:hunter2@localhost/private",
+      preventDefault: uriPreventDefault,
+    });
+    expect(uriPreventDefault).toHaveBeenCalledOnce();
     await vi.waitFor(() => expect(pageTools.agentPageHasSensitiveEvidence)
       .toHaveBeenCalledWith(contents));
     pageTools.agentPageHasSensitiveEvidence.mockResolvedValueOnce(true);
@@ -645,6 +652,8 @@ describe("agent-owned native Browser", () => {
     const serialized = JSON.stringify(state.evidence);
     expect(serialized).not.toContain("console-value");
     expect(serialized).not.toContain("hunter2");
+    expect(serialized).not.toContain("MONGODB_URI");
+    expect(serialized).not.toContain("mongodb://alice");
     expect(serialized).not.toContain("/Users/alice");
     expect(serialized).not.toContain("network-value");
     expect(serialized).not.toContain("never-store");
@@ -676,7 +685,7 @@ describe("agent-owned native Browser", () => {
       entry.detail === "Sensitive console detail hidden" && entry.redacted
     )).toBe(true);
     expect(consoleEvidence.reduce((total, entry) => total + entry.occurrences, 0))
-      .toBe(3);
+      .toBe(4);
 
     const capture = state.evidence.entries.find((entry) => entry.kind === "screenshot");
     expect(capture).toBeDefined();

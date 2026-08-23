@@ -35,8 +35,9 @@ export function installPreviewAgentShadowBoundarySignal(eventName: string): void
     Object.defineProperty(Element.prototype, "attachShadow", {
       ...shadowDescriptor,
       value(this: Element, init: ShadowRootInit): ShadowRoot {
+        const root = Reflect.apply(attachShadow, this, [init]) as ShadowRoot;
         signal();
-        return Reflect.apply(attachShadow, this, [init]) as ShadowRoot;
+        return root;
       },
     });
   }

@@ -117,6 +117,45 @@ describe("agent browser semantic snapshots", () => {
     expect(dispatched).toEqual(["nested-boundary"]);
   });
 
+  it("signals an imperative shadow boundary only after native creation succeeds", () => {
+    const dispatched: string[] = [];
+    class FakeEvent {
+      constructor(readonly type: string) {}
+    }
+    class FakeEventTarget {
+      dispatchEvent(event: FakeEvent): boolean {
+        dispatched.push(event.type);
+        return true;
+      }
+    }
+    class FakeElement extends FakeEventTarget {
+      attachShadow(init: { mode?: string }): object {
+        if (init.mode !== "closed") throw new TypeError("Invalid shadow root mode");
+        return {};
+      }
+    }
+    class FakeHTMLElement extends FakeElement {
+      attachInternals(): object { return { shadowRoot: null }; }
+    }
+    const context = {
+      document: new FakeEventTarget(),
+      Element: FakeElement,
+      HTMLElement: FakeHTMLElement,
+      EventTarget: FakeEventTarget,
+      Event: FakeEvent,
+    };
+
+    runInNewContext(
+      `(${installPreviewAgentShadowBoundarySignal.toString()})("nested-boundary")`,
+      context,
+    );
+    expect(() => runInNewContext("new Element().attachShadow({mode:'invalid'})", context))
+      .toThrow("Invalid shadow root mode");
+    expect(dispatched).toEqual([]);
+    runInNewContext("new Element().attachShadow({mode:'closed'})", context);
+    expect(dispatched).toEqual(["nested-boundary"]);
+  });
+
   it("signals declarative-root parsing before a detached host can disappear", () => {
     const dispatched: string[] = [];
     class FakeEvent {

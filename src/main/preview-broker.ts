@@ -752,7 +752,7 @@ export class PreviewBroker {
   ): void {
     slot.activity = {
       action,
-      label,
+      label: label.slice(0, 300),
       tabId,
       at: new Date().toISOString(),
       ...point,

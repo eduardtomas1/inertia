@@ -373,6 +373,43 @@ describe("agent-owned native Browser", () => {
     expect(children[0]!.webContents.insertedText).toEqual(["hello"]);
   });
 
+  it("keeps click and type activity labels valid for maximum-length element names", async () => {
+    const { broker } = harness();
+    await broker.navigate({
+      ownerId: "primary",
+      contextId: conversationId,
+      url: "http://127.0.0.1:3000/",
+    });
+    const maximumName = "界".repeat(300);
+    pageTools.locateAgentPageRef.mockResolvedValue({
+      found: true, blocked: false, disabled: false, editable: true,
+      label: maximumName, x: 42, y: 28,
+    });
+
+    const clicked = await broker.perform(conversationId, { action: "click", ref: "e1" });
+    expect(clicked).toMatchObject({ ok: true });
+    expect(parseAgentBrowserResult(clicked)).not.toBeNull();
+    if (!clicked.ok) return;
+    expect(clicked.state.activity?.label).toHaveLength(300);
+    expect(clicked.state.activity?.label).toMatch(/^Agent clicked /u);
+
+    const typed = await broker.perform(conversationId, {
+      action: "type", ref: "e2", text: "hello", replace: true,
+    });
+    expect(typed).toMatchObject({ ok: true });
+    expect(parseAgentBrowserResult(typed)).not.toBeNull();
+    if (!typed.ok) return;
+    expect(typed.state.activity?.label).toHaveLength(300);
+    expect(typed.state.activity?.label).toMatch(/^Agent typed in /u);
+    await expect(broker.perform(conversationId, { action: "tabs" }))
+      .resolves.toSatisfy((result) => parseAgentBrowserResult(result) !== null);
+
+    pageTools.locateAgentPageRef.mockResolvedValue({
+      found: true, blocked: false, disabled: false, editable: true,
+      label: "Run checks", x: 42, y: 28,
+    });
+  });
+
   it("refuses typing when a focus-handler microtask moves focus to another element", async () => {
     const { broker, children } = harness();
     await broker.navigate({

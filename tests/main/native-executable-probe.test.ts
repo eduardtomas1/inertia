@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, win32 } from "node:path";
@@ -8,7 +9,7 @@ import { expect, test } from "vitest";
 
 const root = join(import.meta.dirname, "..", "..");
 
-function processExists(pid: number): boolean {
+function signaledProcessExists(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
@@ -17,12 +18,41 @@ function processExists(pid: number): boolean {
   }
 }
 
-async function waitForExit(pid: number): Promise<void> {
-  const deadline = Date.now() + 5_000;
-  while (processExists(pid) && Date.now() < deadline) {
-    await new Promise((resolveWait) => setTimeout(resolveWait, 25));
+function processState(pid: number): string | null {
+  if (!signaledProcessExists(pid)) return null;
+  if (process.platform === "linux") {
+    try {
+      const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+      const commandEnd = stat.lastIndexOf(")");
+      const state = commandEnd >= 0 ? stat.slice(commandEnd + 2, commandEnd + 3) : "";
+      return /^[A-Z]$/u.test(state) ? state : "?";
+    } catch {
+      return signaledProcessExists(pid) ? "?" : null;
+    }
   }
-  expect(processExists(pid)).toBe(false);
+  if (process.platform === "win32") return "R";
+  const result = spawnSync(
+    "/bin/ps",
+    ["-o", "stat=", "-p", String(pid)],
+    { encoding: "utf8", shell: false, timeout: 1_000 },
+  );
+  const state = result.status === 0 ? result.stdout.trim().slice(0, 1) : "";
+  return state || (signaledProcessExists(pid) ? "?" : null);
+}
+
+function processExists(pid: number): boolean {
+  return processState(pid) !== null;
+}
+
+async function waitForTermination(pid: number): Promise<string | null> {
+  const deadline = Date.now() + 5_000;
+  let state = processState(pid);
+  while (state !== null && !new Set(["X", "Z"]).has(state) && Date.now() < deadline) {
+    await new Promise((resolveWait) => setTimeout(resolveWait, 25));
+    state = processState(pid);
+  }
+  expect(state === null || state === "X" || state === "Z").toBe(true);
+  return state;
 }
 
 function forceCleanup(pid: number): void {
@@ -94,7 +124,12 @@ test.skipIf(process.platform === "win32")(
       expect(processExists(descendantPid)).toBe(true);
       await deadlineFailure;
       expect(Date.now() - startedAt).toBeLessThan(5_000);
-      await waitForExit(descendantPid);
+      const terminalState = await waitForTermination(descendantPid);
+      if (process.platform === "linux") {
+        process.stdout.write(
+          `Native probe orphan termination state: ${terminalState ?? "reaped"}.\n`,
+        );
+      }
     } finally {
       forceCleanup(descendantPid);
       await rm(temporaryDirectory, { force: true, recursive: true });
@@ -138,7 +173,7 @@ test.skipIf(process.platform !== "win32")(
       }
       expect(Number.isSafeInteger(descendantPid)).toBe(true);
       await expect(probe).rejects.toThrow("exceeded its 1000ms deadline");
-      await waitForExit(descendantPid);
+      await waitForTermination(descendantPid);
     } finally {
       forceCleanup(descendantPid);
       await rm(temporaryDirectory, { force: true, recursive: true });
@@ -186,7 +221,7 @@ test.skipIf(process.platform === "win32")(
       expect(group.status).toBe(0);
       expect(Number(group.stdout.trim())).toBe(ptyPid);
       await deadlineFailure;
-      await waitForExit(ptyPid);
+      await waitForTermination(ptyPid);
     } finally {
       forceCleanup(ptyPid);
       await rm(temporaryDirectory, { force: true, recursive: true });

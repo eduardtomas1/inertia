@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
-import { captureAgentBrowserSnapshot, expectClosedShadowActivationBlocked, expectDocumentStartPrivacyGuard, expectFocusNavigationSettlement, expectHoverRetargetingGuard, expectMicrotaskFocusTheftBlocked, expectSemanticClickBoundaries } from "./support/agent-browser-security";
+import { captureAgentBrowserSnapshot, expectClosedShadowActivationBlocked, expectDocumentStartPrivacyGuard, expectFocusNavigationSettlement, expectHoverRetargetingGuard, expectMicrotaskFocusTheftBlocked, expectSemanticClickBoundaries, expectWindowCapturePrivacyGuard } from "./support/agent-browser-security";
 import { selectWorkspaceTool } from "./support/workspace-tools";
 let app!: AppFixture;
 let page!: AppFixture["page"];
@@ -618,6 +618,7 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
   await expectClosedShadowActivationBlocked(app, primaryConversationId, `${app.previewUrl}agent-browser-closed-disabled-focus`);
   const privacyUrl = `${app.previewUrl}agent-browser-privacy-start`;
   await expectDocumentStartPrivacyGuard(app, primaryConversationId, privacyUrl);
+  await expectWindowCapturePrivacyGuard(app, primaryConversationId, `${app.previewUrl}agent-browser-window-capture-privacy`);
   for (const [path, secret] of [
     ["agent-browser-nested-privacy-start", "nested-password-sentinel"],
     ["agent-browser-frame-lifetime-privacy", "removed-frame-password-sentinel"],

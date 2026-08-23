@@ -245,8 +245,12 @@ export function installPreviewAgentPrivacyGuard(
     // newly entered value into the ordinary top-level DOM and remove the host.
     if (!exposedControl) state.nestedContentObserved = true;
   };
-  document.addEventListener("beforeinput", inspectInputEvent, true);
-  document.addEventListener("input", inspectInputEvent, true);
+  // Preload installs this before author scripts. Observe from the earliest
+  // capture boundary so a page-owned window handler cannot mirror and clear a
+  // password before the privacy guard sees its original control and value.
+  const activationTarget = typeof owner.addEventListener === "function" ? owner : document;
+  activationTarget.addEventListener("beforeinput", inspectInputEvent, true);
+  activationTarget.addEventListener("input", inspectInputEvent, true);
   document.addEventListener("click", (event) => {
     if (!state.agentInputActive) return;
     const fileInput = event.composedPath().some((node) => {
@@ -257,7 +261,6 @@ export function installPreviewAgentPrivacyGuard(
     event.preventDefault();
     event.stopImmediatePropagation();
   }, true);
-  const activationTarget = typeof owner.addEventListener === "function" ? owner : document;
   const activationKey = (event: Event): "Enter" | "Space" | null => {
     const key = String((event as KeyboardEvent).key || "");
     if (key === "Enter" || key === "\r") return "Enter";

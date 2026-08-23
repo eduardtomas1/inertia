@@ -857,7 +857,7 @@ describe("agent browser semantic snapshots", () => {
       querySelectorAll: () => [],
     };
     let clickListener: ((event: Record<string, unknown>) => void) | undefined;
-    let inputListener: ((event: Record<string, unknown>) => void) | undefined;
+    let privacyInputListener: ((event: Record<string, unknown>) => void) | undefined;
     const activationListeners = new Map<string, (event: Record<string, unknown>) => void>();
     let nestedBoundaryListener: ((event: Record<string, unknown>) => void) | undefined;
     const document = withSemanticIterator({
@@ -867,7 +867,6 @@ describe("agent browser semantic snapshots", () => {
       activeElement: null,
       addEventListener: vi.fn((name: string, listener: (event: Record<string, unknown>) => void) => {
         if (name === "click") clickListener = listener;
-        if (name === "input") inputListener = listener;
         if (name === "__inertia_agent_nested_boundary__") nestedBoundaryListener = listener;
       }),
       querySelectorAll: () => [input],
@@ -889,6 +888,7 @@ describe("agent browser semantic snapshots", () => {
       scrollY: 0,
       getComputedStyle: () => ({ visibility: "visible", display: "block", opacity: "1" }),
       addEventListener: vi.fn((name: string, listener: (event: Record<string, unknown>) => void) => {
+        if (name === "input" && !privacyInputListener) privacyInputListener = listener;
         activationListeners.set(name, listener);
       }),
     };
@@ -900,6 +900,10 @@ describe("agent browser semantic snapshots", () => {
     };
 
     await installAgentPagePrivacyGuard(contents as never);
+    expect(document.addEventListener.mock.calls.map(([name]) => name))
+      .not.toContain("input");
+    expect(context.addEventListener.mock.calls.slice(0, 2).map(([name]) => name))
+      .toEqual(["beforeinput", "input"]);
     input.value = secret;
     input.type = "text";
     document.title = secret;
@@ -1017,7 +1021,14 @@ describe("agent browser semantic snapshots", () => {
     }
     await setAgentPageInputGuard(contents as never, false);
     runInNewContext("globalThis.__inertiaAgentBrowser.passwordValues.clear()", context);
-    inputListener?.({ composedPath: () => [{ tagName: "CREDENTIAL-HOST" }] });
+    input.type = "password";
+    input.value = secret;
+    privacyInputListener?.({ composedPath: () => [input] });
+    input.value = "";
+    input.type = "text";
+    await expect(agentPageHasSensitiveEvidence(contents as never)).resolves.toBe(true);
+    runInNewContext("globalThis.__inertiaAgentBrowser.passwordValues.clear()", context);
+    privacyInputListener?.({ composedPath: () => [{ tagName: "CREDENTIAL-HOST" }] });
     await expect(agentPageHasSensitiveEvidence(contents as never)).resolves.toBe(true);
     runInNewContext("globalThis.__inertiaAgentBrowser.nestedContentObserved = false", context);
     nestedBoundaryListener?.({});

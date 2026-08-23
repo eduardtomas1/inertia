@@ -75,6 +75,75 @@ export async function expectDocumentStartPrivacyGuard(
   expect(JSON.stringify(evidence)).not.toContain(forbiddenText);
 }
 
+export async function expectWindowCapturePrivacyGuard(
+  app: AppFixture,
+  conversationId: string,
+  url: string,
+): Promise<void> {
+  const secret = "window-capture-password-sentinel";
+  const evidence = await app.electronApp.evaluate(
+    async ({ webContents }, request) => {
+      type Command =
+        | { action: "snapshot" | "screenshot" | "tabs" }
+        | { action: "tab-open"; url: string }
+        | { action: "tab-activate" | "tab-close"; tabId: string }
+        | { action: "type"; ref: string; replace: boolean; text: string };
+      type Result = {
+        code?: string;
+        ok: boolean;
+        state?: { activeTabId: string };
+        text?: string;
+      };
+      const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
+        agentBrowser: (id: string, command: Command) => Promise<Result>;
+      };
+      const before = await runtime.agentBrowser(request.conversationId, { action: "tabs" });
+      if (!before.ok || !before.state) return { before };
+      const previousTabId = before.state.activeTabId;
+      const opened = await runtime.agentBrowser(request.conversationId, {
+        action: "tab-open", url: request.url,
+      });
+      if (!opened.ok || !opened.state) return { opened };
+      const tabId = opened.state.activeTabId;
+      const initial = await runtime.agentBrowser(request.conversationId, { action: "snapshot" });
+      const elements = initial.text
+        ? (JSON.parse(initial.text) as { elements: Array<{ name: string; ref: string }> }).elements
+        : [];
+      const ref = elements.find((element) => element.name === "Password field")?.ref;
+      const typed = ref ? await runtime.agentBrowser(request.conversationId, {
+        action: "type", ref, replace: true, text: request.secret,
+      }) : null;
+      const contents = webContents.getAllWebContents().find(
+        (candidate) => candidate.getURL() === request.url,
+      );
+      const pageState = await contents?.executeJavaScript(`({
+        inputEmpty: document.querySelector('#credential')?.value === '',
+        mirrorMatched: document.querySelector('#mirror')?.textContent
+          === ${JSON.stringify(request.secret)}
+      })`);
+      const snapshot = await runtime.agentBrowser(request.conversationId, { action: "snapshot" });
+      const screenshot = await runtime.agentBrowser(request.conversationId, { action: "screenshot" });
+      const closed = await runtime.agentBrowser(request.conversationId, { action: "tab-close", tabId });
+      const restored = await runtime.agentBrowser(request.conversationId, {
+        action: "tab-activate", tabId: previousTabId,
+      });
+      return { closed, initial, opened, pageState, ref, restored, screenshot, snapshot, typed };
+    },
+    { conversationId, secret, url },
+  );
+  expect(evidence).toMatchObject({
+    opened: { ok: true },
+    initial: { ok: true },
+    typed: { ok: true },
+    pageState: { inputEmpty: true, mirrorMatched: true },
+    snapshot: { ok: false, code: "invalid" },
+    screenshot: { ok: false, code: "invalid" },
+    closed: { ok: true },
+    restored: { ok: true },
+  });
+  expect(JSON.stringify(evidence)).not.toContain(secret);
+}
+
 export async function expectHoverRetargetingGuard(
   app: AppFixture,
   conversationId: string,

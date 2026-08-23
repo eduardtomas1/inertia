@@ -87,10 +87,16 @@ export class BrowserEvidenceLedger {
   snapshot(): BrowserEvidenceSnapshot {
     return {
       revision: this.#revision,
-      entries: this.#entries.map((entry) => ({
-        ...entry,
-        ...(entry.screenshot ? { screenshot: { ...entry.screenshot } } : {}),
-      })),
+      entries: this.#entries
+        .slice()
+        .sort((left, right) =>
+          left.occurredAt.localeCompare(right.occurredAt)
+          || left.sequence - right.sequence
+        )
+        .map((entry) => ({
+          ...entry,
+          ...(entry.screenshot ? { screenshot: { ...entry.screenshot } } : {}),
+        })),
       omitted: this.#omitted,
     };
   }

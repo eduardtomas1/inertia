@@ -46,12 +46,18 @@ describe("Browser evidence capture", () => {
     capture.recordConsoleError(pages[0]!, "first failure");
     vi.setSystemTime("2026-08-23T07:00:01.000Z");
     capture.recordConsoleError(pages[1]!, "second failure");
+    vi.setSystemTime("2026-08-23T07:00:02.000Z");
+    capture.recordNavigation(
+      pages[0]!,
+      "https://example.com/after-console",
+      true,
+    );
     vi.setSystemTime("2026-08-23T07:00:05.000Z");
     secondInspection.resolve(false);
     await Promise.resolve();
-    expect(capture.snapshot().entries).toEqual([]);
+    expect(capture.snapshot().entries).toMatchObject([{ kind: "navigation" }]);
     firstInspection.resolve(false);
-    await vi.waitFor(() => expect(capture.snapshot().entries).toHaveLength(2));
+    await vi.waitFor(() => expect(capture.snapshot().entries).toHaveLength(3));
 
     expect(capture.snapshot().entries).toEqual([
       expect.objectContaining({
@@ -61,6 +67,10 @@ describe("Browser evidence capture", () => {
       expect.objectContaining({
         detail: "second failure",
         occurredAt: "2026-08-23T07:00:01.000Z",
+      }),
+      expect.objectContaining({
+        kind: "navigation",
+        occurredAt: "2026-08-23T07:00:02.000Z",
       }),
     ]);
   });

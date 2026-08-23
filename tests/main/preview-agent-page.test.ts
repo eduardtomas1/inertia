@@ -336,6 +336,39 @@ describe("agent browser semantic snapshots", () => {
     `, context);
 
     expect(dispatched).toEqual(Array(12).fill("nested-boundary"));
+    const descriptorRoutes = [
+      `const input = new HTMLInputElement(); input.type = "password";
+        Object.defineProperty(input, "value", {
+          configurable: true, writable: true, value: "hunter2",
+        }); delete input.value;`,
+      `const input = new HTMLInputElement(); input.type = "password";
+        Object.defineProperties(input, {
+          value: { configurable: true, writable: true, value: "hunter2" },
+        }); delete input.value;`,
+      `const input = new HTMLInputElement(); input.type = "password";
+        Reflect.defineProperty(input, "value", {
+          configurable: true, writable: true, value: "hunter2",
+        }); delete input.value;`,
+      `const input = new HTMLInputElement();
+        Object.defineProperty(input, "value", {
+          configurable: true, writable: true, value: "hunter2",
+        }); input.type = "password"; delete input.value;`,
+      `const input = new HTMLInputElement(); input.type = "password";
+        Object.prototype.__defineGetter__.call(input, "value", () => "hunter2");
+        delete input.value;`,
+    ];
+    for (const [index, route] of descriptorRoutes.entries()) {
+      runInNewContext(`{${route}}`, context);
+      expect(dispatched, route).toHaveLength(13 + index);
+    }
+    runInNewContext(`{
+      const input = new HTMLInputElement();
+      Object.defineProperty(input, "value", {
+        configurable: true, writable: true, value: "brief note",
+      });
+      delete input.value;
+    }`, context);
+    expect(dispatched).toHaveLength(17);
   });
 
   it("signals private parser content before a detached host can disappear", () => {

@@ -20,6 +20,11 @@ export const NATIVE_CREDENTIAL_AUDIT_ROUTES = [
   "document-writeln",
   "set-html-unsafe",
   "document-parse-html-unsafe",
+  "object-define-property",
+  "object-define-properties",
+  "reflect-define-property",
+  "define-property-before-type",
+  "legacy-define-getter",
 ] as const;
 
 const nativeCredentialSource: Record<(typeof NATIVE_CREDENTIAL_AUDIT_ROUTES)[number], string> = {
@@ -42,6 +47,11 @@ const nativeCredentialSource: Record<(typeof NATIVE_CREDENTIAL_AUDIT_ROUTES)[num
   "document-writeln": "const parsed=document.implementation.createHTMLDocument('');parsed.writeln(markup);const input=parsed.querySelector('input');leaked=input.value;clear=()=>{parsed.body.textContent=''}",
   "set-html-unsafe": "const host=document.createElement('div');if(typeof host.setHTMLUnsafe!=='function')throw new Error('unsupported');host.setHTMLUnsafe(markup);const input=host.firstElementChild;leaked=input.value;clear=()=>{host.setHTMLUnsafe('')}",
   "document-parse-html-unsafe": "if(typeof Document.parseHTMLUnsafe!=='function')throw new Error('unsupported');const parsed=Document.parseHTMLUnsafe(markup);const input=parsed.querySelector('input');leaked=input.value;clear=()=>input.remove()",
+  "object-define-property": "const input=document.createElement('input');input.type='password';Object.defineProperty(input,'value',{configurable:true,writable:true,value:secret});leaked=input.value;clear=()=>{delete input.value}",
+  "object-define-properties": "const input=document.createElement('input');input.type='password';Object.defineProperties(input,{value:{configurable:true,writable:true,value:secret}});leaked=input.value;clear=()=>{delete input.value}",
+  "reflect-define-property": "const input=document.createElement('input');input.type='password';Reflect.defineProperty(input,'value',{configurable:true,writable:true,value:secret});leaked=input.value;clear=()=>{delete input.value}",
+  "define-property-before-type": "const input=document.createElement('input');Object.defineProperty(input,'value',{configurable:true,writable:true,value:secret});input.type='password';leaked=input.value;clear=()=>{delete input.value}",
+  "legacy-define-getter": "const input=document.createElement('input');input.type='password';input.__defineGetter__('value',()=>secret);leaked=input.value;clear=()=>{delete input.value}",
 };
 
 export function serveAgentBrowserPrivacyFixture(

@@ -102,6 +102,22 @@ export function installPreviewAgentShadowBoundarySignal(eventName: string): void
   const nodeTextContentDescriptor = typeof Node === "undefined"
     ? undefined
     : Object.getOwnPropertyDescriptor(Node.prototype, "textContent");
+  const objectDefinePropertyDescriptor = Object.getOwnPropertyDescriptor(
+    Object,
+    "defineProperty",
+  );
+  const objectDefinePropertiesDescriptor = Object.getOwnPropertyDescriptor(
+    Object,
+    "defineProperties",
+  );
+  const reflectDefinePropertyDescriptor = Object.getOwnPropertyDescriptor(
+    Reflect,
+    "defineProperty",
+  );
+  const legacyDefineGetterDescriptor = Object.getOwnPropertyDescriptor(
+    Object.prototype,
+    "__defineGetter__",
+  );
   const inputValueGetter = inputValueDescriptor?.get;
   const inputValueSetter = inputValueDescriptor?.set;
   const inputTypeGetter = inputTypeDescriptor?.get;
@@ -120,7 +136,23 @@ export function installPreviewAgentShadowBoundarySignal(eventName: string): void
   const attrValueSetter = attrValueDescriptor?.set;
   const nodeValueSetter = nodeValueDescriptor?.set;
   const nodeTextContentSetter = nodeTextContentDescriptor?.set;
+  const objectDefineProperty = objectDefinePropertyDescriptor?.value as
+    | typeof Object.defineProperty
+    | undefined;
+  const objectDefineProperties = objectDefinePropertiesDescriptor?.value as
+    | typeof Object.defineProperties
+    | undefined;
+  const reflectDefineProperty = reflectDefinePropertyDescriptor?.value as
+    | typeof Reflect.defineProperty
+    | undefined;
+  const legacyDefineGetter = legacyDefineGetterDescriptor?.value as
+    | ((propertyKey: PropertyKey, getter: () => unknown) => void)
+    | undefined;
+  const nativeGetOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
   const nativeIsPrototypeOf = Object.prototype.isPrototypeOf;
+  const nativeWeakSetAdd = WeakSet.prototype.add;
+  const nativeWeakSetHas = WeakSet.prototype.has;
+  const ownValueInputs = new WeakSet<object>();
   const inputPrototype = typeof HTMLInputElement === "undefined"
     ? undefined
     : HTMLInputElement.prototype;
@@ -148,9 +180,39 @@ export function installPreviewAgentShadowBoundarySignal(eventName: string): void
     try {
       const assignedValue = Reflect.apply(inputValueGetter!, input, []) as string;
       const defaultValue = Reflect.apply(inputDefaultValueGetter!, input, []) as string;
-      if ((assignedValue || defaultValue)
-        && Reflect.apply(nativeLowerCase, inputType, []) === "password") signal();
+      const isPassword = Reflect.apply(nativeLowerCase, inputType, []) === "password";
+      const ownValueShadowed = Reflect.apply(
+        nativeWeakSetHas,
+        ownValueInputs,
+        [input as object],
+      ) as boolean;
+      if (isPassword && (ownValueShadowed || assignedValue || defaultValue)) signal();
     } catch {
+      signal();
+    }
+  };
+  const trackOwnInputValue = (input: unknown): void => {
+    let isInput: boolean;
+    try {
+      isInput = Reflect.apply(nativeIsPrototypeOf, inputPrototype!, [input]) as boolean;
+    } catch {
+      return;
+    }
+    if (!isInput) return;
+    try {
+      const ownValue = Reflect.apply(
+        nativeGetOwnPropertyDescriptor,
+        Object,
+        [input, "value"],
+      ) as PropertyDescriptor | undefined;
+      if (!ownValue) return;
+      Reflect.apply(nativeWeakSetAdd, ownValueInputs, [input as object]);
+      const inputType = nativeString(Reflect.apply(inputTypeGetter!, input, []));
+      if (Reflect.apply(nativeLowerCase, inputType, []) === "password") signal();
+    } catch {
+      // Once a descriptor mutation has succeeded on a real input, an
+      // uninspectable target can hide a page-readable value from every native
+      // input accessor. Retain the lifetime taint rather than invoke it.
       signal();
     }
   };
@@ -420,6 +482,61 @@ export function installPreviewAgentShadowBoundarySignal(eventName: string): void
   if (typeof Document !== "undefined") {
     signalParserArguments(Document.prototype, "write");
     signalParserArguments(Document.prototype, "writeln");
+  }
+  if (typeof HTMLInputElement !== "undefined") {
+    if (!objectDefinePropertyDescriptor || typeof objectDefineProperty !== "function"
+      || !objectDefinePropertiesDescriptor || typeof objectDefineProperties !== "function"
+      || !reflectDefinePropertyDescriptor || typeof reflectDefineProperty !== "function"
+      || !legacyDefineGetterDescriptor || typeof legacyDefineGetter !== "function") {
+      signal();
+    } else {
+      try {
+        Reflect.apply(objectDefineProperty, Object, [Object, "defineProperty", {
+          ...objectDefinePropertyDescriptor,
+          value(target: object, propertyKey: PropertyKey, attributes: PropertyDescriptor): object {
+            const defined = Reflect.apply(objectDefineProperty, Object, [
+              target,
+              propertyKey,
+              attributes,
+            ]) as object;
+            trackOwnInputValue(defined);
+            return defined;
+          },
+        }]);
+        Reflect.apply(objectDefineProperty, Object, [Object, "defineProperties", {
+          ...objectDefinePropertiesDescriptor,
+          value(target: object, properties: PropertyDescriptorMap): object {
+            const defined = Reflect.apply(objectDefineProperties, Object, [
+              target,
+              properties,
+            ]) as object;
+            trackOwnInputValue(defined);
+            return defined;
+          },
+        }]);
+        Reflect.apply(objectDefineProperty, Object, [Reflect, "defineProperty", {
+          ...reflectDefinePropertyDescriptor,
+          value(target: object, propertyKey: PropertyKey, attributes: PropertyDescriptor): boolean {
+            const defined = Reflect.apply(reflectDefineProperty, Reflect, [
+              target,
+              propertyKey,
+              attributes,
+            ]) as boolean;
+            if (defined) trackOwnInputValue(target);
+            return defined;
+          },
+        }]);
+        Reflect.apply(objectDefineProperty, Object, [Object.prototype, "__defineGetter__", {
+          ...legacyDefineGetterDescriptor,
+          value(this: object, propertyKey: PropertyKey, getter: () => unknown): void {
+            Reflect.apply(legacyDefineGetter, this, [propertyKey, getter]);
+            trackOwnInputValue(this);
+          },
+        }]);
+      } catch {
+        signal();
+      }
+    }
   }
 }
 

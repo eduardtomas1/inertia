@@ -163,6 +163,47 @@ describe("Browser evidence timeline", () => {
     await waitFor(() => expect(screen.queryByText("Local evidence")).not.toBeInTheDocument());
   });
 
+  it("drops evicted thumbnails and ignores late image responses", async () => {
+    let resolveImage: ((image: { mimeType: "image/png"; data: string }) => void) | undefined;
+    const loadImage = vi.fn(() => new Promise<{ mimeType: "image/png"; data: string }>((resolve) => {
+      resolveImage = resolve;
+    }));
+    const panel = (snapshot: BrowserEvidenceSnapshot) => (
+      <PreviewPanel
+        owner="primary"
+        contextId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        url="http://127.0.0.1:4173/"
+        evidence={snapshot}
+        onNavigate={vi.fn()}
+        onOpenExternal={vi.fn()}
+        onLoadEvidenceImage={loadImage}
+      />
+    );
+    const view = render(panel(evidence));
+    fireEvent.click(screen.getByRole("button", { name: /Evidence 3/u }));
+    fireEvent.click(await screen.findByText("Inspect capture"));
+    expect(await screen.findByText("Loading capture…")).toBeInTheDocument();
+
+    const expired: BrowserEvidenceSnapshot = {
+      ...evidence,
+      revision: evidence.revision + 1,
+      entries: evidence.entries.map((entry) => entry.screenshot
+        ? { ...entry, screenshot: { ...entry.screenshot, available: false } }
+        : entry),
+    };
+    view.rerender(panel(expired));
+    expect(await screen.findByText("Capture expired")).toBeInTheDocument();
+    expect(screen.queryByText("Loading capture…")).not.toBeInTheDocument();
+
+    resolveImage?.({
+      mimeType: "image/png",
+      data: Buffer.from("late-evicted-capture").toString("base64"),
+    });
+    await waitFor(() => expect(screen.queryByRole("img", {
+      name: /Browser screenshot/u,
+    })).not.toBeInTheDocument());
+  });
+
   it("provides roving tab focus and restores focus after keyboard tab closure", async () => {
     const onActivateTab = vi.fn();
     const onCloseTab = vi.fn();
@@ -184,6 +225,7 @@ describe("Browser evidence timeline", () => {
     const tabs = [
       { id: "one", title: "One", url: "http://127.0.0.1:4173/one", loading: false },
       { id: "two", title: "Two", url: "http://127.0.0.1:4173/two", loading: false },
+      { id: "three", title: "Three", url: "http://127.0.0.1:4173/three", loading: false },
     ];
     const view = render(panel(tabs, "one"));
 
@@ -194,11 +236,15 @@ describe("Browser evidence timeline", () => {
     expect(onActivateTab).toHaveBeenCalledWith("two");
     expect(second).toHaveFocus();
 
-    fireEvent.keyDown(second, { key: "Delete" });
+    view.rerender(panel(tabs, "two"));
+    screen.getByRole("tab", { name: "Two" }).focus();
+    fireEvent.keyDown(screen.getByRole("tab", { name: "Two" }), { key: "Delete" });
     expect(onCloseTab).toHaveBeenCalledWith("two");
-    view.rerender(panel([tabs[0]!], "one"));
+    view.rerender(panel([tabs[0]!, tabs[2]!], "one"));
     await waitFor(() => expect(screen.getByRole("tab", { name: "One" })).toHaveFocus());
+    expect(screen.getByRole("tab", { name: "Three" })).not.toHaveFocus();
 
+    view.rerender(panel([tabs[0]!], "one"));
     fireEvent.keyDown(screen.getByRole("tab", { name: "One" }), { key: "Delete" });
     expect(onCloseTab).toHaveBeenLastCalledWith("one");
     view.rerender(panel([

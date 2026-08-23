@@ -33,15 +33,19 @@ export function BrowserEvidenceTimeline({
   onClose,
 }: BrowserEvidenceTimelineProps): React.JSX.Element {
   const closeRef = useRef<HTMLButtonElement>(null);
+  const availableImageIdsRef = useRef<ReadonlySet<string>>(new Set());
   const [images, setImages] = useState<Record<string, EvidenceImageState>>({});
   const entries = evidence.entries.slice().reverse();
+  availableImageIdsRef.current = new Set(evidence.entries.flatMap((entry) => (
+    entry.screenshot?.available ? [entry.id] : []
+  )));
 
   useEffect(() => {
     closeRef.current?.focus();
   }, []);
 
   useEffect(() => {
-    const available = new Set(evidence.entries.map((entry) => entry.id));
+    const available = availableImageIdsRef.current;
     setImages((current) => Object.fromEntries(
       Object.entries(current).filter(([entryId]) => available.has(entryId)),
     ));
@@ -51,15 +55,13 @@ export function BrowserEvidenceTimeline({
     if (!entry.screenshot?.available || images[entry.id] !== undefined) return;
     setImages((current) => ({ ...current, [entry.id]: null }));
     void loadImage(entry.id).then((image) => {
-      setImages((current) => ({
-        ...current,
-        [entry.id]: image ?? false,
-      }));
+      setImages((current) => availableImageIdsRef.current.has(entry.id) ? ({
+        ...current, [entry.id]: image ?? false,
+      }) : current);
     }, () => {
-      setImages((current) => ({
-        ...current,
-        [entry.id]: false,
-      }));
+      setImages((current) => availableImageIdsRef.current.has(entry.id) ? ({
+        ...current, [entry.id]: false,
+      }) : current);
     });
   };
 

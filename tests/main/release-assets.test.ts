@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -16,6 +17,28 @@ const packageJson = JSON.parse(await readFile(join(root, "package.json"), "utf8"
 const version = packageJson.version;
 const releaseTag = `v${version}`;
 const temporaryDirectories = new Set<string>();
+const require = createRequire(import.meta.url);
+
+interface ResolvedUpdaterFile {
+  url: URL;
+  info: { url: string };
+}
+
+const { findFile } = require("electron-updater/out/providers/Provider.js") as {
+  findFile: (
+    files: ResolvedUpdaterFile[],
+    extension: string,
+    excludedExtensions?: string[],
+  ) => ResolvedUpdaterFile | undefined;
+};
+const { MacUpdater } = require("electron-updater/out/MacUpdater.js") as {
+  MacUpdater: {
+    filterFilesForArch: (
+      files: ResolvedUpdaterFile[],
+      isArm64Mac: boolean,
+    ) => ResolvedUpdaterFile[];
+  };
+};
 
 const policies = {
   "macos-x64": {
@@ -229,6 +252,20 @@ describe("release asset staging", () => {
       ...policies["macos-arm64"].packages,
     ]);
     expect(macMetadata.path).toBe(policies["macos-x64"].packages.at(-1));
+    const resolvedMacFiles = macMetadata.files.map(({ url }) => ({
+      url: new URL(url, "https://updates.example.invalid/"),
+      info: { url },
+    }));
+    expect(findFile(
+      MacUpdater.filterFilesForArch(resolvedMacFiles, false),
+      "zip",
+      ["pkg", "dmg"],
+    )?.info.url).toBe(policies["macos-x64"].packages.at(-1));
+    expect(findFile(
+      MacUpdater.filterFilesForArch(resolvedMacFiles, true),
+      "zip",
+      ["pkg", "dmg"],
+    )?.info.url).toBe(policies["macos-arm64"].packages.at(-1));
 
     const windowsMetadata = parse(
       await readFile(join(stageRoot, "final", "latest.yml"), "utf8"),
@@ -238,6 +275,15 @@ describe("release asset staging", () => {
       ...policies["windows-arm64"].packages,
     ]);
     expect(windowsMetadata.path).toBe(policies["windows-x64"].packages[0]);
+    const resolvedWindowsFiles = windowsMetadata.files.map(({ url }) => ({
+      url: new URL(url, "https://updates.example.invalid/"),
+      info: { url },
+    }));
+    expect(findFile(resolvedWindowsFiles, "exe")?.info.url).toBe(
+      process.arch === "arm64"
+        ? policies["windows-arm64"].packages[0]
+        : policies["windows-x64"].packages[0],
+    );
   });
 
   it("rejects mixed updater capability within one shared architecture channel", async () => {

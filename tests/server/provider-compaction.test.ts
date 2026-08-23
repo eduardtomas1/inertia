@@ -158,9 +158,10 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   if (message.method === "initialized") return;
   if (message.method === "thread/resume") return send({ id: message.id, result: { thread: { id: message.params.threadId }, serviceTier: ${attestedTier === "echo" ? "message.params.serviceTier" : JSON.stringify(attestedTier)} } });
   if (message.method === "thread/compact/start") {
+    const lifecycleAtMs = Date.now() - 1000;
     send({ id: message.id, result: {} });
-    send({ method: "item/started", params: { threadId: message.params.threadId, turnId: "compact-tier-turn", startedAtMs: Date.now(), item: { id: "compact-tier-item", type: "contextCompaction" } } });
-    return send({ method: "item/completed", params: { threadId: message.params.threadId, turnId: "compact-tier-turn", completedAtMs: Date.now(), item: { id: "compact-tier-item", type: "contextCompaction" } } });
+    send({ method: "item/started", params: { threadId: message.params.threadId, turnId: "compact-tier-turn", startedAtMs: lifecycleAtMs, item: { id: "compact-tier-item", type: "contextCompaction" } } });
+    return send({ method: "item/completed", params: { threadId: message.params.threadId, turnId: "compact-tier-turn", completedAtMs: lifecycleAtMs, item: { id: "compact-tier-item", type: "contextCompaction" } } });
   }
 });
 `);
@@ -179,7 +180,7 @@ describe.sequential("provider compaction adapters", () => {
     await Promise.all(roots.splice(0).map(removePortableFixture));
   });
 
-  it("uses Codex App Server compaction and waits for its completion item", async () => {
+  it("accepts ordered Codex compaction lifecycle from a trailing provider clock", async () => {
     // The control client's process and JSON-lines transport have their own
     // focused coverage. Keep this adapter proof in-process so Windows endpoint
     // inspection cannot stall a second short-lived Node launch in the same job.
@@ -195,17 +196,18 @@ describe.sequential("provider compaction adapters", () => {
         if (method !== "thread/compact/start") {
           throw new Error(`Unexpected control request: ${method}`);
         }
+        const lifecycleAtMs = Date.now() - 1_000;
         queueMicrotask(() => {
           options.onNotification?.("item/started", {
             threadId: params.threadId,
             turnId: "compact-turn-1",
-            startedAtMs: Number.MAX_SAFE_INTEGER,
+            startedAtMs: lifecycleAtMs,
             item: { id: "compact-1", type: "contextCompaction" },
           });
           options.onNotification?.("item/completed", {
             threadId: params.threadId,
             turnId: "compact-turn-1",
-            completedAtMs: Number.MAX_SAFE_INTEGER,
+            completedAtMs: lifecycleAtMs,
             item: { id: "compact-1", type: "contextCompaction" },
           });
         });
@@ -339,7 +341,7 @@ describe.sequential("provider compaction adapters", () => {
     });
   });
 
-  it("does not accept a stale timestamped Codex lifecycle after requesting compaction", async () => {
+  it("does not accept a stale Codex lifecycle buffered before requesting compaction", async () => {
     const root = portableFixtureRoot("Codex compact stale lifecycle");
     roots.push(root);
     const command = process.execPath;
@@ -350,11 +352,16 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   const message = JSON.parse(line);
   if (message.method === "initialize") return send({ id: message.id, result: { userAgent: "fixture" } });
   if (message.method === "initialized") return;
-  if (message.method === "thread/resume") return send({ id: message.id, result: { thread: { id: message.params.threadId } } });
+  if (message.method === "thread/resume") {
+    const stale = [
+      { method: "item/started", params: { threadId: message.params.threadId, turnId: "stale-turn", startedAtMs: 1, item: { id: "compact-stale", type: "contextCompaction" } } },
+      { method: "item/completed", params: { threadId: message.params.threadId, turnId: "stale-turn", completedAtMs: 2, item: { id: "compact-stale", type: "contextCompaction" } } },
+      { id: message.id, result: { thread: { id: message.params.threadId } } },
+    ];
+    return process.stdout.write(stale.map(JSON.stringify).join("\\n") + "\\n");
+  }
   if (message.method === "thread/compact/start") {
     send({ id: message.id, result: {} });
-    send({ method: "item/started", params: { threadId: message.params.threadId, turnId: "stale-turn", startedAtMs: 1, item: { id: "compact-stale", type: "contextCompaction" } } });
-    send({ method: "item/completed", params: { threadId: message.params.threadId, turnId: "stale-turn", completedAtMs: 2, item: { id: "compact-stale", type: "contextCompaction" } } });
     return setImmediate(() => send({ id: 9999, method: "fixture/reject-invalid-compaction" }));
   }
 });

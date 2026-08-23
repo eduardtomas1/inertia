@@ -307,7 +307,6 @@ function startCodexCompaction(
       const serviceTier = codexServiceTier(options.input);
       let resolveCompaction!: () => void;
       let compactionInitiated = false;
-      let compactionInitiatedAtMs: number | null = null;
       let compactionItemId: string | null = null;
       let compactionTurnId: string | null = null;
       let compactionStartedAtMs: number | null = null;
@@ -339,14 +338,16 @@ function startCodexCompaction(
           if (item?.type !== "contextCompaction") return;
           const itemId = exactCodexLifecycleId(item.id);
           const turnId = exactCodexLifecycleId(params.turnId);
-          if (!itemId || !turnId || compactionInitiatedAtMs === null) return;
+          if (!itemId || !turnId) return;
           if (method === "item/started") {
             const startedAtMs = params.startedAtMs;
             if (
               typeof startedAtMs !== "number"
               || !Number.isSafeInteger(startedAtMs)
-              || startedAtMs < compactionInitiatedAtMs
             ) return;
+            // The ordered one-shot JSONL connection and compactionInitiated
+            // boundary establish authority. Comparing Date.now() values from
+            // separate processes is not reliable on every architecture.
             compactionItemId ??= itemId;
             compactionTurnId ??= turnId;
             compactionStartedAtMs ??= startedAtMs;
@@ -415,7 +416,6 @@ function startCodexCompaction(
           );
         }
         emitter.status("running");
-        compactionInitiatedAtMs = Date.now();
         const compactRequest = client.request(
           "thread/compact/start",
           { threadId: sessionId },

@@ -1,5 +1,8 @@
 import { GIT_LAUNCH_ENVIRONMENT_KEYS } from "../node/git-environment";
-import { PROVIDER_ROUTING_ENVIRONMENT_KEYS } from "../node/provider-routing-environment";
+import {
+  PROVIDER_ENDPOINT_ROUTING_ENVIRONMENT_KEY,
+  PROVIDER_ROUTING_ENVIRONMENT_KEYS,
+} from "../node/provider-routing-environment";
 
 const RUNTIME_PROCESS_ENVIRONMENT_KEYS = [
   "ALLUSERSPROFILE",
@@ -90,6 +93,8 @@ const PROXY_PROTOCOLS = new Set([
   "socks5h:",
 ]);
 
+const HTTP_ENDPOINT_PROTOCOLS = new Set(["http:", "https:"]);
+
 const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/u;
 
 function credentialFreeProxyUrl(value: string): boolean {
@@ -99,6 +104,24 @@ function credentialFreeProxyUrl(value: string): boolean {
   try {
     const parsed = new URL(value);
     return PROXY_PROTOCOLS.has(parsed.protocol)
+      && parsed.hostname.length > 0
+      && parsed.username.length === 0
+      && parsed.password.length === 0
+      && (parsed.pathname === "" || parsed.pathname === "/")
+      && parsed.search.length === 0
+      && parsed.hash.length === 0;
+  } catch {
+    return false;
+  }
+}
+
+function credentialFreeHttpEndpoint(value: string): boolean {
+  if (value.length === 0 || value.length > 2_048 || CONTROL_CHARACTER.test(value)) {
+    return false;
+  }
+  try {
+    const parsed = new URL(value);
+    return HTTP_ENDPOINT_PROTOCOLS.has(parsed.protocol)
       && parsed.hostname.length > 0
       && parsed.username.length === 0
       && parsed.password.length === 0
@@ -145,6 +168,17 @@ export function runtimeProcessEnvironment(
       continue;
     }
     sanitized[key] = value;
+  }
+  for (const [key, value] of Object.entries(environment)) {
+    const normalized = key.toUpperCase();
+    if (
+      value !== undefined
+      && (platform === "win32" || key === normalized)
+      && PROVIDER_ENDPOINT_ROUTING_ENVIRONMENT_KEY.test(normalized)
+      && credentialFreeHttpEndpoint(value)
+    ) {
+      sanitized[normalized] = value;
+    }
   }
   for (const key of RUNTIME_PROXY_ENVIRONMENT_KEYS) {
     const variants = platform === "win32" ? [key] : [key, key.toLowerCase()];

@@ -396,6 +396,9 @@ describe.sequential("provider environment discovery", () => {
       CLAUDE_CODE_USE_BEDROCK: "1",
       AWS_CA_BUNDLE: "/etc/company/aws-ca.pem",
       AWS_ACCESS_KEY_ID: "bedrock-id",
+      AWS_ENDPOINT_URL: "https://bedrock.example.test",
+      AWS_ENDPOINT_URL_BEDROCK_RUNTIME:
+        "https://bedrock-runtime.example.test",
       AWS_SECRET_ACCESS_KEY: "bedrock-secret",
       GOOGLE_APPLICATION_CREDENTIALS: "/tmp/vertex.json",
       GITHUB_TOKEN: "github-secret",
@@ -405,6 +408,9 @@ describe.sequential("provider environment discovery", () => {
       CLAUDE_CODE_USE_BEDROCK: "1",
       AWS_CA_BUNDLE: "/etc/company/aws-ca.pem",
       AWS_ACCESS_KEY_ID: "bedrock-id",
+      AWS_ENDPOINT_URL: "https://bedrock.example.test",
+      AWS_ENDPOINT_URL_BEDROCK_RUNTIME:
+        "https://bedrock-runtime.example.test",
       AWS_SECRET_ACCESS_KEY: "bedrock-secret",
     });
     expect(providerChildEnvironment("claude", source)).not.toHaveProperty(

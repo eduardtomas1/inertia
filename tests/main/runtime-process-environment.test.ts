@@ -7,6 +7,8 @@ describe("supervised runtime process environment", () => {
     ANTHROPIC_API_KEY: "sentinel-anthropic-secret",
     ANTHROPIC_CUSTOM_HEADERS: "Authorization: sentinel-secret",
     AWS_ACCESS_KEY_ID: "sentinel-aws-access-key",
+    AWS_ENDPOINT_URL_STS:
+      "https://sentinel-user:sentinel-secret@sts.example.test",
     AWS_SECRET_ACCESS_KEY: "sentinel-aws-secret",
     AWS_SESSION_TOKEN: "sentinel-aws-session",
     AWS_SHARED_CREDENTIALS_FILE: "/tmp/sentinel-aws-credentials",
@@ -39,6 +41,9 @@ describe("supervised runtime process environment", () => {
       CODEX_HOME: "/Users/person/.codex",
       ANTHROPIC_BASE_URL: "https://anthropic.example.test",
       AWS_CA_BUNDLE: "/etc/company/aws-ca.pem",
+      AWS_ENDPOINT_URL: "https://bedrock.example.test",
+      AWS_ENDPOINT_URL_BEDROCK_RUNTIME:
+        "https://bedrock-runtime.example.test",
       AWS_PROFILE: "bedrock-profile",
       AWS_REGION: "eu-west-1",
       CLAUDE_CODE_USE_BEDROCK: "1",
@@ -96,6 +101,9 @@ describe("supervised runtime process environment", () => {
       CODEX_HOME: parent.CODEX_HOME,
       ANTHROPIC_BASE_URL: parent.ANTHROPIC_BASE_URL,
       AWS_CA_BUNDLE: parent.AWS_CA_BUNDLE,
+      AWS_ENDPOINT_URL: parent.AWS_ENDPOINT_URL,
+      AWS_ENDPOINT_URL_BEDROCK_RUNTIME:
+        parent.AWS_ENDPOINT_URL_BEDROCK_RUNTIME,
       AWS_PROFILE: parent.AWS_PROFILE,
       AWS_REGION: parent.AWS_REGION,
       CLAUDE_CODE_USE_BEDROCK: parent.CLAUDE_CODE_USE_BEDROCK,
@@ -163,6 +171,8 @@ describe("supervised runtime process environment", () => {
       SystemRoot: "C:\\Windows",
       TEMP: "C:\\Users\\person\\AppData\\Local\\Temp",
       AllUsersProfile: "C:\\ProgramData",
+      Aws_Endpoint_Url_Bedrock_Runtime:
+        "https://bedrock-runtime.windows.test",
       UserProfile: "C:\\Users\\person",
       ...sentinelSecrets,
     };
@@ -178,6 +188,8 @@ describe("supervised runtime process environment", () => {
       SYSTEMROOT: parent.SystemRoot,
       TEMP: parent.TEMP,
       ALLUSERSPROFILE: parent.AllUsersProfile,
+      AWS_ENDPOINT_URL_BEDROCK_RUNTIME:
+        parent.Aws_Endpoint_Url_Bedrock_Runtime,
       USERPROFILE: parent.UserProfile,
     });
   });

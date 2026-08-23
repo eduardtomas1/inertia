@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { accessSync, constants, readFileSync, readlinkSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, win32 } from "node:path";
@@ -44,6 +44,60 @@ function processExists(pid: number): boolean {
   return processState(pid) !== null;
 }
 
+function boundedLsof(args: string[]): Record<string, unknown> {
+  const executable = "/usr/bin/lsof";
+  let executableAvailable = true;
+  try {
+    accessSync(executable, constants.X_OK);
+  } catch {
+    executableAvailable = false;
+  }
+  const result = spawnSync(executable, args, {
+    encoding: "utf8",
+    env: {},
+    maxBuffer: 64 * 1024,
+    shell: false,
+    timeout: 1_000,
+  });
+  return {
+    args,
+    error: result.error?.message ?? null,
+    executableAvailable,
+    signal: result.signal,
+    status: result.status,
+    stderr: result.stderr?.slice(0, 4_096) ?? "",
+    stdout: result.stdout?.slice(0, 8_192) ?? "",
+  };
+}
+
+function linuxProcessObservation(pid: number, state: string | null): Record<string, unknown> {
+  let stat = "";
+  try { stat = readFileSync(`/proc/${pid}/stat`, "utf8"); } catch { /* Report absence below. */ }
+  const commandEnd = stat.lastIndexOf(")");
+  const fields = commandEnd >= 0 ? stat.slice(commandEnd + 2).trim().split(/\s+/u) : [];
+  const descriptorTarget = (descriptor: number): string | null => {
+    try { return readlinkSync(`/proc/${pid}/fd/${descriptor}`, "utf8"); } catch { return null; }
+  };
+  const userId = process.getuid?.();
+  return {
+    fd1: descriptorTarget(1),
+    fd2: descriptorTarget(2),
+    groupPid: Number(fields[2]) || null,
+    lsofChildDescriptors: boundedLsof([
+      "-n", "-P", "-a", "-p", String(pid), "-d", "1,2", "-F", "pfdin",
+    ]),
+    lsofParentDescriptors: boundedLsof([
+      "-n", "-P", "-a", "-p", String(process.pid), "-F", "pfdin",
+    ]),
+    lsofProductionScan: boundedLsof([
+      "-n", "-P", "-a", "-u", String(userId), "-d", "1,2", "-F", "pfdin",
+    ]),
+    parentPid: Number(fields[1]) || null,
+    sessionId: Number(fields[3]) || null,
+    state,
+  };
+}
+
 async function waitForTermination(pid: number): Promise<string | null> {
   const deadline = Date.now() + 5_000;
   let state = processState(pid);
@@ -51,7 +105,14 @@ async function waitForTermination(pid: number): Promise<string | null> {
     await new Promise((resolveWait) => setTimeout(resolveWait, 25));
     state = processState(pid);
   }
-  expect(state === null || state === "X" || state === "Z").toBe(true);
+  if (state !== null && state !== "X" && state !== "Z") {
+    const observation = process.platform === "linux"
+      ? linuxProcessObservation(pid, state)
+      : { state };
+    throw new Error(
+      `Process ${pid} did not reach a terminal state: ${JSON.stringify(observation)}`,
+    );
+  }
   return state;
 }
 

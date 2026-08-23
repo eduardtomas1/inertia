@@ -28,6 +28,8 @@ describe("supervised runtime process environment", () => {
   it("passes only reviewed POSIX launch values and omits sentinel secrets", () => {
     const parent: NodeJS.ProcessEnv = {
       CODEX_HOME: "/Users/person/.codex",
+      DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/501/bus",
+      DISPLAY: ":0",
       EMAIL: "person@example.test",
       GIT_AUTHOR_EMAIL: "author@example.test",
       GIT_AUTHOR_NAME: "Example Author",
@@ -42,18 +44,22 @@ describe("supervised runtime process environment", () => {
       GIT_SSH_COMMAND: "/usr/bin/ssh -F /Users/person/.ssh/config",
       GIT_SSH_VARIANT: "ssh",
       HOME: "/Users/person",
+      INERTIA_STREAMING_TRACE: "1",
       LANG: "en_US.UTF-8",
       NODE_ENV: "test",
       NODE_EXTRA_CA_CERTS: "/etc/company/ca.pem",
       PATH: "/opt/bin:/usr/bin:/bin",
       SSH_AUTH_SOCK: "/tmp/ssh-agent.sock",
       TMPDIR: "/tmp/runtime",
+      WAYLAND_DISPLAY: "wayland-0",
       XDG_CONFIG_HOME: "/Users/person/.config",
       ...sentinelSecrets,
     };
 
-    expect(runtimeProcessEnvironment(parent, "darwin")).toEqual({
+    expect(runtimeProcessEnvironment(parent, "linux")).toEqual({
       CODEX_HOME: parent.CODEX_HOME,
+      DBUS_SESSION_BUS_ADDRESS: parent.DBUS_SESSION_BUS_ADDRESS,
+      DISPLAY: parent.DISPLAY,
       EMAIL: parent.EMAIL,
       GIT_AUTHOR_EMAIL: parent.GIT_AUTHOR_EMAIL,
       GIT_AUTHOR_NAME: parent.GIT_AUTHOR_NAME,
@@ -68,12 +74,14 @@ describe("supervised runtime process environment", () => {
       GIT_SSH_COMMAND: parent.GIT_SSH_COMMAND,
       GIT_SSH_VARIANT: parent.GIT_SSH_VARIANT,
       HOME: parent.HOME,
+      INERTIA_STREAMING_TRACE: parent.INERTIA_STREAMING_TRACE,
       LANG: parent.LANG,
       NODE_ENV: parent.NODE_ENV,
       NODE_EXTRA_CA_CERTS: parent.NODE_EXTRA_CA_CERTS,
       PATH: parent.PATH,
       SSH_AUTH_SOCK: parent.SSH_AUTH_SOCK,
       TMPDIR: parent.TMPDIR,
+      WAYLAND_DISPLAY: parent.WAYLAND_DISPLAY,
       XDG_CONFIG_HOME: parent.XDG_CONFIG_HOME,
     });
   });
@@ -83,6 +91,7 @@ describe("supervised runtime process environment", () => {
       AppData: "C:\\Users\\person\\AppData\\Roaming",
       ComSpec: "C:\\Windows\\System32\\cmd.exe",
       NODE_ENV: "production",
+      INERTIA_STREAMING_TRACE: "1",
       Path: "C:\\Windows\\System32",
       SystemRoot: "C:\\Windows",
       TEMP: "C:\\Users\\person\\AppData\\Local\\Temp",
@@ -98,5 +107,16 @@ describe("supervised runtime process environment", () => {
       TEMP: parent.TEMP,
       USERPROFILE: parent.UserProfile,
     });
+  });
+
+  it("requires the exact test-only streaming trace opt-in", () => {
+    expect(runtimeProcessEnvironment({
+      INERTIA_STREAMING_TRACE: "1",
+      NODE_ENV: "production",
+    }, "linux")).toEqual({});
+    expect(runtimeProcessEnvironment({
+      INERTIA_STREAMING_TRACE: "true",
+      NODE_ENV: "test",
+    }, "linux")).toEqual({ NODE_ENV: "test" });
   });
 });

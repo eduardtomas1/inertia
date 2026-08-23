@@ -7,6 +7,8 @@ const RUNTIME_PROCESS_ENVIRONMENT_KEYS = [
   "CODEX_INSTALL_DIR",
   "COMSPEC",
   "CURSOR_HOME",
+  "DBUS_SESSION_BUS_ADDRESS",
+  "DISPLAY",
   "GH_CONFIG_DIR",
   "HOME",
   "HOMEDRIVE",
@@ -44,6 +46,7 @@ const RUNTIME_PROCESS_ENVIRONMENT_KEYS = [
   "USERNAME",
   "USERPROFILE",
   "VOLTA_HOME",
+  "WAYLAND_DISPLAY",
   "WINDIR",
   "XDG_CACHE_HOME",
   "XDG_CONFIG_HOME",
@@ -81,6 +84,12 @@ export function runtimeProcessEnvironment(
       continue;
     }
     sanitized[key] = value;
+  }
+  if (
+    sanitized.NODE_ENV === "test"
+    && environmentValue(environment, "INERTIA_STREAMING_TRACE", platform) === "1"
+  ) {
+    sanitized.INERTIA_STREAMING_TRACE = "1";
   }
   return sanitized;
 }

@@ -347,12 +347,15 @@ describe("runtime recovery supervisor integration", () => {
       recoveryPath,
       targetDirectory,
     );
+    const timedOutAndCancelled = expect(pending).rejects.toThrow(
+      /timed out and was cancelled/u,
+    );
     await waitFor(
       () => existsSync(markerPath),
       "busy import transaction marker",
       diagnostics,
     );
-    await expect(pending).rejects.toThrow(/timed out and was cancelled/u);
+    await timedOutAndCancelled;
     expect(supervisor.snapshot()).toMatchObject({ phase: "ready", generation: 1 });
     expect(readdirSync(targetDirectory)).toEqual([]);
 

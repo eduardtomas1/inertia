@@ -69,12 +69,10 @@ if (canvas.toBuffer("image/png").length <= 8) {
 }
 
 await new Promise((resolveProbe, rejectProbe) => {
-  const terminal = spawnPty(process.execPath, [
-    "-e",
-    // ConPTY can drop a final unterminated write while draining its output
-    // pipe, so make the probe a complete terminal line on every platform.
-    "console.log('inertia-native-pty-ok')",
-  ], {
+  // Avoid inline-script quoting here: node-pty builds a Windows command line
+  // from this argument vector, and --version exercises the same native spawn,
+  // output, and exit paths without a platform-specific quoting boundary.
+  const terminal = spawnPty(process.execPath, ["--version"], {
     cols: 80,
     rows: 24,
     cwd: root,
@@ -100,9 +98,12 @@ await new Promise((resolveProbe, rejectProbe) => {
     }
   });
   terminal.onExit(({ exitCode }) => {
-    if (exitCode !== 0 || !output.includes("inertia-native-pty-ok")) {
+    if (exitCode !== 0 || !output.includes(process.version)) {
       finish(() => rejectProbe(
-        new Error("The native PTY binding did not complete its child-process probe."),
+        new Error(
+          "The native PTY binding did not complete its child-process probe "
+          + `(exit ${exitCode}, output ${JSON.stringify(output.slice(0, 200))}).`,
+        ),
       ));
       return;
     }

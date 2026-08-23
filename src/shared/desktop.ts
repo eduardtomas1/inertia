@@ -241,16 +241,38 @@ export interface AppProcessHealth {
   memoryBytes: number;
 }
 
+export type AppRuntimePhase =
+  | "idle"
+  | "starting"
+  | "ready"
+  | "restarting"
+  | "stopping"
+  | "stopped";
+
+export type AppHealthWarningCode =
+  | "processes"
+  | "runtime"
+  | "database"
+  | "cache"
+  | "cache-clear"
+  | "attachments";
+
+export interface AppHealthWarning {
+  code: AppHealthWarningCode;
+  message: string;
+}
+
 export interface AppHealthSnapshot {
   sampledAt: string;
-  totalMemoryBytes: number;
+  totalMemoryBytes: number | null;
   mainProcess: AppProcessHealth | null;
-  rendererProcess: AppProcessHealth | null;
+  rendererProcesses: AppProcessHealth[] | null;
   runtimeProcess: AppProcessHealth | null;
-  runtimePhase: "idle" | "starting" | "ready" | "restarting" | "stopping" | "stopped";
-  databaseBytes: number;
-  cacheBytes: number;
-  temporaryAttachmentBytes: number;
+  runtimePhase: AppRuntimePhase | null;
+  databaseBytes: number | null;
+  cacheBytes: number | null;
+  temporaryAttachmentBytes: number | null;
+  warnings: AppHealthWarning[];
 }
 
 export function parseDesktopNotificationRequest(

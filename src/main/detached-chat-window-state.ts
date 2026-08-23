@@ -4,6 +4,7 @@ import {
   readSecureAtomicState,
   writeSecureAtomicState,
 } from "./secure-atomic-state.js";
+import { restoreReachableWindowBounds } from "./window-bounds.js";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -11,7 +12,6 @@ const UUID_PATTERN =
 const STATE_VERSION = 1;
 const MAX_STATE_BYTES = 64 * 1024;
 const MAX_SAVED_WINDOWS = 64;
-const MIN_VISIBLE_EDGE = 80;
 export const DETACHED_CHAT_DEFAULT_BOUNDS = Object.freeze({
   width: 640,
   height: 780,
@@ -117,49 +117,15 @@ export function parseDetachedChatWindowState(
   };
 }
 
-function clamp(value: number, minimum: number, maximum: number): number {
-  return Math.max(minimum, Math.min(value, maximum));
-}
-
-function visibleOnDisplay(
-  bounds: Rectangle,
-  displays: readonly DetachedChatDisplay[],
-): boolean {
-  return displays.some(({ workArea }) => {
-    const width = Math.min(
-      bounds.x + bounds.width,
-      workArea.x + workArea.width,
-    ) - Math.max(bounds.x, workArea.x);
-    const height = Math.min(
-      bounds.y + bounds.height,
-      workArea.y + workArea.height,
-    ) - Math.max(bounds.y, workArea.y);
-    return width >= MIN_VISIBLE_EDGE && height >= MIN_VISIBLE_EDGE;
-  });
-}
-
 export function restoreDetachedChatWindowBounds(
   saved: Rectangle | null,
   displays: readonly DetachedChatDisplay[],
 ): DetachedChatWindowBounds {
   if (!saved) return { ...DETACHED_CHAT_DEFAULT_BOUNDS };
-  const normalized: Rectangle = {
-    x: saved.x,
-    y: saved.y,
-    width: clamp(
-      saved.width,
-      DETACHED_CHAT_MIN_BOUNDS.width,
-      DETACHED_CHAT_MAX_BOUNDS.width,
-    ),
-    height: clamp(
-      saved.height,
-      DETACHED_CHAT_MIN_BOUNDS.height,
-      DETACHED_CHAT_MAX_BOUNDS.height,
-    ),
-  };
-  return visibleOnDisplay(normalized, displays)
-    ? normalized
-    : { width: normalized.width, height: normalized.height };
+  return restoreReachableWindowBounds(saved, displays, {
+    minimum: DETACHED_CHAT_MIN_BOUNDS,
+    maximum: DETACHED_CHAT_MAX_BOUNDS,
+  });
 }
 
 export class DetachedChatWindowStateStore {

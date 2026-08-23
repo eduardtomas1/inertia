@@ -24,11 +24,7 @@ import {
 import { capturedAgentScreenshotResult } from "./preview-agent-screenshot.js";
 import { failedAgentBrowserResult as failure, successfulAgentBrowserResult } from "./preview-agent-result.js";
 type PreviewOwner = "primary" | "secondary";
-
-interface PreviewTab {
-  id: string;
-  view: WebContentsView;
-}
+interface PreviewTab { id: string; view: WebContentsView; unregisterHealth(): void }
 
 interface PreviewSlot {
   contextId: string;
@@ -45,6 +41,7 @@ interface PreviewBrokerOptions {
   getWindow: () => BrowserWindow | null;
   openExternal: (url: string) => Promise<void>;
   stateChannel: string;
+  registerHealthRenderer?(contents: WebContents): () => void;
 }
 
 const UUID_PATTERN =
@@ -649,25 +646,27 @@ export class PreviewBroker {
     }
     const window = this.options.getWindow();
     if (!window) throw new Error("The preview window is unavailable");
+    const view = new WebContentsView({
+      webPreferences: {
+        partition: slot.partition,
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+        webSecurity: true,
+        allowRunningInsecureContent: false,
+        devTools: false,
+        disableDialogs: true,
+        navigateOnDragDrop: false,
+        preload: fileURLToPath(new URL(
+          "../preload/preview-agent-privacy.cjs",
+          import.meta.url,
+        )),
+      },
+    });
     const tab: PreviewTab = {
       id: randomUUID(),
-      view: new WebContentsView({
-        webPreferences: {
-          partition: slot.partition,
-          contextIsolation: true,
-          nodeIntegration: false,
-          sandbox: true,
-          webSecurity: true,
-          allowRunningInsecureContent: false,
-          devTools: false,
-          disableDialogs: true,
-          navigateOnDragDrop: false,
-          preload: fileURLToPath(new URL(
-            "../preload/preview-agent-privacy.cjs",
-            import.meta.url,
-          )),
-        },
-      }),
+      view,
+      unregisterHealth: this.options.registerHealthRenderer?.(view.webContents) ?? (() => undefined),
     };
     const contents = tab.view.webContents;
     tab.view.setBackgroundColor("#17171b");
@@ -738,6 +737,7 @@ export class PreviewBroker {
   }
 
   #destroyTab(tab: PreviewTab): void {
+    tab.unregisterHealth();
     this.options.getWindow()?.contentView.removeChildView(tab.view);
     if (!tab.view.webContents.isDestroyed()) tab.view.webContents.close();
   }

@@ -82,6 +82,18 @@ describe("detached chat window state", () => {
       width: 700,
       height: 800,
     }, displays)).toEqual({ width: 700, height: 800 });
+    expect(restoreDetachedChatWindowBounds({
+      x: 1_919,
+      y: 100,
+      width: 700,
+      height: 800,
+    }, displays)).toEqual({ width: 700, height: 800 });
+    expect(restoreDetachedChatWindowBounds({
+      x: 200,
+      y: 1_050,
+      width: 700,
+      height: 800,
+    }, displays)).toEqual({ width: 700, height: 800 });
   });
 
   it("persists independent per-chat bounds without persisting open windows", () => {

@@ -24,6 +24,7 @@ export interface DetachedChatBootstrapOptions {
     session: Electron.Session,
     conversationId: string,
   ): void;
+  registerHealthRenderer(contents: Electron.WebContents): () => void;
   onDock(conversationId: string): void | Promise<void>;
 }
 
@@ -37,6 +38,7 @@ export function createDetachedChatMain(
     getDisplays: () => screen.getAllDisplays(),
     hardenSession: hardenDesktopSession,
     registerRendererProtocol: options.registerRendererProtocol,
+    registerHealthRenderer: options.registerHealthRenderer,
     rendererUrl: options.rendererUrl,
     preloadPath: fileURLToPath(
       new URL("../preload/detached-chat.cjs", import.meta.url),

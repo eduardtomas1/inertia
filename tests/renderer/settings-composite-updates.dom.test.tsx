@@ -141,6 +141,51 @@ function settingsProps(
 }
 
 describe("Settings composite updates", () => {
+  it("keeps healthy local metrics visible beside bounded partial warnings", async () => {
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: {
+        getPlatform: () => "darwin",
+        getAppHealth: vi.fn(async () => ({
+          sampledAt: "2030-01-02T03:04:05.000Z",
+          totalMemoryBytes: 30 * 1_024 * 1_024,
+          mainProcess: {
+            pid: 10,
+            cpuPercent: 1.2,
+            memoryBytes: 10 * 1_024 * 1_024,
+          },
+          rendererProcesses: [{
+            pid: 20,
+            cpuPercent: 2.4,
+            memoryBytes: 20 * 1_024 * 1_024,
+          }],
+          runtimeProcess: null,
+          runtimePhase: "ready",
+          databaseBytes: 4_096,
+          cacheBytes: null,
+          temporaryAttachmentBytes: 512,
+          warnings: [{
+            code: "cache",
+            message: "Browser cache storage could not be measured.",
+          }],
+        })),
+      },
+    });
+    render(<SettingsView {...settingsProps(vi.fn(async () => undefined))} />);
+    fireEvent.click(screen.getByRole("button", { name: "Archive & data" }));
+
+    expect(await screen.findByText("Partial health data")).toBeVisible();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Browser cache storage could not be measured.",
+    );
+    expect(screen.getByText("30 MB")).toBeVisible();
+    expect(screen.getByText("4.0 KB")).toBeVisible();
+    expect(screen.getByText("Unavailable")).toBeVisible();
+    expect(screen.getByText(/UI 20 MB across 1 process/u)).toBeVisible();
+    expect(screen.getByText("Partial health data").parentElement)
+      .toBe(screen.getByRole("status"));
+  });
+
   it("announces a sanitized application-update action failure", async () => {
     Object.defineProperty(window, "inertia", {
       configurable: true,

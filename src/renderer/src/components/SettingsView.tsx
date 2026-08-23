@@ -177,6 +177,10 @@ export function formatStorageBytes(bytes: number): string {
   return `${value >= 10 || unit === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unit]}`;
 }
 
+export function formatHealthBytes(bytes: number | null): string {
+  return bytes === null ? "Unavailable" : formatStorageBytes(bytes);
+}
+
 function SettingsSectionFallback(): React.JSX.Element {
   return (
     <div className="settings-section-loading" aria-busy="true">
@@ -357,8 +361,11 @@ export function SettingsView({
     setClearingCache(true);
     setHealthStatus(null);
     try {
-      setAppHealth(await window.inertia.clearAppCache());
-      setHealthStatus("Browser cache cleared; user data was unchanged.");
+      const health = await window.inertia.clearAppCache();
+      setAppHealth(health);
+      setHealthStatus(health.warnings.some(({ code }) => code === "cache-clear")
+        ? "Some browser caches could not be cleared; user data was unchanged."
+        : "Browser cache cleared; user data was unchanged.");
     } catch {
       setHealthStatus("The browser cache could not be cleared.");
     } finally {
@@ -833,13 +840,19 @@ export function SettingsView({
                   <small>Sampled only while open; covers Inertia processes and app storage, never project files.</small>
                   {appHealth ? (
                     <span className="app-health-grid">
-                      <span><b>{formatStorageBytes(appHealth.totalMemoryBytes)}</b><small>App memory</small></span>
-                      <span><b>{formatStorageBytes(appHealth.databaseBytes)}</b><small>Database</small></span>
-                      <span><b>{formatStorageBytes(appHealth.cacheBytes)}</b><small>Browser cache</small></span>
-                      <span><b>{formatStorageBytes(appHealth.temporaryAttachmentBytes)}</b><small>Temporary attachments</small></span>
+                      <span><b>{formatHealthBytes(appHealth.totalMemoryBytes)}</b><small>App memory</small></span>
+                      <span><b>{formatHealthBytes(appHealth.databaseBytes)}</b><small>Database</small></span>
+                      <span><b>{formatHealthBytes(appHealth.cacheBytes)}</b><small>Browser cache</small></span>
+                      <span><b>{formatHealthBytes(appHealth.temporaryAttachmentBytes)}</b><small>Temporary attachments</small></span>
                     </span>
                   ) : <small>Measuring local usage…</small>}
-                  {appHealth && <small>Local service: {appHealth.runtimePhase} · main {appHealth.mainProcess ? `${appHealth.mainProcess.cpuPercent.toFixed(1)}% CPU` : "unavailable"} · renderer {appHealth.rendererProcess ? formatStorageBytes(appHealth.rendererProcess.memoryBytes) : "unavailable"}.</small>}
+                  {appHealth && <small>Memory breakdown: main {appHealth.mainProcess ? `${formatStorageBytes(appHealth.mainProcess.memoryBytes)} (${appHealth.mainProcess.cpuPercent.toFixed(1)}% CPU)` : "unavailable"} · UI {appHealth.rendererProcesses ? `${formatStorageBytes(appHealth.rendererProcesses.reduce((total, process) => total + process.memoryBytes, 0))} across ${appHealth.rendererProcesses.length} ${appHealth.rendererProcesses.length === 1 ? "process" : "processes"}` : "unavailable"} · local service {appHealth.runtimeProcess ? formatStorageBytes(appHealth.runtimeProcess.memoryBytes) : "unavailable"} ({appHealth.runtimePhase ?? "state unavailable"}).</small>}
+                  {appHealth && appHealth.warnings.length > 0 && (
+                    <small className="settings-card-note" role="status">
+                      <strong>Partial health data</strong>
+                      {`: ${appHealth.warnings.map(({ message }) => message).join(" ")}`}
+                    </small>
+                  )}
                 </span>
                 <div>
                   <button type="button" className="secondary-button" disabled={clearingCache || !appHealth} onClick={() => { void clearAppCache(); }}><Trash2 size={14} />{clearingCache ? "Clearing…" : "Clear browser cache"}</button>

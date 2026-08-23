@@ -24,7 +24,7 @@ import {
   KIMI_CLAUDE_BUILTIN_PROFILE_ID,
 } from "../shared/claude-backend-profiles.js";
 import {
-  type AppHealthSnapshot, type AppProcessHealth,
+  type AppHealthSnapshot,
   parseAttachmentPickerMode, parseDesktopNotificationRequest,
   parseOpenProjectPathRequest,
   type RuntimeConnectionUnavailable,
@@ -55,6 +55,7 @@ import {
   openConversationAttachments,
 } from "./conversation-attachment-access.js";
 import { AppUpdateService } from "./app-update.js";
+import { AppHealthCollector, InertiaHealthRegistry } from "./app-health.js";
 import { registerInertiaReleaseIpc } from "./inertia-release-ipc.js";
 import { resolveAppUpdateCapability } from "./app-update-capability.js";
 import { AppUpdateInstallCoordinator } from "./app-update-install.js";
@@ -95,6 +96,11 @@ import {
   type WindowThemePreference,
   writeWindowThemePreference,
 } from "./window-appearance.js";
+import {
+  MAIN_WINDOW_DEFAULT_STATE,
+  restoreMainWindowState,
+  type MainWindowState,
+} from "./main-window-state.js";
 const IPC = {
   getRuntimeConnection: "inertia:runtime-connection",
   runtimeReady: "inertia:runtime-ready",
@@ -154,10 +160,19 @@ let detachedChatMain: DetachedChatMain | null = null;
 let trustedRendererUrl = "";
 let privilegedCleanup: Promise<boolean> | null = null;
 let packageSmokeFilePath: string | null = null;
+const appHealthRegistry = new InertiaHealthRegistry();
+appHealthRegistry.registerProcess("main", () => process.pid);
+appHealthRegistry.registerProcess(
+  "runtime",
+  () => runtimeSupervisor?.snapshot().pid ?? null,
+);
 const previewBroker = new PreviewBroker({
   getWindow: () => mainWindow,
   openExternal: async (url) => shell.openExternal(url),
   stateChannel: IPC.previewState,
+  registerHealthRenderer: (contents) => (
+    appHealthRegistry.registerRenderer(contents)
+  ),
 });
 let windowThemePreference: WindowThemePreference = "system";
 let importedAttachments: AttachmentRegistry | null = null;
@@ -171,8 +186,6 @@ let attachmentReservation: AttachmentStorageReservation = {
 };
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
-interface WindowState { x?: number; y?: number; width: number; height: number; maximized: boolean }
-
 function windowStatePath(): string { return join(app.getPath("userData"), "window-state.json"); }
 function windowAppearancePath(): string { return join(app.getPath("userData"), WINDOW_APPEARANCE_FILENAME); }
 
@@ -195,22 +208,6 @@ function attachmentRegistry(): AttachmentRegistry {
   return importedAttachments;
 }
 
-type ElectronAppMetric = ReturnType<typeof app.getAppMetrics>[number];
-
-function processHealth(
-  metrics: readonly ElectronAppMetric[],
-  pid: number | null,
-): AppProcessHealth | null {
-  if (pid === null) return null;
-  const metric = metrics.find((candidate) => candidate.pid === pid);
-  if (!metric) return null;
-  return {
-    pid,
-    cpuPercent: Math.max(0, metric.cpu.percentCPUUsage),
-    memoryBytes: Math.max(0, metric.memory.workingSetSize * 1_024),
-  };
-}
-
 async function fixedRegularFileSize(path: string): Promise<number> {
   try {
     const metadata = await lstat(path);
@@ -223,42 +220,25 @@ async function fixedRegularFileSize(path: string): Promise<number> {
   }
 }
 
-async function collectAppHealth(): Promise<AppHealthSnapshot> {
-  const metrics = app.getAppMetrics();
-  const runtime = runtimeSupervisor?.snapshot() ?? null;
-  const rendererPid = mainWindow && !mainWindow.isDestroyed()
-    ? mainWindow.webContents.getOSProcessId()
-    : null;
-  const databaseBytes = runtimeDataDirectory
+const appHealthCollector = new AppHealthCollector({
+  registry: appHealthRegistry,
+  getProcessMetrics: () => app.getAppMetrics(),
+  getRuntimePhase: () => runtimeSupervisor?.snapshot().phase ?? "idle",
+  readDatabaseBytes: async () => runtimeDataDirectory
     ? (await Promise.all([
         "inertia.sqlite",
         "inertia.sqlite-wal",
         "inertia.sqlite-shm",
       ].map((name) => fixedRegularFileSize(join(runtimeDataDirectory!, name)))))
         .reduce((total, size) => total + size, 0)
-    : 0;
-  const cacheBytes = mainWindow && !mainWindow.isDestroyed()
-    ? await mainWindow.webContents.session.getCacheSize()
-    : 0;
-  const attachmentUsage = importedAttachments?.usage()
-    ?? attachmentReservation;
-  return {
-    sampledAt: new Date().toISOString(),
-    totalMemoryBytes: metrics.reduce(
-      (total, metric) => total + Math.max(
-        0,
-        metric.memory.workingSetSize * 1_024,
-      ),
-      0,
-    ),
-    mainProcess: processHealth(metrics, process.pid),
-    rendererProcess: processHealth(metrics, rendererPid),
-    runtimeProcess: processHealth(metrics, runtime?.pid ?? null),
-    runtimePhase: runtime?.phase ?? "idle",
-    databaseBytes,
-    cacheBytes,
-    temporaryAttachmentBytes: attachmentUsage.bytes,
-  };
+    : 0,
+  readTemporaryAttachmentBytes: () => (
+    importedAttachments?.usage() ?? attachmentReservation
+  ).bytes,
+});
+
+async function collectAppHealth(): Promise<AppHealthSnapshot> {
+  return await appHealthCollector.collect();
 }
 
 function disposeImportedAttachments(): Promise<void> {
@@ -277,17 +257,14 @@ function disposeImportedAttachments(): Promise<void> {
   return attachmentCleanup;
 }
 
-function readWindowState(): WindowState {
+function readWindowState(): MainWindowState {
   try {
-    const value = JSON.parse(readFileSync(windowStatePath(), "utf8")) as Partial<WindowState>;
-    if (!Number.isInteger(value.width) || !Number.isInteger(value.height)) throw new Error();
-    const width = Math.max(760, Math.min(value.width as number, 5000));
-    const height = Math.max(600, Math.min(value.height as number, 3000));
-    const candidate = Number.isInteger(value.x) && Number.isInteger(value.y) ? { x: value.x as number, y: value.y as number, width, height } : null;
-    const visible = candidate && screen.getAllDisplays().some((display) => candidate.x < display.bounds.x + display.bounds.width && candidate.x + candidate.width > display.bounds.x && candidate.y < display.bounds.y + display.bounds.height && candidate.y + candidate.height > display.bounds.y);
-    return { ...(visible && candidate ? { x: candidate.x, y: candidate.y } : {}), width, height, maximized: value.maximized === true };
+    return restoreMainWindowState(
+      JSON.parse(readFileSync(windowStatePath(), "utf8")),
+      screen.getAllDisplays(),
+    );
   } catch {
-    return { width: 1440, height: 920, maximized: false };
+    return { ...MAIN_WINDOW_DEFAULT_STATE };
   }
 }
 
@@ -754,11 +731,7 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC.clearAppCache, async (event, ...args) => {
     assertTrustedIpc(event, args.length);
-    if (!mainWindow || mainWindow.isDestroyed()) {
-      throw new Error("The app cache is unavailable.");
-    }
-    await mainWindow.webContents.session.clearCache();
-    return await collectAppHealth();
+    return await appHealthCollector.clearCache();
   });
 
   ipcMain.handle(IPC.previewNavigate, async (event, ...args) => {
@@ -831,7 +804,14 @@ async function createMainWindow(): Promise<void> {
       conversationAttachments: () => conversationAttachments,
       runtimeSupervisor: () => runtimeSupervisor,
       workspaceImageConversationId: conversationId,
-    }, session.protocol), onDraftStoreDiagnostic: (diagnostic) => runtimeDiagnostics?.record("detached-draft.recovery", { ...diagnostic }),
+    }, session.protocol),
+    registerHealthRenderer: (contents) => (
+      appHealthRegistry.registerRenderer(contents)
+    ),
+    onDraftStoreDiagnostic: (diagnostic) => runtimeDiagnostics?.record(
+      "detached-draft.recovery",
+      { ...diagnostic },
+    ),
     onDock: (conversationId) => activateThreadNotification(conversationId, {
       channel: IPC.threadNotificationActivated,
       currentWindow: () => mainWindow, createWindow,
@@ -867,6 +847,9 @@ async function createMainWindow(): Promise<void> {
   });
 
   mainWindow = window;
+  const unregisterHealthRenderer = appHealthRegistry.registerRenderer(
+    window.webContents,
+  );
   detachedChatMain.registerIpc();
 
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
@@ -890,6 +873,7 @@ async function createMainWindow(): Promise<void> {
   window.once("ready-to-show", () => window.show());
   detachedChatClose.coordinateMainWindowClose(window, detachedChatMain, saveWindowState);
   window.on("closed", () => {
+    unregisterHealthRenderer();
     previewBroker.close();
     if (mainWindow === window) {
       mainWindow = null;

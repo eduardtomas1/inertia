@@ -57,6 +57,8 @@ export async function verifyBrowserEvidence({
   expect(evidenceText).not.toContain("hunter2");
   expect(evidenceText).not.toContain("MONGODB_URI");
   expect(evidenceText).not.toContain("mongodb://alice");
+  expect(evidenceText).not.toContain("control-e2e-short");
+  expect(evidenceText).not.toContain("bidi-e2e-short");
   expect(evidenceText).not.toContain("Jane Doe");
   expect(evidenceText).not.toContain("private-server");
   expect(evidenceText).not.toContain("secret share");

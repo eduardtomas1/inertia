@@ -613,6 +613,18 @@ describe("agent-owned native Browser", () => {
     });
     expect(uriPreventDefault).toHaveBeenCalledOnce();
     for (const message of [
+      "tok\u0000en=control-broker-short",
+      "pass\u202dword=bidi-broker-short",
+    ]) {
+      const controlPreventDefault = vi.fn();
+      contents.emit("console-message", {
+        level: "error",
+        message,
+        preventDefault: controlPreventDefault,
+      });
+      expect(controlPreventDefault).toHaveBeenCalledOnce();
+    }
+    for (const message of [
       "Failure at C://Users/Jane Doe/private/file.txt",
       "Failure at //private-server/secret share/file.txt",
       "Failed in src/private/config",
@@ -671,6 +683,8 @@ describe("agent-owned native Browser", () => {
     expect(serialized).not.toContain("hunter2");
     expect(serialized).not.toContain("MONGODB_URI");
     expect(serialized).not.toContain("mongodb://alice");
+    expect(serialized).not.toContain("control-broker-short");
+    expect(serialized).not.toContain("bidi-broker-short");
     expect(serialized).not.toContain("Jane Doe");
     expect(serialized).not.toContain("private-server");
     expect(serialized).not.toContain("secret share");
@@ -710,7 +724,7 @@ describe("agent-owned native Browser", () => {
       entry.detail === "Sensitive console detail hidden" && entry.redacted
     )).toBe(true);
     expect(consoleEvidence.reduce((total, entry) => total + entry.occurrences, 0))
-      .toBe(11);
+      .toBe(13);
 
     const capture = state.evidence.entries.find((entry) => entry.kind === "screenshot");
     expect(capture).toBeDefined();

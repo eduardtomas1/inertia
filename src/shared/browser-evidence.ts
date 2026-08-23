@@ -130,6 +130,13 @@ function withoutAuthorityUris(value: string): string {
   return remaining;
 }
 
+function withoutControlOrBidi(value: string): string {
+  CONTROL_OR_BIDI.lastIndex = 0;
+  const normalized = value.replace(CONTROL_OR_BIDI, "");
+  CONTROL_OR_BIDI.lastIndex = 0;
+  return normalized;
+}
+
 function hasFilesystemPathCandidate(value: string): boolean {
   return patternMatches(FILE_URL, value)
     || patternMatches(POSIX_PATH, value)
@@ -139,6 +146,27 @@ function hasFilesystemPathCandidate(value: string): boolean {
     || patternMatches(COMMON_ROOT_RELATIVE_PATH, value)
     || patternMatches(WINDOWS_OR_UNC_PATH_PREFIX, value)
     || patternMatches(UNC_OR_HOME_PATH, value);
+}
+
+function hasFailClosedEvidence(
+  value: string,
+  includeProjectableSecrets: boolean,
+): boolean {
+  return patternMatches(SENSITIVE_FIELD, value)
+    || patternMatches(CAMEL_CASE_CREDENTIAL_ASSIGNMENT, value)
+    || patternMatches(AUTHORIZATION_VALUE, value)
+    || hasCredentialBearingUri(value)
+    || patternMatches(FILE_URL, value)
+    || patternMatches(WINDOWS_OR_UNC_PATH_PREFIX, value)
+    || hasFilesystemPathCandidate(withoutAuthorityUris(value))
+    || (
+      includeProjectableSecrets
+      && (
+        patternMatches(PREFIXED_SECRET, value)
+        || patternMatches(JWT, value)
+        || patternMatches(PRIVATE_KEY, value)
+      )
+    );
 }
 
 function boundedPercentDecode(value: string): string | null {
@@ -241,37 +269,28 @@ export function sanitizeBrowserEvidenceText(
     decodedOutsideDirectHttpUrls === null
     || patternMatches(
       HTTP_SCHEME,
-      decodedOutsideDirectHttpUrls.replace(CONTROL_OR_BIDI, ""),
+      withoutControlOrBidi(decodedOutsideDirectHttpUrls),
     )
   ) {
     return { text: fallback.slice(0, limit), redacted: true };
   }
-  const inspectedWithoutAuthorityUris = withoutAuthorityUris(inspected);
-  const decodedWithoutAuthorityUris = decoded === inspected
-    ? inspectedWithoutAuthorityUris
-    : withoutAuthorityUris(decoded);
+  const controlNormalizedInspected = withoutControlOrBidi(inspected);
+  const controlNormalizedDecoded = decoded === inspected
+    ? controlNormalizedInspected
+    : withoutControlOrBidi(decoded);
   if (
-    SENSITIVE_FIELD.test(inspected)
-    || patternMatches(CAMEL_CASE_CREDENTIAL_ASSIGNMENT, inspected)
-    || patternMatches(AUTHORIZATION_VALUE, inspected)
-    || hasCredentialBearingUri(inspected)
-    || patternMatches(FILE_URL, inspected)
-    || patternMatches(WINDOWS_OR_UNC_PATH_PREFIX, inspected)
-    || hasFilesystemPathCandidate(inspectedWithoutAuthorityUris)
+    hasFailClosedEvidence(inspected, false)
     || (
       decoded !== inspected
-      && (
-        SENSITIVE_FIELD.test(decoded)
-        || patternMatches(CAMEL_CASE_CREDENTIAL_ASSIGNMENT, decoded)
-        || patternMatches(AUTHORIZATION_VALUE, decoded)
-        || patternMatches(PREFIXED_SECRET, decoded)
-        || patternMatches(JWT, decoded)
-        || patternMatches(PRIVATE_KEY, decoded)
-        || hasCredentialBearingUri(decoded)
-        || patternMatches(FILE_URL, decoded)
-        || patternMatches(WINDOWS_OR_UNC_PATH_PREFIX, decoded)
-        || hasFilesystemPathCandidate(decodedWithoutAuthorityUris)
-      )
+      && hasFailClosedEvidence(decoded, true)
+    )
+    || (
+      controlNormalizedInspected !== inspected
+      && hasFailClosedEvidence(controlNormalizedInspected, false)
+    )
+    || (
+      controlNormalizedDecoded !== decoded
+      && hasFailClosedEvidence(controlNormalizedDecoded, false)
     )
   ) {
     return { text: fallback.slice(0, limit), redacted: true };

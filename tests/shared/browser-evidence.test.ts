@@ -76,6 +76,11 @@ describe("Browser evidence sanitization", () => {
     "sk%252Dabcdefgh12345678",
     "render failed 100% sk%2Dabcdefgh12345678",
     "sk%252525252Dabcdefgh12345678",
+    "tok\u0000en=hunter2",
+    "pass\u202dword=hunter2",
+    "clientSec\u2066ret=x",
+    "tok%00en=hunter2",
+    "pass%E2%80%ADword=hunter2",
     "-----BEGIN PRIVATE KEY-----",
   ])("fails closed for credential-bearing console detail: %s", (value) => {
     expect(sanitizeBrowserEvidenceText(value, "Sensitive console detail hidden"))
@@ -96,6 +101,16 @@ describe("Browser evidence sanitization", () => {
   it("does not treat a sensitive-field substring in normal prose as a field", () => {
     expect(sanitizeBrowserEvidenceText("The obsession ended normally.", "hidden"))
       .toEqual({ text: "The obsession ended normally.", redacted: false });
+  });
+
+  it("normalizes controls in ordinary prose without failing the detail closed", () => {
+    expect(sanitizeBrowserEvidenceText(
+      "The pass\u202d completed after a line\u0000break.",
+      "hidden",
+    )).toEqual({
+      text: "The pass completed after a line break.",
+      redacted: true,
+    });
   });
 
   it.each([

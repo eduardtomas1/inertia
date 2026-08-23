@@ -60,6 +60,8 @@ describe("Browser evidence ledger", () => {
     "PGPASSWORD=hunter2",
     "postgres://alice:hunter2@localhost/private",
     "MONGODB_URI=mongodb://alice:hunter2@localhost/private",
+    "tok\u0000en=hunter2",
+    "pass\u202dword=hunter2",
   ])("fails closed before storing page-authored credential assignment: %s", (message) => {
     const ledger = new BrowserEvidenceLedger();
     ledger.recordConsoleError({ ...location, message });

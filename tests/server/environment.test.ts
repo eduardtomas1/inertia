@@ -394,6 +394,7 @@ describe.sequential("provider environment discovery", () => {
     const source = {
       PATH: process.env.PATH,
       CLAUDE_CODE_USE_BEDROCK: "1",
+      AWS_CA_BUNDLE: "/etc/company/aws-ca.pem",
       AWS_ACCESS_KEY_ID: "bedrock-id",
       AWS_SECRET_ACCESS_KEY: "bedrock-secret",
       GOOGLE_APPLICATION_CREDENTIALS: "/tmp/vertex.json",
@@ -402,6 +403,7 @@ describe.sequential("provider environment discovery", () => {
 
     expect(providerChildEnvironment("claude", source)).toMatchObject({
       CLAUDE_CODE_USE_BEDROCK: "1",
+      AWS_CA_BUNDLE: "/etc/company/aws-ca.pem",
       AWS_ACCESS_KEY_ID: "bedrock-id",
       AWS_SECRET_ACCESS_KEY: "bedrock-secret",
     });

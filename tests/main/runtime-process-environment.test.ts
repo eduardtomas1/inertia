@@ -38,6 +38,7 @@ describe("supervised runtime process environment", () => {
     const parent: NodeJS.ProcessEnv = {
       CODEX_HOME: "/Users/person/.codex",
       ANTHROPIC_BASE_URL: "https://anthropic.example.test",
+      AWS_CA_BUNDLE: "/etc/company/aws-ca.pem",
       AWS_PROFILE: "bedrock-profile",
       AWS_REGION: "eu-west-1",
       CLAUDE_CODE_USE_BEDROCK: "1",
@@ -94,6 +95,7 @@ describe("supervised runtime process environment", () => {
     expect(runtimeProcessEnvironment(parent, "linux")).toEqual({
       CODEX_HOME: parent.CODEX_HOME,
       ANTHROPIC_BASE_URL: parent.ANTHROPIC_BASE_URL,
+      AWS_CA_BUNDLE: parent.AWS_CA_BUNDLE,
       AWS_PROFILE: parent.AWS_PROFILE,
       AWS_REGION: parent.AWS_REGION,
       CLAUDE_CODE_USE_BEDROCK: parent.CLAUDE_CODE_USE_BEDROCK,

@@ -74,6 +74,14 @@ function metadataBytes(entry: BrowserEvidenceEntry): number {
   return Buffer.byteLength(JSON.stringify(entry), "utf8");
 }
 
+function compareOccurrence(
+  left: BrowserEvidenceEntry,
+  right: BrowserEvidenceEntry,
+): number {
+  return left.occurredAt.localeCompare(right.occurredAt)
+    || left.sequence - right.sequence;
+}
+
 export class BrowserEvidenceLedger {
   readonly #entries: BrowserEvidenceEntry[] = [];
   readonly #entryBytes = new Map<string, number>();
@@ -89,10 +97,7 @@ export class BrowserEvidenceLedger {
       revision: this.#revision,
       entries: this.#entries
         .slice()
-        .sort((left, right) =>
-          left.occurredAt.localeCompare(right.occurredAt)
-          || left.sequence - right.sequence
-        )
+        .sort(compareOccurrence)
         .map((entry) => ({
           ...entry,
           ...(entry.screenshot ? { screenshot: { ...entry.screenshot } } : {}),
@@ -294,7 +299,13 @@ export class BrowserEvidenceLedger {
       this.#entries.length > MAX_BROWSER_EVIDENCE_ENTRIES
       || this.#metadataBytes > MAX_BROWSER_EVIDENCE_METADATA_BYTES
     ) {
-      const removed = this.#entries.shift();
+      let oldestIndex = 0;
+      for (let index = 1; index < this.#entries.length; index += 1) {
+        if (compareOccurrence(this.#entries[index]!, this.#entries[oldestIndex]!) < 0) {
+          oldestIndex = index;
+        }
+      }
+      const [removed] = this.#entries.splice(oldestIndex, 1);
       if (!removed) break;
       this.#metadataBytes -= this.#entryBytes.get(removed.id) ?? 0;
       this.#entryBytes.delete(removed.id);

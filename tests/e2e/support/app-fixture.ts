@@ -14,7 +14,7 @@ import { promisify } from "node:util";
 import { RuntimeStore } from "../../../src/server/database";
 import { portableNodeExecutable } from "../../helpers/portable-provider-fixture";
 import { seedAppConversation } from "../../support/seed-app-conversation";
-import { serveAgentBrowserWindowCapturePrivacy } from "./agent-browser-fixture-pages";
+import { serveAgentBrowserPrivacyFixture } from "./agent-browser-fixture-pages";
 import { expectNoViewportOverflow as expectPageNoViewportOverflow } from "./layout-assertions";
 
 const execFileAsync = promisify(execFile);
@@ -85,7 +85,7 @@ async function createPreviewServer(): Promise<{
   url: string;
 }> {
   const server = createServer((request, response) => {
-    if (serveAgentBrowserWindowCapturePrivacy(request.url, response)) return;
+    if (serveAgentBrowserPrivacyFixture(request.url, response)) return;
     if (
       request.method === "POST"
       && request.url === "/backend-probe/v1/messages"

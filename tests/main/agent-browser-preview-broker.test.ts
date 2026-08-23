@@ -600,6 +600,12 @@ describe("agent-owned native Browser", () => {
     expect(preventDefault).toHaveBeenCalledOnce();
     await vi.waitFor(() => expect(pageTools.agentPageHasSensitiveEvidence)
       .toHaveBeenCalledWith(contents));
+    pageTools.agentPageHasSensitiveEvidence.mockResolvedValueOnce(true);
+    contents.emit("console-message", {
+      level: "error",
+      message: "hunter2",
+      preventDefault: vi.fn(),
+    });
 
     browserSession.emitBeforeRequest({
       id: 71,
@@ -631,6 +637,7 @@ describe("agent-owned native Browser", () => {
     });
     const serialized = JSON.stringify(state.evidence);
     expect(serialized).not.toContain("console-value");
+    expect(serialized).not.toContain("hunter2");
     expect(serialized).not.toContain("/Users/alice");
     expect(serialized).not.toContain("network-value");
     expect(serialized).not.toContain("never-store");
@@ -655,6 +662,8 @@ describe("agent-owned native Browser", () => {
         screenshot: expect.objectContaining({ available: true }),
       }),
     ]));
+    expect(state.evidence.entries.filter((entry) => entry.kind === "console-error"))
+      .toHaveLength(2);
 
     const capture = state.evidence.entries.find((entry) => entry.kind === "screenshot");
     expect(capture).toBeDefined();

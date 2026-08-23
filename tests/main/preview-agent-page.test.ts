@@ -156,6 +156,60 @@ describe("agent browser semantic snapshots", () => {
     expect(dispatched).toEqual(["nested-boundary"]);
   });
 
+  it("signals a non-empty password value assignment before page code can clear it", () => {
+    const dispatched: string[] = [];
+    class FakeEvent {
+      constructor(readonly type: string) {}
+    }
+    class FakeEventTarget {
+      dispatchEvent(event: FakeEvent): boolean {
+        dispatched.push(event.type);
+        return true;
+      }
+    }
+    class FakeElement extends FakeEventTarget {
+      attachShadow(): object { return {}; }
+    }
+    class FakeHTMLElement extends FakeElement {
+      attachInternals(): object { return { shadowRoot: null }; }
+    }
+    class FakeHTMLInputElement extends FakeHTMLElement {
+      #type = "text";
+      #value = "";
+      get type(): string { return this.#type; }
+      set type(value: string) { this.#type = value; }
+      get value(): string { return this.#value; }
+      set value(value: string) { this.#value = String(value); }
+    }
+    const context = {
+      document: new FakeEventTarget(),
+      Element: FakeElement,
+      HTMLElement: FakeHTMLElement,
+      HTMLInputElement: FakeHTMLInputElement,
+      EventTarget: FakeEventTarget,
+      Event: FakeEvent,
+    };
+
+    runInNewContext(
+      `(${installPreviewAgentShadowBoundarySignal.toString()})("nested-boundary")`,
+      context,
+    );
+    runInNewContext(`
+      const ordinary = new HTMLInputElement();
+      ordinary.value = "brief note";
+      const credential = new HTMLInputElement();
+      credential.type = "password";
+      credential.value = "hunter2";
+      credential.value = "";
+      const latePassword = new HTMLInputElement();
+      latePassword.value = "secret";
+      latePassword.type = "password";
+      latePassword.value = "";
+    `, context);
+
+    expect(dispatched).toEqual(["nested-boundary", "nested-boundary"]);
+  });
+
   it("signals declarative-root parsing before a detached host can disappear", () => {
     const dispatched: string[] = [];
     class FakeEvent {

@@ -102,6 +102,37 @@ describe("Browser evidence ledger", () => {
     );
   });
 
+  it("evicts a delayed older entry before later navigation occurrences", () => {
+    const ledger = new BrowserEvidenceLedger();
+    for (let index = 0; index < MAX_BROWSER_EVIDENCE_ENTRIES; index += 1) {
+      ledger.recordNavigation({
+        ...location,
+        documentSequence: index + 3,
+        occurredAt: new Date(1_000 + index).toISOString(),
+        url: `http://localhost:3000/page-${index}`,
+        sameDocument: false,
+      });
+    }
+    ledger.recordConsoleError({
+      ...location,
+      occurredAt: new Date(0).toISOString(),
+      message: "delayed older failure",
+    });
+
+    const snapshot = ledger.snapshot();
+    expect(snapshot.entries).toHaveLength(MAX_BROWSER_EVIDENCE_ENTRIES);
+    expect(snapshot.omitted).toBe(true);
+    expect(snapshot.entries).not.toContainEqual(expect.objectContaining({
+      detail: "delayed older failure",
+    }));
+    expect(snapshot.entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({ documentSequence: 3 }),
+      expect.objectContaining({
+        documentSequence: MAX_BROWSER_EVIDENCE_ENTRIES + 2,
+      }),
+    ]));
+  });
+
   it("keeps at most eight bounded screenshot handles and drops all bytes on clear", () => {
     const ledger = new BrowserEvidenceLedger();
     const ids: string[] = [];

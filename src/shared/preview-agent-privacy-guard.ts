@@ -56,6 +56,57 @@ export function installPreviewAgentShadowBoundarySignal(eventName: string): void
       },
     });
   }
+  const inputValueDescriptor = typeof HTMLInputElement === "undefined"
+    ? undefined
+    : Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
+  const inputTypeDescriptor = typeof HTMLInputElement === "undefined"
+    ? undefined
+    : Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "type");
+  const inputValueGetter = inputValueDescriptor?.get;
+  const inputValueSetter = inputValueDescriptor?.set;
+  const inputTypeGetter = inputTypeDescriptor?.get;
+  const inputTypeSetter = inputTypeDescriptor?.set;
+  const nativeString = String;
+  const nativeLowerCase = String.prototype.toLowerCase;
+  const signalPasswordValue = (input: HTMLInputElement): void => {
+    try {
+      const assignedValue = Reflect.apply(inputValueGetter!, input, []) as string;
+      if (!assignedValue) return;
+      const inputType = nativeString(Reflect.apply(inputTypeGetter!, input, []));
+      if (Reflect.apply(nativeLowerCase, inputType, []) === "password") signal();
+    } catch {
+      // A native write already succeeded. If its resulting type/value cannot
+      // be proven safe, retain the lifetime taint before author code can log
+      // and clear a credential in the same task.
+      signal();
+    }
+  };
+  if (typeof HTMLInputElement !== "undefined") {
+    if (!inputValueDescriptor || typeof inputValueGetter !== "function"
+      || typeof inputValueSetter !== "function" || !inputTypeDescriptor
+      || typeof inputTypeGetter !== "function" || typeof inputTypeSetter !== "function") {
+      signal();
+    } else {
+      try {
+        Object.defineProperty(HTMLInputElement.prototype, "value", {
+          ...inputValueDescriptor,
+          set(this: HTMLInputElement, value: unknown): void {
+            Reflect.apply(inputValueSetter, this, [value]);
+            signalPasswordValue(this);
+          },
+        });
+        Object.defineProperty(HTMLInputElement.prototype, "type", {
+          ...inputTypeDescriptor,
+          set(this: HTMLInputElement, value: unknown): void {
+            Reflect.apply(inputTypeSetter, this, [value]);
+            signalPasswordValue(this);
+          },
+        });
+      } catch {
+        signal();
+      }
+    }
+  }
   const maximumParserSourceCharacters = 4_096;
   const createElement = typeof Document === "undefined"
     ? undefined

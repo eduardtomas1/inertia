@@ -1,4 +1,4 @@
-import { expect } from "@playwright/test";
+import { expect, type Locator } from "@playwright/test";
 
 import { AGENT_BROWSER_WORLD_ID } from "../../../src/main/preview-agent-page";
 import type { AppFixture } from "./app-fixture";
@@ -191,6 +191,20 @@ export async function expectWindowCapturePrivacyGuard(
     restored: { ok: true },
   });
   expect(JSON.stringify(evidence)).not.toContain(secret);
+}
+
+export async function expectPasswordAssignmentPrivacyGuard(
+  app: AppFixture,
+  conversationId: string,
+  url: string,
+  preview: Locator,
+): Promise<void> {
+  await expectDocumentStartPrivacyGuard(app, conversationId, url, "hunter2");
+  await preview.getByRole("button", { name: /Evidence/u }).click();
+  const evidence = preview.getByRole("list", { name: "Browser evidence timeline" });
+  await expect(evidence).not.toContainText("hunter2");
+  await expect(evidence).toContainText("Sensitive console detail hidden");
+  await preview.getByRole("button", { name: "Close Browser evidence" }).click();
 }
 
 export async function expectHoverRetargetingGuard(

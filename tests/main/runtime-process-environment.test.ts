@@ -160,6 +160,46 @@ describe("supervised runtime process environment", () => {
     });
   });
 
+  it("passes credential-free proxy routing and rejects credential-bearing values", () => {
+    const parent: NodeJS.ProcessEnv = {
+      ALL_PROXY: "socks5://socks.example.test:1080",
+      HTTP_PROXY: "http://proxy.example.test:8080",
+      HTTPS_PROXY: "https://sentinel-user:sentinel-secret@proxy.example.test:8443",
+      NO_PROXY: "localhost,.example.test,127.0.0.1",
+      all_proxy: "socks5://sentinel-user:sentinel-secret@socks.example.test:1080",
+      http_proxy: "http://sentinel-user:sentinel-secret@proxy.example.test:8080",
+      https_proxy: "https://proxy.example.test:8443",
+      no_proxy: "localhost,[::1]",
+    };
+
+    expect(runtimeProcessEnvironment(parent, "linux")).toEqual({
+      ALL_PROXY: parent.ALL_PROXY,
+      HTTP_PROXY: parent.HTTP_PROXY,
+      NO_PROXY: parent.NO_PROXY,
+      https_proxy: parent.https_proxy,
+      no_proxy: parent.no_proxy,
+    });
+    expect(runtimeProcessEnvironment({
+      http_proxy: "http://proxy.windows.test:8080",
+    }, "win32")).toEqual({
+      HTTP_PROXY: "http://proxy.windows.test:8080",
+    });
+    for (const value of [
+      "http://sentinel-user:sentinel-secret@proxy.example.test:8080",
+      "http://proxy.example.test:8080/sentinel-secret",
+      "http://proxy.example.test:8080?token=sentinel-secret",
+      "http://proxy.example.test:8080#sentinel-secret",
+      "file:///tmp/sentinel-proxy",
+      "not a proxy URL",
+      `http://proxy.example.test/${"x".repeat(2_048)}`,
+    ]) {
+      expect(runtimeProcessEnvironment({ HTTP_PROXY: value }, "linux")).toEqual({});
+    }
+    expect(runtimeProcessEnvironment({
+      NO_PROXY: "sentinel-secret@example.test",
+    }, "linux")).toEqual({});
+  });
+
   it("requires the exact test-only streaming trace opt-in", () => {
     expect(runtimeProcessEnvironment({
       INERTIA_STREAMING_TRACE: "1",

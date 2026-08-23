@@ -65,6 +65,48 @@ const RUNTIME_PROCESS_ENVIRONMENT_KEYS = [
   ...PROVIDER_ROUTING_ENVIRONMENT_KEYS,
 ] as const;
 
+const RUNTIME_PROXY_ENVIRONMENT_KEYS = [
+  "ALL_PROXY",
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+] as const;
+
+const PROXY_PROTOCOLS = new Set([
+  "http:",
+  "https:",
+  "socks:",
+  "socks4:",
+  "socks4a:",
+  "socks5:",
+  "socks5h:",
+]);
+
+const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/u;
+
+function credentialFreeProxyUrl(value: string): boolean {
+  if (value.length === 0 || value.length > 2_048 || CONTROL_CHARACTER.test(value)) {
+    return false;
+  }
+  try {
+    const parsed = new URL(value);
+    return PROXY_PROTOCOLS.has(parsed.protocol)
+      && parsed.hostname.length > 0
+      && parsed.username.length === 0
+      && parsed.password.length === 0
+      && (parsed.pathname === "" || parsed.pathname === "/")
+      && parsed.search.length === 0
+      && parsed.hash.length === 0;
+  } catch {
+    return false;
+  }
+}
+
+function credentialFreeNoProxy(value: string): boolean {
+  return value.length <= 8_192
+    && !CONTROL_CHARACTER.test(value)
+    && !value.includes("@");
+}
+
 function environmentValue(
   environment: NodeJS.ProcessEnv,
   key: string,
@@ -94,6 +136,21 @@ export function runtimeProcessEnvironment(
       continue;
     }
     sanitized[key] = value;
+  }
+  for (const key of RUNTIME_PROXY_ENVIRONMENT_KEYS) {
+    const variants = platform === "win32" ? [key] : [key, key.toLowerCase()];
+    for (const variant of variants) {
+      const value = environmentValue(environment, variant, platform);
+      if (value !== undefined && credentialFreeProxyUrl(value)) {
+        sanitized[variant] = value;
+      }
+    }
+  }
+  for (const key of platform === "win32" ? ["NO_PROXY"] : ["NO_PROXY", "no_proxy"]) {
+    const value = environmentValue(environment, key, platform);
+    if (value !== undefined && credentialFreeNoProxy(value)) {
+      sanitized[key] = value;
+    }
   }
   if (
     sanitized.NODE_ENV === "test"

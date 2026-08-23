@@ -75,6 +75,7 @@ describe("supervised runtime process environment", () => {
       WAYLAND_DISPLAY: "wayland-0",
       XAUTHORITY: "/run/user/501/gdm/Xauthority",
       XDG_CONFIG_HOME: "/Users/person/.config",
+      XDG_STATE_HOME: "/Users/person/.local/state-work",
       ...sentinelSecrets,
     };
 
@@ -118,6 +119,7 @@ describe("supervised runtime process environment", () => {
       WAYLAND_DISPLAY: parent.WAYLAND_DISPLAY,
       XAUTHORITY: parent.XAUTHORITY,
       XDG_CONFIG_HOME: parent.XDG_CONFIG_HOME,
+      XDG_STATE_HOME: parent.XDG_STATE_HOME,
     });
   });
 
@@ -128,8 +130,13 @@ describe("supervised runtime process environment", () => {
       NODE_ENV: "production",
       INERTIA_STREAMING_TRACE: "1",
       Path: "C:\\Windows\\System32",
+      ProgramData: "C:\\ProgramData",
+      ProgramFiles: "C:\\Program Files",
+      "ProgramFiles(x86)": "C:\\Program Files (x86)",
+      ProgramW6432: "C:\\Program Files",
       SystemRoot: "C:\\Windows",
       TEMP: "C:\\Users\\person\\AppData\\Local\\Temp",
+      AllUsersProfile: "C:\\ProgramData",
       UserProfile: "C:\\Users\\person",
       ...sentinelSecrets,
     };
@@ -138,8 +145,13 @@ describe("supervised runtime process environment", () => {
       APPDATA: parent.AppData,
       COMSPEC: parent.ComSpec,
       PATH: parent.Path,
+      PROGRAMDATA: parent.ProgramData,
+      PROGRAMFILES: parent.ProgramFiles,
+      "PROGRAMFILES(X86)": parent["ProgramFiles(x86)"],
+      PROGRAMW6432: parent.ProgramW6432,
       SYSTEMROOT: parent.SystemRoot,
       TEMP: parent.TEMP,
+      ALLUSERSPROFILE: parent.AllUsersProfile,
       USERPROFILE: parent.UserProfile,
     });
   });

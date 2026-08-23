@@ -875,6 +875,40 @@ setInterval(() => {}, 1000);
     }
   });
 
+  it("rejects a naturally failing Git inspection after bounded output is truncated", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "inertia-git-bounded-failure-"));
+    temporaryDirectories.push(directory);
+    portableNodeExecutable(directory, "git");
+    writeNodeSubcommand(
+      directory,
+      "status",
+      `process.stdout.write("x".repeat(64 * 1024), () => {
+  process.stderr.write("fatal: bounded inspection failed\\n");
+  process.exit(128);
+});`,
+    );
+    const previousPath = process.env.PATH;
+    process.env.PATH = directory;
+    const terminateProcessTree = vi.fn(async () => true);
+    try {
+      await expect(runGit(directory, ["status"], {
+        timeoutMs: 5_000,
+        maxOutputBytes: 1_024,
+        truncateOutput: true,
+        failureMessage: "Git status failed.",
+      }, {
+        terminateProcessTree,
+      })).rejects.toMatchObject({
+        code: "operation-failed",
+        message: "Git status failed.",
+      } satisfies Partial<GitError>);
+      expect(terminateProcessTree).not.toHaveBeenCalled();
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+    }
+  });
+
   it("preserves an abort that arrives during bounded-output termination", async () => {
     const directory = await mkdtemp(join(tmpdir(), "inertia-git-bounded-abort-"));
     temporaryDirectories.push(directory);

@@ -1,0 +1,83 @@
+const RUNTIME_PROCESS_ENVIRONMENT_KEYS = [
+  "APPDATA",
+  "BUN_INSTALL",
+  "CODEX_HOME",
+  "CODEX_INSTALL_DIR",
+  "COMSPEC",
+  "CURSOR_HOME",
+  "GH_CONFIG_DIR",
+  "HOME",
+  "HOMEDRIVE",
+  "HOMEPATH",
+  "LANG",
+  "LANGUAGE",
+  "LC_ALL",
+  "LC_COLLATE",
+  "LC_CTYPE",
+  "LC_MESSAGES",
+  "LC_MONETARY",
+  "LC_NUMERIC",
+  "LC_TIME",
+  "LOCALAPPDATA",
+  "LOGNAME",
+  "NODE_ENV",
+  "NODE_EXTRA_CA_CERTS",
+  "NVM_BIN",
+  "PATH",
+  "PATHEXT",
+  "PNPM_HOME",
+  "OPENCODE_CONFIG",
+  "SHELL",
+  "SSH_AUTH_SOCK",
+  "SSL_CERT_DIR",
+  "SSL_CERT_FILE",
+  "SYSTEMDRIVE",
+  "SYSTEMROOT",
+  "TEMP",
+  "TERM",
+  "TMP",
+  "TMPDIR",
+  "TZ",
+  "USER",
+  "USERNAME",
+  "USERPROFILE",
+  "VOLTA_HOME",
+  "WINDIR",
+  "XDG_CACHE_HOME",
+  "XDG_CONFIG_HOME",
+  "XDG_DATA_HOME",
+  "XDG_RUNTIME_DIR",
+] as const;
+
+function environmentValue(
+  environment: NodeJS.ProcessEnv,
+  key: string,
+  platform: NodeJS.Platform,
+): string | undefined {
+  if (platform !== "win32") return environment[key];
+  const normalized = key.toUpperCase();
+  const match = Object.keys(environment).find(
+    (candidate) => candidate.toUpperCase() === normalized,
+  );
+  return match ? environment[match] : undefined;
+}
+
+/**
+ * The supervised runtime receives only process-launch essentials and reviewed
+ * filesystem locations. Provider credentials remain behind the privileged
+ * broker instead of crossing the Electron utility-process boundary.
+ */
+export function runtimeProcessEnvironment(
+  environment: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): NodeJS.ProcessEnv {
+  const sanitized: NodeJS.ProcessEnv = {};
+  for (const key of RUNTIME_PROCESS_ENVIRONMENT_KEYS) {
+    const value = environmentValue(environment, key, platform);
+    if (value === undefined || (key === "NODE_ENV" && value !== "test")) {
+      continue;
+    }
+    sanitized[key] = value;
+  }
+  return sanitized;
+}

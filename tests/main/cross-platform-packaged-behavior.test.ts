@@ -165,6 +165,12 @@ describe("cross-platform packaged behavior contract", () => {
     expect(main).toContain(
       "codexBinaryPath: packageSmokeCodexExecutable",
     );
+    const runtimeForkStart = main.indexOf(
+      "spawn: () => utilityProcess.fork(",
+    );
+    const runtimeFork = main.slice(runtimeForkStart, runtimeForkStart + 500);
+    expect(runtimeForkStart).toBeGreaterThanOrEqual(0);
+    expect(runtimeFork).toContain("env: runtimeBootstrap.runtimeProcessEnvironment(),");
     expect(main.match(/timestampMs: Date\.now\(\)/gu)).toHaveLength(2);
     expect(main).toContain("packageSmokePdf:");
     expect(main).toContain("waitForRequestedPackageSmokeResults({");

@@ -1046,7 +1046,7 @@ async function bootstrap(): Promise<void> {
       fileURLToPath(new URL("./runtime-worker.js", import.meta.url)),
       [],
       {
-        cwd: app.getPath("home"),
+        cwd: app.getPath("home"), env: runtimeBootstrap.runtimeProcessEnvironment(),
         stdio: "ignore",
         serviceName: "Inertia Runtime",
       },

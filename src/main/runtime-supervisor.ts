@@ -84,7 +84,7 @@ export class RuntimeSupervisor {
   private lastError: string | null = null;
   private databaseRecoveryReport: RuntimeDatabaseStartupRecoveryReport | null = null;
   private databaseRecoveryNoticePending = false;
-  private desiredRunning = false;
+  private desiredRunning = false; private lifecycle: "unused" | "started" | "closed" = "unused";
   private restartBlocked = false;
   private unconfirmedRestarts = 0;
   private readonly ownerNonce = randomUUID();
@@ -202,8 +202,8 @@ export class RuntimeSupervisor {
     });
     this.onStateChange = options.onStateChange;
   }
-  start(): void { if (this.desiredRunning || this.restartBlocked) return;
-    this.desiredRunning = true; this.clearShutdownTimers();
+  start(): void { if (this.lifecycle !== "unused" || this.restartBlocked) return;
+    this.lifecycle = "started"; this.desiredRunning = true; this.clearShutdownTimers();
     const priorRecovery = this.startupRecovery.begin((recovered) => { if (!this.desiredRunning) return;
       if (!recovered) { this.desiredRunning = false; this.restartBlocked = true; this.phase = "stopped";
         this.lastError = unconfirmedRuntimeCleanupMessage(this.systemBootId,
@@ -415,7 +415,7 @@ export class RuntimeSupervisor {
     return recycle.promise;
   }
   stop(): Promise<boolean> {
-    this.testRecycle.cancelForStop();
+    this.lifecycle = "closed"; this.testRecycle.cancelForStop();
     if (this.stopPromise) return this.stopPromise;
     this.desiredRunning = false;
     this.clearTimerValue("restartTimer");

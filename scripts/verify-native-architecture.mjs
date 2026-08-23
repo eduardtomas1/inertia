@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 
 import { createCanvas } from "@napi-rs/canvas";
 import Database from "better-sqlite3";
+import { inspectNativeBinaryArchitecture } from "./native-binary-architecture.mjs";
 import { probeNativeExecutable } from "./native-executable-probe.mjs";
 
 const expectedArchitecture = process.env.INERTIA_EXPECTED_ARCH;
@@ -31,6 +32,9 @@ const claudeManifest = JSON.parse(await readFile(join(claudeDirectory, "package.
 if (claudeManifest.name !== `@anthropic-ai/${claudePackage}`) {
   throw new Error("The installed Claude SDK native package does not match the runner architecture.");
 }
+if (typeof claudeManifest.version !== "string" || claudeManifest.version.length === 0) {
+  throw new Error("The installed Claude SDK native package has no manifest version.");
+}
 const claudeExecutable = join(
   claudeDirectory,
   process.platform === "win32" ? "claude.exe" : "claude",
@@ -39,10 +43,10 @@ const claudeStat = await lstat(claudeExecutable);
 if (!claudeStat.isFile() || claudeStat.size <= 0) {
   throw new Error("The Claude SDK native executable is missing or empty.");
 }
-const claudeVersion = await probeNativeExecutable(claudeExecutable, ["--version"]);
-if (claudeVersion.status !== 0 || !/\d+\.\d+\.\d+/u.test(claudeVersion.stdout)) {
-  throw new Error("The Claude SDK native executable did not complete its bounded version probe.");
-}
+await inspectNativeBinaryArchitecture(claudeExecutable, {
+  expectedArchitecture,
+  platform: process.platform,
+});
 
 const database = new Database(":memory:");
 try {
@@ -97,5 +101,5 @@ if (ptyProbe.status !== 0 || !ptyProbe.stdout.includes(ptySuccessMarker)) {
 
 console.log(
   `Native architecture probe passed for ${process.platform}/${process.arch} `
-  + `(Claude ${claudeVersion.stdout.trim()}).`,
+  + `(Claude manifest ${claudeManifest.version}).`,
 );

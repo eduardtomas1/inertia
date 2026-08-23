@@ -392,10 +392,17 @@ describe("cross-platform packaged behavior contract", () => {
 
   it("supervises the native PTY architecture probe outside the binding process", async () => {
     const verifier = await source("scripts/verify-native-architecture.mjs");
+    const architectureInspector = await source("scripts/native-binary-architecture.mjs");
     const helper = await source("scripts/native-pty-probe.mjs");
     expect(verifier).not.toContain('from "node-pty"');
+    expect(verifier).toContain("inspectNativeBinaryArchitecture(claudeExecutable");
+    expect(verifier).not.toContain("claudeExecutable, [\"--version\"]");
     expect(verifier).toContain('"native-pty-probe.mjs"');
     expect(verifier).toContain("probeNativeExecutable(");
+    expect(verifier.match(/probeNativeExecutable\(/gu)).toHaveLength(1);
+    expect(architectureInspector).toContain("NATIVE_HEADER_READ_LIMIT");
+    expect(architectureInspector).toContain("await handle.read(");
+    expect(architectureInspector).not.toContain('node:child_process');
     expect(helper).toContain('from "node-pty"');
     expect(helper).toContain("spawnPty(executable, args");
   });

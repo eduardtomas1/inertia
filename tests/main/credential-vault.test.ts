@@ -1,3 +1,4 @@
+import type { Stats } from "node:fs";
 import {
   mkdir,
   mkdtemp,
@@ -402,13 +403,13 @@ describe("FileCredentialVaultPersistence", () => {
     try {
       await expect(new FileCredentialVaultPersistence(path).read())
         .resolves.toBe(expected);
-      expect(read.mock.calls.length).toBeGreaterThan(1);
+      expect(read.mock.calls.length).toBeGreaterThan(2);
     } finally {
       read.mockRestore();
     }
   });
 
-  it("rejects content that changes through the opened vault identity", async () => {
+  it("rejects content changes when opened-handle timestamps do not advance", async () => {
     const directory = await mkdtemp(join(tmpdir(), "inertia-credential-vault-"));
     temporaryDirectories.push(directory);
     const path = join(directory, "credentials.json");
@@ -422,9 +423,25 @@ describe("FileCredentialVaultPersistence", () => {
         length: number,
         position: number,
       ): Promise<{ bytesRead: number; buffer: Buffer }>;
+      stat(): Promise<Stats>;
     };
     await probe.close();
     const originalRead = prototype.read;
+    const originalStat = prototype.stat;
+    let openedTimes: { ctimeMs: number; mtimeMs: number } | null = null;
+    const openedStat = vi.spyOn(prototype, "stat")
+      .mockImplementation(async function (this: typeof prototype) {
+        const metadata = await originalStat.call(this);
+        openedTimes ??= {
+          ctimeMs: metadata.ctimeMs,
+          mtimeMs: metadata.mtimeMs,
+        };
+        Object.defineProperties(metadata, {
+          ctimeMs: { configurable: true, value: openedTimes.ctimeMs },
+          mtimeMs: { configurable: true, value: openedTimes.mtimeMs },
+        });
+        return metadata;
+      });
     let changed = false;
     const read = vi.spyOn(prototype, "read").mockImplementation(async function (
       this: typeof prototype,
@@ -454,6 +471,7 @@ describe("FileCredentialVaultPersistence", () => {
         .rejects.toMatchObject({ code: "storage-corrupt" });
     } finally {
       read.mockRestore();
+      openedStat.mockRestore();
     }
   });
 

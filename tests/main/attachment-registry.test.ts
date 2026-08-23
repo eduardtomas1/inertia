@@ -228,6 +228,52 @@ describe("main-owned attachment registry", () => {
     });
   });
 
+  it("retires an unpublished duplicate when cleanup is blocked", async () => {
+    const unlinkFile = vi.fn<(path: string) => Promise<void>>()
+      .mockRejectedValue(Object.assign(
+        new Error("file remains locked"),
+        { code: "EPERM" },
+      ));
+    const { directory, registry: attachments } = await registry({
+      maxRecords: 2,
+      maxBytes: png.length * 2,
+    }, unlinkFile, async () => undefined);
+
+    const imported = await attachments.import([
+      {
+        name: "first.png",
+        mimeType: "image/png",
+        data: png,
+      },
+      {
+        name: "renamed-duplicate.png",
+        mimeType: "image/png",
+        data: png,
+      },
+    ]);
+
+    expect(imported).toHaveLength(1);
+    expect(unlinkFile).toHaveBeenCalledTimes(3);
+    const names = await readdir(directory);
+    expect(names).toHaveLength(2);
+    const hiddenName = names.find((name) =>
+      !name.startsWith(imported[0]!.id));
+    expect(hiddenName).toMatch(/^[0-9a-f-]{36}\.png$/u);
+    await expect(attachments.preview(hiddenName!.slice(0, -4)))
+      .resolves.toBeNull();
+    expect(attachments.usage()).toEqual({
+      records: 2,
+      bytes: png.length * 2,
+    });
+    await expect(attachments.import([{
+      name: "blocked-by-retired-duplicate.png",
+      mimeType: "image/png",
+      data: alternatePng,
+    }])).rejects.toThrow(/storage is full/u);
+    await attachments.dispose();
+    await expect(readdir(directory)).resolves.toEqual([]);
+  });
+
   it("rejects content or metadata that changed after privileged import", async () => {
     const { registry: attachments } = await registry();
     const [imported] = await attachments.import([{

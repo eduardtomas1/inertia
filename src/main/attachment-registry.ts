@@ -732,7 +732,7 @@ export class AttachmentRegistry {
           signal,
         );
         if (digests.has(attachment.digest)) {
-          await this.releaseRecord(attachment);
+          await this.rollbackRecord(attachment);
           continue;
         }
         digests.add(attachment.digest);

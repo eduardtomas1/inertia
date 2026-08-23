@@ -76,6 +76,22 @@ describe("Browser evidence ledger", () => {
   });
 
   it.each([
+    "gho_abcdefghijklmnop",
+    "ghu_abcdefghijklmnop",
+    "ghs_abcdefghijklmnop",
+    "ghr_abcdefghijklmnop",
+  ])("projects a recognizable GitHub token before ledger storage: %s", (message) => {
+    const ledger = new BrowserEvidenceLedger();
+    ledger.recordConsoleError({ ...location, message });
+
+    expect(ledger.snapshot().entries).toMatchObject([{
+      detail: "<redacted>",
+      redacted: true,
+    }]);
+    expect(JSON.stringify(ledger.snapshot())).not.toContain(message);
+  });
+
+  it.each([
     "tokenize=ok",
     "SessionIdentity=ok",
     "ClientSecretariat=ok",
@@ -109,6 +125,7 @@ describe("Browser evidence ledger", () => {
   });
 
   it.each([
+    "Failure opening /root-ledger-secret",
     "Failure at C://Users/Jane Doe/private/file.txt",
     String.raw`Failure in C:Users\Jane Doe\private\config`,
     "Failure at //private-server/secret share/file.txt",
@@ -119,6 +136,7 @@ describe("Browser evidence ledger", () => {
     const serialized = JSON.stringify(ledger.snapshot());
     expect(serialized).toContain("Sensitive console detail hidden");
     expect(serialized).not.toContain("Jane Doe");
+    expect(serialized).not.toContain("root-ledger-secret");
     expect(serialized).not.toContain("C:Users");
     expect(serialized).not.toContain("private-server");
   });

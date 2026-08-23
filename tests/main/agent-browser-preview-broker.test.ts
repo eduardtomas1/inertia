@@ -619,6 +619,7 @@ describe("agent-owned native Browser", () => {
       "tok％65n=compat-percent-broker-short",
       "sk%00-control-broker-prefix1234",
       "sk\u0000-literal-broker-prefix1234",
+      "gho_abcdefghijklmnop",
     ]) {
       const controlPreventDefault = vi.fn();
       contents.emit("console-message", {
@@ -631,6 +632,7 @@ describe("agent-owned native Browser", () => {
     for (const message of [
       "Failure at C://Users/Jane Doe/private/file.txt",
       "Failure in C:Users\\Jane Doe\\private\\config",
+      "Failure opening /root-broker-secret",
       "Failure at //private-server/secret share/file.txt",
       "Failed in src/private/config",
       "Failed in src/config",
@@ -694,8 +696,10 @@ describe("agent-owned native Browser", () => {
     expect(serialized).not.toContain("compat-percent-broker-short");
     expect(serialized).not.toContain("control-broker-prefix1234");
     expect(serialized).not.toContain("literal-broker-prefix1234");
+    expect(serialized).not.toContain("gho_abcdefghijklmnop");
     expect(serialized).not.toContain("Jane Doe");
     expect(serialized).not.toContain("C:Users");
+    expect(serialized).not.toContain("root-broker-secret");
     expect(serialized).not.toContain("private-server");
     expect(serialized).not.toContain("secret share");
     expect(serialized).not.toContain("src/private/config");
@@ -731,10 +735,14 @@ describe("agent-owned native Browser", () => {
       (entry) => entry.kind === "console-error",
     );
     expect(consoleEvidence.every((entry) =>
-      entry.detail === "Sensitive console detail hidden" && entry.redacted
+      entry.redacted
+      && (
+        entry.detail === "Sensitive console detail hidden"
+        || entry.detail === "<redacted>"
+      )
     )).toBe(true);
     expect(consoleEvidence.reduce((total, entry) => total + entry.occurrences, 0))
-      .toBe(18);
+      .toBe(20);
 
     const capture = state.evidence.entries.find((entry) => entry.kind === "screenshot");
     expect(capture).toBeDefined();

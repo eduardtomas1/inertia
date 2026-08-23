@@ -58,6 +58,7 @@ const URL_TOKEN = /https?:\/\/[^\s<>"'`]+/giu;
 const AUTHORITY_URI_TOKEN = /(?:[A-Za-z][A-Za-z0-9+.-]*:)?\/\/[^\s<>"'`]+/giu;
 const FILE_URL = /(?<![A-Za-z0-9])file:\/\/[^\s<>"'`]+/giu;
 const POSIX_PATH = /(?<![A-Za-z0-9])\/(?:[^/\s,;:)"']+\/)+[^/\s,;:)"']+/gu;
+const ROOT_POSIX_PATH = /(?<![A-Za-z0-9])\/[^/\s,;:)"']+(?=$|[\s,;:)"'])/gu;
 const RELATIVE_FILE_PATH = /(^|[\s(=:"'])(?:(?:\.{1,2}|[^/\s,;:)"']+)\/)+[^/\s,;:)"']+\.[A-Za-z0-9]{1,12}(?=$|[\s,;:)"'])/gu;
 const RELATIVE_EXTENSIONLESS_PATH = /(^|[\s(=:"'])(?:(?:\.{1,2})\/[^/\s,;:)"']+|(?:[^/\s,;:)"']+\/){2,}[^/\s,;:)"']+|(?:[^/\s,;:)"']+\/)+\.[A-Za-z0-9][^/\s,;:)"']*)(?=$|[\s,;:)"'])/gu;
 const RELATIVE_WINDOWS_PATH = /(^|[\s(=:"'])(?:(?:\.{1,2})\\[^\\/\s,;:)"']+|(?:[^\\/\s,;:)"']+\\){2,}[^\\/\s,;:)"']+|(?:[^\\/\s,;:)"']+\\)+(?:\.[A-Za-z0-9][^\\/\s,;:)"']*|[^\\/\s,;:)"']+\.[A-Za-z0-9]{1,12}))(?=$|[\s,;:)"'])/gu;
@@ -70,18 +71,18 @@ const CREDENTIAL_ASSIGNMENT =
   /(?<![A-Za-z0-9])(api[-_ ]?key|authorization|proxy[-_ ]?authorization|cookie|set[-_ ]?cookie|credential|passcode|passphrase|password|passwd|pgpassword|pwd|secret|session|token)(?![A-Za-z0-9])["']?\s*[:=]\s*(?:(?:Bearer|Basic)\s+[^\s,;]+|"[^"]*"|'[^']*'|[^\s,;]+)/giu;
 const AUTHORIZATION_VALUE = /(?<![A-Za-z0-9])(Bearer|Basic)\s+[^\s,;]+/giu;
 const PREFIXED_SECRET =
-  /(?<![A-Za-z0-9])(?:(?:sk|rk|pk|ghp|github_pat|glpat|npm|pypi|hf|xox[baprs]|api|key|token)[-_][A-Za-z0-9_-]{8,}|(?:AKIA|ASIA)[A-Z0-9]{16}|AIza[A-Za-z0-9_-]{20,})(?![A-Za-z0-9])/gu;
+  /(?<![A-Za-z0-9])(?:(?:sk|rk|pk|gh[opusr]|github_pat|glpat|npm|pypi|hf|xox[baprs]|api|key|token)[-_][A-Za-z0-9_-]{8,}|(?:AKIA|ASIA)[A-Z0-9]{16}|AIza[A-Za-z0-9_-]{20,})(?![A-Za-z0-9])/gu;
 const JWT = /(?<![A-Za-z0-9])eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}(?![A-Za-z0-9])/gu;
 const PRIVATE_KEY = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/gu;
 const LONG_OPAQUE_VALUE = /(?<![A-Za-z0-9])(?=[A-Za-z0-9+/_=-]{32,}(?![A-Za-z0-9]))(?=[A-Za-z0-9+/_=-]*[A-Za-z])(?=[A-Za-z0-9+/_=-]*\d)[A-Za-z0-9+/_=-]+/gu;
 const TRAILING_SECRET_FRAGMENT =
-  /(?<![A-Za-z0-9])(?:(?:sk|rk|pk|ghp|github_pat|xox[baprs]|api|key|token)[-_][A-Za-z0-9_-]*|eyJ[A-Za-z0-9_.-]*|(?:Bearer|Basic)\s+\S*)$/iu;
+  /(?<![A-Za-z0-9])(?:(?:sk|rk|pk|gh[opusr]|github_pat|xox[baprs]|api|key|token)[-_][A-Za-z0-9_-]*|eyJ[A-Za-z0-9_.-]*|(?:Bearer|Basic)\s+\S*)$/iu;
 const SENSITIVE_FIELD =
   /(?<![A-Za-z0-9])(?:(?:access|auth|id|refresh)[-_ ]?token|api[-_ ]?key|authorization|proxy[-_ ]?authorization|cookie|set[-_ ]?cookie|credential|password|passwd|(?:passcode|passphrase|pgpassword|pwd)(?=\s*["']?\s*[:=])|private[-_ ]?key|request[-_ ]?body|secret|session|token)(?![A-Za-z0-9])/iu;
 const CAMEL_CASE_CREDENTIAL_ASSIGNMENT =
   /(?<![A-Za-z0-9])(?:[A-Za-z][A-Za-z0-9]*?)?(?:AccessKey|AccessToken|APIKey|ApiKey|AuthHeader|AuthToken|Authorization|AuthorizationHeader|Cookie|Credential|Credentials|EncryptionKey|IDToken|IdToken|PAT|Pat|PGPassword|Passcode|Passphrase|Password|Passwd|PrivateKey|Pwd|RefreshToken|RequestBody|Secret|SecretKey|Session|SessionId|SigningKey|Token)(?:Value|Values)?(?![A-Za-z0-9])["']?\s*[:=]/giu;
 const SECRET_HOST_FRAGMENT =
-  /(?:(?:sk|rk|pk|ghp|github[-_]?pat|glpat|npm|pypi|hf|xox[baprs]|api|key|token)[-_][a-z0-9_-]{8,}|(?:akia|asia)[a-z0-9]{16}|aiza[a-z0-9_-]{20,})/iu;
+  /(?:(?:sk|rk|pk|gh[opusr]|github[-_]?pat|glpat|npm|pypi|hf|xox[baprs]|api|key|token)[-_][a-z0-9_-]{8,}|(?:akia|asia)[a-z0-9]{16}|aiza[a-z0-9_-]{20,})/iu;
 const MAX_PERCENT_DECODE_PASSES = 4;
 const MAX_INSPECTION_REPRESENTATIONS = 8;
 
@@ -141,6 +142,7 @@ function withoutControlOrBidi(value: string): string {
 function hasFilesystemPathCandidate(value: string): boolean {
   return patternMatches(FILE_URL, value)
     || patternMatches(POSIX_PATH, value)
+    || patternMatches(ROOT_POSIX_PATH, value)
     || patternMatches(RELATIVE_FILE_PATH, value)
     || patternMatches(RELATIVE_EXTENSIONLESS_PATH, value)
     || patternMatches(RELATIVE_WINDOWS_PATH, value)

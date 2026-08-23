@@ -27,6 +27,9 @@ describe("Browser evidence sanitization", () => {
       "https://prefix_ghp_abcdefgh12345678.example.com/private",
     )).toBeNull();
     expect(browserEvidenceOrigin(
+      "https://prefix_gho_abcdefghijklmnop.example.com/private",
+    )).toBeNull();
+    expect(browserEvidenceOrigin(
       "https://AKIA1234567890ABCDEF.example.com/private",
     )).toBeNull();
     expect(browserEvidenceOrigin("https://prefix-sketchbook.example.com/private"))
@@ -103,6 +106,7 @@ describe("Browser evidence sanitization", () => {
     "ｓｋ-abcdefgh12345678",
     "%EF%BD%93%EF%BD%8B%2Dabcdefgh12345678",
     "sk％00-abcdefgh12345678",
+    "gho_\u200babcdefghijklmnop",
   ])("fails closed when a derived representation reveals a projectable secret: %s", (value) => {
     expect(sanitizeBrowserEvidenceText(value, "hidden"))
       .toEqual({ text: "hidden", redacted: true });
@@ -267,6 +271,10 @@ describe("Browser evidence sanitization", () => {
   it.each([
     "Cloud value AKIA1234567890ABCDEF",
     "Cloud value AIza1234567890abcdefghijklmno",
+    "GitHub value gho_abcdefghijklmnop",
+    "GitHub value ghu_abcdefghijklmnop",
+    "GitHub value ghs_abcdefghijklmnop",
+    "GitHub value ghr_abcdefghijklmnop",
   ])("redacts recognizable credential prefixes: %s", (value) => {
     const result = sanitizeBrowserEvidenceText(value, "hidden");
     expect(result).toMatchObject({ redacted: true });
@@ -276,6 +284,9 @@ describe("Browser evidence sanitization", () => {
   it.each([
     "Failure in /workspace/inertia/src/main.ts",
     "Failure in /uncommon-root/private/output.ts",
+    "Failure opening /.env",
+    "Failure opening /secret.txt",
+    "Failure opening /private",
     "Failure in packages/browser/private/output.ts",
     "Failure in ~/private/main.ts",
     "Failure in /Users/Jane Doe/private project/src/main.ts",

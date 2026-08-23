@@ -63,8 +63,10 @@ export async function verifyBrowserEvidence({
   expect(evidenceText).not.toContain("compat-percent-e2e-short");
   expect(evidenceText).not.toContain("control-e2e-prefix1234");
   expect(evidenceText).not.toContain("literal-e2e-prefix1234");
+  expect(evidenceText).not.toContain("gho_abcdefghijklmnop");
   expect(evidenceText).not.toContain("Jane Doe");
   expect(evidenceText).not.toContain("C:Users");
+  expect(evidenceText).not.toContain("root-e2e-secret");
   expect(evidenceText).not.toContain("private-server");
   expect(evidenceText).not.toContain("secret share");
   expect(evidenceText).not.toContain("src/private/config");

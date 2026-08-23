@@ -134,6 +134,44 @@ describe("app health collection", () => {
     expect(health.warnings).toHaveLength(3);
   });
 
+  it.each([
+    ["missing", []],
+    ["invalid", [{
+      pid: 21,
+      cpu: { percentCPUUsage: 2.1 },
+      memory: { workingSetSize: Number.NaN },
+    }]],
+  ])("marks renderer metrics unavailable when one renderer is %s", async (
+    _case,
+    secondRendererMetrics,
+  ) => {
+    const registry = new InertiaHealthRegistry();
+    registry.registerProcess("main", () => 10);
+    registry.registerRenderer(renderer(20, session(0)));
+    registry.registerRenderer(renderer(21, session(0)));
+    const collector = new AppHealthCollector({
+      registry,
+      getProcessMetrics: () => [
+        metric(10, 10),
+        metric(20, 20),
+        ...secondRendererMetrics,
+      ],
+      getRuntimePhase: () => "ready",
+      readDatabaseBytes: async () => 0,
+      readTemporaryAttachmentBytes: () => 0,
+    });
+
+    await expect(collector.collect()).resolves.toMatchObject({
+      totalMemoryBytes: null,
+      mainProcess: { pid: 10 },
+      rendererProcesses: null,
+      warnings: [{
+        code: "processes",
+        message: "Some Inertia process measurements are unavailable.",
+      }],
+    });
+  });
+
   it("reports a partial clear without hiding otherwise healthy metrics", async () => {
     const registry = new InertiaHealthRegistry();
     const healthy = session(100);

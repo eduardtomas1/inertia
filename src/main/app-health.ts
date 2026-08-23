@@ -205,17 +205,26 @@ export class AppHealthCollector {
     const byPid = new Map(metrics.map((metric) => [metric.pid, metric]));
     const registered = new Map<number, HealthProcessRole>();
     let incomplete = false;
+    let rendererIncomplete = false;
     for (const process of this.#options.registry.processes()) {
       try {
         const pid = process.pid();
-        if (pid === null) continue;
+        if (pid === null) {
+          if (process.role === "renderer") {
+            incomplete = true;
+            rendererIncomplete = true;
+          }
+          continue;
+        }
         if (!Number.isSafeInteger(pid) || pid <= 0) {
           incomplete = true;
+          if (process.role === "renderer") rendererIncomplete = true;
           continue;
         }
         registered.set(pid, process.role);
       } catch {
         incomplete = true;
+        if (process.role === "renderer") rendererIncomplete = true;
       }
     }
 
@@ -228,6 +237,7 @@ export class AppHealthCollector {
       const health = metric ? processHealth(metric) : null;
       if (!health) {
         incomplete = true;
+        if (role === "renderer") rendererIncomplete = true;
         continue;
       }
       measuredByPid.set(pid, health);
@@ -244,7 +254,7 @@ export class AppHealthCollector {
             0,
           ),
       mainProcess: main[0] ?? null,
-      rendererProcesses: renderers,
+      rendererProcesses: rendererIncomplete ? null : renderers,
       runtimeProcess: runtime[0] ?? null,
       warning: incomplete,
     };

@@ -1,7 +1,9 @@
 import {
+  appendFile,
   chmod,
   lstat,
   mkdtemp,
+  open,
   realpath,
   rm,
   symlink,
@@ -10,7 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   AttachmentImportValidationError,
@@ -168,6 +170,43 @@ describe("private staged attachment validation", () => {
     await writeFile(path, replacement, { mode: 0o600 });
 
     await validation;
+  });
+
+  it("bounds reads when a staged file grows during validation", async () => {
+    const bytes = readablePdf();
+    const { operation, path } = await stage(
+      "brief.pdf",
+      "application/pdf",
+      bytes,
+      50,
+    );
+    const sample = await open(path, "r");
+    const fileHandlePrototype = Object.getPrototypeOf(sample) as {
+      read: typeof sample.read;
+      readFile: typeof sample.readFile;
+    };
+    await sample.close();
+    const readSpy = vi.spyOn(fileHandlePrototype, "read");
+    const readFileSpy = vi.spyOn(fileHandlePrototype, "readFile");
+    try {
+      const validation = expect(
+        validateAttachmentImportFile(operation),
+      ).rejects.toMatchObject({ code: "unsafe" });
+      await new Promise<void>((resolveWait) => setTimeout(resolveWait, 10));
+      await appendFile(path, Buffer.alloc(1024 * 1024));
+
+      await validation;
+      expect(readFileSpy).not.toHaveBeenCalled();
+      expect(readSpy).toHaveBeenCalledWith(
+        expect.any(Buffer),
+        0,
+        1,
+        operation.size,
+      );
+    } finally {
+      readSpy.mockRestore();
+      readFileSpy.mockRestore();
+    }
   });
 
   it("cancels a delayed validation without publishing a receipt", async () => {

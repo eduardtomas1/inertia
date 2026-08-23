@@ -235,7 +235,29 @@ export async function validateAttachmentImportFile(
     if (operation.stallBeforeValidationMs > 0) {
       await wait(operation.stallBeforeValidationMs, undefined, { signal });
     }
-    const bytes = await file.readFile();
+    const bytes = Buffer.allocUnsafe(operation.size);
+    let readOffset = 0;
+    while (readOffset < bytes.length) {
+      signal?.throwIfAborted();
+      const { bytesRead } = await file.read(
+        bytes,
+        readOffset,
+        bytes.length - readOffset,
+        readOffset,
+      );
+      if (bytesRead === 0) break;
+      readOffset += bytesRead;
+    }
+    const overflowProbe = Buffer.allocUnsafe(1);
+    const { bytesRead: overflowBytes } = await file.read(
+      overflowProbe,
+      0,
+      overflowProbe.length,
+      operation.size,
+    );
+    if (readOffset !== operation.size || overflowBytes !== 0) {
+      throw new AttachmentImportValidationError("unsafe");
+    }
     const after = await file.stat({ bigint: true });
     signal?.throwIfAborted();
     if (

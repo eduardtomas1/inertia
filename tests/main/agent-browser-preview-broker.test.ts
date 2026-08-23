@@ -615,6 +615,9 @@ describe("agent-owned native Browser", () => {
     for (const message of [
       "Failure at C://Users/Jane Doe/private/file.txt",
       "Failure at //private-server/secret share/file.txt",
+      "Failed in src/private/config",
+      "Failed in src/.env",
+      "Failed in ./Dockerfile",
     ]) {
       const pathPreventDefault = vi.fn();
       contents.emit("console-message", {
@@ -669,6 +672,9 @@ describe("agent-owned native Browser", () => {
     expect(serialized).not.toContain("Jane Doe");
     expect(serialized).not.toContain("private-server");
     expect(serialized).not.toContain("secret share");
+    expect(serialized).not.toContain("src/private/config");
+    expect(serialized).not.toContain("src/.env");
+    expect(serialized).not.toContain("./Dockerfile");
     expect(serialized).not.toContain("/Users/alice");
     expect(serialized).not.toContain("network-value");
     expect(serialized).not.toContain("never-store");
@@ -700,7 +706,7 @@ describe("agent-owned native Browser", () => {
       entry.detail === "Sensitive console detail hidden" && entry.redacted
     )).toBe(true);
     expect(consoleEvidence.reduce((total, entry) => total + entry.occurrences, 0))
-      .toBe(6);
+      .toBe(9);
 
     const capture = state.evidence.entries.find((entry) => entry.kind === "screenshot");
     expect(capture).toBeDefined();

@@ -191,6 +191,10 @@ describe("Browser evidence sanitization", () => {
     "Failure in ~/private/main.ts",
     "Failure in /Users/Jane Doe/private project/src/main.ts",
     "Failure in packages/browser/private project/src/main.ts",
+    "Failed in src/private/config",
+    "Failed in src/.env",
+    "Failed in ./Dockerfile",
+    "Failed in ../Makefile",
     "Failure in ~/Jane Doe/private project/src/main.ts",
     "Failure in file:///Users/Jane%20Doe/private%20project/src/main.ts",
     "prefix_/Users/Jane Doe/private project",
@@ -232,6 +236,8 @@ describe("Browser evidence sanitization", () => {
   it.each([
     "Render used 1/2 of the frame budget.",
     "Choose yes/no when prompted.",
+    "Dockerfile checks completed normally.",
+    ".env variables are documented separately.",
     "Opened profile://example during setup.",
     "Failed https://example.com/private?next=/docs#section during render.",
   ])("does not mistake normal prose or HTTP URLs for filesystem paths: %s", (value) => {

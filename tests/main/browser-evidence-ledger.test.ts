@@ -115,6 +115,19 @@ describe("Browser evidence ledger", () => {
     expect(serialized).not.toContain("private-server");
   });
 
+  it.each([
+    "Failed in src/private/config",
+    "Failed in src/.env",
+    "Failed in ./Dockerfile",
+  ])("fails closed before storing an extensionless relative path: %s", (message) => {
+    const ledger = new BrowserEvidenceLedger();
+    ledger.recordConsoleError({ ...location, message });
+
+    const serialized = JSON.stringify(ledger.snapshot());
+    expect(serialized).toContain("Sensitive console detail hidden");
+    expect(serialized).not.toContain(message);
+  });
+
   it("coalesces repeats and bounds metadata without losing monotonic sequence", () => {
     const ledger = new BrowserEvidenceLedger();
     ledger.recordConsoleError({ ...location, message: "render failed" });

@@ -60,6 +60,7 @@ const AUTHORITY_URI_TOKEN = /(?:[A-Za-z][A-Za-z0-9+.-]*:)?\/\/[^\s<>"'`]+/giu;
 const FILE_URL = /(?<![A-Za-z0-9])file:\/\/[^\s<>"'`]+/giu;
 const POSIX_PATH = /(?<![A-Za-z0-9])\/(?:[^/\s,;:)"']+\/)+[^/\s,;:)"']+/gu;
 const RELATIVE_FILE_PATH = /(^|[\s(=:"'])(?:(?:\.{1,2}|[^/\s,;:)"']+)\/)+[^/\s,;:)"']+\.[A-Za-z0-9]{1,12}(?=$|[\s,;:)"'])/gu;
+const RELATIVE_EXTENSIONLESS_PATH = /(^|[\s(=:"'])(?:(?:\.{1,2})\/[^/\s,;:)"']+|(?:[^/\s,;:)"']+\/){2,}[^/\s,;:)"']+|(?:[^/\s,;:)"']+\/)+\.[A-Za-z0-9][^/\s,;:)"']*)(?=$|[\s,;:)"'])/gu;
 const WINDOWS_PATH = /\b[A-Za-z]:\\(?:[^\\\s,;:)"']+\\)*[^\\\s,;:)"']*/gu;
 const UNC_OR_HOME_PATH = /(?:\\\\[^\\\s]+\\[^\s,;:)"']+|~\/(?:[^\s,;:)"']+\/)*[^\s,;:)"']+)/gu;
 const WINDOWS_OR_UNC_PATH_PREFIX = /(?:(?:^|[^A-Za-z0-9])[A-Za-z]:[\\/]|\\\\|(?:^|[\s(="'])\/\/)/u;
@@ -131,6 +132,7 @@ function hasFilesystemPathCandidate(value: string): boolean {
   return patternMatches(FILE_URL, value)
     || patternMatches(POSIX_PATH, value)
     || patternMatches(RELATIVE_FILE_PATH, value)
+    || patternMatches(RELATIVE_EXTENSIONLESS_PATH, value)
     || patternMatches(WINDOWS_OR_UNC_PATH_PREFIX, value)
     || patternMatches(UNC_OR_HOME_PATH, value);
 }
@@ -285,6 +287,7 @@ export function sanitizeBrowserEvidenceText(
     [FILE_URL, "<path>"],
     [POSIX_PATH, "$1<path>"],
     [RELATIVE_FILE_PATH, "$1<path>"],
+    [RELATIVE_EXTENSIONLESS_PATH, "$1<path>"],
     [WINDOWS_PATH, "<path>"],
     [UNC_OR_HOME_PATH, "<path>"],
     [CREDENTIAL_ASSIGNMENT, "$1=<redacted>"],

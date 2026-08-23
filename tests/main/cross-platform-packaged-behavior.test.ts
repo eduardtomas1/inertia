@@ -40,8 +40,9 @@ describe("cross-platform packaged behavior contract", () => {
       "run: npm run check",
       "run: npm exec -- playwright test",
       "run: xvfb-run --auto-servernum npm exec -- playwright test",
-      "run: npm run dist:dir",
-      "run: npm run dist:linux",
+      "name: CI (non-release)",
+      "run: npm run dist:contributor-ci:dir",
+      "run: npm run dist:contributor-ci:linux",
       "npm run verify:fuses -- \"$app\"",
       "run: npm run test:package-smoke",
       "run: xvfb-run --auto-servernum npm run test:package-smoke",
@@ -306,6 +307,8 @@ describe("cross-platform packaged behavior contract", () => {
       "dist_script: dist:release:win",
       "dist_script: dist:release:linux",
       "node scripts/validate-release.mjs",
+      "node scripts/validate-release-signing.mjs macos-arm64",
+      "node scripts/validate-release-signing.mjs windows-x64",
       "run: npm run test:package-smoke",
       "run: xvfb-run --auto-servernum npm run test:package-smoke",
       "codesign --verify --deep --strict",
@@ -319,6 +322,21 @@ describe("cross-platform packaged behavior contract", () => {
     expect(workflow).toContain("MACOS_APPLE_API_KEY_BASE64");
     expect(workflow).toContain("WINDOWS_CSC_LINK");
     expect(workflow).not.toContain("BEGIN PRIVATE KEY");
+
+    const macSigning = workflowStep(
+      workflow,
+      "Require complete macOS release signing configuration",
+    );
+    expect(macSigning).toContain("MACOS_CSC_LINK");
+    expect(macSigning).toContain("MACOS_APPLE_API_KEY_BASE64");
+    expect(macSigning).not.toContain("WINDOWS_CSC_LINK");
+
+    const windowsSigning = workflowStep(
+      workflow,
+      "Require complete Windows release signing configuration",
+    );
+    expect(windowsSigning).toContain("WINDOWS_CSC_LINK");
+    expect(windowsSigning).not.toContain("MACOS_CSC_LINK");
 
     const macBuild = workflowStep(workflow, "Build macOS release package");
     expect(macBuild).toContain("if: runner.os == 'macOS'");
@@ -338,6 +356,22 @@ describe("cross-platform packaged behavior contract", () => {
     expect(linuxBuild).toContain("if: runner.os == 'Linux'");
     expect(linuxBuild).not.toContain("_CSC_");
     expect(linuxBuild).not.toContain("APPLE_API_");
+
+    const macVerification = workflowStep(
+      workflow,
+      "Verify complete macOS bundle signature",
+    );
+    expect(macVerification).toContain("Authority=Developer ID Application:");
+    expect(macVerification).toContain("xcrun stapler validate");
+    expect(macVerification).not.toContain('if [[ -n "${CSC_LINK:-}" ]]');
+
+    const windowsVerification = workflowStep(
+      workflow,
+      "Verify complete Windows Authenticode signature",
+    );
+    expect(windowsVerification).toContain("Get-AuthenticodeSignature");
+    expect(windowsVerification).toContain('$signature.Status -ne "Valid"');
+    expect(windowsVerification).not.toContain("IsNullOrWhiteSpace");
 
     const releaseUpload = workflowStep(
       workflow,

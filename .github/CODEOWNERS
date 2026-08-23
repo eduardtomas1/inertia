@@ -1,0 +1,66 @@
+# Persistence and released migrations
+/src/server/database.ts @eduardtomas1
+/src/server/database-migrations.ts @eduardtomas1
+/src/server/database-public-types.ts @eduardtomas1
+/src/server/persistence/ @eduardtomas1
+/scripts/generate-database-fixtures.mjs @eduardtomas1
+/tests/fixtures/database/ @eduardtomas1
+
+# Privileged credential storage and credential transport
+/src/main/credential-vault.ts @eduardtomas1
+/src/main/credential-vault-ipc.ts @eduardtomas1
+/src/server/runtime/backends/credential-broker-client.ts @eduardtomas1
+/src/shared/backend-credentials.ts @eduardtomas1
+
+# Runtime process supervision and shutdown authority
+/src/main/runtime-bootstrap-safety.ts @eduardtomas1
+/src/main/runtime-owned-process-recovery.ts @eduardtomas1
+/src/main/runtime-process-tree.ts @eduardtomas1
+/src/main/runtime-shutdown-coordination.ts @eduardtomas1
+/src/main/runtime-supervisor-*.ts @eduardtomas1
+/src/main/runtime-supervisor.ts @eduardtomas1
+/src/node/runtime-owned-processes.ts @eduardtomas1
+/src/node/runtime-process-protocol.ts @eduardtomas1
+/src/server/runtime-shutdown.ts @eduardtomas1
+/src/server/runtime-worker-shutdown.ts @eduardtomas1
+/src/server/runtime-worker.ts @eduardtomas1
+
+# Private Connect authority, protocol, and packaged browser
+/src/main/private-connect/ @eduardtomas1
+/src/main/runtime-private-connect-prompt-coordinator.ts @eduardtomas1
+/src/renderer/private-connect/ @eduardtomas1
+/src/server/private-connect/ @eduardtomas1
+/src/shared/private-connect/ @eduardtomas1
+/scripts/build-private-connect.mjs @eduardtomas1
+/docs/PRIVATE_CONNECT*.md @eduardtomas1
+
+# Agent Browser security boundary and privileged preview broker
+/src/main/preview-agent-*.ts @eduardtomas1
+/src/main/preview-broker.ts @eduardtomas1
+/src/main/runtime-agent-browser-coordinator.ts @eduardtomas1
+/src/node/runtime-agent-browser-protocol.ts @eduardtomas1
+/src/preload/preview-agent-privacy.ts @eduardtomas1
+/src/server/runtime/agent-browser-*.ts @eduardtomas1
+/src/shared/agent-browser.ts @eduardtomas1
+/src/shared/preview-agent-privacy-guard.ts @eduardtomas1
+/src/shared/preview-url.ts @eduardtomas1
+/docs/AGENT_BROWSER.md @eduardtomas1
+
+# Release, contributor packaging, update-feed integrity, and publication
+/.github/CODEOWNERS @eduardtomas1
+/.github/workflows/ci.yml @eduardtomas1
+/.github/workflows/discord-release.yml @eduardtomas1
+/.github/workflows/release-platforms.yml @eduardtomas1
+/docs/RELEASING.md @eduardtomas1
+/package.json @eduardtomas1
+/package-lock.json @eduardtomas1
+/scripts/electron-builder.contributor-ci.cjs @eduardtomas1
+/scripts/electron-builder.release.cjs @eduardtomas1
+/scripts/generate-third-party-notices.mjs @eduardtomas1
+/scripts/package-smoke.mjs @eduardtomas1
+/scripts/release-assets.mjs @eduardtomas1
+/scripts/release-signing-policy.cjs @eduardtomas1
+/scripts/validate-linux-package.mjs @eduardtomas1
+/scripts/validate-release-signing.mjs @eduardtomas1
+/scripts/validate-release.mjs @eduardtomas1
+/scripts/verify-electron-fuses.mjs @eduardtomas1

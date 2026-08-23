@@ -226,7 +226,7 @@ describe("release asset staging", () => {
     expect(result.stderr).toContain("approved generic feed");
   });
 
-  it("omits updater channel assets from manual-only platform releases", async () => {
+  it("rejects manual-only artifacts from the public release asset union", async () => {
     const fixtureRoot = await temporaryDirectory();
     const sourceRoot = join(fixtureRoot, "source");
     const stageRoot = join(fixtureRoot, "stage");
@@ -236,18 +236,11 @@ describe("release asset staging", () => {
       INERTIA_RELEASE_SOURCE_DIR: sourceRoot,
       INERTIA_RELEASE_STAGE_DIR: stageRoot,
     });
-    expect(result.status, result.stderr).toBe(0);
-    expect((await readdir(join(stageRoot, "windows-x64"))).sort()).toEqual([
-      `Inertia.Setup.${version}.exe`,
-      "manifest.json",
-    ]);
-    const manifest = JSON.parse(
-      await readFile(join(stageRoot, "windows-x64", "manifest.json"), "utf8"),
-    ) as { updateCapability: unknown };
-    expect(manifest.updateCapability).toEqual({
-      delivery: "manual",
-      reason: "windows-signing-unavailable",
-    });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
+      "Every public release platform must be in-app capable and use its release identity",
+    );
+    await expect(readdir(join(stageRoot, "windows-x64"))).rejects.toThrow();
   });
 
   it("requires publisher identity only for signed Windows update channels", async () => {

@@ -1,4 +1,4 @@
-name: CI
+name: CI (non-release)
 
 on:
   pull_request:
@@ -126,21 +126,21 @@ jobs:
         if: runner.os == 'Linux'
         run: xvfb-run --auto-servernum npm run benchmark:desktop:built
 
-      - name: Build native unpacked Windows app
+      - name: Build non-release contributor Windows package
         if: runner.os == 'Windows'
-        run: npm run dist:dir
+        run: npm run dist:contributor-ci:dir
 
-      - name: Build native unpacked macOS app
+      - name: Build non-release contributor macOS package
         if: runner.os == 'macOS'
         env:
           # The builder is configured for ad-hoc signing (identity "-"), so no
           # signing secret is exposed by enabling it for pull-request builds.
           CSC_FOR_PULL_REQUEST: "true"
-        run: npm run dist:dir
+        run: npm run dist:contributor-ci:dir
 
-      - name: Build Linux AppImage and unpacked app
+      - name: Build non-release contributor Linux package
         if: runner.os == 'Linux'
-        run: npm run dist:linux
+        run: npm run dist:contributor-ci:linux
 
       - name: Validate Linux AppImage identity, icons, and runtime resource
         if: runner.os == 'Linux'

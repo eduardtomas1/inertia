@@ -1,4 +1,5 @@
 const packageJson = require("../package.json");
+const { requireCompleteCredentialSet } = require("./release-signing-policy.cjs");
 
 const platform = process.env.INERTIA_RELEASE_PLATFORM ?? "";
 const supportedPlatforms = new Set(["macos-arm64", "windows-x64", "linux-x64"]);
@@ -21,17 +22,7 @@ for (const name of credentialEnvironmentKeys) {
   }
 }
 
-function credentialSet(label, names) {
-  const present = names.filter((name) => typeof process.env[name] === "string"
-    && process.env[name].trim().length > 0);
-  if (present.length > 0 && present.length !== names.length) {
-    const missing = names.filter((name) => !present.includes(name));
-    throw new Error(`${label} signing configuration is incomplete. Missing: ${missing.join(", ")}.`);
-  }
-  return present.length === names.length;
-}
-
-const macSigning = platform === "macos-arm64" && credentialSet(
+const macSigning = platform === "macos-arm64" && requireCompleteCredentialSet(
   "macOS",
   [
     "CSC_LINK",
@@ -41,23 +32,19 @@ const macSigning = platform === "macos-arm64" && credentialSet(
     "APPLE_API_ISSUER",
   ],
 );
-const windowsSigning = platform === "windows-x64" && credentialSet(
+const windowsSigning = platform === "windows-x64" && requireCompleteCredentialSet(
   "Windows",
   ["WIN_CSC_LINK", "WIN_CSC_KEY_PASSWORD"],
 );
 const signingRequired = macSigning || windowsSigning;
-const updateCapability = platform === "linux-x64"
-  ? { delivery: "in-app", platform: "linux" }
-  : platform === "macos-arm64" && macSigning
-    ? { delivery: "in-app", platform: "darwin" }
-    : platform === "windows-x64" && windowsSigning
-      ? { delivery: "in-app", platform: "win32" }
-      : {
-          delivery: "manual",
-          reason: platform === "macos-arm64"
-            ? "macos-signing-unavailable"
-            : "windows-signing-unavailable",
-        };
+const updateCapability = {
+  delivery: "in-app",
+  platform: {
+    "macos-arm64": "darwin",
+    "windows-x64": "win32",
+    "linux-x64": "linux",
+  }[platform],
+};
 
 module.exports = {
   ...packageJson.build,
@@ -77,11 +64,10 @@ module.exports = {
   },
   mac: {
     ...packageJson.build.mac,
-    // Pull requests and community builds retain the explicit, testable ad-hoc
-    // path. A complete release secret set switches to Developer ID discovery,
-    // hardened runtime, fail-closed signing, and notarization.
-    identity: macSigning ? undefined : "-",
+    // This configuration is release-only. Contributor CI uses its own config
+    // and identity; a public macOS build must use Developer ID and notarization.
+    identity: undefined,
     hardenedRuntime: true,
-    notarize: macSigning,
+    notarize: true,
   },
 };

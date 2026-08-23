@@ -202,20 +202,7 @@ function validateUpdateCapability(value, platform) {
     && value.delivery === "in-app"
     && value.platform === expectedPlatform
   ) return { delivery: "in-app", platform: expectedPlatform };
-  const expectedManualReason = {
-    "macos-arm64": "macos-signing-unavailable",
-    "windows-x64": "windows-signing-unavailable",
-    "linux-x64": null,
-  }[platform];
-  if (
-    expectedManualReason
-    && keys.length === 2
-    && keys[0] === "delivery"
-    && keys[1] === "reason"
-    && value.delivery === "manual"
-    && value.reason === expectedManualReason
-  ) return { delivery: "manual", reason: expectedManualReason };
-  throw new Error("The packaged update capability does not match the release platform.");
+  throw new Error("Every public release platform must be in-app capable and use its release identity.");
 }
 
 async function packagedUpdateCapability(platform) {
@@ -382,12 +369,11 @@ async function validateUpdateMetadata(platform, directory) {
   }
 }
 
-function expectedAssetNames(policy, capability) {
+function expectedAssetNames(policy) {
   return [
     ...policy.packages,
-    ...(capability.delivery === "in-app"
-      ? [policy.metadata, ...policy.companions]
-      : []),
+    policy.metadata,
+    ...policy.companions,
   ].sort();
 }
 
@@ -422,7 +408,7 @@ async function readArtifactManifest(path, platform) {
     manifest.updateCapability,
     platform,
   );
-  const expectedNames = expectedAssetNames(platformPolicies[platform], updateCapability);
+  const expectedNames = expectedAssetNames(platformPolicies[platform]);
   const names = manifest.assets.map((asset) => asset?.name).sort();
   if (!sameStrings(names, expectedNames)) throw new Error(`Invalid ${platform} manifest asset set.`);
   return { manifest, updateCapability, expectedNames };
@@ -433,12 +419,10 @@ if (command === "stage") {
   const policy = platformPolicies[platform];
   if (!policy) throw new Error(`Unknown release platform: ${platform}`);
   const updateCapability = await packagedUpdateCapability(platform);
-  const expectedNames = expectedAssetNames(policy, updateCapability);
+  const expectedNames = expectedAssetNames(policy);
   for (const name of expectedNames) assertSafeAssetName(name);
   await validatePackagedUpdateConfig(platform, updateCapability);
-  if (updateCapability.delivery === "in-app") {
-    await validateUpdateMetadata(platform, releaseSourceRoot);
-  }
+  await validateUpdateMetadata(platform, releaseSourceRoot);
 
   const stagingRoot = resolve(process.env.INERTIA_RELEASE_STAGE_DIR ?? "release-upload");
   const platformDirectory = join(stagingRoot, platform);
@@ -474,16 +458,13 @@ if (command === "stage") {
     const entries = (await readdir(platformDirectory)).sort();
     const {
       manifest,
-      updateCapability,
       expectedNames,
     } = await readArtifactManifest(join(platformDirectory, "manifest.json"), platform);
     const expectedEntries = [...expectedNames, "manifest.json"].sort();
     if (!sameStrings(entries, expectedEntries)) {
       throw new Error(`Unexpected ${platform} artifact file set: ${entries.join(", ")}`);
     }
-    if (updateCapability.delivery === "in-app") {
-      await validateUpdateMetadata(platform, platformDirectory);
-    }
+    await validateUpdateMetadata(platform, platformDirectory);
     for (const expectedName of expectedNames) {
       if (combinedNames.has(expectedName)) throw new Error(`Duplicate consolidated asset name: ${expectedName}`);
       const path = join(platformDirectory, expectedName);

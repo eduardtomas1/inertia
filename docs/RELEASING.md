@@ -3,10 +3,12 @@
 Inertia releases are built only from an exact `vMAJOR.MINOR.PATCH` tag. Linux,
 Windows, and macOS artifacts are tested, checksummed, and published together.
 
-Signing credentials are optional until the project has the corresponding
-certificates. A credential-free build remains explicit: macOS uses the tested
-ad-hoc signature and Windows remains unsigned. Supplying any part of a signing
-set without the rest stops the build.
+Public releases fail closed unless every required signing secret is present.
+macOS must be Developer ID signed and notarized, and Windows must carry a valid
+Authenticode signature. Complete, partial, and completely missing secret sets
+are validated before dependency installation; the release builder repeats the
+platform-specific check before packaging. There is no unsigned or ad-hoc
+public-release fallback.
 
 For a signed macOS release, configure these GitHub Actions secrets:
 
@@ -37,22 +39,29 @@ blockmaps, but they cannot create or modify a GitHub release. The final Ubuntu
 job validates and publishes the exact combined asset set as the workflow's
 single writer.
 
+Pull-request and `main` CI packages are explicitly non-release contributor
+builds. They use `dev.inertia.app.contributor-ci`, carry a manual-only update
+capability, contain no stable update-feed configuration, and are never uploaded
+as public release assets. Their macOS bundle remains ad-hoc signed solely so CI
+can exercise native package, fuse, and smoke behavior without release secrets.
+
 The packaged capability marker enables in-app delivery only for a real release
 AppImage, a completely Authenticode-signed Windows build, or a Developer ID
-signed and notarized macOS build. Unsigned Windows and ad-hoc macOS builds keep
-the manual browser flow. Linux additionally checks at runtime that `APPIMAGE`
-identifies a replaceable regular file.
+signed and notarized macOS build. Public release consolidation rejects any
+manual-only platform artifact. Linux additionally checks at runtime that
+`APPIMAGE` identifies a replaceable regular file; electron-builder's AppImage
+updater authenticates downloads through the release manifest checksum, while
+the workflow also preserves the exact-union SHA-256 manifest and GitHub build
+provenance.
 
 Each platform stage validates its packaged `app-update.yml`, channel manifest,
 package sizes and SHA-512 values, and required differential-download
 companions. The consolidation job then revalidates every downloaded artifact,
 rejects extra or duplicate names, and writes `SHA256SUMS.txt` over the complete
-public asset union. Signed Windows packages must carry the bounded publisher
-identity used by the native installer verifier. When Windows or macOS is built
-for manual delivery because signing is unavailable, its channel manifest and
-blockmap are deliberately excluded so an older signed installation cannot be
-offered an uninstallable release. Build provenance covers that same exact
-union.
+public asset union. Windows packages must carry the bounded publisher identity
+used by the native installer verifier. Every platform contributes its channel
+manifest and required differential-download companions. Build provenance
+covers that same exact union.
 
 Publishing is draft-first and fail-closed. A retry may reuse an existing draft:
 identical assets are retained and missing assets are uploaded, while unexpected

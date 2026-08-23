@@ -63,6 +63,23 @@ jobs:
           event_sha="${PUSH_EVENT_SHA:-$(git rev-parse "$release_ref")}"
           RELEASE_REF="$release_ref" RELEASE_EVENT_SHA="$event_sha" node scripts/validate-release.mjs
 
+      - name: Require complete macOS release signing configuration
+        if: runner.os == 'macOS'
+        env:
+          MACOS_CSC_LINK: ${{ secrets.MACOS_CSC_LINK }}
+          MACOS_CSC_KEY_PASSWORD: ${{ secrets.MACOS_CSC_KEY_PASSWORD }}
+          MACOS_APPLE_API_KEY_BASE64: ${{ secrets.MACOS_APPLE_API_KEY_BASE64 }}
+          MACOS_APPLE_API_KEY_ID: ${{ secrets.MACOS_APPLE_API_KEY_ID }}
+          MACOS_APPLE_API_ISSUER: ${{ secrets.MACOS_APPLE_API_ISSUER }}
+        run: node scripts/validate-release-signing.mjs macos-arm64
+
+      - name: Require complete Windows release signing configuration
+        if: runner.os == 'Windows'
+        env:
+          WINDOWS_CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
+          WINDOWS_CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
+        run: node scripts/validate-release-signing.mjs windows-x64
+
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -102,11 +119,9 @@ jobs:
           APPLE_API_KEY_BASE64: ${{ secrets.MACOS_APPLE_API_KEY_BASE64 }}
         run: |
           set -euo pipefail
-          if [[ -z "${APPLE_API_KEY_BASE64:-}" ]]; then
-            exit 0
-          fi
           key_path="$RUNNER_TEMP/inertia-notarization-key.p8"
           printf '%s' "$APPLE_API_KEY_BASE64" | base64 -D > "$key_path"
+          test -s "$key_path"
           chmod 600 "$key_path"
           echo "APPLE_API_KEY=$key_path" >> "$GITHUB_ENV"
 
@@ -201,24 +216,16 @@ jobs:
           set -euo pipefail
           mac_app="release/mac-arm64/Inertia.app"
           codesign --verify --deep --strict --verbose=2 "$mac_app"
-          if [[ -n "${CSC_LINK:-}" ]]; then
-            codesign --display --verbose=2 "$mac_app" 2>&1 | grep -q "Authority=Developer ID Application:"
-            xcrun stapler validate "$mac_app"
-          fi
-        env:
-          CSC_LINK: ${{ secrets.MACOS_CSC_LINK }}
+          codesign --display --verbose=2 "$mac_app" 2>&1 | grep -q "Authority=Developer ID Application:"
+          xcrun stapler validate "$mac_app"
 
-      - name: Verify Windows Authenticode signature when configured
+      - name: Verify complete Windows Authenticode signature
         if: runner.os == 'Windows'
         shell: pwsh
-        env:
-          WIN_CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
         run: |
-          if (-not [string]::IsNullOrWhiteSpace($env:WIN_CSC_LINK)) {
-            $signature = Get-AuthenticodeSignature "release/Inertia.Setup.$((Get-Content package.json | ConvertFrom-Json).version).exe"
-            if ($signature.Status -ne "Valid") {
-              throw "The Windows release signature is not valid: $($signature.Status)"
-            }
+          $signature = Get-AuthenticodeSignature "release/Inertia.Setup.$((Get-Content package.json | ConvertFrom-Json).version).exe"
+          if ($signature.Status -ne "Valid") {
+            throw "The Windows release signature is not valid: $($signature.Status)"
           }
 
       - name: Stage exact release assets and checksums

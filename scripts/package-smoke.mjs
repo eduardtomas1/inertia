@@ -30,6 +30,7 @@ const MANUAL_UPDATE_REASONS = new Set([
   "platform-mismatch",
   "macos-signing-unavailable",
   "windows-signing-unavailable",
+  "contributor-ci-build",
 ]);
 
 function sleep(milliseconds) {
@@ -330,6 +331,11 @@ async function requirePackagedAssets(executable) {
       throw new Error("An in-app update-capable package is missing resources/app-update.yml.");
     }
     validateUpdateConfiguration(updateConfiguration, capability);
+  } else if (
+    capability.reason === "contributor-ci-build"
+    && updateConfiguration !== null
+  ) {
+    throw new Error("A contributor CI package must not contain a stable update configuration.");
   }
   console.log(
     capability.delivery === "in-app"

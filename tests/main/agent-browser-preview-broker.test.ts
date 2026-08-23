@@ -612,6 +612,18 @@ describe("agent-owned native Browser", () => {
       preventDefault: uriPreventDefault,
     });
     expect(uriPreventDefault).toHaveBeenCalledOnce();
+    for (const message of [
+      "Failure at C://Users/Jane Doe/private/file.txt",
+      "Failure at //private-server/secret share/file.txt",
+    ]) {
+      const pathPreventDefault = vi.fn();
+      contents.emit("console-message", {
+        level: "error",
+        message,
+        preventDefault: pathPreventDefault,
+      });
+      expect(pathPreventDefault).toHaveBeenCalledOnce();
+    }
     await vi.waitFor(() => expect(pageTools.agentPageHasSensitiveEvidence)
       .toHaveBeenCalledWith(contents));
     pageTools.agentPageHasSensitiveEvidence.mockResolvedValueOnce(true);
@@ -654,6 +666,9 @@ describe("agent-owned native Browser", () => {
     expect(serialized).not.toContain("hunter2");
     expect(serialized).not.toContain("MONGODB_URI");
     expect(serialized).not.toContain("mongodb://alice");
+    expect(serialized).not.toContain("Jane Doe");
+    expect(serialized).not.toContain("private-server");
+    expect(serialized).not.toContain("secret share");
     expect(serialized).not.toContain("/Users/alice");
     expect(serialized).not.toContain("network-value");
     expect(serialized).not.toContain("never-store");
@@ -685,7 +700,7 @@ describe("agent-owned native Browser", () => {
       entry.detail === "Sensitive console detail hidden" && entry.redacted
     )).toBe(true);
     expect(consoleEvidence.reduce((total, entry) => total + entry.occurrences, 0))
-      .toBe(4);
+      .toBe(6);
 
     const capture = state.evidence.entries.find((entry) => entry.kind === "screenshot");
     expect(capture).toBeDefined();

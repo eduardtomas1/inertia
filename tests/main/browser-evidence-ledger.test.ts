@@ -102,6 +102,19 @@ describe("Browser evidence ledger", () => {
     }]);
   });
 
+  it.each([
+    "Failure at C://Users/Jane Doe/private/file.txt",
+    "Failure at //private-server/secret share/file.txt",
+  ])("fails closed before storing a URI-shaped filesystem path: %s", (message) => {
+    const ledger = new BrowserEvidenceLedger();
+    ledger.recordConsoleError({ ...location, message });
+
+    const serialized = JSON.stringify(ledger.snapshot());
+    expect(serialized).toContain("Sensitive console detail hidden");
+    expect(serialized).not.toContain("Jane Doe");
+    expect(serialized).not.toContain("private-server");
+  });
+
   it("coalesces repeats and bounds metadata without losing monotonic sequence", () => {
     const ledger = new BrowserEvidenceLedger();
     ledger.recordConsoleError({ ...location, message: "render failed" });

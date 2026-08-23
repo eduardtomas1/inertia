@@ -140,7 +140,6 @@ describe("Browser evidence sanitization", () => {
     ["postgres://localhost/private", "postgres://localhost"],
     ["postgresql://localhost:5432/private", "postgresql://localhost:5432"],
     ["ssh://git@github.com/project/repository", "ssh://github.com"],
-    ["//localhost/private", "//localhost"],
     ["MONGODB_URI=mongodb://localhost/private", "MONGODB_URI=mongodb://localhost"],
   ])("projects a credential-free hierarchical URI without failing closed: %s", (value, projected) => {
     const result = sanitizeBrowserEvidenceText(value, "hidden");
@@ -205,9 +204,12 @@ describe("Browser evidence sanitization", () => {
     String.raw`Failure in C:\Users\Jane\private\main.ts`,
     String.raw`Failure in C:\Users\Jane Doe\private project\src\main.ts`,
     "Failure in C:/Users/Jane Doe/private project/src/main.ts",
+    "Failure at C://Users/Jane Doe/private/file.txt",
     String.raw`Failure in \\server\private\main.ts`,
     String.raw`Failure in \\server\private share\src\main.ts`,
     "Failure in //server/private share/src/main.ts",
+    "Failure at //private-server/secret share/file.txt",
+    "//localhost/private",
   ])("fails closed for complete Windows filesystem paths: %s", (value) => {
     expect(sanitizeBrowserEvidenceText(value, "hidden"))
       .toEqual({ text: "hidden", redacted: true });

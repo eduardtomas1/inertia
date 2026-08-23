@@ -250,6 +250,7 @@ export function sanitizeBrowserEvidenceText(
     || patternMatches(AUTHORIZATION_VALUE, inspected)
     || hasCredentialBearingUri(inspected)
     || patternMatches(FILE_URL, inspected)
+    || patternMatches(WINDOWS_OR_UNC_PATH_PREFIX, inspected)
     || hasFilesystemPathCandidate(inspectedWithoutAuthorityUris)
     || (
       decoded !== inspected
@@ -262,6 +263,7 @@ export function sanitizeBrowserEvidenceText(
         || patternMatches(PRIVATE_KEY, decoded)
         || hasCredentialBearingUri(decoded)
         || patternMatches(FILE_URL, decoded)
+        || patternMatches(WINDOWS_OR_UNC_PATH_PREFIX, decoded)
         || hasFilesystemPathCandidate(decodedWithoutAuthorityUris)
       )
     )

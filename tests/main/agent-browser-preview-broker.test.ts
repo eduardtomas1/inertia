@@ -27,6 +27,7 @@ const electronState = vi.hoisted(() => ({
       removeEntryAtIndex: ReturnType<typeof vi.fn>;
     };
     emit(name: string, ...args: unknown[]): void;
+    on(name: string, handler: (...args: unknown[]) => void): void;
     getURL(): string;
     insertedText: string[];
     sentInputs: Array<Record<string, unknown>>;
@@ -428,6 +429,37 @@ describe("agent-owned native Browser", () => {
         code: "invalid",
         message: "The focused page element is disabled.",
       });
+  });
+
+  it("preserves a preload refusal while the rejected document navigates away", async () => {
+    const contentsOffset = electronState.contents.length;
+    const { broker } = harness();
+    await broker.navigate({
+      ownerId: "primary",
+      contextId: conversationId,
+      url: "http://127.0.0.1:3000/source",
+    });
+    const contents = electronState.contents[contentsOffset]!;
+    expect(broker.reportInputRefusal(contents as never, "disabled")).toBe(false);
+    contents.on("input-event", (_event: unknown, input: unknown) => {
+      const inputType = (input as { type?: string }).type;
+      if (inputType !== "keyDown") return;
+      expect(broker.reportInputRefusal(contents as never, "disabled")).toBe(true);
+      contents.emit("did-start-navigation", {
+        isMainFrame: true,
+        isSameDocument: false,
+        url: "http://127.0.0.1:3000/destination",
+      });
+      queueMicrotask(() => contents.emit("did-stop-loading"));
+    });
+
+    await expect(broker.perform(conversationId, { action: "press", key: "Enter" }))
+      .resolves.toMatchObject({
+        ok: false,
+        code: "invalid",
+        message: "The focused page element is disabled.",
+      });
+    expect(broker.reportInputRefusal(contents as never, "disabled")).toBe(false);
   });
 
   it("holds queued work until click-triggered main-frame navigation settles", async () => {

@@ -170,7 +170,7 @@ async function createPreviewServer(): Promise<{
         + "<script>const safe=document.querySelector('#safe-focus');const disabled=document.querySelector('#late-disabled');"
         + "disabled.addEventListener('click',()=>{window.__lateDisabledClicked=true});"
         + "safe.addEventListener('keydown',event=>{window.__trustedKeydown=event.isTrusted;safe.dispatchEvent(new KeyboardEvent('keyup',{bubbles:true,cancelable:true,composed:true,key:'Enter'}));"
-        + "disabled.focus()});"
+        + "disabled.focus();if(window.__navigateAfterKey)setTimeout(()=>{location.href='/agent-browser-focus-destination'},0)});"
         + "for(const name of ['keypress','keyup','beforeinput','input'])window.addEventListener(name,event=>{"
         + "if(document.activeElement===disabled)disabled.click()},true)</script>",
       );

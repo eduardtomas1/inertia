@@ -1,5 +1,6 @@
 import type { WebContents } from "electron";
 
+import type { PreviewAgentInputRefusal } from "../shared/preview-agent-privacy-guard.js";
 import { previewNavigationTarget } from "../shared/preview-url.js";
 import { AGENT_BROWSER_WORLD_ID, agentPageActivationBlocked, locateAgentPageRef, type PreviewAgentTarget, waitForAgentPageHover } from "./preview-agent-page.js";
 import { agentPageHasUnguardedNestedContent as hasUnguardedNestedContent, installAgentFileChooserBlock } from "./preview-agent-boundary.js";
@@ -17,6 +18,33 @@ const HOVER_INPUT_TIMEOUT_MS = 15_000;
 const NAVIGATION_TIMEOUT_MS = 30_000;
 const FILE_CHOOSER_ACTIVATION_POLL_MS = 100;
 const FILE_CHOOSER_ACTIVATION_LIMIT_MS = 10_000;
+const armedRefusalCaptures = new WeakSet<WebContents>();
+const capturedRefusals = new WeakMap<WebContents, PreviewAgentInputRefusal>();
+
+export function beginAgentPageInputRefusalCapture(contents: WebContents): void {
+  capturedRefusals.delete(contents);
+  armedRefusalCaptures.add(contents);
+}
+
+export function captureAgentPageInputRefusal(contents: WebContents, value: unknown): boolean {
+  if (!armedRefusalCaptures.has(contents)
+    || (value !== "disabled" && value !== "file" && value !== "nested" && value !== "retargeted")) return false;
+  if (!capturedRefusals.has(contents)) {
+    capturedRefusals.set(contents, value as PreviewAgentInputRefusal);
+  }
+  return true;
+}
+
+export function capturedAgentPageInputRefusal(
+  contents: WebContents,
+): PreviewAgentInputRefusal | null {
+  return capturedRefusals.get(contents) ?? null;
+}
+
+export function endAgentPageInputRefusalCapture(contents: WebContents): void {
+  armedRefusalCaptures.delete(contents);
+  capturedRefusals.delete(contents);
+}
 
 function stopForAbort(signal?: AbortSignal): void {
   if (signal?.aborted) throw new Error("browser-action-cancelled");

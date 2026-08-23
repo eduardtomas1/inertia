@@ -19,6 +19,8 @@ type AgentBrowserPrivacyGlobal = typeof globalThis & {
 };
 
 export const PREVIEW_AGENT_NESTED_BOUNDARY_EVENT = "__inertia_agent_nested_boundary__";
+export const PREVIEW_AGENT_INPUT_REFUSAL_CHANNEL = "inertia:preview-agent-input-refusal";
+export type PreviewAgentInputRefusal = "disabled" | "file" | "nested" | "retargeted";
 
 /** Runs in the page's main world before author scripts. */
 export function installPreviewAgentShadowBoundarySignal(eventName: string): void {
@@ -133,7 +135,9 @@ export function installPreviewAgentShadowBoundarySignal(eventName: string): void
  * self-contained because the main process also serializes it as a defensive
  * repair for already-created test documents.
  */
-export function installPreviewAgentPrivacyGuard(): void {
+export function installPreviewAgentPrivacyGuard(
+  reportRefusal?: (refusal: PreviewAgentInputRefusal) => void,
+): void {
   const owner = globalThis as AgentBrowserPrivacyGlobal;
   const nestedBoundaryEvent = "__inertia_agent_nested_boundary__";
   let state = owner.__inertiaAgentBrowser;
@@ -264,6 +268,11 @@ export function installPreviewAgentPrivacyGuard(): void {
     event.preventDefault();
     event.stopImmediatePropagation();
   };
+  const recordRefusal = (refusal: PreviewAgentInputRefusal): void => {
+    if (state.agentInputRefused) return;
+    state.agentInputRefused = refusal;
+    reportRefusal?.(refusal);
+  };
   const activationEventRefusal = (
     event: Event,
   ): "disabled" | "file" | "nested" | null => {
@@ -294,7 +303,7 @@ export function installPreviewAgentPrivacyGuard(): void {
           ? "retargeted"
           : null);
       if (!refusal) return;
-      state.agentInputRefused = refusal;
+      recordRefusal(refusal);
       stopActivationEvent(event);
     }, true);
   }
@@ -305,7 +314,7 @@ export function installPreviewAgentPrivacyGuard(): void {
     state.agentActivationKey = key;
     const refusal = activationEventRefusal(event);
     if (!refusal) return;
-    state.agentInputRefused = refusal;
+    recordRefusal(refusal);
     state.blockedAgentActivationKey = key;
     stopActivationEvent(event);
   }, true);
@@ -316,7 +325,7 @@ export function installPreviewAgentPrivacyGuard(): void {
       if (!key || key !== state.agentActivationKey) return;
       const refusal = activationEventRefusal(event);
       if (state.blockedAgentActivationKey === key || refusal) {
-        if (refusal) state.agentInputRefused = refusal;
+        if (refusal) recordRefusal(refusal);
         state.blockedAgentActivationKey = key;
         stopActivationEvent(event);
       }
@@ -331,7 +340,7 @@ export function installPreviewAgentPrivacyGuard(): void {
       if (!state.agentInputActive || event.isTrusted !== true || !state.agentActivationKey) return;
       const refusal = activationEventRefusal(event);
       if (!state.blockedAgentActivationKey && !refusal) return;
-      if (refusal) state.agentInputRefused = refusal;
+      if (refusal) recordRefusal(refusal);
       state.blockedAgentActivationKey = state.agentActivationKey;
       stopActivationEvent(event);
     }, true);

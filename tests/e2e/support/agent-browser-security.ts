@@ -250,10 +250,17 @@ export async function expectClosedShadowActivationBlocked(
     }], true);
     const finalInterleavedClicked = await interleaveContents?.executeJavaScript("window.__lateDisabledClicked === true");
     const finalTrustedKeydown = await interleaveContents?.executeJavaScript("window.__trustedKeydown === true");
+    const navigationRefusalPreflight = await interleaveContents?.executeJavaScript(
+      "document.querySelector('#safe-focus').focus();window.__navigateAfterKey=true;document.activeElement?.id",
+      true,
+    );
+    const navigationRefusal = await runtime.agentBrowser(request.conversationId, { action: "press", key: "Enter" });
+    const navigationRefusalUrl = interleaveContents?.getURL();
     return {
       armed, clicked, enter, hostFocused, interleaveNavigation, interleavedClicked,
       finalFocus, finalGuardState, finalInterleavedClicked, finalNavigation, finalPreflight,
-      finalTrustedKeydown, interleavedEnter,
+      finalTrustedKeydown, interleavedEnter, navigationRefusal, navigationRefusalPreflight,
+      navigationRefusalUrl,
       interleavedFocus, navigation, prepared, space,
     };
   }, { conversationId, url, worldId: AGENT_BROWSER_WORLD_ID });
@@ -271,6 +278,9 @@ export async function expectClosedShadowActivationBlocked(
     interleavedClicked: false,
     interleavedEnter: { code: "invalid", ok: false },
     interleavedFocus: "late-disabled",
+    navigationRefusal: { code: "invalid", ok: false },
+    navigationRefusalPreflight: "safe-focus",
+    navigationRefusalUrl: expect.stringContaining("/agent-browser-focus-destination"),
     navigation: { ok: true },
     prepared: { ok: true },
     space: { code: "invalid", ok: false },

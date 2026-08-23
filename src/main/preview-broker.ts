@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
-
 import {
   WebContentsView,
   type BrowserWindow,
@@ -8,9 +7,8 @@ import {
   type KeyboardInputEvent,
   type NativeImage,
   type Rectangle,
-  type Session,
+  type Session, type WebContents,
 } from "electron";
-
 import type { AgentBrowserActivity, AgentBrowserCommand, AgentBrowserResult, AgentBrowserState, AgentBrowserTab } from "../shared/agent-browser.js";
 import { MAX_AGENT_BROWSER_TEXT_BYTES } from "../shared/agent-browser.js";
 import type { PreviewState } from "../shared/desktop.js";
@@ -21,7 +19,7 @@ import {
   locateAgentPageRef, semanticPageSnapshot, setAgentPageInputGuard, showAgentPageCursor,
 } from "./preview-agent-page.js";
 import {
-  agentPageActivationBlock, agentPageHasUnguardedNestedContent, beginAgentFileChooserBlock, ensureAgentFileChooserBlock, hoverAgentPageRef, releaseAgentFileChooserBlock, setAgentPageFrozen, settleAgentPageDebuggerBootstrap, settleAgentPageInput,
+  agentPageActivationBlock, agentPageHasUnguardedNestedContent, beginAgentFileChooserBlock, beginAgentPageInputRefusalCapture, captureAgentPageInputRefusal, capturedAgentPageInputRefusal, endAgentPageInputRefusalCapture, ensureAgentFileChooserBlock, hoverAgentPageRef, releaseAgentFileChooserBlock, setAgentPageFrozen, settleAgentPageDebuggerBootstrap, settleAgentPageInput,
 } from "./preview-agent-input.js";
 import { capturedAgentScreenshotResult } from "./preview-agent-screenshot.js";
 import { failedAgentBrowserResult as failure, successfulAgentBrowserResult } from "./preview-agent-result.js";
@@ -150,15 +148,14 @@ function providerVisiblePageUrl(value: string): string {
 function stopForAbort(signal?: AbortSignal): void {
   if (signal?.aborted) throw new Error("browser-action-cancelled");
 }
-
 export class PreviewBroker {
+  reportInputRefusal(contents: WebContents, value: unknown): boolean { return captureAgentPageInputRefusal(contents, value); }
   readonly #slots = new Map<PreviewOwner, PreviewSlot>();
   readonly #pendingBounds = new Map<PreviewOwner, {
     contextId: string;
     bounds: Rectangle;
   }>();
   readonly #captureLocked = new WeakSet<PreviewTab["view"]["webContents"]>();
-
   constructor(private readonly options: PreviewBrokerOptions) {}
 
   async navigate(value: unknown): Promise<PreviewState> {
@@ -1234,8 +1231,10 @@ export class PreviewBroker {
         () => setAgentPageInputGuard(contents, true, expectedClickRef),
         { signal },
       );
+      beginAgentPageInputRefusalCapture(contents);
       await settleAgentPageInput(contents, dispatch, signal);
-      return await this.#rendererOperation(contents, () => agentPageInputRefusal(contents), { signal });
+      const isolated = await this.#rendererOperation(contents, () => agentPageInputRefusal(contents), { signal });
+      return capturedAgentPageInputRefusal(contents) ?? isolated;
     } finally {
       if (!contents.isDestroyed()) {
         await this.#rendererOperation(
@@ -1244,6 +1243,7 @@ export class PreviewBroker {
         ).catch(() => undefined);
         void releaseAgentFileChooserBlock(contents, chooserGeneration).catch(() => undefined);
       }
+      endAgentPageInputRefusalCapture(contents);
     }
   }
 }

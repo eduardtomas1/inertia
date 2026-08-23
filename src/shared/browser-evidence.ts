@@ -74,6 +74,7 @@ const SENSITIVE_FIELD =
   /\b(?:api[-_ ]?key|authorization|proxy[-_ ]?authorization|cookie|set[-_ ]?cookie|credential|password|passwd|private[-_ ]?key|request[-_ ]?body|secret|session|token)\b/iu;
 const SECRET_HOST_LABEL =
   /^(?:(?:sk|rk|pk|ghp|github[-_]?pat|glpat|npm|pypi|hf|xox[baprs]|api|key|token)[-_][a-z0-9_-]{8,}|(?:akia|asia)[a-z0-9]{16}|aiza[a-z0-9_-]{20,})$/iu;
+const MAX_PERCENT_DECODE_PASSES = 4;
 
 function boundedInput(value: string, maximum: number): string {
   return value.slice(0, Math.max(maximum + 4_096, 4_096));
@@ -84,6 +85,22 @@ function patternMatches(pattern: RegExp, value: string): boolean {
   const matched = pattern.test(value);
   pattern.lastIndex = 0;
   return matched;
+}
+
+function boundedPercentDecode(value: string): string | null {
+  let decoded = value;
+  for (let pass = 0; pass < MAX_PERCENT_DECODE_PASSES; pass += 1) {
+    if (!decoded.includes("%")) return decoded;
+    let next: string;
+    try {
+      next = decodeURIComponent(decoded);
+    } catch {
+      return null;
+    }
+    if (next === decoded) return decoded;
+    decoded = next;
+  }
+  return decoded.includes("%") ? null : decoded;
 }
 
 function suspiciousHostname(hostname: string): boolean {
@@ -141,11 +158,9 @@ export function sanitizeBrowserEvidenceText(
   const limit = Math.max(1, Math.min(Math.trunc(maximum), MAX_BROWSER_EVIDENCE_TEXT_CHARS));
   if (typeof value !== "string") return { text: fallback.slice(0, limit), redacted: true };
   const inspected = boundedInput(value, limit);
-  let decoded = inspected;
-  try {
-    decoded = decodeURIComponent(inspected);
-  } catch {
-    // Malformed page-authored encoding remains subject to the raw scanners.
+  const decoded = boundedPercentDecode(inspected);
+  if (decoded === null) {
+    return { text: fallback.slice(0, limit), redacted: true };
   }
   if (
     SENSITIVE_FIELD.test(inspected)

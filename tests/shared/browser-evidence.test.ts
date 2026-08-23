@@ -32,10 +32,18 @@ describe("Browser evidence sanitization", () => {
     "password=private-value",
     "request_body: private-value",
     "token%3Dprivate-value",
+    "sk%252Dabcdefgh12345678",
+    "render failed 100% sk%2Dabcdefgh12345678",
+    "sk%252525252Dabcdefgh12345678",
     "-----BEGIN PRIVATE KEY-----",
   ])("fails closed for credential-bearing console detail: %s", (value) => {
     expect(sanitizeBrowserEvidenceText(value, "Sensitive console detail hidden"))
       .toEqual({ text: "Sensitive console detail hidden", redacted: true });
+  });
+
+  it("fails closed for malformed page-authored percent encoding", () => {
+    expect(sanitizeBrowserEvidenceText("render reached 100%", "hidden"))
+      .toEqual({ text: "hidden", redacted: true });
   });
 
   it.each([

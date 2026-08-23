@@ -56,8 +56,8 @@ const CONTROL_OR_BIDI =
   /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u206f]+/gu;
 const HTTP_SCHEME = /https?:\/\//iu;
 const URL_TOKEN = /https?:\/\/[^\s<>"'`]+/giu;
-const FILE_URL = /\bfile:\/\/[^\s<>"'`]+/giu;
-const POSIX_PATH = /(^|[\s(=:"'])\/(?:[^/\s,;:)"']+\/)*[^/\s,;:)"']+/gu;
+const FILE_URL = /(?<![A-Za-z0-9])file:\/\/[^\s<>"'`]+/giu;
+const POSIX_PATH = /(?<![A-Za-z0-9])\/(?:[^/\s,;:)"']+\/)+[^/\s,;:)"']+/gu;
 const RELATIVE_FILE_PATH = /(^|[\s(=:"'])(?:(?:\.{1,2}|[^/\s,;:)"']+)\/)+[^/\s,;:)"']+\.[A-Za-z0-9]{1,12}(?=$|[\s,;:)"'])/gu;
 const WINDOWS_PATH = /\b[A-Za-z]:\\(?:[^\\\s,;:)"']+\\)*[^\\\s,;:)"']*/gu;
 const UNC_OR_HOME_PATH = /(?:\\\\[^\\\s]+\\[^\s,;:)"']+|~\/(?:[^\s,;:)"']+\/)*[^\s,;:)"']+)/gu;
@@ -74,8 +74,8 @@ const TRAILING_SECRET_FRAGMENT =
   /(?<![A-Za-z0-9])(?:(?:sk|rk|pk|ghp|github_pat|xox[baprs]|api|key|token)[-_][A-Za-z0-9_-]*|eyJ[A-Za-z0-9_.-]*|(?:Bearer|Basic)\s+\S*)$/iu;
 const SENSITIVE_FIELD =
   /(?<![A-Za-z0-9])(?:(?:access|auth|id|refresh)[-_ ]?token|api[-_ ]?key|authorization|proxy[-_ ]?authorization|cookie|set[-_ ]?cookie|credential|password|passwd|private[-_ ]?key|request[-_ ]?body|secret|session|token)(?![A-Za-z0-9])/iu;
-const SECRET_HOST_LABEL =
-  /^(?:(?:sk|rk|pk|ghp|github[-_]?pat|glpat|npm|pypi|hf|xox[baprs]|api|key|token)[-_][a-z0-9_-]{8,}|(?:akia|asia)[a-z0-9]{16}|aiza[a-z0-9_-]{20,})$/iu;
+const SECRET_HOST_FRAGMENT =
+  /(?:(?:sk|rk|pk|ghp|github[-_]?pat|glpat|npm|pypi|hf|xox[baprs]|api|key|token)[-_][a-z0-9_-]{8,}|(?:akia|asia)[a-z0-9]{16}|aiza[a-z0-9_-]{20,})/iu;
 const MAX_PERCENT_DECODE_PASSES = 4;
 
 function boundedInput(value: string, maximum: number): string {
@@ -122,7 +122,7 @@ function boundedPercentDecode(value: string): string | null {
 
 function suspiciousHostname(hostname: string): boolean {
   return hostname.split(".").some((label) =>
-    SECRET_HOST_LABEL.test(label)
+    SECRET_HOST_FRAGMENT.test(label)
     || (
       label.length >= 32
       && /[A-Za-z]/u.test(label)

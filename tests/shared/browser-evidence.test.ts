@@ -21,8 +21,16 @@ describe("Browser evidence sanitization", () => {
       "https://sk-abcdefgh12345678.example.com/private",
     )).toBeNull();
     expect(browserEvidenceOrigin(
+      "https://prefix_sk-abcdefgh12345678.example.com/private",
+    )).toBeNull();
+    expect(browserEvidenceOrigin(
+      "https://prefix_ghp_abcdefgh12345678.example.com/private",
+    )).toBeNull();
+    expect(browserEvidenceOrigin(
       "https://AKIA1234567890ABCDEF.example.com/private",
     )).toBeNull();
+    expect(browserEvidenceOrigin("https://prefix-sketchbook.example.com/private"))
+      .toBe("https://prefix-sketchbook.example.com");
   });
 
   it.each([
@@ -82,6 +90,8 @@ describe("Browser evidence sanitization", () => {
     "Failure in packages/browser/private project/src/main.ts",
     "Failure in ~/Jane Doe/private project/src/main.ts",
     "Failure in file:///Users/Jane%20Doe/private%20project/src/main.ts",
+    "prefix_/Users/Jane Doe/private project",
+    "prefix_file:///Users/Jane Doe/private project",
   ])("fails closed for POSIX, file, home, and relative filesystem paths: %s", (value) => {
     expect(sanitizeBrowserEvidenceText(value, "hidden"))
       .toEqual({ text: "hidden", redacted: true });
@@ -116,6 +126,7 @@ describe("Browser evidence sanitization", () => {
   it.each([
     "Render used 1/2 of the frame budget.",
     "Choose yes/no when prompted.",
+    "Opened profile://example during setup.",
     "Failed https://example.com/private?next=/docs#section during render.",
   ])("does not mistake normal prose or HTTP URLs for filesystem paths: %s", (value) => {
     const result = sanitizeBrowserEvidenceText(value, "hidden");

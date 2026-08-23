@@ -41,8 +41,8 @@ export function BrowserEvidenceTimeline({
   )));
 
   useEffect(() => {
-    closeRef.current?.focus();
-  }, []);
+    if (document.activeElement?.getAttribute("aria-controls") === id) closeRef.current?.focus();
+  }, [id]);
 
   useEffect(() => {
     const available = availableImageIdsRef.current;

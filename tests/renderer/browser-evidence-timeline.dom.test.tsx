@@ -90,6 +90,28 @@ beforeEach(() => {
 });
 
 describe("Browser evidence timeline", () => {
+  it("does not steal newer focus when the lazy evidence view resolves", async () => {
+    render(
+      <PreviewPanel
+        owner="primary"
+        contextId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        url="http://127.0.0.1:4173/"
+        evidence={evidence}
+        onNavigate={vi.fn()}
+        onOpenExternal={vi.fn()}
+      />,
+    );
+
+    const toggle = screen.getByRole("button", { name: /Evidence 3/u });
+    toggle.focus();
+    fireEvent.click(toggle);
+    const address = screen.getByRole("textbox", { name: "Preview address" });
+    address.focus();
+
+    expect(await screen.findByText("Local evidence")).toBeInTheDocument();
+    expect(address).toHaveFocus();
+  });
+
   it("replaces the native stage, renders hostile evidence as text, and restores focus", async () => {
     const onBoundsChange = vi.fn();
     const loadImage = vi.fn(async () => ({
@@ -122,6 +144,7 @@ describe("Browser evidence timeline", () => {
     });
 
     const toggle = screen.getByRole("button", { name: /Evidence 3/u });
+    toggle.focus();
     fireEvent.click(toggle);
 
     expect(screen.queryByRole("tabpanel")).not.toBeInTheDocument();
@@ -219,7 +242,9 @@ describe("Browser evidence timeline", () => {
       </>
     );
     const view = render(panel("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"));
-    fireEvent.click(screen.getByRole("button", { name: /Evidence 3/u }));
+    const toggle = screen.getByRole("button", { name: /Evidence 3/u });
+    toggle.focus();
+    fireEvent.click(toggle);
     expect(await screen.findByRole("button", { name: "Close Browser evidence" }))
       .toHaveFocus();
 

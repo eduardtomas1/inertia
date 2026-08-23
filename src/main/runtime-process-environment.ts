@@ -1,3 +1,5 @@
+import { GIT_LAUNCH_ENVIRONMENT_KEYS } from "../node/git-environment";
+
 const RUNTIME_PROCESS_ENVIRONMENT_KEYS = [
   "APPDATA",
   "BUN_INSTALL",
@@ -47,6 +49,7 @@ const RUNTIME_PROCESS_ENVIRONMENT_KEYS = [
   "XDG_CONFIG_HOME",
   "XDG_DATA_HOME",
   "XDG_RUNTIME_DIR",
+  ...GIT_LAUNCH_ENVIRONMENT_KEYS,
 ] as const;
 
 function environmentValue(

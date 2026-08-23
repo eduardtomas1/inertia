@@ -59,8 +59,9 @@ export class InertiaHealthRegistry {
   }
 
   registerRenderer(renderer: HealthRenderer): () => void {
-    const references = this.#sessions.get(renderer.session) ?? 0;
-    this.#sessions.set(renderer.session, references + 1);
+    const session = renderer.session;
+    const references = this.#sessions.get(session) ?? 0;
+    this.#sessions.set(session, references + 1);
     const unregisterProcess = this.registerProcess("renderer", () => (
       renderer.isDestroyed() ? null : renderer.getOSProcessId()
     ));
@@ -69,9 +70,9 @@ export class InertiaHealthRegistry {
       if (!registered) return;
       registered = false;
       unregisterProcess();
-      const remaining = (this.#sessions.get(renderer.session) ?? 1) - 1;
-      if (remaining <= 0) this.#sessions.delete(renderer.session);
-      else this.#sessions.set(renderer.session, remaining);
+      const remaining = (this.#sessions.get(session) ?? 1) - 1;
+      if (remaining <= 0) this.#sessions.delete(session);
+      else this.#sessions.set(session, remaining);
     };
   }
 

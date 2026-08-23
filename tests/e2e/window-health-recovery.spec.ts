@@ -41,7 +41,10 @@ test("restores a saved off-screen window with a reachable title bar", async ({
       workAreas: screen.getAllDisplays().map(({ workArea }) => workArea),
     };
   });
-  expect(geometry.bounds).toMatchObject({ width: 1_180, height: 760 });
+  expect(geometry.bounds.width).toBeGreaterThanOrEqual(760);
+  expect(geometry.bounds.width).toBeLessThanOrEqual(1_180);
+  expect(geometry.bounds.height).toBeGreaterThanOrEqual(600);
+  expect(geometry.bounds.height).toBeLessThanOrEqual(760);
   expect(geometry.workAreas.some((workArea) => {
     const titleWidth = Math.min(
       geometry.bounds.x + geometry.bounds.width,

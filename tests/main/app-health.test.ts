@@ -34,6 +34,25 @@ function metric(pid: number, memoryKb: number) {
 }
 
 describe("app health collection", () => {
+  it("unregisters a renderer after its Electron contents are destroyed", () => {
+    const registry = new InertiaHealthRegistry();
+    const ownedSession = session(0);
+    let destroyed = false;
+    const unregister = registry.registerRenderer({
+      get session() {
+        if (destroyed) throw new Error("Object has been destroyed");
+        return ownedSession;
+      },
+      getOSProcessId: () => 20,
+      isDestroyed: () => destroyed,
+    });
+
+    destroyed = true;
+    expect(unregister).not.toThrow();
+    expect(registry.sessions()).toEqual([]);
+    expect(registry.processes()).toEqual([]);
+  });
+
   it("measures and clears only registered Inertia resources", async () => {
     const registry = new InertiaHealthRegistry();
     const mainSession = session(1_024);

@@ -71,7 +71,9 @@ if (canvas.toBuffer("image/png").length <= 8) {
 await new Promise((resolveProbe, rejectProbe) => {
   const terminal = spawnPty(process.execPath, [
     "-e",
-    "process.stdout.write('inertia-native-pty-ok')",
+    // ConPTY can drop a final unterminated write while draining its output
+    // pipe, so make the probe a complete terminal line on every platform.
+    "console.log('inertia-native-pty-ok')",
   ], {
     cols: 80,
     rows: 24,

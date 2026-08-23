@@ -172,7 +172,11 @@ export function createAttachmentImportUtilityRunner(
       signal?.addEventListener("abort", onAbort, { once: true });
       child.once("spawn", () => {
         spawned = true;
-        if (signal?.aborted || stoppingError) {
+        if (stoppingError) {
+          child.kill();
+          return;
+        }
+        if (signal?.aborted) {
           onAbort();
           return;
         }

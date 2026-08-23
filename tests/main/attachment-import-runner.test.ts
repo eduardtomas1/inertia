@@ -132,6 +132,35 @@ describe("supervised attachment import utility", () => {
     await expect(running.stopped).resolves.toBeUndefined();
   });
 
+  it("retries a pre-spawn cancellation kill after startup", async () => {
+    const children: FakeUtilityProcess[] = [];
+    const controller = new AbortController();
+    const runner = createAttachmentImportUtilityRunner({
+      spawn: () => {
+        const child = new FakeUtilityProcess();
+        children.push(child);
+        return utility(child);
+      },
+    });
+    const running = runner(operation, controller.signal);
+    children[0]!.kill.mockReturnValueOnce(false);
+
+    controller.abort();
+    expect(children[0]!.kill).toHaveBeenCalledOnce();
+    children[0]!.emit("spawn");
+    expect(children[0]!.kill).toHaveBeenCalledTimes(2);
+    expect(children[0]!.postMessage).not.toHaveBeenCalled();
+    children[0]!.emit("exit", 1);
+
+    await expect(running.result).rejects.toThrow(/cancelled/u);
+    await expect(running.stopped).resolves.toBeUndefined();
+
+    const future = runner(operation);
+    expect(children).toHaveLength(2);
+    reportSuccess(children[1]!);
+    await expect(future.result).resolves.toEqual(receipt);
+  });
+
   it("bounds active and pending attachment validation memory", async () => {
     const children: FakeUtilityProcess[] = [];
     const runner = createAttachmentImportUtilityRunner({

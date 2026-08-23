@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   agentPageActivationBlocked,
   agentPageHasSensitiveEvidence,
+  agentPageInputRefusal,
   agentPageRefHasFocus,
   installAgentPagePrivacyGuard,
   locateAgentPageRef,
@@ -905,12 +906,36 @@ describe("agent browser semantic snapshots", () => {
     document.body.innerText = secret;
     const firstSnapshot = await semanticPageSnapshot(contents as never);
     expect(firstSnapshot).not.toContain(secret);
-    expect(JSON.parse(firstSnapshot)).toMatchObject({
+    const parsedFirstSnapshot = JSON.parse(firstSnapshot) as {
+      elements: Array<{ ref: string }>;
+    };
+    expect(parsedFirstSnapshot).toMatchObject({
       title: "[redacted]",
       text: "[redacted]",
       elements: [{ name: "Password field", value: "[redacted]" }],
     });
     await expect(agentPageHasSensitiveEvidence(contents as never)).resolves.toBe(true);
+    const expectedRef = parsedFirstSnapshot.elements[0]!.ref;
+    await setAgentPageInputGuard(contents as never, true, expectedRef);
+    const expectedMouseDownPrevented = vi.fn();
+    activationListeners.get("mousedown")?.({
+      composedPath: () => [input],
+      isTrusted: true,
+      preventDefault: expectedMouseDownPrevented,
+      stopImmediatePropagation: vi.fn(),
+    });
+    expect(expectedMouseDownPrevented).not.toHaveBeenCalled();
+    const retargetedMouseUpPrevented = vi.fn();
+    const retargetedMouseUpStopped = vi.fn();
+    activationListeners.get("mouseup")?.({
+      composedPath: () => [{ isConnected: true }],
+      isTrusted: true,
+      preventDefault: retargetedMouseUpPrevented,
+      stopImmediatePropagation: retargetedMouseUpStopped,
+    });
+    expect(retargetedMouseUpPrevented).toHaveBeenCalledOnce();
+    expect(retargetedMouseUpStopped).toHaveBeenCalledOnce();
+    await expect(agentPageInputRefusal(contents as never)).resolves.toBe("retargeted");
     await setAgentPageInputGuard(contents as never, true);
     const fileInput = { tagName: "INPUT", type: "file" };
     const prevented = vi.fn();

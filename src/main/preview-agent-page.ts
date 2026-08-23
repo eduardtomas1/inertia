@@ -468,16 +468,33 @@ export async function agentPageHasSensitiveEvidence(contents: WebContents): Prom
 export async function setAgentPageInputGuard(
   contents: WebContents,
   active: boolean,
+  expectedClickRef?: string,
 ): Promise<void> {
   const updated = await execute(contents, `(() => {
     const state = globalThis.__inertiaAgentBrowser;
     if (state?.privacyGuardInstalled !== true) return false;
     state.agentActivationKey = undefined;
     state.blockedAgentActivationKey = undefined;
+    state.expectedAgentClickRef = ${active && expectedClickRef ? JSON.stringify(expectedClickRef) : "undefined"};
+    state.agentInputRefused = undefined;
     state.agentInputActive = ${active ? "true" : "false"};
     return true;
   })()`);
   if (updated !== true) throw new Error("The Browser privacy guard is unavailable.");
+}
+
+export type AgentPageInputRefusal = "disabled" | "file" | "nested" | "retargeted";
+
+export async function agentPageInputRefusal(
+  contents: WebContents,
+): Promise<AgentPageInputRefusal | null> {
+  const value = await execute(contents, `(() => {
+    const value = globalThis.__inertiaAgentBrowser?.agentInputRefused;
+    return ["disabled", "file", "nested", "retargeted"].includes(value) ? value : null;
+  })()`);
+  return value === "disabled" || value === "file" || value === "nested" || value === "retargeted"
+    ? value
+    : null;
 }
 
 export async function locateAgentPageRef(

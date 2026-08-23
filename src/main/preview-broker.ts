@@ -16,7 +16,7 @@ import { MAX_AGENT_BROWSER_TEXT_BYTES } from "../shared/agent-browser.js";
 import type { PreviewState } from "../shared/desktop.js";
 import { previewNavigationTarget } from "../shared/preview-url.js";
 import {
-  agentPageHasSensitiveEvidence, agentPageRefHasFocus,
+  agentPageHasSensitiveEvidence, agentPageInputRefusal, agentPageRefHasFocus,
   installAgentPagePrivacyGuard,
   locateAgentPageRef, semanticPageSnapshot, setAgentPageInputGuard, showAgentPageCursor,
 } from "./preview-agent-page.js";
@@ -951,7 +951,7 @@ export class PreviewBroker {
     if (revalidated.disabled) return failure("invalid", "That page element is disabled.");
     stopForAbort(signal);
     try {
-      await this.#sendInputAndWait(contents, async () => {
+      const deliveryRefusal = await this.#sendInputAndWait(contents, async () => {
         const finalTarget = await this.#rendererOperation(
           contents,
           () => hoverAgentPageRef(contents, ref, x!, y!, signal),
@@ -976,7 +976,12 @@ export class PreviewBroker {
         ));
         contents.sendInputEvent({ type: "mouseDown", x, y, button: "left", clickCount: 1 });
         contents.sendInputEvent({ type: "mouseUp", x, y, button: "left", clickCount: 1 });
-      }, signal);
+      }, signal, ref);
+      if (deliveryRefusal === "retargeted") return failure("not-found", "That page element changed during the click. Inspect the page again for current refs.");
+      if (deliveryRefusal) return failure("invalid", deliveryRefusal === "file"
+        ? "File inputs cannot be activated by the Browser agent."
+        : deliveryRefusal === "disabled" ? "That page element became disabled during the click."
+          : "Page controls are unavailable for nested page content.");
     } catch (error) {
       if (error instanceof AgentBrowserRefusal) return error.result;
       throw error;
@@ -1093,7 +1098,7 @@ export class PreviewBroker {
     await this.#prepareAgentPage(contents, signal);
     const keyCode = key === "Space" ? " " : key;
     let activationBlocked: "disabled" | "file" | "nested" | null = null;
-    await this.#sendInputAndWait(contents, async () => {
+    const deliveryRefusal = await this.#sendInputAndWait(contents, async () => {
       if (key === "Enter" || key === "Space") {
         activationBlocked = await this.#rendererOperation(contents,
           () => agentPageActivationBlock(contents), { signal });
@@ -1105,10 +1110,9 @@ export class PreviewBroker {
       }
       contents.sendInputEvent({ type: "keyUp", keyCode });
     }, signal);
-    if (activationBlocked) {
-      return failure("invalid", activationBlocked === "file" ? "File inputs cannot be activated by the Browser agent."
-        : activationBlocked === "disabled" ? "The focused page element is disabled." : "Activation keys are unavailable for nested page content.");
-    }
+    const refusal = activationBlocked || deliveryRefusal;
+    if (refusal) return failure("invalid", refusal === "file" ? "File inputs cannot be activated by the Browser agent."
+      : refusal === "disabled" ? "The focused page element is disabled." : "Activation keys are unavailable for nested page content.");
     this.#record(ownerId, slot, "press", `Agent pressed ${key}`);
     return successfulAgentBrowserResult(JSON.stringify({ pressed: key }), this.#agentState(slot));
   }
@@ -1216,11 +1220,8 @@ export class PreviewBroker {
     });
   }
 
-  async #sendInputAndWait(
-    contents: PreviewTab["view"]["webContents"],
-    dispatch: () => void | Promise<void>,
-    signal?: AbortSignal,
-  ): Promise<void> {
+  async #sendInputAndWait(contents: PreviewTab["view"]["webContents"], dispatch: () => void | Promise<void>,
+    signal?: AbortSignal, expectedClickRef?: string): Promise<Awaited<ReturnType<typeof agentPageInputRefusal>>> {
     stopForAbort(signal);
     const chooserGeneration = await this.#rendererOperation(
       contents,
@@ -1230,10 +1231,11 @@ export class PreviewBroker {
     try {
       await this.#rendererOperation(
         contents,
-        () => setAgentPageInputGuard(contents, true),
+        () => setAgentPageInputGuard(contents, true, expectedClickRef),
         { signal },
       );
       await settleAgentPageInput(contents, dispatch, signal);
+      return await this.#rendererOperation(contents, () => agentPageInputRefusal(contents), { signal });
     } finally {
       if (!contents.isDestroyed()) {
         await this.#rendererOperation(

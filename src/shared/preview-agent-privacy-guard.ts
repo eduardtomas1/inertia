@@ -9,6 +9,8 @@ interface AgentBrowserPrivacyState {
   agentInputActive?: boolean;
   agentActivationKey?: "Enter" | "Space";
   blockedAgentActivationKey?: "Enter" | "Space";
+  expectedAgentClickRef?: string;
+  agentInputRefused?: "disabled" | "file" | "nested" | "retargeted";
   nestedContentObserved?: boolean;
 }
 
@@ -222,7 +224,8 @@ export function installPreviewAgentPrivacyGuard(): void {
   if (document.documentElement) inspectTree(document.documentElement, scanBudget());
   const inspectInputEvent = (event: Event): void => {
     let exposedControl = false;
-    for (const node of event.composedPath()) {
+    const path = typeof event.composedPath === "function" ? event.composedPath() : [];
+    for (const node of path) {
       const input = inputElement(node);
       if (input) {
         exposedControl = true;
@@ -261,22 +264,48 @@ export function installPreviewAgentPrivacyGuard(): void {
     event.preventDefault();
     event.stopImmediatePropagation();
   };
-  const activationEventBlocked = (event: Event): boolean => (
-    state.nestedContentObserved === true || event.composedPath().some((node) => {
+  const activationEventRefusal = (
+    event: Event,
+  ): "disabled" | "file" | "nested" | null => {
+    if (state.nestedContentObserved === true) return "nested";
+    let disabled = false;
+    const path = typeof event.composedPath === "function" ? event.composedPath() : [];
+    for (const node of path) {
       const candidate = node as Partial<HTMLInputElement> | null;
       const input = inputElement(node);
-      return input?.type.toLowerCase() === "file"
-        || candidate?.matches?.(":disabled") === true
+      if (input?.type.toLowerCase() === "file") return "file";
+      if (candidate?.matches?.(":disabled") === true
         || candidate?.disabled === true
-        || String(candidate?.getAttribute?.("aria-disabled") || "").toLowerCase() === "true";
-    })
-  );
+        || String(candidate?.getAttribute?.("aria-disabled") || "").toLowerCase() === "true") {
+        disabled = true;
+      }
+    }
+    return disabled ? "disabled" : null;
+  };
+  for (const eventName of ["mousedown", "mouseup", "click"] as const) {
+    activationTarget.addEventListener(eventName, (event) => {
+      if (!state.agentInputActive || event.isTrusted !== true) return;
+      const expectedRef = state.expectedAgentClickRef;
+      if (!expectedRef) return;
+      const expected = state.refs.get(expectedRef);
+      const refusal = state.agentInputRefused
+        || activationEventRefusal(event)
+        || (!expected?.isConnected || !event.composedPath().includes(expected)
+          ? "retargeted"
+          : null);
+      if (!refusal) return;
+      state.agentInputRefused = refusal;
+      stopActivationEvent(event);
+    }, true);
+  }
   activationTarget.addEventListener("keydown", (event) => {
     if (!state.agentInputActive || event.isTrusted !== true) return;
     const key = activationKey(event);
     if (!key) return;
     state.agentActivationKey = key;
-    if (!activationEventBlocked(event)) return;
+    const refusal = activationEventRefusal(event);
+    if (!refusal) return;
+    state.agentInputRefused = refusal;
     state.blockedAgentActivationKey = key;
     stopActivationEvent(event);
   }, true);
@@ -285,7 +314,9 @@ export function installPreviewAgentPrivacyGuard(): void {
       if (!state.agentInputActive || event.isTrusted !== true) return;
       const key = activationKey(event);
       if (!key || key !== state.agentActivationKey) return;
-      if (state.blockedAgentActivationKey === key || activationEventBlocked(event)) {
+      const refusal = activationEventRefusal(event);
+      if (state.blockedAgentActivationKey === key || refusal) {
+        if (refusal) state.agentInputRefused = refusal;
         state.blockedAgentActivationKey = key;
         stopActivationEvent(event);
       }
@@ -298,7 +329,9 @@ export function installPreviewAgentPrivacyGuard(): void {
   for (const eventName of ["beforeinput", "input"] as const) {
     activationTarget.addEventListener(eventName, (event) => {
       if (!state.agentInputActive || event.isTrusted !== true || !state.agentActivationKey) return;
-      if (!state.blockedAgentActivationKey && !activationEventBlocked(event)) return;
+      const refusal = activationEventRefusal(event);
+      if (!state.blockedAgentActivationKey && !refusal) return;
+      if (refusal) state.agentInputRefused = refusal;
       state.blockedAgentActivationKey = state.agentActivationKey;
       stopActivationEvent(event);
     }, true);

@@ -74,27 +74,39 @@ export async function expectHoverRetargetingGuard(
       const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
         agentBrowser: (
           id: string,
-          command: { action: "click"; ref: string },
-        ) => Promise<{ code?: string; ok: boolean }>;
+          command: { action: "click"; ref: string } | { action: "snapshot" },
+        ) => Promise<{ code?: string; ok: boolean; text?: string }>;
       };
       const result = await runtime.agentBrowser(request.conversationId, {
         action: "click",
         ref: request.ref,
       });
+      const snapshot = await runtime.agentBrowser(request.conversationId, { action: "snapshot" });
+      const deliveryRef = snapshot.text
+        ? (JSON.parse(snapshot.text) as { elements: Array<{ name: string; ref: string }> })
+          .elements.find((element) => element.name === "Delivery-moving action")?.ref
+        : undefined;
+      const delivery = deliveryRef
+        ? await runtime.agentBrowser(request.conversationId, { action: "click", ref: deliveryRef })
+        : null;
       const contents = webContents.getAllWebContents().find(
         (candidate) => candidate.getURL() === request.url,
       );
       const state = await contents?.executeJavaScript(`({
         target: window.__hoverTargetClicked === true,
         decoy: window.__hoverDecoyClicked === true,
+        deliveryTarget: window.__deliveryTargetClicked === true,
+        deliveryDecoy: window.__deliveryDecoyClicked === true,
       })`);
-      return { result, state };
+      return { delivery, deliveryRef, result, state };
     },
     { conversationId, ref, url },
   );
   expect(evidence).toMatchObject({
+    delivery: { ok: false, code: "not-found" },
+    deliveryRef: expect.stringMatching(/^e\d+$/u),
     result: { ok: false, code: "not-found" },
-    state: { target: false, decoy: false },
+    state: { target: false, decoy: false, deliveryTarget: false, deliveryDecoy: false },
   });
 }
 

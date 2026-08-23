@@ -204,6 +204,7 @@ const pageTools = vi.hoisted(() => ({
   AGENT_BROWSER_WORLD_ID: 999,
   agentPageActivationBlocked: vi.fn<() => Promise<"disabled" | "file" | null>>(async () => null),
   agentPageHasSensitiveEvidence: vi.fn(async () => false),
+  agentPageInputRefusal: vi.fn<() => Promise<"disabled" | "file" | "nested" | "retargeted" | null>>(async () => null),
   agentPageRefHasFocus: vi.fn(async () => true),
   installAgentPagePrivacyGuard: vi.fn(async () => undefined),
   locateAgentPageRef: vi.fn<() => Promise<PreviewAgentTarget>>(async () => ({
@@ -214,6 +215,7 @@ const pageTools = vi.hoisted(() => ({
   setAgentPageInputGuard: vi.fn<(
     contents: unknown,
     active: boolean,
+    expectedClickRef?: string,
   ) => Promise<void>>(async () => undefined),
   showAgentPageCursor: vi.fn(async () => undefined),
   waitForAgentPageHover: vi.fn(async () => undefined),
@@ -358,7 +360,7 @@ describe("agent-owned native Browser", () => {
       expect.objectContaining({ type: "mouseDown", x: 42, y: 28 }),
       expect.objectContaining({ type: "mouseUp", x: 42, y: 28 }),
     ]));
-    expect(pageTools.setAgentPageInputGuard).toHaveBeenCalledWith(expect.anything(), true);
+    expect(pageTools.setAgentPageInputGuard).toHaveBeenCalledWith(expect.anything(), true, "e1");
     expect(pageTools.setAgentPageInputGuard).toHaveBeenCalledWith(expect.anything(), false);
     expect(electronState.contents[contentsOffset]!.debugger.sendCommand).toHaveBeenCalledWith(
       "Page.setInterceptFileChooserDialog",
@@ -388,6 +390,44 @@ describe("agent-owned native Browser", () => {
     });
     expect(pageTools.agentPageRefHasFocus).toHaveBeenCalledWith(expect.anything(), "e2");
     expect(children[0]!.webContents.insertedText).toEqual([]);
+  });
+
+  it("reports a click refused by the delivery-time exact-ref guard", async () => {
+    const { broker, children } = harness();
+    await broker.navigate({
+      ownerId: "primary",
+      contextId: conversationId,
+      url: "http://127.0.0.1:3000/",
+    });
+    pageTools.agentPageInputRefusal.mockResolvedValueOnce("retargeted");
+
+    await expect(broker.perform(conversationId, { action: "click", ref: "e1" }))
+      .resolves.toMatchObject({
+        ok: false,
+        code: "not-found",
+        message: "That page element changed during the click. Inspect the page again for current refs.",
+      });
+    expect(children[0]!.webContents.sentInputs).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "mouseDown" }),
+      expect.objectContaining({ type: "mouseUp" }),
+    ]));
+  });
+
+  it("reports activation rejected during trusted key delivery", async () => {
+    const { broker } = harness();
+    await broker.navigate({
+      ownerId: "primary",
+      contextId: conversationId,
+      url: "http://127.0.0.1:3000/",
+    });
+    pageTools.agentPageInputRefusal.mockResolvedValueOnce("disabled");
+
+    await expect(broker.perform(conversationId, { action: "press", key: "Enter" }))
+      .resolves.toMatchObject({
+        ok: false,
+        code: "invalid",
+        message: "The focused page element is disabled.",
+      });
   });
 
   it("holds queued work until click-triggered main-frame navigation settles", async () => {

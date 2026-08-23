@@ -37,6 +37,14 @@ describe("Browser evidence sanitization", () => {
     "Authorization: Bearer private-value",
     "oauth_access_token=private-value",
     "prefix_auth_token: private-value",
+    "oauthAccessToken=private-value",
+    "githubToken: private-value",
+    "clientSecret = private-value",
+    "awsSecretAccessKey=private-value",
+    "githubPAT=private-value",
+    "clientPassphrase=private-value",
+    "browserSessionId=private-value",
+    "\"oauthAccessToken\":\"private-value\"",
     "Cookie=session=private-value",
     "Set-Cookie: session=private-value",
     "password=private-value",
@@ -65,6 +73,15 @@ describe("Browser evidence sanitization", () => {
   it("does not treat a sensitive-field substring in normal prose as a field", () => {
     expect(sanitizeBrowserEvidenceText("The obsession ended normally.", "hidden"))
       .toEqual({ text: "The obsession ended normally.", redacted: false });
+  });
+
+  it.each([
+    "tokenize=public-value",
+    "cancellationTokenCount=4",
+    "clientSecretariat=public-value",
+  ])("does not treat a camel-case suffix substring as a credential field: %s", (value) => {
+    expect(sanitizeBrowserEvidenceText(value, "hidden"))
+      .toEqual({ text: value, redacted: false });
   });
 
   it("fails closed for malformed page-authored percent encoding", () => {

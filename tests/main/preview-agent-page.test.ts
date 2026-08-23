@@ -1028,7 +1028,15 @@ describe("agent browser semantic snapshots", () => {
     input.type = "text";
     await expect(agentPageHasSensitiveEvidence(contents as never)).resolves.toBe(true);
     runInNewContext("globalThis.__inertiaAgentBrowser.passwordValues.clear()", context);
-    privacyInputListener?.({ composedPath: () => [{ tagName: "CREDENTIAL-HOST" }] });
+    privacyInputListener?.({
+      composedPath: () => [{ tagName: "CREDENTIAL-HOST" }],
+      isTrusted: false,
+    });
+    await expect(agentPageHasSensitiveEvidence(contents as never)).resolves.toBe(false);
+    privacyInputListener?.({
+      composedPath: () => [{ tagName: "CREDENTIAL-HOST" }],
+      isTrusted: true,
+    });
     await expect(agentPageHasSensitiveEvidence(contents as never)).resolves.toBe(true);
     runInNewContext("globalThis.__inertiaAgentBrowser.nestedContentObserved = false", context);
     nestedBoundaryListener?.({});

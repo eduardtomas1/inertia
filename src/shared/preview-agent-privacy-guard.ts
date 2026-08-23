@@ -241,9 +241,10 @@ export function installPreviewAgentPrivacyGuard(
         || candidate?.isContentEditable === true) exposedControl = true;
     }
     // Closed declarative roots hide their controls from an outside composed
-    // path. Retain a lifetime taint before an author handler can mirror the
-    // newly entered value into the ordinary top-level DOM and remove the host.
-    if (!exposedControl) state.nestedContentObserved = true;
+    // path. Retain a lifetime taint for trusted native delivery before an
+    // author handler can mirror the value and remove the host; synthetic page
+    // events cannot permanently disable Browser evidence.
+    if (!exposedControl && event.isTrusted === true) state.nestedContentObserved = true;
   };
   // Preload installs this before author scripts. Observe from the earliest
   // capture boundary so a page-owned window handler cannot mirror and clear a

@@ -15,6 +15,7 @@ function runtimeWithClose(
       trigger: "none",
       restoredBackup: null,
       preservedCorruptPrimary: false,
+      preservedDatabaseFamilyMembers: 0,
       invalidBackupsSkipped: 0,
       unsupportedBackupsSkipped: 0,
     },

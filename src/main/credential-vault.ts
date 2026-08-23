@@ -173,8 +173,10 @@ export class FileCredentialVaultPersistence implements CredentialVaultPersistenc
     if (!paths) return null;
     await this.recover(paths.directory, paths.target);
     let file: Awaited<ReturnType<typeof open>> | null = null;
+    let observedTarget = false;
     try {
       const before = await lstat(paths.target);
+      observedTarget = true;
       if (!before.isFile() || before.isSymbolicLink()) {
         throw new CredentialVaultError(
           "storage-corrupt",
@@ -190,6 +192,9 @@ export class FileCredentialVaultPersistence implements CredentialVaultPersistenc
         !metadata.isFile()
         || metadata.dev !== before.dev
         || metadata.ino !== before.ino
+        || metadata.size !== before.size
+        || metadata.mtimeMs !== before.mtimeMs
+        || metadata.ctimeMs !== before.ctimeMs
         || metadata.size > MAX_CREDENTIAL_VAULT_BYTES
       ) {
         throw new CredentialVaultError(
@@ -198,8 +203,31 @@ export class FileCredentialVaultPersistence implements CredentialVaultPersistenc
         );
       }
       const bytes = Buffer.alloc(metadata.size);
-      const { bytesRead } = await file.read(bytes, 0, bytes.length, 0);
-      if (bytesRead !== metadata.size) {
+      let offset = 0;
+      while (offset < bytes.length) {
+        const { bytesRead } = await file.read(
+          bytes,
+          offset,
+          bytes.length - offset,
+          offset,
+        );
+        if (bytesRead === 0) {
+          throw new CredentialVaultError(
+            "storage-corrupt",
+            "The secure credential vault is invalid.",
+          );
+        }
+        offset += bytesRead;
+      }
+      const after = await file.stat();
+      if (
+        !after.isFile()
+        || after.dev !== metadata.dev
+        || after.ino !== metadata.ino
+        || after.size !== metadata.size
+        || after.mtimeMs !== metadata.mtimeMs
+        || after.ctimeMs !== metadata.ctimeMs
+      ) {
         throw new CredentialVaultError(
           "storage-corrupt",
           "The secure credential vault is invalid.",
@@ -207,7 +235,13 @@ export class FileCredentialVaultPersistence implements CredentialVaultPersistenc
       }
       return bytes.toString("utf8");
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        if (!observedTarget) return null;
+        throw new CredentialVaultError(
+          "storage-corrupt",
+          "The secure credential vault changed while it was being read.",
+        );
+      }
       if (error instanceof CredentialVaultError) throw error;
       throw new CredentialVaultError(
         "persistence-failed",

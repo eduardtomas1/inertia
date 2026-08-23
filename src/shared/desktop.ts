@@ -29,6 +29,7 @@ export interface DatabaseRecoveryStartupNotice {
   outcome: "restored" | "created-empty";
   trigger: "primary-missing" | "primary-corrupt";
   preservedCorruptPrimary: boolean;
+  preservedDatabaseFamilyMembers: number;
   invalidBackupsSkipped: number;
   unsupportedBackupsSkipped: number;
 }

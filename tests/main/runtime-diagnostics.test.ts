@@ -76,6 +76,43 @@ describe("runtime diagnostics", () => {
     expect(sanitized).not.toContain("\u0000");
   });
 
+  it("exposes only classified detached-draft recovery diagnostics", () => {
+    const root = fixture();
+    const diagnostics = new RuntimeDiagnostics(runtimeDiagnosticsDirectory(root));
+    diagnostics.record("detached-draft.recovery", {
+      reason: "invalid-json",
+      outcome: "recovered",
+      evidencePreserved: true,
+      draft: "private draft text",
+      path: "/Users/alice/private/detached-chat-pending-drafts.json",
+      error: "raw filesystem detail",
+      message: "message containing another private detached draft",
+      phase: "ready",
+      generation: 42,
+      restartScheduled: true,
+    });
+
+    const report = diagnostics.supportReport({
+      version: "0.0.41",
+      platform: "darwin",
+      architecture: "arm64",
+      runtime: null,
+    });
+
+    expect(report.text).toContain("detached-draft.recovery");
+    expect(report.text).toContain("reason=invalid-json");
+    expect(report.text).toContain("outcome=recovered");
+    expect(report.text).toContain("evidence=preserved");
+    expect(report.text).not.toContain("private draft text");
+    expect(report.text).not.toContain("alice");
+    expect(report.text).not.toContain("pending-drafts");
+    expect(report.text).not.toContain("raw filesystem detail");
+    expect(report.text).not.toContain("another private detached draft");
+    expect(report.text).not.toContain("phase=ready");
+    expect(report.text).not.toContain("generation=42");
+    expect(report.text).not.toContain("scheduled=yes");
+  });
+
   it("rotates within fixed file and byte bounds and removes expired generations", () => {
     const root = fixture();
     const directory = runtimeDiagnosticsDirectory(root);

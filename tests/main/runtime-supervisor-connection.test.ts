@@ -23,6 +23,7 @@ describe("runtime supervisor connection", () => {
         trigger: "primary-corrupt",
         restoredBackup: "backup.sqlite",
         preservedCorruptPrimary: true,
+        preservedDatabaseFamilyMembers: 1,
         invalidBackupsSkipped: 0,
         unsupportedBackupsSkipped: 0,
       },

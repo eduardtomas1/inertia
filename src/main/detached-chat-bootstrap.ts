@@ -8,6 +8,7 @@ import {
 } from "electron";
 
 import { DetachedChatMain } from "./detached-chat-main.js";
+import type { DetachedChatDraftStoreDiagnostic } from "./detached-chat-draft-store.js";
 import { hardenDesktopSession } from "./preview-broker.js";
 
 export interface DetachedChatBootstrapOptions {
@@ -16,6 +17,9 @@ export interface DetachedChatBootstrapOptions {
   userDataDirectory: string;
   iconPath: string;
   backgroundColor: string;
+  onDraftStoreDiagnostic?: (
+    diagnostic: DetachedChatDraftStoreDiagnostic,
+  ) => void;
   registerRendererProtocol(
     session: Electron.Session,
     conversationId: string,
@@ -47,6 +51,7 @@ export function createDetachedChatMain(
     ),
     iconPath: options.iconPath,
     backgroundColor: options.backgroundColor,
+    onDraftStoreDiagnostic: options.onDraftStoreDiagnostic,
     onDock: options.onDock,
   });
 }

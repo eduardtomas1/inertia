@@ -125,6 +125,7 @@ describe("useInertiaConnection", () => {
       outcome: "created-empty" as const,
       trigger: "primary-corrupt" as const,
       preservedCorruptPrimary: true,
+      preservedDatabaseFamilyMembers: 1,
       invalidBackupsSkipped: 1,
       unsupportedBackupsSkipped: 0,
     };

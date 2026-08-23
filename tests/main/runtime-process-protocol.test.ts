@@ -543,11 +543,26 @@ describe("runtime process protocol", () => {
         trigger: "primary-corrupt",
         restoredBackup: "inertia-20260101T000000000Z.sqlite",
         preservedCorruptPrimary: true,
+        preservedDatabaseFamilyMembers: 1,
         invalidBackupsSkipped: 1,
         unsupportedBackupsSkipped: 0,
       },
     } as const;
     expect(parseRuntimeWorkerEvent(recoveredReady)).toEqual(recoveredReady);
+    const orphanedFamilyReady = {
+      ...recoveredReady,
+      databaseRecovery: {
+        ...recoveredReady.databaseRecovery,
+        outcome: "created-empty",
+        trigger: "primary-missing",
+        restoredBackup: null,
+        preservedCorruptPrimary: false,
+        preservedDatabaseFamilyMembers: 2,
+        invalidBackupsSkipped: 0,
+      },
+    } as const;
+    expect(parseRuntimeWorkerEvent(orphanedFamilyReady))
+      .toEqual(orphanedFamilyReady);
     expect(parseRuntimeWorkerEvent({
       ...recoveredReady,
       databaseRecovery: {

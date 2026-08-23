@@ -4,12 +4,133 @@ import { win32 } from "node:path";
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_OUTPUT_LIMIT = 64 * 1024;
 const CLEANUP_TIMEOUT_MS = 2_000;
+const PROCESS_TABLE_TIMEOUT_MS = 500;
+const PROCESS_TABLE_OUTPUT_LIMIT = 1024 * 1024;
+const PROCESS_GROUP_DISCOVERY_PASSES = 3;
 
 function inheritedWindowsSystemRoot(environment = process.env) {
   const entry = Object.entries(environment).find(([name]) =>
     ["systemroot", "windir"].includes(name.toLowerCase()));
   const candidate = entry?.[1]?.trim();
   return candidate && win32.isAbsolute(candidate) ? win32.normalize(candidate) : null;
+}
+
+function readPosixProcessTable() {
+  const result = spawnSync(
+    "/bin/ps",
+    ["-axo", "pid=,ppid=,pgid="],
+    {
+      encoding: "utf8",
+      env: {},
+      maxBuffer: PROCESS_TABLE_OUTPUT_LIMIT,
+      shell: false,
+      timeout: PROCESS_TABLE_TIMEOUT_MS,
+    },
+  );
+  if (result.error || result.status !== 0) return null;
+  const processes = [];
+  for (const line of result.stdout.split("\n")) {
+    const [pidText, parentPidText, groupPidText] = line.trim().split(/\s+/u);
+    const pid = Number(pidText);
+    const parentPid = Number(parentPidText);
+    const groupPid = Number(groupPidText);
+    if ([pid, parentPid, groupPid].every(Number.isSafeInteger)) {
+      processes.push({ groupPid, parentPid, pid });
+    }
+  }
+  return processes;
+}
+
+function posixDescendants(rootPid, processes) {
+  const descendantPids = new Set([rootPid]);
+  let added = true;
+  while (added) {
+    added = false;
+    for (const processEntry of processes) {
+      if (
+        !descendantPids.has(processEntry.pid)
+        && descendantPids.has(processEntry.parentPid)
+      ) {
+        descendantPids.add(processEntry.pid);
+        added = true;
+      }
+    }
+  }
+  descendantPids.delete(rootPid);
+  return processes.filter(({ pid }) => descendantPids.has(pid));
+}
+
+function signalProcess(target, signal, missingIsSuccess = true) {
+  try {
+    process.kill(target, signal);
+    return true;
+  } catch (error) {
+    return missingIsSuccess
+      && Boolean(error && typeof error === "object" && error.code === "ESRCH");
+  }
+}
+
+function forceTerminatePosixProcessTree(pid) {
+  // Freeze the owned helper group before inspecting descendants so it cannot
+  // create another separately grouped PTY between discovery and termination.
+  const helperStopped = signalProcess(-pid, "SIGSTOP", false);
+  if (!helperStopped) {
+    signalProcess(-pid, "SIGKILL");
+    return false;
+  }
+
+  const ownedGroups = new Set();
+  const individualPids = new Set();
+  let completeTreeSignaled = true;
+  let discoveryStable = false;
+  for (let pass = 0; pass < PROCESS_GROUP_DISCOVERY_PASSES; pass += 1) {
+    const processes = readPosixProcessTable();
+    if (!processes) {
+      completeTreeSignaled = false;
+      break;
+    }
+    const descendants = posixDescendants(pid, processes);
+    const descendantPids = new Set(descendants.map(({ pid: descendantPid }) => descendantPid));
+    const newGroups = [...new Set(
+      descendants
+        .map(({ groupPid }) => groupPid)
+        .filter((groupPid) => (
+          groupPid > 1
+          && groupPid !== pid
+          && descendantPids.has(groupPid)
+          && !ownedGroups.has(groupPid)
+        )),
+    )];
+    const newIndividuals = descendants
+      .filter(({ groupPid, pid: descendantPid }) => (
+        groupPid !== pid
+        && !ownedGroups.has(groupPid)
+        && !newGroups.includes(groupPid)
+        && !individualPids.has(descendantPid)
+      ))
+      .map(({ pid: descendantPid }) => descendantPid);
+    if (newGroups.length === 0 && newIndividuals.length === 0) {
+      discoveryStable = true;
+      break;
+    }
+    for (const groupPid of newGroups) {
+      ownedGroups.add(groupPid);
+      completeTreeSignaled = signalProcess(-groupPid, "SIGSTOP") && completeTreeSignaled;
+    }
+    for (const descendantPid of newIndividuals) {
+      individualPids.add(descendantPid);
+      completeTreeSignaled = signalProcess(descendantPid, "SIGSTOP") && completeTreeSignaled;
+    }
+  }
+  completeTreeSignaled = discoveryStable && completeTreeSignaled;
+  for (const groupPid of ownedGroups) {
+    completeTreeSignaled = signalProcess(-groupPid, "SIGKILL") && completeTreeSignaled;
+  }
+  for (const descendantPid of individualPids) {
+    completeTreeSignaled = signalProcess(descendantPid, "SIGKILL") && completeTreeSignaled;
+  }
+  completeTreeSignaled = signalProcess(-pid, "SIGKILL") && completeTreeSignaled;
+  return completeTreeSignaled;
 }
 
 function forceTerminateProcessTree(child) {
@@ -37,12 +158,7 @@ function forceTerminateProcessTree(child) {
       }
     }
   } else {
-    try {
-      process.kill(-pid, "SIGKILL");
-      return true;
-    } catch {
-      // The process group may already have exited or failed to form.
-    }
+    return forceTerminatePosixProcessTree(pid);
   }
   try { child.kill("SIGKILL"); } catch { /* The direct child may already be gone. */ }
   return false;

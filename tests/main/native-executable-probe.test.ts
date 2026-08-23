@@ -40,7 +40,7 @@ function forceCleanup(pid: number): void {
   try { process.kill(pid, "SIGKILL"); } catch { /* The process may already be gone. */ }
 }
 
-test("enforces the native executable deadline on its complete process tree", async () => {
+test("enforces the native executable deadline across separate POSIX process groups", async () => {
   const temporaryDirectory = await mkdtemp(join(tmpdir(), "inertia-native-probe-"));
   const pidFile = join(temporaryDirectory, "descendant.pid");
   let descendantPid = 0;
@@ -60,9 +60,28 @@ test("enforces the native executable deadline on its complete process tree", asy
       environment: { INERTIA_PROBE_PID_FILE: pidFile },
       timeoutMs: 1_000,
     });
-    await expect(probe).rejects.toThrow("exceeded its 1000ms deadline");
+    const deadlineFailure = expect(probe).rejects.toThrow("exceeded its 1000ms deadline");
+    if (process.platform !== "win32") {
+      const pidFileDeadline = Date.now() + 750;
+      while (!descendantPid && Date.now() < pidFileDeadline) {
+        try {
+          descendantPid = Number(await readFile(pidFile, "utf8"));
+        } catch {
+          await new Promise((resolveWait) => setTimeout(resolveWait, 10));
+        }
+      }
+      expect(Number.isSafeInteger(descendantPid)).toBe(true);
+      const group = spawnSync(
+        "/bin/ps",
+        ["-o", "pgid=", "-p", String(descendantPid)],
+        { encoding: "utf8", shell: false, timeout: 1_000 },
+      );
+      expect(group.status).toBe(0);
+      expect(Number(group.stdout.trim())).toBe(descendantPid);
+    }
+    await deadlineFailure;
     expect(Date.now() - startedAt).toBeLessThan(5_000);
-    descendantPid = Number(await readFile(pidFile, "utf8"));
+    descendantPid ||= Number(await readFile(pidFile, "utf8"));
     expect(Number.isSafeInteger(descendantPid)).toBe(true);
     await waitForExit(descendantPid);
   } finally {
@@ -70,3 +89,51 @@ test("enforces the native executable deadline on its complete process tree", asy
     await rm(temporaryDirectory, { force: true, recursive: true });
   }
 });
+
+test.skipIf(process.platform === "win32")(
+  "terminates the separately grouped native PTY command on timeout",
+  async () => {
+    const temporaryDirectory = await mkdtemp(join(tmpdir(), "inertia-native-pty-probe-"));
+    const pidFile = join(temporaryDirectory, "pty.pid");
+    let ptyPid = 0;
+    try {
+      const moduleUrl = pathToFileURL(join(root, "scripts", "native-executable-probe.mjs")).href;
+      const { probeNativeExecutable } = await import(moduleUrl) as {
+        probeNativeExecutable: (
+          command: string,
+          args: string[],
+          options: { environment: NodeJS.ProcessEnv; timeoutMs: number },
+        ) => Promise<unknown>;
+      };
+      const probe = probeNativeExecutable(process.execPath, [
+        join(root, "scripts", "native-pty-probe.mjs"),
+        join(import.meta.dirname, "..", "fixtures", "native-pty-probe-hang.sh"),
+      ], {
+        environment: { INERTIA_PTY_PID_FILE: pidFile },
+        timeoutMs: 1_000,
+      });
+      const deadlineFailure = expect(probe).rejects.toThrow("exceeded its 1000ms deadline");
+      const pidFileDeadline = Date.now() + 750;
+      while (!ptyPid && Date.now() < pidFileDeadline) {
+        try {
+          ptyPid = Number(await readFile(pidFile, "utf8"));
+        } catch {
+          await new Promise((resolveWait) => setTimeout(resolveWait, 10));
+        }
+      }
+      expect(Number.isSafeInteger(ptyPid)).toBe(true);
+      const group = spawnSync(
+        "/bin/ps",
+        ["-o", "pgid=", "-p", String(ptyPid)],
+        { encoding: "utf8", shell: false, timeout: 1_000 },
+      );
+      expect(group.status).toBe(0);
+      expect(Number(group.stdout.trim())).toBe(ptyPid);
+      await deadlineFailure;
+      await waitForExit(ptyPid);
+    } finally {
+      forceCleanup(ptyPid);
+      await rm(temporaryDirectory, { force: true, recursive: true });
+    }
+  },
+);

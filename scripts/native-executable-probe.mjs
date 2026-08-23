@@ -8,6 +8,9 @@ const PROCESS_TABLE_TIMEOUT_MS = 500;
 const PROCESS_TABLE_OUTPUT_LIMIT = 1024 * 1024;
 const PROCESS_GROUP_DISCOVERY_PASSES = 3;
 const POSIX_OWNERSHIP_TOKEN_PASSES = 3;
+const POSIX_OWNERSHIP_RECOVERY_PASSES = 3;
+const POSIX_OWNERSHIP_RECOVERY_DELAY_MS = 25;
+const POSIX_START_MARKER = "inertia-native-probe-start\n";
 const POSIX_LSOF_PATH = process.platform === "darwin" ? "/usr/sbin/lsof" : "/usr/bin/lsof";
 
 function inheritedWindowsSystemRoot(environment = process.env) {
@@ -60,7 +63,7 @@ function extendPosixOwnership(ownedPids, processes) {
   return processes.filter(({ pid }) => ownedPids.has(pid));
 }
 
-function readLsofRecords(args, diagnostics) {
+function readLsofRecords(args) {
   const result = spawnSync(
     POSIX_LSOF_PATH,
     [
@@ -79,14 +82,6 @@ function readLsofRecords(args, diagnostics) {
       timeout: PROCESS_TABLE_TIMEOUT_MS,
     },
   );
-  diagnostics?.push({
-    args,
-    error: result.error?.message ?? null,
-    signal: result.signal,
-    status: result.status,
-    stderr: result.stderr?.slice(0, 4_096) ?? "",
-    stdout: result.stdout?.slice(0, 8_192) ?? "",
-  });
   if (result.error || result.status !== 0) return null;
   return parseLsofRecords(result.stdout);
 }
@@ -142,7 +137,6 @@ export function readPosixProbePipeIdentities(
   child,
   readRecords = readLsofRecords,
   platform = process.platform,
-  diagnostics,
 ) {
   const descriptors = [
     childPipeDescriptor(child.stdout),
@@ -154,7 +148,7 @@ export function readPosixProbePipeIdentities(
       "-a",
       "-p", String(process.pid),
       "-d", descriptors.join(","),
-    ], diagnostics);
+    ]);
     if (!records) continue;
     const identities = new Set(
       records.map((record) => lsofPipeIdentity(record, platform)).filter(Boolean),
@@ -194,39 +188,40 @@ function signalProcess(target, signal, missingIsSuccess = true) {
   }
 }
 
-function createPosixProcessTracker(rootPid, child) {
+export function createPosixProcessTracker(rootPid, child, dependencies = {}) {
   // The parent-side pipe handles outlive the provider root. Their kernel
   // identities therefore provide an ownership token for a detached child that
   // inherits stdout or stderr and reparents before any process-table snapshot.
-  const diagnostics = [];
-  const pipeToken = readPosixProbePipeIdentities(
-    child,
-    readLsofRecords,
-    process.platform,
-    diagnostics,
-  );
-  if (!pipeToken) {
-    process.stderr.write(
-      `Native executable ownership initialization failed: ${JSON.stringify({
-        lsofPath: POSIX_LSOF_PATH,
-        platform: process.platform,
-        diagnostics,
-      })}\n`,
-    );
-    return null;
-  }
-  const ownedPids = new Set([rootPid, ...pipeToken.ownerPids]);
+  const readPipeToken = dependencies.readPipeToken ?? readPosixProbePipeIdentities;
+  const readPipeOwners = dependencies.readPipeOwners ?? readPosixProbePipeOwners;
+  const readProcesses = dependencies.readProcesses ?? readPosixProcessTable;
+  let pipeToken = readPipeToken(child);
+  const ownedPids = new Set([rootPid]);
+  const applyPipeToken = () => {
+    for (const ownerPid of pipeToken?.ownerPids ?? []) ownedPids.add(ownerPid);
+  };
+  applyPipeToken();
+  const recover = () => {
+    if (!pipeToken) {
+      pipeToken = readPipeToken(child);
+      applyPipeToken();
+    }
+    return pipeToken !== null;
+  };
   const refresh = () => {
-    const pipeOwners = readPosixProbePipeOwners(pipeToken.identities);
+    if (!recover()) return null;
+    const pipeOwners = readPipeOwners(pipeToken.identities);
     if (!pipeOwners) return null;
     for (const pipeOwner of pipeOwners) ownedPids.add(pipeOwner);
-    const processes = readPosixProcessTable();
+    const processes = readProcesses();
     if (processes) extendPosixOwnership(ownedPids, processes);
     return processes ? { pipeOwners, processes } : null;
   };
   return {
+    get confirmed() { return pipeToken !== null; },
     dispose() {},
     ownedPids,
+    recover,
     refresh,
   };
 }
@@ -332,20 +327,31 @@ function forceTerminateProcessTree(child, tracker) {
 }
 
 export function probeNativeExecutable(command, args, options = {}) {
+  return probeNativeExecutableWithDependencies(command, args, options);
+}
+
+export function probeNativeExecutableWithDependencies(
+  command,
+  args,
+  options = {},
+  dependencies = {},
+) {
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const outputLimit = options.outputLimit ?? DEFAULT_OUTPUT_LIMIT;
   return new Promise((resolveProbe, rejectProbe) => {
     const startedAt = Date.now();
+    const startAfterOwnership = process.platform !== "win32"
+      && options.startAfterOwnership === true;
     const child = spawn(command, args, {
       detached: process.platform !== "win32",
       env: options.environment ?? {},
       shell: false,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: [startAfterOwnership ? "pipe" : "ignore", "pipe", "pipe"],
       windowsHide: true,
     });
     const processTracker = process.platform === "win32" || !child.pid
       ? null
-      : createPosixProcessTracker(child.pid, child);
+      : createPosixProcessTracker(child.pid, child, dependencies.processTracker);
     let stdout = "";
     let stderr = "";
     let outputBytes = 0;
@@ -353,18 +359,14 @@ export function probeNativeExecutable(command, args, options = {}) {
     let settled = false;
     let cleanupTimer;
     let deadlineTimer;
-
-    if (process.platform !== "win32" && child.pid && !processTracker) {
-      signalProcess(-child.pid, "SIGKILL");
-      rejectProbe(new Error("The native executable process ownership token could not be initialized."));
-      return;
-    }
+    let ownershipRecoveryTimer;
 
     const settle = (callback) => {
       if (settled) return;
       settled = true;
       clearTimeout(deadlineTimer);
       clearTimeout(cleanupTimer);
+      clearTimeout(ownershipRecoveryTimer);
       processTracker?.dispose();
       callback();
     };
@@ -399,10 +401,18 @@ export function probeNativeExecutable(command, args, options = {}) {
     };
     child.stdout.on("data", capture("stdout"));
     child.stderr.on("data", capture("stderr"));
+    child.stdin?.once("error", (error) => stopTree(error));
     child.once("error", (error) => settle(() => rejectProbe(error)));
     child.once("close", (status, signal) => {
       if (failure) {
         settle(() => rejectProbe(failure));
+        return;
+      }
+      if (processTracker && !processTracker.confirmed) {
+        forceTerminateProcessTree(child, processTracker);
+        settle(() => rejectProbe(new Error(
+          "The native executable exited with unconfirmed process ownership.",
+        )));
         return;
       }
       if (processTracker && processTracker.ownedPids.size > 1) {
@@ -419,5 +429,27 @@ export function probeNativeExecutable(command, args, options = {}) {
     deadlineTimer = setTimeout(() => {
       stopTree(new Error(`The native executable exceeded its ${timeoutMs}ms deadline.`));
     }, Math.max(0, timeoutMs - (Date.now() - startedAt)));
+    if (startAfterOwnership) {
+      let recoveryPass = 0;
+      const releaseStartGate = () => {
+        if (failure || settled) return;
+        if (processTracker?.recover()) {
+          child.stdin.end(POSIX_START_MARKER);
+          return;
+        }
+        if (recoveryPass >= POSIX_OWNERSHIP_RECOVERY_PASSES) {
+          stopTree(new Error(
+            "The native executable process ownership token could not be initialized.",
+          ));
+          return;
+        }
+        recoveryPass += 1;
+        ownershipRecoveryTimer = setTimeout(
+          releaseStartGate,
+          POSIX_OWNERSHIP_RECOVERY_DELAY_MS,
+        );
+      };
+      releaseStartGate();
+    }
   });
 }

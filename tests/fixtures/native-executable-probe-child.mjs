@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { closeSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const pidFile = process.env.INERTIA_PROBE_PID_FILE;
@@ -9,12 +9,21 @@ if (!pidFile || !rootPidFile) {
 }
 writeFileSync(rootPidFile, String(process.pid));
 
+const redirectsDescendant = process.env.INERTIA_PROBE_REDIRECT_DESCENDANT === "1";
+if (redirectsDescendant) {
+  for (const descriptor of [1, 2]) {
+    try { closeSync(descriptor); } catch { /* The descriptor may already be closed. */ }
+  }
+}
+
 const descendant = spawn(process.execPath, [
   join(import.meta.dirname, "native-executable-probe-descendant.mjs"),
 ], {
   detached: process.platform !== "win32",
   env: {},
-  stdio: ["ignore", "inherit", "inherit"],
+  stdio: redirectsDescendant
+    ? ["ignore", "ignore", "ignore"]
+    : ["ignore", "inherit", "inherit"],
   windowsHide: true,
 });
 if (!descendant.pid) throw new Error("The probe descendant did not start.");

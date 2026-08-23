@@ -120,6 +120,69 @@ test("retries a raced Linux endpoint snapshot and fails closed without peer data
   expect(reads).toBe(3);
 });
 
+test("reacquires a missing ownership token during tracker refresh", async () => {
+  const moduleUrl = pathToFileURL(join(root, "scripts", "native-executable-probe.mjs")).href;
+  const { createPosixProcessTracker } = await import(moduleUrl) as {
+    createPosixProcessTracker: (
+      rootPid: number,
+      child: object,
+      dependencies: {
+        readPipeOwners: (identities: Set<string>) => Set<number> | null;
+        readPipeToken: () => { identities: Set<string>; ownerPids: Set<number> } | null;
+        readProcesses: () => Array<{ groupPid: number; parentPid: number; pid: number }> | null;
+      },
+    ) => {
+      confirmed: boolean;
+      ownedPids: Set<number>;
+      refresh: () => object | null;
+    };
+  };
+  let tokenReads = 0;
+  const identity = "socket:18736:18737";
+  const tracker = createPosixProcessTracker(4100, {}, {
+    readPipeOwners: (identities) => identities.has(identity) ? new Set([4101]) : null,
+    readPipeToken: () => {
+      tokenReads += 1;
+      return tokenReads === 1
+        ? null
+        : { identities: new Set([identity]), ownerPids: new Set([4101]) };
+    },
+    readProcesses: () => [
+      { groupPid: 4100, parentPid: 1, pid: 4100 },
+      { groupPid: 4101, parentPid: 1, pid: 4101 },
+    ],
+  });
+
+  expect(tracker.confirmed).toBe(false);
+  expect(tracker.refresh()).not.toBeNull();
+  expect(tracker.confirmed).toBe(true);
+  expect(tracker.ownedPids).toEqual(new Set([4100, 4101]));
+  expect(tokenReads).toBe(2);
+});
+
+test("keeps a permanently missing ownership token unconfirmed", async () => {
+  const moduleUrl = pathToFileURL(join(root, "scripts", "native-executable-probe.mjs")).href;
+  const { createPosixProcessTracker } = await import(moduleUrl) as {
+    createPosixProcessTracker: (
+      rootPid: number,
+      child: object,
+      dependencies: {
+        readPipeOwners: () => Set<number> | null;
+        readPipeToken: () => null;
+        readProcesses: () => [] | null;
+      },
+    ) => { confirmed: boolean; refresh: () => object | null };
+  };
+  const tracker = createPosixProcessTracker(4200, {}, {
+    readPipeOwners: () => new Set(),
+    readPipeToken: () => null,
+    readProcesses: () => [],
+  });
+
+  expect(tracker.refresh()).toBeNull();
+  expect(tracker.confirmed).toBe(false);
+});
+
 function signaledProcessExists(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -169,6 +232,7 @@ async function waitForTermination(pid: number): Promise<string | null> {
 }
 
 function forceCleanup(pid: number): void {
+  if (!Number.isSafeInteger(pid) || pid <= 1) return;
   if (!processExists(pid)) return;
   if (process.platform === "win32") {
     const systemRoot = Object.entries(process.env).find(([name]) =>
@@ -250,6 +314,66 @@ test.skipIf(process.platform === "win32")(
   },
 );
 
+test.skipIf(process.platform === "win32")(
+  "rejects a detached descendant that closes the ownership descriptors",
+  async () => {
+    const temporaryDirectory = await mkdtemp(join(tmpdir(), "inertia-native-probe-escape-"));
+    const pidFile = join(temporaryDirectory, "descendant.pid");
+    const rootPidFile = join(temporaryDirectory, "root.pid");
+    let descendantPid = 0;
+    try {
+      const moduleUrl = pathToFileURL(join(root, "scripts", "native-executable-probe.mjs")).href;
+      const { probeNativeExecutableWithDependencies } = await import(moduleUrl) as {
+        probeNativeExecutableWithDependencies: (
+          command: string,
+          args: string[],
+          options: { environment: NodeJS.ProcessEnv; timeoutMs: number },
+          dependencies: {
+            processTracker: {
+              readPipeOwners: () => Set<number>;
+              readPipeToken: () => null;
+              readProcesses: () => [];
+            };
+          },
+        ) => Promise<unknown>;
+      };
+      const probe = probeNativeExecutableWithDependencies(process.execPath, [
+        join(import.meta.dirname, "..", "fixtures", "native-executable-probe-child.mjs"),
+      ], {
+        environment: {
+          INERTIA_PROBE_PID_FILE: pidFile,
+          INERTIA_PROBE_REDIRECT_DESCENDANT: "1",
+          INERTIA_PROBE_ROOT_PID_FILE: rootPidFile,
+        },
+        timeoutMs: 1_000,
+      }, {
+        processTracker: {
+          readPipeOwners: () => new Set(),
+          readPipeToken: () => null,
+          readProcesses: () => [],
+        },
+      });
+      const unconfirmedFailure = expect(probe).rejects.toThrow(
+        "exited with unconfirmed process ownership",
+      );
+      const pidFileDeadline = Date.now() + 750;
+      while (!descendantPid && Date.now() < pidFileDeadline) {
+        try {
+          descendantPid = Number(await readFile(pidFile, "utf8"));
+        } catch {
+          await new Promise((resolveWait) => setTimeout(resolveWait, 10));
+        }
+      }
+      expect(Number.isSafeInteger(descendantPid)).toBe(true);
+      expect(processExists(descendantPid)).toBe(true);
+      await unconfirmedFailure;
+    } finally {
+      forceCleanup(descendantPid);
+      await rm(temporaryDirectory, { force: true, recursive: true });
+    }
+  },
+);
+
 test.skipIf(process.platform !== "win32")(
   "preserves taskkill process-tree cleanup for a live Windows root",
   async () => {
@@ -306,14 +430,22 @@ test.skipIf(process.platform === "win32")(
         probeNativeExecutable: (
           command: string,
           args: string[],
-          options: { environment: NodeJS.ProcessEnv; timeoutMs: number },
+          options: {
+            environment: NodeJS.ProcessEnv;
+            startAfterOwnership: boolean;
+            timeoutMs: number;
+          },
         ) => Promise<unknown>;
       };
       const probe = probeNativeExecutable(process.execPath, [
         join(root, "scripts", "native-pty-probe.mjs"),
         join(import.meta.dirname, "..", "fixtures", "native-pty-probe-hang.sh"),
       ], {
-        environment: { INERTIA_PTY_PID_FILE: pidFile },
+        environment: {
+          INERTIA_NATIVE_PTY_START_GATE: "1",
+          INERTIA_PTY_PID_FILE: pidFile,
+        },
+        startAfterOwnership: true,
         timeoutMs: 1_000,
       });
       const deadlineFailure = expect(probe).rejects.toThrow("exceeded its 1000ms deadline");

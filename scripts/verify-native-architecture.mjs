@@ -81,7 +81,12 @@ const ptyExecutable = process.platform === "win32"
 const ptyProbe = await probeNativeExecutable(
   process.execPath,
   [join(root, "scripts", "native-pty-probe.mjs"), ptyExecutable],
-  { environment: windowsPtyEnvironment },
+  {
+    environment: process.platform === "win32"
+      ? windowsPtyEnvironment
+      : { INERTIA_NATIVE_PTY_START_GATE: "1" },
+    startAfterOwnership: process.platform !== "win32",
+  },
 );
 if (ptyProbe.status !== 0 || !ptyProbe.stdout.includes(ptySuccessMarker)) {
   throw new Error(

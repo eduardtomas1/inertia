@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { accessSync, constants, readFileSync, readlinkSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, win32 } from "node:path";
@@ -8,6 +8,117 @@ import { pathToFileURL } from "node:url";
 import { expect, test } from "vitest";
 
 const root = join(import.meta.dirname, "..", "..");
+
+test("normalizes Linux lsof socket endpoints without changing pipe or macOS identities", async () => {
+  const moduleUrl = pathToFileURL(join(root, "scripts", "native-executable-probe.mjs")).href;
+  const { lsofPipeIdentity } = await import(moduleUrl) as {
+    lsofPipeIdentity: (
+      record: { device: string; inode: string; name: string },
+      platform: NodeJS.Platform,
+    ) => string | null;
+  };
+  const parentSocket = {
+    device: "0x0000000000000000",
+    inode: "167904",
+    name: "type=STREAM ->INO=167905 30224,node,1u",
+  };
+  const childSocket = {
+    device: "0x0000000000000000",
+    inode: "167905",
+    name: "type=STREAM ->INO=167904 30183,node,22u",
+  };
+
+  expect(lsofPipeIdentity(parentSocket, "linux")).toBe("socket:167904:167905");
+  expect(lsofPipeIdentity(childSocket, "linux")).toBe("socket:167904:167905");
+  expect(lsofPipeIdentity({
+    device: "",
+    inode: "9001",
+    name: "pipe",
+  }, "linux")).toBe("inode::9001");
+  expect(lsofPipeIdentity({
+    device: "0x0",
+    inode: "167904",
+    name: "type=STREAM",
+  }, "linux")).toBeNull();
+  expect(lsofPipeIdentity(parentSocket, "darwin")).toBe(
+    "inode:0x0000000000000000:167904",
+  );
+});
+
+test("bounds parsed lsof ownership output", async () => {
+  const moduleUrl = pathToFileURL(join(root, "scripts", "native-executable-probe.mjs")).href;
+  const { parseLsofRecords } = await import(moduleUrl) as {
+    parseLsofRecords: (output: string) => unknown[] | null;
+  };
+
+  expect(parseLsofRecords(
+    "p30183\nf22\nd0x0000000000000000\ni167904\n"
+      + "ntype=STREAM ->INO=167905 30224,node,1u\n",
+  )).toEqual([{
+    device: "0x0000000000000000",
+    inode: "167904",
+    name: "type=STREAM ->INO=167905 30224,node,1u",
+    pid: 30183,
+  }]);
+  expect(parseLsofRecords("x".repeat(1024 * 1024 + 1))).toBeNull();
+});
+
+test("retries a raced Linux endpoint snapshot and fails closed without peer data", async () => {
+  const moduleUrl = pathToFileURL(join(root, "scripts", "native-executable-probe.mjs")).href;
+  const { readPosixProbePipeIdentities } = await import(moduleUrl) as {
+    readPosixProbePipeIdentities: (
+      child: object,
+      readRecords: () => Array<{ device: string; inode: string; name: string; pid: number }>,
+      platform: NodeJS.Platform,
+    ) => { identities: Set<string>; ownerPids: Set<number> } | null;
+  };
+  const child = {
+    stderr: { _handle: { fd: 20 } },
+    stdout: { _handle: { fd: 18 } },
+  };
+  const missingEndpoints = [
+    { device: "0x0", inode: "167904", name: "type=STREAM", pid: 30183 },
+    { device: "0x0", inode: "167906", name: "type=STREAM", pid: 30183 },
+  ];
+  const connectedEndpoints = [
+    {
+      device: "0x0",
+      inode: "167904",
+      name: "type=STREAM ->INO=167905 30224,node,1u",
+      pid: 30183,
+    },
+    {
+      device: "0x0",
+      inode: "167906",
+      name: "type=STREAM ->INO=167907 30224,node,2u",
+      pid: 30183,
+    },
+  ];
+  let reads = 0;
+  const token = readPosixProbePipeIdentities(
+    child,
+    () => (reads++ === 0 ? missingEndpoints : connectedEndpoints),
+    "linux",
+  );
+
+  expect(reads).toBe(2);
+  expect(token?.identities).toEqual(new Set([
+    "socket:167904:167905",
+    "socket:167906:167907",
+  ]));
+  expect(token?.ownerPids).toEqual(new Set([30224]));
+
+  reads = 0;
+  expect(readPosixProbePipeIdentities(
+    child,
+    () => {
+      reads += 1;
+      return missingEndpoints;
+    },
+    "linux",
+  )).toBeNull();
+  expect(reads).toBe(3);
+});
 
 function signaledProcessExists(pid: number): boolean {
   try {
@@ -44,60 +155,6 @@ function processExists(pid: number): boolean {
   return processState(pid) !== null;
 }
 
-function boundedLsof(args: string[]): Record<string, unknown> {
-  const executable = "/usr/bin/lsof";
-  let executableAvailable = true;
-  try {
-    accessSync(executable, constants.X_OK);
-  } catch {
-    executableAvailable = false;
-  }
-  const result = spawnSync(executable, args, {
-    encoding: "utf8",
-    env: {},
-    maxBuffer: 64 * 1024,
-    shell: false,
-    timeout: 1_000,
-  });
-  return {
-    args,
-    error: result.error?.message ?? null,
-    executableAvailable,
-    signal: result.signal,
-    status: result.status,
-    stderr: result.stderr?.slice(0, 4_096) ?? "",
-    stdout: result.stdout?.slice(0, 8_192) ?? "",
-  };
-}
-
-function linuxProcessObservation(pid: number, state: string | null): Record<string, unknown> {
-  let stat = "";
-  try { stat = readFileSync(`/proc/${pid}/stat`, "utf8"); } catch { /* Report absence below. */ }
-  const commandEnd = stat.lastIndexOf(")");
-  const fields = commandEnd >= 0 ? stat.slice(commandEnd + 2).trim().split(/\s+/u) : [];
-  const descriptorTarget = (descriptor: number): string | null => {
-    try { return readlinkSync(`/proc/${pid}/fd/${descriptor}`, "utf8"); } catch { return null; }
-  };
-  const userId = process.getuid?.();
-  return {
-    fd1: descriptorTarget(1),
-    fd2: descriptorTarget(2),
-    groupPid: Number(fields[2]) || null,
-    lsofChildDescriptors: boundedLsof([
-      "-n", "-P", "-a", "-p", String(pid), "-d", "1,2", "-F", "pfdin",
-    ]),
-    lsofParentDescriptors: boundedLsof([
-      "-n", "-P", "-a", "-p", String(process.pid), "-F", "pfdin",
-    ]),
-    lsofProductionScan: boundedLsof([
-      "-n", "-P", "-a", "-u", String(userId), "-d", "1,2", "-F", "pfdin",
-    ]),
-    parentPid: Number(fields[1]) || null,
-    sessionId: Number(fields[3]) || null,
-    state,
-  };
-}
-
 async function waitForTermination(pid: number): Promise<string | null> {
   const deadline = Date.now() + 5_000;
   let state = processState(pid);
@@ -106,12 +163,7 @@ async function waitForTermination(pid: number): Promise<string | null> {
     state = processState(pid);
   }
   if (state !== null && state !== "X" && state !== "Z") {
-    const observation = process.platform === "linux"
-      ? linuxProcessObservation(pid, state)
-      : { state };
-    throw new Error(
-      `Process ${pid} did not reach a terminal state: ${JSON.stringify(observation)}`,
-    );
+    throw new Error(`Process ${pid} remained in non-terminal state ${state}.`);
   }
   return state;
 }

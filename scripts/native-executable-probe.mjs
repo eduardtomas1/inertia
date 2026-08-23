@@ -7,6 +7,7 @@ const CLEANUP_TIMEOUT_MS = 2_000;
 const PROCESS_TABLE_TIMEOUT_MS = 500;
 const PROCESS_TABLE_OUTPUT_LIMIT = 1024 * 1024;
 const PROCESS_GROUP_DISCOVERY_PASSES = 3;
+const POSIX_OWNERSHIP_TOKEN_PASSES = 3;
 const POSIX_LSOF_PATH = process.platform === "darwin" ? "/usr/sbin/lsof" : "/usr/bin/lsof";
 
 function inheritedWindowsSystemRoot(environment = process.env) {
@@ -62,7 +63,14 @@ function extendPosixOwnership(ownedPids, processes) {
 function readLsofRecords(args) {
   const result = spawnSync(
     POSIX_LSOF_PATH,
-    ["-n", "-P", ...args, "-F", "pfdin"],
+    [
+      "-n",
+      "-P",
+      ...(process.platform === "linux" ? ["-E"] : []),
+      ...args,
+      "-F",
+      "pfdin",
+    ],
     {
       encoding: "utf8",
       env: {},
@@ -72,11 +80,19 @@ function readLsofRecords(args) {
     },
   );
   if (result.error || result.status !== 0) return null;
+  return parseLsofRecords(result.stdout);
+}
+
+export function parseLsofRecords(output) {
+  if (
+    typeof output !== "string"
+    || Buffer.byteLength(output) > PROCESS_TABLE_OUTPUT_LIMIT
+  ) return null;
   const records = [];
   let pid = 0;
   let device = "";
   let inode = "";
-  for (const line of result.stdout.split("\n")) {
+  for (const line of output.split("\n")) {
     const field = line.slice(0, 1);
     const value = line.slice(1);
     if (field === "p") pid = Number(value);
@@ -92,10 +108,21 @@ function readLsofRecords(args) {
   return records;
 }
 
-function lsofPipeIdentity({ device, inode, name }) {
+export function lsofPipeIdentity({ device, inode, name }, platform = process.platform) {
+  if (platform === "linux" && name.startsWith("type=STREAM")) {
+    const peer = /^type=STREAM ->INO=(\d+)(?:\s|$)/u.exec(name)?.[1];
+    if (!inode || !peer) return null;
+    return `socket:${[inode, peer].sort().join(":")}`;
+  }
   if (inode) return `inode:${device}:${inode}`;
   if (!device || !name.startsWith("->")) return null;
   return `endpoints:${[device, name.slice(2)].sort().join(":")}`;
+}
+
+function lsofPipePeerPid({ name }, platform = process.platform) {
+  if (platform !== "linux") return null;
+  const peerPid = Number(/^type=STREAM ->INO=\d+\s+(\d+),/u.exec(name)?.[1]);
+  return Number.isSafeInteger(peerPid) && peerPid > 1 ? peerPid : null;
 }
 
 function childPipeDescriptor(stream) {
@@ -103,20 +130,33 @@ function childPipeDescriptor(stream) {
   return Number.isSafeInteger(descriptor) && descriptor >= 0 ? descriptor : null;
 }
 
-function readPosixProbePipeIdentities(child) {
+export function readPosixProbePipeIdentities(
+  child,
+  readRecords = readLsofRecords,
+  platform = process.platform,
+) {
   const descriptors = [
     childPipeDescriptor(child.stdout),
     childPipeDescriptor(child.stderr),
   ];
   if (descriptors.some((descriptor) => descriptor === null)) return null;
-  const records = readLsofRecords([
-    "-a",
-    "-p", String(process.pid),
-    "-d", descriptors.join(","),
-  ]);
-  if (!records) return null;
-  const identities = new Set(records.map(lsofPipeIdentity).filter(Boolean));
-  return identities.size === descriptors.length ? identities : null;
+  for (let pass = 0; pass < POSIX_OWNERSHIP_TOKEN_PASSES; pass += 1) {
+    const records = readRecords([
+      "-a",
+      "-p", String(process.pid),
+      "-d", descriptors.join(","),
+    ]);
+    if (!records) continue;
+    const identities = new Set(
+      records.map((record) => lsofPipeIdentity(record, platform)).filter(Boolean),
+    );
+    if (identities.size !== descriptors.length) continue;
+    return {
+      identities,
+      ownerPids: new Set(records.map((record) => lsofPipePeerPid(record, platform)).filter(Boolean)),
+    };
+  }
+  return null;
 }
 
 function readPosixProbePipeOwners(pipeIdentities) {
@@ -149,11 +189,11 @@ function createPosixProcessTracker(rootPid, child) {
   // The parent-side pipe handles outlive the provider root. Their kernel
   // identities therefore provide an ownership token for a detached child that
   // inherits stdout or stderr and reparents before any process-table snapshot.
-  const pipeIdentities = readPosixProbePipeIdentities(child);
-  if (!pipeIdentities) return null;
-  const ownedPids = new Set([rootPid]);
+  const pipeToken = readPosixProbePipeIdentities(child);
+  if (!pipeToken) return null;
+  const ownedPids = new Set([rootPid, ...pipeToken.ownerPids]);
   const refresh = () => {
-    const pipeOwners = readPosixProbePipeOwners(pipeIdentities);
+    const pipeOwners = readPosixProbePipeOwners(pipeToken.identities);
     if (!pipeOwners) return null;
     for (const pipeOwner of pipeOwners) ownedPids.add(pipeOwner);
     const processes = readPosixProcessTable();

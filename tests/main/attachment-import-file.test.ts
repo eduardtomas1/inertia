@@ -159,13 +159,15 @@ describe("private staged attachment validation", () => {
       bytes,
       50,
     );
-    const validation = validateAttachmentImportFile(operation);
+    const validation = expect(
+      validateAttachmentImportFile(operation),
+    ).rejects.toMatchObject({ code: "unsafe" });
     await new Promise<void>((resolveWait) => setTimeout(resolveWait, 10));
     const replacement = Buffer.from(bytes);
     replacement[replacement.length - 1] ^= 0x01;
     await writeFile(path, replacement, { mode: 0o600 });
 
-    await expect(validation).rejects.toMatchObject({ code: "unsafe" });
+    await validation;
   });
 
   it("cancels a delayed validation without publishing a receipt", async () => {

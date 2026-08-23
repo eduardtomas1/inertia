@@ -61,13 +61,13 @@ describe("desktop attachment preflight", () => {
 
   it("imports renderer files one at a time instead of retaining the batch", async () => {
     const events: string[] = [];
-    const files = ["first.pdf", "second.pdf", "third.pdf"].map((name) => ({
+    const files = ["first.pdf", "second.pdf", "third.pdf"].map((name, index) => ({
       name,
       size: 1,
       type: "application/pdf",
       arrayBuffer: vi.fn(async () => {
         events.push(`read:${name}`);
-        return new ArrayBuffer(1);
+        return Uint8Array.of(index).buffer;
       }),
     } as unknown as File));
     let activeImports = 0;
@@ -106,12 +106,40 @@ describe("desktop attachment preflight", () => {
     ]);
   });
 
-  it("releases earlier renderer imports after a later validation failure", async () => {
-    const files = ["first.pdf", "unsafe.pdf"].map((name) => ({
+  it("deduplicates byte-identical renderer files without retaining the batch", async () => {
+    const files = ["first.pdf", "renamed.pdf"].map((name) => ({
       name,
       size: 1,
       type: "application/pdf",
-      arrayBuffer: vi.fn(async () => new ArrayBuffer(1)),
+      arrayBuffer: vi.fn(async () => Uint8Array.of(7).buffer),
+    } as unknown as File & { arrayBuffer: ReturnType<typeof vi.fn> }));
+    const importOne = vi.fn(async ({ name }: { name: string }) => [{
+      id: "11111111-1111-4111-8111-111111111111",
+      name,
+      path: "opaque",
+      mimeType: "application/pdf" as const,
+      size: 1,
+    }]);
+
+    const imported = await importComposerAttachmentFilesSequentially(
+      files,
+      importOne,
+      async () => undefined,
+    );
+
+    expect(imported).toHaveLength(1);
+    expect(imported[0]?.name).toBe("first.pdf");
+    expect(importOne).toHaveBeenCalledTimes(1);
+    expect(files[0].arrayBuffer).toHaveBeenCalledOnce();
+    expect(files[1].arrayBuffer).toHaveBeenCalledOnce();
+  });
+
+  it("releases earlier renderer imports after a later validation failure", async () => {
+    const files = ["first.pdf", "unsafe.pdf"].map((name, index) => ({
+      name,
+      size: 1,
+      type: "application/pdf",
+      arrayBuffer: vi.fn(async () => Uint8Array.of(index).buffer),
     } as unknown as File));
     const released: string[] = [];
 

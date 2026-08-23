@@ -493,7 +493,7 @@ export class AttachmentRegistry {
   private readonly validationRunner: AttachmentImportValidationRunner;
   private readonly validationDelayMs: number;
   private readonly lifecycle = new AbortController();
-  private readonly pendingPaths = new Set<string>();
+  private readonly pendingPaths = new Map<string, number>();
   private pendingImportBytes = 0;
   private importTail: Promise<void> = Promise.resolve();
   private disposed = false;
@@ -536,10 +536,15 @@ export class AttachmentRegistry {
 
   usage(): AttachmentStorageReservation {
     return {
-      records: this.reservedRecords + this.records.size,
+      records: this.reservedRecords
+        + this.records.size
+        + this.pendingPaths.size,
       bytes: this.reservedBytes + [...this.records.values()].reduce(
         (total, { size }) => total + size,
-        0,
+        [...this.pendingPaths.values()].reduce(
+          (total, size) => total + size,
+          0,
+        ),
       ),
     };
   }
@@ -757,10 +762,16 @@ export class AttachmentRegistry {
   private assertStorageCapacity(additionalBytes: number): void {
     const retainedBytes = [...this.records.values()].reduce(
       (total, { size }) => total + size,
-      0,
+      [...this.pendingPaths.values()].reduce(
+        (total, size) => total + size,
+        0,
+      ),
     );
     if (
-      this.reservedRecords + this.records.size + 1 > this.maxRecords
+      this.reservedRecords
+        + this.records.size
+        + this.pendingPaths.size
+        + 1 > this.maxRecords
       || this.reservedBytes + retainedBytes + additionalBytes > this.maxBytes
     ) {
       throw new Error(
@@ -980,7 +991,7 @@ export class AttachmentRegistry {
     for (const release of releases) release.cancel();
     await Promise.allSettled(releases.map(({ promise }) => promise));
     const records = [...this.records.values()];
-    const pendingPaths = [...this.pendingPaths];
+    const pendingPaths = [...this.pendingPaths.keys()];
     this.records.clear();
     this.pendingPaths.clear();
     this.revokedAttachmentIds.clear();
@@ -1077,7 +1088,7 @@ export class AttachmentRegistry {
       constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY,
       0o600,
     );
-    this.pendingPaths.add(path);
+    this.pendingPaths.set(path, attachment.size);
     try {
       try {
         await write(file, signal);

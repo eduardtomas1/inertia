@@ -578,6 +578,43 @@ describe("main-owned attachment registry", () => {
     expect(attachments.usage()).toEqual({ records: 0, bytes: 0 });
   });
 
+  it("accounts for a staged file when partial-failure cleanup is blocked", async () => {
+    const persistentError = Object.assign(
+      new Error("file remains locked"),
+      { code: "EPERM" },
+    );
+    const unlinkFile = vi.fn<(path: string) => Promise<void>>()
+      .mockRejectedValue(persistentError);
+    const { directory, registry: attachments } = await registry({
+      maxRecords: 1,
+      maxBytes: png.length,
+    }, unlinkFile, async () => undefined);
+
+    await expect(attachments.importFromWriter({
+      name: "stranded.png",
+      mimeType: "image/png",
+      size: png.length,
+      write: async (destination) => {
+        await destination.write(png.subarray(0, 12));
+        throw new Error("synthetic staged write failure");
+      },
+    })).rejects.toThrow("synthetic staged write failure");
+
+    expect(unlinkFile).toHaveBeenCalledTimes(3);
+    await expect(readdir(directory)).resolves.toHaveLength(1);
+    expect(attachments.usage()).toEqual({
+      records: 1,
+      bytes: png.length,
+    });
+    await expect(attachments.import([{
+      name: "blocked-by-stranded-file.png",
+      mimeType: "image/png",
+      data: png,
+    }])).rejects.toThrow(/storage is full/u);
+    await attachments.dispose();
+    await expect(readdir(directory)).resolves.toEqual([]);
+  });
+
   it("cancels validation and removes its unpublished staged file", async () => {
     const { directory, registry: attachments } = await registry({
       validationDelayMs: 5_000,

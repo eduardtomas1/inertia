@@ -42,6 +42,7 @@ export async function importComposerAttachmentFilesSequentially(
   release: (id: string) => Promise<void>,
 ): Promise<ChatAttachment[]> {
   preflightComposerAttachmentFiles(files);
+  const digests = new Set<string>();
   const imported: ChatAttachment[] = [];
   try {
     for (const file of files) {
@@ -49,6 +50,14 @@ export async function importComposerAttachmentFilesSequentially(
       if (data.byteLength !== file.size) {
         throw new Error("An attachment changed while it was being imported.");
       }
+      const digestBytes = new Uint8Array(
+        await globalThis.crypto.subtle.digest("SHA-256", data),
+      );
+      const digest = Array.from(
+        digestBytes,
+        (byte) => byte.toString(16).padStart(2, "0"),
+      ).join("");
+      if (digests.has(digest)) continue;
       const current = await importOne({
         name: file.name,
         mimeType: file.type,
@@ -57,6 +66,7 @@ export async function importComposerAttachmentFilesSequentially(
       if (current.length !== 1) {
         throw new Error("Attachment import did not complete.");
       }
+      digests.add(digest);
       imported.push(current[0]!);
     }
     return imported;

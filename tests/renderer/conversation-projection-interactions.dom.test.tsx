@@ -1043,6 +1043,7 @@ describe("useConversationProjection pending interactions", () => {
         turnId: `${primaryId}-turn-current`,
         status: "cancelled" as const,
         terminalReason: "The user stopped the turn.",
+        terminalAssistantMessageId: null,
       },
     },
     {
@@ -1059,6 +1060,7 @@ describe("useConversationProjection pending interactions", () => {
         status: "interrupted" as const,
         terminalReason: "The agent turn was interrupted.",
         message: "The agent turn was interrupted.",
+        terminalAssistantMessageId: null,
       },
     },
   ]) {
@@ -1074,6 +1076,7 @@ describe("useConversationProjection pending interactions", () => {
         requestedAt: "2026-07-28T12:01:30.000Z",
         startedAt: "2026-07-28T12:01:31.000Z",
         updatedAt: "2026-07-28T12:01:31.000Z",
+        terminalAssistantMessageId: "stale-terminal-message",
       };
       const staleApproval = {
         ...approval(primaryId, "stale-turn-approval"),
@@ -1223,6 +1226,8 @@ describe("useConversationProjection pending interactions", () => {
       source.emit(scenario.event);
 
       expect(hook.result.current.streamingChannel).toBeNull();
+      expect(hook.result.current.terminalProjections[`${turn.runId}\0${turn.id}`]
+        ?.terminalAssistantMessageId).toBeNull();
       expect(hook.result.current.turns.find(({ id }) => id === turn.id))
         .toMatchObject({
         id: turn.id,
@@ -1233,6 +1238,8 @@ describe("useConversationProjection pending interactions", () => {
         ?.terminalReason).toBe(
         scenario.event.terminalReason,
       );
+      expect(hook.result.current.turns.find(({ id }) => id === turn.id)
+        ?.terminalAssistantMessageId).toBeNull();
       expect(hook.result.current.pendingApprovals.map(({ id }) => id))
         .toEqual(["stale-turn-approval"]);
       expect(hook.result.current.pendingInputs.map(({ id }) => id))
@@ -1330,7 +1337,7 @@ describe("useConversationProjection pending interactions", () => {
           state: "ready",
           detail: {
             conversation: conversation(primaryId),
-            agentTurns: [],
+            agentTurns: [runningTurn()],
             turnGitArtifacts: [],
             messages: authoritativeMessages,
             activities: [],
@@ -1359,6 +1366,15 @@ describe("useConversationProjection pending interactions", () => {
     }));
     await waitFor(() => expect(hook.result.current.detailState?.state).toBe("ready"));
 
+    const terminalAssistantMessage: ChatMessage = {
+      id: "terminal-assistant-message",
+      conversationId: primaryId,
+      turnId: `${primaryId}-turn`,
+      role: "assistant",
+      content: "The final answer remains visible.",
+      attachments: [],
+      createdAt: "2026-07-28T12:02:00.000Z",
+    };
     source.emit({
       type: "agent.text",
       conversationId: primaryId,
@@ -1367,13 +1383,21 @@ describe("useConversationProjection pending interactions", () => {
       text: "The final answer remains visible.",
     });
     source.emit({
+      type: "conversation.message.persisted",
+      message: terminalAssistantMessage,
+    });
+    source.emit({
       type: "agent.completed",
       conversationId: primaryId,
       runId: `${primaryId}-run`,
       turnId: `${primaryId}-turn`,
       status: "completed",
       terminalReason: "provider-completed",
+      terminalAssistantMessageId: terminalAssistantMessage.id,
     });
+    expect(hook.result.current.messages).toEqual([terminalAssistantMessage]);
+    expect(hook.result.current.turns[0]?.terminalAssistantMessageId)
+      .toBe(terminalAssistantMessage.id);
     source.emit({
       type: "conversation.detail.invalidated",
       conversationId: primaryId,
@@ -1382,18 +1406,11 @@ describe("useConversationProjection pending interactions", () => {
     await waitFor(() => expect(detailLoads).toBe(2));
     expect(hook.result.current.detailState?.state).toBe("ready");
     expect(hook.result.current.detail).not.toBeNull();
+    expect(hook.result.current.messages).toEqual([terminalAssistantMessage]);
     expect(hook.result.current.streamingText)
       .toBe("The final answer remains visible.");
 
-    authoritativeMessages = [{
-      id: "terminal-assistant-message",
-      conversationId: primaryId,
-      turnId: `${primaryId}-turn`,
-      role: "assistant",
-      content: "The final answer remains visible.",
-      attachments: [],
-      createdAt: "2026-07-28T12:02:00.000Z",
-    }];
+    authoritativeMessages = [terminalAssistantMessage];
     source.emit({
       type: "conversation.detail.invalidated",
       conversationId: primaryId,

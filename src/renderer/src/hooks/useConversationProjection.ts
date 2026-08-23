@@ -838,6 +838,7 @@ export function useConversationProjection({
           owner: eventOwner,
           status: event.status,
           terminalReason: event.terminalReason,
+          terminalAssistantMessageId: event.terminalAssistantMessageId,
         },
       ));
       terminalRefreshPendingRef.current = true;

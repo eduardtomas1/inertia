@@ -225,6 +225,9 @@ export class TurnSettlementCoordinator {
       updatedAt: completedAt,
     });
     active.turn = settlement.turn;
+    const terminalAssistantMessage = active.turn.terminalAssistantMessageId
+      ? this.options.store.message(active.turn.terminalAssistantMessageId)
+      : null;
     this.options.hooks.testOnlyStreamingTrace?.mark("terminal-persistence-completed");
     this.options.cleanup(active);
     if (!settlement.settled) return false;
@@ -261,6 +264,10 @@ export class TurnSettlementCoordinator {
     } catch {
       // Projections are repairable; agent_turns remains lifecycle truth.
     }
+    if (terminalAssistantMessage) this.options.hooks.broadcast({
+      type: "conversation.message.persisted",
+      message: terminalAssistantMessage,
+    });
     if (status === "failed" || status === "interrupted") {
       const failureMessage = message ?? (
         status === "interrupted"
@@ -289,6 +296,7 @@ export class TurnSettlementCoordinator {
         status,
         terminalReason,
         message: failureMessage,
+        terminalAssistantMessageId: terminalAssistantMessage?.id ?? null,
       });
     } else {
       this.options.hooks.broadcast({
@@ -298,6 +306,7 @@ export class TurnSettlementCoordinator {
         turnId: active.turn.id,
         status,
         terminalReason,
+        terminalAssistantMessageId: terminalAssistantMessage?.id ?? null,
       });
     }
     this.options.hooks.testOnlyStreamingTrace?.mark("terminal-event-projected");

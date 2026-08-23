@@ -160,6 +160,7 @@ export interface TerminalTurnProjection {
   owner: string;
   status: AgentTurnTerminalStatus;
   terminalReason: string | null;
+  terminalAssistantMessageId?: string | null;
 }
 
 export type TerminalTurnProjections = Record<string, TerminalTurnProjection>;
@@ -250,7 +251,11 @@ export function applyTerminalTurnProjections(
   if (Object.keys(projections).length === 0) return turns;
   return turns.map((turn) => {
     const projection = projections[turnOwner(turn)];
-    if (!projection || isTerminalStatus(turn.status)) return turn;
+    if (
+      !projection
+      || (isTerminalStatus(turn.status)
+        && projection.terminalAssistantMessageId === undefined)
+    ) return turn;
     const settlement = latestTurn
       && turnOwner(latestTurn) === projection.owner
       && isTerminalStatus(latestTurn.status)
@@ -264,6 +269,10 @@ export function applyTerminalTurnProjections(
       terminalReason: settlement
         ? settlement.terminalReason
         : projection.terminalReason,
+      terminalAssistantMessageId:
+        projection.terminalAssistantMessageId === undefined
+          ? turn.terminalAssistantMessageId
+          : projection.terminalAssistantMessageId,
       updatedAt: settlement?.updatedAt ?? turn.updatedAt,
     };
   });

@@ -122,6 +122,8 @@ export type RuntimeMutationEvent =
       turnId: string;
       status: "completed" | "cancelled";
       terminalReason: string;
+      /** Exact durable final-answer identity, if this turn owns one. */
+      terminalAssistantMessageId?: string | null;
     }
   | {
       type: "agent.failed";
@@ -131,6 +133,8 @@ export type RuntimeMutationEvent =
       status: "failed" | "interrupted";
       terminalReason: string;
       message: string;
+      /** Exact durable final-answer identity, if this turn owns one. */
+      terminalAssistantMessageId?: string | null;
     };
 
 export type RuntimeSequencedFrame =

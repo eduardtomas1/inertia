@@ -1576,6 +1576,35 @@ describe("server event remaining discriminant and identity boundary", () => {
       message: { ...assistantMessage, conversationId: "conversation-2" },
     })).toThrow("Malformed server event");
   });
+  it("accepts optional nullable terminal assistant message identities", () => {
+    const completion = {
+      type: "agent.completed",
+      conversationId: conversation.id,
+      runId: "run-1",
+      turnId: "turn-1",
+      status: "completed",
+      terminalReason: "provider-completed",
+      terminalAssistantMessageId: "terminal-assistant",
+    };
+    expect(parseServerEvent(completion)).toBeTruthy();
+    expect(parseServerEvent({
+      ...completion,
+      terminalAssistantMessageId: null,
+    })).toBeTruthy();
+    expect(parseServerEvent({
+      type: "agent.failed",
+      conversationId: conversation.id,
+      runId: "run-1",
+      turnId: "turn-1",
+      status: "failed",
+      terminalReason: "provider-failed",
+      message: "Provider failed.",
+    })).toBeTruthy();
+    expect(() => parseServerEvent({
+      ...completion,
+      terminalAssistantMessageId: 42,
+    })).toThrow("Malformed server event");
+  });
   it("binds snapshot conversation runs while preserving project-scoped runs", () => {
     const parseSnapshot = (runs: unknown[]): unknown => parseServerEvent({
       type: "snapshot.updated",

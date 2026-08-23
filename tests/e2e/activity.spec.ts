@@ -643,7 +643,11 @@ test("keeps delegated-agent traces compact while the active composer accepts a p
     const activeAttachments = composer.getByRole("list", {
       name: "Attachments",
     });
-    await expect(activeAttachments.locator("img")).toHaveCount(1);
+    const attachmentPreview = activeAttachments.locator("img");
+    await expect(attachmentPreview).toHaveCount(1);
+    await expect.poll(() => attachmentPreview.evaluate((element) => ({
+      complete: (element as HTMLImageElement).complete, width: (element as HTMLImageElement).naturalWidth,
+    }))).toEqual({ complete: true, width: 1 });
     const expandedRailGeometry = await measureComposerRail(composer);
     expect(expandedRailGeometry.dockWidth).toBeGreaterThanOrEqual(838);
     expect(expandedRailGeometry.toolbarFits).toBe(true);

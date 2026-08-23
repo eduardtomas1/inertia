@@ -64,6 +64,7 @@ export interface DetachedChatMainOptions {
   getDisplays(): readonly Pick<Display, "workArea">[];
   hardenSession(session: Session): void;
   registerRendererProtocol(session: Session, conversationId: string): void;
+  registerHealthRenderer(contents: WebContents): () => void;
   rendererUrl: string;
   preloadPath: string;
   statePath: string;
@@ -482,16 +483,21 @@ export class DetachedChatMain {
     window.webContents.on("will-attach-webview", (event) => {
       event.preventDefault();
     });
+    let unregisterHealth = (): void => undefined;
     try {
       this.#options.registerRendererProtocol(
         window.webContents.session,
         input.request.conversationId,
       );
       this.#options.hardenSession(window.webContents.session);
+      unregisterHealth = this.#options.registerHealthRenderer(
+        window.webContents,
+      );
     } catch (error) {
       window.destroy();
       throw error;
     }
+    window.once("closed", unregisterHealth);
     window.once("ready-to-show", () => {
       if (!window.isDestroyed()) window.show();
     });

@@ -225,6 +225,37 @@ describe("app update checks", () => {
     await expect(service.download()).rejects.toThrow("No checked update");
   });
 
+  it("retries a rejected updater initialization without duplicating a success", async () => {
+    const updater: AppUpdaterAdapter = {
+      check: vi.fn(async () => ({ available: true, version: "0.0.11" })),
+      download: vi.fn(),
+      quitAndInstall: vi.fn(async () => true),
+    };
+    const loadUpdater = vi.fn<() => Promise<AppUpdaterAdapter>>()
+      .mockRejectedValueOnce(new Error("dynamic import failed once"))
+      .mockResolvedValue(updater);
+    const service = new AppUpdateService({
+      currentVersion: "0.0.10",
+      fetch: vi.fn<typeof globalThis.fetch>(),
+      capability: { delivery: "in-app" },
+      loadUpdater,
+    });
+
+    await expect(service.check()).resolves.toMatchObject({
+      state: "unavailable",
+    });
+    await expect(Promise.all([service.check(), service.check()])).resolves
+      .toEqual([
+        expect.objectContaining({ state: "available" }),
+        expect.objectContaining({ state: "available" }),
+      ]);
+    await expect(service.check(true)).resolves.toMatchObject({
+      state: "available",
+    });
+    expect(loadUpdater).toHaveBeenCalledTimes(2);
+    expect(updater.check).toHaveBeenCalledTimes(2);
+  });
+
   it("coalesces requests, caches success, and lets an explicit refresh bypass the cache", async () => {
     let settle!: (response: Response) => void;
     const first = new Promise<Response>((resolve) => {

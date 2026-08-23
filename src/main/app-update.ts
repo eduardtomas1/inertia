@@ -482,8 +482,13 @@ export class AppUpdateService {
 
   private updater(): Promise<AppUpdaterAdapter> {
     if (!this.loadUpdater) return Promise.reject(new Error("In-app updates are unavailable."));
-    this.updaterPromise ??= this.loadUpdater();
-    return this.updaterPromise;
+    if (this.updaterPromise) return this.updaterPromise;
+    const initialization = this.loadUpdater();
+    this.updaterPromise = initialization;
+    void initialization.catch(() => {
+      if (this.updaterPromise === initialization) this.updaterPromise = null;
+    });
+    return initialization;
   }
 
   private publish(update: Partial<AppUpdateStatus>): AppUpdateStatus {

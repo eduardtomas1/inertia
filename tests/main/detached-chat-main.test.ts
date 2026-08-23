@@ -211,6 +211,7 @@ function fixture(
       protocolConversationIds.push(conversationId);
       if (protocolFailure) throw protocolFailure;
     },
+    registerHealthRenderer: () => () => undefined,
     rendererUrl: RENDERER_URL,
     preloadPath: join(directory, "detached-chat.cjs"),
     statePath: join(directory, "detached-chat-window-state.json"),

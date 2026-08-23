@@ -46,6 +46,7 @@ describe("supervised runtime process environment", () => {
       DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/501/bus",
       DISPLAY: ":0",
       EMAIL: "person@example.test",
+      GCM_INTERACTIVE: "never",
       GIT_AUTHOR_EMAIL: "author@example.test",
       GIT_AUTHOR_NAME: "Example Author",
       GIT_CEILING_DIRECTORIES: "/Users/person/work",
@@ -76,6 +77,7 @@ describe("supervised runtime process environment", () => {
       XAUTHORITY: "/run/user/501/gdm/Xauthority",
       XDG_CONFIG_HOME: "/Users/person/.config",
       XDG_STATE_HOME: "/Users/person/.local/state-work",
+      ZDOTDIR: "/Users/person/.config/zsh-work",
       ...sentinelSecrets,
     };
 
@@ -90,6 +92,7 @@ describe("supervised runtime process environment", () => {
       DBUS_SESSION_BUS_ADDRESS: parent.DBUS_SESSION_BUS_ADDRESS,
       DISPLAY: parent.DISPLAY,
       EMAIL: parent.EMAIL,
+      GCM_INTERACTIVE: parent.GCM_INTERACTIVE,
       GIT_AUTHOR_EMAIL: parent.GIT_AUTHOR_EMAIL,
       GIT_AUTHOR_NAME: parent.GIT_AUTHOR_NAME,
       GIT_CEILING_DIRECTORIES: parent.GIT_CEILING_DIRECTORIES,
@@ -120,6 +123,7 @@ describe("supervised runtime process environment", () => {
       XAUTHORITY: parent.XAUTHORITY,
       XDG_CONFIG_HOME: parent.XDG_CONFIG_HOME,
       XDG_STATE_HOME: parent.XDG_STATE_HOME,
+      ZDOTDIR: parent.ZDOTDIR,
     });
   });
 

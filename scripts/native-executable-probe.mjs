@@ -173,10 +173,13 @@ export function readPosixProbePipeIdentities(
 
 export function readPosixProbePipeOwners(
   pipeIdentities,
-  readRecords = readLsofRecords,
-  platform = process.platform,
+  dependencies = {},
 ) {
-  const userId = process.getuid?.();
+  const readRecords = dependencies.readRecords ?? readLsofRecords;
+  const platform = dependencies.platform ?? process.platform;
+  const userId = "userId" in dependencies
+    ? dependencies.userId
+    : process.getuid?.();
   if (!Number.isSafeInteger(userId) || userId < 0) return null;
   let emptyOwners = null;
   for (let pass = 0; pass < POSIX_OWNERSHIP_TOKEN_PASSES; pass += 1) {

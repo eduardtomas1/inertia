@@ -61,32 +61,55 @@ test("retries transient pipe-owner scans without accepting a permanently unreada
   const { readPosixProbePipeOwners } = await import(moduleUrl) as {
     readPosixProbePipeOwners: (
       identities: Set<string>,
-      readRecords: () => Array<{
-        device: string;
-        inode: string;
-        name: string;
-        pid: number;
-      }> | null,
-      platform: NodeJS.Platform,
+      dependencies: {
+        readRecords: () => Array<{
+          device: string;
+          inode: string;
+          name: string;
+          pid: number;
+        }> | null;
+        platform: NodeJS.Platform;
+        userId: number | null;
+      },
     ) => Set<number> | null;
   };
   let reads = 0;
   const identity = "endpoints:0xa:0xb";
-  const owners = readPosixProbePipeOwners(new Set([identity]), () => {
-    reads += 1;
-    return reads === 1
-      ? []
-      : [{ device: "0xa", inode: "", name: "->0xb", pid: 4301 }];
-  }, "darwin");
+  const owners = readPosixProbePipeOwners(new Set([identity]), {
+    platform: "darwin",
+    readRecords: () => {
+      reads += 1;
+      return reads === 1
+        ? []
+        : [{ device: "0xa", inode: "", name: "->0xb", pid: 4301 }];
+    },
+    // Windows has no process.getuid(). Supplying the validated target UID
+    // keeps this parser/scan seam host-portable without changing production.
+    userId: 501,
+  });
 
   expect(owners).toEqual(new Set([4301]));
   expect(reads).toBe(2);
 
   reads = 0;
-  expect(readPosixProbePipeOwners(new Set([identity]), () => {
-    reads += 1;
-    return null;
-  }, "darwin")).toBeNull();
+  expect(readPosixProbePipeOwners(new Set([identity]), {
+    platform: "darwin",
+    readRecords: () => {
+      reads += 1;
+      return null;
+    },
+    userId: 501,
+  })).toBeNull();
+  expect(reads).toBe(3);
+
+  expect(readPosixProbePipeOwners(new Set([identity]), {
+    platform: "darwin",
+    readRecords: () => {
+      reads += 1;
+      return [];
+    },
+    userId: null,
+  })).toBeNull();
   expect(reads).toBe(3);
 });
 

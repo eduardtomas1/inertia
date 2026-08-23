@@ -21,7 +21,10 @@ import {
   type DetachedChatWindowSummary,
 } from "../shared/desktop.js";
 import { DETACHED_CHAT_IPC } from "../shared/detached-chat-ipc.js";
-import { DetachedChatDraftStore } from "./detached-chat-draft-store.js";
+import {
+  DetachedChatDraftStore,
+  type DetachedChatDraftStoreDiagnostic,
+} from "./detached-chat-draft-store.js";
 import {
   DetachedChatWindowManager,
   type DetachedChatWindowFactoryInput,
@@ -67,6 +70,9 @@ export interface DetachedChatMainOptions {
   draftStatePath: string;
   iconPath: string;
   backgroundColor: string;
+  onDraftStoreDiagnostic?: (
+    diagnostic: DetachedChatDraftStoreDiagnostic,
+  ) => void;
   onDock(conversationId: string): void | Promise<void>;
 }
 
@@ -153,7 +159,9 @@ export class DetachedChatMain {
     this.#options = options;
     this.#rendererUrl = fixedRendererUrl(options.rendererUrl);
     this.#backgroundColor = options.backgroundColor;
-    this.#pendingDrafts = new DetachedChatDraftStore(options.draftStatePath);
+    this.#pendingDrafts = new DetachedChatDraftStore(options.draftStatePath, {
+      onDiagnostic: options.onDraftStoreDiagnostic,
+    });
     this.#manager = new DetachedChatWindowManager({
       createWindow: (input) => this.#createWindow(input),
       loadWindow: async (window) => {

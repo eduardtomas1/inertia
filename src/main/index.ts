@@ -831,7 +831,7 @@ async function createMainWindow(): Promise<void> {
       conversationAttachments: () => conversationAttachments,
       runtimeSupervisor: () => runtimeSupervisor,
       workspaceImageConversationId: conversationId,
-    }, session.protocol),
+    }, session.protocol), onDraftStoreDiagnostic: (diagnostic) => runtimeDiagnostics?.record("detached-draft.recovery", { ...diagnostic }),
     onDock: (conversationId) => activateThreadNotification(conversationId, {
       channel: IPC.threadNotificationActivated,
       currentWindow: () => mainWindow, createWindow,

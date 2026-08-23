@@ -320,6 +320,7 @@ describe("trusted overlay native preview suspension", () => {
           outcome: "created-empty",
           trigger: "primary-corrupt",
           preservedCorruptPrimary: true,
+          preservedDatabaseFamilyMembers: 1,
           invalidBackupsSkipped: 1,
           unsupportedBackupsSkipped: 0,
         }}

@@ -3,6 +3,7 @@ import {
   chmodSync,
   copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -758,6 +759,7 @@ describe("database backup and startup recovery", () => {
       outcome: "first-launch",
       trigger: "none",
       preservedCorruptPrimary: false,
+      preservedDatabaseFamilyMembers: 0,
       invalidBackupsSkipped: 0,
       unsupportedBackupsSkipped: 0,
     });
@@ -767,6 +769,78 @@ describe("database backup and startup recovery", () => {
     ))).toBe(false);
     store.close();
   });
+
+  it("quarantines orphaned WAL and SHM evidence instead of reporting a clean first launch", () => {
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    writeFileSync(`${databasePath}-wal`, "orphaned wal evidence");
+    writeFileSync(`${databasePath}-shm`, "orphaned shm evidence");
+
+    const recovered = new RuntimeStore(databasePath, directory, {
+      recoverInterruptedRuns: false,
+    });
+
+    expect(recovered.databaseRecoveryReport()).toMatchObject({
+      outcome: "created-empty",
+      trigger: "primary-missing",
+      restoredBackup: null,
+      preservedCorruptPrimary: false,
+      preservedDatabaseFamilyMembers: 2,
+    });
+    const paths = databaseRecoveryPaths(databasePath);
+    const quarantined = readdirSync(paths.corruptDirectory).sort();
+    expect(quarantined).toHaveLength(2);
+    expect(readFileSync(join(
+      paths.corruptDirectory,
+      quarantined.find((name) => name.endsWith(".sqlite-wal"))!,
+    ), "utf8")).toBe("orphaned wal evidence");
+    expect(readFileSync(join(
+      paths.corruptDirectory,
+      quarantined.find((name) => name.endsWith(".sqlite-shm"))!,
+    ), "utf8")).toBe("orphaned shm evidence");
+    expect(JSON.parse(readFileSync(join(
+      paths.recoveryDirectory,
+      "last-database-recovery.json",
+    ), "utf8"))).toMatchObject({
+      outcome: "created-empty",
+      trigger: "primary-missing",
+      preservedDatabaseFamilyMembers: 2,
+    });
+    recovered.close();
+
+    const restarted = new RuntimeStore(databasePath, directory, {
+      recoverInterruptedRuns: false,
+    });
+    expect(restarted.databaseRecoveryReport()).toMatchObject({
+      outcome: "healthy",
+      trigger: "none",
+      preservedDatabaseFamilyMembers: 0,
+    });
+    restarted.close();
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "preflights an unsafe orphan family member before moving any evidence",
+    () => {
+      const directory = temporaryDirectory();
+      const databasePath = join(directory, "inertia.sqlite");
+      const outside = join(directory, "outside-evidence.txt");
+      writeFileSync(databasePath, "corrupt primary evidence");
+      writeFileSync(outside, "outside must remain unchanged");
+      symlinkSync(outside, `${databasePath}-wal`);
+
+      expect(() => recoverDatabaseOnStartup(databasePath)).toThrow(
+        "database recovery source is not a local file",
+      );
+      expect(readFileSync(databasePath, "utf8"))
+        .toBe("corrupt primary evidence");
+      expect(readFileSync(outside, "utf8"))
+        .toBe("outside must remain unchanged");
+      expect(lstatSync(`${databasePath}-wal`).isSymbolicLink()).toBe(true);
+      expect(readdirSync(databaseRecoveryPaths(databasePath).corruptDirectory))
+        .toEqual([]);
+    },
+  );
 
   it("creates an online validated backup that includes committed WAL data", async () => {
     const directory = temporaryDirectory();
@@ -1243,6 +1317,48 @@ describe("database backup and startup recovery", () => {
         AND name = 'agent_turns_usage_dashboard_completed_idx'
     `).get()).toEqual({ name: "agent_turns_usage_dashboard_completed_idx" });
     upgraded.close();
+  });
+
+  it("restores and migrates a released backup while quarantining an orphaned database family", () => {
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const paths = databaseRecoveryPaths(databasePath);
+    mkdirSync(paths.backupsDirectory, { recursive: true });
+    const backupFilename = "inertia-20260812T010000000Z.sqlite";
+    copyFileSync(join(
+      import.meta.dirname,
+      "..",
+      "fixtures",
+      "database",
+      "v0.0.6.sqlite",
+    ), join(paths.backupsDirectory, backupFilename));
+    writeFileSync(`${databasePath}-wal`, "orphaned released wal");
+    writeFileSync(`${databasePath}-shm`, "orphaned released shm");
+
+    const recovered = new RuntimeStore(databasePath, directory, {
+      recoverInterruptedRuns: false,
+    });
+
+    expect(recovered.databaseRecoveryReport()).toMatchObject({
+      outcome: "restored",
+      trigger: "primary-missing",
+      restoredBackup: backupFilename,
+      preservedCorruptPrimary: false,
+      preservedDatabaseFamilyMembers: 2,
+    });
+    expect(recovered.snapshot().agentTurns).toHaveLength(2);
+    recovered.close();
+    const upgraded = new Database(databasePath, { readonly: true });
+    expect((upgraded.prepare(
+      "SELECT MAX(version) AS version FROM schema_migrations",
+    ).get() as { version: number }).version).toBe(
+      CURRENT_DATABASE_SCHEMA_VERSION,
+    );
+    upgraded.close();
+    expect(readdirSync(paths.corruptDirectory).sort()).toEqual([
+      expect.stringMatching(/\.sqlite-shm$/u),
+      expect.stringMatching(/\.sqlite-wal$/u),
+    ]);
   });
 
   it("restores schema 55 provider ownership before applying attachment sanitization", async () => {

@@ -7,6 +7,7 @@ const baseNotice = {
   id: "runtime-1-database-recovery",
   trigger: "primary-corrupt" as const,
   preservedCorruptPrimary: true,
+  preservedDatabaseFamilyMembers: 1,
   invalidBackupsSkipped: 1,
   unsupportedBackupsSkipped: 0,
 };
@@ -49,5 +50,25 @@ describe("DatabaseRecoveryNotice", () => {
 
     expect(screen.getByText("Inertia restored a validated backup")).toBeVisible();
     expect(screen.queryByText("Inertia started with empty data")).toBeNull();
+  });
+
+  it("reports preserved incomplete database-family evidence", () => {
+    render(
+      <DatabaseRecoveryNotice
+        notice={{
+          ...baseNotice,
+          outcome: "created-empty",
+          trigger: "primary-missing",
+          preservedCorruptPrimary: false,
+          preservedDatabaseFamilyMembers: 2,
+        }}
+        onDismiss={vi.fn()}
+        onImportRecovery={vi.fn(async () => undefined)}
+        onCopyReport={vi.fn(async () => undefined)}
+      />,
+    );
+
+    expect(screen.getByText(/Incomplete database files were preserved/u))
+      .toBeVisible();
   });
 });

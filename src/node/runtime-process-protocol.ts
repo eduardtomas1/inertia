@@ -42,7 +42,12 @@ import {
   type RuntimeUpdateWorkerEvent,
 } from "./runtime-update-process-protocol";
 import { validRuntimeGenerationId, validSystemBootId } from "./runtime-identity-protocol";
+import {
+  parseRuntimeDatabaseStartupRecovery,
+  type RuntimeDatabaseStartupRecoveryReport,
+} from "./runtime-database-recovery-protocol";
 export { validRuntimeGenerationId, validSystemBootId } from "./runtime-identity-protocol";
+export type { RuntimeDatabaseStartupRecoveryReport } from "./runtime-database-recovery-protocol";
 export type { RuntimeUpdatePreparationBlocker, RuntimeUpdatePreparationResult } from "./runtime-update-process-protocol";
 
 export type { RuntimeConversationAttachmentStoreResult }
@@ -96,16 +101,6 @@ export interface RuntimeDatabaseRecoverySummary {
   conversations: number;
   messages: number;
   alreadyImported: boolean;
-}
-
-export interface RuntimeDatabaseStartupRecoveryReport {
-  checkedAt: string;
-  outcome: "healthy" | "first-launch" | "restored" | "created-empty";
-  trigger: "none" | "primary-missing" | "primary-corrupt";
-  restoredBackup: string | null;
-  preservedCorruptPrimary: boolean;
-  invalidBackupsSkipped: number;
-  unsupportedBackupsSkipped: number;
 }
 
 export type RuntimeWorkerCommand =
@@ -909,72 +904,6 @@ export function parseRuntimeWorkerEvent(value: unknown): RuntimeWorkerEvent | nu
       : null;
   }
   return null;
-}
-
-function parseRuntimeDatabaseStartupRecovery(
-  value: unknown,
-): RuntimeDatabaseStartupRecoveryReport | null {
-  if (!plainObject(value) || Object.keys(value).length !== 7) return null;
-  if (
-    typeof value.checkedAt !== "string"
-    || value.checkedAt.length > 64
-    || !Number.isFinite(Date.parse(value.checkedAt))
-    || (
-      value.outcome !== "healthy"
-      && value.outcome !== "first-launch"
-      && value.outcome !== "restored"
-      && value.outcome !== "created-empty"
-    )
-    || (
-      value.trigger !== "none"
-      && value.trigger !== "primary-missing"
-      && value.trigger !== "primary-corrupt"
-    )
-    || (
-      value.restoredBackup !== null
-      && (
-        typeof value.restoredBackup !== "string"
-        || !/^[A-Za-z0-9_.-]{1,200}$/u.test(value.restoredBackup)
-      )
-    )
-    || typeof value.preservedCorruptPrimary !== "boolean"
-    || typeof value.invalidBackupsSkipped !== "number"
-    || !Number.isSafeInteger(value.invalidBackupsSkipped)
-    || value.invalidBackupsSkipped < 0
-    || typeof value.unsupportedBackupsSkipped !== "number"
-    || !Number.isSafeInteger(value.unsupportedBackupsSkipped)
-    || value.unsupportedBackupsSkipped < 0
-  ) return null;
-  if (
-    (
-      (value.outcome === "healthy" || value.outcome === "first-launch")
-      && (
-        value.trigger !== "none"
-        || value.restoredBackup !== null
-        || value.preservedCorruptPrimary
-        || value.invalidBackupsSkipped !== 0
-        || value.unsupportedBackupsSkipped !== 0
-      )
-    )
-    || (
-      value.outcome === "restored"
-      && (value.trigger === "none" || value.restoredBackup === null)
-    )
-    || (
-      value.outcome === "created-empty"
-      && (value.trigger === "none" || value.restoredBackup !== null)
-    )
-    || (value.preservedCorruptPrimary && value.trigger !== "primary-corrupt")
-  ) return null;
-  return {
-    checkedAt: value.checkedAt,
-    outcome: value.outcome,
-    trigger: value.trigger,
-    restoredBackup: value.restoredBackup,
-    preservedCorruptPrimary: value.preservedCorruptPrimary,
-    invalidBackupsSkipped: value.invalidBackupsSkipped,
-    unsupportedBackupsSkipped: value.unsupportedBackupsSkipped,
-  };
 }
 
 function parseRuntimePrivateConnectForgetScope(

@@ -17,6 +17,10 @@ import Database from "better-sqlite3";
 import { authoritativeRunStateSchemaIsValid } from "./authoritative-run-state-schema";
 import { validAttachmentCapabilities } from "./attachment-capability-schema";
 import {
+  databaseFamilyEntryExists,
+  quarantineDatabaseFamily,
+} from "./database-family-quarantine";
+import {
   regularOwnedFile,
   removeDatabaseFileFamily,
   removeIfRegularFile,
@@ -80,6 +84,7 @@ export interface DatabaseRecoveryReport {
   readonly trigger: "none" | "primary-missing" | "primary-corrupt";
   readonly restoredBackup: string | null;
   readonly preservedCorruptPrimary: boolean;
+  readonly preservedDatabaseFamilyMembers: number;
   readonly invalidBackupsSkipped: number;
   readonly unsupportedBackupsSkipped: number;
 }
@@ -689,13 +694,6 @@ function availableName(directory: string, stem: string, suffix: string): string 
     index += 1;
   }
 }
-function availableDatabaseFamilyStem(directory: string, stem: string): string {
-  for (let index = 0; ; index += 1) {
-    const candidate = `${stem}${index === 0 ? "" : `-${index}`}`;
-    const familyAvailable = [".sqlite", ".sqlite-wal", ".sqlite-shm"].every((suffix) => !existsSync(join(directory, `${candidate}${suffix}`)));
-    if (familyAvailable) return candidate;
-  }
-}
 function cleanInterruptedFiles(databasePath: string): void {
   const paths = databaseRecoveryPaths(databasePath);
   removeDatabaseFileFamily(paths.restorePartialPath);
@@ -711,24 +709,18 @@ function cleanInterruptedFiles(databasePath: string): void {
 function quarantinePrimary(
   databasePath: string,
   now: Date,
-): boolean {
+): {
+  preservedCorruptPrimary: boolean;
+  preservedDatabaseFamilyMembers: number;
+} {
   const { corruptDirectory } = databaseRecoveryPaths(databasePath);
   ensureOwnedDirectory(corruptDirectory);
   const timestamp = compactTimestamp(now);
-  const targetStem = availableDatabaseFamilyStem(corruptDirectory, `${safeDatabaseStem(databasePath)}-${timestamp}`);
-  let preserved = false;
-  for (const suffix of ["", "-wal", "-shm"] as const) {
-    const source = `${databasePath}${suffix}`;
-    if (!existsSync(source)) continue;
-    if (!regularOwnedFile(source)) {
-      throw new Error("The database recovery source is not a local file.");
-    }
-    const targetName = `${targetStem}.sqlite${suffix}`;
-    renameSync(source, join(corruptDirectory, targetName));
-    chmodSync(join(corruptDirectory, targetName), FILE_MODE);
-    if (suffix === "") preserved = true;
-  }
-  return preserved;
+  return quarantineDatabaseFamily(
+    databasePath,
+    corruptDirectory,
+    `${safeDatabaseStem(databasePath)}-${timestamp}`,
+  );
 }
 
 function restoreBackup(databasePath: string, backup: ValidatedBackup): void {
@@ -782,17 +774,21 @@ export function recoverDatabaseOnStartup(
   ensureOwnedDirectory(paths.backupsDirectory);
   cleanInterruptedFiles(paths.databasePath);
 
-  const primaryExists = existsSync(paths.databasePath);
+  const primaryExists = databaseFamilyEntryExists(paths.databasePath);
+  const databaseFamilyExists = ["", "-wal", "-shm"].some(
+    (suffix) => databaseFamilyEntryExists(`${paths.databasePath}${suffix}`),
+  );
   if (primaryExists && !regularOwnedFile(paths.databasePath)) {
     throw new Error("The database path is not a local file.");
   }
-  if (!primaryExists && listBackupMetadata(paths.databasePath).length === 0) {
+  if (!databaseFamilyExists && listBackupMetadata(paths.databasePath).length === 0) {
     return {
       checkedAt: now.toISOString(),
       outcome: "first-launch",
       trigger: "none",
       restoredBackup: null,
       preservedCorruptPrimary: false,
+      preservedDatabaseFamilyMembers: 0,
       invalidBackupsSkipped: 0,
       unsupportedBackupsSkipped: 0,
     };
@@ -812,13 +808,14 @@ export function recoverDatabaseOnStartup(
       trigger: "none",
       restoredBackup: null,
       preservedCorruptPrimary: false,
+      preservedDatabaseFamilyMembers: 0,
       invalidBackupsSkipped: 0,
       unsupportedBackupsSkipped: 0,
     };
   }
 
   const trigger = primaryExists ? "primary-corrupt" : "primary-missing";
-  const preservedCorruptPrimary = quarantinePrimary(paths.databasePath, now);
+  const preserved = quarantinePrimary(paths.databasePath, now);
   const backups = listValidatedBackups(paths.databasePath);
   const selected = backups.valid[0];
   if (selected) restoreBackup(paths.databasePath, selected);
@@ -828,7 +825,7 @@ export function recoverDatabaseOnStartup(
     outcome: selected ? "restored" : "created-empty",
     trigger,
     restoredBackup: selected?.filename ?? null,
-    preservedCorruptPrimary,
+    ...preserved,
     invalidBackupsSkipped: backups.invalid.length,
     unsupportedBackupsSkipped: backups.unsupported.length,
   };

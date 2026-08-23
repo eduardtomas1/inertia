@@ -24,16 +24,36 @@ import {
 
 const FILE_MODE = 0o600;
 
-interface StatePaths {
+export interface SecureAtomicStatePaths {
   directory: string;
   target: string;
+}
+
+export type SecureAtomicStateReadErrorCode =
+  | "changed"
+  | "io"
+  | "permission"
+  | "too-large"
+  | "unsafe";
+
+export class SecureAtomicStateReadError extends Error {
+  constructor(
+    readonly code: SecureAtomicStateReadErrorCode,
+    message: string,
+    options: ErrorOptions = {},
+  ) {
+    super(message, options);
+    this.name = "SecureAtomicStateReadError";
+  }
 }
 
 function missing(error: unknown): boolean {
   return (error as NodeJS.ErrnoException).code === "ENOENT";
 }
 
-function statePaths(path: string): StatePaths {
+export function resolveSecureAtomicStatePaths(
+  path: string,
+): SecureAtomicStatePaths {
   const name = basename(path);
   if (!name || name === "." || name === "..") {
     throw new Error("Invalid secure state path");
@@ -45,6 +65,30 @@ function statePaths(path: string): StatePaths {
     throw new Error("Secure state escaped its directory");
   }
   return { directory, target };
+}
+
+function classifiedReadError(error: unknown): SecureAtomicStateReadError {
+  if (error instanceof SecureAtomicStateReadError) return error;
+  const code = (error as NodeJS.ErrnoException).code;
+  if (code === "EACCES" || code === "EPERM") {
+    return new SecureAtomicStateReadError(
+      "permission",
+      "Secure state could not be read because access was denied",
+      { cause: error },
+    );
+  }
+  if (code === "ELOOP" || code === "ENOTDIR") {
+    return new SecureAtomicStateReadError(
+      "unsafe",
+      "Secure state crossed an unsafe filesystem boundary",
+      { cause: error },
+    );
+  }
+  return new SecureAtomicStateReadError(
+    "io",
+    "Secure state could not be read",
+    { cause: error },
+  );
 }
 
 function targetMetadata(target: string): ReturnType<typeof lstatSync> | null {
@@ -80,7 +124,7 @@ export function writeSecureAtomicState(
   if (bytes.length > boundedMaximum(maximumBytes)) {
     throw new Error("Secure state is too large");
   }
-  const { directory, target } = statePaths(path);
+  const { directory, target } = resolveSecureAtomicStatePaths(path);
   assertSafeTarget(target);
   let temporaryPath = join(
     directory,
@@ -141,25 +185,63 @@ export function readSecureAtomicState(
   path: string,
   maximumBytes: number,
 ): string | null {
-  const maximum = boundedMaximum(maximumBytes);
-  const { target } = statePaths(path);
-  const before = targetMetadata(target);
-  if (!before) return null;
-  if (
-    !before.isFile()
-    || before.isSymbolicLink()
-    || before.size > maximum
-  ) return null;
-  const noFollow = "O_NOFOLLOW" in constants ? constants.O_NOFOLLOW : 0;
-  const descriptor = openSync(target, constants.O_RDONLY | noFollow);
   try {
+    return readSecureAtomicStateStrict(path, maximumBytes);
+  } catch (error) {
+    if (
+      error instanceof SecureAtomicStateReadError
+      && (
+        error.code === "changed"
+        || error.code === "too-large"
+        || error.code === "unsafe"
+      )
+    ) return null;
+    throw error;
+  }
+}
+
+/**
+ * Strict variant used for durable user state where missing, damaged, unsafe,
+ * and temporarily unreadable files must remain distinguishable.
+ */
+export function readSecureAtomicStateStrict(
+  path: string,
+  maximumBytes: number,
+): string | null {
+  const maximum = boundedMaximum(maximumBytes);
+  let descriptor: number | null = null;
+  try {
+    const { target } = resolveSecureAtomicStatePaths(path);
+    const before = targetMetadata(target);
+    if (!before) return null;
+    if (!before.isFile() || before.isSymbolicLink()) {
+      throw new SecureAtomicStateReadError(
+        "unsafe",
+        "Secure state is not a regular local file",
+      );
+    }
+    if (before.size > maximum) {
+      throw new SecureAtomicStateReadError(
+        "too-large",
+        "Secure state exceeds its size limit",
+      );
+    }
+    const noFollow = "O_NOFOLLOW" in constants ? constants.O_NOFOLLOW : 0;
+    descriptor = openSync(target, constants.O_RDONLY | noFollow);
     const opened = fstatSync(descriptor);
     if (
       !opened.isFile()
       || opened.dev !== before.dev
       || opened.ino !== before.ino
       || opened.size !== before.size
-    ) return null;
+      || opened.mtimeMs !== before.mtimeMs
+      || opened.ctimeMs !== before.ctimeMs
+    ) {
+      throw new SecureAtomicStateReadError(
+        "changed",
+        "Secure state changed while it was being opened",
+      );
+    }
     const bytes = Buffer.alloc(opened.size);
     let offset = 0;
     while (offset < bytes.length) {
@@ -170,17 +252,31 @@ export function readSecureAtomicState(
         bytes.length - offset,
         offset,
       );
-      if (count === 0) return null;
+      if (count === 0) {
+        throw new SecureAtomicStateReadError(
+          "changed",
+          "Secure state ended before the verified size",
+        );
+      }
       offset += count;
     }
     const after = fstatSync(descriptor);
     if (
-      after.size !== opened.size
+      after.dev !== opened.dev
+      || after.ino !== opened.ino
+      || after.size !== opened.size
       || after.mtimeMs !== opened.mtimeMs
       || after.ctimeMs !== opened.ctimeMs
-    ) return null;
+    ) {
+      throw new SecureAtomicStateReadError(
+        "changed",
+        "Secure state changed while it was being read",
+      );
+    }
     return bytes.toString("utf8");
+  } catch (error) {
+    throw classifiedReadError(error);
   } finally {
-    closeSync(descriptor);
+    if (descriptor !== null) closeSync(descriptor);
   }
 }

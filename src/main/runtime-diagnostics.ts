@@ -27,6 +27,7 @@ const LOG_FILE_PATTERN = /^runtime(?:\.\d+)?\.log$/u;
 export type RuntimeDiagnosticEvent =
   | "app.start"
   | "app.stop"
+  | "detached-draft.recovery"
   | "logs.reveal"
   | "report.copy"
   | "runtime.failure"
@@ -140,14 +141,41 @@ export class RuntimeDiagnostics {
       const generation = boundedInteger(fields.generation, 0, Number.MAX_SAFE_INTEGER);
       const processId = boundedInteger(fields.processId, 1, 2_147_483_647);
       const restartAttempt = boundedInteger(fields.restartAttempt, 0, 1_000_000);
-      const message = event === "runtime.failure"
-        ? runtimeFailureSummary(fields.message)
-        : sanitizeRuntimeDiagnosticText(fields.message);
-      if (phase) entry.phase = phase;
-      if (generation !== undefined) entry.generation = generation;
-      if (processId !== undefined) entry.processId = processId;
-      if (restartAttempt !== undefined) entry.restartAttempt = restartAttempt;
-      if (typeof fields.restartScheduled === "boolean") entry.restartScheduled = fields.restartScheduled;
+      const message = event === "detached-draft.recovery"
+        ? undefined
+        : event === "runtime.failure"
+          ? runtimeFailureSummary(fields.message)
+          : sanitizeRuntimeDiagnosticText(fields.message);
+      if (event !== "detached-draft.recovery") {
+        if (phase) entry.phase = phase;
+        if (generation !== undefined) entry.generation = generation;
+        if (processId !== undefined) entry.processId = processId;
+        if (restartAttempt !== undefined) entry.restartAttempt = restartAttempt;
+        if (typeof fields.restartScheduled === "boolean") entry.restartScheduled = fields.restartScheduled;
+      }
+      if (
+        event === "detached-draft.recovery"
+        && typeof fields.reason === "string"
+        && [
+          "changed",
+          "invalid-json",
+          "invalid-schema",
+          "missing",
+          "permission",
+          "too-large",
+          "transient-io",
+          "unsafe",
+        ].includes(fields.reason)
+      ) entry.reason = fields.reason;
+      if (
+        event === "detached-draft.recovery"
+        && typeof fields.outcome === "string"
+        && ["blocked", "quarantined", "recovered"].includes(fields.outcome)
+      ) entry.outcome = fields.outcome;
+      if (
+        event === "detached-draft.recovery"
+        && typeof fields.evidencePreserved === "boolean"
+      ) entry.evidencePreserved = fields.evidencePreserved;
       if (message) entry.message = message;
 
       let line = `${JSON.stringify(entry)}\n`;
@@ -168,9 +196,9 @@ export class RuntimeDiagnostics {
   recordState(snapshot: RuntimeSupervisorSnapshot): void {
     const recovery = snapshot.databaseRecovery;
     const recoveryMessage = recovery?.outcome === "restored"
-      ? `Database restored from validated backup ${recovery.restoredBackup ?? "unknown"}; corrupt primary preserved: ${recovery.preservedCorruptPrimary ? "yes" : "no"}; invalid backups skipped: ${recovery.invalidBackupsSkipped}; newer backups preserved: ${recovery.unsupportedBackupsSkipped}.`
+      ? `Database restored from validated backup ${recovery.restoredBackup ?? "unknown"}; corrupt primary preserved: ${recovery.preservedCorruptPrimary ? "yes" : "no"}; database family members preserved: ${recovery.preservedDatabaseFamilyMembers}; invalid backups skipped: ${recovery.invalidBackupsSkipped}; newer backups preserved: ${recovery.unsupportedBackupsSkipped}.`
       : recovery?.outcome === "created-empty"
-        ? `Database started empty after ${recovery.trigger}; corrupt primary preserved: ${recovery.preservedCorruptPrimary ? "yes" : "no"}; invalid backups skipped: ${recovery.invalidBackupsSkipped}; newer backups preserved: ${recovery.unsupportedBackupsSkipped}.`
+        ? `Database started empty after ${recovery.trigger}; corrupt primary preserved: ${recovery.preservedCorruptPrimary ? "yes" : "no"}; database family members preserved: ${recovery.preservedDatabaseFamilyMembers}; invalid backups skipped: ${recovery.invalidBackupsSkipped}; newer backups preserved: ${recovery.unsupportedBackupsSkipped}.`
         : undefined;
     this.record(snapshot.lastError ? "runtime.failure" : "runtime.state", {
       phase: snapshot.phase,
@@ -253,6 +281,7 @@ export class RuntimeDiagnostics {
             && [
               "app.start",
               "app.stop",
+              "detached-draft.recovery",
               "logs.reveal",
               "report.copy",
               "runtime.failure",
@@ -265,18 +294,46 @@ export class RuntimeDiagnostics {
               ? new Date(value.at).toISOString()
               : null;
           if (!event || !at) continue;
+          const lifecycleEvent = event !== "detached-draft.recovery";
           const fields = [
-            typeof value.phase === "string" ? `phase=${value.phase}` : null,
-            boundedInteger(value.generation, 0, Number.MAX_SAFE_INTEGER) !== undefined
+            lifecycleEvent && typeof value.phase === "string"
+              ? `phase=${value.phase}`
+              : null,
+            lifecycleEvent
+              && boundedInteger(value.generation, 0, Number.MAX_SAFE_INTEGER) !== undefined
               ? `generation=${value.generation}`
               : null,
-            boundedInteger(value.restartAttempt, 0, 1_000_000) !== undefined
+            lifecycleEvent
+              && boundedInteger(value.restartAttempt, 0, 1_000_000) !== undefined
               ? `restart=${value.restartAttempt}`
               : null,
-            typeof value.restartScheduled === "boolean"
+            lifecycleEvent && typeof value.restartScheduled === "boolean"
               ? `scheduled=${value.restartScheduled ? "yes" : "no"}`
               : null,
-            sanitizeRuntimeDiagnosticText(value.message),
+            event === "detached-draft.recovery"
+              && typeof value.reason === "string"
+              && [
+                "changed",
+                "invalid-json",
+                "invalid-schema",
+                "missing",
+                "permission",
+                "too-large",
+                "transient-io",
+                "unsafe",
+              ].includes(value.reason)
+              ? `reason=${value.reason}`
+              : null,
+            event === "detached-draft.recovery"
+              && typeof value.outcome === "string"
+              && ["blocked", "quarantined", "recovered"].includes(value.outcome)
+              ? `outcome=${value.outcome}`
+              : null,
+            event === "detached-draft.recovery"
+              && typeof value.evidencePreserved === "boolean"
+              ? `evidence=${value.evidencePreserved ? "preserved" : "unavailable"}`
+              : null,
+            lifecycleEvent ? sanitizeRuntimeDiagnosticText(value.message) : null,
           ].filter((field): field is string => Boolean(field));
           events.push(`${at} · ${event}${fields.length > 0 ? ` · ${fields.join(" · ")}` : ""}`);
         } catch {

@@ -37,7 +37,9 @@ export function DatabaseRecoveryNotice({
   const createdEmpty = notice.outcome === "created-empty";
   const detail = createdEmpty
     ? notice.trigger === "primary-missing"
-      ? "The primary database was missing and no valid backup was available."
+      ? notice.preservedDatabaseFamilyMembers > 0
+        ? "The primary database was missing and no valid backup was available. Incomplete database files were preserved for recovery."
+        : "The primary database was missing and no valid backup was available."
       : notice.preservedCorruptPrimary
         ? "No valid backup was available. The damaged primary was preserved for recovery."
         : "No valid backup was available, so Inertia created a new empty database."

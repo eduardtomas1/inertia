@@ -38,6 +38,7 @@ export function runtimeConnection(state: RuntimeConnectionState): {
       outcome: report.outcome,
       trigger: report.trigger,
       preservedCorruptPrimary: report.preservedCorruptPrimary,
+      preservedDatabaseFamilyMembers: report.preservedDatabaseFamilyMembers,
       invalidBackupsSkipped: report.invalidBackupsSkipped,
       unsupportedBackupsSkipped: report.unsupportedBackupsSkipped,
     };

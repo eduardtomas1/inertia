@@ -1,6 +1,7 @@
 import {
   mkdir,
   mkdtemp,
+  open,
   readFile,
   rm,
   stat,
@@ -364,6 +365,96 @@ describe("FileCredentialVaultPersistence", () => {
     expect(await persistence.read()).toBeNull();
     await expect(stat(path)).rejects.toMatchObject({ code: "ENOENT" });
     await expect(persistence.remove()).resolves.toBeUndefined();
+  });
+
+  it("reads until complete when the filesystem returns short reads", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "inertia-credential-vault-"));
+    temporaryDirectories.push(directory);
+    const path = join(directory, "credentials.json");
+    const expected = '{"schemaVersion":2,"entries":{"opaque":"ciphertext"}}';
+    await writeFile(path, expected, { encoding: "utf8", mode: 0o600 });
+    const probe = await open(path, "r");
+    const prototype = Object.getPrototypeOf(probe) as {
+      read(
+        buffer: Buffer,
+        offset: number,
+        length: number,
+        position: number,
+      ): Promise<{ bytesRead: number; buffer: Buffer }>;
+    };
+    await probe.close();
+    const originalRead = prototype.read;
+    const read = vi.spyOn(prototype, "read").mockImplementation(function (
+      this: typeof prototype,
+      buffer,
+      offset,
+      length,
+      position,
+    ) {
+      return originalRead.call(
+        this,
+        buffer,
+        offset,
+        Math.min(length, 3),
+        position,
+      );
+    });
+    try {
+      await expect(new FileCredentialVaultPersistence(path).read())
+        .resolves.toBe(expected);
+      expect(read.mock.calls.length).toBeGreaterThan(1);
+    } finally {
+      read.mockRestore();
+    }
+  });
+
+  it("rejects content that changes through the opened vault identity", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "inertia-credential-vault-"));
+    temporaryDirectories.push(directory);
+    const path = join(directory, "credentials.json");
+    const expected = '{"schemaVersion":2,"entries":{}}';
+    await writeFile(path, expected, { encoding: "utf8", mode: 0o600 });
+    const probe = await open(path, "r");
+    const prototype = Object.getPrototypeOf(probe) as {
+      read(
+        buffer: Buffer,
+        offset: number,
+        length: number,
+        position: number,
+      ): Promise<{ bytesRead: number; buffer: Buffer }>;
+    };
+    await probe.close();
+    const originalRead = prototype.read;
+    let changed = false;
+    const read = vi.spyOn(prototype, "read").mockImplementation(async function (
+      this: typeof prototype,
+      buffer,
+      offset,
+      length,
+      position,
+    ) {
+      const result = await originalRead.call(
+        this,
+        buffer,
+        offset,
+        Math.min(length, 4),
+        position,
+      );
+      if (!changed) {
+        changed = true;
+        await writeFile(path, "x".repeat(Buffer.byteLength(expected)), {
+          encoding: "utf8",
+          mode: 0o600,
+        });
+      }
+      return result;
+    });
+    try {
+      await expect(new FileCredentialVaultPersistence(path).read())
+        .rejects.toMatchObject({ code: "storage-corrupt" });
+    } finally {
+      read.mockRestore();
+    }
   });
 
   it.runIf(process.platform !== "win32")(

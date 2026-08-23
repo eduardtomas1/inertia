@@ -235,7 +235,13 @@ export async function expectClosedShadowActivationBlocked(
       code: "globalThis.__inertiaAgentBrowser.agentInputActive=true;({active:globalThis.__inertiaAgentBrowser.agentInputActive,nested:globalThis.__inertiaAgentBrowser.nestedContentObserved===true})",
     }], true);
     interleaveContents?.sendInputEvent({ type: "keyDown", keyCode: "Enter" });
-    const finalFocus = await interleaveContents?.executeJavaScript("document.activeElement?.id", true);
+    let finalFocus = "";
+    for (let attempt = 0; attempt < 20 && finalFocus !== "late-disabled"; attempt += 1) {
+      finalFocus = await interleaveContents?.executeJavaScript(
+        "new Promise(resolve=>setTimeout(()=>resolve(document.activeElement?.id),10))",
+        true,
+      ) as string || "";
+    }
     interleaveContents?.sendInputEvent({ type: "char", keyCode: "\r" });
     interleaveContents?.sendInputEvent({ type: "keyUp", keyCode: "Enter" });
     await interleaveContents?.executeJavaScript("new Promise(resolve=>setTimeout(resolve,0))", true);

@@ -738,7 +738,7 @@ export class AttachmentRegistry {
         digests.add(attachment.digest);
         totalBytes += attachment.size;
         if (totalBytes > MAX_CHAT_ATTACHMENT_TOTAL_BYTES) {
-          await this.releaseRecord(attachment);
+          await this.rollbackRecord(attachment);
           throw new Error("Attachments exceed the 20 MB turn limit.");
         }
         registered.push(attachment);

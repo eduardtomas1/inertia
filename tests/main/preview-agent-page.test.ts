@@ -167,8 +167,60 @@ describe("agent browser semantic snapshots", () => {
         return true;
       }
     }
-    class FakeElement extends FakeEventTarget {
+    class FakeNode extends FakeEventTarget {
+      nodeValueStorage: string | null = null;
+      get nodeValue(): string | null { return this.nodeValueStorage; }
+      set nodeValue(value: string | null) {
+        this.nodeValueStorage = value;
+        const syncOwner = Reflect.get(this, "syncOwner");
+        if (typeof syncOwner === "function") Reflect.apply(syncOwner, this, []);
+      }
+      get textContent(): string | null { return this.nodeValueStorage; }
+      set textContent(value: string | null) {
+        this.nodeValueStorage = value;
+        const syncOwner = Reflect.get(this, "syncOwner");
+        if (typeof syncOwner === "function") Reflect.apply(syncOwner, this, []);
+      }
+    }
+    class FakeElement extends FakeNode {
       attachShadow(): object { return {}; }
+      applyAttribute(_name: string, _value: string): void {}
+      attachAttribute(attr: FakeAttr): null {
+        attr.attach(this);
+        this.applyAttribute(attr.name, attr.value);
+        return null;
+      }
+      setAttribute(name: string, value: string): void {
+        this.applyAttribute(name, String(value));
+      }
+      setAttributeNS(_namespace: string | null, name: string, value: string): void {
+        this.applyAttribute(name, String(value));
+      }
+      setAttributeNode(attr: FakeAttr): null {
+        return this.attachAttribute(attr);
+      }
+      setAttributeNodeNS(attr: FakeAttr): null {
+        return this.attachAttribute(attr);
+      }
+    }
+    class FakeAttr extends FakeNode {
+      owner: FakeElement | null = null;
+      constructor(readonly name: string) { super(); }
+      get ownerElement(): FakeElement | null { return this.owner; }
+      get value(): string { return this.nodeValueStorage ?? ""; }
+      set value(value: string) {
+        this.nodeValueStorage = String(value);
+        this.syncOwner();
+      }
+      attach(owner: FakeElement): void { this.owner = owner; }
+      syncOwner(): void {
+        if (this.owner) this.owner.applyAttribute(this.name, this.value);
+      }
+    }
+    class FakeNamedNodeMap {
+      constructor(readonly owner: FakeElement) {}
+      setNamedItem(attr: FakeAttr): null { return this.owner.attachAttribute(attr); }
+      setNamedItemNS(attr: FakeAttr): null { return this.owner.attachAttribute(attr); }
     }
     class FakeHTMLElement extends FakeElement {
       attachInternals(): object { return { shadowRoot: null }; }
@@ -176,16 +228,34 @@ describe("agent browser semantic snapshots", () => {
     class FakeHTMLInputElement extends FakeHTMLElement {
       #type = "text";
       #value = "";
+      #defaultValue = "";
+      readonly attributes = new FakeNamedNodeMap(this);
       get type(): string { return this.#type; }
       set type(value: string) { this.#type = value; }
       get value(): string { return this.#value; }
       set value(value: string) { this.#value = String(value); }
+      get defaultValue(): string { return this.#defaultValue; }
+      set defaultValue(value: string) {
+        this.#defaultValue = String(value);
+        this.#value = this.#defaultValue;
+      }
+      setRangeText(value: string): void { this.#value = String(value); }
+      applyAttribute(name: string, value: string): void {
+        if (name === "type") this.#type = value;
+        if (name === "value") {
+          this.#defaultValue = value;
+          this.#value = value;
+        }
+      }
     }
     const context = {
       document: new FakeEventTarget(),
       Element: FakeElement,
       HTMLElement: FakeHTMLElement,
       HTMLInputElement: FakeHTMLInputElement,
+      NamedNodeMap: FakeNamedNodeMap,
+      Attr: FakeAttr,
+      Node: FakeNode,
       EventTarget: FakeEventTarget,
       Event: FakeEvent,
     };
@@ -197,6 +267,12 @@ describe("agent browser semantic snapshots", () => {
     runInNewContext(`
       const ordinary = new HTMLInputElement();
       ordinary.value = "brief note";
+      ordinary.setRangeText("ordinary text");
+      const ordinaryAttrInput = new HTMLInputElement();
+      const ordinaryAttr = new Attr("value");
+      ordinaryAttrInput.setAttributeNode(ordinaryAttr);
+      ordinaryAttr.textContent = "brief note";
+      ordinaryAttr.textContent = "";
       const credential = new HTMLInputElement();
       credential.type = "password";
       credential.value = "hunter2";
@@ -205,12 +281,64 @@ describe("agent browser semantic snapshots", () => {
       latePassword.value = "secret";
       latePassword.type = "password";
       latePassword.value = "";
+      const attributeCredential = new HTMLInputElement();
+      attributeCredential.type = "password";
+      attributeCredential.setAttribute("value", "hunter2");
+      attributeCredential.setAttribute("value", "");
+      const defaultCredential = new HTMLInputElement();
+      defaultCredential.defaultValue = "private";
+      defaultCredential.type = "password";
+      defaultCredential.defaultValue = "";
+      const namespacedCredential = new HTMLInputElement();
+      namespacedCredential.type = "password";
+      namespacedCredential.setAttributeNS(null, "value", "short");
+      namespacedCredential.setAttributeNS(null, "value", "");
+      const rangeCredential = new HTMLInputElement();
+      rangeCredential.type = "password";
+      rangeCredential.setRangeText("hunter2");
+      rangeCredential.value = "";
+      const attrValueCredential = new HTMLInputElement();
+      attrValueCredential.type = "password";
+      const valueAttr = new Attr("value");
+      valueAttr.value = "short";
+      attrValueCredential.setAttributeNode(valueAttr);
+      valueAttr.value = "";
+      const attrNodeValueCredential = new HTMLInputElement();
+      attrNodeValueCredential.type = "password";
+      const nodeValueAttr = new Attr("value");
+      nodeValueAttr.nodeValue = "brief";
+      attrNodeValueCredential.setAttributeNodeNS(nodeValueAttr);
+      nodeValueAttr.nodeValue = "";
+      const namedItemCredential = new HTMLInputElement();
+      namedItemCredential.type = "password";
+      const namedAttr = new Attr("value");
+      namedAttr.value = "tiny";
+      namedItemCredential.attributes.setNamedItem(namedAttr);
+      namedAttr.value = "";
+      const attachedValueCredential = new HTMLInputElement();
+      attachedValueCredential.type = "password";
+      const attachedValueAttr = new Attr("value");
+      attachedValueCredential.setAttributeNode(attachedValueAttr);
+      attachedValueAttr.value = "small";
+      attachedValueAttr.value = "";
+      const attachedNodeValueCredential = new HTMLInputElement();
+      attachedNodeValueCredential.type = "password";
+      const attachedNodeValueAttr = new Attr("value");
+      attachedNodeValueCredential.setAttributeNode(attachedNodeValueAttr);
+      attachedNodeValueAttr.nodeValue = "little";
+      attachedNodeValueAttr.nodeValue = "";
+      const attachedTextCredential = new HTMLInputElement();
+      attachedTextCredential.type = "password";
+      const attachedTextAttr = new Attr("value");
+      attachedTextCredential.setAttributeNode(attachedTextAttr);
+      attachedTextAttr.textContent = "concise";
+      attachedTextAttr.textContent = "";
     `, context);
 
-    expect(dispatched).toEqual(["nested-boundary", "nested-boundary"]);
+    expect(dispatched).toEqual(Array(12).fill("nested-boundary"));
   });
 
-  it("signals declarative-root parsing before a detached host can disappear", () => {
+  it("signals private parser content before a detached host can disappear", () => {
     const dispatched: string[] = [];
     class FakeEvent {
       constructor(readonly type: string) {}
@@ -225,15 +353,19 @@ describe("agent browser semantic snapshots", () => {
       source = "";
       querySelector(_selector: string): object | null {
         const beforeClose = this.source.split("</template>", 1)[0] ?? "";
-        return beforeClose.startsWith("<template") && beforeClose.includes(" shadowrootmode")
-          ? {}
-          : null;
+        if (beforeClose.startsWith("<template") && beforeClose.includes(" shadowrootmode")) {
+          return {};
+        }
+        return /<input\b(?=[^>]*\btype\s*=\s*['"]?password\b)(?=[^>]*\bvalue\s*=\s*(?:['"][^'"]+['"]|[^\s>]+))/iu
+          .test(this.source) ? {} : null;
       }
     }
     class FakeElement extends FakeEventTarget {
       fragment = new FakeDocumentFragment();
       attachShadow(): object { return {}; }
       set innerHTML(source: string) { this.fragment.source = source; }
+      set outerHTML(source: string) { this.fragment.source = source; }
+      insertAdjacentHTML(_position: string, source: string): void { this.fragment.source = source; }
       setHTML(source: string): void { this.fragment.source = source; }
       setHTMLUnsafe(source: string): void { this.fragment.source = source; }
     }
@@ -247,14 +379,27 @@ describe("agent browser semantic snapshots", () => {
       createHTMLDocument(): FakeDocument { return new FakeDocument(); }
     }
     class FakeDocument extends FakeEventTarget {
+      parsedSource = "";
       static parseHTML(_html: string): object { return {}; }
       static parseHTMLUnsafe(_html: string): object { return {}; }
       get implementation(): FakeDOMImplementation { return new FakeDOMImplementation(); }
       createElement(): FakeHTMLTemplateElement { return new FakeHTMLTemplateElement(); }
+      write(...parts: string[]): void { this.parsedSource = parts.join(""); }
+      writeln(...parts: string[]): void { this.parsedSource = `${parts.join("")}\n`; }
     }
     class FakeShadowRoot {
       setHTML(_html: string): void {}
       setHTMLUnsafe(_html: string): void {}
+    }
+    class FakeRange {
+      createContextualFragment(source: string): FakeDocumentFragment {
+        const fragment = new FakeDocumentFragment();
+        fragment.source = source;
+        return fragment;
+      }
+    }
+    class FakeDOMParser {
+      parseFromString(_source: string, _type: string): object { return {}; }
     }
     const context = {
       document: new FakeDocument(),
@@ -265,6 +410,8 @@ describe("agent browser semantic snapshots", () => {
       DOMImplementation: FakeDOMImplementation,
       DocumentFragment: FakeDocumentFragment,
       ShadowRoot: FakeShadowRoot,
+      Range: FakeRange,
+      DOMParser: FakeDOMParser,
       EventTarget: FakeEventTarget,
       Event: FakeEvent,
     };
@@ -280,9 +427,19 @@ describe("agent browser semantic snapshots", () => {
       Document.parseHTMLUnsafe('<template shadowrootmode=closed>private</template>');
       new ShadowRoot().setHTML('<template shadowrootmode=closed>private</template>');
       new ShadowRoot().setHTMLUnsafe('<template shadowrootmode=closed>private</template>');
+      const passwordMarkup = '<input type="password" value="hunter2">';
+      new Element().innerHTML = passwordMarkup;
+      new Element().outerHTML = passwordMarkup;
+      new Element().insertAdjacentHTML('beforeend', passwordMarkup);
+      new Range().createContextualFragment(passwordMarkup);
+      new DOMParser().parseFromString(passwordMarkup, 'text/html');
+      new Element().setHTMLUnsafe(passwordMarkup);
+      Document.parseHTMLUnsafe(passwordMarkup);
+      new Document().write('<input type="password" ', 'value="hunter2">');
+      new Document().writeln('<input type="password" ', 'value="hunter2">');
     `, context);
 
-    expect(dispatched).toEqual(Array(6).fill("nested-boundary"));
+    expect(dispatched).toEqual(Array(15).fill("nested-boundary"));
 
     runInNewContext(`
       new Element().setHTML('<p>ordinary</p>');
@@ -294,11 +451,19 @@ describe("agent browser semantic snapshots", () => {
       new Element().setHTML('<!-- <template shadowrootmode=open> -->');
       new Element().setHTML('<template data-shadowrootmode=open></template>');
       new Element().setHTML('<template></template><div shadowrootmode=open></div>');
+      const ordinaryMarkup = '<input type="text" value="brief note">';
+      new Element().innerHTML = ordinaryMarkup;
+      new Element().outerHTML = ordinaryMarkup;
+      new Element().insertAdjacentHTML('beforeend', ordinaryMarkup);
+      new Range().createContextualFragment(ordinaryMarkup);
+      new DOMParser().parseFromString(ordinaryMarkup, 'text/html');
+      new Document().write('<p>', 'ordinary</p>');
+      new Document().writeln('<input type="text" ', 'value="brief note">');
     `, context);
-    expect(dispatched).toHaveLength(6);
+    expect(dispatched).toHaveLength(15);
 
     runInNewContext("new Element().setHTML('x'.repeat(4097))", context);
-    expect(dispatched).toEqual(Array(7).fill("nested-boundary"));
+    expect(dispatched).toEqual(Array(16).fill("nested-boundary"));
   });
 
   it("keeps oversized Unicode snapshots valid within the provider byte limit", () => {

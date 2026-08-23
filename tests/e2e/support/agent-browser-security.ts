@@ -2,6 +2,7 @@ import { expect, type Locator } from "@playwright/test";
 
 import { AGENT_BROWSER_WORLD_ID } from "../../../src/main/preview-agent-page";
 import type { AppFixture } from "./app-fixture";
+import { NATIVE_CREDENTIAL_AUDIT_ROUTES } from "./agent-browser-fixture-pages";
 
 export async function captureAgentBrowserSnapshot(
   app: AppFixture,
@@ -199,7 +200,96 @@ export async function expectPasswordAssignmentPrivacyGuard(
   url: string,
   preview: Locator,
 ): Promise<void> {
-  await expectDocumentStartPrivacyGuard(app, conversationId, url, "hunter2");
+  const previousTabId = await app.electronApp.evaluate(
+    async (_electron, id) => {
+      const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
+        agentBrowser: (
+          conversationId: string,
+          command: { action: "tabs" },
+        ) => Promise<{ ok: boolean; state?: { activeTabId: string } }>;
+      };
+      const tabs = await runtime.agentBrowser(id, { action: "tabs" });
+      return tabs.ok ? tabs.state?.activeTabId : undefined;
+    },
+    conversationId,
+  );
+  expect(previousTabId).toBeTruthy();
+  const audit = [];
+  for (const route of NATIVE_CREDENTIAL_AUDIT_ROUTES) {
+    const routeUrl = `${url}?route=${encodeURIComponent(route)}`;
+    const status = await app.electronApp.evaluate(
+      async ({ webContents }, request) => {
+        const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
+          agentBrowser: (id: string, command: { action: "tab-open" | "tab-close" | "snapshot" | "screenshot"; url?: string; tabId?: string }) => Promise<{
+            code?: string;
+            ok: boolean;
+            state?: { activeTabId: string };
+          }>;
+        };
+        const opened = await runtime.agentBrowser(request.conversationId, {
+          action: "tab-open",
+          url: request.url,
+        });
+        if (!opened.ok || !opened.state) return { route: request.route, opened };
+        const tabId = opened.state.activeTabId;
+        const contents = webContents.getAllWebContents().find(
+          (candidate) => candidate.getURL() === request.url,
+        );
+        const page = await contents?.executeJavaScript("window.__credentialRouteStatus");
+        const snapshot = await runtime.agentBrowser(request.conversationId, { action: "snapshot" });
+        const screenshot = await runtime.agentBrowser(request.conversationId, { action: "screenshot" });
+        const closed = await runtime.agentBrowser(request.conversationId, {
+          action: "tab-close",
+          tabId,
+        });
+        return { closed, opened, page, route: request.route, screenshot, snapshot };
+      },
+      { conversationId, route, url: routeUrl },
+    );
+    audit.push(status);
+  }
+  const restored = await app.electronApp.evaluate(
+    async (_electron, request) => {
+      const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
+        agentBrowser: (
+          conversationId: string,
+          command: { action: "tab-activate"; tabId: string },
+        ) => Promise<{ ok: boolean }>;
+      };
+      return await runtime.agentBrowser(request.conversationId, {
+        action: "tab-activate",
+        tabId: request.tabId,
+      });
+    },
+    { conversationId, tabId: previousTabId! },
+  );
+  expect(restored).toMatchObject({ ok: true });
+  const results = audit.map((result) => {
+    const current = result as {
+      closed?: { ok?: boolean };
+      opened?: { ok?: boolean };
+      page?: { produced?: boolean; route?: string; supported?: boolean };
+      route?: string;
+      screenshot?: { code?: string; ok?: boolean };
+      snapshot?: { code?: string; ok?: boolean };
+    };
+    return {
+      closed: current.closed?.ok,
+      opened: current.opened?.ok,
+      page: current.page,
+      route: current.route,
+      screenshot: { code: current.screenshot?.code, ok: current.screenshot?.ok },
+      snapshot: { code: current.snapshot?.code, ok: current.snapshot?.ok },
+    };
+  });
+  expect(results).toEqual(NATIVE_CREDENTIAL_AUDIT_ROUTES.map((route) => ({
+    closed: true,
+    opened: true,
+    page: { produced: true, route, supported: true },
+    route,
+    screenshot: { code: "invalid", ok: false },
+    snapshot: { code: "invalid", ok: false },
+  })));
   await preview.getByRole("button", { name: /Evidence/u }).click();
   const evidence = preview.getByRole("list", { name: "Browser evidence timeline" });
   await expect(evidence).not.toContainText("hunter2");

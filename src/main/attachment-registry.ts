@@ -928,7 +928,13 @@ export class AttachmentRegistry {
   }
 
   async releaseFromRenderer(id: string): Promise<boolean> {
-    return await this.startRelease(id, !this.attachmentHandoffs.has(id));
+    try {
+      return await this.startRelease(id, !this.attachmentHandoffs.has(id));
+    } catch (error) {
+      const record = this.records.get(id);
+      if (record) this.retireForPendingCleanup(record);
+      throw error;
+    }
   }
 
   private async startRelease(
@@ -1087,13 +1093,17 @@ export class AttachmentRegistry {
       // The capability was never published to its caller, so it cannot be
       // retried through release. Retire it while conservatively retaining its
       // quota until disposal or restart cleanup can unlink the private file.
-      if (this.records.get(record.id) === record) {
-        this.records.delete(record.id);
-      }
-      this.dropAttachmentHandoffs(record.id);
-      this.revokedAttachmentIds.delete(record.id);
-      this.pendingPaths.set(record.path, record.size);
+      this.retireForPendingCleanup(record);
     }
+  }
+
+  private retireForPendingCleanup(record: AttachmentRegistryRecord): void {
+    if (this.records.get(record.id) === record) {
+      this.records.delete(record.id);
+    }
+    this.dropAttachmentHandoffs(record.id);
+    this.revokedAttachmentIds.delete(record.id);
+    this.pendingPaths.set(record.path, record.size);
   }
 
   private async persistAndValidate(

@@ -657,6 +657,40 @@ describe("main-owned attachment registry", () => {
     await expect(readdir(directory)).resolves.toEqual([]);
   });
 
+  it("retires a renderer release when unlink retries are exhausted", async () => {
+    const unlinkFile = vi.fn<(path: string) => Promise<void>>()
+      .mockRejectedValue(Object.assign(
+        new Error("file remains locked"),
+        { code: "EPERM" },
+      ));
+    const { directory, registry: attachments } = await registry({
+      maxRecords: 1,
+      maxBytes: png.length,
+    }, unlinkFile, async () => undefined);
+    const [attachment] = await attachments.import([{
+      name: "renderer-owned.png",
+      mimeType: "image/png",
+      data: png,
+    }]);
+
+    await expect(attachments.releaseFromRenderer(attachment!.id))
+      .rejects.toThrow("file remains locked");
+
+    expect(unlinkFile).toHaveBeenCalledTimes(3);
+    await expect(attachments.preview(attachment!.id)).resolves.toBeNull();
+    expect(attachments.usage()).toEqual({
+      records: 1,
+      bytes: png.length,
+    });
+    await expect(attachments.import([{
+      name: "blocked-after-renderer-release.png",
+      mimeType: "image/png",
+      data: png,
+    }])).rejects.toThrow(/storage is full/u);
+    await attachments.dispose();
+    await expect(readdir(directory)).resolves.toEqual([]);
+  });
+
   it("cancels validation and removes its unpublished staged file", async () => {
     const { directory, registry: attachments } = await registry({
       validationDelayMs: 5_000,

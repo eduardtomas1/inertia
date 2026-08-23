@@ -47,6 +47,9 @@ describe("Browser evidence ledger", () => {
     "sessionId=x",
     "secretKey: y",
     "ClientSecret=z",
+    "authTokenValue=x",
+    "apiKeyValue=y",
+    "clientSecretValue=z",
     "\"SessionId\":\"q\"",
   ])("fails closed before storing page-authored credential assignment: %s", (message) => {
     const ledger = new BrowserEvidenceLedger();
@@ -61,6 +64,8 @@ describe("Browser evidence ledger", () => {
     "tokenize=ok",
     "SessionIdentity=ok",
     "ClientSecretariat=ok",
+    "authTokenValueCount=4",
+    "ClientSecretValueObject=ok",
   ])("keeps a non-credential page-authored identifier: %s", (message) => {
     const ledger = new BrowserEvidenceLedger();
     ledger.recordConsoleError({ ...location, message });

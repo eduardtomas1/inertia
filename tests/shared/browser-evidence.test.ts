@@ -47,6 +47,10 @@ describe("Browser evidence sanitization", () => {
     "sessionId=private-value",
     "secretKey: private-value",
     "ClientSecret=private-value",
+    "authTokenValue=x",
+    "apiKeyValue=y",
+    "clientSecretValue=z",
+    "SessionIdValues=q",
     "CLIENT_SECRET_KEY=private-value",
     "\"oauthAccessToken\":\"private-value\"",
     "\"SessionId\":\"private-value\"",
@@ -87,6 +91,9 @@ describe("Browser evidence sanitization", () => {
     "SessionIdentity=public-value",
     "ApiKeynote=public-value",
     "ClientSecretariat=public-value",
+    "authTokenValueCount=4",
+    "ApiKeyValueFactory=public-value",
+    "ClientSecretValueObject=public-value",
   ])("does not treat a camel-case suffix substring as a credential field: %s", (value) => {
     expect(sanitizeBrowserEvidenceText(value, "hidden"))
       .toEqual({ text: value, redacted: false });

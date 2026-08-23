@@ -40,6 +40,7 @@ interface BrowserEvidenceCaptureOptions {
 export class BrowserEvidenceCapture {
   readonly #ledger = new BrowserEvidenceLedger();
   readonly #networkRequests = new Map<number, BrowserEvidenceLocation>();
+  #consoleCommitQueue = Promise.resolve();
   #session: Session | null = null;
   #pageEvents = 0;
   #limited = false;
@@ -142,6 +143,7 @@ export class BrowserEvidenceCapture {
     authority?: BrowserEvidenceAuthority,
   ): void {
     if (!this.options.isLive() || !this.#reservePageEvent()) return;
+    const occurredAt = new Date().toISOString();
     const boundedMessage = typeof message === "string"
       ? message.slice(0, 8_192)
       : "";
@@ -149,13 +151,17 @@ export class BrowserEvidenceCapture {
       if (!this.options.isLive() || !this.options.isCurrent(page)) return;
       this.#ledger.recordConsoleError({
         ...this.#location(page, authority),
+        occurredAt,
         message: boundedMessage,
         sensitiveDocument,
       });
       this.options.publish();
     };
-    void this.options.sensitiveDocument(page.contents)
-      .then(commit, () => commit(true));
+    const inspection = this.options.sensitiveDocument(page.contents)
+      .then((sensitiveDocument) => sensitiveDocument, () => true);
+    this.#consoleCommitQueue = this.#consoleCommitQueue.then(async () => {
+      commit(await inspection);
+    });
   }
 
   recordAgentAction(

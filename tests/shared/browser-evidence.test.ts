@@ -27,6 +27,8 @@ describe("Browser evidence sanitization", () => {
 
   it.each([
     "Authorization: Bearer private-value",
+    "oauth_access_token=private-value",
+    "prefix_auth_token: private-value",
     "Cookie=session=private-value",
     "Set-Cookie: session=private-value",
     "password=private-value",
@@ -39,6 +41,22 @@ describe("Browser evidence sanitization", () => {
   ])("fails closed for credential-bearing console detail: %s", (value) => {
     expect(sanitizeBrowserEvidenceText(value, "Sensitive console detail hidden"))
       .toEqual({ text: "Sensitive console detail hidden", redacted: true });
+  });
+
+  it.each([
+    "prefix_Bearer private-value",
+    "prefix_sk-abcdefgh12345678",
+    "prefix_eyJabcdefgh.ijklmnop.qrstuvwx",
+    "prefix_abcdefghijklmno1234567890qrstuv",
+  ])("redacts secret values attached to identifier separators: %s", (value) => {
+    const result = sanitizeBrowserEvidenceText(value, "hidden");
+    expect(result.redacted).toBe(true);
+    expect(result.text).not.toContain(value.slice("prefix_".length));
+  });
+
+  it("does not treat a sensitive-field substring in normal prose as a field", () => {
+    expect(sanitizeBrowserEvidenceText("The obsession ended normally.", "hidden"))
+      .toEqual({ text: "The obsession ended normally.", redacted: false });
   });
 
   it("fails closed for malformed page-authored percent encoding", () => {

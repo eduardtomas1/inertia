@@ -51,6 +51,15 @@ export const CODEX_APP_SERVER_HARNESS_CAPABILITIES = {
   },
 } as const satisfies CodexAppServerHarnessCapabilities;
 
+const MAX_CODEX_COMPACTION_CANDIDATES = 32;
+const CODEX_COMPACTION_TURN_SUFFIX_LIMIT =
+  MAX_CODEX_COMPACTION_CANDIDATES + 1;
+
+interface CodexCompactionCandidate {
+  successful: boolean;
+  turnId: string;
+}
+
 function codexServiceTier(
   input: AgentHarnessStartOptions["input"],
 ): "priority" | null | undefined {
@@ -64,6 +73,7 @@ function codexServiceTier(
 }
 
 export interface CodexAppServerHarnessDependencies {
+  compactionTimeoutMs?: number;
   withControlClient?: typeof withCodexControlClient;
 }
 
@@ -305,19 +315,57 @@ function startCodexCompaction(
         modelProvider: options.harnessConfiguration,
       });
       const serviceTier = codexServiceTier(options.input);
-      let resolveCompaction!: () => void;
-      let compactionInitiated = false;
+      let compactionRequested = false;
       let compactionItemId: string | null = null;
+      let compactionItemCompleted = false;
       let compactionTurnId: string | null = null;
       let compactionStartedAtMs: number | null = null;
-      const compacted = new Promise<void>((resolve, reject) => {
-        resolveCompaction = resolve;
-        completionTimer = setTimeout(
-          () => reject(new Error("Codex context compaction timed out.")),
-          PROVIDER_COMPACTION_OPERATION_TIMEOUT_MS,
-        );
-        completionTimer.unref();
-      });
+      const candidates: CodexCompactionCandidate[] = [];
+      let observedCandidateCount = 0;
+      let candidateFailure: Error | undefined;
+      let candidateWaiter: {
+        reject: (error: Error) => void;
+        resolve: (candidate: CodexCompactionCandidate) => void;
+      } | undefined;
+      const failCandidates = (error: Error): void => {
+        if (candidateFailure) return;
+        candidateFailure = error;
+        candidateWaiter?.reject(error);
+        candidateWaiter = undefined;
+      };
+      const enqueueCandidate = (
+        candidate: CodexCompactionCandidate,
+      ): void => {
+        if (candidateFailure) return;
+        if (observedCandidateCount >= MAX_CODEX_COMPACTION_CANDIDATES) {
+          failCandidates(new Error(
+            "Codex context compaction returned too many lifecycle candidates.",
+          ));
+          return;
+        }
+        observedCandidateCount += 1;
+        if (candidateWaiter) {
+          const waiter = candidateWaiter;
+          candidateWaiter = undefined;
+          waiter.resolve(candidate);
+          return;
+        }
+        candidates.push(candidate);
+      };
+      const nextCandidate = (): Promise<CodexCompactionCandidate> => {
+        if (candidateFailure) return Promise.reject(candidateFailure);
+        const candidate = candidates.shift();
+        if (candidate) return Promise.resolve(candidate);
+        return new Promise((resolve, reject) => {
+          candidateWaiter = { reject, resolve };
+        });
+      };
+      completionTimer = setTimeout(
+        () => failCandidates(new Error("Codex context compaction timed out.")),
+        dependencies.compactionTimeoutMs
+          ?? PROVIDER_COMPACTION_OPERATION_TIMEOUT_MS,
+      );
+      completionTimer.unref();
       await (dependencies.withControlClient ?? withCodexControlClient)({
         executable: options.executable,
         environment: options.environment,
@@ -326,30 +374,62 @@ function startCodexCompaction(
         processLabel: "Codex compaction process tree",
         signal: abortController.signal,
         onNotification: (method, params) => {
-          // App Server does not expose a request/item correlation ID for
-          // thread/compact/start. Its bounded authority is therefore a
-          // matching terminal event on this one-shot control connection,
-          // after local request initiation and before the operation timeout.
-          // A buffered completion observed while resuming proves nothing.
-          if (!compactionInitiated) return;
+          // Codex may publish the compact turn lifecycle on either side of the
+          // empty thread/compact/start response. Collect bounded candidates
+          // once the request is about to be written; only a successful matching
+          // turn completion plus the durable suffix check below can authorize
+          // one as newly materialized.
+          if (!compactionRequested) return;
+          if (method === "turn/started") {
+            if (params.threadId !== sessionId) return;
+            const turnId = exactCodexLifecycleId(objectValue(params.turn)?.id);
+            if (turnId) {
+              compactionTurnId = turnId;
+              compactionItemId = null;
+              compactionItemCompleted = false;
+              compactionStartedAtMs = null;
+            }
+            return;
+          }
+          if (method === "turn/completed") {
+            if (params.threadId !== sessionId) return;
+            const turn = objectValue(params.turn);
+            const turnId = exactCodexLifecycleId(turn?.id);
+            const status = turn?.status;
+            if (
+              !turnId
+              || turnId !== compactionTurnId
+              || !compactionItemCompleted
+              || (
+                status !== "completed"
+                && status !== "failed"
+                && status !== "interrupted"
+              )
+            ) return;
+            compactionTurnId = null;
+            compactionItemId = null;
+            compactionItemCompleted = false;
+            compactionStartedAtMs = null;
+            enqueueCandidate({
+              successful: status === "completed",
+              turnId,
+            });
+            return;
+          }
           if (method !== "item/started" && method !== "item/completed") return;
           if (params.threadId !== sessionId) return;
           const item = objectValue(params.item);
           if (item?.type !== "contextCompaction") return;
           const itemId = exactCodexLifecycleId(item.id);
           const turnId = exactCodexLifecycleId(params.turnId);
-          if (!itemId || !turnId) return;
+          if (!itemId || !turnId || turnId !== compactionTurnId) return;
           if (method === "item/started") {
             const startedAtMs = params.startedAtMs;
             if (
               typeof startedAtMs !== "number"
               || !Number.isSafeInteger(startedAtMs)
             ) return;
-            // The ordered one-shot JSONL connection and compactionInitiated
-            // boundary establish authority. Comparing Date.now() values from
-            // separate processes is not reliable on every architecture.
             compactionItemId ??= itemId;
-            compactionTurnId ??= turnId;
             compactionStartedAtMs ??= startedAtMs;
             return;
           }
@@ -361,7 +441,9 @@ function startCodexCompaction(
             && typeof completedAtMs === "number"
             && Number.isSafeInteger(completedAtMs)
             && completedAtMs >= compactionStartedAtMs
-          ) resolveCompaction();
+          ) {
+            compactionItemCompleted = true;
+          }
         },
       }, async (client) => {
         const accessPolicy = codexAccessPolicy({
@@ -396,6 +478,11 @@ function startCodexCompaction(
         const resumed = await client.request("thread/resume", {
           threadId: sessionId,
           excludeTurns: true,
+          initialTurnsPage: {
+            limit: 1,
+            sortDirection: "desc",
+            itemsView: "summary",
+          },
           ...threadConfig,
         });
         const resumedThreadId = boundedText(
@@ -415,14 +502,40 @@ function startCodexCompaction(
             "Codex did not confirm the requested response service tier for compaction.",
           );
         }
+        const priorLatestTurnId = codexTurnIds(
+          resumed.initialTurnsPage,
+          "initial",
+          1,
+        )[0] ?? null;
         emitter.status("running");
-        const compactRequest = client.request(
-          "thread/compact/start",
-          { threadId: sessionId },
-        );
-        compactionInitiated = true;
-        await compactRequest;
-        await compacted;
+        compactionRequested = true;
+        await client.request("thread/compact/start", { threadId: sessionId });
+        for (;;) {
+          const candidate = await nextCandidate();
+          const latestTurns = await client.request("thread/turns/list", {
+            threadId: sessionId,
+            limit: CODEX_COMPACTION_TURN_SUFFIX_LIMIT,
+            sortDirection: "desc",
+            itemsView: "summary",
+          });
+          if (candidateFailure) throw candidateFailure;
+          const latestTurnIds = codexTurnIds(
+            latestTurns,
+            "latest",
+            CODEX_COMPACTION_TURN_SUFFIX_LIMIT,
+          );
+          if (!codexCandidateAppearsBeforeBaseline(
+            candidate.turnId,
+            priorLatestTurnId,
+            latestTurnIds,
+          )) continue;
+          if (!candidate.successful) {
+            throw new Error(
+              "Codex context compaction turn did not complete successfully.",
+            );
+          }
+          break;
+        }
       });
       emitter.status("completed");
       return {
@@ -485,6 +598,43 @@ function exactCodexLifecycleId(value: unknown): string | null {
     || value.includes("\0")
   ) return null;
   return value;
+}
+
+function codexTurnIds(
+  value: unknown,
+  source: string,
+  limit: number,
+): string[] {
+  const data = objectValue(value)?.data;
+  if (!Array.isArray(data) || data.length > limit) {
+    throw new Error(`Codex returned an invalid ${source} turn page.`);
+  }
+  const turnIds = data.map((turn) =>
+    exactCodexLifecycleId(objectValue(turn)?.id)
+  );
+  if (
+    turnIds.some((turnId) => !turnId)
+    || new Set(turnIds).size !== turnIds.length
+  ) {
+    throw new Error(`Codex returned invalid ${source} turn identities.`);
+  }
+  return turnIds as string[];
+}
+
+function codexCandidateAppearsBeforeBaseline(
+  candidateTurnId: string,
+  priorLatestTurnId: string | null,
+  latestTurnIds: string[],
+): boolean {
+  const candidateIndex = latestTurnIds.indexOf(candidateTurnId);
+  if (priorLatestTurnId === null) return candidateIndex >= 0;
+  const baselineIndex = latestTurnIds.indexOf(priorLatestTurnId);
+  if (baselineIndex < 0) {
+    throw new Error(
+      "Codex did not return the captured compaction turn baseline within its bounded latest-turn page.",
+    );
+  }
+  return candidateIndex >= 0 && candidateIndex < baselineIndex;
 }
 
 function inactiveCodexExtension(): AgentHarnessRun["extension"] {

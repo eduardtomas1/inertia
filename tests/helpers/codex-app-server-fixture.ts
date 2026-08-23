@@ -114,7 +114,7 @@ if (message.method === "thread/start" || message.method === "thread/resume") {
     return send({ id: message.id, result: { thread: { id: "thread-unrelated" }, cwd: process.cwd(), model: "fake", serviceTier: null } });
   }
   threadId = message.params.threadId || "thread-new";
-  send({ id: message.id, result: { thread: { id: threadId }, cwd: process.cwd(), model: "fake", serviceTier: message.params.serviceTier ?? null } });
+  send({ id: message.id, result: { thread: { id: threadId }, cwd: process.cwd(), model: "fake", serviceTier: message.params.serviceTier ?? null, initialTurnsPage: message.method === "thread/resume" ? { data: [{ id: "previous-turn" }] } : null } });
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "stale-completion") {
     send({ method: "turn/completed", params: { threadId, turn: { id: "stale-turn", status: "completed", items: [], error: null } } });
   }
@@ -122,9 +122,14 @@ if (message.method === "thread/start" || message.method === "thread/resume") {
 }
 if (message.method === "thread/compact/start") {
   send({ id: message.id, result: {} });
+  send({ method: "turn/started", params: { threadId, turn: { id: "compact-turn-1", status: "inProgress", items: [], error: null } } });
   send({ method: "item/started", params: { threadId, turnId: "compact-turn-1", startedAtMs: Date.now(), item: { id: "compact-1", type: "contextCompaction" } } });
   send({ method: "item/completed", params: { threadId, turnId: "compact-turn-1", completedAtMs: Date.now(), item: { id: "compact-1", type: "contextCompaction" } } });
+  send({ method: "turn/completed", params: { threadId, turn: { id: "compact-turn-1", status: "completed", items: [], error: null } } });
   return;
+}
+if (message.method === "thread/turns/list") {
+  return send({ id: message.id, result: { data: [{ id: "compact-turn-1" }, { id: "previous-turn" }] } });
 }
 if (message.method === "thread/goal/set") {
   if (process.env.INERTIA_APP_SERVER_SCENARIO === "goal-live-mutation-error") {

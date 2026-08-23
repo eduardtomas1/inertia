@@ -56,6 +56,7 @@ async function loadConversationDetailResult(
   socket: WebSocket,
   events: EventQueue,
   conversationId: string,
+  deadlineAt?: number,
 ): Promise<Extract<Extract<ServerEvent, { type: "request.result" }>["result"], { kind: "conversation.detail" }>> {
   const requestId = randomUUID();
   send(socket, {
@@ -63,12 +64,15 @@ async function loadConversationDetailResult(
     requestId,
     payload: { conversationId },
   });
-  const event = await events.next(
-    (candidate): candidate is Extract<ServerEvent, { type: "request.result" }> =>
-      candidate.type === "request.result"
-      && candidate.requestId === requestId
-      && candidate.result.kind === "conversation.detail",
-  );
+  const isConversationDetail = (
+    candidate: ServerEvent,
+  ): candidate is Extract<ServerEvent, { type: "request.result" }> =>
+    candidate.type === "request.result"
+    && candidate.requestId === requestId
+    && candidate.result.kind === "conversation.detail";
+  const event = deadlineAt === undefined
+    ? await events.next(isConversationDetail)
+    : await events.nextForRequest(requestId, isConversationDetail, deadlineAt);
   if (event.result.kind !== "conversation.detail") {
     throw new Error(`Expected a conversation detail result for ${conversationId}.`);
   }
@@ -78,8 +82,14 @@ async function loadConversationDetail(
   socket: WebSocket,
   events: EventQueue,
   conversationId: string,
+  deadlineAt?: number,
 ): Promise<ConversationDetail> {
-  const result = await loadConversationDetailResult(socket, events, conversationId);
+  const result = await loadConversationDetailResult(
+    socket,
+    events,
+    conversationId,
+    deadlineAt,
+  );
   if (result.state !== "ready") {
     throw new Error(`Expected ready conversation detail for ${conversationId}.`);
   }
@@ -1377,6 +1387,7 @@ process.exit(child.status ?? 1);
     const diff = parseUnifiedDiff((await getUnifiedDiff(workspace)).text);
     const file = diff.files[0]!;
     const targetFingerprint = diffFileFingerprint(file);
+    const requestDeadlineAt = Date.now() + 30_000;
 
     const stateRequestId = randomUUID();
     send(client.socket, {
@@ -1391,11 +1402,18 @@ process.exit(child.status ?? 1);
         reviewed: true,
       },
     });
-    await client.events.next(
+    await client.events.nextForRequest(
+      stateRequestId,
       (event): event is Extract<ServerEvent, { type: "request.ok" }> =>
         event.type === "request.ok" && event.requestId === stateRequestId,
+      requestDeadlineAt,
     );
-    expect((await loadConversationDetail(client.socket, client.events, conversationId)).reviewStates)
+    expect((await loadConversationDetail(
+      client.socket,
+      client.events,
+      conversationId,
+      requestDeadlineAt,
+    )).reviewStates)
       .toContainEqual(expect.objectContaining({
         conversationId,
         path: file.path,
@@ -1416,11 +1434,18 @@ process.exit(child.status ?? 1);
         body: "Keep this review checkpoint after the commit.",
       },
     });
-    await client.events.next(
+    await client.events.nextForRequest(
+      noteRequestId,
       (event): event is Extract<ServerEvent, { type: "request.ok" }> =>
         event.type === "request.ok" && event.requestId === noteRequestId,
+      requestDeadlineAt,
     );
-    expect((await loadConversationDetail(client.socket, client.events, conversationId)).reviewNotes)
+    expect((await loadConversationDetail(
+      client.socket,
+      client.events,
+      conversationId,
+      requestDeadlineAt,
+    )).reviewNotes)
       .toContainEqual(expect.objectContaining({
         conversationId,
         path: file.path,
@@ -1433,11 +1458,13 @@ process.exit(child.status ?? 1);
       requestId: statusRequestId,
       payload: { projectId, conversationId },
     });
-    const statusResult = await client.events.next(
+    const statusResult = await client.events.nextForRequest(
+      statusRequestId,
       (event): event is Extract<ServerEvent, { type: "request.result" }> =>
         event.type === "request.result"
         && event.requestId === statusRequestId
         && event.result.kind === "git.status",
+      requestDeadlineAt,
     );
     expect(statusResult.result.kind).toBe("git.status");
     if (statusResult.result.kind !== "git.status") throw new Error("Expected Git status.");
@@ -1455,11 +1482,13 @@ process.exit(child.status ?? 1);
         commitReview: true,
       },
     });
-    const diffResult = await client.events.next(
+    const diffResult = await client.events.nextForRequest(
+      diffRequestId,
       (event): event is Extract<ServerEvent, { type: "request.result" }> =>
         event.type === "request.result"
         && event.requestId === diffRequestId
         && event.result.kind === "git.diff",
+      requestDeadlineAt,
     );
     expect(diffResult.result.kind).toBe("git.diff");
     if (diffResult.result.kind !== "git.diff") throw new Error("Expected Git diff.");
@@ -1478,13 +1507,20 @@ process.exit(child.status ?? 1);
         reviewReceipt,
       },
     });
-    await client.events.next(
+    await client.events.nextForRequest(
+      commitRequestId,
       (event): event is Extract<ServerEvent, { type: "request.result" }> =>
         event.type === "request.result"
         && event.requestId === commitRequestId
         && event.result.kind === "git.action",
+      requestDeadlineAt,
     );
-    const invalidated = await loadConversationDetail(client.socket, client.events, conversationId);
+    const invalidated = await loadConversationDetail(
+      client.socket,
+      client.events,
+      conversationId,
+      requestDeadlineAt,
+    );
     expect(invalidated.reviewStates).toContainEqual(expect.objectContaining({
       conversationId,
       path: file.path,

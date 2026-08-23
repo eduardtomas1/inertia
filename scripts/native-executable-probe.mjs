@@ -60,7 +60,7 @@ function extendPosixOwnership(ownedPids, processes) {
   return processes.filter(({ pid }) => ownedPids.has(pid));
 }
 
-function readLsofRecords(args) {
+function readLsofRecords(args, diagnostics) {
   const result = spawnSync(
     POSIX_LSOF_PATH,
     [
@@ -79,6 +79,14 @@ function readLsofRecords(args) {
       timeout: PROCESS_TABLE_TIMEOUT_MS,
     },
   );
+  diagnostics?.push({
+    args,
+    error: result.error?.message ?? null,
+    signal: result.signal,
+    status: result.status,
+    stderr: result.stderr?.slice(0, 4_096) ?? "",
+    stdout: result.stdout?.slice(0, 8_192) ?? "",
+  });
   if (result.error || result.status !== 0) return null;
   return parseLsofRecords(result.stdout);
 }
@@ -134,6 +142,7 @@ export function readPosixProbePipeIdentities(
   child,
   readRecords = readLsofRecords,
   platform = process.platform,
+  diagnostics,
 ) {
   const descriptors = [
     childPipeDescriptor(child.stdout),
@@ -145,7 +154,7 @@ export function readPosixProbePipeIdentities(
       "-a",
       "-p", String(process.pid),
       "-d", descriptors.join(","),
-    ]);
+    ], diagnostics);
     if (!records) continue;
     const identities = new Set(
       records.map((record) => lsofPipeIdentity(record, platform)).filter(Boolean),
@@ -189,8 +198,23 @@ function createPosixProcessTracker(rootPid, child) {
   // The parent-side pipe handles outlive the provider root. Their kernel
   // identities therefore provide an ownership token for a detached child that
   // inherits stdout or stderr and reparents before any process-table snapshot.
-  const pipeToken = readPosixProbePipeIdentities(child);
-  if (!pipeToken) return null;
+  const diagnostics = [];
+  const pipeToken = readPosixProbePipeIdentities(
+    child,
+    readLsofRecords,
+    process.platform,
+    diagnostics,
+  );
+  if (!pipeToken) {
+    process.stderr.write(
+      `Native executable ownership initialization failed: ${JSON.stringify({
+        lsofPath: POSIX_LSOF_PATH,
+        platform: process.platform,
+        diagnostics,
+      })}\n`,
+    );
+    return null;
+  }
   const ownedPids = new Set([rootPid, ...pipeToken.ownerPids]);
   const refresh = () => {
     const pipeOwners = readPosixProbePipeOwners(pipeToken.identities);

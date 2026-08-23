@@ -180,9 +180,11 @@ export interface PreviewState {
   agentActivity: PreviewAgentActivity | null;
   evidence: BrowserEvidenceSnapshot;
 }
-export interface PreviewStateUpdate extends PreviewState {
+export interface PreviewStateUpdate extends Omit<PreviewState, "evidence"> {
   ownerId: "primary" | "secondary";
   contextId: string;
+  /** Included only when the bounded local evidence revision changes. */
+  evidence?: BrowserEvidenceSnapshot;
 }
 
 export type ProjectPathAction = "open-externally" | "reveal";

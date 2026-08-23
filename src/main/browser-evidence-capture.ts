@@ -50,6 +50,10 @@ export class BrowserEvidenceCapture {
     return this.#ledger.snapshot();
   }
 
+  revision(): number {
+    return this.#ledger.revision();
+  }
+
   image(id: string): BrowserEvidenceImage | null {
     return this.#ledger.image(id);
   }

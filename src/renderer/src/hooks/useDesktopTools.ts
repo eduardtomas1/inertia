@@ -3,7 +3,7 @@ import type { ChatAttachment } from "@shared/contracts";
 import type {
   BrowserEvidenceImage,
 } from "@shared/browser-evidence";
-import type { PreviewBounds, PreviewState } from "@shared/desktop";
+import type { PreviewBounds, PreviewState, PreviewStateUpdate } from "@shared/desktop";
 import type { AttachmentPickerMode } from "@shared/desktop";
 import {
   MAX_CHAT_ATTACHMENT_BYTES,
@@ -15,6 +15,27 @@ interface DesktopToolsOptions {
   setActionError: (message: string | null) => void;
   previewOwnerId?: "primary" | "secondary";
   previewContextId?: string | null;
+}
+
+interface OwnedPreviewState {
+  contextId: string | null;
+  url: string;
+  navigation: PreviewState;
+}
+
+export function mergePreviewStateUpdate(
+  current: OwnedPreviewState,
+  state: PreviewStateUpdate,
+): OwnedPreviewState {
+  const evidence = state.evidence
+    ?? (current.contextId === state.contextId
+      ? current.navigation.evidence
+      : emptyPreviewState().evidence);
+  return {
+    contextId: state.contextId,
+    url: state.url,
+    navigation: { ...state, evidence },
+  };
 }
 
 export function preflightComposerAttachmentFiles(
@@ -106,11 +127,7 @@ export function useDesktopTools({
 }: DesktopToolsOptions) {
   const authorityRef = useRef({ previewOwnerId, previewContextId });
   authorityRef.current = { previewOwnerId, previewContextId };
-  const [ownedPreview, setOwnedPreview] = useState<{
-    contextId: string | null;
-    url: string;
-    navigation: PreviewState;
-  }>({
+  const [ownedPreview, setOwnedPreview] = useState<OwnedPreviewState>({
     contextId: previewContextId,
     url: "",
     navigation: emptyPreviewState(),
@@ -129,11 +146,7 @@ export function useDesktopTools({
         state.ownerId !== authority.previewOwnerId
         || state.contextId !== authority.previewContextId
       ) return;
-      setOwnedPreview({
-        contextId: state.contextId,
-        url: state.url,
-        navigation: state,
-      });
+      setOwnedPreview((current) => mergePreviewStateUpdate(current, state));
     });
     return () => {
       unsubscribe();

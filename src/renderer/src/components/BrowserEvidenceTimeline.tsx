@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import type {
   BrowserEvidenceEntry,
   BrowserEvidenceImage,
@@ -162,4 +162,4 @@ export function BrowserEvidenceTimeline({
   );
 }
 
-export default BrowserEvidenceTimeline;
+export default memo(BrowserEvidenceTimeline);

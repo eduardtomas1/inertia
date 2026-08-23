@@ -372,6 +372,49 @@ describe("agent-owned native Browser", () => {
     expect(closed.tabs).toHaveLength(1);
   });
 
+  it("publishes evidence only when its revision changes during runaway title updates", async () => {
+    const contentsOffset = electronState.contents.length;
+    const { broker, window } = harness();
+    const initial = await broker.navigate({
+      ownerId: "primary",
+      contextId: conversationId,
+      url: "http://127.0.0.1:3000/",
+    });
+    const contents = electronState.contents[contentsOffset]!;
+    const send = window.webContents.send;
+    send.mockClear();
+
+    for (let frame = 0; frame < 64; frame += 1) {
+      contents.setTitle(`Animated frame ${frame}`);
+      contents.emit("page-title-updated");
+    }
+
+    expect(send).toHaveBeenCalledTimes(64);
+    const titleUpdates = send.mock.calls.map((call) => call[1] as Record<string, unknown>);
+    expect(titleUpdates.every((update) => !Object.hasOwn(update, "evidence"))).toBe(true);
+    expect(titleUpdates.at(-1)).toMatchObject({
+      tabs: [expect.objectContaining({ title: "Animated frame 63" })],
+    });
+
+    contents.emit("console-message", {
+      level: "error",
+      message: "Animation failed safely",
+      preventDefault: vi.fn(),
+    });
+    await vi.waitFor(() => expect(send.mock.calls.some((call) =>
+      Object.hasOwn(call[1] as object, "evidence"))).toBe(true));
+    const evidenceUpdates = send.mock.calls
+      .map((call) => call[1] as { evidence?: { revision: number; entries: unknown[] } })
+      .filter((update) => update.evidence !== undefined);
+    expect(evidenceUpdates).toHaveLength(1);
+    expect(evidenceUpdates[0]!.evidence).toMatchObject({
+      revision: initial.evidence.revision + 1,
+      entries: expect.arrayContaining([
+        expect.objectContaining({ kind: "console-error" }),
+      ]),
+    });
+  });
+
   it("returns semantic and visual evidence and renders exact visible interaction input", async () => {
     const contentsOffset = electronState.contents.length;
     const { broker, children } = harness();

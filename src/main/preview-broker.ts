@@ -53,6 +53,7 @@ interface PreviewSlot {
   agentQueue: Promise<void>;
   activeIdentity: AgentBrowserRunIdentity | null;
   evidence: BrowserEvidenceCapture;
+  publishedEvidenceRevision: number | null;
   nextPageNumber: number;
 }
 
@@ -539,23 +540,20 @@ export class PreviewBroker {
 
   #state(ownerId: PreviewOwner, contextId: string): PreviewState {
     const slot = this.#ownedSlot(ownerId, contextId);
-    const contents = slot ? this.#active(slot).view.webContents : undefined;
     return {
-      url: contents?.getURL() ?? "",
-      loading: contents?.isLoading() ?? false,
-      canGoBack: contents?.navigationHistory.canGoBack() ?? false,
-      canGoForward: contents?.navigationHistory.canGoForward() ?? false,
-      activeTabId: slot?.activeTabId ?? null,
-      tabs: slot ? [...slot.tabs.values()].map((tab) => this.#previewTab(tab)) : [],
-      agentActivity: slot?.activity ?? null,
-      evidence: slot?.evidence.snapshot() ?? {
-        revision: 0,
-        entries: [],
-        omitted: false,
-      },
+      ...this.#stateWithoutEvidence(slot),
+      evidence: slot?.evidence.snapshot() ?? { revision: 0, entries: [], omitted: false },
     };
   }
-
+  #stateWithoutEvidence(slot: PreviewSlot | undefined): Omit<PreviewState, "evidence"> {
+    const contents = slot ? this.#active(slot).view.webContents : undefined;
+    return {
+      url: contents?.getURL() ?? "", loading: contents?.isLoading() ?? false,
+      canGoBack: contents?.navigationHistory.canGoBack() ?? false, canGoForward: contents?.navigationHistory.canGoForward() ?? false,
+      activeTabId: slot?.activeTabId ?? null, agentActivity: slot?.activity ?? null,
+      tabs: slot ? [...slot.tabs.values()].map((tab) => this.#previewTab(tab)) : [],
+    };
+  }
   #agentState(slot: PreviewSlot): AgentBrowserState {
     return {
       activeTabId: slot.activeTabId,
@@ -563,15 +561,16 @@ export class PreviewBroker {
       activity: slot.activity,
     };
   }
-
   #publish(ownerId: PreviewOwner, contextId: string): void {
-    const window = this.options.getWindow();
-    if (!window || window.webContents.isDestroyed() || !this.#ownedSlot(ownerId, contextId)) return;
+    const window = this.options.getWindow(), slot = this.#ownedSlot(ownerId, contextId);
+    if (!window || window.webContents.isDestroyed() || !slot) return;
+    const evidenceRevision = slot.evidence.revision(), publishEvidence = slot.publishedEvidenceRevision !== evidenceRevision;
     window.webContents.send(this.options.stateChannel, {
-      ownerId,
-      contextId,
-      ...this.#state(ownerId, contextId),
+      ownerId, contextId,
+      ...this.#stateWithoutEvidence(slot),
+      ...(publishEvidence ? { evidence: slot.evidence.snapshot() } : {}),
     });
+    if (publishEvidence) slot.publishedEvidenceRevision = evidenceRevision;
   }
 
   #ensure(ownerId: PreviewOwner, contextId: string): PreviewSlot {
@@ -603,6 +602,7 @@ export class PreviewBroker {
       agentQueue: Promise.resolve(),
       activeIdentity: null,
       evidence,
+      publishedEvidenceRevision: null,
       nextPageNumber: 0,
     };
     const tab = this.#openTab(ownerId, slot);

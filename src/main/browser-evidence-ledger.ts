@@ -95,6 +95,10 @@ export class BrowserEvidenceLedger {
     };
   }
 
+  revision(): number {
+    return this.#revision;
+  }
+
   markOmitted(): boolean {
     if (this.#omitted) return false;
     this.#omitted = true;

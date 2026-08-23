@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   type ComposerAttachmentImportBatch,
   importComposerAttachmentFilesSequentially,
+  mergePreviewStateUpdate,
   preflightComposerAttachmentFiles,
 } from "../../src/renderer/src/hooks/useDesktopTools";
 import {
@@ -188,5 +189,52 @@ describe("desktop attachment preflight", () => {
 
     expect(importOne).not.toHaveBeenCalled();
     expect(batch.cancel).toHaveBeenCalledExactlyOnceWith(batchId);
+  });
+});
+
+describe("desktop preview evidence projection", () => {
+  it("retains the evidence reference until a revision update is published", () => {
+    const evidence = { revision: 7, entries: [], omitted: false };
+    const current = {
+      contextId: "chat-one",
+      url: "http://127.0.0.1:3000/",
+      navigation: {
+        url: "http://127.0.0.1:3000/",
+        loading: false,
+        canGoBack: false,
+        canGoForward: false,
+        activeTabId: "tab-one",
+        tabs: [],
+        agentActivity: null,
+        evidence,
+      },
+    };
+    const titleOnly = mergePreviewStateUpdate(current, {
+      ownerId: "primary",
+      contextId: "chat-one",
+      url: current.url,
+      loading: false,
+      canGoBack: false,
+      canGoForward: false,
+      activeTabId: "tab-one",
+      tabs: [{ id: "tab-one", title: "Animated", url: current.url, loading: false }],
+      agentActivity: null,
+    });
+    expect(titleOnly.navigation.evidence).toBe(evidence);
+
+    const changedEvidence = { revision: 8, entries: [], omitted: false };
+    const changed = mergePreviewStateUpdate(titleOnly, {
+      ownerId: "primary",
+      contextId: "chat-one",
+      url: current.url,
+      loading: false,
+      canGoBack: false,
+      canGoForward: false,
+      activeTabId: "tab-one",
+      tabs: titleOnly.navigation.tabs,
+      agentActivity: null,
+      evidence: changedEvidence,
+    });
+    expect(changed.navigation.evidence).toBe(changedEvidence);
   });
 });

@@ -19,4 +19,5 @@ const descendant = spawn(process.execPath, [
 });
 if (!descendant.pid) throw new Error("The probe descendant did not start.");
 writeFileSync(pidFile, String(descendant.pid));
-setTimeout(() => process.exit(0), 100);
+if (process.env.INERTIA_PROBE_KEEP_ROOT === "1") setInterval(() => {}, 60_000);
+else process.exit(0);

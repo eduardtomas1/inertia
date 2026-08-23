@@ -40,33 +40,34 @@ function forceCleanup(pid: number): void {
   try { process.kill(pid, "SIGKILL"); } catch { /* The process may already be gone. */ }
 }
 
-test("tracks a separate process group after the native executable root exits", async () => {
-  const temporaryDirectory = await mkdtemp(join(tmpdir(), "inertia-native-probe-"));
-  const pidFile = join(temporaryDirectory, "descendant.pid");
-  const rootPidFile = join(temporaryDirectory, "root.pid");
-  let descendantPid = 0;
-  let rootPid = 0;
-  try {
-    const moduleUrl = pathToFileURL(join(root, "scripts", "native-executable-probe.mjs")).href;
-    const { probeNativeExecutable } = await import(moduleUrl) as {
-      probeNativeExecutable: (
-        command: string,
-        args: string[],
-        options: { environment: NodeJS.ProcessEnv; timeoutMs: number },
-      ) => Promise<unknown>;
-    };
-    const startedAt = Date.now();
-    const probe = probeNativeExecutable(process.execPath, [
-      join(import.meta.dirname, "..", "fixtures", "native-executable-probe-child.mjs"),
-    ], {
-      environment: {
-        INERTIA_PROBE_PID_FILE: pidFile,
-        INERTIA_PROBE_ROOT_PID_FILE: rootPidFile,
-      },
-      timeoutMs: 1_000,
-    });
-    const deadlineFailure = expect(probe).rejects.toThrow("exceeded its 1000ms deadline");
-    if (process.platform !== "win32") {
+test.skipIf(process.platform === "win32")(
+  "tracks an inherited probe pipe when the native executable root exits immediately",
+  async () => {
+    const temporaryDirectory = await mkdtemp(join(tmpdir(), "inertia-native-probe-"));
+    const pidFile = join(temporaryDirectory, "descendant.pid");
+    const rootPidFile = join(temporaryDirectory, "root.pid");
+    let descendantPid = 0;
+    let rootPid = 0;
+    try {
+      const moduleUrl = pathToFileURL(join(root, "scripts", "native-executable-probe.mjs")).href;
+      const { probeNativeExecutable } = await import(moduleUrl) as {
+        probeNativeExecutable: (
+          command: string,
+          args: string[],
+          options: { environment: NodeJS.ProcessEnv; timeoutMs: number },
+        ) => Promise<unknown>;
+      };
+      const startedAt = Date.now();
+      const probe = probeNativeExecutable(process.execPath, [
+        join(import.meta.dirname, "..", "fixtures", "native-executable-probe-child.mjs"),
+      ], {
+        environment: {
+          INERTIA_PROBE_PID_FILE: pidFile,
+          INERTIA_PROBE_ROOT_PID_FILE: rootPidFile,
+        },
+        timeoutMs: 1_000,
+      });
+      const deadlineFailure = expect(probe).rejects.toThrow("exceeded its 1000ms deadline");
       const pidFileDeadline = Date.now() + 750;
       while (!descendantPid && Date.now() < pidFileDeadline) {
         try {
@@ -83,25 +84,67 @@ test("tracks a separate process group after the native executable root exits", a
       );
       expect(group.status).toBe(0);
       expect(Number(group.stdout.trim())).toBe(descendantPid);
+      rootPid = Number(await readFile(rootPidFile, "utf8"));
+      expect(Number.isSafeInteger(rootPid)).toBe(true);
+      const rootExitDeadline = Date.now() + 750;
+      while (processExists(rootPid) && Date.now() < rootExitDeadline) {
+        await new Promise((resolveWait) => setTimeout(resolveWait, 10));
+      }
+      expect(processExists(rootPid)).toBe(false);
+      expect(processExists(descendantPid)).toBe(true);
+      await deadlineFailure;
+      expect(Date.now() - startedAt).toBeLessThan(5_000);
+      await waitForExit(descendantPid);
+    } finally {
+      forceCleanup(descendantPid);
+      await rm(temporaryDirectory, { force: true, recursive: true });
     }
-    rootPid = Number(await readFile(rootPidFile, "utf8"));
-    expect(Number.isSafeInteger(rootPid)).toBe(true);
-    const rootExitDeadline = Date.now() + 750;
-    while (processExists(rootPid) && Date.now() < rootExitDeadline) {
-      await new Promise((resolveWait) => setTimeout(resolveWait, 10));
+  },
+);
+
+test.skipIf(process.platform !== "win32")(
+  "preserves taskkill process-tree cleanup for a live Windows root",
+  async () => {
+    const temporaryDirectory = await mkdtemp(join(tmpdir(), "inertia-native-probe-win32-"));
+    const pidFile = join(temporaryDirectory, "descendant.pid");
+    const rootPidFile = join(temporaryDirectory, "root.pid");
+    let descendantPid = 0;
+    try {
+      const moduleUrl = pathToFileURL(join(root, "scripts", "native-executable-probe.mjs")).href;
+      const { probeNativeExecutable } = await import(moduleUrl) as {
+        probeNativeExecutable: (
+          command: string,
+          args: string[],
+          options: { environment: NodeJS.ProcessEnv; timeoutMs: number },
+        ) => Promise<unknown>;
+      };
+      const probe = probeNativeExecutable(process.execPath, [
+        join(import.meta.dirname, "..", "fixtures", "native-executable-probe-child.mjs"),
+      ], {
+        environment: {
+          INERTIA_PROBE_KEEP_ROOT: "1",
+          INERTIA_PROBE_PID_FILE: pidFile,
+          INERTIA_PROBE_ROOT_PID_FILE: rootPidFile,
+        },
+        timeoutMs: 1_000,
+      });
+      const pidFileDeadline = Date.now() + 750;
+      while (!descendantPid && Date.now() < pidFileDeadline) {
+        try {
+          descendantPid = Number(await readFile(pidFile, "utf8"));
+        } catch {
+          await new Promise((resolveWait) => setTimeout(resolveWait, 10));
+        }
+      }
+      expect(Number.isSafeInteger(descendantPid)).toBe(true);
+      await expect(probe).rejects.toThrow("exceeded its 1000ms deadline");
+      await waitForExit(descendantPid);
+    } finally {
+      forceCleanup(descendantPid);
+      await rm(temporaryDirectory, { force: true, recursive: true });
     }
-    expect(processExists(rootPid)).toBe(false);
-    expect(processExists(descendantPid)).toBe(true);
-    await deadlineFailure;
-    expect(Date.now() - startedAt).toBeLessThan(5_000);
-    descendantPid ||= Number(await readFile(pidFile, "utf8"));
-    expect(Number.isSafeInteger(descendantPid)).toBe(true);
-    await waitForExit(descendantPid);
-  } finally {
-    forceCleanup(descendantPid);
-    await rm(temporaryDirectory, { force: true, recursive: true });
-  }
-});
+  },
+);
 
 test.skipIf(process.platform === "win32")(
   "terminates the separately grouped native PTY command on timeout",

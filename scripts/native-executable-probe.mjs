@@ -7,7 +7,7 @@ const CLEANUP_TIMEOUT_MS = 2_000;
 const PROCESS_TABLE_TIMEOUT_MS = 500;
 const PROCESS_TABLE_OUTPUT_LIMIT = 1024 * 1024;
 const PROCESS_GROUP_DISCOVERY_PASSES = 3;
-const PROCESS_TRACKING_INTERVAL_MS = 25;
+const POSIX_LSOF_PATH = process.platform === "darwin" ? "/usr/sbin/lsof" : "/usr/bin/lsof";
 
 function inheritedWindowsSystemRoot(environment = process.env) {
   const entry = Object.entries(environment).find(([name]) =>
@@ -59,6 +59,82 @@ function extendPosixOwnership(ownedPids, processes) {
   return processes.filter(({ pid }) => ownedPids.has(pid));
 }
 
+function readLsofRecords(args) {
+  const result = spawnSync(
+    POSIX_LSOF_PATH,
+    ["-n", "-P", ...args, "-F", "pfdin"],
+    {
+      encoding: "utf8",
+      env: {},
+      maxBuffer: PROCESS_TABLE_OUTPUT_LIMIT,
+      shell: false,
+      timeout: PROCESS_TABLE_TIMEOUT_MS,
+    },
+  );
+  if (result.error || result.status !== 0) return null;
+  const records = [];
+  let pid = 0;
+  let device = "";
+  let inode = "";
+  for (const line of result.stdout.split("\n")) {
+    const field = line.slice(0, 1);
+    const value = line.slice(1);
+    if (field === "p") pid = Number(value);
+    else if (field === "f") {
+      device = "";
+      inode = "";
+    } else if (field === "d") device = value;
+    else if (field === "i") inode = value;
+    else if (field === "n" && Number.isSafeInteger(pid) && pid > 1) {
+      records.push({ device, inode, name: value, pid });
+    }
+  }
+  return records;
+}
+
+function lsofPipeIdentity({ device, inode, name }) {
+  if (inode) return `inode:${device}:${inode}`;
+  if (!device || !name.startsWith("->")) return null;
+  return `endpoints:${[device, name.slice(2)].sort().join(":")}`;
+}
+
+function childPipeDescriptor(stream) {
+  const descriptor = stream?._handle?.fd;
+  return Number.isSafeInteger(descriptor) && descriptor >= 0 ? descriptor : null;
+}
+
+function readPosixProbePipeIdentities(child) {
+  const descriptors = [
+    childPipeDescriptor(child.stdout),
+    childPipeDescriptor(child.stderr),
+  ];
+  if (descriptors.some((descriptor) => descriptor === null)) return null;
+  const records = readLsofRecords([
+    "-a",
+    "-p", String(process.pid),
+    "-d", descriptors.join(","),
+  ]);
+  if (!records) return null;
+  const identities = new Set(records.map(lsofPipeIdentity).filter(Boolean));
+  return identities.size === descriptors.length ? identities : null;
+}
+
+function readPosixProbePipeOwners(pipeIdentities) {
+  const userId = process.getuid?.();
+  if (!Number.isSafeInteger(userId) || userId < 0) return null;
+  const records = readLsofRecords([
+    "-a",
+    "-u", String(userId),
+    "-d", "1,2",
+  ]);
+  if (!records) return null;
+  return new Set(
+    records
+      .filter((record) => pipeIdentities.has(lsofPipeIdentity(record)))
+      .map(({ pid }) => pid),
+  );
+}
+
 function signalProcess(target, signal, missingIsSuccess = true) {
   try {
     process.kill(target, signal);
@@ -69,42 +145,46 @@ function signalProcess(target, signal, missingIsSuccess = true) {
   }
 }
 
-function createPosixProcessTracker(rootPid) {
+function createPosixProcessTracker(rootPid, child) {
+  // The parent-side pipe handles outlive the provider root. Their kernel
+  // identities therefore provide an ownership token for a detached child that
+  // inherits stdout or stderr and reparents before any process-table snapshot.
+  const pipeIdentities = readPosixProbePipeIdentities(child);
+  if (!pipeIdentities) return null;
   const ownedPids = new Set([rootPid]);
-  let disposed = false;
   const refresh = () => {
-    if (disposed) return null;
+    const pipeOwners = readPosixProbePipeOwners(pipeIdentities);
+    if (!pipeOwners) return null;
+    for (const pipeOwner of pipeOwners) ownedPids.add(pipeOwner);
     const processes = readPosixProcessTable();
     if (processes) extendPosixOwnership(ownedPids, processes);
-    return processes;
+    return processes ? { pipeOwners, processes } : null;
   };
-  refresh();
-  const timer = setInterval(refresh, PROCESS_TRACKING_INTERVAL_MS);
-  timer.unref();
   return {
-    dispose() {
-      if (disposed) return;
-      disposed = true;
-      clearInterval(timer);
-    },
+    dispose() {},
     ownedPids,
     refresh,
   };
 }
 
 function forceTerminatePosixProcessTree(pid, tracker) {
-  // Freeze every process group whose leader has been observed as part of this
-  // probe. Tracking begins while the root is alive, so ownership survives a
-  // root that exits and reparents a pipe-holding descendant before timeout.
+  // Freeze every process group whose leader is owned by this probe. The probe
+  // pipe identities recover an inherited, pipe-holding descendant even when
+  // its root exited and it reparented before cleanup began.
   const ownedPids = tracker?.ownedPids ?? new Set([pid]);
-  tracker?.refresh();
-
   const ownedGroups = new Set();
   const individualPids = new Set();
-  let completeTreeSignaled = true;
+  const ownershipSnapshot = tracker?.refresh();
+  let completeTreeSignaled = tracker === null || ownershipSnapshot !== null;
+  for (const pipeOwner of ownershipSnapshot?.pipeOwners ?? []) {
+    individualPids.add(pipeOwner);
+    completeTreeSignaled = signalProcess(pipeOwner, "SIGSTOP") && completeTreeSignaled;
+  }
   let discoveryStable = false;
   for (let pass = 0; pass < PROCESS_GROUP_DISCOVERY_PASSES; pass += 1) {
-    const processes = readPosixProcessTable();
+    const processes = pass === 0 && ownershipSnapshot
+      ? ownershipSnapshot.processes
+      : readPosixProcessTable();
     if (!processes) {
       completeTreeSignaled = false;
       break;
@@ -201,7 +281,7 @@ export function probeNativeExecutable(command, args, options = {}) {
     });
     const processTracker = process.platform === "win32" || !child.pid
       ? null
-      : createPosixProcessTracker(child.pid);
+      : createPosixProcessTracker(child.pid, child);
     let stdout = "";
     let stderr = "";
     let outputBytes = 0;
@@ -209,6 +289,12 @@ export function probeNativeExecutable(command, args, options = {}) {
     let settled = false;
     let cleanupTimer;
     let deadlineTimer;
+
+    if (process.platform !== "win32" && child.pid && !processTracker) {
+      signalProcess(-child.pid, "SIGKILL");
+      rejectProbe(new Error("The native executable process ownership token could not be initialized."));
+      return;
+    }
 
     const settle = (callback) => {
       if (settled) return;

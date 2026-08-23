@@ -25,6 +25,7 @@ describe("supervised runtime process environment", () => {
     GIT_EXEC_PATH: "/tmp/sentinel-git-core",
     GITHUB_TOKEN: "sentinel-github-secret",
     GOOGLE_APPLICATION_CREDENTIALS: "/tmp/sentinel-google-credentials.json",
+    HOMEBREW_GITHUB_API_TOKEN: "sentinel-homebrew-token",
     HTTPS_PROXY: "https://secret@example.test",
     HTTP_PROXY: "https://secret@example.test",
     INERTIA_CODEX_BACKEND_TOKEN: "sentinel-broker-secret",
@@ -203,6 +204,17 @@ describe("supervised runtime process environment", () => {
       AWS_ENDPOINT_URL_BEDROCK_RUNTIME:
         parent.Aws_Endpoint_Url_Bedrock_Runtime,
       USERPROFILE: parent.UserProfile,
+    });
+  });
+
+  it("preserves reviewed Homebrew maintenance paths on macOS", () => {
+    expect(runtimeProcessEnvironment({
+      HOMEBREW_CACHE: "/Volumes/cache/homebrew",
+      HOMEBREW_GITHUB_API_TOKEN: "sentinel-homebrew-token",
+      HOMEBREW_PREFIX: "/Volumes/tools/homebrew",
+    }, "darwin")).toEqual({
+      HOMEBREW_CACHE: "/Volumes/cache/homebrew",
+      HOMEBREW_PREFIX: "/Volumes/tools/homebrew",
     });
   });
 

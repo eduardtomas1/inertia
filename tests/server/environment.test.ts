@@ -3,6 +3,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { PROVIDER_ROUTING_ENVIRONMENT_KEYS } from "../../src/node/provider-routing-environment";
 import {
   credentialFreeProviderEnvironment,
   executableCandidates,
@@ -217,6 +218,20 @@ describe.sequential("provider environment discovery", () => {
     expect(providerChildEnvironment("claude", source)).not.toHaveProperty(
       "INERTIA_LOGIN_SHELL_MARKER",
     );
+  });
+
+  it("recognizes every outer-boundary provider routing control", () => {
+    const source = Object.fromEntries(
+      PROVIDER_ROUTING_ENVIRONMENT_KEYS.map((key) => [key, "1"]),
+    );
+    const retained = new Set(
+      (["codex", "claude", "opencode"] as const).flatMap((providerId) =>
+        Object.keys(providerChildEnvironment(providerId, source))),
+    );
+
+    expect(PROVIDER_ROUTING_ENVIRONMENT_KEYS.filter(
+      (key) => !retained.has(key),
+    )).toEqual([]);
   });
 
   it("keeps desktop-session launch authority out of provider children", () => {

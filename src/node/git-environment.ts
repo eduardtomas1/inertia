@@ -16,4 +16,6 @@ export const GIT_LAUNCH_ENVIRONMENT_KEYS = [
   "GIT_SSH",
   "GIT_SSH_COMMAND",
   "GIT_SSH_VARIANT",
+  "GNUPGHOME",
+  "GPG_TTY",
 ] as const;

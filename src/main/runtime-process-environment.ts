@@ -1,4 +1,5 @@
 import { GIT_LAUNCH_ENVIRONMENT_KEYS } from "../node/git-environment";
+import { PROVIDER_ROUTING_ENVIRONMENT_KEYS } from "../node/provider-routing-environment";
 
 const RUNTIME_PROCESS_ENVIRONMENT_KEYS = [
   "APPDATA",
@@ -53,6 +54,7 @@ const RUNTIME_PROCESS_ENVIRONMENT_KEYS = [
   "XDG_DATA_HOME",
   "XDG_RUNTIME_DIR",
   ...GIT_LAUNCH_ENVIRONMENT_KEYS,
+  ...PROVIDER_ROUTING_ENVIRONMENT_KEYS,
 ] as const;
 
 function environmentValue(

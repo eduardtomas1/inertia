@@ -43,6 +43,34 @@ describe("Browser evidence ledger", () => {
     )).toBe(true);
   });
 
+  it.each([
+    "sessionId=x",
+    "secretKey: y",
+    "ClientSecret=z",
+    "\"SessionId\":\"q\"",
+  ])("fails closed before storing page-authored credential assignment: %s", (message) => {
+    const ledger = new BrowserEvidenceLedger();
+    ledger.recordConsoleError({ ...location, message });
+
+    const serialized = JSON.stringify(ledger.snapshot());
+    expect(serialized).toContain("Sensitive console detail hidden");
+    expect(serialized).not.toContain(message);
+  });
+
+  it.each([
+    "tokenize=ok",
+    "SessionIdentity=ok",
+    "ClientSecretariat=ok",
+  ])("keeps a non-credential page-authored identifier: %s", (message) => {
+    const ledger = new BrowserEvidenceLedger();
+    ledger.recordConsoleError({ ...location, message });
+
+    expect(ledger.snapshot().entries).toMatchObject([{
+      detail: message,
+      redacted: false,
+    }]);
+  });
+
   it("coalesces repeats and bounds metadata without losing monotonic sequence", () => {
     const ledger = new BrowserEvidenceLedger();
     ledger.recordConsoleError({ ...location, message: "render failed" });

@@ -472,6 +472,7 @@ export async function setAgentPageInputGuard(
   const updated = await execute(contents, `(() => {
     const state = globalThis.__inertiaAgentBrowser;
     if (state?.privacyGuardInstalled !== true) return false;
+    state.agentActivationKey = undefined;
     state.blockedAgentActivationKey = undefined;
     state.agentInputActive = ${active ? "true" : "false"};
     return true;

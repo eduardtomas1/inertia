@@ -947,6 +947,36 @@ describe("agent browser semantic snapshots", () => {
       expect(sequencePrevented, name).toHaveBeenCalledOnce();
       expect(sequenceStopped, name).toHaveBeenCalledOnce();
     }
+    const safeTarget = {
+      disabled: false,
+      getAttribute: () => null,
+      matches: () => false,
+    };
+    const lateDisabledTarget = {
+      disabled: false,
+      getAttribute: (name: string) => name === "aria-disabled" ? "true" : null,
+      matches: () => false,
+    };
+    const allowedKeydownPrevented = vi.fn();
+    activationListeners.get("keydown")?.({
+      composedPath: () => [safeTarget],
+      key: "Enter",
+      preventDefault: allowedKeydownPrevented,
+      stopImmediatePropagation: vi.fn(),
+    });
+    expect(allowedKeydownPrevented).not.toHaveBeenCalled();
+    for (const [name, key] of [["keypress", "Enter"], ["beforeinput", ""], ["input", ""], ["keyup", "Enter"]]) {
+      const sequencePrevented = vi.fn();
+      const sequenceStopped = vi.fn();
+      activationListeners.get(name)?.({
+        composedPath: () => [lateDisabledTarget],
+        key,
+        preventDefault: sequencePrevented,
+        stopImmediatePropagation: sequenceStopped,
+      });
+      expect(sequencePrevented, `late ${name}`).toHaveBeenCalledOnce();
+      expect(sequenceStopped, `late ${name}`).toHaveBeenCalledOnce();
+    }
     await setAgentPageInputGuard(contents as never, false);
     runInNewContext("globalThis.__inertiaAgentBrowser.passwordValues.clear()", context);
     inputListener?.({ composedPath: () => [{ tagName: "CREDENTIAL-HOST" }] });

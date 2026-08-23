@@ -113,8 +113,7 @@ async function createPreviewServer(): Promise<{
       return;
     }
     if (request.url === "/agent-browser-page") {
-      response.writeHead(200, {
-        "Content-Type": "text/html",
+      response.writeHead(200, { "Content-Type": "text/html",
         "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'",
       });
       response.end(
@@ -157,6 +156,23 @@ async function createPreviewServer(): Promise<{
         + "button.type='button';button.setAttribute('aria-disabled','true');"
         + "button.addEventListener('click',()=>{window.__closedDisabledActionClicked=true});"
         + "root.append(button);button.focus();window.__closedHostFocused=document.activeElement===host</script>",
+      );
+      return;
+    }
+    if (request.url === "/agent-browser-key-phase-interleave") {
+      response.writeHead(200, {
+        "Content-Type": "text/html",
+        "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline'",
+      });
+      response.end(
+        "<!doctype html><title>Activation phase focus interleave</title>"
+        + "<button id='safe-focus' type='button'>Safe focus</button>"
+        + "<button id='late-disabled' type='button' aria-disabled='true'>Late disabled</button>"
+        + "<script>const safe=document.querySelector('#safe-focus');const disabled=document.querySelector('#late-disabled');"
+        + "disabled.addEventListener('click',()=>{window.__lateDisabledClicked=true});"
+        + "safe.addEventListener('keydown',()=>disabled.focus());"
+        + "for(const name of ['keypress','keyup','beforeinput','input'])window.addEventListener(name,event=>{"
+        + "if(document.activeElement===disabled)disabled.click()},true)</script>",
       );
       return;
     }

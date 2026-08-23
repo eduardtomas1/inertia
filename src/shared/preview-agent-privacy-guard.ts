@@ -7,6 +7,7 @@ interface AgentBrowserPrivacyState {
   privacyGuardInstalled?: boolean;
   privacyObserver?: MutationObserver;
   agentInputActive?: boolean;
+  agentActivationKey?: "Enter" | "Space";
   blockedAgentActivationKey?: "Enter" | "Space";
   nestedContentObserved?: boolean;
 }
@@ -260,32 +261,45 @@ export function installPreviewAgentPrivacyGuard(): void {
     event.preventDefault();
     event.stopImmediatePropagation();
   };
-  activationTarget.addEventListener("keydown", (event) => {
-    if (!state.agentInputActive) return;
-    const key = activationKey(event);
-    if (!key) return;
-    const blocked = state.nestedContentObserved === true || event.composedPath().some((node) => {
+  const activationEventBlocked = (event: Event): boolean => (
+    state.nestedContentObserved === true || event.composedPath().some((node) => {
       const candidate = node as Partial<HTMLInputElement> | null;
       const input = inputElement(node);
       return input?.type.toLowerCase() === "file"
         || candidate?.matches?.(":disabled") === true
         || candidate?.disabled === true
         || String(candidate?.getAttribute?.("aria-disabled") || "").toLowerCase() === "true";
-    });
-    if (!blocked) return;
+    })
+  );
+  activationTarget.addEventListener("keydown", (event) => {
+    if (!state.agentInputActive) return;
+    const key = activationKey(event);
+    if (!key) return;
+    state.agentActivationKey = key;
+    if (!activationEventBlocked(event)) return;
     state.blockedAgentActivationKey = key;
     stopActivationEvent(event);
   }, true);
   for (const eventName of ["keypress", "keyup"] as const) {
     activationTarget.addEventListener(eventName, (event) => {
-      if (!state.agentInputActive || activationKey(event) !== state.blockedAgentActivationKey) return;
-      stopActivationEvent(event);
-      if (eventName === "keyup") state.blockedAgentActivationKey = undefined;
+      if (!state.agentInputActive) return;
+      const key = activationKey(event);
+      if (!key || key !== state.agentActivationKey) return;
+      if (state.blockedAgentActivationKey === key || activationEventBlocked(event)) {
+        state.blockedAgentActivationKey = key;
+        stopActivationEvent(event);
+      }
+      if (eventName === "keyup") {
+        state.agentActivationKey = undefined;
+        state.blockedAgentActivationKey = undefined;
+      }
     }, true);
   }
   for (const eventName of ["beforeinput", "input"] as const) {
     activationTarget.addEventListener(eventName, (event) => {
-      if (!state.agentInputActive || !state.blockedAgentActivationKey) return;
+      if (!state.agentInputActive || !state.agentActivationKey) return;
+      if (!state.blockedAgentActivationKey && !activationEventBlocked(event)) return;
+      state.blockedAgentActivationKey = state.agentActivationKey;
       stopActivationEvent(event);
     }, true);
   }

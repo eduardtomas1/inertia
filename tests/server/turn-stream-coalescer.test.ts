@@ -989,10 +989,13 @@ describe("TurnController coalesced streaming", () => {
     await flushPromises();
 
     const turn = runtime.store.agentTurn(queued.turn.id);
-    expect(runtime.store.snapshot().messages).toContainEqual(expect.objectContaining({
+    const terminalAssistantMessage = runtime.store.snapshot().messages.find(
+      ({ id }) => id === turn.terminalAssistantMessageId,
+    );
+    expect(terminalAssistantMessage).toMatchObject({
       id: turn.terminalAssistantMessageId,
       content: "pending assistant",
-    }));
+    });
     expect(runtime.store.snapshot().reasonings).toContainEqual(expect.objectContaining({
       turnId: queued.turn.id,
       content: "pending reasoning",
@@ -1005,6 +1008,22 @@ describe("TurnController coalesced streaming", () => {
       expect.objectContaining({ type: "agent.reasoning", text: "pending reasoning" }),
       expect.objectContaining({ type: "agent.completed" }),
     ]);
+    expect(runtime.events).toContainEqual({
+      type: "conversation.message.persisted",
+      message: terminalAssistantMessage,
+    });
+    const terminalMessageEventIndex = runtime.events.findIndex((event) => (
+      event.type === "conversation.message.persisted"
+      && event.message.id === terminalAssistantMessage?.id
+    ));
+    const terminalEventIndex = runtime.events.findIndex((event) => (
+      event.type === "agent.completed" && event.turnId === queued.turn.id
+    ));
+    expect(terminalMessageEventIndex).toBe(terminalEventIndex - 1);
+    expect(streamEvents.at(-1)).toMatchObject({
+      type: "agent.completed",
+      terminalAssistantMessageId: terminalAssistantMessage?.id,
+    });
     expect(runtime.scheduler.timers).toHaveLength(0);
     await closeRuntime(runtime);
   });

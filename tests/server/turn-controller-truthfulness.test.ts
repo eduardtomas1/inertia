@@ -188,6 +188,7 @@ describe("TurnController terminal truthfulness", () => {
       turnId: queued.turn.id,
       status: "cancelled",
       terminalReason: "user-cancelled",
+      terminalAssistantMessageId: null,
     });
     value.store.close();
   });

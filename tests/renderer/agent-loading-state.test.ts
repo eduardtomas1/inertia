@@ -276,11 +276,13 @@ describe("terminal turn projection", () => {
         owner: firstOwner,
         status: "completed",
         terminalReason: null,
+        terminalAssistantMessageId: "terminal-answer-first",
       }),
       {
         owner: secondOwner,
         status: "failed",
         terminalReason: "Provider failed.",
+        terminalAssistantMessageId: null,
       },
     );
 
@@ -288,10 +290,22 @@ describe("terminal turn projection", () => {
       [first, second],
       projections,
       null,
-    ).map(({ status, runState }) => ({ status, state: runState?.state })))
+    ).map(({ status, runState, terminalAssistantMessageId }) => ({
+      status,
+      state: runState?.state,
+      terminalAssistantMessageId,
+    })))
       .toEqual([
-        { status: "completed", state: undefined },
-        { status: "failed", state: undefined },
+        {
+          status: "completed",
+          state: undefined,
+          terminalAssistantMessageId: "terminal-answer-first",
+        },
+        {
+          status: "failed",
+          state: undefined,
+          terminalAssistantMessageId: null,
+        },
       ]);
     expect(reconcileTerminalTurnProjections(projections, [{
       ...first,

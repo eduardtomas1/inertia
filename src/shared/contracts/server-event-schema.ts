@@ -1067,7 +1067,7 @@ function runtimeMutationEvent(value: unknown): value is RuntimeMutationEvent {
       return providerMaintenanceOperation(value.operation);
     case "agent.started": return recordWithStrings(value, "conversationId", "runId", "turnId");
     case "agent.completed": return recordWithStrings(value, "conversationId", "runId", "turnId", "terminalReason")
-      && oneOf(value, "status", ["completed", "cancelled"]);
+      && oneOf(value, "status", ["completed", "cancelled"]) && optionalNullableStringField(value, "terminalAssistantMessageId");
     case "agent.text":
     case "agent.reasoning":
       return recordWithStrings(value, "conversationId", "runId", "turnId", "text");
@@ -1101,7 +1101,7 @@ function runtimeMutationEvent(value: unknown): value is RuntimeMutationEvent {
       return recordWithStrings(value, "conversationId", "source")
         && oneOf(value, "source", SERVER_EVENT_OPTIONS.goalSources);
     case "agent.failed": return recordWithStrings(value, "conversationId", "runId", "turnId", "terminalReason", "message")
-      && oneOf(value, "status", ["failed", "interrupted"]);
+      && oneOf(value, "status", ["failed", "interrupted"]) && optionalNullableStringField(value, "terminalAssistantMessageId");
     default:
       return false;
   }

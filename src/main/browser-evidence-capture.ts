@@ -43,6 +43,7 @@ export class BrowserEvidenceCapture {
   #consoleCommitQueue = Promise.resolve();
   #session: Session | null = null;
   #pageEvents = 0;
+  #occurrenceSequence = 0;
   #limited = false;
 
   constructor(private readonly options: BrowserEvidenceCaptureOptions) {}
@@ -106,6 +107,8 @@ export class BrowserEvidenceCapture {
       ) return;
       this.#ledger.recordNetworkFailure({
         ...location,
+        occurredAt: new Date().toISOString(),
+        occurrenceSequence: this.#nextOccurrenceSequence(),
         url: details.url,
         method: details.method,
         resourceType: details.resourceType,
@@ -132,6 +135,8 @@ export class BrowserEvidenceCapture {
     if (!this.options.isLive() || !this.#reservePageEvent()) return;
     this.#ledger.recordNavigation({
       ...this.#location(page, authority),
+      occurredAt: new Date().toISOString(),
+      occurrenceSequence: this.#nextOccurrenceSequence(),
       url,
       sameDocument,
     });
@@ -144,6 +149,7 @@ export class BrowserEvidenceCapture {
   ): void {
     if (!this.options.isLive() || !this.#reservePageEvent()) return;
     const occurredAt = new Date().toISOString();
+    const occurrenceSequence = this.#nextOccurrenceSequence();
     const boundedMessage = typeof message === "string"
       ? message.slice(0, 8_192)
       : "";
@@ -152,6 +158,7 @@ export class BrowserEvidenceCapture {
       this.#ledger.recordConsoleError({
         ...this.#location(page, authority),
         occurredAt,
+        occurrenceSequence,
         message: boundedMessage,
         sensitiveDocument,
       });
@@ -173,6 +180,7 @@ export class BrowserEvidenceCapture {
     this.#ledger.recordAgentAction({
       ...this.#location(page, authority),
       occurredAt,
+      occurrenceSequence: this.#nextOccurrenceSequence(),
       summary,
     });
   }
@@ -188,6 +196,7 @@ export class BrowserEvidenceCapture {
     this.#ledger.recordScreenshot({
       ...this.#location(page, authority),
       occurredAt,
+      occurrenceSequence: this.#nextOccurrenceSequence(),
       url,
       data: this.#boundedThumbnailData(image),
       width: size.width,
@@ -223,6 +232,11 @@ export class BrowserEvidenceCapture {
       if (this.#ledger.markOmitted()) this.options.publish();
     }
     return false;
+  }
+
+  #nextOccurrenceSequence(): number {
+    this.#occurrenceSequence += 1;
+    return this.#occurrenceSequence;
   }
 
   #boundedThumbnailData(source: NativeImage): string | null {

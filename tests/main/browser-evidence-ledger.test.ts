@@ -183,6 +183,35 @@ describe("Browser evidence ledger", () => {
     );
   });
 
+  it("does not coalesce repeats across a chronologically adjacent navigation", () => {
+    const ledger = new BrowserEvidenceLedger();
+    ledger.recordNavigation({
+      ...location,
+      occurredAt: "2026-08-23T11:00:01.000Z",
+      occurrenceSequence: 2,
+      url: "https://example.com/history",
+      sameDocument: true,
+    });
+    ledger.recordConsoleError({
+      ...location,
+      occurredAt: "2026-08-23T11:00:00.000Z",
+      occurrenceSequence: 1,
+      message: "identical delayed error",
+    });
+    ledger.recordConsoleError({
+      ...location,
+      occurredAt: "2026-08-23T11:00:02.000Z",
+      occurrenceSequence: 3,
+      message: "identical delayed error",
+    });
+
+    expect(ledger.snapshot().entries).toMatchObject([
+      { kind: "console-error", occurrences: 1, sequence: 1 },
+      { kind: "navigation", occurrences: 1, sequence: 2 },
+      { kind: "console-error", occurrences: 1, sequence: 3 },
+    ]);
+  });
+
   it("evicts a delayed older entry before later navigation occurrences", () => {
     const ledger = new BrowserEvidenceLedger();
     for (let index = 0; index < MAX_BROWSER_EVIDENCE_ENTRIES; index += 1) {

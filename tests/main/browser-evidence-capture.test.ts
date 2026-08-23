@@ -16,6 +16,38 @@ afterEach(() => {
 });
 
 describe("Browser evidence capture", () => {
+  it("keeps same-millisecond delayed errors on both sides of a navigation", async () => {
+    vi.useFakeTimers();
+    const firstInspection = deferred<boolean>();
+    const page: BrowserEvidencePage = {
+      tabId: "11111111-1111-4111-8111-111111111111",
+      pageNumber: 1,
+      documentSequence: 1,
+      contents: {} as BrowserEvidencePage["contents"],
+    };
+    const capture = new BrowserEvidenceCapture({
+      isLive: () => true,
+      isCurrent: () => true,
+      publish: vi.fn(),
+      sensitiveDocument: vi.fn()
+        .mockImplementationOnce(async () => await firstInspection.promise)
+        .mockResolvedValueOnce(false),
+    });
+
+    vi.setSystemTime("2026-08-23T11:00:00.000Z");
+    capture.recordConsoleError(page, "identical delayed error");
+    capture.recordNavigation(page, "https://example.com/history", true);
+    capture.recordConsoleError(page, "identical delayed error");
+    firstInspection.resolve(false);
+    await vi.waitFor(() => expect(capture.snapshot().entries).toHaveLength(3));
+
+    expect(capture.snapshot().entries).toMatchObject([
+      { kind: "console-error", occurrences: 1, sequence: 1 },
+      { kind: "navigation", occurrences: 1, sequence: 2 },
+      { kind: "console-error", occurrences: 1, sequence: 3 },
+    ]);
+  });
+
   it("keeps console occurrence times when cross-tab inspections settle out of order", async () => {
     vi.useFakeTimers();
     const firstInspection = deferred<boolean>();

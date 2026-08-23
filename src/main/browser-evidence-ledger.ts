@@ -25,6 +25,7 @@ interface BrowserEvidenceLocation {
   documentSequence: number;
   authority?: BrowserEvidenceAuthority;
   occurredAt?: string;
+  occurrenceSequence?: number;
 }
 
 interface BrowserEvidenceRecord extends BrowserEvidenceLocation {
@@ -85,6 +86,7 @@ function compareOccurrence(
 export class BrowserEvidenceLedger {
   readonly #entries: BrowserEvidenceEntry[] = [];
   readonly #entryBytes = new Map<string, number>();
+  readonly #lastOccurrenceSequence = new Map<string, number>();
   readonly #images = new Map<string, { data: string; bytes: number }>();
   #metadataBytes = 0;
   #imageBytes = 0;
@@ -217,6 +219,7 @@ export class BrowserEvidenceLedger {
   clear(): void {
     this.#entries.splice(0);
     this.#entryBytes.clear();
+    this.#lastOccurrenceSequence.clear();
     this.#images.clear();
     this.#metadataBytes = 0;
     this.#imageBytes = 0;
@@ -224,29 +227,52 @@ export class BrowserEvidenceLedger {
   }
 
   #append(record: BrowserEvidenceRecord): BrowserEvidenceEntry {
-    const last = this.#entries.at(-1);
+    const occurredAt = record.occurredAt ?? new Date().toISOString();
+    const occurrenceSequence = record.occurrenceSequence ?? this.#sequence + 1;
+    this.#sequence = Math.max(this.#sequence, occurrenceSequence);
+    let adjacent: BrowserEvidenceEntry | undefined;
+    for (const entry of this.#entries) {
+      const entryOccurrenceSequence = this.#lastOccurrenceSequence.get(entry.id)
+        ?? entry.sequence;
+      if (
+        (
+          entry.occurredAt.localeCompare(occurredAt)
+          || entryOccurrenceSequence - occurrenceSequence
+        ) < 0
+        && (
+          !adjacent
+          || adjacent.occurredAt.localeCompare(entry.occurredAt) < 0
+          || (
+            adjacent.occurredAt === entry.occurredAt
+            && (this.#lastOccurrenceSequence.get(adjacent.id) ?? adjacent.sequence)
+              < entryOccurrenceSequence
+          )
+        )
+      ) adjacent = entry;
+    }
     if (
-      last
+      adjacent
       && record.kind !== "screenshot"
-      && last.kind === record.kind
-      && last.tabId === record.tabId
-      && last.documentSequence === record.documentSequence
-      && last.runId === (record.authority?.runId ?? null)
-      && last.turnId === (record.authority?.turnId ?? null)
-      && last.summary === record.summary
-      && last.detail === (record.detail ?? null)
-      && last.origin === (record.origin ?? null)
-      && last.occurrences < 999
+      && adjacent.kind === record.kind
+      && adjacent.tabId === record.tabId
+      && adjacent.documentSequence === record.documentSequence
+      && adjacent.runId === (record.authority?.runId ?? null)
+      && adjacent.turnId === (record.authority?.turnId ?? null)
+      && adjacent.summary === record.summary
+      && adjacent.detail === (record.detail ?? null)
+      && adjacent.origin === (record.origin ?? null)
+      && adjacent.occurrences < 999
     ) {
-      this.#metadataBytes -= this.#entryBytes.get(last.id) ?? 0;
-      last.occurrences += 1;
-      last.occurredAt = record.occurredAt ?? new Date().toISOString();
-      const bytes = metadataBytes(last);
-      this.#entryBytes.set(last.id, bytes);
+      this.#metadataBytes -= this.#entryBytes.get(adjacent.id) ?? 0;
+      adjacent.occurrences += 1;
+      adjacent.occurredAt = occurredAt;
+      this.#lastOccurrenceSequence.set(adjacent.id, occurrenceSequence);
+      const bytes = metadataBytes(adjacent);
+      this.#entryBytes.set(adjacent.id, bytes);
       this.#metadataBytes += bytes;
       this.#boundEntries();
       this.#revision += 1;
-      return { ...last };
+      return { ...adjacent };
     }
     const screenshotData = record.screenshot?.data ?? null;
     const screenshotBytes = screenshotData
@@ -259,14 +285,14 @@ export class BrowserEvidenceLedger {
     );
     const entry: BrowserEvidenceEntry = {
       id: randomUUID(),
-      sequence: this.#sequence += 1,
+      sequence: occurrenceSequence,
       kind: record.kind,
       tabId: record.tabId,
       pageNumber: record.pageNumber,
       documentSequence: record.documentSequence,
       runId: record.authority?.runId ?? null,
       turnId: record.authority?.turnId ?? null,
-      occurredAt: record.occurredAt ?? new Date().toISOString(),
+      occurredAt,
       summary: record.summary.slice(0, 240),
       detail: record.detail?.slice(0, 600) ?? null,
       origin: record.origin?.slice(0, 300) ?? null,
@@ -281,6 +307,7 @@ export class BrowserEvidenceLedger {
       } : {}),
     };
     this.#entries.push(entry);
+    this.#lastOccurrenceSequence.set(entry.id, occurrenceSequence);
     const bytes = metadataBytes(entry);
     this.#entryBytes.set(entry.id, bytes);
     this.#metadataBytes += bytes;
@@ -309,6 +336,7 @@ export class BrowserEvidenceLedger {
       if (!removed) break;
       this.#metadataBytes -= this.#entryBytes.get(removed.id) ?? 0;
       this.#entryBytes.delete(removed.id);
+      this.#lastOccurrenceSequence.delete(removed.id);
       this.#dropImage(removed.id);
       this.#omitted = true;
     }

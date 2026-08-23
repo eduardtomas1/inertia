@@ -908,10 +908,16 @@ export function createWorkspaceSceneModel({
         loading: desktopTools.previewNavigation.loading,
         canGoBack: desktopTools.previewNavigation.canGoBack,
         canGoForward: desktopTools.previewNavigation.canGoForward,
+        tabs: desktopTools.previewNavigation.tabs,
+        activeTabId: desktopTools.previewNavigation.activeTabId,
+        agentActivity: desktopTools.previewNavigation.agentActivity,
         onNavigate: desktopTools.navigatePreview,
         onBack: () => desktopTools.previewCommand("back"),
         onForward: () => desktopTools.previewCommand("forward"),
         onReload: () => desktopTools.previewCommand("reload"),
+        onOpenTab: () => desktopTools.previewTab("open"),
+        onActivateTab: (tabId) => desktopTools.previewTab("activate", tabId),
+        onCloseTab: (tabId) => desktopTools.previewTab("close", tabId),
         onBoundsChange: desktopTools.setPreviewBounds,
         onOpenExternal: (url) => {
           void window.inertia.openExternal(url).catch((error) => {

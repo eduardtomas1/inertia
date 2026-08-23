@@ -29,6 +29,7 @@ import {
   parseOpenProjectPathRequest,
   type RuntimeConnectionUnavailable,
 } from "../shared/desktop.js";
+import { PREVIEW_AGENT_INPUT_REFUSAL_CHANNEL } from "../shared/preview-agent-privacy-guard.js";
 import { safeHttpUrl } from "../shared/preview-url.js";
 import { MAC_TRAFFIC_LIGHT_POSITION } from "../shared/window-chrome.js";
 import {
@@ -123,6 +124,7 @@ const IPC = {
   clearAppCache: "inertia:clear-app-cache",
   previewNavigate: "inertia:preview-navigate",
   previewCommand: "inertia:preview-command",
+  previewTab: "inertia:preview-tab",
   previewSetBounds: "inertia:preview-set-bounds",
   previewClose: "inertia:preview-close",
   previewState: "inertia:preview-state",
@@ -169,7 +171,6 @@ let attachmentReservation: AttachmentStorageReservation = {
 };
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
-
 interface WindowState { x?: number; y?: number; width: number; height: number; maximized: boolean }
 
 function windowStatePath(): string { return join(app.getPath("userData"), "window-state.json"); }
@@ -353,7 +354,6 @@ function assertTrustedChatIpc(event: IpcMainInvokeEvent, argumentCount: number, 
 function runtimeConnectionUnavailable(message: string): RuntimeConnectionUnavailable {
   return { unavailable: true, message };
 }
-
 function isTransientRuntimeConnectionError(error: unknown): error is Error {
   return error instanceof Error && (
     error.message.startsWith("The local service is starting.")
@@ -362,6 +362,7 @@ function isTransientRuntimeConnectionError(error: unknown): error is Error {
 }
 
 function registerIpcHandlers(): void {
+  ipcMain.on(PREVIEW_AGENT_INPUT_REFUSAL_CHANNEL, (event, value) => { event.returnValue = previewBroker.reportInputRefusal(event.sender, value); });
   ipcMain.handle(IPC.getRuntimeConnection, (event, ...args) => {
     const context = assertTrustedChatIpc(event, args.length);
 
@@ -765,11 +766,14 @@ function registerIpcHandlers(): void {
     return previewBroker.navigate(args[0]);
   });
 
-  ipcMain.handle(IPC.previewCommand, (event, ...args) => {
+  ipcMain.handle(IPC.previewCommand, async (event, ...args) => {
     assertTrustedIpc(event, args.length, 1);
-    return previewBroker.command(args[0]);
+    return await previewBroker.command(args[0]);
   });
 
+  ipcMain.handle(IPC.previewTab, async (event, ...args) => {
+    assertTrustedIpc(event, args.length, 1); return previewBroker.tab(args[0]);
+  });
   ipcMain.handle(IPC.previewSetBounds, (event, ...args) => {
     assertTrustedIpc(event, args.length, 1);
     previewBroker.setBounds(args[0]);
@@ -1047,6 +1051,7 @@ async function bootstrap(): Promise<void> {
   } = packageSmoke;
   let packageSmokeScheduled = false;
   runtimeSupervisor = new RuntimeSupervisor({
+    agentBrowserBroker: previewBroker,
     systemBootId: bootstrapSafety.systemBootId,
     conversationAttachmentStoreRunner,
     conversationAttachmentStoreAuthority:
@@ -1180,6 +1185,7 @@ async function bootstrap(): Promise<void> {
         },
         recycle: () => runtimeSupervisor?.testOnlyRecycle()
           ?? Promise.reject(new Error("The test runtime is not running")),
+        agentBrowser: (id: string, command: Parameters<PreviewBroker["perform"]>[1]) => previewBroker.perform(id, command),
         quit: () => {
           const snapshot = runtimeSupervisor?.snapshot() ?? null;
           setTimeout(() => app.quit(), 100);
@@ -1191,7 +1197,6 @@ async function bootstrap(): Promise<void> {
 }
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
-
 if (!hasSingleInstanceLock) {
   app.quit();
 } else {

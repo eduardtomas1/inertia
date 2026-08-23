@@ -16,6 +16,9 @@ import type { WorkspaceRunController } from "./workspace-run-controller";
 import {
   ConversationContextRequestCoordinator,
 } from "./conversation-context-request-coordinator";
+import type {
+  RuntimeAgentBrowserBroker,
+} from "./agent-browser-broker-client";
 
 interface AgentThreadRuntimeDependencies {
   store: RuntimeStore;
@@ -26,6 +29,7 @@ interface AgentThreadRuntimeDependencies {
   turns: TurnController;
   providerTerminalResumes: ProviderTerminalResumeRegistry;
   pendingInputs: Map<string, AgentInputRequest>;
+  agentBrowser?: RuntimeAgentBrowserBroker;
   providerInfo(): readonly ProviderInfo[];
   broadcastSnapshot(): void;
   broadcastConversationShell(conversationId: string): void;

@@ -38,6 +38,14 @@ import type {
   ConversationContextRequestCoordinator,
 } from "./conversation-context-request-coordinator";
 import type { TurnController } from "./turns/turn-controller";
+import {
+  AGENT_BROWSER_TOOL_DEFINITIONS,
+  AGENT_BROWSER_TOOL_NAMES,
+  AgentBrowserHostTools,
+} from "./agent-browser-host-tools";
+import type {
+  RuntimeAgentBrowserBroker,
+} from "./agent-browser-broker-client";
 
 const MAX_LIST_LIMIT = 25;
 const MAX_PROMPT_CHARS = 32_768;
@@ -273,6 +281,7 @@ export interface AgentThreadManagerDependencies {
     "acquire" | "isActive" | "release"
   >;
   contextRequests: ConversationContextRequestCoordinator;
+  agentBrowser?: RuntimeAgentBrowserBroker;
   providerInfo(): readonly ProviderInfo[];
   broadcastSnapshot(): void;
   broadcastConversationShell(conversationId: string): void;
@@ -349,14 +358,20 @@ function safeConversation(conversation: Conversation, managed: boolean): unknown
 export class AgentThreadManager {
   private readonly now: () => string;
   private readonly mutationTails = new Map<string, Promise<void>>();
+  private readonly agentBrowser: AgentBrowserHostTools | undefined;
 
   constructor(private readonly dependencies: AgentThreadManagerDependencies) {
     this.now = dependencies.now ?? (() => new Date().toISOString());
+    this.agentBrowser = dependencies.agentBrowser
+      ? new AgentBrowserHostTools(dependencies.agentBrowser)
+      : undefined;
   }
 
   bridgeFor(source: AgentThreadSource): ProviderHostToolBridge | undefined {
     return {
-      definitions: TOOL_DEFINITIONS,
+      definitions: this.agentBrowser
+        ? [...TOOL_DEFINITIONS, ...AGENT_BROWSER_TOOL_DEFINITIONS]
+        : TOOL_DEFINITIONS,
       invoke: (call) => this.invoke(source, call),
     };
   }
@@ -398,6 +413,9 @@ export class AgentThreadManager {
     try {
       const current = this.assertSource(source);
       if (call.signal.aborted) return failure("call_cancelled", "The host tool call was cancelled.");
+      if (this.agentBrowser && AGENT_BROWSER_TOOL_NAMES.has(call.tool)) {
+        return await this.agentBrowser.invoke(current, call);
+      }
       switch (call.tool) {
         case "inertia_list_conversations":
           return this.list(current, call.arguments);

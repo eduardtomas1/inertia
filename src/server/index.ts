@@ -2,7 +2,6 @@ import { randomBytes } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { createServer } from "node:http";
 import { join, resolve } from "node:path";
-
 import WebSocket from "ws";
 
 import {
@@ -695,6 +694,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     store, providers, backendProfileController, workspaceRuns, dataDirectory, turns, providerTerminalResumes,
     providerInfo: () => providerInfo, broadcastSnapshot: flushSnapshot,
     broadcastConversationShell, pendingInputs, broadcast,
+    agentBrowser: options.agentBrowser,
   });
   agentWorkflows.attachNativeGoalRuntime(turns);
   const duoLaunchCoordinator = new DuoLaunchCoordinator(

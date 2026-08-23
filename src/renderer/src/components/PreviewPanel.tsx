@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { PreviewBounds } from "@shared/desktop";
+import type {
+  PreviewAgentActivity,
+  PreviewBounds,
+  PreviewTabState,
+} from "@shared/desktop";
 import {
   previewNavigationTarget,
   type PreviewNavigationTarget,
@@ -12,7 +16,7 @@ import {
   registerWorkspacePreviewAddress,
   type WorkspacePreviewOwner,
 } from "../utils/workspacePreviewFocus";
-import { ArrowLeft, ArrowRight, ExternalLink, Globe2, LockKeyhole, RefreshCw, ShieldCheck } from "lucide-react";
+import { ArrowLeft, ArrowRight, Bot, ExternalLink, Globe2, LockKeyhole, Plus, RefreshCw, ShieldCheck, X } from "lucide-react";
 import { IconButton, LoadingMark } from "./ui";
 
 export type PreviewPanelProps = {
@@ -21,11 +25,17 @@ export type PreviewPanelProps = {
   loading?: boolean;
   canGoBack?: boolean;
   canGoForward?: boolean;
+  tabs?: PreviewTabState[];
+  activeTabId?: string | null;
+  agentActivity?: PreviewAgentActivity | null;
   onNavigate: (url: string) => void;
   onOpenExternal: (url: string) => void;
   onBack?: () => void;
   onForward?: () => void;
   onReload?: () => void;
+  onOpenTab?: () => void;
+  onActivateTab?: (tabId: string) => void;
+  onCloseTab?: (tabId: string) => void;
   onBoundsChange?: (bounds: PreviewBounds | null) => void;
 };
 
@@ -77,11 +87,17 @@ export function PreviewPanel({
   loading = false,
   canGoBack = false,
   canGoForward = false,
+  tabs = [],
+  activeTabId = null,
+  agentActivity = null,
   onNavigate,
   onOpenExternal,
   onBack,
   onForward,
   onReload,
+  onOpenTab,
+  onActivateTab,
+  onCloseTab,
   onBoundsChange,
 }: PreviewPanelProps): React.JSX.Element {
   const [draftUrl, setDraftUrl] = useState(url);
@@ -148,6 +164,54 @@ export function PreviewPanel({
 
   return (
     <section className="preview-panel" aria-label="Browser preview" aria-busy={loading}>
+      <div className="preview-tab-strip" aria-label="Inertia Browser pages">
+        <span className="preview-browser-label">
+          <Globe2 size={13} aria-hidden="true" />
+          <span>Browser</span>
+        </span>
+        <div className="preview-tabs" role="tablist" aria-label="Browser pages">
+          {tabs.map((tab) => (
+            <div
+              key={tab.id}
+              className={`preview-tab-shell${tab.id === activeTabId ? " active" : ""}`}
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-selected={tab.id === activeTabId}
+                className="preview-tab"
+                onClick={() => onActivateTab?.(tab.id)}
+              >
+                <span>{tab.title || (tab.url ? new URL(tab.url).hostname : "New page")}</span>
+              </button>
+              {onCloseTab && (
+                <button
+                  type="button"
+                  className="preview-tab-close"
+                  aria-label={`Close ${tab.title || "browser page"}`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onCloseTab(tab.id);
+                  }}
+                >
+                  <X size={11} aria-hidden="true" />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+        {onOpenTab && (
+          <IconButton label="Open browser page" onClick={onOpenTab} disabled={tabs.length >= 8}>
+            <Plus size={14} />
+          </IconButton>
+        )}
+        {agentActivity && (
+          <span className="preview-agent-activity" title={agentActivity.label}>
+            <Bot size={13} aria-hidden="true" />
+            <span>{agentActivity.label}</span>
+          </span>
+        )}
+      </div>
       <header className="preview-chrome">
         <div className="preview-history-actions">
           {onBack && (

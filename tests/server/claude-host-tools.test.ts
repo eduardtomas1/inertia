@@ -45,6 +45,40 @@ async function waitFor(predicate: () => boolean): Promise<void> {
 }
 
 describe("Claude in-process Inertia chat tools", () => {
+  it("returns host-owned PNG evidence through Claude MCP content", async () => {
+    const image = Buffer.from("png-evidence").toString("base64");
+    const bridge = hostBridge();
+    bridge.invoke = async () => ({
+      success: true,
+      text: "captured",
+      image: { mimeType: "image/png", data: image },
+    });
+    const runtime = new ProviderHostToolRuntime({
+      bridge,
+      conversationId: "claude-parent",
+      turnId: "claude-turn",
+      cwd: "/project",
+      onApproval: () => undefined,
+      onApprovalResolved: () => undefined,
+    });
+    const tools = createClaudeHostTools(runtime);
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "inertia-image-test", version: "1.0.0" });
+    await tools.config.instance.connect(serverTransport);
+    await client.connect(clientTransport);
+    expect(await client.callTool({
+      name: "inertia_create_conversation",
+      arguments: { title: "Visual proof" },
+    })).toMatchObject({
+      content: [
+        { type: "text", text: "captured" },
+        { type: "image", mimeType: "image/png", data: image },
+      ],
+    });
+    await tools.close();
+    await client.close().catch(() => undefined);
+  });
+
   it("executes a real SDK MCP call with one host-owned approval and closes exactly", async () => {
     const approvals: AgentApprovalRequest[] = [];
     const resolved: Array<[string, string]> = [];

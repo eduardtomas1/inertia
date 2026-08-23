@@ -19,6 +19,7 @@ const budgets = {
   transcriptJavaScript: 600 * kibibyte,
   deferredFailureDiagnosticsJavaScript: 8 * kibibyte,
   deferredAttachmentPreviewJavaScript: 12 * kibibyte,
+  deferredPreviewJavaScript: 8 * kibibyte,
   deferredSpreadsheetJavaScript: 510 * kibibyte,
   deferredDiscordSettingsJavaScript: 6 * kibibyte,
   detachedChatJavaScript: 16 * kibibyte,
@@ -107,6 +108,9 @@ const deferredFailureDiagnosticsJavaScript = assetNames.find(
 const deferredAttachmentPreviewJavaScript = assetNames.find(
   (name) => /^DocumentAttachmentPreview-.*\.js$/u.test(name),
 );
+const deferredPreviewJavaScript = assetNames.find(
+  (name) => /^PreviewPanel-.*\.js$/u.test(name),
+);
 const deferredSpreadsheetJavaScript = assetNames.find(
   (name) => /^xlsx-.*\.js$/u.test(name),
 );
@@ -162,6 +166,11 @@ if (!deferredFailureDiagnosticsJavaScript) {
 if (!deferredAttachmentPreviewJavaScript || !deferredSpreadsheetJavaScript) {
   throw new Error(
     "Renderer bundle check could not find the deferred attachment preview chunks.",
+  );
+}
+if (!deferredPreviewJavaScript) {
+  throw new Error(
+    "Renderer bundle check could not find the deferred Preview chunk.",
   );
 }
 if (!deferredDiscordSettingsJavaScript) {
@@ -269,6 +278,9 @@ const deferredFailureDiagnosticsJavaScriptBytes = await assetBytes(
 const deferredAttachmentPreviewJavaScriptBytes = await assetBytes(
   `assets/${deferredAttachmentPreviewJavaScript}`,
 );
+const deferredPreviewJavaScriptBytes = await assetBytes(
+  `assets/${deferredPreviewJavaScript}`,
+);
 const deferredSpreadsheetJavaScriptBytes = await assetBytes(
   `assets/${deferredSpreadsheetJavaScript}`,
 );
@@ -312,6 +324,7 @@ const coreJavaScriptBytes =
   - deferredPdfJavaScriptBytes
   - deferredFailureDiagnosticsJavaScriptBytes
   - deferredAttachmentPreviewJavaScriptBytes
+  - deferredPreviewJavaScriptBytes
   - deferredSpreadsheetJavaScriptBytes
   - deferredDiscordSettingsJavaScriptBytes
   - detachedChatJavaScriptBytes
@@ -334,6 +347,7 @@ const measurements = {
     deferredFailureDiagnosticsJavaScriptBytes,
   deferredAttachmentPreviewJavaScript:
     deferredAttachmentPreviewJavaScriptBytes,
+  deferredPreviewJavaScript: deferredPreviewJavaScriptBytes,
   deferredSpreadsheetJavaScript: deferredSpreadsheetJavaScriptBytes,
   deferredDiscordSettingsJavaScript: deferredDiscordSettingsJavaScriptBytes,
   detachedChatJavaScript: detachedChatJavaScriptBytes,

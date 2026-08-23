@@ -867,7 +867,6 @@ describe("agent browser semantic snapshots", () => {
       activeElement: null,
       addEventListener: vi.fn((name: string, listener: (event: Record<string, unknown>) => void) => {
         if (name === "click") clickListener = listener;
-        if (name === "__inertia_agent_nested_boundary__") nestedBoundaryListener = listener;
       }),
       querySelectorAll: () => [input],
       elementFromPoint: () => input,
@@ -889,6 +888,7 @@ describe("agent browser semantic snapshots", () => {
       getComputedStyle: () => ({ visibility: "visible", display: "block", opacity: "1" }),
       addEventListener: vi.fn((name: string, listener: (event: Record<string, unknown>) => void) => {
         if (name === "input" && !privacyInputListener) privacyInputListener = listener;
+        if (name === "__inertia_agent_nested_boundary__") nestedBoundaryListener = listener;
         activationListeners.set(name, listener);
       }),
     };
@@ -902,8 +902,8 @@ describe("agent browser semantic snapshots", () => {
     await installAgentPagePrivacyGuard(contents as never);
     expect(document.addEventListener.mock.calls.map(([name]) => name))
       .not.toContain("input");
-    expect(context.addEventListener.mock.calls.slice(0, 2).map(([name]) => name))
-      .toEqual(["beforeinput", "input"]);
+    expect(context.addEventListener.mock.calls.slice(0, 3).map(([name]) => name))
+      .toEqual(["__inertia_agent_nested_boundary__", "beforeinput", "input"]);
     input.value = secret;
     input.type = "text";
     document.title = secret;

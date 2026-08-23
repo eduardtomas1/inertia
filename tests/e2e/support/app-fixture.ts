@@ -263,7 +263,7 @@ async function createPreviewServer(): Promise<{
       });
       response.end(
         "<!doctype html><title>Removed shadow privacy probe</title><body></body>"
-        + "<script>const host=document.createElement('div');document.body.append(host);"
+        + "<script>window.addEventListener('__inertia_agent_nested_boundary__',event=>event.stopImmediatePropagation(),true);const host=document.createElement('div');document.body.append(host);"
         + "const root=host.attachShadow({mode:'closed'});const input=document.createElement('input');"
         + `input.type='password';input.value=${JSON.stringify(secret)};root.append(input);`
         + "const mirror=document.createElement('p');mirror.textContent=input.value;"

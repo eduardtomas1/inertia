@@ -222,7 +222,8 @@ export function installPreviewAgentPrivacyGuard(
       if (input) inspect(input);
     }
   };
-  document.addEventListener(nestedBoundaryEvent, () => {
+  const activationTarget = typeof owner.addEventListener === "function" ? owner : document;
+  activationTarget.addEventListener(nestedBoundaryEvent, () => {
     state.nestedContentObserved = true;
   }, true);
   if (document.documentElement) inspectTree(document.documentElement, scanBudget());
@@ -249,7 +250,6 @@ export function installPreviewAgentPrivacyGuard(
   // Preload installs this before author scripts. Observe from the earliest
   // capture boundary so a page-owned window handler cannot mirror and clear a
   // password before the privacy guard sees its original control and value.
-  const activationTarget = typeof owner.addEventListener === "function" ? owner : document;
   activationTarget.addEventListener("beforeinput", inspectInputEvent, true);
   activationTarget.addEventListener("input", inspectInputEvent, true);
   document.addEventListener("click", (event) => {

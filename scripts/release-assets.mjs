@@ -3,7 +3,7 @@ import { constants, createReadStream } from "node:fs";
 import { copyFile, lstat, mkdir, open, readFile, readdir, writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 
-import { parseDocument } from "yaml";
+import { parseDocument, stringify } from "yaml";
 
 const MAX_UPDATE_METADATA_BYTES = 256 * 1024;
 const MAX_MANIFEST_BYTES = 512 * 1024;
@@ -27,6 +27,16 @@ if (releaseTag !== `v${version}`) {
 }
 
 const platformPolicies = {
+  "macos-x64": {
+    packages: [
+      `Inertia-${version}.dmg`,
+      `Inertia-${version}-mac.zip`,
+    ],
+    metadata: "latest-mac.yml",
+    companions: [`Inertia-${version}-mac.zip.blockmap`],
+    packagedUpdateConfig: "mac/Inertia.app/Contents/Resources/app-update.yml",
+    packagedAppArchive: "mac/Inertia.app/Contents/Resources/app.asar",
+  },
   "macos-arm64": {
     packages: [
       `Inertia-${version}-arm64.dmg`,
@@ -44,6 +54,13 @@ const platformPolicies = {
     packagedUpdateConfig: "win-unpacked/resources/app-update.yml",
     packagedAppArchive: "win-unpacked/resources/app.asar",
   },
+  "windows-arm64": {
+    packages: [`Inertia.Setup.${version}.arm64.exe`],
+    metadata: "latest.yml",
+    companions: [`Inertia.Setup.${version}.arm64.exe.blockmap`],
+    packagedUpdateConfig: "win-arm64-unpacked/resources/app-update.yml",
+    packagedAppArchive: "win-arm64-unpacked/resources/app.asar",
+  },
   "linux-x64": {
     packages: [`Inertia-${version}.AppImage`],
     metadata: "latest-linux.yml",
@@ -51,7 +68,22 @@ const platformPolicies = {
     packagedUpdateConfig: "linux-unpacked/resources/app-update.yml",
     packagedAppArchive: "linux-unpacked/resources/app.asar",
   },
+  "linux-arm64": {
+    packages: [`Inertia-${version}-arm64.AppImage`],
+    metadata: "latest-linux-arm64.yml",
+    companions: [],
+    packagedUpdateConfig: "linux-arm64-unpacked/resources/app-update.yml",
+    packagedAppArchive: "linux-arm64-unpacked/resources/app.asar",
+  },
 };
+
+const sharedMetadataGroups = [
+  { metadata: "latest-mac.yml", platforms: ["macos-x64", "macos-arm64"] },
+  { metadata: "latest.yml", platforms: ["windows-x64", "windows-arm64"] },
+];
+const sharedMetadataByName = new Map(
+  sharedMetadataGroups.map((group) => [group.metadata, group]),
+);
 
 const releaseSourceRoot = resolve(process.env.INERTIA_RELEASE_SOURCE_DIR ?? "release");
 
@@ -190,11 +222,13 @@ async function readAsarPackageManifest(path) {
 function validateUpdateCapability(value, platform) {
   if (!isPlainRecord(value)) throw new Error("The packaged update capability is invalid.");
   const keys = Object.keys(value).sort();
-  const expectedPlatform = {
-    "macos-arm64": "darwin",
-    "windows-x64": "win32",
-    "linux-x64": "linux",
-  }[platform];
+  const expectedPlatform = platform.startsWith("macos-")
+    ? "darwin"
+    : platform.startsWith("windows-")
+      ? "win32"
+      : platform.startsWith("linux-")
+        ? "linux"
+        : null;
   if (
     keys.length === 2
     && keys[0] === "delivery"
@@ -202,11 +236,11 @@ function validateUpdateCapability(value, platform) {
     && value.delivery === "in-app"
     && value.platform === expectedPlatform
   ) return { delivery: "in-app", platform: expectedPlatform };
-  const expectedManualReason = {
-    "macos-arm64": "macos-signing-unavailable",
-    "windows-x64": "windows-signing-unavailable",
-    "linux-x64": null,
-  }[platform];
+  const expectedManualReason = platform.startsWith("macos-")
+    ? "macos-signing-unavailable"
+    : platform.startsWith("windows-")
+      ? "windows-signing-unavailable"
+      : null;
   if (
     expectedManualReason
     && keys.length === 2
@@ -309,14 +343,13 @@ async function validatePackagedUpdateConfig(platform, capability) {
   if (config.useMultipleRangeRequest !== undefined && typeof config.useMultipleRangeRequest !== "boolean") {
     throw new Error("Packaged update configuration has an invalid range-request setting.");
   }
-  const signedWindows = platform === "windows-x64" && capability.delivery === "in-app";
+  const signedWindows = platform.startsWith("windows-") && capability.delivery === "in-app";
   if (signedWindows ? !validPublisherName(config.publisherName) : config.publisherName !== undefined) {
     throw new Error("Packaged update configuration has an invalid publisher identity.");
   }
 }
 
-async function validateUpdateMetadata(platform, directory) {
-  const policy = platformPolicies[platform];
+async function validateUpdateMetadataPolicy(policy, directory) {
   const metadata = await parseUpdateMetadata(join(directory, policy.metadata));
   assertExactKeys(metadata, new Set([
     "version",
@@ -380,6 +413,11 @@ async function validateUpdateMetadata(platform, directory) {
   if (packageMetadata.get(metadata.path)?.sha512 !== metadata.sha512) {
     throw new Error(`${policy.metadata} primary digest does not match its package.`);
   }
+  return metadata;
+}
+
+async function validateUpdateMetadata(platform, directory) {
+  return validateUpdateMetadataPolicy(platformPolicies[platform], directory);
 }
 
 function expectedAssetNames(policy, capability) {
@@ -469,6 +507,8 @@ if (command === "stage") {
   await mkdir(finalDirectory);
   const combined = [];
   const combinedNames = new Set();
+  const platformCapabilities = new Map();
+  const sharedMetadataSources = new Map();
   for (const platform of Object.keys(platformPolicies)) {
     const platformDirectory = join(downloadRoot, platform);
     const entries = (await readdir(platformDirectory)).sort();
@@ -484,8 +524,8 @@ if (command === "stage") {
     if (updateCapability.delivery === "in-app") {
       await validateUpdateMetadata(platform, platformDirectory);
     }
+    platformCapabilities.set(platform, updateCapability);
     for (const expectedName of expectedNames) {
-      if (combinedNames.has(expectedName)) throw new Error(`Duplicate consolidated asset name: ${expectedName}`);
       const path = join(platformDirectory, expectedName);
       const actual = await fileMetadata(path);
       const recorded = manifest.assets.find((asset) => asset?.name === expectedName);
@@ -499,10 +539,57 @@ if (command === "stage") {
       ) {
         throw new Error(`Artifact integrity mismatch for ${expectedName}.`);
       }
+      const metadataGroup = sharedMetadataByName.get(expectedName);
+      if (metadataGroup?.platforms.includes(platform)) {
+        let sources = sharedMetadataSources.get(expectedName);
+        if (!sources) sharedMetadataSources.set(expectedName, sources = new Map());
+        sources.set(platform, path);
+        continue;
+      }
+      if (combinedNames.has(expectedName)) throw new Error(`Duplicate consolidated asset name: ${expectedName}`);
       await copyFile(path, join(finalDirectory, expectedName), constants.COPYFILE_EXCL);
       combined.push(actual);
       combinedNames.add(expectedName);
     }
+  }
+  for (const group of sharedMetadataGroups) {
+    const inAppPlatforms = group.platforms.filter(
+      (platform) => platformCapabilities.get(platform)?.delivery === "in-app",
+    );
+    if (inAppPlatforms.length === 0) continue;
+    if (inAppPlatforms.length !== group.platforms.length) {
+      throw new Error(`${group.metadata} architectures disagree on update delivery capability.`);
+    }
+    const sources = sharedMetadataSources.get(group.metadata);
+    if (!sources || sources.size !== group.platforms.length) {
+      throw new Error(`${group.metadata} is missing architecture metadata.`);
+    }
+    const documents = [];
+    for (const platform of group.platforms) {
+      const path = sources.get(platform);
+      if (!path) throw new Error(`${group.metadata} is missing metadata for ${platform}.`);
+      documents.push(await parseUpdateMetadata(path));
+    }
+    const primary = documents[0];
+    const metadata = {
+      ...primary,
+      files: documents.flatMap((document) => document.files),
+    };
+    const output = join(finalDirectory, group.metadata);
+    await writeFile(output, stringify(metadata), { encoding: "utf8", flag: "wx" });
+    const consolidatedPolicy = {
+      metadata: group.metadata,
+      packages: group.platforms.flatMap(
+        (platform) => platformPolicies[platform].packages,
+      ),
+      companions: group.platforms.flatMap(
+        (platform) => platformPolicies[platform].companions,
+      ),
+    };
+    await validateUpdateMetadataPolicy(consolidatedPolicy, finalDirectory);
+    const actual = await fileMetadata(output);
+    combined.push(actual);
+    combinedNames.add(actual.name);
   }
   combined.sort((left, right) => left.name.localeCompare(right.name, "en"));
   await writeFile(

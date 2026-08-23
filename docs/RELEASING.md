@@ -1,7 +1,11 @@
 # Releasing Inertia
 
-Inertia releases are built only from an exact `vMAJOR.MINOR.PATCH` tag. Linux,
-Windows, and macOS artifacts are tested, checksummed, and published together.
+Inertia releases are built only from an exact `vMAJOR.MINOR.PATCH` tag. Native
+macOS x64 and arm64, Windows x64 and ARM64, and Linux x64 and ARM64 artifacts
+are tested, checksummed, and published together. Each package is built and
+smoked on a matching GitHub-hosted architecture; macOS is intentionally built
+per architecture because host-selected provider executables and native modules
+make a cross-host universal bundle incomplete.
 
 Signing credentials are optional until the project has the corresponding
 certificates. A credential-free build remains explicit: macOS uses the tested
@@ -47,11 +51,16 @@ Each platform stage validates its packaged `app-update.yml`, channel manifest,
 package sizes and SHA-512 values, and required differential-download
 companions. The consolidation job then revalidates every downloaded artifact,
 rejects extra or duplicate names, and writes `SHA256SUMS.txt` over the complete
-public asset union. Signed Windows packages must carry the bounded publisher
-identity used by the native installer verifier. When Windows or macOS is built
-for manual delivery because signing is unavailable, its channel manifest and
-blockmap are deliberately excluded so an older signed installation cannot be
-offered an uninstallable release. Build provenance covers that same exact
+public asset union. Because the macOS and Windows updaters use one channel name
+per operating system, consolidation also creates one validated `latest-mac.yml`
+and one validated `latest.yml` whose exact file union contains both native
+architectures; Linux retains its architecture-qualified channel manifests.
+Signed Windows packages must carry the bounded publisher identity used by the
+native installer verifier. When Windows or macOS is built for manual delivery
+because signing is unavailable, its channel manifest and blockmap are
+deliberately excluded so an older signed installation cannot be offered an
+uninstallable release. Mixed update capability between two architectures of
+the same operating system is rejected. Build provenance covers that same exact
 union.
 
 Publishing is draft-first and fail-closed. A retry may reuse an existing draft:

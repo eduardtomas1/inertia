@@ -52,15 +52,43 @@ jobs:
           - label: Linux x64
             runner: ubuntu-24.04
             artifact: linux-x64
+            arch: x64
             timeout_minutes: 40
+            dist_script: dist:linux
+            app_path: release/linux-unpacked/inertia
+            unpacked_dir: release/linux-unpacked
+          - label: Linux ARM64
+            runner: ubuntu-24.04-arm
+            artifact: linux-arm64
+            arch: arm64
+            timeout_minutes: 55
+            dist_script: dist:linux:arm64
+            app_path: release/linux-arm64-unpacked/inertia
+            unpacked_dir: release/linux-arm64-unpacked
           - label: Windows x64
             runner: windows-2025
             artifact: windows-x64
+            arch: x64
             timeout_minutes: 55
+            app_path: release/win-unpacked/Inertia.exe
+          - label: Windows ARM64
+            runner: windows-11-arm
+            artifact: windows-arm64
+            arch: arm64
+            timeout_minutes: 70
+            app_path: release/win-arm64-unpacked/Inertia.exe
           - label: macOS arm64
             runner: macos-15
             artifact: macos-arm64
+            arch: arm64
             timeout_minutes: 40
+            app_path: release/mac-arm64/Inertia.app
+          - label: macOS x64
+            runner: macos-15-intel
+            artifact: macos-x64
+            arch: x64
+            timeout_minutes: 45
+            app_path: release/mac/Inertia.app
     env:
       CI: "true"
       INERTIA_BENCHMARK_REPORT: performance-results/platform-${{ matrix.artifact }}.json
@@ -83,6 +111,11 @@ jobs:
 
       - name: Install locked dependencies
         run: npm ci
+
+      - name: Verify native dependency architecture
+        env:
+          INERTIA_EXPECTED_ARCH: ${{ matrix.arch }}
+        run: npm run test:native-architecture
 
       - name: Run cross-platform performance smoke
         run: npm run benchmark:platform:smoke
@@ -167,7 +200,7 @@ jobs:
 
       - name: Build Linux AppImage and unpacked app
         if: runner.os == 'Linux'
-        run: npm run dist:linux
+        run: npm run "${{ matrix.dist_script }}"
 
       - name: Validate Linux AppImage identity, icons, and runtime resource
         if: runner.os == 'Linux'
@@ -177,12 +210,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          case "$RUNNER_OS" in
-            Linux) app="release/linux-unpacked/inertia" ;;
-            Windows) app="release/win-unpacked/Inertia.exe" ;;
-            macOS) app="release/mac-arm64/Inertia.app" ;;
-            *) echo "Unsupported runner: $RUNNER_OS" >&2; exit 1 ;;
-          esac
+          app="${{ matrix.app_path }}"
+          test -e "$app"
           npm run verify:fuses -- "$app"
 
       - name: Smoke native packaged app
@@ -194,9 +223,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sudo chown root:root release/linux-unpacked/chrome-sandbox
-          sudo chmod 4755 release/linux-unpacked/chrome-sandbox
-          test "$(stat -c '%u:%g:%a' release/linux-unpacked/chrome-sandbox)" = "0:0:4755"
+          sandbox="${{ matrix.unpacked_dir }}/chrome-sandbox"
+          sudo chown root:root "$sandbox"
+          sudo chmod 4755 "$sandbox"
+          test "$(stat -c '%u:%g:%a' "$sandbox")" = "0:0:4755"
 
       - name: Smoke native packaged app under Xvfb
         if: runner.os == 'Linux'
@@ -207,7 +237,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mac_app="release/mac-arm64/Inertia.app"
+          mac_app="${{ matrix.app_path }}"
           codesign --verify --deep --strict --verbose=2 "$mac_app"
 
       - name: Keep failure diagnostics

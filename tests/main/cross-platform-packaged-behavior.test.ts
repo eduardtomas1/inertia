@@ -31,17 +31,21 @@ function workflowMatrixEntry(workflow: string, label: string): string {
 }
 
 describe("cross-platform packaged behavior contract", () => {
-  it("keeps build, Electron E2E, fuse verification, and native smoke on all three CI platforms", async () => {
+  it("keeps build, Electron E2E, fuse verification, and native smoke on all six CI targets", async () => {
     const workflow = await source(".github/workflows/ci.yml");
     for (const expected of [
       "runner: ubuntu-24.04",
+      "runner: ubuntu-24.04-arm",
       "runner: windows-2025",
+      "runner: windows-11-arm",
       "runner: macos-15",
+      "runner: macos-15-intel",
       "run: npm run check",
+      "run: npm run test:native-architecture",
       "run: npm exec -- playwright test",
       "run: xvfb-run --auto-servernum npm exec -- playwright test",
       "run: npm run dist:dir",
-      "run: npm run dist:linux",
+      'run: npm run "${{ matrix.dist_script }}"',
       "npm run verify:fuses -- \"$app\"",
       "run: npm run test:package-smoke",
       "run: xvfb-run --auto-servernum npm run test:package-smoke",
@@ -50,19 +54,23 @@ describe("cross-platform packaged behavior contract", () => {
     }
   });
 
-  it("keeps Windows CI bounded through its complete platform gate", async () => {
+  it("keeps every native architecture CI target explicitly bounded", async () => {
     const workflow = await source(".github/workflows/ci.yml");
     expect(workflow).toContain(
       "timeout-minutes: ${{ matrix.timeout_minutes }}",
     );
-    for (const [label, runner, artifact, timeout] of [
-      ["Linux x64", "ubuntu-24.04", "linux-x64", 40],
-      ["Windows x64", "windows-2025", "windows-x64", 55],
-      ["macOS arm64", "macos-15", "macos-arm64", 40],
+    for (const [label, runner, artifact, architecture, timeout] of [
+      ["Linux x64", "ubuntu-24.04", "linux-x64", "x64", 40],
+      ["Linux ARM64", "ubuntu-24.04-arm", "linux-arm64", "arm64", 55],
+      ["Windows x64", "windows-2025", "windows-x64", "x64", 55],
+      ["Windows ARM64", "windows-11-arm", "windows-arm64", "arm64", 70],
+      ["macOS arm64", "macos-15", "macos-arm64", "arm64", 40],
+      ["macOS x64", "macos-15-intel", "macos-x64", "x64", 45],
     ] as const) {
       const entry = workflowMatrixEntry(workflow, label);
       expect(entry).toContain(`runner: ${runner}`);
       expect(entry).toContain(`artifact: ${artifact}`);
+      expect(entry).toContain(`arch: ${architecture}`);
       expect(entry).toContain(`timeout_minutes: ${timeout}`);
     }
   });
@@ -122,6 +130,7 @@ describe("cross-platform packaged behavior contract", () => {
     expect(smoke).toContain('process.platform === "darwin"');
     expect(smoke).toContain('process.platform === "win32"');
     expect(smoke).toContain('process.platform === "linux"');
+    expect(smoke).toContain('process.arch === "x64" ? "" : `-${process.arch}`');
     expect(smoke).toContain(
       "mkdir(dataDirectory, { recursive: true, mode: 0o700 })",
     );
@@ -303,8 +312,17 @@ describe("cross-platform packaged behavior contract", () => {
       'tags:',
       '- "v*.*.*"',
       "dist_script: dist:release:mac",
+      "dist_script: dist:release:mac:x64",
       "dist_script: dist:release:win",
+      "dist_script: dist:release:win:arm64",
       "dist_script: dist:release:linux",
+      "dist_script: dist:release:linux:arm64",
+      "name: release-macos-x64",
+      "name: release-macos-arm64",
+      "name: release-windows-x64",
+      "name: release-windows-arm64",
+      "name: release-linux-x64",
+      "name: release-linux-arm64",
       "node scripts/validate-release.mjs",
       "run: npm run test:package-smoke",
       "run: xvfb-run --auto-servernum npm run test:package-smoke",
@@ -319,6 +337,20 @@ describe("cross-platform packaged behavior contract", () => {
     expect(workflow).toContain("MACOS_APPLE_API_KEY_BASE64");
     expect(workflow).toContain("WINDOWS_CSC_LINK");
     expect(workflow).not.toContain("BEGIN PRIVATE KEY");
+    for (const [label, runner, platform, architecture, distScript] of [
+      ["macOS x64", "macos-15-intel", "macos-x64", "x64", "dist:release:mac:x64"],
+      ["macOS arm64", "macos-15", "macos-arm64", "arm64", "dist:release:mac"],
+      ["Windows x64", "windows-2025", "windows-x64", "x64", "dist:release:win"],
+      ["Windows ARM64", "windows-11-arm", "windows-arm64", "arm64", "dist:release:win:arm64"],
+      ["Linux x64", "ubuntu-24.04", "linux-x64", "x64", "dist:release:linux"],
+      ["Linux ARM64", "ubuntu-24.04-arm", "linux-arm64", "arm64", "dist:release:linux:arm64"],
+    ] as const) {
+      const entry = workflowMatrixEntry(workflow, label);
+      expect(entry).toContain(`runner: ${runner}`);
+      expect(entry).toContain(`platform: ${platform}`);
+      expect(entry).toContain(`arch: ${architecture}`);
+      expect(entry).toContain(`dist_script: ${distScript}`);
+    }
 
     const macBuild = workflowStep(workflow, "Build macOS release package");
     expect(macBuild).toContain("if: runner.os == 'macOS'");

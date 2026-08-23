@@ -64,16 +64,25 @@ test("restores a saved off-screen window with a reachable title bar", async ({
 test("renders partial health failures without hiding healthy metrics", async ({
   browserName: _browserName,
 }, testInfo) => {
-  await app.electronApp.evaluate(({ BrowserWindow }) => {
+  await app.electronApp.evaluate(({ BrowserWindow, app }) => {
     const session = BrowserWindow.getAllWindows()[0]?.webContents.session;
     if (!session) throw new Error("The main renderer session is unavailable");
-    const original = session.getCacheSize;
+    const originalCacheSize = session.getCacheSize;
+    const originalAppMetrics = app.getAppMetrics;
     Reflect.set(session, "getCacheSize", async () => {
       throw new Error("simulated cache measurement failure");
     });
-    Reflect.set(globalThis, "__restoreInertiaHealthCacheSize", () => {
-      Reflect.set(session, "getCacheSize", original);
-      Reflect.deleteProperty(globalThis, "__restoreInertiaHealthCacheSize");
+    Reflect.set(app, "getAppMetrics", () => originalAppMetrics.call(app).map(
+      (metric) => ({
+        ...metric,
+        cpu: { ...metric.cpu, percentCPUUsage: 1 },
+        memory: { ...metric.memory, workingSetSize: 100 * 1_024 },
+      }),
+    ));
+    Reflect.set(globalThis, "__restoreInertiaHealthEvidence", () => {
+      Reflect.set(session, "getCacheSize", originalCacheSize);
+      Reflect.set(app, "getAppMetrics", originalAppMetrics);
+      Reflect.deleteProperty(globalThis, "__restoreInertiaHealthEvidence");
     });
   });
   try {
@@ -99,7 +108,7 @@ test("renders partial health failures without hiding healthy metrics", async ({
     await app.electronApp.evaluate(() => {
       const restore = Reflect.get(
         globalThis,
-        "__restoreInertiaHealthCacheSize",
+        "__restoreInertiaHealthEvidence",
       );
       if (typeof restore === "function") restore();
     });

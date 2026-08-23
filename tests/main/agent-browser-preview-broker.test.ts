@@ -613,6 +613,7 @@ describe("agent-owned native Browser", () => {
     });
     expect(uriPreventDefault).toHaveBeenCalledOnce();
     for (const message of [
+      "db_pass=broker-pass-short",
       "tok\u0000en=control-broker-short",
       "pass\u202dword=bidi-broker-short",
       "tok\u200ben=zero-width-broker-short",
@@ -690,6 +691,7 @@ describe("agent-owned native Browser", () => {
     expect(serialized).not.toContain("hunter2");
     expect(serialized).not.toContain("MONGODB_URI");
     expect(serialized).not.toContain("mongodb://alice");
+    expect(serialized).not.toContain("broker-pass-short");
     expect(serialized).not.toContain("control-broker-short");
     expect(serialized).not.toContain("bidi-broker-short");
     expect(serialized).not.toContain("zero-width-broker-short");
@@ -742,7 +744,7 @@ describe("agent-owned native Browser", () => {
       )
     )).toBe(true);
     expect(consoleEvidence.reduce((total, entry) => total + entry.occurrences, 0))
-      .toBe(20);
+      .toBe(21);
 
     const capture = state.evidence.entries.find((entry) => entry.kind === "screenshot");
     expect(capture).toBeDefined();

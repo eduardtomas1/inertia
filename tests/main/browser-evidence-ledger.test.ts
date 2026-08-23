@@ -51,6 +51,11 @@ describe("Browser evidence ledger", () => {
     "apiKeyValue=y",
     "clientSecretValue=z",
     "\"SessionId\":\"q\"",
+    "pass=hunter2",
+    "PASS : hunter2",
+    "\"pass\":\"hunter2\"",
+    "db_pass=hunter2",
+    "databasePass=hunter2",
     "pwd=hunter2",
     "PWD : hunter2",
     "\"pwd\":\"hunter2\"",
@@ -100,6 +105,10 @@ describe("Browser evidence ledger", () => {
     "The pwd field is empty",
     "The pass completed normally",
     "The passcode prompt is visible",
+    "compass=public",
+    "bypass=public",
+    "passCount=4",
+    "db_pass is unset",
     "PGPASSWORD is unset",
   ])("keeps a non-credential page-authored identifier: %s", (message) => {
     const ledger = new BrowserEvidenceLedger();

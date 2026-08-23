@@ -252,6 +252,7 @@ export function PreviewPanel({
                   aria-label={`Close ${tab.title || "browser page"}`}
                   onClick={(event) => {
                     event.stopPropagation();
+                    prepareTabCloseFocus(tab.id);
                     onCloseTab(tab.id);
                   }}
                 >

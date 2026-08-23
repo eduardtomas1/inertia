@@ -60,6 +60,13 @@ describe("Browser evidence sanitization", () => {
     "Cookie=session=private-value",
     "Set-Cookie: session=private-value",
     "password=private-value",
+    "pass=hunter2",
+    "pass: hunter2",
+    "PASS = hunter2",
+    "\"pass\" : \"hunter2\"",
+    "'Pass' : 'hunter2'",
+    "db_pass=hunter2",
+    "databasePass=hunter2",
     "pwd=hunter2",
     "pwd: hunter2",
     "PWD = hunter2",
@@ -193,6 +200,10 @@ describe("Browser evidence sanitization", () => {
     "The pass completed normally.",
     "The passcode prompt is visible.",
     "The passphrase prompt is visible.",
+    "compass=public",
+    "bypass=public",
+    "passCount=4",
+    "db_pass is unset.",
   ])("does not treat a password alias in ordinary prose as an assignment: %s", (value) => {
     expect(sanitizeBrowserEvidenceText(value, "hidden"))
       .toEqual({ text: value, redacted: false });

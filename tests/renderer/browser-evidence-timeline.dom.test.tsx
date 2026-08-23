@@ -311,4 +311,46 @@ describe("Browser evidence timeline", () => {
     ], "replacement"));
     await waitFor(() => expect(screen.getByRole("tab", { name: "New page" })).toHaveFocus());
   });
+
+  it("restores close-button focus after delayed removal without stealing newer focus", async () => {
+    const onCloseTab = vi.fn();
+    const tabs = [
+      { id: "one", title: "One", url: "http://127.0.0.1:4173/one", loading: false },
+      { id: "two", title: "Two", url: "http://127.0.0.1:4173/two", loading: false },
+      { id: "three", title: "Three", url: "http://127.0.0.1:4173/three", loading: false },
+    ];
+    const panel = (
+      nextTabs: typeof tabs,
+      activeTabId: string,
+    ) => (
+      <PreviewPanel
+        owner="primary"
+        url="http://127.0.0.1:4173/"
+        tabs={nextTabs}
+        activeTabId={activeTabId}
+        onNavigate={vi.fn()}
+        onOpenExternal={vi.fn()}
+        onCloseTab={onCloseTab}
+      />
+    );
+    const view = render(panel(tabs, "two"));
+
+    const closeTwo = screen.getByRole("button", { name: "Close Two" });
+    closeTwo.focus();
+    fireEvent.click(closeTwo, { detail: 0 });
+    expect(onCloseTab).toHaveBeenCalledWith("two");
+    view.rerender(panel(tabs, "two"));
+    expect(closeTwo).toHaveFocus();
+    view.rerender(panel([tabs[0]!, tabs[2]!], "one"));
+    await waitFor(() => expect(screen.getByRole("tab", { name: "One" })).toHaveFocus());
+
+    view.rerender(panel(tabs, "one"));
+    const closeOne = screen.getByRole("button", { name: "Close One" });
+    closeOne.focus();
+    fireEvent.click(closeOne, { detail: 0 });
+    const address = screen.getByRole("textbox", { name: "Preview address" });
+    address.focus();
+    view.rerender(panel([tabs[1]!, tabs[2]!], "two"));
+    await waitFor(() => expect(address).toHaveFocus());
+  });
 });

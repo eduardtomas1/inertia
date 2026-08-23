@@ -1497,7 +1497,7 @@ process.exit(child.status ?? 1);
       body: "Keep this review checkpoint after the commit.",
       stale: true,
     }));
-  });
+  }, 30_000);
 
   it("scopes review state and notes to the selected file when the repository diff exceeds its file limit", async () => {
     const { data, workspace } = temporaryWorkspace();

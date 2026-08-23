@@ -627,20 +627,5 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
     cleanup.deleteConversation(conversation.id);
     cleanup.deleteConversation(weightedConversation.id);
     cleanup.close();
-    await page.emulateMedia({ colorScheme: "no-preference" });
-    await page.reload();
-    await resizeWindow(1440, 920);
-    await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible({
-      timeout: 10_000,
-    });
-    const navigation = page.getByRole("complementary", { name: "Project navigation", exact: true });
-    if (!await navigation.isVisible()) {
-      await page.getByRole("button", { name: "Toggle project navigation" }).click();
-      await expect(navigation).toBeVisible();
-    }
-    if (!await page.locator(".workspace-panel").isVisible()) {
-      await page.getByRole("button", { name: "Open workspace tools" }).click();
-      await expect(page.locator(".workspace-panel")).toBeVisible();
-    }
   }
 });

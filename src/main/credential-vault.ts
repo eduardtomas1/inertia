@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { constants as fsConstants } from "node:fs";
+import { constants as fsConstants, type Stats } from "node:fs";
 import {
   chmod,
   lstat,
@@ -9,6 +9,7 @@ import {
   realpath,
   rename,
   unlink,
+  type FileHandle,
 } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import type { SafeStorage } from "electron";
@@ -90,6 +91,36 @@ function publicStorageState(
       ? null
       : "Secure credential storage is unavailable on this system.",
   };
+}
+
+function matchesOpenedFileIdentity(candidate: Stats, expected: Stats): boolean {
+  return candidate.isFile()
+    && candidate.dev === expected.dev
+    && candidate.ino === expected.ino
+    && candidate.size === expected.size
+    && candidate.mtimeMs === expected.mtimeMs
+    && candidate.ctimeMs === expected.ctimeMs;
+}
+
+async function readOpenedFile(file: FileHandle, size: number): Promise<Buffer> {
+  const bytes = Buffer.alloc(size);
+  let offset = 0;
+  while (offset < bytes.length) {
+    const { bytesRead } = await file.read(
+      bytes,
+      offset,
+      bytes.length - offset,
+      offset,
+    );
+    if (bytesRead === 0) {
+      throw new CredentialVaultError(
+        "storage-corrupt",
+        "The secure credential vault is invalid.",
+      );
+    }
+    offset += bytesRead;
+  }
+  return bytes;
 }
 
 export class ElectronSafeStorageBackend implements CredentialEncryptionBackend {
@@ -189,12 +220,7 @@ export class FileCredentialVaultPersistence implements CredentialVaultPersistenc
       );
       const metadata = await file.stat();
       if (
-        !metadata.isFile()
-        || metadata.dev !== before.dev
-        || metadata.ino !== before.ino
-        || metadata.size !== before.size
-        || metadata.mtimeMs !== before.mtimeMs
-        || metadata.ctimeMs !== before.ctimeMs
+        !matchesOpenedFileIdentity(metadata, before)
         || metadata.size > MAX_CREDENTIAL_VAULT_BYTES
       ) {
         throw new CredentialVaultError(
@@ -202,31 +228,19 @@ export class FileCredentialVaultPersistence implements CredentialVaultPersistenc
           "The secure credential vault is invalid.",
         );
       }
-      const bytes = Buffer.alloc(metadata.size);
-      let offset = 0;
-      while (offset < bytes.length) {
-        const { bytesRead } = await file.read(
-          bytes,
-          offset,
-          bytes.length - offset,
-          offset,
-        );
-        if (bytesRead === 0) {
-          throw new CredentialVaultError(
-            "storage-corrupt",
-            "The secure credential vault is invalid.",
-          );
-        }
-        offset += bytesRead;
-      }
+      const bytes = await readOpenedFile(file, metadata.size);
       const after = await file.stat();
+      if (!matchesOpenedFileIdentity(after, metadata)) {
+        throw new CredentialVaultError(
+          "storage-corrupt",
+          "The secure credential vault is invalid.",
+        );
+      }
+      const verification = await readOpenedFile(file, metadata.size);
+      const verified = await file.stat();
       if (
-        !after.isFile()
-        || after.dev !== metadata.dev
-        || after.ino !== metadata.ino
-        || after.size !== metadata.size
-        || after.mtimeMs !== metadata.mtimeMs
-        || after.ctimeMs !== metadata.ctimeMs
+        !matchesOpenedFileIdentity(verified, metadata)
+        || !verification.equals(bytes)
       ) {
         throw new CredentialVaultError(
           "storage-corrupt",

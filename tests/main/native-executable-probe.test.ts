@@ -40,10 +40,12 @@ function forceCleanup(pid: number): void {
   try { process.kill(pid, "SIGKILL"); } catch { /* The process may already be gone. */ }
 }
 
-test("enforces the native executable deadline across separate POSIX process groups", async () => {
+test("tracks a separate process group after the native executable root exits", async () => {
   const temporaryDirectory = await mkdtemp(join(tmpdir(), "inertia-native-probe-"));
   const pidFile = join(temporaryDirectory, "descendant.pid");
+  const rootPidFile = join(temporaryDirectory, "root.pid");
   let descendantPid = 0;
+  let rootPid = 0;
   try {
     const moduleUrl = pathToFileURL(join(root, "scripts", "native-executable-probe.mjs")).href;
     const { probeNativeExecutable } = await import(moduleUrl) as {
@@ -57,7 +59,10 @@ test("enforces the native executable deadline across separate POSIX process grou
     const probe = probeNativeExecutable(process.execPath, [
       join(import.meta.dirname, "..", "fixtures", "native-executable-probe-child.mjs"),
     ], {
-      environment: { INERTIA_PROBE_PID_FILE: pidFile },
+      environment: {
+        INERTIA_PROBE_PID_FILE: pidFile,
+        INERTIA_PROBE_ROOT_PID_FILE: rootPidFile,
+      },
       timeoutMs: 1_000,
     });
     const deadlineFailure = expect(probe).rejects.toThrow("exceeded its 1000ms deadline");
@@ -79,6 +84,14 @@ test("enforces the native executable deadline across separate POSIX process grou
       expect(group.status).toBe(0);
       expect(Number(group.stdout.trim())).toBe(descendantPid);
     }
+    rootPid = Number(await readFile(rootPidFile, "utf8"));
+    expect(Number.isSafeInteger(rootPid)).toBe(true);
+    const rootExitDeadline = Date.now() + 750;
+    while (processExists(rootPid) && Date.now() < rootExitDeadline) {
+      await new Promise((resolveWait) => setTimeout(resolveWait, 10));
+    }
+    expect(processExists(rootPid)).toBe(false);
+    expect(processExists(descendantPid)).toBe(true);
     await deadlineFailure;
     expect(Date.now() - startedAt).toBeLessThan(5_000);
     descendantPid ||= Number(await readFile(pidFile, "utf8"));

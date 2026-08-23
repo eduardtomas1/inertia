@@ -7,6 +7,7 @@ const CLEANUP_TIMEOUT_MS = 2_000;
 const PROCESS_TABLE_TIMEOUT_MS = 500;
 const PROCESS_TABLE_OUTPUT_LIMIT = 1024 * 1024;
 const PROCESS_GROUP_DISCOVERY_PASSES = 3;
+const PROCESS_TRACKING_INTERVAL_MS = 25;
 
 function inheritedWindowsSystemRoot(environment = process.env) {
   const entry = Object.entries(environment).find(([name]) =>
@@ -41,23 +42,21 @@ function readPosixProcessTable() {
   return processes;
 }
 
-function posixDescendants(rootPid, processes) {
-  const descendantPids = new Set([rootPid]);
+function extendPosixOwnership(ownedPids, processes) {
   let added = true;
   while (added) {
     added = false;
     for (const processEntry of processes) {
       if (
-        !descendantPids.has(processEntry.pid)
-        && descendantPids.has(processEntry.parentPid)
+        !ownedPids.has(processEntry.pid)
+        && ownedPids.has(processEntry.parentPid)
       ) {
-        descendantPids.add(processEntry.pid);
+        ownedPids.add(processEntry.pid);
         added = true;
       }
     }
   }
-  descendantPids.delete(rootPid);
-  return processes.filter(({ pid }) => descendantPids.has(pid));
+  return processes.filter(({ pid }) => ownedPids.has(pid));
 }
 
 function signalProcess(target, signal, missingIsSuccess = true) {
@@ -70,14 +69,35 @@ function signalProcess(target, signal, missingIsSuccess = true) {
   }
 }
 
-function forceTerminatePosixProcessTree(pid) {
-  // Freeze the owned helper group before inspecting descendants so it cannot
-  // create another separately grouped PTY between discovery and termination.
-  const helperStopped = signalProcess(-pid, "SIGSTOP", false);
-  if (!helperStopped) {
-    signalProcess(-pid, "SIGKILL");
-    return false;
-  }
+function createPosixProcessTracker(rootPid) {
+  const ownedPids = new Set([rootPid]);
+  let disposed = false;
+  const refresh = () => {
+    if (disposed) return null;
+    const processes = readPosixProcessTable();
+    if (processes) extendPosixOwnership(ownedPids, processes);
+    return processes;
+  };
+  refresh();
+  const timer = setInterval(refresh, PROCESS_TRACKING_INTERVAL_MS);
+  timer.unref();
+  return {
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      clearInterval(timer);
+    },
+    ownedPids,
+    refresh,
+  };
+}
+
+function forceTerminatePosixProcessTree(pid, tracker) {
+  // Freeze every process group whose leader has been observed as part of this
+  // probe. Tracking begins while the root is alive, so ownership survives a
+  // root that exits and reparents a pipe-holding descendant before timeout.
+  const ownedPids = tracker?.ownedPids ?? new Set([pid]);
+  tracker?.refresh();
 
   const ownedGroups = new Set();
   const individualPids = new Set();
@@ -89,27 +109,29 @@ function forceTerminatePosixProcessTree(pid) {
       completeTreeSignaled = false;
       break;
     }
-    const descendants = posixDescendants(pid, processes);
-    const descendantPids = new Set(descendants.map(({ pid: descendantPid }) => descendantPid));
+    const previousOwnedPidCount = ownedPids.size;
+    const descendants = extendPosixOwnership(ownedPids, processes);
     const newGroups = [...new Set(
       descendants
         .map(({ groupPid }) => groupPid)
         .filter((groupPid) => (
           groupPid > 1
-          && groupPid !== pid
-          && descendantPids.has(groupPid)
+          && ownedPids.has(groupPid)
           && !ownedGroups.has(groupPid)
         )),
     )];
     const newIndividuals = descendants
       .filter(({ groupPid, pid: descendantPid }) => (
-        groupPid !== pid
-        && !ownedGroups.has(groupPid)
+        !ownedGroups.has(groupPid)
         && !newGroups.includes(groupPid)
         && !individualPids.has(descendantPid)
       ))
       .map(({ pid: descendantPid }) => descendantPid);
-    if (newGroups.length === 0 && newIndividuals.length === 0) {
+    if (
+      ownedPids.size === previousOwnedPidCount
+      && newGroups.length === 0
+      && newIndividuals.length === 0
+    ) {
       discoveryStable = true;
       break;
     }
@@ -130,10 +152,11 @@ function forceTerminatePosixProcessTree(pid) {
     completeTreeSignaled = signalProcess(descendantPid, "SIGKILL") && completeTreeSignaled;
   }
   completeTreeSignaled = signalProcess(-pid, "SIGKILL") && completeTreeSignaled;
+  tracker?.dispose();
   return completeTreeSignaled;
 }
 
-function forceTerminateProcessTree(child) {
+function forceTerminateProcessTree(child, tracker) {
   const pid = child.pid;
   if (!Number.isSafeInteger(pid) || pid <= 1) return false;
   if (process.platform === "win32") {
@@ -158,7 +181,7 @@ function forceTerminateProcessTree(child) {
       }
     }
   } else {
-    return forceTerminatePosixProcessTree(pid);
+    return forceTerminatePosixProcessTree(pid, tracker);
   }
   try { child.kill("SIGKILL"); } catch { /* The direct child may already be gone. */ }
   return false;
@@ -168,6 +191,7 @@ export function probeNativeExecutable(command, args, options = {}) {
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const outputLimit = options.outputLimit ?? DEFAULT_OUTPUT_LIMIT;
   return new Promise((resolveProbe, rejectProbe) => {
+    const startedAt = Date.now();
     const child = spawn(command, args, {
       detached: process.platform !== "win32",
       env: options.environment ?? {},
@@ -175,6 +199,9 @@ export function probeNativeExecutable(command, args, options = {}) {
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
     });
+    const processTracker = process.platform === "win32" || !child.pid
+      ? null
+      : createPosixProcessTracker(child.pid);
     let stdout = "";
     let stderr = "";
     let outputBytes = 0;
@@ -188,13 +215,14 @@ export function probeNativeExecutable(command, args, options = {}) {
       settled = true;
       clearTimeout(deadlineTimer);
       clearTimeout(cleanupTimer);
+      processTracker?.dispose();
       callback();
     };
     const stopTree = (error) => {
       if (failure || settled) return;
       failure = error;
       clearTimeout(deadlineTimer);
-      const treeTerminationConfirmed = forceTerminateProcessTree(child);
+      const treeTerminationConfirmed = forceTerminateProcessTree(child, processTracker);
       if (!treeTerminationConfirmed) {
         failure = new Error(`${error.message} The provider process tree could not be confirmed stopped.`);
       }
@@ -227,10 +255,19 @@ export function probeNativeExecutable(command, args, options = {}) {
         settle(() => rejectProbe(failure));
         return;
       }
+      if (processTracker && processTracker.ownedPids.size > 1) {
+        const treeTerminationConfirmed = forceTerminateProcessTree(child, processTracker);
+        if (!treeTerminationConfirmed) {
+          settle(() => rejectProbe(new Error(
+            "The native executable exited with an unconfirmed descendant process tree.",
+          )));
+          return;
+        }
+      }
       settle(() => resolveProbe({ signal, status, stderr, stdout }));
     });
     deadlineTimer = setTimeout(() => {
       stopTree(new Error(`The native executable exceeded its ${timeoutMs}ms deadline.`));
-    }, timeoutMs);
+    }, Math.max(0, timeoutMs - (Date.now() - startedAt)));
   });
 }

@@ -1,4 +1,26 @@
+import { useEffect, useRef, type RefObject } from "react";
+
 export type WorkspacePreviewOwner = "primary" | "secondary";
+
+export function usePreviewTabCloseFocus(
+  tabs: readonly { id: string }[],
+  activeTabId: string | null,
+  tabRefs: RefObject<Map<string, HTMLButtonElement>>,
+): (closedTabId: string) => void {
+  const pending = useRef<string | false | undefined>(undefined);
+  useEffect(() => {
+    const targetId = pending.current || activeTabId || tabs[0]?.id;
+    if (pending.current === undefined || !targetId) return;
+    const element = tabRefs.current.get(targetId);
+    if (!element) return;
+    pending.current = undefined;
+    element.focus();
+  }, [activeTabId, tabRefs, tabs]);
+  return (closedTabId) => {
+    const index = tabs.findIndex((tab) => tab.id === closedTabId);
+    pending.current = tabs[index + 1]?.id ?? tabs[index - 1]?.id ?? false;
+  };
+}
 
 export function routeWorkspaceRunPreview<Run extends {
   conversationId: string | null;

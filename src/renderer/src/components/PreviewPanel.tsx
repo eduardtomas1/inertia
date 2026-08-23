@@ -17,6 +17,7 @@ import {
 } from "../utils/nativePreviewOverlay";
 import {
   registerWorkspacePreviewAddress,
+  usePreviewTabCloseFocus,
   type WorkspacePreviewOwner,
 } from "../utils/workspacePreviewFocus";
 import { ArrowLeft, ArrowRight, ExternalLink, Globe2, History, LockKeyhole, Plus, RefreshCw, ShieldCheck, X } from "lucide-react";
@@ -120,6 +121,7 @@ export function PreviewPanel({
     registerWorkspacePreviewAddress(owner, address);
   }, [owner]);
   const currentLocation = useMemo(() => safePreviewUrl(url), [url]);
+  const prepareTabCloseFocus = usePreviewTabCloseFocus(tabs, activeTabId, tabRefs);
 
   useEffect(() => {
     setDraftUrl(url);
@@ -235,6 +237,7 @@ export function PreviewPanel({
                     moveTabFocus(tab.id, event.key);
                   } else if (event.key === "Delete" && onCloseTab) {
                     event.preventDefault();
+                    prepareTabCloseFocus(tab.id);
                     onCloseTab(tab.id);
                   }
                 }}

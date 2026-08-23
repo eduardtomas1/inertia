@@ -163,24 +163,29 @@ describe("Browser evidence timeline", () => {
     await waitFor(() => expect(screen.queryByText("Local evidence")).not.toBeInTheDocument());
   });
 
-  it("provides roving tab focus and keyboard tab closure", () => {
+  it("provides roving tab focus and restores focus after keyboard tab closure", async () => {
     const onActivateTab = vi.fn();
     const onCloseTab = vi.fn();
-    render(
+    const panel = (
+      tabs: Array<{ id: string; title: string; url: string; loading: boolean }>,
+      activeTabId: string,
+    ) => (
       <PreviewPanel
         owner="primary"
         url="http://127.0.0.1:4173/"
-        tabs={[
-          { id: "one", title: "One", url: "http://127.0.0.1:4173/one", loading: false },
-          { id: "two", title: "Two", url: "http://127.0.0.1:4173/two", loading: false },
-        ]}
-        activeTabId="one"
+        tabs={tabs}
+        activeTabId={activeTabId}
         onNavigate={vi.fn()}
         onOpenExternal={vi.fn()}
         onActivateTab={onActivateTab}
         onCloseTab={onCloseTab}
-      />,
+      />
     );
+    const tabs = [
+      { id: "one", title: "One", url: "http://127.0.0.1:4173/one", loading: false },
+      { id: "two", title: "Two", url: "http://127.0.0.1:4173/two", loading: false },
+    ];
+    const view = render(panel(tabs, "one"));
 
     const first = screen.getByRole("tab", { name: "One" });
     const second = screen.getByRole("tab", { name: "Two" });
@@ -191,5 +196,14 @@ describe("Browser evidence timeline", () => {
 
     fireEvent.keyDown(second, { key: "Delete" });
     expect(onCloseTab).toHaveBeenCalledWith("two");
+    view.rerender(panel([tabs[0]!], "one"));
+    await waitFor(() => expect(screen.getByRole("tab", { name: "One" })).toHaveFocus());
+
+    fireEvent.keyDown(screen.getByRole("tab", { name: "One" }), { key: "Delete" });
+    expect(onCloseTab).toHaveBeenLastCalledWith("one");
+    view.rerender(panel([
+      { id: "replacement", title: "New page", url: "", loading: false },
+    ], "replacement"));
+    await waitFor(() => expect(screen.getByRole("tab", { name: "New page" })).toHaveFocus());
   });
 });

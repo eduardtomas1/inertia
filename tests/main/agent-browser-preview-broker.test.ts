@@ -616,6 +616,7 @@ describe("agent-owned native Browser", () => {
       "tok\u0000en=control-broker-short",
       "pass\u202dword=bidi-broker-short",
       "tok\u200ben=zero-width-broker-short",
+      "tok％65n=compat-percent-broker-short",
       "sk%00-control-broker-prefix1234",
       "sk\u0000-literal-broker-prefix1234",
     ]) {
@@ -689,6 +690,7 @@ describe("agent-owned native Browser", () => {
     expect(serialized).not.toContain("control-broker-short");
     expect(serialized).not.toContain("bidi-broker-short");
     expect(serialized).not.toContain("zero-width-broker-short");
+    expect(serialized).not.toContain("compat-percent-broker-short");
     expect(serialized).not.toContain("control-broker-prefix1234");
     expect(serialized).not.toContain("literal-broker-prefix1234");
     expect(serialized).not.toContain("Jane Doe");
@@ -730,7 +732,7 @@ describe("agent-owned native Browser", () => {
       entry.detail === "Sensitive console detail hidden" && entry.redacted
     )).toBe(true);
     expect(consoleEvidence.reduce((total, entry) => total + entry.occurrences, 0))
-      .toBe(16);
+      .toBe(17);
 
     const capture = state.evidence.entries.find((entry) => entry.kind === "screenshot");
     expect(capture).toBeDefined();

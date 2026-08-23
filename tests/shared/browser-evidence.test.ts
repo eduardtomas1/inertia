@@ -84,6 +84,8 @@ describe("Browser evidence sanitization", () => {
     "tok%00en=hunter2",
     "pass%E2%80%ADword=hunter2",
     "tok%E2%80%8Ben=hunter2",
+    "tok％65n=hunter2",
+    "tok%EF%BC%8565n=hunter2",
     "ｔｏｋｅｎ=hunter2",
     "%EF%BD%94%EF%BD%8F%EF%BD%8B%EF%BD%85%EF%BD%8E=hunter2",
     "-----BEGIN PRIVATE KEY-----",
@@ -100,6 +102,7 @@ describe("Browser evidence sanitization", () => {
     "-----BEGIN PRIVATE\u0000 KEY-----",
     "ｓｋ-abcdefgh12345678",
     "%EF%BD%93%EF%BD%8B%2Dabcdefgh12345678",
+    "sk％00-abcdefgh12345678",
   ])("fails closed when a derived representation reveals a projectable secret: %s", (value) => {
     expect(sanitizeBrowserEvidenceText(value, "hidden"))
       .toEqual({ text: "hidden", redacted: true });
@@ -127,6 +130,7 @@ describe("Browser evidence sanitization", () => {
         "tok\u200ben=hunter2",
         "ｓｒｃ／config",
         "ｓｋ-abcdefgh12345678",
+        "tok％65n=hunter2",
       ],
       uriDecoded: [
         "postgres%3A%2F%2Falice%3Ahunter2%40localhost%2Fprivate",
@@ -213,6 +217,7 @@ describe("Browser evidence sanitization", () => {
     "postgres://alice%3Ahunter2%40localhost/private",
     "post\u0000gres://alice:hunter2@localhost/private",
     "ｐｏｓｔｇｒｅｓ：／／alice:hunter2@localhost/private",
+    "postgres％3A％2F％2Falice％3Ahunter2％40localhost％2Fprivate",
     "MONGODB_URI=MoNgOdB://alice:hunter2@localhost/private",
     "\"MONGODB_URI\":\"mongodb://alice:hunter2@localhost/private\"",
   ])("fails closed for credential-bearing hierarchical URI: %s", (value) => {
@@ -283,6 +288,7 @@ describe("Browser evidence sanitization", () => {
     "Failed in src%2Fconfig",
     "Failed in src%5Cconfig",
     "Failed in ｓｒｃ／config",
+    "Failed in src％2Fconfig",
     String.raw`Failed in src\private\config`,
     String.raw`Failed in src\config`,
     String.raw`Failed in .\Dockerfile`,
@@ -335,6 +341,7 @@ describe("Browser evidence sanitization", () => {
     "Failed https://example.com/private?next=/docs#section during render.",
     "Render used 1%2F2 of the frame budget.",
     "Word%20wrapping completed normally.",
+    "Word％20wrapping completed normally.",
     "Ｆｉｎｉｓｈｅｄ normally.",
   ])("does not mistake normal prose or HTTP URLs for filesystem paths: %s", (value) => {
     const result = sanitizeBrowserEvidenceText(value, "hidden");

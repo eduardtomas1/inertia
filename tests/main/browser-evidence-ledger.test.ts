@@ -63,6 +63,7 @@ describe("Browser evidence ledger", () => {
     "tok\u0000en=hunter2",
     "pass\u202dword=hunter2",
     "tok\u200ben=hunter2",
+    "tok％65n=hunter2",
     "sk%00-abcdefgh12345678",
     "sk\u0000-abcdefgh12345678",
   ])("fails closed before storing a page-authored credential shape: %s", (message) => {

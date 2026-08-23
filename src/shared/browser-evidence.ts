@@ -82,6 +82,7 @@ const CAMEL_CASE_CREDENTIAL_ASSIGNMENT =
 const SECRET_HOST_FRAGMENT =
   /(?:(?:sk|rk|pk|ghp|github[-_]?pat|glpat|npm|pypi|hf|xox[baprs]|api|key|token)[-_][a-z0-9_-]{8,}|(?:akia|asia)[a-z0-9]{16}|aiza[a-z0-9_-]{20,})/iu;
 const MAX_PERCENT_DECODE_PASSES = 4;
+const MAX_INSPECTION_REPRESENTATIONS = 8;
 
 function boundedInput(value: string, maximum: number): string {
   return value.slice(0, Math.max(maximum + 4_096, 4_096));
@@ -212,6 +213,27 @@ function boundedPercentDecode(value: string): string | null {
   return decoded.includes("%") ? null : decoded;
 }
 
+function boundedInspectionRepresentations(
+  value: string,
+  maximum: number,
+): string[] | null {
+  const representations = [value];
+  const seen = new Set(representations);
+  for (let index = 0; index < representations.length; index += 1) {
+    const representation = representations[index]!;
+    const decoded = boundedPercentDecode(representation);
+    const normalized = boundedNormalizedInspection(representation, maximum);
+    if (decoded === null || normalized === null) return null;
+    for (const candidate of [decoded, normalized]) {
+      if (seen.has(candidate)) continue;
+      if (representations.length >= MAX_INSPECTION_REPRESENTATIONS) return null;
+      seen.add(candidate);
+      representations.push(candidate);
+    }
+  }
+  return representations;
+}
+
 function suspiciousHostname(hostname: string): boolean {
   return hostname.split(".").some((label) =>
     SECRET_HOST_FRAGMENT.test(label)
@@ -286,21 +308,17 @@ export function sanitizeBrowserEvidenceText(
   const limit = Math.max(1, Math.min(Math.trunc(maximum), MAX_BROWSER_EVIDENCE_TEXT_CHARS));
   if (typeof value !== "string") return { text: fallback.slice(0, limit), redacted: true };
   const inspected = boundedInput(value, limit);
-  const decoded = boundedPercentDecode(inspected);
-  if (decoded === null) {
-    return { text: fallback.slice(0, limit), redacted: true };
-  }
   const inspectionMaximum = Math.max(limit + 4_096, 4_096);
-  const normalizedInspected = boundedNormalizedInspection(inspected, inspectionMaximum);
-  const normalizedDecoded = decoded === inspected
-    ? normalizedInspected
-    : boundedNormalizedInspection(decoded, inspectionMaximum);
-  if (normalizedInspected === null || normalizedDecoded === null) {
+  const inspectionRepresentations = boundedInspectionRepresentations(
+    inspected,
+    inspectionMaximum,
+  );
+  if (inspectionRepresentations === null) {
     return { text: fallback.slice(0, limit), redacted: true };
   }
-  // Every distinct bounded representation is inspected through one cached
-  // decision. Only the raw view may rely on the projection pass below; a
-  // decoded or normalized view that newly needs projection must fail closed.
+  // Decode and normalize to a bounded fixpoint, then inspect every distinct
+  // representation through one cached decision. Only the raw view may rely
+  // on projection; a derived view that newly needs it must fail closed.
   const decisions = new Map<string, BrowserEvidenceInspectionDecision>();
   const decisionFor = (representation: string): BrowserEvidenceInspectionDecision => {
     const cached = decisions.get(representation);
@@ -313,13 +331,7 @@ export function sanitizeBrowserEvidenceText(
   if (rawDecision.failClosed) {
     return { text: fallback.slice(0, limit), redacted: true };
   }
-  const derivedRepresentations = new Set([
-    decoded,
-    normalizedInspected,
-    normalizedDecoded,
-  ]);
-  derivedRepresentations.delete(inspected);
-  for (const representation of derivedRepresentations) {
+  for (const representation of inspectionRepresentations.slice(1)) {
     const decision = decisionFor(representation);
     if (
       decision.failClosed

@@ -753,8 +753,8 @@ export class AttachmentRegistry {
         path: attachment.id,
       }));
     } catch (error) {
-      await Promise.allSettled(registered.map(async (attachment) =>
-        await this.releaseRecord(attachment)));
+      await Promise.all(registered.map(async (attachment) =>
+        await this.rollbackRecord(attachment)));
       throw error;
     }
   }
@@ -921,6 +921,12 @@ export class AttachmentRegistry {
     return await this.startRelease(id, true);
   }
 
+  async rollback(id: string): Promise<void> {
+    const record = this.records.get(id);
+    if (!record) return;
+    await this.rollbackRecord(record);
+  }
+
   async releaseFromRenderer(id: string): Promise<boolean> {
     return await this.startRelease(id, !this.attachmentHandoffs.has(id));
   }
@@ -1070,6 +1076,24 @@ export class AttachmentRegistry {
     this.dropAttachmentHandoffs(record.id);
     this.revokedAttachmentIds.delete(record.id);
     return true;
+  }
+
+  private async rollbackRecord(
+    record: AttachmentRegistryRecord,
+  ): Promise<void> {
+    try {
+      await this.releaseRecord(record);
+    } catch {
+      // The capability was never published to its caller, so it cannot be
+      // retried through release. Retire it while conservatively retaining its
+      // quota until disposal or restart cleanup can unlink the private file.
+      if (this.records.get(record.id) === record) {
+        this.records.delete(record.id);
+      }
+      this.dropAttachmentHandoffs(record.id);
+      this.revokedAttachmentIds.delete(record.id);
+      this.pendingPaths.set(record.path, record.size);
+    }
   }
 
   private async persistAndValidate(

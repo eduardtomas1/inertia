@@ -46,7 +46,7 @@ function registryFor(
     failAt?: number;
   } = {},
 ): {
-  registry: Pick<AttachmentRegistry, "importFromWriter" | "release">;
+  registry: Pick<AttachmentRegistry, "importFromWriter" | "rollback">;
   maxActive: () => number;
   released: string[];
 } {
@@ -88,12 +88,11 @@ function registryFor(
           size: source.size,
         };
       },
-      release: async (id: string): Promise<boolean> => {
+      rollback: async (id: string): Promise<void> => {
         released.push(id);
         const path = paths.get(id);
         if (path) await rm(path, { force: true });
         paths.delete(id);
-        return Boolean(path);
       },
     },
   };

@@ -157,7 +157,7 @@ async function inspectSelections(
 }
 
 export async function importSelectedAttachmentPaths(
-  registry: Pick<AttachmentRegistry, "importFromWriter" | "release">,
+  registry: Pick<AttachmentRegistry, "importFromWriter" | "rollback">,
   paths: readonly string[],
   mode: AttachmentPickerMode,
   signal: AbortSignal,
@@ -204,8 +204,8 @@ export async function importSelectedAttachmentPaths(
     }
     return imported;
   } catch (error) {
-    await Promise.allSettled(imported.map(async ({ id }) =>
-      await registry.release(id)));
+    await Promise.all(imported.map(async ({ id }) =>
+      await registry.rollback(id)));
     throw error;
   }
 }

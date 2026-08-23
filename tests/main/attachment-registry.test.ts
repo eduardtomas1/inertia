@@ -615,6 +615,48 @@ describe("main-owned attachment registry", () => {
     await expect(readdir(directory)).resolves.toEqual([]);
   });
 
+  it("retires an unpublished record when batch rollback cleanup is blocked", async () => {
+    const unlinkFile = vi.fn<(path: string) => Promise<void>>()
+      .mockRejectedValue(Object.assign(
+        new Error("file remains locked"),
+        { code: "EPERM" },
+      ));
+    const { directory, registry: attachments } = await registry({
+      maxRecords: 1,
+      maxBytes: png.length + alternatePng.length,
+    }, unlinkFile, async () => undefined);
+
+    await expect(attachments.import([
+      {
+        name: "registered-before-failure.png",
+        mimeType: "image/png",
+        data: png,
+      },
+      {
+        name: "blocked-by-record-cap.png",
+        mimeType: "image/png",
+        data: alternatePng,
+      },
+    ])).rejects.toThrow(/storage is full/u);
+
+    expect(unlinkFile).toHaveBeenCalledTimes(3);
+    const [strandedName] = await readdir(directory);
+    expect(strandedName).toMatch(/^[0-9a-f-]{36}\.png$/u);
+    const strandedId = strandedName!.slice(0, -4);
+    await expect(attachments.preview(strandedId)).resolves.toBeNull();
+    expect(attachments.usage()).toEqual({
+      records: 1,
+      bytes: png.length,
+    });
+    await expect(attachments.import([{
+      name: "blocked-by-retired-file.png",
+      mimeType: "image/png",
+      data: png,
+    }])).rejects.toThrow(/storage is full/u);
+    await attachments.dispose();
+    await expect(readdir(directory)).resolves.toEqual([]);
+  });
+
   it("cancels validation and removes its unpublished staged file", async () => {
     const { directory, registry: attachments } = await registry({
       validationDelayMs: 5_000,

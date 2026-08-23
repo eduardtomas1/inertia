@@ -79,12 +79,79 @@ describe("Browser evidence sanitization", () => {
     "tok\u0000en=hunter2",
     "pass\u202dword=hunter2",
     "clientSec\u2066ret=x",
+    "tok\u200ben=hunter2",
+    "pass\u034fword=hunter2",
     "tok%00en=hunter2",
     "pass%E2%80%ADword=hunter2",
+    "tok%E2%80%8Ben=hunter2",
+    "ｔｏｋｅｎ=hunter2",
+    "%EF%BD%94%EF%BD%8F%EF%BD%8B%EF%BD%85%EF%BD%8E=hunter2",
     "-----BEGIN PRIVATE KEY-----",
   ])("fails closed for credential-bearing console detail: %s", (value) => {
     expect(sanitizeBrowserEvidenceText(value, "Sensitive console detail hidden"))
       .toEqual({ text: "Sensitive console detail hidden", redacted: true });
+  });
+
+  it.each([
+    "sk%00-abcdefgh12345678",
+    "sk\u0000-abcdefgh12345678",
+    "ghp_\u202dabcdefgh12345678",
+    "eyJabcdefgh.\u0000ijklmnop.qrstuvwx",
+    "-----BEGIN PRIVATE\u0000 KEY-----",
+    "ｓｋ-abcdefgh12345678",
+    "%EF%BD%93%EF%BD%8B%2Dabcdefgh12345678",
+  ])("fails closed when a derived representation reveals a projectable secret: %s", (value) => {
+    expect(sanitizeBrowserEvidenceText(value, "hidden"))
+      .toEqual({ text: "hidden", redacted: true });
+  });
+
+  it("still projects a secret already recognizable in the bounded raw view", () => {
+    expect(sanitizeBrowserEvidenceText("sk-abcdefgh12345678", "hidden"))
+      .toEqual({ text: "<redacted>", redacted: true });
+  });
+
+  it("applies one fail-closed policy across bounded derived representations", () => {
+    const matrix = {
+      raw: [
+        "token=hunter2",
+        "src/config",
+        "postgres://alice:hunter2@localhost/private",
+      ],
+      percentDecoded: [
+        "tok%65n=hunter2",
+        "src%2Fconfig",
+        "sk%00-abcdefgh12345678",
+      ],
+      unicodeOrControlNormalized: [
+        "tok\u0000en=hunter2",
+        "tok\u200ben=hunter2",
+        "ｓｒｃ／config",
+        "ｓｋ-abcdefgh12345678",
+      ],
+      uriDecoded: [
+        "postgres%3A%2F%2Falice%3Ahunter2%40localhost%2Fprivate",
+        "post\u0000gres://alice:hunter2@localhost/private",
+      ],
+    } as const;
+    for (const [stage, representations] of Object.entries(matrix)) {
+      for (const representation of representations) {
+        expect(
+          sanitizeBrowserEvidenceText(representation, "hidden"),
+          `${stage}: ${representation}`,
+        ).toEqual({ text: "hidden", redacted: true });
+      }
+    }
+  });
+
+  it.each([
+    ["sk-abcdefgh12345678", "<redacted>"],
+    ["https://example.com/private?draft=value", "https://example.com"],
+    ["postgres://localhost/private", "postgres://localhost"],
+    ["The pass\u202d completed normally.", "The pass completed normally."],
+  ])("produces a storage-safe projection fixpoint for %s", (value, projected) => {
+    const first = sanitizeBrowserEvidenceText(value, "hidden");
+    expect(first.text).toBe(projected);
+    expect(sanitizeBrowserEvidenceText(first.text, "hidden").text).toBe(projected);
   });
 
   it.each([
@@ -105,10 +172,10 @@ describe("Browser evidence sanitization", () => {
 
   it("normalizes controls in ordinary prose without failing the detail closed", () => {
     expect(sanitizeBrowserEvidenceText(
-      "The pass\u202d completed after a line\u0000break.",
+      "The pass\u202d completed after a line\u0000break and soft\u200bwrap.",
       "hidden",
     )).toEqual({
-      text: "The pass completed after a line break.",
+      text: "The pass completed after a line break and soft wrap.",
       redacted: true,
     });
   });
@@ -144,6 +211,8 @@ describe("Browser evidence sanitization", () => {
     "//alice:hunter2@localhost/private",
     "postgres%3A%2F%2Falice%3Ahunter2%40localhost%2Fprivate",
     "postgres://alice%3Ahunter2%40localhost/private",
+    "post\u0000gres://alice:hunter2@localhost/private",
+    "ｐｏｓｔｇｒｅｓ：／／alice:hunter2@localhost/private",
     "MONGODB_URI=MoNgOdB://alice:hunter2@localhost/private",
     "\"MONGODB_URI\":\"mongodb://alice:hunter2@localhost/private\"",
   ])("fails closed for credential-bearing hierarchical URI: %s", (value) => {
@@ -211,6 +280,9 @@ describe("Browser evidence sanitization", () => {
     "Failed in src/.env",
     "Failed in ./Dockerfile",
     "Failed in ../Makefile",
+    "Failed in src%2Fconfig",
+    "Failed in src%5Cconfig",
+    "Failed in ｓｒｃ／config",
     String.raw`Failed in src\private\config`,
     String.raw`Failed in src\config`,
     String.raw`Failed in .\Dockerfile`,
@@ -240,10 +312,10 @@ describe("Browser evidence sanitization", () => {
       .toEqual({ text: "hidden", redacted: true });
   });
 
-  it("strips URL routes, filesystem paths, tokens, controls, and bidi text", () => {
+  it("strips URL routes and recognizable tokens from the raw projection", () => {
     const result = sanitizeBrowserEvidenceText(
       "Failed http://localhost:3000/private?draft=value#section "
-      + "with ghp_abcdefgh12345678\u0000\u202ereordered",
+      + "with ghp_abcdefgh12345678 reordered",
       "hidden",
     );
     expect(result.redacted).toBe(true);
@@ -251,7 +323,6 @@ describe("Browser evidence sanitization", () => {
     expect(result.text).toContain("<redacted>");
     expect(result.text).not.toContain("private?draft");
     expect(result.text).not.toContain("ghp_abcdefgh");
-    expect(result.text).not.toMatch(/[\u0000\u202e]/u);
   });
 
   it.each([
@@ -262,6 +333,9 @@ describe("Browser evidence sanitization", () => {
     ".env variables are documented separately.",
     "Opened profile://example during setup.",
     "Failed https://example.com/private?next=/docs#section during render.",
+    "Render used 1%2F2 of the frame budget.",
+    "Word%20wrapping completed normally.",
+    "Ｆｉｎｉｓｈｅｄ normally.",
   ])("does not mistake normal prose or HTTP URLs for filesystem paths: %s", (value) => {
     const result = sanitizeBrowserEvidenceText(value, "hidden");
     expect(result.text).not.toBe("hidden");

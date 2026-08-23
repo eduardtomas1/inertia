@@ -62,7 +62,10 @@ describe("Browser evidence ledger", () => {
     "MONGODB_URI=mongodb://alice:hunter2@localhost/private",
     "tok\u0000en=hunter2",
     "pass\u202dword=hunter2",
-  ])("fails closed before storing page-authored credential assignment: %s", (message) => {
+    "tok\u200ben=hunter2",
+    "sk%00-abcdefgh12345678",
+    "sk\u0000-abcdefgh12345678",
+  ])("fails closed before storing a page-authored credential shape: %s", (message) => {
     const ledger = new BrowserEvidenceLedger();
     ledger.recordConsoleError({ ...location, message });
 

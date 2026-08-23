@@ -52,8 +52,7 @@ export interface SanitizedBrowserEvidenceText {
   redacted: boolean;
 }
 
-const CONTROL_OR_BIDI =
-  /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u206f]+/gu;
+const CONTROL_OR_BIDI = /[\p{Cc}\p{Default_Ignorable_Code_Point}]+/gu;
 const HTTP_SCHEME = /https?:\/\//iu;
 const URL_TOKEN = /https?:\/\/[^\s<>"'`]+/giu;
 const AUTHORITY_URI_TOKEN = /(?:[A-Za-z][A-Za-z0-9+.-]*:)?\/\/[^\s<>"'`]+/giu;
@@ -148,25 +147,53 @@ function hasFilesystemPathCandidate(value: string): boolean {
     || patternMatches(UNC_OR_HOME_PATH, value);
 }
 
-function hasFailClosedEvidence(
+interface BrowserEvidenceInspectionDecision {
+  authorityProjectionSignature: string;
+  authorityProjectionRequired: boolean;
+  failClosed: boolean;
+  secretProjectionRequired: boolean;
+}
+
+function authorityProjectionSignature(value: string): string {
+  AUTHORITY_URI_TOKEN.lastIndex = 0;
+  const matches = Array.from(value.matchAll(AUTHORITY_URI_TOKEN), (match) => match[0]);
+  AUTHORITY_URI_TOKEN.lastIndex = 0;
+  return JSON.stringify(matches.map((match) =>
+    replaceAuthorityUri(replaceUrl(match).value).value
+  ));
+}
+
+function inspectBrowserEvidenceRepresentation(
   value: string,
-  includeProjectableSecrets: boolean,
-): boolean {
-  return patternMatches(SENSITIVE_FIELD, value)
+): BrowserEvidenceInspectionDecision {
+  const outsideAuthorityUris = withoutAuthorityUris(value);
+  const outsideHttpUrls = withoutHttpUrls(value);
+  const authorityProjected = replaceAuthorityUri(replaceUrl(value).value).value;
+  return {
+    authorityProjectionSignature: authorityProjectionSignature(value),
+    authorityProjectionRequired: authorityProjected !== value,
+    failClosed: patternMatches(HTTP_SCHEME, outsideHttpUrls)
+    || patternMatches(SENSITIVE_FIELD, value)
+    || patternMatches(CREDENTIAL_ASSIGNMENT, value)
     || patternMatches(CAMEL_CASE_CREDENTIAL_ASSIGNMENT, value)
     || patternMatches(AUTHORIZATION_VALUE, value)
     || hasCredentialBearingUri(value)
     || patternMatches(FILE_URL, value)
     || patternMatches(WINDOWS_OR_UNC_PATH_PREFIX, value)
-    || hasFilesystemPathCandidate(withoutAuthorityUris(value))
-    || (
-      includeProjectableSecrets
-      && (
-        patternMatches(PREFIXED_SECRET, value)
-        || patternMatches(JWT, value)
-        || patternMatches(PRIVATE_KEY, value)
-      )
-    );
+    || hasFilesystemPathCandidate(outsideAuthorityUris),
+    secretProjectionRequired: patternMatches(PREFIXED_SECRET, value)
+      || patternMatches(JWT, value)
+      || patternMatches(PRIVATE_KEY, value)
+      || patternMatches(LONG_OPAQUE_VALUE, value),
+  };
+}
+
+function boundedNormalizedInspection(
+  value: string,
+  maximum: number,
+): string | null {
+  const normalized = withoutControlOrBidi(value).normalize("NFKC");
+  return normalized.length <= maximum ? normalized : null;
 }
 
 function boundedPercentDecode(value: string): string | null {
@@ -263,37 +290,51 @@ export function sanitizeBrowserEvidenceText(
   if (decoded === null) {
     return { text: fallback.slice(0, limit), redacted: true };
   }
-  const inspectedWithoutHttpUrls = withoutHttpUrls(inspected);
-  const decodedOutsideDirectHttpUrls = boundedPercentDecode(inspectedWithoutHttpUrls);
-  if (
-    decodedOutsideDirectHttpUrls === null
-    || patternMatches(
-      HTTP_SCHEME,
-      withoutControlOrBidi(decodedOutsideDirectHttpUrls),
-    )
-  ) {
+  const inspectionMaximum = Math.max(limit + 4_096, 4_096);
+  const normalizedInspected = boundedNormalizedInspection(inspected, inspectionMaximum);
+  const normalizedDecoded = decoded === inspected
+    ? normalizedInspected
+    : boundedNormalizedInspection(decoded, inspectionMaximum);
+  if (normalizedInspected === null || normalizedDecoded === null) {
     return { text: fallback.slice(0, limit), redacted: true };
   }
-  const controlNormalizedInspected = withoutControlOrBidi(inspected);
-  const controlNormalizedDecoded = decoded === inspected
-    ? controlNormalizedInspected
-    : withoutControlOrBidi(decoded);
-  if (
-    hasFailClosedEvidence(inspected, false)
-    || (
-      decoded !== inspected
-      && hasFailClosedEvidence(decoded, true)
-    )
-    || (
-      controlNormalizedInspected !== inspected
-      && hasFailClosedEvidence(controlNormalizedInspected, false)
-    )
-    || (
-      controlNormalizedDecoded !== decoded
-      && hasFailClosedEvidence(controlNormalizedDecoded, false)
-    )
-  ) {
+  // Every distinct bounded representation is inspected through one cached
+  // decision. Only the raw view may rely on the projection pass below; a
+  // decoded or normalized view that newly needs projection must fail closed.
+  const decisions = new Map<string, BrowserEvidenceInspectionDecision>();
+  const decisionFor = (representation: string): BrowserEvidenceInspectionDecision => {
+    const cached = decisions.get(representation);
+    if (cached) return cached;
+    const decision = inspectBrowserEvidenceRepresentation(representation);
+    decisions.set(representation, decision);
+    return decision;
+  };
+  const rawDecision = decisionFor(inspected);
+  if (rawDecision.failClosed) {
     return { text: fallback.slice(0, limit), redacted: true };
+  }
+  const derivedRepresentations = new Set([
+    decoded,
+    normalizedInspected,
+    normalizedDecoded,
+  ]);
+  derivedRepresentations.delete(inspected);
+  for (const representation of derivedRepresentations) {
+    const decision = decisionFor(representation);
+    if (
+      decision.failClosed
+      || decision.secretProjectionRequired
+      || (
+        decision.authorityProjectionRequired
+        && (
+          !rawDecision.authorityProjectionRequired
+          || decision.authorityProjectionSignature
+            !== rawDecision.authorityProjectionSignature
+        )
+      )
+    ) {
+      return { text: fallback.slice(0, limit), redacted: true };
+    }
   }
   let redacted = inspected.length < value.length;
   let text = inspected.replace(CONTROL_OR_BIDI, () => {
@@ -331,6 +372,14 @@ export function sanitizeBrowserEvidenceText(
   if (text.length > limit) {
     redacted = true;
     text = text.slice(0, limit).replace(TRAILING_SECRET_FRAGMENT, "").trimEnd();
+  }
+  const projectedDecision = decisionFor(text);
+  if (
+    projectedDecision.failClosed
+    || projectedDecision.authorityProjectionRequired
+    || projectedDecision.secretProjectionRequired
+  ) {
+    return { text: fallback.slice(0, limit), redacted: true };
   }
   return { text: text || fallback.slice(0, limit), redacted };
 }

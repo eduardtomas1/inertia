@@ -31,10 +31,11 @@ describe("Browser evidence ledger", () => {
     });
 
     const serialized = JSON.stringify(ledger.snapshot());
-    expect(serialized).toContain("<path>");
+    expect(serialized).toContain("Sensitive console detail hidden");
     expect(serialized).toContain("http://localhost:3000");
     expect(serialized).toContain("HTTP 503");
     expect(serialized).not.toContain("alice");
+    expect(serialized).not.toContain("private.ts");
     expect(serialized).not.toContain("authorization=secret");
     expect(serialized).not.toContain("#hash");
     expect(ledger.snapshot().entries.every((entry) =>

@@ -88,6 +88,21 @@ function patternMatches(pattern: RegExp, value: string): boolean {
   return matched;
 }
 
+function withoutHttpUrls(value: string): string {
+  URL_TOKEN.lastIndex = 0;
+  const remaining = value.replace(URL_TOKEN, "");
+  URL_TOKEN.lastIndex = 0;
+  return remaining;
+}
+
+function hasFilesystemPathCandidate(value: string): boolean {
+  return patternMatches(FILE_URL, value)
+    || patternMatches(POSIX_PATH, value)
+    || patternMatches(RELATIVE_FILE_PATH, value)
+    || patternMatches(WINDOWS_OR_UNC_PATH_PREFIX, value)
+    || patternMatches(UNC_OR_HOME_PATH, value);
+}
+
 function boundedPercentDecode(value: string): string | null {
   let decoded = value;
   for (let pass = 0; pass < MAX_PERCENT_DECODE_PASSES; pass += 1) {
@@ -163,10 +178,14 @@ export function sanitizeBrowserEvidenceText(
   if (decoded === null) {
     return { text: fallback.slice(0, limit), redacted: true };
   }
+  const inspectedWithoutHttpUrls = withoutHttpUrls(inspected);
+  const decodedWithoutHttpUrls = decoded === inspected
+    ? inspectedWithoutHttpUrls
+    : withoutHttpUrls(decoded);
   if (
     SENSITIVE_FIELD.test(inspected)
     || patternMatches(AUTHORIZATION_VALUE, inspected)
-    || patternMatches(WINDOWS_OR_UNC_PATH_PREFIX, inspected)
+    || hasFilesystemPathCandidate(inspectedWithoutHttpUrls)
     || (
       decoded !== inspected
       && (
@@ -175,10 +194,7 @@ export function sanitizeBrowserEvidenceText(
         || patternMatches(PREFIXED_SECRET, decoded)
         || patternMatches(JWT, decoded)
         || patternMatches(PRIVATE_KEY, decoded)
-        || patternMatches(POSIX_PATH, decoded)
-        || patternMatches(RELATIVE_FILE_PATH, decoded)
-        || patternMatches(WINDOWS_OR_UNC_PATH_PREFIX, decoded)
-        || patternMatches(UNC_OR_HOME_PATH, decoded)
+        || hasFilesystemPathCandidate(decodedWithoutHttpUrls)
       )
     )
   ) {

@@ -60,11 +60,13 @@ describe("Browser evidence sanitization", () => {
     "Failure in /uncommon-root/private/output.ts",
     "Failure in packages/browser/private/output.ts",
     "Failure in ~/private/main.ts",
-  ])("removes platform filesystem paths: %s", (value) => {
-    const result = sanitizeBrowserEvidenceText(value, "hidden");
-    expect(result.redacted).toBe(true);
-    expect(result.text).toContain("<path>");
-    expect(result.text).not.toContain("main.ts");
+    "Failure in /Users/Jane Doe/private project/src/main.ts",
+    "Failure in packages/browser/private project/src/main.ts",
+    "Failure in ~/Jane Doe/private project/src/main.ts",
+    "Failure in file:///Users/Jane%20Doe/private%20project/src/main.ts",
+  ])("fails closed for POSIX, file, home, and relative filesystem paths: %s", (value) => {
+    expect(sanitizeBrowserEvidenceText(value, "hidden"))
+      .toEqual({ text: "hidden", redacted: true });
   });
 
   it.each([
@@ -81,18 +83,25 @@ describe("Browser evidence sanitization", () => {
 
   it("strips URL routes, filesystem paths, tokens, controls, and bidi text", () => {
     const result = sanitizeBrowserEvidenceText(
-      "Failed http://localhost:3000/private?draft=value#section at /Users/alice/project/app.ts "
+      "Failed http://localhost:3000/private?draft=value#section "
       + "with ghp_abcdefgh12345678\u0000\u202ereordered",
       "hidden",
     );
     expect(result.redacted).toBe(true);
     expect(result.text).toContain("http://localhost:3000");
-    expect(result.text).toContain("<path>");
     expect(result.text).toContain("<redacted>");
     expect(result.text).not.toContain("private?draft");
-    expect(result.text).not.toContain("alice");
     expect(result.text).not.toContain("ghp_abcdefgh");
     expect(result.text).not.toMatch(/[\u0000\u202e]/u);
+  });
+
+  it.each([
+    "Render used 1/2 of the frame budget.",
+    "Choose yes/no when prompted.",
+    "Failed https://example.com/private?next=/docs#section during render.",
+  ])("does not mistake normal prose or HTTP URLs for filesystem paths: %s", (value) => {
+    const result = sanitizeBrowserEvidenceText(value, "hidden");
+    expect(result.text).not.toBe("hidden");
   });
 
   it("bounds oversized multibyte page text without retaining a secret fragment", () => {

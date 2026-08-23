@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { runtimeProcessEnvironment } from "../../src/main/runtime-process-environment";
+import { runtimeEnvironmentKind } from "../../src/server/runtime-status";
 
 describe("supervised runtime process environment", () => {
   const sentinelSecrets: NodeJS.ProcessEnv = {
@@ -16,6 +17,8 @@ describe("supervised runtime process environment", () => {
     AZURE_OPENAI_API_KEY: "sentinel-azure-openai-secret",
     CLAUDE_CODE_OAUTH_TOKEN: "sentinel-claude-oauth-secret",
     CLOUDFLARE_API_TOKEN: "sentinel-cloudflare-secret",
+    CODESPACES_TOKEN: "sentinel-codespaces-token",
+    CONTAINER_SECRET: "sentinel-container-secret",
     DYLD_INSERT_LIBRARIES: "/tmp/sentinel-secret.dylib",
     ELECTRON_RUN_AS_NODE: "1",
     GIT_ASKPASS: "/tmp/sentinel-askpass",
@@ -35,6 +38,7 @@ describe("supervised runtime process environment", () => {
     NODE_OPTIONS: "--require=/tmp/sentinel-secret.cjs",
     OPENAI_API_KEY: "sentinel-openai-secret",
     SSH_ASKPASS: "/tmp/sentinel-ssh-askpass",
+    SSH_PRIVATE_KEY: "sentinel-ssh-private-key",
   };
 
   it("passes only reviewed POSIX launch values and omits sentinel secrets", () => {
@@ -50,8 +54,14 @@ describe("supervised runtime process environment", () => {
       CLAUDE_CODE_USE_BEDROCK: "1",
       CLAUDE_CODE_USE_VERTEX: "1",
       CLOUD_ML_REGION: "europe-west4",
+      CODESPACE_NAME: "example-space",
+      CODESPACES: "true",
+      COLORTERM: "truecolor",
+      CONTAINER: "podman",
+      container: "docker",
       DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/501/bus",
       DESKTOP_SESSION: "gnome-wayland",
+      DEVCONTAINER: "true",
       DISPLAY: ":0",
       EDITOR: "/usr/bin/nvim",
       EMAIL: "person@example.test",
@@ -87,8 +97,12 @@ describe("supervised runtime process environment", () => {
       OPENAI_API_VERSION: "2025-04-01-preview",
       OPENAI_BASE_URL: "https://openai.example.test/v1",
       PATH: "/opt/bin:/usr/bin:/bin",
+      REMOTE_CONTAINERS: "true",
       SSH_AGENT_PID: "4242",
       SSH_AUTH_SOCK: "/tmp/ssh-agent.sock",
+      SSH_CLIENT: "192.0.2.1 12345 22",
+      SSH_CONNECTION: "192.0.2.1 12345 192.0.2.2 22",
+      SSH_TTY: "/dev/pts/1",
       TMPDIR: "/tmp/runtime",
       VERTEX_LOCATION: "europe-west4",
       VISUAL: "/usr/bin/nvim",
@@ -118,8 +132,14 @@ describe("supervised runtime process environment", () => {
       CLAUDE_CODE_USE_BEDROCK: parent.CLAUDE_CODE_USE_BEDROCK,
       CLAUDE_CODE_USE_VERTEX: parent.CLAUDE_CODE_USE_VERTEX,
       CLOUD_ML_REGION: parent.CLOUD_ML_REGION,
+      CODESPACE_NAME: parent.CODESPACE_NAME,
+      CODESPACES: parent.CODESPACES,
+      COLORTERM: parent.COLORTERM,
+      CONTAINER: parent.CONTAINER,
+      container: parent.container,
       DBUS_SESSION_BUS_ADDRESS: parent.DBUS_SESSION_BUS_ADDRESS,
       DESKTOP_SESSION: parent.DESKTOP_SESSION,
+      DEVCONTAINER: parent.DEVCONTAINER,
       DISPLAY: parent.DISPLAY,
       EDITOR: parent.EDITOR,
       EMAIL: parent.EMAIL,
@@ -155,8 +175,12 @@ describe("supervised runtime process environment", () => {
       OPENAI_API_VERSION: parent.OPENAI_API_VERSION,
       OPENAI_BASE_URL: parent.OPENAI_BASE_URL,
       PATH: parent.PATH,
+      REMOTE_CONTAINERS: parent.REMOTE_CONTAINERS,
       SSH_AGENT_PID: parent.SSH_AGENT_PID,
       SSH_AUTH_SOCK: parent.SSH_AUTH_SOCK,
+      SSH_CLIENT: parent.SSH_CLIENT,
+      SSH_CONNECTION: parent.SSH_CONNECTION,
+      SSH_TTY: parent.SSH_TTY,
       TMPDIR: parent.TMPDIR,
       VERTEX_LOCATION: parent.VERTEX_LOCATION,
       VISUAL: parent.VISUAL,
@@ -177,14 +201,29 @@ describe("supervised runtime process environment", () => {
   it("normalizes reviewed Windows keys and omits production bootstrap injection", () => {
     const parent: NodeJS.ProcessEnv = {
       AppData: "C:\\Users\\person\\AppData\\Roaming",
+      Aws_Profile: "windows-bedrock-profile",
+      Claude_Code_Use_Bedrock: "1",
       ComSpec: "C:\\Windows\\System32\\cmd.exe",
+      CodeSpace_Name: "windows-space",
+      CodeSpaces: "true",
+      ColorTerm: "truecolor",
+      Container: "windows-container",
+      DevContainer: "true",
+      Force_Color: "3",
+      Gcm_Interactive: "never",
+      Git_Config_Global: "C:\\Users\\person\\.gitconfig",
       NODE_ENV: "production",
       INERTIA_STREAMING_TRACE: "1",
+      No_Color: "1",
       Path: "C:\\Windows\\System32",
       ProgramData: "C:\\ProgramData",
       ProgramFiles: "C:\\Program Files",
       "ProgramFiles(x86)": "C:\\Program Files (x86)",
       ProgramW6432: "C:\\Program Files",
+      Remote_Containers: "true",
+      Ssh_Client: "192.0.2.1 12345 22",
+      Ssh_Connection: "192.0.2.1 12345 192.0.2.2 22",
+      Ssh_Tty: "console",
       SystemRoot: "C:\\Windows",
       TEMP: "C:\\Users\\person\\AppData\\Local\\Temp",
       AllUsersProfile: "C:\\ProgramData",
@@ -196,12 +235,27 @@ describe("supervised runtime process environment", () => {
 
     expect(runtimeProcessEnvironment(parent, "win32")).toEqual({
       APPDATA: parent.AppData,
+      AWS_PROFILE: parent.Aws_Profile,
+      CLAUDE_CODE_USE_BEDROCK: parent.Claude_Code_Use_Bedrock,
+      CODESPACE_NAME: parent.CodeSpace_Name,
+      CODESPACES: parent.CodeSpaces,
+      COLORTERM: parent.ColorTerm,
       COMSPEC: parent.ComSpec,
+      CONTAINER: parent.Container,
+      DEVCONTAINER: parent.DevContainer,
+      FORCE_COLOR: parent.Force_Color,
+      GCM_INTERACTIVE: parent.Gcm_Interactive,
+      GIT_CONFIG_GLOBAL: parent.Git_Config_Global,
+      NO_COLOR: parent.No_Color,
       PATH: parent.Path,
       PROGRAMDATA: parent.ProgramData,
       PROGRAMFILES: parent.ProgramFiles,
       "PROGRAMFILES(X86)": parent["ProgramFiles(x86)"],
       PROGRAMW6432: parent.ProgramW6432,
+      REMOTE_CONTAINERS: parent.Remote_Containers,
+      SSH_CLIENT: parent.Ssh_Client,
+      SSH_CONNECTION: parent.Ssh_Connection,
+      SSH_TTY: parent.Ssh_Tty,
       SYSTEMROOT: parent.SystemRoot,
       TEMP: parent.TEMP,
       ALLUSERSPROFILE: parent.AllUsersProfile,
@@ -209,6 +263,18 @@ describe("supervised runtime process environment", () => {
         parent.Aws_Endpoint_Url_Bedrock_Runtime,
       USERPROFILE: parent.UserProfile,
     });
+  });
+
+  it.each([
+    ["codespaces", { CODESPACES: "true" }],
+    ["dev-container", { DEVCONTAINER: "true" }],
+    ["ssh", { SSH_CONNECTION: "192.0.2.1 12345 192.0.2.2 22" }],
+    ["wsl", { WSL_DISTRO_NAME: "Ubuntu-24.04" }],
+    ["container", { container: "podman" }],
+  ] as const)("preserves the %s runtime classifier", (expected, source) => {
+    expect(runtimeEnvironmentKind(
+      runtimeProcessEnvironment(source, "linux"),
+    )).toBe(expected);
   });
 
   it("preserves reviewed Homebrew maintenance paths on macOS", () => {

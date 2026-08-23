@@ -197,6 +197,7 @@ describe.sequential("provider environment discovery", () => {
       ANTHROPIC_API_KEY: "anthropic-secret",
       OPENAI_API_KEY: "openai-secret",
       AWS_SECRET_ACCESS_KEY: "aws-secret",
+      COLORTERM: "truecolor",
       FORCE_COLOR: "3",
       GITHUB_TOKEN: "github-secret",
       INERTIA_LOGIN_SHELL_MARKER: "shell-export",
@@ -207,6 +208,7 @@ describe.sequential("provider environment discovery", () => {
       PATH: source.PATH,
       HOME: source.HOME,
       ANTHROPIC_API_KEY: "anthropic-secret",
+      COLORTERM: "truecolor",
       FORCE_COLOR: "3",
       NO_COLOR: "1",
     });

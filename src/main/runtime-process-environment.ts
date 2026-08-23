@@ -8,12 +8,17 @@ const RUNTIME_PROCESS_ENVIRONMENT_KEYS = [
   "ALLUSERSPROFILE",
   "APPDATA",
   "BUN_INSTALL",
+  "CODESPACE_NAME",
+  "CODESPACES",
   "CODEX_HOME",
   "CODEX_INSTALL_DIR",
+  "COLORTERM",
   "COMSPEC",
+  "CONTAINER",
   "CURSOR_HOME",
   "DBUS_SESSION_BUS_ADDRESS",
   "DESKTOP_SESSION",
+  "DEVCONTAINER",
   "DISPLAY",
   "EDITOR",
   "FORCE_COLOR",
@@ -52,8 +57,12 @@ const RUNTIME_PROCESS_ENVIRONMENT_KEYS = [
   "PROGRAMFILES",
   "PROGRAMFILES(X86)",
   "PROGRAMW6432",
+  "REMOTE_CONTAINERS",
   "SHELL",
   "SSH_AUTH_SOCK",
+  "SSH_CLIENT",
+  "SSH_CONNECTION",
+  "SSH_TTY",
   "SSL_CERT_DIR",
   "SSL_CERT_FILE",
   "SYSTEMDRIVE",
@@ -86,6 +95,8 @@ const RUNTIME_PROCESS_ENVIRONMENT_KEYS = [
   ...GIT_LAUNCH_ENVIRONMENT_KEYS,
   ...PROVIDER_ROUTING_ENVIRONMENT_KEYS,
 ] as const;
+
+const RUNTIME_POSIX_CASE_SENSITIVE_ENVIRONMENT_KEYS = ["container"] as const;
 
 const RUNTIME_PROXY_ENVIRONMENT_KEYS = [
   "ALL_PROXY",
@@ -178,6 +189,12 @@ export function runtimeProcessEnvironment(
       continue;
     }
     sanitized[key] = value;
+  }
+  if (platform !== "win32") {
+    for (const key of RUNTIME_POSIX_CASE_SENSITIVE_ENVIRONMENT_KEYS) {
+      const value = environment[key];
+      if (value !== undefined) sanitized[key] = value;
+    }
   }
   for (const [key, value] of Object.entries(environment)) {
     const normalized = key.toUpperCase();

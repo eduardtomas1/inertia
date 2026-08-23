@@ -165,6 +165,7 @@ export async function importSelectedAttachmentPaths(
   const selections = await inspectSelections(paths, mode, signal);
   const noFollow = "O_NOFOLLOW" in constants ? constants.O_NOFOLLOW : 0;
   const nonBlocking = "O_NONBLOCK" in constants ? constants.O_NONBLOCK : 0;
+  const batchDigests = new Set<string>();
   const imported: ChatAttachment[] = [];
   try {
     for (const selected of selections) {
@@ -191,7 +192,12 @@ export async function importSelectedAttachmentPaths(
             );
           },
         };
-        imported.push(await registry.importFromWriter(writer, signal));
+        const attachment = await registry.importFromWriter(
+          writer,
+          signal,
+          batchDigests,
+        );
+        if (attachment) imported.push(attachment);
       } finally {
         await source.close().catch(() => undefined);
       }

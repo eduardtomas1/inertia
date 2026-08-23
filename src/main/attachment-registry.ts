@@ -637,17 +637,19 @@ export class AttachmentRegistry {
   async importFromWriter(
     source: AttachmentImportWriter,
     signal?: AbortSignal,
-  ): Promise<ChatAttachment> {
+    batchDigests?: Set<string>,
+  ): Promise<ChatAttachment | null> {
     const prepared = prepareAttachmentImportMetadata(source);
     const imported = await this.serializeImport(
       prepared.size,
       async (operationSignal) => await this.importPreparedWriters([{
         prepared,
         write: source.write,
-      }], operationSignal),
+      }], operationSignal, batchDigests),
       signal,
     );
     const attachment = imported[0];
+    if (!attachment && batchDigests) return null;
     if (!attachment) throw new Error("Attachment import did not complete.");
     return attachment;
   }
@@ -711,9 +713,9 @@ export class AttachmentRegistry {
       ) => Promise<void>;
     }[],
     signal: AbortSignal,
+    digests = new Set<string>(),
   ): Promise<ChatAttachment[]> {
     const registered: AttachmentRegistryRecord[] = [];
-    const digests = new Set<string>();
     let totalBytes = 0;
     try {
       for (const source of sources) {

@@ -18,11 +18,12 @@ import {
   importSelectedAttachmentPaths,
   privacySafeAttachmentImportError,
 } from "../../src/main/attachment-selection-import";
-import type {
-  AttachmentImportWriter,
+import {
   AttachmentRegistry,
+  type AttachmentImportWriter,
 } from "../../src/main/attachment-registry";
 import type { ChatAttachment } from "../../src/shared/contracts";
+import { validXlsxFixture } from "../fixtures/attachments/malicious-structures";
 
 const directories: string[] = [];
 
@@ -150,6 +151,32 @@ describe("native attachment selection streaming", () => {
 
     expect(fake.released).toHaveLength(2);
     expect(await readdir(output)).toEqual([]);
+  });
+
+  it("deduplicates identical content across sequential staged writes", async () => {
+    const source = await directory("inertia-selection-source-");
+    const output = await directory("inertia-selection-output-");
+    const first = join(source, "first.xlsx");
+    const second = join(source, "renamed.xlsx");
+    const bytes = validXlsxFixture();
+    await Promise.all([
+      writeFile(first, bytes, { mode: 0o600 }),
+      writeFile(second, bytes, { mode: 0o600 }),
+    ]);
+    const registry = new AttachmentRegistry(output);
+
+    const imported = await importSelectedAttachmentPaths(
+      registry,
+      [first, second],
+      "all",
+      new AbortController().signal,
+    );
+
+    expect(imported).toHaveLength(1);
+    expect(imported[0]?.name).toBe("first.xlsx");
+    expect(await readdir(output)).toHaveLength(1);
+    expect(registry.usage()).toEqual({ records: 1, bytes: bytes.length });
+    await registry.dispose();
   });
 
   it("rejects replacement between dialog selection and sequential open", async () => {

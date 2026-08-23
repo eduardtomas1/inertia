@@ -1,10 +1,11 @@
-import { spawnSync } from "node:child_process";
 import { lstat, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 import { createCanvas } from "@napi-rs/canvas";
 import Database from "better-sqlite3";
 import { spawn as spawnPty } from "node-pty";
+
+import { probeNativeExecutable } from "./native-executable-probe.mjs";
 
 const expectedArchitecture = process.env.INERTIA_EXPECTED_ARCH;
 if (!new Set(["x64", "arm64"]).has(expectedArchitecture)) {
@@ -40,15 +41,8 @@ const claudeStat = await lstat(claudeExecutable);
 if (!claudeStat.isFile() || claudeStat.size <= 0) {
   throw new Error("The Claude SDK native executable is missing or empty.");
 }
-const claudeVersion = spawnSync(claudeExecutable, ["--version"], {
-  encoding: "utf8",
-  env: {},
-  maxBuffer: 64 * 1024,
-  shell: false,
-  timeout: 10_000,
-  windowsHide: true,
-});
-if (claudeVersion.error || claudeVersion.status !== 0 || !/\d+\.\d+\.\d+/u.test(claudeVersion.stdout)) {
+const claudeVersion = await probeNativeExecutable(claudeExecutable, ["--version"]);
+if (claudeVersion.status !== 0 || !/\d+\.\d+\.\d+/u.test(claudeVersion.stdout)) {
   throw new Error("The Claude SDK native executable did not complete its bounded version probe.");
 }
 

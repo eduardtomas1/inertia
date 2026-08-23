@@ -219,6 +219,7 @@ export async function expectClosedShadowActivationBlocked(
     }], true);
     const finalFocus = await interleaveContents?.executeJavaScript("document.querySelector('#late-disabled').focus();document.activeElement?.id", true);
     interleaveContents?.sendInputEvent({ type: "keyDown", keyCode: "Enter" });
+    interleaveContents?.sendInputEvent({ type: "char", keyCode: "\r" });
     interleaveContents?.sendInputEvent({ type: "keyUp", keyCode: "Enter" });
     await interleaveContents?.executeJavaScript("new Promise(resolve=>setTimeout(resolve,0))", true);
     await interleaveContents?.executeJavaScriptInIsolatedWorld(request.worldId, [{

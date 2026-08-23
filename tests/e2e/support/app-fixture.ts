@@ -172,6 +172,8 @@ async function createPreviewServer(): Promise<{
         + "<main>" + "<div></div>".repeat(1_900) + "</main>"
         + "<script>const safe=document.querySelector('#safe-focus');const disabled=document.querySelector('#late-disabled');"
         + "disabled.addEventListener('click',()=>{window.__lateDisabledClicked=true});"
+        + "for(const name of ['keydown','keypress','keyup','beforeinput','input'])window.addEventListener(name,event=>{"
+        + "if((!event.key||event.key==='Enter')&&document.activeElement===disabled)disabled.click()},true);"
         + "window.__armDisabledFocus=()=>{safe.focus();setTimeout(()=>disabled.focus(),10);return document.activeElement===safe}</script>",
       );
       return;

@@ -3,8 +3,6 @@ import { join, resolve } from "node:path";
 
 import { createCanvas } from "@napi-rs/canvas";
 import Database from "better-sqlite3";
-import { spawn as spawnPty } from "node-pty";
-
 import { probeNativeExecutable } from "./native-executable-probe.mjs";
 
 const expectedArchitecture = process.env.INERTIA_EXPECTED_ARCH;
@@ -62,7 +60,7 @@ if (canvas.toBuffer("image/png").length <= 8) {
   throw new Error("The native canvas binding did not produce a PNG.");
 }
 
-const ptyMarker = "inertia-native-pty-ok";
+const ptySuccessMarker = "inertia-native-pty-probe-passed";
 const windowsPtyEnvironment = {};
 if (process.platform === "win32") {
   for (const name of ["SystemRoot", "WINDIR", "ComSpec", "Path", "PATHEXT", "TEMP", "TMP"]) {
@@ -76,53 +74,21 @@ const ptyExecutable = process.platform === "win32"
   ? windowsPtyEnvironment.ComSpec
     ?? join(windowsPtyEnvironment.SystemRoot ?? windowsPtyEnvironment.WINDIR ?? "C:\\Windows", "System32", "cmd.exe")
   : process.execPath;
-const ptyArguments = process.platform === "win32"
-  ? ["/d", "/s", "/c", `echo ${ptyMarker}`]
-  : ["--version"];
-const ptyExpectedOutput = process.platform === "win32" ? ptyMarker : process.version;
-
-await new Promise((resolveProbe, rejectProbe) => {
-  // Windows exercises the same ComSpec path as TerminalManager with only the
-  // non-secret system variables CreateProcess/ConPTY needs. POSIX uses Node's
-  // quote-free version path to cover the native spawn, output, and exit flow.
-  const terminal = spawnPty(ptyExecutable, ptyArguments, {
-    cols: 80,
-    rows: 24,
-    cwd: root,
-    env: windowsPtyEnvironment,
-  });
-  let output = "";
-  let settled = false;
-  const finish = (callback) => {
-    if (settled) return;
-    settled = true;
-    clearTimeout(timer);
-    callback();
-  };
-  const timer = setTimeout(() => {
-    terminal.kill();
-    finish(() => rejectProbe(new Error("The native PTY binding exceeded its 10 second deadline.")));
-  }, 10_000);
-  terminal.onData((chunk) => {
-    output += chunk;
-    if (output.length > 64 * 1024) {
-      terminal.kill();
-      finish(() => rejectProbe(new Error("The native PTY binding exceeded its output limit.")));
-    }
-  });
-  terminal.onExit(({ exitCode }) => {
-    if (exitCode !== 0 || !output.includes(ptyExpectedOutput)) {
-      finish(() => rejectProbe(
-        new Error(
-          "The native PTY binding did not complete its child-process probe "
-          + `(exit ${exitCode}, output ${JSON.stringify(output.slice(0, 200))}).`,
-        ),
-      ));
-      return;
-    }
-    finish(resolveProbe);
-  });
-});
+// Run the binding in a supervised process because native PTY creation itself
+// can block before JavaScript in that process gets a chance to schedule a
+// timeout. The outer probe owns the deadline and terminates the complete helper
+// process tree on timeout.
+const ptyProbe = await probeNativeExecutable(
+  process.execPath,
+  [join(root, "scripts", "native-pty-probe.mjs"), ptyExecutable],
+  { environment: windowsPtyEnvironment },
+);
+if (ptyProbe.status !== 0 || !ptyProbe.stdout.includes(ptySuccessMarker)) {
+  throw new Error(
+    "The native PTY binding did not complete its bounded child-process probe "
+    + `(exit ${ptyProbe.status}, output ${JSON.stringify(ptyProbe.stdout.slice(0, 200))}).`,
+  );
+}
 
 console.log(
   `Native architecture probe passed for ${process.platform}/${process.arch} `

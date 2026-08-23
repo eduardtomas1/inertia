@@ -1,5 +1,5 @@
-import { randomUUID } from "node:crypto";
-import { constants } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
+import { constants, type BigIntStats } from "node:fs";
 import {
   type FileHandle,
   lstat,
@@ -29,15 +29,24 @@ import {
 import type { ChatAttachment } from "../shared/contracts.js";
 import type { TrustedRuntimeAttachment } from "../shared/runtime-attachments.js";
 import {
-  validateAttachmentImport,
-  type ValidatedAttachmentImport,
+  prepareAttachmentImport,
+  prepareAttachmentImportMetadata,
+  type PreparedAttachmentImport,
+  type PreparedAttachmentMetadata,
 } from "./attachment-import.js";
+import {
+  inProcessAttachmentImportValidationRunner,
+  type AttachmentImportFileOperation,
+  type AttachmentImportValidationReceipt,
+  type AttachmentImportValidationRunner,
+} from "./attachment-import-file.js";
 
 const MAX_SESSION_ATTACHMENT_RECORDS = 256;
 const MAX_SESSION_ATTACHMENT_BYTES = 512 * 1024 * 1024;
 const ATTACHMENT_RELEASE_ATTEMPTS = 3;
 const ATTACHMENT_RELEASE_RETRY_BASE_MS = 25;
 const ATTACHMENT_HANDOFF_TIMEOUT_MS = 210_000;
+const MAX_PENDING_IMPORT_BYTES = MAX_CHAT_ATTACHMENT_TOTAL_BYTES;
 const ATTACHMENT_SESSION_PREFIX = "session-";
 const ATTACHMENT_SESSION_DIRECTORY =
   /^session-[A-Za-z0-9_-]{6}$/u;
@@ -83,6 +92,19 @@ export interface AttachmentRegistryLimits {
   readonly maxBytes?: number;
   readonly reservedRecords?: number;
   readonly reservedBytes?: number;
+  readonly validationRunner?: AttachmentImportValidationRunner;
+  /** Test-only worker delay used by real Electron responsiveness coverage. */
+  readonly validationDelayMs?: number;
+}
+
+export interface AttachmentImportWriter {
+  readonly name: string;
+  readonly mimeType: string;
+  readonly size: number;
+  write(
+    destination: FileHandle,
+    signal: AbortSignal,
+  ): Promise<void>;
 }
 
 export interface AttachmentStorageReservation {
@@ -190,6 +212,37 @@ function sameIdentity(
   right: { dev: number; ino: number },
 ): boolean {
   return left.dev === right.dev && left.ino === right.ino;
+}
+
+function isStablePrivateAttachment(
+  before: BigIntStats,
+  after: BigIntStats,
+): boolean {
+  return before.isFile()
+    && after.isFile()
+    && !before.isSymbolicLink()
+    && !after.isSymbolicLink()
+    && before.nlink === 1n
+    && after.nlink === 1n
+    && before.dev === after.dev
+    && before.ino === after.ino
+    && before.size === after.size
+    && before.mtimeNs === after.mtimeNs
+    && before.ctimeNs === after.ctimeNs
+    && (
+      process.platform === "win32"
+      || (
+        (before.mode & 0o777n) === 0o600n
+        && (after.mode & 0o777n) === 0o600n
+        && (
+          typeof process.getuid !== "function"
+          || (
+            before.uid === BigInt(process.getuid())
+            && after.uid === BigInt(process.getuid())
+          )
+        )
+      )
+    );
 }
 
 function assertOwnedDirectory(
@@ -367,6 +420,14 @@ function assertNotAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw new Error("The attachment request was cancelled.");
 }
 
+function validateSelectedImportCount(count: number): void {
+  if (
+    !Number.isSafeInteger(count)
+    || count < 0
+    || count > MAX_CHAT_ATTACHMENTS
+  ) throw new Error(`Select at most ${MAX_CHAT_ATTACHMENTS} attachments.`);
+}
+
 function boundedLimit(value: number | undefined, maximum: number): number {
   return typeof value === "number" && Number.isFinite(value)
     ? Math.max(1, Math.min(Math.trunc(value), maximum))
@@ -429,6 +490,11 @@ export class AttachmentRegistry {
   private readonly maxBytes: number;
   private readonly reservedRecords: number;
   private readonly reservedBytes: number;
+  private readonly validationRunner: AttachmentImportValidationRunner;
+  private readonly validationDelayMs: number;
+  private readonly lifecycle = new AbortController();
+  private readonly pendingPaths = new Set<string>();
+  private pendingImportBytes = 0;
   private importTail: Promise<void> = Promise.resolve();
   private disposed = false;
   private disposal: Promise<void> | null = null;
@@ -456,6 +522,16 @@ export class AttachmentRegistry {
       0,
       Math.min(Math.trunc(limits.reservedBytes ?? 0), this.maxBytes),
     );
+    this.validationRunner = limits.validationRunner
+      ?? inProcessAttachmentImportValidationRunner;
+    this.validationDelayMs = process.env.NODE_ENV === "test"
+      && typeof limits.validationDelayMs === "number"
+      && Number.isFinite(limits.validationDelayMs)
+      ? Math.max(
+          0,
+          Math.min(Math.trunc(limits.validationDelayMs ?? 0), 60_000),
+        )
+      : 0;
   }
 
   usage(): AttachmentStorageReservation {
@@ -542,53 +618,123 @@ export class AttachmentRegistry {
     }
   }
 
-  async import(values: readonly unknown[]): Promise<ChatAttachment[]> {
-    if (this.disposed) {
+  async import(
+    values: readonly unknown[],
+    signal?: AbortSignal,
+  ): Promise<ChatAttachment[]> {
+    validateSelectedImportCount(values.length);
+    if (values.length === 0) return [];
+    const prepared = values.map(prepareAttachmentImport);
+    const pendingBytes = prepared.reduce((total, { size }) => total + size, 0);
+    return await this.serializeImport(
+      pendingBytes,
+      async (operationSignal) =>
+        await this.importPrepared(prepared, operationSignal),
+      signal,
+    );
+  }
+
+  async importFromWriter(
+    source: AttachmentImportWriter,
+    signal?: AbortSignal,
+  ): Promise<ChatAttachment> {
+    const prepared = prepareAttachmentImportMetadata(source);
+    const imported = await this.serializeImport(
+      prepared.size,
+      async (operationSignal) => await this.importPreparedWriters([{
+        prepared,
+        write: source.write,
+      }], operationSignal),
+      signal,
+    );
+    const attachment = imported[0];
+    if (!attachment) throw new Error("Attachment import did not complete.");
+    return attachment;
+  }
+
+  private async serializeImport<T>(
+    pendingBytes: number,
+    operation: (signal: AbortSignal) => Promise<T>,
+    externalSignal?: AbortSignal,
+  ): Promise<T> {
+    if (this.disposed || externalSignal?.aborted) {
       throw new Error("Temporary attachment storage is no longer available.");
     }
+    if (
+      !Number.isSafeInteger(pendingBytes)
+      || pendingBytes < 1
+      || pendingBytes > MAX_CHAT_ATTACHMENT_TOTAL_BYTES
+    ) throw new Error("Attachments exceed the 20 MB turn limit.");
+    if (this.pendingImportBytes + pendingBytes > MAX_PENDING_IMPORT_BYTES) {
+      throw new Error("Attachment import is busy. Try again in a moment.");
+    }
+    this.pendingImportBytes += pendingBytes;
     let unlock = (): void => undefined;
     const previous = this.importTail;
     this.importTail = new Promise<void>((resolveImport) => {
       unlock = resolveImport;
     });
     await previous;
+    const signal = externalSignal
+      ? AbortSignal.any([externalSignal, this.lifecycle.signal])
+      : this.lifecycle.signal;
     try {
-      return await this.importExclusive(values);
+      signal.throwIfAborted();
+      if (this.disposed) {
+        throw new Error("Temporary attachment storage is no longer available.");
+      }
+      return await operation(signal);
     } finally {
+      this.pendingImportBytes -= pendingBytes;
       unlock();
     }
   }
 
-  private async importExclusive(
-    values: readonly unknown[],
+  private async importPrepared(
+    prepared: readonly PreparedAttachmentImport[],
+    signal: AbortSignal,
   ): Promise<ChatAttachment[]> {
-    if (this.disposed) {
-      throw new Error("Temporary attachment storage is no longer available.");
-    }
-    const validated = values.map(validateAttachmentImport);
-    const deduplicated = validated.filter((attachment, index) =>
-      validated.findIndex(({ digest }) => digest === attachment.digest) === index);
-    const totalBytes = deduplicated.reduce((total, { size }) => total + size, 0);
-    if (totalBytes > MAX_CHAT_ATTACHMENT_TOTAL_BYTES) {
-      throw new Error("Attachments exceed the 20 MB turn limit.");
-    }
-    const retainedBytes = [...this.records.values()].reduce(
-      (total, { size }) => total + size,
-      0,
-    );
-    if (
-      this.reservedRecords + this.records.size + deduplicated.length
-        > this.maxRecords
-      || this.reservedBytes + retainedBytes + totalBytes > this.maxBytes
-    ) {
-      throw new Error(
-        "Temporary attachment storage is full. Remove an attachment and try again.",
-      );
-    }
+    return await this.importPreparedWriters(prepared.map((attachment) => ({
+      prepared: attachment,
+      write: async (destination: FileHandle): Promise<void> => {
+        await destination.writeFile(attachment.bytes);
+      },
+    })), signal);
+  }
+
+  private async importPreparedWriters(
+    sources: readonly {
+      readonly prepared: PreparedAttachmentMetadata;
+      readonly write: (
+        destination: FileHandle,
+        signal: AbortSignal,
+      ) => Promise<void>;
+    }[],
+    signal: AbortSignal,
+  ): Promise<ChatAttachment[]> {
     const registered: AttachmentRegistryRecord[] = [];
+    const digests = new Set<string>();
+    let totalBytes = 0;
     try {
-      for (const attachment of deduplicated) {
-        registered.push(await this.persist(attachment));
+      for (const source of sources) {
+        signal.throwIfAborted();
+        this.assertStorageCapacity(source.prepared.size);
+        const attachment = await this.persistAndValidate(
+          source.prepared,
+          source.write,
+          signal,
+        );
+        if (digests.has(attachment.digest)) {
+          await this.releaseRecord(attachment);
+          continue;
+        }
+        digests.add(attachment.digest);
+        totalBytes += attachment.size;
+        if (totalBytes > MAX_CHAT_ATTACHMENT_TOTAL_BYTES) {
+          await this.releaseRecord(attachment);
+          throw new Error("Attachments exceed the 20 MB turn limit.");
+        }
+        registered.push(attachment);
       }
       return registered.map(({
         digest: _digest,
@@ -600,11 +746,24 @@ export class AttachmentRegistry {
         path: attachment.id,
       }));
     } catch (error) {
-      await Promise.all(registered.map(async (attachment) => {
-        this.records.delete(attachment.id);
-        await unlink(attachment.path).catch(() => undefined);
-      }));
+      await Promise.allSettled(registered.map(async (attachment) =>
+        await this.releaseRecord(attachment)));
       throw error;
+    }
+  }
+
+  private assertStorageCapacity(additionalBytes: number): void {
+    const retainedBytes = [...this.records.values()].reduce(
+      (total, { size }) => total + size,
+      0,
+    );
+    if (
+      this.reservedRecords + this.records.size + 1 > this.maxRecords
+      || this.reservedBytes + retainedBytes + additionalBytes > this.maxBytes
+    ) {
+      throw new Error(
+        "Temporary attachment storage is full. Remove an attachment and try again.",
+      );
     }
   }
 
@@ -652,6 +811,35 @@ export class AttachmentRegistry {
     if (this.revokedAttachmentIds.has(id)) return null;
     const record = this.records.get(id);
     if (!record) return null;
+    const operationSignal = signal
+      ? AbortSignal.any([signal, this.lifecycle.signal])
+      : this.lifecycle.signal;
+    let receipt: AttachmentImportValidationReceipt;
+    try {
+      receipt = await this.validateStoredFile(
+        record.path,
+        {
+          displayName: record.name,
+          mimeType: record.mimeType,
+          extension: record.extension,
+          size: record.size,
+        },
+        operationSignal,
+        false,
+      );
+    } catch {
+      assertNotAborted(operationSignal);
+      throw new Error("The registered attachment changed after import.");
+    }
+    if (
+      receipt.displayName !== record.name
+      || receipt.mimeType !== record.mimeType
+      || receipt.extension !== record.extension
+      || receipt.size !== record.size
+      || receipt.digest !== record.digest
+    ) {
+      throw new Error("The registered attachment metadata no longer matches its content.");
+    }
     await mkdir(this.directory, { recursive: true, mode: 0o700 });
     if (this.revokedAttachmentIds.has(id)) return null;
     const canonicalRoot = await realpath(this.directory);
@@ -684,10 +872,10 @@ export class AttachmentRegistry {
       ) {
         throw new Error("The registered attachment changed after import.");
       }
-      assertNotAborted(signal);
+      assertNotAborted(operationSignal);
       const bytes = await file.readFile();
       const after = await file.stat();
-      assertNotAborted(signal);
+      assertNotAborted(operationSignal);
       if (
         after.size !== before.size
         || after.mtimeMs !== before.mtimeMs
@@ -695,15 +883,8 @@ export class AttachmentRegistry {
       ) {
         throw new Error("The registered attachment changed while it was read.");
       }
-      const validated = validateAttachmentImport({
-        name: record.name,
-        mimeType: record.mimeType,
-        data: bytes,
-      });
       if (
-        validated.mimeType !== record.mimeType
-        || validated.size !== record.size
-        || validated.digest !== record.digest
+        createHash("sha256").update(bytes).digest("hex") !== record.digest
       ) {
         throw new Error("The registered attachment metadata no longer matches its content.");
       }
@@ -779,12 +960,17 @@ export class AttachmentRegistry {
   dispose(): Promise<void> {
     if (this.disposal) return this.disposal;
     this.disposed = true;
+    this.lifecycle.abort();
     this.disposal = this.disposeExclusive();
     return this.disposal;
   }
 
   private async disposeExclusive(): Promise<void> {
     await this.importTail;
+    const validationStopped = await this.validationRunner.shutdown?.() ?? true;
+    if (!validationStopped) {
+      throw new Error("Attachment validation utility shutdown is unconfirmed.");
+    }
     for (const handoff of this.handoffs.values()) clearTimeout(handoff.timer);
     this.handoffs.clear();
     this.attachmentHandoffs.clear();
@@ -792,10 +978,12 @@ export class AttachmentRegistry {
     for (const release of releases) release.cancel();
     await Promise.allSettled(releases.map(({ promise }) => promise));
     const records = [...this.records.values()];
+    const pendingPaths = [...this.pendingPaths];
     this.records.clear();
+    this.pendingPaths.clear();
     this.revokedAttachmentIds.clear();
-    await Promise.all(records.map(({ path }) =>
-      unlink(path).catch(() => undefined)));
+    await Promise.all([...records.map(({ path }) => path), ...pendingPaths]
+      .map((path) => unlink(path).catch(() => undefined)));
   }
 
   private cancelPendingRelease(id: string): boolean {
@@ -871,28 +1059,136 @@ export class AttachmentRegistry {
     return true;
   }
 
-  private async persist(
-    attachment: ValidatedAttachmentImport,
+  private async persistAndValidate(
+    attachment: PreparedAttachmentMetadata,
+    write: (
+      destination: FileHandle,
+      signal: AbortSignal,
+    ) => Promise<void>,
+    signal: AbortSignal,
   ): Promise<AttachmentRegistryRecord> {
     await mkdir(this.directory, { recursive: true, mode: 0o700 });
     const id = randomUUID();
     const path = join(this.directory, `${id}.${attachment.extension}`);
-    const file = await open(path, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600);
-    try {
-      await file.writeFile(attachment.bytes);
-    } finally {
-      await file.close();
-    }
-    const record: AttachmentRegistryRecord = {
-      id,
-      name: attachment.displayName,
+    const file = await open(
       path,
+      constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY,
+      0o600,
+    );
+    this.pendingPaths.add(path);
+    try {
+      try {
+        await write(file, signal);
+      } finally {
+        await file.close();
+      }
+      signal.throwIfAborted();
+      const receipt = await this.validateStoredFile(
+        path,
+        attachment,
+        signal,
+        true,
+      );
+      if (
+        receipt.displayName !== attachment.displayName
+        || receipt.mimeType !== attachment.mimeType
+        || receipt.extension !== attachment.extension
+        || receipt.size !== attachment.size
+      ) {
+        throw new Error(
+          "Temporary attachment storage could not be verified safely.",
+        );
+      }
+      signal.throwIfAborted();
+      const record: AttachmentRegistryRecord = {
+        id,
+        name: receipt.displayName,
+        path,
+        mimeType: receipt.mimeType,
+        size: receipt.size,
+        digest: receipt.digest,
+        extension: receipt.extension,
+      };
+      this.records.set(id, record);
+      this.pendingPaths.delete(path);
+      return record;
+    } catch (error) {
+      const removed = await unlinkWithRetry(
+        path,
+        this.unlinkFile,
+        this.waitForRetry,
+      ).then(() => true, () => false);
+      if (removed) this.pendingPaths.delete(path);
+      throw error;
+    }
+  }
+
+  private async validateStoredFile(
+    path: string,
+    attachment: PreparedAttachmentMetadata,
+    signal: AbortSignal,
+    allowTestDelay: boolean,
+  ): Promise<AttachmentImportValidationReceipt> {
+    signal.throwIfAborted();
+    const root = await securePrivateDirectory(this.directory);
+    const rootInfo = await lstat(root, { bigint: true });
+    const [before, canonicalPath] = await Promise.all([
+      lstat(path, { bigint: true }),
+      realpath(path),
+    ]);
+    const expectedPath = join(root, basename(path));
+    if (
+      !isStablePrivateAttachment(before, before)
+      || before.size !== BigInt(attachment.size)
+      || canonicalPath !== expectedPath
+      || dirname(canonicalPath) !== root
+    ) {
+      throw new Error(
+        "Temporary attachment storage could not be verified safely.",
+      );
+    }
+    const operation: AttachmentImportFileOperation = {
+      root,
+      rootDev: String(rootInfo.dev),
+      rootIno: String(rootInfo.ino),
+      rootUid: process.platform === "win32" ? null : String(rootInfo.uid),
+      fileName: basename(path),
+      name: attachment.displayName,
       mimeType: attachment.mimeType,
       size: attachment.size,
-      digest: attachment.digest,
-      extension: attachment.extension,
+      stallBeforeValidationMs: allowTestDelay
+        ? this.validationDelayMs
+        : 0,
     };
-    this.records.set(id, record);
-    return record;
+    const validation = this.validationRunner(operation, signal);
+    let receipt: AttachmentImportValidationReceipt | null = null;
+    let resultError: unknown;
+    try {
+      receipt = await validation.result;
+    } catch (error) {
+      resultError = error;
+    }
+    await validation.stopped;
+    if (resultError) throw resultError;
+    if (!receipt) {
+      throw new Error("Attachment validation utility returned no result.");
+    }
+    signal.throwIfAborted();
+    const verifiedRoot = await securePrivateDirectory(this.directory);
+    const [after, verifiedPath] = await Promise.all([
+      lstat(path, { bigint: true }),
+      realpath(path),
+    ]);
+    if (
+      verifiedRoot !== root
+      || !isStablePrivateAttachment(before, after)
+      || verifiedPath !== join(verifiedRoot, basename(path))
+      || dirname(verifiedPath) !== verifiedRoot
+    ) {
+      throw new Error(
+        "Temporary attachment storage could not be verified safely.",
+      );
+    }
+    return receipt;
   }
 }

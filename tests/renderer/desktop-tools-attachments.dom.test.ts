@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  prepareComposerAttachmentImports,
+  importComposerAttachmentFilesSequentially,
+  preflightComposerAttachmentFiles,
 } from "../../src/renderer/src/hooks/useDesktopTools";
 import {
   MAX_CHAT_ATTACHMENT_BYTES,
@@ -25,8 +26,8 @@ describe("desktop attachment preflight", () => {
       MAX_CHAT_ATTACHMENT_BYTES + 1,
     );
 
-    await expect(prepareComposerAttachmentImports([safe, oversized]))
-      .rejects.toThrow("10 MB file limit");
+    expect(() => preflightComposerAttachmentFiles([safe, oversized]))
+      .toThrow("10 MB file limit");
     expect(safe.arrayBuffer).not.toHaveBeenCalled();
     expect(oversized.arrayBuffer).not.toHaveBeenCalled();
   });
@@ -41,23 +42,94 @@ describe("desktop attachment preflight", () => {
         + 1,
     );
 
-    await expect(prepareComposerAttachmentImports([first, second, final]))
-      .rejects.toThrow("20 MB turn limit");
+    expect(() => preflightComposerAttachmentFiles([first, second, final]))
+      .toThrow("20 MB turn limit");
     expect(first.arrayBuffer).not.toHaveBeenCalled();
     expect(second.arrayBuffer).not.toHaveBeenCalled();
     expect(final.arrayBuffer).not.toHaveBeenCalled();
   });
 
-  it("reads a bounded selection only after the complete preflight passes", async () => {
+  it("accepts a bounded selection without reading renderer bytes", () => {
     const first = fakeFile("first.pdf", 8);
     const second = fakeFile("second.pdf", 9);
 
-    await expect(prepareComposerAttachmentImports([first, second]))
-      .resolves.toEqual([
-        expect.objectContaining({ name: "first.pdf", mimeType: "application/pdf" }),
-        expect.objectContaining({ name: "second.pdf", mimeType: "application/pdf" }),
-      ]);
-    expect(first.arrayBuffer).toHaveBeenCalledOnce();
-    expect(second.arrayBuffer).toHaveBeenCalledOnce();
+    expect(() => preflightComposerAttachmentFiles([first, second]))
+      .not.toThrow();
+    expect(first.arrayBuffer).not.toHaveBeenCalled();
+    expect(second.arrayBuffer).not.toHaveBeenCalled();
+  });
+
+  it("imports renderer files one at a time instead of retaining the batch", async () => {
+    const events: string[] = [];
+    const files = ["first.pdf", "second.pdf", "third.pdf"].map((name) => ({
+      name,
+      size: 1,
+      type: "application/pdf",
+      arrayBuffer: vi.fn(async () => {
+        events.push(`read:${name}`);
+        return new ArrayBuffer(1);
+      }),
+    } as unknown as File));
+    let activeImports = 0;
+    let maximumImports = 0;
+
+    const imported = await importComposerAttachmentFilesSequentially(
+      files,
+      async ({ name }) => {
+        activeImports += 1;
+        maximumImports = Math.max(maximumImports, activeImports);
+        events.push(`import:${name}`);
+        await Promise.resolve();
+        activeImports -= 1;
+        const index = events.filter((event) => event.startsWith("import:"))
+          .length;
+        return [{
+          id: `${String(index).padStart(8, "0")}-1111-4111-8111-111111111111`,
+          name,
+          path: "opaque",
+          mimeType: "application/pdf",
+          size: 1,
+        }];
+      },
+      async () => undefined,
+    );
+
+    expect(imported).toHaveLength(3);
+    expect(maximumImports).toBe(1);
+    expect(events).toEqual([
+      "read:first.pdf",
+      "import:first.pdf",
+      "read:second.pdf",
+      "import:second.pdf",
+      "read:third.pdf",
+      "import:third.pdf",
+    ]);
+  });
+
+  it("releases earlier renderer imports after a later validation failure", async () => {
+    const files = ["first.pdf", "unsafe.pdf"].map((name) => ({
+      name,
+      size: 1,
+      type: "application/pdf",
+      arrayBuffer: vi.fn(async () => new ArrayBuffer(1)),
+    } as unknown as File));
+    const released: string[] = [];
+
+    await expect(importComposerAttachmentFilesSequentially(
+      files,
+      async ({ name }) => {
+        if (name === "unsafe.pdf") throw new Error("unsafe fixture");
+        return [{
+          id: "11111111-1111-4111-8111-111111111111",
+          name,
+          path: "opaque",
+          mimeType: "application/pdf",
+          size: 1,
+        }];
+      },
+      async (id) => { released.push(id); },
+    )).rejects.toThrow("unsafe fixture");
+
+    expect(released).toEqual(["11111111-1111-4111-8111-111111111111"]);
   });
 });

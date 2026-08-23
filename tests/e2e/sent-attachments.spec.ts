@@ -44,6 +44,7 @@ test.beforeAll(async () => {
   app = await createAppFixture({
     name: "sent-attachments",
     initialState: "conversation",
+    attachmentImportDelayMs: 750,
   });
   electronApp = app.electronApp;
   page = app.page;
@@ -73,6 +74,36 @@ test("previews, validates, removes, and cleans up secure composer attachments", 
   await page.getByRole("button", {
     name: "Attach images, documents, or spreadsheets",
   }).click();
+  const importStatus = page.getByRole("status");
+  await expect(importStatus).toBeVisible();
+  await expect(importStatus).toHaveText("Adding attachments…");
+  const mainHeartbeatStarted = Date.now();
+  await electronApp.evaluate(async () => {
+    await new Promise<void>((resolveHeartbeat) => {
+      setTimeout(resolveHeartbeat, 10);
+    });
+  });
+  expect(Date.now() - mainHeartbeatStarted).toBeLessThan(500);
+  const responsiveProbe = "Typing stays responsive while files are validated.";
+  const probeStarted = Date.now();
+  await page.getByRole("textbox", { name: "Message" }).fill(responsiveProbe);
+  await expect(page.getByRole("textbox", { name: "Message" }))
+    .toHaveValue(responsiveProbe);
+  expect(Date.now() - probeStarted).toBeLessThan(500);
+  await expect(page.getByRole("button", { name: "Send message" }))
+    .toBeDisabled();
+  const responsiveScreenshotPath = testInfo.outputPath(
+    "attachment-import-responsive-1440x920.png",
+  );
+  await page.screenshot({
+    animations: "disabled",
+    path: responsiveScreenshotPath,
+  });
+  await testInfo.attach("attachment-import-responsive-1440x920", {
+    path: responsiveScreenshotPath,
+    contentType: "image/png",
+  });
+  await page.getByRole("textbox", { name: "Message" }).fill("");
   const attachments = page.getByRole("list", {
     name: "Attachments",
     exact: true,

@@ -21,6 +21,9 @@ export default defineConfig({
           "conversation-attachment-store-worker": resolve(
             "src/main/conversation-attachment-store-worker.ts",
           ),
+          "attachment-import-worker": resolve(
+            "src/main/attachment-import-worker.ts",
+          ),
         },
       },
     },

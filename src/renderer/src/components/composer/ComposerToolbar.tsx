@@ -4,6 +4,7 @@ import {
   Command,
   FolderGit2,
   GitBranch,
+  LoaderCircle,
   MessagesSquare,
   Paperclip,
   Wrench,
@@ -81,6 +82,7 @@ export interface ComposerToolbarProps {
   disabled: boolean;
   running: boolean;
   attachmentCount: number;
+  attachmentImporting: boolean;
   onChooseAttachments: () => Promise<void>;
   contextAvailable: boolean;
   contextCount: number;
@@ -156,6 +158,7 @@ export function ComposerToolbar({
   disabled,
   running,
   attachmentCount,
+  attachmentImporting,
   onChooseAttachments,
   contextAvailable,
   contextCount,
@@ -322,6 +325,7 @@ export function ComposerToolbar({
           onClick={() => void onChooseAttachments()}
           disabled={
             disabled
+            || attachmentImporting
             || primaryAction === "submitting"
             || (running && !canAttachWhileRunning)
             || attachmentCount >= MAX_CHAT_ATTACHMENTS
@@ -329,6 +333,16 @@ export function ComposerToolbar({
         >
           <Paperclip size={16} />
         </IconButton>
+        {attachmentImporting && (
+          <span className="provider-status is-ready" role="status">
+            <LoaderCircle
+              size={13}
+              className="provider-status-spinner"
+              aria-hidden="true"
+            />
+            <span>Adding attachments…</span>
+          </span>
+        )}
         {conversationContextHandoffEnabled && (
           <IconButton
             label={contextCount > 0

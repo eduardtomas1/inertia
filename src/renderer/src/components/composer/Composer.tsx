@@ -126,6 +126,7 @@ export const Composer = memo(function Composer({
   const draftPersistenceTimerRef = useRef<number | null>(null);
   const draftPersistenceMaxWaitTimerRef = useRef<number | null>(null);
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
+  const [attachmentImporting, setAttachmentImporting] = useState(false); const attachmentImportingRef = useRef(false); const attachmentImportSequenceRef = useRef(0);
   const conversationContext = useComposerConversationContext({ conversationId: conversation.id, contextPackets, enabled: conversationContextHandoffEnabled, onCommand: onConversationContextCommand });
   const { contextPacketIds } = conversationContext;
   const attachmentsRef = useRef<ChatAttachment[]>([]);
@@ -301,6 +302,7 @@ export const Composer = memo(function Composer({
   useEffect(() => {
     flushDraftPersistence();
     attachmentAuthorityRef.current += 1;
+    attachmentImportSequenceRef.current += 1; attachmentImportingRef.current = false; setAttachmentImporting(false);
     if (submissionReleaseTimerRef.current !== null) {
       window.clearTimeout(submissionReleaseTimerRef.current);
       submissionReleaseTimerRef.current = null;
@@ -497,6 +499,7 @@ export const Composer = memo(function Composer({
   };
 
   const submit = async () => {
+    if (attachmentImportingRef.current) return;
     const compactCommand = parseCompactComposerCommand(message);
     if (compactCommand) {
       await compact(compactCommand);
@@ -656,6 +659,8 @@ export const Composer = memo(function Composer({
   const { chooseAttachments, importAttachments, removeAttachment } =
     composerAttachmentActions({
       attachmentAuthorityRef,
+      attachmentImportSequenceRef,
+      attachmentImportingRef,
       attachmentsRef,
       blocked: disabled || sending,
       conversationId: conversation.id,
@@ -668,6 +673,7 @@ export const Composer = memo(function Composer({
       releaseAttachmentRef,
       running,
       setAttachments,
+      setAttachmentImporting,
       submittingRef,
     });
 
@@ -705,6 +711,7 @@ export const Composer = memo(function Composer({
     && messageFits
     && routeReadiness.ready
     && !disabled
+    && !attachmentImporting
     && !conversationUpdatePending;
   const primaryAction = composerPrimaryActionState({
     sendEligible,
@@ -1032,13 +1039,7 @@ export const Composer = memo(function Composer({
           (menu || slashMatch || commandSurface) && "has-open-menu",
         )}
         aria-label="Message composer"
-        aria-busy={
-          submissionPending
-          || followUpPending
-          || running
-          || stopping
-          || conversationUpdatePending
-        }
+        aria-busy={submissionPending || followUpPending || attachmentImporting || running || stopping || conversationUpdatePending}
         data-primary-action={primaryAction}
         data-disabled={disabled || conversationUpdatePending}
         onDragOver={(event) => { if (event.dataTransfer.types.includes("Files")) event.preventDefault(); }}
@@ -1164,6 +1165,7 @@ export const Composer = memo(function Composer({
           disabled={disabled}
           running={running}
           attachmentCount={attachments.length}
+          attachmentImporting={attachmentImporting}
           onChooseAttachments={chooseAttachments}
           {...composerConversationContextToolbarProps(conversationContext, contextSources.length, Boolean(onConversationContextCommand), conversationContextHandoffEnabled)}
           onRunAction={onRunAction}
@@ -1232,8 +1234,7 @@ export const Composer = memo(function Composer({
           latestTurn={latestTurn}
           onUsageDisplayModeChange={onUsageDisplayModeChange}
           primaryAction={primaryAction}
-          canSendQueuedNow={!disabled && !sending
-            && (!running || followUpState === "ready")}
+          canSendQueuedNow={!disabled && !sending && !attachmentImporting && (!running || followUpState === "ready")}
           queuedTurnId={(latestTurnSummary ?? latestTurn)?.id ?? null}
           queuedTurnStatus={(latestTurnSummary ?? latestTurn)?.status ?? null}
           queuedTurnAuthoritative={queuedTurnAuthoritative}

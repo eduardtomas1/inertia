@@ -13,9 +13,9 @@ interface DesktopToolsOptions {
   previewContextId?: string | null;
 }
 
-export async function prepareComposerAttachmentImports(
+export function preflightComposerAttachmentFiles(
   files: readonly File[],
-): Promise<Array<{ name: string; mimeType: string; data: ArrayBuffer }>> {
+): void {
   let totalBytes = 0;
   for (const file of files) {
     if (
@@ -32,11 +32,38 @@ export async function prepareComposerAttachmentImports(
       throw new Error("Attachments exceed the 20 MB turn limit.");
     }
   }
-  return await Promise.all(files.map(async (file) => ({
-    name: file.name,
-    mimeType: file.type,
-    data: await file.arrayBuffer(),
-  })));
+}
+
+export async function importComposerAttachmentFilesSequentially(
+  files: readonly File[],
+  importOne: (
+    value: { name: string; mimeType: string; data: ArrayBuffer },
+  ) => Promise<ChatAttachment[]>,
+  release: (id: string) => Promise<void>,
+): Promise<ChatAttachment[]> {
+  preflightComposerAttachmentFiles(files);
+  const imported: ChatAttachment[] = [];
+  try {
+    for (const file of files) {
+      const data = await file.arrayBuffer();
+      if (data.byteLength !== file.size) {
+        throw new Error("An attachment changed while it was being imported.");
+      }
+      const current = await importOne({
+        name: file.name,
+        mimeType: file.type,
+        data,
+      });
+      if (current.length !== 1) {
+        throw new Error("Attachment import did not complete.");
+      }
+      imported.push(current[0]!);
+    }
+    return imported;
+  } catch (error) {
+    await Promise.allSettled(imported.map(async ({ id }) => await release(id)));
+    throw error;
+  }
 }
 
 export function useDesktopTools({
@@ -103,8 +130,10 @@ export function useDesktopTools({
   const importComposerAttachments = useCallback(
     async (files: File[]): Promise<ChatAttachment[]> => {
       try {
-        return await window.inertia.importAttachments(
-          await prepareComposerAttachmentImports(files),
+        return await importComposerAttachmentFilesSequentially(
+          files,
+          async (value) => await window.inertia.importAttachments([value]),
+          async (id) => await window.inertia.releaseAttachment(id),
         );
       } catch (error) {
         setActionError(

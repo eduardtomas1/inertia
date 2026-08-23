@@ -12,6 +12,8 @@ import type { ComposerProps } from "./types";
 
 interface ComposerAttachmentActionOptions {
   attachmentAuthorityRef: MutableRefObject<number>;
+  attachmentImportSequenceRef: MutableRefObject<number>;
+  attachmentImportingRef: MutableRefObject<boolean>;
   attachmentsRef: MutableRefObject<ChatAttachment[]>;
   blocked: boolean;
   conversationId: string;
@@ -24,6 +26,7 @@ interface ComposerAttachmentActionOptions {
   releaseAttachmentRef: MutableRefObject<ComposerProps["onReleaseAttachment"]>;
   running: boolean;
   setAttachments: Dispatch<SetStateAction<ChatAttachment[]>>;
+  setAttachmentImporting: Dispatch<SetStateAction<boolean>>;
   submittingRef: MutableRefObject<boolean>;
 }
 
@@ -35,6 +38,8 @@ export interface ComposerAttachmentActions {
 
 export function composerAttachmentActions({
   attachmentAuthorityRef,
+  attachmentImportSequenceRef,
+  attachmentImportingRef,
   attachmentsRef,
   blocked,
   conversationId,
@@ -47,6 +52,7 @@ export function composerAttachmentActions({
   releaseAttachmentRef,
   running,
   setAttachments,
+  setAttachmentImporting,
   submittingRef,
 }: ComposerAttachmentActionOptions): ComposerAttachmentActions {
   const addAttachments = (incoming: readonly ChatAttachment[]): void => {
@@ -80,19 +86,37 @@ export function composerAttachmentActions({
   };
   const actionBlocked = (): boolean =>
     submittingRef.current
+    || attachmentImportingRef.current
     || blocked
     || (running && !supportsActiveParentFollowUp(harnessId));
+  const beginImport = (): number => {
+    const sequence = attachmentImportSequenceRef.current + 1;
+    attachmentImportSequenceRef.current = sequence;
+    attachmentImportingRef.current = true;
+    setAttachmentImporting(true);
+    return sequence;
+  };
+  const finishImport = (sequence: number): void => {
+    if (attachmentImportSequenceRef.current !== sequence) return;
+    attachmentImportingRef.current = false;
+    setAttachmentImporting(false);
+  };
 
   return {
     async chooseAttachments() {
       if (actionBlocked()) return;
+      const importSequence = beginImport();
       const authority = attachmentAuthorityRef.current;
-      const selected = await onChooseAttachments(running ? "images" : "all");
-      if (!selectionRemainsAuthorized(authority)) {
-        releaseSelected(selected);
-        return;
+      try {
+        const selected = await onChooseAttachments(running ? "images" : "all");
+        if (!selectionRemainsAuthorized(authority)) {
+          releaseSelected(selected);
+          return;
+        }
+        addAttachments(selected);
+      } finally {
+        finishImport(importSequence);
       }
-      addAttachments(selected);
     },
     async importAttachments(files) {
       if (actionBlocked()) return;
@@ -108,12 +132,17 @@ export function composerAttachmentActions({
           })
         : files).slice(0, remaining);
       if (candidates.length === 0) return;
-      const selected = await onImportAttachments(candidates);
-      if (!selectionRemainsAuthorized(authority)) {
-        releaseSelected(selected);
-        return;
+      const importSequence = beginImport();
+      try {
+        const selected = await onImportAttachments(candidates);
+        if (!selectionRemainsAuthorized(authority)) {
+          releaseSelected(selected);
+          return;
+        }
+        addAttachments(selected);
+      } finally {
+        finishImport(importSequence);
       }
-      addAttachments(selected);
     },
     removeAttachment(attachment) {
       if (!attachmentsRef.current.some(({ id }) => id === attachment.id)) return;

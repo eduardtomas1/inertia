@@ -23,6 +23,10 @@ import {
   removeAttachmentStorageSession,
   type AttachmentRegistryLimits,
 } from "../../src/main/attachment-registry";
+import {
+  validateAttachmentImportFile,
+  type AttachmentImportValidationRunner,
+} from "../../src/main/attachment-import-file";
 
 const directories: string[] = [];
 const handoffId = "22222222-2222-4222-8222-222222222222";
@@ -555,6 +559,78 @@ describe("main-owned attachment registry", () => {
       mimeType: "image/png",
       data: png,
     }])).rejects.toThrow(/no longer available/u);
+  });
+
+  it("removes the current staged file after a partial writer failure", async () => {
+    const { directory, registry: attachments } = await registry();
+
+    await expect(attachments.importFromWriter({
+      name: "partial.png",
+      mimeType: "image/png",
+      size: png.length,
+      write: async (destination) => {
+        await destination.write(png.subarray(0, 12));
+        throw new Error("synthetic staged write failure");
+      },
+    })).rejects.toThrow("synthetic staged write failure");
+
+    await expect(readdir(directory)).resolves.toEqual([]);
+    expect(attachments.usage()).toEqual({ records: 0, bytes: 0 });
+  });
+
+  it("cancels validation and removes its unpublished staged file", async () => {
+    const { directory, registry: attachments } = await registry({
+      validationDelayMs: 5_000,
+    });
+    const controller = new AbortController();
+    const importing = attachments.importFromWriter({
+      name: "cancelled.png",
+      mimeType: "image/png",
+      size: png.length,
+      write: async (destination) => {
+        await destination.writeFile(png);
+      },
+    }, controller.signal);
+    await vi.waitFor(async () => {
+      expect(await readdir(directory)).toHaveLength(1);
+    });
+    controller.abort();
+
+    await expect(importing).rejects.toThrow(/abort/u);
+    await expect(readdir(directory)).resolves.toEqual([]);
+    expect(attachments.usage()).toEqual({ records: 0, bytes: 0 });
+  });
+
+  it("rejects a staged inode changed before the worker's exact exit", async () => {
+    expect(sameSizeReplacementPng).toHaveLength(png.length);
+    const validationRunner: AttachmentImportValidationRunner = (
+      operation,
+      signal,
+    ) => {
+      const result = validateAttachmentImportFile(operation, { signal });
+      return {
+        result,
+        stopped: result.then(async () => {
+          await writeFile(
+            join(operation.root, operation.fileName),
+            sameSizeReplacementPng,
+            { mode: 0o600 },
+          );
+        }),
+      };
+    };
+    const { directory, registry: attachments } = await registry({
+      validationRunner,
+    });
+
+    await expect(attachments.import([{
+      name: "changed-before-exit.png",
+      mimeType: "image/png",
+      data: png,
+    }])).rejects.toThrow(/could not be verified safely/u);
+
+    await expect(readdir(directory)).resolves.toEqual([]);
+    expect(attachments.usage()).toEqual({ records: 0, bytes: 0 });
   });
 
   it("removes prior-process orphans before a new registry starts", async () => {

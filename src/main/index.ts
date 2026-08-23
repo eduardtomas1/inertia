@@ -1,6 +1,6 @@
-import { constants, existsSync, readFileSync, writeFileSync } from "node:fs";
-import { lstat, mkdir, open, writeFile } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { lstat, mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   app,
@@ -18,7 +18,6 @@ import {
   utilityProcess,
   type IpcMainInvokeEvent,
 } from "electron";
-import { MAX_CHAT_ATTACHMENTS } from "../shared/attachments.js";
 import {
   builtInKimiClaudeBackendProfile,
   KIMI_CLAUDE_BUILTIN_PROFILE_ID,
@@ -33,12 +32,13 @@ import { PREVIEW_AGENT_INPUT_REFUSAL_CHANNEL } from "../shared/preview-agent-pri
 import { safeHttpUrl } from "../shared/preview-url.js";
 import { MAC_TRAFFIC_LIGHT_POSITION } from "../shared/window-chrome.js";
 import {
-  attachmentPickerConfiguration, validateAttachmentPickerName,
-  validateSelectedAttachmentCount, validateSelectedAttachmentOpen,
-  validateSelectedAttachmentRead,
-  validateSelectedAttachmentStats,
-  type SelectedAttachmentReadSnapshot,
+  attachmentPickerConfiguration,
 } from "./attachment-import.js";
+import { attachmentImportRunner } from "./attachment-import-desktop-runner.js";
+import {
+  importSelectedAttachmentPaths,
+  privacySafeAttachmentImportError,
+} from "./attachment-selection-import.js";
 import {
   AttachmentRegistry,
   createAttachmentStorageSession,
@@ -204,6 +204,10 @@ function attachmentRegistry(): AttachmentRegistry {
   importedAttachments ??= new AttachmentRegistry(attachmentDirectory(), {
     reservedRecords: attachmentReservation.records,
     reservedBytes: attachmentReservation.bytes,
+    validationRunner: attachmentImportRunner,
+    validationDelayMs: process.env.NODE_ENV === "test"
+      ? Number(process.env.INERTIA_TEST_ATTACHMENT_IMPORT_DELAY_MS ?? 0)
+      : 0,
   });
   return importedAttachments;
 }
@@ -522,131 +526,51 @@ function registerIpcHandlers(): void {
     const mode = parseAttachmentPickerMode(args[0]);
     if (!mode) throw new Error("Invalid attachment picker mode.");
     const picker = attachmentPickerConfiguration(mode);
-    const result = await dialog.showOpenDialog(ownerWindow, {
-      title: picker.title,
-      buttonLabel: "Attach",
-      filters: [{
-        name: picker.filterName,
-        extensions: picker.extensions,
-      }],
-      properties: ["openFile", "multiSelections"],
-    });
-    if (result.canceled) return [];
-    validateSelectedAttachmentCount(result.filePaths.length);
-    const noFollow = "O_NOFOLLOW" in constants ? constants.O_NOFOLLOW : 0;
-    const nonBlocking = "O_NONBLOCK" in constants ? constants.O_NONBLOCK : 0;
-    const selectedFiles: Array<{
-      path: string;
-      size: number;
-      isFile: boolean;
-      snapshot: SelectedAttachmentReadSnapshot;
-      file: Awaited<ReturnType<typeof open>>;
-    }> = [];
+    const lifetime = new AbortController();
+    const cancelImport = (): void => lifetime.abort();
+    event.sender.once("destroyed", cancelImport);
+    if (event.sender.isDestroyed()) cancelImport();
     try {
-      for (const path of result.filePaths) {
-        const pathInfo = await lstat(path, { bigint: true });
-        if (!pathInfo.isFile() || pathInfo.isSymbolicLink()) {
-          throw new Error("The selected attachment is not a safe regular file.");
-        }
-        const file = await open(
-          path,
-          constants.O_RDONLY | noFollow | nonBlocking,
-        );
-        try {
-          const info = await file.stat({ bigint: true });
-          validateSelectedAttachmentOpen({
-            dev: pathInfo.dev,
-            ino: pathInfo.ino,
-            isFile: pathInfo.isFile(),
-            isSymbolicLink: pathInfo.isSymbolicLink(),
-          }, {
-            dev: info.dev,
-            ino: info.ino,
-            isFile: info.isFile(),
-            isSymbolicLink: info.isSymbolicLink(),
-          });
-          selectedFiles.push({
-            path,
-            size: Number(info.size),
-            isFile: info.isFile(),
-            snapshot: {
-              dev: info.dev,
-              ino: info.ino,
-              size: info.size,
-              mtimeNs: info.mtimeNs,
-              ctimeNs: info.ctimeNs,
-              isFile: info.isFile(),
-              isSymbolicLink: info.isSymbolicLink(),
-            },
-            file,
-          });
-        } catch (error) {
-          await file.close().catch(() => undefined);
-          throw error;
-        }
-      }
-      // Validate the complete selection before reading any selected bytes.
-      validateSelectedAttachmentStats(selectedFiles.map(({ size, isFile }) => ({
-        size,
-        isFile,
-        isSymbolicLink: false,
-      })));
-      const values = [];
-      for (const selected of selectedFiles) {
-        const name = basename(selected.path);
-        validateAttachmentPickerName(mode, name);
-        const data = Buffer.alloc(selected.size);
-        let offset = 0;
-        while (offset < data.length) {
-          const { bytesRead } = await selected.file.read(
-            data,
-            offset,
-            data.length - offset,
-            offset,
-          );
-          if (bytesRead === 0) break;
-          offset += bytesRead;
-        }
-        const extra = Buffer.alloc(1);
-        const { bytesRead: extraBytes } = await selected.file.read(
-          extra,
-          0,
-          1,
-          offset,
-        );
-        if (offset !== data.length || extraBytes !== 0) {
-          throw new Error("A selected attachment changed while it was being read.");
-        }
-        const after = await selected.file.stat({ bigint: true });
-        validateSelectedAttachmentRead(selected.snapshot, {
-          dev: after.dev,
-          ino: after.ino,
-          size: after.size,
-          mtimeNs: after.mtimeNs,
-          ctimeNs: after.ctimeNs,
-          isFile: after.isFile(),
-          isSymbolicLink: after.isSymbolicLink(),
-        });
-        values.push({
-          name,
-          mimeType: "",
-          data,
-        });
-      }
-      return await attachmentRegistry().import(values);
+      const result = await dialog.showOpenDialog(ownerWindow, {
+        title: picker.title,
+        buttonLabel: "Attach",
+        filters: [{
+          name: picker.filterName,
+          extensions: picker.extensions,
+        }],
+        properties: ["openFile", "multiSelections"],
+      });
+      lifetime.signal.throwIfAborted();
+      if (result.canceled) return [];
+      return await importSelectedAttachmentPaths(
+        attachmentRegistry(),
+        result.filePaths,
+        mode,
+        lifetime.signal,
+      );
+    } catch (error) {
+      throw privacySafeAttachmentImportError(error);
     } finally {
-      await Promise.all(selectedFiles.map(({ file }) =>
-        file.close().catch(() => undefined)));
+      event.sender.removeListener("destroyed", cancelImport);
     }
   });
 
   ipcMain.handle(IPC.importAttachments, async (event, ...args) => {
     assertTrustedChatIpc(event, args.length, 1);
     const [value] = args;
-    if (!Array.isArray(value) || value.length > MAX_CHAT_ATTACHMENTS) {
+    if (!Array.isArray(value) || value.length !== 1) {
       throw new Error("Invalid attachments.");
     }
-    return await attachmentRegistry().import(value);
+    const lifetime = new AbortController();
+    const cancelImport = (): void => lifetime.abort();
+    event.sender.once("destroyed", cancelImport);
+    try {
+      return await attachmentRegistry().import(value, lifetime.signal);
+    } catch (error) {
+      throw privacySafeAttachmentImportError(error);
+    } finally {
+      event.sender.removeListener("destroyed", cancelImport);
+    }
   });
 
   registerAttachmentLifecycleIpc({

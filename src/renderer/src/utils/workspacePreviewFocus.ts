@@ -2,23 +2,43 @@ import { useEffect, useRef, type RefObject } from "react";
 
 export type WorkspacePreviewOwner = "primary" | "secondary";
 
+interface PendingPreviewTabCloseFocus {
+  closedTabId: string;
+  initialActiveElement: Element | null;
+}
+
 export function usePreviewTabCloseFocus(
   tabs: readonly { id: string }[],
   activeTabId: string | null,
   tabRefs: RefObject<Map<string, HTMLButtonElement>>,
 ): (closedTabId: string) => void {
-  const pendingClosedTabId = useRef<string | null>(null);
+  const pending = useRef<PendingPreviewTabCloseFocus | null>(null);
   useEffect(() => {
-    const closedTabId = pendingClosedTabId.current;
-    if (!closedTabId || tabs.some((tab) => tab.id === closedTabId)) return;
+    const request = pending.current;
+    if (!request || tabs.some((tab) => tab.id === request.closedTabId)) return;
+    const activeElement = document.activeElement;
+    if (
+      activeElement !== request.initialActiveElement
+      && activeElement instanceof HTMLElement
+      && activeElement !== document.body
+      && activeElement.isConnected
+    ) {
+      pending.current = null;
+      return;
+    }
     const targetId = activeTabId ?? tabs[0]?.id;
     if (!targetId) return;
     const element = tabRefs.current.get(targetId);
     if (!element) return;
-    pendingClosedTabId.current = null;
+    pending.current = null;
     element.focus();
   }, [activeTabId, tabRefs, tabs]);
-  return (closedTabId) => { pendingClosedTabId.current = closedTabId; };
+  return (closedTabId) => {
+    pending.current = {
+      closedTabId,
+      initialActiveElement: document.activeElement,
+    };
+  };
 }
 
 export function routeWorkspaceRunPreview<Run extends {

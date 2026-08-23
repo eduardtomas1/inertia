@@ -204,7 +204,7 @@ describe("Browser evidence timeline", () => {
     })).not.toBeInTheDocument());
   });
 
-  it("provides roving tab focus and restores focus after keyboard tab closure", async () => {
+  it("restores keyboard tab-close focus without stealing a newer focus target", async () => {
     const onActivateTab = vi.fn();
     const onCloseTab = vi.fn();
     const panel = (
@@ -243,6 +243,13 @@ describe("Browser evidence timeline", () => {
     view.rerender(panel([tabs[0]!, tabs[2]!], "one"));
     await waitFor(() => expect(screen.getByRole("tab", { name: "One" })).toHaveFocus());
     expect(screen.getByRole("tab", { name: "Three" })).not.toHaveFocus();
+
+    screen.getByRole("tab", { name: "One" }).focus();
+    fireEvent.keyDown(screen.getByRole("tab", { name: "One" }), { key: "Delete" });
+    const address = screen.getByRole("textbox", { name: "Preview address" });
+    address.focus();
+    view.rerender(panel([tabs[2]!], "three"));
+    await waitFor(() => expect(address).toHaveFocus());
 
     view.rerender(panel([tabs[0]!], "one"));
     fireEvent.keyDown(screen.getByRole("tab", { name: "One" }), { key: "Delete" });

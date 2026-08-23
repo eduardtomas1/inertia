@@ -6,17 +6,19 @@ export function usePreviewTabCloseFocus(
   tabs: readonly { id: string }[],
   activeTabId: string | null,
   tabRefs: RefObject<Map<string, HTMLButtonElement>>,
-): () => void {
-  const pending = useRef(false);
+): (closedTabId: string) => void {
+  const pendingClosedTabId = useRef<string | null>(null);
   useEffect(() => {
+    const closedTabId = pendingClosedTabId.current;
+    if (!closedTabId || tabs.some((tab) => tab.id === closedTabId)) return;
     const targetId = activeTabId ?? tabs[0]?.id;
-    if (!pending.current || !targetId) return;
+    if (!targetId) return;
     const element = tabRefs.current.get(targetId);
     if (!element) return;
-    pending.current = false;
+    pendingClosedTabId.current = null;
     element.focus();
   }, [activeTabId, tabRefs, tabs]);
-  return () => { pending.current = true; };
+  return (closedTabId) => { pendingClosedTabId.current = closedTabId; };
 }
 
 export function routeWorkspaceRunPreview<Run extends {

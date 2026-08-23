@@ -237,7 +237,7 @@ export function PreviewPanel({
                     moveTabFocus(tab.id, event.key);
                   } else if (event.key === "Delete" && onCloseTab) {
                     event.preventDefault();
-                    prepareTabCloseFocus();
+                    prepareTabCloseFocus(tab.id);
                     onCloseTab(tab.id);
                   }
                 }}

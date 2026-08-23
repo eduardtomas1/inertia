@@ -236,10 +236,10 @@ describe("Browser evidence timeline", () => {
     expect(onActivateTab).toHaveBeenCalledWith("two");
     expect(second).toHaveFocus();
 
-    view.rerender(panel(tabs, "two"));
-    screen.getByRole("tab", { name: "Two" }).focus();
     fireEvent.keyDown(screen.getByRole("tab", { name: "Two" }), { key: "Delete" });
     expect(onCloseTab).toHaveBeenCalledWith("two");
+    view.rerender(panel(tabs, "two"));
+    expect(screen.getByRole("tab", { name: "Two" })).toHaveFocus();
     view.rerender(panel([tabs[0]!, tabs[2]!], "one"));
     await waitFor(() => expect(screen.getByRole("tab", { name: "One" })).toHaveFocus());
     expect(screen.getByRole("tab", { name: "Three" })).not.toHaveFocus();

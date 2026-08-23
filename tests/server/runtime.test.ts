@@ -37,6 +37,10 @@ import {
   connectRuntime as connect,
   RuntimeEventQueue as EventQueue,
 } from "../support/runtime-event-queue";
+import {
+  loadConversationDetail,
+  loadConversationDetailResult,
+} from "../support/runtime-conversation-detail";
 import { SecureFileTestBroker } from "../support/secure-file-test-broker";
 import { startTestRuntime as startRuntime } from "../support/test-runtime";
 
@@ -50,50 +54,6 @@ function providerReady(provider: ProviderInfo): boolean {
   const { models, rateLimits } = provider.metadataState;
   return provider.authState === "authenticated" && provider.canRun && models.lastAttemptedAt !== null
     && rateLimits.lastAttemptedAt !== null && !models.refreshing && !rateLimits.refreshing;
-}
-
-async function loadConversationDetailResult(
-  socket: WebSocket,
-  events: EventQueue,
-  conversationId: string,
-  deadlineAt?: number,
-): Promise<Extract<Extract<ServerEvent, { type: "request.result" }>["result"], { kind: "conversation.detail" }>> {
-  const requestId = randomUUID();
-  send(socket, {
-    type: "conversation.detail.load",
-    requestId,
-    payload: { conversationId },
-  });
-  const isConversationDetail = (
-    candidate: ServerEvent,
-  ): candidate is Extract<ServerEvent, { type: "request.result" }> =>
-    candidate.type === "request.result"
-    && candidate.requestId === requestId
-    && candidate.result.kind === "conversation.detail";
-  const event = deadlineAt === undefined
-    ? await events.next(isConversationDetail)
-    : await events.nextForRequest(requestId, isConversationDetail, deadlineAt);
-  if (event.result.kind !== "conversation.detail") {
-    throw new Error(`Expected a conversation detail result for ${conversationId}.`);
-  }
-  return event.result;
-}
-async function loadConversationDetail(
-  socket: WebSocket,
-  events: EventQueue,
-  conversationId: string,
-  deadlineAt?: number,
-): Promise<ConversationDetail> {
-  const result = await loadConversationDetailResult(
-    socket,
-    events,
-    conversationId,
-    deadlineAt,
-  );
-  if (result.state !== "ready") {
-    throw new Error(`Expected ready conversation detail for ${conversationId}.`);
-  }
-  return result.detail;
 }
 
 async function waitForConversationDetail(

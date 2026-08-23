@@ -62,15 +62,34 @@ if (canvas.toBuffer("image/png").length <= 8) {
   throw new Error("The native canvas binding did not produce a PNG.");
 }
 
+const ptyMarker = "inertia-native-pty-ok";
+const windowsPtyEnvironment = {};
+if (process.platform === "win32") {
+  for (const name of ["SystemRoot", "WINDIR", "ComSpec", "Path", "PATHEXT", "TEMP", "TMP"]) {
+    const value = Object.entries(process.env).find(
+      ([candidate]) => candidate.toLowerCase() === name.toLowerCase(),
+    )?.[1]?.trim();
+    if (value) windowsPtyEnvironment[name] = value;
+  }
+}
+const ptyExecutable = process.platform === "win32"
+  ? windowsPtyEnvironment.ComSpec
+    ?? join(windowsPtyEnvironment.SystemRoot ?? windowsPtyEnvironment.WINDIR ?? "C:\\Windows", "System32", "cmd.exe")
+  : process.execPath;
+const ptyArguments = process.platform === "win32"
+  ? ["/d", "/s", "/c", `echo ${ptyMarker}`]
+  : ["--version"];
+const ptyExpectedOutput = process.platform === "win32" ? ptyMarker : process.version;
+
 await new Promise((resolveProbe, rejectProbe) => {
-  // Avoid inline-script quoting here: node-pty builds a Windows command line
-  // from this argument vector, and --version exercises the same native spawn,
-  // output, and exit paths without a platform-specific quoting boundary.
-  const terminal = spawnPty(process.execPath, ["--version"], {
+  // Windows exercises the same ComSpec path as TerminalManager with only the
+  // non-secret system variables CreateProcess/ConPTY needs. POSIX uses Node's
+  // quote-free version path to cover the native spawn, output, and exit flow.
+  const terminal = spawnPty(ptyExecutable, ptyArguments, {
     cols: 80,
     rows: 24,
     cwd: root,
-    env: {},
+    env: windowsPtyEnvironment,
   });
   let output = "";
   let settled = false;
@@ -92,7 +111,7 @@ await new Promise((resolveProbe, rejectProbe) => {
     }
   });
   terminal.onExit(({ exitCode }) => {
-    if (exitCode !== 0 || !output.includes(process.version)) {
+    if (exitCode !== 0 || !output.includes(ptyExpectedOutput)) {
       finish(() => rejectProbe(
         new Error(
           "The native PTY binding did not complete its child-process probe "

@@ -69,7 +69,7 @@ function readLsofRecords(args) {
     [
       "-n",
       "-P",
-      ...(process.platform === "linux" ? ["-E"] : []),
+      ...lsofPlatformArgs(),
       ...args,
       "-F",
       "pfdin",
@@ -84,6 +84,15 @@ function readLsofRecords(args) {
   );
   if (result.error || result.status !== 0) return null;
   return parseLsofRecords(result.stdout);
+}
+
+export function lsofPlatformArgs(platform = process.platform) {
+  if (platform === "linux") return ["-E"];
+  // Darwin's descriptor-only mode avoids inspecting unrelated process
+  // metadata during the all-user fd 1/2 ownership scan. That keeps the scan
+  // within its existing bound even on a loaded native Intel runner.
+  if (platform === "darwin") return ["-X"];
+  return [];
 }
 
 export function parseLsofRecords(output) {
@@ -162,20 +171,30 @@ export function readPosixProbePipeIdentities(
   return null;
 }
 
-function readPosixProbePipeOwners(pipeIdentities) {
+export function readPosixProbePipeOwners(
+  pipeIdentities,
+  readRecords = readLsofRecords,
+  platform = process.platform,
+) {
   const userId = process.getuid?.();
   if (!Number.isSafeInteger(userId) || userId < 0) return null;
-  const records = readLsofRecords([
-    "-a",
-    "-u", String(userId),
-    "-d", "1,2",
-  ]);
-  if (!records) return null;
-  return new Set(
-    records
-      .filter((record) => pipeIdentities.has(lsofPipeIdentity(record)))
-      .map(({ pid }) => pid),
-  );
+  let emptyOwners = null;
+  for (let pass = 0; pass < POSIX_OWNERSHIP_TOKEN_PASSES; pass += 1) {
+    const records = readRecords([
+      "-a",
+      "-u", String(userId),
+      "-d", "1,2",
+    ]);
+    if (!records) continue;
+    const owners = new Set(
+      records
+        .filter((record) => pipeIdentities.has(lsofPipeIdentity(record, platform)))
+        .map(({ pid }) => pid),
+    );
+    if (owners.size > 0) return owners;
+    emptyOwners = owners;
+  }
+  return emptyOwners;
 }
 
 function signalProcess(target, signal, missingIsSuccess = true) {

@@ -15,6 +15,7 @@ import {
   createCodexAppServerHarness,
   type CodexAppServerHarnessDependencies,
 } from "../../src/server/provider/codex-app-server-harness";
+import { withCodexControlClient } from "../../src/server/codex/control-client";
 import { createClaudeAgentSdkHarness } from "../../src/server/provider/claude-agent-sdk-harness";
 import {
   portableFixtureRoot,
@@ -32,6 +33,112 @@ import {
   withModelSelectionFastMode,
 } from "../../src/shared/model-routing";
 import { nativeProviderRunInput } from "./model-route-fixture";
+
+const COMPACTION_PHASE_TRACE_LIMIT = 32;
+const COMPACTION_PHASE_DEADLINE_MS = 20_000;
+
+function capturedRequestMethods(capturePath: string): string[] {
+  try {
+    return readFileSync(capturePath, "utf8").trim().split("\n")
+      .slice(0, COMPACTION_PHASE_TRACE_LIMIT)
+      .map((line) => {
+        const message = JSON.parse(line) as { method?: unknown };
+        return typeof message.method === "string" ? message.method : "unknown";
+      });
+  } catch {
+    return [];
+  }
+}
+
+function createCodexCompactionPhaseTrace(): {
+  describe: () => string;
+  withControlClient: NonNullable<
+    CodexAppServerHarnessDependencies["withControlClient"]
+  >;
+} {
+  const startedAt = Date.now();
+  const phases: string[] = [];
+  const record = (phase: string, details?: Record<string, unknown>): void => {
+    if (phases.length >= COMPACTION_PHASE_TRACE_LIMIT) return;
+    const suffix = details ? ` ${JSON.stringify(details)}` : "";
+    phases.push(`${Date.now() - startedAt}ms ${phase}${suffix}`);
+  };
+  const withControlClient: NonNullable<
+    CodexAppServerHarnessDependencies["withControlClient"]
+  > = async (options, runWithClient) => {
+    record("control:spawn");
+    try {
+      return await withCodexControlClient({
+        ...options,
+        onNotification: (method, params) => {
+          const item = params.item && typeof params.item === "object"
+            ? params.item as { id?: unknown; type?: unknown }
+            : undefined;
+          record(`notification:${method}`, {
+            completedAtMs: params.completedAtMs,
+            itemId: item?.id,
+            itemType: item?.type,
+            startedAtMs: params.startedAtMs,
+            threadId: params.threadId,
+            turnId: params.turnId,
+          });
+          options.onNotification?.(method, params);
+        },
+      }, async (client) => {
+        // withCodexControlClient invokes this callback only after initialize
+        // has been admitted by the child.
+        record("initialize:admitted");
+        try {
+          return await runWithClient({
+            request: async (method, params = {}) => {
+              record(`request:${method}:write`);
+              try {
+                const response = await client.request(method, params);
+                record(`request:${method}:admitted`);
+                return response;
+              } catch (error) {
+                record(`request:${method}:rejected`, {
+                  message: error instanceof Error
+                    ? error.message.slice(0, 160)
+                    : "unknown",
+                });
+                throw error;
+              }
+            },
+          });
+        } finally {
+          record("operation:settled");
+        }
+      });
+    } finally {
+      record("cleanup:closed");
+    }
+  };
+  return {
+    describe: () => phases.join(" | "),
+    withControlClient,
+  };
+}
+
+async function withCompactionPhaseDeadline<T>(
+  operation: Promise<T>,
+  trace: ReturnType<typeof createCodexCompactionPhaseTrace>,
+  capturePath: string,
+): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(
+          `Codex compaction phase deadline exceeded. phases=[${trace.describe()}] inbound=[${capturedRequestMethods(capturePath).join(",")}]`,
+        )), COMPACTION_PHASE_DEADLINE_MS);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 function codexCompactionTierAgent(
   root: string,
@@ -146,8 +253,16 @@ describe.sequential("provider compaction adapters", () => {
       capturePath,
       attestedTier,
     );
+    const phaseTrace = createCodexCompactionPhaseTrace();
     const manager = trackManager(
-      new ProviderManager({ commands: { codex: command } }),
+      new ProviderManager(
+        { commands: { codex: command } },
+        new AgentHarnessRegistry([
+          createCodexAppServerHarness({
+            withControlClient: phaseTrace.withControlClient,
+          }),
+        ]),
+      ),
     );
     const base = nativeProviderRunInput({
       providerId: "codex",
@@ -163,7 +278,7 @@ describe.sequential("provider compaction adapters", () => {
       ? withModelSelectionFastMode(base.modelSelection, requestedTier)
       : base.modelSelection;
 
-    await expect(manager.compact({
+    await expect(withCompactionPhaseDeadline(manager.compact({
       ...base,
       supportedFastMode: "priority",
       modelSelection: selection,
@@ -172,7 +287,7 @@ describe.sequential("provider compaction adapters", () => {
         null,
         false,
       ),
-    })).resolves.toMatchObject({ status: "completed" });
+    }), phaseTrace, capturePath)).resolves.toMatchObject({ status: "completed" });
 
     const messages = readFileSync(capturePath, "utf8").trim().split("\n")
       .map((line) => JSON.parse(line) as {

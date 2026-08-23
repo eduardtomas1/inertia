@@ -45,6 +45,51 @@ test("normalizes Linux lsof socket endpoints without changing pipe or macOS iden
   );
 });
 
+test("uses bounded endpoint and descriptor-only lsof modes on Linux and macOS", async () => {
+  const moduleUrl = pathToFileURL(join(root, "scripts", "native-executable-probe.mjs")).href;
+  const { lsofPlatformArgs } = await import(moduleUrl) as {
+    lsofPlatformArgs: (platform: NodeJS.Platform) => string[];
+  };
+
+  expect(lsofPlatformArgs("linux")).toEqual(["-E"]);
+  expect(lsofPlatformArgs("darwin")).toEqual(["-X"]);
+  expect(lsofPlatformArgs("win32")).toEqual([]);
+});
+
+test("retries transient pipe-owner scans without accepting a permanently unreadable scan", async () => {
+  const moduleUrl = pathToFileURL(join(root, "scripts", "native-executable-probe.mjs")).href;
+  const { readPosixProbePipeOwners } = await import(moduleUrl) as {
+    readPosixProbePipeOwners: (
+      identities: Set<string>,
+      readRecords: () => Array<{
+        device: string;
+        inode: string;
+        name: string;
+        pid: number;
+      }> | null,
+      platform: NodeJS.Platform,
+    ) => Set<number> | null;
+  };
+  let reads = 0;
+  const identity = "endpoints:0xa:0xb";
+  const owners = readPosixProbePipeOwners(new Set([identity]), () => {
+    reads += 1;
+    return reads === 1
+      ? []
+      : [{ device: "0xa", inode: "", name: "->0xb", pid: 4301 }];
+  }, "darwin");
+
+  expect(owners).toEqual(new Set([4301]));
+  expect(reads).toBe(2);
+
+  reads = 0;
+  expect(readPosixProbePipeOwners(new Set([identity]), () => {
+    reads += 1;
+    return null;
+  }, "darwin")).toBeNull();
+  expect(reads).toBe(3);
+});
+
 test("bounds parsed lsof ownership output", async () => {
   const moduleUrl = pathToFileURL(join(root, "scripts", "native-executable-probe.mjs")).href;
   const { parseLsofRecords } = await import(moduleUrl) as {

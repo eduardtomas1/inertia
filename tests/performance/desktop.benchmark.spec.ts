@@ -19,6 +19,7 @@ import {
 } from "../../src/shared/runtime-command-timeouts";
 import { processExists } from "../e2e/support/app-fixture";
 import { selectWorkspaceTool } from "../e2e/support/workspace-tools";
+import { driveBoundedWheelNavigation } from "../helpers/bounded-wheel-navigation";
 
 const execFileAsync = promisify(execFile);
 const reportPath = resolve(
@@ -42,6 +43,9 @@ const CI_PREFETCHED_SURFACE_TARGET_MS = 100;
 // Four distinct visible commits still prove progressive rendering before and
 // after the explicit return to latest without rewarding a broken auto-follow.
 const CI_STREAM_MIN_VISIBLE_UPDATES = 4;
+const READER_NAVIGATION_MAX_WHEEL_GESTURES = 16;
+const READER_NAVIGATION_MAX_PROGRESS_SAMPLES = 10;
+const READER_NAVIGATION_TARGET_SCROLL_TOP = 120;
 
 const streamingAppServer = `
 const readline = require("node:readline");
@@ -723,7 +727,7 @@ async function streamingResponsivenessSample(
     "stream-before",
   );
   const processBefore = await processSample(electronApp);
-  const measurementPromise = page.evaluate((sampleNumber) => (
+  const measurementOutcomePromise = page.evaluate((sampleNumber) => (
       new Promise<{
       firstProviderDeltaToPaintMs: number;
       completionToFinalPaintMs: number;
@@ -910,7 +914,10 @@ async function streamingResponsivenessSample(
       }
       frameHandle = window.requestAnimationFrame(frame);
     })
-  ), sampleNumber);
+  ), sampleNumber).then(
+    (value) => ({ status: "fulfilled" as const, value }),
+    (error: unknown) => ({ error, status: "rejected" as const }),
+  );
 
   const composer = page.getByRole("region", { name: "Message composer" });
   await composer.getByRole("textbox", { name: "Message" })
@@ -921,15 +928,20 @@ async function streamingResponsivenessSample(
   });
   const liveViewport = page.locator(".message-scroll");
   await liveViewport.hover({ position: { x: 16, y: 16 } });
-  for (let gesture = 0; gesture < 8; gesture += 1) {
-    await page.mouse.wheel(0, -30_000);
-  }
-  await expect.poll(() => liveViewport.evaluate(
-    (viewport) => viewport.scrollTop,
-  )).toBeLessThan(120);
+  await driveBoundedWheelNavigation({
+    maxGestures: READER_NAVIGATION_MAX_WHEEL_GESTURES,
+    maxProgressSamples: READER_NAVIGATION_MAX_PROGRESS_SAMPLES,
+    readScrollTop: () => liveViewport.evaluate((viewport) => viewport.scrollTop),
+    targetScrollTop: READER_NAVIGATION_TARGET_SCROLL_TOP,
+    waitForNextSample: () => page.waitForTimeout(25),
+    wheelUp: () => page.mouse.wheel(0, -30_000),
+  });
   await page.waitForTimeout(150);
   const readerNavigationScrollTop = await liveViewport.evaluate(
     (viewport) => viewport.scrollTop,
+  );
+  expect(readerNavigationScrollTop).toBeLessThan(
+    READER_NAVIGATION_TARGET_SCROLL_TOP,
   );
   const memoryDuring = await rendererMemorySample(
     electronApp,
@@ -994,7 +1006,9 @@ async function streamingResponsivenessSample(
     );
     throw error;
   }
-  const visible = await measurementPromise;
+  const measurementOutcome = await measurementOutcomePromise;
+  if (measurementOutcome.status === "rejected") throw measurementOutcome.error;
+  const visible = measurementOutcome.value;
   const memoryAfter = await rendererMemorySample(
     electronApp,
     page,

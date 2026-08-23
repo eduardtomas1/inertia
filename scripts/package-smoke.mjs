@@ -401,15 +401,16 @@ async function createUpdateNetworkTrap() {
 
 async function locatePackagedExecutable() {
   const releaseDirectory = resolve("release");
+  const architectureSuffix = process.arch === "x64" ? "" : `-${process.arch}`;
   const candidates = process.platform === "darwin"
     ? [
         join(releaseDirectory, `mac-${process.arch}`, "Inertia.app", "Contents", "MacOS", "Inertia"),
         join(releaseDirectory, "mac", "Inertia.app", "Contents", "MacOS", "Inertia"),
       ]
     : process.platform === "win32"
-      ? [join(releaseDirectory, "win-unpacked", "Inertia.exe")]
+      ? [join(releaseDirectory, `win${architectureSuffix}-unpacked`, "Inertia.exe")]
       : process.platform === "linux"
-        ? [join(releaseDirectory, "linux-unpacked", "inertia")]
+        ? [join(releaseDirectory, `linux${architectureSuffix}-unpacked`, "inertia")]
         : [];
   const matches = [];
   for (const candidate of candidates) {

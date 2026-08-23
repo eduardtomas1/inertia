@@ -22,7 +22,7 @@ jobs:
   build:
     name: Build ${{ matrix.label }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 50
+    timeout-minutes: ${{ matrix.timeout_minutes }}
     defaults:
       run:
         shell: bash
@@ -30,18 +30,52 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - label: macOS x64
+            runner: macos-15-intel
+            platform: macos-x64
+            arch: x64
+            dist_script: dist:release:mac:x64
+            timeout_minutes: 55
+            app_path: release/mac/Inertia.app
           - label: macOS arm64
             runner: macos-15
             platform: macos-arm64
+            arch: arm64
             dist_script: dist:release:mac
+            timeout_minutes: 50
+            app_path: release/mac-arm64/Inertia.app
           - label: Windows x64
             runner: windows-2025
             platform: windows-x64
+            arch: x64
             dist_script: dist:release:win
+            timeout_minutes: 60
+            app_path: release/win-unpacked/Inertia.exe
+            windows_asset_suffix: ""
+          - label: Windows ARM64
+            runner: windows-11-arm
+            platform: windows-arm64
+            arch: arm64
+            dist_script: dist:release:win:arm64
+            timeout_minutes: 75
+            app_path: release/win-arm64-unpacked/Inertia.exe
+            windows_asset_suffix: .arm64
           - label: Linux x64
             runner: ubuntu-24.04
             platform: linux-x64
+            arch: x64
             dist_script: dist:release:linux
+            timeout_minutes: 55
+            app_path: release/linux-unpacked/inertia
+            unpacked_dir: release/linux-unpacked
+          - label: Linux ARM64
+            runner: ubuntu-24.04-arm
+            platform: linux-arm64
+            arch: arm64
+            dist_script: dist:release:linux:arm64
+            timeout_minutes: 65
+            app_path: release/linux-arm64-unpacked/inertia
+            unpacked_dir: release/linux-arm64-unpacked
     env:
       CI: "true"
 
@@ -72,6 +106,11 @@ jobs:
 
       - name: Install locked dependencies
         run: npm ci
+
+      - name: Verify native dependency architecture
+        env:
+          INERTIA_EXPECTED_ARCH: ${{ matrix.arch }}
+        run: npm run test:native-architecture
 
       - name: Typecheck, unit test, and build
         run: npm run check
@@ -158,12 +197,8 @@ jobs:
       - name: Verify packaged Electron fuses
         run: |
           set -euo pipefail
-          case "$RUNNER_OS" in
-            Linux) app="release/linux-unpacked/inertia" ;;
-            Windows) app="release/win-unpacked/Inertia.exe" ;;
-            macOS) app="release/mac-arm64/Inertia.app" ;;
-            *) echo "Unsupported runner: $RUNNER_OS" >&2; exit 1 ;;
-          esac
+          app="${{ matrix.app_path }}"
+          test -e "$app"
           npm run verify:fuses -- "$app"
 
       - name: Normalize Windows release filename
@@ -171,11 +206,14 @@ jobs:
         run: |
           set -euo pipefail
           version="$(node -p "require('./package.json').version")"
-          generated="release/Inertia Setup ${version}.exe"
-          expected="release/Inertia.Setup.${version}.exe"
+          expected="release/Inertia.Setup.${version}${{ matrix.windows_asset_suffix }}.exe"
           if [[ ! -f "$expected" ]]; then
-            test -f "$generated"
-            cp -- "$generated" "$expected"
+            mapfile -d '' -t generated < <(find release -maxdepth 1 -type f -name '*.exe' -print0)
+            if [[ "${#generated[@]}" -ne 1 ]]; then
+              echo "Expected exactly one generated Windows installer; found ${#generated[@]}." >&2
+              exit 1
+            fi
+            cp -- "${generated[0]}" "$expected"
           fi
 
       - name: Smoke native packaged app
@@ -187,9 +225,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sudo chown root:root release/linux-unpacked/chrome-sandbox
-          sudo chmod 4755 release/linux-unpacked/chrome-sandbox
-          test "$(stat -c '%u:%g:%a' release/linux-unpacked/chrome-sandbox)" = "0:0:4755"
+          sandbox="${{ matrix.unpacked_dir }}/chrome-sandbox"
+          sudo chown root:root "$sandbox"
+          sudo chmod 4755 "$sandbox"
+          test "$(stat -c '%u:%g:%a' "$sandbox")" = "0:0:4755"
 
       - name: Smoke native packaged app under Xvfb
         if: runner.os == 'Linux'
@@ -199,7 +238,7 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           set -euo pipefail
-          mac_app="release/mac-arm64/Inertia.app"
+          mac_app="${{ matrix.app_path }}"
           codesign --verify --deep --strict --verbose=2 "$mac_app"
           if [[ -n "${CSC_LINK:-}" ]]; then
             codesign --display --verbose=2 "$mac_app" 2>&1 | grep -q "Authority=Developer ID Application:"
@@ -215,7 +254,8 @@ jobs:
           WIN_CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
         run: |
           if (-not [string]::IsNullOrWhiteSpace($env:WIN_CSC_LINK)) {
-            $signature = Get-AuthenticodeSignature "release/Inertia.Setup.$((Get-Content package.json | ConvertFrom-Json).version).exe"
+            $suffix = "${{ matrix.windows_asset_suffix }}"
+            $signature = Get-AuthenticodeSignature "release/Inertia.Setup.$((Get-Content package.json | ConvertFrom-Json).version)$suffix.exe"
             if ($signature.Status -ne "Valid") {
               throw "The Windows release signature is not valid: $($signature.Status)"
             }
@@ -292,17 +332,35 @@ jobs:
           name: release-macos-arm64
           path: ${{ runner.temp }}/inertia-release-assets/macos-arm64
 
+      - name: Download macOS x64 release artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-macos-x64
+          path: ${{ runner.temp }}/inertia-release-assets/macos-x64
+
       - name: Download Windows release artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: release-windows-x64
           path: ${{ runner.temp }}/inertia-release-assets/windows-x64
 
+      - name: Download Windows ARM64 release artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-windows-arm64
+          path: ${{ runner.temp }}/inertia-release-assets/windows-arm64
+
       - name: Download Linux release artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: release-linux-x64
           path: ${{ runner.temp }}/inertia-release-assets/linux-x64
+
+      - name: Download Linux ARM64 release artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-linux-arm64
+          path: ${{ runner.temp }}/inertia-release-assets/linux-arm64
 
       - name: Verify and consolidate release assets
         env:

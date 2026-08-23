@@ -66,9 +66,9 @@ profiler-friendly engineering benchmark rather than an absolute timing gate.
 budgets to every exploratory cadence. Only the shipped 12/64 cadence also has
 the tighter hosted first-projection and visible-gap ceilings. Hosted CI is too
 noisy for lab-grade latency gates, so the smoke gate also checks structural
-properties such as bounded terminal frames. CI runs both
-harnesses on Windows x64, Linux x64 under X11/Xvfb, and macOS arm64 and retains
-the JSON reports for 14 days.
+properties such as bounded terminal frames. CI runs both harnesses on native
+Windows x64 and ARM64, Linux x64 and ARM64 under X11/Xvfb, and macOS x64 and
+arm64 runners and retains the JSON reports for 14 days.
 
 Native package smoke records authoritative main-process runtime-ready and
 before-quit timestamps, the child exit timestamp, and post-exit cleanup timing

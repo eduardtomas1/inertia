@@ -15,7 +15,13 @@ const signingEnvironmentKeys = [
 ] as const;
 
 function loadConfig(
-  platform: "macos-arm64" | "windows-x64" | "linux-x64",
+  platform:
+    | "macos-x64"
+    | "macos-arm64"
+    | "windows-x64"
+    | "windows-arm64"
+    | "linux-x64"
+    | "linux-arm64",
   additions: Record<string, string> = {},
   inspectEnvironment = false,
 ): { status: number | null; stdout: string; stderr: string } {
@@ -123,6 +129,24 @@ describe("release signing configuration", () => {
     expect(complete.stdout).not.toContain("password");
   });
 
+  it("applies the same fail-closed macOS policy to the native Intel build", () => {
+    const complete = loadConfig("macos-x64", {
+      CSC_LINK: "certificate",
+      CSC_KEY_PASSWORD: "password",
+      APPLE_API_KEY: "/private/key.p8",
+      APPLE_API_KEY_ID: "key-id",
+      APPLE_API_ISSUER: "issuer",
+    });
+    expect(complete.status).toBe(0);
+    expect(JSON.parse(complete.stdout)).toMatchObject({
+      forceCodeSigning: true,
+      extraMetadata: {
+        inertiaUpdateCapability: { delivery: "in-app", platform: "darwin" },
+      },
+      mac: { hardenedRuntime: true, notarize: true },
+    });
+  });
+
   it("fails closed on partial Windows signing configuration", () => {
     const partial = loadConfig("windows-x64", { WIN_CSC_LINK: "certificate" });
     expect(partial.status).not.toBe(0);
@@ -143,18 +167,37 @@ describe("release signing configuration", () => {
     expect(complete.stdout).not.toContain("password");
   });
 
-  it("marks only the release AppImage configuration as Linux in-app capable", () => {
-    const result = loadConfig("linux-x64");
-    expect(result.status).toBe(0);
-    expect(JSON.parse(result.stdout)).toMatchObject({
-      forceCodeSigning: false,
-      publish: [{
-        provider: "generic",
-        url: "https://github.com/eduardtomas1/inertia/releases/latest/download",
-      }],
+  it("gives the signed ARM64 Windows installer a collision-free name", () => {
+    const complete = loadConfig("windows-arm64", {
+      WIN_CSC_LINK: "certificate",
+      WIN_CSC_KEY_PASSWORD: "password",
+    });
+    expect(complete.status).toBe(0);
+    expect(JSON.parse(complete.stdout)).toMatchObject({
+      forceCodeSigning: true,
       extraMetadata: {
-        inertiaUpdateCapability: { delivery: "in-app", platform: "linux" },
+        inertiaUpdateCapability: { delivery: "in-app", platform: "win32" },
+      },
+      win: {
+        artifactName: "Inertia.Setup.${version}.arm64.${ext}",
       },
     });
+  });
+
+  it("marks only the release AppImage configuration as Linux in-app capable", () => {
+    for (const platform of ["linux-x64", "linux-arm64"] as const) {
+      const result = loadConfig(platform);
+      expect(result.status).toBe(0);
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        forceCodeSigning: false,
+        publish: [{
+          provider: "generic",
+          url: "https://github.com/eduardtomas1/inertia/releases/latest/download",
+        }],
+        extraMetadata: {
+          inertiaUpdateCapability: { delivery: "in-app", platform: "linux" },
+        },
+      });
+    }
   });
 });

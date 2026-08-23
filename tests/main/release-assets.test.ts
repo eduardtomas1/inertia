@@ -1,11 +1,13 @@
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
 import { createPackage } from "@electron/asar";
 import { afterEach, describe, expect, it } from "vitest";
+import { parse } from "yaml";
 
 const root = resolve(import.meta.dirname, "../..");
 const packageJson = JSON.parse(await readFile(join(root, "package.json"), "utf8")) as {
@@ -15,8 +17,37 @@ const packageJson = JSON.parse(await readFile(join(root, "package.json"), "utf8"
 const version = packageJson.version;
 const releaseTag = `v${version}`;
 const temporaryDirectories = new Set<string>();
+const require = createRequire(import.meta.url);
+
+interface ResolvedUpdaterFile {
+  url: URL;
+  info: { url: string };
+}
+
+const { findFile } = require("electron-updater/out/providers/Provider.js") as {
+  findFile: (
+    files: ResolvedUpdaterFile[],
+    extension: string,
+    excludedExtensions?: string[],
+  ) => ResolvedUpdaterFile | undefined;
+};
+const { MacUpdater } = require("electron-updater/out/MacUpdater.js") as {
+  MacUpdater: {
+    filterFilesForArch: (
+      files: ResolvedUpdaterFile[],
+      isArm64Mac: boolean,
+    ) => ResolvedUpdaterFile[];
+  };
+};
 
 const policies = {
+  "macos-x64": {
+    packages: [`Inertia-${version}.dmg`, `Inertia-${version}-mac.zip`],
+    metadata: "latest-mac.yml",
+    companions: [`Inertia-${version}-mac.zip.blockmap`],
+    packagedUpdateConfig: "mac/Inertia.app/Contents/Resources/app-update.yml",
+    packagedAppArchive: "mac/Inertia.app/Contents/Resources/app.asar",
+  },
   "macos-arm64": {
     packages: [`Inertia-${version}-arm64.dmg`, `Inertia-${version}-arm64-mac.zip`],
     metadata: "latest-mac.yml",
@@ -31,12 +62,26 @@ const policies = {
     packagedUpdateConfig: "win-unpacked/resources/app-update.yml",
     packagedAppArchive: "win-unpacked/resources/app.asar",
   },
+  "windows-arm64": {
+    packages: [`Inertia.Setup.${version}.arm64.exe`],
+    metadata: "latest.yml",
+    companions: [`Inertia.Setup.${version}.arm64.exe.blockmap`],
+    packagedUpdateConfig: "win-arm64-unpacked/resources/app-update.yml",
+    packagedAppArchive: "win-arm64-unpacked/resources/app.asar",
+  },
   "linux-x64": {
     packages: [`Inertia-${version}.AppImage`],
     metadata: "latest-linux.yml",
     companions: [],
     packagedUpdateConfig: "linux-unpacked/resources/app-update.yml",
     packagedAppArchive: "linux-unpacked/resources/app.asar",
+  },
+  "linux-arm64": {
+    packages: [`Inertia-${version}-arm64.AppImage`],
+    metadata: "latest-linux-arm64.yml",
+    companions: [],
+    packagedUpdateConfig: "linux-arm64-unpacked/resources/app-update.yml",
+    packagedAppArchive: "linux-arm64-unpacked/resources/app.asar",
   },
 } as const;
 
@@ -62,12 +107,12 @@ async function writeFixture(
 ): Promise<void> {
   const policy = policies[platform];
   const delivery = options.delivery ?? "in-app";
-  const platformMarker = {
-    "macos-arm64": "darwin",
-    "windows-x64": "win32",
-    "linux-x64": "linux",
-  }[platform];
-  const manualReason = platform === "macos-arm64"
+  const platformMarker = platform.startsWith("macos-")
+    ? "darwin"
+    : platform.startsWith("windows-")
+      ? "win32"
+      : "linux";
+  const manualReason = platform.startsWith("macos-")
     ? "macos-signing-unavailable"
     : "windows-signing-unavailable";
   const capability = delivery === "in-app"
@@ -87,7 +132,7 @@ async function writeFixture(
   const updateConfigPath = join(sourceRoot, policy.packagedUpdateConfig);
   await mkdir(dirname(updateConfigPath), { recursive: true });
   const includePublisherName = options.includePublisherName
-    ?? (platform === "windows-x64" && delivery === "in-app");
+    ?? (platform.startsWith("windows-") && delivery === "in-app");
   await writeFile(
     updateConfigPath,
     [
@@ -187,17 +232,82 @@ describe("release asset staging", () => {
     });
     expect(finalized.status, finalized.stderr).toBe(0);
     const entries = (await readdir(join(stageRoot, "final"))).sort();
-    const expected = [
+    const expected = [...new Set([
       ...Object.values(policies).flatMap((policy) => [
         ...policy.packages,
         policy.metadata,
         ...policy.companions,
       ]),
       "SHA256SUMS.txt",
-    ].sort();
+    ])].sort();
     expect(entries).toEqual(expected);
     const checksums = await readFile(join(stageRoot, "final", "SHA256SUMS.txt"), "utf8");
     expect(checksums.trim().split("\n")).toHaveLength(expected.length - 1);
+
+    const macMetadata = parse(
+      await readFile(join(stageRoot, "final", "latest-mac.yml"), "utf8"),
+    ) as { files: Array<{ url: string }>; path: string };
+    expect(macMetadata.files.map(({ url }) => url)).toEqual([
+      ...policies["macos-x64"].packages,
+      ...policies["macos-arm64"].packages,
+    ]);
+    expect(macMetadata.path).toBe(policies["macos-x64"].packages.at(-1));
+    const resolvedMacFiles = macMetadata.files.map(({ url }) => ({
+      url: new URL(url, "https://updates.example.invalid/"),
+      info: { url },
+    }));
+    expect(findFile(
+      MacUpdater.filterFilesForArch(resolvedMacFiles, false),
+      "zip",
+      ["pkg", "dmg"],
+    )?.info.url).toBe(policies["macos-x64"].packages.at(-1));
+    expect(findFile(
+      MacUpdater.filterFilesForArch(resolvedMacFiles, true),
+      "zip",
+      ["pkg", "dmg"],
+    )?.info.url).toBe(policies["macos-arm64"].packages.at(-1));
+
+    const windowsMetadata = parse(
+      await readFile(join(stageRoot, "final", "latest.yml"), "utf8"),
+    ) as { files: Array<{ url: string }>; path: string };
+    expect(windowsMetadata.files.map(({ url }) => url)).toEqual([
+      ...policies["windows-x64"].packages,
+      ...policies["windows-arm64"].packages,
+    ]);
+    expect(windowsMetadata.path).toBe(policies["windows-x64"].packages[0]);
+    const resolvedWindowsFiles = windowsMetadata.files.map(({ url }) => ({
+      url: new URL(url, "https://updates.example.invalid/"),
+      info: { url },
+    }));
+    expect(findFile(resolvedWindowsFiles, "exe")?.info.url).toBe(
+      process.arch === "arm64"
+        ? policies["windows-arm64"].packages[0]
+        : policies["windows-x64"].packages[0],
+    );
+  });
+
+  it("rejects mixed updater capability within one shared architecture channel", async () => {
+    const fixtureRoot = await temporaryDirectory();
+    const sourceRoot = join(fixtureRoot, "source");
+    const stageRoot = join(fixtureRoot, "stage");
+    await mkdir(sourceRoot);
+    for (const platform of Object.keys(policies) as Array<keyof typeof policies>) {
+      await writeFixture(sourceRoot, platform, {
+        delivery: platform === "windows-arm64" ? "manual" : "in-app",
+      });
+      const staged = runReleaseAssets(["stage", platform], {
+        INERTIA_RELEASE_SOURCE_DIR: sourceRoot,
+        INERTIA_RELEASE_STAGE_DIR: stageRoot,
+      });
+      expect(staged.status, staged.stderr).toBe(0);
+    }
+    const finalized = runReleaseAssets(["finalize"], {
+      INERTIA_RELEASE_DOWNLOAD_DIR: stageRoot,
+    });
+    expect(finalized.status).not.toBe(0);
+    expect(finalized.stderr).toContain(
+      "latest.yml architectures disagree on update delivery capability",
+    );
   });
 
   it("rejects a metadata path that is not an exact package filename", async () => {

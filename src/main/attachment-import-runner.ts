@@ -208,6 +208,14 @@ export function createAttachmentImportUtilityRunner(
         reported = event;
       });
       child.once("error", () => {
+        if (!spawned) {
+          stoppingError ??= unavailable(
+            "Attachment validation utility could not be started.",
+          );
+          resolveStopped();
+          settle(stoppingError);
+          return;
+        }
         stop(unavailable(
           "Attachment validation utility stopped unexpectedly.",
         ));

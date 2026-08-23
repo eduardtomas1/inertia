@@ -161,6 +161,54 @@ describe("supervised attachment import utility", () => {
     await expect(future.result).resolves.toEqual(receipt);
   });
 
+  it("recovers after a utility error confirms startup failed", async () => {
+    const children: FakeUtilityProcess[] = [];
+    const runner = createAttachmentImportUtilityRunner({
+      spawn: () => {
+        const child = new FakeUtilityProcess();
+        children.push(child);
+        return utility(child);
+      },
+      maxActiveOperations: 1,
+    });
+    const failed = runner(operation);
+    void failed.result.catch(() => undefined);
+    void failed.stopped.catch(() => undefined);
+
+    children[0]!.emit("error", new Error("spawn failed"));
+
+    expect(children[0]!.kill).not.toHaveBeenCalled();
+    await expect(failed.result).rejects.toThrow(/could not be started/u);
+    await expect(failed.stopped).resolves.toBeUndefined();
+
+    const future = runner(operation);
+    expect(children).toHaveLength(2);
+    reportSuccess(children[1]!);
+    await expect(future.result).resolves.toEqual(receipt);
+    await expect(future.stopped).resolves.toBeUndefined();
+  });
+
+  it("kills a started utility after an error and confirms its exit", async () => {
+    const child = new FakeUtilityProcess();
+    const runner = createAttachmentImportUtilityRunner({
+      spawn: () => utility(child),
+    });
+    const running = runner(operation);
+    void running.result.catch(() => undefined);
+    child.emit("spawn");
+
+    child.emit("error", new Error("worker failed"));
+
+    expect(child.kill).toHaveBeenCalledOnce();
+    const stopped = vi.fn();
+    void running.stopped.then(stopped);
+    await Promise.resolve();
+    expect(stopped).not.toHaveBeenCalled();
+    child.emit("exit", 1);
+    await expect(running.result).rejects.toThrow(/stopped unexpectedly/u);
+    await expect(running.stopped).resolves.toBeUndefined();
+  });
+
   it("bounds active and pending attachment validation memory", async () => {
     const children: FakeUtilityProcess[] = [];
     const runner = createAttachmentImportUtilityRunner({

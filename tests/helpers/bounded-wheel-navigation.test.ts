@@ -2,9 +2,27 @@ import { describe, expect, it, vi } from "vitest";
 
 import { driveBoundedWheelNavigation } from "./bounded-wheel-navigation";
 
-function scrollReader(positions: readonly number[]) {
+function scrollReader(
+  positions: readonly number[],
+  itemIndexes: readonly number[] = positions.map((position) => Math.floor(position / 1_000)),
+  itemOffsets: readonly number[] = positions.map((position) => -(position % 1_000)),
+  itemIds: readonly string[] = itemIndexes.map((itemIndex) => `turn-${itemIndex}`),
+) {
   let index = 0;
-  return vi.fn(async () => positions[Math.min(index++, positions.length - 1)]!);
+  return vi.fn(async (trackedItemId?: string) => {
+    const sample = Math.min(index++, positions.length - 1);
+    const itemId = itemIds[Math.min(sample, itemIds.length - 1)]!;
+    const itemOffset = itemOffsets[Math.min(sample, itemOffsets.length - 1)]!;
+    return {
+      itemId,
+      itemIndex: itemIndexes[Math.min(sample, itemIndexes.length - 1)]!,
+      itemOffset,
+      scrollTop: positions[sample]!,
+      trackedItemOffset: trackedItemId === undefined || trackedItemId === itemId
+        ? itemOffset
+        : null,
+    };
+  });
 }
 
 describe("bounded real-wheel navigation", () => {
@@ -14,7 +32,7 @@ describe("bounded real-wheel navigation", () => {
     await expect(driveBoundedWheelNavigation({
       maxGestures: 16,
       maxProgressSamples: 3,
-      readScrollTop: scrollReader([119]),
+      readPosition: scrollReader([119]),
       targetScrollTop: 120,
       waitForNextSample: async () => undefined,
       wheelUp,
@@ -25,7 +43,7 @@ describe("bounded real-wheel navigation", () => {
   });
 
   it("continues past the former fixed eight gestures until the reader reaches the top", async () => {
-    const readScrollTop = scrollReader([
+    const readPosition = scrollReader([
       248_665,
       218_665,
       188_665,
@@ -42,7 +60,7 @@ describe("bounded real-wheel navigation", () => {
     await expect(driveBoundedWheelNavigation({
       maxGestures: 16,
       maxProgressSamples: 3,
-      readScrollTop,
+      readPosition,
       targetScrollTop: 120,
       waitForNextSample: async () => undefined,
       wheelUp,
@@ -57,7 +75,7 @@ describe("bounded real-wheel navigation", () => {
     await expect(driveBoundedWheelNavigation({
       maxGestures: 16,
       maxProgressSamples: 3,
-      readScrollTop: scrollReader([1_000, 1_000, 700, 0]),
+      readPosition: scrollReader([1_000, 1_000, 700, 0]),
       targetScrollTop: 120,
       waitForNextSample,
       wheelUp,
@@ -72,12 +90,12 @@ describe("bounded real-wheel navigation", () => {
     await expect(driveBoundedWheelNavigation({
       maxGestures: 16,
       maxProgressSamples: 3,
-      readScrollTop: scrollReader([8_665, 8_665, 8_665, 8_665]),
+      readPosition: scrollReader([8_665, 8_665, 8_665, 8_665]),
       targetScrollTop: 120,
       waitForNextSample: async () => undefined,
       wheelUp,
     })).rejects.toThrow(
-      "Wheel gesture 1 made no upward progress: scrollTop remained 8665 from 8665.",
+      "Wheel gesture 1 made no upward progress: logical position ended at turn-8 (item 8, offset -665) while tracked turn-8 ended at -665 from item 8 offset -665 (scrollTop 8665 from 8665).",
     );
     expect(wheelUp).toHaveBeenCalledTimes(1);
   });
@@ -88,7 +106,7 @@ describe("bounded real-wheel navigation", () => {
     await expect(driveBoundedWheelNavigation({
       maxGestures: 3,
       maxProgressSamples: 2,
-      readScrollTop: scrollReader([1_000, 900, 800, 700]),
+      readPosition: scrollReader([1_000, 900, 800, 700]),
       targetScrollTop: 120,
       waitForNextSample: async () => undefined,
       wheelUp,
@@ -96,5 +114,65 @@ describe("bounded real-wheel navigation", () => {
       "Reader navigation exhausted 3 wheel gestures at scrollTop 700; expected less than 120.",
     );
     expect(wheelUp).toHaveBeenCalledTimes(3);
+  });
+
+  it("accepts logical upward progress while a streamed row raises absolute scrollTop", async () => {
+    const wheelUp = vi.fn(async () => undefined);
+
+    await expect(driveBoundedWheelNavigation({
+      maxGestures: 3,
+      maxProgressSamples: 2,
+      readPosition: scrollReader(
+        [159_147, 159_434, 80_164, 0],
+        [299, 300, 80, 0],
+        [-280, -61, -164, 0],
+        ["stream-turn", "stream-turn", "turn-80", "turn-0"],
+      ),
+      targetScrollTop: 120,
+      waitForNextSample: async () => undefined,
+      wheelUp,
+    })).resolves.toEqual({ gestures: 3, scrollTop: 0 });
+    expect(wheelUp).toHaveBeenCalledTimes(3);
+  });
+
+  it("rejects an absolute decrease when the logical reader anchor did not move", async () => {
+    const wheelUp = vi.fn(async () => undefined);
+
+    await expect(driveBoundedWheelNavigation({
+      maxGestures: 3,
+      maxProgressSamples: 2,
+      readPosition: scrollReader(
+        [8_665, 8_000, 7_500],
+        [8, 8, 8],
+        [-665, -665, -665],
+      ),
+      targetScrollTop: 120,
+      waitForNextSample: async () => undefined,
+      wheelUp,
+    })).rejects.toThrow(
+      "Wheel gesture 1 made no upward progress: logical position ended at turn-8 (item 8, offset -665) while tracked turn-8 ended at -665 from item 8 offset -665 (scrollTop 7500 from 8665).",
+    );
+    expect(wheelUp).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a shifted virtual index when the stable reader row did not move", async () => {
+    const wheelUp = vi.fn(async () => undefined);
+
+    await expect(driveBoundedWheelNavigation({
+      maxGestures: 3,
+      maxProgressSamples: 2,
+      readPosition: scrollReader(
+        [159_147, 159_434, 159_600],
+        [299, 300, 300],
+        [-280, -280, -280],
+        ["stream-turn", "stream-turn", "stream-turn"],
+      ),
+      targetScrollTop: 120,
+      waitForNextSample: async () => undefined,
+      wheelUp,
+    })).rejects.toThrow(
+      "Wheel gesture 1 made no upward progress: logical position ended at stream-turn (item 300, offset -280) while tracked stream-turn ended at -280 from item 299 offset -280 (scrollTop 159600 from 159147).",
+    );
+    expect(wheelUp).toHaveBeenCalledTimes(1);
   });
 });

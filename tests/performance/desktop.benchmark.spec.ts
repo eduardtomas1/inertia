@@ -931,9 +931,40 @@ async function streamingResponsivenessSample(
   await driveBoundedWheelNavigation({
     maxGestures: READER_NAVIGATION_MAX_WHEEL_GESTURES,
     maxProgressSamples: READER_NAVIGATION_MAX_PROGRESS_SAMPLES,
-    readScrollTop: () => liveViewport.evaluate((viewport) => viewport.scrollTop),
+    readPosition: (trackedItemId) => liveViewport.evaluate((viewport, trackedId) => {
+      const viewportTop = viewport.getBoundingClientRect().top;
+      // Stream growth and virtual-row measurement can move scrollTop without
+      // moving the reader. Track the exact turn rather than its shifting index.
+      const items = [...viewport.querySelectorAll<HTMLElement>(
+        ".response-virtual-item[data-index]",
+      )];
+      const turnIdFor = (item: HTMLElement): string | null => item
+        .querySelector<HTMLElement>("section[data-turn-id]")
+        ?.dataset.turnId ?? null;
+      const item = items.find((candidate) => (
+        turnIdFor(candidate) !== null
+        && candidate.getBoundingClientRect().bottom > viewportTop + 8
+      ));
+      if (!item) throw new Error("The transcript has no visible logical item.");
+      const itemId = turnIdFor(item);
+      if (!itemId) throw new Error("The visible logical item has no stable turn ID.");
+      const trackedItem = trackedId === undefined
+        ? item
+        : items.find((candidate) => turnIdFor(candidate) === trackedId) ?? null;
+      return {
+        itemId,
+        itemIndex: Number(item.dataset.index),
+        itemOffset: item.getBoundingClientRect().top - viewportTop,
+        scrollTop: viewport.scrollTop,
+        trackedItemOffset: trackedItem === null
+          ? null
+          : trackedItem.getBoundingClientRect().top - viewportTop,
+      };
+    }, trackedItemId),
     targetScrollTop: READER_NAVIGATION_TARGET_SCROLL_TOP,
-    waitForNextSample: () => page.waitForTimeout(25),
+    waitForNextSample: () => liveViewport.evaluate(() => (
+      new Promise<void>((resolveFrame) => requestAnimationFrame(() => resolveFrame()))
+    )),
     wheelUp: () => page.mouse.wheel(0, -30_000),
   });
   await page.waitForTimeout(150);

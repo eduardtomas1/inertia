@@ -369,6 +369,35 @@ describe("agent browser semantic snapshots", () => {
       delete input.value;
     }`, context);
     expect(dispatched).toHaveLength(17);
+    const prototypeRoutes = [
+      `const input = new HTMLInputElement(); input.type = "password";
+        const nativePrototype = Object.getPrototypeOf(input);
+        Object.setPrototypeOf(input, { value: "hunter2" });
+        Object.setPrototypeOf(input, nativePrototype);`,
+      `const input = new HTMLInputElement(); input.type = "password";
+        const nativePrototype = Object.getPrototypeOf(input);
+        Reflect.setPrototypeOf(input, { value: "hunter2" });
+        Object.setPrototypeOf(input, nativePrototype);`,
+      `const input = new HTMLInputElement(); input.type = "password";
+        const nativePrototype = Object.getPrototypeOf(input);
+        Object.getOwnPropertyDescriptor(Object.prototype, "__proto__").set
+          .call(input, { value: "hunter2" });
+        Object.setPrototypeOf(input, nativePrototype);`,
+      `const input = new HTMLInputElement();
+        const nativePrototype = Object.getPrototypeOf(input);
+        Object.setPrototypeOf(input, { type: "password", value: "hunter2" });
+        Object.setPrototypeOf(input, nativePrototype);`,
+    ];
+    for (const [index, route] of prototypeRoutes.entries()) {
+      runInNewContext(`{${route}}`, context);
+      expect(dispatched, route).toHaveLength(18 + index);
+    }
+    runInNewContext(`{
+      const ordinary = {};
+      Object.setPrototypeOf(ordinary, { value: "brief note" });
+      Reflect.setPrototypeOf(ordinary, null);
+    }`, context);
+    expect(dispatched).toHaveLength(21);
   });
 
   it("signals private parser content before a detached host can disappear", () => {

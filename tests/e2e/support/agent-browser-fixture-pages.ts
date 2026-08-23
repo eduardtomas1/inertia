@@ -25,6 +25,10 @@ export const NATIVE_CREDENTIAL_AUDIT_ROUTES = [
   "reflect-define-property",
   "define-property-before-type",
   "legacy-define-getter",
+  "object-set-prototype",
+  "reflect-set-prototype",
+  "legacy-set-prototype",
+  "prototype-before-type",
 ] as const;
 
 const nativeCredentialSource: Record<(typeof NATIVE_CREDENTIAL_AUDIT_ROUTES)[number], string> = {
@@ -52,6 +56,10 @@ const nativeCredentialSource: Record<(typeof NATIVE_CREDENTIAL_AUDIT_ROUTES)[num
   "reflect-define-property": "const input=document.createElement('input');input.type='password';Reflect.defineProperty(input,'value',{configurable:true,writable:true,value:secret});leaked=input.value;clear=()=>{delete input.value}",
   "define-property-before-type": "const input=document.createElement('input');Object.defineProperty(input,'value',{configurable:true,writable:true,value:secret});input.type='password';leaked=input.value;clear=()=>{delete input.value}",
   "legacy-define-getter": "const input=document.createElement('input');input.type='password';input.__defineGetter__('value',()=>secret);leaked=input.value;clear=()=>{delete input.value}",
+  "object-set-prototype": "const input=document.createElement('input');input.type='password';const prototype=Object.getPrototypeOf(input);Object.setPrototypeOf(input,{value:secret});leaked=input.value;clear=()=>{Object.setPrototypeOf(input,prototype)}",
+  "reflect-set-prototype": "const input=document.createElement('input');input.type='password';const prototype=Object.getPrototypeOf(input);Reflect.setPrototypeOf(input,{value:secret});leaked=input.value;clear=()=>{Reflect.setPrototypeOf(input,prototype)}",
+  "legacy-set-prototype": "const input=document.createElement('input');input.type='password';const prototype=Object.getPrototypeOf(input);input.__proto__={value:secret};leaked=input.value;clear=()=>{input.__proto__=prototype}",
+  "prototype-before-type": "const input=document.createElement('input');const prototype=Object.getPrototypeOf(input);Object.setPrototypeOf(input,{type:'password',value:secret});leaked=input.value;clear=()=>{Object.setPrototypeOf(input,prototype)}",
 };
 
 export function serveAgentBrowserPrivacyFixture(

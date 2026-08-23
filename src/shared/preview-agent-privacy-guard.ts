@@ -114,6 +114,18 @@ export function installPreviewAgentShadowBoundarySignal(eventName: string): void
     Reflect,
     "defineProperty",
   );
+  const objectSetPrototypeOfDescriptor = Object.getOwnPropertyDescriptor(
+    Object,
+    "setPrototypeOf",
+  );
+  const reflectSetPrototypeOfDescriptor = Object.getOwnPropertyDescriptor(
+    Reflect,
+    "setPrototypeOf",
+  );
+  const legacyPrototypeDescriptor = Object.getOwnPropertyDescriptor(
+    Object.prototype,
+    "__proto__",
+  );
   const legacyDefineGetterDescriptor = Object.getOwnPropertyDescriptor(
     Object.prototype,
     "__defineGetter__",
@@ -145,6 +157,13 @@ export function installPreviewAgentShadowBoundarySignal(eventName: string): void
   const reflectDefineProperty = reflectDefinePropertyDescriptor?.value as
     | typeof Reflect.defineProperty
     | undefined;
+  const objectSetPrototypeOf = objectSetPrototypeOfDescriptor?.value as
+    | typeof Object.setPrototypeOf
+    | undefined;
+  const reflectSetPrototypeOf = reflectSetPrototypeOfDescriptor?.value as
+    | typeof Reflect.setPrototypeOf
+    | undefined;
+  const legacyPrototypeSetter = legacyPrototypeDescriptor?.set;
   const legacyDefineGetter = legacyDefineGetterDescriptor?.value as
     | ((propertyKey: PropertyKey, getter: () => unknown) => void)
     | undefined;
@@ -158,14 +177,15 @@ export function installPreviewAgentShadowBoundarySignal(eventName: string): void
     : HTMLInputElement.prototype;
   const nativeString = String;
   const nativeLowerCase = String.prototype.toLowerCase;
-  const signalPasswordValue = (input: unknown, knownInput: boolean): void => {
-    if (!knownInput) {
-      try {
-        if (!Reflect.apply(nativeIsPrototypeOf, inputPrototype!, [input])) return;
-      } catch {
-        return;
-      }
+  const isNativeInput = (input: unknown): boolean => {
+    try {
+      return Reflect.apply(nativeIsPrototypeOf, inputPrototype!, [input]) as boolean;
+    } catch {
+      return false;
     }
+  };
+  const signalPasswordValue = (input: unknown, knownInput: boolean): void => {
+    if (!knownInput && !isNativeInput(input)) return;
     let inputType: string;
     try {
       inputType = nativeString(Reflect.apply(inputTypeGetter!, input, []));
@@ -192,13 +212,7 @@ export function installPreviewAgentShadowBoundarySignal(eventName: string): void
     }
   };
   const trackOwnInputValue = (input: unknown): void => {
-    let isInput: boolean;
-    try {
-      isInput = Reflect.apply(nativeIsPrototypeOf, inputPrototype!, [input]) as boolean;
-    } catch {
-      return;
-    }
-    if (!isInput) return;
+    if (!isNativeInput(input)) return;
     try {
       const ownValue = Reflect.apply(
         nativeGetOwnPropertyDescriptor,
@@ -487,6 +501,9 @@ export function installPreviewAgentShadowBoundarySignal(eventName: string): void
     if (!objectDefinePropertyDescriptor || typeof objectDefineProperty !== "function"
       || !objectDefinePropertiesDescriptor || typeof objectDefineProperties !== "function"
       || !reflectDefinePropertyDescriptor || typeof reflectDefineProperty !== "function"
+      || !objectSetPrototypeOfDescriptor || typeof objectSetPrototypeOf !== "function"
+      || !reflectSetPrototypeOfDescriptor || typeof reflectSetPrototypeOf !== "function"
+      || !legacyPrototypeDescriptor || typeof legacyPrototypeSetter !== "function"
       || !legacyDefineGetterDescriptor || typeof legacyDefineGetter !== "function") {
       signal();
     } else {
@@ -524,6 +541,38 @@ export function installPreviewAgentShadowBoundarySignal(eventName: string): void
             ]) as boolean;
             if (defined) trackOwnInputValue(target);
             return defined;
+          },
+        }]);
+        Reflect.apply(objectDefineProperty, Object, [Object, "setPrototypeOf", {
+          ...objectSetPrototypeOfDescriptor,
+          value(target: object, prototype: object | null): object {
+            const input = isNativeInput(target);
+            const updated = Reflect.apply(objectSetPrototypeOf, Object, [
+              target,
+              prototype,
+            ]) as object;
+            if (input) signal();
+            return updated;
+          },
+        }]);
+        Reflect.apply(objectDefineProperty, Object, [Reflect, "setPrototypeOf", {
+          ...reflectSetPrototypeOfDescriptor,
+          value(target: object, prototype: object | null): boolean {
+            const input = isNativeInput(target);
+            const updated = Reflect.apply(reflectSetPrototypeOf, Reflect, [
+              target,
+              prototype,
+            ]) as boolean;
+            if (input && updated) signal();
+            return updated;
+          },
+        }]);
+        Reflect.apply(objectDefineProperty, Object, [Object.prototype, "__proto__", {
+          ...legacyPrototypeDescriptor,
+          set(this: object, prototype: object | null): void {
+            const input = isNativeInput(this);
+            Reflect.apply(legacyPrototypeSetter, this, [prototype]);
+            if (input) signal();
           },
         }]);
         Reflect.apply(objectDefineProperty, Object, [Object.prototype, "__defineGetter__", {

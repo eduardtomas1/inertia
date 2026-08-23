@@ -67,6 +67,10 @@ describe("Browser evidence sanitization", () => {
     "'Pass' : 'hunter2'",
     "db_pass=hunter2",
     "databasePass=hunter2",
+    "passValue=hunter2",
+    "passValues=hunter2",
+    "pass_value=hunter2",
+    "db_pass_values=hunter2",
     "pwd=hunter2",
     "pwd: hunter2",
     "PWD = hunter2",
@@ -203,6 +207,9 @@ describe("Browser evidence sanitization", () => {
     "compass=public",
     "bypass=public",
     "passCount=4",
+    "compassValue=public",
+    "bypassValues=public",
+    "pass_value_count=4",
     "db_pass is unset.",
   ])("does not treat a password alias in ordinary prose as an assignment: %s", (value) => {
     expect(sanitizeBrowserEvidenceText(value, "hidden"))

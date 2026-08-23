@@ -55,6 +55,7 @@ export async function verifyBrowserEvidence({
   const evidenceText = await evidenceTimeline.textContent();
   expect(evidenceText).not.toContain("browser-e2e-console-sentinel");
   expect(evidenceText).not.toContain("browser-e2e-pass-short");
+  expect(evidenceText).not.toContain("browser-e2e-pass-value-short");
   expect(evidenceText).not.toContain("hunter2");
   expect(evidenceText).not.toContain("MONGODB_URI");
   expect(evidenceText).not.toContain("mongodb://alice");

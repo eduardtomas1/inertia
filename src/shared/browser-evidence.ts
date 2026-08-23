@@ -68,7 +68,7 @@ const UNC_OR_HOME_PATH = /(?:\\\\[^\\\s]+\\[^\s,;:)"']+|~\/(?:[^\s,;:)"']+\/)*[^
 const WINDOWS_OR_UNC_PATH_PREFIX = /(?:(?:^|[^A-Za-z0-9])[A-Za-z]:[\\/]|\\\\|(?:^|[\s(="'])\/\/)/u;
 const DRIVE_RELATIVE_WINDOWS_PATH = /(?:^|[\s(="'])[A-Za-z]:(?![\\/])(?:[^\\/\s,;:)"']+[\\/][^\\/\s,;:)"']+|(?:\.[A-Za-z0-9][^\\/\s,;:)"']*|[^\\/\s,;:)"']+\.[A-Za-z0-9]{1,12}))(?=$|[\s,;:)"']|[\\/])/gu;
 const CREDENTIAL_ASSIGNMENT =
-  /(?<![A-Za-z0-9])(api[-_ ]?key|authorization|proxy[-_ ]?authorization|cookie|set[-_ ]?cookie|credential|pass|passcode|passphrase|password|passwd|pgpassword|pwd|secret|session|token)(?![A-Za-z0-9])["']?\s*[:=]\s*(?:(?:Bearer|Basic)\s+[^\s,;]+|"[^"]*"|'[^']*'|[^\s,;]+)/giu;
+  /(?<![A-Za-z0-9])(api[-_ ]?key|authorization|proxy[-_ ]?authorization|cookie|set[-_ ]?cookie|credential|pass(?:[-_ ]?values?)?|passcode|passphrase|password|passwd|pgpassword|pwd|secret|session|token)(?![A-Za-z0-9])["']?\s*[:=]\s*(?:(?:Bearer|Basic)\s+[^\s,;]+|"[^"]*"|'[^']*'|[^\s,;]+)/giu;
 const AUTHORIZATION_VALUE = /(?<![A-Za-z0-9])(Bearer|Basic)\s+[^\s,;]+/giu;
 const PREFIXED_SECRET =
   /(?<![A-Za-z0-9])(?:(?:sk|rk|pk|gh[opusr]|github_pat|glpat|npm|pypi|hf|xox[baprs]|api|key|token)[-_][A-Za-z0-9_-]{8,}|(?:AKIA|ASIA)[A-Z0-9]{16}|AIza[A-Za-z0-9_-]{20,})(?![A-Za-z0-9])/gu;
@@ -78,7 +78,7 @@ const LONG_OPAQUE_VALUE = /(?<![A-Za-z0-9])(?=[A-Za-z0-9+/_=-]{32,}(?![A-Za-z0-9
 const TRAILING_SECRET_FRAGMENT =
   /(?<![A-Za-z0-9])(?:(?:sk|rk|pk|gh[opusr]|github_pat|xox[baprs]|api|key|token)[-_][A-Za-z0-9_-]*|eyJ[A-Za-z0-9_.-]*|(?:Bearer|Basic)\s+\S*)$/iu;
 const SENSITIVE_FIELD =
-  /(?<![A-Za-z0-9])(?:(?:access|auth|id|refresh)[-_ ]?token|api[-_ ]?key|authorization|proxy[-_ ]?authorization|cookie|set[-_ ]?cookie|credential|password|passwd|(?:pass|passcode|passphrase|pgpassword|pwd)(?=\s*["']?\s*[:=])|private[-_ ]?key|request[-_ ]?body|secret|session|token)(?![A-Za-z0-9])/iu;
+  /(?<![A-Za-z0-9])(?:(?:access|auth|id|refresh)[-_ ]?token|api[-_ ]?key|authorization|proxy[-_ ]?authorization|cookie|set[-_ ]?cookie|credential|password|passwd|(?:pass(?:[-_ ]?values?)?|passcode|passphrase|pgpassword|pwd)(?=\s*["']?\s*[:=])|private[-_ ]?key|request[-_ ]?body|secret|session|token)(?![A-Za-z0-9])/iu;
 const CAMEL_CASE_CREDENTIAL_ASSIGNMENT =
   /(?<![A-Za-z0-9])(?:[A-Za-z][A-Za-z0-9]*?)?(?:AccessKey|AccessToken|APIKey|ApiKey|AuthHeader|AuthToken|Authorization|AuthorizationHeader|Cookie|Credential|Credentials|EncryptionKey|IDToken|IdToken|PAT|Pat|PGPassword|Passcode|Passphrase|Password|Passwd|PrivateKey|Pwd|RefreshToken|RequestBody|Secret|SecretKey|Session|SessionId|SigningKey|Token)(?:Value|Values)?(?![A-Za-z0-9])["']?\s*[:=]/giu;
 const CAMEL_CASE_PASS_ASSIGNMENT =

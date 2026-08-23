@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
-import { expectClosedShadowActivationBlocked, expectDocumentStartPrivacyGuard, expectFocusNavigationSettlement, expectHoverRetargetingGuard, expectMicrotaskFocusTheftBlocked, expectSemanticClickBoundaries } from "./support/agent-browser-security";
+import { captureAgentBrowserSnapshot, expectClosedShadowActivationBlocked, expectDocumentStartPrivacyGuard, expectFocusNavigationSettlement, expectHoverRetargetingGuard, expectMicrotaskFocusTheftBlocked, expectSemanticClickBoundaries } from "./support/agent-browser-security";
 import { selectWorkspaceTool } from "./support/workspace-tools";
 let app!: AppFixture;
 let page!: AppFixture["page"];
@@ -430,18 +430,7 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
   )).toBe(true);
   await expect(primaryPreview.locator(".preview-tab-shell.active"))
     .toContainText("Agent browser source");
-  const semanticSnapshot = await app.electronApp.evaluate(
-    async (_electron, conversationId) => {
-      const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
-        agentBrowser: (
-          id: string,
-          command: { action: "snapshot" },
-        ) => Promise<{ ok: boolean; text?: string }>;
-      };
-      return await runtime.agentBrowser(conversationId, { action: "snapshot" });
-    },
-    primaryConversationId,
-  );
+  const semanticSnapshot = await captureAgentBrowserSnapshot(app, primaryConversationId);
   expect(semanticSnapshot.ok).toBe(true);
   const semanticElements = JSON.parse(semanticSnapshot.text ?? "{}") as {
     elements?: Array<{ ref?: string; name?: string }>;
@@ -450,7 +439,12 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
   expect(hoverRef).toMatch(/^e\d+$/u);
   await expectHoverRetargetingGuard(app, primaryConversationId, secondPrimaryPreviewUrl, hoverRef!);
   await expectSemanticClickBoundaries(app, primaryConversationId, secondPrimaryPreviewUrl);
-  const navigationRef = semanticElements.elements?.find(
+  const navigationSnapshot = await captureAgentBrowserSnapshot(app, primaryConversationId);
+  expect(navigationSnapshot.ok).toBe(true);
+  const navigationElements = JSON.parse(navigationSnapshot.text ?? "{}") as {
+    elements?: Array<{ ref?: string; name?: string }>;
+  };
+  const navigationRef = navigationElements.elements?.find(
     (element) => element.name === "Continue in Browser",
   )?.ref;
   expect(navigationRef).toMatch(/^e\d+$/u);

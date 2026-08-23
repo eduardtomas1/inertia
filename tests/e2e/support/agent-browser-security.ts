@@ -3,6 +3,18 @@ import { expect } from "@playwright/test";
 import { AGENT_BROWSER_WORLD_ID } from "../../../src/main/preview-agent-page";
 import type { AppFixture } from "./app-fixture";
 
+export async function captureAgentBrowserSnapshot(
+  app: AppFixture,
+  conversationId: string,
+): Promise<{ ok: boolean; text?: string }> {
+  return await app.electronApp.evaluate(async (_electron, id) => {
+    const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
+      agentBrowser: (conversationId: string, command: { action: "snapshot" }) => Promise<{ ok: boolean; text?: string }>;
+    };
+    return await runtime.agentBrowser(id, { action: "snapshot" });
+  }, conversationId);
+}
+
 export async function expectDocumentStartPrivacyGuard(
   app: AppFixture,
   conversationId: string,
@@ -98,6 +110,10 @@ export async function expectHoverRetargetingGuard(
         deliveryTarget: window.__deliveryTargetClicked === true,
         deliveryDecoy: window.__deliveryDecoyClicked === true,
       })`);
+      await contents?.executeJavaScript(
+        "for(const id of ['hover-decoy','delivery-decoy'])document.querySelector('#'+id).style.display='none';for(const id of ['hover-target','delivery-target'])document.querySelector('#'+id).style.transform=''",
+        true,
+      );
       return { delivery, deliveryRef, result, state };
     },
     { conversationId, ref, url },
@@ -125,22 +141,40 @@ export async function expectSemanticClickBoundaries(
       const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
         agentBrowser: (id: string, command: Command) => Promise<Result>;
       };
-      const snapshot = await runtime.agentBrowser(request.conversationId, { action: "snapshot" });
-      if (!snapshot.ok || !snapshot.text) return { snapshot };
-      const elements = (JSON.parse(snapshot.text) as {
+      const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL() === request.url);
+      const elementsFrom = (snapshot: Result) => snapshot.text
+        ? (JSON.parse(snapshot.text) as {
         elements: Array<{ disabled: boolean; name: string; ref: string }>;
-      }).elements;
-      const outerRef = elements.find((element) => element.name === "Outer nested action")?.ref;
-      const opacityRef = elements.find((element) => element.name === "Temporarily visible action")?.ref;
-      const ariaDisabled = elements.find((element) => element.name === "Inherited disabled action");
-      if (!outerRef || !opacityRef || !ariaDisabled) {
-        return { ariaDisabled, names: elements.map((element) => element.name), outerRef, opacityRef, snapshot };
-      }
+        }).elements
+        : [];
+      await contents?.executeJavaScript(
+        "document.querySelector('#aria-disabled-action').scrollIntoView({block:'center',inline:'center'})",
+        true,
+      );
+      const ariaSnapshot = await runtime.agentBrowser(request.conversationId, { action: "snapshot" });
+      const ariaElements = elementsFrom(ariaSnapshot);
+      const ariaDisabled = ariaElements.find((element) => element.name === "Inherited disabled action");
+      if (!ariaDisabled) return { ariaDisabled, ariaNames: ariaElements.map((element) => element.name), ariaSnapshot };
       const inheritedDisabled = await runtime.agentBrowser(request.conversationId, {
         action: "click", ref: ariaDisabled.ref,
       });
+      await contents?.executeJavaScript(
+        "document.querySelector('#outer-action').scrollIntoView({block:'center',inline:'center'})",
+        true,
+      );
+      const outerSnapshot = await runtime.agentBrowser(request.conversationId, { action: "snapshot" });
+      const outerElements = elementsFrom(outerSnapshot);
+      const outerRef = outerElements.find((element) => element.name === "Outer nested action")?.ref;
+      if (!outerRef) return { ariaDisabled, outerNames: outerElements.map((element) => element.name), outerSnapshot };
       const nested = await runtime.agentBrowser(request.conversationId, { action: "click", ref: outerRef });
-      const contents = webContents.getAllWebContents().find((candidate) => candidate.getURL() === request.url);
+      await contents?.executeJavaScript(
+        "document.querySelector('#opacity-action').scrollIntoView({block:'center',inline:'center'})",
+        true,
+      );
+      const opacitySnapshot = await runtime.agentBrowser(request.conversationId, { action: "snapshot" });
+      const opacityElements = elementsFrom(opacitySnapshot);
+      const opacityRef = opacityElements.find((element) => element.name === "Temporarily visible action")?.ref;
+      if (!opacityRef) return { ariaDisabled, opacityNames: opacityElements.map((element) => element.name), opacitySnapshot };
       await contents?.executeJavaScript("document.querySelector('#opacity-parent').style.opacity='0'");
       const hidden = await runtime.agentBrowser(request.conversationId, { action: "click", ref: opacityRef });
       const hiddenSnapshot = await runtime.agentBrowser(request.conversationId, { action: "snapshot" });
@@ -167,6 +201,7 @@ export async function expectSemanticClickBoundaries(
         opacity: window.__opacityActionClicked === true,
         ariaDisabled: window.__ariaDisabledActionClicked === true,
       })`);
+      await contents?.executeJavaScript("scrollTo(0,0)", true);
       return {
         ariaDisabled, disabledEnter, disabledSpace, focused, hidden, hiddenNames,
         hiddenSnapshot, inheritedDisabled, nested, state, tabResults,

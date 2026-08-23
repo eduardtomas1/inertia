@@ -51,6 +51,12 @@ describe("Browser evidence ledger", () => {
     "apiKeyValue=y",
     "clientSecretValue=z",
     "\"SessionId\":\"q\"",
+    "pwd=hunter2",
+    "PWD : hunter2",
+    "\"pwd\":\"hunter2\"",
+    "databasePwd=hunter2",
+    "passphrase=hunter2",
+    "passcode=hunter2",
   ])("fails closed before storing page-authored credential assignment: %s", (message) => {
     const ledger = new BrowserEvidenceLedger();
     ledger.recordConsoleError({ ...location, message });
@@ -66,6 +72,9 @@ describe("Browser evidence ledger", () => {
     "ClientSecretariat=ok",
     "authTokenValueCount=4",
     "ClientSecretValueObject=ok",
+    "The pwd field is empty",
+    "The pass completed normally",
+    "The passcode prompt is visible",
   ])("keeps a non-credential page-authored identifier: %s", (message) => {
     const ledger = new BrowserEvidenceLedger();
     ledger.recordConsoleError({ ...location, message });

@@ -57,6 +57,16 @@ describe("Browser evidence sanitization", () => {
     "Cookie=session=private-value",
     "Set-Cookie: session=private-value",
     "password=private-value",
+    "pwd=hunter2",
+    "pwd: hunter2",
+    "PWD = hunter2",
+    "\"pwd\" : \"hunter2\"",
+    "'Pwd' : 'hunter2'",
+    "databasePwd=hunter2",
+    "passphrase=hunter2",
+    "passcode: hunter2",
+    "clientPasscode=hunter2",
+    "pwd%3Dhunter2",
     "request_body: private-value",
     "token%3Dprivate-value",
     "sk%252Dabcdefgh12345678",
@@ -82,6 +92,16 @@ describe("Browser evidence sanitization", () => {
   it("does not treat a sensitive-field substring in normal prose as a field", () => {
     expect(sanitizeBrowserEvidenceText("The obsession ended normally.", "hidden"))
       .toEqual({ text: "The obsession ended normally.", redacted: false });
+  });
+
+  it.each([
+    "The pwd field is empty after setup.",
+    "The pass completed normally.",
+    "The passcode prompt is visible.",
+    "The passphrase prompt is visible.",
+  ])("does not treat a password alias in ordinary prose as an assignment: %s", (value) => {
+    expect(sanitizeBrowserEvidenceText(value, "hidden"))
+      .toEqual({ text: value, redacted: false });
   });
 
   it.each([

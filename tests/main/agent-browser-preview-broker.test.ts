@@ -598,6 +598,13 @@ describe("agent-owned native Browser", () => {
       preventDefault,
     });
     expect(preventDefault).toHaveBeenCalledOnce();
+    const pwdPreventDefault = vi.fn();
+    contents.emit("console-message", {
+      level: "error",
+      message: "pwd=hunter2",
+      preventDefault: pwdPreventDefault,
+    });
+    expect(pwdPreventDefault).toHaveBeenCalledOnce();
     await vi.waitFor(() => expect(pageTools.agentPageHasSensitiveEvidence)
       .toHaveBeenCalledWith(contents));
     pageTools.agentPageHasSensitiveEvidence.mockResolvedValueOnce(true);
@@ -662,8 +669,14 @@ describe("agent-owned native Browser", () => {
         screenshot: expect.objectContaining({ available: true }),
       }),
     ]));
-    expect(state.evidence.entries.filter((entry) => entry.kind === "console-error"))
-      .toHaveLength(2);
+    const consoleEvidence = state.evidence.entries.filter(
+      (entry) => entry.kind === "console-error",
+    );
+    expect(consoleEvidence.every((entry) =>
+      entry.detail === "Sensitive console detail hidden" && entry.redacted
+    )).toBe(true);
+    expect(consoleEvidence.reduce((total, entry) => total + entry.occurrences, 0))
+      .toBe(3);
 
     const capture = state.evidence.entries.find((entry) => entry.kind === "screenshot");
     expect(capture).toBeDefined();

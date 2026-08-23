@@ -54,6 +54,7 @@ export async function verifyBrowserEvidence({
   await expect(evidenceTimeline).toContainText("Sensitive console detail hidden");
   const evidenceText = await evidenceTimeline.textContent();
   expect(evidenceText).not.toContain("browser-e2e-console-sentinel");
+  expect(evidenceText).not.toContain("hunter2");
   expect(evidenceText).not.toContain("browser-e2e-query-sentinel");
   expect(evidenceText).not.toContain("browser-e2e-body-sentinel");
   expect(evidenceText).not.toContain("browser-e2e-response-sentinel");

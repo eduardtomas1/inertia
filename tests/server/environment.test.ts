@@ -197,14 +197,18 @@ describe.sequential("provider environment discovery", () => {
       ANTHROPIC_API_KEY: "anthropic-secret",
       OPENAI_API_KEY: "openai-secret",
       AWS_SECRET_ACCESS_KEY: "aws-secret",
+      FORCE_COLOR: "3",
       GITHUB_TOKEN: "github-secret",
       INERTIA_LOGIN_SHELL_MARKER: "shell-export",
+      NO_COLOR: "1",
     };
 
     expect(providerChildEnvironment("claude", source)).toMatchObject({
       PATH: source.PATH,
       HOME: source.HOME,
       ANTHROPIC_API_KEY: "anthropic-secret",
+      FORCE_COLOR: "3",
+      NO_COLOR: "1",
     });
     expect(providerChildEnvironment("claude", source)).not.toHaveProperty(
       "OPENAI_API_KEY",

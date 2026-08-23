@@ -240,7 +240,7 @@ export const Composer = memo(function Composer({
       attachmentCount: attachmentsRef.current.length,
       conversationContextPending: conversationContextHandoffEnabled && (conversationContext.draftContextPackets.length > 0 || conversationContext.dialog !== null || agentContextRequest !== null),
       fileReferenceCount: fileReferences.length,
-      mutationInFlight: submittingRef.current
+      mutationInFlight: attachmentImportingRef.current || submittingRef.current
         || stoppingRef.current
         || creatingRouteConversation
         || routeRepairing

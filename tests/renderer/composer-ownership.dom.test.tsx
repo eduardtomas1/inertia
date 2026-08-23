@@ -411,6 +411,52 @@ describe("composer detachment ownership", () => {
     await act(async () => finishSend());
   });
 
+  it.each([
+    ["detachment", "native selection"],
+    ["docking", "drop"],
+  ] as const)("blocks %s while a delayed %s import is in flight", async (
+    transition,
+    source,
+  ) => {
+    let finishImport!: (attachments: ChatAttachment[]) => void;
+    const importing = new Promise<ChatAttachment[]>((resolve) => {
+      finishImport = resolve;
+    });
+    const current = conversation(`${transition}-importing-attachment-owner`);
+    render(<Composer {...composerProps(current, source === "native selection"
+      ? { onChooseAttachments: () => importing }
+      : { onImportAttachments: () => importing })} />);
+
+    if (source === "native selection") {
+      fireEvent.click(screen.getByRole("button", {
+        name: "Attach images, documents, or spreadsheets",
+      }));
+    } else {
+      fireEvent.drop(screen.getByLabelText("Message composer"), {
+        dataTransfer: {
+          files: [new File(["image"], "imported.png", { type: "image/png" })],
+          types: ["Files"],
+        },
+      });
+    }
+    await screen.findByText("Adding attachments…");
+
+    expect(prepareComposerDetachment(current.id)).toEqual({
+      status: "blocked",
+      blocker: "mutation-in-flight",
+      reason: "Wait for the current composer action to finish before moving this chat to a window.",
+      draft: "",
+    });
+
+    await act(async () => finishImport([attachment("imported")]));
+    expect(prepareComposerDetachment(current.id)).toEqual({
+      status: "blocked",
+      blocker: "attachments",
+      reason: "Send or remove attachments before moving this chat to a window.",
+      draft: "",
+    });
+  });
+
   it("blocks a pending model-route transfer", async () => {
     const current = conversation("route-owner");
     current.modelSelection = nativeModelSelection({

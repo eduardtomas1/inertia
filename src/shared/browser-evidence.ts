@@ -60,6 +60,7 @@ const POSIX_PATH = /(^|[\s(=:"'])\/(?:[^/\s,;:)"']+\/)*[^/\s,;:)"']+/gu;
 const RELATIVE_FILE_PATH = /(^|[\s(=:"'])(?:(?:\.{1,2}|[^/\s,;:)"']+)\/)+[^/\s,;:)"']+\.[A-Za-z0-9]{1,12}(?=$|[\s,;:)"'])/gu;
 const WINDOWS_PATH = /\b[A-Za-z]:\\(?:[^\\\s,;:)"']+\\)*[^\\\s,;:)"']*/gu;
 const UNC_OR_HOME_PATH = /(?:\\\\[^\\\s]+\\[^\s,;:)"']+|~\/(?:[^\s,;:)"']+\/)*[^\s,;:)"']+)/gu;
+const WINDOWS_OR_UNC_PATH_PREFIX = /(?:(?:^|[^A-Za-z0-9])[A-Za-z]:[\\/]|\\\\|(?:^|[\s(="'])\/\/)/u;
 const CREDENTIAL_ASSIGNMENT =
   /\b(api[-_ ]?key|authorization|proxy[-_ ]?authorization|cookie|set[-_ ]?cookie|credential|password|passwd|secret|session|token)\b\s*[:=]\s*(?:(?:Bearer|Basic)\s+[^\s,;]+|"[^"]*"|'[^']*'|[^\s,;]+)/giu;
 const AUTHORIZATION_VALUE = /\b(Bearer|Basic)\s+[^\s,;]+/giu;
@@ -165,6 +166,7 @@ export function sanitizeBrowserEvidenceText(
   if (
     SENSITIVE_FIELD.test(inspected)
     || patternMatches(AUTHORIZATION_VALUE, inspected)
+    || patternMatches(WINDOWS_OR_UNC_PATH_PREFIX, inspected)
     || (
       decoded !== inspected
       && (
@@ -175,7 +177,7 @@ export function sanitizeBrowserEvidenceText(
         || patternMatches(PRIVATE_KEY, decoded)
         || patternMatches(POSIX_PATH, decoded)
         || patternMatches(RELATIVE_FILE_PATH, decoded)
-        || patternMatches(WINDOWS_PATH, decoded)
+        || patternMatches(WINDOWS_OR_UNC_PATH_PREFIX, decoded)
         || patternMatches(UNC_OR_HOME_PATH, decoded)
       )
     )

@@ -113,7 +113,8 @@ export function PreviewPanel({
 }: PreviewPanelProps): React.JSX.Element {
   const [draftUrl, setDraftUrl] = useState(url);
   const [validationError, setValidationError] = useState<string | null>(null);
-  const [evidenceOpen, setEvidenceOpen] = useState(false);
+  const [openEvidenceContextId, setOpenEvidenceContextId] = useState<string | null>(null);
+  const evidenceOpen = openEvidenceContextId === contextId;
   const stageRef = useRef<HTMLDivElement>(null);
   const evidenceToggleRef = useRef<HTMLButtonElement>(null);
   const tabRefs = useRef(new Map<string, HTMLButtonElement>());
@@ -129,8 +130,8 @@ export function PreviewPanel({
   }, [url]);
 
   useEffect(() => {
-    setEvidenceOpen(false);
-  }, [contextId]);
+    if (openEvidenceContextId !== contextId) setOpenEvidenceContextId(null);
+  }, [contextId, openEvidenceContextId]);
 
   useEffect(() => {
     const stage = stageRef.current;
@@ -157,7 +158,7 @@ export function PreviewPanel({
   }, [onBoundsChange]);
 
   const closeEvidence = useCallback(() => {
-    setEvidenceOpen(false);
+    setOpenEvidenceContextId(null);
     requestAnimationFrame(() => evidenceToggleRef.current?.focus());
   }, []);
 
@@ -271,7 +272,9 @@ export function PreviewPanel({
           className={`preview-evidence-toggle${evidenceOpen ? " is-active" : ""}${evidence.entries.some((entry) => entry.kind === "console-error" || entry.kind === "network-failure") ? " has-failures" : ""}`}
           aria-expanded={evidenceOpen}
           aria-controls={`browser-evidence-${owner}`}
-          onClick={() => setEvidenceOpen((current) => !current)}
+          onClick={() => setOpenEvidenceContextId((current) => (
+            current === contextId ? null : contextId
+          ))}
         >
           <History size={13} aria-hidden="true" />
           <span>Evidence</span>

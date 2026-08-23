@@ -204,6 +204,33 @@ describe("Browser evidence timeline", () => {
     })).not.toBeInTheDocument());
   });
 
+  it("closes evidence on context change without stealing newer focus", async () => {
+    const panel = (contextId: string) => (
+      <>
+        <button type="button">Switch conversation</button>
+        <PreviewPanel
+          owner="primary"
+          contextId={contextId}
+          url="http://127.0.0.1:4173/"
+          evidence={evidence}
+          onNavigate={vi.fn()}
+          onOpenExternal={vi.fn()}
+        />
+      </>
+    );
+    const view = render(panel("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"));
+    fireEvent.click(screen.getByRole("button", { name: /Evidence 3/u }));
+    expect(await screen.findByRole("button", { name: "Close Browser evidence" }))
+      .toHaveFocus();
+
+    const conversationSwitch = screen.getByRole("button", { name: "Switch conversation" });
+    conversationSwitch.focus();
+    view.rerender(panel("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"));
+
+    await waitFor(() => expect(screen.queryByText("Local evidence")).not.toBeInTheDocument());
+    expect(conversationSwitch).toHaveFocus();
+  });
+
   it("restores keyboard tab-close focus without stealing a newer focus target", async () => {
     const onActivateTab = vi.fn();
     const onCloseTab = vi.fn();

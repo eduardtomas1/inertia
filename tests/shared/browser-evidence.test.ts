@@ -59,13 +59,24 @@ describe("Browser evidence sanitization", () => {
     "Failure in /workspace/inertia/src/main.ts",
     "Failure in /uncommon-root/private/output.ts",
     "Failure in packages/browser/private/output.ts",
-    "Failure in \\\\server\\private\\main.ts",
     "Failure in ~/private/main.ts",
   ])("removes platform filesystem paths: %s", (value) => {
     const result = sanitizeBrowserEvidenceText(value, "hidden");
     expect(result.redacted).toBe(true);
     expect(result.text).toContain("<path>");
     expect(result.text).not.toContain("main.ts");
+  });
+
+  it.each([
+    String.raw`Failure in C:\Users\Jane\private\main.ts`,
+    String.raw`Failure in C:\Users\Jane Doe\private project\src\main.ts`,
+    "Failure in C:/Users/Jane Doe/private project/src/main.ts",
+    String.raw`Failure in \\server\private\main.ts`,
+    String.raw`Failure in \\server\private share\src\main.ts`,
+    "Failure in //server/private share/src/main.ts",
+  ])("fails closed for complete Windows filesystem paths: %s", (value) => {
+    expect(sanitizeBrowserEvidenceText(value, "hidden"))
+      .toEqual({ text: "hidden", redacted: true });
   });
 
   it("strips URL routes, filesystem paths, tokens, controls, and bidi text", () => {

@@ -308,6 +308,10 @@ describe("Browser evidence sanitization", () => {
     String.raw`Failure in C:\Users\Jane Doe\private project\src\main.ts`,
     "Failure in C:/Users/Jane Doe/private project/src/main.ts",
     "Failure at C://Users/Jane Doe/private/file.txt",
+    String.raw`Failure in C:Users\Jane Doe\private\config`,
+    "Failure in C:Users/Jane Doe/private/config",
+    String.raw`Failure in D:private\config.json`,
+    "Failure in E:.env",
     String.raw`Failure in \\server\private\main.ts`,
     String.raw`Failure in \\server\private share\src\main.ts`,
     "Failure in //server/private share/src/main.ts",
@@ -346,6 +350,14 @@ describe("Browser evidence sanitization", () => {
   ])("does not mistake normal prose or HTTP URLs for filesystem paths: %s", (value) => {
     const result = sanitizeBrowserEvidenceText(value, "hidden");
     expect(result.text).not.toBe("hidden");
+  });
+
+  it.each([
+    "Drive C: is ready.",
+    "Label C:Users completed normally.",
+  ])("does not mistake a drive label without a path separator for a path: %s", (value) => {
+    expect(sanitizeBrowserEvidenceText(value, "hidden"))
+      .toEqual({ text: value, redacted: false });
   });
 
   it.each([

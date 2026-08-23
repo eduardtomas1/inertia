@@ -110,6 +110,7 @@ describe("Browser evidence ledger", () => {
 
   it.each([
     "Failure at C://Users/Jane Doe/private/file.txt",
+    String.raw`Failure in C:Users\Jane Doe\private\config`,
     "Failure at //private-server/secret share/file.txt",
   ])("fails closed before storing a URI-shaped filesystem path: %s", (message) => {
     const ledger = new BrowserEvidenceLedger();
@@ -118,6 +119,7 @@ describe("Browser evidence ledger", () => {
     const serialized = JSON.stringify(ledger.snapshot());
     expect(serialized).toContain("Sensitive console detail hidden");
     expect(serialized).not.toContain("Jane Doe");
+    expect(serialized).not.toContain("C:Users");
     expect(serialized).not.toContain("private-server");
   });
 

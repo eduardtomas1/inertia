@@ -65,6 +65,7 @@ const COMMON_ROOT_RELATIVE_PATH = /(^|[\s(=:"'])(?:app|assets|bin|build|config|c
 const WINDOWS_PATH = /\b[A-Za-z]:\\(?:[^\\\s,;:)"']+\\)*[^\\\s,;:)"']*/gu;
 const UNC_OR_HOME_PATH = /(?:\\\\[^\\\s]+\\[^\s,;:)"']+|~\/(?:[^\s,;:)"']+\/)*[^\s,;:)"']+)/gu;
 const WINDOWS_OR_UNC_PATH_PREFIX = /(?:(?:^|[^A-Za-z0-9])[A-Za-z]:[\\/]|\\\\|(?:^|[\s(="'])\/\/)/u;
+const DRIVE_RELATIVE_WINDOWS_PATH = /(?:^|[\s(="'])[A-Za-z]:(?![\\/])(?:[^\\/\s,;:)"']+[\\/][^\\/\s,;:)"']+|(?:\.[A-Za-z0-9][^\\/\s,;:)"']*|[^\\/\s,;:)"']+\.[A-Za-z0-9]{1,12}))(?=$|[\s,;:)"']|[\\/])/gu;
 const CREDENTIAL_ASSIGNMENT =
   /(?<![A-Za-z0-9])(api[-_ ]?key|authorization|proxy[-_ ]?authorization|cookie|set[-_ ]?cookie|credential|passcode|passphrase|password|passwd|pgpassword|pwd|secret|session|token)(?![A-Za-z0-9])["']?\s*[:=]\s*(?:(?:Bearer|Basic)\s+[^\s,;]+|"[^"]*"|'[^']*'|[^\s,;]+)/giu;
 const AUTHORIZATION_VALUE = /(?<![A-Za-z0-9])(Bearer|Basic)\s+[^\s,;]+/giu;
@@ -145,6 +146,7 @@ function hasFilesystemPathCandidate(value: string): boolean {
     || patternMatches(RELATIVE_WINDOWS_PATH, value)
     || patternMatches(COMMON_ROOT_RELATIVE_PATH, value)
     || patternMatches(WINDOWS_OR_UNC_PATH_PREFIX, value)
+    || patternMatches(DRIVE_RELATIVE_WINDOWS_PATH, value)
     || patternMatches(UNC_OR_HOME_PATH, value);
 }
 
@@ -181,6 +183,7 @@ function inspectBrowserEvidenceRepresentation(
     || hasCredentialBearingUri(value)
     || patternMatches(FILE_URL, value)
     || patternMatches(WINDOWS_OR_UNC_PATH_PREFIX, value)
+    || patternMatches(DRIVE_RELATIVE_WINDOWS_PATH, value)
     || hasFilesystemPathCandidate(outsideAuthorityUris),
     secretProjectionRequired: patternMatches(PREFIXED_SECRET, value)
       || patternMatches(JWT, value)

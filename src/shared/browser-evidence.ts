@@ -54,7 +54,8 @@ export interface SanitizedBrowserEvidenceText {
 
 const CONTROL_OR_BIDI =
   /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u206f]+/gu;
-const URL_TOKEN = /\bhttps?:\/\/[^\s<>"'`]+/giu;
+const HTTP_SCHEME = /https?:\/\//iu;
+const URL_TOKEN = /https?:\/\/[^\s<>"'`]+/giu;
 const FILE_URL = /\bfile:\/\/[^\s<>"'`]+/giu;
 const POSIX_PATH = /(^|[\s(=:"'])\/(?:[^/\s,;:)"']+\/)*[^/\s,;:)"']+/gu;
 const RELATIVE_FILE_PATH = /(^|[\s(=:"'])(?:(?:\.{1,2}|[^/\s,;:)"']+)\/)+[^/\s,;:)"']+\.[A-Za-z0-9]{1,12}(?=$|[\s,;:)"'])/gu;
@@ -72,7 +73,7 @@ const LONG_OPAQUE_VALUE = /\b(?=[A-Za-z0-9+/_=-]{32,}\b)(?=[A-Za-z0-9+/_=-]*[A-Z
 const TRAILING_SECRET_FRAGMENT =
   /(?:\b(?:sk|rk|pk|ghp|github_pat|xox[baprs]|api|key|token)[-_][A-Za-z0-9_-]*|\beyJ[A-Za-z0-9_.-]*|\b(?:Bearer|Basic)\s+\S*)$/iu;
 const SENSITIVE_FIELD =
-  /\b(?:api[-_ ]?key|authorization|proxy[-_ ]?authorization|cookie|set[-_ ]?cookie|credential|password|passwd|private[-_ ]?key|request[-_ ]?body|secret|session|token)\b/iu;
+  /\b(?:(?:access|auth|id|refresh)[-_ ]?token|api[-_ ]?key|authorization|proxy[-_ ]?authorization|cookie|set[-_ ]?cookie|credential|password|passwd|private[-_ ]?key|request[-_ ]?body|secret|session|token)\b/iu;
 const SECRET_HOST_LABEL =
   /^(?:(?:sk|rk|pk|ghp|github[-_]?pat|glpat|npm|pypi|hf|xox[baprs]|api|key|token)[-_][a-z0-9_-]{8,}|(?:akia|asia)[a-z0-9]{16}|aiza[a-z0-9_-]{20,})$/iu;
 const MAX_PERCENT_DECODE_PASSES = 4;
@@ -179,6 +180,16 @@ export function sanitizeBrowserEvidenceText(
     return { text: fallback.slice(0, limit), redacted: true };
   }
   const inspectedWithoutHttpUrls = withoutHttpUrls(inspected);
+  const decodedOutsideDirectHttpUrls = boundedPercentDecode(inspectedWithoutHttpUrls);
+  if (
+    decodedOutsideDirectHttpUrls === null
+    || patternMatches(
+      HTTP_SCHEME,
+      decodedOutsideDirectHttpUrls.replace(CONTROL_OR_BIDI, ""),
+    )
+  ) {
+    return { text: fallback.slice(0, limit), redacted: true };
+  }
   const decodedWithoutHttpUrls = decoded === inspected
     ? inspectedWithoutHttpUrls
     : withoutHttpUrls(decoded);

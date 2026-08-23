@@ -104,6 +104,26 @@ describe("Browser evidence sanitization", () => {
     expect(result.text).not.toBe("hidden");
   });
 
+  it.each([
+    "prefix_https://localhost/private?draft=private-value",
+    "prefix_https://localhost/private%20project?draft=private-value",
+  ])("redacts HTTP URLs attached to identifier characters: %s", (value) => {
+    const result = sanitizeBrowserEvidenceText(value, "hidden");
+    expect(result.text).toContain("https://localhost");
+    expect(result.text).not.toContain("private");
+    expect(result.redacted).toBe(true);
+  });
+
+  it.each([
+    "prefix_https://localhost/private?access_token=private-value",
+    "prefix_h%74tps://localhost/private?access_token=private-value",
+    "prefix_http%3A%2F%2Flocalhost/private?access_token=private-value",
+    "prefix_h\u0000ttps://localhost/private?draft=private-value",
+  ])("fails closed for credential-bearing or encoded HTTP schemes: %s", (value) => {
+    expect(sanitizeBrowserEvidenceText(value, "hidden"))
+      .toEqual({ text: "hidden", redacted: true });
+  });
+
   it("bounds oversized multibyte page text without retaining a secret fragment", () => {
     const result = sanitizeBrowserEvidenceText(
       `${"é".repeat(900)} Bearer partial-secret`,

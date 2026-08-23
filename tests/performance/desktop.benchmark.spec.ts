@@ -931,9 +931,23 @@ async function streamingResponsivenessSample(
   await driveBoundedWheelNavigation({
     maxGestures: READER_NAVIGATION_MAX_WHEEL_GESTURES,
     maxProgressSamples: READER_NAVIGATION_MAX_PROGRESS_SAMPLES,
-    readScrollTop: () => liveViewport.evaluate((viewport) => viewport.scrollTop),
+    readPosition: () => liveViewport.evaluate((viewport) => {
+      const viewportTop = viewport.getBoundingClientRect().top;
+      // Stream growth and virtual-row measurement can move scrollTop without
+      // moving the reader. Sample the logical row and its viewport offset.
+      const item = [...viewport.querySelectorAll<HTMLElement>("[data-index]")]
+        .find((candidate) => candidate.getBoundingClientRect().bottom > viewportTop + 8);
+      if (!item) throw new Error("The transcript has no visible logical item.");
+      return {
+        itemIndex: Number(item.dataset.index),
+        itemOffset: item.getBoundingClientRect().top - viewportTop,
+        scrollTop: viewport.scrollTop,
+      };
+    }),
     targetScrollTop: READER_NAVIGATION_TARGET_SCROLL_TOP,
-    waitForNextSample: () => page.waitForTimeout(25),
+    waitForNextSample: () => liveViewport.evaluate(() => (
+      new Promise<void>((resolveFrame) => requestAnimationFrame(() => resolveFrame()))
+    )),
     wheelUp: () => page.mouse.wheel(0, -30_000),
   });
   await page.waitForTimeout(150);

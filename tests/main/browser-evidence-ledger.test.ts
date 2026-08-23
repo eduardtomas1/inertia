@@ -117,8 +117,11 @@ describe("Browser evidence ledger", () => {
 
   it.each([
     "Failed in src/private/config",
+    "Failed in src/config",
     "Failed in src/.env",
     "Failed in ./Dockerfile",
+    String.raw`Failed in src\private\config`,
+    String.raw`Failed in src\config`,
   ])("fails closed before storing an extensionless relative path: %s", (message) => {
     const ledger = new BrowserEvidenceLedger();
     ledger.recordConsoleError({ ...location, message });

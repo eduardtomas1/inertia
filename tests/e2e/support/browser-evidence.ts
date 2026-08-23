@@ -61,6 +61,8 @@ export async function verifyBrowserEvidence({
   expect(evidenceText).not.toContain("private-server");
   expect(evidenceText).not.toContain("secret share");
   expect(evidenceText).not.toContain("src/private/config");
+  expect(evidenceText).not.toContain("src/config");
+  expect(evidenceText).not.toContain("src\\private\\config");
   expect(evidenceText).not.toContain("src/.env");
   expect(evidenceText).not.toContain("./Dockerfile");
   expect(evidenceText).not.toContain("browser-e2e-query-sentinel");

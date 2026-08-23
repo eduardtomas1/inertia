@@ -73,6 +73,7 @@ describe("supervised runtime process environment", () => {
       TMPDIR: "/tmp/runtime",
       VERTEX_LOCATION: "europe-west4",
       WAYLAND_DISPLAY: "wayland-0",
+      XAUTHORITY: "/run/user/501/gdm/Xauthority",
       XDG_CONFIG_HOME: "/Users/person/.config",
       ...sentinelSecrets,
     };
@@ -115,6 +116,7 @@ describe("supervised runtime process environment", () => {
       TMPDIR: parent.TMPDIR,
       VERTEX_LOCATION: parent.VERTEX_LOCATION,
       WAYLAND_DISPLAY: parent.WAYLAND_DISPLAY,
+      XAUTHORITY: parent.XAUTHORITY,
       XDG_CONFIG_HOME: parent.XDG_CONFIG_HOME,
     });
   });

@@ -139,11 +139,16 @@ describe("agent browser semantic snapshots", () => {
   it.each([
     ["canvas", { tagName: "CANVAS" }],
     ["image input", { tagName: "INPUT", type: "image" }],
+    ["selected file input", { tagName: "INPUT", type: "file", files: { length: 1 } }],
     ["CSS background", { tagName: "DIV", backgroundImage: "url(private.png)" }],
+    ["pseudo-element CSS background", {
+      tagName: "DIV", pseudoBackgroundImage: "url(private.png)",
+    }],
     ["generated content", { tagName: "DIV", pseudoContent: '"private"' }],
   ])("refuses uninspectable %s pixels before screenshot capture", async (_name, candidate) => {
     const candidateStyle = candidate as {
       backgroundImage?: string;
+      pseudoBackgroundImage?: string;
       pseudoContent?: string;
     };
     const element = {
@@ -175,7 +180,9 @@ describe("agent browser semantic snapshots", () => {
       innerWidth: 1_200, innerHeight: 800, scrollX: 0, scrollY: 0,
       getComputedStyle: (_element: unknown, pseudo?: string) => ({
         visibility: "visible", display: "block", opacity: "1",
-        backgroundImage: candidateStyle.backgroundImage ?? "none",
+        backgroundImage: pseudo
+          ? candidateStyle.pseudoBackgroundImage ?? "none"
+          : candidateStyle.backgroundImage ?? "none",
         borderImageSource: "none", listStyleImage: "none", maskImage: "none",
         webkitMaskImage: "none",
         content: pseudo ? candidateStyle.pseudoContent ?? "none" : "normal",

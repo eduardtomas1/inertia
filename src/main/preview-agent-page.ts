@@ -503,6 +503,10 @@ async function agentPageHasUninspectablePixels(contents: WebContents): Promise<b
       "backgroundImage", "borderImageSource", "listStyleImage", "maskImage",
       "webkitMaskImage",
     ];
+    const hasImageSource = (style) => imageProperties.some((property) => {
+      const source = style[property];
+      return typeof source === "string" && source !== "none" && source !== "";
+    });
     let scanned = 0;
     while (scanned < ${MAX_SEMANTIC_SCAN_NODES}) {
       const element = iterator.nextNode();
@@ -529,14 +533,15 @@ async function agentPageHasUninspectablePixels(contents: WebContents): Promise<b
         && rect.top < innerHeight && rect.left < innerWidth)) continue;
       if (pixelTags.has(element.tagName)
         || (element.tagName === "INPUT"
-          && String(element.type || "").toLowerCase() === "image")) return true;
+          && (String(element.type || "").toLowerCase() === "image"
+            || (String(element.type || "").toLowerCase() === "file"
+              && Number(element.files?.length || 0) > 0)))) return true;
       const style = getComputedStyle(element);
-      for (const property of imageProperties) {
-        const source = style[property];
-        if (typeof source === "string" && source !== "none" && source !== "") return true;
-      }
+      if (hasImageSource(style)) return true;
       for (const pseudo of ["::before", "::after", "::marker"]) {
-        const content = getComputedStyle(element, pseudo).content;
+        const pseudoStyle = getComputedStyle(element, pseudo);
+        if (hasImageSource(pseudoStyle)) return true;
+        const content = pseudoStyle.content;
         const emptyQuoted = typeof content === "string" && content.length === 2
           && content.charCodeAt(0) === content.charCodeAt(1)
           && (content.charCodeAt(0) === 34 || content.charCodeAt(0) === 39);

@@ -318,8 +318,12 @@ function relativePathAcrossEmbeddedSpaces(value: string): boolean {
           && !/[,;:()="'<>`]/u.test(value[leafEnd]!)
         ) leafEnd += 1;
         const leaf = value.slice(index + 1, leafEnd);
+        const coherentUnlistedCandidate = whitespaceRuns === 1
+          && root.length >= 2
+          && leaf.length >= 2;
         if (
-          COMMON_RELATIVE_PATH_ROOTS.has(root)
+          coherentUnlistedCandidate
+          || COMMON_RELATIVE_PATH_ROOTS.has(root)
           || root === "."
           || root === ".."
           || (leaf.startsWith(".") && leaf.length > 1)

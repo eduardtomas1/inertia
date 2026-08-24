@@ -670,6 +670,14 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "tool_call", toolCallId: "tool-5", title: "Already complete", kind: "execute", status: "completed", rawInput: { command: "npm run check" }, rawOutput: "green" } } });
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "tool_call", toolCallId: "tool-6", title: "T".repeat(5000), kind: "execute", status: "pending", rawInput: { command: "c".repeat(5000), ignored: "x".repeat(500000) } } } });
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "tool_call_update", toolCallId: "tool-6", status: "completed", rawOutput: "clean" } } });
+    send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "compaction_update", compactionId: "compact-1", status: "in_progress" } } });
+    send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "compaction_summary_chunk", compactionId: "compact-1", content: { type: "text", text: "Retained summary, not assistant output" } } } });
+    send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "compaction_update", compactionId: "compact-1", status: "future_paused" } } });
+    send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "compaction_update", compactionId: "compact-1", status: "completed", summary: [{ type: "text", text: "Final retained summary" }] } } });
+    send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "compaction_update", compactionId: "compact-2", status: "in_progress" } } });
+    send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "compaction_update", compactionId: "compact-2", status: "failed", error: "Context limit changed" } } });
+    send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "compaction_update", compactionId: "compact-3", status: "in_progress" } } });
+    send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "compaction_update", compactionId: "compact-3", status: "cancelled" } } });
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "usage_update", used: 321, size: 200000 } } });
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Cursor response" } } } });
     return send({ jsonrpc: "2.0", id: promptRequestId, result: { stopReason: "end_turn", usage: { totalTokens: 350, inputTokens: 320, outputTokens: 30, thoughtTokens: 5, cachedReadTokens: 20, cachedWriteTokens: 0.5 } } });
@@ -758,6 +766,37 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       phase: "completed",
       detail: "Command:\nnpm run check\n\nOutput:\ngreen",
     }));
+    expect(activities).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        activityId: "cursor:compaction:compact-1",
+        phase: "started",
+        label: "Cursor is compacting session context",
+        detail: "Status: in_progress",
+      }),
+      expect.objectContaining({
+        activityId: "cursor:compaction:compact-1",
+        phase: "completed",
+        label: "Cursor compacted session context",
+        detail: "Status: completed",
+      }),
+      expect.objectContaining({
+        phase: "info",
+        label: "Cursor reported a context compaction update",
+        detail: "Status: future_paused",
+      }),
+      expect.objectContaining({
+        activityId: "cursor:compaction:compact-2",
+        phase: "failed",
+        label: "Cursor could not compact session context",
+        detail: "Error: Context limit changed",
+      }),
+      expect.objectContaining({
+        activityId: "cursor:compaction:compact-3",
+        phase: "info",
+        label: "Cursor cancelled session context compaction",
+        detail: "Status: cancelled",
+      }),
+    ]));
     const boundedTool = activities.find((activity) =>
       activity.activityId === "tool-6" && activity.phase === "completed");
     expect(boundedTool?.label).toBe("T".repeat(240));

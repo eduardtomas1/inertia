@@ -68,6 +68,7 @@ import {
   toolActivityPhase,
   validateKimiInitialize,
 } from "./kimi-acp-projection";
+import { projectAcpCompactionUpdate } from "./acp-compaction-projection";
 import { parseAcpSessionNotification } from "./acp-json-rpc";
 
 const MAX_WIRE_LINE_BYTES = 1024 * 1024;
@@ -1121,6 +1122,15 @@ function handleKimiUpdate(
           compactsAutomatically: null,
         },
       });
+      return;
+    case "compaction_update":
+      turnEvidence.seen = true;
+      projectAcpCompactionUpdate("Kimi Code", "kimi", update, emitter);
+      return;
+    case "compaction_summary_chunk":
+      // ACP compaction summaries replace retained context. They prove that the
+      // provider handled this turn, but are not assistant response text.
+      turnEvidence.seen = true;
       return;
   }
   const unsupportedUpdate: never = update;

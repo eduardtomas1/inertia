@@ -238,6 +238,9 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "plan", entries: [{ content: "Inspect", priority: "medium", status: "completed" }, { content: "Implement", priority: "high", status: "in_progress" }] } } });
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "tool_call", toolCallId: "tool-1", title: "Run checks", kind: "execute", status: "in_progress", rawInput: { command: "npm test" } } } });
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "tool_call_update", toolCallId: "tool-1", status: "completed", rawOutput: "green" } } });
+    send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "compaction_update", compactionId: "compact-1", status: "in_progress" } } });
+    send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "compaction_summary_chunk", compactionId: "compact-1", content: { type: "text", text: "Retained summary, not assistant output" } } } });
+    send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "compaction_update", compactionId: "compact-1", status: "completed", summary: [{ type: "text", text: "Final retained summary" }] } } });
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "usage_update", used: 125, size: 1000 } } });
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Kimi response" } } } });
     return send({
@@ -348,6 +351,18 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       phase: "completed",
       detail: "Command:\nnpm test\n\nOutput:\ngreen",
     }));
+    expect(activities).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        activityId: "kimi:compaction:compact-1",
+        phase: "started",
+        detail: "Status: in_progress",
+      }),
+      expect.objectContaining({
+        activityId: "kimi:compaction:compact-1",
+        phase: "completed",
+        detail: "Status: completed",
+      }),
+    ]));
     const captured = JSON.parse(readFileSync(capturePath, "utf8")) as Array<{
       id?: number;
       method?: string;

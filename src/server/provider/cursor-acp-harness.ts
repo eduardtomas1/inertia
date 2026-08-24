@@ -58,6 +58,7 @@ import {
   BoundedJsonLineTransform,
   validateCursorVendorFrame,
 } from "./cursor-acp-framing";
+import { projectAcpCompactionUpdate } from "./acp-compaction-projection";
 import { parseAcpSessionNotification } from "./acp-json-rpc";
 import {
   cursorQuestions,
@@ -989,6 +990,14 @@ function handleCursorUpdate(
           compactsAutomatically: null,
         },
       });
+      return;
+    case "compaction_update":
+      projectAcpCompactionUpdate("Cursor", "cursor", update, emitter);
+      return;
+    case "compaction_summary_chunk":
+      // ACP defines this as retained context, not new assistant output. The
+      // lifecycle update above is projected; replaying the summary here would
+      // falsely append historical context to the current answer.
       return;
   }
   const unsupportedUpdate: never = update;

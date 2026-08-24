@@ -282,12 +282,17 @@ async function expectExactUnsignedAssetUnion(
 
   const checksumSource = await readFile(join(finalDirectory, "SHA256SUMS.txt"), "utf8");
   expect(checksumSource.endsWith("\n")).toBe(true);
-  const checksumRecords = new Map(checksumSource.trimEnd().split("\n").map((line) => {
+  const checksumLines = checksumSource.trimEnd().split("\n");
+  const publicAssets = expected.filter((name) => name !== "SHA256SUMS.txt");
+  expect(
+    checksumLines,
+    "SHA256SUMS.txt must contain exactly one row per public asset",
+  ).toHaveLength(publicAssets.length);
+  const checksumRecords = new Map(checksumLines.map((line) => {
     const match = /^([0-9a-f]{64})  ([A-Za-z0-9._-]+)$/u.exec(line);
     if (!match) throw new Error(`Invalid checksum fixture line: ${line}`);
     return [match[2]!, match[1]!] as const;
   }));
-  const publicAssets = expected.filter((name) => name !== "SHA256SUMS.txt");
   expect([...checksumRecords.keys()].sort()).toEqual(publicAssets);
   for (const name of publicAssets) {
     const digest = createHash("sha256")
@@ -381,7 +386,18 @@ describe("release asset staging", () => {
         INERTIA_RELEASE_DOWNLOAD_DIR: stageRoot,
       });
       expect(finalized.status, finalized.stderr).toBe(0);
-      await expectExactUnsignedAssetUnion(join(stageRoot, "final"), channel);
+      const finalDirectory = join(stageRoot, "final");
+      await expectExactUnsignedAssetUnion(finalDirectory, channel);
+      if (channel === "stable") {
+        const checksumPath = join(finalDirectory, "SHA256SUMS.txt");
+        const checksumSource = await readFile(checksumPath, "utf8");
+        const duplicate = checksumSource.split("\n")[0];
+        if (!duplicate) throw new Error("The checksum fixture has no first row.");
+        await writeFile(checksumPath, `${checksumSource}${duplicate}\n`);
+        await expect(expectExactUnsignedAssetUnion(finalDirectory, channel)).rejects.toThrow(
+          "SHA256SUMS.txt must contain exactly one row per public asset",
+        );
+      }
     },
   );
 

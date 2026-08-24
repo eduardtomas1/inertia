@@ -88,6 +88,8 @@ describe("cross-platform packaged behavior contract", () => {
     expect(scenario).toContain("process.env.INERTIA_CANARY_SCREENSHOT_PATH");
     expect(scenario).toContain("INERTIA_CANARY_SCREENSHOT_PATH must be absolute");
     expect(scenario).toContain("await copyFile(evidence, requestedPath)");
+    // Final integration: after the exact-head PNG is generated and tracked,
+    // read its first eight bytes here and assert the canonical PNG signature.
   });
 
   it("documents six checksum-first native choices without disabling platform security", async () => {

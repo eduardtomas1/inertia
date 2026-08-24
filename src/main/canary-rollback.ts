@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import {
   chmod,
@@ -25,6 +25,7 @@ const MAX_STATE_BYTES = 8 * 1_024;
 const MAX_CHECKSUM_BYTES = 256 * 1_024;
 const MAX_PACKAGE_BYTES = 2 * 1_024 * 1_024 * 1_024;
 const DEFAULT_DOWNLOAD_TIMEOUT_MS = 15 * 60 * 1_000;
+const TEMPORARY_PACKAGE_NAME = ".rollback-package.download";
 const VERSION_PATTERN = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/u;
 
@@ -48,6 +49,7 @@ export interface CanaryRollbackManagerOptions {
   activeAppImagePath?: string;
   now?: () => Date;
   timeoutMs?: number;
+  chmodPath?: (path: string, mode: number) => Promise<void>;
 }
 
 interface ChunkWriter {
@@ -187,12 +189,14 @@ export class CanaryRollbackManager {
   readonly #statePath: string;
   readonly #now: () => Date;
   readonly #timeoutMs: number;
+  readonly #chmodPath: (path: string, mode: number) => Promise<void>;
   #preparation: Promise<CanaryRollbackStatus> | null = null;
 
   constructor(readonly options: CanaryRollbackManagerOptions) {
     this.#directory = join(options.userDataDirectory, "canary-rollback");
     this.#statePath = join(this.#directory, "last-known-good.json");
     this.#now = options.now ?? (() => new Date());
+    this.#chmodPath = options.chmodPath ?? chmod;
     this.#timeoutMs = Math.max(
       1,
       Math.min(options.timeoutMs ?? DEFAULT_DOWNLOAD_TIMEOUT_MS, 60 * 60 * 1_000),
@@ -317,6 +321,9 @@ export class CanaryRollbackManager {
     const platform = this.options.platform as "darwin" | "win32" | "linux";
     const architecture = this.options.architecture as "arm64" | "x64";
     const name = releaseArtifactName("canary", platform, this.options.version, architecture);
+    await mkdir(this.#directory, { recursive: true, mode: 0o700 });
+    const temporaryPath = join(this.#directory, TEMPORARY_PACKAGE_NAME);
+    await rm(temporaryPath, { force: true });
     const baseUrl = `https://github.com/eduardtomas1/inertia/releases/download/canary-v${this.options.version}`;
     const checksum = await this.#fetchWithinTimeout(
       `${baseUrl}/SHA256SUMS.txt`,
@@ -324,60 +331,64 @@ export class CanaryRollbackManager {
       boundedText,
     );
     const expected = expectedDigest(checksum, name);
-    await mkdir(this.#directory, { recursive: true, mode: 0o700 });
-    const temporaryPath = join(this.#directory, `.${randomUUID()}.download`);
-    const downloaded = await this.#fetchWithinTimeout(
-      `${baseUrl}/${name}`,
-      "Rollback package download timed out.",
-      async (response) => {
-        if (!response.ok || !response.body) throw new Error("Rollback package unavailable.");
-        const declaredHeader = response.headers.get("content-length");
-        const declared = Number(declaredHeader);
-        if (
-          declaredHeader !== null
-          && (!Number.isFinite(declared) || declared <= 0 || declared > MAX_PACKAGE_BYTES)
-        ) {
-          throw new Error("Rollback package has an invalid size.");
-        }
-        const handle = await open(temporaryPath, "wx", 0o600);
-        const digest = createHash("sha256");
-        const reader = response.body.getReader();
-        let size = 0;
-        try {
-          while (true) {
-            const next = await reader.read();
-            if (next.done) break;
-            size += next.value.byteLength;
-            if (size > MAX_PACKAGE_BYTES) {
-              await reader.cancel();
-              throw new Error("Rollback package is oversized.");
-            }
-            digest.update(next.value);
-            await writeBufferCompletely(handle, next.value);
+    let downloaded: { size: number; actual: string };
+    try {
+      downloaded = await this.#fetchWithinTimeout(
+        `${baseUrl}/${name}`,
+        "Rollback package download timed out.",
+        async (response) => {
+          if (!response.ok || !response.body) throw new Error("Rollback package unavailable.");
+          const declaredHeader = response.headers.get("content-length");
+          const declared = Number(declaredHeader);
+          if (
+            declaredHeader !== null
+            && (!Number.isFinite(declared) || declared <= 0 || declared > MAX_PACKAGE_BYTES)
+          ) {
+            throw new Error("Rollback package has an invalid size.");
           }
-          await handle.sync();
-        } catch (error) {
+          const handle = await open(temporaryPath, "wx", 0o600);
+          const digest = createHash("sha256");
+          const reader = response.body.getReader();
+          let size = 0;
+          try {
+            while (true) {
+              const next = await reader.read();
+              if (next.done) break;
+              size += next.value.byteLength;
+              if (size > MAX_PACKAGE_BYTES) {
+                await reader.cancel();
+                throw new Error("Rollback package is oversized.");
+              }
+              digest.update(next.value);
+              await writeBufferCompletely(handle, next.value);
+            }
+            await handle.sync();
+          } catch (error) {
+            await handle.close();
+            await rm(temporaryPath, { force: true });
+            throw error;
+          } finally {
+            reader.releaseLock();
+          }
           await handle.close();
-          await rm(temporaryPath, { force: true });
-          throw error;
-        } finally {
-          reader.releaseLock();
-        }
-        await handle.close();
-        const actual = digest.digest("hex");
-        if (
-          size <= 0
-          || actual !== expected
-          || await sha256File(temporaryPath, size) !== expected
-        ) {
-          await rm(temporaryPath, { force: true });
-          throw new Error("Rollback package digest did not match the release checksum.");
-        }
-        return { size, actual };
-      },
-    );
+          const actual = digest.digest("hex");
+          if (
+            size <= 0
+            || actual !== expected
+            || await sha256File(temporaryPath, size) !== expected
+          ) {
+            await rm(temporaryPath, { force: true });
+            throw new Error("Rollback package digest did not match the release checksum.");
+          }
+          return { size, actual };
+        },
+      );
+      if (platform === "linux") await this.#chmodPath(temporaryPath, 0o700);
+    } catch (error) {
+      await rm(temporaryPath, { force: true });
+      throw error;
+    }
     const { size, actual } = downloaded;
-    if (platform === "linux") await chmod(temporaryPath, 0o700);
     const destination = join(this.#directory, name);
     try {
       const existing = await lstat(destination);

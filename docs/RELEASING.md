@@ -104,12 +104,13 @@ repository or an uploaded artifact. Complete macOS credentials enable hardened
 runtime, Developer ID signing, notarization, and fail-closed signature checks.
 Complete Windows credentials enable fail-closed Authenticode signing.
 
-Release packages use electron-builder's generic update provider at
-`https://github.com/eduardtomas1/inertia/releases/latest/download`. Packaging
-uses `--publish never`: platform jobs generate packages, update metadata, and
-blockmaps, but they cannot create or modify a GitHub release. The final Ubuntu
-job validates and publishes the exact combined asset set as the workflow's
-single writer.
+Stable release packages use electron-builder's generic update provider at
+`https://github.com/eduardtomas1/inertia/releases/latest/download`. Canary
+packages instead use the isolated raw `canary-feed` branch described above.
+Packaging uses `--publish never`: platform jobs generate packages, update
+metadata, and blockmaps, but they cannot create or modify a GitHub release. The
+final Ubuntu job validates and publishes the exact combined asset set as the
+workflow's single writer.
 
 The packaged capability marker enables in-app delivery only for a real release
 AppImage, a completely Authenticode-signed Windows build, or a Developer ID

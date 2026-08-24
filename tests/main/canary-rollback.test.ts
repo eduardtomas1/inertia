@@ -1,5 +1,12 @@
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -31,6 +38,7 @@ function manager(options: {
   timeoutMs?: number;
   platform?: NodeJS.Platform;
   architecture?: "arm64" | "x64";
+  chmodPath?: (path: string, mode: number) => Promise<void>;
 } = {}): CanaryRollbackManager {
   const userDataDirectory = options.userDataDirectory ?? root();
   const activeAppImagePath = options.activeAppImagePath === undefined
@@ -57,6 +65,7 @@ function manager(options: {
     ...(activeAppImagePath === null ? {} : { activeAppImagePath }),
     now: () => new Date("2030-01-02T03:04:05.000Z"),
     ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+    ...(options.chmodPath === undefined ? {} : { chmodPath: options.chmodPath }),
   });
 }
 
@@ -114,6 +123,36 @@ describe("Canary last-known-good rollback", () => {
     });
     const subject = manager({ fetch, timeoutMs: 10 });
     await expect(subject.prepare()).rejects.toThrow("package download timed out");
+    await expect(subject.current()).resolves.toMatchObject({ state: "not-prepared" });
+    expect(readdirSync(join(subject.options.userDataDirectory, "canary-rollback")))
+      .toEqual([]);
+  });
+
+  it("cleans an interrupted preparation before a restarted manager fetches", async () => {
+    const userDataDirectory = root();
+    const directory = join(userDataDirectory, "canary-rollback");
+    const temporaryPath = join(directory, ".rollback-package.download");
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(temporaryPath, "interrupted-package");
+    const subject = manager({
+      userDataDirectory,
+      fetch: vi.fn<typeof globalThis.fetch>(async () => new Response("unavailable", {
+        status: 503,
+      })),
+    });
+
+    await expect(subject.prepare()).rejects.toThrow("checksum unavailable");
+    expect(readdirSync(directory)).toEqual([]);
+  });
+
+  it("removes the bounded temporary package when Linux chmod fails", async () => {
+    const subject = manager({
+      chmodPath: vi.fn(async () => {
+        throw new Error("chmod failed");
+      }),
+    });
+
+    await expect(subject.prepare()).rejects.toThrow("chmod failed");
     await expect(subject.current()).resolves.toMatchObject({ state: "not-prepared" });
     expect(readdirSync(join(subject.options.userDataDirectory, "canary-rollback")))
       .toEqual([]);

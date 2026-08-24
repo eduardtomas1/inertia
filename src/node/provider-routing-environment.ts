@@ -149,6 +149,13 @@ const CLAUDE_BOOLEAN_VALUES = new Set([
   "yes",
 ]);
 
+const CLAUDE_TRUTHY_BOOLEAN_VALUES = new Set([
+  "1",
+  "on",
+  "true",
+  "yes",
+]);
+
 const CLAUDE_BEDROCK_REGION_PREFIXES = new Set([
   "apac",
   "au",
@@ -172,6 +179,7 @@ const MAXIMUM_PROVIDER_ENDPOINT_PATH_LENGTH = 512;
 const MAXIMUM_PROVIDER_ENDPOINT_PATH_COMPONENTS = 16;
 const MAXIMUM_PROVIDER_ENDPOINT_PATH_COMPONENT_LENGTH = 128;
 const MAXIMUM_CLAUDE_BOOLEAN_LENGTH = 16;
+const MAXIMUM_CLAUDE_REGION_PREFIX_LENGTH = 16;
 const MAXIMUM_CLAUDE_TEXT_LENGTH = 256;
 
 function decodedUrlRepresentations(value: string): string[] | null {
@@ -243,6 +251,15 @@ export function isClaudeCloudRoutingEnvironmentKey(
   return CLAUDE_CLOUD_ROUTING_ENVIRONMENT_KEY_SET.has(key);
 }
 
+export function isClaudeCloudRoutingEnvironmentEnabled(
+  value: string | undefined,
+): boolean {
+  if (value === undefined || value.length > MAXIMUM_CLAUDE_BOOLEAN_LENGTH) {
+    return false;
+  }
+  return CLAUDE_TRUTHY_BOOLEAN_VALUES.has(value.trim().toLowerCase());
+}
+
 export function isValidClaudeCloudRoutingEnvironmentValue(
   key: ClaudeCloudRoutingEnvironmentKey,
   value: string,
@@ -250,15 +267,14 @@ export function isValidClaudeCloudRoutingEnvironmentValue(
   if (CLAUDE_CLOUD_HTTP_ENDPOINT_ENVIRONMENT_KEYS.has(key)) {
     return isCredentialFreeProviderHttpEndpoint(value);
   }
-  const normalized = value.trim();
   if (CLAUDE_CLOUD_BOOLEAN_ENVIRONMENT_KEYS.has(key)) {
-    return value.length <= MAXIMUM_CLAUDE_BOOLEAN_LENGTH
-      && CLAUDE_BOOLEAN_VALUES.has(normalized.toLowerCase());
+    if (value.length > MAXIMUM_CLAUDE_BOOLEAN_LENGTH) return false;
+    return CLAUDE_BOOLEAN_VALUES.has(value.trim().toLowerCase());
   }
   if (key === "ANTHROPIC_BEDROCK_REGION_PREFIX") {
-    return CLAUDE_BEDROCK_REGION_PREFIXES.has(normalized);
+    if (value.length > MAXIMUM_CLAUDE_REGION_PREFIX_LENGTH) return false;
+    return CLAUDE_BEDROCK_REGION_PREFIXES.has(value.trim());
   }
-  return value.length <= MAXIMUM_CLAUDE_TEXT_LENGTH
-    && normalized.length > 0
-    && !CONTROL_CHARACTER.test(value);
+  if (value.length > MAXIMUM_CLAUDE_TEXT_LENGTH) return false;
+  return value.trim().length > 0 && !CONTROL_CHARACTER.test(value);
 }

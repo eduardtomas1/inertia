@@ -8,6 +8,7 @@ import {
 import { runtimeEnvironmentKind } from "../../src/server/runtime-status";
 
 describe("supervised runtime process environment", () => {
+  const multiMegabyteValue = " ".repeat(2 * 1_024 * 1_024);
   const sentinelSecrets: NodeJS.ProcessEnv = {
     ANTHROPIC_API_KEY: "sentinel-anthropic-secret",
     ANTHROPIC_AWS_API_KEY: "sentinel-anthropic-aws-secret",
@@ -356,12 +357,18 @@ describe("supervised runtime process environment", () => {
       expect(runtimeProcessEnvironment({
         [key]: `true${" ".repeat(16)}`,
       }, "linux")).toEqual({});
+      expect(runtimeProcessEnvironment({
+        [key]: multiMegabyteValue,
+      }, "linux")).toEqual({});
     }
     expect(runtimeProcessEnvironment({
       ANTHROPIC_BEDROCK_REGION_PREFIX: "north-america",
     }, "linux")).toEqual({});
     expect(runtimeProcessEnvironment({
       ANTHROPIC_BEDROCK_REGION_PREFIX: "u".repeat(257),
+    }, "linux")).toEqual({});
+    expect(runtimeProcessEnvironment({
+      ANTHROPIC_BEDROCK_REGION_PREFIX: multiMegabyteValue,
     }, "linux")).toEqual({});
     for (const key of [
       "ANTHROPIC_AWS_WORKSPACE_ID",
@@ -375,6 +382,9 @@ describe("supervised runtime process environment", () => {
         [key]: "x".repeat(257),
       }, "linux")).toEqual({});
     }
+    expect(runtimeProcessEnvironment({
+      ANTHROPIC_AWS_WORKSPACE_ID: multiMegabyteValue,
+    }, "linux")).toEqual({});
     expect(runtimeProcessEnvironment({
       ANTHROPIC_AWS_API_KEY: "sentinel-aws-secret",
       ANTHROPIC_AWS_AUTH: "Bearer sentinel-aws-secret",

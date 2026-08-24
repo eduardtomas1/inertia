@@ -46,6 +46,7 @@ const ENVIRONMENT_KEYS = [
 ] as const;
 
 describe.sequential("provider environment discovery", () => {
+  const multiMegabyteValue = " ".repeat(2 * 1_024 * 1_024);
   const roots: string[] = [];
   const originalEnvironment = Object.fromEntries(ENVIRONMENT_KEYS.map((key) => [key, process.env[key]]));
 
@@ -274,6 +275,51 @@ describe.sequential("provider environment discovery", () => {
     });
   });
 
+  it.each(["true", "1", "yes", "on"])(
+    "activates native Claude cloud identity with %s",
+    (truthy) => {
+      const environment = providerChildEnvironment("claude", {
+        CLAUDE_CODE_USE_ANTHROPIC_AWS: truthy,
+        CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD: truthy,
+        AWS_ACCESS_KEY_ID: "aws-access-id",
+        AMAZON_BEDROCK_PROFILE: "amazon-profile",
+        CLOUD_ML_REGION: "europe-west4",
+        GOOGLE_APPLICATION_CREDENTIALS: "/run/secrets/google.json",
+        GCLOUD_PROJECT: "example-project",
+      });
+
+      expect(environment).toMatchObject({
+        CLAUDE_CODE_USE_ANTHROPIC_AWS: truthy,
+        CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD: truthy,
+        AWS_ACCESS_KEY_ID: "aws-access-id",
+        AMAZON_BEDROCK_PROFILE: "amazon-profile",
+        CLOUD_ML_REGION: "europe-west4",
+        GOOGLE_APPLICATION_CREDENTIALS: "/run/secrets/google.json",
+        GCLOUD_PROJECT: "example-project",
+      });
+    },
+  );
+
+  it.each(["false", "0", "no", "off"])(
+    "does not activate native Claude cloud identity with %s",
+    (falsey) => {
+      const environment = providerChildEnvironment("claude", {
+        CLAUDE_CODE_USE_ANTHROPIC_AWS: falsey,
+        CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD: falsey,
+        AWS_ACCESS_KEY_ID: "must-not-pass",
+        AMAZON_BEDROCK_PROFILE: "must-not-pass",
+        CLOUD_ML_REGION: "must-not-pass",
+        GOOGLE_APPLICATION_CREDENTIALS: "/must/not/pass.json",
+        GCLOUD_PROJECT: "must-not-pass",
+      });
+
+      expect(environment).toEqual({
+        CLAUDE_CODE_USE_ANTHROPIC_AWS: falsey,
+        CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD: falsey,
+      });
+    },
+  );
+
   it("rejects malformed and oversized Claude cloud routes in provider children", () => {
     for (const key of [
       "ANTHROPIC_AWS_BASE_URL",
@@ -298,12 +344,18 @@ describe.sequential("provider environment discovery", () => {
       expect(providerChildEnvironment("claude", {
         [key]: `true${" ".repeat(16)}`,
       })).toEqual({});
+      expect(providerChildEnvironment("claude", {
+        [key]: multiMegabyteValue,
+      })).toEqual({});
     }
     expect(providerChildEnvironment("claude", {
       ANTHROPIC_BEDROCK_REGION_PREFIX: "north-america",
     })).toEqual({});
     expect(providerChildEnvironment("claude", {
       ANTHROPIC_BEDROCK_REGION_PREFIX: "u".repeat(257),
+    })).toEqual({});
+    expect(providerChildEnvironment("claude", {
+      ANTHROPIC_BEDROCK_REGION_PREFIX: multiMegabyteValue,
     })).toEqual({});
     for (const key of [
       "ANTHROPIC_AWS_WORKSPACE_ID",
@@ -317,6 +369,9 @@ describe.sequential("provider environment discovery", () => {
         [key]: "x".repeat(257),
       })).toEqual({});
     }
+    expect(providerChildEnvironment("claude", {
+      ANTHROPIC_AWS_WORKSPACE_ID: multiMegabyteValue,
+    })).toEqual({});
   });
 
   it("recognizes every outer-boundary provider routing control", () => {

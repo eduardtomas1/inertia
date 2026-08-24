@@ -10,6 +10,7 @@ import {
   resolveClaudeModelRouting,
   type ClaudeCompatibleBackendProfile,
 } from "../../../shared/claude-backend-profiles";
+import { CLAUDE_CLOUD_ROUTING_ENVIRONMENT_KEYS } from "../../../node/provider-routing-environment";
 import type {
   HarnessBackendCompatibility,
   KnownHarnessId,
@@ -79,6 +80,7 @@ const CLAUDE_BACKEND_ENVIRONMENT_KEYS = [
   "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE",
   "CLAUDE_ENABLE_STREAM_WATCHDOG",
   "ENABLE_TOOL_SEARCH",
+  ...CLAUDE_CLOUD_ROUTING_ENVIRONMENT_KEYS,
 ] as const;
 
 const SECRET_ENVIRONMENT_KEYS = [

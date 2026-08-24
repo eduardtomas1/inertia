@@ -3,6 +3,7 @@ import { access, open, readdir, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { delimiter, isAbsolute, join, resolve } from "node:path";
 import {
+  isClaudeCloudRoutingEnvironmentEnabled,
   isClaudeCloudRoutingEnvironmentKey,
   isValidClaudeCloudRoutingEnvironmentValue,
 } from "../node/provider-routing-environment";
@@ -146,7 +147,12 @@ export function providerChildEnvironment(
   if (providerId === "codex") normalizeCodexHomeEnvironment(result);
   if (
     providerId === "claude"
-    && source.CLAUDE_CODE_USE_BEDROCK === "1"
+    && (
+      source.CLAUDE_CODE_USE_BEDROCK === "1"
+      || isClaudeCloudRoutingEnvironmentEnabled(
+        source.CLAUDE_CODE_USE_ANTHROPIC_AWS,
+      )
+    )
   ) {
     copyMatchingEnvironment(
       result,
@@ -156,7 +162,12 @@ export function providerChildEnvironment(
   }
   if (
     providerId === "claude"
-    && source.CLAUDE_CODE_USE_VERTEX === "1"
+    && (
+      source.CLAUDE_CODE_USE_VERTEX === "1"
+      || isClaudeCloudRoutingEnvironmentEnabled(
+        source.CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD,
+      )
+    )
   ) {
     copyMatchingEnvironment(
       result,

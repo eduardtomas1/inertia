@@ -98,6 +98,7 @@ describe("supervised runtime process environment", () => {
       GPG_TTY: "/dev/ttys001",
       HOME: "/Users/person",
       INERTIA_STREAMING_TRACE: "1",
+      KUBECONFIG: "/Users/person/.kube/work-config",
       LANG: "en_US.UTF-8",
       LC_ADDRESS: "en_GB.UTF-8",
       LC_IDENTIFICATION: "en_GB.UTF-8",
@@ -129,7 +130,9 @@ describe("supervised runtime process environment", () => {
       WSLENV: "USERPROFILE/up:PROGRAMDATA/up",
       XAUTHORITY: "/run/user/501/gdm/Xauthority",
       XDG_CONFIG_HOME: "/Users/person/.config",
+      XDG_CONFIG_DIRS: "/opt/vendor/etc/xdg:/etc/xdg",
       XDG_CURRENT_DESKTOP: "GNOME",
+      XDG_DATA_DIRS: "/nix/var/nix/profiles/default/share:/usr/local/share:/usr/share",
       XDG_SESSION_DESKTOP: "gnome",
       XDG_SESSION_TYPE: "wayland",
       XDG_STATE_HOME: "/Users/person/.local/state-work",
@@ -182,6 +185,7 @@ describe("supervised runtime process environment", () => {
       GPG_TTY: parent.GPG_TTY,
       HOME: parent.HOME,
       INERTIA_STREAMING_TRACE: parent.INERTIA_STREAMING_TRACE,
+      KUBECONFIG: parent.KUBECONFIG,
       LANG: parent.LANG,
       LC_ADDRESS: parent.LC_ADDRESS,
       LC_IDENTIFICATION: parent.LC_IDENTIFICATION,
@@ -213,7 +217,9 @@ describe("supervised runtime process environment", () => {
       WSLENV: parent.WSLENV,
       XAUTHORITY: parent.XAUTHORITY,
       XDG_CONFIG_HOME: parent.XDG_CONFIG_HOME,
+      XDG_CONFIG_DIRS: parent.XDG_CONFIG_DIRS,
       XDG_CURRENT_DESKTOP: parent.XDG_CURRENT_DESKTOP,
+      XDG_DATA_DIRS: parent.XDG_DATA_DIRS,
       XDG_SESSION_DESKTOP: parent.XDG_SESSION_DESKTOP,
       XDG_SESSION_TYPE: parent.XDG_SESSION_TYPE,
       XDG_STATE_HOME: parent.XDG_STATE_HOME,
@@ -240,6 +246,7 @@ describe("supervised runtime process environment", () => {
       Git_Config_Global: "C:\\Users\\person\\.gitconfig",
       NODE_ENV: "production",
       INERTIA_STREAMING_TRACE: "1",
+      KubeConfig: "C:\\Users\\person\\.kube\\work-config",
       Less: "-FRX",
       ManPager: "C:\\Tools\\less.exe",
       No_Color: "1",
@@ -259,6 +266,8 @@ describe("supervised runtime process environment", () => {
       Aws_Endpoint_Url_Bedrock_Runtime:
         "https://bedrock-runtime.windows.test",
       UserProfile: "C:\\Users\\person",
+      Xdg_Config_Dirs: "C:\\Vendor\\xdg;C:\\ProgramData\\xdg",
+      Xdg_Data_Dirs: "C:\\Vendor\\share;C:\\ProgramData\\share",
       ...sentinelSecrets,
     };
 
@@ -278,6 +287,7 @@ describe("supervised runtime process environment", () => {
       GIT_PAGER: parent.Git_Pager,
       GIT_SEQUENCE_EDITOR: parent.Git_Sequence_Editor,
       GIT_CONFIG_GLOBAL: parent.Git_Config_Global,
+      KUBECONFIG: parent.KubeConfig,
       LESS: parent.Less,
       MANPAGER: parent.ManPager,
       NO_COLOR: parent.No_Color,
@@ -297,6 +307,8 @@ describe("supervised runtime process environment", () => {
       AWS_ENDPOINT_URL_BEDROCK_RUNTIME:
         parent.Aws_Endpoint_Url_Bedrock_Runtime,
       USERPROFILE: parent.UserProfile,
+      XDG_CONFIG_DIRS: parent.Xdg_Config_Dirs,
+      XDG_DATA_DIRS: parent.Xdg_Data_Dirs,
     });
   });
 

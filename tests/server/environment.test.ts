@@ -320,6 +320,41 @@ describe.sequential("provider environment discovery", () => {
     },
   );
 
+  it("isolates AWS cloud identity when Google cloud routing is disabled", () => {
+    expect(providerChildEnvironment("claude", {
+      CLAUDE_CODE_USE_ANTHROPIC_AWS: "on",
+      CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD: "off",
+      AWS_ACCESS_KEY_ID: "aws-access-id",
+      AMAZON_BEDROCK_PROFILE: "amazon-profile",
+      CLOUD_ML_REGION: "must-not-pass",
+      GOOGLE_APPLICATION_CREDENTIALS: "/must/not/pass.json",
+      GCLOUD_PROJECT: "must-not-pass",
+    })).toEqual({
+      CLAUDE_CODE_USE_ANTHROPIC_AWS: "on",
+      CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD: "off",
+      AWS_ACCESS_KEY_ID: "aws-access-id",
+      AMAZON_BEDROCK_PROFILE: "amazon-profile",
+    });
+  });
+
+  it("isolates Google cloud identity when AWS cloud routing is disabled", () => {
+    expect(providerChildEnvironment("claude", {
+      CLAUDE_CODE_USE_ANTHROPIC_AWS: "off",
+      CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD: "on",
+      AWS_ACCESS_KEY_ID: "must-not-pass",
+      AMAZON_BEDROCK_PROFILE: "must-not-pass",
+      CLOUD_ML_REGION: "europe-west4",
+      GOOGLE_APPLICATION_CREDENTIALS: "/run/secrets/google.json",
+      GCLOUD_PROJECT: "example-project",
+    })).toEqual({
+      CLAUDE_CODE_USE_ANTHROPIC_AWS: "off",
+      CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD: "on",
+      CLOUD_ML_REGION: "europe-west4",
+      GOOGLE_APPLICATION_CREDENTIALS: "/run/secrets/google.json",
+      GCLOUD_PROJECT: "example-project",
+    });
+  });
+
   it("rejects malformed and oversized Claude cloud routes in provider children", () => {
     for (const key of [
       "ANTHROPIC_AWS_BASE_URL",

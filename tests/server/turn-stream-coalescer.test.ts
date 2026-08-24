@@ -989,10 +989,13 @@ describe("TurnController coalesced streaming", () => {
     await flushPromises();
 
     const turn = runtime.store.agentTurn(queued.turn.id);
-    expect(runtime.store.snapshot().messages).toContainEqual(expect.objectContaining({
+    const terminalAssistantMessage = runtime.store.snapshot().messages.find(
+      ({ id }) => id === turn.terminalAssistantMessageId,
+    );
+    expect(terminalAssistantMessage).toMatchObject({
       id: turn.terminalAssistantMessageId,
       content: "pending assistant",
-    }));
+    });
     expect(runtime.store.snapshot().reasonings).toContainEqual(expect.objectContaining({
       turnId: queued.turn.id,
       content: "pending reasoning",
@@ -1005,6 +1008,18 @@ describe("TurnController coalesced streaming", () => {
       expect.objectContaining({ type: "agent.reasoning", text: "pending reasoning" }),
       expect.objectContaining({ type: "agent.completed" }),
     ]);
+    const terminalEvent = runtime.events.find((event) => (
+      event.type === "agent.completed" && event.turnId === queued.turn.id
+    ));
+    expect(terminalEvent).toMatchObject({
+      type: "agent.completed",
+      terminalAssistantMessageId: terminalAssistantMessage?.id,
+      terminalAssistantMessage,
+    });
+    expect(runtime.events).not.toContainEqual({
+      type: "conversation.message.persisted",
+      message: terminalAssistantMessage,
+    });
     expect(runtime.scheduler.timers).toHaveLength(0);
     await closeRuntime(runtime);
   });
@@ -1166,12 +1181,23 @@ describe("TurnController coalesced streaming", () => {
       content: "reasoning before shutdown",
       status: "failed",
     }));
+    const terminalAssistantMessage = runtime.store.snapshot().messages.find(
+      ({ id }) => id === turn.terminalAssistantMessageId,
+    );
     expect(runtime.events.filter(({ type }) =>
       type === "agent.text" || type === "agent.reasoning" || type === "agent.failed")).toEqual([
       expect.objectContaining({ type: "agent.text", text: "saved before shutdown" }),
       expect.objectContaining({ type: "agent.reasoning", text: "reasoning before shutdown" }),
-      expect.objectContaining({ type: "agent.failed" }),
+      expect.objectContaining({
+        type: "agent.failed",
+        terminalAssistantMessageId: terminalAssistantMessage?.id,
+        terminalAssistantMessage,
+      }),
     ]);
+    expect(runtime.events).not.toContainEqual({
+      type: "conversation.message.persisted",
+      message: terminalAssistantMessage,
+    });
     expect(runtime.scheduler.timers).toHaveLength(0);
     await closeRuntime(runtime);
   });

@@ -72,6 +72,9 @@ import {
   transcriptNavigationFollowsContent,
   transcriptNavigationReducer,
 } from "../utils/transcriptNavigation";
+import {
+  markTestStreamingReaderActivityReceipt,
+} from "../utils/testStreamingTrace";
 import { Composer } from "./Composer";
 import type { ChatGoalControlProps } from "./ChatGoalControl";
 import type { PromptPresetCommandRunner } from "./composer/types";
@@ -548,12 +551,13 @@ export function ChatWorkspace({
   );
 
   useEffect(() => {
+    markTestStreamingReaderActivityReceipt(streamingText);
     if (!transcriptNavigationFollowsContent(navigationRef.current)) return;
     const frame = window.requestAnimationFrame(
       () => performScrollToLatest("auto"),
     );
     return () => window.cancelAnimationFrame(frame);
-  }, [contentSignal, performScrollToLatest]);
+  }, [contentSignal, performScrollToLatest, streamingText]);
 
   useEffect(() => {
     const content = timelineRef.current;

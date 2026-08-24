@@ -3,6 +3,9 @@ import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ChatWorkspace } from "../../src/renderer/src/components/ChatWorkspace";
+import {
+  streamingReaderActivityReceiptStage,
+} from "../../src/renderer/src/utils/testStreamingTrace";
 import type {
   AgentTurn,
   ChatMessage,
@@ -341,10 +344,71 @@ async function expectVirtualWindow(container: HTMLElement): Promise<void> {
 
 afterEach(() => {
   finalAnswerAnchorStarts.mockReset();
+  Reflect.deleteProperty(globalThis, "__inertiaTestStreamingTrace");
   vi.restoreAllMocks();
 });
 
 describe("ChatWorkspace final-answer hydration", () => {
+  it("marks only the exact trailing reader activity committed at the workspace boundary", async () => {
+    const activeConversation = conversation("conversation-stream-commit");
+    const runningTurn = turn(activeConversation, 1, "running");
+    const beforeMarker = "STREAM_PROVIDER_READER_ACTIVITY_1_BEFORE";
+    const awayMarker = "STREAM_PROVIDER_READER_ACTIVITY_1_AWAY";
+    const trace = vi.fn();
+    Reflect.set(globalThis, "__inertiaTestStreamingTrace", trace);
+    const props = workspaceProps(activeConversation);
+    const view = render(
+      <ChatWorkspace
+        {...props}
+        latestTurnSummary={latestTurnSummary(runningTurn, "running")}
+        turns={[runningTurn]}
+        messages={messagesForTurn(runningTurn)}
+        streamingText={`${"earlier provider text ".repeat(20)}${beforeMarker} `}
+      />,
+    );
+    await waitFor(() => expect(trace).toHaveBeenCalledWith(
+      streamingReaderActivityReceiptStage(beforeMarker),
+    ));
+    trace.mockClear();
+
+    view.rerender(
+      <ChatWorkspace
+        {...props}
+        latestTurnSummary={latestTurnSummary(runningTurn, "running")}
+        turns={[runningTurn]}
+        messages={messagesForTurn(runningTurn)}
+        streamingText={`${beforeMarker} ${awayMarker} pending unrelated content`}
+      />,
+    );
+    await act(async () => Promise.resolve());
+    expect(trace).not.toHaveBeenCalled();
+
+    view.rerender(
+      <ChatWorkspace
+        {...props}
+        latestTurnSummary={latestTurnSummary(runningTurn, "running")}
+        turns={[runningTurn]}
+        messages={messagesForTurn(runningTurn)}
+        streamingText={`${beforeMarker} STREAM_PROVIDER_READER_ACTIVITY_10000_AWAY `}
+      />,
+    );
+    await act(async () => Promise.resolve());
+    expect(trace).not.toHaveBeenCalled();
+
+    view.rerender(
+      <ChatWorkspace
+        {...props}
+        latestTurnSummary={latestTurnSummary(runningTurn, "running")}
+        turns={[runningTurn]}
+        messages={messagesForTurn(runningTurn)}
+        streamingText={`${beforeMarker} ${awayMarker} `}
+      />,
+    );
+    await waitFor(() => expect(trace).toHaveBeenCalledWith(
+      streamingReaderActivityReceiptStage(awayMarker),
+    ));
+  });
+
   it("anchors one virtualized answer from an owner-scoped running shell", async () => {
     const activeConversation = conversation("conversation-shell-live");
     const staleConversation = conversation("conversation-shell-stale");

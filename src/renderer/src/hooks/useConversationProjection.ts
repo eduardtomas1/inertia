@@ -811,6 +811,26 @@ export function useConversationProjection({
       if (hydration) hydration.channel = "reasoning";
     }
     if (event.type === "agent.completed" || event.type === "agent.failed") {
+      const embeddedTerminalAssistantMessage = event.terminalAssistantMessage;
+      const terminalAssistantMessage = embeddedTerminalAssistantMessage
+        && embeddedTerminalAssistantMessage.role === "assistant"
+        && embeddedTerminalAssistantMessage.conversationId === event.conversationId
+        && embeddedTerminalAssistantMessage.turnId === event.turnId
+        && embeddedTerminalAssistantMessage.id === event.terminalAssistantMessageId
+        ? embeddedTerminalAssistantMessage
+        : null;
+      if (terminalAssistantMessage) {
+        setLiveMessages((current) => {
+          const existing = current[terminalAssistantMessage.conversationId] ?? [];
+          return {
+            ...current,
+            [terminalAssistantMessage.conversationId]: [
+              ...existing.filter(({ id }) => id !== terminalAssistantMessage.id),
+              terminalAssistantMessage,
+            ],
+          };
+        });
+      }
       const liveTurnOwner = liveTurnOwnerRef.current;
       const eventOwner = turnEventOwner(event);
       if (!terminalEventMatchesCurrentTurn({
@@ -838,6 +858,8 @@ export function useConversationProjection({
           owner: eventOwner,
           status: event.status,
           terminalReason: event.terminalReason,
+          terminalAssistantMessageId:
+            terminalAssistantMessage?.id ?? event.terminalAssistantMessageId,
         },
       ));
       terminalRefreshPendingRef.current = true;

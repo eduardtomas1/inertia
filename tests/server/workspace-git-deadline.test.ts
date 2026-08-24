@@ -30,6 +30,7 @@ import type { RuntimeSecureFileBroker } from "../../src/server/secure-files";
 const roots: string[] = [];
 
 afterEach(() => {
+  vi.useRealTimers();
   fsGate.blockedName = null;
   fsGate.inspectedPaths = [];
   while (roots.length > 0) rmSync(roots.pop()!, { recursive: true, force: true });
@@ -51,13 +52,19 @@ describe("workspace Git traversal deadline", () => {
   });
 
   it("aborts a stalled secure-root authorization at the aggregate deadline", async () => {
+    vi.useFakeTimers({ now: 10_000 });
     const root = mkdtempSync(join(tmpdir(), "inertia-workspace-auth-deadline-"));
     roots.push(root);
     mkdirSync(join(root, ".git"));
     let observedSignal: AbortSignal | undefined;
+    let markAuthorizationStarted!: () => void;
+    const authorizationStarted = new Promise<void>((resolve) => {
+      markAuthorizationStarted = resolve;
+    });
     const secureFiles: RuntimeSecureFileBroker = {
       authorizeRoot: vi.fn(async (_path: string, signal?: AbortSignal) => {
         observedSignal = signal;
+        markAuthorizationStarted();
         return await new Promise<never>((_resolve, reject) => {
           signal?.addEventListener("abort", () => {
             reject(new Error("aborted"));
@@ -73,10 +80,13 @@ describe("workspace Git traversal deadline", () => {
       }),
     };
 
-    await expect(discoverWorkspaceGitRepositories(root, {
+    const discovery = expect(discoverWorkspaceGitRepositories(root, {
       deadlineAt: Date.now() + 40,
       secureFiles,
     })).rejects.toThrow("Workspace repository discovery took too long.");
+    await authorizationStarted;
+    await vi.advanceTimersByTimeAsync(40);
+    await discovery;
     expect(observedSignal?.aborted).toBe(true);
     expect(secureFiles.verifyRoot).not.toHaveBeenCalled();
   });

@@ -186,6 +186,12 @@ test("keeps a clamped accepted turn pending until its delayed answer can follow"
       "utf8",
     );
     await expect(latestLine).toBeVisible({ timeout: 5_000 });
+    // The fixture publishes the complete stream before its terminal event.
+    // Wait for this turn's persisted answer so the reader gesture exercises
+    // post-settlement navigation instead of racing the live-to-final swap.
+    await expect(acceptedRow.locator(
+      '[data-answer-phase="persisted"][aria-label="Final assistant answer"]',
+    )).toBeVisible({ timeout: 5_000 });
     await expect.poll(() => latestLine.evaluate((line) => {
       const viewport = document.querySelector<HTMLElement>(".message-scroll")
         ?.getBoundingClientRect();
@@ -224,6 +230,11 @@ test("positions a completed answer at the viewport start by default", async () =
     await composer.getByRole("textbox", { name: "Message" })
       .fill(request);
     await composer.getByRole("button", { name: "Send message" }).click();
+    // Prove the active turn reached the renderer before allowing the fixture
+    // to complete. Otherwise a loaded host can deliver the terminal snapshot
+    // before the final-answer observer has seen the active lifecycle.
+    await expect(composer.getByRole("button", { name: "Stop agent" }))
+      .toBeVisible();
 
     const acceptedRow = page.locator("[data-turn-id]").filter({
       has: page.getByText(request, { exact: true }),

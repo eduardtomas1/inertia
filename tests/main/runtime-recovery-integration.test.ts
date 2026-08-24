@@ -96,6 +96,30 @@ async function waitFor(
   }
 }
 
+function markerGatedRequestTimer(markerPath: string): typeof setTimeout {
+  let recoveryDeadlineCount = 0;
+  return ((
+    callback: (...args: unknown[]) => void,
+    delay?: number,
+    ...args: unknown[]
+  ) => {
+    if (delay !== 1) return setTimeout(callback, delay, ...args);
+    recoveryDeadlineCount += 1;
+    if (recoveryDeadlineCount > 1) {
+      return setTimeout(callback, 10_000, ...args);
+    }
+    // Arm the request deadline only after the isolated import worker proves
+    // it owns the transaction. Cold worker startup is not part of the
+    // cancellation behavior under test.
+    const timer = setInterval(() => {
+      if (!existsSync(markerPath)) return;
+      clearInterval(timer);
+      callback(...args);
+    }, 10);
+    return timer;
+  }) as typeof setTimeout;
+}
+
 function buildRuntimeWorkers(): string {
   const buildDirectory = mkdtempSync(join(repositoryRoot, ".recovery-integration-"));
   temporaryDirectories.push(buildDirectory);
@@ -168,27 +192,7 @@ describe("runtime recovery supervisor integration", () => {
 
     const children: NodeUtilityProcess[] = [];
     const states: string[] = [];
-    let recoveryDeadlineCount = 0;
-    const markerGatedSetTimer = ((
-      callback: (...args: unknown[]) => void,
-      delay?: number,
-      ...args: unknown[]
-    ) => {
-      if (delay !== 1) return setTimeout(callback, delay, ...args);
-      recoveryDeadlineCount += 1;
-      if (recoveryDeadlineCount > 1) {
-        return setTimeout(callback, 10_000, ...args);
-      }
-      // Arm the request deadline only once the privileged post-rename fault
-      // has taken control. This removes cold worker startup from the forced
-      // cancellation assertion without changing any product timeout.
-      const timer = setInterval(() => {
-        if (!existsSync(markerPath)) return;
-        clearInterval(timer);
-        callback(...args);
-      }, 10);
-      return timer;
-    }) as typeof setTimeout;
+    const markerGatedSetTimer = markerGatedRequestTimer(markerPath);
     const supervisor = new RuntimeSupervisor({
       workerOptions: {
         dataDirectory,
@@ -299,6 +303,7 @@ describe("runtime recovery supervisor integration", () => {
     const runtimeWorkerPath = buildRuntimeWorkers();
     const children: NodeUtilityProcess[] = [];
     const states: string[] = [];
+    const markerGatedSetTimer = markerGatedRequestTimer(markerPath);
     const supervisor = new RuntimeSupervisor({
       workerOptions: {
         dataDirectory,
@@ -319,7 +324,8 @@ describe("runtime recovery supervisor integration", () => {
       stableUptimeMs: 30_000,
       shutdownGraceMs: 2_000,
       forceKillWaitMs: 1_000,
-      databaseRecoveryRequestTimeoutMs: 5_000,
+      setTimer: markerGatedSetTimer,
+      databaseRecoveryRequestTimeoutMs: 1,
       databaseRecoveryCancelTimeoutMs: 2_000,
       onStateChange: ({ phase, generation, pid }) => {
         states.push(`${phase}:${generation}:${pid ?? 0}`);
@@ -341,12 +347,15 @@ describe("runtime recovery supervisor integration", () => {
       recoveryPath,
       targetDirectory,
     );
+    const timedOutAndCancelled = expect(pending).rejects.toThrow(
+      /timed out and was cancelled/u,
+    );
     await waitFor(
       () => existsSync(markerPath),
       "busy import transaction marker",
       diagnostics,
     );
-    await expect(pending).rejects.toThrow(/timed out and was cancelled/u);
+    await timedOutAndCancelled;
     expect(supervisor.snapshot()).toMatchObject({ phase: "ready", generation: 1 });
     expect(readdirSync(targetDirectory)).toEqual([]);
 

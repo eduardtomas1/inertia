@@ -3,7 +3,6 @@ import { conversationDetailCollectionsCoherent, modelRouteIdentityCoherent, pull
 import { APP_SHORTCUT_KEYS, DEFAULT_APP_KEYBINDINGS } from "../keybindings";
 import { continuationIdentitySchema, modelSelectionSchema } from "../model-routing";
 import { modelBackendDefaultSchema, modelBackendProfileDetailSchema, modelBackendProfileViewSchema } from "../backend-profile-settings";
-import { CHAT_ATTACHMENT_MIME_TYPES } from "../attachments";
 import { AGENT_TURN_STATUSES, type AgentTurnStatus } from "../turn-lifecycle";
 import { AGENT_GOAL_STATUSES } from "./agent-workflows";
 import { DUO_COMPARISON_STATES, DUO_DISPATCH_STATES, DUO_LAUNCH_STATES } from "./duo";
@@ -13,6 +12,7 @@ import { dailyWorkDashboardSchema } from "./daily-work-schema";
 import { providerFastModeField } from "./provider-fast-mode-schema";
 import { validatePreMergeConfidence } from "./pre-merge-confidence-schema";
 import { COLOR_THEME_IDS } from "./app";
+import { chatMessageSchema as chatMessage, optionalTerminalAssistantMessageSchema as optionalTerminalAssistantMessage } from "./chat-message-schema";
 import { MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES, MAX_CONVERSATION_CONTEXT_MESSAGES, MAX_CONVERSATION_CONTEXT_NOTE_BYTES, MAX_CONVERSATION_CONTEXT_SOURCE_MESSAGES, MAX_CONVERSATION_CONTEXT_TOTAL_BYTES } from "../conversation-context";
 type UnknownRecord = Record<string, unknown>; const UTF8_ENCODER = new TextEncoder(); const PROVIDER_IDS = ["codex", "claude", "cursor", "kimi", "opencode"] as const; const USAGE_SCOPES = ["thread", "session", "run"] as const; const ACCESS_MODES = ["supervised", "auto-edit", "full"] as const; const WORKSPACE_RELATIONS = ["same-workspace", "different-workspace"] as const; const PROJECT_GROUPING = ["repository", "repository-path", "separate"] as const; const PATCH_STATES = ["none", "available", "truncated", "expired", "failed"] as const; const COMPLETENESS = ["complete", "truncated", "partial", "unavailable"] as const; const INTERACTION_MODES = ["build", "plan"] as const;
 const utf8Length = (value: string): number => UTF8_ENCODER.encode(value).byteLength;
@@ -87,20 +87,6 @@ function syncCursor(value: unknown): boolean {
     && (value.runtimeGeneration as string).length > 0
     && Number.isSafeInteger(value.latestSequence)
     && Number(value.latestSequence) >= 0;
-}
-
-function attachment(value: unknown): boolean {
-  return recordWithStrings(value, "id", "name", "path", "mimeType")
-    && oneOf(value, "mimeType", CHAT_ATTACHMENT_MIME_TYPES)
-    && numberField(value, "size")
-    && Number(value.size) >= 0;
-}
-function chatMessage(value: unknown): boolean {
-  return recordWithStrings(value, "id", "conversationId", "role", "content", "createdAt")
-    && nullableStringField(value, "turnId")
-    && oneOf(value, "role", ["user", "assistant", "system"])
-    && arrayOf(value.attachments, attachment)
-    && uniqueRecordField(value.attachments as unknown[], "id");
 }
 
 function providerMaintenanceStatus(value: unknown): boolean {
@@ -1067,7 +1053,9 @@ function runtimeMutationEvent(value: unknown): value is RuntimeMutationEvent {
       return providerMaintenanceOperation(value.operation);
     case "agent.started": return recordWithStrings(value, "conversationId", "runId", "turnId");
     case "agent.completed": return recordWithStrings(value, "conversationId", "runId", "turnId", "terminalReason")
-      && oneOf(value, "status", ["completed", "cancelled"]);
+      && oneOf(value, "status", ["completed", "cancelled"])
+      && optionalNullableStringField(value, "terminalAssistantMessageId")
+      && optionalTerminalAssistantMessage(value);
     case "agent.text":
     case "agent.reasoning":
       return recordWithStrings(value, "conversationId", "runId", "turnId", "text");
@@ -1101,7 +1089,9 @@ function runtimeMutationEvent(value: unknown): value is RuntimeMutationEvent {
       return recordWithStrings(value, "conversationId", "source")
         && oneOf(value, "source", SERVER_EVENT_OPTIONS.goalSources);
     case "agent.failed": return recordWithStrings(value, "conversationId", "runId", "turnId", "terminalReason", "message")
-      && oneOf(value, "status", ["failed", "interrupted"]);
+      && oneOf(value, "status", ["failed", "interrupted"])
+      && optionalNullableStringField(value, "terminalAssistantMessageId")
+      && optionalTerminalAssistantMessage(value);
     default:
       return false;
   }

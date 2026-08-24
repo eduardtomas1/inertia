@@ -1576,6 +1576,85 @@ describe("server event remaining discriminant and identity boundary", () => {
       message: { ...assistantMessage, conversationId: "conversation-2" },
     })).toThrow("Malformed server event");
   });
+  it("accepts coherent optional terminal assistant messages and legacy identities", () => {
+    const terminalAssistantMessage = {
+      ...conversationDetail.messages[0],
+      id: "terminal-assistant",
+      conversationId: conversation.id,
+      turnId: "turn-1",
+      role: "assistant",
+      content: "Durable final answer.",
+    };
+    const completion = {
+      type: "agent.completed",
+      conversationId: conversation.id,
+      runId: "run-1",
+      turnId: "turn-1",
+      status: "completed",
+      terminalReason: "provider-completed",
+      terminalAssistantMessageId: "terminal-assistant",
+      terminalAssistantMessage,
+    };
+    expect(parseServerEvent(completion)).toBeTruthy();
+    expect(parseServerEvent({
+      ...completion,
+      terminalAssistantMessageId: null,
+      terminalAssistantMessage: null,
+    })).toBeTruthy();
+    expect(parseServerEvent({
+      type: "agent.completed",
+      conversationId: conversation.id,
+      runId: "run-1",
+      turnId: "turn-1",
+      status: "completed",
+      terminalReason: "provider-completed",
+      terminalAssistantMessageId: terminalAssistantMessage.id,
+    })).toBeTruthy();
+    expect(parseServerEvent({
+      type: "agent.failed",
+      conversationId: conversation.id,
+      runId: "run-1",
+      turnId: "turn-1",
+      status: "failed",
+      terminalReason: "provider-failed",
+      message: "Provider failed.",
+      terminalAssistantMessageId: terminalAssistantMessage.id,
+      terminalAssistantMessage,
+    })).toBeTruthy();
+    expect(parseServerEvent({
+      type: "agent.failed",
+      conversationId: conversation.id,
+      runId: "run-1",
+      turnId: "turn-1",
+      status: "failed",
+      terminalReason: "provider-failed",
+      message: "Legacy provider failure.",
+    })).toBeTruthy();
+    expect(() => parseServerEvent({
+      ...completion,
+      terminalAssistantMessageId: 42,
+    })).toThrow("Malformed server event");
+    expect(() => parseServerEvent({
+      type: "agent.completed",
+      conversationId: conversation.id,
+      runId: "run-1",
+      turnId: "turn-1",
+      status: "completed",
+      terminalReason: "provider-completed",
+      terminalAssistantMessage,
+    })).toThrow("Malformed server event");
+    for (const terminalAssistantMessage of [
+      { ...completion.terminalAssistantMessage, role: "user" },
+      { ...completion.terminalAssistantMessage, conversationId: "conversation-2" },
+      { ...completion.terminalAssistantMessage, turnId: "turn-2" },
+      { ...completion.terminalAssistantMessage, id: "other-assistant" },
+    ]) {
+      expect(() => parseServerEvent({
+        ...completion,
+        terminalAssistantMessage,
+      })).toThrow("Malformed server event");
+    }
+  });
   it("binds snapshot conversation runs while preserving project-scoped runs", () => {
     const parseSnapshot = (runs: unknown[]): unknown => parseServerEvent({
       type: "snapshot.updated",

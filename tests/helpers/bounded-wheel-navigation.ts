@@ -1,10 +1,21 @@
 interface BoundedWheelNavigationOptions {
   maxGestures: number;
   maxProgressSamples: number;
-  readScrollTop: () => Promise<number>;
+  readPosition: (
+    trackedItemId?: string,
+  ) => Promise<BoundedWheelPosition | null>;
   targetScrollTop: number;
   waitForNextSample: () => Promise<void>;
   wheelUp: () => Promise<void>;
+}
+
+interface BoundedWheelPosition {
+  itemId: string;
+  itemIndex: number;
+  itemOffset: number;
+  scrollHeight: number;
+  scrollTop: number;
+  trackedItemOffset: number | null;
 }
 
 interface BoundedWheelNavigationResult {
@@ -12,52 +23,124 @@ interface BoundedWheelNavigationResult {
   scrollTop: number;
 }
 
-function requireScrollTop(value: number, label: string): number {
-  if (!Number.isFinite(value) || value < 0) {
-    throw new Error(`${label} returned invalid scrollTop ${String(value)}.`);
+function requirePosition(
+  value: BoundedWheelPosition,
+  label: string,
+): BoundedWheelPosition {
+  if (!Number.isFinite(value.scrollTop) || value.scrollTop < 0) {
+    throw new Error(`${label} returned invalid scrollTop ${String(value.scrollTop)}.`);
+  }
+  if (!Number.isFinite(value.scrollHeight) || value.scrollHeight < 0) {
+    throw new Error(`${label} returned invalid scrollHeight ${String(value.scrollHeight)}.`);
+  }
+  if (value.itemId.length === 0) {
+    throw new Error(`${label} returned an empty itemId.`);
+  }
+  if (!Number.isInteger(value.itemIndex) || value.itemIndex < 0) {
+    throw new Error(`${label} returned invalid itemIndex ${String(value.itemIndex)}.`);
+  }
+  if (!Number.isFinite(value.itemOffset)) {
+    throw new Error(`${label} returned invalid itemOffset ${String(value.itemOffset)}.`);
+  }
+  if (
+    value.trackedItemOffset !== null
+    && !Number.isFinite(value.trackedItemOffset)
+  ) {
+    throw new Error(
+      `${label} returned invalid trackedItemOffset ${String(value.trackedItemOffset)}.`,
+    );
   }
   return value;
+}
+
+function madeUpwardProgress(
+  previous: BoundedWheelPosition,
+  current: BoundedWheelPosition,
+): boolean {
+  // Virtual indices can shift while streamed rows are inserted or reconciled.
+  // Follow the exact prior row instead: exposing more of that stable row is
+  // reader-owned progress even when measurement raises absolute scrollTop.
+  if (current.trackedItemOffset !== null) {
+    return current.trackedItemOffset > previous.itemOffset;
+  }
+  // Once the prior row is unmounted, only an independently lower native scroll
+  // coordinate proves progress. A shifted virtual index is diagnostic only.
+  return current.scrollTop < previous.scrollTop;
 }
 
 export async function driveBoundedWheelNavigation(
   options: BoundedWheelNavigationOptions,
 ): Promise<BoundedWheelNavigationResult> {
-  let scrollTop = requireScrollTop(
-    await options.readScrollTop(),
-    "The initial reader position",
-  );
-  if (scrollTop < options.targetScrollTop) {
+  let position: BoundedWheelPosition | null = null;
+  for (let sample = 0; sample < options.maxProgressSamples; sample += 1) {
+    const candidate = await options.readPosition();
+    if (candidate !== null) {
+      position = requirePosition(candidate, "The initial reader position");
+      break;
+    }
+    if (sample + 1 < options.maxProgressSamples) {
+      await options.waitForNextSample();
+    }
+  }
+  if (position === null) {
     throw new Error(
-      `Reader navigation started at scrollTop ${scrollTop}; expected at least ${options.targetScrollTop} before a real wheel gesture.`,
+      `The initial reader position had no visible logical item across ${options.maxProgressSamples} bounded samples.`,
+    );
+  }
+  if (position.scrollTop < options.targetScrollTop) {
+    throw new Error(
+      `Reader navigation started at scrollTop ${position.scrollTop}; expected at least ${options.targetScrollTop} before a real wheel gesture.`,
     );
   }
 
   for (let gesture = 1; gesture <= options.maxGestures; gesture += 1) {
-    const previousScrollTop = scrollTop;
+    const previousPosition = position;
     await options.wheelUp();
+    let sampledPosition: BoundedWheelPosition | null = null;
+    let progressed = false;
 
     for (let sample = 0; sample < options.maxProgressSamples; sample += 1) {
-      scrollTop = requireScrollTop(
-        await options.readScrollTop(),
-        `Reader position after wheel gesture ${gesture}`,
-      );
-      if (scrollTop < previousScrollTop) break;
+      const candidate = await options.readPosition(previousPosition.itemId);
+      if (candidate !== null) {
+        sampledPosition = requirePosition(
+          candidate,
+          `Reader position after wheel gesture ${gesture}`,
+        );
+      }
+      if (
+        sampledPosition !== null
+        && candidate !== null
+        && madeUpwardProgress(previousPosition, sampledPosition)
+      ) {
+        progressed = true;
+        break;
+      }
       if (sample + 1 < options.maxProgressSamples) {
         await options.waitForNextSample();
       }
     }
 
-    if (scrollTop >= previousScrollTop) {
+    if (sampledPosition === null) {
       throw new Error(
-        `Wheel gesture ${gesture} made no upward progress: scrollTop remained ${scrollTop} from ${previousScrollTop}.`,
+        `Reader position after wheel gesture ${gesture} had no visible logical item across ${options.maxProgressSamples} bounded samples.`,
       );
     }
-    if (scrollTop < options.targetScrollTop) {
-      return { gestures: gesture, scrollTop };
+    position = sampledPosition;
+    if (!progressed) {
+      // Streaming can grow the document by more than the wheel delta and move
+      // the stable reader row up/out even though Chromium accepted the gesture.
+      // Growth is not success: it only spends the next already-bounded gesture.
+      if (position.scrollHeight > previousPosition.scrollHeight) continue;
+      throw new Error(
+        `Wheel gesture ${gesture} made no upward progress: logical position ended at ${position.itemId} (item ${position.itemIndex}, offset ${position.itemOffset}) while tracked ${previousPosition.itemId} ended at ${String(position.trackedItemOffset)} from item ${previousPosition.itemIndex} offset ${previousPosition.itemOffset} (scrollTop ${position.scrollTop} from ${previousPosition.scrollTop}; scrollHeight ${position.scrollHeight} from ${previousPosition.scrollHeight}).`,
+      );
+    }
+    if (position.scrollTop < options.targetScrollTop) {
+      return { gestures: gesture, scrollTop: position.scrollTop };
     }
   }
 
   throw new Error(
-    `Reader navigation exhausted ${options.maxGestures} wheel gestures at scrollTop ${scrollTop}; expected less than ${options.targetScrollTop}.`,
+    `Reader navigation exhausted ${options.maxGestures} wheel gestures at scrollTop ${position.scrollTop}; expected less than ${options.targetScrollTop}.`,
   );
 }

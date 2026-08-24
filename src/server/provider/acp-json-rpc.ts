@@ -8,6 +8,12 @@ function nonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.length > 0;
 }
 
+function validProtocolIdentifier(value: unknown): value is string {
+  return nonEmptyString(value)
+    && value.length <= 1_000
+    && !/[\u0000-\u001F\u007F-\u009F]/u.test(value);
+}
+
 function finiteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
@@ -75,6 +81,38 @@ function validSessionUpdate(update: Record<string, unknown> & { sessionUpdate: s
         && (update.updatedAt === undefined || update.updatedAt === null || typeof update.updatedAt === "string");
     case "usage_update":
       return finiteNumber(update.used) && finiteNumber(update.size);
+    case "compaction_update": {
+      const status = update.status;
+      return validProtocolIdentifier(update.compactionId)
+        && validProtocolIdentifier(status)
+        && (
+          update.summary === undefined
+          || update.summary === null
+          || (
+            Array.isArray(update.summary)
+            && update.summary.every(validContentBlock)
+            && (update.summary.length === 0 || status === "completed")
+          )
+        )
+        && (
+          update.error === undefined
+          || update.error === null
+          || (typeof update.error === "string" && status === "failed")
+        )
+        && (
+          update._meta === undefined
+          || update._meta === null
+          || Boolean(record(update._meta))
+        );
+    }
+    case "compaction_summary_chunk":
+      return validProtocolIdentifier(update.compactionId)
+        && validContentBlock(update.content)
+        && (
+          update._meta === undefined
+          || update._meta === null
+          || Boolean(record(update._meta))
+        );
     default:
       return false;
   }
@@ -88,10 +126,7 @@ export function parseAcpSessionNotification(value: unknown): {
   const update = record(params?.update);
   if (
     !params
-    || typeof params.sessionId !== "string"
-    || !params.sessionId
-    || params.sessionId.length > 1_000
-    || params.sessionId.includes("\0")
+    || !validProtocolIdentifier(params.sessionId)
     || !update
     || typeof update.sessionUpdate !== "string"
     || !update.sessionUpdate

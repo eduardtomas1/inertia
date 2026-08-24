@@ -100,6 +100,10 @@ describe("agent browser semantic snapshots", () => {
     };
 
     await expect(agentPageHasSensitiveScreenshotEvidence(contents as never)).resolves.toBe(false);
+    body.innerText = "Documentation: http://localhost:3000/docs";
+    await expect(agentPageHasSensitiveScreenshotEvidence(contents as never)).resolves.toBe(false);
+    body.innerText = "Workspace source: /workspace/inertia/src/main.ts";
+    await expect(agentPageHasSensitiveScreenshotEvidence(contents as never)).resolves.toBe(false);
     body.innerText = "API_KEY=sk-visible-token-that-must-not-enter-a-bitmap";
     await expect(agentPageHasSensitiveScreenshotEvidence(contents as never)).resolves.toBe(true);
     body.innerText = ordinaryBodyText;

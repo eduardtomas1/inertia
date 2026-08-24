@@ -2,10 +2,29 @@ import { describe, expect, it } from "vitest";
 
 import {
   browserEvidenceOrigin,
+  browserEvidenceTextContainsSensitiveCredential,
   sanitizeBrowserEvidenceText,
 } from "../../src/shared/browser-evidence";
 
 describe("Browser evidence sanitization", () => {
+  it.each([
+    "Documentation: http://localhost:3000/docs",
+    "Workspace source: /workspace/inertia/src/main.ts",
+    "Ratios x/y and a/b are invalid",
+  ])("does not classify ordinary projected page text as a credential: %s", (value) => {
+    expect(browserEvidenceTextContainsSensitiveCredential(value)).toBe(false);
+  });
+
+  it.each([
+    "API_KEY=sk-visible-token-that-must-not-enter-a-bitmap",
+    "databasepass=visible-input-secret",
+    "Authorization: Bearer visible-browser-secret",
+    "https://user:secret@example.com/docs",
+    "API_KEY%3Dsk-visible-encoded-token-1234",
+  ])("classifies recognizable visible credentials: %s", (value) => {
+    expect(browserEvidenceTextContainsSensitiveCredential(value)).toBe(true);
+  });
+
   it("projects navigation and request URLs to an origin only", () => {
     expect(browserEvidenceOrigin(
       "http://127.0.0.1:4173/reset/private-token?access_token=secret#draft-secret",

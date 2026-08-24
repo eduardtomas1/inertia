@@ -1,7 +1,10 @@
 import type { WebContents } from "electron";
 
 import { MAX_AGENT_BROWSER_TEXT_BYTES } from "../shared/agent-browser.js";
-import { MAX_BROWSER_EVIDENCE_TEXT_CHARS, sanitizeBrowserEvidenceText } from "../shared/browser-evidence.js";
+import {
+  browserEvidenceTextContainsSensitiveCredential,
+  MAX_BROWSER_EVIDENCE_TEXT_CHARS,
+} from "../shared/browser-evidence.js";
 import { installPreviewAgentPrivacyGuard } from "../shared/preview-agent-privacy-guard.js";
 
 // Electron's context-isolated preload world. This is the only world that owns
@@ -476,7 +479,7 @@ function snapshotHasSensitiveVisualEvidence(value: unknown): boolean {
     const step = Math.floor(MAX_BROWSER_EVIDENCE_TEXT_CHARS / 2);
     for (let start = 0; start < candidate.length; start += step) {
       const text = candidate.slice(start, start + MAX_BROWSER_EVIDENCE_TEXT_CHARS);
-      if (sanitizeBrowserEvidenceText(text, "[redacted]").redacted) return true;
+      if (browserEvidenceTextContainsSensitiveCredential(text)) return true;
     }
     return false;
   };

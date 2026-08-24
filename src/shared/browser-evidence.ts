@@ -557,6 +557,46 @@ function suspiciousHostname(hostname: string): boolean {
     ));
 }
 
+function representationContainsSensitiveCredential(value: string): boolean {
+  const authorityRanges = authorityUriTokenRanges(value);
+  const sensitiveAuthority = authorityRanges.some((range) => {
+    const parsed = parsedAuthorityUri(value.slice(range.start, range.end));
+    return Boolean(
+      parsed
+      && (parsed.username || parsed.password || suspiciousHostname(parsed.hostname)),
+    );
+  });
+  return sensitiveAuthority
+    || patternMatches(CREDENTIAL_ASSIGNMENT, value)
+    || patternMatches(CAMEL_CASE_CREDENTIAL_ASSIGNMENT, value)
+    || hasConcatenatedPassAssignment(value)
+    || patternMatches(AUTHORIZATION_VALUE, value)
+    || patternMatches(PREFIXED_SECRET, value)
+    || patternMatches(JWT, value)
+    || patternMatches(PRIVATE_KEY, value)
+    || patternMatches(LONG_OPAQUE_VALUE, value)
+    || patternMatches(TRAILING_SECRET_FRAGMENT, value);
+}
+
+/**
+ * Classifies visible page text for local screenshot preflight without treating
+ * ordinary URL/path projection as a credential. Malformed, oversized, or
+ * over-depth representations still fail closed before bitmap capture.
+ */
+export function browserEvidenceTextContainsSensitiveCredential(
+  value: unknown,
+  maximum = MAX_BROWSER_EVIDENCE_TEXT_CHARS,
+): boolean {
+  const limit = Math.max(1, Math.min(Math.trunc(maximum), MAX_BROWSER_EVIDENCE_TEXT_CHARS));
+  if (typeof value !== "string" || value.length > limit) return true;
+  const representations = boundedInspectionRepresentations(
+    value,
+    Math.max(limit + 4_096, 4_096),
+  );
+  return representations === null
+    || representations.some(representationContainsSensitiveCredential);
+}
+
 /**
  * Browser evidence deliberately keeps only an HTTP(S) origin. User info,
  * paths, queries, and fragments are never part of the local ledger.

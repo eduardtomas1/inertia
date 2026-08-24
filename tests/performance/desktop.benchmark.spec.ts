@@ -20,6 +20,10 @@ import {
 import { processExists } from "../e2e/support/app-fixture";
 import { selectWorkspaceTool } from "../e2e/support/workspace-tools";
 import { driveBoundedWheelNavigation } from "../helpers/bounded-wheel-navigation";
+import {
+  distribution,
+  summarizeStreamingBenchmarkEvidence,
+} from "../helpers/desktop-benchmark-summary";
 import { streamingReaderActivityReceiptStage } from "../../src/renderer/src/utils/testStreamingTrace";
 import {
   beginStreamingReaderActivity,
@@ -95,28 +99,6 @@ interface StreamingPaintMeasurement {
   droppedOrOverBudgetFrames: number;
   frameBudgetMs: number;
   rendererTraceMarks: StreamingTraceMarker[];
-}
-
-interface DistributionSummary {
-  sampleCount: number;
-  minimum: number | null;
-  median: number | null;
-  p95: number | null;
-  maximum: number | null;
-}
-
-function distribution(values: readonly number[]): DistributionSummary {
-  const ordered = values.filter(Number.isFinite).toSorted((left, right) => left - right);
-  const percentile = (fraction: number): number | null => ordered.length > 0
-    ? ordered[Math.min(ordered.length - 1, Math.floor(ordered.length * fraction))]!
-    : null;
-  return {
-    sampleCount: ordered.length,
-    minimum: ordered[0] ?? null,
-    median: percentile(0.5),
-    p95: percentile(0.95),
-    maximum: ordered.at(-1) ?? null,
-  };
 }
 
 const stageMetricDefinitions = [
@@ -1218,8 +1200,7 @@ function summarizeStreamingResponsiveness(
   const finalPaint = distribution(samples.map(
     ({ completionToFinalPaintMs }) => completionToFinalPaintMs,
   ));
-  const visibleGap = distribution(samples.map(({ p95VisibleGapMs }) => p95VisibleGapMs));
-  const longTaskTotal = distribution(samples.map(({ longTaskTotalMs }) => longTaskTotalMs));
+  const evidence = summarizeStreamingBenchmarkEvidence(samples);
   const droppedFrames = distribution(samples.map(
     ({ droppedOrOverBudgetFrames }) => droppedOrOverBudgetFrames,
   ));
@@ -1231,8 +1212,7 @@ function summarizeStreamingResponsiveness(
     distributions: {
       firstProviderDeltaToPaintMs: firstPaint,
       completionToFinalPaintMs: finalPaint,
-      p95VisibleGapMs: visibleGap,
-      longTaskTotalMs: longTaskTotal,
+      ...evidence.distributions,
       droppedOrOverBudgetFrames: droppedFrames,
     },
     firstProviderDeltaToPaintMs: firstPaint.median ?? Number.POSITIVE_INFINITY,
@@ -1240,13 +1220,13 @@ function summarizeStreamingResponsiveness(
     medianVisibleGapMs: distribution(samples.map(
       ({ medianVisibleGapMs }) => medianVisibleGapMs,
     )).median ?? Number.POSITIVE_INFINITY,
-    p95VisibleGapMs: visibleGap.p95 ?? Number.POSITIVE_INFINITY,
+    p95VisibleGapMs: evidence.p95VisibleGapMs,
     visibleUpdates: Math.min(...samples.map(({ visibleUpdates }) => visibleUpdates)),
     visibleUpdatesPerSecond: distribution(samples.map(
       ({ visibleUpdatesPerSecond }) => visibleUpdatesPerSecond,
     )).median ?? 0,
     longTasks: samples.reduce((sum, { longTasks }) => sum + longTasks, 0),
-    longTaskTotalMs: longTaskTotal.maximum ?? Number.POSITIVE_INFINITY,
+    longTaskTotalMs: evidence.longTaskTotalMs,
     frames: samples.reduce((sum, { frames }) => sum + frames, 0),
     droppedOrOverBudgetFrames: samples.reduce(
       (sum, { droppedOrOverBudgetFrames }) => sum + droppedOrOverBudgetFrames,

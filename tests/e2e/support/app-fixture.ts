@@ -211,6 +211,19 @@ async function createPreviewServer(): Promise<{
       );
       return;
     }
+    if (request.url === "/agent-browser-visible-secret-privacy") {
+      const secret = "API_KEY=sk-visible-browser-screenshot-sentinel-1234567890";
+      response.writeHead(200, {
+        "Content-Type": "text/html",
+        "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",
+      });
+      response.end(
+        "<!doctype html><title>Visible secret privacy probe</title>"
+        + "<style>body{font:20px sans-serif;padding:40px}</style>"
+        + `<main><h1>Deployment credentials</h1><p>${secret}</p></main>`,
+      );
+      return;
+    }
     if (request.url === "/agent-browser-nested-privacy-start") {
       const secret = "nested-password-sentinel";
       response.writeHead(200, {

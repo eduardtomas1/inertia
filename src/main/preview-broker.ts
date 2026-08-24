@@ -15,7 +15,7 @@ import {
 import type { PreviewState } from "../shared/desktop.js";
 import { previewNavigationTarget } from "../shared/preview-url.js";
 import {
-  agentPageHasSensitiveEvidence, agentPageInputRefusal, agentPageRefHasFocus,
+  agentPageHasSensitiveEvidence, agentPageHasSensitiveScreenshotEvidence, agentPageInputRefusal, agentPageRefHasFocus,
   installAgentPagePrivacyGuard,
   locateAgentPageRef, semanticPageSnapshot, setAgentPageInputGuard, showAgentPageCursor,
 } from "./preview-agent-page.js";
@@ -813,15 +813,15 @@ export class PreviewBroker {
     let capturedState: AgentBrowserState | null = null;
     try {
       await this.#rendererOperation(contents, () => setAgentPageFrozen(contents, true), { signal });
-      if (await this.#rendererOperation(contents, () => agentPageHasSensitiveEvidence(contents), { signal })) {
-        return failure("invalid", "Screenshots are unavailable until the password-bearing document navigates away.");
+      if (await this.#rendererOperation(contents, () => agentPageHasSensitiveScreenshotEvidence(contents), { signal })) {
+        return failure("invalid", "Screenshots are unavailable while the document contains sensitive evidence.");
       }
       if (await this.#rendererOperation(contents, () => agentPageHasUnguardedNestedContent(contents), { signal })) {
         return failure("invalid", "Screenshots are unavailable for nested page content.");
       }
       image = await this.#rendererOperation(contents, () => contents.capturePage(), { signal });
-      if (await this.#rendererOperation(contents, () => agentPageHasSensitiveEvidence(contents), { signal })) {
-        return failure("invalid", "Screenshots are unavailable until the password-bearing document navigates away.");
+      if (await this.#rendererOperation(contents, () => agentPageHasSensitiveScreenshotEvidence(contents), { signal })) {
+        return failure("invalid", "Screenshots are unavailable while the document contains sensitive evidence.");
       }
       if (await this.#rendererOperation(contents, () => agentPageHasUnguardedNestedContent(contents), { signal })) {
         return failure("invalid", "Screenshots are unavailable for nested page content.");

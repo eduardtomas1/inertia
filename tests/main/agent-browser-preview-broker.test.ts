@@ -236,6 +236,7 @@ const pageTools = vi.hoisted(() => ({
   AGENT_BROWSER_WORLD_ID: 999,
   agentPageActivationBlocked: vi.fn<() => Promise<"disabled" | "file" | null>>(async () => null),
   agentPageHasSensitiveEvidence: vi.fn(async () => false),
+  agentPageHasSensitiveScreenshotEvidence: vi.fn(async () => false),
   agentPageInputRefusal: vi.fn<() => Promise<"disabled" | "file" | "nested" | "retargeted" | null>>(async () => null),
   agentPageRefHasFocus: vi.fn(async () => true),
   installAgentPagePrivacyGuard: vi.fn(async () => undefined),
@@ -951,7 +952,7 @@ describe("agent-owned native Browser", () => {
     pageTools.agentPageHasSensitiveEvidence.mockResolvedValueOnce(true);
     await expect(broker.perform(conversationId, { action: "snapshot" }))
       .resolves.toMatchObject({ ok: false, code: "invalid" });
-    pageTools.agentPageHasSensitiveEvidence.mockResolvedValueOnce(true);
+    pageTools.agentPageHasSensitiveScreenshotEvidence.mockResolvedValueOnce(true);
     await expect(broker.perform(conversationId, { action: "screenshot" }))
       .resolves.toMatchObject({ ok: false, code: "invalid" });
     expect(capturePage).toHaveBeenCalledTimes(captures);
@@ -1070,7 +1071,7 @@ describe("agent-owned native Browser", () => {
       url: "http://127.0.0.1:3000/login",
     });
     const contents = electronState.contents[contentsOffset]!;
-    pageTools.agentPageHasSensitiveEvidence
+    pageTools.agentPageHasSensitiveScreenshotEvidence
       .mockResolvedValueOnce(false)
       .mockResolvedValueOnce(true);
 
@@ -1078,7 +1079,7 @@ describe("agent-owned native Browser", () => {
       .resolves.toMatchObject({
         ok: false,
         code: "invalid",
-        message: "Screenshots are unavailable until the password-bearing document navigates away.",
+        message: "Screenshots are unavailable while the document contains sensitive evidence.",
       });
     expect(contents.capturePage).toHaveBeenCalledOnce();
     expect(contents.debugger.sendCommand).toHaveBeenCalledWith(

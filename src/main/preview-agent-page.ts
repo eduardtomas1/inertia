@@ -1,6 +1,7 @@
 import type { WebContents } from "electron";
 
 import { MAX_AGENT_BROWSER_TEXT_BYTES } from "../shared/agent-browser.js";
+import { MAX_BROWSER_EVIDENCE_TEXT_CHARS, sanitizeBrowserEvidenceText } from "../shared/browser-evidence.js";
 import { installPreviewAgentPrivacyGuard } from "../shared/preview-agent-privacy-guard.js";
 
 // Electron's context-isolated preload world. This is the only world that owns
@@ -463,6 +464,41 @@ export async function agentPageHasSensitiveEvidence(contents: WebContents): Prom
     return state.passwordValues.size > 0 || state.nestedContentObserved === true;
   })()`);
   return value === true;
+}
+
+function snapshotHasSensitiveVisualEvidence(value: unknown): boolean {
+  if (!plainObject(value) || value.truncated === true || !Array.isArray(value.elements)
+    || value.elements.length > MAX_SEMANTIC_ELEMENTS) return true;
+  const sensitive = (candidate: unknown, maximum: number): boolean => {
+    if (typeof candidate !== "string") return false;
+    if (candidate.length > maximum) return true;
+    if (!/\S/u.test(candidate)) return false;
+    const step = Math.floor(MAX_BROWSER_EVIDENCE_TEXT_CHARS / 2);
+    for (let start = 0; start < candidate.length; start += step) {
+      const text = candidate.slice(start, start + MAX_BROWSER_EVIDENCE_TEXT_CHARS);
+      if (sanitizeBrowserEvidenceText(text, "[redacted]").redacted) return true;
+    }
+    return false;
+  };
+  if (sensitive(value.text, MAX_PAGE_TEXT_CHARS)) return true;
+  for (const element of value.elements) {
+    if (!plainObject(element)
+      || sensitive(element.name, 300)
+      || sensitive(element.value, 500)) return true;
+  }
+  return false;
+}
+
+export async function agentPageHasSensitiveScreenshotEvidence(
+  contents: WebContents,
+): Promise<boolean> {
+  if (await agentPageHasSensitiveEvidence(contents)) return true;
+  const snapshot = await semanticPageSnapshot(contents);
+  try {
+    return snapshotHasSensitiveVisualEvidence(JSON.parse(snapshot) as unknown);
+  } catch {
+    return true;
+  }
 }
 
 export async function setAgentPageInputGuard(

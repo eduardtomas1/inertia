@@ -125,6 +125,58 @@ export async function expectDocumentStartPrivacyGuard(
   expect(JSON.stringify(evidence)).not.toContain(forbiddenText);
 }
 
+export async function expectVisibleTextScreenshotPrivacyGuard(
+  app: AppFixture,
+  conversationId: string,
+  url: string,
+): Promise<void> {
+  const forbiddenText = "sk-visible-browser-screenshot-sentinel-1234567890";
+  const evidence = await app.electronApp.evaluate(async (_electron, request) => {
+    type Command =
+      | { action: "screenshot" | "tabs" }
+      | { action: "tab-open"; url: string }
+      | { action: "tab-activate" | "tab-close"; tabId: string };
+    type Result = {
+      code?: string;
+      message?: string;
+      ok: boolean;
+      state?: { activeTabId: string };
+    };
+    const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
+      agentBrowser: (id: string, command: Command) => Promise<Result>;
+    };
+    const before = await runtime.agentBrowser(request.conversationId, { action: "tabs" });
+    if (!before.ok || !before.state) return { before };
+    const previousTabId = before.state.activeTabId;
+    const opened = await runtime.agentBrowser(request.conversationId, {
+      action: "tab-open", url: request.url,
+    });
+    if (!opened.ok || !opened.state) return { opened };
+    const tabId = opened.state.activeTabId;
+    const screenshot = await runtime.agentBrowser(request.conversationId, {
+      action: "screenshot",
+    });
+    const closed = await runtime.agentBrowser(request.conversationId, {
+      action: "tab-close", tabId,
+    });
+    const restored = await runtime.agentBrowser(request.conversationId, {
+      action: "tab-activate", tabId: previousTabId,
+    });
+    return { closed, opened, restored, screenshot };
+  }, { conversationId, url });
+  expect(evidence).toMatchObject({
+    opened: { ok: true },
+    screenshot: {
+      ok: false,
+      code: "invalid",
+      message: "Screenshots are unavailable while the document contains sensitive evidence.",
+    },
+    closed: { ok: true },
+    restored: { ok: true },
+  });
+  expect(JSON.stringify(evidence)).not.toContain(forbiddenText);
+}
+
 export async function expectWindowCapturePrivacyGuard(
   app: AppFixture,
   conversationId: string,

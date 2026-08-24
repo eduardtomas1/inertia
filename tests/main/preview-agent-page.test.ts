@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   agentPageActivationBlocked,
   agentPageHasSensitiveEvidence,
+  agentPageHasSensitiveScreenshotEvidence,
   agentPageInputRefusal,
   agentPageRefHasFocus,
   installAgentPagePrivacyGuard,
@@ -52,6 +53,89 @@ function withSemanticIterator<
 }
 
 describe("agent browser semantic snapshots", () => {
+  it("classifies bounded visible text and input values before screenshot capture", async () => {
+    const input = {
+      nodeType: 1,
+      tagName: "INPUT",
+      type: "text",
+      value: "ordinary note",
+      labels: [],
+      firstChild: null,
+      parentElement: null,
+      disabled: false,
+      checked: false,
+      getAttribute: () => null,
+      hasAttribute: () => false,
+      matches: () => false,
+      getBoundingClientRect: () => ({
+        x: 10, y: 10, left: 10, top: 10,
+        right: 210, bottom: 40, width: 200, height: 30,
+      }),
+    };
+    const ordinaryBodyText = "Build finished successfully. ".repeat(40);
+    const body = bodyWithText(ordinaryBodyText);
+    const context = {
+      __inertiaAgentBrowser: {
+        privacyGuardInstalled: true,
+        nestedContentObserved: false,
+        passwordNodes: new WeakSet(),
+        passwordValues: new Set(),
+        nodes: new WeakMap(), refs: new Map(), next: 1,
+      },
+      document: withSemanticIterator({
+        title: "Local app", body, documentElement: {},
+        querySelectorAll: () => [input],
+      }),
+      location: { href: "http://127.0.0.1:3000/" },
+      URL,
+      encodeURIComponent,
+      innerWidth: 1_200, innerHeight: 800, scrollX: 0, scrollY: 0,
+      getComputedStyle: () => ({ visibility: "visible", display: "block", opacity: "1" }),
+    };
+    const contents = {
+      executeJavaScriptInIsolatedWorld: vi.fn(async (
+        _worldId: number,
+        scripts: Array<{ code: string }>,
+      ) => runInNewContext(scripts[0]!.code, context)),
+    };
+
+    await expect(agentPageHasSensitiveScreenshotEvidence(contents as never)).resolves.toBe(false);
+    body.innerText = "API_KEY=sk-visible-token-that-must-not-enter-a-bitmap";
+    await expect(agentPageHasSensitiveScreenshotEvidence(contents as never)).resolves.toBe(true);
+    body.innerText = ordinaryBodyText;
+    input.value = "databasepass=visible-input-secret";
+    await expect(agentPageHasSensitiveScreenshotEvidence(contents as never)).resolves.toBe(true);
+  });
+
+  it("fails screenshot classification closed when visible evidence is truncated", async () => {
+    const body = bodyWithText("x".repeat(30_000));
+    const context = {
+      __inertiaAgentBrowser: {
+        privacyGuardInstalled: true,
+        nestedContentObserved: false,
+        passwordNodes: new WeakSet(),
+        passwordValues: new Set(),
+        nodes: new WeakMap(), refs: new Map(), next: 1,
+      },
+      document: withSemanticIterator({
+        title: "Dense app", body, documentElement: {}, querySelectorAll: () => [],
+      }),
+      location: { href: "http://127.0.0.1:3000/" },
+      URL,
+      encodeURIComponent,
+      innerWidth: 1_200, innerHeight: 800, scrollX: 0, scrollY: 0,
+      getComputedStyle: () => ({ visibility: "visible", display: "block", opacity: "1" }),
+    };
+    const contents = {
+      executeJavaScriptInIsolatedWorld: vi.fn(async (
+        _worldId: number,
+        scripts: Array<{ code: string }>,
+      ) => runInNewContext(scripts[0]!.code, context)),
+    };
+
+    await expect(agentPageHasSensitiveScreenshotEvidence(contents as never)).resolves.toBe(true);
+  });
+
   it("rechecks the exact focused ref after page microtasks settle", async () => {
     const targetElement = {
       isConnected: true,

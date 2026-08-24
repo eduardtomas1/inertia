@@ -20,7 +20,7 @@ import {
 import { processExists } from "../e2e/support/app-fixture";
 import { selectWorkspaceTool } from "../e2e/support/workspace-tools";
 import { driveBoundedWheelNavigation } from "../helpers/bounded-wheel-navigation";
-import { RENDERER_WORKSPACE_CONTENT_COMMITTED_STAGE } from "../../src/renderer/src/utils/testStreamingTrace";
+import { streamingReaderActivityReceiptStage } from "../../src/renderer/src/utils/testStreamingTrace";
 import {
   beginStreamingReaderActivity,
   beginStreamingReaderAwayActivity,
@@ -943,9 +943,6 @@ async function streamingResponsivenessSample(
     },
   ).toBeGreaterThanOrEqual(CI_STREAM_MIN_VISIBLE_UPDATES);
   await waitForStreamingCompletionReady(workspace, sampleNumber);
-  const contentCommitsBeforeReaderPulse = await page.evaluate((stage) => (
-    performance.getEntriesByName(`inertia-stream:${stage}`).length
-  ), RENDERER_WORKSPACE_CONTENT_COMMITTED_STAGE);
   await beginStreamingReaderActivity(workspace, sampleNumber);
   await waitForStreamingReaderActivity(workspace, sampleNumber);
   const readerActivityBeforeMarker = streamingReaderActivityMarker(
@@ -958,12 +955,18 @@ async function streamingResponsivenessSample(
   );
   await expect(page.locator('[data-stream-renderer="plain-text"]'))
     .toContainText(readerActivityBeforeMarker);
+  const readerActivityBeforeReceipt = streamingReaderActivityReceiptStage(
+    readerActivityBeforeMarker,
+  );
+  const readerActivityAwayReceipt = streamingReaderActivityReceiptStage(
+    readerActivityAwayMarker,
+  );
   await expect.poll(() => page.evaluate((stage) => (
     performance.getEntriesByName(`inertia-stream:${stage}`).length
-  ), RENDERER_WORKSPACE_CONTENT_COMMITTED_STAGE), {
+  ), readerActivityBeforeReceipt), {
     message: `streaming sample ${sampleNumber} should commit ${readerActivityBeforeMarker} before reader navigation`,
     timeout: STREAMING_COMPLETION_GATE_TIMEOUT_MS,
-  }).toBeGreaterThan(contentCommitsBeforeReaderPulse);
+  }).toBeGreaterThan(0);
   const liveViewport = page.locator(".message-scroll");
   const finalAnswer = page.locator(
     '[data-answer-phase="persisted"] .response-markdown',
@@ -1020,24 +1023,19 @@ async function streamingResponsivenessSample(
     wheelUp: () => page.mouse.wheel(0, -30_000),
   });
   const readerNavigationMs = performance.now() - readerNavigationStartedAt;
-  const contentCommitsBeforeAway = await page.evaluate((stage) => (
-    performance.getEntriesByName(`inertia-stream:${stage}`).length
-  ), RENDERER_WORKSPACE_CONTENT_COMMITTED_STAGE);
   await beginStreamingReaderAwayActivity(workspace, sampleNumber);
   await waitForStreamingReaderAwayActivity(workspace, sampleNumber);
   await expect(finalAnswer).toHaveCount(0);
-  // The fixture acknowledgment proves only that the provider wrote the exact
-  // AWAY delta. Because completion is held and no other text delta can follow
-  // the already-rendered BEFORE pulse, the next workspace content commit is
-  // causally the unique AWAY marker reaching Inertia's renderer. Waiting for
-  // that post-commit effect also proves reader-mode follow logic ran before we
-  // inspect the preserved position or invoke Jump to latest.
+  // The fixture acknowledgment proves only that the provider wrote the AWAY
+  // delta. The keyed receipt mark is emitted only when ChatWorkspace commits
+  // that exact sample-and-phase marker at the bounded streaming-text tail, so
+  // older pending effects or unrelated content cannot satisfy this barrier.
   await expect.poll(() => page.evaluate((stage) => (
     performance.getEntriesByName(`inertia-stream:${stage}`).length
-  ), RENDERER_WORKSPACE_CONTENT_COMMITTED_STAGE), {
+  ), readerActivityAwayReceipt), {
     message: `streaming sample ${sampleNumber} should consume ${readerActivityAwayMarker} while reader navigation remains active`,
     timeout: STREAMING_COMPLETION_GATE_TIMEOUT_MS,
-  }).toBeGreaterThan(contentCommitsBeforeAway);
+  }).toBeGreaterThan(0);
   const readerNavigationScrollTop = await liveViewport.evaluate(
     (viewport) => viewport.scrollTop,
   );

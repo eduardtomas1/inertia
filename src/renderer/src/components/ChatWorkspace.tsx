@@ -73,8 +73,7 @@ import {
   transcriptNavigationReducer,
 } from "../utils/transcriptNavigation";
 import {
-  markTestStreamingStage,
-  RENDERER_WORKSPACE_CONTENT_COMMITTED_STAGE,
+  markTestStreamingReaderActivityReceipt,
 } from "../utils/testStreamingTrace";
 import { Composer } from "./Composer";
 import type { ChatGoalControlProps } from "./ChatGoalControl";
@@ -552,13 +551,13 @@ export function ChatWorkspace({
   );
 
   useEffect(() => {
-    markTestStreamingStage(RENDERER_WORKSPACE_CONTENT_COMMITTED_STAGE);
+    markTestStreamingReaderActivityReceipt(streamingText);
     if (!transcriptNavigationFollowsContent(navigationRef.current)) return;
     const frame = window.requestAnimationFrame(
       () => performScrollToLatest("auto"),
     );
     return () => window.cancelAnimationFrame(frame);
-  }, [contentSignal, performScrollToLatest]);
+  }, [contentSignal, performScrollToLatest, streamingText]);
 
   useEffect(() => {
     const content = timelineRef.current;

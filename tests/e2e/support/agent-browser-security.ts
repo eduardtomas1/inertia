@@ -130,6 +130,7 @@ export async function expectScreenshotPrivacyGuard(
   conversationId: string,
   url: string,
   forbiddenText: string,
+  localOnly = false,
 ): Promise<void> {
   const evidence = await app.electronApp.evaluate(async (_electron, request) => {
     type Command =
@@ -138,9 +139,11 @@ export async function expectScreenshotPrivacyGuard(
       | { action: "tab-activate" | "tab-close"; tabId: string };
     type Result = {
       code?: string;
+      image?: unknown;
       message?: string;
       ok: boolean;
       state?: { activeTabId: string };
+      text?: string;
     };
     const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
       agentBrowser: (id: string, command: Command) => Promise<Result>;
@@ -164,7 +167,12 @@ export async function expectScreenshotPrivacyGuard(
     });
     return { closed, opened, restored, screenshot };
   }, { conversationId, url });
-  expect(evidence).toMatchObject({
+  expect(evidence).toMatchObject(localOnly ? {
+    opened: { ok: true },
+    screenshot: { ok: true },
+    closed: { ok: true },
+    restored: { ok: true },
+  } : {
     opened: { ok: true },
     screenshot: {
       ok: false,
@@ -174,6 +182,11 @@ export async function expectScreenshotPrivacyGuard(
     closed: { ok: true },
     restored: { ok: true },
   });
+  if (localOnly && evidence.screenshot?.ok) {
+    expect(evidence.screenshot).not.toHaveProperty("image");
+    expect(JSON.parse(evidence.screenshot.text ?? "{}"))
+      .toMatchObject({ bitmap: "local-only", providerImage: false });
+  }
   expect(JSON.stringify(evidence)).not.toContain(forbiddenText);
 }
 

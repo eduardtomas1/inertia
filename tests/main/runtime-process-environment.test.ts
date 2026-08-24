@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { runtimeProcessEnvironment } from "../../src/main/runtime-process-environment";
+import { PROVIDER_HTTP_ENDPOINT_ROUTING_ENVIRONMENT_KEYS } from "../../src/node/provider-routing-environment";
 import { runtimeEnvironmentKind } from "../../src/server/runtime-status";
 
 describe("supervised runtime process environment", () => {
@@ -341,6 +342,83 @@ describe("supervised runtime process environment", () => {
       NO_PROXY: "sentinel-secret@example.test",
     }, "linux")).toEqual({});
   });
+
+  it.each(["linux", "win32"] as const)(
+    "validates every fixed provider endpoint on %s",
+    (platform) => {
+      for (const key of PROVIDER_HTTP_ENDPOINT_ROUTING_ENVIRONMENT_KEYS) {
+        const valid = "https://gateway.example.test/provider/v1/";
+        expect(runtimeProcessEnvironment({ [key]: valid }, platform)).toEqual({
+          [key]: valid,
+        });
+        for (const rejected of [
+          "https://sentinel-user:sentinel-secret@gateway.example.test/v1",
+          "https://gateway.example.test/v1?token=sentinel-secret",
+          "https://gateway.example.test/v1#sentinel-secret",
+          "https://gateway.example.test/v1/sentinel-secret",
+          "https://gateway.example.test/v1/%73ecret-value",
+          "https://gateway.example.test/v1\nsentinel",
+          `https://gateway.example.test/${"x".repeat(2_048)}`,
+        ]) {
+          expect(runtimeProcessEnvironment({ [key]: rejected }, platform)).toEqual({});
+        }
+      }
+    },
+  );
+
+  it.each(["linux", "win32"] as const)(
+    "rejects raw and encoded dot-segment URL normalization bypasses on %s",
+    (platform) => {
+      for (const value of [
+        "http://routing.example.test/..",
+        "http://routing.example.test/./",
+        "http://routing.example.test/%2e",
+        "http://routing.example.test/%2e%2e/",
+        "http://routing.example.test/.%2e",
+        "http://routing.example.test/%252e%252e/",
+      ]) {
+        expect(runtimeProcessEnvironment({ HTTP_PROXY: value }, platform)).toEqual({});
+        expect(runtimeProcessEnvironment({ AWS_ENDPOINT_URL: value }, platform)).toEqual({});
+      }
+    },
+  );
+
+  it.each(["linux", "win32"] as const)(
+    "accepts only bounded documented NO_PROXY entries on %s",
+    (platform) => {
+      const valid = [
+        "localhost",
+        ".example.test",
+        "*.svc.cluster.local",
+        "127.0.0.1",
+        "127.0.0.1:8080",
+        "10.0.0.0/8",
+        "[::1]",
+        "[::1]:8443",
+        "[2001:db8::]/32",
+        "*",
+      ].join(",");
+      expect(runtimeProcessEnvironment({ NO_PROXY: valid }, platform)).toEqual({
+        NO_PROXY: valid,
+      });
+
+      for (const rejected of [
+        "sentinel-secret@example.test",
+        "https://example.test",
+        "example.test/private",
+        "bad_host.example.test",
+        "999.999.999.999",
+        "example.test:65536",
+        "10.0.0.0/33",
+        "[2001:db8::]/129",
+        "foo*bar.example.test",
+        "localhost,,example.test",
+        Array.from({ length: 257 }, () => "localhost").join(","),
+      ]) {
+        expect(runtimeProcessEnvironment({ NO_PROXY: rejected }, platform)).toEqual({});
+      }
+    },
+  );
 
   it("requires the exact test-only streaming trace opt-in", () => {
     expect(runtimeProcessEnvironment({

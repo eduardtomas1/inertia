@@ -1,6 +1,8 @@
+import { isIP } from "node:net";
 import { GIT_LAUNCH_ENVIRONMENT_KEYS } from "../node/git-environment";
 import {
   PROVIDER_ENDPOINT_ROUTING_ENVIRONMENT_KEY,
+  PROVIDER_HTTP_ENDPOINT_ROUTING_ENVIRONMENT_KEYS,
   PROVIDER_ROUTING_ENVIRONMENT_KEYS,
 } from "../node/provider-routing-environment";
 
@@ -119,48 +121,169 @@ const PROXY_PROTOCOLS = new Set([
 
 const HTTP_ENDPOINT_PROTOCOLS = new Set(["http:", "https:"]);
 
-const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/u;
+const PROVIDER_HTTP_ENDPOINT_ROUTING_ENVIRONMENT_KEY_SET = new Set<string>(
+  PROVIDER_HTTP_ENDPOINT_ROUTING_ENVIRONMENT_KEYS,
+);
 
-function credentialFreeProxyUrl(value: string): boolean {
-  if (value.length === 0 || value.length > 2_048 || CONTROL_CHARACTER.test(value)) {
-    return false;
+const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/u;
+const URL_DOT_SEGMENT = /(?:^|[\\/])\.{1,2}(?=[\\/?#]|$)/u;
+const PROVIDER_ENDPOINT_PATH_COMPONENT = /^[A-Za-z0-9._~-]+$/u;
+const SECRET_ENDPOINT_PATH_COMPONENT =
+  /(?:^|[-_.])(?:api[-_.]?key|authorization|bearer|credential|password|passwd|pwd|secret|session[-_.]?token|token)(?:$|[-_.=:])/iu;
+const SECRET_ENDPOINT_PATH_VALUE =
+  /^(?:api|key|pk|rk|sk|token|gh[pousr]|github_pat|xox[baprs])[-_][A-Za-z0-9_-]{8,}$/iu;
+const MAXIMUM_URL_DECODE_PASSES = 4;
+const MAXIMUM_PROVIDER_ENDPOINT_PATH_LENGTH = 512;
+const MAXIMUM_PROVIDER_ENDPOINT_PATH_COMPONENTS = 16;
+const MAXIMUM_PROVIDER_ENDPOINT_PATH_COMPONENT_LENGTH = 128;
+const MAXIMUM_NO_PROXY_ENTRIES = 256;
+const MAXIMUM_NO_PROXY_ENTRY_LENGTH = 512;
+
+function decodedUrlRepresentations(value: string): string[] | null {
+  const representations = [value];
+  let current = value;
+  for (let pass = 0; pass < MAXIMUM_URL_DECODE_PASSES; pass += 1) {
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(current);
+    } catch {
+      return null;
+    }
+    if (decoded === current) return representations;
+    representations.push(decoded);
+    current = decoded;
   }
   try {
+    return decodeURIComponent(current) === current ? representations : null;
+  } catch {
+    return null;
+  }
+}
+
+function credentialFreeUrl(
+  value: string,
+  protocols: ReadonlySet<string>,
+): URL | null {
+  if (value.length === 0 || value.length > 2_048) return null;
+  const representations = decodedUrlRepresentations(value);
+  if (
+    representations === null
+    || representations.some((candidate) =>
+      CONTROL_CHARACTER.test(candidate) || URL_DOT_SEGMENT.test(candidate))
+  ) return null;
+  try {
     const parsed = new URL(value);
-    return PROXY_PROTOCOLS.has(parsed.protocol)
+    return protocols.has(parsed.protocol)
       && parsed.hostname.length > 0
       && parsed.username.length === 0
       && parsed.password.length === 0
-      && (parsed.pathname === "" || parsed.pathname === "/")
       && parsed.search.length === 0
-      && parsed.hash.length === 0;
+      && parsed.hash.length === 0
+      ? parsed
+      : null;
   } catch {
-    return false;
+    return null;
   }
+}
+
+function credentialFreeProxyUrl(value: string): boolean {
+  const parsed = credentialFreeUrl(value, PROXY_PROTOCOLS);
+  return parsed !== null && (parsed.pathname === "" || parsed.pathname === "/");
 }
 
 function credentialFreeHttpEndpoint(value: string): boolean {
-  if (value.length === 0 || value.length > 2_048 || CONTROL_CHARACTER.test(value)) {
-    return false;
-  }
-  try {
-    const parsed = new URL(value);
-    return HTTP_ENDPOINT_PROTOCOLS.has(parsed.protocol)
-      && parsed.hostname.length > 0
-      && parsed.username.length === 0
-      && parsed.password.length === 0
-      && (parsed.pathname === "" || parsed.pathname === "/")
-      && parsed.search.length === 0
-      && parsed.hash.length === 0;
-  } catch {
-    return false;
-  }
+  const parsed = credentialFreeUrl(value, HTTP_ENDPOINT_PROTOCOLS);
+  return parsed !== null && (parsed.pathname === "" || parsed.pathname === "/");
+}
+
+function safeProviderEndpointPath(pathname: string): boolean {
+  const representations = decodedUrlRepresentations(pathname);
+  if (representations === null) return false;
+  const decoded = representations.at(-1)!;
+  if (
+    decoded.length > MAXIMUM_PROVIDER_ENDPOINT_PATH_LENGTH
+    || CONTROL_CHARACTER.test(decoded)
+    || /[\\@?#]/u.test(decoded)
+  ) return false;
+  const components = decoded.split("/").filter(Boolean);
+  return components.length <= MAXIMUM_PROVIDER_ENDPOINT_PATH_COMPONENTS
+    && components.every((component) =>
+      component.length <= MAXIMUM_PROVIDER_ENDPOINT_PATH_COMPONENT_LENGTH
+      && PROVIDER_ENDPOINT_PATH_COMPONENT.test(component)
+      && !SECRET_ENDPOINT_PATH_COMPONENT.test(component)
+      && !SECRET_ENDPOINT_PATH_VALUE.test(component));
+}
+
+function credentialFreeProviderEndpoint(value: string): boolean {
+  const parsed = credentialFreeUrl(value, HTTP_ENDPOINT_PROTOCOLS);
+  return parsed !== null && safeProviderEndpointPath(parsed.pathname);
+}
+
+function validPort(value: string | undefined): boolean {
+  if (value === undefined) return true;
+  if (!/^\d{1,5}$/u.test(value)) return false;
+  const port = Number(value);
+  return port >= 1 && port <= 65_535;
+}
+
+function validHostname(value: string): boolean {
+  const hostname = value.endsWith(".") ? value.slice(0, -1) : value;
+  return hostname.length > 0
+    && hostname.length <= 253
+    && hostname.split(".").every((label) =>
+      label.length > 0
+      && label.length <= 63
+      && /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/u.test(label));
+}
+
+function validNoProxyCidr(value: string): boolean {
+  const match = /^(\[[^\]]+\]|[^/]+)\/(\d{1,3})$/u.exec(value);
+  if (!match) return false;
+  const address = match[1]!.startsWith("[")
+    ? match[1]!.slice(1, -1)
+    : match[1]!;
+  const version = isIP(address);
+  const prefix = Number(match[2]);
+  return (version === 4 && prefix <= 32) || (version === 6 && prefix <= 128);
+}
+
+function validNoProxyHost(value: string): boolean {
+  const bracketed = /^\[([^\]]+)\](?::(\d{1,5}))?$/u.exec(value);
+  if (bracketed) return isIP(bracketed[1]!) === 6 && validPort(bracketed[2]);
+  if (isIP(value) === 6) return true;
+
+  const hostAndPort = /^([^:]+?)(?::(\d{1,5}))?$/u.exec(value);
+  if (!hostAndPort || !validPort(hostAndPort[2])) return false;
+  const host = hostAndPort[1]!;
+  if (isIP(host) === 4) return true;
+  if (/^\d+(?:\.\d+){3}$/u.test(host)) return false;
+  const hostname = host.startsWith("*.")
+    ? host.slice(2)
+    : host.startsWith(".")
+      ? host.slice(1)
+      : host;
+  return validHostname(hostname)
+    && (host === hostname || host.startsWith(".") || host.startsWith("*."));
+}
+
+function validNoProxyEntry(value: string): boolean {
+  if (value === "*") return true;
+  return value.includes("/") ? validNoProxyCidr(value) : validNoProxyHost(value);
 }
 
 function credentialFreeNoProxy(value: string): boolean {
-  return value.length <= 8_192
-    && !CONTROL_CHARACTER.test(value)
-    && !value.includes("@");
+  if (value.length === 0 || value.length > 8_192 || CONTROL_CHARACTER.test(value)) {
+    return false;
+  }
+  // A bounded comma-separated list of DNS names (optionally prefixed by `.`
+  // or `*.`), IPv4/IPv6 literals, IP CIDRs, optional host ports, or exact `*`.
+  // CIDRs cannot carry ports; IPv6 ports require brackets.
+  const entries = value.split(",").map((entry) => entry.trim());
+  return entries.length <= MAXIMUM_NO_PROXY_ENTRIES
+    && entries.every((entry) =>
+      entry.length > 0
+      && entry.length <= MAXIMUM_NO_PROXY_ENTRY_LENGTH
+      && validNoProxyEntry(entry));
 }
 
 function environmentValue(
@@ -188,7 +311,14 @@ export function runtimeProcessEnvironment(
   const sanitized: NodeJS.ProcessEnv = {};
   for (const key of RUNTIME_PROCESS_ENVIRONMENT_KEYS) {
     const value = environmentValue(environment, key, platform);
-    if (value === undefined || (key === "NODE_ENV" && value !== "test")) {
+    if (
+      value === undefined
+      || (key === "NODE_ENV" && value !== "test")
+      || (
+        PROVIDER_HTTP_ENDPOINT_ROUTING_ENVIRONMENT_KEY_SET.has(key)
+        && !credentialFreeProviderEndpoint(value)
+      )
+    ) {
       continue;
     }
     sanitized[key] = value;

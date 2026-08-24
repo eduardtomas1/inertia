@@ -75,3 +75,23 @@ export const PROVIDER_ROUTING_ENVIRONMENT_KEYS = [
 
 export const PROVIDER_ENDPOINT_ROUTING_ENVIRONMENT_KEY =
   /^AWS_ENDPOINT_URL(?:_[A-Z0-9_]+)?$/u;
+
+/**
+ * Fixed-name provider routes whose values cross the outer Electron boundary.
+ * These are validated as credential-free HTTP(S) endpoints before they reach
+ * the supervised runtime; non-URL provider controls retain their own syntax.
+ */
+export const PROVIDER_HTTP_ENDPOINT_ROUTING_ENVIRONMENT_KEYS = [
+  "AI_API_URL",
+  "ANTHROPIC_BASE_URL",
+  "ANTHROPIC_BEDROCK_BASE_URL",
+  "ANTHROPIC_BEDROCK_MANTLE_BASE_URL",
+  "ANTHROPIC_FOUNDRY_BASE_URL",
+  "ANTHROPIC_VERTEX_BASE_URL",
+  "AZURE_OPENAI_BASE_URL",
+  "AZURE_OPENAI_ENDPOINT",
+  "GITLAB_AI_GATEWAY_URL",
+  "GITLAB_INSTANCE_URL",
+  "OPENAI_BASE_URL",
+  "OPENAI_ENDPOINT",
+] as const;

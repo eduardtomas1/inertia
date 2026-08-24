@@ -12,6 +12,9 @@ export const loadModelBackendsSettings = createSurfaceLoader(async () => ({
 export const loadDiscordSettings = createSurfaceLoader(async () => ({
   default: (await import("./DiscordSettings")).DiscordSettings,
 }));
+export const loadCanaryRollbackSetting = createSurfaceLoader(
+  () => import("./CanaryRollbackSetting"),
+);
 
 export function prefetchSettingsSection(section: string): void {
   if (section === "backends") {

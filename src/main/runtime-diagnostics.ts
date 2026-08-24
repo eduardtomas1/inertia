@@ -42,6 +42,7 @@ export interface RuntimeDiagnosticsOptions {
 
 export interface RuntimeSupportReportInput {
   version: string;
+  channel?: "stable" | "canary";
   platform: string;
   architecture: string;
   runtime: RuntimeSupervisorSnapshot | null;
@@ -219,6 +220,7 @@ export class RuntimeDiagnostics {
       "Inertia support summary",
       `Generated: ${new Date(this.now()).toISOString()}`,
       `Version: ${sanitizeRuntimeDiagnosticText(input.version) ?? "unknown"}`,
+      `Channel: ${input.channel ?? "stable"}`,
       `Platform: ${sanitizeRuntimeDiagnosticText(input.platform) ?? "unknown"}`,
       `Architecture: ${sanitizeRuntimeDiagnosticText(input.architecture) ?? "unknown"}`,
       `Runtime: ${runtime?.phase ?? "unavailable"}`,

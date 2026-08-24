@@ -184,6 +184,7 @@ interface Fixture {
 function fixture(
   onDock?: (conversationId: string) => void | Promise<void>,
   protocolFailure?: Error,
+  productName?: string,
 ): Fixture {
   const directory = mkdtempSync(join(tmpdir(), "inertia-detached-main-"));
   const ipc = new FakeIpcMain();
@@ -213,6 +214,7 @@ function fixture(
     },
     registerHealthRenderer: () => () => undefined,
     rendererUrl: RENDERER_URL,
+    productName,
     preloadPath: join(directory, "detached-chat.cjs"),
     statePath: join(directory, "detached-chat-window-state.json"),
     draftStatePath: join(directory, "detached-chat-pending-drafts.json"),
@@ -244,6 +246,20 @@ afterEach(() => {
 });
 
 describe("detached chat main-process boundary", () => {
+  it("uses the channel product name for native detached windows", async () => {
+    const value = fixture(undefined, undefined, "Inertia Canary");
+    try {
+      await value.ipc.invoke(
+        DETACHED_CHAT_IPC.open,
+        eventFor(value.main.webContents),
+        { conversationId: FIRST_ID, title: "Canary chat", draft: "" },
+      );
+      expect(value.popups[0]?.title).toBe("Canary chat — Inertia Canary");
+    } finally {
+      await cleanup(value);
+    }
+  });
+
   it("creates one hardened native window at the fixed renderer URL", async () => {
     const value = fixture();
     try {

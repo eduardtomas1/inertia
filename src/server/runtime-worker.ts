@@ -49,6 +49,10 @@ let packageSmokePdfOperation: Promise<void> | null = null;
 let packageSmokeImageController: AbortController | null = null;
 let packageSmokeImageOperation: Promise<void> | null = null;
 const parentPort = process.parentPort;
+let acknowledgeStopped!: () => void;
+const stoppedAcknowledged = new Promise<void>((resolve) => {
+  acknowledgeStopped = resolve;
+});
 
 if (!parentPort) throw new Error("The runtime worker must run as an Electron utility process.");
 
@@ -95,6 +99,7 @@ async function finishShutdown(
     },
     ownedProcessCleanupConfirmed: awaitRuntimeOwnedProcessCleanupConfirmed,
     post,
+    awaitStoppedAcknowledgement: () => stoppedAcknowledged,
     exit: (code) => process.exit(code),
   });
 }
@@ -154,6 +159,10 @@ parentPort.on("message", (messageEvent) => {
   }
   if (command.type === "runtime.shutdown") {
     void shutdown();
+    return;
+  }
+  if (command.type === "runtime.stopped-acknowledged") {
+    acknowledgeStopped();
     return;
   }
   if (command.type === "runtime.release-update-preparation") {

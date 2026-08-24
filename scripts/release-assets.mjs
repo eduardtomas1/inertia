@@ -12,7 +12,14 @@ const MAX_DOCUMENT_NODES = 256;
 const MAX_STRING_BYTES = 32 * 1024;
 const MAX_PACKAGED_MANIFEST_BYTES = 256 * 1024;
 const MAX_ASAR_HEADER_BYTES = 64 * 1024 * 1024;
-const UPDATE_FEED_URL = "https://github.com/eduardtomas1/inertia/releases/latest/download";
+const releaseChannel = process.env.INERTIA_RELEASE_CHANNEL ?? "stable";
+if (releaseChannel !== "stable" && releaseChannel !== "canary") {
+  throw new Error("INERTIA_RELEASE_CHANNEL must be stable or canary.");
+}
+const canary = releaseChannel === "canary";
+const UPDATE_FEED_URL = canary
+  ? "https://raw.githubusercontent.com/eduardtomas1/inertia/canary-feed"
+  : "https://github.com/eduardtomas1/inertia/releases/latest/download";
 
 const command = process.argv[2] ?? "";
 const packageJson = JSON.parse(await readFile("package.json", "utf8"));
@@ -22,55 +29,68 @@ if (typeof version !== "string" || !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 }
 
 const releaseTag = process.env.RELEASE_TAG;
-if (releaseTag !== `v${version}`) {
-  throw new Error(`RELEASE_TAG must exactly match package version v${version}.`);
+const expectedReleaseTag = `${canary ? "canary-v" : "v"}${version}`;
+if (releaseTag !== expectedReleaseTag) {
+  throw new Error(`RELEASE_TAG must exactly match package version ${expectedReleaseTag}.`);
 }
 
 const platformPolicies = {
   "macos-x64": {
     packages: [
-      `Inertia-${version}.dmg`,
-      `Inertia-${version}-mac.zip`,
+      canary ? `Inertia-Canary-${version}-x64.dmg` : `Inertia-${version}.dmg`,
+      canary ? `Inertia-Canary-${version}-x64.zip` : `Inertia-${version}-mac.zip`,
     ],
-    metadata: "latest-mac.yml",
-    companions: [`Inertia-${version}-mac.zip.blockmap`],
-    packagedUpdateConfig: "mac/Inertia.app/Contents/Resources/app-update.yml",
-    packagedAppArchive: "mac/Inertia.app/Contents/Resources/app.asar",
+    metadata: canary ? "canary-mac.yml" : "latest-mac.yml",
+    companions: [canary
+      ? `Inertia-Canary-${version}-x64.zip.blockmap`
+      : `Inertia-${version}-mac.zip.blockmap`],
+    packagedUpdateConfig: `mac/${canary ? "Inertia Canary" : "Inertia"}.app/Contents/Resources/app-update.yml`,
+    packagedAppArchive: `mac/${canary ? "Inertia Canary" : "Inertia"}.app/Contents/Resources/app.asar`,
   },
   "macos-arm64": {
     packages: [
-      `Inertia-${version}-arm64.dmg`,
-      `Inertia-${version}-arm64-mac.zip`,
+      canary ? `Inertia-Canary-${version}-arm64.dmg` : `Inertia-${version}-arm64.dmg`,
+      canary ? `Inertia-Canary-${version}-arm64.zip` : `Inertia-${version}-arm64-mac.zip`,
     ],
-    metadata: "latest-mac.yml",
-    companions: [`Inertia-${version}-arm64-mac.zip.blockmap`],
-    packagedUpdateConfig: "mac-arm64/Inertia.app/Contents/Resources/app-update.yml",
-    packagedAppArchive: "mac-arm64/Inertia.app/Contents/Resources/app.asar",
+    metadata: canary ? "canary-mac.yml" : "latest-mac.yml",
+    companions: [canary
+      ? `Inertia-Canary-${version}-arm64.zip.blockmap`
+      : `Inertia-${version}-arm64-mac.zip.blockmap`],
+    packagedUpdateConfig: `mac-arm64/${canary ? "Inertia Canary" : "Inertia"}.app/Contents/Resources/app-update.yml`,
+    packagedAppArchive: `mac-arm64/${canary ? "Inertia Canary" : "Inertia"}.app/Contents/Resources/app.asar`,
   },
   "windows-x64": {
-    packages: [`Inertia.Setup.${version}.exe`],
-    metadata: "latest.yml",
-    companions: [`Inertia.Setup.${version}.exe.blockmap`],
+    packages: [canary ? `Inertia.Canary.Setup.${version}.exe` : `Inertia.Setup.${version}.exe`],
+    metadata: canary ? "canary.yml" : "latest.yml",
+    companions: [canary
+      ? `Inertia.Canary.Setup.${version}.exe.blockmap`
+      : `Inertia.Setup.${version}.exe.blockmap`],
     packagedUpdateConfig: "win-unpacked/resources/app-update.yml",
     packagedAppArchive: "win-unpacked/resources/app.asar",
   },
   "windows-arm64": {
-    packages: [`Inertia.Setup.${version}.arm64.exe`],
-    metadata: "latest.yml",
-    companions: [`Inertia.Setup.${version}.arm64.exe.blockmap`],
+    packages: [canary
+      ? `Inertia.Canary.Setup.${version}.arm64.exe`
+      : `Inertia.Setup.${version}.arm64.exe`],
+    metadata: canary ? "canary.yml" : "latest.yml",
+    companions: [canary
+      ? `Inertia.Canary.Setup.${version}.arm64.exe.blockmap`
+      : `Inertia.Setup.${version}.arm64.exe.blockmap`],
     packagedUpdateConfig: "win-arm64-unpacked/resources/app-update.yml",
     packagedAppArchive: "win-arm64-unpacked/resources/app.asar",
   },
   "linux-x64": {
-    packages: [`Inertia-${version}.AppImage`],
-    metadata: "latest-linux.yml",
+    packages: [canary ? `Inertia-Canary-${version}.AppImage` : `Inertia-${version}.AppImage`],
+    metadata: canary ? "canary-linux.yml" : "latest-linux.yml",
     companions: [],
     packagedUpdateConfig: "linux-unpacked/resources/app-update.yml",
     packagedAppArchive: "linux-unpacked/resources/app.asar",
   },
   "linux-arm64": {
-    packages: [`Inertia-${version}-arm64.AppImage`],
-    metadata: "latest-linux-arm64.yml",
+    packages: [canary
+      ? `Inertia-Canary-${version}-arm64.AppImage`
+      : `Inertia-${version}-arm64.AppImage`],
+    metadata: canary ? "canary-linux-arm64.yml" : "latest-linux-arm64.yml",
     companions: [],
     packagedUpdateConfig: "linux-arm64-unpacked/resources/app-update.yml",
     packagedAppArchive: "linux-arm64-unpacked/resources/app.asar",
@@ -78,8 +98,14 @@ const platformPolicies = {
 };
 
 const sharedMetadataGroups = [
-  { metadata: "latest-mac.yml", platforms: ["macos-x64", "macos-arm64"] },
-  { metadata: "latest.yml", platforms: ["windows-x64", "windows-arm64"] },
+  {
+    metadata: canary ? "canary-mac.yml" : "latest-mac.yml",
+    platforms: ["macos-x64", "macos-arm64"],
+  },
+  {
+    metadata: canary ? "canary.yml" : "latest.yml",
+    platforms: ["windows-x64", "windows-arm64"],
+  },
 ];
 const sharedMetadataByName = new Map(
   sharedMetadataGroups.map((group) => [group.metadata, group]),
@@ -258,8 +284,9 @@ async function packagedUpdateCapability(platform) {
   );
   if (
     !isPlainRecord(manifest)
-    || manifest.name !== packageJson.name
+    || manifest.name !== (canary ? "inertia-canary" : packageJson.name)
     || manifest.version !== version
+    || manifest.inertiaReleaseChannel !== releaseChannel
     || !Object.hasOwn(manifest, "inertiaUpdateCapability")
   ) {
     throw new Error("The packaged application has no update capability marker.");
@@ -337,8 +364,12 @@ async function validatePackagedUpdateConfig(platform, capability) {
   ) {
     throw new Error("Packaged update configuration has an invalid cache directory name.");
   }
-  if (config.channel !== undefined && config.channel !== "latest") {
+  if (canary ? config.channel !== "canary" : config.channel !== undefined && config.channel !== "latest") {
     throw new Error("Packaged update configuration has an unexpected channel.");
+  }
+  const expectedCache = canary ? "inertia-canary-updater" : "inertia-updater";
+  if (config.updaterCacheDirName !== expectedCache) {
+    throw new Error("Packaged update configuration does not isolate the channel cache.");
   }
   if (config.useMultipleRangeRequest !== undefined && typeof config.useMultipleRangeRequest !== "boolean") {
     throw new Error("Packaged update configuration has an invalid range-request setting.");
@@ -445,12 +476,13 @@ async function readArtifactManifest(path, platform) {
   if (!isPlainRecord(manifest)) throw new Error(`Invalid ${platform} artifact manifest.`);
   assertExactKeys(
     manifest,
-    new Set(["version", "tag", "platform", "updateCapability", "assets"]),
+    new Set(["version", "tag", "channel", "platform", "updateCapability", "assets"]),
     "Artifact manifest",
   );
   if (
     manifest.version !== version
     || manifest.tag !== releaseTag
+    || manifest.channel !== releaseChannel
     || manifest.platform !== platform
     || !Array.isArray(manifest.assets)
   ) {
@@ -494,6 +526,7 @@ if (command === "stage") {
     `${JSON.stringify({
       version,
       tag: releaseTag,
+      channel: releaseChannel,
       platform,
       updateCapability,
       assets,

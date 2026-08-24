@@ -80,7 +80,7 @@ function observeRuntimeEventBackpressure(socket: WebSocket): void {
 }
 
 export function isAllowedRuntimeOrigin(origin: string | undefined): boolean {
-  if (origin === "inertia://bundle") return true;
+  if (origin === "inertia://bundle" || origin === "inertia-canary://bundle") return true;
   if (origin === undefined || origin === "null" || origin === "file://") return false;
   try {
     const url = new URL(origin);

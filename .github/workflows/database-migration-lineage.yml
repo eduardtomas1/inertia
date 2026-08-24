@@ -1,0 +1,56 @@
+name: Database migration lineage
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  lineage:
+    name: Reject released migration tamper
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out complete lineage
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve authoritative comparison commit
+        id: base
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == pull_request ]]; then
+            git fetch --no-tags origin "$BASE_REF"
+            comparison="$(git merge-base HEAD "origin/$BASE_REF")"
+          elif [[ "$BEFORE_SHA" =~ ^[0-9a-f]{40}$ ]] && [[ ! "$BEFORE_SHA" =~ ^0+$ ]]; then
+            git fetch --no-tags origin "$BEFORE_SHA"
+            comparison="$BEFORE_SHA"
+          else
+            comparison="$(git rev-list --max-parents=0 HEAD | tail -n 1)"
+          fi
+          printf 'commit=%s\n' "$comparison" >> "$GITHUB_OUTPUT"
+
+      - name: Reject edited, removed, or reordered released migrations
+        run: node scripts/verify-database-lineage.mjs --base-ref "${{ steps.base.outputs.commit }}"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Recompute semantic migration digests
+        run: npm exec -- vitest run tests/server/database-migration-lineage.test.ts tests/main/database-lineage-gate.test.ts

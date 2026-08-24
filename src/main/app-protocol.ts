@@ -22,13 +22,14 @@ function isContained(root: string, target: string): boolean {
 }
 
 export function registerAppProtocol(options: {
+  scheme?: string;
   attachmentRegistry: () => AttachmentRegistry | null;
   conversationAttachments: () => ConversationAttachmentAccess | null;
   runtimeSupervisor: () => RuntimeSupervisor | null;
   workspaceImageConversationId?: string;
 }, target: Pick<Protocol, "handle"> = protocol): void {
   const rendererRoot = fileURLToPath(new URL("../renderer/", import.meta.url));
-  target.handle(APP_SCHEME, async (request) => {
+  target.handle(options.scheme ?? APP_SCHEME, async (request) => {
     try {
       const url = new URL(request.url);
       if (
@@ -80,4 +81,36 @@ export function registerAppProtocol(options: {
       });
     }
   });
+}
+
+export function createAppProtocolRegistrar(options: {
+  scheme: string;
+  attachmentRegistry: () => AttachmentRegistry | null;
+  conversationAttachments: () => ConversationAttachmentAccess | null;
+  runtimeSupervisor: () => RuntimeSupervisor | null;
+}): (target?: Pick<Protocol, "handle" | "isProtocolHandled">, conversationId?: string) => void {
+  const registrations = new WeakMap<
+    Pick<Protocol, "handle" | "isProtocolHandled">,
+    string | null
+  >();
+  return (target = protocol, conversationId) => {
+    const scope = conversationId ?? null;
+    if (registrations.has(target)) {
+      if (registrations.get(target) !== scope) {
+        throw new Error("The renderer protocol session already has another conversation scope.");
+      }
+      return;
+    }
+    if (target.isProtocolHandled(options.scheme)) {
+      if (scope !== null) {
+        throw new Error("The renderer protocol session already has another conversation scope.");
+      }
+      return;
+    }
+    registerAppProtocol({
+      ...options,
+      workspaceImageConversationId: conversationId,
+    }, target);
+    registrations.set(target, scope);
+  };
 }

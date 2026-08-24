@@ -1,4 +1,5 @@
 import type { AppUpdater, ProgressInfo, UpdateCheckResult } from "electron-updater";
+import type { InertiaReleaseChannel } from "./release-channel.js";
 
 export interface AppUpdaterDownloadProgress {
   percent: number;
@@ -39,7 +40,9 @@ function resolvedModule(namespace: ElectronUpdaterModule): ElectronUpdaterModule
  * update-capable. Development and unsupported packages never initialize its
  * filesystem or network machinery.
  */
-export async function loadElectronAppUpdater(): Promise<AppUpdaterAdapter> {
+export async function loadElectronAppUpdater(
+  channel: InertiaReleaseChannel = "stable",
+): Promise<AppUpdaterAdapter> {
   const [moduleNamespace, electron] = await Promise.all([
     import("electron-updater"),
     import("electron"),
@@ -49,13 +52,17 @@ export async function loadElectronAppUpdater(): Promise<AppUpdaterAdapter> {
   updater.autoDownload = false;
   updater.autoInstallOnAppQuit = false;
   updater.autoRunAppAfterInstall = true;
-  updater.allowPrerelease = false;
+  updater.allowPrerelease = channel === "canary";
   updater.allowDowngrade = false;
   updater.disableWebInstaller = true;
   updater.logger = null;
   // electron-updater creates a per-install rollout UUID internally. Override
   // only the outbound header so GitHub never receives a stable device ID.
-  updater.requestHeaders = { "x-user-staging-id": ANONYMOUS_STAGING_ID };
+  updater.requestHeaders = {
+    "x-user-staging-id": channel === "canary"
+      ? `${ANONYMOUS_STAGING_ID}-canary`
+      : ANONYMOUS_STAGING_ID,
+  };
   return new ElectronAppUpdaterAdapter(
     updater,
     module.CancellationToken,

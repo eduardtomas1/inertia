@@ -1,5 +1,19 @@
 const packageJson = require("../package.json");
 
+const releaseChannel = process.env.INERTIA_RELEASE_CHANNEL ?? "stable";
+if (releaseChannel !== "stable" && releaseChannel !== "canary") {
+  throw new Error("INERTIA_RELEASE_CHANNEL must be stable or canary.");
+}
+const canary = releaseChannel === "canary";
+const productName = canary ? "Inertia Canary" : "Inertia";
+const appId = canary ? "dev.inertia.app.canary" : "dev.inertia.app";
+const desktopName = canary
+  ? "dev.inertia.app.desktop.canary"
+  : packageJson.desktopName;
+const updateFeedUrl = canary
+  ? "https://raw.githubusercontent.com/eduardtomas1/inertia/canary-feed"
+  : "https://github.com/eduardtomas1/inertia/releases/latest/download";
+
 const platform = process.env.INERTIA_RELEASE_PLATFORM ?? "";
 const supportedPlatforms = new Set([
   "macos-x64",
@@ -71,6 +85,8 @@ const updateCapability = isLinux
 
 module.exports = {
   ...packageJson.build,
+  appId,
+  productName,
   forceCodeSigning: signingRequired,
   // electron-builder still writes the update metadata and packaged
   // app-update.yml with --publish never. GitHub Actions remains the sole
@@ -78,15 +94,22 @@ module.exports = {
   publish: [
     {
       provider: "generic",
-      url: "https://github.com/eduardtomas1/inertia/releases/latest/download",
+      url: updateFeedUrl,
+      ...(canary ? { channel: "canary" } : {}),
     },
   ],
   extraMetadata: {
     ...packageJson.build.extraMetadata,
+    ...(canary ? { name: "inertia-canary" } : {}),
+    desktopName,
+    inertiaReleaseChannel: releaseChannel,
     inertiaUpdateCapability: updateCapability,
   },
   mac: {
     ...packageJson.build.mac,
+    ...(canary
+      ? { artifactName: "Inertia-Canary-${version}-${arch}.${ext}" }
+      : {}),
     // Pull requests and community builds retain the explicit, testable ad-hoc
     // path. A complete release secret set switches to Developer ID discovery,
     // hardened runtime, fail-closed signing, and notarization.
@@ -98,8 +121,30 @@ module.exports = {
     ...packageJson.build.win,
     // Keep the established x64 filename while giving the ARM64 installer and
     // its blockmap an architecture-qualified public identity.
-    artifactName: platform === "windows-arm64"
-      ? "Inertia.Setup.${version}.arm64.${ext}"
-      : packageJson.build.win.artifactName,
+    artifactName: canary
+      ? platform === "windows-arm64"
+        ? "Inertia.Canary.Setup.${version}.arm64.${ext}"
+        : "Inertia.Canary.Setup.${version}.${ext}"
+      : platform === "windows-arm64"
+        ? "Inertia.Setup.${version}.arm64.${ext}"
+        : packageJson.build.win.artifactName,
+  },
+  linux: {
+    ...packageJson.build.linux,
+    ...(canary
+      ? {
+          artifactName: platform === "linux-arm64"
+            ? "Inertia-Canary-${version}-arm64.${ext}"
+            : "Inertia-Canary-${version}.${ext}",
+          executableName: "inertia-canary",
+          desktop: {
+            entry: {
+              Name: productName,
+              Comment: packageJson.description,
+              StartupWMClass: productName,
+            },
+          },
+        }
+      : {}),
   },
 };

@@ -54,6 +54,7 @@ import { LoadingMark, Switch } from "./ui";
 import { ProviderMaintenanceNotice } from "./ProviderMaintenanceNotice";
 import {
   loadConnectionsAndDevicesSettings,
+  loadCanaryRollbackSetting,
   loadDiscordSettings,
   loadModelBackendsSettings,
   prefetchSettingsSection,
@@ -230,6 +231,7 @@ export function SettingsView({
   onSetBackendDefault,
   onClearBackendDefault,
 }: SettingsViewProps): React.JSX.Element {
+  const isCanary = appUpdateStatus?.channel === "canary";
   const rootRef = useRef<HTMLElement>(null);
   useEffect(() => {
     rootRef.current?.focus();
@@ -251,6 +253,10 @@ export function SettingsView({
   const DiscordSettings = useLoadedSurface(
     loadDiscordSettings,
     section === "discord",
+  );
+  const CanaryRollbackSetting = useLoadedSurface(
+    loadCanaryRollbackSetting,
+    isCanary,
   );
   const previousTarget = useRef(target);
   useEffect(() => {
@@ -562,7 +568,9 @@ export function SettingsView({
               <div className="settings-card-heading"><div><Download size={18} /></div><span><h3 id="application-update-heading">Application updates</h3><p>Update on your schedule, never during active work.</p></span></div>
               <div className="codex-binary-path application-update-setting">
                 <span>
-                  <strong>Inertia v{INERTIA_VERSION}</strong>
+                  <strong>
+                    {`${isCanary ? "Inertia Canary" : "Inertia"} · v${INERTIA_VERSION}`}
+                  </strong>
                   <small role="status" aria-live="polite" aria-atomic="true">
                     {updateCheckStatus
                       ?? appUpdateStatus?.message
@@ -585,6 +593,7 @@ export function SettingsView({
                   <button type="button" className="secondary-button" disabled={checkingUpdate || checkingAppUpdate || ["downloading", "downloaded", "installing"].includes(appUpdateStatus?.state ?? "")} onClick={() => { void checkAppUpdate(); }}><RefreshCw size={14} />{checkingUpdate || checkingAppUpdate ? "Checking…" : "Check now"}</button>
                 </div>
               </div>
+              {isCanary && CanaryRollbackSetting && <CanaryRollbackSetting />}
             </section>
           </>
         )}

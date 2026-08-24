@@ -727,8 +727,8 @@ export class RuntimeSupervisor {
         record.processTreeTerminationConfirmed = true;
         record.processTreeTerminationSettled = true;
       }
-      this.clearCredentialRequests(record);
-      this.secureFiles.clear(record);
+      this.clearCredentialRequests(record); this.secureFiles.clear(record);
+      this.post(record.child, { type: "runtime.stopped-acknowledged" });
       return;
     }
     if (event.type === "runtime.cleanup-receipt-consumed") {

@@ -58,8 +58,8 @@ interface PreviewBrokerOptions {
   openExternal: (url: string) => Promise<void>;
   stateChannel: string;
   registerHealthRenderer?(contents: WebContents): () => void;
+  partitionPrefix?: string;
 }
-
 const MAX_BROWSER_TABS = 8;
 const PREVIEW_RENDERER_OPERATION_TIMEOUT_MS = 15_000;
 const PREVIEW_NAVIGATION_COMMAND_TIMEOUT_MS = 30_000;
@@ -587,7 +587,7 @@ export class PreviewBroker {
     });
     slot = {
       contextId,
-      partition: createPreviewPartition(),
+      partition: createPreviewPartition(this.options.partitionPrefix),
       tabs: new Map(),
       activeTabId: "",
       bounds: null,

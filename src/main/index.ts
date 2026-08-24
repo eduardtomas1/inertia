@@ -14,6 +14,7 @@ import {
   protocol,
   safeStorage,
   screen,
+  session,
   shell,
   utilityProcess,
   type IpcMainInvokeEvent,
@@ -64,7 +65,9 @@ import { AppHealthCollector, InertiaHealthRegistry } from "./app-health.js";
 import { registerInertiaReleaseIpc } from "./inertia-release-ipc.js";
 import { resolveAppUpdateCapability } from "./app-update-capability.js";
 import { AppUpdateInstallCoordinator } from "./app-update-install.js";
-import { loadElectronAppUpdater } from "./electron-app-updater.js";
+import { CanaryRollbackManager } from "./canary-rollback.js";
+import { APP_UPDATE_IPC, registerAppUpdateIpc } from "./app-update-ipc.js";
+import { initializeReleaseUpdates } from "./release-updates.js";
 import { resolveRuntimeIconPath } from "./runtime-assets.js";
 import {
   CredentialVault,
@@ -89,7 +92,8 @@ import { PrivateConnectHost } from "./private-connect/host.js";
 import { SecureFileBroker } from "./secure-file-broker.js";
 import { packageSmokeEnvironment } from "./package-smoke-environment.js";
 import { waitForRequestedPackageSmokeResults } from "./package-smoke-results.js";
-import { APP_HOST, APP_SCHEME, registerAppProtocol } from "./app-protocol.js";
+import { APP_HOST, createAppProtocolRegistrar } from "./app-protocol.js";
+import { initializeInertiaReleaseChannel, releaseRuntimeOverride } from "./release-channel.js";
 import {
   activateThreadNotification,
   waitForThreadNotificationWindowLoad,
@@ -107,6 +111,7 @@ import {
   restoreMainWindowState,
   type MainWindowState,
 } from "./main-window-state.js";
+const { configuration: releaseChannel, packageSmokeRoot } = initializeInertiaReleaseChannel(app, process.env);
 const IPC = {
   getRuntimeConnection: "inertia:runtime-connection",
   runtimeReady: "inertia:runtime-ready",
@@ -117,11 +122,7 @@ const IPC = {
   revealRuntimeLogs: "inertia:reveal-runtime-logs",
   copyRuntimeDiagnosticReport: "inertia:copy-runtime-diagnostic-report",
   copyText: "inertia:copy-text",
-  checkAppUpdate: "inertia:check-app-update",
-  downloadAppUpdate: "inertia:download-app-update",
-  cancelAppUpdateDownload: "inertia:cancel-app-update-download",
-  installAppUpdate: "inertia:install-app-update",
-  appUpdateStatus: "inertia:app-update-status",
+  ...APP_UPDATE_IPC,
   selectAttachments: "inertia:select-attachments",
   beginAttachmentImport: "inertia:begin-attachment-import",
   importAttachments: "inertia:import-attachments",
@@ -148,7 +149,7 @@ const IPC = {
 } as const;
 protocol.registerSchemesAsPrivileged([
   {
-    scheme: APP_SCHEME,
+    scheme: releaseChannel.protocolScheme,
     privileges: {
       standard: true,
       secure: true,
@@ -165,6 +166,7 @@ let privateConnectHost: PrivateConnectHost | null = null;
 let runtimeDiagnostics: RuntimeDiagnostics | null = null;
 let appUpdateService: AppUpdateService | null = null;
 let appUpdateInstallCoordinator: AppUpdateInstallCoordinator | null = null;
+let canaryRollbackManager: CanaryRollbackManager | null = null;
 let credentialVault: CredentialVault | null = null;
 let detachedChatMain: DetachedChatMain | null = null;
 let trustedRendererUrl = "";
@@ -183,6 +185,7 @@ const previewBroker = new PreviewBroker({
   registerHealthRenderer: (contents) => (
     appHealthRegistry.registerRenderer(contents)
   ),
+  partitionPrefix: releaseChannel.channel === "canary" ? "inertia-canary-preview" : "inertia-preview",
 });
 let windowThemePreference: WindowThemePreference = "system";
 let importedAttachments: AttachmentRegistry | null = null;
@@ -194,13 +197,19 @@ let attachmentReservation: AttachmentStorageReservation = {
   records: 0,
   bytes: 0,
 };
+const registerRendererProtocol = createAppProtocolRegistrar({
+  scheme: releaseChannel.protocolScheme,
+  attachmentRegistry: () => importedAttachments,
+  conversationAttachments: () => conversationAttachments,
+  runtimeSupervisor: () => runtimeSupervisor,
+});
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 function windowStatePath(): string { return join(app.getPath("userData"), "window-state.json"); }
 function windowAppearancePath(): string { return join(app.getPath("userData"), WINDOW_APPEARANCE_FILENAME); }
 
 function attachmentStorageRoot(): string {
-  return join(app.getPath("temp"), "inertia-attachments");
+  return join(app.getPath("temp"), releaseChannel.temporaryAttachmentDirectoryName);
 }
 
 function attachmentDirectory(): string {
@@ -317,7 +326,7 @@ function rendererLocation(): { target: string; isUrl: boolean } {
   }
 
   return {
-    target: `${APP_SCHEME}://${APP_HOST}/index.html`,
+    target: `${releaseChannel.protocolScheme}://${APP_HOST}/index.html`,
     isUrl: true,
   };
 }
@@ -490,6 +499,7 @@ function registerIpcHandlers(): void {
     runtimeDiagnostics = diagnostics;
     const report = diagnostics.supportReport({
       version: app.getVersion(),
+      channel: releaseChannel.channel,
       platform: process.platform,
       architecture: process.arch,
       runtime: runtimeSupervisor?.snapshot() ?? null,
@@ -508,34 +518,12 @@ function registerIpcHandlers(): void {
 
   registerClipboardIpc(IPC.copyText, assertTrustedChatIpc);
 
-  ipcMain.handle(IPC.checkAppUpdate, async (event, ...args) => {
-    assertTrustedIpc(event, args.length, 1);
-    const [force] = args;
-    if (typeof force !== "boolean") {
-      throw new Error("Invalid update check request");
-    }
-    if (!appUpdateService) throw new Error("Update checks are unavailable.");
-    return await appUpdateService.check(force);
-  });
-
-  ipcMain.handle(IPC.downloadAppUpdate, async (event, ...args) => {
-    assertTrustedIpc(event, args.length);
-    if (!appUpdateService) throw new Error("Application updates are unavailable.");
-    return await appUpdateService.download();
-  });
-
-  ipcMain.handle(IPC.cancelAppUpdateDownload, (event, ...args) => {
-    assertTrustedIpc(event, args.length);
-    if (!appUpdateService) throw new Error("Application updates are unavailable.");
-    return appUpdateService.cancelDownload();
-  });
-
-  ipcMain.handle(IPC.installAppUpdate, async (event, ...args) => {
-    assertTrustedIpc(event, args.length);
-    if (!appUpdateInstallCoordinator) {
-      throw new Error("Application updates are unavailable.");
-    }
-    return await appUpdateInstallCoordinator.install();
+  registerAppUpdateIpc({
+    ipcMain,
+    currentVersion: () => app.getVersion(),
+    service: () => appUpdateService, installCoordinator: () => appUpdateInstallCoordinator,
+    rollbackManager: () => canaryRollbackManager,
+    assertTrustedIpc,
   });
 
   ipcMain.handle(IPC.selectAttachments, async (event, ...args) => {
@@ -761,13 +749,11 @@ async function createMainWindow(): Promise<void> {
   detachedChatMain ??= createDetachedChatMain({
     mainWindow: () => mainWindow,
     rendererUrl: trustedRendererUrl, userDataDirectory: app.getPath("userData"),
-    iconPath, backgroundColor,
-    registerRendererProtocol: (session, conversationId) => registerAppProtocol({
-      attachmentRegistry: () => importedAttachments,
-      conversationAttachments: () => conversationAttachments,
-      runtimeSupervisor: () => runtimeSupervisor,
-      workspaceImageConversationId: conversationId,
-    }, session.protocol),
+    iconPath, backgroundColor, productName: releaseChannel.productName,
+    applicationScheme: releaseChannel.protocolScheme,
+    sessionPartitionPrefix: releaseChannel.channel === "canary" ? "inertia-canary" : "inertia",
+    registerRendererProtocol: (session, conversationId) =>
+      registerRendererProtocol(session.protocol, conversationId),
     registerHealthRenderer: (contents) => (
       appHealthRegistry.registerRenderer(contents)
     ),
@@ -782,7 +768,7 @@ async function createMainWindow(): Promise<void> {
   });
   const savedWindow = readWindowState();
   const window = new BrowserWindow({
-    title: "Inertia",
+    title: releaseChannel.productName,
     width: savedWindow.width,
     height: savedWindow.height,
     ...(savedWindow.x !== undefined && savedWindow.y !== undefined ? { x: savedWindow.x, y: savedWindow.y } : {}),
@@ -806,6 +792,7 @@ async function createMainWindow(): Promise<void> {
       webSecurity: true,
       allowRunningInsecureContent: false,
       webviewTag: false,
+      ...(releaseChannel.sessionPartition ? { partition: releaseChannel.sessionPartition } : {}),
     },
   });
 
@@ -813,8 +800,8 @@ async function createMainWindow(): Promise<void> {
   const unregisterHealthRenderer = appHealthRegistry.registerRenderer(
     window.webContents,
   );
+  window.on("page-title-updated", (event) => { event.preventDefault(); window.setTitle(releaseChannel.productName); });
   detachedChatMain.registerIpc();
-
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   window.webContents.on("will-navigate", (event, url) => {
     if (!isTrustedRendererLocation(url)) {
@@ -924,16 +911,18 @@ async function bootstrap(): Promise<void> {
     ? { delivery: "manual" as const, reason: "development-build" as const }
     : resolveAppUpdateCapability({ isPackaged: app.isPackaged,
         platform: process.platform, appPath: app.getAppPath(), appImagePath: process.env.APPIMAGE });
-  appUpdateService = new AppUpdateService({
+  const releaseUpdates = initializeReleaseUpdates({
+    configuration: releaseChannel,
     currentVersion: app.getVersion(),
     capability: appUpdateCapability,
-    loadUpdater: loadElectronAppUpdater,
-    fetch: process.env.NODE_ENV === "test"
-      ? async () => new Response(JSON.stringify({
-          tag_name: `v${testUpdateVersion.replace(/^v/u, "")}`,
-        }))
-      : net.fetch as typeof globalThis.fetch,
+    fetch: net.fetch as typeof globalThis.fetch,
+    ...(process.env.NODE_ENV === "test" ? { testUpdateVersion } : {}),
+    userDataDirectory: app.getPath("userData"),
+    platform: process.platform, architecture: process.arch, activeAppImagePath: process.env.APPIMAGE,
+    openPath: async (path) => await shell.openPath(path), revealPath: (path) => shell.showItemInFolder(path),
   });
+  appUpdateService = releaseUpdates.service;
+  canaryRollbackManager = releaseUpdates.rollbackManager;
   appUpdateService.subscribe((status) => {
     const window = mainWindow;
     if (window && !window.isDestroyed()) window.webContents.send(IPC.appUpdateStatus, status);
@@ -950,7 +939,14 @@ async function bootstrap(): Promise<void> {
     mainWindow?.setBackgroundColor(backgroundColor);
     detachedChatMain?.setBackgroundColor(backgroundColor);
   });
-  const dataDirectory = runtimeBootstrap.runtimeDataPath(process.env.INERTIA_DATA_DIR, app.getPath("userData"));
+  const configuredDataDirectory = releaseRuntimeOverride({
+    configuration: releaseChannel, isPackaged: app.isPackaged, packageSmokeRoot,
+    configuredPath: process.env.INERTIA_DATA_DIR, smokeDirectoryName: "data",
+  });
+  const dataDirectory = runtimeBootstrap.runtimeDataPath(
+    configuredDataDirectory,
+    app.getPath("userData"),
+  );
   runtimeDataDirectory = dataDirectory;
   const bootstrapSafety = runtimeBootstrap.prepareRuntimeBootstrapSafety(dataDirectory);
   conversationAttachments = openConversationAttachments(
@@ -958,7 +954,15 @@ async function bootstrap(): Promise<void> {
     conversationAttachmentStoreRunner,
   );
   const retainedConversationAttachments = conversationAttachments;
-  const defaultWorkspacePath = runtimeBootstrap.runtimeWorkspacePath(process.env.INERTIA_WORKSPACE_DIR, app.getPath("home"));
+  const configuredWorkspaceDirectory = releaseRuntimeOverride({
+    configuration: releaseChannel, isPackaged: app.isPackaged, packageSmokeRoot,
+    configuredPath: process.env.INERTIA_WORKSPACE_DIR, smokeDirectoryName: "workspace",
+  });
+  const defaultWorkspacePath = runtimeBootstrap.runtimeWorkspacePath(
+    configuredWorkspaceDirectory,
+    app.getPath("home"),
+    releaseChannel.workspaceDirectoryName,
+  );
   credentialVault = new CredentialVault(
     new ElectronSafeStorageBackend(safeStorage),
     new FileCredentialVaultPersistence(
@@ -966,11 +970,7 @@ async function bootstrap(): Promise<void> {
     ),
   );
 
-  registerAppProtocol({
-    attachmentRegistry: () => importedAttachments,
-    conversationAttachments: () => conversationAttachments,
-    runtimeSupervisor: () => runtimeSupervisor,
-  });
+  registerRendererProtocol(releaseChannel.sessionPartition ? session.fromPartition(releaseChannel.sessionPartition).protocol : undefined);
   // Paint the secure renderer while private attachment storage is reconciled.
   // The renderer can show its bounded starting state until the runtime-ready
   // signal arrives; orphan cleanup no longer blocks the first window.

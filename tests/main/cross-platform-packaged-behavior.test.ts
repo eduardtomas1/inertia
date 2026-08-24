@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -31,6 +31,119 @@ function workflowMatrixEntry(workflow: string, label: string): string {
 }
 
 describe("cross-platform packaged behavior contract", () => {
+  it("keeps one authoritative stable-only Discord release notifier", async () => {
+    const workflowDirectory = join(repositoryRoot, ".github/workflows");
+    const workflowNames = (await readdir(workflowDirectory))
+      .filter((name) => name.endsWith(".yml") || name.endsWith(".yaml"))
+      .sort();
+    expect(workflowNames).not.toContain("discord-release.yml");
+
+    const notifierWorkflows: string[] = [];
+    let notifierJobs = 0;
+    for (const name of workflowNames) {
+      const workflow = await source(`.github/workflows/${name}`);
+      if (workflow.includes("DISCORD_WEBHOOK_URL")) notifierWorkflows.push(name);
+      notifierJobs += workflow.match(/^  notify-discord:\s*$/gmu)?.length ?? 0;
+    }
+    expect(notifierWorkflows).toEqual(["release-platforms.yml"]);
+    expect(notifierJobs).toBe(1);
+
+    const releaseWorkflow = await source(".github/workflows/release-platforms.yml");
+    const notifierStart = releaseWorkflow.indexOf("\n  notify-discord:");
+    expect(notifierStart).toBeGreaterThanOrEqual(0);
+    const notifier = releaseWorkflow.slice(notifierStart);
+    expect(notifier).toContain("needs: upload");
+    expect(notifier).toContain(
+      "if: ${{ !startsWith(inputs.release_tag || github.ref_name, 'canary-v') }}",
+    );
+    expect(notifier).toContain("DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}");
+  });
+
+  it("keeps Canary packages behind the full smoke, fuse, checksum, provenance, and atomic-feed gate", async () => {
+    const workflow = await source(".github/workflows/release-platforms.yml");
+    for (const expected of [
+      '- "canary-v*.*.*"',
+      "INERTIA_RELEASE_CHANNEL:",
+      "npm run verify:fuses -- \"$app\"",
+      "run: npm run test:package-smoke",
+      "run: xvfb-run --auto-servernum npm run test:package-smoke",
+      "node scripts/release-assets.mjs finalize",
+      "actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8",
+      "node scripts/prepare-canary-feed.mjs",
+      "--prerelease --latest=false",
+      "HEAD:canary-feed",
+    ]) {
+      expect(workflow).toContain(expected);
+    }
+  });
+
+  it("keeps deterministic exact-head Canary screenshot wiring", async () => {
+    const readme = await source("README.md");
+    expect(readme).toContain("### Canary release channel");
+    expect(readme).toContain(
+      "![Inertia Canary channel status and rollback controls](docs/screenshots/inertia-canary-channel.png)",
+    );
+
+    const scenario = await source("tests/e2e/canary-channel.spec.ts");
+    expect(scenario).toContain("process.env.INERTIA_CANARY_SCREENSHOT_PATH");
+    expect(scenario).toContain("INERTIA_CANARY_SCREENSHOT_PATH must be absolute");
+    expect(scenario).toContain("await copyFile(evidence, requestedPath)");
+    const screenshot = await readFile(join(
+      repositoryRoot,
+      "docs/screenshots/inertia-canary-channel.png",
+    ));
+    expect([...screenshot.subarray(0, 8)]).toEqual([
+      0x89,
+      0x50,
+      0x4e,
+      0x47,
+      0x0d,
+      0x0a,
+      0x1a,
+      0x0a,
+    ]);
+  });
+
+  it("documents six checksum-first native choices without disabling platform security", async () => {
+    const readme = await source("README.md");
+    const normalizedReadme = readme.replace(/\s+/gu, " ");
+    for (const choice of [
+      "macOS · Apple silicon",
+      "macOS · Intel",
+      "Windows · x64",
+      "Windows · ARM64",
+      "Linux · x64",
+      "Linux · ARM64",
+    ]) {
+      expect(normalizedReadme).toContain(choice);
+    }
+    for (const expected of [
+      "SHA256SUMS.txt",
+      "System Settings → Privacy & Security → Open Anyway",
+      "Do not remove quarantine attributes or disable Gatekeeper.",
+      "Windows protected your PC",
+      "More info",
+      "Unknown publisher",
+      "Run anyway",
+    ]) {
+      expect(normalizedReadme).toContain(expected);
+    }
+    expect(normalizedReadme).toContain("Do not disable SmartScreen.");
+    expect(readme).not.toContain("xattr");
+    expect(readme).not.toContain("spctl --master-disable");
+
+    const releasing = await source("docs/RELEASING.md");
+    const normalizedReleasing = releasing.replace(/\s+/gu, " ");
+    expect(normalizedReleasing).toContain("credential-free public union is exactly 11");
+    expect(normalizedReleasing).toContain("Manual macOS and Windows releases do not publish");
+    expect(normalizedReleasing).toContain(
+      "Do not strip quarantine attributes or disable Gatekeeper.",
+    );
+    expect(normalizedReleasing).toContain("Do not disable SmartScreen.");
+    expect(releasing).not.toContain("xattr");
+    expect(releasing).not.toContain("spctl --master-disable");
+  });
+
   it("keeps build, Electron E2E, fuse verification, and native smoke on all six CI targets", async () => {
     const workflow = await source(".github/workflows/ci.yml");
     for (const expected of [
@@ -187,6 +300,17 @@ describe("cross-platform packaged behavior contract", () => {
   });
 
   it("fails closed when packaged updater wiring or the test network boundary drifts", async () => {
+    const packageJson = JSON.parse(await source("package.json")) as {
+      inertiaReleaseChannel?: unknown;
+      build: { publish?: unknown; extraMetadata?: unknown };
+    };
+    expect(packageJson.inertiaReleaseChannel).toBe("stable");
+    expect(packageJson.build.publish).toEqual([{
+      provider: "generic",
+      url: "https://github.com/eduardtomas1/inertia/releases/latest/download",
+    }]);
+    expect(packageJson.build.extraMetadata).toBeUndefined();
+
     const smoke = await source("scripts/package-smoke.mjs");
     expect(smoke).toContain('["node_modules", "electron-updater", "package.json"]');
     expect(smoke).toContain('["node_modules", "electron-updater", "out", "main.js"]');
@@ -201,20 +325,25 @@ describe("cross-platform packaged behavior contract", () => {
     expect(smoke).toContain('`--proxy-server=${updateNetworkTrap.proxy}`');
     expect(smoke).toContain('"api.github.com"');
     expect(smoke).toContain('"github.com"');
+    expect(smoke).toContain('"raw.githubusercontent.com"');
     expect(smoke).toContain('"release-assets.githubusercontent.com"');
     expect(smoke).toContain("updateNetworkTrap.assertNoUpdateRequests()");
 
     const main = await source("src/main/index.ts");
     const capabilityStart = main.indexOf("const appUpdateCapability =");
-    const serviceStart = main.indexOf("appUpdateService = new AppUpdateService", capabilityStart);
-    const bootstrapUpdateBoundary = main.slice(capabilityStart, serviceStart + 900);
+    const serviceStart = main.indexOf("initializeReleaseUpdates({", capabilityStart);
+    const bootstrapUpdateBoundary = main.slice(capabilityStart, serviceStart + 700);
     expect(capabilityStart).toBeGreaterThanOrEqual(0);
     expect(serviceStart).toBeGreaterThan(capabilityStart);
     expect(bootstrapUpdateBoundary).toContain('process.env.NODE_ENV === "test"');
     expect(bootstrapUpdateBoundary).toContain('delivery: "manual" as const');
     expect(bootstrapUpdateBoundary).toContain("resolveAppUpdateCapability({");
-    expect(bootstrapUpdateBoundary).toContain("tag_name:");
-    expect(bootstrapUpdateBoundary).toContain(": net.fetch as typeof globalThis.fetch");
+    expect(bootstrapUpdateBoundary).toContain("fetch: net.fetch as typeof globalThis.fetch");
+    const releaseUpdates = await source("src/main/release-updates.ts");
+    expect(releaseUpdates).toContain('channel === "canary"');
+    expect(releaseUpdates).toContain("{ version:");
+    expect(releaseUpdates).toContain("{ tag_name:");
+    expect(releaseUpdates).toContain("loadElectronAppUpdater(channel)");
   });
 
   it("registers runtime socket handlers before sending the first hydration frame", async () => {

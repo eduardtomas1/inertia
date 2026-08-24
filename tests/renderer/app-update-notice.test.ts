@@ -7,6 +7,7 @@ import type { AppUpdateStatus } from "../../src/shared/desktop";
 
 const available: AppUpdateStatus = {
   revision: 1,
+  channel: "stable",
   state: "available",
   freshness: "fresh",
   delivery: "in-app",

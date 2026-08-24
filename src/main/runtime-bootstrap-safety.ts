@@ -16,8 +16,12 @@ export function runtimeDataPath(configuredPath: string | undefined, userDataPath
   return configuredPath ? resolve(configuredPath) : join(userDataPath, "runtime");
 }
 
-export function runtimeWorkspacePath(configuredPath: string | undefined, homePath: string): string {
-  return configuredPath ? resolve(configuredPath) : join(homePath, "Inertia");
+export function runtimeWorkspacePath(
+  configuredPath: string | undefined,
+  homePath: string,
+  directoryName = "Inertia",
+): string {
+  return configuredPath ? resolve(configuredPath) : join(homePath, directoryName);
 }
 
 export function prepareRuntimeBootstrapSafety(

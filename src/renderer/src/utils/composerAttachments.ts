@@ -83,5 +83,8 @@ export function attachmentPreviewKind(
 }
 
 export function attachmentPreviewUrl(attachment: ChatAttachment): string {
-  return `inertia://bundle/attachment-preview/${encodeURIComponent(attachment.id)}`;
+  const scheme = globalThis.location?.protocol === "inertia-canary:"
+    ? "inertia-canary"
+    : "inertia";
+  return `${scheme}://bundle/attachment-preview/${encodeURIComponent(attachment.id)}`;
 }

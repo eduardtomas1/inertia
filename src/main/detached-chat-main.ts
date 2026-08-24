@@ -66,6 +66,9 @@ export interface DetachedChatMainOptions {
   registerRendererProtocol(session: Session, conversationId: string): void;
   registerHealthRenderer(contents: WebContents): () => void;
   rendererUrl: string;
+  productName?: string;
+  applicationScheme?: string;
+  sessionPartitionPrefix?: string;
   preloadPath: string;
   statePath: string;
   draftStatePath: string;
@@ -79,7 +82,7 @@ export interface DetachedChatMainOptions {
 
 type TrustedWindowRole = DesktopWindowContext["role"];
 
-function fixedRendererUrl(value: string): string {
+function fixedRendererUrl(value: string, applicationScheme: string): string {
   let parsed: URL;
   try {
     parsed = new URL(value);
@@ -96,7 +99,7 @@ function fixedRendererUrl(value: string): string {
     if (!loopback) {
       throw new Error("Detached chat development renderers must be loopback-only");
     }
-  } else if (parsed.protocol !== "inertia:") {
+  } else if (parsed.protocol !== `${applicationScheme}:`) {
     throw new Error("Detached chats require the application renderer protocol");
   }
   return parsed.href;
@@ -158,7 +161,10 @@ export class DetachedChatMain {
       throw new Error("Detached chat draft state path must be absolute");
     }
     this.#options = options;
-    this.#rendererUrl = fixedRendererUrl(options.rendererUrl);
+    this.#rendererUrl = fixedRendererUrl(
+      options.rendererUrl,
+      options.applicationScheme ?? "inertia",
+    );
     this.#backgroundColor = options.backgroundColor;
     this.#pendingDrafts = new DetachedChatDraftStore(options.draftStatePath, {
       onDiagnostic: options.onDraftStoreDiagnostic,
@@ -170,6 +176,7 @@ export class DetachedChatMain {
       },
       getDisplays: () => options.getDisplays(),
       state: new DetachedChatWindowStateStore(options.statePath),
+      formatTitle: (title) => `${title} — ${options.productName ?? "Inertia"}`,
       onWindowsChanged: (windows) => this.#broadcastWindows(windows),
       onRendererGone: (id) => this.#persistDraftAfterRendererCrash(id),
     });
@@ -439,7 +446,7 @@ export class DetachedChatMain {
   #createWindow(input: DetachedChatWindowFactoryInput): BrowserWindow {
     const { bounds } = input;
     const window = this.#options.createBrowserWindow({
-      title: "Inertia",
+      title: this.#options.productName ?? "Inertia",
       width: bounds.width,
       height: bounds.height,
       ...(bounds.x === undefined || bounds.y === undefined
@@ -460,7 +467,7 @@ export class DetachedChatMain {
       icon: this.#options.iconPath,
       webPreferences: {
         preload: this.#options.preloadPath,
-        partition: `inertia-detached-chat-${randomUUID()}`,
+        partition: `${this.#options.sessionPartitionPrefix ?? "inertia"}-detached-chat-${randomUUID()}`,
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: true,

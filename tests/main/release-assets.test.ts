@@ -84,6 +84,50 @@ const policies = {
     packagedAppArchive: "linux-arm64-unpacked/resources/app.asar",
   },
 } as const;
+const canaryPolicies = {
+  "macos-x64": {
+    packages: [`Inertia-Canary-${version}-x64.dmg`, `Inertia-Canary-${version}-x64.zip`],
+    metadata: "canary-mac.yml",
+    companions: [`Inertia-Canary-${version}-x64.zip.blockmap`],
+    packagedUpdateConfig: "mac/Inertia Canary.app/Contents/Resources/app-update.yml",
+    packagedAppArchive: "mac/Inertia Canary.app/Contents/Resources/app.asar",
+  },
+  "macos-arm64": {
+    packages: [`Inertia-Canary-${version}-arm64.dmg`, `Inertia-Canary-${version}-arm64.zip`],
+    metadata: "canary-mac.yml",
+    companions: [`Inertia-Canary-${version}-arm64.zip.blockmap`],
+    packagedUpdateConfig: "mac-arm64/Inertia Canary.app/Contents/Resources/app-update.yml",
+    packagedAppArchive: "mac-arm64/Inertia Canary.app/Contents/Resources/app.asar",
+  },
+  "windows-x64": {
+    packages: [`Inertia.Canary.Setup.${version}.exe`],
+    metadata: "canary.yml",
+    companions: [`Inertia.Canary.Setup.${version}.exe.blockmap`],
+    packagedUpdateConfig: "win-unpacked/resources/app-update.yml",
+    packagedAppArchive: "win-unpacked/resources/app.asar",
+  },
+  "windows-arm64": {
+    packages: [`Inertia.Canary.Setup.${version}.arm64.exe`],
+    metadata: "canary.yml",
+    companions: [`Inertia.Canary.Setup.${version}.arm64.exe.blockmap`],
+    packagedUpdateConfig: "win-arm64-unpacked/resources/app-update.yml",
+    packagedAppArchive: "win-arm64-unpacked/resources/app.asar",
+  },
+  "linux-x64": {
+    packages: [`Inertia-Canary-${version}.AppImage`],
+    metadata: "canary-linux.yml",
+    companions: [],
+    packagedUpdateConfig: "linux-unpacked/resources/app-update.yml",
+    packagedAppArchive: "linux-unpacked/resources/app.asar",
+  },
+  "linux-arm64": {
+    packages: [`Inertia-Canary-${version}-arm64.AppImage`],
+    metadata: "canary-linux-arm64.yml",
+    companions: [],
+    packagedUpdateConfig: "linux-arm64-unpacked/resources/app-update.yml",
+    packagedAppArchive: "linux-arm64-unpacked/resources/app.asar",
+  },
+} as const;
 
 async function temporaryDirectory(): Promise<string> {
   const path = await mkdtemp(join(tmpdir(), "inertia-release-assets-"));
@@ -99,13 +143,15 @@ async function writeFixture(
   sourceRoot: string,
   platform: keyof typeof policies,
   options: {
+    channel?: "stable" | "canary";
     feedUrl?: string;
     overrideUrl?: string;
     delivery?: "in-app" | "manual";
     includePublisherName?: boolean;
   } = {},
 ): Promise<void> {
-  const policy = policies[platform];
+  const channel = options.channel ?? "stable";
+  const policy = channel === "canary" ? canaryPolicies[platform] : policies[platform];
   const delivery = options.delivery ?? "in-app";
   const platformMarker = platform.startsWith("macos-")
     ? "darwin"
@@ -123,8 +169,9 @@ async function writeFixture(
   await mkdir(manifestSource, { recursive: true });
   await mkdir(dirname(archivePath), { recursive: true });
   await writeFile(join(manifestSource, "package.json"), JSON.stringify({
-    name: packageJson.name,
+    name: channel === "canary" ? "inertia-canary" : packageJson.name,
     version,
+    inertiaReleaseChannel: channel,
     inertiaUpdateCapability: capability,
   }));
   await createPackage(manifestSource, archivePath);
@@ -137,8 +184,11 @@ async function writeFixture(
     updateConfigPath,
     [
       "provider: generic",
-      `url: ${options.feedUrl ?? "https://github.com/eduardtomas1/inertia/releases/latest/download"}`,
-      "updaterCacheDirName: inertia-updater",
+      `url: ${options.feedUrl ?? (channel === "canary"
+        ? "https://raw.githubusercontent.com/eduardtomas1/inertia/canary-feed"
+        : "https://github.com/eduardtomas1/inertia/releases/latest/download")}`,
+      `updaterCacheDirName: ${channel === "canary" ? "inertia-canary-updater" : "inertia-updater"}`,
+      ...(channel === "canary" ? ["channel: canary"] : []),
       ...(includePublisherName ? ["publisherName: Inertia Test Publisher"] : []),
       "",
     ].join("\n"),
@@ -207,12 +257,150 @@ function runReleaseAssets(
   };
 }
 
+async function expectExactUnsignedAssetUnion(
+  finalDirectory: string,
+  channel: "stable" | "canary",
+): Promise<void> {
+  const selectedPolicies = channel === "canary" ? canaryPolicies : policies;
+  const expected = [
+    ...Object.values(selectedPolicies).flatMap((policy) => policy.packages),
+    channel === "canary" ? "canary-linux.yml" : "latest-linux.yml",
+    channel === "canary" ? "canary-linux-arm64.yml" : "latest-linux-arm64.yml",
+    "SHA256SUMS.txt",
+  ].sort();
+  expect(expected).toHaveLength(11);
+
+  const entries = (await readdir(finalDirectory)).sort();
+  expect(entries).toEqual(expected);
+  expect(entries.filter((name) => name.endsWith(".blockmap"))).toEqual([]);
+  expect(entries.filter((name) => [
+    "latest-mac.yml",
+    "latest.yml",
+    "canary-mac.yml",
+    "canary.yml",
+  ].includes(name))).toEqual([]);
+
+  const checksumSource = await readFile(join(finalDirectory, "SHA256SUMS.txt"), "utf8");
+  expect(checksumSource.endsWith("\n")).toBe(true);
+  const checksumLines = checksumSource.trimEnd().split("\n");
+  const publicAssets = expected.filter((name) => name !== "SHA256SUMS.txt");
+  expect(
+    checksumLines,
+    "SHA256SUMS.txt must contain exactly one row per public asset",
+  ).toHaveLength(publicAssets.length);
+  const checksumRecords = new Map(checksumLines.map((line) => {
+    const match = /^([0-9a-f]{64})  ([A-Za-z0-9._-]+)$/u.exec(line);
+    if (!match) throw new Error(`Invalid checksum fixture line: ${line}`);
+    return [match[2]!, match[1]!] as const;
+  }));
+  expect([...checksumRecords.keys()].sort()).toEqual(publicAssets);
+  for (const name of publicAssets) {
+    const digest = createHash("sha256")
+      .update(await readFile(join(finalDirectory, name)))
+      .digest("hex");
+    expect(checksumRecords.get(name)).toBe(digest);
+  }
+}
+
 afterEach(async () => {
   await Promise.all([...temporaryDirectories].map(async (path) => await rm(path, { recursive: true, force: true })));
   temporaryDirectories.clear();
 });
 
 describe("release asset staging", () => {
+  it("validates and consolidates the disjoint Canary artifact and metadata union", async () => {
+    const fixtureRoot = await temporaryDirectory();
+    const sourceRoot = join(fixtureRoot, "source");
+    const stageRoot = join(fixtureRoot, "stage");
+    await mkdir(sourceRoot);
+    for (const platform of Object.keys(canaryPolicies) as Array<keyof typeof canaryPolicies>) {
+      await writeFixture(sourceRoot, platform, { channel: "canary" });
+      const staged = runReleaseAssets(["stage", platform], {
+        INERTIA_RELEASE_CHANNEL: "canary",
+        RELEASE_TAG: `canary-v${version}`,
+        INERTIA_RELEASE_SOURCE_DIR: sourceRoot,
+        INERTIA_RELEASE_STAGE_DIR: stageRoot,
+      });
+      expect(staged.status, staged.stderr).toBe(0);
+    }
+    const finalized = runReleaseAssets(["finalize"], {
+      INERTIA_RELEASE_CHANNEL: "canary",
+      RELEASE_TAG: `canary-v${version}`,
+      INERTIA_RELEASE_DOWNLOAD_DIR: stageRoot,
+    });
+    expect(finalized.status, finalized.stderr).toBe(0);
+    const entries = (await readdir(join(stageRoot, "final"))).sort();
+    expect(Object.keys(canaryPolicies)).toEqual([
+      "macos-x64",
+      "macos-arm64",
+      "windows-x64",
+      "windows-arm64",
+      "linux-x64",
+      "linux-arm64",
+    ]);
+    expect(entries).toEqual([...new Set([
+      ...Object.values(canaryPolicies).flatMap((policy) => [
+        ...policy.packages,
+        policy.metadata,
+        ...policy.companions,
+      ]),
+      "SHA256SUMS.txt",
+    ])].sort());
+    for (const [metadata, platforms] of [
+      ["canary-mac.yml", ["macos-x64", "macos-arm64"]],
+      ["canary.yml", ["windows-x64", "windows-arm64"]],
+    ] as const) {
+      const document = parse(
+        await readFile(join(stageRoot, "final", metadata), "utf8"),
+      ) as { files: Array<{ url: string }> };
+      expect(document.files.map(({ url }) => url)).toEqual(
+        platforms.flatMap((platform) => canaryPolicies[platform].packages),
+      );
+    }
+  });
+
+  it.each(["stable", "canary"] as const)(
+    "publishes the exact 11-file unsigned %s union without desktop feed metadata or blockmaps",
+    async (channel) => {
+      const fixtureRoot = await temporaryDirectory();
+      const sourceRoot = join(fixtureRoot, "source");
+      const stageRoot = join(fixtureRoot, "stage");
+      await mkdir(sourceRoot);
+      const selectedPolicies = channel === "canary" ? canaryPolicies : policies;
+      for (const platform of Object.keys(selectedPolicies) as Array<keyof typeof policies>) {
+        await writeFixture(sourceRoot, platform, {
+          channel,
+          delivery: platform.startsWith("linux-") ? "in-app" : "manual",
+        });
+        const staged = runReleaseAssets(["stage", platform], {
+          INERTIA_RELEASE_CHANNEL: channel,
+          RELEASE_TAG: channel === "canary" ? `canary-v${version}` : releaseTag,
+          INERTIA_RELEASE_SOURCE_DIR: sourceRoot,
+          INERTIA_RELEASE_STAGE_DIR: stageRoot,
+        });
+        expect(staged.status, staged.stderr).toBe(0);
+      }
+      const finalized = runReleaseAssets(["finalize"], {
+        INERTIA_RELEASE_CHANNEL: channel,
+        RELEASE_TAG: channel === "canary" ? `canary-v${version}` : releaseTag,
+        INERTIA_RELEASE_DOWNLOAD_DIR: stageRoot,
+      });
+      expect(finalized.status, finalized.stderr).toBe(0);
+      const finalDirectory = join(stageRoot, "final");
+      await expectExactUnsignedAssetUnion(finalDirectory, channel);
+      if (channel === "stable") {
+        const checksumPath = join(finalDirectory, "SHA256SUMS.txt");
+        const checksumSource = await readFile(checksumPath, "utf8");
+        const duplicate = checksumSource.split("\n")[0];
+        if (!duplicate) throw new Error("The checksum fixture has no first row.");
+        await writeFile(checksumPath, `${checksumSource}${duplicate}\n`);
+        await expect(expectExactUnsignedAssetUnion(finalDirectory, channel)).rejects.toThrow(
+          "SHA256SUMS.txt must contain exactly one row per public asset",
+        );
+      }
+    },
+  );
+
   it("validates and consolidates the exact updater asset union", async () => {
     const fixtureRoot = await temporaryDirectory();
     const sourceRoot = join(fixtureRoot, "source");

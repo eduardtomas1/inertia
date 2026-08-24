@@ -8,6 +8,11 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 const EXPECTED_SIZES = [16, 24, 32, 48, 64, 128, 256, 512, 1024];
 const ROOT = resolve(import.meta.dirname, "..");
+const releaseChannel = process.env.INERTIA_RELEASE_CHANNEL ?? "stable";
+if (releaseChannel !== "stable" && releaseChannel !== "canary") {
+  throw new Error("INERTIA_RELEASE_CHANNEL must be stable or canary.");
+}
+const canary = releaseChannel === "canary";
 
 function pngDimensions(buffer, label) {
   const signature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
@@ -81,22 +86,28 @@ async function validateAppDir(appDir) {
   const desktopPath = join(appDir, desktopFiles[0]);
   const desktop = parseDesktopEntry(await readFile(desktopPath, "utf8"));
   const expectedDesktop = {
-    Name: "Inertia",
-    Icon: "inertia",
-    StartupWMClass: "Inertia",
+    Name: canary ? "Inertia Canary" : "Inertia",
+    Icon: canary ? "inertia-canary" : "inertia",
+    StartupWMClass: canary ? "Inertia Canary" : "Inertia",
   };
   for (const [field, expected] of Object.entries(expectedDesktop)) {
     if (desktop.get(field) !== expected) throw new Error(`Desktop ${field} must be ${JSON.stringify(expected)}; received ${JSON.stringify(desktop.get(field))}.`);
   }
   const desktopExec = desktop.get("Exec") ?? "";
-  if (!/^(?:inertia|AppRun)(?:\s|$)/u.test(desktopExec)) throw new Error(`Desktop Exec must launch the packaged Inertia entry point; received ${JSON.stringify(desktopExec)}.`);
-  const entryPoint = desktopExec.startsWith("AppRun") ? join(appDir, "AppRun") : join(appDir, "inertia");
+  const expectedExecutable = canary ? "inertia-canary" : "inertia";
+  if (!(desktopExec.startsWith(`${expectedExecutable} `) || desktopExec === expectedExecutable || desktopExec.startsWith("AppRun"))) throw new Error(`Desktop Exec must launch the packaged Inertia entry point; received ${JSON.stringify(desktopExec)}.`);
+  const entryPoint = desktopExec.startsWith("AppRun") ? join(appDir, "AppRun") : join(appDir, expectedExecutable);
   const entryPointMetadata = await stat(entryPoint);
   if (!entryPointMetadata.isFile() || (entryPointMetadata.mode & 0o111) === 0) throw new Error(`Desktop Exec entry point is not executable: ${entryPoint}.`);
 
   const hicolor = join(appDir, "usr", "share", "icons", "hicolor");
   for (const size of EXPECTED_SIZES) {
-    const iconPath = join(hicolor, `${size}x${size}`, "apps", "inertia.png");
+    const iconPath = join(
+      hicolor,
+      `${size}x${size}`,
+      "apps",
+      `${canary ? "inertia-canary" : "inertia"}.png`,
+    );
     const icon = await readFile(iconPath);
     const dimensions = pngDimensions(icon, iconPath);
     if (dimensions.width !== size || dimensions.height !== size) throw new Error(`${iconPath} has unexpected dimensions ${dimensions.width}x${dimensions.height}.`);

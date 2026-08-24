@@ -5,7 +5,6 @@ import type { DatabaseRecoveryStartupNotice } from "@shared/desktop";
 import type { useAppUpdate } from "../hooks/useAppUpdate";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import type { ProviderQuotaNoticeController } from "../hooks/useProviderQuotaNotices";
-import { AppUpdateNotice } from "./AppUpdateNotice";
 import { DatabaseRecoveryNotice } from "./DatabaseRecoveryNotice";
 import { ProviderQuotaNotices } from "./ProviderQuotaNotices";
 import { IconButton } from "./ui";
@@ -13,6 +12,9 @@ import { loadProviderAuthDialog } from "./lazySurfaceLoaders";
 
 const ProviderAuthDialog = lazy(async () => ({
   default: (await loadProviderAuthDialog()).ProviderAuthDialog,
+}));
+const AppUpdateNotice = lazy(async () => ({
+  default: (await import("./AppUpdateNotice")).AppUpdateNotice,
 }));
 
 interface AppStatusOverlaysProps {
@@ -67,22 +69,24 @@ export function AppStatusOverlays({
       {(appUpdate.visible || appUpdate.error || providerQuotaNotices.notices.length > 0 || error) && (
         <div className="status-overlay-stack">
           {appUpdate.visible && appUpdate.status && (
-            <AppUpdateNotice
-              status={appUpdate.status}
-              onDismiss={appUpdate.dismiss}
-              onOpenRelease={() => {
-                void appUpdate.openRelease().catch(() => undefined);
-              }}
-              onDownload={() => {
-                void appUpdate.download().catch(() => undefined);
-              }}
-              onCancelDownload={() => {
-                void appUpdate.cancelDownload().catch(() => undefined);
-              }}
-              onInstall={() => {
-                void appUpdate.install().catch(() => undefined);
-              }}
-            />
+            <Suspense fallback={null}>
+              <AppUpdateNotice
+                status={appUpdate.status}
+                onDismiss={appUpdate.dismiss}
+                onOpenRelease={() => {
+                  void appUpdate.openRelease().catch(() => undefined);
+                }}
+                onDownload={() => {
+                  void appUpdate.download().catch(() => undefined);
+                }}
+                onCancelDownload={() => {
+                  void appUpdate.cancelDownload().catch(() => undefined);
+                }}
+                onInstall={() => {
+                  void appUpdate.install().catch(() => undefined);
+                }}
+              />
+            </Suspense>
           )}
           <ProviderQuotaNotices
             notices={providerQuotaNotices.notices}

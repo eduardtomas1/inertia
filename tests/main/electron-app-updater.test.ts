@@ -102,6 +102,20 @@ describe("electron updater adapter", () => {
     expect(updaterFixture.updater).not.toHaveProperty("setFeedURL");
   });
 
+  it("opts Canary into prereleases while keeping its rollout identity isolated", async () => {
+    await loadElectronAppUpdater("canary");
+    expect(updaterFixture.updater).toMatchObject({
+      autoDownload: false,
+      autoInstallOnAppQuit: false,
+      autoRunAppAfterInstall: true,
+      allowPrerelease: true,
+      allowDowngrade: false,
+      disableWebInstaller: true,
+      requestHeaders: { "x-user-staging-id": "inertia-anonymous-canary" },
+      logger: null,
+    });
+  });
+
   it("preserves the native platform and staged-rollout eligibility decision", async () => {
     updaterFixture.updater.checkForUpdates.mockResolvedValueOnce({
       isUpdateAvailable: false,

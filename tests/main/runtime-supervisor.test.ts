@@ -868,7 +868,6 @@ describe("RuntimeSupervisor", () => {
     children[0].exit(0);
     await expect(stopped).resolves.toBe(true);
   });
-
   it("forwards a strict secure-file recovery result to the current runtime", async () => {
     const secureFileBroker: RuntimeSecureFileBroker = {
       perform: vi.fn<RuntimeSecureFileBroker["perform"]>(
@@ -1881,6 +1880,7 @@ describe("RuntimeSupervisor", () => {
       websocketUrl: null,
     });
     children[0].message({ type: "runtime.stopped" });
+    expect(children[0].messages.at(-1)).toEqual({ type: "runtime.stopped-acknowledged" });
     children[0].exit(0);
     expect(children).toHaveLength(2);
     children[1].spawn();

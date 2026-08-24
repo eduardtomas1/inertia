@@ -19,8 +19,14 @@ const MAX_OUTPUT_LENGTH = 64 * 1024;
 const MAX_PACKAGED_MANIFEST_BYTES = 256 * 1024;
 const MAX_UPDATE_CONFIG_BYTES = 64 * 1024;
 const MAX_MAIN_BUNDLE_BYTES = 16 * 1024 * 1024;
-const UPDATE_PROVIDER_URL =
-  "https://github.com/eduardtomas1/inertia/releases/latest/download";
+const releaseChannel = process.env.INERTIA_RELEASE_CHANNEL ?? "stable";
+if (releaseChannel !== "stable" && releaseChannel !== "canary") {
+  throw new Error("INERTIA_RELEASE_CHANNEL must be stable or canary.");
+}
+const canary = releaseChannel === "canary";
+const UPDATE_PROVIDER_URL = canary
+  ? "https://raw.githubusercontent.com/eduardtomas1/inertia/canary-feed"
+  : "https://github.com/eduardtomas1/inertia/releases/latest/download";
 const STABLE_VERSION_PATTERN =
   /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u;
 const MANUAL_UPDATE_REASONS = new Set([
@@ -142,6 +148,12 @@ function exactKeys(value, expected) {
 }
 
 function packagedUpdateCapability(manifest) {
+  if (manifest.name !== (canary ? "inertia-canary" : "inertia")) {
+    throw new Error("The packaged application name does not isolate the release channel.");
+  }
+  if (manifest.inertiaReleaseChannel !== releaseChannel) {
+    throw new Error("The packaged app release channel does not match the smoke target.");
+  }
   if (!Object.hasOwn(manifest, "inertiaUpdateCapability")) {
     return { delivery: "manual", reason: "capability-missing" };
   }
@@ -206,6 +218,13 @@ function validateUpdateConfiguration(source, capability) {
     || configuration.url !== UPDATE_PROVIDER_URL
   ) {
     throw new Error("The packaged app-update.yml does not use the exact Inertia generic update provider.");
+  }
+  if (canary ? configuration.channel !== "canary" : configuration.channel !== undefined && configuration.channel !== "latest") {
+    throw new Error("The packaged app-update.yml uses an unexpected channel.");
+  }
+  const expectedCache = canary ? "inertia-canary-updater" : "inertia-updater";
+  if (configuration.updaterCacheDirName !== expectedCache) {
+    throw new Error("The packaged app-update.yml does not isolate the updater cache.");
   }
   const allowedKeys = new Set([
     "provider",
@@ -329,6 +348,8 @@ async function requirePackagedAssets(executable) {
     if (updateConfiguration === null) {
       throw new Error("An in-app update-capable package is missing resources/app-update.yml.");
     }
+  }
+  if (updateConfiguration !== null) {
     validateUpdateConfiguration(updateConfiguration, capability);
   }
   console.log(
@@ -343,6 +364,7 @@ async function createUpdateNetworkTrap() {
     "api.github.com",
     "github.com",
     "objects.githubusercontent.com",
+    "raw.githubusercontent.com",
     "release-assets.githubusercontent.com",
   ]);
   const updateAttempts = [];
@@ -404,13 +426,21 @@ async function locatePackagedExecutable() {
   const architectureSuffix = process.arch === "x64" ? "" : `-${process.arch}`;
   const candidates = process.platform === "darwin"
     ? [
-        join(releaseDirectory, `mac-${process.arch}`, "Inertia.app", "Contents", "MacOS", "Inertia"),
-        join(releaseDirectory, "mac", "Inertia.app", "Contents", "MacOS", "Inertia"),
+        join(releaseDirectory, `mac-${process.arch}`, `${canary ? "Inertia Canary" : "Inertia"}.app`, "Contents", "MacOS", canary ? "Inertia Canary" : "Inertia"),
+        join(releaseDirectory, "mac", `${canary ? "Inertia Canary" : "Inertia"}.app`, "Contents", "MacOS", canary ? "Inertia Canary" : "Inertia"),
       ]
     : process.platform === "win32"
-      ? [join(releaseDirectory, `win${architectureSuffix}-unpacked`, "Inertia.exe")]
+      ? [join(
+          releaseDirectory,
+          `win${architectureSuffix}-unpacked`,
+          canary ? "Inertia Canary.exe" : "Inertia.exe",
+        )]
       : process.platform === "linux"
-        ? [join(releaseDirectory, `linux${architectureSuffix}-unpacked`, "inertia")]
+        ? [join(
+            releaseDirectory,
+            `linux${architectureSuffix}-unpacked`,
+            canary ? "inertia-canary" : "inertia",
+          )]
         : [];
   const matches = [];
   for (const candidate of candidates) {

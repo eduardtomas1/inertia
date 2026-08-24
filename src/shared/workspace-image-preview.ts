@@ -5,13 +5,21 @@ const WORKSPACE_IMAGE_PATH = /^\/workspace-image\/([^/]+)\/([^/]+)\/([^/]+)$/u;
 
 export const MAX_WORKSPACE_IMAGE_PREVIEW_BYTES = 10 * 1024 * 1024;
 
+export function applicationRendererScheme(protocol?: string): "inertia" | "inertia-canary" {
+  return protocol === "inertia-canary:" ? "inertia-canary" : "inertia";
+}
+
+export function applicationProductName(protocol?: string): "Inertia" | "Inertia Canary" {
+  return protocol === "inertia-canary:" ? "Inertia Canary" : "Inertia";
+}
+
 export function workspaceImagePreviewUrl(request: {
   projectId: string;
   conversationId?: string;
   relativePath: string;
-}): string {
+}, scheme: "inertia" | "inertia-canary" = "inertia"): string {
   const owner = request.conversationId ?? "project";
-  return `inertia://bundle/workspace-image/${encodeURIComponent(request.projectId)}/${encodeURIComponent(owner)}/${encodeURIComponent(request.relativePath)}`;
+  return `${scheme}://bundle/workspace-image/${encodeURIComponent(request.projectId)}/${encodeURIComponent(owner)}/${encodeURIComponent(request.relativePath)}`;
 }
 
 export function parseWorkspaceImagePreviewUrl(

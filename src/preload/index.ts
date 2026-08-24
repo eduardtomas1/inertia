@@ -26,6 +26,9 @@ const IPC = {
   cancelAppUpdateDownload: "inertia:cancel-app-update-download",
   installAppUpdate: "inertia:install-app-update",
   appUpdateStatus: "inertia:app-update-status",
+  getCanaryRollbackStatus: "inertia:get-canary-rollback-status",
+  prepareCanaryRollback: "inertia:prepare-canary-rollback",
+  openCanaryRollback: "inertia:open-canary-rollback",
   sendDiscordReleaseInfo: "inertia:send-discord-release-info",
   selectAttachments: "inertia:select-attachments",
   beginAttachmentImport: "inertia:begin-attachment-import",
@@ -218,6 +221,18 @@ const bridge: DesktopBridge = Object.freeze({
   installAppUpdate: () =>
     ipcRenderer.invoke(IPC.installAppUpdate) as ReturnType<
       DesktopBridge["installAppUpdate"]
+    >,
+  getCanaryRollbackStatus: () =>
+    ipcRenderer.invoke(IPC.getCanaryRollbackStatus) as ReturnType<
+      DesktopBridge["getCanaryRollbackStatus"]
+    >,
+  prepareCanaryRollback: () =>
+    ipcRenderer.invoke(IPC.prepareCanaryRollback) as ReturnType<
+      DesktopBridge["prepareCanaryRollback"]
+    >,
+  openCanaryRollback: () =>
+    ipcRenderer.invoke(IPC.openCanaryRollback) as ReturnType<
+      DesktopBridge["openCanaryRollback"]
     >,
   onAppUpdateStatus: (listener: (status: AppUpdateStatus) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, status: AppUpdateStatus) => {

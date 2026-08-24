@@ -1,0 +1,557 @@
+{
+  "format": 2,
+  "migrations": [
+    {
+      "version": 1,
+      "name": "SchemaVersion1",
+      "digest": "3898e82deaada888a2cbbcdb2d0550a8ae25db20c852078ff48955c9ed57a42e"
+    },
+    {
+      "version": 2,
+      "name": "SchemaVersion2",
+      "digest": "af0d86381214b19e44a1551c3f79f9b4781888ed953fed8a05b8804ef18a92b1"
+    },
+    {
+      "version": 3,
+      "name": "SchemaVersion3",
+      "digest": "17f4e70d1f9e945fce7ad37737983077978a200906361fd93ac8f953033ba1a3"
+    },
+    {
+      "version": 4,
+      "name": "SchemaVersion4",
+      "digest": "44ec3cdb90d8da42462ca101bec790251e40da7530b80983984515c3f8333ad2"
+    },
+    {
+      "version": 5,
+      "name": "SchemaVersion5",
+      "digest": "27ae2f35545c7e55159ad5fdd2311ce163e75de53da9ba351a2e8a9487dabdd7"
+    },
+    {
+      "version": 6,
+      "name": "SchemaVersion6",
+      "digest": "c4f02b3701f028e20158b2b5e7a09878ea5d2fd70938af2173c210071edf59f6"
+    },
+    {
+      "version": 7,
+      "name": "SchemaVersion7",
+      "digest": "0295344f7cda800d21ff07a6207ae64b477ab53bb68999e9477db24a6947fc3f"
+    },
+    {
+      "version": 8,
+      "name": "SchemaVersion8",
+      "digest": "8ad685993dd881975a3449de16276eff291d663ded6ac5affaea533eb39eec84"
+    },
+    {
+      "version": 9,
+      "name": "SchemaVersion9",
+      "digest": "46b77cb8c6ed79477dfdbfc3130531780479855c35a80df2aa675a916a68532e"
+    },
+    {
+      "version": 10,
+      "name": "SchemaVersion10",
+      "digest": "20fd0e820ba6c8bfb3ad17384e34d36e33cad6229f2f6114f35ec9b95c4b2d1f"
+    },
+    {
+      "version": 11,
+      "name": "SchemaVersion11",
+      "digest": "74172f02cf18ea82934dcc2486c52193bda9f2c1ffabf557af1ca81510737ee9"
+    },
+    {
+      "version": 12,
+      "name": "SchemaVersion12",
+      "digest": "f3ddd3b71dc96e2b877dde3bf3117f1a8a6d4884d163368e21cd50ab4d567823"
+    },
+    {
+      "version": 13,
+      "name": "SchemaVersion13",
+      "digest": "bfc4ffcd5633a1acb22a8358cbdf7fca462617c71069ef12b62d9c67f884e8f1"
+    },
+    {
+      "version": 14,
+      "name": "SchemaVersion14",
+      "digest": "5602128c2ba8fa508066a379035959fde1631b7fce29d4346a1347277c90f87a"
+    },
+    {
+      "version": 15,
+      "name": "SchemaVersion15",
+      "digest": "7b0e964e313587c6290ffff8c5e28aebcb8247f77874d9b1a201050aa99affc8"
+    },
+    {
+      "version": 16,
+      "name": "SchemaVersion16",
+      "digest": "f776ff14fdac05fc19bcb01b744fd3900c88d4c4dc0cfaa9859dc09c7f921efa"
+    },
+    {
+      "version": 17,
+      "name": "ExplicitTurnOwnership",
+      "digest": "aab1a7c32734c44ac1b2fba1dab46a404b041bc9e041abf857da6b88d5588e3e",
+      "sources": [
+        {
+          "path": "src/server/persistence/migrations/legacy-schema.ts",
+          "symbols": [
+            "LEGACY_SCHEMA_SQL"
+          ],
+          "digest": "ea675b63e70f4e4ec357c26c397c1f5c79c8539a05dc14233f9f8b2fd9e96d80"
+        },
+        {
+          "path": "src/server/persistence/migrations/sql-identifiers.ts",
+          "symbols": [
+            "SQLITE_IDENTIFIER",
+            "quotedSqlIdentifier"
+          ],
+          "digest": "75bf33b3c007127a307fcddc30f27f8b49dad063c2bff1a431e815360e1b3987"
+        },
+        {
+          "path": "src/server/persistence/migrations/turn-association-columns.ts",
+          "symbols": [
+            "TURN_ASSOCIATION_COLUMNS",
+            "TURN_ASSOCIATION_TABLES",
+            "ensureTurnAssociationColumns"
+          ],
+          "digest": "1a81c16954e17badca2ca7280ca1cd37d6cbf759ff9f3c1bb71f5faed1c33e28"
+        }
+      ]
+    },
+    {
+      "version": 18,
+      "name": "BackfillLegacyAgentTurns",
+      "digest": "ca91c7ec6c862636a8556d905df8ee302938fd32b50cdb6ef3259fb803b1af49",
+      "sources": [
+        {
+          "path": "src/server/persistence/migrations/runner.ts",
+          "symbols": [
+            "ACCESS_MODES",
+            "INTERACTION_MODES",
+            "PROVIDERS",
+            "PUBLISHED_RELEASES_BY_SCHEMA",
+            "TERMINAL_WORKSPACE_STATUSES",
+            "TURN_OWNERSHIP_TABLES",
+            "backfillLegacyAgentTurns",
+            "buildResponseGroups",
+            "chooseRunId",
+            "groupByConversation",
+            "hasTable",
+            "isWithinGroup",
+            "isoTimestamp",
+            "normalizedConversation",
+            "parseTimestamp",
+            "publishedReleasesForSchema",
+            "requireLegacyOwnershipSchema",
+            "stableIdentifier",
+            "tableColumns",
+            "validRunId"
+          ],
+          "digest": "8eaa42b335f920ec08b296af4fff30b117d2232a5f153fcafbccb215f64c02d2"
+        },
+        {
+          "path": "src/server/persistence/migrations/sql-identifiers.ts",
+          "symbols": [
+            "SQLITE_IDENTIFIER",
+            "quotedSqlIdentifier"
+          ],
+          "digest": "75bf33b3c007127a307fcddc30f27f8b49dad063c2bff1a431e815360e1b3987"
+        }
+      ]
+    },
+    {
+      "version": 19,
+      "name": "PersistCompleteDiffReviewSummary",
+      "digest": "10d2cc66be483df88054e5840aef4eae486040b23748c040077ae366f810df1d"
+    },
+    {
+      "version": 20,
+      "name": "PersistWorkspaceRunAttention",
+      "digest": "86f666752058f1caf9a6ccc69581b7734203cfd6646108a80525a26642c656d8"
+    },
+    {
+      "version": 21,
+      "name": "PersistAgentPlansPerTurn",
+      "digest": "18590327dde06b2356cf2dd9c04e7d634da79ff3b3a6f02f559cd59f29f6c4c4"
+    },
+    {
+      "version": 22,
+      "name": "PersistBoundedTurnExecutionContext",
+      "digest": "9873e5bd7ff95fb1657f5a38ac2676a7222489540b35cba9cc66158c5969b0bb"
+    },
+    {
+      "version": 23,
+      "name": "PersistTurnGitArtifacts",
+      "digest": "34342f3835a0637e790ef94282e6dbb33f105adfed77ab469343c6b345063f2d"
+    },
+    {
+      "version": 24,
+      "name": "PersistTurnModelSelection",
+      "digest": "8f39ca5acb3eec8bc3b037f50d763ddac5b48547dbdd5c37f35e2cb53a885a80",
+      "sources": [
+        {
+          "path": "src/server/persistence/codecs.ts",
+          "symbols": [
+            "legacyModelSelection"
+          ],
+          "digest": "f1c73a81747eef9f7ed932e34ab013f7dcd2e98e51b777ad3ad8f9da4178c7ad"
+        },
+        {
+          "path": "src/server/persistence/migrations/sql-identifiers.ts",
+          "symbols": [
+            "SQLITE_IDENTIFIER",
+            "quotedSqlIdentifier"
+          ],
+          "digest": "75bf33b3c007127a307fcddc30f27f8b49dad063c2bff1a431e815360e1b3987"
+        },
+        {
+          "path": "src/shared/model-routing.ts",
+          "symbols": [
+            "KNOWN_HARNESS_IDS",
+            "MODEL_CAPABILITY_IDS",
+            "MODEL_CAPABILITY_STATES",
+            "NATIVE_BACKENDS",
+            "NATIVE_HARNESS",
+            "SECRET_OPTION_KEY",
+            "boundedIdentitySchema",
+            "boundedLabelSchema",
+            "boundedModelSchema",
+            "boundedOptionKeySchema",
+            "containsSecretLikeOptionKey",
+            "continuationIdentityForSelection",
+            "continuationIdentitySchema",
+            "fastModeProviderValue",
+            "harnessIdSchema",
+            "jsonValueSchema",
+            "knownHarnessIdSchema",
+            "modelBackendProfileIdSchema",
+            "modelCapabilitySchema",
+            "modelCapabilityStateSchema",
+            "modelSelectionSchema",
+            "nativeBackendProfile",
+            "nativeHarnessId",
+            "nativeModelSelection",
+            "opaqueIdentitySchema",
+            "safeProviderOptionsSchema"
+          ],
+          "digest": "c17c23f8729b5ba1d77519d0e2e7ecb063934b4969cb0e4c98ddff570fbfbfea"
+        }
+      ]
+    },
+    {
+      "version": 25,
+      "name": "PersistModelBackendProfiles",
+      "digest": "17e8e9ea5520c0fca1e8082fc8b327b020c731d53ad96bdbb11b3a2469a870ec"
+    },
+    {
+      "version": 26,
+      "name": "ScopeProviderMetadataByExecutionIdentity",
+      "digest": "7730abe6d7ed40b2129ed55b4048d675e5b6474c3533ffc06916c8c2b00d5bb5",
+      "sources": [
+        {
+          "path": "src/server/provider/metadata.ts",
+          "symbols": [
+            "AUTH_STATES",
+            "AVAILABLE_FIELDS",
+            "PROVIDER_METADATA_CATALOG_MODEL_ID",
+            "cleanString",
+            "nativeProviderMetadataScope",
+            "normalizeProviderMetadataScope",
+            "providerMetadataScopeKey"
+          ],
+          "digest": "4c97a4f15f93c9c26be7f63dfcc4256389fd07b5c786e8fc3824ceca38c9c6ec"
+        },
+        {
+          "path": "src/shared/model-routing.ts",
+          "symbols": [
+            "KNOWN_HARNESS_IDS",
+            "NATIVE_BACKENDS",
+            "NATIVE_HARNESS",
+            "boundedIdentitySchema",
+            "knownHarnessIdSchema",
+            "legacyProviderIdForHarness",
+            "nativeBackendProfile",
+            "nativeHarnessId"
+          ],
+          "digest": "0e25db801bd2645b17415f41407d2ebff8c1b7e2c5c6ff046037f37b7a5b5358"
+        }
+      ]
+    },
+    {
+      "version": 27,
+      "name": "ClassifyTurnGitArtifactAbsence",
+      "digest": "9370adfe9163d8ff43b529ca8a0e2be7a5d6be031f5a54921da9170c8e89df8d"
+    },
+    {
+      "version": 28,
+      "name": "PersistBoundedSubagentTraces",
+      "digest": "a8f94a29a28ea81880762b40262b52222d3014b79a51d486f1235f4327df4559"
+    },
+    {
+      "version": 29,
+      "name": "PersistProjectGitRepositoryLimit",
+      "digest": "fb2417cb9139b8c4e1e5a01fc5c181b3b03fc62c6bad3df188bac5c96cb0eb43"
+    },
+    {
+      "version": 30,
+      "name": "ScopeDiffReviewTargetsByRepository",
+      "digest": "bca636ce0ab0eaabb5d6102522ac06c76bc00da6bb421b226a33bfb281c76ee4"
+    },
+    {
+      "version": 31,
+      "name": "PersistWorkspaceStartupSurface",
+      "digest": "b8581ce4404b75f7e4f5f0b6091af94a81c665c74209dbac4f10db61dd5953eb"
+    },
+    {
+      "version": 32,
+      "name": "PersistAgentGoals",
+      "digest": "97d26a313a44628c5d93dbee9ab0211c98c8f0a9a4ccf6679b17a4725b4fecc2"
+    },
+    {
+      "version": 33,
+      "name": "DisableAutomaticPlanPanelReveal",
+      "digest": "ac9eaef828fe8306adff7d32ccbc3e72bc545880a5381a735ad4beff82b74829"
+    },
+    {
+      "version": 34,
+      "name": "OptimizeConversationDetailIndexes",
+      "digest": "dea693422b11579aa54084f0597245ee93432dd2231646719e7c0cc0fc777479"
+    },
+    {
+      "version": 35,
+      "name": "PersistAttachmentExecutionContext",
+      "digest": "c1f54eefec00910075c0c46cf43921054df98e27776487464999428ffe46f480"
+    },
+    {
+      "version": 36,
+      "name": "PreserveProviderSubagentStatus",
+      "digest": "84ab046134af3b00bcbe28ebcb4b65e43097ce93438ac60bfc129c6cce34bc0b"
+    },
+    {
+      "version": 37,
+      "name": "PreserveProviderSubagentLiveness",
+      "digest": "81643bad64132b469c5e14f659073c224416233bcc5c64cb55d4cf5c8733940e"
+    },
+    {
+      "version": 38,
+      "name": "PersistAtomicDuoLaunches",
+      "digest": "8252ea3b249592ca30a381bb75804480ba335ff74775b6ce25f9bbf4fed5122a"
+    },
+    {
+      "version": 39,
+      "name": "PersistDuoWorktreeCleanupReceipts",
+      "digest": "bc05a002924748940487983edb2ff889d0116529dce5adca475623b5c497a929"
+    },
+    {
+      "version": 40,
+      "name": "PersistDuoWorktreeRegistrationIdentity",
+      "digest": "6dd6f97a0db8ee38e310479cb1771f05f2ecf7935c9c9dff7722f25614916b9a",
+      "sources": [
+        {
+          "path": "src/server/persistence/migrations/duo-deletion-trigger.ts",
+          "symbols": [
+            "rebuildPairedLaunchProjectDeletionTrigger"
+          ],
+          "digest": "d375415e9ef2e0dd35f30ef82a19baf1c64f08de23b7f21c274f0acfa3ef9b89"
+        }
+      ]
+    },
+    {
+      "version": 41,
+      "name": "PersistDuoWorktreeFilesystemIdentity",
+      "digest": "0ec79e9ae90d8b2910218f547e9a499d42c42b0b5cd4f1a294103ab87950dd14"
+    },
+    {
+      "version": 42,
+      "name": "AppendStreamTextChunks",
+      "digest": "13c7879bde699197a8932a9467334e8b6761b6f5132d1d4bac709087ee638be6"
+    },
+    {
+      "version": 43,
+      "name": "RecordIdempotentRecoveryImports",
+      "digest": "83fe2a5c3553422a7ef5503f7c51f6ab2116bc79c81febd44e49f6a0179ecac9"
+    },
+    {
+      "version": 44,
+      "name": "MakeStreamChunksNulSafe",
+      "digest": "85ac6e55ffc35642a55e63529a433000561e4fefe5555d90f166cf629e8da0bd"
+    },
+    {
+      "version": 45,
+      "name": "ProtectInterruptedDuoRecovery",
+      "digest": "7729d4529681f86c5ea626a6dd94411aaf23859a931555931b9d820cf52d6803",
+      "sources": [
+        {
+          "path": "src/server/persistence/migrations/duo-deletion-trigger.ts",
+          "symbols": [
+            "protectInterruptedPairedLaunchDeletion"
+          ],
+          "digest": "8b388cbde8d6f9833558a2a35f3e5665b80a107a532348737caeb76a83e457b6"
+        }
+      ]
+    },
+    {
+      "version": 46,
+      "name": "PersistDuoThirdModelComparison",
+      "digest": "97287def1ce0b160a636009c007124d8569c8e9c026d69cfa101b0d7d7771661",
+      "sources": [
+        {
+          "path": "src/server/persistence/migrations/duo-comparison-migration.ts",
+          "symbols": [
+            "persistDuoThirdModelComparison"
+          ],
+          "digest": "e4ebdc458f1ba7b5c5506615614bd05797ecffa1c46595fb2c614b786a79cbe7"
+        },
+        {
+          "path": "src/server/persistence/migrations/duo-deletion-trigger.ts",
+          "symbols": [
+            "protectDuoComparisonDeletion"
+          ],
+          "digest": "d47b7c20b44d009d35e141e1978ac63cacd35e14c8ec7b13613209f42ecb4272"
+        }
+      ]
+    },
+    {
+      "version": 47,
+      "name": "PersistThreadOrganization",
+      "digest": "ef51e9e6eed90d4b5d12a84a24d0a46bcffb9bd7583930bc089080a2104db5ea"
+    },
+    {
+      "version": 48,
+      "name": "PersistProviderIdentityLabels",
+      "digest": "7fbe0ac7ac5e136977dd0badfc2566202c14c0a5300f30b93c75f806e03b6bab"
+    },
+    {
+      "version": 49,
+      "name": "PersistCustomKeybindings",
+      "digest": "7ccc84dee594ff3f08703bb7681d13a5be33a45edeff6726cbdd63675abb665a"
+    },
+    {
+      "version": 50,
+      "name": "ProtectCancellingDuoProviderCleanup",
+      "digest": "9525da9bf27ebff335af22c86ee3bb79bbd8d3663580fc75ebb97d5c4b93acdd",
+      "sources": [
+        {
+          "path": "src/server/persistence/migrations/duo-deletion-trigger.ts",
+          "symbols": [
+            "protectCancellingDuoDeletion"
+          ],
+          "digest": "6a78e59cb995847c2c51cb11cbc7116e1b8eef324e9f95f7d5cea542c5625565"
+        }
+      ]
+    },
+    {
+      "version": 51,
+      "name": "PersistFinalAnswerAutoScroll",
+      "digest": "61fff9896b949c9abc22687c4f51ad3aa76d66a0078477e7e30ff44a24cf6c65"
+    },
+    {
+      "version": 52,
+      "name": "PersistConversationWorktreeOwnership",
+      "digest": "b9ba6fb396742e986be54ebb97552ebf57db74af0aa4dd87e297900c5b3b72a1"
+    },
+    {
+      "version": 53,
+      "name": "PersistWorkspacePathAuthorities",
+      "digest": "38a4a349c8a284c6fc441e42d1d77cbc121f5d6dca8fef4d8e0c87c7edd72d50"
+    },
+    {
+      "version": 54,
+      "name": "PersistPromptPresets",
+      "digest": "28fba607177ef88dd64344d198e9db2fc67c258073d88c6974e2296883b9b3c9"
+    },
+    {
+      "version": 55,
+      "name": "PersistOwnedProviderRuns",
+      "digest": "5d69e8e040dd827f990e617aef3ff8174d0d0e800ccc844f988f319cccfb50c1"
+    },
+    {
+      "version": 56,
+      "name": "SanitizePersistedAttachmentCapabilities",
+      "digest": "85a0f02e27de3d19440d924901aa8d6e42c882c0d748f69b5af8515b0b4fa09a",
+      "sources": [
+        {
+          "path": "src/server/persistence/codecs.ts",
+          "symbols": [
+            "isPersistedChatAttachment",
+            "parseAttachments",
+            "rendererSafeAttachments"
+          ],
+          "digest": "a03bcff73e3147a57f0d663e2f2eb3b60157c826015444f7c12341f5dc72ed8a"
+        },
+        {
+          "path": "src/server/persistence/migrations/attachment-capabilities.ts",
+          "symbols": [
+            "sanitizePersistedAttachmentCapabilities"
+          ],
+          "digest": "5d1d068de3b06b8e8b72029fea040a29f7d2c087ea8a438aac66cf35272c6f21"
+        },
+        {
+          "path": "src/shared/attachments.ts",
+          "symbols": [
+            "CHAT_ATTACHMENT_MIME_TYPES",
+            "DOCUMENT_ATTACHMENT_MIME_TYPES",
+            "IMAGE_ATTACHMENT_MIME_TYPES",
+            "MAX_CHAT_ATTACHMENTS",
+            "MAX_CHAT_ATTACHMENT_BYTES",
+            "MAX_CHAT_ATTACHMENT_TOTAL_BYTES",
+            "SPREADSHEET_ATTACHMENT_MIME_TYPES",
+            "attachmentMimeByExtension",
+            "chatAttachmentMimeTypeForName"
+          ],
+          "digest": "a6643312ca13de5bfe4bc9a1c1ecc4f84f929941cd9a7ec2399be4ef31e69c21"
+        }
+      ]
+    },
+    {
+      "version": 57,
+      "name": "IndexUsageDashboardCompletedTurns",
+      "digest": "6e595e54d96d733fb60044c9f3186566ad73783798cd7574b782a78ba70152c2"
+    },
+    {
+      "version": 58,
+      "name": "InvalidateLegacyUnownedTurnUsageStarts",
+      "digest": "d0572f72da8997ff0136c2d3372573e8eef3ac1a28e5cb11be32f304d1d03c04"
+    },
+    {
+      "version": 59,
+      "name": "PersistColorTheme",
+      "digest": "999dce9ac72d19d39edb9c18fd87a44f37acad6ecdfc26e515094b802ed6b632"
+    },
+    {
+      "version": 60,
+      "name": "PersistAgentThreadManagement",
+      "digest": "cf57d39d35edad9e6fd3b84f4ddaad0ba8e0ded7439de408ea5bb5abb340f921"
+    },
+    {
+      "version": 61,
+      "name": "PersistConversationContextPackets",
+      "digest": "93e51dfc38b885d37f2d31acd5c44064d6e7c048e2665ed031d2a1b6904c7a53"
+    },
+    {
+      "version": 62,
+      "name": "SupportNativeKimiProvider",
+      "digest": "4c827a274a5facb15f4a0005297e1b156f285553264c60dc1acd367b38ad3f1a",
+      "sources": [
+        {
+          "path": "src/server/persistence/migrations/duo-deletion-trigger.ts",
+          "symbols": [
+            "protectCancellingDuoDeletion"
+          ],
+          "digest": "6a78e59cb995847c2c51cb11cbc7116e1b8eef324e9f95f7d5cea542c5625565"
+        },
+        {
+          "path": "src/server/persistence/migrations/native-kimi-provider.ts",
+          "symbols": [
+            "nativeKimiProviderMigration"
+          ],
+          "digest": "9340c82fdc54c8529ee3c6e5089d747a6ca6965dfedaa343c61bef50dfe982b1"
+        }
+      ]
+    },
+    {
+      "version": 63,
+      "name": "PersistDiscordReleaseRepositoryUrl",
+      "digest": "c4067e403143e38f6c3660f69fc0002356c446082fc7bf740b559bc52b61a028"
+    },
+    {
+      "version": 64,
+      "name": "PersistAuthoritativeRunState",
+      "digest": "fd312d5d33cad9048fa9ae8c517644c8f413fc4054b79760a38ed9861ae89f97"
+    }
+  ]
+}

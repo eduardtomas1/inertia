@@ -15,6 +15,7 @@ import { initialProviderSnapshots, providerSnapshot } from "../../src/server/run
 describe("runtime boundary helpers", () => {
   it("accepts only the desktop bundle and local development origins", () => {
     expect(isAllowedRuntimeOrigin("inertia://bundle")).toBe(true);
+    expect(isAllowedRuntimeOrigin("inertia-canary://bundle")).toBe(true);
     expect(isAllowedRuntimeOrigin("http://localhost:5173")).toBe(true);
     expect(isAllowedRuntimeOrigin("https://127.0.0.1:4173")).toBe(true);
     expect(isAllowedRuntimeOrigin("https://example.com")).toBe(false);

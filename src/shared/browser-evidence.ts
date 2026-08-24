@@ -55,18 +55,7 @@ export interface SanitizedBrowserEvidenceText {
 const CONTROL_OR_BIDI = /[\p{Cc}\p{Default_Ignorable_Code_Point}]+/gu;
 const HTTP_SCHEME = /https?:\/\//iu;
 const URL_TOKEN = /https?:\/\/[^\s<>"'`]+/giu;
-const AUTHORITY_URI_TOKEN = /(?:[A-Za-z][A-Za-z0-9+.-]*:)?\/\/[^\s<>"'`]+/giu;
 const FILE_URL = /(?<![A-Za-z0-9])file:\/\/[^\s<>"'`]+/giu;
-const POSIX_PATH = /(?<![A-Za-z0-9])\/(?:[^/\s,;:)"']+\/)+[^/\s,;:)"']+/gu;
-const ROOT_POSIX_PATH = /(?<![A-Za-z0-9])\/[^/\s,;:)"']+(?=$|[\s,;:)"'])/gu;
-const RELATIVE_FILE_PATH = /(^|[\s(=:"'])(?:(?:\.{1,2}|[^/\s,;:)"']+)\/)+[^/\s,;:)"']+\.[A-Za-z0-9]{1,12}(?=$|[\s,;:)"'])/gu;
-const RELATIVE_EXTENSIONLESS_PATH = /(^|[\s(=:"'])(?:(?:\.{1,2})\/[^/\s,;:)"']+|(?:[^/\s,;:)"']+\/){2,}[^/\s,;:)"']+|(?:[^/\s,;:)"']+\/)+\.[A-Za-z0-9][^/\s,;:)"']*)(?=$|[\s,;:)"'])/gu;
-const RELATIVE_WINDOWS_PATH = /(^|[\s(=:"'])(?:(?:\.{1,2})\\[^\\/\s,;:)"']+|(?:[^\\/\s,;:)"']+\\){2,}[^\\/\s,;:)"']+|(?:[^\\/\s,;:)"']+\\)+(?:\.[A-Za-z0-9][^\\/\s,;:)"']*|[^\\/\s,;:)"']+\.[A-Za-z0-9]{1,12}))(?=$|[\s,;:)"'])/gu;
-const COMMON_ROOT_RELATIVE_PATH = /(^|[\s(=:"'])(?:app|assets|bin|build|config|configs|dist|docs|lib|out|packages|public|resources|scripts|src|spec|specs|test|tests)[\\/][^\\/\s,;:)"']+(?:[\\/][^\\/\s,;:)"']+)*(?=$|[\s,;:)"'])/giu;
-const WINDOWS_PATH = /\b[A-Za-z]:\\(?:[^\\\s,;:)"']+\\)*[^\\\s,;:)"']*/gu;
-const UNC_OR_HOME_PATH = /(?:\\\\[^\\\s]+\\[^\s,;:)"']+|~\/(?:[^\s,;:)"']+\/)*[^\s,;:)"']+)/gu;
-const WINDOWS_OR_UNC_PATH_PREFIX = /(?:(?:^|[^A-Za-z0-9])[A-Za-z]:[\\/]|\\\\|(?:^|[\s(="'])\/\/)/u;
-const DRIVE_RELATIVE_WINDOWS_PATH = /(?:^|[\s(="'])[A-Za-z]:(?![\\/])(?:[^\\/\s,;:)"']+[\\/][^\\/\s,;:)"']+|(?:\.[A-Za-z0-9][^\\/\s,;:)"']*|[^\\/\s,;:)"']+\.[A-Za-z0-9]{1,12}))(?=$|[\s,;:)"']|[\\/])/gu;
 const CREDENTIAL_ASSIGNMENT =
   /(?<![A-Za-z0-9])(api[-_ ]?key|authorization|proxy[-_ ]?authorization|cookie|set[-_ ]?cookie|credential|pass(?:[-_ ]?values?)?|passcode|passphrase|password|passwd|pgpassword|pwd|secret|session|token)(?![A-Za-z0-9])["']?\s*[:=]\s*(?:(?:Bearer|Basic)\s+[^\s,;]+|"[^"]*"|'[^']*'|[^\s,;]+)/giu;
 const AUTHORIZATION_VALUE = /(?<![A-Za-z0-9])(Bearer|Basic)\s+[^\s,;]+/giu;
@@ -81,12 +70,34 @@ const SENSITIVE_FIELD =
   /(?<![A-Za-z0-9])(?:(?:access|auth|id|refresh)[-_ ]?token|api[-_ ]?key|authorization|proxy[-_ ]?authorization|cookie|set[-_ ]?cookie|credential|password|passwd|(?:pass(?:[-_ ]?values?)?|passcode|passphrase|pgpassword|pwd)(?=\s*["']?\s*[:=])|private[-_ ]?key|request[-_ ]?body|secret|session|token)(?![A-Za-z0-9])/iu;
 const CAMEL_CASE_CREDENTIAL_ASSIGNMENT =
   /(?<![A-Za-z0-9])(?:[A-Za-z][A-Za-z0-9]*?)?(?:AccessKey|AccessToken|APIKey|ApiKey|AuthHeader|AuthToken|Authorization|AuthorizationHeader|Cookie|Credential|Credentials|EncryptionKey|IDToken|IdToken|PAT|Pat|PGPassword|Passcode|Passphrase|Password|Passwd|PrivateKey|Pwd|RefreshToken|RequestBody|Secret|SecretKey|Session|SessionId|SigningKey|Token)(?:Value|Values)?(?![A-Za-z0-9])["']?\s*[:=]/giu;
-const CAMEL_CASE_PASS_ASSIGNMENT =
-  /(?<![A-Za-z0-9])(?:[A-Za-z][A-Za-z0-9]*?)?Pass(?:Value|Values)?(?![A-Za-z0-9])["']?\s*[:=]/gu;
 const SECRET_HOST_FRAGMENT =
   /(?:(?:sk|rk|pk|gh[opusr]|github[-_]?pat|glpat|npm|pypi|hf|xox[baprs]|api|key|token)[-_][a-z0-9_-]{8,}|(?:akia|asia)[a-z0-9]{16}|aiza[a-z0-9_-]{20,})/iu;
 const MAX_PERCENT_DECODE_PASSES = 4;
 const MAX_INSPECTION_REPRESENTATIONS = 8;
+const CONCATENATED_PASS_NAMESPACES = new Set([
+  "backup",
+  "database",
+  "db",
+  "dev",
+  "guest",
+  "ldap",
+  "my",
+  "oracle",
+  "portal",
+  "prod",
+  "tenant",
+  "vpn",
+]);
+const COMMON_RELATIVE_PATH_ROOTS = new Set([
+  "app", "assets", "bin", "build", "config", "configs", "dist", "docs",
+  "lib", "out", "packages", "public", "resources", "scripts", "src",
+  "spec", "specs", "test", "tests",
+]);
+
+interface TextRange {
+  start: number;
+  end: number;
+}
 
 function boundedInput(value: string, maximum: number): string {
   return value.slice(0, Math.max(maximum + 4_096, 4_096));
@@ -106,6 +117,65 @@ function withoutHttpUrls(value: string): string {
   return remaining;
 }
 
+function asciiLetter(character: string | undefined): boolean {
+  return character !== undefined && /[A-Za-z]/u.test(character);
+}
+
+function uriSchemeCharacter(character: string | undefined): boolean {
+  return character !== undefined && /[A-Za-z0-9+.-]/u.test(character);
+}
+
+function authorityTokenTerminator(character: string): boolean {
+  return /[\s<>"'`]/u.test(character);
+}
+
+/**
+ * Finds hierarchical-URI tokens in one monotonic pass. In particular, a long
+ * scheme-shaped near miss is never retried from each subsequent character.
+ */
+function authorityUriTokenRanges(value: string): TextRange[] {
+  const ranges: TextRange[] = [];
+  let index = 0;
+  while (index + 2 < value.length) {
+    if (value[index] !== "/" || value[index + 1] !== "/") {
+      index += 1;
+      continue;
+    }
+    let start = index;
+    if (value[index - 1] === ":") {
+      let schemeRunStart = index - 2;
+      while (schemeRunStart >= 0 && uriSchemeCharacter(value[schemeRunStart])) {
+        schemeRunStart -= 1;
+      }
+      schemeRunStart += 1;
+      while (schemeRunStart < index - 1 && !asciiLetter(value[schemeRunStart])) {
+        schemeRunStart += 1;
+      }
+      if (schemeRunStart < index - 1) start = schemeRunStart;
+    }
+    let end = index + 2;
+    while (end < value.length && !authorityTokenTerminator(value[end]!)) end += 1;
+    if (end === index + 2) {
+      index += 2;
+      continue;
+    }
+    ranges.push({ start, end });
+    index = end;
+  }
+  return ranges;
+}
+
+function textWithoutRanges(value: string, ranges: readonly TextRange[]): string {
+  if (ranges.length === 0) return value;
+  let result = "";
+  let copiedUntil = 0;
+  for (const range of ranges) {
+    result += value.slice(copiedUntil, range.start);
+    copiedUntil = range.end;
+  }
+  return result + value.slice(copiedUntil);
+}
+
 function parsedAuthorityUri(value: string): URL | null {
   const candidate = value.replace(/[),.;!?]+$/u, "");
   try {
@@ -115,23 +185,19 @@ function parsedAuthorityUri(value: string): URL | null {
   }
 }
 
-function hasCredentialBearingUri(value: string): boolean {
-  AUTHORITY_URI_TOKEN.lastIndex = 0;
-  for (const match of value.matchAll(AUTHORITY_URI_TOKEN)) {
-    if (parsedAuthorityUri(match[0])?.password) {
-      AUTHORITY_URI_TOKEN.lastIndex = 0;
-      return true;
-    }
-  }
-  AUTHORITY_URI_TOKEN.lastIndex = 0;
-  return false;
+function hasCredentialBearingUri(
+  value: string,
+  ranges: readonly TextRange[],
+): boolean {
+  return ranges.some((range) =>
+    Boolean(parsedAuthorityUri(value.slice(range.start, range.end))?.password));
 }
 
-function withoutAuthorityUris(value: string): string {
-  AUTHORITY_URI_TOKEN.lastIndex = 0;
-  const remaining = value.replace(AUTHORITY_URI_TOKEN, "");
-  AUTHORITY_URI_TOKEN.lastIndex = 0;
-  return remaining;
+function withoutAuthorityUris(
+  value: string,
+  ranges: readonly TextRange[],
+): string {
+  return textWithoutRanges(value, ranges);
 }
 
 function withoutControlOrBidi(value: string): string {
@@ -141,17 +207,159 @@ function withoutControlOrBidi(value: string): string {
   return normalized;
 }
 
+function alphanumeric(character: string | undefined): boolean {
+  return character !== undefined && /[A-Za-z0-9]/u.test(character);
+}
+
+function pathTokenTerminator(character: string): boolean {
+  return /[\s,;:()="']/u.test(character);
+}
+
+function pathSeparator(character: string | undefined): boolean {
+  return character === "/" || character === "\\";
+}
+
+function hasFileExtension(component: string): boolean {
+  const dot = component.lastIndexOf(".");
+  if (dot <= 0) return false;
+  const extension = component.slice(dot + 1);
+  return extension.length >= 1
+    && extension.length <= 12
+    && /^[A-Za-z0-9]+$/u.test(extension);
+}
+
+function relativePathToken(value: string): boolean {
+  if (
+    value.startsWith("./")
+    || value.startsWith("../")
+    || value.startsWith(".\\")
+    || value.startsWith("..\\")
+  ) return value.length > (value[1] === "." ? 3 : 2);
+
+  let separators = 0;
+  let firstSeparator = -1;
+  let lastSeparator = -1;
+  for (let index = 0; index < value.length; index += 1) {
+    if (!pathSeparator(value[index])) continue;
+    separators += 1;
+    if (firstSeparator < 0) firstSeparator = index;
+    lastSeparator = index;
+  }
+  if (separators >= 2) return true;
+  if (separators === 0 || lastSeparator === value.length - 1) return false;
+  const root = value.slice(0, firstSeparator).toLowerCase();
+  const leaf = value.slice(lastSeparator + 1);
+  return COMMON_RELATIVE_PATH_ROOTS.has(root)
+    || (leaf.startsWith(".") && leaf.length > 1)
+    || hasFileExtension(leaf);
+}
+
+function hasNonTrailingPathSeparator(value: string): boolean {
+  for (let index = 0; index < value.length - 1; index += 1) {
+    if (pathSeparator(value[index])) return true;
+  }
+  return false;
+}
+
+function hasAmbiguousFilesystemPathPrefix(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const previous = value[index - 1];
+    const boundary = index === 0 || !alphanumeric(previous);
+    if (
+      boundary
+      && asciiLetter(value[index])
+      && value[index + 1] === ":"
+    ) {
+      if (pathSeparator(value[index + 2])) return true;
+      let end = index + 2;
+      while (end < value.length && !pathTokenTerminator(value[end]!)) end += 1;
+      const relative = value.slice(index + 2, end);
+      if (
+        (relative.startsWith(".") && relative.length > 1)
+        || hasFileExtension(relative)
+        || hasNonTrailingPathSeparator(relative)
+      ) return true;
+    }
+    if (value[index] === "\\" && value[index + 1] === "\\") return true;
+    if (
+      value[index] === "/"
+      && value[index + 1] === "/"
+      && (
+        index === 0
+        || previous === " "
+        || previous === "("
+        || previous === "="
+        || previous === "\""
+        || previous === "'"
+      )
+    ) return true;
+  }
+  return false;
+}
+
 function hasFilesystemPathCandidate(value: string): boolean {
-  return patternMatches(FILE_URL, value)
-    || patternMatches(POSIX_PATH, value)
-    || patternMatches(ROOT_POSIX_PATH, value)
-    || patternMatches(RELATIVE_FILE_PATH, value)
-    || patternMatches(RELATIVE_EXTENSIONLESS_PATH, value)
-    || patternMatches(RELATIVE_WINDOWS_PATH, value)
-    || patternMatches(COMMON_ROOT_RELATIVE_PATH, value)
-    || patternMatches(WINDOWS_OR_UNC_PATH_PREFIX, value)
-    || patternMatches(DRIVE_RELATIVE_WINDOWS_PATH, value)
-    || patternMatches(UNC_OR_HOME_PATH, value);
+  if (patternMatches(FILE_URL, value) || hasAmbiguousFilesystemPathPrefix(value)) {
+    return true;
+  }
+  for (let index = 0; index < value.length;) {
+    if (pathTokenTerminator(value[index]!)) {
+      index += 1;
+      continue;
+    }
+    const start = index;
+    while (index < value.length && !pathTokenTerminator(value[index]!)) index += 1;
+    const token = value.slice(start, index);
+    if (token.startsWith("~/") && token.length > 2) return true;
+    for (let offset = 0; offset + 1 < token.length; offset += 1) {
+      if (
+        token[offset] === "/"
+        && token[offset + 1] !== "/"
+        && (offset === 0 || !alphanumeric(token[offset - 1]))
+      ) return true;
+    }
+    if (relativePathToken(token)) return true;
+
+    for (let offset = 0; offset + 2 < token.length; offset += 1) {
+      if (!asciiLetter(token[offset]) || token[offset + 1] !== ":") continue;
+      const relative = token.slice(offset + 2);
+      if (relativePathToken(relative) || hasFileExtension(relative)) return true;
+    }
+  }
+  return false;
+}
+
+function concatenatedPassKey(value: string): boolean {
+  const normalized = value.toLowerCase();
+  const withoutProjectionSuffix = normalized.endsWith("values")
+    ? normalized.slice(0, -"values".length)
+    : normalized.endsWith("value")
+      ? normalized.slice(0, -"value".length)
+      : normalized;
+  if (withoutProjectionSuffix === "pass") return true;
+  if (!withoutProjectionSuffix.endsWith("pass")) return false;
+  return CONCATENATED_PASS_NAMESPACES.has(
+    withoutProjectionSuffix.slice(0, -"pass".length),
+  );
+}
+
+function hasConcatenatedPassAssignment(value: string): boolean {
+  for (let index = 0; index < value.length;) {
+    if (!asciiLetter(value[index]) || alphanumeric(value[index - 1])) {
+      index += 1;
+      continue;
+    }
+    const start = index;
+    while (alphanumeric(value[index])) index += 1;
+    const key = value.slice(start, index);
+    let assignment = index;
+    if (value[assignment] === "\"" || value[assignment] === "'") assignment += 1;
+    while (/\s/u.test(value[assignment] ?? "")) assignment += 1;
+    if (
+      concatenatedPassKey(key)
+      && (value[assignment] === ":" || value[assignment] === "=")
+    ) return true;
+  }
+  return false;
 }
 
 interface BrowserEvidenceInspectionDecision {
@@ -162,38 +370,39 @@ interface BrowserEvidenceInspectionDecision {
 }
 
 function authorityProjectionSignature(value: string): string {
-  AUTHORITY_URI_TOKEN.lastIndex = 0;
-  const matches = Array.from(value.matchAll(AUTHORITY_URI_TOKEN), (match) => match[0]);
-  AUTHORITY_URI_TOKEN.lastIndex = 0;
-  return JSON.stringify(matches.map((match) =>
-    replaceAuthorityUri(replaceUrl(match).value).value
+  const ranges = authorityUriTokenRanges(value);
+  return JSON.stringify(ranges.map((range) =>
+    replaceAuthorityUri(replaceUrl(value.slice(range.start, range.end)).value).value
   ));
 }
 
 function inspectBrowserEvidenceRepresentation(
   value: string,
 ): BrowserEvidenceInspectionDecision {
-  const outsideAuthorityUris = withoutAuthorityUris(value);
+  const authorityRanges = authorityUriTokenRanges(value);
+  const outsideAuthorityUris = withoutAuthorityUris(value, authorityRanges);
   const outsideHttpUrls = withoutHttpUrls(value);
   const authorityProjected = replaceAuthorityUri(replaceUrl(value).value).value;
-  return {
-    authorityProjectionSignature: authorityProjectionSignature(value),
-    authorityProjectionRequired: authorityProjected !== value,
-    failClosed: patternMatches(HTTP_SCHEME, outsideHttpUrls)
+  const failClosed = patternMatches(HTTP_SCHEME, outsideHttpUrls)
     || patternMatches(SENSITIVE_FIELD, value)
     || patternMatches(CREDENTIAL_ASSIGNMENT, value)
     || patternMatches(CAMEL_CASE_CREDENTIAL_ASSIGNMENT, value)
-    || patternMatches(CAMEL_CASE_PASS_ASSIGNMENT, value)
+    || hasConcatenatedPassAssignment(value)
     || patternMatches(AUTHORIZATION_VALUE, value)
-    || hasCredentialBearingUri(value)
+    || hasCredentialBearingUri(value, authorityRanges)
     || patternMatches(FILE_URL, value)
-    || patternMatches(WINDOWS_OR_UNC_PATH_PREFIX, value)
-    || patternMatches(DRIVE_RELATIVE_WINDOWS_PATH, value)
-    || hasFilesystemPathCandidate(outsideAuthorityUris),
-    secretProjectionRequired: patternMatches(PREFIXED_SECRET, value)
+    || hasAmbiguousFilesystemPathPrefix(value)
+    || hasFilesystemPathCandidate(outsideAuthorityUris);
+  return {
+    authorityProjectionSignature: authorityProjectionSignature(value),
+    authorityProjectionRequired: authorityProjected !== value,
+    failClosed,
+    secretProjectionRequired: !failClosed && (
+      patternMatches(PREFIXED_SECRET, value)
       || patternMatches(JWT, value)
       || patternMatches(PRIVATE_KEY, value)
-      || patternMatches(LONG_OPAQUE_VALUE, value),
+      || patternMatches(LONG_OPAQUE_VALUE, value)
+    ),
   };
 }
 
@@ -286,21 +495,31 @@ function replaceUrl(value: string): { value: string; redacted: boolean } {
 
 function replaceAuthorityUri(value: string): { value: string; redacted: boolean } {
   let redacted = false;
-  AUTHORITY_URI_TOKEN.lastIndex = 0;
-  const replaced = value.replace(AUTHORITY_URI_TOKEN, (match) => {
+  const ranges = authorityUriTokenRanges(value);
+  if (ranges.length === 0) return { value, redacted };
+  let replaced = "";
+  let copiedUntil = 0;
+  for (const range of ranges) {
+    replaced += value.slice(copiedUntil, range.start);
+    const match = value.slice(range.start, range.end);
     const url = parsedAuthorityUri(match);
     if (!url || url.password || !url.hostname || suspiciousHostname(url.hostname)) {
       redacted = true;
-      return "<redacted-url>";
+      replaced += "<redacted-url>";
+      copiedUntil = range.end;
+      continue;
     }
     const directHttp = url.protocol === "http:" || url.protocol === "https:";
-    if (directHttp) return match;
-    redacted = true;
-    const protocol = match.startsWith("//") ? "" : url.protocol;
-    return `${protocol}//${url.host}`;
-  });
-  AUTHORITY_URI_TOKEN.lastIndex = 0;
-  return { value: replaced, redacted };
+    if (directHttp) {
+      replaced += match;
+    } else {
+      redacted = true;
+      const protocol = match.startsWith("//") ? "" : url.protocol;
+      replaced += `${protocol}//${url.host}`;
+    }
+    copiedUntil = range.end;
+  }
+  return { value: replaced + value.slice(copiedUntil), redacted };
 }
 
 /**
@@ -368,14 +587,6 @@ export function sanitizeBrowserEvidenceText(
   text = authorityUri.value;
   redacted ||= authorityUri.redacted;
   const replacements: ReadonlyArray<readonly [RegExp, string]> = [
-    [FILE_URL, "<path>"],
-    [POSIX_PATH, "$1<path>"],
-    [RELATIVE_FILE_PATH, "$1<path>"],
-    [RELATIVE_EXTENSIONLESS_PATH, "$1<path>"],
-    [RELATIVE_WINDOWS_PATH, "$1<path>"],
-    [COMMON_ROOT_RELATIVE_PATH, "$1<path>"],
-    [WINDOWS_PATH, "<path>"],
-    [UNC_OR_HOME_PATH, "<path>"],
     [CREDENTIAL_ASSIGNMENT, "$1=<redacted>"],
     [AUTHORIZATION_VALUE, "$1 <redacted>"],
     [PREFIXED_SECRET, "<redacted>"],

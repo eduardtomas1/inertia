@@ -109,6 +109,26 @@ describe("Browser evidence sanitization", () => {
   });
 
   it.each([
+    "dbpass=hunter2",
+    "databasepass=hunter2",
+    "mypassValue=hunter2",
+    "prodpass=hunter2",
+    "devpass=hunter2",
+    "guestpass=hunter2",
+    "backuppass=hunter2",
+    "tenantpass=hunter2",
+    "portalpass=hunter2",
+    "ldappass=hunter2",
+    "oraclepass=hunter2",
+    "vpnpass=hunter2",
+    "DBPASS=hunter2",
+    "\"DatabasePass\":\"hunter2\"",
+  ])("fails closed for a finite concatenated pass namespace: %s", (value) => {
+    expect(sanitizeBrowserEvidenceText(value, "hidden"))
+      .toEqual({ text: "hidden", redacted: true });
+  });
+
+  it.each([
     "sk%00-abcdefgh12345678",
     "sk\u0000-abcdefgh12345678",
     "ghp_\u202dabcdefgh12345678",
@@ -211,6 +231,9 @@ describe("Browser evidence sanitization", () => {
     "bypassValues=public",
     "pass_value_count=4",
     "db_pass is unset.",
+    "underpass=public",
+    "overpassValues=public",
+    "mypassCount=4",
   ])("does not treat a password alias in ordinary prose as an assignment: %s", (value) => {
     expect(sanitizeBrowserEvidenceText(value, "hidden"))
       .toEqual({ text: value, redacted: false });

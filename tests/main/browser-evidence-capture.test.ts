@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { performance } from "node:perf_hooks";
 
 import {
   BrowserEvidenceCapture,
@@ -105,5 +106,39 @@ describe("Browser evidence capture", () => {
         occurredAt: "2026-08-23T07:00:02.000Z",
       }),
     ]);
+  });
+
+  it("sanitizes the complete hostile console batch within one bounded deadline", async () => {
+    const page: BrowserEvidencePage = {
+      tabId: "11111111-1111-4111-8111-111111111111",
+      pageNumber: 1,
+      documentSequence: 1,
+      contents: {} as BrowserEvidencePage["contents"],
+    };
+    const publish = vi.fn();
+    const capture = new BrowserEvidenceCapture({
+      isLive: () => true,
+      isCurrent: () => true,
+      publish,
+      sensitiveDocument: vi.fn().mockResolvedValue(false),
+    });
+    const hostile = [
+      `${"a".repeat(4_680)}//x`,
+      "a/".repeat(2_340),
+    ];
+
+    const startedAt = performance.now();
+    for (let index = 0; index < 160; index += 1) {
+      capture.recordConsoleError(page, hostile[index % hostile.length]);
+    }
+    await vi.waitFor(
+      () => expect(publish).toHaveBeenCalledTimes(160),
+      { interval: 5, timeout: 1_500 },
+    );
+    expect(performance.now() - startedAt).toBeLessThan(1_500);
+    expect(capture.snapshot()).toMatchObject({
+      omitted: true,
+      entries: expect.any(Array),
+    });
   });
 });

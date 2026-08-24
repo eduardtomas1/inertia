@@ -74,6 +74,10 @@ describe("Browser evidence ledger", () => {
     "tok％65n=hunter2",
     "sk%00-abcdefgh12345678",
     "sk\u0000-abcdefgh12345678",
+    "dbpass=hunter2",
+    "mypassValue=hunter2",
+    "prodpass=hunter2",
+    "tenantpass=hunter2",
   ])("fails closed before storing a page-authored credential shape: %s", (message) => {
     const ledger = new BrowserEvidenceLedger();
     ledger.recordConsoleError({ ...location, message });
@@ -116,6 +120,9 @@ describe("Browser evidence ledger", () => {
     "pass_value_count=4",
     "db_pass is unset",
     "PGPASSWORD is unset",
+    "underpass=public",
+    "overpassValues=public",
+    "mypassCount=4",
   ])("keeps a non-credential page-authored identifier: %s", (message) => {
     const ledger = new BrowserEvidenceLedger();
     ledger.recordConsoleError({ ...location, message });

@@ -9,6 +9,7 @@ interface RuntimeWorkerShutdownOptions {
   closeBrokers: () => void;
   ownedProcessCleanupConfirmed?: () => boolean | Promise<boolean>;
   post: (event: RuntimeWorkerEvent) => void;
+  awaitStoppedAcknowledgement: () => Promise<void>;
   exit: (code: number) => void;
 }
 
@@ -70,5 +71,6 @@ export async function completeRuntimeWorkerShutdown(
     return;
   }
   options.post({ type: "runtime.stopped" });
+  await options.awaitStoppedAcknowledgement();
   options.exit(options.exitCode);
 }

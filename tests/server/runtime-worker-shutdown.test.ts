@@ -48,18 +48,28 @@ describe("runtime worker shutdown", () => {
     const post = vi.fn();
     const exit = vi.fn();
     const closeBrokers = vi.fn();
+    let acknowledgeStopped!: () => void;
+    const stoppedAcknowledged = new Promise<void>((resolve) => {
+      acknowledgeStopped = resolve;
+    });
 
-    await completeRuntimeWorkerShutdown({
+    const shutdown = completeRuntimeWorkerShutdown({
       runtime: runtimeWithClose(vi.fn(async () => undefined)),
       cause: "runtime-shutdown",
       exitCode: 0,
       closeBrokers,
       post,
+      awaitStoppedAcknowledgement: () => stoppedAcknowledged,
       exit,
     });
 
+    await vi.waitFor(() => {
+      expect(post).toHaveBeenCalledWith({ type: "runtime.stopped" });
+    });
     expect(closeBrokers).toHaveBeenCalledOnce();
-    expect(post).toHaveBeenCalledWith({ type: "runtime.stopped" });
+    expect(exit).not.toHaveBeenCalled();
+    acknowledgeStopped();
+    await shutdown;
     expect(exit).toHaveBeenCalledWith(0);
   });
 
@@ -76,6 +86,7 @@ describe("runtime worker shutdown", () => {
       exitCode: 0,
       closeBrokers,
       post,
+      awaitStoppedAcknowledgement: async () => undefined,
       exit,
     });
 
@@ -98,6 +109,7 @@ describe("runtime worker shutdown", () => {
       closeBrokers: vi.fn(),
       ownedProcessCleanupConfirmed: () => false,
       post,
+      awaitStoppedAcknowledgement: async () => undefined,
       exit,
     });
 
@@ -119,6 +131,7 @@ describe("runtime worker shutdown", () => {
         queueMicrotask(() => resolve(true));
       }),
       post,
+      awaitStoppedAcknowledgement: async () => undefined,
       exit,
     });
 
@@ -138,6 +151,7 @@ describe("runtime worker shutdown", () => {
         closeBrokers: vi.fn(),
         ownedProcessCleanupConfirmed: () => new Promise<boolean>(() => undefined),
         post,
+        awaitStoppedAcknowledgement: async () => undefined,
         exit,
       });
 
@@ -172,6 +186,7 @@ describe("runtime worker shutdown", () => {
         exitCode: 0,
         closeBrokers,
         post,
+        awaitStoppedAcknowledgement: async () => undefined,
         exit,
       });
 

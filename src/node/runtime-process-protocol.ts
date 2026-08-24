@@ -106,6 +106,7 @@ export interface RuntimeDatabaseRecoverySummary {
 export type RuntimeWorkerCommand =
   | { type: "runtime.start"; options: RuntimeWorkerOptions }
   | { type: "runtime.shutdown" }
+  | { type: "runtime.stopped-acknowledged" }
   | RuntimeUpdateWorkerCommand
   | { type: "runtime.resolve-project-path"; requestId: string; request: OpenProjectPathRequest }
   | {
@@ -330,6 +331,10 @@ function runtimePath(value: unknown): value is string {
 export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand | null {
   if (!plainObject(value) || typeof value.type !== "string") return null;
   if (value.type === "runtime.shutdown" && Object.keys(value).length === 1) return { type: "runtime.shutdown" };
+  if (
+    value.type === "runtime.stopped-acknowledged"
+    && Object.keys(value).length === 1
+  ) return { type: "runtime.stopped-acknowledged" };
   const updateCommand = parseRuntimeUpdateWorkerCommand(value);
   if (updateCommand) return updateCommand;
   if (value.type === "runtime.attachment-result") {

@@ -396,6 +396,13 @@ describe("runtime process protocol", () => {
     })).toBeNull();
     expect(parseRuntimeWorkerCommand({ type: "runtime.shutdown", unexpected: true })).toBeNull();
     expect(parseRuntimeWorkerCommand({
+      type: "runtime.stopped-acknowledged",
+    })).toEqual({ type: "runtime.stopped-acknowledged" });
+    expect(parseRuntimeWorkerCommand({
+      type: "runtime.stopped-acknowledged",
+      unexpected: true,
+    })).toBeNull();
+    expect(parseRuntimeWorkerCommand({
       type: "runtime.start",
       options: {
         dataDirectory,

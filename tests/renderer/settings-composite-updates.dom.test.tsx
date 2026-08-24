@@ -223,7 +223,7 @@ describe("Settings composite updates", () => {
     }} />);
 
     expect(screen.getByText("Inertia Canary · v0.0.41")).toBeInTheDocument();
-    expect(screen.getByText("Canary channel · isolated profile")).toBeInTheDocument();
+    expect(await screen.findByText("Canary channel · isolated profile")).toBeInTheDocument();
     expect(await screen.findByText("Verified Canary 0.0.40 is retained for rollback."))
       .toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Open rollback v0.0.40" }));

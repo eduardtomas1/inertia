@@ -23,6 +23,8 @@ const budgets = {
   deferredBrowserEvidenceJavaScript: 5 * kibibyte,
   deferredSpreadsheetJavaScript: 510 * kibibyte,
   deferredDiscordSettingsJavaScript: 6 * kibibyte,
+  deferredCanaryRollbackJavaScript: 4 * kibibyte,
+  deferredAppUpdateNoticeJavaScript: 6 * kibibyte,
   detachedChatJavaScript: 16 * kibibyte,
   preMergeConfidenceJavaScript: 28 * kibibyte,
   morphiconsJavaScript: 20 * kibibyte,
@@ -121,6 +123,12 @@ const deferredSpreadsheetJavaScript = assetNames.find(
 const deferredDiscordSettingsJavaScript = assetNames.find(
   (name) => /^DiscordSettings-.*\.js$/u.test(name),
 );
+const deferredCanaryRollbackJavaScript = assetNames.find(
+  (name) => /^CanaryRollbackSetting-.*\.js$/u.test(name),
+);
+const deferredAppUpdateNoticeJavaScript = assetNames.find(
+  (name) => /^AppUpdateNotice-.*\.js$/u.test(name),
+);
 const mainWorkbenchJavaScript = assetNames.find(
   (name) => /^App-.*\.js$/u.test(name),
 );
@@ -185,6 +193,16 @@ if (!deferredBrowserEvidenceJavaScript) {
 if (!deferredDiscordSettingsJavaScript) {
   throw new Error(
     "Renderer bundle check could not find the deferred Discord settings chunk.",
+  );
+}
+if (!deferredCanaryRollbackJavaScript) {
+  throw new Error(
+    "Renderer bundle check could not find the deferred Canary rollback chunk.",
+  );
+}
+if (!deferredAppUpdateNoticeJavaScript) {
+  throw new Error(
+    "Renderer bundle check could not find the deferred update notice chunk.",
   );
 }
 if (!mainWorkbenchJavaScript) {
@@ -299,6 +317,12 @@ const deferredSpreadsheetJavaScriptBytes = await assetBytes(
 const deferredDiscordSettingsJavaScriptBytes = await assetBytes(
   `assets/${deferredDiscordSettingsJavaScript}`,
 );
+const deferredCanaryRollbackJavaScriptBytes = await assetBytes(
+  `assets/${deferredCanaryRollbackJavaScript}`,
+);
+const deferredAppUpdateNoticeJavaScriptBytes = await assetBytes(
+  `assets/${deferredAppUpdateNoticeJavaScript}`,
+);
 const detachedChatJavaScriptBytes = await closureBytes(
   detachedChatJavaScriptClosure,
   mainWorkbenchJavaScriptClosure,
@@ -340,6 +364,8 @@ const coreJavaScriptBytes =
   - deferredBrowserEvidenceJavaScriptBytes
   - deferredSpreadsheetJavaScriptBytes
   - deferredDiscordSettingsJavaScriptBytes
+  - deferredCanaryRollbackJavaScriptBytes
+  - deferredAppUpdateNoticeJavaScriptBytes
   - detachedChatJavaScriptBytes
   - preMergeConfidenceJavaScriptBytes
   // The dependency and feature adapter each have strict ceilings above, so do
@@ -364,6 +390,8 @@ const measurements = {
   deferredBrowserEvidenceJavaScript: deferredBrowserEvidenceJavaScriptBytes,
   deferredSpreadsheetJavaScript: deferredSpreadsheetJavaScriptBytes,
   deferredDiscordSettingsJavaScript: deferredDiscordSettingsJavaScriptBytes,
+  deferredCanaryRollbackJavaScript: deferredCanaryRollbackJavaScriptBytes,
+  deferredAppUpdateNoticeJavaScript: deferredAppUpdateNoticeJavaScriptBytes,
   detachedChatJavaScript: detachedChatJavaScriptBytes,
   preMergeConfidenceJavaScript: preMergeConfidenceJavaScriptBytes,
   morphiconsJavaScript: morphiconsJavaScriptBytes,

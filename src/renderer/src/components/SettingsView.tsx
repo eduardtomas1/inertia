@@ -41,7 +41,6 @@ import { defaultSettings } from "@shared/contracts/app";
 import type {
   AppHealthSnapshot,
   AppUpdateStatus,
-  CanaryRollbackStatus,
 } from "@shared/desktop";
 import { INERTIA_VERSION } from "@shared/version";
 import {
@@ -55,6 +54,7 @@ import { LoadingMark, Switch } from "./ui";
 import { ProviderMaintenanceNotice } from "./ProviderMaintenanceNotice";
 import {
   loadConnectionsAndDevicesSettings,
+  loadCanaryRollbackSetting,
   loadDiscordSettings,
   loadModelBackendsSettings,
   prefetchSettingsSection,
@@ -231,6 +231,7 @@ export function SettingsView({
   onSetBackendDefault,
   onClearBackendDefault,
 }: SettingsViewProps): React.JSX.Element {
+  const isCanary = appUpdateStatus?.channel === "canary";
   const rootRef = useRef<HTMLElement>(null);
   useEffect(() => {
     rootRef.current?.focus();
@@ -253,6 +254,10 @@ export function SettingsView({
     loadDiscordSettings,
     section === "discord",
   );
+  const CanaryRollbackSetting = useLoadedSurface(
+    loadCanaryRollbackSetting,
+    isCanary,
+  );
   const previousTarget = useRef(target);
   useEffect(() => {
     if (target && target !== previousTarget.current) setSection(target.section);
@@ -264,8 +269,6 @@ export function SettingsView({
   const [logRevealStatus, setLogRevealStatus] = useState<string | null>(null);
   const [supportReportStatus, setSupportReportStatus] = useState<string | null>(null);
   const [updateCheckStatus, setUpdateCheckStatus] = useState<string | null>(null);
-  const [canaryRollback, setCanaryRollback] = useState<CanaryRollbackStatus | null>(null);
-  const [canaryRollbackBusy, setCanaryRollbackBusy] = useState(false);
   const [recoveryOperation, setRecoveryOperation] = useState<
     "export" | "import" | null
   >(null);
@@ -292,23 +295,6 @@ export function SettingsView({
     settings.providerIdentityLabels,
   );
   const keybindingsFingerprint = stableRecordFingerprint(settings.keybindings);
-  useEffect(() => {
-    if (appUpdateStatus?.channel !== "canary") {
-      setCanaryRollback(null);
-      return;
-    }
-    let active = true;
-    void window.inertia.getCanaryRollbackStatus().then((next) => {
-      if (active) setCanaryRollback(next);
-    }, () => {
-      if (active) setCanaryRollback({
-        state: "failed",
-        version: null,
-        message: "The Canary rollback status could not be verified.",
-      });
-    });
-    return () => { active = false; };
-  }, [appUpdateStatus?.channel]);
   useEffect(() => {
     authoritativeProviderIdentityLabelsRef.current =
       settings.providerIdentityLabels;
@@ -353,8 +339,7 @@ export function SettingsView({
     : "Provider default";
   const modelDefaultReasoningLabel = modelDefaultReasoning?.label
     ?? effectiveDefaultModel?.defaultReasoningEffort;
-  const platform = window.inertia.getPlatform();
-  const primaryModifier = platform === "darwin" ? "⌘" : "Ctrl";
+  const primaryModifier = window.inertia.getPlatform() === "darwin" ? "⌘" : "Ctrl";
   const archivedByProvider = useMemo(() => new Map(providers.map((provider) => [provider.id, provider.label])), [providers]);
   useEffect(() => {
     if (section !== "archive") return;
@@ -442,23 +427,6 @@ export function SettingsView({
       await operation();
     } catch {
       setUpdateCheckStatus(failureMessage);
-    }
-  };
-  const runCanaryRollbackAction = async (
-    operation: () => Promise<CanaryRollbackStatus>,
-  ): Promise<void> => {
-    if (canaryRollbackBusy) return;
-    setCanaryRollbackBusy(true);
-    try {
-      setCanaryRollback(await operation());
-    } catch {
-      setCanaryRollback({
-        state: "failed",
-        version: canaryRollback?.version ?? null,
-        message: "The Canary rollback operation could not be completed.",
-      });
-    } finally {
-      setCanaryRollbackBusy(false);
     }
   };
   const exportRecoveryData = async (): Promise<void> => {
@@ -601,8 +569,7 @@ export function SettingsView({
               <div className="codex-binary-path application-update-setting">
                 <span>
                   <strong>
-                    {appUpdateStatus?.channel === "canary" ? "Inertia Canary" : "Inertia"}
-                    {" · "}v{INERTIA_VERSION}
+                    {`${isCanary ? "Inertia Canary" : "Inertia"} · v${INERTIA_VERSION}`}
                   </strong>
                   <small role="status" aria-live="polite" aria-atomic="true">
                     {updateCheckStatus
@@ -626,31 +593,7 @@ export function SettingsView({
                   <button type="button" className="secondary-button" disabled={checkingUpdate || checkingAppUpdate || ["downloading", "downloaded", "installing"].includes(appUpdateStatus?.state ?? "")} onClick={() => { void checkAppUpdate(); }}><RefreshCw size={14} />{checkingUpdate || checkingAppUpdate ? "Checking…" : "Check now"}</button>
                 </div>
               </div>
-              {appUpdateStatus?.channel === "canary" && (
-                <div className="codex-binary-path application-update-setting canary-rollback-setting">
-                  <span>
-                    <strong>Canary channel · isolated profile</strong>
-                    <small role="status" aria-live="polite" aria-atomic="true">
-                      {canaryRollbackBusy
-                        ? "Downloading and verifying the current immutable Canary package…"
-                        : canaryRollback?.message
-                          ?? "Checking the retained last-known-good Canary package…"}
-                    </small>
-                  </span>
-                  <div>
-                    {canaryRollback?.state === "ready"
-                      && canaryRollback.version !== INERTIA_VERSION && (
-                      <button type="button" className="secondary-button" disabled={canaryRollbackBusy} onClick={() => { void runCanaryRollbackAction(window.inertia.openCanaryRollback); }}><RotateCcw size={14} />{platform === "linux" ? "Show rollback file" : "Open rollback"} v{canaryRollback.version}</button>
-                    )}
-                    {canaryRollback?.state !== "ready" && (
-                      <button type="button" className="secondary-button" disabled={canaryRollbackBusy} onClick={() => { void runCanaryRollbackAction(window.inertia.prepareCanaryRollback); }}><ShieldCheck size={14} />Prepare rollback</button>
-                    )}
-                  </div>
-                </div>
-              )}
-              {appUpdateStatus?.channel === "canary" && (
-                <p className="settings-card-note">Canary uses a separate app identity, protocol, data directory, Chromium profile, update feed, and package cache. Stable Inertia data is never imported or modified.</p>
-              )}
+              {isCanary && CanaryRollbackSetting && <CanaryRollbackSetting />}
             </section>
           </>
         )}

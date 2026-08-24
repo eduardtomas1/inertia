@@ -2,6 +2,7 @@ import type { WebContents } from "electron";
 
 import { MAX_AGENT_BROWSER_TEXT_BYTES } from "../shared/agent-browser.js";
 import {
+  browserEvidenceFieldNameIsSensitiveCredential,
   browserEvidenceTextContainsSensitiveCredential,
   MAX_BROWSER_EVIDENCE_TEXT_CHARS,
 } from "../shared/browser-evidence.js";
@@ -515,6 +516,7 @@ function snapshotHasSensitiveVisualEvidence(value: unknown): boolean {
     const boundedName = name.trim();
     const boundedValue = value.trim();
     if (!boundedName || !boundedValue) return false;
+    if (browserEvidenceFieldNameIsSensitiveCredential(boundedName, 300)) return true;
     const availableValue = Math.max(
       1,
       MAX_BROWSER_EVIDENCE_TEXT_CHARS - boundedName.length - 1,

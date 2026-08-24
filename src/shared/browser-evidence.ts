@@ -67,7 +67,7 @@ const LONG_OPAQUE_VALUE = /(?<![A-Za-z0-9])(?=[A-Za-z0-9+/_=-]{32,}(?![A-Za-z0-9
 const TRAILING_SECRET_FRAGMENT =
   /(?<![A-Za-z0-9])(?:(?:sk|rk|pk|gh[opusr]|github_pat|xox[baprs]|api|key|token)[-_][A-Za-z0-9_-]*|eyJ[A-Za-z0-9_.-]*|(?:Bearer|Basic)\s+\S*)$/iu;
 const SENSITIVE_FIELD =
-  /(?<![A-Za-z0-9])(?:(?:access|auth|id|refresh)[-_ ]?token|api[-_ ]?key|authorization|proxy[-_ ]?authorization|cookie|set[-_ ]?cookie|credential|password|passwd|(?:pass(?:[-_ ]?values?)?|passcode|passphrase|pgpassword|pwd)(?=\s*["']?\s*[:=])|private[-_ ]?key|request[-_ ]?body|secret|session|token)(?![A-Za-z0-9])/iu;
+  /(?<![A-Za-z0-9])(?:(?:access|auth|id|refresh)[-_ ]?token|(?:secret[-_ ]+)?access[-_ ]+key(?:[-_ ]+id)?|api[-_ ]?key|authorization|proxy[-_ ]?authorization|cookie|set[-_ ]?cookie|credential|password|passwd|(?:pass(?:[-_ ]?values?)?|passcode|passphrase|pgpassword|pwd)(?=\s*["']?\s*[:=])|private[-_ ]?key|request[-_ ]?body|secret|session|token)(?![A-Za-z0-9])/iu;
 const CAMEL_CASE_CREDENTIAL_ASSIGNMENT =
   /(?<![A-Za-z0-9])(?:[A-Za-z][A-Za-z0-9]*?)?(?:AccessKey|AccessToken|APIKey|ApiKey|AuthHeader|AuthToken|Authorization|AuthorizationHeader|Cookie|Credential|Credentials|EncryptionKey|IDToken|IdToken|PAT|Pat|PGPassword|Passcode|Passphrase|Password|Passwd|PrivateKey|Pwd|RefreshToken|RequestBody|Secret|SecretKey|Session|SessionId|SigningKey|Token)(?:Value|Values)?(?![A-Za-z0-9])["']?\s*[:=]/giu;
 const SECRET_HOST_FRAGMENT =
@@ -595,6 +595,31 @@ export function browserEvidenceTextContainsSensitiveCredential(
   );
   return representations === null
     || representations.some(representationContainsSensitiveCredential);
+}
+
+/**
+ * Classifies a bounded semantic field name independently from its associated
+ * value. Screenshot preflight uses this only when the same element also has a
+ * nonempty value, so ordinary prose remains readable while credential fields
+ * fail closed even when their short values are not recognizable secrets.
+ */
+export function browserEvidenceFieldNameIsSensitiveCredential(
+  value: unknown,
+  maximum = MAX_BROWSER_EVIDENCE_TEXT_CHARS,
+): boolean {
+  const limit = Math.max(1, Math.min(Math.trunc(maximum), MAX_BROWSER_EVIDENCE_TEXT_CHARS));
+  if (typeof value !== "string" || value.length > limit) return true;
+  if (!/\S/u.test(value)) return false;
+  const representations = boundedInspectionRepresentations(
+    value,
+    Math.max(limit + 4_096, 4_096),
+  );
+  return representations === null || representations.some((representation) => {
+    const assigned = `${representation}=x`;
+    return patternMatches(SENSITIVE_FIELD, representation)
+      || patternMatches(CAMEL_CASE_CREDENTIAL_ASSIGNMENT, assigned)
+      || hasConcatenatedPassAssignment(assigned);
+  });
 }
 
 /**

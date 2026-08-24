@@ -1,12 +1,30 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  browserEvidenceFieldNameIsSensitiveCredential,
   browserEvidenceOrigin,
   browserEvidenceTextContainsSensitiveCredential,
   sanitizeBrowserEvidenceText,
 } from "../../src/shared/browser-evidence";
 
 describe("Browser evidence sanitization", () => {
+  it.each([
+    "API key",
+    "Secret access key",
+    "Access key ID",
+    "databasePass",
+  ])("classifies credential field names with associated values: %s", (value) => {
+    expect(browserEvidenceFieldNameIsSensitiveCredential(value)).toBe(true);
+  });
+
+  it.each([
+    "Documentation search",
+    "Workspace location",
+    "Build progress",
+  ])("keeps ordinary field names readable: %s", (value) => {
+    expect(browserEvidenceFieldNameIsSensitiveCredential(value)).toBe(false);
+  });
+
   it.each([
     "Documentation: http://localhost:3000/docs",
     "Workspace source: /workspace/inertia/src/main.ts",

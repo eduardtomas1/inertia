@@ -120,11 +120,18 @@ describe("agent browser semantic snapshots", () => {
     inputLabel = "Workspace location";
     input.value = "/workspace/inertia/src/main.ts";
     await expect(agentPageHasSensitiveScreenshotEvidence(contents as never)).resolves.toBe(false);
+    inputLabel = "Build progress";
+    input.value = "1 / 3";
+    await expect(agentPageHasSensitiveScreenshotEvidence(contents as never)).resolves.toBe(false);
     inputLabel = "API key";
     input.value = "hunter2";
     await expect(agentPageHasSensitiveScreenshotEvidence(contents as never)).resolves.toBe(true);
     inputLabel = null;
     inputLabelledBy = "key-label";
+    await expect(agentPageHasSensitiveScreenshotEvidence(contents as never)).resolves.toBe(true);
+    referencedLabelBody.innerText = "Secret access key";
+    await expect(agentPageHasSensitiveScreenshotEvidence(contents as never)).resolves.toBe(true);
+    referencedLabelBody.innerText = "Access key ID";
     await expect(agentPageHasSensitiveScreenshotEvidence(contents as never)).resolves.toBe(true);
     inputLabelledBy = null;
     body.innerText = "API_KEY=sk-visible-token-that-must-not-enter-a-bitmap";

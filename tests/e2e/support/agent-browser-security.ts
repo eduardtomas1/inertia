@@ -15,6 +15,55 @@ export async function captureAgentBrowserSnapshot(
   }, conversationId);
 }
 
+export async function typeAgentBrowserField(
+  app: AppFixture,
+  conversationId: string,
+  fieldName: string,
+  text: string,
+) {
+  return await app.electronApp.evaluate(async (_electron, request) => {
+    type Command =
+      | { action: "snapshot" }
+      | { action: "type"; ref: string; text: string; replace: boolean };
+    type Result = {
+      ok: boolean;
+      code?: string;
+      message?: string;
+      text?: string;
+    };
+    const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
+      agentBrowser: (id: string, command: Command) => Promise<Result>;
+    };
+    const snapshot = await runtime.agentBrowser(request.conversationId, {
+      action: "snapshot",
+    });
+    if (!snapshot.ok) return { ...snapshot, stage: "snapshot" };
+    if (!snapshot.text) return {
+      ok: false,
+      code: "invalid",
+      message: "The fresh snapshot did not return semantic content.",
+      stage: "snapshot",
+    };
+    const elements = (JSON.parse(snapshot.text) as {
+      elements: Array<{ name: string; ref: string }>;
+    }).elements;
+    const ref = elements.find(({ name }) => name === request.fieldName)?.ref;
+    if (!ref) return {
+      ok: false,
+      code: "not-found",
+      message: `The fresh snapshot did not contain ${request.fieldName}.`,
+      stage: "ref",
+    };
+    const result = await runtime.agentBrowser(request.conversationId, {
+      action: "type",
+      ref,
+      text: request.text,
+      replace: true,
+    });
+    return result.ok ? result : { ...result, stage: "type" };
+  }, { conversationId, fieldName, text });
+}
+
 export async function expectDocumentStartPrivacyGuard(
   app: AppFixture,
   conversationId: string,

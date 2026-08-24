@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
-import { captureAgentBrowserSnapshot, expectClosedShadowActivationBlocked, expectDocumentStartPrivacyGuard, expectFocusNavigationSettlement, expectHoverRetargetingGuard, expectMicrotaskFocusTheftBlocked, expectSemanticClickBoundaries, expectWindowCapturePrivacyGuard } from "./support/agent-browser-security";
+import { captureAgentBrowserSnapshot, expectClosedShadowActivationBlocked, expectDocumentStartPrivacyGuard, expectFocusNavigationSettlement, expectHoverRetargetingGuard, expectMicrotaskFocusTheftBlocked, expectSemanticClickBoundaries, expectWindowCapturePrivacyGuard, typeAgentBrowserField } from "./support/agent-browser-security";
 import { selectWorkspaceTool } from "./support/workspace-tools";
 let app!: AppFixture;
 let page!: AppFixture["page"];
@@ -505,47 +505,11 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
   await expect(primaryPreview.getByRole("textbox", {
     name: "Preview address",
   })).toHaveValue(keyDestinationUrl);
-  const typeResult = await app.electronApp.evaluate(
-    async (_electron, conversationId) => {
-      type Command =
-        | { action: "snapshot" }
-        | { action: "type"; ref: string; text: string; replace: boolean };
-      type Result = {
-        ok: boolean;
-        code?: string;
-        message?: string;
-        text?: string;
-      };
-      const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
-        agentBrowser: (id: string, command: Command) => Promise<Result>;
-      };
-      const snapshot = await runtime.agentBrowser(conversationId, { action: "snapshot" });
-      if (!snapshot.ok) return { ...snapshot, stage: "snapshot" };
-      if (!snapshot.text) return {
-        ok: false,
-        code: "invalid",
-        message: "The fresh snapshot did not return semantic content.",
-        stage: "snapshot",
-      };
-      const parsed = JSON.parse(snapshot.text) as {
-        elements: Array<{ name: string; ref: string }>;
-      };
-      const ref = parsed.elements.find((element) => element.name === "Type destination")?.ref;
-      if (!ref) return {
-        ok: false,
-        code: "not-found",
-        message: "The fresh snapshot did not contain Type destination.",
-        stage: "ref",
-      };
-      const result = await runtime.agentBrowser(conversationId, {
-        action: "type",
-        ref,
-        text: "inertia",
-        replace: true,
-      });
-      return result.ok ? result : { ...result, stage: "type" };
-    },
+  const typeResult = await typeAgentBrowserField(
+    app,
     primaryConversationId,
+    "Type destination",
+    "inertia",
   );
   expect(typeResult).toMatchObject({ ok: true });
   const typeDestinationUrl = `${app.previewUrl}agent-browser-type-destination?query=inertia`;

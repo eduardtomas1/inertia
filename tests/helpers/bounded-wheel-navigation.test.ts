@@ -86,6 +86,126 @@ describe("bounded real-wheel navigation", () => {
     expect(wheelUp).toHaveBeenCalledTimes(2);
   });
 
+  it("resamples a transiently unmounted initial virtual range before scrolling", async () => {
+    const waitForNextSample = vi.fn(async () => undefined);
+    const wheelUp = vi.fn(async () => undefined);
+    const settledReader = scrollReader([1_000, 0]);
+    let initialSample = true;
+    const readPosition = vi.fn(async (trackedItemId?: string) => {
+      if (initialSample) {
+        initialSample = false;
+        return null;
+      }
+      return settledReader(trackedItemId);
+    });
+
+    await expect(driveBoundedWheelNavigation({
+      maxGestures: 3,
+      maxProgressSamples: 2,
+      readPosition,
+      targetScrollTop: 120,
+      waitForNextSample,
+      wheelUp,
+    })).resolves.toEqual({ gestures: 1, scrollTop: 0 });
+    expect(readPosition).toHaveBeenCalledTimes(3);
+    expect(waitForNextSample).toHaveBeenCalledTimes(1);
+    expect(wheelUp).toHaveBeenCalledTimes(1);
+  });
+
+  it("resamples a transiently unmounted range after a wheel gesture", async () => {
+    const waitForNextSample = vi.fn(async () => undefined);
+    const wheelUp = vi.fn(async () => undefined);
+    const positions = scrollReader([1_000, 0]);
+    let samples = 0;
+    const readPosition = vi.fn(async (trackedItemId?: string) => {
+      samples += 1;
+      if (samples === 2) return null;
+      return positions(trackedItemId);
+    });
+
+    await expect(driveBoundedWheelNavigation({
+      maxGestures: 3,
+      maxProgressSamples: 2,
+      readPosition,
+      targetScrollTop: 120,
+      waitForNextSample,
+      wheelUp,
+    })).resolves.toEqual({ gestures: 1, scrollTop: 0 });
+    expect(readPosition).toHaveBeenCalledTimes(3);
+    expect(waitForNextSample).toHaveBeenCalledTimes(1);
+    expect(wheelUp).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails within the sample cap when the initial virtual range stays unmounted", async () => {
+    const readPosition = vi.fn(async () => null);
+    const waitForNextSample = vi.fn(async () => undefined);
+    const wheelUp = vi.fn(async () => undefined);
+
+    await expect(driveBoundedWheelNavigation({
+      maxGestures: 3,
+      maxProgressSamples: 3,
+      readPosition,
+      targetScrollTop: 120,
+      waitForNextSample,
+      wheelUp,
+    })).rejects.toThrow(
+      "The initial reader position had no visible logical item across 3 bounded samples.",
+    );
+    expect(readPosition).toHaveBeenCalledTimes(3);
+    expect(waitForNextSample).toHaveBeenCalledTimes(2);
+    expect(wheelUp).not.toHaveBeenCalled();
+  });
+
+  it("fails within the sample cap when the post-wheel virtual range stays unmounted", async () => {
+    const initialPosition = scrollReader([1_000]);
+    let samples = 0;
+    const readPosition = vi.fn(async (trackedItemId?: string) => {
+      samples += 1;
+      return samples === 1 ? initialPosition(trackedItemId) : null;
+    });
+    const waitForNextSample = vi.fn(async () => undefined);
+    const wheelUp = vi.fn(async () => undefined);
+
+    await expect(driveBoundedWheelNavigation({
+      maxGestures: 3,
+      maxProgressSamples: 3,
+      readPosition,
+      targetScrollTop: 120,
+      waitForNextSample,
+      wheelUp,
+    })).rejects.toThrow(
+      "Reader position after wheel gesture 1 had no visible logical item across 3 bounded samples.",
+    );
+    expect(readPosition).toHaveBeenCalledTimes(4);
+    expect(waitForNextSample).toHaveBeenCalledTimes(2);
+    expect(wheelUp).toHaveBeenCalledTimes(1);
+  });
+
+  it("retains the last real no-progress sample through terminal unavailable samples", async () => {
+    const realPositions = scrollReader([1_000, 1_000]);
+    let samples = 0;
+    const readPosition = vi.fn(async (trackedItemId?: string) => {
+      samples += 1;
+      return samples <= 2 ? realPositions(trackedItemId) : null;
+    });
+    const waitForNextSample = vi.fn(async () => undefined);
+    const wheelUp = vi.fn(async () => undefined);
+
+    await expect(driveBoundedWheelNavigation({
+      maxGestures: 3,
+      maxProgressSamples: 3,
+      readPosition,
+      targetScrollTop: 120,
+      waitForNextSample,
+      wheelUp,
+    })).rejects.toThrow(
+      "Wheel gesture 1 made no upward progress: logical position ended at turn-1 (item 1, offset 0) while tracked turn-1 ended at 0 from item 1 offset 0 (scrollTop 1000 from 1000; scrollHeight 300000 from 300000).",
+    );
+    expect(readPosition).toHaveBeenCalledTimes(4);
+    expect(waitForNextSample).toHaveBeenCalledTimes(2);
+    expect(wheelUp).toHaveBeenCalledTimes(1);
+  });
+
   it("fails immediately when a real wheel gesture makes no measurable progress", async () => {
     const wheelUp = vi.fn(async () => undefined);
 

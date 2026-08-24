@@ -1,7 +1,9 @@
 interface BoundedWheelNavigationOptions {
   maxGestures: number;
   maxProgressSamples: number;
-  readPosition: (trackedItemId?: string) => Promise<BoundedWheelPosition>;
+  readPosition: (
+    trackedItemId?: string,
+  ) => Promise<BoundedWheelPosition | null>;
   targetScrollTop: number;
   waitForNextSample: () => Promise<void>;
   wheelUp: () => Promise<void>;
@@ -69,10 +71,22 @@ function madeUpwardProgress(
 export async function driveBoundedWheelNavigation(
   options: BoundedWheelNavigationOptions,
 ): Promise<BoundedWheelNavigationResult> {
-  let position = requirePosition(
-    await options.readPosition(),
-    "The initial reader position",
-  );
+  let position: BoundedWheelPosition | null = null;
+  for (let sample = 0; sample < options.maxProgressSamples; sample += 1) {
+    const candidate = await options.readPosition();
+    if (candidate !== null) {
+      position = requirePosition(candidate, "The initial reader position");
+      break;
+    }
+    if (sample + 1 < options.maxProgressSamples) {
+      await options.waitForNextSample();
+    }
+  }
+  if (position === null) {
+    throw new Error(
+      `The initial reader position had no visible logical item across ${options.maxProgressSamples} bounded samples.`,
+    );
+  }
   if (position.scrollTop < options.targetScrollTop) {
     throw new Error(
       `Reader navigation started at scrollTop ${position.scrollTop}; expected at least ${options.targetScrollTop} before a real wheel gesture.`,
@@ -82,19 +96,37 @@ export async function driveBoundedWheelNavigation(
   for (let gesture = 1; gesture <= options.maxGestures; gesture += 1) {
     const previousPosition = position;
     await options.wheelUp();
+    let sampledPosition: BoundedWheelPosition | null = null;
+    let progressed = false;
 
     for (let sample = 0; sample < options.maxProgressSamples; sample += 1) {
-      position = requirePosition(
-        await options.readPosition(previousPosition.itemId),
-        `Reader position after wheel gesture ${gesture}`,
-      );
-      if (madeUpwardProgress(previousPosition, position)) break;
+      const candidate = await options.readPosition(previousPosition.itemId);
+      if (candidate !== null) {
+        sampledPosition = requirePosition(
+          candidate,
+          `Reader position after wheel gesture ${gesture}`,
+        );
+      }
+      if (
+        sampledPosition !== null
+        && candidate !== null
+        && madeUpwardProgress(previousPosition, sampledPosition)
+      ) {
+        progressed = true;
+        break;
+      }
       if (sample + 1 < options.maxProgressSamples) {
         await options.waitForNextSample();
       }
     }
 
-    if (!madeUpwardProgress(previousPosition, position)) {
+    if (sampledPosition === null) {
+      throw new Error(
+        `Reader position after wheel gesture ${gesture} had no visible logical item across ${options.maxProgressSamples} bounded samples.`,
+      );
+    }
+    position = sampledPosition;
+    if (!progressed) {
       // Streaming can grow the document by more than the wheel delta and move
       // the stable reader row up/out even though Chromium accepted the gesture.
       // Growth is not success: it only spends the next already-bounded gesture.

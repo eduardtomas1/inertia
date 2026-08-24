@@ -945,7 +945,10 @@ async function streamingResponsivenessSample(
         turnIdFor(candidate) !== null
         && candidate.getBoundingClientRect().bottom > viewportTop + 8
       ));
-      if (!item) throw new Error("The transcript has no visible logical item.");
+      // The virtualizer can briefly unmount the outgoing range before the next
+      // range lands. Report absence so the bounded driver resamples it rather
+      // than treating a renderer handoff as movement or failing immediately.
+      if (!item) return null;
       const itemId = turnIdFor(item);
       if (!itemId) throw new Error("The visible logical item has no stable turn ID.");
       const trackedItem = trackedId === undefined

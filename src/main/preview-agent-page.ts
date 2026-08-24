@@ -483,11 +483,26 @@ function snapshotHasSensitiveVisualEvidence(value: unknown): boolean {
     }
     return false;
   };
+  const sensitiveNamedValue = (name: unknown, value: unknown): boolean => {
+    if (typeof name !== "string" || typeof value !== "string") return false;
+    if (name.length > 300 || value.length > 500) return true;
+    const boundedName = name.trim();
+    const boundedValue = value.trim();
+    if (!boundedName || !boundedValue) return false;
+    const availableValue = Math.max(
+      1,
+      MAX_BROWSER_EVIDENCE_TEXT_CHARS - boundedName.length - 1,
+    );
+    return browserEvidenceTextContainsSensitiveCredential(
+      `${boundedName}=${boundedValue.slice(0, availableValue)}`,
+    );
+  };
   if (sensitive(value.text, MAX_PAGE_TEXT_CHARS)) return true;
   for (const element of value.elements) {
     if (!plainObject(element)
       || sensitive(element.name, 300)
-      || sensitive(element.value, 500)) return true;
+      || sensitive(element.value, 500)
+      || sensitiveNamedValue(element.name, element.value)) return true;
   }
   return false;
 }

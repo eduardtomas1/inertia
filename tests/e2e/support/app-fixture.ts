@@ -224,6 +224,15 @@ async function createPreviewServer(): Promise<{
       );
       return;
     }
+    if (request.url === "/agent-browser-labeled-secret-privacy") {
+      response.writeHead(200, {
+        "Content-Type": "text/html",
+        "Content-Security-Policy": "default-src 'none'",
+      });
+      response.end("<!doctype html><title>Labeled secret privacy probe</title>"
+        + "<label>API key <input aria-label='API key' value='hunter2'></label>");
+      return;
+    }
     if (request.url === "/agent-browser-pixel-secret-privacy") {
       const secret = "sk-canvas-browser-screenshot-sentinel-1234567890";
       response.writeHead(200, {

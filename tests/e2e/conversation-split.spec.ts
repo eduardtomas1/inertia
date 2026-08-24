@@ -596,6 +596,8 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
     `${app.previewUrl}agent-browser-visible-secret-privacy`,
     "sk-visible-browser-screenshot-sentinel-1234567890");
   await expectScreenshotPrivacyGuard(app, primaryConversationId,
+    `${app.previewUrl}agent-browser-labeled-secret-privacy`, "hunter2");
+  await expectScreenshotPrivacyGuard(app, primaryConversationId,
     `${app.previewUrl}agent-browser-pixel-secret-privacy`,
     "sk-canvas-browser-screenshot-sentinel-1234567890", true);
   await expectPasswordAssignmentPrivacyGuard(app, primaryConversationId,

@@ -54,6 +54,7 @@ function withSemanticIterator<
 
 describe("agent browser semantic snapshots", () => {
   it("classifies bounded visible text and input values before screenshot capture", async () => {
+    let inputLabel: string | null = null;
     const input = {
       nodeType: 1,
       tagName: "INPUT",
@@ -64,7 +65,7 @@ describe("agent browser semantic snapshots", () => {
       parentElement: null,
       disabled: false,
       checked: false,
-      getAttribute: () => null,
+      getAttribute: (name: string) => name === "aria-label" ? inputLabel : null,
       hasAttribute: () => false,
       matches: () => false,
       getBoundingClientRect: () => ({
@@ -104,6 +105,17 @@ describe("agent browser semantic snapshots", () => {
     await expect(agentPageHasSensitiveScreenshotEvidence(contents as never)).resolves.toBe(false);
     body.innerText = "Workspace source: /workspace/inertia/src/main.ts";
     await expect(agentPageHasSensitiveScreenshotEvidence(contents as never)).resolves.toBe(false);
+    body.innerText = ordinaryBodyText;
+    inputLabel = "Documentation search";
+    input.value = "http://localhost:3000/docs";
+    await expect(agentPageHasSensitiveScreenshotEvidence(contents as never)).resolves.toBe(false);
+    inputLabel = "Workspace location";
+    input.value = "/workspace/inertia/src/main.ts";
+    await expect(agentPageHasSensitiveScreenshotEvidence(contents as never)).resolves.toBe(false);
+    inputLabel = "API key";
+    input.value = "hunter2";
+    await expect(agentPageHasSensitiveScreenshotEvidence(contents as never)).resolves.toBe(true);
+    inputLabel = null;
     body.innerText = "API_KEY=sk-visible-token-that-must-not-enter-a-bitmap";
     await expect(agentPageHasSensitiveScreenshotEvidence(contents as never)).resolves.toBe(true);
     body.innerText = ordinaryBodyText;

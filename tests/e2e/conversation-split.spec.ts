@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
-import { captureAgentBrowserSnapshot, expectClosedShadowActivationBlocked, expectDocumentStartPrivacyGuard, expectFocusNavigationSettlement, expectHoverRetargetingGuard, expectMicrotaskFocusTheftBlocked, expectPasswordAssignmentPrivacyGuard, expectSemanticClickBoundaries, expectVisibleTextScreenshotPrivacyGuard, expectWindowCapturePrivacyGuard, typeAgentBrowserField } from "./support/agent-browser-security";
+import { captureAgentBrowserSnapshot, expectClosedShadowActivationBlocked, expectDocumentStartPrivacyGuard, expectFocusNavigationSettlement, expectHoverRetargetingGuard, expectMicrotaskFocusTheftBlocked, expectPasswordAssignmentPrivacyGuard, expectScreenshotPrivacyGuard, expectSemanticClickBoundaries, expectWindowCapturePrivacyGuard, typeAgentBrowserField } from "./support/agent-browser-security";
 import { verifyBrowserEvidence } from "./support/browser-evidence";
 import { openConversationPaneTool } from "./support/workspace-tools";
 let app!: AppFixture;
@@ -592,8 +592,12 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
   const privacyUrl = `${app.previewUrl}agent-browser-privacy-start`;
   await expectDocumentStartPrivacyGuard(app, primaryConversationId, privacyUrl);
   await expectWindowCapturePrivacyGuard(app, primaryConversationId, `${app.previewUrl}agent-browser-window-capture-privacy`);
-  await expectVisibleTextScreenshotPrivacyGuard(app, primaryConversationId,
-    `${app.previewUrl}agent-browser-visible-secret-privacy`);
+  await expectScreenshotPrivacyGuard(app, primaryConversationId,
+    `${app.previewUrl}agent-browser-visible-secret-privacy`,
+    "sk-visible-browser-screenshot-sentinel-1234567890");
+  await expectScreenshotPrivacyGuard(app, primaryConversationId,
+    `${app.previewUrl}agent-browser-pixel-secret-privacy`,
+    "sk-canvas-browser-screenshot-sentinel-1234567890");
   await expectPasswordAssignmentPrivacyGuard(app, primaryConversationId,
     `${app.previewUrl}agent-browser-password-assignment-privacy`, primaryPreview);
   for (const [path, secret] of [

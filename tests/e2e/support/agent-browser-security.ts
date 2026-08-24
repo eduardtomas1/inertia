@@ -125,12 +125,12 @@ export async function expectDocumentStartPrivacyGuard(
   expect(JSON.stringify(evidence)).not.toContain(forbiddenText);
 }
 
-export async function expectVisibleTextScreenshotPrivacyGuard(
+export async function expectScreenshotPrivacyGuard(
   app: AppFixture,
   conversationId: string,
   url: string,
+  forbiddenText: string,
 ): Promise<void> {
-  const forbiddenText = "sk-visible-browser-screenshot-sentinel-1234567890";
   const evidence = await app.electronApp.evaluate(async (_electron, request) => {
     type Command =
       | { action: "screenshot" | "tabs" }

@@ -224,6 +224,20 @@ async function createPreviewServer(): Promise<{
       );
       return;
     }
+    if (request.url === "/agent-browser-pixel-secret-privacy") {
+      const secret = "sk-canvas-browser-screenshot-sentinel-1234567890";
+      response.writeHead(200, {
+        "Content-Type": "text/html",
+        "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline'",
+      });
+      response.end(
+        "<!doctype html><title>Pixel secret privacy probe</title><canvas width='800' height='160'></canvas>"
+        + "<script>const context=document.querySelector('canvas').getContext('2d');"
+        + "context.font='24px sans-serif';context.fillText("
+        + `${JSON.stringify(secret)},40,80)</script>`,
+      );
+      return;
+    }
     if (request.url === "/agent-browser-nested-privacy-start") {
       const secret = "nested-password-sentinel";
       response.writeHead(200, {

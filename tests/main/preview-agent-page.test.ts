@@ -136,6 +136,61 @@ describe("agent browser semantic snapshots", () => {
     await expect(agentPageHasSensitiveScreenshotEvidence(contents as never)).resolves.toBe(true);
   });
 
+  it.each([
+    ["canvas", { tagName: "CANVAS" }],
+    ["image input", { tagName: "INPUT", type: "image" }],
+    ["CSS background", { tagName: "DIV", backgroundImage: "url(private.png)" }],
+    ["generated content", { tagName: "DIV", pseudoContent: '"private"' }],
+  ])("refuses uninspectable %s pixels before screenshot capture", async (_name, candidate) => {
+    const candidateStyle = candidate as {
+      backgroundImage?: string;
+      pseudoContent?: string;
+    };
+    const element = {
+      nodeType: 1,
+      firstChild: null,
+      parentElement: null,
+      hidden: false,
+      type: "",
+      getBoundingClientRect: () => ({
+        x: 10, y: 10, left: 10, top: 10,
+        right: 210, bottom: 110, width: 200, height: 100,
+      }),
+      ...candidate,
+    };
+    const context = {
+      __inertiaAgentBrowser: {
+        privacyGuardInstalled: true,
+        nestedContentObserved: false,
+        passwordNodes: new WeakSet(),
+        passwordValues: new Set(),
+      },
+      document: withSemanticIterator({
+        title: "Pixel app", body: bodyWithText("Ordinary page"), documentElement: {},
+        querySelectorAll: () => [element],
+      }),
+      location: { href: "http://127.0.0.1:3000/" },
+      URL,
+      encodeURIComponent,
+      innerWidth: 1_200, innerHeight: 800, scrollX: 0, scrollY: 0,
+      getComputedStyle: (_element: unknown, pseudo?: string) => ({
+        visibility: "visible", display: "block", opacity: "1",
+        backgroundImage: candidateStyle.backgroundImage ?? "none",
+        borderImageSource: "none", listStyleImage: "none", maskImage: "none",
+        webkitMaskImage: "none",
+        content: pseudo ? candidateStyle.pseudoContent ?? "none" : "normal",
+      }),
+    };
+    const contents = {
+      executeJavaScriptInIsolatedWorld: vi.fn(async (
+        _worldId: number,
+        scripts: Array<{ code: string }>,
+      ) => runInNewContext(scripts[0]!.code, context)),
+    };
+
+    await expect(agentPageHasSensitiveScreenshotEvidence(contents as never)).resolves.toBe(true);
+  });
+
   it("rechecks the exact focused ref after page microtasks settle", async () => {
     const targetElement = {
       isConnected: true,

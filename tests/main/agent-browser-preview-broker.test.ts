@@ -6,6 +6,7 @@ const electronState = vi.hoisted(() => ({
   interactionTimeline: [] as string[],
   viewOptions: [] as Array<Record<string, unknown>>,
   contents: [] as Array<{
+    id: number;
     capturePage: {
       getMockImplementation(): (() => Promise<unknown>) | undefined;
       mockImplementationOnce(implementation: () => Promise<unknown>): unknown;
@@ -39,15 +40,30 @@ const electronState = vi.hoisted(() => ({
     permissionRequests: number;
     downloadHandlers: number;
     clearStorageData: ReturnType<typeof vi.fn>;
+    emitBeforeRequest(details: Record<string, unknown>): void;
+    emitCompleted(details: Record<string, unknown>): void;
+    emitError(details: Record<string, unknown>): void;
+    hasEvidenceListeners(): boolean;
   }>,
 }));
 
 vi.mock("electron", () => {
+  const sessionsByPartition = new Map<string, FakeSession>();
+  let nextWebContentsId = 1;
+
   class FakeSession {
     permissionChecks = 0;
     permissionRequests = 0;
     downloadHandlers = 0;
     clearStorageData = vi.fn(async () => undefined);
+    private beforeRequest: ((details: Record<string, unknown>, callback: (response: object) => void) => void) | null = null;
+    private completed: ((details: Record<string, unknown>) => void) | null = null;
+    private error: ((details: Record<string, unknown>) => void) | null = null;
+    readonly webRequest = {
+      onBeforeRequest: (listener: typeof this.beforeRequest) => { this.beforeRequest = listener; },
+      onCompleted: (listener: typeof this.completed) => { this.completed = listener; },
+      onErrorOccurred: (listener: typeof this.error) => { this.error = listener; },
+    };
 
     constructor() {
       electronState.sessions.push(this);
@@ -57,6 +73,14 @@ vi.mock("electron", () => {
     setPermissionRequestHandler(): void { this.permissionRequests += 1; }
     on(name: string): void {
       if (name === "will-download") this.downloadHandlers += 1;
+    }
+    emitBeforeRequest(details: Record<string, unknown>): void {
+      this.beforeRequest?.(details, () => undefined);
+    }
+    emitCompleted(details: Record<string, unknown>): void { this.completed?.(details); }
+    emitError(details: Record<string, unknown>): void { this.error?.(details); }
+    hasEvidenceListeners(): boolean {
+      return Boolean(this.beforeRequest || this.completed || this.error);
     }
   }
 
@@ -71,7 +95,7 @@ vi.mock("electron", () => {
   }
 
   class FakeWebContents {
-    readonly session = new FakeSession();
+    readonly id = nextWebContentsId++;
     readonly navigationHistory = {
       canGoBack: vi.fn(() => false),
       canGoForward: vi.fn(() => false),
@@ -125,7 +149,7 @@ vi.mock("electron", () => {
       }),
     };
 
-    constructor() {
+    constructor(readonly session: FakeSession) {
       electronState.contents.push(this);
     }
 
@@ -185,9 +209,16 @@ vi.mock("electron", () => {
   }
 
   class FakeWebContentsView {
-    readonly webContents = new FakeWebContents();
+    readonly webContents: FakeWebContents;
     bounds = { x: 0, y: 0, width: 0, height: 0 };
-    constructor(options: Record<string, unknown>) { electronState.viewOptions.push(options); }
+    constructor(options: Record<string, unknown>) {
+      electronState.viewOptions.push(options);
+      const preferences = options.webPreferences as { partition?: string } | undefined;
+      const partition = preferences?.partition ?? crypto.randomUUID();
+      const browserSession = sessionsByPartition.get(partition) ?? new FakeSession();
+      sessionsByPartition.set(partition, browserSession);
+      this.webContents = new FakeWebContents(browserSession);
+    }
     setBounds(bounds: typeof this.bounds): void {
       this.bounds = bounds;
       electronState.interactionTimeline.push(
@@ -205,6 +236,7 @@ const pageTools = vi.hoisted(() => ({
   AGENT_BROWSER_WORLD_ID: 999,
   agentPageActivationBlocked: vi.fn<() => Promise<"disabled" | "file" | null>>(async () => null),
   agentPageHasSensitiveEvidence: vi.fn(async () => false),
+  agentPageHasSensitiveScreenshotEvidence: vi.fn(async () => false),
   agentPageInputRefusal: vi.fn<() => Promise<"disabled" | "file" | "nested" | "retargeted" | null>>(async () => null),
   agentPageRefHasFocus: vi.fn(async () => true),
   installAgentPagePrivacyGuard: vi.fn(async () => undefined),
@@ -231,6 +263,11 @@ import {
 } from "../../src/shared/agent-browser";
 
 const conversationId = "11111111-1111-4111-8111-111111111111";
+const runIdentity = {
+  conversationId,
+  runId: "22222222-2222-4222-8222-222222222222",
+  turnId: "33333333-3333-4333-8333-333333333333",
+};
 
 function harness() {
   const children: Array<{
@@ -336,6 +373,49 @@ describe("agent-owned native Browser", () => {
     expect(closed.tabs).toHaveLength(1);
   });
 
+  it("publishes evidence only when its revision changes during runaway title updates", async () => {
+    const contentsOffset = electronState.contents.length;
+    const { broker, window } = harness();
+    const initial = await broker.navigate({
+      ownerId: "primary",
+      contextId: conversationId,
+      url: "http://127.0.0.1:3000/",
+    });
+    const contents = electronState.contents[contentsOffset]!;
+    const send = window.webContents.send;
+    send.mockClear();
+
+    for (let frame = 0; frame < 64; frame += 1) {
+      contents.setTitle(`Animated frame ${frame}`);
+      contents.emit("page-title-updated");
+    }
+
+    expect(send).toHaveBeenCalledTimes(64);
+    const titleUpdates = send.mock.calls.map((call) => call[1] as Record<string, unknown>);
+    expect(titleUpdates.every((update) => !Object.hasOwn(update, "evidence"))).toBe(true);
+    expect(titleUpdates.at(-1)).toMatchObject({
+      tabs: [expect.objectContaining({ title: "Animated frame 63" })],
+    });
+
+    contents.emit("console-message", {
+      level: "error",
+      message: "Animation failed safely",
+      preventDefault: vi.fn(),
+    });
+    await vi.waitFor(() => expect(send.mock.calls.some((call) =>
+      Object.hasOwn(call[1] as object, "evidence"))).toBe(true));
+    const evidenceUpdates = send.mock.calls
+      .map((call) => call[1] as { evidence?: { revision: number; entries: unknown[] } })
+      .filter((update) => update.evidence !== undefined);
+    expect(evidenceUpdates).toHaveLength(1);
+    expect(evidenceUpdates[0]!.evidence).toMatchObject({
+      revision: initial.evidence.revision + 1,
+      entries: expect.arrayContaining([
+        expect.objectContaining({ kind: "console-error" }),
+      ]),
+    });
+  });
+
   it("returns semantic and visual evidence and renders exact visible interaction input", async () => {
     const contentsOffset = electronState.contents.length;
     const { broker, children } = harness();
@@ -349,13 +429,22 @@ describe("agent-owned native Browser", () => {
     const screenshot = await broker.perform(conversationId, { action: "screenshot" });
     expect(screenshot).toMatchObject({
       ok: true,
-      image: { mimeType: "image/png", data: Buffer.from("bounded-png").toString("base64") },
     });
+    expect(screenshot).not.toHaveProperty("image");
+    if (screenshot.ok) {
+      expect(JSON.parse(screenshot.text)).toMatchObject({
+        bitmap: "local-only",
+        providerImage: false,
+      });
+      expect(screenshot.text).not.toContain(
+        Buffer.from("bounded-png").toString("base64"),
+      );
+    }
     expect(pageTools.agentPageHasSensitiveEvidence).toHaveBeenCalled();
     await expect(broker.perform(conversationId, { action: "click", ref: "e1" }))
       .resolves.toMatchObject({ ok: true });
     expect(pageTools.showAgentPageCursor).toHaveBeenCalledWith(
-      expect.anything(), 42, 28, "Agent · Run checks",
+      expect.anything(), 42, 28, "Agent click",
     );
     expect(children[0]!.webContents.sentInputs).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: "mouseDown", x: 42, y: 28 }),
@@ -373,7 +462,29 @@ describe("agent-owned native Browser", () => {
     expect(children[0]!.webContents.insertedText).toEqual(["hello"]);
   });
 
-  it("keeps click and type activity labels valid for maximum-length element names", async () => {
+  it("never returns CSS-painted screenshot bytes to the provider result", async () => {
+    const contentsOffset = electronState.contents.length;
+    const { broker } = harness();
+    await broker.navigate({
+      ownerId: "primary",
+      contextId: conversationId,
+      url: "http://127.0.0.1:3000/pixel-art",
+    });
+    const paintedBytes = Buffer.from("credential-painted-only-with-css-pixels");
+    electronState.contents[contentsOffset]!.capturePage.mockImplementationOnce(async () => ({
+      getSize: () => ({ width: 640, height: 360 }),
+      resize() { return this; },
+      toPNG: () => paintedBytes,
+    }));
+
+    const screenshot = await broker.perform(conversationId, { action: "screenshot" });
+    expect(screenshot).toMatchObject({ ok: true });
+    expect(screenshot).not.toHaveProperty("image");
+    expect(JSON.stringify(screenshot)).not.toContain(paintedBytes.toString("base64"));
+    expect(JSON.stringify(screenshot)).not.toContain(paintedBytes.toString("utf8"));
+  });
+
+  it("keeps page-authored element names out of click and type activity labels", async () => {
     const { broker } = harness();
     await broker.navigate({
       ownerId: "primary",
@@ -390,8 +501,8 @@ describe("agent-owned native Browser", () => {
     expect(clicked).toMatchObject({ ok: true });
     expect(parseAgentBrowserResult(clicked)).not.toBeNull();
     if (!clicked.ok) return;
-    expect(clicked.state.activity?.label).toHaveLength(300);
-    expect(clicked.state.activity?.label).toMatch(/^Agent clicked /u);
+    expect(clicked.state.activity?.label).toBe("Agent clicked a page element");
+    expect(clicked.state.activity?.label).not.toContain(maximumName);
 
     const typed = await broker.perform(conversationId, {
       action: "type", ref: "e2", text: "hello", replace: true,
@@ -399,8 +510,8 @@ describe("agent-owned native Browser", () => {
     expect(typed).toMatchObject({ ok: true });
     expect(parseAgentBrowserResult(typed)).not.toBeNull();
     if (!typed.ok) return;
-    expect(typed.state.activity?.label).toHaveLength(300);
-    expect(typed.state.activity?.label).toMatch(/^Agent typed in /u);
+    expect(typed.state.activity?.label).toBe("Agent typed in a page element");
+    expect(typed.state.activity?.label).not.toContain(maximumName);
     await expect(broker.perform(conversationId, { action: "tabs" }))
       .resolves.toSatisfy((result) => parseAgentBrowserResult(result) !== null);
 
@@ -495,8 +606,318 @@ describe("agent-owned native Browser", () => {
         ok: false,
         code: "invalid",
         message: "The focused page element is disabled.",
-      });
+    });
     expect(broker.reportInputRefusal(contents as never, "disabled")).toBe(false);
+  });
+
+  it("keeps sanitized page evidence local to its exact owner and live chat", async () => {
+    const contentsOffset = electronState.contents.length;
+    const sessionOffset = electronState.sessions.length;
+    const { broker } = harness();
+    const initial = await broker.navigate({
+      ownerId: "primary",
+      contextId: conversationId,
+      url: "http://127.0.0.1:3000/private/path?access_token=never-store#fragment",
+    });
+    const contents = electronState.contents[contentsOffset]!;
+    const browserSession = electronState.sessions[sessionOffset]!;
+    expect(browserSession.hasEvidenceListeners()).toBe(true);
+
+    const preventDefault = vi.fn();
+    contents.emit("console-message", {
+      level: "error",
+      message: "password=console-value from /Users/alice/private.ts",
+      preventDefault,
+    });
+    expect(preventDefault).toHaveBeenCalledOnce();
+    const pwdPreventDefault = vi.fn();
+    contents.emit("console-message", {
+      level: "error",
+      message: "pwd=hunter2",
+      preventDefault: pwdPreventDefault,
+    });
+    expect(pwdPreventDefault).toHaveBeenCalledOnce();
+    const uriPreventDefault = vi.fn();
+    contents.emit("console-message", {
+      level: "error",
+      message: "MONGODB_URI=mongodb://alice:hunter2@localhost/private",
+      preventDefault: uriPreventDefault,
+    });
+    expect(uriPreventDefault).toHaveBeenCalledOnce();
+    for (const message of [
+      "db_pass=broker-pass-short",
+      "pass_value=broker-pass-value-short",
+      "clientpassvalues=broker-client-pass-values-short",
+      "dbp%61ss=broker-percent-dbpass-short",
+      "dbp\u200bass=broker-zero-width-dbpass-short",
+      "\"CLIENTPASSVALUES\" = \"broker-quoted-client-pass-short\"",
+      "tok\u0000en=control-broker-short",
+      "pass\u202dword=bidi-broker-short",
+      "tok\u200ben=zero-width-broker-short",
+      "tok％65n=compat-percent-broker-short",
+      "sk%00-control-broker-prefix1234",
+      "sk\u0000-literal-broker-prefix1234",
+      "gho_abcdefghijklmnop",
+    ]) {
+      const controlPreventDefault = vi.fn();
+      contents.emit("console-message", {
+        level: "error",
+        message,
+        preventDefault: controlPreventDefault,
+      });
+      expect(controlPreventDefault).toHaveBeenCalledOnce();
+    }
+    for (const message of [
+      "Failure at C://Users/Jane Doe/private/file.txt",
+      "Failure in C:Users\\Jane Doe\\private\\config",
+      "Failure opening /root-broker-secret",
+      "Failure at //private-server/secret share/file.txt",
+      "Failed in src/private/config",
+      "Failed in src/config",
+      "Failed in src\\private\\config",
+      "Failed in src/.env",
+      "Failed in ./Dockerfile",
+    ]) {
+      const pathPreventDefault = vi.fn();
+      contents.emit("console-message", {
+        level: "error",
+        message,
+        preventDefault: pathPreventDefault,
+      });
+      expect(pathPreventDefault).toHaveBeenCalledOnce();
+    }
+    await vi.waitFor(() => expect(pageTools.agentPageHasSensitiveEvidence)
+      .toHaveBeenCalledWith(contents));
+    pageTools.agentPageHasSensitiveEvidence.mockResolvedValueOnce(true);
+    contents.emit("console-message", {
+      level: "error",
+      message: "hunter2",
+      preventDefault: vi.fn(),
+    });
+
+    browserSession.emitBeforeRequest({
+      id: 71,
+      url: "http://127.0.0.1:3000/api?authorization=network-value#hidden",
+      method: "POST",
+      resourceType: "xhr",
+      webContentsId: contents.id,
+      requestHeaders: { Authorization: "Bearer never-store" },
+      uploadData: [{ bytes: Buffer.from("request-body-never-store") }],
+    });
+    browserSession.emitCompleted({
+      id: 71,
+      url: "http://127.0.0.1:3000/api?authorization=network-value#hidden",
+      method: "POST",
+      resourceType: "xhr",
+      webContentsId: contents.id,
+      statusCode: 503,
+      statusLine: "HTTP/1.1 503 raw-status-never-store",
+      responseHeaders: { "Set-Cookie": ["never-store"] },
+    });
+
+    await expect(broker.perform(runIdentity, { action: "screenshot" }))
+      .resolves.toMatchObject({ ok: true });
+    const state = await broker.tab({
+      ownerId: "primary",
+      contextId: conversationId,
+      action: "activate",
+      tabId: initial.activeTabId,
+    });
+    const serialized = JSON.stringify(state.evidence);
+    expect(serialized).not.toContain("console-value");
+    expect(serialized).not.toContain("hunter2");
+    expect(serialized).not.toContain("MONGODB_URI");
+    expect(serialized).not.toContain("mongodb://alice");
+    expect(serialized).not.toContain("broker-pass-short");
+    expect(serialized).not.toContain("broker-pass-value-short");
+    expect(serialized).not.toContain("broker-client-pass-values-short");
+    expect(serialized).not.toContain("broker-percent-dbpass-short");
+    expect(serialized).not.toContain("broker-zero-width-dbpass-short");
+    expect(serialized).not.toContain("broker-quoted-client-pass-short");
+    expect(serialized).not.toContain("control-broker-short");
+    expect(serialized).not.toContain("bidi-broker-short");
+    expect(serialized).not.toContain("zero-width-broker-short");
+    expect(serialized).not.toContain("compat-percent-broker-short");
+    expect(serialized).not.toContain("control-broker-prefix1234");
+    expect(serialized).not.toContain("literal-broker-prefix1234");
+    expect(serialized).not.toContain("gho_abcdefghijklmnop");
+    expect(serialized).not.toContain("Jane Doe");
+    expect(serialized).not.toContain("C:Users");
+    expect(serialized).not.toContain("root-broker-secret");
+    expect(serialized).not.toContain("private-server");
+    expect(serialized).not.toContain("secret share");
+    expect(serialized).not.toContain("src/private/config");
+    expect(serialized).not.toContain("src/config");
+    expect(serialized).not.toContain("src\\private\\config");
+    expect(serialized).not.toContain("src/.env");
+    expect(serialized).not.toContain("./Dockerfile");
+    expect(serialized).not.toContain("/Users/alice");
+    expect(serialized).not.toContain("network-value");
+    expect(serialized).not.toContain("never-store");
+    expect(serialized).not.toContain("request-body");
+    expect(serialized).not.toContain("raw-status");
+    expect(serialized).not.toContain("private/path");
+    expect(state.evidence.entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: "console-error",
+        detail: "Sensitive console detail hidden",
+        redacted: true,
+      }),
+      expect.objectContaining({
+        kind: "network-failure",
+        summary: "POST xhr failed",
+        detail: "HTTP 503 · http://127.0.0.1:3000",
+      }),
+      expect.objectContaining({
+        kind: "screenshot",
+        runId: runIdentity.runId,
+        turnId: runIdentity.turnId,
+        screenshot: expect.objectContaining({ available: true }),
+      }),
+    ]));
+    const consoleEvidence = state.evidence.entries.filter(
+      (entry) => entry.kind === "console-error",
+    );
+    expect(consoleEvidence.every((entry) =>
+      entry.redacted
+      && (
+        entry.detail === "Sensitive console detail hidden"
+        || entry.detail === "<redacted>"
+      )
+    )).toBe(true);
+    expect(consoleEvidence.reduce((total, entry) => total + entry.occurrences, 0))
+      .toBe(26);
+
+    const capture = state.evidence.entries.find((entry) => entry.kind === "screenshot");
+    expect(capture).toBeDefined();
+    const request = {
+      ownerId: "primary",
+      contextId: conversationId,
+      evidenceId: capture!.id,
+    };
+    await expect(broker.inspectEvidenceImage(
+      request, async () => false, async () => ({ show: () => true, close: vi.fn() }),
+    )).resolves.toBe(false);
+    const approve = vi.fn(async () => true);
+    const closeInspector = vi.fn();
+    const showInspector = vi.fn(() => true);
+    const inspect = vi.fn(async () => ({ show: showInspector, close: closeInspector }));
+    await expect(broker.inspectEvidenceImage(request, approve, inspect)).resolves.toBe(true);
+    expect(approve).toHaveBeenCalledWith(expect.objectContaining({
+      evidenceId: capture!.id,
+      fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/u),
+    }));
+    expect(inspect).toHaveBeenCalledWith({
+      mimeType: "image/png",
+      data: Buffer.from("bounded-png").toString("base64"),
+    });
+    expect(showInspector).toHaveBeenCalledOnce();
+    const rejectUnexpected = vi.fn(async () => true);
+    await expect(broker.inspectEvidenceImage(
+      { ...request, ownerId: "secondary" }, rejectUnexpected, inspect,
+    )).resolves.toBe(false);
+    await expect(broker.inspectEvidenceImage({
+      ...request,
+      contextId: "44444444-4444-4444-8444-444444444444",
+    }, rejectUnexpected, inspect)).resolves.toBe(false);
+    expect(rejectUnexpected).not.toHaveBeenCalled();
+
+    broker.close("primary", conversationId);
+    expect(closeInspector).toHaveBeenCalledOnce();
+    expect(browserSession.hasEvidenceListeners()).toBe(false);
+    expect(browserSession.clearStorageData).toHaveBeenCalledOnce();
+    await expect(broker.inspectEvidenceImage(request, rejectUnexpected, inspect)).resolves.toBe(false);
+    expect(rejectUnexpected).not.toHaveBeenCalled();
+  });
+
+  it("destroys protected evidence inspectors on replacement, navigation, eviction, and close", async () => {
+    const contentsOffset = electronState.contents.length;
+    const { broker } = harness();
+    const initial = await broker.navigate({
+      ownerId: "primary",
+      contextId: conversationId,
+      url: "http://127.0.0.1:3000/inspectors",
+    });
+    await expect(broker.perform(conversationId, { action: "screenshot" }))
+      .resolves.toMatchObject({ ok: true });
+    const state = await broker.tab({
+      ownerId: "primary",
+      contextId: conversationId,
+      action: "activate",
+      tabId: initial.activeTabId,
+    });
+    const capture = state.evidence.entries.find((entry) => entry.kind === "screenshot")!;
+    const request = {
+      ownerId: "primary",
+      contextId: conversationId,
+      evidenceId: capture.id,
+    };
+    const closeFirst = vi.fn();
+    await expect(broker.inspectEvidenceImage(
+      request, async () => true, async () => ({ show: () => true, close: closeFirst }),
+    )).resolves.toBe(true);
+    const closeReplacement = vi.fn();
+    await expect(broker.inspectEvidenceImage(
+      request, async () => true, async () => ({ show: () => true, close: closeReplacement }),
+    )).resolves.toBe(true);
+    expect(closeFirst).toHaveBeenCalledOnce();
+
+    electronState.contents[contentsOffset]!.emit(
+      "did-navigate", {}, "http://127.0.0.1:3000/after-inspection",
+    );
+    expect(closeReplacement).toHaveBeenCalledOnce();
+
+    let inspectionPrepared = (): void => undefined;
+    let releaseInspection = (): void => undefined;
+    const prepared = new Promise<void>((resolve) => { inspectionPrepared = resolve; });
+    const held = new Promise<void>((resolve) => { releaseInspection = resolve; });
+    const showStale = vi.fn(() => true);
+    const closeStale = vi.fn();
+    const staleInspection = broker.inspectEvidenceImage(
+      request,
+      async () => true,
+      async () => {
+        inspectionPrepared();
+        await held;
+        return { show: showStale, close: closeStale };
+      },
+    );
+    await prepared;
+    electronState.contents[contentsOffset]!.emit(
+      "did-navigate", {}, "http://127.0.0.1:3000/during-inspection",
+    );
+    releaseInspection();
+    await expect(staleInspection).resolves.toBe(false);
+    expect(showStale).not.toHaveBeenCalled();
+    expect(closeStale).toHaveBeenCalledOnce();
+
+    const closeEvicted = vi.fn();
+    await expect(broker.inspectEvidenceImage(
+      request, async () => true, async () => ({ show: () => true, close: closeEvicted }),
+    )).resolves.toBe(true);
+    for (let index = 0; index < 8; index += 1) {
+      await expect(broker.perform(conversationId, { action: "screenshot" }))
+        .resolves.toMatchObject({ ok: true });
+    }
+    expect(closeEvicted).toHaveBeenCalledOnce();
+
+    const current = await broker.tab({
+      ownerId: "primary",
+      contextId: conversationId,
+      action: "activate",
+      tabId: initial.activeTabId,
+    });
+    const newest = current.evidence.entries.filter(
+      (entry) => entry.kind === "screenshot" && entry.screenshot?.available,
+    ).at(-1)!;
+    const closeWithSlot = vi.fn();
+    await expect(broker.inspectEvidenceImage(
+      { ...request, evidenceId: newest.id },
+      async () => true,
+      async () => ({ show: () => true, close: closeWithSlot }),
+    )).resolves.toBe(true);
+    broker.close("primary", conversationId);
+    expect(closeWithSlot).toHaveBeenCalledOnce();
   });
 
   it("holds queued work until click-triggered main-frame navigation settles", async () => {
@@ -671,7 +1092,7 @@ describe("agent-owned native Browser", () => {
     pageTools.agentPageHasSensitiveEvidence.mockResolvedValueOnce(true);
     await expect(broker.perform(conversationId, { action: "snapshot" }))
       .resolves.toMatchObject({ ok: false, code: "invalid" });
-    pageTools.agentPageHasSensitiveEvidence.mockResolvedValueOnce(true);
+    pageTools.agentPageHasSensitiveScreenshotEvidence.mockResolvedValueOnce(true);
     await expect(broker.perform(conversationId, { action: "screenshot" }))
       .resolves.toMatchObject({ ok: false, code: "invalid" });
     expect(capturePage).toHaveBeenCalledTimes(captures);
@@ -790,7 +1211,7 @@ describe("agent-owned native Browser", () => {
       url: "http://127.0.0.1:3000/login",
     });
     const contents = electronState.contents[contentsOffset]!;
-    pageTools.agentPageHasSensitiveEvidence
+    pageTools.agentPageHasSensitiveScreenshotEvidence
       .mockResolvedValueOnce(false)
       .mockResolvedValueOnce(true);
 
@@ -798,7 +1219,7 @@ describe("agent-owned native Browser", () => {
       .resolves.toMatchObject({
         ok: false,
         code: "invalid",
-        message: "Screenshots are unavailable until the password-bearing document navigates away.",
+        message: "Screenshots are unavailable while the document contains sensitive evidence.",
       });
     expect(contents.capturePage).toHaveBeenCalledOnce();
     expect(contents.debugger.sendCommand).toHaveBeenCalledWith(

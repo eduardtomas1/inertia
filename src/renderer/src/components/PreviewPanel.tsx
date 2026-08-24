@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
-  PreviewAgentActivity,
   PreviewBounds,
   PreviewTabState,
 } from "@shared/desktop";
+import type {
+  BrowserEvidenceSnapshot,
+} from "@shared/browser-evidence";
 import {
   previewNavigationTarget,
   type PreviewNavigationTarget,
@@ -14,20 +16,25 @@ import {
 } from "../utils/nativePreviewOverlay";
 import {
   registerWorkspacePreviewAddress,
+  usePreviewTabCloseFocus,
   type WorkspacePreviewOwner,
 } from "../utils/workspacePreviewFocus";
-import { ArrowLeft, ArrowRight, Bot, ExternalLink, Globe2, LockKeyhole, Plus, RefreshCw, ShieldCheck, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, ExternalLink, Globe2, History, LockKeyhole, Plus, RefreshCw, ShieldCheck, X } from "lucide-react";
 import { IconButton, LoadingMark } from "./ui";
+import "./PreviewPanel.css";
+
+const BrowserEvidenceTimeline = lazy(() => import("./BrowserEvidenceTimeline"));
 
 export type PreviewPanelProps = {
   owner: WorkspacePreviewOwner;
+  contextId?: string;
   url: string;
   loading?: boolean;
   canGoBack?: boolean;
   canGoForward?: boolean;
   tabs?: PreviewTabState[];
   activeTabId?: string | null;
-  agentActivity?: PreviewAgentActivity | null;
+  evidence?: BrowserEvidenceSnapshot;
   onNavigate: (url: string) => void;
   onOpenExternal: (url: string) => void;
   onBack?: () => void;
@@ -36,6 +43,7 @@ export type PreviewPanelProps = {
   onOpenTab?: () => void;
   onActivateTab?: (tabId: string) => void;
   onCloseTab?: (tabId: string) => void;
+  onInspectEvidenceImage?: (evidenceId: string) => Promise<boolean>;
   onBoundsChange?: (bounds: PreviewBounds | null) => void;
 };
 
@@ -83,13 +91,14 @@ export function safePreviewUrl(
 
 export function PreviewPanel({
   owner,
+  contextId = "",
   url,
   loading = false,
   canGoBack = false,
   canGoForward = false,
   tabs = [],
   activeTabId = null,
-  agentActivity = null,
+  evidence = { revision: 0, entries: [], omitted: false },
   onNavigate,
   onOpenExternal,
   onBack,
@@ -98,20 +107,30 @@ export function PreviewPanel({
   onOpenTab,
   onActivateTab,
   onCloseTab,
+  onInspectEvidenceImage,
   onBoundsChange,
 }: PreviewPanelProps): React.JSX.Element {
   const [draftUrl, setDraftUrl] = useState(url);
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [openEvidenceContextId, setOpenEvidenceContextId] = useState<string | null>(null);
+  const evidenceOpen = openEvidenceContextId === contextId;
   const stageRef = useRef<HTMLDivElement>(null);
+  const evidenceToggleRef = useRef<HTMLButtonElement>(null);
+  const tabRefs = useRef(new Map<string, HTMLButtonElement>());
   const addressRef = useCallback((address: HTMLInputElement | null) => {
     registerWorkspacePreviewAddress(owner, address);
   }, [owner]);
   const currentLocation = useMemo(() => safePreviewUrl(url), [url]);
+  const prepareTabCloseFocus = usePreviewTabCloseFocus(tabs, activeTabId, tabRefs);
 
   useEffect(() => {
     setDraftUrl(url);
     setValidationError(null);
   }, [url]);
+
+  useEffect(() => {
+    if (openEvidenceContextId !== contextId) setOpenEvidenceContextId(null);
+  }, [contextId, openEvidenceContextId]);
 
   useEffect(() => {
     const stage = stageRef.current;
@@ -135,7 +154,31 @@ export function PreviewPanel({
       window.removeEventListener(NATIVE_PREVIEW_SUSPENSION_CHANGED, update);
       onBoundsChange(null);
     };
-  }, [onBoundsChange]);
+  }, [evidenceOpen, onBoundsChange]);
+
+  const closeEvidence = useCallback(() => {
+    setOpenEvidenceContextId(null);
+    requestAnimationFrame(() => evidenceToggleRef.current?.focus());
+  }, []);
+
+  const moveTabFocus = (
+    currentTabId: string,
+    key: string,
+  ): void => {
+    const index = tabs.findIndex((tab) => tab.id === currentTabId);
+    if (index < 0 || tabs.length === 0) return;
+    const nextIndex = key === "Home"
+      ? 0
+      : key === "End"
+        ? tabs.length - 1
+        : key === "ArrowRight"
+          ? (index + 1) % tabs.length
+          : (index - 1 + tabs.length) % tabs.length;
+    const next = tabs[nextIndex];
+    if (!next) return;
+    onActivateTab?.(next.id);
+    tabRefs.current.get(next.id)?.focus();
+  };
 
   const navigate = () => {
     const result = safePreviewUrl(draftUrl);
@@ -176,11 +219,28 @@ export function PreviewPanel({
               className={`preview-tab-shell${tab.id === activeTabId ? " active" : ""}`}
             >
               <button
+                id={`preview-tab-${owner}-${tab.id}`}
+                ref={(element) => {
+                  if (element) tabRefs.current.set(tab.id, element);
+                  else tabRefs.current.delete(tab.id);
+                }}
                 type="button"
                 role="tab"
                 aria-selected={tab.id === activeTabId}
+                aria-controls={evidenceOpen ? undefined : `preview-page-${owner}`}
+                tabIndex={tab.id === (activeTabId ?? tabs[0]?.id) ? 0 : -1}
                 className="preview-tab"
                 onClick={() => onActivateTab?.(tab.id)}
+                onKeyDown={(event) => {
+                  if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
+                    event.preventDefault();
+                    moveTabFocus(tab.id, event.key);
+                  } else if (event.key === "Delete" && onCloseTab) {
+                    event.preventDefault();
+                    prepareTabCloseFocus(tab.id);
+                    onCloseTab(tab.id);
+                  }
+                }}
               >
                 <span>{tab.title || (tab.url ? new URL(tab.url).hostname : "New page")}</span>
               </button>
@@ -191,6 +251,7 @@ export function PreviewPanel({
                   aria-label={`Close ${tab.title || "browser page"}`}
                   onClick={(event) => {
                     event.stopPropagation();
+                    prepareTabCloseFocus(tab.id);
                     onCloseTab(tab.id);
                   }}
                 >
@@ -205,12 +266,20 @@ export function PreviewPanel({
             <Plus size={14} />
           </IconButton>
         )}
-        {agentActivity && (
-          <span className="preview-agent-activity" title={agentActivity.label}>
-            <Bot size={13} aria-hidden="true" />
-            <span>{agentActivity.label}</span>
-          </span>
-        )}
+        <button
+          ref={evidenceToggleRef}
+          type="button"
+          className={`preview-evidence-toggle${evidenceOpen ? " is-active" : ""}${evidence.entries.some((entry) => entry.kind === "console-error" || entry.kind === "network-failure") ? " has-failures" : ""}`}
+          aria-expanded={evidenceOpen}
+          aria-controls={`browser-evidence-${owner}`}
+          onClick={() => setOpenEvidenceContextId((current) => (
+            current === contextId ? null : contextId
+          ))}
+        >
+          <History size={13} aria-hidden="true" />
+          <span>Evidence</span>
+          <small>{evidence.entries.length}</small>
+        </button>
       </div>
       <header className="preview-chrome">
         <div className="preview-history-actions">
@@ -262,31 +331,49 @@ export function PreviewPanel({
 
       {validationError && <p className="preview-address-error" id="preview-url-error" role="alert">{validationError}</p>}
 
-      <div className="preview-safe-stage" ref={stageRef}>
-        {loading ? (
-          <div className="panel-loading"><LoadingMark label="Connecting to preview" /><span>Connecting to preview…</span></div>
-        ) : currentLocation && !("error" in currentLocation) ? (
-          <div className="preview-safe-card">
-            <span className="preview-safe-icon"><ShieldCheck size={23} aria-hidden="true" /></span>
-            <span className="panel-kicker">Safe preview target</span>
-            <h3>{currentLocation.parsed.hostname}</h3>
-            <p>{currentLocation.parsed.origin}</p>
-            <p className="preview-safe-note">
-              Inertia keeps remote content outside the React renderer. Navigation is handed to the desktop preview service.
-            </p>
-            <button type="button" className="secondary-button" onClick={openExternal}>
-              <ExternalLink size={15} aria-hidden="true" />
-              <span>Open externally</span>
-            </button>
-          </div>
-        ) : (
-          <div className="panel-empty preview-empty">
-            <Globe2 size={23} aria-hidden="true" />
-            <h3>Open a local preview</h3>
-            <p>Enter a development server URL above. No untrusted page is embedded in this renderer.</p>
-          </div>
-        )}
-      </div>
+      {evidenceOpen ? (
+        <Suspense fallback={null}>
+          <BrowserEvidenceTimeline
+            key={contextId}
+            id={`browser-evidence-${owner}`}
+            evidence={evidence}
+            inspectImage={onInspectEvidenceImage ?? (async () => false)}
+            onClose={closeEvidence}
+          />
+        </Suspense>
+      ) : (
+        <div
+          className="preview-safe-stage"
+          id={`preview-page-${owner}`}
+          ref={stageRef}
+          role="tabpanel"
+          aria-labelledby={activeTabId ? `preview-tab-${owner}-${activeTabId}` : undefined}
+        >
+          {loading ? (
+            <div className="panel-loading"><LoadingMark label="Connecting to preview" /><span>Connecting to preview…</span></div>
+          ) : currentLocation && !("error" in currentLocation) ? (
+            <div className="preview-safe-card">
+              <span className="preview-safe-icon"><ShieldCheck size={23} aria-hidden="true" /></span>
+              <span className="panel-kicker">Safe preview target</span>
+              <h3>{currentLocation.parsed.hostname}</h3>
+              <p>{currentLocation.parsed.origin}</p>
+              <p className="preview-safe-note">
+                Inertia keeps remote content outside the React renderer. Navigation is handed to the desktop preview service.
+              </p>
+              <button type="button" className="secondary-button" onClick={openExternal}>
+                <ExternalLink size={15} aria-hidden="true" />
+                <span>Open externally</span>
+              </button>
+            </div>
+          ) : (
+            <div className="panel-empty preview-empty">
+              <Globe2 size={23} aria-hidden="true" />
+              <h3>Open a local preview</h3>
+              <p>Enter a development server URL above. No untrusted page is embedded in this renderer.</p>
+            </div>
+          )}
+        </div>
+      )}
     </section>
   );
 }

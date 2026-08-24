@@ -56,6 +56,311 @@ export function installPreviewAgentShadowBoundarySignal(eventName: string): void
       },
     });
   }
+  const inputValueDescriptor = typeof HTMLInputElement === "undefined"
+    ? undefined
+    : Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
+  const inputTypeDescriptor = typeof HTMLInputElement === "undefined"
+    ? undefined
+    : Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "type");
+  const inputDefaultValueDescriptor = typeof HTMLInputElement === "undefined"
+    ? undefined
+    : Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "defaultValue");
+  const inputSetRangeTextDescriptor = typeof HTMLInputElement === "undefined"
+    ? undefined
+    : Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "setRangeText");
+  const setAttributeDescriptor = Object.getOwnPropertyDescriptor(
+    Element.prototype,
+    "setAttribute",
+  );
+  const setAttributeNsDescriptor = Object.getOwnPropertyDescriptor(
+    Element.prototype,
+    "setAttributeNS",
+  );
+  const setAttributeNodeDescriptor = Object.getOwnPropertyDescriptor(
+    Element.prototype,
+    "setAttributeNode",
+  );
+  const setAttributeNodeNsDescriptor = Object.getOwnPropertyDescriptor(
+    Element.prototype,
+    "setAttributeNodeNS",
+  );
+  const setNamedItemDescriptor = typeof NamedNodeMap === "undefined"
+    ? undefined
+    : Object.getOwnPropertyDescriptor(NamedNodeMap.prototype, "setNamedItem");
+  const setNamedItemNsDescriptor = typeof NamedNodeMap === "undefined"
+    ? undefined
+    : Object.getOwnPropertyDescriptor(NamedNodeMap.prototype, "setNamedItemNS");
+  const attrValueDescriptor = typeof Attr === "undefined"
+    ? undefined
+    : Object.getOwnPropertyDescriptor(Attr.prototype, "value");
+  const attrOwnerElement = typeof Attr === "undefined"
+    ? undefined
+    : Object.getOwnPropertyDescriptor(Attr.prototype, "ownerElement")?.get;
+  const nodeValueDescriptor = typeof Node === "undefined"
+    ? undefined
+    : Object.getOwnPropertyDescriptor(Node.prototype, "nodeValue");
+  const nodeTextContentDescriptor = typeof Node === "undefined"
+    ? undefined
+    : Object.getOwnPropertyDescriptor(Node.prototype, "textContent");
+  const objectDefinePropertyDescriptor = Object.getOwnPropertyDescriptor(
+    Object,
+    "defineProperty",
+  );
+  const objectDefinePropertiesDescriptor = Object.getOwnPropertyDescriptor(
+    Object,
+    "defineProperties",
+  );
+  const reflectDefinePropertyDescriptor = Object.getOwnPropertyDescriptor(
+    Reflect,
+    "defineProperty",
+  );
+  const objectSetPrototypeOfDescriptor = Object.getOwnPropertyDescriptor(
+    Object,
+    "setPrototypeOf",
+  );
+  const reflectSetPrototypeOfDescriptor = Object.getOwnPropertyDescriptor(
+    Reflect,
+    "setPrototypeOf",
+  );
+  const legacyPrototypeDescriptor = Object.getOwnPropertyDescriptor(
+    Object.prototype,
+    "__proto__",
+  );
+  const legacyDefineGetterDescriptor = Object.getOwnPropertyDescriptor(
+    Object.prototype,
+    "__defineGetter__",
+  );
+  const inputValueGetter = inputValueDescriptor?.get;
+  const inputValueSetter = inputValueDescriptor?.set;
+  const inputTypeGetter = inputTypeDescriptor?.get;
+  const inputTypeSetter = inputTypeDescriptor?.set;
+  const inputDefaultValueGetter = inputDefaultValueDescriptor?.get;
+  const inputDefaultValueSetter = inputDefaultValueDescriptor?.set;
+  const inputSetRangeText = inputSetRangeTextDescriptor?.value as
+    | HTMLInputElement["setRangeText"]
+    | undefined;
+  const setAttribute = setAttributeDescriptor?.value as Element["setAttribute"] | undefined;
+  const setAttributeNs = setAttributeNsDescriptor?.value as Element["setAttributeNS"] | undefined;
+  const setAttributeNode = setAttributeNodeDescriptor?.value as Element["setAttributeNode"] | undefined;
+  const setAttributeNodeNs = setAttributeNodeNsDescriptor?.value as Element["setAttributeNodeNS"] | undefined;
+  const setNamedItem = setNamedItemDescriptor?.value as NamedNodeMap["setNamedItem"] | undefined;
+  const setNamedItemNs = setNamedItemNsDescriptor?.value as NamedNodeMap["setNamedItemNS"] | undefined;
+  const attrValueSetter = attrValueDescriptor?.set;
+  const nodeValueSetter = nodeValueDescriptor?.set;
+  const nodeTextContentSetter = nodeTextContentDescriptor?.set;
+  const objectDefineProperty = objectDefinePropertyDescriptor?.value as
+    | typeof Object.defineProperty
+    | undefined;
+  const objectDefineProperties = objectDefinePropertiesDescriptor?.value as
+    | typeof Object.defineProperties
+    | undefined;
+  const reflectDefineProperty = reflectDefinePropertyDescriptor?.value as
+    | typeof Reflect.defineProperty
+    | undefined;
+  const objectSetPrototypeOf = objectSetPrototypeOfDescriptor?.value as
+    | typeof Object.setPrototypeOf
+    | undefined;
+  const reflectSetPrototypeOf = reflectSetPrototypeOfDescriptor?.value as
+    | typeof Reflect.setPrototypeOf
+    | undefined;
+  const legacyPrototypeSetter = legacyPrototypeDescriptor?.set;
+  const legacyDefineGetter = legacyDefineGetterDescriptor?.value as
+    | ((propertyKey: PropertyKey, getter: () => unknown) => void)
+    | undefined;
+  const nativeGetOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
+  const nativeIsPrototypeOf = Object.prototype.isPrototypeOf;
+  const nativeWeakSetAdd = WeakSet.prototype.add;
+  const nativeWeakSetHas = WeakSet.prototype.has;
+  const ownValueInputs = new WeakSet<object>();
+  const inputPrototype = typeof HTMLInputElement === "undefined"
+    ? undefined
+    : HTMLInputElement.prototype;
+  const nativeString = String;
+  const nativeLowerCase = String.prototype.toLowerCase;
+  const isNativeInput = (input: unknown): boolean => {
+    try {
+      return Reflect.apply(nativeIsPrototypeOf, inputPrototype!, [input]) as boolean;
+    } catch {
+      return false;
+    }
+  };
+  const signalPasswordValue = (input: unknown, knownInput: boolean): void => {
+    if (!knownInput && !isNativeInput(input)) return;
+    let inputType: string;
+    try {
+      inputType = nativeString(Reflect.apply(inputTypeGetter!, input, []));
+    } catch {
+      if (!knownInput) return;
+      // A native write already succeeded. If its resulting type/value cannot
+      // be proven safe, retain the lifetime taint before author code can log
+      // and clear a credential in the same task.
+      signal();
+      return;
+    }
+    try {
+      const assignedValue = Reflect.apply(inputValueGetter!, input, []) as string;
+      const defaultValue = Reflect.apply(inputDefaultValueGetter!, input, []) as string;
+      const isPassword = Reflect.apply(nativeLowerCase, inputType, []) === "password";
+      const ownValueShadowed = Reflect.apply(
+        nativeWeakSetHas,
+        ownValueInputs,
+        [input as object],
+      ) as boolean;
+      if (isPassword && (ownValueShadowed || assignedValue || defaultValue)) signal();
+    } catch {
+      signal();
+    }
+  };
+  const trackOwnInputValue = (input: unknown): void => {
+    if (!isNativeInput(input)) return;
+    try {
+      const ownValue = Reflect.apply(
+        nativeGetOwnPropertyDescriptor,
+        Object,
+        [input, "value"],
+      ) as PropertyDescriptor | undefined;
+      if (!ownValue) return;
+      Reflect.apply(nativeWeakSetAdd, ownValueInputs, [input as object]);
+      const inputType = nativeString(Reflect.apply(inputTypeGetter!, input, []));
+      if (Reflect.apply(nativeLowerCase, inputType, []) === "password") signal();
+    } catch {
+      // Once a descriptor mutation has succeeded on a real input, an
+      // uninspectable target can hide a page-readable value from every native
+      // input accessor. Retain the lifetime taint rather than invoke it.
+      signal();
+    }
+  };
+  const signalAttrOwner = (attr: unknown, knownAttr: boolean): void => {
+    try {
+      const ownerElement = Reflect.apply(attrOwnerElement!, attr, []) as Element | null;
+      if (ownerElement) signalPasswordValue(ownerElement, false);
+    } catch {
+      if (knownAttr) signal();
+    }
+  };
+  if (typeof HTMLInputElement !== "undefined") {
+    if (!inputValueDescriptor || typeof inputValueGetter !== "function"
+      || typeof inputValueSetter !== "function" || !inputTypeDescriptor
+      || typeof inputTypeGetter !== "function" || typeof inputTypeSetter !== "function"
+      || !inputDefaultValueDescriptor || typeof inputDefaultValueGetter !== "function"
+      || typeof inputDefaultValueSetter !== "function" || !inputSetRangeTextDescriptor
+      || typeof inputSetRangeText !== "function" || !setAttributeDescriptor
+      || typeof setAttribute !== "function" || !setAttributeNsDescriptor
+      || typeof setAttributeNs !== "function" || !setAttributeNodeDescriptor
+      || typeof setAttributeNode !== "function" || !setAttributeNodeNsDescriptor
+      || typeof setAttributeNodeNs !== "function" || !setNamedItemDescriptor
+      || typeof setNamedItem !== "function" || !setNamedItemNsDescriptor
+      || typeof setNamedItemNs !== "function" || !attrValueDescriptor
+      || typeof attrValueSetter !== "function" || typeof attrOwnerElement !== "function"
+      || !nodeValueDescriptor || typeof nodeValueSetter !== "function"
+      || !nodeTextContentDescriptor || typeof nodeTextContentSetter !== "function") {
+      signal();
+    } else {
+      try {
+        Object.defineProperty(HTMLInputElement.prototype, "value", {
+          ...inputValueDescriptor,
+          set(this: HTMLInputElement, value: unknown): void {
+            Reflect.apply(inputValueSetter, this, [value]);
+            signalPasswordValue(this, true);
+          },
+        });
+        Object.defineProperty(HTMLInputElement.prototype, "type", {
+          ...inputTypeDescriptor,
+          set(this: HTMLInputElement, value: unknown): void {
+            Reflect.apply(inputTypeSetter, this, [value]);
+            signalPasswordValue(this, true);
+          },
+        });
+        Object.defineProperty(HTMLInputElement.prototype, "defaultValue", {
+          ...inputDefaultValueDescriptor,
+          set(this: HTMLInputElement, value: unknown): void {
+            Reflect.apply(inputDefaultValueSetter, this, [value]);
+            signalPasswordValue(this, true);
+          },
+        });
+        Object.defineProperty(HTMLInputElement.prototype, "setRangeText", {
+          ...inputSetRangeTextDescriptor,
+          value(this: HTMLInputElement, ...args: unknown[]): void {
+            Reflect.apply(inputSetRangeText, this, args);
+            signalPasswordValue(this, true);
+          },
+        });
+        Object.defineProperty(Element.prototype, "setAttribute", {
+          ...setAttributeDescriptor,
+          value(this: Element, name: string, value: string): void {
+            Reflect.apply(setAttribute, this, [name, value]);
+            signalPasswordValue(this, false);
+          },
+        });
+        Object.defineProperty(Element.prototype, "setAttributeNS", {
+          ...setAttributeNsDescriptor,
+          value(this: Element, namespace: string | null, qualifiedName: string, value: string): void {
+            Reflect.apply(setAttributeNs, this, [namespace, qualifiedName, value]);
+            signalPasswordValue(this, false);
+          },
+        });
+        Object.defineProperty(Element.prototype, "setAttributeNode", {
+          ...setAttributeNodeDescriptor,
+          value(this: Element, attr: Attr): Attr | null {
+            const replaced = Reflect.apply(setAttributeNode, this, [attr]) as Attr | null;
+            signalPasswordValue(this, false);
+            return replaced;
+          },
+        });
+        Object.defineProperty(Element.prototype, "setAttributeNodeNS", {
+          ...setAttributeNodeNsDescriptor,
+          value(this: Element, attr: Attr): Attr | null {
+            const replaced = Reflect.apply(setAttributeNodeNs, this, [attr]) as Attr | null;
+            signalPasswordValue(this, false);
+            return replaced;
+          },
+        });
+        Object.defineProperty(NamedNodeMap.prototype, "setNamedItem", {
+          ...setNamedItemDescriptor,
+          value(this: NamedNodeMap, attr: Attr): Attr | null {
+            const replaced = Reflect.apply(setNamedItem, this, [attr]) as Attr | null;
+            signalAttrOwner(attr, true);
+            return replaced;
+          },
+        });
+        Object.defineProperty(NamedNodeMap.prototype, "setNamedItemNS", {
+          ...setNamedItemNsDescriptor,
+          value(this: NamedNodeMap, attr: Attr): Attr | null {
+            const replaced = Reflect.apply(setNamedItemNs, this, [attr]) as Attr | null;
+            signalAttrOwner(attr, true);
+            return replaced;
+          },
+        });
+        Object.defineProperty(Attr.prototype, "value", {
+          ...attrValueDescriptor,
+          set(this: Attr, value: string): void {
+            Reflect.apply(attrValueSetter, this, [value]);
+            signalAttrOwner(this, true);
+          },
+        });
+        Object.defineProperty(Node.prototype, "nodeValue", {
+          ...nodeValueDescriptor,
+          set(this: Node, value: string | null): void {
+            Reflect.apply(nodeValueSetter, this, [value]);
+            if (Reflect.apply(nativeIsPrototypeOf, Attr.prototype, [this])) {
+              signalAttrOwner(this, true);
+            }
+          },
+        });
+        Object.defineProperty(Node.prototype, "textContent", {
+          ...nodeTextContentDescriptor,
+          set(this: Node, value: string | null): void {
+            Reflect.apply(nodeTextContentSetter, this, [value]);
+            if (Reflect.apply(nativeIsPrototypeOf, Attr.prototype, [this])) {
+              signalAttrOwner(this, true);
+            }
+          },
+        });
+      } catch {
+        signal();
+      }
+    }
+  }
   const maximumParserSourceCharacters = 4_096;
   const createElement = typeof Document === "undefined"
     ? undefined
@@ -75,7 +380,7 @@ export function installPreviewAgentShadowBoundarySignal(eventName: string): void
   const querySelector = typeof DocumentFragment === "undefined"
     ? undefined
     : DocumentFragment.prototype.querySelector;
-  const mayCreateDeclarativeRoot = (value: unknown): boolean => {
+  const mayCreatePrivateContent = (value: unknown): boolean => {
     if (typeof value !== "string" || value.length > maximumParserSourceCharacters) return true;
     if (typeof createElement !== "function" || typeof getImplementation !== "function"
       || typeof createHTMLDocument !== "function" || typeof parseSafeHTML !== "function"
@@ -93,41 +398,194 @@ export function installPreviewAgentShadowBoundarySignal(eventName: string): void
       ) as HTMLTemplateElement;
       Reflect.apply(parseSafeHTML, template, [value, {
         sanitizer: {
-          elements: [{ name: "template", attributes: ["shadowrootmode"] }],
+          elements: [
+            { name: "template", attributes: ["shadowrootmode"] },
+            { name: "input", attributes: ["type", "value"] },
+          ],
         },
       }]);
       const content = Reflect.apply(templateContent, template, []) as DocumentFragment;
-      return Reflect.apply(querySelector, content, ["template[shadowrootmode]"]) !== null;
+      return Reflect.apply(querySelector, content, [
+        "template[shadowrootmode],input[type='password' i][value]:not([value=''])",
+      ]) !== null;
     } catch {
       return true;
     }
   };
-  const signalDeclarativeParser = (prototype: object, name: string): void => {
+  const signalPrivateParser = (prototype: object, name: string): void => {
     const descriptor = Object.getOwnPropertyDescriptor(prototype, name);
     const parser = descriptor?.value as ((...args: unknown[]) => unknown) | undefined;
     if (!descriptor || typeof parser !== "function") return;
     Object.defineProperty(prototype, name, {
       ...descriptor,
       value(this: unknown, ...args: unknown[]): unknown {
-        // These APIs can create a closed declarative root entirely while its
-        // host is detached. Signal before author callbacks can mirror private
-        // content and remove the host from the observable document tree. Keep
-        // ordinary parser use available, but fail closed when bounded source
-        // inspection cannot prove that declarative-root syntax is absent.
-        if (mayCreateDeclarativeRoot(args[0])) signal();
+        // These APIs can create private content entirely outside the observed
+        // document. Signal before author code can read, log, and remove it.
+        // Keep ordinary parser use available, but fail closed when bounded
+        // source inspection cannot prove that private syntax is absent.
+        if (mayCreatePrivateContent(args[0])) signal();
         return Reflect.apply(parser, this, args);
       },
     });
   };
-  signalDeclarativeParser(Element.prototype, "setHTML");
-  signalDeclarativeParser(Element.prototype, "setHTMLUnsafe");
+  signalPrivateParser(Element.prototype, "setHTML");
+  signalPrivateParser(Element.prototype, "setHTMLUnsafe");
   if (typeof Document !== "undefined") {
-    signalDeclarativeParser(Document, "parseHTML");
-    signalDeclarativeParser(Document, "parseHTMLUnsafe");
+    signalPrivateParser(Document, "parseHTML");
+    signalPrivateParser(Document, "parseHTMLUnsafe");
   }
   if (typeof ShadowRoot !== "undefined") {
-    signalDeclarativeParser(ShadowRoot.prototype, "setHTML");
-    signalDeclarativeParser(ShadowRoot.prototype, "setHTMLUnsafe");
+    signalPrivateParser(ShadowRoot.prototype, "setHTML");
+    signalPrivateParser(ShadowRoot.prototype, "setHTMLUnsafe");
+  }
+  const signalParserSetter = (prototype: object, name: string): void => {
+    const descriptor = Object.getOwnPropertyDescriptor(prototype, name);
+    const setter = descriptor?.set;
+    if (!descriptor || typeof setter !== "function") return;
+    Object.defineProperty(prototype, name, {
+      ...descriptor,
+      set(this: unknown, value: unknown): void {
+        if (mayCreatePrivateContent(value)) signal();
+        Reflect.apply(setter, this, [value]);
+      },
+    });
+  };
+  const signalParserMethod = (prototype: object, name: string, sourceIndex = 0): void => {
+    const descriptor = Object.getOwnPropertyDescriptor(prototype, name);
+    const parser = descriptor?.value as ((...args: unknown[]) => unknown) | undefined;
+    if (!descriptor || typeof parser !== "function") return;
+    Object.defineProperty(prototype, name, {
+      ...descriptor,
+      value(this: unknown, ...args: unknown[]): unknown {
+        if (mayCreatePrivateContent(args[sourceIndex])) signal();
+        return Reflect.apply(parser, this, args);
+      },
+    });
+  };
+  signalParserSetter(Element.prototype, "innerHTML");
+  signalParserSetter(Element.prototype, "outerHTML");
+  signalParserMethod(Element.prototype, "insertAdjacentHTML", 1);
+  if (typeof Range !== "undefined") {
+    signalParserMethod(Range.prototype, "createContextualFragment");
+  }
+  if (typeof DOMParser !== "undefined") {
+    signalParserMethod(DOMParser.prototype, "parseFromString");
+  }
+  const signalParserArguments = (prototype: object, name: string): void => {
+    const descriptor = Object.getOwnPropertyDescriptor(prototype, name);
+    const parser = descriptor?.value as ((...args: unknown[]) => unknown) | undefined;
+    if (!descriptor || typeof parser !== "function") return;
+    Object.defineProperty(prototype, name, {
+      ...descriptor,
+      value(this: unknown, ...args: unknown[]): unknown {
+        let source = "";
+        let unsafe = false;
+        for (const argument of args) {
+          if (typeof argument !== "string"
+            || source.length + argument.length > maximumParserSourceCharacters) {
+            unsafe = true;
+            break;
+          }
+          source += argument;
+        }
+        if (unsafe || mayCreatePrivateContent(source)) signal();
+        return Reflect.apply(parser, this, args);
+      },
+    });
+  };
+  if (typeof Document !== "undefined") {
+    signalParserArguments(Document.prototype, "write");
+    signalParserArguments(Document.prototype, "writeln");
+  }
+  if (typeof HTMLInputElement !== "undefined") {
+    if (!objectDefinePropertyDescriptor || typeof objectDefineProperty !== "function"
+      || !objectDefinePropertiesDescriptor || typeof objectDefineProperties !== "function"
+      || !reflectDefinePropertyDescriptor || typeof reflectDefineProperty !== "function"
+      || !objectSetPrototypeOfDescriptor || typeof objectSetPrototypeOf !== "function"
+      || !reflectSetPrototypeOfDescriptor || typeof reflectSetPrototypeOf !== "function"
+      || !legacyPrototypeDescriptor || typeof legacyPrototypeSetter !== "function"
+      || !legacyDefineGetterDescriptor || typeof legacyDefineGetter !== "function") {
+      signal();
+    } else {
+      try {
+        Reflect.apply(objectDefineProperty, Object, [Object, "defineProperty", {
+          ...objectDefinePropertyDescriptor,
+          value(target: object, propertyKey: PropertyKey, attributes: PropertyDescriptor): object {
+            const defined = Reflect.apply(objectDefineProperty, Object, [
+              target,
+              propertyKey,
+              attributes,
+            ]) as object;
+            trackOwnInputValue(defined);
+            return defined;
+          },
+        }]);
+        Reflect.apply(objectDefineProperty, Object, [Object, "defineProperties", {
+          ...objectDefinePropertiesDescriptor,
+          value(target: object, properties: PropertyDescriptorMap): object {
+            const defined = Reflect.apply(objectDefineProperties, Object, [
+              target,
+              properties,
+            ]) as object;
+            trackOwnInputValue(defined);
+            return defined;
+          },
+        }]);
+        Reflect.apply(objectDefineProperty, Object, [Reflect, "defineProperty", {
+          ...reflectDefinePropertyDescriptor,
+          value(target: object, propertyKey: PropertyKey, attributes: PropertyDescriptor): boolean {
+            const defined = Reflect.apply(reflectDefineProperty, Reflect, [
+              target,
+              propertyKey,
+              attributes,
+            ]) as boolean;
+            if (defined) trackOwnInputValue(target);
+            return defined;
+          },
+        }]);
+        Reflect.apply(objectDefineProperty, Object, [Object, "setPrototypeOf", {
+          ...objectSetPrototypeOfDescriptor,
+          value(target: object, prototype: object | null): object {
+            const input = isNativeInput(target);
+            const updated = Reflect.apply(objectSetPrototypeOf, Object, [
+              target,
+              prototype,
+            ]) as object;
+            if (input) signal();
+            return updated;
+          },
+        }]);
+        Reflect.apply(objectDefineProperty, Object, [Reflect, "setPrototypeOf", {
+          ...reflectSetPrototypeOfDescriptor,
+          value(target: object, prototype: object | null): boolean {
+            const input = isNativeInput(target);
+            const updated = Reflect.apply(reflectSetPrototypeOf, Reflect, [
+              target,
+              prototype,
+            ]) as boolean;
+            if (input && updated) signal();
+            return updated;
+          },
+        }]);
+        Reflect.apply(objectDefineProperty, Object, [Object.prototype, "__proto__", {
+          ...legacyPrototypeDescriptor,
+          set(this: object, prototype: object | null): void {
+            const input = isNativeInput(this);
+            Reflect.apply(legacyPrototypeSetter, this, [prototype]);
+            if (input) signal();
+          },
+        }]);
+        Reflect.apply(objectDefineProperty, Object, [Object.prototype, "__defineGetter__", {
+          ...legacyDefineGetterDescriptor,
+          value(this: object, propertyKey: PropertyKey, getter: () => unknown): void {
+            Reflect.apply(legacyDefineGetter, this, [propertyKey, getter]);
+            trackOwnInputValue(this);
+          },
+        }]);
+      } catch {
+        signal();
+      }
+    }
   }
 }
 

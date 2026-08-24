@@ -4,6 +4,13 @@ export const MAX_AGENT_BROWSER_TEXT_BYTES = MAX_PROVIDER_HOST_TOOL_RESULT_BYTES;
 export const MAX_AGENT_BROWSER_SCREENSHOT_BYTES = 4 * 1024 * 1024;
 export const MAX_AGENT_BROWSER_TYPE_CHARS = 4_000;
 
+/** Trusted Inertia ownership captured before a provider host-tool call runs. */
+export interface AgentBrowserRunIdentity {
+  conversationId: string;
+  runId: string;
+  turnId: string;
+}
+
 export type AgentBrowserActionKind =
   | "navigate"
   | "click"
@@ -71,10 +78,6 @@ export type AgentBrowserResult =
       ok: true;
       text: string;
       state: AgentBrowserState;
-      image?: {
-        mimeType: "image/png";
-        data: string;
-      };
     }
   | {
       ok: false;
@@ -243,17 +246,6 @@ function safeState(value: unknown): value is AgentBrowserState {
     && (value.activity === null || safeActivity(value.activity));
 }
 
-function decodedBase64Bytes(value: string): number | null {
-  if (
-    value.length === 0
-    || value.length > Math.ceil(MAX_AGENT_BROWSER_SCREENSHOT_BYTES / 3) * 4
-    || value.length % 4 !== 0
-    || !/^[A-Za-z0-9+/]*={0,2}$/u.test(value)
-  ) return null;
-  const padding = value.endsWith("==") ? 2 : value.endsWith("=") ? 1 : 0;
-  return value.length / 4 * 3 - padding;
-}
-
 function utf8Bytes(value: string): number {
   return new TextEncoder().encode(value).byteLength;
 }
@@ -274,28 +266,11 @@ export function parseAgentBrowserResult(value: unknown): AgentBrowserResult | nu
       : null;
   }
   if (
-    !exactKeys(value, ["ok", "text", "state"], ["image"])
+    !exactKeys(value, ["ok", "text", "state"])
     || typeof value.text !== "string"
     || utf8Bytes(value.text) > MAX_AGENT_BROWSER_TEXT_BYTES
     || value.text.includes("\0")
     || !safeState(value.state)
   ) return null;
-  if (value.image === undefined) {
-    return { ok: true, text: value.text, state: value.state };
-  }
-  if (
-    !plainObject(value.image)
-    || !exactKeys(value.image, ["mimeType", "data"])
-    || value.image.mimeType !== "image/png"
-    || typeof value.image.data !== "string"
-  ) return null;
-  const bytes = decodedBase64Bytes(value.image.data);
-  return bytes !== null && bytes <= MAX_AGENT_BROWSER_SCREENSHOT_BYTES
-    ? {
-        ok: true,
-        text: value.text,
-        state: value.state,
-        image: { mimeType: "image/png", data: value.image.data },
-      }
-    : null;
+  return { ok: true, text: value.text, state: value.state };
 }

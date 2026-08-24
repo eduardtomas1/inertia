@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   agentPageActivationBlocked,
   agentPageHasSensitiveEvidence,
+  agentPageHasSensitiveScreenshotEvidence,
   agentPageInputRefusal,
   agentPageRefHasFocus,
   installAgentPagePrivacyGuard,
@@ -52,6 +53,189 @@ function withSemanticIterator<
 }
 
 describe("agent browser semantic snapshots", () => {
+  it("classifies bounded visible text and input values before screenshot capture", async () => {
+    let inputLabel: string | null = null;
+    let inputLabelledBy: string | null = null;
+    const referencedLabelBody = bodyWithText("API key");
+    const input = {
+      nodeType: 1,
+      tagName: "INPUT",
+      type: "text",
+      value: "ordinary note",
+      labels: [],
+      firstChild: null,
+      parentElement: null,
+      disabled: false,
+      checked: false,
+      getAttribute: (name: string) => name === "aria-label"
+        ? inputLabel
+        : name === "aria-labelledby" ? inputLabelledBy : null,
+      hasAttribute: () => false,
+      matches: () => false,
+      getBoundingClientRect: () => ({
+        x: 10, y: 10, left: 10, top: 10,
+        right: 210, bottom: 40, width: 200, height: 30,
+      }),
+    };
+    const ordinaryBodyText = "Build finished successfully. ".repeat(40);
+    const body = bodyWithText(ordinaryBodyText);
+    const context = {
+      __inertiaAgentBrowser: {
+        privacyGuardInstalled: true,
+        nestedContentObserved: false,
+        passwordNodes: new WeakSet(),
+        passwordValues: new Set(),
+        nodes: new WeakMap(), refs: new Map(), next: 1,
+      },
+      document: withSemanticIterator({
+        title: "Local app", body, documentElement: {},
+        getElementById: (id: string) => id === "key-label" ? referencedLabelBody : null,
+        querySelectorAll: () => [input],
+      }),
+      location: { href: "http://127.0.0.1:3000/" },
+      URL,
+      encodeURIComponent,
+      innerWidth: 1_200, innerHeight: 800, scrollX: 0, scrollY: 0,
+      getComputedStyle: () => ({ visibility: "visible", display: "block", opacity: "1" }),
+    };
+    const contents = {
+      executeJavaScriptInIsolatedWorld: vi.fn(async (
+        _worldId: number,
+        scripts: Array<{ code: string }>,
+      ) => runInNewContext(scripts[0]!.code, context)),
+    };
+
+    await expect(agentPageHasSensitiveScreenshotEvidence(contents as never)).resolves.toBe(false);
+    body.innerText = "Documentation: http://localhost:3000/docs";
+    await expect(agentPageHasSensitiveScreenshotEvidence(contents as never)).resolves.toBe(false);
+    body.innerText = "Workspace source: /workspace/inertia/src/main.ts";
+    await expect(agentPageHasSensitiveScreenshotEvidence(contents as never)).resolves.toBe(false);
+    body.innerText = ordinaryBodyText;
+    inputLabel = "Documentation search";
+    input.value = "http://localhost:3000/docs";
+    await expect(agentPageHasSensitiveScreenshotEvidence(contents as never)).resolves.toBe(false);
+    inputLabelledBy = "key-label";
+    await expect(agentPageHasSensitiveScreenshotEvidence(contents as never)).resolves.toBe(false);
+    inputLabelledBy = null;
+    inputLabel = "Workspace location";
+    input.value = "/workspace/inertia/src/main.ts";
+    await expect(agentPageHasSensitiveScreenshotEvidence(contents as never)).resolves.toBe(false);
+    inputLabel = "Build progress";
+    input.value = "1 / 3";
+    await expect(agentPageHasSensitiveScreenshotEvidence(contents as never)).resolves.toBe(false);
+    inputLabel = "API key";
+    input.value = "hunter2";
+    await expect(agentPageHasSensitiveScreenshotEvidence(contents as never)).resolves.toBe(true);
+    inputLabel = null;
+    inputLabelledBy = "key-label";
+    await expect(agentPageHasSensitiveScreenshotEvidence(contents as never)).resolves.toBe(true);
+    referencedLabelBody.innerText = "Secret access key";
+    await expect(agentPageHasSensitiveScreenshotEvidence(contents as never)).resolves.toBe(true);
+    referencedLabelBody.innerText = "Access key ID";
+    await expect(agentPageHasSensitiveScreenshotEvidence(contents as never)).resolves.toBe(true);
+    inputLabelledBy = null;
+    body.innerText = "API_KEY=sk-visible-token-that-must-not-enter-a-bitmap";
+    await expect(agentPageHasSensitiveScreenshotEvidence(contents as never)).resolves.toBe(true);
+    body.innerText = ordinaryBodyText;
+    input.value = "databasepass=visible-input-secret";
+    await expect(agentPageHasSensitiveScreenshotEvidence(contents as never)).resolves.toBe(true);
+  });
+
+  it("fails screenshot classification closed when visible evidence is truncated", async () => {
+    const body = bodyWithText("x".repeat(30_000));
+    const context = {
+      __inertiaAgentBrowser: {
+        privacyGuardInstalled: true,
+        nestedContentObserved: false,
+        passwordNodes: new WeakSet(),
+        passwordValues: new Set(),
+        nodes: new WeakMap(), refs: new Map(), next: 1,
+      },
+      document: withSemanticIterator({
+        title: "Dense app", body, documentElement: {}, querySelectorAll: () => [],
+      }),
+      location: { href: "http://127.0.0.1:3000/" },
+      URL,
+      encodeURIComponent,
+      innerWidth: 1_200, innerHeight: 800, scrollX: 0, scrollY: 0,
+      getComputedStyle: () => ({ visibility: "visible", display: "block", opacity: "1" }),
+    };
+    const contents = {
+      executeJavaScriptInIsolatedWorld: vi.fn(async (
+        _worldId: number,
+        scripts: Array<{ code: string }>,
+      ) => runInNewContext(scripts[0]!.code, context)),
+    };
+
+    await expect(agentPageHasSensitiveScreenshotEvidence(contents as never)).resolves.toBe(true);
+  });
+
+  it.each([
+    ["canvas", { tagName: "CANVAS" }],
+    ["image input", { tagName: "INPUT", type: "image" }],
+    ["selected file input", { tagName: "INPUT", type: "file", files: { length: 1 } }],
+    ["CSS background", { tagName: "DIV", backgroundImage: "url(private.png)" }],
+    ["pseudo-element CSS background", {
+      tagName: "DIV", pseudoBackgroundImage: "url(private.png)",
+    }],
+    ["generated content", { tagName: "DIV", pseudoContent: '"private"' }],
+  ])("does not treat a %s property list as a bitmap security boundary", async (_name, candidate) => {
+    const candidateStyle = candidate as {
+      backgroundImage?: string;
+      pseudoBackgroundImage?: string;
+      pseudoContent?: string;
+    };
+    const element = {
+      nodeType: 1,
+      firstChild: null,
+      parentElement: null,
+      hidden: false,
+      type: "",
+      getAttribute: () => null,
+      hasAttribute: () => false,
+      matches: () => false,
+      getBoundingClientRect: () => ({
+        x: 10, y: 10, left: 10, top: 10,
+        right: 210, bottom: 110, width: 200, height: 100,
+      }),
+      ...candidate,
+    };
+    const context = {
+      __inertiaAgentBrowser: {
+        privacyGuardInstalled: true,
+        nestedContentObserved: false,
+        passwordNodes: new WeakSet(),
+        passwordValues: new Set(),
+        nodes: new WeakMap(), refs: new Map(), next: 1,
+      },
+      document: withSemanticIterator({
+        title: "Pixel app", body: bodyWithText("Ordinary page"), documentElement: {},
+        querySelectorAll: () => [element],
+      }),
+      location: { href: "http://127.0.0.1:3000/" },
+      URL,
+      encodeURIComponent,
+      innerWidth: 1_200, innerHeight: 800, scrollX: 0, scrollY: 0,
+      getComputedStyle: (_element: unknown, pseudo?: string) => ({
+        visibility: "visible", display: "block", opacity: "1",
+        backgroundImage: pseudo
+          ? candidateStyle.pseudoBackgroundImage ?? "none"
+          : candidateStyle.backgroundImage ?? "none",
+        borderImageSource: "none", listStyleImage: "none", maskImage: "none",
+        webkitMaskImage: "none",
+        content: pseudo ? candidateStyle.pseudoContent ?? "none" : "normal",
+      }),
+    };
+    const contents = {
+      executeJavaScriptInIsolatedWorld: vi.fn(async (
+        _worldId: number,
+        scripts: Array<{ code: string }>,
+      ) => runInNewContext(scripts[0]!.code, context)),
+    };
+
+    await expect(agentPageHasSensitiveScreenshotEvidence(contents as never)).resolves.toBe(false);
+  });
+
   it("rechecks the exact focused ref after page microtasks settle", async () => {
     const targetElement = {
       isConnected: true,
@@ -156,7 +340,251 @@ describe("agent browser semantic snapshots", () => {
     expect(dispatched).toEqual(["nested-boundary"]);
   });
 
-  it("signals declarative-root parsing before a detached host can disappear", () => {
+  it("signals a non-empty password value assignment before page code can clear it", () => {
+    const dispatched: string[] = [];
+    class FakeEvent {
+      constructor(readonly type: string) {}
+    }
+    class FakeEventTarget {
+      dispatchEvent(event: FakeEvent): boolean {
+        dispatched.push(event.type);
+        return true;
+      }
+    }
+    class FakeNode extends FakeEventTarget {
+      nodeValueStorage: string | null = null;
+      get nodeValue(): string | null { return this.nodeValueStorage; }
+      set nodeValue(value: string | null) {
+        this.nodeValueStorage = value;
+        const syncOwner = Reflect.get(this, "syncOwner");
+        if (typeof syncOwner === "function") Reflect.apply(syncOwner, this, []);
+      }
+      get textContent(): string | null { return this.nodeValueStorage; }
+      set textContent(value: string | null) {
+        this.nodeValueStorage = value;
+        const syncOwner = Reflect.get(this, "syncOwner");
+        if (typeof syncOwner === "function") Reflect.apply(syncOwner, this, []);
+      }
+    }
+    class FakeElement extends FakeNode {
+      attachShadow(): object { return {}; }
+      applyAttribute(_name: string, _value: string): void {}
+      attachAttribute(attr: FakeAttr): null {
+        attr.attach(this);
+        this.applyAttribute(attr.name, attr.value);
+        return null;
+      }
+      setAttribute(name: string, value: string): void {
+        this.applyAttribute(name, String(value));
+      }
+      setAttributeNS(_namespace: string | null, name: string, value: string): void {
+        this.applyAttribute(name, String(value));
+      }
+      setAttributeNode(attr: FakeAttr): null {
+        return this.attachAttribute(attr);
+      }
+      setAttributeNodeNS(attr: FakeAttr): null {
+        return this.attachAttribute(attr);
+      }
+    }
+    class FakeAttr extends FakeNode {
+      owner: FakeElement | null = null;
+      constructor(readonly name: string) { super(); }
+      get ownerElement(): FakeElement | null { return this.owner; }
+      get value(): string { return this.nodeValueStorage ?? ""; }
+      set value(value: string) {
+        this.nodeValueStorage = String(value);
+        this.syncOwner();
+      }
+      attach(owner: FakeElement): void { this.owner = owner; }
+      syncOwner(): void {
+        if (this.owner) this.owner.applyAttribute(this.name, this.value);
+      }
+    }
+    class FakeNamedNodeMap {
+      constructor(readonly owner: FakeElement) {}
+      setNamedItem(attr: FakeAttr): null { return this.owner.attachAttribute(attr); }
+      setNamedItemNS(attr: FakeAttr): null { return this.owner.attachAttribute(attr); }
+    }
+    class FakeHTMLElement extends FakeElement {
+      attachInternals(): object { return { shadowRoot: null }; }
+    }
+    class FakeHTMLInputElement extends FakeHTMLElement {
+      #type = "text";
+      #value = "";
+      #defaultValue = "";
+      readonly attributes = new FakeNamedNodeMap(this);
+      get type(): string { return this.#type; }
+      set type(value: string) { this.#type = value; }
+      get value(): string { return this.#value; }
+      set value(value: string) { this.#value = String(value); }
+      get defaultValue(): string { return this.#defaultValue; }
+      set defaultValue(value: string) {
+        this.#defaultValue = String(value);
+        this.#value = this.#defaultValue;
+      }
+      setRangeText(value: string): void { this.#value = String(value); }
+      applyAttribute(name: string, value: string): void {
+        if (name === "type") this.#type = value;
+        if (name === "value") {
+          this.#defaultValue = value;
+          this.#value = value;
+        }
+      }
+    }
+    const context = {
+      document: new FakeEventTarget(),
+      Element: FakeElement,
+      HTMLElement: FakeHTMLElement,
+      HTMLInputElement: FakeHTMLInputElement,
+      NamedNodeMap: FakeNamedNodeMap,
+      Attr: FakeAttr,
+      Node: FakeNode,
+      EventTarget: FakeEventTarget,
+      Event: FakeEvent,
+    };
+
+    runInNewContext(
+      `(${installPreviewAgentShadowBoundarySignal.toString()})("nested-boundary")`,
+      context,
+    );
+    runInNewContext(`
+      const ordinary = new HTMLInputElement();
+      ordinary.value = "brief note";
+      ordinary.setRangeText("ordinary text");
+      const ordinaryAttrInput = new HTMLInputElement();
+      const ordinaryAttr = new Attr("value");
+      ordinaryAttrInput.setAttributeNode(ordinaryAttr);
+      ordinaryAttr.textContent = "brief note";
+      ordinaryAttr.textContent = "";
+      const credential = new HTMLInputElement();
+      credential.type = "password";
+      credential.value = "hunter2";
+      credential.value = "";
+      const latePassword = new HTMLInputElement();
+      latePassword.value = "secret";
+      latePassword.type = "password";
+      latePassword.value = "";
+      const attributeCredential = new HTMLInputElement();
+      attributeCredential.type = "password";
+      attributeCredential.setAttribute("value", "hunter2");
+      attributeCredential.setAttribute("value", "");
+      const defaultCredential = new HTMLInputElement();
+      defaultCredential.defaultValue = "private";
+      defaultCredential.type = "password";
+      defaultCredential.defaultValue = "";
+      const namespacedCredential = new HTMLInputElement();
+      namespacedCredential.type = "password";
+      namespacedCredential.setAttributeNS(null, "value", "short");
+      namespacedCredential.setAttributeNS(null, "value", "");
+      const rangeCredential = new HTMLInputElement();
+      rangeCredential.type = "password";
+      rangeCredential.setRangeText("hunter2");
+      rangeCredential.value = "";
+      const attrValueCredential = new HTMLInputElement();
+      attrValueCredential.type = "password";
+      const valueAttr = new Attr("value");
+      valueAttr.value = "short";
+      attrValueCredential.setAttributeNode(valueAttr);
+      valueAttr.value = "";
+      const attrNodeValueCredential = new HTMLInputElement();
+      attrNodeValueCredential.type = "password";
+      const nodeValueAttr = new Attr("value");
+      nodeValueAttr.nodeValue = "brief";
+      attrNodeValueCredential.setAttributeNodeNS(nodeValueAttr);
+      nodeValueAttr.nodeValue = "";
+      const namedItemCredential = new HTMLInputElement();
+      namedItemCredential.type = "password";
+      const namedAttr = new Attr("value");
+      namedAttr.value = "tiny";
+      namedItemCredential.attributes.setNamedItem(namedAttr);
+      namedAttr.value = "";
+      const attachedValueCredential = new HTMLInputElement();
+      attachedValueCredential.type = "password";
+      const attachedValueAttr = new Attr("value");
+      attachedValueCredential.setAttributeNode(attachedValueAttr);
+      attachedValueAttr.value = "small";
+      attachedValueAttr.value = "";
+      const attachedNodeValueCredential = new HTMLInputElement();
+      attachedNodeValueCredential.type = "password";
+      const attachedNodeValueAttr = new Attr("value");
+      attachedNodeValueCredential.setAttributeNode(attachedNodeValueAttr);
+      attachedNodeValueAttr.nodeValue = "little";
+      attachedNodeValueAttr.nodeValue = "";
+      const attachedTextCredential = new HTMLInputElement();
+      attachedTextCredential.type = "password";
+      const attachedTextAttr = new Attr("value");
+      attachedTextCredential.setAttributeNode(attachedTextAttr);
+      attachedTextAttr.textContent = "concise";
+      attachedTextAttr.textContent = "";
+    `, context);
+
+    expect(dispatched).toEqual(Array(12).fill("nested-boundary"));
+    const descriptorRoutes = [
+      `const input = new HTMLInputElement(); input.type = "password";
+        Object.defineProperty(input, "value", {
+          configurable: true, writable: true, value: "hunter2",
+        }); delete input.value;`,
+      `const input = new HTMLInputElement(); input.type = "password";
+        Object.defineProperties(input, {
+          value: { configurable: true, writable: true, value: "hunter2" },
+        }); delete input.value;`,
+      `const input = new HTMLInputElement(); input.type = "password";
+        Reflect.defineProperty(input, "value", {
+          configurable: true, writable: true, value: "hunter2",
+        }); delete input.value;`,
+      `const input = new HTMLInputElement();
+        Object.defineProperty(input, "value", {
+          configurable: true, writable: true, value: "hunter2",
+        }); input.type = "password"; delete input.value;`,
+      `const input = new HTMLInputElement(); input.type = "password";
+        Object.prototype.__defineGetter__.call(input, "value", () => "hunter2");
+        delete input.value;`,
+    ];
+    for (const [index, route] of descriptorRoutes.entries()) {
+      runInNewContext(`{${route}}`, context);
+      expect(dispatched, route).toHaveLength(13 + index);
+    }
+    runInNewContext(`{
+      const input = new HTMLInputElement();
+      Object.defineProperty(input, "value", {
+        configurable: true, writable: true, value: "brief note",
+      });
+      delete input.value;
+    }`, context);
+    expect(dispatched).toHaveLength(17);
+    const prototypeRoutes = [
+      `const input = new HTMLInputElement(); input.type = "password";
+        const nativePrototype = Object.getPrototypeOf(input);
+        Object.setPrototypeOf(input, { value: "hunter2" });
+        Object.setPrototypeOf(input, nativePrototype);`,
+      `const input = new HTMLInputElement(); input.type = "password";
+        const nativePrototype = Object.getPrototypeOf(input);
+        Reflect.setPrototypeOf(input, { value: "hunter2" });
+        Object.setPrototypeOf(input, nativePrototype);`,
+      `const input = new HTMLInputElement(); input.type = "password";
+        const nativePrototype = Object.getPrototypeOf(input);
+        Object.getOwnPropertyDescriptor(Object.prototype, "__proto__").set
+          .call(input, { value: "hunter2" });
+        Object.setPrototypeOf(input, nativePrototype);`,
+      `const input = new HTMLInputElement();
+        const nativePrototype = Object.getPrototypeOf(input);
+        Object.setPrototypeOf(input, { type: "password", value: "hunter2" });
+        Object.setPrototypeOf(input, nativePrototype);`,
+    ];
+    for (const [index, route] of prototypeRoutes.entries()) {
+      runInNewContext(`{${route}}`, context);
+      expect(dispatched, route).toHaveLength(18 + index);
+    }
+    runInNewContext(`{
+      const ordinary = {};
+      Object.setPrototypeOf(ordinary, { value: "brief note" });
+      Reflect.setPrototypeOf(ordinary, null);
+    }`, context);
+    expect(dispatched).toHaveLength(21);
+  });
+
+  it("signals private parser content before a detached host can disappear", () => {
     const dispatched: string[] = [];
     class FakeEvent {
       constructor(readonly type: string) {}
@@ -171,15 +599,19 @@ describe("agent browser semantic snapshots", () => {
       source = "";
       querySelector(_selector: string): object | null {
         const beforeClose = this.source.split("</template>", 1)[0] ?? "";
-        return beforeClose.startsWith("<template") && beforeClose.includes(" shadowrootmode")
-          ? {}
-          : null;
+        if (beforeClose.startsWith("<template") && beforeClose.includes(" shadowrootmode")) {
+          return {};
+        }
+        return /<input\b(?=[^>]*\btype\s*=\s*['"]?password\b)(?=[^>]*\bvalue\s*=\s*(?:['"][^'"]+['"]|[^\s>]+))/iu
+          .test(this.source) ? {} : null;
       }
     }
     class FakeElement extends FakeEventTarget {
       fragment = new FakeDocumentFragment();
       attachShadow(): object { return {}; }
       set innerHTML(source: string) { this.fragment.source = source; }
+      set outerHTML(source: string) { this.fragment.source = source; }
+      insertAdjacentHTML(_position: string, source: string): void { this.fragment.source = source; }
       setHTML(source: string): void { this.fragment.source = source; }
       setHTMLUnsafe(source: string): void { this.fragment.source = source; }
     }
@@ -193,14 +625,27 @@ describe("agent browser semantic snapshots", () => {
       createHTMLDocument(): FakeDocument { return new FakeDocument(); }
     }
     class FakeDocument extends FakeEventTarget {
+      parsedSource = "";
       static parseHTML(_html: string): object { return {}; }
       static parseHTMLUnsafe(_html: string): object { return {}; }
       get implementation(): FakeDOMImplementation { return new FakeDOMImplementation(); }
       createElement(): FakeHTMLTemplateElement { return new FakeHTMLTemplateElement(); }
+      write(...parts: string[]): void { this.parsedSource = parts.join(""); }
+      writeln(...parts: string[]): void { this.parsedSource = `${parts.join("")}\n`; }
     }
     class FakeShadowRoot {
       setHTML(_html: string): void {}
       setHTMLUnsafe(_html: string): void {}
+    }
+    class FakeRange {
+      createContextualFragment(source: string): FakeDocumentFragment {
+        const fragment = new FakeDocumentFragment();
+        fragment.source = source;
+        return fragment;
+      }
+    }
+    class FakeDOMParser {
+      parseFromString(_source: string, _type: string): object { return {}; }
     }
     const context = {
       document: new FakeDocument(),
@@ -211,6 +656,8 @@ describe("agent browser semantic snapshots", () => {
       DOMImplementation: FakeDOMImplementation,
       DocumentFragment: FakeDocumentFragment,
       ShadowRoot: FakeShadowRoot,
+      Range: FakeRange,
+      DOMParser: FakeDOMParser,
       EventTarget: FakeEventTarget,
       Event: FakeEvent,
     };
@@ -226,9 +673,19 @@ describe("agent browser semantic snapshots", () => {
       Document.parseHTMLUnsafe('<template shadowrootmode=closed>private</template>');
       new ShadowRoot().setHTML('<template shadowrootmode=closed>private</template>');
       new ShadowRoot().setHTMLUnsafe('<template shadowrootmode=closed>private</template>');
+      const passwordMarkup = '<input type="password" value="hunter2">';
+      new Element().innerHTML = passwordMarkup;
+      new Element().outerHTML = passwordMarkup;
+      new Element().insertAdjacentHTML('beforeend', passwordMarkup);
+      new Range().createContextualFragment(passwordMarkup);
+      new DOMParser().parseFromString(passwordMarkup, 'text/html');
+      new Element().setHTMLUnsafe(passwordMarkup);
+      Document.parseHTMLUnsafe(passwordMarkup);
+      new Document().write('<input type="password" ', 'value="hunter2">');
+      new Document().writeln('<input type="password" ', 'value="hunter2">');
     `, context);
 
-    expect(dispatched).toEqual(Array(6).fill("nested-boundary"));
+    expect(dispatched).toEqual(Array(15).fill("nested-boundary"));
 
     runInNewContext(`
       new Element().setHTML('<p>ordinary</p>');
@@ -240,11 +697,19 @@ describe("agent browser semantic snapshots", () => {
       new Element().setHTML('<!-- <template shadowrootmode=open> -->');
       new Element().setHTML('<template data-shadowrootmode=open></template>');
       new Element().setHTML('<template></template><div shadowrootmode=open></div>');
+      const ordinaryMarkup = '<input type="text" value="brief note">';
+      new Element().innerHTML = ordinaryMarkup;
+      new Element().outerHTML = ordinaryMarkup;
+      new Element().insertAdjacentHTML('beforeend', ordinaryMarkup);
+      new Range().createContextualFragment(ordinaryMarkup);
+      new DOMParser().parseFromString(ordinaryMarkup, 'text/html');
+      new Document().write('<p>', 'ordinary</p>');
+      new Document().writeln('<input type="text" ', 'value="brief note">');
     `, context);
-    expect(dispatched).toHaveLength(6);
+    expect(dispatched).toHaveLength(15);
 
     runInNewContext("new Element().setHTML('x'.repeat(4097))", context);
-    expect(dispatched).toEqual(Array(7).fill("nested-boundary"));
+    expect(dispatched).toEqual(Array(16).fill("nested-boundary"));
   });
 
   it("keeps oversized Unicode snapshots valid within the provider byte limit", () => {

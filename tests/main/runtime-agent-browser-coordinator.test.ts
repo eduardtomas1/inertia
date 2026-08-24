@@ -4,6 +4,11 @@ import { RuntimeAgentBrowserCoordinator } from "../../src/main/runtime-agent-bro
 import type { RuntimeProcessRecord } from "../../src/main/runtime-supervisor-types";
 
 const conversationId = "11111111-1111-4111-8111-111111111111";
+const identity = {
+  conversationId,
+  runId: "22222222-2222-4222-8222-222222222222",
+  turnId: "33333333-3333-4333-8333-333333333333",
+};
 
 function record(): RuntimeProcessRecord {
   return { agentBrowserRequestIds: new Set() } as RuntimeProcessRecord;
@@ -20,7 +25,7 @@ describe("runtime agent browser coordinator", () => {
     const operation = deferred<{ ok: false; code: "not-found"; message: string }>();
     let signal: AbortSignal | undefined;
     const broker = {
-      perform: vi.fn(async (_conversationId, _command, candidate?: AbortSignal) => {
+      perform: vi.fn(async (_identity, _command, candidate?: AbortSignal) => {
         signal = candidate;
         return await operation.promise;
       }),
@@ -36,7 +41,7 @@ describe("runtime agent browser coordinator", () => {
     const event = {
       type: "runtime.agent-browser-request" as const,
       requestId,
-      conversationId,
+      identity,
       command: { action: "snapshot" as const },
     };
     coordinator.handle(peer, event);
@@ -56,7 +61,7 @@ describe("runtime agent browser coordinator", () => {
     const operation = deferred<{ ok: false; code: "not-found"; message: string }>();
     let signal: AbortSignal | undefined;
     const broker = {
-      perform: vi.fn(async (_conversationId, _command, candidate?: AbortSignal) => {
+      perform: vi.fn(async (_identity, _command, candidate?: AbortSignal) => {
         signal = candidate;
         return await operation.promise;
       }),
@@ -68,13 +73,19 @@ describe("runtime agent browser coordinator", () => {
     coordinator.handle(peer, {
       type: "runtime.agent-browser-request",
       requestId,
-      conversationId,
+      identity,
       command: { action: "click", ref: "e1" },
     });
     coordinator.handle(peer, {
       type: "runtime.agent-browser-cancel",
       requestId,
-      conversationId,
+      identity: { ...identity, runId: "44444444-4444-4444-8444-444444444444" },
+    });
+    expect(signal?.aborted).toBe(false);
+    coordinator.handle(peer, {
+      type: "runtime.agent-browser-cancel",
+      requestId,
+      identity,
     });
     expect(signal?.aborted).toBe(true);
     coordinator.clear(peer);

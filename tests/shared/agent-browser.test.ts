@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  MAX_AGENT_BROWSER_SCREENSHOT_BYTES,
   MAX_AGENT_BROWSER_TEXT_BYTES,
   parseAgentBrowserCommand,
   parseAgentBrowserResult,
@@ -30,19 +29,14 @@ describe("agent browser boundary", () => {
       .toBeNull();
   });
 
-  it("strictly bounds semantic text, tab state, and PNG evidence", () => {
+  it("strictly bounds semantic text and tab state while rejecting bitmap bytes", () => {
     const image = Buffer.from("small-png-fixture").toString("base64");
     expect(parseAgentBrowserResult({
       ok: true,
       text: "snapshot",
       state,
       image: { mimeType: "image/png", data: image },
-    })).toEqual({
-      ok: true,
-      text: "snapshot",
-      state,
-      image: { mimeType: "image/png", data: image },
-    });
+    })).toBeNull();
     expect(parseAgentBrowserResult({ ok: true, text: "snapshot", state: { ...state, tabs: [] } }))
       .toBeNull();
     expect(parseAgentBrowserResult({
@@ -55,15 +49,6 @@ describe("agent browser boundary", () => {
       text: "snapshot",
       state,
       image: { mimeType: "image/jpeg", data: image },
-    })).toBeNull();
-    expect(parseAgentBrowserResult({
-      ok: true,
-      text: "snapshot",
-      state,
-      image: {
-        mimeType: "image/png",
-        data: Buffer.alloc(MAX_AGENT_BROWSER_SCREENSHOT_BYTES + 1).toString("base64"),
-      },
     })).toBeNull();
   });
 });

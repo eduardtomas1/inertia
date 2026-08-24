@@ -1,20 +1,21 @@
-import { randomUUID } from "node:crypto";
-import { fileURLToPath } from "node:url";
+import type { BrowserWindow, NativeImage, Rectangle, WebContents } from "electron";
+
+import type {
+  AgentBrowserActivity,
+  AgentBrowserCommand,
+  AgentBrowserResult,
+  AgentBrowserRunIdentity,
+  AgentBrowserState,
+  AgentBrowserTab,
+} from "../shared/agent-browser.js";
 import {
-  WebContentsView,
-  type BrowserWindow,
-  type Input,
-  type KeyboardInputEvent,
-  type NativeImage,
-  type Rectangle,
-  type Session, type WebContents,
-} from "electron";
-import type { AgentBrowserActivity, AgentBrowserCommand, AgentBrowserResult, AgentBrowserState, AgentBrowserTab } from "../shared/agent-browser.js";
-import { MAX_AGENT_BROWSER_TEXT_BYTES } from "../shared/agent-browser.js";
+  sanitizeBrowserEvidenceText,
+  type BrowserEvidenceImage,
+} from "../shared/browser-evidence.js";
 import type { PreviewState } from "../shared/desktop.js";
 import { previewNavigationTarget } from "../shared/preview-url.js";
 import {
-  agentPageHasSensitiveEvidence, agentPageInputRefusal, agentPageRefHasFocus,
+  agentPageHasSensitiveEvidence, agentPageHasSensitiveScreenshotEvidence, agentPageInputRefusal, agentPageRefHasFocus,
   installAgentPagePrivacyGuard,
   locateAgentPageRef, semanticPageSnapshot, setAgentPageInputGuard, showAgentPageCursor,
 } from "./preview-agent-page.js";
@@ -22,9 +23,20 @@ import {
   agentPageActivationBlock, agentPageHasUnguardedNestedContent, beginAgentFileChooserBlock, beginAgentPageInputRefusalCapture, captureAgentPageInputRefusal, capturedAgentPageInputRefusal, endAgentPageInputRefusalCapture, ensureAgentFileChooserBlock, hoverAgentPageRef, releaseAgentFileChooserBlock, setAgentPageFrozen, settleAgentPageDebuggerBootstrap, settleAgentPageInput,
 } from "./preview-agent-input.js";
 import { capturedAgentScreenshotResult } from "./preview-agent-screenshot.js";
-import { failedAgentBrowserResult as failure, successfulAgentBrowserResult } from "./preview-agent-result.js";
-type PreviewOwner = "primary" | "secondary";
-interface PreviewTab { id: string; view: WebContentsView; unregisterHealth(): void }
+import { BrowserEvidenceCapture, type BrowserEvidenceAuthority, type BrowserEvidencePage } from "./browser-evidence-capture.js";
+import { BrowserEvidenceInspectorRegistry, type BrowserEvidenceImageApproval, type BrowserEvidenceImageInspection } from "./browser-evidence-image-approval.js";
+import {
+  agentBrowserIdentity,
+  previewContext,
+  previewOwner,
+  previewTabId,
+  type PreviewOwner,
+} from "./preview-identity.js";
+import { boundedAgentStateText, failedAgentBrowserResult as failure, successfulAgentBrowserResult } from "./preview-agent-result.js";
+import { createPreviewPartition } from "./preview-session.js";
+import { createPreviewTab, type PreviewTab } from "./preview-tab.js";
+export { previewAppShortcutKey } from "./preview-keyboard.js";
+export { createPreviewPartition, hardenDesktopSession } from "./preview-session.js";
 
 interface PreviewSlot {
   contextId: string;
@@ -35,6 +47,10 @@ interface PreviewSlot {
   boundsGeneration: number;
   activity: AgentBrowserActivity | null;
   agentQueue: Promise<void>;
+  activeIdentity: AgentBrowserRunIdentity | null;
+  evidence: BrowserEvidenceCapture; evidenceInspectors: BrowserEvidenceInspectorRegistry;
+  publishedEvidenceRevision: number | null;
+  nextPageNumber: number;
 }
 
 interface PreviewBrokerOptions {
@@ -44,76 +60,9 @@ interface PreviewBrokerOptions {
   registerHealthRenderer?(contents: WebContents): () => void;
 }
 
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
-const hardenedSessions = new WeakSet<Session>();
-const APP_SHORTCUT_KEYS = new Set(["b", "j", "k", "n"]);
 const MAX_BROWSER_TABS = 8;
 const PREVIEW_RENDERER_OPERATION_TIMEOUT_MS = 15_000;
 const PREVIEW_NAVIGATION_COMMAND_TIMEOUT_MS = 30_000;
-
-export function previewAppShortcutKey(input: Pick<
-  Input,
-  "alt" | "control" | "key" | "meta" | "shift" | "type"
->): string | null {
-  const key = input.key.toLowerCase();
-  return input.type === "keyDown"
-      && (input.meta || input.control)
-      && !input.alt
-      && !input.shift
-      && APP_SHORTCUT_KEYS.has(key)
-    ? key
-    : null;
-}
-
-function forwardedKeyboardInput(input: Input): KeyboardInputEvent {
-  const modifiers: NonNullable<KeyboardInputEvent["modifiers"]> = [];
-  if (input.control) modifiers.push("control");
-  if (input.meta) modifiers.push("meta");
-  return {
-    type: input.type === "keyUp" ? "keyUp" : "keyDown",
-    keyCode: input.key,
-    modifiers,
-  };
-}
-
-export function createPreviewPartition(): string {
-  return `inertia-preview-${randomUUID()}`;
-}
-
-export function hardenDesktopSession(session: Session): void {
-  if (hardenedSessions.has(session)) return;
-  hardenedSessions.add(session);
-  session.setPermissionCheckHandler(() => false);
-  session.setPermissionRequestHandler((_contents, _permission, callback) => {
-    callback(false);
-  });
-  session.on("will-download", (event, item) => {
-    event.preventDefault();
-    item.cancel();
-  });
-}
-
-function previewOwner(value: unknown): PreviewOwner {
-  if (value !== "primary" && value !== "secondary") {
-    throw new Error("Invalid preview owner");
-  }
-  return value;
-}
-
-function previewContext(value: unknown): string {
-  if (typeof value !== "string" || !UUID_PATTERN.test(value)) {
-    throw new Error("Invalid preview context");
-  }
-  return value;
-}
-
-function previewTabId(value: unknown): string {
-  if (typeof value !== "string" || !UUID_PATTERN.test(value)) {
-    throw new Error("Invalid preview tab");
-  }
-  return value;
-}
 
 class AgentBrowserRefusal extends Error {
   constructor(readonly result: AgentBrowserResult) {
@@ -271,12 +220,12 @@ export class PreviewBroker {
   }
 
   async perform(
-    conversationId: string,
+    owner: string | AgentBrowserRunIdentity,
     command: AgentBrowserCommand,
     signal?: AbortSignal,
   ): Promise<AgentBrowserResult> {
     try {
-      const contextId = previewContext(conversationId);
+      const { contextId, identity } = agentBrowserIdentity(owner);
       const owned = this.#slotForContext(contextId);
       if (!owned) {
         return failure(
@@ -290,46 +239,54 @@ export class PreviewBroker {
           return failure("unavailable", "This chat's Inertia Browser was closed.");
         }
         stopForAbort(signal);
-        switch (command.action) {
-          case "snapshot":
-            return await this.#snapshot(ownerId, slot, signal);
-          case "screenshot":
-            return await this.#screenshot(ownerId, slot, signal);
-          case "navigate":
-            return await this.#agentNavigate(ownerId, slot, command.url, signal);
-          case "click":
-            return await this.#click(ownerId, slot, command.ref, signal);
-          case "type":
-            return await this.#type(ownerId, slot, command.ref, command.text, command.replace, signal);
-          case "press":
-            return await this.#press(ownerId, slot, command.key, signal);
-          case "scroll":
-            return await this.#scroll(ownerId, slot, command.deltaY, signal);
-          case "tabs":
-            return successfulAgentBrowserResult(this.#agentStateText(slot), this.#agentState(slot));
-          case "tab-open":
-            return await this.#agentOpenTab(ownerId, slot, command.url, signal);
-          case "tab-activate":
-            if (!slot.tabs.has(command.tabId)) {
-              return failure("not-found", "That Inertia Browser tab no longer exists.");
+        slot.activeIdentity = identity;
+        try {
+          switch (command.action) {
+            case "snapshot":
+              return await this.#snapshot(ownerId, slot, signal);
+            case "screenshot":
+              return await this.#screenshot(ownerId, slot, signal);
+            case "navigate":
+              return await this.#agentNavigate(ownerId, slot, command.url, signal);
+            case "click":
+              return await this.#click(ownerId, slot, command.ref, signal);
+            case "type":
+              return await this.#type(ownerId, slot, command.ref, command.text, command.replace, signal);
+            case "press":
+              return await this.#press(ownerId, slot, command.key, signal);
+            case "scroll":
+              return await this.#scroll(ownerId, slot, command.deltaY, signal);
+            case "tabs":
+              return this.#success(slot, boundedAgentStateText(this.#agentState(slot)));
+            case "tab-open":
+              return await this.#agentOpenTab(ownerId, slot, command.url, signal);
+            case "tab-activate":
+              if (!slot.tabs.has(command.tabId)) {
+                return failure("not-found", "That Inertia Browser tab no longer exists.");
+              }
+              this.#activateTab(ownerId, slot, command.tabId);
+              this.#record(ownerId, slot, "tab-activate", "Agent switched pages");
+              return this.#success(slot, boundedAgentStateText(this.#agentState(slot)));
+            case "tab-close": {
+              const closingTab = slot.tabs.get(command.tabId);
+              if (!closingTab) {
+                return failure("not-found", "That Inertia Browser tab no longer exists.");
+              }
+              this.#closeTab(ownerId, slot, command.tabId);
+              this.#record(
+                ownerId,
+                slot,
+                "tab-close",
+                "Agent closed a page",
+                undefined,
+                command.tabId,
+                closingTab,
+              );
+              return this.#success(slot, boundedAgentStateText(this.#agentState(slot)));
             }
-            this.#activateTab(ownerId, slot, command.tabId);
-            this.#record(ownerId, slot, "tab-activate", "Agent switched pages");
-            return successfulAgentBrowserResult(this.#agentStateText(slot), this.#agentState(slot));
-          case "tab-close":
-            if (!slot.tabs.has(command.tabId)) {
-              return failure("not-found", "That Inertia Browser tab no longer exists.");
-            }
-            this.#closeTab(ownerId, slot, command.tabId);
-            this.#record(
-              ownerId,
-              slot,
-              "tab-close",
-              "Agent closed a page",
-              undefined,
-              command.tabId,
-            );
-            return successfulAgentBrowserResult(this.#agentStateText(slot), this.#agentState(slot));
+          }
+        } finally {
+          if (slot.activeIdentity === identity) slot.activeIdentity = null;
         }
       });
     } catch (error) {
@@ -338,7 +295,11 @@ export class PreviewBroker {
         : failure(
             "unavailable",
             error instanceof Error
-              ? error.message.slice(0, 1_000)
+              ? sanitizeBrowserEvidenceText(
+                  error.message,
+                  "The Inertia Browser action failed.",
+                  600,
+                ).text
               : "The Inertia Browser action failed.",
           );
     }
@@ -410,7 +371,18 @@ export class PreviewBroker {
     const request = value as { ownerId?: unknown; contextId?: unknown };
     this.close(previewOwner(request.ownerId), previewContext(request.contextId));
   }
-
+  async inspectEvidenceImage(value: unknown, requestApproval: BrowserEvidenceImageApproval, inspect: BrowserEvidenceImageInspection): Promise<boolean> {
+    if (!value || typeof value !== "object") throw new Error("Invalid Browser evidence request");
+    const request = value as { ownerId?: unknown; contextId?: unknown; evidenceId?: unknown };
+    const ownerId = previewOwner(request.ownerId), contextId = previewContext(request.contextId);
+    const evidenceId = previewTabId(request.evidenceId);
+    const slot = this.#ownedSlot(ownerId, contextId); if (!slot) return false;
+    const lookup = (): BrowserEvidenceImage | null => {
+      const current = this.#ownedSlot(ownerId, contextId);
+      return current === slot ? current.evidence.image(evidenceId) : null;
+    };
+    return await slot.evidenceInspectors.inspect(evidenceId, lookup, requestApproval, inspect);
+  }
   close(ownerId?: PreviewOwner, contextId?: string): void {
     const slots = ownerId
       ? [[ownerId, this.#slots.get(ownerId)] as const]
@@ -422,6 +394,8 @@ export class PreviewBroker {
       this.#slots.delete(id);
       const browserSession = slot.tabs.values().next().value
         ?.view.webContents.session;
+      slot.evidenceInspectors.close();
+      slot.evidence.close();
       for (const tab of slot.tabs.values()) this.#destroyTab(tab);
       void browserSession?.clearStorageData().catch(() => {
         // The non-persistent session is destroyed with its owning slot.
@@ -559,18 +533,20 @@ export class PreviewBroker {
 
   #state(ownerId: PreviewOwner, contextId: string): PreviewState {
     const slot = this.#ownedSlot(ownerId, contextId);
-    const contents = slot ? this.#active(slot).view.webContents : undefined;
     return {
-      url: contents?.getURL() ?? "",
-      loading: contents?.isLoading() ?? false,
-      canGoBack: contents?.navigationHistory.canGoBack() ?? false,
-      canGoForward: contents?.navigationHistory.canGoForward() ?? false,
-      activeTabId: slot?.activeTabId ?? null,
-      tabs: slot ? [...slot.tabs.values()].map((tab) => this.#previewTab(tab)) : [],
-      agentActivity: slot?.activity ?? null,
+      ...this.#stateWithoutEvidence(slot),
+      evidence: slot?.evidence.snapshot() ?? { revision: 0, entries: [], omitted: false },
     };
   }
-
+  #stateWithoutEvidence(slot: PreviewSlot | undefined): Omit<PreviewState, "evidence"> {
+    const contents = slot ? this.#active(slot).view.webContents : undefined;
+    return {
+      url: contents?.getURL() ?? "", loading: contents?.isLoading() ?? false,
+      canGoBack: contents?.navigationHistory.canGoBack() ?? false, canGoForward: contents?.navigationHistory.canGoForward() ?? false,
+      activeTabId: slot?.activeTabId ?? null, agentActivity: slot?.activity ?? null,
+      tabs: slot ? [...slot.tabs.values()].map((tab) => this.#previewTab(tab)) : [],
+    };
+  }
   #agentState(slot: PreviewSlot): AgentBrowserState {
     return {
       activeTabId: slot.activeTabId,
@@ -578,48 +554,38 @@ export class PreviewBroker {
       activity: slot.activity,
     };
   }
-
-  #agentStateText(
-    slot: PreviewSlot,
-    detail?: Record<string, unknown>,
-  ): string {
-    const state = this.#agentState(slot);
-    const payload = detail ? { ...detail, state } : state;
-    const serialized = JSON.stringify(payload);
-    if (Buffer.byteLength(serialized, "utf8") <= MAX_AGENT_BROWSER_TEXT_BYTES) {
-      return serialized;
-    }
-    const compactState = {
-      ...state,
-      tabs: state.tabs.map((tab) => ({
-        ...tab,
-        title: tab.title.slice(0, 120),
-        url: tab.url.slice(0, 1_024),
-      })),
-      activity: state.activity
-        ? { ...state.activity, label: state.activity.label.slice(0, 160) }
-        : null,
-    };
-    return JSON.stringify(detail
-      ? { ...detail, state: compactState, truncated: true }
-      : { ...compactState, truncated: true });
-  }
-
   #publish(ownerId: PreviewOwner, contextId: string): void {
-    const window = this.options.getWindow();
-    if (!window || window.webContents.isDestroyed() || !this.#ownedSlot(ownerId, contextId)) return;
+    const window = this.options.getWindow(), slot = this.#ownedSlot(ownerId, contextId);
+    if (!window || window.webContents.isDestroyed() || !slot) return;
+    slot.evidenceInspectors.closeUnavailable((id) => Boolean(slot.evidence.image(id)));
+    const evidenceRevision = slot.evidence.revision(), publishEvidence = slot.publishedEvidenceRevision !== evidenceRevision;
     window.webContents.send(this.options.stateChannel, {
-      ownerId,
-      contextId,
-      ...this.#state(ownerId, contextId),
+      ownerId, contextId,
+      ...this.#stateWithoutEvidence(slot),
+      ...(publishEvidence ? { evidence: slot.evidence.snapshot() } : {}),
     });
+    if (publishEvidence) slot.publishedEvidenceRevision = evidenceRevision;
   }
 
   #ensure(ownerId: PreviewOwner, contextId: string): PreviewSlot {
     const existing = this.#ownedSlot(ownerId, contextId);
     if (existing) return existing;
     if (this.#slots.has(ownerId)) this.close(ownerId);
-    const slot: PreviewSlot = {
+    let slot!: PreviewSlot;
+    const evidence = new BrowserEvidenceCapture({
+      isLive: () => this.#ownedSlot(ownerId, contextId) === slot,
+      isCurrent: (page) => {
+        const tab = slot.tabs.get(page.tabId);
+        return tab?.view.webContents === page.contents
+          && tab.documentSequence === page.documentSequence;
+      },
+      publish: () => this.#publish(ownerId, contextId),
+      sensitiveDocument: async (contents) => await this.#rendererOperation(
+        contents,
+        () => agentPageHasSensitiveEvidence(contents),
+      ),
+    });
+    slot = {
       contextId,
       partition: createPreviewPartition(),
       tabs: new Map(),
@@ -628,10 +594,27 @@ export class PreviewBroker {
       boundsGeneration: 0,
       activity: null,
       agentQueue: Promise.resolve(),
+      activeIdentity: null,
+      evidence,
+      evidenceInspectors: new BrowserEvidenceInspectorRegistry(),
+      publishedEvidenceRevision: null,
+      nextPageNumber: 0,
     };
     const tab = this.#openTab(ownerId, slot);
     slot.activeTabId = tab.id;
     this.#slots.set(ownerId, slot);
+    evidence.installSession(tab.view.webContents.session, (webContentsId) => {
+      if (typeof webContentsId !== "number" || !Number.isInteger(webContentsId)) return null;
+      const requestTab = [...slot.tabs.values()].find(
+        (candidate) => candidate.view.webContents.id === webContentsId,
+      );
+      return requestTab ? {
+        tabId: requestTab.id,
+        pageNumber: requestTab.pageNumber,
+        documentSequence: requestTab.documentSequence,
+        authority: this.#evidenceAuthority(slot, requestTab.id),
+      } : null;
+    });
     const pending = this.#pendingBounds.get(ownerId);
     const bounds = pending?.contextId === contextId ? pending.bounds : undefined;
     tab.view.setBounds(bounds ?? { x: 0, y: 0, width: 0, height: 0 });
@@ -646,64 +629,51 @@ export class PreviewBroker {
     }
     const window = this.options.getWindow();
     if (!window) throw new Error("The preview window is unavailable");
-    const view = new WebContentsView({
-      webPreferences: {
-        partition: slot.partition,
-        contextIsolation: true,
-        nodeIntegration: false,
-        sandbox: true,
-        webSecurity: true,
-        allowRunningInsecureContent: false,
-        devTools: false,
-        disableDialogs: true,
-        navigateOnDragDrop: false,
-        preload: fileURLToPath(new URL(
-          "../preload/preview-agent-privacy.cjs",
-          import.meta.url,
-        )),
+    const publish = () => this.#publish(ownerId, slot.contextId);
+    const tab = createPreviewTab({
+      partition: slot.partition,
+      pageNumber: slot.nextPageNumber += 1,
+      captureLocked: this.#captureLocked,
+      registerHealthRenderer: this.options.registerHealthRenderer,
+      targetContents: () => this.options.getWindow()?.webContents,
+      guardNavigation: (event, url) => this.#guardNavigation(event, url),
+      publish,
+      navigated: (currentTab, url, sameDocument) => {
+        slot.evidenceInspectors.close();
+        slot.evidence.recordNavigation(
+          this.#evidencePage(currentTab),
+          url,
+          sameDocument,
+          this.#evidenceAuthority(slot, currentTab.id),
+        );
+      },
+      consoleError: (currentTab, message) => {
+        slot.evidence.recordConsoleError(
+          this.#evidencePage(currentTab),
+          message,
+          this.#evidenceAuthority(slot, currentTab.id),
+        );
       },
     });
-    const tab: PreviewTab = {
-      id: randomUUID(),
-      view,
-      unregisterHealth: this.options.registerHealthRenderer?.(view.webContents) ?? (() => undefined),
-    };
-    const contents = tab.view.webContents;
-    tab.view.setBackgroundColor("#17171b");
-    contents.setWindowOpenHandler(() => ({ action: "deny" }));
-    contents.on("will-navigate", (event, url) => this.#guardNavigation(event, url));
-    contents.on("will-redirect", (event, url) => this.#guardNavigation(event, url));
-    const ownedKeyUps = new Set<string>();
-    contents.on("before-input-event", (event, input) => {
-      if (this.#captureLocked.has(contents)) {
-        event.preventDefault();
-        return;
-      }
-      const shortcutKey = previewAppShortcutKey(input);
-      const key = input.key.toLowerCase();
-      const ownsKeyUp = input.type === "keyUp" && ownedKeyUps.delete(key);
-      if (!shortcutKey && !ownsKeyUp) {
-        if (input.type === "keyDown") ownedKeyUps.delete(key);
-        return;
-      }
-      event.preventDefault();
-      if (shortcutKey) ownedKeyUps.add(shortcutKey);
-      const target = this.options.getWindow()?.webContents;
-      if (!target || target.isDestroyed()) return;
-      target.sendInputEvent(forwardedKeyboardInput(input));
-    });
-    contents.on("before-mouse-event", (event) => {
-      if (this.#captureLocked.has(contents)) event.preventDefault();
-    });
-    hardenDesktopSession(contents.session);
-    const publish = () => this.#publish(ownerId, slot.contextId);
-    contents.on("did-start-loading", publish);
-    contents.on("did-stop-loading", publish);
-    contents.on("did-navigate", publish);
-    contents.on("did-navigate-in-page", publish);
-    contents.on("page-title-updated", publish);
     slot.tabs.set(tab.id, tab);
     return tab;
+  }
+
+  #evidencePage(tab: PreviewTab): BrowserEvidencePage {
+    return {
+      tabId: tab.id,
+      pageNumber: tab.pageNumber,
+      documentSequence: tab.documentSequence,
+      contents: tab.view.webContents,
+    };
+  }
+
+  #evidenceAuthority(
+    slot: PreviewSlot,
+    tabId: string,
+  ): BrowserEvidenceAuthority | undefined {
+    const identity = tabId === slot.activeTabId ? slot.activeIdentity : null;
+    return identity ? { runId: identity.runId, turnId: identity.turnId } : undefined;
   }
 
   #activateTab(ownerId: PreviewOwner, slot: PreviewSlot, tabId: string): void {
@@ -724,6 +694,7 @@ export class PreviewBroker {
   #closeTab(ownerId: PreviewOwner, slot: PreviewSlot, tabId: string): void {
     const tab = slot.tabs.get(tabId);
     if (!tab) throw new Error("That Inertia Browser tab no longer exists.");
+    slot.evidenceInspectors.close();
     const wasActive = slot.activeTabId === tabId;
     slot.tabs.delete(tabId);
     this.#destroyTab(tab);
@@ -749,15 +720,38 @@ export class PreviewBroker {
     label: string,
     point?: { x: number; y: number },
     tabId = slot.activeTabId,
+    knownTab?: PreviewTab,
   ): void {
+    const sanitized = sanitizeBrowserEvidenceText(
+      label,
+      "Agent controlled this page",
+      240,
+    );
+    const at = new Date().toISOString();
     slot.activity = {
       action,
-      label: label.slice(0, 300),
+      label: sanitized.text,
       tabId,
-      at: new Date().toISOString(),
+      at,
       ...point,
     };
+    const tab = knownTab ?? slot.tabs.get(tabId);
+    if (tab) slot.evidence.recordAgentAction(
+      this.#evidencePage(tab),
+      sanitized.text,
+      at,
+      slot.activeIdentity
+        ? { runId: slot.activeIdentity.runId, turnId: slot.activeIdentity.turnId }
+        : undefined,
+    );
     this.#publish(ownerId, slot.contextId);
+  }
+
+  #success(
+    slot: PreviewSlot,
+    text: string,
+  ): AgentBrowserResult {
+    return successfulAgentBrowserResult(text, this.#agentState(slot));
   }
 
   async #snapshot(ownerId: PreviewOwner, slot: PreviewSlot, signal?: AbortSignal): Promise<AgentBrowserResult> {
@@ -810,6 +804,7 @@ export class PreviewBroker {
   async #screenshot(ownerId: PreviewOwner, slot: PreviewSlot, signal?: AbortSignal): Promise<AgentBrowserResult> {
     const tab = this.#active(slot);
     const tabId = tab.id;
+    const documentSequence = tab.documentSequence;
     const contents = tab.view.webContents;
     if (!contents.getURL()) return failure("not-found", "The active Browser tab has no page.");
     await this.#prepareAgentPage(contents, signal);
@@ -819,15 +814,15 @@ export class PreviewBroker {
     let capturedState: AgentBrowserState | null = null;
     try {
       await this.#rendererOperation(contents, () => setAgentPageFrozen(contents, true), { signal });
-      if (await this.#rendererOperation(contents, () => agentPageHasSensitiveEvidence(contents), { signal })) {
-        return failure("invalid", "Screenshots are unavailable until the password-bearing document navigates away.");
+      if (await this.#rendererOperation(contents, () => agentPageHasSensitiveScreenshotEvidence(contents), { signal })) {
+        return failure("invalid", "Screenshots are unavailable while the document contains sensitive evidence.");
       }
       if (await this.#rendererOperation(contents, () => agentPageHasUnguardedNestedContent(contents), { signal })) {
         return failure("invalid", "Screenshots are unavailable for nested page content.");
       }
       image = await this.#rendererOperation(contents, () => contents.capturePage(), { signal });
-      if (await this.#rendererOperation(contents, () => agentPageHasSensitiveEvidence(contents), { signal })) {
-        return failure("invalid", "Screenshots are unavailable until the password-bearing document navigates away.");
+      if (await this.#rendererOperation(contents, () => agentPageHasSensitiveScreenshotEvidence(contents), { signal })) {
+        return failure("invalid", "Screenshots are unavailable while the document contains sensitive evidence.");
       }
       if (await this.#rendererOperation(contents, () => agentPageHasUnguardedNestedContent(contents), { signal })) {
         return failure("invalid", "Screenshots are unavailable for nested page content.");
@@ -850,14 +845,24 @@ export class PreviewBroker {
     if (!capturedState) {
       return failure("unavailable", "The Browser screenshot state could not be captured.");
     }
-    if (slot.tabs.get(tabId) !== tab || contents.isDestroyed()) {
+    if (
+      slot.tabs.get(tabId) !== tab
+      || contents.isDestroyed()
+      || tab.documentSequence !== documentSequence
+    ) {
       return failure("not-found", "The captured Browser tab was closed before its screenshot completed.");
     }
     const result = capturedAgentScreenshotResult(
       image, tabId, providerVisiblePageUrl(capturedUrl), capturedState,
     );
     if (!result.ok) return result;
-    this.#record(ownerId, slot, "screenshot", "Agent captured this page", undefined, tabId);
+    slot.activity = slot.evidence.recordScreenshot(
+      this.#evidencePage(tab),
+      capturedUrl,
+      image,
+      this.#evidenceAuthority(slot, tab.id),
+    );
+    this.#publish(ownerId, slot.contextId);
     return { ...result, state: { ...result.state, activity: slot.activity } };
   }
 
@@ -874,8 +879,8 @@ export class PreviewBroker {
     const contents = this.#active(slot).view.webContents;
     await this.#loadURL(contents, target.url.toString(), signal);
     stopForAbort(signal);
-    this.#record(ownerId, slot, "navigate", `Agent opened ${target.url.host}`);
-    return successfulAgentBrowserResult(this.#agentStateText(slot), this.#agentState(slot));
+    this.#record(ownerId, slot, "navigate", "Agent navigated the page");
+    return this.#success(slot, boundedAgentStateText(this.#agentState(slot)));
   }
 
   async #agentOpenTab(
@@ -904,7 +909,7 @@ export class PreviewBroker {
     }
     stopForAbort(signal);
     this.#record(ownerId, slot, "tab-open", "Agent opened a new page");
-    return successfulAgentBrowserResult(this.#agentStateText(slot), this.#agentState(slot));
+    return this.#success(slot, boundedAgentStateText(this.#agentState(slot)));
   }
 
   async #click(ownerId: PreviewOwner, slot: PreviewSlot, ref: string, signal?: AbortSignal): Promise<AgentBrowserResult> {
@@ -929,7 +934,7 @@ export class PreviewBroker {
     stopForAbort(signal);
     await this.#rendererOperation(
       contents,
-      () => showAgentPageCursor(contents, cursorX, cursorY, `Agent · ${located.label || ref}`),
+      () => showAgentPageCursor(contents, cursorX, cursorY, "Agent click"),
       { signal },
     );
     if (slot.boundsGeneration !== boundsGeneration) return changedGeometry();
@@ -983,11 +988,8 @@ export class PreviewBroker {
       if (error instanceof AgentBrowserRefusal) return error.result;
       throw error;
     }
-    this.#record(ownerId, slot, "click", `Agent clicked ${located.label || ref}`, { x, y });
-    return successfulAgentBrowserResult(
-      this.#agentStateText(slot, { clicked: ref }),
-      this.#agentState(slot),
-    );
+    this.#record(ownerId, slot, "click", "Agent clicked a page element", { x, y });
+    return this.#success(slot, boundedAgentStateText(this.#agentState(slot), { clicked: ref }));
   }
 
   async #type(
@@ -1020,7 +1022,7 @@ export class PreviewBroker {
     stopForAbort(signal);
     await this.#rendererOperation(
       contents,
-      () => showAgentPageCursor(contents, cursorX, cursorY, `Agent typing · ${located.label || ref}`),
+      () => showAgentPageCursor(contents, cursorX, cursorY, "Agent typing"),
       { signal },
     );
     if (slot.boundsGeneration !== boundsGeneration) return changedGeometry();
@@ -1082,11 +1084,8 @@ export class PreviewBroker {
       throw error;
     }
     stopForAbort(signal);
-    this.#record(ownerId, slot, "type", `Agent typed in ${located.label || ref}`, { x, y });
-    return successfulAgentBrowserResult(
-      JSON.stringify({ typed: ref, characters: text.length }),
-      this.#agentState(slot),
-    );
+    this.#record(ownerId, slot, "type", "Agent typed in a page element", { x, y });
+    return this.#success(slot, JSON.stringify({ typed: ref, characters: text.length }));
   }
 
   async #press(ownerId: PreviewOwner, slot: PreviewSlot, key: string, signal?: AbortSignal): Promise<AgentBrowserResult> {

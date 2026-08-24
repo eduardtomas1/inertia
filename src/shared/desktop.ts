@@ -8,6 +8,9 @@ import type {
   PrivateConnectPreset,
 } from "./private-connect/scopes";
 import type { PrivateConnectStateView } from "./private-connect/protocol";
+import type {
+  BrowserEvidenceSnapshot,
+} from "./browser-evidence";
 export { PRIVATE_CONNECT_IPC } from "./private-connect/ipc";
 
 export interface RuntimeConnection {
@@ -174,10 +177,13 @@ export interface PreviewState {
   activeTabId: string | null;
   tabs: PreviewTabState[];
   agentActivity: PreviewAgentActivity | null;
+  evidence: BrowserEvidenceSnapshot;
 }
-export interface PreviewStateUpdate extends PreviewState {
+export interface PreviewStateUpdate extends Omit<PreviewState, "evidence"> {
   ownerId: "primary" | "secondary";
   contextId: string;
+  /** Included only when the bounded local evidence revision changes. */
+  evidence?: BrowserEvidenceSnapshot;
 }
 
 export type ProjectPathAction = "open-externally" | "reveal";
@@ -661,6 +667,12 @@ export interface DesktopBridge {
     ownerId: string;
     contextId: string;
   }) => Promise<void>;
+  /** Requests native approval to inspect one exact bounded local screenshot. */
+  previewInspectEvidenceImage: (request: {
+    ownerId: string;
+    contextId: string;
+    evidenceId: string;
+  }) => Promise<boolean>;
   /** Subscribes to navigation initiated inside an owned desktop preview. */
   onPreviewState: (listener: (state: PreviewStateUpdate) => void) => () => void;
   syncThemePreference: (preference: "system" | "light" | "dark") => Promise<void>;

@@ -13,6 +13,7 @@ import type { SecureFileRequest, SecureFileResult } from "../node/secure-file-pr
 import type {
   AgentBrowserCommand,
   AgentBrowserResult,
+  AgentBrowserRunIdentity,
 } from "../shared/agent-browser.js";
 import type { RuntimeAttachmentBroker } from "./runtime-attachment-broker.js";
 import type {
@@ -95,7 +96,7 @@ export interface RuntimeSecureFileBroker {
 
 export interface RuntimeAgentBrowserBroker {
   perform(
-    conversationId: string,
+    identity: AgentBrowserRunIdentity,
     command: AgentBrowserCommand,
     signal?: AbortSignal,
   ): Promise<AgentBrowserResult>;

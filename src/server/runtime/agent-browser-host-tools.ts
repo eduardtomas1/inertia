@@ -4,6 +4,7 @@ import type { Conversation } from "../../shared/contracts.js";
 import type {
   AgentBrowserCommand,
   AgentBrowserKey,
+  AgentBrowserRunIdentity,
 } from "../../shared/agent-browser.js";
 import type {
   ProviderHostToolCall,
@@ -67,7 +68,7 @@ readonly ProviderHostToolDefinition[] = [
   },
   {
     name: "inertia_browser_screenshot",
-    description: "Capture the active visible Inertia Browser page as bounded PNG visual evidence. The screenshot is returned directly to the model and is never written into the project.",
+    description: "Capture the active visible Inertia Browser page into the bounded local Evidence timeline. Bitmap bytes stay on the user's device; use inertia_browser_snapshot for provider-visible page inspection.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -208,7 +209,11 @@ export class AgentBrowserHostTools {
   async invoke(
     conversation: Conversation,
     call: ProviderHostToolCall,
+    identity: AgentBrowserRunIdentity,
   ): Promise<ProviderHostToolResult> {
+    if (identity.conversationId !== conversation.id) {
+      return failure("invalid_owner", "The Browser action no longer owns this chat.");
+    }
     const command = commandFor(call);
     if (!command) return failure("unknown_tool", "That Inertia browser tool is unavailable.");
     if (
@@ -229,7 +234,7 @@ export class AgentBrowserHostTools {
       return failure("call_cancelled", "The browser action was cancelled.");
     }
     const result = await this.browser.perform(
-      conversation.id,
+      identity,
       command,
       call.signal,
     );
@@ -237,7 +242,6 @@ export class AgentBrowserHostTools {
       ? {
           success: true,
           text: result.text,
-          ...(result.image ? { image: result.image } : {}),
         }
       : failure(result.code, result.message);
   }

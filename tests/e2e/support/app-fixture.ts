@@ -14,7 +14,7 @@ import { promisify } from "node:util";
 import { RuntimeStore } from "../../../src/server/database";
 import { portableNodeExecutable } from "../../helpers/portable-provider-fixture";
 import { seedAppConversation } from "../../support/seed-app-conversation";
-import { serveAgentBrowserWindowCapturePrivacy } from "./agent-browser-fixture-pages";
+import { serveAgentBrowserPrivacyFixture } from "./agent-browser-fixture-pages";
 import { expectNoViewportOverflow as expectPageNoViewportOverflow } from "./layout-assertions";
 
 const execFileAsync = promisify(execFile);
@@ -85,7 +85,7 @@ async function createPreviewServer(): Promise<{
   url: string;
 }> {
   const server = createServer((request, response) => {
-    if (serveAgentBrowserWindowCapturePrivacy(request.url, response)) return;
+    if (serveAgentBrowserPrivacyFixture(request.url, response)) return;
     if (
       request.method === "POST"
       && request.url === "/backend-probe/v1/messages"
@@ -208,6 +208,44 @@ async function createPreviewServer(): Promise<{
         + `input.value=${JSON.stringify(secret)};input.type='text';input.remove();`
         + `document.title=${JSON.stringify(secret)}</script></head>`
         + `<body>${secret}</body></html>`,
+      );
+      return;
+    }
+    if (request.url === "/agent-browser-visible-secret-privacy") {
+      const secret = "API_KEY=sk-visible-browser-screenshot-sentinel-1234567890";
+      response.writeHead(200, {
+        "Content-Type": "text/html",
+        "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",
+      });
+      response.end(
+        "<!doctype html><title>Visible secret privacy probe</title>"
+        + "<style>body{font:20px sans-serif;padding:40px}</style>"
+        + `<main><h1>Deployment credentials</h1><p>${secret}</p></main>`,
+      );
+      return;
+    }
+    if (request.url === "/agent-browser-labeled-secret-privacy") {
+      response.writeHead(200, {
+        "Content-Type": "text/html",
+        "Content-Security-Policy": "default-src 'none'",
+      });
+      response.end("<!doctype html><title>Labeled secret privacy probe</title>"
+        + "<span id='key-label'>Secret access key</span>"
+        + "<input aria-labelledby='key-label' value='hunter2'>"
+        + "<label>Access key ID <input value='hunter2'></label>");
+      return;
+    }
+    if (request.url === "/agent-browser-pixel-secret-privacy") {
+      const secret = "sk-canvas-browser-screenshot-sentinel-1234567890";
+      response.writeHead(200, {
+        "Content-Type": "text/html",
+        "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline'",
+      });
+      response.end(
+        "<!doctype html><title>Pixel secret privacy probe</title><canvas width='800' height='160'></canvas>"
+        + "<script>const context=document.querySelector('canvas').getContext('2d');"
+        + "context.font='24px sans-serif';context.fillText("
+        + `${JSON.stringify(secret)},40,80)</script>`,
       );
       return;
     }
@@ -382,12 +420,9 @@ async function createPreviewServer(): Promise<{
     }
     if (request.url?.startsWith("/agent-browser-type-destination")) {
       setTimeout(() => {
-        response.writeHead(200, {
-          "Content-Type": "text/html",
-          "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline'",
-        });
+        response.writeHead(200, { "Content-Type": "text/html", "Content-Security-Policy": "default-src 'none'; connect-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'" });
         response.end(
-          "<!doctype html><title>Agent browser type destination</title>"
+          "<!doctype html><title>Agent browser type destination</title><style>body{font-family:sans-serif;padding:4px;margin:0;background:#f5f5f7;color:#17171b}h1{font-size:20px;margin:4px 0}label,button{display:inline-block;margin:2px}</style>"
           + "<h1>Typing navigation settled</h1>"
           + "<label>Microtask focus target <input aria-label='Microtask focus target'></label>"
           + "<label>Microtask focus decoy <input aria-label='Microtask focus decoy'></label>"
@@ -396,7 +431,7 @@ async function createPreviewServer(): Promise<{
           + "<label>Focus navigation <input aria-label='Focus navigation'></label>"
           + "<label>Private upload <input type='file' aria-label='Private upload'></label>"
           + "<button type='button'>Choose through page handler</button>"
-          + "<script>document.querySelector('[aria-label=\"Focus navigation\"]')"
+          + "<script>console.error('password=browser-e2e-console-sentinel');console.error('db_pass=browser-e2e-pass-short');console.error('passValues=browser-e2e-pass-value-short');console.error('clientpassvalues=browser-e2e-client-pass-values-short');console.error('dbp%61ss=browser-e2e-percent-dbpass-short');console.error('dbp\\u200bass=browser-e2e-zero-width-dbpass-short');console.error('\"CLIENTPASSVALUES\" = \"browser-e2e-quoted-client-pass-short\"');console.error('pwd=hunter2');console.error('MONGODB_URI=mongodb://alice:hunter2@localhost/private');console.error('tok\\u0000en=control-e2e-short');console.error('pass\\u202dword=bidi-e2e-short');console.error('tok\\u200ben=zero-width-e2e-short');console.error('tok\\uff0565n=compat-percent-e2e-short');console.error('sk%00-control-e2e-prefix1234');console.error('sk\\u0000-literal-e2e-prefix1234');console.error('gho_abcdefghijklmnop');console.error('Failure at C://Users/Jane Doe/private/file.txt');console.error('Failure in C:Users\\\\Jane Doe\\\\private\\\\config');console.error('Failure opening /root-e2e-secret');console.error('Failure at //private-server/secret share/file.txt');console.error('Failed in src/private/config');console.error('Failed in src/config');console.error('Failed in src\\\\private\\\\config');console.error('Failed in src/.env');console.error('Failed in ./Dockerfile');fetch('/agent-browser-evidence-failure?access_token=browser-e2e-query-sentinel',{method:'POST',body:'browser-e2e-body-sentinel'}).catch(()=>{});document.querySelector('[aria-label=\"Focus navigation\"]')"
           + ".addEventListener('focus',()=>{location.href='/agent-browser-focus-destination'});"
           + "document.querySelector('[aria-label=\"Microtask focus target\"]')"
           + ".addEventListener('focus',()=>queueMicrotask(()=>document.querySelector("
@@ -427,6 +462,7 @@ async function createPreviewServer(): Promise<{
       }, 450);
       return;
     }
+    if (request.url?.startsWith("/agent-browser-evidence-failure")) { response.writeHead(503, { "Content-Type": "text/plain" }); response.end("browser-e2e-response-sentinel"); return; }
     response.writeHead(200, {
       "Content-Type": "text/html",
       "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",

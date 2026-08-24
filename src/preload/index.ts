@@ -47,6 +47,7 @@ const IPC = {
   previewTab: "inertia:preview-tab",
   previewSetBounds: "inertia:preview-set-bounds",
   previewClose: "inertia:preview-close",
+  previewInspectEvidenceImage: "inertia:preview-inspect-evidence-image",
   previewState: "inertia:preview-state",
   syncThemePreference: "inertia:sync-theme-preference",
   setBackendCredential: "inertia:set-backend-credential",
@@ -270,6 +271,11 @@ const bridge: DesktopBridge = Object.freeze({
     ipcRenderer.invoke(IPC.previewSetBounds, request) as Promise<void>,
   previewClose: (request: Parameters<DesktopBridge["previewClose"]>[0]) =>
     ipcRenderer.invoke(IPC.previewClose, request) as Promise<void>,
+  previewInspectEvidenceImage: (
+    request: Parameters<DesktopBridge["previewInspectEvidenceImage"]>[0],
+  ) => ipcRenderer.invoke(IPC.previewInspectEvidenceImage, request) as ReturnType<
+    DesktopBridge["previewInspectEvidenceImage"]
+  >,
   onPreviewState: (listener: (state: PreviewStateUpdate) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, state: PreviewStateUpdate) => {
       listener(state);

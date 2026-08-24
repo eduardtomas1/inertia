@@ -1,6 +1,11 @@
 import type { WebContents } from "electron";
 
 import { MAX_AGENT_BROWSER_TEXT_BYTES } from "../shared/agent-browser.js";
+import {
+  browserEvidenceFieldNameIsSensitiveCredential,
+  browserEvidenceTextContainsSensitiveCredential,
+  MAX_BROWSER_EVIDENCE_TEXT_CHARS,
+} from "../shared/browser-evidence.js";
 import { installPreviewAgentPrivacyGuard } from "../shared/preview-agent-privacy-guard.js";
 
 // Electron's context-isolated preload world. This is the only world that owns
@@ -296,10 +301,36 @@ export async function semanticPageSnapshot(
           || element.tagName.toLowerCase(),
           50,
         );
+    const labelledByFor = (element) => {
+      const source = element.getAttribute("aria-labelledby");
+      if (!source) return "";
+      if (typeof source !== "string" || source.length > ${MAX_LABEL_TEXT_SOURCE_CHARS}) {
+        elementScanTruncated = true;
+        return "";
+      }
+      const references = normalizeText(source, ${MAX_LABEL_TEXT_SOURCE_CHARS}).split(" ");
+      if (references.length > 16) elementScanTruncated = true;
+      const labels = [];
+      for (let index = 0; index < Math.min(references.length, 16); index += 1) {
+        const id = references[index];
+        if (!id || id.length > 300 || typeof document.getElementById !== "function") {
+          elementScanTruncated = true;
+          continue;
+        }
+        const label = document.getElementById(id);
+        if (!label) {
+          elementScanTruncated = true;
+          continue;
+        }
+        labels.push(boundedElementText(label));
+      }
+      return normalizeText(labels.join(" "), ${MAX_LABEL_TEXT_SOURCE_CHARS});
+    };
     const nameFor = (element) => passwordField(element)
       ? "Password field"
       : redact(
           element.getAttribute("aria-label")
+          || labelledByFor(element)
           || element.getAttribute("title")
           || element.getAttribute("placeholder")
           || (element.labels && boundedElementText(element.labels[0]))
@@ -463,6 +494,57 @@ export async function agentPageHasSensitiveEvidence(contents: WebContents): Prom
     return state.passwordValues.size > 0 || state.nestedContentObserved === true;
   })()`);
   return value === true;
+}
+
+function snapshotHasSensitiveVisualEvidence(value: unknown): boolean {
+  if (!plainObject(value) || value.truncated === true || !Array.isArray(value.elements)
+    || value.elements.length > MAX_SEMANTIC_ELEMENTS) return true;
+  const sensitive = (candidate: unknown, maximum: number): boolean => {
+    if (typeof candidate !== "string") return false;
+    if (candidate.length > maximum) return true;
+    if (!/\S/u.test(candidate)) return false;
+    const step = Math.floor(MAX_BROWSER_EVIDENCE_TEXT_CHARS / 2);
+    for (let start = 0; start < candidate.length; start += step) {
+      const text = candidate.slice(start, start + MAX_BROWSER_EVIDENCE_TEXT_CHARS);
+      if (browserEvidenceTextContainsSensitiveCredential(text)) return true;
+    }
+    return false;
+  };
+  const sensitiveNamedValue = (name: unknown, value: unknown): boolean => {
+    if (typeof name !== "string" || typeof value !== "string") return false;
+    if (name.length > 300 || value.length > 500) return true;
+    const boundedName = name.trim();
+    const boundedValue = value.trim();
+    if (!boundedName || !boundedValue) return false;
+    if (browserEvidenceFieldNameIsSensitiveCredential(boundedName, 300)) return true;
+    const availableValue = Math.max(
+      1,
+      MAX_BROWSER_EVIDENCE_TEXT_CHARS - boundedName.length - 1,
+    );
+    return browserEvidenceTextContainsSensitiveCredential(
+      `${boundedName}=${boundedValue.slice(0, availableValue)}`,
+    );
+  };
+  if (sensitive(value.text, MAX_PAGE_TEXT_CHARS)) return true;
+  for (const element of value.elements) {
+    if (!plainObject(element)
+      || sensitive(element.name, 300)
+      || sensitive(element.value, 500)
+      || sensitiveNamedValue(element.name, element.value)) return true;
+  }
+  return false;
+}
+
+export async function agentPageHasSensitiveScreenshotEvidence(
+  contents: WebContents,
+): Promise<boolean> {
+  if (await agentPageHasSensitiveEvidence(contents)) return true;
+  const snapshot = await semanticPageSnapshot(contents);
+  try {
+    return snapshotHasSensitiveVisualEvidence(JSON.parse(snapshot) as unknown);
+  } catch {
+    return true;
+  }
 }
 
 export async function setAgentPageInputGuard(

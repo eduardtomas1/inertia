@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type {
   AgentBrowserCommand,
   AgentBrowserResult,
+  AgentBrowserRunIdentity,
 } from "../../shared/agent-browser.js";
 import type {
   RuntimeWorkerEvent,
@@ -13,7 +14,7 @@ const DEFAULT_TIMEOUT_MS = 20_000;
 const MAX_PENDING_REQUESTS = 16;
 
 interface PendingRequest {
-  conversationId: string;
+  identity: AgentBrowserRunIdentity;
   timer: NodeJS.Timeout;
   signal: AbortSignal | undefined;
   onAbort: (() => void) | null;
@@ -22,7 +23,7 @@ interface PendingRequest {
 
 export interface RuntimeAgentBrowserBroker {
   perform(
-    conversationId: string,
+    identity: AgentBrowserRunIdentity,
     command: AgentBrowserCommand,
     signal?: AbortSignal,
   ): Promise<AgentBrowserResult>;
@@ -46,7 +47,7 @@ implements RuntimeAgentBrowserBroker {
   }
 
   perform(
-    conversationId: string,
+    identity: AgentBrowserRunIdentity,
     command: AgentBrowserCommand,
     signal?: AbortSignal,
   ): Promise<AgentBrowserResult> {
@@ -76,7 +77,7 @@ implements RuntimeAgentBrowserBroker {
         this.post({
           type: "runtime.agent-browser-cancel",
           requestId,
-          conversationId,
+          identity,
         });
         settle(unavailable("The browser action timed out."));
       }, this.timeoutMs);
@@ -85,7 +86,7 @@ implements RuntimeAgentBrowserBroker {
             this.post({
               type: "runtime.agent-browser-cancel",
               requestId,
-              conversationId,
+              identity,
             });
             settle({
               ok: false,
@@ -95,7 +96,7 @@ implements RuntimeAgentBrowserBroker {
           }
         : null;
       const pending: PendingRequest = {
-        conversationId,
+        identity,
         timer,
         signal,
         onAbort,
@@ -106,7 +107,7 @@ implements RuntimeAgentBrowserBroker {
       this.post({
         type: "runtime.agent-browser-request",
         requestId,
-        conversationId,
+        identity,
         command,
       });
     });
@@ -130,7 +131,7 @@ implements RuntimeAgentBrowserBroker {
       this.post({
         type: "runtime.agent-browser-cancel",
         requestId,
-        conversationId: pending.conversationId,
+        identity: pending.identity,
       });
       pending.resolve(unavailable("The Inertia browser service stopped."));
     }

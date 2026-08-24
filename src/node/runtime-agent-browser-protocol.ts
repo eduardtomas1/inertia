@@ -3,6 +3,7 @@ import {
   parseAgentBrowserResult,
   type AgentBrowserCommand,
   type AgentBrowserResult,
+  type AgentBrowserRunIdentity,
 } from "../shared/agent-browser.js";
 
 export interface RuntimeAgentBrowserResult {
@@ -15,13 +16,13 @@ export type RuntimeAgentBrowserEvent =
   | {
       type: "runtime.agent-browser-request";
       requestId: string;
-      conversationId: string;
+      identity: AgentBrowserRunIdentity;
       command: AgentBrowserCommand;
     }
   | {
       type: "runtime.agent-browser-cancel";
       requestId: string;
-      conversationId: string;
+      identity: AgentBrowserRunIdentity;
     };
 
 const UUID_PATTERN =
@@ -29,6 +30,24 @@ const UUID_PATTERN =
 
 function plainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseIdentity(value: unknown): AgentBrowserRunIdentity | null {
+  if (
+    !plainObject(value)
+    || Object.keys(value).length !== 3
+    || typeof value.conversationId !== "string"
+    || !UUID_PATTERN.test(value.conversationId)
+    || typeof value.runId !== "string"
+    || !UUID_PATTERN.test(value.runId)
+    || typeof value.turnId !== "string"
+    || !UUID_PATTERN.test(value.turnId)
+  ) return null;
+  return {
+    conversationId: value.conversationId,
+    runId: value.runId,
+    turnId: value.turnId,
+  };
 }
 
 export function parseRuntimeAgentBrowserResult(
@@ -58,15 +77,15 @@ export function parseRuntimeAgentBrowserEvent(
     )
     || typeof value.requestId !== "string"
     || !UUID_PATTERN.test(value.requestId)
-    || typeof value.conversationId !== "string"
-    || !UUID_PATTERN.test(value.conversationId)
   ) return null;
+  const identity = parseIdentity(value.identity);
+  if (!identity) return null;
   if (value.type === "runtime.agent-browser-cancel") {
     return Object.keys(value).length === 3
       ? {
           type: "runtime.agent-browser-cancel",
           requestId: value.requestId,
-          conversationId: value.conversationId,
+          identity,
         }
       : null;
   }
@@ -76,7 +95,7 @@ export function parseRuntimeAgentBrowserEvent(
     ? {
         type: "runtime.agent-browser-request",
         requestId: value.requestId,
-        conversationId: value.conversationId,
+        identity,
         command,
       }
     : null;

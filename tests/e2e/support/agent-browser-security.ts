@@ -1,7 +1,8 @@
-import { expect } from "@playwright/test";
+import { expect, type Locator } from "@playwright/test";
 
 import { AGENT_BROWSER_WORLD_ID } from "../../../src/main/preview-agent-page";
 import type { AppFixture } from "./app-fixture";
+import { NATIVE_CREDENTIAL_AUDIT_ROUTES } from "./agent-browser-fixture-pages";
 
 export async function captureAgentBrowserSnapshot(
   app: AppFixture,
@@ -124,6 +125,71 @@ export async function expectDocumentStartPrivacyGuard(
   expect(JSON.stringify(evidence)).not.toContain(forbiddenText);
 }
 
+export async function expectScreenshotPrivacyGuard(
+  app: AppFixture,
+  conversationId: string,
+  url: string,
+  forbiddenText: string,
+  localOnly = false,
+): Promise<void> {
+  const evidence = await app.electronApp.evaluate(async (_electron, request) => {
+    type Command =
+      | { action: "screenshot" | "tabs" }
+      | { action: "tab-open"; url: string }
+      | { action: "tab-activate" | "tab-close"; tabId: string };
+    type Result = {
+      code?: string;
+      image?: unknown;
+      message?: string;
+      ok: boolean;
+      state?: { activeTabId: string };
+      text?: string;
+    };
+    const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
+      agentBrowser: (id: string, command: Command) => Promise<Result>;
+    };
+    const before = await runtime.agentBrowser(request.conversationId, { action: "tabs" });
+    if (!before.ok || !before.state) return { before };
+    const previousTabId = before.state.activeTabId;
+    const opened = await runtime.agentBrowser(request.conversationId, {
+      action: "tab-open", url: request.url,
+    });
+    if (!opened.ok || !opened.state) return { opened };
+    const tabId = opened.state.activeTabId;
+    const screenshot = await runtime.agentBrowser(request.conversationId, {
+      action: "screenshot",
+    });
+    const closed = await runtime.agentBrowser(request.conversationId, {
+      action: "tab-close", tabId,
+    });
+    const restored = await runtime.agentBrowser(request.conversationId, {
+      action: "tab-activate", tabId: previousTabId,
+    });
+    return { closed, opened, restored, screenshot };
+  }, { conversationId, url });
+  expect(evidence).toMatchObject(localOnly ? {
+    opened: { ok: true },
+    screenshot: { ok: true },
+    closed: { ok: true },
+    restored: { ok: true },
+  } : {
+    opened: { ok: true },
+    screenshot: {
+      ok: false,
+      code: "invalid",
+      message: "Screenshots are unavailable while the document contains sensitive evidence.",
+    },
+    closed: { ok: true },
+    restored: { ok: true },
+  });
+  if (localOnly && evidence.screenshot?.ok) {
+    expect(evidence.screenshot).not.toHaveProperty("image");
+    expect(JSON.parse(evidence.screenshot.text ?? "{}"))
+      .toMatchObject({ bitmap: "local-only", providerImage: false });
+  }
+  expect(JSON.stringify(evidence)).not.toContain(forbiddenText);
+}
+
 export async function expectWindowCapturePrivacyGuard(
   app: AppFixture,
   conversationId: string,
@@ -191,6 +257,109 @@ export async function expectWindowCapturePrivacyGuard(
     restored: { ok: true },
   });
   expect(JSON.stringify(evidence)).not.toContain(secret);
+}
+
+export async function expectPasswordAssignmentPrivacyGuard(
+  app: AppFixture,
+  conversationId: string,
+  url: string,
+  preview: Locator,
+): Promise<void> {
+  const previousTabId = await app.electronApp.evaluate(
+    async (_electron, id) => {
+      const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
+        agentBrowser: (
+          conversationId: string,
+          command: { action: "tabs" },
+        ) => Promise<{ ok: boolean; state?: { activeTabId: string } }>;
+      };
+      const tabs = await runtime.agentBrowser(id, { action: "tabs" });
+      return tabs.ok ? tabs.state?.activeTabId : undefined;
+    },
+    conversationId,
+  );
+  expect(previousTabId).toBeTruthy();
+  const audit = [];
+  for (const route of NATIVE_CREDENTIAL_AUDIT_ROUTES) {
+    const routeUrl = `${url}?route=${encodeURIComponent(route)}`;
+    const status = await app.electronApp.evaluate(
+      async ({ webContents }, request) => {
+        const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
+          agentBrowser: (id: string, command: { action: "tab-open" | "tab-close" | "snapshot" | "screenshot"; url?: string; tabId?: string }) => Promise<{
+            code?: string;
+            ok: boolean;
+            state?: { activeTabId: string };
+          }>;
+        };
+        const opened = await runtime.agentBrowser(request.conversationId, {
+          action: "tab-open",
+          url: request.url,
+        });
+        if (!opened.ok || !opened.state) return { route: request.route, opened };
+        const tabId = opened.state.activeTabId;
+        const contents = webContents.getAllWebContents().find(
+          (candidate) => candidate.getURL() === request.url,
+        );
+        const page = await contents?.executeJavaScript("window.__credentialRouteStatus");
+        const snapshot = await runtime.agentBrowser(request.conversationId, { action: "snapshot" });
+        const screenshot = await runtime.agentBrowser(request.conversationId, { action: "screenshot" });
+        const closed = await runtime.agentBrowser(request.conversationId, {
+          action: "tab-close",
+          tabId,
+        });
+        return { closed, opened, page, route: request.route, screenshot, snapshot };
+      },
+      { conversationId, route, url: routeUrl },
+    );
+    audit.push(status);
+  }
+  const restored = await app.electronApp.evaluate(
+    async (_electron, request) => {
+      const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
+        agentBrowser: (
+          conversationId: string,
+          command: { action: "tab-activate"; tabId: string },
+        ) => Promise<{ ok: boolean }>;
+      };
+      return await runtime.agentBrowser(request.conversationId, {
+        action: "tab-activate",
+        tabId: request.tabId,
+      });
+    },
+    { conversationId, tabId: previousTabId! },
+  );
+  expect(restored).toMatchObject({ ok: true });
+  const results = audit.map((result) => {
+    const current = result as {
+      closed?: { ok?: boolean };
+      opened?: { ok?: boolean };
+      page?: { produced?: boolean; route?: string; supported?: boolean };
+      route?: string;
+      screenshot?: { code?: string; ok?: boolean };
+      snapshot?: { code?: string; ok?: boolean };
+    };
+    return {
+      closed: current.closed?.ok,
+      opened: current.opened?.ok,
+      page: current.page,
+      route: current.route,
+      screenshot: { code: current.screenshot?.code, ok: current.screenshot?.ok },
+      snapshot: { code: current.snapshot?.code, ok: current.snapshot?.ok },
+    };
+  });
+  expect(results).toEqual(NATIVE_CREDENTIAL_AUDIT_ROUTES.map((route) => ({
+    closed: true,
+    opened: true,
+    page: { produced: true, route, supported: true },
+    route,
+    screenshot: { code: "invalid", ok: false },
+    snapshot: { code: "invalid", ok: false },
+  })));
+  await preview.getByRole("button", { name: /Evidence/u }).click();
+  const evidence = preview.getByRole("list", { name: "Browser evidence timeline" });
+  await expect(evidence).not.toContainText("hunter2");
+  await expect(evidence).toContainText("Sensitive console detail hidden");
+  await preview.getByRole("button", { name: "Close Browser evidence" }).click();
 }
 
 export async function expectHoverRetargetingGuard(

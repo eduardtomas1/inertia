@@ -1,18 +1,15 @@
-import { execFile } from "node:child_process";
 import { mkdtempSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
 
 import { afterEach, describe, expect, it } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
+import { runGit } from "../../src/server/git/runner";
 import { inspectProjectIdentity } from "../../src/server/project-identity";
 import { ProjectIdentityRefresher } from "../../src/server/project-identity-refresh";
 import { removeTemporaryDirectory } from "../helpers/temporary-directory";
 import { seedAppConversation } from "../support/seed-app-conversation";
-
-const execFileAsync = promisify(execFile);
 
 describe("app fixture project identity", () => {
   const directories: string[] = [];
@@ -31,8 +28,12 @@ describe("app fixture project identity", () => {
     mkdirSync(secondWorkspaceDirectory);
     mkdirSync(dataDirectory);
     await Promise.all([
-      execFileAsync("git", ["init", "-q", workspaceDirectory]),
-      execFileAsync("git", ["init", "-q", secondWorkspaceDirectory]),
+      runGit(workspaceDirectory, ["init", "-q"], {
+        failureMessage: "The primary fixture repository could not be initialized.",
+      }),
+      runGit(secondWorkspaceDirectory, ["init", "-q"], {
+        failureMessage: "The secondary fixture repository could not be initialized.",
+      }),
     ]);
 
     await seedAppConversation({

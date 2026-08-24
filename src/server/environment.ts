@@ -2,6 +2,10 @@ import { constants as fsConstants } from "node:fs";
 import { access, open, readdir, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { delimiter, isAbsolute, join, resolve } from "node:path";
+import {
+  isClaudeCloudRoutingEnvironmentKey,
+  isValidClaudeCloudRoutingEnvironmentValue,
+} from "../node/provider-routing-environment";
 import type { ProviderId } from "./provider/contracts";
 
 export interface ProviderEnvironment {
@@ -105,6 +109,13 @@ const PROVIDER_ENVIRONMENT_KEYS: Record<ProviderId, readonly RegExp[]> = {
   ],
 };
 
+const CLAUDE_CHILD_DENIED_ENVIRONMENT_KEYS = new Set([
+  "ANTHROPIC_AWS_API_KEY",
+  "ANTHROPIC_AWS_AUTH",
+  "ANTHROPIC_GOOGLE_CLOUD_AUTH",
+  "CLAUDE_CODE_API_BASE_URL",
+]);
+
 export function providerChildEnvironment(
   providerId: ProviderId,
   source: NodeJS.ProcessEnv,
@@ -113,6 +124,16 @@ export function providerChildEnvironment(
   for (const [key, value] of Object.entries(source)) {
     if (value === undefined) continue;
     const normalized = key.toUpperCase();
+    if (
+      providerId === "claude"
+      && (
+        CLAUDE_CHILD_DENIED_ENVIRONMENT_KEYS.has(normalized)
+        || (
+          isClaudeCloudRoutingEnvironmentKey(normalized)
+          && !isValidClaudeCloudRoutingEnvironmentValue(normalized, value)
+        )
+      )
+    ) continue;
     if (
       SAFE_CHILD_ENVIRONMENT_KEYS.has(normalized)
       || normalized.startsWith("LC_")

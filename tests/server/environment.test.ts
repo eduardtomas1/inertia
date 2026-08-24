@@ -226,9 +226,108 @@ describe.sequential("provider environment discovery", () => {
     );
   });
 
+  it("preserves bounded Claude cloud routes and ordinary brokered credentials", () => {
+    const routes = {
+      CLAUDE_CODE_USE_ANTHROPIC_AWS: "true",
+      CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD: "off",
+      ANTHROPIC_AWS_BASE_URL: "https://aws.example.test/claude/v1",
+      ANTHROPIC_AWS_WORKSPACE_ID: "aws-workspace-123",
+      ANTHROPIC_GOOGLE_CLOUD_BASE_URL:
+        "https://google.example.test/claude/v1",
+      ANTHROPIC_GOOGLE_CLOUD_LOCATION: "europe-west4",
+      ANTHROPIC_GOOGLE_CLOUD_PROJECT: "example-project",
+      ANTHROPIC_GOOGLE_CLOUD_WORKSPACE_ID: "google-workspace-456",
+      ANTHROPIC_BEDROCK_REGION_PREFIX: "apac",
+      ANTHROPIC_BEDROCK_SERVICE_TIER: "auto",
+    };
+    const environment = providerChildEnvironment("claude", {
+      ...routes,
+      ANTHROPIC_API_KEY: "brokered-anthropic-secret",
+      ANTHROPIC_AWS_API_KEY: "sentinel-aws-secret",
+      ANTHROPIC_AWS_AUTH: "Bearer sentinel-aws-secret",
+      ANTHROPIC_GOOGLE_CLOUD_AUTH: "Bearer sentinel-google-secret",
+      CLAUDE_CODE_API_BASE_URL: "https://excluded-api-base.example.test",
+    });
+
+    expect(environment).toMatchObject({
+      ...routes,
+      ANTHROPIC_API_KEY: "brokered-anthropic-secret",
+    });
+    expect(environment).not.toHaveProperty("ANTHROPIC_AWS_API_KEY");
+    expect(environment).not.toHaveProperty("ANTHROPIC_AWS_AUTH");
+    expect(environment).not.toHaveProperty("ANTHROPIC_GOOGLE_CLOUD_AUTH");
+    expect(environment).not.toHaveProperty("CLAUDE_CODE_API_BASE_URL");
+  });
+
+  it("validates mixed-case Claude cloud routes and auth denials", () => {
+    const source = {
+      Claude_Code_Use_Anthropic_Aws: "YES",
+      Anthropic_Aws_Base_Url: "https://aws.windows.test/claude/v1",
+      Anthropic_Aws_Workspace_Id: "windows-workspace",
+      Anthropic_Aws_Auth: "Bearer sentinel-windows-secret",
+    };
+
+    expect(providerChildEnvironment("claude", source)).toEqual({
+      Claude_Code_Use_Anthropic_Aws: source.Claude_Code_Use_Anthropic_Aws,
+      Anthropic_Aws_Base_Url: source.Anthropic_Aws_Base_Url,
+      Anthropic_Aws_Workspace_Id: source.Anthropic_Aws_Workspace_Id,
+    });
+  });
+
+  it("rejects malformed and oversized Claude cloud routes in provider children", () => {
+    for (const key of [
+      "ANTHROPIC_AWS_BASE_URL",
+      "ANTHROPIC_GOOGLE_CLOUD_BASE_URL",
+    ]) {
+      for (const value of [
+        "not a URL",
+        "https://sentinel-user:sentinel-secret@cloud.example.test/v1",
+        "https://cloud.example.test/v1?token=sentinel-secret",
+        `https://cloud.example.test/${"x".repeat(2_048)}`,
+      ]) {
+        expect(providerChildEnvironment("claude", { [key]: value })).toEqual({});
+      }
+    }
+    for (const key of [
+      "CLAUDE_CODE_USE_ANTHROPIC_AWS",
+      "CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD",
+    ]) {
+      expect(providerChildEnvironment("claude", {
+        [key]: "sometimes",
+      })).toEqual({});
+      expect(providerChildEnvironment("claude", {
+        [key]: `true${" ".repeat(16)}`,
+      })).toEqual({});
+    }
+    expect(providerChildEnvironment("claude", {
+      ANTHROPIC_BEDROCK_REGION_PREFIX: "north-america",
+    })).toEqual({});
+    expect(providerChildEnvironment("claude", {
+      ANTHROPIC_BEDROCK_REGION_PREFIX: "u".repeat(257),
+    })).toEqual({});
+    for (const key of [
+      "ANTHROPIC_AWS_WORKSPACE_ID",
+      "ANTHROPIC_GOOGLE_CLOUD_LOCATION",
+      "ANTHROPIC_GOOGLE_CLOUD_PROJECT",
+      "ANTHROPIC_GOOGLE_CLOUD_WORKSPACE_ID",
+      "ANTHROPIC_BEDROCK_SERVICE_TIER",
+    ]) {
+      expect(providerChildEnvironment("claude", { [key]: " \n " })).toEqual({});
+      expect(providerChildEnvironment("claude", {
+        [key]: "x".repeat(257),
+      })).toEqual({});
+    }
+  });
+
   it("recognizes every outer-boundary provider routing control", () => {
     const source = Object.fromEntries(
-      PROVIDER_ROUTING_ENVIRONMENT_KEYS.map((key) => [key, "1"]),
+      PROVIDER_ROUTING_ENVIRONMENT_KEYS.map((key) => [
+        key,
+        key === "ANTHROPIC_AWS_BASE_URL"
+          || key === "ANTHROPIC_GOOGLE_CLOUD_BASE_URL"
+          ? "https://routing.example.test/claude/v1"
+          : key === "ANTHROPIC_BEDROCK_REGION_PREFIX" ? "us" : "1",
+      ]),
     );
     const retained = new Set(
       (["codex", "claude", "opencode"] as const).flatMap((providerId) =>

@@ -1,13 +1,19 @@
 import { describe, expect, it } from "vitest";
 
 import { runtimeProcessEnvironment } from "../../src/main/runtime-process-environment";
-import { PROVIDER_HTTP_ENDPOINT_ROUTING_ENVIRONMENT_KEYS } from "../../src/node/provider-routing-environment";
+import {
+  CLAUDE_CLOUD_ROUTING_ENVIRONMENT_KEYS,
+  PROVIDER_HTTP_ENDPOINT_ROUTING_ENVIRONMENT_KEYS,
+} from "../../src/node/provider-routing-environment";
 import { runtimeEnvironmentKind } from "../../src/server/runtime-status";
 
 describe("supervised runtime process environment", () => {
   const sentinelSecrets: NodeJS.ProcessEnv = {
     ANTHROPIC_API_KEY: "sentinel-anthropic-secret",
+    ANTHROPIC_AWS_API_KEY: "sentinel-anthropic-aws-secret",
+    ANTHROPIC_AWS_AUTH: "Bearer sentinel-anthropic-aws-secret",
     ANTHROPIC_CUSTOM_HEADERS: "Authorization: sentinel-secret",
+    ANTHROPIC_GOOGLE_CLOUD_AUTH: "Bearer sentinel-google-cloud-secret",
     AWS_ACCESS_KEY_ID: "sentinel-aws-access-key",
     AWS_ENDPOINT_URL_STS:
       "https://sentinel-user:sentinel-secret@sts.example.test",
@@ -17,6 +23,7 @@ describe("supervised runtime process environment", () => {
     AWS_WEB_IDENTITY_TOKEN_FILE: "/tmp/sentinel-web-identity-token",
     AZURE_OPENAI_API_KEY: "sentinel-azure-openai-secret",
     CLAUDE_CODE_OAUTH_TOKEN: "sentinel-claude-oauth-secret",
+    CLAUDE_CODE_API_BASE_URL: "https://excluded-api-base.example.test",
     CLOUDFLARE_API_TOKEN: "sentinel-cloudflare-secret",
     CODESPACES_TOKEN: "sentinel-codespaces-token",
     CONTAINER_SECRET: "sentinel-container-secret",
@@ -278,6 +285,102 @@ describe("supervised runtime process environment", () => {
         parent.Aws_Endpoint_Url_Bedrock_Runtime,
       USERPROFILE: parent.UserProfile,
     });
+  });
+
+  it("preserves the ten bounded Claude cloud routes on Linux", () => {
+    const routes = {
+      CLAUDE_CODE_USE_ANTHROPIC_AWS: "yes",
+      CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD: "0",
+      ANTHROPIC_AWS_BASE_URL: "https://aws.example.test/claude/v1",
+      ANTHROPIC_AWS_WORKSPACE_ID: "aws-workspace-123",
+      ANTHROPIC_GOOGLE_CLOUD_BASE_URL:
+        "https://google.example.test/claude/v1",
+      ANTHROPIC_GOOGLE_CLOUD_LOCATION: "europe-west4",
+      ANTHROPIC_GOOGLE_CLOUD_PROJECT: "example-project",
+      ANTHROPIC_GOOGLE_CLOUD_WORKSPACE_ID: "google-workspace-456",
+      ANTHROPIC_BEDROCK_REGION_PREFIX: "eu",
+      ANTHROPIC_BEDROCK_SERVICE_TIER: "auto",
+    };
+
+    expect(CLAUDE_CLOUD_ROUTING_ENVIRONMENT_KEYS).toEqual(Object.keys(routes));
+    expect(runtimeProcessEnvironment(routes, "linux")).toEqual(routes);
+  });
+
+  it("canonicalizes mixed-case Windows Claude cloud routes", () => {
+    expect(runtimeProcessEnvironment({
+      Claude_Code_Use_Anthropic_Aws: "On",
+      Claude_Code_Use_Anthropic_Google_Cloud: "false",
+      Anthropic_Aws_Base_Url: "https://aws.windows.test/claude/v1",
+      Anthropic_Aws_Workspace_Id: "aws-windows-workspace",
+      Anthropic_Google_Cloud_Base_Url:
+        "https://google.windows.test/claude/v1",
+      Anthropic_Google_Cloud_Location: "us-central1",
+      Anthropic_Google_Cloud_Project: "windows-project",
+      Anthropic_Google_Cloud_Workspace_Id: "google-windows-workspace",
+      Anthropic_Bedrock_Region_Prefix: "global",
+      Anthropic_Bedrock_Service_Tier: "standard_only",
+    }, "win32")).toEqual({
+      CLAUDE_CODE_USE_ANTHROPIC_AWS: "On",
+      CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD: "false",
+      ANTHROPIC_AWS_BASE_URL: "https://aws.windows.test/claude/v1",
+      ANTHROPIC_AWS_WORKSPACE_ID: "aws-windows-workspace",
+      ANTHROPIC_GOOGLE_CLOUD_BASE_URL:
+        "https://google.windows.test/claude/v1",
+      ANTHROPIC_GOOGLE_CLOUD_LOCATION: "us-central1",
+      ANTHROPIC_GOOGLE_CLOUD_PROJECT: "windows-project",
+      ANTHROPIC_GOOGLE_CLOUD_WORKSPACE_ID: "google-windows-workspace",
+      ANTHROPIC_BEDROCK_REGION_PREFIX: "global",
+      ANTHROPIC_BEDROCK_SERVICE_TIER: "standard_only",
+    });
+  });
+
+  it("rejects malformed Claude routes and cloud auth sentinels at the outer boundary", () => {
+    for (const key of [
+      "ANTHROPIC_AWS_BASE_URL",
+      "ANTHROPIC_GOOGLE_CLOUD_BASE_URL",
+    ]) {
+      for (const value of [
+        "not a URL",
+        "https://sentinel-user:sentinel-secret@cloud.example.test/v1",
+        "https://cloud.example.test/v1?token=sentinel-secret",
+        `https://cloud.example.test/${"x".repeat(2_048)}`,
+      ]) {
+        expect(runtimeProcessEnvironment({ [key]: value }, "linux")).toEqual({});
+      }
+    }
+    for (const key of [
+      "CLAUDE_CODE_USE_ANTHROPIC_AWS",
+      "CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD",
+    ]) {
+      expect(runtimeProcessEnvironment({ [key]: "sometimes" }, "linux")).toEqual({});
+      expect(runtimeProcessEnvironment({
+        [key]: `true${" ".repeat(16)}`,
+      }, "linux")).toEqual({});
+    }
+    expect(runtimeProcessEnvironment({
+      ANTHROPIC_BEDROCK_REGION_PREFIX: "north-america",
+    }, "linux")).toEqual({});
+    expect(runtimeProcessEnvironment({
+      ANTHROPIC_BEDROCK_REGION_PREFIX: "u".repeat(257),
+    }, "linux")).toEqual({});
+    for (const key of [
+      "ANTHROPIC_AWS_WORKSPACE_ID",
+      "ANTHROPIC_GOOGLE_CLOUD_LOCATION",
+      "ANTHROPIC_GOOGLE_CLOUD_PROJECT",
+      "ANTHROPIC_GOOGLE_CLOUD_WORKSPACE_ID",
+      "ANTHROPIC_BEDROCK_SERVICE_TIER",
+    ]) {
+      expect(runtimeProcessEnvironment({ [key]: " \t " }, "linux")).toEqual({});
+      expect(runtimeProcessEnvironment({
+        [key]: "x".repeat(257),
+      }, "linux")).toEqual({});
+    }
+    expect(runtimeProcessEnvironment({
+      ANTHROPIC_AWS_API_KEY: "sentinel-aws-secret",
+      ANTHROPIC_AWS_AUTH: "Bearer sentinel-aws-secret",
+      ANTHROPIC_GOOGLE_CLOUD_AUTH: "Bearer sentinel-google-secret",
+      CLAUDE_CODE_API_BASE_URL: "https://excluded-api-base.example.test",
+    }, "linux")).toEqual({});
   });
 
   it.each([

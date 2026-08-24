@@ -1,6 +1,9 @@
 import { isIP } from "node:net";
 import { GIT_LAUNCH_ENVIRONMENT_KEYS } from "../node/git-environment";
 import {
+  isCredentialFreeProviderHttpEndpoint,
+  isClaudeCloudRoutingEnvironmentKey,
+  isValidClaudeCloudRoutingEnvironmentValue,
   PROVIDER_ENDPOINT_ROUTING_ENVIRONMENT_KEY,
   PROVIDER_HTTP_ENDPOINT_ROUTING_ENVIRONMENT_KEYS,
   PROVIDER_ROUTING_ENVIRONMENT_KEYS,
@@ -127,15 +130,7 @@ const PROVIDER_HTTP_ENDPOINT_ROUTING_ENVIRONMENT_KEY_SET = new Set<string>(
 
 const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/u;
 const URL_DOT_SEGMENT = /(?:^|[\\/])\.{1,2}(?=[\\/?#]|$)/u;
-const PROVIDER_ENDPOINT_PATH_COMPONENT = /^[A-Za-z0-9._~-]+$/u;
-const SECRET_ENDPOINT_PATH_COMPONENT =
-  /(?:^|[-_.])(?:api[-_.]?key|authorization|bearer|credential|password|passwd|pwd|secret|session[-_.]?token|token)(?:$|[-_.=:])/iu;
-const SECRET_ENDPOINT_PATH_VALUE =
-  /^(?:api|key|pk|rk|sk|token|gh[pousr]|github_pat|xox[baprs])[-_][A-Za-z0-9_-]{8,}$/iu;
 const MAXIMUM_URL_DECODE_PASSES = 4;
-const MAXIMUM_PROVIDER_ENDPOINT_PATH_LENGTH = 512;
-const MAXIMUM_PROVIDER_ENDPOINT_PATH_COMPONENTS = 16;
-const MAXIMUM_PROVIDER_ENDPOINT_PATH_COMPONENT_LENGTH = 128;
 const MAXIMUM_NO_PROXY_ENTRIES = 256;
 const MAXIMUM_NO_PROXY_ENTRY_LENGTH = 512;
 
@@ -194,29 +189,6 @@ function credentialFreeProxyUrl(value: string): boolean {
 function credentialFreeHttpEndpoint(value: string): boolean {
   const parsed = credentialFreeUrl(value, HTTP_ENDPOINT_PROTOCOLS);
   return parsed !== null && (parsed.pathname === "" || parsed.pathname === "/");
-}
-
-function safeProviderEndpointPath(pathname: string): boolean {
-  const representations = decodedUrlRepresentations(pathname);
-  if (representations === null) return false;
-  const decoded = representations.at(-1)!;
-  if (
-    decoded.length > MAXIMUM_PROVIDER_ENDPOINT_PATH_LENGTH
-    || CONTROL_CHARACTER.test(decoded)
-    || /[\\@?#]/u.test(decoded)
-  ) return false;
-  const components = decoded.split("/").filter(Boolean);
-  return components.length <= MAXIMUM_PROVIDER_ENDPOINT_PATH_COMPONENTS
-    && components.every((component) =>
-      component.length <= MAXIMUM_PROVIDER_ENDPOINT_PATH_COMPONENT_LENGTH
-      && PROVIDER_ENDPOINT_PATH_COMPONENT.test(component)
-      && !SECRET_ENDPOINT_PATH_COMPONENT.test(component)
-      && !SECRET_ENDPOINT_PATH_VALUE.test(component));
-}
-
-function credentialFreeProviderEndpoint(value: string): boolean {
-  const parsed = credentialFreeUrl(value, HTTP_ENDPOINT_PROTOCOLS);
-  return parsed !== null && safeProviderEndpointPath(parsed.pathname);
 }
 
 function validPort(value: string | undefined): boolean {
@@ -316,7 +288,11 @@ export function runtimeProcessEnvironment(
       || (key === "NODE_ENV" && value !== "test")
       || (
         PROVIDER_HTTP_ENDPOINT_ROUTING_ENVIRONMENT_KEY_SET.has(key)
-        && !credentialFreeProviderEndpoint(value)
+        && !isCredentialFreeProviderHttpEndpoint(value)
+      )
+      || (
+        isClaudeCloudRoutingEnvironmentKey(key)
+        && !isValidClaudeCloudRoutingEnvironmentValue(key, value)
       )
     ) {
       continue;

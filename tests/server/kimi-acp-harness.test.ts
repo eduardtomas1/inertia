@@ -366,8 +366,18 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const captured = JSON.parse(readFileSync(capturePath, "utf8")) as Array<{
       id?: number;
       method?: string;
+      params?: Record<string, unknown>;
       result?: { outcome?: { outcome?: string; optionId?: string } };
     }>;
+    expect(captured.find(({ method }) => method === "initialize"))
+      .toMatchObject({
+        params: {
+          clientCapabilities: {
+            plan: {},
+            session: { compaction: {} },
+          },
+        },
+      });
     expect(captured.find(({ id }) => id === 101)?.result).toEqual({
       outcome: { outcome: "selected", optionId: "q0_opt_0" },
     });
@@ -631,7 +641,9 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   }
   if (message.method === "session/prompt") {
     fs.writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify(message.params.prompt));
-    send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Compacted" } } } });
+    send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "compaction_update", compactionId: "explicit-compact", status: "in_progress" } } });
+    send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "compaction_summary_chunk", compactionId: "explicit-compact", content: { type: "text", text: "Retained context" } } } });
+    send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "compaction_update", compactionId: "explicit-compact", status: "completed", summary: [{ type: "text", text: "Retained context" }] } } });
     return send({ jsonrpc: "2.0", id: message.id, result: { stopReason: "end_turn" } });
   }
 });
@@ -656,6 +668,113 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     expect(JSON.parse(readFileSync(capturePath, "utf8"))).toEqual([
       { type: "text", text: "/compact preserve exact retrieval facts" },
     ]);
+  });
+
+  it("requires clean negotiated lifecycle completion for explicit compaction", async () => {
+    const cases = [
+      {
+        name: "no-event",
+        updates: [],
+        status: "failed",
+      },
+      {
+        name: "failed",
+        updates: [
+          { sessionUpdate: "compaction_update", compactionId: "compact-1", status: "in_progress" },
+          { sessionUpdate: "compaction_update", compactionId: "compact-1", status: "failed", error: "limit changed" },
+        ],
+        status: "failed",
+      },
+      {
+        name: "cancelled",
+        updates: [
+          { sessionUpdate: "compaction_update", compactionId: "compact-1", status: "in_progress" },
+          { sessionUpdate: "compaction_update", compactionId: "compact-1", status: "cancelled" },
+        ],
+        status: "failed",
+      },
+      {
+        name: "incomplete",
+        updates: [
+          { sessionUpdate: "compaction_update", compactionId: "compact-1", status: "in_progress" },
+        ],
+        status: "failed",
+      },
+      {
+        name: "completed",
+        updates: [
+          { sessionUpdate: "compaction_update", compactionId: "compact-1", status: "in_progress" },
+          { sessionUpdate: "compaction_update", compactionId: "compact-1", status: "completed" },
+        ],
+        status: "completed",
+      },
+      {
+        name: "mixed",
+        updates: [
+          { sessionUpdate: "compaction_update", compactionId: "compact-1", status: "completed" },
+          { sessionUpdate: "compaction_update", compactionId: "compact-2", status: "failed", error: "limit changed" },
+        ],
+        status: "failed",
+      },
+      {
+        name: "future-then-completed",
+        updates: [
+          { sessionUpdate: "compaction_update", compactionId: "compact-1", status: "in_progress" },
+          { sessionUpdate: "compaction_update", compactionId: "compact-1", status: "future_paused" },
+          { sessionUpdate: "compaction_update", compactionId: "compact-1", status: "completed" },
+        ],
+        status: "completed",
+      },
+      {
+        name: "unknown-only",
+        updates: [
+          { sessionUpdate: "compaction_update", compactionId: "compact-1", status: "future_paused" },
+        ],
+        status: "failed",
+      },
+    ] as const;
+
+    for (const fixture of cases) {
+      const root = portableFixtureRoot(`kimi ACP compact ${fixture.name}`);
+      roots.push(root);
+      const command = portableNodeExecutable(root, "kimi");
+      writeNodeSubcommand(root, "acp", `
+const readline = require("node:readline");
+const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
+const sessionId = "kimi-compact-session";
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: 1, agentCapabilities: { sessionCapabilities: { resume: {} } }, agentInfo: { name: "Kimi Code CLI", version: "test" } } });
+  if (message.method === "session/resume") {
+    send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "available_commands_update", availableCommands: [{ name: "compact", description: "Compact context" }] } } });
+    return send({ jsonrpc: "2.0", id: message.id, result: { modes: { currentModeId: "build", availableModes: [{ id: "build", name: "Build" }] }, configOptions: [] } });
+  }
+  if (message.method === "session/prompt") {
+    for (const update of ${JSON.stringify(fixture.updates)}) {
+      send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update } });
+    }
+    return send({ jsonrpc: "2.0", id: message.id, result: { stopReason: "end_turn" } });
+  }
+});
+`);
+      const manager = new ProviderManager(
+        { commands: { kimi: command } },
+        new AgentHarnessRegistry([createKimiAcpHarness()]),
+      );
+      const result = await manager.compact(nativeProviderRunInput({
+        providerId: "kimi",
+        conversationId: `kimi-compact-${fixture.name}`,
+        cwd: root,
+        prompt: "/compact",
+        interactionMode: "build",
+        access: "supervised",
+        sessionId: "kimi-compact-session",
+      }));
+      expect(result.status, fixture.name).toBe(fixture.status);
+      if (fixture.status === "failed") {
+        expect(result.message).toContain("did not confirm");
+      }
+    }
   });
 
   it("classifies authentication and authoritative prompt stop failures", async () => {
@@ -750,6 +869,53 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     });
   });
 
+  it("fails closed on terminal authentication without invoking authenticate", async () => {
+    const root = portableFixtureRoot("kimi ACP terminal auth");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "kimi");
+    writeNodeSubcommand(root, "acp", `
+const fs = require("node:fs");
+const readline = require("node:readline");
+const messages = [];
+const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const message = JSON.parse(line);
+  messages.push(message);
+  fs.writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify(messages));
+  if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: {
+    protocolVersion: 1,
+    agentCapabilities: {},
+    authMethods: [{ type: "terminal", id: "login", name: "Kimi login", args: ["login"] }],
+    agentInfo: { name: "Kimi Code CLI", version: "test" },
+  } });
+});
+setInterval(() => {}, 1000);
+`);
+    const manager = new ProviderManager(
+      { commands: { kimi: command } },
+      new AgentHarnessRegistry([createKimiAcpHarness()]),
+    );
+
+    const terminalResult = await manager.run(nativeProviderRunInput({
+      providerId: "kimi",
+      conversationId: "kimi-terminal-auth",
+      cwd: root,
+      prompt: "Start",
+      interactionMode: "build",
+      access: "supervised",
+    }));
+    expect(terminalResult).toMatchObject({
+      status: "failed",
+      error: "Kimi ACP advertised unsupported terminal authentication.",
+      failure: { phase: "initialize", terminalEvent: "initialize" },
+    });
+    const messages = JSON.parse(readFileSync(capturePath, "utf8")) as Array<{
+      method?: string;
+    }>;
+    expect(messages.some(({ method }) => method === "authenticate")).toBe(false);
+  });
+
   it("classifies bounded protocol, transport, process, and cleanup failures", async () => {
     const runFailure = async (
       name: string,
@@ -764,6 +930,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
         { commands: { kimi: command } },
         new AgentHarnessRegistry([harness]),
       );
+      const activities: Array<{ activityId?: string }> = [];
       const result = await manager.run(nativeProviderRunInput({
         providerId: "kimi",
         conversationId: name.replaceAll(" ", "-"),
@@ -771,8 +938,10 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
         prompt: "Start",
         interactionMode: "build",
         access: "supervised",
-      }));
-      return { manager, result };
+      }), {
+        onActivity: (event) => activities.push(event),
+      });
+      return { activities, manager, result };
     };
 
     const overflow = await runFailure(
@@ -952,7 +1121,11 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   const message = JSON.parse(line);
   if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: 1, agentCapabilities: {}, agentInfo: { name: "Kimi Code CLI", version: "test" } } });
   if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: { sessionId: "empty", modes: { currentModeId: "build", availableModes: [{ id: "build", name: "Build" }] }, configOptions: [] } });
-  if (message.method === "session/prompt") return send({ jsonrpc: "2.0", id: message.id, result: { stopReason: "end_turn" } });
+  if (message.method === "session/prompt") {
+    send({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "empty", update: { sessionUpdate: "compaction_update", compactionId: "ordinary-compact", status: "completed", _meta: { source: "terminal-first" } } } });
+    send({ jsonrpc: "2.0", method: "session/update", params: { sessionId: "empty", update: { sessionUpdate: "compaction_update", compactionId: "ordinary-compact", status: "completed", summary: [{ type: "text", text: "Late retained context" }], _meta: null } } });
+    return send({ jsonrpc: "2.0", id: message.id, result: { stopReason: "end_turn" } });
+  }
 });
 `);
     expect(emptyEndTurn.result).toMatchObject({
@@ -963,6 +1136,50 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
         terminalEvent: "session/prompt:empty-end-turn",
       },
     });
+    expect(emptyEndTurn.activities.filter(({ activityId }) =>
+      activityId === "kimi:compaction:ordinary-compact")).toHaveLength(1);
+
+    const incompleteCompactionCases = [
+      {
+        name: "in progress",
+        updates: `send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "compaction_update", compactionId: "compact-1", status: "in_progress" } } });`,
+      },
+      {
+        name: "failed",
+        updates: `send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "compaction_update", compactionId: "compact-1", status: "in_progress" } } });
+send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "compaction_update", compactionId: "compact-1", status: "failed", error: "limit changed" } } });`,
+      },
+      {
+        name: "cancelled",
+        updates: `send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "compaction_update", compactionId: "compact-1", status: "in_progress" } } });
+send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "compaction_update", compactionId: "compact-1", status: "cancelled" } } });`,
+      },
+      {
+        name: "summary chunk",
+        updates: `send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "compaction_update", compactionId: "compact-1", status: "in_progress" } } });
+send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "compaction_summary_chunk", compactionId: "compact-1", content: { type: "text", text: "Retained context" } } } });`,
+      },
+    ];
+    for (const compactionCase of incompleteCompactionCases) {
+      const result = await runFailure(`kimi ACP ${compactionCase.name} evidence`, `
+const readline = require("node:readline");
+const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
+const sessionId = "empty-compaction";
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: 1, agentCapabilities: {}, agentInfo: { name: "Kimi Code CLI", version: "test" } } });
+  if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: { sessionId, modes: { currentModeId: "build", availableModes: [{ id: "build", name: "Build" }] }, configOptions: [] } });
+  if (message.method === "session/prompt") {
+    ${compactionCase.updates}
+    return send({ jsonrpc: "2.0", id: message.id, result: { stopReason: "end_turn" } });
+  }
+});
+`);
+      expect(result.result).toMatchObject({
+        status: "failed",
+        failure: { terminalEvent: "session/prompt:empty-end-turn" },
+      });
+    }
 
     const toolOverflow = await runFailure("kimi ACP tool state overflow", `
 const readline = require("node:readline");

@@ -68,7 +68,11 @@ import {
   toolActivityPhase,
   validateKimiInitialize,
 } from "./kimi-acp-projection";
-import { projectAcpCompactionUpdate } from "./acp-compaction-projection";
+import { selectAcpAgentAuthMethod } from "./acp-auth";
+import {
+  AcpCompactionProjection,
+  unconfirmedAcpCompactionFailure,
+} from "./acp-compaction-projection";
 import { parseAcpSessionNotification } from "./acp-json-rpc";
 
 const MAX_WIRE_LINE_BYTES = 1024 * 1024;
@@ -189,6 +193,11 @@ function startKimiRun(
     maxTokens: null,
   };
   const turnEvidence: TurnEvidence = { seen: false };
+  const compactions = new AcpCompactionProjection(
+    "Kimi Code",
+    "kimi",
+    emitter,
+  );
   const hostToolRuntime = options.hostTools && options.input.turnId
     ? new ProviderHostToolRuntime({
         bridge: options.hostTools,
@@ -329,6 +338,7 @@ function startKimiRun(
           contextUsage,
           toolActivities,
           turnEvidence,
+          compactions,
         );
       } catch (error) {
         wireError = error instanceof Error
@@ -410,14 +420,18 @@ function startKimiRun(
       const initialized = await requestControl(
         context.request(acp.methods.agent.initialize, {
           protocolVersion: 1,
-          clientCapabilities: { plan: {} },
+          clientCapabilities: { plan: {}, session: { compaction: {} } },
           clientInfo: { name: "Inertia", version: INERTIA_VERSION },
         }),
         "initialize",
       );
       validateKimiInitialize(initialized);
       supportsImages = initialized.agentCapabilities?.promptCapabilities?.image === true;
-      const login = initialized.authMethods?.find(({ id }) => id === "login");
+      const login = selectAcpAgentAuthMethod(
+        "Kimi Code",
+        initialized.authMethods,
+        "login",
+      );
       if (login) {
         activeFailurePhase = "auth";
         activeTerminalEvent = "authenticate";
@@ -549,14 +563,22 @@ function startKimiRun(
       if (response.usage) {
         emitKimiPromptUsage(response.usage, contextUsage, emitter.rich);
       }
+      const compactionFailure = options.input.operation?.kind === "compact"
+        && compactions.completionEvidence() !== "completed"
+        ? unconfirmedAcpCompactionFailure("Kimi")
+        : undefined;
       const outcome = cancelRequested || response.stopReason === "cancelled"
         ? finish("cancelled")
         : response.stopReason === "end_turn"
           // Current Kimi ACP collapses most internal failed turns into
           // end_turn. Empty turns can fail closed; partial-output failures are
           // wire-indistinguishable until the upstream adapter exposes them.
-          ? turnEvidence.seen
-            ? finish("completed")
+          ? options.input.operation?.kind === "compact"
+            ? compactionFailure
+              ? finish("failed", compactionFailure.message, compactionFailure)
+              : finish("completed")
+            : turnEvidence.seen
+              ? finish("completed")
             : (() => {
                 const failure: ProviderRunFailure = {
                   reason: "provider-error",
@@ -952,6 +974,7 @@ function handleKimiUpdate(
   contextUsage: KimiContextUsage,
   toolActivities: Map<string, ToolActivity>,
   turnEvidence: TurnEvidence,
+  compactions: AcpCompactionProjection,
 ): void {
   const update = notification.update;
   switch (update.sessionUpdate) {
@@ -1124,13 +1147,13 @@ function handleKimiUpdate(
       });
       return;
     case "compaction_update":
-      turnEvidence.seen = true;
-      projectAcpCompactionUpdate("Kimi Code", "kimi", update, emitter);
+      compactions.observeUpdate(update);
       return;
     case "compaction_summary_chunk":
       // ACP compaction summaries replace retained context. They prove that the
-      // provider handled this turn, but are not assistant response text.
-      turnEvidence.seen = true;
+      // provider handled this turn, but are not assistant response text or
+      // ordinary-turn evidence.
+      compactions.observeSummaryChunk(update);
       return;
   }
   const unsupportedUpdate: never = update;

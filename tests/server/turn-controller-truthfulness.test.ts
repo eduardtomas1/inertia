@@ -6,6 +6,8 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { AgentApprovalRequest, AgentInputRequest, AgentPlan, ProviderInfo, ServerEvent } from "../../src/shared/contracts";
 import { RuntimeStore } from "../../src/server/database";
+import { createAgentHarnessEmitter } from "../../src/server/provider/agent-harness";
+import { AcpCompactionProjection } from "../../src/server/provider/acp-compaction-projection";
 import { TurnController } from "../../src/server/runtime/turns/turn-controller";
 import { FakeTurnProvider, FakeTurnScheduler } from "../support/fake-turn-provider";
 
@@ -125,6 +127,65 @@ describe("TurnController terminal truthfulness", () => {
 
     value.provider.emit({ ...identity(value), type: "status", status: "running" });
     expect(value.store.agentTurn(queued.turn.id).status).toBe("running");
+    value.provider.resolve();
+    await flushPromises();
+    value.store.close();
+  });
+
+  it("persists one terminal-first ACP compaction row across mutable patches", async () => {
+    const value = await runtime();
+    const queued = value.controller.queue({
+      conversationId: value.conversationId,
+      content: "Exercise terminal-first compaction patches.",
+    });
+    expect(value.controller.start(queued.turn.id)).toBe(true);
+    await flushPromises();
+
+    const emitter = createAgentHarnessEmitter(
+      "codex",
+      value.conversationId,
+      {
+        onEvent: (event) => {
+          if (event.type === "activity") value.provider.emit(event);
+        },
+      },
+      queued.turn.runId,
+      queued.turn.id,
+    );
+    const compactions = new AcpCompactionProjection(
+      "Cursor",
+      "cursor",
+      emitter,
+    );
+    compactions.observeUpdate({
+      compactionId: "compact-terminal-first",
+      status: "failed",
+      error: "first provider detail",
+    });
+    compactions.observeUpdate({
+      compactionId: "compact-terminal-first",
+      status: "failed",
+    });
+    compactions.observeUpdate({
+      compactionId: "compact-terminal-first",
+      status: "failed",
+      error: "replacement provider detail",
+    });
+    compactions.observeUpdate({
+      compactionId: "compact-terminal-first",
+      status: "failed",
+      error: null,
+    });
+
+    expect(value.store.conversationDetail(value.conversationId)?.activities
+      .filter(({ turnId }) => turnId === queued.turn.id)).toEqual([
+      expect.objectContaining({
+        title: "Cursor could not compact session context",
+        detail: "Status: failed",
+        status: "failed",
+      }),
+    ]);
+
     value.provider.resolve();
     await flushPromises();
     value.store.close();

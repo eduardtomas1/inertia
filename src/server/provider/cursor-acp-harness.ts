@@ -58,7 +58,8 @@ import {
   BoundedJsonLineTransform,
   validateCursorVendorFrame,
 } from "./cursor-acp-framing";
-import { projectAcpCompactionUpdate } from "./acp-compaction-projection";
+import { selectAcpAgentAuthMethod } from "./acp-auth";
+import { AcpCompactionProjection, unconfirmedAcpCompactionFailure } from "./acp-compaction-projection";
 import { parseAcpSessionNotification } from "./acp-json-rpc";
 import {
   cursorQuestions,
@@ -184,6 +185,7 @@ function startCursorRun(
     resolveCommandAdvertisement = resolve;
   });
   const contextUsage: CursorContextUsage = { usedTokens: null, maxTokens: null };
+  const compactions = new AcpCompactionProjection("Cursor", "cursor", emitter);
   let subagentSequence = 0;
   const toolActivities = new Map<
     string,
@@ -312,9 +314,7 @@ function startCursorRun(
       }
       if (!ownsActivePrompt()) return;
       handleCursorProviderEvent(() => {
-        handleCursorUpdate(
-          safeParams, resultText, emitter, supportsImages, contextUsage, toolActivities,
-        );
+        handleCursorUpdate(safeParams, resultText, emitter, supportsImages, contextUsage, toolActivities, compactions);
       }, "Cursor ACP sent an invalid update.");
     })
     .onRequest("cursor/ask_question", (value) => value, async ({ params: rawParams, signal }) => {
@@ -473,7 +473,7 @@ function startCursorRun(
   const providerResult = client.connectWith(stream, async (context): Promise<ProviderRunResult> => {
     activeContext = context;
     const initialized = await requestControl(context.request(acp.methods.agent.initialize, {
-      protocolVersion: 1, clientCapabilities: { plan: {} },
+      protocolVersion: 1, clientCapabilities: { plan: {}, session: { compaction: {} } },
       clientInfo: { name: "Inertia", version: INERTIA_VERSION },
     }), "initialize");
     validateCursorInitialize(initialized);
@@ -485,7 +485,7 @@ function startCursorRun(
           initialized.agentCapabilities?.mcpCapabilities?.http === true,
         )
       : [];
-    const cursorLogin = initialized.authMethods?.find((method) => method.id === "cursor_login");
+    const cursorLogin = selectAcpAgentAuthMethod("Cursor", initialized.authMethods, "cursor_login");
     if (cursorLogin) {
       activeFailurePhase = "auth"; activeTerminalEvent = "authenticate";
       await requestControl(
@@ -560,10 +560,7 @@ function startCursorRun(
     if (cancelRequested) return finish("cancelled");
     sessionReady = true;
     emitter.status("running");
-    // ACP v1 has no separate compaction event. For Cursor, the bounded native
-    // authority is the exact session/prompt response for `/summarize`, after
-    // that same resumed session authoritatively advertised the command above.
-    // Only end_turn is accepted below; every other stop reason fails closed.
+    // ACP 1.4 compaction evidence, not a bare `/summarize` end_turn, authorizes success.
     promptInFlight = true;
     activeFailurePhase = "turn"; activeTerminalEvent = "session/prompt";
     const response = redactHostMcpPayload(await context.request(
@@ -574,6 +571,10 @@ function startCursorRun(
     }));
     if (providerEventError) throw providerEventError;
     if (response.usage) emitCursorPromptUsage(response.usage, contextUsage, emitter.rich);
+    const compactionFailure = options.input.operation?.kind === "compact"
+      && compactions.completionEvidence() !== "completed"
+      ? unconfirmedAcpCompactionFailure("Cursor")
+      : undefined;
     const outcome = cancelRequested || response.stopReason === "cancelled"
       ? finish("cancelled")
       : response.stopReason !== "end_turn"
@@ -586,7 +587,9 @@ function startCursorRun(
               terminalEvent: `session/prompt:${response.stopReason}`,
             });
           })()
-        : finish("completed");
+        : compactionFailure
+          ? finish("failed", compactionFailure.message, compactionFailure)
+          : finish("completed");
     // Arm owned termination before returning control to connectWith, which may
     // close/reap the ACP transport before the public-result continuation runs.
     requestProcessTermination(true);
@@ -820,6 +823,7 @@ function handleCursorUpdate(
       status?: ToolCallStatus | null;
     }
   >,
+  compactions: AcpCompactionProjection,
 ): void {
   const update = notification.update;
   switch (update.sessionUpdate) {
@@ -992,12 +996,13 @@ function handleCursorUpdate(
       });
       return;
     case "compaction_update":
-      projectAcpCompactionUpdate("Cursor", "cursor", update, emitter);
+      compactions.observeUpdate(update);
       return;
     case "compaction_summary_chunk":
       // ACP defines this as retained context, not new assistant output. The
       // lifecycle update above is projected; replaying the summary here would
       // falsely append historical context to the current answer.
+      compactions.observeSummaryChunk(update);
       return;
   }
   const unsupportedUpdate: never = update;

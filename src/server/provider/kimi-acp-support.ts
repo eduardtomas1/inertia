@@ -162,7 +162,11 @@ export function kimiRuntimeFailure(
   ].filter(Boolean).join("\n");
   const isAuth = /auth_required|not authenticated|authentication required|login required|unauthorized/iu
     .test(detail);
-  const reason: ProviderRunFailure["reason"] = isAuth
+  const unsupportedTerminalAuth = /advertised terminal authentication without client terminal support/iu
+    .test(detail);
+  const reason: ProviderRunFailure["reason"] = unsupportedTerminalAuth
+    ? "provider-error"
+    : isAuth
     ? "provider-error"
     : /oversized|bounded (?:approval|input|tool activity|event|protocol)|safety limit|more than \d+ input options/iu.test(detail)
       ? "protocol-overflow"
@@ -177,7 +181,9 @@ export function kimiRuntimeFailure(
               : /stream (?:was )?closed|connection (?:was )?closed|transport|end of (?:file|stream)|\beof\b|epipe|econnreset|broken pipe/iu.test(detail)
                 ? "transport-closed"
                 : "provider-error";
-  const message = isAuth
+  const message = unsupportedTerminalAuth
+    ? "Kimi ACP advertised unsupported terminal authentication."
+    : isAuth
     ? "Kimi Code is not authenticated. Run 'kimi login' and try again."
     : reason === "protocol-overflow"
       ? "Kimi ACP exceeded Inertia's bounded protocol limits."

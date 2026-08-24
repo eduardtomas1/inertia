@@ -75,6 +75,11 @@ function compactingCursorAgent(
   advertisedCommands: readonly string[] | null = null,
   advertiseAfterLoadResponse = false,
   advertiseBeforeLoad = false,
+  compactionUpdates: readonly object[] = [{
+    sessionUpdate: "compaction_update",
+    compactionId: "explicit-compact",
+    status: "completed",
+  }],
 ): string {
   const command = portableNodeExecutable(root, name);
   writeNodeSubcommand(root, "acp", `
@@ -97,6 +102,9 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   }
   if (message.method === "session/prompt") {
     fs.writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify(message.params.prompt));
+    for (const update of ${JSON.stringify(compactionUpdates)}) {
+      send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update } });
+    }
     return send({ jsonrpc: "2.0", id: message.id, result: { stopReason: "end_turn" } });
   }
 });
@@ -331,6 +339,102 @@ describe.sequential("Cursor ACP harness", () => {
     const captured = readFileSync(capturePath, "utf8");
     expect(captured).toContain("/summarize");
     expect(captured).not.toContain("remember retrieval exactly");
+  });
+
+  it("requires clean negotiated lifecycle completion for explicit compaction", async () => {
+    const cases = [
+      {
+        name: "no-event",
+        updates: [],
+        status: "failed",
+      },
+      {
+        name: "failed",
+        updates: [
+          { sessionUpdate: "compaction_update", compactionId: "compact-1", status: "in_progress" },
+          { sessionUpdate: "compaction_update", compactionId: "compact-1", status: "failed", error: "limit changed" },
+        ],
+        status: "failed",
+      },
+      {
+        name: "cancelled",
+        updates: [
+          { sessionUpdate: "compaction_update", compactionId: "compact-1", status: "in_progress" },
+          { sessionUpdate: "compaction_update", compactionId: "compact-1", status: "cancelled" },
+        ],
+        status: "failed",
+      },
+      {
+        name: "incomplete",
+        updates: [
+          { sessionUpdate: "compaction_update", compactionId: "compact-1", status: "in_progress" },
+        ],
+        status: "failed",
+      },
+      {
+        name: "completed",
+        updates: [
+          { sessionUpdate: "compaction_update", compactionId: "compact-1", status: "in_progress" },
+          { sessionUpdate: "compaction_update", compactionId: "compact-1", status: "completed" },
+        ],
+        status: "completed",
+      },
+      {
+        name: "mixed",
+        updates: [
+          { sessionUpdate: "compaction_update", compactionId: "compact-1", status: "completed" },
+          { sessionUpdate: "compaction_update", compactionId: "compact-2", status: "failed", error: "limit changed" },
+        ],
+        status: "failed",
+      },
+      {
+        name: "future-then-completed",
+        updates: [
+          { sessionUpdate: "compaction_update", compactionId: "compact-1", status: "in_progress" },
+          { sessionUpdate: "compaction_update", compactionId: "compact-1", status: "future_paused" },
+          { sessionUpdate: "compaction_update", compactionId: "compact-1", status: "completed" },
+        ],
+        status: "completed",
+      },
+      {
+        name: "unknown-only",
+        updates: [
+          { sessionUpdate: "compaction_update", compactionId: "compact-1", status: "future_paused" },
+        ],
+        status: "failed",
+      },
+    ] as const;
+
+    for (const fixture of cases) {
+      const root = portableFixtureRoot(`cursor ACP compact ${fixture.name}`);
+      roots.push(root);
+      const command = compactingCursorAgent(
+        root,
+        `cursor-compact-${fixture.name}`,
+        join(root, "prompt.json"),
+        ["summarize"],
+        false,
+        false,
+        fixture.updates,
+      );
+      const manager = new ProviderManager(
+        { commands: { cursor: command } },
+        new AgentHarnessRegistry([createCursorAcpHarness()]),
+      );
+      const result = await manager.compact(nativeProviderRunInput({
+        providerId: "cursor",
+        conversationId: `cursor-compact-${fixture.name}`,
+        cwd: root,
+        prompt: "/compact",
+        interactionMode: "build",
+        access: "supervised",
+        sessionId: "cursor-compact-session",
+      }));
+      expect(result.status, fixture.name).toBe(fixture.status);
+      if (fixture.status === "failed") {
+        expect(result.message).toContain("did not confirm");
+      }
+    }
   });
 
   it("waits for Cursor's command advertisement after the load response", async () => {
@@ -678,6 +782,8 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "compaction_update", compactionId: "compact-2", status: "failed", error: "Context limit changed" } } });
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "compaction_update", compactionId: "compact-3", status: "in_progress" } } });
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "compaction_update", compactionId: "compact-3", status: "cancelled" } } });
+    send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "compaction_update", compactionId: "compact-4", status: "completed", _meta: { source: "terminal-first" } } } });
+    send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "compaction_update", compactionId: "compact-4", status: "completed", summary: [{ type: "text", text: "Late retained summary" }], _meta: null } } });
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "usage_update", used: 321, size: 200000 } } });
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Cursor response" } } } });
     return send({ jsonrpc: "2.0", id: promptRequestId, result: { stopReason: "end_turn", usage: { totalTokens: 350, inputTokens: 320, outputTokens: 30, thoughtTokens: 5, cachedReadTokens: 20, cachedWriteTokens: 0.5 } } });
@@ -788,7 +894,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
         activityId: "cursor:compaction:compact-2",
         phase: "failed",
         label: "Cursor could not compact session context",
-        detail: "Error: Context limit changed",
+        detail: "Status: failed",
       }),
       expect.objectContaining({
         activityId: "cursor:compaction:compact-3",
@@ -796,7 +902,15 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
         label: "Cursor cancelled session context compaction",
         detail: "Status: cancelled",
       }),
+      expect.objectContaining({
+        activityId: "cursor:compaction:compact-4",
+        phase: "completed",
+        label: "Cursor compacted session context",
+        detail: "Status: completed",
+      }),
     ]));
+    expect(activities.filter(({ activityId }) =>
+      activityId === "cursor:compaction:compact-4")).toHaveLength(1);
     const boundedTool = activities.find((activity) =>
       activity.activityId === "tool-6" && activity.phase === "completed");
     expect(boundedTool?.label).toBe("T".repeat(240));
@@ -847,6 +961,15 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       metadataState: { models: { freshness: "fresh", provenance: "session" } },
     });
     const captured = JSON.parse(readFileSync(capturePath, "utf8")) as Array<Record<string, unknown>>;
+    expect(captured.find((message) => message.method === "initialize"))
+      .toMatchObject({
+        params: {
+          clientCapabilities: {
+            plan: {},
+            session: { compaction: {} },
+          },
+        },
+      });
     expect(captured.find((message) => message.id === 100)).toMatchObject({ result: { outcome: { outcome: "selected", optionId: "allow" } } });
     expect(captured.find((message) => message.id === 101)).toMatchObject({
       result: {
@@ -870,6 +993,51 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
         { params: { configId: "model", value: "model-a" } },
         { params: { configId: "effort-model-a", value: "high" } },
       ]);
+  });
+
+  it("fails closed on terminal authentication without invoking authenticate", async () => {
+    const root = portableFixtureRoot("cursor ACP terminal auth");
+    roots.push(root);
+    const capturePath = join(root, "capture.json");
+    const command = portableNodeExecutable(root, "cursor-agent");
+    writeNodeSubcommand(root, "acp", `
+const fs = require("node:fs");
+const readline = require("node:readline");
+const messages = [];
+const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const message = JSON.parse(line);
+  messages.push(message);
+  fs.writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify(messages));
+  if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: {
+    protocolVersion: 1,
+    agentCapabilities: {},
+    authMethods: [{ type: "terminal", id: "cursor_login", name: "Cursor login", args: ["login"] }],
+    agentInfo: { name: "Cursor", version: "test" },
+  } });
+});
+`);
+    const manager = new ProviderManager(
+      { commands: { cursor: command } },
+      new AgentHarnessRegistry([createCursorAcpHarness()]),
+    );
+
+    await expect(manager.run(nativeProviderRunInput({
+      providerId: "cursor",
+      conversationId: "cursor-terminal-auth",
+      cwd: root,
+      prompt: "Start",
+      interactionMode: "build",
+      access: "supervised",
+    }))).resolves.toMatchObject({
+      status: "failed",
+      error: expect.stringContaining("terminal authentication"),
+      failure: { phase: "initialize", terminalEvent: "initialize" },
+    });
+    const messages = JSON.parse(readFileSync(capturePath, "utf8")) as Array<{
+      method?: string;
+    }>;
+    expect(messages.some(({ method }) => method === "authenticate")).toBe(false);
   });
 
   it("fails closed on malformed ACP frames", async () => {

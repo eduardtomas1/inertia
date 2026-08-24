@@ -9,7 +9,9 @@ function nonEmptyString(value: unknown): value is string {
 }
 
 function validProtocolIdentifier(value: unknown): value is string {
-  return nonEmptyString(value) && value.length <= 1_000 && !value.includes("\0");
+  return nonEmptyString(value)
+    && value.length <= 1_000
+    && !/[\u0000-\u001F\u007F-\u009F]/u.test(value);
 }
 
 function finiteNumber(value: unknown): value is number {
@@ -105,7 +107,12 @@ function validSessionUpdate(update: Record<string, unknown> & { sessionUpdate: s
     }
     case "compaction_summary_chunk":
       return validProtocolIdentifier(update.compactionId)
-        && validContentBlock(update.content);
+        && validContentBlock(update.content)
+        && (
+          update._meta === undefined
+          || update._meta === null
+          || Boolean(record(update._meta))
+        );
     default:
       return false;
   }
@@ -119,10 +126,7 @@ export function parseAcpSessionNotification(value: unknown): {
   const update = record(params?.update);
   if (
     !params
-    || typeof params.sessionId !== "string"
-    || !params.sessionId
-    || params.sessionId.length > 1_000
-    || params.sessionId.includes("\0")
+    || !validProtocolIdentifier(params.sessionId)
     || !update
     || typeof update.sessionUpdate !== "string"
     || !update.sessionUpdate

@@ -22,12 +22,14 @@ import { selectWorkspaceTool } from "../e2e/support/workspace-tools";
 import { driveBoundedWheelNavigation } from "../helpers/bounded-wheel-navigation";
 import {
   beginStreamingReaderActivity,
+  beginStreamingReaderAwayActivity,
   cleanupStreamingCompletionGate,
   releaseStreamingCompletion,
   streamingAppServer,
   waitForStreamingCompletionCleanup,
   waitForStreamingCompletionReady,
   waitForStreamingReaderActivity,
+  waitForStreamingReaderAwayActivity,
 } from "../helpers/desktop-benchmark-streaming-fixture";
 
 const execFileAsync = promisify(execFile);
@@ -940,9 +942,12 @@ async function streamingResponsivenessSample(
   await waitForStreamingCompletionReady(workspace, sampleNumber);
   await beginStreamingReaderActivity(workspace, sampleNumber);
   await waitForStreamingReaderActivity(workspace, sampleNumber);
-  const readerActivityMarker = `STREAM_PROVIDER_READER_ACTIVITY_${sampleNumber}_`;
+  const readerActivityBeforeMarker =
+    `STREAM_PROVIDER_READER_ACTIVITY_${sampleNumber}_BEFORE`;
+  const readerActivityAwayMarker =
+    `STREAM_PROVIDER_READER_ACTIVITY_${sampleNumber}_AWAY`;
   await expect(page.locator('[data-stream-renderer="plain-text"]'))
-    .toContainText(readerActivityMarker);
+    .toContainText(readerActivityBeforeMarker);
   const liveViewport = page.locator(".message-scroll");
   const finalAnswer = page.locator(
     '[data-answer-phase="persisted"] .response-markdown',
@@ -999,6 +1004,9 @@ async function streamingResponsivenessSample(
     wheelUp: () => page.mouse.wheel(0, -30_000),
   });
   const readerNavigationMs = performance.now() - readerNavigationStartedAt;
+  await beginStreamingReaderAwayActivity(workspace, sampleNumber);
+  await waitForStreamingReaderAwayActivity(workspace, sampleNumber);
+  await expect(finalAnswer).toHaveCount(0);
   await page.waitForTimeout(150);
   const readerNavigationScrollTop = await liveViewport.evaluate(
     (viewport) => viewport.scrollTop,
@@ -1006,6 +1014,7 @@ async function streamingResponsivenessSample(
   expect(readerNavigationScrollTop).toBeLessThan(
     READER_NAVIGATION_TARGET_SCROLL_TOP,
   );
+  await expect(finalAnswer).toHaveCount(0);
   let jumpToLatestBottomGap = Number.POSITIVE_INFINITY;
   let finalSettledBottomGap = Number.POSITIVE_INFINITY;
   let finalAnswerVisible = false;
@@ -1045,7 +1054,8 @@ async function streamingResponsivenessSample(
     );
     processAfterTerminalPaint = await processSample(electronApp);
     await finalAnswer.waitFor();
-    await expect(finalAnswer).toContainText(readerActivityMarker);
+    await expect(finalAnswer).toContainText(readerActivityBeforeMarker);
+    await expect(finalAnswer).toContainText(readerActivityAwayMarker);
     finalAnswerVisible = await finalAnswer.isVisible();
     const finalTurn = finalAnswer.locator(
       "xpath=ancestor::section[@data-turn-id][1]",
@@ -1149,6 +1159,7 @@ async function streamingResponsivenessSample(
       startedAtLiveEdge: true,
       completionHeldDuringReaderNavigation: true,
       readerActivityWhileCompletionHeld: true,
+      readerActivityPulseCount: 2,
       streamingBottomGapBeforeReaderNavigation,
       terminalAnswerBottomGapAtPaint: visible.terminalAnswerBottomGapAtPaint,
       terminalAnswerVisibleAtPaint: visible.terminalAnswerVisibleAtPaint,
@@ -1231,6 +1242,9 @@ function summarizeStreamingResponsiveness(
       readerActivityWhileCompletionHeld:
         samples.every(({ followLatest }) =>
           followLatest.readerActivityWhileCompletionHeld),
+      readerActivityPulseCount: Math.max(...samples.map(
+        ({ followLatest }) => followLatest.readerActivityPulseCount,
+      )),
       streamingBottomGapBeforeReaderNavigation: Math.max(...samples.map(
         ({ followLatest }) => followLatest.streamingBottomGapBeforeReaderNavigation,
       )),
@@ -1765,7 +1779,7 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
       limitations: [
         "The authoritative long-conversation fixture creates 300 queued, running, and settled turns through RuntimeStore lifecycle APIs; the compatibility scenario separately stresses collapsed orphan history.",
         "Desktop streaming uses a deterministic local Codex app-server fixture; it exercises the production provider, utility-runtime, SQLite, WebSocket, React, and paint path without network variance.",
-        "The streaming fixture holds terminal completion behind a bounded local gate while reader activity continues, returns to the live edge through Jump to latest, and releases completion immediately before the terminal-paint await.",
+        "The streaming fixture holds terminal completion behind a bounded local gate, acknowledges one activity pulse before reader navigation and one after it, returns through Jump to latest, and releases completion immediately before the terminal-paint await.",
         "Cross-process streaming attribution uses bounded wall-clock markers only for comparison; WebSocket receipt starts at the causal pre-send marker, each first-delta and terminal chain is isolated to one run, and stage ordering remains authoritative within each process.",
         "Animation-frame intervals describe compositor scheduling, while PerformanceObserver long-task durations describe main-thread stalls; hosted frame intervals are retained as observational evidence rather than a 60-fps claim.",
         "Chromium process working-set retention after panels close is not classified as a leak when JavaScript heap, DOM, terminal, workspace-surface, and split-pane counters are released.",
@@ -1821,6 +1835,8 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
       report.scenarios.streamingResponsiveness.followLatest
         .readerActivityWhileCompletionHeld,
     ).toBe(true);
+    expect(report.scenarios.streamingResponsiveness.followLatest.readerActivityPulseCount)
+      .toBe(2);
     expect(
       report.scenarios.streamingResponsiveness.followLatest
         .streamingBottomGapBeforeReaderNavigation,

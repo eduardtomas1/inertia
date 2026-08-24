@@ -10,6 +10,8 @@ export function streamingCompletionGatePaths(
 ): {
   reader: string;
   readerActive: string;
+  readerAway: string;
+  readerAwayActive: string;
   ready: string;
   release: string;
 } {
@@ -20,6 +22,8 @@ export function streamingCompletionGatePaths(
   return {
     reader: join(workspace, `${prefix}.reader`),
     readerActive: join(workspace, `${prefix}.reader-active`),
+    readerAway: join(workspace, `${prefix}.reader-away`),
+    readerAwayActive: join(workspace, `${prefix}.reader-away-active`),
     ready: join(workspace, `${prefix}.ready`),
     release: join(workspace, `${prefix}.release`),
   };
@@ -33,6 +37,8 @@ export async function cleanupStreamingCompletionGate(
   await Promise.all([
     rm(paths.reader, { force: true }),
     rm(paths.readerActive, { force: true }),
+    rm(paths.readerAway, { force: true }),
+    rm(paths.readerAwayActive, { force: true }),
     rm(paths.ready, { force: true }),
     rm(paths.release, { force: true }),
   ]);
@@ -85,6 +91,23 @@ export async function waitForStreamingReaderActivity(
   await waitForPath(readerActive, timeoutMs);
 }
 
+export async function beginStreamingReaderAwayActivity(
+  workspace: string,
+  sampleNumber: number,
+): Promise<void> {
+  const { readerAway } = streamingCompletionGatePaths(workspace, sampleNumber);
+  await writeFile(readerAway, "reader-away\n", { encoding: "utf8", flag: "wx" });
+}
+
+export async function waitForStreamingReaderAwayActivity(
+  workspace: string,
+  sampleNumber: number,
+  timeoutMs = STREAMING_COMPLETION_GATE_TIMEOUT_MS,
+): Promise<void> {
+  const { readerAwayActive } = streamingCompletionGatePaths(workspace, sampleNumber);
+  await waitForPath(readerAwayActive, timeoutMs);
+}
+
 export async function waitForStreamingCompletionCleanup(
   workspace: string,
   sampleNumber: number,
@@ -135,13 +158,24 @@ const gatePaths = (sampleNumber) => {
   return {
     reader: join(process.cwd(), prefix + ".reader"),
     readerActive: join(process.cwd(), prefix + ".reader-active"),
+    readerAway: join(process.cwd(), prefix + ".reader-away"),
+    readerAwayActive: join(process.cwd(), prefix + ".reader-away-active"),
     ready: join(process.cwd(), prefix + ".ready"),
     release: join(process.cwd(), prefix + ".release"),
   };
 };
-const cleanupGate = ({ reader, readerActive, ready, release }) => {
+const cleanupGate = ({
+  reader,
+  readerActive,
+  readerAway,
+  readerAwayActive,
+  ready,
+  release,
+}) => {
   rmSync(reader, { force: true });
   rmSync(readerActive, { force: true });
+  rmSync(readerAway, { force: true });
+  rmSync(readerAwayActive, { force: true });
   rmSync(ready, { force: true });
   rmSync(release, { force: true });
 };
@@ -196,7 +230,8 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       cleanupGate(paths);
       writeFileSync(paths.ready, "ready\\n", { encoding: "utf8", flag: "wx" });
       const gateStartedAt = Date.now();
-      let readerChunk = 0;
+      let readerPulseSent = false;
+      let readerAwayPulseSent = false;
       const gateTimer = setInterval(() => {
         if (existsSync(paths.release)) {
           clearInterval(gateTimer);
@@ -205,15 +240,21 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
           send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
           return;
         }
-        if (existsSync(paths.reader)) {
-          readerChunk += 1;
-          if (readerChunk === 1) {
-            writeFileSync(paths.readerActive, "active\\n", {
-              encoding: "utf8",
-              flag: "wx",
-            });
-          }
-          send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId, delta: " STREAM_PROVIDER_READER_ACTIVITY_" + sampleNumber + "_" + readerChunk + " " } });
+        if (!readerPulseSent && existsSync(paths.reader)) {
+          readerPulseSent = true;
+          send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId, delta: " STREAM_PROVIDER_READER_ACTIVITY_" + sampleNumber + "_BEFORE " } });
+          writeFileSync(paths.readerActive, "active\\n", {
+            encoding: "utf8",
+            flag: "wx",
+          });
+        }
+        if (!readerAwayPulseSent && existsSync(paths.readerAway)) {
+          readerAwayPulseSent = true;
+          send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId, delta: " STREAM_PROVIDER_READER_ACTIVITY_" + sampleNumber + "_AWAY " } });
+          writeFileSync(paths.readerAwayActive, "active\\n", {
+            encoding: "utf8",
+            flag: "wx",
+          });
         }
         if (Date.now() - gateStartedAt >= completionGateTimeoutMs) {
           clearInterval(gateTimer);

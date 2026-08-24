@@ -7,11 +7,13 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   beginStreamingReaderActivity,
+  beginStreamingReaderAwayActivity,
   releaseStreamingCompletion,
   streamingAppServer,
   waitForStreamingCompletionCleanup,
   waitForStreamingCompletionReady,
   waitForStreamingReaderActivity,
+  waitForStreamingReaderAwayActivity,
 } from "./desktop-benchmark-streaming-fixture";
 
 interface FixtureRun {
@@ -106,9 +108,13 @@ describe("desktop benchmark streaming completion gate", () => {
     expect(run.messages.some(isTerminalMessage)).toBe(false);
     await beginStreamingReaderActivity(workspace, 7);
     await waitForStreamingReaderActivity(workspace, 7, 2_000);
-    const activityCount = () => run.messages.filter((message) => JSON.stringify(message)
-      .includes("STREAM_PROVIDER_READER_ACTIVITY_7_")).length;
-    await waitFor(() => activityCount() >= 2);
+    await waitFor(() => run.messages.some((message) => JSON.stringify(message)
+      .includes("STREAM_PROVIDER_READER_ACTIVITY_7_BEFORE")));
+    expect(run.messages.some(isTerminalMessage)).toBe(false);
+    await beginStreamingReaderAwayActivity(workspace, 7);
+    await waitForStreamingReaderAwayActivity(workspace, 7, 2_000);
+    await waitFor(() => run.messages.some((message) => JSON.stringify(message)
+      .includes("STREAM_PROVIDER_READER_ACTIVITY_7_AWAY")));
     expect(run.messages.some(isTerminalMessage)).toBe(false);
 
     await releaseStreamingCompletion(workspace, 7);
@@ -118,6 +124,9 @@ describe("desktop benchmark streaming completion gate", () => {
     const completionIndex = run.messages.findIndex(isTerminalMessage);
     const markerIndex = run.messages.findIndex((message) => JSON.stringify(message)
       .includes("STREAM_PROVIDER_COMPLETE_7_"));
+    const activityMessages = run.messages.filter((message) => JSON.stringify(message)
+      .includes("STREAM_PROVIDER_READER_ACTIVITY_7_"));
+    expect(activityMessages).toHaveLength(2);
     expect(markerIndex).toBeGreaterThanOrEqual(0);
     expect(completionIndex).toBeGreaterThan(markerIndex);
   });

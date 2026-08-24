@@ -11,6 +11,7 @@ import {
   boundedClaudeLabel as boundedLabel,
   BoundedStringMap,
   BoundedStringSet,
+  claudeCommandLifecycleProjection as commandLifecycleProjection,
   claudeCommandLifecycleMessage as commandLifecycleMessage,
   claudeAssistantFailure,
   claudeDetailLines as detailLines,
@@ -540,21 +541,8 @@ export class ClaudeMessageProjector {
       this.observeUnknownRuntimeMessage("command lifecycle", message);
       return;
     }
-    const phase = message.state === "queued" || message.state === "started"
-      ? "started"
-      : message.state === "completed"
-        ? "completed"
-        : "info";
-    const label = message.state === "queued"
-      ? "Claude queued the request"
-      : message.state === "started"
-        ? "Claude started the request"
-        : message.state === "completed"
-          ? "Claude completed the request"
-          : message.state === "cancelled"
-            ? "Claude cancelled the request"
-            : "Claude discarded the request";
-    this.options.emitter.activity("system", phase, label, {
+    const projection = commandLifecycleProjection(message.state);
+    this.options.emitter.activity("system", projection.phase, projection.label, {
       activityId: `claude:command:${activityId}`,
       detail: `State: ${message.state}`,
     });

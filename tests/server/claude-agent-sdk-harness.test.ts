@@ -39,6 +39,7 @@ import {
 } from "../../src/server/provider/claude-agent-sdk-harness";
 import {
   CLAUDE_ISOLATED_SKILL_PLUGIN_NAME,
+  CLAUDE_ISOLATED_SKILL_SETTINGS,
   discoverClaudeFilesystemSkills,
   stageClaudeSkillPlugin,
 } from "../../src/server/provider/claude-skill-plugin";
@@ -347,12 +348,14 @@ describe("Claude Agent SDK harness", () => {
     });
 
     expect(result).toMatchObject({ status: "completed", text: "Claude response", sessionId: "33333333-3333-4333-8333-333333333333" });
+    expect(CLAUDE_ISOLATED_SKILL_SETTINGS.syncClaudeAiSkills).toBe(false);
     expect(capturedOptions).toMatchObject({
       pathToClaudeCodeExecutable: "/fake/claude",
       settingSources: [],
       managedSettings: expect.objectContaining({
         disableAllHooks: true,
         disableSkillShellExecution: true,
+        syncClaudeAiSkills: false,
         strictPluginOnlyCustomization: ["skills", "agents", "hooks", "mcp"],
       }),
       permissionMode: "default",
@@ -538,6 +541,9 @@ describe("Claude Agent SDK harness", () => {
 
     expect(promptWasRead).toBe(false);
     expect(discoveryOptions?.settingSources).toEqual([]);
+    expect(discoveryOptions?.managedSettings)
+      .toEqual(CLAUDE_ISOLATED_SKILL_SETTINGS);
+    expect(discoveryOptions?.managedSettings?.syncClaudeAiSkills).toBe(false);
     expect(discoveryOptions?.mcpServers).toBeUndefined();
     expect(discoveryOptions?.strictMcpConfig).toBeUndefined();
     expect(spawnProcess).toHaveBeenCalledWith(
@@ -695,6 +701,7 @@ describe("Claude Agent SDK harness", () => {
     expect(discoveryOptions.every(({ managedSettings, plugins, skills }) =>
       managedSettings?.disableAllHooks === true
       && managedSettings.disableSkillShellExecution === true
+      && managedSettings.syncClaudeAiSkills === false
       && plugins?.length === 1
       && plugins[0]?.skipMcpDiscovery === true
       && skills === "all")).toBe(true);

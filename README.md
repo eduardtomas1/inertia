@@ -160,7 +160,8 @@ Open **Settings → Discord** to configure release posts. Add the public GitHub 
 Canary installs coexist with stable Inertia as a separate application and local
 profile. **Settings → General → Application updates** identifies the active
 channel, reports whether the current immutable Canary package is retained as
-last-known-good, and opens a reverified rollback package after an update. Canary
+last-known-good, and opens or reveals a reverified rollback package after an
+update. Canary
 never shares stable's protocol, database, Chromium profile, updater cache, feed,
 or package names.
 

@@ -35,7 +35,8 @@ current branch head and retries a non-force fast-forward after concurrent
 updates, so an older workflow that finishes late cannot replace a newer feed.
 Linux update metadata is always required; credential-optional manual macOS or
 Windows builds are omitted from the feed until that platform is update-capable.
-Stable packages never read this feed, and Canary packages never read
+Stable packages read GitHub's `releases/latest/download` feed and never this
+branch. Canary packages read only the raw `canary-feed` branch and never
 `releases/latest/download`.
 
 Before an in-app Canary update downloads, Inertia downloads the immutable

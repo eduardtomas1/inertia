@@ -300,6 +300,17 @@ describe("cross-platform packaged behavior contract", () => {
   });
 
   it("fails closed when packaged updater wiring or the test network boundary drifts", async () => {
+    const packageJson = JSON.parse(await source("package.json")) as {
+      inertiaReleaseChannel?: unknown;
+      build: { publish?: unknown; extraMetadata?: unknown };
+    };
+    expect(packageJson.inertiaReleaseChannel).toBe("stable");
+    expect(packageJson.build.publish).toEqual([{
+      provider: "generic",
+      url: "https://github.com/eduardtomas1/inertia/releases/latest/download",
+    }]);
+    expect(packageJson.build.extraMetadata).toBeUndefined();
+
     const smoke = await source("scripts/package-smoke.mjs");
     expect(smoke).toContain('["node_modules", "electron-updater", "package.json"]');
     expect(smoke).toContain('["node_modules", "electron-updater", "out", "main.js"]');

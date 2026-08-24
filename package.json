@@ -74,6 +74,12 @@
   "build": {
     "appId": "dev.inertia.app",
     "productName": "Inertia",
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://github.com/eduardtomas1/inertia/releases/latest/download"
+      }
+    ],
     "asar": true,
     "asarUnpack": [
       "node_modules/@napi-rs/canvas*/**/*",

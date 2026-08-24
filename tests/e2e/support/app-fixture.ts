@@ -13,6 +13,7 @@ import { promisify } from "node:util";
 
 import { RuntimeStore } from "../../../src/server/database";
 import { portableNodeExecutable } from "../../helpers/portable-provider-fixture";
+import { seedAppConversation } from "../../support/seed-app-conversation";
 import { serveAgentBrowserWindowCapturePrivacy } from "./agent-browser-fixture-pages";
 import { expectNoViewportOverflow as expectPageNoViewportOverflow } from "./layout-assertions";
 
@@ -611,47 +612,6 @@ async function createSecondWorkspace(
   return workspaceDirectory;
 }
 
-function seedConversation(
-  testDirectory: string,
-  workspaceDirectory: string,
-  name: string,
-  seedAssistantCodeBlock: boolean,
-  secondWorkspaceDirectory: string | null,
-): void {
-  const store = new RuntimeStore(
-    join(testDirectory, "data", "inertia.sqlite"),
-    workspaceDirectory,
-    { recoverInterruptedRuns: false },
-  );
-  const project = store.createProject("Inertia", workspaceDirectory);
-  const conversation = store.createConversation(project.id, `${name} fixture`);
-  if (secondWorkspaceDirectory) {
-    const secondProject = store.createProject(
-      "Companion",
-      secondWorkspaceDirectory,
-    );
-    store.createConversation(
-      secondProject.id,
-      `${name} companion`,
-    );
-    store.selectConversation(conversation.id);
-  }
-  if (seedAssistantCodeBlock) {
-    store.createMessage(
-      conversation.id,
-      [
-        "# Settings fixture",
-        "",
-        "```ts file=src/settings.ts",
-        "const ready: boolean = true;",
-        "```",
-      ].join("\n"),
-      "assistant",
-    );
-  }
-  store.close();
-}
-
 export async function createAppFixture(
   options: AppFixtureOptions,
 ): Promise<AppFixture> {
@@ -749,13 +709,13 @@ export async function createAppFixture(
   }
   if (options.initialState === "conversation") {
     await mkdir(join(testDirectory, "data"), { recursive: true });
-    seedConversation(
+    await seedAppConversation({
       testDirectory,
-      workspace.workspaceDirectory,
-      options.name,
-      options.seedAssistantCodeBlock ?? false,
+      workspaceDirectory: workspace.workspaceDirectory,
+      name: options.name,
+      seedAssistantCodeBlock: options.seedAssistantCodeBlock ?? false,
       secondWorkspaceDirectory,
-    );
+    });
   } else if (options.initialNewThreadMode) {
     await mkdir(join(testDirectory, "data"), { recursive: true });
     const store = new RuntimeStore(

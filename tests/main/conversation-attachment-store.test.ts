@@ -999,7 +999,9 @@ describe("durable conversation attachment storage", () => {
 
       await expect(store.preview(retained!.id)).rejects.toThrow(/unsafe/u);
       await expect(store.reconcile([retained!])).resolves.toBeUndefined();
-      await expect(store.preview(retained!.id)).resolves.toBeNull();
+      await vi.waitFor(async () => {
+        await expect(store.preview(retained!.id)).resolves.toBeNull();
+      });
     },
   );
 

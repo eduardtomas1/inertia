@@ -9,6 +9,7 @@ import {
   beginStreamingReaderActivity,
   beginStreamingReaderAwayActivity,
   releaseStreamingCompletion,
+  streamingReaderActivityMarker,
   streamingAppServer,
   waitForStreamingCompletionCleanup,
   waitForStreamingCompletionReady,
@@ -97,6 +98,15 @@ async function exitCode(child: ChildProcessWithoutNullStreams): Promise<number |
 }
 
 describe("desktop benchmark streaming completion gate", () => {
+  it("owns exact, sample-scoped markers for both bounded reader pulses", () => {
+    expect(streamingReaderActivityMarker(7, "BEFORE"))
+      .toBe("STREAM_PROVIDER_READER_ACTIVITY_7_BEFORE");
+    expect(streamingReaderActivityMarker(7, "AWAY"))
+      .toBe("STREAM_PROVIDER_READER_ACTIVITY_7_AWAY");
+    expect(() => streamingReaderActivityMarker(0, "AWAY"))
+      .toThrow("Streaming sample numbers must be positive integers.");
+  });
+
   it("holds completion through reader activity until release and cleans its gate files", async () => {
     const { run, workspace } = await startFixture({
       INERTIA_BENCHMARK_COMPLETION_GATE_TIMEOUT_MS: "2000",
@@ -109,12 +119,12 @@ describe("desktop benchmark streaming completion gate", () => {
     await beginStreamingReaderActivity(workspace, 7);
     await waitForStreamingReaderActivity(workspace, 7, 2_000);
     await waitFor(() => run.messages.some((message) => JSON.stringify(message)
-      .includes("STREAM_PROVIDER_READER_ACTIVITY_7_BEFORE")));
+      .includes(streamingReaderActivityMarker(7, "BEFORE"))));
     expect(run.messages.some(isTerminalMessage)).toBe(false);
     await beginStreamingReaderAwayActivity(workspace, 7);
     await waitForStreamingReaderAwayActivity(workspace, 7, 2_000);
     await waitFor(() => run.messages.some((message) => JSON.stringify(message)
-      .includes("STREAM_PROVIDER_READER_ACTIVITY_7_AWAY")));
+      .includes(streamingReaderActivityMarker(7, "AWAY"))));
     expect(run.messages.some(isTerminalMessage)).toBe(false);
 
     await releaseStreamingCompletion(workspace, 7);

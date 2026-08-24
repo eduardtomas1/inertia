@@ -3,6 +3,9 @@ import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ChatWorkspace } from "../../src/renderer/src/components/ChatWorkspace";
+import {
+  RENDERER_WORKSPACE_CONTENT_COMMITTED_STAGE,
+} from "../../src/renderer/src/utils/testStreamingTrace";
 import type {
   AgentTurn,
   ChatMessage,
@@ -341,10 +344,46 @@ async function expectVirtualWindow(container: HTMLElement): Promise<void> {
 
 afterEach(() => {
   finalAnswerAnchorStarts.mockReset();
+  Reflect.deleteProperty(globalThis, "__inertiaTestStreamingTrace");
   vi.restoreAllMocks();
 });
 
 describe("ChatWorkspace final-answer hydration", () => {
+  it("marks each committed streaming projection at the workspace boundary", async () => {
+    const activeConversation = conversation("conversation-stream-commit");
+    const runningTurn = turn(activeConversation, 1, "running");
+    const trace = vi.fn();
+    Reflect.set(globalThis, "__inertiaTestStreamingTrace", trace);
+    const props = workspaceProps(activeConversation);
+    const view = render(
+      <ChatWorkspace
+        {...props}
+        latestTurnSummary={latestTurnSummary(runningTurn, "running")}
+        turns={[runningTurn]}
+        messages={messagesForTurn(runningTurn)}
+        streamingText="STREAM_PROVIDER_READER_ACTIVITY_1_BEFORE"
+      />,
+    );
+    await waitFor(() => expect(trace).toHaveBeenCalledWith(
+      RENDERER_WORKSPACE_CONTENT_COMMITTED_STAGE,
+    ));
+    trace.mockClear();
+
+    view.rerender(
+      <ChatWorkspace
+        {...props}
+        latestTurnSummary={latestTurnSummary(runningTurn, "running")}
+        turns={[runningTurn]}
+        messages={messagesForTurn(runningTurn)}
+        streamingText="STREAM_PROVIDER_READER_ACTIVITY_1_BEFORE STREAM_PROVIDER_READER_ACTIVITY_1_AWAY"
+      />,
+    );
+
+    await waitFor(() => expect(trace).toHaveBeenCalledWith(
+      RENDERER_WORKSPACE_CONTENT_COMMITTED_STAGE,
+    ));
+  });
+
   it("anchors one virtualized answer from an owner-scoped running shell", async () => {
     const activeConversation = conversation("conversation-shell-live");
     const staleConversation = conversation("conversation-shell-stale");

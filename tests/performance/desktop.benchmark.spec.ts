@@ -20,11 +20,14 @@ import {
 import { processExists } from "../e2e/support/app-fixture";
 import { selectWorkspaceTool } from "../e2e/support/workspace-tools";
 import { driveBoundedWheelNavigation } from "../helpers/bounded-wheel-navigation";
+import { RENDERER_WORKSPACE_CONTENT_COMMITTED_STAGE } from "../../src/renderer/src/utils/testStreamingTrace";
 import {
   beginStreamingReaderActivity,
   beginStreamingReaderAwayActivity,
   cleanupStreamingCompletionGate,
   releaseStreamingCompletion,
+  STREAMING_COMPLETION_GATE_TIMEOUT_MS,
+  streamingReaderActivityMarker,
   streamingAppServer,
   waitForStreamingCompletionCleanup,
   waitForStreamingCompletionReady,
@@ -940,14 +943,27 @@ async function streamingResponsivenessSample(
     },
   ).toBeGreaterThanOrEqual(CI_STREAM_MIN_VISIBLE_UPDATES);
   await waitForStreamingCompletionReady(workspace, sampleNumber);
+  const contentCommitsBeforeReaderPulse = await page.evaluate((stage) => (
+    performance.getEntriesByName(`inertia-stream:${stage}`).length
+  ), RENDERER_WORKSPACE_CONTENT_COMMITTED_STAGE);
   await beginStreamingReaderActivity(workspace, sampleNumber);
   await waitForStreamingReaderActivity(workspace, sampleNumber);
-  const readerActivityBeforeMarker =
-    `STREAM_PROVIDER_READER_ACTIVITY_${sampleNumber}_BEFORE`;
-  const readerActivityAwayMarker =
-    `STREAM_PROVIDER_READER_ACTIVITY_${sampleNumber}_AWAY`;
+  const readerActivityBeforeMarker = streamingReaderActivityMarker(
+    sampleNumber,
+    "BEFORE",
+  );
+  const readerActivityAwayMarker = streamingReaderActivityMarker(
+    sampleNumber,
+    "AWAY",
+  );
   await expect(page.locator('[data-stream-renderer="plain-text"]'))
     .toContainText(readerActivityBeforeMarker);
+  await expect.poll(() => page.evaluate((stage) => (
+    performance.getEntriesByName(`inertia-stream:${stage}`).length
+  ), RENDERER_WORKSPACE_CONTENT_COMMITTED_STAGE), {
+    message: `streaming sample ${sampleNumber} should commit ${readerActivityBeforeMarker} before reader navigation`,
+    timeout: STREAMING_COMPLETION_GATE_TIMEOUT_MS,
+  }).toBeGreaterThan(contentCommitsBeforeReaderPulse);
   const liveViewport = page.locator(".message-scroll");
   const finalAnswer = page.locator(
     '[data-answer-phase="persisted"] .response-markdown',
@@ -1004,10 +1020,24 @@ async function streamingResponsivenessSample(
     wheelUp: () => page.mouse.wheel(0, -30_000),
   });
   const readerNavigationMs = performance.now() - readerNavigationStartedAt;
+  const contentCommitsBeforeAway = await page.evaluate((stage) => (
+    performance.getEntriesByName(`inertia-stream:${stage}`).length
+  ), RENDERER_WORKSPACE_CONTENT_COMMITTED_STAGE);
   await beginStreamingReaderAwayActivity(workspace, sampleNumber);
   await waitForStreamingReaderAwayActivity(workspace, sampleNumber);
   await expect(finalAnswer).toHaveCount(0);
-  await page.waitForTimeout(150);
+  // The fixture acknowledgment proves only that the provider wrote the exact
+  // AWAY delta. Because completion is held and no other text delta can follow
+  // the already-rendered BEFORE pulse, the next workspace content commit is
+  // causally the unique AWAY marker reaching Inertia's renderer. Waiting for
+  // that post-commit effect also proves reader-mode follow logic ran before we
+  // inspect the preserved position or invoke Jump to latest.
+  await expect.poll(() => page.evaluate((stage) => (
+    performance.getEntriesByName(`inertia-stream:${stage}`).length
+  ), RENDERER_WORKSPACE_CONTENT_COMMITTED_STAGE), {
+    message: `streaming sample ${sampleNumber} should consume ${readerActivityAwayMarker} while reader navigation remains active`,
+    timeout: STREAMING_COMPLETION_GATE_TIMEOUT_MS,
+  }).toBeGreaterThan(contentCommitsBeforeAway);
   const readerNavigationScrollTop = await liveViewport.evaluate(
     (viewport) => viewport.scrollTop,
   );

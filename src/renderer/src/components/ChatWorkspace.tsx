@@ -72,6 +72,10 @@ import {
   transcriptNavigationFollowsContent,
   transcriptNavigationReducer,
 } from "../utils/transcriptNavigation";
+import {
+  markTestStreamingStage,
+  RENDERER_WORKSPACE_CONTENT_COMMITTED_STAGE,
+} from "../utils/testStreamingTrace";
 import { Composer } from "./Composer";
 import type { ChatGoalControlProps } from "./ChatGoalControl";
 import type { PromptPresetCommandRunner } from "./composer/types";
@@ -548,6 +552,7 @@ export function ChatWorkspace({
   );
 
   useEffect(() => {
+    markTestStreamingStage(RENDERER_WORKSPACE_CONTENT_COMMITTED_STAGE);
     if (!transcriptNavigationFollowsContent(navigationRef.current)) return;
     const frame = window.requestAnimationFrame(
       () => performScrollToLatest("auto"),

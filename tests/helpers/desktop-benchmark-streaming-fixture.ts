@@ -3,6 +3,17 @@ import { join } from "node:path";
 
 export const STREAMING_COMPLETION_GATE_TIMEOUT_MS = 15_000;
 const STREAMING_COMPLETION_GATE_POLL_MS = 10;
+export type StreamingReaderActivityPhase = "BEFORE" | "AWAY";
+
+export function streamingReaderActivityMarker(
+  sampleNumber: number,
+  phase: StreamingReaderActivityPhase,
+): string {
+  if (!Number.isInteger(sampleNumber) || sampleNumber <= 0) {
+    throw new Error("Streaming sample numbers must be positive integers.");
+  }
+  return `STREAM_PROVIDER_READER_ACTIVITY_${sampleNumber}_${phase}`;
+}
 
 export function streamingCompletionGatePaths(
   workspace: string,

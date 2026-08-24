@@ -135,7 +135,7 @@ export function PreviewPanel({
       window.removeEventListener(NATIVE_PREVIEW_SUSPENSION_CHANGED, update);
       onBoundsChange(null);
     };
-  }, [onBoundsChange, url]);
+  }, [onBoundsChange]);
 
   const navigate = () => {
     const result = safePreviewUrl(draftUrl);

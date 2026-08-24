@@ -502,35 +502,48 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
     primaryConversationId,
   )).resolves.toMatchObject({ ok: true });
   const keyDestinationUrl = `${app.previewUrl}agent-browser-key-destination?query=inertia`;
-  const currentPreviewUrls = await app.electronApp.evaluate(
-    ({ webContents }, origin) => webContents.getAllWebContents()
-      .map((contents) => contents.getURL())
-      .filter((url) => url.startsWith(origin)),
-    app.previewUrl,
-  );
-  expect(currentPreviewUrls).toContain(keyDestinationUrl);
+  await expect(primaryPreview.getByRole("textbox", {
+    name: "Preview address",
+  })).toHaveValue(keyDestinationUrl);
   const typeResult = await app.electronApp.evaluate(
     async (_electron, conversationId) => {
       type Command =
         | { action: "snapshot" }
         | { action: "type"; ref: string; text: string; replace: boolean };
-      type Result = { ok: boolean; text?: string };
+      type Result = {
+        ok: boolean;
+        code?: string;
+        message?: string;
+        text?: string;
+      };
       const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
         agentBrowser: (id: string, command: Command) => Promise<Result>;
       };
       const snapshot = await runtime.agentBrowser(conversationId, { action: "snapshot" });
-      if (!snapshot.ok || !snapshot.text) return { ok: false, stage: "snapshot" };
+      if (!snapshot.ok) return { ...snapshot, stage: "snapshot" };
+      if (!snapshot.text) return {
+        ok: false,
+        code: "invalid",
+        message: "The fresh snapshot did not return semantic content.",
+        stage: "snapshot",
+      };
       const parsed = JSON.parse(snapshot.text) as {
         elements: Array<{ name: string; ref: string }>;
       };
       const ref = parsed.elements.find((element) => element.name === "Type destination")?.ref;
-      if (!ref) return { ok: false, stage: "ref" };
-      return await runtime.agentBrowser(conversationId, {
+      if (!ref) return {
+        ok: false,
+        code: "not-found",
+        message: "The fresh snapshot did not contain Type destination.",
+        stage: "ref",
+      };
+      const result = await runtime.agentBrowser(conversationId, {
         action: "type",
         ref,
         text: "inertia",
         replace: true,
       });
+      return result.ok ? result : { ...result, stage: "type" };
     },
     primaryConversationId,
   );

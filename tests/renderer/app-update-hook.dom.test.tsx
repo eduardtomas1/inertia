@@ -7,6 +7,7 @@ import type { AppUpdateStatus, DesktopBridge } from "../../src/shared/desktop";
 function update(revision: number, message: string): AppUpdateStatus {
   return {
     revision,
+    channel: "stable",
     state: "available",
     freshness: "fresh",
     delivery: "in-app",

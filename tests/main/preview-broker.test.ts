@@ -15,6 +15,8 @@ describe("preview broker isolation", () => {
     expect(second).not.toBe(first);
     expect(first.startsWith("persist:")).toBe(false);
     expect(second.startsWith("persist:")).toBe(false);
+    expect(createPreviewPartition("inertia-canary-preview"))
+      .toMatch(/^inertia-canary-preview-[0-9a-f-]{36}$/u);
   });
 
   it("recognizes only exact app shortcuts from native preview input", () => {

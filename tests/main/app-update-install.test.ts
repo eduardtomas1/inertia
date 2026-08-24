@@ -7,6 +7,7 @@ import type { AppUpdateInstallBlocker, AppUpdateStatus } from "../../src/shared/
 function status(state: AppUpdateStatus["state"]): AppUpdateStatus {
   return {
     revision: 1,
+    channel: "stable",
     state,
     freshness: "fresh",
     delivery: "in-app",

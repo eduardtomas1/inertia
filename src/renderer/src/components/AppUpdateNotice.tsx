@@ -4,12 +4,13 @@ import type { AppUpdateStatus } from "@shared/desktop";
 import { IconButton } from "./ui";
 
 function title(status: AppUpdateStatus): string {
-  if (status.state === "downloading") return `Downloading Inertia ${status.latestVersion}`;
-  if (status.state === "downloaded") return `Inertia ${status.latestVersion} is ready`;
+  const product = status.channel === "canary" ? "Inertia Canary" : "Inertia";
+  if (status.state === "downloading") return `Downloading ${product} ${status.latestVersion}`;
+  if (status.state === "downloaded") return `${product} ${status.latestVersion} is ready`;
   if (status.state === "installing") return "Preparing a safe restart";
   if (status.state === "cancelled") return "Update download cancelled";
   if (status.state === "failed") return "Update needs attention";
-  return `Inertia ${status.latestVersion} is available`;
+  return `${product} ${status.latestVersion} is available`;
 }
 
 export function AppUpdateNotice({

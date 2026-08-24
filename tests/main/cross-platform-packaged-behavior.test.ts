@@ -31,6 +31,24 @@ function workflowMatrixEntry(workflow: string, label: string): string {
 }
 
 describe("cross-platform packaged behavior contract", () => {
+  it("keeps Canary packages behind the full smoke, fuse, checksum, provenance, and atomic-feed gate", async () => {
+    const workflow = await source(".github/workflows/release-platforms.yml");
+    for (const expected of [
+      '- "canary-v*.*.*"',
+      "INERTIA_RELEASE_CHANNEL:",
+      "npm run verify:fuses -- \"$app\"",
+      "run: npm run test:package-smoke",
+      "run: xvfb-run --auto-servernum npm run test:package-smoke",
+      "node scripts/release-assets.mjs finalize",
+      "actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8",
+      "node scripts/prepare-canary-feed.mjs",
+      "--prerelease --latest=false",
+      "HEAD:canary-feed",
+    ]) {
+      expect(workflow).toContain(expected);
+    }
+  });
+
   it("keeps build, Electron E2E, fuse verification, and native smoke on all six CI targets", async () => {
     const workflow = await source(".github/workflows/ci.yml");
     for (const expected of [
@@ -201,20 +219,25 @@ describe("cross-platform packaged behavior contract", () => {
     expect(smoke).toContain('`--proxy-server=${updateNetworkTrap.proxy}`');
     expect(smoke).toContain('"api.github.com"');
     expect(smoke).toContain('"github.com"');
+    expect(smoke).toContain('"raw.githubusercontent.com"');
     expect(smoke).toContain('"release-assets.githubusercontent.com"');
     expect(smoke).toContain("updateNetworkTrap.assertNoUpdateRequests()");
 
     const main = await source("src/main/index.ts");
     const capabilityStart = main.indexOf("const appUpdateCapability =");
-    const serviceStart = main.indexOf("appUpdateService = new AppUpdateService", capabilityStart);
-    const bootstrapUpdateBoundary = main.slice(capabilityStart, serviceStart + 900);
+    const serviceStart = main.indexOf("initializeReleaseUpdates({", capabilityStart);
+    const bootstrapUpdateBoundary = main.slice(capabilityStart, serviceStart + 700);
     expect(capabilityStart).toBeGreaterThanOrEqual(0);
     expect(serviceStart).toBeGreaterThan(capabilityStart);
     expect(bootstrapUpdateBoundary).toContain('process.env.NODE_ENV === "test"');
     expect(bootstrapUpdateBoundary).toContain('delivery: "manual" as const');
     expect(bootstrapUpdateBoundary).toContain("resolveAppUpdateCapability({");
-    expect(bootstrapUpdateBoundary).toContain("tag_name:");
-    expect(bootstrapUpdateBoundary).toContain(": net.fetch as typeof globalThis.fetch");
+    expect(bootstrapUpdateBoundary).toContain("fetch: net.fetch as typeof globalThis.fetch");
+    const releaseUpdates = await source("src/main/release-updates.ts");
+    expect(releaseUpdates).toContain('channel === "canary"');
+    expect(releaseUpdates).toContain("{ version:");
+    expect(releaseUpdates).toContain("{ tag_name:");
+    expect(releaseUpdates).toContain("loadElectronAppUpdater(channel)");
   });
 
   it("registers runtime socket handlers before sending the first hydration frame", async () => {

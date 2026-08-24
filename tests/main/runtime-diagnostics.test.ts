@@ -193,6 +193,7 @@ describe("runtime diagnostics", () => {
 
     expect(report.eventCount).toBe(1);
     expect(report.text).toContain("Version: 0.0.10");
+    expect(report.text).toContain("Channel: stable");
     expect(report.text).toContain("Platform: darwin");
     expect(report.text).toContain("Runtime: restarting");
     expect(report.text).toContain("Runtime generation: 7");

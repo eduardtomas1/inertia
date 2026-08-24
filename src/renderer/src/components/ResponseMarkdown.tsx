@@ -37,7 +37,7 @@ import {
 } from "../utils/workspaceFileReference";
 import { writeClipboardText } from "../utils/clipboard";
 import { highlightedSourceHtml } from "../utils/sourceHighlighting";
-import { workspaceImagePreviewUrl } from "@shared/workspace-image-preview";
+import { applicationRendererScheme, workspaceImagePreviewUrl } from "@shared/workspace-image-preview";
 import { markdownHeadingDomId } from "../utils/markdownHeading";
 import {
   MarkdownImageSchedulerProvider,
@@ -771,11 +771,11 @@ function MarkdownImage({
     markdownBasePath,
   );
   const trustedSource = target.kind === "project"
-    ? workspaceImagePreviewUrl({
+      ? workspaceImagePreviewUrl({
         projectId,
         ...(conversationId ? { conversationId } : {}),
         relativePath: target.relativePath,
-      })
+      }, applicationRendererScheme(globalThis.location?.protocol))
     : null;
   const schedule = useMarkdownImageSchedule(trustedSource);
   const placeholder = (reason: string, overflow = false): React.JSX.Element => {

@@ -8839,6 +8839,8 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 .runtime-log-setting > div,
 .application-update-setting > div { display: flex; flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .application-update-setting small { max-width: 620px; overflow: visible; line-height: 1.5; white-space: normal; }
+.canary-rollback-setting { align-items: flex-start; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+.canary-rollback-setting > span > strong { color: var(--accent-strong); }
 .settings-card-note { margin: 10px 2px 0; color: var(--text-muted); font-size: 8.5px; }
 
 .backend-settings {

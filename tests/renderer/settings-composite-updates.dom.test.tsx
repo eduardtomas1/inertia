@@ -186,6 +186,94 @@ describe("Settings composite updates", () => {
       .toBe(screen.getByRole("status"));
   });
 
+  it("shows the isolated Canary channel and reverified rollback action", async () => {
+    const openCanaryRollback = vi.fn(async () => ({
+      state: "ready" as const,
+      version: "0.0.40",
+      message: "Opened the verified Canary 0.0.40 rollback package.",
+    }));
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: {
+        getPlatform: () => "darwin",
+        getCanaryRollbackStatus: vi.fn(async () => ({
+          state: "ready" as const,
+          version: "0.0.40",
+          message: "Verified Canary 0.0.40 is retained for rollback.",
+        })),
+        openCanaryRollback,
+      },
+    });
+    const props = settingsProps(vi.fn(async () => undefined));
+    render(<SettingsView {...props} appUpdateStatus={{
+      revision: 1,
+      channel: "canary",
+      state: "current",
+      freshness: "fresh",
+      delivery: "in-app",
+      deliveryReason: null,
+      installBlocker: null,
+      progress: null,
+      currentVersion: "0.0.41",
+      latestVersion: "0.0.41",
+      releaseUrl: "https://github.com/eduardtomas1/inertia/releases/tag/canary-v0.0.41",
+      checkedAt: "2030-01-01T00:00:00.000Z",
+      lastAttemptedAt: "2030-01-01T00:00:00.000Z",
+      message: "Inertia Canary is up to date.",
+    }} />);
+
+    expect(screen.getByText("Inertia Canary · v0.0.41")).toBeInTheDocument();
+    expect(screen.getByText("Canary channel · isolated profile")).toBeInTheDocument();
+    expect(await screen.findByText("Verified Canary 0.0.40 is retained for rollback."))
+      .toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Open rollback v0.0.40" }));
+    await waitFor(() => expect(openCanaryRollback).toHaveBeenCalledTimes(1));
+  });
+
+  it("labels the Linux rollback action as a verified file replacement", async () => {
+    const openCanaryRollback = vi.fn(async () => ({
+      state: "ready" as const,
+      version: "0.0.40",
+      message: "Quit Canary and replace the active AppImage with the revealed file.",
+    }));
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: {
+        getPlatform: () => "linux",
+        getCanaryRollbackStatus: vi.fn(async () => ({
+          state: "ready" as const,
+          version: "0.0.40",
+          message: "Verified Canary 0.0.40 is retained for rollback.",
+        })),
+        openCanaryRollback,
+      },
+    });
+    render(<SettingsView {...settingsProps(vi.fn(async () => undefined))} appUpdateStatus={{
+      revision: 1,
+      channel: "canary",
+      state: "current",
+      freshness: "fresh",
+      delivery: "in-app",
+      deliveryReason: null,
+      installBlocker: null,
+      progress: null,
+      currentVersion: "0.0.41",
+      latestVersion: "0.0.41",
+      releaseUrl: "https://github.com/eduardtomas1/inertia/releases/tag/canary-v0.0.41",
+      checkedAt: "2030-01-01T00:00:00.000Z",
+      lastAttemptedAt: "2030-01-01T00:00:00.000Z",
+      message: "Inertia Canary is up to date.",
+    }} />);
+
+    fireEvent.click(await screen.findByRole("button", {
+      name: "Show rollback file v0.0.40",
+    }));
+    await waitFor(() => expect(openCanaryRollback).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText(
+      "Quit Canary and replace the active AppImage with the revealed file.",
+    )).toBeInTheDocument();
+  });
+
   it("announces a sanitized application-update action failure", async () => {
     Object.defineProperty(window, "inertia", {
       configurable: true,
@@ -195,7 +283,8 @@ describe("Settings composite updates", () => {
     render(<SettingsView
       {...props}
       appUpdateStatus={{
-        revision: 1,
+      revision: 1,
+      channel: "stable",
         state: "available",
         freshness: "fresh",
         delivery: "in-app",

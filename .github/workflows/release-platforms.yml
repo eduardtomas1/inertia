@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - "v*.*.*"
+      - "canary-v*.*.*"
   workflow_dispatch:
     inputs:
       release_tag:
@@ -78,6 +79,7 @@ jobs:
             unpacked_dir: release/linux-arm64-unpacked
     env:
       CI: "true"
+      INERTIA_RELEASE_CHANNEL: ${{ startsWith(inputs.release_tag || github.ref_name, 'canary-v') && 'canary' || 'stable' }}
 
     steps:
       - name: Check out exact release tag
@@ -198,6 +200,14 @@ jobs:
         run: |
           set -euo pipefail
           app="${{ matrix.app_path }}"
+          if [[ "$INERTIA_RELEASE_CHANNEL" == canary ]]; then
+            case "$RUNNER_OS" in
+              Linux) app="${app%/inertia}/inertia-canary" ;;
+              Windows) app="${app%/Inertia.exe}/Inertia Canary.exe" ;;
+              macOS) app="${app%/Inertia.app}/Inertia Canary.app" ;;
+              *) echo "Unsupported runner: $RUNNER_OS" >&2; exit 1 ;;
+            esac
+          fi
           test -e "$app"
           npm run verify:fuses -- "$app"
 
@@ -206,7 +216,11 @@ jobs:
         run: |
           set -euo pipefail
           version="$(node -p "require('./package.json').version")"
-          expected="release/Inertia.Setup.${version}${{ matrix.windows_asset_suffix }}.exe"
+          if [[ "$INERTIA_RELEASE_CHANNEL" == canary ]]; then
+            expected="release/Inertia.Canary.Setup.${version}${{ matrix.windows_asset_suffix }}.exe"
+          else
+            expected="release/Inertia.Setup.${version}${{ matrix.windows_asset_suffix }}.exe"
+          fi
           if [[ ! -f "$expected" ]]; then
             mapfile -d '' -t generated < <(find release -maxdepth 1 -type f -name '*.exe' -print0)
             if [[ "${#generated[@]}" -ne 1 ]]; then
@@ -239,6 +253,9 @@ jobs:
         run: |
           set -euo pipefail
           mac_app="${{ matrix.app_path }}"
+          if [[ "$INERTIA_RELEASE_CHANNEL" == canary ]]; then
+            mac_app="${mac_app%/Inertia.app}/Inertia Canary.app"
+          fi
           codesign --verify --deep --strict --verbose=2 "$mac_app"
           if [[ -n "${CSC_LINK:-}" ]]; then
             codesign --display --verbose=2 "$mac_app" 2>&1 | grep -q "Authority=Developer ID Application:"
@@ -255,7 +272,8 @@ jobs:
         run: |
           if (-not [string]::IsNullOrWhiteSpace($env:WIN_CSC_LINK)) {
             $suffix = "${{ matrix.windows_asset_suffix }}"
-            $signature = Get-AuthenticodeSignature "release/Inertia.Setup.$((Get-Content package.json | ConvertFrom-Json).version)$suffix.exe"
+            $prefix = if ($env:INERTIA_RELEASE_CHANNEL -eq "canary") { "Inertia.Canary.Setup" } else { "Inertia.Setup" }
+            $signature = Get-AuthenticodeSignature "release/$prefix.$((Get-Content package.json | ConvertFrom-Json).version)$suffix.exe"
             if ($signature.Status -ne "Valid") {
               throw "The Windows release signature is not valid: $($signature.Status)"
             }
@@ -297,6 +315,8 @@ jobs:
     defaults:
       run:
         shell: bash
+    env:
+      INERTIA_RELEASE_CHANNEL: ${{ startsWith(inputs.release_tag || github.ref_name, 'canary-v') && 'canary' || 'stable' }}
 
     steps:
       - name: Check out exact release tag
@@ -367,6 +387,23 @@ jobs:
           INERTIA_RELEASE_DOWNLOAD_DIR: ${{ runner.temp }}/inertia-release-assets
           RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         run: node scripts/release-assets.mjs finalize
+
+      - name: Prepare atomic Canary feed metadata
+        if: env.INERTIA_RELEASE_CHANNEL == 'canary'
+        env:
+          INERTIA_CANARY_ASSET_DIR: ${{ runner.temp }}/inertia-release-assets/final
+          INERTIA_CANARY_FEED_DIR: ${{ runner.temp }}/inertia-canary-feed
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+        run: node scripts/prepare-canary-feed.mjs
+
+      - name: Keep exact Canary feed metadata
+        if: env.INERTIA_RELEASE_CHANNEL == 'canary'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: canary-feed-${{ inputs.release_tag || github.ref_name }}
+          path: ${{ runner.temp }}/inertia-canary-feed
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Attest release build provenance
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
@@ -539,11 +576,94 @@ jobs:
             fi
           done
 
-          gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+          if [[ "$INERTIA_RELEASE_CHANNEL" == canary ]]; then
+            gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease --latest=false
+          else
+            gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+          fi
+
+  publish-canary-feed:
+    name: Publish atomic Canary feed
+    needs: upload
+    if: ${{ startsWith(inputs.release_tag || github.ref_name, 'canary-v') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out exact release implementation
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Download exact Canary feed metadata
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: canary-feed-${{ inputs.release_tag || github.ref_name }}
+          path: ${{ runner.temp }}/inertia-canary-feed
+
+      - name: Publish monotonic immutable metadata commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FEED_DIRECTORY: ${{ runner.temp }}/inertia-canary-feed
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3 4 5; do
+            feed_worktree="$(mktemp -d "$RUNNER_TEMP/inertia-canary-feed.XXXXXX")"
+            git -C "$feed_worktree" init
+            git -C "$feed_worktree" remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+            set +e
+            git -C "$feed_worktree" ls-remote --exit-code --heads origin canary-feed >/dev/null
+            remote_status=$?
+            set -e
+            if [[ "$remote_status" -eq 0 ]]; then
+              git -C "$feed_worktree" fetch --force --depth=1 origin canary-feed
+              git -C "$feed_worktree" checkout -B canary-feed FETCH_HEAD
+            elif [[ "$remote_status" -eq 2 ]]; then
+              git -C "$feed_worktree" checkout --orphan canary-feed
+            else
+              echo "Unable to read the current Canary feed head." >&2
+              exit "$remote_status"
+            fi
+
+            set +e
+            if [[ -f "$feed_worktree/canary-status.json" ]]; then
+              node scripts/validate-canary-feed-advance.mjs \
+                "$feed_worktree/canary-status.json" \
+                "$FEED_DIRECTORY/canary-status.json"
+            else
+              node scripts/validate-canary-feed-advance.mjs \
+                "$FEED_DIRECTORY/canary-status.json"
+            fi
+            advance_status=$?
+            set -e
+            if [[ "$advance_status" -eq 2 ]]; then
+              exit 0
+            elif [[ "$advance_status" -ne 0 ]]; then
+              exit "$advance_status"
+            fi
+
+            find "$feed_worktree" -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf -- {} +
+            cp -- "$FEED_DIRECTORY"/* "$feed_worktree"/
+            git -C "$feed_worktree" add --all
+            git -C "$feed_worktree" -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -m "Publish Canary feed ${{ inputs.release_tag || github.ref_name }}"
+            if git -C "$feed_worktree" push origin HEAD:canary-feed; then
+              exit 0
+            fi
+            echo "Canary feed head advanced concurrently; retrying from the winner ($attempt/5)."
+          done
+          echo "Unable to publish the Canary feed after five concurrent updates." >&2
+          exit 1
 
   notify-discord:
     name: Notify Discord
     needs: upload
+    if: ${{ !startsWith(inputs.release_tag || github.ref_name, 'canary-v') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:

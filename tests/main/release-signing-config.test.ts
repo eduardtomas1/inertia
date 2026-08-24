@@ -62,6 +62,8 @@ describe("release signing configuration", () => {
       config: {
         forceCodeSigning: false,
         extraMetadata: {
+          desktopName: "dev.inertia.app.desktop",
+          inertiaReleaseChannel: "stable",
           inertiaUpdateCapability: {
             delivery: "manual",
             reason: "macos-signing-unavailable",
@@ -86,6 +88,8 @@ describe("release signing configuration", () => {
         url: "https://github.com/eduardtomas1/inertia/releases/latest/download",
       }],
       extraMetadata: {
+        desktopName: "dev.inertia.app.desktop",
+        inertiaReleaseChannel: "stable",
         inertiaUpdateCapability: {
           delivery: "manual",
           reason: "macos-signing-unavailable",
@@ -123,6 +127,8 @@ describe("release signing configuration", () => {
     expect(config.mac.hardenedRuntime).toBe(true);
     expect(config.mac.notarize).toBe(true);
     expect(config.extraMetadata).toEqual({
+      desktopName: "dev.inertia.app.desktop",
+      inertiaReleaseChannel: "stable",
       inertiaUpdateCapability: { delivery: "in-app", platform: "darwin" },
     });
     expect(complete.stdout).not.toContain("certificate");
@@ -160,6 +166,8 @@ describe("release signing configuration", () => {
     expect(JSON.parse(complete.stdout)).toMatchObject({
       forceCodeSigning: true,
       extraMetadata: {
+        desktopName: "dev.inertia.app.desktop",
+        inertiaReleaseChannel: "stable",
         inertiaUpdateCapability: { delivery: "in-app", platform: "win32" },
       },
     });
@@ -198,6 +206,75 @@ describe("release signing configuration", () => {
           inertiaUpdateCapability: { delivery: "in-app", platform: "linux" },
         },
       });
+    }
+  });
+
+  it("builds Canary as a separate application, feed, cache lineage, executable, and artifact set", () => {
+    const result = loadConfig("linux-x64", {
+      INERTIA_RELEASE_CHANNEL: "canary",
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      appId: "dev.inertia.app.canary",
+      productName: "Inertia Canary",
+      publish: [{
+        provider: "generic",
+        url: "https://raw.githubusercontent.com/eduardtomas1/inertia/canary-feed",
+        channel: "canary",
+      }],
+      extraMetadata: {
+        name: "inertia-canary",
+        desktopName: "dev.inertia.app.desktop.canary",
+        inertiaReleaseChannel: "canary",
+        inertiaUpdateCapability: { delivery: "in-app", platform: "linux" },
+      },
+      linux: {
+        artifactName: "Inertia-Canary-${version}.${ext}",
+        executableName: "inertia-canary",
+        desktop: { entry: {
+          Name: "Inertia Canary",
+          StartupWMClass: "Inertia Canary",
+        } },
+      },
+    });
+  });
+
+  it("keeps six-target Canary artifacts disjoint without changing unsigned desktop delivery", () => {
+    const expectedArtifacts = {
+      "macos-x64": "Inertia-Canary-${version}-${arch}.${ext}",
+      "macos-arm64": "Inertia-Canary-${version}-${arch}.${ext}",
+      "windows-x64": "Inertia.Canary.Setup.${version}.${ext}",
+      "windows-arm64": "Inertia.Canary.Setup.${version}.arm64.${ext}",
+      "linux-x64": "Inertia-Canary-${version}.${ext}",
+      "linux-arm64": "Inertia-Canary-${version}-arm64.${ext}",
+    } as const;
+    for (const [platform, artifactName] of Object.entries(expectedArtifacts) as Array<
+      [keyof typeof expectedArtifacts, string]
+    >) {
+      const result = loadConfig(platform, { INERTIA_RELEASE_CHANNEL: "canary" });
+      expect(result.status, result.stderr).toBe(0);
+      const config = JSON.parse(result.stdout) as {
+        extraMetadata: { inertiaUpdateCapability: { delivery: string; reason?: string } };
+        linux?: { artifactName: string };
+        mac?: { artifactName: string };
+        win?: { artifactName: string };
+      };
+      expect(config[platform.startsWith("macos-")
+        ? "mac"
+        : platform.startsWith("windows-")
+          ? "win"
+          : "linux"]?.artifactName).toBe(artifactName);
+      if (platform.startsWith("macos-") || platform.startsWith("windows-")) {
+        expect(config.extraMetadata.inertiaUpdateCapability).toMatchObject({
+          delivery: "manual",
+          reason: platform.startsWith("macos-")
+            ? "macos-signing-unavailable"
+            : "windows-signing-unavailable",
+        });
+      } else {
+        expect(config.extraMetadata.inertiaUpdateCapability)
+          .toEqual({ delivery: "in-app", platform: "linux" });
+      }
     }
   });
 });

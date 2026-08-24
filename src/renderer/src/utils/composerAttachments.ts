@@ -7,6 +7,7 @@ import {
   chatAttachmentKind,
   isSpreadsheetAttachmentMimeType,
 } from "@shared/attachments";
+import { applicationRendererScheme } from "@shared/workspace-image-preview";
 
 export interface AttachmentMergeResult {
   readonly attachments: ChatAttachment[];
@@ -83,5 +84,6 @@ export function attachmentPreviewKind(
 }
 
 export function attachmentPreviewUrl(attachment: ChatAttachment): string {
-  return `inertia://bundle/attachment-preview/${encodeURIComponent(attachment.id)}`;
+  const scheme = applicationRendererScheme(globalThis.location?.protocol);
+  return `${scheme}://bundle/attachment-preview/${encodeURIComponent(attachment.id)}`;
 }

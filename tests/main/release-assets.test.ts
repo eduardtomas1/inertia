@@ -84,6 +84,50 @@ const policies = {
     packagedAppArchive: "linux-arm64-unpacked/resources/app.asar",
   },
 } as const;
+const canaryPolicies = {
+  "macos-x64": {
+    packages: [`Inertia-Canary-${version}-x64.dmg`, `Inertia-Canary-${version}-x64.zip`],
+    metadata: "canary-mac.yml",
+    companions: [`Inertia-Canary-${version}-x64.zip.blockmap`],
+    packagedUpdateConfig: "mac/Inertia Canary.app/Contents/Resources/app-update.yml",
+    packagedAppArchive: "mac/Inertia Canary.app/Contents/Resources/app.asar",
+  },
+  "macos-arm64": {
+    packages: [`Inertia-Canary-${version}-arm64.dmg`, `Inertia-Canary-${version}-arm64.zip`],
+    metadata: "canary-mac.yml",
+    companions: [`Inertia-Canary-${version}-arm64.zip.blockmap`],
+    packagedUpdateConfig: "mac-arm64/Inertia Canary.app/Contents/Resources/app-update.yml",
+    packagedAppArchive: "mac-arm64/Inertia Canary.app/Contents/Resources/app.asar",
+  },
+  "windows-x64": {
+    packages: [`Inertia.Canary.Setup.${version}.exe`],
+    metadata: "canary.yml",
+    companions: [`Inertia.Canary.Setup.${version}.exe.blockmap`],
+    packagedUpdateConfig: "win-unpacked/resources/app-update.yml",
+    packagedAppArchive: "win-unpacked/resources/app.asar",
+  },
+  "windows-arm64": {
+    packages: [`Inertia.Canary.Setup.${version}.arm64.exe`],
+    metadata: "canary.yml",
+    companions: [`Inertia.Canary.Setup.${version}.arm64.exe.blockmap`],
+    packagedUpdateConfig: "win-arm64-unpacked/resources/app-update.yml",
+    packagedAppArchive: "win-arm64-unpacked/resources/app.asar",
+  },
+  "linux-x64": {
+    packages: [`Inertia-Canary-${version}.AppImage`],
+    metadata: "canary-linux.yml",
+    companions: [],
+    packagedUpdateConfig: "linux-unpacked/resources/app-update.yml",
+    packagedAppArchive: "linux-unpacked/resources/app.asar",
+  },
+  "linux-arm64": {
+    packages: [`Inertia-Canary-${version}-arm64.AppImage`],
+    metadata: "canary-linux-arm64.yml",
+    companions: [],
+    packagedUpdateConfig: "linux-arm64-unpacked/resources/app-update.yml",
+    packagedAppArchive: "linux-arm64-unpacked/resources/app.asar",
+  },
+} as const;
 
 async function temporaryDirectory(): Promise<string> {
   const path = await mkdtemp(join(tmpdir(), "inertia-release-assets-"));
@@ -99,13 +143,15 @@ async function writeFixture(
   sourceRoot: string,
   platform: keyof typeof policies,
   options: {
+    channel?: "stable" | "canary";
     feedUrl?: string;
     overrideUrl?: string;
     delivery?: "in-app" | "manual";
     includePublisherName?: boolean;
   } = {},
 ): Promise<void> {
-  const policy = policies[platform];
+  const channel = options.channel ?? "stable";
+  const policy = channel === "canary" ? canaryPolicies[platform] : policies[platform];
   const delivery = options.delivery ?? "in-app";
   const platformMarker = platform.startsWith("macos-")
     ? "darwin"
@@ -123,8 +169,9 @@ async function writeFixture(
   await mkdir(manifestSource, { recursive: true });
   await mkdir(dirname(archivePath), { recursive: true });
   await writeFile(join(manifestSource, "package.json"), JSON.stringify({
-    name: packageJson.name,
+    name: channel === "canary" ? "inertia-canary" : packageJson.name,
     version,
+    inertiaReleaseChannel: channel,
     inertiaUpdateCapability: capability,
   }));
   await createPackage(manifestSource, archivePath);
@@ -137,8 +184,11 @@ async function writeFixture(
     updateConfigPath,
     [
       "provider: generic",
-      `url: ${options.feedUrl ?? "https://github.com/eduardtomas1/inertia/releases/latest/download"}`,
-      "updaterCacheDirName: inertia-updater",
+      `url: ${options.feedUrl ?? (channel === "canary"
+        ? "https://raw.githubusercontent.com/eduardtomas1/inertia/canary-feed"
+        : "https://github.com/eduardtomas1/inertia/releases/latest/download")}`,
+      `updaterCacheDirName: ${channel === "canary" ? "inertia-canary-updater" : "inertia-updater"}`,
+      ...(channel === "canary" ? ["channel: canary"] : []),
       ...(includePublisherName ? ["publisherName: Inertia Test Publisher"] : []),
       "",
     ].join("\n"),
@@ -213,6 +263,92 @@ afterEach(async () => {
 });
 
 describe("release asset staging", () => {
+  it("validates and consolidates the disjoint Canary artifact and metadata union", async () => {
+    const fixtureRoot = await temporaryDirectory();
+    const sourceRoot = join(fixtureRoot, "source");
+    const stageRoot = join(fixtureRoot, "stage");
+    await mkdir(sourceRoot);
+    for (const platform of Object.keys(canaryPolicies) as Array<keyof typeof canaryPolicies>) {
+      await writeFixture(sourceRoot, platform, { channel: "canary" });
+      const staged = runReleaseAssets(["stage", platform], {
+        INERTIA_RELEASE_CHANNEL: "canary",
+        RELEASE_TAG: `canary-v${version}`,
+        INERTIA_RELEASE_SOURCE_DIR: sourceRoot,
+        INERTIA_RELEASE_STAGE_DIR: stageRoot,
+      });
+      expect(staged.status, staged.stderr).toBe(0);
+    }
+    const finalized = runReleaseAssets(["finalize"], {
+      INERTIA_RELEASE_CHANNEL: "canary",
+      RELEASE_TAG: `canary-v${version}`,
+      INERTIA_RELEASE_DOWNLOAD_DIR: stageRoot,
+    });
+    expect(finalized.status, finalized.stderr).toBe(0);
+    const entries = (await readdir(join(stageRoot, "final"))).sort();
+    expect(Object.keys(canaryPolicies)).toEqual([
+      "macos-x64",
+      "macos-arm64",
+      "windows-x64",
+      "windows-arm64",
+      "linux-x64",
+      "linux-arm64",
+    ]);
+    expect(entries).toEqual([...new Set([
+      ...Object.values(canaryPolicies).flatMap((policy) => [
+        ...policy.packages,
+        policy.metadata,
+        ...policy.companions,
+      ]),
+      "SHA256SUMS.txt",
+    ])].sort());
+    for (const [metadata, platforms] of [
+      ["canary-mac.yml", ["macos-x64", "macos-arm64"]],
+      ["canary.yml", ["windows-x64", "windows-arm64"]],
+    ] as const) {
+      const document = parse(
+        await readFile(join(stageRoot, "final", metadata), "utf8"),
+      ) as { files: Array<{ url: string }> };
+      expect(document.files.map(({ url }) => url)).toEqual(
+        platforms.flatMap((platform) => canaryPolicies[platform].packages),
+      );
+    }
+  });
+
+  it("retains every Canary package while omitting unsigned desktop feed metadata", async () => {
+    const fixtureRoot = await temporaryDirectory();
+    const sourceRoot = join(fixtureRoot, "source");
+    const stageRoot = join(fixtureRoot, "stage");
+    await mkdir(sourceRoot);
+    for (const platform of Object.keys(canaryPolicies) as Array<keyof typeof canaryPolicies>) {
+      await writeFixture(sourceRoot, platform, {
+        channel: "canary",
+        delivery: platform.startsWith("linux-") ? "in-app" : "manual",
+      });
+      const staged = runReleaseAssets(["stage", platform], {
+        INERTIA_RELEASE_CHANNEL: "canary",
+        RELEASE_TAG: `canary-v${version}`,
+        INERTIA_RELEASE_SOURCE_DIR: sourceRoot,
+        INERTIA_RELEASE_STAGE_DIR: stageRoot,
+      });
+      expect(staged.status, staged.stderr).toBe(0);
+    }
+    const finalized = runReleaseAssets(["finalize"], {
+      INERTIA_RELEASE_CHANNEL: "canary",
+      RELEASE_TAG: `canary-v${version}`,
+      INERTIA_RELEASE_DOWNLOAD_DIR: stageRoot,
+    });
+    expect(finalized.status, finalized.stderr).toBe(0);
+    const entries = await readdir(join(stageRoot, "final"));
+    expect(entries).toEqual(expect.arrayContaining([
+      ...Object.values(canaryPolicies).flatMap((policy) => policy.packages),
+      "canary-linux.yml",
+      "canary-linux-arm64.yml",
+      "SHA256SUMS.txt",
+    ]));
+    expect(entries).not.toContain("canary-mac.yml");
+    expect(entries).not.toContain("canary.yml");
+  });
+
   it("validates and consolidates the exact updater asset union", async () => {
     const fixtureRoot = await temporaryDirectory();
     const sourceRoot = join(fixtureRoot, "source");

@@ -108,6 +108,7 @@ export interface AppUpdateProgress {
 export interface AppUpdateStatus {
   /** Monotonic within one desktop process; rejects stale invoke responses. */
   revision: number;
+  channel: "stable" | "canary";
   state: AppUpdateState;
   freshness: AppUpdateFreshness;
   delivery: AppUpdateDelivery;
@@ -119,6 +120,12 @@ export interface AppUpdateStatus {
   releaseUrl: string | null;
   checkedAt: string | null;
   lastAttemptedAt: string | null;
+  message: string;
+}
+
+export interface CanaryRollbackStatus {
+  state: "unavailable" | "not-prepared" | "preparing" | "ready" | "failed";
+  version: string | null;
   message: string;
 }
 
@@ -598,6 +605,11 @@ export interface DesktopBridge {
   cancelAppUpdateDownload: () => Promise<AppUpdateStatus>;
   /** Requests a guarded runtime shutdown and installs only after cleanup is confirmed. */
   installAppUpdate: () => Promise<AppUpdateStatus>;
+  /** Canary-only: downloads and verifies the current immutable package before an update. */
+  prepareCanaryRollback: () => Promise<CanaryRollbackStatus>;
+  getCanaryRollbackStatus: () => Promise<CanaryRollbackStatus>;
+  /** Canary-only: opens the retained, reverified last-known-good package with the OS. */
+  openCanaryRollback: () => Promise<CanaryRollbackStatus>;
   /** Receives sanitized authoritative updater snapshots. */
   onAppUpdateStatus: (listener: (status: AppUpdateStatus) => void) => () => void;
   /** Fetches authoritative release metadata and sends the latest comparison to Discord. */

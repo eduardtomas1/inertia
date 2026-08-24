@@ -20,6 +20,9 @@ export interface DetachedChatBootstrapOptions {
   onDraftStoreDiagnostic?: (
     diagnostic: DetachedChatDraftStoreDiagnostic,
   ) => void;
+  productName?: string;
+  applicationScheme?: string;
+  sessionPartitionPrefix?: string;
   registerRendererProtocol(
     session: Electron.Session,
     conversationId: string,
@@ -40,6 +43,9 @@ export function createDetachedChatMain(
     registerRendererProtocol: options.registerRendererProtocol,
     registerHealthRenderer: options.registerHealthRenderer,
     rendererUrl: options.rendererUrl,
+    productName: options.productName ?? "Inertia",
+    applicationScheme: options.applicationScheme ?? "inertia",
+    sessionPartitionPrefix: options.sessionPartitionPrefix ?? "inertia",
     preloadPath: fileURLToPath(
       new URL("../preload/detached-chat.cjs", import.meta.url),
     ),

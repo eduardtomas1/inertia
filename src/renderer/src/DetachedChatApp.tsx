@@ -24,6 +24,7 @@ import type {
 import { defaultSettings } from "@shared/contracts/app";
 import type { DesktopWindowContext } from "@shared/desktop";
 import { selectConversationWorkspaceRun } from "../../shared/attention";
+import { applicationProductName } from "../../shared/workspace-image-preview";
 
 import { ChatWorkspace } from "./components/ChatWorkspace";
 import "./detached-chat.css";
@@ -259,7 +260,7 @@ export default function DetachedChatApp({
   const conversationTitle = conversation?.title ?? null;
   useEffect(() => {
     const chatTitle = conversationTitle ?? "Detached chat";
-    document.title = `${chatTitle} — Inertia`;
+    document.title = `${chatTitle} — ${applicationProductName(window.location.protocol)}`;
     const nativeTitle = chatTitle.trim();
     if (
       !projectedConversationId

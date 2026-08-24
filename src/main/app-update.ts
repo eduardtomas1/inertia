@@ -5,11 +5,14 @@ import type {
   AppUpdateStatus,
 } from "../shared/desktop.js";
 import type { AppUpdaterAdapter, AppUpdaterDownload } from "./electron-app-updater.js";
+import {
+  channelConfiguration,
+  releasePageUrl,
+  type InertiaReleaseChannel,
+} from "./release-channel.js";
 
 const LATEST_RELEASE_URL =
   "https://api.github.com/repos/eduardtomas1/inertia/releases/latest";
-const RELEASE_PAGE_PREFIX =
-  "https://github.com/eduardtomas1/inertia/releases/tag/v";
 const DEFAULT_CACHE_MS = 6 * 60 * 60 * 1_000;
 const DEFAULT_TIMEOUT_MS = 8_000;
 const MAX_RESPONSE_BYTES = 64 * 1_024;
@@ -22,6 +25,7 @@ export type AppUpdateCapability =
 
 export interface AppUpdateServiceOptions {
   currentVersion: string;
+  channel?: InertiaReleaseChannel;
   fetch: typeof globalThis.fetch;
   capability?: AppUpdateCapability;
   loadUpdater?: () => Promise<AppUpdaterAdapter>;
@@ -108,11 +112,13 @@ async function boundedJson(response: Response): Promise<unknown> {
   return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
 }
 
-function latestTag(value: unknown): string {
+function latestTag(value: unknown, channel: InertiaReleaseChannel): string {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new Error("The update response was invalid.");
   }
-  const tag = parsedVersion((value as { tag_name?: unknown }).tag_name);
+  const tag = parsedVersion(channel === "canary"
+    ? (value as { version?: unknown }).version
+    : (value as { tag_name?: unknown }).tag_name);
   if (!tag) throw new Error("The latest release tag was invalid.");
   return tag.text;
 }
@@ -151,6 +157,8 @@ function snapshot(status: AppUpdateStatus): AppUpdateStatus {
 
 export class AppUpdateService {
   private readonly currentVersion: string;
+  private readonly channel: InertiaReleaseChannel;
+  private readonly productName: string;
   private readonly fetch: typeof globalThis.fetch;
   private readonly capability: AppUpdateCapability;
   private readonly loadUpdater: (() => Promise<AppUpdaterAdapter>) | null;
@@ -168,6 +176,8 @@ export class AppUpdateService {
     const current = parsedVersion(options.currentVersion);
     if (!current) throw new Error("The current Inertia version is invalid.");
     this.currentVersion = current.text;
+    this.channel = options.channel ?? "stable";
+    this.productName = channelConfiguration(this.channel).productName;
     this.fetch = options.fetch;
     this.capability = options.capability ?? {
       delivery: "manual",
@@ -182,6 +192,7 @@ export class AppUpdateService {
     this.timeoutMs = Math.max(1_000, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
     this.status = {
       revision: 0,
+      channel: this.channel,
       state: "idle",
       freshness: "unavailable",
       delivery: this.capability.delivery,
@@ -194,8 +205,8 @@ export class AppUpdateService {
       checkedAt: null,
       lastAttemptedAt: null,
       message: this.capability.delivery === "in-app"
-        ? "Inertia will check for updates shortly."
-        : "Inertia will check for releases shortly; this installation updates manually.",
+        ? `${this.productName} will check for updates shortly.`
+        : `${this.productName} will check for releases shortly; this installation updates manually.`,
     };
   }
 
@@ -259,7 +270,7 @@ export class AppUpdateService {
       state: "downloading",
       installBlocker: null,
       progress: null,
-      message: `Downloading Inertia ${this.status.latestVersion}…`,
+      message: `Downloading ${this.productName} ${this.status.latestVersion}…`,
     });
     const operation: DownloadOperation = {
       native: null,
@@ -345,11 +356,11 @@ export class AppUpdateService {
       const cached: CachedCheck = {
         state: available ? "available" : "current",
         latestVersion,
-        releaseUrl: `${RELEASE_PAGE_PREFIX}${latestVersion}`,
+        releaseUrl: releasePageUrl(this.channel, latestVersion),
         checkedAt,
         message: available
-          ? `Inertia ${latestVersion} is available.`
-          : "Inertia is up to date.",
+          ? `${this.productName} ${latestVersion} is available.`
+          : `${this.productName} is up to date.`,
       };
       this.cached = cached;
       return this.publish({
@@ -396,7 +407,11 @@ export class AppUpdateService {
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
     timeout.unref?.();
     try {
-      const response = await this.fetch(LATEST_RELEASE_URL, {
+      const response = await this.fetch(
+        this.channel === "canary"
+          ? `${channelConfiguration("canary").updateFeedUrl}/canary-status.json`
+          : LATEST_RELEASE_URL,
+        {
         method: "GET",
         redirect: "error",
         signal: controller.signal,
@@ -407,7 +422,7 @@ export class AppUpdateService {
         },
       });
       if (!response.ok) throw new Error(`Update request failed (${response.status}).`);
-      return latestTag(await boundedJson(response));
+      return latestTag(await boundedJson(response), this.channel);
     } finally {
       clearTimeout(timeout);
     }
@@ -458,7 +473,7 @@ export class AppUpdateService {
         state: "downloaded",
         progress: null,
         installBlocker: null,
-        message: `Inertia ${this.status.latestVersion} is ready to install.`,
+        message: `${this.productName} ${this.status.latestVersion} is ready to install.`,
       });
     } catch {
       if (operation.cancelled) {

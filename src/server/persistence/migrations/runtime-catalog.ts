@@ -1,7 +1,7 @@
 import type Database from "better-sqlite3";
 import type { ProviderId } from "../../../shared/contracts";
 import { continuationIdentityForSelection, nativeModelSelection } from "../../../shared/model-routing";
-import { backfillLegacyAgentTurns, formatMigrationDiagnostic, runDatabaseMigrations } from "../../database-migrations";
+import { backfillLegacyAgentTurns, formatMigrationDiagnostic, runDatabaseMigrations, type DatabaseMigration } from "../../database-migrations";
 import { nativeProviderMetadataScope, providerMetadataScopeKey, type PersistedProviderMetadata } from "../../provider/metadata";
 import { legacyModelSelection } from "../codecs";
 import type { AgentTurnRow, ConversationRow } from "../rows";
@@ -30,7 +30,7 @@ import { workspacePathAuthoritiesMigration } from "./workspace-path-authorities"
 import { conversationContextPacketsMigration } from "./conversation-context-packets";
 const MODEL_SELECTION_TABLES = ["conversations", "agent_turns"] as const;
 const MODEL_SELECTION_COLUMNS = ["model_selection_json", "continuation_identity_json"] as const;
-export function migrateRuntimeDatabase(database: Database.Database, maximumVersion = CURRENT_DATABASE_SCHEMA_VERSION): void {
+export function runtimeMigrationCatalog(): readonly DatabaseMigration[] {
     const legacyMigrations: DatabaseMigrationDefinition[] = LEGACY_SCHEMA_SQL.map(
       (sql, index) => {
       const version = index + 1;
@@ -1227,10 +1227,10 @@ export function migrateRuntimeDatabase(database: Database.Database, maximumVersi
       persistDiscordReleaseRepositoryUrl,
       authoritativeRunStateMigration,
     );
-    const runtimeMigrations = createRuntimeMigrationCatalog(
-      legacyMigrations,
-      migrationExtensions,
-    );
+    return createRuntimeMigrationCatalog(legacyMigrations, migrationExtensions);
+}
+export function migrateRuntimeDatabase(database: Database.Database, maximumVersion = CURRENT_DATABASE_SCHEMA_VERSION): void {
+    const runtimeMigrations = runtimeMigrationCatalog();
     runDatabaseMigrations(database, runtimeMigrations.slice(0, maximumVersion), {
       onDiagnostic: (diagnostic) => {
         if (diagnostic.outcome === "failed") {

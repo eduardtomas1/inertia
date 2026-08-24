@@ -153,6 +153,13 @@ Inertia does not estimate price from a model name or send usage to a hosted anal
 
 Open **Settings → Discord** to configure release posts. Add the public GitHub or GitLab repository URL, then paste a Discord incoming webhook URL from the target channel's **Edit Channel → Integrations → Webhooks** settings. Inertia stores that webhook only in the operating system credential vault; the renderer and SQLite database receive configured/unconfigured state, never the saved URL. Press **Generate** to compare the latest release tag with the previous one and post a bounded local diff summary with **Millores**, **Implementacions**, **Bugs**, and **Altres**. Empty Discord settings stay blank and do not block startup.
 
+Canary installs coexist with stable Inertia as a separate application and local
+profile. **Settings → General → Application updates** identifies the active
+channel, reports whether the current immutable Canary package is retained as
+last-known-good, and opens a reverified rollback package after an update. Canary
+never shares stable's protocol, database, Chromium profile, updater cache, feed,
+or package names.
+
 ![Configure credential-safe Discord release summaries](docs/screenshots/inertia-discord-settings.png)
 
 ### Private Connect, without surrendering the desktop

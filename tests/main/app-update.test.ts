@@ -58,6 +58,7 @@ describe("app update checks", () => {
 
     await expect(service.check()).resolves.toEqual({
       revision: 2,
+      channel: "stable",
       state: "available",
       freshness: "fresh",
       delivery: "manual",
@@ -73,6 +74,33 @@ describe("app update checks", () => {
       message: "Inertia 0.0.11 is available.",
     });
     expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("checks only the isolated Canary feed and reports its immutable release tag", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>(async (input) => {
+      expect(String(input)).toBe(
+        "https://raw.githubusercontent.com/eduardtomas1/inertia/canary-feed/canary-status.json",
+      );
+      return new Response(JSON.stringify({
+        version: "0.0.12",
+        tag: "canary-v0.0.12",
+        remoteUrl: "https://attacker.invalid/ignored",
+      }));
+    });
+    const service = new AppUpdateService({
+      currentVersion: "0.0.11",
+      channel: "canary",
+      fetch,
+    });
+
+    await expect(service.check()).resolves.toMatchObject({
+      channel: "canary",
+      state: "available",
+      latestVersion: "0.0.12",
+      releaseUrl:
+        "https://github.com/eduardtomas1/inertia/releases/tag/canary-v0.0.12",
+      message: "Inertia Canary 0.0.12 is available.",
+    });
   });
 
   it("downloads explicitly, publishes bounded progress, and blocks installation safely", async () => {

@@ -8,6 +8,7 @@ import { resolveWorkspaceImagePreviewResponse } from "../../src/main/workspace-i
 import { resolveWorkspacePathForOpen } from "../../src/server/workspace";
 import {
   MAX_WORKSPACE_IMAGE_PREVIEW_BYTES,
+  applicationProductName,
   parseWorkspaceImagePreviewUrl,
   workspaceImagePreviewUrl,
 } from "../../src/shared/workspace-image-preview";
@@ -19,6 +20,13 @@ const VALID_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
   "base64",
 );
+
+describe("application renderer identity", () => {
+  it("projects the product name from the isolated renderer scheme", () => {
+    expect(applicationProductName("inertia:")).toBe("Inertia");
+    expect(applicationProductName("inertia-canary:")).toBe("Inertia Canary");
+  });
+});
 
 function pngChunk(kind: string, data: Buffer): Buffer {
   const length = Buffer.alloc(4);
@@ -315,6 +323,12 @@ describe("workspace image previews", () => {
     expect(parseWorkspaceImagePreviewUrl(new URL(
       `inertia://bundle/workspace-image/${PROJECT_ID}/project/..%2Fsecret.png`,
     ))).toBeNull();
+    expect(workspaceImagePreviewUrl({
+      projectId: PROJECT_ID,
+      relativePath: "images/canary.png",
+    }, "inertia-canary")).toBe(
+      `inertia-canary://bundle/workspace-image/${PROJECT_ID}/project/images%2Fcanary.png`,
+    );
   });
 
   it("serves only MIME-sniffed bounded image bytes from the contained resolver", async () => {

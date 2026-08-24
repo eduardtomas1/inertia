@@ -51,8 +51,7 @@ export interface AppFixture {
 
 interface AppFixtureOptions {
   name: string;
-  initialState: "empty" | "conversation";
-  windowDisplay?: "primary";
+  initialState: "empty" | "conversation"; windowDisplay?: "primary"; additionalEnvironment?: Record<string, string>;
   initialNewThreadMode?: "local" | "worktree";
   seedAssistantCodeBlock?: boolean;
   seedSecondProject?: boolean;
@@ -789,6 +788,7 @@ export async function createAppFixture(
       ...(options.codexAppServerSource
         ? { INERTIA_PACKAGE_SMOKE_CODEX_EXPECTED: process.execPath }
         : {}),
+      ...options.additionalEnvironment,
     },
   };
   const appendDiagnostic = (source: string, chunk: Buffer | string): void => {

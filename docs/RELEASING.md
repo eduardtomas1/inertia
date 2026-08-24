@@ -7,6 +7,57 @@ smoked on a matching GitHub-hosted architecture; macOS is intentionally built
 per architecture because host-selected provider executables and native modules
 make a cross-host universal bundle incomplete.
 
+Canary releases are the same source and version discipline under the distinct
+`canary-vMAJOR.MINOR.PATCH` tag namespace. They are prereleases and are never
+marked as GitHub's latest stable release. The release workflow packages Canary
+with its own application ID, product/executable names, protocol scheme,
+Chromium partition, profile/data/workspace/temp roots, updater cache, generic
+feed, metadata channel, and artifact names. A Canary process ignores packaged
+data/workspace environment overrides, so it cannot be pointed at stable data.
+
+To install Canary, open the exact `canary-vMAJOR.MINOR.PATCH` GitHub prerelease,
+download the Canary-named package for the target platform and verify it against
+that release's `SHA256SUMS.txt` before running the installer. It installs beside
+stable Inertia rather than replacing it. On first launch, confirm **Canary
+channel · isolated profile** in **Settings → General → Application updates**;
+stable projects and conversations are intentionally not imported. Use **Check
+now** for subsequent Canary updates. Before any update download begins, the
+application must show a verified last-known-good build; use **Prepare rollback**
+when the current package has not yet been retained.
+
+The Canary feed is one immutable commit per published version on the
+`canary-feed` branch. Its small update
+metadata points to immutable assets on the exact versioned Canary prerelease;
+the branch advances only after every platform package, smoke test, fuse check,
+signature check, asset digest, consolidated checksum, and provenance
+attestation succeeds. Publication compares the candidate version with the
+current branch head and retries a non-force fast-forward after concurrent
+updates, so an older workflow that finishes late cannot replace a newer feed.
+Linux update metadata is always required; credential-optional manual macOS or
+Windows builds are omitted from the feed until that platform is update-capable.
+Stable packages never read this feed, and Canary packages never read
+`releases/latest/download`.
+
+Before an in-app Canary update downloads, Inertia downloads the immutable
+package for the currently running version, verifies it against that release's
+`SHA256SUMS.txt`, and retains exactly one last-known-good package inside the
+Canary profile. The Settings update surface reports the channel and verification
+state. After an update, the macOS and Windows **Open rollback v…** action
+rehashes the retained installer before asking the operating system to open it.
+The Linux **Show rollback file v…** action rehashes and reveals the retained
+AppImage without trying to launch it under the running profile lock. Quit
+Canary, replace the active `APPIMAGE` path named in the status message with the
+revealed file, preserve
+the destination's executable permission, and reopen Canary. A missing release,
+truncated download, digest mismatch, substituted file, invalid active AppImage,
+or OS open/reveal failure is reported without starting the new update or
+touching the prior retained package. The first
+Canary installed outside the release workflow may need **Prepare rollback**
+once; updates remain blocked until the running build is retained successfully.
+After opening a macOS or Windows rollback package, follow the platform installer
+prompt and restart Canary; the retained checksum remains the authority for the
+selected package.
+
 Signing credentials are optional until the project has the corresponding
 certificates. A credential-free build remains explicit: macOS uses the tested
 ad-hoc signature and Windows remains unsigned. Supplying any part of a signing
@@ -83,3 +134,18 @@ the installed production dependency graph, fails when a package references
 missing license material, and places deterministic third-party notices beside
 Inertia's own license and Electron's Chromium notices in the packaged
 resources. Release validation must not bypass that prebuild step.
+
+## Database migration lineage
+
+`database-migration-lineage.json` is the durable released migration order and
+semantic digest manifest. `npm run check:migrations` validates its shape, while
+the focused Vitest lineage test reconstructs all migrations from the runtime
+catalog and compares every version, name, foreign-key mode, SQL body, or data
+migration callback digest. Data migrations that call imported helpers also pin
+sorted SHA-256 digests for the named top-level helper declarations and their
+relevant transitive helpers. Unrelated declarations in the same live module can
+continue to evolve without rewriting released lineage. The dedicated CI
+workflow additionally compares the
+PR merge base (or previous `main` commit) and rejects any edited, removed, or
+reordered released entry even when the proposed branch also edits the manifest.
+Only new entries may be appended. Release migrations are never rewritten.

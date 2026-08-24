@@ -38,11 +38,11 @@ const CI_STREAM_LONG_TASK_CATASTROPHIC_MS = 2_000;
 // These surfaces are loaded during idle time. Their first interaction should
 // therefore be a synchronous render, not React's delayed first lazy handoff.
 const CI_PREFETCHED_SURFACE_TARGET_MS = 100;
-// The scenario deliberately leaves the live edge to verify reader navigation,
-// so paints produced while the response is outside the viewport are excluded.
-// Four distinct visible commits still prove progressive rendering before and
-// after the explicit return to latest without rewarding a broken auto-follow.
+// Prove progressive rendering before the scenario deliberately leaves the live
+// edge. Follow-latest assertions separately prove that returning to the live
+// answer restores the final settled view without rewarding broken auto-follow.
 const CI_STREAM_MIN_VISIBLE_UPDATES = 4;
+const CI_STREAM_VISIBLE_UPDATE_BARRIER_TIMEOUT_MS = 5_000;
 const READER_NAVIGATION_MAX_WHEEL_GESTURES = 16;
 const READER_NAVIGATION_MAX_PROGRESS_SAMPLES = 10;
 const READER_NAVIGATION_TARGET_SCROLL_TOP = 120;
@@ -926,6 +926,15 @@ async function streamingResponsivenessSample(
   await page.locator('[data-stream-renderer="plain-text"]').waitFor({
     timeout: 10_000,
   });
+  await expect.poll(
+    () => page.evaluate(() => performance.getEntriesByName(
+      "inertia-stream:stream-paint",
+    ).length),
+    {
+      message: `streaming sample ${sampleNumber} should paint progressively before reader navigation`,
+      timeout: CI_STREAM_VISIBLE_UPDATE_BARRIER_TIMEOUT_MS,
+    },
+  ).toBeGreaterThanOrEqual(CI_STREAM_MIN_VISIBLE_UPDATES);
   const liveViewport = page.locator(".message-scroll");
   await liveViewport.hover({ position: { x: 16, y: 16 } });
   await driveBoundedWheelNavigation({

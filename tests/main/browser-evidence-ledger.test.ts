@@ -127,6 +127,8 @@ describe("Browser evidence ledger", () => {
     "underpass=public",
     "overpassValues=public",
     "mypassCount=4",
+    "Ratios x/y and a/b are invalid",
+    "Progress 1/2 complete 3/4",
   ])("keeps a non-credential page-authored identifier: %s", (message) => {
     const ledger = new BrowserEvidenceLedger();
     ledger.recordConsoleError({ ...location, message });

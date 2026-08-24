@@ -420,6 +420,8 @@ describe("Browser evidence sanitization", () => {
 
   it.each([
     "Render used 1/2 of the frame budget.",
+    "Ratios x/y and a/b are invalid.",
+    "Progress 1/2 complete 3/4.",
     "Choose yes/no when prompted.",
     String.raw`Choose yes\no when prompted.`,
     "Dockerfile checks completed normally.",

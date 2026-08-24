@@ -118,8 +118,8 @@ const CONCATENATED_PASS_NAMESPACES = new Set([
 ]);
 const COMMON_RELATIVE_PATH_ROOTS = new Set([
   "app", "assets", "bin", "build", "config", "configs", "dist", "docs",
-  "lib", "out", "packages", "public", "resources", "scripts", "src",
-  "spec", "specs", "test", "tests",
+  "lib", "out", "packages", "projects", "public", "resources", "scripts",
+  "spec", "specs", "src", "test", "tests", "workspace",
 ]);
 
 interface TextRange {
@@ -285,12 +285,14 @@ function relativePathToken(value: string): boolean {
 function relativePathAcrossEmbeddedSpaces(value: string): boolean {
   for (const separator of ["/", "\\"] as const) {
     let previous = -1;
+    let root = "";
     let whitespaceRuns = 0;
     let inWhitespace = false;
     for (let index = 0; index < value.length; index += 1) {
       const character = value[index]!;
       if (/[,;:()="'<>`]/u.test(character)) {
         previous = -1;
+        root = "";
         whitespaceRuns = 0;
         inWhitespace = false;
         continue;
@@ -308,7 +310,31 @@ function relativePathAcrossEmbeddedSpaces(value: string): boolean {
         && index + 1 < value.length
         && !pathTokenTerminator(value[previous - 1]!)
         && !pathTokenTerminator(value[index + 1]!)
-      ) return true;
+      ) {
+        let leafEnd = index + 1;
+        while (
+          leafEnd < value.length
+          && !pathTokenTerminator(value[leafEnd]!)
+          && !/[,;:()="'<>`]/u.test(value[leafEnd]!)
+        ) leafEnd += 1;
+        const leaf = value.slice(index + 1, leafEnd);
+        if (
+          COMMON_RELATIVE_PATH_ROOTS.has(root)
+          || root === "."
+          || root === ".."
+          || (leaf.startsWith(".") && leaf.length > 1)
+          || hasFileExtension(leaf)
+        ) return true;
+      }
+      if (previous < 0) {
+        let rootStart = index;
+        while (
+          rootStart > 0
+          && !pathTokenTerminator(value[rootStart - 1]!)
+          && !/[,;:()="'<>`]/u.test(value[rootStart - 1]!)
+        ) rootStart -= 1;
+        root = value.slice(rootStart, index).toLowerCase();
+      }
       previous = index;
       whitespaceRuns = 0;
     }

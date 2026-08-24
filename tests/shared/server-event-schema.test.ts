@@ -1602,6 +1602,15 @@ describe("server event remaining discriminant and identity boundary", () => {
       terminalAssistantMessage: null,
     })).toBeTruthy();
     expect(parseServerEvent({
+      type: "agent.completed",
+      conversationId: conversation.id,
+      runId: "run-1",
+      turnId: "turn-1",
+      status: "completed",
+      terminalReason: "provider-completed",
+      terminalAssistantMessageId: terminalAssistantMessage.id,
+    })).toBeTruthy();
+    expect(parseServerEvent({
       type: "agent.failed",
       conversationId: conversation.id,
       runId: "run-1",
@@ -1624,6 +1633,15 @@ describe("server event remaining discriminant and identity boundary", () => {
     expect(() => parseServerEvent({
       ...completion,
       terminalAssistantMessageId: 42,
+    })).toThrow("Malformed server event");
+    expect(() => parseServerEvent({
+      type: "agent.completed",
+      conversationId: conversation.id,
+      runId: "run-1",
+      turnId: "turn-1",
+      status: "completed",
+      terminalReason: "provider-completed",
+      terminalAssistantMessage,
     })).toThrow("Malformed server event");
     for (const terminalAssistantMessage of [
       { ...completion.terminalAssistantMessage, role: "user" },

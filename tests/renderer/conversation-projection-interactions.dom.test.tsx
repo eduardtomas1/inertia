@@ -1036,6 +1036,7 @@ describe("useConversationProjection pending interactions", () => {
       exactStatus: "cancelled" as const,
       exactConversationStatus: "idle" as const,
       exactReason: "The user stopped the turn.",
+      exactTerminalAssistantMessageId: null,
       event: {
         type: "agent.completed" as const,
         conversationId: primaryId,
@@ -1044,6 +1045,7 @@ describe("useConversationProjection pending interactions", () => {
         status: "cancelled" as const,
         terminalReason: "The user stopped the turn.",
         terminalAssistantMessageId: null,
+        terminalAssistantMessage: null,
       },
     },
     {
@@ -1052,6 +1054,7 @@ describe("useConversationProjection pending interactions", () => {
       exactStatus: "interrupted" as const,
       exactConversationStatus: "failed" as const,
       exactReason: "The agent turn was interrupted.",
+      exactTerminalAssistantMessageId: "legacy-terminal-message",
       event: {
         type: "agent.failed" as const,
         conversationId: primaryId,
@@ -1060,7 +1063,7 @@ describe("useConversationProjection pending interactions", () => {
         status: "interrupted" as const,
         terminalReason: "The agent turn was interrupted.",
         message: "The agent turn was interrupted.",
-        terminalAssistantMessageId: null,
+        terminalAssistantMessageId: "legacy-terminal-message",
       },
     },
   ]) {
@@ -1207,11 +1210,25 @@ describe("useConversationProjection pending interactions", () => {
         text: "Provider output before settlement.",
       });
       expect(hook.result.current.streamingChannel).toBe("text");
+      const staleTerminalAssistantMessage: ChatMessage = {
+        id: "stale-turn-terminal-message",
+        conversationId: primaryId,
+        turnId: staleTurn.id,
+        role: "assistant",
+        content: "Durable output from the stale turn.",
+        attachments: [],
+        createdAt: "2026-07-28T12:01:15.000Z",
+      };
       source.emit({
         ...scenario.event,
         runId: staleTurn.runId,
         turnId: staleTurn.id,
+        terminalAssistantMessageId: staleTerminalAssistantMessage.id,
+        terminalAssistantMessage: staleTerminalAssistantMessage,
       });
+      expect(hook.result.current.messages).toContainEqual(
+        staleTerminalAssistantMessage,
+      );
       expect(hook.result.current.streamingChannel).toBe("text");
       expect(hook.result.current.turns.find(({ id }) => id === staleTurn.id)?.status)
         .toBe("running");
@@ -1227,7 +1244,9 @@ describe("useConversationProjection pending interactions", () => {
 
       expect(hook.result.current.streamingChannel).toBeNull();
       expect(hook.result.current.terminalProjections[`${turn.runId}\0${turn.id}`]
-        ?.terminalAssistantMessageId).toBeNull();
+        ?.terminalAssistantMessageId).toBe(
+        scenario.exactTerminalAssistantMessageId,
+      );
       expect(hook.result.current.turns.find(({ id }) => id === turn.id))
         .toMatchObject({
         id: turn.id,
@@ -1239,7 +1258,9 @@ describe("useConversationProjection pending interactions", () => {
         scenario.event.terminalReason,
       );
       expect(hook.result.current.turns.find(({ id }) => id === turn.id)
-        ?.terminalAssistantMessageId).toBeNull();
+        ?.terminalAssistantMessageId).toBe(
+        scenario.exactTerminalAssistantMessageId,
+      );
       expect(hook.result.current.pendingApprovals.map(({ id }) => id))
         .toEqual(["stale-turn-approval"]);
       expect(hook.result.current.pendingInputs.map(({ id }) => id))

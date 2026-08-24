@@ -111,10 +111,8 @@ function optionalTerminalAssistantMessage(value: UnknownRecord): boolean {
     && message.role === "assistant"
     && message.conversationId === value.conversationId
     && message.turnId === value.turnId
-    && (
-      value.terminalAssistantMessageId === undefined
-      || value.terminalAssistantMessageId === message.id
-    );
+    && typeof value.terminalAssistantMessageId === "string"
+    && value.terminalAssistantMessageId === message.id;
 }
 
 function providerMaintenanceStatus(value: unknown): boolean {

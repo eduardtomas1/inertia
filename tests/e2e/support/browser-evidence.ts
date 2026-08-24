@@ -144,11 +144,13 @@ export async function verifyBrowserEvidence({
     );
     return inspector ? {
       title: inspector.getTitle(),
-      url: inspector.webContents.getURL().slice(0, 24),
+      localDocument: inspector.webContents.getURL().startsWith(
+        "data:text/html;charset=utf-8,",
+      ),
     } : null;
   })).toEqual({
     title: "Local Browser capture",
-    url: "data:text/html;charset=",
+    localDocument: true,
   });
   await app.electronApp.evaluate(({ BrowserWindow }) => {
     BrowserWindow.getAllWindows().find(

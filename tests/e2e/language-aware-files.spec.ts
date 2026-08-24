@@ -231,6 +231,19 @@ test("opens a language-aware project link at its exact validated Java range", as
   const resizedSelection = resizedTree.getByRole("treeitem", {
     name: "OrderService.java",
   });
+  // The Files panel intentionally re-reveals its selected row from a
+  // ResizeObserver. Wait for that observer delivery before moving the tree to
+  // an adversarial scroll position; otherwise slower renderers can apply the
+  // Home resize's still-pending reveal after this test scrolls the tree.
+  await resizedTree.evaluate((element) =>
+    new Promise<void>((resolve) => {
+      const observer = new ResizeObserver(() => {
+        observer.disconnect();
+        requestAnimationFrame(() => resolve());
+      });
+      observer.observe(element);
+    })
+  );
   await resizedTree.evaluate((element) => {
     element.scrollTop = element.scrollHeight;
   });

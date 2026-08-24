@@ -955,6 +955,7 @@ async function streamingResponsivenessSample(
         itemId,
         itemIndex: Number(item.dataset.index),
         itemOffset: item.getBoundingClientRect().top - viewportTop,
+        scrollHeight: viewport.scrollHeight,
         scrollTop: viewport.scrollTop,
         trackedItemOffset: trackedItem === null
           ? null

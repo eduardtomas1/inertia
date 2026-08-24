@@ -11,6 +11,7 @@ interface BoundedWheelPosition {
   itemId: string;
   itemIndex: number;
   itemOffset: number;
+  scrollHeight: number;
   scrollTop: number;
   trackedItemOffset: number | null;
 }
@@ -26,6 +27,9 @@ function requirePosition(
 ): BoundedWheelPosition {
   if (!Number.isFinite(value.scrollTop) || value.scrollTop < 0) {
     throw new Error(`${label} returned invalid scrollTop ${String(value.scrollTop)}.`);
+  }
+  if (!Number.isFinite(value.scrollHeight) || value.scrollHeight < 0) {
+    throw new Error(`${label} returned invalid scrollHeight ${String(value.scrollHeight)}.`);
   }
   if (value.itemId.length === 0) {
     throw new Error(`${label} returned an empty itemId.`);
@@ -91,8 +95,12 @@ export async function driveBoundedWheelNavigation(
     }
 
     if (!madeUpwardProgress(previousPosition, position)) {
+      // Streaming can grow the document by more than the wheel delta and move
+      // the stable reader row up/out even though Chromium accepted the gesture.
+      // Growth is not success: it only spends the next already-bounded gesture.
+      if (position.scrollHeight > previousPosition.scrollHeight) continue;
       throw new Error(
-        `Wheel gesture ${gesture} made no upward progress: logical position ended at ${position.itemId} (item ${position.itemIndex}, offset ${position.itemOffset}) while tracked ${previousPosition.itemId} ended at ${String(position.trackedItemOffset)} from item ${previousPosition.itemIndex} offset ${previousPosition.itemOffset} (scrollTop ${position.scrollTop} from ${previousPosition.scrollTop}).`,
+        `Wheel gesture ${gesture} made no upward progress: logical position ended at ${position.itemId} (item ${position.itemIndex}, offset ${position.itemOffset}) while tracked ${previousPosition.itemId} ended at ${String(position.trackedItemOffset)} from item ${previousPosition.itemIndex} offset ${previousPosition.itemOffset} (scrollTop ${position.scrollTop} from ${previousPosition.scrollTop}; scrollHeight ${position.scrollHeight} from ${previousPosition.scrollHeight}).`,
       );
     }
     if (position.scrollTop < options.targetScrollTop) {

@@ -188,8 +188,8 @@ describe("useWorkspaceMentions", () => {
           onListSkills={async () => undefined}
           onUpdateConversation={() => Promise.resolve()}
           onCreateConversationForSelection={async () => undefined}
-          onChooseAttachments={async () => []}
-          onImportAttachments={async () => []}
+          onChooseAttachments={async () => null}
+          onImportAttachments={async () => null}
           onReleaseAttachment={releaseAttachment}
           onRunAction={() => undefined}
           onMentionQuery={mentions.searchMentions}

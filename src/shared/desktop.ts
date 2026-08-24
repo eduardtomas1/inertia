@@ -127,6 +127,11 @@ export interface DesktopAttachment {
   size: number;
 }
 
+export interface DesktopAttachmentImportSelection {
+  batchId: string;
+  attachments: DesktopAttachment[];
+}
+
 export type AttachmentPickerMode = "all" | "images";
 
 export function parseAttachmentPickerMode(
@@ -595,8 +600,20 @@ export interface DesktopBridge {
   ) => Promise<{ sent: true }>;
   selectAttachments: (
     mode?: AttachmentPickerMode,
+  ) => Promise<DesktopAttachmentImportSelection | null>;
+  /** Opens one sender-owned import lifetime for a bounded renderer selection. */
+  beginAttachmentImport: () => Promise<string>;
+  importAttachments: (
+    batchId: string,
+    files: AttachmentImport[],
   ) => Promise<DesktopAttachment[]>;
-  importAttachments: (files: AttachmentImport[]) => Promise<DesktopAttachment[]>;
+  /** Commits only the exact capabilities synchronously adopted by Composer. */
+  commitAttachmentImport: (
+    batchId: string,
+    adoptedAttachmentIds: string[],
+  ) => Promise<void>;
+  /** Rolls back every uncommitted capability in the selection. */
+  cancelAttachmentImport: (batchId: string) => Promise<void>;
   /** Pins one exact send request across the renderer/runtime IPC handoff. */
   prepareAttachmentHandoff: (request: {
     requestId: string;

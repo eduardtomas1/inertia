@@ -36,6 +36,11 @@ import {
 } from "./attachment-import.js";
 import { attachmentImportRunner } from "./attachment-import-desktop-runner.js";
 import {
+  attachmentImportDocumentFromEvent,
+  registerRendererAttachmentImportIpc,
+  RendererAttachmentImportCoordinator,
+} from "./attachment-import-ipc.js";
+import {
   importSelectedAttachmentPaths,
   privacySafeAttachmentImportError,
 } from "./attachment-selection-import.js";
@@ -117,7 +122,10 @@ const IPC = {
   installAppUpdate: "inertia:install-app-update",
   appUpdateStatus: "inertia:app-update-status",
   selectAttachments: "inertia:select-attachments",
+  beginAttachmentImport: "inertia:begin-attachment-import",
   importAttachments: "inertia:import-attachments",
+  commitAttachmentImport: "inertia:commit-attachment-import",
+  cancelAttachmentImport: "inertia:cancel-attachment-import",
   prepareAttachmentHandoff: "inertia:prepare-attachment-handoff",
   finishAttachmentHandoff: "inertia:finish-attachment-handoff",
   releaseAttachment: "inertia:release-attachment",
@@ -212,6 +220,13 @@ function attachmentRegistry(): AttachmentRegistry {
   return importedAttachments;
 }
 
+const rendererAttachmentImports = new RendererAttachmentImportCoordinator(
+  attachmentRegistry,
+  process.env.NODE_ENV === "test"
+    ? Number(process.env.INERTIA_TEST_ATTACHMENT_COMMIT_DELAY_MS ?? 0)
+    : 0,
+);
+
 async function fixedRegularFileSize(path: string): Promise<number> {
   try {
     const metadata = await lstat(path);
@@ -254,6 +269,7 @@ function disposeImportedAttachments(): Promise<void> {
     attachmentCleanup = attachmentCleanup
       .catch(() => undefined)
       .then(async () => {
+        await rendererAttachmentImports.dispose();
         await registry?.dispose();
         if (directory) await removeAttachmentStorageSession(directory);
       });
@@ -526,10 +542,8 @@ function registerIpcHandlers(): void {
     const mode = parseAttachmentPickerMode(args[0]);
     if (!mode) throw new Error("Invalid attachment picker mode.");
     const picker = attachmentPickerConfiguration(mode);
-    const lifetime = new AbortController();
-    const cancelImport = (): void => lifetime.abort();
-    event.sender.once("destroyed", cancelImport);
-    if (event.sender.isDestroyed()) cancelImport();
+    const document = attachmentImportDocumentFromEvent(event);
+    const batchId = rendererAttachmentImports.begin(document);
     try {
       const result = await dialog.showOpenDialog(ownerWindow, {
         title: picker.title,
@@ -540,37 +554,45 @@ function registerIpcHandlers(): void {
         }],
         properties: ["openFile", "multiSelections"],
       });
-      lifetime.signal.throwIfAborted();
-      if (result.canceled) return [];
-      return await importSelectedAttachmentPaths(
-        attachmentRegistry(),
-        result.filePaths,
-        mode,
-        lifetime.signal,
+      if (result.canceled) {
+        await rendererAttachmentImports.cancel(document, batchId);
+        return null;
+      }
+      const attachments = await rendererAttachmentImports.importSelection(
+        document,
+        batchId,
+        async (signal) => await importSelectedAttachmentPaths(
+          attachmentRegistry(),
+          result.filePaths,
+          mode,
+          signal,
+        ),
       );
+      return { batchId, attachments };
     } catch (error) {
+      try {
+        await rendererAttachmentImports.cancel(document, batchId);
+      } catch (cleanupError) {
+        throw privacySafeAttachmentImportError(new AggregateError([
+          error,
+          cleanupError,
+        ]));
+      }
       throw privacySafeAttachmentImportError(error);
-    } finally {
-      event.sender.removeListener("destroyed", cancelImport);
     }
   });
 
-  ipcMain.handle(IPC.importAttachments, async (event, ...args) => {
-    assertTrustedChatIpc(event, args.length, 1);
-    const [value] = args;
-    if (!Array.isArray(value) || value.length !== 1) {
-      throw new Error("Invalid attachments.");
-    }
-    const lifetime = new AbortController();
-    const cancelImport = (): void => lifetime.abort();
-    event.sender.once("destroyed", cancelImport);
-    try {
-      return await attachmentRegistry().import(value, lifetime.signal);
-    } catch (error) {
-      throw privacySafeAttachmentImportError(error);
-    } finally {
-      event.sender.removeListener("destroyed", cancelImport);
-    }
+  registerRendererAttachmentImportIpc({
+    ipcMain,
+    channels: {
+      begin: IPC.beginAttachmentImport,
+      importOne: IPC.importAttachments,
+      commit: IPC.commitAttachmentImport,
+      cancel: IPC.cancelAttachmentImport,
+    },
+    assertTrusted: assertTrustedChatIpc,
+    coordinator: rendererAttachmentImports,
+    sanitizeError: privacySafeAttachmentImportError,
   });
 
   registerAttachmentLifecycleIpc({

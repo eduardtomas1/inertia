@@ -13,7 +13,7 @@ describe("Composer streaming boundary", () => {
   it("memoizes the composer without coupling it to transcript deltas", () => {
     expect(Composer).toHaveProperty("$$typeof", Symbol.for("react.memo"));
 
-    const composerStart = workspaceSource.indexOf("<Composer");
+    const composerStart = workspaceSource.search(/<Composer\s/u);
     const composerEnd = workspaceSource.indexOf("/>", composerStart);
     const composerProps = workspaceSource.slice(composerStart, composerEnd);
 

@@ -40,6 +40,7 @@ import {
   type AttachmentImportValidationReceipt,
   type AttachmentImportValidationRunner,
 } from "./attachment-import-file.js";
+import { RendererAttachmentImportHolds } from "./attachment-import-holds.js";
 
 const MAX_SESSION_ATTACHMENT_RECORDS = 256;
 const MAX_SESSION_ATTACHMENT_BYTES = 512 * 1024 * 1024;
@@ -472,19 +473,17 @@ async function unlinkWithRetry(
     }
   }
 }
-
-function fullReservation(): AttachmentStorageReservation {
-  return {
-    records: MAX_SESSION_ATTACHMENT_RECORDS,
-    bytes: MAX_SESSION_ATTACHMENT_BYTES,
-  };
-}
-
+function fullReservation(): AttachmentStorageReservation { return { records: MAX_SESSION_ATTACHMENT_RECORDS, bytes: MAX_SESSION_ATTACHMENT_BYTES }; }
 export class AttachmentRegistry {
   private readonly records = new Map<string, AttachmentRegistryRecord>();
   private readonly releases = new Map<string, PendingAttachmentRelease>();
   private readonly handoffs = new Map<string, PendingAttachmentHandoff>();
   private readonly attachmentHandoffs = new Map<string, Set<string>>();
+  readonly rendererImports = new RendererAttachmentImportHolds(
+    (id) => this.records.get(id)?.size ?? null,
+    (id) => this.revokedAttachmentIds.has(id) || this.releases.has(id)
+      || this.attachmentHandoffs.has(id),
+  );
   private readonly revokedAttachmentIds = new Set<string>();
   private readonly maxRecords: number;
   private readonly maxBytes: number;
@@ -576,6 +575,7 @@ export class AttachmentRegistry {
     for (const id of attachmentIds) {
       if (
         !this.records.has(id)
+        || this.rendererImports.has(id)
         || this.revokedAttachmentIds.has(id)
         || this.releases.has(id)
         || runtimeOwnsAttachment(id)
@@ -821,7 +821,10 @@ export class AttachmentRegistry {
     signal?: AbortSignal,
   ): Promise<ValidatedAttachmentRead | null> {
     assertNotAborted(signal);
-    if (this.revokedAttachmentIds.has(id)) return null;
+    if (
+      this.revokedAttachmentIds.has(id)
+      || this.rendererImports.has(id)
+    ) return null;
     const record = this.records.get(id);
     if (!record) return null;
     const operationSignal = signal
@@ -918,6 +921,7 @@ export class AttachmentRegistry {
   }
 
   async release(id: string): Promise<boolean> {
+    if (this.rendererImports.has(id)) return false;
     return await this.startRelease(id, true);
   }
 
@@ -928,6 +932,7 @@ export class AttachmentRegistry {
   }
 
   async releaseFromRenderer(id: string): Promise<boolean> {
+    if (this.rendererImports.has(id)) return false;
     try {
       return await this.startRelease(id, !this.attachmentHandoffs.has(id));
     } catch (error) {
@@ -999,6 +1004,7 @@ export class AttachmentRegistry {
     for (const handoff of this.handoffs.values()) clearTimeout(handoff.timer);
     this.handoffs.clear();
     this.attachmentHandoffs.clear();
+    this.rendererImports.clear();
     const releases = [...this.releases.values()];
     for (const release of releases) release.cancel();
     await Promise.allSettled(releases.map(({ promise }) => promise));
@@ -1079,6 +1085,7 @@ export class AttachmentRegistry {
     if (this.records.get(record.id) === record) {
       this.records.delete(record.id);
     }
+    this.rendererImports.drop(record.id);
     this.dropAttachmentHandoffs(record.id);
     this.revokedAttachmentIds.delete(record.id);
     return true;
@@ -1101,6 +1108,7 @@ export class AttachmentRegistry {
     if (this.records.get(record.id) === record) {
       this.records.delete(record.id);
     }
+    this.rendererImports.drop(record.id);
     this.dropAttachmentHandoffs(record.id);
     this.revokedAttachmentIds.delete(record.id);
     this.pendingPaths.set(record.path, record.size);

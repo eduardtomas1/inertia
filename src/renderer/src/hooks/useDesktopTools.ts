@@ -6,6 +6,7 @@ import {
   MAX_CHAT_ATTACHMENT_BYTES,
   MAX_CHAT_ATTACHMENT_TOTAL_BYTES,
 } from "@shared/attachments";
+import type { ComposerAttachmentImportLease } from "../utils/composerAttachments";
 
 interface DesktopToolsOptions {
   setActionError: (message: string | null) => void;
@@ -34,14 +35,26 @@ export function preflightComposerAttachmentFiles(
   }
 }
 
+export interface ComposerAttachmentImportBatch {
+  begin(): Promise<string>;
+  importOne(
+    batchId: string,
+    value: { name: string; mimeType: string; data: ArrayBuffer },
+  ): Promise<ChatAttachment[]>;
+  cancel(batchId: string): Promise<void>;
+}
+
+export interface PreparedComposerAttachmentImport {
+  readonly batchId: string;
+  readonly attachments: readonly ChatAttachment[];
+}
+
 export async function importComposerAttachmentFilesSequentially(
   files: readonly File[],
-  importOne: (
-    value: { name: string; mimeType: string; data: ArrayBuffer },
-  ) => Promise<ChatAttachment[]>,
-  release: (id: string) => Promise<void>,
-): Promise<ChatAttachment[]> {
+  batch: ComposerAttachmentImportBatch,
+): Promise<PreparedComposerAttachmentImport> {
   preflightComposerAttachmentFiles(files);
+  const batchId = await batch.begin();
   const digests = new Set<string>();
   const imported: ChatAttachment[] = [];
   try {
@@ -58,7 +71,7 @@ export async function importComposerAttachmentFilesSequentially(
         (byte) => byte.toString(16).padStart(2, "0"),
       ).join("");
       if (digests.has(digest)) continue;
-      const current = await importOne({
+      const current = await batch.importOne(batchId, {
         name: file.name,
         mimeType: file.type,
         data,
@@ -69,9 +82,16 @@ export async function importComposerAttachmentFilesSequentially(
       digests.add(digest);
       imported.push(current[0]!);
     }
-    return imported;
+    return { batchId, attachments: imported };
   } catch (error) {
-    await Promise.allSettled(imported.map(async ({ id }) => await release(id)));
+    try {
+      await batch.cancel(batchId);
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [error, cleanupError],
+        "Attachments could not be rolled back safely.",
+      );
+    }
     throw error;
   }
 }
@@ -121,40 +141,85 @@ export function useDesktopTools({
     };
   }, [previewContextId, previewOwnerId]);
 
+  const composerAttachmentLease = useCallback((
+    prepared: PreparedComposerAttachmentImport,
+  ): ComposerAttachmentImportLease => {
+    let settled = false;
+    return {
+      attachments: prepared.attachments,
+      async commit(adoptedAttachmentIds) {
+        if (settled) throw new Error("Attachment import is already settled.");
+        try {
+          await window.inertia.commitAttachmentImport(
+            prepared.batchId,
+            [...adoptedAttachmentIds],
+          );
+          settled = true;
+        } catch (error) {
+          setActionError(
+            error instanceof Error
+              ? error.message
+              : "Attachments could not be added.",
+          );
+          throw error;
+        }
+      },
+      async cancel() {
+        if (settled) return;
+        try {
+          await window.inertia.cancelAttachmentImport(prepared.batchId);
+          settled = true;
+        } catch (error) {
+          setActionError("Attachments could not be rolled back safely.");
+          throw error;
+        }
+      },
+    };
+  }, [setActionError]);
+
   const chooseComposerAttachments = useCallback(
-    async (mode: AttachmentPickerMode = "all"): Promise<ChatAttachment[]> => {
+    async (
+      mode: AttachmentPickerMode = "all",
+    ): Promise<ComposerAttachmentImportLease | null> => {
       try {
-        return await window.inertia.selectAttachments(mode);
+        const prepared = await window.inertia.selectAttachments(mode);
+        return prepared ? composerAttachmentLease(prepared) : null;
       } catch (error) {
         setActionError(
           error instanceof Error
             ? error.message
             : "Attachments could not be added.",
         );
-        return [];
+        return null;
       }
     },
-    [setActionError],
+    [composerAttachmentLease, setActionError],
   );
 
   const importComposerAttachments = useCallback(
-    async (files: File[]): Promise<ChatAttachment[]> => {
+    async (files: File[]): Promise<ComposerAttachmentImportLease | null> => {
       try {
-        return await importComposerAttachmentFilesSequentially(
+        const prepared = await importComposerAttachmentFilesSequentially(
           files,
-          async (value) => await window.inertia.importAttachments([value]),
-          async (id) => await window.inertia.releaseAttachment(id),
+          {
+            begin: async () => await window.inertia.beginAttachmentImport(),
+            importOne: async (batchId, value) =>
+              await window.inertia.importAttachments(batchId, [value]),
+            cancel: async (batchId) =>
+              await window.inertia.cancelAttachmentImport(batchId),
+          },
         );
+        return composerAttachmentLease(prepared);
       } catch (error) {
         setActionError(
           error instanceof Error
             ? error.message
             : "Attachments could not be added.",
         );
-        return [];
+        return null;
       }
     },
-    [setActionError],
+    [composerAttachmentLease, setActionError],
   );
 
   const releaseComposerAttachment = useCallback(

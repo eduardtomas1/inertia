@@ -28,7 +28,10 @@ const IPC = {
   appUpdateStatus: "inertia:app-update-status",
   sendDiscordReleaseInfo: "inertia:send-discord-release-info",
   selectAttachments: "inertia:select-attachments",
+  beginAttachmentImport: "inertia:begin-attachment-import",
   importAttachments: "inertia:import-attachments",
+  commitAttachmentImport: "inertia:commit-attachment-import",
+  cancelAttachmentImport: "inertia:cancel-attachment-import",
   prepareAttachmentHandoff: "inertia:prepare-attachment-handoff",
   finishAttachmentHandoff: "inertia:finish-attachment-handoff",
   releaseAttachment: "inertia:release-attachment",
@@ -229,7 +232,10 @@ const bridge: DesktopBridge = Object.freeze({
       DesktopBridge["sendDiscordReleaseInfo"]
     >,
   selectAttachments: (mode: Parameters<DesktopBridge["selectAttachments"]>[0]) => ipcRenderer.invoke(IPC.selectAttachments, mode) as ReturnType<DesktopBridge["selectAttachments"]>,
-  importAttachments: (files: Parameters<DesktopBridge["importAttachments"]>[0]) => ipcRenderer.invoke(IPC.importAttachments, files) as ReturnType<DesktopBridge["importAttachments"]>,
+  beginAttachmentImport: () => ipcRenderer.invoke(IPC.beginAttachmentImport) as ReturnType<DesktopBridge["beginAttachmentImport"]>,
+  importAttachments: (batchId: string, files: Parameters<DesktopBridge["importAttachments"]>[1]) => ipcRenderer.invoke(IPC.importAttachments, batchId, files) as ReturnType<DesktopBridge["importAttachments"]>,
+  commitAttachmentImport: (batchId: string, adoptedAttachmentIds: string[]) => ipcRenderer.invoke(IPC.commitAttachmentImport, batchId, adoptedAttachmentIds) as ReturnType<DesktopBridge["commitAttachmentImport"]>,
+  cancelAttachmentImport: (batchId: string) => ipcRenderer.invoke(IPC.cancelAttachmentImport, batchId) as ReturnType<DesktopBridge["cancelAttachmentImport"]>,
   prepareAttachmentHandoff: (request: Parameters<DesktopBridge["prepareAttachmentHandoff"]>[0]) =>
     ipcRenderer.invoke(IPC.prepareAttachmentHandoff, request) as Promise<void>,
   finishAttachmentHandoff: (requestId: string) =>

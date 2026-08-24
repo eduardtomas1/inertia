@@ -24,6 +24,7 @@ import {
   prepareComposerDetachment,
   registerComposerOwnership,
 } from "../../src/renderer/src/utils/composerOwnership";
+import type { ComposerAttachmentImportLease } from "../../src/renderer/src/utils/composerAttachments";
 
 const provider: ProviderInfo = {
   id: "codex",
@@ -96,6 +97,14 @@ function attachment(id: string): ChatAttachment {
   };
 }
 
+function attachmentLease(attachments: ChatAttachment[]): ComposerAttachmentImportLease {
+  return {
+    attachments,
+    commit: async () => undefined,
+    cancel: async () => undefined,
+  };
+}
+
 function contextPacket(
   current: Conversation,
   consumedMessageId: string | null,
@@ -143,8 +152,8 @@ function composerProps(
     onListSkills: async () => undefined,
     onUpdateConversation: async () => undefined,
     onCreateConversationForSelection: async () => undefined,
-    onChooseAttachments: async () => [],
-    onImportAttachments: async () => [],
+    onChooseAttachments: async () => null,
+    onImportAttachments: async () => null,
     onReleaseAttachment: async () => undefined,
     onRunAction: () => undefined,
     onMentionQuery: () => undefined,
@@ -340,7 +349,9 @@ describe("composer detachment ownership", () => {
       <>
         <section aria-label="Attachment owner">
           <Composer {...composerProps(attachmentOwner, {
-            onChooseAttachments: async () => [attachment("pending")],
+            onChooseAttachments: async () => attachmentLease([
+              attachment("pending"),
+            ]),
           })} />
         </section>
         <section aria-label="Reference owner">
@@ -418,8 +429,8 @@ describe("composer detachment ownership", () => {
     transition,
     source,
   ) => {
-    let finishImport!: (attachments: ChatAttachment[]) => void;
-    const importing = new Promise<ChatAttachment[]>((resolve) => {
+    let finishImport!: (value: ComposerAttachmentImportLease) => void;
+    const importing = new Promise<ComposerAttachmentImportLease>((resolve) => {
       finishImport = resolve;
     });
     const current = conversation(`${transition}-importing-attachment-owner`);
@@ -448,7 +459,9 @@ describe("composer detachment ownership", () => {
       draft: "",
     });
 
-    await act(async () => finishImport([attachment("imported")]));
+    await act(async () => finishImport(attachmentLease([
+      attachment("imported"),
+    ])));
     expect(prepareComposerDetachment(current.id)).toEqual({
       status: "blocked",
       blocker: "attachments",

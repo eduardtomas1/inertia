@@ -36,6 +36,28 @@ describe("preload attachment picker", () => {
     );
   });
 
+  it("forwards only the opaque lifecycle token with sequential renderer imports", async () => {
+    electron.invoke.mockClear();
+    const batchId = "11111111-1111-4111-8111-111111111111";
+    const files = [{
+      name: "safe.pdf",
+      mimeType: "application/pdf",
+      data: new ArrayBuffer(1),
+    }];
+
+    await bridge.beginAttachmentImport();
+    await bridge.importAttachments(batchId, files);
+    await bridge.commitAttachmentImport(batchId, [batchId]);
+    await bridge.cancelAttachmentImport(batchId);
+
+    expect(electron.invoke.mock.calls).toEqual([
+      ["inertia:begin-attachment-import"],
+      ["inertia:import-attachments", batchId, files],
+      ["inertia:commit-attachment-import", batchId, [batchId]],
+      ["inertia:cancel-attachment-import", batchId],
+    ]);
+  });
+
   it("exposes pending draft hydration and acknowledgement only to main", async () => {
     electron.invoke.mockClear();
     const acknowledgement = {

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  type ComposerAttachmentImportBatch,
   importComposerAttachmentFilesSequentially,
   preflightComposerAttachmentFiles,
 } from "../../src/renderer/src/hooks/useDesktopTools";
@@ -16,6 +17,21 @@ function fakeFile(name: string, size: number) {
     type: "application/pdf",
     arrayBuffer: vi.fn(async () => new ArrayBuffer(1)),
   } as unknown as File & { arrayBuffer: ReturnType<typeof vi.fn> };
+}
+
+const batchId = "11111111-1111-4111-8111-111111111111";
+
+function importBatch(
+  importOne: ComposerAttachmentImportBatch["importOne"],
+): ComposerAttachmentImportBatch & {
+  begin: ReturnType<typeof vi.fn>;
+  cancel: ReturnType<typeof vi.fn>;
+} {
+  return {
+    begin: vi.fn(async () => batchId),
+    importOne,
+    cancel: vi.fn(async () => undefined),
+  };
 }
 
 describe("desktop attachment preflight", () => {
@@ -73,9 +89,7 @@ describe("desktop attachment preflight", () => {
     let activeImports = 0;
     let maximumImports = 0;
 
-    const imported = await importComposerAttachmentFilesSequentially(
-      files,
-      async ({ name }) => {
+    const batch = importBatch(async (_batchId, { name }) => {
         activeImports += 1;
         maximumImports = Math.max(maximumImports, activeImports);
         events.push(`import:${name}`);
@@ -90,11 +104,13 @@ describe("desktop attachment preflight", () => {
           mimeType: "application/pdf",
           size: 1,
         }];
-      },
-      async () => undefined,
-    );
+      });
+    const imported = await importComposerAttachmentFilesSequentially(files, batch);
 
-    expect(imported).toHaveLength(3);
+    expect(imported.attachments).toHaveLength(3);
+    expect(imported.batchId).toBe(batchId);
+    expect(batch.begin).toHaveBeenCalledOnce();
+    expect(batch.cancel).not.toHaveBeenCalled();
     expect(maximumImports).toBe(1);
     expect(events).toEqual([
       "read:first.pdf",
@@ -113,7 +129,7 @@ describe("desktop attachment preflight", () => {
       type: "application/pdf",
       arrayBuffer: vi.fn(async () => Uint8Array.of(7).buffer),
     } as unknown as File & { arrayBuffer: ReturnType<typeof vi.fn> }));
-    const importOne = vi.fn(async ({ name }: { name: string }) => [{
+    const importOne = vi.fn(async (_batchId: string, { name }: { name: string }) => [{
       id: "11111111-1111-4111-8111-111111111111",
       name,
       path: "opaque",
@@ -121,14 +137,11 @@ describe("desktop attachment preflight", () => {
       size: 1,
     }]);
 
-    const imported = await importComposerAttachmentFilesSequentially(
-      files,
-      importOne,
-      async () => undefined,
-    );
+    const batch = importBatch(importOne);
+    const imported = await importComposerAttachmentFilesSequentially(files, batch);
 
-    expect(imported).toHaveLength(1);
-    expect(imported[0]?.name).toBe("first.pdf");
+    expect(imported.attachments).toHaveLength(1);
+    expect(imported.attachments[0]?.name).toBe("first.pdf");
     expect(importOne).toHaveBeenCalledTimes(1);
     expect(files[0].arrayBuffer).toHaveBeenCalledOnce();
     expect(files[1].arrayBuffer).toHaveBeenCalledOnce();
@@ -141,23 +154,39 @@ describe("desktop attachment preflight", () => {
       type: "application/pdf",
       arrayBuffer: vi.fn(async () => Uint8Array.of(index).buffer),
     } as unknown as File));
-    const released: string[] = [];
+    const batch = importBatch(async (_batchId, { name }) => {
+      if (name === "unsafe.pdf") throw new Error("unsafe fixture");
+      return [{
+        id: "11111111-1111-4111-8111-111111111111",
+        name,
+        path: "opaque",
+        mimeType: "application/pdf",
+        size: 1,
+      }];
+    });
 
     await expect(importComposerAttachmentFilesSequentially(
       files,
-      async ({ name }) => {
-        if (name === "unsafe.pdf") throw new Error("unsafe fixture");
-        return [{
-          id: "11111111-1111-4111-8111-111111111111",
-          name,
-          path: "opaque",
-          mimeType: "application/pdf",
-          size: 1,
-        }];
-      },
-      async (id) => { released.push(id); },
+      batch,
     )).rejects.toThrow("unsafe fixture");
 
-    expect(released).toEqual(["11111111-1111-4111-8111-111111111111"]);
+    expect(batch.cancel).toHaveBeenCalledExactlyOnceWith(batchId);
+  });
+
+  it("cancels the privileged batch when a renderer file changes before import", async () => {
+    const file = {
+      name: "changed.pdf",
+      size: 1,
+      type: "application/pdf",
+      arrayBuffer: vi.fn(async () => new ArrayBuffer(2)),
+    } as unknown as File;
+    const importOne = vi.fn();
+    const batch = importBatch(importOne);
+
+    await expect(importComposerAttachmentFilesSequentially([file], batch))
+      .rejects.toThrow("changed while it was being imported");
+
+    expect(importOne).not.toHaveBeenCalled();
+    expect(batch.cancel).toHaveBeenCalledExactlyOnceWith(batchId);
   });
 });

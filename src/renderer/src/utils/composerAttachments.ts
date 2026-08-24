@@ -13,6 +13,12 @@ export interface AttachmentMergeResult {
   readonly rejected: ChatAttachment[];
 }
 
+export interface ComposerAttachmentImportLease {
+  readonly attachments: readonly ChatAttachment[];
+  commit(adoptedAttachmentIds: readonly string[]): Promise<void>;
+  cancel(): Promise<void>;
+}
+
 function duplicateKey(attachment: ChatAttachment): string {
   return [
     attachment.name.normalize("NFKC").trim().toLocaleLowerCase("en-US"),

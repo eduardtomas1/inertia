@@ -1,4 +1,4 @@
-import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import type { ChatAttachment, PromptPreset } from "@shared/contracts";
 import { chatAttachmentKind } from "@shared/attachments";
@@ -125,7 +125,7 @@ export const Composer = memo(function Composer({
   } | null>(null);
   const draftPersistenceTimerRef = useRef<number | null>(null);
   const draftPersistenceMaxWaitTimerRef = useRef<number | null>(null);
-  const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
+  const [attachments, setAttachments] = useState<ChatAttachment[]>([]); const [pendingAttachmentIds, setPendingAttachmentIds] = useState<ReadonlySet<string>>(() => new Set()); const pendingAttachmentIdsRef = useRef(new Set<string>());
   const [attachmentImporting, setAttachmentImporting] = useState(false); const attachmentImportingRef = useRef(false); const attachmentImportSequenceRef = useRef(0);
   const conversationContext = useComposerConversationContext({ conversationId: conversation.id, contextPackets, enabled: conversationContextHandoffEnabled, onCommand: onConversationContextCommand });
   const { contextPacketIds } = conversationContext;
@@ -138,7 +138,7 @@ export const Composer = memo(function Composer({
   const stopReleaseTimerRef = useRef<number | null>(null);
   const mountedRef = useRef(true);
   const conversationIdRef = useRef(conversation.id);
-  const attachmentAuthorityRef = useRef(0);
+  const attachmentAuthorityKey = JSON.stringify([conversation.id, running, latestTurn?.id ?? null, latestTurn?.harnessId ?? null]); const attachmentAuthorityRef = useRef({ key: attachmentAuthorityKey, conversationId: conversation.id });
   const submissionSequenceRef = useRef(0);
   const activeSubmissionsRef = useRef(new Map<string, number>());
   const editorRevisionSequenceRef = useRef(0);
@@ -180,6 +180,7 @@ export const Composer = memo(function Composer({
   }, []);
 
   conversationIdRef.current = conversation.id;
+  useLayoutEffect(() => { attachmentAuthorityRef.current = { key: attachmentAuthorityKey, conversationId: conversation.id }; return () => { if (attachmentAuthorityRef.current.key === attachmentAuthorityKey) attachmentAuthorityRef.current = { key: "", conversationId: "" }; }; }, [attachmentAuthorityKey, conversation.id]);
 
   const flushDraftPersistence = useCallback((): void => {
     if (draftPersistenceTimerRef.current !== null) {
@@ -301,7 +302,6 @@ export const Composer = memo(function Composer({
 
   useEffect(() => {
     flushDraftPersistence();
-    attachmentAuthorityRef.current += 1;
     attachmentImportSequenceRef.current += 1; attachmentImportingRef.current = false; setAttachmentImporting(false);
     if (submissionReleaseTimerRef.current !== null) {
       window.clearTimeout(submissionReleaseTimerRef.current);
@@ -324,7 +324,7 @@ export const Composer = memo(function Composer({
       void onReleaseAttachment(attachment.id);
     }
     attachmentsRef.current = [];
-    setAttachments([]);
+    setAttachments([]); pendingAttachmentIdsRef.current = new Set(); setPendingAttachmentIds(new Set());
     setFileReferences([]);
     selectedPreviewUrlRef.current = null;
     setPreviewContextSelected(false);
@@ -343,7 +343,6 @@ export const Composer = memo(function Composer({
   ]);
 
   useEffect(() => {
-    attachmentAuthorityRef.current += 1;
     if (running) {
       dismissMenu("context-change");
       const retainedImages = attachmentsRef.current.filter(
@@ -452,7 +451,6 @@ export const Composer = memo(function Composer({
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
-      attachmentAuthorityRef.current += 1;
       const unsent = attachmentsRef.current;
       attachmentsRef.current = [];
       for (const attachment of unsent) {
@@ -659,12 +657,12 @@ export const Composer = memo(function Composer({
   const { chooseAttachments, importAttachments, removeAttachment } =
     composerAttachmentActions({
       attachmentAuthorityRef,
+      attachmentAuthorityKey,
       attachmentImportSequenceRef,
       attachmentImportingRef,
-      attachmentsRef,
+      attachmentsRef, pendingAttachmentIdsRef,
       blocked: disabled || sending,
       conversationId: conversation.id,
-      conversationIdRef,
       harnessId: latestTurn?.harnessId ?? null,
       markEditorChanged,
       mountedRef,
@@ -673,7 +671,7 @@ export const Composer = memo(function Composer({
       releaseAttachmentRef,
       running,
       setAttachments,
-      setAttachmentImporting,
+      setAttachmentImporting, setPendingAttachmentIds,
       submittingRef,
     });
 
@@ -1078,7 +1076,7 @@ export const Composer = memo(function Composer({
           previewContextUrl={previewContextUrl}
           previewContextSelected={previewContextSelected}
           onTogglePreviewContext={togglePreviewContext}
-          attachments={attachments}
+          attachments={attachments} attachmentsDisabled={attachmentImporting} pendingAttachmentIds={pendingAttachmentIds}
           onRemoveAttachment={removeAttachment}
           pendingRoute={pendingRoute}
           creatingRouteConversation={creatingRouteConversation}

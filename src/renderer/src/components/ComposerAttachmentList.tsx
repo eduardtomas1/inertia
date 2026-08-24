@@ -17,11 +17,15 @@ import { AttachmentPreviewDialog } from "./AttachmentPreviewDialog";
 
 type ComposerAttachmentListProps = {
   attachments: readonly ChatAttachment[];
+  disabled?: boolean;
+  pendingAttachmentIds?: ReadonlySet<string>;
   onRemove: (attachment: ChatAttachment) => void;
 };
 
 export function ComposerAttachmentList({
   attachments,
+  disabled = false,
+  pendingAttachmentIds = new Set(),
   onRemove,
 }: ComposerAttachmentListProps): React.JSX.Element | null {
   const [previewAttachment, setPreviewAttachment] =
@@ -46,10 +50,11 @@ export function ComposerAttachmentList({
           const kind = chatAttachmentKind(attachment.mimeType);
           const previewKind = attachmentPreviewKind(attachment);
           const previewUrl = attachmentPreviewUrl(attachment);
+          const pending = pendingAttachmentIds.has(attachment.id);
           const content = (
             <>
               <span className="composer-attachment-preview" aria-hidden="true">
-                {previewKind === "image"
+                {previewKind === "image" && !pending
                   ? (
                       <img
                         src={previewUrl}
@@ -74,13 +79,15 @@ export function ComposerAttachmentList({
             <li
               className="composer-attachment"
               data-attachment-kind={kind}
+              data-attachment-pending={pending || undefined}
               key={attachment.id}
             >
               <button
                 type="button"
                 className="composer-attachment-open"
-                data-preview-source={previewUrl}
+                data-preview-source={pending ? undefined : previewUrl}
                 aria-label={`Preview attachment ${attachment.name}`}
+                disabled={disabled || pending}
                 onClick={() => setPreviewAttachment(attachment)}
               >
                 {content}
@@ -89,6 +96,7 @@ export function ComposerAttachmentList({
                 type="button"
                 className="composer-attachment-remove"
                 aria-label={`Remove attachment ${attachment.name}`}
+                disabled={disabled || pending}
                 onClick={() => onRemove(attachment)}
               >
                 <X size={12} aria-hidden="true" />

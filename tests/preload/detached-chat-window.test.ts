@@ -40,7 +40,10 @@ describe("detached chat preload", () => {
     );
     expect(Object.isFrozen(bridge)).toBe(true);
     expect(Object.keys(bridge).sort()).toEqual([
+      "beginAttachmentImport",
+      "cancelAttachmentImport",
       "closeDetachedChat",
+      "commitAttachmentImport",
       "copyText",
       "dockDetachedChat",
       "finishAttachmentHandoff",
@@ -111,7 +114,11 @@ describe("detached chat preload", () => {
     await bridge.getRuntimeConnection();
     await bridge.copyText("copy me");
     await bridge.selectAttachments("images");
-    await bridge.importAttachments(files);
+    const importBatchId = "55555555-5555-4555-8555-555555555555";
+    await bridge.beginAttachmentImport();
+    await bridge.importAttachments(importBatchId, files);
+    await bridge.commitAttachmentImport(importBatchId, [importBatchId]);
+    await bridge.cancelAttachmentImport(importBatchId);
     await bridge.prepareAttachmentHandoff(handoff);
     await bridge.finishAttachmentHandoff(handoff.requestId);
     await bridge.releaseAttachment(handoff.attachmentIds[0]!);
@@ -128,7 +135,10 @@ describe("detached chat preload", () => {
       ["inertia:runtime-connection"],
       ["inertia:copy-text", "copy me"],
       ["inertia:select-attachments", "images"],
-      ["inertia:import-attachments", files],
+      ["inertia:begin-attachment-import"],
+      ["inertia:import-attachments", importBatchId, files],
+      ["inertia:commit-attachment-import", importBatchId, [importBatchId]],
+      ["inertia:cancel-attachment-import", importBatchId],
       ["inertia:prepare-attachment-handoff", handoff],
       ["inertia:finish-attachment-handoff", handoff.requestId],
       ["inertia:release-attachment", handoff.attachmentIds[0]],

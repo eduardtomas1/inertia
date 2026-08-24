@@ -31,6 +31,7 @@ import {
 const directories: string[] = [];
 const handoffId = "22222222-2222-4222-8222-222222222222";
 const retryHandoffId = "33333333-3333-4333-8333-333333333333";
+const importBatchId = "44444444-4444-4444-8444-444444444444";
 const png = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAABHNCSVQICAgIfAhkiAAAAAFzUkdCAK7OHOkAAAANSURBVAiZY2BgYPgPAAEEAQB9ssjfAAAAAElFTkSuQmCC",
   "base64",
@@ -43,6 +44,31 @@ const sameSizeReplacementPng = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAABHNCSVQICAgIfAhkiAAAAAFzUkdCAK7OHOkAAAANSURBVAiZY/jPwPAfAAUAAf+rzjaJAAAAAElFTkSuQmCC",
   "base64",
 );
+
+function largeReadablePdf(payloadBytes: number, fill: string): Buffer {
+  const stream = `BT /F1 12 Tf 72 720 Td (${fill.repeat(payloadBytes)}) Tj ET`;
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+      + "/Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
+    `<< /Length ${Buffer.byteLength(stream, "ascii")} >>\nstream\n${stream}\nendstream`,
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+  ];
+  let source = "%PDF-1.4\n";
+  const offsets: number[] = [];
+  for (const [index, object] of objects.entries()) {
+    offsets.push(Buffer.byteLength(source, "ascii"));
+    source += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  }
+  const xrefOffset = Buffer.byteLength(source, "ascii");
+  source += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  source += offsets.map((offset) =>
+    `${String(offset).padStart(10, "0")} 00000 n \n`).join("");
+  source += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\n`;
+  source += `startxref\n${xrefOffset}\n%%EOF\n`;
+  return Buffer.from(source, "ascii");
+}
 
 async function registry(
   limits?: AttachmentRegistryLimits,
@@ -226,6 +252,133 @@ describe("main-owned attachment registry", () => {
       mimeType: "image/png",
       size: png.length,
     });
+  });
+
+  it("keeps renderer-batch capabilities unusable until exact subset adoption", async () => {
+    const { registry: attachments } = await registry();
+    const [adopted] = await attachments.import([{
+      name: "adopted.png",
+      mimeType: "image/png",
+      data: png,
+    }]);
+    const [rejected] = await attachments.import([{
+      name: "rejected.png",
+      mimeType: "image/png",
+      data: alternatePng,
+    }]);
+    attachments.rendererImports.hold(importBatchId, [adopted!.id]);
+    attachments.rendererImports.hold(importBatchId, [rejected!.id]);
+
+    await expect(attachments.preview(adopted!.id)).resolves.toBeNull();
+    await expect(attachments.resolve(adopted!.id)).resolves.toBeNull();
+    await expect(attachments.releaseFromRenderer(adopted!.id)).resolves.toBe(false);
+    await expect(attachments.prepareHandoff(
+      handoffId,
+      [adopted!.id],
+      () => false,
+    )).rejects.toThrow("handoff is unavailable");
+    await expect(attachments.resolveForRuntime(
+      adopted!.id,
+      handoffId,
+    )).resolves.toBeNull();
+
+    await attachments.rendererImports.commit(
+      importBatchId,
+      [adopted!.id],
+      async (id) => await attachments.rollback(id),
+    );
+
+    await expect(attachments.resolve(adopted!.id)).resolves.toMatchObject({
+      id: adopted!.id,
+    });
+    await expect(attachments.resolve(rejected!.id)).resolves.toBeNull();
+    await expect(attachments.release(adopted!.id)).resolves.toBe(true);
+  });
+
+  it("linearizes batch cancellation ahead of concurrent handoff and runtime claims", async () => {
+    const { registry: attachments } = await registry();
+    const [imported] = await attachments.import([{
+      name: "cancelled.png",
+      mimeType: "image/png",
+      data: png,
+    }]);
+    attachments.rendererImports.hold(importBatchId, [imported!.id]);
+
+    const cancelling = attachments.rendererImports.rollback(
+      importBatchId,
+      async (id) => await attachments.rollback(id),
+    );
+    const handoff = attachments.prepareHandoff(
+      handoffId,
+      [imported!.id],
+      () => false,
+    );
+
+    await expect(handoff).rejects.toThrow("handoff is unavailable");
+    await cancelling;
+    await expect(attachments.resolveForRuntime(
+      imported!.id,
+      handoffId,
+    )).resolves.toBeNull();
+    await expect(attachments.resolve(imported!.id)).resolves.toBeNull();
+  });
+
+  it("enforces the authoritative cumulative count across one-file imports", async () => {
+    const { registry: attachments } = await registry();
+    for (let index = 0; index < 8; index += 1) {
+      const [imported] = await attachments.import([{
+        name: `accepted-${index}.png`,
+        mimeType: "image/png",
+        data: index % 2 === 0 ? png : alternatePng,
+      }]);
+      attachments.rendererImports.hold(importBatchId, [imported!.id]);
+    }
+    const [overflow] = await attachments.import([{
+      name: "overflow.png",
+      mimeType: "image/png",
+      data: png,
+    }]);
+
+    expect(() => attachments.rendererImports.hold(importBatchId, [overflow!.id]))
+      .toThrow("batch is unavailable");
+    await attachments.rollback(overflow!.id);
+    await attachments.rendererImports.rollback(
+      importBatchId,
+      async (id) => await attachments.rollback(id),
+    );
+    expect(attachments.usage()).toEqual({ records: 0, bytes: 0 });
+  });
+
+  it("enforces the authoritative cumulative byte limit across one-file imports", async () => {
+    const { registry: attachments } = await registry();
+    const chunks = [
+      largeReadablePdf(8 * 1024 * 1024, "a"),
+      largeReadablePdf(8 * 1024 * 1024, "b"),
+      largeReadablePdf(5 * 1024 * 1024, "c"),
+    ];
+    const heldIds: string[] = [];
+    for (let index = 0; index < chunks.length; index += 1) {
+      const [imported] = await attachments.import([{
+        name: `chunk-${index}.pdf`,
+        mimeType: "application/pdf",
+        data: chunks[index],
+      }]);
+      if (index < 2) {
+        attachments.rendererImports.hold(importBatchId, [imported!.id]);
+        heldIds.push(imported!.id);
+      } else {
+        expect(() => attachments.rendererImports.hold(importBatchId, [imported!.id]))
+          .toThrow("batch is unavailable");
+        await attachments.rollback(imported!.id);
+      }
+    }
+
+    expect(heldIds).toHaveLength(2);
+    await attachments.rendererImports.rollback(
+      importBatchId,
+      async (id) => await attachments.rollback(id),
+    );
+    expect(attachments.usage()).toEqual({ records: 0, bytes: 0 });
   });
 
   it("retires an unpublished duplicate when cleanup is blocked", async () => {

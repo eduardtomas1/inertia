@@ -52,6 +52,7 @@ test.beforeAll(async () => {
     name: "sent-attachments",
     initialState: "conversation",
     attachmentImportDelayMs: 750,
+    attachmentCommitDelayMs: 750,
   });
   electronApp = app.electronApp;
   page = app.page;
@@ -282,8 +283,14 @@ test("previews, validates, removes, and cleans up secure composer attachments", 
     textarea.dispatchEvent(event);
   }, imageBytes);
   await expect(attachments.getByText("pasted.png", { exact: true })).toBeVisible();
+  const pendingPastedAttachment = attachments.locator(
+    '[data-attachment-pending="true"]',
+  ).filter({ hasText: "pasted.png" });
+  await expect(pendingPastedAttachment).toBeVisible();
+  await expect(pendingPastedAttachment.locator("img")).toHaveCount(0);
   const pastedPreview = attachments.locator("img");
   await expect(pastedPreview).toHaveCount(1);
+  await expect(pendingPastedAttachment).toHaveCount(0);
   await expectImagePreviewSettled(pastedPreview);
   const pastedSource = await pastedPreview.getAttribute("src");
   const pastedId = pastedSource?.split("/").at(-1);

@@ -75,6 +75,9 @@ function registryFor(
         maximum = Math.max(maximum, active);
         try {
           await source.write(destination, operationSignal);
+        } catch (error) {
+          await rm(path, { force: true });
+          throw error;
         } finally {
           active -= 1;
           await destination.close();
@@ -149,6 +152,32 @@ describe("native attachment selection streaming", () => {
     )).rejects.toThrow("synthetic failure");
 
     expect(fake.released).toHaveLength(2);
+    expect(await readdir(output)).toEqual([]);
+  });
+
+  it("rolls back the staged native prefix when renderer lifetime is cancelled", async () => {
+    const source = await directory("inertia-selection-source-");
+    const output = await directory("inertia-selection-output-");
+    const paths = await Promise.all([0, 1].map(async (index) => {
+      const path = join(source, `input-${index}.pdf`);
+      await writeFile(path, `safe-${index}`, { mode: 0o600 });
+      return path;
+    }));
+    const lifetime = new AbortController();
+    const fake = registryFor(output, {
+      beforeImport: (index) => {
+        if (index === 1) lifetime.abort();
+      },
+    });
+
+    await expect(importSelectedAttachmentPaths(
+      fake.registry,
+      paths,
+      "all",
+      lifetime.signal,
+    )).rejects.toThrow("aborted");
+
+    expect(fake.released).toHaveLength(1);
     expect(await readdir(output)).toEqual([]);
   });
 

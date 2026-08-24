@@ -153,6 +153,10 @@ Inertia does not estimate price from a model name or send usage to a hosted anal
 
 Open **Settings → Discord** to configure release posts. Add the public GitHub or GitLab repository URL, then paste a Discord incoming webhook URL from the target channel's **Edit Channel → Integrations → Webhooks** settings. Inertia stores that webhook only in the operating system credential vault; the renderer and SQLite database receive configured/unconfigured state, never the saved URL. Press **Generate** to compare the latest release tag with the previous one and post a bounded local diff summary with **Millores**, **Implementacions**, **Bugs**, and **Altres**. Empty Discord settings stay blank and do not block startup.
 
+![Configure credential-safe Discord release summaries](docs/screenshots/inertia-discord-settings.png)
+
+### Canary release channel
+
 Canary installs coexist with stable Inertia as a separate application and local
 profile. **Settings → General → Application updates** identifies the active
 channel, reports whether the current immutable Canary package is retained as
@@ -160,7 +164,7 @@ last-known-good, and opens a reverified rollback package after an update. Canary
 never shares stable's protocol, database, Chromium profile, updater cache, feed,
 or package names.
 
-![Configure credential-safe Discord release summaries](docs/screenshots/inertia-discord-settings.png)
+![Inertia Canary channel status and rollback controls](docs/screenshots/inertia-canary-channel.png)
 
 ### Private Connect, without surrendering the desktop
 
@@ -228,9 +232,23 @@ Download [Inertia v0.0.41](https://github.com/eduardtomas1/inertia/releases/tag/
 | Platform | Download |
 | --- | --- |
 | macOS · Apple silicon | DMG or ZIP |
+| macOS · Intel | DMG or ZIP |
 | Windows · x64 | Installer |
+| Windows · ARM64 | Installer |
 | Linux · x64 | AppImage |
+| Linux · ARM64 | AppImage |
 
-Every release also includes `SHA256SUMS.txt`. See the [changelog](CHANGELOG.md) for the complete release story.
+Every stable release and Canary prerelease includes `SHA256SUMS.txt`. Download
+it from the same exact tagged release and compare the selected package's SHA-256
+before opening it. Credential-free macOS packages are ad-hoc signed rather than
+notarized, so Gatekeeper may retain the download's quarantine warning. After
+verifying the checksum, open the package from Finder; if macOS blocks it, use
+**System Settings → Privacy & Security → Open Anyway**, confirm the exact file,
+then choose **Open**. Do not remove quarantine attributes or disable Gatekeeper.
+Unsigned Windows installers may show **Windows protected your PC**. After
+verifying the checksum and exact GitHub release source, choose **More info**,
+confirm the filename and **Unknown publisher** status, then **Run anyway**. Do
+not disable SmartScreen. See the [changelog](CHANGELOG.md) for the complete
+release story.
 
 Inertia is available under the [Apache 2.0 License](LICENSE). Packaged builds also include the generated notices and original license texts supplied by their production dependencies and Electron.

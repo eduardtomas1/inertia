@@ -63,6 +63,24 @@ certificates. A credential-free build remains explicit: macOS uses the tested
 ad-hoc signature and Windows remains unsigned. Supplying any part of a signing
 set without the rest stops the build.
 
+For either stable or Canary, the credential-free public union is exactly 11
+files: four macOS packages (DMG and ZIP for x64 and arm64), two Windows
+installers, two Linux AppImages, the two architecture-qualified Linux update
+manifests, and `SHA256SUMS.txt`. Manual macOS and Windows releases do not publish
+their update metadata or desktop blockmaps. Linux remains in-app capable and
+retains both metadata manifests.
+
+Unsigned/manual installation is checksum-first. Download `SHA256SUMS.txt` from
+the same exact tagged release and compare the selected package before opening
+it. An ad-hoc macOS package is not notarized, and a browser download normally
+retains quarantine, so Gatekeeper may block the first open. After checksum
+verification, open it from Finder and use **System Settings → Privacy &
+Security → Open Anyway**, confirm the exact package, then choose **Open**. Do
+not strip quarantine attributes or disable Gatekeeper. On Windows, an unsigned
+installer may show **Windows protected your PC**; after verifying the checksum
+and exact release source, use **More info**, confirm the filename and **Unknown
+publisher** status, then **Run anyway**. Do not disable SmartScreen.
+
 For a signed macOS release, configure these GitHub Actions secrets:
 
 - `MACOS_CSC_LINK`
@@ -120,10 +138,11 @@ assets or any size/digest mismatch stop the release. The workflow downloads and
 hashes the complete draft before publishing it. It never overwrites an asset or
 modifies an already-published release.
 
-The release workflow sends the Discord notification after the exact-tag release
-is published. This is intentionally part of the release workflow because
-GitHub-created release events from the workflow token do not reliably start a
-separate `release.published` workflow.
+The release workflow has one authoritative Discord notification job after the
+exact-tag stable release is published. Canary releases never run that job. The
+notification remains inside the release workflow because GitHub-created release
+events from the workflow token do not reliably start a separate
+`release.published` workflow; there is no second release-event notifier.
 
 The first update-capable version must still be installed manually. Validate a
 packaged update from that version to the following version on each eligible

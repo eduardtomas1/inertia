@@ -4,15 +4,22 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const root = resolve(import.meta.dirname, "../..");
-const signingEnvironmentKeys = [
+const macSigningEnvironmentKeys = [
   "CSC_LINK",
   "CSC_KEY_PASSWORD",
   "APPLE_API_KEY",
   "APPLE_API_KEY_ID",
   "APPLE_API_ISSUER",
+] as const;
+const windowsSigningEnvironmentKeys = [
   "WIN_CSC_LINK",
   "WIN_CSC_KEY_PASSWORD",
 ] as const;
+const signingEnvironmentKeys = [
+  ...macSigningEnvironmentKeys,
+  ...windowsSigningEnvironmentKeys,
+] as const;
+const releaseChannels = ["stable", "canary"] as const;
 
 function loadConfig(
   platform:
@@ -54,28 +61,74 @@ function loadConfig(
 }
 
 describe("release signing configuration", () => {
-  it("removes blank CI credential variables before electron-builder can resolve them as paths", () => {
+  it("removes blank CI credential variables on every channel and native architecture", () => {
     const blanks = Object.fromEntries(signingEnvironmentKeys.map((key) => [key, ""]));
-    const result = loadConfig("macos-arm64", blanks, true);
-    expect(result.status).toBe(0);
-    expect(JSON.parse(result.stdout)).toMatchObject({
-      config: {
-        forceCodeSigning: false,
-        extraMetadata: {
-          desktopName: "dev.inertia.app.desktop",
-          inertiaReleaseChannel: "stable",
-          inertiaUpdateCapability: {
-            delivery: "manual",
-            reason: "macos-signing-unavailable",
-          },
-        },
-        mac: {
-          identity: "-",
-          notarize: false,
-        },
-      },
-      present: [],
-    });
+    for (const channel of releaseChannels) {
+      for (const platform of [
+        "macos-x64",
+        "macos-arm64",
+        "windows-x64",
+        "windows-arm64",
+        "linux-x64",
+        "linux-arm64",
+      ] as const) {
+        const result = loadConfig(platform, {
+          ...blanks,
+          INERTIA_RELEASE_CHANNEL: channel,
+        }, true);
+        expect(result.status, `${channel}/${platform}: ${result.stderr}`).toBe(0);
+        const parsed = JSON.parse(result.stdout) as {
+          config: {
+            forceCodeSigning: boolean;
+            extraMetadata: {
+              inertiaReleaseChannel: string;
+              inertiaUpdateCapability: unknown;
+            };
+          };
+          present: string[];
+        };
+        expect(parsed.present).toEqual([]);
+        expect(parsed.config.forceCodeSigning).toBe(false);
+        expect(parsed.config.extraMetadata.inertiaReleaseChannel).toBe(channel);
+        expect(parsed.config.extraMetadata.inertiaUpdateCapability).toEqual(
+          platform.startsWith("linux-")
+            ? { delivery: "in-app", platform: "linux" }
+            : {
+                delivery: "manual",
+                reason: platform.startsWith("macos-")
+                  ? "macos-signing-unavailable"
+                  : "windows-signing-unavailable",
+              },
+        );
+      }
+    }
+  });
+
+  it("rejects every non-empty proper macOS signing subset on both channels and architectures", () => {
+    let checked = 0;
+    for (const channel of releaseChannels) {
+      for (const platform of ["macos-x64", "macos-arm64"] as const) {
+        for (let mask = 1; mask < (1 << macSigningEnvironmentKeys.length) - 1; mask += 1) {
+          const additions: Record<string, string> = {
+            INERTIA_RELEASE_CHANNEL: channel,
+          };
+          for (const [index, key] of macSigningEnvironmentKeys.entries()) {
+            if ((mask & (1 << index)) !== 0) additions[key] = `configured-${key}`;
+          }
+          const result = loadConfig(platform, additions);
+          expect(
+            result.status,
+            `${channel}/${platform}/subset-${mask}: ${result.stderr}`,
+          ).not.toBe(0);
+          expect(result.stderr).toContain("macOS signing configuration is incomplete");
+          for (const value of Object.values(additions)) {
+            if (value !== channel) expect(result.stderr).not.toContain(value);
+          }
+          checked += 1;
+        }
+      }
+    }
+    expect(checked).toBe(120);
   });
 
   it("keeps credential-free macOS builds explicit and reproducible", () => {
@@ -103,12 +156,7 @@ describe("release signing configuration", () => {
     });
   });
 
-  it("requires every macOS signing and notarization secret as one set", () => {
-    const partial = loadConfig("macos-arm64", { CSC_LINK: "certificate" });
-    expect(partial.status).not.toBe(0);
-    expect(partial.stderr).toContain("macOS signing configuration is incomplete");
-    expect(partial.stderr).not.toContain("certificate");
-
+  it("accepts the complete macOS signing and notarization set", () => {
     const complete = loadConfig("macos-arm64", {
       CSC_LINK: "certificate",
       CSC_KEY_PASSWORD: "password",
@@ -153,11 +201,27 @@ describe("release signing configuration", () => {
     });
   });
 
-  it("fails closed on partial Windows signing configuration", () => {
-    const partial = loadConfig("windows-x64", { WIN_CSC_LINK: "certificate" });
-    expect(partial.status).not.toBe(0);
-    expect(partial.stderr).toContain("Windows signing configuration is incomplete");
+  it("rejects both Windows singleton signing subsets on both channels and architectures", () => {
+    let checked = 0;
+    for (const channel of releaseChannels) {
+      for (const platform of ["windows-x64", "windows-arm64"] as const) {
+        for (const key of windowsSigningEnvironmentKeys) {
+          const value = `configured-${key}`;
+          const result = loadConfig(platform, {
+            INERTIA_RELEASE_CHANNEL: channel,
+            [key]: value,
+          });
+          expect(result.status, `${channel}/${platform}/${key}: ${result.stderr}`).not.toBe(0);
+          expect(result.stderr).toContain("Windows signing configuration is incomplete");
+          expect(result.stderr).not.toContain(value);
+          checked += 1;
+        }
+      }
+    }
+    expect(checked).toBe(8);
+  });
 
+  it("accepts the complete Windows signing configuration", () => {
     const complete = loadConfig("windows-x64", {
       WIN_CSC_LINK: "certificate",
       WIN_CSC_KEY_PASSWORD: "password",

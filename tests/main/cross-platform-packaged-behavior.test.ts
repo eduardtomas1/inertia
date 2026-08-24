@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -31,6 +31,34 @@ function workflowMatrixEntry(workflow: string, label: string): string {
 }
 
 describe("cross-platform packaged behavior contract", () => {
+  it("keeps one authoritative stable-only Discord release notifier", async () => {
+    const workflowDirectory = join(repositoryRoot, ".github/workflows");
+    const workflowNames = (await readdir(workflowDirectory))
+      .filter((name) => name.endsWith(".yml") || name.endsWith(".yaml"))
+      .sort();
+    expect(workflowNames).not.toContain("discord-release.yml");
+
+    const notifierWorkflows: string[] = [];
+    let notifierJobs = 0;
+    for (const name of workflowNames) {
+      const workflow = await source(`.github/workflows/${name}`);
+      if (workflow.includes("DISCORD_WEBHOOK_URL")) notifierWorkflows.push(name);
+      notifierJobs += workflow.match(/^  notify-discord:\s*$/gmu)?.length ?? 0;
+    }
+    expect(notifierWorkflows).toEqual(["release-platforms.yml"]);
+    expect(notifierJobs).toBe(1);
+
+    const releaseWorkflow = await source(".github/workflows/release-platforms.yml");
+    const notifierStart = releaseWorkflow.indexOf("\n  notify-discord:");
+    expect(notifierStart).toBeGreaterThanOrEqual(0);
+    const notifier = releaseWorkflow.slice(notifierStart);
+    expect(notifier).toContain("needs: upload");
+    expect(notifier).toContain(
+      "if: ${{ !startsWith(inputs.release_tag || github.ref_name, 'canary-v') }}",
+    );
+    expect(notifier).toContain("DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}");
+  });
+
   it("keeps Canary packages behind the full smoke, fuse, checksum, provenance, and atomic-feed gate", async () => {
     const workflow = await source(".github/workflows/release-platforms.yml");
     for (const expected of [
@@ -47,6 +75,59 @@ describe("cross-platform packaged behavior contract", () => {
     ]) {
       expect(workflow).toContain(expected);
     }
+  });
+
+  it("keeps deterministic exact-head Canary screenshot wiring", async () => {
+    const readme = await source("README.md");
+    expect(readme).toContain("### Canary release channel");
+    expect(readme).toContain(
+      "![Inertia Canary channel status and rollback controls](docs/screenshots/inertia-canary-channel.png)",
+    );
+
+    const scenario = await source("tests/e2e/canary-channel.spec.ts");
+    expect(scenario).toContain("process.env.INERTIA_CANARY_SCREENSHOT_PATH");
+    expect(scenario).toContain("INERTIA_CANARY_SCREENSHOT_PATH must be absolute");
+    expect(scenario).toContain("await copyFile(evidence, requestedPath)");
+  });
+
+  it("documents six checksum-first native choices without disabling platform security", async () => {
+    const readme = await source("README.md");
+    const normalizedReadme = readme.replace(/\s+/gu, " ");
+    for (const choice of [
+      "macOS · Apple silicon",
+      "macOS · Intel",
+      "Windows · x64",
+      "Windows · ARM64",
+      "Linux · x64",
+      "Linux · ARM64",
+    ]) {
+      expect(normalizedReadme).toContain(choice);
+    }
+    for (const expected of [
+      "SHA256SUMS.txt",
+      "System Settings → Privacy & Security → Open Anyway",
+      "Do not remove quarantine attributes or disable Gatekeeper.",
+      "Windows protected your PC",
+      "More info",
+      "Unknown publisher",
+      "Run anyway",
+    ]) {
+      expect(normalizedReadme).toContain(expected);
+    }
+    expect(normalizedReadme).toContain("Do not disable SmartScreen.");
+    expect(readme).not.toContain("xattr");
+    expect(readme).not.toContain("spctl --master-disable");
+
+    const releasing = await source("docs/RELEASING.md");
+    const normalizedReleasing = releasing.replace(/\s+/gu, " ");
+    expect(normalizedReleasing).toContain("credential-free public union is exactly 11");
+    expect(normalizedReleasing).toContain("Manual macOS and Windows releases do not publish");
+    expect(normalizedReleasing).toContain(
+      "Do not strip quarantine attributes or disable Gatekeeper.",
+    );
+    expect(normalizedReleasing).toContain("Do not disable SmartScreen.");
+    expect(releasing).not.toContain("xattr");
+    expect(releasing).not.toContain("spctl --master-disable");
   });
 
   it("keeps build, Electron E2E, fuse verification, and native smoke on all six CI targets", async () => {

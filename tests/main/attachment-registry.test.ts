@@ -23,10 +23,15 @@ import {
   removeAttachmentStorageSession,
   type AttachmentRegistryLimits,
 } from "../../src/main/attachment-registry";
+import {
+  validateAttachmentImportFile,
+  type AttachmentImportValidationRunner,
+} from "../../src/main/attachment-import-file";
 
 const directories: string[] = [];
 const handoffId = "22222222-2222-4222-8222-222222222222";
 const retryHandoffId = "33333333-3333-4333-8333-333333333333";
+const importBatchId = "44444444-4444-4444-8444-444444444444";
 const png = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAABHNCSVQICAgIfAhkiAAAAAFzUkdCAK7OHOkAAAANSURBVAiZY2BgYPgPAAEEAQB9ssjfAAAAAElFTkSuQmCC",
   "base64",
@@ -39,6 +44,31 @@ const sameSizeReplacementPng = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAABHNCSVQICAgIfAhkiAAAAAFzUkdCAK7OHOkAAAANSURBVAiZY/jPwPAfAAUAAf+rzjaJAAAAAElFTkSuQmCC",
   "base64",
 );
+
+function largeReadablePdf(payloadBytes: number, fill: string): Buffer {
+  const stream = `BT /F1 12 Tf 72 720 Td (${fill.repeat(payloadBytes)}) Tj ET`;
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+      + "/Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
+    `<< /Length ${Buffer.byteLength(stream, "ascii")} >>\nstream\n${stream}\nendstream`,
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+  ];
+  let source = "%PDF-1.4\n";
+  const offsets: number[] = [];
+  for (const [index, object] of objects.entries()) {
+    offsets.push(Buffer.byteLength(source, "ascii"));
+    source += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  }
+  const xrefOffset = Buffer.byteLength(source, "ascii");
+  source += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  source += offsets.map((offset) =>
+    `${String(offset).padStart(10, "0")} 00000 n \n`).join("");
+  source += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\n`;
+  source += `startxref\n${xrefOffset}\n%%EOF\n`;
+  return Buffer.from(source, "ascii");
+}
 
 async function registry(
   limits?: AttachmentRegistryLimits,
@@ -222,6 +252,179 @@ describe("main-owned attachment registry", () => {
       mimeType: "image/png",
       size: png.length,
     });
+  });
+
+  it("keeps renderer-batch capabilities unusable until exact subset adoption", async () => {
+    const { registry: attachments } = await registry();
+    const [adopted] = await attachments.import([{
+      name: "adopted.png",
+      mimeType: "image/png",
+      data: png,
+    }]);
+    const [rejected] = await attachments.import([{
+      name: "rejected.png",
+      mimeType: "image/png",
+      data: alternatePng,
+    }]);
+    attachments.rendererImports.hold(importBatchId, [adopted!.id]);
+    attachments.rendererImports.hold(importBatchId, [rejected!.id]);
+
+    await expect(attachments.preview(adopted!.id)).resolves.toBeNull();
+    await expect(attachments.resolve(adopted!.id)).resolves.toBeNull();
+    await expect(attachments.releaseFromRenderer(adopted!.id)).resolves.toBe(false);
+    await expect(attachments.prepareHandoff(
+      handoffId,
+      [adopted!.id],
+      () => false,
+    )).rejects.toThrow("handoff is unavailable");
+    await expect(attachments.resolveForRuntime(
+      adopted!.id,
+      handoffId,
+    )).resolves.toBeNull();
+
+    await attachments.rendererImports.commit(
+      importBatchId,
+      [adopted!.id],
+      async (id) => await attachments.rollback(id),
+    );
+
+    await expect(attachments.resolve(adopted!.id)).resolves.toMatchObject({
+      id: adopted!.id,
+    });
+    await expect(attachments.resolve(rejected!.id)).resolves.toBeNull();
+    await expect(attachments.release(adopted!.id)).resolves.toBe(true);
+  });
+
+  it("linearizes batch cancellation ahead of concurrent handoff and runtime claims", async () => {
+    const { registry: attachments } = await registry();
+    const [imported] = await attachments.import([{
+      name: "cancelled.png",
+      mimeType: "image/png",
+      data: png,
+    }]);
+    attachments.rendererImports.hold(importBatchId, [imported!.id]);
+
+    const cancelling = attachments.rendererImports.rollback(
+      importBatchId,
+      async (id) => await attachments.rollback(id),
+    );
+    const handoff = attachments.prepareHandoff(
+      handoffId,
+      [imported!.id],
+      () => false,
+    );
+
+    await expect(handoff).rejects.toThrow("handoff is unavailable");
+    await cancelling;
+    await expect(attachments.resolveForRuntime(
+      imported!.id,
+      handoffId,
+    )).resolves.toBeNull();
+    await expect(attachments.resolve(imported!.id)).resolves.toBeNull();
+  });
+
+  it("enforces the authoritative cumulative count across one-file imports", async () => {
+    const { registry: attachments } = await registry();
+    for (let index = 0; index < 8; index += 1) {
+      const [imported] = await attachments.import([{
+        name: `accepted-${index}.png`,
+        mimeType: "image/png",
+        data: index % 2 === 0 ? png : alternatePng,
+      }]);
+      attachments.rendererImports.hold(importBatchId, [imported!.id]);
+    }
+    const [overflow] = await attachments.import([{
+      name: "overflow.png",
+      mimeType: "image/png",
+      data: png,
+    }]);
+
+    expect(() => attachments.rendererImports.hold(importBatchId, [overflow!.id]))
+      .toThrow("batch is unavailable");
+    await attachments.rollback(overflow!.id);
+    await attachments.rendererImports.rollback(
+      importBatchId,
+      async (id) => await attachments.rollback(id),
+    );
+    expect(attachments.usage()).toEqual({ records: 0, bytes: 0 });
+  });
+
+  it("enforces the authoritative cumulative byte limit across one-file imports", async () => {
+    const { registry: attachments } = await registry();
+    const chunks = [
+      largeReadablePdf(8 * 1024 * 1024, "a"),
+      largeReadablePdf(8 * 1024 * 1024, "b"),
+      largeReadablePdf(5 * 1024 * 1024, "c"),
+    ];
+    const heldIds: string[] = [];
+    for (let index = 0; index < chunks.length; index += 1) {
+      const [imported] = await attachments.import([{
+        name: `chunk-${index}.pdf`,
+        mimeType: "application/pdf",
+        data: chunks[index],
+      }]);
+      if (index < 2) {
+        attachments.rendererImports.hold(importBatchId, [imported!.id]);
+        heldIds.push(imported!.id);
+      } else {
+        expect(() => attachments.rendererImports.hold(importBatchId, [imported!.id]))
+          .toThrow("batch is unavailable");
+        await attachments.rollback(imported!.id);
+      }
+    }
+
+    expect(heldIds).toHaveLength(2);
+    await attachments.rendererImports.rollback(
+      importBatchId,
+      async (id) => await attachments.rollback(id),
+    );
+    expect(attachments.usage()).toEqual({ records: 0, bytes: 0 });
+  });
+
+  it("retires an unpublished duplicate when cleanup is blocked", async () => {
+    const unlinkFile = vi.fn<(path: string) => Promise<void>>()
+      .mockRejectedValue(Object.assign(
+        new Error("file remains locked"),
+        { code: "EPERM" },
+      ));
+    const { directory, registry: attachments } = await registry({
+      maxRecords: 2,
+      maxBytes: png.length * 2,
+    }, unlinkFile, async () => undefined);
+
+    const imported = await attachments.import([
+      {
+        name: "first.png",
+        mimeType: "image/png",
+        data: png,
+      },
+      {
+        name: "renamed-duplicate.png",
+        mimeType: "image/png",
+        data: png,
+      },
+    ]);
+
+    expect(imported).toHaveLength(1);
+    expect(unlinkFile).toHaveBeenCalledTimes(3);
+    const names = await readdir(directory);
+    expect(names).toHaveLength(2);
+    const hiddenName = names.find((name) =>
+      !name.startsWith(imported[0]!.id));
+    expect(hiddenName).toMatch(/^[0-9a-f-]{36}\.png$/u);
+    await expect(attachments.preview(hiddenName!.slice(0, -4)))
+      .resolves.toBeNull();
+    expect(attachments.usage()).toEqual({
+      records: 2,
+      bytes: png.length * 2,
+    });
+    await expect(attachments.import([{
+      name: "blocked-by-retired-duplicate.png",
+      mimeType: "image/png",
+      data: alternatePng,
+    }])).rejects.toThrow(/storage is full/u);
+    await attachments.dispose();
+    await expect(readdir(directory)).resolves.toEqual([]);
   });
 
   it("rejects content or metadata that changed after privileged import", async () => {
@@ -555,6 +758,191 @@ describe("main-owned attachment registry", () => {
       mimeType: "image/png",
       data: png,
     }])).rejects.toThrow(/no longer available/u);
+  });
+
+  it("removes the current staged file after a partial writer failure", async () => {
+    const { directory, registry: attachments } = await registry();
+
+    await expect(attachments.importFromWriter({
+      name: "partial.png",
+      mimeType: "image/png",
+      size: png.length,
+      write: async (destination) => {
+        await destination.write(png.subarray(0, 12));
+        throw new Error("synthetic staged write failure");
+      },
+    })).rejects.toThrow("synthetic staged write failure");
+
+    await expect(readdir(directory)).resolves.toEqual([]);
+    expect(attachments.usage()).toEqual({ records: 0, bytes: 0 });
+  });
+
+  it("accounts for a staged file when partial-failure cleanup is blocked", async () => {
+    const persistentError = Object.assign(
+      new Error("file remains locked"),
+      { code: "EPERM" },
+    );
+    const unlinkFile = vi.fn<(path: string) => Promise<void>>()
+      .mockRejectedValue(persistentError);
+    const { directory, registry: attachments } = await registry({
+      maxRecords: 1,
+      maxBytes: png.length,
+    }, unlinkFile, async () => undefined);
+
+    await expect(attachments.importFromWriter({
+      name: "stranded.png",
+      mimeType: "image/png",
+      size: png.length,
+      write: async (destination) => {
+        await destination.write(png.subarray(0, 12));
+        throw new Error("synthetic staged write failure");
+      },
+    })).rejects.toThrow("synthetic staged write failure");
+
+    expect(unlinkFile).toHaveBeenCalledTimes(3);
+    await expect(readdir(directory)).resolves.toHaveLength(1);
+    expect(attachments.usage()).toEqual({
+      records: 1,
+      bytes: png.length,
+    });
+    await expect(attachments.import([{
+      name: "blocked-by-stranded-file.png",
+      mimeType: "image/png",
+      data: png,
+    }])).rejects.toThrow(/storage is full/u);
+    await attachments.dispose();
+    await expect(readdir(directory)).resolves.toEqual([]);
+  });
+
+  it("retires an unpublished record when batch rollback cleanup is blocked", async () => {
+    const unlinkFile = vi.fn<(path: string) => Promise<void>>()
+      .mockRejectedValue(Object.assign(
+        new Error("file remains locked"),
+        { code: "EPERM" },
+      ));
+    const { directory, registry: attachments } = await registry({
+      maxRecords: 1,
+      maxBytes: png.length + alternatePng.length,
+    }, unlinkFile, async () => undefined);
+
+    await expect(attachments.import([
+      {
+        name: "registered-before-failure.png",
+        mimeType: "image/png",
+        data: png,
+      },
+      {
+        name: "blocked-by-record-cap.png",
+        mimeType: "image/png",
+        data: alternatePng,
+      },
+    ])).rejects.toThrow(/storage is full/u);
+
+    expect(unlinkFile).toHaveBeenCalledTimes(3);
+    const [strandedName] = await readdir(directory);
+    expect(strandedName).toMatch(/^[0-9a-f-]{36}\.png$/u);
+    const strandedId = strandedName!.slice(0, -4);
+    await expect(attachments.preview(strandedId)).resolves.toBeNull();
+    expect(attachments.usage()).toEqual({
+      records: 1,
+      bytes: png.length,
+    });
+    await expect(attachments.import([{
+      name: "blocked-by-retired-file.png",
+      mimeType: "image/png",
+      data: png,
+    }])).rejects.toThrow(/storage is full/u);
+    await attachments.dispose();
+    await expect(readdir(directory)).resolves.toEqual([]);
+  });
+
+  it("retires a renderer release when unlink retries are exhausted", async () => {
+    const unlinkFile = vi.fn<(path: string) => Promise<void>>()
+      .mockRejectedValue(Object.assign(
+        new Error("file remains locked"),
+        { code: "EPERM" },
+      ));
+    const { directory, registry: attachments } = await registry({
+      maxRecords: 1,
+      maxBytes: png.length,
+    }, unlinkFile, async () => undefined);
+    const [attachment] = await attachments.import([{
+      name: "renderer-owned.png",
+      mimeType: "image/png",
+      data: png,
+    }]);
+
+    await expect(attachments.releaseFromRenderer(attachment!.id))
+      .rejects.toThrow("file remains locked");
+
+    expect(unlinkFile).toHaveBeenCalledTimes(3);
+    await expect(attachments.preview(attachment!.id)).resolves.toBeNull();
+    expect(attachments.usage()).toEqual({
+      records: 1,
+      bytes: png.length,
+    });
+    await expect(attachments.import([{
+      name: "blocked-after-renderer-release.png",
+      mimeType: "image/png",
+      data: png,
+    }])).rejects.toThrow(/storage is full/u);
+    await attachments.dispose();
+    await expect(readdir(directory)).resolves.toEqual([]);
+  });
+
+  it("cancels validation and removes its unpublished staged file", async () => {
+    const { directory, registry: attachments } = await registry({
+      validationDelayMs: 5_000,
+    });
+    const controller = new AbortController();
+    const importing = attachments.importFromWriter({
+      name: "cancelled.png",
+      mimeType: "image/png",
+      size: png.length,
+      write: async (destination) => {
+        await destination.writeFile(png);
+      },
+    }, controller.signal);
+    await vi.waitFor(async () => {
+      expect(await readdir(directory)).toHaveLength(1);
+    });
+    controller.abort();
+
+    await expect(importing).rejects.toThrow(/abort/u);
+    await expect(readdir(directory)).resolves.toEqual([]);
+    expect(attachments.usage()).toEqual({ records: 0, bytes: 0 });
+  });
+
+  it("rejects a staged inode changed before the worker's exact exit", async () => {
+    expect(sameSizeReplacementPng).toHaveLength(png.length);
+    const validationRunner: AttachmentImportValidationRunner = (
+      operation,
+      signal,
+    ) => {
+      const result = validateAttachmentImportFile(operation, { signal });
+      return {
+        result,
+        stopped: result.then(async () => {
+          await writeFile(
+            join(operation.root, operation.fileName),
+            sameSizeReplacementPng,
+            { mode: 0o600 },
+          );
+        }),
+      };
+    };
+    const { directory, registry: attachments } = await registry({
+      validationRunner,
+    });
+
+    await expect(attachments.import([{
+      name: "changed-before-exit.png",
+      mimeType: "image/png",
+      data: png,
+    }])).rejects.toThrow(/could not be verified safely/u);
+
+    await expect(readdir(directory)).resolves.toEqual([]);
+    expect(attachments.usage()).toEqual({ records: 0, bytes: 0 });
   });
 
   it("removes prior-process orphans before a new registry starts", async () => {

@@ -12,7 +12,10 @@ const IPC = {
   runtimeReady: "inertia:runtime-ready",
   copyText: "inertia:copy-text",
   selectAttachments: "inertia:select-attachments",
+  beginAttachmentImport: "inertia:begin-attachment-import",
   importAttachments: "inertia:import-attachments",
+  commitAttachmentImport: "inertia:commit-attachment-import",
+  cancelAttachmentImport: "inertia:cancel-attachment-import",
   prepareAttachmentHandoff: "inertia:prepare-attachment-handoff",
   finishAttachmentHandoff: "inertia:finish-attachment-handoff",
   releaseAttachment: "inertia:release-attachment",
@@ -86,12 +89,26 @@ const bridge = Object.freeze({
     IPC.selectAttachments,
     mode,
   ) as ReturnType<DesktopBridge["selectAttachments"]>,
+  beginAttachmentImport: () => ipcRenderer.invoke(
+    IPC.beginAttachmentImport,
+  ) as ReturnType<DesktopBridge["beginAttachmentImport"]>,
   importAttachments: (
-    files: Parameters<DesktopBridge["importAttachments"]>[0],
+    batchId: string,
+    files: Parameters<DesktopBridge["importAttachments"]>[1],
   ) => ipcRenderer.invoke(
     IPC.importAttachments,
+    batchId,
     files,
   ) as ReturnType<DesktopBridge["importAttachments"]>,
+  commitAttachmentImport: (batchId: string, adoptedAttachmentIds: string[]) => ipcRenderer.invoke(
+    IPC.commitAttachmentImport,
+    batchId,
+    adoptedAttachmentIds,
+  ) as ReturnType<DesktopBridge["commitAttachmentImport"]>,
+  cancelAttachmentImport: (batchId: string) => ipcRenderer.invoke(
+    IPC.cancelAttachmentImport,
+    batchId,
+  ) as ReturnType<DesktopBridge["cancelAttachmentImport"]>,
   prepareAttachmentHandoff: (
     request: Parameters<DesktopBridge["prepareAttachmentHandoff"]>[0],
   ) => ipcRenderer.invoke(

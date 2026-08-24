@@ -6,6 +6,92 @@ import {
   type TestInfo,
 } from "@playwright/test";
 
+const TARGET_REVEAL_TIMEOUT_MS = 5_000;
+const MINIMAP_REVEAL_TIMEOUT_MS = 750;
+const TARGET_REVEAL_RETRY_INTERVAL_MS = 50;
+
+type TargetRevealEvidence = {
+  mounted: boolean;
+  visible: boolean;
+  intersectsTranscript: boolean;
+};
+
+function targetIsRevealed(evidence: TargetRevealEvidence): boolean {
+  return evidence.mounted
+    && evidence.visible
+    && evidence.intersectsTranscript;
+}
+
+function waitForRetry(): Promise<void> {
+  return new Promise<void>((resolve) =>
+    setTimeout(resolve, TARGET_REVEAL_RETRY_INTERVAL_MS));
+}
+
+async function scrollFreshTargetIntoView(
+  target: Locator,
+): Promise<TargetRevealEvidence> {
+  return target.evaluateAll((elements) => {
+    const element = elements.length === 1 ? elements[0] : undefined;
+    if (!(element instanceof HTMLElement) || !element.isConnected) {
+      return { mounted: false, visible: false, intersectsTranscript: false };
+    }
+    element.scrollIntoView({ block: "center", inline: "nearest" });
+    if (!element.isConnected) {
+      return { mounted: false, visible: false, intersectsTranscript: false };
+    }
+    const transcript = element.closest<HTMLElement>(".message-scroll");
+    if (!transcript?.isConnected) {
+      return { mounted: true, visible: false, intersectsTranscript: false };
+    }
+    const bounds = element.getBoundingClientRect();
+    const transcriptBounds = transcript.getBoundingClientRect();
+    const styles = getComputedStyle(element);
+    return {
+      mounted: true,
+      visible: element.getClientRects().length > 0
+        && bounds.width > 0
+        && bounds.height > 0
+        && styles.display !== "none"
+        && styles.visibility !== "hidden",
+      intersectsTranscript: Math.min(bounds.right, transcriptBounds.right)
+          > Math.max(bounds.left, transcriptBounds.left)
+        && Math.min(bounds.bottom, transcriptBounds.bottom)
+          > Math.max(bounds.top, transcriptBounds.top),
+    };
+  });
+}
+
+async function tryMinimapReveal(input: {
+  minimap: Locator;
+  index: number;
+  expectedMarkerCount: number;
+  timeoutMs: number;
+}): Promise<boolean> {
+  const { minimap, index, expectedMarkerCount, timeoutMs } = input;
+  const markers = minimap.getByRole("button");
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const clicked = await markers.evaluateAll((buttons, request) => {
+      if (buttons.length !== request.expectedMarkerCount) return false;
+      const marker = buttons[request.index];
+      if (!(marker instanceof HTMLButtonElement) || !marker.isConnected) {
+        return false;
+      }
+      const bounds = marker.getBoundingClientRect();
+      const styles = getComputedStyle(marker);
+      if (bounds.width <= 0 || bounds.height <= 0
+        || styles.display === "none" || styles.visibility === "hidden") {
+        return false;
+      }
+      marker.click();
+      return true;
+    }, { expectedMarkerCount, index });
+    if (clicked) return true;
+    await waitForRetry();
+  }
+  return false;
+}
+
 export async function revealVirtualizedTimelineTurn(input: {
   page: Page;
   target: Locator;
@@ -15,38 +101,66 @@ export async function revealVirtualizedTimelineTurn(input: {
   const { page, target, index, lastIndex } = input;
   const virtualRows = page.locator(".response-virtual-item");
   await expect.poll(() => virtualRows.count()).toBeGreaterThan(0);
-  if (await target.count() === 0) {
+  const revealDeadline = Date.now() + TARGET_REVEAL_TIMEOUT_MS;
+  const initiallyRevealed = targetIsRevealed(
+    await scrollFreshTargetIntoView(target),
+  );
+
+  if (!initiallyRevealed) {
     const minimap = page.getByRole("navigation", {
       name: "Conversation minimap",
     });
-    if (await minimap.isVisible().catch(() => false)) {
-      const markers = minimap.getByRole("button");
-      await expect(markers).toHaveCount(lastIndex + 1);
-      await markers.nth(index).click();
-      await expect(target).toHaveCount(1);
-    }
-    if (await target.count() === 0) {
-      const transcript = page.locator(".message-scroll");
-      await transcript.evaluate((element, position) => {
-        const maximum = element.scrollHeight - element.clientHeight;
-        element.scrollTop = maximum * position;
-      }, index / lastIndex);
-      await expect.poll(async () => {
-        if (await target.count() === 1) return true;
-        const mounted = await virtualRows
-          .evaluateAll((items) => items.map((item) =>
-            Number((item as HTMLElement).dataset.index)));
-        if (mounted.length === 0) return false;
-        await transcript.evaluate((element, direction) => {
-          const step = Math.max(100, element.clientHeight * 0.75);
-          element.scrollTop += direction * step;
-        }, index < Math.min(...mounted) ? -1 : 1);
-        return false;
-      }).toBe(true);
-    }
-    await expect(target).toHaveCount(1);
+    await tryMinimapReveal({
+      minimap,
+      index,
+      expectedMarkerCount: lastIndex + 1,
+      timeoutMs: Math.min(
+        MINIMAP_REVEAL_TIMEOUT_MS,
+        Math.max(0, revealDeadline - Date.now()),
+      ),
+    });
   }
-  await target.scrollIntoViewIfNeeded();
+
+  const transcript = page.locator(".message-scroll");
+  let consecutiveRevealedSamples = 0;
+  let positionedByRatio = false;
+  await expect.poll(async () => {
+    const revealed = targetIsRevealed(
+      await scrollFreshTargetIntoView(target),
+    );
+    consecutiveRevealedSamples = revealed
+      ? consecutiveRevealedSamples + 1
+      : 0;
+    if (consecutiveRevealedSamples >= 2) return true;
+    if (revealed) return false;
+
+    const mounted = await virtualRows
+      .evaluateAll((items) => items.map((item) =>
+        Number((item as HTMLElement).dataset.index))
+        .filter(Number.isFinite));
+    await transcript.evaluate((element, request) => {
+      if (!request.positionedByRatio) {
+        const maximum = element.scrollHeight - element.clientHeight;
+        element.scrollTop = maximum * request.position;
+        return;
+      }
+      if (request.mounted.length === 0) return;
+      const step = Math.max(100, element.clientHeight * 0.75);
+      element.scrollTop += request.index < Math.min(...request.mounted)
+        ? -step
+        : step;
+    }, {
+      index,
+      mounted,
+      positionedByRatio,
+      position: index / Math.max(1, lastIndex),
+    });
+    positionedByRatio = true;
+    return false;
+  }, {
+    intervals: [TARGET_REVEAL_RETRY_INTERVAL_MS],
+    timeout: Math.max(1, revealDeadline - Date.now()),
+  }).toBe(true);
 }
 
 export async function verifyDesktopMarkdownControls(input: {

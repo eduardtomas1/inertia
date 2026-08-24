@@ -58,7 +58,7 @@ interface AppFixtureOptions {
   seedSecondProject?: boolean;
   codexAppServerSource?: string;
   codexResumeSource?: string;
-  claudeAuthSource?: string;
+  claudeAuthSource?: string; attachmentImportDelayMs?: number; attachmentCommitDelayMs?: number;
   githubCliSources?: {
     pr: string;
     api: string;
@@ -733,8 +733,7 @@ export async function createAppFixture(
     workspaceDirectory: workspace.workspaceDirectory,
     secondWorkspaceDirectory,
   });
-  const rendererErrors: string[] = [];
-  const startupDiagnostics: string[] = [];
+  const rendererErrors: string[] = []; const startupDiagnostics: string[] = [];
   const launchOptions = {
     args: [".", `--user-data-dir=${join(testDirectory, "electron-profile")}`],
     env: {
@@ -742,6 +741,8 @@ export async function createAppFixture(
       NODE_ENV: "test",
       INERTIA_DATA_DIR: join(testDirectory, "data"),
       INERTIA_WORKSPACE_DIR: workspace.workspaceDirectory,
+      ...(options.attachmentImportDelayMs ? { INERTIA_TEST_ATTACHMENT_IMPORT_DELAY_MS: String(options.attachmentImportDelayMs) } : {}),
+      ...(options.attachmentCommitDelayMs ? { INERTIA_TEST_ATTACHMENT_COMMIT_DELAY_MS: String(options.attachmentCommitDelayMs) } : {}),
       ...(providerBinDirectory
         ? {
             PATH: [providerBinDirectory, process.env.PATH ?? ""]

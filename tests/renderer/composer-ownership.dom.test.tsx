@@ -24,6 +24,7 @@ import {
   prepareComposerDetachment,
   registerComposerOwnership,
 } from "../../src/renderer/src/utils/composerOwnership";
+import type { ComposerAttachmentImportLease } from "../../src/renderer/src/utils/composerAttachments";
 
 const provider: ProviderInfo = {
   id: "codex",
@@ -96,6 +97,14 @@ function attachment(id: string): ChatAttachment {
   };
 }
 
+function attachmentLease(attachments: ChatAttachment[]): ComposerAttachmentImportLease {
+  return {
+    attachments,
+    commit: async () => undefined,
+    cancel: async () => undefined,
+  };
+}
+
 function contextPacket(
   current: Conversation,
   consumedMessageId: string | null,
@@ -143,8 +152,8 @@ function composerProps(
     onListSkills: async () => undefined,
     onUpdateConversation: async () => undefined,
     onCreateConversationForSelection: async () => undefined,
-    onChooseAttachments: async () => [],
-    onImportAttachments: async () => [],
+    onChooseAttachments: async () => null,
+    onImportAttachments: async () => null,
     onReleaseAttachment: async () => undefined,
     onRunAction: () => undefined,
     onMentionQuery: () => undefined,
@@ -340,7 +349,9 @@ describe("composer detachment ownership", () => {
       <>
         <section aria-label="Attachment owner">
           <Composer {...composerProps(attachmentOwner, {
-            onChooseAttachments: async () => [attachment("pending")],
+            onChooseAttachments: async () => attachmentLease([
+              attachment("pending"),
+            ]),
           })} />
         </section>
         <section aria-label="Reference owner">
@@ -409,6 +420,54 @@ describe("composer detachment ownership", () => {
     });
 
     await act(async () => finishSend());
+  });
+
+  it.each([
+    ["detachment", "native selection"],
+    ["docking", "drop"],
+  ] as const)("blocks %s while a delayed %s import is in flight", async (
+    transition,
+    source,
+  ) => {
+    let finishImport!: (value: ComposerAttachmentImportLease) => void;
+    const importing = new Promise<ComposerAttachmentImportLease>((resolve) => {
+      finishImport = resolve;
+    });
+    const current = conversation(`${transition}-importing-attachment-owner`);
+    render(<Composer {...composerProps(current, source === "native selection"
+      ? { onChooseAttachments: () => importing }
+      : { onImportAttachments: () => importing })} />);
+
+    if (source === "native selection") {
+      fireEvent.click(screen.getByRole("button", {
+        name: "Attach images, documents, or spreadsheets",
+      }));
+    } else {
+      fireEvent.drop(screen.getByLabelText("Message composer"), {
+        dataTransfer: {
+          files: [new File(["image"], "imported.png", { type: "image/png" })],
+          types: ["Files"],
+        },
+      });
+    }
+    await screen.findByText("Adding attachments…");
+
+    expect(prepareComposerDetachment(current.id)).toEqual({
+      status: "blocked",
+      blocker: "mutation-in-flight",
+      reason: "Wait for the current composer action to finish before moving this chat to a window.",
+      draft: "",
+    });
+
+    await act(async () => finishImport(attachmentLease([
+      attachment("imported"),
+    ])));
+    expect(prepareComposerDetachment(current.id)).toEqual({
+      status: "blocked",
+      blocker: "attachments",
+      reason: "Send or remove attachments before moving this chat to a window.",
+      draft: "",
+    });
   });
 
   it("blocks a pending model-route transfer", async () => {

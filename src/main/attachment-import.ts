@@ -98,6 +98,15 @@ export interface ValidatedAttachmentImport {
   readonly digest: string;
 }
 
+export type PreparedAttachmentMetadata = Omit<
+  ValidatedAttachmentImport,
+  "bytes" | "digest"
+>;
+
+export interface PreparedAttachmentImport extends PreparedAttachmentMetadata {
+  readonly bytes: Buffer;
+}
+
 export interface SelectedAttachmentStat {
   readonly size: number;
   readonly isFile: boolean;
@@ -609,34 +618,76 @@ function bytesFromUnknown(value: unknown): Buffer | null {
 }
 
 export function validateAttachmentImport(value: unknown): ValidatedAttachmentImport {
+  const prepared = prepareAttachmentImport(value);
+  const validSignature = prepared.mimeType.startsWith("image/")
+    ? hasSafeImageAttachment(
+        prepared.bytes,
+        prepared.mimeType as ImageAttachmentMimeType,
+      )
+    : hasExpectedDocumentSignature(
+        prepared.bytes,
+        prepared.mimeType as DocumentAttachmentMimeType,
+      );
+  if (!validSignature) {
+    throw new Error("Attachment content does not match its safe file type.");
+  }
+
+  return {
+    ...prepared,
+    digest: createHash("sha256").update(prepared.bytes).digest("hex"),
+  };
+}
+
+/**
+ * Performs only the bounded envelope checks needed before private staging.
+ * Structural parsing deliberately remains in `validateAttachmentImport`,
+ * which production invokes inside the supervised attachment utility.
+ */
+export function prepareAttachmentImport(value: unknown): PreparedAttachmentImport {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new Error("Invalid attachment.");
   }
   const item = value as { name?: unknown; mimeType?: unknown; data?: unknown };
+  const bytes = bytesFromUnknown(item.data);
+  if (!bytes) throw new Error("Invalid attachment.");
+  const metadata = prepareAttachmentImportMetadata({
+    name: item.name,
+    mimeType: item.mimeType,
+    size: bytes.length,
+  });
+
+  return {
+    ...metadata,
+    bytes,
+  };
+}
+
+export function prepareAttachmentImportMetadata(
+  value: unknown,
+): PreparedAttachmentMetadata {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("Invalid attachment.");
+  }
+  const item = value as {
+    name?: unknown;
+    mimeType?: unknown;
+    size?: unknown;
+  };
   const declaredMimeType = typeof item.mimeType === "string" ? item.mimeType : "";
   const suppliedName = typeof item.name === "string" ? item.name : "";
   const mimeType = chatAttachmentMimeTypeForName(suppliedName);
-  const bytes = bytesFromUnknown(item.data);
   if (
     !mimeType
     || !isPotentialChatAttachment(suppliedName, declaredMimeType)
-    || !bytes
-    || bytes.length < 1
-    || bytes.length > MAX_CHAT_ATTACHMENT_BYTES
-  ) {
-    throw new Error("Invalid attachment.");
-  }
-  const validSignature = mimeType.startsWith("image/")
-    ? hasSafeImageAttachment(bytes, mimeType as ImageAttachmentMimeType)
-    : hasExpectedDocumentSignature(bytes, mimeType as DocumentAttachmentMimeType);
-  if (!validSignature) throw new Error("Attachment content does not match its safe file type.");
-
+    || typeof item.size !== "number"
+    || !Number.isSafeInteger(item.size)
+    || item.size < 1
+    || item.size > MAX_CHAT_ATTACHMENT_BYTES
+  ) throw new Error("Invalid attachment.");
   return {
     displayName: safeDisplayName(item.name, mimeType),
     mimeType,
     extension: chatAttachmentStorageExtension(mimeType),
-    bytes,
-    size: bytes.length,
-    digest: createHash("sha256").update(bytes).digest("hex"),
+    size: item.size,
   };
 }

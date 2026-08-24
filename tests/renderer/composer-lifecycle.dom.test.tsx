@@ -7,6 +7,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
+import { useState } from "react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -30,7 +31,9 @@ import {
 } from "../../src/renderer/src/components/composer/Composer";
 import type { PromptPresetCommandRunner } from "../../src/renderer/src/components/composer/types";
 import { useAppRuntimeActions } from "../../src/renderer/src/hooks/useAppRuntimeActions";
+import { useDesktopTools } from "../../src/renderer/src/hooks/useDesktopTools";
 import { RuntimeCommandError } from "../../src/renderer/src/utils/connectionMessages";
+import type { ComposerAttachmentImportLease } from "../../src/renderer/src/utils/composerAttachments";
 import { readPromptStash } from "../../src/renderer/src/utils/promptStash";
 
 const provider: ProviderInfo = {
@@ -104,6 +107,14 @@ function attachment(id: string): ChatAttachment {
   };
 }
 
+function attachmentLease(
+  attachments: ChatAttachment[],
+  commit: ComposerAttachmentImportLease["commit"] = async () => undefined,
+  cancel: ComposerAttachmentImportLease["cancel"] = async () => undefined,
+): ComposerAttachmentImportLease {
+  return { attachments, commit, cancel };
+}
+
 function promptPreset(id: string, position = 0): PromptPreset {
   return {
     id,
@@ -159,8 +170,8 @@ function composerProps(
     onListSkills: async () => undefined,
     onUpdateConversation: () => Promise.resolve(),
     onCreateConversationForSelection: async () => undefined,
-    onChooseAttachments: async () => [],
-    onImportAttachments: async () => [],
+    onChooseAttachments: async () => null,
+    onImportAttachments: async () => null,
     onReleaseAttachment: async () => undefined,
     onRunAction: () => undefined,
     onMentionQuery: () => undefined,
@@ -885,7 +896,7 @@ describe("composer asynchronous ownership", () => {
   it("selects image-only media and sends an attachment-only active follow-up", async () => {
     const current = conversation("15151515-1515-4515-8515-151515151515");
     const selected = attachment("follow-up-reference");
-    const chooseAttachments = vi.fn(async () => [selected]);
+    const chooseAttachments = vi.fn(async () => attachmentLease([selected]));
     const onSend = vi.fn(async () => undefined);
     render(<Composer {...composerProps(current, {
       running: true,
@@ -924,13 +935,18 @@ describe("composer asynchronous ownership", () => {
     };
     const onSend = vi.fn(async () => undefined);
     const onReleaseAttachment = vi.fn(async () => undefined);
+    const cancel = vi.fn(async () => undefined);
     render(<Composer {...composerProps(current, {
       running: true,
       latestTurn: {
         ...({} as NonNullable<React.ComponentProps<typeof Composer>["latestTurn"]>),
         harnessId: "claude-agent-sdk",
       },
-      onChooseAttachments: async () => [document],
+      onChooseAttachments: async () => attachmentLease(
+        [document],
+        undefined,
+        cancel,
+      ),
       onReleaseAttachment,
       onSend,
     })} />);
@@ -938,8 +954,8 @@ describe("composer asynchronous ownership", () => {
     fireEvent.click(screen.getByRole("button", {
       name: "Attach follow-up images",
     }));
-    await waitFor(() => expect(onReleaseAttachment)
-      .toHaveBeenCalledExactlyOnceWith(document.id));
+    await waitFor(() => expect(cancel).toHaveBeenCalledOnce());
+    expect(onReleaseAttachment).not.toHaveBeenCalled();
     expect(screen.queryByText("unsafe-document.pdf")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Send queued message now" }))
       .not.toBeInTheDocument();
@@ -1580,11 +1596,12 @@ describe("composer asynchronous ownership", () => {
     })).not.toBeDisabled();
   });
 
-  it("releases a late attachment picker result instead of moving it to another chat", async () => {
+  it("cancels a late attachment picker lease instead of moving it to another chat", async () => {
     const first = conversation("22222222-2222-4222-8222-222222222222");
     const second = conversation("33333333-3333-4333-8333-333333333333");
-    const picked = deferred<ChatAttachment[]>();
+    const picked = deferred<ComposerAttachmentImportLease>();
     const release = vi.fn(async () => undefined);
+    const cancel = vi.fn(async () => undefined);
     const view = render(<Composer {...composerProps(first, {
       onChooseAttachments: () => picked.promise,
       onReleaseAttachment: release,
@@ -1597,18 +1614,22 @@ describe("composer asynchronous ownership", () => {
       onChooseAttachments: () => picked.promise,
       onReleaseAttachment: release,
     })} />);
-    await act(async () => picked.resolve([attachment("late-picker")]));
+    await act(async () => picked.resolve(attachmentLease(
+      [attachment("late-picker")],
+      undefined,
+      cancel,
+    )));
 
-    await waitFor(() => expect(release).toHaveBeenCalledExactlyOnceWith(
-      "late-picker",
-    ));
+    await waitFor(() => expect(cancel).toHaveBeenCalledOnce());
+    expect(release).not.toHaveBeenCalled();
     expect(screen.queryByText("late-picker.png")).toBeNull();
   });
 
   it("rechecks active-turn authority after the image picker settles", async () => {
     const current = conversation("23232323-2323-4323-8323-232323232323");
-    const picked = deferred<ChatAttachment[]>();
+    const picked = deferred<ComposerAttachmentImportLease>();
     const release = vi.fn(async () => undefined);
+    const cancel = vi.fn(async () => undefined);
     const overrides = {
       latestTurn: {
         ...({} as NonNullable<React.ComponentProps<typeof Composer>["latestTurn"]>),
@@ -1626,12 +1647,108 @@ describe("composer asynchronous ownership", () => {
       ...overrides,
       running: true,
     })} />);
-    await act(async () => picked.resolve([attachment("stale-picker-mode")]));
+    await act(async () => picked.resolve(attachmentLease(
+      [attachment("stale-picker-mode")],
+      undefined,
+      cancel,
+    )));
 
-    await waitFor(() => expect(release).toHaveBeenCalledExactlyOnceWith(
-      "stale-picker-mode",
-    ));
+    await waitFor(() => expect(cancel).toHaveBeenCalledOnce());
+    expect(release).not.toHaveBeenCalled();
     expect(screen.queryByText("stale-picker-mode.png")).not.toBeInTheDocument();
+  });
+
+  it("rejects a late picker lease after the active turn changes without waiting for passive effects", async () => {
+    const current = conversation("24242424-2424-4424-8424-242424242424");
+    const picked = deferred<{
+      batchId: string;
+      attachments: readonly ChatAttachment[];
+    }>();
+    const cancelAttachmentImport = vi.fn(async () => {
+      throw new Error("Attachment cleanup failed safely.");
+    });
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: {
+        selectAttachments: vi.fn(() => picked.promise),
+        cancelAttachmentImport,
+      },
+    });
+    const turn = (id: string) => ({
+      ...({} as NonNullable<React.ComponentProps<typeof Composer>["latestTurn"]>),
+      id,
+      status: "running" as const,
+      harnessId: "codex-app-server" as const,
+    });
+    function Harness({ turnId }: { turnId: string }) {
+      const [error, setError] = useState<string | null>(null);
+      const desktop = useDesktopTools({ setActionError: setError });
+      return <>
+        {error ? <div role="alert">{error}</div> : null}
+        <Composer {...composerProps(current, {
+          running: true,
+          latestTurn: turn(turnId),
+          onChooseAttachments: desktop.chooseComposerAttachments,
+        })} />
+      </>;
+    }
+    const view = render(<Harness turnId="turn-a" />);
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "Attach follow-up images",
+    }));
+    view.rerender(<Harness turnId="turn-b" />);
+    await act(async () => picked.resolve({
+      batchId: "24242424-2424-4424-8424-242424242425",
+      attachments: [attachment("late-turn-picker")],
+    }));
+
+    await waitFor(() => expect(cancelAttachmentImport).toHaveBeenCalledOnce());
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Attachments could not be rolled back safely.",
+    );
+    expect(screen.getByRole("button", {
+      name: "Attach follow-up images",
+    })).toBeEnabled();
+    expect(screen.queryByText("late-turn-picker.png")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", {
+      name: "Preview attachment late-turn-picker.png",
+    })).not.toBeInTheDocument();
+  });
+
+  it("rejects a late picker lease when the same active turn changes harness", async () => {
+    const current = conversation("25252525-2525-4525-8525-252525252525");
+    const picked = deferred<ComposerAttachmentImportLease>();
+    const cancel = vi.fn(async () => undefined);
+    const activeTurn = {
+      ...({} as NonNullable<React.ComponentProps<typeof Composer>["latestTurn"]>),
+      id: "turn-same-id",
+      status: "running" as const,
+      harnessId: "codex-app-server" as const,
+    };
+    const overrides = {
+      running: true,
+      latestTurn: activeTurn,
+      onChooseAttachments: () => picked.promise,
+    };
+    const view = render(<Composer {...composerProps(current, overrides)} />);
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "Attach follow-up images",
+    }));
+    view.rerender(<Composer {...composerProps(current, {
+      ...overrides,
+      latestTurn: { ...activeTurn, harnessId: "opencode-sdk" },
+    })} />);
+    await act(async () => picked.resolve(attachmentLease(
+      [attachment("late-harness-picker")],
+      undefined,
+      cancel,
+    )));
+
+    await waitFor(() => expect(cancel).toHaveBeenCalledOnce());
+    expect(screen.queryByText("late-harness-picker.png"))
+      .not.toBeInTheDocument();
   });
 
   it("releases only unsent attachments before the renderer reloads", async () => {
@@ -1639,7 +1756,9 @@ describe("composer asynchronous ownership", () => {
     const view = render(<Composer {...composerProps(
       conversation("12121212-1212-4212-8212-121212121212"),
       {
-        onChooseAttachments: async () => [attachment("held-before-reload")],
+        onChooseAttachments: async () => attachmentLease([
+          attachment("held-before-reload"),
+        ]),
         onReleaseAttachment: release,
       },
     )} />);
@@ -1657,9 +1776,14 @@ describe("composer asynchronous ownership", () => {
     expect(release).toHaveBeenCalledTimes(1);
   });
 
-  it("releases a late imported attachment after the composer unmounts", async () => {
-    const imported = deferred<ChatAttachment[]>();
+  it("cancels a late privileged import after the composer unmounts", async () => {
+    const imported = deferred<{
+      attachments: ChatAttachment[];
+      commit: (adoptedIds: readonly string[]) => Promise<void>;
+      cancel: () => Promise<void>;
+    }>();
     const release = vi.fn(async () => undefined);
+    const cancel = vi.fn(async () => undefined);
     const view = render(<Composer {...composerProps(
       conversation("44444444-4444-4444-8444-444444444444"),
       {
@@ -1675,11 +1799,253 @@ describe("composer asynchronous ownership", () => {
       },
     });
     view.unmount();
-    await act(async () => imported.resolve([attachment("late-import")]));
+    await act(async () => imported.resolve({
+      attachments: [attachment("late-import")],
+      commit: vi.fn(async () => undefined),
+      cancel,
+    }));
+
+    await waitFor(() => expect(cancel).toHaveBeenCalledOnce());
+    expect(release).not.toHaveBeenCalled();
+  });
+
+  it("commits only the privileged attachment subset synchronously adopted by Composer", async () => {
+    const existing = attachment("existing-import");
+    const accepted = attachment("accepted-import");
+    const duplicate = {
+      ...existing,
+      id: "rejected-duplicate-import",
+    };
+    const acknowledgement = deferred<void>();
+    const commit = vi.fn(async () => await acknowledgement.promise);
+    const cancel = vi.fn(async () => undefined);
+    render(<Composer {...composerProps(
+      conversation("45454545-4545-4545-8545-454545454545"),
+      {
+        onChooseAttachments: async () => attachmentLease([existing]),
+        onImportAttachments: async () => ({
+          attachments: [duplicate, accepted],
+          commit,
+          cancel,
+        }),
+      },
+    )} />);
+    fireEvent.click(screen.getByRole("button", {
+      name: "Attach images, documents, or spreadsheets",
+    }));
+    await screen.findByText(existing.name);
+
+    fireEvent.drop(screen.getByLabelText("Message composer"), {
+      dataTransfer: {
+        files: [new File(["image"], "source.png", { type: "image/png" })],
+        types: ["Files"],
+      },
+    });
+
+    await waitFor(() => expect(commit).toHaveBeenCalledExactlyOnceWith([
+      accepted.id,
+    ]));
+    const acceptedRow = screen.getByText(accepted.name).closest("li");
+    const existingRow = screen.getByText(existing.name).closest("li");
+    expect(acceptedRow).toHaveAttribute("data-attachment-pending", "true");
+    expect(acceptedRow?.querySelector("img")).toBeNull();
+    expect(acceptedRow?.querySelector("[data-preview-source]"))
+      .toBeNull();
+    expect(existingRow?.querySelector("img")).not.toBeNull();
+    await act(async () => acknowledgement.resolve());
+    await waitFor(() => expect(acceptedRow)
+      .not.toHaveAttribute("data-attachment-pending"));
+    expect(acceptedRow?.querySelector("img")).not.toBeNull();
+    expect(cancel).not.toHaveBeenCalled();
+    expect(screen.getByText(accepted.name)).toBeInTheDocument();
+    expect(screen.getAllByText(existing.name)).toHaveLength(1);
+  });
+
+  it.each([
+    [false, true],
+    [true, false],
+  ])("removes an acknowledged import after running authority changes from %s to %s", async (
+    initialRunning,
+    nextRunning,
+  ) => {
+    const imported = attachment(`authority-${initialRunning}-${nextRunning}`);
+    const acknowledgement = deferred<void>();
+    const release = vi.fn(async () => undefined);
+    const overrides = {
+      running: initialRunning,
+      latestTurn: {
+        ...({} as NonNullable<React.ComponentProps<typeof Composer>["latestTurn"]>),
+        harnessId: "codex-app-server" as const,
+      },
+      onImportAttachments: async () => attachmentLease(
+        [imported],
+        vi.fn(async () => await acknowledgement.promise),
+      ),
+      onReleaseAttachment: release,
+    };
+    const current = conversation("47474747-4747-4747-8747-474747474747");
+    const view = render(<Composer {...composerProps(current, overrides)} />);
+
+    fireEvent.drop(screen.getByLabelText("Message composer"), {
+      dataTransfer: {
+        files: [new File(["image"], "source.png", { type: "image/png" })],
+        types: ["Files"],
+      },
+    });
+    await screen.findByText(imported.name);
+    view.rerender(<Composer {...composerProps(current, {
+      ...overrides,
+      running: nextRunning,
+    })} />);
+    await act(async () => acknowledgement.resolve());
 
     await waitFor(() => expect(release).toHaveBeenCalledExactlyOnceWith(
-      "late-import",
+      imported.id,
     ));
+    expect(screen.queryByText(imported.name)).not.toBeInTheDocument();
+  });
+
+  it("removes an acknowledged import when the active turn is replaced while still running", async () => {
+    const imported = attachment("same-running-turn-change");
+    const acknowledgement = deferred<void>();
+    const release = vi.fn(async () => undefined);
+    const activeTurn = {
+      ...({} as NonNullable<React.ComponentProps<typeof Composer>["latestTurn"]>),
+      id: "active-turn-a",
+      status: "running" as const,
+      harnessId: "codex-app-server" as const,
+    };
+    const overrides = {
+      running: true,
+      latestTurn: activeTurn,
+      onImportAttachments: async () => attachmentLease(
+        [imported],
+        vi.fn(async () => await acknowledgement.promise),
+      ),
+      onReleaseAttachment: release,
+    };
+    const current = conversation("47474747-4747-4747-8747-474747474748");
+    const view = render(<Composer {...composerProps(current, overrides)} />);
+
+    fireEvent.drop(screen.getByLabelText("Message composer"), {
+      dataTransfer: {
+        files: [new File(["image"], "source.png", { type: "image/png" })],
+        types: ["Files"],
+      },
+    });
+    await screen.findByText(imported.name);
+    view.rerender(<Composer {...composerProps(current, {
+      ...overrides,
+      latestTurn: { ...activeTurn, id: "active-turn-b" },
+    })} />);
+    await act(async () => acknowledgement.resolve());
+
+    await waitFor(() => expect(release).toHaveBeenCalledExactlyOnceWith(
+      imported.id,
+    ));
+    expect(screen.queryByText(imported.name)).not.toBeInTheDocument();
+  });
+
+  it("removes tentatively adopted attachments when privileged acknowledgement fails", async () => {
+    const imported = attachment("failed-ack-import");
+    const acknowledgement = deferred<void>();
+    const commit = vi.fn(async () => await acknowledgement.promise);
+    const cancel = vi.fn(async () => undefined);
+    const release = vi.fn(async () => undefined);
+    render(<Composer {...composerProps(
+      conversation("46464646-4646-4646-8646-464646464646"),
+      {
+        onImportAttachments: async () => ({
+          attachments: [imported],
+          commit,
+          cancel,
+        }),
+        onReleaseAttachment: release,
+      },
+    )} />);
+
+    fireEvent.drop(screen.getByLabelText("Message composer"), {
+      dataTransfer: {
+        files: [new File(["image"], "source.png", { type: "image/png" })],
+        types: ["Files"],
+      },
+    });
+
+    await screen.findByText(imported.name);
+    expect(screen.getByText(imported.name).closest("li")?.querySelector("img"))
+      .toBeNull();
+    expect(screen.getByRole("button", {
+      name: `Preview attachment ${imported.name}`,
+    })).toBeDisabled();
+    expect(screen.getByRole("button", {
+      name: `Remove attachment ${imported.name}`,
+    })).toBeDisabled();
+    await act(async () => acknowledgement.reject(
+      new Error("acknowledgement failed"),
+    ));
+    await waitFor(() => expect(cancel).toHaveBeenCalledOnce());
+    expect(screen.queryByText(imported.name)).not.toBeInTheDocument();
+    expect(release).not.toHaveBeenCalled();
+  });
+
+  it("surfaces and consumes a rejected cancel when no privileged attachment is adopted", async () => {
+    const current = conversation("48484848-4848-4848-8848-484848484848");
+    const imported = {
+      id: "48484848-4848-4848-8848-484848484849",
+      name: "blocked-document.pdf",
+      path: "opaque",
+      mimeType: "application/pdf",
+      size: 5,
+    } satisfies ChatAttachment;
+    const cancelAttachmentImport = vi.fn(async () => {
+      throw new Error("Attachment rollback could not be confirmed.");
+    });
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: {
+        beginAttachmentImport: vi.fn(async () =>
+          "48484848-4848-4848-8848-484848484850"),
+        importAttachments: vi.fn(async () => [imported]),
+        cancelAttachmentImport,
+      },
+    });
+    function Harness() {
+      const [error, setError] = useState<string | null>(null);
+      const desktop = useDesktopTools({ setActionError: setError });
+      return <>
+        {error ? <div role="alert">{error}</div> : null}
+        <Composer {...composerProps(current, {
+          running: true,
+          latestTurn: {
+            ...({} as NonNullable<React.ComponentProps<typeof Composer>["latestTurn"]>),
+            id: "turn-zero-adoption",
+            status: "running",
+            harnessId: "codex-app-server",
+          },
+          onImportAttachments: desktop.importComposerAttachments,
+        })} />
+      </>;
+    }
+    render(<Harness />);
+
+    fireEvent.drop(screen.getByLabelText("Message composer"), {
+      dataTransfer: {
+        files: [new File(["image"], "source.png", { type: "image/png" })],
+        types: ["Files"],
+      },
+    });
+
+    await waitFor(() => expect(cancelAttachmentImport).toHaveBeenCalledOnce());
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Attachments could not be rolled back safely.",
+    );
+    expect(screen.getByRole("button", {
+      name: "Attach follow-up images",
+    })).toBeEnabled();
+    expect(screen.queryByText(imported.name)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", {
+      name: `Preview attachment ${imported.name}`,
+    })).not.toBeInTheDocument();
   });
 
   it("removes only the submitted draft after a successful navigated-away send", async () => {
@@ -1743,8 +2109,8 @@ describe("composer asynchronous ownership", () => {
     const second = conversation("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
     const sent = deferred<void>();
     const chooseAttachments = vi.fn()
-      .mockResolvedValueOnce([attachment("submitted")])
-      .mockResolvedValueOnce([attachment("newer")]);
+      .mockResolvedValueOnce(attachmentLease([attachment("submitted")]))
+      .mockResolvedValueOnce(attachmentLease([attachment("newer")]));
     const release = vi.fn(async () => undefined);
     const overrides = {
       onSend: () => sent.promise,
@@ -1788,8 +2154,8 @@ describe("composer asynchronous ownership", () => {
     const second = conversation("cccccccc-cccc-4ccc-8ccc-cccccccccccc");
     const sent = deferred<void>();
     const chooseAttachments = vi.fn()
-      .mockResolvedValueOnce([attachment("failed")])
-      .mockResolvedValueOnce([attachment("newer")]);
+      .mockResolvedValueOnce(attachmentLease([attachment("failed")]))
+      .mockResolvedValueOnce(attachmentLease([attachment("newer")]));
     const release = vi.fn(async () => undefined);
     const overrides = {
       onSend: () => sent.promise,
@@ -1842,7 +2208,7 @@ describe("composer asynchronous ownership", () => {
     const release = vi.fn(async () => undefined);
     const overrides = {
       onSend: () => sent.promise,
-      onChooseAttachments: async () => [attachment("retry")],
+      onChooseAttachments: async () => attachmentLease([attachment("retry")]),
       onReleaseAttachment: release,
     };
     const view = render(<Composer {...composerProps(first, overrides)} />);
@@ -1943,7 +2309,7 @@ describe("composer asynchronous ownership", () => {
     render(<Composer {...composerProps(current, {
       promptPresets: [preset],
       onSend,
-      onChooseAttachments: async () => [attachment("kept")],
+      onChooseAttachments: async () => attachmentLease([attachment("kept")]),
     })} />);
     const input = screen.getByRole("textbox", { name: "Message" });
 

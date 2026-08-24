@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator } from "@playwright/test";
 import { readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -18,6 +18,13 @@ let malformedAttachmentPath!: AppFixture["malformedAttachmentPath"];
 let rendererErrors!: AppFixture["rendererErrors"];
 let runtimeSnapshot!: AppFixture["runtimeSnapshot"];
 let resizeWindow!: AppFixture["resizeWindow"];
+
+async function expectImagePreviewSettled(image: Locator): Promise<void> {
+  await expect.poll(() => image.evaluate((element) => ({
+    complete: (element as HTMLImageElement).complete,
+    width: (element as HTMLImageElement).naturalWidth,
+  }))).toEqual({ complete: true, width: 1 });
+}
 
 async function stagedAttachmentPath(
   id: string | undefined,
@@ -44,6 +51,8 @@ test.beforeAll(async () => {
   app = await createAppFixture({
     name: "sent-attachments",
     initialState: "conversation",
+    attachmentImportDelayMs: 750,
+    attachmentCommitDelayMs: 750,
   });
   electronApp = app.electronApp;
   page = app.page;
@@ -73,6 +82,36 @@ test("previews, validates, removes, and cleans up secure composer attachments", 
   await page.getByRole("button", {
     name: "Attach images, documents, or spreadsheets",
   }).click();
+  const importStatus = page.getByRole("status");
+  await expect(importStatus).toBeVisible();
+  await expect(importStatus).toHaveText("Adding attachments…");
+  const mainHeartbeatStarted = Date.now();
+  await electronApp.evaluate(async () => {
+    await new Promise<void>((resolveHeartbeat) => {
+      setTimeout(resolveHeartbeat, 10);
+    });
+  });
+  expect(Date.now() - mainHeartbeatStarted).toBeLessThan(500);
+  const responsiveProbe = "Typing stays responsive while files are validated.";
+  const probeStarted = Date.now();
+  await page.getByRole("textbox", { name: "Message" }).fill(responsiveProbe);
+  await expect(page.getByRole("textbox", { name: "Message" }))
+    .toHaveValue(responsiveProbe);
+  expect(Date.now() - probeStarted).toBeLessThan(500);
+  await expect(page.getByRole("button", { name: "Send message" }))
+    .toBeDisabled();
+  const responsiveScreenshotPath = testInfo.outputPath(
+    "attachment-import-responsive-1440x920.png",
+  );
+  await page.screenshot({
+    animations: "disabled",
+    path: responsiveScreenshotPath,
+  });
+  await testInfo.attach("attachment-import-responsive-1440x920", {
+    path: responsiveScreenshotPath,
+    contentType: "image/png",
+  });
+  await page.getByRole("textbox", { name: "Message" }).fill("");
   const attachments = page.getByRole("list", {
     name: "Attachments",
     exact: true,
@@ -244,8 +283,16 @@ test("previews, validates, removes, and cleans up secure composer attachments", 
     textarea.dispatchEvent(event);
   }, imageBytes);
   await expect(attachments.getByText("pasted.png", { exact: true })).toBeVisible();
-  await expect(attachments.locator("img")).toHaveCount(1);
-  const pastedSource = await attachments.locator("img").getAttribute("src");
+  const pendingPastedAttachment = attachments.locator(
+    '[data-attachment-pending="true"]',
+  ).filter({ hasText: "pasted.png" });
+  await expect(pendingPastedAttachment).toBeVisible();
+  await expect(pendingPastedAttachment.locator("img")).toHaveCount(0);
+  const pastedPreview = attachments.locator("img");
+  await expect(pastedPreview).toHaveCount(1);
+  await expect(pendingPastedAttachment).toHaveCount(0);
+  await expectImagePreviewSettled(pastedPreview);
+  const pastedSource = await pastedPreview.getAttribute("src");
   const pastedId = pastedSource?.split("/").at(-1);
   const pastedTempPath = await stagedAttachmentPath(pastedId, "png");
   await attachments.getByRole("button", { name: "Remove attachment pasted.png" }).click();
@@ -294,7 +341,9 @@ test("previews, validates, removes, and cleans up secure composer attachments", 
   await page.getByRole("button", {
     name: "Attach images, documents, or spreadsheets",
   }).click();
-  const unsentSource = await attachments.locator("img").getAttribute("src");
+  const unsentPreview = attachments.locator("img");
+  await expectImagePreviewSettled(unsentPreview);
+  const unsentSource = await unsentPreview.getAttribute("src");
   const unsentId = unsentSource?.split("/").at(-1);
   const unsentTempPath = await stagedAttachmentPath(unsentId, "png");
   await expect.poll(async () => stat(unsentTempPath).then(() => true, () => false)).toBe(true);

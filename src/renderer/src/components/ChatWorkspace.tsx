@@ -54,6 +54,7 @@ import type {
   WorkspaceEntry,
 } from "@shared/contracts";
 import type { WorkspaceFileLocation } from "../utils/workspaceFileReference";
+import type { ComposerAttachmentImportLease } from "../utils/composerAttachments";
 import type { ProviderIdentityLabels } from "@shared/provider-identities";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import {
@@ -181,8 +182,10 @@ type ChatWorkspaceProps = {
   ) => Promise<void>;
   onChooseAttachments: (
     mode?: import("@shared/desktop").AttachmentPickerMode,
-  ) => Promise<ChatAttachment[]>;
-  onImportAttachments: (files: File[]) => Promise<ChatAttachment[]>;
+  ) => Promise<ComposerAttachmentImportLease | null>;
+  onImportAttachments: (
+    files: File[],
+  ) => Promise<ComposerAttachmentImportLease | null>;
   onReleaseAttachment: (id: string) => Promise<void>;
   onRunAction: (action: ProjectAction) => void;
   onMentionQuery: (query: string) => void;

@@ -22,6 +22,7 @@ import type {
 import type { ProviderIdentityLabels } from "@shared/provider-identities";
 import type { AttachmentPickerMode } from "@shared/desktop";
 import type { CommandWithoutId } from "../../lib/runtimeCommands";
+import type { ComposerAttachmentImportLease } from "../../utils/composerAttachments";
 import type { ChatGoalControlProps } from "../ChatGoalControl";
 import type { ProviderTerminalResumeOption } from "../providerResumeOptions";
 import type {
@@ -89,8 +90,10 @@ export interface ComposerProps {
   ) => Promise<void>;
   onChooseAttachments: (
     mode?: AttachmentPickerMode,
-  ) => Promise<ChatAttachment[]>;
-  onImportAttachments: (files: File[]) => Promise<ChatAttachment[]>;
+  ) => Promise<ComposerAttachmentImportLease | null>;
+  onImportAttachments: (
+    files: File[],
+  ) => Promise<ComposerAttachmentImportLease | null>;
   onReleaseAttachment: (id: string) => Promise<void>;
   onRunAction: (action: ProjectAction) => void;
   onMentionQuery: (query: string) => void;

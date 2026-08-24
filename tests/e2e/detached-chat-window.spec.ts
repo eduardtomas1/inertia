@@ -312,12 +312,16 @@ test("moves one live chat between a remembered native window and the main app", 
   )).toMatchObject({ width: 704, height: 668 });
   await reopened.getByRole("textbox", { name: "Message" }).fill(dockedDraft);
 
-  await Promise.all([
-    reopened.waitForEvent("close"),
-    reopened.getByRole("button", {
-      name: "Return chat to main window",
-    }).click({ noWaitAfter: true }),
-  ]);
+  const returnToMain = reopened.getByRole("button", {
+    name: "Return chat to main window",
+  });
+  await expect(returnToMain).toBeVisible();
+  await expect(returnToMain).toBeEnabled();
+  const reopenedClosed = reopened.waitForEvent("close");
+  await returnToMain.evaluate((button: HTMLButtonElement) => {
+    window.setTimeout(() => button.click(), 0);
+  });
+  await reopenedClosed;
   await expect(page.getByRole("textbox", { name: "Message" }))
     .toHaveValue(dockedDraft);
   await expect(page.getByRole("region", {

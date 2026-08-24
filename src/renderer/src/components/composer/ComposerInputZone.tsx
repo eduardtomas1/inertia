@@ -61,6 +61,8 @@ export interface ComposerInputZoneProps {
   previewContextSelected: boolean;
   onTogglePreviewContext: () => void;
   attachments: ChatAttachment[];
+  attachmentsDisabled?: boolean;
+  pendingAttachmentIds?: ReadonlySet<string>;
   onRemoveAttachment: (attachment: ChatAttachment) => void;
   pendingRoute: PendingModelRoute | null;
   creatingRouteConversation: boolean;
@@ -115,6 +117,8 @@ export function ComposerInputZone({
   previewContextSelected,
   onTogglePreviewContext,
   attachments,
+  attachmentsDisabled = false,
+  pendingAttachmentIds,
   onRemoveAttachment,
   pendingRoute,
   creatingRouteConversation,
@@ -332,6 +336,8 @@ export function ComposerInputZone({
         )}
         <ComposerAttachmentList
           attachments={attachments}
+          disabled={attachmentsDisabled}
+          pendingAttachmentIds={pendingAttachmentIds}
           onRemove={onRemoveAttachment}
         />
         {pendingRoute && (

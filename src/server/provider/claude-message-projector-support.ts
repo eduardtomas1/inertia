@@ -20,12 +20,31 @@ export type ClaudeCommandLifecycleState =
   | "started"
   | "completed"
   | "cancelled"
+  | "refused"
   | "discarded";
 
 export interface ClaudeCommandLifecycleMessage {
   type: "command_lifecycle";
   command_uuid: string;
   state: ClaudeCommandLifecycleState;
+}
+
+const CLAUDE_COMMAND_LIFECYCLE_PROJECTIONS = {
+  queued: { phase: "started", label: "Claude queued the request" },
+  started: { phase: "started", label: "Claude started the request" },
+  completed: { phase: "completed", label: "Claude completed the request" },
+  cancelled: { phase: "info", label: "Claude cancelled the request" },
+  refused: { phase: "failed", label: "Claude refused the request" },
+  discarded: { phase: "info", label: "Claude discarded the request" },
+} as const satisfies Record<ClaudeCommandLifecycleState, {
+  phase: "started" | "completed" | "failed" | "info";
+  label: string;
+}>;
+
+export function claudeCommandLifecycleProjection(
+  state: ClaudeCommandLifecycleState,
+) {
+  return CLAUDE_COMMAND_LIFECYCLE_PROJECTIONS[state];
 }
 
 function commandLifecycleState(
@@ -35,6 +54,7 @@ function commandLifecycleState(
     || value === "started"
     || value === "completed"
     || value === "cancelled"
+    || value === "refused"
     || value === "discarded";
 }
 
@@ -210,6 +230,8 @@ export function claudeAssistantFailure(
         return "Claude authentication failed.";
       case "oauth_org_not_allowed":
         return "This Claude organization does not allow OAuth access.";
+      case "account_on_hold":
+        return "Claude could not continue because the account is on hold.";
       case "billing_error":
         return "Claude could not continue because of an account billing issue.";
       case "rate_limit":

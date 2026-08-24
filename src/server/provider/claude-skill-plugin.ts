@@ -50,6 +50,7 @@ export const CLAUDE_ISOLATED_SKILL_SETTINGS = {
   disableSkillShellExecution: true,
   disableBundledSkills: true,
   disableClaudeAiConnectors: true,
+  syncClaudeAiSkills: false,
   allowedMcpServers: [],
   strictPluginOnlyCustomization: ["skills", "agents", "hooks", "mcp"],
 } as const satisfies Settings;

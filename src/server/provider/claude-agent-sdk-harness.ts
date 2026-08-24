@@ -272,6 +272,7 @@ export async function readClaudeAgentSdkMetadata(
         pathToClaudeCodeExecutable: executable,
         spawnClaudeCodeProcess: ownedProcess.spawnClaudeCodeProcess,
         settingSources: [],
+        managedSettings: CLAUDE_ISOLATED_SKILL_SETTINGS,
       },
     });
     const usageReader = query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET;

@@ -154,6 +154,13 @@ describe("Claude Agent SDK message projection", () => {
         uuid: "lifecycle-3",
         session_id: CLAUDE_PROTOCOL_SESSION_ID,
       }),
+      sdkMessage({
+        type: "command_lifecycle",
+        command_uuid: "command-refused",
+        state: "refused",
+        uuid: "lifecycle-refused",
+        session_id: CLAUDE_PROTOCOL_SESSION_ID,
+      }),
       claudeSuccessResult("Done", "completed"),
     ]);
 
@@ -169,6 +176,13 @@ describe("Claude Agent SDK message projection", () => {
       activityId: "claude:command:command-1",
       phase: "completed",
       label: "Claude completed the request",
+    }));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "activity",
+      activityId: "claude:command:command-refused",
+      phase: "failed",
+      label: "Claude refused the request",
+      detail: "State: refused",
     }));
     expect(events).not.toContainEqual(expect.objectContaining({
       label: "Claude sent an unsupported SDK update",
@@ -413,6 +427,34 @@ describe("Claude Agent SDK message projection", () => {
       phase: "failed",
       label: "Claude response issue",
       activityId: "assistant-rate-limit",
+    }));
+  });
+
+  it("surfaces an account hold as the typed cause of a missing result", async () => {
+    const { events, result } = await run([
+      assistantMessage({
+        uuid: "assistant-account-hold",
+        apiMessageId: "api-account-hold",
+        content: [],
+        error: "account_on_hold",
+      }),
+    ]);
+
+    expect(result).toMatchObject({
+      status: "failed",
+      error: "Claude could not continue because the account is on hold.",
+      failure: {
+        reason: "provider-error",
+        message: "Claude could not continue because the account is on hold.",
+        terminalEvent: "assistant/account_on_hold",
+        activityId: "assistant-account-hold",
+      },
+    });
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "activity",
+      phase: "failed",
+      label: "Claude response issue",
+      activityId: "assistant-account-hold",
     }));
   });
 

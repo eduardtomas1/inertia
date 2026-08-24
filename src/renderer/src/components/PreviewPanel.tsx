@@ -155,7 +155,7 @@ export function PreviewPanel({
       window.removeEventListener(NATIVE_PREVIEW_SUSPENSION_CHANGED, update);
       onBoundsChange(null);
     };
-  }, [onBoundsChange]);
+  }, [evidenceOpen, onBoundsChange]);
 
   const closeEvidence = useCallback(() => {
     setOpenEvidenceContextId(null);

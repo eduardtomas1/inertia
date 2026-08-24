@@ -919,7 +919,7 @@ export function createWorkspaceSceneModel({
         onOpenTab: () => desktopTools.previewTab("open"),
         onActivateTab: (tabId) => desktopTools.previewTab("activate", tabId),
         onCloseTab: (tabId) => desktopTools.previewTab("close", tabId),
-        onLoadEvidenceImage: desktopTools.loadPreviewEvidenceImage,
+        onInspectEvidenceImage: desktopTools.inspectPreviewEvidenceImage,
         onBoundsChange: desktopTools.setPreviewBounds,
         onOpenExternal: (url) => {
           void window.inertia.openExternal(url).catch((error) => {

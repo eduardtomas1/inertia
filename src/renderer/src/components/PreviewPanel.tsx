@@ -4,7 +4,6 @@ import type {
   PreviewTabState,
 } from "@shared/desktop";
 import type {
-  BrowserEvidenceImage,
   BrowserEvidenceSnapshot,
 } from "@shared/browser-evidence";
 import {
@@ -44,7 +43,7 @@ export type PreviewPanelProps = {
   onOpenTab?: () => void;
   onActivateTab?: (tabId: string) => void;
   onCloseTab?: (tabId: string) => void;
-  onLoadEvidenceImage?: (evidenceId: string) => Promise<BrowserEvidenceImage | null>;
+  onInspectEvidenceImage?: (evidenceId: string) => Promise<boolean>;
   onBoundsChange?: (bounds: PreviewBounds | null) => void;
 };
 
@@ -108,7 +107,7 @@ export function PreviewPanel({
   onOpenTab,
   onActivateTab,
   onCloseTab,
-  onLoadEvidenceImage,
+  onInspectEvidenceImage,
   onBoundsChange,
 }: PreviewPanelProps): React.JSX.Element {
   const [draftUrl, setDraftUrl] = useState(url);
@@ -338,7 +337,7 @@ export function PreviewPanel({
             key={contextId}
             id={`browser-evidence-${owner}`}
             evidence={evidence}
-            loadImage={onLoadEvidenceImage ?? (async () => null)}
+            inspectImage={onInspectEvidenceImage ?? (async () => false)}
             onClose={closeEvidence}
           />
         </Suspense>

@@ -74,6 +74,7 @@ import {
 } from "./credential-vault.js";
 import { RuntimeDiagnostics, runtimeDiagnosticsDirectory } from "./runtime-diagnostics.js";
 import { PreviewBroker, hardenDesktopSession } from "./preview-broker.js";
+import { showBrowserEvidenceImageWindow } from "./browser-evidence-image-inspector.js";
 import { RuntimeSupervisor } from "./runtime-supervisor.js";
 import * as runtimeBootstrap from "./runtime-bootstrap-safety.js";
 import {
@@ -141,7 +142,7 @@ const IPC = {
   previewTab: "inertia:preview-tab",
   previewSetBounds: "inertia:preview-set-bounds",
   previewClose: "inertia:preview-close",
-  previewEvidenceImage: "inertia:preview-evidence-image",
+  previewInspectEvidenceImage: "inertia:preview-inspect-evidence-image",
   previewState: "inertia:preview-state",
   syncThemePreference: "inertia:sync-theme-preference",
 } as const;
@@ -699,9 +700,25 @@ function registerIpcHandlers(): void {
     assertTrustedIpc(event, args.length, 1);
     previewBroker.closeRequest(args[0]);
   });
-  ipcMain.handle(IPC.previewEvidenceImage, (event, ...args) => {
+  ipcMain.handle(IPC.previewInspectEvidenceImage, async (event, ...args) => {
     assertTrustedIpc(event, args.length, 1);
-    return previewBroker.evidenceImage(args[0]);
+    const owner = BrowserWindow.fromWebContents(event.sender) ?? mainWindow;
+    return await previewBroker.inspectEvidenceImage(args[0], async ({ fingerprint }) => {
+      const options = {
+        type: "warning" as const,
+        title: "Inspect local Browser capture?",
+        message: "Inspect this local Browser capture?",
+        detail: `Capture ${fingerprint.slice(0, 12)} may contain private information. It stays on this device and is never shared with the agent.`,
+        buttons: ["Inspect capture", "Cancel"],
+        defaultId: 1,
+        cancelId: 1,
+        noLink: true,
+      };
+      const decision = owner
+        ? await dialog.showMessageBox(owner, options)
+        : await dialog.showMessageBox(options);
+      return decision.response === 0;
+    }, async (image) => await showBrowserEvidenceImageWindow(owner, image));
   });
   ipcMain.handle(IPC.syncThemePreference, (event, ...args) => {
     assertTrustedIpc(event, args.length, 1);

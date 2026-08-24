@@ -1,8 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChatAttachment } from "@shared/contracts";
-import type {
-  BrowserEvidenceImage,
-} from "@shared/browser-evidence";
 import type { PreviewBounds, PreviewState, PreviewStateUpdate } from "@shared/desktop";
 import type { AttachmentPickerMode } from "@shared/desktop";
 import {
@@ -379,13 +376,13 @@ export function useDesktopTools({
     }).catch(() => undefined);
   }, [previewContextId, previewOwnerId]);
 
-  const loadPreviewEvidenceImage = useCallback(async (
+  const inspectPreviewEvidenceImage = useCallback(async (
     evidenceId: string,
-  ): Promise<BrowserEvidenceImage | null> => {
+  ): Promise<boolean> => {
     const contextId = previewContextId;
-    if (!contextId) return null;
+    if (!contextId) return false;
     try {
-      const image = await window.inertia.previewEvidenceImage({
+      const opened = await window.inertia.previewInspectEvidenceImage({
         ownerId: previewOwnerId,
         contextId,
         evidenceId,
@@ -393,10 +390,10 @@ export function useDesktopTools({
       const authority = authorityRef.current;
       return authority.previewOwnerId === previewOwnerId
         && authority.previewContextId === contextId
-        ? image
-        : null;
+        ? opened
+        : false;
     } catch {
-      return null;
+      return false;
     }
   }, [previewContextId, previewOwnerId]);
 
@@ -418,7 +415,7 @@ export function useDesktopTools({
     previewCommand,
     previewTab,
     setPreviewBounds,
-    loadPreviewEvidenceImage,
+    inspectPreviewEvidenceImage,
   };
 }
 

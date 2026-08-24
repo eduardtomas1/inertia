@@ -99,10 +99,62 @@ export async function verifyBrowserEvidence({
     typeDestinationUrl,
   )).toEqual({ width: 0, height: 0 });
 
+  await app.electronApp.evaluate(({ dialog }) => {
+    const owner = globalThis as typeof globalThis & {
+      __inertiaEvidenceApprovalDialog?: unknown;
+      __inertiaOriginalEvidenceMessageBox?: typeof dialog.showMessageBox;
+    };
+    owner.__inertiaOriginalEvidenceMessageBox ??= dialog.showMessageBox.bind(dialog);
+    Reflect.set(dialog, "showMessageBox", async (...args: unknown[]) => {
+      owner.__inertiaEvidenceApprovalDialog = args.at(-1);
+      return { response: 0, checkboxChecked: false };
+    });
+  });
   await evidenceTimeline.getByText("Inspect capture").click();
-  await expect(evidenceTimeline.getByRole("img", {
-    name: /Browser screenshot from Page/u,
-  })).toBeVisible();
+  await expect(evidenceTimeline.getByText(
+    "Capture opened in a protected window.",
+  )).toBeVisible();
+  await expect.poll(() => app.electronApp.evaluate(({ dialog }) => {
+    const owner = globalThis as typeof globalThis & {
+      __inertiaEvidenceApprovalDialog?: {
+        buttons?: string[];
+        cancelId?: number;
+        defaultId?: number;
+        detail?: string;
+        title?: string;
+      };
+      __inertiaOriginalEvidenceMessageBox?: typeof dialog.showMessageBox;
+    };
+    const approval = owner.__inertiaEvidenceApprovalDialog;
+    const original = owner.__inertiaOriginalEvidenceMessageBox;
+    if (original) Reflect.set(dialog, "showMessageBox", original);
+    delete owner.__inertiaOriginalEvidenceMessageBox;
+    delete owner.__inertiaEvidenceApprovalDialog;
+    return approval;
+  })).toMatchObject({
+    title: "Inspect local Browser capture?",
+    buttons: ["Inspect capture", "Cancel"],
+    defaultId: 1,
+    cancelId: 1,
+    detail: expect.stringMatching(/^Capture [a-f0-9]{12} .*never shared with the agent\.$/u),
+  });
+  await expect.poll(() => app.electronApp.evaluate(({ BrowserWindow }) => {
+    const inspector = BrowserWindow.getAllWindows().find(
+      (candidate) => candidate.getTitle() === "Local Browser capture",
+    );
+    return inspector ? {
+      title: inspector.getTitle(),
+      url: inspector.webContents.getURL().slice(0, 24),
+    } : null;
+  })).toEqual({
+    title: "Local Browser capture",
+    url: "data:text/html;charset=",
+  });
+  await app.electronApp.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows().find(
+      (candidate) => candidate.getTitle() === "Local Browser capture",
+    )?.close();
+  });
   const primaryToolsResize = primary.getByRole("separator", {
     name: "Resize workspace tools",
   });

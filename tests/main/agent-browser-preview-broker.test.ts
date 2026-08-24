@@ -429,8 +429,17 @@ describe("agent-owned native Browser", () => {
     const screenshot = await broker.perform(conversationId, { action: "screenshot" });
     expect(screenshot).toMatchObject({
       ok: true,
-      image: { mimeType: "image/png", data: Buffer.from("bounded-png").toString("base64") },
     });
+    expect(screenshot).not.toHaveProperty("image");
+    if (screenshot.ok) {
+      expect(JSON.parse(screenshot.text)).toMatchObject({
+        bitmap: "local-only",
+        providerImage: false,
+      });
+      expect(screenshot.text).not.toContain(
+        Buffer.from("bounded-png").toString("base64"),
+      );
+    }
     expect(pageTools.agentPageHasSensitiveEvidence).toHaveBeenCalled();
     await expect(broker.perform(conversationId, { action: "click", ref: "e1" }))
       .resolves.toMatchObject({ ok: true });
@@ -451,6 +460,28 @@ describe("agent-owned native Browser", () => {
       action: "type", ref: "e2", text: "hello", replace: true,
     })).resolves.toMatchObject({ ok: true });
     expect(children[0]!.webContents.insertedText).toEqual(["hello"]);
+  });
+
+  it("never returns CSS-painted screenshot bytes to the provider result", async () => {
+    const contentsOffset = electronState.contents.length;
+    const { broker } = harness();
+    await broker.navigate({
+      ownerId: "primary",
+      contextId: conversationId,
+      url: "http://127.0.0.1:3000/pixel-art",
+    });
+    const paintedBytes = Buffer.from("credential-painted-only-with-css-pixels");
+    electronState.contents[contentsOffset]!.capturePage.mockImplementationOnce(async () => ({
+      getSize: () => ({ width: 640, height: 360 }),
+      resize() { return this; },
+      toPNG: () => paintedBytes,
+    }));
+
+    const screenshot = await broker.perform(conversationId, { action: "screenshot" });
+    expect(screenshot).toMatchObject({ ok: true });
+    expect(screenshot).not.toHaveProperty("image");
+    expect(JSON.stringify(screenshot)).not.toContain(paintedBytes.toString("base64"));
+    expect(JSON.stringify(screenshot)).not.toContain(paintedBytes.toString("utf8"));
   });
 
   it("keeps page-authored element names out of click and type activity labels", async () => {
@@ -764,20 +795,129 @@ describe("agent-owned native Browser", () => {
       contextId: conversationId,
       evidenceId: capture!.id,
     };
-    expect(broker.evidenceImage(request)).toEqual({
+    await expect(broker.inspectEvidenceImage(
+      request, async () => false, async () => ({ show: () => true, close: vi.fn() }),
+    )).resolves.toBe(false);
+    const approve = vi.fn(async () => true);
+    const closeInspector = vi.fn();
+    const showInspector = vi.fn(() => true);
+    const inspect = vi.fn(async () => ({ show: showInspector, close: closeInspector }));
+    await expect(broker.inspectEvidenceImage(request, approve, inspect)).resolves.toBe(true);
+    expect(approve).toHaveBeenCalledWith(expect.objectContaining({
+      evidenceId: capture!.id,
+      fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/u),
+    }));
+    expect(inspect).toHaveBeenCalledWith({
       mimeType: "image/png",
       data: Buffer.from("bounded-png").toString("base64"),
     });
-    expect(broker.evidenceImage({ ...request, ownerId: "secondary" })).toBeNull();
-    expect(broker.evidenceImage({
+    expect(showInspector).toHaveBeenCalledOnce();
+    const rejectUnexpected = vi.fn(async () => true);
+    await expect(broker.inspectEvidenceImage(
+      { ...request, ownerId: "secondary" }, rejectUnexpected, inspect,
+    )).resolves.toBe(false);
+    await expect(broker.inspectEvidenceImage({
       ...request,
       contextId: "44444444-4444-4444-8444-444444444444",
-    })).toBeNull();
+    }, rejectUnexpected, inspect)).resolves.toBe(false);
+    expect(rejectUnexpected).not.toHaveBeenCalled();
 
     broker.close("primary", conversationId);
+    expect(closeInspector).toHaveBeenCalledOnce();
     expect(browserSession.hasEvidenceListeners()).toBe(false);
     expect(browserSession.clearStorageData).toHaveBeenCalledOnce();
-    expect(broker.evidenceImage(request)).toBeNull();
+    await expect(broker.inspectEvidenceImage(request, rejectUnexpected, inspect)).resolves.toBe(false);
+    expect(rejectUnexpected).not.toHaveBeenCalled();
+  });
+
+  it("destroys protected evidence inspectors on replacement, navigation, eviction, and close", async () => {
+    const contentsOffset = electronState.contents.length;
+    const { broker } = harness();
+    const initial = await broker.navigate({
+      ownerId: "primary",
+      contextId: conversationId,
+      url: "http://127.0.0.1:3000/inspectors",
+    });
+    await expect(broker.perform(conversationId, { action: "screenshot" }))
+      .resolves.toMatchObject({ ok: true });
+    const state = await broker.tab({
+      ownerId: "primary",
+      contextId: conversationId,
+      action: "activate",
+      tabId: initial.activeTabId,
+    });
+    const capture = state.evidence.entries.find((entry) => entry.kind === "screenshot")!;
+    const request = {
+      ownerId: "primary",
+      contextId: conversationId,
+      evidenceId: capture.id,
+    };
+    const closeFirst = vi.fn();
+    await expect(broker.inspectEvidenceImage(
+      request, async () => true, async () => ({ show: () => true, close: closeFirst }),
+    )).resolves.toBe(true);
+    const closeReplacement = vi.fn();
+    await expect(broker.inspectEvidenceImage(
+      request, async () => true, async () => ({ show: () => true, close: closeReplacement }),
+    )).resolves.toBe(true);
+    expect(closeFirst).toHaveBeenCalledOnce();
+
+    electronState.contents[contentsOffset]!.emit(
+      "did-navigate", {}, "http://127.0.0.1:3000/after-inspection",
+    );
+    expect(closeReplacement).toHaveBeenCalledOnce();
+
+    let inspectionPrepared = (): void => undefined;
+    let releaseInspection = (): void => undefined;
+    const prepared = new Promise<void>((resolve) => { inspectionPrepared = resolve; });
+    const held = new Promise<void>((resolve) => { releaseInspection = resolve; });
+    const showStale = vi.fn(() => true);
+    const closeStale = vi.fn();
+    const staleInspection = broker.inspectEvidenceImage(
+      request,
+      async () => true,
+      async () => {
+        inspectionPrepared();
+        await held;
+        return { show: showStale, close: closeStale };
+      },
+    );
+    await prepared;
+    electronState.contents[contentsOffset]!.emit(
+      "did-navigate", {}, "http://127.0.0.1:3000/during-inspection",
+    );
+    releaseInspection();
+    await expect(staleInspection).resolves.toBe(false);
+    expect(showStale).not.toHaveBeenCalled();
+    expect(closeStale).toHaveBeenCalledOnce();
+
+    const closeEvicted = vi.fn();
+    await expect(broker.inspectEvidenceImage(
+      request, async () => true, async () => ({ show: () => true, close: closeEvicted }),
+    )).resolves.toBe(true);
+    for (let index = 0; index < 8; index += 1) {
+      await expect(broker.perform(conversationId, { action: "screenshot" }))
+        .resolves.toMatchObject({ ok: true });
+    }
+    expect(closeEvicted).toHaveBeenCalledOnce();
+
+    const current = await broker.tab({
+      ownerId: "primary",
+      contextId: conversationId,
+      action: "activate",
+      tabId: initial.activeTabId,
+    });
+    const newest = current.evidence.entries.filter(
+      (entry) => entry.kind === "screenshot" && entry.screenshot?.available,
+    ).at(-1)!;
+    const closeWithSlot = vi.fn();
+    await expect(broker.inspectEvidenceImage(
+      { ...request, evidenceId: newest.id },
+      async () => true,
+      async () => ({ show: () => true, close: closeWithSlot }),
+    )).resolves.toBe(true);
+    broker.close("primary", conversationId);
+    expect(closeWithSlot).toHaveBeenCalledOnce();
   });
 
   it("holds queued work until click-triggered main-frame navigation settles", async () => {

@@ -29,7 +29,7 @@ function call(tool: string, args: unknown, decision: "approve" | "deny" = "appro
 }
 
 describe("agent browser host tools", () => {
-  it("returns screenshot evidence directly without approval", async () => {
+  it("keeps screenshot bytes local even when a broker result regresses", async () => {
     const image = Buffer.from("png").toString("base64");
     const broker = { perform: vi.fn(async () => ({
       ok: true as const,
@@ -46,7 +46,6 @@ describe("agent browser host tools", () => {
     await expect(tools.invoke(conversation("supervised"), request, identity)).resolves.toEqual({
       success: true,
       text: "captured",
-      image: { mimeType: "image/png", data: image },
     });
     expect(request.requestApproval).not.toHaveBeenCalled();
     expect(broker.perform).toHaveBeenCalledWith(

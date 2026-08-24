@@ -145,7 +145,7 @@ describe("agent browser semantic snapshots", () => {
       tagName: "DIV", pseudoBackgroundImage: "url(private.png)",
     }],
     ["generated content", { tagName: "DIV", pseudoContent: '"private"' }],
-  ])("refuses uninspectable %s pixels before screenshot capture", async (_name, candidate) => {
+  ])("does not treat a %s property list as a bitmap security boundary", async (_name, candidate) => {
     const candidateStyle = candidate as {
       backgroundImage?: string;
       pseudoBackgroundImage?: string;
@@ -157,6 +157,9 @@ describe("agent browser semantic snapshots", () => {
       parentElement: null,
       hidden: false,
       type: "",
+      getAttribute: () => null,
+      hasAttribute: () => false,
+      matches: () => false,
       getBoundingClientRect: () => ({
         x: 10, y: 10, left: 10, top: 10,
         right: 210, bottom: 110, width: 200, height: 100,
@@ -169,6 +172,7 @@ describe("agent browser semantic snapshots", () => {
         nestedContentObserved: false,
         passwordNodes: new WeakSet(),
         passwordValues: new Set(),
+        nodes: new WeakMap(), refs: new Map(), next: 1,
       },
       document: withSemanticIterator({
         title: "Pixel app", body: bodyWithText("Ordinary page"), documentElement: {},
@@ -195,7 +199,7 @@ describe("agent browser semantic snapshots", () => {
       ) => runInNewContext(scripts[0]!.code, context)),
     };
 
-    await expect(agentPageHasSensitiveScreenshotEvidence(contents as never)).resolves.toBe(true);
+    await expect(agentPageHasSensitiveScreenshotEvidence(contents as never)).resolves.toBe(false);
   });
 
   it("rechecks the exact focused ref after page microtasks settle", async () => {

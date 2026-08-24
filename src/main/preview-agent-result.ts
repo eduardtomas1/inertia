@@ -39,7 +39,6 @@ export function boundedAgentStateText(
 export function successfulAgentBrowserResult(
   text: string,
   state: AgentBrowserState,
-  image?: { mimeType: "image/png"; data: string },
 ): AgentBrowserResult {
   if (Buffer.byteLength(text, "utf8") > MAX_AGENT_BROWSER_TEXT_BYTES) {
     return failedAgentBrowserResult(
@@ -47,5 +46,5 @@ export function successfulAgentBrowserResult(
       "The Browser result exceeded its bounded text size.",
     );
   }
-  return { ok: true, text, state, ...(image ? { image } : {}) };
+  return { ok: true, text, state };
 }

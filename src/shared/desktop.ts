@@ -9,7 +9,6 @@ import type {
 } from "./private-connect/scopes";
 import type { PrivateConnectStateView } from "./private-connect/protocol";
 import type {
-  BrowserEvidenceImage,
   BrowserEvidenceSnapshot,
 } from "./browser-evidence";
 export { PRIVATE_CONNECT_IPC } from "./private-connect/ipc";
@@ -668,12 +667,12 @@ export interface DesktopBridge {
     ownerId: string;
     contextId: string;
   }) => Promise<void>;
-  /** Reads one bounded in-memory screenshot for the exact live Browser slot. */
-  previewEvidenceImage: (request: {
+  /** Requests native approval to inspect one exact bounded local screenshot. */
+  previewInspectEvidenceImage: (request: {
     ownerId: string;
     contextId: string;
     evidenceId: string;
-  }) => Promise<BrowserEvidenceImage | null>;
+  }) => Promise<boolean>;
   /** Subscribes to navigation initiated inside an owned desktop preview. */
   onPreviewState: (listener: (state: PreviewStateUpdate) => void) => () => void;
   syncThemePreference: (preference: "system" | "light" | "dark") => Promise<void>;

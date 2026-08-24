@@ -489,76 +489,10 @@ function snapshotHasSensitiveVisualEvidence(value: unknown): boolean {
   return false;
 }
 
-async function agentPageHasUninspectablePixels(contents: WebContents): Promise<boolean> {
-  const value = await execute(contents, `(() => {
-    const root = document.documentElement || document.body;
-    const iterator = root && typeof document.createNodeIterator === "function"
-      ? document.createNodeIterator(root, 1)
-      : null;
-    if (!iterator) return true;
-    const pixelTags = new Set([
-      "CANVAS", "EMBED", "IFRAME", "IMG", "OBJECT", "PICTURE", "SVG", "VIDEO",
-    ]);
-    const imageProperties = [
-      "backgroundImage", "borderImageSource", "listStyleImage", "maskImage",
-      "webkitMaskImage",
-    ];
-    const hasImageSource = (style) => imageProperties.some((property) => {
-      const source = style[property];
-      return typeof source === "string" && source !== "none" && source !== "";
-    });
-    let scanned = 0;
-    while (scanned < ${MAX_SEMANTIC_SCAN_NODES}) {
-      const element = iterator.nextNode();
-      if (!element) return false;
-      scanned += 1;
-      if (typeof element.getBoundingClientRect !== "function") return true;
-      let current = element;
-      let depth = 0;
-      let visible = true;
-      while (current) {
-        depth += 1;
-        if (depth > ${MAX_SEMANTIC_SCAN_NODES}) return true;
-        const ancestorStyle = getComputedStyle(current);
-        if (ancestorStyle.display === "none" || ancestorStyle.visibility === "hidden"
-          || Number(ancestorStyle.opacity || "1") <= 0 || current.hidden === true) {
-          visible = false;
-          break;
-        }
-        current = current.parentElement;
-      }
-      if (!visible) continue;
-      const rect = element.getBoundingClientRect();
-      if (!(rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.right > 0
-        && rect.top < innerHeight && rect.left < innerWidth)) continue;
-      if (pixelTags.has(element.tagName)
-        || (element.tagName === "INPUT"
-          && (String(element.type || "").toLowerCase() === "image"
-            || (String(element.type || "").toLowerCase() === "file"
-              && Number(element.files?.length || 0) > 0)))) return true;
-      const style = getComputedStyle(element);
-      if (hasImageSource(style)) return true;
-      for (const pseudo of ["::before", "::after", "::marker"]) {
-        const pseudoStyle = getComputedStyle(element, pseudo);
-        if (hasImageSource(pseudoStyle)) return true;
-        const content = pseudoStyle.content;
-        const emptyQuoted = typeof content === "string" && content.length === 2
-          && content.charCodeAt(0) === content.charCodeAt(1)
-          && (content.charCodeAt(0) === 34 || content.charCodeAt(0) === 39);
-        if (typeof content === "string"
-          && !emptyQuoted && !["", "none", "normal"].includes(content)) return true;
-      }
-    }
-    return iterator.nextNode() !== null;
-  })()`);
-  return value !== false;
-}
-
 export async function agentPageHasSensitiveScreenshotEvidence(
   contents: WebContents,
 ): Promise<boolean> {
   if (await agentPageHasSensitiveEvidence(contents)) return true;
-  if (await agentPageHasUninspectablePixels(contents)) return true;
   const snapshot = await semanticPageSnapshot(contents);
   try {
     return snapshotHasSensitiveVisualEvidence(JSON.parse(snapshot) as unknown);

@@ -68,7 +68,7 @@ readonly ProviderHostToolDefinition[] = [
   },
   {
     name: "inertia_browser_screenshot",
-    description: "Capture the active visible Inertia Browser page as bounded PNG visual evidence. The screenshot is returned directly to the model and is never written into the project.",
+    description: "Capture the active visible Inertia Browser page into the bounded local Evidence timeline. Bitmap bytes stay on the user's device; use inertia_browser_snapshot for provider-visible page inspection.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -242,7 +242,6 @@ export class AgentBrowserHostTools {
       ? {
           success: true,
           text: result.text,
-          ...(result.image ? { image: result.image } : {}),
         }
       : failure(result.code, result.message);
   }

@@ -28,8 +28,8 @@ local runtime receives only a narrow command broker.
 The provider-neutral bridge exposes five tools:
 
 - `inertia_browser_snapshot` returns a semantic snapshot of the active page.
-- `inertia_browser_screenshot` returns bounded PNG visual evidence directly to
-  the provider model.
+- `inertia_browser_screenshot` captures one bounded local Evidence image and
+  returns only capture metadata to the provider model.
 - `inertia_browser_navigate` opens a validated local development URL.
 - `inertia_browser_interact` clicks or types through a current semantic
   element reference, sends one allowlisted key, or performs a bounded scroll.
@@ -42,15 +42,22 @@ and remain valid JSON. Element references are generated in an isolated
 JavaScript world and become invalid when their DOM node disappears or is no
 longer visible.
 
-Screenshots are resized to at most 1600 by 1000 pixels and rejected above 4
-MiB of decoded PNG data. Inertia does not write them to the repository,
-attachment store, diagnostics, or its application database. They cross the
-same bounded host-tool result path as the semantic text; each provider receives
-the format its audited native tool or MCP transport supports. A document-level
-privacy guard starts before the first inspection. Once it observes a non-empty
-password value, semantic and visual evidence remain unavailable until that
-document navigates away, so reveal controls, replacement inputs, and page-made
-copies cannot turn a screenshot or snapshot into a credential channel.
+Screenshots are reduced to a local thumbnail of at most 512 by 320 pixels and
+256 KiB. Inertia does not write them to the repository, attachment store,
+diagnostics, or its application database, and no provider transport receives
+their bitmap bytes. The tool result contains only bounded capture metadata;
+providers use the semantic snapshot for page inspection.
+
+That separation is deliberate. CSS boxes, shadows, canvas, SVG, video, and
+other rendering primitives can encode arbitrary pixels without a corresponding
+secret string or enumerable source property. OCR, visual heuristics, and a
+growing CSS-property blacklist cannot prove such a bitmap safe. Inertia keeps
+the useful local capture while placing the provider boundary before all bitmap
+bytes. A document-level privacy guard still starts before the first inspection.
+Once it observes a non-empty password value, semantic evidence and local
+capture remain unavailable until that document navigates away, so reveal
+controls, replacement inputs, and page-made copies remain covered by the
+defense-in-depth guard.
 
 ## Local evidence
 
@@ -77,19 +84,25 @@ replaced by a fixed message. Page titles, semantic labels, typed text, and raw
 provider output are not used as agent-action labels.
 
 Screenshot bytes remain in main-process memory behind an opaque evidence UUID.
-The preload bridge can retrieve one bounded PNG only for the exact live
-owner/conversation/evidence tuple. A stale chat, split owner, evicted image, or
-closed Browser receives no bytes. Timeline screenshots never cross back to a
-provider; the ordinary screenshot tool's single bounded result remains the
-only provider screenshot path.
+The preload bridge can request inspection only for the exact live
+owner/conversation/evidence tuple; it never returns PNG data. The main process
+fingerprints those exact immutable bytes, opens a native post-capture
+confirmation with **Cancel** as the default, rechecks the fingerprint, and then
+renders the image in a main-owned sandboxed window with no preload or IPC
+bridge. The React renderer receives only shown/unavailable status. A denial,
+stale chat, split owner, replaced or evicted image, or closed Browser receives
+no view. Full Access never bypasses this local inspection confirmation, and
+timeline or tool screenshots never cross back to a provider.
 
 ## Permission behavior
 
-Snapshots, screenshots, and page listing are read-only. In a Supervised chat,
+Snapshots, local screenshot capture, and page listing are read-only. Inspecting
+one retained capture has its separate native post-capture confirmation. In a Supervised chat,
 navigation, interaction, and page mutations create one ordinary Inertia
 approval tied to the exact provider tool call. Denial prevents the browser
 action. Auto-edit and Full Access use their existing provider access contract
-without adding a second Inertia approval.
+without adding a second interaction approval, but do not release local image
+bytes.
 
 An aborted or settled call loses browser authority immediately. The utility
 runtime allows at most 16 pending browser requests and applies a 20-second
@@ -106,8 +119,8 @@ The main process denies permission checks and requests, downloads, new windows,
 remote navigation, and URLs containing credentials. Browser storage is cleared
 when the owning slot closes.
 
-The renderer can request navigation, page selection, bounds, and an exact
-opaque evidence image through a strict preload API, but it never receives a
+The renderer can request navigation, page selection, bounds, and native
+inspection for an exact opaque evidence image through a strict preload API, but it never receives image bytes, a
 `WebContents`, browser storage, raw page DOM, or arbitrary capture capability.
 The supervised utility process cannot create Electron views directly. Its path
 is:

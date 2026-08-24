@@ -1,18 +1,17 @@
 import { memo, useEffect, useRef, useState } from "react";
 import type {
   BrowserEvidenceEntry,
-  BrowserEvidenceImage,
   BrowserEvidenceSnapshot,
 } from "@shared/browser-evidence";
 import { IconButton } from "./ui";
 import "./BrowserEvidenceTimeline.css";
 
-type EvidenceImageState = BrowserEvidenceImage | null | false;
+type EvidenceInspectionState = "loading" | "opened" | "unavailable";
 
 export interface BrowserEvidenceTimelineProps {
   id: string;
   evidence: BrowserEvidenceSnapshot;
-  loadImage: (evidenceId: string) => Promise<BrowserEvidenceImage | null>;
+  inspectImage: (evidenceId: string) => Promise<boolean>;
   onClose: () => void;
 }
 
@@ -29,12 +28,12 @@ function evidenceKindLabel(kind: BrowserEvidenceEntry["kind"]): string {
 export function BrowserEvidenceTimeline({
   id,
   evidence,
-  loadImage,
+  inspectImage,
   onClose,
 }: BrowserEvidenceTimelineProps): React.JSX.Element {
   const closeRef = useRef<HTMLButtonElement>(null);
   const availableImageIdsRef = useRef<ReadonlySet<string>>(new Set());
-  const [images, setImages] = useState<Record<string, EvidenceImageState>>({});
+  const [inspections, setInspections] = useState<Record<string, EvidenceInspectionState>>({});
   const entries = evidence.entries.slice().reverse();
   availableImageIdsRef.current = new Set(evidence.entries.flatMap((entry) => (
     entry.screenshot?.available ? [entry.id] : []
@@ -46,21 +45,21 @@ export function BrowserEvidenceTimeline({
 
   useEffect(() => {
     const available = availableImageIdsRef.current;
-    setImages((current) => Object.fromEntries(
+    setInspections((current) => Object.fromEntries(
       Object.entries(current).filter(([entryId]) => available.has(entryId)),
     ));
   }, [evidence.revision, evidence.entries]);
 
   const requestImage = (entry: BrowserEvidenceEntry): void => {
-    if (!entry.screenshot?.available || images[entry.id] !== undefined) return;
-    setImages((current) => ({ ...current, [entry.id]: null }));
-    void loadImage(entry.id).then((image) => {
-      setImages((current) => availableImageIdsRef.current.has(entry.id) ? ({
-        ...current, [entry.id]: image ?? false,
+    if (!entry.screenshot?.available || inspections[entry.id] === "loading") return;
+    setInspections((current) => ({ ...current, [entry.id]: "loading" }));
+    void inspectImage(entry.id).then((opened) => {
+      setInspections((current) => availableImageIdsRef.current.has(entry.id) ? ({
+        ...current, [entry.id]: opened ? "opened" : "unavailable",
       }) : current);
     }, () => {
-      setImages((current) => availableImageIdsRef.current.has(entry.id) ? ({
-        ...current, [entry.id]: false,
+      setInspections((current) => availableImageIdsRef.current.has(entry.id) ? ({
+        ...current, [entry.id]: "unavailable",
       }) : current);
     });
   };
@@ -101,7 +100,7 @@ export function BrowserEvidenceTimeline({
           {entries.map((entry) => {
             const time = new Date(entry.occurredAt).toLocaleTimeString();
             const kindLabel = evidenceKindLabel(entry.kind);
-            const image = images[entry.id];
+            const inspection = inspections[entry.id];
             return (
               <li
                 key={entry.id}
@@ -130,18 +129,17 @@ export function BrowserEvidenceTimeline({
                       }}
                     >
                       <summary>Inspect capture</summary>
-                      {image === null && (
+                      {inspection === "loading" && (
                         <span className="browser-evidence-image-status">
-                          Loading capture…
+                          Opening protected capture…
                         </span>
                       )}
-                      {image && (
-                        <img
-                          src={`data:${image.mimeType};base64,${image.data}`}
-                          alt={`Browser screenshot from Page ${entry.pageNumber} at ${time}`}
-                        />
+                      {inspection === "opened" && (
+                        <span className="browser-evidence-image-status">
+                          Capture opened in a protected window.
+                        </span>
                       )}
-                      {image === false && (
+                      {inspection === "unavailable" && (
                         <span className="browser-evidence-image-status">Capture is no longer available.</span>
                       )}
                     </details>

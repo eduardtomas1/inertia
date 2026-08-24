@@ -114,10 +114,7 @@ describe("Browser evidence timeline", () => {
 
   it("replaces the native stage, renders hostile evidence as text, and restores focus", async () => {
     const onBoundsChange = vi.fn();
-    const loadImage = vi.fn(async () => ({
-      mimeType: "image/png" as const,
-      data: Buffer.from("bounded-capture").toString("base64"),
-    }));
+    const inspectImage = vi.fn(async () => true);
     const view = render(
       <PreviewPanel
         owner="primary"
@@ -133,7 +130,7 @@ describe("Browser evidence timeline", () => {
         evidence={evidence}
         onNavigate={vi.fn()}
         onOpenExternal={vi.fn()}
-        onLoadEvidenceImage={loadImage}
+        onInspectEvidenceImage={inspectImage}
         onBoundsChange={onBoundsChange}
       />,
     );
@@ -158,11 +155,12 @@ describe("Browser evidence timeline", () => {
       .toHaveFocus();
 
     fireEvent.click(screen.getByText("Inspect capture"));
-    await waitFor(() => expect(loadImage).toHaveBeenCalledWith(
+    await waitFor(() => expect(inspectImage).toHaveBeenCalledWith(
       "33333333-3333-4333-8333-333333333333",
     ));
-    expect(await screen.findByRole("img", { name: /Browser screenshot from Page 1/u }))
-      .toHaveAttribute("src", expect.stringMatching(/^data:image\/png;base64,/u));
+    expect(await screen.findByText("Capture opened in a protected window."))
+      .toBeInTheDocument();
+    expect(document.querySelector("img")).toBeNull();
 
     fireEvent.keyDown(screen.getByText("Local evidence"), { key: "Escape" });
     await waitFor(() => expect(toggle).toHaveFocus());
@@ -186,10 +184,10 @@ describe("Browser evidence timeline", () => {
     await waitFor(() => expect(screen.queryByText("Local evidence")).not.toBeInTheDocument());
   });
 
-  it("drops evicted thumbnails and ignores late image responses", async () => {
-    let resolveImage: ((image: { mimeType: "image/png"; data: string }) => void) | undefined;
-    const loadImage = vi.fn(() => new Promise<{ mimeType: "image/png"; data: string }>((resolve) => {
-      resolveImage = resolve;
+  it("drops evicted thumbnails and ignores late inspection responses", async () => {
+    let resolveInspection: ((opened: boolean) => void) | undefined;
+    const inspectImage = vi.fn(() => new Promise<boolean>((resolve) => {
+      resolveInspection = resolve;
     }));
     const panel = (snapshot: BrowserEvidenceSnapshot) => (
       <PreviewPanel
@@ -199,13 +197,13 @@ describe("Browser evidence timeline", () => {
         evidence={snapshot}
         onNavigate={vi.fn()}
         onOpenExternal={vi.fn()}
-        onLoadEvidenceImage={loadImage}
+        onInspectEvidenceImage={inspectImage}
       />
     );
     const view = render(panel(evidence));
     fireEvent.click(screen.getByRole("button", { name: /Evidence 3/u }));
     fireEvent.click(await screen.findByText("Inspect capture"));
-    expect(await screen.findByText("Loading capture…")).toBeInTheDocument();
+    expect(await screen.findByText("Opening protected capture…")).toBeInTheDocument();
 
     const expired: BrowserEvidenceSnapshot = {
       ...evidence,
@@ -216,15 +214,12 @@ describe("Browser evidence timeline", () => {
     };
     view.rerender(panel(expired));
     expect(await screen.findByText("Capture expired")).toBeInTheDocument();
-    expect(screen.queryByText("Loading capture…")).not.toBeInTheDocument();
+    expect(screen.queryByText("Opening protected capture…")).not.toBeInTheDocument();
 
-    resolveImage?.({
-      mimeType: "image/png",
-      data: Buffer.from("late-evicted-capture").toString("base64"),
-    });
-    await waitFor(() => expect(screen.queryByRole("img", {
-      name: /Browser screenshot/u,
-    })).not.toBeInTheDocument());
+    resolveInspection?.(true);
+    await waitFor(() => expect(screen.queryByText(
+      "Capture opened in a protected window.",
+    )).not.toBeInTheDocument());
   });
 
   it("closes evidence on context change without stealing newer focus", async () => {

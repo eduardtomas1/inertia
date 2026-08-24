@@ -24,6 +24,7 @@ import {
 } from "./preview-agent-input.js";
 import { capturedAgentScreenshotResult } from "./preview-agent-screenshot.js";
 import { BrowserEvidenceCapture, type BrowserEvidenceAuthority, type BrowserEvidencePage } from "./browser-evidence-capture.js";
+import { BrowserEvidenceInspectorRegistry, type BrowserEvidenceImageApproval, type BrowserEvidenceImageInspection } from "./browser-evidence-image-approval.js";
 import {
   agentBrowserIdentity,
   previewContext,
@@ -47,7 +48,7 @@ interface PreviewSlot {
   activity: AgentBrowserActivity | null;
   agentQueue: Promise<void>;
   activeIdentity: AgentBrowserRunIdentity | null;
-  evidence: BrowserEvidenceCapture;
+  evidence: BrowserEvidenceCapture; evidenceInspectors: BrowserEvidenceInspectorRegistry;
   publishedEvidenceRevision: number | null;
   nextPageNumber: number;
 }
@@ -370,22 +371,18 @@ export class PreviewBroker {
     const request = value as { ownerId?: unknown; contextId?: unknown };
     this.close(previewOwner(request.ownerId), previewContext(request.contextId));
   }
-
-  evidenceImage(value: unknown): BrowserEvidenceImage | null {
-    if (!value || typeof value !== "object") {
-      throw new Error("Invalid Browser evidence request");
-    }
-    const request = value as {
-      ownerId?: unknown;
-      contextId?: unknown;
-      evidenceId?: unknown;
-    };
-    const ownerId = previewOwner(request.ownerId);
-    const contextId = previewContext(request.contextId);
+  async inspectEvidenceImage(value: unknown, requestApproval: BrowserEvidenceImageApproval, inspect: BrowserEvidenceImageInspection): Promise<boolean> {
+    if (!value || typeof value !== "object") throw new Error("Invalid Browser evidence request");
+    const request = value as { ownerId?: unknown; contextId?: unknown; evidenceId?: unknown };
+    const ownerId = previewOwner(request.ownerId), contextId = previewContext(request.contextId);
     const evidenceId = previewTabId(request.evidenceId);
-    return this.#ownedSlot(ownerId, contextId)?.evidence.image(evidenceId) ?? null;
+    const slot = this.#ownedSlot(ownerId, contextId); if (!slot) return false;
+    const lookup = (): BrowserEvidenceImage | null => {
+      const current = this.#ownedSlot(ownerId, contextId);
+      return current === slot ? current.evidence.image(evidenceId) : null;
+    };
+    return await slot.evidenceInspectors.inspect(evidenceId, lookup, requestApproval, inspect);
   }
-
   close(ownerId?: PreviewOwner, contextId?: string): void {
     const slots = ownerId
       ? [[ownerId, this.#slots.get(ownerId)] as const]
@@ -397,6 +394,7 @@ export class PreviewBroker {
       this.#slots.delete(id);
       const browserSession = slot.tabs.values().next().value
         ?.view.webContents.session;
+      slot.evidenceInspectors.close();
       slot.evidence.close();
       for (const tab of slot.tabs.values()) this.#destroyTab(tab);
       void browserSession?.clearStorageData().catch(() => {
@@ -559,6 +557,7 @@ export class PreviewBroker {
   #publish(ownerId: PreviewOwner, contextId: string): void {
     const window = this.options.getWindow(), slot = this.#ownedSlot(ownerId, contextId);
     if (!window || window.webContents.isDestroyed() || !slot) return;
+    slot.evidenceInspectors.closeUnavailable((id) => Boolean(slot.evidence.image(id)));
     const evidenceRevision = slot.evidence.revision(), publishEvidence = slot.publishedEvidenceRevision !== evidenceRevision;
     window.webContents.send(this.options.stateChannel, {
       ownerId, contextId,
@@ -597,6 +596,7 @@ export class PreviewBroker {
       agentQueue: Promise.resolve(),
       activeIdentity: null,
       evidence,
+      evidenceInspectors: new BrowserEvidenceInspectorRegistry(),
       publishedEvidenceRevision: null,
       nextPageNumber: 0,
     };
@@ -639,6 +639,7 @@ export class PreviewBroker {
       guardNavigation: (event, url) => this.#guardNavigation(event, url),
       publish,
       navigated: (currentTab, url, sameDocument) => {
+        slot.evidenceInspectors.close();
         slot.evidence.recordNavigation(
           this.#evidencePage(currentTab),
           url,
@@ -693,6 +694,7 @@ export class PreviewBroker {
   #closeTab(ownerId: PreviewOwner, slot: PreviewSlot, tabId: string): void {
     const tab = slot.tabs.get(tabId);
     if (!tab) throw new Error("That Inertia Browser tab no longer exists.");
+    slot.evidenceInspectors.close();
     const wasActive = slot.activeTabId === tabId;
     slot.tabs.delete(tabId);
     this.#destroyTab(tab);
@@ -748,9 +750,8 @@ export class PreviewBroker {
   #success(
     slot: PreviewSlot,
     text: string,
-    image?: { mimeType: "image/png"; data: string },
   ): AgentBrowserResult {
-    return successfulAgentBrowserResult(text, this.#agentState(slot), image);
+    return successfulAgentBrowserResult(text, this.#agentState(slot));
   }
 
   async #snapshot(ownerId: PreviewOwner, slot: PreviewSlot, signal?: AbortSignal): Promise<AgentBrowserResult> {

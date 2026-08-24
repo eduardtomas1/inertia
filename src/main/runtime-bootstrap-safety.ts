@@ -5,6 +5,7 @@ import { RuntimeGenerationLeaseJournal } from "../node/runtime-generation-leases
 import { RuntimeOwnedProcessJournal } from "../node/runtime-owned-processes.js";
 import { runtimeCleanupReceiptIds } from "./runtime-cleanup-receipts.js";
 import { readSystemBootId } from "./system-boot-id.js";
+export { runtimeProcessEnvironment } from "./runtime-process-environment.js";
 
 export interface RuntimeBootstrapSafety {
   systemBootId: string;

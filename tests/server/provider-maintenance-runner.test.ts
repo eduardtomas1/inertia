@@ -384,6 +384,9 @@ describe("provider maintenance runner", () => {
     expect(providerMaintenanceEnvironment({
       PATH: "/tools",
       HOME: "/home/ada",
+      HOMEBREW_CACHE: "/var/cache/homebrew",
+      HOMEBREW_PREFIX: "/opt/homebrew",
+      HOMEBREW_GITHUB_API_TOKEN: "secret",
       CURSOR_API_KEY: "secret",
       ANTHROPIC_AUTH_TOKEN: "secret",
       HTTPS_PROXY: "https://proxy.example",
@@ -391,6 +394,8 @@ describe("provider maintenance runner", () => {
       CI: "1",
       NO_COLOR: "1",
       HOME: "/home/ada",
+      HOMEBREW_CACHE: "/var/cache/homebrew",
+      HOMEBREW_PREFIX: "/opt/homebrew",
       PATH: "/tools",
     });
   });

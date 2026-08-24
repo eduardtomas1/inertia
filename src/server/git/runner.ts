@@ -390,7 +390,7 @@ export function runGit(
             "Git returned more data than this application can safely process.",
           ),
         );
-      } else if (code === 0 || (truncated && options.truncateOutput)) {
+      } else if (code === 0) {
         finish(undefined, result);
       } else {
         finish(

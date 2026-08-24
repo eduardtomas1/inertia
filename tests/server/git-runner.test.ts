@@ -596,9 +596,14 @@ process.stdin.on("data", (chunk) => {
       PATH: "/usr/bin:/bin",
       HOME: "/tmp/home",
       DBUS_SESSION_BUS_ADDRESS: "unix:path=/tmp/dbus",
+      SSH_AGENT_PID: "4242",
       SSH_AUTH_SOCK: "/tmp/agent.sock",
       USERNAME: "twin",
       XDG_CACHE_HOME: "/tmp/cache",
+      GCM_INTERACTIVE: "never",
+      GIT_EDITOR: "/usr/bin/nvim",
+      GIT_PAGER: "/usr/bin/less",
+      GIT_SEQUENCE_EDITOR: "/usr/bin/nvim -f",
       GIT_DIR: "/tmp/other.git",
       GIT_INDEX_FILE: "/tmp/checkpoint.index",
       GIT_WORK_TREE: "/tmp/other-worktree",
@@ -617,9 +622,14 @@ process.stdin.on("data", (chunk) => {
       PATH: "/usr/bin:/bin",
       HOME: "/tmp/home",
       DBUS_SESSION_BUS_ADDRESS: "unix:path=/tmp/dbus",
+      SSH_AGENT_PID: "4242",
       SSH_AUTH_SOCK: "/tmp/agent.sock",
       USERNAME: "twin",
       XDG_CACHE_HOME: "/tmp/cache",
+      GCM_INTERACTIVE: "never",
+      GIT_EDITOR: "/usr/bin/nvim",
+      GIT_PAGER: "/usr/bin/less",
+      GIT_SEQUENCE_EDITOR: "/usr/bin/nvim -f",
       GIT_SSH_VARIANT: "ssh",
       GIT_CONFIG_GLOBAL: "/tmp/gitconfig",
       GIT_CONFIG_NOSYSTEM: "1",
@@ -869,6 +879,40 @@ setInterval(() => {}, 1000);
           throw error;
         }
       });
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+    }
+  });
+
+  it("rejects a naturally failing Git inspection after bounded output is truncated", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "inertia-git-bounded-failure-"));
+    temporaryDirectories.push(directory);
+    portableNodeExecutable(directory, "git");
+    writeNodeSubcommand(
+      directory,
+      "status",
+      `process.stdout.write("x".repeat(64 * 1024), () => {
+  process.stderr.write("fatal: bounded inspection failed\\n");
+  process.exit(128);
+});`,
+    );
+    const previousPath = process.env.PATH;
+    process.env.PATH = directory;
+    const terminateProcessTree = vi.fn(async () => true);
+    try {
+      await expect(runGit(directory, ["status"], {
+        timeoutMs: 5_000,
+        maxOutputBytes: 1_024,
+        truncateOutput: true,
+        failureMessage: "Git status failed.",
+      }, {
+        terminateProcessTree,
+      })).rejects.toMatchObject({
+        code: "operation-failed",
+        message: "Git status failed.",
+      } satisfies Partial<GitError>);
+      expect(terminateProcessTree).not.toHaveBeenCalled();
     } finally {
       if (previousPath === undefined) delete process.env.PATH;
       else process.env.PATH = previousPath;

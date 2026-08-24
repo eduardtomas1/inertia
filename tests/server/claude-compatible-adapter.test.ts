@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { CLAUDE_CLOUD_ROUTING_ENVIRONMENT_KEYS } from "../../src/node/provider-routing-environment";
 import {
   claudeHarnessBackendCompatibility,
   createCustomClaudeBackendProfile,
@@ -91,6 +92,41 @@ describe("Claude-compatible process adapter", () => {
       ANTHROPIC_API_KEY: "native-user-key",
       EMPTY_VALUE: "",
       UNICODE_VALUE: "calm-λ",
+    });
+  });
+
+  it("retains native cloud routing while scrubbing every route from Kimi", () => {
+    const inheritedRoutes = Object.fromEntries(
+      CLAUDE_CLOUD_ROUTING_ENVIRONMENT_KEYS.map((key, index) => [
+        key,
+        `inherited-route-${index}`,
+      ]),
+    );
+    const baseEnvironment = {
+      PATH: "/usr/bin",
+      ...inheritedRoutes,
+    };
+    const native = resolveClaudeCompatibleLaunch({
+      profile: nativeAnthropicBackendProfile(),
+      baseEnvironment,
+    });
+    const kimi = resolveClaudeCompatibleLaunch({
+      profile: createKimiClaudeBackendProfile({
+        id: "kimi:cloud-routing-isolation",
+        secretReference: SECRET_REFERENCE,
+        primaryModelId: "k3-256k",
+      }),
+      baseEnvironment,
+      secretValue: SECRET_VALUE,
+    });
+
+    expect(native.environment).toEqual(baseEnvironment);
+    for (const key of CLAUDE_CLOUD_ROUTING_ENVIRONMENT_KEYS) {
+      expect(kimi.environment).not.toHaveProperty(key);
+    }
+    expect(baseEnvironment).toEqual({
+      PATH: "/usr/bin",
+      ...inheritedRoutes,
     });
   });
 

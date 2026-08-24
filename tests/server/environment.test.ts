@@ -3,6 +3,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { PROVIDER_ROUTING_ENVIRONMENT_KEYS } from "../../src/node/provider-routing-environment";
 import {
   credentialFreeProviderEnvironment,
   executableCandidates,
@@ -45,6 +46,7 @@ const ENVIRONMENT_KEYS = [
 ] as const;
 
 describe.sequential("provider environment discovery", () => {
+  const multiMegabyteValue = " ".repeat(2 * 1_024 * 1_024);
   const roots: string[] = [];
   const originalEnvironment = Object.fromEntries(ENVIRONMENT_KEYS.map((key) => [key, process.env[key]]));
 
@@ -196,14 +198,20 @@ describe.sequential("provider environment discovery", () => {
       ANTHROPIC_API_KEY: "anthropic-secret",
       OPENAI_API_KEY: "openai-secret",
       AWS_SECRET_ACCESS_KEY: "aws-secret",
+      COLORTERM: "truecolor",
+      FORCE_COLOR: "3",
       GITHUB_TOKEN: "github-secret",
       INERTIA_LOGIN_SHELL_MARKER: "shell-export",
+      NO_COLOR: "1",
     };
 
     expect(providerChildEnvironment("claude", source)).toMatchObject({
       PATH: source.PATH,
       HOME: source.HOME,
       ANTHROPIC_API_KEY: "anthropic-secret",
+      COLORTERM: "truecolor",
+      FORCE_COLOR: "3",
+      NO_COLOR: "1",
     });
     expect(providerChildEnvironment("claude", source)).not.toHaveProperty(
       "OPENAI_API_KEY",
@@ -217,6 +225,208 @@ describe.sequential("provider environment discovery", () => {
     expect(providerChildEnvironment("claude", source)).not.toHaveProperty(
       "INERTIA_LOGIN_SHELL_MARKER",
     );
+  });
+
+  it("preserves bounded Claude cloud routes and ordinary brokered credentials", () => {
+    const routes = {
+      CLAUDE_CODE_USE_ANTHROPIC_AWS: "true",
+      CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD: "off",
+      ANTHROPIC_AWS_BASE_URL: "https://aws.example.test/claude/v1",
+      ANTHROPIC_AWS_WORKSPACE_ID: "aws-workspace-123",
+      ANTHROPIC_GOOGLE_CLOUD_BASE_URL:
+        "https://google.example.test/claude/v1",
+      ANTHROPIC_GOOGLE_CLOUD_LOCATION: "europe-west4",
+      ANTHROPIC_GOOGLE_CLOUD_PROJECT: "example-project",
+      ANTHROPIC_GOOGLE_CLOUD_WORKSPACE_ID: "google-workspace-456",
+      ANTHROPIC_BEDROCK_REGION_PREFIX: "apac",
+      ANTHROPIC_BEDROCK_SERVICE_TIER: "auto",
+    };
+    const environment = providerChildEnvironment("claude", {
+      ...routes,
+      ANTHROPIC_API_KEY: "brokered-anthropic-secret",
+      ANTHROPIC_AWS_API_KEY: "sentinel-aws-secret",
+      ANTHROPIC_AWS_AUTH: "Bearer sentinel-aws-secret",
+      ANTHROPIC_GOOGLE_CLOUD_AUTH: "Bearer sentinel-google-secret",
+      CLAUDE_CODE_API_BASE_URL: "https://excluded-api-base.example.test",
+    });
+
+    expect(environment).toMatchObject({
+      ...routes,
+      ANTHROPIC_API_KEY: "brokered-anthropic-secret",
+    });
+    expect(environment).not.toHaveProperty("ANTHROPIC_AWS_API_KEY");
+    expect(environment).not.toHaveProperty("ANTHROPIC_AWS_AUTH");
+    expect(environment).not.toHaveProperty("ANTHROPIC_GOOGLE_CLOUD_AUTH");
+    expect(environment).not.toHaveProperty("CLAUDE_CODE_API_BASE_URL");
+  });
+
+  it("validates mixed-case Claude cloud routes and auth denials", () => {
+    const source = {
+      Claude_Code_Use_Anthropic_Aws: "YES",
+      Anthropic_Aws_Base_Url: "https://aws.windows.test/claude/v1",
+      Anthropic_Aws_Workspace_Id: "windows-workspace",
+      Anthropic_Aws_Auth: "Bearer sentinel-windows-secret",
+    };
+
+    expect(providerChildEnvironment("claude", source)).toEqual({
+      Claude_Code_Use_Anthropic_Aws: source.Claude_Code_Use_Anthropic_Aws,
+      Anthropic_Aws_Base_Url: source.Anthropic_Aws_Base_Url,
+      Anthropic_Aws_Workspace_Id: source.Anthropic_Aws_Workspace_Id,
+    });
+  });
+
+  it.each(["true", "1", "yes", "on"])(
+    "activates native Claude cloud identity with %s",
+    (truthy) => {
+      const environment = providerChildEnvironment("claude", {
+        CLAUDE_CODE_USE_ANTHROPIC_AWS: truthy,
+        CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD: truthy,
+        AWS_ACCESS_KEY_ID: "aws-access-id",
+        AMAZON_BEDROCK_PROFILE: "amazon-profile",
+        CLOUD_ML_REGION: "europe-west4",
+        GOOGLE_APPLICATION_CREDENTIALS: "/run/secrets/google.json",
+        GCLOUD_PROJECT: "example-project",
+      });
+
+      expect(environment).toMatchObject({
+        CLAUDE_CODE_USE_ANTHROPIC_AWS: truthy,
+        CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD: truthy,
+        AWS_ACCESS_KEY_ID: "aws-access-id",
+        AMAZON_BEDROCK_PROFILE: "amazon-profile",
+        CLOUD_ML_REGION: "europe-west4",
+        GOOGLE_APPLICATION_CREDENTIALS: "/run/secrets/google.json",
+        GCLOUD_PROJECT: "example-project",
+      });
+    },
+  );
+
+  it.each(["false", "0", "no", "off"])(
+    "does not activate native Claude cloud identity with %s",
+    (falsey) => {
+      const environment = providerChildEnvironment("claude", {
+        CLAUDE_CODE_USE_ANTHROPIC_AWS: falsey,
+        CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD: falsey,
+        AWS_ACCESS_KEY_ID: "must-not-pass",
+        AMAZON_BEDROCK_PROFILE: "must-not-pass",
+        CLOUD_ML_REGION: "must-not-pass",
+        GOOGLE_APPLICATION_CREDENTIALS: "/must/not/pass.json",
+        GCLOUD_PROJECT: "must-not-pass",
+      });
+
+      expect(environment).toEqual({
+        CLAUDE_CODE_USE_ANTHROPIC_AWS: falsey,
+        CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD: falsey,
+      });
+    },
+  );
+
+  it("isolates AWS cloud identity when Google cloud routing is disabled", () => {
+    expect(providerChildEnvironment("claude", {
+      CLAUDE_CODE_USE_ANTHROPIC_AWS: "on",
+      CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD: "off",
+      AWS_ACCESS_KEY_ID: "aws-access-id",
+      AMAZON_BEDROCK_PROFILE: "amazon-profile",
+      CLOUD_ML_REGION: "must-not-pass",
+      GOOGLE_APPLICATION_CREDENTIALS: "/must/not/pass.json",
+      GCLOUD_PROJECT: "must-not-pass",
+    })).toEqual({
+      CLAUDE_CODE_USE_ANTHROPIC_AWS: "on",
+      CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD: "off",
+      AWS_ACCESS_KEY_ID: "aws-access-id",
+      AMAZON_BEDROCK_PROFILE: "amazon-profile",
+    });
+  });
+
+  it("isolates Google cloud identity when AWS cloud routing is disabled", () => {
+    expect(providerChildEnvironment("claude", {
+      CLAUDE_CODE_USE_ANTHROPIC_AWS: "off",
+      CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD: "on",
+      AWS_ACCESS_KEY_ID: "must-not-pass",
+      AMAZON_BEDROCK_PROFILE: "must-not-pass",
+      CLOUD_ML_REGION: "europe-west4",
+      GOOGLE_APPLICATION_CREDENTIALS: "/run/secrets/google.json",
+      GCLOUD_PROJECT: "example-project",
+    })).toEqual({
+      CLAUDE_CODE_USE_ANTHROPIC_AWS: "off",
+      CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD: "on",
+      CLOUD_ML_REGION: "europe-west4",
+      GOOGLE_APPLICATION_CREDENTIALS: "/run/secrets/google.json",
+      GCLOUD_PROJECT: "example-project",
+    });
+  });
+
+  it("rejects malformed and oversized Claude cloud routes in provider children", () => {
+    for (const key of [
+      "ANTHROPIC_AWS_BASE_URL",
+      "ANTHROPIC_GOOGLE_CLOUD_BASE_URL",
+    ]) {
+      for (const value of [
+        "not a URL",
+        "https://sentinel-user:sentinel-secret@cloud.example.test/v1",
+        "https://cloud.example.test/v1?token=sentinel-secret",
+        `https://cloud.example.test/${"x".repeat(2_048)}`,
+      ]) {
+        expect(providerChildEnvironment("claude", { [key]: value })).toEqual({});
+      }
+    }
+    for (const key of [
+      "CLAUDE_CODE_USE_ANTHROPIC_AWS",
+      "CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD",
+    ]) {
+      expect(providerChildEnvironment("claude", {
+        [key]: "sometimes",
+      })).toEqual({});
+      expect(providerChildEnvironment("claude", {
+        [key]: `true${" ".repeat(16)}`,
+      })).toEqual({});
+      expect(providerChildEnvironment("claude", {
+        [key]: multiMegabyteValue,
+      })).toEqual({});
+    }
+    expect(providerChildEnvironment("claude", {
+      ANTHROPIC_BEDROCK_REGION_PREFIX: "north-america",
+    })).toEqual({});
+    expect(providerChildEnvironment("claude", {
+      ANTHROPIC_BEDROCK_REGION_PREFIX: "u".repeat(257),
+    })).toEqual({});
+    expect(providerChildEnvironment("claude", {
+      ANTHROPIC_BEDROCK_REGION_PREFIX: multiMegabyteValue,
+    })).toEqual({});
+    for (const key of [
+      "ANTHROPIC_AWS_WORKSPACE_ID",
+      "ANTHROPIC_GOOGLE_CLOUD_LOCATION",
+      "ANTHROPIC_GOOGLE_CLOUD_PROJECT",
+      "ANTHROPIC_GOOGLE_CLOUD_WORKSPACE_ID",
+      "ANTHROPIC_BEDROCK_SERVICE_TIER",
+    ]) {
+      expect(providerChildEnvironment("claude", { [key]: " \n " })).toEqual({});
+      expect(providerChildEnvironment("claude", {
+        [key]: "x".repeat(257),
+      })).toEqual({});
+    }
+    expect(providerChildEnvironment("claude", {
+      ANTHROPIC_AWS_WORKSPACE_ID: multiMegabyteValue,
+    })).toEqual({});
+  });
+
+  it("recognizes every outer-boundary provider routing control", () => {
+    const source = Object.fromEntries(
+      PROVIDER_ROUTING_ENVIRONMENT_KEYS.map((key) => [
+        key,
+        key === "ANTHROPIC_AWS_BASE_URL"
+          || key === "ANTHROPIC_GOOGLE_CLOUD_BASE_URL"
+          ? "https://routing.example.test/claude/v1"
+          : key === "ANTHROPIC_BEDROCK_REGION_PREFIX" ? "us" : "1",
+      ]),
+    );
+    const retained = new Set(
+      (["codex", "claude", "opencode"] as const).flatMap((providerId) =>
+        Object.keys(providerChildEnvironment(providerId, source))),
+    );
+
+    expect(PROVIDER_ROUTING_ENVIRONMENT_KEYS.filter(
+      (key) => !retained.has(key),
+    )).toEqual([]);
   });
 
   it("keeps desktop-session launch authority out of provider children", () => {
@@ -379,7 +589,11 @@ describe.sequential("provider environment discovery", () => {
     const source = {
       PATH: process.env.PATH,
       CLAUDE_CODE_USE_BEDROCK: "1",
+      AWS_CA_BUNDLE: "/etc/company/aws-ca.pem",
       AWS_ACCESS_KEY_ID: "bedrock-id",
+      AWS_ENDPOINT_URL: "https://bedrock.example.test",
+      AWS_ENDPOINT_URL_BEDROCK_RUNTIME:
+        "https://bedrock-runtime.example.test",
       AWS_SECRET_ACCESS_KEY: "bedrock-secret",
       GOOGLE_APPLICATION_CREDENTIALS: "/tmp/vertex.json",
       GITHUB_TOKEN: "github-secret",
@@ -387,7 +601,11 @@ describe.sequential("provider environment discovery", () => {
 
     expect(providerChildEnvironment("claude", source)).toMatchObject({
       CLAUDE_CODE_USE_BEDROCK: "1",
+      AWS_CA_BUNDLE: "/etc/company/aws-ca.pem",
       AWS_ACCESS_KEY_ID: "bedrock-id",
+      AWS_ENDPOINT_URL: "https://bedrock.example.test",
+      AWS_ENDPOINT_URL_BEDROCK_RUNTIME:
+        "https://bedrock-runtime.example.test",
       AWS_SECRET_ACCESS_KEY: "bedrock-secret",
     });
     expect(providerChildEnvironment("claude", source)).not.toHaveProperty(

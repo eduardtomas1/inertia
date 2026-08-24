@@ -832,13 +832,27 @@ export function useConversationProjection({
         || turnEventOwner(request) !== eventOwner;
       setPendingApprovals((current) => current.filter(retainOtherTurn));
       setPendingInputs((current) => current.filter(retainOtherTurn));
+      const terminalAssistantMessage = event.terminalAssistantMessage;
+      if (terminalAssistantMessage) {
+        setLiveMessages((current) => {
+          const existing = current[terminalAssistantMessage.conversationId] ?? [];
+          return {
+            ...current,
+            [terminalAssistantMessage.conversationId]: [
+              ...existing.filter(({ id }) => id !== terminalAssistantMessage.id),
+              terminalAssistantMessage,
+            ],
+          };
+        });
+      }
       setTerminalProjections((current) => withTerminalTurnProjection(
         current,
         {
           owner: eventOwner,
           status: event.status,
           terminalReason: event.terminalReason,
-          terminalAssistantMessageId: event.terminalAssistantMessageId,
+          terminalAssistantMessageId:
+            terminalAssistantMessage?.id ?? event.terminalAssistantMessageId,
         },
       ));
       terminalRefreshPendingRef.current = true;

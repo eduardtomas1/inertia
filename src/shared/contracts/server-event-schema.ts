@@ -103,6 +103,20 @@ function chatMessage(value: unknown): boolean {
     && uniqueRecordField(value.attachments as unknown[], "id");
 }
 
+function optionalTerminalAssistantMessage(value: UnknownRecord): boolean {
+  const message = value.terminalAssistantMessage;
+  if (message === undefined || message === null) return true;
+  return chatMessage(message)
+    && record(message)
+    && message.role === "assistant"
+    && message.conversationId === value.conversationId
+    && message.turnId === value.turnId
+    && (
+      value.terminalAssistantMessageId === undefined
+      || value.terminalAssistantMessageId === message.id
+    );
+}
+
 function providerMaintenanceStatus(value: unknown): boolean {
   return recordWithStrings(
     value,
@@ -1067,7 +1081,9 @@ function runtimeMutationEvent(value: unknown): value is RuntimeMutationEvent {
       return providerMaintenanceOperation(value.operation);
     case "agent.started": return recordWithStrings(value, "conversationId", "runId", "turnId");
     case "agent.completed": return recordWithStrings(value, "conversationId", "runId", "turnId", "terminalReason")
-      && oneOf(value, "status", ["completed", "cancelled"]) && optionalNullableStringField(value, "terminalAssistantMessageId");
+      && oneOf(value, "status", ["completed", "cancelled"])
+      && optionalNullableStringField(value, "terminalAssistantMessageId")
+      && optionalTerminalAssistantMessage(value);
     case "agent.text":
     case "agent.reasoning":
       return recordWithStrings(value, "conversationId", "runId", "turnId", "text");
@@ -1101,7 +1117,9 @@ function runtimeMutationEvent(value: unknown): value is RuntimeMutationEvent {
       return recordWithStrings(value, "conversationId", "source")
         && oneOf(value, "source", SERVER_EVENT_OPTIONS.goalSources);
     case "agent.failed": return recordWithStrings(value, "conversationId", "runId", "turnId", "terminalReason", "message")
-      && oneOf(value, "status", ["failed", "interrupted"]) && optionalNullableStringField(value, "terminalAssistantMessageId");
+      && oneOf(value, "status", ["failed", "interrupted"])
+      && optionalNullableStringField(value, "terminalAssistantMessageId")
+      && optionalTerminalAssistantMessage(value);
     default:
       return false;
   }

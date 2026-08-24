@@ -264,10 +264,6 @@ export class TurnSettlementCoordinator {
     } catch {
       // Projections are repairable; agent_turns remains lifecycle truth.
     }
-    if (terminalAssistantMessage) this.options.hooks.broadcast({
-      type: "conversation.message.persisted",
-      message: terminalAssistantMessage,
-    });
     if (status === "failed" || status === "interrupted") {
       const failureMessage = message ?? (
         status === "interrupted"
@@ -297,6 +293,7 @@ export class TurnSettlementCoordinator {
         terminalReason,
         message: failureMessage,
         terminalAssistantMessageId: terminalAssistantMessage?.id ?? null,
+        terminalAssistantMessage,
       });
     } else {
       this.options.hooks.broadcast({
@@ -307,6 +304,7 @@ export class TurnSettlementCoordinator {
         status,
         terminalReason,
         terminalAssistantMessageId: terminalAssistantMessage?.id ?? null,
+        terminalAssistantMessage,
       });
     }
     this.options.hooks.testOnlyStreamingTrace?.mark("terminal-event-projected");

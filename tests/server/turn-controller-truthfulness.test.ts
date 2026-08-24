@@ -189,6 +189,7 @@ describe("TurnController terminal truthfulness", () => {
       status: "cancelled",
       terminalReason: "user-cancelled",
       terminalAssistantMessageId: null,
+      terminalAssistantMessage: null,
     });
     value.store.close();
   });

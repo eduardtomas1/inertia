@@ -1311,7 +1311,7 @@ describe("useConversationProjection pending interactions", () => {
     });
   }
 
-  it("keeps the last ready thread visible when a refresh request times out", async () => {
+  it("atomically projects the terminal answer before a detail refresh times out", async () => {
     const source = createEventSource();
     let detailLoads = 0;
     let authoritativeMessages: ChatMessage[] = [];
@@ -1383,10 +1383,6 @@ describe("useConversationProjection pending interactions", () => {
       text: "The final answer remains visible.",
     });
     source.emit({
-      type: "conversation.message.persisted",
-      message: terminalAssistantMessage,
-    });
-    source.emit({
       type: "agent.completed",
       conversationId: primaryId,
       runId: `${primaryId}-run`,
@@ -1394,6 +1390,7 @@ describe("useConversationProjection pending interactions", () => {
       status: "completed",
       terminalReason: "provider-completed",
       terminalAssistantMessageId: terminalAssistantMessage.id,
+      terminalAssistantMessage,
     });
     expect(hook.result.current.messages).toEqual([terminalAssistantMessage]);
     expect(hook.result.current.turns[0]?.terminalAssistantMessageId)

@@ -843,6 +843,7 @@ describe("message attachment ownership transfer", () => {
       type: "conversation.message.persisted",
       message: followUp,
     });
+    expect(handlerDependencies.broadcast).toHaveBeenCalledTimes(1);
     expect(handlerDependencies.send).toHaveBeenCalledWith(expect.anything(), {
       type: "request.result",
       requestId: command.requestId,

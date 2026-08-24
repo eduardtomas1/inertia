@@ -615,6 +615,10 @@ describe("agent-owned native Browser", () => {
     for (const message of [
       "db_pass=broker-pass-short",
       "pass_value=broker-pass-value-short",
+      "clientpassvalues=broker-client-pass-values-short",
+      "dbp%61ss=broker-percent-dbpass-short",
+      "dbp\u200bass=broker-zero-width-dbpass-short",
+      "\"CLIENTPASSVALUES\" = \"broker-quoted-client-pass-short\"",
       "tok\u0000en=control-broker-short",
       "pass\u202dword=bidi-broker-short",
       "tok\u200ben=zero-width-broker-short",
@@ -694,6 +698,10 @@ describe("agent-owned native Browser", () => {
     expect(serialized).not.toContain("mongodb://alice");
     expect(serialized).not.toContain("broker-pass-short");
     expect(serialized).not.toContain("broker-pass-value-short");
+    expect(serialized).not.toContain("broker-client-pass-values-short");
+    expect(serialized).not.toContain("broker-percent-dbpass-short");
+    expect(serialized).not.toContain("broker-zero-width-dbpass-short");
+    expect(serialized).not.toContain("broker-quoted-client-pass-short");
     expect(serialized).not.toContain("control-broker-short");
     expect(serialized).not.toContain("bidi-broker-short");
     expect(serialized).not.toContain("zero-width-broker-short");
@@ -746,7 +754,7 @@ describe("agent-owned native Browser", () => {
       )
     )).toBe(true);
     expect(consoleEvidence.reduce((total, entry) => total + entry.occurrences, 0))
-      .toBe(22);
+      .toBe(26);
 
     const capture = state.evidence.entries.find((entry) => entry.kind === "screenshot");
     expect(capture).toBeDefined();

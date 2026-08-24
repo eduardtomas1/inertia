@@ -56,6 +56,10 @@ export async function verifyBrowserEvidence({
   expect(evidenceText).not.toContain("browser-e2e-console-sentinel");
   expect(evidenceText).not.toContain("browser-e2e-pass-short");
   expect(evidenceText).not.toContain("browser-e2e-pass-value-short");
+  expect(evidenceText).not.toContain("browser-e2e-client-pass-values-short");
+  expect(evidenceText).not.toContain("browser-e2e-percent-dbpass-short");
+  expect(evidenceText).not.toContain("browser-e2e-zero-width-dbpass-short");
+  expect(evidenceText).not.toContain("browser-e2e-quoted-client-pass-short");
   expect(evidenceText).not.toContain("hunter2");
   expect(evidenceText).not.toContain("MONGODB_URI");
   expect(evidenceText).not.toContain("mongodb://alice");

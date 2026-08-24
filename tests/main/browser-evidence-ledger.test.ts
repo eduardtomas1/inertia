@@ -78,6 +78,10 @@ describe("Browser evidence ledger", () => {
     "mypassValue=hunter2",
     "prodpass=hunter2",
     "tenantpass=hunter2",
+    "clientpassvalues=hunter2",
+    "dbp%61ss=hunter2",
+    "dbp\u200bass=hunter2",
+    "\"CLIENTPASSVALUES\" : \"hunter2\"",
   ])("fails closed before storing a page-authored credential shape: %s", (message) => {
     const ledger = new BrowserEvidenceLedger();
     ledger.recordConsoleError({ ...location, message });

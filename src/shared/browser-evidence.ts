@@ -282,6 +282,40 @@ function relativePathToken(value: string): boolean {
     || hasFileExtension(leaf);
 }
 
+function relativePathAcrossEmbeddedSpaces(value: string): boolean {
+  for (const separator of ["/", "\\"] as const) {
+    let previous = -1;
+    let whitespaceRuns = 0;
+    let inWhitespace = false;
+    for (let index = 0; index < value.length; index += 1) {
+      const character = value[index]!;
+      if (/[,;:()="'<>`]/u.test(character)) {
+        previous = -1;
+        whitespaceRuns = 0;
+        inWhitespace = false;
+        continue;
+      }
+      if (/\s/u.test(character)) {
+        if (previous >= 0 && !inWhitespace) whitespaceRuns += 1;
+        inWhitespace = true;
+        continue;
+      }
+      inWhitespace = false;
+      if (character !== separator) continue;
+      if (
+        previous > 0
+        && whitespaceRuns > 0
+        && index + 1 < value.length
+        && !pathTokenTerminator(value[previous - 1]!)
+        && !pathTokenTerminator(value[index + 1]!)
+      ) return true;
+      previous = index;
+      whitespaceRuns = 0;
+    }
+  }
+  return false;
+}
+
 function hasNonTrailingPathSeparator(value: string): boolean {
   for (let index = 0; index < value.length - 1; index += 1) {
     if (pathSeparator(value[index])) return true;
@@ -326,7 +360,11 @@ function hasAmbiguousFilesystemPathPrefix(value: string): boolean {
 }
 
 function hasFilesystemPathCandidate(value: string): boolean {
-  if (patternMatches(FILE_URL, value) || hasAmbiguousFilesystemPathPrefix(value)) {
+  if (
+    patternMatches(FILE_URL, value)
+    || hasAmbiguousFilesystemPathPrefix(value)
+    || relativePathAcrossEmbeddedSpaces(value)
+  ) {
     return true;
   }
   for (let index = 0; index < value.length;) {

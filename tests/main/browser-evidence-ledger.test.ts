@@ -174,6 +174,8 @@ describe("Browser evidence ledger", () => {
     "Failed in ./Dockerfile",
     String.raw`Failed in src\private\config`,
     String.raw`Failed in src\config`,
+    "Failure in projects/Jane Doe/config",
+    String.raw`Failure in workspace\Jane Doe\config`,
   ])("fails closed before storing an extensionless relative path: %s", (message) => {
     const ledger = new BrowserEvidenceLedger();
     ledger.recordConsoleError({ ...location, message });

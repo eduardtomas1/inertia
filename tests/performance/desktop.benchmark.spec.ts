@@ -20,6 +20,15 @@ import {
 import { processExists } from "../e2e/support/app-fixture";
 import { selectWorkspaceTool } from "../e2e/support/workspace-tools";
 import { driveBoundedWheelNavigation } from "../helpers/bounded-wheel-navigation";
+import {
+  beginStreamingReaderActivity,
+  cleanupStreamingCompletionGate,
+  releaseStreamingCompletion,
+  streamingAppServer,
+  waitForStreamingCompletionCleanup,
+  waitForStreamingCompletionReady,
+  waitForStreamingReaderActivity,
+} from "../helpers/desktop-benchmark-streaming-fixture";
 
 const execFileAsync = promisify(execFile);
 const reportPath = resolve(
@@ -46,65 +55,7 @@ const CI_STREAM_VISIBLE_UPDATE_BARRIER_TIMEOUT_MS = 5_000;
 const READER_NAVIGATION_MAX_WHEEL_GESTURES = 16;
 const READER_NAVIGATION_MAX_PROGRESS_SAMPLES = 10;
 const READER_NAVIGATION_TARGET_SCROLL_TOP = 120;
-
-const streamingAppServer = `
-const readline = require("node:readline");
-const args = process.argv.slice(2);
-const send = (message) => process.stdout.write(JSON.stringify(message) + "\\n");
-if (args[0] === "--help") {
-  process.stdout.write("Usage: codex app-server [OPTIONS] - Run the app server\\n");
-  process.exit(0);
-}
-let threadId = "performance-thread";
-let turnSequence = 0;
-readline.createInterface({ input: process.stdin }).on("line", (line) => {
-  const message = JSON.parse(line);
-  if (message.method === "initialize") {
-    send({ id: message.id, result: { userAgent: "performance-fixture" } });
-    return;
-  }
-  if (message.method === "initialized") return;
-  if (message.method === "model/list") {
-    send({ id: message.id, result: { data: [], nextCursor: null } });
-    return;
-  }
-  if (message.method === "account/rateLimits/read") {
-    send({ id: message.id, result: { rateLimits: null, rateLimitsByLimitId: null } });
-    return;
-  }
-  if (message.method === "thread/start" || message.method === "thread/resume") {
-    threadId = message.params.threadId || threadId;
-    send({ id: message.id, result: { thread: { id: threadId }, model: "fixture" } });
-    return;
-  }
-  if (message.method !== "turn/start") return;
-  turnSequence += 1;
-  const promptText = Array.isArray(message.params && message.params.input)
-    ? message.params.input.find((item) => item && item.type === "text")?.text || ""
-    : "";
-  const requestedSample = Number(/sample (\\d+)/u.exec(promptText)?.[1]);
-  const sampleNumber = Number.isInteger(requestedSample) && requestedSample > 0
-    ? requestedSample
-    : turnSequence;
-  const turnId = "performance-turn-" + sampleNumber;
-  const itemId = "performance-answer-" + sampleNumber;
-  send({ id: message.id, result: { turn: { id: turnId, status: "inProgress", items: [], error: null } } });
-  send({ method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress", items: [], error: null } } });
-  let index = 0;
-  const timer = setInterval(() => {
-    if (index === 0) {
-      send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId, delta: "STREAM_PROVIDER_DELTA_" + sampleNumber + "_" + Date.now() + " " } });
-    } else if (index < 128) {
-      send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId, delta: "chunk-" + index + "🙂 " } });
-    } else {
-      clearInterval(timer);
-      send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId, delta: " STREAM_PROVIDER_COMPLETE_" + sampleNumber + "_" + Date.now() } });
-      send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
-    }
-    index += 1;
-  }, 8);
-});
-`;
+const FOLLOW_LATEST_LIVE_EDGE_THRESHOLD = 120;
 
 interface RuntimeSnapshot {
   phase: string;
@@ -122,6 +73,23 @@ interface StreamingTraceMarker {
   stage: string;
   monotonicMs?: number;
   wallTimeMs: number;
+}
+
+interface StreamingPaintMeasurement {
+  firstProviderDeltaToPaintMs: number;
+  completionToFinalPaintMs: number;
+  terminalAnswerBottomGapAtPaint: number;
+  terminalAnswerVisibleAtPaint: boolean;
+  medianVisibleGapMs: number;
+  p95VisibleGapMs: number;
+  visibleUpdates: number;
+  visibleUpdatesPerSecond: number;
+  longTasks: number;
+  longTaskTotalMs: number;
+  frames: number;
+  droppedOrOverBudgetFrames: number;
+  frameBudgetMs: number;
+  rendererTraceMarks: StreamingTraceMarker[];
 }
 
 interface DistributionSummary {
@@ -293,7 +261,7 @@ async function initializeWorkspace(workspace: string): Promise<void> {
     ),
     writeFile(
       join(workspace, ".git", "info", "exclude"),
-      "app-server\nlogin\n",
+      "app-server\nlogin\n.inertia-stream-completion-*\n",
       { encoding: "utf8", flag: "a" },
     ),
   ]);
@@ -706,8 +674,10 @@ async function streamingResponsivenessSample(
   electronApp: ElectronApplication,
   page: Page,
   dataDirectory: string,
+  workspace: string,
   sampleNumber: number,
 ) {
+  await cleanupStreamingCompletionGate(workspace, sampleNumber);
   const runtimeTracePath = join(dataDirectory, "streaming-trace.jsonl");
   const runtimeTraceOffset = await stat(runtimeTracePath)
     .then(({ size }) => size)
@@ -727,21 +697,8 @@ async function streamingResponsivenessSample(
     "stream-before",
   );
   const processBefore = await processSample(electronApp);
-  const measurementOutcomePromise = page.evaluate((sampleNumber) => (
-      new Promise<{
-      firstProviderDeltaToPaintMs: number;
-      completionToFinalPaintMs: number;
-      medianVisibleGapMs: number;
-      p95VisibleGapMs: number;
-      visibleUpdates: number;
-      visibleUpdatesPerSecond: number;
-      longTasks: number;
-      longTaskTotalMs: number;
-        frames: number;
-        droppedOrOverBudgetFrames: number;
-        frameBudgetMs: number;
-        rendererTraceMarks: StreamingTraceMarker[];
-      }>((resolveMeasurement, rejectMeasurement) => {
+  const measurementOutcomePromise = page.evaluate(({ liveEdgeThreshold, sampleNumber }) => (
+      new Promise<StreamingPaintMeasurement>((resolveMeasurement, rejectMeasurement) => {
       for (const entry of performance.getEntriesByType("mark")) {
         if (entry.name.startsWith("inertia-stream:")) {
           performance.clearMarks(entry.name);
@@ -755,8 +712,11 @@ async function streamingResponsivenessSample(
       let lastVisibleUpdateAt: number | null = null;
       let firstProviderDeltaToPaintMs: number | null = null;
       let completionToFinalPaintMs: number | null = null;
+      let terminalAnswerBottomGapAtPaint: number | null = null;
+      let terminalAnswerVisibleAtPaint = false;
       let previousFrame = performance.now();
       let frameHandle = 0;
+      let paintHandle = 0;
       let paintPending = false;
       let settled = false;
       const timeout = window.setTimeout(() => {
@@ -766,6 +726,8 @@ async function streamingResponsivenessSample(
           visibleUpdates: visibleUpdates.length,
           firstProviderDeltaToPaintMs,
           completionToFinalPaintMs,
+          terminalAnswerBottomGapAtPaint,
+          terminalAnswerVisibleAtPaint,
           liveRendererCount: document.querySelectorAll('[data-stream-renderer="plain-text"]').length,
           persistedAnswerCount: document.querySelectorAll('[data-answer-phase="persisted"] .response-markdown').length,
           finalAnswerText: Array.from(document.querySelectorAll<HTMLElement>('[data-answer-phase="persisted"] .response-markdown'))
@@ -792,6 +754,7 @@ async function streamingResponsivenessSample(
         settled = true;
         window.clearTimeout(timeout);
         window.cancelAnimationFrame(frameHandle);
+        window.cancelAnimationFrame(paintHandle);
         mutationObserver.disconnect();
         longTaskObserver?.disconnect();
       };
@@ -812,6 +775,9 @@ async function streamingResponsivenessSample(
         resolveMeasurement({
           firstProviderDeltaToPaintMs,
           completionToFinalPaintMs,
+          terminalAnswerBottomGapAtPaint:
+            terminalAnswerBottomGapAtPaint ?? Number.POSITIVE_INFINITY,
+          terminalAnswerVisibleAtPaint,
           medianVisibleGapMs: percentile(visibleUpdateGaps, 0.5),
           p95VisibleGapMs: percentile(visibleUpdateGaps, 0.95),
           visibleUpdates: visibleUpdates.length,
@@ -843,6 +809,7 @@ async function streamingResponsivenessSample(
         });
       };
       const samplePaint = (): void => {
+        if (settled) return;
         paintPending = false;
         const live = document.querySelector<HTMLElement>(
           '[data-stream-renderer="plain-text"]',
@@ -887,17 +854,49 @@ async function streamingResponsivenessSample(
           `STREAM_PROVIDER_COMPLETE_${sampleNumber}_(\\d+)`,
           "u",
         ));
-        if (completionMarker && completionToFinalPaintMs === null) {
+        const finalViewport = finalAnswer?.closest<HTMLElement>(".message-scroll") ?? null;
+        const finalRect = finalAnswer?.getBoundingClientRect() ?? null;
+        const finalViewportRect = finalViewport?.getBoundingClientRect() ?? null;
+        const finalBottomGap = finalViewport === null
+          ? Number.POSITIVE_INFINITY
+          : finalViewport.scrollHeight
+            - finalViewport.clientHeight
+            - finalViewport.scrollTop;
+        const terminalAnswerIsVisible = Boolean(
+          finalAnswer
+          && finalViewport
+          && finalRect
+          && finalViewportRect
+          && finalRect.bottom > finalViewportRect.top
+          && finalRect.top < finalViewportRect.bottom,
+        );
+        // Capture terminal paint only while the completed answer is mounted at
+        // the live edge. The fixture holds completion until reader navigation
+        // has returned here, so final paint cannot race a virtualized row.
+        if (
+          completionMarker
+          && completionToFinalPaintMs === null
+          && terminalAnswerIsVisible
+          && finalBottomGap <= liveEdgeThreshold
+        ) {
           completionToFinalPaintMs = Date.now() - Number(completionMarker[1]);
+          terminalAnswerBottomGapAtPaint = finalBottomGap;
+          terminalAnswerVisibleAtPaint = true;
           const trace = Reflect.get(globalThis, "__inertiaTestStreamingTrace");
           if (typeof trace === "function") trace("final-answer-paint");
+        } else if (completionMarker && completionToFinalPaintMs === null) {
+          // Follow-latest scroll changes do not mutate the DOM. Keep sampling
+          // paint frames until the mounted terminal answer reaches the live
+          // edge, within the measurement's existing hard deadline.
+          paintPending = true;
+          paintHandle = window.requestAnimationFrame(samplePaint);
         }
         finish();
       };
       const mutationObserver = new MutationObserver(() => {
         if (paintPending || settled) return;
         paintPending = true;
-        window.requestAnimationFrame(samplePaint);
+        paintHandle = window.requestAnimationFrame(samplePaint);
       });
       mutationObserver.observe(document.body, {
         childList: true,
@@ -914,7 +913,10 @@ async function streamingResponsivenessSample(
       }
       frameHandle = window.requestAnimationFrame(frame);
     })
-  ), sampleNumber).then(
+  ), {
+    liveEdgeThreshold: FOLLOW_LATEST_LIVE_EDGE_THRESHOLD,
+    sampleNumber,
+  }).then(
     (value) => ({ status: "fulfilled" as const, value }),
     (error: unknown) => ({ error, status: "rejected" as const }),
   );
@@ -935,8 +937,24 @@ async function streamingResponsivenessSample(
       timeout: CI_STREAM_VISIBLE_UPDATE_BARRIER_TIMEOUT_MS,
     },
   ).toBeGreaterThanOrEqual(CI_STREAM_MIN_VISIBLE_UPDATES);
+  await waitForStreamingCompletionReady(workspace, sampleNumber);
+  await beginStreamingReaderActivity(workspace, sampleNumber);
+  await waitForStreamingReaderActivity(workspace, sampleNumber);
+  const readerActivityMarker = `STREAM_PROVIDER_READER_ACTIVITY_${sampleNumber}_`;
+  await expect(page.locator('[data-stream-renderer="plain-text"]'))
+    .toContainText(readerActivityMarker);
   const liveViewport = page.locator(".message-scroll");
+  const finalAnswer = page.locator(
+    '[data-answer-phase="persisted"] .response-markdown',
+  ).filter({ hasText: `STREAM_PROVIDER_COMPLETE_${sampleNumber}_` }).last();
+  await expect(finalAnswer).toHaveCount(0);
+  const streamingBottomGapBeforeReaderNavigation = await liveViewport.evaluate(
+    (viewport) => viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop,
+  );
+  expect(streamingBottomGapBeforeReaderNavigation)
+    .toBeLessThanOrEqual(FOLLOW_LATEST_LIVE_EDGE_THRESHOLD);
   await liveViewport.hover({ position: { x: 16, y: 16 } });
+  const readerNavigationStartedAt = performance.now();
   await driveBoundedWheelNavigation({
     maxGestures: READER_NAVIGATION_MAX_WHEEL_GESTURES,
     maxProgressSamples: READER_NAVIGATION_MAX_PROGRESS_SAMPLES,
@@ -980,6 +998,7 @@ async function streamingResponsivenessSample(
     )),
     wheelUp: () => page.mouse.wheel(0, -30_000),
   });
+  const readerNavigationMs = performance.now() - readerNavigationStartedAt;
   await page.waitForTimeout(150);
   const readerNavigationScrollTop = await liveViewport.evaluate(
     (viewport) => viewport.scrollTop,
@@ -987,29 +1006,46 @@ async function streamingResponsivenessSample(
   expect(readerNavigationScrollTop).toBeLessThan(
     READER_NAVIGATION_TARGET_SCROLL_TOP,
   );
-  const memoryDuring = await rendererMemorySample(
-    electronApp,
-    page,
-    "stream-during",
-  );
-  const processDuring = await processSample(electronApp);
-  let streamingBottomGap = Number.POSITIVE_INFINITY;
+  let jumpToLatestBottomGap = Number.POSITIVE_INFINITY;
   let finalSettledBottomGap = Number.POSITIVE_INFINITY;
   let finalAnswerVisible = false;
+  let jumpToLatestMs = Number.POSITIVE_INFINITY;
+  let visible: StreamingPaintMeasurement | null = null;
+  let memoryAfterTerminalPaint: Awaited<ReturnType<typeof rendererMemorySample>> | null = null;
+  let processAfterTerminalPaint: Awaited<ReturnType<typeof processSample>> | null = null;
   try {
     const jumpToLatest = page.getByRole("button", { name: "Jump to latest" });
     await expect(jumpToLatest).toBeVisible();
+    const jumpToLatestStartedAt = performance.now();
     await jumpToLatest.click();
     await expect.poll(() => liveViewport.evaluate(
       (viewport) => viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop,
-    )).toBeLessThanOrEqual(120);
-    streamingBottomGap = await liveViewport.evaluate(
+    )).toBeLessThanOrEqual(FOLLOW_LATEST_LIVE_EDGE_THRESHOLD);
+    jumpToLatestBottomGap = await liveViewport.evaluate(
       (viewport) => viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop,
     );
-    const finalAnswer = page.locator(
-      '[data-answer-phase="persisted"] .response-markdown',
-    ).filter({ hasText: `STREAM_PROVIDER_COMPLETE_${sampleNumber}_` }).last();
+    jumpToLatestMs = performance.now() - jumpToLatestStartedAt;
+    // Completion remains explicitly held while the reader leaves and returns
+    // to the streaming turn. Releasing it here makes the very next await the
+    // terminal-paint gate, with no GC/GPU/process sample in that interval.
+    await expect(page.locator('[data-stream-renderer="plain-text"]')).toBeVisible();
+    await expect(finalAnswer).toHaveCount(0);
+    await releaseStreamingCompletion(workspace, sampleNumber);
+    const measurementOutcome = await measurementOutcomePromise;
+    if (measurementOutcome.status === "rejected") throw measurementOutcome.error;
+    visible = measurementOutcome.value;
+    await waitForStreamingCompletionCleanup(workspace, sampleNumber);
+    expect(visible.terminalAnswerVisibleAtPaint).toBe(true);
+    expect(visible.terminalAnswerBottomGapAtPaint)
+      .toBeLessThanOrEqual(FOLLOW_LATEST_LIVE_EDGE_THRESHOLD);
+    memoryAfterTerminalPaint = await rendererMemorySample(
+      electronApp,
+      page,
+      "stream-after-terminal-paint",
+    );
+    processAfterTerminalPaint = await processSample(electronApp);
     await finalAnswer.waitFor();
+    await expect(finalAnswer).toContainText(readerActivityMarker);
     finalAnswerVisible = await finalAnswer.isVisible();
     const finalTurn = finalAnswer.locator(
       "xpath=ancestor::section[@data-turn-id][1]",
@@ -1050,9 +1086,12 @@ async function streamingResponsivenessSample(
     );
     throw error;
   }
-  const measurementOutcome = await measurementOutcomePromise;
-  if (measurementOutcome.status === "rejected") throw measurementOutcome.error;
-  const visible = measurementOutcome.value;
+  if (visible === null) {
+    throw new Error("The terminal-paint measurement did not resolve after gate release.");
+  }
+  if (memoryAfterTerminalPaint === null || processAfterTerminalPaint === null) {
+    throw new Error("Post-terminal-paint resource sampling did not complete.");
+  }
   const memoryAfter = await rendererMemorySample(
     electronApp,
     page,
@@ -1093,12 +1132,12 @@ async function streamingResponsivenessSample(
     walBytes,
     memory: {
       before: memoryBefore,
-      during: memoryDuring,
+      afterTerminalPaint: memoryAfterTerminalPaint,
       after: memoryAfter,
     },
     processes: {
       before: processBefore.metrics,
-      during: processDuring.metrics,
+      afterTerminalPaint: processAfterTerminalPaint.metrics,
       after: processAfter.metrics,
     },
     stageAttribution: stageAttributionSample(
@@ -1108,9 +1147,19 @@ async function streamingResponsivenessSample(
     ),
     followLatest: {
       startedAtLiveEdge: true,
-      readerNavigationPreserved: readerNavigationScrollTop < 120,
-      jumpToLatestWithinFollowThreshold: streamingBottomGap <= 120,
-      streamingBottomGap,
+      completionHeldDuringReaderNavigation: true,
+      readerActivityWhileCompletionHeld: true,
+      streamingBottomGapBeforeReaderNavigation,
+      terminalAnswerBottomGapAtPaint: visible.terminalAnswerBottomGapAtPaint,
+      terminalAnswerVisibleAtPaint: visible.terminalAnswerVisibleAtPaint,
+      readerNavigationMs,
+      readerNavigationScrollTop,
+      readerNavigationPreserved:
+        readerNavigationScrollTop < READER_NAVIGATION_TARGET_SCROLL_TOP,
+      jumpToLatestMs,
+      jumpToLatestWithinFollowThreshold:
+        jumpToLatestBottomGap <= FOLLOW_LATEST_LIVE_EDGE_THRESHOLD,
+      jumpToLatestBottomGap,
       finalSettledBottomGap,
       finalAnswerVisible,
     },
@@ -1168,7 +1217,7 @@ function summarizeStreamingResponsiveness(
     walBytes: last.walBytes,
     memory: {
       before: first.memory.before,
-      during: samples.map(({ memory }) => memory.during),
+      afterTerminalPaint: samples.map(({ memory }) => memory.afterTerminalPaint),
       after: last.memory.after,
     },
     processes: samples.map(({ processes }) => processes),
@@ -1176,13 +1225,36 @@ function summarizeStreamingResponsiveness(
       samples.map(({ stageAttribution }) => stageAttribution),
     ),
     followLatest: {
+      completionHeldDuringReaderNavigation:
+        samples.every(({ followLatest }) =>
+          followLatest.completionHeldDuringReaderNavigation),
+      readerActivityWhileCompletionHeld:
+        samples.every(({ followLatest }) =>
+          followLatest.readerActivityWhileCompletionHeld),
+      streamingBottomGapBeforeReaderNavigation: Math.max(...samples.map(
+        ({ followLatest }) => followLatest.streamingBottomGapBeforeReaderNavigation,
+      )),
+      terminalAnswerVisibleAtPaint:
+        samples.every(({ followLatest }) => followLatest.terminalAnswerVisibleAtPaint),
+      terminalAnswerBottomGapAtPaint: Math.max(...samples.map(
+        ({ followLatest }) => followLatest.terminalAnswerBottomGapAtPaint,
+      )),
+      readerNavigationMs: distribution(samples.map(
+        ({ followLatest }) => followLatest.readerNavigationMs,
+      )),
+      readerNavigationScrollTop: Math.max(...samples.map(
+        ({ followLatest }) => followLatest.readerNavigationScrollTop,
+      )),
       readerNavigationPreserved:
         samples.every(({ followLatest }) => followLatest.readerNavigationPreserved),
+      jumpToLatestMs: distribution(samples.map(
+        ({ followLatest }) => followLatest.jumpToLatestMs,
+      )),
       jumpToLatestWithinFollowThreshold:
         samples.every(({ followLatest }) =>
           followLatest.jumpToLatestWithinFollowThreshold),
-      streamingBottomGap: Math.max(...samples.map(
-        ({ followLatest }) => followLatest.streamingBottomGap,
+      jumpToLatestBottomGap: Math.max(...samples.map(
+        ({ followLatest }) => followLatest.jumpToLatestBottomGap,
       )),
       finalSettledBottomGap: Math.max(...samples.map(
         ({ followLatest }) => followLatest.finalSettledBottomGap,
@@ -1431,6 +1503,7 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
         cold.electronApp,
         cold.page,
         dataDirectory,
+        workspace,
         sampleNumber,
       ));
     }
@@ -1692,6 +1765,7 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
       limitations: [
         "The authoritative long-conversation fixture creates 300 queued, running, and settled turns through RuntimeStore lifecycle APIs; the compatibility scenario separately stresses collapsed orphan history.",
         "Desktop streaming uses a deterministic local Codex app-server fixture; it exercises the production provider, utility-runtime, SQLite, WebSocket, React, and paint path without network variance.",
+        "The streaming fixture holds terminal completion behind a bounded local gate while reader activity continues, returns to the live edge through Jump to latest, and releases completion immediately before the terminal-paint await.",
         "Cross-process streaming attribution uses bounded wall-clock markers only for comparison; WebSocket receipt starts at the causal pre-send marker, each first-delta and terminal chain is isolated to one run, and stage ordering remains authoritative within each process.",
         "Animation-frame intervals describe compositor scheduling, while PerformanceObserver long-task durations describe main-thread stalls; hosted frame intervals are retained as observational evidence rather than a 60-fps claim.",
         "Chromium process working-set retention after panels close is not classified as a leak when JavaScript heap, DOM, terminal, workspace-surface, and split-pane counters are released.",
@@ -1739,8 +1813,40 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
       .toBeLessThan(CI_STREAM_LONG_TASK_CATASTROPHIC_MS);
     expect(report.scenarios.streamingResponsiveness.droppedOrOverBudgetFrames)
       .toBeLessThan(report.scenarios.streamingResponsiveness.frames);
+    expect(
+      report.scenarios.streamingResponsiveness.followLatest
+        .completionHeldDuringReaderNavigation,
+    ).toBe(true);
+    expect(
+      report.scenarios.streamingResponsiveness.followLatest
+        .readerActivityWhileCompletionHeld,
+    ).toBe(true);
+    expect(
+      report.scenarios.streamingResponsiveness.followLatest
+        .streamingBottomGapBeforeReaderNavigation,
+    ).toBeLessThanOrEqual(FOLLOW_LATEST_LIVE_EDGE_THRESHOLD);
+    expect(report.scenarios.streamingResponsiveness.followLatest.terminalAnswerVisibleAtPaint)
+      .toBe(true);
+    expect(
+      report.scenarios.streamingResponsiveness.followLatest
+        .terminalAnswerBottomGapAtPaint,
+    ).toBeLessThanOrEqual(FOLLOW_LATEST_LIVE_EDGE_THRESHOLD);
+    expect(report.scenarios.streamingResponsiveness.followLatest.readerNavigationMs.sampleCount)
+      .toBe(streamingSampleCount);
+    expect(
+      report.scenarios.streamingResponsiveness.followLatest.readerNavigationMs.minimum ?? -1,
+    ).toBeGreaterThanOrEqual(0);
+    expect(report.scenarios.streamingResponsiveness.followLatest.readerNavigationScrollTop)
+      .toBeLessThan(READER_NAVIGATION_TARGET_SCROLL_TOP);
     expect(report.scenarios.streamingResponsiveness.followLatest.readerNavigationPreserved)
       .toBe(true);
+    expect(report.scenarios.streamingResponsiveness.followLatest.jumpToLatestMs.sampleCount)
+      .toBe(streamingSampleCount);
+    expect(
+      report.scenarios.streamingResponsiveness.followLatest.jumpToLatestMs.minimum ?? -1,
+    ).toBeGreaterThanOrEqual(0);
+    expect(report.scenarios.streamingResponsiveness.followLatest.jumpToLatestBottomGap)
+      .toBeLessThanOrEqual(FOLLOW_LATEST_LIVE_EDGE_THRESHOLD);
     expect(report.scenarios.streamingResponsiveness.followLatest.jumpToLatestWithinFollowThreshold)
       .toBe(true);
     expect(report.scenarios.streamingResponsiveness.followLatest.finalSettledBottomGap)

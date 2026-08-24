@@ -1,9 +1,4 @@
-import {
-  type BrowserWindow,
-  type NativeImage,
-  type Rectangle,
-  type WebContents,
-} from "electron";
+import type { BrowserWindow, NativeImage, Rectangle, WebContents } from "electron";
 
 import type {
   AgentBrowserActivity,

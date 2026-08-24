@@ -230,7 +230,8 @@ async function createPreviewServer(): Promise<{
         "Content-Security-Policy": "default-src 'none'",
       });
       response.end("<!doctype html><title>Labeled secret privacy probe</title>"
-        + "<label>API key <input aria-label='API key' value='hunter2'></label>");
+        + "<span id='key-label'>API key</span>"
+        + "<input aria-labelledby='key-label' value='hunter2'>");
       return;
     }
     if (request.url === "/agent-browser-pixel-secret-privacy") {

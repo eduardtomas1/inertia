@@ -300,10 +300,36 @@ export async function semanticPageSnapshot(
           || element.tagName.toLowerCase(),
           50,
         );
+    const labelledByFor = (element) => {
+      const source = element.getAttribute("aria-labelledby");
+      if (!source) return "";
+      if (typeof source !== "string" || source.length > ${MAX_LABEL_TEXT_SOURCE_CHARS}) {
+        elementScanTruncated = true;
+        return "";
+      }
+      const references = normalizeText(source, ${MAX_LABEL_TEXT_SOURCE_CHARS}).split(" ");
+      if (references.length > 16) elementScanTruncated = true;
+      const labels = [];
+      for (let index = 0; index < Math.min(references.length, 16); index += 1) {
+        const id = references[index];
+        if (!id || id.length > 300 || typeof document.getElementById !== "function") {
+          elementScanTruncated = true;
+          continue;
+        }
+        const label = document.getElementById(id);
+        if (!label) {
+          elementScanTruncated = true;
+          continue;
+        }
+        labels.push(boundedElementText(label));
+      }
+      return normalizeText(labels.join(" "), ${MAX_LABEL_TEXT_SOURCE_CHARS});
+    };
     const nameFor = (element) => passwordField(element)
       ? "Password field"
       : redact(
           element.getAttribute("aria-label")
+          || labelledByFor(element)
           || element.getAttribute("title")
           || element.getAttribute("placeholder")
           || (element.labels && boundedElementText(element.labels[0]))

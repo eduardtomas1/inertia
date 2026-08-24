@@ -55,6 +55,8 @@ function withSemanticIterator<
 describe("agent browser semantic snapshots", () => {
   it("classifies bounded visible text and input values before screenshot capture", async () => {
     let inputLabel: string | null = null;
+    let inputLabelledBy: string | null = null;
+    const referencedLabelBody = bodyWithText("API key");
     const input = {
       nodeType: 1,
       tagName: "INPUT",
@@ -65,7 +67,9 @@ describe("agent browser semantic snapshots", () => {
       parentElement: null,
       disabled: false,
       checked: false,
-      getAttribute: (name: string) => name === "aria-label" ? inputLabel : null,
+      getAttribute: (name: string) => name === "aria-label"
+        ? inputLabel
+        : name === "aria-labelledby" ? inputLabelledBy : null,
       hasAttribute: () => false,
       matches: () => false,
       getBoundingClientRect: () => ({
@@ -85,6 +89,7 @@ describe("agent browser semantic snapshots", () => {
       },
       document: withSemanticIterator({
         title: "Local app", body, documentElement: {},
+        getElementById: (id: string) => id === "key-label" ? referencedLabelBody : null,
         querySelectorAll: () => [input],
       }),
       location: { href: "http://127.0.0.1:3000/" },
@@ -109,6 +114,9 @@ describe("agent browser semantic snapshots", () => {
     inputLabel = "Documentation search";
     input.value = "http://localhost:3000/docs";
     await expect(agentPageHasSensitiveScreenshotEvidence(contents as never)).resolves.toBe(false);
+    inputLabelledBy = "key-label";
+    await expect(agentPageHasSensitiveScreenshotEvidence(contents as never)).resolves.toBe(false);
+    inputLabelledBy = null;
     inputLabel = "Workspace location";
     input.value = "/workspace/inertia/src/main.ts";
     await expect(agentPageHasSensitiveScreenshotEvidence(contents as never)).resolves.toBe(false);
@@ -116,6 +124,9 @@ describe("agent browser semantic snapshots", () => {
     input.value = "hunter2";
     await expect(agentPageHasSensitiveScreenshotEvidence(contents as never)).resolves.toBe(true);
     inputLabel = null;
+    inputLabelledBy = "key-label";
+    await expect(agentPageHasSensitiveScreenshotEvidence(contents as never)).resolves.toBe(true);
+    inputLabelledBy = null;
     body.innerText = "API_KEY=sk-visible-token-that-must-not-enter-a-bitmap";
     await expect(agentPageHasSensitiveScreenshotEvidence(contents as never)).resolves.toBe(true);
     body.innerText = ordinaryBodyText;

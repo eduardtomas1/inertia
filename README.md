@@ -236,7 +236,7 @@ Report suspected vulnerabilities privately through the [security policy](SECURIT
 
 ### Version 0.0.44
 
-Inertia 0.0.44 is a maintenance release for deterministic CI ownership. It preserves the public feature set shipped in 0.0.43 while giving the compact Browser evidence control an explicit accessible name with its current evidence count and making the PTY lifecycle benchmark wait for a complete acknowledged stream instead of node-pty's nondeterministic close tail.
+Inertia 0.0.44 is a maintenance release for deterministic CI ownership. It preserves the public feature set shipped in 0.0.43 while giving the compact Browser evidence control an explicit accessible name with its current evidence count, making the PTY lifecycle benchmark wait for a complete acknowledged stream instead of node-pty's nondeterministic close tail, and measuring stream first projection from three raw persistence-path samples without changing the shipped cadence or hosted ceiling.
 
 Inertia now gives each chat a visible local Browser with bounded agent actions and an inspectable, fail-closed evidence timeline for screenshots, console failures, failed requests, navigation, and actions. The pre-merge confidence view collects exact-head CI, review freshness, affected areas, focused evidence, portability, bundle deltas, and release readiness without letting stale status look green.
 

@@ -60,6 +60,63 @@ function loadConfig(
   };
 }
 
+function loadIncompleteMacSigningMatrix(): {
+  status: number | null;
+  stdout: string;
+  stderr: string;
+  error: string;
+} {
+  const environment = { ...process.env };
+  for (const key of signingEnvironmentKeys) delete environment[key];
+  const command = `
+    const signingEnvironmentKeys = ${JSON.stringify(signingEnvironmentKeys)};
+    const macSigningEnvironmentKeys = ${JSON.stringify(macSigningEnvironmentKeys)};
+    const releaseChannels = ${JSON.stringify(releaseChannels)};
+    const releasePlatforms = ["macos-x64", "macos-arm64"];
+    const configPath = require.resolve("./scripts/electron-builder.release.cjs");
+    const results = [];
+
+    for (const channel of releaseChannels) {
+      for (const platform of releasePlatforms) {
+        for (let mask = 1; mask < (1 << macSigningEnvironmentKeys.length) - 1; mask += 1) {
+          for (const key of signingEnvironmentKeys) delete process.env[key];
+          process.env.INERTIA_RELEASE_CHANNEL = channel;
+          process.env.INERTIA_RELEASE_PLATFORM = platform;
+          for (const [index, key] of macSigningEnvironmentKeys.entries()) {
+            if ((mask & (1 << index)) !== 0) process.env[key] = \`configured-\${key}\`;
+          }
+
+          delete require.cache[configPath];
+          let outcome = "success";
+          let diagnostic = "";
+          try {
+            require(configPath);
+          } catch (error) {
+            outcome = "error";
+            diagnostic = error instanceof Error ? error.message : String(error);
+          }
+          results.push({ channel, platform, mask, outcome, diagnostic });
+        }
+      }
+    }
+
+    process.stdout.write(JSON.stringify(results));
+  `;
+  const result = spawnSync(process.execPath, ["-e", command], {
+    cwd: root,
+    encoding: "utf8",
+    env: environment,
+    maxBuffer: 512 * 1024,
+    timeout: 5_000,
+  });
+  return {
+    status: result.status,
+    stdout: result.stdout,
+    stderr: result.stderr,
+    error: result.error?.message ?? "",
+  };
+}
+
 describe("release signing configuration", () => {
   it("removes blank CI credential variables on every channel and native architecture", () => {
     const blanks = Object.fromEntries(signingEnvironmentKeys.map((key) => [key, ""]));
@@ -105,24 +162,36 @@ describe("release signing configuration", () => {
   });
 
   it("rejects every non-empty proper macOS signing subset on both channels and architectures", () => {
+    const result = loadIncompleteMacSigningMatrix();
+    expect(result.status, `${result.error}\n${result.stderr}`).toBe(0);
+    expect(result.error).toBe("");
+    expect(result.stderr).toBe("");
+    const cases = JSON.parse(result.stdout) as Array<{
+      channel: string;
+      platform: string;
+      mask: number;
+      outcome: "success" | "error";
+      diagnostic: string;
+    }>;
+    expect(cases).toHaveLength(120);
+
     let checked = 0;
     for (const channel of releaseChannels) {
       for (const platform of ["macos-x64", "macos-arm64"] as const) {
         for (let mask = 1; mask < (1 << macSigningEnvironmentKeys.length) - 1; mask += 1) {
-          const additions: Record<string, string> = {
-            INERTIA_RELEASE_CHANNEL: channel,
-          };
-          for (const [index, key] of macSigningEnvironmentKeys.entries()) {
-            if ((mask & (1 << index)) !== 0) additions[key] = `configured-${key}`;
-          }
-          const result = loadConfig(platform, additions);
+          const testCase = cases[checked];
+          expect(testCase).toMatchObject({ channel, platform, mask, outcome: "error" });
+          const missingKeys = macSigningEnvironmentKeys.filter(
+            (_key, index) => (mask & (1 << index)) === 0,
+          );
           expect(
-            result.status,
-            `${channel}/${platform}/subset-${mask}: ${result.stderr}`,
-          ).not.toBe(0);
-          expect(result.stderr).toContain("macOS signing configuration is incomplete");
-          for (const value of Object.values(additions)) {
-            if (value !== channel) expect(result.stderr).not.toContain(value);
+            testCase.diagnostic,
+            `${channel}/${platform}/subset-${mask}`,
+          ).toBe(
+            `macOS signing configuration is incomplete. Missing: ${missingKeys.join(", ")}.`,
+          );
+          for (const key of macSigningEnvironmentKeys) {
+            expect(testCase.diagnostic).not.toContain(`configured-${key}`);
           }
           checked += 1;
         }

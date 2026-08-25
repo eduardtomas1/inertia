@@ -78,6 +78,18 @@ When you explicitly enable third-model comparison, Inertia locks the two source 
 
 Nested module repositories keep their own review marks, notes, questions, and selective reverts. Agent revision requests and generated whole-repository summaries remain limited to the project-root repository because their recovery checkpoint must cover the same Git worktree; Inertia explains that boundary instead of presenting nested repositories as temporarily unavailable.
 
+![Responsive Files navigation with a selected file and code range](docs/screenshots/pr-162-exact-files-resized-panel-light.png)
+
+Picker, paste, and drop attachments remain provisional until the privileged host acknowledges a per-document import lease. Only the exact committed subset becomes visible to the provider; navigation, renderer loss, cancellation, timeout, partial failure, and stale chat or turn authority reclaim every uncommitted intermediate.
+
+![The responsive composer stays usable while attachments are validated](docs/screenshots/pr-attachment-import-responsive-light-wide.png)
+
+### Know whether a change is actually ready
+
+The local pre-merge confidence view brings the exact checkout and head together with hosted CI, Codex review freshness, unresolved conversations, affected areas, focused and portability evidence, bundle deltas, and release readiness. Stale or missing evidence stays visibly incomplete instead of being decorated as green.
+
+![Exact-head checks, review, and release readiness in the pre-merge confidence view](docs/screenshots/pre-merge-confidence-exact-dark-wide.png)
+
 ### Conversations that explain the work
 
 - The transcript reads like one calm engineering document: a light request, an understandable workstream, a clean final answer, and a quiet supporting ledger.
@@ -120,6 +132,8 @@ Nested module repositories keep their own review marks, notes, questions, and se
 Open **Preview** for a chat and point it at a loopback development server. That chat now owns an ephemeral multi-page Inertia Browser: the selected agent can inspect a bounded semantic snapshot, navigate local pages, interact through stable element references, and capture a bounded PNG into local Evidence without launching a separate Playwright browser. Cursor movement stays visible on the page, while **Evidence** keeps a strictly local, bounded timeline of screenshots, navigation, failed requests, console errors, and fixed agent-action labels for the exact owning chat.
 
 Semantic inspection does not prompt again. Screenshot bitmap bytes are never returned to a provider because arbitrary CSS, canvas, and media pixels cannot be proven secret-free from source inspection. Opening one exact local capture requires a native post-capture confirmation tied to its immutable bytes; Auto-edit and Full Access do not bypass that confirmation. In **Supervised** mode, navigation, typing, clicks, scrolling, and page changes require Inertia's ordinary approval; Auto-edit and Full Access follow their existing provider permission modes. Remote sites continue to open in the system browser and never become agent-controlled embedded content. Browser pages use a non-persistent hardened Electron session with permissions, downloads, popups, and file access denied, and all authority is cancelled when the owning turn or runtime ends. If a page observes a password value, agent snapshots and screenshots stay unavailable until that document navigates away. See the [agent browser design and security boundary](docs/AGENT_BROWSER.md).
+
+![A bounded local Browser evidence timeline beside the visible page](docs/screenshots/pr-166-browser-evidence-light-wide.png)
 
 ![Search-first Work rows with provider, repository, branch, status, and time](docs/screenshots/inertia-work.png)
 
@@ -220,36 +234,33 @@ If something goes wrong, first refresh the affected provider in **Settings → P
 
 Report suspected vulnerabilities privately through the [security policy](SECURITY.md), never through a public issue.
 
-### Version 0.0.41
+### Version 0.0.42
 
-Active chats now use a tighter responsive composer in both the main workspace and detached windows. Enter sends an immediate follow-up, Tab queues one durably for that chat, `$` autocompletes only route-discovered skills, and the longer responsive minimap keeps more of a large transcript reachable without adding noise.
+Inertia now gives each chat a visible local Browser with bounded agent actions and an inspectable, fail-closed evidence timeline for screenshots, console failures, failed requests, navigation, and actions. The pre-merge confidence view collects exact-head CI, review freshness, affected areas, focused evidence, portability, bundle deltas, and release readiness without letting stale status look green.
 
-Daily Work can browse every retained local date, Duo setup keeps its optional judge compact, and project menus dismiss and rename predictably. Refreshed dark, light, Duo, detached-chat, workstream, Daily Work, and settings captures document the resulting responsive surfaces.
+One authoritative run-state engine keeps Codex, Claude, Cursor, Kimi Code, and OpenCode truthful through delegation, retry, waiting, cancellation, failure, restart, and completion. OpenCode descendant sessions can keep legitimate work alive without leaking child-private output, reviewed SDK updates retain their native protocols, and supervised runtimes preserve only bounded non-secret launch state.
 
-Discord release summaries compare the latest public GitHub or GitLab release with its predecessor, categorize a bounded local diff, and post through a webhook held only by the operating system credential vault. The privileged main process re-fetches authoritative release metadata before sending, so the renderer never supplies trusted tags or receives the saved secret.
+Files navigation keeps exact repository, path, disclosure, search, language, keyboard, and responsive state. Picker, paste, and drop attachments stay inside a privileged per-document lease until the exact accepted subset is committed, while recovery, window placement, updater ownership, health reporting, theme contrast, and measured first paint all remain explicit about partial or failed state.
 
-Download [Inertia v0.0.41](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.41):
+Stable builds now cover six native architectures. Unsigned Windows and ad-hoc macOS packages remain manual downloads until signing credentials exist; Linux AppImages keep verified in-app delivery. The separately identified Canary prerelease channel can test and roll back Canary packages without changing Stable's feed or local state.
 
-| Platform | Download |
-| --- | --- |
-| macOS · Apple silicon | DMG or ZIP |
-| macOS · Intel | DMG or ZIP |
-| Windows · x64 | Installer |
-| Windows · ARM64 | Installer |
-| Linux · x64 | AppImage |
-| Linux · ARM64 | AppImage |
+Download [Inertia v0.0.42](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.42):
 
-Every stable release and Canary prerelease includes `SHA256SUMS.txt`. Download
-it from the same exact tagged release and compare the selected package's SHA-256
-before opening it. Credential-free macOS packages are ad-hoc signed rather than
-notarized, so Gatekeeper may retain the download's quarantine warning. After
-verifying the checksum, open the package from Finder; if macOS blocks it, use
-**System Settings → Privacy & Security → Open Anyway**, confirm the exact file,
-then choose **Open**. Do not remove quarantine attributes or disable Gatekeeper.
-Unsigned Windows installers may show **Windows protected your PC**. After
-verifying the checksum and exact GitHub release source, choose **More info**,
-confirm the filename and **Unknown publisher** status, then **Run anyway**. Do
-not disable SmartScreen. See the [changelog](CHANGELOG.md) for the complete
-release story.
+| Platform | Architecture | Package | Update delivery after the first manual install |
+| --- | --- | --- | --- |
+| macOS | Apple silicon (arm64) | DMG or ZIP | Manual while Developer ID signing and notarization are unavailable |
+| macOS | Intel (x64) | DMG or ZIP | Manual while Developer ID signing and notarization are unavailable |
+| Windows | x64 | Installer | Manual while Authenticode signing is unavailable |
+| Windows | ARM64 | Installer | Manual while Authenticode signing is unavailable |
+| Linux | x64 | AppImage | Verified in-app updates |
+| Linux | ARM64 | AppImage | Verified in-app updates |
+
+Every platform requires a manual first install. Every stable release and Canary prerelease includes `SHA256SUMS.txt`; download it from the same exact tagged release and compare the selected package's SHA-256 before opening it.
+
+Credential-free macOS packages are ad-hoc signed rather than notarized, so Gatekeeper may retain the download's quarantine warning. After verifying the checksum, open the package from Finder; if macOS blocks it, use **System Settings → Privacy & Security → Open Anyway**, confirm the exact file, then choose **Open**. Do not remove quarantine attributes or disable Gatekeeper.
+
+Unsigned Windows installers may show **Windows protected your PC**. After verifying the checksum and exact GitHub release source, choose **More info**, confirm the filename and **Unknown publisher** status, then **Run anyway**. Do not disable SmartScreen.
+
+See the [changelog](CHANGELOG.md) for the complete release story and [release guide](docs/RELEASING.md) for Stable, Canary, signing, and update-delivery details.
 
 Inertia is available under the [Apache 2.0 License](LICENSE). Packaged builds also include the generated notices and original license texts supplied by their production dependencies and Electron.

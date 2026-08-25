@@ -283,7 +283,7 @@ async function seedShowcaseData() {
       now,
     );
     database.prepare(`
-      UPDATE conversations SET branch = 'codex/release-0.0.31'
+      UPDATE conversations SET branch = 'codex/release-0.0.42'
       WHERE id = ?
     `).run(conversationId);
     database.prepare(`
@@ -332,13 +332,13 @@ async function seedShowcaseData() {
         continuation_identity_json, harness_id, backend_profile_id, model,
         model_alias, reasoning_effort, interaction_mode, access_mode,
         provider_session_before, provider_session_after, requested_at,
-        started_at, completed_at, status, terminal_reason, checkpoint_id,
+        started_at, completed_at, status, run_state, terminal_reason, checkpoint_id,
         usage_start_json, usage_completion_json, configuration_revision,
         association, created_at, updated_at
       ) VALUES (
         ?, ?, ?, ?, ?, 'codex', ?, ?, 'codex-app-server',
         'builtin:openai', 'gpt-5.6-sol', 'GPT-5.6-Sol', 'high',
-        'build', 'supervised', NULL, NULL, ?, ?, ?, 'completed',
+        'build', 'supervised', NULL, NULL, ?, ?, ?, 'completed', 'completed',
         'provider-completed', NULL, NULL, NULL, 0, 'authoritative', ?, ?
       )
     `).run(
@@ -570,13 +570,13 @@ function seedActiveWorkstream(showcase) {
         continuation_identity_json, harness_id, backend_profile_id, model,
         model_alias, reasoning_effort, interaction_mode, access_mode,
         provider_session_before, provider_session_after, requested_at,
-        started_at, completed_at, status, terminal_reason, checkpoint_id,
+        started_at, completed_at, status, run_state, terminal_reason, checkpoint_id,
         usage_start_json, usage_completion_json, configuration_revision,
         association, created_at, updated_at
       ) VALUES (
         ?, ?, ?, ?, NULL, 'codex', ?, ?, 'codex-app-server',
         'builtin:openai', 'gpt-5.6-sol', 'GPT-5.6-Sol', 'high',
-        'build', 'supervised', NULL, NULL, ?, ?, NULL, 'running',
+        'build', 'supervised', NULL, NULL, ?, ?, NULL, 'running', 'running',
         NULL, NULL, NULL, NULL, 0, 'authoritative', ?, ?
       )
     `).run(
@@ -953,7 +953,7 @@ try {
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("radio", { name: "Dark" }).click();
   await page.getByText(
-    `Inertia v${packageManifest.version}`,
+    `Inertia · v${packageManifest.version}`,
     { exact: true },
   ).first().waitFor();
   await capture(page, "inertia-settings.png");

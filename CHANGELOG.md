@@ -4,6 +4,43 @@ The useful changes in each Inertia release, in plain language.
 
 ## Next
 
+## 0.0.42 — 2026-08-25
+
+### Agents can work in a visible, inspectable local Browser
+
+- Each chat can own a hardened, non-persistent multi-page Browser for loopback development sites. Codex, Claude, Cursor, Kimi Code, and OpenCode can inspect a bounded semantic view, navigate, click, type, scroll, and switch pages through host-owned tools while the exact page remains visible in Inertia. Remote sites continue to open outside the embedded Browser, and Browser authority ends with the owning runtime.
+- Browser work gains a bounded local evidence timeline for screenshots, console errors, failed requests, navigation, and visible agent actions. Evidence retains exact project, chat, tab, run, turn, document, and occurrence identity; providers receive bounded semantic snapshots and evidence metadata rather than screenshot pixels; and the complete ledger disappears when its Browser closes. A screenshot remains main-process-owned and opens only after exact post-capture approval in a no-preload native inspector that clears on replacement, navigation, eviction, or page closure.
+- Evidence fails closed before a provider or renderer can inspect it when a document observes password data or content looks like a credential, private path, credential-bearing URL, malformed encoding, or oversized value. The Browser also revalidates the exact live target through interaction settlement so navigation, focus, nested controls, disabled geometry, and page-script races cannot redirect an acknowledged action.
+
+### Provider and runtime state has one truthful owner
+
+- Running, delegated, retrying, waiting, cancelling, failed, and completed states now come from one authoritative persisted run-state engine. Codex, Claude, Cursor, Kimi Code, and OpenCode settle renderer state with the owned provider process instead of leaving a stale “working” label after failure, interruption, retry, restart, or exit.
+- OpenCode descendant sessions form a bounded verified ownership graph. Legitimate subagent work keeps its parent run alive without copying child-private reasoning or tool output into the parent conversation, unrelated sessions cannot extend the deadline, and the root session still decides final completion and cancellation.
+- Provider protocol coverage was re-audited and refreshed for ACP 1.4, Claude Agent SDK 0.3.238, and OpenCode SDK 1.18.21. Supervised runtimes now preserve only bounded, reviewed non-secret Git, shell, terminal, WSL, desktop, locale, proxy, pager, Homebrew, Bedrock, and Claude cloud-routing state; credentials, auth selectors, loader controls, executable hooks, malformed endpoints, and arbitrary environment families remain excluded at both process boundaries.
+
+### Files, attachments, and review surfaces stay attributable
+
+- Files navigation is denser and more direct across trees, previews, nested repositories, language-aware links, searches, refreshes, and responsive panel sizes. Exact selected paths, repository ownership, keyboard focus, disclosure, and in-flight search state stay stable instead of being inferred from transient layout or stale reads.
+- Picker, paste, and drop attachments now enter a privileged per-document batch lease before the renderer can preview or send them. Pending images do not fetch before acknowledgement, only the exact committed subset becomes provider-visible, and navigation, renderer loss, cancellation, timeout, partial failure, or stale chat/turn authority reclaims every uncommitted intermediate.
+- The pre-merge confidence view brings exact-head CI, Codex review freshness, affected areas, focused and portability evidence, bundle deltas, and release readiness into one local surface. Theme contrast, borders, labels, menus, focus, and compact controls were also refined across every built-in palette without flattening the character of light, dark, split, detached, narrow, reduced-motion, or forced-color layouts.
+
+### Recovery and first paint do less work without hiding failure
+
+- Workspace ordering, traversal, streaming first paint, and high-frequency projections avoid redundant work while preserving exact ordering, focus, visible live state, architecture boundaries, and renderer budgets. Performance changes were retained only where measured behavior improved without weakening correctness.
+- Recoverable database-family and startup state is quarantined and restored without presenting partial recovery as success. Desktop persistence and hosted evidence now synchronize exact fixture identity, streaming projection, transcript navigation, Files geometry, and Browser bounds without relaxing product deadlines or assertions.
+- Updater and restart ownership recover deterministically, off-screen main and detached windows return to a usable display, and partial process, storage, or renderer health remains visibly partial. Node 22.13 is now validated as the minimum supported runtime instead of letting an older Node installation fail later with a less precise error.
+
+### Native releases cover every supported architecture
+
+- Stable release CI now builds and smokes native macOS Intel and Apple silicon, Windows x64 and ARM64, and Linux x64 and ARM64 packages on matching hosts. Exact-tag validation, locked dependencies, native-binary checks, the complete test gate, package smoke, Electron fuses, checksums, provenance, and no-replacement publication cover the full six-architecture union before one writer publishes it.
+- Signing remains optional until the project has certificates. macOS uses its verified ad-hoc signature and Windows remains explicitly unsigned, so both platforms use a clear manual download flow; Linux AppImages retain their verified in-app delivery path. Stable feed metadata alone never grants updater authority—the verified packaged capability marker remains decisive—and a partial signing configuration fails closed without making unsigned public packages unusable.
+- A separate Canary channel can validate prerelease packages without changing Stable’s latest feed, application identity, local profile, workspace state, updater cache, or protocol. Canary retains and re-verifies its last-known-good package for bounded rollback, while an immutable migration-lineage gate protects every released database migration and its relevant helpers from edits, removal, or reordering.
+
+### Release confidence
+
+- Reviewed dependency updates cover provider protocols, MCP, canvas, virtualization, icons, native SQLite types, and their locked transitive graph. Deterministic portable contracts continue to prove provider success, continuation, tools, images, compaction, failure, cancellation, malformed input, output ceilings, and clean shutdown without downloading unreviewed provider code during the release gate.
+- Architecture and both lint layers, all TypeScript projects, the complete unit and integration suite, portable provider contracts, real Electron scenarios, production dependency audit, renderer budgets, migration lineage, native package smoke, Electron fuses, checksums, provenance, and the exact-head release PR protect the release.
+
 ## 0.0.41 — 2026-08-21
 
 ### Active chats stay compact while follow-ups remain deliberate

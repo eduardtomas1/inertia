@@ -647,7 +647,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
         || manuallyAdjustedRows.current.has(String(item.key)),
     });
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const signal = hasLatestTurnSignal
         && latestSignalTurnId !== null
         && latestSignalRunId !== null

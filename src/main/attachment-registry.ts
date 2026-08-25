@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { constants, type BigIntStats } from "node:fs";
+import { constants } from "node:fs";
 import {
   type FileHandle,
   lstat,
@@ -35,17 +35,16 @@ import {
   type PreparedAttachmentMetadata,
 } from "./attachment-import.js";
 import {
+  isStablePrivateAttachment,
+  verifyStoredAttachmentAfterValidation,
+} from "./attachment-registry-file-verification.js";
+import {
   inProcessAttachmentImportValidationRunner,
   type AttachmentImportFileOperation,
   type AttachmentImportValidationReceipt,
   type AttachmentImportValidationRunner,
 } from "./attachment-import-file.js";
 import { RendererAttachmentImportHolds } from "./attachment-import-holds.js";
-import {
-  identity,
-  type OpenedSecureFile,
-  openVerifiedFile,
-} from "./secure-file-io.js";
 
 const MAX_SESSION_ATTACHMENT_RECORDS = 256;
 const MAX_SESSION_ATTACHMENT_BYTES = 512 * 1024 * 1024;
@@ -218,37 +217,6 @@ function sameIdentity(
   right: { dev: number; ino: number },
 ): boolean {
   return left.dev === right.dev && left.ino === right.ino;
-}
-
-function isStablePrivateAttachment(
-  before: BigIntStats,
-  after: BigIntStats,
-): boolean {
-  return before.isFile()
-    && after.isFile()
-    && !before.isSymbolicLink()
-    && !after.isSymbolicLink()
-    && before.nlink === 1n
-    && after.nlink === 1n
-    && before.dev === after.dev
-    && before.ino === after.ino
-    && before.size === after.size
-    && before.mtimeNs === after.mtimeNs
-    && before.ctimeNs === after.ctimeNs
-    && (
-      process.platform === "win32"
-      || (
-        (before.mode & 0o777n) === 0o600n
-        && (after.mode & 0o777n) === 0o600n
-        && (
-          typeof process.getuid !== "function"
-          || (
-            before.uid === BigInt(process.getuid())
-            && after.uid === BigInt(process.getuid())
-          )
-        )
-      )
-    );
 }
 
 function assertOwnedDirectory(
@@ -1233,52 +1201,16 @@ export class AttachmentRegistry {
     if (!receipt) {
       throw new Error("Attachment validation utility returned no result.");
     }
-    signal.throwIfAborted();
-    const verificationError =
-      "Temporary attachment storage could not be verified safely.";
-    let verified: OpenedSecureFile;
-    try {
-      verified = await openVerifiedFile(
-        path,
-        attachment.size,
-        identity(before),
-      );
-    } catch {
-      signal.throwIfAborted();
-      throw new Error(verificationError);
-    }
-    try {
-      signal.throwIfAborted();
-      const [verifiedRoot, pinnedAfter, namedAfter, verifiedPath] =
-        await Promise.all([
-          securePrivateDirectory(this.directory),
-          verified.handle.stat({ bigint: true }),
-          lstat(path, { bigint: true }),
-          realpath(path),
-        ]);
-      signal.throwIfAborted();
-      if (
-        verified.linkCount !== 1
-        || verified.content.byteLength !== attachment.size
-        || verified.metadata.size !== attachment.size
-        || verified.metadata.size !== receipt.size
-        || verified.metadata.digest !== receipt.digest
-        || (
-          process.platform !== "win32"
-          && verified.metadata.mode !== 0o600
-        )
-        || verifiedRoot !== root
-        || !isStablePrivateAttachment(before, pinnedAfter)
-        || !isStablePrivateAttachment(pinnedAfter, namedAfter)
-        || verifiedPath !== join(verifiedRoot, basename(path))
-        || dirname(verifiedPath) !== verifiedRoot
-      ) {
-        throw new Error(verificationError);
-      }
-    } finally {
-      await verified.handle.close();
-    }
-    signal.throwIfAborted();
+    await verifyStoredAttachmentAfterValidation({
+      before,
+      expectedRoot: root,
+      expectedSize: attachment.size,
+      path,
+      receipt,
+      resolveVerifiedRoot: async () =>
+        await securePrivateDirectory(this.directory),
+      signal,
+    });
     return receipt;
   }
 }

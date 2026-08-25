@@ -58,6 +58,7 @@ const HOSTED_STREAM_FIRST_PROJECTION_CATASTROPHIC_MS = 500;
 const HOSTED_STREAM_VISIBLE_GAP_CATASTROPHIC_MS = 500;
 const HOSTED_SELECTED_STREAM_FIRST_PROJECTION_MS = 75;
 const HOSTED_SELECTED_STREAM_VISIBLE_GAP_MS = 175;
+const FIRST_PROJECTION_SAMPLE_COUNT = 3;
 const PTY_RECORD_PREFIX = "INERTIA_PTY_RECORD_BEGIN:";
 const PTY_RECORD_SEPARATOR = ":PAYLOAD:";
 const PTY_RECORD_SUFFIX = ":INERTIA_PTY_RECORD_END";
@@ -78,6 +79,7 @@ interface StreamingCadenceMeasurement extends Measurement {
   firstFlushMs: 12 | 16 | 24;
   intervalMs: number;
   firstProjectionMs: number;
+  firstProjectionSamplesMs: number[];
   medianVisibleGapMs: number;
   p95VisibleGapMs: number;
   visibleUpdatesPerSecond: number;
@@ -88,6 +90,68 @@ interface StreamingCadenceMeasurement extends Measurement {
   runtimeCpuMs: number;
   runtimeRssDeltaBytes: number;
   sourceCharacters: number;
+}
+
+async function firstProjectionSamples(
+  root: string,
+  workspace: string,
+  intervalMs: 64 | 80 | 96,
+  firstFlushMs: 12 | 16 | 24,
+): Promise<number[]> {
+  const databasePath = join(
+    root,
+    `stream-first-projection-${firstFlushMs}-${intervalMs}.sqlite`,
+  );
+  const store = new RuntimeStore(databasePath, workspace, {
+    recoverInterruptedRuns: false,
+  });
+  const project = store.createProject(`First ${intervalMs}`, workspace);
+  const conversation = store.createConversation(
+    project.id,
+    `First ${intervalMs}`,
+  );
+  const samples: number[] = [];
+  try {
+    for (let sample = 0; sample < FIRST_PROJECTION_SAMPLE_COUNT; sample += 1) {
+      const expectedText = `first-projection-${sample}`;
+      const message = store.createMessage(conversation.id, "", "assistant");
+      let resolveProjection!: () => void;
+      let rejectProjection!: (error: unknown) => void;
+      const projection = new Promise<void>((resolve, reject) => {
+        resolveProjection = resolve;
+        rejectProjection = reject;
+      });
+      let projectedAt = 0;
+      const channel = new TurnStreamCoalescer({
+        scheduler: {
+          setTimeout: (callback, delayMs) => setTimeout(callback, delayMs),
+          clearTimeout: (handle) => clearTimeout(handle as NodeJS.Timeout),
+        },
+        firstFlushMs,
+        flushIntervalMs: intervalMs,
+        maxBufferedChars: 16_384,
+        onFlush: ({ delta }) => {
+          store.appendMessageContent(message.id, delta);
+          projectedAt = performance.now();
+          resolveProjection();
+        },
+        onTimerError: rejectProjection,
+      });
+
+      try {
+        const startedAt = performance.now();
+        channel.append(expectedText);
+        await projection;
+        expect(store.message(message.id).content).toBe(expectedText);
+        samples.push(Number((projectedAt - startedAt).toFixed(3)));
+      } finally {
+        channel.dispose();
+      }
+    }
+  } finally {
+    store.close();
+  }
+  return samples;
 }
 
 function percentile(values: readonly number[], fraction: number): number {
@@ -117,6 +181,15 @@ async function streamingCadenceMeasurement(
   const conversation = store.createConversation(
     project.id,
     `Cadence ${intervalMs}`,
+  );
+  // Keep the shipped wall-time contract on the real persistence path, but do
+  // not let one unrelated host preemption own the release gate. A median of
+  // three catches a sustained regression without changing the 75 ms ceiling.
+  const firstProjectionSamplesMs = await firstProjectionSamples(
+    root,
+    workspace,
+    intervalMs,
+    firstFlushMs,
   );
   const message = store.createMessage(conversation.id, "", "assistant");
   const sourceChunks = Array.from({ length: 128 }, (_, index) => (
@@ -181,8 +254,9 @@ async function streamingCadenceMeasurement(
       maximumMs: sample,
       samples: [sample],
       firstProjectionMs: Number(
-        ((projectionTimes[0] ?? completedAt) - startedAt).toFixed(3),
+        percentile(firstProjectionSamplesMs, 0.5).toFixed(3),
       ),
+      firstProjectionSamplesMs,
       medianVisibleGapMs: Number(percentile(visibleGaps, 0.5).toFixed(3)),
       p95VisibleGapMs: Number(percentile(visibleGaps, 0.95).toFixed(3)),
       visibleUpdatesPerSecond: Number(
@@ -1016,6 +1090,10 @@ describe("cross-platform performance benchmark", () => {
         // projection and 175 ms visible-gap contracts. Unconditional timing
         // ceilings would let one scheduler delay override those hosted limits.
         expect(candidate.firstProjectionMs).toBeGreaterThan(0);
+        expect(candidate.firstProjectionSamplesMs)
+          .toHaveLength(FIRST_PROJECTION_SAMPLE_COUNT);
+        expect(candidate.firstProjectionSamplesMs.every((sample) => sample > 0))
+          .toBe(true);
         expect(candidate.p95VisibleGapMs).toBeGreaterThan(0);
         expect(candidate.sqliteWrites).toBe(candidate.visibleUpdates);
       }
@@ -1043,6 +1121,10 @@ describe("cross-platform performance benchmark", () => {
           // without pretending that all nine must meet the product cadence.
           expect(candidate.firstProjectionMs)
             .toBeLessThan(HOSTED_STREAM_FIRST_PROJECTION_CATASTROPHIC_MS);
+          for (const sample of candidate.firstProjectionSamplesMs) {
+            expect(sample)
+              .toBeLessThan(HOSTED_STREAM_FIRST_PROJECTION_CATASTROPHIC_MS);
+          }
           expect(candidate.p95VisibleGapMs)
             .toBeLessThan(HOSTED_STREAM_VISIBLE_GAP_CATASTROPHIC_MS);
           expect(candidate.runtimeCpuMs).toBeLessThan(5_000);

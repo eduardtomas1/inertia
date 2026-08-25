@@ -1,4 +1,4 @@
-import { act, render, waitFor } from "@testing-library/react";
+import { act, render } from "@testing-library/react";
 import { useRef } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -81,7 +81,8 @@ describe("sidebar index position motion", () => {
     const view = render(
       <MotionHarness enabled order={["thread:alpha", "thread:beta"]} />,
     );
-    await waitFor(() => expect(getBounds).toHaveBeenCalledTimes(3));
+    await vi.dynamicImportSettled();
+    expect(getBounds).toHaveBeenCalledTimes(3);
     expect(animate).not.toHaveBeenCalled();
 
     // A scrolled ancestor shifts both the stream and its rows in viewport
@@ -91,7 +92,8 @@ describe("sidebar index position motion", () => {
       <MotionHarness enabled order={["thread:beta", "thread:alpha"]} />,
     );
 
-    await waitFor(() => expect(animate).toHaveBeenCalledTimes(2));
+    await vi.dynamicImportSettled();
+    expect(animate).toHaveBeenCalledTimes(2);
     expect(animate.mock.calls[0]?.[0]).toEqual([
       { opacity: 0.86, transform: "translate(0px, 48px)" },
       { opacity: 1, transform: "translate(0, 0)" },
@@ -126,14 +128,16 @@ describe("sidebar index position motion", () => {
       <MotionHarness enabled={enabled} order={["a", "b"]} visible={visible} />,
     );
     if (enabled) {
-      await waitFor(() => expect(getBounds).toHaveBeenCalledTimes(3));
+      await vi.dynamicImportSettled();
+      expect(getBounds).toHaveBeenCalledTimes(3);
     }
 
     view.rerender(
       <MotionHarness enabled={enabled} order={["b", "a"]} visible={visible} />,
     );
     if (enabled) {
-      await waitFor(() => expect(getBounds).toHaveBeenCalledTimes(6));
+      await vi.dynamicImportSettled();
+      expect(getBounds).toHaveBeenCalledTimes(6);
     } else {
       await act(async () => undefined);
     }
@@ -161,12 +165,14 @@ describe("sidebar index position motion", () => {
     const view = render(
       <MotionHarness active={false} enabled order={["a", "b"]} visible />,
     );
-    await waitFor(() => expect(animate).not.toHaveBeenCalled());
+    await vi.dynamicImportSettled();
+    expect(animate).not.toHaveBeenCalled();
 
     view.rerender(
       <MotionHarness active={false} enabled order={["b", "a"]} visible />,
     );
-    await waitFor(() => expect(animate).toHaveBeenCalledTimes(2));
+    await vi.dynamicImportSettled();
+    expect(animate).toHaveBeenCalledTimes(2);
   });
 
   it("resynchronizes hidden layout changes before visible motion resumes", async () => {
@@ -187,18 +193,20 @@ describe("sidebar index position motion", () => {
       });
     const animate = installAnimateStub();
     const view = render(<MotionHarness enabled order={["a", "b"]} />);
-    await waitFor(() => expect(animate).not.toHaveBeenCalled());
+    await vi.dynamicImportSettled();
+    expect(animate).not.toHaveBeenCalled();
 
     view.rerender(<MotionHarness enabled order={["b", "a"]} visible={false} />);
-    await act(async () => undefined);
+    await vi.dynamicImportSettled();
     expect(animate).not.toHaveBeenCalled();
 
     view.rerender(<MotionHarness enabled order={["b", "a"]} visible />);
-    await act(async () => undefined);
+    await vi.dynamicImportSettled();
     expect(animate).not.toHaveBeenCalled();
 
     view.rerender(<MotionHarness enabled order={["a", "b"]} visible />);
-    await waitFor(() => expect(animate).toHaveBeenCalledTimes(2));
+    await vi.dynamicImportSettled();
+    expect(animate).toHaveBeenCalledTimes(2);
   });
 
   it("cancels active position motion when reduced motion becomes active", async () => {
@@ -221,12 +229,15 @@ describe("sidebar index position motion", () => {
     const animate = installAnimateStub();
     animate.mockReturnValue(animation);
     const view = render(<MotionHarness enabled order={["a", "b"]} />);
-    await waitFor(() => expect(animate).not.toHaveBeenCalled());
+    await vi.dynamicImportSettled();
+    expect(animate).not.toHaveBeenCalled();
     view.rerender(<MotionHarness enabled order={["b", "a"]} />);
-    await waitFor(() => expect(animate).toHaveBeenCalledTimes(2));
+    await vi.dynamicImportSettled();
+    expect(animate).toHaveBeenCalledTimes(2);
 
     view.rerender(<MotionHarness enabled={false} order={["b", "a"]} />);
 
-    await waitFor(() => expect(animation.cancel).toHaveBeenCalledTimes(2));
+    await vi.dynamicImportSettled();
+    expect(animation.cancel).toHaveBeenCalledTimes(2);
   });
 });

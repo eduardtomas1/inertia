@@ -4,6 +4,18 @@ The useful changes in each Inertia release, in plain language.
 
 ## Next
 
+## 0.0.43 — 2026-08-25
+
+### The complete 0.0.42 feature line reaches its first public binary
+
+- Inertia 0.0.43 is the first published binary to contain the complete 0.0.42 feature set described below, together with the completed-answer anchor correction in this section. The `v0.0.42` tag was created, but its platform build never reached publication: there is no GitHub release and there are no downloadable 0.0.42 assets. The 0.0.42 entry remains the historical record of that feature batch; use 0.0.43 for installation.
+- A newly completed answer now keeps its exact reading position while ordinary terminal and detail rerenders settle. The bounded anchor survives only for its matching conversation, turn, run, and answer lifecycle, cancels for explicit reader navigation or replacement work, and cannot let a loaded host pull the answer back to the bottom between its first and second stable frame.
+
+### Release confidence
+
+- The positive OpenCode manual-compaction boundary fixture now has enough test-only headroom to observe completion on loaded hosts, while the production 30-minute inactivity deadline and the focused 100-millisecond negative fixtures remain unchanged. Final-answer coverage reproduces terminal and detail rerenders between stable layout frames and verifies the result in a real Electron viewport.
+- Version, release metadata, migration lineage, architecture, lint, type safety, unit and integration behavior, portable provider contracts, production dependencies, renderer budgets, package smoke, Electron fuses, checksums, provenance, and the exact-head release PR remain the publication boundary.
+
 ## 0.0.42 — 2026-08-25
 
 ### Agents can work in a visible, inspectable local Browser

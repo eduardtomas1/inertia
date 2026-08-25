@@ -620,7 +620,7 @@ export function ChatWorkspace({
     return () => observer.disconnect();
   }, [conversationId, performScrollToLatest]);
 
-  const noteReaderIntent = (): void => {
+  const noteReaderIntent = useCallback((): void => {
     clearPendingFinalAnswerNavigation();
     readerIntentRef.current = true;
     if (followCorrectionFrameRef.current !== null) {
@@ -634,7 +634,7 @@ export function ChatWorkspace({
       readerIntentRef.current = false;
       readerIntentReleaseTimerRef.current = null;
     }, READER_INTENT_GUARD_MS);
-  };
+  }, [clearPendingFinalAnswerNavigation]);
 
   const noteReaderKeyboardIntent = (
     event: React.KeyboardEvent<HTMLDivElement>,
@@ -838,6 +838,7 @@ export function ChatWorkspace({
               onTurnAnchorSettled={onTurnAnchorSettled}
               onTurnAnchorCancelled={onTurnAnchorCancelled}
               onFinalAnswerAutoScroll={onFinalAnswerAutoScroll}
+              onReaderNavigationIntent={noteReaderIntent}
               scrollElementRef={scrollRef}
               timelineElementRef={timelineRef}
               checkpointRestoreDisabled={conversation.status === "running"

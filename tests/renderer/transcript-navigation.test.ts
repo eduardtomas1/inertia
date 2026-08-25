@@ -116,6 +116,21 @@ describe("transcript new-turn navigation", () => {
     })).toBe(reading);
   });
 
+  it("lets a followed transcript observe programmatic movement into history", () => {
+    expect(transcriptNavigationReducer({
+      mode: "follow-latest",
+      conversationId: "conversation-1",
+    }, {
+      type: "reader.scrolled",
+      conversationId: "conversation-1",
+      followsLatest: false,
+      intentional: false,
+    })).toEqual({
+      mode: "reading-history",
+      conversationId: "conversation-1",
+    });
+  });
+
   it("does not anchor active-turn follow-ups or another conversation", () => {
     const reading = {
       mode: "reading-history" as const,

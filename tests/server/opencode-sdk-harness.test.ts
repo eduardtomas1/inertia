@@ -1839,7 +1839,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     const manager = new ProviderManager(
       { commands: { opencode: command } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness({
-        eventInactivityDeadlineMs: 100,
+        eventInactivityDeadlineMs: 5_000, // Keep cleanup bounded below Vitest's 15-second timeout.
         compactionTimestampNow: () => 4242,
       })]),
     );

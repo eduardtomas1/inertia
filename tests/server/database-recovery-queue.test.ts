@@ -113,6 +113,10 @@ describe("database recovery operation serialization", () => {
   it("cancels and drains an active external export without retaining a partial", async () => {
     const directory = mkdtempSync(join(tmpdir(), "inertia-recovery-queue-"));
     const queue = new DatabaseRecoveryOperationQueue();
+    let markWriteStarted!: () => void;
+    const writeStarted = new Promise<void>((resolve) => {
+      markWriteStarted = resolve;
+    });
     const injectedOpen = (async (...args: Parameters<typeof open>) => {
       const handle = await open(...args);
       return new Proxy(handle, {
@@ -125,11 +129,16 @@ describe("database recovery operation serialization", () => {
             _content: string,
             options?: { signal?: AbortSignal },
           ) => new Promise<void>((_resolve, reject) => {
-            options?.signal?.addEventListener(
-              "abort",
-              () => reject(options.signal!.reason),
-              { once: true },
-            );
+            const signal = options?.signal;
+            if (signal?.aborted) {
+              markWriteStarted();
+              reject(signal.reason);
+              return;
+            }
+            signal?.addEventListener("abort", () => reject(signal.reason), {
+              once: true,
+            });
+            markWriteStarted();
           });
         },
       });
@@ -152,6 +161,7 @@ describe("database recovery operation serialization", () => {
       await vi.waitFor(() => expect(
         readdirSync(directory).some((entry) => entry.endsWith(".partial")),
       ).toBe(true));
+      await writeStarted;
 
       await queue.closeAndDrain();
 

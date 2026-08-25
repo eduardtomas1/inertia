@@ -4,6 +4,20 @@ The useful changes in each Inertia release, in plain language.
 
 ## Next
 
+## 0.0.44 — 2026-08-25
+
+### CI checks have clearer deterministic owners
+
+- Source-control deadline coverage now advances a fake clock while preserving the production cancellation and cleanup contract. The exhaustive macOS partial-signing matrix runs in one bounded Node process, sidebar motion assertions wait for their exact lazy module to settle, and Agent Browser privacy checks run in a focused Electron scenario instead of extending the unrelated cross-project workspace test. These are test-harness reliability changes: production Git deadlines, signing policy, motion, and Browser privacy boundaries are unchanged.
+- Browser evidence coverage now measures hostile-console sanitization against the owning thread's CPU budget and verifies every retained redaction and bounded ledger entry. The compact evidence control also has an explicit accessible name containing its current evidence count, so the audited state remains understandable without its hidden text label.
+- The PTY lifecycle benchmark now keeps its fixture alive until all 2,000 ordered records cross the public terminal stream and an explicit acknowledgement returns through the product input path. This preserves strict byte, ordering, exit, and late-output assertions while removing node-pty close-tail nondeterminism; production terminal behavior is unchanged.
+
+### Release confidence
+
+- The detached-chat, composer-command, and Browser-evidence fixtures now assert their owned persisted state, route, accessibility, and teardown boundaries directly.
+- Credential-free publication remains an exact 11-file union: four ad-hoc-signed macOS packages, two unsigned Windows installers, two Linux AppImages, two architecture-qualified Linux update manifests, and `SHA256SUMS.txt`. macOS and Windows remain checksum-first manual installs; only Linux AppImages support verified in-app delivery in this configuration.
+- Version, release metadata, migration lineage, architecture, lint, type safety, unit and integration behavior, portable provider contracts, production dependencies, renderer budgets, package smoke, Electron fuses, checksums, provenance, and the exact-head release PR remain the publication boundary.
+
 ## 0.0.43 — 2026-08-25
 
 ### The complete 0.0.42 feature line reaches its first public binary

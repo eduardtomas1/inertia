@@ -103,6 +103,7 @@ describe("Browser evidence timeline", () => {
     );
 
     const toggle = screen.getByRole("button", { name: /Evidence 3/u });
+    expect(toggle).toHaveAttribute("aria-label", "Evidence 3");
     toggle.focus();
     fireEvent.click(toggle);
     const address = screen.getByRole("textbox", { name: "Preview address" });

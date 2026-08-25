@@ -54,6 +54,7 @@ describe("source-control aggregate deadlines", () => {
   });
 
   it("retains deadline ownership until cancelled Git cleanup settles", async () => {
+    vi.useFakeTimers({ now: 10_000 });
     const deadline = new SourceControlDeadline(Date.now() + 20, "read");
     const cleanupStarted = deferred<void>();
     const releaseCleanup = deferred<void>();
@@ -95,6 +96,7 @@ describe("source-control aggregate deadlines", () => {
         () => { aggregateSettled = true; },
       );
 
+      await vi.advanceTimersByTimeAsync(20);
       await cleanupStarted.promise;
       expect(aggregateSettled).toBe(false);
 
@@ -104,6 +106,7 @@ describe("source-control aggregate deadlines", () => {
     } finally {
       releaseCleanup.resolve();
       deadline.dispose();
+      vi.useRealTimers();
     }
   });
 

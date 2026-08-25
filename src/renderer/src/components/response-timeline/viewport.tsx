@@ -541,7 +541,14 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
   const layoutAnchorActive = useRef(false);
   const turnAnchorActive = useRef(false);
   const finalAnswerAnchorOwner = useRef<string | null>(null);
+  const finalAnswerAnchorSignalOwner = useRef<string | null>(null);
   const cancelFinalAnswerAnchorRef = useRef<(() => void) | null>(null);
+  const cancelFinalAnswerAnchor = useCallback((): void => {
+    const cancelAnchor = cancelFinalAnswerAnchorRef.current;
+    cancelFinalAnswerAnchorRef.current = null;
+    finalAnswerAnchorSignalOwner.current = null;
+    cancelAnchor?.();
+  }, []);
   const onTurnAnchorSettledRef = useRef(props.onTurnAnchorSettled);
   const onTurnAnchorCancelledRef = useRef(props.onTurnAnchorCancelled);
   const onFinalAnswerAutoScroll = props.onFinalAnswerAutoScroll;
@@ -561,7 +568,29 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
         || manuallyAdjustedRows.current.has(String(item.key)),
     });
 
+  useLayoutEffect(() => () => {
+    cancelFinalAnswerAnchor();
+  }, [cancelFinalAnswerAnchor]);
+
   useLayoutEffect(() => {
+    const activeOwner = finalAnswerAnchorOwner.current;
+    const signalOwner = latestSignalTurnId !== null
+        && latestSignalRunId !== null
+      ? `${props.conversationId}\u0000${latestSignalTurnId}\u0000${latestSignalRunId}`
+      : null;
+    if (
+      activeOwner !== null
+      && (
+        !props.autoScrollToFinalAnswer
+        || latestSignalIsActive
+        || finalAnswerAnchorSignalOwner.current !== signalOwner
+        || !activeOwner.startsWith(`${props.conversationId}\u0000`)
+        || (
+          finalAnswerId !== null
+          && activeOwner !== `${props.conversationId}\u0000${finalAnswerId}`
+        )
+      )
+    ) cancelFinalAnswerAnchor();
     const signal = hasLatestTurnSignal
         && latestSignalTurnId !== null
         && latestSignalRunId !== null
@@ -582,6 +611,8 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     if (
       !transition.shouldAnchor
       || finalAnswerId === null
+      || latestSignalTurnId === null
+      || latestSignalRunId === null
       || !props.autoScrollToFinalAnswer
     ) return;
 
@@ -592,6 +623,8 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     const root = props.timelineElementRef?.current;
     if (!scrollElement || !root || answerIndex < 0) return;
 
+    cancelFinalAnswerAnchor();
+    finalAnswerAnchorSignalOwner.current = signalOwner;
     let cancelAnchor: (() => void) | null = null;
     cancelAnchor = startFinalAnswerAnchor({
       conversationId,
@@ -614,18 +647,14 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
           && cancelFinalAnswerAnchorRef.current === cancelAnchor
         ) {
           cancelFinalAnswerAnchorRef.current = null;
+          finalAnswerAnchorSignalOwner.current = null;
         }
         onFinalAnswerAutoScroll?.(event);
       },
     });
     cancelFinalAnswerAnchorRef.current = cancelAnchor;
-    return () => {
-      if (cancelFinalAnswerAnchorRef.current === cancelAnchor) {
-        cancelFinalAnswerAnchorRef.current = null;
-      }
-      cancelAnchor?.();
-    };
   }, [
+    cancelFinalAnswerAnchor,
     finalAnswerId,
     hasLatestTurnSignal,
     latestSignalIsActive,
@@ -1065,11 +1094,9 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
   }, [props.timelineElementRef, timeline, virtualized, virtualizer]);
 
   const beginReaderTimelineNavigation = useCallback((): void => {
-    const cancelAnchor = cancelFinalAnswerAnchorRef.current;
-    cancelFinalAnswerAnchorRef.current = null;
-    cancelAnchor?.();
+    cancelFinalAnswerAnchor();
     onReaderNavigationIntent?.();
-  }, [onReaderNavigationIntent]);
+  }, [cancelFinalAnswerAnchor, onReaderNavigationIntent]);
 
   useEffect(() => {
     const focusRequestedTurn = (event: Event): void => {

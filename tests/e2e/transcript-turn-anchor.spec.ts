@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { randomUUID } from "node:crypto";
-import { writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { copyFile, mkdir, writeFile } from "node:fs/promises";
+import { dirname, isAbsolute, join } from "node:path";
 
 import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture } from "./support/app-fixture";
@@ -259,6 +259,27 @@ test("positions a completed answer at the viewport start by default", async () =
     })).toBeLessThanOrEqual(4);
     await expect(page.getByRole("button", { name: "Jump to latest" }))
       .toBeVisible();
+    const environment = page.getByRole("region", { name: "Environment details" });
+    await expect(environment.getByText("Checking…", { exact: true }))
+      .toHaveCount(0);
+    await expect(environment.getByText("Checking branch…", { exact: true }))
+      .toHaveCount(0);
+    const evidence = test.info().outputPath("inertia-final-answer-anchor.png");
+    await page.screenshot({ animations: "disabled", path: evidence });
+    await test.info().attach("inertia-final-answer-anchor", {
+      path: evidence,
+      contentType: "image/png",
+    });
+    const requestedPath = process.env.INERTIA_FINAL_ANSWER_ANCHOR_SCREENSHOT_PATH;
+    if (requestedPath) {
+      if (!isAbsolute(requestedPath)) {
+        throw new Error(
+          "INERTIA_FINAL_ANSWER_ANCHOR_SCREENSHOT_PATH must be absolute.",
+        );
+      }
+      await mkdir(dirname(requestedPath), { recursive: true });
+      await copyFile(evidence, requestedPath);
+    }
     expect(app.rendererErrors).toEqual([]);
   } finally {
     await app.close();

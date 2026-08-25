@@ -366,7 +366,10 @@ describe("completed answer positioning", () => {
       { length: Math.max(0, count - 1) },
       (_, index) => message(index + 1),
     );
-    const scene = (settled: boolean): React.JSX.Element => (
+    const scene = (
+      settled: boolean,
+      detailLoading = false,
+    ): React.JSX.Element => (
       <div ref={scrollElementRef} className="anchor-test-scroll">
         <div ref={timelineElementRef}>
           <ResponseTimeline
@@ -396,6 +399,7 @@ describe("completed answer positioning", () => {
             autoCollapseWorkLog
             showChangedFileSummaries={false}
             autoScrollToFinalAnswer={enabled}
+            detailLoading={detailLoading}
             checkpointRestoreDisabled={false}
             scrollElementRef={scrollElementRef}
             timelineElementRef={timelineElementRef}
@@ -418,6 +422,7 @@ describe("completed answer positioning", () => {
       scrollElementRef,
       timelineElementRef,
       settle: () => view.rerender(scene(true)),
+      rerenderSettledDetail: () => view.rerender(scene(true, true)),
       unmount: () => view.unmount(),
     };
   }
@@ -548,7 +553,7 @@ describe("completed answer positioning", () => {
     };
   }
 
-  it("places a newly persisted final answer at the viewport top", async () => {
+  it("keeps positioning a persisted answer across a detail rerender", async () => {
     const frames: FrameRequestCallback[] = [];
     vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
       frames.push(callback);
@@ -576,6 +581,18 @@ describe("completed answer positioning", () => {
     const answer = harness.timelineElementRef.current!
       .querySelector<HTMLElement>(`[data-terminal-answer-id="${harness.answer.id}"]`)!;
     answer.getBoundingClientRect = () => rect(2_100 - scrollTop, 2_400);
+    await act(async () => {
+      let remaining = 20;
+      while (frames.length > 0 && scrollTop !== 1_992 && remaining > 0) {
+        frames.shift()!(performance.now());
+        remaining -= 1;
+      }
+    });
+    expect(scrollTop).toBe(1_992);
+    expect(positioned.mock.calls.map(([event]) => event.status))
+      .toEqual(["started"]);
+
+    harness.rerenderSettledDetail();
     await act(async () => {
       while (frames.length > 0) frames.shift()!(performance.now());
     });
@@ -968,6 +985,76 @@ describe("completed answer positioning", () => {
     });
     expect(positioned.mock.calls.map(([event]) => event.status))
       .toEqual(["started", "positioned"]);
+  });
+
+  it("cancels a pending answer when the authoritative run advances", async () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => undefined);
+    const positioned = vi.fn();
+    const scrollElementRef = createRef<HTMLDivElement>();
+    const timelineElementRef = createRef<HTMLDivElement>();
+    const targetConversationId = "66666666-6666-4666-8666-666666666666";
+    const runningSummary = hydrationLatestTurnSummary(
+      targetConversationId,
+      "running",
+      "run-1",
+    );
+    const terminalSummary = hydrationLatestTurnSummary(
+      targetConversationId,
+      "completed",
+      "run-1",
+    );
+    const replacementSummary = hydrationLatestTurnSummary(
+      targetConversationId,
+      "completed",
+      "run-2",
+    );
+    const view = render(hydrationScene(
+      targetConversationId,
+      "loading",
+      scrollElementRef,
+      timelineElementRef,
+      positioned,
+      runningSummary,
+    ));
+
+    await act(async () => {
+      view.rerender(hydrationScene(
+        targetConversationId,
+        "settled",
+        scrollElementRef,
+        timelineElementRef,
+        positioned,
+        terminalSummary,
+      ));
+      await Promise.resolve();
+    });
+    expect(positioned.mock.calls.map(([event]) => event.status))
+      .toEqual(["started"]);
+
+    await act(async () => {
+      view.rerender(hydrationScene(
+        targetConversationId,
+        "settled",
+        scrollElementRef,
+        timelineElementRef,
+        positioned,
+        replacementSummary,
+      ));
+      await Promise.resolve();
+    });
+    expect(positioned.mock.calls.map(([event]) => event.status))
+      .toEqual(["started", "cancelled"]);
+    await act(async () => {
+      while (frames.length > 0) frames.shift()!(performance.now());
+    });
+
+    expect(positioned.mock.calls.map(([event]) => event.status))
+      .toEqual(["started", "cancelled"]);
   });
 
   it("keeps an already-terminal shell hydration historical", async () => {

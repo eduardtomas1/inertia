@@ -79,6 +79,7 @@ interface StreamingCadenceMeasurement extends Measurement {
   firstFlushMs: 12 | 16 | 24;
   intervalMs: number;
   firstProjectionMs: number;
+  firstProjectionMedianMs: number;
   firstProjectionSamplesMs: number[];
   medianVisibleGapMs: number;
   p95VisibleGapMs: number;
@@ -254,6 +255,9 @@ async function streamingCadenceMeasurement(
       maximumMs: sample,
       samples: [sample],
       firstProjectionMs: Number(
+        ((projectionTimes[0] ?? completedAt) - startedAt).toFixed(3),
+      ),
+      firstProjectionMedianMs: Number(
         percentile(firstProjectionSamplesMs, 0.5).toFixed(3),
       ),
       firstProjectionSamplesMs,
@@ -1086,10 +1090,11 @@ describe("cross-platform performance benchmark", () => {
       for (const candidate of streamingCadenceCandidates) {
         // Every comparative cadence must produce a real projection. Hosted
         // Performance limits are enforced below: a catastrophic guard covers
-        // all candidates, while the shipped cadence retains its 75 ms first-
-        // projection and 175 ms visible-gap contracts. Unconditional timing
-        // ceilings would let one scheduler delay override those hosted limits.
+        // all candidates, while the shipped cadence retains its 75 ms median
+        // first-projection and 175 ms visible-gap contracts. Unconditional
+        // timing ceilings would let one scheduler delay override those limits.
         expect(candidate.firstProjectionMs).toBeGreaterThan(0);
+        expect(candidate.firstProjectionMedianMs).toBeGreaterThan(0);
         expect(candidate.firstProjectionSamplesMs)
           .toHaveLength(FIRST_PROJECTION_SAMPLE_COUNT);
         expect(candidate.firstProjectionSamplesMs.every((sample) => sample > 0))
@@ -1130,7 +1135,7 @@ describe("cross-platform performance benchmark", () => {
           expect(candidate.runtimeCpuMs).toBeLessThan(5_000);
           expect(candidate.runtimeRssDeltaBytes).toBeLessThan(128 * 1024 * 1024);
         }
-        expect(selectedStreamingCadence!.firstProjectionMs)
+        expect(selectedStreamingCadence!.firstProjectionMedianMs)
           .toBeLessThan(HOSTED_SELECTED_STREAM_FIRST_PROJECTION_MS);
         expect(selectedStreamingCadence!.p95VisibleGapMs)
           .toBeLessThan(HOSTED_SELECTED_STREAM_VISIBLE_GAP_MS);

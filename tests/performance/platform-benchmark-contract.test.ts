@@ -23,7 +23,7 @@ describe("platform benchmark threshold ownership", () => {
   it("enforces the selected first-projection ceiling on three real samples", () => {
     const enforceIndex = benchmarkSource.indexOf("if (enforce) {");
     const ceilings = [...benchmarkSource.matchAll(
-      /expect\(selectedStreamingCadence!\.firstProjectionMs\)\s*\.toBeLessThan\(([^)]+)\)/gu,
+      /expect\(selectedStreamingCadence!\.firstProjectionMedianMs\)\s*\.toBeLessThan\(([^)]+)\)/gu,
     )];
     const rawSampleGuardIndex = benchmarkSource.indexOf(
       "for (const sample of candidate.firstProjectionSamplesMs)",
@@ -37,6 +37,9 @@ describe("platform benchmark threshold ownership", () => {
     expect(benchmarkSource).toContain("const FIRST_PROJECTION_SAMPLE_COUNT = 3;");
     expect(benchmarkSource).toContain(
       "percentile(firstProjectionSamplesMs, 0.5)",
+    );
+    expect(benchmarkSource).toContain(
+      "((projectionTimes[0] ?? completedAt) - startedAt).toFixed(3)",
     );
     expect(rawSampleGuardIndex).toBeGreaterThan(enforceIndex);
     expect(rawSampleCeilingIndex).toBeGreaterThan(rawSampleGuardIndex);

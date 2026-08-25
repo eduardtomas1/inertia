@@ -86,10 +86,7 @@ export function transcriptNavigationReducer(
         : state;
     case "reader.scrolled":
       if (action.conversationId !== state.conversationId) return state;
-      if (
-        !action.intentional
-        && (state.mode === "await-turn" || state.mode === "follow-turn")
-      ) return state;
+      if (!action.intentional) return state;
       return action.followsLatest
         ? { mode: "follow-latest", conversationId: action.conversationId }
         : { mode: "reading-history", conversationId: action.conversationId };

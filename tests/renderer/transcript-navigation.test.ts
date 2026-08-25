@@ -102,6 +102,20 @@ describe("transcript new-turn navigation", () => {
     });
   });
 
+  it("does not let programmatic scroll events override reader-owned history", () => {
+    const reading = {
+      mode: "reading-history" as const,
+      conversationId: "conversation-1",
+    };
+
+    expect(transcriptNavigationReducer(reading, {
+      type: "reader.scrolled",
+      conversationId: "conversation-1",
+      followsLatest: true,
+      intentional: false,
+    })).toBe(reading);
+  });
+
   it("does not anchor active-turn follow-ups or another conversation", () => {
     const reading = {
       mode: "reading-history" as const,

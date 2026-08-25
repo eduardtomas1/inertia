@@ -582,8 +582,14 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
       activeOwner !== null
       && (
         !props.autoScrollToFinalAnswer
-        || latestSignalIsActive
-        || finalAnswerAnchorSignalOwner.current !== signalOwner
+        // Detail hydration can briefly remove the shell and answer after the
+        // terminal transition. Keep the bounded anchor owner through that gap;
+        // a concrete different shell identity remains authoritative and must
+        // cancel before stale detail can position the prior answer.
+        || (
+          signalOwner !== null
+          && finalAnswerAnchorSignalOwner.current !== signalOwner
+        )
         || !activeOwner.startsWith(`${props.conversationId}\u0000`)
         || (
           finalAnswerId !== null
@@ -604,7 +610,11 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
       observed: observedLatestTurnRef.current,
       conversationId: props.conversationId,
       signal,
-      detailLoading: Boolean(props.detailLoading),
+      // The accepted-turn anchor owns the viewport until it has positioned the
+      // request. Do not consume a fast terminal edge while final-answer
+      // navigation is still disabled by that pending owner.
+      detailLoading: Boolean(props.detailLoading)
+        || props.turnAnchorId === latestSignalTurnId,
       answerId: finalAnswerId,
     });
     observedLatestTurnRef.current = transition.observation;
@@ -666,6 +676,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     onFinalAnswerAutoScroll,
     props.scrollElementRef,
     props.timelineElementRef,
+    props.turnAnchorId,
     virtualized,
     virtualizer,
   ]);

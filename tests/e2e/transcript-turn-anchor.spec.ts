@@ -260,6 +260,7 @@ test("positions a completed answer at the viewport start by default", async () =
     await expect(page.getByRole("button", { name: "Jump to latest" }))
       .toBeVisible();
     const environment = page.getByRole("region", { name: "Environment details" });
+    await expect(environment).toBeVisible();
     await expect(environment.getByText("Checking…", { exact: true }))
       .toHaveCount(0);
     await expect(environment.getByText("Checking branch…", { exact: true }))

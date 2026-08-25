@@ -336,6 +336,7 @@ describe("completed answer positioning", () => {
     settledInitially = false,
     count = 1,
     onReaderNavigationIntent?: () => void,
+    initialTurnAnchorId: string | null = null,
   ) {
     const scrollElementRef = createRef<HTMLDivElement>();
     const timelineElementRef = createRef<HTMLDivElement>();
@@ -369,6 +370,8 @@ describe("completed answer positioning", () => {
     const scene = (
       settled: boolean,
       detailLoading = false,
+      autoScrollToFinalAnswer = enabled,
+      turnAnchorId = initialTurnAnchorId,
     ): React.JSX.Element => (
       <div ref={scrollElementRef} className="anchor-test-scroll">
         <div ref={timelineElementRef}>
@@ -398,8 +401,9 @@ describe("completed answer positioning", () => {
             defaultCodeWrap={false}
             autoCollapseWorkLog
             showChangedFileSummaries={false}
-            autoScrollToFinalAnswer={enabled}
+            autoScrollToFinalAnswer={autoScrollToFinalAnswer}
             detailLoading={detailLoading}
+            turnAnchorId={turnAnchorId}
             checkpointRestoreDisabled={false}
             scrollElementRef={scrollElementRef}
             timelineElementRef={timelineElementRef}
@@ -423,6 +427,15 @@ describe("completed answer positioning", () => {
       timelineElementRef,
       settle: () => view.rerender(scene(true)),
       rerenderSettledDetail: () => view.rerender(scene(true, true)),
+      rerenderSettledNavigation: (
+        autoScrollToFinalAnswer: boolean,
+        turnAnchorId: string | null,
+      ) => view.rerender(scene(
+        true,
+        false,
+        autoScrollToFinalAnswer,
+        turnAnchorId,
+      )),
       unmount: () => view.unmount(),
     };
   }
@@ -598,6 +611,66 @@ describe("completed answer positioning", () => {
     });
 
     expect(scrollTop).toBe(1_992);
+    expect(positioned.mock.calls).toEqual([
+      [{
+        status: "started",
+        conversationId,
+        answerId: harness.answer.id,
+      }],
+      [{
+        status: "positioned",
+        conversationId,
+        answerId: harness.answer.id,
+        followsLatest: false,
+      }],
+    ]);
+  });
+
+  it("defers completion while the accepted turn anchor still owns navigation", async () => {
+    const frames = new Map<number, FrameRequestCallback>();
+    let nextFrame = 0;
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      nextFrame += 1;
+      frames.set(nextFrame, callback);
+      return nextFrame;
+    });
+    vi.stubGlobal("cancelAnimationFrame", (frame: number) => {
+      frames.delete(frame);
+    });
+    const positioned = vi.fn();
+    const harness = renderAnswerTimeline(
+      false,
+      positioned,
+      false,
+      1,
+      undefined,
+      "turn-1",
+    );
+
+    harness.settle();
+    expect(positioned).not.toHaveBeenCalled();
+
+    harness.rerenderSettledNavigation(true, null);
+    expect(positioned.mock.calls.map(([event]) => event.status))
+      .toEqual(["started"]);
+    const answer = harness.timelineElementRef.current!
+      .querySelector<HTMLElement>('[data-terminal-answer-id="answer-1"]')!;
+    const scroll = harness.scrollElementRef.current!;
+    Object.defineProperties(scroll, {
+      clientHeight: { configurable: true, value: 400 },
+      scrollHeight: { configurable: true, value: 5_000 },
+      scrollTop: { configurable: true, writable: true, value: 1_000 },
+    });
+    scroll.getBoundingClientRect = () => rect(0, 400);
+    answer.getBoundingClientRect = () => rect(8, 200);
+    await act(async () => {
+      while (frames.size > 0) {
+        const [frame, callback] = frames.entries().next().value!;
+        frames.delete(frame);
+        callback(performance.now());
+      }
+    });
+
     expect(positioned.mock.calls).toEqual([
       [{
         status: "started",
@@ -1055,6 +1128,85 @@ describe("completed answer positioning", () => {
 
     expect(positioned.mock.calls.map(([event]) => event.status))
       .toEqual(["started", "cancelled"]);
+  });
+
+  it("keeps a pending answer through a transient owner hydration gap", async () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => undefined);
+    const positioned = vi.fn();
+    const scrollElementRef = createRef<HTMLDivElement>();
+    const timelineElementRef = createRef<HTMLDivElement>();
+    const targetConversationId = "77777777-7777-4777-8777-777777777777";
+    const runningSummary = hydrationLatestTurnSummary(
+      targetConversationId,
+      "running",
+    );
+    const terminalSummary = hydrationLatestTurnSummary(
+      targetConversationId,
+      "completed",
+    );
+    const view = render(hydrationScene(
+      targetConversationId,
+      "loading",
+      scrollElementRef,
+      timelineElementRef,
+      positioned,
+      runningSummary,
+    ));
+
+    await act(async () => {
+      view.rerender(hydrationScene(
+        targetConversationId,
+        "settled",
+        scrollElementRef,
+        timelineElementRef,
+        positioned,
+        terminalSummary,
+      ));
+      await Promise.resolve();
+    });
+    expect(positioned.mock.calls.map(([event]) => event.status))
+      .toEqual(["started"]);
+
+    await act(async () => {
+      view.rerender(hydrationScene(
+        targetConversationId,
+        "loading",
+        scrollElementRef,
+        timelineElementRef,
+        positioned,
+      ));
+      await Promise.resolve();
+    });
+    expect(positioned.mock.calls.map(([event]) => event.status))
+      .toEqual(["started"]);
+
+    await act(async () => {
+      view.rerender(hydrationScene(
+        targetConversationId,
+        "settled",
+        scrollElementRef,
+        timelineElementRef,
+        positioned,
+        terminalSummary,
+      ));
+      await Promise.resolve();
+    });
+    expect(positioned.mock.calls.map(([event]) => event.status))
+      .toEqual(["started"]);
+    expect(timelineElementRef.current!.querySelector(
+      `[data-terminal-answer-id="${targetConversationId}-answer"]`,
+    )).not.toBeNull();
+    await act(async () => {
+      while (frames.length > 0) frames.shift()!(performance.now());
+    });
+
+    expect(positioned.mock.calls.map(([event]) => event.status))
+      .toEqual(["started", "positioned"]);
   });
 
   it("keeps an already-terminal shell hydration historical", async () => {

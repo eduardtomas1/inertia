@@ -335,6 +335,7 @@ describe("completed answer positioning", () => {
     onFinalAnswerAutoScroll: (event: FinalAnswerAutoScrollEvent) => void,
     settledInitially = false,
     count = 1,
+    onReaderNavigationIntent?: () => void,
   ) {
     const scrollElementRef = createRef<HTMLDivElement>();
     const timelineElementRef = createRef<HTMLDivElement>();
@@ -399,6 +400,7 @@ describe("completed answer positioning", () => {
             scrollElementRef={scrollElementRef}
             timelineElementRef={timelineElementRef}
             onFinalAnswerAutoScroll={onFinalAnswerAutoScroll}
+            onReaderNavigationIntent={onReaderNavigationIntent}
             onRespondToApproval={async () => undefined}
             onRespondToInput={async () => undefined}
             onRevertCheckpoint={() => undefined}
@@ -612,6 +614,28 @@ describe("completed answer positioning", () => {
 
     expect(positioned.mock.calls.map(([event]) => event.status))
       .toEqual(["started", "cancelled"]);
+  });
+
+  it("cancels an active final-answer anchor before Alt timeline navigation", () => {
+    const sequence: string[] = [];
+    vi.stubGlobal("requestAnimationFrame", () => 1);
+    vi.stubGlobal("cancelAnimationFrame", () => undefined);
+    const harness = renderAnswerTimeline(
+      true,
+      (event) => sequence.push(event.status),
+      false,
+      1,
+      () => sequence.push("intent"),
+    );
+
+    harness.settle();
+    expect(sequence).toEqual(["started"]);
+    fireEvent.keyDown(harness.scrollElementRef.current!, {
+      altKey: true,
+      key: "g",
+    });
+
+    expect(sequence).toEqual(["started", "cancelled", "intent"]);
   });
 
   it("cancels cleanup without reporting a false positioned answer", async () => {

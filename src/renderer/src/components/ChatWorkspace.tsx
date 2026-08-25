@@ -378,6 +378,10 @@ export function ChatWorkspace({
   navigationRef.current = activeNavigation;
   const readerIntentRef = useRef(false);
   const finalAnswerAutoScrollOwnerRef = useRef<string | null>(null);
+  const pendingFinalAnswerNavigationRef = useRef<{
+    conversationId: string;
+    followsLatest: boolean;
+  } | null>(null);
   const showJump = activeNavigation.mode === "reading-history";
   const projectRoot = conversation?.worktreePath ?? project?.path ?? "";
   const ownedTurns = recordsOwnedByConversation(turns, conversationId);
@@ -419,11 +423,16 @@ export function ChatWorkspace({
     }
   }, []);
 
+  const clearPendingFinalAnswerNavigation = useCallback((): void => {
+    pendingFinalAnswerNavigationRef.current = null;
+  }, []);
+
   const performScrollToLatest = useCallback((
     behavior: ScrollBehavior = "smooth",
   ): void => {
     if (
       readerIntentRef.current
+      || pendingFinalAnswerNavigationRef.current !== null
       || finalAnswerAutoScrollOwnerRef.current !== null
     ) return;
     const element = scrollRef.current;
@@ -440,6 +449,7 @@ export function ChatWorkspace({
         if (
           !current
           || readerIntentRef.current
+          || pendingFinalAnswerNavigationRef.current !== null
           || finalAnswerAutoScrollOwnerRef.current !== null
         ) return;
         if (!transcriptNavigationFollowsContent(navigationRef.current)) {
@@ -468,12 +478,18 @@ export function ChatWorkspace({
   ): void => {
     if (!conversationId) return;
     clearReaderIntent();
+    clearPendingFinalAnswerNavigation();
     dispatchNavigation({
       type: "latest.requested",
       conversationId,
     });
     performScrollToLatest(behavior);
-  }, [clearReaderIntent, conversationId, performScrollToLatest]);
+  }, [
+    clearPendingFinalAnswerNavigation,
+    clearReaderIntent,
+    conversationId,
+    performScrollToLatest,
+  ]);
 
   const onFinalAnswerAutoScroll = useCallback((
     event: FinalAnswerAutoScrollEvent,
@@ -481,6 +497,7 @@ export function ChatWorkspace({
     const owner = `${event.conversationId}\u0000${event.answerId}`;
     if (event.status === "started") {
       if (navigationRef.current.conversationId !== event.conversationId) return;
+      clearPendingFinalAnswerNavigation();
       finalAnswerAutoScrollOwnerRef.current = owner;
       if (followCorrectionFrameRef.current !== null) {
         window.cancelAnimationFrame(followCorrectionFrameRef.current);
@@ -495,7 +512,10 @@ export function ChatWorkspace({
       || navigationRef.current.conversationId !== event.conversationId
     ) return;
 
-    readerIntentRef.current = true;
+    pendingFinalAnswerNavigationRef.current = {
+      conversationId: event.conversationId,
+      followsLatest: event.followsLatest,
+    };
     dispatchNavigation({
       type: "reader.scrolled",
       conversationId: event.conversationId,
@@ -503,14 +523,7 @@ export function ChatWorkspace({
       intentional: true,
     });
     onLatestContentVisibilityChange?.(event.followsLatest);
-    if (readerIntentReleaseTimerRef.current !== null) {
-      window.clearTimeout(readerIntentReleaseTimerRef.current);
-    }
-    readerIntentReleaseTimerRef.current = window.setTimeout(() => {
-      readerIntentRef.current = false;
-      readerIntentReleaseTimerRef.current = null;
-    }, READER_INTENT_GUARD_MS);
-  }, [onLatestContentVisibilityChange]);
+  }, [clearPendingFinalAnswerNavigation, onLatestContentVisibilityChange]);
 
   const revealPendingInput = useCallback((): void => {
     if (!pendingInputRequest) return;
@@ -530,13 +543,30 @@ export function ChatWorkspace({
 
   useLayoutEffect(() => {
     finalAnswerAutoScrollOwnerRef.current = null;
+    clearPendingFinalAnswerNavigation();
     clearReaderIntent();
     dispatchNavigation({
       type: "conversation.changed",
       conversationId,
     });
     performScrollToLatest("auto");
-  }, [clearReaderIntent, conversationId, performScrollToLatest]);
+  }, [
+    clearPendingFinalAnswerNavigation,
+    clearReaderIntent,
+    conversationId,
+    performScrollToLatest,
+  ]);
+
+  useLayoutEffect(() => {
+    const pending = pendingFinalAnswerNavigationRef.current;
+    if (!pending || activeNavigation.conversationId !== pending.conversationId) {
+      return;
+    }
+    const targetCommitted = pending.followsLatest
+      ? activeNavigation.mode === "follow-latest"
+      : activeNavigation.mode === "reading-history";
+    if (targetCommitted) clearPendingFinalAnswerNavigation();
+  }, [activeNavigation, clearPendingFinalAnswerNavigation]);
 
   useEffect(
     () => () => {
@@ -549,16 +579,20 @@ export function ChatWorkspace({
   );
 
   useEffect(
-    () => () => clearReaderIntent(),
-    [clearReaderIntent],
+    () => () => {
+      clearPendingFinalAnswerNavigation();
+      clearReaderIntent();
+    },
+    [clearPendingFinalAnswerNavigation, clearReaderIntent],
   );
 
   useEffect(() => {
     markTestStreamingReaderActivityReceipt(streamingText);
     if (!transcriptNavigationFollowsContent(navigationRef.current)) return;
-    const frame = window.requestAnimationFrame(
-      () => performScrollToLatest("auto"),
-    );
+    const frame = window.requestAnimationFrame(() => {
+      if (!transcriptNavigationFollowsContent(navigationRef.current)) return;
+      performScrollToLatest("auto");
+    });
     return () => window.cancelAnimationFrame(frame);
   }, [contentSignal, performScrollToLatest, streamingText]);
 
@@ -586,7 +620,8 @@ export function ChatWorkspace({
     return () => observer.disconnect();
   }, [conversationId, performScrollToLatest]);
 
-  const noteReaderIntent = (): void => {
+  const noteReaderIntent = useCallback((): void => {
+    clearPendingFinalAnswerNavigation();
     readerIntentRef.current = true;
     if (followCorrectionFrameRef.current !== null) {
       window.cancelAnimationFrame(followCorrectionFrameRef.current);
@@ -599,7 +634,7 @@ export function ChatWorkspace({
       readerIntentRef.current = false;
       readerIntentReleaseTimerRef.current = null;
     }, READER_INTENT_GUARD_MS);
-  };
+  }, [clearPendingFinalAnswerNavigation]);
 
   const noteReaderKeyboardIntent = (
     event: React.KeyboardEvent<HTMLDivElement>,
@@ -612,6 +647,10 @@ export function ChatWorkspace({
     if (!element) return;
     const follows = shouldFollowTimeline(element.scrollTop, element.clientHeight, element.scrollHeight);
     if (finalAnswerAutoScrollOwnerRef.current !== null) {
+      onLatestContentVisibilityChange?.(follows);
+      return;
+    }
+    if (pendingFinalAnswerNavigationRef.current !== null) {
       onLatestContentVisibilityChange?.(follows);
       return;
     }
@@ -638,6 +677,7 @@ export function ChatWorkspace({
       context,
     );
     if (!acceptance) return null;
+    clearPendingFinalAnswerNavigation();
     clearReaderIntent();
     dispatchNavigation({
       type: "message.accepted",
@@ -645,7 +685,12 @@ export function ChatWorkspace({
       sourceConversationId,
     });
     return acceptance;
-  }, [clearReaderIntent, conversationId, onSendMessage]);
+  }, [
+    clearPendingFinalAnswerNavigation,
+    clearReaderIntent,
+    conversationId,
+    onSendMessage,
+  ]);
 
   const turnAnchorId = activeNavigation.mode === "await-turn"
     ? activeNavigation.turnId
@@ -793,6 +838,7 @@ export function ChatWorkspace({
               onTurnAnchorSettled={onTurnAnchorSettled}
               onTurnAnchorCancelled={onTurnAnchorCancelled}
               onFinalAnswerAutoScroll={onFinalAnswerAutoScroll}
+              onReaderNavigationIntent={noteReaderIntent}
               scrollElementRef={scrollRef}
               timelineElementRef={timelineRef}
               checkpointRestoreDisabled={conversation.status === "running"

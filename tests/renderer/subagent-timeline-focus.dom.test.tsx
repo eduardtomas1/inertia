@@ -91,6 +91,8 @@ describe("delegated-agent parent-turn navigation", () => {
     const secondTurn = turn(secondConversation, "turn-second");
     const firstTimeline = createRef<HTMLDivElement>();
     const secondTimeline = createRef<HTMLDivElement>();
+    const firstNavigationIntent = vi.fn();
+    const secondNavigationIntent = vi.fn();
     const common = {
       activities: [],
       reasonings: [],
@@ -126,6 +128,7 @@ describe("delegated-agent parent-turn navigation", () => {
             turns={[firstTurn]}
             messages={[message(firstConversation, firstTurn.id)]}
             timelineElementRef={firstTimeline}
+            onReaderNavigationIntent={firstNavigationIntent}
           />
         </div>
         <div ref={secondTimeline}>
@@ -135,6 +138,7 @@ describe("delegated-agent parent-turn navigation", () => {
             turns={[secondTurn]}
             messages={[message(secondConversation, secondTurn.id)]}
             timelineElementRef={secondTimeline}
+            onReaderNavigationIntent={secondNavigationIntent}
           />
         </div>
       </>,
@@ -145,6 +149,8 @@ describe("delegated-agent parent-turn navigation", () => {
       turnId: secondTurn.id,
     }));
     expect(document.activeElement).toHaveAttribute("data-turn-id", secondTurn.id);
+    expect(secondNavigationIntent).toHaveBeenCalledTimes(1);
+    expect(firstNavigationIntent).not.toHaveBeenCalled();
 
     act(() => {
       window.dispatchEvent(new CustomEvent("inertia:timeline-focus", {
@@ -152,11 +158,13 @@ describe("delegated-agent parent-turn navigation", () => {
       }));
     });
     expect(document.activeElement).toHaveAttribute("data-turn-id", secondTurn.id);
+    expect(secondNavigationIntent).toHaveBeenCalledTimes(1);
 
     act(() => requestTimelineFocus({
       conversationId: firstConversation,
       turnId: firstTurn.id,
     }));
     expect(document.activeElement).toHaveAttribute("data-turn-id", firstTurn.id);
+    expect(firstNavigationIntent).toHaveBeenCalledTimes(1);
   });
 });

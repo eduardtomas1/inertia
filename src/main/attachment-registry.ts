@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { constants, type BigIntStats } from "node:fs";
+import { constants } from "node:fs";
 import {
   type FileHandle,
   lstat,
@@ -34,6 +34,10 @@ import {
   type PreparedAttachmentImport,
   type PreparedAttachmentMetadata,
 } from "./attachment-import.js";
+import {
+  isStablePrivateAttachment,
+  verifyStoredAttachmentAfterValidation,
+} from "./attachment-registry-file-verification.js";
 import {
   inProcessAttachmentImportValidationRunner,
   type AttachmentImportFileOperation,
@@ -213,37 +217,6 @@ function sameIdentity(
   right: { dev: number; ino: number },
 ): boolean {
   return left.dev === right.dev && left.ino === right.ino;
-}
-
-function isStablePrivateAttachment(
-  before: BigIntStats,
-  after: BigIntStats,
-): boolean {
-  return before.isFile()
-    && after.isFile()
-    && !before.isSymbolicLink()
-    && !after.isSymbolicLink()
-    && before.nlink === 1n
-    && after.nlink === 1n
-    && before.dev === after.dev
-    && before.ino === after.ino
-    && before.size === after.size
-    && before.mtimeNs === after.mtimeNs
-    && before.ctimeNs === after.ctimeNs
-    && (
-      process.platform === "win32"
-      || (
-        (before.mode & 0o777n) === 0o600n
-        && (after.mode & 0o777n) === 0o600n
-        && (
-          typeof process.getuid !== "function"
-          || (
-            before.uid === BigInt(process.getuid())
-            && after.uid === BigInt(process.getuid())
-          )
-        )
-      )
-    );
 }
 
 function assertOwnedDirectory(
@@ -1228,22 +1201,16 @@ export class AttachmentRegistry {
     if (!receipt) {
       throw new Error("Attachment validation utility returned no result.");
     }
-    signal.throwIfAborted();
-    const verifiedRoot = await securePrivateDirectory(this.directory);
-    const [after, verifiedPath] = await Promise.all([
-      lstat(path, { bigint: true }),
-      realpath(path),
-    ]);
-    if (
-      verifiedRoot !== root
-      || !isStablePrivateAttachment(before, after)
-      || verifiedPath !== join(verifiedRoot, basename(path))
-      || dirname(verifiedPath) !== verifiedRoot
-    ) {
-      throw new Error(
-        "Temporary attachment storage could not be verified safely.",
-      );
-    }
+    await verifyStoredAttachmentAfterValidation({
+      before,
+      expectedRoot: root,
+      expectedSize: attachment.size,
+      path,
+      receipt,
+      resolveVerifiedRoot: async () =>
+        await securePrivateDirectory(this.directory),
+      signal,
+    });
     return receipt;
   }
 }

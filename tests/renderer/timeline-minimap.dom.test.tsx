@@ -27,13 +27,19 @@ describe("TimelineMinimap", () => {
   afterEach(() => vi.restoreAllMocks());
 
   it("owns one custom preview across pointer and keyboard focus", () => {
+    const calls: string[] = [];
+    const onNavigationIntent = vi.fn(() => calls.push("intent"));
     const onNavigate = vi.fn();
     render(
       <TimelineMinimap
         activeIndex={0}
         left={24}
         markers={markers}
-        onNavigate={onNavigate}
+        onNavigationIntent={onNavigationIntent}
+        onNavigate={(...args) => {
+          calls.push("navigate");
+          onNavigate(...args);
+        }}
       />,
     );
 
@@ -93,7 +99,9 @@ describe("TimelineMinimap", () => {
     expect(second).not.toHaveAttribute("aria-describedby");
 
     fireEvent.click(first);
+    expect(onNavigationIntent).toHaveBeenCalledTimes(1);
     expect(onNavigate).toHaveBeenCalledWith(0, "turn");
+    expect(calls).toEqual(["intent", "navigate"]);
   });
 
   it("scrolls a newly active marker into a clipped rail without stealing focus", () => {

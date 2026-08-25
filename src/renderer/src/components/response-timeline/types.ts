@@ -59,6 +59,7 @@ export interface ResponseTimelineProps {
   onTurnAnchorSettled?: (turnId: string) => void;
   onTurnAnchorCancelled?: (turnId: string) => void;
   onFinalAnswerAutoScroll?: (event: FinalAnswerAutoScrollEvent) => void;
+  onReaderNavigationIntent?: () => void;
   onRespondToApproval: (
     request: AgentApprovalRequest,
     decision: AgentApprovalDecision,

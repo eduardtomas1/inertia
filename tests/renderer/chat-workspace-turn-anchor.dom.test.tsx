@@ -78,6 +78,8 @@ vi.mock("../../src/renderer/src/components/ResponseTimeline", async () => {
       inputRequests,
       detailLoading,
       onFinalAnswerAutoScroll,
+      onReaderNavigationIntent,
+      onTurnAnchorSettled,
     }: {
       conversationId: string;
       turns: AgentTurn[];
@@ -85,6 +87,8 @@ vi.mock("../../src/renderer/src/components/ResponseTimeline", async () => {
       inputRequests: AgentInputRequest[];
       detailLoading?: boolean;
       onFinalAnswerAutoScroll?: (event: FinalAnswerAutoScrollEvent) => void;
+      onReaderNavigationIntent?: () => void;
+      onTurnAnchorSettled?: (turnId: string) => void;
     }) => {
       useEffect(() => {
         timelineLifecycle.mounts += 1;
@@ -98,6 +102,17 @@ vi.mock("../../src/renderer/src/components/ResponseTimeline", async () => {
       return (
         <>
           <div data-testid="turn-anchor-projection">{turnAnchorId ?? "none"}</div>
+          <button type="button" onClick={onReaderNavigationIntent}>
+            Navigate response timeline
+          </button>
+          {turnAnchorId && (
+            <button
+              type="button"
+              onClick={() => onTurnAnchorSettled?.(turnAnchorId)}
+            >
+              Settle projected turn anchor
+            </button>
+          )}
           <div data-testid="timeline-detail-loading">
             {detailLoading ? "loading" : "ready"}
           </div>
@@ -493,6 +508,267 @@ describe("draft turn anchoring", () => {
     });
 
     expect(visible).not.toHaveBeenCalled();
+  });
+
+  it("keeps reading history after a completed answer's late programmatic scroll", async () => {
+    const activeConversation = conversation("conversation-final-answer-scroll");
+    const scrollTo = vi.fn();
+    HTMLElement.prototype.scrollTo = scrollTo;
+    render(
+      <ChatWorkspace
+        {...workspaceProps(activeConversation, async () => null)}
+      />,
+    );
+    await screen.findByTestId("turn-anchor-projection");
+    const transcript = screen.getByLabelText("Thread transcript");
+    Object.defineProperties(transcript, {
+      clientHeight: { configurable: true, value: 100 },
+      scrollHeight: { configurable: true, value: 500 },
+      scrollTop: { configurable: true, writable: true, value: 400 },
+    });
+    const callback = timelineCallbacks.get(activeConversation.id)!;
+
+    act(() => {
+      callback({
+        status: "started",
+        conversationId: activeConversation.id,
+        answerId: "answer-final",
+      });
+      callback({
+        status: "positioned",
+        conversationId: activeConversation.id,
+        answerId: "answer-final",
+        followsLatest: false,
+      });
+    });
+    expect(await screen.findByRole("button", { name: "Jump to latest" }))
+      .toBeVisible();
+
+    vi.useFakeTimers();
+    try {
+      await act(async () => vi.advanceTimersByTime(1_000));
+      fireEvent.scroll(transcript);
+
+      expect(screen.getByRole("button", { name: "Jump to latest" }))
+        .toBeVisible();
+
+      fireEvent.wheel(transcript);
+      fireEvent.scroll(transcript);
+
+      expect(screen.queryByRole("button", { name: "Jump to latest" }))
+        .not.toBeInTheDocument();
+    } finally {
+      await act(async () => vi.runOnlyPendingTimers());
+      vi.useRealTimers();
+    }
+  });
+
+  it("shows Jump when a followed transcript is moved away from the bottom", async () => {
+    const activeConversation = conversation("conversation-programmatic-history");
+    HTMLElement.prototype.scrollTo = vi.fn();
+    render(
+      <ChatWorkspace
+        {...workspaceProps(activeConversation, async () => null)}
+      />,
+    );
+    await screen.findByTestId("turn-anchor-projection");
+    const transcript = screen.getByLabelText("Thread transcript");
+    Object.defineProperties(transcript, {
+      clientHeight: { configurable: true, value: 100 },
+      scrollHeight: { configurable: true, value: 500 },
+      scrollTop: { configurable: true, writable: true, value: 200 },
+    });
+
+    fireEvent.scroll(transcript);
+
+    expect(await screen.findByRole("button", { name: "Jump to latest" }))
+      .toBeVisible();
+  });
+
+  it("yields an awaited turn to explicit response timeline navigation", async () => {
+    const activeConversation = conversation("conversation-explicit-timeline-navigation");
+    const acceptance: TranscriptMessageSendAcceptance = {
+      kind: "message.accepted",
+      conversationId: activeConversation.id,
+      turnId: "turn-explicit-navigation",
+      userMessageId: "message-explicit-navigation",
+      disposition: "new-turn",
+    };
+    HTMLElement.prototype.scrollTo = vi.fn();
+    render(
+      <ChatWorkspace
+        {...workspaceProps(activeConversation, async () => acceptance)}
+      />,
+    );
+    await screen.findByTestId("turn-anchor-projection");
+    fireEvent.click(screen.getByRole("button", { name: "Send materialized draft" }));
+    await waitFor(() => expect(screen.getByTestId("turn-anchor-projection"))
+      .toHaveTextContent(acceptance.turnId));
+
+    const transcript = screen.getByLabelText("Thread transcript");
+    Object.defineProperties(transcript, {
+      clientHeight: { configurable: true, value: 100 },
+      scrollHeight: { configurable: true, value: 500 },
+      scrollTop: { configurable: true, writable: true, value: 200 },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Navigate response timeline" }));
+    fireEvent.scroll(transcript);
+
+    expect(await screen.findByRole("button", { name: "Jump to latest" }))
+      .toBeVisible();
+  });
+
+  it("yields a followed turn to explicit response timeline navigation", async () => {
+    const activeConversation = conversation("conversation-followed-timeline-navigation");
+    const acceptance: TranscriptMessageSendAcceptance = {
+      kind: "message.accepted",
+      conversationId: activeConversation.id,
+      turnId: "turn-followed-navigation",
+      userMessageId: "message-followed-navigation",
+      disposition: "new-turn",
+    };
+    HTMLElement.prototype.scrollTo = vi.fn();
+    render(
+      <ChatWorkspace
+        {...workspaceProps(activeConversation, async () => acceptance)}
+      />,
+    );
+    await screen.findByTestId("turn-anchor-projection");
+    fireEvent.click(screen.getByRole("button", { name: "Send materialized draft" }));
+    await waitFor(() => expect(screen.getByTestId("turn-anchor-projection"))
+      .toHaveTextContent(acceptance.turnId));
+    fireEvent.click(screen.getByRole("button", { name: "Settle projected turn anchor" }));
+    expect(screen.getByTestId("turn-anchor-projection")).toHaveTextContent("none");
+
+    const transcript = screen.getByLabelText("Thread transcript");
+    Object.defineProperties(transcript, {
+      clientHeight: { configurable: true, value: 100 },
+      scrollHeight: { configurable: true, value: 500 },
+      scrollTop: { configurable: true, writable: true, value: 200 },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Navigate response timeline" }));
+    fireEvent.scroll(transcript);
+
+    expect(await screen.findByRole("button", { name: "Jump to latest" }))
+      .toBeVisible();
+  });
+
+  it("drops a queued content-follow frame after the final answer is positioned", async () => {
+    const activeConversation = conversation("conversation-stale-follow-frame");
+    const scheduled = new Map<number, FrameRequestCallback>();
+    let nextFrameId = 0;
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      const frameId = ++nextFrameId;
+      scheduled.set(frameId, callback);
+      return frameId;
+    });
+    vi.spyOn(window, "cancelAnimationFrame").mockImplementation((frameId) => {
+      scheduled.delete(frameId);
+    });
+    const scrollTo = vi.fn();
+    HTMLElement.prototype.scrollTo = scrollTo;
+    const props = workspaceProps(activeConversation, async () => null);
+    const view = render(<ChatWorkspace {...props} streamingText="" />);
+    await screen.findByTestId("turn-anchor-projection");
+    scheduled.clear();
+    scrollTo.mockClear();
+
+    view.rerender(<ChatWorkspace {...props} streamingText="settled answer" />);
+    expect(scheduled.size).toBeGreaterThan(0);
+    const staleFrames = [...scheduled.values()];
+    const callback = timelineCallbacks.get(activeConversation.id)!;
+    act(() => {
+      callback({
+        status: "started",
+        conversationId: activeConversation.id,
+        answerId: "answer-final",
+      });
+      callback({
+        status: "positioned",
+        conversationId: activeConversation.id,
+        answerId: "answer-final",
+        followsLatest: false,
+      });
+    });
+    expect(await screen.findByRole("button", { name: "Jump to latest" }))
+      .toBeVisible();
+
+    act(() => {
+      for (const frame of staleFrames) frame(0);
+    });
+
+    expect(scrollTo).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Jump to latest" }))
+      .toBeVisible();
+  });
+
+  it("hands a pending final-answer position to a newly accepted turn", async () => {
+    const activeConversation = conversation("conversation-answer-to-turn");
+    const acceptance: TranscriptMessageSendAcceptance = {
+      kind: "message.accepted",
+      conversationId: activeConversation.id,
+      turnId: "turn-after-answer",
+      userMessageId: "message-after-answer",
+      disposition: "new-turn",
+    };
+    let acceptMessage!: (value: TranscriptMessageSendAcceptance) => void;
+    const onSendMessage = vi.fn(() => (
+      new Promise<TranscriptMessageSendAcceptance>((resolve) => {
+        acceptMessage = resolve;
+      })
+    ));
+    const scheduled = new Map<number, FrameRequestCallback>();
+    let nextFrameId = 0;
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      const frameId = ++nextFrameId;
+      scheduled.set(frameId, callback);
+      return frameId;
+    });
+    vi.spyOn(window, "cancelAnimationFrame").mockImplementation((frameId) => {
+      scheduled.delete(frameId);
+    });
+    const scrollTo = vi.fn();
+    HTMLElement.prototype.scrollTo = scrollTo;
+    const props = workspaceProps(activeConversation, onSendMessage);
+    const view = render(<ChatWorkspace {...props} />);
+    await screen.findByTestId("turn-anchor-projection");
+    scheduled.clear();
+    scrollTo.mockClear();
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "Send materialized draft",
+    }));
+    const callback = timelineCallbacks.get(activeConversation.id)!;
+    await act(async () => {
+      callback({
+        status: "started",
+        conversationId: activeConversation.id,
+        answerId: "answer-before-turn",
+      });
+      callback({
+        status: "positioned",
+        conversationId: activeConversation.id,
+        answerId: "answer-before-turn",
+        followsLatest: false,
+      });
+      acceptMessage(acceptance);
+      await Promise.resolve();
+    });
+    expect(screen.getByTestId("turn-anchor-projection"))
+      .toHaveTextContent("turn-after-answer");
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "Settle projected turn anchor",
+    }));
+    view.rerender(<ChatWorkspace {...props} streamingText="new turn output" />);
+    const contentFrames = [...scheduled.values()];
+    act(() => {
+      for (const frame of contentFrames) frame(0);
+    });
+
+    expect(scrollTo).toHaveBeenCalledWith(expect.objectContaining({
+      behavior: "auto",
+    }));
   });
 
   it.each(["codex", "claude", "cursor", "kimi", "opencode"] as const)(

@@ -102,6 +102,35 @@ describe("transcript new-turn navigation", () => {
     });
   });
 
+  it("does not let programmatic scroll events override reader-owned history", () => {
+    const reading = {
+      mode: "reading-history" as const,
+      conversationId: "conversation-1",
+    };
+
+    expect(transcriptNavigationReducer(reading, {
+      type: "reader.scrolled",
+      conversationId: "conversation-1",
+      followsLatest: true,
+      intentional: false,
+    })).toBe(reading);
+  });
+
+  it("lets a followed transcript observe programmatic movement into history", () => {
+    expect(transcriptNavigationReducer({
+      mode: "follow-latest",
+      conversationId: "conversation-1",
+    }, {
+      type: "reader.scrolled",
+      conversationId: "conversation-1",
+      followsLatest: false,
+      intentional: false,
+    })).toEqual({
+      mode: "reading-history",
+      conversationId: "conversation-1",
+    });
+  });
+
   it("does not anchor active-turn follow-ups or another conversation", () => {
     const reading = {
       mode: "reading-history" as const,

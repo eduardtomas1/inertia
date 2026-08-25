@@ -13,14 +13,14 @@ import {
 } from "../../scripts/validate-canary-feed-advance.mjs";
 
 const roots: string[] = [];
-const version = "0.0.41";
+const version = "0.0.42";
 const metadata = [
   `version: ${version}`,
   "files:",
-  "  - url: Inertia-Canary-0.0.41.AppImage",
+  `  - url: Inertia-Canary-${version}.AppImage`,
   `    sha512: ${Buffer.alloc(64).toString("base64")}`,
   "    size: 100",
-  "path: Inertia-Canary-0.0.41.AppImage",
+  `path: Inertia-Canary-${version}.AppImage`,
   `sha512: ${Buffer.alloc(64).toString("base64")}`,
   "releaseDate: 2030-01-01T00:00:00.000Z",
   "",
@@ -64,9 +64,9 @@ describe("Canary feed publication", () => {
       path: string;
     };
     expect(parsed.files[0]?.url).toBe(
-      "https://github.com/eduardtomas1/inertia/releases/download/canary-v0.0.41/Inertia-Canary-0.0.41.AppImage",
+      `https://github.com/eduardtomas1/inertia/releases/download/canary-v${version}/Inertia-Canary-${version}.AppImage`,
     );
-    expect(parsed.path).toBe("Inertia-Canary-0.0.41.AppImage");
+    expect(parsed.path).toBe(`Inertia-Canary-${version}.AppImage`);
     expect(JSON.parse(await readFile(join(feed, "canary-status.json"), "utf8")))
       .toEqual({ version, tag: `canary-v${version}` });
   });

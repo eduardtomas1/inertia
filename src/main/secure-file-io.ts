@@ -145,7 +145,9 @@ export async function openVerifiedFile(
   }
   const handle = await open(
     basename,
-    fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0),
+    fsConstants.O_RDONLY
+      | (fsConstants.O_NOFOLLOW ?? 0)
+      | (fsConstants.O_NONBLOCK ?? 0),
   );
   try {
     const opened = await handle.stat({ bigint: true });
@@ -195,7 +197,9 @@ export async function snapshotNamedFile(
   }
   const handle = await open(
     name,
-    fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0),
+    fsConstants.O_RDONLY
+      | (fsConstants.O_NOFOLLOW ?? 0)
+      | (fsConstants.O_NONBLOCK ?? 0),
   );
   try {
     const opened = await handle.stat({ bigint: true });

@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  STREAMING_COMPLETION_GATE_TIMEOUT_MS,
   beginStreamingReaderActivity,
   beginStreamingReaderAwayActivity,
   releaseStreamingCompletion,
@@ -83,7 +84,7 @@ function isTerminalMessage(message: Record<string, unknown>): boolean {
 
 async function waitFor(
   predicate: () => boolean,
-  timeoutMs = 2_000,
+  timeoutMs = STREAMING_COMPLETION_GATE_TIMEOUT_MS,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!predicate()) {
@@ -114,22 +115,22 @@ describe("desktop benchmark streaming completion gate", () => {
     });
     beginSample(run, 7);
 
-    await waitForStreamingCompletionReady(workspace, 7, 2_000);
+    await waitForStreamingCompletionReady(workspace, 7);
     expect(run.messages.some(isTerminalMessage)).toBe(false);
     await beginStreamingReaderActivity(workspace, 7);
-    await waitForStreamingReaderActivity(workspace, 7, 2_000);
+    await waitForStreamingReaderActivity(workspace, 7);
     await waitFor(() => run.messages.some((message) => JSON.stringify(message)
       .includes(streamingReaderActivityMarker(7, "BEFORE"))));
     expect(run.messages.some(isTerminalMessage)).toBe(false);
     await beginStreamingReaderAwayActivity(workspace, 7);
-    await waitForStreamingReaderAwayActivity(workspace, 7, 2_000);
+    await waitForStreamingReaderAwayActivity(workspace, 7);
     await waitFor(() => run.messages.some((message) => JSON.stringify(message)
       .includes(streamingReaderActivityMarker(7, "AWAY"))));
     expect(run.messages.some(isTerminalMessage)).toBe(false);
 
     await releaseStreamingCompletion(workspace, 7);
     await waitFor(() => run.messages.some(isTerminalMessage));
-    await waitForStreamingCompletionCleanup(workspace, 7, 2_000);
+    await waitForStreamingCompletionCleanup(workspace, 7);
 
     const completionIndex = run.messages.findIndex(isTerminalMessage);
     const markerIndex = run.messages.findIndex((message) => JSON.stringify(message)
@@ -148,10 +149,10 @@ describe("desktop benchmark streaming completion gate", () => {
     });
     beginSample(run, 9);
 
-    await waitForStreamingCompletionReady(workspace, 9, 2_000);
+    await waitForStreamingCompletionReady(workspace, 9);
     expect(await exitCode(run.child)).toBe(2);
     children.delete(run.child);
-    await waitForStreamingCompletionCleanup(workspace, 9, 2_000);
+    await waitForStreamingCompletionCleanup(workspace, 9);
     expect(run.messages.some(isTerminalMessage)).toBe(false);
     expect(run.stderr.join("")).toContain("Benchmark completion gate timed out.");
   });

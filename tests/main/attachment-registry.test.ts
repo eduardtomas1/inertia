@@ -945,6 +945,39 @@ describe("main-owned attachment registry", () => {
     expect(attachments.usage()).toEqual({ records: 0, bytes: 0 });
   });
 
+  it("rejects a stable staged file whose worker receipt has the wrong digest", async () => {
+    const validationRunner: AttachmentImportValidationRunner = (
+      operation,
+      signal,
+    ) => {
+      const validated = validateAttachmentImportFile(operation, { signal });
+      return {
+        result: validated.then((receipt) => ({
+          ...receipt,
+          digest: `${receipt.digest.startsWith("0") ? "1" : "0"}${
+            receipt.digest.slice(1)
+          }`,
+        })),
+        stopped: validated.then(
+          () => undefined,
+          () => undefined,
+        ),
+      };
+    };
+    const { directory, registry: attachments } = await registry({
+      validationRunner,
+    });
+
+    await expect(attachments.import([{
+      name: "wrong-worker-digest.png",
+      mimeType: "image/png",
+      data: png,
+    }])).rejects.toThrow(/could not be verified safely/u);
+
+    await expect(readdir(directory)).resolves.toEqual([]);
+    expect(attachments.usage()).toEqual({ records: 0, bytes: 0 });
+  });
+
   it("removes prior-process orphans before a new registry starts", async () => {
     const { directory, registry: previousProcess } = await registry({
       maxRecords: 1,

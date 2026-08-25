@@ -26,13 +26,13 @@ const projectId = "11111111-1111-4111-8111-111111111111";
 const conversationId = "22222222-2222-4222-8222-222222222222";
 const temporaryDirectories: string[] = [];
 
-function git(cwd: string, ...args: string[]): string {
+function git(cwd: string, globalConfig: string, ...args: string[]): string {
   return execFileSync("git", args, {
     cwd,
     encoding: "utf8",
     env: {
       ...process.env,
-      GIT_CONFIG_GLOBAL: process.platform === "win32" ? "NUL" : "/dev/null",
+      GIT_CONFIG_GLOBAL: globalConfig,
       GIT_CONFIG_NOSYSTEM: "1",
     },
   }).trim();
@@ -56,6 +56,7 @@ function conversationWorktreeRepositoryFixture() {
 
 function linkedWorkspace(): {
   data: string;
+  globalConfig: string;
   gitDirectory: string;
   replacement: string;
   replacementCommonDirectory: string;
@@ -68,21 +69,47 @@ function linkedWorkspace(): {
   const workspace = join(root, "workspace");
   const replacement = join(root, "replacement");
   const data = join(root, "data");
+  const globalConfig = join(root, "empty.gitconfig");
+  writeFileSync(globalConfig, "");
   mkdirSync(source);
   mkdirSync(replacement);
-  git(source, "init", "-q", "--initial-branch=main");
-  git(source, "config", "user.name", "Inertia Tests");
-  git(source, "config", "user.email", "tests@inertia.invalid");
-  git(source, "commit", "--allow-empty", "-m", "Initial");
-  git(source, "worktree", "add", "-q", "-b", "linked", workspace);
-  git(replacement, "init", "-q", "--initial-branch=main");
-  git(replacement, "config", "user.name", "Inertia Tests");
-  git(replacement, "config", "user.email", "tests@inertia.invalid");
-  git(replacement, "commit", "--allow-empty", "-m", "Replacement");
+  git(source, globalConfig, "init", "-q", "--initial-branch=main");
+  git(source, globalConfig, "config", "user.name", "Inertia Tests");
+  git(source, globalConfig, "config", "user.email", "tests@inertia.invalid");
+  git(source, globalConfig, "commit", "--allow-empty", "-m", "Initial");
+  git(
+    source,
+    globalConfig,
+    "worktree",
+    "add",
+    "-q",
+    "-b",
+    "linked",
+    workspace,
+  );
+  git(replacement, globalConfig, "init", "-q", "--initial-branch=main");
+  git(replacement, globalConfig, "config", "user.name", "Inertia Tests");
+  git(
+    replacement,
+    globalConfig,
+    "config",
+    "user.email",
+    "tests@inertia.invalid",
+  );
+  git(
+    replacement,
+    globalConfig,
+    "commit",
+    "--allow-empty",
+    "-m",
+    "Replacement",
+  );
   return {
     data,
+    globalConfig,
     gitDirectory: git(
       workspace,
+      globalConfig,
       "rev-parse",
       "--path-format=absolute",
       "--git-dir",
@@ -90,6 +117,7 @@ function linkedWorkspace(): {
     replacement,
     replacementCommonDirectory: git(
       replacement,
+      globalConfig,
       "rev-parse",
       "--path-format=absolute",
       "--git-common-dir",
@@ -179,8 +207,20 @@ describe("conversation isolated-worktree source identity", () => {
     expect(deleteConversation).toHaveBeenCalledWith(conversationId);
     expect(existsSync(join(fixture.data, "worktrees", conversationId)))
       .toBe(false);
-    expect(git(fixture.source, "branch", "--list", "inertia/*")).toBe("");
-    expect(git(fixture.replacement, "branch", "--list", "inertia/*"))
+    expect(git(
+      fixture.source,
+      fixture.globalConfig,
+      "branch",
+      "--list",
+      "inertia/*",
+    )).toBe("");
+    expect(git(
+      fixture.replacement,
+      fixture.globalConfig,
+      "branch",
+      "--list",
+      "inertia/*",
+    ))
       .toBe("");
     expect(dependencies.send).not.toHaveBeenCalled();
   });
@@ -273,11 +313,18 @@ describe("conversation isolated-worktree source identity", () => {
     expect(existsSync(target)).toBe(true);
     expect(git(
       fixture.source,
+      fixture.globalConfig,
       "rev-parse",
       "--verify",
       `inertia/${conversationId.slice(0, 8)}`,
     )).toMatch(/^[0-9a-f]{40,64}$/u);
-    expect(git(fixture.replacement, "branch", "--list", "inertia/*"))
+    expect(git(
+      fixture.replacement,
+      fixture.globalConfig,
+      "branch",
+      "--list",
+      "inertia/*",
+    ))
       .toBe("");
     expect(broadcastSnapshot).toHaveBeenCalledOnce();
     expect(dependencies.send).not.toHaveBeenCalled();

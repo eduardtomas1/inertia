@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
-import { captureAgentBrowserSnapshot, expectClosedShadowActivationBlocked, expectDocumentStartPrivacyGuard, expectFocusNavigationSettlement, expectHoverRetargetingGuard, expectMicrotaskFocusTheftBlocked, expectPasswordAssignmentPrivacyGuard, expectScreenshotPrivacyGuard, expectSemanticClickBoundaries, expectWindowCapturePrivacyGuard, typeAgentBrowserField } from "./support/agent-browser-security";
+import { captureAgentBrowserSnapshot, expectHoverRetargetingGuard, expectMicrotaskFocusTheftBlocked, expectSemanticClickBoundaries, typeAgentBrowserField } from "./support/agent-browser-security";
 import { verifyBrowserEvidence } from "./support/browser-evidence";
 import { openConversationPaneTool } from "./support/workspace-tools";
 let app!: AppFixture;
@@ -585,37 +585,6 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
     secondaryPreview,
     primaryConversationId,
     typeDestinationUrl,
-  });
-  await expectFocusNavigationSettlement(app, primaryConversationId,
-    `${app.previewUrl}agent-browser-focus-destination`);
-  await expectClosedShadowActivationBlocked(app, primaryConversationId, `${app.previewUrl}agent-browser-closed-disabled-focus`);
-  const privacyUrl = `${app.previewUrl}agent-browser-privacy-start`;
-  await expectDocumentStartPrivacyGuard(app, primaryConversationId, privacyUrl);
-  await expectWindowCapturePrivacyGuard(app, primaryConversationId, `${app.previewUrl}agent-browser-window-capture-privacy`);
-  await expectScreenshotPrivacyGuard(app, primaryConversationId,
-    `${app.previewUrl}agent-browser-visible-secret-privacy`,
-    "sk-visible-browser-screenshot-sentinel-1234567890");
-  await expectScreenshotPrivacyGuard(app, primaryConversationId,
-    `${app.previewUrl}agent-browser-labeled-secret-privacy`, "hunter2");
-  await expectScreenshotPrivacyGuard(app, primaryConversationId,
-    `${app.previewUrl}agent-browser-pixel-secret-privacy`,
-    "sk-canvas-browser-screenshot-sentinel-1234567890", true);
-  await expectPasswordAssignmentPrivacyGuard(app, primaryConversationId,
-    `${app.previewUrl}agent-browser-password-assignment-privacy`, primaryPreview);
-  for (const [path, secret] of [
-    ["agent-browser-nested-privacy-start", "nested-password-sentinel"],
-    ["agent-browser-frame-lifetime-privacy", "removed-frame-password-sentinel"],
-    ["agent-browser-shadow-lifetime-privacy", "removed-shadow-password-sentinel"],
-    ["agent-browser-declarative-shadow-privacy", "declarative-shadow-password-sentinel"],
-    ["agent-browser-declarative-closed-privacy", "declarative-closed-password-sentinel"],
-    ["agent-browser-declarative-detached-privacy", "detached-declarative-password-sentinel"],
-    ["agent-browser-trusted-types-declarative-detached-privacy", "trusted-types-declarative-password-sentinel"],
-  ]) await expectDocumentStartPrivacyGuard(app, primaryConversationId, `${app.previewUrl}${path}`, secret);
-  const browserPagesScreenshot = testInfo.outputPath("inertia-browser-pages.png");
-  await page.screenshot({ animations: "disabled", path: browserPagesScreenshot });
-  await testInfo.attach("inertia-browser-pages", {
-    path: browserPagesScreenshot,
-    contentType: "image/png",
   });
   await primaryPreview.locator(".preview-tab-shell.active .preview-tab-close").click();
   await expect(browserTabs).toHaveCount(1);

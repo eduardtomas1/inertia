@@ -171,31 +171,28 @@ afterEach(() => {
 });
 
 describe("RuntimeSupervisor", () => {
-  it.runIf(process.platform === "linux")(
-    "retires a recoverable prior app generation before spawning",
-    async () => {
-      const priorGeneration = "30000000-0000-4000-8000-000000000003:7";
-      const bootId = "test:00000000-0000-4000-8000-000000000001";
-      expect(new RuntimeGenerationLeaseJournal(dataDirectory)
-        .publish(priorGeneration, bootId)).toBe(true);
-      expect(new RuntimeOwnedProcessJournal(dataDirectory)
-        .startSession(priorGeneration, bootId)).toBe(true);
-      const { children, supervisor } = createHarness();
+  it("retires a recoverable prior app generation before spawning", async () => {
+    const priorGeneration = "30000000-0000-4000-8000-000000000003:7";
+    const bootId = "test:00000000-0000-4000-8000-000000000001";
+    expect(new RuntimeGenerationLeaseJournal(dataDirectory)
+      .publish(priorGeneration, bootId)).toBe(true);
+    expect(new RuntimeOwnedProcessJournal(dataDirectory)
+      .startSession(priorGeneration, bootId)).toBe(true);
+    const { children, supervisor } = createHarness();
 
-      supervisor.start();
-      expect(children).toHaveLength(0);
-      await vi.advanceTimersByTimeAsync(0);
+    supervisor.start();
+    expect(children).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(0);
 
-      expect(children).toHaveLength(1);
-      children[0].spawn();
-      expect(children[0].messages.at(-1)).toMatchObject({
-        type: "runtime.start",
-        options: {
-          confirmedTerminatedRuntimeGenerationIds: [priorGeneration],
-        },
-      });
-    },
-  );
+    expect(children).toHaveLength(1);
+    children[0].spawn();
+    expect(children[0].messages.at(-1)).toMatchObject({
+      type: "runtime.start",
+      options: {
+        confirmedTerminatedRuntimeGenerationIds: [priorGeneration],
+      },
+    });
+  });
 
   it("prepares and releases only the current runtime generation for an update", async () => {
     const { children, supervisor } = createHarness();

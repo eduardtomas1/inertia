@@ -15,6 +15,8 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  readDarwinProcessIdentity,
+  readWindowsProcessIdentity,
   recoverPriorRuntimeGenerations,
   recoverRuntimeOwnedProcesses,
 } from "../../src/main/runtime-owned-process-recovery";
@@ -871,6 +873,8 @@ describe.skipIf(process.platform !== "linux")(
       const journal = new RuntimeOwnedProcessJournal(directory);
       const record = journal.records(runtimeGenerationId)?.[0];
       if (!record || record.state !== "owned") throw new Error("Missing claim");
+      if (!("startTimeTicks" in record.process)) throw new Error("Missing Linux claim");
+      const processIdentity = record.process;
       const forceKill = vi.fn(async () => true);
       const kill = vi.fn<typeof process.kill>(() => true);
       deactivate();
@@ -884,8 +888,8 @@ describe.skipIf(process.platform !== "linux")(
           forceKill,
           kill,
           readIdentity: () => ({
-            ...record.process,
-            startTimeTicks: `${BigInt(record.process.startTimeTicks) + 1n}`,
+            ...processIdentity,
+            startTimeTicks: `${BigInt(processIdentity.startTimeTicks) + 1n}`,
           }),
         },
       );
@@ -904,6 +908,8 @@ describe.skipIf(process.platform !== "linux")(
       const journal = new RuntimeOwnedProcessJournal(directory);
       const record = journal.records(runtimeGenerationId)?.[0];
       if (!record || record.state !== "owned") throw new Error("Missing claim");
+      if (!("startTimeTicks" in record.process)) throw new Error("Missing Linux claim");
+      const processIdentity = record.process;
       const forceKill = vi.fn(async () => true);
       deactivate();
 
@@ -916,10 +922,10 @@ describe.skipIf(process.platform !== "linux")(
           forceKill,
           readIdentity: (pid) => readLinuxProcessIdentity(pid, () =>
             linuxProcessStat(
-              record.process.pid,
+              processIdentity.pid,
               1,
-              record.process.processGroupId,
-              record.process.startTimeTicks,
+              processIdentity.processGroupId,
+              processIdentity.startTimeTicks,
             )),
         },
       );
@@ -966,15 +972,17 @@ describe.skipIf(process.platform !== "linux")(
       const journal = new RuntimeOwnedProcessJournal(directory);
       const record = journal.records(runtimeGenerationId)?.[0];
       if (!record || record.state !== "owned") throw new Error("Missing claim");
+      if (!("startTimeTicks" in record.process)) throw new Error("Missing Linux claim");
+      const processIdentity = record.process;
       deactivate();
       let identityRead = 0;
       const readIdentity = vi.fn(() => {
         identityRead += 1;
         return identityRead === 1
-          ? record.process
+          ? processIdentity
           : {
-              ...record.process,
-              startTimeTicks: `${BigInt(record.process.startTimeTicks) + 1n}`,
+              ...processIdentity,
+              startTimeTicks: `${BigInt(processIdentity.startTimeTicks) + 1n}`,
             };
       });
       const kill = vi.fn<typeof process.kill>(() => true);
@@ -1085,3 +1093,343 @@ describe.skipIf(process.platform !== "linux")(
     });
   },
 );
+
+describe("cross-platform runtime owned process recovery", () => {
+  function portableClaim(
+    directory: string,
+    platform: "darwin" | "win32",
+    pid = 4_242,
+  ) {
+    const journal = new RuntimeOwnedProcessJournal(directory, { platform });
+    expect(journal.startSession(runtimeGenerationId, systemBootId)).toBe(true);
+    const ownershipId = journal.begin(runtimeGenerationId, systemBootId);
+    const claim = journal.claim(
+      ownershipId,
+      runtimeGenerationId,
+      systemBootId,
+      pid,
+      101,
+      { spawnedAfterMs: 10_000, spawnedBeforeMs: 10_001 },
+    );
+    if (!("platform" in claim.process)) {
+      throw new Error("Expected a portable process claim");
+    }
+    return { claim, journal };
+  }
+
+  it("recovers an exact Windows process tree without rebooting", async () => {
+    const directory = temporaryDirectory();
+    const { claim, journal } = portableClaim(directory, "win32");
+    if (!("startedBeforeMs" in claim.process)) {
+      throw new Error("Expected a portable process claim");
+    }
+    const forceKill = vi.fn(async () => true);
+
+    await expect(recoverRuntimeOwnedProcesses(
+      directory,
+      runtimeGenerationId,
+      systemBootId,
+      {
+        platform: "win32",
+        deadlineAt: Date.now() + 2_000,
+        forceKill,
+        readIdentity: () => ({
+          platform: "win32",
+          pid: claim.process.pid,
+          processGroupId: null,
+          startedAtMs: 10_000,
+        }),
+      },
+    )).resolves.toBe(true);
+
+    expect(forceKill).toHaveBeenCalledWith(
+      claim.process.pid,
+      expect.objectContaining({ rootProcessGroup: false }),
+    );
+    expect(journal.records(runtimeGenerationId)).toEqual([]);
+  });
+
+  it("retires a missing Windows root without retargeting its PID", async () => {
+    const directory = temporaryDirectory();
+    const { journal } = portableClaim(directory, "win32");
+    const forceKill = vi.fn(async () => true);
+
+    await expect(recoverRuntimeOwnedProcesses(
+      directory,
+      runtimeGenerationId,
+      systemBootId,
+      {
+        platform: "win32",
+        deadlineAt: Date.now() + 2_000,
+        forceKill,
+        readIdentity: () => null,
+      },
+    )).resolves.toBe(true);
+
+    expect(forceKill).not.toHaveBeenCalled();
+    expect(journal.records(runtimeGenerationId)).toEqual([]);
+  });
+
+  it("does not target a recycled Windows PID", async () => {
+    const directory = temporaryDirectory();
+    const { claim, journal } = portableClaim(directory, "win32");
+    if (!("startedBeforeMs" in claim.process)) {
+      throw new Error("Expected a portable process claim");
+    }
+    const startedBeforeMs = claim.process.startedBeforeMs;
+    const forceKill = vi.fn(async () => true);
+
+    await expect(recoverRuntimeOwnedProcesses(
+      directory,
+      runtimeGenerationId,
+      systemBootId,
+      {
+        platform: "win32",
+        deadlineAt: Date.now() + 2_000,
+        forceKill,
+        readIdentity: () => ({
+          platform: "win32",
+          pid: claim.process.pid,
+          processGroupId: null,
+          startedAtMs: startedBeforeMs + 1,
+        }),
+      },
+    )).resolves.toBe(false);
+
+    expect(forceKill).not.toHaveBeenCalled();
+    expect(journal.records(runtimeGenerationId)).toEqual([claim]);
+  });
+
+  it("retires a Windows root that exits before tree termination", async () => {
+    const directory = temporaryDirectory();
+    const { claim, journal } = portableClaim(directory, "win32");
+    let reads = 0;
+    const forceKill = vi.fn(async () => true);
+
+    await expect(recoverRuntimeOwnedProcesses(
+      directory,
+      runtimeGenerationId,
+      systemBootId,
+      {
+        platform: "win32",
+        deadlineAt: Date.now() + 2_000,
+        forceKill,
+        readIdentity: () => {
+          reads += 1;
+          return reads === 1
+            ? {
+                platform: "win32",
+                pid: claim.process.pid,
+                processGroupId: null,
+                startedAtMs: 10_000,
+              }
+            : null;
+        },
+      },
+    )).resolves.toBe(true);
+
+    expect(forceKill).not.toHaveBeenCalled();
+    expect(journal.records(runtimeGenerationId)).toEqual([]);
+  });
+
+  it("recovers an exact macOS process group without rebooting", async () => {
+    const directory = temporaryDirectory();
+    const { claim, journal } = portableClaim(directory, "darwin");
+    const forceKill = vi.fn(async () => true);
+
+    await expect(recoverRuntimeOwnedProcesses(
+      directory,
+      runtimeGenerationId,
+      systemBootId,
+      {
+        platform: "darwin",
+        deadlineAt: Date.now() + 2_000,
+        forceKill,
+        readIdentity: () => ({
+          platform: "darwin",
+          pid: claim.process.pid,
+          processGroupId: claim.process.pid,
+          startedAtMs: 10_000,
+        }),
+      },
+    )).resolves.toBe(true);
+
+    expect(forceKill).toHaveBeenCalledWith(
+      claim.process.pid,
+      expect.objectContaining({ rootProcessGroup: true }),
+    );
+    expect(journal.records(runtimeGenerationId)).toEqual([]);
+  });
+
+  it("retires a missing macOS root only when its group is absent", async () => {
+    const directory = temporaryDirectory();
+    const { journal } = portableClaim(directory, "darwin");
+    const missing = new Error("missing") as NodeJS.ErrnoException;
+    missing.code = "ESRCH";
+    const kill = vi.fn<typeof process.kill>(() => { throw missing; });
+
+    await expect(recoverRuntimeOwnedProcesses(
+      directory,
+      runtimeGenerationId,
+      systemBootId,
+      {
+        platform: "darwin",
+        deadlineAt: Date.now() + 2_000,
+        kill,
+        readIdentity: () => null,
+      },
+    )).resolves.toBe(true);
+
+    expect(kill).toHaveBeenCalledWith(-4_242, 0);
+    expect(journal.records(runtimeGenerationId)).toEqual([]);
+  });
+
+  it("keeps an extant macOS group fail-closed when its root is missing", async () => {
+    const directory = temporaryDirectory();
+    const { claim, journal } = portableClaim(directory, "darwin");
+    const kill = vi.fn<typeof process.kill>(() => true);
+
+    await expect(recoverRuntimeOwnedProcesses(
+      directory,
+      runtimeGenerationId,
+      systemBootId,
+      {
+        platform: "darwin",
+        deadlineAt: Date.now() + 2_000,
+        kill,
+        readIdentity: () => null,
+      },
+    )).resolves.toBe(false);
+
+    expect(kill).toHaveBeenCalledWith(-4_242, 0);
+    expect(journal.records(runtimeGenerationId)).toEqual([claim]);
+  });
+
+  it.each(["darwin", "win32"] as const)(
+    "retires an empty %s ownership session and its generation lease",
+    async (platform) => {
+      const directory = temporaryDirectory();
+      const leases = new RuntimeGenerationLeaseJournal(directory);
+      const receipts = new RuntimeCleanupReceiptJournal(directory);
+      expect(leases.publish(runtimeGenerationId, systemBootId)).toBe(true);
+      expect(new RuntimeOwnedProcessJournal(directory, { platform })
+        .startSession(runtimeGenerationId, systemBootId)).toBe(true);
+
+      const recovery = recoverPriorRuntimeGenerations({
+        dataDirectory: directory,
+        systemBootId,
+        deadlineAt: Date.now() + 2_000,
+        leases,
+        receipts,
+        platform,
+      });
+
+      await expect(recovery).resolves.toBe(true);
+      leases.refresh();
+      expect(leases.all()).toEqual([]);
+      expect(receipts.pending()).toEqual([runtimeGenerationId]);
+    },
+  );
+
+  it("reads a bounded macOS process birth identity", () => {
+    const started = "Mon Aug 25 08:31:05 2025";
+    const spawnProcessSync = vi.fn(() => ({
+      status: 0,
+      stdout: `4242 4242 ${started}\n`,
+      stderr: "",
+    }));
+
+    expect(readDarwinProcessIdentity(4_242, {
+      platform: "darwin",
+      deadlineAt: Date.now() + 2_000,
+      spawnProcessSync: spawnProcessSync as never,
+    })).toEqual({
+      platform: "darwin",
+      pid: 4_242,
+      processGroupId: 4_242,
+      startedAtMs: Date.parse(started),
+    });
+    expect(spawnProcessSync).toHaveBeenCalledWith(
+      "/bin/ps",
+      ["-p", "4242", "-o", "pid=,pgid=,lstart="],
+      expect.objectContaining({ shell: false }),
+    );
+  });
+
+  it("reads a bounded Windows process birth identity", () => {
+    const ticks = 621_355_968_100_000_000n;
+    const spawnProcessSync = vi.fn(() => ({
+      status: 0,
+      stdout: `found|${ticks}`,
+      stderr: "",
+    }));
+
+    expect(readWindowsProcessIdentity(4_242, {
+      platform: "win32",
+      deadlineAt: Date.now() + 2_000,
+      environment: { SystemRoot: "C:\\Windows" },
+      spawnProcessSync: spawnProcessSync as never,
+    })).toEqual({
+      platform: "win32",
+      pid: 4_242,
+      processGroupId: null,
+      startedAtMs: 10_000,
+    });
+    expect(spawnProcessSync).toHaveBeenCalledWith(
+      "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+      expect.arrayContaining(["-NoProfile", "-NonInteractive"]),
+      expect.objectContaining({ shell: false, windowsHide: true }),
+    );
+  });
+
+  it.runIf(process.platform === "darwin" || process.platform === "win32")(
+    "retires a normally closed real process on the host platform",
+    async () => {
+      const directory = temporaryDirectory();
+      activate(directory);
+      const child = spawnRuntimeOwnedProcess(() => spawn(
+        process.execPath,
+        ["-e", "void 0"],
+        {
+          detached: process.platform !== "win32",
+          shell: false,
+          stdio: "ignore",
+        },
+      ));
+      liveChildren.add(child);
+      child.once("close", () => liveChildren.delete(child));
+      await closeOf(child);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      expect(new RuntimeOwnedProcessJournal(directory)
+        .records(runtimeGenerationId)).toEqual([]);
+      deactivate();
+    },
+    10_000,
+  );
+
+  it.runIf(process.platform === "darwin" || process.platform === "win32")(
+    "recovers a real owned process on the host platform",
+    async () => {
+      const directory = temporaryDirectory();
+      activate(directory);
+      const child = longRunningChild();
+      const close = closeOf(child);
+      const journal = new RuntimeOwnedProcessJournal(directory);
+      expect(journal.records(runtimeGenerationId)).toHaveLength(1);
+      deactivate();
+
+      const recovery = recoverRuntimeOwnedProcesses(
+        directory,
+        runtimeGenerationId,
+        systemBootId,
+        { deadlineAt: Date.now() + 5_000 },
+      );
+
+      await expect(recovery).resolves.toBe(true);
+      await close;
+      expect(journal.records(runtimeGenerationId)).toEqual([]);
+    },
+    10_000,
+  );
+});

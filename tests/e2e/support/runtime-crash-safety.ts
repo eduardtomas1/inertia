@@ -4,9 +4,14 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 
+import {
+  readDarwinProcessIdentity,
+  readWindowsProcessIdentity,
+} from "../../../src/main/runtime-owned-process-recovery";
 import { readSystemBootId } from "../../../src/main/system-boot-id";
 import { RuntimeGenerationLeaseJournal } from "../../../src/node/runtime-generation-leases";
 import {
+  type ObservedRuntimeOwnedProcessIdentity,
   readLinuxProcessIdentity,
   RuntimeOwnedProcessJournal,
 } from "../../../src/node/runtime-owned-processes";
@@ -56,6 +61,19 @@ function procState(pid: number): { state: string | null; errorCode: string | nul
   }
 }
 
+function readOwnedProcessIdentity(
+  pid: number,
+): ObservedRuntimeOwnedProcessIdentity | null {
+  if (process.platform === "linux") return readLinuxProcessIdentity(pid);
+  if (process.platform === "darwin") {
+    return readDarwinProcessIdentity(pid, { deadlineAt: Date.now() + 1_000 });
+  }
+  if (process.platform === "win32") {
+    return readWindowsProcessIdentity(pid, { deadlineAt: Date.now() + 1_000 });
+  }
+  return null;
+}
+
 async function runtimeWebsocketUrl(page: AppFixture["page"]): Promise<string> {
   return await page.evaluate(async () => {
     const connection = await window.inertia.getRuntimeConnection();
@@ -78,10 +96,9 @@ export async function expectRuntimeCrashRecovery(
   const before = await runtimeSnapshot();
   const beforeObservation = runtimeObservation(before);
   const dataDirectory = join(testDirectory, "data");
-  const priorLease = process.platform === "linux"
-    ? new RuntimeGenerationLeaseJournal(dataDirectory).all().find((lease) =>
-      lease.runtimeGenerationId.endsWith(`:${before.generation}`)) ?? null
-    : null;
+  const priorLease = new RuntimeGenerationLeaseJournal(dataDirectory).all()
+    .find((lease) =>
+      lease.runtimeGenerationId.endsWith(`:${before.generation}`)) ?? null;
   const beforeUrl = await runtimeWebsocketUrl(page);
   await expect(page.locator(".app-shell")).toHaveAttribute(
     "data-runtime-generation",
@@ -318,38 +335,6 @@ export async function expectRuntimeCrashRecovery(
   expect(await page.evaluate(() =>
     Reflect.get(window, "__unsafeMarkdown"))).toBeUndefined();
   const safetyAlert = page.locator(".error-toast[role=\"alert\"]");
-  if (process.platform !== "linux") {
-    await expect(interruptedNotice).toHaveCount(0);
-    await expect(safetyAlert).toContainText(
-      "Changes are unavailable in recovery safety mode.",
-    );
-    await expect(terminal).not.toHaveAttribute("data-terminal-id", /.+/u);
-    await safetyAlert.getByRole("button", { name: "Dismiss error" }).click();
-    await expect(safetyAlert).toHaveCount(0);
-    await newChat.click();
-    await expect(safetyAlert).toContainText(
-      "Changes are unavailable in recovery safety mode.",
-    );
-    const preserved = new Database(join(testDirectory, "data", "inertia.sqlite"), {
-      readonly: true,
-    });
-    try {
-      expect((preserved.prepare("SELECT COUNT(*) AS count FROM conversations")
-        .get() as { count: number }).count).toBe(conversationCount);
-      expect(preserved.prepare("SELECT status FROM conversations WHERE id = ?")
-        .get(conversation.id)).toEqual({ status: "running" });
-      expect(preserved.prepare("SELECT status FROM activities WHERE run_id = ?")
-        .get("e2e-interrupted-run")).toEqual({ status: "running" });
-    } finally {
-      preserved.close();
-    }
-    if (before.pid) {
-      await expect.poll(() => processExists(before.pid as number), {
-        timeout: 5_000,
-      }).toBe(false);
-    }
-    return;
-  }
   await expect(newChat).toBeEnabled();
   if (
     testInfo
@@ -374,7 +359,7 @@ export async function expectRuntimeCrashRecovery(
       let currentIdentity = null;
       let currentIdentityErrorCode: string | null = null;
       try {
-        currentIdentity = readLinuxProcessIdentity(record.process.pid);
+        currentIdentity = readOwnedProcessIdentity(record.process.pid);
       } catch (error) {
         currentIdentityErrorCode = error
           && typeof error === "object"

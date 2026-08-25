@@ -1357,7 +1357,11 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     if (deactivate) {
       expect(journal.records(runtimeGenerationId)).toMatchObject([{
         state: "owned",
-        process: { processGroupId: expect.any(Number) },
+        process: {
+          processGroupId: process.platform === "win32"
+            ? null
+            : expect.any(Number),
+        },
       }]);
     }
     await waitFor("Kimi fixture capture", () => {

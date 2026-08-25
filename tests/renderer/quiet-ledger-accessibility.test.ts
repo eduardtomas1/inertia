@@ -307,9 +307,9 @@ describe("Quiet Ledger transcript accessibility", () => {
   });
 
   it("exposes one custom minimap preview to hover and keyboard focus", () => {
-    const viewportSource = readFileSync(
+    const minimapSource = readFileSync(
       new URL(
-        "../../src/renderer/src/components/response-timeline/viewport.tsx",
+        "../../src/renderer/src/components/response-timeline/minimap.tsx",
         import.meta.url,
       ),
       "utf8",
@@ -319,13 +319,13 @@ describe("Quiet Ledger transcript accessibility", () => {
       "utf8",
     );
 
-    expect(viewportSource).toContain('className="timeline-minimap-preview"');
-    expect(viewportSource).toContain('aria-hidden="true"');
-    expect(viewportSource).toContain(
+    expect(minimapSource).toContain('className="timeline-minimap-preview"');
+    expect(minimapSource).toContain('aria-hidden="true"');
+    expect(minimapSource).toContain(
       "aria-label={`Go to turn ${marker.number}: ${marker.label}`}",
     );
-    expect(viewportSource).not.toContain("aria-describedby=");
-    expect(viewportSource).not.toContain(
+    expect(minimapSource).not.toContain("aria-describedby=");
+    expect(minimapSource).not.toContain(
       "title={`Turn ${marker.number}: ${marker.label}`}",
     );
     expect(styles).toContain(

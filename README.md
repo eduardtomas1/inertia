@@ -234,9 +234,9 @@ If something goes wrong, first refresh the affected provider in **Settings → P
 
 Report suspected vulnerabilities privately through the [security policy](SECURITY.md), never through a public issue.
 
-### Version 0.0.43
+### Version 0.0.44
 
-Inertia 0.0.43 is the first downloadable binary for the complete feature set recorded under 0.0.42 in the changelog. The `v0.0.42` tag was created during release validation, but publication did not complete and it has no release assets.
+Inertia 0.0.44 is a maintenance release for deterministic CI ownership. It preserves the public feature set shipped in 0.0.43 while giving the compact Browser evidence control an explicit accessible name with its current evidence count, making the PTY lifecycle benchmark wait for a complete acknowledged stream instead of node-pty's nondeterministic close tail, and measuring stream first projection from three raw persistence-path samples without changing the shipped cadence or hosted ceiling.
 
 Inertia now gives each chat a visible local Browser with bounded agent actions and an inspectable, fail-closed evidence timeline for screenshots, console failures, failed requests, navigation, and actions. The pre-merge confidence view collects exact-head CI, review freshness, affected areas, focused evidence, portability, bundle deltas, and release readiness without letting stale status look green.
 
@@ -248,7 +248,7 @@ Newly completed answers also retain their intended reading position across ordin
 
 Stable builds now cover six native architectures. Unsigned Windows and ad-hoc macOS packages remain manual downloads until signing credentials exist; Linux AppImages keep verified in-app delivery. The separately identified Canary prerelease channel can test and roll back Canary packages without changing Stable's feed or local state.
 
-Download [Inertia v0.0.43](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.43):
+Download [Inertia v0.0.44](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.44):
 
 | Platform | Architecture | Package | Update delivery after the first manual install |
 | --- | --- | --- | --- |
@@ -258,6 +258,8 @@ Download [Inertia v0.0.43](https://github.com/eduardtomas1/inertia/releases/tag/
 | Windows | ARM64 | Installer | Manual while Authenticode signing is unavailable |
 | Linux | x64 | AppImage | Verified in-app updates |
 | Linux | ARM64 | AppImage | Verified in-app updates |
+
+The credential-free public release is exactly 11 assets: four macOS packages (DMG and ZIP for both architectures), two Windows installers, two Linux AppImages, the two architecture-qualified Linux update manifests, and `SHA256SUMS.txt`. Manual macOS and Windows builds do not publish updater metadata or blockmaps.
 
 Every platform requires a manual first install. Every stable release and Canary prerelease includes `SHA256SUMS.txt`; download it from the same exact tagged release and compare the selected package's SHA-256 before opening it.
 

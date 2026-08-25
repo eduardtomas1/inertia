@@ -175,6 +175,9 @@ export async function verifyDesktopMarkdownControls(input: {
   const firstWrap = codeBlocks.nth(0).getByRole("button", { name: "Wrap" });
   const firstCopy = codeBlocks.nth(0).locator('button[title="Copy code"]');
   const secondCopy = codeBlocks.nth(1).locator('button[title="Copy code"]');
+  await firstWrap.evaluate((button) => {
+    button.scrollIntoView({ block: "center", inline: "nearest" });
+  });
   const wrapHitTest = await firstWrap.evaluate((button) => {
     const bounds = button.getBoundingClientRect();
     const x = bounds.left + bounds.width / 2;

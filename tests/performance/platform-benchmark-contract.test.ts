@@ -19,4 +19,32 @@ describe("platform benchmark threshold ownership", () => {
     expect(ceilings[0]?.[1]).toBe("HOSTED_SELECTED_STREAM_VISIBLE_GAP_MS");
     expect(ceilings[0]?.index).toBeGreaterThan(enforceIndex);
   });
+
+  it("enforces the selected first-projection ceiling on three real samples", () => {
+    const enforceIndex = benchmarkSource.indexOf("if (enforce) {");
+    const ceilings = [...benchmarkSource.matchAll(
+      /expect\(selectedStreamingCadence!\.firstProjectionMedianMs\)\s*\.toBeLessThan\(([^)]+)\)/gu,
+    )];
+    const rawSampleGuardIndex = benchmarkSource.indexOf(
+      "for (const sample of candidate.firstProjectionSamplesMs)",
+    );
+    const rawSampleCeilingIndex = benchmarkSource.indexOf(
+      ".toBeLessThan(HOSTED_STREAM_FIRST_PROJECTION_CATASTROPHIC_MS)",
+      rawSampleGuardIndex,
+    );
+
+    expect(enforceIndex).toBeGreaterThan(-1);
+    expect(benchmarkSource).toContain("const FIRST_PROJECTION_SAMPLE_COUNT = 3;");
+    expect(benchmarkSource).toContain(
+      "percentile(firstProjectionSamplesMs, 0.5)",
+    );
+    expect(benchmarkSource).toContain(
+      "((projectionTimes[0] ?? completedAt) - startedAt).toFixed(3)",
+    );
+    expect(rawSampleGuardIndex).toBeGreaterThan(enforceIndex);
+    expect(rawSampleCeilingIndex).toBeGreaterThan(rawSampleGuardIndex);
+    expect(ceilings).toHaveLength(1);
+    expect(ceilings[0]?.[1]).toBe("HOSTED_SELECTED_STREAM_FIRST_PROJECTION_MS");
+    expect(ceilings[0]?.index).toBeGreaterThan(enforceIndex);
+  });
 });

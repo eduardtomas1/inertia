@@ -234,7 +234,9 @@ If something goes wrong, first refresh the affected provider in **Settings → P
 
 Report suspected vulnerabilities privately through the [security policy](SECURITY.md), never through a public issue.
 
-### Version 0.0.42
+### Version 0.0.43
+
+Inertia 0.0.43 is the first downloadable binary for the complete feature set recorded under 0.0.42 in the changelog. The `v0.0.42` tag was created during release validation, but publication did not complete and it has no release assets.
 
 Inertia now gives each chat a visible local Browser with bounded agent actions and an inspectable, fail-closed evidence timeline for screenshots, console failures, failed requests, navigation, and actions. The pre-merge confidence view collects exact-head CI, review freshness, affected areas, focused evidence, portability, bundle deltas, and release readiness without letting stale status look green.
 
@@ -242,9 +244,11 @@ One authoritative run-state engine keeps Codex, Claude, Cursor, Kimi Code, and O
 
 Files navigation keeps exact repository, path, disclosure, search, language, keyboard, and responsive state. Picker, paste, and drop attachments stay inside a privileged per-document lease until the exact accepted subset is committed, while recovery, window placement, updater ownership, health reporting, theme contrast, and measured first paint all remain explicit about partial or failed state.
 
+Newly completed answers also retain their intended reading position across ordinary terminal and detail rerenders. Explicit reader navigation, replacement work, conversation changes, and lifecycle shutdown still cancel the bounded anchor immediately.
+
 Stable builds now cover six native architectures. Unsigned Windows and ad-hoc macOS packages remain manual downloads until signing credentials exist; Linux AppImages keep verified in-app delivery. The separately identified Canary prerelease channel can test and roll back Canary packages without changing Stable's feed or local state.
 
-Download [Inertia v0.0.42](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.42):
+Download [Inertia v0.0.43](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.43):
 
 | Platform | Architecture | Package | Update delivery after the first manual install |
 | --- | --- | --- | --- |

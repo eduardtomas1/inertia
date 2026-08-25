@@ -541,6 +541,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
   const layoutAnchorActive = useRef(false);
   const turnAnchorActive = useRef(false);
   const finalAnswerAnchorOwner = useRef<string | null>(null);
+  const cancelFinalAnswerAnchorRef = useRef<(() => void) | null>(null);
   const onTurnAnchorSettledRef = useRef(props.onTurnAnchorSettled);
   const onTurnAnchorCancelledRef = useRef(props.onTurnAnchorCancelled);
   const onFinalAnswerAutoScroll = props.onFinalAnswerAutoScroll;
@@ -591,7 +592,8 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     const root = props.timelineElementRef?.current;
     if (!scrollElement || !root || answerIndex < 0) return;
 
-    return startFinalAnswerAnchor({
+    let cancelAnchor: (() => void) | null = null;
+    cancelAnchor = startFinalAnswerAnchor({
       conversationId,
       answerId,
       scrollElement,
@@ -606,8 +608,23 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
       cancelLayoutAnchorRestoration: () => {
         cancelLayoutAnchorRestoration.current?.();
       },
-      onEvent: onFinalAnswerAutoScroll,
+      onEvent: (event) => {
+        if (
+          event.status !== "started"
+          && cancelFinalAnswerAnchorRef.current === cancelAnchor
+        ) {
+          cancelFinalAnswerAnchorRef.current = null;
+        }
+        onFinalAnswerAutoScroll?.(event);
+      },
     });
+    cancelFinalAnswerAnchorRef.current = cancelAnchor;
+    return () => {
+      if (cancelFinalAnswerAnchorRef.current === cancelAnchor) {
+        cancelFinalAnswerAnchorRef.current = null;
+      }
+      cancelAnchor?.();
+    };
   }, [
     finalAnswerId,
     hasLatestTurnSignal,
@@ -1047,6 +1064,13 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     window.requestAnimationFrame(focus);
   }, [props.timelineElementRef, timeline, virtualized, virtualizer]);
 
+  const beginReaderTimelineNavigation = useCallback((): void => {
+    const cancelAnchor = cancelFinalAnswerAnchorRef.current;
+    cancelFinalAnswerAnchorRef.current = null;
+    cancelAnchor?.();
+    onReaderNavigationIntent?.();
+  }, [onReaderNavigationIntent]);
+
   useEffect(() => {
     const focusRequestedTurn = (event: Event): void => {
       const detail = (event as CustomEvent<unknown>).detail;
@@ -1057,7 +1081,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
       const index = timeline.findIndex((item) =>
         item.kind === "turn" && item.turn.id === detail.turnId);
       if (index >= 0) {
-        onReaderNavigationIntent?.();
+        beginReaderTimelineNavigation();
         focusTimelineItem(index, "turn");
       }
     };
@@ -1067,9 +1091,9 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
       focusRequestedTurn,
     );
   }, [
+    beginReaderTimelineNavigation,
     focusTimelineItem,
     props.conversationId,
-    onReaderNavigationIntent,
     timeline,
   ]);
 
@@ -1089,16 +1113,16 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
       const intent = resolveTimelineKeyboardIntent(event, current, timeline.length);
       if (!intent) return;
       event.preventDefault();
-      onReaderNavigationIntent?.();
+      beginReaderTimelineNavigation();
       focusTimelineItem(intent.index, intent.target);
     };
     scrollElement.addEventListener("keydown", onKeyDown);
     return () => scrollElement.removeEventListener("keydown", onKeyDown);
   }, [
+    beginReaderTimelineNavigation,
     focusTimelineItem,
     props.scrollElementRef,
     props.timelineElementRef,
-    onReaderNavigationIntent,
     timeline,
     virtualized,
     virtualizer,
@@ -1130,7 +1154,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
           activeIndex={activeIndex}
           left={gutter.minimapLeft}
           markers={markers}
-          onNavigationIntent={onReaderNavigationIntent}
+          onNavigationIntent={beginReaderTimelineNavigation}
           onNavigate={focusTimelineItem}
         />
       )}

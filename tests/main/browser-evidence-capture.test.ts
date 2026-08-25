@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { performance } from "node:perf_hooks";
 
 import {
   BrowserEvidenceCapture,
@@ -108,14 +107,19 @@ describe("Browser evidence capture", () => {
     ]);
   });
 
-  it("sanitizes the complete hostile console batch within one bounded deadline", async () => {
+  it("sanitizes and bounds the complete hostile console batch within its CPU budget", async () => {
     const page: BrowserEvidencePage = {
       tabId: "11111111-1111-4111-8111-111111111111",
       pageNumber: 1,
       documentSequence: 1,
       contents: {} as BrowserEvidencePage["contents"],
     };
-    const publish = vi.fn();
+    const published = deferred<void>();
+    let publishCount = 0;
+    const publish = vi.fn(() => {
+      publishCount += 1;
+      if (publishCount === 160) published.resolve();
+    });
     const capture = new BrowserEvidenceCapture({
       isLive: () => true,
       isCurrent: () => true,
@@ -127,18 +131,27 @@ describe("Browser evidence capture", () => {
       "a/".repeat(2_340),
     ];
 
-    const startedAt = performance.now();
+    const cpuStartedAt = process.cpuUsage();
     for (let index = 0; index < 160; index += 1) {
       capture.recordConsoleError(page, hostile[index % hostile.length]);
     }
-    await vi.waitFor(
-      () => expect(publish).toHaveBeenCalledTimes(160),
-      { interval: 5, timeout: 1_500 },
+    await published.promise;
+
+    const cpu = process.cpuUsage(cpuStartedAt);
+    expect(cpu.user + cpu.system).toBeLessThan(1_500_000);
+    expect(publish).toHaveBeenCalledTimes(160);
+    const snapshot = capture.snapshot();
+    expect(snapshot.omitted).toBe(true);
+    expect(snapshot.entries).toHaveLength(100);
+    expect(snapshot.entries.every((entry) => (
+      entry.kind === "console-error" && entry.redacted
+    ))).toBe(true);
+    expect(snapshot.entries.map((entry) => entry.detail)).toEqual(
+      Array.from({ length: 100 }, (_, index) => (
+        index % 2 === 0
+          ? "a".repeat(600)
+          : "Sensitive console detail hidden"
+      )),
     );
-    expect(performance.now() - startedAt).toBeLessThan(1_500);
-    expect(capture.snapshot()).toMatchObject({
-      omitted: true,
-      entries: expect.any(Array),
-    });
   });
 });

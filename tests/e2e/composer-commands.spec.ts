@@ -89,6 +89,8 @@ test("keeps provider commands in a full-width floating command surface", async (
   const input = page.getByRole("textbox", { name: "Message" });
 
   await input.fill("/");
+  await expect(composer.getByRole("button", { name: "Send message" }))
+    .toBeEnabled();
   const commandList = page.getByRole("listbox", { name: "Composer commands" });
   const commandMenu = page.locator(".composer-command-menu");
   await expect(commandList).toBeVisible();

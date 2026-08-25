@@ -184,6 +184,11 @@ export async function verifyBrowserEvidence({
   await app.resizeWindow(1_050, 820);
   await expect(primaryPreview.locator(".preview-evidence-toggle > span"))
     .toBeHidden();
+  const compactEvidenceCount = await primaryEvidenceToggle.locator("small").innerText();
+  expect(compactEvidenceCount).toMatch(/^\d+$/u);
+  await expect(primaryEvidenceToggle).toHaveAccessibleName(
+    `Evidence ${compactEvidenceCount}`,
+  );
   const compactEvidenceScreenshot = testInfo.outputPath(
     "inertia-browser-evidence-dark-compact.png",
   );

@@ -289,22 +289,27 @@ describe("useDetachedChatWindows", () => {
 
   it("leaves a pending handoff unacknowledged when storage is unavailable", async () => {
     const acknowledgeDraft = vi.fn(async () => true);
-    vi.spyOn(window.localStorage, "setItem").mockImplementation(() => {
-      throw new Error("storage unavailable");
-    });
-    installDetachedChatBridge({
-      acknowledgeDraft,
-      getPendingDrafts: vi.fn(async () => [{
-        conversationId: CONVERSATION_ID,
-        draft: "retry after reload",
-        handoffId: "66666666-6666-4666-8666-666666666666",
-      }]),
-    });
+    const storageWrite = vi.spyOn(window.localStorage, "setItem")
+      .mockImplementation(() => {
+        throw new Error("storage unavailable");
+      });
+    try {
+      installDetachedChatBridge({
+        acknowledgeDraft,
+        getPendingDrafts: vi.fn(async () => [{
+          conversationId: CONVERSATION_ID,
+          draft: "retry after reload",
+          handoffId: "66666666-6666-4666-8666-666666666666",
+        }]),
+      });
 
-    const hook = renderHook(() => useDetachedChatWindows());
+      const hook = renderHook(() => useDetachedChatWindows());
 
-    await waitFor(() => expect(hook.result.current.ready).toBe(true));
-    expect(acknowledgeDraft).not.toHaveBeenCalled();
+      await waitFor(() => expect(hook.result.current.ready).toBe(true));
+      expect(acknowledgeDraft).not.toHaveBeenCalled();
+    } finally {
+      storageWrite.mockRestore();
+    }
   });
 
   it("forwards open and focus requests to the desktop bridge", async () => {

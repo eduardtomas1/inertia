@@ -269,11 +269,21 @@ async function terminalPtyLifecycleMeasurement(): Promise<Measurement> {
   const frameCounts: number[] = [];
   const outputFrameCounts: number[] = [];
   const outputBytes: number[] = [];
+  // node-pty can destroy unread Unix PTY bytes when a child exits. Keep the
+  // fixture alive until its complete deterministic stream crosses our public
+  // output path, then prove the acknowledgement-to-exit lifecycle separately.
+  const readyMarker = "INERTIA_PTY_RECORDS_READY";
   for (let sample = 0; sample < 3; sample += 1) {
     let frames = 0;
     let outputFrames = 0;
     let bytes = 0;
     let output = "";
+    let outputAtExit = "";
+    const eventTypes: string[] = [];
+    let resolveReady!: () => void;
+    const readyObserved = new Promise<void>((resolve) => {
+      resolveReady = resolve;
+    });
     const owner = {
       readyState: 1,
       bufferedAmount: 0,
@@ -284,37 +294,88 @@ async function terminalPtyLifecycleMeasurement(): Promise<Measurement> {
           type: string;
           data?: string;
         };
+        eventTypes.push(event.type);
         if (event.type === "terminal.output" && event.data) {
           outputFrames += 1;
           output += event.data;
+          if (output.includes(readyMarker)) resolveReady();
+        } else if (event.type === "terminal.exit") {
+          outputAtExit = output;
         }
       },
     } as unknown as WebSocket;
     const manager = new TerminalManager();
     const startedAt = performance.now();
-    await new Promise<void>((resolveExit, reject) => {
-      const timer = setTimeout(
-        () => reject(new Error("The benchmark PTY did not exit.")),
-        10_000,
-      );
-      manager.createProcess(
+    let resolveExit!: () => void;
+    const exited = new Promise<void>((resolve) => {
+      resolveExit = resolve;
+    });
+    let rejectDeadline!: (error: Error) => void;
+    const deadline = new Promise<never>((_resolve, reject) => {
+      rejectDeadline = reject;
+    });
+    const timer = setTimeout(
+      () => rejectDeadline(new Error("The benchmark PTY did not settle.")),
+      10_000,
+    );
+    try {
+      const terminalId = manager.createProcess(
         owner,
         process.cwd(),
         process.execPath,
         [
           "-e",
-          "for(let i=0;i<2000;i++)process.stdout.write(`INERTIA_PTY_RECORD_BEGIN:${i}:PAYLOAD:payload-${i}:INERTIA_PTY_RECORD_END\\n`)",
+          `
+process.stdin.setEncoding("utf8");
+if (process.stdin.isTTY) process.stdin.setRawMode(true);
+process.stdin.resume();
+process.stdin.once("data", () => {
+  process.stdin.pause();
+});
+for (let i = 0; i < 2_000; i += 1) {
+  process.stdout.write(\`INERTIA_PTY_RECORD_BEGIN:\${i}:PAYLOAD:payload-\${i}:INERTIA_PTY_RECORD_END\\n\`);
+}
+process.stdout.write("INERTIA_PTY_RECORDS_READY");
+`,
         ],
         process.env,
         120,
         40,
         () => {
-          clearTimeout(timer);
           resolveExit();
         },
       );
-    });
-    assertExpectedPtyRecords(output, 2_000);
+      await Promise.race([readyObserved, deadline]);
+      manager.input(owner, terminalId, "ack\n");
+      await Promise.race([exited, deadline]);
+      const readyIndex = output.indexOf(readyMarker);
+      expect(readyIndex).toBeGreaterThanOrEqual(0);
+      expect(outputAtExit).toBe(output);
+      expect(eventTypes.at(-1)).toBe("terminal.exit");
+      const recordOutput = `${output.slice(0, readyIndex)}${
+        output.slice(readyIndex + readyMarker.length)
+      }`;
+      assertExpectedPtyRecords(recordOutput, 2_000);
+    } catch (error) {
+      const diagnostics = {
+        bytes: Buffer.byteLength(output),
+        codeUnits: output.length,
+        frames,
+        outputFrames,
+        readyObserved: output.includes(readyMarker),
+        outputCompleteAtExit: outputAtExit === output,
+        finalEvent: eventTypes.at(-1) ?? null,
+        head: JSON.stringify(output.slice(0, 160)),
+        tail: JSON.stringify(output.slice(-160)),
+      };
+      throw new Error(
+        `The benchmark PTY output was incomplete: ${JSON.stringify(diagnostics)}`,
+        { cause: error },
+      );
+    } finally {
+      clearTimeout(timer);
+      await manager.disposeAll();
+    }
     samples.push(performance.now() - startedAt);
     frameCounts.push(frames);
     outputFrameCounts.push(outputFrames);

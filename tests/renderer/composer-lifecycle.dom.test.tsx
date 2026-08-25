@@ -1051,9 +1051,11 @@ describe("composer asynchronous ownership", () => {
     fireEvent.change(input, { target: { value: "/resume" } });
     fireEvent.keyDown(input, { key: "Tab" });
 
+    // This surface is intentionally lazy behind Suspense; a loaded Windows
+    // suite can exceed Testing Library's default one-second module wait.
     const region = await screen.findByRole("region", {
       name: "Resume a provider chat",
-    });
+    }, { timeout: 5_000 });
     expect(region.parentElement).toHaveClass("composer-command-layer");
     expect(region).toHaveClass("composer-command-menu");
     expect(input).toHaveValue("");

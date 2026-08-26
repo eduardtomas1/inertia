@@ -17,6 +17,64 @@ afterEach(async () => {
 });
 
 describe("system suspend repository", () => {
+  it("retains an idle suspend interval without charging later work", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "inertia-system-suspend-"));
+    directories.push(directory);
+    const workspace = join(directory, "workspace");
+    const databasePath = join(directory, "inertia.sqlite");
+    await mkdir(workspace);
+    const store = new RuntimeStore(databasePath, workspace, {
+      recoverInterruptedRuns: false,
+    });
+
+    const idle = {
+      id: "11111111-1111-4111-8111-111111111111",
+      suspendedAt: "2026-08-26T08:00:00.000Z",
+      resumedAt: "2026-08-26T08:30:00.000Z",
+    };
+    expect(store.systemSuspends.record(idle)).toEqual([]);
+
+    const project = store.createProject("Idle suspend", workspace);
+    const conversation = store.createConversation(project.id, "Later work", {
+      providerId: "codex",
+    });
+    const message = store.createMessage(
+      conversation.id,
+      "Start after the machine resumes.",
+      "user",
+      [],
+      null,
+      "2026-08-26T09:00:00.000Z",
+    );
+    const turn = store.createAgentTurn({
+      conversationId: conversation.id,
+      runId: randomUUID(),
+      userMessageId: message.id,
+      providerId: "codex",
+      modelSelection: nativeModelSelection({ providerId: "codex" }),
+      reasoningEffort: "",
+      interactionMode: "build",
+      accessMode: "supervised",
+      requestedAt: "2026-08-26T09:00:00.000Z",
+      usageAtStart: null,
+      configurationRevision: 0,
+      association: "authoritative",
+    });
+    store.updateAgentTurnLifecycle(turn.id, {
+      status: "completed",
+      startedAt: "2026-08-26T09:00:00.000Z",
+      completedAt: "2026-08-26T09:10:00.000Z",
+      updatedAt: "2026-08-26T09:10:00.000Z",
+    });
+
+    expect(store.agentTurn(turn.id).suspendedDurationMs).toBe(0);
+    expect(store.systemSuspends.read(
+      "2026-08-26T00:00:00.000Z",
+      "2026-08-27T00:00:00.000Z",
+    )).toEqual([idle]);
+    store.close();
+  });
+
   it("retries a failed head before a later interval after restart", async () => {
     const directory = await mkdtemp(join(tmpdir(), "inertia-system-suspend-"));
     directories.push(directory);

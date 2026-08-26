@@ -92,7 +92,13 @@ export function ReasoningSummary({
   );
 }
 
-export function LiveElapsed({ startedAt }: { startedAt: string }): React.JSX.Element {
+export function LiveElapsed({
+  startedAt,
+  excludedMs = 0,
+}: {
+  startedAt: string;
+  excludedMs?: number;
+}): React.JSX.Element {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     let timer: number | null = null;
@@ -121,7 +127,11 @@ export function LiveElapsed({ startedAt }: { startedAt: string }): React.JSX.Ele
       window.removeEventListener("blur", synchronize);
     };
   }, []);
-  return <span>{formatElapsed(Math.max(0, now - Date.parse(startedAt)), true)}</span>;
+  return (
+    <span>
+      {formatElapsed(Math.max(0, now - Date.parse(startedAt) - excludedMs), true)}
+    </span>
+  );
 }
 
 export const MAX_ANIMATED_STREAM_WORDS = 96;

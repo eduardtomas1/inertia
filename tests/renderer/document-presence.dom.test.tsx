@@ -94,4 +94,22 @@ describe("document presence", () => {
     await act(async () => document.dispatchEvent(new Event("visibilitychange")));
     expect(view.getByText("3.1s")).toBeInTheDocument();
   });
+
+  it("keeps persisted suspend time out of the live work clock", async () => {
+    vi.useFakeTimers();
+    const startedAt = "2026-08-19T08:00:00.000Z";
+    vi.setSystemTime(new Date("2026-08-19T08:00:10.000Z"));
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    const view = render(
+      <LiveElapsed startedAt={startedAt} excludedMs={7_000} />,
+    );
+
+    expect(view.getByText("3.0s")).toBeInTheDocument();
+    await act(async () => vi.advanceTimersByTime(100));
+    expect(view.getByText("3.1s")).toBeInTheDocument();
+
+    view.rerender(<LiveElapsed startedAt={startedAt} excludedMs={9_000} />);
+    expect(view.getByText("1.1s")).toBeInTheDocument();
+  });
 });

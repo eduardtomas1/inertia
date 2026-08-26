@@ -22,6 +22,7 @@ interface AuditedElement {
   role: string;
   name: string;
   nameSource: string | null;
+  actionable: boolean;
   editable: boolean;
   disabled: boolean;
   rect: Rect;
@@ -69,6 +70,12 @@ function safeElement(value: unknown): AuditedElement | null {
     || y === null
     || width === null
     || height === null
+    || width <= 0
+    || height <= 0
+    || !Number.isFinite(x + width)
+    || !Number.isFinite(y + height)
+    || x + width <= x
+    || y + height <= y
   ) return null;
   return {
     ref: element.ref,
@@ -78,6 +85,7 @@ function safeElement(value: unknown): AuditedElement | null {
       && /^[a-z-]{1,30}$/u.test(element.nameSource)
       ? element.nameSource
       : null,
+    actionable: element.actionable === true,
     editable: element.editable === true,
     disabled: element.disabled,
     rect: { x, y, width, height },
@@ -90,12 +98,9 @@ function intersects(left: Rect, right: Rect): boolean {
   const height = Math.min(left.y + left.height, right.y + right.height)
     - Math.max(left.y, right.y);
   if (width <= 0 || height <= 0) return false;
-  const overlap = width * height;
-  const smaller = Math.min(
-    Math.max(1, left.width * left.height),
-    Math.max(1, right.width * right.height),
-  );
-  return overlap / smaller >= 0.5;
+  const leftRatio = (width / left.width) * (height / left.height);
+  const rightRatio = (width / right.width) * (height / right.height);
+  return Math.max(leftRatio, rightRatio) >= 0.5;
 }
 
 function issue(
@@ -176,9 +181,9 @@ export function withFrontendBrowserAudit(snapshotText: string): string {
   const viewport = record(snapshot.viewport);
   const viewportWidth = finite(viewport?.width);
   const viewportHeight = finite(viewport?.height);
-  const interactive = elements.filter(({ role, editable, disabled }) => (
+  const interactive = elements.filter(({ role, actionable, editable, disabled }) => (
     !disabled
-    && (editable || INTERACTIVE_ROLES.has(role.toLowerCase()))
+    && (actionable || editable || INTERACTIVE_ROLES.has(role.toLowerCase()))
   ));
   const unnamed = interactive.filter(({ name, nameSource }) => (
     name.trim().length === 0

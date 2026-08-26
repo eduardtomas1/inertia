@@ -617,6 +617,10 @@ export function installPreviewAgentPrivacyGuard(
   const normalize = (value: unknown): string => String(value ?? "")
     .slice(0, maximumValueSourceCharacters)
     .replace(/\s+/gu, " ").trim();
+  const exactToken = (value: unknown, expected: string, maximum: number): boolean => (
+    typeof value === "string" && value.length <= maximum
+    && value.trim().toLowerCase() === expected
+  );
   const remember = (value: unknown): void => {
     const normalized = normalize(value);
     if (!normalized) return;
@@ -630,7 +634,7 @@ export function installPreviewAgentPrivacyGuard(
   };
   const inspect = (input: HTMLInputElement, wasPassword = false): void => {
     const knownPassword = wasPassword
-      || String(input.type || "").toLowerCase() === "password"
+      || exactToken(input.type, "password", 20)
       || state.passwordNodes.has(input);
     if (!knownPassword && state.passwordValues.size === 0) return;
     const value = normalize(input.value);
@@ -682,13 +686,21 @@ export function installPreviewAgentPrivacyGuard(
     }
   };
   const activationTarget = typeof owner.addEventListener === "function" ? owner : document;
+  const boundedEventPath = (event: Event): EventTarget[] | null => {
+    const path = typeof event.composedPath === "function" ? event.composedPath() : [];
+    return path.length <= maximumScanNodes ? path : null;
+  };
   activationTarget.addEventListener(nestedBoundaryEvent, () => {
     state.nestedContentObserved = true;
   }, true);
   if (document.documentElement) inspectTree(document.documentElement, scanBudget());
   const inspectInputEvent = (event: Event): void => {
     let exposedControl = false;
-    const path = typeof event.composedPath === "function" ? event.composedPath() : [];
+    const path = boundedEventPath(event);
+    if (!path) {
+      if (event.isTrusted === true) state.nestedContentObserved = true;
+      return;
+    }
     for (const node of path) {
       const input = inputElement(node);
       if (input) {
@@ -713,10 +725,22 @@ export function installPreviewAgentPrivacyGuard(
   activationTarget.addEventListener("input", inspectInputEvent, true);
   document.addEventListener("click", (event) => {
     if (!state.agentInputActive) return;
-    const fileInput = event.composedPath().some((node) => {
-      const input = inputElement(node);
-      return input?.type.toLowerCase() === "file";
-    });
+    const path = boundedEventPath(event);
+    if (!path) {
+      if (event.isTrusted === true) {
+        state.nestedContentObserved = true;
+        recordRefusal("nested");
+        stopActivationEvent(event);
+      }
+      return;
+    }
+    let fileInput = false;
+    for (const node of path) {
+      if (exactToken(inputElement(node)?.type, "file", 20)) {
+        fileInput = true;
+        break;
+      }
+    }
     if (!fileInput) return;
     event.preventDefault();
     event.stopImmediatePropagation();
@@ -736,19 +760,27 @@ export function installPreviewAgentPrivacyGuard(
     state.agentInputRefused = refusal;
     reportRefusal?.(refusal);
   };
+  const ariaDisabled = (candidate: Partial<Element> | null): boolean => {
+    const value = candidate?.getAttribute?.("aria-disabled");
+    return exactToken(value, "true", 10);
+  };
   const activationEventRefusal = (
     event: Event,
+    suppliedPath: EventTarget[] | null = boundedEventPath(event),
   ): "disabled" | "file" | "nested" | null => {
     if (state.nestedContentObserved === true) return "nested";
+    if (!suppliedPath) {
+      state.nestedContentObserved = true;
+      return "nested";
+    }
     let disabled = false;
-    const path = typeof event.composedPath === "function" ? event.composedPath() : [];
-    for (const node of path) {
+    for (const node of suppliedPath) {
       const candidate = node as Partial<HTMLInputElement> | null;
       const input = inputElement(node);
-      if (input?.type.toLowerCase() === "file") return "file";
+      if (exactToken(input?.type, "file", 20)) return "file";
       if (candidate?.matches?.(":disabled") === true
         || candidate?.disabled === true
-        || String(candidate?.getAttribute?.("aria-disabled") || "").toLowerCase() === "true") {
+        || ariaDisabled(candidate)) {
         disabled = true;
       }
     }
@@ -760,9 +792,10 @@ export function installPreviewAgentPrivacyGuard(
       const expectedRef = state.expectedAgentClickRef;
       if (!expectedRef) return;
       const expected = state.refs.get(expectedRef);
+      const path = boundedEventPath(event);
       const refusal = state.agentInputRefused
-        || activationEventRefusal(event)
-        || (!expected?.isConnected || !event.composedPath().includes(expected)
+        || activationEventRefusal(event, path)
+        || (!expected?.isConnected || path === null || !path.includes(expected)
           ? "retargeted"
           : null);
       if (!refusal) return;
@@ -815,7 +848,7 @@ export function installPreviewAgentPrivacyGuard(
       const record = records[recordIndex]!;
       const changedInput = inputElement(record.target);
       if (record.type === "attributes" && changedInput) {
-        inspect(changedInput, String(record.oldValue || "").toLowerCase() === "password");
+        inspect(changedInput, exactToken(record.oldValue, "password", 20));
       }
       for (const node of record.removedNodes) {
         if (!consume(budget)) break;

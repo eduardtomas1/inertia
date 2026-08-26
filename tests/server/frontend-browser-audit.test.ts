@@ -9,6 +9,7 @@ function element(
     role: string;
     name: string;
     nameSource: string;
+    actionable: boolean;
     editable: boolean;
     disabled: boolean;
     x: number;
@@ -22,6 +23,7 @@ function element(
     role: input.role ?? "button",
     name: input.name ?? "Action",
     nameSource: input.nameSource ?? "content",
+    actionable: input.actionable ?? false,
     editable: input.editable ?? false,
     disabled: input.disabled ?? false,
     rect: {
@@ -113,6 +115,44 @@ describe("frontend Browser audit", () => {
       inertiaAudit: { version: 1 },
     });
     expect(parsed.elements.length).toBeLessThan(200);
+  });
+
+  it("uses fractional CSS geometry at exact target and viewport thresholds", () => {
+    const audited = JSON.parse(withFrontendBrowserAudit(JSON.stringify({
+      viewport: { width: 320, height: 200 },
+      elements: [
+        element("small", { width: 23.6, height: 24 }),
+        element("left-clipped", { x: -0.4, width: 24, height: 24 }),
+        element("right-clipped", { x: 0.4, width: 319.7, height: 24 }),
+        element("exact-edge", { x: 296, width: 24, height: 24 }),
+      ],
+    }))) as {
+      inertiaAudit: { issues: Array<{ code: string; refs: string[] }> };
+    };
+    expect(audited.inertiaAudit.issues.find(({ code }) => code === "small-target")?.refs)
+      .toEqual(["small"]);
+    expect(audited.inertiaAudit.issues.find(({ code }) => code === "clipped-control")?.refs)
+      .toEqual(["left-clipped", "right-clipped"]);
+  });
+
+  it("measures overlap relative to subpixel targets and rejects empty rectangles", () => {
+    const audited = JSON.parse(withFrontendBrowserAudit(JSON.stringify({
+      viewport: { width: 320, height: 200 },
+      elements: [
+        element("tiny-a", { width: 0.5, height: 0.5 }),
+        element("tiny-b", { width: 0.5, height: 0.5 }),
+        element("empty", { width: 0 }),
+        element("collapsed", { x: Number.MAX_VALUE, width: 1 }),
+      ],
+    }))) as {
+      inertiaAudit: {
+        checkedElements: number;
+        issues: Array<{ code: string; refs: string[] }>;
+      };
+    };
+    expect(audited.inertiaAudit.checkedElements).toBe(2);
+    expect(audited.inertiaAudit.issues.find(({ code }) => code === "overlapping-controls")?.refs)
+      .toEqual(["tiny-a", "tiny-b"]);
   });
 
   it("passes malformed provider-visible text through unchanged", () => {

@@ -37,6 +37,10 @@ function numberField(value: UnknownRecord, key: string): boolean {
 function integerField(value: UnknownRecord, key: string): boolean {
   return Number.isSafeInteger(value[key]);
 }
+function optionalNonNegativeIntegerField(value: UnknownRecord, key: string): boolean {
+  return value[key] === undefined
+    || (integerField(value, key) && Number(value[key]) >= 0);
+}
 function nullableNumberField(value: UnknownRecord, key: string): boolean {
   return value[key] === null || numberField(value, key);
 }
@@ -169,6 +173,7 @@ function latestTurn(value: unknown): boolean {
     && authoritativeRunState(value.runState, value.status as AgentTurnStatus)
     && nullableStringField(value, "startedAt")
     && nullableStringField(value, "completedAt")
+    && optionalNonNegativeIntegerField(value, "suspendedDurationMs")
     && nullableStringField(value, "terminalReason")
     && modelSelection(value.modelSelection) && continuationIdentity(value.continuationIdentity)
     && modelRouteIdentityCoherent(value);
@@ -918,6 +923,7 @@ function agentTurn(value: unknown): boolean {
     && nullableStringField(value, "providerSessionAfter")
     && nullableStringField(value, "startedAt")
     && nullableStringField(value, "completedAt")
+    && optionalNonNegativeIntegerField(value, "suspendedDurationMs")
     && nullableStringField(value, "terminalReason")
     && nullableStringField(value, "checkpointId")
     && oneOf(value, "status", AGENT_TURN_STATUSES)

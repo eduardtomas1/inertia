@@ -154,6 +154,7 @@ export class TurnLedgerRepository {
       requestedAt,
       startedAt: null,
       completedAt: null,
+      suspendedDurationMs: 0,
       status: "queued",
       runState: {
         state: "queued",

@@ -157,6 +157,12 @@ parentPort.on("message", (messageEvent) => {
     agentBrowser.handle(command);
     return;
   }
+  if (command.type === "runtime.record-system-suspend") {
+    if (runtime && !stopping) {
+      runtime.recordSystemSuspendInterval(command.interval);
+    }
+    return;
+  }
   if (command.type === "runtime.shutdown") {
     void shutdown();
     return;

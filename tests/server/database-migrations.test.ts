@@ -2014,6 +2014,12 @@ describe("runtime migration catalog", () => {
     expect(migrated.prepare(
       "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'prompt_presets'",
     ).get()).toEqual({ name: "prompt_presets" });
+    expect(migrated.prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'system_suspend_intervals'",
+    ).get()).toEqual({ name: "system_suspend_intervals" });
+    expect((migrated.prepare("PRAGMA table_info(agent_turns)").all() as Array<{
+      name: string;
+    }>).some(({ name }) => name === "suspended_duration_ms")).toBe(true);
     const appStateColumns = new Set((migrated.prepare(
       "PRAGMA table_info(app_state)",
     ).all() as Array<{ name: string }>).map(({ name }) => name));

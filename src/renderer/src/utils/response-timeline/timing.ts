@@ -45,17 +45,24 @@ export function turnQueueElapsedMs(
  * historical duration.
  */
 export function turnExecutionElapsedMs(
-  turn: Pick<ResponseTurn, "startedAt" | "completedAt" | "isActive">,
+  turn: Pick<ResponseTurn, "startedAt" | "completedAt" | "isActive" | "agentTurn">,
   now = Date.now(),
 ): number | null {
   if (!turn.startedAt) return null;
   if (!turn.completedAt && !turn.isActive) return null;
-  return boundedElapsed(turn.startedAt, turn.completedAt, now);
+  const suspendedDuration = turn.agentTurn.suspendedDurationMs ?? 0;
+  if (!Number.isSafeInteger(suspendedDuration) || suspendedDuration < 0) {
+    return null;
+  }
+  return Math.max(
+    0,
+    boundedElapsed(turn.startedAt, turn.completedAt, now) - suspendedDuration,
+  );
 }
 
 /** Backward-compatible alias: elapsed work never includes queue time. */
 export function turnElapsedMs(
-  turn: Pick<ResponseTurn, "startedAt" | "completedAt" | "isActive">,
+  turn: Pick<ResponseTurn, "startedAt" | "completedAt" | "isActive" | "agentTurn">,
   now = Date.now(),
 ): number {
   return turnExecutionElapsedMs(turn, now) ?? 0;

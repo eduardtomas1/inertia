@@ -9,6 +9,7 @@ import {
 } from "../daily-work";
 import { agentTurnFromRow } from "./codecs";
 import type { AgentTurnRow } from "./rows";
+import { SystemSuspendRepository } from "./system-suspend-repository";
 
 interface DailyWorkConversationRow {
   id: string;
@@ -85,11 +86,16 @@ export class DailyWorkRepository {
         )
       ORDER BY agent_turns.updated_at ASC, agent_turns.id ASC
     `).all(parameters) as AgentTurnRow[];
+    const suspendIntervals = new SystemSuspendRepository(this.database).read(
+      parameters.fromInclusive,
+      parameters.toExclusive,
+    );
     return projectDailyWork(
       conversations.map(conversationFromRow),
       turns.map(agentTurnFromRow),
       range,
       generatedAt,
+      suspendIntervals,
     );
   }
 }

@@ -1019,6 +1019,23 @@ describe("authoritative response timeline", () => {
     expect(workSummaryLabel(response)).toBe("Completed without tool activity");
   });
 
+  it("excludes persisted system suspend time from completed work duration", () => {
+    const turn = {
+      ...agentTurn("turn-1", "user-1"),
+      suspendedDurationMs: 5_000,
+    };
+    const response = timelineTurn(buildResponseTimeline({
+      turns: [turn],
+      messages: [message("user-1", turn.id, "user", "Run it", turn.requestedAt)],
+      activities: [],
+      reasonings: [],
+      checkpoints: [],
+    }), turn.id);
+
+    expect(turnExecutionElapsedMs(response)).toBe(2_000);
+    expect(turnTimingLabels(response)).toEqual(["Queued 5s", "Worked 2s"]);
+  });
+
   it("renders plans only for their explicit owning turn and quarantines nullable legacy plans", () => {
     const first = agentTurn("first", "first-user");
     const second = agentTurn("second", "second-user");

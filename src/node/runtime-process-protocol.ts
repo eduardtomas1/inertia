@@ -103,10 +103,20 @@ export interface RuntimeDatabaseRecoverySummary {
   alreadyImported: boolean;
 }
 
+export interface RuntimeSystemSuspendInterval {
+  id: string;
+  suspendedAt: string;
+  resumedAt: string;
+}
+
 export type RuntimeWorkerCommand =
   | { type: "runtime.start"; options: RuntimeWorkerOptions }
   | { type: "runtime.shutdown" }
   | { type: "runtime.stopped-acknowledged" }
+  | {
+      type: "runtime.record-system-suspend";
+      interval: RuntimeSystemSuspendInterval;
+    }
   | RuntimeUpdateWorkerCommand
   | { type: "runtime.resolve-project-path"; requestId: string; request: OpenProjectPathRequest }
   | {
@@ -328,6 +338,13 @@ function runtimePath(value: unknown): value is string {
   return typeof value === "string" && value.length > 0 && value.length <= 4096 && !value.includes("\0") && isAbsolute(value);
 }
 
+function runtimeTimestamp(value: unknown): value is string {
+  return typeof value === "string"
+    && value.length >= 20
+    && value.length <= 40
+    && Number.isFinite(Date.parse(value));
+}
+
 export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand | null {
   if (!plainObject(value) || typeof value.type !== "string") return null;
   if (value.type === "runtime.shutdown" && Object.keys(value).length === 1) return { type: "runtime.shutdown" };
@@ -335,6 +352,26 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
     value.type === "runtime.stopped-acknowledged"
     && Object.keys(value).length === 1
   ) return { type: "runtime.stopped-acknowledged" };
+  if (
+    value.type === "runtime.record-system-suspend"
+    && Object.keys(value).length === 2
+    && plainObject(value.interval)
+    && Object.keys(value.interval).length === 3
+    && typeof value.interval.id === "string"
+    && UUID_PATTERN.test(value.interval.id)
+    && runtimeTimestamp(value.interval.suspendedAt)
+    && runtimeTimestamp(value.interval.resumedAt)
+    && Date.parse(value.interval.resumedAt) >= Date.parse(value.interval.suspendedAt)
+  ) {
+    return {
+      type: "runtime.record-system-suspend",
+      interval: {
+        id: value.interval.id,
+        suspendedAt: value.interval.suspendedAt,
+        resumedAt: value.interval.resumedAt,
+      },
+    };
+  }
   const updateCommand = parseRuntimeUpdateWorkerCommand(value);
   if (updateCommand) return updateCommand;
   if (value.type === "runtime.attachment-result") {

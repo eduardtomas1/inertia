@@ -15,6 +15,7 @@ import {
   type RuntimeDatabaseStartupRecoveryReport,
   type RuntimePrivateConnectForgetScope,
   type RuntimePrivateConnectPromptPreparation,
+  type RuntimeSystemSuspendInterval,
   type RuntimeUpdatePreparationResult,
   type RuntimeWorkerCommand,
 } from "../node/runtime-process-protocol.js";
@@ -232,6 +233,10 @@ export class RuntimeSupervisor {
   }
   detachedConnection(conversationId: string, clientId: string): RuntimeConnection {
     return detachedRuntimeConnection(this.connection(false), conversationId, clientId);
+  }
+  recordSystemSuspendInterval(interval: RuntimeSystemSuspendInterval): boolean {
+    const record = this.phase === "ready" ? this.current : null;
+    return Boolean(record?.ready && this.post(record.child, { type: "runtime.record-system-suspend", interval }));
   }
   resolveProjectPath(request: OpenProjectPathRequest): Promise<string> {
     const record = this.current;
@@ -539,7 +544,6 @@ export class RuntimeSupervisor {
       this.emitState();
       return;
     }
-
     let child: UtilityProcess;
     try {
       child = this.spawnProcess();
@@ -557,7 +561,6 @@ export class RuntimeSupervisor {
       this.scheduleRestart();
       return;
     }
-
     const record: RuntimeProcessRecord = {
       child,
       generation,
@@ -774,7 +777,6 @@ export class RuntimeSupervisor {
     this.testRecycle.succeed(record);
     this.emitState();
   }
-
   private handleExit(record: RuntimeProcessRecord, code: number): void {
     if (this.current !== record) return;
     const exitedBeforeCleanRecycleReadiness = this.testRecycle.owns(record)
@@ -813,7 +815,6 @@ export class RuntimeSupervisor {
       () => this.handleDrainedExit(record, code, false),
     );
   }
-
   private handleDrainedExit(record: RuntimeProcessRecord, code: number, secureFileCleanupConfirmed: boolean): void {
     if (this.current !== record) return;
     if (!secureFileCleanupConfirmed) {
@@ -876,7 +877,6 @@ export class RuntimeSupervisor {
       this.settleStopped(record);
       return;
     }
-
     const continueAfterTermination = (confirmed: boolean): void => {
       if (this.current !== record) return;
       if (!this.desiredRunning) {

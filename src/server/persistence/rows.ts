@@ -106,6 +106,7 @@ export interface AgentTurnRow {
   requested_at: string;
   started_at: string | null;
   completed_at: string | null;
+  suspended_duration_ms: number;
   status: AgentTurnStatus;
   run_state: AgentRunState;
   provider_state: string | null;

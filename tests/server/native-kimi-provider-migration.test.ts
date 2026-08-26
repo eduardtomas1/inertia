@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { RuntimeStore } from "../../src/server/database";
 import { DatabaseMigrationError } from "../../src/server/database-migrations";
+import { CURRENT_DATABASE_SCHEMA_VERSION } from "../../src/server/persistence/migrations/catalog";
 import { migrateRuntimeDatabase } from "../../src/server/persistence/migrations/runtime-catalog";
 
 const REBUILT_TABLES = [
@@ -288,7 +289,7 @@ describe.sequential("native Kimi provider migration", () => {
     expect(database.pragma("foreign_keys", { simple: true })).toBe(1);
     expect((database.prepare(
       "SELECT MAX(version) AS version FROM schema_migrations",
-    ).get() as { version: number }).version).toBe(65);
+    ).get() as { version: number }).version).toBe(CURRENT_DATABASE_SCHEMA_VERSION);
 
     const indexes = (database.prepare(`
       SELECT name FROM sqlite_master

@@ -54,6 +54,7 @@ function turn(input: {
   completedAt: string;
   status?: AgentTurn["status"];
   runtimeMs?: number | null;
+  suspendedDurationMs?: number;
   startUsage?: AgentTurnUsageSnapshot | null;
   completionUsage?: AgentTurnUsageSnapshot | null;
   backendProfileId?: string;
@@ -114,6 +115,7 @@ function turn(input: {
       ? null
       : new Date(Date.parse(completedAt) - runtimeMs).toISOString(),
     completedAt,
+    suspendedDurationMs: input.suspendedDurationMs ?? 0,
     status: input.status ?? "completed",
     terminalReason: null,
     checkpointId: null,
@@ -139,6 +141,7 @@ describe("usage dashboard projection", () => {
         providerId: "codex",
         model: "gpt-unknown-preview",
         completedAt: "2026-06-10T09:00:00.000Z",
+        suspendedDurationMs: 2_000,
         providerSessionBefore: "codex-thread-1",
         startUsage: usage("2026-06-10T08:59:00.000Z", {
           totalProcessedTokens: 1_000,
@@ -241,7 +244,7 @@ describe("usage dashboard projection", () => {
       failedCount: 1,
       activeDays: 5,
       runtime: {
-        value: 30_000,
+        value: 28_000,
         measuredRequests: 5,
         totalRequests: 6,
         coverage: "partial",

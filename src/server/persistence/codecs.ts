@@ -295,6 +295,7 @@ function conversationTurnSummary(
     requestedAt: turn.requestedAt,
     startedAt: turn.startedAt,
     completedAt: turn.completedAt,
+    suspendedDurationMs: turn.suspendedDurationMs,
     terminalReason: turn.terminalReason,
     updatedAt: turn.updatedAt,
   };
@@ -485,6 +486,7 @@ export function agentTurnFromRow(row: AgentTurnRow): AgentTurn {
     requestedAt: row.requested_at,
     startedAt: row.started_at,
     completedAt: row.completed_at,
+    suspendedDurationMs: row.suspended_duration_ms,
     status: row.status,
     runState: {
       state: AGENT_RUN_STATES.includes(row.run_state)

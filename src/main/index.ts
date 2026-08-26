@@ -11,6 +11,7 @@ import {
   net,
   nativeTheme,
   Notification,
+  powerMonitor,
   protocol,
   safeStorage,
   screen,
@@ -79,6 +80,7 @@ import { RuntimeDiagnostics, runtimeDiagnosticsDirectory } from "./runtime-diagn
 import { PreviewBroker, hardenDesktopSession } from "./preview-broker.js";
 import { showBrowserEvidenceImageWindow } from "./browser-evidence-image-inspector.js";
 import { RuntimeSupervisor } from "./runtime-supervisor.js";
+import { RuntimeSystemSuspendTracker } from "./runtime-system-suspend-tracker.js";
 import * as runtimeBootstrap from "./runtime-bootstrap-safety.js";
 import {
   cleanupPrivilegedOwners,
@@ -195,6 +197,7 @@ let conversationAttachments: ConversationAttachmentAccess | null = null;
 let attachmentCleanup: Promise<void> = Promise.resolve();
 let attachmentStorageDirectory: string | null = null;
 let runtimeDataDirectory: string | null = null;
+const systemSuspends = new RuntimeSystemSuspendTracker();
 let attachmentReservation: AttachmentStorageReservation = {
   records: 0,
   bytes: 0,
@@ -1076,6 +1079,11 @@ async function bootstrap(): Promise<void> {
       },
     ),
     onStateChange: (snapshot) => {
+      if (snapshot.phase === "ready") {
+        for (const interval of systemSuspends.completed()) {
+          runtimeSupervisor?.recordSystemSuspendInterval(interval);
+        }
+      }
       runtimeDiagnostics?.recordState(snapshot);
       if (
         snapshot.phase === "ready"
@@ -1126,6 +1134,11 @@ async function bootstrap(): Promise<void> {
     assertTrusted: assertTrustedIpc,
   });
   registerIpcHandlers();
+  powerMonitor.on("suspend", () => systemSuspends.suspend());
+  powerMonitor.on("resume", () => {
+    const interval = systemSuspends.resume();
+    if (interval) runtimeSupervisor?.recordSystemSuspendInterval(interval);
+  });
   runtimeSupervisor.start();
   if (process.env.NODE_ENV === "test") {
     Object.defineProperty(globalThis, "__inertiaTestRuntime", {

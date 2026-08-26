@@ -1576,6 +1576,32 @@ describe("database backup and startup recovery", () => {
     primary.close();
   });
 
+  it("validates the exact suspend interval index off thread", async () => {
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { store } = seed(databasePath, "suspend index validation");
+    store.close();
+    const primary = new Database(databasePath);
+    primary.exec(`
+      DROP INDEX system_suspend_intervals_range_idx;
+      CREATE INDEX system_suspend_intervals_range_idx
+      ON system_suspend_intervals(suspended_at COLLATE NOCASE, resumed_at);
+    `);
+    const manager = new DatabaseBackupManager(primary, databasePath);
+
+    await expect(manager.createBackup()).rejects.toThrow(/failed validation/u);
+    expect(backupNames(databasePath)).toEqual([]);
+    primary.exec(`
+      DROP INDEX system_suspend_intervals_range_idx;
+      CREATE INDEX system_suspend_intervals_range_idx
+      ON system_suspend_intervals(suspended_at ASC, resumed_at ASC);
+    `);
+    await expect(manager.createBackup()).resolves.toMatchObject({
+      filename: expect.stringMatching(/\.sqlite$/u),
+    });
+    primary.close();
+  });
+
   it("skips incomplete migration history and restores the next coherent backup", async () => {
     const directory = temporaryDirectory();
     const databasePath = join(directory, "inertia.sqlite");
@@ -1788,6 +1814,37 @@ describe("database backup and startup recovery", () => {
           DROP INDEX agent_turns_usage_dashboard_completed_idx;
           CREATE INDEX agent_turns_usage_dashboard_completed_idx
           ON agent_turns(association, completed_at COLLATE NOCASE, id);
+        `);
+      },
+    },
+    {
+      label: "the suspend interval table",
+      mutate: (database: Database.Database) => {
+        database.exec("DROP TABLE system_suspend_intervals");
+      },
+    },
+    {
+      label: "the per-turn suspended duration column",
+      mutate: (database: Database.Database) => {
+        database.exec("ALTER TABLE agent_turns DROP COLUMN suspended_duration_ms");
+      },
+    },
+    {
+      label: "the suspend interval range index",
+      mutate: (database: Database.Database) => {
+        database.exec("DROP INDEX system_suspend_intervals_range_idx");
+      },
+    },
+    {
+      label: "the exact suspend interval range index",
+      mutate: (database: Database.Database) => {
+        database.exec(`
+          DROP INDEX system_suspend_intervals_range_idx;
+          CREATE INDEX system_suspend_intervals_range_idx
+          ON system_suspend_intervals(
+            suspended_at COLLATE NOCASE,
+            resumed_at
+          );
         `);
       },
     },

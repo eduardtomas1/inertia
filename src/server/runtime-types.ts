@@ -74,7 +74,7 @@ export interface RunningRuntime {
   ) => Promise<void>;
   websocketUrl: string;
   databaseRecovery: ReturnType<RuntimeStore["databaseRecoveryReport"]>;
-  recordSystemSuspendInterval: (interval: RuntimeSystemSuspendInterval) => void;
+  recordSystemSuspendInterval: (interval: RuntimeSystemSuspendInterval) => boolean;
   /**
    * Atomically closes runtime work admission and reports whether shutdown for
    * an application update can begin. A ready result deliberately keeps the

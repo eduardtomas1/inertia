@@ -1,8 +1,34 @@
 import { randomUUID } from "node:crypto";
 
 import type { RuntimeSystemSuspendInterval } from "../node/runtime-process-protocol";
+import {
+  readSecureAtomicStateStrict,
+  writeSecureAtomicState,
+} from "./secure-atomic-state.js";
 
-const MAX_RETAINED_INTERVALS = 64;
+const MAX_PENDING_INTERVALS = 64;
+const MAX_STATE_BYTES = 32 * 1024;
+const STATE_VERSION = 1;
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+
+interface ActiveSuspendBoundary {
+  id: string;
+  suspendedAt: string;
+  resumedAt: string | null;
+}
+
+interface RuntimeSystemSuspendState {
+  version: 1;
+  active: ActiveSuspendBoundary | null;
+  intervals: RuntimeSystemSuspendInterval[];
+}
+
+export interface RuntimeSystemSuspendTrackerOptions {
+  statePath?: string;
+  recoveredAt?: string;
+  onDiagnostic?: (error: Error) => void;
+}
 
 function normalizedTimestamp(value: string, label: string): string {
   const milliseconds = Date.parse(value);
@@ -10,16 +36,148 @@ function normalizedTimestamp(value: string, label: string): string {
   return new Date(milliseconds).toISOString();
 }
 
-/** Retains trusted desktop suspend windows across local runtime generations. */
+function plainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function canonicalTimestamp(value: unknown): value is string {
+  if (typeof value !== "string" || value.length < 20 || value.length > 40) {
+    return false;
+  }
+  try {
+    return normalizedTimestamp(value, "The persisted system suspend time")
+      === value;
+  } catch {
+    return false;
+  }
+}
+
+function interval(value: unknown): RuntimeSystemSuspendInterval | null {
+  if (
+    !plainObject(value)
+    || Object.keys(value).length !== 3
+    || typeof value.id !== "string"
+    || !UUID_PATTERN.test(value.id)
+    || !canonicalTimestamp(value.suspendedAt)
+    || !canonicalTimestamp(value.resumedAt)
+    || value.resumedAt < value.suspendedAt
+  ) return null;
+  return {
+    id: value.id,
+    suspendedAt: value.suspendedAt,
+    resumedAt: value.resumedAt,
+  };
+}
+
+function state(value: unknown): RuntimeSystemSuspendState | null {
+  if (
+    !plainObject(value)
+    || Object.keys(value).length !== 3
+    || value.version !== STATE_VERSION
+    || !Array.isArray(value.intervals)
+    || value.intervals.length > MAX_PENDING_INTERVALS
+    || !(value.active === null || plainObject(value.active))
+  ) return null;
+  const intervals: RuntimeSystemSuspendInterval[] = [];
+  const identities = new Set<string>();
+  let previousResume: string | null = null;
+  for (const candidate of value.intervals) {
+    const parsed = interval(candidate);
+    if (
+      !parsed
+      || identities.has(parsed.id)
+      || (previousResume !== null && parsed.suspendedAt < previousResume)
+    ) return null;
+    intervals.push(parsed);
+    identities.add(parsed.id);
+    previousResume = parsed.resumedAt;
+  }
+  let active: ActiveSuspendBoundary | null = null;
+  if (value.active !== null) {
+    const candidate = value.active;
+    if (
+      Object.keys(candidate).length !== 3
+      || typeof candidate.id !== "string"
+      || !UUID_PATTERN.test(candidate.id)
+      || identities.has(candidate.id)
+      || !canonicalTimestamp(candidate.suspendedAt)
+      || (previousResume !== null && candidate.suspendedAt < previousResume)
+      || !(
+        candidate.resumedAt === null
+        || (
+          canonicalTimestamp(candidate.resumedAt)
+          && candidate.resumedAt >= candidate.suspendedAt
+        )
+      )
+    ) return null;
+    active = {
+      id: candidate.id,
+      suspendedAt: candidate.suspendedAt,
+      resumedAt: candidate.resumedAt,
+    };
+  }
+  return { version: STATE_VERSION, active, intervals };
+}
+
+/**
+ * Retains trusted desktop suspend windows until the runtime durably records
+ * and acknowledges them. An active boundary also survives app/OS restart.
+ */
 export class RuntimeSystemSuspendTracker {
-  private active: { id: string; suspendedAt: string } | null = null;
-  private readonly intervals: RuntimeSystemSuspendInterval[] = [];
+  private active: ActiveSuspendBoundary | null = null;
+  private intervals: RuntimeSystemSuspendInterval[] = [];
+  private readonly statePath: string | null;
+  private readonly onDiagnostic: (error: Error) => void;
+
+  constructor(options: RuntimeSystemSuspendTrackerOptions = {}) {
+    this.statePath = options.statePath ?? null;
+    this.onDiagnostic = options.onDiagnostic ?? (() => undefined);
+    if (!this.statePath) return;
+    try {
+      const content = readSecureAtomicStateStrict(
+        this.statePath,
+        MAX_STATE_BYTES,
+      );
+      if (content === null) return;
+      const snapshot = state(JSON.parse(content) as unknown);
+      if (!snapshot) throw new Error("The persisted system suspend state is invalid.");
+      this.active = snapshot.active;
+      this.intervals = snapshot.intervals;
+      if (this.active) {
+        this.resume(options.recoveredAt ?? new Date().toISOString());
+      }
+    } catch (error) {
+      this.onDiagnostic(error instanceof Error
+        ? error
+        : new Error("The persisted system suspend state could not be read."));
+    }
+  }
+
+  private persist(
+    active: ActiveSuspendBoundary | null,
+    intervals: readonly RuntimeSystemSuspendInterval[],
+  ): boolean {
+    if (!this.statePath) return true;
+    try {
+      writeSecureAtomicState(this.statePath, JSON.stringify({
+        version: STATE_VERSION,
+        active,
+        intervals,
+      }), MAX_STATE_BYTES);
+      return true;
+    } catch (error) {
+      this.onDiagnostic(error instanceof Error
+        ? error
+        : new Error("The system suspend state could not be persisted."));
+      return false;
+    }
+  }
 
   suspend(at = new Date().toISOString()): void {
     if (this.active) return;
     const requestedSuspend = normalizedTimestamp(at, "The system suspend time");
     const previousResume = this.intervals.at(-1)?.resumedAt;
-    this.active = {
+    const active = {
       id: randomUUID(),
       suspendedAt: previousResume
         ? new Date(Math.max(
@@ -27,29 +185,56 @@ export class RuntimeSystemSuspendTracker {
             Date.parse(previousResume),
           )).toISOString()
         : requestedSuspend,
+      resumedAt: null,
     };
+    this.persist(active, this.intervals);
+    // Keep the observed boundary truthful in this process even when durable
+    // storage is temporarily unavailable. It is never sent until persisted.
+    this.active = active;
   }
 
   resume(at = new Date().toISOString()): RuntimeSystemSuspendInterval | null {
     const suspended = this.active;
     if (!suspended) return null;
-    const requestedResume = normalizedTimestamp(at, "The system resume time");
-    this.active = null;
-    const interval = {
-      ...suspended,
-      resumedAt: new Date(Math.max(
-        Date.parse(requestedResume),
-        Date.parse(suspended.suspendedAt),
-      )).toISOString(),
-    };
-    this.intervals.push(interval);
-    if (this.intervals.length > MAX_RETAINED_INTERVALS) {
-      this.intervals.splice(0, this.intervals.length - MAX_RETAINED_INTERVALS);
+    const requestedResume = suspended.resumedAt
+      ?? normalizedTimestamp(at, "The system resume time");
+    const resumedAt = new Date(Math.max(
+      Date.parse(requestedResume),
+      Date.parse(suspended.suspendedAt),
+    )).toISOString();
+    const observed = { ...suspended, resumedAt };
+    if (this.intervals.length >= MAX_PENDING_INTERVALS) {
+      this.persist(observed, this.intervals);
+      this.active = observed;
+      this.onDiagnostic(new Error(
+        "System suspend accounting is waiting for runtime acknowledgements.",
+      ));
+      return null;
     }
-    return interval;
+    const completed = {
+      id: observed.id,
+      suspendedAt: observed.suspendedAt,
+      resumedAt,
+    };
+    const intervals = [...this.intervals, completed];
+    if (!this.persist(null, intervals)) {
+      this.active = observed;
+      return null;
+    }
+    this.active = null;
+    this.intervals = intervals;
+    return completed;
+  }
+
+  acknowledge(id: string): RuntimeSystemSuspendInterval | null {
+    const intervals = this.intervals.filter((candidate) => candidate.id !== id);
+    if (intervals.length === this.intervals.length) return null;
+    if (!this.persist(this.active, intervals)) return null;
+    this.intervals = intervals;
+    return this.active?.resumedAt ? this.resume(this.active.resumedAt) : null;
   }
 
   completed(): readonly RuntimeSystemSuspendInterval[] {
-    return this.intervals;
+    return [...this.intervals];
   }
 }

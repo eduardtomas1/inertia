@@ -6,7 +6,10 @@ import { systemSuspendTimingSchemaIsValid } from "../../src/server/persistence/s
 const databases: Database.Database[] = [];
 
 function databaseWithSuspendedDuration(
-  definition = "INTEGER NOT NULL DEFAULT 0",
+  definition = `INTEGER NOT NULL DEFAULT 0 CHECK (
+    suspended_duration_ms >= 0
+    AND suspended_duration_ms <= 9007199254740991
+  )`,
   intervalColumns = `
     sequence INTEGER PRIMARY KEY AUTOINCREMENT,
     id TEXT NOT NULL UNIQUE CHECK (length(id) = 36),
@@ -59,6 +62,13 @@ describe("system suspend timing recovery schema", () => {
     ["missing its default", "INTEGER NOT NULL"],
     ["using a text affinity", "TEXT NOT NULL DEFAULT 0"],
     ["using a nonzero default", "INTEGER NOT NULL DEFAULT 1"],
+    ["missing its range check", "INTEGER NOT NULL DEFAULT 0"],
+    ["spoofing its range check in a comment", `INTEGER NOT NULL DEFAULT 0
+      /* CHECK (suspended_duration_ms >= 0 AND
+        suspended_duration_ms <= 9007199254740991) */`],
+    ["spoofing its range check in a string literal", `INTEGER NOT NULL DEFAULT 0,
+      note TEXT DEFAULT 'CHECK (suspended_duration_ms >= 0 AND
+        suspended_duration_ms <= 9007199254740991)'`],
   ])("rejects a suspended-duration column that is %s", (_label, definition) => {
     expect(systemSuspendTimingSchemaIsValid(
       databaseWithSuspendedDuration(definition),
@@ -71,10 +81,12 @@ describe("system suspend timing recovery schema", () => {
     ["text", "fifteen seconds"],
   ])("rejects an existing %s suspended duration", (_label, value) => {
     const database = databaseWithSuspendedDuration();
+    database.pragma("ignore_check_constraints = ON");
     database.prepare(`
       INSERT INTO agent_turns (id, suspended_duration_ms)
       VALUES (?, ?)
     `).run("turn", value);
+    database.pragma("ignore_check_constraints = OFF");
 
     expect(systemSuspendTimingSchemaIsValid(database)).toBe(false);
   });

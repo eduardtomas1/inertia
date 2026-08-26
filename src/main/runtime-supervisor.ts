@@ -1,5 +1,4 @@
-import { randomUUID } from "node:crypto";
-import type { UtilityProcess } from "electron";
+import { randomUUID } from "node:crypto"; import type { UtilityProcess } from "electron";
 import type { BackendCredentialStatus } from "../shared/backend-credentials";
 import type {
   PrivateConnectRuntimeAuthorization,
@@ -75,7 +74,7 @@ export class RuntimeSupervisor {
   private readonly credentialBroker?: RuntimeCredentialBroker;
   private readonly credentialRequestTimeoutMs: number;
   private readonly attachmentRequests: RuntimeAttachmentBrokerCoordinator<RuntimeProcessRecord>;
-  private readonly onStateChange?: RuntimeSupervisorOptions["onStateChange"];
+  private readonly onSystemSuspendRecorded?: (id: string) => void; private readonly onStateChange?: RuntimeSupervisorOptions["onStateChange"];
   private current: RuntimeProcessRecord | null = null;
   private readonly quarantined = new Set<RuntimeProcessRecord>();
   private phase: RuntimeSupervisorPhase = "idle";
@@ -201,7 +200,7 @@ export class RuntimeSupervisor {
       post: (record, command) => this.post(record.child, command),
       forceTerminate: (record) => this.forceTerminate(record.child),
     });
-    this.onStateChange = options.onStateChange;
+    this.onSystemSuspendRecorded = options.onSystemSuspendRecorded; this.onStateChange = options.onStateChange;
   }
   start(): void { if (this.lifecycle !== "unused" || this.restartBlocked) return;
     this.lifecycle = "started"; this.desiredRunning = true; this.clearShutdownTimers();
@@ -688,6 +687,7 @@ export class RuntimeSupervisor {
       this.databaseRecoveryRequests.handle(record, event);
       return;
     }
+    if (event.type === "runtime.system-suspend-recorded") { this.onSystemSuspendRecorded?.(event.id); return; }
     if (event.type === "runtime.private-connect-prompt-result") {
       this.privateConnectPrompts.handle(record, event);
       return;

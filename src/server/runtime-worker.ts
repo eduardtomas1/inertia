@@ -158,8 +158,15 @@ parentPort.on("message", (messageEvent) => {
     return;
   }
   if (command.type === "runtime.record-system-suspend") {
-    if (runtime && !stopping) {
-      runtime.recordSystemSuspendInterval(command.interval);
+    if (
+      runtime
+      && !stopping
+      && runtime.recordSystemSuspendInterval(command.interval)
+    ) {
+      post({
+        type: "runtime.system-suspend-recorded",
+        id: command.interval.id,
+      });
     }
     return;
   }

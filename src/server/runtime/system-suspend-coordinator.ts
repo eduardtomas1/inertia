@@ -9,7 +9,7 @@ export function recordSystemSuspendInterval(
   interval: RuntimeSystemSuspendInterval,
   broadcast: (event: RuntimeMutationEvent) => void,
   broadcastSnapshot: () => void,
-): void {
+): boolean {
   let conversationIds: string[];
   try {
     conversationIds = store.systemSuspends.record(interval);
@@ -18,9 +18,9 @@ export function recordSystemSuspendInterval(
     // must not escape the synchronous utility-process command boundary and
     // turn a display-time correction into a runtime restart loop.
     console.error("Unable to record system suspend accounting.", error);
-    return;
+    return false;
   }
-  if (conversationIds.length === 0) return;
+  if (conversationIds.length === 0) return true;
   for (const conversationId of conversationIds) {
     broadcast({
       type: "conversation.detail.invalidated",
@@ -28,4 +28,5 @@ export function recordSystemSuspendInterval(
     });
   }
   broadcastSnapshot();
+  return true;
 }

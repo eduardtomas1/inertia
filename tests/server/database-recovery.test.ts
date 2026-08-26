@@ -93,6 +93,14 @@ function replaceProviderRunOwnershipTable(
   `);
 }
 
+function removeSuspendedDurationCheck(database: Database.Database): void {
+  database.exec(`
+    ALTER TABLE agent_turns DROP COLUMN suspended_duration_ms;
+    ALTER TABLE agent_turns
+      ADD COLUMN suspended_duration_ms INTEGER NOT NULL DEFAULT 0;
+  `);
+}
+
 afterEach(() => {
   vi.useRealTimers();
   for (const directory of directories.splice(0)) {
@@ -1216,6 +1224,33 @@ describe("database backup and startup recovery", () => {
     },
   );
 
+  it("restores a valid backup when the primary lost the suspend-duration check", async () => {
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { conversationId, store } = seed(
+      databasePath,
+      "suspend constraint backup",
+    );
+    const backup = await store.createBackup();
+    store.close();
+    const incomplete = new Database(databasePath);
+    removeSuspendedDurationCheck(incomplete);
+    expect(incomplete.pragma("quick_check", { simple: true })).toBe("ok");
+    incomplete.close();
+
+    const recovered = new RuntimeStore(databasePath, directory, {
+      recoverInterruptedRuns: false,
+    });
+    expect(recovered.databaseRecoveryReport()).toMatchObject({
+      outcome: "restored",
+      restoredBackup: backup.filename,
+      trigger: "primary-corrupt",
+    });
+    expect(recovered.conversationDetail(conversationId)?.messages[0]?.content)
+      .toBe("suspend constraint backup");
+    recovered.close();
+  });
+
   it("restores and upgrades a valid backup from released schema 41", async () => {
     const directory = temporaryDirectory();
     const databasePath = join(directory, "inertia.sqlite");
@@ -1854,6 +1889,10 @@ describe("database backup and startup recovery", () => {
       mutate: (database: Database.Database) => {
         database.exec("ALTER TABLE agent_turns DROP COLUMN suspended_duration_ms");
       },
+    },
+    {
+      label: "the per-turn suspended duration check",
+      mutate: removeSuspendedDurationCheck,
     },
     {
       label: "the suspend interval range index",

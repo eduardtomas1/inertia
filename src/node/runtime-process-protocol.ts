@@ -253,6 +253,7 @@ export type RuntimeWorkerEvent =
       websocketUrl: string;
       databaseRecovery?: RuntimeDatabaseStartupRecoveryReport;
     }
+  | { type: "runtime.system-suspend-recorded"; id: string }
   | { type: "runtime.startup-failed"; message: string }
   | { type: "runtime.shutdown-unconfirmed" }
   | { type: "runtime.stopped" }
@@ -686,6 +687,12 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
 export function parseRuntimeWorkerEvent(value: unknown): RuntimeWorkerEvent | null {
   if (!plainObject(value) || typeof value.type !== "string") return null;
   if (value.type === "runtime.stopped" && Object.keys(value).length === 1) return { type: "runtime.stopped" };
+  if (
+    value.type === "runtime.system-suspend-recorded"
+    && Object.keys(value).length === 2
+    && typeof value.id === "string"
+    && UUID_PATTERN.test(value.id)
+  ) return { type: "runtime.system-suspend-recorded", id: value.id };
   const updateEvent = parseRuntimeUpdateWorkerEvent(value);
   if (updateEvent) return updateEvent;
   const browserEvent = parseRuntimeAgentBrowserEvent(value); if (browserEvent) return browserEvent;

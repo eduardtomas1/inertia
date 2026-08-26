@@ -15,13 +15,13 @@ describe("system suspend coordinator", () => {
     const broadcastSnapshot = vi.fn();
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
-    expect(() => recordSystemSuspendInterval({
+    expect(recordSystemSuspendInterval({
       systemSuspends: {
         record: vi.fn(() => {
           throw failure;
         }),
       },
-    }, interval, broadcast, broadcastSnapshot)).not.toThrow();
+    }, interval, broadcast, broadcastSnapshot)).toBe(false);
     expect(error).toHaveBeenCalledWith(
       "Unable to record system suspend accounting.",
       failure,
@@ -30,5 +30,16 @@ describe("system suspend coordinator", () => {
     expect(broadcastSnapshot).not.toHaveBeenCalled();
 
     error.mockRestore();
+  });
+
+  it("acknowledges idempotent persistence even when no view changed", () => {
+    const broadcast = vi.fn();
+    const broadcastSnapshot = vi.fn();
+
+    expect(recordSystemSuspendInterval({
+      systemSuspends: { record: vi.fn(() => []) },
+    }, interval, broadcast, broadcastSnapshot)).toBe(true);
+    expect(broadcast).not.toHaveBeenCalled();
+    expect(broadcastSnapshot).not.toHaveBeenCalled();
   });
 });

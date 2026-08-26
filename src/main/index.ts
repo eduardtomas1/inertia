@@ -197,7 +197,6 @@ let conversationAttachments: ConversationAttachmentAccess | null = null;
 let attachmentCleanup: Promise<void> = Promise.resolve();
 let attachmentStorageDirectory: string | null = null;
 let runtimeDataDirectory: string | null = null;
-const systemSuspends = new RuntimeSystemSuspendTracker();
 let attachmentReservation: AttachmentStorageReservation = {
   records: 0,
   bytes: 0,
@@ -915,6 +914,14 @@ function runPrivilegedCleanup(): Promise<boolean> {
 async function bootstrap(): Promise<void> {
   runtimeDiagnostics = new RuntimeDiagnostics(runtimeDiagnosticsDirectory(app.getPath("userData")));
   setImmediate(() => runtimeDiagnostics?.record("app.start"));
+  const systemSuspends = new RuntimeSystemSuspendTracker({
+    statePath: join(app.getPath("userData"), "runtime-system-suspends.json"),
+    recoveredAt: new Date().toISOString(),
+    onDiagnostic: (error) => console.error(
+      "Unable to retain system suspend accounting.",
+      error,
+    ),
+  });
   const testUpdateVersion = runtimeBootstrap.runtimeUpdateVersion(app.getVersion());
   const appUpdateCapability = process.env.NODE_ENV === "test"
     ? { delivery: "manual" as const, reason: "development-build" as const }
@@ -1010,6 +1017,10 @@ async function bootstrap(): Promise<void> {
   runtimeSupervisor = new RuntimeSupervisor({
     agentBrowserBroker: previewBroker,
     systemBootId: bootstrapSafety.systemBootId,
+    onSystemSuspendRecorded: (id) => {
+      const interval = systemSuspends.acknowledge(id);
+      if (interval) runtimeSupervisor?.recordSystemSuspendInterval(interval);
+    },
     conversationAttachmentStoreRunner,
     conversationAttachmentStoreAuthority:
       await conversationAttachmentStoreAuthority(conversationAttachmentStore),

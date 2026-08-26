@@ -438,6 +438,20 @@ describe("runtime process protocol", () => {
       ...command,
       unexpected: true,
     })).toBeNull();
+
+    const acknowledgement = {
+      type: "runtime.system-suspend-recorded" as const,
+      id: command.interval.id,
+    };
+    expect(parseRuntimeWorkerEvent(acknowledgement)).toEqual(acknowledgement);
+    expect(parseRuntimeWorkerEvent({
+      ...acknowledgement,
+      id: "not-a-uuid",
+    })).toBeNull();
+    expect(parseRuntimeWorkerEvent({
+      ...acknowledgement,
+      extra: true,
+    })).toBeNull();
   });
 
   it("accepts only strict safe Kimi profiles in the private startup envelope", () => {

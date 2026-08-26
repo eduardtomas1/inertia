@@ -4,6 +4,17 @@ import type Database from "better-sqlite3";
 export function systemSuspendTimingSchemaIsValid(
   database: Database.Database,
 ): boolean {
+  const executableSchemaSql = (value: unknown): string => (
+    typeof value === "string"
+      ? value
+          .replace(/'(?:''|[^'])*'/gu, " ")
+          .replace(/--[^\r\n]*/gu, " ")
+          .replace(/\/\*[\s\S]*?\*\//gu, " ")
+          .replace(/\s+/gu, " ")
+          .trim()
+          .toLowerCase()
+      : ""
+  );
   const turnColumns = database.prepare("PRAGMA table_info(agent_turns)").all() as Array<{
     dflt_value: string | null;
     name: string;
@@ -12,6 +23,13 @@ export function systemSuspendTimingSchemaIsValid(
   }>;
   const suspendedDuration = turnColumns.find(
     ({ name }) => name === "suspended_duration_ms",
+  );
+  const agentTurnDefinition = database.prepare(`
+    SELECT sql FROM sqlite_master
+    WHERE type = 'table' AND name = 'agent_turns'
+  `).get() as { sql: unknown } | undefined;
+  const normalizedAgentTurnDefinition = executableSchemaSql(
+    agentTurnDefinition?.sql,
   );
   const intervalColumns = database.prepare(
     "PRAGMA table_info(system_suspend_intervals)",
@@ -33,6 +51,8 @@ export function systemSuspendTimingSchemaIsValid(
     || suspendedDuration.type.trim().toUpperCase() !== "INTEGER"
     || suspendedDuration.notnull !== 1
     || suspendedDuration.dflt_value?.trim() !== "0"
+    || !/check\s*\(\s*suspended_duration_ms\s*>=\s*0\s+and\s+suspended_duration_ms\s*<=\s*9007199254740991\s*\)/u
+      .test(normalizedAgentTurnDefinition)
     || intervalColumns.length !== expectedIntervalColumns.length
     || expectedIntervalColumns.some(([name, type, notnull, pk], ordinal) => {
       const column = intervalColumns[ordinal];
@@ -56,9 +76,7 @@ export function systemSuspendTimingSchemaIsValid(
     SELECT sql FROM sqlite_master
     WHERE type = 'table' AND name = 'system_suspend_intervals'
   `).get() as { sql: unknown } | undefined;
-  const normalizedDefinition = typeof tableDefinition?.sql === "string"
-    ? tableDefinition.sql.replace(/\s+/gu, " ").toLowerCase()
-    : "";
+  const normalizedDefinition = executableSchemaSql(tableDefinition?.sql);
   if ([
     "check (length(id) = 36)",
     "check (length(suspended_at) between 20 and 40)",

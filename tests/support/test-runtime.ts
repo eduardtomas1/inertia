@@ -12,7 +12,14 @@ export async function startTestRuntime(options: RuntimeOptions): Promise<Running
   mkdirSync(options.dataDirectory, { recursive: true, mode: 0o700 });
   if (process.platform !== "win32") chmodSync(options.dataDirectory, 0o700);
   const leases = new RuntimeGenerationLeaseJournal(options.dataDirectory);
-  if (!leases.publish(options.runtimeGenerationId, options.systemBootId)) {
+  if (
+    !leases.publish(options.runtimeGenerationId, options.systemBootId)
+    && !leases.publishWithLegacyRecoveryReserve(
+      options.runtimeGenerationId,
+      options.systemBootId,
+      options.manuallyRetiredRuntimeGenerationIds ?? [],
+    )
+  ) {
     throw new Error("The test runtime generation lease could not be published.");
   }
   return await startRuntime(options);

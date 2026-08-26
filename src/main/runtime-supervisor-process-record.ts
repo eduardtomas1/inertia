@@ -5,12 +5,21 @@ export function createRuntimeProcessRecord(options: {
   generation: number;
   runtimeGenerationId: string;
   cleanupReceiptIds: readonly string[];
+  legacyRecoveryAuthorityIds?: readonly string[];
+  modernDarwinRecoveryAuthority?: RuntimeProcessRecord[
+    "modernDarwinRecoveryAuthority"
+  ];
 }): RuntimeProcessRecord {
   return {
     child: options.child,
     generation: options.generation,
     runtimeGenerationId: options.runtimeGenerationId,
     cleanupReceiptIds: new Set(options.cleanupReceiptIds),
+    legacyRecoveryAuthorityIds: new Set(
+      options.legacyRecoveryAuthorityIds ?? [],
+    ),
+    modernDarwinRecoveryAuthority:
+      options.modernDarwinRecoveryAuthority ?? null,
     ready: false,
     acceptingReady: true,
     cleanupConfirmed: false,

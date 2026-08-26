@@ -340,4 +340,44 @@ describe("runtime generation lease journal", () => {
     }
     expect(journal.publish(generationA, bootA)).toBe(false);
   });
+
+  it("reserves one current slot for an exact mixed modern and legacy batch", () => {
+    const path = directory();
+    const journal = new RuntimeGenerationLeaseJournal(path);
+    const legacy: string[] = [];
+    const modern: string[] = [];
+    for (let index = 0; index < 32; index += 1) {
+      const suffix = index.toString(16).padStart(12, "0");
+      const generationId = `00000000-0000-4000-8000-${suffix}:1`;
+      const target = index % 2 === 0 ? legacy : modern;
+      target.push(generationId);
+      expect(journal.publish(
+        generationId,
+        index % 2 === 0 ? "unavailable" : bootA,
+      )).toBe(true);
+    }
+    expect(journal.publishWithManualRecoveryReserve(
+      generationA,
+      bootA,
+      legacy,
+      modern,
+    )).toBe(true);
+    expect(journal.all()).toHaveLength(33);
+
+    const changed = directory();
+    const changedJournal = new RuntimeGenerationLeaseJournal(changed);
+    for (const generationId of [...legacy, ...modern]) {
+      expect(changedJournal.publish(
+        generationId,
+        legacy.includes(generationId) ? "unavailable" : bootA,
+      )).toBe(true);
+    }
+    expect(changedJournal.publishWithManualRecoveryReserve(
+      generationB,
+      bootA,
+      legacy.slice(1),
+      modern,
+    )).toBe(false);
+    expect(changedJournal.all()).toHaveLength(32);
+  });
 });

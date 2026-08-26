@@ -12,6 +12,9 @@ import type {
 import type {
   RuntimeOwnedProcessContainment,
 } from "../node/runtime-owned-processes.js";
+import type {
+  ModernDarwinRecoveryAuthorityDescriptor,
+} from "../node/runtime-modern-recovery-authorities.js";
 import type { SecureFileRequest, SecureFileResult } from "../node/secure-file-protocol.js";
 import type {
   AgentBrowserCommand,
@@ -31,6 +34,9 @@ export interface RuntimeProcessRecord {
   generation: number;
   runtimeGenerationId: string;
   cleanupReceiptIds: Set<string>;
+  legacyRecoveryAuthorityIds: Set<string>;
+  modernDarwinRecoveryAuthority:
+    ModernDarwinRecoveryAuthorityDescriptor | null;
   ready: boolean;
   acceptingReady: boolean;
   cleanupConfirmed: boolean;
@@ -131,9 +137,12 @@ export interface RuntimeSupervisorOptions {
     | "runtimeGenerationId"
     | "systemBootId"
     | "confirmedTerminatedRuntimeGenerationIds"
+    | "manuallyRetiredRuntimeGenerationIds"
     | "priorRuntimeCleanupUnconfirmed"
   >;
   systemBootId?: string;
+  /** Main-owned user decision gate; no process recovery or worker spawn occurs. */
+  runtimeRecoveryBlocked?: boolean;
   startupTimeoutMs?: number;
   stableUptimeMs?: number;
   shutdownGraceMs?: number;

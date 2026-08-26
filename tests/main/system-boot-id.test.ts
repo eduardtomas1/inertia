@@ -3,7 +3,6 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   readSystemBootId,
-  readSystemBootStartedAtMs,
   type SystemBootIdDependencies,
 } from "../../src/main/system-boot-id";
 
@@ -29,21 +28,11 @@ function dependencies(
     readFile: vi.fn(() => "11111111-1111-4111-8111-111111111111\n"),
     spawn: vi.fn(() => spawnResult("")),
     environment: {},
-    now: () => 1_756_100_100_000,
-    uptimeSeconds: () => 100,
     ...overrides,
   };
 }
 
 describe("system boot identity", () => {
-  it("reads the Linux kernel boot start without using wall-clock uptime math", () => {
-    const readFile = vi.fn((path: string) => path === "/proc/stat"
-      ? "cpu 1 2 3\nbtime 1756100000\nprocesses 42\n"
-      : "");
-    expect(readSystemBootStartedAtMs("linux", dependencies({ readFile })))
-      .toBe(1_756_100_000_000);
-  });
-
   it("reads and canonicalizes the Linux kernel boot identity", () => {
     const readFile = vi.fn(() =>
       "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA\n");
@@ -80,17 +69,6 @@ describe("system boot identity", () => {
         timeout: 1_000,
         maxBuffer: 4_096,
       }),
-    );
-  });
-
-  it("reads the fixed Darwin kernel boot timestamp", () => {
-    const spawn = vi.fn(() => spawnResult("{ sec = 1756100000, usec = 42 }\n"));
-    expect(readSystemBootStartedAtMs("darwin", dependencies({ spawn })))
-      .toBe(1_756_100_000_000);
-    expect(spawn).toHaveBeenCalledWith(
-      "/usr/sbin/sysctl",
-      ["-n", "kern.boottime"],
-      expect.objectContaining({ shell: false, timeout: 1_000 }),
     );
   });
 
@@ -140,29 +118,6 @@ describe("system boot identity", () => {
     );
   });
 
-  it("reads the Windows boot timestamp with a fixed trusted executable", () => {
-    const ticks = 638_916_968_000_000_000n;
-    const spawn = vi.fn(() => spawnResult(String(ticks)));
-    const environment = {
-      SystemRoot: "C:\\Windows",
-      SECRET_TOKEN: "must-not-be-inherited",
-    };
-    expect(readSystemBootStartedAtMs(
-      "win32",
-      dependencies({ spawn, environment }),
-    )).toBe(1_756_100_000_000);
-    expect(spawn).toHaveBeenCalledWith(
-      "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
-      expect.arrayContaining(["-NoProfile", "-NonInteractive"]),
-      expect.objectContaining({
-        env: expect.not.objectContaining({ SECRET_TOKEN: expect.anything() }),
-        shell: false,
-        timeout: 5_000,
-        windowsHide: true,
-      }),
-    );
-  });
-
   it("rejects ambiguous, malformed, failed, and untrusted Windows probes", () => {
     const ambiguous = vi.fn(() => spawnResult(
       "BootId REG_DWORD 0x1\nBootId REG_DWORD 0x2\n",
@@ -185,16 +140,6 @@ describe("system boot identity", () => {
     expect(readSystemBootId("win32", dependencies({
       spawn: ambiguous,
       environment: { SystemRoot: "relative" },
-    }))).toBeNull();
-  });
-
-  it("rejects a wall-clock boot timestamp that disagrees with monotonic uptime", () => {
-    const ticks = 638_916_968_000_000_000n;
-    expect(readSystemBootStartedAtMs("win32", dependencies({
-      environment: { SystemRoot: "C:\\Windows" },
-      now: () => 1_756_200_000_000,
-      spawn: () => spawnResult(String(ticks)),
-      uptimeSeconds: () => 100,
     }))).toBeNull();
   });
 });

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   existsSync,
   lstatSync,
@@ -5,40 +6,64 @@ import {
   mkdtempSync,
   readdirSync,
   rmSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const bootProbe = vi.hoisted(() => ({
-  calls: 0,
-  startedAtMs: null as number | null,
+const { readSystemBootIdMock } = vi.hoisted(() => ({
+  readSystemBootIdMock: vi.fn(
+    () => "test:00000000-0000-4000-8000-000000000001" as string | null,
+  ),
 }));
-
 vi.mock("../../src/main/system-boot-id", () => ({
-  readSystemBootId: () => "test:00000000-0000-4000-8000-000000000001",
-  readSystemBootStartedAtMs: () => {
-    bootProbe.calls += 1;
-    return bootProbe.startedAtMs;
-  },
+  readSystemBootId: readSystemBootIdMock,
 }));
 
-import { prepareRuntimeBootstrapSafety } from "../../src/main/runtime-bootstrap-safety";
+import {
+  authorizeModernDarwinRuntimeRecovery,
+  authorizeLegacyRuntimeRecovery,
+  LEGACY_RUNTIME_RECOVERY_DIALOG_DETAIL,
+  MODERN_DARWIN_RECOVERY_DIALOG_DETAIL,
+  prepareModernDarwinBootstrapRecovery,
+  prepareRuntimeBootstrapSafety,
+} from "../../src/main/runtime-bootstrap-safety";
+import {
+  captureModernDarwinRecoverySnapshot,
+  ModernDarwinRecoveryAuthorityJournal,
+} from "../../src/node/runtime-modern-recovery-authorities";
+import { LegacyRuntimeRecoveryAuthorityJournal } from "../../src/main/runtime-legacy-recovery-authorities";
 import { RuntimeGenerationLeaseJournal } from "../../src/node/runtime-generation-leases";
 import { RuntimeOwnedProcessJournal } from "../../src/node/runtime-owned-processes";
 
 const directories: string[] = [];
 
 afterEach(() => {
-  bootProbe.calls = 0;
-  bootProbe.startedAtMs = null;
+  readSystemBootIdMock.mockReturnValue(
+    "test:00000000-0000-4000-8000-000000000001",
+  );
   for (const path of directories.splice(0)) {
     rmSync(path, { recursive: true, force: true });
   }
 });
 
 describe("runtime bootstrap safety", () => {
+  it("asks only for visible old processes and never requires a reboot or hidden helper", () => {
+    for (const detail of [
+      MODERN_DARWIN_RECOVERY_DIALOG_DETAIL,
+      LEGACY_RUNTIME_RECOVERY_DIALOG_DETAIL,
+    ]) {
+      expect(detail).toMatch(/will NOT kill any surviving process/u);
+      expect(detail).toMatch(/older Inertia window/u);
+      expect(detail).toMatch(/agent or terminal process.*you can still see/u);
+      expect(detail).not.toMatch(/reboot|restart|guardian|helper/iu);
+    }
+    expect(MODERN_DARWIN_RECOVERY_DIALOG_DETAIL)
+      .toMatch(/exact recorded roots and state.*checked again/u);
+  });
+
   it("creates a fresh profile data directory before opening its journals", () => {
     const root = mkdtempSync(join(tmpdir(), "inertia-bootstrap-safety-"));
     const dataDirectory = join(root, "fresh", "runtime");
@@ -48,12 +73,12 @@ describe("runtime bootstrap safety", () => {
     expect(prepareRuntimeBootstrapSafety(dataDirectory)).toEqual({
       systemBootId: "test:00000000-0000-4000-8000-000000000001",
       preserveAttachments: false,
+      legacyRecoveryCandidates: [],
     });
     expect(lstatSync(dataDirectory).isDirectory()).toBe(true);
-    expect(bootProbe.calls).toBe(0);
   });
 
-  it("retires a stale safety lease after proving the machine already rebooted", () => {
+  it("never retires an unavailable lease from historical wall-clock state", () => {
     const root = mkdtempSync(join(tmpdir(), "inertia-bootstrap-safety-"));
     const dataDirectory = join(root, "runtime");
     const staleGenerationId = "30000000-0000-4000-8000-000000000003:8";
@@ -69,19 +94,19 @@ describe("runtime bootstrap safety", () => {
       "unavailable",
     )).toBe(true);
     ownedProcesses.begin(staleGenerationId, "unavailable");
-    bootProbe.startedAtMs = Date.now() + 120_000;
-
-    expect(prepareRuntimeBootstrapSafety(dataDirectory)).toEqual({
+    expect(prepareRuntimeBootstrapSafety(dataDirectory, "darwin")).toEqual({
       systemBootId: bootId,
-      preserveAttachments: false,
+      preserveAttachments: true,
+      legacyRecoveryCandidates: [],
     });
-    expect(bootProbe.calls).toBe(1);
     leases.refresh();
-    expect(leases.all()).toEqual([]);
-    expect(ownedProcesses.records(staleGenerationId)).toBeNull();
+    expect(leases.all()).toMatchObject([
+      { runtimeGenerationId: staleGenerationId, systemBootId: "unavailable" },
+    ]);
+    expect(ownedProcesses.records(staleGenerationId)).toHaveLength(1);
   });
 
-  it("never treats a current-boot lease as reboot-retired from timestamps alone", () => {
+  it("keeps a modern current-boot lease outside manual recovery", () => {
     const root = mkdtempSync(join(tmpdir(), "inertia-bootstrap-safety-"));
     const dataDirectory = join(root, "runtime");
     const activeGenerationId = "30000000-0000-4000-8000-000000000003:10";
@@ -91,20 +116,265 @@ describe("runtime bootstrap safety", () => {
 
     const leases = new RuntimeGenerationLeaseJournal(dataDirectory);
     expect(leases.publish(activeGenerationId, bootId)).toBe(true);
-    bootProbe.startedAtMs = Date.now() + 1_000;
-
-    expect(prepareRuntimeBootstrapSafety(dataDirectory)).toEqual({
+    expect(prepareRuntimeBootstrapSafety(dataDirectory, "darwin")).toEqual({
       systemBootId: bootId,
       preserveAttachments: true,
+      legacyRecoveryCandidates: [],
     });
-    expect(bootProbe.calls).toBe(0);
     leases.refresh();
     expect(leases.all()).toMatchObject([
       { runtimeGenerationId: activeGenerationId, systemBootId: bootId },
     ]);
   });
 
-  it("keeps a legacy unavailable lease locked when boot-time proof is unavailable", () => {
+  it("authorizes modern and unavailable legacy batches together in one launch", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-bootstrap-safety-"));
+    const dataDirectory = join(root, "runtime");
+    const legacyGenerationId = "30000000-0000-4000-8000-000000000003:30";
+    const exactGenerationId = "30000000-0000-4000-8000-000000000003:31";
+    const bootId = "test:00000000-0000-4000-8000-000000000001";
+    directories.push(root);
+    mkdirSync(dataDirectory, { recursive: true, mode: 0o700 });
+    const leases = new RuntimeGenerationLeaseJournal(dataDirectory);
+    expect(leases.publish(legacyGenerationId, "unavailable")).toBe(true);
+    expect(leases.publish(exactGenerationId, bootId)).toBe(true);
+    expect(new RuntimeOwnedProcessJournal(dataDirectory, {
+      platform: "darwin",
+    }).startSession(exactGenerationId, bootId)).toBe(true);
+
+    // The unrelated owned session initially suppresses the old broad legacy
+    // eligibility check.
+    expect(prepareRuntimeBootstrapSafety(dataDirectory, "darwin")
+      .legacyRecoveryCandidates).toEqual([]);
+    const modern = await prepareModernDarwinBootstrapRecovery(
+      dataDirectory,
+      bootId,
+      "/private/tmp/inertia-test-guardian",
+      { platform: "darwin", deadlineAt: Date.now() + 1_000 },
+    );
+    expect(modern).toMatchObject({ authority: null, blocked: false });
+    expect(modern.candidate?.generations).toHaveLength(1);
+    const modernDescriptor = authorizeModernDarwinRuntimeRecovery(
+      dataDirectory,
+      modern.candidate!,
+      bootId,
+      "/private/tmp/inertia-test-guardian",
+      {
+        platform: "darwin",
+        readDarwinIdentity: () => null,
+        pidExists: () => false,
+      },
+    );
+    expect(modernDescriptor).not.toBeNull();
+
+    // Bootstrap re-reads safety only after the complete modern snapshot is
+    // durable, then binds the independent legacy batch before supervisor
+    // admission. Neither path needs a second restart.
+    const preparedLegacy = prepareRuntimeBootstrapSafety(
+      dataDirectory,
+      "darwin",
+    );
+    expect(preparedLegacy.legacyRecoveryCandidates).toEqual([
+      legacyGenerationId,
+    ]);
+    expect(authorizeLegacyRuntimeRecovery(
+      dataDirectory,
+      preparedLegacy.legacyRecoveryCandidates,
+      bootId,
+      "darwin",
+    )).toBe(true);
+    expect(new ModernDarwinRecoveryAuthorityJournal(dataDirectory).pending())
+      .toMatchObject({ snapshotDigest: modernDescriptor?.snapshotDigest });
+    expect(new LegacyRuntimeRecoveryAuthorityJournal(dataDirectory)
+      .pending("darwin", bootId)).toEqual([legacyGenerationId]);
+  });
+
+  it("offers and binds only unchanged concrete-boot Darwin state", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-bootstrap-safety-"));
+    const dataDirectory = join(root, "runtime");
+    const generationId = "30000000-0000-4000-8000-000000000003:32";
+    const bootId = "test:00000000-0000-4000-8000-000000000001";
+    directories.push(root);
+    mkdirSync(dataDirectory, { recursive: true, mode: 0o700 });
+    expect(new RuntimeGenerationLeaseJournal(dataDirectory).publish(
+      generationId,
+      bootId,
+    )).toBe(true);
+    const owned = new RuntimeOwnedProcessJournal(dataDirectory, {
+      platform: "darwin",
+      darwinGuardianPath: "/private/tmp/inertia-test-guardian",
+    });
+    owned.begin(generationId, bootId);
+
+    const prepared = await prepareModernDarwinBootstrapRecovery(
+      dataDirectory,
+      bootId,
+      "/private/tmp/inertia-test-guardian",
+      { platform: "darwin", deadlineAt: Date.now() + 100 },
+    );
+    expect(prepared.blocked).toBe(false);
+    expect(prepared.authority).toBeNull();
+    expect(prepared.candidate?.generations).toHaveLength(1);
+    const descriptor = authorizeModernDarwinRuntimeRecovery(
+      dataDirectory,
+      prepared.candidate!,
+      bootId,
+      "/private/tmp/inertia-test-guardian",
+      {
+        platform: "darwin",
+        readDarwinIdentity: () => null,
+        pidExists: () => false,
+      },
+    );
+    expect(descriptor?.runtimeGenerationIds).toEqual([generationId]);
+    expect(new ModernDarwinRecoveryAuthorityJournal(dataDirectory).pending())
+      .toMatchObject({
+        operationId: descriptor?.operationId,
+        snapshotDigest: descriptor?.snapshotDigest,
+      });
+  });
+
+  it("rejects confirmation while an exact recorded Darwin root is still alive", () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-bootstrap-safety-"));
+    const dataDirectory = join(root, "runtime");
+    const generationId = "30000000-0000-4000-8000-000000000003:33";
+    const bootId = "test:00000000-0000-4000-8000-000000000001";
+    const guardianIdentity = {
+      platform: "darwin" as const,
+      pid: 7_431,
+      parentPid: 7_400,
+      processGroupId: 7_431,
+      sessionId: 7_431,
+      startTimeSeconds: "1800000000",
+      startTimeMicroseconds: 123_456,
+    };
+    directories.push(root);
+    mkdirSync(dataDirectory, { recursive: true, mode: 0o700 });
+    expect(new RuntimeGenerationLeaseJournal(dataDirectory).publish(
+      generationId,
+      bootId,
+    )).toBe(true);
+    const owned = new RuntimeOwnedProcessJournal(dataDirectory, {
+      platform: "darwin",
+      readDarwinIdentity: () => guardianIdentity,
+    });
+    expect(owned.startSession(generationId, bootId)).toBe(true);
+    const ownershipId = owned.begin(generationId, bootId);
+    owned.claim(ownershipId, generationId, bootId, 7_431, 7_400);
+    const candidate = captureModernDarwinRecoverySnapshot(
+      dataDirectory,
+      bootId,
+    );
+    expect(candidate).not.toBeNull();
+
+    expect(authorizeModernDarwinRuntimeRecovery(
+      dataDirectory,
+      candidate!,
+      bootId,
+      "/private/tmp/inertia-test-guardian",
+      {
+        platform: "darwin",
+        readDarwinIdentity: () => guardianIdentity,
+        pidExists: () => false,
+      },
+    )).toBeNull();
+    expect(new ModernDarwinRecoveryAuthorityJournal(dataDirectory).pending())
+      .toBeNull();
+    expect(new RuntimeOwnedProcessJournal(dataDirectory, {
+      platform: "darwin",
+    }).records(generationId)).toHaveLength(1);
+  });
+
+  it("cancels a replayed authority when its exact guardian root is live again", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-bootstrap-safety-"));
+    const dataDirectory = join(root, "runtime");
+    const generationId = "30000000-0000-4000-8000-000000000003:35";
+    const bootId = "test:00000000-0000-4000-8000-000000000001";
+    const guardianIdentity = {
+      platform: "darwin" as const,
+      pid: 7_435,
+      parentPid: 7_400,
+      processGroupId: 7_435,
+      sessionId: 7_435,
+      startTimeSeconds: "1800000000",
+      startTimeMicroseconds: 123_456,
+    };
+    directories.push(root);
+    mkdirSync(dataDirectory, { recursive: true, mode: 0o700 });
+    expect(new RuntimeGenerationLeaseJournal(dataDirectory).publish(
+      generationId,
+      bootId,
+    )).toBe(true);
+    const owned = new RuntimeOwnedProcessJournal(dataDirectory, {
+      platform: "darwin",
+      readDarwinIdentity: () => guardianIdentity,
+    });
+    expect(owned.startSession(generationId, bootId)).toBe(true);
+    const ownershipId = owned.begin(generationId, bootId);
+    owned.claim(ownershipId, generationId, bootId, 7_435, 7_400);
+    const snapshot = captureModernDarwinRecoverySnapshot(
+      dataDirectory,
+      bootId,
+    );
+    expect(snapshot).not.toBeNull();
+    expect(snapshot && new ModernDarwinRecoveryAuthorityJournal(dataDirectory)
+      .publish(snapshot)).not.toBeNull();
+
+    const replay = await prepareModernDarwinBootstrapRecovery(
+      dataDirectory,
+      bootId,
+      "/private/tmp/inertia-test-guardian",
+      {
+        platform: "darwin",
+        deadlineAt: Date.now() + 100,
+        readDarwinIdentity: () => guardianIdentity,
+        pidExists: () => false,
+      },
+    );
+    expect(replay.authority).toBeNull();
+    expect(replay.candidate?.generations[0]?.records).toHaveLength(1);
+    expect(new ModernDarwinRecoveryAuthorityJournal(dataDirectory).pending())
+      .toBeNull();
+  });
+
+  it("cancels a pending modern authority after a verified boot change", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-bootstrap-safety-"));
+    const dataDirectory = join(root, "runtime");
+    const generationId = "30000000-0000-4000-8000-000000000003:34";
+    const priorBootId = "test:10000000-0000-4000-8000-000000000001";
+    const currentBootId = "test:20000000-0000-4000-8000-000000000002";
+    directories.push(root);
+    mkdirSync(dataDirectory, { recursive: true, mode: 0o700 });
+    const leases = new RuntimeGenerationLeaseJournal(dataDirectory);
+    expect(leases.publish(generationId, priorBootId)).toBe(true);
+    expect(new RuntimeOwnedProcessJournal(dataDirectory, {
+      platform: "darwin",
+    }).startSession(generationId, priorBootId)).toBe(true);
+    const snapshot = captureModernDarwinRecoverySnapshot(
+      dataDirectory,
+      priorBootId,
+    );
+    expect(snapshot).not.toBeNull();
+    expect(snapshot && new ModernDarwinRecoveryAuthorityJournal(dataDirectory)
+      .publish(snapshot)).not.toBeNull();
+    readSystemBootIdMock.mockReturnValue(currentBootId);
+
+    expect(prepareRuntimeBootstrapSafety(dataDirectory, "darwin")).toMatchObject({
+      systemBootId: currentBootId,
+      preserveAttachments: false,
+    });
+    await expect(prepareModernDarwinBootstrapRecovery(
+      dataDirectory,
+      currentBootId,
+      "/private/tmp/inertia-test-guardian",
+      { platform: "darwin" },
+    )).resolves.toEqual({ authority: null, candidate: null, blocked: false });
+    expect(new ModernDarwinRecoveryAuthorityJournal(dataDirectory).pending())
+      .toBeNull();
+    expect(new RuntimeGenerationLeaseJournal(dataDirectory).all()).toEqual([]);
+  });
+
+  it("offers only an unowned legacy Windows or macOS lease for manual recovery", () => {
     const root = mkdtempSync(join(tmpdir(), "inertia-bootstrap-safety-"));
     const dataDirectory = join(root, "runtime");
     const activeGenerationId = "30000000-0000-4000-8000-000000000003:11";
@@ -114,15 +384,219 @@ describe("runtime bootstrap safety", () => {
     const leases = new RuntimeGenerationLeaseJournal(dataDirectory);
     expect(leases.publish(activeGenerationId, "unavailable")).toBe(true);
 
-    expect(prepareRuntimeBootstrapSafety(dataDirectory)).toEqual({
+    expect(prepareRuntimeBootstrapSafety(dataDirectory, "win32")).toEqual({
       systemBootId: "test:00000000-0000-4000-8000-000000000001",
       preserveAttachments: true,
+      legacyRecoveryCandidates: [activeGenerationId],
     });
-    expect(bootProbe.calls).toBe(1);
     leases.refresh();
     expect(leases.all()).toMatchObject([
       { runtimeGenerationId: activeGenerationId, systemBootId: "unavailable" },
     ]);
+  });
+
+  it("retains the lease and re-prompts after an incomplete authority publish", () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-bootstrap-safety-"));
+    const dataDirectory = join(root, "runtime");
+    const generationId = "30000000-0000-4000-8000-000000000003:16";
+    directories.push(root);
+    mkdirSync(dataDirectory, { recursive: true, mode: 0o700 });
+    const leases = new RuntimeGenerationLeaseJournal(dataDirectory);
+    expect(leases.publish(generationId, "unavailable")).toBe(true);
+    const generationHash = createHash("sha256")
+      .update(generationId)
+      .digest("hex");
+    writeFileSync(
+      join(
+        dataDirectory,
+        `.runtime-legacy-recovery-authority-${generationHash}.publish.tmp`,
+      ),
+      "{",
+      { mode: 0o600 },
+    );
+
+    expect(prepareRuntimeBootstrapSafety(dataDirectory, "darwin")).toEqual({
+      systemBootId: "test:00000000-0000-4000-8000-000000000001",
+      preserveAttachments: true,
+      legacyRecoveryCandidates: [generationId],
+    });
+    expect(leases.all()).toMatchObject([
+      { runtimeGenerationId: generationId, systemBootId: "unavailable" },
+    ]);
+  });
+
+  it("publishes an exact replayable authority without clearing the lease", () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-bootstrap-safety-"));
+    const dataDirectory = join(root, "runtime");
+    const generationId = "30000000-0000-4000-8000-000000000003:12";
+    const bootId = "test:00000000-0000-4000-8000-000000000001";
+    directories.push(root);
+    mkdirSync(dataDirectory, { recursive: true, mode: 0o700 });
+    const leases = new RuntimeGenerationLeaseJournal(dataDirectory);
+    expect(leases.publish(generationId, "unavailable")).toBe(true);
+
+    expect(authorizeLegacyRuntimeRecovery(
+      dataDirectory,
+      [generationId],
+      bootId,
+      "darwin",
+    )).toBe(true);
+    expect(new LegacyRuntimeRecoveryAuthorityJournal(dataDirectory)
+      .pending("darwin", bootId)).toEqual([generationId]);
+    leases.refresh();
+    expect(leases.all()).toMatchObject([
+      { runtimeGenerationId: generationId, systemBootId: "unavailable" },
+    ]);
+    expect(prepareRuntimeBootstrapSafety(dataDirectory, "darwin")).toEqual({
+      systemBootId: bootId,
+      preserveAttachments: true,
+      legacyRecoveryCandidates: [],
+    });
+  });
+
+  it("authorizes an unowned Linux fallback lease without bypassing exact records", () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-bootstrap-safety-"));
+    const dataDirectory = join(root, "runtime");
+    const generationId = "30000000-0000-4000-8000-000000000003:18";
+    const bootId = "test:00000000-0000-4000-8000-000000000001";
+    directories.push(root);
+    mkdirSync(dataDirectory, { recursive: true, mode: 0o700 });
+    expect(new RuntimeGenerationLeaseJournal(dataDirectory).publish(
+      generationId,
+      "unavailable",
+    )).toBe(true);
+
+    expect(prepareRuntimeBootstrapSafety(dataDirectory, "linux")
+      .legacyRecoveryCandidates).toEqual([generationId]);
+    expect(authorizeLegacyRuntimeRecovery(
+      dataDirectory,
+      [generationId],
+      bootId,
+      "linux",
+    )).toBe(true);
+    expect(new LegacyRuntimeRecoveryAuthorityJournal(dataDirectory)
+      .pending("linux", bootId)).toEqual([generationId]);
+  });
+
+  it("retires an expired authority but keeps its lease for fresh confirmation", () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-bootstrap-safety-"));
+    const dataDirectory = join(root, "runtime");
+    const generationId = "30000000-0000-4000-8000-000000000003:14";
+    const previousBootId = "test:10000000-0000-4000-8000-000000000001";
+    const currentBootId = "test:00000000-0000-4000-8000-000000000001";
+    directories.push(root);
+    mkdirSync(dataDirectory, { recursive: true, mode: 0o700 });
+    const leases = new RuntimeGenerationLeaseJournal(dataDirectory);
+    expect(leases.publish(generationId, "unavailable")).toBe(true);
+    expect(new LegacyRuntimeRecoveryAuthorityJournal(dataDirectory).publish(
+      generationId,
+      "win32",
+      previousBootId,
+    )).toBe(true);
+
+    expect(prepareRuntimeBootstrapSafety(dataDirectory, "win32")).toEqual({
+      systemBootId: currentBootId,
+      preserveAttachments: true,
+      legacyRecoveryCandidates: [generationId],
+    });
+    expect(new LegacyRuntimeRecoveryAuthorityJournal(dataDirectory)
+      .pending("win32", previousBootId)).toEqual([]);
+    expect(leases.all()).toMatchObject([
+      { runtimeGenerationId: generationId, systemBootId: "unavailable" },
+    ]);
+    expect(authorizeLegacyRuntimeRecovery(
+      dataDirectory,
+      [generationId],
+      currentBootId,
+      "win32",
+    )).toBe(true);
+    expect(new LegacyRuntimeRecoveryAuthorityJournal(dataDirectory)
+      .pending("win32", currentBootId)).toEqual([generationId]);
+    expect(new LegacyRuntimeRecoveryAuthorityJournal(dataDirectory)
+      .pending("win32", previousBootId)).toEqual([]);
+  });
+
+  it("retires an expired authority only after its legacy lease is absent", () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-bootstrap-safety-"));
+    const dataDirectory = join(root, "runtime");
+    const generationId = "30000000-0000-4000-8000-000000000003:17";
+    const previousBootId = "test:10000000-0000-4000-8000-000000000001";
+    directories.push(root);
+    mkdirSync(dataDirectory, { recursive: true, mode: 0o700 });
+    expect(new LegacyRuntimeRecoveryAuthorityJournal(dataDirectory).publish(
+      generationId,
+      "darwin",
+      previousBootId,
+    )).toBe(true);
+
+    expect(prepareRuntimeBootstrapSafety(dataDirectory, "darwin")).toEqual({
+      systemBootId: "test:00000000-0000-4000-8000-000000000001",
+      preserveAttachments: false,
+      legacyRecoveryCandidates: [],
+    });
+    expect(new LegacyRuntimeRecoveryAuthorityJournal(dataDirectory)
+      .pending("darwin", previousBootId)).toEqual([]);
+  });
+
+  it.each(["win32", "darwin", "linux"] as const)(
+    "offers exact no-reboot legacy recovery when the %s boot probe is unavailable",
+    (platform) => {
+      const root = mkdtempSync(join(tmpdir(), "inertia-bootstrap-safety-"));
+      const dataDirectory = join(root, "runtime");
+      const generationId = "30000000-0000-4000-8000-000000000003:15";
+      directories.push(root);
+      mkdirSync(dataDirectory, { recursive: true, mode: 0o700 });
+      expect(new RuntimeGenerationLeaseJournal(dataDirectory)
+        .publish(generationId, "unavailable")).toBe(true);
+    readSystemBootIdMock.mockReturnValue(null);
+
+      expect(prepareRuntimeBootstrapSafety(dataDirectory, platform)).toEqual({
+        systemBootId: "unavailable",
+        preserveAttachments: true,
+        legacyRecoveryCandidates: [generationId],
+      });
+      expect(authorizeLegacyRuntimeRecovery(
+        dataDirectory,
+        [generationId],
+        "unavailable",
+        platform,
+      )).toBe(true);
+      expect(new LegacyRuntimeRecoveryAuthorityJournal(dataDirectory)
+        .pending(platform, "unavailable")).toEqual([generationId]);
+    },
+  );
+
+  it("keeps cancellation and invalid ownership state fail closed", () => {
+    const cancelledRoot = mkdtempSync(join(tmpdir(), "inertia-bootstrap-safety-"));
+    const cancelledData = join(cancelledRoot, "runtime");
+    const generationId = "30000000-0000-4000-8000-000000000003:13";
+    directories.push(cancelledRoot);
+    mkdirSync(cancelledData, { recursive: true, mode: 0o700 });
+    expect(new RuntimeGenerationLeaseJournal(cancelledData)
+      .publish(generationId, "unavailable")).toBe(true);
+
+    expect(prepareRuntimeBootstrapSafety(cancelledData, "linux")).toEqual({
+      systemBootId: "test:00000000-0000-4000-8000-000000000001",
+      preserveAttachments: true,
+      legacyRecoveryCandidates: [generationId],
+    });
+    expect(new LegacyRuntimeRecoveryAuthorityJournal(cancelledData)
+      .pending("darwin", "test:00000000-0000-4000-8000-000000000001"))
+      .toEqual([]);
+
+    writeFileSync(
+      join(cancelledData, ".runtime-owned-invalid.json"),
+      "invalid",
+      { mode: 0o600 },
+    );
+    expect(prepareRuntimeBootstrapSafety(cancelledData, "darwin")
+      .legacyRecoveryCandidates).toEqual([]);
+    expect(authorizeLegacyRuntimeRecovery(
+      cancelledData,
+      [generationId],
+      "test:00000000-0000-4000-8000-000000000001",
+      "darwin",
+    )).toBe(false);
   });
 
   it.runIf(process.platform === "linux")(
@@ -148,6 +622,7 @@ describe("runtime bootstrap safety", () => {
       expect(prepareRuntimeBootstrapSafety(dataDirectory)).toEqual({
         systemBootId: "test:00000000-0000-4000-8000-000000000001",
         preserveAttachments: false,
+        legacyRecoveryCandidates: [],
       });
       leases.refresh();
       expect(leases.all()).toEqual([]);

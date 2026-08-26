@@ -83,6 +83,18 @@ export class RuntimeProcessContainmentAdmission {
                 [...record.cleanupReceiptIds],
             }
           : {}),
+        ...(record.legacyRecoveryAuthorityIds.size > 0
+          ? {
+              manuallyRetiredRuntimeGenerationIds:
+                [...record.legacyRecoveryAuthorityIds],
+            }
+          : {}),
+        ...(record.modernDarwinRecoveryAuthority
+          ? {
+              manualModernDarwinRecovery:
+                record.modernDarwinRecoveryAuthority,
+            }
+          : {}),
         ...(this.options.hasQuarantinedProcesses()
           ? { priorRuntimeCleanupUnconfirmed: true }
           : {}),

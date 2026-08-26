@@ -289,7 +289,7 @@ export class TerminalManager {
     const id = randomUUID();
     let pseudoterminal: IPty;
     let confirmOwnedProcessStopped!: () => boolean;
-    let releaseOwnedProcessIfExited!: () => void;
+    let releaseOwnedProcessIfExited!: (exitSignal?: number) => void;
     try {
       const invocation = runtimeOwnedPtyInvocation(executable, args);
       const owned = spawnRuntimeOwnedPidProcess(() => this.spawnTerminal(
@@ -362,12 +362,12 @@ export class TerminalManager {
       onOutput?.(data);
       queueOutput(data);
     });
-    const exitListener = pseudoterminal.onExit(({ exitCode }) => {
+    const exitListener = pseudoterminal.onExit(({ exitCode, signal }) => {
       flushOutput();
       session.exitObserved = true;
       for (const resolveExit of session.exitWaiters) resolveExit();
       session.exitWaiters.clear();
-      releaseOwnedProcessIfExited();
+      releaseOwnedProcessIfExited(signal);
       if (session.terminationRequested) return;
       this.dispose(id, false);
       send(owner, { type: "terminal.exit", terminalId: id, exitCode });

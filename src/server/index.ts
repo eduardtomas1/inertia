@@ -20,6 +20,11 @@ import {
 } from "../node/runtime-process-protocol";
 import { ConversationAttachmentStore } from "../node/conversation-attachment-store";
 import { RuntimeGenerationLeaseJournal } from "../node/runtime-generation-leases";
+import {
+  modernDarwinRecoveryJournalMatches,
+  modernDarwinRecoveryDescriptorMatches,
+  ModernDarwinRecoveryAuthorityJournal,
+} from "../node/runtime-modern-recovery-authorities";
 import { RuntimeStore } from "./database";
 import { TurnController } from "./runtime/turns/turn-controller";
 import { recoverInterruptedTurns } from "./runtime/turns/turn-recovery";
@@ -135,6 +140,9 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     throw new Error("The operating system boot identity is invalid.");
   }
   const confirmedGenerations = options.confirmedTerminatedRuntimeGenerationIds ?? [];
+  const manuallyRetiredGenerations =
+    options.manuallyRetiredRuntimeGenerationIds ?? [];
+  const manualModernDarwinRecovery = options.manualModernDarwinRecovery;
   if (
     confirmedGenerations.length > 32
     || new Set(confirmedGenerations).size !== confirmedGenerations.length
@@ -143,13 +151,53 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       || generationId === options.runtimeGenerationId
     ))
   ) throw new Error("The confirmed runtime cleanup receipts are invalid.");
+  if (
+    manuallyRetiredGenerations.length > 32
+    || new Set(manuallyRetiredGenerations).size
+      !== manuallyRetiredGenerations.length
+    || manuallyRetiredGenerations.some((generationId) => (
+      !validRuntimeGenerationId(generationId)
+      || generationId === options.runtimeGenerationId
+      || confirmedGenerations.includes(generationId)
+    ))
+  ) throw new Error("The manual legacy runtime recovery authorities are invalid.");
   const dataDirectory = resolve(options.dataDirectory);
   mkdirSync(dataDirectory, { recursive: true, mode: 0o700 });
   const runtimeGenerationLeases = new RuntimeGenerationLeaseJournal(dataDirectory);
+  const modernDarwinAuthority = manualModernDarwinRecovery
+    ? new ModernDarwinRecoveryAuthorityJournal(dataDirectory).pending()
+    : null;
+  if (
+    manualModernDarwinRecovery
+    && (
+      !modernDarwinAuthority
+      || !modernDarwinRecoveryDescriptorMatches(
+        manualModernDarwinRecovery,
+        modernDarwinAuthority,
+      )
+      || !modernDarwinRecoveryJournalMatches(
+        dataDirectory,
+        modernDarwinAuthority,
+        options.runtimeGenerationId,
+      )
+    )
+  ) throw new Error("The manual macOS runtime recovery authority changed.");
   for (const confirmedRuntimeGenerationId of confirmedGenerations) {
     if (!runtimeGenerationLeases.clearRuntimeGeneration(confirmedRuntimeGenerationId)) {
       throw new Error("Confirmed provider process ownership could not be retired.");
     }
+  }
+  runtimeGenerationLeases.refresh();
+  for (const manuallyRetiredRuntimeGenerationId of manuallyRetiredGenerations) {
+    const lease = runtimeGenerationLeases.all().find(({ runtimeGenerationId }) =>
+      runtimeGenerationId === manuallyRetiredRuntimeGenerationId);
+    if (lease && lease.systemBootId !== "unavailable") {
+      throw new Error("Manual legacy recovery cannot retire a modern runtime lease.");
+    }
+    // A missing lease is an idempotent replay after the worker durably
+    // reconciled the database and retired it, but exited before main consumed
+    // the corresponding authority. Present legacy leases remain durable until
+    // after interrupted-run reconciliation below.
   }
   const priorBootLeasesCleared = runtimeGenerationLeases.clearPriorBootSessions(
     options.systemBootId,
@@ -159,16 +207,36 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     lease.runtimeGenerationId === options.runtimeGenerationId
     && lease.systemBootId === options.systemBootId
   );
+  const authorizedLegacyGenerationIds = new Set(manuallyRetiredGenerations);
+  const authorizedModernGenerationIds = new Set(
+    manualModernDarwinRecovery?.runtimeGenerationIds ?? [],
+  );
+  const authorizedLegacyOwner = (
+    lease: typeof retainedGenerationLeases[number],
+  ): boolean => lease.systemBootId === "unavailable"
+    && authorizedLegacyGenerationIds.has(lease.runtimeGenerationId);
+  const authorizedModernOwner = (
+    lease: typeof retainedGenerationLeases[number],
+  ): boolean => lease.systemBootId === options.systemBootId
+    && authorizedModernGenerationIds.has(lease.runtimeGenerationId);
   const runtimeSafetyLock = options.priorRuntimeCleanupUnconfirmed === true
     || !runtimeGenerationLeases.isValid()
     || !retainedGenerationLeases.some(currentGenerationOwner)
-    || retainedGenerationLeases.some((lease) => !currentGenerationOwner(lease));
+    || retainedGenerationLeases.some((lease) => (
+      !currentGenerationOwner(lease)
+      && !authorizedLegacyOwner(lease)
+      && !authorizedModernOwner(lease)
+    ));
   const runtimeSafetyError = (operation: string): string => (
     `${operation} A prior runtime-owned process may still be running. Inertia kept the affected work unchanged and will retry exact cleanup when its local service starts again; contact support if the recovery remains blocked.`
   );
   const generatedAttachments = await PrivateGeneratedAttachmentStore.create(
     dataDirectory,
-    { preserveExisting: runtimeSafetyLock },
+    {
+      preserveExisting: runtimeSafetyLock
+        || manuallyRetiredGenerations.length > 0
+        || authorizedModernGenerationIds.size > 0,
+    },
   );
   const databasePath = join(dataDirectory, "inertia.sqlite");
   let turns: TurnController;
@@ -238,6 +306,16 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       options.runtimeGenerationId,
     );
   }
+  for (const manuallyRetiredRuntimeGenerationId of manuallyRetiredGenerations) {
+    store.providerRunOwnership.clearRuntimeGeneration(
+      manuallyRetiredRuntimeGenerationId,
+    );
+  }
+  for (const modernRuntimeGenerationId of authorizedModernGenerationIds) {
+    store.providerRunOwnership.clearRuntimeGeneration(
+      modernRuntimeGenerationId,
+    );
+  }
   if (priorBootLeasesCleared) {
     store.providerRunOwnership.clearPriorBootSessions(options.systemBootId);
   }
@@ -294,9 +372,38 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     },
   };
   const secureFileAuthorities = new SecureFileAuthorityRegistry(secureFiles);
+  if (!runtimeSafetyLock && manuallyRetiredGenerations.length > 0) {
+    if (process.env.NODE_ENV === "test") {
+      options.testOnlyBeforeLegacyInterruptedRecovery?.();
+    }
+  }
+  if (!runtimeSafetyLock && authorizedModernGenerationIds.size > 0) {
+    if (process.env.NODE_ENV === "test") {
+      options.testOnlyBeforeModernDarwinRecoveryAcknowledged?.();
+    }
+  }
   const recovery = runtimeSafetyLock
     ? { recoveredTurns: [], recoveredAttachmentIds: [] }
     : recoverInterruptedTurns(store);
+  if (!runtimeSafetyLock) {
+    for (const manuallyRetiredRuntimeGenerationId of manuallyRetiredGenerations) {
+      if (!runtimeGenerationLeases.clearUnavailableRuntimeGeneration(
+        manuallyRetiredRuntimeGenerationId,
+      )) {
+        throw new Error("Manual legacy provider ownership could not be retired.");
+      }
+      options.onLegacyRecoveryAuthorityConsumed?.(
+        manuallyRetiredRuntimeGenerationId,
+        options.runtimeGenerationId,
+      );
+    }
+    if (manualModernDarwinRecovery) {
+      options.onModernDarwinRecoveryAuthorityAcknowledged?.(
+        manualModernDarwinRecovery,
+        options.runtimeGenerationId,
+      );
+    }
+  }
   if (!runtimeSafetyLock) await reconcileInterruptedDuoLaunches(store);
   if (options.attachments && recovery.recoveredAttachmentIds.length > 0) {
     void Promise.allSettled(recovery.recoveredAttachmentIds.map(

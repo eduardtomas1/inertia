@@ -18,6 +18,8 @@ import {
   validSystemBootId,
 } from "./runtime-process-protocol.js";
 import {
+  darwinProcessGuardianReady,
+  darwinProcessSessionEmpty,
   readDarwinProcessIdentity,
   type DarwinProcessIdentity,
 } from "./runtime-owned-process-darwin.js";
@@ -25,7 +27,11 @@ import {
   exactProcessGroupAbsent,
   failedClaimProcessCanExecute,
 } from "./runtime-owned-process-posix.js";
-export { readDarwinProcessIdentity } from "./runtime-owned-process-darwin.js";
+export {
+  darwinProcessGuardianReady,
+  darwinProcessSessionEmpty,
+  readDarwinProcessIdentity,
+} from "./runtime-owned-process-darwin.js";
 export type { DarwinProcessIdentity } from "./runtime-owned-process-darwin.js";
 const CLAIM_PREFIX = ".runtime-owned-child-";
 const SESSION_PREFIX = ".runtime-owned-process-session-";
@@ -272,6 +278,7 @@ function parseRecord(bytes: Buffer): RuntimeOwnedProcessRecord | null {
       "pid",
       "platform",
       "processGroupId",
+      "sessionId",
       "startTimeMicroseconds",
       "startTimeSeconds",
     ])
@@ -280,6 +287,8 @@ function parseRecord(bytes: Buffer): RuntimeOwnedProcessRecord | null {
       && validParentPid((identity as Partial<DarwinProcessIdentity>).parentPid)
       && validPid(identity.processGroupId)
       && identity.processGroupId === identity.pid
+      && validPid((identity as Partial<DarwinProcessIdentity>).sessionId)
+      && (identity as Partial<DarwinProcessIdentity>).sessionId === identity.pid
       && validTicks((identity as Partial<DarwinProcessIdentity>).startTimeSeconds)
       && Number.isSafeInteger(
         (identity as Partial<DarwinProcessIdentity>).startTimeMicroseconds,
@@ -359,6 +368,7 @@ function sameProcess(
       && right.platform === "darwin"
       && left.pid === right.pid
       && left.processGroupId === right.processGroupId
+      && left.sessionId === right.sessionId
       && left.startTimeSeconds === right.startTimeSeconds
       && left.startTimeMicroseconds === right.startTimeMicroseconds;
   }
@@ -423,7 +433,7 @@ export class RuntimeOwnedProcessJournal {
   private readonly root: DirectRuntimeJournalRoot;
   readonly platform: NodeJS.Platform;
   private readonly darwinGuardianPath: string | null;
-  private readonly darwinIdentityReader: (
+  private readonly darwinGuardianReadyReader: (
     pid: number,
   ) => DarwinProcessIdentity | null;
 
@@ -433,14 +443,18 @@ export class RuntimeOwnedProcessJournal {
       readonly platform?: NodeJS.Platform;
       readonly darwinGuardianPath?: string;
       readonly readDarwinIdentity?: (pid: number) => DarwinProcessIdentity | null;
+      readonly readDarwinGuardianReady?: (
+        pid: number,
+      ) => DarwinProcessIdentity | null;
     } = {},
   ) {
     this.root = pinDirectRuntimeJournalRoot(dataDirectory);
     this.platform = options.platform ?? process.platform;
     this.darwinGuardianPath = options.darwinGuardianPath ?? null;
-    this.darwinIdentityReader = options.readDarwinIdentity
+    this.darwinGuardianReadyReader = options.readDarwinGuardianReady
+      ?? options.readDarwinIdentity
       ?? ((pid) => this.darwinGuardianPath
-        ? readDarwinProcessIdentity(pid, this.darwinGuardianPath)
+        ? darwinProcessGuardianReady(pid, this.darwinGuardianPath)
         : null);
   }
 
@@ -572,6 +586,7 @@ export class RuntimeOwnedProcessJournal {
     options: {
       readonly spawnedAfterMs?: number;
       readonly spawnedBeforeMs?: number;
+      readonly expectedDarwinIdentity?: DarwinProcessIdentity;
     } = {},
   ): RuntimeOwnedProcessClaim {
     if (!UUID_PATTERN.test(ownershipId)) {
@@ -587,7 +602,7 @@ export class RuntimeOwnedProcessJournal {
       ? readLinuxProcessIdentity(pid)
       : null;
     const darwinIdentity = this.platform === "darwin"
-      ? this.darwinIdentityReader(pid)
+      ? this.darwinGuardianReadyReader(pid)
       : null;
     const spawnedAfterMs = Math.max(
       0,
@@ -610,8 +625,13 @@ export class RuntimeOwnedProcessJournal {
       || pending.runtimeGenerationId !== runtimeGenerationId
       || pending.systemBootId !== systemBootId
       || !identity
+      || (darwinIdentity && options.expectedDarwinIdentity
+        && !sameProcess(options.expectedDarwinIdentity, darwinIdentity))
       || ("parentPid" in identity && identity.parentPid !== expectedParentPid)
       || identity.processGroupId !== (this.platform === "win32" ? null : pid)
+      || (this.platform === "darwin"
+        && "sessionId" in identity
+        && identity.sessionId !== pid)
     ) throw new Error("The spawned process ownership could not be proven.");
     const claim: RuntimeOwnedProcessClaim = {
       version: pending.version,
@@ -757,6 +777,12 @@ interface ActiveRuntimeOwnedProcessRegistry {
   readonly runtimeGenerationId: string;
   readonly systemBootId: string;
   readonly darwinGuardianPath: string | null;
+  readonly readDarwinIdentity: (
+    pid: number,
+  ) => DarwinProcessIdentity | null;
+  readonly readDarwinGuardianReady: (
+    pid: number,
+  ) => DarwinProcessIdentity | null;
   readonly claims: WeakMap<ChildProcess, ActiveRuntimeOwnedProcessClaim>;
   readonly pendingReleaseConfirmations: Set<Promise<boolean>>;
 }
@@ -777,6 +803,12 @@ export function activateRuntimeOwnedProcessRegistry(
   options: {
     readonly platform?: NodeJS.Platform;
     readonly darwinGuardianPath?: string;
+    readonly readDarwinIdentity?: (
+      pid: number,
+    ) => DarwinProcessIdentity | null;
+    readonly readDarwinGuardianReady?: (
+      pid: number,
+    ) => DarwinProcessIdentity | null;
   } = {},
 ): (() => void) | null {
   const platform = options.platform ?? process.platform;
@@ -792,6 +824,12 @@ export function activateRuntimeOwnedProcessRegistry(
   const journal = new RuntimeOwnedProcessJournal(dataDirectory, {
     platform,
     ...(darwinGuardianPath ? { darwinGuardianPath } : {}),
+    ...(options.readDarwinIdentity
+      ? { readDarwinIdentity: options.readDarwinIdentity }
+      : {}),
+    ...(options.readDarwinGuardianReady
+      ? { readDarwinGuardianReady: options.readDarwinGuardianReady }
+      : {}),
   });
   if (!journal.startSession(runtimeGenerationId, systemBootId)) {
     throw new Error("The runtime process ownership session could not be persisted.");
@@ -802,6 +840,14 @@ export function activateRuntimeOwnedProcessRegistry(
     runtimeGenerationId,
     systemBootId,
     darwinGuardianPath,
+    readDarwinIdentity: options.readDarwinIdentity
+      ?? ((pid) => darwinGuardianPath
+        ? readDarwinProcessIdentity(pid, darwinGuardianPath)
+        : null),
+    readDarwinGuardianReady: options.readDarwinGuardianReady
+      ?? ((pid) => darwinGuardianPath
+        ? darwinProcessGuardianReady(pid, darwinGuardianPath)
+        : null),
     claims: new WeakMap(),
     pendingReleaseConfirmations: new Set(),
   };
@@ -817,9 +863,9 @@ export interface RuntimeOwnedProcessInvocation {
 }
 
 /**
- * Places every macOS runtime child behind the native process-group watchdog.
- * The helper execs the requested program without a shell and keeps the exact
- * root alive until its complete group is drained.
+ * Places every macOS runtime child inside the native guardian's private
+ * process session. The helper execs the requested program without a shell;
+ * the guardian stays alive until every process in that session is drained.
  */
 export function runtimeOwnedProcessInvocation(
   command: string,
@@ -852,6 +898,23 @@ function hardStopUnclaimed(
     try { process.kill(-pid, "SIGKILL"); } catch { /* The group may be gone. */ }
   }
   try { child.kill("SIGKILL"); } catch { /* The child may be gone. */ }
+}
+
+function hardStopUnclaimedDarwinGuardian(
+  child: Pick<ChildProcess, "pid" | "kill">,
+  registry: ActiveRuntimeOwnedProcessRegistry,
+  expectedIdentity: DarwinProcessIdentity | null,
+): void {
+  const pid = child.pid;
+  if (!pid || !expectedIdentity || !registry.darwinGuardianPath) return;
+  let current: DarwinProcessIdentity | null = null;
+  try {
+    current = registry.readDarwinIdentity(pid);
+  } catch {
+    return;
+  }
+  if (!current || !sameProcess(expectedIdentity, current)) return;
+  try { child.kill("SIGKILL"); } catch { /* The exact guardian may be gone. */ }
 }
 
 function exactPendingClaim(
@@ -1017,14 +1080,13 @@ function releaseIfGroupExited(
       return;
     }
     try {
-      process.kill(-pid, 0);
-    } catch (error) {
-      if (
-        error
-        && typeof error === "object"
-        && "code" in error
-        && error.code === "ESRCH"
-      ) {
+      const containmentAbsent = registry.platform === "darwin"
+        ? Boolean(
+            registry.darwinGuardianPath
+            && darwinProcessSessionEmpty(pid, registry.darwinGuardianPath),
+          )
+        : exactProcessGroupAbsent(pid) === true;
+      if (containmentAbsent) {
         try {
           if (!releaseActiveClaim(registry, claim)) settleConfirmation(false);
         } catch {
@@ -1033,6 +1095,8 @@ function releaseIfGroupExited(
         }
         return;
       }
+    } catch {
+      // An unreadable containment boundary remains durably owned.
     }
     const remainingMs = Math.trunc(deadlineAt - Date.now());
     if (remainingMs <= 0) {
@@ -1058,6 +1122,24 @@ function releaseActiveClaim(
   claim.released = true;
   claim.settleReleaseConfirmation?.(true);
   return true;
+}
+
+function authorizeDarwinGuardian(
+  registry: ActiveRuntimeOwnedProcessRegistry,
+  durableClaim: RuntimeOwnedProcessClaim,
+): void {
+  if (registry.platform !== "darwin") return;
+  if (
+    !("platform" in durableClaim.process)
+    || durableClaim.process.platform !== "darwin"
+    || !registry.darwinGuardianPath
+  ) throw new Error("The macOS owned process guardian is invalid.");
+  const identity = registry.readDarwinIdentity(durableClaim.process.pid);
+  if (
+    !identity
+    || !RuntimeOwnedProcessJournal.identityMatches(durableClaim, identity)
+  ) throw new Error("The macOS owned process guardian identity changed.");
+  process.kill(identity.pid, "SIGUSR1");
 }
 
 export function spawnRuntimeOwnedProcess<T extends ChildProcess>(
@@ -1087,17 +1169,36 @@ export function spawnRuntimeOwnedProcess<T extends ChildProcess>(
     releaseConfirmation: null,
     settleReleaseConfirmation: null,
   };
+  let darwinGuardianIdentity: DarwinProcessIdentity | null = null;
   try {
-    registry.journal.claim(
+    if (registry.platform === "darwin" && registry.darwinGuardianPath) {
+      darwinGuardianIdentity = registry.readDarwinGuardianReady(child.pid ?? 0);
+      if (!darwinGuardianIdentity) {
+        throw new Error("The macOS owned process guardian is not ready.");
+      }
+    }
+    const durableClaim = registry.journal.claim(
       ownershipId,
       registry.runtimeGenerationId,
       registry.systemBootId,
       child.pid ?? 0,
       process.pid,
-      { spawnedAfterMs, spawnedBeforeMs: Date.now() },
+      {
+        spawnedAfterMs,
+        spawnedBeforeMs: Date.now(),
+        ...(darwinGuardianIdentity
+          ? { expectedDarwinIdentity: darwinGuardianIdentity }
+          : {}),
+      },
     );
+    authorizeDarwinGuardian(registry, durableClaim);
     registry.claims.set(child, claim);
-    child.once("close", () => {
+    child.once("close", (_code, signal) => {
+      // The guardian handles normal stop signals itself and reports payload
+      // signals as numeric exit statuses. A signal on the guardian process is
+      // therefore an unambiguous unproved-containment marker (or an external
+      // hard kill); retain the durable claim for explicit recovery.
+      if (registry.platform === "darwin" && typeof signal === "string") return;
       if (registry.platform === "win32") {
         try { releaseActiveClaim(registry, claim); } catch {
           // The durable claim remains for startup recovery.
@@ -1109,7 +1210,13 @@ export function spawnRuntimeOwnedProcess<T extends ChildProcess>(
   } catch (error) {
     if (child.pid === undefined) registry.journal.release(ownershipId);
     else {
-      hardStopUnclaimed(child, registry.platform);
+      if (registry.platform === "darwin") {
+        hardStopUnclaimedDarwinGuardian(
+          child,
+          registry,
+          darwinGuardianIdentity,
+        );
+      } else hardStopUnclaimed(child, registry.platform);
       const processCanExecute = failedClaimProcessCanExecute(
         registry.platform, registry.darwinGuardianPath, PROCESS_GROUP_EXIT_WAIT_MS,
       );
@@ -1130,7 +1237,7 @@ export function spawnRuntimeOwnedProcess<T extends ChildProcess>(
 export interface RuntimeOwnedPidProcess<T> {
   readonly process: T;
   confirmStopped(): boolean;
-  releaseIfGroupExited(): void;
+  releaseIfGroupExited(exitSignal?: number): void;
 }
 
 export function spawnRuntimeOwnedPidProcess<T extends { readonly pid: number }>(
@@ -1156,6 +1263,7 @@ export function spawnRuntimeOwnedPidProcess<T extends { readonly pid: number }>(
     settleReleaseConfirmation: null,
   };
   let owned: T | null = null;
+  let darwinGuardianIdentity: DarwinProcessIdentity | null = null;
   const spawnedAfterMs = Date.now();
   try {
     owned = spawnProcess();
@@ -1171,25 +1279,45 @@ export function spawnRuntimeOwnedPidProcess<T extends { readonly pid: number }>(
         options,
       );
     } else {
-      registry.journal.claim(
+      if (registry.platform === "darwin" && registry.darwinGuardianPath) {
+        darwinGuardianIdentity = registry.readDarwinGuardianReady(owned.pid);
+        if (!darwinGuardianIdentity) {
+          throw new Error("The macOS owned process guardian is not ready.");
+        }
+      }
+      const durableClaim = registry.journal.claim(
         ownershipId,
         registry.runtimeGenerationId,
         registry.systemBootId,
         owned.pid,
         process.pid,
-        { spawnedAfterMs, spawnedBeforeMs: Date.now() },
+        {
+          spawnedAfterMs,
+          spawnedBeforeMs: Date.now(),
+          ...(darwinGuardianIdentity
+            ? { expectedDarwinIdentity: darwinGuardianIdentity }
+            : {}),
+        },
       );
+      authorizeDarwinGuardian(registry, durableClaim);
     }
   } catch (error) {
     if (owned) {
       const failedOwned = owned;
-      hardStopUnclaimed({
+      const unclaimed = {
         pid: failedOwned.pid,
         kill: () => {
           try { process.kill(failedOwned.pid, "SIGKILL"); } catch { /* Gone. */ }
           return true;
         },
-      }, registry.platform);
+      };
+      if (registry.platform === "darwin") {
+        hardStopUnclaimedDarwinGuardian(
+          unclaimed,
+          registry,
+          darwinGuardianIdentity,
+        );
+      } else hardStopUnclaimed(unclaimed, registry.platform);
       const processCanExecute = failedClaimProcessCanExecute(
         registry.platform, registry.darwinGuardianPath, PROCESS_GROUP_EXIT_WAIT_MS,
       );
@@ -1208,11 +1336,19 @@ export function spawnRuntimeOwnedPidProcess<T extends { readonly pid: number }>(
   return {
     process: confirmedOwned,
     confirmStopped: () => releaseActiveClaim(registry, claim),
-    releaseIfGroupExited: () => {
+    releaseIfGroupExited: (exitSignal) => {
       if (registry.platform === "win32") {
         try { releaseActiveClaim(registry, claim); } catch {
           // The durable claim remains for startup recovery.
         }
+      } else if (
+        registry.platform === "darwin"
+        && typeof exitSignal === "number"
+        && exitSignal > 0
+      ) {
+        // A guardian-level signal is the unproved-containment marker. Do not
+        // let a now-empty private session erase evidence of a detached child.
+        return;
       } else {
         void releaseIfGroupExited(registry, claim, confirmedOwned.pid);
       }

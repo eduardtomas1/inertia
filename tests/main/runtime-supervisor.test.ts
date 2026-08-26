@@ -13,6 +13,12 @@ import {
   type RuntimeSecureFileBroker,
 } from "../../src/main/runtime-supervisor";
 import { RuntimeCleanupReceiptJournal } from "../../src/main/runtime-cleanup-receipts";
+import { LegacyRuntimeRecoveryAuthorityJournal } from "../../src/main/runtime-legacy-recovery-authorities";
+import {
+  captureModernDarwinRecoverySnapshot,
+  ModernDarwinRecoveryAuthorityJournal,
+  type ModernDarwinRecoveryAuthorityDescriptor,
+} from "../../src/node/runtime-modern-recovery-authorities";
 import {
   encodeConversationAttachmentStoreOperation,
   type ConversationAttachmentStoreAnyOperationRunner,
@@ -92,6 +98,25 @@ class FakeUtilityProcess extends EventEmitter {
             currentRuntimeGenerationId: start.options.runtimeGenerationId,
           });
         }
+        for (const retiredRuntimeGenerationId of
+          start.options.manuallyRetiredRuntimeGenerationIds ?? []) {
+          this.emit("message", {
+            type: "runtime.legacy-recovery-authority-consumed",
+            retiredRuntimeGenerationId,
+            currentRuntimeGenerationId: start.options.runtimeGenerationId,
+          });
+        }
+        if (start.options.manualModernDarwinRecovery) {
+          this.emit("message", {
+            type: "runtime.modern-darwin-recovery-authority-acknowledged",
+            operationId:
+              start.options.manualModernDarwinRecovery.operationId,
+            snapshotDigest:
+              start.options.manualModernDarwinRecovery.snapshotDigest,
+            currentRuntimeGenerationId:
+              start.options.runtimeGenerationId,
+          });
+        }
       }
     }
     this.emit("message", value);
@@ -104,6 +129,7 @@ class FakeUtilityProcess extends EventEmitter {
 }
 
 function createHarness(options: {
+  systemBootId?: string;
   stableUptimeMs?: number;
   shutdownGraceMs?: number;
   forceKillWaitMs?: number;
@@ -121,6 +147,9 @@ function createHarness(options: {
   attachmentRequestTimeoutMs?: number;
   databaseRecoveryRequestTimeoutMs?: number;
   databaseRecoveryCancelTimeoutMs?: number;
+  manualModernDarwinRecovery?: ModernDarwinRecoveryAuthorityDescriptor;
+  runtimeProcessGuardianPath?: string;
+  runtimeRecoveryBlocked?: boolean;
 } = {}) {
   const children: FakeUtilityProcess[] = [];
   const forceKill = vi.fn((
@@ -128,11 +157,21 @@ function createHarness(options: {
     _deadlineAt: number,
   ): boolean | Promise<boolean> => true);
   const supervisor = new RuntimeSupervisor({
-    systemBootId: "test:00000000-0000-4000-8000-000000000001",
+    systemBootId: options.systemBootId
+      ?? "test:00000000-0000-4000-8000-000000000001",
+    ...(options.runtimeRecoveryBlocked
+      ? { runtimeRecoveryBlocked: true }
+      : {}),
     workerOptions: {
       dataDirectory,
       defaultWorkspacePath: workspaceDirectory,
       enableProviders: false,
+      ...(options.manualModernDarwinRecovery
+        ? { manualModernDarwinRecovery: options.manualModernDarwinRecovery }
+        : {}),
+      ...(options.runtimeProcessGuardianPath
+        ? { runtimeProcessGuardianPath: options.runtimeProcessGuardianPath }
+        : {}),
     },
     spawn: () => {
       const child = new FakeUtilityProcess(10_000 + children.length);
@@ -174,6 +213,30 @@ afterEach(() => {
 });
 
 describe("RuntimeSupervisor", () => {
+  const currentAuthorityPlatform = (): "darwin" | "linux" | "win32" => {
+    if (process.platform === "darwin" || process.platform === "win32") {
+      return process.platform;
+    }
+    return "linux";
+  };
+  it("does not recover or spawn after manual runtime recovery is declined", async () => {
+    const recoverOwnedProcesses = vi.fn(() => true);
+    const { children, supervisor } = createHarness({
+      runtimeRecoveryBlocked: true,
+      recoverOwnedProcesses,
+    });
+
+    supervisor.start();
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(children).toEqual([]);
+    expect(recoverOwnedProcesses).not.toHaveBeenCalled();
+    expect(supervisor.snapshot()).toMatchObject({
+      phase: "stopped",
+      lastError: expect.stringMatching(/explicit confirmation/u),
+    });
+  });
+
   it("retires a recoverable prior app generation before spawning", async () => {
     const priorGeneration = "30000000-0000-4000-8000-000000000003:7";
     const bootId = "test:00000000-0000-4000-8000-000000000001";
@@ -195,6 +258,275 @@ describe("RuntimeSupervisor", () => {
         confirmedTerminatedRuntimeGenerationIds: [priorGeneration],
       },
     });
+  });
+
+  it("passes and consumes only a current-boot manual legacy authority", () => {
+    const legacyGenerationId =
+      "30000000-0000-4000-8000-000000000003:70";
+    const bootId = "test:00000000-0000-4000-8000-000000000001";
+    const platform = currentAuthorityPlatform();
+    expect(new RuntimeGenerationLeaseJournal(dataDirectory).publish(
+      legacyGenerationId,
+      "unavailable",
+    )).toBe(true);
+    expect(new LegacyRuntimeRecoveryAuthorityJournal(dataDirectory).publish(
+      legacyGenerationId,
+      platform,
+      bootId,
+    )).toBe(true);
+    const { children, supervisor } = createHarness();
+
+    supervisor.start();
+    children[0].spawn();
+    expect(children[0].messages.at(-1)).toMatchObject({
+      type: "runtime.start",
+      options: {
+        manuallyRetiredRuntimeGenerationIds: [legacyGenerationId],
+      },
+    });
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+
+    expect(supervisor.snapshot()).toMatchObject({ phase: "ready" });
+    expect(new LegacyRuntimeRecoveryAuthorityJournal(dataDirectory)
+      .pending(platform, bootId)).toEqual([]);
+  });
+
+  it("retires exact modern Darwin state only after the runtime DB acknowledgement", () => {
+    const oldGenerationId =
+      "30000000-0000-4000-8000-000000000003:75";
+    const bootId = "test:00000000-0000-4000-8000-000000000001";
+    const leases = new RuntimeGenerationLeaseJournal(dataDirectory);
+    expect(leases.publish(oldGenerationId, bootId)).toBe(true);
+    expect(new RuntimeOwnedProcessJournal(dataDirectory, {
+      platform: "darwin",
+    }).startSession(oldGenerationId, bootId)).toBe(true);
+    const snapshot = captureModernDarwinRecoverySnapshot(
+      dataDirectory,
+      bootId,
+    );
+    expect(snapshot).not.toBeNull();
+    const descriptor = snapshot
+      ? new ModernDarwinRecoveryAuthorityJournal(dataDirectory)
+        .publish(snapshot)
+      : null;
+    expect(descriptor).not.toBeNull();
+    const { children, supervisor } = createHarness({
+      systemBootId: bootId,
+      manualModernDarwinRecovery: descriptor!,
+      runtimeProcessGuardianPath: "/private/tmp/inertia-test-guardian",
+    });
+
+    supervisor.start();
+    expect(children).toHaveLength(1);
+    children[0].spawn();
+    expect(children[0].messages.at(-1)).toMatchObject({
+      type: "runtime.start",
+      options: {
+        manualModernDarwinRecovery: descriptor,
+      },
+    });
+    expect(new RuntimeGenerationLeaseJournal(dataDirectory).all()).toHaveLength(2);
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+
+    expect(supervisor.snapshot()).toMatchObject({ phase: "ready" });
+    expect(new ModernDarwinRecoveryAuthorityJournal(dataDirectory).pending())
+      .toBeNull();
+    expect(new RuntimeGenerationLeaseJournal(dataDirectory).all()).toEqual([
+      expect.objectContaining({
+        runtimeGenerationId: expect.not.stringMatching(oldGenerationId),
+      }),
+    ]);
+    expect(new RuntimeOwnedProcessJournal(dataDirectory, {
+      platform: "darwin",
+    }).records(oldGenerationId)).toBeNull();
+  });
+
+  it("consumes a mixed legacy and modern recovery batch before readiness", () => {
+    const modernGenerationId =
+      "30000000-0000-4000-8000-000000000003:78";
+    const legacyGenerationId =
+      "30000000-0000-4000-8000-000000000003:79";
+    const bootId = "test:00000000-0000-4000-8000-000000000001";
+    const platform = currentAuthorityPlatform();
+    const leases = new RuntimeGenerationLeaseJournal(dataDirectory);
+    expect(leases.publish(modernGenerationId, bootId)).toBe(true);
+    expect(leases.publish(legacyGenerationId, "unavailable")).toBe(true);
+    expect(new RuntimeOwnedProcessJournal(dataDirectory, {
+      platform: "darwin",
+    }).startSession(modernGenerationId, bootId)).toBe(true);
+    const snapshot = captureModernDarwinRecoverySnapshot(
+      dataDirectory,
+      bootId,
+    );
+    expect(snapshot).not.toBeNull();
+    const modernDescriptor = snapshot
+      ? new ModernDarwinRecoveryAuthorityJournal(dataDirectory)
+        .publish(snapshot)
+      : null;
+    expect(modernDescriptor).not.toBeNull();
+    expect(new LegacyRuntimeRecoveryAuthorityJournal(dataDirectory)
+      .publishBatch([legacyGenerationId], platform, bootId)).toBe(true);
+    const { children, supervisor } = createHarness({
+      systemBootId: bootId,
+      manualModernDarwinRecovery: modernDescriptor!,
+      runtimeProcessGuardianPath: "/private/tmp/inertia-test-guardian",
+    });
+
+    supervisor.start();
+    expect(children).toHaveLength(1);
+    children[0].spawn();
+    const start = children[0].messages.at(-1);
+    expect(start).toMatchObject({
+      type: "runtime.start",
+      options: {
+        manuallyRetiredRuntimeGenerationIds: [legacyGenerationId],
+        manualModernDarwinRecovery: modernDescriptor,
+      },
+    });
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+
+    expect(supervisor.snapshot()).toMatchObject({ phase: "ready" });
+    expect(new LegacyRuntimeRecoveryAuthorityJournal(dataDirectory)
+      .pending(platform, bootId)).toEqual([]);
+    expect(new ModernDarwinRecoveryAuthorityJournal(dataDirectory).pending())
+      .toBeNull();
+    expect(new RuntimeGenerationLeaseJournal(dataDirectory).all())
+      .not.toContainEqual(expect.objectContaining({
+        runtimeGenerationId: modernGenerationId,
+      }));
+    expect(new RuntimeOwnedProcessJournal(dataDirectory, {
+      platform: "darwin",
+    }).records(modernGenerationId)).toBeNull();
+  });
+
+  it("reserves one current lease slot for the maximum legacy recovery batch", () => {
+    const bootId = "test:00000000-0000-4000-8000-000000000001";
+    const platform = currentAuthorityPlatform();
+    const legacyGenerationIds = Array.from({ length: 32 }, (_, index) => (
+      `30000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}:1`
+    ));
+    const leases = new RuntimeGenerationLeaseJournal(dataDirectory);
+    for (const generationId of legacyGenerationIds) {
+      expect(leases.publish(generationId, "unavailable")).toBe(true);
+    }
+    expect(new LegacyRuntimeRecoveryAuthorityJournal(dataDirectory)
+      .publishBatch(legacyGenerationIds, platform, bootId)).toBe(true);
+    const { children, supervisor } = createHarness();
+
+    supervisor.start();
+    expect(children).toHaveLength(1);
+    children[0].spawn();
+    expect(children[0].messages.at(-1)).toMatchObject({
+      type: "runtime.start",
+      options: {
+        manuallyRetiredRuntimeGenerationIds: legacyGenerationIds,
+      },
+    });
+    expect(new RuntimeGenerationLeaseJournal(dataDirectory).all())
+      .toHaveLength(33);
+  });
+
+  it("withholds a partial legacy authority batch until every lease is authorized", () => {
+    const bootId = "test:00000000-0000-4000-8000-000000000001";
+    const platform = currentAuthorityPlatform();
+    const legacyGenerationIds = [
+      "30000000-0000-4000-8000-000000000003:73",
+      "30000000-0000-4000-8000-000000000003:74",
+    ];
+    const leases = new RuntimeGenerationLeaseJournal(dataDirectory);
+    for (const generationId of legacyGenerationIds) {
+      expect(leases.publish(generationId, "unavailable")).toBe(true);
+    }
+    expect(new LegacyRuntimeRecoveryAuthorityJournal(dataDirectory).publish(
+      legacyGenerationIds[0]!,
+      platform,
+      bootId,
+    )).toBe(true);
+    const { children, supervisor } = createHarness();
+
+    supervisor.start();
+    expect(children).toHaveLength(0);
+    expect(supervisor.snapshot()).toMatchObject({
+      phase: "stopped",
+      lastError:
+        "The manual legacy runtime recovery authority changed before startup.",
+    });
+    expect(new LegacyRuntimeRecoveryAuthorityJournal(dataDirectory)
+      .pending(platform, bootId)).toEqual([legacyGenerationIds[0]]);
+  });
+
+  it("rejects a legacy batch when an exact lease disappears after confirmation", () => {
+    const bootId = "test:00000000-0000-4000-8000-000000000001";
+    const platform = currentAuthorityPlatform();
+    const legacyGenerationIds = [
+      "30000000-0000-4000-8000-000000000003:76",
+      "30000000-0000-4000-8000-000000000003:77",
+    ];
+    const leases = new RuntimeGenerationLeaseJournal(dataDirectory);
+    for (const generationId of legacyGenerationIds) {
+      expect(leases.publish(generationId, "unavailable")).toBe(true);
+    }
+    expect(new LegacyRuntimeRecoveryAuthorityJournal(dataDirectory)
+      .publishBatch(legacyGenerationIds, platform, bootId)).toBe(true);
+    expect(leases.clearRuntimeGeneration(legacyGenerationIds[1]!)).toBe(true);
+    const { children, supervisor } = createHarness();
+
+    supervisor.start();
+    expect(children).toHaveLength(0);
+    expect(supervisor.snapshot()).toMatchObject({
+      phase: "stopped",
+      lastError:
+        "The manual legacy runtime recovery authority changed before startup.",
+    });
+    expect(new LegacyRuntimeRecoveryAuthorityJournal(dataDirectory)
+      .pending(platform, bootId)).toEqual(legacyGenerationIds);
+  });
+
+  it("never admits a manual legacy authority from another boot", () => {
+    const legacyGenerationId =
+      "30000000-0000-4000-8000-000000000003:71";
+    const platform = currentAuthorityPlatform();
+    expect(new LegacyRuntimeRecoveryAuthorityJournal(dataDirectory).publish(
+      legacyGenerationId,
+      platform,
+      "test:10000000-0000-4000-8000-000000000001",
+    )).toBe(true);
+    const { children, supervisor } = createHarness();
+
+    supervisor.start();
+    children[0].spawn();
+    expect(children[0].messages.at(-1)).not.toMatchObject({
+      options: {
+        manuallyRetiredRuntimeGenerationIds: expect.anything(),
+      },
+    });
+  });
+
+  it("admits exact manual legacy recovery when the boot probe is unavailable", () => {
+    const legacyGenerationId =
+      "30000000-0000-4000-8000-000000000003:72";
+    const platform = currentAuthorityPlatform();
+    expect(new RuntimeGenerationLeaseJournal(dataDirectory).publish(
+      legacyGenerationId,
+      "unavailable",
+    )).toBe(true);
+    expect(new LegacyRuntimeRecoveryAuthorityJournal(dataDirectory)
+      .publishBatch([legacyGenerationId], platform, "unavailable")).toBe(true);
+    const { children, supervisor } = createHarness({
+      systemBootId: "unavailable",
+    });
+
+    supervisor.start();
+    children[0].spawn();
+    expect(children[0].messages.at(-1)).toMatchObject({
+      options: {
+        manuallyRetiredRuntimeGenerationIds: [legacyGenerationId],
+      },
+    });
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+    expect(supervisor.snapshot()).toMatchObject({ phase: "ready" });
+    expect(new LegacyRuntimeRecoveryAuthorityJournal(dataDirectory)
+      .pending(platform, "unavailable")).toEqual([]);
   });
 
   it("prepares and releases only the current runtime generation for an update", async () => {

@@ -1,4 +1,5 @@
 import {
+  darwinProcessSessionEmpty,
   type ObservedRuntimeOwnedProcessIdentity,
   readDarwinProcessIdentity,
   readLinuxProcessIdentity,
@@ -15,7 +16,6 @@ import { recoverWindowsRuntimeJob } from "./windows-runtime-job.js";
 export { readDarwinProcessIdentity } from "../node/runtime-owned-processes.js";
 
 type Kill = (pid: number, signal?: NodeJS.Signals | number) => true;
-const DARWIN_PENDING_WATCHDOG_DRAIN_MS = 200;
 const PROCESS_GROUP_DRAIN_POLL_MS = 20;
 const PROCESS_GROUP_DRAIN_POLLS = 50;
 
@@ -27,6 +27,7 @@ export interface RuntimeOwnedProcessRecoveryOptions {
   readonly readIdentity?: (
     pid: number,
   ) => ObservedRuntimeOwnedProcessIdentity | null;
+  readonly readDarwinSessionEmpty?: (sessionId: number) => boolean;
   readonly recoverWindowsJob?: typeof recoverWindowsRuntimeJob;
   readonly darwinGuardianPath?: string;
   readonly waitForProcessGroupDrain?: (durationMs: number) => Promise<void>;
@@ -130,9 +131,9 @@ async function waitForMissingRootCleanup(
   wait: (durationMs: number) => Promise<void>,
 ): Promise<boolean> {
   // Windows recovery never reaches this identity path: the named Job Object
-  // is the sole authority. A missing POSIX root is never signalled; its claim
-  // can be retired only after the already-claimed process group is absent.
-  if (platform !== "darwin" && platform !== "linux") return false;
+  // is the sole authority. Linux missing roots can be retired only after the
+  // already-claimed process group is absent. macOS uses its private session.
+  if (platform !== "linux") return false;
   if (missingRootProcessGroupAbsent(claim, kill)) return true;
   for (let poll = 0; poll < PROCESS_GROUP_DRAIN_POLLS; poll += 1) {
     if (Date.now() + PROCESS_GROUP_DRAIN_POLL_MS >= deadlineAt) return false;
@@ -142,16 +143,55 @@ async function waitForMissingRootCleanup(
   return false;
 }
 
+async function waitForDarwinSessionDrain(
+  claim: RuntimeOwnedProcessClaim,
+  readIdentity: (
+    pid: number,
+  ) => ObservedRuntimeOwnedProcessIdentity | null,
+  readSessionEmpty: (sessionId: number) => boolean,
+  deadlineAt: number,
+  wait: (durationMs: number) => Promise<void>,
+): Promise<boolean> {
+  if (!("sessionId" in claim.process)) return false;
+  const { pid, sessionId } = claim.process;
+  for (let poll = 0; poll <= PROCESS_GROUP_DRAIN_POLLS; poll += 1) {
+    let identity: ObservedRuntimeOwnedProcessIdentity | null | undefined;
+    let sessionEmpty: boolean | undefined;
+    try {
+      identity = readIdentity(pid);
+    } catch {
+      // A terminating Darwin process can briefly be present while libproc no
+      // longer exposes its birth identity. Session emptiness remains the exact
+      // containment proof; transiently unreadable state is retried to deadline.
+    }
+    try {
+      sessionEmpty = readSessionEmpty(sessionId);
+    } catch {
+      // An unreadable session is not empty and cannot authorize retirement.
+    }
+    if (
+      identity
+      && !RuntimeOwnedProcessJournal.identityMatches(claim, identity)
+    ) return false;
+    if (!identity && sessionEmpty) return true;
+    if (Date.now() + PROCESS_GROUP_DRAIN_POLL_MS >= deadlineAt) {
+      return false;
+    }
+    await wait(PROCESS_GROUP_DRAIN_POLL_MS);
+  }
+  return false;
+}
+
 /**
  * Recovers one durable generation without guessing process ownership.
  *
- * A legacy pending claim stays fail-closed. A macOS intent admitted behind the
- * native parent watchdog can be retired only after the exact runtime parent is
- * absent across the watchdog's bounded drain. Owned claims are killed only
- * while their platform-specific birth identity still matches. Reused roots
- * stay fail-closed and are never signalled. Windows uses its named Job Object;
- * a missing Linux or macOS root is retired only after the exact claimed group
- * is proven absent, and an extant group remains fail-closed.
+ * Legacy pending claims stay fail-closed. A guarded macOS pending intent can
+ * be retired after its runtime parent is absent because the guardian cannot
+ * fork its command until the exact owned claim is durably published. Owned
+ * claims are killed only while their platform-specific birth identity still
+ * matches. Reused roots stay fail-closed and are never signalled. Windows uses
+ * its named Job Object. Linux uses the exact claimed process group. macOS asks
+ * the exact guardian to drain its private process session, including PTY groups.
  */
 export function recoverRuntimeOwnedProcesses(
   dataDirectory: string,
@@ -191,21 +231,17 @@ export function recoverRuntimeOwnedProcesses(
         setTimeout(resolve, durationMs);
       }));
     const pending = records.filter((record) => record.state === "pending");
-    if (pending.length > 0) {
-      const guardedPending = pending.filter(guardedDarwinPending);
+    for (const record of pending) {
+      if (record.systemBootId !== systemBootId) {
+        if (!journal.release(record.ownershipId)) return false;
+        continue;
+      }
       if (
         platform !== "darwin"
-        || guardedPending.length !== pending.length
-        || guardedPending.some((record) =>
-          !exactPidAbsent(record.runtimeParentPid, kill))
-        || Date.now() + DARWIN_PENDING_WATCHDOG_DRAIN_MS >= options.deadlineAt
+        || !guardedDarwinPending(record)
+        || !exactPidAbsent(record.runtimeParentPid, kill)
+        || !journal.release(record.ownershipId)
       ) return false;
-      await waitForProcessGroupDrain(DARWIN_PENDING_WATCHDOG_DRAIN_MS);
-      if (guardedPending.some((record) =>
-        !exactPidAbsent(record.runtimeParentPid, kill))) return false;
-      for (const record of guardedPending) {
-        if (!journal.release(record.ownershipId)) return false;
-      }
     }
     const forceKill = options.forceKill ?? forceKillRuntimeProcessTree;
     const readIdentity = options.readIdentity
@@ -215,6 +251,17 @@ export function recoverRuntimeOwnedProcesses(
         options.deadlineAt,
         options.darwinGuardianPath,
       ));
+    const readDarwinSessionEmpty = options.readDarwinSessionEmpty
+      ?? ((sessionId: number) => {
+        if (!options.darwinGuardianPath) {
+          throw new Error("The macOS runtime process guardian is unavailable.");
+        }
+        return darwinProcessSessionEmpty(
+          sessionId,
+          options.darwinGuardianPath,
+          { deadlineAt: options.deadlineAt },
+        );
+      });
     for (const record of records) {
       if (record.state !== "owned") continue;
       if (!claimMatchesPlatform(record, platform)) return false;
@@ -229,6 +276,19 @@ export function recoverRuntimeOwnedProcesses(
         return false;
       }
       if (!identity) {
+        if (platform === "darwin") {
+          if (
+            !await waitForDarwinSessionDrain(
+              record,
+              readIdentity,
+              readDarwinSessionEmpty,
+              options.deadlineAt,
+              waitForProcessGroupDrain,
+            )
+            || !journal.release(record.ownershipId)
+          ) return false;
+          continue;
+        }
         if (
           !await waitForMissingRootCleanup(
             record,
@@ -242,6 +302,35 @@ export function recoverRuntimeOwnedProcesses(
         continue;
       }
       if (!RuntimeOwnedProcessJournal.identityMatches(record, identity)) return false;
+      if (platform === "darwin") {
+        if (
+          !("sessionId" in identity)
+          || identity.sessionId !== identity.pid
+          || identity.processGroupId !== identity.pid
+          || Date.now() >= options.deadlineAt
+        ) return false;
+        try {
+          verifiedKill(record, kill, readIdentity)(identity.pid, "SIGTERM");
+        } catch (error) {
+          if (!(
+            error
+            && typeof error === "object"
+            && "code" in error
+            && error.code === "ESRCH"
+          )) return false;
+        }
+        if (
+          !await waitForDarwinSessionDrain(
+            record,
+            readIdentity,
+            readDarwinSessionEmpty,
+            options.deadlineAt,
+            waitForProcessGroupDrain,
+          )
+          || !journal.release(record.ownershipId)
+        ) return false;
+        continue;
+      }
       if (
         identity.processGroupId !== identity.pid
         || Date.now() >= options.deadlineAt

@@ -608,6 +608,23 @@ parentPort.on("message", (messageEvent) => {
       receiptRuntimeGenerationId,
       currentRuntimeGenerationId,
     }),
+    onLegacyRecoveryAuthorityConsumed: (
+      retiredRuntimeGenerationId,
+      currentRuntimeGenerationId,
+    ) => post({
+      type: "runtime.legacy-recovery-authority-consumed",
+      retiredRuntimeGenerationId,
+      currentRuntimeGenerationId,
+    }),
+    onModernDarwinRecoveryAuthorityAcknowledged: (
+      authority,
+      currentRuntimeGenerationId,
+    ) => post({
+      type: "runtime.modern-darwin-recovery-authority-acknowledged",
+      operationId: authority.operationId,
+      snapshotDigest: authority.snapshotDigest,
+      currentRuntimeGenerationId,
+    }),
     backendCredentials: credentials,
     attachments,
     conversationAttachmentStoreOperations: conversationAttachmentStore.runner,

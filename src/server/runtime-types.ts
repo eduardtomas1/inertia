@@ -14,6 +14,9 @@ import type {
   RuntimeUpdatePreparationResult,
 } from "../node/runtime-process-protocol.js";
 import type {
+  ModernDarwinRecoveryAuthorityDescriptor,
+} from "../node/runtime-modern-recovery-authorities.js";
+import type {
   ConversationAttachmentStoreAnyOperationRunner,
 } from "../node/conversation-attachment-store-child.js";
 import type { RuntimeStore } from "./database.js";
@@ -48,12 +51,24 @@ export interface RuntimeOptions {
   systemBootId: string;
   runtimeProcessGuardianPath?: string;
   confirmedTerminatedRuntimeGenerationIds?: readonly string[];
+  manuallyRetiredRuntimeGenerationIds?: readonly string[];
+  manualModernDarwinRecovery?: ModernDarwinRecoveryAuthorityDescriptor;
   priorRuntimeCleanupUnconfirmed?: boolean;
   onCleanupReceiptConsumed?: (
     receiptRuntimeGenerationId: string,
     currentRuntimeGenerationId: string,
   ) => void;
+  onLegacyRecoveryAuthorityConsumed?: (
+    retiredRuntimeGenerationId: string,
+    currentRuntimeGenerationId: string,
+  ) => void;
+  onModernDarwinRecoveryAuthorityAcknowledged?: (
+    authority: ModernDarwinRecoveryAuthorityDescriptor,
+    currentRuntimeGenerationId: string,
+  ) => void;
   testOnlyOnTurnSettled?: (turn: AgentTurn) => void | Promise<void>;
+  testOnlyBeforeLegacyInterruptedRecovery?: () => void;
+  testOnlyBeforeModernDarwinRecoveryAcknowledged?: () => void;
   testOnlyProjectIdentityRefresh?: Promise<void>;
   testOnlyBeforeRuntimeCommand?: () => Promise<void>;
   testOnlyProviderRefresh?: () => Promise<void>;

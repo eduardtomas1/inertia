@@ -1,6 +1,6 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { expect, test } from "vitest";
@@ -16,12 +16,28 @@ const boundedRunnerUrl = pathToFileURL(
 async function installerSmokeModule() {
   return await import(moduleUrl) as {
     applicationArchiveMethod: (listing: string) => string;
+    installedWindowsNativeBinaryPaths: (
+      installDirectory: string,
+      applicationName: string,
+      architecture: "arm64" | "x64",
+    ) => string[];
     nsisApplicationArchiveName: (
       sanitizedName: string,
       version: string,
       architecture: "arm64" | "x64",
     ) => string;
     requireInstallTimeDecodableMethod: (method: string) => void;
+    requireExactNodePtyNativeInventory: (
+      packageDirectory: string,
+      architecture: "arm64" | "x64",
+    ) => Promise<void>;
+    requireInstalledFiles: (
+      installDirectory: string,
+      unpackedDirectory: string,
+      applicationName: string,
+      uninstallerName: string,
+      architecture: "arm64" | "x64",
+    ) => Promise<void>;
     runBounded: (
       command: string,
       args: string[],
@@ -57,6 +73,23 @@ function processExists(pid: number) {
   }
 }
 
+function peBinary(architecture: "arm64" | "x64", salt = 0) {
+  const header = Buffer.alloc(512);
+  header[0] = 0x4d;
+  header[1] = 0x5a;
+  const peOffset = 0x80;
+  header.writeUInt32LE(peOffset, 0x3c);
+  header.write("PE\0\0", peOffset, "binary");
+  header.writeUInt16LE(architecture === "arm64" ? 0xaa64 : 0x8664, peOffset + 4);
+  header[header.length - 1] = salt;
+  return header;
+}
+
+async function writeFixture(path: string, contents: string | Buffer) {
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, contents);
+}
+
 test("selects the exact stable and Canary Windows installer identities", async () => {
   const { windowsInstallerAssetName } = await installerSmokeModule();
 
@@ -81,6 +114,213 @@ test("selects the exact generated NSIS application archive", async () => {
     .toBe("inertia-canary-0.0.44-arm64.nsis.7z");
   expect(() => nsisApplicationArchiveName("../inertia", "0.0.44", "x64"))
     .toThrow("name is invalid");
+});
+
+test("gates the exact runtime-selected and fallback node-pty binaries per Windows architecture", async () => {
+  const { installedWindowsNativeBinaryPaths } = await installerSmokeModule();
+
+  for (const architecture of ["x64", "arm64"] as const) {
+    const paths = installedWindowsNativeBinaryPaths(
+      join("installed", architecture),
+      "Inertia.exe",
+      architecture,
+    );
+    const nodePtyRoot = join("node-pty");
+    const releaseRoot = join(nodePtyRoot, "build", "Release");
+    const prebuildRoot = join(nodePtyRoot, "prebuilds", `win32-${architecture}`);
+
+    expect(paths).toHaveLength(26);
+    expect(new Set(paths).size).toBe(26);
+    expect(paths.filter((path) => path.includes(releaseRoot))).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining(join(releaseRoot, "pty.node")),
+        expect.stringContaining(join(releaseRoot, "conpty.node")),
+        expect.stringContaining(join(releaseRoot, "winpty-agent.exe")),
+      ]),
+    );
+    expect(paths.filter((path) => path.includes(prebuildRoot))).toHaveLength(7);
+    expect(paths).toEqual(expect.arrayContaining([
+      expect.stringContaining(join(prebuildRoot, "conpty", "conpty.dll")),
+      expect.stringContaining(join(prebuildRoot, "conpty", "OpenConsole.exe")),
+      expect.stringContaining(join(
+        nodePtyRoot,
+        "third_party",
+        "conpty",
+        "1.23.251008001",
+        `win10-${architecture}`,
+        "conpty.dll",
+      )),
+    ]));
+    expect(paths.some((path) => path.includes(join(releaseRoot, "conpty", "conpty.dll"))))
+      .toBe(false);
+    expect(paths.every((path) => !path.includes(`win32-${architecture === "x64" ? "arm64" : "x64"}`)))
+      .toBe(true);
+  }
+});
+
+test("rejects missing and extra installed node-pty native payloads", async () => {
+  const {
+    installedWindowsNativeBinaryPaths,
+    requireExactNodePtyNativeInventory,
+  } = await installerSmokeModule();
+  const temporaryRoot = await mkdtemp(join(tmpdir(), "inertia-node-pty-inventory-"));
+  try {
+    for (const architecture of ["x64", "arm64"] as const) {
+      const packageRoot = join(temporaryRoot, architecture);
+      const nodePtyNeedle = join("node_modules", "node-pty");
+      const nodePtyPaths = installedWindowsNativeBinaryPaths(
+        packageRoot,
+        "Inertia.exe",
+        architecture,
+      ).filter((path) => path.includes(nodePtyNeedle));
+      for (const path of nodePtyPaths) {
+        await writeFixture(path, architecture);
+      }
+
+      const otherArchitecture = architecture === "x64" ? "arm64" : "x64";
+      await writeFixture(join(
+        packageRoot,
+        "resources",
+        "app.asar.unpacked",
+        "node_modules",
+        "node-pty",
+        "prebuilds",
+        `win32-${otherArchitecture}`,
+        "decoy.dll",
+      ), "cross-architecture decoy");
+      await writeFixture(join(
+        packageRoot,
+        "resources",
+        "app.asar.unpacked",
+        "node_modules",
+        "node-pty",
+        "third_party",
+        "conpty",
+        "1.23.251008001",
+        `win10-${otherArchitecture}`,
+        "decoy.dll",
+      ), "cross-architecture decoy");
+
+      await expect(requireExactNodePtyNativeInventory(packageRoot, architecture))
+        .resolves.toBeUndefined();
+
+      const extraPath = join(
+        packageRoot,
+        "resources",
+        "app.asar.unpacked",
+        "node_modules",
+        "node-pty",
+        "build",
+        "Release",
+        "unexpected.dll",
+      );
+      await writeFile(extraPath, "unexpected");
+      await expect(requireExactNodePtyNativeInventory(packageRoot, architecture))
+        .rejects.toThrow("native inventory is not exact");
+      await unlink(extraPath);
+
+      if (process.platform !== "win32") {
+        const symlinkPath = join(dirname(extraPath), "unexpected-link.dll");
+        await symlink(nodePtyPaths[0], symlinkPath);
+        await expect(requireExactNodePtyNativeInventory(packageRoot, architecture))
+          .rejects.toThrow("contains symbolic link");
+        await unlink(symlinkPath);
+      }
+
+      await unlink(nodePtyPaths.at(-1)!);
+      await expect(requireExactNodePtyNativeInventory(packageRoot, architecture))
+        .rejects.toThrow("native inventory is not exact");
+    }
+  } finally {
+    await rm(temporaryRoot, { force: true, recursive: true });
+  }
+});
+
+test("compares the installed Windows runtime byte-for-byte and rejects wrong PE architecture", async () => {
+  const {
+    installedWindowsNativeBinaryPaths,
+    requireInstalledFiles,
+  } = await installerSmokeModule();
+  const temporaryRoot = await mkdtemp(join(tmpdir(), "inertia-installed-inventory-"));
+  try {
+    for (const architecture of ["x64", "arm64"] as const) {
+      const fixtureRoot = join(temporaryRoot, architecture);
+      const installedRoot = join(fixtureRoot, "installed");
+      const unpackedRoot = join(fixtureRoot, "unpacked");
+      const applicationName = "Inertia.exe";
+      const uninstallerName = "Uninstall Inertia.exe";
+      const requiredRelativePaths = [
+        join("resources", "app.asar"),
+        join("resources", "LICENSE.txt"),
+        join("resources", "THIRD_PARTY_NOTICES.txt"),
+        join("resources", "elevate.exe"),
+      ];
+      for (const relativePath of requiredRelativePaths) {
+        await writeFixture(join(unpackedRoot, relativePath), `source-${relativePath}`);
+        await writeFixture(join(installedRoot, relativePath), `source-${relativePath}`);
+      }
+      await writeFixture(join(installedRoot, uninstallerName), "generated uninstaller");
+
+      const installedNativePaths = installedWindowsNativeBinaryPaths(
+        installedRoot,
+        applicationName,
+        architecture,
+      );
+      const unpackedNativePaths = installedWindowsNativeBinaryPaths(
+        unpackedRoot,
+        applicationName,
+        architecture,
+      );
+      for (let index = 0; index < installedNativePaths.length; index += 1) {
+        const binary = peBinary(architecture, index);
+        await writeFixture(installedNativePaths[index], binary);
+        await writeFixture(unpackedNativePaths[index], binary);
+      }
+
+      await expect(requireInstalledFiles(
+        installedRoot,
+        unpackedRoot,
+        applicationName,
+        uninstallerName,
+        architecture,
+      )).resolves.toBeUndefined();
+
+      const installedAsar = join(installedRoot, "resources", "app.asar");
+      await writeFile(installedAsar, "changed payload");
+      await expect(requireInstalledFiles(
+        installedRoot,
+        unpackedRoot,
+        applicationName,
+        uninstallerName,
+        architecture,
+      )).rejects.toThrow("changed required file");
+      await writeFile(installedAsar, `source-${join("resources", "app.asar")}`);
+
+      const wrongIndex = installedNativePaths.findIndex((path) => path.endsWith("conpty.node"));
+      await writeFile(installedNativePaths[wrongIndex], peBinary(architecture, 255));
+      await expect(requireInstalledFiles(
+        installedRoot,
+        unpackedRoot,
+        applicationName,
+        uninstallerName,
+        architecture,
+      )).rejects.toThrow("changed native binary");
+      await writeFile(installedNativePaths[wrongIndex], peBinary(architecture, wrongIndex));
+
+      const wrongArchitecture = architecture === "x64" ? "arm64" : "x64";
+      await writeFile(installedNativePaths[wrongIndex], peBinary(wrongArchitecture));
+      await writeFile(unpackedNativePaths[wrongIndex], peBinary(wrongArchitecture));
+      await expect(requireInstalledFiles(
+        installedRoot,
+        unpackedRoot,
+        applicationName,
+        uninstallerName,
+        architecture,
+      )).rejects.toThrow("native architecture mismatch");
+    }
+  } finally {
+    await rm(temporaryRoot, { force: true, recursive: true });
+  }
 });
 
 test("rejects the exact archive methods that dropped Windows executables", async () => {
@@ -375,9 +615,15 @@ test("pins the minimal fixed builder and gates installed Windows binaries", asyn
   expect(releaseConfig).toContain("artifactBuildCompleted: verifyWindowsNsisPayload");
   expect(releaseConfig).toContain("verifyBuiltNsisApplicationArchive");
   expect(source).toContain("Installed Windows native binaries verified");
+  expect(source).toContain("sha256File(unpackedPath)");
+  expect(source).toContain("installedDigest !== unpackedDigest");
+  expect(source).toContain("changed required file");
+  expect(source).toContain("requireExactNodePtyNativeInventory(unpackedDirectory, architecture)");
   expect(source).toContain('"d3dcompiler_47.dll"');
+  expect(source).toContain('"prebuilds", `win32-${architecture}`');
   expect(source).toContain('["conpty.dll", "OpenConsole.exe"]');
-  expect(source).toContain('join(resources, "elevate.exe")');
+  expect(source).not.toContain('"build", "Release", "conpty", name');
+  expect(source).toContain('join("resources", "elevate.exe")');
   expect(source).toContain("INERTIA_PACKAGE_SMOKE_EXECUTABLE: installedExecutable");
   expect(source).toContain('["/S", `/D=${installDirectory}`]');
   expect(source).toContain('runBounded(uninstaller, ["/S"]');

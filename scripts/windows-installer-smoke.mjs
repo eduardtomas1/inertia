@@ -1,5 +1,7 @@
 import { createRequire } from "node:module";
-import { lstat, mkdtemp, rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
+import { lstat, mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -21,6 +23,16 @@ const PACKAGE_SMOKE_TIMEOUT_MS = 3 * 60_000;
 const UNINSTALL_TIMEOUT_MS = 2 * 60_000;
 const UNINSTALL_SETTLE_TIMEOUT_MS = 30_000;
 const SETTLE_INTERVAL_MS = 100;
+const NODE_PTY_CONPTY_VERSION = "1.23.251008001";
+const NODE_PTY_RELEASE_FILES = [
+  "pty.node",
+  "conpty.node",
+  "conpty_console_list.node",
+  "winpty.dll",
+  "winpty-agent.exe",
+];
+const NODE_PTY_CONPTY_FILES = ["conpty.dll", "OpenConsole.exe"];
+const WINDOWS_NATIVE_FILE_PATTERN = /\.(?:dll|exe|node)$/iu;
 
 function sleep(milliseconds) {
   return new Promise((settle) => setTimeout(settle, milliseconds));
@@ -43,6 +55,92 @@ async function pathExists(path) {
   } catch (error) {
     if (error?.code === "ENOENT") return false;
     throw error;
+  }
+}
+
+async function sha256File(path) {
+  const hash = createHash("sha256");
+  await new Promise((resolvePromise, rejectPromise) => {
+    const stream = createReadStream(path);
+    stream.on("data", (chunk) => hash.update(chunk));
+    stream.once("error", rejectPromise);
+    stream.once("end", resolvePromise);
+  });
+  return hash.digest("hex");
+}
+
+async function nativeFilesBelow(root, relativeRoot = "") {
+  const entries = await readdir(join(root, relativeRoot), { withFileTypes: true });
+  const paths = [];
+  for (const entry of entries) {
+    const relativePath = join(relativeRoot, entry.name);
+    if (entry.isSymbolicLink()) {
+      throw new Error(`The Windows native inventory contains symbolic link ${relativePath}.`);
+    }
+    if (entry.isDirectory()) {
+      paths.push(...await nativeFilesBelow(root, relativePath));
+    } else if (entry.isFile() && WINDOWS_NATIVE_FILE_PATTERN.test(entry.name)) {
+      paths.push(relativePath);
+    }
+  }
+  return paths;
+}
+
+export async function requireExactNodePtyNativeInventory(packageDirectory, architecture) {
+  const nodePtyRoot = join(
+    packageDirectory,
+    "resources",
+    "app.asar.unpacked",
+    "node_modules",
+    "node-pty",
+  );
+  const conptyRoot = join(nodePtyRoot, "third_party", "conpty");
+  const conptyVersions = (await readdir(conptyRoot, { withFileTypes: true }))
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+  if (conptyVersions.length !== 1 || conptyVersions[0] !== NODE_PTY_CONPTY_VERSION) {
+    throw new Error(
+      `The packaged node-pty ConPTY inventory has unexpected versions: ${conptyVersions.join(", ")}.`,
+    );
+  }
+  const roots = [
+    join("build", "Release"),
+    join("prebuilds", `win32-${architecture}`),
+    join("third_party", "conpty", NODE_PTY_CONPTY_VERSION, `win10-${architecture}`),
+  ];
+  const actual = (await Promise.all(
+    roots.map(async (relativeRoot) => (await nativeFilesBelow(nodePtyRoot, relativeRoot))
+      .map((path) => join("node-pty", path))),
+  )).flat().sort();
+  const expected = [
+    ...NODE_PTY_RELEASE_FILES.map((name) => join("node-pty", "build", "Release", name)),
+    ...NODE_PTY_RELEASE_FILES.map((name) => join(
+      "node-pty",
+      "prebuilds",
+      `win32-${architecture}`,
+      name,
+    )),
+    ...NODE_PTY_CONPTY_FILES.map((name) => join(
+      "node-pty",
+      "prebuilds",
+      `win32-${architecture}`,
+      "conpty",
+      name,
+    )),
+    ...NODE_PTY_CONPTY_FILES.map((name) => join(
+      "node-pty",
+      "third_party",
+      "conpty",
+      NODE_PTY_CONPTY_VERSION,
+      `win10-${architecture}`,
+      name,
+    )),
+  ].sort();
+  if (actual.length !== expected.length || actual.some((path, index) => path !== expected[index])) {
+    throw new Error(
+      `The packaged node-pty native inventory is not exact for ${architecture}: ${JSON.stringify(actual)}.`,
+    );
   }
 }
 
@@ -123,50 +221,120 @@ export async function verifyBuiltNsisApplicationArchive(options) {
   console.log(`NSIS application archive verified (${applicationArchive}, ${method}).`);
 }
 
-async function requireInstalledFiles(
+export function installedWindowsNativeBinaryPaths(
   installDirectory,
   applicationName,
-  uninstallerName,
   architecture,
 ) {
+  if (!ARCHITECTURES.has(architecture)) {
+    throw new Error("The installed Windows architecture is invalid.");
+  }
   const resources = join(installDirectory, "resources");
   const unpackedModules = join(resources, "app.asar.unpacked", "node_modules");
-  const requiredFiles = [
-    join(installDirectory, applicationName),
-    join(installDirectory, uninstallerName),
-    join(resources, "app.asar"),
-    join(resources, "LICENSE.txt"),
-    join(resources, "THIRD_PARTY_NOTICES.txt"),
-    join(resources, "elevate.exe"),
-  ];
-  for (const path of requiredFiles) {
-    if (!await existsAsRegularFile(path)) {
-      throw new Error(`The installed Windows package is missing ${path}.`);
-    }
-  }
-
-  const nativeBinaries = [
+  return [
     join(installDirectory, applicationName),
     ...["d3dcompiler_47.dll", "dxcompiler.dll", "dxil.dll", "ffmpeg.dll", "libEGL.dll", "libGLESv2.dll", "vk_swiftshader.dll", "vulkan-1.dll"]
       .map((name) => join(installDirectory, name)),
     join(unpackedModules, `@anthropic-ai/claude-agent-sdk-win32-${architecture}/claude.exe`),
     join(unpackedModules, `@napi-rs/canvas-win32-${architecture}-msvc/skia.win32-${architecture}-msvc.node`),
     join(unpackedModules, `better-sqlite3/prebuilds/win32-${architecture}.node`),
-    ...["pty.node", "conpty.node", "conpty_console_list.node", "winpty.dll", "winpty-agent.exe"]
+    ...NODE_PTY_RELEASE_FILES
       .map((name) => join(unpackedModules, "node-pty", "build", "Release", name)),
-    ...["conpty.dll", "OpenConsole.exe"]
-      .map((name) => join(unpackedModules, "node-pty", "build", "Release", "conpty", name)),
+    ...NODE_PTY_RELEASE_FILES
+      .map((name) => join(unpackedModules, "node-pty", "prebuilds", `win32-${architecture}`, name)),
+    ...NODE_PTY_CONPTY_FILES
+      .map((name) => join(
+        unpackedModules,
+        "node-pty",
+        "prebuilds",
+        `win32-${architecture}`,
+        "conpty",
+        name,
+      )),
+    ...NODE_PTY_CONPTY_FILES
+      .map((name) => join(
+        unpackedModules,
+        "node-pty",
+        "third_party",
+        "conpty",
+        NODE_PTY_CONPTY_VERSION,
+        `win10-${architecture}`,
+        name,
+      )),
   ];
+}
+
+export async function requireInstalledFiles(
+  installDirectory,
+  unpackedDirectory,
+  applicationName,
+  uninstallerName,
+  architecture,
+) {
+  const requiredRelativePaths = [
+    applicationName,
+    join("resources", "app.asar"),
+    join("resources", "LICENSE.txt"),
+    join("resources", "THIRD_PARTY_NOTICES.txt"),
+    join("resources", "elevate.exe"),
+  ];
+  for (const relativePath of requiredRelativePaths) {
+    const installedPath = join(installDirectory, relativePath);
+    const unpackedPath = join(unpackedDirectory, relativePath);
+    if (!await existsAsRegularFile(installedPath)) {
+      throw new Error(`The installed Windows package is missing ${installedPath}.`);
+    }
+    if (!await existsAsRegularFile(unpackedPath)) {
+      throw new Error(`The unpacked Windows package is missing ${unpackedPath}.`);
+    }
+    const [installedDigest, unpackedDigest] = await Promise.all([
+      sha256File(installedPath),
+      sha256File(unpackedPath),
+    ]);
+    if (installedDigest !== unpackedDigest) {
+      throw new Error(`The Windows installer changed required file ${relativePath}.`);
+    }
+  }
+  const uninstaller = join(installDirectory, uninstallerName);
+  if (!await existsAsRegularFile(uninstaller)) {
+    throw new Error(`The installed Windows package is missing ${uninstaller}.`);
+  }
+
+  const nativeBinaries = installedWindowsNativeBinaryPaths(
+    installDirectory,
+    applicationName,
+    architecture,
+  );
+  await requireExactNodePtyNativeInventory(unpackedDirectory, architecture);
+  await requireExactNodePtyNativeInventory(installDirectory, architecture);
   for (const path of nativeBinaries) {
     if (!await existsAsRegularFile(path)) {
       throw new Error(`The installed Windows package is missing native binary ${path}.`);
+    }
+    const relativePath = path.slice(installDirectory.length + 1);
+    const unpackedPath = join(unpackedDirectory, relativePath);
+    if (!await existsAsRegularFile(unpackedPath)) {
+      throw new Error(`The unpacked Windows package is missing native binary ${unpackedPath}.`);
     }
     await inspectNativeBinaryArchitecture(path, {
       expectedArchitecture: architecture,
       platform: "win32",
     });
+    await inspectNativeBinaryArchitecture(unpackedPath, {
+      expectedArchitecture: architecture,
+      platform: "win32",
+    });
+    const [installedDigest, unpackedDigest] = await Promise.all([
+      sha256File(path),
+      sha256File(unpackedPath),
+    ]);
+    if (installedDigest !== unpackedDigest) {
+      throw new Error(`The Windows installer changed native binary ${relativePath}.`);
+    }
   }
-  console.log(`Installed Windows native binaries verified (${nativeBinaries.length}, ${architecture}).`);
+  console.log(
+    `Installed Windows native binaries verified byte-for-byte (${nativeBinaries.length}, ${architecture}).`,
+  );
 }
 
 async function waitForRemoval(path) {
@@ -211,6 +379,11 @@ export async function main() {
   const applicationName = `${productName}.exe`;
   const uninstallerName = `Uninstall ${productName}.exe`;
   const installedExecutable = join(installDirectory, applicationName);
+  const unpackedDirectory = join(
+    repositoryRoot,
+    "release",
+    process.arch === "arm64" ? "win-arm64-unpacked" : "win-unpacked",
+  );
   const uninstaller = join(installDirectory, uninstallerName);
   let operationError;
   let uninstalled = false;
@@ -221,6 +394,7 @@ export async function main() {
     });
     await requireInstalledFiles(
       installDirectory,
+      unpackedDirectory,
       applicationName,
       uninstallerName,
       process.arch,

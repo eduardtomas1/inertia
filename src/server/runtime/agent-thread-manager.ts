@@ -39,13 +39,18 @@ import type {
 } from "./conversation-context-request-coordinator";
 import type { TurnController } from "./turns/turn-controller";
 import {
-  AGENT_BROWSER_TOOL_DEFINITIONS,
   AGENT_BROWSER_TOOL_NAMES,
   AgentBrowserHostTools,
 } from "./agent-browser-host-tools";
 import type {
   RuntimeAgentBrowserBroker,
 } from "./agent-browser-broker-client";
+import {
+  type HarnessCapabilityManifest,
+  type HarnessCapabilityRegistry,
+} from "./harness-capabilities";
+import { createInertiaHarnessCapabilities } from "./inertia-harness-capabilities";
+import type { HiddenProviderInstruction } from "./turns/request-context";
 
 const MAX_LIST_LIMIT = 25;
 const MAX_PROMPT_CHARS = 32_768;
@@ -359,21 +364,30 @@ export class AgentThreadManager {
   private readonly now: () => string;
   private readonly mutationTails = new Map<string, Promise<void>>();
   private readonly agentBrowser: AgentBrowserHostTools | undefined;
+  private readonly capabilities: HarnessCapabilityRegistry;
 
   constructor(private readonly dependencies: AgentThreadManagerDependencies) {
     this.now = dependencies.now ?? (() => new Date().toISOString());
     this.agentBrowser = dependencies.agentBrowser
       ? new AgentBrowserHostTools(dependencies.agentBrowser)
       : undefined;
+    this.capabilities = createInertiaHarnessCapabilities({
+      orchestrationTools: TOOL_DEFINITIONS,
+      browserEnabled: this.agentBrowser !== undefined,
+      invoke: async (context, call) => await this.invoke(context, call),
+    });
   }
 
-  bridgeFor(source: AgentThreadSource): ProviderHostToolBridge | undefined {
-    return {
-      definitions: this.agentBrowser
-        ? [...TOOL_DEFINITIONS, ...AGENT_BROWSER_TOOL_DEFINITIONS]
-        : TOOL_DEFINITIONS,
-      invoke: (call) => this.invoke(source, call),
-    };
+  capabilityInstructions(): readonly HiddenProviderInstruction[] {
+    return this.capabilities.instructions();
+  }
+
+  capabilityManifest(): HarnessCapabilityManifest {
+    return this.capabilities.manifest();
+  }
+
+  bridgeFor(source: AgentThreadSource): ProviderHostToolBridge {
+    return this.capabilities.bridgeFor(source);
   }
 
   async onSourceTurnSettled(turn: AgentTurn): Promise<void> {

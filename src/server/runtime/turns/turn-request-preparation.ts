@@ -75,6 +75,8 @@ export function resolveTurnRequest(
 ): ResolvedTurnRequest {
   const conversation = dependencies.store.conversation(request.conversationId);
   const attachments = [...(request.attachments ?? [])];
+  const capabilityInstructions = dependencies.hooks
+    .harnessInstructionsForTurn?.({ conversation }) ?? [];
   const assembled = assembleTurnRequest({
     cwd: dependencies.store.conversationPath(conversation.id),
     visibleContent: request.content,
@@ -83,7 +85,10 @@ export function resolveTurnRequest(
     imagePaths: request.imagePaths,
     documentContexts: request.documentContexts,
     context: request.context,
-    internalInstructions: request.internalInstructions,
+    internalInstructions: [
+      ...capabilityInstructions,
+      ...(request.internalInstructions ?? []),
+    ],
   });
   const runId = dependencies.id();
   const turnId = dependencies.id();

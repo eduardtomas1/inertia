@@ -612,7 +612,6 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     if (conversation.projectId !== projectId) throw new RequestError("The thread does not belong to this project.");
     return ensureDirectory(store.conversationPath(conversationId));
   };
-
   turns = new TurnController(
     store,
     providers,
@@ -624,6 +623,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       broadcastSnapshot,
       broadcastConversationShell,
       providerInfo: () => providerInfo,
+      harnessInstructionsForTurn: () => agentThreads?.manager.capabilityInstructions() ?? [],
       hostToolsForTurn: (input) => agentThreads?.manager.bridgeFor(input),
       applyProviderMetadata: (event) => {
         applyProviderMetadata(event.providerId, providers.cachedMetadata(event.providerId));

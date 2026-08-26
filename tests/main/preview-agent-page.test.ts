@@ -1748,11 +1748,15 @@ describe("agent browser semantic snapshots", () => {
     };
 
     const snapshot = JSON.parse(await semanticPageSnapshot(contents as never)) as {
-      elements: Array<{ name: string }>;
+      elements: Array<{ name: string; nameSource: string }>;
     };
     expect(snapshot.elements.map(({ name }) => name)).toEqual([
       "rich text",
       "plaintext-only",
+    ]);
+    expect(snapshot.elements.map(({ nameSource }) => nameSource)).toEqual([
+      "content",
+      "content",
     ]);
   });
 

@@ -326,18 +326,32 @@ export async function semanticPageSnapshot(
       }
       return normalizeText(labels.join(" "), ${MAX_LABEL_TEXT_SOURCE_CHARS});
     };
-    const nameFor = (element) => passwordField(element)
-      ? "Password field"
-      : redact(
-          element.getAttribute("aria-label")
-          || labelledByFor(element)
-          || element.getAttribute("title")
-          || element.getAttribute("placeholder")
-          || (element.labels && boundedElementText(element.labels[0]))
-          || boundedElementText(element)
-          || element.value,
-          300,
-        );
+    const nameFor = (element) => {
+      const inputType = String(element.type || "").toLowerCase();
+      const valueSource = ["button", "image", "reset", "submit"].includes(inputType)
+        ? "control-value"
+        : "value";
+      const contentName = ["INPUT", "SELECT", "TEXTAREA"].includes(element.tagName)
+        ? ""
+        : boundedElementText(element);
+      const candidates = [
+        [element.getAttribute("aria-label"), "aria-label"],
+        [labelledByFor(element), "aria-labelledby"],
+        [element.getAttribute("title"), "title"],
+        [element.labels && boundedElementText(element.labels[0]), "label"],
+        [inputType === "image" && element.getAttribute("alt"), "alt"],
+        [contentName, "content"],
+        [element.getAttribute("placeholder"), "placeholder"],
+        [element.value, valueSource],
+      ];
+      const selected = candidates.find(([value]) => Boolean(value));
+      return {
+        name: passwordField(element)
+          ? "Password field"
+          : redact(selected?.[0], 300),
+        nameSource: selected?.[1] || "none",
+      };
+    };
     const semanticTags = new Set(["BUTTON", "INPUT", "TEXTAREA", "SELECT", "SUMMARY"]);
     const hasAttribute = (element, name) => element.hasAttribute?.(name) === true
       || (typeof element.getAttribute === "function" && element.getAttribute(name) !== null);
@@ -366,7 +380,7 @@ export async function semanticPageSnapshot(
       elements.push({
         ref,
         role: roleFor(element),
-        name: nameFor(element),
+        ...nameFor(element),
         disabled: Boolean(
           element.matches?.(":disabled")
           || element.disabled

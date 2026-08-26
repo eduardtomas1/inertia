@@ -48,6 +48,18 @@ and remain valid JSON. Element references are generated in an isolated
 JavaScript world and become invalid when their DOM node disappears or is no
 longer visible.
 
+Each successful snapshot also includes a bounded `inertiaAudit` object. Version
+1 reports deterministic issue codes and affected refs for controls without
+stable labels or semantic names, clipped controls, rectangles that overlap by
+at least half of the smaller target, and interactive targets smaller than 24
+by 24 CSS pixels.
+Disabled controls are excluded. The result covers only the current visible
+viewport and semantic element set; it cannot judge color, typography, imagery,
+canvas, animation, or pixel-level visual quality. Agents are instructed to
+repeat the snapshot after the user or layout changes the viewport and to report
+only evidence they actually observed. Inertia does not currently give an agent
+an autonomous viewport-resize command.
+
 Screenshots are reduced to a local thumbnail of at most 512 by 320 pixels and
 256 KiB. Inertia does not write them to the repository, attachment store,
 diagnostics, or its application database, and no provider transport receives

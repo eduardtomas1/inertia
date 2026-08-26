@@ -29,6 +29,46 @@ function call(tool: string, args: unknown, decision: "approve" | "deny" = "appro
 }
 
 describe("agent browser host tools", () => {
+  it("adds a bounded deterministic audit to semantic snapshots", async () => {
+    const broker = { perform: vi.fn(async () => ({
+      ok: true as const,
+      text: JSON.stringify({
+        title: "Local app",
+        viewport: { width: 320, height: 200, scrollX: 0, scrollY: 0 },
+        text: "Dashboard",
+        elements: [{
+          ref: "e1",
+          role: "button",
+          name: "",
+          nameSource: "none",
+          disabled: false,
+          rect: { x: 10, y: 10, width: 20, height: 20 },
+        }],
+        truncated: false,
+      }),
+      state: {
+        activeTabId: tabId,
+        tabs: [{ id: tabId, title: "App", url: "http://127.0.0.1:3000", loading: false }],
+        activity: null,
+      },
+    })) };
+    const tools = new AgentBrowserHostTools(broker);
+    const request = call("inertia_browser_snapshot", {});
+    const result = await tools.invoke(conversation("supervised"), request, identity);
+    expect(result.success).toBe(true);
+    expect(JSON.parse(result.text)).toMatchObject({
+      inertiaAudit: {
+        version: 1,
+        errors: 1,
+        issues: expect.arrayContaining([
+          expect.objectContaining({ code: "missing-stable-name" }),
+          expect.objectContaining({ code: "small-target" }),
+        ]),
+      },
+    });
+    expect(request.requestApproval).not.toHaveBeenCalled();
+  });
+
   it("keeps screenshot bytes local even when a broker result regresses", async () => {
     const image = Buffer.from("png").toString("base64");
     const broker = { perform: vi.fn(async () => ({

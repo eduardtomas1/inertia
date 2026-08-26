@@ -139,6 +139,10 @@ export interface TurnControllerHooks {
    */
   broadcastConversationShell?(conversationId: string): void;
   providerInfo(): readonly ProviderInfo[];
+  /** Reviewed Inertia capability instructions, re-injected on every turn. */
+  harnessInstructionsForTurn?(input: {
+    conversation: Conversation;
+  }): readonly HiddenProviderInstruction[];
   /** Exact-turn host authority; absent means the selected harness gets no tools. */
   hostToolsForTurn?(input: {
     conversation: Conversation;

@@ -14,6 +14,7 @@ import type {
 import type {
   RuntimeAgentBrowserBroker,
 } from "./agent-browser-broker-client.js";
+import { withFrontendBrowserAudit } from "./frontend-browser-audit.js";
 
 const tabIdSchema = z.string().uuid();
 const refSchema = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/u);
@@ -241,7 +242,9 @@ export class AgentBrowserHostTools {
     return result.ok
       ? {
           success: true,
-          text: result.text,
+          text: command.action === "snapshot"
+            ? withFrontendBrowserAudit(result.text)
+            : result.text,
         }
       : failure(result.code, result.message);
   }

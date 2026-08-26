@@ -157,4 +157,25 @@ describe("system suspend timing recovery schema", () => {
     );
     expect(systemSuspendTimingSchemaIsValid(overlap)).toBe(false);
   });
+
+  it.each(["suspended_at", "resumed_at"])(
+    "rejects an unparsable %s that satisfies the persisted length checks",
+    (column) => {
+      const database = databaseWithSuspendedDuration();
+      database.prepare(`
+        INSERT INTO system_suspend_intervals (id, suspended_at, resumed_at)
+        VALUES (?, ?, ?)
+      `).run(
+        "11111111-1111-4111-8111-111111111111",
+        column === "suspended_at"
+          ? "00000000000000000000"
+          : "2026-08-26T08:00:00.000Z",
+        column === "resumed_at"
+          ? "xxxxxxxxxxxxxxxxxxxx"
+          : "2026-08-26T08:05:00.000Z",
+      );
+
+      expect(systemSuspendTimingSchemaIsValid(database)).toBe(false);
+    },
+  );
 });

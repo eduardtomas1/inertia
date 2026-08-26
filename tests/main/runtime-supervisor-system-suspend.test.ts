@@ -43,10 +43,10 @@ afterEach(() => {
   rmSync(dataDirectory, { recursive: true, force: true });
 });
 
-describe("RuntimeSupervisor system suspend acknowledgement", () => {
-  it("accepts an acknowledgement only from the current ready runtime", () => {
+describe("RuntimeSupervisor system suspend results", () => {
+  it("reports success and failure only from the current ready runtime", () => {
     const child = new FakeUtilityProcess();
-    const acknowledged = vi.fn();
+    const results = vi.fn();
     const supervisor = new RuntimeSupervisor({
       systemBootId: "test:00000000-0000-4000-8000-000000000001",
       workerOptions: {
@@ -56,7 +56,7 @@ describe("RuntimeSupervisor system suspend acknowledgement", () => {
       },
       spawn: () => child as never,
       recoverOwnedProcesses: () => true,
-      onSystemSuspendRecorded: acknowledged,
+      onSystemSuspendResult: results,
     });
     const interval = {
       id: "11111111-1111-4111-8111-111111111111",
@@ -74,10 +74,17 @@ describe("RuntimeSupervisor system suspend acknowledgement", () => {
       interval,
     });
     child.message({
-      type: "runtime.system-suspend-recorded",
+      type: "runtime.system-suspend-result",
       id: interval.id,
+      recorded: false,
     });
-    expect(acknowledged).toHaveBeenCalledOnce();
-    expect(acknowledged).toHaveBeenCalledWith(interval.id);
+    child.message({
+      type: "runtime.system-suspend-result",
+      id: interval.id,
+      recorded: true,
+    });
+    expect(results).toHaveBeenCalledTimes(2);
+    expect(results).toHaveBeenNthCalledWith(1, interval.id, 1, false);
+    expect(results).toHaveBeenNthCalledWith(2, interval.id, 1, true);
   });
 });

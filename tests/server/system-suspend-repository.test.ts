@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { RuntimeSystemSuspendTracker } from "../../src/main/runtime-system-suspend-tracker";
 import { RuntimeStore } from "../../src/server/database";
 import { nativeModelSelection } from "../../src/shared/model-routing";
 
@@ -16,6 +17,80 @@ afterEach(async () => {
 });
 
 describe("system suspend repository", () => {
+  it("retries a failed head before a later interval after restart", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "inertia-system-suspend-"));
+    directories.push(directory);
+    const workspace = join(directory, "workspace");
+    const databasePath = join(directory, "inertia.sqlite");
+    const statePath = join(directory, "runtime-system-suspends.json");
+    await mkdir(workspace);
+    const initial = new RuntimeStore(databasePath, workspace, {
+      recoverInterruptedRuns: false,
+    });
+    const project = initial.createProject("Suspend replay", workspace);
+    const conversation = initial.createConversation(project.id, "Long run", {
+      providerId: "codex",
+    });
+    const message = initial.createMessage(
+      conversation.id,
+      "Keep accounting ordered.",
+      "user",
+      [],
+      null,
+      "2026-08-26T09:00:00.000Z",
+    );
+    const turn = initial.createAgentTurn({
+      conversationId: conversation.id,
+      runId: randomUUID(),
+      userMessageId: message.id,
+      providerId: "codex",
+      modelSelection: nativeModelSelection({ providerId: "codex" }),
+      reasoningEffort: "",
+      interactionMode: "build",
+      accessMode: "supervised",
+      requestedAt: "2026-08-26T09:00:00.000Z",
+      usageAtStart: null,
+      configurationRevision: 0,
+      association: "authoritative",
+    });
+    initial.updateAgentTurnLifecycle(turn.id, {
+      status: "completed",
+      startedAt: "2026-08-26T09:00:00.000Z",
+      completedAt: "2026-08-26T11:00:00.000Z",
+      updatedAt: "2026-08-26T11:00:00.000Z",
+    });
+    initial.close();
+
+    const tracker = new RuntimeSystemSuspendTracker({ statePath });
+    tracker.suspend("2026-08-26T10:00:00.000Z");
+    const first = tracker.resume("2026-08-26T10:20:00.000Z")!;
+    expect(tracker.claim(1)).toEqual(first);
+    // Generation one fails before the repository can acknowledge the head.
+    tracker.release(first.id, 1);
+    tracker.suspend("2026-08-26T10:30:00.000Z");
+    const second = tracker.resume("2026-08-26T10:40:00.000Z")!;
+    expect(tracker.claim(1)).toEqual(first);
+    tracker.release(first.id, 1);
+
+    const replay = new RuntimeSystemSuspendTracker({ statePath });
+    const restarted = new RuntimeStore(databasePath, workspace, {
+      recoverInterruptedRuns: false,
+    });
+    expect(replay.claim(2)).toEqual(first);
+    expect(restarted.systemSuspends.record(first)).toEqual([conversation.id]);
+    expect(replay.acknowledge(first.id, 2)).toBe(true);
+    expect(replay.claim(2)).toEqual(second);
+    expect(restarted.systemSuspends.record(second)).toEqual([conversation.id]);
+    expect(replay.acknowledge(second.id, 2)).toBe(true);
+
+    expect(restarted.agentTurn(turn.id).suspendedDurationMs).toBe(30 * 60_000);
+    expect(restarted.systemSuspends.read(
+      "2026-08-26T00:00:00.000Z",
+      "2026-08-27T00:00:00.000Z",
+    )).toEqual([first, second]);
+    restarted.close();
+  });
+
   it("reconciles a backward wall-clock correction with persisted resume order", async () => {
     const directory = await mkdtemp(join(tmpdir(), "inertia-system-suspend-"));
     directories.push(directory);

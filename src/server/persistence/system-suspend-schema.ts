@@ -115,7 +115,9 @@ export function systemSuspendTimingSchemaIsValid(
       OR substr(id, 20, 1) NOT GLOB '[89aAbB]'
       OR typeof(suspended_at) != 'text'
       OR typeof(resumed_at) != 'text'
+      OR strftime('%Y-%m-%dT%H:%M:%fZ', suspended_at) IS NULL
       OR strftime('%Y-%m-%dT%H:%M:%fZ', suspended_at) != suspended_at
+      OR strftime('%Y-%m-%dT%H:%M:%fZ', resumed_at) IS NULL
       OR strftime('%Y-%m-%dT%H:%M:%fZ', resumed_at) != resumed_at
       OR resumed_at < suspended_at
     LIMIT 1

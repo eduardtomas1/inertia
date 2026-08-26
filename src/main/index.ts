@@ -1014,12 +1014,24 @@ async function bootstrap(): Promise<void> {
     imageResult: packageSmokeImageResult,
   } = packageSmoke;
   let packageSmokeScheduled = false;
+  const sendNextSystemSuspend = (generation: number): void => {
+    const supervisor = runtimeSupervisor;
+    const snapshot = supervisor?.snapshot();
+    if (!supervisor || snapshot?.phase !== "ready" || snapshot.generation !== generation) return;
+    const interval = systemSuspends.claim(generation);
+    if (interval && !supervisor.recordSystemSuspendInterval(interval)) {
+      systemSuspends.release(interval.id, generation);
+    }
+  };
   runtimeSupervisor = new RuntimeSupervisor({
     agentBrowserBroker: previewBroker,
     systemBootId: bootstrapSafety.systemBootId,
-    onSystemSuspendRecorded: (id) => {
-      const interval = systemSuspends.acknowledge(id);
-      if (interval) runtimeSupervisor?.recordSystemSuspendInterval(interval);
+    onSystemSuspendResult: (id, generation, recorded) => {
+      if (!recorded) {
+        systemSuspends.release(id, generation);
+      } else if (systemSuspends.acknowledge(id, generation)) {
+        sendNextSystemSuspend(generation);
+      }
     },
     conversationAttachmentStoreRunner,
     conversationAttachmentStoreAuthority:
@@ -1090,11 +1102,7 @@ async function bootstrap(): Promise<void> {
       },
     ),
     onStateChange: (snapshot) => {
-      if (snapshot.phase === "ready") {
-        for (const interval of systemSuspends.completed()) {
-          runtimeSupervisor?.recordSystemSuspendInterval(interval);
-        }
-      }
+      if (snapshot.phase === "ready") sendNextSystemSuspend(snapshot.generation);
       runtimeDiagnostics?.recordState(snapshot);
       if (
         snapshot.phase === "ready"
@@ -1147,8 +1155,9 @@ async function bootstrap(): Promise<void> {
   registerIpcHandlers();
   powerMonitor.on("suspend", () => systemSuspends.suspend());
   powerMonitor.on("resume", () => {
-    const interval = systemSuspends.resume();
-    if (interval) runtimeSupervisor?.recordSystemSuspendInterval(interval);
+    systemSuspends.resume();
+    const snapshot = runtimeSupervisor?.snapshot();
+    if (snapshot?.phase === "ready") sendNextSystemSuspend(snapshot.generation);
   });
   runtimeSupervisor.start();
   if (process.env.NODE_ENV === "test") {

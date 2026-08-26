@@ -77,7 +77,8 @@ describe("RuntimeSystemSuspendTracker", () => {
       recoveredAt: "2026-08-26T06:00:00.000Z",
     }).completed()).toEqual(recovered.completed());
 
-    expect(recovered.acknowledge(active.active.id)).toBeNull();
+    expect(recovered.claim(1)?.id).toBe(active.active.id);
+    expect(recovered.acknowledge(active.active.id, 1)).toBe(true);
     expect(new RuntimeSystemSuspendTracker({ statePath: path }).completed())
       .toEqual([]);
   });
@@ -124,7 +125,9 @@ describe("RuntimeSystemSuspendTracker", () => {
       onDiagnostic: diagnostics,
     });
     expect(reloaded.completed()).toEqual(retained);
-    const released = reloaded.acknowledge(retained[0].id);
+    expect(reloaded.claim(1)).toEqual(retained[0]);
+    expect(reloaded.acknowledge(retained[0].id, 1)).toBe(true);
+    const released = reloaded.completed().at(-1)!;
     expect(released).toMatchObject({
       suspendedAt: new Date(origin + 128_000).toISOString(),
       resumedAt: new Date(origin + 129_000).toISOString(),
@@ -132,6 +135,29 @@ describe("RuntimeSystemSuspendTracker", () => {
     expect(reloaded.completed()).toHaveLength(64);
     expect(reloaded.completed()).not.toContainEqual(retained[0]);
     expect(reloaded.completed()).toContainEqual(released);
+  });
+
+  it("delivers only the durable head and retries it across runtime generations", () => {
+    const tracker = new RuntimeSystemSuspendTracker();
+    tracker.suspend("2026-08-26T10:00:00.000Z");
+    const first = tracker.resume("2026-08-26T10:10:00.000Z")!;
+    tracker.suspend("2026-08-26T10:20:00.000Z");
+    const second = tracker.resume("2026-08-26T10:30:00.000Z")!;
+
+    expect(tracker.claim(1)).toEqual(first);
+    expect(tracker.claim(1)).toBeNull();
+    expect(tracker.acknowledge(second.id, 1)).toBe(false);
+    tracker.release(first.id, 2);
+    expect(tracker.claim(1)).toBeNull();
+    tracker.release(first.id, 1);
+    expect(tracker.claim(1)).toEqual(first);
+    expect(tracker.claim(2)).toEqual(first);
+    expect(tracker.acknowledge(first.id, 1)).toBe(false);
+    expect(tracker.acknowledge(first.id, 2)).toBe(true);
+    expect(tracker.claim(2)).toEqual(second);
+    expect(tracker.acknowledge(first.id, 2)).toBe(false);
+    expect(tracker.acknowledge(second.id, 2)).toBe(true);
+    expect(tracker.completed()).toEqual([]);
   });
 
   it("rejects bounded malformed durable state without fabricating an interval", () => {
@@ -166,6 +192,29 @@ describe("RuntimeSystemSuspendTracker", () => {
 
       expect(lstatSync(path).isFile()).toBe(true);
       expect(lstatSync(path).mode & 0o777).toBe(0o600);
+    },
+  );
+
+  it.runIf(process.platform !== "win32")(
+    "retries the durable head after its acknowledgement cannot be persisted",
+    () => {
+      const path = statePath();
+      const tracker = new RuntimeSystemSuspendTracker({ statePath: path });
+      tracker.suspend("2026-08-25T12:15:39.000Z");
+      const completed = tracker.resume("2026-08-25T12:20:00.000Z")!;
+      expect(tracker.claim(1)).toEqual(completed);
+
+      const destination = join(path, "..", "outside.json");
+      writeFileSync(destination, readFileSync(path));
+      rmSync(path);
+      symlinkSync(destination, path);
+
+      expect(tracker.acknowledge(completed.id, 1)).toBe(false);
+      expect(tracker.completed()).toEqual([completed]);
+      expect(tracker.claim(1)).toEqual(completed);
+      expect(JSON.parse(readFileSync(destination, "utf8"))).toMatchObject({
+        intervals: [completed],
+      });
     },
   );
 

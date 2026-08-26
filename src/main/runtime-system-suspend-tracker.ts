@@ -126,6 +126,7 @@ function state(value: unknown): RuntimeSystemSuspendState | null {
 export class RuntimeSystemSuspendTracker {
   private active: ActiveSuspendBoundary | null = null;
   private intervals: RuntimeSystemSuspendInterval[] = [];
+  private inFlight: { generation: number; id: string } | null = null;
   private readonly statePath: string | null;
   private readonly onDiagnostic: (error: Error) => void;
 
@@ -226,12 +227,39 @@ export class RuntimeSystemSuspendTracker {
     return completed;
   }
 
-  acknowledge(id: string): RuntimeSystemSuspendInterval | null {
+  claim(generation: number): RuntimeSystemSuspendInterval | null {
+    if (!Number.isSafeInteger(generation) || generation < 1) return null;
+    const head = this.intervals[0];
+    if (!head) return null;
+    if (
+      this.inFlight?.generation === generation
+      && this.inFlight.id === head.id
+    ) return null;
+    this.inFlight = { generation, id: head.id };
+    return { ...head };
+  }
+
+  release(id: string, generation: number): void {
+    if (this.inFlight?.id === id && this.inFlight.generation === generation) {
+      this.inFlight = null;
+    }
+  }
+
+  acknowledge(id: string, generation: number): boolean {
+    if (
+      this.inFlight?.id !== id
+      || this.inFlight.generation !== generation
+      || this.intervals[0]?.id !== id
+    ) return false;
     const intervals = this.intervals.filter((candidate) => candidate.id !== id);
-    if (intervals.length === this.intervals.length) return null;
-    if (!this.persist(this.active, intervals)) return null;
+    if (!this.persist(this.active, intervals)) {
+      this.inFlight = null;
+      return false;
+    }
+    this.inFlight = null;
     this.intervals = intervals;
-    return this.active?.resumedAt ? this.resume(this.active.resumedAt) : null;
+    if (this.active?.resumedAt) this.resume(this.active.resumedAt);
+    return true;
   }
 
   completed(): readonly RuntimeSystemSuspendInterval[] {

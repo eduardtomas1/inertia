@@ -101,6 +101,17 @@ function removeSuspendedDurationCheck(database: Database.Database): void {
   `);
 }
 
+function insertUnparseableSuspendInterval(database: Database.Database): void {
+  database.prepare(`
+    INSERT INTO system_suspend_intervals (id, suspended_at, resumed_at)
+    VALUES (?, ?, ?)
+  `).run(
+    "11111111-1111-4111-8111-111111111111",
+    "xxxxxxxxxxxxxxxxxxxx",
+    "xxxxxxxxxxxxxxxxxxxx",
+  );
+}
+
 afterEach(() => {
   vi.useRealTimers();
   for (const directory of directories.splice(0)) {
@@ -1251,6 +1262,38 @@ describe("database backup and startup recovery", () => {
     recovered.close();
   });
 
+  it("restores a valid backup when the primary has an unparsable suspend boundary", async () => {
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { conversationId, store } = seed(
+      databasePath,
+      "suspend timestamp backup",
+    );
+    const backup = await store.createBackup();
+    store.close();
+    const malformed = new Database(databasePath);
+    insertUnparseableSuspendInterval(malformed);
+    expect(malformed.pragma("quick_check", { simple: true })).toBe("ok");
+    malformed.close();
+
+    const recovered = new RuntimeStore(databasePath, directory, {
+      recoverInterruptedRuns: false,
+    });
+    expect(recovered.databaseRecoveryReport()).toMatchObject({
+      outcome: "restored",
+      restoredBackup: backup.filename,
+      trigger: "primary-corrupt",
+    });
+    expect(recovered.systemSuspends.record({
+      id: "22222222-2222-4222-8222-222222222222",
+      suspendedAt: "2026-08-26T08:00:00.000Z",
+      resumedAt: "2026-08-26T08:05:00.000Z",
+    })).toEqual([]);
+    expect(recovered.conversationDetail(conversationId)?.messages[0]?.content)
+      .toBe("suspend timestamp backup");
+    recovered.close();
+  });
+
   it("restores and upgrades a valid backup from released schema 41", async () => {
     const directory = temporaryDirectory();
     const databasePath = join(directory, "inertia.sqlite");
@@ -1661,6 +1704,41 @@ describe("database backup and startup recovery", () => {
       filename: expect.stringMatching(/\.sqlite$/u),
     });
     primary.close();
+  });
+
+  it("skips an unparsable suspend-boundary backup and preserves repository progress", async () => {
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { conversationId, store } = seed(databasePath, "coherent suspend");
+    const older = await store.createBackup();
+    store.createMessage(conversationId, "malformed suspend", "assistant");
+    const newer = await store.createBackup();
+    store.close();
+    const malformed = new Database(join(
+      databaseRecoveryPaths(databasePath).backupsDirectory,
+      newer.filename,
+    ));
+    insertUnparseableSuspendInterval(malformed);
+    expect(malformed.pragma("quick_check", { simple: true })).toBe("ok");
+    malformed.close();
+    writeFileSync(databasePath, "invalid primary");
+
+    const recovered = new RuntimeStore(databasePath, directory, {
+      recoverInterruptedRuns: false,
+    });
+    expect(recovered.databaseRecoveryReport()).toMatchObject({
+      outcome: "restored",
+      restoredBackup: older.filename,
+      invalidBackupsSkipped: 1,
+    });
+    expect(recovered.systemSuspends.record({
+      id: "22222222-2222-4222-8222-222222222222",
+      suspendedAt: "2026-08-26T08:00:00.000Z",
+      resumedAt: "2026-08-26T08:05:00.000Z",
+    })).toEqual([]);
+    expect(recovered.conversationDetail(conversationId)?.messages
+      .map(({ content }) => content)).toEqual(["coherent suspend"]);
+    recovered.close();
   });
 
   it("skips incomplete migration history and restores the next coherent backup", async () => {

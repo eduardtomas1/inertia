@@ -439,17 +439,28 @@ describe("runtime process protocol", () => {
       unexpected: true,
     })).toBeNull();
 
-    const acknowledgement = {
-      type: "runtime.system-suspend-recorded" as const,
+    const result = {
+      type: "runtime.system-suspend-result" as const,
       id: command.interval.id,
+      recorded: true,
     };
-    expect(parseRuntimeWorkerEvent(acknowledgement)).toEqual(acknowledgement);
+    expect(parseRuntimeWorkerEvent(result)).toEqual(result);
+    expect(parseRuntimeWorkerEvent({ ...result, recorded: false })).toEqual({
+      ...result,
+      recorded: false,
+    });
     expect(parseRuntimeWorkerEvent({
-      ...acknowledgement,
+      ...result,
       id: "not-a-uuid",
     })).toBeNull();
     expect(parseRuntimeWorkerEvent({
-      ...acknowledgement,
+      ...result,
+      recorded: "yes",
+    })).toBeNull();
+    const { recorded: _recorded, ...missingResult } = result;
+    expect(parseRuntimeWorkerEvent(missingResult)).toBeNull();
+    expect(parseRuntimeWorkerEvent({
+      ...result,
       extra: true,
     })).toBeNull();
   });

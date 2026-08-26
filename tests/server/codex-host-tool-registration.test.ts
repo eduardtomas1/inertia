@@ -119,8 +119,8 @@ describe("Codex host-tool registration", () => {
     );
     expect(resumed?.params).toMatchObject({ threadId: "thread-existing" });
     // Codex App Server 0.114.0 exposes dynamicTools only on thread/start.
-    // Unreleased v60 invalidates sessions that predate registration, so every
-    // persisted session reaching this path was provisioned with the tools.
+    // Schema 65 invalidates sessions from before the current Browser tool
+    // capability epoch, so persisted sessions here were provisioned with them.
     expect(resumed?.params).not.toHaveProperty("dynamicTools");
   });
 });

@@ -60,7 +60,7 @@ test("switches workspace tools, opens multiple terminals, and loads a safe nativ
 
   await selectWorkspaceTool(page.locator(".workspace-panel"), "Changes");
   await selectWorkspaceTool(page.locator(".workspace-panel"), "Files");
-  await selectWorkspaceTool(page.locator(".workspace-panel"), "Preview");
+  await selectWorkspaceTool(page.locator(".workspace-panel"), "Browser");
   const address = page.getByRole("textbox", { name: "Preview address" });
   await address.fill(previewUrl);
   await page.getByRole("button", { name: "Go", exact: true }).click();
@@ -81,7 +81,7 @@ test("switches workspace tools, opens multiple terminals, and loads a safe nativ
 test("keeps hostile native previews beneath trusted workspace overlays", async () => {
   await resizeWindow(1440, 920);
   await ensureWorkspaceTools();
-  await selectWorkspaceTool(page.locator(".workspace-panel"), "Preview");
+  await selectWorkspaceTool(page.locator(".workspace-panel"), "Browser");
   const hostilePreviewUrl = `${previewUrl}trusted-overlays`;
   await page.getByRole("textbox", { name: "Preview address" })
     .fill(hostilePreviewUrl);
@@ -104,7 +104,7 @@ test("keeps hostile native previews beneath trusted workspace overlays", async (
   await expect.poll(
     () => app.nativePreviewIsVisible(hostilePreviewUrl),
   ).toBe(false);
-  await selectWorkspaceTool(page.locator(".workspace-panel"), "Preview");
+  await selectWorkspaceTool(page.locator(".workspace-panel"), "Browser");
   await expect.poll(
     () => app.nativePreviewIsVisible(hostilePreviewUrl),
   ).toBe(true);
@@ -143,7 +143,7 @@ test("keeps hostile native previews beneath trusted workspace overlays", async (
 test("keeps app shortcuts active while the native preview owns focus", async () => {
   await resizeWindow(1440, 920);
   await ensureWorkspaceTools();
-  await selectWorkspaceTool(page.locator(".workspace-panel"), "Preview");
+  await selectWorkspaceTool(page.locator(".workspace-panel"), "Browser");
   const focusedPreviewUrl = `${previewUrl}shortcut-focus`;
   await page.getByRole("textbox", { name: "Preview address" })
     .fill(focusedPreviewUrl);

@@ -25,6 +25,7 @@ import {
 import { capturedAgentScreenshotResult } from "./preview-agent-screenshot.js";
 import { BrowserEvidenceCapture, type BrowserEvidenceAuthority, type BrowserEvidencePage } from "./browser-evidence-capture.js";
 import { BrowserEvidenceInspectorRegistry, type BrowserEvidenceImageApproval, type BrowserEvidenceImageInspection } from "./browser-evidence-image-approval.js";
+import { PreviewContextRegistry } from "./preview-lifecycle.js";
 import {
   agentBrowserIdentity,
   previewContext,
@@ -77,32 +78,25 @@ function changedGeometry(): AgentBrowserResult {
   );
 }
 
-function sameBounds(left: Rectangle | null, right: Rectangle): boolean {
-  return left !== null
-    && left.x === right.x && left.y === right.y
-    && left.width === right.width && left.height === right.height;
-}
-
-function providerVisiblePageUrl(value: string): string {
-  try {
-    return new URL("/", value).origin;
-  } catch {
-    return "";
-  }
-}
-
-function stopForAbort(signal?: AbortSignal): void {
-  if (signal?.aborted) throw new Error("browser-action-cancelled");
-}
+function sameBounds(left: Rectangle | null, right: Rectangle): boolean { return left !== null && left.x === right.x && left.y === right.y && left.width === right.width && left.height === right.height; }
+function providerVisiblePageUrl(value: string): string { try { return new URL("/", value).origin; } catch { return ""; } }
+function stopForAbort(signal?: AbortSignal): void { if (signal?.aborted) throw new Error("browser-action-cancelled"); }
 export class PreviewBroker {
   reportInputRefusal(contents: WebContents, value: unknown): boolean { return captureAgentPageInputRefusal(contents, value); }
   readonly #slots = new Map<PreviewOwner, PreviewSlot>();
+  readonly #registeredContexts = new PreviewContextRegistry();
   readonly #pendingBounds = new Map<PreviewOwner, {
     contextId: string;
     bounds: Rectangle;
   }>();
   readonly #captureLocked = new WeakSet<PreviewTab["view"]["webContents"]>();
   constructor(private readonly options: PreviewBrokerOptions) {}
+
+  connect(value: unknown): PreviewState {
+    const { ownerId, contextId, priorContextId } = this.#registeredContexts.connect(value);
+    if (priorContextId && priorContextId !== contextId) this.close(ownerId, priorContextId);
+    return this.#state(ownerId, contextId);
+  }
 
   async navigate(value: unknown): Promise<PreviewState> {
     const request = this.#request(value);
@@ -226,11 +220,15 @@ export class PreviewBroker {
   ): Promise<AgentBrowserResult> {
     try {
       const { contextId, identity } = agentBrowserIdentity(owner);
-      const owned = this.#slotForContext(contextId);
+      stopForAbort(signal);
+      const registeredOwnerId = this.#registeredContexts.ownerFor(contextId);
+      const owned = this.#slotForContext(contextId) ?? (registeredOwnerId
+        ? [registeredOwnerId, this.#ensure(registeredOwnerId, contextId)]
+        : undefined);
       if (!owned) {
         return failure(
           "unavailable",
-          "Open this chat's Preview once before asking the agent to use Inertia Browser.",
+          "Open this chat in the main workspace before using Inertia Browser.",
         );
       }
       const [ownerId, slot] = owned;
@@ -356,12 +354,11 @@ export class PreviewBroker {
       height: Math.max(0, Math.min(candidate.height as number, content.height - y)),
     };
     this.#pendingBounds.set(ownerId, { contextId, bounds });
-    const slot = this.#ownedSlot(ownerId, contextId);
-    if (slot) {
-      if (!sameBounds(slot.bounds, bounds)) slot.boundsGeneration += 1;
-      slot.bounds = bounds;
-      this.#active(slot).view.setBounds(bounds);
-    }
+    const slot = this.#ownedSlot(ownerId, contextId)
+      ?? this.#ensure(ownerId, contextId);
+    if (!sameBounds(slot.bounds, bounds)) slot.boundsGeneration += 1;
+    slot.bounds = bounds;
+    this.#active(slot).view.setBounds(bounds);
   }
 
   closeRequest(value: unknown): void {
@@ -384,10 +381,12 @@ export class PreviewBroker {
     return await slot.evidenceInspectors.inspect(evidenceId, lookup, requestApproval, inspect);
   }
   close(ownerId?: PreviewOwner, contextId?: string): void {
+    if (!ownerId && !contextId) this.#registeredContexts.clear();
     const slots = ownerId
       ? [[ownerId, this.#slots.get(ownerId)] as const]
       : [...this.#slots.entries()];
     for (const [id, slot] of slots) {
+      this.#registeredContexts.release(id, contextId);
       const pending = this.#pendingBounds.get(id);
       if (!contextId || pending?.contextId === contextId) this.#pendingBounds.delete(id);
       if (!slot || (contextId && slot.contextId !== contextId)) continue;
@@ -570,7 +569,8 @@ export class PreviewBroker {
   #ensure(ownerId: PreviewOwner, contextId: string): PreviewSlot {
     const existing = this.#ownedSlot(ownerId, contextId);
     if (existing) return existing;
-    if (this.#slots.has(ownerId)) this.close(ownerId);
+    const displaced = this.#slots.get(ownerId);
+    if (displaced) this.close(ownerId, displaced.contextId);
     let slot!: PreviewSlot;
     const evidence = new BrowserEvidenceCapture({
       isLive: () => this.#ownedSlot(ownerId, contextId) === slot,
@@ -620,6 +620,7 @@ export class PreviewBroker {
     tab.view.setBounds(bounds ?? { x: 0, y: 0, width: 0, height: 0 });
     if (bounds) slot.bounds = bounds;
     this.options.getWindow()?.contentView.addChildView(tab.view);
+    this.#publish(ownerId, contextId);
     return slot;
   }
 

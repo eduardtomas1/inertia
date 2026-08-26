@@ -115,6 +115,7 @@ interface UseSplitWorkspaceSceneOptions {
   conversation: Conversation | null;
   project: Project | null;
   splitConversation: Conversation | null;
+  visible: boolean;
   layout: ConversationPaneLayout;
   snapshotProjects: Project[];
   settings: AppSettings;
@@ -147,6 +148,7 @@ export function useSplitWorkspaceScene({
   conversation,
   project,
   splitConversation,
+  visible,
   layout,
   snapshotProjects,
   settings,
@@ -251,7 +253,7 @@ export function useSplitWorkspaceScene({
   const desktopTools = useStableController(useDesktopTools({
     setActionError,
     previewOwnerId: "secondary",
-    previewContextId: splitConversation?.id ?? null,
+    previewContextId: visible ? splitConversation?.id ?? null : null,
   }));
   const activatePreviewContext = useCallback((run: PreviewWorkspaceRun) => {
     if (

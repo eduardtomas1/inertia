@@ -552,6 +552,11 @@
       "version": 64,
       "name": "PersistAuthoritativeRunState",
       "digest": "fd312d5d33cad9048fa9ae8c517644c8f413fc4054b79760a38ed9861ae89f97"
+    },
+    {
+      "version": 65,
+      "name": "RefreshAgentBrowserCapability",
+      "digest": "1c802868ae932033ba4d3c91d429db8b881beeee4a574aeec986356ce9c91daf"
     }
   ]
 }

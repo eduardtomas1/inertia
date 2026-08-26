@@ -45,6 +45,7 @@ const IPC = {
   threadNotificationActivated: "inertia:thread-notification-activated",
   getAppHealth: "inertia:get-app-health",
   clearAppCache: "inertia:clear-app-cache",
+  previewConnect: "inertia:preview-connect",
   previewNavigate: "inertia:preview-navigate",
   previewCommand: "inertia:preview-command",
   previewTab: "inertia:preview-tab",
@@ -270,6 +271,10 @@ const bridge: DesktopBridge = Object.freeze({
     ipcRenderer.invoke(IPC.getAppHealth) as ReturnType<DesktopBridge["getAppHealth"]>,
   clearAppCache: () =>
     ipcRenderer.invoke(IPC.clearAppCache) as ReturnType<DesktopBridge["clearAppCache"]>,
+  previewConnect: (request: Parameters<DesktopBridge["previewConnect"]>[0]) =>
+    ipcRenderer.invoke(IPC.previewConnect, request) as ReturnType<
+      DesktopBridge["previewConnect"]
+    >,
   previewNavigate: (request: Parameters<DesktopBridge["previewNavigate"]>[0]) =>
     ipcRenderer.invoke(IPC.previewNavigate, request) as ReturnType<
       DesktopBridge["previewNavigate"]

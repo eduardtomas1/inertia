@@ -47,7 +47,7 @@ test("enforces Agent Browser activation and credential privacy boundaries", asyn
   await page.keyboard.press("Escape");
 
   const workspaceTools = await ensureWorkspaceTools(page);
-  await selectWorkspaceTool(workspaceTools, "Preview");
+  await selectWorkspaceTool(workspaceTools, "Browser");
   const workspaceToolsResize = page.getByRole("separator", {
     name: "Resize workspace tools",
   });

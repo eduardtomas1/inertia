@@ -148,6 +148,7 @@ interface AppLayoutProps {
   sceneActiveTool: WorkspacePanelTab | null;
   sceneToggleWorkspaceTools: () => void;
   sceneOpenEnvironment: () => void;
+  sceneOpenBrowser: () => void;
   workspaceToolsUnavailableReason: string | null;
   gitStatus: GitStatusSnapshot | null;
   branches: GitBranchInfo[];
@@ -237,6 +238,7 @@ export function AppLayout({
   sceneActiveTool,
   sceneToggleWorkspaceTools,
   sceneOpenEnvironment,
+  sceneOpenBrowser,
   workspaceToolsUnavailableReason,
   gitStatus,
   branches,
@@ -539,6 +541,9 @@ export function AppLayout({
             onToggleTools={sceneToggleWorkspaceTools}
             workspaceToolsUnavailableReason={workspaceToolsUnavailableReason}
             onOpenEnvironment={sceneOpenEnvironment}
+            {...(!conversationSuppressedInMain
+              ? { onOpenBrowser: sceneOpenBrowser }
+              : {})}
             onCycleTheme={actions.cycleTheme}
             onOpenSettings={() => setView("settings")}
             onOpenConnectionsSettings={actions.openConnectionsSettings}

@@ -222,7 +222,7 @@ test("keeps preview and failed-run actions in Environment", async () => {
     });
     await openPreview.focus();
     await page.keyboard.press("Enter");
-    await expect(page.getByRole("tab", { name: /Preview/u })).toHaveAttribute(
+    await expect(page.getByRole("tab", { name: /Browser/u })).toHaveAttribute(
       "aria-selected",
       "true",
     );

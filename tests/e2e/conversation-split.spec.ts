@@ -328,12 +328,12 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
   const primaryPreview = await openConversationPaneTool(
     primary,
     primaryTitle,
-    "Preview",
+    "Browser",
   );
   const secondaryPreview = await openConversationPaneTool(
     secondary,
     secondaryTitle,
-    "Preview",
+    "Browser",
   );
   const primaryPreviewUrl = `${app.previewUrl}primary-project`;
   const secondaryPreviewUrl = `${app.previewUrl}companion-project`;

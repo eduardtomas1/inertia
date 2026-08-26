@@ -137,6 +137,7 @@ export function useDesktopTools({
       navigation: emptyPreviewState(),
     });
     if (!previewContextId) return;
+    let cancelled = false;
     const unsubscribe = window.inertia.onPreviewState((state) => {
       const authority = authorityRef.current;
       if (
@@ -145,7 +146,24 @@ export function useDesktopTools({
       ) return;
       setOwnedPreview((current) => mergePreviewStateUpdate(current, state));
     });
+    void window.inertia.previewConnect({
+      ownerId: previewOwnerId,
+      contextId: previewContextId,
+    }).then((state) => {
+      const authority = authorityRef.current;
+      if (
+        cancelled
+        || authority.previewOwnerId !== previewOwnerId
+        || authority.previewContextId !== previewContextId
+      ) return;
+      setOwnedPreview({
+        contextId: previewContextId,
+        url: state.url,
+        navigation: state,
+      });
+    }).catch(() => undefined);
     return () => {
+      cancelled = true;
       unsubscribe();
       void window.inertia.previewClose({
         ownerId: previewOwnerId,

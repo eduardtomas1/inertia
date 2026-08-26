@@ -78,6 +78,7 @@ describe("detached chat preload", () => {
       "exportRecoveryData",
       "getBackendCredentialState",
       "getPrivateConnectState",
+      "previewConnect",
       "previewNavigate",
       "getAppHealth",
     ] satisfies (keyof DesktopBridge)[]) {

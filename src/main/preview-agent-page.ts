@@ -253,7 +253,6 @@ export async function semanticPageSnapshot(
           || boundedLowerAttribute(current, "aria-hidden", 10) === "true"
           || (current === element && style.visibility === "hidden")
           || style.display === "none"
-          || effectiveOpacity.get(current) === false
         ) return "";
         if (current === root) break;
         current = current.parentElement;
@@ -294,8 +293,7 @@ export async function semanticPageSnapshot(
           const hidden = ["SCRIPT", "STYLE", "TEMPLATE", "NOSCRIPT"].includes(node.tagName)
             || node.hidden === true
             || boundedLowerAttribute(node, "aria-hidden", 10) === "true"
-            || style.display === "none"
-            || Number(style.opacity || "1") <= 0;
+            || style.display === "none";
           if (!hidden && node.firstChild) {
             node = node.firstChild;
             continue;
@@ -798,7 +796,6 @@ export async function locateAgentPageRef(
           || boundedLowerAttribute(current, "aria-hidden", 10) === "true"
           || (current === candidate && currentStyle.visibility === "hidden")
           || currentStyle.display === "none"
-          || Number(currentStyle.opacity || "1") <= 0
         ) return "";
         if (current === root) break;
         current = current.parentElement;
@@ -839,8 +836,7 @@ export async function locateAgentPageRef(
           const hidden = ["SCRIPT", "STYLE", "TEMPLATE", "NOSCRIPT"].includes(node.tagName)
             || node.hidden === true
             || boundedLowerAttribute(node, "aria-hidden", 10) === "true"
-            || nodeStyle.display === "none"
-            || Number(nodeStyle.opacity || "1") <= 0;
+            || nodeStyle.display === "none";
           if (!hidden && node.firstChild) {
             node = node.firstChild;
             continue;

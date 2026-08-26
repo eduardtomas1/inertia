@@ -100,9 +100,52 @@ describe("agent Browser semantic audit inputs", () => {
     visibilityHiddenSpan.parentNode = imageButton;
     visibleImage.parentElement = visibilityHiddenSpan;
     visibleImage.parentNode = visibilityHiddenSpan;
+    const opacityText = {
+      nodeType: 3, nodeValue: "Save", parentElement: null as unknown,
+      parentNode: null as unknown, nextSibling: null,
+    };
+    const opacityTextSpan = {
+      nodeType: 1, tagName: "SPAN", hidden: false, firstChild: opacityText,
+      parentElement: null as unknown, parentNode: null as unknown, nextSibling: null,
+      getAttribute: () => null, hasAttribute: () => false,
+    };
+    const opacityTextButton = {
+      ...button, firstChild: opacityTextSpan, parentElement: null,
+      getAttribute: () => null, hasAttribute: () => false,
+      contains: (candidate: unknown) => [
+        opacityTextButton, opacityTextSpan, opacityText,
+      ].some((value) => value === candidate),
+      getBoundingClientRect: () => ({
+        x: 150, y: 10, left: 150, top: 10,
+        right: 250, bottom: 40, width: 100, height: 30,
+      }),
+    };
+    opacityTextSpan.parentElement = opacityTextButton;
+    opacityTextSpan.parentNode = opacityTextButton;
+    opacityText.parentElement = opacityTextSpan;
+    opacityText.parentNode = opacityTextSpan;
+    const opacityImage = {
+      nodeType: 1, tagName: "IMG", hidden: false, firstChild: null,
+      parentElement: null as unknown, parentNode: null as unknown, nextSibling: null,
+      getAttribute: (name: string) => name === "alt" ? "Save" : null,
+      hasAttribute: (name: string) => name === "alt",
+    };
+    const opacityImageButton = {
+      ...button, firstChild: opacityImage, parentElement: null,
+      getAttribute: () => null, hasAttribute: () => false,
+      contains: (candidate: unknown) => [opacityImageButton, opacityImage]
+        .some((value) => value === candidate),
+      getBoundingClientRect: () => ({
+        x: 150, y: 50, left: 150, top: 50,
+        right: 250, bottom: 80, width: 100, height: 30,
+      }),
+    };
+    opacityImage.parentElement = opacityImageButton;
+    opacityImage.parentNode = opacityImageButton;
     const elements = [
       input, textarea, readonlyInput, checkbox, button, hidden, ariaHiddenButton,
       imageButton, visibilityHiddenSpan, visibleImage,
+      opacityTextButton, opacityTextSpan, opacityImageButton, opacityImage,
     ];
     const visibilityHiddenParent = { parentElement: null };
     const body = bodyWithText("Visible page copy");
@@ -130,7 +173,8 @@ describe("agent Browser semantic audit inputs", () => {
         visibility: element === visibilityHiddenParent || element === visibilityHiddenSpan
           ? "hidden"
           : "visible",
-        display: "block", opacity: "1",
+        display: "block",
+        opacity: element === opacityTextSpan || element === opacityImage ? "0" : "1",
       }),
     };
     const contents = {
@@ -148,7 +192,7 @@ describe("agent Browser semantic audit inputs", () => {
       text: string;
     };
     expect(snapshot.text).toBe("Visible page copy");
-    expect(snapshot.elements).toHaveLength(6);
+    expect(snapshot.elements).toHaveLength(8);
     expect(snapshot.elements.slice(0, 4).map(({ editable }) => editable))
       .toEqual([true, true, false, false]);
     expect(snapshot.elements[0]).toMatchObject({ role: "region", editable: true });
@@ -157,6 +201,10 @@ describe("agent Browser semantic audit inputs", () => {
       rect: { x: -0.4, y: 170, width: 23.6, height: 23.6 },
     });
     expect(snapshot.elements[5]).toMatchObject({ name: "Checkout", nameSource: "content" });
+    expect(snapshot.elements.slice(6)).toMatchObject([
+      { name: "Save", nameSource: "content" },
+      { name: "Save", nameSource: "content" },
+    ]);
     const audited = JSON.parse(withFrontendBrowserAudit(JSON.stringify(snapshot))) as {
       inertiaAudit: { issues: Array<{ code: string; refs: string[] }> };
     };
@@ -164,6 +212,8 @@ describe("agent Browser semantic audit inputs", () => {
       .toContain("e1");
     expect(audited.inertiaAudit.issues.find(({ code }) => code === "missing-stable-name")?.refs)
       .toContain("e5");
+    expect(audited.inertiaAudit.issues.find(({ code }) => code === "missing-stable-name")?.refs)
+      .not.toEqual(expect.arrayContaining(["e7", "e8"]));
     expect(audited.inertiaAudit.issues.find(({ code }) => code === "small-target")?.refs)
       .toContain("e5");
     expect(audited.inertiaAudit.issues.find(({ code }) => code === "clipped-control")?.refs)
@@ -174,6 +224,12 @@ describe("agent Browser semantic audit inputs", () => {
     document.elementFromPoint = () => imageButton;
     await expect(locateAgentPageRef(contents as never, "e6"))
       .resolves.toMatchObject({ found: true, label: "Checkout" });
+    document.elementFromPoint = () => opacityTextButton;
+    await expect(locateAgentPageRef(contents as never, "e7"))
+      .resolves.toMatchObject({ found: true, label: "Save" });
+    document.elementFromPoint = () => opacityImageButton;
+    await expect(locateAgentPageRef(contents as never, "e8"))
+      .resolves.toMatchObject({ found: true, label: "Save" });
   });
 
   it("bounds aria-disabled before every snapshot and activation normalization", async () => {

@@ -1699,7 +1699,7 @@ describe("agent browser semantic snapshots", () => {
     expect(editedReplacementSnapshot).not.toContain(changedSecret);
   });
 
-  it("includes every valid contenteditable form in semantic refs", async () => {
+  it("classifies contenteditable contents as mutable values, not stable names", async () => {
     const editors = ["", "plaintext-only"].map((mode, index) => {
       const editor = {
         nodeType: 1,
@@ -1709,7 +1709,11 @@ describe("agent browser semantic snapshots", () => {
         checked: undefined,
         firstChild: null as unknown,
         isContentEditable: true,
-        getAttribute: (name: string) => name === "contenteditable" ? mode : null,
+        getAttribute: (name: string) => {
+          if (name === "contenteditable") return mode;
+          if (name === "role") return "textbox";
+          return null;
+        },
         getBoundingClientRect: () => ({
           x: 20, y: 30 + index * 50, left: 20, top: 30 + index * 50,
           right: 220, bottom: 70 + index * 50, width: 200, height: 40,
@@ -1748,15 +1752,19 @@ describe("agent browser semantic snapshots", () => {
     };
 
     const snapshot = JSON.parse(await semanticPageSnapshot(contents as never)) as {
-      elements: Array<{ name: string; nameSource: string }>;
+      elements: Array<{ role: string; name: string; nameSource: string }>;
     };
+    expect(snapshot.elements.map(({ role }) => role)).toEqual([
+      "textbox",
+      "textbox",
+    ]);
     expect(snapshot.elements.map(({ name }) => name)).toEqual([
       "rich text",
       "plaintext-only",
     ]);
     expect(snapshot.elements.map(({ nameSource }) => nameSource)).toEqual([
-      "content",
-      "content",
+      "value",
+      "value",
     ]);
   });
 

@@ -334,13 +334,16 @@ export async function semanticPageSnapshot(
       const contentName = ["INPUT", "SELECT", "TEXTAREA"].includes(element.tagName)
         ? ""
         : boundedElementText(element);
+      const contentNameSource = element.isContentEditable === true
+        ? "value"
+        : "content";
       const candidates = [
         [element.getAttribute("aria-label"), "aria-label"],
         [labelledByFor(element), "aria-labelledby"],
         [element.getAttribute("title"), "title"],
         [element.labels && boundedElementText(element.labels[0]), "label"],
         [inputType === "image" && element.getAttribute("alt"), "alt"],
-        [contentName, "content"],
+        [contentName, contentNameSource],
         [element.getAttribute("placeholder"), "placeholder"],
         [element.value, valueSource],
       ];

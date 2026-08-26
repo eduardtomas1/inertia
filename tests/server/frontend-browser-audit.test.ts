@@ -44,6 +44,9 @@ describe("frontend Browser audit", () => {
         element("weak-checkbox", {
           role: "checkbox", name: "on", nameSource: "value",
         }),
+        element("unlabelled-editor", {
+          role: "textbox", name: "draft text", nameSource: "value",
+        }),
         element("disabled", { name: "", disabled: true, width: 10, height: 10 }),
       ],
       truncated: false,
@@ -59,7 +62,7 @@ describe("frontend Browser audit", () => {
 
     expect(audited.inertiaAudit).toMatchObject({
       scope: "current-semantic-viewport",
-      errors: 2,
+      errors: 3,
     });
     expect(audited.inertiaAudit.issues.map(({ code }) => code)).toEqual([
       "missing-stable-name",
@@ -71,6 +74,7 @@ describe("frontend Browser audit", () => {
       code === "missing-stable-name")?.refs).toEqual([
         "unnamed",
         "weak-checkbox",
+        "unlabelled-editor",
       ]);
     expect(audited.inertiaAudit.limitations.join(" ")).toContain("pixel-level");
     expect(JSON.stringify(audited)).not.toContain("WCAG");

@@ -17,9 +17,16 @@ export class RuntimeSystemSuspendTracker {
 
   suspend(at = new Date().toISOString()): void {
     if (this.active) return;
+    const requestedSuspend = normalizedTimestamp(at, "The system suspend time");
+    const previousResume = this.intervals.at(-1)?.resumedAt;
     this.active = {
       id: randomUUID(),
-      suspendedAt: normalizedTimestamp(at, "The system suspend time"),
+      suspendedAt: previousResume
+        ? new Date(Math.max(
+            Date.parse(requestedSuspend),
+            Date.parse(previousResume),
+          )).toISOString()
+        : requestedSuspend,
     };
   }
 

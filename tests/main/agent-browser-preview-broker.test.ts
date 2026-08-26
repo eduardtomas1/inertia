@@ -301,7 +301,101 @@ function harness() {
 }
 
 describe("agent-owned native Browser", () => {
+  it("opens one shared blank Browser page directly from empty visible bounds", () => {
+    const { broker, children, window } = harness();
+
+    expect(broker.connect({
+      ownerId: "primary",
+      contextId: conversationId,
+    }).tabs).toEqual([]);
+    broker.setBounds({
+      ownerId: "primary",
+      contextId: conversationId,
+      bounds: { x: 10, y: 20, width: 900, height: 600 },
+    });
+    const state = broker.connect({
+      ownerId: "primary",
+      contextId: conversationId,
+    });
+
+    expect(children).toHaveLength(1);
+    expect(state).toMatchObject({
+      url: "",
+      activeTabId: expect.any(String),
+      tabs: [expect.objectContaining({ url: "" })],
+    });
+    expect(window.webContents.send).toHaveBeenCalledWith(
+      "preview-state",
+      expect.objectContaining({
+        ownerId: "primary",
+        contextId: conversationId,
+        activeTabId: state.activeTabId,
+      }),
+    );
+  });
+
+  it("lazily provisions the registered user Browser for an agent and returns its authoritative state", async () => {
+    const { broker, children, window } = harness();
+    expect(broker.connect({
+      ownerId: "primary",
+      contextId: conversationId,
+    }).tabs).toEqual([]);
+    expect(children).toHaveLength(0);
+
+    await expect(broker.perform(runIdentity, { action: "tabs" }))
+      .resolves.toMatchObject({ ok: true });
+    expect(children).toHaveLength(1);
+    await expect(broker.perform(runIdentity, {
+      action: "navigate",
+      url: "http://127.0.0.1:3000/shared-state",
+    })).resolves.toMatchObject({ ok: true });
+
+    const userState = broker.connect({
+      ownerId: "primary",
+      contextId: conversationId,
+    });
+    expect(userState.url).toBe("http://127.0.0.1:3000/shared-state");
+    expect(userState.tabs).toHaveLength(1);
+    expect(window.webContents.send).toHaveBeenCalledWith(
+      "preview-state",
+      expect.objectContaining({
+        ownerId: "primary",
+        contextId: conversationId,
+        url: "http://127.0.0.1:3000/shared-state",
+      }),
+    );
+  });
+
+  it("does not leave a false Browser page after cancellation or context release", async () => {
+    const { broker, children } = harness();
+    broker.connect({
+      ownerId: "primary",
+      contextId: conversationId,
+    });
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(broker.perform(
+      runIdentity,
+      { action: "tabs" },
+      controller.signal,
+    )).resolves.toMatchObject({ ok: false, code: "cancelled" });
+    expect(children).toHaveLength(0);
+    expect(broker.connect({
+      ownerId: "primary",
+      contextId: conversationId,
+    }).tabs).toEqual([]);
+
+    broker.close("primary", conversationId);
+    await expect(broker.perform(runIdentity, { action: "tabs" }))
+      .resolves.toMatchObject({ ok: false, code: "unavailable" });
+    expect(children).toHaveLength(0);
+  });
+
   it("keeps one hardened ephemeral tab session and manages bounded pages atomically", async () => {
+    const viewOffset = electronState.viewOptions.length;
+    const contentsOffset = electronState.contents.length;
+    const sessionOffset = electronState.sessions.length;
     const { broker } = harness();
     const initial = await broker.navigate({
       ownerId: "primary",
@@ -310,7 +404,7 @@ describe("agent-owned native Browser", () => {
     });
     expect(initial.tabs).toHaveLength(1);
     expect(initial.url).toBe("http://127.0.0.1:3000/");
-    expect(electronState.viewOptions[0]).toMatchObject({
+    expect(electronState.viewOptions[viewOffset]).toMatchObject({
       webPreferences: {
         partition: expect.stringMatching(/^inertia-preview-/u),
         contextIsolation: true,
@@ -323,24 +417,24 @@ describe("agent-owned native Browser", () => {
         preload: expect.stringMatching(/preview-agent-privacy\.cjs$/u),
       },
     });
-    expect(electronState.contents[0]!.debugger.sendCommand)
+    expect(electronState.contents[contentsOffset]!.debugger.sendCommand)
       .toHaveBeenCalledWith("Page.enable");
-    expect(electronState.contents[0]!.debugger.sendCommand)
+    expect(electronState.contents[contentsOffset]!.debugger.sendCommand)
       .toHaveBeenCalledWith("DOM.enable");
-    expect(electronState.contents[0]!.debugger.isAttached()).toBe(true);
-    expect(electronState.contents[0]!.navigationHistory.clear).not.toHaveBeenCalled();
-    expect(electronState.contents[0]!.navigationHistory.removeEntryAtIndex)
+    expect(electronState.contents[contentsOffset]!.debugger.isAttached()).toBe(true);
+    expect(electronState.contents[contentsOffset]!.navigationHistory.clear).not.toHaveBeenCalled();
+    expect(electronState.contents[contentsOffset]!.navigationHistory.removeEntryAtIndex)
       .toHaveBeenCalledExactlyOnceWith(0);
     await expect(broker.perform(conversationId, { action: "snapshot" }))
       .resolves.toMatchObject({ ok: true });
-    expect(electronState.contents[0]!.debugger.sendCommand).toHaveBeenCalledWith(
+    expect(electronState.contents[contentsOffset]!.debugger.sendCommand).toHaveBeenCalledWith(
       "Page.setInterceptFileChooserDialog",
       { enabled: false },
     );
-    expect(electronState.contents[0]!.debugger.isAttached()).toBe(true);
-    expect((electronState.viewOptions[0]!.webPreferences as { partition: string }).partition)
+    expect(electronState.contents[contentsOffset]!.debugger.isAttached()).toBe(true);
+    expect((electronState.viewOptions[viewOffset]!.webPreferences as { partition: string }).partition)
       .not.toMatch(/^persist:/u);
-    expect(electronState.sessions[0]).toMatchObject({
+    expect(electronState.sessions[sessionOffset]).toMatchObject({
       permissionChecks: 1,
       permissionRequests: 1,
       downloadHandlers: 1,

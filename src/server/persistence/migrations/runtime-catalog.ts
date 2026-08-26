@@ -1225,7 +1225,7 @@ export function runtimeMigrationCatalog(): readonly DatabaseMigration[] {
       conversationContextPacketsMigration,
       nativeKimiProviderMigration,
       persistDiscordReleaseRepositoryUrl,
-      authoritativeRunStateMigration,
+      authoritativeRunStateMigration, { name: "RefreshAgentBrowserCapability", up: "DELETE FROM agent_goals WHERE source = 'codex-native' AND conversation_id IN (SELECT id FROM conversations WHERE provider_id = 'codex' AND provider_session_id IS NOT NULL); UPDATE conversations SET provider_session_id = NULL, continuation_identity_json = NULL WHERE provider_id = 'codex' AND provider_session_id IS NOT NULL;" },
     );
     return createRuntimeMigrationCatalog(legacyMigrations, migrationExtensions);
 }

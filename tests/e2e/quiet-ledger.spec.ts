@@ -222,7 +222,7 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     const previewTools = page.getByRole("complementary", {
       name: "Workspace tools",
     });
-    await selectWorkspaceTool(previewTools, "Preview");
+    await selectWorkspaceTool(previewTools, "Browser");
     const hostilePreviewUrl = `${app.previewUrl}approval-overlay`;
     await previewTools.getByRole("textbox", {
       name: "Preview address",

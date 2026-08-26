@@ -285,6 +285,7 @@ export default function App(): React.JSX.Element {
     ? primaryPaneLayout.toggleWorkspaceTools
     : toggleWorkspaceTools;
   const sceneOpenEnvironment = () => sceneSetActiveTool("environment");
+  const sceneOpenBrowser = () => sceneSetActiveTool("preview");
   const conversationProjection = useStableController(
     useConversationProjection({
       snapshot: connection.snapshot,
@@ -494,7 +495,11 @@ export default function App(): React.JSX.Element {
     useDesktopTools({
       setActionError,
       previewOwnerId: "primary",
-      previewContextId: conversation?.id ?? null,
+      previewContextId: conversation
+        && !suppressedMainConversationIds.has(conversation.id)
+        && !detachedChats.conversationIds.has(conversation.id)
+        ? conversation.id
+        : null,
     }),
   );
   const {
@@ -1189,6 +1194,7 @@ export default function App(): React.JSX.Element {
       sceneActiveTool={sceneHeaderActiveTool}
       sceneToggleWorkspaceTools={sceneToggleWorkspaceTools}
       sceneOpenEnvironment={sceneOpenEnvironment}
+      sceneOpenBrowser={sceneOpenBrowser}
       workspaceToolsUnavailableReason={workspaceToolsUnavailableReason}
       gitStatus={gitStatus}
       branches={branches}

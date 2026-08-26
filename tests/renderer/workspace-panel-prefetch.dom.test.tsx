@@ -124,14 +124,14 @@ describe("workspace tool intent prefetch", () => {
     expect(screen.getByRole("tab", { name: "Environment" })).toHaveFocus();
 
     fireEvent.click(screen.getByLabelText("Choose workspace tool"));
-    fireEvent.click(screen.getByRole("button", { name: "Preview" }), {
+    fireEvent.click(screen.getByRole("button", { name: "Browser" }), {
       detail: 0,
     });
     flushFocusFrame();
-    expect(screen.getByRole("tab", { name: "Preview" })).toHaveFocus();
+    expect(screen.getByRole("tab", { name: "Browser" })).toHaveFocus();
     expect(onTabChange).toHaveBeenLastCalledWith("preview");
 
-    fireEvent.keyDown(screen.getByRole("tab", { name: "Preview" }), {
+    fireEvent.keyDown(screen.getByRole("tab", { name: "Browser" }), {
       key: "Home",
     });
     flushFocusFrame();
@@ -149,10 +149,10 @@ describe("workspace tool intent prefetch", () => {
       key: "End",
     });
     flushFocusFrame();
-    expect(screen.getByRole("tab", { name: "Preview" })).toHaveFocus();
+    expect(screen.getByRole("tab", { name: "Browser" })).toHaveFocus();
     expect(onTabChange).toHaveBeenLastCalledWith("preview");
 
-    fireEvent.keyDown(screen.getByRole("tab", { name: "Preview" }), {
+    fireEvent.keyDown(screen.getByRole("tab", { name: "Browser" }), {
       key: "ArrowRight",
     });
     flushFocusFrame();

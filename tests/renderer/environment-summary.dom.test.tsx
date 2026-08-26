@@ -18,7 +18,7 @@ import { EnvironmentPanel } from "../../src/renderer/src/components/EnvironmentP
 import { WorkspaceHeader } from "../../src/renderer/src/components/WorkspaceHeader";
 import { WorkspacePanel } from "../../src/renderer/src/components/WorkspacePanel";
 import type { EnvironmentSummarySnapshot } from "../../src/renderer/src/utils/environmentSummary";
-import type { Project } from "../../src/shared/contracts";
+import type { Conversation, Project } from "../../src/shared/contracts";
 
 type EnvironmentRun = EnvironmentSummarySnapshot["checks"][number];
 
@@ -198,23 +198,27 @@ const project: Project = {
 
 function HeaderHarness({
   activeProject = null,
+  conversation = null,
   activeTool = null,
   workspaceToolsUnavailableReason = null,
   onOpenSettings = vi.fn(),
   onOpenConnectionsSettings = vi.fn(),
   onOpenEnvironment = vi.fn(),
+  onOpenBrowser,
 }: {
   activeProject?: Project | null;
-  activeTool?: "environment" | null;
+  conversation?: Conversation | null;
+  activeTool?: "environment" | "preview" | null;
   workspaceToolsUnavailableReason?: string | null;
   onOpenSettings?: () => void;
   onOpenConnectionsSettings?: () => void;
   onOpenEnvironment?: () => void;
+  onOpenBrowser?: () => void;
 }): React.JSX.Element {
   return (
     <WorkspaceHeader
       project={activeProject}
-      conversation={null}
+      conversation={conversation}
       view="workspace"
       activeTool={activeTool}
       sidebarCollapsed={false}
@@ -227,6 +231,7 @@ function HeaderHarness({
       onToggleTools={vi.fn()}
       workspaceToolsUnavailableReason={workspaceToolsUnavailableReason}
       onOpenEnvironment={onOpenEnvironment}
+      onOpenBrowser={onOpenBrowser}
       onCycleTheme={vi.fn()}
       onOpenSettings={onOpenSettings}
       onOpenConnectionsSettings={onOpenConnectionsSettings}
@@ -388,6 +393,37 @@ describe("Environment panel", () => {
       <HeaderHarness activeProject={project} activeTool="environment" />,
     );
     expect(screen.getByRole("button", { name: "Open Environment" }))
+      .toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("opens Browser directly for the active chat and reflects its active state", () => {
+    const onOpenBrowser = vi.fn();
+    const conversation = {
+      id: "22222222-2222-4222-8222-222222222222",
+      title: "Browser chat",
+      worktreePath: null,
+    } as Conversation;
+    const view = render(
+      <HeaderHarness
+        activeProject={project}
+        conversation={conversation}
+        onOpenBrowser={onOpenBrowser}
+      />,
+    );
+    const trigger = screen.getByRole("button", { name: "Open Browser" });
+    expect(trigger).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(trigger);
+    expect(onOpenBrowser).toHaveBeenCalledOnce();
+
+    view.rerender(
+      <HeaderHarness
+        activeProject={project}
+        conversation={conversation}
+        activeTool="preview"
+        onOpenBrowser={onOpenBrowser}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Open Browser" }))
       .toHaveAttribute("aria-pressed", "true");
   });
 

@@ -653,6 +653,11 @@ export interface DesktopBridge {
   getAppHealth: () => Promise<AppHealthSnapshot>;
   /** Clears Chromium's recreatable HTTP cache only; user data and provider state are untouched. */
   clearAppCache: () => Promise<AppHealthSnapshot>;
+  /** Registers the visible chat as a Browser owner and returns its current shared state. */
+  previewConnect: (request: {
+    ownerId: string;
+    contextId: string;
+  }) => Promise<PreviewState>;
   previewNavigate: (request: {
     ownerId: string;
     contextId: string;

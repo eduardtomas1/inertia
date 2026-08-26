@@ -138,6 +138,7 @@ const IPC = {
   threadNotificationActivated: "inertia:thread-notification-activated",
   getAppHealth: "inertia:get-app-health",
   clearAppCache: "inertia:clear-app-cache",
+  previewConnect: "inertia:preview-connect",
   previewNavigate: "inertia:preview-navigate",
   previewCommand: "inertia:preview-command",
   previewTab: "inertia:preview-tab",
@@ -667,6 +668,10 @@ function registerIpcHandlers(): void {
   ipcMain.handle(IPC.clearAppCache, async (event, ...args) => {
     assertTrustedIpc(event, args.length);
     return await appHealthCollector.clearCache();
+  });
+  ipcMain.handle(IPC.previewConnect, (event, ...args) => {
+    assertTrustedIpc(event, args.length, 1);
+    return previewBroker.connect(args[0]);
   });
   ipcMain.handle(IPC.previewNavigate, async (event, ...args) => {
     assertTrustedIpc(event, args.length, 1);

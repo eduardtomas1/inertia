@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
-import { ChevronDown, FolderOpen, GitBranch, Info, ListFilter, MessageSquarePlus, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, PictureInPicture2, Plus, RadioTower, Settings, SunMoon } from "lucide-react";
+import { ChevronDown, FolderOpen, GitBranch, Globe2, Info, ListFilter, MessageSquarePlus, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, PictureInPicture2, Plus, RadioTower, Settings, SunMoon } from "lucide-react";
 import type { Conversation, GitBranchInfo, GitStatusSnapshot, Project, ProjectAction, ThemePreference } from "@shared/contracts";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { conversationContextMismatch } from "../lib/newConversation";
@@ -34,6 +34,7 @@ type WorkspaceHeaderProps = {
   onToggleTools: () => void;
   workspaceToolsUnavailableReason?: string | null;
   onOpenEnvironment: () => void;
+  onOpenBrowser?: () => void;
   onCycleTheme: () => void;
   onOpenSettings: () => void;
   onOpenConnectionsSettings: () => void;
@@ -69,6 +70,7 @@ export function WorkspaceHeader({
   onToggleTools,
   workspaceToolsUnavailableReason = null,
   onOpenEnvironment,
+  onOpenBrowser,
   onCycleTheme,
   onOpenSettings,
   onOpenConnectionsSettings,
@@ -366,6 +368,20 @@ export function WorkspaceHeader({
               </div>
             )}
           </>
+        )}
+        {view === "workspace" && project && (
+          conversation && onOpenBrowser && (
+            <IconButton
+              label="Open Browser"
+              aria-pressed={activeTool === "preview"}
+              onClick={() => {
+                setMenu(null);
+                onOpenBrowser();
+              }}
+            >
+              <Globe2 size={17} />
+            </IconButton>
+          )
         )}
         {view === "workspace" && project && (
           <div className="header-popover-anchor environment-panel-anchor">

@@ -33,8 +33,8 @@ afterEach(async () => {
 
 const hostTools: ProviderHostToolBridge = {
   definitions: [{
-    name: "inertia_list_conversations",
-    description: "List safe chats.",
+    name: "inertia_browser_tabs",
+    description: "List the shared Inertia Browser pages for this chat.",
     inputSchema: { type: "object", additionalProperties: false },
     inputValidator: z.object({}).strict(),
     readOnly: true,
@@ -254,7 +254,7 @@ describe.sequential("provider host-tool injection", () => {
           if (!canUseTool) throw new Error("Claude did not install its tool policy callback.");
           const stream = (async function* (): AsyncGenerator<SDKMessage> {
             permission = await canUseTool(
-              "mcp__inertia-chat-manager__inertia_list_conversations",
+              "mcp__inertia-chat-manager__inertia_browser_tabs",
               {},
               {
                 signal: new AbortController().signal,

@@ -1644,6 +1644,83 @@ describe("runtime migration catalog", () => {
     });
     migrated.close();
   });
+
+  it("refreshes the Codex Browser capability epoch without resetting other providers", async () => {
+    const directory = await temporaryDirectory();
+    const databasePath = join(directory, "schema-64-browser-tools.sqlite");
+    const workspacePath = join(directory, "workspace");
+    await mkdir(workspacePath);
+    const store = new RuntimeStore(databasePath, workspacePath, {
+      recoverInterruptedRuns: false,
+    });
+    const project = store.createProject("Browser capability", workspacePath);
+    const codex = store.createConversation(project.id, "Existing Codex chat", {
+      providerId: "codex",
+    });
+    const resumableProviders = ["claude", "opencode", "cursor", "kimi"] as const;
+    const resumableConversations = resumableProviders.map((providerId) =>
+      store.createConversation(project.id, `Existing ${providerId} chat`, {
+        providerId,
+      }));
+    store.createMessage(codex.id, "Keep the Browser request transcript.");
+    store.updateConversation(codex.id, {
+      providerSessionId: "codex-before-browser-capability",
+    });
+    for (const conversation of resumableConversations) {
+      store.updateConversation(conversation.id, {
+        providerSessionId: `${conversation.providerId}-browser-session`,
+      });
+    }
+    store.upsertAgentGoal({
+      conversationId: codex.id,
+      source: "codex-native",
+      providerSessionId: "codex-before-browser-capability",
+      objective: "Provider-owned goal from incompatible session",
+      status: "active",
+      tokenBudget: null,
+      tokensUsed: 4,
+      timeUsedSeconds: 2,
+      createdAt: "2026-08-22T10:00:00.000Z",
+      updatedAt: "2026-08-22T10:01:00.000Z",
+      synchronizedAt: "2026-08-22T10:01:00.000Z",
+    });
+    store.close();
+
+    const schema64 = new Database(databasePath);
+    schema64.prepare("DELETE FROM schema_migrations WHERE version = 65").run();
+    expect((schema64.prepare(
+      "SELECT MAX(version) AS version FROM schema_migrations",
+    ).get() as { version: number }).version).toBe(64);
+    schema64.close();
+
+    migrateFixtureInPlace(databasePath);
+    migrateFixtureInPlace(databasePath);
+
+    const migrated = new RuntimeStore(databasePath, workspacePath, {
+      recoverInterruptedRuns: false,
+    });
+    expect(migrated.conversation(codex.id)).toMatchObject({
+      providerSessionId: null,
+      continuationIdentity: null,
+    });
+    expect(migrated.conversationDetail(codex.id)!.messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: "user",
+          content: "Keep the Browser request transcript.",
+        }),
+      ]),
+    );
+    expect(migrated.agentGoals(codex.id)).toEqual([]);
+    for (const conversation of resumableConversations) {
+      expect(migrated.conversation(conversation.id)).toMatchObject({
+        providerSessionId: `${conversation.providerId}-browser-session`,
+        continuationIdentity: expect.any(Object),
+      });
+    }
+    migrated.close();
+  });
+
   it.each(["complete", "partial"] as const)(
     "fails closed when schema 61 finds an unreceipted %s context table",
     async (shape) => {
@@ -1926,6 +2003,7 @@ describe("runtime migration catalog", () => {
       { version: 62 },
       { version: 63 },
       { version: 64 },
+      { version: 65 },
     ]);
     expect((migrated.prepare(
       "SELECT auto_scroll_to_final_answer AS enabled FROM app_state WHERE id = 1",

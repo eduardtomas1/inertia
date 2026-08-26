@@ -72,6 +72,14 @@ describe("main preview URL boundary", () => {
     expect(embeddedBoundary).not.toContain("shell.openExternal");
     expect(broker).toContain("createPreviewTab({");
 
+    const connectStart = main.indexOf("ipcMain.handle(IPC.previewConnect");
+    const connectEnd = main.indexOf(
+      "\n  ipcMain.handle(IPC.previewNavigate",
+      connectStart,
+    );
+    const connectIpc = main.slice(connectStart, connectEnd);
+    expect(connectIpc).toContain("previewBroker.connect");
+
     const ipcStart = main.indexOf("ipcMain.handle(IPC.previewNavigate");
     const ipcEnd = main.indexOf(
       "\n  ipcMain.handle(IPC.previewCommand",

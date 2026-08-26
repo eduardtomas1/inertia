@@ -1,15 +1,17 @@
 # Inertia Agent Browser
 
-The Inertia Agent Browser is the existing native Preview surface extended into
-an exact-chat, multi-page browser that coding agents can inspect and control.
+The Inertia Agent Browser is an exact-chat, native multi-page browser that the
+user and coding agent inspect and control through one authoritative surface.
 It is not a Playwright process, a provider-specific browser skill, or a remote
 browser service. Electron's privileged main process owns every page and the
 local runtime receives only a narrow command broker.
 
 ## Product contract
 
-- Open Preview for the chat that should own the browser. The browser remains
-  unavailable to other chats, split panes, detached windows, and stale turns.
+- Select a chat in the main workspace. Its Browser button opens a blank page
+  directly; if an authorized agent calls a Browser tool first, Inertia lazily
+  creates that same visible page without requiring a manual open. A Browser
+  remains unavailable to background chats, detached windows, and stale turns.
 - A chat may hold at most eight ephemeral pages. Pages share that chat's one
   non-persistent browser session and disappear when ownership closes.
 - Only loopback development origins accepted by the existing preview URL
@@ -21,7 +23,11 @@ local runtime receives only a narrow command broker.
   with a fixed bounded label inside the visible page.
 - Browser tools are injected automatically into the existing exact-turn host
   bridge for Codex, Claude, Cursor, Kimi Code, and OpenCode. No skill install is
-  required.
+  required. Claude, Cursor, Kimi Code, and OpenCode advertise the bridge again
+  on resumed turns. Codex App Server cannot inject dynamic tools into an
+  already-live native thread, so the database capability epoch clears only its
+  opaque native continuation once and starts the next turn with current tools;
+  the Inertia conversation and visible transcript are preserved.
 
 ## Agent tools
 

@@ -18,8 +18,9 @@ export async function selectWorkspaceTool(
   panel: Locator,
   name: string,
 ): Promise<void> {
+  const tabId = name === "Browser" ? "preview" : name.toLowerCase();
   const tab = panel.locator(
-    `[data-workspace-tab="${name.toLowerCase()}"]`,
+    `[data-workspace-tab="${tabId}"]`,
   );
   if (await tab.isVisible().catch(() => false)) {
     await tab.click();
@@ -33,7 +34,7 @@ export async function selectWorkspaceTool(
 export async function openConversationPaneTool(
   pane: Locator,
   chatTitle: string,
-  tab: "Changes" | "Files" | "Terminal" | "Goal" | "Preview",
+  tab: "Changes" | "Files" | "Terminal" | "Goal" | "Browser",
 ): Promise<Locator> {
   const tools = pane.getByRole("complementary", { name: "Workspace tools" });
   if (!await tools.isVisible().catch(() => false)) {

@@ -2316,6 +2316,16 @@ describe("workspace pane authority", () => {
 
   it("closes and resets a native preview when its conversation changes", async () => {
     const previewClose = vi.fn(async () => undefined);
+    const previewConnect = vi.fn(async () => ({
+      url: "",
+      loading: false,
+      canGoBack: false,
+      canGoForward: false,
+      activeTabId: null,
+      tabs: [],
+      agentActivity: null,
+      evidence: { revision: 0, entries: [], omitted: false },
+    }));
     let settleNavigation: ((state: {
       url: string;
       loading: boolean;
@@ -2326,6 +2336,7 @@ describe("workspace pane authority", () => {
       configurable: true,
       value: {
         previewClose,
+        previewConnect,
         onPreviewState: vi.fn(() => () => undefined),
         previewNavigate: vi.fn(({ url }: { url: string }) =>
           new Promise((resolve) => {
@@ -2346,6 +2357,10 @@ describe("workspace pane authority", () => {
       }),
       { initialProps: { contextId: alphaChat.id } },
     );
+    await waitFor(() => expect(previewConnect).toHaveBeenCalledWith({
+      ownerId: "primary",
+      contextId: alphaChat.id,
+    }));
     act(() => hook.result.current.navigatePreview("http://localhost:3000"));
     expect(hook.result.current.previewUrl).toBe("http://localhost:3000");
 
@@ -2366,6 +2381,48 @@ describe("workspace pane authority", () => {
         contextId: alphaChat.id,
       });
     });
+  });
+
+  it("hydrates an agent-created Browser from the same authoritative state", async () => {
+    const sharedState = {
+      url: "http://127.0.0.1:4173/shared",
+      loading: false,
+      canGoBack: true,
+      canGoForward: false,
+      activeTabId: "55555555-5555-4555-8555-555555555555",
+      tabs: [{
+        id: "55555555-5555-4555-8555-555555555555",
+        title: "Shared Browser",
+        url: "http://127.0.0.1:4173/shared",
+        loading: false,
+      }],
+      agentActivity: null,
+      evidence: { revision: 0, entries: [], omitted: false },
+    };
+    const previewConnect = vi.fn(async () => sharedState);
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: {
+        previewClose: vi.fn(async () => undefined),
+        previewConnect,
+        onPreviewState: vi.fn(() => () => undefined),
+      },
+    });
+    const hook = renderHook(() => useDesktopTools({
+      setActionError: vi.fn(),
+      previewOwnerId: "primary",
+      previewContextId: alphaChat.id,
+    }));
+
+    await waitFor(() => {
+      expect(hook.result.current.previewUrl).toBe(sharedState.url);
+      expect(hook.result.current.previewNavigation.tabs).toEqual(sharedState.tabs);
+    });
+    expect(previewConnect).toHaveBeenLastCalledWith({
+      ownerId: "primary",
+      contextId: alphaChat.id,
+    });
+    expect(hook.result.current.previewUrl).toBe(sharedState.url);
   });
 
 });

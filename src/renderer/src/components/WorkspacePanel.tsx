@@ -44,7 +44,7 @@ const tabMeta: Record<WorkspacePanelTab, { label: string; icon: React.JSX.Elemen
   terminal: { label: "Terminal", icon: <TerminalSquare size={15} aria-hidden="true" /> },
   goal: { label: "Goal", icon: <Flag size={15} aria-hidden="true" /> },
   plan: { label: "Plan", icon: <ListChecks size={15} aria-hidden="true" /> },
-  preview: { label: "Preview", icon: <Globe2 size={15} aria-hidden="true" /> },
+  preview: { label: "Browser", icon: <Globe2 size={15} aria-hidden="true" /> },
 };
 
 const defaultTabs: readonly WorkspacePanelTab[] = [

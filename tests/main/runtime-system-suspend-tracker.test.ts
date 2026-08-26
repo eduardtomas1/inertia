@@ -28,7 +28,6 @@ afterEach(() => {
 });
 
 describe("RuntimeSystemSuspendTracker", () => {
-  // Temporary workflow synchronization sentinel; removed before final review.
   it("retains one completed interval and ignores duplicate suspend signals", () => {
     const tracker = new RuntimeSystemSuspendTracker();
     tracker.suspend("2026-08-25T12:15:39.000Z");

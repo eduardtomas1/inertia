@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -9,6 +9,14 @@ const moduleUrl = pathToFileURL(join(repositoryRoot, "scripts", "release-contain
 
 async function smokeModule() {
   return await import(moduleUrl) as {
+    macImageIsMounted: (value: unknown, mountPoint: string) => boolean;
+    reconcileMacImageMount: (
+      mountPoint: string,
+      operations: {
+        queryMount: (mountPoint: string) => Promise<boolean>;
+        detach: (mountPoint: string) => Promise<void>;
+      },
+    ) => Promise<void>;
     releaseContainerNames: (
       version: string,
       channel: "canary" | "stable",
@@ -60,6 +68,51 @@ describe("final release container smoke", () => {
     )).toEqual([]);
   });
 
+  it("reconciles interrupted DMG mount state before temporary cleanup", async () => {
+    const { macImageIsMounted, reconcileMacImageMount } = await smokeModule();
+    const mountPoint = "/private/tmp/inertia smoke/dmg";
+    expect(macImageIsMounted({
+      images: [{
+        "system-entities": [
+          { "dev-entry": "/dev/disk9s1", "mount-point": mountPoint },
+        ],
+      }],
+    }, mountPoint)).toBe(true);
+    expect(macImageIsMounted({ images: [] }, mountPoint)).toBe(false);
+
+    let mounted = true;
+    let detachCalls = 0;
+    await expect(reconcileMacImageMount(mountPoint, {
+      queryMount: async () => mounted,
+      detach: async () => {
+        detachCalls += 1;
+        mounted = false;
+      },
+    })).resolves.toBeUndefined();
+    expect(detachCalls).toBe(1);
+
+    await expect(reconcileMacImageMount(mountPoint, {
+      queryMount: async () => true,
+      detach: async () => { throw new Error("interrupted detach"); },
+    })).rejects.toMatchObject({ preserveTemporaryRoot: true });
+    await expect(reconcileMacImageMount(mountPoint, {
+      queryMount: async () => { throw new Error("unknown mount state"); },
+      detach: async () => {},
+    })).rejects.toMatchObject({ preserveTemporaryRoot: true });
+  });
+
+  it("uses the canonical physical macOS mountpoint identity", async () => {
+    if (process.platform !== "darwin") return;
+    const requested = await mkdtemp("/tmp/inertia-canonical-dmg-test-");
+    try {
+      const canonical = await realpath(requested);
+      expect(requested).toMatch(/^\/tmp\//u);
+      expect(canonical).toMatch(/^\/private\/tmp\//u);
+    } finally {
+      await rm(requested, { force: true, recursive: true });
+    }
+  });
+
   it("pins the corrected builder and static AppImage runtime toolsets", async () => {
     const manifest = JSON.parse(await readFile(join(repositoryRoot, "package.json"), "utf8")) as {
       build: { toolsets?: { appimage?: string } };
@@ -94,8 +147,15 @@ describe("final release container smoke", () => {
 
   it("keeps container validation bounded to native architectures", async () => {
     const source = await readFile(join(repositoryRoot, "scripts", "release-container-smoke.mjs"), "utf8");
-    expect(source).toContain('runBounded(appImage, ["--appimage-version"]');
-    expect(source).toContain('runBounded(appImage, ["--appimage-extract"]');
+    expect(source).toContain('import { runBounded } from "./bounded-process-tree.mjs"');
+    expect(source).not.toContain("spawnSync");
+    expect(source).toContain('await runContainerCommand(appImage, ["--appimage-version"]');
+    expect(source).toContain('await runContainerCommand(appImage, ["--appimage-extract"]');
+    expect(source).toContain("operationError?.preserveTemporaryRoot === true");
+    expect(source).toContain("mountAttempted = true");
+    expect(source).toContain("await realpath(requestedExtractionRoot)");
+    expect(source).toContain("await reconcileMacImageMount(extractionRoot)");
+    expect(source).toContain('INERTIA_PACKAGE_SMOKE_INHERIT_PROCESS_GROUP: "1"');
     expect(source).toContain('}, ["APPIMAGE_EXTRACT_AND_RUN"]);');
     expect(source).toContain('APPIMAGE_EXTRACT_AND_RUN: "1"');
     expect(source).toContain("AppImage default mount/AppRun smoke passed");

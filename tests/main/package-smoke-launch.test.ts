@@ -13,6 +13,7 @@ async function launchModule() {
     packageSmokeProcessesExited: (options: {
       launcherPid: number;
       mainPid: number;
+      ownedProcessGroupId?: number | null;
       runtimePid: number;
       processExists: (pid: number) => boolean;
       processGroupExists: (pid: number) => boolean;
@@ -27,6 +28,7 @@ async function launchModule() {
         allowLauncherHandoff: boolean;
         launchedAt: number;
         launcherPid: number;
+        ownedProcessGroupId?: number;
         ownerToken: string;
         processExists: (pid: number) => boolean;
         processGroupId: (pid: number) => number | null;
@@ -38,6 +40,10 @@ async function launchModule() {
       launcherTimeoutMs: number;
       waitForReadiness: () => Promise<unknown>;
     }) => Promise<unknown>;
+    packagedAppUsesDetachedProcessGroup: (
+      platform: NodeJS.Platform,
+      inheritSupervisedProcessGroup: boolean,
+    ) => boolean;
   };
 }
 
@@ -56,6 +62,22 @@ function readiness(overrides: Record<string, unknown> = {}) {
 afterEach(() => vi.unstubAllEnvs());
 
 describe("package smoke launcher handoff", () => {
+  it("keeps final-container apps inside the inherited supervisor group", async () => {
+    const { packagedAppUsesDetachedProcessGroup, parsePackageSmokeReadiness } = await launchModule();
+    expect(packagedAppUsesDetachedProcessGroup("darwin", true)).toBe(false);
+    expect(packagedAppUsesDetachedProcessGroup("linux", true)).toBe(false);
+    expect(packagedAppUsesDetachedProcessGroup("linux", false)).toBe(true);
+    expect(parsePackageSmokeReadiness(readiness(), {
+      allowLauncherHandoff: true,
+      launchedAt: 1_000,
+      launcherPid: 101,
+      ownedProcessGroupId: 909,
+      ownerToken,
+      processExists: (pid) => pid === 202 || pid === 303,
+      processGroupId: () => 909,
+    })).toMatchObject({ mainPid: 202, runtimePid: 303 });
+  });
+
   it("accepts a live, token-bound main process distinct from a successful AppImage launcher", async () => {
     const { parsePackageSmokeReadiness, waitForPackageSmokeReadiness } = await launchModule();
     expect(parsePackageSmokeReadiness(readiness(), {

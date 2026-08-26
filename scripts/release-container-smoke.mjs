@@ -1,42 +1,108 @@
-import { spawnSync } from "node:child_process";
 import { constants } from "node:fs";
-import { access, lstat, mkdtemp, mkdir, rm } from "node:fs/promises";
+import { access, lstat, mkdtemp, mkdir, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { runBounded } from "./bounded-process-tree.mjs";
 import { inspectNativeBinaryArchitecture } from "./native-binary-architecture.mjs";
 
 const ARCHITECTURES = new Set(["arm64", "x64"]);
 const CHANNELS = new Set(["canary", "stable"]);
 const VERSION_PATTERN = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u;
-const COMMAND_OUTPUT_LIMIT = 4 * 1024 * 1024;
 const CONTAINER_TIMEOUT_MS = 3 * 60_000;
 const PACKAGE_SMOKE_TIMEOUT_MS = 3 * 60_000;
 
-function boundedOutput(result) {
-  const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
-  return output.length <= 16 * 1024 ? output : output.slice(-16 * 1024);
+function runContainerCommand(command, args, options = {}) {
+  return runBounded(command, args, {
+    ...options,
+    label: options.label ?? command,
+    timeoutMs: options.timeoutMs ?? CONTAINER_TIMEOUT_MS,
+  });
 }
 
-function runBounded(command, args, options = {}) {
-  const result = spawnSync(command, args, {
-    cwd: options.cwd,
-    encoding: "utf8",
-    env: options.env,
-    maxBuffer: COMMAND_OUTPUT_LIMIT,
-    timeout: options.timeoutMs ?? CONTAINER_TIMEOUT_MS,
-    windowsHide: true,
+function temporaryRootPreservationError(message, cause) {
+  const error = new Error(message, { cause });
+  error.name = "TemporaryRootPreservationError";
+  error.preserveTemporaryRoot = true;
+  return error;
+}
+
+export function macImageIsMounted(value, mountPoint) {
+  if (!value || typeof value !== "object" || !Array.isArray(value.images)) return false;
+  return value.images.some((image) => (
+    image
+    && typeof image === "object"
+    && Array.isArray(image["system-entities"])
+    && image["system-entities"].some((entity) => (
+      entity
+      && typeof entity === "object"
+      && entity["mount-point"] === mountPoint
+    ))
+  ));
+}
+
+async function queryMacImageMount(mountPoint) {
+  const plist = await runContainerCommand("hdiutil", ["info", "-plist"], {
+    label: "macOS image mount-state query",
   });
-  const output = boundedOutput(result);
-  if (result.error) {
-    throw new Error(`${options.label ?? command} failed to start: ${result.error.message}\n${output}`);
+  const json = await runContainerCommand(
+    "plutil",
+    ["-convert", "json", "-o", "-", "--", "-"],
+    {
+      input: plist,
+      label: "macOS image mount-state decoding",
+    },
+  );
+  let value;
+  try {
+    value = JSON.parse(json);
+  } catch (cause) {
+    throw new Error("The macOS image mount state is malformed.", { cause });
   }
-  if (result.status !== 0) {
-    throw new Error(`${options.label ?? command} exited with status ${String(result.status)}.\n${output}`);
+  return macImageIsMounted(value, mountPoint);
+}
+
+export async function reconcileMacImageMount(mountPoint, operations = {}) {
+  const queryMount = operations.queryMount ?? queryMacImageMount;
+  const detach = operations.detach ?? (async () => {
+    await runContainerCommand("hdiutil", ["detach", mountPoint, "-force"], {
+      label: "macOS DMG detach",
+    });
+  });
+  let mounted;
+  try {
+    mounted = await queryMount(mountPoint);
+  } catch (cause) {
+    throw temporaryRootPreservationError(
+      `The macOS image state at ${mountPoint} could not be proven before cleanup.`,
+      cause,
+    );
   }
-  if (options.echoOutput && output.trim().length > 0) process.stdout.write(output);
-  return result.stdout ?? "";
+  if (!mounted) return;
+  let detachError;
+  try {
+    await detach(mountPoint);
+  } catch (error) {
+    if (error?.preserveTemporaryRoot === true) throw error;
+    detachError = error;
+  }
+  let stillMounted;
+  try {
+    stillMounted = await queryMount(mountPoint);
+  } catch (cause) {
+    throw temporaryRootPreservationError(
+      `The macOS image state at ${mountPoint} could not be proven after detach.`,
+      cause,
+    );
+  }
+  if (stillMounted) {
+    throw temporaryRootPreservationError(
+      `The macOS image remains mounted at ${mountPoint}; preserving its smoke root.`,
+      detachError,
+    );
+  }
+  if (detachError) throw detachError;
 }
 
 async function requireRegularFile(path, executable = false) {
@@ -166,11 +232,12 @@ function nativeModulePaths(resources, platform, productName, app) {
   ];
 }
 
-function runPackageSmoke(
+async function runPackageSmoke(
   repositoryRoot,
   executable,
   resources,
   packageKind,
+  supervisorRoot,
   extraEnvironment = {},
   unsetEnvironment = [],
 ) {
@@ -178,11 +245,13 @@ function runPackageSmoke(
     ...process.env,
     ...extraEnvironment,
     INERTIA_PACKAGE_SMOKE_EXECUTABLE: executable,
+    INERTIA_PACKAGE_SMOKE_INHERIT_PROCESS_GROUP: "1",
     INERTIA_PACKAGE_SMOKE_KIND: packageKind,
     INERTIA_PACKAGE_SMOKE_RESOURCES: resources,
+    INERTIA_PACKAGE_SMOKE_SUPERVISOR_ROOT: supervisorRoot,
   };
   for (const name of unsetEnvironment) delete environment[name];
-  runBounded(process.execPath, [join(repositoryRoot, "scripts", "package-smoke.mjs")], {
+  await runContainerCommand(process.execPath, [join(repositoryRoot, "scripts", "package-smoke.mjs")], {
     cwd: repositoryRoot,
     echoOutput: true,
     env: environment,
@@ -192,20 +261,22 @@ function runPackageSmoke(
 }
 
 async function smokeMacContainer(repositoryRoot, container, kind, temporaryRoot, productName) {
-  const extractionRoot = join(temporaryRoot, kind);
-  await mkdir(extractionRoot, { recursive: true });
-  let mounted = false;
+  const requestedExtractionRoot = join(temporaryRoot, kind);
+  await mkdir(requestedExtractionRoot, { recursive: true });
+  const extractionRoot = await realpath(requestedExtractionRoot);
+  let mountAttempted = false;
+  let operationError;
   try {
     if (kind === "macos-zip") {
-      runBounded("ditto", ["-x", "-k", container, extractionRoot], {
+      await runContainerCommand("ditto", ["-x", "-k", container, extractionRoot], {
         label: "macOS ZIP extraction",
       });
     } else {
-      runBounded("hdiutil", ["verify", container], { label: "macOS DMG verification" });
-      runBounded("hdiutil", ["attach", "-readonly", "-nobrowse", "-mountpoint", extractionRoot, container], {
+      await runContainerCommand("hdiutil", ["verify", container], { label: "macOS DMG verification" });
+      mountAttempted = true;
+      await runContainerCommand("hdiutil", ["attach", "-readonly", "-nobrowse", "-mountpoint", extractionRoot, container], {
         label: "macOS DMG mount",
       });
-      mounted = true;
     }
     const app = join(extractionRoot, `${productName}.app`);
     const executable = join(app, "Contents", "MacOS", productName);
@@ -215,15 +286,20 @@ async function smokeMacContainer(repositoryRoot, container, kind, temporaryRoot,
       [executable, ...nativeModulePaths(resources, "darwin", productName, app)],
       "darwin",
     );
-    runBounded("codesign", ["--verify", "--deep", "--strict", "--verbose=2", app], {
+    await runContainerCommand("codesign", ["--verify", "--deep", "--strict", "--verbose=2", app], {
       label: `${kind} complete bundle signature`,
     });
-    runPackageSmoke(repositoryRoot, executable, resources, kind);
+    await runPackageSmoke(repositoryRoot, executable, resources, kind, temporaryRoot);
+  } catch (error) {
+    operationError = error;
+    throw error;
   } finally {
-    if (mounted) {
-      runBounded("hdiutil", ["detach", extractionRoot, "-force"], {
-        label: "macOS DMG detach",
-      });
+    if (mountAttempted) {
+      if (operationError?.preserveTemporaryRoot === true) {
+        console.error(`Preserved mounted macOS smoke root after unconfirmed process cleanup: ${extractionRoot}.`);
+      } else {
+        await reconcileMacImageMount(extractionRoot);
+      }
     }
   }
 }
@@ -234,12 +310,20 @@ async function smokeMac(repositoryRoot, releaseDirectory, names, productName) {
   await requireRegularFile(dmg);
   await requireRegularFile(zip);
   const temporaryRoot = await mkdtemp(join(tmpdir(), "inertia-mac-container-smoke-"));
+  let operationError;
   try {
     await smokeMacContainer(repositoryRoot, zip, "macos-zip", temporaryRoot, productName);
     await smokeMacContainer(repositoryRoot, dmg, "macos-dmg", temporaryRoot, productName);
     console.log(`macOS ${process.arch} ZIP and DMG container smoke passed.`);
+  } catch (error) {
+    operationError = error;
+    throw error;
   } finally {
-    await rm(temporaryRoot, { force: true, maxRetries: 3, recursive: true, retryDelay: 100 });
+    if (operationError?.preserveTemporaryRoot === true) {
+      console.error(`Preserved macOS release-container smoke root: ${temporaryRoot}.`);
+    } else {
+      await rm(temporaryRoot, { force: true, maxRetries: 3, recursive: true, retryDelay: 100 });
+    }
   }
 }
 
@@ -250,21 +334,22 @@ async function smokeLinux(repositoryRoot, releaseDirectory, names, productName) 
     expectedArchitecture: process.arch,
     platform: "linux",
   });
-  const dynamicSection = runBounded("readelf", ["-d", appImage], {
+  const dynamicSection = await runContainerCommand("readelf", ["-d", appImage], {
     label: "AppImage runtime dependency inspection",
   });
   const unsafeDependencies = unversionedAppImageDependencies(dynamicSection);
   if (unsafeDependencies.length > 0) {
     throw new Error(`The AppImage runtime requires unsafe unversioned dependencies: ${unsafeDependencies.join(", ")}.`);
   }
-  runBounded(appImage, ["--appimage-version"], {
+  await runContainerCommand(appImage, ["--appimage-version"], {
     label: "AppImage runtime entry",
     echoOutput: true,
   });
 
   const temporaryRoot = await mkdtemp(join(tmpdir(), "inertia-appimage-container-smoke-"));
+  let operationError;
   try {
-    runBounded(appImage, ["--appimage-extract"], {
+    await runContainerCommand(appImage, ["--appimage-extract"], {
       cwd: temporaryRoot,
       label: "AppImage wrapper extraction",
     });
@@ -275,17 +360,24 @@ async function smokeLinux(repositoryRoot, releaseDirectory, names, productName) 
       [embeddedExecutable, ...nativeModulePaths(resources, "linux", productName, app)],
       "linux",
     );
-    runPackageSmoke(repositoryRoot, appImage, resources, "linux-appimage", {
+    await runPackageSmoke(repositoryRoot, appImage, resources, "linux-appimage", temporaryRoot, {
       INERTIA_PACKAGE_SMOKE_NO_SANDBOX: "1",
     }, ["APPIMAGE_EXTRACT_AND_RUN"]);
     console.log(`Linux ${process.arch} AppImage default mount/AppRun smoke passed.`);
-    runPackageSmoke(repositoryRoot, appImage, resources, "linux-appimage", {
+    await runPackageSmoke(repositoryRoot, appImage, resources, "linux-appimage", temporaryRoot, {
       APPIMAGE_EXTRACT_AND_RUN: "1",
       INERTIA_PACKAGE_SMOKE_NO_SANDBOX: "1",
     });
     console.log(`Linux ${process.arch} AppImage extract-and-run fallback smoke passed.`);
+  } catch (error) {
+    operationError = error;
+    throw error;
   } finally {
-    await rm(temporaryRoot, { force: true, maxRetries: 3, recursive: true, retryDelay: 100 });
+    if (operationError?.preserveTemporaryRoot === true) {
+      console.error(`Preserved Linux release-container smoke root: ${temporaryRoot}.`);
+    } else {
+      await rm(temporaryRoot, { force: true, maxRetries: 3, recursive: true, retryDelay: 100 });
+    }
   }
 }
 

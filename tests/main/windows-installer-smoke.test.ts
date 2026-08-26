@@ -9,6 +9,9 @@ const repositoryRoot = join(import.meta.dirname, "..", "..");
 const moduleUrl = pathToFileURL(
   join(repositoryRoot, "scripts", "windows-installer-smoke.mjs"),
 ).href;
+const boundedRunnerUrl = pathToFileURL(
+  join(repositoryRoot, "scripts", "bounded-process-tree.mjs"),
+).href;
 
 async function installerSmokeModule() {
   return await import(moduleUrl) as {
@@ -29,6 +32,15 @@ async function installerSmokeModule() {
       releaseChannel: "canary" | "stable",
       architecture: "arm64" | "x64",
     ) => string;
+  };
+}
+
+async function boundedRunnerModule() {
+  return await import(boundedRunnerUrl) as {
+    posixProcessGroupKillIsConfirmed: (
+      error: null | { code?: string },
+      groupStillExists: boolean,
+    ) => boolean;
   };
 }
 
@@ -145,6 +157,59 @@ test("terminates the complete owned process tree on a gate timeout", async () =>
   }
 });
 
+test("accepts an ESRCH kill race only after exact group absence", async () => {
+  const { posixProcessGroupKillIsConfirmed } = await boundedRunnerModule();
+  expect(posixProcessGroupKillIsConfirmed(null, true)).toBe(true);
+  expect(posixProcessGroupKillIsConfirmed({ code: "ESRCH" }, false)).toBe(true);
+  expect(posixProcessGroupKillIsConfirmed({ code: "ESRCH" }, true)).toBe(false);
+  expect(posixProcessGroupKillIsConfirmed({ code: "EPERM" }, false)).toBe(false);
+});
+
+test("rejects and terminates an owned grandchild left after the root exits", async () => {
+  if (process.platform === "win32") return;
+  const { runBounded } = await installerSmokeModule();
+  const temporaryRoot = await mkdtemp(join(tmpdir(), "inertia-installer-residual-test-"));
+  const pidFile = join(temporaryRoot, "descendants.pid");
+  let middlePid = 0;
+  let grandchildPid = 0;
+  try {
+    const middleScript = [
+      'const { spawn } = require("node:child_process");',
+      'const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });',
+      'process.send({ middle: process.pid, grandchild: child.pid });',
+      "setInterval(() => {}, 1000);",
+    ].join("");
+    const rootScript = [
+      'const { spawn } = require("node:child_process");',
+      'const { writeFileSync } = require("node:fs");',
+      `const middle = spawn(process.execPath, ["-e", ${JSON.stringify(middleScript)}], { stdio: ["ignore", "ignore", "ignore", "ipc"] });`,
+      "middle.once(\"message\", (value) => { writeFileSync(process.argv[1], JSON.stringify(value)); process.exit(0); });",
+    ].join("");
+    await expect(runBounded(process.execPath, ["-e", rootScript, pidFile], {
+      label: "Residual descendant fixture",
+      timeoutMs: 5_000,
+    })).rejects.toThrow("left descendant processes running");
+    const pids = JSON.parse(await readFile(pidFile, "utf8")) as {
+      middle: number;
+      grandchild: number;
+    };
+    middlePid = pids.middle;
+    grandchildPid = pids.grandchild;
+    expect(processExists(middlePid)).toBe(false);
+    expect(processExists(grandchildPid)).toBe(false);
+  } finally {
+    for (const pid of [middlePid, grandchildPid]) {
+      if (pid <= 0 || !processExists(pid)) continue;
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        // Best-effort cleanup for a failing regression.
+      }
+    }
+    await rm(temporaryRoot, { force: true, recursive: true });
+  }
+});
+
 test("keeps stderr diagnostics out of strict archive listing stdout", async () => {
   const { runBounded } = await installerSmokeModule();
   const listing = [
@@ -184,6 +249,10 @@ test("pins the minimal fixed builder and gates installed Windows binaries", asyn
     join(repositoryRoot, "scripts", "windows-installer-smoke.mjs"),
     "utf8",
   );
+  const boundedRunnerSource = await readFile(
+    join(repositoryRoot, "scripts", "bounded-process-tree.mjs"),
+    "utf8",
+  );
   const releaseConfig = await readFile(
     join(repositoryRoot, "scripts", "electron-builder.release.cjs"),
     "utf8",
@@ -206,8 +275,8 @@ test("pins the minimal fixed builder and gates installed Windows binaries", asyn
   expect(source).toContain("INERTIA_PACKAGE_SMOKE_EXECUTABLE: installedExecutable");
   expect(source).toContain('["/S", `/D=${installDirectory}`]');
   expect(source).toContain('runBounded(uninstaller, ["/S"]');
-  expect(source).toContain('["/PID", String(child.pid), "/T", "/F"]');
-  expect(source).toContain("its process tree could not be confirmed stopped");
+  expect(boundedRunnerSource).toContain('["/PID", String(child.pid), "/T", "/F"]');
+  expect(boundedRunnerSource).toContain("its process tree could not be confirmed stopped");
   expect(source).toContain("return waitForRemoval(installDirectory)");
   expect(source).toContain("completed without a reboot");
 });

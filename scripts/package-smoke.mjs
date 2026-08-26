@@ -10,6 +10,7 @@ import { parseDocument } from "yaml";
 
 import {
   packageSmokeProcessesExited,
+  packagedAppUsesDetachedProcessGroup,
   parsePackageSmokeOwnedPids,
   parsePackageSmokeReadiness,
   waitForPackageSmokeReadiness,
@@ -752,7 +753,23 @@ if (requestedPackageKind !== undefined && !PACKAGE_KINDS.has(requestedPackageKin
   throw new Error("INERTIA_PACKAGE_SMOKE_KIND must identify a reviewed package path.");
 }
 await requirePackagedAssets(executable);
-const temporaryRoot = await mkdtemp(join(tmpdir(), "inertia-package-smoke-"));
+const inheritSupervisedProcessGroup = process.platform !== "win32"
+  && process.env.INERTIA_PACKAGE_SMOKE_INHERIT_PROCESS_GROUP === "1";
+const supervisorRoot = boundedExactPathEnvironment("INERTIA_PACKAGE_SMOKE_SUPERVISOR_ROOT");
+if (inheritSupervisedProcessGroup !== (supervisorRoot !== undefined)) {
+  throw new Error("Inherited package-smoke supervision requires its exact temporary root.");
+}
+if (supervisorRoot !== undefined) {
+  const supervisorMetadata = await lstat(supervisorRoot).catch(() => null);
+  if (
+    supervisorMetadata === null
+    || supervisorMetadata.isSymbolicLink()
+    || !supervisorMetadata.isDirectory()
+    || (supervisorMetadata.mode & 0o077) !== 0
+    || supervisorMetadata.uid !== process.geteuid()
+  ) throw new Error("The package-smoke supervisor root is not an owner-private direct directory.");
+}
+const temporaryRoot = await mkdtemp(join(supervisorRoot ?? tmpdir(), "inertia-package-smoke-"));
 const markerPath = join(temporaryRoot, "ready.json");
 const dataDirectory = join(temporaryRoot, "data");
 const workspaceDirectory = join(temporaryRoot, "workspace");
@@ -765,6 +782,10 @@ let stderr = "";
 let launchedAt = 0;
 const ownerToken = randomUUID();
 const allowLauncherHandoff = requestedPackageKind === "linux-appimage";
+const inheritedProcessGroupId = inheritSupervisedProcessGroup ? processGroupId(process.pid) : null;
+if (inheritSupervisedProcessGroup && inheritedProcessGroupId === null) {
+  throw new Error("The inherited package-smoke process group could not be identified.");
+}
 const updateNetworkTrap = await createUpdateNetworkTrap();
 
 try {
@@ -794,7 +815,7 @@ try {
   ];
   launchedAt = Date.now();
   child = spawn(executable, launchArguments, {
-    detached: process.platform !== "win32",
+    detached: packagedAppUsesDetachedProcessGroup(process.platform, inheritSupervisedProcessGroup),
     env: {
       ...process.env,
       NODE_ENV: "test",
@@ -849,6 +870,7 @@ try {
         allowLauncherHandoff,
         launchedAt,
         launcherPid: child.pid,
+        ownedProcessGroupId: inheritedProcessGroupId ?? child.pid,
         ownerToken,
         processExists,
         processGroupId,
@@ -912,6 +934,7 @@ try {
   if (process.platform !== "win32") await waitUntil(
     () => packageSmokeProcessesExited({
       launcherPid: child.pid,
+      ownedProcessGroupId: inheritSupervisedProcessGroup ? null : child.pid,
       mainPid: readiness.mainPid,
       runtimePid: readiness.runtimePid,
       processExists,
@@ -983,11 +1006,13 @@ try {
   const mainPid = readiness?.mainPid ?? cleanupOwnedPids?.mainPid ?? child?.pid ?? null;
   const runtimePid = readiness?.runtimePid ?? cleanupOwnedPids?.runtimePid ?? null;
   const launchedPid = child?.pid ?? null;
-  if ((launchedPid && processGroupExists(launchedPid)) || (mainPid && processExists(mainPid)) || (runtimePid && processExists(runtimePid))) {
-    forceTerminateProcessTree(launchedPid, mainPid, runtimePid);
+  const ownedProcessGroupId = inheritSupervisedProcessGroup ? null : launchedPid;
+  if ((ownedProcessGroupId && processGroupExists(ownedProcessGroupId)) || (mainPid && processExists(mainPid)) || (runtimePid && processExists(runtimePid))) {
+    forceTerminateProcessTree(ownedProcessGroupId, mainPid, runtimePid);
     await waitUntil(
       () => packageSmokeProcessesExited({
         launcherPid: launchedPid,
+        ownedProcessGroupId,
         mainPid,
         runtimePid,
         processExists,
@@ -998,13 +1023,15 @@ try {
     );
   }
   await updateNetworkTrap.close();
-  await rm(temporaryRoot, {
-    recursive: true,
-    force: true,
-    // Chromium can briefly retain profile WAL handles after its owning
-    // process exits on Windows. Keep cleanup bounded while allowing the OS to
-    // release those handles instead of turning a successful smoke into EBUSY.
-    maxRetries: process.platform === "win32" ? 10 : 0,
-    retryDelay: 100,
-  });
+  if (!inheritSupervisedProcessGroup) {
+    await rm(temporaryRoot, {
+      recursive: true,
+      force: true,
+      // Chromium can briefly retain profile WAL handles after its owning
+      // process exits on Windows. Keep cleanup bounded while allowing the OS to
+      // release those handles instead of turning a successful smoke into EBUSY.
+      maxRetries: process.platform === "win32" ? 10 : 0,
+      retryDelay: 100,
+    });
+  }
 }

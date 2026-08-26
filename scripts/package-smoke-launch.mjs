@@ -1,5 +1,9 @@
 const OWNER_TOKEN_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 
+export function packagedAppUsesDetachedProcessGroup(platform, inheritSupervisedProcessGroup) {
+  return platform !== "win32" && inheritSupervisedProcessGroup !== true;
+}
+
 export function isPackageSmokeOwnerToken(value) {
   return typeof value === "string" && OWNER_TOKEN_PATTERN.test(value);
 }
@@ -27,6 +31,7 @@ export function parsePackageSmokeReadiness(value, options) {
   const { mainPid, runtimePid } = owned;
   const { generation, websocketUrl } = value;
   const handoff = options.allowLauncherHandoff === true;
+  const ownedProcessGroupId = options.ownedProcessGroupId ?? options.launcherPid;
   if (
     (handoff ? mainPid === options.launcherPid : mainPid !== options.launcherPid)
     || !Number.isSafeInteger(generation)
@@ -36,8 +41,8 @@ export function parsePackageSmokeReadiness(value, options) {
     || (handoff && (
       !options.processExists(mainPid)
       || !options.processExists(runtimePid)
-      || options.processGroupId(mainPid) !== options.launcherPid
-      || options.processGroupId(runtimePid) !== options.launcherPid
+      || options.processGroupId(mainPid) !== ownedProcessGroupId
+      || options.processGroupId(runtimePid) !== ownedProcessGroupId
     ))
   ) return null;
   return { ...owned, generation, websocketUrl };
@@ -80,5 +85,8 @@ export async function waitForPackageSmokeReadiness(options) {
 export function packageSmokeProcessesExited(options) {
   return !options.processExists(options.mainPid)
     && !options.processExists(options.runtimePid)
-    && !options.processGroupExists(options.launcherPid);
+    && (
+      options.ownedProcessGroupId === null
+      || !options.processGroupExists(options.ownedProcessGroupId ?? options.launcherPid)
+    );
 }

@@ -275,7 +275,7 @@ jobs:
           INERTIA_RELEASE_CHANNEL: stable
         run: npm run test:release-container-smoke
 
-      - name: Smoke final Linux AppImage wrapper under Xvfb
+      - name: Smoke final Linux AppImage default and fallback launches under Xvfb
         if: runner.os == 'Linux'
         env:
           INERTIA_RELEASE_CHANNEL: stable

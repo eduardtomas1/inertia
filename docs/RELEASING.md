@@ -154,7 +154,9 @@ and run the complete packaged runtime smoke from both contained apps. Native
 Linux jobs reject unversioned AppImage runtime dependencies, execute the exact
 AppImage wrapper in pristine `ubuntu:24.04`, extract through that wrapper
 without an `unsquashfs` fallback, verify selected native binaries, and run the
-complete smoke through the AppImage entry point. These final-container gates do
+complete smoke twice through the exact AppImage entry point: once through the
+advertised default FUSE mount/AppRun path and once through the explicit
+extract-and-run fallback. These final-container gates do
 not replace the separate checksum, provenance, signature, fuse, update-metadata,
 or unpacked-package checks.
 

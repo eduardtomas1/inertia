@@ -85,7 +85,9 @@ describe("final release container smoke", () => {
       expect(workflow).toContain('"/release/$artifact" --appimage-version');
       expect(workflow).toContain("Smoke final macOS and Linux release containers");
       expect(workflow).toContain("run: npm run test:release-container-smoke");
-      expect(workflow).toContain("Smoke final Linux AppImage wrapper under Xvfb");
+      expect(workflow).toContain(
+        "Smoke final Linux AppImage default and fallback launches under Xvfb",
+      );
       expect(workflow).toContain("xvfb-run --auto-servernum npm run test:release-container-smoke");
     }
   });
@@ -94,6 +96,10 @@ describe("final release container smoke", () => {
     const source = await readFile(join(repositoryRoot, "scripts", "release-container-smoke.mjs"), "utf8");
     expect(source).toContain('runBounded(appImage, ["--appimage-version"]');
     expect(source).toContain('runBounded(appImage, ["--appimage-extract"]');
+    expect(source).toContain('}, ["APPIMAGE_EXTRACT_AND_RUN"]);');
+    expect(source).toContain('APPIMAGE_EXTRACT_AND_RUN: "1"');
+    expect(source).toContain("AppImage default mount/AppRun smoke passed");
+    expect(source).toContain("AppImage extract-and-run fallback smoke passed");
     expect(source).toContain('INERTIA_PACKAGE_SMOKE_KIND: packageKind');
     expect(source).toContain('"macos-zip"');
     expect(source).toContain('"macos-dmg"');

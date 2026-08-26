@@ -1,8 +1,8 @@
 import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
-import { lstat, mkdtemp, readdir, rm } from "node:fs/promises";
+import { lstat, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { inspectNativeBinaryArchitecture } from "./native-binary-architecture.mjs";
@@ -13,6 +13,7 @@ const { getPath7za } = require("app-builder-lib/out/toolsets/7zip.js");
 const VERSION_PATTERN = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/u;
 const ARCHITECTURES = new Set(["x64", "arm64"]);
 const RELEASE_CHANNELS = new Set(["stable", "canary"]);
+const SANITIZED_APPLICATION_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 const MAX_COMMAND_OUTPUT_BYTES = 4 * 1024 * 1024;
 const INSTALL_TIMEOUT_MS = 3 * 60_000;
 const PACKAGE_SMOKE_TIMEOUT_MS = 3 * 60_000;
@@ -84,28 +85,23 @@ function archiveHeader(listing) {
   return boundary < 0 ? normalized : normalized.slice(0, boundary);
 }
 
-export function nsisApplicationArchivePath(listing, architecture) {
+export function nsisApplicationArchiveName(sanitizedName, version, architecture) {
+  if (!SANITIZED_APPLICATION_NAME_PATTERN.test(sanitizedName)) {
+    throw new Error("The sanitized Windows application name is invalid.");
+  }
+  if (!VERSION_PATTERN.test(version)) throw new Error("The Windows installer version is invalid.");
   if (!ARCHITECTURES.has(architecture)) throw new Error("The Windows installer architecture is invalid.");
-  if (!/^Type = Nsis$/mu.test(archiveHeader(listing))) {
-    throw new Error("The Windows package is not an NSIS installer.");
-  }
-  const expectedName = architecture === "arm64" ? "app-arm64.7z" : "app-64.7z";
-  const normalizedListing = listing.replaceAll("\r\n", "\n").replaceAll("\r", "\n");
-  const candidates = [...normalizedListing.matchAll(/^Path = (.+)$/gmu)]
-    .map((match) => match[1].trim())
-    .filter((path) => path.replaceAll("\\", "/").startsWith("$PLUGINSDIR/app-")
-      && path.toLowerCase().endsWith(".7z"));
-  if (candidates.length !== 1 || basename(candidates[0].replaceAll("\\", "/")) !== expectedName) {
-    throw new Error(
-      `Expected exactly one ${expectedName} NSIS payload; found ${candidates.join(", ") || "none"}.`,
-    );
-  }
-  return candidates[0];
+  return `${sanitizedName}-${version}-${architecture}.nsis.7z`;
 }
 
 export function applicationArchiveMethod(listing) {
   const header = archiveHeader(listing);
-  if (!/^Type = 7z$/mu.test(header)) throw new Error("The embedded application payload is not a 7z archive.");
+  if (!/^Type = 7z$/mu.test(header)) {
+    const diagnostic = header.slice(0, 2 * 1024);
+    throw new Error(
+      `The embedded application payload is not a 7z archive. Listing header: ${JSON.stringify(diagnostic)}.`,
+    );
+  }
   const methods = [...header.matchAll(/^Method = (.+)$/gmu)].map((match) => match[1].trim());
   if (methods.length !== 1 || methods[0].length === 0) {
     throw new Error("The embedded application payload has no exact archive method.");
@@ -129,34 +125,26 @@ export function requireInstallTimeDecodableMethod(method) {
   }
 }
 
-async function inspectInstallerArchive(installer, architecture, temporaryRoot) {
-  const sevenZip = await getPath7za();
-  const outerListing = runBounded(sevenZip, ["l", "-slt", installer], {
-    label: "NSIS archive inspection",
-    timeoutMs: INSTALL_TIMEOUT_MS,
-  });
-  const embeddedPath = nsisApplicationArchivePath(outerListing, architecture);
-  const archiveDirectory = join(temporaryRoot, "archive");
-  runBounded(
-    sevenZip,
-    ["e", "-bd", "-y", `-o${archiveDirectory}`, installer, embeddedPath],
-    { label: "NSIS application archive extraction", timeoutMs: INSTALL_TIMEOUT_MS },
+export async function verifyBuiltNsisApplicationArchive(options) {
+  const applicationArchive = join(
+    options.outputDirectory,
+    nsisApplicationArchiveName(
+      options.sanitizedName,
+      options.version,
+      options.architecture,
+    ),
   );
-  const extracted = await readdir(archiveDirectory);
-  if (extracted.length !== 1 || extracted[0] !== basename(embeddedPath.replaceAll("\\", "/"))) {
-    throw new Error("The NSIS application archive extraction produced an unexpected file set.");
-  }
-  const applicationArchive = join(archiveDirectory, extracted[0]);
   if (!await existsAsRegularFile(applicationArchive)) {
-    throw new Error("The extracted NSIS application archive is missing or empty.");
+    throw new Error(`The generated NSIS application archive is missing or empty: ${applicationArchive}.`);
   }
+  const sevenZip = await getPath7za();
   const applicationListing = runBounded(sevenZip, ["l", "-slt", applicationArchive], {
-    label: "NSIS application payload inspection",
+    label: "Generated NSIS application payload inspection",
     timeoutMs: INSTALL_TIMEOUT_MS,
   });
   const method = applicationArchiveMethod(applicationListing);
   requireInstallTimeDecodableMethod(method);
-  console.log(`NSIS application archive verified (${embeddedPath}, ${method}).`);
+  console.log(`NSIS application archive verified (${applicationArchive}, ${method}).`);
 }
 
 async function requireInstalledFiles(
@@ -251,7 +239,6 @@ export async function main() {
   let operationError;
   let uninstalled = false;
   try {
-    await inspectInstallerArchive(installer, process.arch, temporaryRoot);
     runBounded(installer, ["/S", `/D=${installDirectory}`], {
       label: "Silent Windows installer",
       timeoutMs: INSTALL_TIMEOUT_MS,

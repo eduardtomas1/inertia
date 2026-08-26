@@ -273,7 +273,7 @@ jobs:
         if: runner.os == 'macOS'
         run: npm run test:release-container-smoke
 
-      - name: Smoke final Linux AppImage wrapper under Xvfb
+      - name: Smoke final Linux AppImage default and fallback launches under Xvfb
         if: runner.os == 'Linux'
         run: xvfb-run --auto-servernum npm run test:release-container-smoke
 

@@ -1,4 +1,5 @@
 const packageJson = require("../package.json");
+const path = require("node:path");
 
 const releaseChannel = process.env.INERTIA_RELEASE_CHANNEL ?? "stable";
 if (releaseChannel !== "stable" && releaseChannel !== "canary") {
@@ -81,7 +82,21 @@ const updateCapability = isLinux
           reason: isMac
             ? "macos-signing-unavailable"
             : "windows-signing-unavailable",
-        };
+      };
+
+async function verifyWindowsNsisPayload(event) {
+  if (!isWindows || event.target?.name !== "nsis" || path.extname(event.file).toLowerCase() !== ".exe") {
+    return;
+  }
+  const architecture = platform === "windows-arm64" ? "arm64" : "x64";
+  const { verifyBuiltNsisApplicationArchive } = await import("./windows-installer-smoke.mjs");
+  await verifyBuiltNsisApplicationArchive({
+    architecture,
+    outputDirectory: path.dirname(event.file),
+    sanitizedName: event.packager.appInfo.sanitizedName,
+    version: event.packager.appInfo.version,
+  });
+}
 
 module.exports = {
   ...packageJson.build,
@@ -105,6 +120,10 @@ module.exports = {
     inertiaReleaseChannel: releaseChannel,
     inertiaUpdateCapability: updateCapability,
   },
+  // electron-builder deletes the generated application archive after the
+  // artifact hook returns. Inspect it here with the bundled 7z-capable tool;
+  // the much smaller Windows 7za cannot parse an outer NSIS executable.
+  artifactBuildCompleted: verifyWindowsNsisPayload,
   mac: {
     ...packageJson.build.mac,
     ...(canary

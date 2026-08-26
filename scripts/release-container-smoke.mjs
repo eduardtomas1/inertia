@@ -166,17 +166,26 @@ function nativeModulePaths(resources, platform, productName, app) {
   ];
 }
 
-function runPackageSmoke(repositoryRoot, executable, resources, packageKind, extraEnvironment = {}) {
+function runPackageSmoke(
+  repositoryRoot,
+  executable,
+  resources,
+  packageKind,
+  extraEnvironment = {},
+  unsetEnvironment = [],
+) {
+  const environment = {
+    ...process.env,
+    ...extraEnvironment,
+    INERTIA_PACKAGE_SMOKE_EXECUTABLE: executable,
+    INERTIA_PACKAGE_SMOKE_KIND: packageKind,
+    INERTIA_PACKAGE_SMOKE_RESOURCES: resources,
+  };
+  for (const name of unsetEnvironment) delete environment[name];
   runBounded(process.execPath, [join(repositoryRoot, "scripts", "package-smoke.mjs")], {
     cwd: repositoryRoot,
     echoOutput: true,
-    env: {
-      ...process.env,
-      ...extraEnvironment,
-      INERTIA_PACKAGE_SMOKE_EXECUTABLE: executable,
-      INERTIA_PACKAGE_SMOKE_KIND: packageKind,
-      INERTIA_PACKAGE_SMOKE_RESOURCES: resources,
-    },
+    env: environment,
     label: `${packageKind} application smoke`,
     timeoutMs: PACKAGE_SMOKE_TIMEOUT_MS,
   });
@@ -267,10 +276,14 @@ async function smokeLinux(repositoryRoot, releaseDirectory, names, productName) 
       "linux",
     );
     runPackageSmoke(repositoryRoot, appImage, resources, "linux-appimage", {
+      INERTIA_PACKAGE_SMOKE_NO_SANDBOX: "1",
+    }, ["APPIMAGE_EXTRACT_AND_RUN"]);
+    console.log(`Linux ${process.arch} AppImage default mount/AppRun smoke passed.`);
+    runPackageSmoke(repositoryRoot, appImage, resources, "linux-appimage", {
       APPIMAGE_EXTRACT_AND_RUN: "1",
       INERTIA_PACKAGE_SMOKE_NO_SANDBOX: "1",
     });
-    console.log(`Linux ${process.arch} AppImage wrapper and application smoke passed.`);
+    console.log(`Linux ${process.arch} AppImage extract-and-run fallback smoke passed.`);
   } finally {
     await rm(temporaryRoot, { force: true, maxRetries: 3, recursive: true, retryDelay: 100 });
   }

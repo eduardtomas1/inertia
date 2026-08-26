@@ -12,8 +12,9 @@ const moduleUrl = pathToFileURL(
 async function installerSmokeModule() {
   return await import(moduleUrl) as {
     applicationArchiveMethod: (listing: string) => string;
-    nsisApplicationArchivePath: (
-      listing: string,
+    nsisApplicationArchiveName: (
+      sanitizedName: string,
+      version: string,
       architecture: "arm64" | "x64",
     ) => string;
     requireInstallTimeDecodableMethod: (method: string) => void;
@@ -40,25 +41,15 @@ test("selects the exact stable and Canary Windows installer identities", async (
     .toThrow("version is invalid");
 });
 
-test("requires the architecture-qualified application archive inside NSIS", async () => {
-  const { nsisApplicationArchivePath } = await installerSmokeModule();
-  const arm64Listing = [
-    "Path = release/Inertia.Setup.0.0.44.arm64.exe",
-    "Type = Nsis",
-    "Method = Deflate",
-    "----------",
-    "Path = $PLUGINSDIR\\app-arm64.7z",
-    "Method = Copy",
-  ].join("\n");
+test("selects the exact generated NSIS application archive", async () => {
+  const { nsisApplicationArchiveName } = await installerSmokeModule();
 
-  expect(nsisApplicationArchivePath(arm64Listing.replaceAll("\n", "\r\n"), "arm64"))
-    .toBe("$PLUGINSDIR\\app-arm64.7z");
-  expect(() => nsisApplicationArchivePath(arm64Listing, "x64"))
-    .toThrow("app-64.7z");
-  expect(() => nsisApplicationArchivePath(
-    arm64Listing.replace("Type = Nsis", "Type = PE"),
-    "arm64",
-  )).toThrow("not an NSIS installer");
+  expect(nsisApplicationArchiveName("inertia", "0.0.44", "x64"))
+    .toBe("inertia-0.0.44-x64.nsis.7z");
+  expect(nsisApplicationArchiveName("inertia-canary", "0.0.44", "arm64"))
+    .toBe("inertia-canary-0.0.44-arm64.nsis.7z");
+  expect(() => nsisApplicationArchiveName("../inertia", "0.0.44", "x64"))
+    .toThrow("name is invalid");
 });
 
 test("rejects the exact archive methods that dropped Windows executables", async () => {
@@ -87,6 +78,16 @@ test("rejects the exact archive methods that dropped Windows executables", async
   )).toThrow("install-time undecodable");
   expect(() => requireInstallTimeDecodableMethod("LZMA2:24"))
     .toThrow("does not pin a decoder-compatible filter");
+
+  const windowsStandaloneListing = [
+    "Path = Inertia.Setup.0.0.44.exe",
+    "Type = PE",
+    "Physical Size = 243892224",
+    "CPU = x64",
+    "64-bit = +",
+  ].join("\r\n");
+  expect(() => applicationArchiveMethod(windowsStandaloneListing))
+    .toThrow(/Listing header:.*Type = PE/u);
 });
 
 test("pins the minimal fixed builder and gates installed Windows binaries", async () => {
@@ -107,6 +108,10 @@ test("pins the minimal fixed builder and gates installed Windows binaries", asyn
     join(repositoryRoot, "scripts", "windows-installer-smoke.mjs"),
     "utf8",
   );
+  const releaseConfig = await readFile(
+    join(repositoryRoot, "scripts", "electron-builder.release.cjs"),
+    "utf8",
+  );
 
   expect(manifest.devDependencies["electron-builder"]).toBe("26.15.6");
   expect(lock.packages["node_modules/electron-builder"]?.version).toBe("26.15.6");
@@ -114,6 +119,10 @@ test("pins the minimal fixed builder and gates installed Windows binaries", asyn
   expect(manifest.scripts["test:windows-installer-smoke"])
     .toBe("node scripts/windows-installer-smoke.mjs");
   expect(source).toContain("NSIS application archive verified");
+  expect(source).toContain("Generated NSIS application payload inspection");
+  expect(source).not.toContain('["l", "-slt", installer]');
+  expect(releaseConfig).toContain("artifactBuildCompleted: verifyWindowsNsisPayload");
+  expect(releaseConfig).toContain("verifyBuiltNsisApplicationArchive");
   expect(source).toContain("Installed Windows native binaries verified");
   expect(source).toContain('"d3dcompiler_47.dll"');
   expect(source).toContain('["conpty.dll", "OpenConsole.exe"]');

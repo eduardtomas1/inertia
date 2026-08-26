@@ -157,7 +157,7 @@ describe("cross-platform packaged behavior contract", () => {
       "run: npm run test:native-architecture",
       "run: npm exec -- playwright test",
       "run: xvfb-run --auto-servernum npm exec -- playwright test",
-      "run: npm run dist:dir",
+      'run: npm run "${{ matrix.release_dist_script }}"',
       'run: npm run "${{ matrix.dist_script }}"',
       "npm run verify:fuses -- \"$app\"",
       "run: npm run test:package-smoke",

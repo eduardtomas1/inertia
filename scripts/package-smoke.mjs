@@ -37,6 +37,24 @@ const MANUAL_UPDATE_REASONS = new Set([
   "macos-signing-unavailable",
   "windows-signing-unavailable",
 ]);
+const PACKAGE_KINDS = new Set([
+  "linux-appimage",
+  "linux-unpacked",
+  "macos-dmg",
+  "macos-unpacked",
+  "macos-zip",
+  "windows-installed",
+  "windows-unpacked",
+]);
+
+function boundedExactPathEnvironment(name) {
+  const value = process.env[name];
+  if (value === undefined) return undefined;
+  if (value.length === 0 || value !== value.trim() || Buffer.byteLength(value, "utf8") > 4 * 1024) {
+    throw new Error(`${name} must be a bounded exact path.`);
+  }
+  return resolve(value);
+}
 
 function sleep(milliseconds) {
   return new Promise((settle) => setTimeout(settle, milliseconds));
@@ -250,14 +268,26 @@ function validateUpdateConfiguration(source, capability) {
 
 async function requirePackagedAssets(executable) {
   const executableDirectory = dirname(executable);
-  const resourceCandidates = [
-    resolve(executableDirectory, "resources"),
-    resolve(executableDirectory, "..", "Resources"),
-  ];
+  const explicitResources = boundedExactPathEnvironment("INERTIA_PACKAGE_SMOKE_RESOURCES");
+  if (explicitResources) {
+    const metadata = await lstat(explicitResources).catch(() => null);
+    if (metadata === null || metadata.isSymbolicLink() || !metadata.isDirectory()) {
+      throw new Error("INERTIA_PACKAGE_SMOKE_RESOURCES does not identify a direct resources directory.");
+    }
+  }
+  const resourceCandidates = explicitResources
+    ? [explicitResources]
+    : [
+        resolve(executableDirectory, "resources"),
+        resolve(executableDirectory, "..", "Resources"),
+      ];
   const resources = [];
   for (const candidate of resourceCandidates) {
     const archive = join(candidate, "app.asar");
-    if (await stat(archive).then((value) => value.isFile(), () => false)) {
+    if (await lstat(archive).then(
+      (value) => value.isFile() && !value.isSymbolicLink(),
+      () => false,
+    )) {
       resources.push({ directory: candidate, archive });
     }
   }
@@ -422,6 +452,20 @@ async function createUpdateNetworkTrap() {
 }
 
 async function locatePackagedExecutable() {
+  const explicitExecutable = boundedExactPathEnvironment("INERTIA_PACKAGE_SMOKE_EXECUTABLE");
+  if (explicitExecutable !== undefined) {
+    const candidate = explicitExecutable;
+    const metadata = await lstat(candidate).catch(() => null);
+    if (
+      metadata === null
+      || metadata.isSymbolicLink()
+      || !metadata.isFile()
+      || !await isExecutableFile(candidate)
+    ) {
+      throw new Error("INERTIA_PACKAGE_SMOKE_EXECUTABLE does not identify an executable regular file.");
+    }
+    return candidate;
+  }
   const releaseDirectory = resolve("release");
   const architectureSuffix = process.arch === "x64" ? "" : `-${process.arch}`;
   const candidates = process.platform === "darwin"
@@ -692,6 +736,10 @@ function appendOutput(current, chunk) {
 }
 
 const executable = await locatePackagedExecutable();
+const requestedPackageKind = process.env.INERTIA_PACKAGE_SMOKE_KIND;
+if (requestedPackageKind !== undefined && !PACKAGE_KINDS.has(requestedPackageKind)) {
+  throw new Error("INERTIA_PACKAGE_SMOKE_KIND must identify a reviewed package path.");
+}
 await requirePackagedAssets(executable);
 const temporaryRoot = await mkdtemp(join(tmpdir(), "inertia-package-smoke-"));
 const markerPath = join(temporaryRoot, "ready.json");
@@ -844,7 +892,12 @@ try {
     platform: process.platform,
     architecture: process.arch,
     node: process.version,
-    packageKind: process.platform === "linux" ? "linux-unpacked" : "unpacked",
+    packageKind: requestedPackageKind
+      ?? (process.platform === "linux"
+        ? "linux-unpacked"
+        : process.platform === "darwin"
+          ? "macos-unpacked"
+          : "windows-unpacked"),
     signingState: process.platform === "darwin" ? "ci-ad-hoc-or-local" : "not-recorded",
     launchToRuntimeReadyMs: readiness.timestampMs - launchedAt,
     shutdownToProcessExitMs: exit.endedAt - shutdownStartedAt,

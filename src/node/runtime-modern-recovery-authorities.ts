@@ -49,6 +49,9 @@ export interface ModernDarwinRecoveryGenerationSnapshot {
 
 export interface ModernDarwinRecoverySnapshot {
   readonly platform: "darwin";
+  // The boot identity observed by the recovering Inertia launch. Every
+  // generation below retains its separately recorded boot identity so a
+  // temporarily unavailable probe cannot rewrite or reinterpret old state.
   readonly systemBootId: string;
   readonly generations: readonly ModernDarwinRecoveryGenerationSnapshot[];
 }
@@ -187,7 +190,6 @@ function parseSnapshot(value: unknown): ModernDarwinRecoverySnapshot | null {
   if (
     candidate.platform !== "darwin"
     || !validSystemBootId(candidate.systemBootId)
-    || candidate.systemBootId === "unavailable"
     || !Array.isArray(candidate.generations)
     || candidate.generations.length < 1
     || candidate.generations.length > MAX_GENERATIONS
@@ -211,7 +213,7 @@ function parseSnapshot(value: unknown): ModernDarwinRecoverySnapshot | null {
         "systemBootId",
       ])
       || !validRuntimeGenerationId(generation.lease.runtimeGenerationId)
-      || generation.lease.systemBootId !== candidate.systemBootId
+      || !validSystemBootId(generation.lease.systemBootId)
       || !validCreatedAt(generation.lease.createdAt)
       || !Array.isArray(generation.records)
     ) return null;
@@ -220,7 +222,7 @@ function parseSnapshot(value: unknown): ModernDarwinRecoverySnapshot | null {
     const records = generation.records.map((record) => normalizeRecord(
       record,
       generation.lease!.runtimeGenerationId,
-      candidate.systemBootId!,
+      generation.lease!.systemBootId,
     ));
     if (records.some((record) => record === null)) return null;
     const sortedRecords = (records as Readonly<Record<string, unknown>>[])
@@ -346,25 +348,30 @@ function captureTargetSnapshot(
   systemBootId: string,
   runtimeGenerationIds?: ReadonlySet<string>,
 ): ModernDarwinRecoverySnapshot | null {
-  if (!validSystemBootId(systemBootId) || systemBootId === "unavailable") {
+  if (!validSystemBootId(systemBootId)) {
     return null;
   }
   const leases = new RuntimeGenerationLeaseJournal(dataDirectory);
   if (!leases.isValid()) return null;
+  const owned = new RuntimeOwnedProcessJournal(dataDirectory, {
+    platform: "darwin",
+  });
+  // A failed boot probe writes the literal unavailable marker for both new
+  // sessions and v0.0.44 compatibility leases. Only a durable owned-session
+  // leaf distinguishes the modern unscoped batch. Do not require its recorded
+  // marker to equal the current observation: a probe may become available or
+  // temporarily fail across launches without proving that the machine booted.
   const selected = leases.all().filter((lease) => (
-    lease.systemBootId === systemBootId
-    && (!runtimeGenerationIds || runtimeGenerationIds.has(
+    (!runtimeGenerationIds || runtimeGenerationIds.has(
       lease.runtimeGenerationId,
     ))
+    && owned.records(lease.runtimeGenerationId) !== null
   ));
   if (
     selected.length < 1
     || selected.length > MAX_GENERATIONS
     || (runtimeGenerationIds && selected.length !== runtimeGenerationIds.size)
   ) return null;
-  const owned = new RuntimeOwnedProcessJournal(dataDirectory, {
-    platform: "darwin",
-  });
   const generations: ModernDarwinRecoveryGenerationSnapshot[] = [];
   let recordCount = 0;
   for (const lease of selected) {
@@ -376,7 +383,7 @@ function captureTargetSnapshot(
     const records = currentRecords.map((record) => normalizeRecord(
       record,
       lease.runtimeGenerationId,
-      systemBootId,
+      lease.systemBootId,
     ));
     if (records.some((record) => record === null)) return null;
     generations.push({
@@ -413,8 +420,23 @@ export function modernDarwinRecoveryJournalMatches(
   if (!current) return false;
   const leases = new RuntimeGenerationLeaseJournal(dataDirectory);
   if (!leases.isValid()) return false;
+  const owned = new RuntimeOwnedProcessJournal(dataDirectory, {
+    platform: "darwin",
+  });
+  if (
+    allowedCurrentRuntimeGenerationId
+    && owned.records(allowedCurrentRuntimeGenerationId) === null
+  ) return false;
+  // Ignore only no-session v0.0.44 leases that are authorized independently.
+  // Every session-backed lease is modern regardless of whether its recorded
+  // boot probe and the recovering launch's observation differ. The newly
+  // reserved current generation is named explicitly.
   const currentBootIds = leases.all()
-    .filter(({ systemBootId }) => systemBootId === authority.snapshot.systemBootId)
+    .filter(({ runtimeGenerationId }) => (
+      targetIds.has(runtimeGenerationId)
+      || runtimeGenerationId === allowedCurrentRuntimeGenerationId
+      || owned.records(runtimeGenerationId) !== null
+    ))
     .map(({ runtimeGenerationId }) => runtimeGenerationId)
     .sort();
   const expectedIds = [
@@ -553,7 +575,7 @@ function clearRetiringSnapshot(
     const normalized = currentRecords.map((record) => normalizeRecord(
       record,
       generation.lease.runtimeGenerationId,
-      authority.snapshot.systemBootId,
+      generation.lease.systemBootId,
     ));
     if (normalized.some((record) => record === null)) return false;
     for (const record of normalized as Readonly<Record<string, unknown>>[]) {

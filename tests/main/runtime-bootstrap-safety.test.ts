@@ -566,6 +566,145 @@ describe("runtime bootstrap safety", () => {
     },
   );
 
+  it("keeps probe-unavailable modern macOS state on the explicit recovery path", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-bootstrap-safety-"));
+    const dataDirectory = join(root, "runtime");
+    const generationId = "30000000-0000-4000-8000-000000000003:19";
+    const legacyGenerationId = "30000000-0000-4000-8000-000000000003:20";
+    directories.push(root);
+    mkdirSync(dataDirectory, { recursive: true, mode: 0o700 });
+    expect(new RuntimeGenerationLeaseJournal(dataDirectory).publish(
+      generationId,
+      "unavailable",
+    )).toBe(true);
+    expect(new RuntimeGenerationLeaseJournal(dataDirectory).publish(
+      legacyGenerationId,
+      "unavailable",
+    )).toBe(true);
+    expect(new RuntimeOwnedProcessJournal(dataDirectory, {
+      platform: "darwin",
+    }).startSession(generationId, "unavailable")).toBe(true);
+    readSystemBootIdMock.mockReturnValue(null);
+
+    const safety = prepareRuntimeBootstrapSafety(dataDirectory, "darwin");
+    expect(safety).toEqual({
+      systemBootId: "unavailable",
+      preserveAttachments: true,
+      legacyRecoveryCandidates: [],
+    });
+    const prepared = await prepareModernDarwinBootstrapRecovery(
+      dataDirectory,
+      safety.systemBootId,
+      "/private/tmp/inertia-test-guardian",
+      { platform: "darwin", deadlineAt: Date.now() + 100 },
+    );
+    expect(prepared).toMatchObject({ authority: null, blocked: false });
+    expect(prepared.candidate).toMatchObject({
+      platform: "darwin",
+      systemBootId: "unavailable",
+      generations: [{
+        lease: { runtimeGenerationId: generationId },
+        records: [],
+      }],
+    });
+    const descriptor = authorizeModernDarwinRuntimeRecovery(
+      dataDirectory,
+      prepared.candidate!,
+      safety.systemBootId,
+      "/private/tmp/inertia-test-guardian",
+      {
+        platform: "darwin",
+        readDarwinIdentity: () => null,
+        pidExists: () => false,
+      },
+    );
+    expect(descriptor?.runtimeGenerationIds).toEqual([generationId]);
+    const afterModernAuthority = prepareRuntimeBootstrapSafety(
+      dataDirectory,
+      "darwin",
+    );
+    expect(afterModernAuthority.legacyRecoveryCandidates).toEqual([
+      legacyGenerationId,
+    ]);
+    expect(authorizeLegacyRuntimeRecovery(
+      dataDirectory,
+      afterModernAuthority.legacyRecoveryCandidates,
+      "unavailable",
+      "darwin",
+    )).toBe(true);
+    expect(new RuntimeGenerationLeaseJournal(dataDirectory).all())
+      .toContainEqual(expect.objectContaining({
+        runtimeGenerationId: generationId,
+        systemBootId: "unavailable",
+      }));
+  });
+
+  it.each([
+    [
+      "unavailable",
+      "test:00000000-0000-4000-8000-000000000001",
+    ],
+    [
+      "test:00000000-0000-4000-8000-000000000001",
+      "unavailable",
+    ],
+  ] as const)(
+    "re-prompts modern macOS recovery when the boot probe changes from %s to %s",
+    async (recordedBootId, observedBootId) => {
+      const root = mkdtempSync(join(tmpdir(), "inertia-bootstrap-safety-"));
+      const dataDirectory = join(root, "runtime");
+      const generationId = "30000000-0000-4000-8000-000000000003:21";
+      directories.push(root);
+      mkdirSync(dataDirectory, { recursive: true, mode: 0o700 });
+      expect(new RuntimeGenerationLeaseJournal(dataDirectory).publish(
+        generationId,
+        recordedBootId,
+      )).toBe(true);
+      expect(new RuntimeOwnedProcessJournal(dataDirectory, {
+        platform: "darwin",
+      }).startSession(generationId, recordedBootId)).toBe(true);
+
+      const initialSnapshot = captureModernDarwinRecoverySnapshot(
+        dataDirectory,
+        recordedBootId,
+      );
+      expect(initialSnapshot).not.toBeNull();
+      expect(initialSnapshot
+        && new ModernDarwinRecoveryAuthorityJournal(dataDirectory)
+          .publish(initialSnapshot)).not.toBeNull();
+
+      const prepared = await prepareModernDarwinBootstrapRecovery(
+        dataDirectory,
+        observedBootId,
+        "/private/tmp/inertia-test-guardian",
+        { platform: "darwin", deadlineAt: Date.now() + 100 },
+      );
+      expect(prepared).toMatchObject({ authority: null, blocked: false });
+      expect(prepared.candidate).toMatchObject({
+        systemBootId: observedBootId,
+        generations: [{
+          lease: {
+            runtimeGenerationId: generationId,
+            systemBootId: recordedBootId,
+          },
+        }],
+      });
+      expect(new ModernDarwinRecoveryAuthorityJournal(dataDirectory).pending())
+        .toBeNull();
+      expect(authorizeModernDarwinRuntimeRecovery(
+        dataDirectory,
+        prepared.candidate!,
+        observedBootId,
+        "/private/tmp/inertia-test-guardian",
+        {
+          platform: "darwin",
+          readDarwinIdentity: () => null,
+          pidExists: () => false,
+        },
+      )?.runtimeGenerationIds).toEqual([generationId]);
+    },
+  );
+
   it("keeps cancellation and invalid ownership state fail closed", () => {
     const cancelledRoot = mkdtempSync(join(tmpdir(), "inertia-bootstrap-safety-"));
     const cancelledData = join(cancelledRoot, "runtime");

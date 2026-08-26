@@ -308,15 +308,20 @@ describe("runtime recovery safety command boundary", () => {
     const legacyGeneration = "40000000-0000-4000-8000-000000000004:8";
     const modernGeneration = "40000000-0000-4000-8000-000000000004:9";
     const currentGeneration = "50000000-0000-4000-8000-000000000005:10";
-    const bootId = "test:00000000-0000-4000-8000-000000000001";
+    // A missing current OS boot probe must not demote a modern Darwin session
+    // recorded while the probe worked into legacy recovery or bypass its exact
+    // snapshot-bound acknowledgement.
+    const bootId = "unavailable";
+    const recordedModernBootId =
+      "test:00000000-0000-4000-8000-000000000009";
     mkdirSync(dataDirectory, { recursive: true, mode: 0o700 });
     mkdirSync(workspaceDirectory);
     const leases = new RuntimeGenerationLeaseJournal(dataDirectory);
     expect(leases.publish(legacyGeneration, "unavailable")).toBe(true);
-    expect(leases.publish(modernGeneration, bootId)).toBe(true);
+    expect(leases.publish(modernGeneration, recordedModernBootId)).toBe(true);
     expect(new RuntimeOwnedProcessJournal(dataDirectory, {
       platform: "darwin",
-    }).startSession(modernGeneration, bootId)).toBe(true);
+    }).startSession(modernGeneration, recordedModernBootId)).toBe(true);
     const snapshot = captureModernDarwinRecoverySnapshot(
       dataDirectory,
       bootId,
@@ -328,6 +333,9 @@ describe("runtime recovery safety command boundary", () => {
       : null;
     expect(modernDescriptor).not.toBeNull();
     expect(leases.publish(currentGeneration, bootId)).toBe(true);
+    expect(new RuntimeOwnedProcessJournal(dataDirectory, {
+      platform: "darwin",
+    }).startSession(currentGeneration, bootId)).toBe(true);
 
     const seed = new RuntimeStore(databasePath, workspaceDirectory, {
       recoverInterruptedRuns: false,
@@ -336,7 +344,7 @@ describe("runtime recovery safety command boundary", () => {
     const turnIds: string[] = [];
     for (const [kind, generationId, generationBootId] of [
       ["legacy", legacyGeneration, "unavailable"],
-      ["modern", modernGeneration, bootId],
+      ["modern", modernGeneration, recordedModernBootId],
     ] as const) {
       const conversation = seed.createConversation(
         project.id,
@@ -480,6 +488,7 @@ describe("runtime recovery safety command boundary", () => {
     // Main publishes the new supervised generation only after the exact old
     // snapshot is consent-bound.
     expect(leases.publish(currentGeneration, currentBootId)).toBe(true);
+    expect(owned.startSession(currentGeneration, currentBootId)).toBe(true);
 
     const seed = new RuntimeStore(databasePath, workspaceDirectory, {
       recoverInterruptedRuns: false,

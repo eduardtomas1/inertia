@@ -341,6 +341,24 @@ describe("runtime generation lease journal", () => {
     expect(journal.publish(generationA, bootA)).toBe(false);
   });
 
+  it("reserves one current slot for an exact modern batch across a boot-probe transition", () => {
+    const path = directory();
+    const journal = new RuntimeGenerationLeaseJournal(path);
+    const authorized: string[] = [];
+    for (let index = 0; index < 32; index += 1) {
+      const suffix = index.toString(16).padStart(12, "0");
+      const generationId = `00000000-0000-4000-8000-${suffix}:1`;
+      authorized.push(generationId);
+      expect(journal.publish(generationId, bootA)).toBe(true);
+    }
+    expect(journal.publishWithModernRecoveryReserve(
+      generationA,
+      "unavailable",
+      authorized,
+    )).toBe(true);
+    expect(journal.all()).toHaveLength(33);
+  });
+
   it("reserves one current slot for an exact mixed modern and legacy batch", () => {
     const path = directory();
     const journal = new RuntimeGenerationLeaseJournal(path);
@@ -379,5 +397,21 @@ describe("runtime generation lease journal", () => {
       modern,
     )).toBe(false);
     expect(changedJournal.all()).toHaveLength(32);
+
+    const unavailable = directory();
+    const unavailableJournal = new RuntimeGenerationLeaseJournal(unavailable);
+    for (const generationId of [...legacy, ...modern]) {
+      expect(unavailableJournal.publish(
+        generationId,
+        legacy.includes(generationId) ? "unavailable" : bootA,
+      )).toBe(true);
+    }
+    expect(unavailableJournal.publishWithManualRecoveryReserve(
+      generationB,
+      "unavailable",
+      legacy,
+      modern,
+    )).toBe(true);
+    expect(unavailableJournal.all()).toHaveLength(33);
   });
 });

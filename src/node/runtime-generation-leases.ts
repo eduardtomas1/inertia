@@ -257,7 +257,6 @@ export class RuntimeGenerationLeaseJournal {
     this.refresh();
     if (
       this.invalid
-      || systemBootId === "unavailable"
       || this.leases.size !== MAX_REGULAR_GENERATION_LEASES
       || authorizedRuntimeGenerationIds.length
         !== MAX_REGULAR_GENERATION_LEASES
@@ -266,8 +265,7 @@ export class RuntimeGenerationLeaseJournal {
     ) return false;
     const authorized = new Set(authorizedRuntimeGenerationIds);
     if (this.all().some((lease) => (
-      lease.systemBootId !== systemBootId
-      || !authorized.has(lease.runtimeGenerationId)
+      !authorized.has(lease.runtimeGenerationId)
     ))) return false;
     return this.publishWithinLimit(
       runtimeGenerationId,
@@ -287,7 +285,6 @@ export class RuntimeGenerationLeaseJournal {
     const authorizedModern = new Set(authorizedModernRuntimeGenerationIds);
     if (
       this.invalid
-      || systemBootId === "unavailable"
       || this.leases.size !== MAX_REGULAR_GENERATION_LEASES
       || authorizedLegacy.size !== authorizedLegacyRuntimeGenerationIds.length
       || authorizedModern.size !== authorizedModernRuntimeGenerationIds.length
@@ -296,10 +293,9 @@ export class RuntimeGenerationLeaseJournal {
       || [...authorizedLegacy].some((generationId) =>
         authorizedModern.has(generationId))
       || this.all().some((lease) => (
-        lease.systemBootId === "unavailable"
-          ? !authorizedLegacy.has(lease.runtimeGenerationId)
-          : lease.systemBootId !== systemBootId
-            || !authorizedModern.has(lease.runtimeGenerationId)
+        authorizedLegacy.has(lease.runtimeGenerationId)
+          ? lease.systemBootId !== "unavailable"
+          : !authorizedModern.has(lease.runtimeGenerationId)
       ))
     ) return false;
     return this.publishWithinLimit(

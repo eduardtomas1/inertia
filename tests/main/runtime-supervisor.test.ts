@@ -341,6 +341,66 @@ describe("RuntimeSupervisor", () => {
     }).records(oldGenerationId)).toBeNull();
   });
 
+  it("retires probe-unavailable modern Darwin state only after DB acknowledgement", () => {
+    const oldGenerationId =
+      "30000000-0000-4000-8000-000000000003:80";
+    const legacyGenerationId =
+      "30000000-0000-4000-8000-000000000003:81";
+    const platform = currentAuthorityPlatform();
+    const recordedModernBootId =
+      "test:00000000-0000-4000-8000-000000000009";
+    const leases = new RuntimeGenerationLeaseJournal(dataDirectory);
+    expect(leases.publish(oldGenerationId, recordedModernBootId)).toBe(true);
+    expect(leases.publish(legacyGenerationId, "unavailable")).toBe(true);
+    expect(new RuntimeOwnedProcessJournal(dataDirectory, {
+      platform: "darwin",
+    }).startSession(oldGenerationId, recordedModernBootId)).toBe(true);
+    const snapshot = captureModernDarwinRecoverySnapshot(
+      dataDirectory,
+      "unavailable",
+    );
+    const descriptor = snapshot
+      ? new ModernDarwinRecoveryAuthorityJournal(dataDirectory)
+        .publish(snapshot)
+      : null;
+    expect(descriptor).not.toBeNull();
+    expect(new LegacyRuntimeRecoveryAuthorityJournal(dataDirectory)
+      .publishBatch(
+        [legacyGenerationId],
+        platform,
+        "unavailable",
+      )).toBe(true);
+    const { children, supervisor } = createHarness({
+      systemBootId: "unavailable",
+      manualModernDarwinRecovery: descriptor!,
+      runtimeProcessGuardianPath: "/private/tmp/inertia-test-guardian",
+    });
+
+    supervisor.start();
+    expect(children).toHaveLength(1);
+    children[0].spawn();
+    expect(children[0].messages.at(-1)).toMatchObject({
+      type: "runtime.start",
+      options: {
+        manuallyRetiredRuntimeGenerationIds: [legacyGenerationId],
+        manualModernDarwinRecovery: descriptor,
+      },
+    });
+    expect(new RuntimeGenerationLeaseJournal(dataDirectory).all())
+      .toHaveLength(3);
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+
+    expect(supervisor.snapshot()).toMatchObject({ phase: "ready" });
+    expect(new ModernDarwinRecoveryAuthorityJournal(dataDirectory).pending())
+      .toBeNull();
+    expect(new LegacyRuntimeRecoveryAuthorityJournal(dataDirectory)
+      .pending(platform, "unavailable")).toEqual([]);
+    expect(new RuntimeGenerationLeaseJournal(dataDirectory).all())
+      .not.toContainEqual(expect.objectContaining({
+        runtimeGenerationId: oldGenerationId,
+      }));
+  });
+
   it("consumes a mixed legacy and modern recovery batch before readiness", () => {
     const modernGenerationId =
       "30000000-0000-4000-8000-000000000003:78";

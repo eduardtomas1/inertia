@@ -123,6 +123,84 @@ describe("modern Darwin runtime recovery authority", () => {
     });
   });
 
+  it("binds an unavailable boot probe instead of treating it as reboot proof", () => {
+    const path = directory();
+    expect(new RuntimeGenerationLeaseJournal(path).publish(
+      generationA,
+      "unavailable",
+    )).toBe(true);
+    expect(new RuntimeOwnedProcessJournal(path, {
+      platform: "darwin",
+    }).startSession(generationA, "unavailable")).toBe(true);
+
+    const snapshot = captureModernDarwinRecoverySnapshot(
+      path,
+      "unavailable",
+    );
+    expect(snapshot).toMatchObject({
+      platform: "darwin",
+      systemBootId: "unavailable",
+      generations: [{
+        lease: {
+          runtimeGenerationId: generationA,
+          systemBootId: "unavailable",
+        },
+      }],
+    });
+    const descriptor = snapshot
+      ? new ModernDarwinRecoveryAuthorityJournal(path).publish(snapshot)
+      : null;
+    const authority = new ModernDarwinRecoveryAuthorityJournal(path).pending();
+    expect(descriptor?.runtimeGenerationIds).toEqual([generationA]);
+    expect(authority && modernDarwinRecoveryAuthorityMatches(
+      path,
+      authority,
+      absentRoots,
+    )).toBe(true);
+  });
+
+  it.each([
+    ["unavailable", bootId],
+    [bootId, "unavailable"],
+  ] as const)(
+    "binds recorded boot %s independently from current observation %s",
+    (recordedBootId, observedBootId) => {
+      const path = directory();
+      expect(new RuntimeGenerationLeaseJournal(path).publish(
+        generationA,
+        recordedBootId,
+      )).toBe(true);
+      expect(new RuntimeOwnedProcessJournal(path, {
+        platform: "darwin",
+      }).startSession(generationA, recordedBootId)).toBe(true);
+
+      const snapshot = captureModernDarwinRecoverySnapshot(
+        path,
+        observedBootId,
+      );
+      expect(snapshot).toMatchObject({
+        systemBootId: observedBootId,
+        generations: [{
+          lease: {
+            runtimeGenerationId: generationA,
+            systemBootId: recordedBootId,
+          },
+        }],
+      });
+      const descriptor = snapshot
+        ? new ModernDarwinRecoveryAuthorityJournal(path).publish(snapshot)
+        : null;
+      const authority = new ModernDarwinRecoveryAuthorityJournal(path)
+        .pending();
+      expect(descriptor?.runtimeGenerationIds).toEqual([generationA]);
+      expect(authority && modernDarwinRecoveryAuthorityMatches(
+        path,
+        authority,
+        absentRoots,
+      )).toBe(true);
+    },
+  );
+
   it("rejects a pending-to-claimed transition after the prompt", () => {
     const path = directory();
     const { ownershipId } = seedPending(path, generationA);

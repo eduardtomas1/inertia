@@ -67,6 +67,7 @@ function unavailableLegacyRecoveryCandidates(
     !supportedPlatform
     || !generationLeases.isValid()
   ) return [];
+  const separatelyAuthorizedModernIds = new Set<string>();
   try {
     // v0.0.44 never wrote runtime-owned session, claim, or containment leaves
     // alongside these fallback leases. Any such leaf represents a newer exact
@@ -81,9 +82,10 @@ function unavailableLegacyRecoveryCandidates(
       const owned = new RuntimeOwnedProcessJournal(dataDirectory, {
         platform: "darwin",
       });
-      const modernLeases = generationLeases.all().filter(
-        ({ systemBootId: leaseBootId }) => leaseBootId !== "unavailable",
-      );
+      const allLeases = generationLeases.all();
+      const modernLeases = allLeases.filter(({ runtimeGenerationId }) => (
+        owned.records(runtimeGenerationId) !== null
+      ));
       const modernAuthority = modernLeases.length > 0
         ? new ModernDarwinRecoveryAuthorityJournal(dataDirectory).pending()
         : null;
@@ -99,9 +101,20 @@ function unavailableLegacyRecoveryCandidates(
         )
       ) return [];
       let expectedLeaves = 0;
-      for (const lease of generationLeases.all()) {
+      const modernGenerationIds = new Set(
+        modernAuthority?.snapshot.generations.map(
+          ({ lease }) => lease.runtimeGenerationId,
+        ) ?? [],
+      );
+      for (const runtimeGenerationId of modernGenerationIds) {
+        separatelyAuthorizedModernIds.add(runtimeGenerationId);
+      }
+      for (const lease of allLeases) {
         const records = owned.records(lease.runtimeGenerationId);
-        if (lease.systemBootId === "unavailable") {
+        if (
+          lease.systemBootId === "unavailable"
+          && !modernGenerationIds.has(lease.runtimeGenerationId)
+        ) {
           if (records !== null) return [];
           continue;
         }
@@ -130,6 +143,7 @@ function unavailableLegacyRecoveryCandidates(
   return generationLeases.all()
     .filter((lease) => (
       lease.systemBootId === "unavailable"
+      && !separatelyAuthorizedModernIds.has(lease.runtimeGenerationId)
       && !alreadyAuthorized.has(lease.runtimeGenerationId)
     ))
     .map(({ runtimeGenerationId }) => runtimeGenerationId);
@@ -251,7 +265,6 @@ export async function prepareModernDarwinBootstrapRecovery(
   const platform = options.platform ?? process.platform;
   if (
     platform !== "darwin"
-    || systemBootId === "unavailable"
     || !guardianPath
   ) return { authority: null, candidate: null, blocked: false };
   try {
@@ -297,8 +310,15 @@ export async function prepareModernDarwinBootstrapRecovery(
     if (!leases.isValid()) {
       return { authority: null, candidate: null, blocked: true };
     }
+    const owned = new RuntimeOwnedProcessJournal(dataDirectory, {
+      platform: "darwin",
+    });
+    // Session-backed leases are modern state even when a boot probe changed
+    // between available and unavailable. That transition is not reboot proof,
+    // so preserve the lease's recorded identity for exact cleanup and bind the
+    // current observation separately in the manual authority snapshot.
     const prior = leases.all().filter((lease) => (
-      lease.systemBootId === systemBootId
+      owned.records(lease.runtimeGenerationId) !== null
     ));
     const deadlineAt = options.deadlineAt ?? Date.now() + 5_000;
     // Drain every exact recorded guardian/session boundary first, but retain
@@ -310,7 +330,7 @@ export async function prepareModernDarwinBootstrapRecovery(
       const recovery = recoverRuntimeOwnedProcesses(
         dataDirectory,
         lease.runtimeGenerationId,
-        systemBootId,
+        lease.systemBootId,
         {
           deadlineAt,
           platform: "darwin",
@@ -346,7 +366,6 @@ export function authorizeModernDarwinRuntimeRecovery(
   const platform = options.platform ?? process.platform;
   if (
     platform !== "darwin"
-    || systemBootId === "unavailable"
     || candidate.systemBootId !== systemBootId
   ) return null;
   try {

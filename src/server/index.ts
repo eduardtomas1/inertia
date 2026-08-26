@@ -171,6 +171,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     manualModernDarwinRecovery
     && (
       !modernDarwinAuthority
+      || modernDarwinAuthority.snapshot.systemBootId !== options.systemBootId
       || !modernDarwinRecoveryDescriptorMatches(
         manualModernDarwinRecovery,
         modernDarwinAuthority,
@@ -217,8 +218,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     && authorizedLegacyGenerationIds.has(lease.runtimeGenerationId);
   const authorizedModernOwner = (
     lease: typeof retainedGenerationLeases[number],
-  ): boolean => lease.systemBootId === options.systemBootId
-    && authorizedModernGenerationIds.has(lease.runtimeGenerationId);
+  ): boolean => authorizedModernGenerationIds.has(lease.runtimeGenerationId);
   const runtimeSafetyLock = options.priorRuntimeCleanupUnconfirmed === true
     || !runtimeGenerationLeases.isValid()
     || !retainedGenerationLeases.some(currentGenerationOwner)

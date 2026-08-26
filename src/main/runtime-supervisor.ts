@@ -630,6 +630,7 @@ export class RuntimeSupervisor {
         !modernRecoveryRootObservation
         ||
         !modernRecoveryAuthority
+        || modernRecoveryAuthority.snapshot.systemBootId !== this.systemBootId
         || !modernDarwinRecoveryDescriptorMatches(
           modernRecoveryDescriptor,
           modernRecoveryAuthority,
@@ -659,8 +660,17 @@ export class RuntimeSupervisor {
     const pendingLegacyRecoveryAuthorities = new Set(
       pendingLegacyRecoveryAuthorityIds,
     );
+    const modernRecoveryGenerationIds = new Set(
+      modernRecoveryDescriptor?.runtimeGenerationIds ?? [],
+    );
+    // The unavailable boot marker can name both a session-backed modern
+    // Darwin snapshot and no-session v0.0.44 leases. Each cohort has its own
+    // exact authority and must be checked without counting the other twice.
     const legacyLeaseIds = this.runtimeGenerationLeases.all()
-      .filter((lease) => lease.systemBootId === "unavailable")
+      .filter((lease) => (
+        lease.systemBootId === "unavailable"
+        && !modernRecoveryGenerationIds.has(lease.runtimeGenerationId)
+      ))
       .map(({ runtimeGenerationId: generationId }) => generationId)
       .sort();
     const exactLegacyBatchAuthorized = legacyLeaseIds.length
@@ -725,6 +735,7 @@ export class RuntimeSupervisor {
         !modernRecoveryRootObservation
         ||
         !modernRecoveryAuthority
+        || modernRecoveryAuthority.snapshot.systemBootId !== this.systemBootId
         || !modernDarwinRecoveryAuthorityMatches(
           this.workerOptions.dataDirectory,
           modernRecoveryAuthority,
@@ -748,6 +759,7 @@ export class RuntimeSupervisor {
       .filter((lease) => (
         lease.systemBootId === "unavailable"
         && lease.runtimeGenerationId !== runtimeGenerationId
+        && !modernRecoveryGenerationIds.has(lease.runtimeGenerationId)
       ))
       .map(({ runtimeGenerationId: generationId }) => generationId)
       .sort();

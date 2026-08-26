@@ -8,6 +8,9 @@ import {
   waitForPackageSmokeResult,
   waitForRequestedPackageSmokeResults,
 } from "../../src/main/package-smoke-results";
+import {
+  writePackagedSmokeResult,
+} from "../../src/server/runtime/attachments/package-smoke-pdf";
 
 const directories: string[] = [];
 
@@ -45,10 +48,10 @@ describe("package smoke result receipts", () => {
       { pdf, image },
       { timeoutMs: 1_000, pollIntervalMs: 2 },
     ).then(settled);
-    await writeFile(pdf, JSON.stringify({ ok: true, content: "PDF text" }));
+    await writePackagedSmokeResult(pdf, { ok: true, content: "PDF text" });
     await new Promise<void>((resolve) => setTimeout(resolve, 10));
     expect(settled).not.toHaveBeenCalled();
-    await writeFile(image, JSON.stringify({ ok: true }));
+    await writePackagedSmokeResult(image, { ok: true });
     await waiting;
     expect(settled).toHaveBeenCalledOnce();
   });

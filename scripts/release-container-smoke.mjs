@@ -382,11 +382,11 @@ async function smokeLinux(repositoryRoot, releaseDirectory, names, productName) 
       [embeddedExecutable, ...nativeModulePaths(resources, "linux", productName, app)],
       "linux",
     );
-    await runPackageSmoke(repositoryRoot, appImage, resources, "linux-appimage", temporaryRoot, "retained-wrapper", {
+    await runPackageSmoke(repositoryRoot, appImage, resources, "linux-appimage", temporaryRoot, "direct-app", {
       INERTIA_PACKAGE_SMOKE_NO_SANDBOX: "1",
     }, ["APPIMAGE_EXTRACT_AND_RUN"]);
     console.log(`Linux ${process.arch} AppImage default mount/AppRun smoke passed.`);
-    await runPackageSmoke(repositoryRoot, appImage, resources, "linux-appimage", temporaryRoot, "handoff-wrapper", {
+    await runPackageSmoke(repositoryRoot, appImage, resources, "linux-appimage", temporaryRoot, "retained-wrapper", {
       APPIMAGE_EXTRACT_AND_RUN: "1",
       INERTIA_PACKAGE_SMOKE_NO_SANDBOX: "1",
     });

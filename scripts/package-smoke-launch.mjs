@@ -23,10 +23,10 @@ export function packageSmokeChildEnvironment(environment) {
 export function resolvePackageSmokeLaunchMode(options) {
   const { configuredMode, extractAndRun, packageKind } = options;
   if (packageKind === "linux-appimage") {
-    if (configuredMode === "retained-wrapper" && extractAndRun === undefined) {
-      return configuredMode;
+    if ((configuredMode === undefined || configuredMode === "direct-app") && extractAndRun === undefined) {
+      return "direct-app";
     }
-    if (configuredMode === "handoff-wrapper" && extractAndRun === "1") {
+    if (configuredMode === "retained-wrapper" && extractAndRun === "1") {
       return configuredMode;
     }
     throw new Error("The AppImage launcher mode does not match its exact runtime entry path.");

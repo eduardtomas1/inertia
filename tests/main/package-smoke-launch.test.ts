@@ -91,21 +91,20 @@ describe("package smoke launcher handoff", () => {
       packageKind: "macos-dmg",
     })).toBe("direct-app");
     expect(resolvePackageSmokeLaunchMode({
+      packageKind: "linux-appimage",
+    })).toBe("direct-app");
+    expect(resolvePackageSmokeLaunchMode({
       configuredMode: "retained-wrapper",
+      extractAndRun: "1",
       packageKind: "linux-appimage",
     })).toBe("retained-wrapper");
-    expect(resolvePackageSmokeLaunchMode({
-      configuredMode: "handoff-wrapper",
-      extractAndRun: "1",
-      packageKind: "linux-appimage",
-    })).toBe("handoff-wrapper");
     expect(() => resolvePackageSmokeLaunchMode({
       configuredMode: "retained-wrapper",
-      extractAndRun: "1",
       packageKind: "linux-appimage",
     })).toThrow("does not match its exact runtime entry path");
     expect(() => resolvePackageSmokeLaunchMode({
       configuredMode: "handoff-wrapper",
+      extractAndRun: "1",
       packageKind: "linux-appimage",
     })).toThrow("does not match its exact runtime entry path");
     expect(() => resolvePackageSmokeLaunchMode({

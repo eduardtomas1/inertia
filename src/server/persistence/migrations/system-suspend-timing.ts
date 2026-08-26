@@ -17,7 +17,8 @@ export const persistSuspendAwareTurnTiming: DatabaseMigrationDefinition = {
     }
     database.exec(`
       CREATE TABLE IF NOT EXISTS system_suspend_intervals (
-        id TEXT PRIMARY KEY
+        sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+        id TEXT NOT NULL UNIQUE
           CHECK (length(id) = 36),
         suspended_at TEXT NOT NULL
           CHECK (length(suspended_at) BETWEEN 20 AND 40),

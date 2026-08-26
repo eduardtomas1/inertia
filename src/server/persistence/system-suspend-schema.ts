@@ -4,22 +4,45 @@ import type Database from "better-sqlite3";
 export function systemSuspendTimingSchemaIsValid(
   database: Database.Database,
 ): boolean {
-  const turnColumns = new Set(
-    (database.prepare("PRAGMA table_info(agent_turns)").all() as Array<{
-      name: string;
-    }>).map(({ name }) => name),
+  const turnColumns = database.prepare("PRAGMA table_info(agent_turns)").all() as Array<{
+    dflt_value: string | null;
+    name: string;
+    notnull: number;
+    type: string;
+  }>;
+  const suspendedDuration = turnColumns.find(
+    ({ name }) => name === "suspended_duration_ms",
   );
-  const intervalColumns = new Set(
-    (database.prepare("PRAGMA table_info(system_suspend_intervals)").all() as Array<{
-      name: string;
-    }>).map(({ name }) => name),
-  );
+  const intervalColumns = database.prepare(
+    "PRAGMA table_info(system_suspend_intervals)",
+  ).all() as Array<{
+    name: string;
+    pk: number;
+    type: string;
+  }>;
+  const sequence = intervalColumns.find(({ name }) => name === "sequence");
+  const intervalColumnNames = new Set(intervalColumns.map(({ name }) => name));
   if (
-    !turnColumns.has("suspended_duration_ms")
+    !suspendedDuration
+    || suspendedDuration.type.trim().toUpperCase() !== "INTEGER"
+    || suspendedDuration.notnull !== 1
+    || suspendedDuration.dflt_value?.trim() !== "0"
+    || !sequence
+    || sequence.type.trim().toUpperCase() !== "INTEGER"
+    || sequence.pk !== 1
     || ["id", "suspended_at", "resumed_at"].some(
-      (column) => !intervalColumns.has(column),
+      (column) => !intervalColumnNames.has(column),
     )
   ) return false;
+  const invalidDuration = database.prepare(`
+    SELECT 1
+    FROM agent_turns
+    WHERE typeof(suspended_duration_ms) != 'integer'
+      OR suspended_duration_ms < 0
+      OR suspended_duration_ms > 9007199254740991
+    LIMIT 1
+  `).get();
+  if (invalidDuration) return false;
   const index = (database.prepare(
     "PRAGMA index_list(system_suspend_intervals)",
   ).all() as Array<{

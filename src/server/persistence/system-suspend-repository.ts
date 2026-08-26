@@ -8,6 +8,10 @@ interface SystemSuspendIntervalRow {
   resumed_at: string;
 }
 
+interface SequencedSystemSuspendIntervalRow extends SystemSuspendIntervalRow {
+  sequence: number;
+}
+
 interface OverlappingTurnRow {
   id: string;
   conversation_id: string;
@@ -45,18 +49,42 @@ export class SystemSuspendRepository {
     if (resumed.milliseconds < suspended.milliseconds) {
       throw new Error("The system resume time cannot precede its suspend time.");
     }
-    const interval: RuntimeSystemSuspendInterval = {
-      id: input.id,
-      suspendedAt: suspended.iso,
-      resumedAt: resumed.iso,
-    };
-
     return this.database.transaction(() => {
       const existing = this.database.prepare(`
-        SELECT id, suspended_at, resumed_at
+        SELECT sequence, id, suspended_at, resumed_at
         FROM system_suspend_intervals
         WHERE id = ?
-      `).get(interval.id) as SystemSuspendIntervalRow | undefined;
+      `).get(input.id) as SequencedSystemSuspendIntervalRow | undefined;
+      const predecessor = existing
+        ? this.database.prepare(`
+            SELECT resumed_at
+            FROM system_suspend_intervals
+            WHERE sequence < ?
+            ORDER BY sequence DESC
+            LIMIT 1
+          `).get(existing.sequence) as { resumed_at: string } | undefined
+        : this.database.prepare(`
+            SELECT resumed_at
+            FROM system_suspend_intervals
+            ORDER BY sequence DESC
+            LIMIT 1
+          `).get() as { resumed_at: string } | undefined;
+      const previousResume = predecessor
+        ? timestamp(predecessor.resumed_at, "The previous system resume time")
+        : null;
+      const suspendedMilliseconds = Math.max(
+        suspended.milliseconds,
+        previousResume?.milliseconds ?? suspended.milliseconds,
+      );
+      const resumedMilliseconds = Math.max(
+        resumed.milliseconds,
+        suspendedMilliseconds,
+      );
+      const interval: RuntimeSystemSuspendInterval = {
+        id: input.id,
+        suspendedAt: new Date(suspendedMilliseconds).toISOString(),
+        resumedAt: new Date(resumedMilliseconds).toISOString(),
+      };
       if (existing) {
         const persisted = fromRow(existing);
         if (
@@ -105,9 +133,9 @@ export class SystemSuspendRepository {
         const startedAt = Date.parse(turn.started_at);
         const completedAt = turn.completed_at
           ? Date.parse(turn.completed_at)
-          : resumed.milliseconds;
-        const duration = Math.min(completedAt, resumed.milliseconds)
-          - Math.max(startedAt, suspended.milliseconds);
+          : resumedMilliseconds;
+        const duration = Math.min(completedAt, resumedMilliseconds)
+          - Math.max(startedAt, suspendedMilliseconds);
         if (!Number.isSafeInteger(duration) || duration <= 0) continue;
         const next = turn.suspended_duration_ms + duration;
         if (!Number.isSafeInteger(next) || next < 0) {

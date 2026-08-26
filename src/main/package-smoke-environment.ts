@@ -10,8 +10,18 @@ function absoluteTestPath(name: string): string | null {
     : null;
 }
 
+const OWNER_TOKEN_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+
+function ownerToken(): string | null {
+  const value = process.env.NODE_ENV === "test"
+    ? process.env.INERTIA_PACKAGE_SMOKE_OWNER_TOKEN
+    : undefined;
+  return typeof value === "string" && OWNER_TOKEN_PATTERN.test(value) ? value : null;
+}
+
 export function packageSmokeEnvironment(): {
   marker: string | null;
+  ownerToken: string | null;
   codexExecutable: string | null;
   pdfInput: string | null;
   pdfResult: string | null;
@@ -20,6 +30,7 @@ export function packageSmokeEnvironment(): {
 } {
   return {
     marker: absoluteTestPath("INERTIA_PACKAGE_SMOKE_FILE"),
+    ownerToken: ownerToken(),
     codexExecutable: absoluteTestPath("INERTIA_PACKAGE_SMOKE_CODEX_EXPECTED"),
     pdfInput: absoluteTestPath("INERTIA_PACKAGE_SMOKE_PDF_INPUT"),
     pdfResult: absoluteTestPath("INERTIA_PACKAGE_SMOKE_PDF_RESULT"),

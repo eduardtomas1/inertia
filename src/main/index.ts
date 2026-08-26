@@ -173,6 +173,7 @@ let detachedChatMain: DetachedChatMain | null = null;
 let trustedRendererUrl = "";
 let privilegedCleanup: Promise<boolean> | null = null;
 let packageSmokeFilePath: string | null = null;
+let packageSmokeOwnerToken: string | null = null;
 const appHealthRegistry = new InertiaHealthRegistry();
 appHealthRegistry.registerProcess("main", () => process.pid);
 appHealthRegistry.registerProcess(
@@ -994,6 +995,7 @@ async function bootstrap(): Promise<void> {
 
   const packageSmoke = packageSmokeEnvironment();
   packageSmokeFilePath = packageSmoke.marker;
+  packageSmokeOwnerToken = packageSmoke.ownerToken;
   const {
     codexExecutable: packageSmokeCodexExecutable,
     pdfInput: packageSmokePdfInput,
@@ -1087,7 +1089,7 @@ async function bootstrap(): Promise<void> {
         console.error("The local runtime stopped; restart scheduled", snapshot.lastError);
       }
       if (snapshot.phase === "stopped") recordPackageSmokeStage("runtime-stopped");
-      if (snapshot.phase === "ready" && snapshot.pid && snapshot.websocketUrl && packageSmokeFilePath && !packageSmokeScheduled) {
+      if (snapshot.phase === "ready" && snapshot.pid && snapshot.websocketUrl && packageSmokeFilePath && packageSmokeOwnerToken && !packageSmokeScheduled) {
         packageSmokeScheduled = true;
         void writeFile(
           packageSmokeFilePath,
@@ -1097,6 +1099,7 @@ async function bootstrap(): Promise<void> {
             generation: snapshot.generation,
             websocketUrl: snapshot.websocketUrl,
             timestampMs: Date.now(),
+            ownerToken: packageSmokeOwnerToken,
           }),
           { encoding: "utf8", mode: 0o600, flag: "wx" },
         ).then(async () => {
@@ -1194,6 +1197,7 @@ function recordPackageSmokeStage(stage: string): void {
       stage,
       pid: process.pid,
       timestampMs: Date.now(),
+      ownerToken: packageSmokeOwnerToken,
     }), { encoding: "utf8", mode: 0o600, flag: "wx" });
   } catch {
     // Packaged smoke diagnostics are best effort and test-only.

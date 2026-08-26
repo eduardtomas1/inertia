@@ -8,6 +8,13 @@ import { dirname, join, resolve } from "node:path";
 import WebSocket from "ws";
 import { parseDocument } from "yaml";
 
+import {
+  packageSmokeProcessesExited,
+  parsePackageSmokeOwnedPids,
+  parsePackageSmokeReadiness,
+  waitForPackageSmokeReadiness,
+} from "./package-smoke-launch.mjs";
+
 const STARTUP_TIMEOUT_MS = 30_000;
 // This begins only after runtime readiness. It covers the product's bounded
 // 30s cold module load plus 12s extraction deadline and result-file cleanup.
@@ -516,7 +523,20 @@ function processGroupExists(pid) {
   }
 }
 
-function forceTerminateProcessTree(mainPid, runtimePid) {
+function processGroupId(pid) {
+  if (process.platform === "win32" || !Number.isSafeInteger(pid) || pid <= 0) return null;
+  const result = spawnSync("ps", ["-o", "pgid=", "-p", String(pid)], {
+    encoding: "utf8",
+    maxBuffer: 1_024,
+    timeout: 1_000,
+  });
+  const value = result.status === 0 ? result.stdout.trim() : "";
+  if (!/^[1-9]\d*$/u.test(value)) return null;
+  const group = Number(value);
+  return Number.isSafeInteger(group) ? group : null;
+}
+
+function forceTerminateProcessTree(launcherPid, mainPid, runtimePid) {
   const validPids = [...new Set([mainPid, runtimePid].filter((pid) => Number.isSafeInteger(pid) && pid > 0))];
   if (process.platform === "win32") {
     for (const pid of validPids) {
@@ -524,8 +544,8 @@ function forceTerminateProcessTree(mainPid, runtimePid) {
     }
     return;
   }
-  if (Number.isSafeInteger(mainPid) && mainPid > 0 && processGroupExists(mainPid)) {
-    try { process.kill(-mainPid, "SIGKILL"); } catch { /* The process group may already be gone. */ }
+  if (Number.isSafeInteger(launcherPid) && launcherPid > 0 && processGroupExists(launcherPid)) {
+    try { process.kill(-launcherPid, "SIGKILL"); } catch { /* The process group may already be gone. */ }
   }
   for (const pid of validPids) {
     if (!processExists(pid)) continue;
@@ -543,6 +563,11 @@ async function waitUntil(predicate, timeoutMs, description) {
   throw new Error(`Timed out waiting for ${description}.`);
 }
 
+async function waitForObservedProcessExit(pid) {
+  while (processExists(pid)) await sleep(POLL_INTERVAL_MS);
+  return { error: null, code: 0, signal: null, endedAt: Date.now() };
+}
+
 async function readJsonIfPresent(path) {
   try {
     return JSON.parse(await readFile(path, "utf8"));
@@ -551,22 +576,6 @@ async function readJsonIfPresent(path) {
     if (code === "ENOENT" || error instanceof SyntaxError) return null;
     throw error;
   }
-}
-
-function parseReadiness(value, expectedMainPid) {
-  if (!value || typeof value !== "object") return null;
-  const { mainPid, runtimePid, generation, websocketUrl, timestampMs } = value;
-  if (mainPid !== expectedMainPid
-    || !Number.isSafeInteger(runtimePid)
-    || runtimePid <= 0
-    || runtimePid === mainPid
-    || !Number.isSafeInteger(generation)
-    || generation < 1
-    || !Number.isSafeInteger(timestampMs)
-    || timestampMs <= 0
-    || typeof websocketUrl !== "string"
-    || !websocketUrl.startsWith("ws://127.0.0.1:")) return null;
-  return { mainPid, runtimePid, generation, websocketUrl, timestampMs };
 }
 
 async function createWindowsCodexFixture(root, workspace) {
@@ -714,6 +723,7 @@ async function requireLifecycleMarker(
   markerPath,
   stage,
   mainPid,
+  ownerToken,
   timeoutMs = 2_000,
 ) {
   const value = await waitUntil(
@@ -724,6 +734,7 @@ async function requireLifecycleMarker(
   if (
     value.stage !== stage
     || value.pid !== mainPid
+    || value.ownerToken !== ownerToken
     || !Number.isSafeInteger(value.timestampMs)
     || value.timestampMs <= 0
   ) throw new Error(`Invalid ${stage} lifecycle marker.`);
@@ -748,9 +759,12 @@ const workspaceDirectory = join(temporaryRoot, "workspace");
 const profileDirectory = join(temporaryRoot, "profile");
 let child = null;
 let readiness = null;
+let cleanupOwnedPids = null;
 let stdout = "";
 let stderr = "";
 let launchedAt = 0;
+const ownerToken = randomUUID();
+const allowLauncherHandoff = requestedPackageKind === "linux-appimage";
 const updateNetworkTrap = await createUpdateNetworkTrap();
 
 try {
@@ -787,6 +801,7 @@ try {
       INERTIA_DATA_DIR: dataDirectory,
       INERTIA_WORKSPACE_DIR: workspaceDirectory,
       INERTIA_PACKAGE_SMOKE_FILE: markerPath,
+      INERTIA_PACKAGE_SMOKE_OWNER_TOKEN: ownerToken,
       INERTIA_PACKAGE_SMOKE_PDF_INPUT: packagedPdf.inputPath,
       INERTIA_PACKAGE_SMOKE_PDF_RESULT: packagedPdf.resultPath,
       INERTIA_PACKAGE_SMOKE_IMAGE_INPUT: packagedImage.inputPath,
@@ -824,16 +839,28 @@ try {
       endedAt: Date.now(),
     }));
   });
-  readiness = await Promise.race([
-    waitUntil(async () => {
-      const candidate = parseReadiness(await readJsonIfPresent(markerPath), child.pid);
+  readiness = await waitForPackageSmokeReadiness({
+    allowLauncherHandoff,
+    launcherExit: exitResult,
+    launcherTimeoutMs: STARTUP_TIMEOUT_MS,
+    waitForReadiness: () => waitUntil(async () => {
+      const marker = await readJsonIfPresent(markerPath);
+      const parseOptions = {
+        allowLauncherHandoff,
+        launchedAt,
+        launcherPid: child.pid,
+        ownerToken,
+        processExists,
+        processGroupId,
+      };
+      cleanupOwnedPids = parsePackageSmokeOwnedPids(marker, parseOptions) ?? cleanupOwnedPids;
+      const candidate = parsePackageSmokeReadiness(marker, parseOptions);
       return candidate ?? null;
     }, STARTUP_TIMEOUT_MS, "packaged app and utility runtime readiness"),
-    exitResult.then((earlyExit) => {
-      if (earlyExit.error) throw earlyExit.error;
-      throw new Error(`The packaged app exited before reporting readiness (${earlyExit.code ?? earlyExit.signal ?? "unknown"}).`);
-    }),
-  ]);
+  });
+  const appExitResult = allowLauncherHandoff
+    ? waitForObservedProcessExit(readiness.mainPid)
+    : exitResult;
   const runtimeWasObserved = processExists(readiness.runtimePid);
   const pdfResult = await waitUntil(
     () => readJsonIfPresent(packagedPdf.resultPath),
@@ -864,26 +891,35 @@ try {
     markerPath,
     "before-quit",
     readiness.mainPid,
+    ownerToken,
     EXIT_TIMEOUT_MS,
   );
   const shutdownStartedAt = beforeQuit.timestampMs;
   const exit = await withTimeout(
-    exitResult,
+    appExitResult,
     EXIT_TIMEOUT_MS,
     "The packaged app did not finish shutdown after before-quit.",
   );
   if (exit.error) throw exit.error;
-  await requireLifecycleMarker(markerPath, "runtime-stopped", readiness.mainPid);
-  await requireLifecycleMarker(markerPath, "app-exit", readiness.mainPid);
+  await requireLifecycleMarker(markerPath, "runtime-stopped", readiness.mainPid, ownerToken);
+  await requireLifecycleMarker(markerPath, "app-exit", readiness.mainPid, ownerToken);
 
   await waitUntil(
     () => !processExists(readiness.mainPid) && !processExists(readiness.runtimePid),
     CLEANUP_TIMEOUT_MS,
     "main and utility runtime process cleanup",
   );
-  if (process.platform !== "win32") {
-    await waitUntil(() => !processGroupExists(readiness.mainPid), CLEANUP_TIMEOUT_MS, "packaged app process-group cleanup");
-  }
+  if (process.platform !== "win32") await waitUntil(
+    () => packageSmokeProcessesExited({
+      launcherPid: child.pid,
+      mainPid: readiness.mainPid,
+      runtimePid: readiness.runtimePid,
+      processExists,
+      processGroupExists,
+    }),
+    CLEANUP_TIMEOUT_MS,
+    "packaged app process-group cleanup",
+  );
   const cleanupCompletedAt = Date.now();
   updateNetworkTrap.assertNoUpdateRequests();
   const benchmark = {
@@ -944,12 +980,19 @@ try {
   }
   throw new Error(`Packaged smoke failed: ${detail}`, { cause: error });
 } finally {
-  const mainPid = child?.pid ?? null;
-  const runtimePid = readiness?.runtimePid ?? null;
-  if ((mainPid && (processExists(mainPid) || processGroupExists(mainPid))) || (runtimePid && processExists(runtimePid))) {
-    forceTerminateProcessTree(mainPid, runtimePid);
+  const mainPid = readiness?.mainPid ?? cleanupOwnedPids?.mainPid ?? child?.pid ?? null;
+  const runtimePid = readiness?.runtimePid ?? cleanupOwnedPids?.runtimePid ?? null;
+  const launchedPid = child?.pid ?? null;
+  if ((launchedPid && processGroupExists(launchedPid)) || (mainPid && processExists(mainPid)) || (runtimePid && processExists(runtimePid))) {
+    forceTerminateProcessTree(launchedPid, mainPid, runtimePid);
     await waitUntil(
-      () => (!mainPid || (!processExists(mainPid) && !processGroupExists(mainPid))) && (!runtimePid || !processExists(runtimePid)),
+      () => packageSmokeProcessesExited({
+        launcherPid: launchedPid,
+        mainPid,
+        runtimePid,
+        processExists,
+        processGroupExists,
+      }),
       CLEANUP_TIMEOUT_MS,
       "forced packaged process cleanup",
     );

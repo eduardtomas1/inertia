@@ -237,6 +237,18 @@ describe("AgentThreadManager", () => {
           ]),
         );
       }
+      expect(manager.capabilityManifest()).toMatchObject({
+        schemaVersion: 1,
+        definitionDigest: expect.stringMatching(/^[0-9a-f]{64}$/u),
+        packs: [
+          expect.objectContaining({ id: "inertia.frontend-workbench" }),
+          expect.objectContaining({ id: "inertia.orchestration" }),
+        ],
+      });
+      expect(manager.capabilityInstructions().map(({ label }) => label)).toEqual([
+        "inertia-frontend-workbench",
+        "inertia-orchestration",
+      ]);
     } finally {
       store.close();
     }
@@ -255,6 +267,9 @@ describe("AgentThreadManager", () => {
         };
       } | undefined)?.route;
       expect(route?.properties?.providerId?.enum).toContain("kimi");
+      expect(manager.capabilityManifest().packs.map(({ id }) => id)).toEqual([
+        "inertia.orchestration",
+      ]);
       expect(definition?.inputValidator?.safeParse({
         title: "Kimi verifier",
         prompt: "Inspect independently.",

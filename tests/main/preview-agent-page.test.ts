@@ -858,6 +858,269 @@ describe("agent browser semantic snapshots", () => {
     expect(parsed.elements[0]?.value).toHaveLength(500);
   });
 
+  it("keeps image-input values weak while preserving alt as a stable name", async () => {
+    let alt: string | null = null;
+    const input = {
+      nodeType: 1,
+      tagName: "INPUT",
+      type: "image",
+      value: "checkout",
+      labels: [],
+      firstChild: null,
+      parentElement: null,
+      disabled: false,
+      checked: false,
+      getAttribute: (name: string) => name === "alt" ? alt : null,
+      hasAttribute: () => false,
+      matches: () => false,
+      getBoundingClientRect: () => ({
+        x: 10, y: 10, left: 10, top: 10,
+        right: 210, bottom: 40, width: 200, height: 30,
+      }),
+    };
+    const context = {
+      document: withSemanticIterator({
+        title: "Image input",
+        body: bodyWithText(""),
+        documentElement: {},
+        querySelectorAll: () => [input],
+      }),
+      location: { href: "http://127.0.0.1:3000/image-input" },
+      URL,
+      encodeURIComponent,
+      innerWidth: 1_200,
+      innerHeight: 800,
+      scrollX: 0,
+      scrollY: 0,
+      getComputedStyle: () => ({ visibility: "visible", display: "block", opacity: "1" }),
+    };
+    const contents = {
+      executeJavaScriptInIsolatedWorld: vi.fn(async (
+        _worldId: number,
+        scripts: Array<{ code: string }>,
+      ) => runInNewContext(scripts[0]!.code, context)),
+    };
+
+    const valueFallback = JSON.parse(await semanticPageSnapshot(contents as never)) as {
+      elements: Array<{ name: string; nameSource: string }>;
+    };
+    expect(valueFallback.elements[0]).toMatchObject({
+      name: "checkout",
+      nameSource: "value",
+    });
+
+    alt = "Checkout";
+    const altName = JSON.parse(await semanticPageSnapshot(contents as never)) as {
+      elements: Array<{ name: string; nameSource: string }>;
+    };
+    expect(altName.elements[0]).toMatchObject({
+      name: "Checkout",
+      nameSource: "alt",
+    });
+  });
+
+  it("uses stable control values only for exact native input cases", async () => {
+    const button = {
+      nodeType: 1, tagName: "BUTTON", type: "submit", value: "checkout",
+      labels: undefined, firstChild: null, parentElement: null,
+      isContentEditable: false, disabled: false, checked: undefined,
+      getAttribute: () => null,
+      hasAttribute: () => false,
+      matches: () => false,
+      getBoundingClientRect: () => ({
+        x: 10, y: 10, left: 10, top: 10,
+        right: 210, bottom: 40, width: 200, height: 30,
+      }),
+    };
+    const input = { ...button, tagName: "INPUT", value: "Save", labels: [] };
+    const context = {
+      document: withSemanticIterator({
+        title: "Value-less button",
+        body: bodyWithText(""),
+        documentElement: {},
+        querySelectorAll: () => [button, input],
+      }),
+      location: { href: "http://127.0.0.1:3000/button-value" },
+      URL, encodeURIComponent,
+      innerWidth: 1_200, innerHeight: 800, scrollX: 0, scrollY: 0,
+      getComputedStyle: () => ({ visibility: "visible", display: "block", opacity: "1" }),
+    };
+    const contents = {
+      executeJavaScriptInIsolatedWorld: vi.fn(async (
+        _worldId: number,
+        scripts: Array<{ code: string }>,
+      ) => runInNewContext(scripts[0]!.code, context)),
+    };
+
+    const snapshot = JSON.parse(await semanticPageSnapshot(contents as never)) as {
+      elements: Array<{ name: string; nameSource: string }>;
+    };
+    expect(snapshot.elements).toEqual([
+      expect.objectContaining({ name: "", nameSource: "none" }),
+      expect.objectContaining({ name: "Save", nameSource: "control-value" }),
+    ]);
+  });
+
+  it("uses bounded image alt text for image controls and button content", async () => {
+    const image = (alt: string, interactive: boolean) => ({
+      nodeType: 1, tagName: "IMG", firstChild: null,
+      parentElement: null as unknown, parentNode: null as unknown, nextSibling: null,
+      isContentEditable: false, isConnected: true, disabled: false, checked: undefined,
+      getAttribute: (name: string) => {
+        if (name === "alt") return alt;
+        if (interactive && name === "role") return "button";
+        if (interactive && name === "tabindex") return "0";
+        return null;
+      },
+      hasAttribute: (name: string) => interactive
+        && (name === "role" || name === "tabindex"),
+      matches: () => false,
+      contains: (candidate: unknown) => candidate === standalone,
+      getBoundingClientRect: () => ({
+        x: 10, y: 10, left: 10, top: 10,
+        right: 210, bottom: 40, width: 200, height: 30,
+      }),
+    });
+    const standalone = image("Checkout", true);
+    const nested = image("Checkout", false);
+    const button = {
+      nodeType: 1, tagName: "BUTTON", type: "submit", value: "", labels: undefined,
+      firstChild: nested, parentElement: null, parentNode: null, nextSibling: null,
+      isContentEditable: false, isConnected: true, disabled: false, checked: undefined,
+      getAttribute: () => null,
+      hasAttribute: () => false,
+      matches: () => false,
+      contains: (candidate: unknown) => candidate === button || candidate === nested,
+      getBoundingClientRect: () => ({
+        x: 10, y: 50, left: 10, top: 50,
+        right: 210, bottom: 80, width: 200, height: 30,
+      }),
+    };
+    nested.parentElement = button;
+    nested.parentNode = button;
+    const hiddenNested = image("Hidden checkout", false);
+    const hiddenNestedAttribute = hiddenNested.getAttribute;
+    hiddenNested.getAttribute = (name: string) => name === "aria-hidden"
+      ? "true"
+      : hiddenNestedAttribute(name);
+    const hiddenButton = {
+      ...button,
+      firstChild: hiddenNested,
+      getBoundingClientRect: () => ({
+        x: 10, y: 90, left: 10, top: 90,
+        right: 210, bottom: 120, width: 200, height: 30,
+      }),
+    };
+    hiddenNested.parentElement = hiddenButton;
+    hiddenNested.parentNode = hiddenButton;
+    const emptyAlt = image("", true);
+    const oversizedAlt = image("x".repeat(5_000), true);
+    const candidates = [
+      standalone, button, nested, hiddenButton, hiddenNested, emptyAlt, oversizedAlt,
+    ];
+    const context = {
+      document: withSemanticIterator({
+        title: "Image names",
+        body: bodyWithText(""),
+        documentElement: {},
+        querySelectorAll: (selector: string) => selector === "input" ? [] : candidates,
+        elementFromPoint: (_x: number, y: number) => y < 40 ? standalone : nested,
+      }),
+      location: { href: "http://127.0.0.1:3000/image-names" },
+      URL, encodeURIComponent,
+      innerWidth: 1_200, innerHeight: 800, scrollX: 0, scrollY: 0,
+      getComputedStyle: () => ({ visibility: "visible", display: "block", opacity: "1" }),
+    };
+    const contents = {
+      executeJavaScriptInIsolatedWorld: vi.fn(async (
+        _worldId: number,
+        scripts: Array<{ code: string }>,
+      ) => runInNewContext(scripts[0]!.code, context)),
+    };
+
+    const snapshot = JSON.parse(await semanticPageSnapshot(contents as never)) as {
+      elements: Array<{ role: string; name: string; nameSource: string }>;
+    };
+    expect(snapshot.elements).toEqual([
+      expect.objectContaining({ role: "button", name: "Checkout", nameSource: "alt" }),
+      expect.objectContaining({ role: "button", name: "Checkout", nameSource: "content" }),
+      expect.objectContaining({ role: "button", name: "", nameSource: "none" }),
+      expect.objectContaining({ role: "button", name: "", nameSource: "none" }),
+      expect.objectContaining({ role: "button", nameSource: "alt" }),
+    ]);
+    expect(snapshot.elements[4]!.name).toHaveLength(300);
+    await expect(locateAgentPageRef(contents as never, "e1"))
+      .resolves.toMatchObject({ found: true, label: "Checkout" });
+    await expect(locateAgentPageRef(contents as never, "e2"))
+      .resolves.toMatchObject({ found: true, label: "Checkout" });
+  });
+
+  it("bounds page-controlled semantic attributes before normalization", async () => {
+    const hostile = "x".repeat(50_000);
+    const image = {
+      nodeType: 1, tagName: "IMG", type: "", firstChild: null, parentElement: null,
+      isContentEditable: true, isConnected: true, hidden: false,
+      disabled: false, checked: undefined,
+      getAttribute: (name: string) => {
+        if (["role", "aria-hidden", "contenteditable"].includes(name)) return hostile;
+        if (name === "alt") return "Checkout";
+        if (name === "tabindex") return "0";
+        return null;
+      },
+      hasAttribute: (name: string) => [
+        "role", "aria-hidden", "contenteditable", "tabindex",
+      ].includes(name),
+      matches: () => false,
+      contains: (candidate: unknown) => candidate === image,
+      getBoundingClientRect: () => ({
+        x: 10, y: 10, left: 10, top: 10,
+        right: 210, bottom: 40, width: 200, height: 30,
+      }),
+    };
+    const context = {
+      document: withSemanticIterator({
+        title: "Hostile attributes",
+        body: bodyWithText(""),
+        documentElement: {},
+        querySelectorAll: (selector: string) => selector === "input" ? [] : [image],
+        elementFromPoint: () => image,
+      }),
+      location: { href: "http://127.0.0.1:3000/hostile-attributes" },
+      URL, encodeURIComponent,
+      innerWidth: 1_200, innerHeight: 800, scrollX: 0, scrollY: 0,
+      getComputedStyle: () => ({ visibility: "visible", display: "block", opacity: "1" }),
+    };
+    runInNewContext(`{
+      const lower = String.prototype.toLowerCase;
+      const trim = String.prototype.trim;
+      String.prototype.toLowerCase = function () {
+        if (this.length > 4096) throw new Error("unbounded lowercase");
+        return Reflect.apply(lower, this, []);
+      };
+      String.prototype.trim = function () {
+        if (this.length > 4096) throw new Error("unbounded trim");
+        return Reflect.apply(trim, this, []);
+      };
+    }`, context);
+    const contents = {
+      executeJavaScriptInIsolatedWorld: vi.fn(async (
+        _worldId: number,
+        scripts: Array<{ code: string }>,
+      ) => runInNewContext(scripts[0]!.code, context)),
+    };
+
+    const snapshot = JSON.parse(await semanticPageSnapshot(contents as never)) as {
+      elements: Array<{ name: string; nameSource: string; editable: boolean }>;
+    };
+    expect(snapshot.elements[0]).toMatchObject({
+      name: "Checkout",
+      nameSource: "alt",
+      editable: false,
+    });
+    await expect(locateAgentPageRef(contents as never, "e1"))
+      .resolves.toMatchObject({ found: true, label: "Checkout", editable: false });
+  });
+
   it("collects semantic labels through a bounded text-node walk", async () => {
     const button = {
       nodeType: 1,
@@ -1699,8 +1962,8 @@ describe("agent browser semantic snapshots", () => {
     expect(editedReplacementSnapshot).not.toContain(changedSecret);
   });
 
-  it("includes every valid contenteditable form in semantic refs", async () => {
-    const editors = ["", "plaintext-only"].map((mode, index) => {
+  it("classifies implicit contenteditable hosts as textboxes with mutable values", async () => {
+    const editors = ["", "plaintext-only", "region text"].map((mode, index) => {
       const editor = {
         nodeType: 1,
         tagName: "DIV",
@@ -1708,8 +1971,16 @@ describe("agent browser semantic snapshots", () => {
         disabled: false,
         checked: undefined,
         firstChild: null as unknown,
+        parentElement: null,
         isContentEditable: true,
-        getAttribute: (name: string) => name === "contenteditable" ? mode : null,
+        getAttribute: (name: string) => {
+          if (name === "contenteditable") return index === 0 ? "" : "plaintext-only";
+          if (name === "title" && index === 0) return "Editor";
+          if (name === "role") return index === 0
+            ? null
+            : index === 1 ? "textbox" : "region";
+          return null;
+        },
         getBoundingClientRect: () => ({
           x: 20, y: 30 + index * 50, left: 20, top: 30 + index * 50,
           right: 220, bottom: 70 + index * 50, width: 200, height: 40,
@@ -1724,8 +1995,58 @@ describe("agent browser semantic snapshots", () => {
       };
       return editor;
     });
+    const inherited = {
+      ...editors[0]!,
+      parentElement: editors[0],
+      firstChild: null as unknown,
+      getAttribute: () => null,
+    };
+    inherited.firstChild = {
+      nodeType: 3,
+      nodeValue: "inherited child",
+      parentElement: inherited,
+      parentNode: inherited,
+      nextSibling: null,
+    };
+    const disabledIsland = {
+      ...inherited,
+      isContentEditable: false,
+      getAttribute: (name: string) => name === "contenteditable" ? "false" : null,
+    };
+    const nestedDuplicate = {
+      ...inherited,
+      firstChild: null as unknown,
+      getAttribute: (name: string) => name === "contenteditable" ? "true" : null,
+    };
+    nestedDuplicate.firstChild = {
+      nodeType: 3,
+      nodeValue: "nested duplicate",
+      parentElement: nestedDuplicate,
+      parentNode: nestedDuplicate,
+      nextSibling: null,
+    };
+    const reenabledIsland = {
+      ...nestedDuplicate,
+      parentElement: disabledIsland,
+      firstChild: null as unknown,
+    };
+    reenabledIsland.firstChild = {
+      nodeType: 3,
+      nodeValue: "re-enabled island",
+      parentElement: reenabledIsland,
+      parentNode: reenabledIsland,
+      nextSibling: null,
+    };
     const querySelectorAll = vi.fn(
-      (selector: string) => selector === "input" ? [] : editors,
+      (selector: string) => selector === "input"
+        ? []
+        : [
+            ...editors,
+            inherited,
+            disabledIsland,
+            nestedDuplicate,
+            reenabledIsland,
+          ],
     );
     const context = {
       document: withSemanticIterator({
@@ -1748,11 +2069,36 @@ describe("agent browser semantic snapshots", () => {
     };
 
     const snapshot = JSON.parse(await semanticPageSnapshot(contents as never)) as {
-      elements: Array<{ name: string }>;
+      elements: Array<{
+        role: string;
+        name: string;
+        nameSource: string;
+        editable: boolean;
+      }>;
     };
+    expect(snapshot.elements.map(({ role }) => role)).toEqual([
+      "textbox",
+      "textbox",
+      "region",
+      "textbox",
+    ]);
     expect(snapshot.elements.map(({ name }) => name)).toEqual([
-      "rich text",
+      "Editor",
       "plaintext-only",
+      "region text",
+      "re-enabled island",
+    ]);
+    expect(snapshot.elements.map(({ nameSource }) => nameSource)).toEqual([
+      "title",
+      "value",
+      "value",
+      "value",
+    ]);
+    expect(snapshot.elements.map(({ editable }) => editable)).toEqual([
+      true,
+      true,
+      true,
+      true,
     ]);
   });
 

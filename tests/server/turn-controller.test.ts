@@ -1505,7 +1505,7 @@ describe("TurnController authoritative lifecycle", () => {
   });
 
   it("persists visible content separately while the provider receives complete structured execution content", async () => {
-    const runtime = await testRuntime();
+    const runtime = await testRuntime({ harnessInstructionsForTurn: () => [{ label: "test-harness", text: "HARNESS_POLICY: inspect evidence." }] });
     const queued = runtime.controller.queue({
       conversationId: runtime.conversationId,
       content: "Why is this change safe?",
@@ -1539,17 +1539,17 @@ describe("TurnController authoritative lifecycle", () => {
     expect(runtime.store.turnExecutionManifest(queued.turn.id)).toMatchObject({
       contextReferenceCount: 2,
       uniqueContextBlobCount: 2,
-      // The trusted caller control remains separate from the one centralized
-      // Build-mode instruction.
-      internalInstructionCount: 2,
+      // Harness and trusted caller controls remain separate from the one
+      // centralized Build-mode instruction.
+      internalInstructionCount: 3,
     });
     expect(JSON.stringify(runtime.store.turnExecutionManifest(queued.turn.id)))
       .not.toContain("INTERNAL_SECRET_POLICY");
-
     expect(runtime.controller.start(queued.turn.id)).toBe(true);
     expect(runtime.provider.input?.prompt).toContain("Why is this change safe?");
     expect(runtime.provider.input?.prompt).toContain("+const enabled = true;");
     expect(runtime.provider.input?.prompt).toContain("1 test passed");
+    expect(runtime.provider.input?.prompt).toContain("HARNESS_POLICY");
     expect(runtime.provider.input?.prompt).toContain("INTERNAL_SECRET_POLICY");
     runtime.provider.resolve();
     await flushPromises();

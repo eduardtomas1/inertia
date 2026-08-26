@@ -95,6 +95,93 @@ describe("HarnessCapabilityRegistry", () => {
     );
   });
 
+  it("owns and deeply freezes tool schemas used by definitions and the digest", () => {
+    const originalSchema = {
+      type: "object",
+      properties: {
+        mode: {
+          type: "string",
+          enum: ["safe", "thorough"],
+        },
+      },
+      required: ["mode"],
+      additionalProperties: false,
+    };
+    const mutable = pack("inertia.schema", "inertia_schema_tool");
+    mutable.tools[0]!.definition.inputSchema = originalSchema;
+    const registry = new HarnessCapabilityRegistry([mutable]);
+    const digest = registry.manifest().definitionDigest;
+    const ownedSchema = registry.bridgeFor(context).definitions[0]!.inputSchema;
+
+    originalSchema.properties.mode.type = "number";
+    originalSchema.properties.mode.enum[0] = "mutated";
+    originalSchema.required.push("mutated");
+
+    expect(ownedSchema).toEqual({
+      type: "object",
+      properties: {
+        mode: {
+          type: "string",
+          enum: ["safe", "thorough"],
+        },
+      },
+      required: ["mode"],
+      additionalProperties: false,
+    });
+    expect(registry.manifest().definitionDigest).toBe(digest);
+    expect(Object.isFrozen(ownedSchema)).toBe(true);
+    const ownedProperties = ownedSchema.properties as Record<string, {
+      type: string;
+      enum: string[];
+    }>;
+    expect(Object.isFrozen(ownedProperties)).toBe(true);
+    expect(Object.isFrozen(ownedProperties.mode)).toBe(true);
+    expect(Object.isFrozen(ownedProperties.mode.enum)).toBe(true);
+    const ownedRequired = ownedSchema.required as string[];
+    expect(Object.isFrozen(ownedRequired)).toBe(true);
+    expect(() => { ownedProperties.mode.type = "number"; }).toThrow(TypeError);
+    expect(() => { ownedProperties.mode.enum[0] = "mutated"; }).toThrow(TypeError);
+    expect(() => { ownedRequired.push("mutated"); }).toThrow(TypeError);
+
+    const changed = pack("inertia.schema", "inertia_schema_tool");
+    changed.tools[0]!.definition.inputSchema = {
+      ...originalSchema,
+      properties: {
+        mode: { type: "string", enum: ["different", "thorough"] },
+      },
+    };
+    expect(new HarnessCapabilityRegistry([changed]).manifest().definitionDigest)
+      .not.toBe(digest);
+  });
+
+  it("rejects schemas that cannot be owned as bounded JSON", () => {
+    const cyclic: Record<string, unknown> = { type: "object" };
+    cyclic.self = cyclic;
+    const invalid = pack("inertia.invalid", "inertia_invalid_tool");
+    invalid.tools[0]!.definition.inputSchema = cyclic;
+    expect(() => new HarnessCapabilityRegistry([invalid])).toThrow(
+      "input schema contains a cycle",
+    );
+
+    const unsupported = pack("inertia.unsupported", "inertia_unsupported_tool");
+    unsupported.tools[0]!.definition.inputSchema = {
+      type: "object",
+      unsupported: undefined,
+    };
+    expect(() => new HarnessCapabilityRegistry([unsupported])).toThrow(
+      "input schema contains a non-JSON value",
+    );
+
+    const oversized = pack("inertia.oversized", "inertia_oversized_tool");
+    oversized.tools[0]!.definition.inputSchema = {
+      type: "string",
+      description: "x".repeat(64 * 1024),
+    };
+    expect(() => new HarnessCapabilityRegistry([oversized])).toThrow(
+      "input schema exceeds its byte limit",
+    );
+  });
+
   it("rejects conflicting identities and tools before a provider starts", () => {
     expect(() => new HarnessCapabilityRegistry([
       pack("inertia.same", "inertia_first_tool"),

@@ -214,6 +214,38 @@ export async function semanticPageSnapshot(
         && effectiveOpacity.get(element) !== false;
     };
     const ariaDisabled = (element) => effectiveAriaDisabled.get(element) === true;
+    const boundedImageAlt = (element, root = element) => {
+      const image = element?.tagName === "IMG"
+        || (element?.tagName === "INPUT"
+          && normalizeText(element.type, 20).toLowerCase() === "image");
+      if (!image) return "";
+      const roleValue = element.getAttribute?.("role");
+      const role = typeof roleValue === "string"
+        ? normalizeText(roleValue, 50).toLowerCase()
+        : "";
+      if (role === "none" || role === "presentation") return "";
+      let current = element;
+      let visited = 0;
+      while (current) {
+        visited += 1;
+        if (visited > ${MAX_LABEL_TEXT_NODES}) return "";
+        const style = styleFor(current);
+        if (
+          current.hidden === true
+          || normalizeText(current.getAttribute?.("aria-hidden"), 10).toLowerCase() === "true"
+          || style.visibility === "hidden"
+          || style.display === "none"
+          || effectiveOpacity.get(current) === false
+        ) return "";
+        if (current === root) break;
+        current = current.parentElement;
+      }
+      if (!current) return "";
+      const value = element.getAttribute?.("alt");
+      return typeof value === "string"
+        ? normalizeText(value, ${MAX_LABEL_TEXT_SOURCE_CHARS})
+        : "";
+    };
     const boundedElementText = (element) => {
       const chunks = [];
       let characters = 0;
@@ -224,6 +256,13 @@ export async function semanticPageSnapshot(
         if (visited > ${MAX_LABEL_TEXT_NODES}) break;
         if (node.nodeType === 3) {
           const value = String(node.nodeValue || "");
+          const remaining = ${MAX_LABEL_TEXT_SOURCE_CHARS} - characters;
+          if (remaining <= 0) break;
+          chunks.push(value.slice(0, remaining));
+          characters += Math.min(value.length, remaining);
+          if (value.length > remaining) break;
+        } else if (node.nodeType === 1 && node.tagName === "IMG") {
+          const value = boundedImageAlt(node, element);
           const remaining = ${MAX_LABEL_TEXT_SOURCE_CHARS} - characters;
           if (remaining <= 0) break;
           chunks.push(value.slice(0, remaining));
@@ -264,6 +303,15 @@ export async function semanticPageSnapshot(
         String(element.type || "").toLowerCase() === "password"
         || passwordNodes.has(element)
       );
+    const editableHost = (element) => {
+      const state = element.getAttribute?.("contenteditable");
+      return element.isContentEditable === true
+        && element.parentElement?.isContentEditable !== true
+        && typeof state === "string"
+        && ["", "true", "plaintext-only"].includes(
+          normalizeText(state, 20).toLowerCase(),
+        );
+    };
     const sensitiveText = Array.from(passwordValues);
     for (const input of scannedInputs) {
       if (!passwordField(input)) continue;
@@ -297,8 +345,10 @@ export async function semanticPageSnapshot(
       ? "input"
       : redact(
           element.getAttribute("role")
-          || ({ A: "link", BUTTON: "button", INPUT: "input", SELECT: "select", TEXTAREA: "textbox", SUMMARY: "button" })[element.tagName]
-          || element.tagName.toLowerCase(),
+          || (editableHost(element)
+            ? "textbox"
+            : ({ A: "link", BUTTON: "button", INPUT: "input", SELECT: "select", TEXTAREA: "textbox", SUMMARY: "button" })[element.tagName]
+              || element.tagName.toLowerCase()),
           50,
         );
     const labelledByFor = (element) => {
@@ -327,25 +377,29 @@ export async function semanticPageSnapshot(
       return normalizeText(labels.join(" "), ${MAX_LABEL_TEXT_SOURCE_CHARS});
     };
     const nameFor = (element) => {
-      const inputType = String(element.type || "").toLowerCase();
+      const isInput = element.tagName === "INPUT";
+      const isEditable = editableHost(element);
+      const inputType = isInput ? String(element.type || "").toLowerCase() : "";
       const valueSource = ["button", "reset", "submit"].includes(inputType)
         ? "control-value"
         : "value";
       const contentName = ["INPUT", "SELECT", "TEXTAREA"].includes(element.tagName)
         ? ""
         : boundedElementText(element);
-      const contentNameSource = element.isContentEditable === true
+      const contentNameSource = isEditable
         ? "value"
         : "content";
+      const title = element.getAttribute("title");
       const candidates = [
         [element.getAttribute("aria-label"), "aria-label"],
         [labelledByFor(element), "aria-labelledby"],
-        [element.getAttribute("title"), "title"],
         [element.labels && boundedElementText(element.labels[0]), "label"],
-        [inputType === "image" && element.getAttribute("alt"), "alt"],
+        [boundedImageAlt(element), "alt"],
+        [isEditable ? title : "", "title"],
         [contentName, contentNameSource],
+        [isEditable ? "" : title, "title"],
         [element.getAttribute("placeholder"), "placeholder"],
-        [element.value, valueSource],
+        [isInput ? element.value : "", valueSource],
       ];
       const selected = candidates.find(([value]) => Boolean(value));
       return {
@@ -361,7 +415,7 @@ export async function semanticPageSnapshot(
     const semanticCandidate = (element) => semanticTags.has(element.tagName)
       || (element.tagName === "A" && hasAttribute(element, "href"))
       || hasAttribute(element, "role")
-      || hasAttribute(element, "contenteditable")
+      || editableHost(element)
       || hasAttribute(element, "tabindex");
     const elements = [];
     for (const element of scannedElementNodes) {
@@ -384,6 +438,7 @@ export async function semanticPageSnapshot(
         ref,
         role: roleFor(element),
         ...nameFor(element),
+        editable: editableHost(element),
         disabled: Boolean(
           element.matches?.(":disabled")
           || element.disabled
@@ -636,9 +691,26 @@ export async function locateAgentPageRef(
       "menuitemradio", "option", "radio", "searchbox", "slider", "spinbutton",
       "switch", "tab", "textbox", "treeitem",
     ]);
+    const boundedLowerAttribute = (candidate, name, maximum) => {
+      const value = candidate.getAttribute?.(name);
+      return typeof value === "string"
+        ? value.slice(0, maximum).trim().toLowerCase()
+        : "";
+    };
+    const editableHost = (candidate) => {
+      const value = candidate.getAttribute?.("contenteditable");
+      const state = typeof value === "string"
+        ? value.slice(0, 20).trim().toLowerCase()
+        : null;
+      return candidate.isContentEditable === true
+        && candidate.parentElement?.isContentEditable !== true
+        && state !== null
+        && ["", "true", "plaintext-only"].includes(state);
+    };
     const actionable = (candidate) => candidate.matches?.(
-      "a[href],button,input,textarea,select,summary,[contenteditable]:not([contenteditable='false']),[tabindex]",
-    ) || actionableRoles.has(String(candidate.getAttribute?.("role") || "").toLowerCase());
+      "a[href],button,input,textarea,select,summary,[tabindex]",
+    ) || editableHost(candidate)
+      || actionableRoles.has(boundedLowerAttribute(candidate, "role", 50));
     let hitOwner = hit;
     while (hitOwner && hitOwner !== element) {
       if (actionable(hitOwner)) return { found: false };
@@ -649,6 +721,35 @@ export async function locateAgentPageRef(
     const normalizeText = (value, maximum = ${MAX_PAGE_VALUE_SOURCE_CHARS}) => String(value ?? "")
       .slice(0, maximum)
       .replace(/\\s+/gu, " ").trim();
+    const boundedImageAlt = (candidate, root) => {
+      const image = candidate?.tagName === "IMG"
+        || (candidate?.tagName === "INPUT"
+          && String(candidate.type || "").slice(0, 20).toLowerCase() === "image");
+      if (!image) return "";
+      const role = boundedLowerAttribute(candidate, "role", 50);
+      if (role === "none" || role === "presentation") return "";
+      let current = candidate;
+      let visited = 0;
+      while (current) {
+        visited += 1;
+        if (visited > ${MAX_LABEL_TEXT_NODES}) return "";
+        const currentStyle = getComputedStyle(current);
+        if (
+          current.hidden === true
+          || boundedLowerAttribute(current, "aria-hidden", 10) === "true"
+          || currentStyle.visibility === "hidden"
+          || currentStyle.display === "none"
+          || Number(currentStyle.opacity || "1") <= 0
+        ) return "";
+        if (current === root) break;
+        current = current.parentElement;
+      }
+      if (!current) return "";
+      const value = candidate.getAttribute?.("alt");
+      return typeof value === "string"
+        ? normalizeText(value, ${MAX_LABEL_TEXT_SOURCE_CHARS})
+        : "";
+    };
     const boundedElementText = (root) => {
       const chunks = [];
       let characters = 0;
@@ -659,6 +760,13 @@ export async function locateAgentPageRef(
         if (visited > ${MAX_LABEL_TEXT_NODES}) break;
         if (node.nodeType === 3) {
           const value = String(node.nodeValue || "");
+          const remaining = ${MAX_LABEL_TEXT_SOURCE_CHARS} - characters;
+          if (remaining <= 0) break;
+          chunks.push(value.slice(0, remaining));
+          characters += Math.min(value.length, remaining);
+          if (value.length > remaining) break;
+        } else if (node.nodeType === 1 && node.tagName === "IMG") {
+          const value = boundedImageAlt(node, root);
           const remaining = ${MAX_LABEL_TEXT_SOURCE_CHARS} - characters;
           if (remaining <= 0) break;
           chunks.push(value.slice(0, remaining));
@@ -720,7 +828,7 @@ export async function locateAgentPageRef(
     const blocked = inputType === "file";
     const editable = !element.readOnly && (
       element.tagName === "TEXTAREA"
-      || element.isContentEditable
+      || editableHost(element)
       || (element.tagName === "INPUT"
         && ["text", "search", "email", "url", "tel", "password", "number"].includes(inputType))
     );
@@ -784,8 +892,9 @@ export async function locateAgentPageRef(
           password
           ? "Password field"
           : element.getAttribute("aria-label")
+            || boundedImageAlt(element, element)
             || boundedElementText(element)
-            || element.value
+            || (element.tagName === "INPUT" ? element.value : "")
           || "element"
         ),
       x,

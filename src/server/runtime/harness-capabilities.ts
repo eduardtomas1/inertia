@@ -16,6 +16,9 @@ const MAX_CAPABILITY_PACKS = 16;
 const MAX_CAPABILITY_TOOLS = 64;
 const MAX_CAPABILITY_INSTRUCTIONS = 24;
 const MAX_CAPABILITY_INSTRUCTION_BYTES = 24 * 1024;
+const MAX_CAPABILITY_SCHEMA_BYTES = 64 * 1024;
+const MAX_CAPABILITY_SCHEMA_DEPTH = 32;
+const MAX_CAPABILITY_SCHEMA_NODES = 4_096;
 const CAPABILITY_ID = /^[a-z][a-z0-9.-]{0,63}$/u;
 const INSTRUCTION_LABEL = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
 const TOOL_NAME = /^inertia_[a-z0-9_]{1,119}$/u;
@@ -86,6 +89,94 @@ function canonicalJson(value: unknown): string {
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([key, child]) => `${JSON.stringify(key)}:${canonicalJson(child)}`)
     .join(",")}}`;
+}
+
+function immutableInputSchema(
+  schema: Readonly<Record<string, unknown>>,
+): Readonly<Record<string, unknown>> {
+  let nodes = 0;
+  let contentBytes = 0;
+  const ancestors = new WeakSet<object>();
+  const addContentBytes = (value: string): void => {
+    contentBytes += utf8Bytes(value);
+    if (contentBytes > MAX_CAPABILITY_SCHEMA_BYTES) {
+      throw new Error("Capability tool input schema exceeds its byte limit.");
+    }
+  };
+  const clone = (value: unknown, depth: number): unknown => {
+    nodes += 1;
+    if (nodes > MAX_CAPABILITY_SCHEMA_NODES || depth > MAX_CAPABILITY_SCHEMA_DEPTH) {
+      throw new Error("Capability tool input schema exceeds its structural limits.");
+    }
+    if (value === null || typeof value === "boolean") return value;
+    if (typeof value === "string") {
+      addContentBytes(value);
+      return value;
+    }
+    if (typeof value === "number") {
+      if (!Number.isFinite(value)) {
+        throw new Error("Capability tool input schema contains a non-JSON value.");
+      }
+      return value;
+    }
+    if (typeof value !== "object") {
+      throw new Error("Capability tool input schema contains a non-JSON value.");
+    }
+    if (ancestors.has(value)) {
+      throw new Error("Capability tool input schema contains a cycle.");
+    }
+    ancestors.add(value);
+    let result: unknown;
+    if (Array.isArray(value)) {
+      const keys = Reflect.ownKeys(value);
+      if (
+        Object.getPrototypeOf(value) !== Array.prototype
+        || keys.some((key) => (
+          typeof key !== "string"
+          || (key !== "length" && !/^(?:0|[1-9][0-9]*)$/u.test(key))
+        ))
+        || keys.length !== value.length + 1
+      ) {
+        throw new Error("Capability tool input schema contains an invalid array.");
+      }
+      const children = [];
+      for (let index = 0; index < value.length; index += 1) {
+        const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+        if (!descriptor?.enumerable || !("value" in descriptor)) {
+          throw new Error("Capability tool input schema contains an invalid array.");
+        }
+        children.push(clone(descriptor.value, depth + 1));
+      }
+      result = Object.freeze(children);
+    } else {
+      const prototype = Object.getPrototypeOf(value);
+      if (prototype !== Object.prototype && prototype !== null) {
+        throw new Error("Capability tool input schema contains a non-plain object.");
+      }
+      const entries = Reflect.ownKeys(value).map((key) => {
+        if (typeof key !== "string") {
+          throw new Error("Capability tool input schema contains symbol keys.");
+        }
+        addContentBytes(key);
+        const descriptor = Object.getOwnPropertyDescriptor(value, key);
+        if (!descriptor?.enumerable || !("value" in descriptor)) {
+          throw new Error("Capability tool input schema contains an accessor.");
+        }
+        return [key, clone(descriptor.value, depth + 1)] as const;
+      });
+      if (entries.length !== Object.keys(value).length) {
+        throw new Error("Capability tool input schema contains hidden properties.");
+      }
+      result = Object.freeze(Object.fromEntries(entries));
+    }
+    ancestors.delete(value);
+    return result;
+  };
+  const owned = clone(schema, 0) as Readonly<Record<string, unknown>>;
+  if (utf8Bytes(canonicalJson(owned)) > MAX_CAPABILITY_SCHEMA_BYTES) {
+    throw new Error("Capability tool input schema exceeds its byte limit.");
+  }
+  return owned;
 }
 
 function safeMetadata(value: string, label: string, maximum: number): string {
@@ -192,12 +283,18 @@ export class HarnessCapabilityRegistry {
             `Inertia capability tool '${definition.name}' has no runtime validator.`,
           );
         }
-        safeMetadata(definition.description, "Capability tool description", 2_000);
+        const description = safeMetadata(
+          definition.description,
+          "Capability tool description",
+          2_000,
+        );
         const invoke = tool.invoke;
+        const inputSchema = immutableInputSchema(definition.inputSchema);
         const validatedTool = Object.freeze({
           definition: Object.freeze({
             ...definition,
-            inputSchema: Object.freeze({ ...definition.inputSchema }),
+            description,
+            inputSchema,
           }),
           invoke: (
             context: HarnessCapabilityContext,

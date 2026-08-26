@@ -22,6 +22,7 @@ interface AuditedElement {
   role: string;
   name: string;
   nameSource: string | null;
+  editable: boolean;
   disabled: boolean;
   rect: Rect;
 }
@@ -77,6 +78,7 @@ function safeElement(value: unknown): AuditedElement | null {
       && /^[a-z-]{1,30}$/u.test(element.nameSource)
       ? element.nameSource
       : null,
+    editable: element.editable === true,
     disabled: element.disabled,
     rect: { x, y, width, height },
   };
@@ -174,9 +176,9 @@ export function withFrontendBrowserAudit(snapshotText: string): string {
   const viewport = record(snapshot.viewport);
   const viewportWidth = finite(viewport?.width);
   const viewportHeight = finite(viewport?.height);
-  const interactive = elements.filter(({ role, disabled }) => (
+  const interactive = elements.filter(({ role, editable, disabled }) => (
     !disabled
-    && INTERACTIVE_ROLES.has(role.toLowerCase())
+    && (editable || INTERACTIVE_ROLES.has(role.toLowerCase()))
   ));
   const unnamed = interactive.filter(({ name, nameSource }) => (
     name.trim().length === 0

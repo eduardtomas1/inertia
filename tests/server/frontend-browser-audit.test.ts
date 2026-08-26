@@ -9,6 +9,7 @@ function element(
     role: string;
     name: string;
     nameSource: string;
+    editable: boolean;
     disabled: boolean;
     x: number;
     y: number;
@@ -21,6 +22,7 @@ function element(
     role: input.role ?? "button",
     name: input.name ?? "Action",
     nameSource: input.nameSource ?? "content",
+    editable: input.editable ?? false,
     disabled: input.disabled ?? false,
     rect: {
       x: input.x ?? 0,
@@ -47,6 +49,12 @@ describe("frontend Browser audit", () => {
         element("unlabelled-editor", {
           role: "textbox", name: "draft text", nameSource: "value",
         }),
+        element("region-editor", {
+          role: "region", name: "draft region", nameSource: "value", editable: true,
+        }),
+        element("titled-editor", {
+          role: "textbox", name: "Editor", nameSource: "title", editable: true,
+        }),
         element("disabled", { name: "", disabled: true, width: 10, height: 10 }),
       ],
       truncated: false,
@@ -62,7 +70,7 @@ describe("frontend Browser audit", () => {
 
     expect(audited.inertiaAudit).toMatchObject({
       scope: "current-semantic-viewport",
-      errors: 3,
+      errors: 4,
     });
     expect(audited.inertiaAudit.issues.map(({ code }) => code)).toEqual([
       "missing-stable-name",
@@ -75,6 +83,7 @@ describe("frontend Browser audit", () => {
         "unnamed",
         "weak-checkbox",
         "unlabelled-editor",
+        "region-editor",
       ]);
     expect(audited.inertiaAudit.limitations.join(" ")).toContain("pixel-level");
     expect(JSON.stringify(audited)).not.toContain("WCAG");

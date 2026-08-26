@@ -7,6 +7,13 @@ const databases: Database.Database[] = [];
 
 function databaseWithSuspendedDuration(
   definition = "INTEGER NOT NULL DEFAULT 0",
+  intervalColumns = `
+    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+    id TEXT NOT NULL UNIQUE CHECK (length(id) = 36),
+    suspended_at TEXT NOT NULL CHECK (length(suspended_at) BETWEEN 20 AND 40),
+    resumed_at TEXT NOT NULL CHECK (length(resumed_at) BETWEEN 20 AND 40),
+    CHECK (resumed_at >= suspended_at)
+  `,
 ): Database.Database {
   const database = new Database(":memory:");
   databases.push(database);
@@ -16,10 +23,7 @@ function databaseWithSuspendedDuration(
       suspended_duration_ms ${definition}
     );
     CREATE TABLE system_suspend_intervals (
-      sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-      id TEXT NOT NULL UNIQUE,
-      suspended_at TEXT NOT NULL,
-      resumed_at TEXT NOT NULL
+      ${intervalColumns}
     );
     CREATE INDEX system_suspend_intervals_range_idx
     ON system_suspend_intervals(suspended_at ASC, resumed_at ASC);
@@ -38,6 +42,14 @@ describe("system suspend timing recovery schema", () => {
       INSERT INTO agent_turns (id, suspended_duration_ms)
       VALUES (?, ?)
     `).run("turn", 15_000);
+    database.prepare(`
+      INSERT INTO system_suspend_intervals (id, suspended_at, resumed_at)
+      VALUES (?, ?, ?)
+    `).run(
+      "11111111-1111-4111-8111-111111111111",
+      "2026-08-26T08:00:00.000Z",
+      "2026-08-26T08:05:00.000Z",
+    );
 
     expect(systemSuspendTimingSchemaIsValid(database)).toBe(true);
   });
@@ -65,5 +77,72 @@ describe("system suspend timing recovery schema", () => {
     `).run("turn", value);
 
     expect(systemSuspendTimingSchemaIsValid(database)).toBe(false);
+  });
+
+  it.each([
+    ["a non-integer sequence", `
+      sequence TEXT PRIMARY KEY,
+      id TEXT NOT NULL UNIQUE CHECK (length(id) = 36),
+      suspended_at TEXT NOT NULL CHECK (length(suspended_at) BETWEEN 20 AND 40),
+      resumed_at TEXT NOT NULL CHECK (length(resumed_at) BETWEEN 20 AND 40),
+      CHECK (resumed_at >= suspended_at)
+    `],
+    ["a nullable identifier", `
+      sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+      id TEXT UNIQUE CHECK (length(id) = 36),
+      suspended_at TEXT NOT NULL CHECK (length(suspended_at) BETWEEN 20 AND 40),
+      resumed_at TEXT NOT NULL CHECK (length(resumed_at) BETWEEN 20 AND 40),
+      CHECK (resumed_at >= suspended_at)
+    `],
+    ["a non-unique identifier", `
+      sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+      id TEXT NOT NULL CHECK (length(id) = 36),
+      suspended_at TEXT NOT NULL CHECK (length(suspended_at) BETWEEN 20 AND 40),
+      resumed_at TEXT NOT NULL CHECK (length(resumed_at) BETWEEN 20 AND 40),
+      CHECK (resumed_at >= suspended_at)
+    `],
+    ["a nullable resume timestamp", `
+      sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+      id TEXT NOT NULL UNIQUE CHECK (length(id) = 36),
+      suspended_at TEXT NOT NULL CHECK (length(suspended_at) BETWEEN 20 AND 40),
+      resumed_at TEXT CHECK (length(resumed_at) BETWEEN 20 AND 40),
+      CHECK (resumed_at >= suspended_at)
+    `],
+  ])("rejects an interval table with %s", (_label, intervalColumns) => {
+    expect(systemSuspendTimingSchemaIsValid(
+      databaseWithSuspendedDuration(undefined, intervalColumns),
+    )).toBe(false);
+  });
+
+  it("rejects corrupted interval values and chronology", () => {
+    const invalidIdentity = databaseWithSuspendedDuration();
+    invalidIdentity.prepare(`
+      INSERT INTO system_suspend_intervals (id, suspended_at, resumed_at)
+      VALUES (?, ?, ?)
+    `).run(
+      "xxxxxxxx-xxxx-4xxx-8xxx-xxxxxxxxxxxx",
+      "2026-08-26T08:00:00.000Z",
+      "2026-08-26T08:05:00.000Z",
+    );
+    expect(systemSuspendTimingSchemaIsValid(invalidIdentity)).toBe(false);
+
+    const overlap = databaseWithSuspendedDuration();
+    overlap.prepare(`
+      INSERT INTO system_suspend_intervals (id, suspended_at, resumed_at)
+      VALUES (?, ?, ?)
+    `).run(
+      "11111111-1111-4111-8111-111111111111",
+      "2026-08-26T08:00:00.000Z",
+      "2026-08-26T08:10:00.000Z",
+    );
+    overlap.prepare(`
+      INSERT INTO system_suspend_intervals (id, suspended_at, resumed_at)
+      VALUES (?, ?, ?)
+    `).run(
+      "22222222-2222-4222-8222-222222222222",
+      "2026-08-26T08:05:00.000Z",
+      "2026-08-26T08:15:00.000Z",
+    );
+    expect(systemSuspendTimingSchemaIsValid(overlap)).toBe(false);
   });
 });

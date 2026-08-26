@@ -34,5 +34,5 @@ export const REQUIRED_TABLES_BY_SCHEMA_VERSION: DatabaseRequiredTables = [
   [55, ["provider_run_ownership"]],
   [60, ["agent_managed_conversations", "agent_thread_operations"]],
   [61, ["conversation_context_packets", "agent_context_requests"]],
-  [65, ["system_suspend_intervals"]],
+  [66, ["system_suspend_intervals"]],
 ];

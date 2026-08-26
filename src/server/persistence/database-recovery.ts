@@ -431,7 +431,7 @@ function validateOpenDatabase(
   }
   if (version >= 57 && !usageDashboardIndexIsValid(database)) return "corrupt";
   if (version >= 64 && !runStateSchemaIsValid(database)) return "corrupt";
-  if (version >= 65 && !suspendTimingSchemaIsValid(database)) return "corrupt";
+  if (version >= 66 && !suspendTimingSchemaIsValid(database)) return "corrupt";
   return "valid-current";
 }
 

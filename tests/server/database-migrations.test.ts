@@ -1687,7 +1687,7 @@ describe("runtime migration catalog", () => {
     store.close();
 
     const schema64 = new Database(databasePath);
-    schema64.prepare("DELETE FROM schema_migrations WHERE version = 65").run();
+    schema64.prepare("DELETE FROM schema_migrations WHERE version >= 65").run();
     expect((schema64.prepare(
       "SELECT MAX(version) AS version FROM schema_migrations",
     ).get() as { version: number }).version).toBe(64);
@@ -2004,6 +2004,7 @@ describe("runtime migration catalog", () => {
       { version: 63 },
       { version: 64 },
       { version: 65 },
+      { version: 66 },
     ]);
     expect((migrated.prepare(
       "SELECT auto_scroll_to_final_answer AS enabled FROM app_state WHERE id = 1",

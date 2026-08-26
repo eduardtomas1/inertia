@@ -58,7 +58,6 @@ export interface ConversationLatestTurnSummary {
   requestedAt: string;
   startedAt: string | null;
   completedAt: string | null;
-  suspendedDurationMs?: number;
   terminalReason: string | null;
   updatedAt: string;
 }

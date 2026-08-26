@@ -295,7 +295,6 @@ function conversationTurnSummary(
     requestedAt: turn.requestedAt,
     startedAt: turn.startedAt,
     completedAt: turn.completedAt,
-    suspendedDurationMs: turn.suspendedDurationMs,
     terminalReason: turn.terminalReason,
     updatedAt: turn.updatedAt,
   };

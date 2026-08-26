@@ -23,10 +23,15 @@ export function formatElapsed(milliseconds: number, precise = false): string {
   return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
 }
 
-function boundedElapsed(startedAt: string, completedAt: string | null, now: number): number {
+function boundedElapsed(
+  startedAt: string,
+  completedAt: string | null,
+  now: number,
+  excluded = 0,
+): number {
   const start = timestamp(startedAt);
   const end = completedAt ? timestamp(completedAt) : now;
-  return Math.max(0, end - start);
+  return Math.max(0, end - start - excluded);
 }
 
 /** Persisted requested → started queue time. A queued turn remains live. */
@@ -50,13 +55,11 @@ export function turnExecutionElapsedMs(
 ): number | null {
   if (!turn.startedAt) return null;
   if (!turn.completedAt && !turn.isActive) return null;
-  const suspendedDuration = turn.agentTurn.suspendedDurationMs ?? 0;
-  if (!Number.isSafeInteger(suspendedDuration) || suspendedDuration < 0) {
-    return null;
-  }
-  return Math.max(
-    0,
-    boundedElapsed(turn.startedAt, turn.completedAt, now) - suspendedDuration,
+  return boundedElapsed(
+    turn.startedAt,
+    turn.completedAt,
+    now,
+    turn.agentTurn.suspendedDurationMs,
   );
 }
 

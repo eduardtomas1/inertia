@@ -1602,6 +1602,32 @@ describe("database backup and startup recovery", () => {
     primary.close();
   });
 
+  it("rejects corrupted suspend interval values off thread", async () => {
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { store } = seed(databasePath, "suspend value validation");
+    store.close();
+    const primary = new Database(databasePath);
+    primary.prepare(`
+      INSERT INTO system_suspend_intervals (id, suspended_at, resumed_at)
+      VALUES (?, ?, ?)
+    `).run(
+      "xxxxxxxx-xxxx-4xxx-8xxx-xxxxxxxxxxxx",
+      "2026-08-26T08:00:00.000Z",
+      "2026-08-26T08:05:00.000Z",
+    );
+    const manager = new DatabaseBackupManager(primary, databasePath);
+
+    await expect(manager.createBackup()).rejects.toThrow(/failed validation/u);
+    expect(readdirSync(databaseRecoveryPaths(databasePath).backupsDirectory))
+      .toEqual([]);
+    primary.prepare("DELETE FROM system_suspend_intervals").run();
+    await expect(manager.createBackup()).resolves.toMatchObject({
+      filename: expect.stringMatching(/\.sqlite$/u),
+    });
+    primary.close();
+  });
+
   it("skips incomplete migration history and restores the next coherent backup", async () => {
     const directory = temporaryDirectory();
     const databasePath = join(directory, "inertia.sqlite");

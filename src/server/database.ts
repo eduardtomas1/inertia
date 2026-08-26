@@ -1191,13 +1191,13 @@ export class RuntimeStore {
   listModelBackendDefaults(): ModelBackendDefault[] {
     return this.backendProfileRepository.listDefaults();
   }
+
   saveModelBackendDefault(
     projectId: string | null,
     selectionInput: ModelSelection,
   ): ModelBackendDefault {
     return this.backendProfileRepository.saveDefault(projectId, selectionInput);
   }
-
   clearModelBackendDefault(projectId: string | null): void {
     this.backendProfileRepository.clearDefault(projectId);
   }

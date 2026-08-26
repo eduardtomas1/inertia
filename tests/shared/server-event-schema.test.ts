@@ -178,6 +178,7 @@ const conversationDetail = {
     requestedAt: conversation.createdAt,
     startedAt: conversation.createdAt,
     completedAt: null,
+    suspendedDurationMs: 0,
     status: "running",
     runState: {
       state: "retrying",

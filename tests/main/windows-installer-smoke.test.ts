@@ -1,4 +1,5 @@
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -18,12 +19,26 @@ async function installerSmokeModule() {
       architecture: "arm64" | "x64",
     ) => string;
     requireInstallTimeDecodableMethod: (method: string) => void;
+    runBounded: (
+      command: string,
+      args: string[],
+      options: { label: string; timeoutMs: number },
+    ) => Promise<string>;
     windowsInstallerAssetName: (
       version: string,
       releaseChannel: "canary" | "stable",
       architecture: "arm64" | "x64",
     ) => string;
   };
+}
+
+function processExists(pid: number) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 test("selects the exact stable and Canary Windows installer identities", async () => {
@@ -90,6 +105,67 @@ test("rejects the exact archive methods that dropped Windows executables", async
     .toThrow(/Listing header:.*Type = PE/u);
 });
 
+test("terminates the complete owned process tree on a gate timeout", async () => {
+  const { runBounded } = await installerSmokeModule();
+  const temporaryRoot = await mkdtemp(join(tmpdir(), "inertia-installer-timeout-test-"));
+  const pidFile = join(temporaryRoot, "descendant.pid");
+  let rootPid = 0;
+  let descendantPid = 0;
+  try {
+    const script = [
+      'const { spawn } = require("node:child_process");',
+      'const { writeFileSync } = require("node:fs");',
+      'const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });',
+      "writeFileSync(process.argv[1], JSON.stringify({ root: process.pid, descendant: child.pid }));",
+      "setInterval(() => {}, 1000);",
+    ].join("");
+    await expect(runBounded(process.execPath, ["-e", script, pidFile], {
+      label: "Installer timeout fixture",
+      timeoutMs: 500,
+    })).rejects.toThrow("complete process tree was terminated");
+    const pids = JSON.parse(await readFile(pidFile, "utf8")) as {
+      root: number;
+      descendant: number;
+    };
+    rootPid = pids.root;
+    descendantPid = pids.descendant;
+    expect(Number.isSafeInteger(rootPid)).toBe(true);
+    expect(Number.isSafeInteger(descendantPid)).toBe(true);
+    expect(processExists(rootPid)).toBe(false);
+    expect(processExists(descendantPid)).toBe(false);
+  } finally {
+    if (descendantPid > 0 && processExists(descendantPid)) {
+      try {
+        process.kill(descendantPid, "SIGKILL");
+      } catch {
+        // Best-effort cleanup for a failing regression.
+      }
+    }
+    await rm(temporaryRoot, { force: true, recursive: true });
+  }
+});
+
+test("keeps stderr diagnostics out of strict archive listing stdout", async () => {
+  const { runBounded } = await installerSmokeModule();
+  const listing = [
+    "Path = app-arm64.7z",
+    "Type = 7z",
+    "Method = LZMA2:20 LZMA:20 BCJ",
+    "----------",
+    "Path = Inertia.exe",
+    "",
+  ].join("\n");
+  const result = await runBounded(process.execPath, [
+    "-e",
+    `process.stdout.write(${JSON.stringify(listing)}); process.stderr.write("unrelated warning\\n");`,
+  ], {
+    label: "Separated output fixture",
+    timeoutMs: 2_000,
+  });
+
+  expect(result).toBe(listing);
+});
+
 test("pins the minimal fixed builder and gates installed Windows binaries", async () => {
   const manifest = JSON.parse(await readFile(
     join(repositoryRoot, "package.json"),
@@ -130,6 +206,8 @@ test("pins the minimal fixed builder and gates installed Windows binaries", asyn
   expect(source).toContain("INERTIA_PACKAGE_SMOKE_EXECUTABLE: installedExecutable");
   expect(source).toContain('["/S", `/D=${installDirectory}`]');
   expect(source).toContain('runBounded(uninstaller, ["/S"]');
+  expect(source).toContain('["/PID", String(child.pid), "/T", "/F"]');
+  expect(source).toContain("its process tree could not be confirmed stopped");
   expect(source).toContain("return waitForRemoval(installDirectory)");
   expect(source).toContain("completed without a reboot");
 });

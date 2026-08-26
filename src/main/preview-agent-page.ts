@@ -328,7 +328,7 @@ export async function semanticPageSnapshot(
     };
     const nameFor = (element) => {
       const inputType = String(element.type || "").toLowerCase();
-      const valueSource = ["button", "image", "reset", "submit"].includes(inputType)
+      const valueSource = ["button", "reset", "submit"].includes(inputType)
         ? "control-value"
         : "value";
       const contentName = ["INPUT", "SELECT", "TEXTAREA"].includes(element.tagName)

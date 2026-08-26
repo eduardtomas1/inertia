@@ -858,6 +858,67 @@ describe("agent browser semantic snapshots", () => {
     expect(parsed.elements[0]?.value).toHaveLength(500);
   });
 
+  it("keeps image-input values weak while preserving alt as a stable name", async () => {
+    let alt: string | null = null;
+    const input = {
+      nodeType: 1,
+      tagName: "INPUT",
+      type: "image",
+      value: "checkout",
+      labels: [],
+      firstChild: null,
+      parentElement: null,
+      disabled: false,
+      checked: false,
+      getAttribute: (name: string) => name === "alt" ? alt : null,
+      hasAttribute: () => false,
+      matches: () => false,
+      getBoundingClientRect: () => ({
+        x: 10, y: 10, left: 10, top: 10,
+        right: 210, bottom: 40, width: 200, height: 30,
+      }),
+    };
+    const context = {
+      document: withSemanticIterator({
+        title: "Image input",
+        body: bodyWithText(""),
+        documentElement: {},
+        querySelectorAll: () => [input],
+      }),
+      location: { href: "http://127.0.0.1:3000/image-input" },
+      URL,
+      encodeURIComponent,
+      innerWidth: 1_200,
+      innerHeight: 800,
+      scrollX: 0,
+      scrollY: 0,
+      getComputedStyle: () => ({ visibility: "visible", display: "block", opacity: "1" }),
+    };
+    const contents = {
+      executeJavaScriptInIsolatedWorld: vi.fn(async (
+        _worldId: number,
+        scripts: Array<{ code: string }>,
+      ) => runInNewContext(scripts[0]!.code, context)),
+    };
+
+    const valueFallback = JSON.parse(await semanticPageSnapshot(contents as never)) as {
+      elements: Array<{ name: string; nameSource: string }>;
+    };
+    expect(valueFallback.elements[0]).toMatchObject({
+      name: "checkout",
+      nameSource: "value",
+    });
+
+    alt = "Checkout";
+    const altName = JSON.parse(await semanticPageSnapshot(contents as never)) as {
+      elements: Array<{ name: string; nameSource: string }>;
+    };
+    expect(altName.elements[0]).toMatchObject({
+      name: "Checkout",
+      nameSource: "alt",
+    });
+  });
+
   it("collects semantic labels through a bounded text-node walk", async () => {
     const button = {
       nodeType: 1,

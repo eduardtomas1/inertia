@@ -75,6 +75,26 @@ test("shares one directly openable Browser across user, agent, and restart lifec
   await expect(page.getByRole("button", { name: "Open Browser", exact: true }))
     .toHaveAttribute("aria-pressed", "false");
 
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await expect(page.getByRole("main", { name: "Settings" })).toBeVisible();
+  await expect.poll(() => app.electronApp.evaluate(
+    async (_electron, id) => {
+      const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
+        agentBrowser: (
+          conversationId: string,
+          command: { action: "tabs" },
+        ) => Promise<{ ok: boolean; code?: string }>;
+      };
+      return await runtime.agentBrowser(id, { action: "tabs" });
+    },
+    conversationId,
+  )).toMatchObject({ ok: false, code: "unavailable" });
+  await page.getByRole("button", { name: "Workspace", exact: true }).click();
+  await expect(page.getByRole("button", {
+    name: "Open Browser",
+    exact: true,
+  })).toBeVisible();
+
   const agentUrl = `${app.previewUrl}agent-browser-page`;
   const agentFirst = await app.electronApp.evaluate(
     async (_electron, request) => {

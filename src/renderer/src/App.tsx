@@ -491,11 +491,12 @@ export default function App(): React.JSX.Element {
   const backendProfileActions = useStableController(
     useBackendProfiles({ request, run }),
   );
+  const browserWorkspaceVisible = view === "workspace" && detachedChats.ready;
   const desktopTools = useStableController(
     useDesktopTools({
       setActionError,
       previewOwnerId: "primary",
-      previewContextId: conversation
+      previewContextId: browserWorkspaceVisible && conversation
         && !suppressedMainConversationIds.has(conversation.id)
         && !detachedChats.conversationIds.has(conversation.id)
         ? conversation.id
@@ -1032,6 +1033,7 @@ export default function App(): React.JSX.Element {
     conversation,
     project,
     splitConversation,
+    visible: browserWorkspaceVisible && !splitConversationDetached,
     layout: secondaryPaneLayout,
     snapshotProjects: connection.snapshot?.projects ?? [],
     settings,

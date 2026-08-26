@@ -257,6 +257,29 @@ export class RuntimeGenerationLeaseJournal {
       || this.consume(runtimeGenerationId);
   }
 
+  generationsCreatedBefore(
+    startedAtMs: number,
+    systemBootId?: string,
+  ): string[] | null {
+    if (
+      !Number.isSafeInteger(startedAtMs)
+      || startedAtMs < 0
+      || (systemBootId !== undefined && !validSystemBootId(systemBootId))
+    ) return null;
+    this.refresh();
+    if (this.invalid) return null;
+    const generations: string[] = [];
+    for (const lease of this.all()) {
+      if (systemBootId !== undefined && lease.systemBootId !== systemBootId) {
+        continue;
+      }
+      const createdAtMs = Date.parse(lease.createdAt);
+      if (!Number.isFinite(createdAtMs)) return null;
+      if (createdAtMs < startedAtMs) generations.push(lease.runtimeGenerationId);
+    }
+    return generations;
+  }
+
   clearPriorBootSessions(systemBootId: string): boolean {
     if (!validSystemBootId(systemBootId)) return false;
     this.refresh();

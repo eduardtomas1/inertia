@@ -1,5 +1,8 @@
 import { spawn } from "node:child_process";
-import { spawnRuntimeOwnedProcess } from "../../node/runtime-owned-processes";
+import {
+  runtimeOwnedProcessInvocation,
+  spawnRuntimeOwnedProcess,
+} from "../../node/runtime-owned-processes";
 
 import { staleProviderSessionDecision } from "../../shared/continuation-policy";
 import { INERTIA_VERSION } from "../../shared/version";
@@ -73,7 +76,11 @@ export function startCodexAppServerRun(
     ["app-server"],
     options.environment,
   );
-  const child = spawnRuntimeOwnedProcess(() => spawn(invocation.command, invocation.args, {
+  const ownedInvocation = runtimeOwnedProcessInvocation(
+    invocation.command,
+    invocation.args,
+  );
+  const child = spawnRuntimeOwnedProcess(() => spawn(ownedInvocation.command, ownedInvocation.args, {
     cwd: options.cwd,
     env: options.environment,
     detached: process.platform !== "win32",

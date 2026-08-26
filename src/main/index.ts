@@ -69,7 +69,10 @@ import { AppUpdateInstallCoordinator } from "./app-update-install.js";
 import { CanaryRollbackManager } from "./canary-rollback.js";
 import { APP_UPDATE_IPC, registerAppUpdateIpc } from "./app-update-ipc.js";
 import { initializeReleaseUpdates } from "./release-updates.js";
-import { resolveRuntimeIconPath } from "./runtime-assets.js";
+import {
+  resolveRuntimeIconPath,
+  resolveRuntimeProcessGuardianPath,
+} from "./runtime-assets.js";
 import {
   CredentialVault,
   ElectronSafeStorageBackend,
@@ -749,7 +752,19 @@ async function createMainWindow(): Promise<void> {
     resourcesPath: process.resourcesPath,
     appPath: app.getAppPath(),
   });
+  const runtimeProcessGuardianPath = process.platform === "darwin"
+    ? resolveRuntimeProcessGuardianPath({
+        isPackaged: app.isPackaged,
+        resourcesPath: process.resourcesPath,
+        appPath: app.getAppPath(),
+      })
+    : null;
   if (!existsSync(iconPath)) throw new Error(`The required Inertia window icon is missing: ${iconPath}`);
+  if (runtimeProcessGuardianPath && !existsSync(runtimeProcessGuardianPath)) {
+    throw new Error(
+      `The required runtime process guardian is missing: ${runtimeProcessGuardianPath}`,
+    );
+  }
   windowThemePreference = readWindowThemePreference(windowAppearancePath());
   nativeTheme.themeSource = windowThemePreference;
   const backgroundColor = resolveWindowBackground(
@@ -973,6 +988,18 @@ async function bootstrap(): Promise<void> {
     app.getPath("userData"),
   );
   runtimeDataDirectory = dataDirectory;
+  const runtimeProcessGuardianPath = process.platform === "darwin"
+    ? resolveRuntimeProcessGuardianPath({
+        isPackaged: app.isPackaged,
+        resourcesPath: process.resourcesPath,
+        appPath: app.getAppPath(),
+      })
+    : null;
+  if (runtimeProcessGuardianPath && !existsSync(runtimeProcessGuardianPath)) {
+    throw new Error(
+      `The required runtime process guardian is missing: ${runtimeProcessGuardianPath}`,
+    );
+  }
   const bootstrapSafety = runtimeBootstrap.prepareRuntimeBootstrapSafety(dataDirectory);
   conversationAttachments = openConversationAttachments(
     dataDirectory,
@@ -1064,6 +1091,7 @@ async function bootstrap(): Promise<void> {
       defaultWorkspacePath,
       attachmentRoot: attachmentDirectory(),
       enableProviders: process.env.NODE_ENV !== "test" || Boolean(packageSmokeCodexExecutable),
+      ...(runtimeProcessGuardianPath ? { runtimeProcessGuardianPath } : {}),
       ...(packageSmokeCodexExecutable ? { codexBinaryPath: packageSmokeCodexExecutable } : {}),
       ...(packageSmokePdfInput && packageSmokePdfResult
         ? {

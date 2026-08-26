@@ -5,7 +5,10 @@ import { spawn, type IDisposable, type IPty } from "node-pty";
 import WebSocket from "ws";
 
 import type { ServerEvent } from "../shared/contracts";
-import { spawnRuntimeOwnedPidProcess } from "../node/runtime-owned-processes";
+import {
+  spawnRuntimeOwnedPidProcess,
+} from "../node/runtime-owned-processes";
+import { runtimeOwnedPtyInvocation } from "../node/runtime-owned-pty-invocation";
 import {
   createOwnedPidProcessTreeTermination,
   type OwnedPidProcessTreeTermination,
@@ -288,9 +291,10 @@ export class TerminalManager {
     let confirmOwnedProcessStopped!: () => boolean;
     let releaseOwnedProcessIfExited!: () => void;
     try {
+      const invocation = runtimeOwnedPtyInvocation(executable, args);
       const owned = spawnRuntimeOwnedPidProcess(() => this.spawnTerminal(
-        executable,
-        typeof args === "string" ? args : [...args],
+        invocation.command,
+        invocation.args,
         {
           name: "xterm-256color",
           cols,
@@ -298,7 +302,7 @@ export class TerminalManager {
           cwd,
           env: { ...env, TERM: "xterm-256color", COLORTERM: "truecolor" },
         },
-      ));
+      ), { darwinGuardianCommand: invocation.command });
       pseudoterminal = owned.process;
       confirmOwnedProcessStopped = owned.confirmStopped;
       releaseOwnedProcessIfExited = owned.releaseIfGroupExited;

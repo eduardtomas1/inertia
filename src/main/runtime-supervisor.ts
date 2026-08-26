@@ -40,6 +40,9 @@ import { RuntimeDatabaseRecoveryCoordinator } from "./runtime-database-recovery-
 import { recoverRuntimeOwnedProcesses } from "./runtime-owned-process-recovery.js";
 import { RuntimeSupervisorStartupRecovery } from "./runtime-supervisor-startup-recovery.js";
 import { RuntimeOwnedProcessJournal } from "../node/runtime-owned-processes.js";
+import { armWindowsRuntimeJob } from "./windows-runtime-job.js";
+import { createRuntimeProcessRecord } from "./runtime-supervisor-process-record.js";
+import { RuntimeProcessContainmentAdmission } from "./runtime-process-containment-admission.js";
 import type {
   PendingCredentialRequest,
   PendingPrivateConnectRuntimeRequest,
@@ -71,6 +74,9 @@ export class RuntimeSupervisor {
   private readonly forceKill: NonNullable<RuntimeSupervisorOptions["forceKill"]>;
   private readonly recoverOwnedProcesses:
     NonNullable<RuntimeSupervisorOptions["recoverOwnedProcesses"]>;
+  private readonly armProcessContainment:
+    NonNullable<RuntimeSupervisorOptions["armProcessContainment"]>;
+  private readonly processContainmentAdmission: RuntimeProcessContainmentAdmission;
   private readonly credentialBroker?: RuntimeCredentialBroker;
   private readonly credentialRequestTimeoutMs: number;
   private readonly attachmentRequests: RuntimeAttachmentBrokerCoordinator<RuntimeProcessRecord>;
@@ -136,11 +142,43 @@ export class RuntimeSupervisor {
     this.recoverOwnedProcesses = options.recoverOwnedProcesses
       ?? ((runtimeGenerationId, systemBootId, deadlineAt) =>
         recoverRuntimeOwnedProcesses(options.workerOptions.dataDirectory,
-          runtimeGenerationId, systemBootId, { deadlineAt }));
+          runtimeGenerationId, systemBootId, {
+            deadlineAt,
+            ...(options.workerOptions.runtimeProcessGuardianPath
+              ? { darwinGuardianPath: options.workerOptions.runtimeProcessGuardianPath }
+              : {}),
+          }));
+    this.armProcessContainment = options.armProcessContainment
+      ?? (process.platform === "win32"
+        ? ((runtimeGenerationId, runtimePid) =>
+            armWindowsRuntimeJob(runtimeGenerationId, runtimePid))
+        : (() => null));
+    this.processContainmentAdmission = new RuntimeProcessContainmentAdmission({
+      arm: this.armProcessContainment, systemBootId: this.systemBootId,
+      workerOptions: this.workerOptions,
+      isCurrent: (record) => this.current === record,
+      isRunningDesired: () => this.desiredRunning,
+      hasQuarantinedProcesses: () => this.quarantined.size > 0,
+      persist: (record, containment) => this.runtimeOwnedProcesses.armContainment(
+        record.runtimeGenerationId, this.systemBootId, containment,
+      ),
+      post: (record, command) => { this.post(record.child, command); },
+      reject: (record, error) => {
+        if (this.current !== record) return;
+        record.acceptingReady = false;
+        this.lastError = publicProcessError(
+          error, "The runtime process containment could not be armed.",
+        );
+        this.forceTerminate(record.child); this.emitState();
+      },
+    });
     this.startupRecovery = new RuntimeSupervisorStartupRecovery({
       dataDirectory: options.workerOptions.dataDirectory, systemBootId,
       forceKillWaitMs: this.forceKillWaitMs, leases: this.runtimeGenerationLeases,
       receipts: this.cleanupReceipts,
+      ...(options.workerOptions.runtimeProcessGuardianPath
+        ? { darwinGuardianPath: options.workerOptions.runtimeProcessGuardianPath }
+        : {}),
     });
     this.privateConnectPrompts = new RuntimePrivateConnectPromptCoordinator({
       timeoutMs: runtimeSupervisorDefaults.requestTimeoutMs,
@@ -560,52 +598,12 @@ export class RuntimeSupervisor {
       this.scheduleRestart();
       return;
     }
-    const record: RuntimeProcessRecord = {
-      child,
-      generation,
-      runtimeGenerationId,
-      cleanupReceiptIds: new Set(this.cleanupReceipts.pending()),
-      ready: false,
-      acceptingReady: true,
-      cleanupConfirmed: false,
-      generationCleanupConfirmed: false,
-      processTreeTerminationConfirmed: true,
-      processTreeTermination: null,
-      processTreeTerminationSettled: false,
-      shutdownDeadlineAt: null,
-      reportedFailure: null,
-      credentialRequestIds: new Set(),
-      secureFileRequestIds: new Set(),
-      agentBrowserRequestIds: new Set(),
-      attachmentRequestIds: new Set(),
-      attachmentClaimCounts: new Map(),
-      deferredAttachmentReleaseIds: new Set(),
-      deletingAttachmentIds: new Set(),
-      attachmentOperationTails: new Map(),
-    };
-    this.current = record;
-    child.once("spawn", () => {
-      if (this.current !== record) return;
-      if (!this.desiredRunning) {
-        this.post(child, { type: "runtime.shutdown" });
-        return;
-      }
-      const confirmedTerminatedRuntimeGenerationIds = [...record.cleanupReceiptIds];
-      this.post(child, {
-        type: "runtime.start",
-        options: {
-          ...this.workerOptions,
-          runtimeGenerationId: record.runtimeGenerationId,
-          systemBootId: this.systemBootId,
-          ...(confirmedTerminatedRuntimeGenerationIds.length > 0
-            ? { confirmedTerminatedRuntimeGenerationIds }
-            : {}),
-          ...(this.quarantined.size > 0
-            ? { priorRuntimeCleanupUnconfirmed: true }
-            : {}),
-        },
-      });
+    const record = createRuntimeProcessRecord({
+      child, generation, runtimeGenerationId,
+      cleanupReceiptIds: this.cleanupReceipts.pending(),
     });
+    this.current = record;
+    this.processContainmentAdmission.bind(record);
     child.on("message", (message) => this.handleMessage(record, message));
     child.on("error", (type, location) => {
       if (this.current !== record) return;

@@ -36,10 +36,8 @@ export function publicProcessError(
 }
 
 export function unconfirmedRuntimeCleanupMessage(
-  systemBootId: string,
+  _systemBootId: string,
   prefix: string,
 ): string {
-  return systemBootId === "unavailable"
-    ? `${prefix} Automatic reboot verification is unavailable on this system; keep the owned work unchanged until cleanup can be confirmed.`
-    : `${prefix} Restarting Inertia is not enough; a full computer restart lets Inertia prove the prior process ended before recovering its owned work.`;
+  return `${prefix} Inertia kept the affected work unchanged and will retry exact cleanup when its local service starts again.`;
 }

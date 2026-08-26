@@ -146,6 +146,9 @@ function createHarness(options: {
     forceKill,
     // Generic tests model exact cleanup; fail-closed cases override it below.
     recoverOwnedProcesses: options.recoverOwnedProcesses ?? (() => true),
+    armProcessContainment: () => process.platform === "win32"
+      ? { kind: "windows-job-v1", name: `Global\\InertiaRuntime-${"a".repeat(64)}` }
+      : null,
     credentialBroker: options.credentialBroker,
     credentialRequestTimeoutMs: options.credentialRequestTimeoutMs,
     secureFileBroker: options.secureFileBroker,

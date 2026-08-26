@@ -1,6 +1,9 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { basename } from "node:path";
-import { spawnRuntimeOwnedProcess } from "../../node/runtime-owned-processes";
+import {
+  runtimeOwnedProcessInvocation,
+  spawnRuntimeOwnedProcess,
+} from "../../node/runtime-owned-processes";
 
 import {
   credentialFreeProviderEnvironment,
@@ -114,7 +117,11 @@ async function probeProcess(
     let child: ChildProcessWithoutNullStreams;
     try {
       const invocation = providerProcessInvocation(executable, args, environment.env);
-      child = spawnRuntimeOwnedProcess(() => spawn(invocation.command, invocation.args, {
+      const ownedInvocation = runtimeOwnedProcessInvocation(
+        invocation.command,
+        invocation.args,
+      );
+      child = spawnRuntimeOwnedProcess(() => spawn(ownedInvocation.command, ownedInvocation.args, {
         cwd,
         env: environment.env,
         detached: process.platform !== "win32",

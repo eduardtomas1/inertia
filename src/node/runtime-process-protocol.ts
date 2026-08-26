@@ -59,6 +59,8 @@ export interface RuntimeWorkerOptions {
   enableProviders: boolean;
   runtimeGenerationId: string;
   systemBootId: string;
+  /** Main-resolved, packaged macOS watchdog executable. */
+  runtimeProcessGuardianPath?: string;
   confirmedTerminatedRuntimeGenerationIds?: readonly string[];
   /** Main-owned quarantine after an earlier utility process exited unconfirmed. */
   priorRuntimeCleanupUnconfirmed?: boolean;
@@ -541,6 +543,10 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
   const hasRecoveryImportFault = Object.hasOwn(options, "recoveryImportFault");
   const hasRuntimeGenerationId = Object.hasOwn(options, "runtimeGenerationId");
   const hasSystemBootId = Object.hasOwn(options, "systemBootId");
+  const hasRuntimeProcessGuardianPath = Object.hasOwn(
+    options,
+    "runtimeProcessGuardianPath",
+  );
   const hasConfirmedGenerations = Object.hasOwn(
     options,
     "confirmedTerminatedRuntimeGenerationIds",
@@ -561,11 +567,16 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
       + Number(hasRecoveryImportFault)
       + Number(hasConfirmedGenerations)
       + Number(hasPriorRuntimeCleanupUnconfirmed)
+      + Number(hasRuntimeProcessGuardianPath)
     || !runtimePath(options.dataDirectory)
     || !runtimePath(options.defaultWorkspacePath)
     || typeof options.enableProviders !== "boolean"
     || (hasRuntimeGenerationId && !validRuntimeGenerationId(options.runtimeGenerationId))
     || (hasSystemBootId && !validSystemBootId(options.systemBootId))
+    || (
+      hasRuntimeProcessGuardianPath
+      && !runtimePath(options.runtimeProcessGuardianPath)
+    )
     || (
       hasPriorRuntimeCleanupUnconfirmed
       && options.priorRuntimeCleanupUnconfirmed !== true
@@ -641,6 +652,9 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
       enableProviders: options.enableProviders,
       runtimeGenerationId: options.runtimeGenerationId as string,
       systemBootId: options.systemBootId as string,
+      ...(hasRuntimeProcessGuardianPath
+        ? { runtimeProcessGuardianPath: options.runtimeProcessGuardianPath as string }
+        : {}),
       ...(hasConfirmedGenerations
         ? {
             confirmedTerminatedRuntimeGenerationIds:

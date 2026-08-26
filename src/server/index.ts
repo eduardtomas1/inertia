@@ -164,9 +164,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     || !retainedGenerationLeases.some(currentGenerationOwner)
     || retainedGenerationLeases.some((lease) => !currentGenerationOwner(lease));
   const runtimeSafetyError = (operation: string): string => (
-    options.systemBootId === "unavailable"
-      ? `${operation} A prior runtime-owned process may still be running, and automatic cleanup verification is unavailable on this computer. Keep the affected work in place and contact support for recovery guidance.`
-      : `${operation} A prior runtime-owned process may still be running. Restarting Inertia is not enough; a full computer restart lets Inertia verify cleanup.`
+    `${operation} A prior runtime-owned process may still be running. Inertia kept the affected work unchanged and will retry exact cleanup when its local service starts again; contact support if the recovery remains blocked.`
   );
   const generatedAttachments = await PrivateGeneratedAttachmentStore.create(
     dataDirectory,

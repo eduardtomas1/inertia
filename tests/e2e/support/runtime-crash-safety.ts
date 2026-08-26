@@ -1,17 +1,14 @@
 import { expect, type TestInfo } from "@playwright/test";
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { copyFileSync, readFileSync } from "node:fs";
+import { isAbsolute, join } from "node:path";
 import Database from "better-sqlite3";
 
-import {
-  readDarwinProcessIdentity,
-  readWindowsProcessIdentity,
-} from "../../../src/main/runtime-owned-process-recovery";
 import { readSystemBootId } from "../../../src/main/system-boot-id";
 import { RuntimeGenerationLeaseJournal } from "../../../src/node/runtime-generation-leases";
 import {
   type ObservedRuntimeOwnedProcessIdentity,
+  readDarwinProcessIdentity,
   readLinuxProcessIdentity,
   RuntimeOwnedProcessJournal,
 } from "../../../src/node/runtime-owned-processes";
@@ -66,10 +63,14 @@ function readOwnedProcessIdentity(
 ): ObservedRuntimeOwnedProcessIdentity | null {
   if (process.platform === "linux") return readLinuxProcessIdentity(pid);
   if (process.platform === "darwin") {
-    return readDarwinProcessIdentity(pid, { deadlineAt: Date.now() + 1_000 });
-  }
-  if (process.platform === "win32") {
-    return readWindowsProcessIdentity(pid, { deadlineAt: Date.now() + 1_000 });
+    return readDarwinProcessIdentity(
+      pid,
+      join(
+        process.cwd(),
+        "resources/generated/runtime-process-guardian/runtime-process-guardian",
+      ),
+      { deadlineAt: Date.now() + 1_000 },
+    );
   }
   return null;
 }
@@ -88,7 +89,13 @@ export async function expectRuntimeCrashRecovery(
   app: AppFixture,
   testInfo?: TestInfo,
 ): Promise<void> {
-  const { electronApp, page, runtimeSnapshot, testDirectory } = app;
+  const {
+    electronApp,
+    page,
+    runtimeSnapshot,
+    testDirectory,
+    workspaceDirectory,
+  } = app;
   await expect.poll(
     async () => (await runtimeSnapshot()).phase,
     { timeout: 15_000 },
@@ -100,6 +107,46 @@ export async function expectRuntimeCrashRecovery(
     .find((lease) =>
       lease.runtimeGenerationId.endsWith(`:${before.generation}`)) ?? null;
   const beforeUrl = await runtimeWebsocketUrl(page);
+  const addFirstProject = page.getByRole("button", {
+    name: "Add your first project",
+  });
+  if (await addFirstProject.isVisible().catch(() => false)) {
+    await electronApp.evaluate(({ dialog }, directory) => {
+      Reflect.set(dialog, "showOpenDialog", async () => ({
+        canceled: false,
+        filePaths: [directory],
+        bookmarks: [],
+      }));
+    }, workspaceDirectory);
+    await addFirstProject.click();
+    await expect(page.getByRole("heading", {
+      name: /^What should we build in .+\?$/u,
+      level: 3,
+    })).toBeVisible();
+  }
+  const projectNavigation = page.getByRole("complementary", {
+    name: "Project navigation",
+    exact: true,
+  });
+  await projectNavigation.getByRole("button", {
+    name: "New chat",
+    exact: true,
+  }).click();
+  await expect.poll(() => {
+    const current = new Database(join(testDirectory, "data", "inertia.sqlite"), {
+      readonly: true,
+    });
+    try {
+      return (current.prepare(`
+        SELECT COUNT(*) AS count
+        FROM conversations
+        JOIN app_state ON app_state.active_conversation_id = conversations.id
+        WHERE app_state.id = 1
+      `).get() as { count: number }).count;
+    } finally {
+      current.close();
+    }
+  }).toBe(1);
   await expect(page.locator(".app-shell")).toHaveAttribute(
     "data-runtime-generation",
     /^[0-9a-f-]{36}$/iu,
@@ -108,12 +155,17 @@ export async function expectRuntimeCrashRecovery(
     .getAttribute("data-runtime-generation");
   expect(beforeRuntimeGeneration).toMatch(/^[0-9a-f-]{36}$/iu);
   const tools = await ensureWorkspaceTools(page);
-  await selectWorkspaceTool(tools, "Terminal");
   const terminal = page.locator("aside.terminal-panel").first();
   const restartTerminal = terminal.getByRole("button", { name: "Start again" });
   let retriedTerminalAdmission = false;
   await expect.poll(async () => {
-    if (await terminal.getAttribute("data-terminal-id")) return true;
+    if (await tools.getAttribute("data-active-workspace-tool") !== "terminal") {
+      await selectWorkspaceTool(tools, "Terminal");
+      return false;
+    }
+    if (await terminal.count() === 0) return false;
+    if (await terminal.getAttribute("data-terminal-id", { timeout: 500 })
+      .catch(() => null)) return true;
     if (
       !retriedTerminalAdmission
       && await restartTerminal.isVisible().catch(() => false)
@@ -122,7 +174,7 @@ export async function expectRuntimeCrashRecovery(
       await restartTerminal.click();
     }
     return false;
-  }, { timeout: 5_000 }).toBe(true);
+  }, { timeout: 15_000 }).toBe(true);
   await expect(terminal).toHaveAttribute("data-terminal-id", /.+/u);
   const beforeTerminalId = await terminal.getAttribute("data-terminal-id");
   expect(beforeTerminalId).toBeTruthy();
@@ -158,6 +210,16 @@ export async function expectRuntimeCrashRecovery(
       recoveryRootPid = Number.isSafeInteger(pid) && pid > 1 ? pid : null;
       return recoveryRootPid;
     }).not.toBeNull();
+  }
+  if (process.platform === "win32") {
+    expect(priorLease).not.toBeNull();
+    const journal = new RuntimeOwnedProcessJournal(dataDirectory, {
+      platform: "win32",
+    });
+    expect(journal.containment(priorLease!.runtimeGenerationId)).toEqual({
+      kind: "windows-job-v1",
+      name: expect.stringMatching(/^Global\\InertiaRuntime-[0-9a-f]{64}$/u),
+    });
   }
   const database = new Database(join(testDirectory, "data", "inertia.sqlite"));
   const conversation = database.prepare(`
@@ -398,6 +460,23 @@ export async function expectRuntimeCrashRecovery(
   await expect(terminal.locator(".terminal-overlay[role=\"status\"]"))
     .toHaveCount(0);
   await expect(safetyAlert).toHaveCount(0);
+  if (testInfo) {
+    const evidence = testInfo.outputPath("runtime-crash-recovered.png");
+    await page.screenshot({ animations: "disabled", path: evidence });
+    await testInfo.attach("runtime crash recovery", {
+      path: evidence,
+      contentType: "image/png",
+    });
+    const requestedPath = process.env.INERTIA_RUNTIME_CRASH_SCREENSHOT_PATH;
+    if (requestedPath) {
+      if (!isAbsolute(requestedPath)) {
+        throw new Error(
+          "INERTIA_RUNTIME_CRASH_SCREENSHOT_PATH must be absolute.",
+        );
+      }
+      copyFileSync(evidence, requestedPath);
+    }
+  }
   await newChat.click();
   await expect.poll(() => {
     const current = new Database(join(testDirectory, "data", "inertia.sqlite"), {

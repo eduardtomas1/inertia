@@ -1,6 +1,7 @@
 import { randomUUID, createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import type { ChildProcess } from "node:child_process";
+import { isAbsolute } from "node:path";
 
 import {
   discardDirectRuntimeJournalLeaf,
@@ -16,9 +17,19 @@ import {
   validRuntimeGenerationId,
   validSystemBootId,
 } from "./runtime-process-protocol.js";
-
+import {
+  readDarwinProcessIdentity,
+  type DarwinProcessIdentity,
+} from "./runtime-owned-process-darwin.js";
+import {
+  exactProcessGroupAbsent,
+  failedClaimProcessCanExecute,
+} from "./runtime-owned-process-posix.js";
+export { readDarwinProcessIdentity } from "./runtime-owned-process-darwin.js";
+export type { DarwinProcessIdentity } from "./runtime-owned-process-darwin.js";
 const CLAIM_PREFIX = ".runtime-owned-child-";
 const SESSION_PREFIX = ".runtime-owned-process-session-";
+const CONTAINMENT_PREFIX = ".runtime-owned-process-containment-";
 const MAX_CLAIMS = 256;
 const MAX_SESSIONS = 32;
 const MAX_RECORD_BYTES = 768;
@@ -39,28 +50,30 @@ export interface LinuxProcessIdentity {
 
 export type RuntimeOwnedProcessPlatform = "linux" | "darwin" | "win32";
 
-export interface PortableProcessIdentity {
-  readonly platform: Exclude<RuntimeOwnedProcessPlatform, "linux">;
+export interface WindowsProcessIdentity {
+  readonly platform: "win32";
   readonly pid: number;
-  readonly processGroupId: number | null;
+  readonly processGroupId: null;
   readonly startedAfterMs: number;
   readonly startedBeforeMs: number;
 }
 
-export interface ObservedPortableProcessIdentity {
-  readonly platform: Exclude<RuntimeOwnedProcessPlatform, "linux">;
+export interface ObservedWindowsProcessIdentity {
+  readonly platform: "win32";
   readonly pid: number;
-  readonly processGroupId: number | null;
+  readonly processGroupId: null;
   readonly startedAtMs: number;
 }
 
 export type RuntimeOwnedProcessIdentity =
   | LinuxProcessIdentity
-  | PortableProcessIdentity;
+  | DarwinProcessIdentity
+  | WindowsProcessIdentity;
 
 export type ObservedRuntimeOwnedProcessIdentity =
   | LinuxProcessIdentity
-  | ObservedPortableProcessIdentity;
+  | DarwinProcessIdentity
+  | ObservedWindowsProcessIdentity;
 
 interface RuntimeOwnedProcessSession {
   readonly version: typeof SCHEMA_VERSION;
@@ -68,10 +81,31 @@ interface RuntimeOwnedProcessSession {
   readonly systemBootId: string;
 }
 
-interface RuntimeOwnedProcessPending extends RuntimeOwnedProcessSession {
+export interface WindowsRuntimeJobContainment {
+  readonly kind: "windows-job-v1";
+  readonly name: string;
+}
+
+export type RuntimeOwnedProcessContainment = WindowsRuntimeJobContainment;
+
+interface StoredRuntimeOwnedProcessContainment extends RuntimeOwnedProcessSession {
+  readonly containment: RuntimeOwnedProcessContainment;
+}
+
+interface RuntimeOwnedProcessPendingBase extends RuntimeOwnedProcessSession {
   readonly state: "pending";
   readonly ownershipId: string;
 }
+export interface RuntimeOwnedDarwinProcessPending extends RuntimeOwnedProcessPendingBase {
+  readonly containment: "darwin-parent-watchdog-v1";
+  readonly runtimeParentPid: number;
+}
+interface RuntimeOwnedLegacyProcessPending extends RuntimeOwnedProcessPendingBase {
+  readonly containment?: never;
+  readonly runtimeParentPid?: never;
+}
+type RuntimeOwnedProcessPending = RuntimeOwnedDarwinProcessPending
+  | RuntimeOwnedLegacyProcessPending;
 
 export interface RuntimeOwnedProcessClaim extends RuntimeOwnedProcessSession {
   readonly state: "owned";
@@ -87,6 +121,10 @@ function generationHash(runtimeGenerationId: string): string {
 
 function sessionName(runtimeGenerationId: string): string {
   return `${SESSION_PREFIX}${generationHash(runtimeGenerationId)}.json`;
+}
+
+function containmentName(runtimeGenerationId: string): string {
+  return `${CONTAINMENT_PREFIX}${generationHash(runtimeGenerationId)}.json`;
 }
 
 function claimName(ownershipId: string): string {
@@ -148,6 +186,37 @@ function parseSession(bytes: Buffer): RuntimeOwnedProcessSession | null {
   }
 }
 
+function parseContainment(
+  bytes: Buffer,
+  expectedRuntimeGenerationId: string,
+  expectedSystemBootId: string,
+): RuntimeOwnedProcessContainment | null {
+  try {
+    const value = JSON.parse(bytes.toString("utf8")) as unknown;
+    if (!value || typeof value !== "object" || !exactKeys(value, [
+      "containment",
+      "runtimeGenerationId",
+      "systemBootId",
+      "version",
+    ])) return null;
+    const stored = value as Partial<StoredRuntimeOwnedProcessContainment>;
+    if (
+      stored.version !== SCHEMA_VERSION
+      || stored.runtimeGenerationId !== expectedRuntimeGenerationId
+      || stored.systemBootId !== expectedSystemBootId
+      || !stored.containment
+      || typeof stored.containment !== "object"
+      || !exactKeys(stored.containment, ["kind", "name"])
+      || stored.containment.kind !== "windows-job-v1"
+      || typeof stored.containment.name !== "string"
+      || !/^Global\\InertiaRuntime-[0-9a-f]{64}$/u.test(stored.containment.name)
+    ) return null;
+    return stored.containment;
+  } catch {
+    return null;
+  }
+}
+
 function parseRecord(bytes: Buffer): RuntimeOwnedProcessRecord | null {
   try {
     const value = JSON.parse(bytes.toString("utf8")) as unknown;
@@ -161,13 +230,18 @@ function parseRecord(bytes: Buffer): RuntimeOwnedProcessRecord | null {
       || !UUID_PATTERN.test(record.ownershipId)
     ) return null;
     if (record.state === "pending") {
-      return exactKeys(value, [
-        "ownershipId",
-        "runtimeGenerationId",
-        "state",
-        "systemBootId",
-        "version",
-      ]) ? record as RuntimeOwnedProcessPending : null;
+      const legacy = exactKeys(value, [
+        "ownershipId", "runtimeGenerationId", "state", "systemBootId", "version",
+      ]);
+      const guardedDarwin = exactKeys(value, [
+        "containment", "ownershipId", "runtimeGenerationId", "runtimeParentPid",
+        "state", "systemBootId", "version",
+      ])
+        && record.containment === "darwin-parent-watchdog-v1"
+        && validPid(record.runtimeParentPid);
+      return legacy || guardedDarwin
+        ? record as RuntimeOwnedProcessPending
+        : null;
     }
     if (
       record.state !== "owned"
@@ -193,25 +267,40 @@ function parseRecord(bytes: Buffer): RuntimeOwnedProcessRecord | null {
       && validPid((identity as Partial<LinuxProcessIdentity>).parentPid)
       && validPid(identity.processGroupId)
       && validTicks((identity as Partial<LinuxProcessIdentity>).startTimeTicks);
-    const portableIdentity = exactKeys(record.process, [
+    const darwinIdentity = exactKeys(record.process, [
+      "parentPid",
+      "pid",
+      "platform",
+      "processGroupId",
+      "startTimeMicroseconds",
+      "startTimeSeconds",
+    ])
+      && (identity as Partial<DarwinProcessIdentity>).platform === "darwin"
+      && validPid(identity.pid)
+      && validParentPid((identity as Partial<DarwinProcessIdentity>).parentPid)
+      && validPid(identity.processGroupId)
+      && identity.processGroupId === identity.pid
+      && validTicks((identity as Partial<DarwinProcessIdentity>).startTimeSeconds)
+      && Number.isSafeInteger(
+        (identity as Partial<DarwinProcessIdentity>).startTimeMicroseconds,
+      )
+      && Number((identity as Partial<DarwinProcessIdentity>).startTimeMicroseconds) >= 0
+      && Number((identity as Partial<DarwinProcessIdentity>).startTimeMicroseconds) < 1_000_000;
+    const windowsIdentity = exactKeys(record.process, [
       "pid",
       "platform",
       "processGroupId",
       "startedAfterMs",
       "startedBeforeMs",
     ])
-      && ((identity as Partial<PortableProcessIdentity>).platform === "darwin"
-        || (identity as Partial<PortableProcessIdentity>).platform === "win32")
+      && (identity as Partial<WindowsProcessIdentity>).platform === "win32"
       && validPid(identity.pid)
-      && (identity.processGroupId === null || validPid(identity.processGroupId))
-      && validMilliseconds((identity as Partial<PortableProcessIdentity>).startedAfterMs)
-      && validMilliseconds((identity as Partial<PortableProcessIdentity>).startedBeforeMs)
-      && Number((identity as Partial<PortableProcessIdentity>).startedAfterMs)
-        <= Number((identity as Partial<PortableProcessIdentity>).startedBeforeMs)
-      && ((identity as Partial<PortableProcessIdentity>).platform === "darwin"
-        ? identity.processGroupId === identity.pid
-        : identity.processGroupId === null);
-    if (!linuxIdentity && !portableIdentity) return null;
+      && identity.processGroupId === null
+      && validMilliseconds((identity as Partial<WindowsProcessIdentity>).startedAfterMs)
+      && validMilliseconds((identity as Partial<WindowsProcessIdentity>).startedBeforeMs)
+      && Number((identity as Partial<WindowsProcessIdentity>).startedAfterMs)
+        <= Number((identity as Partial<WindowsProcessIdentity>).startedBeforeMs);
+    if (!linuxIdentity && !darwinIdentity && !windowsIdentity) return null;
     return record as RuntimeOwnedProcessClaim;
   } catch {
     return null;
@@ -265,6 +354,14 @@ function sameProcess(
       && left.processGroupId === right.processGroupId
       && left.startTimeTicks === right.startTimeTicks;
   }
+  if (left.platform === "darwin") {
+    return "startTimeSeconds" in right
+      && right.platform === "darwin"
+      && left.pid === right.pid
+      && left.processGroupId === right.processGroupId
+      && left.startTimeSeconds === right.startTimeSeconds
+      && left.startTimeMicroseconds === right.startTimeMicroseconds;
+  }
   return "startedAtMs" in right
     && left.platform === right.platform
     && left.pid === right.pid
@@ -273,7 +370,11 @@ function sameProcess(
     && right.startedAtMs <= left.startedBeforeMs;
 }
 
-function stored(value: RuntimeOwnedProcessSession | RuntimeOwnedProcessRecord): Buffer {
+function stored(
+  value: RuntimeOwnedProcessSession
+    | RuntimeOwnedProcessRecord
+    | StoredRuntimeOwnedProcessContainment,
+): Buffer {
   return Buffer.from(JSON.stringify(value), "utf8");
 }
 
@@ -321,13 +422,26 @@ function removeLeaf(root: DirectRuntimeJournalRoot, name: string): boolean {
 export class RuntimeOwnedProcessJournal {
   private readonly root: DirectRuntimeJournalRoot;
   readonly platform: NodeJS.Platform;
+  private readonly darwinGuardianPath: string | null;
+  private readonly darwinIdentityReader: (
+    pid: number,
+  ) => DarwinProcessIdentity | null;
 
   constructor(
     dataDirectory: string,
-    options: { readonly platform?: NodeJS.Platform } = {},
+    options: {
+      readonly platform?: NodeJS.Platform;
+      readonly darwinGuardianPath?: string;
+      readonly readDarwinIdentity?: (pid: number) => DarwinProcessIdentity | null;
+    } = {},
   ) {
     this.root = pinDirectRuntimeJournalRoot(dataDirectory);
     this.platform = options.platform ?? process.platform;
+    this.darwinGuardianPath = options.darwinGuardianPath ?? null;
+    this.darwinIdentityReader = options.readDarwinIdentity
+      ?? ((pid) => this.darwinGuardianPath
+        ? readDarwinProcessIdentity(pid, this.darwinGuardianPath)
+        : null);
   }
 
   startSession(runtimeGenerationId: string, systemBootId: string): boolean {
@@ -351,6 +465,73 @@ export class RuntimeOwnedProcessJournal {
     );
   }
 
+  armContainment(
+    runtimeGenerationId: string,
+    systemBootId: string,
+    containment: RuntimeOwnedProcessContainment,
+  ): boolean {
+    if (this.platform !== "win32") return false;
+    const sessions = (() => {
+      try { return readSessions(this.root); } catch { return null; }
+    })();
+    const session = sessions?.find((candidate) =>
+      candidate.runtimeGenerationId === runtimeGenerationId);
+    if (!session || session.systemBootId !== systemBootId) return false;
+    const name = containmentName(runtimeGenerationId);
+    const current = readDirectRuntimeJournalLeaf(
+      this.root,
+      name,
+      MAX_RECORD_BYTES,
+    );
+    if (current) {
+      const parsed = parseContainment(
+        current.bytes,
+        runtimeGenerationId,
+        systemBootId,
+      );
+      return parsed?.kind === containment.kind && parsed.name === containment.name;
+    }
+    return writeDirectRuntimeJournalLeaf(
+      this.root,
+      `${name}.publish.tmp`,
+      name,
+      stored({
+        version: SCHEMA_VERSION,
+        runtimeGenerationId,
+        systemBootId,
+        containment,
+      }),
+    );
+  }
+
+  containment(
+    runtimeGenerationId: string,
+  ): RuntimeOwnedProcessContainment | null | undefined {
+    try {
+      const session = readSessions(this.root).find((candidate) =>
+        candidate.runtimeGenerationId === runtimeGenerationId);
+      if (!session) return undefined;
+      const canonical = containmentName(runtimeGenerationId);
+      const temporary = `${canonical}.publish.tmp`;
+      if (readDirectRuntimeJournalLeaf(this.root, temporary, MAX_RECORD_BYTES)) {
+        if (!discardDirectRuntimeJournalLeaf(this.root, temporary)) return undefined;
+      }
+      const leaf = readDirectRuntimeJournalLeaf(
+        this.root,
+        canonical,
+        MAX_RECORD_BYTES,
+      );
+      if (!leaf) return null;
+      return parseContainment(
+        leaf.bytes,
+        runtimeGenerationId,
+        session.systemBootId,
+      ) ?? undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   begin(runtimeGenerationId: string, systemBootId: string): string {
     const ownershipId = randomUUID();
     if (!this.startSession(runtimeGenerationId, systemBootId)) {
@@ -365,13 +546,14 @@ export class RuntimeOwnedProcessJournal {
     if (active.length >= MAX_CLAIMS) {
       throw new Error("The runtime process ownership bound was exceeded.");
     }
-    const pending: RuntimeOwnedProcessPending = {
-      version: SCHEMA_VERSION,
-      state: "pending",
-      ownershipId,
-      runtimeGenerationId,
-      systemBootId,
+    const base: RuntimeOwnedProcessPendingBase = {
+      version: SCHEMA_VERSION, state: "pending", ownershipId,
+      runtimeGenerationId, systemBootId,
     };
+    const pending: RuntimeOwnedProcessPending =
+      this.platform === "darwin" && this.darwinGuardianPath
+        ? { ...base, containment: "darwin-parent-watchdog-v1", runtimeParentPid: process.pid }
+        : base;
     if (!writeDirectRuntimeJournalLeaf(
       this.root,
       temporaryClaimName(ownershipId, "begin"),
@@ -404,29 +586,25 @@ export class RuntimeOwnedProcessJournal {
     const linuxIdentity = this.platform === "linux"
       ? readLinuxProcessIdentity(pid)
       : null;
+    const darwinIdentity = this.platform === "darwin"
+      ? this.darwinIdentityReader(pid)
+      : null;
     const spawnedAfterMs = Math.max(
       0,
       Math.trunc(options.spawnedAfterMs ?? Date.now()),
     );
     const spawnedBeforeMs = Math.trunc(options.spawnedBeforeMs ?? Date.now());
-    const portableIdentity: PortableProcessIdentity | null =
-      this.platform === "darwin" || this.platform === "win32"
+    const windowsIdentity: WindowsProcessIdentity | null =
+      this.platform === "win32"
         ? {
-            platform: this.platform,
+            platform: "win32",
             pid,
-            processGroupId: this.platform === "darwin" ? pid : null,
-            // Darwin's portable `ps lstart` is second-granularity. Windows
-            // exposes millisecond-granularity creation time, so its spawn
-            // interval can remain unexpanded.
-            startedAfterMs: this.platform === "darwin"
-              ? Math.floor(spawnedAfterMs / 1_000) * 1_000
-              : spawnedAfterMs,
-            startedBeforeMs: this.platform === "darwin"
-              ? Math.floor(spawnedBeforeMs / 1_000) * 1_000
-              : spawnedBeforeMs,
+            processGroupId: null,
+            startedAfterMs: spawnedAfterMs,
+            startedBeforeMs: spawnedBeforeMs,
           }
         : null;
-    const identity = linuxIdentity ?? portableIdentity;
+    const identity = linuxIdentity ?? darwinIdentity ?? windowsIdentity;
     if (
       pending?.state !== "pending"
       || pending.runtimeGenerationId !== runtimeGenerationId
@@ -436,8 +614,11 @@ export class RuntimeOwnedProcessJournal {
       || identity.processGroupId !== (this.platform === "win32" ? null : pid)
     ) throw new Error("The spawned process ownership could not be proven.");
     const claim: RuntimeOwnedProcessClaim = {
-      ...pending,
+      version: pending.version,
       state: "owned",
+      ownershipId: pending.ownershipId,
+      runtimeGenerationId: pending.runtimeGenerationId,
+      systemBootId: pending.systemBootId,
       process: identity,
     };
     if (!writeDirectRuntimeJournalLeaf(
@@ -519,6 +700,8 @@ export class RuntimeOwnedProcessJournal {
     if (!supportedRuntimeOwnedProcessPlatform(this.platform)) return true;
     const records = this.records(runtimeGenerationId);
     if (!records || records.length > 0) return false;
+    const containment = containmentName(runtimeGenerationId);
+    if (!removeLeaf(this.root, containment)) return false;
     return removeLeaf(this.root, sessionName(runtimeGenerationId));
   }
 
@@ -543,6 +726,23 @@ export class RuntimeOwnedProcessJournal {
     return true;
   }
 
+  clearRuntimeGenerationAfterConfirmedReboot(
+    runtimeGenerationId: string,
+  ): boolean {
+    if (!supportedRuntimeOwnedProcessPlatform(this.platform)) return true;
+    if (!validRuntimeGenerationId(runtimeGenerationId)) return false;
+    let sessions: RuntimeOwnedProcessSession[];
+    try { sessions = readSessions(this.root); } catch { return false; }
+    if (!sessions.some((session) =>
+      session.runtimeGenerationId === runtimeGenerationId)) return true;
+    const records = this.records(runtimeGenerationId);
+    if (!records) return false;
+    for (const record of records) {
+      if (!this.release(record.ownershipId)) return false;
+    }
+    return this.finishSession(runtimeGenerationId);
+  }
+
   static identityMatches(
     claim: RuntimeOwnedProcessClaim,
     identity: ObservedRuntimeOwnedProcessIdentity,
@@ -556,6 +756,7 @@ interface ActiveRuntimeOwnedProcessRegistry {
   readonly platform: RuntimeOwnedProcessPlatform;
   readonly runtimeGenerationId: string;
   readonly systemBootId: string;
+  readonly darwinGuardianPath: string | null;
   readonly claims: WeakMap<ChildProcess, ActiveRuntimeOwnedProcessClaim>;
   readonly pendingReleaseConfirmations: Set<Promise<boolean>>;
 }
@@ -573,14 +774,25 @@ export function activateRuntimeOwnedProcessRegistry(
   dataDirectory: string,
   runtimeGenerationId: string,
   systemBootId: string,
-  options: { readonly platform?: NodeJS.Platform } = {},
+  options: {
+    readonly platform?: NodeJS.Platform;
+    readonly darwinGuardianPath?: string;
+  } = {},
 ): (() => void) | null {
   const platform = options.platform ?? process.platform;
   if (!supportedRuntimeOwnedProcessPlatform(platform)) return null;
   if (activeRegistry) {
     throw new Error("The runtime process ownership registry is already active.");
   }
-  const journal = new RuntimeOwnedProcessJournal(dataDirectory, { platform });
+  const darwinGuardianPath = options.darwinGuardianPath ?? null;
+  if (
+    platform === "darwin"
+    && (!darwinGuardianPath || !isAbsolute(darwinGuardianPath))
+  ) throw new Error("The macOS runtime process guardian is unavailable.");
+  const journal = new RuntimeOwnedProcessJournal(dataDirectory, {
+    platform,
+    ...(darwinGuardianPath ? { darwinGuardianPath } : {}),
+  });
   if (!journal.startSession(runtimeGenerationId, systemBootId)) {
     throw new Error("The runtime process ownership session could not be persisted.");
   }
@@ -589,6 +801,7 @@ export function activateRuntimeOwnedProcessRegistry(
     platform,
     runtimeGenerationId,
     systemBootId,
+    darwinGuardianPath,
     claims: new WeakMap(),
     pendingReleaseConfirmations: new Set(),
   };
@@ -596,6 +809,37 @@ export function activateRuntimeOwnedProcessRegistry(
   return () => {
     if (activeRegistry === registry) activeRegistry = null;
   };
+}
+
+export interface RuntimeOwnedProcessInvocation {
+  readonly command: string;
+  readonly args: string[];
+}
+
+/**
+ * Places every macOS runtime child behind the native process-group watchdog.
+ * The helper execs the requested program without a shell and keeps the exact
+ * root alive until its complete group is drained.
+ */
+export function runtimeOwnedProcessInvocation(
+  command: string,
+  args: readonly string[],
+): RuntimeOwnedProcessInvocation {
+  const registry = activeRegistry;
+  if (registry?.platform !== "darwin") {
+    return { command, args: [...args] };
+  }
+  if (!registry.darwinGuardianPath) {
+    throw new Error("The macOS runtime process guardian is unavailable.");
+  }
+  return {
+    command: registry.darwinGuardianPath,
+    args: ["watch", String(process.pid), "--", command, ...args],
+  };
+}
+
+export function activeRuntimeOwnedProcessPlatform(): RuntimeOwnedProcessPlatform | null {
+  return activeRegistry?.platform ?? null;
 }
 
 function hardStopUnclaimed(
@@ -638,6 +882,7 @@ interface RuntimeOwnedPidProcessOptions {
   readonly wait?: (durationMs: number) => void;
   readonly readIdentity?: (pid: number) => LinuxProcessIdentity | null;
   readonly processCanExecute?: (pid: number) => boolean | null;
+  readonly darwinGuardianCommand?: string;
 }
 
 function claimPidProcessAfterGroupSettle(
@@ -688,41 +933,6 @@ function claimPidProcessAfterGroupSettle(
       1,
       Math.min(PID_PROCESS_GROUP_SETTLE_POLL_MS, remainingMs),
     ));
-  }
-}
-
-function linuxProcessCanExecute(pid: number): boolean | null {
-  if (!validPid(pid)) return null;
-  let stat: string;
-  try {
-    stat = readFileSync(`/proc/${pid}/stat`, "utf8");
-  } catch (error) {
-    if (
-      error
-      && typeof error === "object"
-      && "code" in error
-      && (error.code === "ENOENT" || error.code === "ESRCH")
-    ) return false;
-    return null;
-  }
-  const closingName = stat.lastIndexOf(")");
-  if (closingName < 2) return null;
-  const state = stat.slice(closingName + 1).trimStart()[0];
-  if (!state || !/^[A-Za-z]$/u.test(state)) return null;
-  return state !== "Z" && state !== "X" && state !== "x";
-}
-
-function exactProcessGroupAbsent(pid: number): boolean | null {
-  try {
-    process.kill(-pid, 0);
-    return false;
-  } catch (error) {
-    return error
-      && typeof error === "object"
-      && "code" in error
-      && error.code === "ESRCH"
-      ? true
-      : null;
   }
 }
 
@@ -863,6 +1073,10 @@ export function spawnRuntimeOwnedProcess<T extends ChildProcess>(
   let child: T;
   try {
     child = spawnProcess();
+    if (
+      registry.platform === "darwin"
+      && child.spawnfile !== registry.darwinGuardianPath
+    ) throw new Error("The macOS owned process did not use its guardian.");
   } catch (error) {
     registry.journal.release(ownershipId);
     throw error;
@@ -896,12 +1110,15 @@ export function spawnRuntimeOwnedProcess<T extends ChildProcess>(
     if (child.pid === undefined) registry.journal.release(ownershipId);
     else {
       hardStopUnclaimed(child, registry.platform);
-      if (registry.platform === "linux") {
+      const processCanExecute = failedClaimProcessCanExecute(
+        registry.platform, registry.darwinGuardianPath, PROCESS_GROUP_EXIT_WAIT_MS,
+      );
+      if (processCanExecute) {
         void releaseFailedPidClaimIfStopped(
           registry,
           claim,
           child.pid,
-          linuxProcessCanExecute,
+          processCanExecute,
         );
       }
     }
@@ -942,6 +1159,10 @@ export function spawnRuntimeOwnedPidProcess<T extends { readonly pid: number }>(
   const spawnedAfterMs = Date.now();
   try {
     owned = spawnProcess();
+    if (
+      registry.platform === "darwin"
+      && options.darwinGuardianCommand !== registry.darwinGuardianPath
+    ) throw new Error("The macOS owned process did not use its guardian.");
     if (registry.platform === "linux") {
       claimPidProcessAfterGroupSettle(
         registry,
@@ -969,12 +1190,15 @@ export function spawnRuntimeOwnedPidProcess<T extends { readonly pid: number }>(
           return true;
         },
       }, registry.platform);
-      if (registry.platform === "linux") {
+      const processCanExecute = failedClaimProcessCanExecute(
+        registry.platform, registry.darwinGuardianPath, PROCESS_GROUP_EXIT_WAIT_MS,
+      );
+      if (processCanExecute) {
         void releaseFailedPidClaimIfStopped(
           registry,
           claim,
           failedOwned.pid,
-          options.processCanExecute ?? linuxProcessCanExecute,
+          options.processCanExecute ?? processCanExecute,
         );
       }
     } else registry.journal.release(ownershipId);

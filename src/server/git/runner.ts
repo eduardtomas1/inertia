@@ -1,5 +1,8 @@
 import { spawn } from "node:child_process";
-import { spawnRuntimeOwnedProcess } from "../../node/runtime-owned-processes";
+import {
+  runtimeOwnedProcessInvocation,
+  spawnRuntimeOwnedProcess,
+} from "../../node/runtime-owned-processes";
 
 import {
   DEFAULT_OUTPUT_BYTES,
@@ -250,7 +253,8 @@ export function runGit(
     ?? terminateProcessTreeAndWait;
 
   return new Promise((resolveProcess, rejectProcess) => {
-    const child = spawnRuntimeOwnedProcess(() => spawn("git", [...args], {
+    const invocation = runtimeOwnedProcessInvocation("git", args);
+    const child = spawnRuntimeOwnedProcess(() => spawn(invocation.command, invocation.args, {
       cwd,
       shell: false,
       detached: process.platform !== "win32",
@@ -453,7 +457,8 @@ function runPreparedGitRefTransaction(
   const timeoutMs = Math.min(LOCAL_TIMEOUT_MS, deadlineTimeoutMs);
   const expiresAt = Date.now() + timeoutMs;
   return new Promise((resolve, reject) => {
-    const child = spawnRuntimeOwnedProcess(() => spawn("git", ["update-ref", "--stdin"], {
+    const invocation = runtimeOwnedProcessInvocation("git", ["update-ref", "--stdin"]);
+    const child = spawnRuntimeOwnedProcess(() => spawn(invocation.command, invocation.args, {
       cwd,
       shell: false,
       detached: process.platform !== "win32",

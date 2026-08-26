@@ -79,6 +79,34 @@ function fakeTerminal(pid = 42): {
 }
 
 describe("TerminalManager", () => {
+  it("preserves a pre-escaped Windows PTY command line verbatim", () => {
+    const terminal = fakeTerminal();
+    const owner = {
+      readyState: 1,
+      bufferedAmount: 0,
+      send: vi.fn(),
+    } as unknown as WebSocket;
+    const spawnTerminal = vi.fn(() => terminal.pty);
+    const manager = new TerminalManager({ spawnTerminal });
+    const commandLine = '/d /s /v:off /c "C:\\Tools\\agent.cmd ^"hello world^""';
+
+    manager.createProcess(
+      owner,
+      process.cwd(),
+      "C:\\Windows\\System32\\cmd.exe",
+      commandLine,
+      {},
+      80,
+      24,
+    );
+
+    expect(spawnTerminal).toHaveBeenCalledWith(
+      "C:\\Windows\\System32\\cmd.exe",
+      commandLine,
+      expect.any(Object),
+    );
+  });
+
   it("atomically blocks PTY creation during update preparation", () => {
     const terminal = fakeTerminal();
     const owner = {

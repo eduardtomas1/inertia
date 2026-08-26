@@ -198,6 +198,14 @@ describe("runtime recovery supervisor integration", () => {
         dataDirectory,
         defaultWorkspacePath: workspaceDirectory,
         enableProviders: false,
+        ...(process.platform === "darwin"
+          ? {
+              runtimeProcessGuardianPath: join(
+                process.cwd(),
+                "resources/generated/runtime-process-guardian/runtime-process-guardian",
+              ),
+            }
+          : {}),
         recoveryImportFault: {
           phase: "after-staging-publish",
           markerPath,
@@ -309,6 +317,14 @@ describe("runtime recovery supervisor integration", () => {
         dataDirectory,
         defaultWorkspacePath: workspaceDirectory,
         enableProviders: false,
+        ...(process.platform === "darwin"
+          ? {
+              runtimeProcessGuardianPath: join(
+                process.cwd(),
+                "resources/generated/runtime-process-guardian/runtime-process-guardian",
+              ),
+            }
+          : {}),
         recoveryImportFault: {
           phase: "during-message-import",
           markerPath,
@@ -410,6 +426,14 @@ describe("runtime recovery supervisor integration", () => {
         dataDirectory,
         defaultWorkspacePath: workspaceDirectory,
         enableProviders: false,
+        ...(process.platform === "darwin"
+          ? {
+              runtimeProcessGuardianPath: join(
+                process.cwd(),
+                "resources/generated/runtime-process-guardian/runtime-process-guardian",
+              ),
+            }
+          : {}),
       },
       spawn: () => {
         const child = new NodeUtilityProcess(runtimeWorkerPath);

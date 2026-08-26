@@ -1295,6 +1295,14 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       registryRoot,
       runtimeGenerationId,
       "test:61000000-0000-4000-8000-000000000061",
+      process.platform === "darwin"
+        ? {
+            darwinGuardianPath: join(
+              process.cwd(),
+              "resources/generated/runtime-process-guardian/runtime-process-guardian",
+            ),
+          }
+        : {},
     );
     if (deactivate) registryDeactivators.push(deactivate);
     const journal = new RuntimeOwnedProcessJournal(registryRoot);

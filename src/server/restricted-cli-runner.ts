@@ -5,7 +5,10 @@ import {
 } from "node:child_process";
 
 import { environmentValue } from "./environment";
-import { spawnRuntimeOwnedProcess } from "../node/runtime-owned-processes";
+import {
+  runtimeOwnedProcessInvocation,
+  spawnRuntimeOwnedProcess,
+} from "../node/runtime-owned-processes";
 import { providerProcessInvocation } from "./provider/process";
 import {
   createOwnedProcessTreeTermination,
@@ -120,7 +123,11 @@ export async function runRestrictedCli(
         environment,
         platform,
       );
-      child = spawnRuntimeOwnedProcess(() => spawnProcess(invocation.command, invocation.args, {
+      const ownedInvocation = runtimeOwnedProcessInvocation(
+        invocation.command,
+        invocation.args,
+      );
+      child = spawnRuntimeOwnedProcess(() => spawnProcess(ownedInvocation.command, ownedInvocation.args, {
         cwd: options.cwd,
         env: environment,
         shell: false,

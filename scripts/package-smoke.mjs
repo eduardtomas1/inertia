@@ -31,6 +31,7 @@ const MAX_OUTPUT_LENGTH = 64 * 1024;
 const MAX_PACKAGED_MANIFEST_BYTES = 256 * 1024;
 const MAX_UPDATE_CONFIG_BYTES = 64 * 1024;
 const MAX_MAIN_BUNDLE_BYTES = 16 * 1024 * 1024;
+const MAX_RUNTIME_GUARDIAN_BYTES = 1024 * 1024;
 const releaseChannel = process.env.INERTIA_RELEASE_CHANNEL ?? "stable";
 if (releaseChannel !== "stable" && releaseChannel !== "canary") {
   throw new Error("INERTIA_RELEASE_CHANNEL must be stable or canary.");
@@ -306,6 +307,27 @@ async function requirePackagedAssets(executable) {
     throw new Error(`Expected exactly one packaged app.asar next to ${executable}; found ${resources.length}.`);
   }
   const [{ directory: resourcesDirectory, archive }] = resources;
+  if (process.platform === "darwin") {
+    const guardian = join(
+      resourcesDirectory,
+      "runtime",
+      "runtime-process-guardian",
+    );
+    const metadata = await lstat(guardian).catch(() => null);
+    if (
+      !metadata
+      || metadata.isSymbolicLink()
+      || !metadata.isFile()
+      || metadata.size <= 0
+      || metadata.size > MAX_RUNTIME_GUARDIAN_BYTES
+      || !await isExecutableFile(guardian)
+    ) {
+      throw new Error(
+        "The packaged macOS runtime process guardian is missing or invalid.",
+      );
+    }
+    console.log("Packaged macOS runtime process guardian verified.");
+  }
   const asar = await readAsarArchive(archive);
   const tree = asar.tree;
   const client = asarEntry(tree, ["out", "private-connect"]);

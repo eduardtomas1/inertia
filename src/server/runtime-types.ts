@@ -46,6 +46,7 @@ export interface RuntimeOptions {
   };
   runtimeGenerationId: string;
   systemBootId: string;
+  runtimeProcessGuardianPath?: string;
   confirmedTerminatedRuntimeGenerationIds?: readonly string[];
   priorRuntimeCleanupUnconfirmed?: boolean;
   onCleanupReceiptConsumed?: (

@@ -11,6 +11,7 @@ export class RuntimeSupervisorStartupRecovery {
     forceKillWaitMs: number;
     leases: RuntimeGenerationLeaseJournal;
     receipts: RuntimeCleanupReceiptJournal;
+    darwinGuardianPath?: string;
   }) {}
 
   begin(onFinished: (recovered: boolean) => void): Promise<boolean> | null {

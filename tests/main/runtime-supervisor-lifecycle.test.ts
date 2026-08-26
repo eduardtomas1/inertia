@@ -60,6 +60,12 @@ function createHarness(): {
     forceKillWaitMs: 500,
     forceKill,
     recoverOwnedProcesses: () => true,
+    armProcessContainment: () => process.platform === "win32"
+      ? {
+          kind: "windows-job-v1",
+          name: `Global\\InertiaRuntime-${"a".repeat(64)}`,
+        }
+      : null,
   });
   return { children, forceKill, supervisor };
 }

@@ -9,6 +9,9 @@ import type {
   RuntimeCredentialOperation,
   RuntimeWorkerOptions,
 } from "../node/runtime-process-protocol.js";
+import type {
+  RuntimeOwnedProcessContainment,
+} from "../node/runtime-owned-processes.js";
 import type { SecureFileRequest, SecureFileResult } from "../node/secure-file-protocol.js";
 import type {
   AgentBrowserCommand,
@@ -143,6 +146,10 @@ export interface RuntimeSupervisorOptions {
     systemBootId: string,
     deadlineAt: number,
   ) => boolean | Promise<boolean> | null;
+  armProcessContainment?: (
+    runtimeGenerationId: string,
+    runtimePid: number,
+  ) => RuntimeOwnedProcessContainment | Promise<RuntimeOwnedProcessContainment | null> | null;
   credentialBroker?: RuntimeCredentialBroker;
   credentialRequestTimeoutMs?: number;
   secureFileBroker?: RuntimeSecureFileBroker;

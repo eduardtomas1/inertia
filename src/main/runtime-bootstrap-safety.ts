@@ -3,14 +3,22 @@ import { join, resolve } from "node:path";
 
 import { RuntimeGenerationLeaseJournal } from "../node/runtime-generation-leases.js";
 import { RuntimeOwnedProcessJournal } from "../node/runtime-owned-processes.js";
-import { runtimeCleanupReceiptIds } from "./runtime-cleanup-receipts.js";
-import { readSystemBootId } from "./system-boot-id.js";
+import {
+  RuntimeCleanupReceiptJournal,
+  runtimeCleanupReceiptIds,
+} from "./runtime-cleanup-receipts.js";
+import {
+  readSystemBootId,
+  readSystemBootStartedAtMs,
+} from "./system-boot-id.js";
 export { runtimeProcessEnvironment } from "./runtime-process-environment.js";
 
 export interface RuntimeBootstrapSafety {
   systemBootId: string;
   preserveAttachments: boolean;
 }
+
+const LEGACY_REBOOT_PROOF_MARGIN_MS = 60_000;
 
 export function runtimeDataPath(configuredPath: string | undefined, userDataPath: string): string {
   return configuredPath ? resolve(configuredPath) : join(userDataPath, "runtime");
@@ -31,6 +39,25 @@ export function prepareRuntimeBootstrapSafety(
   const systemBootId = readSystemBootId() ?? "unavailable";
   const generationLeases = new RuntimeGenerationLeaseJournal(dataDirectory);
   const ownedProcesses = new RuntimeOwnedProcessJournal(dataDirectory);
+  const cleanupReceipts = new RuntimeCleanupReceiptJournal(dataDirectory);
+  const needsLegacyBootRecovery = generationLeases.isValid()
+    && generationLeases.all().some((lease) =>
+      lease.systemBootId === "unavailable");
+  const systemBootStartedAtMs = needsLegacyBootRecovery
+    ? readSystemBootStartedAtMs()
+    : null;
+  const rebootedGenerations = systemBootStartedAtMs === null
+    ? []
+    : generationLeases.generationsCreatedBefore(
+        Math.max(0, systemBootStartedAtMs - LEGACY_REBOOT_PROOF_MARGIN_MS),
+        "unavailable",
+      );
+  const rebootedGenerationsRetired = rebootedGenerations !== null
+    && rebootedGenerations.every((generationId) => (
+      ownedProcesses.clearRuntimeGenerationAfterConfirmedReboot(generationId)
+      && cleanupReceipts.publish(generationId)
+      && generationLeases.clearRuntimeGeneration(generationId)
+    ));
   const receiptsRetired = runtimeCleanupReceiptIds(dataDirectory).every(
     (generationId) => generationLeases.clearRuntimeGeneration(generationId),
   );
@@ -39,6 +66,7 @@ export function prepareRuntimeBootstrapSafety(
   return {
     systemBootId,
     preserveAttachments: !receiptsRetired
+      || !rebootedGenerationsRetired
       || !priorBootRetired
       || generationLeases.safetyLocked(),
   };

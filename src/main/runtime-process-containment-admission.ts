@@ -1,0 +1,92 @@
+import type { RuntimeOwnedProcessContainment } from "../node/runtime-owned-processes.js";
+import type { RuntimeWorkerCommand } from "../node/runtime-process-protocol.js";
+import type {
+  RuntimeProcessRecord,
+  RuntimeSupervisorOptions,
+} from "./runtime-supervisor-types.js";
+
+interface RuntimeProcessContainmentAdmissionOptions {
+  readonly arm: NonNullable<RuntimeSupervisorOptions["armProcessContainment"]>;
+  readonly systemBootId: string;
+  readonly workerOptions: RuntimeSupervisorOptions["workerOptions"];
+  readonly isCurrent: (record: RuntimeProcessRecord) => boolean;
+  readonly isRunningDesired: () => boolean;
+  readonly hasQuarantinedProcesses: () => boolean;
+  readonly persist: (
+    record: RuntimeProcessRecord,
+    containment: RuntimeOwnedProcessContainment,
+  ) => boolean;
+  readonly post: (
+    record: RuntimeProcessRecord,
+    command: RuntimeWorkerCommand,
+  ) => void;
+  readonly reject: (record: RuntimeProcessRecord, error: unknown) => void;
+}
+
+export class RuntimeProcessContainmentAdmission {
+  constructor(private readonly options: RuntimeProcessContainmentAdmissionOptions) {}
+
+  bind(record: RuntimeProcessRecord): void {
+    record.child.once("spawn", () => this.spawned(record));
+  }
+
+  private spawned(record: RuntimeProcessRecord): void {
+    if (!this.options.isCurrent(record)) return;
+    if (!this.options.isRunningDesired()) {
+      this.options.post(record, { type: "runtime.shutdown" });
+      return;
+    }
+    const runtimePid = record.child.pid;
+    if (!Number.isSafeInteger(runtimePid) || Number(runtimePid) <= 1) {
+      this.options.reject(
+        record,
+        new Error("The runtime process identity is unavailable."),
+      );
+      return;
+    }
+    try {
+      const armed = this.options.arm(record.runtimeGenerationId, runtimePid!);
+      if (armed instanceof Promise) {
+        void armed.then((containment) => this.admit(record, containment))
+          .catch((error: unknown) => this.options.reject(record, error));
+      } else {
+        this.admit(record, armed);
+      }
+    } catch (error) {
+      this.options.reject(record, error);
+    }
+  }
+
+  private admit(
+    record: RuntimeProcessRecord,
+    containment: RuntimeOwnedProcessContainment | null,
+  ): void {
+    if (
+      !this.options.isCurrent(record)
+      || !this.options.isRunningDesired()
+    ) return;
+    if (containment && !this.options.persist(record, containment)) {
+      throw new Error("The runtime process containment could not be persisted.");
+    }
+    if (process.platform === "win32" && !containment) {
+      throw new Error("The Windows runtime Job Object is unavailable.");
+    }
+    this.options.post(record, {
+      type: "runtime.start",
+      options: {
+        ...this.options.workerOptions,
+        runtimeGenerationId: record.runtimeGenerationId,
+        systemBootId: this.options.systemBootId,
+        ...(record.cleanupReceiptIds.size > 0
+          ? {
+              confirmedTerminatedRuntimeGenerationIds:
+                [...record.cleanupReceiptIds],
+            }
+          : {}),
+        ...(this.options.hasQuarantinedProcesses()
+          ? { priorRuntimeCleanupUnconfirmed: true }
+          : {}),
+      },
+    });
+  }
+}

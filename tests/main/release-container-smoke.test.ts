@@ -155,7 +155,11 @@ describe("final release container smoke", () => {
     expect(source).toContain("mountAttempted = true");
     expect(source).toContain("await realpath(requestedExtractionRoot)");
     expect(source).toContain("await reconcileMacImageMount(extractionRoot)");
-    expect(source).toContain('INERTIA_PACKAGE_SMOKE_INHERIT_PROCESS_GROUP: "1"');
+    expect(source).toContain("posixProcessGroupHandoff");
+    expect(source).toContain("INERTIA_PACKAGE_SMOKE_PROCESS_GROUP_FILE");
+    expect(source).toContain("INERTIA_PACKAGE_SMOKE_PROCESS_GROUP_TOKEN");
+    expect(source).toContain('"retained-wrapper"');
+    expect(source).toContain('"handoff-wrapper"');
     expect(source).toContain('}, ["APPIMAGE_EXTRACT_AND_RUN"]);');
     expect(source).toContain('APPIMAGE_EXTRACT_AND_RUN: "1"');
     expect(source).toContain("AppImage default mount/AppRun smoke passed");

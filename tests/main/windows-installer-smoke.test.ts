@@ -25,7 +25,11 @@ async function installerSmokeModule() {
     runBounded: (
       command: string,
       args: string[],
-      options: { label: string; timeoutMs: number },
+      options: {
+        label: string;
+        posixProcessGroupHandoff?: { ownerToken: string; path: string };
+        timeoutMs: number;
+      },
     ) => Promise<string>;
     windowsInstallerAssetName: (
       version: string,
@@ -202,6 +206,108 @@ test("rejects and terminates an owned grandchild left after the root exits", asy
       if (pid <= 0 || !processExists(pid)) continue;
       try {
         process.kill(pid, "SIGKILL");
+      } catch {
+        // Best-effort cleanup for a failing regression.
+      }
+    }
+    await rm(temporaryRoot, { force: true, recursive: true });
+  }
+});
+
+test("terminates a token-bound detached process group handed off by the root", async () => {
+  if (process.platform === "win32") return;
+  const { runBounded } = await installerSmokeModule();
+  const temporaryRoot = await mkdtemp(join(tmpdir(), "inertia-detached-handoff-test-"));
+  const handoffFile = join(temporaryRoot, "process-group.json");
+  const pidFile = join(temporaryRoot, "detached-pids.json");
+  const handoffToken = "9de5486e-67f0-4d62-9f18-ea9220f23d44";
+  let detachedPid = 0;
+  let grandchildPid = 0;
+  try {
+    const middleScript = [
+      'const { spawn } = require("node:child_process");',
+      'const { writeFileSync } = require("node:fs");',
+      'const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });',
+      'writeFileSync(process.argv[1], JSON.stringify({ detached: process.pid, grandchild: child.pid }));',
+      "setInterval(() => {}, 1000);",
+    ].join("");
+    const rootScript = [
+      'const { spawn } = require("node:child_process");',
+      'const { writeFileSync } = require("node:fs");',
+      "const handoff = process.argv[1];",
+      "const token = process.argv[2];",
+      "const pidFile = process.argv[3];",
+      "const publish = (value) => writeFileSync(handoff, JSON.stringify({ ownerToken: token, supervisorPid: process.pid, timestampMs: Date.now(), ...value }));",
+      'publish({ state: "launching" });',
+      `const middle = spawn(process.execPath, ["-e", ${JSON.stringify(middleScript)}, pidFile], { detached: true, stdio: "ignore" });`,
+      'publish({ state: "owned", processGroupId: middle.pid });',
+      "setInterval(() => {}, 1000);",
+    ].join("");
+    await expect(runBounded(
+      process.execPath,
+      ["-e", rootScript, handoffFile, handoffToken, pidFile],
+      {
+        label: "Detached handoff timeout fixture",
+        posixProcessGroupHandoff: { ownerToken: handoffToken, path: handoffFile },
+        timeoutMs: 750,
+      },
+    )).rejects.toThrow("complete process tree was terminated");
+    const pids = JSON.parse(await readFile(pidFile, "utf8")) as {
+      detached: number;
+      grandchild: number;
+    };
+    detachedPid = pids.detached;
+    grandchildPid = pids.grandchild;
+    expect(processExists(detachedPid)).toBe(false);
+    expect(processExists(grandchildPid)).toBe(false);
+  } finally {
+    if (detachedPid > 0) {
+      try {
+        process.kill(-detachedPid, "SIGKILL");
+      } catch {
+        // Best-effort cleanup for a failing regression.
+      }
+    }
+    await rm(temporaryRoot, { force: true, recursive: true });
+  }
+});
+
+test("never kills a live process group after its token-bound release", async () => {
+  if (process.platform === "win32") return;
+  const { runBounded } = await installerSmokeModule();
+  const temporaryRoot = await mkdtemp(join(tmpdir(), "inertia-released-handoff-test-"));
+  const handoffFile = join(temporaryRoot, "process-group.json");
+  const pidFile = join(temporaryRoot, "released-pid.json");
+  const handoffToken = "db4318c6-9336-4227-9300-08a9694b0784";
+  let releasedPid = 0;
+  try {
+    const rootScript = [
+      'const { spawn } = require("node:child_process");',
+      'const { writeFileSync } = require("node:fs");',
+      "const handoff = process.argv[1];",
+      "const token = process.argv[2];",
+      "const pidFile = process.argv[3];",
+      'const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { detached: true, stdio: "ignore" });',
+      "child.unref();",
+      "writeFileSync(pidFile, JSON.stringify({ released: child.pid }));",
+      'writeFileSync(handoff, JSON.stringify({ ownerToken: token, processGroupId: child.pid, state: "released", supervisorPid: process.pid, timestampMs: Date.now() }));',
+    ].join("");
+    await expect(runBounded(
+      process.execPath,
+      ["-e", rootScript, handoffFile, handoffToken, pidFile],
+      {
+        label: "Released handoff reuse fixture",
+        posixProcessGroupHandoff: { ownerToken: handoffToken, path: handoffFile },
+        timeoutMs: 5_000,
+      },
+    )).rejects.toThrow("released process-group id is live and no longer safe to terminate");
+    const pids = JSON.parse(await readFile(pidFile, "utf8")) as { released: number };
+    releasedPid = pids.released;
+    expect(processExists(releasedPid)).toBe(true);
+  } finally {
+    if (releasedPid > 0) {
+      try {
+        process.kill(-releasedPid, "SIGKILL");
       } catch {
         // Best-effort cleanup for a failing regression.
       }

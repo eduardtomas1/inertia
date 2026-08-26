@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { access, lstat, mkdtemp, mkdir, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -238,15 +239,25 @@ async function runPackageSmoke(
   resources,
   packageKind,
   supervisorRoot,
+  launchMode,
   extraEnvironment = {},
   unsetEnvironment = [],
 ) {
+  const processGroupOwnerToken = randomUUID();
+  const processGroupFile = join(
+    supervisorRoot,
+    `package-smoke-process-group-${processGroupOwnerToken}.json`,
+  );
   const environment = {
     ...process.env,
     ...extraEnvironment,
     INERTIA_PACKAGE_SMOKE_EXECUTABLE: executable,
-    INERTIA_PACKAGE_SMOKE_INHERIT_PROCESS_GROUP: "1",
     INERTIA_PACKAGE_SMOKE_KIND: packageKind,
+    ...(launchMode === "direct-app" ? {} : {
+      INERTIA_PACKAGE_SMOKE_LAUNCH_MODE: launchMode,
+    }),
+    INERTIA_PACKAGE_SMOKE_PROCESS_GROUP_FILE: processGroupFile,
+    INERTIA_PACKAGE_SMOKE_PROCESS_GROUP_TOKEN: processGroupOwnerToken,
     INERTIA_PACKAGE_SMOKE_RESOURCES: resources,
     INERTIA_PACKAGE_SMOKE_SUPERVISOR_ROOT: supervisorRoot,
   };
@@ -256,6 +267,10 @@ async function runPackageSmoke(
     echoOutput: true,
     env: environment,
     label: `${packageKind} application smoke`,
+    posixProcessGroupHandoff: {
+      ownerToken: processGroupOwnerToken,
+      path: processGroupFile,
+    },
     timeoutMs: PACKAGE_SMOKE_TIMEOUT_MS,
   });
 }
@@ -289,7 +304,14 @@ async function smokeMacContainer(repositoryRoot, container, kind, temporaryRoot,
     await runContainerCommand("codesign", ["--verify", "--deep", "--strict", "--verbose=2", app], {
       label: `${kind} complete bundle signature`,
     });
-    await runPackageSmoke(repositoryRoot, executable, resources, kind, temporaryRoot);
+    await runPackageSmoke(
+      repositoryRoot,
+      executable,
+      resources,
+      kind,
+      temporaryRoot,
+      "direct-app",
+    );
   } catch (error) {
     operationError = error;
     throw error;
@@ -360,11 +382,11 @@ async function smokeLinux(repositoryRoot, releaseDirectory, names, productName) 
       [embeddedExecutable, ...nativeModulePaths(resources, "linux", productName, app)],
       "linux",
     );
-    await runPackageSmoke(repositoryRoot, appImage, resources, "linux-appimage", temporaryRoot, {
+    await runPackageSmoke(repositoryRoot, appImage, resources, "linux-appimage", temporaryRoot, "retained-wrapper", {
       INERTIA_PACKAGE_SMOKE_NO_SANDBOX: "1",
     }, ["APPIMAGE_EXTRACT_AND_RUN"]);
     console.log(`Linux ${process.arch} AppImage default mount/AppRun smoke passed.`);
-    await runPackageSmoke(repositoryRoot, appImage, resources, "linux-appimage", temporaryRoot, {
+    await runPackageSmoke(repositoryRoot, appImage, resources, "linux-appimage", temporaryRoot, "handoff-wrapper", {
       APPIMAGE_EXTRACT_AND_RUN: "1",
       INERTIA_PACKAGE_SMOKE_NO_SANDBOX: "1",
     });

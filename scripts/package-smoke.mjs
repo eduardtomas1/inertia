@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { constants } from "node:fs";
+import { constants, lstatSync, readFileSync, writeFileSync } from "node:fs";
 import { access, copyFile, lstat, mkdtemp, mkdir, open, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
@@ -10,9 +10,13 @@ import { parseDocument } from "yaml";
 
 import {
   packageSmokeProcessesExited,
+  packageSmokeChildEnvironment,
   packagedAppUsesDetachedProcessGroup,
   parsePackageSmokeOwnedPids,
   parsePackageSmokeReadiness,
+  isPackageSmokeOwnerToken,
+  resolvePackageSmokeLaunchMode,
+  waitForPackageSmokeExit,
   waitForPackageSmokeReadiness,
 } from "./package-smoke-launch.mjs";
 
@@ -54,7 +58,6 @@ const PACKAGE_KINDS = new Set([
   "windows-installed",
   "windows-unpacked",
 ]);
-
 function boundedExactPathEnvironment(name) {
   const value = process.env[name];
   if (value === undefined) return undefined;
@@ -753,12 +756,19 @@ if (requestedPackageKind !== undefined && !PACKAGE_KINDS.has(requestedPackageKin
   throw new Error("INERTIA_PACKAGE_SMOKE_KIND must identify a reviewed package path.");
 }
 await requirePackagedAssets(executable);
-const inheritSupervisedProcessGroup = process.platform !== "win32"
-  && process.env.INERTIA_PACKAGE_SMOKE_INHERIT_PROCESS_GROUP === "1";
 const supervisorRoot = boundedExactPathEnvironment("INERTIA_PACKAGE_SMOKE_SUPERVISOR_ROOT");
-if (inheritSupervisedProcessGroup !== (supervisorRoot !== undefined)) {
-  throw new Error("Inherited package-smoke supervision requires its exact temporary root.");
-}
+const supervisorProcessGroupFile = boundedExactPathEnvironment(
+  "INERTIA_PACKAGE_SMOKE_PROCESS_GROUP_FILE",
+);
+const supervisorProcessGroupToken = process.env.INERTIA_PACKAGE_SMOKE_PROCESS_GROUP_TOKEN;
+const supervisedProcessGroup = process.platform !== "win32"
+  && supervisorRoot !== undefined
+  && supervisorProcessGroupFile !== undefined
+  && isPackageSmokeOwnerToken(supervisorProcessGroupToken);
+if (
+  (supervisorRoot !== undefined || supervisorProcessGroupFile !== undefined || supervisorProcessGroupToken !== undefined)
+  && !supervisedProcessGroup
+) throw new Error("Detached package-smoke supervision requires an exact root, handoff file, and owner token.");
 if (supervisorRoot !== undefined) {
   const supervisorMetadata = await lstat(supervisorRoot).catch(() => null);
   if (
@@ -768,6 +778,20 @@ if (supervisorRoot !== undefined) {
     || (supervisorMetadata.mode & 0o077) !== 0
     || supervisorMetadata.uid !== process.geteuid()
   ) throw new Error("The package-smoke supervisor root is not an owner-private direct directory.");
+  if (dirname(supervisorProcessGroupFile) !== supervisorRoot) {
+    throw new Error("The package-smoke process-group handoff must be directly inside its supervisor root.");
+  }
+  const handoffMetadata = lstatSync(supervisorProcessGroupFile);
+  const handoffRequest = JSON.parse(readFileSync(supervisorProcessGroupFile, "utf8"));
+  if (
+    handoffMetadata.isSymbolicLink()
+    || !handoffMetadata.isFile()
+    || handoffMetadata.uid !== process.geteuid()
+    || (handoffMetadata.mode & 0o077) !== 0
+    || handoffMetadata.size > 4 * 1024
+    || handoffRequest?.state !== "pending"
+    || handoffRequest?.ownerToken !== supervisorProcessGroupToken
+  ) throw new Error("The package-smoke process-group handoff request is invalid.");
 }
 const temporaryRoot = await mkdtemp(join(supervisorRoot ?? tmpdir(), "inertia-package-smoke-"));
 const markerPath = join(temporaryRoot, "ready.json");
@@ -781,11 +805,11 @@ let stdout = "";
 let stderr = "";
 let launchedAt = 0;
 const ownerToken = randomUUID();
-const allowLauncherHandoff = requestedPackageKind === "linux-appimage";
-const inheritedProcessGroupId = inheritSupervisedProcessGroup ? processGroupId(process.pid) : null;
-if (inheritSupervisedProcessGroup && inheritedProcessGroupId === null) {
-  throw new Error("The inherited package-smoke process group could not be identified.");
-}
+const launchMode = resolvePackageSmokeLaunchMode({
+  configuredMode: process.env.INERTIA_PACKAGE_SMOKE_LAUNCH_MODE,
+  extractAndRun: process.env.APPIMAGE_EXTRACT_AND_RUN,
+  packageKind: requestedPackageKind,
+});
 const updateNetworkTrap = await createUpdateNetworkTrap();
 
 try {
@@ -814,10 +838,16 @@ try {
     ...(process.platform === "linux" && process.env.INERTIA_PACKAGE_SMOKE_NO_SANDBOX === "1" ? ["--no-sandbox"] : []),
   ];
   launchedAt = Date.now();
+  if (supervisedProcessGroup) writeFileSync(supervisorProcessGroupFile, `${JSON.stringify({
+    ownerToken: supervisorProcessGroupToken,
+    state: "launching",
+    supervisorPid: process.pid,
+    timestampMs: launchedAt,
+  })}\n`, { encoding: "utf8", mode: 0o600 });
   child = spawn(executable, launchArguments, {
-    detached: packagedAppUsesDetachedProcessGroup(process.platform, inheritSupervisedProcessGroup),
+    detached: packagedAppUsesDetachedProcessGroup(process.platform),
     env: {
-      ...process.env,
+      ...packageSmokeChildEnvironment(process.env),
       NODE_ENV: "test",
       INERTIA_DATA_DIR: dataDirectory,
       INERTIA_WORKSPACE_DIR: workspaceDirectory,
@@ -843,6 +873,18 @@ try {
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
+  if (supervisedProcessGroup) {
+    if (!Number.isSafeInteger(child.pid) || child.pid <= 0) {
+      throw new Error("The detached package-smoke process group was not created.");
+    }
+    writeFileSync(supervisorProcessGroupFile, `${JSON.stringify({
+      ownerToken: supervisorProcessGroupToken,
+      processGroupId: child.pid,
+      state: "owned",
+      supervisorPid: process.pid,
+      timestampMs: Date.now(),
+    })}\n`, { encoding: "utf8", mode: 0o600 });
+  }
   child.stdout?.on("data", (chunk) => { stdout = appendOutput(stdout, chunk); });
   child.stderr?.on("data", (chunk) => { stderr = appendOutput(stderr, chunk); });
 
@@ -861,16 +903,16 @@ try {
     }));
   });
   readiness = await waitForPackageSmokeReadiness({
-    allowLauncherHandoff,
+    launchMode,
     launcherExit: exitResult,
     launcherTimeoutMs: STARTUP_TIMEOUT_MS,
     waitForReadiness: () => waitUntil(async () => {
       const marker = await readJsonIfPresent(markerPath);
       const parseOptions = {
-        allowLauncherHandoff,
+        launchMode,
         launchedAt,
         launcherPid: child.pid,
-        ownedProcessGroupId: inheritedProcessGroupId ?? child.pid,
+        ownedProcessGroupId: process.platform === "win32" ? null : child.pid,
         ownerToken,
         processExists,
         processGroupId,
@@ -880,9 +922,9 @@ try {
       return candidate ?? null;
     }, STARTUP_TIMEOUT_MS, "packaged app and utility runtime readiness"),
   });
-  const appExitResult = allowLauncherHandoff
-    ? waitForObservedProcessExit(readiness.mainPid)
-    : exitResult;
+  const mainExitResult = launchMode === "direct-app"
+    ? exitResult
+    : waitForObservedProcessExit(readiness.mainPid);
   const runtimeWasObserved = processExists(readiness.runtimePid);
   const pdfResult = await waitUntil(
     () => readJsonIfPresent(packagedPdf.resultPath),
@@ -918,7 +960,13 @@ try {
   );
   const shutdownStartedAt = beforeQuit.timestampMs;
   const exit = await withTimeout(
-    appExitResult,
+    waitForPackageSmokeExit({
+      beforeQuitTimestampMs: shutdownStartedAt,
+      launchMode,
+      launcherExit: exitResult,
+      mainExit: mainExitResult,
+      mainProcessExists: () => processExists(readiness.mainPid),
+    }),
     EXIT_TIMEOUT_MS,
     "The packaged app did not finish shutdown after before-quit.",
   );
@@ -934,7 +982,7 @@ try {
   if (process.platform !== "win32") await waitUntil(
     () => packageSmokeProcessesExited({
       launcherPid: child.pid,
-      ownedProcessGroupId: inheritSupervisedProcessGroup ? null : child.pid,
+      ownedProcessGroupId: child.pid,
       mainPid: readiness.mainPid,
       runtimePid: readiness.runtimePid,
       processExists,
@@ -1000,13 +1048,30 @@ try {
           }
         : {}),
     });
+  } else if (child) {
+    const marker = await readJsonIfPresent(markerPath);
+    const mainPid = Number.isSafeInteger(marker?.mainPid) ? marker.mainPid : null;
+    const runtimePid = Number.isSafeInteger(marker?.runtimePid) ? marker.runtimePid : null;
+    console.error("Packaged readiness diagnostics:", {
+      launchMode,
+      launcherAlive: processExists(child.pid),
+      launcherPid: child.pid,
+      markerPresent: marker !== null,
+      mainAlive: mainPid === null ? null : processExists(mainPid),
+      mainPid,
+      mainProcessGroupId: mainPid === null ? null : processGroupId(mainPid),
+      ownedProcessGroupId: child.pid,
+      runtimeAlive: runtimePid === null ? null : processExists(runtimePid),
+      runtimePid,
+      runtimeProcessGroupId: runtimePid === null ? null : processGroupId(runtimePid),
+    });
   }
   throw new Error(`Packaged smoke failed: ${detail}`, { cause: error });
 } finally {
   const mainPid = readiness?.mainPid ?? cleanupOwnedPids?.mainPid ?? child?.pid ?? null;
   const runtimePid = readiness?.runtimePid ?? cleanupOwnedPids?.runtimePid ?? null;
   const launchedPid = child?.pid ?? null;
-  const ownedProcessGroupId = inheritSupervisedProcessGroup ? null : launchedPid;
+  const ownedProcessGroupId = launchedPid;
   if ((ownedProcessGroupId && processGroupExists(ownedProcessGroupId)) || (mainPid && processExists(mainPid)) || (runtimePid && processExists(runtimePid))) {
     forceTerminateProcessTree(ownedProcessGroupId, mainPid, runtimePid);
     await waitUntil(
@@ -1023,7 +1088,16 @@ try {
     );
   }
   await updateNetworkTrap.close();
-  if (!inheritSupervisedProcessGroup) {
+  if (supervisedProcessGroup && launchedPid !== null) {
+    writeFileSync(supervisorProcessGroupFile, `${JSON.stringify({
+      ownerToken: supervisorProcessGroupToken,
+      processGroupId: launchedPid,
+      state: "released",
+      supervisorPid: process.pid,
+      timestampMs: Date.now(),
+    })}\n`, { encoding: "utf8", mode: 0o600 });
+  }
+  if (!supervisedProcessGroup) {
     await rm(temporaryRoot, {
       recursive: true,
       force: true,

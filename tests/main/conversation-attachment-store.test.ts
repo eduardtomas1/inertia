@@ -154,10 +154,12 @@ describe("durable conversation attachment storage", () => {
 
     await expect(store.preview(keptAttachment!.id)).resolves.not.toBeNull();
     await expect(store.preview(orphanAttachment!.id)).resolves.toBeNull();
-    await expect(store.usage()).resolves.toEqual({
-      records: 1,
-      bytes: png.length,
-    });
+    await vi.waitFor(async () => {
+      await expect(store.usage()).resolves.toEqual({
+        records: 1,
+        bytes: png.length,
+      });
+    }, { timeout: 5_000, interval: 10 });
   });
 
   it("cleans contained unexpected entries without blocking restart", async () => {

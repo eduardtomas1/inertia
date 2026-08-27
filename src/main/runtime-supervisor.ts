@@ -1,5 +1,4 @@
-import { randomUUID } from "node:crypto";
-import type { UtilityProcess } from "electron";
+import { randomUUID } from "node:crypto"; import type { UtilityProcess } from "electron";
 import type { BackendCredentialStatus } from "../shared/backend-credentials";
 import type {
   PrivateConnectRuntimeAuthorization,
@@ -15,6 +14,7 @@ import {
   type RuntimeDatabaseStartupRecoveryReport,
   type RuntimePrivateConnectForgetScope,
   type RuntimePrivateConnectPromptPreparation,
+  type RuntimeSystemSuspendInterval,
   type RuntimeUpdatePreparationResult,
   type RuntimeWorkerCommand,
 } from "../node/runtime-process-protocol.js";
@@ -74,7 +74,7 @@ export class RuntimeSupervisor {
   private readonly credentialBroker?: RuntimeCredentialBroker;
   private readonly credentialRequestTimeoutMs: number;
   private readonly attachmentRequests: RuntimeAttachmentBrokerCoordinator<RuntimeProcessRecord>;
-  private readonly onStateChange?: RuntimeSupervisorOptions["onStateChange"];
+  private readonly onSystemSuspendResult?: RuntimeSupervisorOptions["onSystemSuspendResult"]; private readonly onStateChange?: RuntimeSupervisorOptions["onStateChange"];
   private current: RuntimeProcessRecord | null = null;
   private readonly quarantined = new Set<RuntimeProcessRecord>();
   private phase: RuntimeSupervisorPhase = "idle";
@@ -200,7 +200,7 @@ export class RuntimeSupervisor {
       post: (record, command) => this.post(record.child, command),
       forceTerminate: (record) => this.forceTerminate(record.child),
     });
-    this.onStateChange = options.onStateChange;
+    this.onSystemSuspendResult = options.onSystemSuspendResult; this.onStateChange = options.onStateChange;
   }
   start(): void { if (this.lifecycle !== "unused" || this.restartBlocked) return;
     this.lifecycle = "started"; this.desiredRunning = true; this.clearShutdownTimers();
@@ -232,6 +232,10 @@ export class RuntimeSupervisor {
   }
   detachedConnection(conversationId: string, clientId: string): RuntimeConnection {
     return detachedRuntimeConnection(this.connection(false), conversationId, clientId);
+  }
+  recordSystemSuspendInterval(interval: RuntimeSystemSuspendInterval): boolean {
+    const record = this.phase === "ready" ? this.current : null;
+    return Boolean(record?.ready && this.post(record.child, { type: "runtime.record-system-suspend", interval }));
   }
   resolveProjectPath(request: OpenProjectPathRequest): Promise<string> {
     const record = this.current;
@@ -539,7 +543,6 @@ export class RuntimeSupervisor {
       this.emitState();
       return;
     }
-
     let child: UtilityProcess;
     try {
       child = this.spawnProcess();
@@ -557,7 +560,6 @@ export class RuntimeSupervisor {
       this.scheduleRestart();
       return;
     }
-
     const record: RuntimeProcessRecord = {
       child,
       generation,
@@ -685,6 +687,7 @@ export class RuntimeSupervisor {
       this.databaseRecoveryRequests.handle(record, event);
       return;
     }
+    if (event.type === "runtime.system-suspend-result") { this.onSystemSuspendResult?.(event.id, record.generation, event.recorded); return; }
     if (event.type === "runtime.private-connect-prompt-result") {
       this.privateConnectPrompts.handle(record, event);
       return;
@@ -774,7 +777,6 @@ export class RuntimeSupervisor {
     this.testRecycle.succeed(record);
     this.emitState();
   }
-
   private handleExit(record: RuntimeProcessRecord, code: number): void {
     if (this.current !== record) return;
     const exitedBeforeCleanRecycleReadiness = this.testRecycle.owns(record)
@@ -813,7 +815,6 @@ export class RuntimeSupervisor {
       () => this.handleDrainedExit(record, code, false),
     );
   }
-
   private handleDrainedExit(record: RuntimeProcessRecord, code: number, secureFileCleanupConfirmed: boolean): void {
     if (this.current !== record) return;
     if (!secureFileCleanupConfirmed) {
@@ -876,7 +877,6 @@ export class RuntimeSupervisor {
       this.settleStopped(record);
       return;
     }
-
     const continueAfterTermination = (confirmed: boolean): void => {
       if (this.current !== record) return;
       if (!this.desiredRunning) {

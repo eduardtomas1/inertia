@@ -153,5 +153,10 @@ export interface RuntimeSupervisorOptions {
   attachmentRequestTimeoutMs?: number;
   databaseRecoveryRequestTimeoutMs?: number;
   databaseRecoveryCancelTimeoutMs?: number;
+  onSystemSuspendResult?: (
+    id: string,
+    generation: number,
+    recorded: boolean,
+  ) => void;
   onStateChange?: (snapshot: RuntimeSupervisorSnapshot) => void;
 }

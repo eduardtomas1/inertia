@@ -17,6 +17,10 @@ import Database from "better-sqlite3";
 import { authoritativeRunStateSchemaIsValid } from "./authoritative-run-state-schema";
 import { validAttachmentCapabilities } from "./attachment-capability-schema";
 import {
+  type DatabaseRequiredTables,
+  REQUIRED_TABLES_BY_SCHEMA_VERSION,
+} from "./database-recovery-required-tables";
+import {
   databaseFamilyEntryExists,
   quarantineDatabaseFamily,
 } from "./database-family-quarantine";
@@ -32,6 +36,7 @@ import {
   indexColumns,
   validProviderRunOwnershipSchema,
 } from "./provider-run-ownership-schema";
+import { systemSuspendTimingSchemaIsValid } from "./system-suspend-schema";
 import { validUsageDashboardIndex } from "./usage-dashboard-index-schema";
 
 export const DATABASE_BACKUP_INTERVAL_MS = 60 * 60 * 1_000;
@@ -44,39 +49,6 @@ export const DATABASE_BACKUP_MAX_TOTAL_BYTES = 512 * 1024 * 1024;
 export const DATABASE_BACKUP_VALIDATION_TIMEOUT_MS = 120_000;
 const DIRECTORY_MODE = 0o700;
 const FILE_MODE = 0o600;
-const REQUIRED_TABLES_BY_SCHEMA_VERSION = [
-  [1, ["projects", "conversations", "messages", "app_state"]],
-  [2, ["activities", "checkpoints"]],
-  [3, ["agent_plans"]],
-  [4, ["agent_reasonings", "thread_usage"]],
-  [5, ["provider_metadata_cache"]],
-  [7, ["diff_review_summaries", "workspace_runs"]],
-  [9, ["diff_review_states", "diff_review_notes"]],
-  [16, ["agent_turns"]],
-  [22, [
-    "turn_execution_context_blobs",
-    "turn_execution_manifests",
-    "turn_execution_context_refs",
-  ]],
-  [23, ["turn_git_artifacts"]],
-  [25, ["model_backend_profiles", "model_backend_defaults"]],
-  [26, ["provider_metadata_scoped_cache"]],
-  [28, ["subagent_traces"]],
-  [32, ["agent_goals"]],
-  [38, ["paired_launches", "paired_launch_sides"]],
-  [42, ["message_content_chunks", "reasoning_content_chunks"]],
-  [43, ["recovery_import_receipts", "recovery_import_journals"]],
-  [52, ["conversation_worktree_ownership"]],
-  [53, [
-    "project_path_authorities",
-    "conversation_path_authorities",
-    "workspace_path_authority_enrollment",
-  ]],
-  [54, ["prompt_presets"]],
-  [55, ["provider_run_ownership"]],
-  [60, ["agent_managed_conversations", "agent_thread_operations"]],
-  [61, ["conversation_context_packets", "agent_context_requests"]],
-] as const;
 
 export interface DatabaseRecoveryReport {
   readonly checkedAt: string;
@@ -185,12 +157,12 @@ function validateOpenDatabase(
   database: Database.Database,
   check: "quick_check" | "integrity_check",
   currentSchemaVersion: number,
-  requiredTablesBySchemaVersion: readonly (
-    readonly [number, readonly string[]]
-  )[],
+  requiredTablesBySchemaVersion: DatabaseRequiredTables,
   providerRunOwnershipSchemaIsValid: DatabaseSchemaValidator,
   attachmentCapabilitiesAreValid: DatabaseSchemaValidator,
-  usageDashboardIndexIsValid: DatabaseSchemaValidator, runStateSchemaIsValid: DatabaseSchemaValidator,
+  usageDashboardIndexIsValid: DatabaseSchemaValidator,
+  runStateSchemaIsValid: DatabaseSchemaValidator,
+  suspendTimingSchemaIsValid: DatabaseSchemaValidator,
 ): DatabaseValidation {
   const integrityResult = database.prepare(`PRAGMA ${check}`).get() as
     | Record<string, unknown>
@@ -459,6 +431,7 @@ function validateOpenDatabase(
   }
   if (version >= 57 && !usageDashboardIndexIsValid(database)) return "corrupt";
   if (version >= 64 && !runStateSchemaIsValid(database)) return "corrupt";
+  if (version >= 66 && !suspendTimingSchemaIsValid(database)) return "corrupt";
   return "valid-current";
 }
 
@@ -477,7 +450,9 @@ function validateDatabase(
       REQUIRED_TABLES_BY_SCHEMA_VERSION,
       validProviderRunOwnershipSchema,
       validAttachmentCapabilities,
-      validUsageDashboardIndex, authoritativeRunStateSchemaIsValid,
+      validUsageDashboardIndex,
+      authoritativeRunStateSchemaIsValid,
+      systemSuspendTimingSchemaIsValid,
     );
   } catch {
     return "corrupt";
@@ -498,7 +473,9 @@ function validateDatabaseOffThread(
     const indexColumns = ${indexColumns.toString()};
     const validProviderRunOwnershipSchema = ${validProviderRunOwnershipSchema.toString()};
     const validAttachmentCapabilities = ${validAttachmentCapabilities.toString()};
-    const validUsageDashboardIndex = ${validUsageDashboardIndex.toString()}; const authoritativeRunStateSchemaIsValid = ${authoritativeRunStateSchemaIsValid.toString()};
+    const validUsageDashboardIndex = ${validUsageDashboardIndex.toString()};
+    const authoritativeRunStateSchemaIsValid = ${authoritativeRunStateSchemaIsValid.toString()};
+    const systemSuspendTimingSchemaIsValid = ${systemSuspendTimingSchemaIsValid.toString()};
     const validate = ${validateOpenDatabase.toString()};
     let database = null;
     let result = "corrupt";
@@ -511,7 +488,9 @@ function validateDatabaseOffThread(
         workerData.requiredTablesBySchemaVersion,
         validProviderRunOwnershipSchema,
         validAttachmentCapabilities,
-        validUsageDashboardIndex, authoritativeRunStateSchemaIsValid,
+        validUsageDashboardIndex,
+        authoritativeRunStateSchemaIsValid,
+        systemSuspendTimingSchemaIsValid,
       );
     } catch {
       result = "corrupt";

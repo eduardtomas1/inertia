@@ -93,6 +93,25 @@ function replaceProviderRunOwnershipTable(
   `);
 }
 
+function removeSuspendedDurationCheck(database: Database.Database): void {
+  database.exec(`
+    ALTER TABLE agent_turns DROP COLUMN suspended_duration_ms;
+    ALTER TABLE agent_turns
+      ADD COLUMN suspended_duration_ms INTEGER NOT NULL DEFAULT 0;
+  `);
+}
+
+function insertUnparseableSuspendInterval(database: Database.Database): void {
+  database.prepare(`
+    INSERT INTO system_suspend_intervals (id, suspended_at, resumed_at)
+    VALUES (?, ?, ?)
+  `).run(
+    "11111111-1111-4111-8111-111111111111",
+    "xxxxxxxxxxxxxxxxxxxx",
+    "xxxxxxxxxxxxxxxxxxxx",
+  );
+}
+
 afterEach(() => {
   vi.useRealTimers();
   for (const directory of directories.splice(0)) {
@@ -1216,6 +1235,65 @@ describe("database backup and startup recovery", () => {
     },
   );
 
+  it("restores a valid backup when the primary lost the suspend-duration check", async () => {
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { conversationId, store } = seed(
+      databasePath,
+      "suspend constraint backup",
+    );
+    const backup = await store.createBackup();
+    store.close();
+    const incomplete = new Database(databasePath);
+    removeSuspendedDurationCheck(incomplete);
+    expect(incomplete.pragma("quick_check", { simple: true })).toBe("ok");
+    incomplete.close();
+
+    const recovered = new RuntimeStore(databasePath, directory, {
+      recoverInterruptedRuns: false,
+    });
+    expect(recovered.databaseRecoveryReport()).toMatchObject({
+      outcome: "restored",
+      restoredBackup: backup.filename,
+      trigger: "primary-corrupt",
+    });
+    expect(recovered.conversationDetail(conversationId)?.messages[0]?.content)
+      .toBe("suspend constraint backup");
+    recovered.close();
+  });
+
+  it("restores a valid backup when the primary has an unparsable suspend boundary", async () => {
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { conversationId, store } = seed(
+      databasePath,
+      "suspend timestamp backup",
+    );
+    const backup = await store.createBackup();
+    store.close();
+    const malformed = new Database(databasePath);
+    insertUnparseableSuspendInterval(malformed);
+    expect(malformed.pragma("quick_check", { simple: true })).toBe("ok");
+    malformed.close();
+
+    const recovered = new RuntimeStore(databasePath, directory, {
+      recoverInterruptedRuns: false,
+    });
+    expect(recovered.databaseRecoveryReport()).toMatchObject({
+      outcome: "restored",
+      restoredBackup: backup.filename,
+      trigger: "primary-corrupt",
+    });
+    expect(recovered.systemSuspends.record({
+      id: "22222222-2222-4222-8222-222222222222",
+      suspendedAt: "2026-08-26T08:00:00.000Z",
+      resumedAt: "2026-08-26T08:05:00.000Z",
+    })).toEqual([]);
+    expect(recovered.conversationDetail(conversationId)?.messages[0]?.content)
+      .toBe("suspend timestamp backup");
+    recovered.close();
+  });
+
   it("restores and upgrades a valid backup from released schema 41", async () => {
     const directory = temporaryDirectory();
     const databasePath = join(directory, "inertia.sqlite");
@@ -1576,6 +1654,93 @@ describe("database backup and startup recovery", () => {
     primary.close();
   });
 
+  it("validates the exact suspend interval index off thread", async () => {
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { store } = seed(databasePath, "suspend index validation");
+    store.close();
+    const primary = new Database(databasePath);
+    primary.exec(`
+      DROP INDEX system_suspend_intervals_range_idx;
+      CREATE INDEX system_suspend_intervals_range_idx
+      ON system_suspend_intervals(suspended_at COLLATE NOCASE, resumed_at);
+    `);
+    const manager = new DatabaseBackupManager(primary, databasePath);
+
+    await expect(manager.createBackup()).rejects.toThrow(/failed validation/u);
+    expect(backupNames(databasePath)).toEqual([]);
+    primary.exec(`
+      DROP INDEX system_suspend_intervals_range_idx;
+      CREATE INDEX system_suspend_intervals_range_idx
+      ON system_suspend_intervals(suspended_at ASC, resumed_at ASC);
+    `);
+    await expect(manager.createBackup()).resolves.toMatchObject({
+      filename: expect.stringMatching(/\.sqlite$/u),
+    });
+    primary.close();
+  });
+
+  it("rejects corrupted suspend interval values off thread", async () => {
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { store } = seed(databasePath, "suspend value validation");
+    store.close();
+    const primary = new Database(databasePath);
+    primary.prepare(`
+      INSERT INTO system_suspend_intervals (id, suspended_at, resumed_at)
+      VALUES (?, ?, ?)
+    `).run(
+      "xxxxxxxx-xxxx-4xxx-8xxx-xxxxxxxxxxxx",
+      "2026-08-26T08:00:00.000Z",
+      "2026-08-26T08:05:00.000Z",
+    );
+    const manager = new DatabaseBackupManager(primary, databasePath);
+
+    await expect(manager.createBackup()).rejects.toThrow(/failed validation/u);
+    expect(readdirSync(databaseRecoveryPaths(databasePath).backupsDirectory))
+      .toEqual([]);
+    primary.prepare("DELETE FROM system_suspend_intervals").run();
+    await expect(manager.createBackup()).resolves.toMatchObject({
+      filename: expect.stringMatching(/\.sqlite$/u),
+    });
+    primary.close();
+  });
+
+  it("skips an unparsable suspend-boundary backup and preserves repository progress", async () => {
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { conversationId, store } = seed(databasePath, "coherent suspend");
+    const older = await store.createBackup();
+    store.createMessage(conversationId, "malformed suspend", "assistant");
+    const newer = await store.createBackup();
+    store.close();
+    const malformed = new Database(join(
+      databaseRecoveryPaths(databasePath).backupsDirectory,
+      newer.filename,
+    ));
+    insertUnparseableSuspendInterval(malformed);
+    expect(malformed.pragma("quick_check", { simple: true })).toBe("ok");
+    malformed.close();
+    writeFileSync(databasePath, "invalid primary");
+
+    const recovered = new RuntimeStore(databasePath, directory, {
+      recoverInterruptedRuns: false,
+    });
+    expect(recovered.databaseRecoveryReport()).toMatchObject({
+      outcome: "restored",
+      restoredBackup: older.filename,
+      invalidBackupsSkipped: 1,
+    });
+    expect(recovered.systemSuspends.record({
+      id: "22222222-2222-4222-8222-222222222222",
+      suspendedAt: "2026-08-26T08:00:00.000Z",
+      resumedAt: "2026-08-26T08:05:00.000Z",
+    })).toEqual([]);
+    expect(recovered.conversationDetail(conversationId)?.messages
+      .map(({ content }) => content)).toEqual(["coherent suspend"]);
+    recovered.close();
+  });
+
   it("skips incomplete migration history and restores the next coherent backup", async () => {
     const directory = temporaryDirectory();
     const databasePath = join(directory, "inertia.sqlite");
@@ -1788,6 +1953,41 @@ describe("database backup and startup recovery", () => {
           DROP INDEX agent_turns_usage_dashboard_completed_idx;
           CREATE INDEX agent_turns_usage_dashboard_completed_idx
           ON agent_turns(association, completed_at COLLATE NOCASE, id);
+        `);
+      },
+    },
+    {
+      label: "the suspend interval table",
+      mutate: (database: Database.Database) => {
+        database.exec("DROP TABLE system_suspend_intervals");
+      },
+    },
+    {
+      label: "the per-turn suspended duration column",
+      mutate: (database: Database.Database) => {
+        database.exec("ALTER TABLE agent_turns DROP COLUMN suspended_duration_ms");
+      },
+    },
+    {
+      label: "the per-turn suspended duration check",
+      mutate: removeSuspendedDurationCheck,
+    },
+    {
+      label: "the suspend interval range index",
+      mutate: (database: Database.Database) => {
+        database.exec("DROP INDEX system_suspend_intervals_range_idx");
+      },
+    },
+    {
+      label: "the exact suspend interval range index",
+      mutate: (database: Database.Database) => {
+        database.exec(`
+          DROP INDEX system_suspend_intervals_range_idx;
+          CREATE INDEX system_suspend_intervals_range_idx
+          ON system_suspend_intervals(
+            suspended_at COLLATE NOCASE,
+            resumed_at
+          );
         `);
       },
     },

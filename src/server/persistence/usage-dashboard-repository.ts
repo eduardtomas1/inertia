@@ -31,6 +31,7 @@ type UsageDashboardTurnRow = Pick<
   | "provider_session_after"
   | "started_at"
   | "completed_at"
+  | "suspended_duration_ms"
   | "status"
   | "usage_start_json"
   | "usage_completion_json"
@@ -65,6 +66,7 @@ function usageDashboardTurnFromRow(
     providerSessionAfter: row.provider_session_after,
     startedAt: row.started_at,
     completedAt: row.completed_at,
+    suspendedDurationMs: row.suspended_duration_ms,
     status: row.status,
     usageAtStart: parseAgentTurnUsage(row.usage_start_json),
     usageAtCompletion: parseAgentTurnUsage(row.usage_completion_json),
@@ -83,7 +85,7 @@ export class UsageDashboardRepository {
       SELECT provider_id, model_selection_json, continuation_identity_json,
         harness_id, backend_profile_id, model, model_alias, reasoning_effort,
         provider_session_before, provider_session_after, started_at,
-        completed_at, status,
+        completed_at, suspended_duration_ms, status,
         usage_start_json, usage_completion_json, configuration_revision,
         association
       FROM agent_turns

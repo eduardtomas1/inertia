@@ -557,6 +557,11 @@
       "version": 65,
       "name": "RefreshAgentBrowserCapability",
       "digest": "1c802868ae932033ba4d3c91d429db8b881beeee4a574aeec986356ce9c91daf"
+    },
+    {
+      "version": 66,
+      "name": "PersistSuspendAwareTurnTiming",
+      "digest": "8ba0779bf58baa8c3d7ed8661756815986b37f14a2d597bd8b65eaefaf136ae5"
     }
   ]
 }

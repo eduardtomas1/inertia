@@ -19,6 +19,7 @@ function runtimeWithClose(
       invalidBackupsSkipped: 0,
       unsupportedBackupsSkipped: 0,
     },
+    recordSystemSuspendInterval: vi.fn(),
     prepareForUpdate: vi.fn(async () => ({ ready: true as const })),
     releaseUpdatePreparation: vi.fn(() => true),
     resolveProjectPath: vi.fn(),

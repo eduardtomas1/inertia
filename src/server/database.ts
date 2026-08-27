@@ -72,6 +72,7 @@ import { ReviewRepository } from "./persistence/review-repository";
 import { SettingsRepository } from "./persistence/settings-repository";
 import { SnapshotRepository } from "./persistence/snapshot-repository";
 import { ConversationWorkAuthority, storedConversationWorkspaceResolver } from "./persistence/stored-conversation-workspace";
+import { SystemSuspendRepository } from "./persistence/system-suspend-repository";
 import { TranscriptRepository } from "./persistence/transcript-repository";
 import { TurnLedgerRepository, type DailyWorkRange, type UsageDashboardRange } from "./persistence/turn-ledger-repository";
 import { WorkspaceRunRepository } from "./persistence/workspace-run-repository";
@@ -120,6 +121,7 @@ export class RuntimeStore {
   private readonly reviewRepository: ReviewRepository;
   private readonly settingsRepository: SettingsRepository;
   private readonly snapshotRepository: SnapshotRepository;
+  readonly systemSuspends: SystemSuspendRepository;
   readonly transcriptRepository: TranscriptRepository;
   private readonly turnLedgerRepository: TurnLedgerRepository;
   private readonly workspaceRunRepository: WorkspaceRunRepository;
@@ -242,6 +244,7 @@ export class RuntimeStore {
       requireAgentTurn: (turnId) => this.requireAgentTurn(turnId),
       requireConversation: (conversationId) => this.requireConversation(conversationId),
     });
+    this.systemSuspends = new SystemSuspendRepository(this.database);
     this.transcriptRepository = new TranscriptRepository({
       assertAgentTurnIdentity: (conversationId, runId, turnId) =>
         this.assertAgentTurnIdentity(conversationId, runId, turnId),
@@ -1185,7 +1188,6 @@ export class RuntimeStore {
   deleteModelBackendProfile(profileId: string): void {
     this.backendProfileRepository.deleteProfile(profileId);
   }
-
   listModelBackendDefaults(): ModelBackendDefault[] {
     return this.backendProfileRepository.listDefaults();
   }
@@ -1196,11 +1198,9 @@ export class RuntimeStore {
   ): ModelBackendDefault {
     return this.backendProfileRepository.saveDefault(projectId, selectionInput);
   }
-
   clearModelBackendDefault(projectId: string | null): void {
     this.backendProfileRepository.clearDefault(projectId);
   }
-
   updateSettings(update: Partial<AppSettings>): void {
     this.settingsRepository.update(update);
   }

@@ -201,7 +201,10 @@ export function AgentExecutionLayer({
             </span>
             <span className="turn-working-elapsed" aria-live="off">
               <span className="turn-working-separator" aria-hidden="true">·</span>
-              <LiveElapsed startedAt={timerStart} />
+              <LiveElapsed
+                startedAt={timerStart}
+                excludedMs={turn.agentTurn.suspendedDurationMs}
+              />
             </span>
             <button
               type="button"

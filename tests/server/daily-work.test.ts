@@ -219,7 +219,7 @@ describe("daily work projection", () => {
 });
 
 describe("daily work repository", () => {
-  it("includes archived continued work and new empty conversations without transcript data", async () => {
+  it("excludes persisted suspend overlap while retaining archived and new conversations", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-08-16T20:00:00.000Z"));
     const directory = await mkdtemp(join(tmpdir(), "inertia-daily-work-"));
@@ -265,6 +265,15 @@ describe("daily work repository", () => {
         totalProcessedScope: "run",
       }),
     });
+    const suspendInterval = {
+      id: "11111111-1111-4111-8111-111111111111",
+      suspendedAt: "2026-08-16T23:55:00.000Z",
+      resumedAt: "2026-08-17T00:10:00.000Z",
+    };
+    expect(store.systemSuspends.record(suspendInterval))
+      .toEqual([continued.id]);
+    expect(store.systemSuspends.record(suspendInterval)).toEqual([]);
+    expect(store.agentTurn(settled.id).suspendedDurationMs).toBe(15 * 60_000);
     store.archiveConversation(continued.id, true);
 
     vi.setSystemTime(new Date("2026-08-17T09:00:00.000Z"));
@@ -280,7 +289,7 @@ describe("daily work repository", () => {
       conversationCount: 2,
       turnCount: 1,
       activeTurnCount: 0,
-      runtime: { value: 20 * 60_000, coverage: "complete" },
+      runtime: { value: 10 * 60_000, coverage: "complete" },
       processedTokens: { value: 250, coverage: "complete" },
     });
     expect(dashboard.conversations).toEqual(expect.arrayContaining([

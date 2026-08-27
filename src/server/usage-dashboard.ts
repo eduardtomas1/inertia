@@ -30,6 +30,7 @@ export type UsageDashboardTurn = Pick<
   | "providerSessionAfter"
   | "startedAt"
   | "completedAt"
+  | "suspendedDurationMs"
   | "status"
   | "usageAtStart"
   | "usageAtCompletion"
@@ -336,7 +337,11 @@ function measuredRuntime(turn: UsageDashboardTurn): number | null {
   if (!turn.startedAt || !turn.completedAt) return null;
   const startedAt = Date.parse(turn.startedAt);
   const completedAt = Date.parse(turn.completedAt);
-  const duration = completedAt - startedAt;
+  const suspendedDuration = turn.suspendedDurationMs ?? 0;
+  if (!Number.isSafeInteger(suspendedDuration) || suspendedDuration < 0) {
+    return null;
+  }
+  const duration = completedAt - startedAt - suspendedDuration;
   return Number.isSafeInteger(duration) && duration >= 0 ? duration : null;
 }
 

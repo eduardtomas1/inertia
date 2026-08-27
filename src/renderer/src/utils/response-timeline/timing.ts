@@ -23,10 +23,15 @@ export function formatElapsed(milliseconds: number, precise = false): string {
   return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
 }
 
-function boundedElapsed(startedAt: string, completedAt: string | null, now: number): number {
+function boundedElapsed(
+  startedAt: string,
+  completedAt: string | null,
+  now: number,
+  excluded = 0,
+): number {
   const start = timestamp(startedAt);
   const end = completedAt ? timestamp(completedAt) : now;
-  return Math.max(0, end - start);
+  return Math.max(0, end - start - excluded);
 }
 
 /** Persisted requested → started queue time. A queued turn remains live. */
@@ -45,17 +50,22 @@ export function turnQueueElapsedMs(
  * historical duration.
  */
 export function turnExecutionElapsedMs(
-  turn: Pick<ResponseTurn, "startedAt" | "completedAt" | "isActive">,
+  turn: Pick<ResponseTurn, "startedAt" | "completedAt" | "isActive" | "agentTurn">,
   now = Date.now(),
 ): number | null {
   if (!turn.startedAt) return null;
   if (!turn.completedAt && !turn.isActive) return null;
-  return boundedElapsed(turn.startedAt, turn.completedAt, now);
+  return boundedElapsed(
+    turn.startedAt,
+    turn.completedAt,
+    now,
+    turn.agentTurn.suspendedDurationMs,
+  );
 }
 
 /** Backward-compatible alias: elapsed work never includes queue time. */
 export function turnElapsedMs(
-  turn: Pick<ResponseTurn, "startedAt" | "completedAt" | "isActive">,
+  turn: Pick<ResponseTurn, "startedAt" | "completedAt" | "isActive" | "agentTurn">,
   now = Date.now(),
 ): number {
   return turnExecutionElapsedMs(turn, now) ?? 0;

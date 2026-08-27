@@ -37,6 +37,9 @@ function numberField(value: UnknownRecord, key: string): boolean {
 function integerField(value: UnknownRecord, key: string): boolean {
   return Number.isSafeInteger(value[key]);
 }
+function integerFieldAtLeast(value: UnknownRecord, key: string, minimum = 0): boolean {
+  return integerField(value, key) && Number(value[key]) >= minimum;
+}
 function nullableNumberField(value: UnknownRecord, key: string): boolean {
   return value[key] === null || numberField(value, key);
 }
@@ -85,8 +88,7 @@ function backendDefault(value: unknown): boolean {
 function syncCursor(value: unknown): boolean {
   return recordWithStrings(value, "runtimeGeneration")
     && (value.runtimeGeneration as string).length > 0
-    && Number.isSafeInteger(value.latestSequence)
-    && Number(value.latestSequence) >= 0;
+    && integerFieldAtLeast(value, "latestSequence");
 }
 
 function providerMaintenanceStatus(value: unknown): boolean {
@@ -146,8 +148,7 @@ function project(value: unknown): boolean {
     && nullableStringField(value, "repositoryRoot")
     && (value.groupingMode === null
       || oneOf(value, "groupingMode", PROJECT_GROUPING))
-    && integerField(value, "gitRepositoryLimit")
-    && Number(value.gitRepositoryLimit) >= 1;
+    && integerFieldAtLeast(value, "gitRepositoryLimit", 1);
 }
 
 function latestTurn(value: unknown): boolean {
@@ -565,8 +566,7 @@ function workflowSkillsCapability(value: unknown): boolean {
 function skillDiscovery(value: unknown): boolean {
   return record(value)
     && booleanField(value, "truncated")
-    && integerField(value, "warningCount")
-    && Number(value.warningCount) >= 0
+    && integerFieldAtLeast(value, "warningCount")
     && nullableStringField(value, "synchronizedAt");
 }
 
@@ -641,8 +641,7 @@ function duoComparison(value: unknown): boolean {
     && oneOf(value, "state", DUO_COMPARISON_STATES)
     && nullableStringField(value, "conversationId")
     && nullableStringField(value, "turnId")
-    && integerField(value, "attempt")
-    && Number(value.attempt) >= 0
+    && integerFieldAtLeast(value, "attempt")
     && nullableStringField(value, "error");
 }
 
@@ -698,10 +697,8 @@ function duoStatus(value: UnknownRecord): boolean {
 
 function changedFile(value: unknown): boolean {
   return recordWithStrings(value, "path", "status", "indexStatus", "worktreeStatus")
-    && integerField(value, "insertions")
-    && Number(value.insertions) >= 0
-    && integerField(value, "deletions")
-    && Number(value.deletions) >= 0
+    && integerFieldAtLeast(value, "insertions")
+    && integerFieldAtLeast(value, "deletions")
     && booleanField(value, "untracked")
     && booleanField(value, "staged")
     && booleanField(value, "unstaged");
@@ -918,6 +915,7 @@ function agentTurn(value: unknown): boolean {
     && nullableStringField(value, "providerSessionAfter")
     && nullableStringField(value, "startedAt")
     && nullableStringField(value, "completedAt")
+    && integerFieldAtLeast(value, "suspendedDurationMs")
     && nullableStringField(value, "terminalReason")
     && nullableStringField(value, "checkpointId")
     && oneOf(value, "status", AGENT_TURN_STATUSES)

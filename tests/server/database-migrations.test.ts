@@ -1687,7 +1687,7 @@ describe("runtime migration catalog", () => {
     store.close();
 
     const schema64 = new Database(databasePath);
-    schema64.prepare("DELETE FROM schema_migrations WHERE version = 65").run();
+    schema64.prepare("DELETE FROM schema_migrations WHERE version >= 65").run();
     expect((schema64.prepare(
       "SELECT MAX(version) AS version FROM schema_migrations",
     ).get() as { version: number }).version).toBe(64);
@@ -1959,6 +1959,74 @@ describe("runtime migration catalog", () => {
     });
   });
 
+  it("upgrades existing turns to suspend-aware accounting without changing prior work", async () => {
+    const directory = await temporaryDirectory();
+    const databasePath = join(directory, "schema-65-system-suspend.sqlite");
+    const workspacePath = join(directory, "workspace");
+    await mkdir(workspacePath);
+    const store = new RuntimeStore(databasePath, workspacePath, {
+      recoverInterruptedRuns: false,
+    });
+    const project = store.createProject("Suspend migration", workspacePath);
+    const conversation = store.createConversation(project.id, "Existing work");
+    const turn = store.beginAgentTurn({
+      id: "existing-suspend-aware-turn",
+      conversationId: conversation.id,
+      runId: "existing-suspend-aware-run",
+      content: "Preserve this completed turn through schema 66.",
+      providerId: "codex",
+      harnessId: "codex-app-server",
+      backendProfileId: "builtin:openai",
+      model: "gpt-test",
+      reasoningEffort: "high",
+      interactionMode: "build",
+      accessMode: "supervised",
+      providerSessionBefore: null,
+      requestedAt: "2026-08-26T09:00:00.000Z",
+      usageAtStart: null,
+      configurationRevision: 0,
+      association: "authoritative",
+    }).turn;
+    store.updateAgentTurnLifecycle(turn.id, {
+      status: "starting",
+      updatedAt: "2026-08-26T09:00:01.000Z",
+    });
+    store.updateAgentTurnLifecycle(turn.id, {
+      status: "running",
+      updatedAt: "2026-08-26T09:00:02.000Z",
+    });
+    store.updateAgentTurnLifecycle(turn.id, {
+      status: "completed",
+      completedAt: "2026-08-26T09:10:00.000Z",
+      updatedAt: "2026-08-26T09:10:00.000Z",
+    });
+    store.close();
+
+    const schema65 = new Database(databasePath);
+    schema65.exec(`
+      DROP INDEX system_suspend_intervals_range_idx;
+      DROP TABLE system_suspend_intervals;
+      ALTER TABLE agent_turns DROP COLUMN suspended_duration_ms;
+      DELETE FROM schema_migrations WHERE version = 66;
+    `);
+    schema65.close();
+
+    migrateFixtureInPlace(databasePath);
+    migrateFixtureInPlace(databasePath);
+
+    const migrated = new RuntimeStore(databasePath, workspacePath, {
+      recoverInterruptedRuns: false,
+    });
+    expect(migrated.agentTurn(turn.id).suspendedDurationMs).toBe(0);
+    expect(migrated.systemSuspends.record({
+      id: "11111111-1111-4111-8111-111111111111",
+      suspendedAt: "2026-08-26T09:04:00.000Z",
+      resumedAt: "2026-08-26T09:06:00.000Z",
+    })).toEqual([conversation.id]);
+    expect(migrated.agentTurn(turn.id).suspendedDurationMs).toBe(2 * 60_000);
+    migrated.close();
+  });
+
   it("appends final-answer auto-scroll after the released schema-50 migration", async () => {
     const directory = await temporaryDirectory();
     const databasePath = join(directory, "schema-50-upgrade.sqlite");
@@ -2004,6 +2072,7 @@ describe("runtime migration catalog", () => {
       { version: 63 },
       { version: 64 },
       { version: 65 },
+      { version: 66 },
     ]);
     expect((migrated.prepare(
       "SELECT auto_scroll_to_final_answer AS enabled FROM app_state WHERE id = 1",
@@ -2014,6 +2083,12 @@ describe("runtime migration catalog", () => {
     expect(migrated.prepare(
       "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'prompt_presets'",
     ).get()).toEqual({ name: "prompt_presets" });
+    expect(migrated.prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'system_suspend_intervals'",
+    ).get()).toEqual({ name: "system_suspend_intervals" });
+    expect((migrated.prepare("PRAGMA table_info(agent_turns)").all() as Array<{
+      name: string;
+    }>).some(({ name }) => name === "suspended_duration_ms")).toBe(true);
     const appStateColumns = new Set((migrated.prepare(
       "PRAGMA table_info(app_state)",
     ).all() as Array<{ name: string }>).map(({ name }) => name));

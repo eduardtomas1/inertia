@@ -6,11 +6,7 @@ import { nativeProviderMetadataScope, providerMetadataScopeKey, type PersistedPr
 import { legacyModelSelection } from "../codecs";
 import type { AgentTurnRow, ConversationRow } from "../rows";
 import { sanitizePersistedAttachmentCapabilities } from "./attachment-capabilities";
-import {
-  CURRENT_DATABASE_SCHEMA_VERSION,
-  createRuntimeMigrationCatalog,
-  type DatabaseMigrationDefinition,
-} from "./catalog";
+import { CURRENT_DATABASE_SCHEMA_VERSION, createRuntimeMigrationCatalog, type DatabaseMigrationDefinition } from "./catalog";
 import { conversationWorktreeOwnershipMigration } from "./conversation-worktree-ownership";
 import { persistColorTheme } from "./color-theme";
 import { persistAgentThreadManagement } from "./agent-thread-management";
@@ -28,6 +24,7 @@ import { quotedSqlIdentifier } from "./sql-identifiers";
 import { ensureTurnAssociationColumns } from "./turn-association-columns";
 import { workspacePathAuthoritiesMigration } from "./workspace-path-authorities";
 import { conversationContextPacketsMigration } from "./conversation-context-packets";
+import { persistSuspendAwareTurnTiming } from "./system-suspend-timing";
 const MODEL_SELECTION_TABLES = ["conversations", "agent_turns"] as const;
 const MODEL_SELECTION_COLUMNS = ["model_selection_json", "continuation_identity_json"] as const;
 export function runtimeMigrationCatalog(): readonly DatabaseMigration[] {
@@ -1225,7 +1222,9 @@ export function runtimeMigrationCatalog(): readonly DatabaseMigration[] {
       conversationContextPacketsMigration,
       nativeKimiProviderMigration,
       persistDiscordReleaseRepositoryUrl,
-      authoritativeRunStateMigration, { name: "RefreshAgentBrowserCapability", up: "DELETE FROM agent_goals WHERE source = 'codex-native' AND conversation_id IN (SELECT id FROM conversations WHERE provider_id = 'codex' AND provider_session_id IS NOT NULL); UPDATE conversations SET provider_session_id = NULL, continuation_identity_json = NULL WHERE provider_id = 'codex' AND provider_session_id IS NOT NULL;" },
+      authoritativeRunStateMigration,
+      { name: "RefreshAgentBrowserCapability", up: "DELETE FROM agent_goals WHERE source = 'codex-native' AND conversation_id IN (SELECT id FROM conversations WHERE provider_id = 'codex' AND provider_session_id IS NOT NULL); UPDATE conversations SET provider_session_id = NULL, continuation_identity_json = NULL WHERE provider_id = 'codex' AND provider_session_id IS NOT NULL;" },
+      persistSuspendAwareTurnTiming,
     );
     return createRuntimeMigrationCatalog(legacyMigrations, migrationExtensions);
 }

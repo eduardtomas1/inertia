@@ -413,6 +413,58 @@ describe("runtime process protocol", () => {
     })).toBeNull();
   });
 
+  it("accepts only bounded completed system suspend intervals", () => {
+    const command = {
+      type: "runtime.record-system-suspend" as const,
+      interval: {
+        id: "11111111-1111-4111-8111-111111111111",
+        suspendedAt: "2026-08-25T12:15:39.000Z",
+        resumedAt: "2026-08-26T05:10:02.000Z",
+      },
+    };
+    expect(parseRuntimeWorkerCommand(command)).toEqual(command);
+    expect(parseRuntimeWorkerCommand({
+      ...command,
+      interval: { ...command.interval, id: "not-a-uuid" },
+    })).toBeNull();
+    expect(parseRuntimeWorkerCommand({
+      ...command,
+      interval: {
+        ...command.interval,
+        resumedAt: "2026-08-25T12:00:00.000Z",
+      },
+    })).toBeNull();
+    expect(parseRuntimeWorkerCommand({
+      ...command,
+      unexpected: true,
+    })).toBeNull();
+
+    const result = {
+      type: "runtime.system-suspend-result" as const,
+      id: command.interval.id,
+      recorded: true,
+    };
+    expect(parseRuntimeWorkerEvent(result)).toEqual(result);
+    expect(parseRuntimeWorkerEvent({ ...result, recorded: false })).toEqual({
+      ...result,
+      recorded: false,
+    });
+    expect(parseRuntimeWorkerEvent({
+      ...result,
+      id: "not-a-uuid",
+    })).toBeNull();
+    expect(parseRuntimeWorkerEvent({
+      ...result,
+      recorded: "yes",
+    })).toBeNull();
+    const { recorded: _recorded, ...missingResult } = result;
+    expect(parseRuntimeWorkerEvent(missingResult)).toBeNull();
+    expect(parseRuntimeWorkerEvent({
+      ...result,
+      extra: true,
+    })).toBeNull();
+  });
+
   it("accepts only strict safe Kimi profiles in the private startup envelope", () => {
     const profile = builtInKimiClaudeBackendProfile(
       backendSecretReferenceForProfile(KIMI_CLAUDE_BUILTIN_PROFILE_ID),

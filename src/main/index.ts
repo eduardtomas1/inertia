@@ -11,6 +11,7 @@ import {
   net,
   nativeTheme,
   Notification,
+  powerMonitor,
   protocol,
   safeStorage,
   screen,
@@ -79,6 +80,8 @@ import { RuntimeDiagnostics, runtimeDiagnosticsDirectory } from "./runtime-diagn
 import { PreviewBroker, hardenDesktopSession } from "./preview-broker.js";
 import { showBrowserEvidenceImageWindow } from "./browser-evidence-image-inspector.js";
 import { RuntimeSupervisor } from "./runtime-supervisor.js";
+import { RuntimeSystemSuspendDelivery } from "./runtime-system-suspend-delivery.js";
+import { RuntimeSystemSuspendTracker } from "./runtime-system-suspend-tracker.js";
 import * as runtimeBootstrap from "./runtime-bootstrap-safety.js";
 import {
   cleanupPrivilegedOwners,
@@ -163,6 +166,7 @@ protocol.registerSchemesAsPrivileged([
 let mainWindow: BrowserWindow | null = null;
 let mainWindowCreation: Promise<void> | null = null;
 let runtimeSupervisor: RuntimeSupervisor | null = null;
+let systemSuspendDelivery: RuntimeSystemSuspendDelivery | null = null;
 let privateConnectHost: PrivateConnectHost | null = null;
 let runtimeDiagnostics: RuntimeDiagnostics | null = null;
 let appUpdateService: AppUpdateService | null = null;
@@ -880,6 +884,8 @@ function finishQuitAfterCleanup(): void {
 }
 function runPrivilegedCleanup(): Promise<boolean> {
   if (privilegedCleanup) return privilegedCleanup;
+  systemSuspendDelivery?.close();
+  systemSuspendDelivery = null;
   if (mainWindow) saveWindowState(mainWindow);
   const supervisorToStop = runtimeSupervisor, privateConnectHostToStop = privateConnectHost; privateConnectHost = null;
   const cleanup = detachedChatClose.closeDetachedChatsForShutdown(detachedChatMain).then(async () => {
@@ -912,6 +918,19 @@ function runPrivilegedCleanup(): Promise<boolean> {
 async function bootstrap(): Promise<void> {
   runtimeDiagnostics = new RuntimeDiagnostics(runtimeDiagnosticsDirectory(app.getPath("userData")));
   setImmediate(() => runtimeDiagnostics?.record("app.start"));
+  const systemSuspends = new RuntimeSystemSuspendTracker({
+    statePath: join(app.getPath("userData"), "runtime-system-suspends.json"),
+    recoveredAt: new Date().toISOString(),
+    onDiagnostic: (error) => console.error(
+      "Unable to retain system suspend accounting.",
+      error,
+    ),
+  });
+  const suspendDelivery = new RuntimeSystemSuspendDelivery({
+    tracker: systemSuspends,
+    runtime: () => runtimeSupervisor,
+  });
+  systemSuspendDelivery = suspendDelivery;
   const testUpdateVersion = runtimeBootstrap.runtimeUpdateVersion(app.getVersion());
   const appUpdateCapability = process.env.NODE_ENV === "test"
     ? { delivery: "manual" as const, reason: "development-build" as const }
@@ -1007,6 +1026,8 @@ async function bootstrap(): Promise<void> {
   runtimeSupervisor = new RuntimeSupervisor({
     agentBrowserBroker: previewBroker,
     systemBootId: bootstrapSafety.systemBootId,
+    onSystemSuspendResult: (id, generation, recorded) =>
+      suspendDelivery.result(id, generation, recorded),
     conversationAttachmentStoreRunner,
     conversationAttachmentStoreAuthority:
       await conversationAttachmentStoreAuthority(conversationAttachmentStore),
@@ -1076,6 +1097,7 @@ async function bootstrap(): Promise<void> {
       },
     ),
     onStateChange: (snapshot) => {
+      suspendDelivery.runtimeState(snapshot.phase, snapshot.generation);
       runtimeDiagnostics?.recordState(snapshot);
       if (
         snapshot.phase === "ready"
@@ -1126,6 +1148,11 @@ async function bootstrap(): Promise<void> {
     assertTrusted: assertTrustedIpc,
   });
   registerIpcHandlers();
+  powerMonitor.on("suspend", () => systemSuspends.suspend());
+  powerMonitor.on("resume", () => {
+    systemSuspends.resume();
+    suspendDelivery.sendIfReady();
+  });
   runtimeSupervisor.start();
   if (process.env.NODE_ENV === "test") {
     Object.defineProperty(globalThis, "__inertiaTestRuntime", {

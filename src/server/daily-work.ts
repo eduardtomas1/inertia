@@ -7,6 +7,7 @@ import type {
   UsageCoverage,
   UsageMeasuredValue,
 } from "../shared/contracts";
+import type { RuntimeSystemSuspendInterval } from "../node/runtime-process-protocol";
 import { isAgentTurnTerminalStatus } from "../shared/turn-lifecycle";
 import {
   measuredProcessedTokens,
@@ -181,12 +182,41 @@ function dailyRuntime(
   turn: DailyWorkTurn,
   from: number,
   to: number,
+  suspendIntervals: readonly RuntimeSystemSuspendInterval[],
 ): number | null {
   const startedAt = timestamp(turn.startedAt);
   const completedAt = timestamp(turn.completedAt);
   if (startedAt === null || completedAt === null) return null;
-  const duration = Math.min(completedAt, to) - Math.max(startedAt, from);
-  return Number.isSafeInteger(duration) && duration >= 0 ? duration : null;
+  const sliceStart = Math.max(startedAt, from);
+  const sliceEnd = Math.min(completedAt, to);
+  const duration = sliceEnd - sliceStart;
+  if (!Number.isSafeInteger(duration) || duration < 0) return null;
+
+  const overlaps: Array<{ start: number; end: number }> = [];
+  for (const interval of suspendIntervals) {
+    const suspendedAt = timestamp(interval.suspendedAt);
+    const resumedAt = timestamp(interval.resumedAt);
+    if (suspendedAt === null || resumedAt === null || resumedAt < suspendedAt) {
+      return null;
+    }
+    const start = Math.max(sliceStart, suspendedAt);
+    const end = Math.min(sliceEnd, resumedAt);
+    if (end > start) overlaps.push({ start, end });
+  }
+  overlaps.sort((left, right) => left.start - right.start || left.end - right.end);
+  let suspendedDuration = 0;
+  let mergedEnd = Number.NEGATIVE_INFINITY;
+  for (const overlap of overlaps) {
+    const uncoveredStart = Math.max(overlap.start, mergedEnd);
+    if (overlap.end > uncoveredStart) {
+      suspendedDuration += overlap.end - uncoveredStart;
+    }
+    mergedEnd = Math.max(mergedEnd, overlap.end);
+  }
+  const activeDuration = duration - suspendedDuration;
+  return Number.isSafeInteger(activeDuration) && activeDuration >= 0
+    ? activeDuration
+    : null;
 }
 
 function isCreatedToday(
@@ -220,13 +250,14 @@ function addTurn(
   turn: DailyWorkTurn,
   from: number,
   to: number,
+  suspendIntervals: readonly RuntimeSystemSuspendInterval[],
 ): void {
   bucket.turnCount += 1;
   if (!isAgentTurnTerminalStatus(turn.status)) {
     bucket.activeTurnCount += 1;
     return;
   }
-  addMetric(bucket.runtime, dailyRuntime(turn, from, to));
+  addMetric(bucket.runtime, dailyRuntime(turn, from, to, suspendIntervals));
   addMetric(bucket.processedTokens, measuredProcessedTokens(turn));
 }
 
@@ -269,6 +300,7 @@ export function projectDailyWork(
   turns: readonly DailyWorkTurn[],
   range: DailyWorkRange,
   generatedAt = new Date().toISOString(),
+  suspendIntervals: readonly RuntimeSystemSuspendInterval[] = [],
 ): DailyWorkDashboard {
   const { from, to } = validateDailyWorkRange(range);
   const generatedAtMs = Date.parse(generatedAt);
@@ -293,8 +325,8 @@ export function projectDailyWork(
     if (!isDailyTurn(turn, from, to, generatedAtMs)) continue;
     const conversation = conversationBuckets.get(turn.conversationId);
     if (!conversation) continue;
-    addTurn(conversation, turn, from, to);
-    addTurn(totalBucket, turn, from, to);
+    addTurn(conversation, turn, from, to, suspendIntervals);
+    addTurn(totalBucket, turn, from, to, suspendIntervals);
     conversation.providerIds.add(turn.providerId);
     if (Date.parse(turn.updatedAt) > Date.parse(conversation.lastActivityAt)) {
       conversation.lastActivityAt = turn.updatedAt;
@@ -304,7 +336,7 @@ export function projectDailyWork(
       ...emptyWorkBucket(),
       providerId: turn.providerId,
     };
-    addTurn(provider, turn, from, to);
+    addTurn(provider, turn, from, to, suspendIntervals);
     providerBuckets.set(turn.providerId, provider);
   }
 

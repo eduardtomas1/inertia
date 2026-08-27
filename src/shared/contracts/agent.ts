@@ -169,6 +169,8 @@ export interface AgentTurn {
   requestedAt: string;
   startedAt: string | null;
   completedAt: string | null;
+  /** Persisted system-suspend overlap excluded from execution timing. */
+  suspendedDurationMs?: number;
   status: AgentTurnStatus;
   /** Optional only for snapshots written before the run-state ledger existed. */
   runState?: AgentRunStateSnapshot;

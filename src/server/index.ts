@@ -117,13 +117,12 @@ import { runRecoveryImportWorker } from "./persistence/database-recovery-import-
 import { runPackagedImageRetentionSmoke } from "./runtime/attachments/package-smoke-image";
 import type { RunningRuntime, RuntimeOptions } from "./runtime-types";
 import { RuntimeUpdatePreparationGate } from "./runtime-update-preparation";
-
+import { recordSystemSuspendInterval } from "./runtime/system-suspend-coordinator";
 export type {
   RunningRuntime,
   RuntimeBackendCredentialBroker,
   RuntimeOptions,
 } from "./runtime-types";
-
 export {
   assembleReadOnlyReviewRequest,
 } from "./runtime/commands/review-support";
@@ -1032,6 +1031,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       ),
     websocketUrl,
     databaseRecovery: store.databaseRecoveryReport(),
+    recordSystemSuspendInterval: (interval) => recordSystemSuspendInterval(store, interval, broadcast, broadcastSnapshot),
     prepareForUpdate: (operationId) => updatePreparation.prepare(operationId),
     releaseUpdatePreparation: (operationId) =>
       updatePreparation.release(operationId),

@@ -1921,6 +1921,59 @@ describe("cross-platform runtime owned process recovery", () => {
   );
 
   it.runIf(process.platform === "darwin")(
+    "retries transient macOS ownership probes without changing payload status",
+    async () => {
+      const directory = temporaryDirectory();
+      const guardianPath = join(directory, "runtime-process-guardian-transient-census");
+      const built = spawnSync(
+        "/usr/bin/xcrun",
+        [
+          "clang", "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
+          "-DINERTIA_RUNTIME_GUARDIAN_TEST_TRANSIENT_CENSUS_FAILURE=1",
+          "-DINERTIA_RUNTIME_GUARDIAN_TEST_TRANSIENT_PARENT_IDENTITY_FAILURE=1",
+          join(process.cwd(), "native/runtime-process-guardian/darwin.c"),
+          "-o", guardianPath,
+        ],
+        {
+          encoding: "utf8",
+          env: { PATH: "/usr/bin:/bin:/usr/sbin:/sbin" },
+          shell: false,
+          timeout: 30_000,
+        },
+      );
+      expect(built.status, `${built.stderr}\n${built.stdout}`).toBe(0);
+      const deactivateRegistry = activateRuntimeOwnedProcessRegistry(
+        directory,
+        runtimeGenerationId,
+        systemBootId,
+        { darwinGuardianPath: guardianPath },
+      );
+      if (deactivateRegistry) deactivators.push(deactivateRegistry);
+      const invocation = runtimeOwnedProcessInvocation(
+        process.execPath,
+        ["-e", "setTimeout(() => process.exit(0), 100)"],
+      );
+      const guardian = spawnRuntimeOwnedProcess(() => spawn(
+        invocation.command,
+        invocation.args,
+        { detached: true, shell: false, stdio: "ignore" },
+      ));
+      liveChildren.add(guardian);
+      guardian.once("close", () => liveChildren.delete(guardian));
+
+      await closeOf(guardian);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      expect(guardian.exitCode).toBe(0);
+      expect(guardian.signalCode).toBeNull();
+      await vi.waitFor(() => expect(new RuntimeOwnedProcessJournal(directory)
+        .records(runtimeGenerationId)).toEqual([]));
+      deactivate();
+    },
+    15_000,
+  );
+
+  it.runIf(process.platform === "darwin")(
     "preserves a normally completed fork under best-effort macOS containment",
     async () => {
       const directory = temporaryDirectory();

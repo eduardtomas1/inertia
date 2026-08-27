@@ -20,7 +20,10 @@ import type {
   RuntimeSupervisorOptions,
 } from "./runtime-supervisor-types.js";
 import { publicProcessError } from "./runtime-supervisor-values.js";
-import { armWindowsRuntimeJob } from "./windows-runtime-job.js";
+import {
+  armWindowsRuntimeJob,
+  waitForWindowsRuntimeProcessCreationIdentity,
+} from "./windows-runtime-job.js";
 
 export function createRuntimeSupervisorProcessSafety(options: {
   readonly configuration: RuntimeSupervisorOptions;
@@ -51,8 +54,21 @@ export function createRuntimeSupervisorProcessSafety(options: {
       ));
   const armProcessContainment = configuration.armProcessContainment
     ?? (process.platform === "win32"
-      ? ((runtimeGenerationId: string, runtimePid: number) =>
-          armWindowsRuntimeJob(runtimeGenerationId, runtimePid))
+      ? (async (runtimeGenerationId: string, runtimePid: number, admission) => {
+          const getMetrics = configuration.getProcessMetrics;
+          if (!getMetrics) {
+            throw new Error("The Windows runtime process metrics are unavailable.");
+          }
+          const runtimeCreationTimeBits =
+            await waitForWindowsRuntimeProcessCreationIdentity(
+              getMetrics,
+              runtimePid,
+              { shouldContinue: admission?.isCurrent },
+            );
+          return armWindowsRuntimeJob(runtimeGenerationId, runtimePid, {
+            runtimeCreationTimeBits,
+          });
+        })
       : (() => null));
   return {
     forceKill,

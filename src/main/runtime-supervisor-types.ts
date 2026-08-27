@@ -155,9 +155,16 @@ export interface RuntimeSupervisorOptions {
     systemBootId: string,
     deadlineAt: number,
   ) => boolean | Promise<boolean> | null;
+  getProcessMetrics?: () => readonly {
+    readonly pid: number;
+    readonly creationTime: number;
+    readonly name?: string;
+    readonly type: string;
+  }[];
   armProcessContainment?: (
     runtimeGenerationId: string,
     runtimePid: number,
+    admission?: { readonly isCurrent: () => boolean },
   ) => RuntimeOwnedProcessContainment | Promise<RuntimeOwnedProcessContainment | null> | null;
   credentialBroker?: RuntimeCredentialBroker;
   credentialRequestTimeoutMs?: number;

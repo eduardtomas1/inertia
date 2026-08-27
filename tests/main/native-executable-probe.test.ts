@@ -413,7 +413,10 @@ test.skipIf(process.platform === "win32")(
           INERTIA_PROBE_REDIRECT_DESCENDANT: "1",
           INERTIA_PROBE_ROOT_PID_FILE: rootPidFile,
         },
-        timeoutMs: 1_000,
+        // This case proves the close-path ownership verdict, not the deadline
+        // path. Keep enough headroom for a cold Node child on a loaded hosted
+        // runner while remaining below the production 10-second probe bound.
+        timeoutMs: 5_000,
       }, {
         processTracker: {
           readPipeOwners: () => new Set(),
@@ -424,7 +427,7 @@ test.skipIf(process.platform === "win32")(
       const unconfirmedFailure = expect(probe).rejects.toThrow(
         "exited with unconfirmed process ownership",
       );
-      const pidFileDeadline = Date.now() + 750;
+      const pidFileDeadline = Date.now() + 4_000;
       while (!descendantPid && Date.now() < pidFileDeadline) {
         try {
           descendantPid = Number(await readFile(pidFile, "utf8"));

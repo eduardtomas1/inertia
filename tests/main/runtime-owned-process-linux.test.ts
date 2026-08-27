@@ -582,6 +582,7 @@ describe("Linux runtime process guardian", () => {
     });
     const invocation = runtimeOwnedProcessInvocation("/bin/sh", ["-c", `touch ${join(root, "ran")}`]);
     let child: ChildProcess | null = null;
+    let childPid = 0;
     const claim = vi.spyOn(RuntimeOwnedProcessJournal.prototype, "claim")
       .mockImplementationOnce(() => {
         throw new Error("The spawned process ownership could not be persisted.");
@@ -589,14 +590,23 @@ describe("Linux runtime process guardian", () => {
     try {
       spawnRuntimeOwnedProcess(() => {
         child = spawn(invocation.command, invocation.args, { detached: true, stdio: "ignore" });
+        childPid = child.pid ?? 0;
         return child;
       });
       await waitFor(() => claim.mock.calls.length === 1);
-      expect(new RuntimeOwnedProcessJournal(root, {
+      const journal = new RuntimeOwnedProcessJournal(root, {
         platform: "linux", darwinGuardianPath: guardian,
-      }).records(generation)).toMatchObject([{ state: "pending" }]);
+      });
+      const duringCleanup = journal.records(generation);
+      expect(duringCleanup).not.toBeNull();
+      expect(duringCleanup?.every((record) => record.state === "pending")).toBe(true);
       expect(() => spawnRuntimeOwnedProcess(() => spawn("/bin/true")))
         .toThrow("tainted until restart");
+      expect(() => statSync(join(root, "ran"))).toThrow();
+      await expect(awaitRuntimeOwnedProcessCleanupConfirmed()).resolves.toBe(true);
+      expect(journal.records(generation)).toEqual([]);
+      expect(childPid).toBeGreaterThan(1);
+      expect(exists(childPid)).toBe(false);
       expect(() => statSync(join(root, "ran"))).toThrow();
     } finally {
       claim.mockRestore();

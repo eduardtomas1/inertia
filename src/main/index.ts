@@ -1036,6 +1036,7 @@ async function bootstrap(): Promise<void> {
   let packageSmokeScheduled = false;
   runtimeSupervisor = new RuntimeSupervisor({
     agentBrowserBroker: previewBroker,
+    getProcessMetrics: () => app.getAppMetrics(),
     systemBootId: bootstrapSafety.systemBootId,
     onSystemSuspendResult: (id, generation, recorded) =>
       suspendDelivery.result(id, generation, recorded),

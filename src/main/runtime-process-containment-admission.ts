@@ -44,12 +44,25 @@ export class RuntimeProcessContainmentAdmission {
       );
       return;
     }
+    const isAdmissionCurrent = (): boolean =>
+      this.options.isCurrent(record)
+      && this.options.isRunningDesired()
+      && record.child.pid === runtimePid;
     try {
-      const armed = this.options.arm(record.runtimeGenerationId, runtimePid!);
+      const armed = this.options.arm(record.runtimeGenerationId, runtimePid!, {
+        isCurrent: isAdmissionCurrent,
+      });
       if (armed instanceof Promise) {
-        void armed.then((containment) => this.admit(record, containment))
-          .catch((error: unknown) => this.options.reject(record, error));
+        void armed.then((containment) => {
+          if (!isAdmissionCurrent()) return;
+          this.admit(record, containment);
+        })
+          .catch((error: unknown) => {
+            if (!isAdmissionCurrent()) return;
+            this.options.reject(record, error);
+          });
       } else {
+        if (!isAdmissionCurrent()) return;
         this.admit(record, armed);
       }
     } catch (error) {

@@ -8,6 +8,10 @@ import { validRuntimeGenerationId } from "../node/runtime-process-protocol.js";
 const HELPER_STARTUP_TIMEOUT_MS = 60_000;
 const NATIVE_READY_TIMEOUT_MS = 15_000;
 const MAX_OUTPUT_BYTES = 8_192;
+const MAX_PROCESS_METRICS = 1_024;
+const PROCESS_METRIC_POLL_MS = 10;
+const PROCESS_METRIC_TIMEOUT_MS = 5_000;
+const MAX_PROCESS_METRIC_ATTEMPTS = 500;
 
 type WindowsRuntimeJobStage =
   | "powershell-start"
@@ -17,6 +21,13 @@ type WindowsRuntimeJobStage =
 interface ActiveWindowsRuntimeJob {
   readonly child: ChildProcessWithoutNullStreams;
   readonly completion: Promise<boolean>;
+}
+
+export interface WindowsRuntimeProcessMetric {
+  readonly pid: number;
+  readonly creationTime: number;
+  readonly name?: string;
+  readonly type: string;
 }
 
 const activeJobs = new Map<string, ActiveWindowsRuntimeJob>();
@@ -81,13 +92,93 @@ export function windowsRuntimeJobName(
   return `Global\\InertiaRuntime-${digest}`;
 }
 
+export function windowsRuntimeProcessCreationIdentity(
+  metrics: readonly WindowsRuntimeProcessMetric[],
+  runtimePid: number,
+): string {
+  if (!Number.isSafeInteger(runtimePid) || runtimePid <= 1) {
+    throw new Error("The Windows runtime process identity is invalid.");
+  }
+  if (metrics.length > MAX_PROCESS_METRICS) {
+    throw new Error("The Windows runtime process metrics are oversized.");
+  }
+  const matching = metrics.filter((metric) =>
+    metric.pid === runtimePid
+    && metric.type === "Utility"
+    && metric.name === "Inertia Runtime");
+  if (matching.length !== 1) {
+    throw new Error("The Windows runtime process metric is not unique.");
+  }
+  const metric = matching[0]!;
+  if (
+    !Number.isFinite(metric.creationTime)
+    || metric.creationTime <= 0
+  ) {
+    throw new Error("The Windows runtime creation identity is invalid.");
+  }
+  const encoded = Buffer.allocUnsafe(8);
+  encoded.writeDoubleLE(metric.creationTime);
+  return encoded.readBigUInt64LE().toString(10);
+}
+
+export async function waitForWindowsRuntimeProcessCreationIdentity(
+  getMetrics: () => readonly WindowsRuntimeProcessMetric[],
+  runtimePid: number,
+  options: {
+    readonly timeoutMs?: number;
+    readonly now?: () => number;
+    readonly shouldContinue?: () => boolean;
+    readonly yieldTurn?: () => Promise<void>;
+  } = {},
+): Promise<string> {
+  const timeoutMs = Math.max(1, Math.min(
+    options.timeoutMs ?? PROCESS_METRIC_TIMEOUT_MS,
+    PROCESS_METRIC_TIMEOUT_MS,
+  ));
+  const now = options.now ?? Date.now;
+  const deadlineAt = now() + timeoutMs;
+  const yieldTurn = options.yieldTurn ?? (() => new Promise<void>((resolve) => {
+    setTimeout(resolve, PROCESS_METRIC_POLL_MS);
+  }));
+  for (let attempt = 0; attempt < MAX_PROCESS_METRIC_ATTEMPTS; attempt += 1) {
+    if (options.shouldContinue?.() === false) {
+      throw new Error("The Windows runtime process admission is no longer current.");
+    }
+    if (now() >= deadlineAt) break;
+    // Electron publishes a freshly spawned UtilityProcess into app metrics on
+    // a later task. Always yield before the first bounded observation.
+    await yieldTurn();
+    if (options.shouldContinue?.() === false) {
+      throw new Error("The Windows runtime process admission is no longer current.");
+    }
+    const metrics = getMetrics();
+    if (metrics.length > MAX_PROCESS_METRICS) {
+      throw new Error("The Windows runtime process metrics are oversized.");
+    }
+    const candidates = metrics.filter((metric) =>
+      metric.pid === runtimePid
+      && metric.type === "Utility"
+      && metric.name === "Inertia Runtime");
+    if (candidates.length === 0) continue;
+    return windowsRuntimeProcessCreationIdentity(candidates, runtimePid);
+  }
+  throw new Error("The Windows runtime process metric is unavailable.");
+}
+
 const nativeJobSource = String.raw`
 using System;
 using System.IO;
+using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text;
 
 public static class InertiaRuntimeJob {
+  [StructLayout(LayoutKind.Sequential)]
+  private struct FILETIME {
+    public UInt32 dwLowDateTime;
+    public UInt32 dwHighDateTime;
+  }
+
   [StructLayout(LayoutKind.Sequential)]
   private struct IO_COUNTERS {
     public UInt64 ReadOperationCount;
@@ -144,6 +235,14 @@ public static class InertiaRuntimeJob {
   [DllImport("kernel32.dll", SetLastError = true)]
   private static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
   [DllImport("kernel32.dll", SetLastError = true)]
+  private static extern bool GetProcessTimes(
+    IntPtr process,
+    out FILETIME creation,
+    out FILETIME exit,
+    out FILETIME kernel,
+    out FILETIME user
+  );
+  [DllImport("kernel32.dll", SetLastError = true)]
   private static extern bool TerminateJobObject(IntPtr job, UInt32 exitCode);
   [DllImport("kernel32.dll", SetLastError = true)]
   private static extern UInt32 WaitForSingleObject(IntPtr handle, UInt32 milliseconds);
@@ -154,6 +253,7 @@ public static class InertiaRuntimeJob {
   private const UInt32 JOB_OBJECT_QUERY = 0x0004;
   private const UInt32 JOB_OBJECT_TERMINATE = 0x0008;
   private const UInt32 INFINITE = 0xffffffff;
+  private const UInt64 WINDOWS_TO_UNIX_EPOCH_TICKS = 116444736000000000;
   private const Int32 ERROR_FILE_NOT_FOUND = 2;
   private const int JobObjectBasicAccountingInformation = 1;
   private const int JobObjectExtendedLimitInformation = 9;
@@ -215,8 +315,59 @@ public static class InertiaRuntimeJob {
     }
   }
 
-  public static int Guard(string name, IntPtr process) {
+  private static int CreationIdentityStatus(
+    IntPtr process,
+    UInt64 expectedCreationTimeBits,
+    out int win32Error
+  ) {
+    FILETIME creation;
+    FILETIME exit;
+    FILETIME kernel;
+    FILETIME user;
+    if (!GetProcessTimes(process, out creation, out exit, out kernel, out user)) {
+      win32Error = Marshal.GetLastWin32Error();
+      return 1;
+    }
+    UInt64 ticks = ((UInt64)creation.dwHighDateTime << 32)
+      | creation.dwLowDateTime;
+    win32Error = 0;
+    if (ticks < WINDOWS_TO_UNIX_EPOCH_TICKS) return 2;
+    UInt64 unixMicroseconds = (ticks / 10)
+      - (WINDOWS_TO_UNIX_EPOCH_TICKS / 10);
+    double actualCreationTimeMs = (double)unixMicroseconds / 1000.0;
+    UInt64 actualCreationTimeBits = unchecked(
+      (UInt64)BitConverter.DoubleToInt64Bits(actualCreationTimeMs)
+    );
+    return actualCreationTimeBits == expectedCreationTimeBits ? 0 : 2;
+  }
+
+  public static int Guard(
+    string name,
+    IntPtr process,
+    string expectedCreationTimeBitsValue
+  ) {
     Stage("native-guard-start");
+    UInt64 expectedCreationTimeBits;
+    if (!UInt64.TryParse(
+      expectedCreationTimeBitsValue,
+      NumberStyles.None,
+      CultureInfo.InvariantCulture,
+      out expectedCreationTimeBits
+    )) {
+      return Failure("process-identity-invalid", 19, 0);
+    }
+    int identityError;
+    int identityStatus = CreationIdentityStatus(
+      process,
+      expectedCreationTimeBits,
+      out identityError
+    );
+    if (identityStatus == 1) {
+      return Failure("read-process-identity", 12, identityError);
+    }
+    if (identityStatus == 2) {
+      return Failure("process-identity-mismatch", 18, 0);
+    }
     IntPtr job = CreateJobObject(IntPtr.Zero, name);
     int createError = Marshal.GetLastWin32Error();
     if (job == IntPtr.Zero) return Failure("create-job", 10, createError);
@@ -347,12 +498,21 @@ export async function armWindowsRuntimeJob(
     readonly platform?: NodeJS.Platform;
     readonly environment?: NodeJS.ProcessEnv;
     readonly timeoutMs?: number;
+    readonly runtimeCreationTimeBits?: string;
     readonly spawnProcess?: typeof spawnPowerShell;
   } = {},
 ): Promise<WindowsRuntimeJobContainment | null> {
   if ((options.platform ?? process.platform) !== "win32") return null;
   if (!Number.isSafeInteger(runtimePid) || runtimePid <= 1) {
     throw new Error("The Windows runtime process identity is invalid.");
+  }
+  const runtimeCreationTimeBits = options.runtimeCreationTimeBits;
+  if (
+    typeof runtimeCreationTimeBits !== "string"
+    || !/^[1-9][0-9]{0,19}$/u.test(runtimeCreationTimeBits)
+    || BigInt(runtimeCreationTimeBits) > 0xffff_ffff_ffff_ffffn
+  ) {
+    throw new Error("The Windows runtime creation identity is invalid.");
   }
   const name = windowsRuntimeJobName(runtimeGenerationId);
   if (activeJobs.has(name)) {
@@ -361,7 +521,11 @@ export async function armWindowsRuntimeJob(
   const child = (options.spawnProcess ?? spawnPowerShell)(
     commandScript(
       `$result = try {
-  [InertiaRuntimeJob]::Guard('${name}', $runtimeHandle)
+  [InertiaRuntimeJob]::Guard(
+    '${name}',
+    $runtimeHandle,
+    '${runtimeCreationTimeBits}'
+  )
 } finally {
   $runtimeProcess.Dispose()
 }

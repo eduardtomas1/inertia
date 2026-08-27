@@ -59,4 +59,107 @@ describe("runtime process containment admission", () => {
       type: "runtime.start",
     }));
   });
+
+  it("ignores an expected containment rejection after runtime stop", async () => {
+    let rejectContainment!: (error: Error) => void;
+    const armed = new Promise<RuntimeOwnedProcessContainment | null>(
+      (_resolve, reject) => { rejectContainment = reject; },
+    );
+    const child = new FakeUtilityProcess();
+    const record = createRuntimeProcessRecord({
+      child: child as never,
+      generation: 1,
+      runtimeGenerationId: "20000000-0000-4000-8000-000000000002:1",
+      cleanupReceiptIds: [],
+    });
+    let runningDesired = true;
+    const persist = vi.fn(() => true);
+    const post = vi.fn();
+    const reject = vi.fn();
+    const admission = new RuntimeProcessContainmentAdmission({
+      arm: vi.fn(() => armed),
+      systemBootId: "test:10000000-0000-4000-8000-000000000001",
+      workerOptions: {
+        dataDirectory: "/runtime",
+        defaultWorkspacePath: "/workspace",
+        enableProviders: false,
+      },
+      isCurrent: (candidate) => candidate === record,
+      isRunningDesired: () => runningDesired,
+      hasQuarantinedProcesses: () => false,
+      persist,
+      post,
+      reject,
+    });
+
+    admission.bind(record);
+    child.emit("spawn");
+    runningDesired = false;
+    rejectContainment(new Error(
+      "The Windows runtime process admission is no longer current.",
+    ));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(reject).not.toHaveBeenCalled();
+    expect(persist).not.toHaveBeenCalled();
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it.each(["resolve", "reject"] as const)(
+    "ignores a late containment %s after the runtime process exits",
+    async (settlement) => {
+      let resolveContainment!: (
+        value: RuntimeOwnedProcessContainment | null,
+      ) => void;
+      let rejectContainment!: (error: Error) => void;
+      const armed = new Promise<RuntimeOwnedProcessContainment | null>(
+        (resolve, reject) => {
+          resolveContainment = resolve;
+          rejectContainment = reject;
+        },
+      );
+      const containment = {
+        kind: "windows-job-v1",
+        name: `Global\\InertiaRuntime-${"a".repeat(64)}`,
+      } as const;
+      const child = new FakeUtilityProcess();
+      const record = createRuntimeProcessRecord({
+        child: child as never,
+        generation: 1,
+        runtimeGenerationId: "20000000-0000-4000-8000-000000000002:1",
+        cleanupReceiptIds: [],
+      });
+      const persist = vi.fn(() => true);
+      const post = vi.fn();
+      const reject = vi.fn();
+      const admission = new RuntimeProcessContainmentAdmission({
+        arm: vi.fn(() => armed),
+        systemBootId: "test:10000000-0000-4000-8000-000000000001",
+        workerOptions: {
+          dataDirectory: "/runtime",
+          defaultWorkspacePath: "/workspace",
+          enableProviders: false,
+        },
+        isCurrent: (candidate) => candidate === record,
+        isRunningDesired: () => true,
+        hasQuarantinedProcesses: () => false,
+        persist,
+        post,
+        reject,
+      });
+
+      admission.bind(record);
+      child.emit("spawn");
+      child.pid = undefined;
+      if (settlement === "resolve") resolveContainment(containment);
+      else rejectContainment(new Error("The runtime process exited."));
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(reject).not.toHaveBeenCalled();
+      expect(persist).not.toHaveBeenCalled();
+      expect(post).not.toHaveBeenCalled();
+    },
+  );
 });

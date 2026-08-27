@@ -18,6 +18,7 @@
 #define SESSION_DRAIN_POLLS 50
 #define TERM_GRACE_POLLS 5
 #define GUARDIAN_READY_POLLS 50
+#define TRANSIENT_PROBE_POLLS 5
 #define POLL_NANOSECONDS 20000000L
 
 struct session_member {
@@ -97,6 +98,52 @@ static int same_identity(
   return left->pbi_pid == right->pbi_pid
     && left->pbi_start_tvsec == right->pbi_start_tvsec
     && left->pbi_start_tvusec == right->pbi_start_tvusec;
+}
+
+enum exact_identity_state {
+  EXACT_IDENTITY_UNREADABLE = -1,
+  EXACT_IDENTITY_GONE_OR_CHANGED = 0,
+  EXACT_IDENTITY_MATCHED = 1
+};
+
+static enum exact_identity_state exact_identity(
+  pid_t pid,
+  const struct proc_bsdinfo *expected
+) {
+#if defined(INERTIA_RUNTIME_GUARDIAN_TEST_TRANSIENT_PARENT_IDENTITY_FAILURE)
+  static int injected_failure_remaining = 1;
+  if (authorization_requested && injected_failure_remaining > 0) {
+    injected_failure_remaining -= 1;
+    return EXACT_IDENTITY_UNREADABLE;
+  }
+#endif
+  struct proc_bsdinfo current;
+  if (read_identity(pid, &current)) {
+    return same_identity(expected, &current)
+      ? EXACT_IDENTITY_MATCHED
+      : EXACT_IDENTITY_GONE_OR_CHANGED;
+  }
+  errno = 0;
+  if (kill(pid, 0) != 0 && errno == ESRCH) {
+    return EXACT_IDENTITY_GONE_OR_CHANGED;
+  }
+  return EXACT_IDENTITY_UNREADABLE;
+}
+
+static int exact_identity_matches_bounded(
+  pid_t pid,
+  const struct proc_bsdinfo *expected
+) {
+  const struct timespec pause = { .tv_sec = 0, .tv_nsec = POLL_NANOSECONDS };
+  for (int poll = 0; poll < TRANSIENT_PROBE_POLLS; poll += 1) {
+    if (stop_requested) return 0;
+    const enum exact_identity_state state = exact_identity(pid, expected);
+    if (state != EXACT_IDENTITY_UNREADABLE) {
+      return state == EXACT_IDENTITY_MATCHED;
+    }
+    if (poll + 1 < TRANSIENT_PROBE_POLLS) (void)nanosleep(&pause, NULL);
+  }
+  return 0;
 }
 
 static int compare_session_members(const void *raw_left, const void *raw_right) {
@@ -386,6 +433,32 @@ static void observe_root_forks(struct owned_tree_tracker *tracker) {
   tracker->fork_tainted = 1;
 }
 
+static int refresh_owned_tree_bounded(
+  pid_t session_id,
+  pid_t guardian_pid,
+  struct owned_tree_tracker *tracker
+) {
+  const struct timespec pause = { .tv_sec = 0, .tv_nsec = POLL_NANOSECONDS };
+  for (int poll = 0; poll < TRANSIENT_PROBE_POLLS; poll += 1) {
+    observe_root_forks(tracker);
+#if defined(INERTIA_RUNTIME_GUARDIAN_TEST_TRANSIENT_CENSUS_FAILURE)
+    static int injected_failure_remaining = 1;
+    const int injected_failure = tracker->count > 0
+      && injected_failure_remaining > 0;
+    if (injected_failure) injected_failure_remaining -= 1;
+    else if (refresh_owned_tree(session_id, guardian_pid, tracker)) return 1;
+#else
+    if (refresh_owned_tree(session_id, guardian_pid, tracker)) return 1;
+#endif
+    // refresh_owned_tree swaps the authoritative member set only after a
+    // complete census, so a failed pass retains every prior exact identity.
+    // NOTE_FORK remains observed between attempts and permanently taints any
+    // possible escape; exhaustion therefore stays fail-closed.
+    if (poll + 1 < TRANSIENT_PROBE_POLLS) (void)nanosleep(&pause, NULL);
+  }
+  return 0;
+}
+
 static int initialize_owned_tree_tracker(struct owned_tree_tracker *tracker) {
   memset(tracker, 0, sizeof(*tracker));
   tracker->root_event_queue = -1;
@@ -460,7 +533,7 @@ static int freeze_owned_tree(
     // turn an otherwise empty tree into a permanent unreadable boundary.
     reap_children();
     observe_root_forks(tracker);
-    if (!refresh_owned_tree(session_id, guardian_pid, tracker)) return 0;
+    if (!refresh_owned_tree_bounded(session_id, guardian_pid, tracker)) return 0;
     memcpy(
       tracker->previous,
       tracker->members,
@@ -473,7 +546,7 @@ static int freeze_owned_tree(
     const struct timespec pause = { .tv_sec = 0, .tv_nsec = POLL_NANOSECONDS };
     (void)nanosleep(&pause, NULL);
     reap_children();
-    if (!refresh_owned_tree(session_id, guardian_pid, tracker)) return 0;
+    if (!refresh_owned_tree_bounded(session_id, guardian_pid, tracker)) return 0;
     if (same_member_sets(
       tracker->previous,
       previous_count,
@@ -500,13 +573,11 @@ static int bounded_owned_tree_cleanup(
   for (int poll = 0; poll < TERM_GRACE_POLLS; poll += 1) {
     (void)nanosleep(&pause, NULL);
     reap_children();
-    if (!refresh_owned_tree(session_id, guardian_pid, tracker)) return 0;
+    if (!refresh_owned_tree_bounded(session_id, guardian_pid, tracker)) return 0;
     if (tracker->count == 0) {
-      struct proc_bsdinfo current_runtime;
       const int completed_authority_intact = allow_completed_payload_forks
         && !stop_requested
-        && read_identity(runtime_pid, &current_runtime)
-        && same_identity(runtime_identity, &current_runtime);
+        && exact_identity_matches_bounded(runtime_pid, runtime_identity);
       return tracker->fork_tainted && !completed_authority_intact ? 0 : 1;
     }
   }
@@ -521,13 +592,11 @@ static int bounded_owned_tree_cleanup(
   for (int poll = 0; poll < SESSION_DRAIN_POLLS; poll += 1) {
     reap_children();
     observe_root_forks(tracker);
-    if (!refresh_owned_tree(session_id, guardian_pid, tracker)) return 0;
+    if (!refresh_owned_tree_bounded(session_id, guardian_pid, tracker)) return 0;
     if (tracker->count == 0) {
-      struct proc_bsdinfo current_runtime;
       const int completed_authority_intact = allow_completed_payload_forks
         && !stop_requested
-        && read_identity(runtime_pid, &current_runtime)
-        && same_identity(runtime_identity, &current_runtime);
+        && exact_identity_matches_bounded(runtime_pid, runtime_identity);
       return tracker->fork_tainted && !completed_authority_intact ? 0 : 1;
     }
     (void)nanosleep(&pause, NULL);
@@ -712,10 +781,8 @@ static int watch_mode(int argc, char *argv[]) {
     return 70;
   }
   while (!authorization_requested) {
-    struct proc_bsdinfo current_runtime;
     if (stop_requested
-      || !read_identity(runtime_pid, &current_runtime)
-      || !same_identity(&runtime_identity, &current_runtime)) {
+      || !exact_identity_matches_bounded(runtime_pid, &runtime_identity)) {
       const int drained = drain_owned_tree(
         self, self, &tracker, 0, runtime_pid, &runtime_identity
       );
@@ -729,10 +796,8 @@ static int watch_mode(int argc, char *argv[]) {
     free_owned_tree_tracker(&tracker);
     return 70;
   }
-  struct proc_bsdinfo authorized_runtime;
   if (stop_requested
-    || !read_identity(runtime_pid, &authorized_runtime)
-    || !same_identity(&runtime_identity, &authorized_runtime)) {
+    || !exact_identity_matches_bounded(runtime_pid, &runtime_identity)) {
     const int drained = drain_owned_tree(
       self, self, &tracker, 0, runtime_pid, &runtime_identity
     );
@@ -785,7 +850,7 @@ static int watch_mode(int argc, char *argv[]) {
   const int observer_armed = child_identity_read
     && arm_root_fork_observer(&tracker, child);
   const int initial_census = observer_armed
-    && refresh_owned_tree(self, self, &tracker);
+    && refresh_owned_tree_bounded(self, self, &tracker);
   const int child_index = initial_census
     ? member_index_by_pid(tracker.members, tracker.count, child)
     : -1;
@@ -819,10 +884,8 @@ static int watch_mode(int argc, char *argv[]) {
     observe_root_forks(&tracker);
     const pid_t waited = waitpid(child, &status, WNOHANG);
     if (waited == child) {
-      struct proc_bsdinfo current_runtime;
       if (!stop_requested
-        && read_identity(runtime_pid, &current_runtime)
-        && same_identity(&runtime_identity, &current_runtime)) {
+        && exact_identity_matches_bounded(runtime_pid, &runtime_identity)) {
         payload_settled = 1;
         if (WIFEXITED(status)) result = WEXITSTATUS(status);
         else if (WIFSIGNALED(status)) result = 128 + WTERMSIG(status);
@@ -839,7 +902,7 @@ static int watch_mode(int argc, char *argv[]) {
     // still reports it present. Scanning first would therefore turn every
     // quick, ordinary payload exit into an unproved cleanup even though the
     // guardian can reap that exact child here.
-    if (!refresh_owned_tree(self, self, &tracker)) {
+    if (!refresh_owned_tree_bounded(self, self, &tracker)) {
       // The exact root can exit after the nonblocking wait above but before
       // libproc reads its birth identity. A zombie still answers kill(pid, 0)
       // while proc_pidinfo no longer returns a complete identity, so the
@@ -847,11 +910,9 @@ static int watch_mode(int argc, char *argv[]) {
       // Reap only the exact child here; every other census failure remains
       // fail-closed.
       const pid_t reaped = waitpid(child, &status, WNOHANG);
-      struct proc_bsdinfo current_runtime;
       if (reaped == child
         && !stop_requested
-        && read_identity(runtime_pid, &current_runtime)
-        && same_identity(&runtime_identity, &current_runtime)) {
+        && exact_identity_matches_bounded(runtime_pid, &runtime_identity)) {
         payload_settled = 1;
         if (WIFEXITED(status)) result = WEXITSTATUS(status);
         else if (WIFSIGNALED(status)) result = 128 + WTERMSIG(status);
@@ -861,10 +922,8 @@ static int watch_mode(int argc, char *argv[]) {
       }
       break;
     }
-    struct proc_bsdinfo current_runtime;
     if (stop_requested
-      || !read_identity(runtime_pid, &current_runtime)
-      || !same_identity(&runtime_identity, &current_runtime)) {
+      || !exact_identity_matches_bounded(runtime_pid, &runtime_identity)) {
       result = 137;
       break;
     }

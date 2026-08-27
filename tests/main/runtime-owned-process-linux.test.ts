@@ -222,7 +222,13 @@ describe("Linux runtime process guardian", () => {
     ].join("");
     expect(() => execFileSync(process.execPath, ["-e", untrustedRelease])).toThrow();
     expect(readFileSync(`/proc/${pid}/comm`, "utf8").trim()).toBe("inertia-done");
-    execFileSync(guardian, [...common, "release"]);
+    const release = spawn(guardian, [...common, "release"], { stdio: "ignore" });
+    await new Promise<void>((resolve, reject) => {
+      release.once("error", reject);
+      release.once("close", (code) => code === 0
+        ? resolve()
+        : reject(new Error(`Release helper exited ${String(code)}.`)));
+    });
     await waitFor(() => !exists(pid));
   }, 15_000);
 });

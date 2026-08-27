@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/prctl.h>
+#include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
@@ -332,8 +333,17 @@ static int exact_signal_mode(int argc, char **argv) {
     const char *next_name = !strcmp(action, "claim") ? "inertia-claim"
       : (!strcmp(action, "exec") ? "inertia-owned" : "inertia-exit");
     struct timespec pause = { .tv_sec = 0, .tv_nsec = POLL_NS };
-    for (int poll = 0; poll < 50 && !named_status(pid, next_name); poll++) nanosleep(&pause, NULL);
-    if (!named_status(pid, next_name)) { close(pidfd); return 4; }
+    for (int poll = 0; poll < 50; poll++) {
+      if (named_status(pid, next_name)) { close(pidfd); return 0; }
+      if (!strcmp(action, "release")) {
+        errno = 0;
+        if (syscall(SYS_pidfd_send_signal, pidfd, 0, NULL, 0) < 0 && errno == ESRCH) {
+          close(pidfd); return 0;
+        }
+      }
+      nanosleep(&pause, NULL);
+    }
+    close(pidfd); return 4;
   }
   close(pidfd); return 0;
 }
@@ -427,6 +437,8 @@ static int watch_mode(int argc, char **argv) {
   }
 }
 int main(int argc, char **argv) {
+  const struct rlimit no_core = { .rlim_cur = 0, .rlim_max = 0 };
+  if (setrlimit(RLIMIT_CORE, &no_core)) return 70;
   if (argc == 2 && !strcmp(argv[1], "seccomp-selftest")) return seccomp_selftest();
   if (argc == 3 && !strcmp(argv[1], "identity")) return identity_mode(argv[2]);
   if (argc == 3 && !strcmp(argv[1], "ready")) return ready_mode(argv[2]);

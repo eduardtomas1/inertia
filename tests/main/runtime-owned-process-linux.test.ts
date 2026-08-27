@@ -136,8 +136,7 @@ describe("Linux runtime process guardian", () => {
     const executable = statSync(guardian, { bigint: true });
     execFileSync(guardian, [
       "signal", String(guardianPid), identity[3]!,
-      String(executable.dev), String(executable.ino),
-      String(executable.dev), String(executable.ino), "release",
+      String(executable.dev), String(executable.ino), "kill",
     ]);
     await waitFor(() => !exists(guardianPid));
   }, 15_000);
@@ -195,7 +194,6 @@ describe("Linux runtime process guardian", () => {
     const common = [
       "signal", String(pid), ready[3]!,
       String(executable.dev), String(executable.ino),
-      String(executable.dev), String(executable.ino),
     ];
     expect(() => execFileSync(guardian, [...common, "exec"])).toThrow();
     const nested = [
@@ -213,6 +211,17 @@ describe("Linux runtime process guardian", () => {
     await waitFor(() => {
       try { return readFileSync(`/proc/${pid}/comm`, "utf8").trim() === "inertia-done"; } catch { return false; }
     });
+    process.kill(pid, "SIGCONT");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(readFileSync(`/proc/${pid}/comm`, "utf8").trim()).toBe("inertia-done");
+    expect(readFileSync(`/proc/${pid}/status`, "utf8")).toContain("State:\tT");
+    const untrustedRelease = [
+      "const {spawnSync}=require('node:child_process');",
+      `const r=spawnSync(${JSON.stringify(guardian)},${JSON.stringify([...common, "release"])});`,
+      "process.exit(r.status ?? 99);",
+    ].join("");
+    expect(() => execFileSync(process.execPath, ["-e", untrustedRelease])).toThrow();
+    expect(readFileSync(`/proc/${pid}/comm`, "utf8").trim()).toBe("inertia-done");
     execFileSync(guardian, [...common, "release"]);
     await waitFor(() => !exists(pid));
   }, 15_000);

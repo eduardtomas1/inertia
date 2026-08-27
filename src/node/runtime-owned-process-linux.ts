@@ -114,8 +114,6 @@ export function signalLinuxGuardianExact(
     "signal",
     String(expected.pid),
     expected.startTimeTicks,
-    expected.guardianExecutableDevice,
-    expected.guardianExecutableInode,
     String(helper.dev),
     String(helper.ino),
     action,

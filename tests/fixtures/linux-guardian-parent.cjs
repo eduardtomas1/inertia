@@ -1,5 +1,5 @@
 const { spawn, spawnSync } = require("node:child_process");
-const { writeFileSync } = require("node:fs");
+const { existsSync, writeFileSync } = require("node:fs");
 const { statSync } = require("node:fs");
 
 const [guardian, payload, descendantPidPath, guardianPidPath] = process.argv.slice(2);
@@ -24,10 +24,19 @@ const timer = setInterval(() => {
   const common = [
     "signal", String(child.pid), start,
     String(guardianIdentity.dev), String(guardianIdentity.ino),
-    String(guardianIdentity.dev), String(guardianIdentity.ino),
   ];
   if (spawnSync(guardian, [...common, "claim"], { stdio: "ignore" }).status !== 0) process.exit(2);
   if (spawnSync(guardian, [...common, "exec"], { stdio: "ignore" }).status !== 0) process.exit(3);
   clearInterval(timer);
-  setTimeout(() => process.exit(0), 50);
+  const readinessDeadline = Date.now() + 5_000;
+  const readiness = setInterval(() => {
+    if (existsSync(descendantPidPath)) {
+      clearInterval(readiness);
+      process.exit(0);
+    }
+    if (Date.now() >= readinessDeadline) {
+      clearInterval(readiness);
+      process.exit(4);
+    }
+  }, 10);
 }, 10);

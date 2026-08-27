@@ -30,6 +30,7 @@ static volatile sig_atomic_t stop_requested;
 static volatile sig_atomic_t claimed;
 static volatile sig_atomic_t authorized;
 static volatile sig_atomic_t runtime_pid;
+static unsigned long long runtime_start;
 static volatile sig_atomic_t claim_sender;
 static volatile sig_atomic_t authorize_sender;
 
@@ -161,6 +162,20 @@ static int install_terminal_filter(pid_t pid, pid_t tid) {
     BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
     BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_exit_group, 0, 1),
     BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
+    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_openat, 0, 1),
+    BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
+    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_read, 0, 1),
+    BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
+    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_close, 0, 1),
+    BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
+    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_fstat, 0, 1),
+    BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
+    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_newfstatat, 0, 1),
+    BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
+    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_pidfd_open, 0, 1),
+    BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
+    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_prctl, 0, 1),
+    BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
     BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_tgkill, 0, 7),
     BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, args[0])),
     BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, (uint32_t)pid, 0, 5),
@@ -222,14 +237,22 @@ static int drain(void) {
 static int terminal_state(int clean, int status) {
   (void)prctl(PR_SET_NAME, clean ? "inertia-done" : "inertia-bad", 0, 0, 0);
   sigset_t blocked; sigfillset(&blocked); sigdelset(&blocked, SIGKILL); sigdelset(&blocked, SIGSTOP);
+  sigdelset(&blocked, SIGUSR2);
   (void)sigprocmask(SIG_SETMASK, &blocked, NULL);
   const pid_t pid = getpid(); const pid_t tid = (pid_t)syscall(SYS_gettid);
   if (!install_terminal_filter(pid, tid)) {
     clean = 0;
     (void)prctl(PR_SET_NAME, "inertia-bad", 0, 0, 0);
   }
-  (void)syscall(SYS_tgkill, pid, tid, SIGSTOP);
-  return clean ? status : 127;
+  authorize_sender = 0;
+  for (;;) {
+    (void)syscall(SYS_tgkill, pid, tid, SIGSTOP);
+    const pid_t sender = authorize_sender; authorize_sender = 0;
+    if (clean && sender && trusted_runtime_helper(sender, runtime_pid, runtime_start)) {
+      (void)prctl(PR_SET_NAME, "inertia-exit", 0, 0, 0);
+      return status;
+    }
+  }
 }
 static int identity_mode(const char *raw) {
   pid_t pid, parent = 0; unsigned long long start = 0; if (!parse_pid(raw, &pid)) return 64;
@@ -275,18 +298,17 @@ static int claimed_mode(const char *raw) {
   return 4;
 }
 static int exact_signal_mode(int argc, char **argv) {
-  if (argc != 9) return 64;
-  pid_t pid; unsigned long long start, device, inode, helper_device, helper_inode;
+  if (argc != 7) return 64;
+  pid_t pid; unsigned long long start, helper_device, helper_inode;
   if (!parse_pid(argv[2], &pid) || !parse_u64(argv[3], &start)
-    || !parse_u64(argv[4], &device) || !parse_u64(argv[5], &inode)
-    || !parse_u64(argv[6], &helper_device) || !parse_u64(argv[7], &helper_inode)) return 64;
+    || !parse_u64(argv[4], &helper_device) || !parse_u64(argv[5], &helper_inode)) return 64;
   struct stat helper; if (stat("/proc/self/exe", &helper)
     || (unsigned long long)helper.st_dev != helper_device
     || (unsigned long long)helper.st_ino != helper_inode) return 3;
-  const char *action = argv[8]; const char *expected_name = NULL; int first_signal = 0, second_signal = 0;
+  const char *action = argv[6]; const char *expected_name = NULL; int first_signal = 0, second_signal = 0;
   if (!strcmp(action, "claim")) { expected_name = "inertia-ready"; first_signal = SIGUSR1; }
   else if (!strcmp(action, "exec")) { expected_name = "inertia-claim"; first_signal = SIGUSR2; }
-  else if (!strcmp(action, "release")) { expected_name = "inertia-done"; first_signal = SIGCONT; }
+  else if (!strcmp(action, "release")) { expected_name = "inertia-done"; first_signal = SIGUSR2; second_signal = SIGCONT; }
   else if (!strcmp(action, "kill")) { expected_name = "inertia-done"; first_signal = SIGKILL; }
   else if (!strcmp(action, "stop")) { first_signal = SIGTERM; }
   else return 64;
@@ -298,7 +320,7 @@ static int exact_signal_mode(int argc, char **argv) {
     close(pidfd);
     return 3;
   }
-  const int valid = device > 0 && inode > 0 && same_process(pid, start)
+  const int valid = same_process(pid, start)
     && (expected_name ? named_status(pid, expected_name)
       : (named_status(pid, "inertia-ready") || named_status(pid, "inertia-claim")
         || named_status(pid, "inertia-owned")));
@@ -306,8 +328,9 @@ static int exact_signal_mode(int argc, char **argv) {
     || (second_signal && syscall(SYS_pidfd_send_signal, pidfd, second_signal, NULL, 0))) {
     close(pidfd); return 3;
   }
-  if (!strcmp(action, "claim") || !strcmp(action, "exec")) {
-    const char *next_name = !strcmp(action, "claim") ? "inertia-claim" : "inertia-owned";
+  if (!strcmp(action, "claim") || !strcmp(action, "exec") || !strcmp(action, "release")) {
+    const char *next_name = !strcmp(action, "claim") ? "inertia-claim"
+      : (!strcmp(action, "exec") ? "inertia-owned" : "inertia-exit");
     struct timespec pause = { .tv_sec = 0, .tv_nsec = POLL_NS };
     for (int poll = 0; poll < 50 && !named_status(pid, next_name); poll++) nanosleep(&pause, NULL);
     if (!named_status(pid, next_name)) { close(pidfd); return 4; }
@@ -343,7 +366,8 @@ static int watch_mode(int argc, char **argv) {
   struct sigaction stop = {0}, claim = {0}, authorize = {0};
   stop.sa_handler = stop_handler; claim.sa_sigaction = claim_handler; claim.sa_flags = SA_SIGINFO;
   authorize.sa_sigaction = authorize_handler; authorize.sa_flags = SA_SIGINFO;
-  sigemptyset(&stop.sa_mask); sigemptyset(&claim.sa_mask); sigemptyset(&authorize.sa_mask); runtime_pid = parent;
+  sigemptyset(&stop.sa_mask); sigemptyset(&claim.sa_mask); sigemptyset(&authorize.sa_mask);
+  runtime_pid = parent; runtime_start = parent_start;
   if (sigaction(SIGTERM, &stop, NULL) || sigaction(SIGINT, &stop, NULL) || sigaction(SIGHUP, &stop, NULL)
     || sigaction(SIGUSR1, &claim, NULL) || sigaction(SIGUSR2, &authorize, NULL)) return 70;
   int gate[2]; if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, gate)) return 70;

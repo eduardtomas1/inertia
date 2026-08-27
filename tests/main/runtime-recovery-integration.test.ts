@@ -198,7 +198,7 @@ describe("runtime recovery supervisor integration", () => {
         dataDirectory,
         defaultWorkspacePath: workspaceDirectory,
         enableProviders: false,
-        ...(process.platform === "darwin"
+        ...(process.platform === "darwin" || process.platform === "linux"
           ? {
               runtimeProcessGuardianPath: join(
                 process.cwd(),
@@ -317,7 +317,7 @@ describe("runtime recovery supervisor integration", () => {
         dataDirectory,
         defaultWorkspacePath: workspaceDirectory,
         enableProviders: false,
-        ...(process.platform === "darwin"
+        ...(process.platform === "darwin" || process.platform === "linux"
           ? {
               runtimeProcessGuardianPath: join(
                 process.cwd(),
@@ -426,7 +426,7 @@ describe("runtime recovery supervisor integration", () => {
         dataDirectory,
         defaultWorkspacePath: workspaceDirectory,
         enableProviders: false,
-        ...(process.platform === "darwin"
+        ...(process.platform === "darwin" || process.platform === "linux"
           ? {
               runtimeProcessGuardianPath: join(
                 process.cwd(),

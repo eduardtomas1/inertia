@@ -1,5 +1,4 @@
-import { spawn } from "node:child_process";
-import { chmodSync, mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -30,6 +29,12 @@ function activate(directory: string): void {
     directory,
     runtimeGenerationId,
     systemBootId,
+    {
+      darwinGuardianPath: join(
+        process.cwd(),
+        "resources/generated/runtime-process-guardian/runtime-process-guardian",
+      ),
+    },
   );
   if (deactivate) deactivators.push(deactivate);
 }
@@ -49,6 +54,7 @@ describe.skipIf(process.platform !== "linux")(
       activate(directory);
       const journal = new RuntimeOwnedProcessJournal(directory);
       const responder = [
+        `#!${process.execPath}`,
         "let buffered = '';",
         "process.stdin.setEncoding('utf8');",
         "process.stdin.on('data', (chunk) => {",
@@ -67,14 +73,13 @@ describe.skipIf(process.platform !== "linux")(
         "});",
         "setInterval(() => undefined, 1000);",
       ].join("\n");
-      const spawnProcess = ((_command: string, _args: readonly string[], options: object) =>
-        spawn(process.execPath, ["-e", responder], options)) as typeof spawn;
+      const executable = join(directory, "codex-control-fixture");
+      writeFileSync(executable, responder, { encoding: "utf8", mode: 0o700 });
 
       await expect(withCodexControlClient({
-        executable: "/ignored/codex",
+        executable,
         environment: process.env,
         cwd: directory,
-        spawnProcess,
       }, async ({ request }) => await request("thread/list")))
         .resolves.toEqual({ method: "thread/list" });
 

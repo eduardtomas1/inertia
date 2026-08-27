@@ -340,6 +340,10 @@ describe.skipIf(process.platform !== "linux")(
         systemBootId,
         {
           deadlineAt: Date.now() + 2_000,
+          darwinGuardianPath: join(
+            process.cwd(),
+            "resources/generated/runtime-process-guardian/runtime-process-guardian",
+          ),
           forceKill,
           readIdentity: () => null,
         },

@@ -521,6 +521,42 @@ describe("Linux runtime process guardian", () => {
         });
       });
       expect(owned.requestGuardianStop()).toBe(true);
+      await expect(owned.waitForGuardianStop()).resolves.toBe(true);
+      await exited;
+      await waitFor(() => new RuntimeOwnedProcessJournal(root, {
+        platform: "linux", darwinGuardianPath: guardian,
+      }).records(generation)?.length === 0);
+      expect(owned.confirmStopped()).toBe(true);
+    } finally {
+      deactivate?.();
+    }
+  }, 15_000);
+
+  linuxIt("consumes an immediate PID-backed stop before guardian admission", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-linux-pty-immediate-stop-")); roots.push(root);
+    const guardian = compileGuardian(root);
+    const generation = "51000000-0000-4000-8000-000000000005:1";
+    const boot = "test:61000000-0000-4000-8000-000000000006";
+    const deactivate = activateRuntimeOwnedProcessRegistry(root, generation, boot, {
+      platform: "linux", darwinGuardianPath: guardian,
+    });
+    try {
+      const invocation = runtimeOwnedPtyInvocation("/bin/sleep", ["60"]);
+      if (!Array.isArray(invocation.args)) throw new Error("Expected guarded PTY arguments.");
+      const owned = spawnRuntimeOwnedPidProcess(() => spawnPty(
+        invocation.command,
+        [...invocation.args],
+        { cwd: root, env: { PATH: "/usr/bin:/bin" } },
+      ), { darwinGuardianCommand: invocation.command });
+      const exited = new Promise<void>((resolve) => {
+        owned.process.onExit(({ signal }) => {
+          owned.releaseIfGroupExited(signal);
+          resolve();
+        });
+      });
+
+      expect(owned.requestGuardianStop()).toBe(true);
+      await expect(owned.waitForGuardianStop()).resolves.toBe(true);
       await exited;
       await waitFor(() => new RuntimeOwnedProcessJournal(root, {
         platform: "linux", darwinGuardianPath: guardian,
@@ -559,7 +595,7 @@ describe("Linux runtime process guardian", () => {
     renameSync(guardian, movedGuardian);
     try {
       expect(owned.requestGuardianStop()).toBe(true);
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await expect(owned.waitForGuardianStop()).resolves.toBe(false);
       expect(exists(owned.process.pid)).toBe(true);
       expect(new RuntimeOwnedProcessJournal(root, {
         platform: "linux", darwinGuardianPath: movedGuardian,

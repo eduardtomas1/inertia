@@ -7,6 +7,7 @@ import WebSocket from "ws";
 import type { ServerEvent } from "../shared/contracts";
 import {
   spawnRuntimeOwnedPidProcess,
+  type RuntimeOwnedPidProcess,
 } from "../node/runtime-owned-processes";
 import { runtimeOwnedPtyInvocation } from "../node/runtime-owned-pty-invocation";
 import {
@@ -42,6 +43,7 @@ interface TerminalSession {
   terminateProcessTree: OwnedPidProcessTreeTermination | null;
   confirmOwnedProcessStopped: () => boolean;
   requestOwnedGuardianStop: () => boolean;
+  waitForOwnedGuardianStop: () => Promise<boolean>;
   flushOutput: () => void;
   disposeOutput: () => void;
   onExit?: (exitCode: number) => void;
@@ -59,6 +61,10 @@ export interface TerminalManagerOptions {
     pid: number,
     waitForExit: WaitForProcessExit,
   ) => Promise<boolean>;
+  spawnOwnedTerminalProcess?: (
+    spawnProcess: () => IPty,
+    options: { readonly darwinGuardianCommand?: string },
+  ) => RuntimeOwnedPidProcess<IPty>;
 }
 
 function userShell(): { executable: string; args: string[] } {
@@ -111,6 +117,10 @@ export class TerminalManager {
     pid: number,
     waitForExit: WaitForProcessExit,
   ) => OwnedPidProcessTreeTermination;
+  private readonly spawnOwnedTerminalProcess: (
+    spawnProcess: () => IPty,
+    options: { readonly darwinGuardianCommand?: string },
+  ) => RuntimeOwnedPidProcess<IPty>;
   private readonly closingFailures = new Map<string, Error>();
 
   constructor(options: TerminalManagerOptions = {}) {
@@ -128,6 +138,8 @@ export class TerminalManager {
       1,
       Math.min(Math.trunc(options.outputFlushMs ?? OUTPUT_FLUSH_MS), 50),
     );
+    this.spawnOwnedTerminalProcess = options.spawnOwnedTerminalProcess
+      ?? spawnRuntimeOwnedPidProcess;
     const terminateProcessTree = options.terminateProcessTree;
     this.createProcessTreeTermination = options.createProcessTreeTermination
       ?? ((pid, waitForExit) => {
@@ -292,9 +304,10 @@ export class TerminalManager {
     let confirmOwnedProcessStopped!: () => boolean;
     let releaseOwnedProcessIfExited!: (exitSignal?: number) => void;
     let requestOwnedGuardianStop!: () => boolean;
+    let waitForOwnedGuardianStop!: () => Promise<boolean>;
     try {
       const invocation = runtimeOwnedPtyInvocation(executable, args);
-      const owned = spawnRuntimeOwnedPidProcess(() => this.spawnTerminal(
+      const owned = this.spawnOwnedTerminalProcess(() => this.spawnTerminal(
         invocation.command,
         invocation.args,
         {
@@ -309,6 +322,7 @@ export class TerminalManager {
       confirmOwnedProcessStopped = owned.confirmStopped;
       releaseOwnedProcessIfExited = owned.releaseIfGroupExited;
       requestOwnedGuardianStop = owned.requestGuardianStop;
+      waitForOwnedGuardianStop = owned.waitForGuardianStop;
     } catch {
       throw new TerminalError("Unable to start a terminal for this project.");
     }
@@ -390,6 +404,7 @@ export class TerminalManager {
       terminateProcessTree: null,
       confirmOwnedProcessStopped,
       requestOwnedGuardianStop,
+      waitForOwnedGuardianStop,
       flushOutput,
       disposeOutput,
       onExit,
@@ -533,6 +548,10 @@ export class TerminalManager {
       // reparenting a surviving background process beyond discovery.
       session.terminateProcessTree ??= session.requestOwnedGuardianStop()
         ? async () => {
+            // A close can race the platform guardian's bounded asynchronous
+            // admission. Let that exact guardian consume the recorded stop
+            // request before starting the shorter PTY-exit deadline.
+            await session.waitForOwnedGuardianStop();
             const exited = await waitForExit(this.shutdownTimeoutMs);
             if (!exited) return false;
             const deadlineAt = Date.now() + this.shutdownTimeoutMs;

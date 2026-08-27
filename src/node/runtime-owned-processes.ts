@@ -961,6 +961,7 @@ export interface RuntimeOwnedPidProcess<T> {
   confirmStopped(): boolean;
   releaseIfGroupExited(exitSignal?: number): void;
   requestGuardianStop(): boolean;
+  waitForGuardianStop(): Promise<boolean>;
 }
 
 export function spawnRuntimeOwnedPidProcess<T extends { readonly pid: number }>(
@@ -974,6 +975,7 @@ export function spawnRuntimeOwnedPidProcess<T extends { readonly pid: number }>(
       confirmStopped: () => true,
       releaseIfGroupExited: () => undefined,
       requestGuardianStop: () => false,
+      waitForGuardianStop: async () => false,
     };
   }
   if (registry.tainted) throw new Error("Runtime process ownership is tainted until restart.");
@@ -1009,6 +1011,7 @@ export function spawnRuntimeOwnedPidProcess<T extends { readonly pid: number }>(
         spawnedAfterMs,
       );
       trackAdmission(registry, claim, admission);
+      let stopBarrier = admission;
       return {
         process: confirmedOwned,
         confirmStopped: () => claim.released,
@@ -1016,7 +1019,7 @@ export function spawnRuntimeOwnedPidProcess<T extends { readonly pid: number }>(
           if (claim.released) return true;
           claim.stopRequested = true;
           if (!claim.admission && claim.linuxIdentity && registry.darwinGuardianPath) {
-            void signalLinuxGuardianExactAsync(
+            stopBarrier = signalLinuxGuardianExactAsync(
               claim.linuxIdentity,
               registry.darwinGuardianPath,
               "stop",
@@ -1024,6 +1027,7 @@ export function spawnRuntimeOwnedPidProcess<T extends { readonly pid: number }>(
           }
           return true;
         },
+        waitForGuardianStop: async () => await stopBarrier,
         releaseIfGroupExited: (exitSignal) => {
           if (typeof exitSignal === "number" && exitSignal > 0) {
             registry.tainted = true;
@@ -1063,6 +1067,7 @@ export function spawnRuntimeOwnedPidProcess<T extends { readonly pid: number }>(
           }
           return true;
         },
+        waitForGuardianStop: async () => await admission,
         releaseIfGroupExited: (exitSignal) => {
           if (typeof exitSignal === "number" && exitSignal > 0) return;
           const settle = (admitted: boolean): void => {
@@ -1143,6 +1148,7 @@ export function spawnRuntimeOwnedPidProcess<T extends { readonly pid: number }>(
       }
       try { process.kill(confirmedOwned.pid, "SIGTERM"); return true; } catch { return false; }
     },
+    waitForGuardianStop: async () => false,
     releaseIfGroupExited: (exitSignal) => {
       if (registry.platform === "win32") {
         try { releaseActiveClaim(registry, claim); } catch {

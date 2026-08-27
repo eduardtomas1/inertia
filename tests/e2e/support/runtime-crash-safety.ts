@@ -128,25 +128,44 @@ export async function expectRuntimeCrashRecovery(
     name: "Project navigation",
     exact: true,
   });
-  await projectNavigation.getByRole("button", {
-    name: "New chat",
-    exact: true,
-  }).click();
-  await expect.poll(() => {
+  const activeConversationId = (): string | null => {
     const current = new Database(join(testDirectory, "data", "inertia.sqlite"), {
       readonly: true,
     });
     try {
       return (current.prepare(`
-        SELECT COUNT(*) AS count
-        FROM conversations
-        JOIN app_state ON app_state.active_conversation_id = conversations.id
-        WHERE app_state.id = 1
-      `).get() as { count: number }).count;
+        SELECT active_conversation_id
+        FROM app_state
+        WHERE id = 1
+      `).get() as { active_conversation_id: string | null } | undefined)
+        ?.active_conversation_id ?? null;
     } finally {
       current.close();
     }
-  }).toBe(1);
+  };
+  const previousConversationId = activeConversationId();
+  const activeConversationRow = projectNavigation.locator(
+    '.conversation-row[aria-current="page"]',
+  );
+  const previousActiveConversationRow = await activeConversationRow.count() > 0
+    ? await activeConversationRow.elementHandle()
+    : null;
+  await projectNavigation.getByRole("button", {
+    name: "New chat",
+    exact: true,
+  }).click();
+  let activeConversation: string | null = null;
+  await expect.poll(() => {
+    const candidate = activeConversationId();
+    activeConversation = candidate && candidate !== previousConversationId
+      ? candidate
+      : null;
+    return activeConversation;
+  }).not.toBeNull();
+  await expect.poll(() => activeConversationRow.evaluateAll((rows, previous) =>
+    rows.length === 1 && (previous === null || rows[0] !== previous),
+  previousActiveConversationRow)).toBe(true);
+  await previousActiveConversationRow?.dispose();
   await expect(page.locator(".app-shell")).toHaveAttribute(
     "data-runtime-generation",
     /^[0-9a-f-]{36}$/iu,
@@ -185,16 +204,16 @@ export async function expectRuntimeCrashRecovery(
     // killed. An ordinary interactive shell exits when its PTY owner dies,
     // which intentionally exercises the separate missing-root fail-closed
     // boundary instead of the positive exact-identity recovery path below.
-    // Encode the marker embedded in the command so terminal echo cannot make
-    // the readiness assertion pass before exec installs the SIGHUP handler.
-    const recoveryRootReadyMarker = "INERTIA_RECOVERY_ROOT_READY:";
-    const encodedReadyMarker = Buffer.from(
-      recoveryRootReadyMarker,
-      "utf8",
-    ).toString("base64");
+    // Publish readiness outside the renderer after installing the SIGHUP
+    // handler. Reading xterm's DOM can itself stall on a loaded native runner,
+    // while this unique file proves the exact helper reached the same point.
+    const recoveryRootReadyPath = join(
+      testDirectory,
+      `runtime-recovery-root-ready-${randomUUID()}.txt`,
+    );
     const recoveryRootSource = [
       "process.on('SIGHUP', () => undefined);",
-      `process.stdout.write(Buffer.from(${JSON.stringify(encodedReadyMarker)},'base64')+String(process.pid)+'\\n');`,
+      `require('node:fs').writeFileSync(${JSON.stringify(recoveryRootReadyPath)},String(process.pid),{encoding:'utf8',flag:'wx'});`,
       "setInterval(() => undefined, 1000);",
     ].join("");
     const terminalInput = terminal.locator(".xterm-helper-textarea");
@@ -203,11 +222,13 @@ export async function expectRuntimeCrashRecovery(
       `exec ${JSON.stringify(process.execPath)} -e ${JSON.stringify(recoveryRootSource)}`,
     );
     await page.keyboard.press("Enter");
-    await expect.poll(async () => {
-      const match = (await terminal.textContent())?.match(
-        /INERTIA_RECOVERY_ROOT_READY:([0-9]+)/u,
-      );
-      const pid = Number(match?.[1] ?? 0);
+    await expect.poll(() => {
+      let pid = 0;
+      try {
+        pid = Number(readFileSync(recoveryRootReadyPath, "utf8").trim());
+      } catch {
+        return null;
+      }
       recoveryRootPid = Number.isSafeInteger(pid) && pid > 1 ? pid : null;
       if (recoveryRootPid) {
         const identity = readLinuxProcessIdentity(recoveryRootPid);
@@ -216,7 +237,7 @@ export async function expectRuntimeCrashRecovery(
           : null;
       }
       return recoveryRootPid;
-    }).not.toBeNull();
+    }, { timeout: 15_000, intervals: [25] }).not.toBeNull();
     expect(recoveryGuardianPid).not.toBeNull();
   }
   if (process.platform === "win32") {

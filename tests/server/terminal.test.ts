@@ -759,6 +759,57 @@ describe("TerminalManager", () => {
     expect(shutdownFinished).toBe(true);
   });
 
+  it("starts the guarded exit deadline after pending admission consumes stop", async () => {
+    vi.useFakeTimers();
+    try {
+      const terminal = fakeTerminal();
+      let settleGuardianStop!: (confirmed: boolean) => void;
+      const guardianStop = new Promise<boolean>((resolve) => {
+        settleGuardianStop = resolve;
+      });
+      let ownershipStopped = false;
+      const requestGuardianStop = vi.fn(() => true);
+      const manager = new TerminalManager({
+        spawnTerminal: vi.fn(() => terminal.pty),
+        shutdownTimeoutMs: 20,
+        spawnOwnedTerminalProcess: (spawnProcess) => ({
+          process: spawnProcess(),
+          confirmStopped: () => ownershipStopped,
+          releaseIfGroupExited: () => undefined,
+          requestGuardianStop,
+          waitForGuardianStop: async () => await guardianStop,
+        }),
+      });
+      const owner = {} as WebSocket;
+      const terminalId = manager.createProcess(
+        owner,
+        process.cwd(),
+        "test-shell",
+        [],
+        {},
+        80,
+        24,
+      );
+
+      let closeSettled = false;
+      const closing = manager.closeManaged(terminalId).finally(() => {
+        closeSettled = true;
+      });
+      await vi.advanceTimersByTimeAsync(100);
+
+      expect(requestGuardianStop).toHaveBeenCalledOnce();
+      expect(closeSettled).toBe(false);
+
+      ownershipStopped = true;
+      terminal.emitExit();
+      settleGuardianStop(true);
+      await expect(closing).resolves.toBe(true);
+      await expect(manager.disposeAll()).resolves.toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("reports a bounded timeout for a disconnected terminal that never exits", async () => {
     vi.useFakeTimers();
     try {

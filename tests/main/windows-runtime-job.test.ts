@@ -2,6 +2,8 @@ import {
   spawn,
   type ChildProcessWithoutNullStreams,
 } from "node:child_process";
+import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -26,6 +28,20 @@ function nodeChild(source: string): ChildProcessWithoutNullStreams {
   });
   children.add(child);
   child.once("close", () => children.delete(child));
+  return child;
+}
+
+function protocolChild(stderr: string): ChildProcessWithoutNullStreams {
+  const stderrStream = new PassThrough();
+  const child = Object.assign(new EventEmitter(), {
+    stdin: new PassThrough(),
+    stdout: new PassThrough(),
+    stderr: stderrStream,
+    exitCode: null,
+    signalCode: null,
+    kill: () => true,
+  }) as unknown as ChildProcessWithoutNullStreams;
+  queueMicrotask(() => stderrStream.write(stderr));
   return child;
 }
 
@@ -330,9 +346,8 @@ describe("Windows runtime Job Object containment", () => {
       platform: "win32",
       runtimeCreationTimeBits,
       timeoutMs: 100,
-      spawnProcess: () => nodeChild(
-        "process.stderr.write('INERTIA_JOB_STAGE stage=powershell-start\\n');"
-        + "setInterval(() => undefined, 1000)",
+      spawnProcess: () => protocolChild(
+        "INERTIA_JOB_STAGE stage=powershell-start\n",
       ),
     })).rejects.toThrow(
       "The PowerShell helper did not complete Add-Type within 100ms. "
@@ -345,12 +360,10 @@ describe("Windows runtime Job Object containment", () => {
       platform: "win32",
       runtimeCreationTimeBits,
       timeoutMs: 100,
-      spawnProcess: () => nodeChild(
-        "process.stderr.write("
-        + "'INERTIA_JOB_STAGE stage=powershell-start\\n"
-        + "INERTIA_JOB_STAGE stage=add-type-complete\\n"
-        + "INERTIA_JOB_STAGE stage=native-guard-start\\n');"
-        + "setInterval(() => undefined, 1000)",
+      spawnProcess: () => protocolChild(
+        "INERTIA_JOB_STAGE stage=powershell-start\n"
+        + "INERTIA_JOB_STAGE stage=add-type-complete\n"
+        + "INERTIA_JOB_STAGE stage=native-guard-start\n",
       ),
     })).rejects.toThrow(
       "The native helper did not report readiness within 100ms after Guard started.",

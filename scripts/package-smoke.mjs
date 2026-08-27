@@ -307,7 +307,7 @@ async function requirePackagedAssets(executable) {
     throw new Error(`Expected exactly one packaged app.asar next to ${executable}; found ${resources.length}.`);
   }
   const [{ directory: resourcesDirectory, archive }] = resources;
-  if (process.platform === "darwin") {
+  if (process.platform === "darwin" || process.platform === "linux") {
     const guardian = join(
       resourcesDirectory,
       "runtime",
@@ -323,10 +323,10 @@ async function requirePackagedAssets(executable) {
       || !await isExecutableFile(guardian)
     ) {
       throw new Error(
-        "The packaged macOS runtime process guardian is missing or invalid.",
+        `The packaged ${process.platform} runtime process guardian is missing or invalid.`,
       );
     }
-    console.log("Packaged macOS runtime process guardian verified.");
+    console.log(`Packaged ${process.platform} runtime process guardian verified.`);
   }
   const asar = await readAsarArchive(archive);
   const tree = asar.tree;

@@ -283,7 +283,7 @@ async function verifyLinuxDirectoryBirthtime(
         if (failure) return;
         failure = error;
         if (child.exitCode === null && child.signalCode === null) {
-          child.kill("SIGKILL");
+          child.kill("SIGTERM");
         }
       };
       const timer = setTimeout(() => {

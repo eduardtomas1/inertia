@@ -9,7 +9,10 @@ import {
   forceKillPosixProcessTree,
   forceKillPosixProcessTreeWithStatus,
 } from "../node/posix-process-tree";
-import { confirmRuntimeOwnedProcessStopped } from "../node/runtime-owned-processes";
+import {
+  confirmRuntimeOwnedProcessStopped,
+  requestRuntimeOwnedGuardianStop,
+} from "../node/runtime-owned-processes";
 
 const DEFAULT_TERMINATION_WAIT_MS = 2_000;
 const PROCESS_GROUP_POLL_MS = 10;
@@ -564,6 +567,20 @@ export async function terminateProcessTreeAndWait(
     }
   }
   const waitForObservedDirectChildClose = observeDirectChildClose(child);
+
+  if (requestRuntimeOwnedGuardianStop(child)) {
+    const childClosed = await waitForObservedDirectChildClose(waitMs);
+    if (!childClosed) return false;
+    const ownershipDeadline = Date.now() + waitMs;
+    while (!confirmRuntimeOwnedProcessStopped(child)) {
+      const remainingMs = ownershipDeadline - Date.now();
+      if (remainingMs <= 0) return false;
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, Math.min(PROCESS_GROUP_POLL_MS, remainingMs));
+      });
+    }
+    return true;
+  }
 
   if (force) {
     const descendants = forceKillPosixProcessTree(pid, {

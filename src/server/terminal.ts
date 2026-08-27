@@ -41,6 +41,7 @@ interface TerminalSession {
   closing: Promise<void> | null;
   terminateProcessTree: OwnedPidProcessTreeTermination | null;
   confirmOwnedProcessStopped: () => boolean;
+  requestOwnedGuardianStop: () => boolean;
   flushOutput: () => void;
   disposeOutput: () => void;
   onExit?: (exitCode: number) => void;
@@ -290,6 +291,7 @@ export class TerminalManager {
     let pseudoterminal: IPty;
     let confirmOwnedProcessStopped!: () => boolean;
     let releaseOwnedProcessIfExited!: (exitSignal?: number) => void;
+    let requestOwnedGuardianStop!: () => boolean;
     try {
       const invocation = runtimeOwnedPtyInvocation(executable, args);
       const owned = spawnRuntimeOwnedPidProcess(() => this.spawnTerminal(
@@ -306,6 +308,7 @@ export class TerminalManager {
       pseudoterminal = owned.process;
       confirmOwnedProcessStopped = owned.confirmStopped;
       releaseOwnedProcessIfExited = owned.releaseIfGroupExited;
+      requestOwnedGuardianStop = owned.requestGuardianStop;
     } catch {
       throw new TerminalError("Unable to start a terminal for this project.");
     }
@@ -386,6 +389,7 @@ export class TerminalManager {
       closing: null,
       terminateProcessTree: null,
       confirmOwnedProcessStopped,
+      requestOwnedGuardianStop,
       flushOutput,
       disposeOutput,
       onExit,
@@ -527,10 +531,19 @@ export class TerminalManager {
       // Start with the root still alive. On POSIX the terminator freezes it
       // before snapshotting descendants, preventing a prompt root exit from
       // reparenting a surviving background process beyond discovery.
-      session.terminateProcessTree ??= this.createProcessTreeTermination(
-        session.pty.pid,
-        waitForExit,
-      );
+      session.terminateProcessTree ??= session.requestOwnedGuardianStop()
+        ? async () => {
+            const exited = await waitForExit(this.shutdownTimeoutMs);
+            if (!exited) return false;
+            const deadlineAt = Date.now() + this.shutdownTimeoutMs;
+            while (!session.confirmOwnedProcessStopped()) {
+              const remainingMs = deadlineAt - Date.now();
+              if (remainingMs <= 0) return false;
+              await new Promise<void>((resolve) => setTimeout(resolve, Math.min(10, remainingMs)));
+            }
+            return true;
+          }
+        : this.createProcessTreeTermination(session.pty.pid, waitForExit);
       void session.terminateProcessTree().then(
         (confirmed) => {
           if (!confirmed) {

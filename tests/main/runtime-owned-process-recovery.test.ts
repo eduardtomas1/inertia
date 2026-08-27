@@ -48,7 +48,7 @@ function activate(directory: string): void {
     directory,
     runtimeGenerationId,
     systemBootId,
-    process.platform === "darwin"
+    process.platform === "darwin" || process.platform === "linux"
       ? {
           darwinGuardianPath: join(
             process.cwd(),
@@ -216,6 +216,8 @@ describe.skipIf(process.platform !== "linux")(
       expect(raw).not.toContain("setInterval");
       expect(raw).not.toContain("PATH");
 
+      child.kill("SIGTERM");
+      await close;
       deactivate();
       const recovery = recoverRuntimeOwnedProcesses(
         directory,
@@ -225,7 +227,6 @@ describe.skipIf(process.platform !== "linux")(
       );
       expect(recovery).not.toBeNull();
       await expect(recovery).resolves.toBe(true);
-      await close;
       expect(journal.records(runtimeGenerationId)).toEqual([]);
       expect(journal.finishSession(runtimeGenerationId)).toBe(true);
     });
@@ -236,11 +237,11 @@ describe.skipIf(process.platform !== "linux")(
       const child = longRunningChild();
       const journal = new RuntimeOwnedProcessJournal(directory);
 
-      hardStop(child);
+      child.kill("SIGTERM");
       await closeOf(child);
-      await new Promise<void>((resolve) => setImmediate(resolve));
-
-      expect(confirmRuntimeOwnedProcessStopped(child)).toBe(true);
+      await vi.waitFor(() => {
+        expect(confirmRuntimeOwnedProcessStopped(child)).toBe(true);
+      });
       expect(journal.records(runtimeGenerationId)).toEqual([]);
       expect(journal.finishSession(runtimeGenerationId)).toBe(true);
       expect(readdirSync(directory).some((name) =>
@@ -1682,6 +1683,40 @@ describe("cross-platform runtime owned process recovery", () => {
       });
 
       await expect(recovery).resolves.toBe(true);
+      leases.refresh();
+      expect(leases.all()).toEqual([]);
+      expect(receipts.pending()).toEqual([runtimeGenerationId]);
+    },
+  );
+
+  it.each([
+    ["unavailable", systemBootId],
+    [systemBootId, "unavailable"],
+  ] as const)(
+    "recovers an empty Linux exact session across boot probe transition %s -> %s",
+    async (recordedBootId, currentBootId) => {
+      const directory = temporaryDirectory();
+      const leases = new RuntimeGenerationLeaseJournal(directory);
+      const receipts = new RuntimeCleanupReceiptJournal(directory);
+      const guardianPath = join(
+        process.cwd(),
+        "resources/generated/runtime-process-guardian/runtime-process-guardian",
+      );
+      expect(leases.publish(runtimeGenerationId, recordedBootId)).toBe(true);
+      expect(new RuntimeOwnedProcessJournal(directory, {
+        platform: "linux",
+        darwinGuardianPath: guardianPath,
+      }).startSession(runtimeGenerationId, recordedBootId)).toBe(true);
+
+      await expect(recoverPriorRuntimeGenerations({
+        dataDirectory: directory,
+        systemBootId: currentBootId,
+        deadlineAt: Date.now() + 2_000,
+        leases,
+        receipts,
+        platform: "linux",
+        darwinGuardianPath: guardianPath,
+      })).resolves.toBe(true);
       leases.refresh();
       expect(leases.all()).toEqual([]);
       expect(receipts.pending()).toEqual([runtimeGenerationId]);

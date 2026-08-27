@@ -245,7 +245,7 @@ describe("cross-platform packaged behavior contract", () => {
     expect(smoke).toContain('process.platform === "win32"');
     expect(smoke).toContain('process.platform === "linux"');
     expect(smoke).toContain(
-      '"The packaged macOS runtime process guardian is missing or invalid."',
+      "`The packaged ${process.platform} runtime process guardian is missing or invalid.`",
     );
     expect(smoke).toContain('"runtime-process-guardian"');
     expect(smoke).toContain("MAX_RUNTIME_GUARDIAN_BYTES");

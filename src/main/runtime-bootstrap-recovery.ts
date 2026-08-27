@@ -20,7 +20,7 @@ export function resolveRequiredRuntimeProcessGuardianPath(options: {
   readonly resourcesPath: string;
   readonly appPath: string;
 }): string | null {
-  const path = options.platform === "darwin"
+  const path = options.platform === "darwin" || options.platform === "linux"
     ? resolveRuntimeProcessGuardianPath(options)
     : null;
   if (path && !existsSync(path)) {

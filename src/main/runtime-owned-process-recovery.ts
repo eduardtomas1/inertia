@@ -5,6 +5,7 @@ import {
   readLinuxProcessIdentity,
   RuntimeOwnedProcessJournal,
   type RuntimeOwnedDarwinProcessPending,
+  type RuntimeOwnedLinuxProcessPending,
   type RuntimeOwnedProcessClaim,
   type RuntimeOwnedProcessPlatform,
   supportedRuntimeOwnedProcessPlatform,
@@ -13,6 +14,10 @@ import { forceKillRuntimeProcessTree } from "./runtime-process-tree.js";
 import { RuntimeCleanupReceiptJournal } from "./runtime-cleanup-receipts.js";
 import { RuntimeGenerationLeaseJournal } from "../node/runtime-generation-leases.js";
 import { recoverWindowsRuntimeJob } from "./windows-runtime-job.js";
+import {
+  linuxGuardianTerminalAuthority,
+  signalLinuxGuardianExact,
+} from "../node/runtime-owned-process-linux.js";
 export { readDarwinProcessIdentity } from "../node/runtime-owned-processes.js";
 
 type Kill = (pid: number, signal?: NodeJS.Signals | number) => true;
@@ -31,6 +36,8 @@ export interface RuntimeOwnedProcessRecoveryOptions {
   readonly recoverWindowsJob?: typeof recoverWindowsRuntimeJob;
   readonly darwinGuardianPath?: string;
   readonly waitForProcessGroupDrain?: (durationMs: number) => Promise<void>;
+  readonly linuxTerminalAuthority?: typeof linuxGuardianTerminalAuthority;
+  readonly signalLinuxGuardian?: typeof signalLinuxGuardianExact;
 }
 
 function exactPidAbsent(pid: number, kill: Kill): boolean {
@@ -55,6 +62,23 @@ function guardedDarwinPending(
     && "runtimeParentPid" in record
     && Number.isSafeInteger(record.runtimeParentPid)
     && Number(record.runtimeParentPid) > 1;
+}
+
+function guardedLinuxPending(
+  record: { readonly state: "pending" },
+): record is RuntimeOwnedLinuxProcessPending {
+  return "containment" in record
+    && record.containment === "linux-parent-gated-v1"
+    && "runtimeParentPid" in record
+    && "runtimeParentStartTimeTicks" in record
+    && Number.isSafeInteger(record.runtimeParentPid)
+    && Number(record.runtimeParentPid) > 1
+    && typeof record.runtimeParentStartTimeTicks === "string";
+}
+
+function exactLinuxParentAbsent(record: RuntimeOwnedLinuxProcessPending): boolean {
+  const current = readLinuxProcessIdentity(record.runtimeParentPid);
+  return !current || current.startTimeTicks !== record.runtimeParentStartTimeTicks;
 }
 
 function readProcessIdentity(
@@ -200,6 +224,10 @@ export function recoverRuntimeOwnedProcesses(
   options: RuntimeOwnedProcessRecoveryOptions,
 ): boolean | Promise<boolean> | null {
   const platform = options.platform ?? process.platform;
+  const linuxTerminalAuthority = options.linuxTerminalAuthority
+    ?? linuxGuardianTerminalAuthority;
+  const signalLinuxGuardian = options.signalLinuxGuardian
+    ?? signalLinuxGuardianExact;
   if (!supportedRuntimeOwnedProcessPlatform(platform)) return null;
   const journal = new RuntimeOwnedProcessJournal(dataDirectory, {
     platform,
@@ -237,9 +265,10 @@ export function recoverRuntimeOwnedProcesses(
         continue;
       }
       if (
-        platform !== "darwin"
-        || !guardedDarwinPending(record)
-        || !exactPidAbsent(record.runtimeParentPid, kill)
+        !((platform === "darwin" && guardedDarwinPending(record)
+          && exactPidAbsent(record.runtimeParentPid, kill))
+          || (platform === "linux" && guardedLinuxPending(record)
+            && exactLinuxParentAbsent(record)))
         || !journal.release(record.ownershipId)
       ) return false;
     }
@@ -263,7 +292,7 @@ export function recoverRuntimeOwnedProcesses(
         );
       });
     for (const record of records) {
-      if (record.state !== "owned") continue;
+      if (record.state !== "preauth" && record.state !== "owned" && record.state !== "retiring") continue;
       if (!claimMatchesPlatform(record, platform)) return false;
       if (record.systemBootId !== systemBootId) {
         if (!journal.release(record.ownershipId)) return false;
@@ -276,6 +305,12 @@ export function recoverRuntimeOwnedProcesses(
         return false;
       }
       if (!identity) {
+        if (
+          platform === "linux"
+          && (record.state === "preauth" || record.state === "retiring")
+          && journal.release(record.ownershipId)
+        ) continue;
+        if (platform === "linux" && options.darwinGuardianPath) return false;
         if (platform === "darwin") {
           if (
             !await waitForDarwinSessionDrain(
@@ -302,6 +337,54 @@ export function recoverRuntimeOwnedProcesses(
         continue;
       }
       if (!RuntimeOwnedProcessJournal.identityMatches(record, identity)) return false;
+      if (
+        platform === "linux"
+        && (record.state === "preauth" || record.state === "owned")
+        && options.darwinGuardianPath
+        && "startTimeTicks" in identity
+        && "startTimeTicks" in record.process
+      ) {
+        while (!linuxTerminalAuthority(record.process, options.darwinGuardianPath)) {
+          if (Date.now() + PROCESS_GROUP_DRAIN_POLL_MS >= options.deadlineAt) return false;
+          await waitForProcessGroupDrain(PROCESS_GROUP_DRAIN_POLL_MS);
+          const current = readIdentity(identity.pid);
+          if (!current) {
+            if (record.state === "preauth" && journal.release(record.ownershipId)) break;
+            return false;
+          }
+          if (!RuntimeOwnedProcessJournal.identityMatches(record, current)) return false;
+        }
+        if (record.state === "preauth") {
+          const currentRecords = journal.records(runtimeGenerationId);
+          if (!currentRecords) return false;
+          if (!currentRecords.some((candidate) =>
+            candidate.ownershipId === record.ownershipId)) continue;
+        }
+        if (record.state === "owned" && !journal.retire(record.ownershipId)) return false;
+        if (!signalLinuxGuardian(record.process, options.darwinGuardianPath, "kill")) return false;
+        while (Date.now() < options.deadlineAt && readIdentity(identity.pid)) {
+          await waitForProcessGroupDrain(PROCESS_GROUP_DRAIN_POLL_MS);
+        }
+        if (readIdentity(identity.pid) || !journal.release(record.ownershipId)) return false;
+        continue;
+      }
+      if (platform === "linux" && record.state === "retiring") {
+        if (
+          !options.darwinGuardianPath
+          || !("startTimeTicks" in identity)
+          || !("startTimeTicks" in record.process)
+          || !linuxTerminalAuthority(record.process, options.darwinGuardianPath)
+        ) return false;
+        if (!signalLinuxGuardian(record.process, options.darwinGuardianPath, "kill")) return false;
+        while (Date.now() < options.deadlineAt) {
+          const current = readIdentity(identity.pid);
+          if (!current) break;
+          if (!RuntimeOwnedProcessJournal.identityMatches(record, current)) return false;
+          await waitForProcessGroupDrain(PROCESS_GROUP_DRAIN_POLL_MS);
+        }
+        if (readIdentity(identity.pid) || !journal.release(record.ownershipId)) return false;
+        continue;
+      }
       if (platform === "darwin") {
         if (
           !("sessionId" in identity)
@@ -335,6 +418,12 @@ export function recoverRuntimeOwnedProcesses(
         identity.processGroupId !== identity.pid
         || Date.now() >= options.deadlineAt
       ) return false;
+      if (
+        platform === "linux"
+        && (!options.darwinGuardianPath
+          || !("startTimeTicks" in identity)
+          || !linuxTerminalAuthority(identity, options.darwinGuardianPath))
+      ) return false;
       const confirmed = await forceKill(identity.pid, {
         rootProcessGroup: true,
         deadlineAt: options.deadlineAt,
@@ -358,15 +447,18 @@ export function recoverPriorRuntimeGenerations(options: {
   const platform = options.platform ?? process.platform;
   if (!supportedRuntimeOwnedProcessPlatform(platform)) return null;
   options.leases.refresh();
-  const prior = options.leases.all().filter((lease) =>
-    lease.systemBootId === options.systemBootId);
-  if (prior.length === 0) return null;
   const journal = new RuntimeOwnedProcessJournal(options.dataDirectory, {
     platform,
     ...(options.darwinGuardianPath
       ? { darwinGuardianPath: options.darwinGuardianPath }
       : {}),
   });
+  const prior = options.leases.all().filter((lease) => (
+    lease.systemBootId === options.systemBootId
+    || (platform === "linux"
+      && journal.records(lease.runtimeGenerationId) !== null)
+  ));
+  if (prior.length === 0) return null;
   if (prior.some((lease) => journal.records(lease.runtimeGenerationId) === null)) {
     return null;
   }
@@ -375,7 +467,7 @@ export function recoverPriorRuntimeGenerations(options: {
       const recovered = recoverRuntimeOwnedProcesses(
         options.dataDirectory,
         lease.runtimeGenerationId,
-        options.systemBootId,
+        lease.systemBootId,
         {
           deadlineAt: options.deadlineAt,
           platform,

@@ -14,18 +14,23 @@ const output = join(outputDirectory, "runtime-process-guardian");
 mkdirSync(outputDirectory, { recursive: true, mode: 0o755 });
 rmSync(output, { force: true });
 
-if (process.platform !== "darwin") process.exit(0);
+if (process.platform !== "darwin" && process.platform !== "linux") process.exit(0);
+
+const compiler = process.platform === "darwin" ? "/usr/bin/xcrun" : "/usr/bin/cc";
+const compilerArgs = process.platform === "darwin"
+  ? ["clang"]
+  : [];
 
 const result = spawnSync(
-  "/usr/bin/xcrun",
+  compiler,
   [
-    "clang",
+    ...compilerArgs,
     "-std=c11",
     "-O2",
     "-Wall",
     "-Wextra",
     "-Werror",
-    join(root, "native", "runtime-process-guardian", "darwin.c"),
+    join(root, "native", "runtime-process-guardian", `${process.platform}.c`),
     "-o",
     output,
   ],
@@ -40,6 +45,6 @@ const result = spawnSync(
 );
 if (result.error || result.status !== 0) {
   const detail = `${result.stderr ?? ""}\n${result.stdout ?? ""}`.trim();
-  throw new Error(detail || "The macOS runtime process guardian could not be built.");
+  throw new Error(detail || `The ${process.platform} runtime process guardian could not be built.`);
 }
 chmodSync(output, 0o755);

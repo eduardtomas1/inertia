@@ -447,6 +447,50 @@ describe.skipIf(process.platform !== "linux")(
   },
 );
 
+describe.skipIf(process.platform !== "darwin")(
+  "macOS runtime owned process recovery",
+  () => {
+    it("preserves exact exit status for a burst of fast native payloads", async () => {
+      const directory = temporaryDirectory();
+      activate(directory);
+      const runs = await Promise.all(Array.from({ length: 16 }, async () =>
+        await new Promise<{ code: number | null; signal: NodeJS.Signals | null; output: string }>((resolveRun, rejectRun) => {
+          const invocation = runtimeOwnedProcessInvocation(
+            process.execPath,
+            ["--version"],
+          );
+          const child = spawnRuntimeOwnedProcess(() => spawn(
+            invocation.command,
+            invocation.args,
+            {
+              detached: true,
+              shell: false,
+              stdio: ["ignore", "pipe", "pipe"],
+            },
+          ));
+          liveChildren.add(child);
+          let output = "";
+          child.stdout?.on("data", (chunk: Buffer) => { output += chunk.toString("utf8"); });
+          child.stderr?.resume();
+          child.once("error", rejectRun);
+          child.once("close", (code, signal) => {
+            liveChildren.delete(child);
+            resolveRun({ code, signal, output });
+          });
+        }),
+      ));
+
+      expect(runs).toHaveLength(16);
+      expect(runs.filter(({ code, signal, output }) =>
+        code !== 0 || signal !== null || !/^v\d+/u.test(output.trim()))).toEqual([]);
+      const journal = new RuntimeOwnedProcessJournal(directory);
+      await vi.waitFor(() => {
+        expect(journal.records(runtimeGenerationId)).toEqual([]);
+      }, { timeout: 5_000 });
+    }, 20_000);
+  },
+);
+
 describe("cross-platform runtime owned process recovery", () => {
   it("preserves a verbatim Windows PTY command line without array quoting", () => {
     const commandLine = '/d /s /v:off /c "C:\\Tools\\agent.cmd ^"hello world^""';
@@ -1165,7 +1209,7 @@ describe("cross-platform runtime owned process recovery", () => {
     expect(reused).not.toHaveBeenCalled();
   });
 
-  it("never signals a reused macOS guardian PID after a claim failure", () => {
+  it("never signals a reused macOS guardian PID after an asynchronous claim failure", async () => {
     const directory = temporaryDirectory();
     const expected = {
       platform: "darwin" as const,
@@ -1176,6 +1220,13 @@ describe("cross-platform runtime owned process recovery", () => {
       startTimeSeconds: "1756100000",
       startTimeMicroseconds: 123_456,
     };
+    const reused = {
+      ...expected,
+      startTimeSeconds: "1756100001",
+    };
+    const readDarwinIdentityAsync = vi.fn()
+      .mockResolvedValueOnce(expected)
+      .mockResolvedValue(reused);
     const deactivate = activateRuntimeOwnedProcessRegistry(
       directory,
       runtimeGenerationId,
@@ -1184,10 +1235,8 @@ describe("cross-platform runtime owned process recovery", () => {
         platform: "darwin",
         darwinGuardianPath: "/trusted/runtime-process-guardian",
         readDarwinGuardianReady: () => expected,
-        readDarwinIdentity: () => ({
-          ...expected,
-          startTimeSeconds: "1756100001",
-        }),
+        readDarwinIdentityAsync,
+        readDarwinIdentity: () => reused,
       },
     );
     if (deactivate) deactivators.push(deactivate);
@@ -1203,13 +1252,131 @@ describe("cross-platform runtime owned process recovery", () => {
         spawnfile: "/trusted/runtime-process-guardian",
         kill: childKill,
         once: vi.fn(),
-      } as unknown as ChildProcess))).toThrow("could not be persisted");
+      } as unknown as ChildProcess))).not.toThrow();
+      await vi.waitFor(() => expect(claim).toHaveBeenCalledOnce());
       expect(childKill).not.toHaveBeenCalled();
       expect(processKill).not.toHaveBeenCalledWith(4_242, "SIGUSR1");
       expect(processKill).not.toHaveBeenCalledWith(4_242, "SIGKILL");
       expect(processKill).not.toHaveBeenCalledWith(-4_242, "SIGKILL");
     } finally {
       claim.mockRestore();
+      processKill.mockRestore();
+      deactivate?.();
+      if (deactivate) deactivators.splice(deactivators.indexOf(deactivate), 1);
+    }
+  });
+
+  it("returns the macOS guardian immediately while exact admission remains pending", async () => {
+    const directory = temporaryDirectory();
+    const expected = {
+      platform: "darwin" as const,
+      pid: 4_242,
+      parentPid: process.pid,
+      processGroupId: 4_242,
+      sessionId: 4_242,
+      startTimeSeconds: "1756100000",
+      startTimeMicroseconds: 123_456,
+    };
+    let resolveReady!: (identity: typeof expected) => void;
+    const ready = new Promise<typeof expected>((resolve) => { resolveReady = resolve; });
+    const deactivate = activateRuntimeOwnedProcessRegistry(
+      directory,
+      runtimeGenerationId,
+      systemBootId,
+      {
+        platform: "darwin",
+        darwinGuardianPath: "/trusted/runtime-process-guardian",
+        readDarwinGuardianReadyAsync: async () => await ready,
+        readDarwinIdentityAsync: async () => expected,
+      },
+    );
+    if (deactivate) deactivators.push(deactivate);
+    const processKill = vi.spyOn(process, "kill").mockReturnValue(true);
+    const child = {
+      pid: 4_242,
+      spawnfile: "/trusted/runtime-process-guardian",
+      kill: vi.fn(() => true),
+      once: vi.fn(),
+    } as unknown as ChildProcess;
+    try {
+      expect(spawnRuntimeOwnedProcess(() => child)).toBe(child);
+      expect(processKill).not.toHaveBeenCalledWith(4_242, "SIGUSR1");
+      expect(new RuntimeOwnedProcessJournal(directory)
+        .records(runtimeGenerationId)).toMatchObject([{ state: "pending" }]);
+
+      resolveReady(expected);
+      await vi.waitFor(() => {
+        expect(processKill).toHaveBeenCalledWith(4_242, "SIGUSR1");
+      });
+      expect(new RuntimeOwnedProcessJournal(directory)
+        .records(runtimeGenerationId)).toMatchObject([{ state: "owned" }]);
+    } finally {
+      processKill.mockRestore();
+      deactivate?.();
+      if (deactivate) deactivators.splice(deactivators.indexOf(deactivate), 1);
+    }
+  });
+
+  it("keeps timers live and coalesces delayed macOS release inspection", async () => {
+    const directory = temporaryDirectory();
+    const expected = {
+      platform: "darwin" as const,
+      pid: 4_242,
+      parentPid: process.pid,
+      processGroupId: 4_242,
+      sessionId: 4_242,
+      startTimeSeconds: "1756100000",
+      startTimeMicroseconds: 123_456,
+    };
+    let resolveEmpty!: (empty: boolean) => void;
+    const delayedEmpty = new Promise<boolean>((resolve) => { resolveEmpty = resolve; });
+    const readDarwinSessionEmptyAsync = vi.fn(async () => await delayedEmpty);
+    const deactivate = activateRuntimeOwnedProcessRegistry(
+      directory,
+      runtimeGenerationId,
+      systemBootId,
+      {
+        platform: "darwin",
+        darwinGuardianPath: "/trusted/runtime-process-guardian",
+        readDarwinGuardianReadyAsync: async () => expected,
+        readDarwinIdentityAsync: async () => expected,
+        readDarwinSessionEmptyAsync,
+      },
+    );
+    if (deactivate) deactivators.push(deactivate);
+    const processKill = vi.spyOn(process, "kill").mockReturnValue(true);
+    let closeHandler = (
+      _code: number | null,
+      _signal: NodeJS.Signals | null,
+    ): void => { throw new Error("The close handler was not registered."); };
+    const child = {
+      pid: 4_242,
+      spawnfile: "/trusted/runtime-process-guardian",
+      kill: vi.fn(() => true),
+      once: vi.fn((event: string, listener: typeof closeHandler) => {
+        if (event === "close") closeHandler = listener;
+        return child;
+      }),
+    } as unknown as ChildProcess;
+    try {
+      spawnRuntimeOwnedProcess(() => child);
+      await vi.waitFor(() => {
+        expect(processKill).toHaveBeenCalledWith(4_242, "SIGUSR1");
+      });
+      closeHandler(0, null);
+      closeHandler(0, null);
+
+      let timerObserved = false;
+      setTimeout(() => { timerObserved = true; }, 0);
+      await vi.waitFor(() => expect(timerObserved).toBe(true));
+      expect(readDarwinSessionEmptyAsync).toHaveBeenCalledTimes(1);
+
+      resolveEmpty(true);
+      await vi.waitFor(() => {
+        expect(new RuntimeOwnedProcessJournal(directory)
+          .records(runtimeGenerationId)).toEqual([]);
+      });
+    } finally {
       processKill.mockRestore();
       deactivate?.();
       if (deactivate) deactivators.splice(deactivators.indexOf(deactivate), 1);
@@ -1639,15 +1806,15 @@ describe("cross-platform runtime owned process recovery", () => {
 
       expect(child.exitCode).toBe(exitCode);
       expect(child.signalCode).toBeNull();
-      expect(new RuntimeOwnedProcessJournal(directory)
-        .records(runtimeGenerationId)).toEqual([]);
+      await vi.waitFor(() => expect(new RuntimeOwnedProcessJournal(directory)
+        .records(runtimeGenerationId)).toEqual([]));
       deactivate();
     },
     10_000,
   );
 
   it.runIf(process.platform === "darwin")(
-    "returns a completed macOS payload status after an ordinary child fork",
+    "preserves a normally completed fork under best-effort macOS containment",
     async () => {
       const directory = temporaryDirectory();
       activate(directory);
@@ -1671,8 +1838,8 @@ describe("cross-platform runtime owned process recovery", () => {
 
       expect(guardian.exitCode).toBe(78);
       expect(guardian.signalCode).toBeNull();
-      expect(new RuntimeOwnedProcessJournal(directory)
-        .records(runtimeGenerationId)).toEqual([]);
+      await vi.waitFor(() => expect(new RuntimeOwnedProcessJournal(directory)
+        .records(runtimeGenerationId)).toEqual([]));
       deactivate();
     },
     10_000,
@@ -1777,7 +1944,11 @@ describe("cross-platform runtime owned process recovery", () => {
       const child = longRunningChild();
       const close = closeOf(child);
       const journal = new RuntimeOwnedProcessJournal(directory);
-      expect(journal.records(runtimeGenerationId)).toHaveLength(1);
+      await vi.waitFor(() => {
+        expect(journal.records(runtimeGenerationId)).toMatchObject([{
+          state: "owned",
+        }]);
+      });
       deactivate();
 
       const recovery = recoverRuntimeOwnedProcesses(

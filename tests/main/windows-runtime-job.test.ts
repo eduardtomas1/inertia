@@ -97,6 +97,68 @@ describe("Windows runtime Job Object containment", () => {
     await closeChild(helper!);
   });
 
+  it("gives cold Add-Type startup a bounded stage-aware window", async () => {
+    let helper: ChildProcessWithoutNullStreams | null = null;
+    const containment = await armWindowsRuntimeJob(
+      runtimeGenerationId,
+      4_242,
+      {
+        platform: "win32",
+        timeoutMs: 500,
+        spawnProcess: () => {
+          helper = nodeChild(
+            "process.stderr.write('INERTIA_JOB_STAGE stage=powershell-start\\n');"
+            + "setTimeout(() => process.stderr.write("
+            + "'INERTIA_JOB_STAGE stage=add-type-complete\\n'), 350);"
+            + "setTimeout(() => {"
+            + "process.stderr.write('INERTIA_JOB_STAGE stage=native-guard-start\\n');"
+            + "process.stdout.write('READY\\n');"
+            + "}, 700);"
+            + "setInterval(() => undefined, 1000)",
+          );
+          return helper;
+        },
+      },
+    );
+
+    expect(containment).toEqual({
+      kind: "windows-job-v1",
+      name: windowsRuntimeJobName(runtimeGenerationId),
+    });
+    helper!.kill("SIGKILL");
+    await closeChild(helper!);
+  });
+
+  it("reports the last bounded helper startup stage on timeout", async () => {
+    await expect(armWindowsRuntimeJob(runtimeGenerationId, 4_242, {
+      platform: "win32",
+      timeoutMs: 100,
+      spawnProcess: () => nodeChild(
+        "process.stderr.write('INERTIA_JOB_STAGE stage=powershell-start\\n');"
+        + "setInterval(() => undefined, 1000)",
+      ),
+    })).rejects.toThrow(
+      "The PowerShell helper did not complete Add-Type within 100ms. "
+      + "INERTIA_JOB_STAGE stage=powershell-start",
+    );
+  });
+
+  it("keeps native arming fail closed after the startup window", async () => {
+    await expect(armWindowsRuntimeJob(runtimeGenerationId, 4_242, {
+      platform: "win32",
+      timeoutMs: 100,
+      spawnProcess: () => nodeChild(
+        "process.stderr.write("
+        + "'INERTIA_JOB_STAGE stage=powershell-start\\n"
+        + "INERTIA_JOB_STAGE stage=add-type-complete\\n"
+        + "INERTIA_JOB_STAGE stage=native-guard-start\\n');"
+        + "setInterval(() => undefined, 1000)",
+      ),
+    })).rejects.toThrow(
+      "The native helper did not report readiness within 100ms after Guard started.",
+    );
+  });
+
   it("fails closed when the native helper exits before readiness", async () => {
     await expect(armWindowsRuntimeJob(runtimeGenerationId, 4_242, {
       platform: "win32",
@@ -162,13 +224,23 @@ describe("Windows runtime Job Object containment", () => {
     "reports a real native Windows helper failure through bounded UTF-8 stderr",
     async () => {
       const generation = "30000000-0000-4000-8000-000000000004:1";
-      await expect(armWindowsRuntimeJob(generation, 4_294_967_294))
-        .rejects.toThrow(
-          "The native helper exited with code 12. "
-          + "INERTIA_JOB_ERROR stage=open-process win32=87",
+      const failure = await armWindowsRuntimeJob(generation, 4_294_967_294)
+        .then(
+          () => null,
+          (error: unknown) => error,
         );
+      expect(failure).toBeInstanceOf(Error);
+      expect((failure as Error).message).toContain(
+        "The native helper exited with code 12.",
+      );
+      expect((failure as Error).message).toContain(
+        "INERTIA_JOB_STAGE stage=native-guard-start",
+      );
+      expect((failure as Error).message).toContain(
+        "INERTIA_JOB_ERROR stage=open-process win32=87",
+      );
     },
-    20_000,
+    95_000,
   );
 
   it.runIf(process.platform === "win32")(
@@ -193,6 +265,6 @@ describe("Windows runtime Job Object containment", () => {
       await closeChild(child);
       await expect(cleanup).resolves.toBe(true);
     },
-    20_000,
+    95_000,
   );
 });

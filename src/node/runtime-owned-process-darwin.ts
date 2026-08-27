@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { isAbsolute, resolve } from "node:path";
 
 export interface DarwinProcessIdentity {
@@ -9,6 +9,64 @@ export interface DarwinProcessIdentity {
   readonly sessionId: number;
   readonly startTimeSeconds: string;
   readonly startTimeMicroseconds: number;
+}
+
+const DARWIN_GUARDIAN_HELPER_OUTPUT_BYTES = 4 * 1024;
+
+interface DarwinGuardianHelperResult {
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly status: number | null;
+  readonly signal: NodeJS.Signals | null;
+  readonly failed: boolean;
+}
+
+function runDarwinGuardianHelper(
+  guardianPath: string,
+  args: readonly string[],
+  timeoutMs: number,
+  abortSignal?: AbortSignal,
+): Promise<DarwinGuardianHelperResult> {
+  return new Promise((resolveResult) => {
+    let settled = false;
+    let stdout = "";
+    let stderr = "";
+    let outputBytes = 0;
+    let failed = false;
+    const child = spawn(resolve(guardianPath), args, {
+      env: { PATH: "/usr/bin:/bin:/usr/sbin:/sbin" },
+      shell: false,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const finish = (status: number | null, signal: NodeJS.Signals | null): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      abortSignal?.removeEventListener("abort", stop);
+      resolveResult({ stdout, stderr, status, signal, failed });
+    };
+    const stop = (): void => {
+      failed = true;
+      try { child.kill("SIGKILL"); } catch { /* The bounded helper already exited. */ }
+    };
+    const collect = (target: "stdout" | "stderr", data: Buffer): void => {
+      outputBytes += data.byteLength;
+      if (outputBytes > DARWIN_GUARDIAN_HELPER_OUTPUT_BYTES) {
+        stop();
+        return;
+      }
+      if (target === "stdout") stdout += data.toString("utf8");
+      else stderr += data.toString("utf8");
+    };
+    const timer = setTimeout(stop, timeoutMs);
+    timer.unref();
+    child.stdout.on("data", (data: Buffer) => collect("stdout", data));
+    child.stderr.on("data", (data: Buffer) => collect("stderr", data));
+    child.once("error", () => { failed = true; });
+    child.once("close", finish);
+    abortSignal?.addEventListener("abort", stop, { once: true });
+    if (abortSignal?.aborted) stop();
+  });
 }
 
 function validPid(value: unknown): value is number {
@@ -95,6 +153,26 @@ export function readDarwinProcessIdentity(
   return parseIdentity(pid, result.stdout);
 }
 
+export async function readDarwinProcessIdentityAsync(
+  pid: number,
+  guardianPath: string,
+  abortSignal?: AbortSignal,
+): Promise<DarwinProcessIdentity | null> {
+  if (process.platform !== "darwin" || !validPid(pid) || !isAbsolute(guardianPath)) {
+    return null;
+  }
+  const result = await runDarwinGuardianHelper(
+    guardianPath,
+    ["identity", String(pid)],
+    1_000,
+    abortSignal,
+  );
+  if (result.failed || result.signal || result.stderr.trim()) return null;
+  if (result.status === 3 && !result.stdout.trim()) return null;
+  if (result.status !== 0) return null;
+  try { return parseIdentity(pid, result.stdout); } catch { return null; }
+}
+
 export function darwinProcessSessionEmpty(
   sessionId: number,
   guardianPath: string,
@@ -133,6 +211,28 @@ export function darwinProcessSessionEmpty(
   if (result.status === 0) return true;
   if (result.status === 4) return false;
   throw new Error("The macOS process session could not be inspected.");
+}
+
+export async function darwinProcessSessionEmptyAsync(
+  sessionId: number,
+  guardianPath: string,
+  abortSignal?: AbortSignal,
+): Promise<boolean | null> {
+  if (process.platform !== "darwin" || !validPid(sessionId) || !isAbsolute(guardianPath)) {
+    return null;
+  }
+  const result = await runDarwinGuardianHelper(
+    guardianPath,
+    ["session-empty", String(sessionId)],
+    1_000,
+    abortSignal,
+  );
+  if (result.failed || result.signal || result.stderr.trim() || result.stdout.trim()) {
+    return null;
+  }
+  if (result.status === 0) return true;
+  if (result.status === 4) return false;
+  return null;
 }
 
 export function darwinProcessGuardianReady(
@@ -180,4 +280,24 @@ export function darwinProcessGuardianReady(
     return null;
   }
   throw new Error("The macOS process guardian readiness could not be inspected.");
+}
+
+export async function darwinProcessGuardianReadyAsync(
+  pid: number,
+  guardianPath: string,
+  abortSignal?: AbortSignal,
+): Promise<DarwinProcessIdentity | null> {
+  if (process.platform !== "darwin" || !validPid(pid) || !isAbsolute(guardianPath)) {
+    return null;
+  }
+  const result = await runDarwinGuardianHelper(
+    guardianPath,
+    ["ready", String(pid)],
+    1_500,
+    abortSignal,
+  );
+  if (result.failed || result.signal || result.stderr.trim()) return null;
+  if ((result.status === 3 || result.status === 4) && !result.stdout.trim()) return null;
+  if (result.status !== 0) return null;
+  try { return parseIdentity(pid, result.stdout); } catch { return null; }
 }

@@ -88,8 +88,26 @@ describe("Linux runtime process guardian", () => {
     vi.advanceTimersByTime(150);
     expect(terminalAuthority).toHaveBeenCalledTimes(3);
     expect(onTerminal).toHaveBeenCalledOnce();
+    expect(onTerminal).toHaveBeenCalledWith(false);
     expect(release).toHaveBeenCalledOnce();
     expect(onFailure).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it("distinguishes an authenticated post-exec terminal from an unexecuted stop", () => {
+    vi.useFakeTimers();
+    const onTerminal = vi.fn(() => true);
+    monitorLinuxGuardianTerminal({
+      pid: 123, parentPid: 1, processGroupId: 123, startTimeTicks: "456",
+      guardianExecutableDevice: "1", guardianExecutableInode: "2",
+    }, "/trusted/guardian", onTerminal, vi.fn(), {
+      readComm: () => "inertia-exdone",
+      terminalAuthority: () => true,
+      release: () => true,
+    });
+
+    vi.advanceTimersByTime(50);
+    expect(onTerminal).toHaveBeenCalledWith(true);
     vi.useRealTimers();
   });
 
@@ -154,6 +172,14 @@ describe("Linux runtime process guardian", () => {
       guardianExecutableDevice: String(old.dev), guardianExecutableInode: String(old.ino),
     }, currentGuardian, procRoot)).toBe(true);
     writeFileSync(join(procRoot, String(pid), "status"), [
+      "Name:\tinertia-exdone", "State:\tT (stopped)", "TracerPid:\t0", "Threads:\t1",
+      "NoNewPrivs:\t1", "Seccomp:\t2", "Seccomp_filters:\t1", "",
+    ].join("\n"));
+    expect(linuxGuardianTerminalAuthority({
+      pid, parentPid: 999, processGroupId: pid, startTimeTicks: "456",
+      guardianExecutableDevice: String(old.dev), guardianExecutableInode: String(old.ino),
+    }, currentGuardian, procRoot, "inertia-exdone")).toBe(true);
+    writeFileSync(join(procRoot, String(pid), "status"), [
       "Name:\tinertia-done", "State:\tT (stopped)", "TracerPid:\t0", "Threads:\t1",
       "NoNewPrivs:\t1", "Seccomp:\t2", "",
     ].join("\n"));
@@ -196,7 +222,7 @@ describe("Linux runtime process guardian", () => {
     const escapedPid = Number(readFileSync(descendantPid, "utf8"));
     await waitFor(() => {
       try {
-        return readFileSync(`/proc/${guardianPid}/comm`, "utf8").trim() === "inertia-done"
+        return readFileSync(`/proc/${guardianPid}/comm`, "utf8").trim() === "inertia-exdone"
           && !exists(escapedPid);
       } catch { return false; }
     });
@@ -366,6 +392,36 @@ describe("Linux runtime process guardian", () => {
       }).records(generation)).toEqual([]);
     } finally {
       await stopChild(child);
+      deactivate?.();
+    }
+  }, 15_000);
+
+  linuxIt("keeps a bounded burst of fast native payloads admissible after owned advances", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-linux-fast-payload-")); roots.push(root);
+    const guardian = compileGuardian(root);
+    const generation = "21000000-0000-4000-8000-000000000021:1";
+    const boot = "test:22000000-0000-4000-8000-000000000022";
+    const deactivate = activateRuntimeOwnedProcessRegistry(root, generation, boot, {
+      platform: "linux", darwinGuardianPath: guardian,
+    });
+    const runFastPayload = async (): Promise<void> => {
+      const invocation = runtimeOwnedProcessInvocation("/bin/true", []);
+      const child = spawnRuntimeOwnedProcess(() => spawn(
+        invocation.command,
+        invocation.args,
+        { detached: true, stdio: "ignore" },
+      ));
+      await waitForChild(child);
+    };
+    try {
+      await Promise.all(Array.from({ length: 64 }, runFastPayload));
+      await expect(awaitRuntimeOwnedProcessCleanupConfirmed()).resolves.toBe(true);
+      await runFastPayload();
+      await expect(awaitRuntimeOwnedProcessCleanupConfirmed()).resolves.toBe(true);
+      expect(new RuntimeOwnedProcessJournal(root, {
+        platform: "linux", darwinGuardianPath: guardian,
+      }).records(generation)).toEqual([]);
+    } finally {
       deactivate?.();
     }
   }, 15_000);
@@ -690,11 +746,11 @@ describe("Linux runtime process guardian", () => {
     execFileSync(guardian, [...common, "exec"]);
     expect(() => execFileSync(guardian, [...common, "exec"])).toThrow();
     await waitFor(() => {
-      try { return readFileSync(`/proc/${pid}/comm`, "utf8").trim() === "inertia-done"; } catch { return false; }
+      try { return readFileSync(`/proc/${pid}/comm`, "utf8").trim() === "inertia-exdone"; } catch { return false; }
     });
     process.kill(pid, "SIGCONT");
     await new Promise((resolve) => setTimeout(resolve, 100));
-    expect(readFileSync(`/proc/${pid}/comm`, "utf8").trim()).toBe("inertia-done");
+    expect(readFileSync(`/proc/${pid}/comm`, "utf8").trim()).toBe("inertia-exdone");
     expect(readFileSync(`/proc/${pid}/status`, "utf8")).toContain("State:\tT");
     const untrustedRelease = [
       "const {spawnSync}=require('node:child_process');",
@@ -702,7 +758,7 @@ describe("Linux runtime process guardian", () => {
       "process.exit(r.status ?? 99);",
     ].join("");
     expect(() => execFileSync(process.execPath, ["-e", untrustedRelease])).toThrow();
-    expect(readFileSync(`/proc/${pid}/comm`, "utf8").trim()).toBe("inertia-done");
+    expect(readFileSync(`/proc/${pid}/comm`, "utf8").trim()).toBe("inertia-exdone");
     const release = spawn(guardian, [...common, "release"], { stdio: "ignore" });
     await new Promise<void>((resolve, reject) => {
       release.once("error", reject);

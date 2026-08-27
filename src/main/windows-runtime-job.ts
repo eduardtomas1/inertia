@@ -5,8 +5,14 @@ import { win32 } from "node:path";
 import type { WindowsRuntimeJobContainment } from "../node/runtime-owned-processes.js";
 import { validRuntimeGenerationId } from "../node/runtime-process-protocol.js";
 
-const READY_TIMEOUT_MS = 15_000;
+const HELPER_STARTUP_TIMEOUT_MS = 60_000;
+const NATIVE_READY_TIMEOUT_MS = 15_000;
 const MAX_OUTPUT_BYTES = 8_192;
+
+type WindowsRuntimeJobStage =
+  | "powershell-start"
+  | "add-type-complete"
+  | "native-guard-start";
 
 interface ActiveWindowsRuntimeJob {
   readonly child: ChildProcessWithoutNullStreams;
@@ -172,6 +178,13 @@ public static class InertiaRuntimeJob {
     return exitCode;
   }
 
+  private static void Stage(string stage) {
+    WriteProtocolLine(
+      Console.OpenStandardError(),
+      "INERTIA_JOB_STAGE stage=" + stage
+    );
+  }
+
   private static bool ArmKillOnClose(IntPtr job, out int win32Error) {
     var information = new JOBOBJECT_EXTENDED_LIMIT_INFORMATION();
     information.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
@@ -209,6 +222,7 @@ public static class InertiaRuntimeJob {
   }
 
   public static int Guard(string name, UInt32 processId) {
+    Stage("native-guard-start");
     IntPtr job = CreateJobObject(IntPtr.Zero, name);
     int createError = Marshal.GetLastWin32Error();
     if (job == IntPtr.Zero) return Failure("create-job", 10, createError);
@@ -282,12 +296,34 @@ function encodedPowerShell(body: string): string {
 }
 
 function commandScript(command: string): string {
-  return `$ErrorActionPreference = 'Stop'; Add-Type -TypeDefinition @'\n${nativeJobSource}\n'@; ${command}; exit $LASTEXITCODE`;
+  return `$ErrorActionPreference = 'Stop'
+function Write-InertiaJobProtocol([string]$Value) {
+  $stream = [Console]::OpenStandardError()
+  $bytes = [Text.Encoding]::UTF8.GetBytes($Value + [Environment]::NewLine)
+  $stream.Write($bytes, 0, $bytes.Length)
+  $stream.Flush()
+}
+Write-InertiaJobProtocol 'INERTIA_JOB_STAGE stage=powershell-start'
+Add-Type -TypeDefinition @'
+${nativeJobSource}
+'@
+Write-InertiaJobProtocol 'INERTIA_JOB_STAGE stage=add-type-complete'
+${command}
+exit $LASTEXITCODE`;
 }
 
 function appendBounded(current: string, chunk: Buffer): string {
   if (current.length >= MAX_OUTPUT_BYTES) return current;
   return (current + chunk.toString("utf8")).slice(0, MAX_OUTPUT_BYTES);
+}
+
+function latestHelperStage(output: string): WindowsRuntimeJobStage | null {
+  const matches = output.matchAll(
+    /INERTIA_JOB_STAGE stage=(powershell-start|add-type-complete|native-guard-start)/gu,
+  );
+  let latest: WindowsRuntimeJobStage | null = null;
+  for (const match of matches) latest = match[1] as WindowsRuntimeJobStage;
+  return latest;
 }
 
 function spawnPowerShell(
@@ -360,17 +396,35 @@ export async function armWindowsRuntimeJob(
   });
   child.once("error", () => settleCompletion(false));
 
-  const timeoutMs = Math.max(1, Math.min(
-    options.timeoutMs ?? READY_TIMEOUT_MS,
-    READY_TIMEOUT_MS,
+  const startupTimeoutMs = Math.max(1, Math.min(
+    options.timeoutMs ?? HELPER_STARTUP_TIMEOUT_MS,
+    HELPER_STARTUP_TIMEOUT_MS,
   ));
-  const deadlineAt = Date.now() + timeoutMs;
-  while (Date.now() < deadlineAt) {
+  const nativeReadyTimeoutMs = Math.min(
+    startupTimeoutMs,
+    NATIVE_READY_TIMEOUT_MS,
+  );
+  let deadlineAt = Date.now() + startupTimeoutMs;
+  let lastStage: WindowsRuntimeJobStage | null = null;
+  let postCompileDeadlineStarted = false;
+  let nativeDeadlineStarted = false;
+  while (true) {
     if (stdout.split(/\r?\n/u).includes("READY")) {
       ready = true;
       break;
     }
     if (child.exitCode !== null || child.signalCode !== null) break;
+    const observedStage = latestHelperStage(stderr);
+    if (observedStage !== null) lastStage = observedStage;
+    if (lastStage === "add-type-complete" && !postCompileDeadlineStarted) {
+      postCompileDeadlineStarted = true;
+      deadlineAt = Date.now() + nativeReadyTimeoutMs;
+    }
+    if (lastStage === "native-guard-start" && !nativeDeadlineStarted) {
+      nativeDeadlineStarted = true;
+      deadlineAt = Date.now() + nativeReadyTimeoutMs;
+    }
+    if (Date.now() >= deadlineAt) break;
     await new Promise<void>((resolve) => setTimeout(resolve, 10));
   }
   if (!ready) {
@@ -381,7 +435,13 @@ export async function armWindowsRuntimeJob(
       ? `The native helper exited with code ${child.exitCode}.`
       : child.signalCode
         ? `The native helper exited from signal ${child.signalCode}.`
-        : `The native helper did not report readiness within ${timeoutMs}ms.`;
+        : lastStage === "native-guard-start"
+          ? `The native helper did not report readiness within ${nativeReadyTimeoutMs}ms after Guard started.`
+          : lastStage === "add-type-complete"
+            ? `The native helper did not enter Guard within ${nativeReadyTimeoutMs}ms after Add-Type completed.`
+            : lastStage === "powershell-start"
+              ? `The PowerShell helper did not complete Add-Type within ${startupTimeoutMs}ms.`
+              : `The PowerShell helper did not start within ${startupTimeoutMs}ms.`;
     throw new Error([
       "The Windows runtime Job Object could not be armed.",
       outcome,

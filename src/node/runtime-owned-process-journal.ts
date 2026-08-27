@@ -617,6 +617,7 @@ export class RuntimeOwnedProcessJournal {
       readonly spawnedAfterMs?: number;
       readonly spawnedBeforeMs?: number;
       readonly expectedDarwinIdentity?: DarwinProcessIdentity;
+      readonly observedDarwinIdentity?: DarwinProcessIdentity;
       readonly expectedLinuxIdentity?: LinuxProcessIdentity;
     } = {},
   ): RuntimeOwnedProcessClaim {
@@ -637,7 +638,7 @@ export class RuntimeOwnedProcessJournal {
       ? readLinuxProcessIdentity(pid)
       : null;
     const darwinIdentity = this.platform === "darwin"
-      ? this.darwinGuardianReadyReader(pid)
+      ? options.observedDarwinIdentity ?? this.darwinGuardianReadyReader(pid)
       : null;
     const spawnedAfterMs = Math.max(
       0,

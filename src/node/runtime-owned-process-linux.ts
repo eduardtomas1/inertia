@@ -22,6 +22,8 @@ interface LinuxGuardianHelperResult {
   readonly failed: boolean;
 }
 
+type LinuxGuardianTerminalName = "inertia-done" | "inertia-exdone";
+
 function runLinuxGuardianHelper(
   guardianPath: string,
   args: readonly string[],
@@ -232,6 +234,7 @@ export function linuxGuardianTerminalAuthority(
   expected: LinuxProcessIdentity,
   _guardianPath: string,
   procRoot = "/proc",
+  terminalName: LinuxGuardianTerminalName = "inertia-done",
 ): boolean {
   try {
     const stat = readFileSync(`${procRoot}/${expected.pid}/stat`, "utf8");
@@ -243,7 +246,7 @@ export function linuxGuardianTerminalAuthority(
       if (separator > 0) fields.set(line.slice(0, separator), line.slice(separator + 1).trim());
     }
     const children = readFileSync(`${procRoot}/${expected.pid}/task/${expected.pid}/children`, "utf8").trim();
-    return fields.get("Name") === "inertia-done"
+    return fields.get("Name") === terminalName
       && statFields[19] === expected.startTimeTicks
       && Number(statFields[2]) === expected.processGroupId
       && (fields.get("State") ?? "").startsWith("T")
@@ -314,7 +317,7 @@ export async function signalLinuxGuardianExactAsync(
 export function monitorLinuxGuardianTerminal(
   expected: LinuxProcessIdentity,
   guardianPath: string,
-  onTerminal: () => boolean,
+  onTerminal: (authorizationObserved: boolean) => boolean,
   onFailure: () => void,
   dependencies: {
     readonly readComm?: () => string;
@@ -354,9 +357,12 @@ export function monitorLinuxGuardianTerminal(
       onFailure();
       return;
     }
-    if (comm !== "inertia-done") { unprovedTerminalPolls = 0; return; }
+    if (comm !== "inertia-done" && comm !== "inertia-exdone") {
+      unprovedTerminalPolls = 0;
+      return;
+    }
     if (!(dependencies.terminalAuthority?.()
-      ?? linuxGuardianTerminalAuthority(expected, guardianPath))) {
+      ?? linuxGuardianTerminalAuthority(expected, guardianPath, "/proc", comm))) {
       unprovedTerminalPolls += 1;
       if (unprovedTerminalPolls >= 20) {
         // A claimed terminal marker without exact hardened authority is unsafe.
@@ -365,7 +371,7 @@ export function monitorLinuxGuardianTerminal(
       }
       return;
     }
-    if (!onTerminal()) return;
+    if (!onTerminal(comm === "inertia-exdone")) return;
     releasePending = true;
     releaseController = new AbortController();
     const release = dependencies.release

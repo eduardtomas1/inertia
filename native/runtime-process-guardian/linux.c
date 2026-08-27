@@ -236,7 +236,10 @@ static int drain(void) {
   return 0;
 }
 static int terminal_state(int clean, int status) {
-  (void)prctl(PR_SET_NAME, clean ? "inertia-done" : "inertia-bad", 0, 0, 0);
+  const char *terminal_name = clean
+    ? (authorized ? "inertia-exdone" : "inertia-done")
+    : "inertia-bad";
+  (void)prctl(PR_SET_NAME, terminal_name, 0, 0, 0);
   sigset_t blocked; sigfillset(&blocked); sigdelset(&blocked, SIGKILL); sigdelset(&blocked, SIGSTOP);
   sigdelset(&blocked, SIGUSR2);
   (void)sigprocmask(SIG_SETMASK, &blocked, NULL);
@@ -250,7 +253,7 @@ static int terminal_state(int clean, int status) {
     (void)syscall(SYS_tgkill, pid, tid, SIGSTOP);
     const pid_t sender = authorize_sender; authorize_sender = 0;
     if (clean && sender && trusted_runtime_helper(sender, runtime_pid, runtime_start)) {
-      (void)prctl(PR_SET_NAME, "inertia-exit", 0, 0, 0);
+      (void)prctl(PR_SET_NAME, authorized ? "inertia-exitok" : "inertia-exit", 0, 0, 0);
       return status;
     }
   }
@@ -309,22 +312,26 @@ static int exact_signal_mode(int argc, char **argv) {
   const char *action = argv[6]; const char *expected_name = NULL; int first_signal = 0, second_signal = 0;
   if (!strcmp(action, "claim")) { expected_name = "inertia-ready"; first_signal = SIGUSR1; }
   else if (!strcmp(action, "exec")) { expected_name = "inertia-claim"; first_signal = SIGUSR2; }
-  else if (!strcmp(action, "release")) { expected_name = "inertia-done"; first_signal = SIGUSR2; second_signal = SIGCONT; }
-  else if (!strcmp(action, "kill")) { expected_name = "inertia-done"; first_signal = SIGKILL; }
+  else if (!strcmp(action, "release")) { first_signal = SIGUSR2; second_signal = SIGCONT; }
+  else if (!strcmp(action, "kill")) { first_signal = SIGKILL; }
   else if (!strcmp(action, "stop")) { first_signal = SIGTERM; }
   else return 64;
   int pidfd = pidfd_open_exact(pid); if (pidfd < 0) return 3;
-  if (!same_process(pid, start)
-    || (expected_name ? !named_status(pid, expected_name)
-      : !(named_status(pid, "inertia-ready") || named_status(pid, "inertia-claim")
-        || named_status(pid, "inertia-owned")))) {
+  const int expected_state = expected_name ? named_status(pid, expected_name)
+    : (!strcmp(action, "release") || !strcmp(action, "kill"))
+      ? (named_status(pid, "inertia-done") || named_status(pid, "inertia-exdone"))
+      : (named_status(pid, "inertia-ready") || named_status(pid, "inertia-claim")
+        || named_status(pid, "inertia-owned"));
+  if (!same_process(pid, start) || !expected_state) {
     close(pidfd);
     return 3;
   }
-  const int valid = same_process(pid, start)
-    && (expected_name ? named_status(pid, expected_name)
+  const int valid_state = expected_name ? named_status(pid, expected_name)
+    : (!strcmp(action, "release") || !strcmp(action, "kill"))
+      ? (named_status(pid, "inertia-done") || named_status(pid, "inertia-exdone"))
       : (named_status(pid, "inertia-ready") || named_status(pid, "inertia-claim")
-        || named_status(pid, "inertia-owned")));
+        || named_status(pid, "inertia-owned"));
+  const int valid = same_process(pid, start) && valid_state;
   if (!valid || syscall(SYS_pidfd_send_signal, pidfd, first_signal, NULL, 0)
     || (second_signal && syscall(SYS_pidfd_send_signal, pidfd, second_signal, NULL, 0))) {
     close(pidfd); return 3;
@@ -334,7 +341,12 @@ static int exact_signal_mode(int argc, char **argv) {
       : (!strcmp(action, "exec") ? "inertia-owned" : "inertia-exit");
     struct timespec pause = { .tv_sec = 0, .tv_nsec = POLL_NS };
     for (int poll = 0; poll < 50; poll++) {
-      if (named_status(pid, next_name)) { close(pidfd); return 0; }
+      if (named_status(pid, next_name)
+        || (!strcmp(action, "exec")
+          && (named_status(pid, "inertia-exdone") || named_status(pid, "inertia-exitok")))
+        || (!strcmp(action, "release") && named_status(pid, "inertia-exitok"))) {
+        close(pidfd); return 0;
+      }
       if (!strcmp(action, "release")) {
         errno = 0;
         if (syscall(SYS_pidfd_send_signal, pidfd, 0, NULL, 0) < 0 && errno == ESRCH) {

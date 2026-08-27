@@ -840,7 +840,25 @@ static int watch_mode(int argc, char *argv[]) {
     // quick, ordinary payload exit into an unproved cleanup even though the
     // guardian can reap that exact child here.
     if (!refresh_owned_tree(self, self, &tracker)) {
-      result = 137;
+      // The exact root can exit after the nonblocking wait above but before
+      // libproc reads its birth identity. A zombie still answers kill(pid, 0)
+      // while proc_pidinfo no longer returns a complete identity, so the
+      // census must not turn that ordinary fast exit into uncertain cleanup.
+      // Reap only the exact child here; every other census failure remains
+      // fail-closed.
+      const pid_t reaped = waitpid(child, &status, WNOHANG);
+      struct proc_bsdinfo current_runtime;
+      if (reaped == child
+        && !stop_requested
+        && read_identity(runtime_pid, &current_runtime)
+        && same_identity(&runtime_identity, &current_runtime)) {
+        payload_settled = 1;
+        if (WIFEXITED(status)) result = WEXITSTATUS(status);
+        else if (WIFSIGNALED(status)) result = 128 + WTERMSIG(status);
+        else result = 1;
+      } else {
+        result = 137;
+      }
       break;
     }
     struct proc_bsdinfo current_runtime;
@@ -857,9 +875,11 @@ static int watch_mode(int argc, char *argv[]) {
   // alive completed under the user's existing authority. Drain every
   // still-observed member and preserve its real exit status even when it
   // legitimately forked (Git, gh, PTYs, and provider helpers all do). The
-  // cleanup success boundary rechecks stop and runtime identity dynamically;
-  // cancellation or parent loss during the drain therefore restores strict
-  // fork proof instead of turning a crash cleanup into a false success.
+  // cleanup success boundary rechecks stop and runtime identity dynamically.
+  // macOS has no unprivileged job object that can prove an arbitrary child
+  // after double-fork + setsid; this normal-completion exception is therefore
+  // deliberately best-effort, while cancellation or parent loss retains the
+  // durable claim fail-closed.
   const int drained = drain_owned_tree(
     self,
     self,

@@ -810,6 +810,158 @@ describe("TerminalManager", () => {
     }
   });
 
+  it("tightens an already-closing guardian admission to the runtime deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      const terminal = fakeTerminal();
+      const guardianStop = new Promise<boolean>(() => undefined);
+      const manager = new TerminalManager({
+        spawnTerminal: vi.fn(() => terminal.pty),
+        shutdownTimeoutMs: 20,
+        spawnOwnedTerminalProcess: (spawnProcess) => ({
+          process: spawnProcess(),
+          confirmStopped: () => false,
+          releaseIfGroupExited: () => undefined,
+          requestGuardianStop: () => true,
+          waitForGuardianStop: async () => await guardianStop,
+        }),
+      });
+      const owner = {} as WebSocket;
+      const terminalId = manager.createProcess(
+        owner,
+        process.cwd(),
+        "test-shell",
+        [],
+        {},
+        80,
+        24,
+      );
+
+      const earlyClose = manager.closeManaged(terminalId);
+      const rejectedEarlyClose = expect(earlyClose).rejects.toThrow(
+        "A terminal process tree could not be confirmed stopped during runtime shutdown.",
+      );
+      await Promise.resolve();
+      const shutdown = manager.disposeAll(Date.now() + 50);
+      const rejectedShutdown = expect(shutdown).rejects.toThrow(
+        "A terminal process tree could not be confirmed stopped during runtime shutdown.",
+      );
+
+      await vi.advanceTimersByTimeAsync(49);
+      await vi.advanceTimersByTimeAsync(1);
+      await rejectedShutdown;
+      await rejectedEarlyClose;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("allows delayed admission when stop, exit, and retirement fit the runtime budget", async () => {
+    vi.useFakeTimers();
+    try {
+      const terminal = fakeTerminal();
+      let settleGuardianStop!: (confirmed: boolean) => void;
+      const guardianStop = new Promise<boolean>((resolve) => {
+        settleGuardianStop = resolve;
+      });
+      let ownershipStopped = false;
+      const manager = new TerminalManager({
+        spawnTerminal: vi.fn(() => terminal.pty),
+        shutdownTimeoutMs: 20,
+        spawnOwnedTerminalProcess: (spawnProcess) => ({
+          process: spawnProcess(),
+          confirmStopped: () => ownershipStopped,
+          releaseIfGroupExited: () => undefined,
+          requestGuardianStop: () => true,
+          waitForGuardianStop: async () => await guardianStop,
+        }),
+      });
+      const owner = {} as WebSocket;
+      manager.createProcess(owner, process.cwd(), "test-shell", [], {}, 80, 24);
+
+      const shutdown = manager.disposeAll(Date.now() + 100);
+      await vi.advanceTimersByTimeAsync(30);
+      ownershipStopped = true;
+      terminal.emitExit();
+      settleGuardianStop(true);
+
+      await expect(shutdown).resolves.toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not start a fresh exit timeout after admission consumes the runtime budget", async () => {
+    vi.useFakeTimers();
+    try {
+      const terminal = fakeTerminal();
+      let settleGuardianStop!: (confirmed: boolean) => void;
+      const guardianStop = new Promise<boolean>((resolve) => {
+        settleGuardianStop = resolve;
+      });
+      const manager = new TerminalManager({
+        spawnTerminal: vi.fn(() => terminal.pty),
+        shutdownTimeoutMs: 20,
+        spawnOwnedTerminalProcess: (spawnProcess) => ({
+          process: spawnProcess(),
+          confirmStopped: () => false,
+          releaseIfGroupExited: () => undefined,
+          requestGuardianStop: () => true,
+          waitForGuardianStop: async () => await guardianStop,
+        }),
+      });
+      const owner = {} as WebSocket;
+      manager.createProcess(owner, process.cwd(), "test-shell", [], {}, 80, 24);
+
+      const shutdown = manager.disposeAll(Date.now() + 50);
+      const rejected = expect(shutdown).rejects.toThrow(
+        "A terminal process tree could not be confirmed stopped during runtime shutdown.",
+      );
+      await vi.advanceTimersByTimeAsync(45);
+      settleGuardianStop(true);
+      await vi.advanceTimersByTimeAsync(4);
+      await vi.advanceTimersByTimeAsync(1);
+      await rejected;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("accepts already-settled guardian work after a delayed event-loop turn", async () => {
+    vi.useFakeTimers();
+    try {
+      const terminal = fakeTerminal();
+      let ownershipStopped = false;
+      const requestGuardianStop = vi.fn(() => true);
+      const waitForGuardianStop = vi.fn(async () => true);
+      const manager = new TerminalManager({
+        spawnTerminal: vi.fn(() => terminal.pty),
+        shutdownTimeoutMs: 20,
+        spawnOwnedTerminalProcess: (spawnProcess) => ({
+          process: spawnProcess(),
+          confirmStopped: () => ownershipStopped,
+          releaseIfGroupExited: () => undefined,
+          requestGuardianStop,
+          waitForGuardianStop,
+        }),
+      });
+      const owner = {} as WebSocket;
+      manager.createProcess(owner, process.cwd(), "test-shell", [], {}, 80, 24);
+
+      const shutdown = manager.disposeAll(Date.now() + 10);
+      ownershipStopped = true;
+      terminal.emitExit();
+      vi.setSystemTime(Date.now() + 100);
+      await vi.advanceTimersByTimeAsync(0);
+
+      await expect(shutdown).resolves.toBeUndefined();
+      expect(requestGuardianStop).toHaveBeenCalledOnce();
+      expect(waitForGuardianStop).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("reports a bounded timeout for a disconnected terminal that never exits", async () => {
     vi.useFakeTimers();
     try {

@@ -326,6 +326,24 @@ async function requirePackagedAssets(executable) {
         `The packaged ${process.platform} runtime process guardian is missing or invalid.`,
       );
     }
+    if (process.platform === "linux") {
+      const guardianSelftest = spawnSync(guardian, ["seccomp-selftest"], {
+        encoding: "utf8",
+        env: { PATH: "/usr/bin:/bin" },
+        maxBuffer: 4 * 1024,
+        shell: false,
+        timeout: 5_000,
+      });
+      if (
+        guardianSelftest.error
+        || guardianSelftest.status !== 0
+        || guardianSelftest.signal
+        || guardianSelftest.stdout !== ""
+        || guardianSelftest.stderr !== ""
+      ) {
+        throw new Error("The packaged Linux runtime process guardian self-test failed.");
+      }
+    }
     console.log(`Packaged ${process.platform} runtime process guardian verified.`);
   }
   const asar = await readAsarArchive(archive);

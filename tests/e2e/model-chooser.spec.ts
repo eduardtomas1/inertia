@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
+import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import Database from "better-sqlite3";
 
 import { RuntimeStore } from "../../src/server/database";
@@ -17,6 +19,8 @@ import {
   createAppFixture,
   type AppFixture,
 } from "./support/app-fixture";
+
+const execFileAsync = promisify(execFile);
 
 let app!: AppFixture;
 let electronApp!: AppFixture["electronApp"];
@@ -255,6 +259,12 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   await expect(modeTrigger.locator("span").first()).toHaveText(nextMode);
 
   const databasePath = join(testDirectory, "data", "inertia.sqlite");
+  const currentBranch = (await execFileAsync(
+    "git",
+    ["branch", "--show-current"],
+    { cwd: workspaceDirectory },
+  )).stdout.trim();
+  expect(currentBranch).not.toBe("");
   const stateDatabase = new Database(databasePath, { readonly: true });
   const state = stateDatabase.prepare(
     "SELECT active_conversation_id FROM app_state WHERE id = 1",
@@ -362,6 +372,22 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
     completedAt: cachedAt,
     updatedAt: cachedAt,
   });
+  runtimeStore.createTurnGitArtifact({
+    id: `composer-e2e-artifact-${randomUUID()}`,
+    turnId: turn.id,
+    branch: currentBranch,
+    createdAt: cachedAt,
+  });
+  runtimeStore.completeTurnGitArtifact(turn.id, {
+    files: [],
+    insertions: 0,
+    deletions: 0,
+    status: "ready",
+    completeness: "complete",
+    patchState: "none",
+    capturedAt: cachedAt,
+    updatedAt: cachedAt,
+  });
   runtimeStore.close();
 
   const beforeRestart = await runtimeSnapshot();
@@ -383,6 +409,22 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
     timeout: 10_000,
   });
   await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
+  await expect(workspaceHeader.getByRole("button", {
+    name: currentBranch,
+    exact: true,
+  })).toBeVisible();
+  await expect.poll(() => {
+    const database = new Database(databasePath, { readonly: true });
+    try {
+      return (database.prepare(`
+        SELECT COUNT(*) AS count
+        FROM workspace_runs
+        WHERE conversation_id = ? AND status IN ('running', 'waiting')
+      `).get(currentConversation.id) as { count: number }).count;
+    } finally {
+      database.close();
+    }
+  }).toBe(0);
 
   await page.evaluate((storageKey) => {
     window.localStorage.setItem(storageKey, JSON.stringify({
@@ -405,6 +447,22 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   }, MODEL_FAVORITES_STORAGE_KEY);
   await page.reload();
   await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
+  await expect(workspaceHeader.getByRole("button", {
+    name: currentBranch,
+    exact: true,
+  })).toBeVisible();
+  await expect.poll(() => {
+    const database = new Database(databasePath, { readonly: true });
+    try {
+      return (database.prepare(`
+        SELECT COUNT(*) AS count
+        FROM workspace_runs
+        WHERE conversation_id = ? AND status IN ('running', 'waiting')
+      `).get(currentConversation.id) as { count: number }).count;
+    } finally {
+      database.close();
+    }
+  }).toBe(0);
   await modelTrigger.click();
   await expect(modelChooser).toBeVisible();
   await searchModels.fill("Sol");

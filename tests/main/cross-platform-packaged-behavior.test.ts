@@ -249,6 +249,10 @@ describe("cross-platform packaged behavior contract", () => {
     );
     expect(smoke).toContain('"runtime-process-guardian"');
     expect(smoke).toContain("MAX_RUNTIME_GUARDIAN_BYTES");
+    expect(smoke).toContain('spawnSync(guardian, ["seccomp-selftest"]');
+    expect(smoke).toContain(
+      "The packaged Linux runtime process guardian self-test failed.",
+    );
     expect(smoke).toContain('process.arch === "x64" ? "" : `-${process.arch}`');
     expect(smoke).toContain(
       "mkdir(dataDirectory, { recursive: true, mode: 0o700 })",

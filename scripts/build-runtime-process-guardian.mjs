@@ -16,10 +16,26 @@ rmSync(output, { force: true });
 
 if (process.platform !== "darwin" && process.platform !== "linux") process.exit(0);
 
-const compiler = process.platform === "darwin" ? "/usr/bin/xcrun" : "/usr/bin/cc";
+const linuxGnuTriplet = process.arch === "x64"
+  ? "x86_64-linux-gnu"
+  : process.arch === "arm64"
+    ? "aarch64-linux-gnu"
+    : null;
+if (process.platform === "linux" && !linuxGnuTriplet) {
+  throw new Error(`The Linux runtime process guardian does not support ${process.arch}.`);
+}
+
+const compiler = process.platform === "darwin" ? "/usr/bin/xcrun" : "/usr/bin/musl-gcc";
 const compilerArgs = process.platform === "darwin"
   ? ["clang"]
-  : [];
+  : [
+      "-static-pie",
+      "-s",
+      "-idirafter",
+      "/usr/include",
+      "-idirafter",
+      `/usr/include/${linuxGnuTriplet}`,
+    ];
 
 const result = spawnSync(
   compiler,
@@ -44,6 +60,11 @@ const result = spawnSync(
   },
 );
 if (result.error || result.status !== 0) {
+  if (process.platform === "linux" && result.error?.code === "ENOENT") {
+    throw new Error(
+      "The Linux runtime process guardian requires musl-tools, linux-libc-dev, and binutils.",
+    );
+  }
   const detail = `${result.stderr ?? ""}\n${result.stdout ?? ""}`.trim();
   throw new Error(detail || `The ${process.platform} runtime process guardian could not be built.`);
 }

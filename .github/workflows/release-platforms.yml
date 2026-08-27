@@ -108,6 +108,12 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
 
+      - name: Install Linux guardian toolchain
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes binutils linux-libc-dev musl-tools=1.2.4-2
+
       - name: Install locked dependencies
         run: npm ci
 
@@ -198,6 +204,21 @@ jobs:
         if: runner.os == 'Linux'
         run: npm run validate:linux-package
 
+      - name: Verify the packaged Linux guardian is static
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          guardian="${{ matrix.unpacked_dir }}/resources/runtime/runtime-process-guardian"
+          test -x "$guardian"
+          if readelf --program-headers "$guardian" | grep -Fq 'INTERP'; then
+            echo "The packaged Linux guardian unexpectedly has a program interpreter." >&2
+            exit 1
+          fi
+          if readelf --dynamic "$guardian" 2>/dev/null | grep -Fq '(NEEDED)'; then
+            echo "The packaged Linux guardian unexpectedly has a dynamic dependency." >&2
+            exit 1
+          fi
+
       - name: Verify packaged Electron fuses
         run: |
           set -euo pipefail
@@ -240,7 +261,7 @@ jobs:
         if: runner.os == 'Windows'
         run: npm run test:windows-installer-smoke
 
-      - name: Prove AppImage runtime on pristine native Ubuntu
+      - name: Prove AppImage and guardian runtime on pristine Ubuntu 22.04
         if: runner.os == 'Linux'
         run: |
           set -euo pipefail
@@ -252,8 +273,25 @@ jobs:
           artifact="$(basename -- "${appimages[0]}")"
           docker run --rm --platform "${{ matrix.docker_platform }}" \
             --volume "$PWD/release:/release:ro" \
-            ubuntu@sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517 \
-            "/release/$artifact" --appimage-version
+            ubuntu@sha256:2edbbc5dc405e9612ba3584ce95480277e3eb374407b5505fe26f17df77c7dbc \
+            bash -euo pipefail -c '
+              app="/release/$1"
+              "$app" --appimage-version
+              work="$(mktemp -d)"
+              cd "$work"
+              "$app" --appimage-extract >/dev/null
+              guardian="squashfs-root/resources/runtime/runtime-process-guardian"
+              test -x "$guardian"
+              "$guardian" seccomp-selftest
+              sleep 30 & child="$!"
+              cleanup() {
+                kill "$child" 2>/dev/null || true
+                wait "$child" 2>/dev/null || true
+              }
+              trap cleanup EXIT
+              identity="$("$guardian" identity "$child")"
+              [[ "$identity" =~ ^[1-9][0-9]*\|[1-9][0-9]*\|[1-9][0-9]*\|[1-9][0-9]*\|[1-9][0-9]*\|[1-9][0-9]*$ ]]
+            ' bash "$artifact"
 
       - name: Configure Linux sandbox helper for smoke
         if: runner.os == 'Linux'

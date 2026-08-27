@@ -17,6 +17,31 @@ function deferred(): {
 }
 
 describe("runtime shutdown phases", () => {
+  it("passes one absolute deadline through every shutdown phase", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    try {
+      const deadlines: number[] = [];
+      const observe = ({ deadlineAt }: { deadlineAt: number }): void => {
+        deadlines.push(deadlineAt);
+      };
+      await runRuntimeShutdownPhases({
+        quiesceRuntimeWork: observe,
+        independentDrains: [observe, observe],
+        stopIsolatedRuns: observe,
+        disposeTurnsAndProviders: observe,
+        settleArtifacts: observe,
+        terminateClients: observe,
+        closeServer: observe,
+        closeStore: observe,
+      }, 100);
+
+      expect(deadlines).toEqual(Array.from({ length: 9 }, () => 1_100));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("quiesces command admission before disposing owned resources", async () => {
     const command = deferred();
     const calls: string[] = [];

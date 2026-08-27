@@ -1161,7 +1161,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         },
         independentDrains: [
           () => initializedConversationAttachments.close(),
-          () => terminals.disposeAll(),
+          ({ deadlineAt }) => terminals.disposeAll(deadlineAt),
           () => providerMaintenance.dispose(),
         ],
         stopIsolatedRuns: () => isolatedRuns.dispose(cause),

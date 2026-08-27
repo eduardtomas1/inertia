@@ -40,6 +40,9 @@ interface TerminalSession {
   exitWaiters: Set<() => void>;
   terminationRequested: boolean;
   closing: Promise<void> | null;
+  shutdownDeadlineAt: number | null;
+  waitForShutdownDeadline: Promise<number>;
+  setShutdownDeadline(deadlineAt: number): void;
   terminateProcessTree: OwnedPidProcessTreeTermination | null;
   confirmOwnedProcessStopped: () => boolean;
   requestOwnedGuardianStop: () => boolean;
@@ -79,6 +82,66 @@ function userShell(): { executable: string; args: string[] } {
 
   const fallback = process.platform === "darwin" ? "/bin/zsh" : "/bin/bash";
   return { executable: fallback, args: ["-l"] };
+}
+
+async function beforeTerminalDeadline(
+  operation: Promise<boolean>,
+  deadlineAt: number,
+): Promise<boolean> {
+  type Settlement =
+    | { kind: "pending" }
+    | { kind: "settled"; value: boolean };
+  const settlement: { current: Settlement } = { current: { kind: "pending" } };
+  const observedSettlement = (): Settlement => settlement.current;
+  void operation.then(
+    (value) => { settlement.current = { kind: "settled", value }; },
+    () => { settlement.current = { kind: "settled", value: false }; },
+  );
+  await Promise.resolve();
+  const immediate = observedSettlement();
+  if (immediate.kind === "settled") return immediate.value;
+  const remainingMs = Math.trunc(deadlineAt - Date.now());
+  if (remainingMs <= 0) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const delayed = observedSettlement();
+    return delayed.kind === "settled"
+      ? delayed.value
+      : false;
+  }
+  return await new Promise<boolean>((resolve) => {
+    let settled = false;
+    const finish = (value: boolean): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    };
+    const timer = setTimeout(() => finish(false), remainingMs);
+    timer.unref();
+    void operation.then(finish, () => finish(false));
+  });
+}
+
+async function waitForGuardianStopWithinDeadline(
+  session: TerminalSession,
+): Promise<boolean> {
+  const guardianStop = session.waitForOwnedGuardianStop();
+  if (session.shutdownDeadlineAt !== null) {
+    return await beforeTerminalDeadline(guardianStop, session.shutdownDeadlineAt);
+  }
+  const first = await Promise.race([
+    guardianStop.then(
+      (value) => ({ kind: "guardian" as const, value }),
+      () => ({ kind: "guardian" as const, value: false }),
+    ),
+    session.waitForShutdownDeadline.then((deadlineAt) => ({
+      kind: "deadline" as const,
+      deadlineAt,
+    })),
+  ]);
+  return first.kind === "guardian"
+    ? first.value
+    : await beforeTerminalDeadline(guardianStop, first.deadlineAt);
 }
 
 function stopSlowSocket(socket: WebSocket): void {
@@ -300,6 +363,10 @@ export class TerminalManager {
     this.assertCapacity(owner, replaced);
 
     const id = randomUUID();
+    let settleShutdownDeadline!: (deadlineAt: number) => void;
+    const waitForShutdownDeadline = new Promise<number>((resolve) => {
+      settleShutdownDeadline = resolve;
+    });
     let pseudoterminal: IPty;
     let confirmOwnedProcessStopped!: () => boolean;
     let releaseOwnedProcessIfExited!: (exitSignal?: number) => void;
@@ -401,6 +468,16 @@ export class TerminalManager {
       exitWaiters: new Set(),
       terminationRequested: false,
       closing: null,
+      shutdownDeadlineAt: null,
+      waitForShutdownDeadline,
+      setShutdownDeadline: (deadlineAt) => {
+        if (
+          session.shutdownDeadlineAt !== null
+          && deadlineAt >= session.shutdownDeadlineAt
+        ) return;
+        session.shutdownDeadlineAt = deadlineAt;
+        settleShutdownDeadline(deadlineAt);
+      },
       terminateProcessTree: null,
       confirmOwnedProcessStopped,
       requestOwnedGuardianStop,
@@ -458,9 +535,12 @@ export class TerminalManager {
     }
   }
 
-  async disposeAll(): Promise<void> {
+  async disposeAll(deadlineAt?: number): Promise<void> {
     this.disposingAll = true;
     for (const session of this.sessions.values()) {
+      if (deadlineAt !== undefined) {
+        session.setShutdownDeadline(deadlineAt);
+      }
       void this.trackDisposal(session);
     }
     const closing = [...this.closingSessions];
@@ -551,10 +631,22 @@ export class TerminalManager {
             // A close can race the platform guardian's bounded asynchronous
             // admission. Let that exact guardian consume the recorded stop
             // request before starting the shorter PTY-exit deadline.
-            await session.waitForOwnedGuardianStop();
-            const exited = await waitForExit(this.shutdownTimeoutMs);
+            const admitted = await waitForGuardianStopWithinDeadline(session);
+            if (!admitted) return false;
+            const exitWaitMs = session.shutdownDeadlineAt === null
+              ? this.shutdownTimeoutMs
+              : Math.min(
+                  this.shutdownTimeoutMs,
+                  Math.max(0, Math.trunc(session.shutdownDeadlineAt - Date.now())),
+                );
+            const exited = session.exitObserved
+              ? true
+              : exitWaitMs > 0 && await waitForExit(exitWaitMs);
             if (!exited) return false;
-            const deadlineAt = Date.now() + this.shutdownTimeoutMs;
+            const deadlineAt = Math.min(
+              Date.now() + this.shutdownTimeoutMs,
+              session.shutdownDeadlineAt ?? Number.POSITIVE_INFINITY,
+            );
             while (!session.confirmOwnedProcessStopped()) {
               const remainingMs = deadlineAt - Date.now();
               if (remainingMs <= 0) return false;

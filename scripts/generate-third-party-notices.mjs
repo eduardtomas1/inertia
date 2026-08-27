@@ -16,11 +16,10 @@ const outputPath = resolve(
     ?? join(repositoryRoot, "resources", "generated", "THIRD_PARTY_NOTICES.txt"),
 );
 const fixtureTreePath = process.env.INERTIA_NOTICES_TREE_PATH;
-const vendoredAssetNoticesPath = join(
-  repositoryRoot,
-  "resources",
-  "provider-icon-notices.txt",
-);
+const vendoredNoticesPaths = [
+  join(repositoryRoot, "resources", "provider-icon-notices.txt"),
+  join(repositoryRoot, "resources", "runtime-process-guardian-notices.txt"),
+];
 
 function fail(message) {
   throw new Error(`Third-party notice generation failed: ${message}`);
@@ -186,12 +185,12 @@ function collectPackages(tree) {
   return [...identities.values()].sort((left, right) => left.identity.localeCompare(right.identity, "en"));
 }
 
-function vendoredAssetNotices() {
-  const notices = readFileSync(vendoredAssetNoticesPath, "utf8")
-    .replace(/\r\n?/gu, "\n")
-    .trim();
-  if (!notices) fail("vendored provider icon notices are empty");
-  return notices;
+function vendoredNotices() {
+  return vendoredNoticesPaths.map((path) => {
+    const notices = readFileSync(path, "utf8").replace(/\r\n?/gu, "\n").trim();
+    if (!notices) fail(`${basename(path)} is empty`);
+    return notices;
+  }).join("\n\n--------------------------------------------------------------------------------\n\n");
 }
 
 function render(packages, assetNotices) {
@@ -233,7 +232,7 @@ function render(packages, assetNotices) {
 
   lines.push(
     "",
-    "VENDORED ASSET LICENSE AND NOTICE TEXTS",
+    "VENDORED COMPONENT LICENSE AND NOTICE TEXTS",
     "",
     assetNotices,
     "",
@@ -257,7 +256,7 @@ function render(packages, assetNotices) {
 }
 
 try {
-  const output = render(collectPackages(productionTree()), vendoredAssetNotices());
+  const output = render(collectPackages(productionTree()), vendoredNotices());
   mkdirSync(dirname(outputPath), { recursive: true });
   writeFileSync(outputPath, output, "utf8");
   console.log(`Generated ${outputPath}`);

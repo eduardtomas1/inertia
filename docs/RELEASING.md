@@ -152,13 +152,21 @@ Native macOS jobs additionally extract the exact ZIP, mount the exact DMG
 read-only, verify the complete signature and selected native binaries in each,
 and run the complete packaged runtime smoke from both contained apps. Native
 Linux jobs reject unversioned AppImage runtime dependencies, execute the exact
-AppImage wrapper in pristine `ubuntu:24.04`, extract through that wrapper
+AppImage wrapper and its statically linked process guardian in pristine
+`ubuntu:22.04` (glibc 2.35), exercise the guardian's seccomp and `/proc`
+identity paths, extract through that wrapper
 without an `unsquashfs` fallback, verify selected native binaries, and run the
 complete smoke twice through the exact AppImage entry point: once through the
 advertised default FUSE mount/AppRun path and once through the explicit
 extract-and-run fallback. These final-container gates do
 not replace the separate checksum, provenance, signature, fuse, update-metadata,
 or unpacked-package checks.
+
+The Linux guardian is statically linked with musl so it does not inherit the
+runner's glibc floor. Ubuntu/Debian development hosts therefore need
+`musl-tools`, `linux-libc-dev`, and `binutils`; CI installs that reviewed
+toolchain explicitly and verifies that the packaged ELF has no interpreter or
+dynamic dependencies. The packaged third-party notices include musl's license.
 
 Publishing is draft-first and fail-closed. A retry may reuse an existing draft:
 identical assets are retained and missing assets are uploaded, while unexpected

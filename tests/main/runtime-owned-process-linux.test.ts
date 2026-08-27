@@ -1,5 +1,5 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn as spawnPty } from "node-pty";
@@ -201,6 +201,79 @@ describe("Linux runtime process guardian", () => {
     }
   }, 15_000);
 
+  linuxIt("never falls back to a raw process signal when exact stop is unavailable", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-linux-stop-unavailable-")); roots.push(root);
+    const guardian = compileGuardian(root);
+    const generation = "f0000000-0000-4000-8000-00000000000f:1";
+    const boot = "test:10000000-0000-4000-8000-000000000010";
+    const deactivate = activateRuntimeOwnedProcessRegistry(root, generation, boot, {
+      platform: "linux", darwinGuardianPath: guardian,
+    });
+    const invocation = runtimeOwnedProcessInvocation("/bin/sleep", ["60"]);
+    const child = spawnRuntimeOwnedProcess(() => spawn(
+      invocation.command,
+      invocation.args,
+      { detached: true, stdio: "ignore" },
+    ));
+    const movedGuardian = `${guardian}.moved`;
+    renameSync(guardian, movedGuardian);
+    const rawKill = vi.fn<typeof process.kill>(() => true);
+    try {
+      await expect(terminateProcessTreeAndWait(child, true, {
+        platform: "linux",
+        killProcess: rawKill,
+        waitMs: 25,
+      })).resolves.toBe(false);
+      expect(rawKill).not.toHaveBeenCalled();
+      expect(exists(child.pid!)).toBe(true);
+      expect(new RuntimeOwnedProcessJournal(root, {
+        platform: "linux", darwinGuardianPath: movedGuardian,
+      }).records(generation)).toMatchObject([{ state: "owned" }]);
+    } finally {
+      renameSync(movedGuardian, guardian);
+      await terminateProcessTreeAndWait(child, true, {
+        platform: "linux",
+        waitMs: 3_000,
+      });
+      deactivate?.();
+    }
+  }, 15_000);
+
+  linuxIt("lets terminal monitoring retire a done guardian without raw fallback", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-linux-done-stop-")); roots.push(root);
+    const guardian = compileGuardian(root);
+    const generation = "11000000-0000-4000-8000-000000000011:1";
+    const boot = "test:12000000-0000-4000-8000-000000000012";
+    const deactivate = activateRuntimeOwnedProcessRegistry(root, generation, boot, {
+      platform: "linux", darwinGuardianPath: guardian,
+    });
+    const invocation = runtimeOwnedProcessInvocation("/bin/true", []);
+    const child = spawnRuntimeOwnedProcess(() => spawn(
+      invocation.command,
+      invocation.args,
+      { detached: true, stdio: "ignore" },
+    ));
+    const rawKill = vi.fn<typeof process.kill>(() => true);
+    try {
+      await waitFor(() => {
+        try { return readFileSync(`/proc/${child.pid}/comm`, "utf8").trim() === "inertia-done"; }
+        catch { return false; }
+      });
+      await expect(terminateProcessTreeAndWait(child, true, {
+        platform: "linux",
+        killProcess: rawKill,
+        waitMs: 2_000,
+      })).resolves.toBe(true);
+      expect(rawKill).not.toHaveBeenCalled();
+      expect(new RuntimeOwnedProcessJournal(root, {
+        platform: "linux", darwinGuardianPath: guardian,
+      }).records(generation)).toEqual([]);
+    } finally {
+      await stopChild(child);
+      deactivate?.();
+    }
+  }, 15_000);
+
   linuxIt("owns and retires a PID-backed terminal through the guardian", async () => {
     const root = mkdtempSync(join(tmpdir(), "inertia-linux-pty-")); roots.push(root);
     const guardian = compileGuardian(root);
@@ -233,6 +306,44 @@ describe("Linux runtime process guardian", () => {
       }).records(generation)?.length === 0);
       expect(owned.confirmStopped()).toBe(true);
     } finally {
+      deactivate?.();
+    }
+  }, 15_000);
+
+  linuxIt("consumes an exact-stop failure for a PID-backed terminal", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-linux-pty-stop-failure-")); roots.push(root);
+    const guardian = compileGuardian(root);
+    const generation = "13000000-0000-4000-8000-000000000013:1";
+    const boot = "test:14000000-0000-4000-8000-000000000014";
+    const deactivate = activateRuntimeOwnedProcessRegistry(root, generation, boot, {
+      platform: "linux", darwinGuardianPath: guardian,
+    });
+    const invocation = runtimeOwnedPtyInvocation("/bin/sleep", ["60"]);
+    if (!Array.isArray(invocation.args)) throw new Error("Expected guarded PTY arguments.");
+    const owned = spawnRuntimeOwnedPidProcess(() => spawnPty(
+      invocation.command,
+      [...invocation.args],
+      { cwd: root, env: { PATH: "/usr/bin:/bin" } },
+    ), { darwinGuardianCommand: invocation.command });
+    const exited = new Promise<void>((resolve) => {
+      owned.process.onExit(({ signal }) => {
+        owned.releaseIfGroupExited(signal);
+        resolve();
+      });
+    });
+    const movedGuardian = `${guardian}.moved`;
+    renameSync(guardian, movedGuardian);
+    try {
+      expect(owned.requestGuardianStop()).toBe(true);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(exists(owned.process.pid)).toBe(true);
+      expect(new RuntimeOwnedProcessJournal(root, {
+        platform: "linux", darwinGuardianPath: movedGuardian,
+      }).records(generation)).toMatchObject([{ state: "owned" }]);
+    } finally {
+      renameSync(movedGuardian, guardian);
+      owned.requestGuardianStop();
+      await exited;
       deactivate?.();
     }
   }, 15_000);

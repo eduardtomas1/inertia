@@ -196,15 +196,17 @@ export function requestRuntimeOwnedGuardianStop(child: ChildProcess): boolean {
   const claim = registry.claims.get(child);
   if (!claim || claim.released || !child.pid) return false;
   if (registry.platform === "linux") {
-    return Boolean(
-      claim.linuxIdentity
-      && registry.darwinGuardianPath
-      && signalLinuxGuardianExact(
+    if (claim.linuxIdentity && registry.darwinGuardianPath) {
+      signalLinuxGuardianExact(
         claim.linuxIdentity,
         registry.darwinGuardianPath,
         "stop",
-      ),
-    );
+      );
+    }
+    // A known Linux guardian always owns this stop attempt. Failure to prove
+    // the exact helper signal must time out with its durable claim retained;
+    // returning false would authorize the caller's unsafe raw-PID fallback.
+    return true;
   }
   try {
     return child.kill("SIGTERM");
@@ -740,15 +742,16 @@ export function spawnRuntimeOwnedPidProcess<T extends { readonly pid: number }>(
       if (registry.platform !== "linux" && registry.platform !== "darwin") return false;
       if (claim.released) return true;
       if (registry.platform === "linux") {
-        return Boolean(
-          claim.linuxIdentity
-          && registry.darwinGuardianPath
-          && signalLinuxGuardianExact(
+        if (claim.linuxIdentity && registry.darwinGuardianPath) {
+          signalLinuxGuardianExact(
             claim.linuxIdentity,
             registry.darwinGuardianPath,
             "stop",
-          ),
-        );
+          );
+        }
+        // Consume the guarded request even when the exact helper cannot act;
+        // the caller must not fall back to signalling a recyclable PID/PGID.
+        return true;
       }
       try { process.kill(confirmedOwned.pid, "SIGTERM"); return true; } catch { return false; }
     },

@@ -172,6 +172,9 @@ describe.skipIf(process.platform !== "linux")(
       const child = longRunningChild();
       const close = closeOf(child);
       const journal = new RuntimeOwnedProcessJournal(directory);
+      await vi.waitFor(() => {
+        expect(journal.records(runtimeGenerationId)?.[0]?.state).toBe("owned");
+      }, { timeout: 5_000 });
       const records = journal.records(runtimeGenerationId);
       expect(records).toHaveLength(1);
       expect(records?.[0]).toMatchObject({
@@ -213,11 +216,15 @@ describe.skipIf(process.platform !== "linux")(
       const child = longRunningChild();
       const journal = new RuntimeOwnedProcessJournal(directory);
 
+      await vi.waitFor(() => {
+        expect(journal.records(runtimeGenerationId)?.[0]?.state).toBe("owned");
+      }, { timeout: 5_000 });
+
       child.kill("SIGTERM");
       await closeOf(child);
       await vi.waitFor(() => {
         expect(confirmRuntimeOwnedProcessStopped(child)).toBe(true);
-      });
+      }, { timeout: 5_000 });
       expect(journal.records(runtimeGenerationId)).toEqual([]);
       expect(journal.finishSession(runtimeGenerationId)).toBe(true);
       expect(readdirSync(directory).some((name) =>
@@ -292,6 +299,9 @@ describe.skipIf(process.platform !== "linux")(
       activate(directory);
       const child = longRunningChild();
       const journal = new RuntimeOwnedProcessJournal(directory);
+      await vi.waitFor(() => {
+        expect(journal.records(runtimeGenerationId)?.[0]?.state).toBe("owned");
+      }, { timeout: 5_000 });
       const record = journal.records(runtimeGenerationId)?.[0];
       if (!record || record.state !== "owned") throw new Error("Missing claim");
       if (!("startTimeTicks" in record.process)) throw new Error("Missing Linux claim");
@@ -327,6 +337,9 @@ describe.skipIf(process.platform !== "linux")(
       activate(directory);
       const child = longRunningChild();
       const journal = new RuntimeOwnedProcessJournal(directory);
+      await vi.waitFor(() => {
+        expect(journal.records(runtimeGenerationId)?.[0]?.state).toBe("owned");
+      }, { timeout: 5_000 });
       const record = journal.records(runtimeGenerationId)?.[0];
       if (!record || record.state !== "owned") throw new Error("Missing claim");
       deactivate();
@@ -1631,6 +1644,129 @@ describe("cross-platform runtime owned process recovery", () => {
       deactivate();
     },
     10_000,
+  );
+
+  it.runIf(process.platform === "darwin")(
+    "returns a completed macOS payload status after an ordinary child fork",
+    async () => {
+      const directory = temporaryDirectory();
+      activate(directory);
+      const invocation = runtimeOwnedProcessInvocation(
+        process.execPath,
+        [
+          "-e",
+          "require('node:child_process').execFileSync('/usr/bin/true'); process.exit(78)",
+        ],
+      );
+      const guardian = spawnRuntimeOwnedProcess(() => spawn(
+        invocation.command,
+        invocation.args,
+        { detached: true, shell: false, stdio: "ignore" },
+      ));
+      liveChildren.add(guardian);
+      guardian.once("close", () => liveChildren.delete(guardian));
+
+      await closeOf(guardian);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      expect(guardian.exitCode).toBe(78);
+      expect(guardian.signalCode).toBeNull();
+      expect(new RuntimeOwnedProcessJournal(directory)
+        .records(runtimeGenerationId)).toEqual([]);
+      deactivate();
+    },
+    10_000,
+  );
+
+  it.runIf(process.platform === "darwin")(
+    "keeps completed macOS fork cleanup fail-closed when cancellation arrives",
+    async () => {
+      const directory = temporaryDirectory();
+      const payloadSourcePath = join(directory, "settled-fork-payload.c");
+      const payloadPath = join(directory, "settled-fork-payload");
+      const rootPidPath = join(directory, "root.pid");
+      const childPidPath = join(directory, "child.pid");
+      writeFileSync(payloadSourcePath, [
+        "#include <signal.h>",
+        "#include <stdio.h>",
+        "#include <sys/types.h>",
+        "#include <unistd.h>",
+        "static int write_pid(const char *path, pid_t pid) {",
+        "  FILE *stream = fopen(path, \"w\");",
+        "  if (!stream) return 0;",
+        "  const int written = fprintf(stream, \"%d\\n\", pid) > 0;",
+        "  return fclose(stream) == 0 && written;",
+        "}",
+        "int main(int argc, char **argv) {",
+        "  if (argc != 3 || !write_pid(argv[1], getpid())) return 64;",
+        "  const pid_t child = fork();",
+        "  if (child < 0) return 71;",
+        "  if (child > 0) { usleep(20000); return 78; }",
+        "  if (signal(SIGTERM, SIG_IGN) == SIG_ERR) _exit(72);",
+        "  if (!write_pid(argv[2], getpid())) _exit(73);",
+        "  for (;;) pause();",
+        "}",
+      ].join("\n"), { encoding: "utf8", mode: 0o600 });
+      const built = spawnSync(
+        "/usr/bin/xcrun",
+        [
+          "clang", "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
+          payloadSourcePath, "-o", payloadPath,
+        ],
+        {
+          encoding: "utf8",
+          env: { PATH: "/usr/bin:/bin:/usr/sbin:/sbin" },
+          shell: false,
+          timeout: 30_000,
+        },
+      );
+      expect(built.status, `${built.stderr}\n${built.stdout}`).toBe(0);
+      const guardianPath = join(
+        process.cwd(),
+        "resources/generated/runtime-process-guardian/runtime-process-guardian",
+      );
+      activate(directory);
+      const invocation = runtimeOwnedProcessInvocation(
+        payloadPath,
+        [rootPidPath, childPidPath],
+      );
+      const guardian = spawnRuntimeOwnedProcess(() => spawn(
+        invocation.command,
+        invocation.args,
+        { detached: true, shell: false, stdio: "ignore" },
+      ));
+      liveChildren.add(guardian);
+      guardian.once("close", () => liveChildren.delete(guardian));
+
+      let rootPid = 0;
+      let childPid = 0;
+      await expect.poll(() => {
+        if (existsSync(rootPidPath)) {
+          rootPid = Number(readFileSync(rootPidPath, "utf8").trim());
+        }
+        if (existsSync(childPidPath)) {
+          childPid = Number(readFileSync(childPidPath, "utf8").trim());
+        }
+        return rootPid > 1 && childPid > 1;
+      }, { timeout: 5_000, interval: 2 }).toBe(true);
+      await expect.poll(() => !processIsAlive(rootPid), {
+        timeout: 5_000,
+        interval: 2,
+      }).toBe(true);
+      guardian.kill("SIGTERM");
+      await closeOf(guardian);
+
+      expect(guardian.exitCode).toBeNull();
+      expect(guardian.signalCode).toBe("SIGUSR2");
+      await expect.poll(() => !processIsAlive(childPid), {
+        timeout: 5_000,
+      }).toBe(true);
+      expect(new RuntimeOwnedProcessJournal(directory, {
+        platform: "darwin",
+        darwinGuardianPath: guardianPath,
+      }).records(runtimeGenerationId)).toHaveLength(1);
+    },
+    15_000,
   );
 
   it.runIf(process.platform === "darwin")(

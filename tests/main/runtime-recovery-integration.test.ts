@@ -20,6 +20,7 @@ import { RuntimeSupervisor } from "../../src/main/runtime-supervisor";
 import { windowsRuntimeJobName } from "../../src/main/windows-runtime-job";
 import type { RuntimeWorkerCommand } from "../../src/node/runtime-process-protocol";
 import { RuntimeStore } from "../../src/server/database";
+import { RUNTIME_SHUTDOWN_DEADLINE_MS } from "../../src/server/runtime-shutdown";
 
 const repositoryRoot = resolve(import.meta.dirname, "../..");
 const temporaryDirectories: string[] = [];
@@ -486,7 +487,10 @@ describe("runtime recovery supervisor integration", () => {
         return child as never;
       },
       startupTimeoutMs: 10_000,
-      shutdownGraceMs: 2_000,
+      // This scenario expects the worker's orderly shutdown result. Keep the
+      // supervisor grace beyond the worker's own bounded cleanup deadline so
+      // host contention cannot force-kill a still-authoritative worker first.
+      shutdownGraceMs: RUNTIME_SHUTDOWN_DEADLINE_MS + 500,
       forceKillWaitMs: 1_000,
     });
     activeSupervisors.add(supervisor);

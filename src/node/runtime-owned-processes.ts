@@ -67,6 +67,8 @@ interface ActiveRuntimeOwnedProcessRegistry {
     pid: number,
   ) => DarwinProcessIdentity | null;
   readonly claims: WeakMap<ChildProcess, ActiveRuntimeOwnedProcessClaim>;
+  readonly activeLinuxMonitors: Set<() => void>;
+  readonly admissionController: AbortController;
   readonly pendingAdmissions: Set<Promise<boolean>>;
   readonly pendingReleaseConfirmations: Set<Promise<boolean>>;
   tainted: boolean;
@@ -140,13 +142,19 @@ export function activateRuntimeOwnedProcessRegistry(
         ? darwinProcessGuardianReady(pid, darwinGuardianPath)
         : null),
     claims: new WeakMap(),
+    activeLinuxMonitors: new Set(),
+    admissionController: new AbortController(),
     pendingAdmissions: new Set(),
     pendingReleaseConfirmations: new Set(),
     tainted: false,
   };
   activeRegistry = registry;
   return () => {
-    if (activeRegistry === registry) activeRegistry = null;
+    if (activeRegistry !== registry) return;
+    activeRegistry = null;
+    registry.admissionController.abort();
+    for (const stopMonitor of registry.activeLinuxMonitors) stopMonitor();
+    registry.activeLinuxMonitors.clear();
   };
 }
 
@@ -442,11 +450,20 @@ function monitorLinuxGuardian(
     registry.pendingReleaseConfirmations.delete(linuxMonitorConfirmation);
     claim.settleLinuxMonitorConfirmation = undefined;
   });
-  claim.stopLinuxMonitor = monitorLinuxGuardianTerminal(
+  let stopMonitor: (() => void) | null = null;
+  const stopTrackedMonitor = (): void => {
+    registry.activeLinuxMonitors.delete(stopTrackedMonitor);
+    const stop = stopMonitor;
+    stopMonitor = null;
+    stop?.();
+  };
+  stopMonitor = monitorLinuxGuardianTerminal(
     durableClaim.process,
     registry.darwinGuardianPath,
     () => registry.journal.retire(claim.ownershipId),
     () => {
+      registry.activeLinuxMonitors.delete(stopTrackedMonitor);
+      claim.stopLinuxMonitor = undefined;
       registry.tainted = true;
       settleLinuxMonitorConfirmation(false);
     },
@@ -468,17 +485,21 @@ function monitorLinuxGuardian(
       },
     },
   );
+  claim.stopLinuxMonitor = stopTrackedMonitor;
+  registry.activeLinuxMonitors.add(stopTrackedMonitor);
 }
 
 async function linuxGuardianReady(
   pid: number,
   guardianPath: string,
+  abortSignal?: AbortSignal,
 ): Promise<LinuxProcessIdentity | null> {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const identity = await readLinuxGuardianReadyAsync(
       pid,
       guardianPath,
       process.pid,
+      abortSignal,
     );
     if (identity) return identity;
   }
@@ -497,7 +518,11 @@ async function admitLinuxGuardian(
     if (!guardianPath || activeRegistry !== registry) {
       throw new Error("The Linux owned process guardian is unavailable.");
     }
-    const identity = await linuxGuardianReady(pid, guardianPath);
+    const identity = await linuxGuardianReady(
+      pid,
+      guardianPath,
+      registry.admissionController.signal,
+    );
     if (!identity || activeRegistry !== registry || registry.tainted) {
       throw new Error("The Linux owned process guardian is not ready.");
     }
@@ -519,12 +544,14 @@ async function admitLinuxGuardian(
       identity,
       guardianPath,
       "claim",
+      registry.admissionController.signal,
     );
     if (!claimed) {
       const observedClaimed = await readLinuxGuardianClaimedAsync(
         pid,
         guardianPath,
         process.pid,
+        registry.admissionController.signal,
       );
       claimed = Boolean(
         observedClaimed
@@ -539,7 +566,12 @@ async function admitLinuxGuardian(
       throw new Error("The Linux owned process authorization could not be persisted.");
     }
     if (claim.stopRequested || registry.tainted) {
-      if (!await signalLinuxGuardianExactAsync(identity, guardianPath, "stop")) {
+      if (!await signalLinuxGuardianExactAsync(
+        identity,
+        guardianPath,
+        "stop",
+        registry.admissionController.signal,
+      )) {
         throw new Error("The Linux owned process guardian could not be stopped.");
       }
       return true;
@@ -548,12 +580,14 @@ async function admitLinuxGuardian(
       owned.process as LinuxProcessIdentity,
       guardianPath,
       "exec",
+      registry.admissionController.signal,
     );
     if (!authorized) {
       const observedOwned = await readLinuxGuardianOwnedAsync(
         pid,
         guardianPath,
         process.pid,
+        registry.admissionController.signal,
       );
       authorized = Boolean(
         observedOwned
@@ -564,12 +598,18 @@ async function admitLinuxGuardian(
       throw new Error("The Linux owned process guardian could not be authorized.");
     }
     if (claim.stopRequested) {
-      if (!await signalLinuxGuardianExactAsync(identity, guardianPath, "stop")) {
+      if (!await signalLinuxGuardianExactAsync(
+        identity,
+        guardianPath,
+        "stop",
+        registry.admissionController.signal,
+      )) {
         throw new Error("The Linux owned process guardian could not be stopped.");
       }
     }
     return true;
   } catch {
+    if (activeRegistry !== registry) return false;
     registry.tainted = true;
     if (claim.linuxIdentity && guardianPath) {
       void signalLinuxGuardianExactAsync(

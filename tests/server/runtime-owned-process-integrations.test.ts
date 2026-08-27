@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type WebSocket from "ws";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   activateRuntimeOwnedProcessRegistry,
@@ -102,10 +102,12 @@ describe.skipIf(process.platform !== "linux")(
         24,
       );
 
-      expect(journal.records(runtimeGenerationId)).toMatchObject([{
-        state: "owned",
-        process: { processGroupId: expect.any(Number) },
-      }]);
+      await vi.waitFor(() => {
+        expect(journal.records(runtimeGenerationId)).toMatchObject([{
+          state: "owned",
+          process: { processGroupId: expect.any(Number) },
+        }]);
+      }, { timeout: 5_000 });
       await expect(manager.closeManaged(terminalId)).resolves.toBe(true);
       expect(journal.records(runtimeGenerationId)).toEqual([]);
       expect(journal.finishSession(runtimeGenerationId)).toBe(true);

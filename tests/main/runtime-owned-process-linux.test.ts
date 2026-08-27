@@ -614,7 +614,7 @@ describe("Linux runtime process guardian", () => {
     }
   }, 15_000);
 
-  linuxIt("keeps retiring claims owned when the active registry is replaced", async () => {
+  linuxIt("keeps inactive registry claims durably owned without late monitor mutation", async () => {
     const firstRoot = mkdtempSync(join(tmpdir(), "inertia-linux-replaced-a-")); roots.push(firstRoot);
     const secondRoot = mkdtempSync(join(tmpdir(), "inertia-linux-replaced-b-")); roots.push(secondRoot);
     const guardian = compileGuardian(firstRoot);
@@ -637,17 +637,22 @@ describe("Linux runtime process guardian", () => {
       platform: "linux", darwinGuardianPath: guardian,
     });
     try {
-      await Promise.all(children.map(waitForChild));
-      await waitFor(() => new RuntimeOwnedProcessJournal(firstRoot, {
-        platform: "linux", darwinGuardianPath: guardian,
-      }).records(generation)?.every((record) => record.state === "retiring") === true);
+      // The replaced registry no longer owns a monitor capable of releasing
+      // these guardians. Let their payloads finish, then prove the stopped
+      // guardians and their durable claims remain fail-closed.
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      expect(children.every((child) => child.pid && exists(child.pid))).toBe(true);
       expect(new RuntimeOwnedProcessJournal(firstRoot, {
         platform: "linux", darwinGuardianPath: guardian,
-      }).records(generation)).toHaveLength(2);
+      }).records(generation)).toMatchObject([
+        { state: "owned" },
+        { state: "owned" },
+      ]);
       expect(new RuntimeOwnedProcessJournal(secondRoot, {
         platform: "linux", darwinGuardianPath: guardian,
       }).records(generation)).toEqual([]);
     } finally {
+      await Promise.all(children.map(stopChild));
       deactivateSecond?.();
     }
   }, 15_000);

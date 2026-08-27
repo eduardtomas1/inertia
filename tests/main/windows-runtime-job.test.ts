@@ -159,6 +159,19 @@ describe("Windows runtime Job Object containment", () => {
   });
 
   it.runIf(process.platform === "win32")(
+    "reports a real native Windows helper failure through bounded UTF-8 stderr",
+    async () => {
+      const generation = "30000000-0000-4000-8000-000000000004:1";
+      await expect(armWindowsRuntimeJob(generation, 4_294_967_294))
+        .rejects.toThrow(
+          "The native helper exited with code 12. "
+          + "INERTIA_JOB_ERROR stage=open-process win32=87",
+        );
+    },
+    20_000,
+  );
+
+  it.runIf(process.platform === "win32")(
     "arms and cleans up a real Job Object around a disposable child",
     async () => {
       const generation = "30000000-0000-4000-8000-000000000003:1";

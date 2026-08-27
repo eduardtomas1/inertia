@@ -77,7 +77,9 @@ export function windowsRuntimeJobName(
 
 const nativeJobSource = String.raw`
 using System;
+using System.IO;
 using System.Runtime.InteropServices;
+using System.Text;
 
 public static class InertiaRuntimeJob {
   [StructLayout(LayoutKind.Sequential)]
@@ -156,11 +158,17 @@ public static class InertiaRuntimeJob {
   private const int JobObjectBasicAccountingInformation = 1;
   private const int JobObjectExtendedLimitInformation = 9;
 
+  private static void WriteProtocolLine(Stream stream, string value) {
+    byte[] bytes = Encoding.UTF8.GetBytes(value + "\n");
+    stream.Write(bytes, 0, bytes.Length);
+    stream.Flush();
+  }
+
   private static int Failure(string stage, int exitCode, int win32Error) {
-    Console.Error.WriteLine(
+    WriteProtocolLine(
+      Console.OpenStandardError(),
       "INERTIA_JOB_ERROR stage=" + stage + " win32=" + win32Error
     );
-    Console.Error.Flush();
     return exitCode;
   }
 
@@ -225,8 +233,10 @@ public static class InertiaRuntimeJob {
       if (!AssignProcessToJobObject(job, process)) {
         return Failure("assign-process", 13, Marshal.GetLastWin32Error());
       }
-      Console.Out.WriteLine("READY");
-      Console.Out.Flush();
+      // PowerShell 5.1's redirected Console.Out encoding is host-dependent.
+      // Write the private readiness protocol to the native stream so Node
+      // always receives the bounded UTF-8 marker it parses on every build.
+      WriteProtocolLine(Console.OpenStandardOutput(), "READY");
       UInt32 waitResult = WaitForSingleObject(process, INFINITE);
       if (waitResult != 0) {
         int waitError = waitResult == UInt32.MaxValue
@@ -251,7 +261,7 @@ public static class InertiaRuntimeJob {
     IntPtr job = OpenJobObject(JOB_OBJECT_QUERY | JOB_OBJECT_TERMINATE, false, name);
     if (job == IntPtr.Zero) {
       if (Marshal.GetLastWin32Error() != ERROR_FILE_NOT_FOUND) return 22;
-      Console.Out.WriteLine("ABSENT");
+      WriteProtocolLine(Console.OpenStandardOutput(), "ABSENT");
       return 0;
     }
     try {

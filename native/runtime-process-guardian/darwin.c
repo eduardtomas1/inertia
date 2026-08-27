@@ -487,7 +487,10 @@ static int freeze_owned_tree(
 static int bounded_owned_tree_cleanup(
   pid_t session_id,
   pid_t guardian_pid,
-  struct owned_tree_tracker *tracker
+  struct owned_tree_tracker *tracker,
+  int allow_completed_payload_forks,
+  pid_t runtime_pid,
+  const struct proc_bsdinfo *runtime_identity
 ) {
   if (!freeze_owned_tree(session_id, guardian_pid, tracker)) return 0;
   for (int index = 0; index < tracker->count; index += 1) {
@@ -498,7 +501,14 @@ static int bounded_owned_tree_cleanup(
     (void)nanosleep(&pause, NULL);
     reap_children();
     if (!refresh_owned_tree(session_id, guardian_pid, tracker)) return 0;
-    if (tracker->count == 0) return tracker->fork_tainted ? 0 : 1;
+    if (tracker->count == 0) {
+      struct proc_bsdinfo current_runtime;
+      const int completed_authority_intact = allow_completed_payload_forks
+        && !stop_requested
+        && read_identity(runtime_pid, &current_runtime)
+        && same_identity(runtime_identity, &current_runtime);
+      return tracker->fork_tainted && !completed_authority_intact ? 0 : 1;
+    }
   }
   // Do not resume the stable frozen set to deliver TERM: a resumed signal
   // handler could fork and reparent a fresh setsid child between bounded
@@ -512,7 +522,14 @@ static int bounded_owned_tree_cleanup(
     reap_children();
     observe_root_forks(tracker);
     if (!refresh_owned_tree(session_id, guardian_pid, tracker)) return 0;
-    if (tracker->count == 0) return tracker->fork_tainted ? 0 : 1;
+    if (tracker->count == 0) {
+      struct proc_bsdinfo current_runtime;
+      const int completed_authority_intact = allow_completed_payload_forks
+        && !stop_requested
+        && read_identity(runtime_pid, &current_runtime)
+        && same_identity(runtime_identity, &current_runtime);
+      return tracker->fork_tainted && !completed_authority_intact ? 0 : 1;
+    }
     (void)nanosleep(&pause, NULL);
   }
   return 0;
@@ -521,7 +538,10 @@ static int bounded_owned_tree_cleanup(
 static int drain_owned_tree(
   pid_t session_id,
   pid_t guardian_pid,
-  struct owned_tree_tracker *tracker
+  struct owned_tree_tracker *tracker,
+  int allow_completed_payload_forks,
+  pid_t runtime_pid,
+  const struct proc_bsdinfo *runtime_identity
 ) {
   // One complete attempt is bounded by the stable-freeze and drain poll caps.
   // Failure—fork taint, an unstable/capped census, or a stubborn exact
@@ -530,7 +550,10 @@ static int drain_owned_tree(
   const int drained = bounded_owned_tree_cleanup(
     session_id,
     guardian_pid,
-    tracker
+    tracker,
+    allow_completed_payload_forks,
+    runtime_pid,
+    runtime_identity
   );
 #if defined(INERTIA_RUNTIME_GUARDIAN_TEST_CLEANUP_UNPROVED)
   // Focused native tests compile a separate, unpackaged guardian with this
@@ -693,7 +716,9 @@ static int watch_mode(int argc, char *argv[]) {
     if (stop_requested
       || !read_identity(runtime_pid, &current_runtime)
       || !same_identity(&runtime_identity, &current_runtime)) {
-      const int drained = drain_owned_tree(self, self, &tracker);
+      const int drained = drain_owned_tree(
+        self, self, &tracker, 0, runtime_pid, &runtime_identity
+      );
       free_owned_tree_tracker(&tracker);
       if (!drained) terminate_with_uncertain_containment();
       return 137;
@@ -708,7 +733,9 @@ static int watch_mode(int argc, char *argv[]) {
   if (stop_requested
     || !read_identity(runtime_pid, &authorized_runtime)
     || !same_identity(&runtime_identity, &authorized_runtime)) {
-    const int drained = drain_owned_tree(self, self, &tracker);
+    const int drained = drain_owned_tree(
+      self, self, &tracker, 0, runtime_pid, &runtime_identity
+    );
     free_owned_tree_tracker(&tracker);
     if (!drained) terminate_with_uncertain_containment();
     return 137;
@@ -769,13 +796,17 @@ static int watch_mode(int argc, char *argv[]) {
     && write(execution_gate[1], &authorization, sizeof(authorization)) == 1;
   (void)close(execution_gate[1]);
   if (!execution_released) {
-    const int drained = drain_owned_tree(self, self, &tracker);
+    const int drained = drain_owned_tree(
+      self, self, &tracker, 0, runtime_pid, &runtime_identity
+    );
     free_owned_tree_tracker(&tracker);
     if (!drained) terminate_with_uncertain_containment();
     return 137;
   }
   if (sigprocmask(SIG_SETMASK, &previous_signals, NULL) != 0) {
-    const int drained = drain_owned_tree(self, self, &tracker);
+    const int drained = drain_owned_tree(
+      self, self, &tracker, 0, runtime_pid, &runtime_identity
+    );
     free_owned_tree_tracker(&tracker);
     if (!drained) terminate_with_uncertain_containment();
     return 137;
@@ -783,13 +814,20 @@ static int watch_mode(int argc, char *argv[]) {
 
   int status = 0;
   int result = 137;
+  int payload_settled = 0;
   for (;;) {
     observe_root_forks(&tracker);
     const pid_t waited = waitpid(child, &status, WNOHANG);
     if (waited == child) {
-      if (WIFEXITED(status)) result = WEXITSTATUS(status);
-      else if (WIFSIGNALED(status)) result = 128 + WTERMSIG(status);
-      else result = 1;
+      struct proc_bsdinfo current_runtime;
+      if (!stop_requested
+        && read_identity(runtime_pid, &current_runtime)
+        && same_identity(&runtime_identity, &current_runtime)) {
+        payload_settled = 1;
+        if (WIFEXITED(status)) result = WEXITSTATUS(status);
+        else if (WIFSIGNALED(status)) result = 128 + WTERMSIG(status);
+        else result = 1;
+      }
       break;
     }
     if (waited < 0 && errno != EINTR) {
@@ -815,7 +853,21 @@ static int watch_mode(int argc, char *argv[]) {
     (void)nanosleep(&pause, NULL);
   }
 
-  const int drained = drain_owned_tree(self, self, &tracker);
+  // A payload that reached waitpid while its exact runtime parent remained
+  // alive completed under the user's existing authority. Drain every
+  // still-observed member and preserve its real exit status even when it
+  // legitimately forked (Git, gh, PTYs, and provider helpers all do). The
+  // cleanup success boundary rechecks stop and runtime identity dynamically;
+  // cancellation or parent loss during the drain therefore restores strict
+  // fork proof instead of turning a crash cleanup into a false success.
+  const int drained = drain_owned_tree(
+    self,
+    self,
+    &tracker,
+    payload_settled,
+    runtime_pid,
+    &runtime_identity
+  );
   free_owned_tree_tracker(&tracker);
   if (!drained) terminate_with_uncertain_containment();
   return result;

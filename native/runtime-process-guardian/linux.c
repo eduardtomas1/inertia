@@ -177,6 +177,13 @@ static int install_terminal_filter(pid_t pid, pid_t tid) {
     BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
     BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_prctl, 0, 1),
     BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
+    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_fcntl, 0, 6),
+    BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, args[1])),
+    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, F_SETFD, 0, 3),
+    BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, args[2])),
+    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, FD_CLOEXEC, 0, 1),
+    BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
+    BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_KILL_PROCESS),
     BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_tgkill, 0, 7),
     BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, args[0])),
     BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, (uint32_t)pid, 0, 5),
@@ -360,16 +367,42 @@ static int exact_signal_mode(int argc, char **argv) {
   close(pidfd); return 0;
 }
 static int seccomp_selftest(void) {
-  const pid_t child = fork();
-  if (child < 0) return 2;
-  if (child == 0) {
+  const pid_t allowed = fork();
+  if (allowed < 0) return 2;
+  if (allowed == 0) {
+    const pid_t pid = getpid(); const pid_t tid = (pid_t)syscall(SYS_gettid);
+    unsigned long long start = 0;
+    if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)
+      || !install_terminal_filter(pid, tid)
+      || !read_start(pid, &start)
+      || start == 0) _exit(3);
+    _exit(0);
+  }
+  int status = 0;
+  if (waitpid(allowed, &status, 0) != allowed || !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+    return 2;
+  }
+  const pid_t denied_fcntl = fork();
+  if (denied_fcntl < 0) return 2;
+  if (denied_fcntl == 0) {
+    const pid_t pid = getpid(); const pid_t tid = (pid_t)syscall(SYS_gettid);
+    if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) || !install_terminal_filter(pid, tid)) _exit(3);
+    (void)fcntl(STDIN_FILENO, F_GETFD);
+    _exit(4);
+  }
+  status = 0;
+  if (waitpid(denied_fcntl, &status, 0) != denied_fcntl
+    || !WIFSIGNALED(status) || WTERMSIG(status) != SIGSYS) return 2;
+  const pid_t denied_syscall = fork();
+  if (denied_syscall < 0) return 2;
+  if (denied_syscall == 0) {
     const pid_t pid = getpid(); const pid_t tid = (pid_t)syscall(SYS_gettid);
     if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) || !install_terminal_filter(pid, tid)) _exit(3);
     (void)syscall(SYS_getuid);
     _exit(4);
   }
-  int status = 0;
-  if (waitpid(child, &status, 0) != child) return 2;
+  status = 0;
+  if (waitpid(denied_syscall, &status, 0) != denied_syscall) return 2;
   return WIFSIGNALED(status) && WTERMSIG(status) == SIGSYS ? 0 : 1;
 }
 static int watch_mode(int argc, char **argv) {

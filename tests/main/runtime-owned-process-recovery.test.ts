@@ -250,7 +250,7 @@ describe.skipIf(process.platform !== "linux")(
       child.kill("SIGTERM");
       await close;
       deactivate();
-      const recovery = recoverRuntimeOwnedProcesses(
+      const recovery = await recoverRuntimeOwnedProcesses(
         directory,
         runtimeGenerationId,
         systemBootId,

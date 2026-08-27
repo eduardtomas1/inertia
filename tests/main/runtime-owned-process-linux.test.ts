@@ -438,20 +438,22 @@ describe("Linux runtime process guardian", () => {
       platform: "linux", darwinGuardianPath: guardian,
     });
     const executable = statSync(guardian, { bigint: true });
+    const wrongOwner = spawn("/bin/sleep", ["60"], { stdio: "ignore" });
     let child: ChildProcess | null = null;
     try {
       expect(() => spawnRuntimeOwnedProcess(() => {
         child = spawn(guardian, [
-          "watch", String(process.pid + 1), String(executable.dev), String(executable.ino),
+          "watch", String(wrongOwner.pid), String(executable.dev), String(executable.ino),
           "--", "/bin/sh", "-c", `touch ${join(root, "ran")}`,
         ], { detached: true, stdio: "ignore" });
         return child;
-      })).toThrow("could not be claimed");
+      })).toThrow(/(?:ownership could not be proven|guardian could not be claimed)/u);
       expect(() => spawnRuntimeOwnedProcess(() => spawn("/bin/true")))
         .toThrow("tainted until restart");
       expect(() => statSync(join(root, "ran"))).toThrow();
     } finally {
       if (child) await stopChild(child);
+      await stopChild(wrongOwner);
       deactivate?.();
     }
   }, 15_000);

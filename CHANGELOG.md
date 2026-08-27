@@ -4,6 +4,31 @@ The useful changes in each Inertia release, in plain language.
 
 ## Next
 
+## 0.0.45 — 2026-08-28
+
+### The Browser is ready when the chat is
+
+- The integrated Browser now starts from the owning chat without a separate warm-up action, works in existing conversations as well as new ones, and keeps the same visible local page available to both the user and the agent. Navigation, tabs, semantic inspection, interaction, and bounded evidence remain tied to the exact project, chat, run, turn, page, and capability authority.
+- Provider harnesses can compose reviewed Inertia-owned capability packs without replacing their native transports. Deterministic manifests and frontend audits keep tool availability, instructions, evaluation boundaries, and Browser semantics attributable across Codex, Claude, Cursor, Kimi Code, and OpenCode.
+- Editable labels, hidden content, image controls, accessible-name traversal, and opacity boundaries received adversarial coverage so semantic Browser actions remain useful without turning page-controlled content into trusted authority.
+
+### Runtime crashes recover without asking for a reboot
+
+- Windows binds each utility runtime to its exact Electron creation identity before assigning the native Job Object, so a slow PowerShell start cannot target a recycled PID. Admission remains inert until containment is ready and cancels cleanly on stop, process exit, or runtime replacement.
+- Linux authenticates guardian completion against the durable owned generation, exact process identity, executable identity, and process group. macOS retries transient privileged census reads within a strict bound while preserving birth identities and fork taint; disappearance, PID reuse, cancellation, parent loss, and exhausted proof still fail closed.
+- When macOS must preserve an owned login shell and start an action or provider in a distinct terminal, a delayed response now reconciles that replacement through its exact request identity. The original shell and requested process remain visible, attributable, and retryable instead of leaving a hidden terminal after an IPC timeout.
+- Startup now retires only process trees it can prove belong to Inertia and reconciles interrupted runs truthfully. The normal desktop recovery path no longer tells users to restart the operating system. macOS continues to state its real platform limit: an arbitrary descendant that deliberately double-forks into a new session cannot be proven contained by an unprivileged app.
+
+### Daily Work measures active time
+
+- Work durations exclude time while the computer is suspended. Closing a laptop or letting the system sleep no longer inflates the duration of work that was already in progress, while ordinary active time and completed history remain unchanged.
+
+### Native installation and release evidence match the package users receive
+
+- Windows ARM64 installers use architecture-correct application archives and are installed, launched, package-smoked, and uninstalled on a native ARM64 runner. A reboot-success installer code is rejected rather than presented as a recovery strategy.
+- macOS Intel and Apple silicon, Windows x64 and ARM64, and Linux x64 and ARM64 containers are checked through their final public package paths. Package-smoke receipts publish atomically.
+- Version, migration lineage, architecture, both lint layers, all TypeScript projects, the complete unit and integration suite, portable provider contracts, real Electron recovery, production bundles, renderer budgets, native package smoke, Electron fuses, checksums, provenance, screenshots, and exact-head review remain release-blocking.
+
 ## 0.0.44 — 2026-08-25
 
 ### CI checks have clearer deterministic owners

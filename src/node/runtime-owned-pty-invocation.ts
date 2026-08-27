@@ -13,7 +13,8 @@ export function runtimeOwnedPtyInvocation(
   command: string,
   args: readonly string[] | string,
 ): RuntimeOwnedPtyInvocation {
-  if (activeRuntimeOwnedProcessPlatform() !== "darwin") {
+  const platform = activeRuntimeOwnedProcessPlatform();
+  if (platform !== "darwin" && platform !== "linux") {
     return { command, args: typeof args === "string" ? args : [...args] };
   }
   return runtimeOwnedProcessInvocation(

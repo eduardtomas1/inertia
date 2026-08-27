@@ -261,7 +261,7 @@ export async function expectRuntimeCrashRecovery(
       firstSeenMs: number;
       lastSeenMs: number;
       samples: number;
-      states: Set<"owned" | "pending">;
+      states: Set<"owned" | "pending" | "preauth" | "retiring">;
     }>();
     try {
       await expect.poll(() => {
@@ -275,7 +275,7 @@ export async function expectRuntimeCrashRecovery(
             firstSeenMs: observedAtMs,
             lastSeenMs: observedAtMs,
             samples: 0,
-            states: new Set<"owned" | "pending">(),
+            states: new Set<"owned" | "pending" | "preauth" | "retiring">(),
           };
           observation.lastSeenMs = observedAtMs;
           observation.samples += 1;

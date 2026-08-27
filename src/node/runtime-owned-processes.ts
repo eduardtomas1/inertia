@@ -77,6 +77,7 @@ interface ActiveRuntimeOwnedProcessClaim {
   released: boolean;
   releaseConfirmation: Promise<boolean> | null;
   settleReleaseConfirmation: ((confirmed: boolean) => void) | null;
+  linuxIdentity?: LinuxProcessIdentity;
   stopLinuxMonitor?: () => void;
 }
 
@@ -194,6 +195,17 @@ export function requestRuntimeOwnedGuardianStop(child: ChildProcess): boolean {
   }
   const claim = registry.claims.get(child);
   if (!claim || claim.released || !child.pid) return false;
+  if (registry.platform === "linux") {
+    return Boolean(
+      claim.linuxIdentity
+      && registry.darwinGuardianPath
+      && signalLinuxGuardianExact(
+        claim.linuxIdentity,
+        registry.darwinGuardianPath,
+        "stop",
+      ),
+    );
+  }
   try {
     return child.kill("SIGTERM");
   } catch {
@@ -450,6 +462,7 @@ function monitorLinuxGuardian(
     || !registry.darwinGuardianPath
     || !("startTimeTicks" in durableClaim.process)
   ) return;
+  claim.linuxIdentity = durableClaim.process;
   claim.stopLinuxMonitor = monitorLinuxGuardianTerminal(
     durableClaim.process,
     registry.darwinGuardianPath,
@@ -726,6 +739,17 @@ export function spawnRuntimeOwnedPidProcess<T extends { readonly pid: number }>(
     requestGuardianStop: () => {
       if (registry.platform !== "linux" && registry.platform !== "darwin") return false;
       if (claim.released) return true;
+      if (registry.platform === "linux") {
+        return Boolean(
+          claim.linuxIdentity
+          && registry.darwinGuardianPath
+          && signalLinuxGuardianExact(
+            claim.linuxIdentity,
+            registry.darwinGuardianPath,
+            "stop",
+          ),
+        );
+      }
       try { process.kill(confirmedOwned.pid, "SIGTERM"); return true; } catch { return false; }
     },
     releaseIfGroupExited: (exitSignal) => {

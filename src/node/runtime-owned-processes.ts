@@ -78,6 +78,7 @@ interface ActiveRuntimeOwnedProcessClaim {
   releaseConfirmation: Promise<boolean> | null;
   settleReleaseConfirmation: ((confirmed: boolean) => void) | null;
   linuxIdentity?: LinuxProcessIdentity;
+  settleLinuxMonitorConfirmation?: (confirmed: boolean) => void;
   stopLinuxMonitor?: () => void;
 }
 
@@ -450,6 +451,7 @@ function releaseActiveClaim(
     : registry.journal.release(claim.ownershipId))) return false;
   claim.stopLinuxMonitor?.();
   claim.released = true;
+  claim.settleLinuxMonitorConfirmation?.(true);
   claim.settleReleaseConfirmation?.(true);
   return true;
 }
@@ -465,11 +467,24 @@ function monitorLinuxGuardian(
     || !("startTimeTicks" in durableClaim.process)
   ) return;
   claim.linuxIdentity = durableClaim.process;
+  let settleLinuxMonitorConfirmation!: (confirmed: boolean) => void;
+  const linuxMonitorConfirmation = new Promise<boolean>((resolve) => {
+    settleLinuxMonitorConfirmation = resolve;
+  });
+  claim.settleLinuxMonitorConfirmation = settleLinuxMonitorConfirmation;
+  registry.pendingReleaseConfirmations.add(linuxMonitorConfirmation);
+  void linuxMonitorConfirmation.then(() => {
+    registry.pendingReleaseConfirmations.delete(linuxMonitorConfirmation);
+    claim.settleLinuxMonitorConfirmation = undefined;
+  });
   claim.stopLinuxMonitor = monitorLinuxGuardianTerminal(
     durableClaim.process,
     registry.darwinGuardianPath,
     () => registry.journal.retire(claim.ownershipId),
-    () => { registry.tainted = true; },
+    () => {
+      registry.tainted = true;
+      settleLinuxMonitorConfirmation(false);
+    },
   );
 }
 

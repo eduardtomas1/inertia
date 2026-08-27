@@ -1,5 +1,5 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn as spawnPty } from "node-pty";
@@ -8,6 +8,7 @@ import { expect } from "vitest";
 import { terminateProcessTreeAndWait } from "../../src/server/process-lifecycle";
 import {
   activateRuntimeOwnedProcessRegistry,
+  awaitRuntimeOwnedProcessCleanupConfirmed,
   runtimeOwnedProcessInvocation,
   RuntimeOwnedProcessJournal,
   spawnRuntimeOwnedPidProcess,
@@ -242,19 +243,26 @@ describe("Linux runtime process guardian", () => {
   linuxIt("lets terminal monitoring retire a done guardian without raw fallback", async () => {
     const root = mkdtempSync(join(tmpdir(), "inertia-linux-done-stop-")); roots.push(root);
     const guardian = compileGuardian(root);
+    const movedGuardian = `${guardian}.moved`;
+    const releaseMarker = join(root, "release.marker");
     const generation = "11000000-0000-4000-8000-000000000011:1";
     const boot = "test:12000000-0000-4000-8000-000000000012";
     const deactivate = activateRuntimeOwnedProcessRegistry(root, generation, boot, {
       platform: "linux", darwinGuardianPath: guardian,
     });
-    const invocation = runtimeOwnedProcessInvocation("/bin/true", []);
+    const invocation = runtimeOwnedProcessInvocation(process.execPath, [
+      "-e",
+      `const fs=require("node:fs");const timer=setInterval(()=>{if(fs.existsSync(${JSON.stringify(releaseMarker)})){clearInterval(timer);process.exit(0)}},10)`,
+    ]);
     const child = spawnRuntimeOwnedProcess(() => spawn(
       invocation.command,
       invocation.args,
       { detached: true, stdio: "ignore" },
     ));
     const rawKill = vi.fn<typeof process.kill>(() => true);
+    renameSync(guardian, movedGuardian);
     try {
+      writeFileSync(releaseMarker, "release\n", { encoding: "utf8", mode: 0o600 });
       await waitFor(() => {
         try { return readFileSync(`/proc/${child.pid}/comm`, "utf8").trim() === "inertia-done"; }
         catch { return false; }
@@ -262,9 +270,48 @@ describe("Linux runtime process guardian", () => {
       await expect(terminateProcessTreeAndWait(child, true, {
         platform: "linux",
         killProcess: rawKill,
-        waitMs: 2_000,
-      })).resolves.toBe(true);
+        waitMs: 25,
+      })).resolves.toBe(false);
       expect(rawKill).not.toHaveBeenCalled();
+      expect(new RuntimeOwnedProcessJournal(root, {
+        platform: "linux", darwinGuardianPath: movedGuardian,
+      }).records(generation)).toMatchObject([{ state: "retiring" }]);
+      renameSync(movedGuardian, guardian);
+      await waitForChild(child);
+      await waitFor(() => new RuntimeOwnedProcessJournal(root, {
+        platform: "linux", darwinGuardianPath: guardian,
+      }).records(generation)?.length === 0);
+    } finally {
+      if (existsSync(movedGuardian)) renameSync(movedGuardian, guardian);
+      await stopChild(child);
+      deactivate?.();
+    }
+  }, 15_000);
+
+  linuxIt("waits for an active guardian monitor before confirming runtime cleanup", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-linux-cleanup-wait-")); roots.push(root);
+    const guardian = compileGuardian(root);
+    const releaseMarker = join(root, "release.marker");
+    const generation = "15000000-0000-4000-8000-000000000015:1";
+    const boot = "test:16000000-0000-4000-8000-000000000016";
+    const deactivate = activateRuntimeOwnedProcessRegistry(root, generation, boot, {
+      platform: "linux", darwinGuardianPath: guardian,
+    });
+    const invocation = runtimeOwnedProcessInvocation(process.execPath, [
+      "-e",
+      `const fs=require("node:fs");const timer=setInterval(()=>{if(fs.existsSync(${JSON.stringify(releaseMarker)})){clearInterval(timer);process.exit(0)}},10)`,
+    ]);
+    const child = spawnRuntimeOwnedProcess(() => spawn(
+      invocation.command,
+      invocation.args,
+      { detached: true, stdio: "ignore" },
+    ));
+    try {
+      const cleanup = awaitRuntimeOwnedProcessCleanupConfirmed();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      writeFileSync(releaseMarker, "release\n", { encoding: "utf8", mode: 0o600 });
+      await expect(cleanup).resolves.toBe(true);
+      await waitForChild(child);
       expect(new RuntimeOwnedProcessJournal(root, {
         platform: "linux", darwinGuardianPath: guardian,
       }).records(generation)).toEqual([]);

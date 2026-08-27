@@ -487,6 +487,6 @@ describe("runtime recovery supervisor integration", () => {
         (SELECT COUNT(*) FROM recovery_import_journals) AS journals
     `).get()).toEqual({ receipts: 0, journals: 0 });
     database.close();
-    await expect(supervisor.stop()).resolves.toBe(true);
+    expect(await supervisor.stop(), diagnostics()).toBe(true);
   }, 30_000);
 });

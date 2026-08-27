@@ -80,6 +80,7 @@ import { RuntimeDiagnostics, runtimeDiagnosticsDirectory } from "./runtime-diagn
 import { PreviewBroker, hardenDesktopSession } from "./preview-broker.js";
 import { showBrowserEvidenceImageWindow } from "./browser-evidence-image-inspector.js";
 import { RuntimeSupervisor } from "./runtime-supervisor.js";
+import { RuntimeSystemSuspendDelivery } from "./runtime-system-suspend-delivery.js";
 import { RuntimeSystemSuspendTracker } from "./runtime-system-suspend-tracker.js";
 import * as runtimeBootstrap from "./runtime-bootstrap-safety.js";
 import {
@@ -165,6 +166,7 @@ protocol.registerSchemesAsPrivileged([
 let mainWindow: BrowserWindow | null = null;
 let mainWindowCreation: Promise<void> | null = null;
 let runtimeSupervisor: RuntimeSupervisor | null = null;
+let systemSuspendDelivery: RuntimeSystemSuspendDelivery | null = null;
 let privateConnectHost: PrivateConnectHost | null = null;
 let runtimeDiagnostics: RuntimeDiagnostics | null = null;
 let appUpdateService: AppUpdateService | null = null;
@@ -882,6 +884,8 @@ function finishQuitAfterCleanup(): void {
 }
 function runPrivilegedCleanup(): Promise<boolean> {
   if (privilegedCleanup) return privilegedCleanup;
+  systemSuspendDelivery?.close();
+  systemSuspendDelivery = null;
   if (mainWindow) saveWindowState(mainWindow);
   const supervisorToStop = runtimeSupervisor, privateConnectHostToStop = privateConnectHost; privateConnectHost = null;
   const cleanup = detachedChatClose.closeDetachedChatsForShutdown(detachedChatMain).then(async () => {
@@ -922,6 +926,11 @@ async function bootstrap(): Promise<void> {
       error,
     ),
   });
+  const suspendDelivery = new RuntimeSystemSuspendDelivery({
+    tracker: systemSuspends,
+    runtime: () => runtimeSupervisor,
+  });
+  systemSuspendDelivery = suspendDelivery;
   const testUpdateVersion = runtimeBootstrap.runtimeUpdateVersion(app.getVersion());
   const appUpdateCapability = process.env.NODE_ENV === "test"
     ? { delivery: "manual" as const, reason: "development-build" as const }
@@ -1014,25 +1023,11 @@ async function bootstrap(): Promise<void> {
     imageResult: packageSmokeImageResult,
   } = packageSmoke;
   let packageSmokeScheduled = false;
-  const sendNextSystemSuspend = (generation: number): void => {
-    const supervisor = runtimeSupervisor;
-    const snapshot = supervisor?.snapshot();
-    if (!supervisor || snapshot?.phase !== "ready" || snapshot.generation !== generation) return;
-    const interval = systemSuspends.claim(generation);
-    if (interval && !supervisor.recordSystemSuspendInterval(interval)) {
-      systemSuspends.release(interval.id, generation);
-    }
-  };
   runtimeSupervisor = new RuntimeSupervisor({
     agentBrowserBroker: previewBroker,
     systemBootId: bootstrapSafety.systemBootId,
-    onSystemSuspendResult: (id, generation, recorded) => {
-      if (!recorded) {
-        systemSuspends.release(id, generation);
-      } else if (systemSuspends.acknowledge(id, generation)) {
-        sendNextSystemSuspend(generation);
-      }
-    },
+    onSystemSuspendResult: (id, generation, recorded) =>
+      suspendDelivery.result(id, generation, recorded),
     conversationAttachmentStoreRunner,
     conversationAttachmentStoreAuthority:
       await conversationAttachmentStoreAuthority(conversationAttachmentStore),
@@ -1102,7 +1097,7 @@ async function bootstrap(): Promise<void> {
       },
     ),
     onStateChange: (snapshot) => {
-      if (snapshot.phase === "ready") sendNextSystemSuspend(snapshot.generation);
+      suspendDelivery.runtimeState(snapshot.phase, snapshot.generation);
       runtimeDiagnostics?.recordState(snapshot);
       if (
         snapshot.phase === "ready"
@@ -1156,8 +1151,7 @@ async function bootstrap(): Promise<void> {
   powerMonitor.on("suspend", () => systemSuspends.suspend());
   powerMonitor.on("resume", () => {
     systemSuspends.resume();
-    const snapshot = runtimeSupervisor?.snapshot();
-    if (snapshot?.phase === "ready") sendNextSystemSuspend(snapshot.generation);
+    suspendDelivery.sendIfReady();
   });
   runtimeSupervisor.start();
   if (process.env.NODE_ENV === "test") {

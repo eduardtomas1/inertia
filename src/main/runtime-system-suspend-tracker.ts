@@ -30,6 +30,11 @@ export interface RuntimeSystemSuspendTrackerOptions {
   onDiagnostic?: (error: Error) => void;
 }
 
+export type RuntimeSystemSuspendAcknowledgement =
+  | "acknowledged"
+  | "retry"
+  | "ignored";
+
 function normalizedTimestamp(value: string, label: string): string {
   const milliseconds = Date.parse(value);
   if (!Number.isFinite(milliseconds)) throw new Error(`${label} is invalid.`);
@@ -239,27 +244,36 @@ export class RuntimeSystemSuspendTracker {
     return { ...head };
   }
 
-  release(id: string, generation: number): void {
+  release(id: string, generation: number): boolean {
     if (this.inFlight?.id === id && this.inFlight.generation === generation) {
       this.inFlight = null;
+      return true;
     }
+    return false;
   }
 
-  acknowledge(id: string, generation: number): boolean {
+  acknowledgeResult(
+    id: string,
+    generation: number,
+  ): RuntimeSystemSuspendAcknowledgement {
     if (
       this.inFlight?.id !== id
       || this.inFlight.generation !== generation
       || this.intervals[0]?.id !== id
-    ) return false;
+    ) return "ignored";
     const intervals = this.intervals.filter((candidate) => candidate.id !== id);
     if (!this.persist(this.active, intervals)) {
       this.inFlight = null;
-      return false;
+      return "retry";
     }
     this.inFlight = null;
     this.intervals = intervals;
     if (this.active?.resumedAt) this.resume(this.active.resumedAt);
-    return true;
+    return "acknowledged";
+  }
+
+  acknowledge(id: string, generation: number): boolean {
+    return this.acknowledgeResult(id, generation) === "acknowledged";
   }
 
   completed(): readonly RuntimeSystemSuspendInterval[] {

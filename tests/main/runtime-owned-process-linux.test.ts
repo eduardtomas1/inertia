@@ -264,8 +264,9 @@ describe("Linux runtime process guardian", () => {
     try {
       writeFileSync(releaseMarker, "release\n", { encoding: "utf8", mode: 0o600 });
       await waitFor(() => {
-        try { return readFileSync(`/proc/${child.pid}/comm`, "utf8").trim() === "inertia-done"; }
-        catch { return false; }
+        return new RuntimeOwnedProcessJournal(root, {
+          platform: "linux", darwinGuardianPath: movedGuardian,
+        }).records(generation)?.[0]?.state === "retiring";
       });
       await expect(terminateProcessTreeAndWait(child, true, {
         platform: "linux",

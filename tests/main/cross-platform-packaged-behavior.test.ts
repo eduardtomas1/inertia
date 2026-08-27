@@ -157,7 +157,7 @@ describe("cross-platform packaged behavior contract", () => {
       "run: npm run test:native-architecture",
       "run: npm exec -- playwright test",
       "run: xvfb-run --auto-servernum npm exec -- playwright test",
-      "run: npm run dist:dir",
+      'run: npm run "${{ matrix.release_dist_script }}"',
       'run: npm run "${{ matrix.dist_script }}"',
       "npm run verify:fuses -- \"$app\"",
       "run: npm run test:package-smoke",
@@ -240,6 +240,7 @@ describe("cross-platform packaged behavior contract", () => {
 
   it("keeps one native smoke implementation for macOS, Windows, and Linux runtime supervision", async () => {
     const smoke = await source("scripts/package-smoke.mjs");
+    const launchContract = await source("scripts/package-smoke-launch.mjs");
     expect(smoke).toContain('process.platform === "darwin"');
     expect(smoke).toContain('process.platform === "win32"');
     expect(smoke).toContain('process.platform === "linux"');
@@ -250,7 +251,7 @@ describe("cross-platform packaged behavior contract", () => {
     expect(smoke).toContain(
       'process.platform === "darwin" ? ["--use-mock-keychain"] : []',
     );
-    expect(smoke).toContain("runtimePid === mainPid");
+    expect(launchContract).toContain("runtimePid === mainPid");
     expect(smoke).toContain("runtime-stopped");
     expect(smoke.indexOf('"before-quit"')).toBeLessThan(
       smoke.indexOf("const exit = await withTimeout("),

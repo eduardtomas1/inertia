@@ -81,6 +81,10 @@ not strip quarantine attributes or disable Gatekeeper. On Windows, an unsigned
 installer may show **Windows protected your PC**; after verifying the checksum
 and exact release source, use **More info**, confirm the filename and **Unknown
 publisher** status, then **Run anyway**. Do not disable SmartScreen.
+GitHub/browser downloads do not retain an AppImage's executable permission.
+Linux instructions must name the exact architecture-qualified file, verify that
+exact line from `SHA256SUMS.txt`, then use `chmod 0755 ./<exact filename>` before
+launch. Never recommend a wildcard chmod or installing development libraries.
 
 For a signed macOS release, configure these GitHub Actions secrets:
 
@@ -133,6 +137,28 @@ deliberately excluded so an older signed installation cannot be offered an
 uninstallable release. Mixed update capability between two architectures of
 the same operating system is rejected. Build provenance covers that same exact
 union.
+
+Both Windows architecture jobs also inspect the NSIS application archive for
+an install-time-decodable 7-Zip method, silently install the exact generated
+installer into a temporary directory, verify the installed executable, native
+modules, provider helper, and Electron DLLs have the runner architecture, and
+run the complete packaged runtime smoke from that installed location. The same
+gate then performs a silent uninstall and requires clean removal with exit code
+zero; a reboot-success code is a failure, not an installation strategy. This
+gate runs in pull-request CI as well as the exact-tag release workflow so an
+unpacked app cannot conceal a broken public installer.
+
+Native macOS jobs additionally extract the exact ZIP, mount the exact DMG
+read-only, verify the complete signature and selected native binaries in each,
+and run the complete packaged runtime smoke from both contained apps. Native
+Linux jobs reject unversioned AppImage runtime dependencies, execute the exact
+AppImage wrapper in pristine `ubuntu:24.04`, extract through that wrapper
+without an `unsquashfs` fallback, verify selected native binaries, and run the
+complete smoke twice through the exact AppImage entry point: once through the
+advertised default FUSE mount/AppRun path and once through the explicit
+extract-and-run fallback. These final-container gates do
+not replace the separate checksum, provenance, signature, fuse, update-metadata,
+or unpacked-package checks.
 
 Publishing is draft-first and fail-closed. A retry may reuse an existing draft:
 identical assets are retained and missing assets are uploaded, while unexpected

@@ -48,6 +48,8 @@
     "benchmark:renderer-primitives": "vitest run --config vitest.benchmark.config.ts benchmarks/renderer-primitives.test.ts",
     "test:e2e": "npm run build && playwright test",
     "test:package-smoke": "node scripts/package-smoke.mjs",
+    "test:release-container-smoke": "node scripts/release-container-smoke.mjs",
+    "test:windows-installer-smoke": "node scripts/windows-installer-smoke.mjs",
     "icons:generate": "node scripts/generate-icons.mjs",
     "validate:linux-package": "node scripts/validate-linux-package.mjs",
     "verify:fuses": "node scripts/verify-electron-fuses.mjs",
@@ -74,6 +76,9 @@
   "build": {
     "appId": "dev.inertia.app",
     "productName": "Inertia",
+    "toolsets": {
+      "appimage": "1.0.3"
+    },
     "publish": [
       {
         "provider": "generic",
@@ -204,7 +209,7 @@
     "@vitejs/plugin-react": "^5.2.0",
     "@vitest/coverage-v8": "^4.1.10",
     "electron": "^43.4.0",
-    "electron-builder": "^26.15.3",
+    "electron-builder": "26.15.6",
     "electron-vite": "^5.0.0",
     "happy-dom": "20.11.2",
     "oxlint": "^1.78.0",

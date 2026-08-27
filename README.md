@@ -263,6 +263,23 @@ Download [Inertia v0.0.44](https://github.com/eduardtomas1/inertia/releases/tag/
 
 The credential-free public release is exactly 11 assets: four macOS packages (DMG and ZIP for both architectures), two Windows installers, two Linux AppImages, the two architecture-qualified Linux update manifests, and `SHA256SUMS.txt`. Manual macOS and Windows builds do not publish updater metadata or blockmaps.
 
+Linux browser downloads do not preserve the AppImage executable bit. After
+verifying the exact selected filename against `SHA256SUMS.txt`, replace
+`VERSION` below with that release's exact version, make only that file
+executable, and launch it:
+
+```sh
+# Linux x64
+chmod 0755 ./Inertia-VERSION.AppImage
+./Inertia-VERSION.AppImage
+
+# Linux ARM64
+chmod 0755 ./Inertia-VERSION-arm64.AppImage
+./Inertia-VERSION-arm64.AppImage
+```
+
+Do not apply executable permissions to a wildcard or to an unverified download.
+
 Every platform requires a manual first install. Every stable release and Canary prerelease includes `SHA256SUMS.txt`; download it from the same exact tagged release and compare the selected package's SHA-256 before opening it.
 
 Credential-free macOS packages are ad-hoc signed rather than notarized, so Gatekeeper may retain the download's quarantine warning. After verifying the checksum, open the package from Finder; if macOS blocks it, use **System Settings → Privacy & Security → Open Anyway**, confirm the exact file, then choose **Open**. Do not remove quarantine attributes or disable Gatekeeper.

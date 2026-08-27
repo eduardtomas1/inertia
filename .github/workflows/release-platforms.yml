@@ -69,6 +69,7 @@ jobs:
             timeout_minutes: 55
             app_path: release/linux-unpacked/inertia
             unpacked_dir: release/linux-unpacked
+            docker_platform: linux/amd64
           - label: Linux ARM64
             runner: ubuntu-24.04-arm
             platform: linux-arm64
@@ -77,6 +78,7 @@ jobs:
             timeout_minutes: 65
             app_path: release/linux-arm64-unpacked/inertia
             unpacked_dir: release/linux-arm64-unpacked
+            docker_platform: linux/arm64
     env:
       CI: "true"
       INERTIA_RELEASE_CHANNEL: ${{ startsWith(inputs.release_tag || github.ref_name, 'canary-v') && 'canary' || 'stable' }}
@@ -234,6 +236,25 @@ jobs:
         if: runner.os != 'Linux'
         run: npm run test:package-smoke
 
+      - name: Install, smoke, and uninstall Windows package
+        if: runner.os == 'Windows'
+        run: npm run test:windows-installer-smoke
+
+      - name: Prove AppImage runtime on pristine native Ubuntu
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          mapfile -d '' -t appimages < <(find release -maxdepth 1 -type f -name '*.AppImage' -print0)
+          if [[ "${#appimages[@]}" -ne 1 ]]; then
+            echo "Expected exactly one AppImage; found ${#appimages[@]}." >&2
+            exit 1
+          fi
+          artifact="$(basename -- "${appimages[0]}")"
+          docker run --rm --platform "${{ matrix.docker_platform }}" \
+            --volume "$PWD/release:/release:ro" \
+            ubuntu@sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517 \
+            "/release/$artifact" --appimage-version
+
       - name: Configure Linux sandbox helper for smoke
         if: runner.os == 'Linux'
         shell: bash
@@ -247,6 +268,14 @@ jobs:
       - name: Smoke native packaged app under Xvfb
         if: runner.os == 'Linux'
         run: xvfb-run --auto-servernum npm run test:package-smoke
+
+      - name: Smoke final macOS and Linux release containers
+        if: runner.os == 'macOS'
+        run: npm run test:release-container-smoke
+
+      - name: Smoke final Linux AppImage default and fallback launches under Xvfb
+        if: runner.os == 'Linux'
+        run: xvfb-run --auto-servernum npm run test:release-container-smoke
 
       - name: Verify complete macOS bundle signature
         if: runner.os == 'macOS'

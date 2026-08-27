@@ -5,7 +5,7 @@ import type {
   RuntimeSupervisorOptions,
 } from "./runtime-supervisor-types.js";
 
-interface RuntimeProcessContainmentAdmissionOptions {
+export interface RuntimeProcessContainmentAdmissionOptions {
   readonly arm: NonNullable<RuntimeSupervisorOptions["armProcessContainment"]>;
   readonly systemBootId: string;
   readonly workerOptions: RuntimeSupervisorOptions["workerOptions"];

@@ -1,81 +1,51 @@
 import { randomUUID } from "node:crypto"; import type { UtilityProcess } from "electron";
 import type { BackendCredentialStatus } from "../shared/backend-credentials";
-import type {
-  PrivateConnectRuntimeAuthorization,
-  PrivateConnectRuntimeRequest,
-  PrivateConnectRuntimeResponse,
-} from "../shared/private-connect/runtime-contract";
+import type { PrivateConnectRuntimeAuthorization, PrivateConnectRuntimeRequest,
+  PrivateConnectRuntimeResponse } from "../shared/private-connect/runtime-contract";
 import type { OpenProjectPathRequest, RuntimeConnection } from "../shared/desktop.js";
 import {
-  parseRuntimeWorkerEvent,
-  validSystemBootId,
-  type RuntimeDatabaseRecoveryOperation,
-  type RuntimeDatabaseRecoverySummary,
-  type RuntimeDatabaseStartupRecoveryReport,
-  type RuntimePrivateConnectForgetScope,
-  type RuntimePrivateConnectPromptPreparation,
-  type RuntimeSystemSuspendInterval,
-  type RuntimeUpdatePreparationResult,
-  type RuntimeWorkerCommand,
+  parseRuntimeWorkerEvent, validSystemBootId,
+  type RuntimeDatabaseRecoveryOperation, type RuntimeDatabaseRecoverySummary,
+  type RuntimeDatabaseStartupRecoveryReport, type RuntimePrivateConnectForgetScope,
+  type RuntimePrivateConnectPromptPreparation, type RuntimeSystemSuspendInterval,
+  type RuntimeUpdatePreparationResult, type RuntimeWorkerCommand,
 } from "../node/runtime-process-protocol.js";
 import { RuntimeAttachmentBrokerCoordinator } from "./runtime-attachment-broker.js";
-import { forceKillRuntimeProcessTree } from "./runtime-process-tree.js";
-import { RuntimePrivateConnectPromptCoordinator } from "./runtime-private-connect-prompt-coordinator.js";
+import { RuntimePrivateConnectPromptCoordinator } from
+  "./runtime-private-connect-prompt-coordinator.js";
 import { RuntimeCleanupReceiptJournal } from "./runtime-cleanup-receipts.js";
-import {
-  LegacyRuntimeRecoveryAuthorityJournal,
-  type LegacyRuntimeRecoveryPlatform,
-} from "./runtime-legacy-recovery-authorities.js";
 import { persistRuntimeGenerationCleanup } from "./runtime-generation-cleanup.js";
 import { readSystemBootId } from "./system-boot-id.js";
-import {
-  boundedDuration,
-  publicProcessError,
-  runtimeRestartDelayMs,
-  runtimeSupervisorDefaults,
-  unconfirmedRuntimeCleanupMessage,
-} from "./runtime-supervisor-values.js";
+import { boundedDuration, publicProcessError, runtimeRestartDelayMs,
+  runtimeSupervisorDefaults, unconfirmedRuntimeCleanupMessage }
+  from "./runtime-supervisor-values.js";
 import { detachedRuntimeConnection, runtimeConnection } from "./runtime-supervisor-connection.js";
 import { RuntimeSupervisorRecycle } from "./runtime-supervisor-recycle.js";
 import { RuntimeSecureFileCoordinator } from "./runtime-secure-file-coordinator.js";
 import { RuntimeGenerationLeaseJournal } from "../node/runtime-generation-leases.js";
-import {
-  modernDarwinRecoveryAuthorityMatches,
-  modernDarwinRecoveryDescriptorMatches,
-  ModernDarwinRecoveryAuthorityJournal,
-  type ModernDarwinRecoveryAuthorityDescriptor,
-} from "../node/runtime-modern-recovery-authorities.js";
 import { RuntimeUpdatePreparationCoordinator } from "./runtime-update-preparation-coordinator.js";
 import { RuntimeDatabaseRecoveryCoordinator } from "./runtime-database-recovery-coordinator.js";
-import { recoverRuntimeOwnedProcesses } from "./runtime-owned-process-recovery.js";
-import { RuntimeSupervisorStartupRecovery } from "./runtime-supervisor-startup-recovery.js";
+import { RuntimeSupervisorStartupRecovery } from
+  "./runtime-supervisor-startup-recovery.js";
 import { RuntimeOwnedProcessJournal } from "../node/runtime-owned-processes.js";
-import { armWindowsRuntimeJob } from "./windows-runtime-job.js";
 import { createRuntimeProcessRecord } from "./runtime-supervisor-process-record.js";
-import { RuntimeProcessContainmentAdmission } from "./runtime-process-containment-admission.js";
+import type { RuntimeProcessContainmentAdmission } from
+  "./runtime-process-containment-admission.js";
+import { RuntimeSupervisorRecoveryAdmission }
+  from "./runtime-supervisor-recovery-admission.js";
+import { createRuntimeProcessContainmentAdmission,
+  createRuntimeSupervisorProcessSafety } from
+  "./runtime-supervisor-process-safety.js";
 import type {
-  PendingCredentialRequest,
-  PendingPrivateConnectRuntimeRequest,
-  PendingProjectPath,
-  RuntimeCredentialBroker,
-  RuntimeProcessRecord,
-  RuntimeSupervisorOptions,
-  RuntimeSupervisorPhase,
-  RuntimeSupervisorSnapshot,
+  PendingCredentialRequest, PendingPrivateConnectRuntimeRequest,
+  PendingProjectPath, RuntimeCredentialBroker, RuntimeProcessRecord,
+  RuntimeSupervisorOptions, RuntimeSupervisorPhase, RuntimeSupervisorSnapshot,
   RuntimeSupervisorTimer,
 } from "./runtime-supervisor-types.js";
-
-function legacyRuntimeRecoveryPlatform(): LegacyRuntimeRecoveryPlatform | null {
-  return process.platform === "darwin"
-    || process.platform === "linux"
-    || process.platform === "win32"
-    ? process.platform
-    : null;
-}
 export type { RuntimeAttachmentBroker } from "./runtime-attachment-broker.js";
 export type { RuntimeCredentialBroker, RuntimeSecureFileBroker,
-  RuntimeSupervisorOptions, RuntimeSupervisorPhase,
-  RuntimeSupervisorSnapshot } from "./runtime-supervisor-types.js";
+  RuntimeSupervisorOptions, RuntimeSupervisorPhase, RuntimeSupervisorSnapshot }
+  from "./runtime-supervisor-types.js";
 export { runtimeRestartDelayMs } from "./runtime-supervisor-values.js";
 type PrivateConnectPromptRequest = Extract<PrivateConnectRuntimeRequest,
   { type: "prompt.send" }>;
@@ -90,14 +60,14 @@ export class RuntimeSupervisor {
   private readonly setTimer: typeof setTimeout;
   private readonly clearTimer: typeof clearTimeout;
   private readonly forceKill: NonNullable<RuntimeSupervisorOptions["forceKill"]>;
-  private readonly recoverOwnedProcesses:
-    NonNullable<RuntimeSupervisorOptions["recoverOwnedProcesses"]>;
-  private readonly armProcessContainment:
-    NonNullable<RuntimeSupervisorOptions["armProcessContainment"]>;
+  private readonly recoverOwnedProcesses: NonNullable<
+    RuntimeSupervisorOptions["recoverOwnedProcesses"]>;
   private readonly processContainmentAdmission: RuntimeProcessContainmentAdmission;
+  private readonly recoveryAdmission: RuntimeSupervisorRecoveryAdmission;
   private readonly credentialBroker?: RuntimeCredentialBroker;
   private readonly credentialRequestTimeoutMs: number;
-  private readonly attachmentRequests: RuntimeAttachmentBrokerCoordinator<RuntimeProcessRecord>;
+  private readonly attachmentRequests:
+    RuntimeAttachmentBrokerCoordinator<RuntimeProcessRecord>;
   private readonly onSystemSuspendResult?: RuntimeSupervisorOptions["onSystemSuspendResult"]; private readonly onStateChange?: RuntimeSupervisorOptions["onStateChange"];
   private current: RuntimeProcessRecord | null = null;
   private readonly quarantined = new Set<RuntimeProcessRecord>();
@@ -113,12 +83,6 @@ export class RuntimeSupervisor {
   private unconfirmedRestarts = 0;
   private readonly ownerNonce = randomUUID();
   private readonly cleanupReceipts: RuntimeCleanupReceiptJournal;
-  private readonly legacyRecoveryAuthorities:
-    LegacyRuntimeRecoveryAuthorityJournal;
-  private readonly modernDarwinRecoveryAuthorities:
-    ModernDarwinRecoveryAuthorityJournal;
-  private manualModernDarwinRecovery:
-    ModernDarwinRecoveryAuthorityDescriptor | null;
   private readonly runtimeGenerationLeases: RuntimeGenerationLeaseJournal;
   private readonly runtimeOwnedProcesses: RuntimeOwnedProcessJournal;
   private restartTimer: RuntimeSupervisorTimer | null = null;
@@ -143,7 +107,6 @@ export class RuntimeSupervisor {
     const { manualModernDarwinRecovery, ...workerOptions } =
       options.workerOptions;
     this.workerOptions = workerOptions;
-    this.manualModernDarwinRecovery = manualModernDarwinRecovery ?? null;
     const systemBootId = options.systemBootId ?? readSystemBootId()
       ?? "unavailable";
     if (!validSystemBootId(systemBootId)) {
@@ -157,19 +120,9 @@ export class RuntimeSupervisor {
         "Runtime recovery remains safety locked until explicit confirmation.";
     }
     this.cleanupReceipts = new RuntimeCleanupReceiptJournal(
-      options.workerOptions.dataDirectory,
-    );
-    this.legacyRecoveryAuthorities =
-      new LegacyRuntimeRecoveryAuthorityJournal(
-        options.workerOptions.dataDirectory,
-      );
-    this.modernDarwinRecoveryAuthorities =
-      new ModernDarwinRecoveryAuthorityJournal(
-        options.workerOptions.dataDirectory,
-      );
+      options.workerOptions.dataDirectory);
     this.runtimeGenerationLeases = new RuntimeGenerationLeaseJournal(
-      options.workerOptions.dataDirectory,
-    );
+      options.workerOptions.dataDirectory);
     this.runtimeOwnedProcesses = new RuntimeOwnedProcessJournal(options.workerOptions.dataDirectory);
     this.startupTimeoutMs = boundedDuration(options.startupTimeoutMs, runtimeSupervisorDefaults.startupTimeoutMs);
     this.stableUptimeMs = boundedDuration(options.stableUptimeMs, runtimeSupervisorDefaults.stableUptimeMs);
@@ -177,25 +130,18 @@ export class RuntimeSupervisor {
     this.forceKillWaitMs = boundedDuration(options.forceKillWaitMs, runtimeSupervisorDefaults.forceKillWaitMs);
     this.setTimer = options.setTimer ?? setTimeout;
     this.clearTimer = options.clearTimer ?? clearTimeout;
-    this.forceKill = options.forceKill
-      ?? ((pid, deadlineAt) =>
-        forceKillRuntimeProcessTree(pid, { deadlineAt }));
-    this.recoverOwnedProcesses = options.recoverOwnedProcesses
-      ?? ((runtimeGenerationId, systemBootId, deadlineAt) =>
-        recoverRuntimeOwnedProcesses(options.workerOptions.dataDirectory,
-          runtimeGenerationId, systemBootId, {
-            deadlineAt,
-            ...(options.workerOptions.runtimeProcessGuardianPath
-              ? { darwinGuardianPath: options.workerOptions.runtimeProcessGuardianPath }
-              : {}),
-          }));
-    this.armProcessContainment = options.armProcessContainment
-      ?? (process.platform === "win32"
-        ? ((runtimeGenerationId, runtimePid) =>
-            armWindowsRuntimeJob(runtimeGenerationId, runtimePid))
-        : (() => null));
-    this.processContainmentAdmission = new RuntimeProcessContainmentAdmission({
-      arm: this.armProcessContainment, systemBootId: this.systemBootId,
+    const processSafety = createRuntimeSupervisorProcessSafety({
+      configuration: options, systemBootId: this.systemBootId,
+      forceKillWaitMs: this.forceKillWaitMs, leases: this.runtimeGenerationLeases,
+      ownedProcesses: this.runtimeOwnedProcesses, receipts: this.cleanupReceipts,
+      ...(manualModernDarwinRecovery ? { manualModernRecovery:
+        manualModernDarwinRecovery } : {}),
+    });
+    this.forceKill = processSafety.forceKill;
+    this.recoverOwnedProcesses = processSafety.recoverOwnedProcesses;
+    this.recoveryAdmission = processSafety.recoveryAdmission;
+    this.processContainmentAdmission = createRuntimeProcessContainmentAdmission({
+      arm: processSafety.armProcessContainment, systemBootId: this.systemBootId,
       workerOptions: this.workerOptions,
       isCurrent: (record) => this.current === record,
       isRunningDesired: () => this.desiredRunning,
@@ -204,23 +150,14 @@ export class RuntimeSupervisor {
         record.runtimeGenerationId, this.systemBootId, containment,
       ),
       post: (record, command) => { this.post(record.child, command); },
-      reject: (record, error) => {
+      reject: (record, message) => {
         if (this.current !== record) return;
         record.acceptingReady = false;
-        this.lastError = publicProcessError(
-          error, "The runtime process containment could not be armed.",
-        );
+        this.lastError = message;
         this.forceTerminate(record.child); this.emitState();
       },
     });
-    this.startupRecovery = new RuntimeSupervisorStartupRecovery({
-      dataDirectory: options.workerOptions.dataDirectory, systemBootId,
-      forceKillWaitMs: this.forceKillWaitMs, leases: this.runtimeGenerationLeases,
-      receipts: this.cleanupReceipts,
-      ...(options.workerOptions.runtimeProcessGuardianPath
-        ? { darwinGuardianPath: options.workerOptions.runtimeProcessGuardianPath }
-        : {}),
-    });
+    this.startupRecovery = processSafety.startupRecovery;
     this.privateConnectPrompts = new RuntimePrivateConnectPromptCoordinator({
       timeoutMs: runtimeSupervisorDefaults.requestTimeoutMs,
       setTimer: this.setTimer,
@@ -283,7 +220,7 @@ export class RuntimeSupervisor {
   }
   start(): void { if (this.lifecycle !== "unused" || this.restartBlocked) return;
     this.lifecycle = "started"; this.desiredRunning = true; this.clearShutdownTimers();
-    if (this.manualModernDarwinRecovery) {
+    if (this.recoveryAdmission.requiresManualStartup()) {
       this.spawnNext();
       return;
     }
@@ -612,175 +549,17 @@ export class RuntimeSupervisor {
     const runtimeGenerationId = `${this.ownerNonce}:${generation}`;
     this.websocketUrl = null;
     this.phase = this.restartAttempt > 0 ? "restarting" : "starting";
-    this.runtimeGenerationLeases.refresh();
-    const modernRecoveryDescriptor = this.manualModernDarwinRecovery;
-    const modernRecoveryAuthority = modernRecoveryDescriptor
-      ? this.modernDarwinRecoveryAuthorities.pending()
-      : null;
-    const modernRecoveryRootObservation =
-      this.workerOptions.runtimeProcessGuardianPath
-        ? {
-            guardianPath: this.workerOptions.runtimeProcessGuardianPath,
-            platform: "darwin" as const,
-          }
-        : null;
-    if (
-      modernRecoveryDescriptor
-      && (
-        !modernRecoveryRootObservation
-        ||
-        !modernRecoveryAuthority
-        || modernRecoveryAuthority.snapshot.systemBootId !== this.systemBootId
-        || !modernDarwinRecoveryDescriptorMatches(
-          modernRecoveryDescriptor,
-          modernRecoveryAuthority,
-        )
-        || !modernDarwinRecoveryAuthorityMatches(
-          this.workerOptions.dataDirectory,
-          modernRecoveryAuthority,
-          modernRecoveryRootObservation,
-        )
-      )
-    ) {
-      this.restartBlocked = true;
-      this.desiredRunning = false;
-      this.phase = "stopped";
-      this.lastError =
-        "The manual macOS runtime recovery authority changed before startup.";
-      this.emitState();
-      return;
-    }
-    const legacyPlatform = legacyRuntimeRecoveryPlatform();
-    const pendingLegacyRecoveryAuthorityIds = legacyPlatform
-      ? this.legacyRecoveryAuthorities.pending(
-          legacyPlatform,
-          this.systemBootId,
-        )
-      : [];
-    const pendingLegacyRecoveryAuthorities = new Set(
-      pendingLegacyRecoveryAuthorityIds,
+    const recoveryAdmission = this.recoveryAdmission.prepare(
+      runtimeGenerationId,
     );
-    const modernRecoveryGenerationIds = new Set(
-      modernRecoveryDescriptor?.runtimeGenerationIds ?? [],
-    );
-    // The unavailable boot marker can name both a session-backed modern
-    // Darwin snapshot and no-session v0.0.44 leases. Each cohort has its own
-    // exact authority and must be checked without counting the other twice.
-    const legacyLeaseIds = this.runtimeGenerationLeases.all()
-      .filter((lease) => (
-        lease.systemBootId === "unavailable"
-        && !modernRecoveryGenerationIds.has(lease.runtimeGenerationId)
-      ))
-      .map(({ runtimeGenerationId: generationId }) => generationId)
-      .sort();
-    const exactLegacyBatchAuthorized = legacyLeaseIds.length
-      === pendingLegacyRecoveryAuthorityIds.length
-      && legacyLeaseIds.every((generationId, index) => (
-        generationId === pendingLegacyRecoveryAuthorityIds[index]
-        && pendingLegacyRecoveryAuthorities.has(generationId)
-      ));
-    if (
-      !exactLegacyBatchAuthorized
-      && (legacyLeaseIds.length > 0
-        || pendingLegacyRecoveryAuthorityIds.length > 0)
-    ) {
+    if (!recoveryAdmission.ok) {
       this.restartBlocked = true;
       this.desiredRunning = false;
       this.phase = "stopped";
-      this.lastError =
-        "The manual legacy runtime recovery authority changed before startup.";
+      this.lastError = recoveryAdmission.error;
       this.emitState();
       return;
     }
-    const legacyRecoveryAuthorityIds = exactLegacyBatchAuthorized
-      ? pendingLegacyRecoveryAuthorityIds
-      : [];
-    if (!this.runtimeOwnedProcesses.startSession(runtimeGenerationId, this.systemBootId)
-      || !(
-        this.runtimeGenerationLeases.publish(
-          runtimeGenerationId,
-          this.systemBootId,
-        )
-        || this.runtimeGenerationLeases.publishWithLegacyRecoveryReserve(
-          runtimeGenerationId,
-          this.systemBootId,
-          legacyRecoveryAuthorityIds,
-        )
-        || (
-          modernRecoveryDescriptor
-          && this.runtimeGenerationLeases.publishWithModernRecoveryReserve(
-            runtimeGenerationId,
-            this.systemBootId,
-            modernRecoveryDescriptor.runtimeGenerationIds,
-          )
-        )
-        || this.runtimeGenerationLeases.publishWithManualRecoveryReserve(
-          runtimeGenerationId,
-          this.systemBootId,
-          legacyRecoveryAuthorityIds,
-          modernRecoveryDescriptor?.runtimeGenerationIds ?? [],
-        )
-      )) {
-      this.runtimeOwnedProcesses.finishSession(runtimeGenerationId);
-      this.restartBlocked = true;
-      this.desiredRunning = false;
-      this.phase = "stopped";
-      this.lastError = "The runtime generation ownership lease could not be persisted.";
-      this.emitState();
-      return;
-    }
-    if (
-      modernRecoveryDescriptor
-      && (
-        !modernRecoveryRootObservation
-        ||
-        !modernRecoveryAuthority
-        || modernRecoveryAuthority.snapshot.systemBootId !== this.systemBootId
-        || !modernDarwinRecoveryAuthorityMatches(
-          this.workerOptions.dataDirectory,
-          modernRecoveryAuthority,
-          modernRecoveryRootObservation,
-          runtimeGenerationId,
-        )
-      )
-    ) {
-      this.runtimeOwnedProcesses.finishSession(runtimeGenerationId);
-      this.runtimeGenerationLeases.consume(runtimeGenerationId);
-      this.restartBlocked = true;
-      this.desiredRunning = false;
-      this.phase = "stopped";
-      this.lastError =
-        "The recorded macOS process state changed before recovery could start.";
-      this.emitState();
-      return;
-    }
-    this.runtimeGenerationLeases.refresh();
-    const exactLegacyLeaseIdsBeforeSpawn = this.runtimeGenerationLeases.all()
-      .filter((lease) => (
-        lease.systemBootId === "unavailable"
-        && lease.runtimeGenerationId !== runtimeGenerationId
-        && !modernRecoveryGenerationIds.has(lease.runtimeGenerationId)
-      ))
-      .map(({ runtimeGenerationId: generationId }) => generationId)
-      .sort();
-    if (
-      exactLegacyLeaseIdsBeforeSpawn.length
-        !== legacyRecoveryAuthorityIds.length
-      || exactLegacyLeaseIdsBeforeSpawn.some((generationId, index) => (
-        generationId !== legacyRecoveryAuthorityIds[index]
-      ))
-    ) {
-      this.runtimeOwnedProcesses.finishSession(runtimeGenerationId);
-      this.runtimeGenerationLeases.consume(runtimeGenerationId);
-      this.restartBlocked = true;
-      this.desiredRunning = false;
-      this.phase = "stopped";
-      this.lastError =
-        "The manual legacy runtime recovery authority changed before launch.";
-      this.emitState();
-      return;
-    }
-
     let child: UtilityProcess;
     try {
       child = this.spawnProcess();
@@ -801,8 +580,10 @@ export class RuntimeSupervisor {
     const record = createRuntimeProcessRecord({
       child, generation, runtimeGenerationId,
       cleanupReceiptIds: this.cleanupReceipts.pending(),
-      legacyRecoveryAuthorityIds,
-      modernDarwinRecoveryAuthority: modernRecoveryDescriptor,
+      legacyRecoveryAuthorityIds:
+        recoveryAdmission.legacyRecoveryAuthorityIds,
+      modernDarwinRecoveryAuthority:
+        recoveryAdmission.modernDarwinRecoveryAuthority,
     });
     this.current = record;
     this.processContainmentAdmission.bind(record);
@@ -950,75 +731,18 @@ export class RuntimeSupervisor {
       record.cleanupReceiptIds.delete(event.receiptRuntimeGenerationId);
       return;
     }
-    if (event.type === "runtime.legacy-recovery-authority-consumed") {
-      const legacyPlatform = legacyRuntimeRecoveryPlatform();
-      if (
-        !legacyPlatform
-        || event.currentRuntimeGenerationId !== record.runtimeGenerationId
-        || !record.legacyRecoveryAuthorityIds.has(
-          event.retiredRuntimeGenerationId,
-        )
-        || !this.legacyRecoveryAuthorities.has(
-          event.retiredRuntimeGenerationId,
-          legacyPlatform,
-          this.systemBootId,
-        )
-      ) return;
-      if (!this.legacyRecoveryAuthorities.consume(
-        event.retiredRuntimeGenerationId,
-        legacyPlatform,
-        this.systemBootId,
-      )) {
-        record.acceptingReady = false;
-        this.lastError =
-          "The manual legacy runtime recovery authority could not be consumed safely.";
-        this.forceTerminate(record.child);
-        this.emitState();
-        return;
-      }
-      record.legacyRecoveryAuthorityIds.delete(event.retiredRuntimeGenerationId);
-      return;
-    }
     if (
-      event.type
+      event.type === "runtime.legacy-recovery-authority-consumed"
+      || event.type
         === "runtime.modern-darwin-recovery-authority-acknowledged"
     ) {
-      const authorityDescriptor = record.modernDarwinRecoveryAuthority;
-      const authority = this.modernDarwinRecoveryAuthorities.pending();
-      if (
-        !authorityDescriptor
-        || event.currentRuntimeGenerationId !== record.runtimeGenerationId
-        || event.operationId !== authorityDescriptor.operationId
-        || event.snapshotDigest !== authorityDescriptor.snapshotDigest
-        || !authority
-        || !modernDarwinRecoveryDescriptorMatches(
-          authorityDescriptor,
-          authority,
-        )
-        || !this.modernDarwinRecoveryAuthorities.beginRetirement(
-          authority,
-          this.workerOptions.dataDirectory,
-          record.runtimeGenerationId,
-          {
-            guardianPath:
-              this.workerOptions.runtimeProcessGuardianPath ?? "",
-            platform: "darwin",
-          },
-        )
-        || !this.modernDarwinRecoveryAuthorities.completeRetirement(
-          this.workerOptions.dataDirectory,
-          authority,
-        )
-      ) {
+      const recovery = this.recoveryAdmission.consume(record, event);
+      if (recovery.error) {
         record.acceptingReady = false;
-        this.lastError =
-          "The manual macOS runtime recovery could not be committed safely.";
+        this.lastError = recovery.error;
         this.forceTerminate(record.child);
         this.emitState();
-        return;
       }
-      record.modernDarwinRecoveryAuthority = null;
-      this.manualModernDarwinRecovery = null;
       return;
     }
     if (!this.desiredRunning || !record.acceptingReady || record.ready) return;

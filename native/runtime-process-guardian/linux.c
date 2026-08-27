@@ -393,6 +393,17 @@ static int seccomp_selftest(void) {
   status = 0;
   if (waitpid(denied_fcntl, &status, 0) != denied_fcntl
     || !WIFSIGNALED(status) || WTERMSIG(status) != SIGSYS) return 2;
+  const pid_t denied_flag = fork();
+  if (denied_flag < 0) return 2;
+  if (denied_flag == 0) {
+    const pid_t pid = getpid(); const pid_t tid = (pid_t)syscall(SYS_gettid);
+    if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) || !install_terminal_filter(pid, tid)) _exit(3);
+    (void)fcntl(STDIN_FILENO, F_SETFD, 0);
+    _exit(4);
+  }
+  status = 0;
+  if (waitpid(denied_flag, &status, 0) != denied_flag
+    || !WIFSIGNALED(status) || WTERMSIG(status) != SIGSYS) return 2;
   const pid_t denied_syscall = fork();
   if (denied_syscall < 0) return 2;
   if (denied_syscall == 0) {

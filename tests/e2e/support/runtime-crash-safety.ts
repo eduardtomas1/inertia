@@ -273,6 +273,9 @@ export async function expectRuntimeCrashRecovery(
       states: Set<"owned" | "pending" | "preauth" | "retiring">;
     }>();
     try {
+      // Admission may consume both bounded 1.5-second attempts at each Linux
+      // ready/claim/exec phase on a loaded native runner. Keep this proof
+      // outside that fail-closed production envelope before forcing a crash.
       await expect.poll(() => {
         const records = journal.records(priorLease!.runtimeGenerationId);
         const systemBootId = readSystemBootId();
@@ -360,7 +363,7 @@ export async function expectRuntimeCrashRecovery(
           return false;
         }
         return stableSince !== null && Date.now() - stableSince >= 250;
-      }, { timeout: 5_000, intervals: [25] }).toBe(true);
+      }, { timeout: 15_000, intervals: [25] }).toBe(true);
     } catch (error) {
       if (testInfo) {
         await testInfo.attach("runtime-owned-process-pre-crash-diagnostic", {

@@ -13,14 +13,9 @@ import {
   type RuntimeMutationEvent,
   type RuntimeSyncCursor,
 } from "../shared/contracts";
-import { ConversationAttachmentStore } from "../node/conversation-attachment-store";
 import { RuntimeStore } from "./database";
 import { TurnController } from "./runtime/turns/turn-controller";
-import { recoverInterruptedTurns } from "./runtime/turns/turn-recovery";
-import {
-  DuoLaunchCoordinator,
-  reconcileInterruptedDuoLaunches,
-} from "./runtime/duo/duo-launch-coordinator";
+import { DuoLaunchCoordinator } from "./runtime/duo/duo-launch-coordinator";
 import { resolveAuthoritativeProjectPath } from "./project-path";
 import { PROVIDER_IDS, ProviderManager, type ProviderDetection } from "./providers";
 import { ProviderMetadataCache, type ProviderMetadata } from "./provider/metadata";
@@ -112,7 +107,11 @@ import { runPackagedImageRetentionSmoke } from "./runtime/attachments/package-sm
 import type { RunningRuntime, RuntimeOptions } from "./runtime-types";
 import { RuntimeUpdatePreparationGate } from "./runtime-update-preparation";
 import { recordSystemSuspendInterval } from "./runtime/system-suspend-coordinator";
-import { prepareRuntimeStartupRecovery, runtimeSafetyError } from "./runtime-startup-recovery";
+import {
+  initializeRuntimePersistence,
+  prepareRuntimeStartupRecovery,
+  runtimeSafetyError,
+} from "./runtime-startup-recovery";
 export type {
   RunningRuntime,
   RuntimeBackendCredentialBroker,
@@ -124,7 +123,12 @@ export {
 
 export async function startRuntime(options: RuntimeOptions): Promise<RunningRuntime> {
   const startupRecovery = prepareRuntimeStartupRecovery(options);
-  const { dataDirectory, runtimeGenerationLeases, confirmedGenerations, manuallyRetiredGenerations, manualModernDarwinRecovery, authorizedModernGenerationIds, priorBootLeasesCleared, runtimeSafetyLock } = startupRecovery;
+  const {
+    dataDirectory,
+    manuallyRetiredGenerations,
+    authorizedModernGenerationIds,
+    runtimeSafetyLock,
+  } = startupRecovery;
   const generatedAttachments = await PrivateGeneratedAttachmentStore.create(
     dataDirectory,
     {
@@ -192,92 +196,10 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       onDatabaseBackupCreated: () => onDatabaseBackupCreated(),
     },
   );
-  let conversationAttachments: ConversationAttachmentStore | null = null;
-  const recovery = await (async () => {
-    for (const confirmedRuntimeGenerationId of confirmedGenerations) {
-      store.providerRunOwnership.clearRuntimeGeneration(
-        confirmedRuntimeGenerationId,
-      );
-      options.onCleanupReceiptConsumed?.(
-        confirmedRuntimeGenerationId,
-        options.runtimeGenerationId,
-      );
-    }
-    for (const manuallyRetiredRuntimeGenerationId of manuallyRetiredGenerations) {
-      store.providerRunOwnership.clearRuntimeGeneration(
-        manuallyRetiredRuntimeGenerationId,
-      );
-    }
-    for (const modernRuntimeGenerationId of authorizedModernGenerationIds) {
-      store.providerRunOwnership.clearRuntimeGeneration(
-        modernRuntimeGenerationId,
-      );
-    }
-    if (priorBootLeasesCleared) {
-      store.providerRunOwnership.clearPriorBootSessions(options.systemBootId);
-    }
-    conversationAttachments = await ConversationAttachmentStore.open(
-      dataDirectory,
-      options.conversationAttachmentStoreOperations
-        ? {
-            operationRunner: options.conversationAttachmentStoreOperations,
-            readOperationRunner: options.conversationAttachmentStoreOperations,
-          }
-        : {},
-    );
-    if (!runtimeSafetyLock) {
-      await conversationAttachments.reconcile(store.attachments());
-      store.startBackups();
-    }
-    if (!runtimeSafetyLock && manuallyRetiredGenerations.length > 0) {
-      if (process.env.NODE_ENV === "test") {
-        options.testOnlyBeforeLegacyInterruptedRecovery?.();
-      }
-    }
-    if (!runtimeSafetyLock && authorizedModernGenerationIds.size > 0) {
-      if (process.env.NODE_ENV === "test") {
-        options.testOnlyBeforeModernDarwinRecoveryAcknowledged?.();
-      }
-    }
-    const interrupted = runtimeSafetyLock
-      ? { recoveredTurns: [], recoveredAttachmentIds: [] }
-      : recoverInterruptedTurns(store);
-    if (!runtimeSafetyLock) {
-      for (const manuallyRetiredRuntimeGenerationId of manuallyRetiredGenerations) {
-        if (!runtimeGenerationLeases.clearUnavailableRuntimeGeneration(
-          manuallyRetiredRuntimeGenerationId,
-        )) {
-          throw new Error("Manual legacy provider ownership could not be retired.");
-        }
-        options.onLegacyRecoveryAuthorityConsumed?.(
-          manuallyRetiredRuntimeGenerationId,
-          options.runtimeGenerationId,
-        );
-      }
-      if (manualModernDarwinRecovery) {
-        options.onModernDarwinRecoveryAuthorityAcknowledged?.(
-          manualModernDarwinRecovery,
-          options.runtimeGenerationId,
-        );
-      }
-      await reconcileInterruptedDuoLaunches(store);
-    }
-    return interrupted;
-  })().catch(async (error: unknown) => {
-    // Persistent startup resources must be released on every initialization
-    // failure. Windows otherwise retains SQLite handles and a retry appears to
-    // require a reboot; the same deterministic rollback applies on every OS.
-    await Promise.allSettled([
-      conversationAttachments?.close(),
-      Promise.resolve().then(() => store.backupAndClose()),
-    ]);
-    throw error;
-  });
-  const initializedConversationAttachments = conversationAttachments as
-    ConversationAttachmentStore | null;
-  if (!initializedConversationAttachments) {
-    throw new Error("Conversation attachment storage did not initialize.");
-  }
+  const {
+    conversationAttachments: initializedConversationAttachments,
+    recovery,
+  } = await initializeRuntimePersistence(options, startupRecovery, store);
   const recoveryImportFault = process.env.NODE_ENV === "test"
     ? options.recoveryImportFault
     : undefined;

@@ -3,6 +3,8 @@ import { resolve } from "node:path";
 
 import { RuntimeGenerationLeaseJournal } from
   "../node/runtime-generation-leases.js";
+import { ConversationAttachmentStore } from
+  "../node/conversation-attachment-store.js";
 import { validRuntimeGenerationId, validSystemBootId } from
   "../node/runtime-identity-protocol.js";
 import {
@@ -12,6 +14,11 @@ import {
   type ModernDarwinRecoveryAuthorityDescriptor,
 } from "../node/runtime-modern-recovery-authorities.js";
 import type { RuntimeOptions } from "./runtime-types.js";
+import { RuntimeStore } from "./database.js";
+import { reconcileInterruptedDuoLaunches } from
+  "./runtime/duo/duo-launch-coordinator.js";
+import { recoverInterruptedTurns } from
+  "./runtime/turns/turn-recovery.js";
 
 export interface RuntimeStartupRecovery {
   readonly dataDirectory: string;
@@ -23,6 +30,100 @@ export interface RuntimeStartupRecovery {
   readonly authorizedModernGenerationIds: ReadonlySet<string>;
   readonly priorBootLeasesCleared: boolean;
   readonly runtimeSafetyLock: boolean;
+}
+
+export interface InitializedRuntimePersistence {
+  readonly conversationAttachments: ConversationAttachmentStore;
+  readonly recovery: ReturnType<typeof recoverInterruptedTurns>;
+}
+
+export async function initializeRuntimePersistence(
+  options: RuntimeOptions,
+  startup: RuntimeStartupRecovery,
+  store: RuntimeStore,
+): Promise<InitializedRuntimePersistence> {
+  const {
+    dataDirectory,
+    runtimeGenerationLeases,
+    confirmedGenerations,
+    manuallyRetiredGenerations,
+    manualModernDarwinRecovery,
+    authorizedModernGenerationIds,
+    priorBootLeasesCleared,
+    runtimeSafetyLock,
+  } = startup;
+  let conversationAttachments: ConversationAttachmentStore | null = null;
+  try {
+    for (const generationId of confirmedGenerations) {
+      store.providerRunOwnership.clearRuntimeGeneration(generationId);
+      options.onCleanupReceiptConsumed?.(
+        generationId,
+        options.runtimeGenerationId,
+      );
+    }
+    for (const generationId of manuallyRetiredGenerations) {
+      store.providerRunOwnership.clearRuntimeGeneration(generationId);
+    }
+    for (const generationId of authorizedModernGenerationIds) {
+      store.providerRunOwnership.clearRuntimeGeneration(generationId);
+    }
+    if (priorBootLeasesCleared) {
+      store.providerRunOwnership.clearPriorBootSessions(options.systemBootId);
+    }
+    conversationAttachments = await ConversationAttachmentStore.open(
+      dataDirectory,
+      options.conversationAttachmentStoreOperations
+        ? {
+            operationRunner: options.conversationAttachmentStoreOperations,
+            readOperationRunner: options.conversationAttachmentStoreOperations,
+          }
+        : {},
+    );
+    if (!runtimeSafetyLock) {
+      await conversationAttachments.reconcile(store.attachments());
+      store.startBackups();
+      if (manuallyRetiredGenerations.length > 0
+        && process.env.NODE_ENV === "test") {
+        options.testOnlyBeforeLegacyInterruptedRecovery?.();
+      }
+      if (authorizedModernGenerationIds.size > 0
+        && process.env.NODE_ENV === "test") {
+        options.testOnlyBeforeModernDarwinRecoveryAcknowledged?.();
+      }
+    }
+    const recovery = runtimeSafetyLock
+      ? { recoveredTurns: [], recoveredAttachmentIds: [] }
+      : recoverInterruptedTurns(store);
+    if (!runtimeSafetyLock) {
+      for (const generationId of manuallyRetiredGenerations) {
+        if (!runtimeGenerationLeases.clearUnavailableRuntimeGeneration(
+          generationId,
+        )) {
+          throw new Error("Manual legacy provider ownership could not be retired.");
+        }
+        options.onLegacyRecoveryAuthorityConsumed?.(
+          generationId,
+          options.runtimeGenerationId,
+        );
+      }
+      if (manualModernDarwinRecovery) {
+        options.onModernDarwinRecoveryAuthorityAcknowledged?.(
+          manualModernDarwinRecovery,
+          options.runtimeGenerationId,
+        );
+      }
+      await reconcileInterruptedDuoLaunches(store);
+    }
+    return { conversationAttachments, recovery };
+  } catch (error) {
+    // Release every acquired persistent resource on startup failure. Windows
+    // otherwise retains SQLite handles and a retry appears to require reboot.
+    await Promise.allSettled([
+      conversationAttachments?.close(),
+      Promise.resolve().then(() => store.backupAndClose()),
+    ]);
+    throw error;
+  }
 }
 
 export function runtimeSafetyError(operation: string): string {

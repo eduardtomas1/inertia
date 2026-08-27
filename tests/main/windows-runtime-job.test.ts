@@ -97,6 +97,41 @@ describe("Windows runtime Job Object containment", () => {
     await closeChild(helper!);
   });
 
+  it("pins the exact runtime handle before cold Add-Type compilation", async () => {
+    let script = "";
+    let helper: ChildProcessWithoutNullStreams | null = null;
+    await armWindowsRuntimeJob(runtimeGenerationId, 4_242, {
+      platform: "win32",
+      timeoutMs: 1_000,
+      spawnProcess: (candidate) => {
+        script = candidate;
+        helper = nodeChild(
+          "process.stdout.write('READY\\n'); setInterval(() => undefined, 1000)",
+        );
+        return helper;
+      },
+    });
+
+    const captureIndex = script.indexOf(
+      "$runtimeProcess = [Diagnostics.Process]::GetProcessById(4242)",
+    );
+    const handleIndex = script.indexOf(
+      "$runtimeHandle = $runtimeProcess.Handle",
+    );
+    const compileIndex = script.indexOf("Add-Type -TypeDefinition");
+    expect(captureIndex).toBeGreaterThan(-1);
+    expect(handleIndex).toBeGreaterThan(captureIndex);
+    expect(compileIndex).toBeGreaterThan(handleIndex);
+    expect(script).toContain(
+      `[InertiaRuntimeJob]::Guard('${windowsRuntimeJobName(runtimeGenerationId)}', $runtimeHandle)`,
+    );
+    expect(script).not.toContain("OpenProcess(");
+    expect(script).toContain("$runtimeProcess.Dispose()");
+
+    helper!.kill("SIGKILL");
+    await closeChild(helper!);
+  });
+
   it("gives cold Add-Type startup a bounded stage-aware window", async () => {
     let helper: ChildProcessWithoutNullStreams | null = null;
     const containment = await armWindowsRuntimeJob(
@@ -234,10 +269,16 @@ describe("Windows runtime Job Object containment", () => {
         "The native helper exited with code 12.",
       );
       expect((failure as Error).message).toContain(
-        "INERTIA_JOB_STAGE stage=native-guard-start",
+        "INERTIA_JOB_STAGE stage=powershell-start",
       );
       expect((failure as Error).message).toContain(
-        "INERTIA_JOB_ERROR stage=open-process win32=87",
+        "INERTIA_JOB_ERROR stage=capture-process-handle",
+      );
+      expect((failure as Error).message).not.toContain(
+        "INERTIA_JOB_STAGE stage=add-type-complete",
+      );
+      expect((failure as Error).message).not.toContain(
+        "INERTIA_JOB_STAGE stage=native-guard-start",
       );
     },
     95_000,

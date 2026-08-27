@@ -146,8 +146,6 @@ public static class InertiaRuntimeJob {
   [DllImport("kernel32.dll", SetLastError = true)]
   private static extern bool TerminateJobObject(IntPtr job, UInt32 exitCode);
   [DllImport("kernel32.dll", SetLastError = true)]
-  private static extern IntPtr OpenProcess(UInt32 access, bool inherit, UInt32 processId);
-  [DllImport("kernel32.dll", SetLastError = true)]
   private static extern UInt32 WaitForSingleObject(IntPtr handle, UInt32 milliseconds);
   [DllImport("kernel32.dll", SetLastError = true)]
   private static extern bool CloseHandle(IntPtr handle);
@@ -155,10 +153,6 @@ public static class InertiaRuntimeJob {
   private const UInt32 JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000;
   private const UInt32 JOB_OBJECT_QUERY = 0x0004;
   private const UInt32 JOB_OBJECT_TERMINATE = 0x0008;
-  private const UInt32 PROCESS_TERMINATE = 0x0001;
-  private const UInt32 PROCESS_SET_QUOTA = 0x0100;
-  private const UInt32 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
-  private const UInt32 SYNCHRONIZE = 0x00100000;
   private const UInt32 INFINITE = 0xffffffff;
   private const Int32 ERROR_FILE_NOT_FOUND = 2;
   private const int JobObjectBasicAccountingInformation = 1;
@@ -221,7 +215,7 @@ public static class InertiaRuntimeJob {
     }
   }
 
-  public static int Guard(string name, UInt32 processId) {
+  public static int Guard(string name, IntPtr process) {
     Stage("native-guard-start");
     IntPtr job = CreateJobObject(IntPtr.Zero, name);
     int createError = Marshal.GetLastWin32Error();
@@ -230,19 +224,10 @@ public static class InertiaRuntimeJob {
       CloseHandle(job);
       return Failure("create-job-existing", 17, createError);
     }
-    IntPtr process = IntPtr.Zero;
     try {
       int armError;
       if (!ArmKillOnClose(job, out armError)) {
         return Failure("set-kill-on-close", 11, armError);
-      }
-      process = OpenProcess(
-        PROCESS_TERMINATE | PROCESS_SET_QUOTA | PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE,
-        false,
-        processId
-      );
-      if (process == IntPtr.Zero) {
-        return Failure("open-process", 12, Marshal.GetLastWin32Error());
       }
       if (!AssignProcessToJobObject(job, process)) {
         return Failure("assign-process", 13, Marshal.GetLastWin32Error());
@@ -266,7 +251,6 @@ public static class InertiaRuntimeJob {
       }
       return ActiveProcesses(job) == 0 ? 0 : 16;
     } finally {
-      if (process != IntPtr.Zero) CloseHandle(process);
       CloseHandle(job);
     }
   }
@@ -295,7 +279,10 @@ function encodedPowerShell(body: string): string {
   return Buffer.from(body, "utf16le").toString("base64");
 }
 
-function commandScript(command: string): string {
+function commandScript(
+  command: string,
+  beforeCompilation = "",
+): string {
   return `$ErrorActionPreference = 'Stop'
 function Write-InertiaJobProtocol([string]$Value) {
   $stream = [Console]::OpenStandardError()
@@ -304,6 +291,7 @@ function Write-InertiaJobProtocol([string]$Value) {
   $stream.Flush()
 }
 Write-InertiaJobProtocol 'INERTIA_JOB_STAGE stage=powershell-start'
+${beforeCompilation}
 Add-Type -TypeDefinition @'
 ${nativeJobSource}
 '@
@@ -372,7 +360,24 @@ export async function armWindowsRuntimeJob(
   }
   const child = (options.spawnProcess ?? spawnPowerShell)(
     commandScript(
-      `$result = [InertiaRuntimeJob]::Guard('${name}', ${runtimePid}); exit $result`,
+      `$result = try {
+  [InertiaRuntimeJob]::Guard('${name}', $runtimeHandle)
+} finally {
+  $runtimeProcess.Dispose()
+}
+exit $result`,
+      `$runtimeProcess = $null
+try {
+  $runtimeProcess = [Diagnostics.Process]::GetProcessById(${runtimePid})
+  # Reading Handle eagerly opens and retains the exact process object before
+  # cold Add-Type compilation. A later reuse of the numeric PID cannot retarget
+  # AssignProcessToJobObject or WaitForSingleObject.
+  $runtimeHandle = $runtimeProcess.Handle
+} catch {
+  if ($null -ne $runtimeProcess) { $runtimeProcess.Dispose() }
+  Write-InertiaJobProtocol 'INERTIA_JOB_ERROR stage=capture-process-handle'
+  exit 12
+}`,
     ),
     options.environment ?? process.env,
   );

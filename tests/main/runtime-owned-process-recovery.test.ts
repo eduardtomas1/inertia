@@ -33,6 +33,7 @@ import {
   RuntimeOwnedProcessJournal,
   spawnRuntimeOwnedProcess,
 } from "../../src/node/runtime-owned-processes";
+import { signalLinuxGuardianExact } from "../../src/node/runtime-owned-process-linux";
 import { runtimeOwnedPtyInvocation } from "../../src/node/runtime-owned-pty-invocation";
 
 const systemBootId = "test:10000000-0000-4000-8000-000000000001";
@@ -104,6 +105,56 @@ function longRunningChild(): ChildProcess {
   liveChildren.add(child);
   child.once("close", () => liveChildren.delete(child));
   return child;
+}
+
+async function completedLinuxGuardian(
+  directory: string,
+  durableState: "preauth" | "owned" | "retiring",
+): Promise<{
+  guardian: ChildProcess;
+  journal: RuntimeOwnedProcessJournal;
+}> {
+  const guardianPath = join(
+    process.cwd(),
+    "resources/generated/runtime-process-guardian/runtime-process-guardian",
+  );
+  const executable = statSync(guardianPath, { bigint: true });
+  const journal = new RuntimeOwnedProcessJournal(directory, {
+    platform: "linux",
+    darwinGuardianPath: guardianPath,
+  });
+  expect(journal.startSession(runtimeGenerationId, systemBootId)).toBe(true);
+  const ownershipId = journal.begin(runtimeGenerationId, systemBootId);
+  const guardian = spawn(guardianPath, [
+    "watch",
+    String(process.pid),
+    String(executable.dev),
+    String(executable.ino),
+    "--",
+    "/bin/true",
+  ], { detached: true, shell: false, stdio: "ignore" });
+  liveChildren.add(guardian);
+  guardian.once("close", () => liveChildren.delete(guardian));
+  if (!guardian.pid) throw new Error("Missing Linux guardian PID");
+  const claim = journal.claim(
+    ownershipId,
+    runtimeGenerationId,
+    systemBootId,
+    guardian.pid,
+    process.pid,
+  );
+  if (!("startTimeTicks" in claim.process)) {
+    throw new Error("Missing Linux guardian identity");
+  }
+  expect(signalLinuxGuardianExact(claim.process, guardianPath, "claim")).toBe(true);
+  if (durableState !== "preauth") expect(journal.own(ownershipId)).not.toBeNull();
+  if (durableState === "retiring") expect(journal.retire(ownershipId)).toBe(true);
+  expect(signalLinuxGuardianExact(claim.process, guardianPath, "exec")).toBe(true);
+  await vi.waitFor(() => {
+    expect(readFileSync(`/proc/${guardian.pid}/comm`, "utf8").trim())
+      .toBe("inertia-exdone");
+  });
+  return { guardian, journal };
 }
 
 function closeOf(child: ChildProcess): Promise<void> {
@@ -364,6 +415,62 @@ describe.skipIf(process.platform !== "linux")(
 
       expect(forceKill).not.toHaveBeenCalled();
       expect(journal.records(runtimeGenerationId)).toEqual([record]);
+    });
+
+    it.each(["owned", "retiring"] as const)(
+      "recovers an authenticated post-exec Linux %s record",
+      async (durableState) => {
+        const directory = temporaryDirectory();
+        const { guardian, journal } = await completedLinuxGuardian(
+          directory,
+          durableState,
+        );
+        const guardianPath = join(
+          process.cwd(),
+          "resources/generated/runtime-process-guardian/runtime-process-guardian",
+        );
+
+        await expect(recoverRuntimeOwnedProcesses(
+          directory,
+          runtimeGenerationId,
+          systemBootId,
+          {
+            deadlineAt: Date.now() + 2_000,
+            darwinGuardianPath: guardianPath,
+          },
+        )).resolves.toBe(true);
+
+        await closeOf(guardian);
+        expect(journal.records(runtimeGenerationId)).toEqual([]);
+      },
+    );
+
+    it("keeps a post-exec Linux terminal fail-closed without durable authorization", async () => {
+      const directory = temporaryDirectory();
+      const { guardian, journal } = await completedLinuxGuardian(
+        directory,
+        "preauth",
+      );
+      const guardianPath = join(
+        process.cwd(),
+        "resources/generated/runtime-process-guardian/runtime-process-guardian",
+      );
+
+      await expect(recoverRuntimeOwnedProcesses(
+        directory,
+        runtimeGenerationId,
+        systemBootId,
+        {
+          deadlineAt: Date.now() + 100,
+          darwinGuardianPath: guardianPath,
+        },
+      )).resolves.toBe(false);
+
+      expect(journal.records(runtimeGenerationId)).toMatchObject([{
+        state: "preauth",
+      }]);
+      hardStop(guardian);
+      await closeOf(guardian);
     });
 
     it("finishes a confirmed-remove crash without resurrecting ownership", () => {

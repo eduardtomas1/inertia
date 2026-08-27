@@ -130,6 +130,22 @@ function claimMatchesPlatform(
     : "platform" in claim.process && claim.process.platform === platform;
 }
 
+function linuxRecoveryTerminalAuthority(
+  claim: RuntimeOwnedProcessClaim,
+  guardianPath: string,
+  authority: typeof linuxGuardianTerminalAuthority,
+): boolean {
+  if (!("startTimeTicks" in claim.process)) return false;
+  if (authority(claim.process, guardianPath, "/proc", "inertia-done")) {
+    return true;
+  }
+  // A post-exec terminal is valid only after the durable journal records that
+  // execution was authorized. A preauth record therefore remains fail-closed
+  // even if an unexpected guardian claims the authenticated terminal name.
+  return claim.state !== "preauth"
+    && authority(claim.process, guardianPath, "/proc", "inertia-exdone");
+}
+
 function missingRootProcessGroupAbsent(
   claim: RuntimeOwnedProcessClaim,
   kill: Kill,
@@ -344,7 +360,11 @@ export function recoverRuntimeOwnedProcesses(
         && "startTimeTicks" in identity
         && "startTimeTicks" in record.process
       ) {
-        while (!linuxTerminalAuthority(record.process, options.darwinGuardianPath)) {
+        while (!linuxRecoveryTerminalAuthority(
+          record,
+          options.darwinGuardianPath,
+          linuxTerminalAuthority,
+        )) {
           if (Date.now() + PROCESS_GROUP_DRAIN_POLL_MS >= options.deadlineAt) return false;
           await waitForProcessGroupDrain(PROCESS_GROUP_DRAIN_POLL_MS);
           const current = readIdentity(identity.pid);
@@ -373,7 +393,11 @@ export function recoverRuntimeOwnedProcesses(
           !options.darwinGuardianPath
           || !("startTimeTicks" in identity)
           || !("startTimeTicks" in record.process)
-          || !linuxTerminalAuthority(record.process, options.darwinGuardianPath)
+          || !linuxRecoveryTerminalAuthority(
+            record,
+            options.darwinGuardianPath,
+            linuxTerminalAuthority,
+          )
         ) return false;
         if (!signalLinuxGuardian(record.process, options.darwinGuardianPath, "kill")) return false;
         while (Date.now() < options.deadlineAt) {

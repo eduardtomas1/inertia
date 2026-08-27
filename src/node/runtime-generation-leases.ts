@@ -16,7 +16,7 @@ import {
 import {
   validRuntimeGenerationId,
   validSystemBootId,
-} from "./runtime-process-protocol.js";
+} from "./runtime-identity-protocol.js";
 
 const MAX_REGULAR_GENERATION_LEASES = 32;
 const MAX_GENERATION_LEASES_WITH_RECOVERY_RESERVE = 33;

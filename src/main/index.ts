@@ -69,10 +69,7 @@ import { AppUpdateInstallCoordinator } from "./app-update-install.js";
 import { CanaryRollbackManager } from "./canary-rollback.js";
 import { APP_UPDATE_IPC, registerAppUpdateIpc } from "./app-update-ipc.js";
 import { initializeReleaseUpdates } from "./release-updates.js";
-import {
-  resolveRuntimeIconPath,
-  resolveRuntimeProcessGuardianPath,
-} from "./runtime-assets.js";
+import { resolveRuntimeIconPath } from "./runtime-assets.js";
 import {
   CredentialVault,
   ElectronSafeStorageBackend,
@@ -86,6 +83,7 @@ import { RuntimeSupervisor } from "./runtime-supervisor.js";
 import { RuntimeSystemSuspendDelivery } from "./runtime-system-suspend-delivery.js";
 import { RuntimeSystemSuspendTracker } from "./runtime-system-suspend-tracker.js";
 import * as runtimeBootstrap from "./runtime-bootstrap-safety.js";
+import { prepareRuntimeBootstrapRecovery, resolveRequiredRuntimeProcessGuardianPath } from "./runtime-bootstrap-recovery.js";
 import {
   cleanupPrivilegedOwners,
   finishPrivilegedExit,
@@ -752,19 +750,7 @@ async function createMainWindow(): Promise<void> {
     resourcesPath: process.resourcesPath,
     appPath: app.getAppPath(),
   });
-  const runtimeProcessGuardianPath = process.platform === "darwin"
-    ? resolveRuntimeProcessGuardianPath({
-        isPackaged: app.isPackaged,
-        resourcesPath: process.resourcesPath,
-        appPath: app.getAppPath(),
-      })
-    : null;
   if (!existsSync(iconPath)) throw new Error(`The required Inertia window icon is missing: ${iconPath}`);
-  if (runtimeProcessGuardianPath && !existsSync(runtimeProcessGuardianPath)) {
-    throw new Error(
-      `The required runtime process guardian is missing: ${runtimeProcessGuardianPath}`,
-    );
-  }
   windowThemePreference = readWindowThemePreference(windowAppearancePath());
   nativeTheme.themeSource = windowThemePreference;
   const backgroundColor = resolveWindowBackground(
@@ -988,106 +974,17 @@ async function bootstrap(): Promise<void> {
     app.getPath("userData"),
   );
   runtimeDataDirectory = dataDirectory;
-  const runtimeProcessGuardianPath = process.platform === "darwin"
-    ? resolveRuntimeProcessGuardianPath({
-        isPackaged: app.isPackaged,
-        resourcesPath: process.resourcesPath,
-        appPath: app.getAppPath(),
-      })
-    : null;
-  if (runtimeProcessGuardianPath && !existsSync(runtimeProcessGuardianPath)) {
-    throw new Error(
-      `The required runtime process guardian is missing: ${runtimeProcessGuardianPath}`,
-    );
-  }
-  let bootstrapSafety = runtimeBootstrap.prepareRuntimeBootstrapSafety(
-    dataDirectory,
-  );
-  let modernDarwinRecoveryAuthority = null as Awaited<ReturnType<
-    typeof runtimeBootstrap.prepareModernDarwinBootstrapRecovery
-  >>["authority"];
-  const modernDarwinRecovery = await runtimeBootstrap
-    .prepareModernDarwinBootstrapRecovery(
-      dataDirectory,
-      bootstrapSafety.systemBootId,
-      runtimeProcessGuardianPath,
-    );
-  modernDarwinRecoveryAuthority = modernDarwinRecovery.authority;
-  let modernRecoveryReady = !modernDarwinRecovery.blocked
-    && modernDarwinRecovery.candidate === null;
-  if (modernDarwinRecovery.blocked) {
-    dialog.showErrorBox(
-      "Runtime recovery remains safety locked",
-      "Inertia could not verify its exact local recovery journal. Your projects and attachments remain preserved; close Inertia and try again.",
-    );
-  } else if (modernDarwinRecovery.candidate) {
-    const decision = await dialog.showMessageBox({
-      type: "warning",
-      title: "Recover unproven macOS runtime state?",
-      message: "A previous Inertia runtime still has unproven process ownership state.",
-      detail: runtimeBootstrap.MODERN_DARWIN_RECOVERY_DIALOG_DETAIL,
-      buttons: ["I closed them — recover", "Keep safety lock"],
-      defaultId: 1,
-      cancelId: 1,
-      noLink: true,
-    });
-    if (decision.response === 0) {
-      modernDarwinRecoveryAuthority = runtimeBootstrap
-        .authorizeModernDarwinRuntimeRecovery(
-          dataDirectory,
-          modernDarwinRecovery.candidate,
-          bootstrapSafety.systemBootId,
-          runtimeProcessGuardianPath ?? "",
-        );
-      if (!modernDarwinRecoveryAuthority) {
-        dialog.showErrorBox(
-          "Runtime recovery was not authorized",
-          "The recorded process state changed before recovery could begin. Inertia kept the safety lock and preserved your work; close every older Inertia, agent, and terminal process, then reopen Inertia to review the current state.",
-        );
-      } else {
-        modernRecoveryReady = true;
-      }
-    }
-  }
-  // Bind the complete modern snapshot first. Only then can an unrelated
-  // unavailable legacy batch be offered in the same launch; cancellation or
-  // either partial publication leaves every provider admission safety-locked.
-  bootstrapSafety = runtimeBootstrap.prepareRuntimeBootstrapSafety(
-    dataDirectory,
-  );
-  if (
-    modernRecoveryReady
-    && bootstrapSafety.legacyRecoveryCandidates.length > 0
-  ) {
-    const decision = await dialog.showMessageBox({
-      type: "warning",
-      title: "Recover legacy local runtime state?",
-      message: "A previous Inertia runtime has legacy process ownership state.",
-      detail: runtimeBootstrap.LEGACY_RUNTIME_RECOVERY_DIALOG_DETAIL,
-      buttons: ["Recover and continue", "Keep safety lock"],
-      defaultId: 1,
-      cancelId: 1,
-      noLink: true,
-    });
-    if (decision.response === 0) {
-      const authorized = runtimeBootstrap.authorizeLegacyRuntimeRecovery(
-        dataDirectory,
-        bootstrapSafety.legacyRecoveryCandidates,
-        bootstrapSafety.systemBootId,
-      );
-      if (!authorized) {
-        dialog.showErrorBox(
-          "Legacy runtime recovery was not authorized",
-          "Inertia kept the existing safety lock and preserved your work. Close Inertia and try again.",
-        );
-      }
-      bootstrapSafety = runtimeBootstrap.prepareRuntimeBootstrapSafety(
-        dataDirectory,
-      );
-    }
-  }
-  const runtimeRecoveryBlocked = !modernRecoveryReady
-    || bootstrapSafety.legacyRecoveryCandidates.length > 0;
+  const runtimeProcessGuardianPath = resolveRequiredRuntimeProcessGuardianPath({
+    platform: process.platform,
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    appPath: app.getAppPath(),
+  });
+  const {
+    bootstrapSafety,
+    modernDarwinRecoveryAuthority,
+    runtimeRecoveryBlocked,
+  } = await prepareRuntimeBootstrapRecovery(dataDirectory, runtimeProcessGuardianPath);
   conversationAttachments = openConversationAttachments(
     dataDirectory,
     conversationAttachmentStoreRunner,

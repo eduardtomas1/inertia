@@ -26,7 +26,7 @@ import {
 import {
   validRuntimeGenerationId,
   validSystemBootId,
-} from "./runtime-process-protocol.js";
+} from "./runtime-identity-protocol.js";
 
 const AUTHORITY_SCHEMA_VERSION = 1;
 const AUTHORITY_PREFIX = ".runtime-modern-darwin-recovery-authority";

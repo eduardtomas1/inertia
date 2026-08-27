@@ -41,9 +41,12 @@ import {
   type RuntimeUpdateWorkerCommand,
   type RuntimeUpdateWorkerEvent,
 } from "./runtime-update-process-protocol";
-import type {
-  ModernDarwinRecoveryAuthorityDescriptor,
-} from "./runtime-modern-recovery-authorities.js";
+import {
+  parseRuntimeRecoveryWorkerEvent,
+  parseRuntimeRecoveryWorkerOptions,
+  type RuntimeRecoveryWorkerEvent,
+  type RuntimeRecoveryWorkerOptions,
+} from "./runtime-recovery-process-protocol.js";
 import { validRuntimeGenerationId, validSystemBootId } from "./runtime-identity-protocol";
 import {
   parseRuntimeDatabaseStartupRecovery,
@@ -56,21 +59,13 @@ export type { RuntimeUpdatePreparationBlocker, RuntimeUpdatePreparationResult } 
 export type { RuntimeConversationAttachmentStoreResult }
   from "./conversation-attachment-store-protocol";
 
-export interface RuntimeWorkerOptions {
+export interface RuntimeWorkerOptions extends RuntimeRecoveryWorkerOptions {
   dataDirectory: string;
   defaultWorkspacePath: string;
   enableProviders: boolean;
   runtimeGenerationId: string;
   systemBootId: string;
-  /** Main-resolved, packaged macOS watchdog executable. */
-  runtimeProcessGuardianPath?: string;
   confirmedTerminatedRuntimeGenerationIds?: readonly string[];
-  /** User-authorized legacy leases; this does not assert process termination. */
-  manuallyRetiredRuntimeGenerationIds?: readonly string[];
-  /** Exact Darwin journal authority; surviving processes are never killed. */
-  manualModernDarwinRecovery?: ModernDarwinRecoveryAuthorityDescriptor;
-  /** Main-owned quarantine after an earlier utility process exited unconfirmed. */
-  priorRuntimeCleanupUnconfirmed?: boolean;
   /** Optional trusted desktop override; never accepted from the renderer. */
   codexBinaryPath?: string;
   /** Main-owned import root used to revalidate brokered attachment capabilities. */
@@ -272,17 +267,7 @@ export type RuntimeWorkerEvent =
       receiptRuntimeGenerationId: string;
       currentRuntimeGenerationId: string;
     }
-  | {
-      type: "runtime.legacy-recovery-authority-consumed";
-      retiredRuntimeGenerationId: string;
-      currentRuntimeGenerationId: string;
-    }
-  | {
-      type: "runtime.modern-darwin-recovery-authority-acknowledged";
-      operationId: string;
-      snapshotDigest: string;
-      currentRuntimeGenerationId: string;
-    }
+  | RuntimeRecoveryWorkerEvent
   | { type: "runtime.project-path-resolved"; requestId: string; path: string }
   | { type: "runtime.project-path-rejected"; requestId: string; message: string }
   | {
@@ -561,29 +546,23 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
   const hasRecoveryImportFault = Object.hasOwn(options, "recoveryImportFault");
   const hasRuntimeGenerationId = Object.hasOwn(options, "runtimeGenerationId");
   const hasSystemBootId = Object.hasOwn(options, "systemBootId");
-  const hasRuntimeProcessGuardianPath = Object.hasOwn(
-    options,
-    "runtimeProcessGuardianPath",
-  );
   const hasConfirmedGenerations = Object.hasOwn(
     options,
     "confirmedTerminatedRuntimeGenerationIds",
   );
-  const hasManuallyRetiredGenerations = Object.hasOwn(
+  const recoveryOptions = parseRuntimeRecoveryWorkerOptions(
     options,
-    "manuallyRetiredRuntimeGenerationIds",
-  );
-  const hasManualModernDarwinRecovery = Object.hasOwn(
-    options,
-    "manualModernDarwinRecovery",
-  );
-  const hasPriorRuntimeCleanupUnconfirmed = Object.hasOwn(
-    options,
-    "priorRuntimeCleanupUnconfirmed",
+    options.runtimeGenerationId,
+    options.systemBootId,
+    hasConfirmedGenerations
+      && Array.isArray(options.confirmedTerminatedRuntimeGenerationIds)
+      ? options.confirmedTerminatedRuntimeGenerationIds
+      : [],
   );
   if (
     !hasRuntimeGenerationId
     || !hasSystemBootId
+    || recoveryOptions === null
     || optionKeys.length !== 5
       + Number(hasKimiProfiles)
       + Number(hasCodexBinaryPath)
@@ -592,23 +571,12 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
       + Number(hasPackageSmokeImage)
       + Number(hasRecoveryImportFault)
       + Number(hasConfirmedGenerations)
-      + Number(hasManuallyRetiredGenerations)
-      + Number(hasManualModernDarwinRecovery)
-      + Number(hasPriorRuntimeCleanupUnconfirmed)
-      + Number(hasRuntimeProcessGuardianPath)
+      + (recoveryOptions?.keyCount ?? 0)
     || !runtimePath(options.dataDirectory)
     || !runtimePath(options.defaultWorkspacePath)
     || typeof options.enableProviders !== "boolean"
     || (hasRuntimeGenerationId && !validRuntimeGenerationId(options.runtimeGenerationId))
     || (hasSystemBootId && !validSystemBootId(options.systemBootId))
-    || (
-      hasRuntimeProcessGuardianPath
-      && !runtimePath(options.runtimeProcessGuardianPath)
-    )
-    || (
-      hasPriorRuntimeCleanupUnconfirmed
-      && options.priorRuntimeCleanupUnconfirmed !== true
-    )
     || (
       hasConfirmedGenerations
       && (
@@ -621,59 +589,6 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
           !validRuntimeGenerationId(generationId)
           || generationId === options.runtimeGenerationId
         ))
-      )
-    )
-    || (
-      hasManuallyRetiredGenerations
-      && (
-        !Array.isArray(options.manuallyRetiredRuntimeGenerationIds)
-        || options.manuallyRetiredRuntimeGenerationIds.length < 1
-        || options.manuallyRetiredRuntimeGenerationIds.length > 32
-        || new Set(options.manuallyRetiredRuntimeGenerationIds).size
-          !== options.manuallyRetiredRuntimeGenerationIds.length
-        || options.manuallyRetiredRuntimeGenerationIds.some((generationId) => (
-          !validRuntimeGenerationId(generationId)
-          || generationId === options.runtimeGenerationId
-          || (hasConfirmedGenerations
-            && (options.confirmedTerminatedRuntimeGenerationIds as unknown[]).includes(
-              generationId,
-            ))
-        ))
-      )
-    )
-    || (
-      hasManualModernDarwinRecovery
-      && (
-        !hasRuntimeProcessGuardianPath
-        || options.systemBootId === "unavailable"
-        ||
-        !plainObject(options.manualModernDarwinRecovery)
-        || Object.keys(options.manualModernDarwinRecovery).length !== 3
-        || typeof options.manualModernDarwinRecovery.operationId !== "string"
-        || !UUID_PATTERN.test(options.manualModernDarwinRecovery.operationId)
-        || typeof options.manualModernDarwinRecovery.snapshotDigest !== "string"
-        || !/^[0-9a-f]{64}$/u.test(
-          options.manualModernDarwinRecovery.snapshotDigest,
-        )
-        || !Array.isArray(
-          options.manualModernDarwinRecovery.runtimeGenerationIds,
-        )
-        || options.manualModernDarwinRecovery.runtimeGenerationIds.length < 1
-        || options.manualModernDarwinRecovery.runtimeGenerationIds.length > 32
-        || new Set(options.manualModernDarwinRecovery.runtimeGenerationIds).size
-          !== options.manualModernDarwinRecovery.runtimeGenerationIds.length
-        || options.manualModernDarwinRecovery.runtimeGenerationIds.some(
-          (generationId) => (
-            !validRuntimeGenerationId(generationId)
-            || generationId === options.runtimeGenerationId
-            || (hasConfirmedGenerations
-              && (options.confirmedTerminatedRuntimeGenerationIds as unknown[])
-                .includes(generationId))
-            || (hasManuallyRetiredGenerations
-              && (options.manuallyRetiredRuntimeGenerationIds as unknown[])
-                .includes(generationId))
-          ),
-        )
       )
     )
     || (hasCodexBinaryPath && !runtimePath(options.codexBinaryPath))
@@ -733,38 +648,12 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
       enableProviders: options.enableProviders,
       runtimeGenerationId: options.runtimeGenerationId as string,
       systemBootId: options.systemBootId as string,
-      ...(hasRuntimeProcessGuardianPath
-        ? { runtimeProcessGuardianPath: options.runtimeProcessGuardianPath as string }
-        : {}),
+      ...recoveryOptions.options,
       ...(hasConfirmedGenerations
         ? {
             confirmedTerminatedRuntimeGenerationIds:
               [...options.confirmedTerminatedRuntimeGenerationIds as string[]],
           }
-        : {}),
-      ...(hasManuallyRetiredGenerations
-        ? {
-            manuallyRetiredRuntimeGenerationIds:
-              [...options.manuallyRetiredRuntimeGenerationIds as string[]],
-          }
-        : {}),
-      ...(hasManualModernDarwinRecovery
-        ? {
-            manualModernDarwinRecovery: {
-              operationId: (options.manualModernDarwinRecovery as
-                Record<string, unknown>).operationId as string,
-              snapshotDigest:
-                (options.manualModernDarwinRecovery as
-                  Record<string, unknown>).snapshotDigest as string,
-              runtimeGenerationIds: [
-                ...(options.manualModernDarwinRecovery as
-                  Record<string, unknown>).runtimeGenerationIds as string[],
-              ],
-            },
-          }
-        : {}),
-      ...(hasPriorRuntimeCleanupUnconfirmed
-        ? { priorRuntimeCleanupUnconfirmed: true as const }
         : {}),
       ...(hasCodexBinaryPath ? { codexBinaryPath: options.codexBinaryPath as string } : {}),
       ...(hasAttachmentRoot ? { attachmentRoot: options.attachmentRoot as string } : {}),
@@ -813,6 +702,8 @@ export function parseRuntimeWorkerEvent(value: unknown): RuntimeWorkerEvent | nu
   const updateEvent = parseRuntimeUpdateWorkerEvent(value);
   if (updateEvent) return updateEvent;
   const browserEvent = parseRuntimeAgentBrowserEvent(value); if (browserEvent) return browserEvent;
+  const recoveryEvent = parseRuntimeRecoveryWorkerEvent(value);
+  if (recoveryEvent) return recoveryEvent;
   if (
     value.type === "runtime.cleanup-receipt-consumed"
     && Object.keys(value).length === 3
@@ -822,31 +713,6 @@ export function parseRuntimeWorkerEvent(value: unknown): RuntimeWorkerEvent | nu
   ) return {
     type: "runtime.cleanup-receipt-consumed",
     receiptRuntimeGenerationId: value.receiptRuntimeGenerationId,
-    currentRuntimeGenerationId: value.currentRuntimeGenerationId,
-  };
-  if (
-    value.type === "runtime.legacy-recovery-authority-consumed"
-    && Object.keys(value).length === 3
-    && validRuntimeGenerationId(value.retiredRuntimeGenerationId)
-    && validRuntimeGenerationId(value.currentRuntimeGenerationId)
-    && value.retiredRuntimeGenerationId !== value.currentRuntimeGenerationId
-  ) return {
-    type: "runtime.legacy-recovery-authority-consumed",
-    retiredRuntimeGenerationId: value.retiredRuntimeGenerationId,
-    currentRuntimeGenerationId: value.currentRuntimeGenerationId,
-  };
-  if (
-    value.type === "runtime.modern-darwin-recovery-authority-acknowledged"
-    && Object.keys(value).length === 4
-    && typeof value.operationId === "string"
-    && UUID_PATTERN.test(value.operationId)
-    && typeof value.snapshotDigest === "string"
-    && /^[0-9a-f]{64}$/u.test(value.snapshotDigest)
-    && validRuntimeGenerationId(value.currentRuntimeGenerationId)
-  ) return {
-    type: value.type,
-    operationId: value.operationId,
-    snapshotDigest: value.snapshotDigest,
     currentRuntimeGenerationId: value.currentRuntimeGenerationId,
   };
   if (value.type === "runtime.shutdown-unconfirmed" && Object.keys(value).length === 1) {

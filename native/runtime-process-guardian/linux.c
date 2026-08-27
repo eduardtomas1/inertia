@@ -289,11 +289,11 @@ static int ready_mode(const char *raw) {
   }
   return 4;
 }
-static int claimed_mode(const char *raw) {
+static int state_mode(const char *raw, const char *expected_name) {
   pid_t pid; if (!parse_pid(raw, &pid)) return 64;
   struct timespec pause = { .tv_sec = 0, .tv_nsec = POLL_NS };
   for (int poll = 0; poll < 50; poll++) {
-    if (getpgid(pid) == pid && getsid(pid) == pid && named_status(pid, "inertia-claim")) return identity_mode(raw);
+    if (getpgid(pid) == pid && getsid(pid) == pid && named_status(pid, expected_name)) return identity_mode(raw);
     nanosleep(&pause, NULL);
   }
   return 4;
@@ -442,7 +442,8 @@ int main(int argc, char **argv) {
   if (argc == 2 && !strcmp(argv[1], "seccomp-selftest")) return seccomp_selftest();
   if (argc == 3 && !strcmp(argv[1], "identity")) return identity_mode(argv[2]);
   if (argc == 3 && !strcmp(argv[1], "ready")) return ready_mode(argv[2]);
-  if (argc == 3 && !strcmp(argv[1], "claimed")) return claimed_mode(argv[2]);
+  if (argc == 3 && !strcmp(argv[1], "claimed")) return state_mode(argv[2], "inertia-claim");
+  if (argc == 3 && !strcmp(argv[1], "owned")) return state_mode(argv[2], "inertia-owned");
   if (argc >= 2 && !strcmp(argv[1], "signal")) return exact_signal_mode(argc, argv);
   if (argc >= 5 && !strcmp(argv[1], "watch")) return watch_mode(argc, argv);
   return 64;

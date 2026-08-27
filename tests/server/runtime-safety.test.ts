@@ -33,6 +33,60 @@ describe("runtime recovery safety command boundary", () => {
     );
   });
 
+  it("releases the database when attachment storage cannot open", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-runtime-safety-"));
+    const workspaceDirectory = join(root, "workspace");
+    mkdirSync(workspaceDirectory);
+    const closeStore = vi.spyOn(RuntimeStore.prototype, "backupAndClose");
+    const openAttachments = vi.spyOn(ConversationAttachmentStore, "open")
+      .mockRejectedValueOnce(new Error("injected attachment open failure"));
+    try {
+      await expect(startTestRuntime({
+        dataDirectory: join(root, "data"),
+        defaultWorkspacePath: workspaceDirectory,
+        enableProviders: false,
+        runtimeGenerationId: `${randomUUID()}:1`,
+        systemBootId: `test:${randomUUID()}`,
+      })).rejects.toThrow("injected attachment open failure");
+      expect(closeStore).toHaveBeenCalledOnce();
+    } finally {
+      openAttachments.mockRestore();
+      closeStore.mockRestore();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("releases both persistent stores when attachment reconcile fails", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-runtime-safety-"));
+    const workspaceDirectory = join(root, "workspace");
+    mkdirSync(workspaceDirectory);
+    const closeStore = vi.spyOn(RuntimeStore.prototype, "backupAndClose");
+    const closeAttachments = vi.spyOn(
+      ConversationAttachmentStore.prototype,
+      "close",
+    );
+    const reconcile = vi.spyOn(
+      ConversationAttachmentStore.prototype,
+      "reconcile",
+    ).mockRejectedValueOnce(new Error("injected attachment reconcile failure"));
+    try {
+      await expect(startTestRuntime({
+        dataDirectory: join(root, "data"),
+        defaultWorkspacePath: workspaceDirectory,
+        enableProviders: false,
+        runtimeGenerationId: `${randomUUID()}:1`,
+        systemBootId: `test:${randomUUID()}`,
+      })).rejects.toThrow("injected attachment reconcile failure");
+      expect(closeAttachments).toHaveBeenCalledOnce();
+      expect(closeStore).toHaveBeenCalledOnce();
+    } finally {
+      reconcile.mockRestore();
+      closeAttachments.mockRestore();
+      closeStore.mockRestore();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("preserves durable attachments while prior-runtime cleanup is unconfirmed", async () => {
     const root = mkdtempSync(join(tmpdir(), "inertia-runtime-safety-"));
     const dataDirectory = join(root, "data");
@@ -246,6 +300,11 @@ describe("runtime recovery safety command boundary", () => {
       legacyGenerationId,
       "unavailable",
     )).toBe(true);
+    const closeAttachments = vi.spyOn(
+      ConversationAttachmentStore.prototype,
+      "close",
+    );
+    const closeStore = vi.spyOn(RuntimeStore.prototype, "backupAndClose");
     try {
       await expect(startTestRuntime({
         dataDirectory,
@@ -258,12 +317,16 @@ describe("runtime recovery safety command boundary", () => {
           throw new Error("injected interrupted recovery failure");
         },
       })).rejects.toThrow("injected interrupted recovery failure");
+      expect(closeAttachments).toHaveBeenCalledOnce();
+      expect(closeStore).toHaveBeenCalledOnce();
       expect(new RuntimeGenerationLeaseJournal(dataDirectory).all())
         .toContainEqual(expect.objectContaining({
           runtimeGenerationId: legacyGenerationId,
           systemBootId: "unavailable",
         }));
     } finally {
+      closeAttachments.mockRestore();
+      closeStore.mockRestore();
       rmSync(root, { recursive: true, force: true });
     }
   });
@@ -523,6 +586,11 @@ describe("runtime recovery safety command boundary", () => {
     );
     seed.close();
 
+    const closeAttachments = vi.spyOn(
+      ConversationAttachmentStore.prototype,
+      "close",
+    );
+    const closeStore = vi.spyOn(RuntimeStore.prototype, "backupAndClose");
     try {
       await expect(startTestRuntime({
         dataDirectory,
@@ -535,6 +603,8 @@ describe("runtime recovery safety command boundary", () => {
           throw new Error("crash after provider ownership clear");
         },
       })).rejects.toThrow("crash after provider ownership clear");
+      expect(closeAttachments).toHaveBeenCalledOnce();
+      expect(closeStore).toHaveBeenCalledOnce();
       expect(new RuntimeGenerationLeaseJournal(dataDirectory).all())
         .toEqual(expect.arrayContaining([
           expect.objectContaining({ runtimeGenerationId: oldGeneration }),
@@ -597,6 +667,8 @@ describe("runtime recovery safety command boundary", () => {
         expect.objectContaining({ runtimeGenerationId: currentGeneration }),
       ]);
     } finally {
+      closeAttachments.mockRestore();
+      closeStore.mockRestore();
       rmSync(root, { recursive: true, force: true });
     }
   });

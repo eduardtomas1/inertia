@@ -26,7 +26,7 @@ function nodeChild(source: string): ChildProcessWithoutNullStreams {
 }
 
 async function closeChild(child: ChildProcessWithoutNullStreams): Promise<void> {
-  if (child.exitCode !== null || child.signalCode !== null) return;
+  if (!children.has(child)) return;
   await new Promise<void>((resolve) => child.once("close", () => resolve()));
 }
 
@@ -102,7 +102,32 @@ describe("Windows runtime Job Object containment", () => {
       platform: "win32",
       timeoutMs: 1_000,
       spawnProcess: () => nodeChild("process.exit(17)"),
-    })).rejects.toThrow("Job Object could not be armed");
+    })).rejects.toThrow(
+      "The Windows runtime Job Object could not be armed. "
+      + "The native helper exited with code 17.",
+    );
+  });
+
+  it("reports bounded native stage diagnostics with the helper exit code", async () => {
+    const failure = await armWindowsRuntimeJob(runtimeGenerationId, 4_242, {
+      platform: "win32",
+      timeoutMs: 1_000,
+      spawnProcess: () => nodeChild(
+        "process.stderr.write('INERTIA_JOB_ERROR stage=assign-process win32=5\\n');"
+        + "process.stderr.write('x'.repeat(10_000));"
+        + "process.exit(13)",
+      ),
+    }).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toContain(
+      "The Windows runtime Job Object could not be armed. "
+      + "The native helper exited with code 13. "
+      + "INERTIA_JOB_ERROR stage=assign-process win32=5",
+    );
+    expect((failure as Error).message.length).toBeLessThanOrEqual(650);
   });
 
   it("accepts recovery only after the exact named job helper succeeds", async () => {
@@ -132,4 +157,29 @@ describe("Windows runtime Job Object containment", () => {
       spawnProcess: () => nodeChild("process.exit(22)"),
     })).resolves.toBe(false);
   });
+
+  it.runIf(process.platform === "win32")(
+    "arms and cleans up a real Job Object around a disposable child",
+    async () => {
+      const generation = "30000000-0000-4000-8000-000000000003:1";
+      const child = nodeChild("setInterval(() => undefined, 1_000)");
+      if (!child.pid) throw new Error("The disposable child did not start.");
+
+      const containment = await armWindowsRuntimeJob(generation, child.pid);
+      if (!containment) throw new Error("Windows Job Object containment was unavailable.");
+      expect(containment).toEqual({
+        kind: "windows-job-v1",
+        name: windowsRuntimeJobName(generation),
+      });
+
+      const cleanup = recoverWindowsRuntimeJob(
+        containment,
+        Date.now() + 5_000,
+      );
+      child.kill("SIGKILL");
+      await closeChild(child);
+      await expect(cleanup).resolves.toBe(true);
+    },
+    20_000,
+  );
 });

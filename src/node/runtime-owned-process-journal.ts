@@ -617,6 +617,7 @@ export class RuntimeOwnedProcessJournal {
       readonly spawnedAfterMs?: number;
       readonly spawnedBeforeMs?: number;
       readonly expectedDarwinIdentity?: DarwinProcessIdentity;
+      readonly expectedLinuxIdentity?: LinuxProcessIdentity;
     } = {},
   ): RuntimeOwnedProcessClaim {
     if (!UUID_PATTERN.test(ownershipId)) {
@@ -629,7 +630,11 @@ export class RuntimeOwnedProcessJournal {
     );
     const pending = current && parseRecord(current.bytes);
     const linuxIdentity = this.platform === "linux" && this.darwinGuardianPath
-      ? readLinuxGuardianReady(pid, this.darwinGuardianPath, expectedParentPid)
+      ? options.expectedLinuxIdentity
+        ?? readLinuxGuardianReady(pid, this.darwinGuardianPath, expectedParentPid)
+      : null;
+    const currentLinuxIdentity = linuxIdentity && options.expectedLinuxIdentity
+      ? readLinuxProcessIdentity(pid)
       : null;
     const darwinIdentity = this.platform === "darwin"
       ? this.darwinGuardianReadyReader(pid)
@@ -655,6 +660,10 @@ export class RuntimeOwnedProcessJournal {
       || pending.runtimeGenerationId !== runtimeGenerationId
       || pending.systemBootId !== systemBootId
       || !identity
+      || (linuxIdentity && options.expectedLinuxIdentity
+        && (!currentLinuxIdentity
+          || currentLinuxIdentity.parentPid !== expectedParentPid
+          || !sameProcess(linuxIdentity, currentLinuxIdentity)))
       || (darwinIdentity && options.expectedDarwinIdentity
         && !sameProcess(options.expectedDarwinIdentity, darwinIdentity))
       || ("parentPid" in identity && identity.parentPid !== expectedParentPid)

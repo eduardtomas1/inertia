@@ -1,5 +1,5 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn as spawnPty } from "node-pty";
@@ -9,6 +9,7 @@ import { terminateProcessTreeAndWait } from "../../src/server/process-lifecycle"
 import {
   activateRuntimeOwnedProcessRegistry,
   awaitRuntimeOwnedProcessCleanupConfirmed,
+  runtimeOwnedProcessCleanupConfirmed,
   runtimeOwnedProcessInvocation,
   RuntimeOwnedProcessJournal,
   spawnRuntimeOwnedPidProcess,
@@ -18,6 +19,7 @@ import { runtimeOwnedPtyInvocation } from "../../src/node/runtime-owned-pty-invo
 import {
   linuxGuardianTerminalAuthority,
   monitorLinuxGuardianTerminal,
+  readLinuxGuardianReadyAsync,
 } from "../../src/node/runtime-owned-process-linux";
 
 const linuxIt = process.platform === "linux" ? it : it.skip;
@@ -89,6 +91,46 @@ describe("Linux runtime process guardian", () => {
     expect(release).toHaveBeenCalledOnce();
     expect(onFailure).not.toHaveBeenCalled();
     vi.useRealTimers();
+  });
+
+  it("runs a delayed guardian helper without blocking the runtime event loop", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-linux-async-helper-")); roots.push(root);
+    const helper = join(root, "guardian");
+    writeFileSync(helper, "#!/bin/sh\nsleep 0.2\nexit 4\n");
+    chmodSync(helper, 0o700);
+    let heartbeat = false;
+    const ready = readLinuxGuardianReadyAsync(123, helper, process.pid);
+    setTimeout(() => { heartbeat = true; }, 20);
+    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    expect(heartbeat).toBe(true);
+    await expect(ready).resolves.toBeNull();
+  });
+
+  it("allows only one asynchronous terminal release attempt at a time", async () => {
+    vi.useFakeTimers();
+    const releaseResolvers: Array<(released: boolean) => void> = [];
+    const release = vi.fn(() => new Promise<boolean>((resolve) => {
+      releaseResolvers.push(resolve);
+    }));
+    const stop = monitorLinuxGuardianTerminal({
+      pid: 123, parentPid: 1, processGroupId: 123, startTimeTicks: "456",
+      guardianExecutableDevice: "1", guardianExecutableInode: "2",
+    }, "/trusted/guardian", () => true, vi.fn(), {
+      readComm: () => "inertia-done",
+      terminalAuthority: () => true,
+      release,
+    });
+    try {
+      await vi.advanceTimersByTimeAsync(500);
+      expect(release).toHaveBeenCalledOnce();
+      releaseResolvers.shift()?.(false);
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(50);
+      expect(release).toHaveBeenCalledTimes(2);
+    } finally {
+      stop();
+      vi.useRealTimers();
+    }
   });
 
   it("keeps terminal authority on the durable identity across a helper upgrade", () => {
@@ -216,6 +258,9 @@ describe("Linux runtime process guardian", () => {
       invocation.args,
       { detached: true, stdio: "ignore" },
     ));
+    await waitFor(() => new RuntimeOwnedProcessJournal(root, {
+      platform: "linux", darwinGuardianPath: guardian,
+    }).records(generation)?.[0]?.state === "owned");
     const movedGuardian = `${guardian}.moved`;
     renameSync(guardian, movedGuardian);
     const rawKill = vi.fn<typeof process.kill>(() => true);
@@ -260,6 +305,9 @@ describe("Linux runtime process guardian", () => {
       { detached: true, stdio: "ignore" },
     ));
     const rawKill = vi.fn<typeof process.kill>(() => true);
+    await waitFor(() => new RuntimeOwnedProcessJournal(root, {
+      platform: "linux", darwinGuardianPath: guardian,
+    }).records(generation)?.[0]?.state === "owned");
     renameSync(guardian, movedGuardian);
     try {
       writeFileSync(releaseMarker, "release\n", { encoding: "utf8", mode: 0o600 });
@@ -322,6 +370,75 @@ describe("Linux runtime process guardian", () => {
     }
   }, 15_000);
 
+  linuxIt("retries a transient retiring-claim release without losing cleanup proof", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-linux-release-retry-")); roots.push(root);
+    const guardian = compileGuardian(root);
+    const generation = "17000000-0000-4000-8000-000000000017:1";
+    const boot = "test:18000000-0000-4000-8000-000000000018";
+    const releaseRetiring = vi.spyOn(
+      RuntimeOwnedProcessJournal.prototype,
+      "releaseRetiring",
+    ).mockReturnValueOnce(false);
+    const deactivate = activateRuntimeOwnedProcessRegistry(root, generation, boot, {
+      platform: "linux", darwinGuardianPath: guardian,
+    });
+    const invocation = runtimeOwnedProcessInvocation(process.execPath, [
+      "-e",
+      "process.exit(0)",
+    ]);
+    const child = spawnRuntimeOwnedProcess(() => spawn(
+      invocation.command,
+      invocation.args,
+      { detached: true, stdio: "ignore" },
+    ));
+    try {
+      await waitForChild(child);
+      await expect(awaitRuntimeOwnedProcessCleanupConfirmed()).resolves.toBe(true);
+      expect(releaseRetiring).toHaveBeenCalledTimes(2);
+      expect(new RuntimeOwnedProcessJournal(root, {
+        platform: "linux", darwinGuardianPath: guardian,
+      }).records(generation)).toEqual([]);
+    } finally {
+      releaseRetiring.mockRestore();
+      await stopChild(child);
+      deactivate?.();
+    }
+  }, 15_000);
+
+  linuxIt("keeps a retiring claim durable when both bounded releases fail", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-linux-release-fail-")); roots.push(root);
+    const guardian = compileGuardian(root);
+    const generation = "19000000-0000-4000-8000-000000000019:1";
+    const boot = "test:20000000-0000-4000-8000-000000000020";
+    const releaseRetiring = vi.spyOn(
+      RuntimeOwnedProcessJournal.prototype,
+      "releaseRetiring",
+    ).mockReturnValue(false);
+    const deactivate = activateRuntimeOwnedProcessRegistry(root, generation, boot, {
+      platform: "linux", darwinGuardianPath: guardian,
+    });
+    const invocation = runtimeOwnedProcessInvocation(process.execPath, [
+      "-e",
+      "process.exit(0)",
+    ]);
+    const child = spawnRuntimeOwnedProcess(() => spawn(
+      invocation.command,
+      invocation.args,
+      { detached: true, stdio: "ignore" },
+    ));
+    try {
+      await waitForChild(child);
+      await waitFor(() => releaseRetiring.mock.calls.length === 2);
+      expect(runtimeOwnedProcessCleanupConfirmed()).toBe(false);
+      expect(new RuntimeOwnedProcessJournal(root, {
+        platform: "linux", darwinGuardianPath: guardian,
+      }).records(generation)).toMatchObject([{ state: "retiring" }]);
+    } finally {
+      releaseRetiring.mockRestore();
+      deactivate?.();
+    }
+  }, 15_000);
+
   linuxIt("owns and retires a PID-backed terminal through the guardian", async () => {
     const root = mkdtempSync(join(tmpdir(), "inertia-linux-pty-")); roots.push(root);
     const guardian = compileGuardian(root);
@@ -338,9 +455,9 @@ describe("Linux runtime process guardian", () => {
         [...invocation.args],
         { cwd: root, env: { PATH: "/usr/bin:/bin" } },
       ), { darwinGuardianCommand: invocation.command });
-      expect(new RuntimeOwnedProcessJournal(root, {
+      await waitFor(() => new RuntimeOwnedProcessJournal(root, {
         platform: "linux", darwinGuardianPath: guardian,
-      }).records(generation)).toMatchObject([{ state: "owned" }]);
+      }).records(generation)?.[0]?.state === "owned");
       const exited = new Promise<void>((resolve) => {
         owned.process.onExit(({ signal }) => {
           owned.releaseIfGroupExited(signal);
@@ -373,6 +490,9 @@ describe("Linux runtime process guardian", () => {
       [...invocation.args],
       { cwd: root, env: { PATH: "/usr/bin:/bin" } },
     ), { darwinGuardianCommand: invocation.command });
+    await waitFor(() => new RuntimeOwnedProcessJournal(root, {
+      platform: "linux", darwinGuardianPath: guardian,
+    }).records(generation)?.[0]?.state === "owned");
     const exited = new Promise<void>((resolve) => {
       owned.process.onExit(({ signal }) => {
         owned.releaseIfGroupExited(signal);
@@ -411,11 +531,11 @@ describe("Linux runtime process guardian", () => {
         throw new Error("The spawned process ownership could not be persisted.");
       });
     try {
-      expect(() => spawnRuntimeOwnedProcess(() => {
+      spawnRuntimeOwnedProcess(() => {
         child = spawn(invocation.command, invocation.args, { detached: true, stdio: "ignore" });
         return child;
-      })).toThrow("could not be persisted");
-      expect(claim).toHaveBeenCalledOnce();
+      });
+      await waitFor(() => claim.mock.calls.length === 1);
       expect(new RuntimeOwnedProcessJournal(root, {
         platform: "linux", darwinGuardianPath: guardian,
       }).records(generation)).toMatchObject([{ state: "pending" }]);
@@ -441,13 +561,18 @@ describe("Linux runtime process guardian", () => {
     const wrongOwner = spawn("/bin/sleep", ["60"], { stdio: "ignore" });
     let child: ChildProcess | null = null;
     try {
-      expect(() => spawnRuntimeOwnedProcess(() => {
+      spawnRuntimeOwnedProcess(() => {
         child = spawn(guardian, [
           "watch", String(wrongOwner.pid), String(executable.dev), String(executable.ino),
           "--", "/bin/sh", "-c", `touch ${join(root, "ran")}`,
         ], { detached: true, stdio: "ignore" });
         return child;
-      })).toThrow(/(?:ownership could not be proven|guardian could not be claimed)/u);
+      });
+      await waitFor(() => new RuntimeOwnedProcessJournal(root, {
+        platform: "linux", darwinGuardianPath: guardian,
+      }).records(generation)?.[0]?.state === "pending");
+      if (!child) throw new Error("The wrong-parent guardian did not spawn.");
+      await waitForChild(child);
       expect(() => spawnRuntimeOwnedProcess(() => spawn("/bin/true")))
         .toThrow("tainted until restart");
       expect(() => statSync(join(root, "ran"))).toThrow();
@@ -471,10 +596,11 @@ describe("Linux runtime process guardian", () => {
       .mockReturnValueOnce(null);
     let child: ChildProcess | null = null;
     try {
-      expect(() => spawnRuntimeOwnedProcess(() => {
+      spawnRuntimeOwnedProcess(() => {
         child = spawn(invocation.command, invocation.args, { detached: true, stdio: "ignore" });
         return child;
-      })).toThrow("authorization could not be persisted");
+      });
+      await waitFor(() => own.mock.calls.length === 1);
       expect(new RuntimeOwnedProcessJournal(root, {
         platform: "linux", darwinGuardianPath: guardian,
       }).records(generation)).toMatchObject([{ state: "preauth" }]);
@@ -503,6 +629,9 @@ describe("Linux runtime process guardian", () => {
         detached: true, stdio: "ignore",
       }));
     });
+    await waitFor(() => new RuntimeOwnedProcessJournal(firstRoot, {
+      platform: "linux", darwinGuardianPath: guardian,
+    }).records(generation)?.every((record) => record.state === "owned") === true);
     deactivateFirst?.();
     const deactivateSecond = activateRuntimeOwnedProcessRegistry(secondRoot, generation, boot, {
       platform: "linux", darwinGuardianPath: guardian,

@@ -179,6 +179,7 @@ export async function expectRuntimeCrashRecovery(
   const beforeTerminalId = await terminal.getAttribute("data-terminal-id");
   expect(beforeTerminalId).toBeTruthy();
   let recoveryRootPid: number | null = null;
+  let recoveryGuardianPid: number | null = null;
   if (process.platform === "linux") {
     // Keep the exact claimed terminal root alive after the utility process is
     // killed. An ordinary interactive shell exits when its PTY owner dies,
@@ -208,8 +209,15 @@ export async function expectRuntimeCrashRecovery(
       );
       const pid = Number(match?.[1] ?? 0);
       recoveryRootPid = Number.isSafeInteger(pid) && pid > 1 ? pid : null;
+      if (recoveryRootPid) {
+        const identity = readLinuxProcessIdentity(recoveryRootPid);
+        recoveryGuardianPid = identity?.parentPid && identity.parentPid > 1
+          ? identity.parentPid
+          : null;
+      }
       return recoveryRootPid;
     }).not.toBeNull();
+    expect(recoveryGuardianPid).not.toBeNull();
   }
   if (process.platform === "win32") {
     expect(priorLease).not.toBeNull();
@@ -252,6 +260,7 @@ export async function expectRuntimeCrashRecovery(
   if (process.platform === "linux") {
     expect(priorLease).not.toBeNull();
     expect(recoveryRootPid).not.toBeNull();
+    expect(recoveryGuardianPid).not.toBeNull();
     const journal = new RuntimeOwnedProcessJournal(dataDirectory);
     let stableSince: number | null = null;
     let stableSignature: string | null = null;
@@ -268,7 +277,7 @@ export async function expectRuntimeCrashRecovery(
         const records = journal.records(priorLease!.runtimeGenerationId);
         const systemBootId = readSystemBootId();
         let allExact = Boolean(records?.length);
-        let intendedRootIncluded = false;
+        let intendedGuardianExact = false;
         const claims = (records ?? []).map((record) => {
           const observedAtMs = Date.now() - quiescenceStartedAt;
           const observation = observedClaims.get(record.ownershipId) ?? {
@@ -309,8 +318,9 @@ export async function expectRuntimeCrashRecovery(
             && RuntimeOwnedProcessJournal.identityMatches(record, currentIdentity),
           );
           allExact &&= exact && record.systemBootId === systemBootId;
-          intendedRootIncluded ||= exact
-            && record.process.pid === recoveryRootPid;
+          intendedGuardianExact ||= exact
+            && record.systemBootId === systemBootId
+            && record.process.pid === recoveryGuardianPid;
           return {
             state: record.state,
             ownershipId: record.ownershipId,
@@ -324,6 +334,7 @@ export async function expectRuntimeCrashRecovery(
         latestDiagnostic = {
           priorGenerationId: priorLease!.runtimeGenerationId,
           intendedRootPid: recoveryRootPid,
+          intendedGuardianPid: recoveryGuardianPid,
           recordsReadable: records !== null,
           claims,
           observedClaims: [...observedClaims.entries()].map(
@@ -336,7 +347,7 @@ export async function expectRuntimeCrashRecovery(
             }),
           ),
         };
-        if (!allExact || !intendedRootIncluded || !records) {
+        if (!allExact || !intendedGuardianExact || !records) {
           stableSince = null;
           stableSignature = null;
           return false;
@@ -396,7 +407,9 @@ export async function expectRuntimeCrashRecovery(
   await expect(page.getByRole("button", { name: "Markdown" })).toBeVisible();
   expect(await page.evaluate(() =>
     Reflect.get(window, "__unsafeMarkdown"))).toBeUndefined();
-  const safetyAlert = page.locator(".error-toast[role=\"alert\"]");
+  const safetyAlert = page.locator(".error-toast[role=\"alert\"]").filter({
+    hasText: /unconfirmed process cleanup|confirm complete process cleanup/iu,
+  });
   await expect(newChat).toBeEnabled();
   if (
     testInfo

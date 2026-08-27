@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
 
 import { RuntimeProcessContainmentAdmission } from "../../src/main/runtime-process-containment-admission";
+import type { RuntimeOwnedProcessContainment } from "../../src/node/runtime-owned-processes";
 import { createRuntimeProcessRecord } from "../../src/main/runtime-supervisor-process-record";
 
 class FakeUtilityProcess extends EventEmitter {
@@ -13,8 +14,16 @@ class FakeUtilityProcess extends EventEmitter {
 
 describe("runtime process containment admission", () => {
   it("does not admit runtime work until asynchronous containment is armed", async () => {
-    let resolveContainment!: (value: null) => void;
-    const armed = new Promise<null>((resolve) => { resolveContainment = resolve; });
+    let resolveContainment!: (
+      value: RuntimeOwnedProcessContainment | null,
+    ) => void;
+    const armed = new Promise<RuntimeOwnedProcessContainment | null>(
+      (resolve) => { resolveContainment = resolve; },
+    );
+    const containment = {
+      kind: "windows-job-v1",
+      name: `Global\\InertiaRuntime-${"a".repeat(64)}`,
+    } as const;
     const child = new FakeUtilityProcess();
     const record = createRuntimeProcessRecord({
       child: child as never,
@@ -43,7 +52,7 @@ describe("runtime process containment admission", () => {
     child.emit("spawn");
     expect(post).not.toHaveBeenCalled();
 
-    resolveContainment(null);
+    resolveContainment(containment);
     await Promise.resolve();
 
     expect(post).toHaveBeenCalledWith(record, expect.objectContaining({

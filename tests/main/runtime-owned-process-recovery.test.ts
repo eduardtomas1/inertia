@@ -11,7 +11,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -1053,7 +1053,7 @@ describe("cross-platform runtime owned process recovery", () => {
       startTimeMicroseconds: 123_456,
     });
     expect(spawnProcessSync).toHaveBeenCalledWith(
-      "/trusted/runtime-process-guardian",
+      resolve("/trusted/runtime-process-guardian"),
       ["identity", "4242"],
       expect.objectContaining({ shell: false }),
     );
@@ -1067,7 +1067,7 @@ describe("cross-platform runtime owned process recovery", () => {
       { platform: "darwin", spawnProcessSync: empty as never },
     )).toBe(true);
     expect(empty).toHaveBeenCalledWith(
-      "/trusted/runtime-process-guardian",
+      resolve("/trusted/runtime-process-guardian"),
       ["session-empty", "4242"],
       expect.objectContaining({ shell: false }),
     );
@@ -1099,7 +1099,7 @@ describe("cross-platform runtime owned process recovery", () => {
       { platform: "darwin", spawnProcessSync: ready as never },
     )).toMatchObject({ pid: 4_242, sessionId: 4_242 });
     expect(ready).toHaveBeenCalledWith(
-      "/trusted/runtime-process-guardian",
+      resolve("/trusted/runtime-process-guardian"),
       ["ready", "4242"],
       expect.objectContaining({ shell: false }),
     );
@@ -1633,8 +1633,8 @@ describe("cross-platform runtime owned process recovery", () => {
     10_000,
   );
 
-  it.runIf(process.platform === "darwin" || process.platform === "win32")(
-    "recovers a real owned process on the host platform",
+  it.runIf(process.platform === "darwin")(
+    "recovers a real macOS owned process through its native guardian",
     async () => {
       const directory = temporaryDirectory();
       activate(directory);

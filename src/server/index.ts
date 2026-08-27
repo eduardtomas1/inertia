@@ -192,38 +192,92 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       onDatabaseBackupCreated: () => onDatabaseBackupCreated(),
     },
   );
-  for (const confirmedRuntimeGenerationId of confirmedGenerations) {
-    store.providerRunOwnership.clearRuntimeGeneration(
-      confirmedRuntimeGenerationId,
+  let conversationAttachments: ConversationAttachmentStore | null = null;
+  const recovery = await (async () => {
+    for (const confirmedRuntimeGenerationId of confirmedGenerations) {
+      store.providerRunOwnership.clearRuntimeGeneration(
+        confirmedRuntimeGenerationId,
+      );
+      options.onCleanupReceiptConsumed?.(
+        confirmedRuntimeGenerationId,
+        options.runtimeGenerationId,
+      );
+    }
+    for (const manuallyRetiredRuntimeGenerationId of manuallyRetiredGenerations) {
+      store.providerRunOwnership.clearRuntimeGeneration(
+        manuallyRetiredRuntimeGenerationId,
+      );
+    }
+    for (const modernRuntimeGenerationId of authorizedModernGenerationIds) {
+      store.providerRunOwnership.clearRuntimeGeneration(
+        modernRuntimeGenerationId,
+      );
+    }
+    if (priorBootLeasesCleared) {
+      store.providerRunOwnership.clearPriorBootSessions(options.systemBootId);
+    }
+    conversationAttachments = await ConversationAttachmentStore.open(
+      dataDirectory,
+      options.conversationAttachmentStoreOperations
+        ? {
+            operationRunner: options.conversationAttachmentStoreOperations,
+            readOperationRunner: options.conversationAttachmentStoreOperations,
+          }
+        : {},
     );
-    options.onCleanupReceiptConsumed?.(
-      confirmedRuntimeGenerationId,
-      options.runtimeGenerationId,
-    );
-  }
-  for (const manuallyRetiredRuntimeGenerationId of manuallyRetiredGenerations) {
-    store.providerRunOwnership.clearRuntimeGeneration(
-      manuallyRetiredRuntimeGenerationId,
-    );
-  }
-  for (const modernRuntimeGenerationId of authorizedModernGenerationIds) {
-    store.providerRunOwnership.clearRuntimeGeneration(
-      modernRuntimeGenerationId,
-    );
-  }
-  if (priorBootLeasesCleared) {
-    store.providerRunOwnership.clearPriorBootSessions(options.systemBootId);
-  }
-  const conversationAttachments = await ConversationAttachmentStore.open(
-    dataDirectory,
-    options.conversationAttachmentStoreOperations
-      ? {
-          operationRunner: options.conversationAttachmentStoreOperations,
-          readOperationRunner: options.conversationAttachmentStoreOperations,
+    if (!runtimeSafetyLock) {
+      await conversationAttachments.reconcile(store.attachments());
+      store.startBackups();
+    }
+    if (!runtimeSafetyLock && manuallyRetiredGenerations.length > 0) {
+      if (process.env.NODE_ENV === "test") {
+        options.testOnlyBeforeLegacyInterruptedRecovery?.();
+      }
+    }
+    if (!runtimeSafetyLock && authorizedModernGenerationIds.size > 0) {
+      if (process.env.NODE_ENV === "test") {
+        options.testOnlyBeforeModernDarwinRecoveryAcknowledged?.();
+      }
+    }
+    const interrupted = runtimeSafetyLock
+      ? { recoveredTurns: [], recoveredAttachmentIds: [] }
+      : recoverInterruptedTurns(store);
+    if (!runtimeSafetyLock) {
+      for (const manuallyRetiredRuntimeGenerationId of manuallyRetiredGenerations) {
+        if (!runtimeGenerationLeases.clearUnavailableRuntimeGeneration(
+          manuallyRetiredRuntimeGenerationId,
+        )) {
+          throw new Error("Manual legacy provider ownership could not be retired.");
         }
-      : {},
-  );
-  if (!runtimeSafetyLock) await conversationAttachments.reconcile(store.attachments());
+        options.onLegacyRecoveryAuthorityConsumed?.(
+          manuallyRetiredRuntimeGenerationId,
+          options.runtimeGenerationId,
+        );
+      }
+      if (manualModernDarwinRecovery) {
+        options.onModernDarwinRecoveryAuthorityAcknowledged?.(
+          manualModernDarwinRecovery,
+          options.runtimeGenerationId,
+        );
+      }
+      await reconcileInterruptedDuoLaunches(store);
+    }
+    return interrupted;
+  })().catch(async (error: unknown) => {
+    // Persistent startup resources must be released on every initialization
+    // failure. Windows otherwise retains SQLite handles and a retry appears to
+    // require a reboot; the same deterministic rollback applies on every OS.
+    await Promise.allSettled([
+      conversationAttachments?.close(),
+      Promise.resolve().then(() => store.backupAndClose()),
+    ]);
+    throw error;
+  });
+  const initializedConversationAttachments = conversationAttachments as
+    ConversationAttachmentStore | null;
+  if (!initializedConversationAttachments) {
+    throw new Error("Conversation attachment storage did not initialize.");
+  }
   const recoveryImportFault = process.env.NODE_ENV === "test"
     ? options.recoveryImportFault
     : undefined;
@@ -239,7 +293,6 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const testOnlyProviderRefresh = process.env.NODE_ENV === "test"
     ? options.testOnlyProviderRefresh
     : undefined;
-  if (!runtimeSafetyLock) store.startBackups();
   const secureFiles: RuntimeSecureFileBroker = options.secureFiles ?? {
     authorizeRoot: async () => {
       throw new SecureFileError(
@@ -267,39 +320,6 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     },
   };
   const secureFileAuthorities = new SecureFileAuthorityRegistry(secureFiles);
-  if (!runtimeSafetyLock && manuallyRetiredGenerations.length > 0) {
-    if (process.env.NODE_ENV === "test") {
-      options.testOnlyBeforeLegacyInterruptedRecovery?.();
-    }
-  }
-  if (!runtimeSafetyLock && authorizedModernGenerationIds.size > 0) {
-    if (process.env.NODE_ENV === "test") {
-      options.testOnlyBeforeModernDarwinRecoveryAcknowledged?.();
-    }
-  }
-  const recovery = runtimeSafetyLock
-    ? { recoveredTurns: [], recoveredAttachmentIds: [] }
-    : recoverInterruptedTurns(store);
-  if (!runtimeSafetyLock) {
-    for (const manuallyRetiredRuntimeGenerationId of manuallyRetiredGenerations) {
-      if (!runtimeGenerationLeases.clearUnavailableRuntimeGeneration(
-        manuallyRetiredRuntimeGenerationId,
-      )) {
-        throw new Error("Manual legacy provider ownership could not be retired.");
-      }
-      options.onLegacyRecoveryAuthorityConsumed?.(
-        manuallyRetiredRuntimeGenerationId,
-        options.runtimeGenerationId,
-      );
-    }
-    if (manualModernDarwinRecovery) {
-      options.onModernDarwinRecoveryAuthorityAcknowledged?.(
-        manualModernDarwinRecovery,
-        options.runtimeGenerationId,
-      );
-    }
-  }
-  if (!runtimeSafetyLock) await reconcileInterruptedDuoLaunches(store);
   if (options.attachments && recovery.recoveredAttachmentIds.length > 0) {
     void Promise.allSettled(recovery.recoveredAttachmentIds.map(
       (attachmentId) => options.attachments!.cleanup(attachmentId),
@@ -734,7 +754,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       }),
       createUsageCommandHandler({ store, send }),
       createConversationCommandHandler({
-        store, conversationAttachments,
+        store, conversationAttachments: initializedConversationAttachments,
         providers,
         backendProfileController,
         workspaceRuns,
@@ -753,7 +773,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         contextRequests: agentThreads.contextRequests,
       }),
       createTurnInteractionCommandHandler({
-        store, conversationAttachments,
+        store, conversationAttachments: initializedConversationAttachments,
         backendProfileController,
         turns,
         isolatedRuns,
@@ -814,7 +834,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         send,
       }),
       createProjectWorkspaceCommandHandler({
-        store, conversationAttachments,
+        store, conversationAttachments: initializedConversationAttachments,
         workspaceRuns,
         turns,
         providers,
@@ -1026,7 +1046,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       runPackagedImageRetentionSmoke(
         inputPath,
         resultPath,
-        conversationAttachments,
+        initializedConversationAttachments,
         signal,
       ),
     websocketUrl,
@@ -1218,7 +1238,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
           await projectIdentities.drain();
         },
         independentDrains: [
-          () => conversationAttachments.close(),
+          () => initializedConversationAttachments.close(),
           () => terminals.disposeAll(),
           () => providerMaintenance.dispose(),
         ],

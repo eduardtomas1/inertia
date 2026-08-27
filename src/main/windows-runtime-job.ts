@@ -156,14 +156,29 @@ public static class InertiaRuntimeJob {
   private const int JobObjectBasicAccountingInformation = 1;
   private const int JobObjectExtendedLimitInformation = 9;
 
-  private static bool ArmKillOnClose(IntPtr job) {
+  private static int Failure(string stage, int exitCode, int win32Error) {
+    Console.Error.WriteLine(
+      "INERTIA_JOB_ERROR stage=" + stage + " win32=" + win32Error
+    );
+    Console.Error.Flush();
+    return exitCode;
+  }
+
+  private static bool ArmKillOnClose(IntPtr job, out int win32Error) {
     var information = new JOBOBJECT_EXTENDED_LIMIT_INFORMATION();
     information.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
     int length = Marshal.SizeOf(information);
     IntPtr pointer = Marshal.AllocHGlobal(length);
     try {
       Marshal.StructureToPtr(information, pointer, false);
-      return SetInformationJobObject(job, JobObjectExtendedLimitInformation, pointer, (UInt32)length);
+      bool armed = SetInformationJobObject(
+        job,
+        JobObjectExtendedLimitInformation,
+        pointer,
+        (UInt32)length
+      );
+      win32Error = armed ? 0 : Marshal.GetLastWin32Error();
+      return armed;
     } finally {
       Marshal.FreeHGlobal(pointer);
     }
@@ -187,25 +202,41 @@ public static class InertiaRuntimeJob {
 
   public static int Guard(string name, UInt32 processId) {
     IntPtr job = CreateJobObject(IntPtr.Zero, name);
-    if (job == IntPtr.Zero) return 10;
-    if (Marshal.GetLastWin32Error() == 183) {
+    int createError = Marshal.GetLastWin32Error();
+    if (job == IntPtr.Zero) return Failure("create-job", 10, createError);
+    if (createError == 183) {
       CloseHandle(job);
-      return 17;
+      return Failure("create-job-existing", 17, createError);
     }
     IntPtr process = IntPtr.Zero;
     try {
-      if (!ArmKillOnClose(job)) return 11;
+      int armError;
+      if (!ArmKillOnClose(job, out armError)) {
+        return Failure("set-kill-on-close", 11, armError);
+      }
       process = OpenProcess(
         PROCESS_TERMINATE | PROCESS_SET_QUOTA | PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE,
         false,
         processId
       );
-      if (process == IntPtr.Zero) return 12;
-      if (!AssignProcessToJobObject(job, process)) return 13;
+      if (process == IntPtr.Zero) {
+        return Failure("open-process", 12, Marshal.GetLastWin32Error());
+      }
+      if (!AssignProcessToJobObject(job, process)) {
+        return Failure("assign-process", 13, Marshal.GetLastWin32Error());
+      }
       Console.Out.WriteLine("READY");
       Console.Out.Flush();
-      if (WaitForSingleObject(process, INFINITE) != 0) return 14;
-      if (!TerminateJobObject(job, 137)) return 15;
+      UInt32 waitResult = WaitForSingleObject(process, INFINITE);
+      if (waitResult != 0) {
+        int waitError = waitResult == UInt32.MaxValue
+          ? Marshal.GetLastWin32Error()
+          : 0;
+        return Failure("wait-process", 14, waitError);
+      }
+      if (!TerminateJobObject(job, 137)) {
+        return Failure("terminate-job", 15, Marshal.GetLastWin32Error());
+      }
       for (int index = 0; index < 200 && ActiveProcesses(job) != 0; index += 1) {
         System.Threading.Thread.Sleep(10);
       }
@@ -329,14 +360,23 @@ export async function armWindowsRuntimeJob(
       ready = true;
       break;
     }
-    if (child.exitCode !== null) break;
+    if (child.exitCode !== null || child.signalCode !== null) break;
     await new Promise<void>((resolve) => setTimeout(resolve, 10));
   }
   if (!ready) {
     child.kill();
     activeJobs.delete(name);
     const detail = stderr.trim().replace(/\s+/gu, " ").slice(0, 500);
-    throw new Error(detail || "The Windows runtime Job Object could not be armed.");
+    const outcome = child.exitCode !== null
+      ? `The native helper exited with code ${child.exitCode}.`
+      : child.signalCode
+        ? `The native helper exited from signal ${child.signalCode}.`
+        : `The native helper did not report readiness within ${timeoutMs}ms.`;
+    throw new Error([
+      "The Windows runtime Job Object could not be armed.",
+      outcome,
+      detail,
+    ].filter(Boolean).join(" "));
   }
   return { kind: "windows-job-v1", name };
 }

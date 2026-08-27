@@ -17,12 +17,14 @@ import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { RuntimeSupervisor } from "../../src/main/runtime-supervisor";
+import { windowsRuntimeJobName } from "../../src/main/windows-runtime-job";
 import type { RuntimeWorkerCommand } from "../../src/node/runtime-process-protocol";
 import { RuntimeStore } from "../../src/server/database";
 
 const repositoryRoot = resolve(import.meta.dirname, "../..");
 const temporaryDirectories: string[] = [];
 const activeChildren = new Set<ChildProcess>();
+const activeSupervisors = new Set<RuntimeSupervisor>();
 
 class NodeUtilityProcess extends EventEmitter {
   readonly child: ChildProcess;
@@ -53,8 +55,10 @@ class NodeUtilityProcess extends EventEmitter {
       this.emit("error", "node-host", error.message);
     });
     this.child.once("exit", (code) => {
-      activeChildren.delete(this.child);
       this.emit("exit", code ?? 1);
+    });
+    this.child.once("close", () => {
+      activeChildren.delete(this.child);
     });
   }
 
@@ -71,15 +75,51 @@ class NodeUtilityProcess extends EventEmitter {
   }
 }
 
-afterEach(() => {
+afterEach(async () => {
+  await Promise.allSettled(
+    [...activeSupervisors].map((supervisor) => supervisor.stop()),
+  );
+  activeSupervisors.clear();
   for (const child of activeChildren) {
     if (child.exitCode === null) child.kill("SIGKILL");
   }
-  activeChildren.clear();
+  await Promise.all([...activeChildren].map((child) => new Promise<void>(
+    (resolveChild, rejectChild) => {
+      const timeout = setTimeout(() => {
+        rejectChild(new Error(`Runtime fixture ${child.pid ?? "unknown"} did not close.`));
+      }, 5_000);
+      timeout.unref();
+      child.once("close", () => {
+        clearTimeout(timeout);
+        resolveChild();
+      });
+    },
+  )));
   for (const directory of temporaryDirectories.splice(0)) {
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+function windowsDatabaseRecoveryContainment(): {
+  armProcessContainment?: (
+    runtimeGenerationId: string,
+    runtimePid: number,
+  ) => { kind: "windows-job-v1"; name: string };
+  recoverOwnedProcesses?: () => false;
+} {
+  if (process.platform !== "win32") return {};
+  // This suite exercises database recovery through the supervisor. Native
+  // Job Object creation and recovery have their own Windows tests and desktop
+  // gates; using PowerShell here would make worker startup the behavior under
+  // test and can exceed the deliberately short recovery deadline.
+  return {
+    armProcessContainment: (runtimeGenerationId) => ({
+      kind: "windows-job-v1",
+      name: windowsRuntimeJobName(runtimeGenerationId),
+    }),
+    recoverOwnedProcesses: () => false,
+  };
+}
 
 async function waitFor(
   predicate: () => boolean,
@@ -194,6 +234,7 @@ describe("runtime recovery supervisor integration", () => {
     const states: string[] = [];
     const markerGatedSetTimer = markerGatedRequestTimer(markerPath);
     const supervisor = new RuntimeSupervisor({
+      ...windowsDatabaseRecoveryContainment(),
       workerOptions: {
         dataDirectory,
         defaultWorkspacePath: workspaceDirectory,
@@ -228,6 +269,7 @@ describe("runtime recovery supervisor integration", () => {
         states.push(`${phase}:${generation}:${pid ?? 0}`);
       },
     });
+    activeSupervisors.add(supervisor);
     const diagnostics = () => JSON.stringify({
       states,
       stderr: children.flatMap(({ stderr }) => stderr),
@@ -313,6 +355,7 @@ describe("runtime recovery supervisor integration", () => {
     const states: string[] = [];
     const markerGatedSetTimer = markerGatedRequestTimer(markerPath);
     const supervisor = new RuntimeSupervisor({
+      ...windowsDatabaseRecoveryContainment(),
       workerOptions: {
         dataDirectory,
         defaultWorkspacePath: workspaceDirectory,
@@ -347,6 +390,7 @@ describe("runtime recovery supervisor integration", () => {
         states.push(`${phase}:${generation}:${pid ?? 0}`);
       },
     });
+    activeSupervisors.add(supervisor);
     const diagnostics = () => JSON.stringify({
       states,
       stderr: children.flatMap(({ stderr }) => stderr),
@@ -422,6 +466,7 @@ describe("runtime recovery supervisor integration", () => {
     const runtimeWorkerPath = buildRuntimeWorkers();
     const children: NodeUtilityProcess[] = [];
     const supervisor = new RuntimeSupervisor({
+      ...windowsDatabaseRecoveryContainment(),
       workerOptions: {
         dataDirectory,
         defaultWorkspacePath: workspaceDirectory,
@@ -444,6 +489,7 @@ describe("runtime recovery supervisor integration", () => {
       shutdownGraceMs: 2_000,
       forceKillWaitMs: 1_000,
     });
+    activeSupervisors.add(supervisor);
     const diagnostics = () => JSON.stringify({
       stderr: children.flatMap(({ stderr }) => stderr),
       snapshot: supervisor.snapshot(),

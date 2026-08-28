@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { readFile } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
@@ -23,6 +23,13 @@ test.beforeAll(async () => {
   previewUrl = app.previewUrl;
   resizeWindow = app.resizeWindow;
   expectNoViewportOverflow = app.expectNoViewportOverflow;
+});
+
+test.afterEach(async () => {
+  await Promise.all([
+    "terminal-before-reload.txt",
+    "terminal-after-reload.txt",
+  ].map(async (name) => rm(join(workspaceDirectory, name), { force: true })));
 });
 
 test.afterAll(async () => {

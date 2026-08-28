@@ -1031,8 +1031,9 @@ describe("TerminalManager", () => {
   it.each([
     "client close",
     "owner disconnect",
+    "detached reattach expiry",
     "runtime shutdown",
-  ] as const)("admits and normally retires a Darwin shell during %s", async (action) => {
+  ] as const)("uses strict guardian retirement for Darwin %s", async (action) => {
     vi.useFakeTimers();
     try {
       const terminal = fakeTerminal(100);
@@ -1048,6 +1049,7 @@ describe("TerminalManager", () => {
         platform: "darwin",
         preserveDarwinShellOnReplacement: false,
         shutdownTimeoutMs: 20,
+        reattachTimeoutMs: 5,
         spawnTerminal: vi.fn(() => terminal.pty),
         spawnOwnedTerminalProcess: (spawnProcess) => ({
           process: spawnProcess(),
@@ -1063,32 +1065,46 @@ describe("TerminalManager", () => {
           },
         }),
       });
-      const terminalId = manager.create(owner, process.cwd(), 80, 24);
+      const terminalId = manager.create(
+        owner,
+        process.cwd(),
+        80,
+        24,
+        undefined,
+        undefined,
+        action === "detached reattach expiry"
+          ? { projectId: "project-1", conversationId: "conversation-1" }
+          : null,
+      );
 
       let completion: Promise<void>;
       if (action === "client close") {
-        void manager.close(owner, terminalId);
-        completion = manager.disposeAll(Date.now() + 100);
+        completion = manager.close(owner, terminalId);
       } else if (action === "owner disconnect") {
         manager.disposeOwner(owner);
+        completion = manager.disposeAll(Date.now() + 100);
+      } else if (action === "detached reattach expiry") {
+        manager.disposeOwner(owner);
+        await vi.advanceTimersByTimeAsync(5);
         completion = manager.disposeAll(Date.now() + 100);
       } else {
         completion = manager.disposeAll(Date.now() + 100);
       }
       await vi.advanceTimersByTimeAsync(0);
+      expect(requestGuardianStop).toHaveBeenCalledOnce();
+      expect(requestPayloadExit).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(14);
       expect(terminal.pty.write).not.toHaveBeenCalled();
       expect(requestPayloadExit).not.toHaveBeenCalled();
-      expect(requestGuardianStop).not.toHaveBeenCalled();
 
       await vi.advanceTimersByTimeAsync(1);
-      expect(requestPayloadExit).toHaveBeenCalledOnce();
+      expect(requestGuardianStop).toHaveBeenCalledOnce();
+      expect(requestPayloadExit).not.toHaveBeenCalled();
       expect(terminal.pty.write).not.toHaveBeenCalled();
       terminal.emitExit({ exitCode: 0, signal: 0 });
       await vi.advanceTimersByTimeAsync(10);
       await expect(completion).resolves.toBeUndefined();
 
-      expect(requestGuardianStop).not.toHaveBeenCalled();
       if (action === "client close") {
         expect(owner.send).toHaveBeenCalledWith(JSON.stringify({
           type: "terminal.exit",
@@ -1346,7 +1362,7 @@ describe("TerminalManager", () => {
     }
   });
 
-  it("waits for a normally exited Darwin shell claim to retire", async () => {
+  it("uses graceful payload retirement only while replacing a Darwin shell", async () => {
     vi.useFakeTimers();
     try {
       const replacedTerminal = fakeTerminal(100);

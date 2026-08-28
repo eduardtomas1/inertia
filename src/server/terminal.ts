@@ -49,7 +49,7 @@ interface TerminalSession {
   exitObserved: boolean;
   exitWaiters: Set<() => void>;
   terminationRequested: boolean;
-  gracefulReplacement: boolean;
+  supportsGracefulReplacement: boolean;
   closing: Promise<void> | null;
   shutdownDeadlineAt: number | null;
   waitForShutdownDeadline: Promise<number>;
@@ -492,7 +492,7 @@ export class TerminalManager {
     onExit?: (exitCode: number) => void,
     onOutput?: (data: string) => void,
     providerResume: TerminalProviderResumeAttachment | null = null,
-    gracefulReplacement = false,
+    replacementSupportsGracefulRetirement = false,
     replacementRequestId?: string,
   ): Promise<string> {
     const replaced = this.ownedSession(owner, terminalId);
@@ -506,7 +506,7 @@ export class TerminalManager {
     }
     if (
       this.platform === "darwin"
-      && replaced.gracefulReplacement
+      && replaced.supportsGracefulReplacement
       && this.preserveDarwinShellOnReplacement
     ) {
       // An interactive macOS shell may have forked while loading the user's
@@ -527,7 +527,7 @@ export class TerminalManager {
         rows,
         onExit,
         onOutput,
-        gracefulReplacement,
+        replacementSupportsGracefulRetirement,
         replaced.reattachScope,
         providerResume,
       );
@@ -542,7 +542,7 @@ export class TerminalManager {
     this.assertCapacity(owner, replaced, replaced.reattachScope);
     this.replacementReservations.set(replaced.id, replaced);
     try {
-      await this.trackDisposal(replaced, replaced.gracefulReplacement);
+      await this.trackReplacementDisposal(replaced);
       // The replacement keeps the same public terminal identity. Publishing
       // an intermediate exit would make the renderer discard the only safe
       // capability it can use to reconcile an ambiguously delivered result.
@@ -560,7 +560,7 @@ export class TerminalManager {
         rows,
         onExit,
         onOutput,
-        gracefulReplacement,
+        replacementSupportsGracefulRetirement,
         replaced.reattachScope,
         providerResume,
       );
@@ -655,7 +655,7 @@ export class TerminalManager {
     rows: number,
     onExit?: (exitCode: number) => void,
     onOutput?: (data: string) => void,
-    gracefulReplacement = false,
+    supportsGracefulReplacement = false,
     reattachScope: TerminalReattachScope | null = null,
     providerResume: TerminalProviderResumeAttachment | null = null,
   ): string {
@@ -718,7 +718,7 @@ export class TerminalManager {
         if (session.reattachScope) {
           this.scheduleDetachedDisposal(session);
         } else {
-          void this.trackDisposal(session, session.gracefulReplacement);
+          void this.trackFinalDisposal(session);
         }
       }
       return sent;
@@ -848,7 +848,7 @@ export class TerminalManager {
       exitObserved: false,
       exitWaiters: new Set(),
       terminationRequested: false,
-      gracefulReplacement,
+      supportsGracefulReplacement,
       closing: null,
       shutdownDeadlineAt: null,
       waitForShutdownDeadline,
@@ -923,7 +923,7 @@ export class TerminalManager {
   async close(owner: WebSocket, terminalId: string): Promise<void> {
     const session = this.ownedSession(owner, terminalId, true);
     const initiated = session.closing === null;
-    await this.trackDisposal(session, session.gracefulReplacement);
+    await this.trackFinalDisposal(session);
     if (initiated) {
       send(owner, {
         type: "terminal.exit",
@@ -941,7 +941,7 @@ export class TerminalManager {
   async closeManaged(terminalId: string): Promise<boolean> {
     const session = this.sessions.get(terminalId);
     if (!session) return false;
-    await this.trackDisposal(session);
+    await this.trackFinalDisposal(session);
     return true;
   }
 
@@ -954,7 +954,7 @@ export class TerminalManager {
           this.scheduleDetachedDisposal(session);
         } else {
           if (session.reattachScope) session.owner = null;
-          void this.trackDisposal(session, session.gracefulReplacement);
+          void this.trackFinalDisposal(session);
         }
       }
     }
@@ -971,7 +971,7 @@ export class TerminalManager {
       if (session.detachTimer !== timer) return;
       session.detachTimer = null;
       if (session.owner !== null || session.terminationRequested) return;
-      void this.trackDisposal(session, session.gracefulReplacement);
+      void this.trackFinalDisposal(session);
     }, this.reattachTimeoutMs);
     timer.unref();
     session.detachTimer = timer;
@@ -985,7 +985,7 @@ export class TerminalManager {
       if (deadlineAt !== undefined) {
         session.setShutdownDeadline(deadlineAt);
       }
-      void this.trackDisposal(session, session.gracefulReplacement);
+      void this.trackFinalDisposal(session);
     }
     const closing = [...this.closingSessions];
     const results = await Promise.allSettled(closing);
@@ -1050,14 +1050,14 @@ export class TerminalManager {
 
   private async disposeAndWait(
     session: TerminalSession,
-    gracefulReplacement: boolean,
+    attemptGracefulReplacement: boolean,
   ): Promise<void> {
     // Let trackDisposal publish the memoized closing promise before a graceful
     // payload exit can synchronously trigger the PTY exit listener.
     await Promise.resolve();
     let fallbackDeadlineAt: number | null = null;
     if (
-      gracefulReplacement
+      attemptGracefulReplacement
       && await this.gracefullyRetireReplacementShell(session)
     ) {
       this.dispose(session.id, false);
@@ -1068,7 +1068,7 @@ export class TerminalManager {
       }
       return;
     }
-    if (gracefulReplacement) {
+    if (attemptGracefulReplacement) {
       // The graceful prepass is an optional convenience for an interactive Darwin
       // shell. Give the fail-closed guardian path its complete configured
       // budget when no enclosing runtime-shutdown deadline is already tighter.
@@ -1163,15 +1163,23 @@ export class TerminalManager {
     });
   }
 
+  private trackFinalDisposal(session: TerminalSession): Promise<void> {
+    return this.trackDisposal(session, false);
+  }
+
+  private trackReplacementDisposal(session: TerminalSession): Promise<void> {
+    return this.trackDisposal(session, session.supportsGracefulReplacement);
+  }
+
   private trackDisposal(
     session: TerminalSession,
-    gracefulReplacement = false,
+    attemptGracefulReplacement: boolean,
   ): Promise<void> {
     if (session.closing) return session.closing;
     if (session.detachTimer) clearTimeout(session.detachTimer);
     session.detachTimer = null;
     session.terminationRequested = true;
-    const closing = this.disposeAndWait(session, gracefulReplacement);
+    const closing = this.disposeAndWait(session, attemptGracefulReplacement);
     session.closing = closing;
     this.closingSessions.add(closing);
     void closing.then(

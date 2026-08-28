@@ -61,6 +61,7 @@ test("switches workspace tools, opens multiple terminals, and loads a safe nativ
   await expect(secondTerminalTab).toHaveJSProperty("tagName", "BUTTON");
   await page.getByRole("button", { name: "Close Terminal 2" }).click();
   await expect(secondTerminalTab).toHaveCount(0);
+  await expect(page.getByRole("alert")).toHaveCount(0);
   await expect(page.getByRole("tab", { name: "Terminal 1", exact: true })).toHaveAttribute("aria-selected", "true");
   await page.getByRole("button", { name: "New terminal" }).click();
   await page.getByRole("button", { name: "Split terminals" }).click();
@@ -132,6 +133,7 @@ test("switches workspace tools, opens multiple terminals, and loads a safe nativ
     expect(await readFile(afterReloadPath, "utf8"))
       .toBe(await readFile(beforeReloadPath, "utf8"));
   }
+
   for (const tabName of ["Terminal 2", "Terminal 1"]) {
     await page.getByRole("tab", { name: tabName, exact: true }).click();
     const activePanel = page.locator(
@@ -142,6 +144,29 @@ test("switches workspace tools, opens multiple terminals, and loads a safe nativ
     await page.keyboard.press("Enter");
     await expect(activePanel).not.toHaveAttribute("data-terminal-id", /.+/u);
   }
+  await page.getByRole("button", { name: "Close Terminal 2" }).click();
+  await expect(page.getByRole("tab", {
+    name: "Terminal 2",
+    exact: true,
+  })).toHaveCount(0);
+  await page.getByRole("button", { name: "Close Terminal 1" }).click();
+  await expect(page.getByRole("tab", {
+    name: "Terminal 1",
+    exact: true,
+  })).toHaveCount(0);
+
+  const runtimeBeforeRecycle = await app.runtimeSnapshot();
+  await app.recycleRuntime();
+  await expect.poll(async () => {
+    const current = await app.runtimeSnapshot();
+    return current.phase === "ready"
+      && current.generation > runtimeBeforeRecycle.generation;
+  }, { timeout: 15_000 }).toBe(true);
+  await expect(page.locator(".app-shell")).toHaveAttribute(
+    "data-connection-status",
+    "online",
+    { timeout: 15_000 },
+  );
   expect(rendererErrors).toEqual([]);
 });
 

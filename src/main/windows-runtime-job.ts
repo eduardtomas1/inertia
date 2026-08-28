@@ -1,5 +1,6 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { isUtf8 } from "node:buffer";
 import {
   closeSync,
   constants,
@@ -21,7 +22,12 @@ import {
 } from "./runtime-assets.js";
 
 const NATIVE_READY_TIMEOUT_MS = 15_000;
+const EXECUTABLE_LOCKED_MARKER = "LOCKED";
+const EXECUTABLE_LOCK_SHUTDOWN = "SHUTDOWN\n";
+const EXECUTABLE_LOCK_BYE_MARKER = "BYE";
 const MAX_OUTPUT_BYTES = 8_192;
+const MAX_BROKER_FIELD_CHARS = 2_048;
+const MAX_BROKER_GUARDIANS = 8;
 const MAX_PROCESS_METRICS = 1_024;
 const PROCESS_METRIC_POLL_MS = 10;
 const PROCESS_METRIC_TIMEOUT_MS = 5_000;
@@ -30,9 +36,27 @@ const MAX_WINDOWS_JOB_ASSEMBLY_BYTES = 1024 * 1024;
 
 type WindowsRuntimeJobStage = "native-guard-start";
 
-interface ActiveWindowsRuntimeJob {
-  readonly child: ChildProcessWithoutNullStreams;
-  readonly completion: Promise<boolean>;
+interface WindowsRuntimeJobExecutableLock {
+  isHeld(): boolean;
+  request(
+    mode: "guard" | "recover",
+    arguments_: readonly string[],
+    deadlineAt: number,
+  ): Promise<WindowsRuntimeJobBrokerResult>;
+  release(): Promise<void>;
+  abort(): void;
+}
+
+interface WindowsRuntimeJobBrokerResult {
+  readonly status: "READY" | `EXIT:${number}` | "TIMEOUT";
+  readonly stdout: string;
+  readonly stderr: string;
+}
+
+interface PreparedWindowsRuntimeJobExecutableLock {
+  readonly assemblyKey: string;
+  ready: Promise<void>;
+  lock: WindowsRuntimeJobExecutableLock | null;
 }
 
 export interface WindowsRuntimeJobAssembly {
@@ -48,7 +72,8 @@ export interface WindowsRuntimeProcessMetric {
   readonly type: string;
 }
 
-const activeJobs = new Map<string, ActiveWindowsRuntimeJob>();
+const pendingJobNames = new Set<string>();
+let preparedExecutableLock: PreparedWindowsRuntimeJobExecutableLock | null = null;
 
 function environmentValue(
   environment: NodeJS.ProcessEnv,
@@ -253,7 +278,11 @@ export function validateWindowsRuntimeJobAssembly(
   if (!timingSafeEqual(actual, expected)) {
     throw new Error("The Windows runtime Job Object assembly integrity check failed.");
   }
-  return assembly;
+  return {
+    path: canonicalPath,
+    root: canonicalRoot,
+    sha256: assembly.sha256,
+  };
 }
 
 export function resolveRequiredWindowsRuntimeJobAssembly(options: {
@@ -273,21 +302,38 @@ export function resolveRequiredWindowsRuntimeJobAssembly(options: {
 
 function selectedWindowsRuntimeJobAssembly(options: {
   readonly assembly?: WindowsRuntimeJobAssembly;
-  readonly spawnProcess?: typeof spawnWindowsRuntimeJobExecutable;
 }): WindowsRuntimeJobAssembly {
   if (!options.assembly) {
     throw new Error("The Windows runtime Job Object assembly authority is unavailable.");
   }
-  // An injected process is the unit-test boundary. Production always validates
-  // the exact protected digest and direct file before starting the executable.
-  return options.spawnProcess
-    ? normalizedWindowsRuntimeJobAssembly(options.assembly)
-    : validateWindowsRuntimeJobAssembly(options.assembly);
+  return validateWindowsRuntimeJobAssembly(options.assembly);
+}
+
+function windowsRuntimeJobAssemblyKey(
+  assembly: WindowsRuntimeJobAssembly,
+): string {
+  return `${assembly.root}\0${assembly.path}\0${assembly.sha256}`;
 }
 
 function appendBounded(current: string, chunk: Buffer): string {
   if (current.length >= MAX_OUTPUT_BYTES) return current;
   return (current + chunk.toString("utf8")).slice(0, MAX_OUTPUT_BYTES);
+}
+
+function decodeBrokerField(value: string): string {
+  if (
+    value.length > MAX_OUTPUT_BYTES * 2
+    || value.length % 4 !== 0
+    || !/^(?:[a-zA-Z0-9+/]{4})*(?:[a-zA-Z0-9+/]{2}==|[a-zA-Z0-9+/]{3}=)?$/u
+      .test(value)
+  ) {
+    throw new Error("The Windows runtime broker returned an invalid result.");
+  }
+  const bytes = Buffer.from(value, "base64");
+  if (bytes.length > MAX_OUTPUT_BYTES || !isUtf8(bytes)) {
+    throw new Error("The Windows runtime broker returned an invalid result.");
+  }
+  return bytes.toString("utf8");
 }
 
 function latestHelperStage(output: string): WindowsRuntimeJobStage | null {
@@ -299,18 +345,216 @@ function latestHelperStage(output: string): WindowsRuntimeJobStage | null {
   return latest;
 }
 
-function spawnWindowsRuntimeJobExecutable(
-  executable: string,
-  arguments_: readonly string[],
+function encodedPowerShell(value: string): string {
+  return Buffer.from(value, "utf16le").toString("base64");
+}
+
+function windowsRuntimeJobLockScript(
+  assembly: WindowsRuntimeJobAssembly,
+): string {
+  const encodedPath = Buffer.from(assembly.path, "utf8").toString("base64");
+  const encodedLockedMarker = Buffer.from(
+    `${EXECUTABLE_LOCKED_MARKER}\n`,
+    "utf8",
+  ).toString("base64");
+  const encodedFailure = Buffer.from(
+    "INERTIA_JOB_ERROR stage=verified-file-lock\n",
+    "utf8",
+  ).toString("base64");
+  return `$ErrorActionPreference = 'Stop'
+$stream = $null
+$processes = @{}
+function Write-Frame([string] $value) {
+  $output = [Console]::OpenStandardOutput()
+  $bytes = [Text.Encoding]::UTF8.GetBytes($value + [char]10)
+  $output.Write($bytes, 0, $bytes.Length)
+  $output.Flush()
+}
+function Encode-Field([string] $value) {
+  return [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($value))
+}
+function Start-Helper([string] $arguments) {
+  $info = New-Object Diagnostics.ProcessStartInfo
+  $info.FileName = $path
+  $info.Arguments = $arguments
+  $info.UseShellExecute = $false
+  $info.CreateNoWindow = $true
+  $info.RedirectStandardInput = $true
+  $info.RedirectStandardOutput = $true
+  $info.RedirectStandardError = $true
+  $process = New-Object Diagnostics.Process
+  $process.StartInfo = $info
+  if (-not $process.Start()) { throw 'process-start' }
+  return $process
+}
+function Stop-Helper([Diagnostics.Process] $process) {
+  try { $process.StandardInput.Close() } catch {}
+  try {
+    if (-not $process.HasExited -and -not $process.WaitForExit(2000)) {
+      $process.Kill()
+    }
+    if (-not $process.HasExited) { $process.WaitForExit() }
+  } catch {}
+  $process.Dispose()
+}
+function Remove-ExitedHelpers() {
+  foreach ($key in @($processes.Keys)) {
+    $process = $processes[$key]
+    if ($process.HasExited) {
+      $process.Dispose()
+      $processes.Remove($key)
+    }
+  }
+}
+function Write-Result(
+  [string] $id,
+  [string] $status,
+  [string] $stdout,
+  [string] $stderr
+) {
+  if ($stdout.Length -gt ${MAX_BROKER_FIELD_CHARS}) { $stdout = $stdout.Substring(0, ${MAX_BROKER_FIELD_CHARS}) }
+  if ($stderr.Length -gt ${MAX_BROKER_FIELD_CHARS}) { $stderr = $stderr.Substring(0, ${MAX_BROKER_FIELD_CHARS}) }
+  Write-Frame ('RESULT ' + $id + ' ' + $status + ' ' + (Encode-Field $stdout) + ' ' + (Encode-Field $stderr))
+}
+try {
+  $path = [Text.Encoding]::UTF8.GetString(
+    [Convert]::FromBase64String('${encodedPath}')
+  )
+  $stream = [IO.File]::Open(
+    $path,
+    [IO.FileMode]::Open,
+    [IO.FileAccess]::Read,
+    [IO.FileShare]::Read
+  )
+  if ($stream.Length -le 0 -or $stream.Length -gt ${MAX_WINDOWS_JOB_ASSEMBLY_BYTES}) {
+    throw 'invalid-size'
+  }
+  $sha256 = [Security.Cryptography.SHA256]::Create()
+  try {
+    $actual = [BitConverter]::ToString(
+      $sha256.ComputeHash($stream)
+    ).Replace('-', '').ToLowerInvariant()
+  } finally {
+    $sha256.Dispose()
+  }
+  if ($stream.Position -ne $stream.Length -or $actual -cne '${assembly.sha256}') {
+    throw 'integrity-mismatch'
+  }
+  $stdout = [Console]::OpenStandardOutput()
+  $locked = [Convert]::FromBase64String('${encodedLockedMarker}')
+  $stdout.Write($locked, 0, $locked.Length)
+  $stdout.Flush()
+  while ($true) {
+    $line = [Console]::In.ReadLine()
+    if ($null -eq $line) { break }
+    if ($line -ceq '${EXECUTABLE_LOCK_SHUTDOWN.trim()}') {
+      foreach ($process in @($processes.Values)) { Stop-Helper $process }
+      $processes.Clear()
+      Write-Frame '${EXECUTABLE_LOCK_BYE_MARKER}'
+      break
+    }
+    if ($line.Length -gt 2048) { throw 'command-oversized' }
+    Remove-ExitedHelpers
+    $parts = $line.Split(' ')
+    $mode = $parts[0]
+    if ($mode -ceq 'GUARD' -and $parts.Length -eq 6) {
+      $id = $parts[1]
+      $name = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($parts[2]))
+      $pidValue = $parts[3]
+      $creation = $parts[4]
+      $timeout = [Int32]::Parse($parts[5], [Globalization.CultureInfo]::InvariantCulture)
+      if ($id -notmatch '^[1-9][0-9]{0,9}$' -or
+        $name -notmatch '^Global\\\\InertiaRuntime-[0-9a-f]{64}$' -or
+        $pidValue -notmatch '^[1-9][0-9]{0,9}$' -or
+        $creation -notmatch '^[1-9][0-9]{0,19}$' -or
+        $timeout -lt 1 -or $timeout -gt ${NATIVE_READY_TIMEOUT_MS}) { throw 'guard-command' }
+      if ($processes.Count -ge ${MAX_BROKER_GUARDIANS}) { throw 'guardian-limit' }
+      $process = Start-Helper ('guard ' + $name + ' ' + $pidValue + ' ' + $creation + ' ${assembly.sha256}')
+      $stdoutTask = $process.StandardOutput.ReadLineAsync()
+      $stderrTask = $process.StandardError.ReadLineAsync()
+      if (-not $stdoutTask.Wait($timeout)) {
+        try { $process.StandardInput.Close() } catch {}
+        if (-not $process.HasExited) { $process.Kill() }
+        if (-not $process.HasExited) { $process.WaitForExit() }
+        $firstError = if ($stderrTask.IsCompleted -and $null -ne $stderrTask.Result) { $stderrTask.Result } else { '' }
+        Write-Result $id 'TIMEOUT' '' ($firstError + [char]10 + $process.StandardError.ReadToEnd())
+        $process.Dispose()
+        continue
+      }
+      $firstOutput = if ($null -eq $stdoutTask.Result) { '' } else { $stdoutTask.Result }
+      $firstError = if ($stderrTask.IsCompleted -and $null -ne $stderrTask.Result) { $stderrTask.Result } else { '' }
+      if ($firstOutput -ceq 'READY' -and -not $process.HasExited) {
+        $processes[$id] = $process
+        Write-Result $id 'READY' $firstOutput $firstError
+        continue
+      }
+      if (-not $process.HasExited) { $process.WaitForExit() }
+      Write-Result $id ('EXIT:' + $process.ExitCode) $firstOutput ($firstError + [char]10 + $process.StandardError.ReadToEnd())
+      $process.Dispose()
+      continue
+    }
+    if ($mode -ceq 'RECOVER' -and $parts.Length -eq 4) {
+      $id = $parts[1]
+      $name = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($parts[2]))
+      $timeout = [Int32]::Parse($parts[3], [Globalization.CultureInfo]::InvariantCulture)
+      if ($id -notmatch '^[1-9][0-9]{0,9}$' -or
+        $name -notmatch '^Global\\\\InertiaRuntime-[0-9a-f]{64}$' -or
+        $timeout -lt 1 -or $timeout -gt ${NATIVE_READY_TIMEOUT_MS}) { throw 'recover-command' }
+      $process = Start-Helper ('recover ' + $name + ' ${assembly.sha256}')
+      $process.StandardInput.Close()
+      $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+      $stderrTask = $process.StandardError.ReadToEndAsync()
+      if (-not $process.WaitForExit($timeout)) {
+        $process.Kill()
+        $process.WaitForExit()
+        Write-Result $id 'TIMEOUT' $stdoutTask.Result $stderrTask.Result
+      } else {
+        Write-Result $id ('EXIT:' + $process.ExitCode) $stdoutTask.Result $stderrTask.Result
+      }
+      $process.Dispose()
+      continue
+    }
+    throw 'command-invalid'
+  }
+  exit 0
+} catch {
+  $stderr = [Console]::OpenStandardError()
+  $failure = [Convert]::FromBase64String('${encodedFailure}')
+  $stderr.Write($failure, 0, $failure.Length)
+  $stderr.Flush()
+  exit 25
+} finally {
+  foreach ($process in @($processes.Values)) { Stop-Helper $process }
+  if ($null -ne $stream) { $stream.Dispose() }
+}`;
+}
+
+function spawnWindowsRuntimeJobLockBroker(
+  assembly: WindowsRuntimeJobAssembly,
   environment: NodeJS.ProcessEnv,
 ): ChildProcessWithoutNullStreams {
   const trustedEnvironment = windowsRuntimeJobEnvironment(environment);
-  if (!trustedEnvironment) {
+  const systemRoot = trustedEnvironment?.SystemRoot;
+  if (!trustedEnvironment || !systemRoot) {
     throw new Error("The trusted Windows runtime environment is unavailable.");
   }
   return spawn(
-    executable,
-    [...arguments_],
+    win32.join(
+      systemRoot,
+      "System32",
+      "WindowsPowerShell",
+      "v1.0",
+      "powershell.exe",
+    ),
+    [
+      "-NoLogo",
+      "-NoProfile",
+      "-NonInteractive",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-EncodedCommand",
+      encodedPowerShell(windowsRuntimeJobLockScript(assembly)),
+    ],
     {
       env: trustedEnvironment,
       shell: false,
@@ -320,16 +564,284 @@ function spawnWindowsRuntimeJobExecutable(
   );
 }
 
+async function acquireWindowsRuntimeJobExecutableLock(
+  assembly: WindowsRuntimeJobAssembly,
+  environment: NodeJS.ProcessEnv,
+  deadlineAt: number,
+  spawnLockBroker: typeof spawnWindowsRuntimeJobLockBroker,
+): Promise<WindowsRuntimeJobExecutableLock> {
+  const child = spawnLockBroker(assembly, environment);
+  let stdoutBuffer = "";
+  const stdoutLines: string[] = [];
+  let stderr = "";
+  let errored = false;
+  let closed = false;
+  child.stdout.on("data", (chunk: Buffer) => {
+    stdoutBuffer += chunk.toString("utf8");
+    if (stdoutBuffer.length > MAX_OUTPUT_BYTES * 2) {
+      errored = true;
+      child.kill();
+      return;
+    }
+    while (true) {
+      const newline = stdoutBuffer.indexOf("\n");
+      if (newline < 0) break;
+      stdoutLines.push(stdoutBuffer.slice(0, newline).replace(/\r$/u, ""));
+      stdoutBuffer = stdoutBuffer.slice(newline + 1);
+      if (stdoutLines.length > 64) {
+        errored = true;
+        child.kill();
+        break;
+      }
+    }
+  });
+  child.stderr.on("data", (chunk: Buffer) => {
+    stderr = appendBounded(stderr, chunk);
+  });
+  // The broker can die between LOCKED and RELEASE. Its pipe failure is already
+  // reflected by process liveness; consuming EPIPE keeps cleanup fail closed.
+  child.stdin.on("error", () => undefined);
+  child.once("error", () => { errored = true; });
+  child.once("close", () => { closed = true; });
+  while (true) {
+    const lockedIndex = stdoutLines.indexOf(EXECUTABLE_LOCKED_MARKER);
+    const locked = lockedIndex >= 0;
+    if (
+      locked
+      && !errored
+      && child.exitCode === null
+      && child.signalCode === null
+    ) {
+      stdoutLines.splice(lockedIndex, 1);
+      let held = true;
+      let requestCounter = 0;
+      let requestTail = Promise.resolve();
+      child.once("error", () => { held = false; });
+      child.once("exit", () => { held = false; });
+      const isHeld = (): boolean => {
+        if (!held || child.exitCode !== null || child.signalCode !== null) return false;
+        try {
+          return child.kill(0);
+        } catch {
+          return false;
+        }
+      };
+      const requestNow = async (
+        mode: "guard" | "recover",
+        arguments_: readonly string[],
+        operationDeadlineAt: number,
+      ): Promise<WindowsRuntimeJobBrokerResult> => {
+        if (!isHeld()) {
+          throw new Error("The verified Windows runtime executable lock is unavailable.");
+        }
+        const remainingMs = Math.max(1, Math.min(
+          Math.trunc(operationDeadlineAt - Date.now()) - 50,
+          NATIVE_READY_TIMEOUT_MS,
+        ));
+        if (Date.now() >= operationDeadlineAt) {
+          throw new Error("The Windows runtime broker operation deadline elapsed.");
+        }
+        requestCounter += 1;
+        const requestId = String(requestCounter);
+        const encodedName = Buffer.from(arguments_[0] ?? "", "utf8").toString("base64");
+        const command = mode === "guard"
+          ? `GUARD ${requestId} ${encodedName} ${arguments_[1]} ${arguments_[2]} ${remainingMs}\n`
+          : `RECOVER ${requestId} ${encodedName} ${remainingMs}\n`;
+        child.stdin.write(command);
+        const prefix = `RESULT ${requestId} `;
+        while (Date.now() < operationDeadlineAt) {
+          if (!isHeld()) {
+            throw new Error("The verified Windows runtime executable lock was lost.");
+          }
+          const resultIndex = stdoutLines.findIndex((line) => line.startsWith(prefix));
+          if (resultIndex >= 0) {
+            const [tag, id, status, encodedOutput, encodedError, ...extra] =
+              stdoutLines.splice(resultIndex, 1)[0]!.split(" ");
+            if (
+              tag !== "RESULT"
+              || id !== requestId
+              || extra.length !== 0
+              || !status
+              || !/^(?:READY|TIMEOUT|EXIT:[0-9]{1,3})$/u.test(status)
+              || encodedOutput === undefined
+              || encodedError === undefined
+              || encodedOutput.length > MAX_OUTPUT_BYTES * 2
+              || encodedError.length > MAX_OUTPUT_BYTES * 2
+            ) {
+              throw new Error("The Windows runtime broker returned an invalid result.");
+            }
+            const result = {
+              status: status as WindowsRuntimeJobBrokerResult["status"],
+              stdout: decodeBrokerField(encodedOutput),
+              stderr: decodeBrokerField(encodedError),
+            };
+            if (!isHeld()) {
+              throw new Error("The verified Windows runtime executable lock was lost.");
+            }
+            return result;
+          }
+          await new Promise<void>((resolve) => setTimeout(resolve, 10));
+        }
+        held = false;
+        // A broker request timeout invalidates the whole verified launch
+        // authority. Killing the broker closes every retained guardian stdin;
+        // each guardian then terminates its own Job through its EOF watcher.
+        child.kill();
+        throw new Error("The Windows runtime broker operation deadline elapsed.");
+      };
+      return {
+        isHeld,
+        request: (mode, arguments_, operationDeadlineAt) => {
+          const operation = requestTail.then(() =>
+            requestNow(mode, arguments_, operationDeadlineAt));
+          requestTail = operation.then(() => undefined, () => undefined);
+          return operation;
+        },
+        release: async () => {
+          if (!held) return;
+          held = false;
+          if (!child.stdin.destroyed && !child.stdin.writableEnded) {
+            try {
+              child.stdin.end(EXECUTABLE_LOCK_SHUTDOWN);
+            } catch {
+              if (child.exitCode === null && child.signalCode === null) child.kill();
+            }
+          } else if (child.exitCode === null && child.signalCode === null) {
+            child.kill();
+          }
+          if (!closed) {
+            await new Promise<void>((resolve) => {
+              const terminate = setTimeout(() => {
+                if (child.exitCode === null && child.signalCode === null) child.kill();
+              }, 3_000);
+              child.once("close", () => {
+                clearTimeout(terminate);
+                resolve();
+              });
+            });
+          }
+          if (!stdoutLines.includes(EXECUTABLE_LOCK_BYE_MARKER)) {
+            throw new Error("The Windows runtime executable broker did not acknowledge shutdown.");
+          }
+        },
+        abort: () => {
+          held = false;
+          if (!child.stdin.destroyed && !child.stdin.writableEnded) child.stdin.destroy();
+          if (child.exitCode === null && child.signalCode === null) child.kill();
+        },
+      };
+    }
+    if (
+      errored
+      || closed
+      || Date.now() >= deadlineAt
+    ) break;
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+  }
+  if (child.exitCode === null && child.signalCode === null) child.kill();
+  const detail = stderr.trim().replace(/\s+/gu, " ").slice(0, 500);
+  throw new Error([
+    "The Windows runtime Job Object executable could not be locked and verified.",
+    detail,
+  ].filter(Boolean).join(" "));
+}
+
+export async function prepareWindowsRuntimeJobExecutableLock(
+  candidate: WindowsRuntimeJobAssembly,
+  options: {
+    readonly environment?: NodeJS.ProcessEnv;
+    readonly timeoutMs?: number;
+    readonly spawnLockBroker?: typeof spawnWindowsRuntimeJobLockBroker;
+  } = {},
+): Promise<void> {
+  const assembly = validateWindowsRuntimeJobAssembly(candidate);
+  const assemblyKey = windowsRuntimeJobAssemblyKey(assembly);
+  const existing = preparedExecutableLock;
+  if (existing) {
+    if (existing.assemblyKey !== assemblyKey) {
+      throw new Error("A different Windows runtime executable lock is already prepared.");
+    }
+    await existing.ready;
+    if (!existing.lock?.isHeld()) {
+      throw new Error("The verified Windows runtime executable lock is unavailable.");
+    }
+    return;
+  }
+  const timeoutMs = Math.max(1, Math.min(
+    options.timeoutMs ?? NATIVE_READY_TIMEOUT_MS,
+    NATIVE_READY_TIMEOUT_MS,
+  ));
+  const state: PreparedWindowsRuntimeJobExecutableLock = {
+    assemblyKey,
+    lock: null,
+    ready: Promise.resolve(),
+  };
+  state.ready = (async () => {
+    const lock = await acquireWindowsRuntimeJobExecutableLock(
+      assembly,
+      options.environment ?? process.env,
+      Date.now() + timeoutMs,
+      options.spawnLockBroker ?? spawnWindowsRuntimeJobLockBroker,
+    );
+    if (preparedExecutableLock !== state) {
+      lock.abort();
+      throw new Error("The Windows runtime executable lock preparation was cancelled.");
+    }
+    state.lock = lock;
+  })();
+  preparedExecutableLock = state;
+  try {
+    await state.ready;
+  } catch (error) {
+    if (preparedExecutableLock === state) preparedExecutableLock = null;
+    throw error;
+  }
+}
+
+export async function disposeWindowsRuntimeJobExecutableLock(): Promise<void> {
+  const state = preparedExecutableLock;
+  preparedExecutableLock = null;
+  if (!state) return;
+  if (state.lock) {
+    try {
+      await state.lock.release();
+    } catch {
+      state.lock.abort();
+    }
+    return;
+  }
+  try {
+    await state.ready;
+    const acquired = (state as PreparedWindowsRuntimeJobExecutableLock).lock;
+    await acquired?.release();
+  } catch {
+    // Cancellation aborts the in-flight broker and its stdio ownership.
+  }
+}
+
+function requireWindowsRuntimeJobExecutableLock(
+  assembly: WindowsRuntimeJobAssembly,
+): WindowsRuntimeJobExecutableLock {
+  const state = preparedExecutableLock;
+  if (
+    !state
+    || state.assemblyKey !== windowsRuntimeJobAssemblyKey(assembly)
+    || !state.lock
+    || !state.lock.isHeld()
+  ) {
+    throw new Error("The verified Windows runtime executable lock is unavailable.");
+  }
+  return state.lock;
+}
+
 export async function armWindowsRuntimeJob(
   runtimeGenerationId: string,
   runtimePid: number,
   options: {
     readonly platform?: NodeJS.Platform;
-    readonly environment?: NodeJS.ProcessEnv;
     readonly timeoutMs?: number;
     readonly runtimeCreationTimeBits?: string;
     readonly assembly?: WindowsRuntimeJobAssembly;
-    readonly spawnProcess?: typeof spawnWindowsRuntimeJobExecutable;
   } = {},
 ): Promise<WindowsRuntimeJobContainment | null> {
   if ((options.platform ?? process.platform) !== "win32") return null;
@@ -345,79 +857,48 @@ export async function armWindowsRuntimeJob(
     throw new Error("The Windows runtime creation identity is invalid.");
   }
   const name = windowsRuntimeJobName(runtimeGenerationId);
-  if (activeJobs.has(name)) {
+  if (pendingJobNames.has(name)) {
     throw new Error("The Windows runtime Job Object is already active.");
   }
-  const assembly = selectedWindowsRuntimeJobAssembly(options);
-  const child = (options.spawnProcess ?? spawnWindowsRuntimeJobExecutable)(
-    assembly.path,
-    [
-      "guard",
-      name,
-      String(runtimePid),
-      runtimeCreationTimeBits,
-      assembly.sha256,
-    ],
-    options.environment ?? process.env,
-  );
-  let stdout = "";
-  let stderr = "";
-  let ready = false;
-  let settleCompletion!: (confirmed: boolean) => void;
-  const completion = new Promise<boolean>((resolve) => {
-    settleCompletion = resolve;
-  });
-  activeJobs.set(name, { child, completion });
-  child.stdout.on("data", (chunk: Buffer) => {
-    stdout = appendBounded(stdout, chunk);
-  });
-  child.stderr.on("data", (chunk: Buffer) => {
-    stderr = appendBounded(stderr, chunk);
-  });
-  child.once("exit", (code) => {
-    activeJobs.delete(name);
-    settleCompletion(code === 0);
-  });
-  child.once("error", () => {
-    activeJobs.delete(name);
-    settleCompletion(false);
-  });
-
-  const startupTimeoutMs = Math.max(1, Math.min(
-    options.timeoutMs ?? NATIVE_READY_TIMEOUT_MS,
-    NATIVE_READY_TIMEOUT_MS,
-  ));
-  const deadlineAt = Date.now() + startupTimeoutMs;
-  let lastStage: WindowsRuntimeJobStage | null = null;
-  while (true) {
-    if (stdout.split(/\r?\n/u).includes("READY")) {
-      ready = true;
-      break;
+  pendingJobNames.add(name);
+  try {
+    const startupTimeoutMs = Math.max(1, Math.min(
+      options.timeoutMs ?? NATIVE_READY_TIMEOUT_MS,
+      NATIVE_READY_TIMEOUT_MS,
+    ));
+    const deadlineAt = Date.now() + startupTimeoutMs;
+    const assembly = selectedWindowsRuntimeJobAssembly(options);
+    const executableLock = requireWindowsRuntimeJobExecutableLock(assembly);
+    if (!executableLock.isHeld()) {
+      throw new Error("The verified Windows runtime executable lock was lost before launch.");
     }
-    if (child.exitCode !== null || child.signalCode !== null) break;
-    const observedStage = latestHelperStage(stderr);
-    if (observedStage !== null) lastStage = observedStage;
-    if (Date.now() >= deadlineAt) break;
-    await new Promise<void>((resolve) => setTimeout(resolve, 10));
-  }
-  if (!ready) {
-    child.kill();
-    activeJobs.delete(name);
-    const detail = stderr.trim().replace(/\s+/gu, " ").slice(0, 500);
-    const outcome = child.exitCode !== null
-      ? `The native helper exited with code ${child.exitCode}.`
-      : child.signalCode
-        ? `The native helper exited from signal ${child.signalCode}.`
-        : lastStage === "native-guard-start"
-          ? `The native helper did not report readiness within ${startupTimeoutMs}ms after Guard started.`
-          : `The native helper did not start within ${startupTimeoutMs}ms.`;
+    const result = await executableLock.request(
+      "guard",
+      [name, String(runtimePid), runtimeCreationTimeBits],
+      deadlineAt,
+    );
+    if (
+      result.status === "READY"
+      && result.stdout === "READY"
+      && executableLock.isHeld()
+    ) {
+      return { kind: "windows-job-v1", name };
+    }
+    const detail = result.stderr.trim().replace(/\s+/gu, " ").slice(0, 500);
+    const lastStage = latestHelperStage(result.stderr);
+    const outcome = result.status.startsWith("EXIT:")
+      ? `The native helper exited with code ${result.status.slice(5)}.`
+      : lastStage === "native-guard-start"
+        ? `The native helper did not report readiness within ${startupTimeoutMs}ms after Guard started.`
+        : `The native helper did not start within ${startupTimeoutMs}ms.`;
     throw new Error([
       "The Windows runtime Job Object could not be armed.",
       outcome,
       detail,
     ].filter(Boolean).join(" "));
+  } finally {
+    pendingJobNames.delete(name);
   }
-  return { kind: "windows-job-v1", name };
 }
 
 export async function recoverWindowsRuntimeJob(
@@ -425,40 +906,27 @@ export async function recoverWindowsRuntimeJob(
   deadlineAt: number,
   options: {
     readonly platform?: NodeJS.Platform;
-    readonly environment?: NodeJS.ProcessEnv;
     readonly assembly?: WindowsRuntimeJobAssembly;
-    readonly spawnProcess?: typeof spawnWindowsRuntimeJobExecutable;
   } = {},
 ): Promise<boolean> {
   if ((options.platform ?? process.platform) !== "win32") return false;
   if (Date.now() >= deadlineAt) return false;
-  const active = activeJobs.get(containment.name);
-  if (active) {
-    const remainingMs = Math.max(1, Math.trunc(deadlineAt - Date.now()));
-    return await Promise.race([
-      active.completion,
-      new Promise<false>((resolve) => setTimeout(resolve, remainingMs, false)),
-    ]);
-  }
   const assembly = selectedWindowsRuntimeJobAssembly(options);
-  const child = (options.spawnProcess ?? spawnWindowsRuntimeJobExecutable)(
-    assembly.path,
-    ["recover", containment.name, assembly.sha256],
-    options.environment ?? process.env,
-  );
-  return await new Promise<boolean>((resolve) => {
-    let settled = false;
-    const settle = (confirmed: boolean): void => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve(confirmed);
-    };
-    const timer = setTimeout(() => {
-      child.kill();
-      settle(false);
-    }, Math.max(1, Math.trunc(deadlineAt - Date.now())));
-    child.once("error", () => settle(false));
-    child.once("exit", (code) => settle(code === 0));
-  });
+  let executableLock: WindowsRuntimeJobExecutableLock;
+  try {
+    executableLock = requireWindowsRuntimeJobExecutableLock(assembly);
+  } catch {
+    return false;
+  }
+  try {
+    if (!executableLock.isHeld()) return false;
+    const result = await executableLock.request(
+      "recover",
+      [containment.name],
+      deadlineAt,
+    );
+    return result.status === "EXIT:0" && executableLock.isHeld();
+  } catch {
+    return false;
+  }
 }

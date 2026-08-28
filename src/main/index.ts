@@ -86,6 +86,10 @@ import * as runtimeBootstrap from "./runtime-bootstrap-safety.js";
 import { prepareRuntimeBootstrapRecovery } from "./runtime-bootstrap-recovery.js";
 import { resolveDesktopRuntimeProcessSafetyAssets } from "./runtime-windows-job-bootstrap.js";
 import {
+  disposeWindowsRuntimeJobExecutableLock,
+  prepareWindowsRuntimeJobExecutableLock,
+} from "./windows-runtime-job.js";
+import {
   cleanupPrivilegedOwners,
   finishPrivilegedExit,
 } from "./privileged-shutdown.js";
@@ -890,30 +894,35 @@ function runPrivilegedCleanup(): Promise<boolean> {
   systemSuspendDelivery = null;
   if (mainWindow) saveWindowState(mainWindow);
   const supervisorToStop = runtimeSupervisor, privateConnectHostToStop = privateConnectHost; privateConnectHost = null;
-  const cleanup = detachedChatClose.closeDetachedChatsForShutdown(detachedChatMain).then(async () => {
-    previewBroker.close(); runtimeDiagnostics?.record("app.stop");
-    return await cleanupPrivilegedOwners({
-      runtime: supervisorToStop, privateConnect: privateConnectHostToStop,
-      onRuntimeStopped: () => { if (runtimeSupervisor === supervisorToStop) runtimeSupervisor = null; },
-      onRuntimeError: (error) => {
-        runtimeDiagnostics?.record("runtime.failure", {
-          phase: "stopping", message: error instanceof Error
-            ? error.message : "The local runtime could not stop cleanly.",
-        });
-        console.error("Failed to stop the local runtime", error);
-      },
-      onPrivateConnectError: (error) => console.error("Failed to stop Private Connect cleanly", error),
-      disposeTemporaryAttachments: disposeImportedAttachments,
-      onTemporaryAttachmentError: (error) => console.error("Failed to remove temporary attachments", error),
-      onUnconfirmedRuntimeExit: () => console.warn(
-        "Retaining temporary attachments because runtime process exit was not confirmed; startup cleanup will remove them.",
-      ),
-      closeDurableAttachments: async () => {
-        const retainedAttachments = conversationAttachments; conversationAttachments = null;
-        await closeConversationAttachmentAccess(retainedAttachments);
-      },
-    });
-  });
+  const cleanup = (async () => {
+    try {
+      await detachedChatClose.closeDetachedChatsForShutdown(detachedChatMain);
+      previewBroker.close(); runtimeDiagnostics?.record("app.stop");
+      return await cleanupPrivilegedOwners({
+        runtime: supervisorToStop, privateConnect: privateConnectHostToStop,
+        onRuntimeStopped: () => { if (runtimeSupervisor === supervisorToStop) runtimeSupervisor = null; },
+        onRuntimeError: (error) => {
+          runtimeDiagnostics?.record("runtime.failure", {
+            phase: "stopping", message: error instanceof Error
+              ? error.message : "The local runtime could not stop cleanly.",
+          });
+          console.error("Failed to stop the local runtime", error);
+        },
+        onPrivateConnectError: (error) => console.error("Failed to stop Private Connect cleanly", error),
+        disposeTemporaryAttachments: disposeImportedAttachments,
+        onTemporaryAttachmentError: (error) => console.error("Failed to remove temporary attachments", error),
+        onUnconfirmedRuntimeExit: () => console.warn(
+          "Retaining temporary attachments because runtime process exit was not confirmed; startup cleanup will remove them.",
+        ),
+        closeDurableAttachments: async () => {
+          const retainedAttachments = conversationAttachments; conversationAttachments = null;
+          await closeConversationAttachmentAccess(retainedAttachments);
+        },
+      });
+    } finally {
+      await disposeWindowsRuntimeJobExecutableLock();
+    }
+  })();
   privilegedCleanup = cleanup;
   return cleanup;
 }
@@ -977,6 +986,12 @@ async function bootstrap(): Promise<void> {
   runtimeDataDirectory = dataDirectory;
   const { runtimeProcessGuardianPath, windowsRuntimeJobAssembly } =
     resolveDesktopRuntimeProcessSafetyAssets();
+  if (windowsRuntimeJobAssembly) {
+    // Hold the exact verified image across every later CreateProcess call.
+    // Recovery keeps its existing short deadline because this bounded cold
+    // readiness gate completes before the supervisor can begin recovery.
+    await prepareWindowsRuntimeJobExecutableLock(windowsRuntimeJobAssembly);
+  }
   const {
     bootstrapSafety,
     modernDarwinRecoveryAuthority,

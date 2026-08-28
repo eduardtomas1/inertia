@@ -292,11 +292,24 @@ describe("cross-platform packaged behavior contract", () => {
     expect(windowsJob).toContain("windows-runtime-job-integrity.json");
     expect(windowsJob).toContain("timingSafeEqual(actual, expected)");
     expect(windowsJobNative).toContain("FileShare.Read");
-    expect(windowsJobNative).toContain("VerifyExecutableIntegrity(");
+    expect(windowsJobNative).toContain("OpenVerifiedExecutable(");
+    expect(windowsJobNative).toContain(
+      "using (var executable = OpenVerifiedExecutable(",
+    );
     expect(windowsJobNative).toContain("Process.GetProcessById(");
     expect(windowsJob).toContain('"guard"');
     expect(windowsJob).toContain('"recover"');
-    expect(windowsJob).not.toContain("-EncodedCommand");
+    expect(windowsJob).toContain("[IO.FileShare]::Read");
+    expect(windowsJob).toContain("-EncodedCommand");
+    expect(windowsJob).not.toContain("[Reflection.Assembly]::Load");
+    expect(windowsJob).toContain("[Console]::In.ReadLine()");
+    expect(windowsJob).toContain("EXECUTABLE_LOCK_SHUTDOWN");
+    expect(windowsJob).toContain("EXECUTABLE_LOCK_BYE_MARKER");
+    expect(windowsJobNative).toContain("while (Console.In.Read() != -1)");
+    expect(main).toContain("await prepareWindowsRuntimeJobExecutableLock(");
+    expect(main.indexOf("await prepareWindowsRuntimeJobExecutableLock("))
+      .toBeLessThan(main.indexOf("runtimeSupervisor = new RuntimeSupervisor("));
+    expect(main).toContain("await disposeWindowsRuntimeJobExecutableLock()");
     expect(processSafety).toContain("configuration.windowsRuntimeJobAssembly");
     expect(smoke).toContain('process.arch === "x64" ? "" : `-${process.arch}`');
     expect(smoke).toContain(

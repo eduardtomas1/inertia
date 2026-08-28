@@ -8,6 +8,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -15,10 +16,12 @@ import {
 import { join, resolve, win32 } from "node:path";
 import { PassThrough } from "node:stream";
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   armWindowsRuntimeJob,
+  disposeWindowsRuntimeJobExecutableLock,
+  prepareWindowsRuntimeJobExecutableLock,
   recoverWindowsRuntimeJob,
   resolveRequiredWindowsRuntimeJobAssembly,
   validateWindowsRuntimeJobAssembly,
@@ -31,11 +34,12 @@ import {
 const runtimeGenerationId = "20000000-0000-4000-8000-000000000002:1";
 const runtimeCreationTimeMs = 1_700_000_000_123.456;
 const runtimeCreationTimeBits = "4789786004267972428";
-const stubAssembly = {
-  path: resolve("/trusted/windows-runtime-job.exe"),
-  root: resolve("/trusted"),
-  sha256: "a".repeat(64),
-} as const;
+let stubDirectory = "";
+let stubAssembly: {
+  readonly path: string;
+  readonly root: string;
+  readonly sha256: string;
+};
 const children = new Set<ChildProcessWithoutNullStreams>();
 
 function nodeChild(source: string): ChildProcessWithoutNullStreams {
@@ -48,18 +52,57 @@ function nodeChild(source: string): ChildProcessWithoutNullStreams {
   return child;
 }
 
-function protocolChild(stderr: string): ChildProcessWithoutNullStreams {
-  const stderrStream = new PassThrough();
-  const child = Object.assign(new EventEmitter(), {
-    stdin: new PassThrough(),
-    stdout: new PassThrough(),
-    stderr: stderrStream,
-    exitCode: null,
-    signalCode: null,
-    kill: () => true,
-  }) as unknown as ChildProcessWithoutNullStreams;
-  queueMicrotask(() => stderrStream.write(stderr));
-  return child;
+interface BrokerChildOptions {
+  readonly lockDelayMs?: number;
+  readonly guardStatus?: "READY" | `EXIT:${number}` | "TIMEOUT";
+  readonly guardStdout?: string;
+  readonly guardStderr?: string;
+  readonly recoverStatus?: `EXIT:${number}` | "TIMEOUT";
+  readonly recoverStdout?: string;
+  readonly recoverStderr?: string;
+  readonly responseDelayMs?: number;
+  readonly commandLogPath?: string;
+  readonly malformedResult?: string;
+  readonly shutdownDelayMs?: number;
+}
+
+function verifiedExecutableBrokerChild(
+  options: BrokerChildOptions = {},
+): ChildProcessWithoutNullStreams {
+  const configuration = Buffer.from(JSON.stringify(options), "utf8").toString("base64");
+  return nodeChild(`
+const fs = require("node:fs");
+const readline = require("node:readline");
+const options = JSON.parse(Buffer.from("${configuration}", "base64").toString("utf8"));
+const encode = (value) => Buffer.from((value ?? "").slice(0, 2048), "utf8").toString("base64");
+const respond = (line) => {
+  if (options.commandLogPath) fs.appendFileSync(options.commandLogPath, line + "\\n");
+  if (line === "SHUTDOWN") {
+    setTimeout(() => process.stdout.write("BYE\\n", () => process.exit(0)), options.shutdownDelayMs ?? 0);
+    return;
+  }
+  const parts = line.split(" ");
+  const id = parts[1];
+  if (options.malformedResult) {
+    process.stdout.write(options.malformedResult + "\\n");
+    return;
+  }
+  const guard = parts[0] === "GUARD";
+  const status = guard ? (options.guardStatus ?? "READY") : (options.recoverStatus ?? "EXIT:0");
+  const stdout = guard ? (options.guardStdout ?? (status === "READY" ? "READY" : "")) : (options.recoverStdout ?? "");
+  const stderr = guard ? (options.guardStderr ?? "") : (options.recoverStderr ?? "");
+  const result = "RESULT " + id + " " + status + " " + encode(stdout) + " " + encode(stderr) + "\\n";
+  setTimeout(() => process.stdout.write(result), options.responseDelayMs ?? 0);
+};
+setTimeout(() => {
+  process.stdout.write("LOCKED\\n");
+  readline.createInterface({ input: process.stdin }).on("line", respond);
+}, options.lockDelayMs ?? 0);
+`);
+}
+
+function spawnVerifiedExecutableLock(): ChildProcessWithoutNullStreams {
+  return verifiedExecutableBrokerChild();
 }
 
 function realWindowsRuntimeJobAssembly() {
@@ -130,12 +173,31 @@ try {
   return creationIdentity;
 }
 
+beforeEach(async () => {
+  stubDirectory = mkdtempSync(join(process.cwd(), ".windows-job-stub-"));
+  const root = join(stubDirectory, "runtime");
+  mkdirSync(root);
+  const path = join(root, "windows-runtime-job.exe");
+  const bytes = Buffer.from([0x4d, 0x5a, 0x90, 0x00]);
+  writeFileSync(path, bytes);
+  stubAssembly = {
+    path,
+    root,
+    sha256: createHash("sha256").update(bytes).digest("hex"),
+  };
+  await prepareWindowsRuntimeJobExecutableLock(stubAssembly, {
+    spawnLockBroker: spawnVerifiedExecutableLock,
+  });
+});
+
 afterEach(async () => {
+  await disposeWindowsRuntimeJobExecutableLock();
   const closing = [...children].map(async (child) => {
     child.kill("SIGKILL");
     await closeChild(child);
   });
   await Promise.all(closing);
+  rmSync(stubDirectory, { recursive: true, force: true });
 });
 
 describe("Windows runtime Job Object containment", () => {
@@ -318,8 +380,8 @@ describe("Windows runtime Job Object containment", () => {
         sha256: assembly.sha256,
       };
       expect(validateWindowsRuntimeJobAssembly(portableAssembly)).toEqual({
-        path: resolve(portableAssembly.path),
-        root: resolve(portableAssembly.root),
+        path: resolve(portableRoot, "windows-runtime-job.exe"),
+        root: resolve(portableRoot),
         sha256: assembly.sha256,
       });
 
@@ -345,61 +407,49 @@ describe("Windows runtime Job Object containment", () => {
     }
   });
 
-  it("does not arm containment until the native helper reports READY", async () => {
-    let helper: ChildProcessWithoutNullStreams | null = null;
-    const containment = await armWindowsRuntimeJob(
-      runtimeGenerationId,
-      4_242,
-      {
-        platform: "win32",
-        assembly: stubAssembly,
-        runtimeCreationTimeBits,
-        timeoutMs: 1_000,
-        spawnProcess: () => {
-          helper = nodeChild(
-            "setTimeout(() => console.log('READY'), 20); setInterval(() => undefined, 1000)",
-          );
-          return helper;
-        },
-      },
-    );
-
-    expect(containment).toEqual({
-      kind: "windows-job-v1",
-      name: windowsRuntimeJobName(runtimeGenerationId),
-    });
-    expect(helper).not.toBeNull();
-    helper!.kill("SIGKILL");
-    await closeChild(helper!);
-  });
-
-  it("launches only the exact verified native executable and bounded arguments", async () => {
-    let executable = "";
-    let arguments_: readonly string[] = [];
-    let helper: ChildProcessWithoutNullStreams | null = null;
-    await armWindowsRuntimeJob(runtimeGenerationId, 4_242, {
+  it("accepts containment only after the verified broker reports readiness", async () => {
+    await expect(armWindowsRuntimeJob(runtimeGenerationId, 4_242, {
       platform: "win32",
       assembly: stubAssembly,
       runtimeCreationTimeBits,
       timeoutMs: 1_000,
-      spawnProcess: (candidate, candidateArguments) => {
-        executable = candidate;
-        arguments_ = candidateArguments;
-        helper = nodeChild(
-          "process.stdout.write('READY\\n'); setInterval(() => undefined, 1000)",
-        );
-        return helper;
+    })).resolves.toEqual({
+      kind: "windows-job-v1",
+      name: windowsRuntimeJobName(runtimeGenerationId),
+    });
+  });
+
+  it("routes exact bounded guard and recovery commands through one broker", async () => {
+    await disposeWindowsRuntimeJobExecutableLock();
+    const commandLogPath = join(stubDirectory, "broker-commands.txt");
+    let brokerSpawns = 0;
+    await prepareWindowsRuntimeJobExecutableLock(stubAssembly, {
+      spawnLockBroker: () => {
+        brokerSpawns += 1;
+        return verifiedExecutableBrokerChild({ commandLogPath });
       },
     });
-
-    expect(executable).toBe(resolve("/trusted/windows-runtime-job.exe"));
-    expect(arguments_).toEqual([
-      "guard",
-      windowsRuntimeJobName(runtimeGenerationId),
-      "4242",
+    const jobName = windowsRuntimeJobName(runtimeGenerationId);
+    await expect(armWindowsRuntimeJob(runtimeGenerationId, 4_242, {
+      platform: "win32",
+      assembly: stubAssembly,
       runtimeCreationTimeBits,
-      stubAssembly.sha256,
-    ]);
+      timeoutMs: 1_000,
+    })).resolves.toEqual({ kind: "windows-job-v1", name: jobName });
+    await expect(recoverWindowsRuntimeJob(
+      { kind: "windows-job-v1", name: jobName },
+      Date.now() + 1_000,
+      { platform: "win32", assembly: stubAssembly },
+    )).resolves.toBe(true);
+    const [guard, recover] = readFileSync(commandLogPath, "utf8").trim().split("\n");
+    const guardParts = guard!.split(" ");
+    const recoverParts = recover!.split(" ");
+    expect(guardParts[0]).toBe("GUARD");
+    expect(Buffer.from(guardParts[2]!, "base64").toString("utf8")).toBe(jobName);
+    expect(guardParts.slice(3, 5)).toEqual(["4242", runtimeCreationTimeBits]);
+    expect(recoverParts[0]).toBe("RECOVER");
+    expect(Buffer.from(recoverParts[2]!, "base64").toString("utf8")).toBe(jobName);
+    expect(brokerSpawns).toBe(1);
 
     const nativeSource = readFileSync(
       resolve(process.cwd(), "native/runtime-process-guardian/windows.cs"),
@@ -407,20 +457,101 @@ describe("Windows runtime Job Object containment", () => {
     );
     expect(nativeSource).toContain("CultureInfo.InvariantCulture");
     expect(nativeSource).not.toContain("OpenProcess(");
-    expect(nativeSource).toContain("VerifyExecutableIntegrity(");
+    expect(nativeSource).toContain("OpenVerifiedExecutable(");
+    expect(nativeSource).toContain(
+      "using (var executable = OpenVerifiedExecutable(",
+    );
     expect(nativeSource).toContain("Process.GetProcessById(");
     expect(nativeSource).toContain("GetProcessTimes(");
     expect(nativeSource).toContain("read-process-identity");
     expect(nativeSource).toContain("process-identity-mismatch");
+    expect(nativeSource).toContain("while (Console.In.Read() != -1)");
     expect(nativeSource.indexOf("CreationIdentityStatus("))
       .toBeLessThan(nativeSource.indexOf("IntPtr job = CreateJobObject("));
 
-    helper!.kill("SIGKILL");
-    await closeChild(helper!);
+    const launchSource = readFileSync(
+      resolve(process.cwd(), "src/main/windows-runtime-job.ts"),
+      "utf8",
+    );
+    expect(launchSource).toContain("[IO.FileShare]::Read");
+    expect(launchSource).toContain("$info.FileName = $path");
+    expect(launchSource).toContain("$processes[$id] = $process");
+    expect(launchSource).toContain("Write-Frame '${EXECUTABLE_LOCK_BYE_MARKER}'");
+    expect(launchSource).toContain("INERTIA_JOB_ERROR stage=verified-file-lock");
+    expect(launchSource).not.toContain("[Reflection.Assembly]::Load");
+    expect(launchSource).not.toContain("spawnWindowsRuntimeJobExecutable");
   });
 
-  it("gives the direct native executable one bounded startup window", async () => {
-    let helper: ChildProcessWithoutNullStreams | null = null;
+  it("requires bootstrap readiness before any native operation can launch", async () => {
+    await disposeWindowsRuntimeJobExecutableLock();
+    const preparation = prepareWindowsRuntimeJobExecutableLock(stubAssembly, {
+      timeoutMs: 1_000,
+      spawnLockBroker: () => verifiedExecutableBrokerChild({ lockDelayMs: 50 }),
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await expect(armWindowsRuntimeJob(runtimeGenerationId, 4_242, {
+      platform: "win32",
+      assembly: stubAssembly,
+      runtimeCreationTimeBits,
+      timeoutMs: 1_000,
+    })).rejects.toThrow("verified Windows runtime executable lock is unavailable");
+    await expect(preparation).resolves.toBeUndefined();
+  });
+
+  it("fails closed when the broker cannot lock and verify the executable", async () => {
+    await disposeWindowsRuntimeJobExecutableLock();
+    await expect(prepareWindowsRuntimeJobExecutableLock(stubAssembly, {
+      timeoutMs: 1_000,
+      spawnLockBroker: () => nodeChild(
+        "process.stderr.write('INERTIA_JOB_ERROR stage=verified-file-lock\\n');"
+        + "process.exit(25)",
+      ),
+    })).rejects.toThrow(
+      "The Windows runtime Job Object executable could not be locked and verified. "
+      + "INERTIA_JOB_ERROR stage=verified-file-lock",
+    );
+    await expect(armWindowsRuntimeJob(runtimeGenerationId, 4_242, {
+      platform: "win32",
+      assembly: stubAssembly,
+      runtimeCreationTimeBits,
+    })).rejects.toThrow("verified Windows runtime executable lock is unavailable");
+  });
+
+  it("releases the prepared broker during normal privileged disposal", async () => {
+    await disposeWindowsRuntimeJobExecutableLock();
+    const broker = verifiedExecutableBrokerChild({ shutdownDelayMs: 30 });
+    await prepareWindowsRuntimeJobExecutableLock(stubAssembly, {
+      spawnLockBroker: () => broker,
+    });
+    const disposal = disposeWindowsRuntimeJobExecutableLock();
+    expect(broker.exitCode).toBeNull();
+    await disposal;
+    await closeChild(broker);
+    expect(broker.exitCode).toBe(0);
+  });
+
+  it("fails closed after the prepared broker is lost", async () => {
+    await disposeWindowsRuntimeJobExecutableLock();
+    const broker = nodeChild(
+      "process.stdout.write('LOCKED\\n'); setTimeout(() => process.exit(0), 20);"
+      + "process.stdin.resume()",
+    );
+    await prepareWindowsRuntimeJobExecutableLock(stubAssembly, {
+      spawnLockBroker: () => broker,
+    });
+    await closeChild(broker);
+    await expect(armWindowsRuntimeJob(runtimeGenerationId, 4_242, {
+      platform: "win32",
+      assembly: stubAssembly,
+      runtimeCreationTimeBits,
+    })).rejects.toThrow("verified Windows runtime executable lock is unavailable");
+  });
+
+  it("gives the broker-owned native executable one bounded startup window", async () => {
+    await disposeWindowsRuntimeJobExecutableLock();
+    await prepareWindowsRuntimeJobExecutableLock(stubAssembly, {
+      spawnLockBroker: () => verifiedExecutableBrokerChild({ responseDelayMs: 350 }),
+    });
     const containment = await armWindowsRuntimeJob(
       runtimeGenerationId,
       4_242,
@@ -429,16 +560,6 @@ describe("Windows runtime Job Object containment", () => {
         assembly: stubAssembly,
         runtimeCreationTimeBits,
         timeoutMs: 500,
-        spawnProcess: () => {
-          helper = nodeChild(
-            "setTimeout(() => {"
-            + "process.stderr.write('INERTIA_JOB_STAGE stage=native-guard-start\\n');"
-            + "process.stdout.write('READY\\n');"
-            + "}, 350);"
-            + "setInterval(() => undefined, 1000)",
-          );
-          return helper;
-        },
       },
     );
 
@@ -446,46 +567,37 @@ describe("Windows runtime Job Object containment", () => {
       kind: "windows-job-v1",
       name: windowsRuntimeJobName(runtimeGenerationId),
     });
-    helper!.kill("SIGKILL");
-    await closeChild(helper!);
   });
 
   it("reports the last bounded helper startup stage on timeout", async () => {
+    await disposeWindowsRuntimeJobExecutableLock();
+    await prepareWindowsRuntimeJobExecutableLock(stubAssembly, {
+      spawnLockBroker: () => verifiedExecutableBrokerChild({
+        guardStatus: "TIMEOUT",
+        guardStderr: "INERTIA_JOB_STAGE stage=native-guard-start\n",
+      }),
+    });
     await expect(armWindowsRuntimeJob(runtimeGenerationId, 4_242, {
       platform: "win32",
       assembly: stubAssembly,
       runtimeCreationTimeBits,
       timeoutMs: 100,
-      spawnProcess: () => protocolChild(
-        "INERTIA_JOB_STAGE stage=native-guard-start\n",
-      ),
     })).rejects.toThrow(
       "The native helper did not report readiness within 100ms after Guard started. "
       + "INERTIA_JOB_STAGE stage=native-guard-start",
     );
   });
 
-  it("keeps native arming fail closed after the startup window", async () => {
-    await expect(armWindowsRuntimeJob(runtimeGenerationId, 4_242, {
-      platform: "win32",
-      assembly: stubAssembly,
-      runtimeCreationTimeBits,
-      timeoutMs: 100,
-      spawnProcess: () => protocolChild(
-        "INERTIA_JOB_STAGE stage=native-guard-start\n",
-      ),
-    })).rejects.toThrow(
-      "The native helper did not report readiness within 100ms after Guard started.",
-    );
-  });
-
   it("fails closed when the native helper exits before readiness", async () => {
+    await disposeWindowsRuntimeJobExecutableLock();
+    await prepareWindowsRuntimeJobExecutableLock(stubAssembly, {
+      spawnLockBroker: () => verifiedExecutableBrokerChild({ guardStatus: "EXIT:17" }),
+    });
     await expect(armWindowsRuntimeJob(runtimeGenerationId, 4_242, {
       platform: "win32",
       assembly: stubAssembly,
       runtimeCreationTimeBits,
       timeoutMs: 1_000,
-      spawnProcess: () => nodeChild("process.exit(17)"),
     })).rejects.toThrow(
       "The Windows runtime Job Object could not be armed. "
       + "The native helper exited with code 17.",
@@ -493,16 +605,18 @@ describe("Windows runtime Job Object containment", () => {
   });
 
   it("reports bounded native stage diagnostics with the helper exit code", async () => {
+    await disposeWindowsRuntimeJobExecutableLock();
+    await prepareWindowsRuntimeJobExecutableLock(stubAssembly, {
+      spawnLockBroker: () => verifiedExecutableBrokerChild({
+        guardStatus: "EXIT:13",
+        guardStderr: "INERTIA_JOB_ERROR stage=assign-process win32=5\n" + "x".repeat(10_000),
+      }),
+    });
     const failure = await armWindowsRuntimeJob(runtimeGenerationId, 4_242, {
       platform: "win32",
       assembly: stubAssembly,
       runtimeCreationTimeBits,
       timeoutMs: 1_000,
-      spawnProcess: () => nodeChild(
-        "process.stderr.write('INERTIA_JOB_ERROR stage=assign-process win32=5\\n');"
-        + "process.stderr.write('x'.repeat(10_000));"
-        + "process.exit(13)",
-      ),
     }).then(
       () => null,
       (error: unknown) => error,
@@ -517,36 +631,30 @@ describe("Windows runtime Job Object containment", () => {
   });
 
   it("accepts recovery only after the exact named job helper succeeds", async () => {
-    let executable = "";
-    let arguments_: readonly string[] = [];
     await expect(recoverWindowsRuntimeJob({
       kind: "windows-job-v1",
       name: windowsRuntimeJobName(runtimeGenerationId),
     }, Date.now() + 1_000, {
       platform: "win32",
       assembly: stubAssembly,
-      spawnProcess: (candidate, candidateArguments) => {
-        executable = candidate;
-        arguments_ = candidateArguments;
-        return nodeChild("process.exit(0)");
-      },
     })).resolves.toBe(true);
-    expect(executable).toBe(resolve("/trusted/windows-runtime-job.exe"));
-    expect(arguments_).toEqual([
-      "recover",
-      windowsRuntimeJobName(runtimeGenerationId),
-      stubAssembly.sha256,
-    ]);
 
+    await disposeWindowsRuntimeJobExecutableLock();
+    await prepareWindowsRuntimeJobExecutableLock(stubAssembly, {
+      spawnLockBroker: () => verifiedExecutableBrokerChild({ recoverStatus: "EXIT:21" }),
+    });
     await expect(recoverWindowsRuntimeJob({
       kind: "windows-job-v1",
       name: windowsRuntimeJobName(runtimeGenerationId),
     }, Date.now() + 1_000, {
       platform: "win32",
       assembly: stubAssembly,
-      spawnProcess: () => nodeChild("process.exit(21)"),
     })).resolves.toBe(false);
 
+    await disposeWindowsRuntimeJobExecutableLock();
+    await prepareWindowsRuntimeJobExecutableLock(stubAssembly, {
+      spawnLockBroker: () => verifiedExecutableBrokerChild({ recoverStatus: "EXIT:22" }),
+    });
     await expect(recoverWindowsRuntimeJob({
       kind: "windows-job-v1",
       name: windowsRuntimeJobName(runtimeGenerationId),
@@ -555,16 +663,185 @@ describe("Windows runtime Job Object containment", () => {
       assembly: stubAssembly,
       // Native exit 22 means OpenJobObject failed for a reason other than
       // ERROR_FILE_NOT_FOUND and must never be projected as an absent job.
-      spawnProcess: () => nodeChild("process.exit(22)"),
     })).resolves.toBe(false);
   });
+
+  it("reuses one prepared broker across multiple native launches", async () => {
+    await disposeWindowsRuntimeJobExecutableLock();
+    let brokerSpawns = 0;
+    await prepareWindowsRuntimeJobExecutableLock(stubAssembly, {
+      spawnLockBroker: () => {
+        brokerSpawns += 1;
+        return verifiedExecutableBrokerChild();
+      },
+    });
+    await expect(armWindowsRuntimeJob(
+      "20000000-0000-4000-8000-000000000003:1",
+      4_242,
+      {
+        platform: "win32",
+        assembly: stubAssembly,
+        runtimeCreationTimeBits,
+      },
+    )).resolves.toMatchObject({ kind: "windows-job-v1" });
+    await expect(recoverWindowsRuntimeJob({
+      kind: "windows-job-v1",
+      name: windowsRuntimeJobName(
+        "20000000-0000-4000-8000-000000000004:1",
+      ),
+    }, Date.now() + 1_000, {
+      platform: "win32",
+      assembly: stubAssembly,
+    })).resolves.toBe(true);
+    expect(brokerSpawns).toBe(1);
+  });
+
+  it("fails closed on malformed broker output", async () => {
+    await disposeWindowsRuntimeJobExecutableLock();
+    await prepareWindowsRuntimeJobExecutableLock(stubAssembly, {
+      spawnLockBroker: () => verifiedExecutableBrokerChild({
+        malformedResult: "RESULT 1 READY only-one-field",
+      }),
+    });
+    await expect(armWindowsRuntimeJob(runtimeGenerationId, 4_242, {
+      platform: "win32",
+      assembly: stubAssembly,
+      runtimeCreationTimeBits,
+      timeoutMs: 1_000,
+    })).rejects.toThrow("broker returned an invalid result");
+  });
+
+  it("rejects fake readiness when the broker dies after launching", async () => {
+    await disposeWindowsRuntimeJobExecutableLock();
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    let live = true;
+    const broker = Object.assign(new EventEmitter(), {
+      stdin,
+      stdout,
+      stderr: new PassThrough(),
+      exitCode: null as number | null,
+      signalCode: null as NodeJS.Signals | null,
+      kill(signal?: NodeJS.Signals | number) {
+        if (signal === 0) return live;
+        live = false;
+        return true;
+      },
+    }) as unknown as ChildProcessWithoutNullStreams;
+    stdin.on("data", (chunk: Buffer) => {
+      const line = chunk.toString("utf8").trim();
+      if (!line.startsWith("GUARD ")) return;
+      const requestId = line.split(" ")[1];
+      stdout.write(
+        `RESULT ${requestId} READY ${Buffer.from("READY").toString("base64")} \n`,
+      );
+      live = false;
+      Object.assign(broker, { exitCode: 0 });
+      broker.emit("exit", 0, null);
+      broker.emit("close", 0, null);
+    });
+    const preparation = prepareWindowsRuntimeJobExecutableLock(stubAssembly, {
+      spawnLockBroker: () => broker,
+    });
+    queueMicrotask(() => stdout.write("LOCKED\n"));
+    await preparation;
+    await expect(armWindowsRuntimeJob(runtimeGenerationId, 4_242, {
+      platform: "win32",
+      assembly: stubAssembly,
+      runtimeCreationTimeBits,
+      timeoutMs: 1_000,
+    })).rejects.toThrow("executable lock was lost");
+  });
+
+  it("invalidates the whole broker authority after an operation deadline", async () => {
+    await disposeWindowsRuntimeJobExecutableLock();
+    const broker = verifiedExecutableBrokerChild({
+      malformedResult: "RESULT 999 READY UkVBRFk= ",
+    });
+    const closed = new Promise<void>((resolve) => broker.once("close", () => resolve()));
+    await prepareWindowsRuntimeJobExecutableLock(stubAssembly, {
+      spawnLockBroker: () => broker,
+    });
+    await expect(armWindowsRuntimeJob(runtimeGenerationId, 4_242, {
+      platform: "win32",
+      assembly: stubAssembly,
+      runtimeCreationTimeBits,
+      timeoutMs: 80,
+    })).rejects.toThrow("broker operation deadline elapsed");
+    await closed;
+    await expect(armWindowsRuntimeJob(runtimeGenerationId, 4_242, {
+      platform: "win32",
+      assembly: stubAssembly,
+      runtimeCreationTimeBits,
+    })).rejects.toThrow("executable lock is unavailable");
+  });
+
+  it.runIf(process.platform === "win32")(
+    "denies executable writes and replacement throughout native launch",
+    async () => {
+      const directory = mkdtempSync(join(process.cwd(), ".windows-job-lock-"));
+      const root = join(directory, "runtime");
+      mkdirSync(root);
+      const path = join(root, "windows-runtime-job.exe");
+      const originalBytes = readFileSync(realWindowsRuntimeJobAssembly().path);
+      writeFileSync(path, originalBytes);
+      const assembly = {
+        path,
+        root,
+        sha256: createHash("sha256").update(originalBytes).digest("hex"),
+      };
+      await disposeWindowsRuntimeJobExecutableLock();
+      await prepareWindowsRuntimeJobExecutableLock(assembly);
+      const generation = "30000000-0000-4000-8000-000000000006:1";
+      const runtime = nodeChild("setInterval(() => undefined, 1_000)");
+      if (!runtime.pid) throw new Error("The disposable child did not start.");
+      const creationIdentity = await windowsProcessCreationIdentity(runtime.pid);
+      let replacementError: unknown;
+      let renameError: unknown;
+      try {
+        const containment = await armWindowsRuntimeJob(generation, runtime.pid, {
+          assembly,
+          runtimeCreationTimeBits: creationIdentity,
+        });
+        try {
+          writeFileSync(path, Buffer.from("MZuntrusted replacement"));
+        } catch (error) {
+          replacementError = error;
+        }
+        try {
+          renameSync(path, `${path}.replaced`);
+        } catch (error) {
+          renameError = error;
+        }
+        expect(replacementError).toBeInstanceOf(Error);
+        expect(renameError).toBeInstanceOf(Error);
+        expect(readFileSync(path)).toEqual(originalBytes);
+        runtime.kill("SIGKILL");
+        await closeChild(runtime);
+        await expect(recoverWindowsRuntimeJob(
+          containment!,
+          Date.now() + 5_000,
+          { assembly },
+        )).resolves.toBe(true);
+      } finally {
+        runtime.kill("SIGKILL");
+        await closeChild(runtime);
+        await disposeWindowsRuntimeJobExecutableLock();
+        rmSync(directory, { recursive: true, force: true });
+      }
+    },
+    95_000,
+  );
 
   it.runIf(process.platform === "win32")(
     "reports a real native Windows helper failure through bounded UTF-8 stderr",
     async () => {
       const generation = "30000000-0000-4000-8000-000000000004:1";
+      const assembly = realWindowsRuntimeJobAssembly();
+      await disposeWindowsRuntimeJobExecutableLock();
+      await prepareWindowsRuntimeJobExecutableLock(assembly);
       const failure = await armWindowsRuntimeJob(generation, 4_294_967_294, {
-        assembly: realWindowsRuntimeJobAssembly(),
+        assembly,
         runtimeCreationTimeBits,
       })
         .then(
@@ -594,6 +871,8 @@ describe("Windows runtime Job Object containment", () => {
 
       const creationIdentity = await windowsProcessCreationIdentity(child.pid);
       const assembly = realWindowsRuntimeJobAssembly();
+      await disposeWindowsRuntimeJobExecutableLock();
+      await prepareWindowsRuntimeJobExecutableLock(assembly);
       const containment = await armWindowsRuntimeJob(generation, child.pid, {
         assembly,
         runtimeCreationTimeBits: creationIdentity,
@@ -623,6 +902,8 @@ describe("Windows runtime Job Object containment", () => {
       const child = nodeChild("setInterval(() => undefined, 1_000)");
       if (!child.pid) throw new Error("The disposable child did not start.");
       const assembly = realWindowsRuntimeJobAssembly();
+      await disposeWindowsRuntimeJobExecutableLock();
+      await prepareWindowsRuntimeJobExecutableLock(assembly);
       const creationIdentity = await windowsProcessCreationIdentity(child.pid);
       const containment = await armWindowsRuntimeJob(generation, child.pid, {
         assembly,
@@ -633,11 +914,13 @@ describe("Windows runtime Job Object containment", () => {
       vi.resetModules();
       const restarted = await import("../../src/main/windows-runtime-job");
       expect(restarted.recoverWindowsRuntimeJob).not.toBe(recoverWindowsRuntimeJob);
+      await restarted.prepareWindowsRuntimeJobExecutableLock(assembly);
       await expect(restarted.recoverWindowsRuntimeJob(
         containment,
-        Date.now() + 10_000,
+        Date.now() + 2_000,
         { assembly },
       )).resolves.toBe(true);
+      await restarted.disposeWindowsRuntimeJobExecutableLock();
       await closeChild(child);
     },
     95_000,

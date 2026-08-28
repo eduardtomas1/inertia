@@ -5,6 +5,7 @@ using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
+using System.Threading;
 
 public static class InertiaRuntimeJob {
   [StructLayout(LayoutKind.Sequential)]
@@ -102,8 +103,8 @@ public static class InertiaRuntimeJob {
     return difference == 0;
   }
 
-  private static bool VerifyExecutableIntegrity(string expectedDigest) {
-    if (expectedDigest == null || expectedDigest.Length != 64) return false;
+  private static FileStream OpenVerifiedExecutable(string expectedDigest) {
+    if (expectedDigest == null || expectedDigest.Length != 64) return null;
     byte[] expected = new byte[32];
     for (int index = 0; index < expected.Length; index += 1) {
       byte value;
@@ -112,24 +113,37 @@ public static class InertiaRuntimeJob {
         NumberStyles.AllowHexSpecifier,
         CultureInfo.InvariantCulture,
         out value
-      )) return false;
+      )) return null;
       expected[index] = value;
     }
     string path = typeof(InertiaRuntimeJob).Assembly.Location;
     var metadata = new FileInfo(path);
     if (!metadata.Exists || metadata.Length <= 0 || metadata.Length > MAX_EXECUTABLE_BYTES) {
-      return false;
+      return null;
     }
-    using (var stream = new FileStream(
-      path,
-      FileMode.Open,
-      FileAccess.Read,
-      FileShare.Read
-    ))
-    using (var sha256 = SHA256.Create()) {
-      if (stream.Length != metadata.Length) return false;
-      byte[] actual = sha256.ComputeHash(stream);
-      return stream.Position == stream.Length && FixedTimeEquals(actual, expected);
+    FileStream stream = null;
+    try {
+      stream = new FileStream(
+        path,
+        FileMode.Open,
+        FileAccess.Read,
+        FileShare.Read
+      );
+      using (var sha256 = SHA256.Create()) {
+        if (stream.Length != metadata.Length) {
+          stream.Dispose();
+          return null;
+        }
+        byte[] actual = sha256.ComputeHash(stream);
+        if (stream.Position != stream.Length || !FixedTimeEquals(actual, expected)) {
+          stream.Dispose();
+          return null;
+        }
+      }
+      return stream;
+    } catch {
+      if (stream != null) stream.Dispose();
+      return null;
     }
   }
 
@@ -258,6 +272,30 @@ public static class InertiaRuntimeJob {
       if (!AssignProcessToJobObject(job, process)) {
         return Failure("assign-process", 13, Marshal.GetLastWin32Error());
       }
+      IntPtr brokerJob = OpenJobObject(
+        JOB_OBJECT_QUERY | JOB_OBJECT_TERMINATE,
+        false,
+        name
+      );
+      if (brokerJob == IntPtr.Zero) {
+        return Failure("open-job-watch", 26, Marshal.GetLastWin32Error());
+      }
+      // The launch broker is the only owner of stdin. Unexpected broker exit
+      // closes the pipe, so the guardian must immediately terminate the Job
+      // instead of becoming an unowned background process. The watcher owns a
+      // distinct Job handle, avoiding a close/use race with Guard's handle.
+      var brokerWatcher = new Thread(delegate() {
+        try {
+          try {
+            while (Console.In.Read() != -1) {}
+          } catch {}
+          TerminateJobObject(brokerJob, 137);
+        } finally {
+          CloseHandle(brokerJob);
+        }
+      });
+      brokerWatcher.IsBackground = true;
+      brokerWatcher.Start();
       // Write the private readiness protocol to the native stream so Node
       // always receives the bounded UTF-8 marker it parses on every build.
       WriteProtocolLine(Console.OpenStandardOutput(), "READY");
@@ -302,31 +340,33 @@ public static class InertiaRuntimeJob {
     if (
       arguments == null
       || arguments.Length < 3
-      || !VerifyExecutableIntegrity(arguments[arguments.Length - 1])
     ) return Failure("self-integrity", 23, 0);
-    if (String.Equals(arguments[0], "recover", StringComparison.Ordinal)) {
-      return arguments.Length == 3 ? Recover(arguments[1]) : 24;
-    }
-    if (!String.Equals(arguments[0], "guard", StringComparison.Ordinal)
-      || arguments.Length != 5) return 24;
-    UInt32 processId;
-    if (!UInt32.TryParse(
-      arguments[2],
-      NumberStyles.None,
-      CultureInfo.InvariantCulture,
-      out processId
-    ) || processId <= 1 || processId > Int32.MaxValue) {
-      return Failure("capture-process-handle", 12, 0);
-    }
-    Process process = null;
-    try {
-      process = Process.GetProcessById((Int32)processId);
-      IntPtr handle = process.Handle;
-      return Guard(arguments[1], handle, arguments[3]);
-    } catch {
-      return Failure("capture-process-handle", 12, 0);
-    } finally {
-      if (process != null) process.Dispose();
+    using (var executable = OpenVerifiedExecutable(arguments[arguments.Length - 1])) {
+      if (executable == null) return Failure("self-integrity", 23, 0);
+      if (String.Equals(arguments[0], "recover", StringComparison.Ordinal)) {
+        return arguments.Length == 3 ? Recover(arguments[1]) : 24;
+      }
+      if (!String.Equals(arguments[0], "guard", StringComparison.Ordinal)
+        || arguments.Length != 5) return 24;
+      UInt32 processId;
+      if (!UInt32.TryParse(
+        arguments[2],
+        NumberStyles.None,
+        CultureInfo.InvariantCulture,
+        out processId
+      ) || processId <= 1 || processId > Int32.MaxValue) {
+        return Failure("capture-process-handle", 12, 0);
+      }
+      Process process = null;
+      try {
+        process = Process.GetProcessById((Int32)processId);
+        IntPtr handle = process.Handle;
+        return Guard(arguments[1], handle, arguments[3]);
+      } catch {
+        return Failure("capture-process-handle", 12, 0);
+      } finally {
+        if (process != null) process.Dispose();
+      }
     }
   }
 }

@@ -18,7 +18,7 @@ const outputDirectory = join(
   "runtime-process-guardian",
 );
 const output = join(outputDirectory, "runtime-process-guardian");
-const windowsOutput = join(outputDirectory, "windows-runtime-job.dll");
+const windowsOutput = join(outputDirectory, "windows-runtime-job.exe");
 const windowsIntegrityOutput = join(
   root,
   "resources",
@@ -64,10 +64,12 @@ if (-not $sourceInfo.Exists -or $sourceInfo.Length -le 0 -or $sourceInfo.Length 
 $source = [IO.File]::ReadAllText($sourcePath, [Text.Encoding]::UTF8)
 $provider = [Microsoft.CSharp.CSharpCodeProvider]::new()
 $parameters = [System.CodeDom.Compiler.CompilerParameters]::new()
-$parameters.GenerateExecutable = $false
+$parameters.GenerateExecutable = $true
 $parameters.GenerateInMemory = $false
 $parameters.OutputAssembly = $outputPath
-$parameters.CompilerOptions = '/platform:anycpu /optimize+'
+$parameters.MainClass = 'InertiaRuntimeJob'
+$parameters.ReferencedAssemblies.Add('System.dll') | Out-Null
+$parameters.CompilerOptions = '/platform:anycpu /optimize+ /target:exe'
 try {
   $results = $provider.CompileAssemblyFromSource($parameters, [string[]]@($source))
   if ($results.Errors.HasErrors) {

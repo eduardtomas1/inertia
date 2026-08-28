@@ -351,7 +351,7 @@ async function requirePackagedAssets(executable) {
     windowsRuntimeJobAssembly = join(
       resourcesDirectory,
       "runtime",
-      "windows-runtime-job.dll",
+      "windows-runtime-job.exe",
     );
     const metadata = await lstat(windowsRuntimeJobAssembly).catch(() => null);
     if (

@@ -63,7 +63,7 @@ describe("Windows runtime Job Object assembly resolution", () => {
     })).toBe(join(
       resolve("C:\\Program Files\\Inertia\\resources"),
       "runtime",
-      "windows-runtime-job.dll",
+      "windows-runtime-job.exe",
     ));
   });
 
@@ -77,7 +77,7 @@ describe("Windows runtime Job Object assembly resolution", () => {
       "resources",
       "generated",
       "runtime-process-guardian",
-      "windows-runtime-job.dll",
+      "windows-runtime-job.exe",
     ));
   });
 });

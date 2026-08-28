@@ -20,7 +20,6 @@ import {
   type RuntimeAssetLocations,
 } from "./runtime-assets.js";
 
-const HELPER_STARTUP_TIMEOUT_MS = 60_000;
 const NATIVE_READY_TIMEOUT_MS = 15_000;
 const MAX_OUTPUT_BYTES = 8_192;
 const MAX_PROCESS_METRICS = 1_024;
@@ -29,10 +28,7 @@ const PROCESS_METRIC_TIMEOUT_MS = 5_000;
 const MAX_PROCESS_METRIC_ATTEMPTS = 500;
 const MAX_WINDOWS_JOB_ASSEMBLY_BYTES = 1024 * 1024;
 
-type WindowsRuntimeJobStage =
-  | "powershell-start"
-  | "assembly-load-complete"
-  | "native-guard-start";
+type WindowsRuntimeJobStage = "native-guard-start";
 
 interface ActiveWindowsRuntimeJob {
   readonly child: ChildProcessWithoutNullStreams;
@@ -62,9 +58,9 @@ function environmentValue(
     key.toLowerCase() === name.toLowerCase() && typeof value === "string")?.[1];
 }
 
-export function windowsRuntimePowerShellLaunch(
+export function windowsRuntimeJobEnvironment(
   environment: NodeJS.ProcessEnv,
-): { executable: string; environment: NodeJS.ProcessEnv } | null {
+): NodeJS.ProcessEnv | null {
   const root = environmentValue(environment, "SystemRoot")?.trim();
   const temporary = (
     environmentValue(environment, "TEMP")
@@ -80,22 +76,13 @@ export function windowsRuntimePowerShellLaunch(
   ) return null;
   const normalizedTemporary = win32.normalize(temporary);
   return {
-    executable: win32.join(
-      root,
-      "System32",
-      "WindowsPowerShell",
-      "v1.0",
-      "powershell.exe",
-    ),
-    environment: {
-      ComSpec: win32.join(root, "System32", "cmd.exe"),
-      PATH: win32.join(root, "System32"),
-      SystemRoot: root,
-      SYSTEMROOT: root,
-      WINDIR: root,
-      TEMP: normalizedTemporary,
-      TMP: normalizedTemporary,
-    },
+    ComSpec: win32.join(root, "System32", "cmd.exe"),
+    PATH: win32.join(root, "System32"),
+    SystemRoot: root,
+    SYSTEMROOT: root,
+    WINDIR: root,
+    TEMP: normalizedTemporary,
+    TMP: normalizedTemporary,
   };
 }
 
@@ -188,17 +175,13 @@ export async function waitForWindowsRuntimeProcessCreationIdentity(
 }
 
 
-function encodedPowerShell(body: string): string {
-  return Buffer.from(body, "utf16le").toString("base64");
-}
-
 function normalizedWindowsRuntimeJobAssembly(
   assembly: WindowsRuntimeJobAssembly,
 ): WindowsRuntimeJobAssembly {
   const root = resolve(assembly.root);
   const path = resolve(assembly.path);
   if (
-    path !== join(root, "windows-runtime-job.dll")
+    path !== join(root, "windows-runtime-job.exe")
     || !/^[0-9a-f]{64}$/u.test(assembly.sha256)
   ) {
     throw new Error("The Windows runtime Job Object assembly authority is invalid.");
@@ -222,7 +205,7 @@ export function validateWindowsRuntimeJobAssembly(
   assertDirectAssetBoundary(assembly.root, assembly.path);
   const canonicalRoot = realpathSync.native(assembly.root);
   const canonicalPath = realpathSync.native(assembly.path);
-  if (canonicalPath !== join(canonicalRoot, "windows-runtime-job.dll")) {
+  if (canonicalPath !== join(canonicalRoot, "windows-runtime-job.exe")) {
     throw new Error("The Windows runtime Job Object assembly escaped its asset root.");
   }
   const descriptor = lstatSync(assembly.path, { throwIfNoEntry: false });
@@ -290,78 +273,16 @@ export function resolveRequiredWindowsRuntimeJobAssembly(options: {
 
 function selectedWindowsRuntimeJobAssembly(options: {
   readonly assembly?: WindowsRuntimeJobAssembly;
-  readonly spawnProcess?: typeof spawnPowerShell;
+  readonly spawnProcess?: typeof spawnWindowsRuntimeJobExecutable;
 }): WindowsRuntimeJobAssembly {
   if (!options.assembly) {
     throw new Error("The Windows runtime Job Object assembly authority is unavailable.");
   }
   // An injected process is the unit-test boundary. Production always validates
-  // the exact protected digest and direct file before starting PowerShell.
+  // the exact protected digest and direct file before starting the executable.
   return options.spawnProcess
     ? normalizedWindowsRuntimeJobAssembly(options.assembly)
     : validateWindowsRuntimeJobAssembly(options.assembly);
-}
-
-function commandScript(
-  command: string,
-  assembly: WindowsRuntimeJobAssembly,
-  beforeAssemblyLoad = "",
-): string {
-  const encodedAssemblyPath = Buffer.from(assembly.path, "utf8").toString("base64");
-  return `$ErrorActionPreference = 'Stop'
-function Write-InertiaJobProtocol([string]$Value) {
-  $stream = [Console]::OpenStandardError()
-  $bytes = [Text.Encoding]::UTF8.GetBytes($Value + [Environment]::NewLine)
-  $stream.Write($bytes, 0, $bytes.Length)
-  $stream.Flush()
-}
-Write-InertiaJobProtocol 'INERTIA_JOB_STAGE stage=powershell-start'
-${beforeAssemblyLoad}
-$assemblyPath = [Text.Encoding]::UTF8.GetString(
-  [Convert]::FromBase64String('${encodedAssemblyPath}')
-)
-$assemblyStream = [IO.File]::Open(
-  $assemblyPath,
-  [IO.FileMode]::Open,
-  [IO.FileAccess]::Read,
-  [IO.FileShare]::Read
-)
-try {
-  if ($assemblyStream.Length -le 0 -or $assemblyStream.Length -gt ${MAX_WINDOWS_JOB_ASSEMBLY_BYTES}) {
-    throw 'The Windows runtime Job Object assembly is oversized.'
-  }
-  $assemblyBytes = New-Object byte[] ([int]$assemblyStream.Length)
-  $offset = 0
-  while ($offset -lt $assemblyBytes.Length) {
-    $read = $assemblyStream.Read(
-      $assemblyBytes,
-      $offset,
-      $assemblyBytes.Length - $offset
-    )
-    if ($read -eq 0) { break }
-    $offset += $read
-  }
-  if ($offset -ne $assemblyBytes.Length -or $assemblyStream.ReadByte() -ne -1) {
-    throw 'The Windows runtime Job Object assembly changed while reading.'
-  }
-  $sha256 = [Security.Cryptography.SHA256]::Create()
-  try {
-    $actualDigest = [BitConverter]::ToString(
-      $sha256.ComputeHash($assemblyBytes)
-    ).Replace('-', '').ToLowerInvariant()
-  } finally {
-    $sha256.Dispose()
-  }
-  if ($actualDigest -cne '${assembly.sha256}') {
-    throw 'The Windows runtime Job Object assembly integrity check failed.'
-  }
-  [Reflection.Assembly]::Load($assemblyBytes) | Out-Null
-} finally {
-  $assemblyStream.Dispose()
-}
-Write-InertiaJobProtocol 'INERTIA_JOB_STAGE stage=assembly-load-complete'
-${command}
-exit $LASTEXITCODE`;
 }
 
 function appendBounded(current: string, chunk: Buffer): string {
@@ -371,32 +292,27 @@ function appendBounded(current: string, chunk: Buffer): string {
 
 function latestHelperStage(output: string): WindowsRuntimeJobStage | null {
   const matches = output.matchAll(
-    /INERTIA_JOB_STAGE stage=(powershell-start|assembly-load-complete|native-guard-start)/gu,
+    /INERTIA_JOB_STAGE stage=(native-guard-start)/gu,
   );
   let latest: WindowsRuntimeJobStage | null = null;
   for (const match of matches) latest = match[1] as WindowsRuntimeJobStage;
   return latest;
 }
 
-function spawnPowerShell(
-  script: string,
+function spawnWindowsRuntimeJobExecutable(
+  executable: string,
+  arguments_: readonly string[],
   environment: NodeJS.ProcessEnv,
 ): ChildProcessWithoutNullStreams {
-  const trusted = windowsRuntimePowerShellLaunch(environment);
-  if (!trusted) throw new Error("The trusted Windows PowerShell runtime is unavailable.");
+  const trustedEnvironment = windowsRuntimeJobEnvironment(environment);
+  if (!trustedEnvironment) {
+    throw new Error("The trusted Windows runtime environment is unavailable.");
+  }
   return spawn(
-    trusted.executable,
-    [
-      "-NoLogo",
-      "-NoProfile",
-      "-NonInteractive",
-      "-ExecutionPolicy",
-      "Bypass",
-      "-EncodedCommand",
-      encodedPowerShell(script),
-    ],
+    executable,
+    [...arguments_],
     {
-      env: trusted.environment,
+      env: trustedEnvironment,
       shell: false,
       windowsHide: true,
       stdio: ["pipe", "pipe", "pipe"],
@@ -413,7 +329,7 @@ export async function armWindowsRuntimeJob(
     readonly timeoutMs?: number;
     readonly runtimeCreationTimeBits?: string;
     readonly assembly?: WindowsRuntimeJobAssembly;
-    readonly spawnProcess?: typeof spawnPowerShell;
+    readonly spawnProcess?: typeof spawnWindowsRuntimeJobExecutable;
   } = {},
 ): Promise<WindowsRuntimeJobContainment | null> {
   if ((options.platform ?? process.platform) !== "win32") return null;
@@ -433,32 +349,15 @@ export async function armWindowsRuntimeJob(
     throw new Error("The Windows runtime Job Object is already active.");
   }
   const assembly = selectedWindowsRuntimeJobAssembly(options);
-  const child = (options.spawnProcess ?? spawnPowerShell)(
-    commandScript(
-      `$result = try {
-  [InertiaRuntimeJob]::Guard(
-    '${name}',
-    $runtimeHandle,
-    '${runtimeCreationTimeBits}'
-  )
-} finally {
-  $runtimeProcess.Dispose()
-}
-exit $result`,
-      assembly,
-      `$runtimeProcess = $null
-try {
-  $runtimeProcess = [Diagnostics.Process]::GetProcessById(${runtimePid})
-  # Reading Handle eagerly opens and retains the exact process object before
-  # loading the precompiled helper. A later reuse of the numeric PID cannot retarget
-  # AssignProcessToJobObject or WaitForSingleObject.
-  $runtimeHandle = $runtimeProcess.Handle
-} catch {
-  if ($null -ne $runtimeProcess) { $runtimeProcess.Dispose() }
-  Write-InertiaJobProtocol 'INERTIA_JOB_ERROR stage=capture-process-handle'
-  exit 12
-}`,
-    ),
+  const child = (options.spawnProcess ?? spawnWindowsRuntimeJobExecutable)(
+    assembly.path,
+    [
+      "guard",
+      name,
+      String(runtimePid),
+      runtimeCreationTimeBits,
+      assembly.sha256,
+    ],
     options.environment ?? process.env,
   );
   let stdout = "";
@@ -479,20 +378,17 @@ try {
     activeJobs.delete(name);
     settleCompletion(code === 0);
   });
-  child.once("error", () => settleCompletion(false));
+  child.once("error", () => {
+    activeJobs.delete(name);
+    settleCompletion(false);
+  });
 
   const startupTimeoutMs = Math.max(1, Math.min(
-    options.timeoutMs ?? HELPER_STARTUP_TIMEOUT_MS,
-    HELPER_STARTUP_TIMEOUT_MS,
-  ));
-  const nativeReadyTimeoutMs = Math.min(
-    startupTimeoutMs,
+    options.timeoutMs ?? NATIVE_READY_TIMEOUT_MS,
     NATIVE_READY_TIMEOUT_MS,
-  );
-  let deadlineAt = Date.now() + startupTimeoutMs;
+  ));
+  const deadlineAt = Date.now() + startupTimeoutMs;
   let lastStage: WindowsRuntimeJobStage | null = null;
-  let postCompileDeadlineStarted = false;
-  let nativeDeadlineStarted = false;
   while (true) {
     if (stdout.split(/\r?\n/u).includes("READY")) {
       ready = true;
@@ -501,14 +397,6 @@ try {
     if (child.exitCode !== null || child.signalCode !== null) break;
     const observedStage = latestHelperStage(stderr);
     if (observedStage !== null) lastStage = observedStage;
-    if (lastStage === "assembly-load-complete" && !postCompileDeadlineStarted) {
-      postCompileDeadlineStarted = true;
-      deadlineAt = Date.now() + nativeReadyTimeoutMs;
-    }
-    if (lastStage === "native-guard-start" && !nativeDeadlineStarted) {
-      nativeDeadlineStarted = true;
-      deadlineAt = Date.now() + nativeReadyTimeoutMs;
-    }
     if (Date.now() >= deadlineAt) break;
     await new Promise<void>((resolve) => setTimeout(resolve, 10));
   }
@@ -521,12 +409,8 @@ try {
       : child.signalCode
         ? `The native helper exited from signal ${child.signalCode}.`
         : lastStage === "native-guard-start"
-          ? `The native helper did not report readiness within ${nativeReadyTimeoutMs}ms after Guard started.`
-          : lastStage === "assembly-load-complete"
-            ? `The native helper did not enter Guard within ${nativeReadyTimeoutMs}ms after the assembly loaded.`
-            : lastStage === "powershell-start"
-              ? `The PowerShell helper did not load the precompiled assembly within ${startupTimeoutMs}ms.`
-              : `The PowerShell helper did not start within ${startupTimeoutMs}ms.`;
+          ? `The native helper did not report readiness within ${startupTimeoutMs}ms after Guard started.`
+          : `The native helper did not start within ${startupTimeoutMs}ms.`;
     throw new Error([
       "The Windows runtime Job Object could not be armed.",
       outcome,
@@ -543,7 +427,7 @@ export async function recoverWindowsRuntimeJob(
     readonly platform?: NodeJS.Platform;
     readonly environment?: NodeJS.ProcessEnv;
     readonly assembly?: WindowsRuntimeJobAssembly;
-    readonly spawnProcess?: typeof spawnPowerShell;
+    readonly spawnProcess?: typeof spawnWindowsRuntimeJobExecutable;
   } = {},
 ): Promise<boolean> {
   if ((options.platform ?? process.platform) !== "win32") return false;
@@ -557,11 +441,9 @@ export async function recoverWindowsRuntimeJob(
     ]);
   }
   const assembly = selectedWindowsRuntimeJobAssembly(options);
-  const child = (options.spawnProcess ?? spawnPowerShell)(
-    commandScript(
-      `$result = [InertiaRuntimeJob]::Recover('${containment.name}'); exit $result`,
-      assembly,
-    ),
+  const child = (options.spawnProcess ?? spawnWindowsRuntimeJobExecutable)(
+    assembly.path,
+    ["recover", containment.name, assembly.sha256],
     options.environment ?? process.env,
   );
   return await new Promise<boolean>((resolve) => {

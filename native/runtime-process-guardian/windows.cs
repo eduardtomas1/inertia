@@ -1,7 +1,9 @@
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Globalization;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text;
 
 public static class InertiaRuntimeJob {
@@ -85,10 +87,51 @@ public static class InertiaRuntimeJob {
   private const UInt32 JOB_OBJECT_QUERY = 0x0004;
   private const UInt32 JOB_OBJECT_TERMINATE = 0x0008;
   private const UInt32 INFINITE = 0xffffffff;
+  private const Int64 MAX_EXECUTABLE_BYTES = 1024 * 1024;
   private const UInt64 WINDOWS_TO_UNIX_EPOCH_TICKS = 116444736000000000;
   private const Int32 ERROR_FILE_NOT_FOUND = 2;
   private const int JobObjectBasicAccountingInformation = 1;
   private const int JobObjectExtendedLimitInformation = 9;
+
+  private static bool FixedTimeEquals(byte[] left, byte[] right) {
+    if (left.Length != right.Length) return false;
+    int difference = 0;
+    for (int index = 0; index < left.Length; index += 1) {
+      difference |= left[index] ^ right[index];
+    }
+    return difference == 0;
+  }
+
+  private static bool VerifyExecutableIntegrity(string expectedDigest) {
+    if (expectedDigest == null || expectedDigest.Length != 64) return false;
+    byte[] expected = new byte[32];
+    for (int index = 0; index < expected.Length; index += 1) {
+      byte value;
+      if (!Byte.TryParse(
+        expectedDigest.Substring(index * 2, 2),
+        NumberStyles.AllowHexSpecifier,
+        CultureInfo.InvariantCulture,
+        out value
+      )) return false;
+      expected[index] = value;
+    }
+    string path = typeof(InertiaRuntimeJob).Assembly.Location;
+    var metadata = new FileInfo(path);
+    if (!metadata.Exists || metadata.Length <= 0 || metadata.Length > MAX_EXECUTABLE_BYTES) {
+      return false;
+    }
+    using (var stream = new FileStream(
+      path,
+      FileMode.Open,
+      FileAccess.Read,
+      FileShare.Read
+    ))
+    using (var sha256 = SHA256.Create()) {
+      if (stream.Length != metadata.Length) return false;
+      byte[] actual = sha256.ComputeHash(stream);
+      return stream.Position == stream.Length && FixedTimeEquals(actual, expected);
+    }
+  }
 
   private static void WriteProtocolLine(Stream stream, string value) {
     byte[] bytes = Encoding.UTF8.GetBytes(value + "\n");
@@ -215,7 +258,6 @@ public static class InertiaRuntimeJob {
       if (!AssignProcessToJobObject(job, process)) {
         return Failure("assign-process", 13, Marshal.GetLastWin32Error());
       }
-      // PowerShell 5.1's redirected Console.Out encoding is host-dependent.
       // Write the private readiness protocol to the native stream so Node
       // always receives the bounded UTF-8 marker it parses on every build.
       WriteProtocolLine(Console.OpenStandardOutput(), "READY");
@@ -253,6 +295,38 @@ public static class InertiaRuntimeJob {
       return ActiveProcesses(job) == 0 ? 0 : 21;
     } finally {
       CloseHandle(job);
+    }
+  }
+
+  public static int Main(string[] arguments) {
+    if (
+      arguments == null
+      || arguments.Length < 3
+      || !VerifyExecutableIntegrity(arguments[arguments.Length - 1])
+    ) return Failure("self-integrity", 23, 0);
+    if (String.Equals(arguments[0], "recover", StringComparison.Ordinal)) {
+      return arguments.Length == 3 ? Recover(arguments[1]) : 24;
+    }
+    if (!String.Equals(arguments[0], "guard", StringComparison.Ordinal)
+      || arguments.Length != 5) return 24;
+    UInt32 processId;
+    if (!UInt32.TryParse(
+      arguments[2],
+      NumberStyles.None,
+      CultureInfo.InvariantCulture,
+      out processId
+    ) || processId <= 1 || processId > Int32.MaxValue) {
+      return Failure("capture-process-handle", 12, 0);
+    }
+    Process process = null;
+    try {
+      process = Process.GetProcessById((Int32)processId);
+      IntPtr handle = process.Handle;
+      return Guard(arguments[1], handle, arguments[3]);
+    } catch {
+      return Failure("capture-process-handle", 12, 0);
+    } finally {
+      if (process != null) process.Dispose();
     }
   }
 }

@@ -253,6 +253,9 @@ describe("cross-platform packaged behavior contract", () => {
       "src/main/runtime-windows-job-bootstrap.ts",
     );
     const windowsJob = await source("src/main/windows-runtime-job.ts");
+    const windowsJobNative = await source(
+      "native/runtime-process-guardian/windows.cs",
+    );
     const processSafety = await source("src/main/runtime-supervisor-process-safety.ts");
     expect(smoke).toContain('process.platform === "darwin"');
     expect(smoke).toContain('process.platform === "win32"');
@@ -261,7 +264,7 @@ describe("cross-platform packaged behavior contract", () => {
       "`The packaged ${process.platform} runtime process guardian is missing or invalid.`",
     );
     expect(smoke).toContain('"runtime-process-guardian"');
-    expect(smoke).toContain('"windows-runtime-job.dll"');
+    expect(smoke).toContain('"windows-runtime-job.exe"');
     expect(smoke).toContain("MAX_RUNTIME_GUARDIAN_BYTES");
     expect(smoke).toContain('spawnSync(guardian, ["seccomp-selftest"]');
     expect(smoke).toContain(
@@ -288,8 +291,12 @@ describe("cross-platform packaged behavior contract", () => {
     expect(windowsJob).not.toContain("process.cwd()");
     expect(windowsJob).toContain("windows-runtime-job-integrity.json");
     expect(windowsJob).toContain("timingSafeEqual(actual, expected)");
-    expect(windowsJob).toContain("[IO.FileShare]::Read");
-    expect(windowsJob).toContain("[Reflection.Assembly]::Load($assemblyBytes)");
+    expect(windowsJobNative).toContain("FileShare.Read");
+    expect(windowsJobNative).toContain("VerifyExecutableIntegrity(");
+    expect(windowsJobNative).toContain("Process.GetProcessById(");
+    expect(windowsJob).toContain('"guard"');
+    expect(windowsJob).toContain('"recover"');
+    expect(windowsJob).not.toContain("-EncodedCommand");
     expect(processSafety).toContain("configuration.windowsRuntimeJobAssembly");
     expect(smoke).toContain('process.arch === "x64" ? "" : `-${process.arch}`');
     expect(smoke).toContain(

@@ -171,20 +171,24 @@ describe("final release container smoke", () => {
     expect(source).toContain("musl-tools, linux-libc-dev, and binutils");
   });
 
-  it("precompiles the Windows Job Object helper into a bounded AnyCPU assembly", async () => {
+  it("precompiles the Windows Job Object helper into a bounded AnyCPU executable", async () => {
     const source = await readFile(
       join(repositoryRoot, "scripts", "build-runtime-process-guardian.mjs"),
       "utf8",
     );
-    expect(source).toContain('"windows-runtime-job.dll"');
+    expect(source).toContain('"windows-runtime-job.exe"');
     expect(source).toContain('"native", "runtime-process-guardian", "windows.cs"');
     expect(source).toContain("[Microsoft.CSharp.CSharpCodeProvider]::new()");
     expect(source).toContain("[System.CodeDom.Compiler.CompilerParameters]::new()");
-    expect(source).toContain("$parameters.GenerateExecutable = $false");
+    expect(source).toContain("$parameters.GenerateExecutable = $true");
     expect(source).toContain("$parameters.GenerateInMemory = $false");
     expect(source).toContain("$parameters.OutputAssembly = $outputPath");
+    expect(source).toContain("$parameters.MainClass = 'InertiaRuntimeJob'");
     expect(source).toContain(
-      "$parameters.CompilerOptions = '/platform:anycpu /optimize+'",
+      "$parameters.ReferencedAssemblies.Add('System.dll') | Out-Null",
+    );
+    expect(source).toContain(
+      "$parameters.CompilerOptions = '/platform:anycpu /optimize+ /target:exe'",
     );
     expect(source).toContain("$provider.CompileAssemblyFromSource(");
     expect(source).toContain("$results.Errors.HasErrors");

@@ -12,7 +12,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, resolve, win32 } from "node:path";
 import { PassThrough } from "node:stream";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -23,7 +23,7 @@ import {
   resolveRequiredWindowsRuntimeJobAssembly,
   validateWindowsRuntimeJobAssembly,
   windowsRuntimeJobName,
-  windowsRuntimePowerShellLaunch,
+  windowsRuntimeJobEnvironment,
   windowsRuntimeProcessCreationIdentity,
   waitForWindowsRuntimeProcessCreationIdentity,
 } from "../../src/main/windows-runtime-job";
@@ -32,7 +32,7 @@ const runtimeGenerationId = "20000000-0000-4000-8000-000000000002:1";
 const runtimeCreationTimeMs = 1_700_000_000_123.456;
 const runtimeCreationTimeBits = "4789786004267972428";
 const stubAssembly = {
-  path: resolve("/trusted/windows-runtime-job.dll"),
+  path: resolve("/trusted/windows-runtime-job.exe"),
   root: resolve("/trusted"),
   sha256: "a".repeat(64),
 } as const;
@@ -81,8 +81,11 @@ async function closeChild(child: ChildProcessWithoutNullStreams): Promise<void> 
 }
 
 async function windowsProcessCreationIdentity(pid: number): Promise<string> {
-  const trusted = windowsRuntimePowerShellLaunch(process.env);
-  if (!trusted) throw new Error("Trusted Windows PowerShell is unavailable.");
+  const trustedEnvironment = windowsRuntimeJobEnvironment(process.env);
+  const systemRoot = trustedEnvironment?.SystemRoot;
+  if (!trustedEnvironment || !systemRoot) {
+    throw new Error("Trusted Windows runtime environment is unavailable.");
+  }
   const script = `$process = [Diagnostics.Process]::GetProcessById(${pid})
 try {
   $unixMicroseconds = [Math]::Floor(
@@ -93,7 +96,13 @@ try {
 } finally {
   $process.Dispose()
 }`;
-  const child = spawn(trusted.executable, [
+  const child = spawn(win32.join(
+    systemRoot,
+    "System32",
+    "WindowsPowerShell",
+    "v1.0",
+    "powershell.exe",
+  ), [
     "-NoLogo",
     "-NoProfile",
     "-NonInteractive",
@@ -102,7 +111,7 @@ try {
     "-EncodedCommand",
     Buffer.from(script, "utf16le").toString("base64"),
   ], {
-    env: trusted.environment,
+    env: trustedEnvironment,
     shell: false,
     windowsHide: true,
     stdio: ["ignore", "pipe", "pipe"],
@@ -245,35 +254,31 @@ describe("Windows runtime Job Object containment", () => {
     );
   });
 
-  it("uses a fixed trusted PowerShell and never inherits user secrets", () => {
-    expect(windowsRuntimePowerShellLaunch({
+  it("uses a bounded trusted runtime environment and never inherits user secrets", () => {
+    expect(windowsRuntimeJobEnvironment({
       SystemRoot: "C:\\Windows",
       TEMP: "C:\\Users\\Test\\AppData\\Local\\Temp",
       PATH: "C:\\attacker",
       SECRET_TOKEN: "must-not-be-inherited",
     })).toEqual({
-      executable:
-        "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
-      environment: {
-        ComSpec: "C:\\Windows\\System32\\cmd.exe",
-        PATH: "C:\\Windows\\System32",
-        SystemRoot: "C:\\Windows",
-        SYSTEMROOT: "C:\\Windows",
-        WINDIR: "C:\\Windows",
-        TEMP: "C:\\Users\\Test\\AppData\\Local\\Temp",
-        TMP: "C:\\Users\\Test\\AppData\\Local\\Temp",
-      },
+      ComSpec: "C:\\Windows\\System32\\cmd.exe",
+      PATH: "C:\\Windows\\System32",
+      SystemRoot: "C:\\Windows",
+      SYSTEMROOT: "C:\\Windows",
+      WINDIR: "C:\\Windows",
+      TEMP: "C:\\Users\\Test\\AppData\\Local\\Temp",
+      TMP: "C:\\Users\\Test\\AppData\\Local\\Temp",
     });
-    expect(windowsRuntimePowerShellLaunch({ SystemRoot: "relative" }))
+    expect(windowsRuntimeJobEnvironment({ SystemRoot: "relative" }))
       .toBeNull();
   });
 
-  it("accepts only one bounded direct precompiled assembly file", () => {
+  it("accepts only one bounded direct precompiled executable", () => {
     const directory = mkdtempSync(join(process.cwd(), ".windows-job-assembly-"));
     try {
       const root = join(directory, "runtime");
       mkdirSync(root);
-      const path = join(root, "windows-runtime-job.dll");
+      const path = join(root, "windows-runtime-job.exe");
       const bytes = Buffer.from([0x4d, 0x5a, 0x90, 0x00]);
       writeFileSync(path, bytes);
       const assembly = {
@@ -300,7 +305,7 @@ describe("Windows runtime Job Object containment", () => {
       mkdirSync(portableTarget);
       const portableRoot = join(portableTarget, "runtime");
       mkdirSync(portableRoot);
-      writeFileSync(join(portableRoot, "windows-runtime-job.dll"), bytes);
+      writeFileSync(join(portableRoot, "windows-runtime-job.exe"), bytes);
       const portableLink = join(directory, "portable-link");
       symlinkSync(
         portableTarget,
@@ -308,7 +313,7 @@ describe("Windows runtime Job Object containment", () => {
         process.platform === "win32" ? "junction" : "dir",
       );
       const portableAssembly = {
-        path: join(portableLink, "runtime", "windows-runtime-job.dll"),
+        path: join(portableLink, "runtime", "windows-runtime-job.exe"),
         root: join(portableLink, "runtime"),
         sha256: assembly.sha256,
       };
@@ -321,14 +326,14 @@ describe("Windows runtime Job Object containment", () => {
       const linkedRoot = join(directory, "linked-runtime");
       symlinkSync(root, linkedRoot, process.platform === "win32" ? "junction" : "dir");
       expect(() => validateWindowsRuntimeJobAssembly({
-        path: join(linkedRoot, "windows-runtime-job.dll"),
+        path: join(linkedRoot, "windows-runtime-job.exe"),
         root: linkedRoot,
         sha256: assembly.sha256,
       })).toThrow("path is not direct");
 
       rmSync(path);
       symlinkSync(
-        join(portableRoot, "windows-runtime-job.dll"),
+        join(portableRoot, "windows-runtime-job.exe"),
         path,
         "file",
       );
@@ -368,16 +373,18 @@ describe("Windows runtime Job Object containment", () => {
     await closeChild(helper!);
   });
 
-  it("pins the exact runtime handle before loading the precompiled assembly", async () => {
-    let script = "";
+  it("launches only the exact verified native executable and bounded arguments", async () => {
+    let executable = "";
+    let arguments_: readonly string[] = [];
     let helper: ChildProcessWithoutNullStreams | null = null;
     await armWindowsRuntimeJob(runtimeGenerationId, 4_242, {
       platform: "win32",
       assembly: stubAssembly,
       runtimeCreationTimeBits,
       timeoutMs: 1_000,
-      spawnProcess: (candidate) => {
-        script = candidate;
+      spawnProcess: (candidate, candidateArguments) => {
+        executable = candidate;
+        arguments_ = candidateArguments;
         helper = nodeChild(
           "process.stdout.write('READY\\n'); setInterval(() => undefined, 1000)",
         );
@@ -385,28 +392,14 @@ describe("Windows runtime Job Object containment", () => {
       },
     });
 
-    const captureIndex = script.indexOf(
-      "$runtimeProcess = [Diagnostics.Process]::GetProcessById(4242)",
-    );
-    const handleIndex = script.indexOf(
-      "$runtimeHandle = $runtimeProcess.Handle",
-    );
-    const loadIndex = script.indexOf("[Reflection.Assembly]::Load($assemblyBytes)");
-    expect(captureIndex).toBeGreaterThan(-1);
-    expect(handleIndex).toBeGreaterThan(captureIndex);
-    expect(loadIndex).toBeGreaterThan(handleIndex);
-    expect(script).toContain(
-      Buffer.from(resolve("/trusted/windows-runtime-job.dll"), "utf8").toString("base64"),
-    );
-    expect(script).not.toContain("/trusted/windows-runtime-job.dll");
-    expect(script).not.toContain("Add-Type -TypeDefinition");
-    expect(script).toContain("[IO.FileShare]::Read");
-    expect(script).toContain(`$actualDigest -cne '${stubAssembly.sha256}'`);
-    expect(script).toContain(
-      `'${windowsRuntimeJobName(runtimeGenerationId)}',`,
-    );
-    expect(script).toContain(`'${runtimeCreationTimeBits}'`);
-    expect(script).toContain("$runtimeProcess.Dispose()");
+    expect(executable).toBe(resolve("/trusted/windows-runtime-job.exe"));
+    expect(arguments_).toEqual([
+      "guard",
+      windowsRuntimeJobName(runtimeGenerationId),
+      "4242",
+      runtimeCreationTimeBits,
+      stubAssembly.sha256,
+    ]);
 
     const nativeSource = readFileSync(
       resolve(process.cwd(), "native/runtime-process-guardian/windows.cs"),
@@ -414,6 +407,8 @@ describe("Windows runtime Job Object containment", () => {
     );
     expect(nativeSource).toContain("CultureInfo.InvariantCulture");
     expect(nativeSource).not.toContain("OpenProcess(");
+    expect(nativeSource).toContain("VerifyExecutableIntegrity(");
+    expect(nativeSource).toContain("Process.GetProcessById(");
     expect(nativeSource).toContain("GetProcessTimes(");
     expect(nativeSource).toContain("read-process-identity");
     expect(nativeSource).toContain("process-identity-mismatch");
@@ -424,7 +419,7 @@ describe("Windows runtime Job Object containment", () => {
     await closeChild(helper!);
   });
 
-  it("gives precompiled assembly startup a bounded stage-aware window", async () => {
+  it("gives the direct native executable one bounded startup window", async () => {
     let helper: ChildProcessWithoutNullStreams | null = null;
     const containment = await armWindowsRuntimeJob(
       runtimeGenerationId,
@@ -436,13 +431,10 @@ describe("Windows runtime Job Object containment", () => {
         timeoutMs: 500,
         spawnProcess: () => {
           helper = nodeChild(
-            "process.stderr.write('INERTIA_JOB_STAGE stage=powershell-start\\n');"
-            + "setTimeout(() => process.stderr.write("
-            + "'INERTIA_JOB_STAGE stage=assembly-load-complete\\n'), 350);"
-            + "setTimeout(() => {"
+            "setTimeout(() => {"
             + "process.stderr.write('INERTIA_JOB_STAGE stage=native-guard-start\\n');"
             + "process.stdout.write('READY\\n');"
-            + "}, 700);"
+            + "}, 350);"
             + "setInterval(() => undefined, 1000)",
           );
           return helper;
@@ -465,11 +457,11 @@ describe("Windows runtime Job Object containment", () => {
       runtimeCreationTimeBits,
       timeoutMs: 100,
       spawnProcess: () => protocolChild(
-        "INERTIA_JOB_STAGE stage=powershell-start\n",
+        "INERTIA_JOB_STAGE stage=native-guard-start\n",
       ),
     })).rejects.toThrow(
-      "The PowerShell helper did not load the precompiled assembly within 100ms. "
-      + "INERTIA_JOB_STAGE stage=powershell-start",
+      "The native helper did not report readiness within 100ms after Guard started. "
+      + "INERTIA_JOB_STAGE stage=native-guard-start",
     );
   });
 
@@ -480,9 +472,7 @@ describe("Windows runtime Job Object containment", () => {
       runtimeCreationTimeBits,
       timeoutMs: 100,
       spawnProcess: () => protocolChild(
-        "INERTIA_JOB_STAGE stage=powershell-start\n"
-        + "INERTIA_JOB_STAGE stage=assembly-load-complete\n"
-        + "INERTIA_JOB_STAGE stage=native-guard-start\n",
+        "INERTIA_JOB_STAGE stage=native-guard-start\n",
       ),
     })).rejects.toThrow(
       "The native helper did not report readiness within 100ms after Guard started.",
@@ -527,14 +517,26 @@ describe("Windows runtime Job Object containment", () => {
   });
 
   it("accepts recovery only after the exact named job helper succeeds", async () => {
+    let executable = "";
+    let arguments_: readonly string[] = [];
     await expect(recoverWindowsRuntimeJob({
       kind: "windows-job-v1",
       name: windowsRuntimeJobName(runtimeGenerationId),
     }, Date.now() + 1_000, {
       platform: "win32",
       assembly: stubAssembly,
-      spawnProcess: () => nodeChild("process.exit(0)"),
+      spawnProcess: (candidate, candidateArguments) => {
+        executable = candidate;
+        arguments_ = candidateArguments;
+        return nodeChild("process.exit(0)");
+      },
     })).resolves.toBe(true);
+    expect(executable).toBe(resolve("/trusted/windows-runtime-job.exe"));
+    expect(arguments_).toEqual([
+      "recover",
+      windowsRuntimeJobName(runtimeGenerationId),
+      stubAssembly.sha256,
+    ]);
 
     await expect(recoverWindowsRuntimeJob({
       kind: "windows-job-v1",
@@ -574,13 +576,7 @@ describe("Windows runtime Job Object containment", () => {
         "The native helper exited with code 12.",
       );
       expect((failure as Error).message).toContain(
-        "INERTIA_JOB_STAGE stage=powershell-start",
-      );
-      expect((failure as Error).message).toContain(
         "INERTIA_JOB_ERROR stage=capture-process-handle",
-      );
-      expect((failure as Error).message).not.toContain(
-        "INERTIA_JOB_STAGE stage=assembly-load-complete",
       );
       expect((failure as Error).message).not.toContain(
         "INERTIA_JOB_STAGE stage=native-guard-start",

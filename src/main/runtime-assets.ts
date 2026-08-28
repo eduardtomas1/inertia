@@ -34,12 +34,12 @@ export function resolveWindowsRuntimeJobAssemblyPath(
   locations: RuntimeAssetLocations,
 ): string {
   return locations.isPackaged
-    ? join(resolve(locations.resourcesPath), "runtime", "windows-runtime-job.dll")
+    ? join(resolve(locations.resourcesPath), "runtime", "windows-runtime-job.exe")
     : join(
         resolve(locations.appPath),
         "resources",
         "generated",
         "runtime-process-guardian",
-        "windows-runtime-job.dll",
+        "windows-runtime-job.exe",
       );
 }

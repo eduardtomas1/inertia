@@ -9,6 +9,12 @@ import type {
   RuntimeCredentialOperation,
   RuntimeWorkerOptions,
 } from "../node/runtime-process-protocol.js";
+import type {
+  RuntimeOwnedProcessContainment,
+} from "../node/runtime-owned-processes.js";
+import type {
+  ModernDarwinRecoveryAuthorityDescriptor,
+} from "../node/runtime-modern-recovery-authorities.js";
 import type { SecureFileRequest, SecureFileResult } from "../node/secure-file-protocol.js";
 import type {
   AgentBrowserCommand,
@@ -20,6 +26,7 @@ import type {
   ConversationAttachmentStoreAnyOperationRunner,
   ConversationAttachmentStoreAuthority,
 } from "../node/conversation-attachment-store-child.js";
+import type { WindowsRuntimeJobAssembly } from "./windows-runtime-job.js";
 
 export type RuntimeSupervisorTimer = ReturnType<typeof setTimeout>;
 
@@ -28,9 +35,14 @@ export interface RuntimeProcessRecord {
   generation: number;
   runtimeGenerationId: string;
   cleanupReceiptIds: Set<string>;
+  legacyRecoveryAuthorityIds: Set<string>;
+  readonly legacyRecoveryAuthorityBatchIds: readonly string[];
+  modernDarwinRecoveryAuthority:
+    ModernDarwinRecoveryAuthorityDescriptor | null;
   ready: boolean;
   acceptingReady: boolean;
   cleanupConfirmed: boolean;
+  cleanupRecoveryRequired: boolean;
   generationCleanupConfirmed: boolean;
   processTreeTerminationConfirmed: boolean;
   processTreeTermination: Promise<boolean> | null;
@@ -123,14 +135,18 @@ export interface RuntimeSupervisorSnapshot {
 
 export interface RuntimeSupervisorOptions {
   spawn: () => UtilityProcess;
+  windowsRuntimeJobAssembly?: WindowsRuntimeJobAssembly;
   workerOptions: Omit<
     RuntimeWorkerOptions,
     | "runtimeGenerationId"
     | "systemBootId"
     | "confirmedTerminatedRuntimeGenerationIds"
+    | "manuallyRetiredRuntimeGenerationIds"
     | "priorRuntimeCleanupUnconfirmed"
   >;
   systemBootId?: string;
+  /** Main-owned user decision gate; no process recovery or worker spawn occurs. */
+  runtimeRecoveryBlocked?: boolean;
   startupTimeoutMs?: number;
   stableUptimeMs?: number;
   shutdownGraceMs?: number;
@@ -143,6 +159,17 @@ export interface RuntimeSupervisorOptions {
     systemBootId: string,
     deadlineAt: number,
   ) => boolean | Promise<boolean> | null;
+  getProcessMetrics?: () => readonly {
+    readonly pid: number;
+    readonly creationTime: number;
+    readonly name?: string;
+    readonly type: string;
+  }[];
+  armProcessContainment?: (
+    runtimeGenerationId: string,
+    runtimePid: number,
+    admission?: { readonly isCurrent: () => boolean },
+  ) => RuntimeOwnedProcessContainment | Promise<RuntimeOwnedProcessContainment | null> | null;
   credentialBroker?: RuntimeCredentialBroker;
   credentialRequestTimeoutMs?: number;
   secureFileBroker?: RuntimeSecureFileBroker;

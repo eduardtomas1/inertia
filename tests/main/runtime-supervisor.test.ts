@@ -4,26 +4,22 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
 import {
-  RuntimeSupervisor,
-  runtimeRestartDelayMs,
-  type RuntimeAttachmentBroker,
-  type RuntimeCredentialBroker,
-  type RuntimeSecureFileBroker,
+  RuntimeSupervisor, runtimeRestartDelayMs, type RuntimeAttachmentBroker,
+  type RuntimeCredentialBroker, type RuntimeSecureFileBroker,
 } from "../../src/main/runtime-supervisor";
 import { RuntimeCleanupReceiptJournal } from "../../src/main/runtime-cleanup-receipts";
+import {
+  type ModernDarwinRecoveryAuthorityDescriptor,
+} from "../../src/node/runtime-modern-recovery-authorities";
 import {
   encodeConversationAttachmentStoreOperation,
   type ConversationAttachmentStoreAnyOperationRunner,
   type ConversationAttachmentStoreAuthority,
 } from "../../src/node/conversation-attachment-store-child";
 import type { RuntimeWorkerCommand } from "../../src/node/runtime-process-protocol";
-import { RuntimeGenerationLeaseJournal } from "../../src/node/runtime-generation-leases";
-import { RuntimeOwnedProcessJournal } from "../../src/node/runtime-owned-processes";
-import {
-  privateConnectRuntimeGrantsFromProjectIds,
-} from "../../src/shared/private-connect/runtime-grants";
+import { privateConnectRuntimeGrantsFromProjectIds }
+  from "../../src/shared/private-connect/runtime-grants";
 
 const firstUrl = `ws://127.0.0.1:41001/runtime/${"a".repeat(43)}`;
 const secondUrl = `ws://127.0.0.1:41002/runtime/${"b".repeat(43)}`;
@@ -58,29 +54,19 @@ class FakeUtilityProcess extends EventEmitter {
   killCalls = 0;
   postError: Error | null = null;
 
-  constructor(pid: number) {
-    super();
-    this.pid = pid;
-  }
+  constructor(pid: number) { super(); this.pid = pid; }
 
   postMessage(message: RuntimeWorkerCommand): void {
     if (this.postError) throw this.postError;
     this.messages.push(message);
   }
 
-  kill(): boolean {
-    this.killCalls += 1;
-    return true;
-  }
+  kill(): boolean { this.killCalls += 1; return true; }
 
   spawn(): void { this.emit("spawn"); }
   message(value: unknown): void {
-    if (
-      value
-      && typeof value === "object"
-      && "type" in value
-      && value.type === "runtime.ready"
-    ) {
+    if (value && typeof value === "object" && "type" in value
+      && value.type === "runtime.ready") {
       const start = this.messages.findLast((message) =>
         message.type === "runtime.start");
       if (start?.type === "runtime.start") {
@@ -90,6 +76,25 @@ class FakeUtilityProcess extends EventEmitter {
             type: "runtime.cleanup-receipt-consumed",
             receiptRuntimeGenerationId,
             currentRuntimeGenerationId: start.options.runtimeGenerationId,
+          });
+        }
+        for (const retiredRuntimeGenerationId of
+          start.options.manuallyRetiredRuntimeGenerationIds ?? []) {
+          this.emit("message", {
+            type: "runtime.legacy-recovery-authority-consumed",
+            retiredRuntimeGenerationId,
+            currentRuntimeGenerationId: start.options.runtimeGenerationId,
+          });
+        }
+        if (start.options.manualModernDarwinRecovery) {
+          this.emit("message", {
+            type: "runtime.modern-darwin-recovery-authority-acknowledged",
+            operationId:
+              start.options.manualModernDarwinRecovery.operationId,
+            snapshotDigest:
+              start.options.manualModernDarwinRecovery.snapshotDigest,
+            currentRuntimeGenerationId:
+              start.options.runtimeGenerationId,
           });
         }
       }
@@ -104,6 +109,7 @@ class FakeUtilityProcess extends EventEmitter {
 }
 
 function createHarness(options: {
+  systemBootId?: string;
   stableUptimeMs?: number;
   shutdownGraceMs?: number;
   forceKillWaitMs?: number;
@@ -121,6 +127,9 @@ function createHarness(options: {
   attachmentRequestTimeoutMs?: number;
   databaseRecoveryRequestTimeoutMs?: number;
   databaseRecoveryCancelTimeoutMs?: number;
+  manualModernDarwinRecovery?: ModernDarwinRecoveryAuthorityDescriptor;
+  runtimeProcessGuardianPath?: string;
+  runtimeRecoveryBlocked?: boolean;
 } = {}) {
   const children: FakeUtilityProcess[] = [];
   const forceKill = vi.fn((
@@ -128,11 +137,21 @@ function createHarness(options: {
     _deadlineAt: number,
   ): boolean | Promise<boolean> => true);
   const supervisor = new RuntimeSupervisor({
-    systemBootId: "test:00000000-0000-4000-8000-000000000001",
+    systemBootId: options.systemBootId
+      ?? "test:00000000-0000-4000-8000-000000000001",
+    ...(options.runtimeRecoveryBlocked
+      ? { runtimeRecoveryBlocked: true }
+      : {}),
     workerOptions: {
       dataDirectory,
       defaultWorkspacePath: workspaceDirectory,
       enableProviders: false,
+      ...(options.manualModernDarwinRecovery
+        ? { manualModernDarwinRecovery: options.manualModernDarwinRecovery }
+        : {}),
+      ...(options.runtimeProcessGuardianPath
+        ? { runtimeProcessGuardianPath: options.runtimeProcessGuardianPath }
+        : {}),
     },
     spawn: () => {
       const child = new FakeUtilityProcess(10_000 + children.length);
@@ -146,6 +165,9 @@ function createHarness(options: {
     forceKill,
     // Generic tests model exact cleanup; fail-closed cases override it below.
     recoverOwnedProcesses: options.recoverOwnedProcesses ?? (() => true),
+    armProcessContainment: () => process.platform === "win32"
+      ? { kind: "windows-job-v1", name: `Global\\InertiaRuntime-${"a".repeat(64)}` }
+      : null,
     credentialBroker: options.credentialBroker,
     credentialRequestTimeoutMs: options.credentialRequestTimeoutMs,
     secureFileBroker: options.secureFileBroker,
@@ -171,32 +193,6 @@ afterEach(() => {
 });
 
 describe("RuntimeSupervisor", () => {
-  it.runIf(process.platform === "linux")(
-    "retires a recoverable prior app generation before spawning",
-    async () => {
-      const priorGeneration = "30000000-0000-4000-8000-000000000003:7";
-      const bootId = "test:00000000-0000-4000-8000-000000000001";
-      expect(new RuntimeGenerationLeaseJournal(dataDirectory)
-        .publish(priorGeneration, bootId)).toBe(true);
-      expect(new RuntimeOwnedProcessJournal(dataDirectory)
-        .startSession(priorGeneration, bootId)).toBe(true);
-      const { children, supervisor } = createHarness();
-
-      supervisor.start();
-      expect(children).toHaveLength(0);
-      await vi.advanceTimersByTimeAsync(0);
-
-      expect(children).toHaveLength(1);
-      children[0].spawn();
-      expect(children[0].messages.at(-1)).toMatchObject({
-        type: "runtime.start",
-        options: {
-          confirmedTerminatedRuntimeGenerationIds: [priorGeneration],
-        },
-      });
-    },
-  );
-
   it("prepares and releases only the current runtime generation for an update", async () => {
     const { children, supervisor } = createHarness();
     supervisor.start();
@@ -955,6 +951,7 @@ describe("RuntimeSupervisor", () => {
     children[0].message({ type: "runtime.stopped" });
     children[0].exit(0);
     await expect(stopped).resolves.toBe(false);
+    expect(supervisor.canResumeWithModernDarwinRecovery()).toBe(false);
   });
 
   it("brokers attachments only to the current generation and bounds stalled requests", async () => {

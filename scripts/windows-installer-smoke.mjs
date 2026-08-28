@@ -276,6 +276,7 @@ export async function requireInstalledFiles(
     join("resources", "app.asar"),
     join("resources", "LICENSE.txt"),
     join("resources", "THIRD_PARTY_NOTICES.txt"),
+    join("resources", "runtime", "windows-runtime-job.exe"),
     join("resources", "elevate.exe"),
   ];
   for (const relativePath of requiredRelativePaths) {

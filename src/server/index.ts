@@ -1,5 +1,4 @@
 import { randomBytes } from "node:crypto";
-import { mkdirSync } from "node:fs";
 import { createServer } from "node:http";
 import { join, resolve } from "node:path";
 import WebSocket from "ws";
@@ -14,19 +13,9 @@ import {
   type RuntimeMutationEvent,
   type RuntimeSyncCursor,
 } from "../shared/contracts";
-import {
-  validRuntimeGenerationId,
-  validSystemBootId,
-} from "../node/runtime-process-protocol";
-import { ConversationAttachmentStore } from "../node/conversation-attachment-store";
-import { RuntimeGenerationLeaseJournal } from "../node/runtime-generation-leases";
 import { RuntimeStore } from "./database";
 import { TurnController } from "./runtime/turns/turn-controller";
-import { recoverInterruptedTurns } from "./runtime/turns/turn-recovery";
-import {
-  DuoLaunchCoordinator,
-  reconcileInterruptedDuoLaunches,
-} from "./runtime/duo/duo-launch-coordinator";
+import { DuoLaunchCoordinator } from "./runtime/duo/duo-launch-coordinator";
 import { resolveAuthoritativeProjectPath } from "./project-path";
 import { PROVIDER_IDS, ProviderManager, type ProviderDetection } from "./providers";
 import { ProviderMetadataCache, type ProviderMetadata } from "./provider/metadata";
@@ -118,6 +107,11 @@ import { runPackagedImageRetentionSmoke } from "./runtime/attachments/package-sm
 import type { RunningRuntime, RuntimeOptions } from "./runtime-types";
 import { RuntimeUpdatePreparationGate } from "./runtime-update-preparation";
 import { recordSystemSuspendInterval } from "./runtime/system-suspend-coordinator";
+import {
+  initializeRuntimePersistence,
+  prepareRuntimeStartupRecovery,
+  runtimeSafetyError,
+} from "./runtime-startup-recovery";
 export type {
   RunningRuntime,
   RuntimeBackendCredentialBroker,
@@ -128,49 +122,20 @@ export {
 } from "./runtime/commands/review-support";
 
 export async function startRuntime(options: RuntimeOptions): Promise<RunningRuntime> {
-  if (!validRuntimeGenerationId(options.runtimeGenerationId)) {
-    throw new Error("The runtime generation identity is invalid.");
-  }
-  if (!validSystemBootId(options.systemBootId)) {
-    throw new Error("The operating system boot identity is invalid.");
-  }
-  const confirmedGenerations = options.confirmedTerminatedRuntimeGenerationIds ?? [];
-  if (
-    confirmedGenerations.length > 32
-    || new Set(confirmedGenerations).size !== confirmedGenerations.length
-    || confirmedGenerations.some((generationId) => (
-      !validRuntimeGenerationId(generationId)
-      || generationId === options.runtimeGenerationId
-    ))
-  ) throw new Error("The confirmed runtime cleanup receipts are invalid.");
-  const dataDirectory = resolve(options.dataDirectory);
-  mkdirSync(dataDirectory, { recursive: true, mode: 0o700 });
-  const runtimeGenerationLeases = new RuntimeGenerationLeaseJournal(dataDirectory);
-  for (const confirmedRuntimeGenerationId of confirmedGenerations) {
-    if (!runtimeGenerationLeases.clearRuntimeGeneration(confirmedRuntimeGenerationId)) {
-      throw new Error("Confirmed provider process ownership could not be retired.");
-    }
-  }
-  const priorBootLeasesCleared = runtimeGenerationLeases.clearPriorBootSessions(
-    options.systemBootId,
-  );
-  const retainedGenerationLeases = runtimeGenerationLeases.all();
-  const currentGenerationOwner = (lease: typeof retainedGenerationLeases[number]): boolean => (
-    lease.runtimeGenerationId === options.runtimeGenerationId
-    && lease.systemBootId === options.systemBootId
-  );
-  const runtimeSafetyLock = options.priorRuntimeCleanupUnconfirmed === true
-    || !runtimeGenerationLeases.isValid()
-    || !retainedGenerationLeases.some(currentGenerationOwner)
-    || retainedGenerationLeases.some((lease) => !currentGenerationOwner(lease));
-  const runtimeSafetyError = (operation: string): string => (
-    options.systemBootId === "unavailable"
-      ? `${operation} A prior runtime-owned process may still be running, and automatic cleanup verification is unavailable on this computer. Keep the affected work in place and contact support for recovery guidance.`
-      : `${operation} A prior runtime-owned process may still be running. Restarting Inertia is not enough; a full computer restart lets Inertia verify cleanup.`
-  );
+  const startupRecovery = prepareRuntimeStartupRecovery(options);
+  const {
+    dataDirectory,
+    manuallyRetiredGenerations,
+    authorizedModernGenerationIds,
+    runtimeSafetyLock,
+  } = startupRecovery;
   const generatedAttachments = await PrivateGeneratedAttachmentStore.create(
     dataDirectory,
-    { preserveExisting: runtimeSafetyLock },
+    {
+      preserveExisting: runtimeSafetyLock
+        || manuallyRetiredGenerations.length > 0
+        || authorizedModernGenerationIds.size > 0,
+    },
   );
   const databasePath = join(dataDirectory, "inertia.sqlite");
   let turns: TurnController;
@@ -231,28 +196,10 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       onDatabaseBackupCreated: () => onDatabaseBackupCreated(),
     },
   );
-  for (const confirmedRuntimeGenerationId of confirmedGenerations) {
-    store.providerRunOwnership.clearRuntimeGeneration(
-      confirmedRuntimeGenerationId,
-    );
-    options.onCleanupReceiptConsumed?.(
-      confirmedRuntimeGenerationId,
-      options.runtimeGenerationId,
-    );
-  }
-  if (priorBootLeasesCleared) {
-    store.providerRunOwnership.clearPriorBootSessions(options.systemBootId);
-  }
-  const conversationAttachments = await ConversationAttachmentStore.open(
-    dataDirectory,
-    options.conversationAttachmentStoreOperations
-      ? {
-          operationRunner: options.conversationAttachmentStoreOperations,
-          readOperationRunner: options.conversationAttachmentStoreOperations,
-        }
-      : {},
-  );
-  if (!runtimeSafetyLock) await conversationAttachments.reconcile(store.attachments());
+  const {
+    conversationAttachments: initializedConversationAttachments,
+    recovery,
+  } = await initializeRuntimePersistence(options, startupRecovery, store);
   const recoveryImportFault = process.env.NODE_ENV === "test"
     ? options.recoveryImportFault
     : undefined;
@@ -268,7 +215,6 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const testOnlyProviderRefresh = process.env.NODE_ENV === "test"
     ? options.testOnlyProviderRefresh
     : undefined;
-  if (!runtimeSafetyLock) store.startBackups();
   const secureFiles: RuntimeSecureFileBroker = options.secureFiles ?? {
     authorizeRoot: async () => {
       throw new SecureFileError(
@@ -296,10 +242,6 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     },
   };
   const secureFileAuthorities = new SecureFileAuthorityRegistry(secureFiles);
-  const recovery = runtimeSafetyLock
-    ? { recoveredTurns: [], recoveredAttachmentIds: [] }
-    : recoverInterruptedTurns(store);
-  if (!runtimeSafetyLock) await reconcileInterruptedDuoLaunches(store);
   if (options.attachments && recovery.recoveredAttachmentIds.length > 0) {
     void Promise.allSettled(recovery.recoveredAttachmentIds.map(
       (attachmentId) => options.attachments!.cleanup(attachmentId),
@@ -336,7 +278,10 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const privateConnectTranscriptCache = new PrivateConnectTranscriptCache();
   const turnGitArtifacts = new TurnGitArtifactManager(store, dataDirectory);
   const enableProviders = !runtimeSafetyLock && (options.enableProviders ?? true);
-  const terminals = new TerminalManager();
+  const terminals = new TerminalManager({
+    onOwnedProcessCleanupUnconfirmed:
+      options.onOwnedProcessCleanupUnconfirmed,
+  });
   const providerTerminalResumes = new ProviderTerminalResumeRegistry(store.conversationWork);
   const metadataCache = new ProviderMetadataCache({
     persistence: {
@@ -734,7 +679,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       }),
       createUsageCommandHandler({ store, send }),
       createConversationCommandHandler({
-        store, conversationAttachments,
+        store, conversationAttachments: initializedConversationAttachments,
         providers,
         backendProfileController,
         workspaceRuns,
@@ -753,7 +698,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         contextRequests: agentThreads.contextRequests,
       }),
       createTurnInteractionCommandHandler({
-        store, conversationAttachments,
+        store, conversationAttachments: initializedConversationAttachments,
         backendProfileController,
         turns,
         isolatedRuns,
@@ -814,7 +759,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         send,
       }),
       createProjectWorkspaceCommandHandler({
-        store, conversationAttachments,
+        store, conversationAttachments: initializedConversationAttachments,
         workspaceRuns,
         turns,
         providers,
@@ -1026,7 +971,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       runPackagedImageRetentionSmoke(
         inputPath,
         resultPath,
-        conversationAttachments,
+        initializedConversationAttachments,
         signal,
       ),
     websocketUrl,
@@ -1218,8 +1163,8 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
           await projectIdentities.drain();
         },
         independentDrains: [
-          () => conversationAttachments.close(),
-          () => terminals.disposeAll(),
+          () => initializedConversationAttachments.close(),
+          ({ deadlineAt }) => terminals.disposeAll(deadlineAt),
           () => providerMaintenance.dispose(),
         ],
         stopIsolatedRuns: () => isolatedRuns.dispose(cause),

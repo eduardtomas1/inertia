@@ -1,6 +1,7 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import {
   chmodSync,
+  existsSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
@@ -10,25 +11,34 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  readDarwinProcessIdentity,
   recoverPriorRuntimeGenerations,
   recoverRuntimeOwnedProcesses,
 } from "../../src/main/runtime-owned-process-recovery";
+import { windowsRuntimeJobName } from "../../src/main/windows-runtime-job";
 import { RuntimeCleanupReceiptJournal } from "../../src/main/runtime-cleanup-receipts";
 import { RuntimeGenerationLeaseJournal } from "../../src/node/runtime-generation-leases";
 import {
   activateRuntimeOwnedProcessRegistry,
-  awaitRuntimeOwnedProcessCleanupConfirmed,
   confirmRuntimeOwnedProcessStopped,
+  darwinProcessGuardianReady,
+  darwinProcessSessionEmpty,
   readLinuxProcessIdentity,
+  runtimeOwnedProcessInvocation,
   RuntimeOwnedProcessJournal,
   spawnRuntimeOwnedPidProcess,
   spawnRuntimeOwnedProcess,
 } from "../../src/node/runtime-owned-processes";
+import {
+  readLinuxGuardianReadyAsync,
+  signalLinuxGuardianExact,
+} from "../../src/node/runtime-owned-process-linux";
+import { runtimeOwnedPtyInvocation } from "../../src/node/runtime-owned-pty-invocation";
 
 const systemBootId = "test:10000000-0000-4000-8000-000000000001";
 const runtimeGenerationId = "20000000-0000-4000-8000-000000000002:1";
@@ -41,6 +51,14 @@ function activate(directory: string): void {
     directory,
     runtimeGenerationId,
     systemBootId,
+    process.platform === "darwin" || process.platform === "linux"
+      ? {
+          darwinGuardianPath: join(
+            process.cwd(),
+            "resources/generated/runtime-process-guardian/runtime-process-guardian",
+          ),
+        }
+      : {},
   );
   if (deactivate) deactivators.push(deactivate);
 }
@@ -75,9 +93,13 @@ function temporaryDirectory(): string {
 }
 
 function longRunningChild(): ChildProcess {
-  const child = spawnRuntimeOwnedProcess(() => spawn(
+  const invocation = runtimeOwnedProcessInvocation(
     process.execPath,
     ["-e", "setInterval(() => undefined, 1000)"],
+  );
+  const child = spawnRuntimeOwnedProcess(() => spawn(
+    invocation.command,
+    invocation.args,
     {
       detached: true,
       shell: false,
@@ -89,25 +111,61 @@ function longRunningChild(): ChildProcess {
   return child;
 }
 
-function rawLongRunningPidChild(): ChildProcess & { readonly pid: number } {
-  const child = spawn(
-    process.execPath,
-    ["-e", "setInterval(() => undefined, 1000)"],
-    { detached: true, shell: false, stdio: "ignore" },
+async function completedLinuxGuardian(
+  directory: string,
+  durableState: "preauth" | "owned" | "retiring",
+): Promise<{
+  guardian: ChildProcess;
+  journal: RuntimeOwnedProcessJournal;
+}> {
+  const guardianPath = join(
+    process.cwd(),
+    "resources/generated/runtime-process-guardian/runtime-process-guardian",
   );
-  if (!child.pid) throw new Error("Missing child PID");
-  liveChildren.add(child);
-  child.once("close", () => liveChildren.delete(child));
-  return child as ChildProcess & { readonly pid: number };
-}
-
-function preGroupIdentity(pid: number) {
-  const identity = readLinuxProcessIdentity(pid);
-  if (!identity) throw new Error("Missing child identity");
-  return {
-    ...identity,
-    processGroupId: pid === 2 ? 3 : pid - 1,
-  };
+  const executable = statSync(guardianPath, { bigint: true });
+  const journal = new RuntimeOwnedProcessJournal(directory, {
+    platform: "linux",
+    darwinGuardianPath: guardianPath,
+  });
+  expect(journal.startSession(runtimeGenerationId, systemBootId)).toBe(true);
+  const ownershipId = journal.begin(runtimeGenerationId, systemBootId);
+  const guardian = spawn(guardianPath, [
+    "watch",
+    String(process.pid),
+    String(executable.dev),
+    String(executable.ino),
+    "--",
+    "/bin/true",
+  ], { detached: true, shell: false, stdio: "ignore" });
+  liveChildren.add(guardian);
+  guardian.once("close", () => liveChildren.delete(guardian));
+  if (!guardian.pid) throw new Error("Missing Linux guardian PID");
+  const identity = await readLinuxGuardianReadyAsync(
+    guardian.pid,
+    guardianPath,
+    process.pid,
+  );
+  if (!identity) throw new Error("Linux guardian did not become ready");
+  const claim = journal.claim(
+    ownershipId,
+    runtimeGenerationId,
+    systemBootId,
+    guardian.pid,
+    process.pid,
+    { expectedLinuxIdentity: identity },
+  );
+  if (!("startTimeTicks" in claim.process)) {
+    throw new Error("Missing Linux guardian identity");
+  }
+  expect(signalLinuxGuardianExact(claim.process, guardianPath, "claim")).toBe(true);
+  if (durableState !== "preauth") expect(journal.own(ownershipId)).not.toBeNull();
+  if (durableState === "retiring") expect(journal.retire(ownershipId)).toBe(true);
+  expect(signalLinuxGuardianExact(claim.process, guardianPath, "exec")).toBe(true);
+  await vi.waitFor(() => {
+    expect(readFileSync(`/proc/${guardian.pid}/comm`, "utf8").trim())
+      .toBe("inertia-exdone");
+  });
+  return { guardian, journal };
 }
 
 function closeOf(child: ChildProcess): Promise<void> {
@@ -115,6 +173,20 @@ function closeOf(child: ChildProcess): Promise<void> {
     return Promise.resolve();
   }
   return new Promise((resolve) => child.once("close", () => resolve()));
+}
+
+function processIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return !(
+      error
+      && typeof error === "object"
+      && "code" in error
+      && error.code === "ESRCH"
+    );
+  }
 }
 
 function hardStop(child: ChildProcess): void {
@@ -162,6 +234,9 @@ describe.skipIf(process.platform !== "linux")(
       const child = longRunningChild();
       const close = closeOf(child);
       const journal = new RuntimeOwnedProcessJournal(directory);
+      await vi.waitFor(() => {
+        expect(journal.records(runtimeGenerationId)?.[0]?.state).toBe("owned");
+      }, { timeout: 5_000 });
       const records = journal.records(runtimeGenerationId);
       expect(records).toHaveLength(1);
       expect(records?.[0]).toMatchObject({
@@ -183,16 +258,16 @@ describe.skipIf(process.platform !== "linux")(
       expect(raw).not.toContain("setInterval");
       expect(raw).not.toContain("PATH");
 
+      child.kill("SIGTERM");
+      await close;
       deactivate();
-      const recovery = recoverRuntimeOwnedProcesses(
+      const recovery = await recoverRuntimeOwnedProcesses(
         directory,
         runtimeGenerationId,
         systemBootId,
         { deadlineAt: Date.now() + 2_000 },
       );
-      expect(recovery).not.toBeNull();
-      await expect(recovery).resolves.toBe(true);
-      await close;
+      expect(recovery).toBe(true);
       expect(journal.records(runtimeGenerationId)).toEqual([]);
       expect(journal.finishSession(runtimeGenerationId)).toBe(true);
     });
@@ -203,11 +278,15 @@ describe.skipIf(process.platform !== "linux")(
       const child = longRunningChild();
       const journal = new RuntimeOwnedProcessJournal(directory);
 
-      hardStop(child);
-      await closeOf(child);
-      await new Promise<void>((resolve) => setImmediate(resolve));
+      await vi.waitFor(() => {
+        expect(journal.records(runtimeGenerationId)?.[0]?.state).toBe("owned");
+      }, { timeout: 5_000 });
 
-      expect(confirmRuntimeOwnedProcessStopped(child)).toBe(true);
+      child.kill("SIGTERM");
+      await closeOf(child);
+      await vi.waitFor(() => {
+        expect(confirmRuntimeOwnedProcessStopped(child)).toBe(true);
+      }, { timeout: 5_000 });
       expect(journal.records(runtimeGenerationId)).toEqual([]);
       expect(journal.finishSession(runtimeGenerationId)).toBe(true);
       expect(readdirSync(directory).some((name) =>
@@ -235,566 +314,6 @@ describe.skipIf(process.platform !== "linux")(
       expect(journal.finishSession(runtimeGenerationId)).toBe(true);
     });
 
-    it("retires a failed child claim only after its exact process group stops", async () => {
-      const directory = temporaryDirectory();
-      activate(directory);
-      const journal = new RuntimeOwnedProcessJournal(directory);
-      const claim = vi.spyOn(RuntimeOwnedProcessJournal.prototype, "claim")
-        .mockImplementationOnce(() => {
-          throw new Error("The spawned process ownership could not be persisted.");
-        });
-      let child!: ChildProcess;
-      try {
-        expect(() => spawnRuntimeOwnedProcess(() => {
-          child = spawn(
-            process.execPath,
-            ["-e", "setInterval(() => undefined, 1000)"],
-            { detached: true, shell: false, stdio: "ignore" },
-          );
-          liveChildren.add(child);
-          child.once("close", () => liveChildren.delete(child));
-          return child;
-        })).toThrow("could not be persisted");
-
-        await expect(awaitRuntimeOwnedProcessCleanupConfirmed()).resolves.toBe(true);
-        expect(claim).toHaveBeenCalledTimes(1);
-        expect(journal.records(runtimeGenerationId)).toEqual([]);
-      } finally {
-        claim.mockRestore();
-        await closeOf(child);
-      }
-    });
-
-    it("registers and idempotently retires a PID-backed process group", async () => {
-      const directory = temporaryDirectory();
-      activate(directory);
-      const owned = spawnRuntimeOwnedPidProcess(() => {
-        const child = spawn(
-          process.execPath,
-          ["-e", "setInterval(() => undefined, 1000)"],
-          { detached: true, shell: false, stdio: "ignore" },
-        );
-        if (!child.pid) throw new Error("Missing child PID");
-        return child as ChildProcess & { readonly pid: number };
-      });
-      liveChildren.add(owned.process);
-      owned.process.once("close", () => liveChildren.delete(owned.process));
-      const journal = new RuntimeOwnedProcessJournal(directory);
-
-      expect(journal.records(runtimeGenerationId)).toMatchObject([{
-        state: "owned",
-        process: { pid: owned.process.pid, processGroupId: owned.process.pid },
-      }]);
-      hardStop(owned.process);
-      await closeOf(owned.process);
-      expect(owned.confirmStopped()).toBe(true);
-      expect(owned.confirmStopped()).toBe(true);
-      expect(journal.records(runtimeGenerationId)).toEqual([]);
-      expect(journal.finishSession(runtimeGenerationId)).toBe(true);
-    });
-
-    it("yields through a pre-setsid PID group transition before exposure", async () => {
-      const directory = temporaryDirectory();
-      activate(directory);
-      let elapsedMs = 0;
-      let identityReads = 0;
-      const waits: number[] = [];
-      const owned = spawnRuntimeOwnedPidProcess(
-        rawLongRunningPidChild,
-        {
-          now: () => elapsedMs,
-          wait: (durationMs) => {
-            waits.push(durationMs);
-            elapsedMs += durationMs;
-          },
-          readIdentity: (pid) => {
-            identityReads += 1;
-            return identityReads <= 2
-              ? preGroupIdentity(pid)
-              : readLinuxProcessIdentity(pid);
-          },
-        },
-      );
-      const journal = new RuntimeOwnedProcessJournal(directory);
-
-      expect(waits).toEqual([1, 1]);
-      expect(elapsedMs).toBe(2);
-      expect(journal.records(runtimeGenerationId)).toMatchObject([{
-        state: "owned",
-        process: { pid: owned.process.pid, processGroupId: owned.process.pid },
-      }]);
-      hardStop(owned.process);
-      await closeOf(owned.process);
-      expect(owned.confirmStopped()).toBe(true);
-    });
-
-    it.each([
-      ["pid", (pid: number) => ({ ...preGroupIdentity(pid), pid: pid + 1 })],
-      ["parent", (pid: number) => ({
-        ...preGroupIdentity(pid),
-        parentPid: process.pid + 1,
-      })],
-    ] as const)("rejects an exact %s mismatch before claiming a PID-backed child", async (
-      _mismatch,
-      identity,
-    ) => {
-      const directory = temporaryDirectory();
-      activate(directory);
-      let child!: ChildProcess & { readonly pid: number };
-      vi.useFakeTimers();
-      try {
-        expect(() => spawnRuntimeOwnedPidProcess(
-          () => {
-            child = rawLongRunningPidChild();
-            return child;
-          },
-          {
-            readIdentity: identity,
-            processCanExecute: () => null,
-          },
-        )).toThrow("identity could not be proven");
-        const cleanup = awaitRuntimeOwnedProcessCleanupConfirmed();
-        await vi.advanceTimersByTimeAsync(1_000);
-
-        await expect(cleanup).resolves.toBe(false);
-        expect(new RuntimeOwnedProcessJournal(directory)
-          .records(runtimeGenerationId)).toMatchObject([{ state: "pending" }]);
-      } finally {
-        vi.useRealTimers();
-        await closeOf(child);
-      }
-    });
-
-    it.each(["present", "eperm"] as const)(
-      "keeps a failed PID claim pending while its exact group is %s",
-      async (groupState) => {
-        const directory = temporaryDirectory();
-        activate(directory);
-        let child!: ChildProcess & { readonly pid: number };
-        let elapsedMs = 0;
-        const nativeKill = process.kill;
-        vi.useFakeTimers();
-        const kill = vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
-          if (child && pid === -child.pid && signal === 0) {
-            if (groupState === "eperm") throw processError("EPERM");
-            return true;
-          }
-          return nativeKill(pid, signal);
-        });
-        try {
-          expect(() => spawnRuntimeOwnedPidProcess(
-            () => {
-              child = rawLongRunningPidChild();
-              return child;
-            },
-            {
-              now: () => elapsedMs,
-              wait: (durationMs) => {
-                elapsedMs += durationMs;
-              },
-              readIdentity: preGroupIdentity,
-              processCanExecute: () => false,
-            },
-          )).toThrow("group identity did not settle");
-          const cleanup = awaitRuntimeOwnedProcessCleanupConfirmed();
-          await vi.advanceTimersByTimeAsync(1_000);
-
-          await expect(cleanup).resolves.toBe(false);
-          expect(new RuntimeOwnedProcessJournal(directory)
-            .records(runtimeGenerationId)).toMatchObject([{ state: "pending" }]);
-        } finally {
-          kill.mockRestore();
-          vi.useRealTimers();
-          await closeOf(child);
-        }
-      },
-    );
-
-    it("does not retire a failed PID claim before its direct child stops", async () => {
-      const directory = temporaryDirectory();
-      activate(directory);
-      let child!: ChildProcess & { readonly pid: number };
-      let elapsedMs = 0;
-      let executionProbes = 0;
-      const nativeKill = process.kill;
-      vi.useFakeTimers();
-      const kill = vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
-        if (child && pid === -child.pid && signal === 0) {
-          throw processError("ESRCH");
-        }
-        return nativeKill(pid, signal);
-      });
-      try {
-        expect(() => spawnRuntimeOwnedPidProcess(
-          () => {
-            child = rawLongRunningPidChild();
-            return child;
-          },
-          {
-            now: () => elapsedMs,
-            wait: (durationMs) => {
-              elapsedMs += durationMs;
-            },
-            readIdentity: preGroupIdentity,
-            processCanExecute: () => {
-              executionProbes += 1;
-              return executionProbes < 3;
-            },
-          },
-        )).toThrow("group identity did not settle");
-        const journal = new RuntimeOwnedProcessJournal(directory);
-        const cleanup = awaitRuntimeOwnedProcessCleanupConfirmed();
-
-        expect(journal.records(runtimeGenerationId)).toMatchObject([{
-          state: "pending",
-        }]);
-        expect(kill).not.toHaveBeenCalledWith(-child.pid, 0);
-        await vi.advanceTimersByTimeAsync(10);
-        expect(journal.records(runtimeGenerationId)).toMatchObject([{
-          state: "pending",
-        }]);
-        await vi.advanceTimersByTimeAsync(10);
-
-        await expect(cleanup).resolves.toBe(true);
-        expect(kill).toHaveBeenCalledWith(-child.pid, 0);
-        expect(journal.records(runtimeGenerationId)).toEqual([]);
-      } finally {
-        kill.mockRestore();
-        vi.useRealTimers();
-        await closeOf(child);
-      }
-    });
-
-    it("retires a journal claim failure only after exact stopped proof", async () => {
-      const directory = temporaryDirectory();
-      activate(directory);
-      let child!: ChildProcess & { readonly pid: number };
-      const journal = new RuntimeOwnedProcessJournal(directory);
-      const claim = vi.spyOn(RuntimeOwnedProcessJournal.prototype, "claim")
-        .mockImplementationOnce(() => {
-          throw new Error("The spawned process ownership could not be persisted.");
-        });
-      const nativeKill = process.kill;
-      const kill = vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
-        if (child && pid === -child.pid && signal === 0) {
-          throw processError("ESRCH");
-        }
-        return nativeKill(pid, signal);
-      });
-      try {
-        expect(() => spawnRuntimeOwnedPidProcess(
-          () => {
-            child = rawLongRunningPidChild();
-            return child;
-          },
-          { processCanExecute: () => false },
-        )).toThrow("could not be persisted");
-
-        await expect(awaitRuntimeOwnedProcessCleanupConfirmed()).resolves.toBe(true);
-        expect(claim).toHaveBeenCalledTimes(1);
-        expect(journal.records(runtimeGenerationId)).toEqual([]);
-      } finally {
-        claim.mockRestore();
-        kill.mockRestore();
-        await closeOf(child);
-      }
-    });
-
-    it("polls the exact process group until ESRCH before retiring its claim", async () => {
-      const directory = temporaryDirectory();
-      activate(directory);
-      const owned = spawnRuntimeOwnedPidProcess(() => {
-        const child = spawn(
-          process.execPath,
-          ["-e", "setInterval(() => undefined, 1000)"],
-          { detached: true, shell: false, stdio: "ignore" },
-        );
-        if (!child.pid) throw new Error("Missing child PID");
-        return child as ChildProcess & { readonly pid: number };
-      });
-      liveChildren.add(owned.process);
-      owned.process.once("close", () => liveChildren.delete(owned.process));
-      const journal = new RuntimeOwnedProcessJournal(directory);
-      const nativeKill = process.kill;
-      let probes = 0;
-
-      vi.useFakeTimers();
-      const kill = vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
-        if (pid === -owned.process.pid && signal === 0) {
-          probes += 1;
-          if (probes >= 3) throw processError("ESRCH");
-          return true;
-        }
-        return nativeKill(pid, signal);
-      });
-      try {
-        owned.releaseIfGroupExited();
-        const cleanup = awaitRuntimeOwnedProcessCleanupConfirmed();
-        await vi.advanceTimersByTimeAsync(20);
-
-        await expect(cleanup).resolves.toBe(true);
-        expect(probes).toBe(3);
-        expect(kill.mock.calls.filter(([pid, signal]) =>
-          pid === -owned.process.pid && signal === 0)).toHaveLength(3);
-        expect(journal.records(runtimeGenerationId)).toEqual([]);
-      } finally {
-        kill.mockRestore();
-        vi.useRealTimers();
-      }
-    });
-
-    it.each(["present", "eperm"] as const)(
-      "keeps a %s process group claim after the bounded exit poll",
-      async (outcome) => {
-        const directory = temporaryDirectory();
-        activate(directory);
-        const owned = spawnRuntimeOwnedPidProcess(() => {
-          const child = spawn(
-            process.execPath,
-            ["-e", "setInterval(() => undefined, 1000)"],
-            { detached: true, shell: false, stdio: "ignore" },
-          );
-          if (!child.pid) throw new Error("Missing child PID");
-          return child as ChildProcess & { readonly pid: number };
-        });
-        liveChildren.add(owned.process);
-        owned.process.once("close", () => liveChildren.delete(owned.process));
-        const journal = new RuntimeOwnedProcessJournal(directory);
-        const nativeKill = process.kill;
-
-        vi.useFakeTimers();
-        const kill = vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
-          if (pid === -owned.process.pid && signal === 0) {
-            if (outcome === "eperm") throw processError("EPERM");
-            return true;
-          }
-          return nativeKill(pid, signal);
-        });
-        try {
-          owned.releaseIfGroupExited();
-          const cleanup = awaitRuntimeOwnedProcessCleanupConfirmed();
-          await vi.advanceTimersByTimeAsync(2_000);
-
-          await expect(cleanup).resolves.toBe(false);
-          expect(kill.mock.calls.filter(([pid, signal]) =>
-            pid === -owned.process.pid && signal === 0).length).toBeGreaterThan(1);
-          expect(journal.records(runtimeGenerationId)).toHaveLength(1);
-        } finally {
-          kill.mockRestore();
-          vi.useRealTimers();
-        }
-      },
-    );
-
-    it("does not retire a claim after the active registry is replaced", async () => {
-      const directory = temporaryDirectory();
-      const replacementDirectory = temporaryDirectory();
-      activate(directory);
-      const owned = spawnRuntimeOwnedPidProcess(() => {
-        const child = spawn(
-          process.execPath,
-          ["-e", "setInterval(() => undefined, 1000)"],
-          { detached: true, shell: false, stdio: "ignore" },
-        );
-        if (!child.pid) throw new Error("Missing child PID");
-        return child as ChildProcess & { readonly pid: number };
-      });
-      liveChildren.add(owned.process);
-      owned.process.once("close", () => liveChildren.delete(owned.process));
-      const journal = new RuntimeOwnedProcessJournal(directory);
-      const nativeKill = process.kill;
-
-      vi.useFakeTimers();
-      const kill = vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
-        if (pid === -owned.process.pid && signal === 0) {
-          return true;
-        }
-        return nativeKill(pid, signal);
-      });
-      try {
-        owned.releaseIfGroupExited();
-        expect(kill).toHaveBeenCalledTimes(1);
-        deactivate();
-        activate(replacementDirectory);
-        await vi.advanceTimersByTimeAsync(2_000);
-
-        expect(kill).toHaveBeenCalledTimes(1);
-        expect(journal.records(runtimeGenerationId)).toHaveLength(1);
-        expect(new RuntimeOwnedProcessJournal(replacementDirectory)
-          .records(runtimeGenerationId)).toEqual([]);
-      } finally {
-        kill.mockRestore();
-        vi.useRealTimers();
-      }
-    });
-
-    it("observes immediate group exit before shutdown can overtake a timer", async () => {
-      const directory = temporaryDirectory();
-      activate(directory);
-      const owned = spawnRuntimeOwnedPidProcess(() => {
-        const child = spawn(
-          process.execPath,
-          ["-e", "setInterval(() => undefined, 1000)"],
-          { detached: true, shell: false, stdio: "ignore" },
-        );
-        if (!child.pid) throw new Error("Missing child PID");
-        return child as ChildProcess & { readonly pid: number };
-      });
-      liveChildren.add(owned.process);
-      owned.process.once("close", () => liveChildren.delete(owned.process));
-      const journal = new RuntimeOwnedProcessJournal(directory);
-      const nativeKill = process.kill;
-      const kill = vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
-        if (pid === -owned.process.pid && signal === 0) {
-          throw processError("ESRCH");
-        }
-        return nativeKill(pid, signal);
-      });
-      try {
-        owned.releaseIfGroupExited();
-
-        await expect(awaitRuntimeOwnedProcessCleanupConfirmed()).resolves.toBe(true);
-        expect(kill).toHaveBeenCalledWith(-owned.process.pid, 0);
-        expect(journal.records(runtimeGenerationId)).toEqual([]);
-      } finally {
-        kill.mockRestore();
-      }
-    });
-
-    it("retires a closed child before later close listeners run", async () => {
-      const directory = temporaryDirectory();
-      activate(directory);
-      const child = longRunningChild();
-      const journal = new RuntimeOwnedProcessJournal(directory);
-      const nativeKill = process.kill;
-      const kill = vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
-        if (pid === -(child.pid ?? 0) && signal === 0) {
-          throw processError("ESRCH");
-        }
-        return nativeKill(pid, signal);
-      });
-      let recordsAtCallerClose: ReturnType<RuntimeOwnedProcessJournal["records"]>;
-      child.once("close", () => {
-        recordsAtCallerClose = journal.records(runtimeGenerationId);
-      });
-      try {
-        hardStop(child);
-        await closeOf(child);
-
-        expect(recordsAtCallerClose!).toEqual([]);
-        expect(kill).toHaveBeenCalledWith(-(child.pid ?? 0), 0);
-      } finally {
-        kill.mockRestore();
-      }
-    });
-
-    it("awaits closing claims that appear while an earlier one settles", async () => {
-      const directory = temporaryDirectory();
-      activate(directory);
-      const createOwned = () => spawnRuntimeOwnedPidProcess(() => {
-        const child = spawn(
-          process.execPath,
-          ["-e", "setInterval(() => undefined, 1000)"],
-          { detached: true, shell: false, stdio: "ignore" },
-        );
-        if (!child.pid) throw new Error("Missing child PID");
-        liveChildren.add(child);
-        child.once("close", () => liveChildren.delete(child));
-        return child as ChildProcess & { readonly pid: number };
-      });
-      const first = createOwned();
-      const second = createOwned();
-      const probes = new Map<number, number>();
-      const nativeKill = process.kill;
-      vi.useFakeTimers();
-      const kill = vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
-        if (typeof pid === "number" && pid < 0 && signal === 0) {
-          const processId = -pid;
-          const count = (probes.get(processId) ?? 0) + 1;
-          probes.set(processId, count);
-          if (processId === first.process.pid && count >= 2) {
-            throw processError("ESRCH");
-          }
-          if (processId === second.process.pid && count >= 3) {
-            throw processError("ESRCH");
-          }
-          return true;
-        }
-        return nativeKill(pid, signal);
-      });
-      try {
-        first.releaseIfGroupExited();
-        const cleanup = awaitRuntimeOwnedProcessCleanupConfirmed();
-        second.releaseIfGroupExited();
-        await vi.advanceTimersByTimeAsync(20);
-
-        await expect(cleanup).resolves.toBe(true);
-        expect(probes.get(first.process.pid)).toBe(2);
-        expect(probes.get(second.process.pid)).toBe(3);
-      } finally {
-        kill.mockRestore();
-        vi.useRealTimers();
-      }
-    });
-
-    it("fails closed immediately when an owned claim has not begun closing", async () => {
-      const directory = temporaryDirectory();
-      activate(directory);
-      const owned = spawnRuntimeOwnedPidProcess(() => {
-        const child = spawn(
-          process.execPath,
-          ["-e", "setInterval(() => undefined, 1000)"],
-          { detached: true, shell: false, stdio: "ignore" },
-        );
-        if (!child.pid) throw new Error("Missing child PID");
-        return child as ChildProcess & { readonly pid: number };
-      });
-      liveChildren.add(owned.process);
-      owned.process.once("close", () => liveChildren.delete(owned.process));
-      const kill = vi.spyOn(process, "kill");
-      try {
-        await expect(awaitRuntimeOwnedProcessCleanupConfirmed()).resolves.toBe(false);
-        expect(kill).not.toHaveBeenCalledWith(-owned.process.pid, 0);
-      } finally {
-        kill.mockRestore();
-      }
-    });
-
-    it("memoizes close confirmation and lets manual settlement complete it", async () => {
-      const directory = temporaryDirectory();
-      activate(directory);
-      const owned = spawnRuntimeOwnedPidProcess(() => {
-        const child = spawn(
-          process.execPath,
-          ["-e", "setInterval(() => undefined, 1000)"],
-          { detached: true, shell: false, stdio: "ignore" },
-        );
-        if (!child.pid) throw new Error("Missing child PID");
-        return child as ChildProcess & { readonly pid: number };
-      });
-      liveChildren.add(owned.process);
-      owned.process.once("close", () => liveChildren.delete(owned.process));
-      const journal = new RuntimeOwnedProcessJournal(directory);
-      const nativeKill = process.kill;
-      vi.useFakeTimers();
-      const kill = vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
-        if (pid === -owned.process.pid && signal === 0) return true;
-        return nativeKill(pid, signal);
-      });
-      try {
-        owned.releaseIfGroupExited();
-        owned.releaseIfGroupExited();
-        expect(owned.confirmStopped()).toBe(true);
-
-        await expect(awaitRuntimeOwnedProcessCleanupConfirmed()).resolves.toBe(true);
-        expect(kill).toHaveBeenCalledTimes(1);
-        expect(journal.records(runtimeGenerationId)).toEqual([]);
-      } finally {
-        kill.mockRestore();
-        vi.useRealTimers();
-      }
-    });
-
     it("keeps a crash between spawn intent and identity fail-closed", async () => {
       const directory = temporaryDirectory();
       const journal = new RuntimeOwnedProcessJournal(directory);
@@ -814,33 +333,6 @@ describe.skipIf(process.platform !== "linux")(
       expect(journal.records(runtimeGenerationId)).toMatchObject([
         { state: "pending", ownershipId },
       ]);
-    });
-
-    it("recovers a prior app session before admitting its replacement", async () => {
-      const directory = temporaryDirectory();
-      const leases = new RuntimeGenerationLeaseJournal(directory);
-      const receipts = new RuntimeCleanupReceiptJournal(directory);
-      expect(leases.publish(runtimeGenerationId, systemBootId)).toBe(true);
-      activate(directory);
-      const child = longRunningChild();
-      const close = closeOf(child);
-      deactivate();
-
-      const recovery = recoverPriorRuntimeGenerations({
-        dataDirectory: directory,
-        systemBootId,
-        deadlineAt: Date.now() + 2_000,
-        leases,
-        receipts,
-      });
-
-      await expect(recovery).resolves.toBe(true);
-      await close;
-      leases.refresh();
-      expect(leases.all()).toEqual([]);
-      expect(receipts.pending()).toEqual([runtimeGenerationId]);
-      expect(readdirSync(directory).some((name) =>
-        name.startsWith(".runtime-owned-process-session-"))).toBe(false);
     });
 
     it("keeps a same-boot legacy lease without an ownership journal locked", () => {
@@ -869,8 +361,13 @@ describe.skipIf(process.platform !== "linux")(
       activate(directory);
       const child = longRunningChild();
       const journal = new RuntimeOwnedProcessJournal(directory);
+      await vi.waitFor(() => {
+        expect(journal.records(runtimeGenerationId)?.[0]?.state).toBe("owned");
+      }, { timeout: 5_000 });
       const record = journal.records(runtimeGenerationId)?.[0];
       if (!record || record.state !== "owned") throw new Error("Missing claim");
+      if (!("startTimeTicks" in record.process)) throw new Error("Missing Linux claim");
+      const processIdentity = record.process;
       const forceKill = vi.fn(async () => true);
       const kill = vi.fn<typeof process.kill>(() => true);
       deactivate();
@@ -884,8 +381,8 @@ describe.skipIf(process.platform !== "linux")(
           forceKill,
           kill,
           readIdentity: () => ({
-            ...record.process,
-            startTimeTicks: `${BigInt(record.process.startTimeTicks) + 1n}`,
+            ...processIdentity,
+            startTimeTicks: `${BigInt(processIdentity.startTimeTicks) + 1n}`,
           }),
         },
       );
@@ -897,46 +394,14 @@ describe.skipIf(process.platform !== "linux")(
       hardStop(child);
     });
 
-    it("recovers an exact owned root after Linux reparents it to PID 1", async () => {
+    it("keeps a missing Linux guardian fail-closed without terminal proof", async () => {
       const directory = temporaryDirectory();
       activate(directory);
       const child = longRunningChild();
       const journal = new RuntimeOwnedProcessJournal(directory);
-      const record = journal.records(runtimeGenerationId)?.[0];
-      if (!record || record.state !== "owned") throw new Error("Missing claim");
-      const forceKill = vi.fn(async () => true);
-      deactivate();
-
-      const recovery = recoverRuntimeOwnedProcesses(
-        directory,
-        runtimeGenerationId,
-        systemBootId,
-        {
-          deadlineAt: Date.now() + 2_000,
-          forceKill,
-          readIdentity: (pid) => readLinuxProcessIdentity(pid, () =>
-            linuxProcessStat(
-              record.process.pid,
-              1,
-              record.process.processGroupId,
-              record.process.startTimeTicks,
-            )),
-        },
-      );
-
-      await expect(recovery).resolves.toBe(true);
-      expect(forceKill).toHaveBeenCalledWith(record.process.pid, expect.objectContaining({
-        rootProcessGroup: true,
-      }));
-      expect(journal.records(runtimeGenerationId)).toEqual([]);
-      hardStop(child);
-    });
-
-    it("keeps a missing owned root fail-closed", async () => {
-      const directory = temporaryDirectory();
-      activate(directory);
-      const child = longRunningChild();
-      const journal = new RuntimeOwnedProcessJournal(directory);
+      await vi.waitFor(() => {
+        expect(journal.records(runtimeGenerationId)?.[0]?.state).toBe("owned");
+      }, { timeout: 5_000 });
       const record = journal.records(runtimeGenerationId)?.[0];
       if (!record || record.state !== "owned") throw new Error("Missing claim");
       deactivate();
@@ -950,6 +415,10 @@ describe.skipIf(process.platform !== "linux")(
         systemBootId,
         {
           deadlineAt: Date.now() + 2_000,
+          darwinGuardianPath: join(
+            process.cwd(),
+            "resources/generated/runtime-process-guardian/runtime-process-guardian",
+          ),
           forceKill,
           readIdentity: () => null,
         },
@@ -959,50 +428,60 @@ describe.skipIf(process.platform !== "linux")(
       expect(journal.records(runtimeGenerationId)).toEqual([record]);
     });
 
-    it("revalidates the injected identity immediately before every signal", async () => {
+    it.each(["owned", "retiring"] as const)(
+      "recovers an authenticated post-exec Linux %s record",
+      async (durableState) => {
+        const directory = temporaryDirectory();
+        const { guardian, journal } = await completedLinuxGuardian(
+          directory,
+          durableState,
+        );
+        const guardianPath = join(
+          process.cwd(),
+          "resources/generated/runtime-process-guardian/runtime-process-guardian",
+        );
+
+        await expect(recoverRuntimeOwnedProcesses(
+          directory,
+          runtimeGenerationId,
+          systemBootId,
+          {
+            deadlineAt: Date.now() + 2_000,
+            darwinGuardianPath: guardianPath,
+          },
+        )).resolves.toBe(true);
+
+        await closeOf(guardian);
+        expect(journal.records(runtimeGenerationId)).toEqual([]);
+      },
+    );
+
+    it("keeps a post-exec Linux terminal fail-closed without durable authorization", async () => {
       const directory = temporaryDirectory();
-      activate(directory);
-      const child = longRunningChild();
-      const journal = new RuntimeOwnedProcessJournal(directory);
-      const record = journal.records(runtimeGenerationId)?.[0];
-      if (!record || record.state !== "owned") throw new Error("Missing claim");
-      deactivate();
-      let identityRead = 0;
-      const readIdentity = vi.fn(() => {
-        identityRead += 1;
-        return identityRead === 1
-          ? record.process
-          : {
-              ...record.process,
-              startTimeTicks: `${BigInt(record.process.startTimeTicks) + 1n}`,
-            };
-      });
-      const kill = vi.fn<typeof process.kill>(() => true);
-      const forceKill = vi.fn(async (_pid, dependencies) => {
-        try {
-          dependencies.kill?.(-record.process.pid, "SIGKILL");
-          return true;
-        } catch {
-          return false;
-        }
-      });
+      const { guardian, journal } = await completedLinuxGuardian(
+        directory,
+        "preauth",
+      );
+      const guardianPath = join(
+        process.cwd(),
+        "resources/generated/runtime-process-guardian/runtime-process-guardian",
+      );
 
       await expect(recoverRuntimeOwnedProcesses(
         directory,
         runtimeGenerationId,
         systemBootId,
         {
-          deadlineAt: Date.now() + 2_000,
-          forceKill,
-          kill,
-          readIdentity,
+          deadlineAt: Date.now() + 100,
+          darwinGuardianPath: guardianPath,
         },
       )).resolves.toBe(false);
-      expect(forceKill).toHaveBeenCalledOnce();
-      expect(readIdentity).toHaveBeenCalledTimes(2);
-      expect(kill).not.toHaveBeenCalled();
-      expect(journal.records(runtimeGenerationId)).toHaveLength(1);
-      hardStop(child);
+
+      expect(journal.records(runtimeGenerationId)).toMatchObject([{
+        state: "preauth",
+      }]);
+      hardStop(guardian);
+      await closeOf(guardian);
     });
 
     it("finishes a confirmed-remove crash without resurrecting ownership", () => {
@@ -1085,3 +564,1927 @@ describe.skipIf(process.platform !== "linux")(
     });
   },
 );
+
+describe.skipIf(process.platform !== "darwin")(
+  "macOS runtime owned process recovery",
+  () => {
+    it("preserves exact exit status for a burst of fast native payloads", async () => {
+      const directory = temporaryDirectory();
+      activate(directory);
+      const runs = await Promise.all(Array.from({ length: 16 }, async () =>
+        await new Promise<{ code: number | null; signal: NodeJS.Signals | null; output: string }>((resolveRun, rejectRun) => {
+          const invocation = runtimeOwnedProcessInvocation(
+            process.execPath,
+            ["--version"],
+          );
+          const child = spawnRuntimeOwnedProcess(() => spawn(
+            invocation.command,
+            invocation.args,
+            {
+              detached: true,
+              shell: false,
+              stdio: ["ignore", "pipe", "pipe"],
+            },
+          ));
+          liveChildren.add(child);
+          let output = "";
+          child.stdout?.on("data", (chunk: Buffer) => { output += chunk.toString("utf8"); });
+          child.stderr?.resume();
+          child.once("error", rejectRun);
+          child.once("close", (code, signal) => {
+            liveChildren.delete(child);
+            resolveRun({ code, signal, output });
+          });
+        }),
+      ));
+
+      expect(runs).toHaveLength(16);
+      expect(runs.filter(({ code, signal, output }) =>
+        code !== 0 || signal !== null || !/^v\d+/u.test(output.trim()))).toEqual([]);
+      const journal = new RuntimeOwnedProcessJournal(directory);
+      await vi.waitFor(() => {
+        expect(journal.records(runtimeGenerationId)).toEqual([]);
+      }, { timeout: 5_000 });
+    }, 20_000);
+  },
+);
+
+describe("cross-platform runtime owned process recovery", () => {
+  it("preserves a verbatim Windows PTY command line without array quoting", () => {
+    const commandLine = '/d /s /v:off /c "C:\\Tools\\agent.cmd ^"hello world^""';
+    expect(runtimeOwnedPtyInvocation(
+      "C:\\Windows\\System32\\cmd.exe",
+      commandLine,
+    )).toEqual({
+      command: "C:\\Windows\\System32\\cmd.exe",
+      args: commandLine,
+    });
+  });
+
+  it("wraps every macOS owned command behind the native guardian", () => {
+    const directory = temporaryDirectory();
+    const deactivateRegistry = activateRuntimeOwnedProcessRegistry(
+      directory,
+      runtimeGenerationId,
+      systemBootId,
+      {
+        platform: "darwin",
+        darwinGuardianPath: "/trusted/runtime-process-guardian",
+      },
+    );
+    expect(runtimeOwnedProcessInvocation("/usr/bin/git", ["status"])).toEqual({
+      command: "/trusted/runtime-process-guardian",
+      args: ["watch", String(process.pid), "--", "/usr/bin/git", "status"],
+    });
+    expect(runtimeOwnedPtyInvocation("/usr/bin/login", "-fp test-user"))
+      .toEqual({
+        command: "/trusted/runtime-process-guardian",
+        args: [
+          "watch",
+          String(process.pid),
+          "--",
+          "/usr/bin/login",
+          "-fp test-user",
+        ],
+      });
+    deactivateRegistry?.();
+  });
+
+  it("wraps Linux PTY commands behind the native guardian", () => {
+    const directory = temporaryDirectory();
+    const guardianPath = join(directory, "runtime-process-guardian");
+    writeFileSync(guardianPath, "trusted helper", { mode: 0o700 });
+    const executable = statSync(guardianPath, { bigint: true });
+    const deactivateRegistry = activateRuntimeOwnedProcessRegistry(
+      directory,
+      runtimeGenerationId,
+      systemBootId,
+      { platform: "linux", darwinGuardianPath: guardianPath },
+    );
+    try {
+      expect(runtimeOwnedPtyInvocation("/bin/sh", ["-l"])).toEqual({
+        command: guardianPath,
+        args: [
+          "watch",
+          String(process.pid),
+          String(executable.dev),
+          String(executable.ino),
+          "--",
+          "/bin/sh",
+          "-l",
+        ],
+      });
+    } finally {
+      deactivateRegistry?.();
+    }
+  });
+
+  it("retires an unarmed macOS spawn window after its runtime parent is gone", async () => {
+    const directory = temporaryDirectory();
+    const journal = new RuntimeOwnedProcessJournal(directory, {
+      platform: "darwin",
+      darwinGuardianPath: "/trusted/runtime-process-guardian",
+    });
+    expect(journal.startSession(runtimeGenerationId, systemBootId)).toBe(true);
+    journal.begin(runtimeGenerationId, systemBootId);
+    const kill = vi.fn<typeof process.kill>((pid, signal) => {
+      expect(pid).toBe(process.pid);
+      expect(signal).toBe(0);
+      throw processError("ESRCH");
+    });
+    const waitForProcessGroupDrain = vi.fn(async () => undefined);
+
+    await expect(recoverRuntimeOwnedProcesses(
+      directory,
+      runtimeGenerationId,
+      systemBootId,
+      {
+        platform: "darwin",
+        deadlineAt: Date.now() + 2_000,
+        kill,
+        waitForProcessGroupDrain,
+      },
+    )).resolves.toBe(true);
+
+    expect(waitForProcessGroupDrain).not.toHaveBeenCalled();
+    expect(kill).toHaveBeenCalledOnce();
+    expect(journal.records(runtimeGenerationId)).toEqual([]);
+  });
+
+  it("retires an unarmed macOS spawn window across an exact boot change", async () => {
+    const directory = temporaryDirectory();
+    const priorBootId = "test:30000000-0000-4000-8000-000000000003";
+    const journal = new RuntimeOwnedProcessJournal(directory, {
+      platform: "darwin",
+      darwinGuardianPath: "/trusted/runtime-process-guardian",
+    });
+    expect(journal.startSession(runtimeGenerationId, priorBootId)).toBe(true);
+    journal.begin(runtimeGenerationId, priorBootId);
+    const kill = vi.fn<typeof process.kill>(() => true);
+
+    await expect(recoverRuntimeOwnedProcesses(
+      directory,
+      runtimeGenerationId,
+      systemBootId,
+      {
+        platform: "darwin",
+        deadlineAt: Date.now() + 2_000,
+        kill,
+      },
+    )).resolves.toBe(true);
+
+    expect(kill).not.toHaveBeenCalled();
+    expect(journal.records(runtimeGenerationId)).toEqual([]);
+  });
+
+  it("keeps guarded macOS spawn windows while their runtime parent exists", async () => {
+    const directory = temporaryDirectory();
+    const journal = new RuntimeOwnedProcessJournal(directory, {
+      platform: "darwin",
+      darwinGuardianPath: "/trusted/runtime-process-guardian",
+    });
+    expect(journal.startSession(runtimeGenerationId, systemBootId)).toBe(true);
+    journal.begin(runtimeGenerationId, systemBootId);
+
+    await expect(recoverRuntimeOwnedProcesses(
+      directory,
+      runtimeGenerationId,
+      systemBootId,
+      {
+        platform: "darwin",
+        deadlineAt: Date.now() + 2_000,
+        kill: () => true,
+        waitForProcessGroupDrain: async () => undefined,
+      },
+    )).resolves.toBe(false);
+
+    expect(journal.records(runtimeGenerationId)).toMatchObject([{
+      state: "pending",
+      containment: "darwin-parent-watchdog-v1",
+      runtimeParentPid: process.pid,
+    }]);
+  });
+
+  it("keeps unguarded macOS spawn windows fail-closed", async () => {
+    const directory = temporaryDirectory();
+    const journal = new RuntimeOwnedProcessJournal(directory, {
+      platform: "darwin",
+    });
+    expect(journal.startSession(runtimeGenerationId, systemBootId)).toBe(true);
+    journal.begin(runtimeGenerationId, systemBootId);
+
+    await expect(recoverRuntimeOwnedProcesses(
+      directory,
+      runtimeGenerationId,
+      systemBootId,
+      {
+        platform: "darwin",
+        deadlineAt: Date.now() + 2_000,
+        kill: () => { throw processError("ESRCH"); },
+        waitForProcessGroupDrain: async () => undefined,
+      },
+    )).resolves.toBe(false);
+
+    expect(journal.records(runtimeGenerationId)).toMatchObject([{
+      state: "pending",
+    }]);
+  });
+
+  function portableClaim(
+    directory: string,
+    platform: "darwin" | "win32",
+    pid = 4_242,
+  ) {
+    const journal = new RuntimeOwnedProcessJournal(directory, {
+      platform,
+      ...(platform === "darwin"
+        ? {
+            darwinGuardianPath: "/trusted/runtime-process-guardian",
+            readDarwinIdentity: () => ({
+              platform: "darwin" as const,
+              pid,
+              parentPid: 101,
+              processGroupId: pid,
+              sessionId: pid,
+              startTimeSeconds: "1756100000",
+              startTimeMicroseconds: 123_456,
+            }),
+          }
+        : {}),
+    });
+    expect(journal.startSession(runtimeGenerationId, systemBootId)).toBe(true);
+    const ownershipId = journal.begin(runtimeGenerationId, systemBootId);
+    const claim = journal.claim(
+      ownershipId,
+      runtimeGenerationId,
+      systemBootId,
+      pid,
+      101,
+      { spawnedAfterMs: 10_000, spawnedBeforeMs: 10_001 },
+    );
+    if (!("platform" in claim.process)) {
+      throw new Error("Expected a portable process claim");
+    }
+    return { claim, journal };
+  }
+
+  it.each(["missing", "mismatched"] as const)(
+    "rejects a Darwin ownership record with a %s session identity",
+    (sessionIdentity) => {
+      const directory = temporaryDirectory();
+      const { claim, journal } = portableClaim(directory, "darwin");
+      const claimFile = join(
+        directory,
+        `.runtime-owned-child-${claim.ownershipId}.json`,
+      );
+      const stored = JSON.parse(readFileSync(claimFile, "utf8")) as {
+        process: { sessionId?: number };
+      };
+      if (sessionIdentity === "missing") {
+        delete stored.process.sessionId;
+      } else {
+        stored.process.sessionId = claim.process.pid + 1;
+      }
+      writeFileSync(claimFile, JSON.stringify(stored), {
+        encoding: "utf8",
+        mode: 0o600,
+      });
+
+      expect(journal.records(runtimeGenerationId)).toBeNull();
+    },
+  );
+
+  it("rejects a Darwin guardian outside its own private session at claim time", () => {
+    const directory = temporaryDirectory();
+    const pid = 4_242;
+    const journal = new RuntimeOwnedProcessJournal(directory, {
+      platform: "darwin",
+      darwinGuardianPath: "/trusted/runtime-process-guardian",
+      readDarwinIdentity: () => ({
+        platform: "darwin",
+        pid,
+        parentPid: 101,
+        processGroupId: pid,
+        sessionId: pid + 1,
+        startTimeSeconds: "1756100000",
+        startTimeMicroseconds: 123_456,
+      }),
+    });
+    expect(journal.startSession(runtimeGenerationId, systemBootId)).toBe(true);
+    const ownershipId = journal.begin(runtimeGenerationId, systemBootId);
+
+    expect(() => journal.claim(
+      ownershipId,
+      runtimeGenerationId,
+      systemBootId,
+      pid,
+      101,
+    )).toThrow("ownership could not be proven");
+  });
+
+  it("recovers an exact Windows Job Object without rebooting", async () => {
+    const directory = temporaryDirectory();
+    const { journal } = portableClaim(directory, "win32");
+    const containment = {
+      kind: "windows-job-v1" as const,
+      name: windowsRuntimeJobName(runtimeGenerationId),
+    };
+    expect(journal.armContainment(
+      runtimeGenerationId,
+      systemBootId,
+      containment,
+    )).toBe(true);
+    const recoverWindowsJob = vi.fn(async () => true);
+
+    await expect(recoverRuntimeOwnedProcesses(
+      directory,
+      runtimeGenerationId,
+      systemBootId,
+      {
+        platform: "win32",
+        deadlineAt: Date.now() + 2_000,
+        recoverWindowsJob,
+      },
+    )).resolves.toBe(true);
+
+    expect(recoverWindowsJob).toHaveBeenCalledWith(
+      containment,
+      expect.any(Number),
+    );
+    expect(journal.records(runtimeGenerationId)).toEqual([]);
+  });
+
+  it("keeps Windows claims fail-closed without a durable Job Object", async () => {
+    const directory = temporaryDirectory();
+    const { claim, journal } = portableClaim(directory, "win32");
+    const recoverWindowsJob = vi.fn(async () => true);
+
+    await expect(recoverRuntimeOwnedProcesses(
+      directory,
+      runtimeGenerationId,
+      systemBootId,
+      {
+        platform: "win32",
+        deadlineAt: Date.now() + 2_000,
+        recoverWindowsJob,
+      },
+    )).resolves.toBe(false);
+
+    expect(recoverWindowsJob).not.toHaveBeenCalled();
+    expect(journal.records(runtimeGenerationId)).toEqual([claim]);
+  });
+
+  it("keeps Windows claims when exact Job Object termination is unconfirmed", async () => {
+    const directory = temporaryDirectory();
+    const { claim, journal } = portableClaim(directory, "win32");
+    const containment = {
+      kind: "windows-job-v1" as const,
+      name: windowsRuntimeJobName(runtimeGenerationId),
+    };
+    expect(journal.armContainment(
+      runtimeGenerationId,
+      systemBootId,
+      containment,
+    )).toBe(true);
+    const recoverWindowsJob = vi.fn(async () => false);
+
+    await expect(recoverRuntimeOwnedProcesses(
+      directory,
+      runtimeGenerationId,
+      systemBootId,
+      {
+        platform: "win32",
+        deadlineAt: Date.now() + 2_000,
+        recoverWindowsJob,
+      },
+    )).resolves.toBe(false);
+
+    expect(recoverWindowsJob).toHaveBeenCalledOnce();
+    expect(journal.records(runtimeGenerationId)).toEqual([claim]);
+  });
+
+  it("rejects a malformed Windows containment marker", async () => {
+    const directory = temporaryDirectory();
+    const { claim, journal } = portableClaim(directory, "win32");
+    const containment = {
+      kind: "windows-job-v1" as const,
+      name: windowsRuntimeJobName(runtimeGenerationId),
+    };
+    expect(journal.armContainment(
+      runtimeGenerationId,
+      systemBootId,
+      containment,
+    )).toBe(true);
+    const marker = readdirSync(directory).find((name) =>
+      name.startsWith(".runtime-owned-process-containment-")
+      && name.endsWith(".json"));
+    if (!marker) throw new Error("Missing containment marker");
+    writeFileSync(join(directory, marker), "{}", { mode: 0o600 });
+    const recoverWindowsJob = vi.fn(async () => true);
+
+    expect(recoverRuntimeOwnedProcesses(
+      directory,
+      runtimeGenerationId,
+      systemBootId,
+      {
+        platform: "win32",
+        deadlineAt: Date.now() + 2_000,
+        recoverWindowsJob,
+      },
+    )).toBeNull();
+
+    expect(recoverWindowsJob).not.toHaveBeenCalled();
+    expect(journal.records(runtimeGenerationId)).toEqual([claim]);
+  });
+
+  it("drains the exact macOS guardian but retains manual recovery authority", async () => {
+    const directory = temporaryDirectory();
+    const { claim, journal } = portableClaim(directory, "darwin");
+    const forceKill = vi.fn(async () => true);
+    let guardianAlive = true;
+    const identity = {
+      platform: "darwin" as const,
+      pid: claim.process.pid,
+      parentPid: 101,
+      processGroupId: claim.process.pid,
+      sessionId: claim.process.pid,
+      startTimeSeconds: "1756100000",
+      startTimeMicroseconds: 123_456,
+    };
+    const kill = vi.fn<(
+      pid: number,
+      signal?: NodeJS.Signals | number,
+    ) => true>((pid, signal) => {
+      expect(pid).toBe(claim.process.pid);
+      expect(signal).toBe("SIGTERM");
+      guardianAlive = false;
+      return true;
+    });
+
+    await expect(recoverRuntimeOwnedProcesses(
+      directory,
+      runtimeGenerationId,
+      systemBootId,
+      {
+        platform: "darwin",
+        deadlineAt: Date.now() + 2_000,
+        forceKill,
+        kill,
+        readIdentity: () => guardianAlive ? identity : null,
+        readDarwinSessionEmpty: () => !guardianAlive,
+      },
+    )).resolves.toBe(false);
+
+    expect(kill).toHaveBeenCalledTimes(1);
+    expect(forceKill).not.toHaveBeenCalled();
+    expect(journal.records(runtimeGenerationId)).toEqual([claim]);
+  });
+
+  it("never signals a reused macOS guardian PID during recovery", async () => {
+    const directory = temporaryDirectory();
+    const { claim, journal } = portableClaim(directory, "darwin");
+    if (!("platform" in claim.process) || claim.process.platform !== "darwin") {
+      throw new Error("Missing macOS claim");
+    }
+    const darwinProcess = claim.process;
+    const kill = vi.fn<typeof process.kill>(() => true);
+
+    await expect(recoverRuntimeOwnedProcesses(
+      directory,
+      runtimeGenerationId,
+      systemBootId,
+      {
+        platform: "darwin",
+        deadlineAt: Date.now() + 2_000,
+        kill,
+        readIdentity: () => ({
+          ...darwinProcess,
+          startTimeMicroseconds: darwinProcess.startTimeMicroseconds + 1,
+        }),
+        readDarwinSessionEmpty: () => false,
+      },
+    )).resolves.toBe(false);
+
+    expect(kill).not.toHaveBeenCalled();
+    expect(journal.records(runtimeGenerationId)).toEqual([claim]);
+  });
+
+  it("retains a missing macOS guardian claim even when its birth session is empty", async () => {
+    const directory = temporaryDirectory();
+    const { claim, journal } = portableClaim(directory, "darwin");
+    const kill = vi.fn<(
+      pid: number,
+      signal?: NodeJS.Signals | number,
+    ) => true>(() => true);
+    const readDarwinSessionEmpty = vi.fn(() => true);
+
+    await expect(recoverRuntimeOwnedProcesses(
+      directory,
+      runtimeGenerationId,
+      systemBootId,
+      {
+        platform: "darwin",
+        deadlineAt: Date.now() + 2_000,
+        kill,
+        readIdentity: () => null,
+        readDarwinSessionEmpty,
+      },
+    )).resolves.toBe(false);
+
+    expect(kill).not.toHaveBeenCalled();
+    expect(readDarwinSessionEmpty).toHaveBeenCalledWith(4_242);
+    expect(journal.records(runtimeGenerationId)).toEqual([claim]);
+  });
+
+  it("waits for a missing macOS guardian's session to drain without clearing authority", async () => {
+    const directory = temporaryDirectory();
+    const { claim, journal } = portableClaim(directory, "darwin");
+    let probe = 0;
+    const readDarwinSessionEmpty = vi.fn(() => {
+      probe += 1;
+      return probe >= 3;
+    });
+    const waitForProcessGroupDrain = vi.fn(async () => undefined);
+
+    await expect(recoverRuntimeOwnedProcesses(
+      directory,
+      runtimeGenerationId,
+      systemBootId,
+      {
+        platform: "darwin",
+        deadlineAt: Date.now() + 2_000,
+        readIdentity: () => null,
+        readDarwinSessionEmpty,
+        waitForProcessGroupDrain,
+      },
+    )).resolves.toBe(false);
+
+    expect(waitForProcessGroupDrain).toHaveBeenCalledTimes(2);
+    expect(waitForProcessGroupDrain).toHaveBeenCalledWith(20);
+    expect(readDarwinSessionEmpty).toHaveBeenCalledTimes(3);
+    expect(journal.records(runtimeGenerationId)).toEqual([claim]);
+  });
+
+  it("keeps an occupied macOS session fail-closed when its guardian is missing", async () => {
+    const directory = temporaryDirectory();
+    const { claim, journal } = portableClaim(directory, "darwin");
+    const readDarwinSessionEmpty = vi.fn(() => false);
+
+    await expect(recoverRuntimeOwnedProcesses(
+      directory,
+      runtimeGenerationId,
+      systemBootId,
+      {
+        platform: "darwin",
+        deadlineAt: Date.now() + 2_000,
+        readIdentity: () => null,
+        readDarwinSessionEmpty,
+        waitForProcessGroupDrain: async () => undefined,
+      },
+    )).resolves.toBe(false);
+
+    expect(readDarwinSessionEmpty).toHaveBeenCalledTimes(51);
+    expect(journal.records(runtimeGenerationId)).toEqual([claim]);
+  });
+
+  it.each(["darwin", "win32"] as const)(
+    "retires an empty %s ownership session and its generation lease",
+    async (platform) => {
+      const directory = temporaryDirectory();
+      const leases = new RuntimeGenerationLeaseJournal(directory);
+      const receipts = new RuntimeCleanupReceiptJournal(directory);
+      expect(leases.publish(runtimeGenerationId, systemBootId)).toBe(true);
+      expect(new RuntimeOwnedProcessJournal(directory, { platform })
+        .startSession(runtimeGenerationId, systemBootId)).toBe(true);
+
+      const recovery = recoverPriorRuntimeGenerations({
+        dataDirectory: directory,
+        systemBootId,
+        deadlineAt: Date.now() + 2_000,
+        leases,
+        receipts,
+        platform,
+      });
+
+      await expect(recovery).resolves.toBe(true);
+      leases.refresh();
+      expect(leases.all()).toEqual([]);
+      expect(receipts.pending()).toEqual([runtimeGenerationId]);
+    },
+  );
+
+  it.each([
+    ["unavailable", systemBootId],
+    [systemBootId, "unavailable"],
+  ] as const)(
+    "recovers an empty Linux exact session across boot probe transition %s -> %s",
+    async (recordedBootId, currentBootId) => {
+      const directory = temporaryDirectory();
+      const leases = new RuntimeGenerationLeaseJournal(directory);
+      const receipts = new RuntimeCleanupReceiptJournal(directory);
+      const guardianPath = join(
+        process.cwd(),
+        "resources/generated/runtime-process-guardian/runtime-process-guardian",
+      );
+      expect(leases.publish(runtimeGenerationId, recordedBootId)).toBe(true);
+      expect(new RuntimeOwnedProcessJournal(directory, {
+        platform: "linux",
+        darwinGuardianPath: guardianPath,
+      }).startSession(runtimeGenerationId, recordedBootId)).toBe(true);
+
+      await expect(recoverPriorRuntimeGenerations({
+        dataDirectory: directory,
+        systemBootId: currentBootId,
+        deadlineAt: Date.now() + 2_000,
+        leases,
+        receipts,
+        platform: "linux",
+        darwinGuardianPath: guardianPath,
+      })).resolves.toBe(true);
+      leases.refresh();
+      expect(leases.all()).toEqual([]);
+      expect(receipts.pending()).toEqual([runtimeGenerationId]);
+    },
+  );
+
+  it("reads a bounded macOS process birth identity", () => {
+    const spawnProcessSync = vi.fn(() => ({
+      status: 0,
+      stdout: "4242|101|4242|4242|1756100000|123456\n",
+      stderr: "",
+    }));
+
+    expect(readDarwinProcessIdentity(4_242, "/trusted/runtime-process-guardian", {
+      platform: "darwin",
+      deadlineAt: Date.now() + 2_000,
+      spawnProcessSync: spawnProcessSync as never,
+    })).toEqual({
+      platform: "darwin",
+      pid: 4_242,
+      parentPid: 101,
+      processGroupId: 4_242,
+      sessionId: 4_242,
+      startTimeSeconds: "1756100000",
+      startTimeMicroseconds: 123_456,
+    });
+    expect(spawnProcessSync).toHaveBeenCalledWith(
+      resolve("/trusted/runtime-process-guardian"),
+      ["identity", "4242"],
+      expect.objectContaining({ shell: false }),
+    );
+  });
+
+  it("reads macOS session emptiness without accepting helper output", () => {
+    const empty = vi.fn(() => ({ status: 0, stdout: "", stderr: "" }));
+    expect(darwinProcessSessionEmpty(
+      4_242,
+      "/trusted/runtime-process-guardian",
+      { platform: "darwin", spawnProcessSync: empty as never },
+    )).toBe(true);
+    expect(empty).toHaveBeenCalledWith(
+      resolve("/trusted/runtime-process-guardian"),
+      ["session-empty", "4242"],
+      expect.objectContaining({ shell: false }),
+    );
+
+    const occupied = vi.fn(() => ({ status: 4, stdout: "", stderr: "" }));
+    expect(darwinProcessSessionEmpty(
+      4_242,
+      "/trusted/runtime-process-guardian",
+      { platform: "darwin", spawnProcessSync: occupied as never },
+    )).toBe(false);
+
+    const noisy = vi.fn(() => ({ status: 0, stdout: "true\n", stderr: "" }));
+    expect(() => darwinProcessSessionEmpty(
+      4_242,
+      "/trusted/runtime-process-guardian",
+      { platform: "darwin", spawnProcessSync: noisy as never },
+    )).toThrow("session result is invalid");
+  });
+
+  it("requires an exact bounded macOS guardian readiness identity", () => {
+    const ready = vi.fn(() => ({
+      status: 0,
+      stdout: "4242|101|4242|4242|1756100000|123456\n",
+      stderr: "",
+    }));
+    expect(darwinProcessGuardianReady(
+      4_242,
+      "/trusted/runtime-process-guardian",
+      { platform: "darwin", spawnProcessSync: ready as never },
+    )).toMatchObject({ pid: 4_242, sessionId: 4_242 });
+    expect(ready).toHaveBeenCalledWith(
+      resolve("/trusted/runtime-process-guardian"),
+      ["ready", "4242"],
+      expect.objectContaining({ shell: false }),
+    );
+
+    const notReady = vi.fn(() => ({ status: 4, stdout: "", stderr: "" }));
+    expect(darwinProcessGuardianReady(
+      4_242,
+      "/trusted/runtime-process-guardian",
+      { platform: "darwin", spawnProcessSync: notReady as never },
+    )).toBeNull();
+
+    const reused = vi.fn(() => ({
+      status: 0,
+      stdout: "4242|101|4242|4242|1756100001|123456\n",
+      stderr: "",
+    }));
+    const journal = new RuntimeOwnedProcessJournal(temporaryDirectory(), {
+      platform: "darwin",
+      darwinGuardianPath: "/trusted/runtime-process-guardian",
+      readDarwinGuardianReady: () => ({
+        platform: "darwin",
+        pid: 4_242,
+        parentPid: 101,
+        processGroupId: 4_242,
+        sessionId: 4_242,
+        startTimeSeconds: "1756100001",
+        startTimeMicroseconds: 123_456,
+      }),
+    });
+    expect(journal.startSession(runtimeGenerationId, systemBootId)).toBe(true);
+    const ownershipId = journal.begin(runtimeGenerationId, systemBootId);
+    expect(() => journal.claim(
+      ownershipId,
+      runtimeGenerationId,
+      systemBootId,
+      4_242,
+      101,
+      {
+        expectedDarwinIdentity: {
+          platform: "darwin",
+          pid: 4_242,
+          parentPid: 101,
+          processGroupId: 4_242,
+          sessionId: 4_242,
+          startTimeSeconds: "1756100000",
+          startTimeMicroseconds: 123_456,
+        },
+      },
+    )).toThrow("could not be proven");
+    expect(reused).not.toHaveBeenCalled();
+  });
+
+  it("never signals a reused macOS guardian PID after an asynchronous claim failure", async () => {
+    const directory = temporaryDirectory();
+    const expected = {
+      platform: "darwin" as const,
+      pid: 4_242, parentPid: process.pid,
+      processGroupId: 4_242, sessionId: 4_242,
+      startTimeSeconds: "1756100000",
+      startTimeMicroseconds: 123_456,
+    };
+    const reused = {
+      ...expected,
+      startTimeSeconds: "1756100001",
+    };
+    const readDarwinIdentityAsync = vi.fn().mockResolvedValue(reused);
+    const deactivate = activateRuntimeOwnedProcessRegistry(
+      directory,
+      runtimeGenerationId,
+      systemBootId,
+      {
+        platform: "darwin",
+        darwinGuardianPath: "/trusted/runtime-process-guardian",
+        readDarwinGuardianReady: () => expected,
+        readDarwinIdentityAsync,
+        readDarwinIdentity: () => reused,
+      },
+    );
+    if (deactivate) deactivators.push(deactivate);
+    const claim = vi.spyOn(RuntimeOwnedProcessJournal.prototype, "claim")
+      .mockImplementationOnce(() => {
+        throw new Error("The spawned process ownership could not be persisted.");
+      });
+    const childKill = vi.fn(() => true);
+    const processKill = vi.spyOn(process, "kill");
+    try {
+      expect(() => spawnRuntimeOwnedProcess(() => ({
+        pid: 4_242,
+        spawnfile: "/trusted/runtime-process-guardian",
+        kill: childKill,
+        once: vi.fn(),
+      } as unknown as ChildProcess))).not.toThrow();
+      await vi.waitFor(() => expect(claim).toHaveBeenCalledOnce());
+      expect(childKill).not.toHaveBeenCalled();
+      expect(processKill).not.toHaveBeenCalledWith(4_242, "SIGUSR1");
+      expect(processKill).not.toHaveBeenCalledWith(4_242, "SIGKILL");
+      expect(processKill).not.toHaveBeenCalledWith(-4_242, "SIGKILL");
+    } finally {
+      claim.mockRestore();
+      processKill.mockRestore();
+      deactivate?.();
+      if (deactivate) deactivators.splice(deactivators.indexOf(deactivate), 1);
+    }
+  });
+
+  it("returns the macOS guardian immediately while exact admission remains pending", async () => {
+    const directory = temporaryDirectory();
+    const expected = {
+      platform: "darwin" as const,
+      pid: 4_242,
+      parentPid: process.pid,
+      processGroupId: 4_242,
+      sessionId: 4_242,
+      startTimeSeconds: "1756100000",
+      startTimeMicroseconds: 123_456,
+    };
+    let resolveReady!: (identity: typeof expected) => void;
+    const ready = new Promise<typeof expected>((resolve) => { resolveReady = resolve; });
+    const readDarwinIdentityAsync = vi.fn(async () => expected);
+    const deactivate = activateRuntimeOwnedProcessRegistry(
+      directory, runtimeGenerationId, systemBootId, {
+        platform: "darwin",
+        darwinGuardianPath: "/trusted/runtime-process-guardian",
+        readDarwinGuardianReadyAsync: async () => await ready,
+        readDarwinIdentityAsync,
+      },
+    );
+    if (deactivate) deactivators.push(deactivate);
+    const processKill = vi.spyOn(process, "kill").mockReturnValue(true);
+    const child = {
+      pid: 4_242,
+      spawnfile: "/trusted/runtime-process-guardian",
+      kill: vi.fn(() => true),
+      once: vi.fn(),
+    } as unknown as ChildProcess;
+    try {
+      expect(spawnRuntimeOwnedProcess(() => child)).toBe(child);
+      expect(processKill).not.toHaveBeenCalledWith(4_242, "SIGUSR1");
+      expect(new RuntimeOwnedProcessJournal(directory)
+        .records(runtimeGenerationId)).toMatchObject([{ state: "pending" }]);
+
+      resolveReady(expected);
+      await vi.waitFor(() => {
+        expect(processKill).toHaveBeenCalledWith(4_242, "SIGUSR1");
+      });
+      expect(readDarwinIdentityAsync).toHaveBeenCalledOnce();
+      expect(new RuntimeOwnedProcessJournal(directory)
+        .records(runtimeGenerationId)).toMatchObject([{ state: "owned" }]);
+    } finally {
+      processKill.mockRestore();
+      deactivate?.();
+      if (deactivate) deactivators.splice(deactivators.indexOf(deactivate), 1);
+    }
+  });
+
+  it("never authorizes a macOS guardian whose identity changes after persistence", async () => {
+    const directory = temporaryDirectory();
+    const expected = {
+      platform: "darwin" as const,
+      pid: 4_242,
+      parentPid: process.pid,
+      processGroupId: 4_242,
+      sessionId: 4_242,
+      startTimeSeconds: "1756100000",
+      startTimeMicroseconds: 123_456,
+    };
+    const reused = { ...expected, startTimeSeconds: "1756100001" };
+    const readDarwinIdentityAsync = vi.fn(async () => reused);
+    const deactivate = activateRuntimeOwnedProcessRegistry(
+      directory, runtimeGenerationId, systemBootId, {
+        platform: "darwin",
+        darwinGuardianPath: "/trusted/runtime-process-guardian",
+        readDarwinGuardianReadyAsync: async () => expected,
+        readDarwinIdentityAsync,
+        readDarwinIdentity: () => reused,
+      },
+    );
+    if (deactivate) deactivators.push(deactivate);
+    const processKill = vi.spyOn(process, "kill");
+    const childKill = vi.fn(() => true);
+    try {
+      spawnRuntimeOwnedProcess(() => ({
+        pid: 4_242,
+        spawnfile: "/trusted/runtime-process-guardian",
+        kill: childKill,
+        once: vi.fn(),
+      } as unknown as ChildProcess));
+      await vi.waitFor(() => expect(readDarwinIdentityAsync).toHaveBeenCalled());
+
+      expect(processKill).not.toHaveBeenCalledWith(4_242, "SIGUSR1");
+      expect(childKill).not.toHaveBeenCalled();
+      expect(new RuntimeOwnedProcessJournal(directory)
+        .records(runtimeGenerationId)).toMatchObject([{ state: "owned" }]);
+    } finally {
+      processKill.mockRestore();
+      deactivate?.();
+      if (deactivate) deactivators.splice(deactivators.indexOf(deactivate), 1);
+    }
+  });
+
+  it("retires an admitted numeric macOS guardian close without another census", async () => {
+    const directory = temporaryDirectory();
+    const expected = {
+      platform: "darwin" as const,
+      pid: 4_242,
+      parentPid: process.pid,
+      processGroupId: 4_242,
+      sessionId: 4_242,
+      startTimeSeconds: "1756100000",
+      startTimeMicroseconds: 123_456,
+    };
+    const readDarwinSessionEmptyAsync = vi.fn(async () => {
+      throw new Error("A trusted normal guardian close must not rescan the session.");
+    });
+    const deactivate = activateRuntimeOwnedProcessRegistry(
+      directory,
+      runtimeGenerationId,
+      systemBootId,
+      {
+        platform: "darwin",
+        darwinGuardianPath: "/trusted/runtime-process-guardian",
+        readDarwinGuardianReadyAsync: async () => expected,
+        readDarwinIdentityAsync: async () => expected,
+        readDarwinSessionEmptyAsync,
+      },
+    );
+    if (deactivate) deactivators.push(deactivate);
+    const processKill = vi.spyOn(process, "kill").mockReturnValue(true);
+    let closeHandler = (
+      _code: number | null,
+      _signal: NodeJS.Signals | null,
+    ): void => { throw new Error("The close handler was not registered."); };
+    const child = {
+      pid: 4_242,
+      spawnfile: "/trusted/runtime-process-guardian",
+      kill: vi.fn(() => true),
+      once: vi.fn((event: string, listener: typeof closeHandler) => {
+        if (event === "close") closeHandler = listener;
+        return child;
+      }),
+    } as unknown as ChildProcess;
+    try {
+      spawnRuntimeOwnedProcess(() => child);
+      await vi.waitFor(() => {
+        expect(processKill).toHaveBeenCalledWith(4_242, "SIGUSR1");
+      });
+      expect(confirmRuntimeOwnedProcessStopped(child)).toBe(false);
+      expect(new RuntimeOwnedProcessJournal(directory)
+        .records(runtimeGenerationId)).toMatchObject([{ state: "owned" }]);
+      closeHandler(78, null);
+      await vi.waitFor(() => {
+        expect(new RuntimeOwnedProcessJournal(directory)
+          .records(runtimeGenerationId)).toEqual([]);
+      });
+      expect(readDarwinSessionEmptyAsync).not.toHaveBeenCalled();
+    } finally {
+      processKill.mockRestore();
+      deactivate?.();
+      if (deactivate) deactivators.splice(deactivators.indexOf(deactivate), 1);
+    }
+  });
+
+  it("waits for macOS admission before retiring a numeric guardian close", async () => {
+    const directory = temporaryDirectory();
+    const expected = {
+      platform: "darwin" as const,
+      pid: 4_242,
+      parentPid: process.pid,
+      processGroupId: 4_242,
+      sessionId: 4_242,
+      startTimeSeconds: "1756100000",
+      startTimeMicroseconds: 123_456,
+    };
+    let resolveReady!: (identity: typeof expected) => void;
+    const ready = new Promise<typeof expected>((resolve) => { resolveReady = resolve; });
+    const readDarwinSessionEmptyAsync = vi.fn(async () => true);
+    const deactivate = activateRuntimeOwnedProcessRegistry(
+      directory,
+      runtimeGenerationId,
+      systemBootId,
+      {
+        platform: "darwin",
+        darwinGuardianPath: "/trusted/runtime-process-guardian",
+        readDarwinGuardianReadyAsync: async () => await ready,
+        readDarwinIdentityAsync: async () => expected,
+        readDarwinSessionEmptyAsync,
+      },
+    );
+    if (deactivate) deactivators.push(deactivate);
+    const processKill = vi.spyOn(process, "kill").mockReturnValue(true);
+    let closeHandler = (
+      _code: number | null,
+      _signal: NodeJS.Signals | null,
+    ): void => { throw new Error("The close handler was not registered."); };
+    const child = {
+      pid: 4_242,
+      spawnfile: "/trusted/runtime-process-guardian",
+      kill: vi.fn(() => true),
+      once: vi.fn((event: string, listener: typeof closeHandler) => {
+        if (event === "close") closeHandler = listener;
+        return child;
+      }),
+    } as unknown as ChildProcess;
+    try {
+      spawnRuntimeOwnedProcess(() => child);
+      closeHandler(0, null);
+      expect(new RuntimeOwnedProcessJournal(directory)
+        .records(runtimeGenerationId)).toMatchObject([{ state: "pending" }]);
+
+      resolveReady(expected);
+      await vi.waitFor(() => {
+        expect(new RuntimeOwnedProcessJournal(directory)
+          .records(runtimeGenerationId)).toEqual([]);
+      });
+      expect(processKill).toHaveBeenCalledWith(4_242, "SIGUSR1");
+      expect(readDarwinSessionEmptyAsync).not.toHaveBeenCalled();
+    } finally {
+      processKill.mockRestore();
+      deactivate?.();
+      if (deactivate) deactivators.splice(deactivators.indexOf(deactivate), 1);
+    }
+  });
+
+  it("keeps a numeric macOS guardian close when admission fails", async () => {
+    const directory = temporaryDirectory();
+    const readDarwinSessionEmptyAsync = vi.fn(async () => true);
+    const deactivate = activateRuntimeOwnedProcessRegistry(
+      directory,
+      runtimeGenerationId,
+      systemBootId,
+      {
+        platform: "darwin",
+        darwinGuardianPath: "/trusted/runtime-process-guardian",
+        readDarwinGuardianReadyAsync: async () => null,
+        readDarwinSessionEmptyAsync,
+      },
+    );
+    if (deactivate) deactivators.push(deactivate);
+    const processKill = vi.spyOn(process, "kill").mockReturnValue(true);
+    let closeHandler = (
+      _code: number | null,
+      _signal: NodeJS.Signals | null,
+    ): void => { throw new Error("The close handler was not registered."); };
+    const child = {
+      pid: 4_242,
+      spawnfile: "/trusted/runtime-process-guardian",
+      kill: vi.fn(() => true),
+      once: vi.fn((event: string, listener: typeof closeHandler) => {
+        if (event === "close") closeHandler = listener;
+        return child;
+      }),
+    } as unknown as ChildProcess;
+    try {
+      spawnRuntimeOwnedProcess(() => child);
+      closeHandler(70, null);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      expect(processKill).not.toHaveBeenCalledWith(4_242, "SIGUSR1");
+      expect(new RuntimeOwnedProcessJournal(directory)
+        .records(runtimeGenerationId)).toMatchObject([{ state: "pending" }]);
+      expect(readDarwinSessionEmptyAsync).not.toHaveBeenCalled();
+    } finally {
+      processKill.mockRestore();
+      deactivate?.();
+      if (deactivate) deactivators.splice(deactivators.indexOf(deactivate), 1);
+    }
+  });
+
+  it("does not retire a numeric macOS close through a deactivated registry", async () => {
+    const directory = temporaryDirectory();
+    const expected = {
+      platform: "darwin" as const,
+      pid: 4_242,
+      parentPid: process.pid,
+      processGroupId: 4_242,
+      sessionId: 4_242,
+      startTimeSeconds: "1756100000",
+      startTimeMicroseconds: 123_456,
+    };
+    let resolveReady!: (identity: typeof expected) => void;
+    const ready = new Promise<typeof expected>((resolve) => { resolveReady = resolve; });
+    const readDarwinSessionEmptyAsync = vi.fn(async () => true);
+    let deactivate = activateRuntimeOwnedProcessRegistry(
+      directory,
+      runtimeGenerationId,
+      systemBootId,
+      {
+        platform: "darwin",
+        darwinGuardianPath: "/trusted/runtime-process-guardian",
+        readDarwinGuardianReadyAsync: async () => await ready,
+        readDarwinIdentityAsync: async () => expected,
+        readDarwinSessionEmptyAsync,
+      },
+    );
+    if (deactivate) deactivators.push(deactivate);
+    const processKill = vi.spyOn(process, "kill").mockReturnValue(true);
+    let closeHandler = (
+      _code: number | null,
+      _signal: NodeJS.Signals | null,
+    ): void => { throw new Error("The close handler was not registered."); };
+    const child = {
+      pid: 4_242,
+      spawnfile: "/trusted/runtime-process-guardian",
+      kill: vi.fn(() => true),
+      once: vi.fn((event: string, listener: typeof closeHandler) => {
+        if (event === "close") closeHandler = listener;
+        return child;
+      }),
+    } as unknown as ChildProcess;
+    try {
+      spawnRuntimeOwnedProcess(() => child);
+      deactivate?.();
+      if (deactivate) deactivators.splice(deactivators.indexOf(deactivate), 1);
+      deactivate = null;
+      closeHandler(0, null);
+      resolveReady(expected);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      expect(processKill).not.toHaveBeenCalledWith(4_242, "SIGUSR1");
+      expect(new RuntimeOwnedProcessJournal(directory)
+        .records(runtimeGenerationId)).toMatchObject([{ state: "pending" }]);
+      expect(readDarwinSessionEmptyAsync).not.toHaveBeenCalled();
+    } finally {
+      processKill.mockRestore();
+      deactivate?.();
+      if (deactivate) deactivators.splice(deactivators.indexOf(deactivate), 1);
+    }
+  });
+
+  it.each([
+    { label: "an ambiguous close", code: null, signal: null },
+    { label: "SIGUSR2", code: null, signal: "SIGUSR2" as NodeJS.Signals },
+  ])("keeps a macOS claim after $label", async ({ code, signal }) => {
+    const directory = temporaryDirectory();
+    const expected = {
+      platform: "darwin" as const,
+      pid: 4_242,
+      parentPid: process.pid,
+      processGroupId: 4_242,
+      sessionId: 4_242,
+      startTimeSeconds: "1756100000",
+      startTimeMicroseconds: 123_456,
+    };
+    const readDarwinSessionEmptyAsync = vi.fn(async () => true);
+    const deactivate = activateRuntimeOwnedProcessRegistry(
+      directory,
+      runtimeGenerationId,
+      systemBootId,
+      {
+        platform: "darwin",
+        darwinGuardianPath: "/trusted/runtime-process-guardian",
+        readDarwinGuardianReadyAsync: async () => expected,
+        readDarwinIdentityAsync: async () => expected,
+        readDarwinSessionEmptyAsync,
+      },
+    );
+    if (deactivate) deactivators.push(deactivate);
+    const processKill = vi.spyOn(process, "kill").mockReturnValue(true);
+    let closeHandler = (
+      _code: number | null,
+      _signal: NodeJS.Signals | null,
+    ): void => { throw new Error("The close handler was not registered."); };
+    const child = {
+      pid: 4_242,
+      spawnfile: "/trusted/runtime-process-guardian",
+      kill: vi.fn(() => true),
+      once: vi.fn((event: string, listener: typeof closeHandler) => {
+        if (event === "close") closeHandler = listener;
+        return child;
+      }),
+    } as unknown as ChildProcess;
+    try {
+      spawnRuntimeOwnedProcess(() => child);
+      await vi.waitFor(() => {
+        expect(processKill).toHaveBeenCalledWith(4_242, "SIGUSR1");
+      });
+      closeHandler(code, signal);
+
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(new RuntimeOwnedProcessJournal(directory)
+        .records(runtimeGenerationId)).toMatchObject([{ state: "owned" }]);
+      expect(readDarwinSessionEmptyAsync).not.toHaveBeenCalled();
+    } finally {
+      processKill.mockRestore();
+      deactivate?.();
+      if (deactivate) deactivators.splice(deactivators.indexOf(deactivate), 1);
+    }
+  });
+
+  it("retires only a zero-signal macOS PID guardian", async () => {
+    const directory = temporaryDirectory();
+    const identity = (pid: number) => ({
+      platform: "darwin" as const,
+      pid,
+      parentPid: process.pid,
+      processGroupId: pid,
+      sessionId: pid,
+      startTimeSeconds: "1756100000",
+      startTimeMicroseconds: 123_456,
+    });
+    const readDarwinSessionEmptyAsync = vi.fn(async () => true);
+    const deactivate = activateRuntimeOwnedProcessRegistry(
+      directory,
+      runtimeGenerationId,
+      systemBootId,
+      {
+        platform: "darwin",
+        darwinGuardianPath: "/trusted/runtime-process-guardian",
+        readDarwinGuardianReadyAsync: async (pid) => identity(pid),
+        readDarwinIdentityAsync: async (pid) => identity(pid),
+        readDarwinSessionEmptyAsync,
+      },
+    );
+    if (deactivate) deactivators.push(deactivate);
+    const processKill = vi.spyOn(process, "kill").mockReturnValue(true);
+    try {
+      const normal = spawnRuntimeOwnedPidProcess(() => ({ pid: 4_242 }), {
+        darwinGuardianCommand: "/trusted/runtime-process-guardian",
+      });
+      const signaled = spawnRuntimeOwnedPidProcess(() => ({ pid: 4_243 }), {
+        darwinGuardianCommand: "/trusted/runtime-process-guardian",
+      });
+      const ambiguous = spawnRuntimeOwnedPidProcess(() => ({ pid: 4_244 }), {
+        darwinGuardianCommand: "/trusted/runtime-process-guardian",
+      });
+      await vi.waitFor(() => {
+        expect(processKill).toHaveBeenCalledWith(4_242, "SIGUSR1");
+        expect(processKill).toHaveBeenCalledWith(4_243, "SIGUSR1");
+        expect(processKill).toHaveBeenCalledWith(4_244, "SIGUSR1");
+      });
+      expect(normal.confirmStopped()).toBe(false);
+
+      normal.releaseIfGroupExited(0);
+      signaled.releaseIfGroupExited(31);
+      const bypassSpawn = vi.fn(() => ({ pid: 4_245 }));
+      expect(() => spawnRuntimeOwnedPidProcess(bypassSpawn, {
+        darwinGuardianCommand: "/trusted/runtime-process-guardian",
+      })).toThrow("Runtime process ownership is tainted until restart.");
+      expect(bypassSpawn).not.toHaveBeenCalled();
+      ambiguous.releaseIfGroupExited();
+
+      await vi.waitFor(() => {
+        expect(new RuntimeOwnedProcessJournal(directory)
+          .records(runtimeGenerationId)?.map((record) => (
+            "process" in record ? record.process.pid : 0
+          )).sort())
+          .toEqual([4_243, 4_244]);
+      });
+      expect(normal.confirmStopped()).toBe(true);
+      expect(readDarwinSessionEmptyAsync).not.toHaveBeenCalled();
+    } finally {
+      processKill.mockRestore();
+      deactivate?.();
+      if (deactivate) deactivators.splice(deactivators.indexOf(deactivate), 1);
+    }
+  });
+
+  it("distinguishes an absent macOS PID from an invalid guardian result", () => {
+    const missing = vi.fn(() => ({ status: 3, stdout: "", stderr: "" }));
+    expect(readDarwinProcessIdentity(
+      4_242,
+      "/trusted/runtime-process-guardian",
+      { platform: "darwin", spawnProcessSync: missing as never },
+    )).toBeNull();
+
+    const malformed = vi.fn(() => ({
+      status: 0,
+      stdout: "4242|101|4242|4242|seconds|0\n",
+      stderr: "",
+    }));
+    expect(() => readDarwinProcessIdentity(
+      4_242,
+      "/trusted/runtime-process-guardian",
+      { platform: "darwin", spawnProcessSync: malformed as never },
+    )).toThrow("identity is invalid");
+
+    const wrongSession = vi.fn(() => ({
+      status: 0,
+      stdout: "4242|101|4242|4243|1756100000|123456\n",
+      stderr: "",
+    }));
+    expect(() => readDarwinProcessIdentity(
+      4_242,
+      "/trusted/runtime-process-guardian",
+      { platform: "darwin", spawnProcessSync: wrongSession as never },
+    )).toThrow("identity is invalid");
+  });
+
+  it.runIf(process.platform === "darwin")(
+    "macOS guardian drains a setsid descendant without touching an unrelated session",
+    async () => {
+      const directory = temporaryDirectory();
+      const payloadSourcePath = join(directory, "session-payload.c");
+      const payloadPath = join(directory, "session-payload");
+      const rootIdentityPath = join(directory, "root.identity");
+      const childIdentityPath = join(directory, "child.identity");
+      writeFileSync(payloadSourcePath, [
+        "#include <stdio.h>",
+        "#include <stdlib.h>",
+        "#include <sys/types.h>",
+        "#include <unistd.h>",
+        "static void publish(const char *path) {",
+        "  FILE *stream = fopen(path, \"w\");",
+        "  if (!stream) _exit(72);",
+        "  fprintf(stream, \"%d|%d|%d\\n\", getpid(), getpgrp(), getsid(0));",
+        "  if (fclose(stream) != 0) _exit(73);",
+        "}",
+        "int main(int argc, char **argv) {",
+        "  if (argc != 3) return 64;",
+        "  if (setsid() != getpid()) return 74;",
+        "  publish(argv[1]);",
+        "  publish(argv[2]);",
+        "  for (;;) pause();",
+        "}",
+      ].join("\n"), { encoding: "utf8", mode: 0o600 });
+      const built = spawnSync(
+        "/usr/bin/xcrun",
+        [
+          "clang", "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
+          payloadSourcePath, "-o", payloadPath,
+        ],
+        {
+          encoding: "utf8",
+          env: { PATH: "/usr/bin:/bin:/usr/sbin:/sbin" },
+          shell: false,
+          timeout: 30_000,
+        },
+      );
+      expect(built.status, `${built.stderr}\n${built.stdout}`).toBe(0);
+      const unrelated = spawn(
+        process.execPath,
+        ["-e", "setInterval(() => undefined, 1000)"],
+        { detached: true, shell: false, stdio: "ignore" },
+      );
+      liveChildren.add(unrelated);
+      unrelated.once("close", () => liveChildren.delete(unrelated));
+      expect(unrelated.pid).toBeGreaterThan(1);
+      const guardianPath = join(
+        process.cwd(),
+        "resources/generated/runtime-process-guardian/runtime-process-guardian",
+      );
+      const parentSource = [
+        "const {spawn,spawnSync}=require('node:child_process')",
+        `const guardian=spawn(${JSON.stringify(guardianPath)},['watch',String(process.pid),'--',${JSON.stringify(payloadPath)},${JSON.stringify(rootIdentityPath)},${JSON.stringify(childIdentityPath)}],{detached:true,stdio:'ignore'})`,
+        "process.stdout.write(String(guardian.pid)+'\\n')",
+        `process.stdin.once('data',()=>{const ready=spawnSync(${JSON.stringify(guardianPath)},['ready',String(guardian.pid)],{stdio:'ignore',timeout:2000});if(ready.status!==0)process.exit(75);process.kill(guardian.pid,'SIGUSR1')})`,
+        "setInterval(() => undefined, 1000)",
+      ].join(";");
+      const parent = spawn(process.execPath, ["-e", parentSource], {
+        shell: false,
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      liveChildren.add(parent);
+      parent.once("close", () => liveChildren.delete(parent));
+      let guardianOutput = "";
+      parent.stdout?.on("data", (chunk: Buffer) => {
+        guardianOutput += chunk.toString("utf8");
+      });
+
+      let guardianPid = 0;
+      await expect.poll(() => {
+        guardianPid = Number(guardianOutput.trim());
+        return Number.isSafeInteger(guardianPid) && guardianPid > 1;
+      }, { timeout: 5_000 }).toBe(true);
+      await expect.poll(
+        () => darwinProcessGuardianReady(guardianPid, guardianPath)?.pid ?? 0,
+        { timeout: 5_000 },
+      ).toBe(guardianPid);
+      expect(existsSync(rootIdentityPath)).toBe(false);
+      expect(existsSync(childIdentityPath)).toBe(false);
+      process.kill(guardianPid, "SIGUSR1");
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(existsSync(rootIdentityPath)).toBe(false);
+      expect(existsSync(childIdentityPath)).toBe(false);
+      parent.stdin?.write("authorize\n");
+      let rootIdentity: number[] = [];
+      let childIdentity: number[] = [];
+      await expect.poll(() => {
+        if (existsSync(rootIdentityPath)) {
+          rootIdentity = readFileSync(rootIdentityPath, "utf8")
+            .trim().split("|").map(Number);
+        }
+        if (existsSync(childIdentityPath)) {
+          childIdentity = readFileSync(childIdentityPath, "utf8")
+            .trim().split("|").map(Number);
+        }
+        return rootIdentity.length === 3 && childIdentity.length === 3;
+      }, { timeout: 5_000 }).toBe(true);
+      const [rootPid, rootGroupId, rootSessionId] = rootIdentity;
+      const [childPid, childGroupId, childSessionId] = childIdentity;
+      expect(rootPid).toBeGreaterThan(1);
+      expect(childPid).toBeGreaterThan(1);
+      expect(rootPid).toBe(childPid);
+      expect(rootGroupId).toBe(rootPid);
+      expect(childGroupId).toBe(childPid);
+      expect(rootSessionId).toBe(rootPid);
+      expect(childSessionId).toBe(childPid);
+
+      parent.kill("SIGKILL");
+      await closeOf(parent);
+      await expect.poll(
+        () => !processIsAlive(guardianPid)
+          && !processIsAlive(rootPid!)
+          && !processIsAlive(childPid!),
+        { timeout: 5_000 },
+      ).toBe(true);
+      expect(processIsAlive(unrelated.pid ?? 0)).toBe(true);
+      unrelated.kill("SIGKILL");
+      await closeOf(unrelated);
+    },
+    10_000,
+  );
+
+  it.runIf(process.platform === "darwin")(
+    "macOS guardian never starts its payload when stopped or orphaned before authorization",
+    async () => {
+      const guardianPath = join(
+        process.cwd(),
+        "resources/generated/runtime-process-guardian/runtime-process-guardian",
+      );
+      for (const termination of ["guardian", "runtime-parent"] as const) {
+        const payloadPath = join(temporaryDirectory(), `${termination}.started`);
+        const parentSource = [
+          "const {spawn}=require('node:child_process')",
+          `const guardian=spawn(${JSON.stringify(guardianPath)},['watch',String(process.pid),'--','/usr/bin/touch',${JSON.stringify(payloadPath)}],{detached:true,stdio:'ignore'})`,
+          "process.stdout.write(String(guardian.pid)+'\\n')",
+          "setInterval(() => undefined,1000)",
+        ].join(";");
+        const parent = spawn(process.execPath, ["-e", parentSource], {
+          shell: false,
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+        liveChildren.add(parent);
+        parent.once("close", () => liveChildren.delete(parent));
+        let output = "";
+        parent.stdout?.on("data", (chunk: Buffer) => {
+          output += chunk.toString("utf8");
+        });
+        let guardianPid = 0;
+        await expect.poll(() => {
+          guardianPid = Number(output.trim());
+          return Number.isSafeInteger(guardianPid) && guardianPid > 1;
+        }, { timeout: 5_000 }).toBe(true);
+        await expect.poll(
+          () => darwinProcessGuardianReady(guardianPid, guardianPath)?.pid ?? 0,
+          { timeout: 5_000 },
+        ).toBe(guardianPid);
+        if (termination === "guardian") process.kill(guardianPid, "SIGTERM");
+        else parent.kill("SIGKILL");
+        await expect.poll(
+          () => !processIsAlive(guardianPid),
+          { timeout: 5_000 },
+        ).toBe(true);
+        expect(existsSync(payloadPath)).toBe(false);
+        if (processIsAlive(parent.pid ?? 0)) parent.kill("SIGKILL");
+        await closeOf(parent);
+      }
+    },
+    15_000,
+  );
+
+  it.runIf(process.platform === "darwin")(
+    "macOS retains a claim when exact non-fork cleanup becomes unprovable",
+    async () => {
+      const directory = temporaryDirectory();
+      const guardianPath = join(directory, "runtime-process-guardian-unproved");
+      const payloadSourcePath = join(directory, "setsid-payload.c");
+      const payloadPath = join(directory, "setsid-payload");
+      const payloadPidPath = join(directory, "setsid-payload.pid");
+      writeFileSync(payloadSourcePath, [
+        "#include <stdio.h>",
+        "#include <sys/types.h>",
+        "#include <unistd.h>",
+        "int main(int argc, char **argv) {",
+        "  if (argc != 2) return 64;",
+        "  if (setsid() != getpid()) return 65;",
+        "  FILE *stream = fopen(argv[1], \"w\");",
+        "  if (!stream) return 66;",
+        "  fprintf(stream, \"%d\\n\", getpid());",
+        "  if (fclose(stream) != 0) return 67;",
+        "  for (;;) pause();",
+        "}",
+      ].join("\n"), { encoding: "utf8", mode: 0o600 });
+      const guardianBuilt = spawnSync(
+        "/usr/bin/xcrun",
+        [
+          "clang", "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
+          "-DINERTIA_RUNTIME_GUARDIAN_TEST_CLEANUP_UNPROVED=1",
+          join(process.cwd(), "native/runtime-process-guardian/darwin.c"),
+          "-o", guardianPath,
+        ],
+        {
+          encoding: "utf8",
+          env: { PATH: "/usr/bin:/bin:/usr/sbin:/sbin" },
+          shell: false,
+          timeout: 30_000,
+        },
+      );
+      expect(
+        guardianBuilt.status,
+        `${guardianBuilt.stderr}\n${guardianBuilt.stdout}`,
+      ).toBe(0);
+      const payloadBuilt = spawnSync(
+        "/usr/bin/xcrun",
+        [
+          "clang", "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
+          payloadSourcePath, "-o", payloadPath,
+        ],
+        {
+          encoding: "utf8",
+          env: { PATH: "/usr/bin:/bin:/usr/sbin:/sbin" },
+          shell: false,
+          timeout: 30_000,
+        },
+      );
+      expect(payloadBuilt.status, `${payloadBuilt.stderr}\n${payloadBuilt.stdout}`)
+        .toBe(0);
+      const deactivate = activateRuntimeOwnedProcessRegistry(
+        directory,
+        runtimeGenerationId,
+        systemBootId,
+        { darwinGuardianPath: guardianPath },
+      );
+      if (deactivate) deactivators.push(deactivate);
+      const invocation = runtimeOwnedProcessInvocation(
+        payloadPath,
+        [payloadPidPath],
+      );
+      const guardian = spawnRuntimeOwnedProcess(() => spawn(
+        invocation.command,
+        invocation.args,
+        { detached: true, shell: false, stdio: "ignore" },
+      ));
+      liveChildren.add(guardian);
+      guardian.once("close", () => liveChildren.delete(guardian));
+      let payloadPid = 0;
+      await expect.poll(() => {
+        if (existsSync(payloadPidPath)) {
+          payloadPid = Number(readFileSync(payloadPidPath, "utf8").trim());
+        }
+        return Number.isSafeInteger(payloadPid) && payloadPid > 1;
+      }, { timeout: 5_000 }).toBe(true);
+
+      guardian.kill("SIGTERM");
+      await closeOf(guardian);
+
+      expect(guardian.exitCode).toBeNull();
+      expect(guardian.signalCode).toBe("SIGUSR2");
+      await expect.poll(() => !processIsAlive(payloadPid), {
+        timeout: 5_000,
+      }).toBe(true);
+      expect(new RuntimeOwnedProcessJournal(directory, {
+        platform: "darwin",
+        darwinGuardianPath: guardianPath,
+      }).records(runtimeGenerationId)).toHaveLength(1);
+    },
+    15_000,
+  );
+
+  it.runIf(process.platform === "darwin")(
+    "macOS authenticated stop retains escaped fork uncertainty",
+    async () => {
+      const directory = temporaryDirectory();
+      const payloadSourcePath = join(directory, "double-fork-payload.c");
+      const payloadPath = join(directory, "double-fork-payload");
+      const grandchildPidPath = join(directory, "grandchild.pid");
+      writeFileSync(payloadSourcePath, [
+        "#include <stdio.h>",
+        "#include <stdlib.h>",
+        "#include <sys/types.h>",
+        "#include <unistd.h>",
+        "int main(int argc, char **argv) {",
+        "  if (argc != 2) return 64;",
+        "  const pid_t child = fork();",
+        "  if (child < 0) return 71;",
+        "  if (child > 0) for (;;) pause();",
+        "  if (setsid() != getpid()) _exit(72);",
+        "  const pid_t grandchild = fork();",
+        "  if (grandchild < 0) _exit(73);",
+        "  if (grandchild > 0) _exit(0);",
+        "  FILE *stream = fopen(argv[1], \"w\");",
+        "  if (!stream) _exit(74);",
+        "  fprintf(stream, \"%d\\n\", getpid());",
+        "  if (fclose(stream) != 0) _exit(75);",
+        "  for (;;) pause();",
+        "}",
+      ].join("\n"), { encoding: "utf8", mode: 0o600 });
+      const built = spawnSync(
+        "/usr/bin/xcrun",
+        [
+          "clang", "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
+          payloadSourcePath, "-o", payloadPath,
+        ],
+        {
+          encoding: "utf8",
+          env: { PATH: "/usr/bin:/bin:/usr/sbin:/sbin" },
+          shell: false,
+          timeout: 30_000,
+        },
+      );
+      expect(built.status, `${built.stderr}\n${built.stdout}`).toBe(0);
+      const guardianPath = join(
+        process.cwd(),
+        "resources/generated/runtime-process-guardian/runtime-process-guardian",
+      );
+      activate(directory);
+      const invocation = runtimeOwnedProcessInvocation(
+        payloadPath,
+        [grandchildPidPath],
+      );
+      const guardian = spawnRuntimeOwnedProcess(() => spawn(
+        invocation.command,
+        invocation.args,
+        { detached: true, shell: false, stdio: "ignore" },
+      ));
+      liveChildren.add(guardian);
+      guardian.once("close", () => liveChildren.delete(guardian));
+      const guardianPid = guardian.pid ?? 0;
+      expect(guardianPid).toBeGreaterThan(1);
+      let grandchildPid = 0;
+      await expect.poll(() => {
+        if (existsSync(grandchildPidPath)) {
+          grandchildPid = Number(readFileSync(grandchildPidPath, "utf8").trim());
+        }
+        return Number.isSafeInteger(grandchildPid) && grandchildPid > 1;
+      }, { timeout: 5_000 }).toBe(true);
+      expect(processIsAlive(grandchildPid)).toBe(true);
+      expect(processIsAlive(guardianPid)).toBe(true);
+      expect(guardian.kill("SIGTERM")).toBe(true);
+      await expect.poll(
+        () => !processIsAlive(guardianPid),
+        { timeout: 5_000 },
+      ).toBe(true);
+      await closeOf(guardian);
+      expect(guardian.exitCode).toBeNull();
+      expect(guardian.signalCode).toBe("SIGUSR2");
+      // Even the exact runtime parent can authorize only cancellation, not a
+      // proof that the escaped descendant was contained. The distinct signal
+      // must retain durable evidence while that process remains alive.
+      const journal = new RuntimeOwnedProcessJournal(directory, {
+        platform: "darwin",
+        darwinGuardianPath: guardianPath,
+      });
+      expect(journal.records(runtimeGenerationId)).toHaveLength(1);
+      expect(processIsAlive(grandchildPid)).toBe(true);
+      await expect(recoverRuntimeOwnedProcesses(
+        directory,
+        runtimeGenerationId,
+        systemBootId,
+        {
+          platform: "darwin",
+          darwinGuardianPath: guardianPath,
+          deadlineAt: Date.now() + 2_000,
+        },
+      )).resolves.toBe(false);
+      expect(journal.records(runtimeGenerationId)).toHaveLength(1);
+      expect(processIsAlive(grandchildPid)).toBe(true);
+      process.kill(grandchildPid, "SIGKILL");
+      await expect.poll(() => !processIsAlive(grandchildPid), {
+        timeout: 5_000,
+      }).toBe(true);
+    },
+    15_000,
+  );
+
+  it.runIf(process.platform === "darwin" || process.platform === "win32").each(
+    [0, 78],
+  )(
+    "retires a normally closed real process with exit %i on the host platform",
+    async (exitCode) => {
+      const directory = temporaryDirectory();
+      activate(directory);
+      const invocation = runtimeOwnedProcessInvocation(
+        process.execPath,
+        ["-e", `process.exit(${exitCode})`],
+      );
+      const child = spawnRuntimeOwnedProcess(() => spawn(
+        invocation.command,
+        invocation.args,
+        {
+          detached: process.platform !== "win32",
+          shell: false,
+          stdio: "ignore",
+        },
+      ));
+      liveChildren.add(child);
+      child.once("close", () => liveChildren.delete(child));
+      await closeOf(child);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      expect(child.exitCode).toBe(exitCode);
+      expect(child.signalCode).toBeNull();
+      await vi.waitFor(() => expect(new RuntimeOwnedProcessJournal(directory)
+        .records(runtimeGenerationId)).toEqual([]));
+      deactivate();
+    },
+    10_000,
+  );
+
+  it.runIf(process.platform === "darwin")(
+    "retries transient macOS ownership probes without changing payload status",
+    async () => {
+      const directory = temporaryDirectory();
+      const guardianPath = join(directory, "runtime-process-guardian-transient-census");
+      const built = spawnSync(
+        "/usr/bin/xcrun",
+        [
+          "clang", "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
+          "-DINERTIA_RUNTIME_GUARDIAN_TEST_TRANSIENT_CENSUS_FAILURE=1",
+          "-DINERTIA_RUNTIME_GUARDIAN_TEST_TRANSIENT_PARENT_IDENTITY_FAILURE=1",
+          join(process.cwd(), "native/runtime-process-guardian/darwin.c"),
+          "-o", guardianPath,
+        ],
+        {
+          encoding: "utf8",
+          env: { PATH: "/usr/bin:/bin:/usr/sbin:/sbin" },
+          shell: false,
+          timeout: 30_000,
+        },
+      );
+      expect(built.status, `${built.stderr}\n${built.stdout}`).toBe(0);
+      const deactivateRegistry = activateRuntimeOwnedProcessRegistry(
+        directory,
+        runtimeGenerationId,
+        systemBootId,
+        { darwinGuardianPath: guardianPath },
+      );
+      if (deactivateRegistry) deactivators.push(deactivateRegistry);
+      const invocation = runtimeOwnedProcessInvocation(
+        process.execPath,
+        ["-e", "setTimeout(() => process.exit(0), 100)"],
+      );
+      const guardian = spawnRuntimeOwnedProcess(() => spawn(
+        invocation.command,
+        invocation.args,
+        { detached: true, shell: false, stdio: "ignore" },
+      ));
+      liveChildren.add(guardian);
+      guardian.once("close", () => liveChildren.delete(guardian));
+
+      await closeOf(guardian);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      expect(guardian.exitCode).toBe(0);
+      expect(guardian.signalCode).toBeNull();
+      await vi.waitFor(() => expect(new RuntimeOwnedProcessJournal(directory)
+        .records(runtimeGenerationId)).toEqual([]));
+      deactivate();
+    },
+    15_000,
+  );
+
+  it.runIf(process.platform === "darwin")(
+    "preserves a normally completed fork under best-effort macOS containment",
+    async () => {
+      const directory = temporaryDirectory();
+      activate(directory);
+      const invocation = runtimeOwnedProcessInvocation(
+        process.execPath,
+        [
+          "-e",
+          "require('node:child_process').execFileSync('/usr/bin/true'); process.exit(78)",
+        ],
+      );
+      const guardian = spawnRuntimeOwnedProcess(() => spawn(
+        invocation.command,
+        invocation.args,
+        { detached: true, shell: false, stdio: "ignore" },
+      ));
+      liveChildren.add(guardian);
+      guardian.once("close", () => liveChildren.delete(guardian));
+
+      await closeOf(guardian);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      expect(guardian.exitCode).toBe(78);
+      expect(guardian.signalCode).toBeNull();
+      await vi.waitFor(() => expect(new RuntimeOwnedProcessJournal(directory)
+        .records(runtimeGenerationId)).toEqual([]));
+      deactivate();
+    },
+    10_000,
+  );
+
+  it.runIf(process.platform === "darwin")(
+    "keeps authenticated macOS fork-tainted cleanup fail closed",
+    async () => {
+      const directory = temporaryDirectory();
+      const payloadSourcePath = join(directory, "settled-fork-payload.c");
+      const payloadPath = join(directory, "settled-fork-payload");
+      const rootPidPath = join(directory, "root.pid");
+      const childPidPath = join(directory, "child.pid");
+      writeFileSync(payloadSourcePath, [
+        "#include <signal.h>",
+        "#include <stdio.h>",
+        "#include <sys/types.h>",
+        "#include <unistd.h>",
+        "static int write_pid(const char *path, pid_t pid) {",
+        "  FILE *stream = fopen(path, \"w\");",
+        "  if (!stream) return 0;",
+        "  const int written = fprintf(stream, \"%d\\n\", pid) > 0;",
+        "  return fclose(stream) == 0 && written;",
+        "}",
+        "int main(int argc, char **argv) {",
+        "  if (argc != 3 || !write_pid(argv[1], getpid())) return 64;",
+        "  const pid_t child = fork();",
+        "  if (child < 0) return 71;",
+        "  if (child > 0) for (;;) pause();",
+        "  if (signal(SIGTERM, SIG_IGN) == SIG_ERR) _exit(72);",
+        "  if (!write_pid(argv[2], getpid())) _exit(73);",
+        "  for (;;) pause();",
+        "}",
+      ].join("\n"), { encoding: "utf8", mode: 0o600 });
+      const built = spawnSync(
+        "/usr/bin/xcrun",
+        [
+          "clang", "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
+          payloadSourcePath, "-o", payloadPath,
+        ],
+        {
+          encoding: "utf8",
+          env: { PATH: "/usr/bin:/bin:/usr/sbin:/sbin" },
+          shell: false,
+          timeout: 30_000,
+        },
+      );
+      expect(built.status, `${built.stderr}\n${built.stdout}`).toBe(0);
+      const guardianPath = join(
+        process.cwd(),
+        "resources/generated/runtime-process-guardian/runtime-process-guardian",
+      );
+      activate(directory);
+      const invocation = runtimeOwnedProcessInvocation(
+        payloadPath,
+        [rootPidPath, childPidPath],
+      );
+      const guardian = spawnRuntimeOwnedProcess(() => spawn(
+        invocation.command,
+        invocation.args,
+        { detached: true, shell: false, stdio: "ignore" },
+      ));
+      liveChildren.add(guardian);
+      guardian.once("close", () => liveChildren.delete(guardian));
+
+      let rootPid = 0;
+      let childPid = 0;
+      await expect.poll(() => {
+        if (existsSync(rootPidPath)) {
+          rootPid = Number(readFileSync(rootPidPath, "utf8").trim());
+        }
+        if (existsSync(childPidPath)) {
+          childPid = Number(readFileSync(childPidPath, "utf8").trim());
+        }
+        return rootPid > 1 && childPid > 1;
+      }, { timeout: 5_000, interval: 2 }).toBe(true);
+      guardian.kill("SIGTERM");
+      await closeOf(guardian);
+
+      expect(guardian.exitCode).toBeNull();
+      expect(guardian.signalCode).toBe("SIGUSR2");
+      await expect.poll(() => !processIsAlive(rootPid), {
+        timeout: 5_000,
+      }).toBe(true);
+      await expect.poll(() => !processIsAlive(childPid), {
+        timeout: 5_000,
+      }).toBe(true);
+      expect(new RuntimeOwnedProcessJournal(directory, {
+        platform: "darwin",
+        darwinGuardianPath: guardianPath,
+      }).records(runtimeGenerationId)).toHaveLength(1);
+    },
+    15_000,
+  );
+
+  it.runIf(process.platform === "darwin")(
+    "drains a real macOS owned process while retaining explicit recovery",
+    async () => {
+      const directory = temporaryDirectory();
+      activate(directory);
+      const child = longRunningChild();
+      const close = closeOf(child);
+      const journal = new RuntimeOwnedProcessJournal(directory);
+      await vi.waitFor(() => {
+        expect(journal.records(runtimeGenerationId)).toMatchObject([{
+          state: "owned",
+        }]);
+      });
+      deactivate();
+
+      const recovery = recoverRuntimeOwnedProcesses(
+        directory,
+        runtimeGenerationId,
+        systemBootId,
+        {
+          deadlineAt: Date.now() + 5_000,
+          ...(process.platform === "darwin"
+            ? {
+                darwinGuardianPath: join(
+                  process.cwd(),
+                  "resources/generated/runtime-process-guardian/runtime-process-guardian",
+                ),
+              }
+            : {}),
+        },
+      );
+
+      await expect(recovery).resolves.toBe(false);
+      await close;
+      expect(journal.records(runtimeGenerationId)).toHaveLength(1);
+    },
+    10_000,
+  );
+});

@@ -3,6 +3,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { INERTIA_VERSION } from "../../shared/version";
 import {
   confirmRuntimeOwnedProcessStopped,
+  runtimeOwnedProcessInvocation,
   spawnRuntimeOwnedProcess,
 } from "../../node/runtime-owned-processes";
 import {
@@ -82,9 +83,13 @@ export async function withCodexControlClient<T>(
     options.environment,
   );
   const spawnProcess = options.spawnProcess ?? spawn;
-  const child: ChildProcessWithoutNullStreams = spawnRuntimeOwnedProcess(() => spawnProcess(
+  const ownedInvocation = runtimeOwnedProcessInvocation(
     invocation.command,
     invocation.args,
+  );
+  const child: ChildProcessWithoutNullStreams = spawnRuntimeOwnedProcess(() => spawnProcess(
+    ownedInvocation.command,
+    ownedInvocation.args,
     {
       cwd: options.cwd,
       env: options.environment,

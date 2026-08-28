@@ -16,9 +16,10 @@ import {
 import {
   validRuntimeGenerationId,
   validSystemBootId,
-} from "./runtime-process-protocol.js";
+} from "./runtime-identity-protocol.js";
 
-const MAX_GENERATION_LEASES = 32;
+const MAX_REGULAR_GENERATION_LEASES = 32;
+const MAX_GENERATION_LEASES_WITH_RECOVERY_RESERVE = 33;
 const MAX_LEASE_BYTES = 768;
 const LEASE_PREFIX = ".runtime-generation-lease-";
 const LEASE_SCHEMA_VERSION = 1;
@@ -102,7 +103,7 @@ function readGenerationLeases(
   const names = listDirectRuntimeJournalLeaves(
     root,
     LEASE_PREFIX,
-    MAX_GENERATION_LEASES * 3,
+    MAX_GENERATION_LEASES_WITH_RECOVERY_RESERVE * 3,
   );
   const leases: RuntimeGenerationLease[] = [];
   for (const name of names) {
@@ -133,7 +134,7 @@ function readGenerationLeases(
       continue;
     }
     leases.push(lease);
-    if (leases.length > MAX_GENERATION_LEASES) {
+    if (leases.length > MAX_GENERATION_LEASES_WITH_RECOVERY_RESERVE) {
       throw new Error("The runtime generation lease bound was exceeded.");
     }
   }
@@ -178,7 +179,11 @@ export class RuntimeGenerationLeaseJournal {
     return false;
   }
 
-  publish(runtimeGenerationId: string, systemBootId: string): boolean {
+  private publishWithinLimit(
+    runtimeGenerationId: string,
+    systemBootId: string,
+    limit: number,
+  ): boolean {
     if (
       this.invalid
       || !validRuntimeGenerationId(runtimeGenerationId)
@@ -188,7 +193,7 @@ export class RuntimeGenerationLeaseJournal {
     if (this.invalid || !this.root) return false;
     const current = this.leases.get(runtimeGenerationId);
     if (current) return current.systemBootId === systemBootId;
-    if (this.leases.size >= MAX_GENERATION_LEASES) return false;
+    if (this.leases.size >= limit) return false;
     const lease: RuntimeGenerationLease = {
       runtimeGenerationId,
       systemBootId,
@@ -208,6 +213,96 @@ export class RuntimeGenerationLeaseJournal {
     }
     this.leases.set(runtimeGenerationId, lease);
     return true;
+  }
+
+  publish(runtimeGenerationId: string, systemBootId: string): boolean {
+    return this.publishWithinLimit(
+      runtimeGenerationId,
+      systemBootId,
+      MAX_REGULAR_GENERATION_LEASES,
+    );
+  }
+
+  publishWithLegacyRecoveryReserve(
+    runtimeGenerationId: string,
+    systemBootId: string,
+    authorizedLegacyRuntimeGenerationIds: readonly string[],
+  ): boolean {
+    this.refresh();
+    if (
+      this.invalid
+      || this.leases.size !== MAX_REGULAR_GENERATION_LEASES
+      || authorizedLegacyRuntimeGenerationIds.length
+        !== MAX_REGULAR_GENERATION_LEASES
+      || new Set(authorizedLegacyRuntimeGenerationIds).size
+        !== authorizedLegacyRuntimeGenerationIds.length
+    ) return false;
+    const authorized = new Set(authorizedLegacyRuntimeGenerationIds);
+    if (this.all().some((lease) => (
+      lease.systemBootId !== "unavailable"
+      || !authorized.has(lease.runtimeGenerationId)
+    ))) return false;
+    return this.publishWithinLimit(
+      runtimeGenerationId,
+      systemBootId,
+      MAX_GENERATION_LEASES_WITH_RECOVERY_RESERVE,
+    );
+  }
+
+  publishWithModernRecoveryReserve(
+    runtimeGenerationId: string,
+    systemBootId: string,
+    authorizedRuntimeGenerationIds: readonly string[],
+  ): boolean {
+    this.refresh();
+    if (
+      this.invalid
+      || this.leases.size !== MAX_REGULAR_GENERATION_LEASES
+      || authorizedRuntimeGenerationIds.length
+        !== MAX_REGULAR_GENERATION_LEASES
+      || new Set(authorizedRuntimeGenerationIds).size
+        !== authorizedRuntimeGenerationIds.length
+    ) return false;
+    const authorized = new Set(authorizedRuntimeGenerationIds);
+    if (this.all().some((lease) => (
+      !authorized.has(lease.runtimeGenerationId)
+    ))) return false;
+    return this.publishWithinLimit(
+      runtimeGenerationId,
+      systemBootId,
+      MAX_GENERATION_LEASES_WITH_RECOVERY_RESERVE,
+    );
+  }
+
+  publishWithManualRecoveryReserve(
+    runtimeGenerationId: string,
+    systemBootId: string,
+    authorizedLegacyRuntimeGenerationIds: readonly string[],
+    authorizedModernRuntimeGenerationIds: readonly string[],
+  ): boolean {
+    this.refresh();
+    const authorizedLegacy = new Set(authorizedLegacyRuntimeGenerationIds);
+    const authorizedModern = new Set(authorizedModernRuntimeGenerationIds);
+    if (
+      this.invalid
+      || this.leases.size !== MAX_REGULAR_GENERATION_LEASES
+      || authorizedLegacy.size !== authorizedLegacyRuntimeGenerationIds.length
+      || authorizedModern.size !== authorizedModernRuntimeGenerationIds.length
+      || authorizedLegacy.size + authorizedModern.size
+        !== MAX_REGULAR_GENERATION_LEASES
+      || [...authorizedLegacy].some((generationId) =>
+        authorizedModern.has(generationId))
+      || this.all().some((lease) => (
+        authorizedLegacy.has(lease.runtimeGenerationId)
+          ? lease.systemBootId !== "unavailable"
+          : !authorizedModern.has(lease.runtimeGenerationId)
+      ))
+    ) return false;
+    return this.publishWithinLimit(
+      runtimeGenerationId,
+      systemBootId,
+      MAX_GENERATION_LEASES_WITH_RECOVERY_RESERVE,
+    );
   }
 
   consume(runtimeGenerationId: string): boolean {
@@ -255,6 +350,17 @@ export class RuntimeGenerationLeaseJournal {
     if (this.invalid) return false;
     return !this.leases.has(runtimeGenerationId)
       || this.consume(runtimeGenerationId);
+  }
+
+  clearUnavailableRuntimeGeneration(runtimeGenerationId: string): boolean {
+    this.refresh();
+    if (this.invalid) return false;
+    const lease = this.leases.get(runtimeGenerationId);
+    return !lease
+      || (
+        lease.systemBootId === "unavailable"
+        && this.consume(runtimeGenerationId)
+      );
   }
 
   clearPriorBootSessions(systemBootId: string): boolean {

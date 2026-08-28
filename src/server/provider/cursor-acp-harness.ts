@@ -21,7 +21,7 @@ import type {
 
 import type { ProviderModel } from "../../shared/contracts";
 import { INERTIA_VERSION } from "../../shared/version";
-import { spawnRuntimeOwnedProcess } from "../../node/runtime-owned-processes";
+import { runtimeOwnedProcessInvocation, spawnRuntimeOwnedProcess } from "../../node/runtime-owned-processes";
 import {
   createOwnedProcessTreeTermination,
   type ProcessTreeTerminator,
@@ -423,19 +423,19 @@ function startCursorRun(
 
   emitter.status("starting");
   try {
-    const invocation = cursorAcpProcessInvocation(
-      options.executable,
-      options.environment,
-    );
-    child = spawnRuntimeOwnedProcess(() => spawn(invocation.command, invocation.args, {
-      cwd: options.input.cwd,
-      env: options.environment,
-      detached: process.platform !== "win32",
-      shell: false,
-      windowsVerbatimArguments: invocation.windowsVerbatimArguments,
-      windowsHide: true,
-      stdio: ["pipe", "pipe", "pipe"],
-    }));
+    const invocation = cursorAcpProcessInvocation(options.executable, options.environment);
+    const ownedInvocation = runtimeOwnedProcessInvocation(invocation.command, invocation.args);
+    child = spawnRuntimeOwnedProcess(() => spawn(
+      ownedInvocation.command, ownedInvocation.args, {
+        cwd: options.input.cwd,
+        env: options.environment,
+        detached: process.platform !== "win32",
+        shell: false,
+        windowsVerbatimArguments: invocation.windowsVerbatimArguments,
+        windowsHide: true,
+        stdio: ["pipe", "pipe", "pipe"],
+      },
+    ));
   } catch (error) {
     return failedCursorRun(conversationId, safeError(error, "Cursor ACP could not be started."), emitter);
   }

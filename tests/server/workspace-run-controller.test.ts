@@ -16,9 +16,11 @@ import {
 
 class FakeTerminals implements WorkspaceActionTerminalManager<object> {
   readonly inputs: Array<{ terminalId: string; data: string }> = [];
-  failCreate = false;
+  readonly closedManagedIds: string[] = [];
+  failReplace = false;
   failInput = false;
   closeManagedFailure: Error | null = null;
+  distinctReplacementId: string | null = null;
   private sequence = 0;
   private readonly sessions = new Map<string, {
     onExit?: (exitCode: number) => void;
@@ -33,10 +35,25 @@ class FakeTerminals implements WorkspaceActionTerminalManager<object> {
     onExit?: (exitCode: number) => void,
     onOutput?: (data: string) => void,
   ): string {
-    if (this.failCreate) throw new Error("spawn failed");
     const terminalId = `terminal-${++this.sequence}`;
     this.sessions.set(terminalId, { onExit, onOutput });
     return terminalId;
+  }
+
+  async replace(
+    _owner: object,
+    terminalId: string,
+    _cwd: string,
+    _cols: number,
+    _rows: number,
+    onExit?: (exitCode: number) => void,
+    onOutput?: (data: string) => void,
+  ): Promise<string> {
+    if (!this.sessions.has(terminalId)) throw new Error("Terminal not found.");
+    if (this.failReplace) throw new Error("spawn failed");
+    const replacementId = this.distinctReplacementId ?? terminalId;
+    this.sessions.set(replacementId, { onExit, onOutput });
+    return replacementId;
   }
 
   input(_owner: object, terminalId: string, data: string): void {
@@ -45,15 +62,20 @@ class FakeTerminals implements WorkspaceActionTerminalManager<object> {
     this.inputs.push({ terminalId, data });
   }
 
-  close(_owner: object, terminalId: string): void {
+  async close(_owner: object, terminalId: string): Promise<void> {
     this.finish(terminalId, 130);
   }
 
   async closeManaged(terminalId: string): Promise<boolean> {
     if (!this.sessions.has(terminalId)) return false;
     if (this.closeManagedFailure) throw this.closeManagedFailure;
+    this.closedManagedIds.push(terminalId);
     this.finish(terminalId, 130);
     return true;
+  }
+
+  has(terminalId: string): boolean {
+    return this.sessions.has(terminalId);
   }
 
   output(terminalId: string, data: string): void {
@@ -90,6 +112,8 @@ async function fixture(
   const project = store.createProject("Workspace", workspace);
   const conversation = store.createConversation(project.id, "Focused work");
   const terminals = new FakeTerminals();
+  const terminalOwner = {};
+  const terminalId = terminals.create(terminalOwner, workspace, 80, 24);
   const broadcastSnapshot = vi.fn();
   const broadcastGitInvalidated = vi.fn();
   const controller = new WorkspaceRunController(
@@ -108,6 +132,8 @@ async function fixture(
     project,
     conversation,
     terminals,
+    terminalOwner,
+    terminalId,
     broadcastSnapshot,
     broadcastGitInvalidated,
     controller,
@@ -138,20 +164,22 @@ describe("workspace run controller", () => {
       );
       expect(runtime.store.conversationWork.reserve(runtime.conversation.id)).toBe(true);
       await expect(runtime.controller.startAction({
-        owner: {},
+        owner: runtime.terminalOwner,
         cwd: runtime.workspace,
         projectId: runtime.project.id,
         conversationId: sibling.id,
         actionId: "check",
+        terminalId: runtime.terminalId,
         cols: 80,
         rows: 24,
         onStarted: vi.fn(),
       })).rejects.toThrow("End the resumed provider terminal");
       await expect(runtime.controller.startAction({
-        owner: {},
+        owner: runtime.terminalOwner,
         cwd: runtime.workspace,
         projectId: "duplicate-project-record",
         actionId: "check",
+        terminalId: runtime.terminalId,
         cols: 80,
         rows: 24,
         onStarted: vi.fn(),
@@ -188,10 +216,11 @@ describe("workspace run controller", () => {
         "Sibling chat in the same checkout",
       );
       const terminalId = await runtime.controller.startAction({
-        owner: {},
+        owner: runtime.terminalOwner,
         cwd: runtime.workspace,
         projectId: runtime.project.id,
         actionId: "check",
+        terminalId: runtime.terminalId,
         cols: 80,
         rows: 24,
         onStarted: vi.fn(),
@@ -248,15 +277,17 @@ describe("workspace run controller", () => {
 
       const onStarted = vi.fn();
       const terminalId = await runtime.controller.startAction({
-        owner: {},
+        owner: runtime.terminalOwner,
         cwd: runtime.workspace,
         projectId: runtime.project.id,
         conversationId: runtime.conversation.id,
         actionId: "preview",
+        terminalId: runtime.terminalId,
         cols: 80,
         rows: 24,
         onStarted,
       });
+      expect(terminalId).toBe(runtime.terminalId);
       const running = runtime.store.shellSnapshot().runs.find((run) => run.actionId === "preview")!;
       expect(running).toMatchObject({
         kind: "service",
@@ -288,15 +319,51 @@ describe("workspace run controller", () => {
     }
   });
 
-  it("retains managed action control when terminal shutdown is unconfirmed", async () => {
+  it("uses an authoritative distinct replacement ID without touching the original shell", async () => {
     const runtime = await fixture();
     try {
-      await runtime.controller.startAction({
-        owner: {},
+      const replacementId = "terminal-darwin-action";
+      runtime.terminals.distinctReplacementId = replacementId;
+      const onStarted = vi.fn();
+
+      await expect(runtime.controller.startAction({
+        owner: runtime.terminalOwner,
         cwd: runtime.workspace,
         projectId: runtime.project.id,
         conversationId: runtime.conversation.id,
         actionId: "preview",
+        terminalId: runtime.terminalId,
+        cols: 80,
+        rows: 24,
+        onStarted,
+      })).resolves.toBe(replacementId);
+
+      expect(runtime.terminals.inputs).toEqual([
+        { terminalId: replacementId, data: "npm run preview\r" },
+      ]);
+      expect(onStarted).toHaveBeenCalledWith(replacementId);
+      expect(runtime.terminals.has(runtime.terminalId)).toBe(true);
+      const running = runtime.store.shellSnapshot().runs.find(
+        (run) => run.actionId === "preview",
+      )!;
+      await expect(runtime.controller.stopManagedAction(running.id)).resolves.toBe(true);
+      expect(runtime.terminals.closedManagedIds).toEqual([replacementId]);
+      expect(runtime.terminals.has(runtime.terminalId)).toBe(true);
+    } finally {
+      runtime.store.close();
+    }
+  });
+
+  it("retains managed action control when terminal shutdown is unconfirmed", async () => {
+    const runtime = await fixture();
+    try {
+      await runtime.controller.startAction({
+        owner: runtime.terminalOwner,
+        cwd: runtime.workspace,
+        projectId: runtime.project.id,
+        conversationId: runtime.conversation.id,
+        actionId: "preview",
+        terminalId: runtime.terminalId,
         cols: 80,
         rows: 24,
         onStarted: vi.fn(),
@@ -781,23 +848,24 @@ describe("workspace run controller", () => {
     }
   });
 
-  it.each(["create", "input"] as const)(
+  it.each(["replace", "input"] as const)(
     "settles an action when terminal %s fails without retaining stop ownership",
     async (failure) => {
       const runtime = await fixture();
       try {
-        runtime.terminals.failCreate = failure === "create";
+        runtime.terminals.failReplace = failure === "replace";
         runtime.terminals.failInput = failure === "input";
         await expect(runtime.controller.startAction({
-          owner: {},
+          owner: runtime.terminalOwner,
           cwd: runtime.workspace,
           projectId: runtime.project.id,
           conversationId: runtime.conversation.id,
           actionId: "check",
+          terminalId: runtime.terminalId,
           cols: 80,
           rows: 24,
           onStarted: vi.fn(),
-        })).rejects.toThrow(failure === "create" ? "spawn failed" : "initial input failed");
+        })).rejects.toThrow(failure === "replace" ? "spawn failed" : "initial input failed");
 
         const failed = runtime.store.shellSnapshot().runs.find((run) => run.actionId === "check")!;
         expect(failed).toMatchObject({

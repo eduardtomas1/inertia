@@ -1187,20 +1187,27 @@ function isServerEvent(value: unknown): value is ServerEvent {
     case "terminal.created":
       return stringField(value, "requestId")
         && stringField(value, "terminalId")
-        && (value.providerResume === undefined
-          || (recordWithStrings(
-            value.providerResume,
-            "providerId",
-            "providerLabel",
-            "sessionId",
-          )
-            && oneOf(value.providerResume, "providerId", [
-              "codex", "claude", "cursor", "kimi", "opencode",
-            ])
-            && nonemptyStringField(value.providerResume, "providerLabel")
-            && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u.test(
-              value.providerResume.sessionId as string,
-            )));
+        && (
+          value.providerResume === undefined
+            ? value.providerResumeConversationId === undefined
+            : recordWithStrings(
+                value.providerResume,
+                "providerId",
+                "providerLabel",
+                "sessionId",
+              )
+              && oneOf(value.providerResume, "providerId", [
+                "codex", "claude", "cursor", "kimi", "opencode",
+              ])
+              && nonemptyStringField(value.providerResume, "providerLabel")
+              && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u.test(
+                value.providerResume.sessionId as string,
+              )
+              && nonemptyStringField(value, "providerResumeConversationId")
+              && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(
+                value.providerResumeConversationId as string,
+              )
+        );
     case "terminal.output":
       return stringField(value, "terminalId") && stringField(value, "data");
     case "terminal.exit":

@@ -583,6 +583,9 @@ parentPort.on("message", (messageEvent) => {
       command.options.dataDirectory,
       command.options.runtimeGenerationId,
       command.options.systemBootId,
+      command.options.runtimeProcessGuardianPath
+        ? { darwinGuardianPath: command.options.runtimeProcessGuardianPath }
+        : {},
     );
   } catch (error) {
     starting = false;
@@ -605,6 +608,24 @@ parentPort.on("message", (messageEvent) => {
       receiptRuntimeGenerationId,
       currentRuntimeGenerationId,
     }),
+    onLegacyRecoveryAuthorityConsumed: (
+      retiredRuntimeGenerationId,
+      currentRuntimeGenerationId,
+    ) => post({
+      type: "runtime.legacy-recovery-authority-consumed",
+      retiredRuntimeGenerationId,
+      currentRuntimeGenerationId,
+    }),
+    onModernDarwinRecoveryAuthorityAcknowledged: (
+      authority,
+      currentRuntimeGenerationId,
+    ) => post({
+      type: "runtime.modern-darwin-recovery-authority-acknowledged",
+      operationId: authority.operationId,
+      snapshotDigest: authority.snapshotDigest,
+      currentRuntimeGenerationId,
+    }),
+    onOwnedProcessCleanupUnconfirmed: () => { void shutdown(1); },
     backendCredentials: credentials,
     attachments,
     conversationAttachmentStoreOperations: conversationAttachmentStore.runner,

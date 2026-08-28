@@ -63,6 +63,14 @@ describe("runtime command delivery policy", () => {
   });
 
   it("classifies representative mutations as ambiguous with their existing deadlines", () => {
+    expect(runtimeCommandPolicy("terminal.attach")).toEqual({
+      timeoutMs: 15_000,
+      timeoutDelivery: "ambiguous",
+    });
+    expect(runtimeCommandPolicy("terminal.detach")).toEqual({
+      timeoutMs: 15_000,
+      timeoutDelivery: "ambiguous",
+    });
     expect(runtimeCommandPolicy("terminal.input")).toEqual({
       timeoutMs: 15_000,
       timeoutDelivery: "ambiguous",

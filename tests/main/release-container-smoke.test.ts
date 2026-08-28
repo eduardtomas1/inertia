@@ -131,11 +131,25 @@ describe("final release container smoke", () => {
         join(repositoryRoot, ".github", "workflows", workflowName),
         "utf8",
       );
-      expect(workflow).toContain("Prove AppImage runtime on pristine native Ubuntu");
       expect(workflow).toContain(
-        "ubuntu@sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517",
+        "Prove AppImage and guardian runtime on pristine Ubuntu 22.04",
       );
-      expect(workflow).toContain('"/release/$artifact" --appimage-version');
+      expect(workflow).toContain(
+        "ubuntu@sha256:2edbbc5dc405e9612ba3584ce95480277e3eb374407b5505fe26f17df77c7dbc",
+      );
+      expect(workflow).toContain('"$app" --appimage-version');
+      expect(workflow).toContain('"$app" --appimage-extract');
+      expect(workflow).toContain('"$guardian" seccomp-selftest');
+      expect(workflow).toContain('"$guardian" identity "$child"');
+      expect(workflow).toContain("cleanup() {");
+      expect(workflow).toContain("trap cleanup EXIT");
+      expect(workflow).not.toContain("trap 'kill");
+      expect(workflow).toContain("Install Linux guardian toolchain");
+      expect(workflow).toContain("binutils linux-libc-dev musl-tools");
+      expect(workflow).toContain("musl-tools=1.2.4-2");
+      expect(workflow).toContain("Verify the packaged Linux guardian is static");
+      expect(workflow).toContain("readelf --program-headers");
+      expect(workflow).toContain("readelf --dynamic");
       expect(workflow).toContain("Smoke final macOS and Linux release containers");
       expect(workflow).toContain("run: npm run test:release-container-smoke");
       expect(workflow).toContain(
@@ -143,6 +157,48 @@ describe("final release container smoke", () => {
       );
       expect(workflow).toContain("xvfb-run --auto-servernum npm run test:release-container-smoke");
     }
+  });
+
+  it("builds the Linux guardian against static musl instead of the host glibc", async () => {
+    const source = await readFile(
+      join(repositoryRoot, "scripts", "build-runtime-process-guardian.mjs"),
+      "utf8",
+    );
+    expect(source).toContain('"/usr/bin/musl-gcc"');
+    expect(source).toContain('"-static-pie"');
+    expect(source).toContain('"-s"');
+    expect(source).toContain('`/usr/include/${linuxGnuTriplet}`');
+    expect(source).toContain("musl-tools, linux-libc-dev, and binutils");
+  });
+
+  it("precompiles the Windows Job Object helper into a bounded AnyCPU executable", async () => {
+    const source = await readFile(
+      join(repositoryRoot, "scripts", "build-runtime-process-guardian.mjs"),
+      "utf8",
+    );
+    expect(source).toContain('"windows-runtime-job.exe"');
+    expect(source).toContain('"native", "runtime-process-guardian", "windows.cs"');
+    expect(source).toContain("[Microsoft.CSharp.CSharpCodeProvider]::new()");
+    expect(source).toContain("[System.CodeDom.Compiler.CompilerParameters]::new()");
+    expect(source).toContain("$parameters.GenerateExecutable = $true");
+    expect(source).toContain("$parameters.GenerateInMemory = $false");
+    expect(source).toContain("$parameters.OutputAssembly = $outputPath");
+    expect(source).toContain("$parameters.MainClass = 'InertiaRuntimeJob'");
+    expect(source).toContain(
+      "$parameters.ReferencedAssemblies.Add('System.dll') | Out-Null",
+    );
+    expect(source).toContain(
+      "$parameters.CompilerOptions = '/platform:anycpu /optimize+ /target:exe'",
+    );
+    expect(source).toContain("$provider.CompileAssemblyFromSource(");
+    expect(source).toContain("$results.Errors.HasErrors");
+    expect(source).not.toContain("Add-Type -TypeDefinition");
+    expect(source).toContain('shell: false');
+    expect(source).toContain('timeout: 60_000');
+    expect(source).toContain('metadata.size > 1024 * 1024');
+    expect(source).toContain('createHash("sha256")');
+    expect(source).toContain('"windows-runtime-job-integrity.json"');
+    expect(source).toContain('JSON.stringify({ sha256 }');
   });
 
   it("keeps container validation bounded to native architectures", async () => {

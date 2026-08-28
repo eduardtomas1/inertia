@@ -200,11 +200,13 @@ function operationHarness(
     writeFileSync(markers.git, "touched");
     return path;
   };
+  const actionTerminalId = randomUUID();
   const projectHandler = createProjectWorkspaceCommandHandler({
     store: fixture.store,
     workspacePath,
     workspaceRuns: {
-      startAction: async () => {
+      startAction: async (input: { terminalId: string }) => {
+        expect(input.terminalId).toBe(actionTerminalId);
         writeFileSync(markers.action, "touched");
       },
     },
@@ -255,6 +257,7 @@ function operationHarness(
         projectId: fixture.projectId,
         conversationId: fixture.conversationId,
         actionId: "test",
+        terminalId: actionTerminalId,
         cols: 80,
         rows: 24,
       },

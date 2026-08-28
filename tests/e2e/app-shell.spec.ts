@@ -93,7 +93,23 @@ test("starts without a demo and adds the first real project", async () => {
   await expect(page.getByLabel("Terminal panel")).toHaveCount(0);
   await expect(page.getByRole("tab", { name: "Environment" })).toHaveAttribute("aria-selected", "true");
   await selectWorkspaceTool(page.locator(".workspace-panel"), "Terminal");
-  await expect(page.getByLabel("Terminal panel").first()).toBeVisible();
+  await expect(page.locator(
+    '.terminal-panel[data-terminal-id][data-terminal-state="ready"]',
+  ).first()).toBeVisible();
+  await expect.poll(async () => (await app.runtimeSnapshot()).phase).toBe("ready");
+  const currentBranch = (await execFileAsync(
+    "git",
+    ["branch", "--show-current"],
+    { cwd: workspaceDirectory },
+  )).stdout.trim();
+  await selectWorkspaceTool(page.locator(".workspace-panel"), "Changes");
+  const changesPanel = page.getByRole("tabpanel", { name: "Changes" });
+  await expect(changesPanel.locator(
+    `.workspace-repository-scope-branch[title=${JSON.stringify(currentBranch)}]`,
+  )).toBeVisible();
+  await expect(page.getByRole("alert").filter({
+    hasText: "The request could not be completed.",
+  })).toHaveCount(0);
   const database = new Database(databasePath);
   const firstConversation = database.prepare(`
     SELECT provider_session_id, worktree_path

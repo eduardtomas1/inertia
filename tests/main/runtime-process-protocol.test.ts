@@ -354,6 +354,83 @@ describe("runtime process protocol", () => {
     expect(parseRuntimeWorkerCommand(priorCleanupUnconfirmed)).toEqual(
       priorCleanupUnconfirmed,
     );
+    const legacyGenerationId =
+      "77777777-7777-4777-8777-777777777777:4";
+    const manualLegacyRecovery = {
+      type: "runtime.start",
+      options: {
+        dataDirectory,
+        defaultWorkspacePath: workspaceDirectory,
+        enableProviders: false,
+        runtimeGenerationId,
+        systemBootId,
+        manuallyRetiredRuntimeGenerationIds: [legacyGenerationId],
+      },
+    } as const;
+    expect(parseRuntimeWorkerCommand(manualLegacyRecovery)).toEqual(
+      manualLegacyRecovery,
+    );
+    expect(parseRuntimeWorkerCommand({
+      ...manualLegacyRecovery,
+      options: {
+        ...manualLegacyRecovery.options,
+        confirmedTerminatedRuntimeGenerationIds: [legacyGenerationId],
+      },
+    })).toBeNull();
+    const modernGenerationId =
+      "88888888-8888-4888-8888-888888888888:5";
+    const modernOperationId = crypto.randomUUID();
+    const modernSnapshotDigest = "b".repeat(64);
+    const manualModernRecovery = {
+      type: "runtime.start",
+      options: {
+        dataDirectory,
+        defaultWorkspacePath: workspaceDirectory,
+        enableProviders: false,
+        runtimeGenerationId,
+        systemBootId,
+        runtimeProcessGuardianPath: resolve(tmpdir(), "guardian"),
+        manualModernDarwinRecovery: {
+          operationId: modernOperationId,
+          snapshotDigest: modernSnapshotDigest,
+          runtimeGenerationIds: [modernGenerationId],
+        },
+      },
+    } as const;
+    expect(parseRuntimeWorkerCommand(manualModernRecovery)).toEqual(
+      manualModernRecovery,
+    );
+    expect(parseRuntimeWorkerCommand({
+      ...manualModernRecovery,
+      options: {
+        ...manualModernRecovery.options,
+        runtimeProcessGuardianPath: undefined,
+      },
+    })).toBeNull();
+    expect(parseRuntimeWorkerCommand({
+      ...manualModernRecovery,
+      options: {
+        ...manualModernRecovery.options,
+        systemBootId: "unavailable",
+      },
+    })).toBeNull();
+    expect(parseRuntimeWorkerCommand({
+      ...manualModernRecovery,
+      options: {
+        ...manualModernRecovery.options,
+        manualModernDarwinRecovery: {
+          ...manualModernRecovery.options.manualModernDarwinRecovery,
+          runtimeGenerationIds: [modernGenerationId, modernGenerationId],
+        },
+      },
+    })).toBeNull();
+    expect(parseRuntimeWorkerCommand({
+      ...manualLegacyRecovery,
+      options: {
+        ...manualLegacyRecovery.options,
+        manuallyRetiredRuntimeGenerationIds: [],
+      },
+    })).toBeNull();
     expect(parseRuntimeWorkerCommand({
       ...priorCleanupUnconfirmed,
       options: {
@@ -400,6 +477,37 @@ describe("runtime process protocol", () => {
     })).toEqual({ type: "runtime.stopped-acknowledged" });
     expect(parseRuntimeWorkerCommand({
       type: "runtime.stopped-acknowledged",
+      unexpected: true,
+    })).toBeNull();
+    expect(parseRuntimeWorkerEvent({
+      type: "runtime.legacy-recovery-authority-consumed",
+      retiredRuntimeGenerationId: legacyGenerationId,
+      currentRuntimeGenerationId: runtimeGenerationId,
+    })).toEqual({
+      type: "runtime.legacy-recovery-authority-consumed",
+      retiredRuntimeGenerationId: legacyGenerationId,
+      currentRuntimeGenerationId: runtimeGenerationId,
+    });
+    expect(parseRuntimeWorkerEvent({
+      type: "runtime.legacy-recovery-authority-consumed",
+      retiredRuntimeGenerationId: runtimeGenerationId,
+      currentRuntimeGenerationId: runtimeGenerationId,
+    })).toBeNull();
+    const modernAcknowledgement = {
+      type: "runtime.modern-darwin-recovery-authority-acknowledged",
+      operationId: modernOperationId,
+      snapshotDigest: modernSnapshotDigest,
+      currentRuntimeGenerationId: runtimeGenerationId,
+    } as const;
+    expect(parseRuntimeWorkerEvent(modernAcknowledgement)).toEqual(
+      modernAcknowledgement,
+    );
+    expect(parseRuntimeWorkerEvent({
+      ...modernAcknowledgement,
+      snapshotDigest: "B".repeat(64),
+    })).toBeNull();
+    expect(parseRuntimeWorkerEvent({
+      ...modernAcknowledgement,
       unexpected: true,
     })).toBeNull();
     expect(parseRuntimeWorkerCommand({

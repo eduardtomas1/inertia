@@ -152,6 +152,8 @@ describe("shared contracts boundary", () => {
       "project.action.run",
       "checkpoint.revert",
       "terminal.create",
+      "terminal.attach",
+      "terminal.detach",
       "terminal.provider.resume",
       "terminal.input",
       "terminal.resize",

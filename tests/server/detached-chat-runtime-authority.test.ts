@@ -413,4 +413,23 @@ describe("detached chat runtime authority", () => {
       },
     })).not.toBeNull();
   });
+
+  it("keeps terminal reattachment outside detached-chat authority", () => {
+    const attach: ClientCommand = {
+      type: "terminal.attach",
+      requestId: REQUEST,
+      payload: {
+        projectId: PROJECT,
+        conversationId: CONVERSATION,
+        terminalId: "22222222-2222-4222-8222-222222222222",
+        cols: 80,
+        rows: 24,
+      },
+    };
+
+    expect(rejection(attach)).toBe(
+      "That request is unavailable in a detached chat.",
+    );
+    expect(mainRejection(attach)).toBeNull();
+  });
 });

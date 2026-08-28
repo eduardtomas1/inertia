@@ -1,6 +1,12 @@
 export const RUNTIME_SHUTDOWN_DEADLINE_MS = 2_500;
 
-type ShutdownOperation = () => void | Promise<void>;
+export interface RuntimeShutdownContext {
+  readonly deadlineAt: number;
+}
+
+type ShutdownOperation = (
+  context: RuntimeShutdownContext,
+) => void | Promise<void>;
 
 export interface RuntimeShutdownPhases {
   /** Stops command admission and drains work that could create new owned resources. */
@@ -91,6 +97,7 @@ export async function runRuntimeShutdownPhases(
   timeoutMs = RUNTIME_SHUTDOWN_DEADLINE_MS,
 ): Promise<void> {
   const deadlineAt = Date.now() + Math.max(1, Math.trunc(timeoutMs));
+  const context: RuntimeShutdownContext = { deadlineAt };
   let shutdownError: unknown;
   let ownedResourceCleanupConfirmed = true;
   const attempt = async (
@@ -98,7 +105,7 @@ export async function runRuntimeShutdownPhases(
     ownsRuntimeResource = false,
   ): Promise<void> => {
     try {
-      await operation();
+      await operation(context);
     } catch (error) {
       if (ownsRuntimeResource) ownedResourceCleanupConfirmed = false;
       shutdownError ??= error;
@@ -112,7 +119,7 @@ export async function runRuntimeShutdownPhases(
   try {
     if (phases.quiesceRuntimeWork) {
       await beforeDeadline(
-        Promise.resolve().then(phases.quiesceRuntimeWork),
+        Promise.resolve().then(() => phases.quiesceRuntimeWork!(context)),
         deadlineAt,
         "runtime command cleanup",
       );

@@ -222,6 +222,7 @@ describe("renderer error visibility boundary", () => {
         providerLabel: "Codex",
         sessionId: "session-1",
       },
+      providerResumeConversationId: "11111111-1111-4111-8111-111111111111",
     }))).resolves.toMatchObject({ type: "terminal.created" });
   });
 

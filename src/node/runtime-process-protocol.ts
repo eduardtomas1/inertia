@@ -41,6 +41,12 @@ import {
   type RuntimeUpdateWorkerCommand,
   type RuntimeUpdateWorkerEvent,
 } from "./runtime-update-process-protocol";
+import {
+  parseRuntimeRecoveryWorkerEvent,
+  parseRuntimeRecoveryWorkerOptions,
+  type RuntimeRecoveryWorkerEvent,
+  type RuntimeRecoveryWorkerOptions,
+} from "./runtime-recovery-process-protocol.js";
 import { validRuntimeGenerationId, validSystemBootId } from "./runtime-identity-protocol";
 import {
   parseRuntimeDatabaseStartupRecovery,
@@ -53,15 +59,13 @@ export type { RuntimeUpdatePreparationBlocker, RuntimeUpdatePreparationResult } 
 export type { RuntimeConversationAttachmentStoreResult }
   from "./conversation-attachment-store-protocol";
 
-export interface RuntimeWorkerOptions {
+export interface RuntimeWorkerOptions extends RuntimeRecoveryWorkerOptions {
   dataDirectory: string;
   defaultWorkspacePath: string;
   enableProviders: boolean;
   runtimeGenerationId: string;
   systemBootId: string;
   confirmedTerminatedRuntimeGenerationIds?: readonly string[];
-  /** Main-owned quarantine after an earlier utility process exited unconfirmed. */
-  priorRuntimeCleanupUnconfirmed?: boolean;
   /** Optional trusted desktop override; never accepted from the renderer. */
   codexBinaryPath?: string;
   /** Main-owned import root used to revalidate brokered attachment capabilities. */
@@ -263,6 +267,7 @@ export type RuntimeWorkerEvent =
       receiptRuntimeGenerationId: string;
       currentRuntimeGenerationId: string;
     }
+  | RuntimeRecoveryWorkerEvent
   | { type: "runtime.project-path-resolved"; requestId: string; path: string }
   | { type: "runtime.project-path-rejected"; requestId: string; message: string }
   | {
@@ -545,13 +550,19 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
     options,
     "confirmedTerminatedRuntimeGenerationIds",
   );
-  const hasPriorRuntimeCleanupUnconfirmed = Object.hasOwn(
+  const recoveryOptions = parseRuntimeRecoveryWorkerOptions(
     options,
-    "priorRuntimeCleanupUnconfirmed",
+    options.runtimeGenerationId,
+    options.systemBootId,
+    hasConfirmedGenerations
+      && Array.isArray(options.confirmedTerminatedRuntimeGenerationIds)
+      ? options.confirmedTerminatedRuntimeGenerationIds
+      : [],
   );
   if (
     !hasRuntimeGenerationId
     || !hasSystemBootId
+    || recoveryOptions === null
     || optionKeys.length !== 5
       + Number(hasKimiProfiles)
       + Number(hasCodexBinaryPath)
@@ -560,16 +571,12 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
       + Number(hasPackageSmokeImage)
       + Number(hasRecoveryImportFault)
       + Number(hasConfirmedGenerations)
-      + Number(hasPriorRuntimeCleanupUnconfirmed)
+      + (recoveryOptions?.keyCount ?? 0)
     || !runtimePath(options.dataDirectory)
     || !runtimePath(options.defaultWorkspacePath)
     || typeof options.enableProviders !== "boolean"
     || (hasRuntimeGenerationId && !validRuntimeGenerationId(options.runtimeGenerationId))
     || (hasSystemBootId && !validSystemBootId(options.systemBootId))
-    || (
-      hasPriorRuntimeCleanupUnconfirmed
-      && options.priorRuntimeCleanupUnconfirmed !== true
-    )
     || (
       hasConfirmedGenerations
       && (
@@ -641,14 +648,12 @@ export function parseRuntimeWorkerCommand(value: unknown): RuntimeWorkerCommand 
       enableProviders: options.enableProviders,
       runtimeGenerationId: options.runtimeGenerationId as string,
       systemBootId: options.systemBootId as string,
+      ...recoveryOptions.options,
       ...(hasConfirmedGenerations
         ? {
             confirmedTerminatedRuntimeGenerationIds:
               [...options.confirmedTerminatedRuntimeGenerationIds as string[]],
           }
-        : {}),
-      ...(hasPriorRuntimeCleanupUnconfirmed
-        ? { priorRuntimeCleanupUnconfirmed: true as const }
         : {}),
       ...(hasCodexBinaryPath ? { codexBinaryPath: options.codexBinaryPath as string } : {}),
       ...(hasAttachmentRoot ? { attachmentRoot: options.attachmentRoot as string } : {}),
@@ -697,6 +702,8 @@ export function parseRuntimeWorkerEvent(value: unknown): RuntimeWorkerEvent | nu
   const updateEvent = parseRuntimeUpdateWorkerEvent(value);
   if (updateEvent) return updateEvent;
   const browserEvent = parseRuntimeAgentBrowserEvent(value); if (browserEvent) return browserEvent;
+  const recoveryEvent = parseRuntimeRecoveryWorkerEvent(value);
+  if (recoveryEvent) return recoveryEvent;
   if (
     value.type === "runtime.cleanup-receipt-consumed"
     && Object.keys(value).length === 3

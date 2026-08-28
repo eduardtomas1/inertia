@@ -1,7 +1,10 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 
 import type { OpencodeClient } from "@opencode-ai/sdk/v2";
-import { spawnRuntimeOwnedProcess } from "../../node/runtime-owned-processes";
+import {
+  runtimeOwnedProcessInvocation,
+  spawnRuntimeOwnedProcess,
+} from "../../node/runtime-owned-processes";
 
 import {
   createOwnedProcessTreeTermination,
@@ -70,7 +73,11 @@ export async function startOwnedOpenCodeServer(
   url: string;
 }> {
   const invocation = openCodeServerProcessInvocation(executable, environment);
-  const child = spawnRuntimeOwnedProcess(() => spawn(invocation.command, invocation.args, {
+  const ownedInvocation = runtimeOwnedProcessInvocation(
+    invocation.command,
+    invocation.args,
+  );
+  const child = spawnRuntimeOwnedProcess(() => spawn(ownedInvocation.command, ownedInvocation.args, {
     cwd,
     env: environment,
     detached: process.platform !== "win32",

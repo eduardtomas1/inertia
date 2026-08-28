@@ -310,7 +310,7 @@ describe("runtime shutdown authority", () => {
       (event): event is Extract<ServerEvent, { type: "request.error" }> =>
         event.type === "request.error" && event.requestId === requestId,
     );
-    expect(rejected.message).toContain("automatic cleanup verification is unavailable");
+    expect(rejected.message).toContain("retry exact cleanup");
     expect(rejected.message).toContain("contact support");
     expect(rejected.message).not.toMatch(/restart|reboot/iu);
   });

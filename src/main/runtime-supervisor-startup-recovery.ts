@@ -1,6 +1,7 @@
 import { RuntimeGenerationLeaseJournal } from "../node/runtime-generation-leases.js";
 import { RuntimeCleanupReceiptJournal } from "./runtime-cleanup-receipts.js";
 import { recoverPriorRuntimeGenerations } from "./runtime-owned-process-recovery.js";
+import type { WindowsRuntimeJobAssembly } from "./windows-runtime-job.js";
 
 export class RuntimeSupervisorStartupRecovery {
   private active: Promise<boolean> | null = null;
@@ -11,6 +12,8 @@ export class RuntimeSupervisorStartupRecovery {
     forceKillWaitMs: number;
     leases: RuntimeGenerationLeaseJournal;
     receipts: RuntimeCleanupReceiptJournal;
+    darwinGuardianPath?: string;
+    windowsRuntimeJobAssembly?: WindowsRuntimeJobAssembly;
   }) {}
 
   begin(onFinished: (recovered: boolean) => void): Promise<boolean> | null {

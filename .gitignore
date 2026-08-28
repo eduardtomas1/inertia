@@ -15,6 +15,9 @@ performance-results/
 .electron-vite/
 .cache/
 resources/generated/
+!resources/generated/
+resources/generated/*
+!resources/generated/windows-runtime-job-integrity.json
 *.tsbuildinfo
 
 # Local runtime state

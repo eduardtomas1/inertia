@@ -253,6 +253,7 @@ test("compares the installed Windows runtime byte-for-byte and rejects wrong PE 
         join("resources", "app.asar"),
         join("resources", "LICENSE.txt"),
         join("resources", "THIRD_PARTY_NOTICES.txt"),
+        join("resources", "runtime", "windows-runtime-job.exe"),
         join("resources", "elevate.exe"),
       ];
       for (const relativePath of requiredRelativePaths) {
@@ -624,6 +625,9 @@ test("pins the minimal fixed builder and gates installed Windows binaries", asyn
   expect(source).toContain('["conpty.dll", "OpenConsole.exe"]');
   expect(source).not.toContain('"build", "Release", "conpty", name');
   expect(source).toContain('join("resources", "elevate.exe")');
+  expect(source).toContain(
+    'join("resources", "runtime", "windows-runtime-job.exe")',
+  );
   expect(source).toContain("INERTIA_PACKAGE_SMOKE_EXECUTABLE: installedExecutable");
   expect(source).toContain('["/S", `/D=${installDirectory}`]');
   expect(source).toContain('runBounded(uninstaller, ["/S"]');

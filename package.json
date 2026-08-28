@@ -12,9 +12,11 @@
     "node": ">=22.13 <23"
   },
   "scripts": {
+    "predev": "node scripts/build-runtime-process-guardian.mjs",
     "dev": "electron-vite dev",
-    "prebuild": "npm run notices:generate",
+    "prebuild": "npm run notices:generate && node scripts/build-runtime-process-guardian.mjs",
     "build": "npm run typecheck && electron-vite build && npm run build:private-connect && npm run check:renderer-bundle",
+    "prebuild:bundle": "node scripts/build-runtime-process-guardian.mjs",
     "build:bundle": "electron-vite build && npm run build:private-connect && npm run check:renderer-bundle",
     "check:renderer-bundle": "node scripts/check-renderer-bundle.mjs",
     "check:migrations": "node scripts/verify-database-lineage.mjs",
@@ -28,6 +30,7 @@
     "lint:type-aware": "oxlint src scripts tests benchmarks --type-aware -A all -D typescript/no-floating-promises -D typescript/no-misused-promises -D typescript/await-thenable --deny-warnings",
     "typecheck:private-connect": "tsc --noEmit -p src/renderer/private-connect/tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && npm run typecheck:private-connect && tsc --noEmit -p tsconfig.test.unit.json && tsc --noEmit -p tsconfig.test.e2e.json",
+    "pretest": "node scripts/build-runtime-process-guardian.mjs",
     "test": "vitest run",
     "test:duo": "npm run test:duo:server && vitest run tests/renderer/multi-spawn tests/renderer/duo",
     "test:duo:server": "node scripts/run-electron-vitest.mjs run tests/server/duo",
@@ -106,6 +109,7 @@
     },
     "files": [
       "out/**/*",
+      "resources/generated/windows-runtime-job-integrity.json",
       "package.json"
     ],
     "extraResources": [
@@ -128,6 +132,10 @@
       {
         "from": "node_modules/electron/dist/LICENSES.chromium.html",
         "to": "electron/LICENSES.chromium.html"
+      },
+      {
+        "from": "resources/generated/runtime-process-guardian",
+        "to": "runtime"
       }
     ],
     "mac": {

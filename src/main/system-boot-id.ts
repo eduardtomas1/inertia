@@ -38,12 +38,13 @@ function boundedCommand(
   executable: string,
   args: string[],
   environment?: NodeJS.ProcessEnv,
+  timeoutMs = 1_000,
 ): string | null {
   const result = dependencies.spawn(executable, args, {
     encoding: "utf8",
     shell: false,
     windowsHide: true,
-    timeout: 1_000,
+    timeout: timeoutMs,
     maxBuffer: 4_096,
     ...(environment ? { env: environment } : {}),
   });

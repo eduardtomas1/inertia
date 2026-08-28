@@ -17,12 +17,19 @@ import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { RuntimeSupervisor } from "../../src/main/runtime-supervisor";
+import {
+  authorizeModernDarwinRuntimeRecovery,
+  prepareModernDarwinBootstrapRecovery,
+} from "../../src/main/runtime-bootstrap-safety";
+import { windowsRuntimeJobName } from "../../src/main/windows-runtime-job";
 import type { RuntimeWorkerCommand } from "../../src/node/runtime-process-protocol";
 import { RuntimeStore } from "../../src/server/database";
+import { RUNTIME_SHUTDOWN_DEADLINE_MS } from "../../src/server/runtime-shutdown";
 
 const repositoryRoot = resolve(import.meta.dirname, "../..");
 const temporaryDirectories: string[] = [];
 const activeChildren = new Set<ChildProcess>();
+const activeSupervisors = new Set<RuntimeSupervisor>();
 
 class NodeUtilityProcess extends EventEmitter {
   readonly child: ChildProcess;
@@ -53,8 +60,10 @@ class NodeUtilityProcess extends EventEmitter {
       this.emit("error", "node-host", error.message);
     });
     this.child.once("exit", (code) => {
-      activeChildren.delete(this.child);
       this.emit("exit", code ?? 1);
+    });
+    this.child.once("close", () => {
+      activeChildren.delete(this.child);
     });
   }
 
@@ -71,15 +80,51 @@ class NodeUtilityProcess extends EventEmitter {
   }
 }
 
-afterEach(() => {
+afterEach(async () => {
+  await Promise.allSettled(
+    [...activeSupervisors].map((supervisor) => supervisor.stop()),
+  );
+  activeSupervisors.clear();
   for (const child of activeChildren) {
     if (child.exitCode === null) child.kill("SIGKILL");
   }
-  activeChildren.clear();
+  await Promise.all([...activeChildren].map((child) => new Promise<void>(
+    (resolveChild, rejectChild) => {
+      const timeout = setTimeout(() => {
+        rejectChild(new Error(`Runtime fixture ${child.pid ?? "unknown"} did not close.`));
+      }, 5_000);
+      timeout.unref();
+      child.once("close", () => {
+        clearTimeout(timeout);
+        resolveChild();
+      });
+    },
+  )));
   for (const directory of temporaryDirectories.splice(0)) {
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+function windowsDatabaseRecoveryContainment(): {
+  armProcessContainment?: (
+    runtimeGenerationId: string,
+    runtimePid: number,
+  ) => { kind: "windows-job-v1"; name: string };
+  recoverOwnedProcesses?: () => false;
+} {
+  if (process.platform !== "win32") return {};
+  // This suite exercises database recovery through the supervisor. Native
+  // Job Object creation and recovery have their own Windows tests and desktop
+  // gates; using PowerShell here would make worker startup the behavior under
+  // test and can exceed the deliberately short recovery deadline.
+  return {
+    armProcessContainment: (runtimeGenerationId) => ({
+      kind: "windows-job-v1",
+      name: windowsRuntimeJobName(runtimeGenerationId),
+    }),
+    recoverOwnedProcesses: () => false,
+  };
+}
 
 async function waitFor(
   predicate: () => boolean,
@@ -160,7 +205,7 @@ function buildRuntimeWorkers(): string {
 }
 
 describe("runtime recovery supervisor integration", () => {
-  it("force-terminates a post-rename import and keeps replacement mutations locked", async () => {
+  it("force-terminates a post-rename import without guessing cleanup authority", async () => {
     const testRoot = mkdtempSync(join(tmpdir(), "inertia-recovery-supervisor-"));
     temporaryDirectories.push(testRoot);
     const dataDirectory = join(testRoot, "data");
@@ -170,6 +215,7 @@ describe("runtime recovery supervisor integration", () => {
     mkdirSync(workspaceDirectory, { mode: 0o700 });
     mkdirSync(targetDirectory, { mode: 0o700 });
     const recoveryPath = join(testRoot, "recovery.json");
+    const exportPath = join(testRoot, "recovery-export.json");
     const markerPath = join(testRoot, "after-publish.marker");
     writeFileSync(recoveryPath, JSON.stringify({
       format: "inertia-recovery-export",
@@ -189,15 +235,25 @@ describe("runtime recovery supervisor integration", () => {
       ],
     }), { encoding: "utf8", mode: 0o600 });
     const runtimeWorkerPath = buildRuntimeWorkers();
+    const systemBootId = "test:00000000-0000-4000-8000-000000000001";
+    const runtimeProcessGuardianPath = join(
+      process.cwd(),
+      "resources/generated/runtime-process-guardian/runtime-process-guardian",
+    );
 
     const children: NodeUtilityProcess[] = [];
     const states: string[] = [];
     const markerGatedSetTimer = markerGatedRequestTimer(markerPath);
     const supervisor = new RuntimeSupervisor({
+      ...windowsDatabaseRecoveryContainment(),
+      systemBootId,
       workerOptions: {
         dataDirectory,
         defaultWorkspacePath: workspaceDirectory,
         enableProviders: false,
+        ...(process.platform === "darwin" || process.platform === "linux"
+          ? { runtimeProcessGuardianPath }
+          : {}),
         recoveryImportFault: {
           phase: "after-staging-publish",
           markerPath,
@@ -220,6 +276,7 @@ describe("runtime recovery supervisor integration", () => {
         states.push(`${phase}:${generation}:${pid ?? 0}`);
       },
     });
+    activeSupervisors.add(supervisor);
     const diagnostics = () => JSON.stringify({
       states,
       stderr: children.flatMap(({ stderr }) => stderr),
@@ -246,6 +303,28 @@ describe("runtime recovery supervisor integration", () => {
       /timed out.*before cancellation was confirmed/u,
     );
     expect(existsSync(markerPath)).toBe(true);
+    if (process.platform === "darwin") {
+      await waitFor(
+        () => supervisor.snapshot().phase === "stopped",
+        "explicit macOS recovery admission",
+        diagnostics,
+      );
+      const recovery = await prepareModernDarwinBootstrapRecovery(
+        dataDirectory,
+        systemBootId,
+        runtimeProcessGuardianPath,
+      );
+      expect(recovery.blocked).toBe(false);
+      expect(recovery.candidate).not.toBeNull();
+      const authority = authorizeModernDarwinRuntimeRecovery(
+        dataDirectory,
+        recovery.candidate!,
+        systemBootId,
+        runtimeProcessGuardianPath,
+      );
+      expect(authority).not.toBeNull();
+      expect(supervisor.resumeWithModernDarwinRecovery(authority!)).toBe(true);
+    }
     await waitFor(
       () => supervisor.snapshot().phase === "ready"
         && supervisor.snapshot().generation === 2,
@@ -257,14 +336,22 @@ describe("runtime recovery supervisor integration", () => {
     expect(existsSync(targetDirectory)).toBe(true);
     await expect(readdir(targetDirectory)).resolves.toEqual([]);
 
-    await expect(supervisor.databaseRecovery(
-      "import",
-      recoveryPath,
-      targetDirectory,
-    )).rejects.toThrow(/recovery safety mode.*prior runtime-owned process/iu);
-    expect(supervisor.snapshot()).toMatchObject({ phase: "ready", generation: 2 });
-    await expect(supervisor.stop()).resolves.toBe(false);
-  }, 30_000);
+    if (process.platform === "darwin") {
+      await supervisor.databaseRecovery("export", exportPath);
+      expect(existsSync(exportPath)).toBe(true);
+    } else {
+      await expect(supervisor.databaseRecovery(
+        "import",
+        recoveryPath,
+        targetDirectory,
+      )).rejects.toThrow(/recovery safety mode.*prior runtime-owned process/iu);
+      await expect(supervisor.stop()).resolves.toBe(false);
+    }
+    expect(supervisor.snapshot()).toMatchObject({
+      phase: process.platform === "darwin" ? "ready" : "stopped",
+      generation: 2,
+    });
+  }, 45_000);
 
   it("cancels a near-limit import while its isolated transaction is busy", async () => {
     const testRoot = mkdtempSync(join(tmpdir(), "inertia-recovery-cancel-"));
@@ -305,10 +392,19 @@ describe("runtime recovery supervisor integration", () => {
     const states: string[] = [];
     const markerGatedSetTimer = markerGatedRequestTimer(markerPath);
     const supervisor = new RuntimeSupervisor({
+      ...windowsDatabaseRecoveryContainment(),
       workerOptions: {
         dataDirectory,
         defaultWorkspacePath: workspaceDirectory,
         enableProviders: false,
+        ...(process.platform === "darwin" || process.platform === "linux"
+          ? {
+              runtimeProcessGuardianPath: join(
+                process.cwd(),
+                "resources/generated/runtime-process-guardian/runtime-process-guardian",
+              ),
+            }
+          : {}),
         recoveryImportFault: {
           phase: "during-message-import",
           markerPath,
@@ -331,6 +427,7 @@ describe("runtime recovery supervisor integration", () => {
         states.push(`${phase}:${generation}:${pid ?? 0}`);
       },
     });
+    activeSupervisors.add(supervisor);
     const diagnostics = () => JSON.stringify({
       states,
       stderr: children.flatMap(({ stderr }) => stderr),
@@ -406,10 +503,19 @@ describe("runtime recovery supervisor integration", () => {
     const runtimeWorkerPath = buildRuntimeWorkers();
     const children: NodeUtilityProcess[] = [];
     const supervisor = new RuntimeSupervisor({
+      ...windowsDatabaseRecoveryContainment(),
       workerOptions: {
         dataDirectory,
         defaultWorkspacePath: workspaceDirectory,
         enableProviders: false,
+        ...(process.platform === "darwin" || process.platform === "linux"
+          ? {
+              runtimeProcessGuardianPath: join(
+                process.cwd(),
+                "resources/generated/runtime-process-guardian/runtime-process-guardian",
+              ),
+            }
+          : {}),
       },
       spawn: () => {
         const child = new NodeUtilityProcess(runtimeWorkerPath);
@@ -417,9 +523,13 @@ describe("runtime recovery supervisor integration", () => {
         return child as never;
       },
       startupTimeoutMs: 10_000,
-      shutdownGraceMs: 2_000,
+      // This scenario expects the worker's orderly shutdown result. Keep the
+      // supervisor grace beyond the worker's own bounded cleanup deadline so
+      // host contention cannot force-kill a still-authoritative worker first.
+      shutdownGraceMs: RUNTIME_SHUTDOWN_DEADLINE_MS + 500,
       forceKillWaitMs: 1_000,
     });
+    activeSupervisors.add(supervisor);
     const diagnostics = () => JSON.stringify({
       stderr: children.flatMap(({ stderr }) => stderr),
       snapshot: supervisor.snapshot(),
@@ -463,6 +573,6 @@ describe("runtime recovery supervisor integration", () => {
         (SELECT COUNT(*) FROM recovery_import_journals) AS journals
     `).get()).toEqual({ receipts: 0, journals: 0 });
     database.close();
-    await expect(supervisor.stop()).resolves.toBe(true);
+    expect(await supervisor.stop(), diagnostics()).toBe(true);
   }, 30_000);
 });

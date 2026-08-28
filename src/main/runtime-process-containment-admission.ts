@@ -19,7 +19,8 @@ export interface RuntimeProcessContainmentAdmissionOptions {
   readonly post: (
     record: RuntimeProcessRecord,
     command: RuntimeWorkerCommand,
-  ) => void;
+  ) => boolean;
+  readonly onStartPosted: (record: RuntimeProcessRecord) => void;
   readonly reject: (record: RuntimeProcessRecord, error: unknown) => void;
 }
 
@@ -84,7 +85,7 @@ export class RuntimeProcessContainmentAdmission {
     if (process.platform === "win32" && !containment) {
       throw new Error("The Windows runtime Job Object is unavailable.");
     }
-    this.options.post(record, {
+    const posted = this.options.post(record, {
       type: "runtime.start",
       options: {
         ...this.options.workerOptions,
@@ -113,5 +114,8 @@ export class RuntimeProcessContainmentAdmission {
           : {}),
       },
     });
+    // Containment has its own bounded admission window. Worker readiness begins
+    // only after the ownership record is durable and runtime.start was posted.
+    if (posted) this.options.onStartPosted(record);
   }
 }

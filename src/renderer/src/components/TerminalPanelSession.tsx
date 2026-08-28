@@ -413,12 +413,6 @@ export function TerminalSession({
       setActiveResume(event.providerResume ?? null);
       setTerminalId(event.terminalId);
       onRestorableTerminalChangeRef.current(event.terminalId);
-      if (event.providerResume && event.providerResumeConversationId) {
-        onProviderResumeStartedRef.current(
-          event.terminalId,
-          event.providerResumeConversationId,
-        );
-      }
       const bufferedOutput = pendingOutputRef.current.get(event.terminalId);
       const earlyExitCode = pendingExit.get(event.terminalId);
       pendingOutput.clear();
@@ -433,8 +427,20 @@ export function TerminalSession({
         onRestorableTerminalChangeRef.current(null);
         if (bufferedOutput) terminal?.write(bufferedOutput);
         terminal?.writeln(`\r\n\x1b[2mProcess exited with code ${earlyExitCode}.\x1b[0m`);
-        setSessionState("closed");
+        if (event.providerResume) {
+          const exit = providerTerminalExitPresentation(event.providerResume, earlyExitCode);
+          setSessionError(exit.message);
+          setSessionState(exit.state);
+        } else {
+          setSessionState("closed");
+        }
         return;
+      }
+      if (event.providerResume && event.providerResumeConversationId) {
+        onProviderResumeStartedRef.current(
+          event.terminalId,
+          event.providerResumeConversationId,
+        );
       }
       terminalReadyRef.current = true;
       setSessionState("ready");

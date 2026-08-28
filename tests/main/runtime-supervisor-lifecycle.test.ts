@@ -8,6 +8,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RuntimeSupervisor } from "../../src/main/runtime-supervisor";
 import { RuntimeGenerationLeaseJournal } from "../../src/node/runtime-generation-leases";
 import { RuntimeOwnedProcessJournal } from "../../src/node/runtime-owned-processes";
+import type { RuntimeOwnedProcessContainment } from
+  "../../src/node/runtime-owned-processes";
 import type { RuntimeWorkerCommand } from "../../src/node/runtime-process-protocol";
 
 const runtimeUrl = `ws://127.0.0.1:41001/runtime/${"a".repeat(43)}`;
@@ -35,7 +37,13 @@ class FakeUtilityProcess extends EventEmitter {
   }
 }
 
-function createHarness(): {
+function createHarness(options: {
+  startupTimeoutMs?: number;
+  armProcessContainment?: () =>
+    RuntimeOwnedProcessContainment
+    | Promise<RuntimeOwnedProcessContainment | null>
+    | null;
+} = {}): {
   children: FakeUtilityProcess[];
   forceKill: ReturnType<typeof vi.fn<(pid: number, deadlineAt: number) => boolean>>;
   supervisor: RuntimeSupervisor;
@@ -54,18 +62,19 @@ function createHarness(): {
       children.push(child);
       return child as never;
     },
-    startupTimeoutMs: 2_000,
+    startupTimeoutMs: options.startupTimeoutMs ?? 2_000,
     stableUptimeMs: 5_000,
     shutdownGraceMs: 1_000,
     forceKillWaitMs: 500,
     forceKill,
     recoverOwnedProcesses: () => true,
-    armProcessContainment: () => process.platform === "win32"
-      ? {
-          kind: "windows-job-v1",
-          name: `Global\\InertiaRuntime-${"a".repeat(64)}`,
-        }
-      : null,
+    armProcessContainment: options.armProcessContainment ?? (() =>
+      process.platform === "win32"
+        ? {
+            kind: "windows-job-v1",
+            name: `Global\\InertiaRuntime-${"a".repeat(64)}`,
+          }
+        : null),
   });
   return { children, forceKill, supervisor };
 }
@@ -82,6 +91,46 @@ afterEach(() => {
 });
 
 describe("RuntimeSupervisor lifecycle", () => {
+  it("starts readiness timing after slow asynchronous containment admission", async () => {
+    let resolveContainment!: (
+      containment: RuntimeOwnedProcessContainment | null,
+    ) => void;
+    const containmentPending =
+      new Promise<RuntimeOwnedProcessContainment | null>((resolve) => {
+        resolveContainment = resolve;
+      });
+    const { children, forceKill, supervisor } = createHarness({
+      startupTimeoutMs: 20_000,
+      armProcessContainment: () => containmentPending,
+    });
+    supervisor.start();
+    children[0].spawn();
+
+    await vi.advanceTimersByTimeAsync(32_751);
+    expect(children[0].messages).not.toContainEqual(expect.objectContaining({
+      type: "runtime.start",
+    }));
+    expect(forceKill).not.toHaveBeenCalled();
+
+    resolveContainment(process.platform === "win32"
+      ? {
+          kind: "windows-job-v1",
+          name: `Global\\InertiaRuntime-${"a".repeat(64)}`,
+        }
+      : null);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(children[0].messages).toContainEqual(expect.objectContaining({
+      type: "runtime.start",
+    }));
+
+    await vi.advanceTimersByTimeAsync(19_999);
+    expect(forceKill).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(forceKill).toHaveBeenCalledWith(10_000, expect.any(Number));
+    expect(() => supervisor.connection()).toThrow("did not become ready");
+  });
+
   it("is single-use after a complete owned-generation shutdown", async () => {
     const { children, forceKill, supervisor } = createHarness();
     supervisor.start();

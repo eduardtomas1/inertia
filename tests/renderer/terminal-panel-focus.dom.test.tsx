@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TerminalPanel } from "../../src/renderer/src/components/TerminalPanel";
+import { TerminalSession } from "../../src/renderer/src/components/TerminalPanelSession";
 import { RuntimeCommandError } from "../../src/renderer/src/utils/connectionMessages";
 import type {
   ClientCommand,
@@ -133,6 +134,71 @@ describe("TerminalPanel focus lifecycle", () => {
     });
     expect(sendCommand.mock.calls.some(([sent]) => sent.type === "terminal.create"))
       .toBe(false);
+  });
+
+  it("does not publish resumed ownership when a reattached provider terminal already exited", async () => {
+    const terminalId = "44444444-4444-4444-8444-444444444445";
+    const resumedConversationId = "33333333-3333-4333-8333-333333333333";
+    const listeners = new Set<(event: ServerEvent) => void>();
+    let settleAttach!: (event: ServerEvent) => void;
+    const attach = new Promise<ServerEvent>((resolve) => {
+      settleAttach = resolve;
+    });
+    const onProviderResumeStarted = vi.fn();
+    const sendCommand = vi.fn((sent: ClientCommand): Promise<ServerEvent> => {
+      if (sent.type === "terminal.attach") return attach;
+      return Promise.resolve({ type: "request.ok", requestId: sent.requestId });
+    });
+
+    render(
+      <TerminalSession
+        projectId="11111111-1111-4111-8111-111111111111"
+        conversationId="22222222-2222-4222-8222-222222222222"
+        projectName="Inertia"
+        status="online"
+        fontSize={13}
+        theme="dark"
+        sendCommand={sendCommand}
+        subscribe={(listener) => {
+          listeners.add(listener);
+          return () => listeners.delete(listener);
+        }}
+        initialTerminalId={terminalId}
+        siblingResumedConversationIds={new Set()}
+        onRestorableTerminalChange={() => undefined}
+        onTerminalReplaced={() => true}
+        onProviderResumeStarted={onProviderResumeStarted}
+        onClose={() => undefined}
+      />,
+    );
+
+    await waitFor(() => expect(sendCommand.mock.calls.some(
+      ([sent]) => sent.type === "terminal.attach",
+    )).toBe(true));
+    await act(async () => {
+      for (const listener of listeners) {
+        listener({ type: "terminal.exit", terminalId, exitCode: 17 });
+      }
+      settleAttach({
+        type: "terminal.created",
+        requestId: crypto.randomUUID(),
+        terminalId,
+        providerResume: {
+          providerId: "codex",
+          providerLabel: "Codex",
+          sessionId: "session-reattached",
+        },
+        providerResumeConversationId: resumedConversationId,
+      });
+      await attach;
+    });
+
+    expect(onProviderResumeStarted).not.toHaveBeenCalled();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Codex could not resume session session-reattached",
+    );
+    expect(document.querySelector(".terminal-panel"))
+      .toHaveAttribute("data-terminal-state", "error");
   });
 
   it("keeps one bounded replay when an ambiguous reattach succeeds on retry", async () => {

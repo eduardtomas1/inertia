@@ -104,6 +104,9 @@ export function createRuntimeProcessContainmentAdmission(options: {
   readonly hasQuarantinedProcesses: () => boolean;
   readonly persist: RuntimeProcessContainmentAdmissionOptions["persist"];
   readonly post: RuntimeProcessContainmentAdmissionOptions["post"];
+  readonly onStartPosted: RuntimeProcessContainmentAdmissionOptions[
+    "onStartPosted"
+  ];
   readonly reject: (record: RuntimeProcessRecord, message: string) => void;
 }) {
   return new RuntimeProcessContainmentAdmission({

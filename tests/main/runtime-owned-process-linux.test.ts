@@ -68,6 +68,19 @@ async function waitFor(predicate: () => boolean, timeout = 5_000): Promise<void>
   }
 }
 
+function waitForPtyExit<T>(exited: Promise<T>, timeout = 5_000): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error("Timed out waiting for the Linux PTY guardian to exit.")),
+      timeout,
+    );
+    exited.then(
+      (event) => { clearTimeout(timer); resolve(event); },
+      (error: unknown) => { clearTimeout(timer); reject(error); },
+    );
+  });
+}
+
 describe("Linux runtime process guardian", () => {
   linuxIt("passes the terminal seccomp self-test in the generated static binary", () => {
     const guardian = join(
@@ -542,6 +555,56 @@ describe("Linux runtime process guardian", () => {
       expect(owned.confirmStopped()).toBe(true);
     } finally {
       deactivate?.();
+    }
+  }, 15_000);
+
+  linuxIt("preserves a natural PTY exit while the payload temporarily closes its slave", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-linux-pty-natural-exit-")); roots.push(root);
+    const guardian = compileGuardian(root);
+    const generation = "52000000-0000-4000-8000-000000000005:1";
+    const boot = "test:62000000-0000-4000-8000-000000000006";
+    const deactivate = activateRuntimeOwnedProcessRegistry(root, generation, boot, {
+      platform: "linux", darwinGuardianPath: guardian,
+    });
+    let cleanup: (() => Promise<void>) | null = null;
+    try {
+      const invocation = runtimeOwnedPtyInvocation(process.execPath, [
+        "-e",
+        [
+          'const { closeSync } = require("node:fs");',
+          "closeSync(0); closeSync(1); closeSync(2);",
+          "setTimeout(() => process.exit(0), 200);",
+        ].join(""),
+      ]);
+      if (!Array.isArray(invocation.args)) throw new Error("Expected guarded PTY arguments.");
+      const owned = spawnRuntimeOwnedPidProcess(() => spawnPty(
+        invocation.command,
+        [...invocation.args],
+        { cwd: root, env: { PATH: "/usr/bin:/bin" } },
+      ), { darwinGuardianCommand: invocation.command });
+      const exited = new Promise<{
+        exitCode: number;
+        signal: number | undefined;
+      }>((resolve) => {
+        owned.process.onExit((event) => {
+          owned.releaseIfGroupExited(event.signal);
+          resolve({ exitCode: event.exitCode, signal: event.signal });
+        });
+      });
+      cleanup = async () => {
+        if (owned.confirmStopped()) return;
+        owned.requestGuardianStop();
+        await waitForPtyExit(exited);
+        await waitFor(() => owned.confirmStopped());
+      };
+
+      await expect(waitForPtyExit(exited)).resolves.toEqual({ exitCode: 0, signal: 0 });
+      await waitFor(() => new RuntimeOwnedProcessJournal(root, {
+        platform: "linux", darwinGuardianPath: guardian,
+      }).records(generation)?.length === 0);
+      expect(owned.confirmStopped()).toBe(true);
+    } finally {
+      try { await cleanup?.(); } finally { deactivate?.(); }
     }
   }, 15_000);
 

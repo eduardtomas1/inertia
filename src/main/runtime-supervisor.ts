@@ -11,31 +11,25 @@ import {
   type RuntimeUpdatePreparationResult, type RuntimeWorkerCommand,
 } from "../node/runtime-process-protocol.js";
 import { RuntimeAttachmentBrokerCoordinator } from "./runtime-attachment-broker.js";
-import { RuntimePrivateConnectPromptCoordinator } from
-  "./runtime-private-connect-prompt-coordinator.js";
+import { RuntimePrivateConnectPromptCoordinator } from "./runtime-private-connect-prompt-coordinator.js";
 import { RuntimeCleanupReceiptJournal } from "./runtime-cleanup-receipts.js";
 import { persistRuntimeGenerationCleanup } from "./runtime-generation-cleanup.js";
 import { readSystemBootId } from "./system-boot-id.js";
 import { boundedDuration, publicProcessError, runtimeRestartDelayMs,
-  runtimeSupervisorDefaults, unconfirmedRuntimeCleanupMessage }
-  from "./runtime-supervisor-values.js";
+  runtimeSupervisorDefaults, unconfirmedRuntimeCleanupMessage } from "./runtime-supervisor-values.js";
 import { detachedRuntimeConnection, runtimeConnection } from "./runtime-supervisor-connection.js";
 import { RuntimeSupervisorRecycle } from "./runtime-supervisor-recycle.js";
 import { RuntimeSecureFileCoordinator } from "./runtime-secure-file-coordinator.js";
 import { RuntimeGenerationLeaseJournal } from "../node/runtime-generation-leases.js";
 import { RuntimeUpdatePreparationCoordinator } from "./runtime-update-preparation-coordinator.js";
 import { RuntimeDatabaseRecoveryCoordinator } from "./runtime-database-recovery-coordinator.js";
-import { RuntimeSupervisorStartupRecovery } from
-  "./runtime-supervisor-startup-recovery.js";
+import { RuntimeSupervisorStartupRecovery } from "./runtime-supervisor-startup-recovery.js";
 import { RuntimeOwnedProcessJournal } from "../node/runtime-owned-processes.js";
 import { createRuntimeProcessRecord } from "./runtime-supervisor-process-record.js";
-import type { RuntimeProcessContainmentAdmission } from
-  "./runtime-process-containment-admission.js";
-import { RuntimeSupervisorRecoveryAdmission }
-  from "./runtime-supervisor-recovery-admission.js";
+import type { RuntimeProcessContainmentAdmission } from "./runtime-process-containment-admission.js";
+import { RuntimeSupervisorRecoveryAdmission } from "./runtime-supervisor-recovery-admission.js";
 import { createRuntimeProcessContainmentAdmission,
-  createRuntimeSupervisorProcessSafety } from
-  "./runtime-supervisor-process-safety.js";
+  createRuntimeSupervisorProcessSafety } from "./runtime-supervisor-process-safety.js";
 import type {
   PendingCredentialRequest, PendingPrivateConnectRuntimeRequest,
   PendingProjectPath, RuntimeCredentialBroker, RuntimeProcessRecord,
@@ -149,7 +143,8 @@ export class RuntimeSupervisor {
       persist: (record, containment) => this.runtimeOwnedProcesses.armContainment(
         record.runtimeGenerationId, this.systemBootId, containment,
       ),
-      post: (record, command) => { this.post(record.child, command); },
+      post: (record, command) => this.post(record.child, command),
+      onStartPosted: (record) => this.startReadinessDeadline(record),
       reject: (record, message) => {
         if (this.current !== record) return;
         record.acceptingReady = false;
@@ -594,6 +589,12 @@ export class RuntimeSupervisor {
       this.emitState();
     });
     child.once("exit", (code) => this.handleExit(record, code));
+    this.emitState();
+  }
+  private startReadinessDeadline(record: RuntimeProcessRecord): void {
+    if (this.current !== record || !this.desiredRunning ||
+      !record.acceptingReady || record.ready) return;
+    this.clearTimerValue("startupTimer");
     this.startupTimer = this.setTimer(() => {
       this.startupTimer = null;
       if (this.current !== record || record.ready) return;
@@ -601,9 +602,8 @@ export class RuntimeSupervisor {
       this.lastError = "The runtime process did not become ready in time.";
       this.rejectTestRecycle(record, this.lastError, true);
       this.emitState();
-      this.forceTerminate(child);
+      this.forceTerminate(record.child);
     }, this.startupTimeoutMs);
-    this.emitState();
   }
   private handleMessage(record: RuntimeProcessRecord, message: unknown): void {
     if (this.current !== record) return;

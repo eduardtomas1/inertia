@@ -449,6 +449,20 @@ static int watch_mode(int argc, char **argv) {
   }
   close_children(preflight_children, preflight_count);
   if (prctl(PR_SET_NAME, "inertia-ready", 0, 0, 0)) return 70;
+  // Keep the PTY slave alive until the guardian itself exits. A payload may
+  // close all three standard descriptors before it becomes waitable; without
+  // this private post-fork hold, EIO closes the master and causes SIGHUP.
+  if (isatty(STDIN_FILENO)) {
+    const int terminal_hold = fcntl(
+      STDIN_FILENO,
+      F_DUPFD_CLOEXEC,
+      STDERR_FILENO + 1
+    );
+    if (terminal_hold < 0) {
+      close(gate[0]); close(gate[1]); (void)waitpid(payload, NULL, 0); return 70;
+    }
+    (void)terminal_hold;
+  }
   close(gate[0]); close(STDIN_FILENO); close(STDOUT_FILENO); close(STDERR_FILENO);
   struct timespec pause = { .tv_sec = 0, .tv_nsec = POLL_NS };
   while (!claimed) {

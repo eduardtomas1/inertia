@@ -592,7 +592,10 @@ static int bounded_owned_tree_cleanup(
     if (tracker->count == 0) {
       const int completed_authority_intact = allow_completed_payload_forks
         && !stop_requested
-        && exact_identity_matches_bounded(runtime_pid, runtime_identity);
+        && !graceful_exit_requested
+        && exact_identity_matches_bounded(runtime_pid, runtime_identity)
+        && !stop_requested
+        && !graceful_exit_requested;
       return tracker->fork_tainted && !completed_authority_intact ? 0 : 1;
     }
   }
@@ -633,7 +636,10 @@ static int bounded_owned_tree_cleanup(
     if (tracker->count == 0) {
       const int completed_authority_intact = allow_completed_payload_forks
         && !stop_requested
-        && exact_identity_matches_bounded(runtime_pid, runtime_identity);
+        && !graceful_exit_requested
+        && exact_identity_matches_bounded(runtime_pid, runtime_identity)
+        && !stop_requested
+        && !graceful_exit_requested;
       return tracker->fork_tainted && !completed_authority_intact ? 0 : 1;
     }
     (void)nanosleep(&pause, NULL);
@@ -972,7 +978,7 @@ static int watch_mode(int argc, char *argv[]) {
     if (waited == child) {
       if (!stop_requested
         && exact_identity_matches_bounded(runtime_pid, &runtime_identity)) {
-        payload_settled = 1;
+        payload_settled = !graceful_exit_requested;
         if (WIFEXITED(status)) result = WEXITSTATUS(status);
         else if (WIFSIGNALED(status)) result = 128 + WTERMSIG(status);
         else result = 1;
@@ -1023,7 +1029,7 @@ static int watch_mode(int argc, char *argv[]) {
         if (reaped == child
           && !stop_requested
           && exact_identity_matches_bounded(runtime_pid, &runtime_identity)) {
-          payload_settled = 1;
+          payload_settled = !graceful_exit_requested;
           if (WIFEXITED(status)) result = WEXITSTATUS(status);
           else if (WIFSIGNALED(status)) result = 128 + WTERMSIG(status);
           else result = 1;
@@ -1046,6 +1052,9 @@ static int watch_mode(int argc, char *argv[]) {
   // still-observed member and preserve its real exit status even when it
   // legitimately forked (Git, gh, PTYs, and provider helpers all do). The
   // cleanup success boundary rechecks stop and runtime identity dynamically.
+  // An authenticated graceful-exit request is cancellation for containment:
+  // it may give the exact root a chance to process SIGHUP and retain its real
+  // status, but it must never enable the normal-completion fork exception.
   // macOS has no unprivileged job object that can prove an arbitrary child
   // after double-fork + setsid; this normal-completion exception is therefore
   // deliberately best-effort, while cancellation or parent loss retains the

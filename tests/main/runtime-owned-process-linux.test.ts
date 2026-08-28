@@ -20,6 +20,7 @@ import {
   linuxGuardianTerminalAuthority,
   monitorLinuxGuardianTerminal,
   readLinuxGuardianReadyAsync,
+  stopPendingLinuxGuardianAsync,
 } from "../../src/node/runtime-owned-process-linux";
 
 const linuxIt = process.platform === "linux" ? it : it.skip;
@@ -723,6 +724,54 @@ describe("Linux runtime process guardian", () => {
     } finally {
       claim.mockRestore();
       if (child) await stopChild(child);
+      deactivate?.();
+    }
+  }, 15_000);
+
+  linuxIt("stops and retires a pre-identity guardian when readiness cannot be published", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-linux-ready-failure-")); roots.push(root);
+    const guardian = join(root, "guardian");
+    execFileSync("cc", [
+      "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
+      "-DINERTIA_RUNTIME_GUARDIAN_TEST_REJECT_READY=1",
+      join(process.cwd(), "native/runtime-process-guardian/linux.c"), "-o", guardian,
+    ]);
+    const generation = "71000000-0000-4000-8000-000000000007:1";
+    const boot = "test:81000000-0000-4000-8000-000000000008";
+    const deactivate = activateRuntimeOwnedProcessRegistry(root, generation, boot, {
+      platform: "linux", darwinGuardianPath: guardian,
+    });
+    const unrelated = spawn("/bin/sleep", ["60"], { detached: true, stdio: "ignore" });
+    const marker = join(root, "ran");
+    const invocation = runtimeOwnedProcessInvocation(
+      "/bin/sh", ["-c", `touch ${marker}`],
+    );
+    let child: ChildProcess | null = null;
+    try {
+      await expect(stopPendingLinuxGuardianAsync(
+        unrelated.pid ?? 0,
+        guardian,
+        process.pid,
+      )).resolves.toBe(false);
+      expect(exists(unrelated.pid ?? 0)).toBe(true);
+
+      child = spawnRuntimeOwnedProcess(() => spawn(
+        invocation.command,
+        invocation.args,
+        { detached: true, stdio: "ignore" },
+      ));
+      await expect(awaitRuntimeOwnedProcessCleanupConfirmed()).resolves.toBe(true);
+      await waitForChild(child);
+
+      expect(child.exitCode).toBe(143);
+      expect(child.signalCode).toBeNull();
+      expect(existsSync(marker)).toBe(false);
+      expect(new RuntimeOwnedProcessJournal(root, {
+        platform: "linux", darwinGuardianPath: guardian,
+      }).records(generation)).toEqual([]);
+    } finally {
+      if (child) await stopChild(child);
+      await stopChild(unrelated);
       deactivate?.();
     }
   }, 15_000);

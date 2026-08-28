@@ -16,6 +16,7 @@
     "dev": "electron-vite dev",
     "prebuild": "npm run notices:generate && node scripts/build-runtime-process-guardian.mjs",
     "build": "npm run typecheck && electron-vite build && npm run build:private-connect && npm run check:renderer-bundle",
+    "prebuild:bundle": "node scripts/build-runtime-process-guardian.mjs",
     "build:bundle": "electron-vite build && npm run build:private-connect && npm run check:renderer-bundle",
     "check:renderer-bundle": "node scripts/check-renderer-bundle.mjs",
     "check:migrations": "node scripts/verify-database-lineage.mjs",
@@ -108,6 +109,7 @@
     },
     "files": [
       "out/**/*",
+      "resources/generated/windows-runtime-job-integrity.json",
       "package.json"
     ],
     "extraResources": [

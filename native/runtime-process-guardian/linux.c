@@ -28,6 +28,7 @@
 
 struct child { pid_t pid; int pidfd; unsigned long long start; };
 static volatile sig_atomic_t stop_requested;
+static volatile sig_atomic_t stop_pending_requested;
 static volatile sig_atomic_t claimed;
 static volatile sig_atomic_t authorized;
 static volatile sig_atomic_t runtime_pid;
@@ -36,6 +37,7 @@ static volatile sig_atomic_t claim_sender;
 static volatile sig_atomic_t authorize_sender;
 
 static void stop_handler(int value) { (void)value; stop_requested = 1; }
+static void stop_pending_handler(int value) { (void)value; stop_pending_requested = 1; }
 static void claim_handler(int value, siginfo_t *info, void *context) {
   (void)value; (void)context;
   if (info) claim_sender = info->si_pid;
@@ -287,6 +289,10 @@ static int named_status(pid_t pid, const char *name) {
   return strstr(data, expected) != NULL;
 }
 static int ready_mode(const char *raw) {
+#if defined(INERTIA_RUNTIME_GUARDIAN_TEST_REJECT_READY)
+  (void)raw;
+  return 4;
+#else
   pid_t pid; if (!parse_pid(raw, &pid)) return 64;
   struct timespec pause = { .tv_sec = 0, .tv_nsec = POLL_NS };
   for (int poll = 0; poll < 50; poll++) {
@@ -294,6 +300,68 @@ static int ready_mode(const char *raw) {
     nanosleep(&pause, NULL);
   }
   return 4;
+#endif
+}
+static int stop_pending_mode(int argc, char **argv) {
+  if (argc != 6) return 64;
+  pid_t pid, parent; unsigned long long helper_device, helper_inode;
+  if (!parse_pid(argv[2], &pid) || !parse_pid(argv[3], &parent)
+    || !parse_u64(argv[4], &helper_device) || !parse_u64(argv[5], &helper_inode)) return 64;
+  struct stat self_executable;
+  if (stat("/proc/self/exe", &self_executable)
+    || (unsigned long long)self_executable.st_dev != helper_device
+    || (unsigned long long)self_executable.st_ino != helper_inode) return 3;
+  int pidfd = pidfd_open_exact(pid); if (pidfd < 0) return 3;
+  pid_t observed_parent = 0; unsigned long long start = 0;
+  if (!read_identity(pid, &observed_parent, &start) || observed_parent != parent) {
+    close(pidfd); return 3;
+  }
+  struct timespec pause = { .tv_sec = 0, .tv_nsec = POLL_NS };
+  for (int poll = 0; poll < 50; poll++) {
+    pid_t confirmed_parent = 0; unsigned long long confirmed_start = 0;
+    if (!read_identity(pid, &confirmed_parent, &confirmed_start)
+      || confirmed_parent != parent || confirmed_start != start) {
+      close(pidfd); return 3;
+    }
+    if (getpgid(pid) == pid && getsid(pid) == pid && hardened_status(pid)) {
+      if (syscall(SYS_pidfd_send_signal, pidfd, SIGQUIT, NULL, 0)) {
+        close(pidfd); return 3;
+      }
+      break;
+    }
+    if (poll == 49) { close(pidfd); return 4; }
+    nanosleep(&pause, NULL);
+  }
+  for (int poll = 0; poll < 50; poll++) {
+    pid_t confirmed_parent = 0; unsigned long long confirmed_start = 0;
+    if (!read_identity(pid, &confirmed_parent, &confirmed_start)
+      || confirmed_parent != parent || confirmed_start != start) {
+      close(pidfd); return 3;
+    }
+    if (getpgid(pid) != pid || getsid(pid) != pid) {
+      close(pidfd); return 3;
+    }
+    if (named_status(pid, "inertia-done")) {
+      if (syscall(SYS_pidfd_send_signal, pidfd, SIGUSR2, NULL, 0)
+        || syscall(SYS_pidfd_send_signal, pidfd, SIGCONT, NULL, 0)) {
+        close(pidfd); return 3;
+      }
+      for (int exit_poll = 0; exit_poll < 50; exit_poll++) {
+        errno = 0;
+        if (syscall(SYS_pidfd_send_signal, pidfd, 0, NULL, 0) < 0) {
+          const int exited = errno == ESRCH;
+          close(pidfd); return exited ? 0 : 3;
+        }
+        nanosleep(&pause, NULL);
+      }
+      close(pidfd); return 4;
+    }
+    if (!named_status(pid, "inertia-ready")) {
+      close(pidfd); return 3;
+    }
+    nanosleep(&pause, NULL);
+  }
+  close(pidfd); return 4;
 }
 static int state_mode(const char *raw, const char *expected_name) {
   pid_t pid; if (!parse_pid(raw, &pid)) return 64;
@@ -430,7 +498,10 @@ static int watch_mode(int argc, char **argv) {
   authorize.sa_sigaction = authorize_handler; authorize.sa_flags = SA_SIGINFO;
   sigemptyset(&stop.sa_mask); sigemptyset(&claim.sa_mask); sigemptyset(&authorize.sa_mask);
   runtime_pid = parent; runtime_start = parent_start;
+  struct sigaction stop_pending = {0}; stop_pending.sa_handler = stop_pending_handler;
+  sigemptyset(&stop_pending.sa_mask);
   if (sigaction(SIGTERM, &stop, NULL) || sigaction(SIGINT, &stop, NULL) || sigaction(SIGHUP, &stop, NULL)
+    || sigaction(SIGQUIT, &stop_pending, NULL)
     || sigaction(SIGUSR1, &claim, NULL) || sigaction(SIGUSR2, &authorize, NULL)) return 70;
   int gate[2]; if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, gate)) return 70;
   pid_t payload = fork(); if (payload < 0) return 70;
@@ -470,8 +541,14 @@ static int watch_mode(int argc, char **argv) {
       const pid_t sender = claim_sender; claim_sender = 0;
       if (trusted_runtime_helper(sender, parent, parent_start)) claimed = 1;
     }
-    if (!same_process(parent, parent_start) || stop_requested) {
-      close(gate[1]); return drain() ? (stop_requested ? 143 : 137) : 127;
+    if (!same_process(parent, parent_start)) {
+      close(gate[1]); return drain() ? 137 : 127;
+    }
+    if (stop_pending_requested) {
+      close(gate[1]); return terminal_state(drain(), 143);
+    }
+    if (stop_requested) {
+      close(gate[1]); return drain() ? 143 : 127;
     }
     nanosleep(&pause, NULL);
   }
@@ -508,6 +585,7 @@ int main(int argc, char **argv) {
   if (argc == 2 && !strcmp(argv[1], "seccomp-selftest")) return seccomp_selftest();
   if (argc == 3 && !strcmp(argv[1], "identity")) return identity_mode(argv[2]);
   if (argc == 3 && !strcmp(argv[1], "ready")) return ready_mode(argv[2]);
+  if (argc == 6 && !strcmp(argv[1], "stop-pending")) return stop_pending_mode(argc, argv);
   if (argc == 3 && !strcmp(argv[1], "claimed")) return state_mode(argv[2], "inertia-claim");
   if (argc == 3 && !strcmp(argv[1], "owned")) return state_mode(argv[2], "inertia-owned");
   if (argc >= 2 && !strcmp(argv[1], "signal")) return exact_signal_mode(argc, argv);

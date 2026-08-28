@@ -26,6 +26,7 @@ import type {
   ConversationAttachmentStoreAnyOperationRunner,
   ConversationAttachmentStoreAuthority,
 } from "../node/conversation-attachment-store-child.js";
+import type { WindowsRuntimeJobAssembly } from "./windows-runtime-job.js";
 
 export type RuntimeSupervisorTimer = ReturnType<typeof setTimeout>;
 
@@ -133,6 +134,7 @@ export interface RuntimeSupervisorSnapshot {
 
 export interface RuntimeSupervisorOptions {
   spawn: () => UtilityProcess;
+  windowsRuntimeJobAssembly?: WindowsRuntimeJobAssembly;
   workerOptions: Omit<
     RuntimeWorkerOptions,
     | "runtimeGenerationId"

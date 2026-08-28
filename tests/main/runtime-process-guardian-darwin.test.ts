@@ -183,6 +183,56 @@ describe("macOS runtime process guardian", () => {
   );
 
   it.runIf(process.platform === "darwin")(
+    "releases an exact blocked root without a pre-exec machine census",
+    async () => {
+      const directory = temporaryDirectory();
+      const guardianPath = join(directory, "runtime-process-guardian-no-preexec-census");
+      const markerPath = join(directory, "payload-started");
+      const built = spawnSync("/usr/bin/xcrun", [
+        "clang", "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
+        "-DINERTIA_RUNTIME_GUARDIAN_TEST_REJECT_PREEXEC_CENSUS=1",
+        join(process.cwd(), "native/runtime-process-guardian/darwin.c"),
+        "-o", guardianPath,
+      ], {
+        encoding: "utf8",
+        env: { PATH: "/usr/bin:/bin:/usr/sbin:/sbin" },
+        shell: false,
+        timeout: 30_000,
+      });
+      expect(built.status, `${built.stderr}\n${built.stdout}`).toBe(0);
+      const deactivate = activateRuntimeOwnedProcessRegistry(
+        directory, runtimeGenerationId, systemBootId, { darwinGuardianPath: guardianPath },
+      );
+      if (deactivate) deactivators.push(deactivate);
+      const invocation = runtimeOwnedProcessInvocation(
+        "/usr/bin/touch", [markerPath],
+      );
+      const owned = spawnRuntimeOwnedPidProcess(() => {
+        const child = spawn(invocation.command, invocation.args, {
+          detached: true,
+          shell: false,
+          stdio: "ignore",
+        });
+        if (!child.pid) throw new Error("Guardian did not publish its PID");
+        return child as ChildProcess & { readonly pid: number };
+      }, { darwinGuardianCommand: invocation.command });
+      const guardian = owned.process;
+      liveChildren.add(guardian);
+      guardian.once("close", () => liveChildren.delete(guardian));
+
+      await expect(owned.waitForGuardianStop()).resolves.toBe(true);
+      await closeOf(guardian);
+
+      expect(guardian.exitCode).toBe(0);
+      expect(guardian.signalCode).toBeNull();
+      expect(existsSync(markerPath)).toBe(true);
+      owned.releaseIfGroupExited(0);
+      await expect.poll(() => owned.confirmStopped()).toBe(true);
+    },
+    15_000,
+  );
+
+  it.runIf(process.platform === "darwin")(
     "keeps graceful fork-tainted cleanup fail closed",
     async () => {
       const directory = temporaryDirectory();

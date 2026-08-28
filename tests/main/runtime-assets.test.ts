@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   resolveRuntimeIconPath,
   resolveRuntimeProcessGuardianPath,
+  resolveWindowsRuntimeJobAssemblyPath,
 } from "../../src/main/runtime-assets";
 
 describe("runtime icon resolution", () => {
@@ -49,6 +50,34 @@ describe("runtime process guardian resolution", () => {
       "generated",
       "runtime-process-guardian",
       "runtime-process-guardian",
+    ));
+  });
+});
+
+describe("Windows runtime Job Object assembly resolution", () => {
+  it("uses the explicit extraResources assembly in packaged builds", () => {
+    expect(resolveWindowsRuntimeJobAssemblyPath({
+      isPackaged: true,
+      resourcesPath: "C:\\Program Files\\Inertia\\resources",
+      appPath: "C:\\Program Files\\Inertia\\resources\\app.asar",
+    })).toBe(join(
+      resolve("C:\\Program Files\\Inertia\\resources"),
+      "runtime",
+      "windows-runtime-job.dll",
+    ));
+  });
+
+  it("uses the generated assembly during development", () => {
+    expect(resolveWindowsRuntimeJobAssemblyPath({
+      isPackaged: false,
+      resourcesPath: "/ignored",
+      appPath: "/work/inertia",
+    })).toBe(join(
+      resolve("/work/inertia"),
+      "resources",
+      "generated",
+      "runtime-process-guardian",
+      "windows-runtime-job.dll",
     ));
   });
 });

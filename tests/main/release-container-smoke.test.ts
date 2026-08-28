@@ -171,6 +171,24 @@ describe("final release container smoke", () => {
     expect(source).toContain("musl-tools, linux-libc-dev, and binutils");
   });
 
+  it("precompiles the Windows Job Object helper into a bounded AnyCPU assembly", async () => {
+    const source = await readFile(
+      join(repositoryRoot, "scripts", "build-runtime-process-guardian.mjs"),
+      "utf8",
+    );
+    expect(source).toContain('"windows-runtime-job.dll"');
+    expect(source).toContain('"native", "runtime-process-guardian", "windows.cs"');
+    expect(source).toContain(
+      "-OutputAssembly $outputPath -OutputType Library -CompilerOptions @('/platform:anycpu', '/optimize+')",
+    );
+    expect(source).toContain('shell: false');
+    expect(source).toContain('timeout: 60_000');
+    expect(source).toContain('metadata.size > 1024 * 1024');
+    expect(source).toContain('createHash("sha256")');
+    expect(source).toContain('"windows-runtime-job-integrity.json"');
+    expect(source).toContain('JSON.stringify({ sha256 }');
+  });
+
   it("keeps container validation bounded to native architectures", async () => {
     const source = await readFile(join(repositoryRoot, "scripts", "release-container-smoke.mjs"), "utf8");
     expect(source).toContain('import { runBounded } from "./bounded-process-tree.mjs"');

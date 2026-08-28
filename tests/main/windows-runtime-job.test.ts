@@ -2,14 +2,26 @@ import {
   spawn,
   type ChildProcessWithoutNullStreams,
 } from "node:child_process";
+import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { join, resolve } from "node:path";
 import { PassThrough } from "node:stream";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   armWindowsRuntimeJob,
   recoverWindowsRuntimeJob,
+  resolveRequiredWindowsRuntimeJobAssembly,
+  validateWindowsRuntimeJobAssembly,
   windowsRuntimeJobName,
   windowsRuntimePowerShellLaunch,
   windowsRuntimeProcessCreationIdentity,
@@ -19,6 +31,11 @@ import {
 const runtimeGenerationId = "20000000-0000-4000-8000-000000000002:1";
 const runtimeCreationTimeMs = 1_700_000_000_123.456;
 const runtimeCreationTimeBits = "4789786004267972428";
+const stubAssembly = {
+  path: resolve("/trusted/windows-runtime-job.dll"),
+  root: resolve("/trusted"),
+  sha256: "a".repeat(64),
+} as const;
 const children = new Set<ChildProcessWithoutNullStreams>();
 
 function nodeChild(source: string): ChildProcessWithoutNullStreams {
@@ -43,6 +60,19 @@ function protocolChild(stderr: string): ChildProcessWithoutNullStreams {
   }) as unknown as ChildProcessWithoutNullStreams;
   queueMicrotask(() => stderrStream.write(stderr));
   return child;
+}
+
+function realWindowsRuntimeJobAssembly() {
+  const assembly = resolveRequiredWindowsRuntimeJobAssembly({
+    platform: "win32",
+    locations: {
+      isPackaged: false,
+      resourcesPath: process.cwd(),
+      appPath: process.cwd(),
+    },
+  });
+  if (!assembly) throw new Error("The generated Windows Job Object assembly is unavailable.");
+  return assembly;
 }
 
 async function closeChild(child: ChildProcessWithoutNullStreams): Promise<void> {
@@ -238,6 +268,78 @@ describe("Windows runtime Job Object containment", () => {
       .toBeNull();
   });
 
+  it("accepts only one bounded direct precompiled assembly file", () => {
+    const directory = mkdtempSync(join(process.cwd(), ".windows-job-assembly-"));
+    try {
+      const root = join(directory, "runtime");
+      mkdirSync(root);
+      const path = join(root, "windows-runtime-job.dll");
+      const bytes = Buffer.from([0x4d, 0x5a, 0x90, 0x00]);
+      writeFileSync(path, bytes);
+      const assembly = {
+        path,
+        root,
+        sha256: createHash("sha256").update(bytes).digest("hex"),
+      };
+      expect(validateWindowsRuntimeJobAssembly(assembly)).toEqual({
+        path: resolve(path),
+        root: resolve(root),
+        sha256: assembly.sha256,
+      });
+      writeFileSync(path, Buffer.from([0x4d, 0x5a, 0x91, 0x00]));
+      expect(() => validateWindowsRuntimeJobAssembly(assembly)).toThrow(
+        "integrity check failed",
+      );
+      writeFileSync(path, Buffer.alloc(1024 * 1024 + 1));
+      expect(() => validateWindowsRuntimeJobAssembly(assembly)).toThrow(
+        "missing or invalid",
+      );
+      writeFileSync(path, bytes);
+
+      const portableTarget = join(directory, "portable-target");
+      mkdirSync(portableTarget);
+      const portableRoot = join(portableTarget, "runtime");
+      mkdirSync(portableRoot);
+      writeFileSync(join(portableRoot, "windows-runtime-job.dll"), bytes);
+      const portableLink = join(directory, "portable-link");
+      symlinkSync(
+        portableTarget,
+        portableLink,
+        process.platform === "win32" ? "junction" : "dir",
+      );
+      const portableAssembly = {
+        path: join(portableLink, "runtime", "windows-runtime-job.dll"),
+        root: join(portableLink, "runtime"),
+        sha256: assembly.sha256,
+      };
+      expect(validateWindowsRuntimeJobAssembly(portableAssembly)).toEqual({
+        path: resolve(portableAssembly.path),
+        root: resolve(portableAssembly.root),
+        sha256: assembly.sha256,
+      });
+
+      const linkedRoot = join(directory, "linked-runtime");
+      symlinkSync(root, linkedRoot, process.platform === "win32" ? "junction" : "dir");
+      expect(() => validateWindowsRuntimeJobAssembly({
+        path: join(linkedRoot, "windows-runtime-job.dll"),
+        root: linkedRoot,
+        sha256: assembly.sha256,
+      })).toThrow("path is not direct");
+
+      rmSync(path);
+      symlinkSync(
+        join(portableRoot, "windows-runtime-job.dll"),
+        path,
+        "file",
+      );
+      expect(() => validateWindowsRuntimeJobAssembly(assembly)).toThrow(
+        "path is not direct",
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("does not arm containment until the native helper reports READY", async () => {
     let helper: ChildProcessWithoutNullStreams | null = null;
     const containment = await armWindowsRuntimeJob(
@@ -245,6 +347,7 @@ describe("Windows runtime Job Object containment", () => {
       4_242,
       {
         platform: "win32",
+        assembly: stubAssembly,
         runtimeCreationTimeBits,
         timeoutMs: 1_000,
         spawnProcess: () => {
@@ -265,11 +368,12 @@ describe("Windows runtime Job Object containment", () => {
     await closeChild(helper!);
   });
 
-  it("pins the exact runtime handle before cold Add-Type compilation", async () => {
+  it("pins the exact runtime handle before loading the precompiled assembly", async () => {
     let script = "";
     let helper: ChildProcessWithoutNullStreams | null = null;
     await armWindowsRuntimeJob(runtimeGenerationId, 4_242, {
       platform: "win32",
+      assembly: stubAssembly,
       runtimeCreationTimeBits,
       timeoutMs: 1_000,
       spawnProcess: (candidate) => {
@@ -287,41 +391,54 @@ describe("Windows runtime Job Object containment", () => {
     const handleIndex = script.indexOf(
       "$runtimeHandle = $runtimeProcess.Handle",
     );
-    const compileIndex = script.indexOf("Add-Type -TypeDefinition");
+    const loadIndex = script.indexOf("[Reflection.Assembly]::Load($assemblyBytes)");
     expect(captureIndex).toBeGreaterThan(-1);
     expect(handleIndex).toBeGreaterThan(captureIndex);
-    expect(compileIndex).toBeGreaterThan(handleIndex);
+    expect(loadIndex).toBeGreaterThan(handleIndex);
+    expect(script).toContain(
+      Buffer.from(resolve("/trusted/windows-runtime-job.dll"), "utf8").toString("base64"),
+    );
+    expect(script).not.toContain("/trusted/windows-runtime-job.dll");
+    expect(script).not.toContain("Add-Type -TypeDefinition");
+    expect(script).toContain("[IO.FileShare]::Read");
+    expect(script).toContain(`$actualDigest -cne '${stubAssembly.sha256}'`);
     expect(script).toContain(
       `'${windowsRuntimeJobName(runtimeGenerationId)}',`,
     );
     expect(script).toContain(`'${runtimeCreationTimeBits}'`);
-    expect(script).toContain("CultureInfo.InvariantCulture");
-    expect(script).not.toContain("OpenProcess(");
-    expect(script).toContain("GetProcessTimes(");
-    expect(script).toContain("read-process-identity");
-    expect(script).toContain("process-identity-mismatch");
-    expect(script.indexOf("CreationIdentityStatus(", compileIndex))
-      .toBeLessThan(script.indexOf("IntPtr job = CreateJobObject(", compileIndex));
     expect(script).toContain("$runtimeProcess.Dispose()");
+
+    const nativeSource = readFileSync(
+      resolve(process.cwd(), "native/runtime-process-guardian/windows.cs"),
+      "utf8",
+    );
+    expect(nativeSource).toContain("CultureInfo.InvariantCulture");
+    expect(nativeSource).not.toContain("OpenProcess(");
+    expect(nativeSource).toContain("GetProcessTimes(");
+    expect(nativeSource).toContain("read-process-identity");
+    expect(nativeSource).toContain("process-identity-mismatch");
+    expect(nativeSource.indexOf("CreationIdentityStatus("))
+      .toBeLessThan(nativeSource.indexOf("IntPtr job = CreateJobObject("));
 
     helper!.kill("SIGKILL");
     await closeChild(helper!);
   });
 
-  it("gives cold Add-Type startup a bounded stage-aware window", async () => {
+  it("gives precompiled assembly startup a bounded stage-aware window", async () => {
     let helper: ChildProcessWithoutNullStreams | null = null;
     const containment = await armWindowsRuntimeJob(
       runtimeGenerationId,
       4_242,
       {
         platform: "win32",
+        assembly: stubAssembly,
         runtimeCreationTimeBits,
         timeoutMs: 500,
         spawnProcess: () => {
           helper = nodeChild(
             "process.stderr.write('INERTIA_JOB_STAGE stage=powershell-start\\n');"
             + "setTimeout(() => process.stderr.write("
-            + "'INERTIA_JOB_STAGE stage=add-type-complete\\n'), 350);"
+            + "'INERTIA_JOB_STAGE stage=assembly-load-complete\\n'), 350);"
             + "setTimeout(() => {"
             + "process.stderr.write('INERTIA_JOB_STAGE stage=native-guard-start\\n');"
             + "process.stdout.write('READY\\n');"
@@ -344,13 +461,14 @@ describe("Windows runtime Job Object containment", () => {
   it("reports the last bounded helper startup stage on timeout", async () => {
     await expect(armWindowsRuntimeJob(runtimeGenerationId, 4_242, {
       platform: "win32",
+      assembly: stubAssembly,
       runtimeCreationTimeBits,
       timeoutMs: 100,
       spawnProcess: () => protocolChild(
         "INERTIA_JOB_STAGE stage=powershell-start\n",
       ),
     })).rejects.toThrow(
-      "The PowerShell helper did not complete Add-Type within 100ms. "
+      "The PowerShell helper did not load the precompiled assembly within 100ms. "
       + "INERTIA_JOB_STAGE stage=powershell-start",
     );
   });
@@ -358,11 +476,12 @@ describe("Windows runtime Job Object containment", () => {
   it("keeps native arming fail closed after the startup window", async () => {
     await expect(armWindowsRuntimeJob(runtimeGenerationId, 4_242, {
       platform: "win32",
+      assembly: stubAssembly,
       runtimeCreationTimeBits,
       timeoutMs: 100,
       spawnProcess: () => protocolChild(
         "INERTIA_JOB_STAGE stage=powershell-start\n"
-        + "INERTIA_JOB_STAGE stage=add-type-complete\n"
+        + "INERTIA_JOB_STAGE stage=assembly-load-complete\n"
         + "INERTIA_JOB_STAGE stage=native-guard-start\n",
       ),
     })).rejects.toThrow(
@@ -373,6 +492,7 @@ describe("Windows runtime Job Object containment", () => {
   it("fails closed when the native helper exits before readiness", async () => {
     await expect(armWindowsRuntimeJob(runtimeGenerationId, 4_242, {
       platform: "win32",
+      assembly: stubAssembly,
       runtimeCreationTimeBits,
       timeoutMs: 1_000,
       spawnProcess: () => nodeChild("process.exit(17)"),
@@ -385,6 +505,7 @@ describe("Windows runtime Job Object containment", () => {
   it("reports bounded native stage diagnostics with the helper exit code", async () => {
     const failure = await armWindowsRuntimeJob(runtimeGenerationId, 4_242, {
       platform: "win32",
+      assembly: stubAssembly,
       runtimeCreationTimeBits,
       timeoutMs: 1_000,
       spawnProcess: () => nodeChild(
@@ -411,6 +532,7 @@ describe("Windows runtime Job Object containment", () => {
       name: windowsRuntimeJobName(runtimeGenerationId),
     }, Date.now() + 1_000, {
       platform: "win32",
+      assembly: stubAssembly,
       spawnProcess: () => nodeChild("process.exit(0)"),
     })).resolves.toBe(true);
 
@@ -419,6 +541,7 @@ describe("Windows runtime Job Object containment", () => {
       name: windowsRuntimeJobName(runtimeGenerationId),
     }, Date.now() + 1_000, {
       platform: "win32",
+      assembly: stubAssembly,
       spawnProcess: () => nodeChild("process.exit(21)"),
     })).resolves.toBe(false);
 
@@ -427,6 +550,7 @@ describe("Windows runtime Job Object containment", () => {
       name: windowsRuntimeJobName(runtimeGenerationId),
     }, Date.now() + 1_000, {
       platform: "win32",
+      assembly: stubAssembly,
       // Native exit 22 means OpenJobObject failed for a reason other than
       // ERROR_FILE_NOT_FOUND and must never be projected as an absent job.
       spawnProcess: () => nodeChild("process.exit(22)"),
@@ -438,6 +562,7 @@ describe("Windows runtime Job Object containment", () => {
     async () => {
       const generation = "30000000-0000-4000-8000-000000000004:1";
       const failure = await armWindowsRuntimeJob(generation, 4_294_967_294, {
+        assembly: realWindowsRuntimeJobAssembly(),
         runtimeCreationTimeBits,
       })
         .then(
@@ -455,7 +580,7 @@ describe("Windows runtime Job Object containment", () => {
         "INERTIA_JOB_ERROR stage=capture-process-handle",
       );
       expect((failure as Error).message).not.toContain(
-        "INERTIA_JOB_STAGE stage=add-type-complete",
+        "INERTIA_JOB_STAGE stage=assembly-load-complete",
       );
       expect((failure as Error).message).not.toContain(
         "INERTIA_JOB_STAGE stage=native-guard-start",
@@ -472,7 +597,9 @@ describe("Windows runtime Job Object containment", () => {
       if (!child.pid) throw new Error("The disposable child did not start.");
 
       const creationIdentity = await windowsProcessCreationIdentity(child.pid);
+      const assembly = realWindowsRuntimeJobAssembly();
       const containment = await armWindowsRuntimeJob(generation, child.pid, {
+        assembly,
         runtimeCreationTimeBits: creationIdentity,
       });
       if (!containment) throw new Error("Windows Job Object containment was unavailable.");
@@ -484,10 +611,38 @@ describe("Windows runtime Job Object containment", () => {
       const cleanup = recoverWindowsRuntimeJob(
         containment,
         Date.now() + 5_000,
+        { assembly },
       );
       child.kill("SIGKILL");
       await closeChild(child);
       await expect(cleanup).resolves.toBe(true);
+    },
+    95_000,
+  );
+
+  it.runIf(process.platform === "win32")(
+    "recovers an active named Job Object through a fresh module after restart",
+    async () => {
+      const generation = "30000000-0000-4000-8000-000000000005:1";
+      const child = nodeChild("setInterval(() => undefined, 1_000)");
+      if (!child.pid) throw new Error("The disposable child did not start.");
+      const assembly = realWindowsRuntimeJobAssembly();
+      const creationIdentity = await windowsProcessCreationIdentity(child.pid);
+      const containment = await armWindowsRuntimeJob(generation, child.pid, {
+        assembly,
+        runtimeCreationTimeBits: creationIdentity,
+      });
+      if (!containment) throw new Error("Windows Job Object containment was unavailable.");
+
+      vi.resetModules();
+      const restarted = await import("../../src/main/windows-runtime-job");
+      expect(restarted.recoverWindowsRuntimeJob).not.toBe(recoverWindowsRuntimeJob);
+      await expect(restarted.recoverWindowsRuntimeJob(
+        containment,
+        Date.now() + 10_000,
+        { assembly },
+      )).resolves.toBe(true);
+      await closeChild(child);
     },
     95_000,
   );

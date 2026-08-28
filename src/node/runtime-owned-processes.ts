@@ -17,9 +17,10 @@ import {
   monitorLinuxGuardianTerminal,
   readLinuxGuardianClaimedAsync,
   readLinuxGuardianOwnedAsync,
-  readLinuxGuardianReadyAsync,
+  readLinuxGuardianReadyWithRetriesAsync,
   signalLinuxGuardianExact,
   signalLinuxGuardianExactAsync,
+  stopPendingLinuxGuardianAsync,
 } from "./runtime-owned-process-linux.js";
 import {
   RuntimeOwnedProcessJournal,
@@ -563,23 +564,6 @@ function monitorLinuxGuardian(
   registry.activeLinuxMonitors.add(stopTrackedMonitor);
 }
 
-async function linuxGuardianReady(
-  pid: number,
-  guardianPath: string,
-  abortSignal?: AbortSignal,
-): Promise<LinuxProcessIdentity | null> {
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    const identity = await readLinuxGuardianReadyAsync(
-      pid,
-      guardianPath,
-      process.pid,
-      abortSignal,
-    );
-    if (identity) return identity;
-  }
-  return null;
-}
-
 async function admitLinuxGuardian(
   registry: ActiveRuntimeOwnedProcessRegistry,
   claim: ActiveRuntimeOwnedProcessClaim,
@@ -592,9 +576,10 @@ async function admitLinuxGuardian(
     if (!guardianPath || activeRegistry !== registry) {
       throw new Error("The Linux owned process guardian is unavailable.");
     }
-    const identity = await linuxGuardianReady(
+    const identity = await readLinuxGuardianReadyWithRetriesAsync(
       pid,
       guardianPath,
+      process.pid,
       registry.admissionController.signal,
     );
     if (!identity || activeRegistry !== registry || registry.tainted) {
@@ -690,12 +675,23 @@ async function admitLinuxGuardian(
   } catch {
     if (activeRegistry !== registry) return false;
     registry.tainted = true;
-    if (claim.linuxIdentity && guardianPath) {
-      void signalLinuxGuardianExactAsync(
-        claim.linuxIdentity,
-        guardianPath,
-        "stop",
-      );
+    if (guardianPath) {
+      if (claim.linuxIdentity) {
+        await signalLinuxGuardianExactAsync(
+          claim.linuxIdentity,
+          guardianPath,
+          "stop",
+        );
+      } else if (pid > 1) {
+        // A readiness probe can fail before it publishes a birth identity.
+        // Stop only the still-direct, exact helper executable in its hardened
+        // pre-claim state; this path can never claim or authorize a payload.
+        await stopPendingLinuxGuardianAsync(
+          pid,
+          guardianPath,
+          process.pid,
+        );
+      }
     }
     const record = registry.journal.records(registry.runtimeGenerationId)
       ?.find((candidate) => candidate.ownershipId === claim.ownershipId);
@@ -805,14 +801,11 @@ async function admitDarwinGuardian(
     if (!readyIdentity || activeRegistry !== registry || registry.tainted) {
       throw new Error("The macOS owned process guardian is not ready.");
     }
-    const observedIdentity = await registry.readDarwinIdentityAsync(
-      pid,
-      registry.admissionController.signal,
-    );
-    if (!observedIdentity || !sameProcess(readyIdentity, observedIdentity)) {
-      throw new Error("The macOS owned process guardian identity changed.");
-    }
-    claim.darwinIdentity = observedIdentity;
+    // The hardened readiness helper reads and returns the exact guardian birth
+    // identity only after PID=PGID=SID and every cleanup/authorization handler
+    // is installed. Persist that observation directly; a second helper here
+    // added no security boundary and doubled the pre-claim probe cost.
+    claim.darwinIdentity = readyIdentity;
     const durableClaim = registry.journal.claim(
       claim.ownershipId,
       registry.runtimeGenerationId,
@@ -823,9 +816,12 @@ async function admitDarwinGuardian(
         spawnedAfterMs,
         spawnedBeforeMs: Date.now(),
         expectedDarwinIdentity: readyIdentity,
-        observedDarwinIdentity: observedIdentity,
+        observedDarwinIdentity: readyIdentity,
       },
     );
+    // Keep the distinct post-persistence check immediately before SIGUSR1.
+    // This is the authorization boundary that detects PID reuse or identity
+    // change after the durable claim has been written.
     const authorizationIdentity = await registry.readDarwinIdentityAsync(
       pid,
       registry.admissionController.signal,

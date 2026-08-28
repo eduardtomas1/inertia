@@ -29,3 +29,17 @@ export function resolveRuntimeProcessGuardianPath(
         "runtime-process-guardian",
       );
 }
+
+export function resolveWindowsRuntimeJobAssemblyPath(
+  locations: RuntimeAssetLocations,
+): string {
+  return locations.isPackaged
+    ? join(resolve(locations.resourcesPath), "runtime", "windows-runtime-job.dll")
+    : join(
+        resolve(locations.appPath),
+        "resources",
+        "generated",
+        "runtime-process-guardian",
+        "windows-runtime-job.dll",
+      );
+}

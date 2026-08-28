@@ -83,7 +83,8 @@ import { RuntimeSupervisor } from "./runtime-supervisor.js";
 import { RuntimeSystemSuspendDelivery } from "./runtime-system-suspend-delivery.js";
 import { RuntimeSystemSuspendTracker } from "./runtime-system-suspend-tracker.js";
 import * as runtimeBootstrap from "./runtime-bootstrap-safety.js";
-import { prepareRuntimeBootstrapRecovery, resolveRequiredRuntimeProcessGuardianPath } from "./runtime-bootstrap-recovery.js";
+import { prepareRuntimeBootstrapRecovery } from "./runtime-bootstrap-recovery.js";
+import { resolveDesktopRuntimeProcessSafetyAssets } from "./runtime-windows-job-bootstrap.js";
 import {
   cleanupPrivilegedOwners,
   finishPrivilegedExit,
@@ -974,12 +975,8 @@ async function bootstrap(): Promise<void> {
     app.getPath("userData"),
   );
   runtimeDataDirectory = dataDirectory;
-  const runtimeProcessGuardianPath = resolveRequiredRuntimeProcessGuardianPath({
-    platform: process.platform,
-    isPackaged: app.isPackaged,
-    resourcesPath: process.resourcesPath,
-    appPath: app.getAppPath(),
-  });
+  const { runtimeProcessGuardianPath, windowsRuntimeJobAssembly } =
+    resolveDesktopRuntimeProcessSafetyAssets();
   const {
     bootstrapSafety,
     modernDarwinRecoveryAuthority,
@@ -1035,6 +1032,7 @@ async function bootstrap(): Promise<void> {
   } = packageSmoke;
   let packageSmokeScheduled = false;
   runtimeSupervisor = new RuntimeSupervisor({
+    ...(windowsRuntimeJobAssembly ? { windowsRuntimeJobAssembly } : {}),
     agentBrowserBroker: previewBroker,
     getProcessMetrics: () => app.getAppMetrics(),
     systemBootId: bootstrapSafety.systemBootId,

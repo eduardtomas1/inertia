@@ -13,7 +13,10 @@ import {
 import { forceKillRuntimeProcessTree } from "./runtime-process-tree.js";
 import { RuntimeCleanupReceiptJournal } from "./runtime-cleanup-receipts.js";
 import { RuntimeGenerationLeaseJournal } from "../node/runtime-generation-leases.js";
-import { recoverWindowsRuntimeJob } from "./windows-runtime-job.js";
+import {
+  recoverWindowsRuntimeJob,
+  type WindowsRuntimeJobAssembly,
+} from "./windows-runtime-job.js";
 import {
   linuxGuardianTerminalAuthority,
   signalLinuxGuardianExact,
@@ -34,6 +37,7 @@ export interface RuntimeOwnedProcessRecoveryOptions {
   ) => ObservedRuntimeOwnedProcessIdentity | null;
   readonly readDarwinSessionEmpty?: (sessionId: number) => boolean;
   readonly recoverWindowsJob?: typeof recoverWindowsRuntimeJob;
+  readonly windowsRuntimeJobAssembly?: WindowsRuntimeJobAssembly;
   readonly darwinGuardianPath?: string;
   readonly waitForProcessGroupDrain?: (durationMs: number) => Promise<void>;
   readonly linuxTerminalAuthority?: typeof linuxGuardianTerminalAuthority;
@@ -258,8 +262,12 @@ export function recoverRuntimeOwnedProcesses(
     if (containment === undefined) return null;
     if (!containment) return records.length === 0 ? true : Promise.resolve(false);
     return (async () => {
-      const recovered = await (options.recoverWindowsJob
-        ?? recoverWindowsRuntimeJob)(containment, options.deadlineAt);
+      const recover = options.recoverWindowsJob ?? recoverWindowsRuntimeJob;
+      const recovered = await (options.windowsRuntimeJobAssembly
+        ? recover(containment, options.deadlineAt, {
+            assembly: options.windowsRuntimeJobAssembly,
+          })
+        : recover(containment, options.deadlineAt));
       if (!recovered) return false;
       for (const record of records) {
         if (!journal.release(record.ownershipId)) return false;
@@ -467,6 +475,7 @@ export function recoverPriorRuntimeGenerations(options: {
   receipts: RuntimeCleanupReceiptJournal;
   platform?: NodeJS.Platform;
   darwinGuardianPath?: string;
+  windowsRuntimeJobAssembly?: WindowsRuntimeJobAssembly;
 }): Promise<boolean> | null {
   const platform = options.platform ?? process.platform;
   if (!supportedRuntimeOwnedProcessPlatform(platform)) return null;
@@ -497,6 +506,9 @@ export function recoverPriorRuntimeGenerations(options: {
           platform,
           ...(options.darwinGuardianPath
             ? { darwinGuardianPath: options.darwinGuardianPath }
+            : {}),
+          ...(options.windowsRuntimeJobAssembly
+            ? { windowsRuntimeJobAssembly: options.windowsRuntimeJobAssembly }
             : {}),
         },
       );

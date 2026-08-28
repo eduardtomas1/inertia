@@ -225,13 +225,20 @@ describe("cross-platform packaged behavior contract", () => {
     );
 
     const packageJson = JSON.parse(await source("package.json")) as {
+      build: { files: string[] };
       scripts: Record<string, string>;
     };
     expect(packageJson.scripts["check:platform"]).toBe(
       "npm run check:quality && npm run check:private-connect && npm run build:bundle",
     );
+    expect(packageJson.scripts["prebuild:bundle"]).toBe(
+      "node scripts/build-runtime-process-guardian.mjs",
+    );
     expect(packageJson.scripts.check).toBe(
       "npm run check:quality && npm run test && npm run check:private-connect && npm run build:bundle",
+    );
+    expect(packageJson.build.files).toContain(
+      "resources/generated/windows-runtime-job-integrity.json",
     );
 
     const vitest = await source("vitest.config.ts");
@@ -241,6 +248,12 @@ describe("cross-platform packaged behavior contract", () => {
   it("keeps one native smoke implementation for macOS, Windows, and Linux runtime supervision", async () => {
     const smoke = await source("scripts/package-smoke.mjs");
     const launchContract = await source("scripts/package-smoke-launch.mjs");
+    const main = await source("src/main/index.ts");
+    const windowsJobBootstrap = await source(
+      "src/main/runtime-windows-job-bootstrap.ts",
+    );
+    const windowsJob = await source("src/main/windows-runtime-job.ts");
+    const processSafety = await source("src/main/runtime-supervisor-process-safety.ts");
     expect(smoke).toContain('process.platform === "darwin"');
     expect(smoke).toContain('process.platform === "win32"');
     expect(smoke).toContain('process.platform === "linux"');
@@ -248,11 +261,36 @@ describe("cross-platform packaged behavior contract", () => {
       "`The packaged ${process.platform} runtime process guardian is missing or invalid.`",
     );
     expect(smoke).toContain('"runtime-process-guardian"');
+    expect(smoke).toContain('"windows-runtime-job.dll"');
     expect(smoke).toContain("MAX_RUNTIME_GUARDIAN_BYTES");
     expect(smoke).toContain('spawnSync(guardian, ["seccomp-selftest"]');
     expect(smoke).toContain(
       "The packaged Linux runtime process guardian self-test failed.",
     );
+    expect(smoke).toContain(
+      "The packaged Windows runtime Job Object assembly is missing or invalid.",
+    );
+    expect(smoke).toContain(
+      "The packaged Windows runtime Job Object assembly failed protected byte-identity verification.",
+    );
+    expect(smoke).toContain(
+      '["resources", "generated", "windows-runtime-job-integrity.json"]',
+    );
+    expect(main).toContain("resolveDesktopRuntimeProcessSafetyAssets");
+    expect(windowsJobBootstrap).toContain(
+      "resolveRequiredRuntimeProcessGuardianPath",
+    );
+    expect(windowsJobBootstrap).toContain(
+      "resolveRequiredWindowsRuntimeJobAssembly",
+    );
+    expect(windowsJobBootstrap).toContain("resourcesPath: process.resourcesPath");
+    expect(windowsJobBootstrap).toContain("appPath: app.getAppPath()");
+    expect(windowsJob).not.toContain("process.cwd()");
+    expect(windowsJob).toContain("windows-runtime-job-integrity.json");
+    expect(windowsJob).toContain("timingSafeEqual(actual, expected)");
+    expect(windowsJob).toContain("[IO.FileShare]::Read");
+    expect(windowsJob).toContain("[Reflection.Assembly]::Load($assemblyBytes)");
+    expect(processSafety).toContain("configuration.windowsRuntimeJobAssembly");
     expect(smoke).toContain('process.arch === "x64" ? "" : `-${process.arch}`');
     expect(smoke).toContain(
       "mkdir(dataDirectory, { recursive: true, mode: 0o700 })",
@@ -284,7 +322,6 @@ describe("cross-platform packaged behavior contract", () => {
     expect(smoke).toContain("const PACKAGED_PDF_TIMEOUT_MS = 47_000;");
     expect(smoke).toContain("PACKAGED_PDF_TIMEOUT_MS,");
     expect(smoke).toContain("pdfExtraction=true");
-    const main = await source("src/main/index.ts");
     expect(main).toContain(
       "codexBinaryPath: packageSmokeCodexExecutable",
     );

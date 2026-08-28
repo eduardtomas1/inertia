@@ -1,9 +1,24 @@
-import { createHash } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { win32 } from "node:path";
+import {
+  closeSync,
+  constants,
+  fstatSync,
+  lstatSync,
+  openSync,
+  readSync,
+  realpathSync,
+} from "node:fs";
+import { dirname, join, resolve, win32 } from "node:path";
 
+import windowsRuntimeJobIntegrity from
+  "../../resources/generated/windows-runtime-job-integrity.json";
 import type { WindowsRuntimeJobContainment } from "../node/runtime-owned-processes.js";
 import { validRuntimeGenerationId } from "../node/runtime-process-protocol.js";
+import {
+  resolveWindowsRuntimeJobAssemblyPath,
+  type RuntimeAssetLocations,
+} from "./runtime-assets.js";
 
 const HELPER_STARTUP_TIMEOUT_MS = 60_000;
 const NATIVE_READY_TIMEOUT_MS = 15_000;
@@ -12,15 +27,22 @@ const MAX_PROCESS_METRICS = 1_024;
 const PROCESS_METRIC_POLL_MS = 10;
 const PROCESS_METRIC_TIMEOUT_MS = 5_000;
 const MAX_PROCESS_METRIC_ATTEMPTS = 500;
+const MAX_WINDOWS_JOB_ASSEMBLY_BYTES = 1024 * 1024;
 
 type WindowsRuntimeJobStage =
   | "powershell-start"
-  | "add-type-complete"
+  | "assembly-load-complete"
   | "native-guard-start";
 
 interface ActiveWindowsRuntimeJob {
   readonly child: ChildProcessWithoutNullStreams;
   readonly completion: Promise<boolean>;
+}
+
+export interface WindowsRuntimeJobAssembly {
+  readonly path: string;
+  readonly root: string;
+  readonly sha256: string;
 }
 
 export interface WindowsRuntimeProcessMetric {
@@ -165,275 +187,127 @@ export async function waitForWindowsRuntimeProcessCreationIdentity(
   throw new Error("The Windows runtime process metric is unavailable.");
 }
 
-const nativeJobSource = String.raw`
-using System;
-using System.IO;
-using System.Globalization;
-using System.Runtime.InteropServices;
-using System.Text;
-
-public static class InertiaRuntimeJob {
-  [StructLayout(LayoutKind.Sequential)]
-  private struct FILETIME {
-    public UInt32 dwLowDateTime;
-    public UInt32 dwHighDateTime;
-  }
-
-  [StructLayout(LayoutKind.Sequential)]
-  private struct IO_COUNTERS {
-    public UInt64 ReadOperationCount;
-    public UInt64 WriteOperationCount;
-    public UInt64 OtherOperationCount;
-    public UInt64 ReadTransferCount;
-    public UInt64 WriteTransferCount;
-    public UInt64 OtherTransferCount;
-  }
-
-  [StructLayout(LayoutKind.Sequential)]
-  private struct JOBOBJECT_BASIC_LIMIT_INFORMATION {
-    public Int64 PerProcessUserTimeLimit;
-    public Int64 PerJobUserTimeLimit;
-    public UInt32 LimitFlags;
-    public UIntPtr MinimumWorkingSetSize;
-    public UIntPtr MaximumWorkingSetSize;
-    public UInt32 ActiveProcessLimit;
-    public UIntPtr Affinity;
-    public UInt32 PriorityClass;
-    public UInt32 SchedulingClass;
-  }
-
-  [StructLayout(LayoutKind.Sequential)]
-  private struct JOBOBJECT_EXTENDED_LIMIT_INFORMATION {
-    public JOBOBJECT_BASIC_LIMIT_INFORMATION BasicLimitInformation;
-    public IO_COUNTERS IoInfo;
-    public UIntPtr ProcessMemoryLimit;
-    public UIntPtr JobMemoryLimit;
-    public UIntPtr PeakProcessMemoryUsed;
-    public UIntPtr PeakJobMemoryUsed;
-  }
-
-  [StructLayout(LayoutKind.Sequential)]
-  private struct JOBOBJECT_BASIC_ACCOUNTING_INFORMATION {
-    public Int64 TotalUserTime;
-    public Int64 TotalKernelTime;
-    public Int64 ThisPeriodTotalUserTime;
-    public Int64 ThisPeriodTotalKernelTime;
-    public UInt32 TotalPageFaultCount;
-    public UInt32 TotalProcesses;
-    public UInt32 ActiveProcesses;
-    public UInt32 TotalTerminatedProcesses;
-  }
-
-  [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-  private static extern IntPtr CreateJobObject(IntPtr attributes, string name);
-  [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-  private static extern IntPtr OpenJobObject(UInt32 access, bool inherit, string name);
-  [DllImport("kernel32.dll", SetLastError = true)]
-  private static extern bool SetInformationJobObject(IntPtr job, int infoClass, IntPtr info, UInt32 length);
-  [DllImport("kernel32.dll", SetLastError = true)]
-  private static extern bool QueryInformationJobObject(IntPtr job, int infoClass, IntPtr info, UInt32 length, IntPtr returnedLength);
-  [DllImport("kernel32.dll", SetLastError = true)]
-  private static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
-  [DllImport("kernel32.dll", SetLastError = true)]
-  private static extern bool GetProcessTimes(
-    IntPtr process,
-    out FILETIME creation,
-    out FILETIME exit,
-    out FILETIME kernel,
-    out FILETIME user
-  );
-  [DllImport("kernel32.dll", SetLastError = true)]
-  private static extern bool TerminateJobObject(IntPtr job, UInt32 exitCode);
-  [DllImport("kernel32.dll", SetLastError = true)]
-  private static extern UInt32 WaitForSingleObject(IntPtr handle, UInt32 milliseconds);
-  [DllImport("kernel32.dll", SetLastError = true)]
-  private static extern bool CloseHandle(IntPtr handle);
-
-  private const UInt32 JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000;
-  private const UInt32 JOB_OBJECT_QUERY = 0x0004;
-  private const UInt32 JOB_OBJECT_TERMINATE = 0x0008;
-  private const UInt32 INFINITE = 0xffffffff;
-  private const UInt64 WINDOWS_TO_UNIX_EPOCH_TICKS = 116444736000000000;
-  private const Int32 ERROR_FILE_NOT_FOUND = 2;
-  private const int JobObjectBasicAccountingInformation = 1;
-  private const int JobObjectExtendedLimitInformation = 9;
-
-  private static void WriteProtocolLine(Stream stream, string value) {
-    byte[] bytes = Encoding.UTF8.GetBytes(value + "\n");
-    stream.Write(bytes, 0, bytes.Length);
-    stream.Flush();
-  }
-
-  private static int Failure(string stage, int exitCode, int win32Error) {
-    WriteProtocolLine(
-      Console.OpenStandardError(),
-      "INERTIA_JOB_ERROR stage=" + stage + " win32=" + win32Error
-    );
-    return exitCode;
-  }
-
-  private static void Stage(string stage) {
-    WriteProtocolLine(
-      Console.OpenStandardError(),
-      "INERTIA_JOB_STAGE stage=" + stage
-    );
-  }
-
-  private static bool ArmKillOnClose(IntPtr job, out int win32Error) {
-    var information = new JOBOBJECT_EXTENDED_LIMIT_INFORMATION();
-    information.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-    int length = Marshal.SizeOf(information);
-    IntPtr pointer = Marshal.AllocHGlobal(length);
-    try {
-      Marshal.StructureToPtr(information, pointer, false);
-      bool armed = SetInformationJobObject(
-        job,
-        JobObjectExtendedLimitInformation,
-        pointer,
-        (UInt32)length
-      );
-      win32Error = armed ? 0 : Marshal.GetLastWin32Error();
-      return armed;
-    } finally {
-      Marshal.FreeHGlobal(pointer);
-    }
-  }
-
-  private static UInt32 ActiveProcesses(IntPtr job) {
-    int length = Marshal.SizeOf(typeof(JOBOBJECT_BASIC_ACCOUNTING_INFORMATION));
-    IntPtr pointer = Marshal.AllocHGlobal(length);
-    try {
-      if (!QueryInformationJobObject(job, JobObjectBasicAccountingInformation, pointer, (UInt32)length, IntPtr.Zero)) {
-        return UInt32.MaxValue;
-      }
-      return ((JOBOBJECT_BASIC_ACCOUNTING_INFORMATION)Marshal.PtrToStructure(
-        pointer,
-        typeof(JOBOBJECT_BASIC_ACCOUNTING_INFORMATION)
-      )).ActiveProcesses;
-    } finally {
-      Marshal.FreeHGlobal(pointer);
-    }
-  }
-
-  private static int CreationIdentityStatus(
-    IntPtr process,
-    UInt64 expectedCreationTimeBits,
-    out int win32Error
-  ) {
-    FILETIME creation;
-    FILETIME exit;
-    FILETIME kernel;
-    FILETIME user;
-    if (!GetProcessTimes(process, out creation, out exit, out kernel, out user)) {
-      win32Error = Marshal.GetLastWin32Error();
-      return 1;
-    }
-    UInt64 ticks = ((UInt64)creation.dwHighDateTime << 32)
-      | creation.dwLowDateTime;
-    win32Error = 0;
-    if (ticks < WINDOWS_TO_UNIX_EPOCH_TICKS) return 2;
-    UInt64 unixMicroseconds = (ticks / 10)
-      - (WINDOWS_TO_UNIX_EPOCH_TICKS / 10);
-    double actualCreationTimeMs = (double)unixMicroseconds / 1000.0;
-    UInt64 actualCreationTimeBits = unchecked(
-      (UInt64)BitConverter.DoubleToInt64Bits(actualCreationTimeMs)
-    );
-    return actualCreationTimeBits == expectedCreationTimeBits ? 0 : 2;
-  }
-
-  public static int Guard(
-    string name,
-    IntPtr process,
-    string expectedCreationTimeBitsValue
-  ) {
-    Stage("native-guard-start");
-    UInt64 expectedCreationTimeBits;
-    if (!UInt64.TryParse(
-      expectedCreationTimeBitsValue,
-      NumberStyles.None,
-      CultureInfo.InvariantCulture,
-      out expectedCreationTimeBits
-    )) {
-      return Failure("process-identity-invalid", 19, 0);
-    }
-    int identityError;
-    int identityStatus = CreationIdentityStatus(
-      process,
-      expectedCreationTimeBits,
-      out identityError
-    );
-    if (identityStatus == 1) {
-      return Failure("read-process-identity", 12, identityError);
-    }
-    if (identityStatus == 2) {
-      return Failure("process-identity-mismatch", 18, 0);
-    }
-    IntPtr job = CreateJobObject(IntPtr.Zero, name);
-    int createError = Marshal.GetLastWin32Error();
-    if (job == IntPtr.Zero) return Failure("create-job", 10, createError);
-    if (createError == 183) {
-      CloseHandle(job);
-      return Failure("create-job-existing", 17, createError);
-    }
-    try {
-      int armError;
-      if (!ArmKillOnClose(job, out armError)) {
-        return Failure("set-kill-on-close", 11, armError);
-      }
-      if (!AssignProcessToJobObject(job, process)) {
-        return Failure("assign-process", 13, Marshal.GetLastWin32Error());
-      }
-      // PowerShell 5.1's redirected Console.Out encoding is host-dependent.
-      // Write the private readiness protocol to the native stream so Node
-      // always receives the bounded UTF-8 marker it parses on every build.
-      WriteProtocolLine(Console.OpenStandardOutput(), "READY");
-      UInt32 waitResult = WaitForSingleObject(process, INFINITE);
-      if (waitResult != 0) {
-        int waitError = waitResult == UInt32.MaxValue
-          ? Marshal.GetLastWin32Error()
-          : 0;
-        return Failure("wait-process", 14, waitError);
-      }
-      if (!TerminateJobObject(job, 137)) {
-        return Failure("terminate-job", 15, Marshal.GetLastWin32Error());
-      }
-      for (int index = 0; index < 200 && ActiveProcesses(job) != 0; index += 1) {
-        System.Threading.Thread.Sleep(10);
-      }
-      return ActiveProcesses(job) == 0 ? 0 : 16;
-    } finally {
-      CloseHandle(job);
-    }
-  }
-
-  public static int Recover(string name) {
-    IntPtr job = OpenJobObject(JOB_OBJECT_QUERY | JOB_OBJECT_TERMINATE, false, name);
-    if (job == IntPtr.Zero) {
-      if (Marshal.GetLastWin32Error() != ERROR_FILE_NOT_FOUND) return 22;
-      WriteProtocolLine(Console.OpenStandardOutput(), "ABSENT");
-      return 0;
-    }
-    try {
-      if (!TerminateJobObject(job, 137)) return 20;
-      for (int index = 0; index < 200 && ActiveProcesses(job) != 0; index += 1) {
-        System.Threading.Thread.Sleep(10);
-      }
-      return ActiveProcesses(job) == 0 ? 0 : 21;
-    } finally {
-      CloseHandle(job);
-    }
-  }
-}
-`;
 
 function encodedPowerShell(body: string): string {
   return Buffer.from(body, "utf16le").toString("base64");
 }
 
+function normalizedWindowsRuntimeJobAssembly(
+  assembly: WindowsRuntimeJobAssembly,
+): WindowsRuntimeJobAssembly {
+  const root = resolve(assembly.root);
+  const path = resolve(assembly.path);
+  if (
+    path !== join(root, "windows-runtime-job.dll")
+    || !/^[0-9a-f]{64}$/u.test(assembly.sha256)
+  ) {
+    throw new Error("The Windows runtime Job Object assembly authority is invalid.");
+  }
+  return { path, root, sha256: assembly.sha256 };
+}
+
+function assertDirectAssetBoundary(root: string, path: string): void {
+  for (const current of [root, path]) {
+    const metadata = lstatSync(current, { throwIfNoEntry: false });
+    if (!metadata || metadata.isSymbolicLink()) {
+      throw new Error(`The Windows runtime Job Object assembly path is not direct: ${path}`);
+    }
+  }
+}
+
+export function validateWindowsRuntimeJobAssembly(
+  candidate: WindowsRuntimeJobAssembly,
+): WindowsRuntimeJobAssembly {
+  const assembly = normalizedWindowsRuntimeJobAssembly(candidate);
+  assertDirectAssetBoundary(assembly.root, assembly.path);
+  const canonicalRoot = realpathSync.native(assembly.root);
+  const canonicalPath = realpathSync.native(assembly.path);
+  if (canonicalPath !== join(canonicalRoot, "windows-runtime-job.dll")) {
+    throw new Error("The Windows runtime Job Object assembly escaped its asset root.");
+  }
+  const descriptor = lstatSync(assembly.path, { throwIfNoEntry: false });
+  if (
+    !descriptor
+    || !descriptor.isFile()
+    || descriptor.size <= 0
+    || descriptor.size > MAX_WINDOWS_JOB_ASSEMBLY_BYTES
+  ) {
+    throw new Error(`The Windows runtime Job Object assembly is missing or invalid: ${assembly.path}`);
+  }
+  const handle = openSync(assembly.path, constants.O_RDONLY);
+  let bytes: Buffer;
+  try {
+    const before = fstatSync(handle, { bigint: true });
+    if (
+      !before.isFile()
+      || before.size <= 0n
+      || before.size > BigInt(MAX_WINDOWS_JOB_ASSEMBLY_BYTES)
+    ) {
+      throw new Error("The Windows runtime Job Object assembly changed during validation.");
+    }
+    bytes = Buffer.alloc(Number(before.size));
+    let offset = 0;
+    while (offset < bytes.length) {
+      const read = readSync(handle, bytes, offset, bytes.length - offset, offset);
+      if (read === 0) break;
+      offset += read;
+    }
+    const after = fstatSync(handle, { bigint: true });
+    if (
+      offset !== bytes.length
+      || after.dev !== before.dev
+      || after.ino !== before.ino
+      || after.size !== before.size
+      || after.mtimeNs !== before.mtimeNs
+    ) {
+      throw new Error("The Windows runtime Job Object assembly changed during validation.");
+    }
+  } finally {
+    closeSync(handle);
+  }
+  const actual = createHash("sha256").update(bytes).digest();
+  const expected = Buffer.from(assembly.sha256, "hex");
+  if (!timingSafeEqual(actual, expected)) {
+    throw new Error("The Windows runtime Job Object assembly integrity check failed.");
+  }
+  return assembly;
+}
+
+export function resolveRequiredWindowsRuntimeJobAssembly(options: {
+  readonly platform: NodeJS.Platform;
+  readonly locations: RuntimeAssetLocations;
+  readonly expectedSha256?: string | null;
+}): WindowsRuntimeJobAssembly | null {
+  if (options.platform !== "win32") return null;
+  const path = resolveWindowsRuntimeJobAssemblyPath(options.locations);
+  const root = dirname(path);
+  const sha256 = options.expectedSha256 ?? windowsRuntimeJobIntegrity.sha256;
+  if (typeof sha256 !== "string") {
+    throw new Error("The Windows runtime Job Object integrity manifest is unavailable.");
+  }
+  return validateWindowsRuntimeJobAssembly({ path, root, sha256 });
+}
+
+function selectedWindowsRuntimeJobAssembly(options: {
+  readonly assembly?: WindowsRuntimeJobAssembly;
+  readonly spawnProcess?: typeof spawnPowerShell;
+}): WindowsRuntimeJobAssembly {
+  if (!options.assembly) {
+    throw new Error("The Windows runtime Job Object assembly authority is unavailable.");
+  }
+  // An injected process is the unit-test boundary. Production always validates
+  // the exact protected digest and direct file before starting PowerShell.
+  return options.spawnProcess
+    ? normalizedWindowsRuntimeJobAssembly(options.assembly)
+    : validateWindowsRuntimeJobAssembly(options.assembly);
+}
+
 function commandScript(
   command: string,
-  beforeCompilation = "",
+  assembly: WindowsRuntimeJobAssembly,
+  beforeAssemblyLoad = "",
 ): string {
+  const encodedAssemblyPath = Buffer.from(assembly.path, "utf8").toString("base64");
   return `$ErrorActionPreference = 'Stop'
 function Write-InertiaJobProtocol([string]$Value) {
   $stream = [Console]::OpenStandardError()
@@ -442,11 +316,50 @@ function Write-InertiaJobProtocol([string]$Value) {
   $stream.Flush()
 }
 Write-InertiaJobProtocol 'INERTIA_JOB_STAGE stage=powershell-start'
-${beforeCompilation}
-Add-Type -TypeDefinition @'
-${nativeJobSource}
-'@
-Write-InertiaJobProtocol 'INERTIA_JOB_STAGE stage=add-type-complete'
+${beforeAssemblyLoad}
+$assemblyPath = [Text.Encoding]::UTF8.GetString(
+  [Convert]::FromBase64String('${encodedAssemblyPath}')
+)
+$assemblyStream = [IO.File]::Open(
+  $assemblyPath,
+  [IO.FileMode]::Open,
+  [IO.FileAccess]::Read,
+  [IO.FileShare]::Read
+)
+try {
+  if ($assemblyStream.Length -le 0 -or $assemblyStream.Length -gt ${MAX_WINDOWS_JOB_ASSEMBLY_BYTES}) {
+    throw 'The Windows runtime Job Object assembly is oversized.'
+  }
+  $assemblyBytes = New-Object byte[] ([int]$assemblyStream.Length)
+  $offset = 0
+  while ($offset -lt $assemblyBytes.Length) {
+    $read = $assemblyStream.Read(
+      $assemblyBytes,
+      $offset,
+      $assemblyBytes.Length - $offset
+    )
+    if ($read -eq 0) { break }
+    $offset += $read
+  }
+  if ($offset -ne $assemblyBytes.Length -or $assemblyStream.ReadByte() -ne -1) {
+    throw 'The Windows runtime Job Object assembly changed while reading.'
+  }
+  $sha256 = [Security.Cryptography.SHA256]::Create()
+  try {
+    $actualDigest = [BitConverter]::ToString(
+      $sha256.ComputeHash($assemblyBytes)
+    ).Replace('-', '').ToLowerInvariant()
+  } finally {
+    $sha256.Dispose()
+  }
+  if ($actualDigest -cne '${assembly.sha256}') {
+    throw 'The Windows runtime Job Object assembly integrity check failed.'
+  }
+  [Reflection.Assembly]::Load($assemblyBytes) | Out-Null
+} finally {
+  $assemblyStream.Dispose()
+}
+Write-InertiaJobProtocol 'INERTIA_JOB_STAGE stage=assembly-load-complete'
 ${command}
 exit $LASTEXITCODE`;
 }
@@ -458,7 +371,7 @@ function appendBounded(current: string, chunk: Buffer): string {
 
 function latestHelperStage(output: string): WindowsRuntimeJobStage | null {
   const matches = output.matchAll(
-    /INERTIA_JOB_STAGE stage=(powershell-start|add-type-complete|native-guard-start)/gu,
+    /INERTIA_JOB_STAGE stage=(powershell-start|assembly-load-complete|native-guard-start)/gu,
   );
   let latest: WindowsRuntimeJobStage | null = null;
   for (const match of matches) latest = match[1] as WindowsRuntimeJobStage;
@@ -499,6 +412,7 @@ export async function armWindowsRuntimeJob(
     readonly environment?: NodeJS.ProcessEnv;
     readonly timeoutMs?: number;
     readonly runtimeCreationTimeBits?: string;
+    readonly assembly?: WindowsRuntimeJobAssembly;
     readonly spawnProcess?: typeof spawnPowerShell;
   } = {},
 ): Promise<WindowsRuntimeJobContainment | null> {
@@ -518,6 +432,7 @@ export async function armWindowsRuntimeJob(
   if (activeJobs.has(name)) {
     throw new Error("The Windows runtime Job Object is already active.");
   }
+  const assembly = selectedWindowsRuntimeJobAssembly(options);
   const child = (options.spawnProcess ?? spawnPowerShell)(
     commandScript(
       `$result = try {
@@ -530,11 +445,12 @@ export async function armWindowsRuntimeJob(
   $runtimeProcess.Dispose()
 }
 exit $result`,
+      assembly,
       `$runtimeProcess = $null
 try {
   $runtimeProcess = [Diagnostics.Process]::GetProcessById(${runtimePid})
   # Reading Handle eagerly opens and retains the exact process object before
-  # cold Add-Type compilation. A later reuse of the numeric PID cannot retarget
+  # loading the precompiled helper. A later reuse of the numeric PID cannot retarget
   # AssignProcessToJobObject or WaitForSingleObject.
   $runtimeHandle = $runtimeProcess.Handle
 } catch {
@@ -585,7 +501,7 @@ try {
     if (child.exitCode !== null || child.signalCode !== null) break;
     const observedStage = latestHelperStage(stderr);
     if (observedStage !== null) lastStage = observedStage;
-    if (lastStage === "add-type-complete" && !postCompileDeadlineStarted) {
+    if (lastStage === "assembly-load-complete" && !postCompileDeadlineStarted) {
       postCompileDeadlineStarted = true;
       deadlineAt = Date.now() + nativeReadyTimeoutMs;
     }
@@ -606,10 +522,10 @@ try {
         ? `The native helper exited from signal ${child.signalCode}.`
         : lastStage === "native-guard-start"
           ? `The native helper did not report readiness within ${nativeReadyTimeoutMs}ms after Guard started.`
-          : lastStage === "add-type-complete"
-            ? `The native helper did not enter Guard within ${nativeReadyTimeoutMs}ms after Add-Type completed.`
+          : lastStage === "assembly-load-complete"
+            ? `The native helper did not enter Guard within ${nativeReadyTimeoutMs}ms after the assembly loaded.`
             : lastStage === "powershell-start"
-              ? `The PowerShell helper did not complete Add-Type within ${startupTimeoutMs}ms.`
+              ? `The PowerShell helper did not load the precompiled assembly within ${startupTimeoutMs}ms.`
               : `The PowerShell helper did not start within ${startupTimeoutMs}ms.`;
     throw new Error([
       "The Windows runtime Job Object could not be armed.",
@@ -626,6 +542,7 @@ export async function recoverWindowsRuntimeJob(
   options: {
     readonly platform?: NodeJS.Platform;
     readonly environment?: NodeJS.ProcessEnv;
+    readonly assembly?: WindowsRuntimeJobAssembly;
     readonly spawnProcess?: typeof spawnPowerShell;
   } = {},
 ): Promise<boolean> {
@@ -639,9 +556,11 @@ export async function recoverWindowsRuntimeJob(
       new Promise<false>((resolve) => setTimeout(resolve, remainingMs, false)),
     ]);
   }
+  const assembly = selectedWindowsRuntimeJobAssembly(options);
   const child = (options.spawnProcess ?? spawnPowerShell)(
     commandScript(
       `$result = [InertiaRuntimeJob]::Recover('${containment.name}'); exit $result`,
+      assembly,
     ),
     options.environment ?? process.env,
   );

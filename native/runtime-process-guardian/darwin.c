@@ -41,6 +41,9 @@ static volatile sig_atomic_t stop_requested = 0;
 static volatile sig_atomic_t authorization_requested = 0;
 static volatile sig_atomic_t graceful_exit_requested = 0;
 static volatile sig_atomic_t authorization_runtime_pid = 0;
+#if defined(INERTIA_RUNTIME_GUARDIAN_TEST_REJECT_PREEXEC_CENSUS)
+static int payload_execution_released_for_test = 0;
+#endif
 
 static void request_stop(int signal_number) {
   (void)signal_number;
@@ -200,6 +203,9 @@ static int list_session_members(
   struct session_member *members,
   int capacity
 ) {
+#if defined(INERTIA_RUNTIME_GUARDIAN_TEST_REJECT_PREEXEC_CENSUS)
+  if (authorization_requested && !payload_execution_released_for_test) return -1;
+#endif
   pid_t *pids = calloc((size_t)capacity, sizeof(*pids));
   if (pids == NULL) return -1;
   const int buffer_bytes = capacity * (int)sizeof(*pids);
@@ -934,21 +940,29 @@ static int watch_mode(int argc, char *argv[]) {
   (void)close(execution_gate[0]);
   struct proc_bsdinfo child_identity;
   const int child_identity_read = read_identity(child, &child_identity);
-  // The payload remains blocked on its private socket until the exact root
-  // birth identity is both watched for fork events and present in the first
-  // owned census. It cannot exec or fork inside the pre-claim discovery gap.
+  // The payload remains blocked on its private socket while the guardian
+  // records its exact birth identity and arms the root fork observer. It
+  // cannot exec or fork inside this boundary, so a machine-wide process
+  // census cannot discover anything beyond this exact child and only delays
+  // every Git/provider/terminal admission.
   const int observer_armed = child_identity_read
     && arm_root_fork_observer(&tracker, child);
-  const int initial_census = observer_armed
-    && refresh_owned_tree_bounded(self, self, &tracker);
-  const int child_index = initial_census
-    ? member_index_by_pid(tracker.members, tracker.count, child)
-    : -1;
-  const int child_tracked = child_index >= 0
-    && same_identity(&tracker.members[child_index].identity, &child_identity);
+  errno = 0;
+  const pid_t child_session = observer_armed ? getsid(child) : -1;
+  const int child_tracked = observer_armed
+    && child_identity.pbi_ppid == (uint32_t)self
+    && child_identity.pbi_pgid == (uint32_t)self
+    && child_session == self;
+  if (child_tracked) {
+    tracker.members[0].identity = child_identity;
+    tracker.count = 1;
+  }
   const char authorization = 'A';
   const int execution_released = child_tracked
     && write(execution_gate[1], &authorization, sizeof(authorization)) == 1;
+#if defined(INERTIA_RUNTIME_GUARDIAN_TEST_REJECT_PREEXEC_CENSUS)
+  if (execution_released) payload_execution_released_for_test = 1;
+#endif
   (void)close(execution_gate[1]);
   if (!execution_released) {
     const int drained = drain_owned_tree(
@@ -1003,11 +1017,11 @@ static int watch_mode(int argc, char *argv[]) {
       }
       graceful_exit_dispatched = 1;
     }
-    // The initial admission census proves the exact blocked root before it can
-    // exec or fork. Until kqueue reports a fork (or an observer error taints
-    // containment), repeating a machine-wide PROC_ALL_PIDS scan cannot add an
-    // owned descendant. Keep the cheap stop/runtime-identity checks on their
-    // 20 ms cadence, but only repeat the expensive census after fork taint.
+    // Admission records the exact blocked root before it can exec or fork.
+    // Until kqueue reports a fork (or an observer error taints containment),
+    // a machine-wide PROC_ALL_PIDS scan cannot add an owned descendant. Keep
+    // the cheap stop/runtime-identity checks on their 20 ms cadence, but only
+    // perform the expensive census after fork taint.
     // The first tainted iteration scans immediately; later scans are at most
     // 12 polls (240 ms) apart.
     if (tracker.fork_tainted

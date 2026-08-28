@@ -346,8 +346,57 @@ async function requirePackagedAssets(executable) {
     }
     console.log(`Packaged ${process.platform} runtime process guardian verified.`);
   }
+  let windowsRuntimeJobAssembly = null;
+  if (process.platform === "win32") {
+    windowsRuntimeJobAssembly = join(
+      resourcesDirectory,
+      "runtime",
+      "windows-runtime-job.dll",
+    );
+    const metadata = await lstat(windowsRuntimeJobAssembly).catch(() => null);
+    if (
+      !metadata
+      || metadata.isSymbolicLink()
+      || !metadata.isFile()
+      || metadata.size <= 0
+      || metadata.size > MAX_RUNTIME_GUARDIAN_BYTES
+    ) {
+      throw new Error(
+        "The packaged Windows runtime Job Object assembly is missing or invalid.",
+      );
+    }
+  }
   const asar = await readAsarArchive(archive);
   const tree = asar.tree;
+  if (windowsRuntimeJobAssembly) {
+    const integrityBytes = await readPackedAsarFile(
+      asar,
+      ["resources", "generated", "windows-runtime-job-integrity.json"],
+      1_024,
+    );
+    let integrity;
+    try {
+      integrity = JSON.parse(integrityBytes.toString("utf8"));
+    } catch {
+      throw new Error("The protected Windows runtime Job Object integrity manifest is invalid.");
+    }
+    if (
+      !integrity
+      || typeof integrity !== "object"
+      || Array.isArray(integrity)
+      || Object.keys(integrity).join("\0") !== "sha256"
+      || typeof integrity.sha256 !== "string"
+      || !/^[0-9a-f]{64}$/u.test(integrity.sha256)
+    ) {
+      throw new Error("The protected Windows runtime Job Object integrity manifest is invalid.");
+    }
+    const assemblyBytes = await readFile(windowsRuntimeJobAssembly);
+    const actual = createHash("sha256").update(assemblyBytes).digest("hex");
+    if (actual !== integrity.sha256) {
+      throw new Error("The packaged Windows runtime Job Object assembly failed protected byte-identity verification.");
+    }
+    console.log("Packaged Windows runtime Job Object assembly verified.");
+  }
   const client = asarEntry(tree, ["out", "private-connect"]);
   if (!client?.files) throw new Error("The packaged app.asar does not contain the Private Connect web client.");
   const names = Object.keys(client.files);

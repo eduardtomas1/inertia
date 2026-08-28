@@ -156,6 +156,52 @@ export async function readLinuxGuardianReadyAsync(
   );
 }
 
+export async function readLinuxGuardianReadyWithRetriesAsync(
+  pid: number,
+  guardianPath: string,
+  expectedParentPid: number,
+  abortSignal?: AbortSignal,
+): Promise<LinuxProcessIdentity | null> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const identity = await readLinuxGuardianReadyAsync(
+      pid,
+      guardianPath,
+      expectedParentPid,
+      abortSignal,
+    );
+    if (identity) return identity;
+  }
+  return null;
+}
+
+/**
+ * Stops only an unauthorised guardian that is still the runtime's exact direct
+ * child in the hardened ready state. This recovery boundary deliberately does
+ * not claim or execute a payload and therefore does not require trusting an
+ * identity result from a readiness probe that already failed.
+ */
+export async function stopPendingLinuxGuardianAsync(
+  pid: number,
+  guardianPath: string,
+  expectedParentPid: number,
+  abortSignal?: AbortSignal,
+): Promise<boolean> {
+  if (!Number.isSafeInteger(pid) || pid <= 1
+    || !Number.isSafeInteger(expectedParentPid) || expectedParentPid <= 1
+    || !isAbsolute(guardianPath)) return false;
+  let helper;
+  try { helper = statSync(guardianPath, { bigint: true }); } catch { return false; }
+  const result = await runLinuxGuardianHelper(guardianPath, [
+    "stop-pending",
+    String(pid),
+    String(expectedParentPid),
+    String(helper.dev),
+    String(helper.ino),
+  ], abortSignal);
+  return !result.failed && result.status === 0 && !result.signal
+    && result.stdout === "" && result.stderr === "";
+}
+
 export function readLinuxGuardianClaimed(
   pid: number,
   guardianPath: string,

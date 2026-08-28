@@ -1340,9 +1340,7 @@ describe("cross-platform runtime owned process recovery", () => {
       ...expected,
       startTimeSeconds: "1756100001",
     };
-    const readDarwinIdentityAsync = vi.fn()
-      .mockResolvedValueOnce(expected)
-      .mockResolvedValue(reused);
+    const readDarwinIdentityAsync = vi.fn().mockResolvedValue(reused);
     const deactivate = activateRuntimeOwnedProcessRegistry(
       directory,
       runtimeGenerationId,
@@ -1395,12 +1393,13 @@ describe("cross-platform runtime owned process recovery", () => {
     };
     let resolveReady!: (identity: typeof expected) => void;
     const ready = new Promise<typeof expected>((resolve) => { resolveReady = resolve; });
+    const readDarwinIdentityAsync = vi.fn(async () => expected);
     const deactivate = activateRuntimeOwnedProcessRegistry(
       directory, runtimeGenerationId, systemBootId, {
         platform: "darwin",
         darwinGuardianPath: "/trusted/runtime-process-guardian",
         readDarwinGuardianReadyAsync: async () => await ready,
-        readDarwinIdentityAsync: async () => expected,
+        readDarwinIdentityAsync,
       },
     );
     if (deactivate) deactivators.push(deactivate);
@@ -1421,6 +1420,52 @@ describe("cross-platform runtime owned process recovery", () => {
       await vi.waitFor(() => {
         expect(processKill).toHaveBeenCalledWith(4_242, "SIGUSR1");
       });
+      expect(readDarwinIdentityAsync).toHaveBeenCalledOnce();
+      expect(new RuntimeOwnedProcessJournal(directory)
+        .records(runtimeGenerationId)).toMatchObject([{ state: "owned" }]);
+    } finally {
+      processKill.mockRestore();
+      deactivate?.();
+      if (deactivate) deactivators.splice(deactivators.indexOf(deactivate), 1);
+    }
+  });
+
+  it("never authorizes a macOS guardian whose identity changes after persistence", async () => {
+    const directory = temporaryDirectory();
+    const expected = {
+      platform: "darwin" as const,
+      pid: 4_242,
+      parentPid: process.pid,
+      processGroupId: 4_242,
+      sessionId: 4_242,
+      startTimeSeconds: "1756100000",
+      startTimeMicroseconds: 123_456,
+    };
+    const reused = { ...expected, startTimeSeconds: "1756100001" };
+    const readDarwinIdentityAsync = vi.fn(async () => reused);
+    const deactivate = activateRuntimeOwnedProcessRegistry(
+      directory, runtimeGenerationId, systemBootId, {
+        platform: "darwin",
+        darwinGuardianPath: "/trusted/runtime-process-guardian",
+        readDarwinGuardianReadyAsync: async () => expected,
+        readDarwinIdentityAsync,
+        readDarwinIdentity: () => reused,
+      },
+    );
+    if (deactivate) deactivators.push(deactivate);
+    const processKill = vi.spyOn(process, "kill");
+    const childKill = vi.fn(() => true);
+    try {
+      spawnRuntimeOwnedProcess(() => ({
+        pid: 4_242,
+        spawnfile: "/trusted/runtime-process-guardian",
+        kill: childKill,
+        once: vi.fn(),
+      } as unknown as ChildProcess));
+      await vi.waitFor(() => expect(readDarwinIdentityAsync).toHaveBeenCalled());
+
+      expect(processKill).not.toHaveBeenCalledWith(4_242, "SIGUSR1");
+      expect(childKill).not.toHaveBeenCalled();
       expect(new RuntimeOwnedProcessJournal(directory)
         .records(runtimeGenerationId)).toMatchObject([{ state: "owned" }]);
     } finally {

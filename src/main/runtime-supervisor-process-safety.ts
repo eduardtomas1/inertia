@@ -38,6 +38,7 @@ export function createRuntimeSupervisorProcessSafety(options: {
 }) {
   const configuration = options.configuration;
   const guardianPath = configuration.workerOptions.runtimeProcessGuardianPath;
+  const windowsRuntimeJobAssembly = configuration.windowsRuntimeJobAssembly;
   const forceKill = configuration.forceKill
     ?? ((pid: number, deadlineAt: number) =>
       forceKillRuntimeProcessTree(pid, { deadlineAt }));
@@ -50,6 +51,7 @@ export function createRuntimeSupervisorProcessSafety(options: {
         {
           deadlineAt,
           ...(guardianPath ? { darwinGuardianPath: guardianPath } : {}),
+          ...(windowsRuntimeJobAssembly ? { windowsRuntimeJobAssembly } : {}),
         },
       ));
   const armProcessContainment = configuration.armProcessContainment
@@ -67,6 +69,9 @@ export function createRuntimeSupervisorProcessSafety(options: {
             );
           return armWindowsRuntimeJob(runtimeGenerationId, runtimePid, {
             runtimeCreationTimeBits,
+            ...(windowsRuntimeJobAssembly
+              ? { assembly: windowsRuntimeJobAssembly }
+              : {}),
           });
         })
       : (() => null));
@@ -91,6 +96,7 @@ export function createRuntimeSupervisorProcessSafety(options: {
       leases: options.leases,
       receipts: options.receipts,
       ...(guardianPath ? { darwinGuardianPath: guardianPath } : {}),
+      ...(windowsRuntimeJobAssembly ? { windowsRuntimeJobAssembly } : {}),
     }),
   };
 }

@@ -122,6 +122,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
 `;
 
 test("starts a sessionless goal and recovers it after Stop and runtime crash", async () => {
+  test.setTimeout(75_000);
   const app = await createAppFixture({
     name: "goal-reliability",
     initialState: "conversation",
@@ -179,12 +180,19 @@ test("starts a sessionless goal and recovers it after Stop and runtime crash", a
     await expect(tools.getByRole("button", { name: "Resume goal" }))
       .toBeVisible({ timeout: 10_000 });
     await tools.getByRole("button", { name: "Resume goal" }).click();
+    // Resume projects the authoritative Starting state before its protective
+    // Git checkpoint. Allow one bounded 30-second local Git operation, while
+    // still requiring the exact provider output before accepting success.
     await expect(page.getByText("Resumed goal run is active.", {
       exact: true,
-    })).toBeVisible({ timeout: 15_000 });
+    })).toBeVisible({ timeout: 30_000 });
     await expect(tools.getByRole("button", { name: "Pause" })).toBeVisible();
 
-    const before = await app.runtimeSnapshot();
+    const shell = page.locator(".app-shell");
+    const beforeRuntimeGeneration = await shell.getAttribute(
+      "data-runtime-generation",
+    );
+    expect(beforeRuntimeGeneration).toMatch(/^[0-9a-f-]{36}$/iu);
     const restoreRuntimeRecoveryConsent = await installRuntimeRecoveryConsent(
       app.electronApp,
     );
@@ -197,13 +205,18 @@ test("starts a sessionless goal and recovers it after Stop and runtime crash", a
         runtime.crash();
       });
       await expect.poll(async () => {
-        const current = await app.runtimeSnapshot();
-        return current.phase === "ready" && current.generation > before.generation;
+        const [connectionStatus, runtimeGeneration] = await Promise.all([
+          shell.getAttribute("data-connection-status"),
+          shell.getAttribute("data-runtime-generation"),
+        ]);
+        return connectionStatus === "online"
+          && runtimeGeneration !== null
+          && runtimeGeneration !== beforeRuntimeGeneration;
       }, { timeout: 20_000 }).toBe(true);
     } finally {
       await restoreRuntimeRecoveryConsent();
     }
-    await expect(page.locator(".app-shell")).toHaveAttribute(
+    await expect(shell).toHaveAttribute(
       "data-connection-status",
       "online",
     );

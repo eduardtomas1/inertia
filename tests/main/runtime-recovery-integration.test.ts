@@ -17,6 +17,10 @@ import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { RuntimeSupervisor } from "../../src/main/runtime-supervisor";
+import {
+  authorizeModernDarwinRuntimeRecovery,
+  prepareModernDarwinBootstrapRecovery,
+} from "../../src/main/runtime-bootstrap-safety";
 import { windowsRuntimeJobName } from "../../src/main/windows-runtime-job";
 import type { RuntimeWorkerCommand } from "../../src/node/runtime-process-protocol";
 import { RuntimeStore } from "../../src/server/database";
@@ -201,7 +205,7 @@ function buildRuntimeWorkers(): string {
 }
 
 describe("runtime recovery supervisor integration", () => {
-  it("force-terminates a post-rename import and keeps replacement mutations locked", async () => {
+  it("force-terminates a post-rename import without guessing cleanup authority", async () => {
     const testRoot = mkdtempSync(join(tmpdir(), "inertia-recovery-supervisor-"));
     temporaryDirectories.push(testRoot);
     const dataDirectory = join(testRoot, "data");
@@ -211,6 +215,7 @@ describe("runtime recovery supervisor integration", () => {
     mkdirSync(workspaceDirectory, { mode: 0o700 });
     mkdirSync(targetDirectory, { mode: 0o700 });
     const recoveryPath = join(testRoot, "recovery.json");
+    const exportPath = join(testRoot, "recovery-export.json");
     const markerPath = join(testRoot, "after-publish.marker");
     writeFileSync(recoveryPath, JSON.stringify({
       format: "inertia-recovery-export",
@@ -230,23 +235,24 @@ describe("runtime recovery supervisor integration", () => {
       ],
     }), { encoding: "utf8", mode: 0o600 });
     const runtimeWorkerPath = buildRuntimeWorkers();
+    const systemBootId = "test:00000000-0000-4000-8000-000000000001";
+    const runtimeProcessGuardianPath = join(
+      process.cwd(),
+      "resources/generated/runtime-process-guardian/runtime-process-guardian",
+    );
 
     const children: NodeUtilityProcess[] = [];
     const states: string[] = [];
     const markerGatedSetTimer = markerGatedRequestTimer(markerPath);
     const supervisor = new RuntimeSupervisor({
       ...windowsDatabaseRecoveryContainment(),
+      systemBootId,
       workerOptions: {
         dataDirectory,
         defaultWorkspacePath: workspaceDirectory,
         enableProviders: false,
         ...(process.platform === "darwin" || process.platform === "linux"
-          ? {
-              runtimeProcessGuardianPath: join(
-                process.cwd(),
-                "resources/generated/runtime-process-guardian/runtime-process-guardian",
-              ),
-            }
+          ? { runtimeProcessGuardianPath }
           : {}),
         recoveryImportFault: {
           phase: "after-staging-publish",
@@ -297,6 +303,28 @@ describe("runtime recovery supervisor integration", () => {
       /timed out.*before cancellation was confirmed/u,
     );
     expect(existsSync(markerPath)).toBe(true);
+    if (process.platform === "darwin") {
+      await waitFor(
+        () => supervisor.snapshot().phase === "stopped",
+        "explicit macOS recovery admission",
+        diagnostics,
+      );
+      const recovery = await prepareModernDarwinBootstrapRecovery(
+        dataDirectory,
+        systemBootId,
+        runtimeProcessGuardianPath,
+      );
+      expect(recovery.blocked).toBe(false);
+      expect(recovery.candidate).not.toBeNull();
+      const authority = authorizeModernDarwinRuntimeRecovery(
+        dataDirectory,
+        recovery.candidate!,
+        systemBootId,
+        runtimeProcessGuardianPath,
+      );
+      expect(authority).not.toBeNull();
+      expect(supervisor.resumeWithModernDarwinRecovery(authority!)).toBe(true);
+    }
     await waitFor(
       () => supervisor.snapshot().phase === "ready"
         && supervisor.snapshot().generation === 2,
@@ -308,14 +336,22 @@ describe("runtime recovery supervisor integration", () => {
     expect(existsSync(targetDirectory)).toBe(true);
     await expect(readdir(targetDirectory)).resolves.toEqual([]);
 
-    await expect(supervisor.databaseRecovery(
-      "import",
-      recoveryPath,
-      targetDirectory,
-    )).rejects.toThrow(/recovery safety mode.*prior runtime-owned process/iu);
-    expect(supervisor.snapshot()).toMatchObject({ phase: "ready", generation: 2 });
-    await expect(supervisor.stop()).resolves.toBe(false);
-  }, 30_000);
+    if (process.platform === "darwin") {
+      await supervisor.databaseRecovery("export", exportPath);
+      expect(existsSync(exportPath)).toBe(true);
+    } else {
+      await expect(supervisor.databaseRecovery(
+        "import",
+        recoveryPath,
+        targetDirectory,
+      )).rejects.toThrow(/recovery safety mode.*prior runtime-owned process/iu);
+      await expect(supervisor.stop()).resolves.toBe(false);
+    }
+    expect(supervisor.snapshot()).toMatchObject({
+      phase: process.platform === "darwin" ? "ready" : "stopped",
+      generation: 2,
+    });
+  }, 45_000);
 
   it("cancels a near-limit import while its isolated transaction is busy", async () => {
     const testRoot = mkdtempSync(join(tmpdir(), "inertia-recovery-cancel-"));

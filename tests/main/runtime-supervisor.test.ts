@@ -951,6 +951,7 @@ describe("RuntimeSupervisor", () => {
     children[0].message({ type: "runtime.stopped" });
     children[0].exit(0);
     await expect(stopped).resolves.toBe(false);
+    expect(supervisor.canResumeWithModernDarwinRecovery()).toBe(false);
   });
 
   it("brokers attachments only to the current generation and bounds stalled requests", async () => {

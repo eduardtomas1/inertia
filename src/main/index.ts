@@ -84,6 +84,7 @@ import { RuntimeSystemSuspendDelivery } from "./runtime-system-suspend-delivery.
 import { RuntimeSystemSuspendTracker } from "./runtime-system-suspend-tracker.js";
 import * as runtimeBootstrap from "./runtime-bootstrap-safety.js";
 import { prepareRuntimeBootstrapRecovery } from "./runtime-bootstrap-recovery.js";
+import { RuntimeLiveDarwinRecoveryCoordinator } from "./runtime-live-darwin-recovery.js";
 import { resolveDesktopRuntimeProcessSafetyAssets } from "./runtime-windows-job-bootstrap.js";
 import { disposeWindowsRuntimeJobExecutableLock, prepareWindowsRuntimeJobExecutableLock } from "./windows-runtime-job.js";
 import {
@@ -967,14 +968,11 @@ async function bootstrap(): Promise<void> {
     mainWindow?.setBackgroundColor(backgroundColor);
     detachedChatMain?.setBackgroundColor(backgroundColor);
   });
-  const configuredDataDirectory = releaseRuntimeOverride({
-    configuration: releaseChannel, isPackaged: app.isPackaged, packageSmokeRoot,
-    configuredPath: process.env.INERTIA_DATA_DIR, smokeDirectoryName: "data",
-  });
-  const dataDirectory = runtimeBootstrap.runtimeDataPath(
-    configuredDataDirectory,
-    app.getPath("userData"),
-  );
+  const configuredDataDirectory = releaseRuntimeOverride({ configuration: releaseChannel,
+    isPackaged: app.isPackaged, packageSmokeRoot,
+    configuredPath: process.env.INERTIA_DATA_DIR, smokeDirectoryName: "data" });
+  const dataDirectory = runtimeBootstrap.runtimeDataPath(configuredDataDirectory,
+    app.getPath("userData"));
   runtimeDataDirectory = dataDirectory;
   const { runtimeProcessGuardianPath, windowsRuntimeJobAssembly } = resolveDesktopRuntimeProcessSafetyAssets();
   // Prime the verified launch broker before the short recovery deadline.
@@ -1033,6 +1031,7 @@ async function bootstrap(): Promise<void> {
     imageResult: packageSmokeImageResult,
   } = packageSmoke;
   let packageSmokeScheduled = false;
+  const liveDarwinRecovery = new RuntimeLiveDarwinRecoveryCoordinator({ dataDirectory, systemBootId: bootstrapSafety.systemBootId, guardianPath: runtimeProcessGuardianPath });
   runtimeSupervisor = new RuntimeSupervisor({
     ...(windowsRuntimeJobAssembly ? { windowsRuntimeJobAssembly } : {}),
     agentBrowserBroker: previewBroker,
@@ -1128,6 +1127,7 @@ async function bootstrap(): Promise<void> {
         console.error("The local runtime stopped; restart scheduled", snapshot.lastError);
       }
       if (snapshot.phase === "stopped") recordPackageSmokeStage("runtime-stopped");
+      liveDarwinRecovery.observe(snapshot, runtimeSupervisor);
       if (snapshot.phase === "ready" && snapshot.pid && snapshot.websocketUrl && packageSmokeFilePath && packageSmokeOwnerToken && !packageSmokeScheduled) {
         packageSmokeScheduled = true;
         void writeFile(

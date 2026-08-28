@@ -625,6 +625,7 @@ parentPort.on("message", (messageEvent) => {
       snapshotDigest: authority.snapshotDigest,
       currentRuntimeGenerationId,
     }),
+    onOwnedProcessCleanupUnconfirmed: () => { void shutdown(1); },
     backendCredentials: credentials,
     attachments,
     conversationAttachmentStoreOperations: conversationAttachmentStore.runner,

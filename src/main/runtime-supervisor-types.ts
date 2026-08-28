@@ -42,6 +42,7 @@ export interface RuntimeProcessRecord {
   ready: boolean;
   acceptingReady: boolean;
   cleanupConfirmed: boolean;
+  cleanupRecoveryRequired: boolean;
   generationCleanupConfirmed: boolean;
   processTreeTerminationConfirmed: boolean;
   processTreeTermination: Promise<boolean> | null;

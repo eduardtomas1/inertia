@@ -81,6 +81,29 @@ export class RuntimeSupervisorRecoveryAdmission {
     return this.#manualModernRecovery !== null;
   }
 
+  acceptManualModernRecovery(
+    descriptor: ModernDarwinRecoveryAuthorityDescriptor,
+  ): boolean {
+    if (this.#manualModernRecovery) return false;
+    const authority = this.#modernAuthorities.pending();
+    const rootObservation = this.#guardianPath
+      ? { guardianPath: this.#guardianPath, platform: "darwin" as const }
+      : null;
+    if (
+      !rootObservation
+      || !authority
+      || authority.snapshot.systemBootId !== this.#systemBootId
+      || !modernDarwinRecoveryDescriptorMatches(descriptor, authority)
+      || !modernDarwinRecoveryAuthorityMatches(
+        this.#dataDirectory,
+        authority,
+        rootObservation,
+      )
+    ) return false;
+    this.#manualModernRecovery = descriptor;
+    return true;
+  }
+
   prepare(runtimeGenerationId: string): RuntimeRecoveryAdmissionResult {
     this.#leases.refresh();
     const modernDescriptor = this.#manualModernRecovery;

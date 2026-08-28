@@ -67,6 +67,10 @@ describe("runtime command delivery policy", () => {
       timeoutMs: 15_000,
       timeoutDelivery: "ambiguous",
     });
+    expect(runtimeCommandPolicy("terminal.detach")).toEqual({
+      timeoutMs: 15_000,
+      timeoutDelivery: "ambiguous",
+    });
     expect(runtimeCommandPolicy("terminal.input")).toEqual({
       timeoutMs: 15_000,
       timeoutDelivery: "ambiguous",

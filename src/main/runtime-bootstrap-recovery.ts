@@ -36,6 +36,51 @@ export interface RuntimeBootstrapRecoveryResult {
   readonly runtimeRecoveryBlocked: boolean;
 }
 
+export async function promptForLiveModernDarwinRuntimeRecovery(
+  dataDirectory: string,
+  systemBootId: string,
+  runtimeProcessGuardianPath: string,
+): Promise<ModernDarwinRecoveryAuthorityDescriptor | null> {
+  const recovery = await prepareModernDarwinBootstrapRecovery(
+    dataDirectory,
+    systemBootId,
+    runtimeProcessGuardianPath,
+  );
+  if (recovery.blocked) {
+    dialog.showErrorBox(
+      "Runtime recovery remains safety locked",
+      "Inertia could not verify its exact local recovery journal. Your projects and attachments remain preserved; close Inertia and try again.",
+    );
+    return null;
+  }
+  if (recovery.authority) return recovery.authority;
+  if (!recovery.candidate) return null;
+  const decision = await dialog.showMessageBox({
+    type: "warning",
+    title: "Recover unproven macOS runtime state?",
+    message: "The Inertia local service stopped with unproven process ownership state.",
+    detail: MODERN_DARWIN_RECOVERY_DIALOG_DETAIL,
+    buttons: ["I closed them — recover", "Keep safety lock"],
+    defaultId: 1,
+    cancelId: 1,
+    noLink: true,
+  });
+  if (decision.response !== 0) return null;
+  const authority = authorizeModernDarwinRuntimeRecovery(
+    dataDirectory,
+    recovery.candidate,
+    systemBootId,
+    runtimeProcessGuardianPath,
+  );
+  if (!authority) {
+    dialog.showErrorBox(
+      "Runtime recovery was not authorized",
+      "The recorded process state changed before recovery could begin. Inertia kept the safety lock and preserved your work; close every older Inertia, agent, and terminal process, then try again.",
+    );
+  }
+  return authority;
+}
+
 export async function prepareRuntimeBootstrapRecovery(
   dataDirectory: string,
   runtimeProcessGuardianPath: string | null,

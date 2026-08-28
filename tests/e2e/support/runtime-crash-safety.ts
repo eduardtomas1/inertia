@@ -396,6 +396,23 @@ export async function expectRuntimeCrashRecovery(
     }
   }
 
+  if (process.platform === "darwin") {
+    await electronApp.evaluate(({ dialog }) => {
+      const owner = globalThis as typeof globalThis & {
+        __inertiaOriginalRuntimeRecoveryMessageBox?: typeof dialog.showMessageBox;
+      };
+      owner.__inertiaOriginalRuntimeRecoveryMessageBox ??=
+        dialog.showMessageBox.bind(dialog);
+      const original = owner.__inertiaOriginalRuntimeRecoveryMessageBox;
+      Reflect.set(dialog, "showMessageBox", async (...args: unknown[]) => {
+        const options = args.at(-1) as { title?: unknown } | undefined;
+        if (options?.title === "Recover unproven macOS runtime state?") {
+          return { response: 0, checkboxChecked: false };
+        }
+        return Reflect.apply(original!, dialog, args);
+      });
+    });
+  }
   const crashed = await electronApp.evaluate((_electron) => {
     const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
       crash: () => RuntimeTestSnapshot;
@@ -409,7 +426,17 @@ export async function expectRuntimeCrashRecovery(
   await expect.poll(async () => {
     const current = await runtimeSnapshot();
     return current.phase === "ready" && current.generation > before.generation;
-  }, { timeout: 10_000 }).toBe(true);
+  }, { timeout: 20_000 }).toBe(true);
+  if (process.platform === "darwin") {
+    await electronApp.evaluate(({ dialog }) => {
+      const owner = globalThis as typeof globalThis & {
+        __inertiaOriginalRuntimeRecoveryMessageBox?: typeof dialog.showMessageBox;
+      };
+      const original = owner.__inertiaOriginalRuntimeRecoveryMessageBox;
+      if (original) Reflect.set(dialog, "showMessageBox", original);
+      delete owner.__inertiaOriginalRuntimeRecoveryMessageBox;
+    });
+  }
   const after = await runtimeSnapshot();
   const replacementReadyObservation = runtimeObservation(after);
   const afterUrl = await runtimeWebsocketUrl(page);

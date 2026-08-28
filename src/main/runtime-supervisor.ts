@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto"; import type { UtilityProcess } from "electron";
-import type { BackendCredentialStatus } from "../shared/backend-credentials";
 import type { PrivateConnectRuntimeAuthorization, PrivateConnectRuntimeRequest,
   PrivateConnectRuntimeResponse } from "../shared/private-connect/runtime-contract";
 import type { OpenProjectPathRequest, RuntimeConnection } from "../shared/desktop.js";
@@ -20,19 +19,25 @@ import { boundedDuration, publicProcessError, runtimeRestartDelayMs,
 import { detachedRuntimeConnection, runtimeConnection } from "./runtime-supervisor-connection.js";
 import { RuntimeSupervisorRecycle } from "./runtime-supervisor-recycle.js";
 import { RuntimeSecureFileCoordinator } from "./runtime-secure-file-coordinator.js";
+import { RuntimeCredentialCoordinator } from "./runtime-credential-coordinator.js";
 import { RuntimeGenerationLeaseJournal } from "../node/runtime-generation-leases.js";
 import { RuntimeUpdatePreparationCoordinator } from "./runtime-update-preparation-coordinator.js";
 import { RuntimeDatabaseRecoveryCoordinator } from "./runtime-database-recovery-coordinator.js";
 import { RuntimeSupervisorStartupRecovery } from "./runtime-supervisor-startup-recovery.js";
 import { RuntimeOwnedProcessJournal } from "../node/runtime-owned-processes.js";
-import { createRuntimeProcessRecord } from "./runtime-supervisor-process-record.js";
+import type { ModernDarwinRecoveryAuthorityDescriptor } from
+  "../node/runtime-modern-recovery-authorities.js";
+import {
+  createRuntimeProcessRecord,
+  drainRuntimeRecordRequests,
+  recoverUnconfirmedRuntimeCleanup,
+} from "./runtime-supervisor-process-record.js";
 import type { RuntimeProcessContainmentAdmission } from "./runtime-process-containment-admission.js";
 import { RuntimeSupervisorRecoveryAdmission } from "./runtime-supervisor-recovery-admission.js";
 import { createRuntimeProcessContainmentAdmission,
   createRuntimeSupervisorProcessSafety } from "./runtime-supervisor-process-safety.js";
 import type {
-  PendingCredentialRequest, PendingPrivateConnectRuntimeRequest,
-  PendingProjectPath, RuntimeCredentialBroker, RuntimeProcessRecord,
+  PendingPrivateConnectRuntimeRequest, PendingProjectPath, RuntimeProcessRecord,
   RuntimeSupervisorOptions, RuntimeSupervisorPhase, RuntimeSupervisorSnapshot,
   RuntimeSupervisorTimer,
 } from "./runtime-supervisor-types.js";
@@ -58,8 +63,6 @@ export class RuntimeSupervisor {
     RuntimeSupervisorOptions["recoverOwnedProcesses"]>;
   private readonly processContainmentAdmission: RuntimeProcessContainmentAdmission;
   private readonly recoveryAdmission: RuntimeSupervisorRecoveryAdmission;
-  private readonly credentialBroker?: RuntimeCredentialBroker;
-  private readonly credentialRequestTimeoutMs: number;
   private readonly attachmentRequests:
     RuntimeAttachmentBrokerCoordinator<RuntimeProcessRecord>;
   private readonly onSystemSuspendResult?: RuntimeSupervisorOptions["onSystemSuspendResult"]; private readonly onStateChange?: RuntimeSupervisorOptions["onStateChange"];
@@ -74,6 +77,7 @@ export class RuntimeSupervisor {
   private databaseRecoveryNoticePending = false;
   private desiredRunning = false; private lifecycle: "unused" | "started" | "closed" = "unused";
   private restartBlocked = false;
+  private liveModernDarwinRecoveryEligible = false;
   private unconfirmedRestarts = 0;
   private readonly ownerNonce = randomUUID();
   private readonly cleanupReceipts: RuntimeCleanupReceiptJournal;
@@ -91,7 +95,7 @@ export class RuntimeSupervisor {
   private readonly updatePreparation: RuntimeUpdatePreparationCoordinator;
   private readonly privateConnectPrompts: RuntimePrivateConnectPromptCoordinator<
     RuntimeProcessRecord>;
-  private readonly pendingCredentialRequests = new Map<string, PendingCredentialRequest>();
+  private readonly credentials: RuntimeCredentialCoordinator;
   private readonly secureFiles: RuntimeSecureFileCoordinator;
   private stopPromise: Promise<boolean> | null = null;
   private resolveStop: ((confirmed: boolean) => void) | null = null;
@@ -159,7 +163,15 @@ export class RuntimeSupervisor {
       clearTimer: this.clearTimer,
       post: (record, command) => this.post(record.child, command),
     });
-    this.credentialBroker = options.credentialBroker;
+    this.credentials = new RuntimeCredentialCoordinator({
+      broker: options.credentialBroker,
+      timeoutMs: boundedDuration(options.credentialRequestTimeoutMs,
+        runtimeSupervisorDefaults.credentialRequestTimeoutMs),
+      setTimer: this.setTimer,
+      clearTimer: this.clearTimer,
+      accepts: (record) => this.acceptsBrokerRequests(record),
+      post: (record, command) => this.post(record.child, command),
+    });
     this.secureFiles = new RuntimeSecureFileCoordinator({
       broker: options.secureFileBroker,
       conversationAttachmentStoreRunner:
@@ -170,10 +182,6 @@ export class RuntimeSupervisor {
       accepts: (record) => this.acceptsBrokerRequests(record),
       post: (record, command) => this.post(record.child, command),
     });
-    this.credentialRequestTimeoutMs = boundedDuration(
-      options.credentialRequestTimeoutMs,
-      runtimeSupervisorDefaults.credentialRequestTimeoutMs,
-    );
     this.attachmentRequests = new RuntimeAttachmentBrokerCoordinator({
       broker: options.attachmentBroker,
       timeoutMs: boundedDuration(
@@ -230,6 +238,37 @@ export class RuntimeSupervisor {
     });
     if (!priorRecovery) { this.spawnNext(); return; }
     this.phase = "starting"; this.emitState();
+  }
+  canResumeWithModernDarwinRecovery(): boolean {
+    return this.lifecycle !== "closed"
+      && this.phase === "stopped"
+      && this.restartBlocked
+      && this.liveModernDarwinRecoveryEligible
+      && !this.current
+      && !this.desiredRunning;
+  }
+  resumeWithModernDarwinRecovery(
+    descriptor: ModernDarwinRecoveryAuthorityDescriptor,
+  ): boolean {
+    if (
+      !this.canResumeWithModernDarwinRecovery()
+      || !this.recoveryAdmission.acceptManualModernRecovery(descriptor)
+    ) return false;
+    // The descriptor binds every retained generation to one explicit user
+    // decision and an unchanged privileged root observation. Only after that
+    // admission may the supervisor forget its in-memory quarantine and let the
+    // replacement worker retire the durable records transactionally.
+    this.quarantined.clear();
+    this.lifecycle = "started";
+    this.restartBlocked = false;
+    this.liveModernDarwinRecoveryEligible = false;
+    this.unconfirmedRestarts = 0;
+    this.restartAttempt = 0;
+    this.lastError = null;
+    this.desiredRunning = true;
+    this.clearShutdownTimers();
+    this.spawnNext();
+    return this.current !== null;
   }
   connection(consumeRecoveryNotice = true): RuntimeConnection {
     const result = runtimeConnection({
@@ -419,7 +458,7 @@ export class RuntimeSupervisor {
     this.rejectProjectPaths(record, "The local service is recycling.");
     this.databaseRecoveryRequests.reject(record, "The local service is recycling.");
     this.rejectPrivateConnectRuntimeRequests(record, "The local service is recycling.");
-    this.clearCredentialRequests(record);
+    this.credentials.clear(record);
     this.secureFiles.clear(record);
     this.emitState();
     if (!this.beginRuntimeShutdown(record, (message) => {
@@ -453,7 +492,7 @@ export class RuntimeSupervisor {
       "The local service is stopping.",
     );
     this.rejectPrivateConnectRuntimeRequests(this.current, "The local service is stopping.");
-    this.clearCredentialRequests(this.current);
+    this.credentials.clear(this.current);
     this.secureFiles.clear(this.current);
     const secureFilesStopped = this.secureFiles.shutdown();
     if (!this.current) {
@@ -618,7 +657,7 @@ export class RuntimeSupervisor {
       return;
     }
     if (event.type === "runtime.credential-request") {
-      this.handleCredentialRequest(record, event);
+      this.credentials.handle(record, event);
       return;
     }
     if (
@@ -687,17 +726,20 @@ export class RuntimeSupervisor {
         if (this.current !== record || record.ready) return;
         this.forceTerminate(record.child);
       }, this.shutdownGraceMs);
-      this.clearCredentialRequests(record);
+      this.credentials.clear(record);
       this.secureFiles.clear(record);
       this.emitState();
       return;
     }
     if (event.type === "runtime.shutdown-unconfirmed") {
       record.acceptingReady = false;
+      record.cleanupRecoveryRequired = true;
+      this.websocketUrl = null;
+      this.phase = this.desiredRunning ? "restarting" : "stopping";
       this.lastError = "The runtime could not confirm complete process cleanup.";
       this.rejectTestRecycle(record, this.lastError, true);
       this.clearTimerValue("startupTimer");
-      this.clearCredentialRequests(record);
+      this.credentials.clear(record);
       this.secureFiles.clear(record);
       this.forceTerminate(record.child);
       this.emitState();
@@ -711,7 +753,7 @@ export class RuntimeSupervisor {
         record.processTreeTerminationConfirmed = true;
         record.processTreeTerminationSettled = true;
       }
-      this.clearCredentialRequests(record); this.secureFiles.clear(record);
+      this.credentials.clear(record); this.secureFiles.clear(record);
       this.post(record.child, { type: "runtime.stopped-acknowledged" });
       return;
     }
@@ -804,7 +846,7 @@ export class RuntimeSupervisor {
       "The local service stopped before the database recovery request completed.",
     );
     this.rejectPrivateConnectRuntimeRequests(record, "The local service stopped before the Private Connect request completed.");
-    this.clearCredentialRequests(record);
+    this.credentials.clear(record);
     this.secureFiles.clear(record);
     if (!this.secureFiles.hasConversationAttachmentOperations(record)) {
       this.handleDrainedExit(record, code, true);
@@ -855,10 +897,15 @@ export class RuntimeSupervisor {
           this.restartBlocked = true;
           this.resolveStop?.(false);
           this.resolveStop = null;
-        } else if (this.unconfirmedRestarts
-          >= runtimeSupervisorDefaults.maxUnconfirmedRestarts) {
+        } else if (
+          this.requiresExplicitModernDarwinRecovery()
+          || this.unconfirmedRestarts
+            >= runtimeSupervisorDefaults.maxUnconfirmedRestarts
+        ) {
           this.phase = "stopped";
           this.restartBlocked = true;
+          this.liveModernDarwinRecoveryEligible =
+            this.requiresExplicitModernDarwinRecovery();
           this.desiredRunning = false;
         } else {
           this.unconfirmedRestarts += 1;
@@ -885,24 +932,64 @@ export class RuntimeSupervisor {
       }
       if (confirmed && record.cleanupConfirmed
         && !this.completeGenerationCleanup(record)) return;
-      this.current = null;
       this.clearShutdownTimers();
       if (!confirmed) {
+        this.current = null;
         this.rejectTestRecycle(record, "The recycled runtime process tree could not be confirmed stopped.", false);
         this.quarantined.add(record);
         this.restartBlocked = true;
+        this.liveModernDarwinRecoveryEligible =
+          this.requiresExplicitModernDarwinRecovery();
         this.desiredRunning = false;
         this.phase = "stopped";
         this.lastError = "The runtime process tree could not be confirmed stopped.";
         this.emitState();
         return;
       }
+      if (!record.cleanupConfirmed && record.cleanupRecoveryRequired) {
+        this.phase = "restarting";
+        this.emitState();
+        recoverUnconfirmedRuntimeCleanup({
+          record,
+          recoverOwnedProcesses: this.recoverOwnedProcesses,
+          systemBootId: this.systemBootId,
+          deadlineAt: Date.now() + this.forceKillWaitMs * 2,
+          isCurrent: () => this.current === record,
+          onSettled: (outcome) => {
+            if (outcome === "recovered") {
+              continueAfterTermination(true);
+              return;
+            }
+            this.current = null;
+            this.quarantined.add(record);
+            this.clearShutdownTimers();
+            this.lastError = unconfirmedRuntimeCleanupMessage(this.systemBootId,
+              "The runtime process tree was stopped, but prior detached work could not be confirmed cleaned up.");
+            this.restartBlocked = true;
+            this.liveModernDarwinRecoveryEligible =
+              this.requiresExplicitModernDarwinRecovery();
+            this.desiredRunning = false;
+            this.phase = "stopped";
+            this.resolveStop?.(false);
+            this.resolveStop = null;
+            this.emitState();
+          },
+        });
+        return;
+      }
       if (!record.cleanupConfirmed) {
+        this.current = null;
         this.quarantined.add(record);
         this.lastError = unconfirmedRuntimeCleanupMessage(this.systemBootId,
           "The runtime process tree was stopped, but prior detached work could not be confirmed cleaned up.");
-        if (this.unconfirmedRestarts >= runtimeSupervisorDefaults.maxUnconfirmedRestarts) {
+        if (
+          this.requiresExplicitModernDarwinRecovery()
+          || this.unconfirmedRestarts
+            >= runtimeSupervisorDefaults.maxUnconfirmedRestarts
+        ) {
           this.restartBlocked = true;
+          this.liveModernDarwinRecoveryEligible =
+            this.requiresExplicitModernDarwinRecovery();
           this.desiredRunning = false;
           this.phase = "stopped";
           this.emitState();
@@ -912,6 +999,7 @@ export class RuntimeSupervisor {
         this.scheduleRestart();
         return;
       }
+      this.current = null;
       this.attachmentRequests.clear(record);
       if (this.testRecycle.sourceIs(record)) {
         this.lastError = null;
@@ -1033,154 +1121,22 @@ export class RuntimeSupervisor {
     this.clearTimerValue("shutdownDeadlineTimer");
   }
   private rejectProjectPaths(record: RuntimeProcessRecord | null, message: string): void {
-    if (!record) return;
-    for (const [requestId, pending] of this.pendingProjectPaths) {
-      if (pending.record !== record) continue;
-      this.pendingProjectPaths.delete(requestId);
+    drainRuntimeRecordRequests(this.pendingProjectPaths, record, (pending) => {
       this.clearTimer(pending.timer);
       pending.reject(new Error(message));
-    }
+    });
   }
   private rejectPrivateConnectRuntimeRequests(
     record: RuntimeProcessRecord | null,
     message: string,
   ): void {
-    if (!record) return;
-    for (const [requestId, pending] of this.pendingPrivateConnectRuntimeRequests) {
-      if (pending.record !== record) continue;
-      this.pendingPrivateConnectRuntimeRequests.delete(requestId);
+    drainRuntimeRecordRequests(this.pendingPrivateConnectRuntimeRequests,
+      record, (pending) => {
       this.clearTimer(pending.timer);
       pending.reject(new Error(message));
-    }
+    });
+    if (!record) return;
     this.privateConnectPrompts.reject(record, message);
-  }
-  private handleCredentialRequest(
-    record: RuntimeProcessRecord,
-    event: Extract<
-      ReturnType<typeof parseRuntimeWorkerEvent>,
-      { type: "runtime.credential-request" }
-    >,
-  ): void {
-    if (!event) return;
-    if (!this.acceptsBrokerRequests(record) || !this.credentialBroker) {
-      this.post(record.child, {
-        type: "runtime.credential-result",
-        requestId: event.requestId,
-        operation: event.operation,
-        ok: false,
-        code: "unavailable",
-        message: "Secure credential storage is unavailable.",
-      });
-      return;
-    }
-    if (record.credentialRequestIds.has(event.requestId)) {
-      this.post(record.child, {
-        type: "runtime.credential-result",
-        requestId: event.requestId,
-        operation: event.operation,
-        ok: false,
-        code: "invalid",
-        message: "The credential request identifier was already used.",
-      });
-      return;
-    }
-    record.credentialRequestIds.add(event.requestId);
-    if (record.credentialRequestIds.size > 512) {
-      const oldest = record.credentialRequestIds.values().next().value;
-      if (typeof oldest === "string") record.credentialRequestIds.delete(oldest);
-    }
-    const controller = new AbortController();
-    const pending: PendingCredentialRequest = {
-      record,
-      operation: event.operation,
-      controller,
-      timer: this.setTimer(() => {
-        if (this.pendingCredentialRequests.get(event.requestId) !== pending) return;
-        this.pendingCredentialRequests.delete(event.requestId);
-        pending.controller.abort();
-        if (this.current !== record) return;
-        this.post(record.child, {
-          type: "runtime.credential-result",
-          requestId: event.requestId,
-          operation: event.operation,
-          ok: false,
-          code: "unavailable",
-          message: "Secure credential storage did not respond in time.",
-        });
-      }, this.credentialRequestTimeoutMs),
-    };
-    this.pendingCredentialRequests.set(event.requestId, pending);
-    const operation = Promise.resolve().then<string | null | boolean | BackendCredentialStatus>(() => event.operation === "resolve"
-      ? this.credentialBroker!.resolve(event.secretReference, controller.signal)
-      : event.operation === "status"
-        ? this.credentialBroker!.status(event.secretReference, controller.signal)
-        : event.operation === "clear"
-          ? this.credentialBroker!.clear(event.secretReference, controller.signal)
-          : this.credentialBroker!.forget(event.secretReference, controller.signal));
-    void operation.then(
-      (value) => {
-        if (this.pendingCredentialRequests.get(event.requestId) !== pending) return;
-        this.pendingCredentialRequests.delete(event.requestId);
-        this.clearTimer(pending.timer);
-        if (!this.acceptsBrokerRequests(record)) return;
-        if (event.operation === "resolve") {
-          if (typeof value !== "string") {
-            this.post(record.child, {
-              type: "runtime.credential-result",
-              requestId: event.requestId,
-              operation: "resolve",
-              ok: false,
-              code: "not-found",
-              message: "The backend credential is unavailable.",
-            });
-            return;
-          }
-          this.post(record.child, {
-            type: "runtime.credential-result",
-            requestId: event.requestId,
-            operation: "resolve",
-            ok: true,
-            secret: value,
-          });
-          return;
-        }
-        if (event.operation === "status") {
-          const status = typeof value === "object" && value !== null
-            ? value as BackendCredentialStatus
-            : { hasSecret: false, credentialGeneration: null };
-          this.post(record.child, {
-              type: "runtime.credential-result",
-              requestId: event.requestId,
-              operation: "status",
-              ok: true,
-              hasSecret: status.hasSecret,
-              credentialGeneration: status.credentialGeneration,
-            });
-          return;
-        }
-        this.post(record.child, {
-              type: "runtime.credential-result",
-              requestId: event.requestId,
-              operation: event.operation,
-              ok: true,
-              removed: value === true,
-            });
-      },
-      () => {
-        if (this.pendingCredentialRequests.get(event.requestId) !== pending) return;
-        this.pendingCredentialRequests.delete(event.requestId);
-        this.clearTimer(pending.timer);
-        if (!this.acceptsBrokerRequests(record)) return;
-        this.post(record.child, {
-          type: "runtime.credential-result",
-          requestId: event.requestId,
-          operation: event.operation,
-          ok: false,
-          code: "unavailable",
-          message: "Secure credential storage is unavailable.",
-        });
-      },
-    );
   }
   private acceptsBrokerRequests(record: RuntimeProcessRecord): boolean {
     return this.current === record
@@ -1192,14 +1148,9 @@ export class RuntimeSupervisor {
         || this.phase === "ready"
       );
   }
-  private clearCredentialRequests(record: RuntimeProcessRecord | null): void {
-    if (!record) return;
-    for (const [requestId, pending] of this.pendingCredentialRequests) {
-      if (pending.record !== record) continue;
-      this.pendingCredentialRequests.delete(requestId);
-      this.clearTimer(pending.timer);
-      pending.controller.abort();
-    }
+  private requiresExplicitModernDarwinRecovery(): boolean {
+    return process.platform === "darwin"
+      && Boolean(this.workerOptions.runtimeProcessGuardianPath);
   }
   private settleStopped(record: RuntimeProcessRecord): void {
     if (this.current !== record || this.desiredRunning) return;

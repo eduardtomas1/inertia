@@ -2000,11 +2000,13 @@ describe("TerminalManager", () => {
     const replacementTerminal = fakeTerminal(43);
     const releaseIfGroupExited = vi.fn();
     const confirmStopped = vi.fn(() => false);
+    const onOwnedProcessCleanupUnconfirmed = vi.fn();
     const spawnTerminal = vi.fn()
       .mockReturnValueOnce(replacedTerminal.pty)
       .mockReturnValueOnce(replacementTerminal.pty);
     const manager = new TerminalManager({
       spawnTerminal,
+      onOwnedProcessCleanupUnconfirmed,
       spawnOwnedTerminalProcess: (spawnProcess) => {
         const process = spawnProcess();
         if (process.pid === replacedTerminal.pty.pid) {
@@ -2059,6 +2061,7 @@ describe("TerminalManager", () => {
     expect(spawnTerminal).toHaveBeenCalledOnce();
     expect(releaseIfGroupExited).toHaveBeenCalledWith(31);
     expect(confirmStopped).toHaveBeenCalled();
+    expect(onOwnedProcessCleanupUnconfirmed).toHaveBeenCalledOnce();
     expect(replacedTerminal.pty.write).not.toHaveBeenCalled();
   });
 

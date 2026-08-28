@@ -66,6 +66,7 @@ export interface RuntimeOptions {
     authority: ModernDarwinRecoveryAuthorityDescriptor,
     currentRuntimeGenerationId: string,
   ) => void;
+  onOwnedProcessCleanupUnconfirmed?: () => void;
   testOnlyOnTurnSettled?: (turn: AgentTurn) => void | Promise<void>;
   testOnlyBeforeLegacyInterruptedRecovery?: () => void;
   testOnlyBeforeModernDarwinRecoveryAcknowledged?: () => void;

@@ -278,7 +278,10 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const privateConnectTranscriptCache = new PrivateConnectTranscriptCache();
   const turnGitArtifacts = new TurnGitArtifactManager(store, dataDirectory);
   const enableProviders = !runtimeSafetyLock && (options.enableProviders ?? true);
-  const terminals = new TerminalManager();
+  const terminals = new TerminalManager({
+    onOwnedProcessCleanupUnconfirmed:
+      options.onOwnedProcessCleanupUnconfirmed,
+  });
   const providerTerminalResumes = new ProviderTerminalResumeRegistry(store.conversationWork);
   const metadataCache = new ProviderMetadataCache({
     persistence: {

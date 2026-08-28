@@ -407,7 +407,7 @@ try {
   if ($stream.Length -le 0 -or $stream.Length -gt ${MAX_WINDOWS_JOB_ASSEMBLY_BYTES}) {
     throw 'invalid-size'
   }
-  $assemblyBytes = New-Object byte[] ([Int32]$stream.Length)
+  $assemblyBytes = [byte[]]::new([Int32]$stream.Length)
   $assemblyOffset = 0
   while ($assemblyOffset -lt $assemblyBytes.Length) {
     $read = $stream.Read(

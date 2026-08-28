@@ -336,17 +336,21 @@ export function recoverRuntimeOwnedProcesses(
         ) continue;
         if (platform === "linux" && options.darwinGuardianPath) return false;
         if (platform === "darwin") {
-          if (
-            !await waitForDarwinSessionDrain(
-              record,
-              readIdentity,
-              readDarwinSessionEmpty,
-              options.deadlineAt,
-              waitForProcessGroupDrain,
-            )
-            || !journal.release(record.ownershipId)
-          ) return false;
-          continue;
+          // A missing guardian and an empty birth session do not prove that a
+          // fork-tainted descendant is gone: it may have double-forked,
+          // called setsid(), and reparented before the guardian's bounded
+          // census. Drain the exact session to reduce live work, but retain
+          // the durable claim for the existing explicit modern-Darwin
+          // recovery authority. Silent recovery here would allow an escaped
+          // process to run beside a replacement runtime.
+          await waitForDarwinSessionDrain(
+            record,
+            readIdentity,
+            readDarwinSessionEmpty,
+            options.deadlineAt,
+            waitForProcessGroupDrain,
+          );
+          return false;
         }
         if (
           !await waitForMissingRootCleanup(
@@ -434,17 +438,18 @@ export function recoverRuntimeOwnedProcesses(
             && error.code === "ESRCH"
           )) return false;
         }
-        if (
-          !await waitForDarwinSessionDrain(
-            record,
-            readIdentity,
-            readDarwinSessionEmpty,
-            options.deadlineAt,
-            waitForProcessGroupDrain,
-          )
-          || !journal.release(record.ownershipId)
-        ) return false;
-        continue;
+        // A cancellation result cannot distinguish a fully drained guardian
+        // from its fork-tainted uncertain-containment exit. Drain the exact
+        // birth session, retain the claim, and require the explicit modern
+        // recovery snapshot before a replacement runtime can start.
+        await waitForDarwinSessionDrain(
+          record,
+          readIdentity,
+          readDarwinSessionEmpty,
+          options.deadlineAt,
+          waitForProcessGroupDrain,
+        );
+        return false;
       }
       if (
         identity.processGroupId !== identity.pid

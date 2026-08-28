@@ -37,7 +37,7 @@ type TerminalSessionProps = TerminalPanelProps & {
   siblingResumedConversationIds: ReadonlySet<string>;
   onRestorableTerminalChange: (
     terminalId: string | null,
-  ) => void;
+  ) => boolean | void;
   onTerminalReplaced: (replacement: TerminalReplacement) => boolean;
   onProviderResumeStarted: (terminalId: string, conversationId: string) => void;
 };
@@ -498,10 +498,19 @@ export function TerminalSession({
           }
           if (cancelled) {
             operationInFlightRef.current = false;
-            if (!reattachId) void sendCommand(command({
-              type: "terminal.close",
-              payload: { terminalId: event.terminalId },
-            })).catch(() => undefined);
+            if (!reattachId) {
+              const retained = onRestorableTerminalChangeRef.current(
+                event.terminalId,
+              ) !== false;
+              try {
+                await sendCommand(command({
+                  type: retained ? "terminal.detach" : "terminal.close",
+                  payload: { terminalId: event.terminalId },
+                }));
+              } catch {
+                // A disconnected owner is already bounded by server cleanup.
+              }
+            }
             return;
           }
           if (event.providerResume && !event.providerResumeConversationId) {

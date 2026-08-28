@@ -997,7 +997,7 @@ describe("cross-platform runtime owned process recovery", () => {
     expect(journal.records(runtimeGenerationId)).toEqual([claim]);
   });
 
-  it("asks the exact macOS guardian to drain its session without rebooting", async () => {
+  it("drains the exact macOS guardian but retains manual recovery authority", async () => {
     const directory = temporaryDirectory();
     const { claim, journal } = portableClaim(directory, "darwin");
     const forceKill = vi.fn(async () => true);
@@ -1033,11 +1033,11 @@ describe("cross-platform runtime owned process recovery", () => {
         readIdentity: () => guardianAlive ? identity : null,
         readDarwinSessionEmpty: () => !guardianAlive,
       },
-    )).resolves.toBe(true);
+    )).resolves.toBe(false);
 
     expect(kill).toHaveBeenCalledTimes(1);
     expect(forceKill).not.toHaveBeenCalled();
-    expect(journal.records(runtimeGenerationId)).toEqual([]);
+    expect(journal.records(runtimeGenerationId)).toEqual([claim]);
   });
 
   it("never signals a reused macOS guardian PID during recovery", async () => {
@@ -1069,9 +1069,9 @@ describe("cross-platform runtime owned process recovery", () => {
     expect(journal.records(runtimeGenerationId)).toEqual([claim]);
   });
 
-  it("retires a missing macOS guardian only when its session is empty", async () => {
+  it("retains a missing macOS guardian claim even when its birth session is empty", async () => {
     const directory = temporaryDirectory();
-    const { journal } = portableClaim(directory, "darwin");
+    const { claim, journal } = portableClaim(directory, "darwin");
     const kill = vi.fn<(
       pid: number,
       signal?: NodeJS.Signals | number,
@@ -1089,16 +1089,16 @@ describe("cross-platform runtime owned process recovery", () => {
         readIdentity: () => null,
         readDarwinSessionEmpty,
       },
-    )).resolves.toBe(true);
+    )).resolves.toBe(false);
 
     expect(kill).not.toHaveBeenCalled();
     expect(readDarwinSessionEmpty).toHaveBeenCalledWith(4_242);
-    expect(journal.records(runtimeGenerationId)).toEqual([]);
+    expect(journal.records(runtimeGenerationId)).toEqual([claim]);
   });
 
-  it("waits for a missing macOS guardian's session to drain", async () => {
+  it("waits for a missing macOS guardian's session to drain without clearing authority", async () => {
     const directory = temporaryDirectory();
-    const { journal } = portableClaim(directory, "darwin");
+    const { claim, journal } = portableClaim(directory, "darwin");
     let probe = 0;
     const readDarwinSessionEmpty = vi.fn(() => {
       probe += 1;
@@ -1117,12 +1117,12 @@ describe("cross-platform runtime owned process recovery", () => {
         readDarwinSessionEmpty,
         waitForProcessGroupDrain,
       },
-    )).resolves.toBe(true);
+    )).resolves.toBe(false);
 
     expect(waitForProcessGroupDrain).toHaveBeenCalledTimes(2);
     expect(waitForProcessGroupDrain).toHaveBeenCalledWith(20);
     expect(readDarwinSessionEmpty).toHaveBeenCalledTimes(3);
-    expect(journal.records(runtimeGenerationId)).toEqual([]);
+    expect(journal.records(runtimeGenerationId)).toEqual([claim]);
   });
 
   it("keeps an occupied macOS session fail-closed when its guardian is missing", async () => {
@@ -2214,11 +2214,23 @@ describe("cross-platform runtime owned process recovery", () => {
       // Even the exact runtime parent can authorize only cancellation, not a
       // proof that the escaped descendant was contained. The distinct signal
       // must retain durable evidence while that process remains alive.
-      const records = new RuntimeOwnedProcessJournal(directory, {
+      const journal = new RuntimeOwnedProcessJournal(directory, {
         platform: "darwin",
         darwinGuardianPath: guardianPath,
-      }).records(runtimeGenerationId);
-      expect(records).toHaveLength(1);
+      });
+      expect(journal.records(runtimeGenerationId)).toHaveLength(1);
+      expect(processIsAlive(grandchildPid)).toBe(true);
+      await expect(recoverRuntimeOwnedProcesses(
+        directory,
+        runtimeGenerationId,
+        systemBootId,
+        {
+          platform: "darwin",
+          darwinGuardianPath: guardianPath,
+          deadlineAt: Date.now() + 2_000,
+        },
+      )).resolves.toBe(false);
+      expect(journal.records(runtimeGenerationId)).toHaveLength(1);
       expect(processIsAlive(grandchildPid)).toBe(true);
       process.kill(grandchildPid, "SIGKILL");
       await expect.poll(() => !processIsAlive(grandchildPid), {
@@ -2438,7 +2450,7 @@ describe("cross-platform runtime owned process recovery", () => {
   );
 
   it.runIf(process.platform === "darwin")(
-    "recovers a real macOS owned process through its native guardian",
+    "drains a real macOS owned process while retaining explicit recovery",
     async () => {
       const directory = temporaryDirectory();
       activate(directory);
@@ -2469,9 +2481,9 @@ describe("cross-platform runtime owned process recovery", () => {
         },
       );
 
-      await expect(recovery).resolves.toBe(true);
+      await expect(recovery).resolves.toBe(false);
       await close;
-      expect(journal.records(runtimeGenerationId)).toEqual([]);
+      expect(journal.records(runtimeGenerationId)).toHaveLength(1);
     },
     10_000,
   );

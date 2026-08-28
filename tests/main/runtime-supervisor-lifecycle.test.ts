@@ -39,6 +39,11 @@ class FakeUtilityProcess extends EventEmitter {
 
 function createHarness(options: {
   startupTimeoutMs?: number;
+  recoverOwnedProcesses?: (
+    runtimeGenerationId: string,
+    systemBootId: string,
+    deadlineAt: number,
+  ) => boolean | Promise<boolean> | null;
   armProcessContainment?: () =>
     RuntimeOwnedProcessContainment
     | Promise<RuntimeOwnedProcessContainment | null>
@@ -67,7 +72,7 @@ function createHarness(options: {
     shutdownGraceMs: 1_000,
     forceKillWaitMs: 500,
     forceKill,
-    recoverOwnedProcesses: () => true,
+    recoverOwnedProcesses: options.recoverOwnedProcesses ?? (() => true),
     armProcessContainment: options.armProcessContainment ?? (() =>
       process.platform === "win32"
         ? {
@@ -91,6 +96,109 @@ afterEach(() => {
 });
 
 describe("RuntimeSupervisor lifecycle", () => {
+  it("recovers exact owned claims after an unconfirmed close before restarting", async () => {
+    const recoverOwnedProcesses = vi.fn(async () => true);
+    const { children, supervisor } = createHarness({ recoverOwnedProcesses });
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: runtimeUrl });
+
+    children[0].message({ type: "runtime.shutdown-unconfirmed" });
+    expect(supervisor.snapshot()).toMatchObject({
+      phase: "restarting",
+      websocketUrl: null,
+    });
+    expect(() => supervisor.connection()).toThrow(
+      "could not confirm complete process cleanup",
+    );
+    children[0].exit(137);
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(500);
+
+    expect(recoverOwnedProcesses).toHaveBeenCalledWith(
+      expect.stringMatching(/^[0-9a-f-]{36}:1$/u),
+      "test:00000000-0000-4000-8000-000000000001",
+      expect.any(Number),
+    );
+    expect(children).toHaveLength(2);
+    children[1].spawn();
+    expect(children[1].messages.at(-1)).toMatchObject({
+      type: "runtime.start",
+      options: {
+        confirmedTerminatedRuntimeGenerationIds: [
+          expect.stringMatching(/^[0-9a-f-]{36}:1$/u),
+        ],
+      },
+    });
+    expect(children[1].messages.at(-1)).not.toMatchObject({
+      options: { priorRuntimeCleanupUnconfirmed: true },
+    });
+  });
+
+  it("settles stop when pending exact cleanup recovery fails", async () => {
+    let resolveRecovery!: (recovered: boolean) => void;
+    const recoverOwnedProcesses = vi.fn(() => new Promise<boolean>((resolve) => {
+      resolveRecovery = resolve;
+    }));
+    const { children, supervisor } = createHarness({ recoverOwnedProcesses });
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: runtimeUrl });
+
+    children[0].message({ type: "runtime.shutdown-unconfirmed" });
+    children[0].exit(137);
+    await vi.advanceTimersByTimeAsync(0);
+    const stopped = supervisor.stop();
+    resolveRecovery(false);
+    await vi.advanceTimersByTimeAsync(0);
+
+    await expect(stopped).resolves.toBe(false);
+    expect(children).toHaveLength(1);
+    expect(supervisor.snapshot()).toMatchObject({
+      phase: "stopped",
+      restartScheduled: false,
+    });
+  });
+
+  it("stays blocked instead of starting a safety-locked replacement", async () => {
+    const recoverOwnedProcesses = vi.fn(() => false);
+    const { children, supervisor } = createHarness({ recoverOwnedProcesses });
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: runtimeUrl });
+
+    children[0].message({ type: "runtime.shutdown-unconfirmed" });
+    children[0].exit(137);
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(recoverOwnedProcesses).toHaveBeenCalledOnce();
+    expect(children).toHaveLength(1);
+    expect(supervisor.snapshot()).toMatchObject({
+      phase: "stopped",
+      restartScheduled: false,
+    });
+  });
+
+  it("fails closed when exact cleanup recovery throws synchronously", async () => {
+    const recoverOwnedProcesses = vi.fn((): boolean => {
+      throw new Error("journal unavailable");
+    });
+    const { children, supervisor } = createHarness({ recoverOwnedProcesses });
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: runtimeUrl });
+
+    children[0].message({ type: "runtime.shutdown-unconfirmed" });
+    expect(() => children[0].exit(137)).not.toThrow();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(children).toHaveLength(1);
+    expect(supervisor.snapshot()).toMatchObject({
+      phase: "stopped",
+      restartScheduled: false,
+    });
+  });
+
   it("starts readiness timing after slow asynchronous containment admission", async () => {
     let resolveContainment!: (
       containment: RuntimeOwnedProcessContainment | null,

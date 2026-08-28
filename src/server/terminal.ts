@@ -85,6 +85,7 @@ export interface TerminalManagerOptions {
     spawnProcess: () => IPty,
     options: { readonly darwinGuardianCommand?: string },
   ) => RuntimeOwnedPidProcess<IPty>;
+  onOwnedProcessCleanupUnconfirmed?: () => void;
   /** Test seam for exercising the fail-closed same-session Darwin retirement path. */
   preserveDarwinShellOnReplacement?: boolean;
 }
@@ -276,6 +277,7 @@ export class TerminalManager {
     spawnProcess: () => IPty,
     options: { readonly darwinGuardianCommand?: string },
   ) => RuntimeOwnedPidProcess<IPty>;
+  private readonly onOwnedProcessCleanupUnconfirmed: () => void;
   private readonly preserveDarwinShellOnReplacement: boolean;
   private readonly closingFailures = new Map<string, Error>();
 
@@ -304,6 +306,8 @@ export class TerminalManager {
     );
     this.spawnOwnedTerminalProcess = options.spawnOwnedTerminalProcess
       ?? spawnRuntimeOwnedPidProcess;
+    this.onOwnedProcessCleanupUnconfirmed =
+      options.onOwnedProcessCleanupUnconfirmed ?? (() => undefined);
     this.preserveDarwinShellOnReplacement =
       options.preserveDarwinShellOnReplacement ?? true;
     const terminateProcessTree = options.terminateProcessTree;
@@ -827,6 +831,17 @@ export class TerminalManager {
       for (const resolveExit of session.exitWaiters) resolveExit();
       session.exitWaiters.clear();
       releaseOwnedProcessIfExited(signal);
+      if (
+        !session.terminationRequested
+        && signal !== 0
+        && !session.confirmOwnedProcessStopped()
+      ) {
+        session.terminationRequested = true;
+        this.recordCleanupFailure(session, new TerminalError(
+          "A terminal process ownership claim could not be retired during runtime shutdown.",
+        ));
+        return;
+      }
       if (session.terminationRequested) return;
       const exitOwner = session.owner;
       this.dispose(id, false);
@@ -918,6 +933,17 @@ export class TerminalManager {
     } catch {
       throw new TerminalError("Unable to resize this terminal.");
     }
+  }
+
+  detach(owner: WebSocket, terminalId: string): void {
+    const session = this.ownedSession(owner, terminalId);
+    if (!session.reattachScope) {
+      throw new TerminalError("This terminal cannot be reattached.");
+    }
+    session.flushOutput();
+    session.owner = null;
+    session.detachOutput();
+    this.scheduleDetachedDisposal(session);
   }
 
   async close(owner: WebSocket, terminalId: string): Promise<void> {
@@ -1103,8 +1129,13 @@ export class TerminalManager {
       // before snapshotting descendants, preventing a prompt root exit from
       // reparenting a surviving background process beyond discovery.
       if (session.terminateProcessTree === null) {
-        session.guardianExitCompletesDisposal = session.requestOwnedGuardianStop();
-        session.terminateProcessTree = session.guardianExitCompletesDisposal
+        const unconfirmedExitedGuardian = session.exitObserved
+          && this.closingFailures.has(session.id);
+        session.guardianExitCompletesDisposal = !unconfirmedExitedGuardian
+          && session.requestOwnedGuardianStop();
+        session.terminateProcessTree = unconfirmedExitedGuardian
+          ? async () => false
+          : session.guardianExitCompletesDisposal
           ? async () => {
             // A close can race the platform guardian's bounded asynchronous
             // admission. Let that exact guardian consume the recorded stop
@@ -1195,11 +1226,20 @@ export class TerminalManager {
           : new TerminalError(
               "A terminal process did not exit during runtime shutdown.",
             );
-        this.closingFailures.set(session.id, failure);
+        this.recordCleanupFailure(session, failure);
         if (session.closing === closing) session.closing = null;
       },
     );
     return closing;
+  }
+
+  private recordCleanupFailure(session: TerminalSession, failure: Error): void {
+    const firstFailure = !this.closingFailures.has(session.id);
+    if (!firstFailure) return;
+    this.closingFailures.set(session.id, failure);
+    try { this.onOwnedProcessCleanupUnconfirmed(); } catch {
+      // Cleanup remains fail-closed even if the outer restart signal fails.
+    }
   }
 }
 

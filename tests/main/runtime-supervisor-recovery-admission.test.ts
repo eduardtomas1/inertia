@@ -158,6 +158,56 @@ describe("RuntimeSupervisor recovery admission", () => {
     });
   });
 
+  it.runIf(process.platform === "darwin")(
+    "resumes a live cleanup failure only with exact macOS authority",
+    async () => {
+      const bootId = "test:00000000-0000-4000-8000-000000000001";
+      const recoverOwnedProcesses = vi.fn(() => false);
+      const { children, supervisor } = createHarness({
+        systemBootId: bootId,
+        recoverOwnedProcesses,
+        runtimeProcessGuardianPath: "/private/tmp/inertia-test-guardian",
+      });
+
+      supervisor.start();
+      children[0].spawn();
+      children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+      children[0].emit("exit", 17);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(recoverOwnedProcesses).toHaveBeenCalledOnce();
+      expect(supervisor.snapshot()).toMatchObject({ phase: "stopped" });
+      expect(supervisor.canResumeWithModernDarwinRecovery()).toBe(true);
+      const snapshot = captureModernDarwinRecoverySnapshot(
+        dataDirectory,
+        bootId,
+      );
+      const descriptor = snapshot
+        ? new ModernDarwinRecoveryAuthorityJournal(dataDirectory)
+          .publish(snapshot)
+        : null;
+      expect(descriptor).not.toBeNull();
+      expect(supervisor.resumeWithModernDarwinRecovery({
+        ...descriptor!,
+        operationId: "00000000-0000-4000-8000-000000000099",
+      })).toBe(false);
+      expect(children).toHaveLength(1);
+
+      expect(supervisor.resumeWithModernDarwinRecovery(descriptor!)).toBe(true);
+      expect(supervisor.canResumeWithModernDarwinRecovery()).toBe(false);
+      expect(children).toHaveLength(2);
+      children[1].spawn();
+      expect(children[1].messages.at(-1)).toMatchObject({
+        type: "runtime.start",
+        options: { manualModernDarwinRecovery: descriptor },
+      });
+      children[1].message({ type: "runtime.ready", websocketUrl: firstUrl });
+      expect(supervisor.snapshot()).toMatchObject({ phase: "ready" });
+      expect(new ModernDarwinRecoveryAuthorityJournal(dataDirectory).pending())
+        .toBeNull();
+    },
+  );
+
   it("retires a recoverable prior app generation before spawning", async () => {
     const priorGeneration = "30000000-0000-4000-8000-000000000003:7";
     const bootId = "test:00000000-0000-4000-8000-000000000001";

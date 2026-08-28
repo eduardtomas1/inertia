@@ -108,6 +108,13 @@ export const workspaceCommandSchemas = [
   z
     .object({
       ...requestBase,
+      type: z.literal("terminal.detach"),
+      payload: z.object({ terminalId: z.string().uuid() }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      ...requestBase,
       type: z.literal("terminal.provider.resume"),
       payload: z
         .object({

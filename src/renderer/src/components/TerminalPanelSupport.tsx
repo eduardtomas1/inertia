@@ -68,6 +68,7 @@ export const command = (value: CommandWithoutId): ClientCommand => ({
 
 const MAX_TERMINAL_STORAGE_LENGTH = 4_096;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+const terminalPanelOwners = new Map<string, string>();
 
 export type TerminalTab = {
   id: string;
@@ -77,6 +78,30 @@ export type TerminalTab = {
 
 export function terminalStorageKey(projectId: string, conversationId?: string): string {
   return `inertia:terminal-sessions:v1:${projectId}:${conversationId ?? "project"}`;
+}
+
+export function claimTerminalPanelOwner(storageKey: string): string {
+  const owner = crypto.randomUUID();
+  terminalPanelOwners.set(storageKey, owner);
+  try {
+    window.sessionStorage.setItem(`${storageKey}:owner`, owner);
+  } catch {
+    // The in-memory token still prevents a stale panel from winning locally.
+  }
+  return owner;
+}
+
+export function isCurrentTerminalPanelOwner(
+  storageKey: string,
+  owner: string,
+): boolean {
+  try {
+    const persisted = window.sessionStorage.getItem(`${storageKey}:owner`);
+    if (persisted !== null) return persisted === owner;
+  } catch {
+    // Fall through to the same-renderer authority token.
+  }
+  return terminalPanelOwners.get(storageKey) === owner;
 }
 
 export function newTerminalTab(
@@ -156,53 +181,38 @@ export function readPersistedTerminalTabs(storageKey: string): TerminalTab[] {
 export function useTerminalTabsLifecycle(
   storageKey: string,
   tabs: readonly TerminalTab[],
-  sendCommand: (command: ClientCommand) => Promise<unknown>,
+  sendCommand: TerminalPanelProps["sendCommand"],
 ): React.MutableRefObject<readonly TerminalTab[]> {
   const tabsRef = useRef(tabs);
-  const pageUnloadingRef = useRef(false);
-  const generationRef = useRef(0);
   tabsRef.current = tabs;
   useEffect(() => {
-    try {
-      if (tabs.length === 0) window.sessionStorage.removeItem(storageKey);
-      else window.sessionStorage.setItem(
-        storageKey,
-        JSON.stringify(tabs.map(({ terminalId }) => terminalId)),
-      );
-    } catch {
-      // Session restoration is a convenience; terminal ownership stays server-side.
-    }
+    persistTerminalTabs(storageKey, tabs);
   }, [storageKey, tabs]);
-  useEffect(() => {
-    const generation = generationRef.current + 1;
-    generationRef.current = generation;
-    pageUnloadingRef.current = false;
-    const markPageUnloading = (): void => {
-      pageUnloadingRef.current = true;
-    };
-    window.addEventListener("beforeunload", markPageUnloading);
-    window.addEventListener("pagehide", markPageUnloading);
-    return () => {
-      window.removeEventListener("beforeunload", markPageUnloading);
-      window.removeEventListener("pagehide", markPageUnloading);
-      window.queueMicrotask(() => {
-        if (generationRef.current !== generation || pageUnloadingRef.current) return;
-        for (const { terminalId } of tabsRef.current) {
-          if (!terminalId) continue;
-          void sendCommand(command({
-            type: "terminal.close",
-            payload: { terminalId },
-          })).catch(() => undefined);
-        }
-        try {
-          window.sessionStorage.removeItem(storageKey);
-        } catch {
-          // The scoped sessions are still closed authoritatively above.
-        }
-      });
-    };
+  useEffect(() => () => {
+    for (const { terminalId } of tabsRef.current) {
+      if (!terminalId) continue;
+      void sendCommand(command({
+        type: "terminal.detach",
+        payload: { terminalId },
+      })).catch(() => undefined);
+    }
   }, [sendCommand, storageKey]);
   return tabsRef;
+}
+
+export function persistTerminalTabs(
+  storageKey: string,
+  tabs: readonly TerminalTab[],
+): void {
+  try {
+    if (tabs.length === 0) window.sessionStorage.removeItem(storageKey);
+    else window.sessionStorage.setItem(
+      storageKey,
+      JSON.stringify(tabs.map(({ terminalId }) => terminalId)),
+    );
+  } catch {
+    // Session restoration is a convenience; terminal ownership stays server-side.
+  }
 }
 
 export function waitForTerminalRetry(delayMs: number): Promise<void> {

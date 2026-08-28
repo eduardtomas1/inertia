@@ -654,7 +654,7 @@ describe("TerminalPanel focus lifecycle", () => {
     )).toContain(terminalId);
   });
 
-  it("preserves a terminal on page teardown but closes it on an ordinary unmount", async () => {
+  it("preserves a terminal across page teardown and ordinary scoped navigation", async () => {
     const terminalId = "11111111-1111-4111-8111-111111111111";
     const sendCommand = vi.fn(async (sent: ClientCommand): Promise<ServerEvent> => {
       if (sent.type === "terminal.create") {
@@ -695,9 +695,11 @@ describe("TerminalPanel focus lifecycle", () => {
       .toHaveAttribute("data-terminal-id", terminalId));
     navigating.unmount();
     await act(async () => Promise.resolve());
-    expect(sendCommand.mock.calls.some(([sent]) => (
-      sent.type === "terminal.close" && sent.payload.terminalId === terminalId
-    ))).toBe(true);
+    expect(sendCommand.mock.calls.some(([sent]) => sent.type === "terminal.close"))
+      .toBe(false);
+    expect(window.sessionStorage.getItem(
+      "inertia:terminal-sessions:v1:project-1:project",
+    )).toContain(terminalId);
   });
 
   afterEach(() => {

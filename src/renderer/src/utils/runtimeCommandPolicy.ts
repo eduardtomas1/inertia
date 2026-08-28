@@ -212,6 +212,7 @@ export const RUNTIME_COMMAND_POLICIES = {
   "terminal.close": shortMutation,
   "terminal.attach": shortMutation,
   "terminal.create": shortMutation,
+  "terminal.detach": shortMutation,
   "terminal.input": shortMutation,
   "terminal.provider.resume": {
     timeoutMs: PROVIDER_REFRESH_REQUEST_TIMEOUT_MS,

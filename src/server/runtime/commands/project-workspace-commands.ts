@@ -66,6 +66,7 @@ export function createProjectWorkspaceCommandHandler(
     "checkpoint.revert",
     "terminal.create",
     "terminal.attach",
+    "terminal.detach",
     "terminal.provider.resume",
     "terminal.input",
     "terminal.resize",
@@ -509,6 +510,13 @@ export function createProjectWorkspaceCommandHandler(
             });
         return "handled";
       }
+      case "terminal.detach":
+        dependencies.terminals.detach(socket, command.payload.terminalId);
+        dependencies.send(socket, {
+          type: "request.ok",
+          requestId: command.requestId,
+        });
+        return "handled";
       case "terminal.provider.resume": {
         const conversation = dependencies.store.conversation(
           command.payload.conversationId,

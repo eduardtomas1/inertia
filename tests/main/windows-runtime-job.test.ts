@@ -482,10 +482,15 @@ describe("Windows runtime Job Object containment", () => {
       resolve(process.cwd(), "src/main/windows-runtime-job.ts"),
       "utf8",
     );
+    const normalizedLaunchSource = launchSource.replaceAll("\r\n", "\n");
     expect(launchSource).toContain("[IO.FileShare]::Read");
-    expect(launchSource).toContain(
+    expect(normalizedLaunchSource).toContain(
       "$actual = [BitConverter]::ToString(\n      $sha256.ComputeHash($assemblyBytes)",
     );
+    expect(launchSource).toContain(
+      "$assemblyBytes = [byte[]]::new([Int32]$stream.Length)",
+    );
+    expect(launchSource).not.toContain("New-Object byte[]");
     expect(launchSource).toContain(
       "$loadedAssembly = [Reflection.Assembly]::Load($assemblyBytes)",
     );

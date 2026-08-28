@@ -17,7 +17,7 @@ import { closeElectronAppBounded, closeElectronFixtureBounded,
 import { expectNoViewportOverflow as expectPageNoViewportOverflow } from "./layout-assertions";
 
 const execFileAsync = promisify(execFile);
-const FIXTURE_RPC_TEARDOWN_TIMEOUT_MS = 1_000;
+const FIXTURE_RPC_TEARDOWN_TIMEOUT_MS = 5_000;
 
 export interface RuntimeTestSnapshot {
   phase: string;

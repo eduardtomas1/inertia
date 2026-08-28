@@ -150,4 +150,46 @@ describe("Electron E2E application lifecycle", () => {
     expect(closeServer).toHaveBeenCalledOnce();
     expect(removeDirectory).toHaveBeenCalledOnce();
   });
+
+  it("retains the child handle before runtime quit disconnects Playwright", async () => {
+    const process = Object.assign(new EventEmitter(), {
+      exitCode: null as number | null,
+      signalCode: null as NodeJS.Signals | null,
+      kill: vi.fn(() => true),
+    });
+    let disconnected = false;
+    const processHandle = vi.fn(() => {
+      if (disconnected) {
+        throw new TypeError("Cannot read properties of undefined (reading '_object')");
+      }
+      return process;
+    });
+    const close = vi.fn(async () => {
+      if (disconnected) throw new Error("Electron application closed");
+    });
+    const closeServer = vi.fn(async () => undefined);
+    const removeDirectory = vi.fn(async () => undefined);
+    await expect(closeElectronFixtureBounded({
+      current: {
+        process: processHandle,
+        close,
+      } as unknown as ElectronApplication,
+      requestRuntimeQuit: async () => {
+        disconnected = true;
+        process.exitCode = 0;
+        process.emit("exit", 0, null);
+        return null;
+      },
+      waitForRuntimeExit: vi.fn(async () => undefined),
+      closeServer,
+      removeDirectory,
+      rpcTimeoutMs: 50,
+      serverTimeoutMs: 50,
+      removeTimeoutMs: 50,
+    })).resolves.toBeUndefined();
+    expect(processHandle).toHaveBeenCalledOnce();
+    expect(close).toHaveBeenCalledOnce();
+    expect(closeServer).toHaveBeenCalledOnce();
+    expect(removeDirectory).toHaveBeenCalledOnce();
+  });
 });

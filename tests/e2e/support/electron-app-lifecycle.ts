@@ -1,4 +1,5 @@
 import type { ElectronApplication, Page } from "@playwright/test";
+import type { ChildProcess } from "node:child_process";
 import { rm } from "node:fs/promises";
 import type { Server } from "node:http";
 
@@ -84,13 +85,14 @@ export function observeElectronPage(
 export async function closeElectronAppBounded(
   current: ElectronApplication,
   options: {
+    readonly childProcess?: ChildProcess;
     readonly gracefulTimeoutMs?: number;
     readonly forcedExitTimeoutMs?: number;
     readonly protocolSettleTimeoutMs?: number;
   } = {},
 ): Promise<void> {
-  const child = current.process();
-  const closeResult = current.close();
+  const child = options.childProcess ?? current.process();
+  const closeResult = Promise.resolve().then(() => current.close());
   const graceful = await settleOperationBounded(
     closeResult,
     options.gracefulTimeoutMs ?? 5_000,
@@ -144,6 +146,14 @@ export async function closeElectronFixtureBounded(options: {
   let runtimePid: number | null = null;
   try {
     if (options.current) {
+      // The quit RPC can close Playwright's Electron dispatcher before the
+      // next JavaScript turn. Retain the OS child authority while connected.
+      let childProcess: ChildProcess | null = null;
+      try {
+        childProcess = options.current.process();
+      } catch (error) {
+        cleanupErrors.push(error);
+      }
       const quitResult = await settleOperationBounded(
         Promise.resolve().then(options.requestRuntimeQuit),
         options.rpcTimeoutMs ?? 1_000,
@@ -157,10 +167,12 @@ export async function closeElectronFixtureBounded(options: {
           "The Electron fixture runtime quit request did not settle in time.",
         ));
       }
-      try {
-        await closeElectronAppBounded(options.current);
-      } catch (error) {
-        cleanupErrors.push(error);
+      if (childProcess) {
+        try {
+          await closeElectronAppBounded(options.current, { childProcess });
+        } catch (error) {
+          cleanupErrors.push(error);
+        }
       }
       if (runtimePid) {
         try {

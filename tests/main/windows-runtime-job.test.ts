@@ -135,8 +135,11 @@ async function windowsProcessCreationIdentity(pid: number): Promise<string> {
   }
   const script = `$process = [Diagnostics.Process]::GetProcessById(${pid})
 try {
-  $unixMicroseconds = [Math]::Floor(
-    ($process.StartTime.ToUniversalTime().Ticks - 621355968000000000) / 10
+  $unixMicroseconds = [Decimal]::Floor(
+    (
+      [Decimal]($process.StartTime.ToUniversalTime().Ticks)
+      - [Decimal]621355968000000000
+    ) / [Decimal]10
   )
   $creationTimeMs = [double]$unixMicroseconds / 1000.0
   [Console]::Out.Write([BitConverter]::DoubleToInt64Bits($creationTimeMs))

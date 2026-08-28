@@ -33,6 +33,8 @@ function runDarwinGuardianHelper(
     let stderr = "";
     let outputBytes = 0;
     let failed = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let closeGrace: ReturnType<typeof setImmediate> | null = null;
     const child = spawn(resolve(guardianPath), args, {
       env: { PATH: "/usr/bin:/bin:/usr/sbin:/sbin" },
       shell: false,
@@ -41,32 +43,35 @@ function runDarwinGuardianHelper(
     const finish = (status: number | null, signal: NodeJS.Signals | null): void => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
-      abortSignal?.removeEventListener("abort", stop);
+      if (timer) clearTimeout(timer);
+      if (closeGrace) clearImmediate(closeGrace);
+      abortSignal?.removeEventListener("abort", failAndStop);
       resolveResult({ stdout, stderr, status, signal, failed });
     };
-    const stop = (): void => {
-      // A trusted helper can have exited inside its deadline while Node is
-      // still waiting for its bounded stdout/stderr pipes to publish `close`.
-      // Do not turn that already-terminal result into a timeout failure merely
-      // because the event loop observed the timer first.
+    const killIfRunning = (): void => {
       if (child.exitCode !== null || child.signalCode !== null) return;
-      let stopRequested = false;
-      try { stopRequested = child.kill("SIGKILL"); } catch {
+      try { child.kill("SIGKILL"); } catch {
         // The helper may have become terminal between the state check and kill.
-      }
-      if (
-        !stopRequested
-        && child.exitCode === null
-        && child.signalCode === null
-      ) {
-        failed = true;
-        finish(null, null);
       }
     };
     const failAndStop = (): void => {
+      if (settled) return;
       failed = true;
-      stop();
+      killIfRunning();
+      finish(null, null);
+    };
+    const stopAtDeadline = (): void => {
+      if (child.exitCode === null && child.signalCode === null) {
+        failAndStop();
+        return;
+      }
+      // A trusted helper can exit inside its deadline while Node is still
+      // waiting for bounded stdout/stderr pipes to publish `close`. Give that
+      // already-terminal result one event-loop turn, never another time budget.
+      closeGrace = setImmediate(() => {
+        closeGrace = null;
+        failAndStop();
+      });
     };
     const collect = (target: "stdout" | "stderr", data: Buffer): void => {
       outputBytes += data.byteLength;
@@ -77,14 +82,14 @@ function runDarwinGuardianHelper(
       if (target === "stdout") stdout += data.toString("utf8");
       else stderr += data.toString("utf8");
     };
-    const timer = setTimeout(stop, timeoutMs);
+    timer = setTimeout(stopAtDeadline, timeoutMs);
     timer.unref();
     child.stdout.on("data", (data: Buffer) => collect("stdout", data));
     child.stderr.on("data", (data: Buffer) => collect("stderr", data));
-    child.once("error", () => { failed = true; });
+    child.once("error", failAndStop);
     child.once("close", finish);
-    abortSignal?.addEventListener("abort", stop, { once: true });
-    if (abortSignal?.aborted) stop();
+    abortSignal?.addEventListener("abort", failAndStop, { once: true });
+    if (abortSignal?.aborted) failAndStop();
   });
 }
 

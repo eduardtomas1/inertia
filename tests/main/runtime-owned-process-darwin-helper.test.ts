@@ -53,7 +53,7 @@ describe("macOS runtime guardian helper", () => {
     );
     helper.exitCode = 0;
 
-    await vi.advanceTimersByTimeAsync(1_500);
+    vi.advanceTimersByTime(1_500);
     expect(helper.kill).not.toHaveBeenCalled();
     helper.emit("close", 0, null);
 
@@ -74,12 +74,45 @@ describe("macOS runtime guardian helper", () => {
       4_242,
       "/trusted/runtime-process-guardian",
     );
-    await vi.advanceTimersByTimeAsync(1_500);
+    vi.advanceTimersByTime(1_500);
     expect(helper.kill).toHaveBeenCalledExactlyOnceWith("SIGKILL");
-    helper.signalCode = "SIGKILL";
-    helper.emit("close", null, "SIGKILL");
+    await expect(result).resolves.toBeNull();
+  });
+
+  it("fails after one event-loop turn when a terminal helper never publishes close", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
+    const helper = fakeHelper();
+    childProcess.spawn.mockReturnValue(helper);
+
+    const result = darwinProcessGuardianReadyAsync(
+      4_242,
+      "/trusted/runtime-process-guardian",
+    );
+    helper.exitCode = 0;
+    vi.advanceTimersByTime(1_500);
+    expect(helper.kill).not.toHaveBeenCalled();
+    await vi.runAllTimersAsync();
 
     await expect(result).resolves.toBeNull();
+  });
+
+  it("fails an aborted helper immediately even when it exited before close", async () => {
+    vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
+    const helper = fakeHelper();
+    childProcess.spawn.mockReturnValue(helper);
+    const controller = new AbortController();
+
+    const result = darwinProcessGuardianReadyAsync(
+      4_242,
+      "/trusted/runtime-process-guardian",
+      controller.signal,
+    );
+    helper.exitCode = 0;
+    controller.abort();
+
+    await expect(result).resolves.toBeNull();
+    expect(helper.kill).not.toHaveBeenCalled();
   });
 
   it("rejects oversized output after a valid helper has exited but before close", async () => {
@@ -97,7 +130,6 @@ describe("macOS runtime guardian helper", () => {
     );
     helper.exitCode = 0;
     helper.stdout.emit("data", Buffer.alloc(4 * 1024));
-    helper.emit("close", 0, null);
 
     await expect(result).resolves.toBeNull();
     expect(helper.kill).not.toHaveBeenCalled();

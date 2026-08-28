@@ -2080,7 +2080,7 @@ describe("cross-platform runtime owned process recovery", () => {
   );
 
   it.runIf(process.platform === "darwin")(
-    "macOS externally stopped fork-tainted guardian retains uncertainty leaves",
+    "macOS authenticated stop retains escaped fork uncertainty",
     async () => {
       const directory = temporaryDirectory();
       const payloadSourcePath = join(directory, "double-fork-payload.c");
@@ -2148,15 +2148,7 @@ describe("cross-platform runtime owned process recovery", () => {
       }, { timeout: 5_000 }).toBe(true);
       expect(processIsAlive(grandchildPid)).toBe(true);
       expect(processIsAlive(guardianPid)).toBe(true);
-      const forgedStop = spawnSync(
-        "/bin/kill",
-        ["-TERM", String(guardianPid)],
-        { encoding: "utf8", shell: false, timeout: 5_000 },
-      );
-      expect(
-        forgedStop.status,
-        `${forgedStop.stderr}\n${forgedStop.stdout}`,
-      ).toBe(0);
+      expect(guardian.kill("SIGTERM")).toBe(true);
       await expect.poll(
         () => !processIsAlive(guardianPid),
         { timeout: 5_000 },
@@ -2164,9 +2156,9 @@ describe("cross-platform runtime owned process recovery", () => {
       await closeOf(guardian);
       expect(guardian.exitCode).toBeNull();
       expect(guardian.signalCode).toBe("SIGUSR2");
-      // The distinct uncertain-containment exit must not let the live parent
-      // release the durable evidence merely because the private session is
-      // now empty. An unknown detached descendant is not claimed killed.
+      // Even the exact runtime parent can authorize only cancellation, not a
+      // proof that the escaped descendant was contained. The distinct signal
+      // must retain durable evidence while that process remains alive.
       const records = new RuntimeOwnedProcessJournal(directory, {
         platform: "darwin",
         darwinGuardianPath: guardianPath,
@@ -2301,7 +2293,7 @@ describe("cross-platform runtime owned process recovery", () => {
   );
 
   it.runIf(process.platform === "darwin")(
-    "allows an authenticated macOS stop to retire drained fork-tainted cleanup",
+    "keeps authenticated macOS fork-tainted cleanup fail closed",
     async () => {
       const directory = temporaryDirectory();
       const payloadSourcePath = join(directory, "settled-fork-payload.c");
@@ -2374,15 +2366,18 @@ describe("cross-platform runtime owned process recovery", () => {
       guardian.kill("SIGTERM");
       await closeOf(guardian);
 
-      expect(guardian.exitCode).toBe(137);
-      expect(guardian.signalCode).toBeNull();
+      expect(guardian.exitCode).toBeNull();
+      expect(guardian.signalCode).toBe("SIGUSR2");
+      await expect.poll(() => !processIsAlive(rootPid), {
+        timeout: 5_000,
+      }).toBe(true);
       await expect.poll(() => !processIsAlive(childPid), {
         timeout: 5_000,
       }).toBe(true);
-      await vi.waitFor(() => expect(new RuntimeOwnedProcessJournal(directory, {
+      expect(new RuntimeOwnedProcessJournal(directory, {
         platform: "darwin",
         darwinGuardianPath: guardianPath,
-      }).records(runtimeGenerationId)).toEqual([]));
+      }).records(runtimeGenerationId)).toHaveLength(1);
     },
     15_000,
   );

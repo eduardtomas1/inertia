@@ -44,6 +44,7 @@ interface TerminalSession {
   waitForShutdownDeadline: Promise<number>;
   setShutdownDeadline(deadlineAt: number): void;
   terminateProcessTree: OwnedPidProcessTreeTermination | null;
+  guardianExitCompletesDisposal: boolean | null;
   confirmOwnedProcessStopped: () => boolean;
   requestOwnedGuardianStop: () => boolean;
   waitForOwnedGuardianStop: () => Promise<boolean>;
@@ -479,6 +480,7 @@ export class TerminalManager {
         settleShutdownDeadline(deadlineAt);
       },
       terminateProcessTree: null,
+      guardianExitCompletesDisposal: null,
       confirmOwnedProcessStopped,
       requestOwnedGuardianStop,
       waitForOwnedGuardianStop,
@@ -626,8 +628,10 @@ export class TerminalManager {
       // Start with the root still alive. On POSIX the terminator freezes it
       // before snapshotting descendants, preventing a prompt root exit from
       // reparenting a surviving background process beyond discovery.
-      session.terminateProcessTree ??= session.requestOwnedGuardianStop()
-        ? async () => {
+      if (session.terminateProcessTree === null) {
+        session.guardianExitCompletesDisposal = session.requestOwnedGuardianStop();
+        session.terminateProcessTree = session.guardianExitCompletesDisposal
+          ? async () => {
             // A close can race the platform guardian's bounded asynchronous
             // admission. Let that exact guardian consume the recorded stop
             // request before starting the shorter PTY-exit deadline.
@@ -642,19 +646,10 @@ export class TerminalManager {
             const exited = session.exitObserved
               ? true
               : exitWaitMs > 0 && await waitForExit(exitWaitMs);
-            if (!exited) return false;
-            const deadlineAt = Math.min(
-              Date.now() + this.shutdownTimeoutMs,
-              session.shutdownDeadlineAt ?? Number.POSITIVE_INFINITY,
-            );
-            while (!session.confirmOwnedProcessStopped()) {
-              const remainingMs = deadlineAt - Date.now();
-              if (remainingMs <= 0) return false;
-              await new Promise<void>((resolve) => setTimeout(resolve, Math.min(10, remainingMs)));
-            }
-            return true;
+            return exited;
           }
-        : this.createProcessTreeTermination(session.pty.pid, waitForExit);
+          : this.createProcessTreeTermination(session.pty.pid, waitForExit);
+      }
       void session.terminateProcessTree().then(
         (confirmed) => {
           if (!confirmed) {
@@ -664,7 +659,15 @@ export class TerminalManager {
             return;
           }
           this.dispose(session.id, false);
-          if (!session.confirmOwnedProcessStopped()) {
+          // Closing the admitted native guardian proves that its PTY handle is
+          // gone, which is sufficient to replace this local terminal session.
+          // It does not prove that every descendant was contained: a distinct
+          // guardian exit signal keeps the global durable claim alive, and the
+          // runtime shutdown/update boundary remains fail closed on that claim.
+          if (
+            session.guardianExitCompletesDisposal !== true
+            && !session.confirmOwnedProcessStopped()
+          ) {
             finish(new TerminalError(
               "A terminal process ownership claim could not be retired during runtime shutdown.",
             ));

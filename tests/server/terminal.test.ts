@@ -42,13 +42,15 @@ function processExists(pid: number): boolean {
 
 function fakeTerminal(pid = 42): {
   emitData: (data: string) => void;
-  emitExit: () => void;
+  emitExit: (event?: { exitCode?: number; signal?: number }) => void;
   pty: IPty;
 } {
   const dataListeners = new Set<(data: string) => void>();
-  const exitListeners = new Set<(event: { exitCode: number }) => void>();
+  const exitListeners = new Set<(
+    event: { exitCode: number; signal?: number },
+  ) => void>();
   const disposable = (
-    callback: (event: { exitCode: number }) => void,
+    callback: (event: { exitCode: number; signal?: number }) => void,
   ): IDisposable => ({
     dispose: () => exitListeners.delete(callback),
   });
@@ -60,7 +62,9 @@ function fakeTerminal(pid = 42): {
         dispose: () => dataListeners.delete(callback),
       };
     }),
-    onExit: vi.fn((callback: (event: { exitCode: number }) => void) => {
+    onExit: vi.fn((callback: (
+      event: { exitCode: number; signal?: number },
+    ) => void) => {
       exitListeners.add(callback);
       return disposable(callback);
     }),
@@ -71,8 +75,11 @@ function fakeTerminal(pid = 42): {
     emitData: (data) => {
       for (const listener of dataListeners) listener(data);
     },
-    emitExit: () => {
-      for (const listener of exitListeners) listener({ exitCode: 0 });
+    emitExit: (event = {}) => {
+      for (const listener of exitListeners) listener({
+        exitCode: event.exitCode ?? 0,
+        ...(event.signal === undefined ? {} : { signal: event.signal }),
+      });
     },
     pty,
   };
@@ -808,6 +815,70 @@ describe("TerminalManager", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("replaces a closed guarded terminal while retaining uncertain ownership", async () => {
+    const replacedTerminal = fakeTerminal(42);
+    const replacementTerminal = fakeTerminal(43);
+    const releaseIfGroupExited = vi.fn();
+    const confirmStopped = vi.fn(() => false);
+    const spawnTerminal = vi.fn()
+      .mockReturnValueOnce(replacedTerminal.pty)
+      .mockReturnValueOnce(replacementTerminal.pty);
+    const manager = new TerminalManager({
+      spawnTerminal,
+      spawnOwnedTerminalProcess: (spawnProcess) => {
+        const process = spawnProcess();
+        if (process.pid === replacedTerminal.pty.pid) {
+          return {
+            process,
+            confirmStopped,
+            releaseIfGroupExited,
+            requestGuardianStop: () => true,
+            waitForGuardianStop: async () => true,
+          };
+        }
+        return {
+          process,
+          confirmStopped: () => true,
+          releaseIfGroupExited: () => undefined,
+          requestGuardianStop: () => false,
+          waitForGuardianStop: async () => false,
+        };
+      },
+      terminateProcessTree: async () => true,
+    });
+    const owner = {
+      readyState: 1,
+      bufferedAmount: 0,
+      send: vi.fn(),
+    } as unknown as WebSocket;
+    const terminalId = manager.createProcess(
+      owner,
+      process.cwd(),
+      "test-shell",
+      [],
+      {},
+      80,
+      24,
+    );
+
+    const replacement = manager.replaceProcess(
+      owner,
+      terminalId,
+      process.cwd(),
+      "provider-cli",
+      ["resume", "session-id"],
+      {},
+      80,
+      24,
+    );
+    replacedTerminal.emitExit({ exitCode: 0, signal: 31 });
+
+    await expect(replacement).resolves.toEqual(expect.any(String));
+    expect(spawnTerminal).toHaveBeenCalledTimes(2);
+    expect(releaseIfGroupExited).toHaveBeenCalledWith(31);
+    expect(confirmStopped).not.toHaveBeenCalled();
   });
 
   it("tightens an already-closing guardian admission to the runtime deadline", async () => {

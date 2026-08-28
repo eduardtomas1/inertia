@@ -38,22 +38,12 @@ struct owned_tree_tracker {
 };
 
 static volatile sig_atomic_t stop_requested = 0;
-static volatile sig_atomic_t authenticated_stop_requested = 0;
 static volatile sig_atomic_t authorization_requested = 0;
 static volatile sig_atomic_t authorization_runtime_pid = 0;
 
-static void request_stop(
-  int signal_number,
-  siginfo_t *information,
-  void *context
-) {
-  (void)context;
+static void request_stop(int signal_number) {
+  (void)signal_number;
   stop_requested = 1;
-  if (signal_number == SIGTERM
-    && information != NULL
-    && information->si_pid == authorization_runtime_pid) {
-    authenticated_stop_requested = 1;
-  }
 }
 
 static void request_authorization(
@@ -148,21 +138,6 @@ static int exact_identity_matches_bounded(
   const struct timespec pause = { .tv_sec = 0, .tv_nsec = POLL_NANOSECONDS };
   for (int poll = 0; poll < TRANSIENT_PROBE_POLLS; poll += 1) {
     if (stop_requested) return 0;
-    const enum exact_identity_state state = exact_identity(pid, expected);
-    if (state != EXACT_IDENTITY_UNREADABLE) {
-      return state == EXACT_IDENTITY_MATCHED;
-    }
-    if (poll + 1 < TRANSIENT_PROBE_POLLS) (void)nanosleep(&pause, NULL);
-  }
-  return 0;
-}
-
-static int exact_identity_matches_bounded_after_stop(
-  pid_t pid,
-  const struct proc_bsdinfo *expected
-) {
-  const struct timespec pause = { .tv_sec = 0, .tv_nsec = POLL_NANOSECONDS };
-  for (int poll = 0; poll < TRANSIENT_PROBE_POLLS; poll += 1) {
     const enum exact_identity_state state = exact_identity(pid, expected);
     if (state != EXACT_IDENTITY_UNREADABLE) {
       return state == EXACT_IDENTITY_MATCHED;
@@ -601,15 +576,10 @@ static int bounded_owned_tree_cleanup(
     reap_children();
     if (!refresh_owned_tree_bounded(session_id, guardian_pid, tracker)) return 0;
     if (tracker->count == 0) {
-      const int cleanup_authority_intact = authenticated_stop_requested
-        ? exact_identity_matches_bounded_after_stop(
-            runtime_pid,
-            runtime_identity
-          )
-        : allow_completed_payload_forks
-          && !stop_requested
-          && exact_identity_matches_bounded(runtime_pid, runtime_identity);
-      return tracker->fork_tainted && !cleanup_authority_intact ? 0 : 1;
+      const int completed_authority_intact = allow_completed_payload_forks
+        && !stop_requested
+        && exact_identity_matches_bounded(runtime_pid, runtime_identity);
+      return tracker->fork_tainted && !completed_authority_intact ? 0 : 1;
     }
   }
   // Do not resume the stable frozen set to deliver TERM: a resumed signal
@@ -647,15 +617,10 @@ static int bounded_owned_tree_cleanup(
     observe_root_forks(tracker);
     if (!refresh_owned_tree_bounded(session_id, guardian_pid, tracker)) return 0;
     if (tracker->count == 0) {
-      const int cleanup_authority_intact = authenticated_stop_requested
-        ? exact_identity_matches_bounded_after_stop(
-            runtime_pid,
-            runtime_identity
-          )
-        : allow_completed_payload_forks
-          && !stop_requested
-          && exact_identity_matches_bounded(runtime_pid, runtime_identity);
-      return tracker->fork_tainted && !cleanup_authority_intact ? 0 : 1;
+      const int completed_authority_intact = allow_completed_payload_forks
+        && !stop_requested
+        && exact_identity_matches_bounded(runtime_pid, runtime_identity);
+      return tracker->fork_tainted && !completed_authority_intact ? 0 : 1;
     }
     (void)nanosleep(&pause, NULL);
   }
@@ -805,8 +770,7 @@ static int watch_mode(int argc, char *argv[]) {
 
   struct sigaction action;
   memset(&action, 0, sizeof(action));
-  action.sa_sigaction = request_stop;
-  action.sa_flags = SA_SIGINFO;
+  action.sa_handler = request_stop;
   sigemptyset(&action.sa_mask);
   if (sigaction(SIGTERM, &action, NULL) != 0
     || sigaction(SIGINT, &action, NULL) != 0

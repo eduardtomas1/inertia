@@ -168,7 +168,7 @@ describe("legacy runtime recovery authority journal", () => {
       .pending("win32", bootId)).toEqual([generationA, generationB]);
   });
 
-  it("retires a changed batch as one cohort so the remaining lease can be reauthorized", () => {
+  it("retains a coherent current-boot cohort until supervisor consumption", () => {
     const path = directory();
     const journal = new LegacyRuntimeRecoveryAuthorityJournal(path);
     expect(journal.publishBatch(
@@ -180,15 +180,36 @@ describe("legacy runtime recovery authority journal", () => {
     expect(journal.retireExpired(
       "win32",
       bootId,
-      new Set([generationA]),
+    )).toBe(true);
+    expect(new LegacyRuntimeRecoveryAuthorityJournal(path)
+      .pending("win32", bootId)).toEqual([generationA, generationB]);
+
+    expect(journal.retireExpired(
+      "darwin",
+      bootId,
     )).toBe(true);
     expect(new LegacyRuntimeRecoveryAuthorityJournal(path)
       .pending("win32", bootId)).toEqual([]);
     expect(readdirSync(path).filter((name) => name.startsWith(prefix)))
       .toEqual([]);
+  });
 
-    const replacement = new LegacyRuntimeRecoveryAuthorityJournal(path);
-    expect(replacement.publishBatch([generationA], "win32", bootId)).toBe(true);
-    expect(replacement.pending("win32", bootId)).toEqual([generationA]);
+  it("retires an incomplete current-boot cohort fail closed", () => {
+    const path = directory();
+    const journal = new LegacyRuntimeRecoveryAuthorityJournal(path);
+    expect(journal.publishBatch(
+      [generationA, generationB],
+      "win32",
+      bootId,
+    )).toBe(true);
+    unlinkSync(join(path, canonicalName(generationB)));
+
+    const replay = new LegacyRuntimeRecoveryAuthorityJournal(path);
+    expect(replay.pending("win32", bootId)).toEqual([]);
+    expect(replay.retireExpired("win32", bootId)).toBe(true);
+    expect(new LegacyRuntimeRecoveryAuthorityJournal(path)
+      .pending("win32", bootId)).toEqual([]);
+    expect(readdirSync(path).filter((name) => name.startsWith(prefix)))
+      .toEqual([]);
   });
 });

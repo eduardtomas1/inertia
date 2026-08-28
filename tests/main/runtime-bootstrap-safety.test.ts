@@ -454,6 +454,35 @@ describe("runtime bootstrap safety", () => {
     });
   });
 
+  it("keeps an acknowledged current-boot authority for supervisor replay", () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-bootstrap-safety-"));
+    const dataDirectory = join(root, "runtime");
+    const generationIds = [
+      "30000000-0000-4000-8000-000000000003:87",
+      "30000000-0000-4000-8000-000000000003:88",
+    ];
+    const bootId = "test:00000000-0000-4000-8000-000000000001";
+    directories.push(root);
+    mkdirSync(dataDirectory, { recursive: true, mode: 0o700 });
+    const leases = new RuntimeGenerationLeaseJournal(dataDirectory);
+    for (const generationId of generationIds) {
+      expect(leases.publish(generationId, "unavailable")).toBe(true);
+    }
+    expect(new LegacyRuntimeRecoveryAuthorityJournal(dataDirectory)
+      .publishBatch(generationIds, "win32", bootId)).toBe(true);
+    for (const generationId of generationIds) {
+      expect(leases.clearRuntimeGeneration(generationId)).toBe(true);
+    }
+
+    expect(prepareRuntimeBootstrapSafety(dataDirectory, "win32")).toEqual({
+      systemBootId: bootId,
+      preserveAttachments: false,
+      legacyRecoveryCandidates: [],
+    });
+    expect(new LegacyRuntimeRecoveryAuthorityJournal(dataDirectory)
+      .pending("win32", bootId)).toEqual(generationIds);
+  });
+
   it("authorizes an unowned Linux fallback lease without bypassing exact records", () => {
     const root = mkdtempSync(join(tmpdir(), "inertia-bootstrap-safety-"));
     const dataDirectory = join(root, "runtime");

@@ -460,7 +460,6 @@ export class LegacyRuntimeRecoveryAuthorityJournal {
   retireExpired(
     platform: LegacyRuntimeRecoveryPlatform,
     systemBootId: string,
-    protectedRuntimeGenerationIds: ReadonlySet<string> = new Set(),
   ): boolean {
     if (!validSystemBootId(systemBootId)) return false;
     try {
@@ -470,8 +469,7 @@ export class LegacyRuntimeRecoveryAuthorityJournal {
         || authority.systemBootId !== systemBootId
         || authority.runtimeGenerationIds.some((runtimeGenerationId) => {
           const member = this.authorities.get(runtimeGenerationId);
-          return !protectedRuntimeGenerationIds.has(runtimeGenerationId)
-            || !member
+          return !member
             || member.platform !== authority.platform
             || member.systemBootId !== authority.systemBootId
             || member.operationId !== authority.operationId

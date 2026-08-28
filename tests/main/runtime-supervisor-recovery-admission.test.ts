@@ -533,6 +533,13 @@ describe("RuntimeSupervisor recovery admission", () => {
     expect(new LegacyRuntimeRecoveryAuthorityJournal(dataDirectory)
       .publishBatch(legacyGenerationIds, platform, bootId)).toBe(true);
     expect(leases.clearRuntimeGeneration(legacyGenerationIds[1]!)).toBe(true);
+    expect(new LegacyRuntimeRecoveryAuthorityJournal(dataDirectory)
+      .retireExpired(
+        platform,
+        bootId,
+      )).toBe(true);
+    expect(new LegacyRuntimeRecoveryAuthorityJournal(dataDirectory)
+      .pending(platform, bootId)).toEqual(legacyGenerationIds);
     const { children, supervisor } = createHarness();
 
     supervisor.start();
@@ -546,6 +553,73 @@ describe("RuntimeSupervisor recovery admission", () => {
     });
     expect(leases.clearUnavailableRuntimeGeneration(legacyGenerationIds[0]!))
       .toBe(true);
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+
+    expect(supervisor.snapshot()).toMatchObject({ phase: "ready" });
+    expect(new LegacyRuntimeRecoveryAuthorityJournal(dataDirectory)
+      .pending(platform, bootId)).toEqual([]);
+  });
+
+  it("replays a complete legacy batch after every lease was acknowledged", () => {
+    const bootId = "test:00000000-0000-4000-8000-000000000001";
+    const platform = currentAuthorityPlatform();
+    const legacyGenerationIds = [
+      "30000000-0000-4000-8000-000000000003:84",
+      "30000000-0000-4000-8000-000000000003:85",
+    ];
+    const leases = new RuntimeGenerationLeaseJournal(dataDirectory);
+    for (const generationId of legacyGenerationIds) {
+      expect(leases.publish(generationId, "unavailable")).toBe(true);
+    }
+    expect(new LegacyRuntimeRecoveryAuthorityJournal(dataDirectory)
+      .publishBatch(legacyGenerationIds, platform, bootId)).toBe(true);
+    for (const generationId of legacyGenerationIds) {
+      expect(leases.clearRuntimeGeneration(generationId)).toBe(true);
+    }
+    expect(new LegacyRuntimeRecoveryAuthorityJournal(dataDirectory)
+      .retireExpired(platform, bootId)).toBe(true);
+    expect(new LegacyRuntimeRecoveryAuthorityJournal(dataDirectory)
+      .pending(platform, bootId)).toEqual(legacyGenerationIds);
+    const { children, supervisor } = createHarness();
+
+    supervisor.start();
+    expect(children).toHaveLength(1);
+    children[0].spawn();
+    expect(children[0].messages.at(-1)).toMatchObject({
+      type: "runtime.start",
+      options: {
+        manuallyRetiredRuntimeGenerationIds: legacyGenerationIds,
+      },
+    });
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+
+    expect(supervisor.snapshot()).toMatchObject({ phase: "ready" });
+    expect(new LegacyRuntimeRecoveryAuthorityJournal(dataDirectory)
+      .pending(platform, bootId)).toEqual([]);
+  });
+
+  it("replays a singleton legacy authority after its lease was acknowledged", () => {
+    const bootId = "test:00000000-0000-4000-8000-000000000001";
+    const platform = currentAuthorityPlatform();
+    const legacyGenerationId =
+      "30000000-0000-4000-8000-000000000003:86";
+    const leases = new RuntimeGenerationLeaseJournal(dataDirectory);
+    expect(leases.publish(legacyGenerationId, "unavailable")).toBe(true);
+    expect(new LegacyRuntimeRecoveryAuthorityJournal(dataDirectory)
+      .publishBatch([legacyGenerationId], platform, bootId)).toBe(true);
+    expect(leases.clearRuntimeGeneration(legacyGenerationId)).toBe(true);
+    expect(new LegacyRuntimeRecoveryAuthorityJournal(dataDirectory)
+      .retireExpired(platform, bootId)).toBe(true);
+    const { children, supervisor } = createHarness();
+
+    supervisor.start();
+    children[0].spawn();
+    expect(children[0].messages.at(-1)).toMatchObject({
+      type: "runtime.start",
+      options: {
+        manuallyRetiredRuntimeGenerationIds: [legacyGenerationId],
+      },
+    });
     children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
 
     expect(supervisor.snapshot()).toMatchObject({ phase: "ready" });

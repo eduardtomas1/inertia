@@ -173,14 +173,10 @@ export function prepareRuntimeBootstrapSafety(
     dataDirectory,
   );
   const supportedLegacyPlatform = legacyRecoveryPlatform(platform);
-  const retainedLegacyLeaseIds = new Set(generationLeases.all()
-    .filter((lease) => lease.systemBootId === "unavailable")
-    .map((lease) => lease.runtimeGenerationId));
   const legacyAuthoritiesReady = supportedLegacyPlatform !== null
     && legacyAuthorities.retireExpired(
       supportedLegacyPlatform,
       systemBootId,
-      retainedLegacyLeaseIds,
     );
   const receiptsRetired = runtimeCleanupReceiptIds(dataDirectory).every(
     (generationId) => generationLeases.clearRuntimeGeneration(generationId),

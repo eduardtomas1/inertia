@@ -1,7 +1,7 @@
 import { expect, _electron as electron,
   type ElectronApplication, type Page } from "@playwright/test";
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
@@ -11,11 +11,13 @@ import { RuntimeStore } from "../../../src/server/database";
 import { portableNodeExecutable } from "../../helpers/portable-provider-fixture";
 import { seedAppConversation } from "../../support/seed-app-conversation";
 import { serveAgentBrowserPrivacyFixture } from "./agent-browser-fixture-pages";
-import { closeElectronAppBounded, observeElectronPage,
-  observeElectronProcess } from "./electron-app-lifecycle";
+import { closeElectronAppBounded, closeElectronFixtureBounded,
+  closePreviewServerBounded, observeElectronPage, observeElectronProcess,
+  removeFixtureDirectory } from "./electron-app-lifecycle";
 import { expectNoViewportOverflow as expectPageNoViewportOverflow } from "./layout-assertions";
 
 const execFileAsync = promisify(execFile);
+const FIXTURE_RPC_TEARDOWN_TIMEOUT_MS = 1_000;
 
 export interface RuntimeTestSnapshot {
   phase: string;
@@ -817,15 +819,14 @@ export async function createAppFixture(
       await page.getByRole("textbox", { name: "Message" }).waitFor();
     }
   } catch (cause) {
-    preview.server.closeAllConnections();
-    await new Promise<void>((resolve) => preview.server.close(() => resolve()));
-    if (electronApp) await closeElectronAppBounded(electronApp);
-    await rm(testDirectory, {
-      recursive: true,
-      force: true,
-      maxRetries: 8,
-      retryDelay: 100,
-    });
+    try {
+      if (electronApp) {
+        await closeElectronAppBounded(electronApp).catch(() => undefined);
+      }
+    } finally {
+      await closePreviewServerBounded(preview.server).catch(() => undefined);
+      await removeFixtureDirectory(testDirectory);
+    }
     const diagnostics = [...startupDiagnostics, ...rendererErrors]
       .join("\n")
       .trim();
@@ -964,35 +965,30 @@ export async function createAppFixture(
       }
     },
     close: async () => {
-      preview.server.closeAllConnections();
-      await new Promise<void>((resolve) => preview.server.close(() => resolve()));
-      const runtimePid = (await runtimeSnapshot().catch(() => null))?.pid ?? null;
       const activeApp = electronApp;
-      if (!activeApp) return;
-      await activeApp.evaluate(() => {
-        const runtime = Reflect.get(
-          globalThis,
-          "__inertiaTestRuntime",
-        ) as { quit?: () => unknown } | undefined;
-        runtime?.quit?.();
-      }).catch(() => undefined);
-      await closeElectronAppBounded(activeApp);
-      if (runtimePid) {
-        await expect.poll(
-          () => processExists(runtimePid),
-          { timeout: 5_000 },
-        ).toBe(false);
-      }
-      // Closed SQLite handles on Windows and recently-settled Git checkpoint
-      // writes on macOS can remain visible for a brief interval after their
-      // owning process exits. Node's recursive removal retries the bounded set
-      // of transient EBUSY/ENOTEMPTY/EPERM failures without hiding a persistent
-      // cleanup problem.
-      await rm(testDirectory, {
-        recursive: true,
-        force: true,
-        maxRetries: 8,
-        retryDelay: 100,
+      electronApp = null;
+      await closeElectronFixtureBounded({
+        current: activeApp,
+        rpcTimeoutMs: FIXTURE_RPC_TEARDOWN_TIMEOUT_MS,
+        requestRuntimeQuit: async () => {
+          if (!activeApp) return null;
+          const snapshot = await activeApp.evaluate(() => {
+            const runtime = Reflect.get(
+              globalThis,
+              "__inertiaTestRuntime",
+            ) as { quit?: () => RuntimeTestSnapshot | null } | undefined;
+            return runtime?.quit?.() ?? null;
+          });
+          return snapshot?.pid ?? null;
+        },
+        waitForRuntimeExit: async (runtimePid) => {
+          await expect.poll(
+            () => processExists(runtimePid),
+            { timeout: 5_000 },
+          ).toBe(false);
+        },
+        closeServer: async () => closePreviewServerBounded(preview.server),
+        removeDirectory: async () => removeFixtureDirectory(testDirectory),
       });
     },
   };

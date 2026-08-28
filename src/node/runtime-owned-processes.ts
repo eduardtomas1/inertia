@@ -1229,6 +1229,10 @@ export function runtimeOwnedProcessCleanupConfirmed(): boolean {
     && records.length === 0;
 }
 
+export function runtimeOwnedProcessOwnershipIsTainted(): boolean {
+  return activeRegistry?.tainted ?? false;
+}
+
 export async function awaitRuntimeOwnedProcessCleanupConfirmed(): Promise<boolean> {
   const registry = activeRegistry;
   if (!registry) return !supportedRuntimeOwnedProcessPlatform(process.platform);

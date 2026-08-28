@@ -18,6 +18,7 @@ import {
   type OwnedPidProcessTreeTermination,
   type WaitForProcessExit,
 } from "./process-lifecycle";
+import { requestRecoveryFromTaintedOwnedProcess } from "./terminal-runtime-recovery";
 
 const MAX_TERMINALS = 8;
 const MAX_TERMINALS_PER_CLIENT = 4;
@@ -699,6 +700,7 @@ export class TerminalManager {
       requestOwnedGuardianStop = owned.requestGuardianStop;
       waitForOwnedGuardianStop = owned.waitForGuardianStop;
     } catch {
+      requestRecoveryFromTaintedOwnedProcess(this.onOwnedProcessCleanupUnconfirmed);
       throw new TerminalError("Unable to start a terminal for this project.");
     }
 

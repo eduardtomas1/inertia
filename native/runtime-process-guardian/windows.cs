@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Globalization;
@@ -94,6 +95,122 @@ public static class InertiaRuntimeJob {
   private const int JobObjectBasicAccountingInformation = 1;
   private const int JobObjectExtendedLimitInformation = 9;
 
+  private sealed class GuardLease : IDisposable {
+    private readonly object gate = new object();
+    private readonly ManualResetEvent completed = new ManualResetEvent(false);
+    private readonly Process process;
+    private readonly IntPtr processHandle;
+    private readonly Thread waiter;
+    private IntPtr job;
+    private int resultCode;
+    private string diagnostic = "";
+    private bool disposed;
+
+    public GuardLease(IntPtr ownedJob, Process ownedProcess) {
+      job = ownedJob;
+      process = ownedProcess;
+      processHandle = process.Handle;
+      waiter = new Thread(WaitForRuntime);
+      waiter.IsBackground = true;
+    }
+
+    public void Start() {
+      waiter.Start();
+    }
+
+    private void Complete(int code, string detail) {
+      lock (gate) {
+        resultCode = code;
+        diagnostic = detail;
+      }
+      completed.Set();
+    }
+
+    private void WaitForRuntime() {
+      UInt32 waitResult = WaitForSingleObject(processHandle, INFINITE);
+      if (waitResult != 0) {
+        int waitError = waitResult == UInt32.MaxValue
+          ? Marshal.GetLastWin32Error()
+          : 0;
+        Complete(14, ErrorLine("wait-process", waitError));
+        return;
+      }
+      IntPtr currentJob;
+      lock (gate) { currentJob = job; }
+      if (currentJob == IntPtr.Zero) {
+        Complete(16, ErrorLine("job-lease-closed", 0));
+        return;
+      }
+      if (!TerminateJobObject(currentJob, 137)) {
+        Complete(15, ErrorLine("terminate-job", Marshal.GetLastWin32Error()));
+        return;
+      }
+      for (int index = 0; index < 200 && ActiveProcesses(currentJob) != 0; index += 1) {
+        Thread.Sleep(10);
+      }
+      if (ActiveProcesses(currentJob) != 0) {
+        Complete(16, ErrorLine("drain-job", 0));
+        return;
+      }
+      Complete(0, "");
+    }
+
+    public bool IsCompleted {
+      get { return completed.WaitOne(0); }
+    }
+
+    public int ResultCode {
+      get { lock (gate) { return resultCode; } }
+    }
+
+    public string Diagnostic {
+      get { lock (gate) { return diagnostic; } }
+    }
+
+    public bool RequestStop(out string detail) {
+      lock (gate) {
+        if (disposed) {
+          detail = ErrorLine("job-lease-closed", 0);
+          return false;
+        }
+        if (completed.WaitOne(0)) {
+          detail = diagnostic;
+          return resultCode == 0;
+        }
+        if (job == IntPtr.Zero || !TerminateJobObject(job, 137)) {
+          detail = ErrorLine("terminate-job", Marshal.GetLastWin32Error());
+          return false;
+        }
+        detail = "";
+        return true;
+      }
+    }
+
+    public bool WaitForCompletion(int timeoutMilliseconds) {
+      return completed.WaitOne(Math.Max(0, timeoutMilliseconds));
+    }
+
+    public void Dispose() {
+      lock (gate) {
+        if (disposed) return;
+        if (!completed.WaitOne(0)) {
+          throw new InvalidOperationException("The Windows runtime Job lease is still active.");
+        }
+        disposed = true;
+        process.Dispose();
+        if (job != IntPtr.Zero) {
+          CloseHandle(job);
+          job = IntPtr.Zero;
+        }
+        completed.Dispose();
+      }
+    }
+  }
+
+  private static readonly object LeaseGate = new object();
+  private static readonly Dictionary<string, GuardLease> GuardLeases =
+    new Dictionary<string, GuardLease>(StringComparer.Ordinal);
+
   private static bool FixedTimeEquals(byte[] left, byte[] right) {
     if (left.Length != right.Length) return false;
     int difference = 0;
@@ -153,10 +270,14 @@ public static class InertiaRuntimeJob {
     stream.Flush();
   }
 
+  private static string ErrorLine(string stage, int win32Error) {
+    return "INERTIA_JOB_ERROR stage=" + stage + " win32=" + win32Error;
+  }
+
   private static int Failure(string stage, int exitCode, int win32Error) {
     WriteProtocolLine(
       Console.OpenStandardError(),
-      "INERTIA_JOB_ERROR stage=" + stage + " win32=" + win32Error
+      ErrorLine(stage, win32Error)
     );
     return exitCode;
   }
@@ -228,6 +349,198 @@ public static class InertiaRuntimeJob {
       (UInt64)BitConverter.DoubleToInt64Bits(actualCreationTimeMs)
     );
     return actualCreationTimeBits == expectedCreationTimeBits ? 0 : 2;
+  }
+
+  private static bool PruneCompletedLeases(out string diagnostic) {
+    var completedNames = new List<string>();
+    var completedLeases = new List<GuardLease>();
+    diagnostic = "";
+    lock (LeaseGate) {
+      foreach (KeyValuePair<string, GuardLease> entry in GuardLeases) {
+        if (!entry.Value.IsCompleted) continue;
+        if (entry.Value.ResultCode != 0) {
+          diagnostic = entry.Value.Diagnostic;
+          return false;
+        }
+        completedNames.Add(entry.Key);
+        completedLeases.Add(entry.Value);
+      }
+      foreach (string name in completedNames) GuardLeases.Remove(name);
+    }
+    foreach (GuardLease lease in completedLeases) lease.Dispose();
+    return true;
+  }
+
+  public static int BeginGuard(
+    string name,
+    string processIdValue,
+    string expectedCreationTimeBitsValue,
+    out string diagnostic
+  ) {
+    diagnostic = "";
+    UInt32 processId;
+    UInt64 expectedCreationTimeBits;
+    if (!UInt32.TryParse(
+      processIdValue,
+      NumberStyles.None,
+      CultureInfo.InvariantCulture,
+      out processId
+    ) || processId <= 1 || processId > Int32.MaxValue) {
+      diagnostic = ErrorLine("capture-process-handle", 0);
+      return 12;
+    }
+    if (!UInt64.TryParse(
+      expectedCreationTimeBitsValue,
+      NumberStyles.None,
+      CultureInfo.InvariantCulture,
+      out expectedCreationTimeBits
+    )) {
+      diagnostic = ErrorLine("process-identity-invalid", 0);
+      return 19;
+    }
+    if (!PruneCompletedLeases(out diagnostic)) return 27;
+    lock (LeaseGate) {
+      if (GuardLeases.Count >= 8) {
+        diagnostic = ErrorLine("guardian-limit", 0);
+        return 27;
+      }
+    }
+
+    Process process = null;
+    IntPtr job = IntPtr.Zero;
+    GuardLease lease = null;
+    bool leaseStarted = false;
+    try {
+      try {
+        process = Process.GetProcessById((Int32)processId);
+        IntPtr processHandle = process.Handle;
+        int identityError;
+        int identityStatus = CreationIdentityStatus(
+          processHandle,
+          expectedCreationTimeBits,
+          out identityError
+        );
+        if (identityStatus == 1) {
+          diagnostic = ErrorLine("read-process-identity", identityError);
+          return 12;
+        }
+        if (identityStatus == 2) {
+          diagnostic = ErrorLine("process-identity-mismatch", 0);
+          return 18;
+        }
+        job = CreateJobObject(IntPtr.Zero, name);
+        int createError = Marshal.GetLastWin32Error();
+        if (job == IntPtr.Zero) {
+          diagnostic = ErrorLine("create-job", createError);
+          return 10;
+        }
+        if (createError == 183) {
+          diagnostic = ErrorLine("create-job-existing", createError);
+          return 17;
+        }
+        int armError;
+        if (!ArmKillOnClose(job, out armError)) {
+          diagnostic = ErrorLine("set-kill-on-close", armError);
+          return 11;
+        }
+        if (!AssignProcessToJobObject(job, processHandle)) {
+          diagnostic = ErrorLine("assign-process", Marshal.GetLastWin32Error());
+          return 13;
+        }
+      } catch {
+        diagnostic = ErrorLine("capture-process-handle", 0);
+        return 12;
+      }
+
+      lease = new GuardLease(job, process);
+      lease.Start();
+      leaseStarted = true;
+      job = IntPtr.Zero;
+      process = null;
+      lock (LeaseGate) {
+        if (GuardLeases.ContainsKey(name)) {
+          diagnostic = ErrorLine("create-job-existing", 183);
+          return 17;
+        }
+        GuardLeases.Add(name, lease);
+      }
+      lease = null;
+      return 0;
+    } finally {
+      if (lease != null && leaseStarted) {
+        string ignored;
+        lease.RequestStop(out ignored);
+        if (lease.WaitForCompletion(2000)) lease.Dispose();
+      }
+      if (job != IntPtr.Zero) CloseHandle(job);
+      if (process != null) process.Dispose();
+    }
+  }
+
+  public static int RecoverManaged(string name) {
+    string ignored;
+    if (!PruneCompletedLeases(out ignored)) return 27;
+    IntPtr job = OpenJobObject(JOB_OBJECT_QUERY | JOB_OBJECT_TERMINATE, false, name);
+    if (job == IntPtr.Zero) {
+      return Marshal.GetLastWin32Error() == ERROR_FILE_NOT_FOUND ? 0 : 22;
+    }
+    try {
+      if (!TerminateJobObject(job, 137)) return 20;
+      for (int index = 0; index < 200 && ActiveProcesses(job) != 0; index += 1) {
+        Thread.Sleep(10);
+      }
+      return ActiveProcesses(job) == 0 ? 0 : 21;
+    } finally {
+      CloseHandle(job);
+    }
+  }
+
+  public static int ShutdownAll(int timeoutMilliseconds, out string diagnostic) {
+    diagnostic = "";
+    var deadline = Stopwatch.StartNew();
+    GuardLease[] leases;
+    lock (LeaseGate) {
+      leases = new GuardLease[GuardLeases.Count];
+      GuardLeases.Values.CopyTo(leases, 0);
+    }
+    bool stopped = true;
+    foreach (GuardLease lease in leases) {
+      string detail;
+      if (!lease.RequestStop(out detail)) {
+        stopped = false;
+        if (diagnostic.Length == 0) diagnostic = detail;
+      }
+    }
+    foreach (GuardLease lease in leases) {
+      int remaining = Math.Max(
+        0,
+        timeoutMilliseconds - (Int32)deadline.ElapsedMilliseconds
+      );
+      if (!lease.WaitForCompletion(remaining)) {
+        stopped = false;
+        if (diagnostic.Length == 0) {
+          diagnostic = ErrorLine("guardian-exit-unconfirmed", 0);
+        }
+      } else if (lease.ResultCode != 0) {
+        stopped = false;
+        if (diagnostic.Length == 0) diagnostic = lease.Diagnostic;
+      }
+    }
+    if (!stopped) return 27;
+    lock (LeaseGate) {
+      foreach (GuardLease lease in leases) {
+        string matchingName = null;
+        foreach (KeyValuePair<string, GuardLease> entry in GuardLeases) {
+          if (Object.ReferenceEquals(entry.Value, lease)) {
+            matchingName = entry.Key;
+            break;
+          }
+        }
+        if (matchingName != null) GuardLeases.Remove(matchingName);
+      }
+    }
+    foreach (GuardLease lease in leases) lease.Dispose();
+    return 0;
   }
 
   public static int Guard(

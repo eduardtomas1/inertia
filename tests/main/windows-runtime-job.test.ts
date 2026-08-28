@@ -466,6 +466,11 @@ describe("Windows runtime Job Object containment", () => {
       "using (var executable = OpenVerifiedExecutable(",
     );
     expect(nativeSource).toContain("Process.GetProcessById(");
+    expect(nativeSource).toContain("public static int BeginGuard(");
+    expect(nativeSource).toContain("string processIdValue");
+    expect(nativeSource).toContain("processId > Int32.MaxValue");
+    expect(nativeSource).toContain("public static int ShutdownAll(");
+    expect(nativeSource).toContain("private sealed class GuardLease");
     expect(nativeSource).toContain("GetProcessTimes(");
     expect(nativeSource).toContain("read-process-identity");
     expect(nativeSource).toContain("process-identity-mismatch");
@@ -478,18 +483,39 @@ describe("Windows runtime Job Object containment", () => {
       "utf8",
     );
     expect(launchSource).toContain("[IO.FileShare]::Read");
-    expect(launchSource).toContain("$info.FileName = $path");
-    expect(launchSource).toContain("$processes[$id] = $process");
+    expect(launchSource).toContain(
+      "$actual = [BitConverter]::ToString(\n      $sha256.ComputeHash($assemblyBytes)",
+    );
+    expect(launchSource).toContain(
+      "$loadedAssembly = [Reflection.Assembly]::Load($assemblyBytes)",
+    );
+    expect(launchSource).toContain(
+      "$jobType = $loadedAssembly.GetType('InertiaRuntimeJob', $true, $false)",
+    );
+    expect(launchSource).toContain("$beginGuardMethod.Invoke($null, $guardArguments)");
+    expect(launchSource).toContain("$recoverMethod.Invoke(");
     expect(launchSource).toContain("Write-Frame '${EXECUTABLE_LOCK_BYE_MARKER}'");
     expect(launchSource).toContain("throw 'guardian-exit-unconfirmed'");
     expect(launchSource.indexOf(
-      "Stop-Helpers ([Diagnostics.Process[]]@($processes.Values))",
+      "$shutdownCode = [Int32]$shutdownMethod.Invoke(",
     )).toBeLessThan(launchSource.indexOf(
       "Write-Frame '${EXECUTABLE_LOCK_BYE_MARKER}'",
     ));
     expect(launchSource).toContain("INERTIA_JOB_ERROR stage=verified-file-lock");
-    expect(launchSource).not.toContain("[Reflection.Assembly]::Load");
+    expect(launchSource).not.toContain("function Start-Helper");
+    expect(launchSource).not.toContain("Diagnostics.ProcessStartInfo");
+    expect(launchSource).not.toContain("[InertiaRuntimeJob]::");
     expect(launchSource).not.toContain("spawnWindowsRuntimeJobExecutable");
+    expect(launchSource.indexOf("[IO.File]::Open("))
+      .toBeLessThan(launchSource.indexOf("$sha256.ComputeHash($assemblyBytes)"));
+    expect(launchSource.indexOf("$sha256.ComputeHash($assemblyBytes)"))
+      .toBeLessThan(launchSource.indexOf("$loadedAssembly = [Reflection.Assembly]::Load($assemblyBytes)"));
+    expect(launchSource.indexOf("$loadedAssembly = [Reflection.Assembly]::Load($assemblyBytes)"))
+      .toBeLessThan(launchSource.indexOf("$stdout.Write($locked"));
+    expect(launchSource.indexOf("$loadedAssembly = [Reflection.Assembly]::Load($assemblyBytes)"))
+      .toBeLessThan(launchSource.indexOf("$beginGuardMethod.Invoke("));
+    expect(launchSource.indexOf("$shutdownMethod.Invoke("))
+      .toBeLessThan(launchSource.indexOf("if ($null -ne $stream) { $stream.Dispose() }"));
   });
 
   it("requires bootstrap readiness before any native operation can launch", async () => {

@@ -301,7 +301,12 @@ describe("cross-platform packaged behavior contract", () => {
     expect(windowsJob).toContain('"recover"');
     expect(windowsJob).toContain("[IO.FileShare]::Read");
     expect(windowsJob).toContain("-EncodedCommand");
-    expect(windowsJob).not.toContain("[Reflection.Assembly]::Load");
+    expect(windowsJob).toContain(
+      "$loadedAssembly = [Reflection.Assembly]::Load($assemblyBytes)",
+    );
+    expect(windowsJob).toContain("$beginGuardMethod.Invoke(");
+    expect(windowsJob).not.toContain("[InertiaRuntimeJob]::");
+    expect(windowsJob).not.toContain("Diagnostics.ProcessStartInfo");
     expect(windowsJob).toContain("[Console]::In.ReadLine()");
     expect(windowsJob).toContain("EXECUTABLE_LOCK_SHUTDOWN");
     expect(windowsJob).toContain("EXECUTABLE_LOCK_BYE_MARKER");

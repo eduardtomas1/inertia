@@ -27,7 +27,6 @@ const EXECUTABLE_LOCK_SHUTDOWN = "SHUTDOWN\n";
 const EXECUTABLE_LOCK_BYE_MARKER = "BYE";
 const MAX_OUTPUT_BYTES = 8_192;
 const MAX_BROKER_FIELD_CHARS = 2_048;
-const MAX_BROKER_GUARDIANS = 8;
 const MAX_PROCESS_METRICS = 1_024;
 const PROCESS_METRIC_POLL_MS = 10;
 const PROCESS_METRIC_TIMEOUT_MS = 5_000;
@@ -376,7 +375,6 @@ function windowsRuntimeJobLockScript(
   ).toString("base64");
   return `$ErrorActionPreference = 'Stop'
 $stream = $null
-$processes = @{}
 function Write-Frame([string] $value) {
   $output = [Console]::OpenStandardOutput()
   $bytes = [Text.Encoding]::UTF8.GetBytes($value + [char]10)
@@ -385,75 +383,6 @@ function Write-Frame([string] $value) {
 }
 function Encode-Field([string] $value) {
   return [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($value))
-}
-function Start-Helper([string] $arguments) {
-  $info = New-Object Diagnostics.ProcessStartInfo
-  $info.FileName = $path
-  $info.Arguments = $arguments
-  $info.UseShellExecute = $false
-  $info.CreateNoWindow = $true
-  $info.RedirectStandardInput = $true
-  $info.RedirectStandardOutput = $true
-  $info.RedirectStandardError = $true
-  $process = New-Object Diagnostics.Process
-  $process.StartInfo = $info
-  if (-not $process.Start()) { throw 'process-start' }
-  return $process
-}
-function Stop-Helpers([Diagnostics.Process[]] $helpers) {
-  foreach ($process in $helpers) {
-    if (-not $process.HasExited) {
-      try { $process.StandardInput.Close() } catch {
-        if (-not $process.HasExited) { throw }
-      }
-    }
-  }
-  $grace = [Diagnostics.Stopwatch]::StartNew()
-  foreach ($process in $helpers) {
-    if (-not $process.HasExited) {
-      $remaining = [Math]::Max(0, ${BROKER_HELPER_GRACEFUL_EXIT_MS} - [Int32]$grace.ElapsedMilliseconds)
-      if ($remaining -gt 0) { $process.WaitForExit($remaining) | Out-Null }
-    }
-  }
-  foreach ($process in $helpers) {
-    if (-not $process.HasExited) {
-      try { $process.Kill() } catch {
-        if (-not $process.HasExited) { throw }
-      }
-    }
-  }
-  $forced = [Diagnostics.Stopwatch]::StartNew()
-  foreach ($process in $helpers) {
-    if (-not $process.HasExited) {
-      $remaining = [Math]::Max(0, ${BROKER_HELPER_FORCED_EXIT_MS} - [Int32]$forced.ElapsedMilliseconds)
-      if ($remaining -gt 0) { $process.WaitForExit($remaining) | Out-Null }
-    }
-  }
-  foreach ($process in $helpers) {
-    if (-not $process.HasExited) { throw 'guardian-exit-unconfirmed' }
-  }
-  foreach ($process in $helpers) { $process.Dispose() }
-}
-function Abort-Helpers([Diagnostics.Process[]] $helpers) {
-  foreach ($process in $helpers) {
-    try { $process.StandardInput.Close() } catch {}
-  }
-  foreach ($process in $helpers) {
-    try { if (-not $process.HasExited) { $process.Kill() } } catch {}
-  }
-  foreach ($process in $helpers) {
-    try { if (-not $process.HasExited) { $process.WaitForExit(1000) | Out-Null } } catch {}
-    try { $process.Dispose() } catch {}
-  }
-}
-function Remove-ExitedHelpers() {
-  foreach ($key in @($processes.Keys)) {
-    $process = $processes[$key]
-    if ($process.HasExited) {
-      $process.Dispose()
-      $processes.Remove($key)
-    }
-  }
 }
 function Write-Result(
   [string] $id,
@@ -478,17 +407,37 @@ try {
   if ($stream.Length -le 0 -or $stream.Length -gt ${MAX_WINDOWS_JOB_ASSEMBLY_BYTES}) {
     throw 'invalid-size'
   }
+  $assemblyBytes = New-Object byte[] ([Int32]$stream.Length)
+  $assemblyOffset = 0
+  while ($assemblyOffset -lt $assemblyBytes.Length) {
+    $read = $stream.Read(
+      $assemblyBytes,
+      $assemblyOffset,
+      $assemblyBytes.Length - $assemblyOffset
+    )
+    if ($read -le 0) { throw 'assembly-read' }
+    $assemblyOffset += $read
+  }
+  if ($assemblyOffset -ne $assemblyBytes.Length -or $stream.ReadByte() -ne -1) {
+    throw 'assembly-read'
+  }
   $sha256 = [Security.Cryptography.SHA256]::Create()
   try {
     $actual = [BitConverter]::ToString(
-      $sha256.ComputeHash($stream)
+      $sha256.ComputeHash($assemblyBytes)
     ).Replace('-', '').ToLowerInvariant()
   } finally {
     $sha256.Dispose()
   }
-  if ($stream.Position -ne $stream.Length -or $actual -cne '${assembly.sha256}') {
-    throw 'integrity-mismatch'
-  }
+  if ($actual -cne '${assembly.sha256}') { throw 'integrity-mismatch' }
+  $loadedAssembly = [Reflection.Assembly]::Load($assemblyBytes)
+  $jobType = $loadedAssembly.GetType('InertiaRuntimeJob', $true, $false)
+  $beginGuardMethod = $jobType.GetMethod('BeginGuard')
+  $recoverMethod = $jobType.GetMethod('RecoverManaged')
+  $shutdownMethod = $jobType.GetMethod('ShutdownAll')
+  if ($null -eq $beginGuardMethod -or
+    $null -eq $recoverMethod -or
+    $null -eq $shutdownMethod) { throw 'assembly-contract' }
   $stdout = [Console]::OpenStandardOutput()
   $locked = [Convert]::FromBase64String('${encodedLockedMarker}')
   $stdout.Write($locked, 0, $locked.Length)
@@ -497,13 +446,16 @@ try {
     $line = [Console]::In.ReadLine()
     if ($null -eq $line) { break }
     if ($line -ceq '${EXECUTABLE_LOCK_SHUTDOWN.trim()}') {
-      Stop-Helpers ([Diagnostics.Process[]]@($processes.Values))
-      $processes.Clear()
+      $shutdownArguments = [Object[]]@(
+        ${BROKER_HELPER_GRACEFUL_EXIT_MS + BROKER_HELPER_FORCED_EXIT_MS},
+        $null
+      )
+      $shutdownCode = [Int32]$shutdownMethod.Invoke($null, $shutdownArguments)
+      if ($shutdownCode -ne 0) { throw 'guardian-exit-unconfirmed' }
       Write-Frame '${EXECUTABLE_LOCK_BYE_MARKER}'
       break
     }
     if ($line.Length -gt 2048) { throw 'command-oversized' }
-    Remove-ExitedHelpers
     $parts = $line.Split(' ')
     $mode = $parts[0]
     if ($mode -ceq 'GUARD' -and $parts.Length -eq 6) {
@@ -517,30 +469,19 @@ try {
         $pidValue -notmatch '^[1-9][0-9]{0,9}$' -or
         $creation -notmatch '^[1-9][0-9]{0,19}$' -or
         $timeout -lt 1 -or $timeout -gt ${NATIVE_READY_TIMEOUT_MS}) { throw 'guard-command' }
-      if ($processes.Count -ge ${MAX_BROKER_GUARDIANS}) { throw 'guardian-limit' }
-      $process = Start-Helper ('guard ' + $name + ' ' + $pidValue + ' ' + $creation + ' ${assembly.sha256}')
-      $stdoutTask = $process.StandardOutput.ReadLineAsync()
-      $stderrTask = $process.StandardError.ReadLineAsync()
-      if (-not $stdoutTask.Wait($timeout)) {
-        try { $process.StandardInput.Close() } catch {}
-        if (-not $process.HasExited) { $process.Kill() }
-        if (-not $process.HasExited) { $process.WaitForExit() }
-        $firstError = if ($null -ne $stderrTask.Result) { $stderrTask.Result } else { '' }
-        Write-Result $id 'TIMEOUT' '' $firstError
-        $process.Dispose()
-        continue
+      $guardArguments = [Object[]]@(
+        $name,
+        $pidValue,
+        $creation,
+        $null
+      )
+      $guardCode = [Int32]$beginGuardMethod.Invoke($null, $guardArguments)
+      $guardDiagnostic = [string]$guardArguments[3]
+      if ($guardCode -eq 0) {
+        Write-Result $id 'READY' 'READY' ''
+      } else {
+        Write-Result $id ('EXIT:' + $guardCode) '' $guardDiagnostic
       }
-      $firstOutput = if ($null -eq $stdoutTask.Result) { '' } else { $stdoutTask.Result }
-      $firstError = if ($stderrTask.IsCompleted -and $null -ne $stderrTask.Result) { $stderrTask.Result } else { '' }
-      if ($firstOutput -ceq 'READY' -and -not $process.HasExited) {
-        $processes[$id] = $process
-        Write-Result $id 'READY' $firstOutput $firstError
-        continue
-      }
-      if (-not $process.HasExited) { $process.WaitForExit() }
-      $firstError = if ($null -ne $stderrTask.Result) { $stderrTask.Result } else { '' }
-      Write-Result $id ('EXIT:' + $process.ExitCode) $firstOutput $firstError
-      $process.Dispose()
       continue
     }
     if ($mode -ceq 'RECOVER' -and $parts.Length -eq 4) {
@@ -550,18 +491,11 @@ try {
       if ($id -notmatch '^[1-9][0-9]{0,9}$' -or
         $name -notmatch '^Global\\\\InertiaRuntime-[0-9a-f]{64}$' -or
         $timeout -lt 1 -or $timeout -gt ${NATIVE_READY_TIMEOUT_MS}) { throw 'recover-command' }
-      $process = Start-Helper ('recover ' + $name + ' ${assembly.sha256}')
-      $process.StandardInput.Close()
-      $stdoutTask = $process.StandardOutput.ReadToEndAsync()
-      $stderrTask = $process.StandardError.ReadToEndAsync()
-      if (-not $process.WaitForExit($timeout)) {
-        $process.Kill()
-        $process.WaitForExit()
-        Write-Result $id 'TIMEOUT' $stdoutTask.Result $stderrTask.Result
-      } else {
-        Write-Result $id ('EXIT:' + $process.ExitCode) $stdoutTask.Result $stderrTask.Result
-      }
-      $process.Dispose()
+      $recoverCode = [Int32]$recoverMethod.Invoke(
+        $null,
+        [Object[]]@($name)
+      )
+      Write-Result $id ('EXIT:' + $recoverCode) '' ''
       continue
     }
     throw 'command-invalid'
@@ -574,7 +508,6 @@ try {
   $stderr.Flush()
   exit 25
 } finally {
-  Abort-Helpers ([Diagnostics.Process[]]@($processes.Values))
   if ($null -ne $stream) { $stream.Dispose() }
 }`;
 }

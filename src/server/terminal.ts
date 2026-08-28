@@ -256,6 +256,10 @@ function send(socket: WebSocket, event: ServerEvent): boolean {
 export class TerminalManager {
   private readonly sessions = new Map<string, TerminalSession>();
   private readonly replacementReservations = new Map<string, TerminalSession>();
+  private readonly distinctReplacements = new Map<string, {
+    previousTerminalId: string;
+    replacementTerminalId: string;
+  }>();
   private readonly closingSessions = new Set<Promise<void>>();
   private disposingAll = false;
   private updatePreparationHeld = false;
@@ -351,6 +355,7 @@ export class TerminalManager {
     rows: number,
     onExit?: (exitCode: number) => void,
     onOutput?: (data: string) => void,
+    replacementRequestId?: string,
   ): Promise<string> {
     const shell = userShell(this.platform);
     return await this.replaceProcess(
@@ -366,6 +371,7 @@ export class TerminalManager {
       onOutput,
       null,
       this.platform === "darwin",
+      replacementRequestId,
     );
   }
 
@@ -376,11 +382,24 @@ export class TerminalManager {
     scope: TerminalReattachScope,
     cols: number,
     rows: number,
+    replacementRequestId?: string,
   ): TerminalAttachment {
     if (this.disposingAll || this.updatePreparationHeld) {
       throw new TerminalError("The terminal service is stopping.");
     }
-    const session = this.sessions.get(terminalId);
+    const replacement = replacementRequestId
+      ? this.distinctReplacements.get(replacementRequestId)
+      : undefined;
+    if (
+      replacementRequestId
+      && (!replacement || replacement.previousTerminalId !== terminalId)
+    ) {
+      throw new TerminalError("Terminal replacement not found.");
+    }
+    const replacementId = replacement?.previousTerminalId === terminalId
+      ? replacement.replacementTerminalId
+      : undefined;
+    const session = this.sessions.get(replacementId ?? terminalId);
     if (
       !session
       || session.cwd !== cwd
@@ -474,6 +493,7 @@ export class TerminalManager {
     onOutput?: (data: string) => void,
     providerResume: TerminalProviderResumeAttachment | null = null,
     gracefulReplacement = false,
+    replacementRequestId?: string,
   ): Promise<string> {
     const replaced = this.ownedSession(owner, terminalId);
     if (replaced.cwd !== cwd) {
@@ -496,7 +516,7 @@ export class TerminalManager {
       // existing identity and start the requested process as a separately
       // owned terminal instead of either weakening containment or orphaning
       // the shell behind a reused public ID.
-      return this.createProcessReplacing(
+      const replacementId = this.createProcessReplacing(
         owner,
         null,
         cwd,
@@ -511,6 +531,13 @@ export class TerminalManager {
         replaced.reattachScope,
         providerResume,
       );
+      if (replacementRequestId && this.sessions.has(replacementId)) {
+        this.distinctReplacements.set(replacementRequestId, {
+          previousTerminalId: replaced.id,
+          replacementTerminalId: replacementId,
+        });
+      }
+      return replacementId;
     }
     this.assertCapacity(owner, replaced, replaced.reattachScope);
     this.replacementReservations.set(replaced.id, replaced);
@@ -522,7 +549,7 @@ export class TerminalManager {
       if (owner.readyState !== WebSocket.OPEN) {
         throw new TerminalError("The terminal client disconnected.");
       }
-      return this.createProcessReplacing(
+      const replacementId = this.createProcessReplacing(
         owner,
         replaced,
         cwd,
@@ -537,6 +564,13 @@ export class TerminalManager {
         replaced.reattachScope,
         providerResume,
       );
+      if (replacementRequestId && this.sessions.has(replacementId)) {
+        this.distinctReplacements.set(replacementRequestId, {
+          previousTerminalId: replaced.id,
+          replacementTerminalId: replacementId,
+        });
+      }
+      return replacementId;
     } finally {
       this.replacementReservations.delete(replaced.id);
     }
@@ -994,6 +1028,11 @@ export class TerminalManager {
     const session = this.sessions.get(terminalId);
     if (!session) return;
     this.sessions.delete(terminalId);
+    for (const [requestId, replacement] of this.distinctReplacements) {
+      if (replacement.replacementTerminalId === terminalId) {
+        this.distinctReplacements.delete(requestId);
+      }
+    }
     if (session.detachTimer) clearTimeout(session.detachTimer);
     session.detachTimer = null;
     session.disposeOutput();

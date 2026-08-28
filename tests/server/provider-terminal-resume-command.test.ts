@@ -173,6 +173,8 @@ describe("terminal.provider.resume command", () => {
         },
         conversationId,
       },
+      false,
+      "55555555-5555-4555-8555-555555555555",
     );
     expect(fixture.send).toHaveBeenCalledWith(expect.anything(), {
       type: "terminal.created",

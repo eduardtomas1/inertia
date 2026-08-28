@@ -87,6 +87,11 @@ function TerminalSession({
     message: string;
     source: "action" | "provider";
   } | null>(null);
+  const replacementReconciliationRef = useRef<{
+    requestId: string;
+    source: "action" | "provider";
+    phase: "pending" | "reconciling";
+  } | null>(null);
   const resumeAttemptRef = useRef(0);
   const mountedRef = useRef(false);
   const initialOptionsRef = useRef({ fontSize, theme });
@@ -272,6 +277,31 @@ function TerminalSession({
   }, [sendCommand, visible]);
 
   useEffect(() => subscribe((event) => {
+    const replacementReconciliation = replacementReconciliationRef.current;
+    if (
+      replacementReconciliation
+      && replacementReconciliation.phase === "pending"
+      && "requestId" in event
+      && event.requestId === replacementReconciliation.requestId
+      && event.type === "terminal.created"
+    ) {
+      replacementReconciliationRef.current = {
+        ...replacementReconciliation,
+        phase: "reconciling",
+      };
+      setSessionKey((value) => value + 1);
+      return;
+    }
+    if (
+      replacementReconciliation
+      && "requestId" in event
+      && event.requestId === replacementReconciliation.requestId
+      && event.type === "request.error"
+    ) {
+      replacementReconciliationRef.current = null;
+      setSessionKey((value) => value + 1);
+      return;
+    }
     if (event.type === "terminal.output") {
       if (
         event.terminalId === terminalIdRef.current
@@ -375,10 +405,11 @@ function TerminalSession({
 
     const finishTerminal = (
       event: Extract<ServerEvent, { type: "terminal.created" }>,
+      managedAction = false,
     ): void => {
       terminalIdRef.current = event.terminalId;
       reattachPendingRef.current = false;
-      managedActionTerminalRef.current = false;
+      managedActionTerminalRef.current = managedAction;
       resumedProviderRef.current = event.providerResume ?? null;
       setActiveResume(event.providerResume ?? null);
       setTerminalId(event.terminalId);
@@ -422,6 +453,13 @@ function TerminalSession({
 
     const startTerminal = async (): Promise<void> => {
       const reattachId = terminalIdRef.current;
+      const replacementReconciliation = replacementReconciliationRef.current;
+      if (replacementReconciliation?.phase === "pending") {
+        replacementReconciliationRef.current = {
+          ...replacementReconciliation,
+          phase: "reconciling",
+        };
+      }
       for (let attempt = 0; ; attempt += 1) {
         try {
           if (reattachId) {
@@ -431,7 +469,13 @@ function TerminalSession({
           const event = await sendCommand(command(reattachId
               ? {
                   type: "terminal.attach" as const,
-                  payload: { projectId, conversationId, terminalId: reattachId, ...size },
+                  payload: {
+                    projectId,
+                    conversationId,
+                    terminalId: reattachId,
+                    replacementRequestId: replacementReconciliation?.requestId,
+                    ...size,
+                  },
                 }
               : {
                   type: "terminal.create" as const,
@@ -439,7 +483,11 @@ function TerminalSession({
                 }));
           if (
             event.type !== "terminal.created"
-            || (reattachId && event.terminalId !== reattachId)
+            || (
+              reattachId
+              && event.terminalId !== reattachId
+              && replacementReconciliation === null
+            )
           ) {
             throw new Error("The terminal service returned an unexpected response.");
           }
@@ -454,12 +502,54 @@ function TerminalSession({
           if (event.providerResume && !event.providerResumeConversationId) {
             throw new Error("The terminal service omitted its resumed chat identity.");
           }
+          if (
+            reattachId
+            && event.terminalId !== reattachId
+            && !onTerminalReplacedRef.current({
+              previousTerminalId: reattachId,
+              terminalId: event.terminalId,
+              preservePrevious: !pendingExitRef.current.has(reattachId),
+            })
+          ) {
+            const message = "The recovered terminal could not open because the terminal tab limit was reached.";
+            replacementReconciliationRef.current = null;
+            reconciliationNoticeRef.current = {
+              message,
+              source: replacementReconciliation?.source ?? "action",
+            };
+            try {
+              await sendCommand(command({
+                type: "terminal.close",
+                payload: { terminalId: event.terminalId },
+              }));
+            } catch {
+              // The exact replacement remains bounded by detached cleanup.
+            }
+            if (!cancelled) setSessionKey((value) => value + 1);
+            return;
+          }
           if (!reattachId) terminal?.clear();
-          finishTerminal(event);
+          replacementReconciliationRef.current = null;
+          if (replacementReconciliation) {
+            reconciliationNoticeRef.current = null;
+            setSessionError(null);
+            setResumeError(null);
+          }
+          finishTerminal(event, replacementReconciliation?.source === "action");
           return;
         } catch (terminalError) {
           if (cancelled) return;
           const delivery = runtimeCommandDelivery(terminalError);
+          if (
+            replacementReconciliation
+            && delivery === "rejected"
+            && terminalError instanceof Error
+            && terminalError.message.includes("Terminal replacement not found")
+          ) {
+            replacementReconciliationRef.current = null;
+            setSessionKey((value) => value + 1);
+            return;
+          }
           const retryDelay = TERMINAL_CREATE_RETRY_DELAYS_MS[attempt];
           if (reattachId && delivery === "rejected") {
             if (
@@ -562,7 +652,7 @@ function TerminalSession({
     setSessionState("starting");
     terminalRef.current?.clear();
     terminalRef.current?.writeln(`\x1b[2mStarting ${actionId}…\x1b[0m`);
-    void sendCommand(command({
+    const actionCommand = command({
       type: "project.action.run",
       payload: {
         projectId,
@@ -571,7 +661,8 @@ function TerminalSession({
         terminalId: previousId,
         ...size,
       },
-      }))
+      });
+    void sendCommand(actionCommand)
       .then((event) => {
         if (event.type !== "terminal.created") {
           throw new Error("The action terminal returned an unexpected response.");
@@ -657,9 +748,16 @@ function TerminalSession({
           message: visibleMessage,
           source: "action",
         };
-        operationInFlightRef.current = false;
+        replacementReconciliationRef.current = delivery === "ambiguous"
+          ? { requestId: actionCommand.requestId, source: "action", phase: "pending" }
+          : null;
+        if (delivery !== "ambiguous") {
+          operationInFlightRef.current = false;
+        }
         onActionStarted?.();
-        setSessionKey((value) => value + 1);
+        if (delivery !== "ambiguous") {
+          setSessionKey((value) => value + 1);
+        }
       });
   }, [actionId, conversationId, onActionStarted, projectId, resumeInFlight, sendCommand, sessionState, status]);
 
@@ -688,7 +786,7 @@ function TerminalSession({
     terminalRef.current?.writeln(
       `\r\n\x1b[2mResuming ${resume.providerLabel} session ${resume.sessionId}…\x1b[0m`,
     );
-    void sendCommand(command({
+    const resumeCommand = command({
       type: "terminal.provider.resume",
       payload: {
         projectId: selectedResumeOption.projectId,
@@ -696,7 +794,8 @@ function TerminalSession({
         terminalId: previousId,
         ...size,
       },
-    }))
+    });
+    void sendCommand(resumeCommand)
       .then((event) => {
         if (event.type !== "terminal.created") {
           throw new Error("The provider terminal returned an unexpected response.");
@@ -774,14 +873,33 @@ function TerminalSession({
         setSessionState("ready");
       })
       .catch((error) => {
-        if (!mountedRef.current || attempt !== resumeAttemptRef.current) return;
-        operationInFlightRef.current = false;
+        const delivery = runtimeCommandDelivery(error);
+        if (!mountedRef.current) return;
+        if (
+          delivery === "ambiguous"
+          && terminalIdRef.current === previousId
+        ) {
+          replacementReconciliationRef.current = {
+            requestId: resumeCommand.requestId,
+            source: "provider",
+            phase: "pending",
+          };
+        }
+        if (attempt !== resumeAttemptRef.current) return;
+        if (delivery !== "ambiguous") {
+          operationInFlightRef.current = false;
+        }
         const message = error instanceof Error
           ? error.message
           : `${resume.providerLabel} could not resume this session.`;
         terminalRef.current?.writeln(`\r\n\x1b[31m${message}\x1b[0m`);
         reconciliationNoticeRef.current = { message, source: "provider" };
-        setSessionKey((value) => value + 1);
+        if (delivery !== "ambiguous") {
+          replacementReconciliationRef.current = null;
+        }
+        if (delivery !== "ambiguous") {
+          setSessionKey((value) => value + 1);
+        }
       })
       .finally(() => {
         if (mountedRef.current && attempt === resumeAttemptRef.current) {

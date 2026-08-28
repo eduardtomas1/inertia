@@ -98,6 +98,7 @@ export const workspaceCommandSchemas = [
           projectId: z.string().uuid(),
           conversationId: z.string().uuid().optional(),
           terminalId: z.string().uuid(),
+          replacementRequestId: z.string().uuid().optional(),
           cols: z.number().int().min(20).max(400),
           rows: z.number().int().min(4).max(200),
         })

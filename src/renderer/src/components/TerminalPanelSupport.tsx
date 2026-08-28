@@ -110,16 +110,26 @@ export function replaceTerminalTabWithoutHiding(
   preservePrevious: boolean,
 ): TerminalTab[] | null {
   const source = tabs.find((tab) => tab.id === tabId);
+  const discardable = preservePrevious && tabs.length >= MAX_PERSISTED_TERMINAL_TABS
+    ? tabs.find((tab) => tab.id !== tabId && tab.terminalId === null)
+    : undefined;
   if (
     source?.terminalId !== previousTerminalId
     || tabs.some((tab) => tab.id !== tabId && tab.terminalId === terminalId)
-    || (preservePrevious && tabs.length >= MAX_PERSISTED_TERMINAL_TABS)
+    || (
+      preservePrevious
+      && tabs.length >= MAX_PERSISTED_TERMINAL_TABS
+      && !discardable
+    )
   ) return null;
-  const next = tabs.map((tab) => tab.id === tabId
+  const retained = discardable
+    ? tabs.filter((tab) => tab.id !== discardable.id)
+    : tabs;
+  const next = retained.map((tab) => tab.id === tabId
     ? { ...tab, terminalId }
     : tab);
   return preservePrevious
-    ? [...next, newTerminalTab(nextTerminalTabIndex(tabs), previousTerminalId)]
+    ? [...next, newTerminalTab(nextTerminalTabIndex(retained), previousTerminalId)]
     : next;
 }
 

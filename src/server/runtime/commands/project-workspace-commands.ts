@@ -399,6 +399,7 @@ export function createProjectWorkspaceCommandHandler(
           projectId: command.payload.projectId,
           conversationId: command.payload.conversationId,
           actionId: command.payload.actionId,
+          replacementRequestId: command.requestId,
           terminalId: command.payload.terminalId,
           cols: command.payload.cols,
           rows: command.payload.rows,
@@ -490,6 +491,7 @@ export function createProjectWorkspaceCommandHandler(
           },
           command.payload.cols,
           command.payload.rows,
+          command.payload.replacementRequestId,
         );
         dependencies.send(socket, attachment.providerResume
           ? {
@@ -592,6 +594,8 @@ export function createProjectWorkspaceCommandHandler(
               descriptor: providerResume,
               conversationId: conversation.id,
             },
+            false,
+            command.requestId,
           );
           dependencies.send(socket, {
             type: "terminal.created",

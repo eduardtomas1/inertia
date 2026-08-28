@@ -48,6 +48,7 @@ export interface WorkspaceActionTerminalManager<Owner> {
     rows: number,
     onExit?: (exitCode: number) => void,
     onOutput?: (data: string) => void,
+    replacementRequestId?: string,
   ): Promise<string>;
   input(owner: Owner, terminalId: string, data: string): void;
   close(owner: Owner, terminalId: string): Promise<void>;
@@ -110,6 +111,7 @@ export interface StartWorkspaceActionInput<Owner> {
   rows: number;
   /** Called after the process accepted its command and before its first snapshot is published. */
   onStarted: (terminalId: string) => void;
+  replacementRequestId?: string;
 }
 
 export function providerDisplayName(providerId: ProviderInfo["id"]): string {
@@ -271,6 +273,7 @@ export class WorkspaceRunController<Owner> {
             }
             if (!this.isClosed()) this.broadcastSnapshot();
           },
+          input.replacementRequestId,
         );
         terminalOwnsReservation = true;
       } catch (error) {

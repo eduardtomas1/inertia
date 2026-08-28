@@ -51,6 +51,7 @@ describe("terminal.attach command", () => {
       { projectId, conversationId },
       91,
       31,
+      undefined,
     );
     expect(send).toHaveBeenCalledWith(socket, {
       type: "terminal.created",
@@ -87,6 +88,46 @@ describe("terminal.attach command", () => {
       { projectId, conversationId: null },
       80,
       24,
+      undefined,
     );
+  });
+
+  it("requests authoritative replacement reconciliation after ambiguous delivery", async () => {
+    const replacementId = "66666666-6666-4666-8666-666666666666";
+    const attach = vi.fn(() => ({ terminalId: replacementId }));
+    const send = vi.fn();
+    const handler = createProjectWorkspaceCommandHandler({
+      workspacePath: vi.fn(() => "/workspace/project"),
+      terminals: { attach },
+      send,
+    } as unknown as ProjectWorkspaceCommandDependencies);
+    const socket = { readyState: WebSocket.OPEN } as WebSocket;
+
+    await handler(socket, {
+      type: "terminal.attach",
+      requestId: "55555555-5555-4555-8555-555555555555",
+      payload: {
+        projectId,
+        conversationId,
+        terminalId,
+        replacementRequestId: "77777777-7777-4777-8777-777777777777",
+        cols: 80,
+        rows: 24,
+      },
+    });
+
+    expect(attach).toHaveBeenCalledWith(
+      socket,
+      terminalId,
+      "/workspace/project",
+      { projectId, conversationId },
+      80,
+      24,
+      "77777777-7777-4777-8777-777777777777",
+    );
+    expect(send).toHaveBeenCalledWith(socket, expect.objectContaining({
+      type: "terminal.created",
+      terminalId: replacementId,
+    }));
   });
 });

@@ -862,6 +862,89 @@ describe("TerminalManager", () => {
     expect(owner.send).not.toHaveBeenCalled();
   });
 
+  it("reconciles an ambiguously delivered Darwin replacement without hiding its shell", async () => {
+    const replacedTerminal = fakeTerminal(100);
+    const replacementTerminal = fakeTerminal(101);
+    const spawnTerminal = vi.fn()
+      .mockReturnValueOnce(replacedTerminal.pty)
+      .mockReturnValueOnce(replacementTerminal.pty);
+    const owner = {
+      readyState: 1,
+      bufferedAmount: 0,
+      send: vi.fn(),
+    } as unknown as WebSocket;
+    const scope = { projectId: crypto.randomUUID(), conversationId: crypto.randomUUID() };
+    const manager = new TerminalManager({
+      platform: "darwin",
+      spawnTerminal,
+      spawnOwnedTerminalProcess: (spawnProcess) => ({
+        process: spawnProcess(),
+        confirmStopped: () => false,
+        releaseIfGroupExited: () => undefined,
+        requestPayloadExit: () => false,
+        requestGuardianStop: () => true,
+        waitForGuardianStop: async () => true,
+      }),
+    });
+    const terminalId = manager.create(
+      owner,
+      process.cwd(),
+      80,
+      24,
+      undefined,
+      undefined,
+      scope,
+    );
+    const replacementId = await manager.replaceProcess(
+      owner,
+      terminalId,
+      process.cwd(),
+      "provider-cli",
+      ["resume", "session-id"],
+      {},
+      80,
+      24,
+      undefined,
+      undefined,
+      null,
+      false,
+      "77777777-7777-4777-8777-777777777777",
+    );
+
+    expect(() => manager.attach(
+      owner,
+      terminalId,
+      process.cwd(),
+      scope,
+      80,
+      24,
+      "88888888-8888-4888-8888-888888888888",
+    )).toThrow("Terminal replacement not found");
+    manager.input(owner, replacementId, "provider");
+    manager.input(owner, terminalId, "shell");
+    expect(replacementTerminal.pty.write).toHaveBeenCalledWith("provider");
+    expect(replacedTerminal.pty.write).toHaveBeenCalledWith("shell");
+    replacedTerminal.emitExit({ exitCode: 0, signal: 0 });
+    expect(manager.attach(
+      owner,
+      terminalId,
+      process.cwd(),
+      scope,
+      80,
+      24,
+      "77777777-7777-4777-8777-777777777777",
+    ).terminalId).toBe(replacementId);
+    expect(manager.attach(
+      owner,
+      terminalId,
+      process.cwd(),
+      scope,
+      80,
+      24,
+      "77777777-7777-4777-8777-777777777777",
+    ).terminalId).toBe(replacementId);
+  });
+
   it("keeps a Darwin local shell healthy when its separate replacement cannot spawn", async () => {
     const replacedTerminal = fakeTerminal(100);
     const requestGuardianStop = vi.fn(() => true);

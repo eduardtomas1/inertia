@@ -47,6 +47,7 @@ interface TerminalSession {
   terminateProcessTree: OwnedPidProcessTreeTermination | null;
   guardianExitCompletesDisposal: boolean | null;
   confirmOwnedProcessStopped: () => boolean;
+  requestOwnedPayloadExit: () => boolean;
   requestOwnedGuardianStop: () => boolean;
   waitForOwnedGuardianStop: () => Promise<boolean>;
   flushOutput: () => void;
@@ -433,6 +434,7 @@ export class TerminalManager {
     let pseudoterminal: IPty;
     let confirmOwnedProcessStopped!: () => boolean;
     let releaseOwnedProcessIfExited!: (exitSignal?: number) => void;
+    let requestOwnedPayloadExit!: () => boolean;
     let requestOwnedGuardianStop!: () => boolean;
     let waitForOwnedGuardianStop!: () => Promise<boolean>;
     try {
@@ -451,6 +453,7 @@ export class TerminalManager {
       pseudoterminal = owned.process;
       confirmOwnedProcessStopped = owned.confirmStopped;
       releaseOwnedProcessIfExited = owned.releaseIfGroupExited;
+      requestOwnedPayloadExit = owned.requestPayloadExit ?? (() => false);
       requestOwnedGuardianStop = owned.requestGuardianStop;
       waitForOwnedGuardianStop = owned.waitForGuardianStop;
     } catch {
@@ -545,6 +548,7 @@ export class TerminalManager {
       terminateProcessTree: null,
       guardianExitCompletesDisposal: null,
       confirmOwnedProcessStopped,
+      requestOwnedPayloadExit,
       requestOwnedGuardianStop,
       waitForOwnedGuardianStop,
       flushOutput,
@@ -558,16 +562,20 @@ export class TerminalManager {
   private async gracefullyRetireReplacementShell(
     session: TerminalSession,
   ): Promise<boolean> {
+    // The native guardian gates the shell until asynchronous admission proves
+    // its exact identity and installs the durable claim. Do not spend the
+    // interactive-shell exit budget—or queue input for a shell that cannot
+    // run yet—before that boundary settles.
+    if (!await waitForGuardianStopWithinDeadline(
+      session,
+      Date.now() + this.shutdownTimeoutMs,
+    )) return false;
     const gracefulDeadlineAt = Date.now()
-      + Math.max(1, Math.trunc(this.shutdownTimeoutMs / 2));
-    try {
-      // A local interactive shell can retire the Darwin guardian normally
-      // through PTY EOF. Provider/action terminals are never sent input by
-      // replacement and continue through the fail-closed stop path below.
-      session.pty.write("\x04");
-    } catch {
-      return false;
-    }
+      + this.shutdownTimeoutMs;
+    // Ask the authenticated native guardian to signal only the exact payload
+    // root. Never inject bytes into a terminal that may contain a partial user
+    // command or have a foreground application consuming input.
+    if (!session.requestOwnedPayloadExit()) return false;
     while (!session.exitObserved || !session.confirmOwnedProcessStopped()) {
       const deadlineAt = Math.min(
         gracefulDeadlineAt,
@@ -598,7 +606,7 @@ export class TerminalManager {
   close(owner: WebSocket, terminalId: string): void {
     const session = this.ownedSession(owner, terminalId, true);
     if (session.closing) return;
-    void this.trackDisposal(session).then(
+    void this.trackDisposal(session, session.gracefulReplacement).then(
       () => {
         send(owner, {
           type: "terminal.exit",
@@ -624,7 +632,9 @@ export class TerminalManager {
 
   disposeOwner(owner: WebSocket): void {
     for (const session of this.sessions.values()) {
-      if (session.owner === owner) void this.trackDisposal(session);
+      if (session.owner === owner) {
+        void this.trackDisposal(session, session.gracefulReplacement);
+      }
     }
   }
 
@@ -634,7 +644,7 @@ export class TerminalManager {
       if (deadlineAt !== undefined) {
         session.setShutdownDeadline(deadlineAt);
       }
-      void this.trackDisposal(session);
+      void this.trackDisposal(session, session.gracefulReplacement);
     }
     const closing = [...this.closingSessions];
     const results = await Promise.allSettled(closing);
@@ -694,7 +704,8 @@ export class TerminalManager {
     session: TerminalSession,
     gracefulReplacement: boolean,
   ): Promise<void> {
-    // Let trackDisposal publish the memoized closing promise before EOF can
+    // Let trackDisposal publish the memoized closing promise before a graceful
+    // payload exit can synchronously trigger the PTY exit listener.
     // synchronously trigger the PTY exit listener.
     await Promise.resolve();
     let fallbackDeadlineAt: number | null = null;
@@ -711,7 +722,7 @@ export class TerminalManager {
       return;
     }
     if (gracefulReplacement) {
-      // The EOF prepass is an optional convenience for an interactive Darwin
+      // The graceful prepass is an optional convenience for an interactive Darwin
       // shell. Give the fail-closed guardian path its complete configured
       // budget when no enclosing runtime-shutdown deadline is already tighter.
       fallbackDeadlineAt = Date.now() + this.shutdownTimeoutMs;

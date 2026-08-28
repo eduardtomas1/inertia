@@ -515,6 +515,7 @@ describe("TerminalManager", () => {
     const replacedTerminal = fakeTerminal(100);
     const replacementTerminal = fakeTerminal(101);
     let ownershipStopped = false;
+    const requestPayloadExit = vi.fn(() => true);
     const requestGuardianStop = vi.fn(() => true);
     const spawnTerminal = vi.fn()
       .mockReturnValueOnce(replacedTerminal.pty)
@@ -534,6 +535,7 @@ describe("TerminalManager", () => {
         releaseIfGroupExited: (signal) => {
           if (signal === 0) ownershipStopped = true;
         },
+        requestPayloadExit,
         requestGuardianStop,
         waitForGuardianStop: async () => true,
       }),
@@ -556,8 +558,9 @@ describe("TerminalManager", () => {
       24,
     );
 
-    await Promise.resolve();
-    expect(replacedTerminal.pty.write).toHaveBeenCalledWith("\x04");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(requestPayloadExit).toHaveBeenCalledOnce();
+    expect(replacedTerminal.pty.write).not.toHaveBeenCalled();
     expect(spawnTerminal).toHaveBeenCalledOnce();
     replacedTerminal.emitExit({ exitCode: 0, signal: 0 });
 
@@ -572,11 +575,86 @@ describe("TerminalManager", () => {
     }));
   });
 
+  it.each([
+    "client close",
+    "owner disconnect",
+    "runtime shutdown",
+  ] as const)("admits and normally retires a Darwin shell during %s", async (action) => {
+    vi.useFakeTimers();
+    try {
+      const terminal = fakeTerminal(100);
+      let ownershipStopped = false;
+      const requestPayloadExit = vi.fn(() => true);
+      const requestGuardianStop = vi.fn(() => true);
+      const owner = {
+        readyState: 1,
+        bufferedAmount: 0,
+        send: vi.fn(),
+      } as unknown as WebSocket;
+      const manager = new TerminalManager({
+        platform: "darwin",
+        shutdownTimeoutMs: 20,
+        spawnTerminal: vi.fn(() => terminal.pty),
+        spawnOwnedTerminalProcess: (spawnProcess) => ({
+          process: spawnProcess(),
+          confirmStopped: () => ownershipStopped,
+          releaseIfGroupExited: (signal) => {
+            if (signal === 0) ownershipStopped = true;
+          },
+          requestPayloadExit,
+          requestGuardianStop,
+          waitForGuardianStop: async () => {
+            await new Promise<void>((resolve) => setTimeout(resolve, 15));
+            return true;
+          },
+        }),
+      });
+      const terminalId = manager.create(owner, process.cwd(), 80, 24);
+
+      let completion: Promise<void>;
+      if (action === "client close") {
+        manager.close(owner, terminalId);
+        completion = manager.disposeAll(Date.now() + 100);
+      } else if (action === "owner disconnect") {
+        manager.disposeOwner(owner);
+        completion = manager.disposeAll(Date.now() + 100);
+      } else {
+        completion = manager.disposeAll(Date.now() + 100);
+      }
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(14);
+      expect(terminal.pty.write).not.toHaveBeenCalled();
+      expect(requestPayloadExit).not.toHaveBeenCalled();
+      expect(requestGuardianStop).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(requestPayloadExit).toHaveBeenCalledOnce();
+      expect(terminal.pty.write).not.toHaveBeenCalled();
+      terminal.emitExit({ exitCode: 0, signal: 0 });
+      await vi.advanceTimersByTimeAsync(10);
+      await expect(completion).resolves.toBeUndefined();
+
+      expect(requestGuardianStop).not.toHaveBeenCalled();
+      if (action === "client close") {
+        expect(owner.send).toHaveBeenCalledWith(JSON.stringify({
+          type: "terminal.exit",
+          terminalId,
+          exitCode: 130,
+        }));
+      } else {
+        expect(owner.send).not.toHaveBeenCalled();
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps Darwin replacement blocked when graceful shell exit is unproved", async () => {
     vi.useFakeTimers();
     try {
       const replacedTerminal = fakeTerminal(100);
       const replacementTerminal = fakeTerminal(101);
+      const requestPayloadExit = vi.fn(() => true);
       const requestGuardianStop = vi.fn(() => true);
       const spawnTerminal = vi.fn()
         .mockReturnValueOnce(replacedTerminal.pty)
@@ -594,6 +672,7 @@ describe("TerminalManager", () => {
           process: spawnProcess(),
           confirmStopped: () => false,
           releaseIfGroupExited: () => undefined,
+          requestPayloadExit,
           requestGuardianStop,
           waitForGuardianStop: async () => true,
         }),
@@ -619,9 +698,10 @@ describe("TerminalManager", () => {
         "A terminal process ownership claim could not be retired during runtime shutdown.",
       );
 
-      await Promise.resolve();
-      expect(replacedTerminal.pty.write).toHaveBeenCalledWith("\x04");
-      await vi.advanceTimersByTimeAsync(10);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(requestPayloadExit).toHaveBeenCalledOnce();
+      expect(replacedTerminal.pty.write).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(20);
       expect(requestGuardianStop).toHaveBeenCalledOnce();
       replacedTerminal.emitExit({ exitCode: 0, signal: 31 });
       await vi.advanceTimersByTimeAsync(20);
@@ -633,13 +713,14 @@ describe("TerminalManager", () => {
     }
   });
 
-  it("preserves the full Darwin guardian fallback budget after EOF", async () => {
+  it("preserves the full Darwin guardian fallback budget after graceful exit", async () => {
     vi.useFakeTimers();
     try {
       const replacedTerminal = fakeTerminal(100);
       const replacementTerminal = fakeTerminal(101);
       let ownershipStopped = false;
       let replacementSettled = false;
+      const requestPayloadExit = vi.fn(() => true);
       const requestGuardianStop = vi.fn(() => true);
       const spawnTerminal = vi.fn()
         .mockReturnValueOnce(replacedTerminal.pty)
@@ -657,6 +738,7 @@ describe("TerminalManager", () => {
           process: spawnProcess(),
           confirmStopped: () => ownershipStopped,
           releaseIfGroupExited: () => undefined,
+          requestPayloadExit,
           requestGuardianStop,
           waitForGuardianStop: async () => true,
         }),
@@ -676,14 +758,15 @@ describe("TerminalManager", () => {
         replacementSettled = true;
       });
 
-      await Promise.resolve();
-      expect(replacedTerminal.pty.write).toHaveBeenCalledWith("\x04");
-      await vi.advanceTimersByTimeAsync(10);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(requestPayloadExit).toHaveBeenCalledOnce();
+      expect(replacedTerminal.pty.write).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(20);
       expect(requestGuardianStop).toHaveBeenCalledOnce();
 
-      // This is beyond the original EOF-plus-fallback deadline. The strict
+      // This is beyond the original graceful-plus-fallback deadline. The strict
       // guardian path must still own its complete configured 20 ms budget.
-      await vi.advanceTimersByTimeAsync(14);
+      await vi.advanceTimersByTimeAsync(19);
       expect(replacementSettled).toBe(false);
       ownershipStopped = true;
       replacedTerminal.emitExit({ exitCode: 0, signal: 0 });
@@ -742,8 +825,8 @@ describe("TerminalManager", () => {
         "A terminal process tree could not be confirmed stopped during runtime shutdown.",
       );
 
-      await Promise.resolve();
-      await vi.advanceTimersByTimeAsync(10);
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(20);
       expect(requestGuardianStop).toHaveBeenCalledOnce();
 
       const shutdown = manager.disposeAll(Date.now() + 5);
@@ -812,6 +895,7 @@ describe("TerminalManager", () => {
       const replacedTerminal = fakeTerminal(100);
       const replacementTerminal = fakeTerminal(101);
       let ownershipStopped = false;
+      const requestPayloadExit = vi.fn(() => true);
       const requestGuardianStop = vi.fn(() => true);
       const spawnTerminal = vi.fn()
         .mockReturnValueOnce(replacedTerminal.pty)
@@ -829,6 +913,7 @@ describe("TerminalManager", () => {
           process: spawnProcess(),
           confirmStopped: () => ownershipStopped,
           releaseIfGroupExited: () => undefined,
+          requestPayloadExit,
           requestGuardianStop,
           waitForGuardianStop: async () => true,
         }),
@@ -849,6 +934,7 @@ describe("TerminalManager", () => {
       replacedTerminal.emitExit({ exitCode: 0, signal: 0 });
       await vi.advanceTimersByTimeAsync(20);
 
+      expect(requestPayloadExit).toHaveBeenCalledOnce();
       expect(requestGuardianStop).not.toHaveBeenCalled();
       expect(spawnTerminal).toHaveBeenCalledOnce();
 
@@ -862,7 +948,7 @@ describe("TerminalManager", () => {
     }
   });
 
-  it("never sends replacement EOF to non-Darwin local shells", async () => {
+  it("never requests graceful replacement exit for non-Darwin local shells", async () => {
     const replacedTerminal = fakeTerminal(100);
     const replacementTerminal = fakeTerminal(101);
     const spawnTerminal = vi.fn()
@@ -900,6 +986,7 @@ describe("TerminalManager", () => {
     const replacementTerminal = fakeTerminal(101);
     let ownershipStopped = false;
     const onExit = vi.fn();
+    const requestPayloadExit = vi.fn(() => true);
     const spawnTerminal = vi.fn()
       .mockReturnValueOnce(replacedTerminal.pty)
       .mockReturnValueOnce(replacementTerminal.pty);
@@ -918,6 +1005,7 @@ describe("TerminalManager", () => {
         releaseIfGroupExited: (signal) => {
           if (signal === 0) ownershipStopped = true;
         },
+        requestPayloadExit,
         requestGuardianStop: () => true,
         waitForGuardianStop: async () => true,
       }),
@@ -941,8 +1029,9 @@ describe("TerminalManager", () => {
       24,
     );
     const shutdown = manager.disposeAll(Date.now() + 50);
-    await Promise.resolve();
-    expect(replacedTerminal.pty.write).toHaveBeenCalledOnce();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(requestPayloadExit).toHaveBeenCalledOnce();
+    expect(replacedTerminal.pty.write).not.toHaveBeenCalled();
     replacedTerminal.emitExit({ exitCode: 0, signal: 0 });
 
     await expect(shutdown).resolves.toBeUndefined();

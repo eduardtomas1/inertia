@@ -1331,10 +1331,8 @@ describe("cross-platform runtime owned process recovery", () => {
     const directory = temporaryDirectory();
     const expected = {
       platform: "darwin" as const,
-      pid: 4_242,
-      parentPid: process.pid,
-      processGroupId: 4_242,
-      sessionId: 4_242,
+      pid: 4_242, parentPid: process.pid,
+      processGroupId: 4_242, sessionId: 4_242,
       startTimeSeconds: "1756100000",
       startTimeMicroseconds: 123_456,
     };
@@ -1398,10 +1396,7 @@ describe("cross-platform runtime owned process recovery", () => {
     let resolveReady!: (identity: typeof expected) => void;
     const ready = new Promise<typeof expected>((resolve) => { resolveReady = resolve; });
     const deactivate = activateRuntimeOwnedProcessRegistry(
-      directory,
-      runtimeGenerationId,
-      systemBootId,
-      {
+      directory, runtimeGenerationId, systemBootId, {
         platform: "darwin",
         darwinGuardianPath: "/trusted/runtime-process-guardian",
         readDarwinGuardianReadyAsync: async () => await ready,

@@ -568,7 +568,13 @@ export async function terminateProcessTreeAndWait(
   }
   const waitForObservedDirectChildClose = observeDirectChildClose(child);
 
-  if (requestRuntimeOwnedGuardianStop(child)) {
+  const guardianStopBarrier = requestRuntimeOwnedGuardianStop(child);
+  if (guardianStopBarrier) {
+    // A failed exact signal can race the guardian's ordinary close. The
+    // durable claim, not the helper's boolean, is authoritative: keep the
+    // entire bounded close/retirement proof, and never fall through to a raw
+    // PID/PGID signal while this guardian owns the request.
+    await guardianStopBarrier;
     const childClosed = await waitForObservedDirectChildClose(waitMs);
     if (!childClosed) return false;
     const ownershipDeadline = Date.now() + waitMs;

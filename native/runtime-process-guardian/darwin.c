@@ -39,6 +39,7 @@ struct owned_tree_tracker {
 
 static volatile sig_atomic_t stop_requested = 0;
 static volatile sig_atomic_t authorization_requested = 0;
+static volatile sig_atomic_t graceful_exit_requested = 0;
 static volatile sig_atomic_t authorization_runtime_pid = 0;
 
 static void request_stop(int signal_number) {
@@ -56,6 +57,19 @@ static void request_authorization(
   if (information != NULL
     && information->si_pid == authorization_runtime_pid) {
     authorization_requested = 1;
+  }
+}
+
+static void request_graceful_exit(
+  int signal_number,
+  siginfo_t *information,
+  void *context
+) {
+  (void)signal_number;
+  (void)context;
+  if (information != NULL
+    && information->si_pid == authorization_runtime_pid) {
+    graceful_exit_requested = 1;
   }
 }
 
@@ -693,7 +707,8 @@ static int guardian_signal_handlers_ready(pid_t pid) {
   return sigismember(&process.kp_proc.p_sigcatch, SIGTERM) == 1
     && sigismember(&process.kp_proc.p_sigcatch, SIGINT) == 1
     && sigismember(&process.kp_proc.p_sigcatch, SIGHUP) == 1
-    && sigismember(&process.kp_proc.p_sigcatch, SIGUSR1) == 1;
+    && sigismember(&process.kp_proc.p_sigcatch, SIGUSR1) == 1
+    && sigismember(&process.kp_proc.p_sigcatch, SIGUSR2) == 1;
 }
 
 static int ready_mode(const char *raw_pid) {
@@ -766,6 +781,7 @@ static int watch_mode(int argc, char *argv[]) {
   sigaddset(&guarded_signals, SIGINT);
   sigaddset(&guarded_signals, SIGHUP);
   sigaddset(&guarded_signals, SIGUSR1);
+  sigaddset(&guarded_signals, SIGUSR2);
   if (sigprocmask(SIG_BLOCK, &guarded_signals, &previous_signals) != 0) return 70;
 
   struct sigaction action;
@@ -782,6 +798,12 @@ static int watch_mode(int argc, char *argv[]) {
   sigemptyset(&authorization_action.sa_mask);
   authorization_runtime_pid = (sig_atomic_t)runtime_pid;
   if (sigaction(SIGUSR1, &authorization_action, NULL) != 0) return 70;
+  struct sigaction graceful_exit_action;
+  memset(&graceful_exit_action, 0, sizeof(graceful_exit_action));
+  graceful_exit_action.sa_sigaction = request_graceful_exit;
+  graceful_exit_action.sa_flags = SA_SIGINFO;
+  sigemptyset(&graceful_exit_action.sa_mask);
+  if (sigaction(SIGUSR2, &graceful_exit_action, NULL) != 0) return 70;
 
   // PID=PGID=SID is the durable readiness boundary read by the parent. Install
   // cleanup handlers first so an admitted guardian can never be terminated
@@ -860,6 +882,45 @@ static int watch_mode(int argc, char *argv[]) {
     } while (bytes < 0 && errno == EINTR);
     (void)close(execution_gate[0]);
     if (bytes != 1 || authorization != 'A') _exit(125);
+#if defined(INERTIA_RUNTIME_GUARDIAN_TEST_PREEXEC_DELAY)
+    const char *preexec_marker = getenv(
+      "INERTIA_RUNTIME_GUARDIAN_TEST_PREEXEC_MARKER"
+    );
+    FILE *preexec_stream = preexec_marker == NULL
+      ? NULL
+      : fopen(preexec_marker, "w");
+    if (preexec_stream == NULL
+      || fputs("ready\n", preexec_stream) < 0
+      || fclose(preexec_stream) != 0) _exit(124);
+    int graceful_signal_pending = 0;
+    const struct timespec preexec_pause = {
+      .tv_sec = 0,
+      .tv_nsec = POLL_NANOSECONDS
+    };
+    for (int poll = 0; poll < 250; poll += 1) {
+      sigset_t pending_signals;
+      if (sigpending(&pending_signals) != 0) _exit(124);
+      if (sigismember(&pending_signals, SIGHUP) == 1) {
+        graceful_signal_pending = 1;
+        break;
+      }
+      (void)nanosleep(&preexec_pause, NULL);
+    }
+    if (!graceful_signal_pending) _exit(124);
+#endif
+    // The fork inherits every guardian handler while their signals remain
+    // blocked. Restore payload dispositions before unblocking so a graceful
+    // SIGHUP queued in the gate-to-exec window terminates the payload instead
+    // of running the guardian's stop handler and then surviving exec.
+    struct sigaction payload_action;
+    memset(&payload_action, 0, sizeof(payload_action));
+    payload_action.sa_handler = SIG_DFL;
+    sigemptyset(&payload_action.sa_mask);
+    if (sigaction(SIGTERM, &payload_action, NULL) != 0
+      || sigaction(SIGINT, &payload_action, NULL) != 0
+      || sigaction(SIGHUP, &payload_action, NULL) != 0
+      || sigaction(SIGUSR1, &payload_action, NULL) != 0
+      || sigaction(SIGUSR2, &payload_action, NULL) != 0) _exit(126);
     if (sigprocmask(SIG_SETMASK, &previous_signals, NULL) != 0) _exit(126);
     execvp(argv[4], &argv[4]);
     _exit(errno == ENOENT ? 127 : 126);
@@ -903,6 +964,7 @@ static int watch_mode(int argc, char *argv[]) {
   int status = 0;
   int result = 137;
   int payload_settled = 0;
+  int graceful_exit_dispatched = 0;
   int active_census_polls = ACTIVE_CENSUS_INTERVAL_POLLS;
   for (;;) {
     observe_root_forks(&tracker);
@@ -920,6 +982,20 @@ static int watch_mode(int argc, char *argv[]) {
     if (waited < 0 && errno != EINTR) {
       result = 1;
       break;
+    }
+    // The exact runtime may ask an admitted interactive shell to retire
+    // without injecting terminal input. SIGHUP is delivered only to the
+    // birth-identity-bound payload root; its ordinary guardian completion
+    // path still performs the bounded descendant drain below. A shell that
+    // ignores the signal remains owned until the runtime requests the strict
+    // guardian stop path.
+    if (graceful_exit_requested && !graceful_exit_dispatched) {
+      struct session_member payload = { .identity = child_identity };
+      if (!signal_exact_owned_member(&payload, SIGHUP)) {
+        result = 137;
+        break;
+      }
+      graceful_exit_dispatched = 1;
     }
     // The initial admission census proves the exact blocked root before it can
     // exec or fork. Until kqueue reports a fork (or an observer error taints

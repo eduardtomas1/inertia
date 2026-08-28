@@ -256,35 +256,44 @@ export function activeRuntimeOwnedProcessPlatform(): RuntimeOwnedProcessPlatform
   return activeRegistry?.platform ?? null;
 }
 
-/** Requests the platform guardian to drain an exact actively-owned child. */
-export function requestRuntimeOwnedGuardianStop(child: ChildProcess): boolean {
+/**
+ * Requests the platform guardian to drain an exact actively-owned child and
+ * returns the bounded admission/stop barrier that owns that request.
+ */
+export function requestRuntimeOwnedGuardianStop(
+  child: ChildProcess,
+): Promise<boolean> | null {
   const registry = activeRegistry;
   if (!registry || (registry.platform !== "darwin" && registry.platform !== "linux")) {
-    return false;
+    return null;
   }
   const claim = registry.claims.get(child);
-  if (!claim || claim.released || !child.pid) return false;
+  if (!claim || claim.released || !child.pid) return null;
   if (registry.platform === "linux") {
     claim.stopRequested = true;
-    if (!claim.admission && claim.linuxIdentity && registry.darwinGuardianPath) {
-      void signalLinuxGuardianExactAsync(
+    if (claim.admission) return claim.admission;
+    if (claim.linuxIdentity && registry.darwinGuardianPath) {
+      return signalLinuxGuardianExactAsync(
         claim.linuxIdentity,
         registry.darwinGuardianPath,
         "stop",
       );
     }
     // A known Linux guardian always owns this stop attempt. Failure to prove
-    // the exact helper signal must time out with its durable claim retained;
-    // returning false would authorize the caller's unsafe raw-PID fallback.
-    return true;
+    // the exact helper signal is reported through the barrier with its durable
+    // claim retained; the caller must never use an unsafe raw-PID fallback.
+    return Promise.resolve(false);
   }
   claim.stopRequested = true;
-  if (!claim.admission && claim.darwinIdentity) {
-    try { child.kill("SIGTERM"); } catch { /* The exact guardian may be gone. */ }
+  if (claim.admission) return claim.admission;
+  if (claim.darwinIdentity) {
+    try { return Promise.resolve(child.kill("SIGTERM")); } catch {
+      return Promise.resolve(false);
+    }
   }
   // The guardian owns the stop even while asynchronous admission is pending;
   // never authorize a caller fallback against a recyclable raw PID.
-  return true;
+  return Promise.resolve(false);
 }
 
 function hardStopUnclaimed(
@@ -977,6 +986,7 @@ export interface RuntimeOwnedPidProcess<T> {
   readonly process: T;
   confirmStopped(): boolean;
   releaseIfGroupExited(exitSignal?: number): void;
+  requestPayloadExit?(): boolean;
   requestGuardianStop(): boolean;
   waitForGuardianStop(): Promise<boolean>;
 }
@@ -991,6 +1001,7 @@ export function spawnRuntimeOwnedPidProcess<T extends { readonly pid: number }>(
       process: spawnProcess(),
       confirmStopped: () => true,
       releaseIfGroupExited: () => undefined,
+      requestPayloadExit: () => false,
       requestGuardianStop: () => false,
       waitForGuardianStop: async () => false,
     };
@@ -1032,6 +1043,7 @@ export function spawnRuntimeOwnedPidProcess<T extends { readonly pid: number }>(
       return {
         process: confirmedOwned,
         confirmStopped: () => claim.released,
+        requestPayloadExit: () => false,
         requestGuardianStop: () => {
           if (claim.released) return true;
           claim.stopRequested = true;
@@ -1071,9 +1083,21 @@ export function spawnRuntimeOwnedPidProcess<T extends { readonly pid: number }>(
       trackAdmission(registry, claim, admission);
       return {
         process: confirmedOwned,
-        // A successful admission proves ownership, not termination. Only the
-        // guardian's normal close observation may retire this live claim.
+        // Only a normal guardian close may retire an admitted live claim.
         confirmStopped: () => claim.released,
+        requestPayloadExit: () => {
+          if (claim.released) return true;
+          if (activeRegistry !== registry || registry.tainted
+            || !claim.admissionSucceeded || !claim.darwinIdentity) return false;
+          try {
+            const current = registry.readDarwinIdentity(confirmedOwned.pid);
+            if (!current || !sameProcess(current, claim.darwinIdentity)) return false;
+            process.kill(current.pid, "SIGUSR2");
+            return true;
+          } catch {
+            return false;
+          }
+        },
         requestGuardianStop: () => {
           if (claim.released) return true;
           claim.stopRequested = true;
@@ -1145,6 +1169,7 @@ export function spawnRuntimeOwnedPidProcess<T extends { readonly pid: number }>(
     confirmStopped: () => registry.platform === "linux"
       ? claim.released
       : releaseActiveClaim(registry, claim),
+    requestPayloadExit: () => false,
     requestGuardianStop: () => {
       if (registry.platform !== "linux" && registry.platform !== "darwin") return false;
       if (claim.released) return true;

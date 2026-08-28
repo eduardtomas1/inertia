@@ -64,10 +64,14 @@ function runDarwinGuardianHelper(
         finish(null, null);
       }
     };
+    const failAndStop = (): void => {
+      failed = true;
+      stop();
+    };
     const collect = (target: "stdout" | "stderr", data: Buffer): void => {
       outputBytes += data.byteLength;
       if (outputBytes > DARWIN_GUARDIAN_HELPER_OUTPUT_BYTES) {
-        stop();
+        failAndStop();
         return;
       }
       if (target === "stdout") stdout += data.toString("utf8");

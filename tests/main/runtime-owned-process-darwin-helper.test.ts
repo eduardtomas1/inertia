@@ -81,4 +81,25 @@ describe("macOS runtime guardian helper", () => {
 
     await expect(result).resolves.toBeNull();
   });
+
+  it("rejects oversized output after a valid helper has exited but before close", async () => {
+    vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
+    const helper = fakeHelper();
+    childProcess.spawn.mockReturnValue(helper);
+
+    const result = darwinProcessGuardianReadyAsync(
+      4_242,
+      "/trusted/runtime-process-guardian",
+    );
+    helper.stdout.emit(
+      "data",
+      Buffer.from("4242|101|4242|4242|1756100000|123456\n"),
+    );
+    helper.exitCode = 0;
+    helper.stdout.emit("data", Buffer.alloc(4 * 1024));
+    helper.emit("close", 0, null);
+
+    await expect(result).resolves.toBeNull();
+    expect(helper.kill).not.toHaveBeenCalled();
+  });
 });

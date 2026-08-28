@@ -57,8 +57,26 @@ if (process.platform === "win32") {
   const script = `$ErrorActionPreference = 'Stop'
 $sourcePath = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encodePath(sourcePath)}'))
 $outputPath = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encodePath(windowsOutput)}'))
+$sourceInfo = [IO.FileInfo]::new($sourcePath)
+if (-not $sourceInfo.Exists -or $sourceInfo.Length -le 0 -or $sourceInfo.Length -gt 1048576) {
+  throw 'The Windows runtime Job Object source is missing or invalid.'
+}
 $source = [IO.File]::ReadAllText($sourcePath, [Text.Encoding]::UTF8)
-Add-Type -TypeDefinition $source -Language CSharp -OutputAssembly $outputPath -OutputType Library -CompilerOptions @('/platform:anycpu', '/optimize+')`;
+$provider = [Microsoft.CSharp.CSharpCodeProvider]::new()
+$parameters = [System.CodeDom.Compiler.CompilerParameters]::new()
+$parameters.GenerateExecutable = $false
+$parameters.GenerateInMemory = $false
+$parameters.OutputAssembly = $outputPath
+$parameters.CompilerOptions = '/platform:anycpu /optimize+'
+try {
+  $results = $provider.CompileAssemblyFromSource($parameters, [string[]]@($source))
+  if ($results.Errors.HasErrors) {
+    $errors = @($results.Errors | Where-Object { -not $_.IsWarning } | ForEach-Object { $_.ToString() })
+    throw "The Windows runtime Job Object assembly failed to compile: $($errors -join '; ')"
+  }
+} finally {
+  $provider.Dispose()
+}`;
   const result = spawnSync(
     win32.join(
       systemRoot,

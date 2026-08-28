@@ -178,9 +178,17 @@ describe("final release container smoke", () => {
     );
     expect(source).toContain('"windows-runtime-job.dll"');
     expect(source).toContain('"native", "runtime-process-guardian", "windows.cs"');
+    expect(source).toContain("[Microsoft.CSharp.CSharpCodeProvider]::new()");
+    expect(source).toContain("[System.CodeDom.Compiler.CompilerParameters]::new()");
+    expect(source).toContain("$parameters.GenerateExecutable = $false");
+    expect(source).toContain("$parameters.GenerateInMemory = $false");
+    expect(source).toContain("$parameters.OutputAssembly = $outputPath");
     expect(source).toContain(
-      "-OutputAssembly $outputPath -OutputType Library -CompilerOptions @('/platform:anycpu', '/optimize+')",
+      "$parameters.CompilerOptions = '/platform:anycpu /optimize+'",
     );
+    expect(source).toContain("$provider.CompileAssemblyFromSource(");
+    expect(source).toContain("$results.Errors.HasErrors");
+    expect(source).not.toContain("Add-Type -TypeDefinition");
     expect(source).toContain('shell: false');
     expect(source).toContain('timeout: 60_000');
     expect(source).toContain('metadata.size > 1024 * 1024');

@@ -39,6 +39,7 @@ interface TerminalSession {
   exitObserved: boolean;
   exitWaiters: Set<() => void>;
   terminationRequested: boolean;
+  gracefulReplacement: boolean;
   closing: Promise<void> | null;
   shutdownDeadlineAt: number | null;
   waitForShutdownDeadline: Promise<number>;
@@ -57,6 +58,7 @@ export interface TerminalManagerOptions {
   spawnTerminal?: typeof spawn;
   shutdownTimeoutMs?: number;
   outputFlushMs?: number;
+  platform?: NodeJS.Platform;
   createProcessTreeTermination?: (
     pid: number,
     waitForExit: WaitForProcessExit,
@@ -71,8 +73,8 @@ export interface TerminalManagerOptions {
   ) => RuntimeOwnedPidProcess<IPty>;
 }
 
-function userShell(): { executable: string; args: string[] } {
-  if (process.platform === "win32") {
+function userShell(platform: NodeJS.Platform): { executable: string; args: string[] } {
+  if (platform === "win32") {
     return { executable: process.env.ComSpec || "powershell.exe", args: [] };
   }
 
@@ -81,7 +83,7 @@ function userShell(): { executable: string; args: string[] } {
     return { executable: configuredShell, args: ["-l"] };
   }
 
-  const fallback = process.platform === "darwin" ? "/bin/zsh" : "/bin/bash";
+  const fallback = platform === "darwin" ? "/bin/zsh" : "/bin/bash";
   return { executable: fallback, args: ["-l"] };
 }
 
@@ -194,6 +196,7 @@ export class TerminalManager {
   private readonly spawnTerminal: typeof spawn;
   private readonly shutdownTimeoutMs: number;
   private readonly outputFlushMs: number;
+  private readonly platform: NodeJS.Platform;
   private readonly createProcessTreeTermination: (
     pid: number,
     waitForExit: WaitForProcessExit,
@@ -205,6 +208,7 @@ export class TerminalManager {
   private readonly closingFailures = new Map<string, Error>();
 
   constructor(options: TerminalManagerOptions = {}) {
+    this.platform = options.platform ?? process.platform;
     this.spawnTerminal = options.spawnTerminal ?? spawn;
     this.shutdownTimeoutMs = Math.max(
       1,
@@ -243,8 +247,20 @@ export class TerminalManager {
     onExit?: (exitCode: number) => void,
     onOutput?: (data: string) => void,
   ): string {
-    const shell = userShell();
-    return this.createProcess(owner, cwd, shell.executable, shell.args, process.env, cols, rows, onExit, onOutput);
+    const shell = userShell(this.platform);
+    return this.createProcessReplacing(
+      owner,
+      null,
+      cwd,
+      shell.executable,
+      shell.args,
+      process.env,
+      cols,
+      rows,
+      onExit,
+      onOutput,
+      this.platform === "darwin",
+    );
   }
 
   createProcess(
@@ -269,6 +285,7 @@ export class TerminalManager {
       rows,
       onExit,
       onOutput,
+      false,
     );
   }
 
@@ -296,7 +313,7 @@ export class TerminalManager {
     this.assertCapacity(owner, replaced);
     this.replacementReservations.set(replaced.id, replaced);
     try {
-      await this.trackDisposal(replaced);
+      await this.trackDisposal(replaced, replaced.gracefulReplacement);
       if (
         owner.readyState !== WebSocket.OPEN
         || !send(owner, {
@@ -377,6 +394,7 @@ export class TerminalManager {
     rows: number,
     onExit?: (exitCode: number) => void,
     onOutput?: (data: string) => void,
+    gracefulReplacement = false,
   ): string {
     this.assertCapacity(owner, replaced);
 
@@ -485,6 +503,7 @@ export class TerminalManager {
       exitObserved: false,
       exitWaiters: new Set(),
       terminationRequested: false,
+      gracefulReplacement,
       closing: null,
       shutdownDeadlineAt: null,
       waitForShutdownDeadline,
@@ -507,6 +526,38 @@ export class TerminalManager {
     };
     this.sessions.set(id, session);
     return id;
+  }
+
+  private async gracefullyRetireReplacementShell(
+    session: TerminalSession,
+  ): Promise<boolean> {
+    const shutdownDeadlineAt = Date.now() + this.shutdownTimeoutMs;
+    session.setShutdownDeadline(shutdownDeadlineAt);
+    const gracefulDeadlineAt = Math.min(
+      session.shutdownDeadlineAt ?? shutdownDeadlineAt,
+      Date.now() + Math.max(1, Math.trunc(this.shutdownTimeoutMs / 2)),
+    );
+    try {
+      // A local interactive shell can retire the Darwin guardian normally
+      // through PTY EOF. Provider/action terminals are never sent input by
+      // replacement and continue through the fail-closed stop path below.
+      session.pty.write("\x04");
+    } catch {
+      return false;
+    }
+    while (!session.exitObserved || !session.confirmOwnedProcessStopped()) {
+      const deadlineAt = Math.min(
+        gracefulDeadlineAt,
+        session.shutdownDeadlineAt ?? gracefulDeadlineAt,
+      );
+      const remainingMs = Math.trunc(deadlineAt - Date.now());
+      if (remainingMs <= 0) return false;
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, Math.min(10, remainingMs));
+        timer.unref();
+      });
+    }
+    return true;
   }
 
   input(owner: WebSocket, terminalId: string, data: string): void {
@@ -616,8 +667,27 @@ export class TerminalManager {
     }
   }
 
-  private disposeAndWait(session: TerminalSession): Promise<void> {
-    return new Promise<void>((resolve, reject) => {
+  private async disposeAndWait(
+    session: TerminalSession,
+    gracefulReplacement: boolean,
+  ): Promise<void> {
+    // Let trackDisposal publish the memoized closing promise before EOF can
+    // synchronously trigger the PTY exit listener.
+    await Promise.resolve();
+    if (
+      gracefulReplacement
+      && await this.gracefullyRetireReplacementShell(session)
+    ) {
+      this.dispose(session.id, false);
+      try {
+        session.onExit?.(130);
+      } catch {
+        // The exact durable claim is already retired.
+      }
+      return;
+    }
+
+    await new Promise<void>((resolve, reject) => {
       let settled = false;
       const waitForExit: WaitForProcessExit = (waitMs) => {
         if (session.exitObserved) return Promise.resolve(true);
@@ -641,7 +711,6 @@ export class TerminalManager {
         if (error) reject(error);
         else resolve();
       };
-      session.terminationRequested = true;
       // Start with the root still alive. On POSIX the terminator freezes it
       // before snapshotting descendants, preventing a prompt root exit from
       // reparenting a surviving background process beyond discovery.
@@ -704,9 +773,13 @@ export class TerminalManager {
     });
   }
 
-  private trackDisposal(session: TerminalSession): Promise<void> {
+  private trackDisposal(
+    session: TerminalSession,
+    gracefulReplacement = false,
+  ): Promise<void> {
     if (session.closing) return session.closing;
-    const closing = this.disposeAndWait(session);
+    session.terminationRequested = true;
+    const closing = this.disposeAndWait(session, gracefulReplacement);
     session.closing = closing;
     this.closingSessions.add(closing);
     void closing.then(

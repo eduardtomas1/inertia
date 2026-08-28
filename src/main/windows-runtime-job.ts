@@ -330,7 +330,11 @@ function decodeBrokerField(value: string): string {
     throw new Error("The Windows runtime broker returned an invalid result.");
   }
   const bytes = Buffer.from(value, "base64");
-  if (bytes.length > MAX_OUTPUT_BYTES || !isUtf8(bytes)) {
+  if (
+    bytes.length > MAX_OUTPUT_BYTES
+    || bytes.toString("base64") !== value
+    || !isUtf8(bytes)
+  ) {
     throw new Error("The Windows runtime broker returned an invalid result.");
   }
   return bytes.toString("utf8");
@@ -698,29 +702,46 @@ async function acquireWindowsRuntimeJobExecutableLock(
           return operation;
         },
         release: async () => {
-          if (!held) return;
+          const requestedShutdown = held;
           held = false;
-          if (!child.stdin.destroyed && !child.stdin.writableEnded) {
+          if (
+            requestedShutdown
+            && !child.stdin.destroyed
+            && !child.stdin.writableEnded
+          ) {
             try {
               child.stdin.end(EXECUTABLE_LOCK_SHUTDOWN);
             } catch {
               if (child.exitCode === null && child.signalCode === null) child.kill();
             }
-          } else if (child.exitCode === null && child.signalCode === null) {
+          } else if (
+            requestedShutdown
+            && child.exitCode === null
+            && child.signalCode === null
+          ) {
             child.kill();
           }
           if (!closed) {
-            await new Promise<void>((resolve) => {
+            await new Promise<void>((resolve, reject) => {
               const terminate = setTimeout(() => {
                 if (child.exitCode === null && child.signalCode === null) child.kill();
+              }, 2_000);
+              const deadline = setTimeout(() => {
+                reject(new Error(
+                  "The Windows runtime executable broker did not close during shutdown.",
+                ));
               }, 3_000);
               child.once("close", () => {
                 clearTimeout(terminate);
+                clearTimeout(deadline);
                 resolve();
               });
             });
           }
-          if (!stdoutLines.includes(EXECUTABLE_LOCK_BYE_MARKER)) {
+          if (
+            requestedShutdown
+            && !stdoutLines.includes(EXECUTABLE_LOCK_BYE_MARKER)
+          ) {
             throw new Error("The Windows runtime executable broker did not acknowledge shutdown.");
           }
         },

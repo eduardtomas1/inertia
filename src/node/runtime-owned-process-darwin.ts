@@ -46,8 +46,23 @@ function runDarwinGuardianHelper(
       resolveResult({ stdout, stderr, status, signal, failed });
     };
     const stop = (): void => {
-      failed = true;
-      try { child.kill("SIGKILL"); } catch { /* The bounded helper already exited. */ }
+      // A trusted helper can have exited inside its deadline while Node is
+      // still waiting for its bounded stdout/stderr pipes to publish `close`.
+      // Do not turn that already-terminal result into a timeout failure merely
+      // because the event loop observed the timer first.
+      if (child.exitCode !== null || child.signalCode !== null) return;
+      let stopRequested = false;
+      try { stopRequested = child.kill("SIGKILL"); } catch {
+        // The helper may have become terminal between the state check and kill.
+      }
+      if (
+        !stopRequested
+        && child.exitCode === null
+        && child.signalCode === null
+      ) {
+        failed = true;
+        finish(null, null);
+      }
     };
     const collect = (target: "stdout" | "stderr", data: Buffer): void => {
       outputBytes += data.byteLength;

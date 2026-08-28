@@ -5,6 +5,7 @@
 #include <linux/audit.h>
 #include <linux/filter.h>
 #include <linux/seccomp.h>
+#include <poll.h>
 #include <signal.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -101,6 +102,12 @@ static int trusted_runtime_helper(pid_t sender, pid_t parent, unsigned long long
 static int pidfd_signal(int pidfd, int signal_number) {
   if (syscall(SYS_pidfd_send_signal, pidfd, signal_number, NULL, 0) == 0) return 1;
   return errno == ESRCH;
+}
+static int pidfd_exited(int pidfd) {
+  struct pollfd descriptor = { .fd = pidfd, .events = POLLIN, .revents = 0 };
+  int result;
+  do { result = poll(&descriptor, 1, 0); } while (result < 0 && errno == EINTR);
+  return result == 1 && (descriptor.revents & (POLLIN | POLLHUP));
 }
 static void close_children(struct child *children, int count) {
   for (int index = 0; index < count; index++) close(children[index].pidfd);
@@ -334,27 +341,16 @@ static int stop_pending_mode(int argc, char **argv) {
   }
   for (int poll = 0; poll < 50; poll++) {
     pid_t confirmed_parent = 0; unsigned long long confirmed_start = 0;
-    if (!read_identity(pid, &confirmed_parent, &confirmed_start)
-      || confirmed_parent != parent || confirmed_start != start) {
+    if (pidfd_exited(pidfd)) { close(pidfd); return 0; }
+    if (!read_identity(pid, &confirmed_parent, &confirmed_start)) {
+      const int exited = pidfd_exited(pidfd);
+      close(pidfd); return exited ? 0 : 3;
+    }
+    if (confirmed_parent != parent || confirmed_start != start) {
       close(pidfd); return 3;
     }
     if (getpgid(pid) != pid || getsid(pid) != pid) {
       close(pidfd); return 3;
-    }
-    if (named_status(pid, "inertia-done")) {
-      if (syscall(SYS_pidfd_send_signal, pidfd, SIGUSR2, NULL, 0)
-        || syscall(SYS_pidfd_send_signal, pidfd, SIGCONT, NULL, 0)) {
-        close(pidfd); return 3;
-      }
-      for (int exit_poll = 0; exit_poll < 50; exit_poll++) {
-        errno = 0;
-        if (syscall(SYS_pidfd_send_signal, pidfd, 0, NULL, 0) < 0) {
-          const int exited = errno == ESRCH;
-          close(pidfd); return exited ? 0 : 3;
-        }
-        nanosleep(&pause, NULL);
-      }
-      close(pidfd); return 4;
     }
     if (!named_status(pid, "inertia-ready")) {
       close(pidfd); return 3;
@@ -545,7 +541,7 @@ static int watch_mode(int argc, char **argv) {
       close(gate[1]); return drain() ? 137 : 127;
     }
     if (stop_pending_requested) {
-      close(gate[1]); return terminal_state(drain(), 143);
+      close(gate[1]); return drain() ? 143 : 127;
     }
     if (stop_requested) {
       close(gate[1]); return drain() ? 143 : 127;

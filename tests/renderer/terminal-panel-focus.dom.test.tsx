@@ -340,7 +340,7 @@ describe("TerminalPanel focus lifecycle", () => {
     )).toBe(true));
   });
 
-  it("creates once after the server authoritatively rejects a stale persisted terminal", async () => {
+  it("recovers a stale terminal after one transient fresh spawn rejection", async () => {
     const projectId = "11111111-1111-4111-8111-111111111111";
     const staleId = "44444444-4444-4444-8444-444444444444";
     const replacementId = "55555555-5555-4555-8555-555555555555";
@@ -349,12 +349,16 @@ describe("TerminalPanel focus lifecycle", () => {
       JSON.stringify([staleId]),
     );
     const sentTypes: string[] = [];
+    let createAttempts = 0;
     const sendCommand = vi.fn(async (sent: ClientCommand): Promise<ServerEvent> => {
       sentTypes.push(sent.type);
       if (sent.type === "terminal.attach") {
         throw new RuntimeCommandError("Terminal not found.", "rejected");
       }
       if (sent.type === "terminal.create") {
+        if (++createAttempts === 1) throw new RuntimeCommandError(
+          "Unable to start a terminal for this project.", "rejected",
+        );
         return {
           type: "terminal.created",
           requestId: sent.requestId,
@@ -363,7 +367,6 @@ describe("TerminalPanel focus lifecycle", () => {
       }
       return { type: "request.ok", requestId: sent.requestId };
     });
-
     render(
       <TerminalPanel
         projectId={projectId}
@@ -376,12 +379,14 @@ describe("TerminalPanel focus lifecycle", () => {
         onClose={() => undefined}
       />,
     );
-
     await waitFor(() => expect(document.querySelector(".terminal-panel"))
       .toHaveAttribute("data-terminal-id", replacementId));
-    expect(sentTypes.slice(0, 2)).toEqual(["terminal.attach", "terminal.create"]);
+    expect(sentTypes.slice(0, 3)).toEqual([
+      "terminal.attach",
+      "terminal.create",
+      "terminal.create",
+    ]);
   });
-
   it("retries an in-progress replacement before one authoritative fallback", async () => {
     const projectId = "11111111-1111-4111-8111-111111111111";
     const staleId = "44444444-4444-4444-8444-444444444444";

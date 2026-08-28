@@ -10,6 +10,7 @@ import {
   createAppFixture,
   type RuntimeTestSnapshot,
 } from "./support/app-fixture";
+import { installRuntimeRecoveryConsent } from "./support/runtime-crash-safety";
 import {
   ensureWorkspaceTools,
   selectWorkspaceTool,
@@ -184,17 +185,24 @@ test("starts a sessionless goal and recovers it after Stop and runtime crash", a
     await expect(tools.getByRole("button", { name: "Pause" })).toBeVisible();
 
     const before = await app.runtimeSnapshot();
-    await app.electronApp.evaluate(() => {
-      const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
-        crash: () => RuntimeTestSnapshot;
-      } | undefined;
-      if (!runtime) throw new Error("The test runtime supervisor is unavailable");
-      runtime.crash();
-    });
-    await expect.poll(async () => {
-      const current = await app.runtimeSnapshot();
-      return current.phase === "ready" && current.generation > before.generation;
-    }, { timeout: 10_000 }).toBe(true);
+    const restoreRuntimeRecoveryConsent = await installRuntimeRecoveryConsent(
+      app.electronApp,
+    );
+    try {
+      await app.electronApp.evaluate(() => {
+        const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
+          crash: () => RuntimeTestSnapshot;
+        } | undefined;
+        if (!runtime) throw new Error("The test runtime supervisor is unavailable");
+        runtime.crash();
+      });
+      await expect.poll(async () => {
+        const current = await app.runtimeSnapshot();
+        return current.phase === "ready" && current.generation > before.generation;
+      }, { timeout: 20_000 }).toBe(true);
+    } finally {
+      await restoreRuntimeRecoveryConsent();
+    }
     await expect(page.locator(".app-shell")).toHaveAttribute(
       "data-connection-status",
       "online",

@@ -16,6 +16,7 @@ import {
   activateRuntimeOwnedProcessRegistry,
   confirmRuntimeOwnedProcessStopped,
   darwinProcessGuardianReady,
+  darwinProcessGuardianReadyAsync,
   runtimeOwnedProcessInvocation,
   RuntimeOwnedProcessJournal,
   spawnRuntimeOwnedPidProcess,
@@ -86,6 +87,47 @@ afterEach(async () => {
 });
 
 describe("macOS runtime process guardian", () => {
+  it.runIf(process.platform === "darwin")(
+    "admits a guardian whose readiness is scheduler-delayed beyond 1.5 seconds",
+    async () => {
+      const directory = temporaryDirectory();
+      const guardianPath = join(directory, "runtime-process-guardian-delayed-ready");
+      const built = spawnSync("/usr/bin/xcrun", [
+        "clang", "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
+        "-DINERTIA_RUNTIME_GUARDIAN_TEST_READY_DELAY=1",
+        join(process.cwd(), "native/runtime-process-guardian/darwin.c"),
+        "-o", guardianPath,
+      ], {
+        encoding: "utf8",
+        env: { PATH: "/usr/bin:/bin:/usr/sbin:/sbin" },
+        shell: false,
+        timeout: 30_000,
+      });
+      expect(built.status, `${built.stderr}\n${built.stdout}`).toBe(0);
+      const guardian = spawn(guardianPath, [
+        "watch",
+        String(process.pid),
+        "--",
+        "/bin/sleep",
+        "8",
+      ], { detached: true, shell: false, stdio: "ignore" });
+      liveChildren.add(guardian);
+      guardian.once("close", () => liveChildren.delete(guardian));
+      const guardianPid = guardian.pid ?? 0;
+      expect(guardianPid).toBeGreaterThan(1);
+
+      const startedAt = Date.now();
+      await expect(darwinProcessGuardianReadyAsync(
+        guardianPid,
+        guardianPath,
+      )).resolves.toMatchObject({ pid: guardianPid, sessionId: guardianPid });
+      expect(Date.now() - startedAt).toBeGreaterThanOrEqual(1_500);
+      guardian.kill("SIGTERM");
+      await closeOf(guardian);
+    },
+    15_000,
+  );
+
   it.runIf(process.platform === "darwin")(
     "retires an exact payload on the authenticated graceful request",
     async () => {

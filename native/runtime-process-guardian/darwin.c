@@ -17,7 +17,7 @@
 #define SESSION_FREEZE_PASSES 16
 #define SESSION_DRAIN_POLLS 50
 #define TERM_GRACE_POLLS 5
-#define GUARDIAN_READY_POLLS 50
+#define GUARDIAN_READY_POLLS 250
 #define TRANSIENT_PROBE_POLLS 5
 #define POLL_NANOSECONDS 20000000L
 #define ACTIVE_CENSUS_INTERVAL_POLLS 12
@@ -782,6 +782,11 @@ static int watch_mode(int argc, char *argv[]) {
   if (argc < 5 || strcmp(argv[3], "--") != 0) return 64;
   pid_t runtime_pid = 0;
   if (!parse_pid(argv[2], &runtime_pid)) return 64;
+
+#if defined(INERTIA_RUNTIME_GUARDIAN_TEST_READY_DELAY)
+  const struct timespec ready_delay = { .tv_sec = 2, .tv_nsec = 0 };
+  (void)nanosleep(&ready_delay, NULL);
+#endif
 
   struct proc_bsdinfo runtime_identity;
   if (!read_identity(runtime_pid, &runtime_identity)) return 69;

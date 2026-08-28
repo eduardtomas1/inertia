@@ -599,10 +599,15 @@ export function TerminalSession({
             setSessionKey((value) => value + 1);
             return;
           }
-          if (
-            retryDelay === undefined
-            || (delivery !== "not-sent" && (!reattachId || delivery !== "ambiguous"))
-          ) {
+          const retryableDelivery = reattachId
+            ? delivery === "not-sent" || delivery === "ambiguous"
+            : delivery === "not-sent" || (
+                delivery === "rejected"
+                && terminalError instanceof Error
+                && terminalError.message
+                  === "Unable to start a terminal for this project."
+              );
+          if (retryDelay === undefined || !retryableDelivery) {
             setSessionState("error");
             setSessionError(terminalError instanceof Error
               ? terminalError.message
@@ -612,7 +617,11 @@ export function TerminalSession({
             operationInFlightRef.current = false;
             return;
           }
-          terminal?.writeln(`\r\n\x1b[2mConnection interrupted. Retrying terminal (${attempt + 2}/3)…\x1b[0m`);
+          terminal?.writeln(`\r\n\x1b[2m${
+            delivery === "rejected"
+              ? "Terminal startup was temporarily unavailable."
+              : "Connection interrupted."
+          } Retrying terminal (${attempt + 2}/3)…\x1b[0m`);
           await waitForTerminalRetry(retryDelay);
         }
       }

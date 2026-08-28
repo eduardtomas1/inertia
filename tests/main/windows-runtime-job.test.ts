@@ -507,12 +507,34 @@ describe("Windows runtime Job Object containment", () => {
       "Write-Frame '${EXECUTABLE_LOCK_BYE_MARKER}'",
     ));
     expect(launchSource).toContain("INERTIA_JOB_ERROR stage=verified-file-lock");
+    expect(launchSource).toContain(
+      "MAX_BROKER_BOOTSTRAP_SCRIPT_BYTES = 64 * 1024",
+    );
+    expect(launchSource).toContain(
+      "$utf8 = [Text.UTF8Encoding]::new($false, $true)",
+    );
+    expect(launchSource).toContain(
+      "[Convert]::ToBase64String($bytes) -cne $line",
+    );
+    expect(launchSource).toContain(
+      "encodedPowerShell(windowsRuntimeJobBootstrapScript())",
+    );
+    expect(launchSource).toContain(
+      "const bootstrapLine = encodedWindowsRuntimeJobLockScript(assembly)",
+    );
+    expect(launchSource).toContain("child.stdin.write(`${bootstrapLine}\\n`)");
+    expect(launchSource).not.toContain(
+      "encodedPowerShell(windowsRuntimeJobLockScript(assembly))",
+    );
     expect(launchSource).not.toContain("function Start-Helper");
     expect(launchSource).not.toContain("Diagnostics.ProcessStartInfo");
     expect(launchSource).not.toContain("[InertiaRuntimeJob]::");
     expect(launchSource).not.toContain("spawnWindowsRuntimeJobExecutable");
     expect(launchSource.indexOf("[IO.File]::Open("))
       .toBeLessThan(launchSource.indexOf("$sha256.ComputeHash($assemblyBytes)"));
+    expect(launchSource.indexOf(
+      "const bootstrapLine = encodedWindowsRuntimeJobLockScript(assembly)",
+    )).toBeLessThan(launchSource.indexOf("const child = spawn("));
     expect(launchSource.indexOf("$sha256.ComputeHash($assemblyBytes)"))
       .toBeLessThan(launchSource.indexOf("$loadedAssembly = [Reflection.Assembly]::Load($assemblyBytes)"));
     expect(launchSource.indexOf("$loadedAssembly = [Reflection.Assembly]::Load($assemblyBytes)"))

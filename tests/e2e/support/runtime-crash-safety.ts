@@ -85,6 +85,41 @@ async function runtimeWebsocketUrl(page: AppFixture["page"]): Promise<string> {
   });
 }
 
+export async function installRuntimeRecoveryConsent(
+  electronApp: AppFixture["electronApp"],
+): Promise<() => Promise<void>> {
+  if (process.platform !== "darwin") return async () => undefined;
+  await electronApp.evaluate(({ dialog }) => {
+    const owner = globalThis as typeof globalThis & {
+      __inertiaOriginalRuntimeRecoveryMessageBox?: typeof dialog.showMessageBox;
+    };
+    owner.__inertiaOriginalRuntimeRecoveryMessageBox ??=
+      dialog.showMessageBox.bind(dialog);
+    const original = owner.__inertiaOriginalRuntimeRecoveryMessageBox;
+    Reflect.set(dialog, "showMessageBox", async (...args: unknown[]) => {
+      const options = args.at(-1) as { title?: unknown } | undefined;
+      if (options?.title === "Recover unproven macOS runtime state?") {
+        return { response: 0, checkboxChecked: false };
+      }
+      return Reflect.apply(original!, dialog, args);
+    });
+  });
+
+  let restored = false;
+  return async () => {
+    if (restored) return;
+    restored = true;
+    await electronApp.evaluate(({ dialog }) => {
+      const owner = globalThis as typeof globalThis & {
+        __inertiaOriginalRuntimeRecoveryMessageBox?: typeof dialog.showMessageBox;
+      };
+      const original = owner.__inertiaOriginalRuntimeRecoveryMessageBox;
+      if (original) Reflect.set(dialog, "showMessageBox", original);
+      delete owner.__inertiaOriginalRuntimeRecoveryMessageBox;
+    }).catch(() => undefined);
+  };
+}
+
 export async function expectRuntimeCrashRecovery(
   app: AppFixture,
   testInfo?: TestInfo,
@@ -396,47 +431,27 @@ export async function expectRuntimeCrashRecovery(
     }
   }
 
-  if (process.platform === "darwin") {
-    await electronApp.evaluate(({ dialog }) => {
-      const owner = globalThis as typeof globalThis & {
-        __inertiaOriginalRuntimeRecoveryMessageBox?: typeof dialog.showMessageBox;
-      };
-      owner.__inertiaOriginalRuntimeRecoveryMessageBox ??=
-        dialog.showMessageBox.bind(dialog);
-      const original = owner.__inertiaOriginalRuntimeRecoveryMessageBox;
-      Reflect.set(dialog, "showMessageBox", async (...args: unknown[]) => {
-        const options = args.at(-1) as { title?: unknown } | undefined;
-        if (options?.title === "Recover unproven macOS runtime state?") {
-          return { response: 0, checkboxChecked: false };
-        }
-        return Reflect.apply(original!, dialog, args);
-      });
+  const restoreRuntimeRecoveryConsent = await installRuntimeRecoveryConsent(
+    electronApp,
+  );
+  let crashed: RuntimeTestSnapshot;
+  try {
+    crashed = await electronApp.evaluate((_electron) => {
+      const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
+        crash: () => RuntimeTestSnapshot;
+      } | undefined;
+      if (!runtime) throw new Error("The test runtime supervisor is unavailable");
+      return runtime.crash();
     });
+    await expect.poll(async () => {
+      const current = await runtimeSnapshot();
+      return current.phase === "ready" && current.generation > before.generation;
+    }, { timeout: 20_000 }).toBe(true);
+  } finally {
+    await restoreRuntimeRecoveryConsent();
   }
-  const crashed = await electronApp.evaluate((_electron) => {
-    const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
-      crash: () => RuntimeTestSnapshot;
-    } | undefined;
-    if (!runtime) throw new Error("The test runtime supervisor is unavailable");
-    return runtime.crash();
-  });
   const crashReturnedObservation = runtimeObservation(crashed);
   expect(crashed.pid).toBe(before.pid);
-
-  await expect.poll(async () => {
-    const current = await runtimeSnapshot();
-    return current.phase === "ready" && current.generation > before.generation;
-  }, { timeout: 20_000 }).toBe(true);
-  if (process.platform === "darwin") {
-    await electronApp.evaluate(({ dialog }) => {
-      const owner = globalThis as typeof globalThis & {
-        __inertiaOriginalRuntimeRecoveryMessageBox?: typeof dialog.showMessageBox;
-      };
-      const original = owner.__inertiaOriginalRuntimeRecoveryMessageBox;
-      if (original) Reflect.set(dialog, "showMessageBox", original);
-      delete owner.__inertiaOriginalRuntimeRecoveryMessageBox;
-    });
-  }
   const after = await runtimeSnapshot();
   const replacementReadyObservation = runtimeObservation(after);
   const afterUrl = await runtimeWebsocketUrl(page);

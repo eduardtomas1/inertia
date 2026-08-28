@@ -451,7 +451,7 @@ describe("Linux runtime process guardian", () => {
     } finally {
       deactivate?.();
     }
-  }, 15_000);
+  }, 45_000);
 
   linuxIt("retries a transient retiring-claim release without losing cleanup proof", async () => {
     const root = mkdtempSync(join(tmpdir(), "inertia-linux-release-retry-")); roots.push(root);

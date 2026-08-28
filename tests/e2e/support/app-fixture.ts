@@ -1,9 +1,5 @@
-import {
-  expect,
-  _electron as electron,
-  type ElectronApplication,
-  type Page,
-} from "@playwright/test";
+import { expect, _electron as electron,
+  type ElectronApplication, type Page } from "@playwright/test";
 import { execFile } from "node:child_process";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
@@ -15,6 +11,8 @@ import { RuntimeStore } from "../../../src/server/database";
 import { portableNodeExecutable } from "../../helpers/portable-provider-fixture";
 import { seedAppConversation } from "../../support/seed-app-conversation";
 import { serveAgentBrowserPrivacyFixture } from "./agent-browser-fixture-pages";
+import { closeElectronAppBounded, observeElectronPage,
+  observeElectronProcess } from "./electron-app-lifecycle";
 import { expectNoViewportOverflow as expectPageNoViewportOverflow } from "./layout-assertions";
 
 const execFileAsync = promisify(execFile);
@@ -795,24 +793,13 @@ export async function createAppFixture(
     startupDiagnostics.push(`${source}: ${String(chunk)}`.slice(0, 16_384));
     if (startupDiagnostics.length > 40) startupDiagnostics.shift();
   };
-  const observeApp = (current: ElectronApplication, currentPage: Page): void => {
-    current.process().stdout?.on("data", (chunk: Buffer) => {
-      appendDiagnostic("stdout", chunk);
-    });
-    current.process().stderr?.on("data", (chunk: Buffer) => {
-      appendDiagnostic("stderr", chunk);
-    });
-    currentPage.on("console", (message) => {
-      if (message.type() === "error") rendererErrors.push(message.text());
-    });
-    currentPage.on("pageerror", (error) => rendererErrors.push(error.message));
-  };
   let electronApp: ElectronApplication | null = null;
   let page: Page;
   try {
     electronApp = await electron.launch(launchOptions);
+    observeElectronProcess(electronApp, appendDiagnostic);
     page = await electronApp.firstWindow();
-    observeApp(electronApp, page);
+    observeElectronPage(page, rendererErrors);
     if (options.windowDisplay === "primary") {
       await electronApp.evaluate(
         ({ BrowserWindow, screen }) => {
@@ -832,7 +819,7 @@ export async function createAppFixture(
   } catch (cause) {
     preview.server.closeAllConnections();
     await new Promise<void>((resolve) => preview.server.close(() => resolve()));
-    await electronApp?.close().catch(() => undefined);
+    if (electronApp) await closeElectronAppBounded(electronApp);
     await rm(testDirectory, {
       recursive: true,
       force: true,
@@ -934,7 +921,7 @@ export async function createAppFixture(
         ) as { quit?: () => unknown } | undefined;
         runtime?.quit?.();
       }).catch(() => undefined);
-      await previousApp.close();
+      await closeElectronAppBounded(previousApp);
       if (runtimePid) {
         await expect.poll(
           () => processExists(runtimePid),
@@ -942,30 +929,46 @@ export async function createAppFixture(
         ).toBe(false);
       }
 
+      const diagnosticStart = startupDiagnostics.length;
       const nextApp = await electron.launch(launchOptions);
-      electronApp = nextApp;
-      const nextPage = await nextApp.firstWindow();
-      page = nextPage;
-      observeApp(nextApp, nextPage);
-      if (options.windowDisplay === "primary") {
-        await nextApp.evaluate(
-          ({ BrowserWindow, screen }) => {
-            const origin = screen.getPrimaryDisplay().workArea;
-            BrowserWindow.getAllWindows()[0]?.setPosition(origin.x, origin.y);
-          },
+      observeElectronProcess(nextApp, appendDiagnostic);
+      try {
+        const nextPage = await nextApp.firstWindow();
+        observeElectronPage(nextPage, rendererErrors);
+        if (options.windowDisplay === "primary") {
+          await nextApp.evaluate(
+            ({ BrowserWindow, screen }) => {
+              const origin = screen.getPrimaryDisplay().workArea;
+              BrowserWindow.getAllWindows()[0]?.setPosition(origin.x, origin.y);
+            },
+          );
+        }
+        await nextPage.locator(
+          '.app-shell[data-connection-status="online"]',
+        ).waitFor();
+        await nextPage.getByRole("textbox", { name: "Message" }).waitFor();
+        electronApp = nextApp;
+        page = nextPage;
+        return { electronApp: nextApp, page: nextPage };
+      } catch (cause) {
+        await closeElectronAppBounded(nextApp);
+        const diagnostics = startupDiagnostics.slice(diagnosticStart)
+          .join("\n")
+          .trim();
+        throw new Error(
+          `Electron fixture restart did not reach its ready state${
+            diagnostics ? `:\n${diagnostics}` : "."
+          }`,
+          { cause },
         );
       }
-      await nextPage.locator(
-        '.app-shell[data-connection-status="online"]',
-      ).waitFor();
-      await nextPage.getByRole("textbox", { name: "Message" }).waitFor();
-      return { electronApp: nextApp, page: nextPage };
     },
     close: async () => {
       preview.server.closeAllConnections();
       await new Promise<void>((resolve) => preview.server.close(() => resolve()));
       const runtimePid = (await runtimeSnapshot().catch(() => null))?.pid ?? null;
-      const activeApp = currentApp();
+      const activeApp = electronApp;
+      if (!activeApp) return;
       await activeApp.evaluate(() => {
         const runtime = Reflect.get(
           globalThis,
@@ -973,7 +976,7 @@ export async function createAppFixture(
         ) as { quit?: () => unknown } | undefined;
         runtime?.quit?.();
       }).catch(() => undefined);
-      await activeApp.close();
+      await closeElectronAppBounded(activeApp);
       if (runtimePid) {
         await expect.poll(
           () => processExists(runtimePid),

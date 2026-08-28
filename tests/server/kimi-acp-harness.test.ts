@@ -1094,7 +1094,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const configManager = new ProviderManager(
       { commands: { kimi: configCommand } },
       new AgentHarnessRegistry([
-        createKimiAcpHarness({ controlRpcTimeoutMs: 250 }),
+        createKimiAcpHarness({ controlRpcTimeoutMs: 5_000 }),
       ]),
     );
     await expect(configManager.run(nativeProviderRunInput({

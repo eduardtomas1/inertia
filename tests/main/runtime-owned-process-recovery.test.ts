@@ -1380,7 +1380,7 @@ describe("cross-platform runtime owned process recovery", () => {
     }
   });
 
-  it("returns the macOS guardian immediately while exact admission remains pending", async () => {
+  it("admits a delayed macOS guardian without tainting the next spawn", async () => {
     const directory = temporaryDirectory();
     const expected = {
       platform: "darwin" as const,
@@ -1393,12 +1393,15 @@ describe("cross-platform runtime owned process recovery", () => {
     };
     let resolveReady!: (identity: typeof expected) => void;
     const ready = new Promise<typeof expected>((resolve) => { resolveReady = resolve; });
-    const readDarwinIdentityAsync = vi.fn(async () => expected);
+    const identity = (pid: number) => ({ ...expected, pid,
+      processGroupId: pid, sessionId: pid });
+    const readDarwinIdentityAsync = vi.fn(async (pid: number) => identity(pid));
     const deactivate = activateRuntimeOwnedProcessRegistry(
       directory, runtimeGenerationId, systemBootId, {
         platform: "darwin",
         darwinGuardianPath: "/trusted/runtime-process-guardian",
-        readDarwinGuardianReadyAsync: async () => await ready,
+        readDarwinGuardianReadyAsync: async (pid) =>
+          pid === 4_242 ? await ready : identity(pid),
         readDarwinIdentityAsync,
       },
     );
@@ -1423,6 +1426,11 @@ describe("cross-platform runtime owned process recovery", () => {
       expect(readDarwinIdentityAsync).toHaveBeenCalledOnce();
       expect(new RuntimeOwnedProcessJournal(directory)
         .records(runtimeGenerationId)).toMatchObject([{ state: "owned" }]);
+
+      const nextChild = { ...child, pid: 4_243 } as unknown as ChildProcess;
+      expect(spawnRuntimeOwnedProcess(() => nextChild)).toBe(nextChild);
+      await vi.waitFor(() => expect(processKill)
+        .toHaveBeenCalledWith(4_243, "SIGUSR1"));
     } finally {
       processKill.mockRestore();
       deactivate?.();

@@ -8,6 +8,7 @@ import {
 import type { RuntimeStore } from "../../src/server/database";
 import type { ProviderManager } from "../../src/server/providers";
 import { ProviderTerminalResumeRegistry } from "../../src/server/provider/terminal-resume";
+import { ConversationWorkAuthority } from "../../src/server/runtime/conversation-work-authority";
 import {
   createProjectWorkspaceCommandHandler,
   type ProjectWorkspaceCommandDependencies,
@@ -255,6 +256,28 @@ describe("terminal.provider.resume command", () => {
     expect(fixture.terminalResumeLaunch).toHaveBeenCalledOnce();
   });
 
+  it("waits for a transient sibling checkout reservation before resuming", async () => {
+    const checkoutPath = "/workspace/.inertia/worktrees/owned";
+    const authority = new ConversationWorkAuthority(() => ({
+      projectId,
+      checkoutPath,
+    }));
+    expect(authority.reserve("66666666-6666-4666-8666-666666666666")).toBe(true);
+    const fixture = dependencies({
+      providerTerminalResumes: new ProviderTerminalResumeRegistry(authority),
+    });
+    const pending = createProjectWorkspaceCommandHandler(fixture.value)(
+      { readyState: 1 } as never,
+      resumeCommand(),
+    );
+    await Promise.resolve();
+    expect(fixture.terminalResumeLaunch).not.toHaveBeenCalled();
+
+    authority.release("66666666-6666-4666-8666-666666666666");
+    await expect(pending).resolves.toBe("handled");
+    expect(fixture.terminalResumeLaunch).toHaveBeenCalledOnce();
+  });
+
   it("abandons the launch if an app provider turn starts during CLI detection", async () => {
     const fixture = dependencies({ runningChecks: [false, true] });
     const handler = createProjectWorkspaceCommandHandler(fixture.value);
@@ -314,22 +337,15 @@ describe("terminal.provider.resume command", () => {
     expect(after.replaceProcess).not.toHaveBeenCalled();
   });
 
-  it("rejects an agent in a sibling chat sharing the checkout before and after discovery", async () => {
-    const before = dependencies({ activeCheckout: true });
-    await expect(createProjectWorkspaceCommandHandler(before.value)(
+  it("rejects an agent in a sibling chat sharing the checkout after discovery", async () => {
+    const fixture = dependencies({ activeCheckout: true });
+    await expect(createProjectWorkspaceCommandHandler(fixture.value)(
       { readyState: 1 } as never,
       resumeCommand(),
     )).rejects.toThrow("Stop the active provider session");
-    expect(before.terminalResumeLaunch).not.toHaveBeenCalled();
-
-    const after = dependencies({ activeCheckoutChecks: [false, true] });
-    await expect(createProjectWorkspaceCommandHandler(after.value)(
-      { readyState: 1 } as never,
-      resumeCommand(),
-    )).rejects.toThrow("Stop the active provider session");
-    expect(after.terminalResumeLaunch).toHaveBeenCalledOnce();
-    expect(after.replaceProcess).not.toHaveBeenCalled();
-    expect(after.providerTerminalResumes.isActive(conversationId)).toBe(false);
+    expect(fixture.terminalResumeLaunch).toHaveBeenCalledOnce();
+    expect(fixture.replaceProcess).not.toHaveBeenCalled();
+    expect(fixture.providerTerminalResumes.isActive(conversationId)).toBe(false);
   });
 
   it("rejects another workspace run that owns the conversation worktree", async () => {

@@ -1,17 +1,19 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Columns2, Plus, TerminalSquare, X } from "lucide-react";
 import { usePersistedSize } from "../hooks/usePersistedSize";
+import { runtimeCommandDelivery } from "../utils/connectionMessages";
 import { PaneResizeHandle } from "./PaneResizeHandle";
 import {
-  command,
+  appendTerminalTab,
   claimTerminalPanelOwner,
   isCurrentTerminalPanelOwner,
   MAX_PERSISTED_TERMINAL_TABS,
   newTerminalTab,
-  nextTerminalTabIndex,
   persistTerminalTabs,
   readPersistedTerminalTabs,
   replaceTerminalTabWithoutHiding,
+  terminalCloseCommand,
+  TERMINAL_CLOSE_FAILURE_MESSAGE,
   terminalStorageKey,
   type TerminalPanelProps,
   type TerminalReplacement,
@@ -27,7 +29,6 @@ function ScopedTerminalPanel(props: TerminalPanelProps): React.JSX.Element {
   const onResumeRequestHandled = props.onResumeRequestHandled;
   const actionRequestId = props.actionId;
   const onActionRequestHandled = props.onActionStarted;
-  const actionScopeIdentity = `${props.projectId}:${props.conversationId ?? ""}`;
   const storageKey = terminalStorageKey(props.projectId, props.conversationId);
   const [panelOwner] = useState(() => claimTerminalPanelOwner(storageKey));
   const [initialTabs] = useState(() => readPersistedTerminalTabs(storageKey));
@@ -45,24 +46,35 @@ function ScopedTerminalPanel(props: TerminalPanelProps): React.JSX.Element {
     () => new Set(),
   );
   const [actionRoutingError, setActionRoutingError] = useState<string | null>(null);
+  const [closeError, setCloseError] = useState<readonly [string, string] | null>(null);
+  const mountedRef = useRef(true);
   const gridRef = useRef<HTMLDivElement>(null);
   const tabsRef = useTerminalTabsLifecycle(storageKey, tabs, sendCommand);
   const handledPanelResumeRequestRef = useRef<string | null>(null);
   const handledBlockedActionRef = useRef<string | null>(null);
+  const [pendingTerminalCloses] = useState(
+    () => new Map<string, Map<string, boolean>>(),
+  );
+  const reconcilePendingTerminalExitRef = useRef<(terminalId: string) => void>(
+    () => undefined,
+  );
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   useEffect(() => setSplitPercent(persistedSplitPercent), [persistedSplitPercent]);
 
   useEffect(() => setResumedTerminals(new Map()), [
     props.conversationId,
     props.projectId,
+    props.status,
   ]);
-
-  useEffect(() => {
-    if (props.status !== "online") setResumedTerminals(new Map());
-  }, [props.status]);
 
   useEffect(() => subscribe((event) => {
     if (event.type !== "terminal.exit") return;
+    reconcilePendingTerminalExitRef.current(event.terminalId);
     setResumedTerminals((current) => {
       const next = new Map(current);
       for (const [conversationId, resumed] of next) {
@@ -77,16 +89,15 @@ function ScopedTerminalPanel(props: TerminalPanelProps): React.JSX.Element {
   const resumedTabIds = useMemo(() => new Set(
     [...resumedTerminals.values()].map(({ tabId }) => tabId),
   ), [resumedTerminals]);
-  const actionTargetId = useMemo<string | null>(() => {
-    if (!props.actionId) return activeId;
-    if (!resumedTabIds.has(activeId)) return activeId;
-    return tabs.find(({ id }) => !resumedTabIds.has(id))?.id ?? null;
-  }, [activeId, props.actionId, resumedTabIds, tabs]);
+  const actionTargetId = !props.actionId || !resumedTabIds.has(activeId)
+    ? activeId
+    : (tabs.find(({ id }) => !resumedTabIds.has(id))?.id ?? null);
 
   useEffect(() => {
     const actionId = actionRequestId;
     if (!actionId) {
       handledBlockedActionRef.current = null;
+      setActionRoutingError(null);
       return;
     }
     if (actionTargetId) {
@@ -95,15 +106,10 @@ function ScopedTerminalPanel(props: TerminalPanelProps): React.JSX.Element {
       return;
     }
     if (tabs.length < MAX_PERSISTED_TERMINAL_TABS) {
-      setTabs((current) => {
-        if (current.length >= MAX_PERSISTED_TERMINAL_TABS) return current;
-        const tab = newTerminalTab(nextTerminalTabIndex(current));
-        window.queueMicrotask(() => setActiveId(tab.id));
-        return [...current, tab];
-      });
+      setTabs((current) => appendTerminalTab(current, setActiveId));
       return;
     }
-    const identity = `${actionScopeIdentity}:${actionId}`;
+    const identity = `${storageKey}:${actionId}`;
     setActionRoutingError(
       "End a resumed provider terminal before starting this project action.",
     );
@@ -115,8 +121,8 @@ function ScopedTerminalPanel(props: TerminalPanelProps): React.JSX.Element {
     actionTargetId,
     activeId,
     actionRequestId,
-    actionScopeIdentity,
     onActionRequestHandled,
+    storageKey,
     tabs.length,
   ]);
 
@@ -139,29 +145,7 @@ function ScopedTerminalPanel(props: TerminalPanelProps): React.JSX.Element {
   }, []);
 
   const addTerminal = (): void => {
-    setTabs((current) => {
-      if (current.length >= MAX_PERSISTED_TERMINAL_TABS) return current;
-      const tab = newTerminalTab(nextTerminalTabIndex(current));
-      window.queueMicrotask(() => setActiveId(tab.id));
-      return [...current, tab];
-    });
-  };
-
-  const replaceTerminalTab = (
-    tabId: string,
-    replacement: TerminalReplacement,
-  ): boolean => {
-    const next = replaceTerminalTabWithoutHiding(
-      tabsRef.current,
-      tabId,
-      replacement.previousTerminalId,
-      replacement.terminalId,
-      replacement.preservePrevious,
-    );
-    if (!next) return false;
-    tabsRef.current = next;
-    setTabs(next);
-    return true;
+    setTabs((current) => appendTerminalTab(current, setActiveId));
   };
 
   useEffect(() => {
@@ -178,13 +162,8 @@ function ScopedTerminalPanel(props: TerminalPanelProps): React.JSX.Element {
       onResumeRequestHandled?.();
       return;
     }
-    const activeTabAlreadyResumed = [...resumedTerminals.values()].some(
-      ({ tabId }) => tabId === activeId,
-    );
-    if (!activeTabAlreadyResumed) return;
-    const idleTab = tabs.find(({ id }) => ![...resumedTerminals.values()].some(
-      ({ tabId }) => tabId === id,
-    ));
+    if (!resumedTabIds.has(activeId)) return;
+    const idleTab = tabs.find(({ id }) => !resumedTabIds.has(id));
     if (idleTab) {
       setActiveId(idleTab.id);
       return;
@@ -193,68 +172,161 @@ function ScopedTerminalPanel(props: TerminalPanelProps): React.JSX.Element {
 
     // A resumed provider owns its terminal until that process exits. Preserve
     // it and give the explicit composer request a fresh terminal to start in.
-    setTabs((current) => {
-      if (current.length >= MAX_PERSISTED_TERMINAL_TABS) return current;
-      const tab = newTerminalTab(nextTerminalTabIndex(current));
-      window.queueMicrotask(() => setActiveId(tab.id));
-      return [...current, tab];
-    });
+    setTabs((current) => appendTerminalTab(current, setActiveId));
   }, [
     activeId,
     onResumeRequestHandled,
     resumeRequestConversationId,
     resumedTerminals,
+    resumedTabIds,
     tabs,
   ]);
 
+  const setTabClosing = (id: string, closing: boolean): void => {
+    setClosingTabIds((closingIds) => {
+      const updated = new Set(closingIds);
+      if (closing) updated.add(id);
+      else updated.delete(id);
+      return updated;
+    });
+  };
+  const ownsTerminalPanel = (): boolean => (
+    isCurrentTerminalPanelOwner(storageKey, panelOwner)
+  );
+  const commitTerminalTabs = (next: TerminalTab[]): void => {
+    tabsRef.current = next;
+    persistTerminalTabs(storageKey, next);
+    if (mountedRef.current) setTabs(next);
+  };
+  const clearCloseError = (id: string): void => {
+    setCloseError((current) => current?.[0] === id ? null : current);
+  };
+
+  const finishTerminalClose = (id: string): void => {
+    if (!ownsTerminalPanel()) return;
+    pendingTerminalCloses.delete(id);
+    const current = tabsRef.current;
+    const next = current.filter((tab) => tab.id !== id);
+    if (next.length === current.length) return;
+    commitTerminalTabs(next);
+    if (!mountedRef.current) return;
+    setTabClosing(id, false);
+    clearCloseError(id);
+    setActiveId((selected) => selected === id
+      ? (next.at(-1)?.id ?? "")
+      : selected);
+    if (next.length < 2) setSplit(false);
+    if (next.length === 0) props.onClose();
+  };
+
+  const requestTerminalClose = (id: string, terminalId: string): void => {
+    const pending = pendingTerminalCloses.get(id);
+    if (!pending || pending.get(terminalId)) return;
+    pending.set(terminalId, true);
+    void sendCommand(terminalCloseCommand(terminalId)).then(() => {
+      if (
+        !ownsTerminalPanel()
+        || pendingTerminalCloses.get(id) !== pending
+      ) return;
+      pending.delete(terminalId);
+      if (!pending.size) finishTerminalClose(id);
+    }, (error: unknown) => {
+      if (
+        !ownsTerminalPanel()
+        || pendingTerminalCloses.get(id) !== pending
+      ) return;
+      if (!pending.has(terminalId)) return;
+      pending.set(terminalId, false);
+      if (runtimeCommandDelivery(error) === "ambiguous") return;
+      if (!mountedRef.current) return;
+      setTabClosing(id, false);
+      setCloseError([
+        id,
+        error instanceof Error ? error.message : TERMINAL_CLOSE_FAILURE_MESSAGE,
+      ]);
+    });
+  };
+
+  const requestPendingTerminalCloses = (
+    id: string,
+    pending: ReadonlyMap<string, boolean>,
+  ): void => {
+    for (const terminalId of pending.keys()) requestTerminalClose(id, terminalId);
+  };
+  reconcilePendingTerminalExitRef.current = (terminalId) => {
+    for (const [tabId, pending] of pendingTerminalCloses) {
+      if (!pending.delete(terminalId)) continue;
+      if (!pending.size) finishTerminalClose(tabId);
+      else requestPendingTerminalCloses(tabId, pending);
+    }
+  };
+
   const closeTerminal = (id: string): void => {
-    if (closingTabIds.has(id)) return;
     const closing = tabsRef.current.find((tab) => tab.id === id);
     if (!closing) return;
-    const finish = (): void => {
-      const current = tabsRef.current;
-      const next = current.filter((tab) => tab.id !== id);
-      if (next.length === current.length) return;
-      setClosingTabIds((closingIds) => {
-        const updated = new Set(closingIds);
-        updated.delete(id);
-        return updated;
-      });
-      tabsRef.current = next;
-      persistTerminalTabs(storageKey, next);
-      setTabs(next);
-      setActiveId((selected) => selected === id
-        ? (next.at(-1)?.id ?? "")
-        : selected);
-      if (next.length === 0) {
-        setSplit(false);
-        props.onClose();
-      } else if (next.length < 2) {
-        setSplit(false);
-      }
-    };
-    if (!closing.terminalId) {
-      finish();
+    const pending = pendingTerminalCloses.get(id);
+    if (pending) {
+      clearCloseError(id);
+      setTabClosing(id, true);
+      requestPendingTerminalCloses(id, pending);
       return;
     }
-    setClosingTabIds((closingIds) => new Set(closingIds).add(id));
-    void sendCommand(command({
-      type: "terminal.close",
-      payload: { terminalId: closing.terminalId },
-    })).then(finish, () => {
-      setClosingTabIds((closingIds) => {
-        const updated = new Set(closingIds);
-        updated.delete(id);
-        return updated;
-      });
-    });
+    if (!closing.terminalId) {
+      finishTerminalClose(id);
+      return;
+    }
+    clearCloseError(id);
+    pendingTerminalCloses.set(id, new Map([[closing.terminalId, false]]));
+    setTabClosing(id, true);
+    requestTerminalClose(id, closing.terminalId);
+  };
+
+  const replaceTerminalTab = (
+    tabId: string,
+    replacement: TerminalReplacement,
+  ): boolean => {
+    const pendingClose = pendingTerminalCloses.get(tabId);
+    if (pendingClose?.has(replacement.terminalId)) return true;
+    if (
+      pendingClose
+      && pendingClose.size >= MAX_PERSISTED_TERMINAL_TABS
+      && (
+        replacement.preservePrevious
+        || !pendingClose.has(replacement.previousTerminalId)
+      )
+    ) return false;
+    const next = replaceTerminalTabWithoutHiding(
+      tabsRef.current,
+      tabId,
+      replacement.previousTerminalId,
+      replacement.terminalId,
+      pendingClose ? false : replacement.preservePrevious,
+    );
+    if (!next) return false;
+    commitTerminalTabs(next);
+    if (pendingClose) {
+      if (!replacement.preservePrevious) pendingClose.delete(replacement.previousTerminalId);
+      pendingClose.set(replacement.terminalId, false);
+      requestPendingTerminalCloses(tabId, pendingClose);
+    }
+    return true;
   };
 
   const updateRestorableTerminal = (
     tabId: string,
     terminalId: string | null,
   ): boolean => {
-    if (!isCurrentTerminalPanelOwner(storageKey, panelOwner)) return false;
+    if (!ownsTerminalPanel()) return false;
+    const pendingClose = pendingTerminalCloses.get(tabId);
+    if (pendingClose) {
+      if (terminalId === null) pendingClose.delete(
+        tabsRef.current.find(({ id }) => id === tabId)?.terminalId ?? "",
+      );
+      else if (!pendingClose.has(terminalId)) pendingClose.set(terminalId, false);
+      if (!pendingClose.size) finishTerminalClose(tabId);
+      else requestPendingTerminalCloses(tabId, pendingClose);
+      return true;
+    }
     let found = false;
     let changed = false;
     const next = tabsRef.current.map((candidate) => {
@@ -271,9 +343,7 @@ function ScopedTerminalPanel(props: TerminalPanelProps): React.JSX.Element {
     // A terminal.create response may arrive after this scoped panel unmounts.
     // Persist the exact returned capability synchronously so a later visit can
     // reattach it instead of cancelling a possibly fork-tainted macOS shell.
-    tabsRef.current = next;
-    persistTerminalTabs(storageKey, next);
-    setTabs(next);
+    commitTerminalTabs(next);
     return true;
   };
 
@@ -283,8 +353,9 @@ function ScopedTerminalPanel(props: TerminalPanelProps): React.JSX.Element {
   };
 
   const secondaryId = tabs.find((tab) => tab.id !== activeId)?.id ?? null;
-  const sessionIds = useMemo(() => new Map(tabs.map((tab) => [tab.id, `terminal-session-${tab.id}`])), [tabs]);
+  const sessionIds = new Map(tabs.map((tab) => [tab.id, `terminal-session-${tab.id}`]));
   const gridStyle = { "--terminal-split-percent": `${splitPercent}%` } as CSSProperties;
+  const panelError = actionRoutingError ?? closeError?.[1];
 
   return (
     <aside className="terminal-tabs-panel" aria-label="Terminal panel" hidden={!props.visible}>
@@ -292,11 +363,11 @@ function ScopedTerminalPanel(props: TerminalPanelProps): React.JSX.Element {
         <div className="terminal-tablist" role="tablist" aria-label="Terminals">
           {tabs.map((tab) => <div className={tab.id === activeId ? "terminal-tab is-active" : "terminal-tab"} key={tab.id}><button type="button" id={`terminal-tab-${tab.id}`} role="tab" aria-selected={tab.id === activeId} aria-controls={sessionIds.get(tab.id)} onClick={() => setActiveId(tab.id)}><TerminalSquare size={13} /><span>{tab.label}</span></button><button type="button" aria-label={`Close ${tab.label}`} disabled={closingTabIds.has(tab.id)} onClick={() => closeTerminal(tab.id)}><X size={11} /></button></div>)}
         </div>
-        <div className="terminal-tab-actions"><IconButton label={tabs.length >= MAX_PERSISTED_TERMINAL_TABS ? "Maximum of 4 terminals open" : "New terminal"} disabled={tabs.length >= MAX_PERSISTED_TERMINAL_TABS} onClick={() => addTerminal()}><Plus size={14} /></IconButton><IconButton label="Split terminals" aria-pressed={split} onClick={splitTerminal}><Columns2 size={14} /></IconButton></div>
+        <div className="terminal-tab-actions"><IconButton label={tabs.length >= MAX_PERSISTED_TERMINAL_TABS ? "Maximum of 4 terminals open" : "New terminal"} disabled={tabs.length >= MAX_PERSISTED_TERMINAL_TABS} onClick={addTerminal}><Plus size={14} /></IconButton><IconButton label="Split terminals" aria-pressed={split} onClick={splitTerminal}><Columns2 size={14} /></IconButton></div>
       </header>
-      {actionRoutingError && (
+      {panelError && (
         <div className="terminal-resume-status is-unavailable" role="alert">
-          {actionRoutingError}
+          {panelError}
         </div>
       )}
       <div
@@ -308,9 +379,9 @@ function ScopedTerminalPanel(props: TerminalPanelProps): React.JSX.Element {
           const visible = tab.id === activeId || (split && tab.id === secondaryId);
           const placement = tab.id === activeId ? "is-primary" : tab.id === secondaryId ? "is-secondary" : "";
           const siblingResumedConversationIds = new Set(
-            [...resumedTerminals]
-              .filter(([, resumed]) => resumed.tabId !== tab.id)
-              .map(([conversationId]) => conversationId),
+            [...resumedTerminals].flatMap(([conversationId, resumed]) => (
+              resumed.tabId === tab.id ? [] : [conversationId]
+            )),
           );
           return <div id={sessionIds.get(tab.id)} role="tabpanel" aria-labelledby={`terminal-tab-${tab.id}`} className={`terminal-session-slot ${placement}`} hidden={!visible} key={tab.id}><TerminalSession {...props} initialTerminalId={tab.terminalId} visible={Boolean(props.visible && visible)} actionId={tab.id === actionTargetId ? props.actionId : null} onActionStarted={tab.id === actionTargetId ? props.onActionStarted : undefined} resumeRequestConversationId={tab.id === activeId ? props.resumeRequestConversationId : null} onResumeRequestHandled={tab.id === activeId ? props.onResumeRequestHandled : undefined} siblingResumedConversationIds={siblingResumedConversationIds} onRestorableTerminalChange={(terminalId) => updateRestorableTerminal(tab.id, terminalId)} onTerminalReplaced={(replacement) => replaceTerminalTab(tab.id, replacement)} onProviderResumeStarted={(terminalId, resumedConversationId) => setResumedTerminals((current) => new Map(current).set(resumedConversationId, { tabId: tab.id, terminalId }))} onClose={() => closeTerminal(tab.id)} /></div>;
         })}

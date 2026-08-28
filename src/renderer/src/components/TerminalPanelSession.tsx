@@ -17,9 +17,14 @@ import { terminalInputChunks } from "../utils/terminalInputChunks";
 import type { ProviderTerminalResumeOption } from "./providerResumeOptions";
 import {
   command,
+  ignoreCommandFailure,
   MAX_PERSISTED_TERMINAL_TABS,
   providerTerminalExitPresentation,
+  terminalCloseCommand,
+  terminalDetachCommand,
+  terminalResizeCommand,
   TERMINAL_CREATE_RETRY_DELAYS_MS,
+  TERMINAL_CLOSE_FAILURE_MESSAGE,
   TERMINAL_SETTLING_RETRY_DELAYS_MS,
   terminalTheme,
   type TerminalPanelProps,
@@ -182,7 +187,10 @@ export function TerminalSession({
         || statusRef.current !== "online"
       ) return;
       for (const chunk of terminalInputChunks(data)) {
-        void sendCommand(command({ type: "terminal.input", payload: { terminalId, data: chunk } })).catch(() => undefined);
+        ignoreCommandFailure(sendCommand(command({
+          type: "terminal.input",
+          payload: { terminalId, data: chunk },
+        })));
       }
     });
 
@@ -202,7 +210,7 @@ export function TerminalSession({
             && terminalReadyRef.current
             && statusRef.current === "online"
           ) {
-            void sendCommand(command({ type: "terminal.resize", payload: { terminalId, ...next } })).catch(() => undefined);
+            ignoreCommandFailure(sendCommand(terminalResizeCommand(terminalId, next)));
           }
         } catch {
           // The terminal may be between responsive layouts; the next observation will fit it.
@@ -263,7 +271,7 @@ export function TerminalSession({
           ) return;
           const next = { cols: Math.max(20, terminal.cols), rows: Math.max(4, terminal.rows) };
           lastSizeRef.current = next;
-          void sendCommand(command({ type: "terminal.resize", payload: { terminalId, ...next } })).catch(() => undefined);
+          ignoreCommandFailure(sendCommand(terminalResizeCommand(terminalId, next)));
         } catch {
           // ResizeObserver will retry after the revealed panel has settled.
         }
@@ -502,14 +510,9 @@ export function TerminalSession({
               const retained = onRestorableTerminalChangeRef.current(
                 event.terminalId,
               ) !== false;
-              try {
-                await sendCommand(command({
-                  type: retained ? "terminal.detach" : "terminal.close",
-                  payload: { terminalId: event.terminalId },
-                }));
-              } catch {
-                // A disconnected owner is already bounded by server cleanup.
-              }
+              ignoreCommandFailure(sendCommand(retained
+                ? terminalDetachCommand(event.terminalId)
+                : terminalCloseCommand(event.terminalId)));
             }
             return;
           }
@@ -531,14 +534,7 @@ export function TerminalSession({
               message,
               source: replacementReconciliation?.source ?? "action",
             };
-            try {
-              await sendCommand(command({
-                type: "terminal.close",
-                payload: { terminalId: event.terminalId },
-              }));
-            } catch {
-              // The exact replacement remains bounded by detached cleanup.
-            }
+            ignoreCommandFailure(sendCommand(terminalCloseCommand(event.terminalId)));
             if (!cancelled) setSessionKey((value) => value + 1);
             return;
           }
@@ -698,10 +694,7 @@ export function TerminalSession({
           pendingExitRef.current.delete(event.terminalId);
           operationInFlightRef.current = false;
           if (event.terminalId !== previousId) {
-            void sendCommand(command({
-              type: "terminal.close",
-              payload: { terminalId: event.terminalId },
-            })).catch(() => undefined);
+            ignoreCommandFailure(sendCommand(terminalCloseCommand(event.terminalId)));
           }
           return;
         }
@@ -714,10 +707,7 @@ export function TerminalSession({
             preservePrevious: !pendingExitRef.current.has(previousId),
           })
         ) {
-          void sendCommand(command({
-            type: "terminal.close",
-            payload: { terminalId: event.terminalId },
-          })).catch(() => undefined);
+          ignoreCommandFailure(sendCommand(terminalCloseCommand(event.terminalId)));
           throw new Error(
             "The action could not open because the terminal tab limit was reached.",
           );
@@ -824,18 +814,12 @@ export function TerminalSession({
           throw new Error("The provider terminal returned an unexpected response.");
         }
         if (!event.providerResume || !event.providerResumeConversationId) {
-          void sendCommand(command({
-            type: "terminal.close",
-            payload: { terminalId: event.terminalId },
-          })).catch(() => undefined);
+          ignoreCommandFailure(sendCommand(terminalCloseCommand(event.terminalId)));
           throw new Error("The provider terminal omitted its authoritative session identity.");
         }
         if (!mountedRef.current || attempt !== resumeAttemptRef.current) {
           if (event.terminalId !== terminalIdRef.current) {
-            void sendCommand(command({
-              type: "terminal.close",
-              payload: { terminalId: event.terminalId },
-            })).catch(() => undefined);
+            ignoreCommandFailure(sendCommand(terminalCloseCommand(event.terminalId)));
           }
           return;
         }
@@ -848,10 +832,7 @@ export function TerminalSession({
             preservePrevious: !pendingExitRef.current.has(previousId),
           })
         ) {
-          void sendCommand(command({
-            type: "terminal.close",
-            payload: { terminalId: event.terminalId },
-          })).catch(() => undefined);
+          ignoreCommandFailure(sendCommand(terminalCloseCommand(event.terminalId)));
           throw new Error(
             "The provider could not open because the terminal tab limit was reached.",
           );
@@ -1003,14 +984,11 @@ export function TerminalSession({
       restart();
       return;
     }
-    void sendCommand(command({
-      type: "terminal.close",
-      payload: { terminalId },
-    })).then(restart, (error: unknown) => {
+    void sendCommand(terminalCloseCommand(terminalId)).then(restart, (error: unknown) => {
       if (!mountedRef.current || resumeAttemptRef.current !== attempt) return;
       const message = error instanceof Error
         ? error.message
-        : "The terminal could not be confirmed stopped.";
+        : TERMINAL_CLOSE_FAILURE_MESSAGE;
       setSessionError(message);
       setSessionState("error");
     });

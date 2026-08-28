@@ -2357,7 +2357,7 @@ describe("TerminalPanel focus lifecycle", () => {
     });
   });
 
-  it("refuses a project action without disturbing four resumed terminals", async () => {
+  it("clears a refused action before reporting a resumed-terminal close failure", async () => {
     const projectId = "11111111-1111-4111-8111-111111111111";
     const conversationId = "22222222-2222-4222-8222-222222222222";
     const terminalIds = [
@@ -2385,6 +2385,9 @@ describe("TerminalPanel focus lifecycle", () => {
           providerResumeConversationId: `30000000-0000-4000-8000-00000000000${index + 1}`,
         };
       }
+      if (sent.type === "terminal.close") {
+        throw new RuntimeCommandError("Terminal close rejected.", "rejected");
+      }
       return { type: "request.ok", requestId: sent.requestId };
     });
     const onActionStarted = vi.fn();
@@ -2402,20 +2405,17 @@ describe("TerminalPanel focus lifecycle", () => {
       onClose: () => undefined,
     };
     const view = render(<TerminalPanel {...props} />);
-    await waitFor(() => expect(document.querySelectorAll(
-      '.terminal-panel[data-terminal-state="ready"]',
-    )).toHaveLength(4));
-
+    await waitFor(() => expect(document.querySelectorAll('.terminal-panel[data-terminal-state="ready"]')).toHaveLength(4));
     view.rerender(<TerminalPanel {...props} actionId="check" />);
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "End a resumed provider terminal before starting this project action.",
-    );
+    expect(await screen.findByRole("alert")).toHaveTextContent("End a resumed provider terminal before starting this project action.");
     expect(onActionStarted).toHaveBeenCalledOnce();
-    expect(sendCommand.mock.calls.some(([sent]) => sent.type === "project.action.run"))
-      .toBe(false);
-    expect(sendCommand.mock.calls.some(([sent]) => sent.type === "terminal.close"))
-      .toBe(false);
+    expect(sendCommand.mock.calls.some(([sent]) => sent.type === "project.action.run")).toBe(false);
+    expect(sendCommand.mock.calls.some(([sent]) => sent.type === "terminal.close")).toBe(false);
     expect(screen.getAllByRole("tab")).toHaveLength(4);
+    view.rerender(<TerminalPanel {...props} actionId={null} />);
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "Close Terminal 1" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Terminal close rejected.");
   });
 
   it("does not attach a delayed project action to a newly selected chat", async () => {

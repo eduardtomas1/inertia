@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { useState } from "react";
+import { useLayoutEffect, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CommandPalette } from "../../src/renderer/src/components/CommandPalette";
@@ -69,6 +69,53 @@ function StableListenerHarness(): React.JSX.Element {
   );
 }
 
+function ImmediateShortcutOwner({ createConversation }: {
+  createConversation: () => void;
+}): null {
+  useGlobalShortcuts({
+    keybindings: DEFAULT_APP_KEYBINDINGS,
+    createConversation,
+    mobileNavigation: false,
+    suspended: false,
+    setActiveTool: vi.fn(),
+    setPaletteOpen: vi.fn(),
+    setSidebarCollapsed: vi.fn(),
+    setSidebarOpen: vi.fn(),
+  });
+  return null;
+}
+
+function ImmediateShortcutDispatch({ onDispatch }: {
+  onDispatch: (owned: boolean) => void;
+}): null {
+  useLayoutEffect(() => {
+    const event = new KeyboardEvent("keydown", {
+      key: "n",
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    window.dispatchEvent(event);
+    onDispatch(event.defaultPrevented);
+  }, [onDispatch]);
+  return null;
+}
+
+function ImmediateNewChatHarness({
+  createConversation,
+  onDispatch,
+}: {
+  createConversation: () => void;
+  onDispatch: (owned: boolean) => void;
+}): React.JSX.Element {
+  return (
+    <>
+      <ImmediateShortcutOwner createConversation={createConversation} />
+      <ImmediateShortcutDispatch onDispatch={onDispatch} />
+    </>
+  );
+}
+
 function SuspendedShortcutHarness({
   createConversation,
   setActiveTool,
@@ -94,6 +141,21 @@ function SuspendedShortcutHarness({
 }
 
 describe("global shortcut DOM integration", () => {
+  it("owns new-chat events dispatched by a sibling layout effect on mount", () => {
+    const createConversation = vi.fn();
+    const onDispatch = vi.fn();
+
+    render(
+      <ImmediateNewChatHarness
+        createConversation={createConversation}
+        onDispatch={onDispatch}
+      />,
+    );
+
+    expect(onDispatch).toHaveBeenCalledWith(true);
+    expect(createConversation).toHaveBeenCalledTimes(1);
+  });
+
   it("does not re-bind global listeners after an unrelated render", async () => {
     const add = vi.spyOn(window, "addEventListener");
     const remove = vi.spyOn(window, "removeEventListener");

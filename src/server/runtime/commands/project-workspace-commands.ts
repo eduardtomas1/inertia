@@ -548,7 +548,6 @@ export function createProjectWorkspaceCommandHandler(
         if (
           dependencies.providers.isRunning(conversation.id)
           || dependencies.turns.isActive(conversation.id)
-          || dependencies.turns.hasActiveCheckout(cwd)
           || dependencies.store.hasRecordedActiveWorkspaceRunForConversation(conversation.id)
           || dependencies.providerTerminalResumes.isActive(conversation.id)
         ) {

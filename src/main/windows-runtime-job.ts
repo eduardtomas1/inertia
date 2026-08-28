@@ -44,7 +44,7 @@ interface WindowsRuntimeJobExecutableLock {
     deadlineAt: number,
   ): Promise<WindowsRuntimeJobBrokerResult>;
   release(): Promise<void>;
-  abort(): void;
+  abort(): Promise<void>;
 }
 
 interface WindowsRuntimeJobBrokerResult {
@@ -480,8 +480,8 @@ try {
         try { $process.StandardInput.Close() } catch {}
         if (-not $process.HasExited) { $process.Kill() }
         if (-not $process.HasExited) { $process.WaitForExit() }
-        $firstError = if ($stderrTask.IsCompleted -and $null -ne $stderrTask.Result) { $stderrTask.Result } else { '' }
-        Write-Result $id 'TIMEOUT' '' ($firstError + [char]10 + $process.StandardError.ReadToEnd())
+        $firstError = if ($null -ne $stderrTask.Result) { $stderrTask.Result } else { '' }
+        Write-Result $id 'TIMEOUT' '' $firstError
         $process.Dispose()
         continue
       }
@@ -493,7 +493,8 @@ try {
         continue
       }
       if (-not $process.HasExited) { $process.WaitForExit() }
-      Write-Result $id ('EXIT:' + $process.ExitCode) $firstOutput ($firstError + [char]10 + $process.StandardError.ReadToEnd())
+      $firstError = if ($null -ne $stderrTask.Result) { $stderrTask.Result } else { '' }
+      Write-Result $id ('EXIT:' + $process.ExitCode) $firstOutput $firstError
       $process.Dispose()
       continue
     }
@@ -607,6 +608,16 @@ async function acquireWindowsRuntimeJobExecutableLock(
   child.stdin.on("error", () => undefined);
   child.once("error", () => { errored = true; });
   child.once("close", () => { closed = true; });
+  const awaitChildClose = async (timeoutMs: number): Promise<boolean> => {
+    if (closed) return true;
+    return await new Promise<boolean>((resolve) => {
+      const timeout = setTimeout(() => resolve(false), timeoutMs);
+      child.once("close", () => {
+        clearTimeout(timeout);
+        resolve(true);
+      });
+    });
+  };
   while (true) {
     const lockedIndex = stdoutLines.indexOf(EXECUTABLE_LOCKED_MARKER);
     const locked = lockedIndex >= 0;
@@ -722,21 +733,16 @@ async function acquireWindowsRuntimeJobExecutableLock(
             child.kill();
           }
           if (!closed) {
-            await new Promise<void>((resolve, reject) => {
-              const terminate = setTimeout(() => {
-                if (child.exitCode === null && child.signalCode === null) child.kill();
-              }, 2_000);
-              const deadline = setTimeout(() => {
-                reject(new Error(
-                  "The Windows runtime executable broker did not close during shutdown.",
-                ));
-              }, 3_000);
-              child.once("close", () => {
-                clearTimeout(terminate);
-                clearTimeout(deadline);
-                resolve();
-              });
-            });
+            const terminate = setTimeout(() => {
+              if (child.exitCode === null && child.signalCode === null) child.kill();
+            }, 2_000);
+            const didClose = await awaitChildClose(3_000);
+            clearTimeout(terminate);
+            if (!didClose) {
+              throw new Error(
+                "The Windows runtime executable broker did not close during shutdown.",
+              );
+            }
           }
           if (
             requestedShutdown
@@ -745,10 +751,13 @@ async function acquireWindowsRuntimeJobExecutableLock(
             throw new Error("The Windows runtime executable broker did not acknowledge shutdown.");
           }
         },
-        abort: () => {
+        abort: async () => {
           held = false;
           if (!child.stdin.destroyed && !child.stdin.writableEnded) child.stdin.destroy();
           if (child.exitCode === null && child.signalCode === null) child.kill();
+          if (!await awaitChildClose(1_000)) {
+            throw new Error("The Windows runtime executable broker could not be aborted.");
+          }
         },
       };
     }
@@ -760,6 +769,7 @@ async function acquireWindowsRuntimeJobExecutableLock(
     await new Promise<void>((resolve) => setTimeout(resolve, 10));
   }
   if (child.exitCode === null && child.signalCode === null) child.kill();
+  await awaitChildClose(1_000);
   const detail = stderr.trim().replace(/\s+/gu, " ").slice(0, 500);
   throw new Error([
     "The Windows runtime Job Object executable could not be locked and verified.",
@@ -805,7 +815,7 @@ export async function prepareWindowsRuntimeJobExecutableLock(
       options.spawnLockBroker ?? spawnWindowsRuntimeJobLockBroker,
     );
     if (preparedExecutableLock !== state) {
-      lock.abort();
+      await lock.abort();
       throw new Error("The Windows runtime executable lock preparation was cancelled.");
     }
     state.lock = lock;
@@ -826,8 +836,9 @@ export async function disposeWindowsRuntimeJobExecutableLock(): Promise<void> {
   if (state.lock) {
     try {
       await state.lock.release();
-    } catch {
-      state.lock.abort();
+    } catch (error) {
+      await state.lock.abort();
+      throw error;
     }
     return;
   }

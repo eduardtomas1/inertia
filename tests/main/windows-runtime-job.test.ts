@@ -64,6 +64,7 @@ interface BrokerChildOptions {
   readonly commandLogPath?: string;
   readonly malformedResult?: string;
   readonly shutdownDelayMs?: number;
+  readonly omitShutdownBye?: boolean;
 }
 
 function verifiedExecutableBrokerChild(
@@ -78,7 +79,10 @@ const encode = (value) => Buffer.from((value ?? "").slice(0, 2048), "utf8").toSt
 const respond = (line) => {
   if (options.commandLogPath) fs.appendFileSync(options.commandLogPath, line + "\\n");
   if (line === "SHUTDOWN") {
-    setTimeout(() => process.stdout.write("BYE\\n", () => process.exit(0)), options.shutdownDelayMs ?? 0);
+    setTimeout(() => {
+      if (options.omitShutdownBye) process.exit(0);
+      else process.stdout.write("BYE\\n", () => process.exit(0));
+    }, options.shutdownDelayMs ?? 0);
     return;
   }
   const parts = line.split(" ");
@@ -526,6 +530,19 @@ describe("Windows runtime Job Object containment", () => {
     const disposal = disposeWindowsRuntimeJobExecutableLock();
     expect(broker.exitCode).toBeNull();
     await disposal;
+    await closeChild(broker);
+    expect(broker.exitCode).toBe(0);
+  });
+
+  it("fails update and quit cleanup closed when shutdown is not acknowledged", async () => {
+    await disposeWindowsRuntimeJobExecutableLock();
+    const broker = verifiedExecutableBrokerChild({ omitShutdownBye: true });
+    await prepareWindowsRuntimeJobExecutableLock(stubAssembly, {
+      spawnLockBroker: () => broker,
+    });
+    await expect(disposeWindowsRuntimeJobExecutableLock()).rejects.toThrow(
+      "broker did not acknowledge shutdown",
+    );
     await closeChild(broker);
     expect(broker.exitCode).toBe(0);
   });

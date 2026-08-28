@@ -816,6 +816,13 @@ describe("TerminalPanel focus lifecycle", () => {
           terminalId,
         };
       }
+      if (command.type === "terminal.attach") {
+        return {
+          type: "terminal.created",
+          requestId: command.requestId,
+          terminalId: command.payload.terminalId,
+        };
+      }
       return { type: "request.ok", requestId: command.requestId };
     });
 
@@ -864,7 +871,16 @@ describe("TerminalPanel focus lifecycle", () => {
     expect(JSON.stringify(resumeCommand)).not.toContain("executable");
     expect(JSON.stringify(resumeCommand)).not.toContain("credential");
     expect(await screen.findByText(authoritativeSessionId, { selector: "code" })).toBeVisible();
-    expect(screen.queryByText(sessionId, { selector: "code" })).toBeNull();
+    expect(screen.getByText(sessionId, { selector: "code" })).not.toBeVisible();
+    expect(screen.getAllByRole("tab")).toHaveLength(2);
+    expect(screen.getByRole("tab", { name: "Terminal 1" }))
+      .toHaveAttribute("aria-selected", "true");
+    fireEvent.click(screen.getByRole("tab", { name: "Terminal 2" }));
+    await waitFor(() => expect(document.querySelector(
+      '[role="tabpanel"]:not([hidden]) .terminal-panel',
+    )).toHaveAttribute("data-terminal-state", "ready"));
+    expect(document.querySelector('[role="tabpanel"]:not([hidden]) .terminal-panel'))
+      .toHaveAttribute("data-terminal-id", "10000000-0000-4000-8000-000000000000");
   });
 
   it("can resume any provider chat from the terminal's current directory", async () => {
@@ -1268,6 +1284,154 @@ describe("TerminalPanel focus lifecycle", () => {
     )).toHaveLength(1));
   });
 
+  it("reconciles a zero-output provider exit that precedes a distinct resume response", async () => {
+    const originalId = "33333333-3333-4333-8333-333333333333";
+    const replacementId = "44444444-4444-4444-8444-444444444444";
+    const sessionId = "55555555-5555-4555-8555-555555555555";
+    const listeners = new Set<(event: ServerEvent) => void>();
+    let settleResume!: (event: ServerEvent) => void;
+    const resumed = new Promise<ServerEvent>((resolve) => { settleResume = resolve; });
+    const sendCommand = vi.fn((sent: ClientCommand): Promise<ServerEvent> => {
+      if (sent.type === "terminal.create") {
+        return Promise.resolve({ type: "terminal.created", requestId: sent.requestId, terminalId: originalId });
+      }
+      if (sent.type === "terminal.provider.resume") return resumed;
+      if (sent.type === "terminal.attach") {
+        return Promise.resolve({ type: "terminal.created", requestId: sent.requestId, terminalId: sent.payload.terminalId });
+      }
+      return Promise.resolve({ type: "request.ok", requestId: sent.requestId });
+    });
+    render(
+      <TerminalPanel
+        projectId="11111111-1111-4111-8111-111111111111"
+        conversationId="22222222-2222-4222-8222-222222222222"
+        projectName="Inertia"
+        status="online"
+        fontSize={13}
+        theme="dark"
+        visible
+        providerResume={{ kind: "available", resume: {
+          providerId: "claude", providerLabel: "Claude", sessionId,
+        }, reason: null }}
+        sendCommand={sendCommand}
+        subscribe={(listener) => { listeners.add(listener); return () => listeners.delete(listener); }}
+        onClose={() => undefined}
+      />,
+    );
+
+    const resume = await screen.findByRole("button", {
+      name: "Resume Claude session in Inertia",
+    });
+    await waitFor(() => expect(resume).toBeEnabled());
+    fireEvent.click(resume);
+    await waitFor(() => expect(sendCommand.mock.calls.some(
+      ([sent]) => sent.type === "terminal.provider.resume",
+    )).toBe(true));
+    await act(async () => {
+      for (const listener of listeners) {
+        listener({ type: "terminal.exit", terminalId: replacementId, exitCode: 9 });
+      }
+      settleResume({
+        type: "terminal.created",
+        requestId: crypto.randomUUID(),
+        terminalId: replacementId,
+        providerResumeConversationId: "22222222-2222-4222-8222-222222222222",
+        providerResume: { providerId: "claude", providerLabel: "Claude", sessionId },
+      });
+      await resumed;
+    });
+
+    expect(await screen.findByText(
+      `Claude could not resume session ${sessionId}. The saved session may be stale or unavailable; review the provider output above.`,
+    )).toBeVisible();
+    expect(screen.getByRole("button", { name: "Start again" })).toBeVisible();
+    expect(document.querySelector(`[data-terminal-id="${replacementId}"]`)).toBeNull();
+    fireEvent.click(screen.getByRole("tab", { name: "Terminal 2" }));
+    await waitFor(() => expect(document.querySelector(
+      '[role="tabpanel"]:not([hidden]) .terminal-panel',
+    )).toHaveAttribute("data-terminal-state", "ready"));
+  });
+
+  it("keeps the original terminal visible when a distinct resume races the tab limit", async () => {
+    const terminalIds = Array.from(
+      { length: 4 },
+      (_, index) => `${index + 1}0000000-0000-4000-8000-000000000000`,
+    );
+    const replacementId = "90000000-0000-4000-8000-000000000000";
+    let created = 0;
+    const sendCommand = vi.fn(async (sent: ClientCommand): Promise<ServerEvent> => {
+      if (sent.type === "terminal.create") {
+        const terminalId = terminalIds[created++];
+        if (!terminalId) throw new Error("unexpected terminal creation");
+        return { type: "terminal.created", requestId: sent.requestId, terminalId };
+      }
+      if (sent.type === "terminal.attach") {
+        return {
+          type: "terminal.created",
+          requestId: sent.requestId,
+          terminalId: sent.payload.terminalId,
+        };
+      }
+      if (sent.type === "terminal.provider.resume") {
+        return {
+          type: "terminal.created",
+          requestId: sent.requestId,
+          terminalId: replacementId,
+          providerResumeConversationId: sent.payload.conversationId,
+          providerResume: {
+            providerId: "claude",
+            providerLabel: "Claude",
+            sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          },
+        };
+      }
+      return { type: "request.ok", requestId: sent.requestId };
+    });
+    render(
+      <TerminalPanel
+        projectId="11111111-1111-4111-8111-111111111111"
+        conversationId="22222222-2222-4222-8222-222222222222"
+        projectName="Inertia"
+        status="online"
+        fontSize={13}
+        theme="dark"
+        visible
+        providerResume={{ kind: "available", resume: {
+          providerId: "claude", providerLabel: "Claude",
+          sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        }, reason: null }}
+        sendCommand={sendCommand}
+        subscribe={() => () => undefined}
+        onClose={() => undefined}
+      />,
+    );
+
+    for (let count = 2; count <= 4; count += 1) {
+      await waitFor(() => expect(screen.getByRole("button", { name: "New terminal" }))
+        .toBeEnabled());
+      fireEvent.click(screen.getByRole("button", { name: "New terminal" }));
+      await waitFor(() => expect(screen.getAllByRole("tab")).toHaveLength(count));
+    }
+    const resume = await screen.findByRole("button", {
+      name: "Resume Claude session in Inertia",
+    });
+    await waitFor(() => expect(resume).toBeEnabled());
+    fireEvent.click(resume);
+
+    await waitFor(() => expect(sendCommand.mock.calls.some(
+      ([sent]) => sent.type === "terminal.close"
+        && sent.payload.terminalId === replacementId,
+    )).toBe(true));
+    expect(screen.getAllByRole("tab")).toHaveLength(4);
+    await waitFor(() => expect(document.querySelector(
+      '[role="tabpanel"]:not([hidden]) .terminal-panel',
+    )).toHaveAttribute("data-terminal-id", terminalIds[3]));
+    expect(document.querySelector(`[data-terminal-id="${replacementId}"]`)).toBeNull();
+    expect(await screen.findByText(
+      "The provider could not open because the terminal tab limit was reached.",
+    )).toBeVisible();
+  });
+
   it("creates a usable local shell after provider replacement teardown fails", async () => {
     const projectId = "11111111-1111-4111-8111-111111111111";
     const conversationId = "22222222-2222-4222-8222-222222222222";
@@ -1642,7 +1806,7 @@ describe("TerminalPanel focus lifecycle", () => {
         return {
           type: "terminal.created",
           requestId: sent.requestId,
-          terminalId: "resumed-primary",
+          terminalId: sent.payload.terminalId,
           providerResumeConversationId: sent.payload.conversationId,
           providerResume: {
             providerId: "claude",
@@ -1728,7 +1892,7 @@ describe("TerminalPanel focus lifecycle", () => {
         return {
           type: "terminal.created",
           requestId: sent.requestId,
-          terminalId: secondary ? "resumed-secondary" : "resumed-primary",
+          terminalId: sent.payload.terminalId,
           providerResumeConversationId: sent.payload.conversationId,
           providerResume: {
             providerId: "claude",
@@ -1926,6 +2090,130 @@ describe("TerminalPanel focus lifecycle", () => {
     expect(screen.getAllByRole("tab")).toHaveLength(4);
     expect(sendCommand.mock.calls.some(([sent]) => sent.type === "terminal.close"))
       .toBe(false);
+  });
+
+  it("keeps a macOS shell visible when a project action starts in a new terminal", async () => {
+    const shellId = "90000000-0000-4000-8000-000000000001";
+    const actionTerminalId = "90000000-0000-4000-8000-000000000002";
+    const sendCommand = vi.fn(async (sent: ClientCommand): Promise<ServerEvent> => {
+      if (sent.type === "terminal.create") {
+        return { type: "terminal.created", requestId: sent.requestId, terminalId: shellId };
+      }
+      if (sent.type === "project.action.run") {
+        return { type: "terminal.created", requestId: sent.requestId, terminalId: actionTerminalId };
+      }
+      if (sent.type === "terminal.attach") {
+        return {
+          type: "terminal.created",
+          requestId: sent.requestId,
+          terminalId: sent.payload.terminalId,
+        };
+      }
+      return { type: "request.ok", requestId: sent.requestId };
+    });
+    const props = {
+      projectId: "11111111-1111-4111-8111-111111111111",
+      conversationId: "22222222-2222-4222-8222-222222222222",
+      projectName: "Inertia",
+      status: "online" as const,
+      fontSize: 13,
+      theme: "dark" as const,
+      visible: true,
+      sendCommand,
+      subscribe: () => () => undefined,
+      onActionStarted: vi.fn(),
+      onClose: () => undefined,
+    };
+    const view = render(<TerminalPanel {...props} />);
+    await waitFor(() => expect(document.querySelector(".terminal-panel"))
+      .toHaveAttribute("data-terminal-id", shellId));
+
+    view.rerender(<TerminalPanel {...props} actionId="check" />);
+    await waitFor(() => expect(screen.getAllByRole("tab")).toHaveLength(2));
+    expect(document.querySelector('[role="tabpanel"]:not([hidden]) .terminal-panel'))
+      .toHaveAttribute("data-terminal-id", actionTerminalId);
+    fireEvent.click(screen.getByRole("tab", { name: "Terminal 2" }));
+    await waitFor(() => expect(document.querySelector(
+      '[role="tabpanel"]:not([hidden]) .terminal-panel',
+    )).toHaveAttribute("data-terminal-id", shellId));
+    await waitFor(() => expect(JSON.parse(window.sessionStorage.getItem(
+      "inertia:terminal-sessions:v1:11111111-1111-4111-8111-111111111111:22222222-2222-4222-8222-222222222222",
+    ) ?? "[]")).toEqual([actionTerminalId, shellId]));
+
+    fireEvent(window, new Event("pagehide"));
+    view.unmount();
+    sendCommand.mockClear();
+    render(<TerminalPanel {...props} />);
+    await waitFor(() => expect(sendCommand.mock.calls.flatMap(([sent]) =>
+      sent.type === "terminal.attach" ? [sent.payload.terminalId] : [])).toEqual(
+      expect.arrayContaining([actionTerminalId, shellId]),
+    ));
+    await waitFor(() => expect(screen.getAllByRole("tab")).toHaveLength(2));
+    fireEvent.click(screen.getByRole("tab", { name: "Terminal 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close Terminal 1" }));
+    await waitFor(() => expect(sendCommand.mock.calls.some(
+      ([sent]) => sent.type === "terminal.close"
+        && sent.payload.terminalId === actionTerminalId,
+    )).toBe(true));
+  });
+
+  it("reconciles a zero-output project-action exit before its distinct response", async () => {
+    const shellId = "90000000-0000-4000-8000-000000000011";
+    const actionTerminalId = "90000000-0000-4000-8000-000000000012";
+    const listeners = new Set<(event: ServerEvent) => void>();
+    let settleAction!: (event: ServerEvent) => void;
+    const action = new Promise<ServerEvent>((resolve) => { settleAction = resolve; });
+    const sendCommand = vi.fn((sent: ClientCommand): Promise<ServerEvent> => {
+      if (sent.type === "terminal.create") {
+        return Promise.resolve({ type: "terminal.created", requestId: sent.requestId, terminalId: shellId });
+      }
+      if (sent.type === "project.action.run") return action;
+      if (sent.type === "terminal.attach") {
+        return Promise.resolve({ type: "terminal.created", requestId: sent.requestId, terminalId: sent.payload.terminalId });
+      }
+      return Promise.resolve({ type: "request.ok", requestId: sent.requestId });
+    });
+    render(
+      <TerminalPanel
+        projectId="11111111-1111-4111-8111-111111111111"
+        conversationId="22222222-2222-4222-8222-222222222222"
+        projectName="Inertia"
+        status="online"
+        fontSize={13}
+        theme="dark"
+        visible
+        actionId="check"
+        sendCommand={sendCommand}
+        subscribe={(listener) => { listeners.add(listener); return () => listeners.delete(listener); }}
+        onActionStarted={() => undefined}
+        onClose={() => undefined}
+      />,
+    );
+
+    await waitFor(() => expect(sendCommand.mock.calls.some(
+      ([sent]) => sent.type === "project.action.run",
+    )).toBe(true));
+    await act(async () => {
+      for (const listener of listeners) {
+        listener({ type: "terminal.exit", terminalId: actionTerminalId, exitCode: 17 });
+      }
+      settleAction({
+        type: "terminal.created",
+        requestId: crypto.randomUUID(),
+        terminalId: actionTerminalId,
+      });
+      await action;
+    });
+
+    expect(screen.getByRole("button", { name: "Start again" })).toBeVisible();
+    expect(document.querySelector(`[data-terminal-id="${actionTerminalId}"]`)).toBeNull();
+    expect(JSON.parse(window.sessionStorage.getItem(
+      "inertia:terminal-sessions:v1:11111111-1111-4111-8111-111111111111:22222222-2222-4222-8222-222222222222",
+    ) ?? "[]")).toEqual([null, shellId]);
+    fireEvent.click(screen.getByRole("tab", { name: "Terminal 2" }));
+    await waitFor(() => expect(document.querySelector(
+      '[role="tabpanel"]:not([hidden]) .terminal-panel',
+    )).toHaveAttribute("data-terminal-state", "ready"));
   });
 
   it("routes a project action away from the only resumed terminal", async () => {

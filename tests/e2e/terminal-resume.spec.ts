@@ -13,6 +13,10 @@ import { selectWorkspaceTool } from "./support/workspace-tools";
 const primarySessionId = "11111111-1111-4111-8111-111111111111";
 const secondarySessionId = "22222222-2222-4222-8222-222222222222";
 
+function quotePosix(value: string): string {
+  return `'${value.replaceAll("'", `'\\''`)}'`;
+}
+
 const codexAppServerSource = `
 if (process.argv[2] === "--help") {
   process.stdout.write("Usage: codex app-server [OPTIONS] - Run the app server\\n");
@@ -131,7 +135,9 @@ test("resumes the selected provider session only in its owning split pane", asyn
     .toBeVisible({ timeout: 20_000 });
 
   const primaryPanel = primaryTools.locator(".terminal-panel");
-  const secondaryPanel = secondaryTools.locator(".terminal-panel");
+  const secondaryPanel = secondaryTools.locator(
+    ".terminal-session-slot.is-primary > .terminal-panel",
+  );
   const primaryTerminal = primaryTools.locator(
     ".terminal-panel[data-terminal-id]",
   );
@@ -144,23 +150,63 @@ test("resumes the selected provider session only in its owning split pane", asyn
   const secondaryTerminalId = await secondaryTerminal.getAttribute(
     "data-terminal-id",
   );
+  const terminalTabs = secondaryTools.getByRole("tablist", {
+    name: "Terminals",
+  });
+  const preservedShellMarker = "inertia-preserved-macos-shell";
+  const preservedShellPath = join(
+    app.secondWorkspaceDirectory!,
+    ".terminal-preserved-shell",
+  );
+  if (process.platform === "darwin") {
+    await expect(secondaryPanel).toHaveAttribute("data-terminal-state", "ready");
+    await secondaryPanel.locator(".xterm-helper-textarea").focus();
+    await page.keyboard.insertText(
+      `export INERTIA_PRESERVED_SHELL=${preservedShellMarker}`,
+    );
+    await page.keyboard.press("Enter");
+  }
   await secondaryTools.getByRole("button", {
     name: "Resume Codex session in Companion",
   }).click();
 
-  await expect(secondaryTerminal).toHaveAttribute(
-    "data-terminal-id",
-    /.+/u,
-  );
-  await expect.poll(
-    () => secondaryTerminal.getAttribute("data-terminal-id"),
-    { timeout: 10_000 },
-  ).not.toBe(secondaryTerminalId);
+  await expect(secondaryPanel).toHaveAttribute("data-terminal-id", /.+/u);
+  if (process.platform === "darwin") {
+    await expect(terminalTabs.getByRole("tab")).toHaveCount(2, {
+      timeout: 20_000,
+    });
+    await expect(secondaryPanel).toHaveAttribute("data-terminal-state", "ready");
+    await expect(secondaryPanel).not.toHaveAttribute(
+      "data-terminal-id",
+      secondaryTerminalId!,
+    );
+    await terminalTabs.getByRole("tab", { name: "Terminal 2" }).click();
+    await expect(secondaryPanel).toHaveAttribute(
+      "data-terminal-id",
+      secondaryTerminalId!,
+    );
+    await expect(secondaryPanel).toHaveAttribute("data-terminal-state", "ready");
+    await secondaryPanel.locator(".xterm-helper-textarea").focus();
+    await page.keyboard.insertText(
+      `printf '%s' "$INERTIA_PRESERVED_SHELL" > ${quotePosix(preservedShellPath)}`,
+    );
+    await page.keyboard.press("Enter");
+    await expect.poll(
+      () => readFile(preservedShellPath, "utf8").catch(() => null),
+    ).toBe(preservedShellMarker);
+    await terminalTabs.getByRole("tab", { name: "Terminal 1" }).click();
+  } else {
+    await expect(secondaryPanel).toHaveAttribute(
+      "data-terminal-id",
+      secondaryTerminalId!,
+    );
+  }
   await expect.poll(
     () => readFile(
       join(app.secondWorkspaceDirectory!, ".terminal-resume-marker"),
       "utf8",
     ).catch(() => null),
+    { timeout: 20_000 },
   ).toBe(secondarySessionId);
   await expect(readFile(
     join(app.workspaceDirectory, ".terminal-resume-marker"),
@@ -192,8 +238,21 @@ test("resumes the selected provider session only in its owning split pane", asyn
   expect(await primaryPanel.getAttribute("data-terminal-id"))
     .toBe(primaryTerminalId);
 
+  if (process.platform === "darwin") {
+    await terminalTabs.getByRole("tab", { name: "Terminal 2" }).click();
+    await expect(secondaryPanel).toHaveAttribute("data-terminal-id", secondaryTerminalId!);
+    await expect(secondaryPanel).toHaveAttribute("data-terminal-state", "ready");
+    await terminalTabs.getByRole("tab", { name: "Terminal 1" }).click();
+  }
   await secondaryPanel.getByRole("button", { name: "Start again" }).click();
   await expect(secondaryPanel).toHaveAttribute("data-terminal-id", /.+/u);
+  await expect(secondaryPanel).toHaveAttribute("data-terminal-state", "ready");
+  if (process.platform === "darwin") {
+    await terminalTabs.getByRole("tab", { name: "Terminal 2" }).click();
+    await expect(secondaryPanel).toHaveAttribute("data-terminal-id", secondaryTerminalId!);
+    await expect(secondaryPanel).toHaveAttribute("data-terminal-state", "ready");
+    await terminalTabs.getByRole("tab", { name: "Terminal 1" }).click();
+  }
   await expect(secondaryPanel.getByRole("button", {
     name: "Resume Codex session in Companion",
   })).toBeEnabled();

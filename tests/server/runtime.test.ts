@@ -1018,7 +1018,8 @@ process.exit(child.status ?? 1);
     const actionCreated = await client.events.next(
       (event): event is Extract<ServerEvent, { type: "terminal.created" }> => event.type === "terminal.created" && event.requestId === runRequestId,
     );
-    expect(actionCreated.terminalId).toBe(actionTerminalId);
+    expect(actionCreated.terminalId === actionTerminalId)
+      .toBe(process.platform !== "darwin");
     const running = await client.events.next(
       (event): event is Extract<ServerEvent, { type: "snapshot.updated" }> =>
         event.type === "snapshot.updated"
@@ -1083,7 +1084,8 @@ process.exit(child.status ?? 1);
     const rerunCreated = await client.events.next(
       (event): event is Extract<ServerEvent, { type: "terminal.created" }> => event.type === "terminal.created" && event.requestId === rerunRequestId,
     );
-    expect(rerunCreated.terminalId).toBe(rerunTerminalId);
+    expect(rerunCreated.terminalId === rerunTerminalId)
+      .toBe(process.platform !== "darwin");
     const rerunning = await client.events.next(
       (event): event is Extract<ServerEvent, { type: "snapshot.updated" }> =>
         event.type === "snapshot.updated"

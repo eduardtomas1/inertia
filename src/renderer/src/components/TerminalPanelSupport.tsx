@@ -2,12 +2,56 @@ import { useEffect, useId, useRef, useState } from "react";
 import { ChevronDown, MessagesSquare } from "lucide-react";
 import type {
   ClientCommand,
+  ColorThemeId,
+  ProviderTerminalResumeAvailability,
   ProviderTerminalResumeDescriptor,
+  ServerEvent,
   ThemePreference,
 } from "@shared/contracts";
 import type { ConnectionStatus } from "../hooks/useInertiaConnection";
 import { ProviderResumePicker } from "./ProviderResumePicker";
 import type { ProviderTerminalResumeOption } from "./providerResumeOptions";
+
+export type TerminalPanelProps = {
+  projectId: string;
+  conversationId?: string;
+  projectName: string;
+  status: ConnectionStatus;
+  fontSize: number;
+  theme: ThemePreference;
+  colorTheme?: ColorThemeId;
+  sendCommand: (command: ClientCommand) => Promise<ServerEvent>;
+  subscribe: (listener: (event: ServerEvent) => void) => () => void;
+  actionId?: string | null;
+  onActionStarted?: () => void;
+  providerResume?: ProviderTerminalResumeAvailability | null;
+  providerResumes?: readonly ProviderTerminalResumeOption[];
+  resumeRequestConversationId?: string | null;
+  onResumeRequestHandled?: () => void;
+  onClose: () => void;
+  visible?: boolean;
+};
+
+export type TerminalReplacement = {
+  previousTerminalId: string;
+  terminalId: string;
+  preservePrevious: boolean;
+};
+
+export function providerTerminalExitPresentation(
+  provider: ProviderTerminalResumeDescriptor,
+  exitCode: number,
+): { message: string; state: "closed" | "error" } {
+  return exitCode === 0
+    ? {
+        message: `${provider.providerLabel} session ${provider.sessionId} ended.`,
+        state: "closed",
+      }
+    : {
+        message: `${provider.providerLabel} could not resume session ${provider.sessionId}. The saved session may be stale or unavailable; review the provider output above.`,
+        state: "error",
+      };
+}
 
 export const MAX_PERSISTED_TERMINAL_TABS = 4;
 export const TERMINAL_CREATE_RETRY_DELAYS_MS = [400, 900] as const;
@@ -58,6 +102,27 @@ export function nextTerminalTabIndex(tabs: readonly TerminalTab[]): number {
   return index;
 }
 
+export function replaceTerminalTabWithoutHiding(
+  tabs: readonly TerminalTab[],
+  tabId: string,
+  previousTerminalId: string,
+  terminalId: string,
+  preservePrevious: boolean,
+): TerminalTab[] | null {
+  const source = tabs.find((tab) => tab.id === tabId);
+  if (
+    source?.terminalId !== previousTerminalId
+    || tabs.some((tab) => tab.id !== tabId && tab.terminalId === terminalId)
+    || (preservePrevious && tabs.length >= MAX_PERSISTED_TERMINAL_TABS)
+  ) return null;
+  const next = tabs.map((tab) => tab.id === tabId
+    ? { ...tab, terminalId }
+    : tab);
+  return preservePrevious
+    ? [...next, newTerminalTab(nextTerminalTabIndex(tabs), previousTerminalId)]
+    : next;
+}
+
 export function readPersistedTerminalTabs(storageKey: string): TerminalTab[] {
   try {
     const raw = window.sessionStorage.getItem(storageKey);
@@ -78,6 +143,58 @@ export function readPersistedTerminalTabs(storageKey: string): TerminalTab[] {
   } catch {
     return [newTerminalTab()];
   }
+}
+
+export function useTerminalTabsLifecycle(
+  storageKey: string,
+  tabs: readonly TerminalTab[],
+  sendCommand: (command: ClientCommand) => Promise<unknown>,
+): React.MutableRefObject<readonly TerminalTab[]> {
+  const tabsRef = useRef(tabs);
+  const pageUnloadingRef = useRef(false);
+  const generationRef = useRef(0);
+  tabsRef.current = tabs;
+  useEffect(() => {
+    try {
+      if (tabs.length === 0) window.sessionStorage.removeItem(storageKey);
+      else window.sessionStorage.setItem(
+        storageKey,
+        JSON.stringify(tabs.map(({ terminalId }) => terminalId)),
+      );
+    } catch {
+      // Session restoration is a convenience; terminal ownership stays server-side.
+    }
+  }, [storageKey, tabs]);
+  useEffect(() => {
+    const generation = generationRef.current + 1;
+    generationRef.current = generation;
+    pageUnloadingRef.current = false;
+    const markPageUnloading = (): void => {
+      pageUnloadingRef.current = true;
+    };
+    window.addEventListener("beforeunload", markPageUnloading);
+    window.addEventListener("pagehide", markPageUnloading);
+    return () => {
+      window.removeEventListener("beforeunload", markPageUnloading);
+      window.removeEventListener("pagehide", markPageUnloading);
+      window.queueMicrotask(() => {
+        if (generationRef.current !== generation || pageUnloadingRef.current) return;
+        for (const { terminalId } of tabsRef.current) {
+          if (!terminalId) continue;
+          void sendCommand(command({
+            type: "terminal.close",
+            payload: { terminalId },
+          })).catch(() => undefined);
+        }
+        try {
+          window.sessionStorage.removeItem(storageKey);
+        } catch {
+          // The scoped sessions are still closed authoritatively above.
+        }
+      });
+    };
+  }, [sendCommand, storageKey]);
+  return tabsRef;
 }
 
 export function waitForTerminalRetry(delayMs: number): Promise<void> {

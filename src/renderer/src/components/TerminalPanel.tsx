@@ -4,14 +4,9 @@ import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { Columns2, Maximize2, Plus, RotateCcw, TerminalSquare, X } from "lucide-react";
 import type {
-  ClientCommand,
-  ColorThemeId,
-  ProviderTerminalResumeAvailability,
   ProviderTerminalResumeDescriptor,
   ServerEvent,
-  ThemePreference,
 } from "@shared/contracts";
-import type { ConnectionStatus } from "../hooks/useInertiaConnection";
 import { usePersistedSize } from "../hooks/usePersistedSize";
 import { runtimeCommandDelivery } from "../utils/connectionMessages";
 import { terminalInputChunks } from "../utils/terminalInputChunks";
@@ -22,44 +17,33 @@ import {
   MAX_PERSISTED_TERMINAL_TABS,
   newTerminalTab,
   nextTerminalTabIndex,
+  providerTerminalExitPresentation,
   readPersistedTerminalTabs,
+  replaceTerminalTabWithoutHiding,
   TERMINAL_CREATE_RETRY_DELAYS_MS,
   TERMINAL_SETTLING_RETRY_DELAYS_MS,
   terminalStorageKey,
   terminalTheme,
+  type TerminalPanelProps,
+  type TerminalReplacement,
   TerminalResumeStatus,
   type TerminalTab,
+  useTerminalTabsLifecycle,
   waitForTerminalRetry,
 } from "./TerminalPanelSupport";
 import { IconButton, LoadingMark } from "./ui";
 
-type TerminalPanelProps = {
-  projectId: string;
-  conversationId?: string;
-  projectName: string;
-  status: ConnectionStatus;
-  fontSize: number;
-  theme: ThemePreference;
-  colorTheme?: ColorThemeId;
-  sendCommand: (command: ClientCommand) => Promise<ServerEvent>;
-  subscribe: (listener: (event: ServerEvent) => void) => () => void;
-  actionId?: string | null;
-  onActionStarted?: () => void;
-  providerResume?: ProviderTerminalResumeAvailability | null;
-  providerResumes?: readonly ProviderTerminalResumeOption[];
-  resumeRequestConversationId?: string | null;
-  onResumeRequestHandled?: () => void;
-  onClose: () => void;
-  visible?: boolean;
-};
-
 type TerminalSessionProps = TerminalPanelProps & {
   initialTerminalId: string | null;
   siblingResumedConversationIds: ReadonlySet<string>;
-  onRestorableTerminalChange: (terminalId: string | null) => void;
+  onRestorableTerminalChange: (
+    terminalId: string | null,
+  ) => void;
+  onTerminalReplaced: (replacement: TerminalReplacement) => boolean;
   onProviderResumeStarted: (terminalId: string, conversationId: string) => void;
 };
 const MAX_PENDING_TERMINAL_OUTPUT = 256 * 1_024 + 256;
+const MAX_PENDING_TERMINAL_EXITS = 8;
 
 function TerminalSession({
   projectId,
@@ -80,6 +64,7 @@ function TerminalSession({
   initialTerminalId,
   siblingResumedConversationIds,
   onRestorableTerminalChange,
+  onTerminalReplaced,
   onProviderResumeStarted,
   onClose,
   visible = true,
@@ -138,8 +123,10 @@ function TerminalSession({
   const resumeProviderSessionRef = useRef<() => boolean>(() => false);
   const handledResumeRequestRef = useRef<string | null>(null);
   const onRestorableTerminalChangeRef = useRef(onRestorableTerminalChange);
+  const onTerminalReplacedRef = useRef(onTerminalReplaced);
   const onProviderResumeStartedRef = useRef(onProviderResumeStarted);
   onRestorableTerminalChangeRef.current = onRestorableTerminalChange;
+  onTerminalReplacedRef.current = onTerminalReplaced;
   onProviderResumeStartedRef.current = onProviderResumeStarted;
   ownerRef.current = `${projectId}:${conversationId ?? ""}`;
   statusRef.current = status;
@@ -312,12 +299,14 @@ function TerminalSession({
     }
     if (event.type === "terminal.exit" && operationInFlightRef.current) {
       if (
-        event.terminalId === terminalIdRef.current
-        || pendingOutputRef.current.has(event.terminalId)
+        !pendingExitRef.current.has(event.terminalId)
+        && pendingExitRef.current.size >= MAX_PENDING_TERMINAL_EXITS
       ) {
-        pendingExitRef.current.set(event.terminalId, event.exitCode);
-        return;
+        const oldest = pendingExitRef.current.keys().next().value;
+        if (oldest) pendingExitRef.current.delete(oldest);
       }
+      pendingExitRef.current.set(event.terminalId, event.exitCode);
+      return;
     }
     if (event.type === "terminal.exit") {
       pendingOutputRef.current.delete(event.terminalId);
@@ -333,15 +322,12 @@ function TerminalSession({
       setActiveResume(null);
       setTerminalId(null);
       onRestorableTerminalChangeRef.current(null);
-      if (resumedProvider && event.exitCode !== 0) {
-        setSessionError(
-          `${resumedProvider.providerLabel} could not resume session ${resumedProvider.sessionId}. The saved session may be stale or unavailable; review the provider output above.`,
-        );
-        setSessionState("error");
+      if (resumedProvider) {
+        const exit = providerTerminalExitPresentation(resumedProvider, event.exitCode);
+        setSessionError(exit.message);
+        setSessionState(exit.state);
       } else {
-        setSessionError(resumedProvider
-          ? `${resumedProvider.providerLabel} session ${resumedProvider.sessionId} ended.`
-          : null);
+        setSessionError(null);
         setSessionState("closed");
       }
     }
@@ -585,9 +571,9 @@ function TerminalSession({
         terminalId: previousId,
         ...size,
       },
-    }))
+      }))
       .then((event) => {
-        if (event.type !== "terminal.created" || event.terminalId !== previousId) {
+        if (event.type !== "terminal.created") {
           throw new Error("The action terminal returned an unexpected response.");
         }
         if (!ownsResponse()) {
@@ -597,14 +583,39 @@ function TerminalSession({
           pendingOutputRef.current.delete(event.terminalId);
           pendingExitRef.current.delete(event.terminalId);
           operationInFlightRef.current = false;
+          if (event.terminalId !== previousId) {
+            void sendCommand(command({
+              type: "terminal.close",
+              payload: { terminalId: event.terminalId },
+            })).catch(() => undefined);
+          }
           return;
+        }
+        const terminalReplaced = event.terminalId !== previousId;
+        if (
+          terminalReplaced
+          && !onTerminalReplacedRef.current({
+            previousTerminalId: previousId,
+            terminalId: event.terminalId,
+            preservePrevious: !pendingExitRef.current.has(previousId),
+          })
+        ) {
+          void sendCommand(command({
+            type: "terminal.close",
+            payload: { terminalId: event.terminalId },
+          })).catch(() => undefined);
+          throw new Error(
+            "The action could not open because the terminal tab limit was reached.",
+          );
         }
         terminalIdRef.current = event.terminalId;
         managedActionTerminalRef.current = true;
         resumedProviderRef.current = null;
         setActiveResume(null);
         setTerminalId(event.terminalId);
-        onRestorableTerminalChangeRef.current(null);
+        if (!terminalReplaced) {
+          onRestorableTerminalChangeRef.current(event.terminalId);
+        }
         const bufferedOutput = pendingOutputRef.current.get(event.terminalId);
         const earlyExitCode = pendingExitRef.current.get(event.terminalId);
         pendingOutputRef.current.clear();
@@ -616,6 +627,7 @@ function TerminalSession({
           terminalIdRef.current = null;
           managedActionTerminalRef.current = false;
           setTerminalId(null);
+          onRestorableTerminalChangeRef.current(null);
           terminalRef.current?.writeln(`\r\n\x1b[2mProcess exited with code ${earlyExitCode}.\x1b[0m`);
           setSessionState("closed");
           actionInFlightRef.current = null;
@@ -705,17 +717,32 @@ function TerminalSession({
           }
           return;
         }
+        const terminalReplaced = event.terminalId !== previousId;
+        if (
+          terminalReplaced
+          && !onTerminalReplacedRef.current({
+            previousTerminalId: previousId,
+            terminalId: event.terminalId,
+            preservePrevious: !pendingExitRef.current.has(previousId),
+          })
+        ) {
+          void sendCommand(command({
+            type: "terminal.close",
+            payload: { terminalId: event.terminalId },
+          })).catch(() => undefined);
+          throw new Error(
+            "The provider could not open because the terminal tab limit was reached.",
+          );
+        }
         const authoritativeResume = event.providerResume;
         terminalIdRef.current = event.terminalId;
         managedActionTerminalRef.current = false;
         resumedProviderRef.current = authoritativeResume;
-        onProviderResumeStartedRef.current(
-          event.terminalId,
-          event.providerResumeConversationId,
-        );
         setActiveResume(authoritativeResume);
         setTerminalId(event.terminalId);
-        onRestorableTerminalChangeRef.current(event.terminalId);
+        if (!terminalReplaced) {
+          onRestorableTerminalChangeRef.current(event.terminalId);
+        }
         const bufferedOutput = pendingOutputRef.current.get(event.terminalId);
         const earlyExitCode = pendingExitRef.current.get(event.terminalId);
         pendingOutputRef.current.clear();
@@ -734,9 +761,15 @@ function TerminalSession({
           setTerminalId(null);
           onRestorableTerminalChangeRef.current(null);
           terminalRef.current?.writeln(`\r\n\x1b[2mProcess exited with code ${earlyExitCode}.\x1b[0m`);
-          setSessionState("closed");
+          const exit = providerTerminalExitPresentation(authoritativeResume, earlyExitCode);
+          setSessionError(exit.message);
+          setSessionState(exit.state);
           return;
         }
+        onProviderResumeStartedRef.current(
+          event.terminalId,
+          event.providerResumeConversationId,
+        );
         terminalReadyRef.current = true;
         setSessionState("ready");
       })
@@ -940,60 +973,9 @@ function ScopedTerminalPanel(props: TerminalPanelProps): React.JSX.Element {
   );
   const [actionRoutingError, setActionRoutingError] = useState<string | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
-  const tabsRef = useRef(tabs);
-  const pageUnloadingRef = useRef(false);
-  const lifecycleGenerationRef = useRef(0);
+  const tabsRef = useTerminalTabsLifecycle(storageKey, tabs, sendCommand);
   const handledPanelResumeRequestRef = useRef<string | null>(null);
   const handledBlockedActionRef = useRef<string | null>(null);
-  tabsRef.current = tabs;
-
-  useEffect(() => {
-    try {
-      if (tabs.length === 0) {
-        window.sessionStorage.removeItem(storageKey);
-        return;
-      }
-      window.sessionStorage.setItem(
-        storageKey,
-        JSON.stringify(tabs.map(({ terminalId }) => terminalId)),
-      );
-    } catch {
-      // Session restoration is a convenience; terminal ownership stays server-side.
-    }
-  }, [storageKey, tabs]);
-
-  useEffect(() => {
-    const generation = lifecycleGenerationRef.current + 1;
-    lifecycleGenerationRef.current = generation;
-    pageUnloadingRef.current = false;
-    const markPageUnloading = (): void => {
-      pageUnloadingRef.current = true;
-    };
-    window.addEventListener("beforeunload", markPageUnloading);
-    window.addEventListener("pagehide", markPageUnloading);
-    return () => {
-      window.removeEventListener("beforeunload", markPageUnloading);
-      window.removeEventListener("pagehide", markPageUnloading);
-      window.queueMicrotask(() => {
-        if (
-          lifecycleGenerationRef.current !== generation
-          || pageUnloadingRef.current
-        ) return;
-        for (const { terminalId } of tabsRef.current) {
-          if (!terminalId) continue;
-          void sendCommand(command({
-            type: "terminal.close",
-            payload: { terminalId },
-          })).catch(() => undefined);
-        }
-        try {
-          window.sessionStorage.removeItem(storageKey);
-        } catch {
-          // The scoped sessions are still closed authoritatively above.
-        }
-      });
-    };
-  }, [sendCommand, storageKey]);
 
   useEffect(() => setSplitPercent(persistedSplitPercent), [persistedSplitPercent]);
 
@@ -1090,6 +1072,23 @@ function ScopedTerminalPanel(props: TerminalPanelProps): React.JSX.Element {
       window.queueMicrotask(() => setActiveId(tab.id));
       return [...current, tab];
     });
+  };
+
+  const replaceTerminalTab = (
+    tabId: string,
+    replacement: TerminalReplacement,
+  ): boolean => {
+    const next = replaceTerminalTabWithoutHiding(
+      tabsRef.current,
+      tabId,
+      replacement.previousTerminalId,
+      replacement.terminalId,
+      replacement.preservePrevious,
+    );
+    if (!next) return false;
+    tabsRef.current = next;
+    setTabs(next);
+    return true;
   };
 
   useEffect(() => {
@@ -1219,7 +1218,7 @@ function ScopedTerminalPanel(props: TerminalPanelProps): React.JSX.Element {
               return { ...candidate, terminalId };
             });
             return changed ? next : current;
-          })} onProviderResumeStarted={(terminalId, resumedConversationId) => setResumedTerminals((current) => new Map(current).set(resumedConversationId, { tabId: tab.id, terminalId }))} onClose={() => closeTerminal(tab.id)} /></div>;
+          })} onTerminalReplaced={(replacement) => replaceTerminalTab(tab.id, replacement)} onProviderResumeStarted={(terminalId, resumedConversationId) => setResumedTerminals((current) => new Map(current).set(resumedConversationId, { tabId: tab.id, terminalId }))} onClose={() => closeTerminal(tab.id)} /></div>;
         })}
         {split && secondaryId && (
           <PaneResizeHandle

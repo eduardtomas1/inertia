@@ -85,6 +85,8 @@ export interface TerminalManagerOptions {
     spawnProcess: () => IPty,
     options: { readonly darwinGuardianCommand?: string },
   ) => RuntimeOwnedPidProcess<IPty>;
+  /** Test seam for exercising the fail-closed same-session Darwin retirement path. */
+  preserveDarwinShellOnReplacement?: boolean;
 }
 
 export interface TerminalReattachScope {
@@ -270,6 +272,7 @@ export class TerminalManager {
     spawnProcess: () => IPty,
     options: { readonly darwinGuardianCommand?: string },
   ) => RuntimeOwnedPidProcess<IPty>;
+  private readonly preserveDarwinShellOnReplacement: boolean;
   private readonly closingFailures = new Map<string, Error>();
 
   constructor(options: TerminalManagerOptions = {}) {
@@ -297,6 +300,8 @@ export class TerminalManager {
     );
     this.spawnOwnedTerminalProcess = options.spawnOwnedTerminalProcess
       ?? spawnRuntimeOwnedPidProcess;
+    this.preserveDarwinShellOnReplacement =
+      options.preserveDarwinShellOnReplacement ?? true;
     const terminateProcessTree = options.terminateProcessTree;
     this.createProcessTreeTermination = options.createProcessTreeTermination
       ?? ((pid, waitForExit) => {
@@ -478,6 +483,34 @@ export class TerminalManager {
     }
     if (owner.readyState !== WebSocket.OPEN) {
       throw new TerminalError("The terminal client disconnected.");
+    }
+    if (
+      this.platform === "darwin"
+      && replaced.gracefulReplacement
+      && this.preserveDarwinShellOnReplacement
+    ) {
+      // An interactive macOS shell may have forked while loading the user's
+      // startup files. The native guardian deliberately cannot retire that
+      // durable claim on cancellation because an unobserved double-fork could
+      // have escaped its session. Preserve the still-visible shell under its
+      // existing identity and start the requested process as a separately
+      // owned terminal instead of either weakening containment or orphaning
+      // the shell behind a reused public ID.
+      return this.createProcessReplacing(
+        owner,
+        null,
+        cwd,
+        executable,
+        args,
+        env,
+        cols,
+        rows,
+        onExit,
+        onOutput,
+        gracefulReplacement,
+        replaced.reattachScope,
+        providerResume,
+      );
     }
     this.assertCapacity(owner, replaced, replaced.reattachScope);
     this.replacementReservations.set(replaced.id, replaced);

@@ -16,9 +16,11 @@ import {
 
 class FakeTerminals implements WorkspaceActionTerminalManager<object> {
   readonly inputs: Array<{ terminalId: string; data: string }> = [];
+  readonly closedManagedIds: string[] = [];
   failReplace = false;
   failInput = false;
   closeManagedFailure: Error | null = null;
+  distinctReplacementId: string | null = null;
   private sequence = 0;
   private readonly sessions = new Map<string, {
     onExit?: (exitCode: number) => void;
@@ -49,8 +51,9 @@ class FakeTerminals implements WorkspaceActionTerminalManager<object> {
   ): Promise<string> {
     if (!this.sessions.has(terminalId)) throw new Error("Terminal not found.");
     if (this.failReplace) throw new Error("spawn failed");
-    this.sessions.set(terminalId, { onExit, onOutput });
-    return terminalId;
+    const replacementId = this.distinctReplacementId ?? terminalId;
+    this.sessions.set(replacementId, { onExit, onOutput });
+    return replacementId;
   }
 
   input(_owner: object, terminalId: string, data: string): void {
@@ -66,8 +69,13 @@ class FakeTerminals implements WorkspaceActionTerminalManager<object> {
   async closeManaged(terminalId: string): Promise<boolean> {
     if (!this.sessions.has(terminalId)) return false;
     if (this.closeManagedFailure) throw this.closeManagedFailure;
+    this.closedManagedIds.push(terminalId);
     this.finish(terminalId, 130);
     return true;
+  }
+
+  has(terminalId: string): boolean {
+    return this.sessions.has(terminalId);
   }
 
   output(terminalId: string, data: string): void {
@@ -306,6 +314,41 @@ describe("workspace run controller", () => {
         runtime.controller.stopManagedAction(running.id),
       ).resolves.toBe(false);
       expect(runtime.broadcastSnapshot).toHaveBeenCalledTimes(3);
+    } finally {
+      runtime.store.close();
+    }
+  });
+
+  it("uses an authoritative distinct replacement ID without touching the original shell", async () => {
+    const runtime = await fixture();
+    try {
+      const replacementId = "terminal-darwin-action";
+      runtime.terminals.distinctReplacementId = replacementId;
+      const onStarted = vi.fn();
+
+      await expect(runtime.controller.startAction({
+        owner: runtime.terminalOwner,
+        cwd: runtime.workspace,
+        projectId: runtime.project.id,
+        conversationId: runtime.conversation.id,
+        actionId: "preview",
+        terminalId: runtime.terminalId,
+        cols: 80,
+        rows: 24,
+        onStarted,
+      })).resolves.toBe(replacementId);
+
+      expect(runtime.terminals.inputs).toEqual([
+        { terminalId: replacementId, data: "npm run preview\r" },
+      ]);
+      expect(onStarted).toHaveBeenCalledWith(replacementId);
+      expect(runtime.terminals.has(runtime.terminalId)).toBe(true);
+      const running = runtime.store.shellSnapshot().runs.find(
+        (run) => run.actionId === "preview",
+      )!;
+      await expect(runtime.controller.stopManagedAction(running.id)).resolves.toBe(true);
+      expect(runtime.terminals.closedManagedIds).toEqual([replacementId]);
+      expect(runtime.terminals.has(runtime.terminalId)).toBe(true);
     } finally {
       runtime.store.close();
     }

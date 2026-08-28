@@ -125,35 +125,61 @@ async function beforeTerminalDeadline(
   });
 }
 
-async function waitForGuardianStopWithinDeadline(
+async function waitForBooleanWithinTerminalDeadline(
+  operation: Promise<boolean>,
   session: TerminalSession,
+  localDeadlineAt: number | null,
 ): Promise<boolean> {
-  const guardianStop = session.waitForOwnedGuardianStop();
   if (session.shutdownDeadlineAt !== null) {
-    return await beforeTerminalDeadline(guardianStop, session.shutdownDeadlineAt);
+    return await beforeTerminalDeadline(
+      operation,
+      localDeadlineAt === null
+        ? session.shutdownDeadlineAt
+        : Math.min(localDeadlineAt, session.shutdownDeadlineAt),
+    );
   }
+  const boundedOperation = localDeadlineAt === null
+    ? operation.catch(() => false)
+    : beforeTerminalDeadline(operation, localDeadlineAt);
   const first = await Promise.race([
-    guardianStop.then(
-      (value) => ({ kind: "guardian" as const, value }),
-      () => ({ kind: "guardian" as const, value: false }),
-    ),
+    boundedOperation.then((value) => ({ kind: "operation" as const, value })),
     session.waitForShutdownDeadline.then((deadlineAt) => ({
       kind: "deadline" as const,
       deadlineAt,
     })),
   ]);
-  return first.kind === "guardian"
+  return first.kind === "operation"
     ? first.value
-    : await beforeTerminalDeadline(guardianStop, first.deadlineAt);
+    : await beforeTerminalDeadline(
+        operation,
+        localDeadlineAt === null
+          ? first.deadlineAt
+          : Math.min(localDeadlineAt, first.deadlineAt),
+      );
+}
+
+async function waitForGuardianStopWithinDeadline(
+  session: TerminalSession,
+  localDeadlineAt: number | null,
+): Promise<boolean> {
+  return await waitForBooleanWithinTerminalDeadline(
+    session.waitForOwnedGuardianStop(),
+    session,
+    localDeadlineAt,
+  );
 }
 
 async function waitForOwnedProcessStoppedWithinDeadline(
   session: TerminalSession,
   fallbackWaitMs: number,
+  localDeadlineAt: number | null = null,
 ): Promise<boolean> {
-  const deadlineAt = session.shutdownDeadlineAt
+  const fallbackDeadlineAt = localDeadlineAt
     ?? Date.now() + fallbackWaitMs;
   while (!session.confirmOwnedProcessStopped()) {
+    const deadlineAt = session.shutdownDeadlineAt === null
+      ? fallbackDeadlineAt
+      : Math.min(fallbackDeadlineAt, session.shutdownDeadlineAt);
     const remainingMs = Math.trunc(deadlineAt - Date.now());
     if (remainingMs <= 0) return false;
     await new Promise<void>((resolve) => {
@@ -531,12 +557,8 @@ export class TerminalManager {
   private async gracefullyRetireReplacementShell(
     session: TerminalSession,
   ): Promise<boolean> {
-    const shutdownDeadlineAt = Date.now() + this.shutdownTimeoutMs;
-    session.setShutdownDeadline(shutdownDeadlineAt);
-    const gracefulDeadlineAt = Math.min(
-      session.shutdownDeadlineAt ?? shutdownDeadlineAt,
-      Date.now() + Math.max(1, Math.trunc(this.shutdownTimeoutMs / 2)),
-    );
+    const gracefulDeadlineAt = Date.now()
+      + Math.max(1, Math.trunc(this.shutdownTimeoutMs / 2));
     try {
       // A local interactive shell can retire the Darwin guardian normally
       // through PTY EOF. Provider/action terminals are never sent input by
@@ -674,6 +696,7 @@ export class TerminalManager {
     // Let trackDisposal publish the memoized closing promise before EOF can
     // synchronously trigger the PTY exit listener.
     await Promise.resolve();
+    let fallbackDeadlineAt: number | null = null;
     if (
       gracefulReplacement
       && await this.gracefullyRetireReplacementShell(session)
@@ -685,6 +708,12 @@ export class TerminalManager {
         // The exact durable claim is already retired.
       }
       return;
+    }
+    if (gracefulReplacement) {
+      // The EOF prepass is an optional convenience for an interactive Darwin
+      // shell. Give the fail-closed guardian path its complete configured
+      // budget when no enclosing runtime-shutdown deadline is already tighter.
+      fallbackDeadlineAt = Date.now() + this.shutdownTimeoutMs;
     }
 
     await new Promise<void>((resolve, reject) => {
@@ -721,17 +750,18 @@ export class TerminalManager {
             // A close can race the platform guardian's bounded asynchronous
             // admission. Let that exact guardian consume the recorded stop
             // request before starting the shorter PTY-exit deadline.
-            const admitted = await waitForGuardianStopWithinDeadline(session);
+            const admitted = await waitForGuardianStopWithinDeadline(
+              session,
+              fallbackDeadlineAt,
+            );
             if (!admitted) return false;
-            const exitWaitMs = session.shutdownDeadlineAt === null
-              ? this.shutdownTimeoutMs
-              : Math.min(
-                  this.shutdownTimeoutMs,
-                  Math.max(0, Math.trunc(session.shutdownDeadlineAt - Date.now())),
-                );
             const exited = session.exitObserved
               ? true
-              : exitWaitMs > 0 && await waitForExit(exitWaitMs);
+              : await waitForBooleanWithinTerminalDeadline(
+                  waitForExit(this.shutdownTimeoutMs),
+                  session,
+                  fallbackDeadlineAt,
+                );
             return exited;
           }
           : this.createProcessTreeTermination(session.pty.pid, waitForExit);
@@ -752,6 +782,7 @@ export class TerminalManager {
           if (!await waitForOwnedProcessStoppedWithinDeadline(
             session,
             this.shutdownTimeoutMs,
+            fallbackDeadlineAt,
           )) {
             finish(new TerminalError(
               "A terminal process ownership claim could not be retired during runtime shutdown.",

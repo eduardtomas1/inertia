@@ -624,10 +624,138 @@ describe("TerminalManager", () => {
       await vi.advanceTimersByTimeAsync(10);
       expect(requestGuardianStop).toHaveBeenCalledOnce();
       replacedTerminal.emitExit({ exitCode: 0, signal: 31 });
-      await vi.advanceTimersByTimeAsync(10);
+      await vi.advanceTimersByTimeAsync(20);
 
       await rejected;
       expect(spawnTerminal).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("preserves the full Darwin guardian fallback budget after EOF", async () => {
+    vi.useFakeTimers();
+    try {
+      const replacedTerminal = fakeTerminal(100);
+      const replacementTerminal = fakeTerminal(101);
+      let ownershipStopped = false;
+      let replacementSettled = false;
+      const requestGuardianStop = vi.fn(() => true);
+      const spawnTerminal = vi.fn()
+        .mockReturnValueOnce(replacedTerminal.pty)
+        .mockReturnValueOnce(replacementTerminal.pty);
+      const owner = {
+        readyState: 1,
+        bufferedAmount: 0,
+        send: vi.fn(),
+      } as unknown as WebSocket;
+      const manager = new TerminalManager({
+        platform: "darwin",
+        shutdownTimeoutMs: 20,
+        spawnTerminal,
+        spawnOwnedTerminalProcess: (spawnProcess) => ({
+          process: spawnProcess(),
+          confirmStopped: () => ownershipStopped,
+          releaseIfGroupExited: () => undefined,
+          requestGuardianStop,
+          waitForGuardianStop: async () => true,
+        }),
+      });
+      const terminalId = manager.create(owner, process.cwd(), 80, 24);
+
+      const replacement = manager.replaceProcess(
+        owner,
+        terminalId,
+        process.cwd(),
+        "provider-cli",
+        ["resume", "session-id"],
+        {},
+        80,
+        24,
+      ).finally(() => {
+        replacementSettled = true;
+      });
+
+      await Promise.resolve();
+      expect(replacedTerminal.pty.write).toHaveBeenCalledWith("\x04");
+      await vi.advanceTimersByTimeAsync(10);
+      expect(requestGuardianStop).toHaveBeenCalledOnce();
+
+      // This is beyond the original EOF-plus-fallback deadline. The strict
+      // guardian path must still own its complete configured 20 ms budget.
+      await vi.advanceTimersByTimeAsync(14);
+      expect(replacementSettled).toBe(false);
+      ownershipStopped = true;
+      replacedTerminal.emitExit({ exitCode: 0, signal: 0 });
+      await vi.advanceTimersByTimeAsync(1);
+
+      await expect(replacement).resolves.toEqual(expect.any(String));
+      expect(spawnTerminal).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("lets runtime shutdown tighten an active Darwin fallback deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      const replacedTerminal = fakeTerminal(100);
+      const replacementTerminal = fakeTerminal(101);
+      let settleGuardianStop!: (confirmed: boolean) => void;
+      const guardianStop = new Promise<boolean>((resolve) => {
+        settleGuardianStop = resolve;
+      });
+      const requestGuardianStop = vi.fn(() => true);
+      const spawnTerminal = vi.fn()
+        .mockReturnValueOnce(replacedTerminal.pty)
+        .mockReturnValueOnce(replacementTerminal.pty);
+      const owner = {
+        readyState: 1,
+        bufferedAmount: 0,
+        send: vi.fn(),
+      } as unknown as WebSocket;
+      const manager = new TerminalManager({
+        platform: "darwin",
+        shutdownTimeoutMs: 20,
+        spawnTerminal,
+        spawnOwnedTerminalProcess: (spawnProcess) => ({
+          process: spawnProcess(),
+          confirmStopped: () => false,
+          releaseIfGroupExited: () => undefined,
+          requestGuardianStop,
+          waitForGuardianStop: async () => await guardianStop,
+        }),
+      });
+      const terminalId = manager.create(owner, process.cwd(), 80, 24);
+
+      const replacement = manager.replaceProcess(
+        owner,
+        terminalId,
+        process.cwd(),
+        "provider-cli",
+        ["resume", "session-id"],
+        {},
+        80,
+        24,
+      );
+      const replacementRejected = expect(replacement).rejects.toThrow(
+        "A terminal process tree could not be confirmed stopped during runtime shutdown.",
+      );
+
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(10);
+      expect(requestGuardianStop).toHaveBeenCalledOnce();
+
+      const shutdown = manager.disposeAll(Date.now() + 5);
+      const shutdownRejected = expect(shutdown).rejects.toThrow(
+        "A terminal process tree could not be confirmed stopped during runtime shutdown.",
+      );
+      await vi.advanceTimersByTimeAsync(5);
+
+      await replacementRejected;
+      await shutdownRejected;
+      expect(spawnTerminal).toHaveBeenCalledOnce();
+      settleGuardianStop(true);
     } finally {
       vi.useRealTimers();
     }

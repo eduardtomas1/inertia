@@ -761,6 +761,51 @@ describe("TerminalManager", () => {
     }
   });
 
+  it("uses the authoritative runtime deadline for non-graceful claim retirement", async () => {
+    vi.useFakeTimers();
+    try {
+      const terminal = fakeTerminal(100);
+      let ownershipStopped = false;
+      let shutdownSettled = false;
+      const manager = new TerminalManager({
+        shutdownTimeoutMs: 20,
+        spawnTerminal: vi.fn(() => terminal.pty),
+        spawnOwnedTerminalProcess: (spawnProcess) => ({
+          process: spawnProcess(),
+          confirmStopped: () => ownershipStopped,
+          releaseIfGroupExited: () => undefined,
+          requestGuardianStop: () => true,
+          waitForGuardianStop: async () => true,
+        }),
+      });
+      const owner = {} as WebSocket;
+      manager.createProcess(
+        owner,
+        process.cwd(),
+        "provider-cli",
+        [],
+        {},
+        80,
+        24,
+      );
+
+      const shutdown = manager.disposeAll(Date.now() + 100).finally(() => {
+        shutdownSettled = true;
+      });
+      await Promise.resolve();
+      terminal.emitExit({ exitCode: 0, signal: 0 });
+      await vi.advanceTimersByTimeAsync(20);
+
+      expect(shutdownSettled).toBe(false);
+      ownershipStopped = true;
+      await vi.advanceTimersByTimeAsync(10);
+
+      await expect(shutdown).resolves.toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("waits for a normally exited Darwin shell claim to retire", async () => {
     vi.useFakeTimers();
     try {

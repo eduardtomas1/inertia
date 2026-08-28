@@ -174,12 +174,13 @@ async function waitForOwnedProcessStoppedWithinDeadline(
   fallbackWaitMs: number,
   localDeadlineAt: number | null = null,
 ): Promise<boolean> {
-  const fallbackDeadlineAt = localDeadlineAt
+  const initialDeadlineAt = localDeadlineAt
+    ?? session.shutdownDeadlineAt
     ?? Date.now() + fallbackWaitMs;
   while (!session.confirmOwnedProcessStopped()) {
     const deadlineAt = session.shutdownDeadlineAt === null
-      ? fallbackDeadlineAt
-      : Math.min(fallbackDeadlineAt, session.shutdownDeadlineAt);
+      ? initialDeadlineAt
+      : Math.min(initialDeadlineAt, session.shutdownDeadlineAt);
     const remainingMs = Math.trunc(deadlineAt - Date.now());
     if (remainingMs <= 0) return false;
     await new Promise<void>((resolve) => {

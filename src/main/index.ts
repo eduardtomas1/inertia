@@ -85,10 +85,7 @@ import { RuntimeSystemSuspendTracker } from "./runtime-system-suspend-tracker.js
 import * as runtimeBootstrap from "./runtime-bootstrap-safety.js";
 import { prepareRuntimeBootstrapRecovery } from "./runtime-bootstrap-recovery.js";
 import { resolveDesktopRuntimeProcessSafetyAssets } from "./runtime-windows-job-bootstrap.js";
-import {
-  disposeWindowsRuntimeJobExecutableLock,
-  prepareWindowsRuntimeJobExecutableLock,
-} from "./windows-runtime-job.js";
+import { disposeWindowsRuntimeJobExecutableLock, prepareWindowsRuntimeJobExecutableLock } from "./windows-runtime-job.js";
 import {
   cleanupPrivilegedOwners,
   finishPrivilegedExit,
@@ -890,12 +887,10 @@ function finishQuitAfterCleanup(): void {
 }
 function runPrivilegedCleanup(): Promise<boolean> {
   if (privilegedCleanup) return privilegedCleanup;
-  systemSuspendDelivery?.close();
-  systemSuspendDelivery = null;
+  systemSuspendDelivery?.close(); systemSuspendDelivery = null;
   if (mainWindow) saveWindowState(mainWindow);
   const supervisorToStop = runtimeSupervisor, privateConnectHostToStop = privateConnectHost; privateConnectHost = null;
-  const cleanup = (async () => {
-    try {
+  const cleanup = (async () => { try {
       await detachedChatClose.closeDetachedChatsForShutdown(detachedChatMain);
       previewBroker.close(); runtimeDiagnostics?.record("app.stop");
       return await cleanupPrivilegedOwners({
@@ -919,12 +914,9 @@ function runPrivilegedCleanup(): Promise<boolean> {
           await closeConversationAttachmentAccess(retainedAttachments);
         },
       });
-    } finally {
-      await disposeWindowsRuntimeJobExecutableLock();
-    }
+    } finally { await disposeWindowsRuntimeJobExecutableLock(); }
   })();
-  privilegedCleanup = cleanup;
-  return cleanup;
+  privilegedCleanup = cleanup; return cleanup;
 }
 async function bootstrap(): Promise<void> {
   runtimeDiagnostics = new RuntimeDiagnostics(runtimeDiagnosticsDirectory(app.getPath("userData")));
@@ -984,14 +976,9 @@ async function bootstrap(): Promise<void> {
     app.getPath("userData"),
   );
   runtimeDataDirectory = dataDirectory;
-  const { runtimeProcessGuardianPath, windowsRuntimeJobAssembly } =
-    resolveDesktopRuntimeProcessSafetyAssets();
-  if (windowsRuntimeJobAssembly) {
-    // Hold the exact verified image across every later CreateProcess call.
-    // Recovery keeps its existing short deadline because this bounded cold
-    // readiness gate completes before the supervisor can begin recovery.
-    await prepareWindowsRuntimeJobExecutableLock(windowsRuntimeJobAssembly);
-  }
+  const { runtimeProcessGuardianPath, windowsRuntimeJobAssembly } = resolveDesktopRuntimeProcessSafetyAssets();
+  // Prime the verified launch broker before the short recovery deadline.
+  if (windowsRuntimeJobAssembly) await prepareWindowsRuntimeJobExecutableLock(windowsRuntimeJobAssembly);
   const {
     bootstrapSafety,
     modernDarwinRecoveryAuthority,

@@ -54,9 +54,12 @@ static int parse_u64(const char *raw, unsigned long long *value) {
   if (errno || end == raw || *end || parsed == 0) return 0;
   *value = parsed; return 1;
 }
+static int open_exact(const char *path, int flags) {
+  return (int)syscall(SYS_openat, AT_FDCWD, path, flags, 0);
+}
 static int read_identity(pid_t pid, pid_t *parent_pid, unsigned long long *start) {
   char path[64], data[4096]; snprintf(path, sizeof(path), "/proc/%d/stat", pid);
-  int fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW); if (fd < 0) return 0;
+  int fd = open_exact(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW); if (fd < 0) return 0;
   ssize_t size = read(fd, data, sizeof(data) - 1); close(fd);
   if (size <= 0 || size >= (ssize_t)sizeof(data)) return 0;
   data[size] = 0;
@@ -80,8 +83,8 @@ static int trusted_runtime_helper(pid_t sender, pid_t parent, unsigned long long
   pid_t sender_parent = 0; unsigned long long sender_start = 0, confirmed_start = 0;
   int pidfd = pidfd_open_exact(sender); if (pidfd < 0) return 0;
   char sender_path[64]; snprintf(sender_path, sizeof(sender_path), "/proc/%d/exe", sender);
-  int sender_exe = open(sender_path, O_PATH | O_CLOEXEC);
-  int self_exe = open("/proc/self/exe", O_PATH | O_CLOEXEC); struct stat left, right;
+  int sender_exe = open_exact(sender_path, O_PATH | O_CLOEXEC);
+  int self_exe = open_exact("/proc/self/exe", O_PATH | O_CLOEXEC); struct stat left, right;
   const int valid = sender_exe >= 0 && self_exe >= 0
     && read_identity(sender, &sender_parent, &sender_start) && sender_parent == parent
     && same_process(parent, parent_start)
@@ -103,7 +106,7 @@ static void close_children(struct child *children, int count) {
 static int census(struct child *children, int *count) {
   char path[96], data[8192];
   snprintf(path, sizeof(path), "/proc/self/task/%d/children", getpid());
-  int fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW); if (fd < 0) return 0;
+  int fd = open_exact(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW); if (fd < 0) return 0;
   ssize_t size = read(fd, data, sizeof(data) - 1); close(fd);
   if (size < 0 || size >= (ssize_t)sizeof(data)) return 0;
   data[size] = 0;
@@ -177,13 +180,6 @@ static int install_terminal_filter(pid_t pid, pid_t tid) {
     BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
     BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_prctl, 0, 1),
     BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
-    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_fcntl, 0, 6),
-    BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, args[1])),
-    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, F_SETFD, 0, 3),
-    BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, args[2])),
-    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, FD_CLOEXEC, 0, 1),
-    BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
-    BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_KILL_PROCESS),
     BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_tgkill, 0, 7),
     BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, args[0])),
     BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, (uint32_t)pid, 0, 5),
@@ -275,7 +271,7 @@ static int identity_mode(const char *raw) {
 }
 static int hardened_status(pid_t pid) {
   char path[64], data[4096]; snprintf(path, sizeof(path), "/proc/%d/status", pid);
-  int fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW); if (fd < 0) return 0;
+  int fd = open_exact(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW); if (fd < 0) return 0;
   ssize_t size = read(fd, data, sizeof(data) - 1); close(fd);
   if (size <= 0 || size >= (ssize_t)sizeof(data)) return 0;
   data[size] = 0;
@@ -284,7 +280,7 @@ static int hardened_status(pid_t pid) {
 }
 static int named_status(pid_t pid, const char *name) {
   char path[64], data[4096], expected[64]; snprintf(path, sizeof(path), "/proc/%d/status", pid);
-  int fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW); if (fd < 0) return 0;
+  int fd = open_exact(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW); if (fd < 0) return 0;
   ssize_t size = read(fd, data, sizeof(data) - 1); close(fd);
   if (size <= 0 || size >= (ssize_t)sizeof(data)) return 0;
   data[size] = 0; snprintf(expected, sizeof(expected), "Name:\t%s\n", name);

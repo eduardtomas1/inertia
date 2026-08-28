@@ -915,7 +915,10 @@ export function spawnRuntimeOwnedProcess<T extends ChildProcess>(
     registry.claims.set(child, claim);
     child.once("close", (code, signal) => {
       // Guardian-level signals are the fail-closed containment marker.
-      if (typeof code !== "number" || signal !== null) return;
+      if (typeof code !== "number" || signal !== null) {
+        registry.tainted = true;
+        return;
+      }
       settleNormallyClosedDarwinGuardian(registry, claim);
     });
     const admission = admitDarwinGuardian(registry, claim, child, spawnedAfterMs);
@@ -1083,7 +1086,10 @@ export function spawnRuntimeOwnedPidProcess<T extends { readonly pid: number }>(
         },
         waitForGuardianStop: async () => await admission,
         releaseIfGroupExited: (exitSignal) => {
-          if (exitSignal !== 0) return;
+          if (exitSignal !== 0) {
+            registry.tainted = true;
+            return;
+          }
           settleNormallyClosedDarwinGuardian(registry, claim);
         },
       };

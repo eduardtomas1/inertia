@@ -69,6 +69,19 @@ async function waitFor(predicate: () => boolean, timeout = 5_000): Promise<void>
 }
 
 describe("Linux runtime process guardian", () => {
+  linuxIt("passes the terminal seccomp self-test in the generated static binary", () => {
+    const guardian = join(
+      process.cwd(),
+      "resources/generated/runtime-process-guardian/runtime-process-guardian",
+    );
+    expect(existsSync(guardian)).toBe(true);
+    expect(() => execFileSync(guardian, ["seccomp-selftest"], {
+      stdio: "ignore",
+      timeout: 5_000,
+    }))
+      .not.toThrow();
+  });
+
   it("bounds the clean-marker hardening transition before release", () => {
     vi.useFakeTimers();
     const terminalAuthority = vi.fn()

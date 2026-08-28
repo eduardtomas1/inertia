@@ -122,10 +122,13 @@ export class RuntimeSupervisorRecoveryAdmission {
         && !modernIds.has(lease.runtimeGenerationId))
       .map(({ runtimeGenerationId }) => runtimeGenerationId)
       .sort();
-    const exactLegacyBatch = legacyLeaseIds.length === pendingLegacyIds.length
-      && legacyLeaseIds.every((generationId, index) =>
-        generationId === pendingLegacyIds[index]
-        && pendingLegacy.has(generationId));
+    // The utility runtime retires the unavailable lease before asking the
+    // supervisor to consume its matching authority. A crash in that narrow
+    // handoff leaves a valid authority without a lease. Replay the complete
+    // authority batch in that state, while continuing to reject any
+    // unavailable lease that is not explicitly authorized.
+    const exactLegacyBatch = legacyLeaseIds.every((generationId) =>
+      pendingLegacy.has(generationId));
     if (
       !exactLegacyBatch
       && (legacyLeaseIds.length > 0 || pendingLegacyIds.length > 0)
@@ -192,11 +195,8 @@ export class RuntimeSupervisorRecoveryAdmission {
         && !modernIds.has(lease.runtimeGenerationId))
       .map(({ runtimeGenerationId }) => runtimeGenerationId)
       .sort();
-    if (
-      exactLegacyIds.length !== legacyIds.length
-      || exactLegacyIds.some((generationId, index) =>
-        generationId !== legacyIds[index])
-    ) return this.#rollback(
+    if (exactLegacyIds.some((generationId) =>
+      !legacyIds.includes(generationId))) return this.#rollback(
       runtimeGenerationId,
       "The manual legacy runtime recovery authority changed before launch.",
     );
@@ -225,18 +225,24 @@ export class RuntimeSupervisorRecoveryAdmission {
           this.#systemBootId,
         )
       ) return { handled: true };
-      if (!this.#legacyAuthorities.consume(
-        event.retiredRuntimeGenerationId,
-        platform,
-        this.#systemBootId,
-      )) return {
-        handled: true,
-        error:
-          "The manual legacy runtime recovery authority could not be consumed safely.",
-      };
       record.legacyRecoveryAuthorityIds.delete(
         event.retiredRuntimeGenerationId,
       );
+      if (record.legacyRecoveryAuthorityIds.size > 0) {
+        return { handled: true };
+      }
+      for (const runtimeGenerationId of
+        record.legacyRecoveryAuthorityBatchIds) {
+        if (!this.#legacyAuthorities.consume(
+          runtimeGenerationId,
+          platform,
+          this.#systemBootId,
+        )) return {
+          handled: true,
+          error:
+            "The manual legacy runtime recovery authority could not be consumed safely.",
+        };
+      }
       return { handled: true };
     }
 

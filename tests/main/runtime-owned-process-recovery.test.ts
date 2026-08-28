@@ -34,7 +34,10 @@ import {
   spawnRuntimeOwnedPidProcess,
   spawnRuntimeOwnedProcess,
 } from "../../src/node/runtime-owned-processes";
-import { signalLinuxGuardianExact } from "../../src/node/runtime-owned-process-linux";
+import {
+  readLinuxGuardianReadyAsync,
+  signalLinuxGuardianExact,
+} from "../../src/node/runtime-owned-process-linux";
 import { runtimeOwnedPtyInvocation } from "../../src/node/runtime-owned-pty-invocation";
 
 const systemBootId = "test:10000000-0000-4000-8000-000000000001";
@@ -137,12 +140,19 @@ async function completedLinuxGuardian(
   liveChildren.add(guardian);
   guardian.once("close", () => liveChildren.delete(guardian));
   if (!guardian.pid) throw new Error("Missing Linux guardian PID");
+  const identity = await readLinuxGuardianReadyAsync(
+    guardian.pid,
+    guardianPath,
+    process.pid,
+  );
+  if (!identity) throw new Error("Linux guardian did not become ready");
   const claim = journal.claim(
     ownershipId,
     runtimeGenerationId,
     systemBootId,
     guardian.pid,
     process.pid,
+    { expectedLinuxIdentity: identity },
   );
   if (!("startTimeTicks" in claim.process)) {
     throw new Error("Missing Linux guardian identity");
@@ -1759,6 +1769,11 @@ describe("cross-platform runtime owned process recovery", () => {
 
       normal.releaseIfGroupExited(0);
       signaled.releaseIfGroupExited(31);
+      const bypassSpawn = vi.fn(() => ({ pid: 4_245 }));
+      expect(() => spawnRuntimeOwnedPidProcess(bypassSpawn, {
+        darwinGuardianCommand: "/trusted/runtime-process-guardian",
+      })).toThrow("Runtime process ownership is tainted until restart.");
+      expect(bypassSpawn).not.toHaveBeenCalled();
       ambiguous.releaseIfGroupExited();
 
       await vi.waitFor(() => {

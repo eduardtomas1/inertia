@@ -145,6 +145,23 @@ async function waitForGuardianStopWithinDeadline(
     : await beforeTerminalDeadline(guardianStop, first.deadlineAt);
 }
 
+async function waitForOwnedProcessStoppedWithinDeadline(
+  session: TerminalSession,
+  fallbackWaitMs: number,
+): Promise<boolean> {
+  const deadlineAt = session.shutdownDeadlineAt
+    ?? Date.now() + fallbackWaitMs;
+  while (!session.confirmOwnedProcessStopped()) {
+    const remainingMs = Math.trunc(deadlineAt - Date.now());
+    if (remainingMs <= 0) return false;
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, Math.min(10, remainingMs));
+      timer.unref();
+    });
+  }
+  return true;
+}
+
 function stopSlowSocket(socket: WebSocket): void {
   try {
     socket.terminate();
@@ -651,7 +668,7 @@ export class TerminalManager {
           : this.createProcessTreeTermination(session.pty.pid, waitForExit);
       }
       void session.terminateProcessTree().then(
-        (confirmed) => {
+        async (confirmed) => {
           if (!confirmed) {
             finish(new TerminalError(
               "A terminal process tree could not be confirmed stopped during runtime shutdown.",
@@ -659,15 +676,14 @@ export class TerminalManager {
             return;
           }
           this.dispose(session.id, false);
-          // Closing the admitted native guardian proves that its PTY handle is
-          // gone, which is sufficient to replace this local terminal session.
-          // It does not prove that every descendant was contained: a distinct
-          // guardian exit signal keeps the global durable claim alive, and the
-          // runtime shutdown/update boundary remains fail closed on that claim.
-          if (
-            session.guardianExitCompletesDisposal !== true
-            && !session.confirmOwnedProcessStopped()
-          ) {
+          // A native guardian exit proves only that the local PTY handle is
+          // gone. Replacement also requires the exact durable ownership claim
+          // to be retired; a fork-tainted guardian exit deliberately keeps it
+          // live so an escaped descendant cannot run beside a new session.
+          if (!await waitForOwnedProcessStoppedWithinDeadline(
+            session,
+            this.shutdownTimeoutMs,
+          )) {
             finish(new TerminalError(
               "A terminal process ownership claim could not be retired during runtime shutdown.",
             ));

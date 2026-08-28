@@ -10,14 +10,16 @@ export function createRuntimeProcessRecord(options: {
     "modernDarwinRecoveryAuthority"
   ];
 }): RuntimeProcessRecord {
+  const legacyRecoveryAuthorityBatchIds = [
+    ...(options.legacyRecoveryAuthorityIds ?? []),
+  ];
   return {
     child: options.child,
     generation: options.generation,
     runtimeGenerationId: options.runtimeGenerationId,
     cleanupReceiptIds: new Set(options.cleanupReceiptIds),
-    legacyRecoveryAuthorityIds: new Set(
-      options.legacyRecoveryAuthorityIds ?? [],
-    ),
+    legacyRecoveryAuthorityIds: new Set(legacyRecoveryAuthorityBatchIds),
+    legacyRecoveryAuthorityBatchIds,
     modernDarwinRecoveryAuthority:
       options.modernDarwinRecoveryAuthority ?? null,
     ready: false,

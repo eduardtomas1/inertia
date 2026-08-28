@@ -35,6 +35,7 @@ export interface RuntimeProcessRecord {
   runtimeGenerationId: string;
   cleanupReceiptIds: Set<string>;
   legacyRecoveryAuthorityIds: Set<string>;
+  readonly legacyRecoveryAuthorityBatchIds: readonly string[];
   modernDarwinRecoveryAuthority:
     ModernDarwinRecoveryAuthorityDescriptor | null;
   ready: boolean;

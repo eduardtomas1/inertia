@@ -33,6 +33,15 @@ const PROCESS_METRIC_POLL_MS = 10;
 const PROCESS_METRIC_TIMEOUT_MS = 5_000;
 const MAX_PROCESS_METRIC_ATTEMPTS = 500;
 const MAX_WINDOWS_JOB_ASSEMBLY_BYTES = 1024 * 1024;
+const BROKER_HELPER_GRACEFUL_EXIT_MS = 2_000;
+const BROKER_HELPER_FORCED_EXIT_MS = 1_000;
+// Stop-Helpers can consume both exit budgets before it writes BYE.
+const BROKER_SHUTDOWN_ACK_MARGIN_MS = 1_000;
+const BROKER_SHUTDOWN_TIMEOUT_MS =
+  BROKER_HELPER_GRACEFUL_EXIT_MS
+  + BROKER_HELPER_FORCED_EXIT_MS
+  + BROKER_SHUTDOWN_ACK_MARGIN_MS;
+const BROKER_FORCE_CLOSE_MARGIN_MS = 1_000;
 
 type WindowsRuntimeJobStage = "native-guard-start";
 
@@ -402,7 +411,7 @@ function Stop-Helpers([Diagnostics.Process[]] $helpers) {
   $grace = [Diagnostics.Stopwatch]::StartNew()
   foreach ($process in $helpers) {
     if (-not $process.HasExited) {
-      $remaining = [Math]::Max(0, 2000 - [Int32]$grace.ElapsedMilliseconds)
+      $remaining = [Math]::Max(0, ${BROKER_HELPER_GRACEFUL_EXIT_MS} - [Int32]$grace.ElapsedMilliseconds)
       if ($remaining -gt 0) { $process.WaitForExit($remaining) | Out-Null }
     }
   }
@@ -416,7 +425,7 @@ function Stop-Helpers([Diagnostics.Process[]] $helpers) {
   $forced = [Diagnostics.Stopwatch]::StartNew()
   foreach ($process in $helpers) {
     if (-not $process.HasExited) {
-      $remaining = [Math]::Max(0, 1000 - [Int32]$forced.ElapsedMilliseconds)
+      $remaining = [Math]::Max(0, ${BROKER_HELPER_FORCED_EXIT_MS} - [Int32]$forced.ElapsedMilliseconds)
       if ($remaining -gt 0) { $process.WaitForExit($remaining) | Out-Null }
     }
   }
@@ -771,8 +780,10 @@ async function acquireWindowsRuntimeJobExecutableLock(
           if (!closed) {
             const terminate = setTimeout(() => {
               if (child.exitCode === null && child.signalCode === null) child.kill();
-            }, 2_000);
-            const didClose = await awaitChildClose(3_000);
+            }, BROKER_SHUTDOWN_TIMEOUT_MS);
+            const didClose = await awaitChildClose(
+              BROKER_SHUTDOWN_TIMEOUT_MS + BROKER_FORCE_CLOSE_MARGIN_MS,
+            );
             clearTimeout(terminate);
             if (!didClose) {
               throw new Error(

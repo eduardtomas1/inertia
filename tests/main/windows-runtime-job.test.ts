@@ -540,6 +540,17 @@ describe("Windows runtime Job Object containment", () => {
     expect(broker.exitCode).toBe(0);
   });
 
+  it("allows the broker's complete bounded guardian shutdown before forcing close", async () => {
+    await disposeWindowsRuntimeJobExecutableLock();
+    const broker = verifiedExecutableBrokerChild({ shutdownDelayMs: 3_100 });
+    await prepareWindowsRuntimeJobExecutableLock(stubAssembly, {
+      spawnLockBroker: () => broker,
+    });
+    await expect(disposeWindowsRuntimeJobExecutableLock()).resolves.toBeUndefined();
+    await closeChild(broker);
+    expect(broker.exitCode).toBe(0);
+  });
+
   it("fails update and quit cleanup closed when retained guardian exit is unconfirmed", async () => {
     await disposeWindowsRuntimeJobExecutableLock();
     const broker = verifiedExecutableBrokerChild({

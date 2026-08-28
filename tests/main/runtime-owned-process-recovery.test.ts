@@ -31,6 +31,7 @@ import {
   readLinuxProcessIdentity,
   runtimeOwnedProcessInvocation,
   RuntimeOwnedProcessJournal,
+  spawnRuntimeOwnedPidProcess,
   spawnRuntimeOwnedProcess,
 } from "../../src/node/runtime-owned-processes";
 import { signalLinuxGuardianExact } from "../../src/node/runtime-owned-process-linux";
@@ -1424,7 +1425,7 @@ describe("cross-platform runtime owned process recovery", () => {
     }
   });
 
-  it("keeps timers live and coalesces delayed macOS release inspection", async () => {
+  it("retires an admitted numeric macOS guardian close without another census", async () => {
     const directory = temporaryDirectory();
     const expected = {
       platform: "darwin" as const,
@@ -1435,9 +1436,9 @@ describe("cross-platform runtime owned process recovery", () => {
       startTimeSeconds: "1756100000",
       startTimeMicroseconds: 123_456,
     };
-    let resolveEmpty!: (empty: boolean) => void;
-    const delayedEmpty = new Promise<boolean>((resolve) => { resolveEmpty = resolve; });
-    const readDarwinSessionEmptyAsync = vi.fn(async () => await delayedEmpty);
+    const readDarwinSessionEmptyAsync = vi.fn(async () => {
+      throw new Error("A trusted normal guardian close must not rescan the session.");
+    });
     const deactivate = activateRuntimeOwnedProcessRegistry(
       directory,
       runtimeGenerationId,
@@ -1470,19 +1471,305 @@ describe("cross-platform runtime owned process recovery", () => {
       await vi.waitFor(() => {
         expect(processKill).toHaveBeenCalledWith(4_242, "SIGUSR1");
       });
-      closeHandler(0, null);
-      closeHandler(0, null);
-
-      let timerObserved = false;
-      setTimeout(() => { timerObserved = true; }, 0);
-      await vi.waitFor(() => expect(timerObserved).toBe(true));
-      expect(readDarwinSessionEmptyAsync).toHaveBeenCalledTimes(1);
-
-      resolveEmpty(true);
+      expect(confirmRuntimeOwnedProcessStopped(child)).toBe(false);
+      expect(new RuntimeOwnedProcessJournal(directory)
+        .records(runtimeGenerationId)).toMatchObject([{ state: "owned" }]);
+      closeHandler(78, null);
       await vi.waitFor(() => {
         expect(new RuntimeOwnedProcessJournal(directory)
           .records(runtimeGenerationId)).toEqual([]);
       });
+      expect(readDarwinSessionEmptyAsync).not.toHaveBeenCalled();
+    } finally {
+      processKill.mockRestore();
+      deactivate?.();
+      if (deactivate) deactivators.splice(deactivators.indexOf(deactivate), 1);
+    }
+  });
+
+  it("waits for macOS admission before retiring a numeric guardian close", async () => {
+    const directory = temporaryDirectory();
+    const expected = {
+      platform: "darwin" as const,
+      pid: 4_242,
+      parentPid: process.pid,
+      processGroupId: 4_242,
+      sessionId: 4_242,
+      startTimeSeconds: "1756100000",
+      startTimeMicroseconds: 123_456,
+    };
+    let resolveReady!: (identity: typeof expected) => void;
+    const ready = new Promise<typeof expected>((resolve) => { resolveReady = resolve; });
+    const readDarwinSessionEmptyAsync = vi.fn(async () => true);
+    const deactivate = activateRuntimeOwnedProcessRegistry(
+      directory,
+      runtimeGenerationId,
+      systemBootId,
+      {
+        platform: "darwin",
+        darwinGuardianPath: "/trusted/runtime-process-guardian",
+        readDarwinGuardianReadyAsync: async () => await ready,
+        readDarwinIdentityAsync: async () => expected,
+        readDarwinSessionEmptyAsync,
+      },
+    );
+    if (deactivate) deactivators.push(deactivate);
+    const processKill = vi.spyOn(process, "kill").mockReturnValue(true);
+    let closeHandler = (
+      _code: number | null,
+      _signal: NodeJS.Signals | null,
+    ): void => { throw new Error("The close handler was not registered."); };
+    const child = {
+      pid: 4_242,
+      spawnfile: "/trusted/runtime-process-guardian",
+      kill: vi.fn(() => true),
+      once: vi.fn((event: string, listener: typeof closeHandler) => {
+        if (event === "close") closeHandler = listener;
+        return child;
+      }),
+    } as unknown as ChildProcess;
+    try {
+      spawnRuntimeOwnedProcess(() => child);
+      closeHandler(0, null);
+      expect(new RuntimeOwnedProcessJournal(directory)
+        .records(runtimeGenerationId)).toMatchObject([{ state: "pending" }]);
+
+      resolveReady(expected);
+      await vi.waitFor(() => {
+        expect(new RuntimeOwnedProcessJournal(directory)
+          .records(runtimeGenerationId)).toEqual([]);
+      });
+      expect(processKill).toHaveBeenCalledWith(4_242, "SIGUSR1");
+      expect(readDarwinSessionEmptyAsync).not.toHaveBeenCalled();
+    } finally {
+      processKill.mockRestore();
+      deactivate?.();
+      if (deactivate) deactivators.splice(deactivators.indexOf(deactivate), 1);
+    }
+  });
+
+  it("keeps a numeric macOS guardian close when admission fails", async () => {
+    const directory = temporaryDirectory();
+    const readDarwinSessionEmptyAsync = vi.fn(async () => true);
+    const deactivate = activateRuntimeOwnedProcessRegistry(
+      directory,
+      runtimeGenerationId,
+      systemBootId,
+      {
+        platform: "darwin",
+        darwinGuardianPath: "/trusted/runtime-process-guardian",
+        readDarwinGuardianReadyAsync: async () => null,
+        readDarwinSessionEmptyAsync,
+      },
+    );
+    if (deactivate) deactivators.push(deactivate);
+    const processKill = vi.spyOn(process, "kill").mockReturnValue(true);
+    let closeHandler = (
+      _code: number | null,
+      _signal: NodeJS.Signals | null,
+    ): void => { throw new Error("The close handler was not registered."); };
+    const child = {
+      pid: 4_242,
+      spawnfile: "/trusted/runtime-process-guardian",
+      kill: vi.fn(() => true),
+      once: vi.fn((event: string, listener: typeof closeHandler) => {
+        if (event === "close") closeHandler = listener;
+        return child;
+      }),
+    } as unknown as ChildProcess;
+    try {
+      spawnRuntimeOwnedProcess(() => child);
+      closeHandler(70, null);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      expect(processKill).not.toHaveBeenCalledWith(4_242, "SIGUSR1");
+      expect(new RuntimeOwnedProcessJournal(directory)
+        .records(runtimeGenerationId)).toMatchObject([{ state: "pending" }]);
+      expect(readDarwinSessionEmptyAsync).not.toHaveBeenCalled();
+    } finally {
+      processKill.mockRestore();
+      deactivate?.();
+      if (deactivate) deactivators.splice(deactivators.indexOf(deactivate), 1);
+    }
+  });
+
+  it("does not retire a numeric macOS close through a deactivated registry", async () => {
+    const directory = temporaryDirectory();
+    const expected = {
+      platform: "darwin" as const,
+      pid: 4_242,
+      parentPid: process.pid,
+      processGroupId: 4_242,
+      sessionId: 4_242,
+      startTimeSeconds: "1756100000",
+      startTimeMicroseconds: 123_456,
+    };
+    let resolveReady!: (identity: typeof expected) => void;
+    const ready = new Promise<typeof expected>((resolve) => { resolveReady = resolve; });
+    const readDarwinSessionEmptyAsync = vi.fn(async () => true);
+    let deactivate = activateRuntimeOwnedProcessRegistry(
+      directory,
+      runtimeGenerationId,
+      systemBootId,
+      {
+        platform: "darwin",
+        darwinGuardianPath: "/trusted/runtime-process-guardian",
+        readDarwinGuardianReadyAsync: async () => await ready,
+        readDarwinIdentityAsync: async () => expected,
+        readDarwinSessionEmptyAsync,
+      },
+    );
+    if (deactivate) deactivators.push(deactivate);
+    const processKill = vi.spyOn(process, "kill").mockReturnValue(true);
+    let closeHandler = (
+      _code: number | null,
+      _signal: NodeJS.Signals | null,
+    ): void => { throw new Error("The close handler was not registered."); };
+    const child = {
+      pid: 4_242,
+      spawnfile: "/trusted/runtime-process-guardian",
+      kill: vi.fn(() => true),
+      once: vi.fn((event: string, listener: typeof closeHandler) => {
+        if (event === "close") closeHandler = listener;
+        return child;
+      }),
+    } as unknown as ChildProcess;
+    try {
+      spawnRuntimeOwnedProcess(() => child);
+      deactivate?.();
+      if (deactivate) deactivators.splice(deactivators.indexOf(deactivate), 1);
+      deactivate = null;
+      closeHandler(0, null);
+      resolveReady(expected);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      expect(processKill).not.toHaveBeenCalledWith(4_242, "SIGUSR1");
+      expect(new RuntimeOwnedProcessJournal(directory)
+        .records(runtimeGenerationId)).toMatchObject([{ state: "pending" }]);
+      expect(readDarwinSessionEmptyAsync).not.toHaveBeenCalled();
+    } finally {
+      processKill.mockRestore();
+      deactivate?.();
+      if (deactivate) deactivators.splice(deactivators.indexOf(deactivate), 1);
+    }
+  });
+
+  it.each([
+    { label: "an ambiguous close", code: null, signal: null },
+    { label: "SIGUSR2", code: null, signal: "SIGUSR2" as NodeJS.Signals },
+  ])("keeps a macOS claim after $label", async ({ code, signal }) => {
+    const directory = temporaryDirectory();
+    const expected = {
+      platform: "darwin" as const,
+      pid: 4_242,
+      parentPid: process.pid,
+      processGroupId: 4_242,
+      sessionId: 4_242,
+      startTimeSeconds: "1756100000",
+      startTimeMicroseconds: 123_456,
+    };
+    const readDarwinSessionEmptyAsync = vi.fn(async () => true);
+    const deactivate = activateRuntimeOwnedProcessRegistry(
+      directory,
+      runtimeGenerationId,
+      systemBootId,
+      {
+        platform: "darwin",
+        darwinGuardianPath: "/trusted/runtime-process-guardian",
+        readDarwinGuardianReadyAsync: async () => expected,
+        readDarwinIdentityAsync: async () => expected,
+        readDarwinSessionEmptyAsync,
+      },
+    );
+    if (deactivate) deactivators.push(deactivate);
+    const processKill = vi.spyOn(process, "kill").mockReturnValue(true);
+    let closeHandler = (
+      _code: number | null,
+      _signal: NodeJS.Signals | null,
+    ): void => { throw new Error("The close handler was not registered."); };
+    const child = {
+      pid: 4_242,
+      spawnfile: "/trusted/runtime-process-guardian",
+      kill: vi.fn(() => true),
+      once: vi.fn((event: string, listener: typeof closeHandler) => {
+        if (event === "close") closeHandler = listener;
+        return child;
+      }),
+    } as unknown as ChildProcess;
+    try {
+      spawnRuntimeOwnedProcess(() => child);
+      await vi.waitFor(() => {
+        expect(processKill).toHaveBeenCalledWith(4_242, "SIGUSR1");
+      });
+      closeHandler(code, signal);
+
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(new RuntimeOwnedProcessJournal(directory)
+        .records(runtimeGenerationId)).toMatchObject([{ state: "owned" }]);
+      expect(readDarwinSessionEmptyAsync).not.toHaveBeenCalled();
+    } finally {
+      processKill.mockRestore();
+      deactivate?.();
+      if (deactivate) deactivators.splice(deactivators.indexOf(deactivate), 1);
+    }
+  });
+
+  it("retires only a zero-signal macOS PID guardian", async () => {
+    const directory = temporaryDirectory();
+    const identity = (pid: number) => ({
+      platform: "darwin" as const,
+      pid,
+      parentPid: process.pid,
+      processGroupId: pid,
+      sessionId: pid,
+      startTimeSeconds: "1756100000",
+      startTimeMicroseconds: 123_456,
+    });
+    const readDarwinSessionEmptyAsync = vi.fn(async () => true);
+    const deactivate = activateRuntimeOwnedProcessRegistry(
+      directory,
+      runtimeGenerationId,
+      systemBootId,
+      {
+        platform: "darwin",
+        darwinGuardianPath: "/trusted/runtime-process-guardian",
+        readDarwinGuardianReadyAsync: async (pid) => identity(pid),
+        readDarwinIdentityAsync: async (pid) => identity(pid),
+        readDarwinSessionEmptyAsync,
+      },
+    );
+    if (deactivate) deactivators.push(deactivate);
+    const processKill = vi.spyOn(process, "kill").mockReturnValue(true);
+    try {
+      const normal = spawnRuntimeOwnedPidProcess(() => ({ pid: 4_242 }), {
+        darwinGuardianCommand: "/trusted/runtime-process-guardian",
+      });
+      const signaled = spawnRuntimeOwnedPidProcess(() => ({ pid: 4_243 }), {
+        darwinGuardianCommand: "/trusted/runtime-process-guardian",
+      });
+      const ambiguous = spawnRuntimeOwnedPidProcess(() => ({ pid: 4_244 }), {
+        darwinGuardianCommand: "/trusted/runtime-process-guardian",
+      });
+      await vi.waitFor(() => {
+        expect(processKill).toHaveBeenCalledWith(4_242, "SIGUSR1");
+        expect(processKill).toHaveBeenCalledWith(4_243, "SIGUSR1");
+        expect(processKill).toHaveBeenCalledWith(4_244, "SIGUSR1");
+      });
+      expect(normal.confirmStopped()).toBe(false);
+
+      normal.releaseIfGroupExited(0);
+      signaled.releaseIfGroupExited(31);
+      ambiguous.releaseIfGroupExited();
+
+      await vi.waitFor(() => {
+        expect(new RuntimeOwnedProcessJournal(directory)
+          .records(runtimeGenerationId)?.map((record) => (
+            "process" in record ? record.process.pid : 0
+          )).sort())
+          .toEqual([4_243, 4_244]);
+      });
+      expect(normal.confirmStopped()).toBe(true);
+      expect(readDarwinSessionEmptyAsync).not.toHaveBeenCalled();
     } finally {
       processKill.mockRestore();
       deactivate?.();
@@ -1793,7 +2080,7 @@ describe("cross-platform runtime owned process recovery", () => {
   );
 
   it.runIf(process.platform === "darwin")(
-    "macOS fork-tainted guardian exits while retaining uncertainty leaves",
+    "macOS externally stopped fork-tainted guardian retains uncertainty leaves",
     async () => {
       const directory = temporaryDirectory();
       const payloadSourcePath = join(directory, "double-fork-payload.c");
@@ -1861,7 +2148,15 @@ describe("cross-platform runtime owned process recovery", () => {
       }, { timeout: 5_000 }).toBe(true);
       expect(processIsAlive(grandchildPid)).toBe(true);
       expect(processIsAlive(guardianPid)).toBe(true);
-      guardian.kill("SIGTERM");
+      const forgedStop = spawnSync(
+        "/bin/kill",
+        ["-TERM", String(guardianPid)],
+        { encoding: "utf8", shell: false, timeout: 5_000 },
+      );
+      expect(
+        forgedStop.status,
+        `${forgedStop.stderr}\n${forgedStop.stdout}`,
+      ).toBe(0);
       await expect.poll(
         () => !processIsAlive(guardianPid),
         { timeout: 5_000 },
@@ -2006,7 +2301,7 @@ describe("cross-platform runtime owned process recovery", () => {
   );
 
   it.runIf(process.platform === "darwin")(
-    "keeps completed macOS fork cleanup fail-closed when cancellation arrives",
+    "allows an authenticated macOS stop to retire drained fork-tainted cleanup",
     async () => {
       const directory = temporaryDirectory();
       const payloadSourcePath = join(directory, "settled-fork-payload.c");
@@ -2028,7 +2323,7 @@ describe("cross-platform runtime owned process recovery", () => {
         "  if (argc != 3 || !write_pid(argv[1], getpid())) return 64;",
         "  const pid_t child = fork();",
         "  if (child < 0) return 71;",
-        "  if (child > 0) { usleep(20000); return 78; }",
+        "  if (child > 0) for (;;) pause();",
         "  if (signal(SIGTERM, SIG_IGN) == SIG_ERR) _exit(72);",
         "  if (!write_pid(argv[2], getpid())) _exit(73);",
         "  for (;;) pause();",
@@ -2076,22 +2371,18 @@ describe("cross-platform runtime owned process recovery", () => {
         }
         return rootPid > 1 && childPid > 1;
       }, { timeout: 5_000, interval: 2 }).toBe(true);
-      await expect.poll(() => !processIsAlive(rootPid), {
-        timeout: 5_000,
-        interval: 2,
-      }).toBe(true);
       guardian.kill("SIGTERM");
       await closeOf(guardian);
 
-      expect(guardian.exitCode).toBeNull();
-      expect(guardian.signalCode).toBe("SIGUSR2");
+      expect(guardian.exitCode).toBe(137);
+      expect(guardian.signalCode).toBeNull();
       await expect.poll(() => !processIsAlive(childPid), {
         timeout: 5_000,
       }).toBe(true);
-      expect(new RuntimeOwnedProcessJournal(directory, {
+      await vi.waitFor(() => expect(new RuntimeOwnedProcessJournal(directory, {
         platform: "darwin",
         darwinGuardianPath: guardianPath,
-      }).records(runtimeGenerationId)).toHaveLength(1);
+      }).records(runtimeGenerationId)).toEqual([]));
     },
     15_000,
   );

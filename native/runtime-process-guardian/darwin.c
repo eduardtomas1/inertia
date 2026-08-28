@@ -20,6 +20,7 @@
 #define GUARDIAN_READY_POLLS 50
 #define TRANSIENT_PROBE_POLLS 5
 #define POLL_NANOSECONDS 20000000L
+#define ACTIVE_CENSUS_INTERVAL_POLLS 12
 
 struct session_member {
   struct proc_bsdinfo identity;
@@ -37,12 +38,22 @@ struct owned_tree_tracker {
 };
 
 static volatile sig_atomic_t stop_requested = 0;
+static volatile sig_atomic_t authenticated_stop_requested = 0;
 static volatile sig_atomic_t authorization_requested = 0;
 static volatile sig_atomic_t authorization_runtime_pid = 0;
 
-static void request_stop(int signal_number) {
-  (void)signal_number;
+static void request_stop(
+  int signal_number,
+  siginfo_t *information,
+  void *context
+) {
+  (void)context;
   stop_requested = 1;
+  if (signal_number == SIGTERM
+    && information != NULL
+    && information->si_pid == authorization_runtime_pid) {
+    authenticated_stop_requested = 1;
+  }
 }
 
 static void request_authorization(
@@ -137,6 +148,21 @@ static int exact_identity_matches_bounded(
   const struct timespec pause = { .tv_sec = 0, .tv_nsec = POLL_NANOSECONDS };
   for (int poll = 0; poll < TRANSIENT_PROBE_POLLS; poll += 1) {
     if (stop_requested) return 0;
+    const enum exact_identity_state state = exact_identity(pid, expected);
+    if (state != EXACT_IDENTITY_UNREADABLE) {
+      return state == EXACT_IDENTITY_MATCHED;
+    }
+    if (poll + 1 < TRANSIENT_PROBE_POLLS) (void)nanosleep(&pause, NULL);
+  }
+  return 0;
+}
+
+static int exact_identity_matches_bounded_after_stop(
+  pid_t pid,
+  const struct proc_bsdinfo *expected
+) {
+  const struct timespec pause = { .tv_sec = 0, .tv_nsec = POLL_NANOSECONDS };
+  for (int poll = 0; poll < TRANSIENT_PROBE_POLLS; poll += 1) {
     const enum exact_identity_state state = exact_identity(pid, expected);
     if (state != EXACT_IDENTITY_UNREADABLE) {
       return state == EXACT_IDENTITY_MATCHED;
@@ -566,19 +592,24 @@ static int bounded_owned_tree_cleanup(
   const struct proc_bsdinfo *runtime_identity
 ) {
   if (!freeze_owned_tree(session_id, guardian_pid, tracker)) return 0;
+  const struct timespec pause = { .tv_sec = 0, .tv_nsec = POLL_NANOSECONDS };
   for (int index = 0; index < tracker->count; index += 1) {
     if (!signal_exact_owned_member(&tracker->members[index], SIGTERM)) return 0;
   }
-  const struct timespec pause = { .tv_sec = 0, .tv_nsec = POLL_NANOSECONDS };
   for (int poll = 0; poll < TERM_GRACE_POLLS; poll += 1) {
     (void)nanosleep(&pause, NULL);
     reap_children();
     if (!refresh_owned_tree_bounded(session_id, guardian_pid, tracker)) return 0;
     if (tracker->count == 0) {
-      const int completed_authority_intact = allow_completed_payload_forks
-        && !stop_requested
-        && exact_identity_matches_bounded(runtime_pid, runtime_identity);
-      return tracker->fork_tainted && !completed_authority_intact ? 0 : 1;
+      const int cleanup_authority_intact = authenticated_stop_requested
+        ? exact_identity_matches_bounded_after_stop(
+            runtime_pid,
+            runtime_identity
+          )
+        : allow_completed_payload_forks
+          && !stop_requested
+          && exact_identity_matches_bounded(runtime_pid, runtime_identity);
+      return tracker->fork_tainted && !cleanup_authority_intact ? 0 : 1;
     }
   }
   // Do not resume the stable frozen set to deliver TERM: a resumed signal
@@ -588,16 +619,43 @@ static int bounded_owned_tree_cleanup(
   if (!freeze_owned_tree(session_id, guardian_pid, tracker)) return 0;
   for (int index = 0; index < tracker->count; index += 1) {
     if (!signal_exact_owned_member(&tracker->members[index], SIGKILL)) return 0;
+    // Darwin can leave a SIGKILL-pending Node process suspended after
+    // SIGSTOP. The bounded resume below is safe only after every exact member
+    // has accepted this uncatchable kill.
+  }
+  // Give the kernel one bounded poll to commit every accepted SIGKILL before
+  // resuming stopped members. They cannot run or be reaped while suspended.
+  (void)nanosleep(&pause, NULL);
+  for (int index = 0; index < tracker->count; index += 1) {
+    const struct session_member *member = &tracker->members[index];
+    if ((pid_t)member->identity.pbi_ppid == guardian_pid) {
+      // This exact direct child cannot be reaped or have its PID recycled
+      // until this guardian calls waitpid, which it does not between the
+      // accepted SIGKILL above and this bounded resume. Darwin can make its
+      // birth identity unreadable while the kill remains pending under STOP,
+      // so use that still-exclusive child PID capability here.
+      const pid_t child_pid = (pid_t)member->identity.pbi_pid;
+      if (kill(child_pid, SIGCONT) != 0 && errno != ESRCH) return 0;
+    } else if (!signal_exact_owned_member(member, SIGCONT)) {
+      // Every non-child PID can be reaped and recycled during the delay and
+      // therefore must remain bound to its exact stored birth identity.
+      return 0;
+    }
   }
   for (int poll = 0; poll < SESSION_DRAIN_POLLS; poll += 1) {
     reap_children();
     observe_root_forks(tracker);
     if (!refresh_owned_tree_bounded(session_id, guardian_pid, tracker)) return 0;
     if (tracker->count == 0) {
-      const int completed_authority_intact = allow_completed_payload_forks
-        && !stop_requested
-        && exact_identity_matches_bounded(runtime_pid, runtime_identity);
-      return tracker->fork_tainted && !completed_authority_intact ? 0 : 1;
+      const int cleanup_authority_intact = authenticated_stop_requested
+        ? exact_identity_matches_bounded_after_stop(
+            runtime_pid,
+            runtime_identity
+          )
+        : allow_completed_payload_forks
+          && !stop_requested
+          && exact_identity_matches_bounded(runtime_pid, runtime_identity);
+      return tracker->fork_tainted && !cleanup_authority_intact ? 0 : 1;
     }
     (void)nanosleep(&pause, NULL);
   }
@@ -747,7 +805,8 @@ static int watch_mode(int argc, char *argv[]) {
 
   struct sigaction action;
   memset(&action, 0, sizeof(action));
-  action.sa_handler = request_stop;
+  action.sa_sigaction = request_stop;
+  action.sa_flags = SA_SIGINFO;
   sigemptyset(&action.sa_mask);
   if (sigaction(SIGTERM, &action, NULL) != 0
     || sigaction(SIGINT, &action, NULL) != 0
@@ -880,6 +939,7 @@ static int watch_mode(int argc, char *argv[]) {
   int status = 0;
   int result = 137;
   int payload_settled = 0;
+  int active_census_polls = ACTIVE_CENSUS_INTERVAL_POLLS;
   for (;;) {
     observe_root_forks(&tracker);
     const pid_t waited = waitpid(child, &status, WNOHANG);
@@ -897,30 +957,41 @@ static int watch_mode(int argc, char *argv[]) {
       result = 1;
       break;
     }
-    // Reap the exact root before a privileged census. On macOS libproc does
-    // not return a complete birth identity for a zombie, while kill(pid, 0)
-    // still reports it present. Scanning first would therefore turn every
-    // quick, ordinary payload exit into an unproved cleanup even though the
-    // guardian can reap that exact child here.
-    if (!refresh_owned_tree_bounded(self, self, &tracker)) {
-      // The exact root can exit after the nonblocking wait above but before
-      // libproc reads its birth identity. A zombie still answers kill(pid, 0)
-      // while proc_pidinfo no longer returns a complete identity, so the
-      // census must not turn that ordinary fast exit into uncertain cleanup.
-      // Reap only the exact child here; every other census failure remains
-      // fail-closed.
-      const pid_t reaped = waitpid(child, &status, WNOHANG);
-      if (reaped == child
-        && !stop_requested
-        && exact_identity_matches_bounded(runtime_pid, &runtime_identity)) {
-        payload_settled = 1;
-        if (WIFEXITED(status)) result = WEXITSTATUS(status);
-        else if (WIFSIGNALED(status)) result = 128 + WTERMSIG(status);
-        else result = 1;
-      } else {
-        result = 137;
+    // The initial admission census proves the exact blocked root before it can
+    // exec or fork. Until kqueue reports a fork (or an observer error taints
+    // containment), repeating a machine-wide PROC_ALL_PIDS scan cannot add an
+    // owned descendant. Keep the cheap stop/runtime-identity checks on their
+    // 20 ms cadence, but only repeat the expensive census after fork taint.
+    // The first tainted iteration scans immediately; later scans are at most
+    // 12 polls (240 ms) apart.
+    if (tracker.fork_tainted
+      && ++active_census_polls >= ACTIVE_CENSUS_INTERVAL_POLLS) {
+      active_census_polls = 0;
+      // Reap the exact root before a privileged census. On macOS libproc does
+      // not return a complete birth identity for a zombie, while kill(pid, 0)
+      // still reports it present. Scanning first would therefore turn every
+      // quick, ordinary payload exit into an unproved cleanup even though the
+      // guardian can reap that exact child here.
+      if (!refresh_owned_tree_bounded(self, self, &tracker)) {
+        // The exact root can exit after the nonblocking wait above but before
+        // libproc reads its birth identity. A zombie still answers kill(pid, 0)
+        // while proc_pidinfo no longer returns a complete identity, so the
+        // census must not turn that ordinary fast exit into uncertain cleanup.
+        // Reap only the exact child here; every other census failure remains
+        // fail-closed.
+        const pid_t reaped = waitpid(child, &status, WNOHANG);
+        if (reaped == child
+          && !stop_requested
+          && exact_identity_matches_bounded(runtime_pid, &runtime_identity)) {
+          payload_settled = 1;
+          if (WIFEXITED(status)) result = WEXITSTATUS(status);
+          else if (WIFSIGNALED(status)) result = 128 + WTERMSIG(status);
+          else result = 1;
+        } else {
+          result = 137;
+        }
+        break;
       }
-      break;
     }
     if (stop_requested
       || !exact_identity_matches_bounded(runtime_pid, &runtime_identity)) {

@@ -723,6 +723,24 @@ function trackAdmission(
   });
 }
 
+function settleNormallyClosedDarwinGuardian(
+  registry: ActiveRuntimeOwnedProcessRegistry,
+  claim: ActiveRuntimeOwnedProcessClaim,
+): void {
+  // The admitted native guardian can exit normally only before releasing its
+  // payload gate or after its bounded owned-tree drain succeeds. Unproved
+  // containment terminates the guardian by signal and never reaches here.
+  const settle = (admitted: boolean): void => {
+    if (!admitted || activeRegistry !== registry || claim.released) return;
+    try { releaseActiveClaim(registry, claim); } catch {
+      // The durable claim remains authoritative when retirement cannot persist.
+    }
+  };
+  const admission = claim.admission;
+  if (admission) void admission.then(settle);
+  else settle(claim.admissionSucceeded);
+}
+
 function settleClosedLinuxGuardian(
   registry: ActiveRuntimeOwnedProcessRegistry,
   claim: ActiveRuntimeOwnedProcessClaim,
@@ -895,14 +913,10 @@ export function spawnRuntimeOwnedProcess<T extends ChildProcess>(
   }
   if (registry.platform === "darwin") {
     registry.claims.set(child, claim);
-    child.once("close", (_code, signal) => {
+    child.once("close", (code, signal) => {
       // Guardian-level signals are the fail-closed containment marker.
-      if (typeof signal === "string") return;
-      const settle = (admitted: boolean): void => {
-        if (admitted) void releaseIfGroupExited(registry, claim, child.pid ?? 0);
-      };
-      if (claim.admission) void claim.admission.then(settle);
-      else settle(claim.admissionSucceeded);
+      if (typeof code !== "number" || signal !== null) return;
+      settleNormallyClosedDarwinGuardian(registry, claim);
     });
     const admission = admitDarwinGuardian(registry, claim, child, spawnedAfterMs);
     trackAdmission(registry, claim, admission);
@@ -1054,9 +1068,9 @@ export function spawnRuntimeOwnedPidProcess<T extends { readonly pid: number }>(
       trackAdmission(registry, claim, admission);
       return {
         process: confirmedOwned,
-        confirmStopped: () => !claim.admission
-          && claim.admissionSucceeded
-          && releaseActiveClaim(registry, claim),
+        // A successful admission proves ownership, not termination. Only the
+        // guardian's normal close observation may retire this live claim.
+        confirmStopped: () => claim.released,
         requestGuardianStop: () => {
           if (claim.released) return true;
           claim.stopRequested = true;
@@ -1069,14 +1083,8 @@ export function spawnRuntimeOwnedPidProcess<T extends { readonly pid: number }>(
         },
         waitForGuardianStop: async () => await admission,
         releaseIfGroupExited: (exitSignal) => {
-          if (typeof exitSignal === "number" && exitSignal > 0) return;
-          const settle = (admitted: boolean): void => {
-            if (admitted) {
-              void releaseIfGroupExited(registry, claim, confirmedOwned.pid);
-            }
-          };
-          if (claim.admission) void claim.admission.then(settle);
-          else settle(claim.admissionSucceeded);
+          if (exitSignal !== 0) return;
+          settleNormallyClosedDarwinGuardian(registry, claim);
         },
       };
     } else {
@@ -1177,9 +1185,7 @@ export function confirmRuntimeOwnedProcessStopped(child: ChildProcess): boolean 
     ? (registry.platform === "linux"
         ? claim.released
         : registry.platform === "darwin"
-          ? !claim.admission
-            && claim.admissionSucceeded
-            && releaseActiveClaim(registry, claim)
+          ? claim.released
           : releaseActiveClaim(registry, claim))
     : true;
 }

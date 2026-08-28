@@ -776,6 +776,78 @@ describe("Linux runtime process guardian", () => {
     }
   }, 15_000);
 
+  linuxIt("rejects pre-identity cleanup when the exact guardian drain fails", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-linux-pending-drain-failure-"));
+    roots.push(root);
+    const guardian = join(root, "guardian");
+    execFileSync("cc", [
+      "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
+      "-DINERTIA_RUNTIME_GUARDIAN_TEST_REJECT_DRAIN=1",
+      join(process.cwd(), "native/runtime-process-guardian/linux.c"), "-o", guardian,
+    ]);
+    const executable = statSync(guardian, { bigint: true });
+    const marker = join(root, "ran");
+    const child = spawn(guardian, [
+      "watch", String(process.pid), String(executable.dev), String(executable.ino),
+      "--", "/bin/sh", "-c", `touch ${marker}`,
+    ], { detached: true, stdio: "ignore" });
+    const pid = child.pid ?? 0;
+    try {
+      await expect(readLinuxGuardianReadyAsync(
+        pid,
+        guardian,
+        process.pid,
+      )).resolves.not.toBeNull();
+      await expect(stopPendingLinuxGuardianAsync(
+        pid,
+        guardian,
+        process.pid,
+      )).resolves.toBe(false);
+      expect(readFileSync(`/proc/${pid}/comm`, "utf8").trim()).toBe("inertia-bad");
+      expect(existsSync(marker)).toBe(false);
+    } finally {
+      try { process.kill(-pid, "SIGKILL"); } catch { /* The exact group is gone. */ }
+      await stopChild(child);
+    }
+  }, 15_000);
+
+  linuxIt("does not accept leader exit while the pre-identity process group survives", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-linux-pending-group-survival-"));
+    roots.push(root);
+    const guardian = join(root, "guardian");
+    execFileSync("cc", [
+      "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
+      "-DINERTIA_RUNTIME_GUARDIAN_TEST_CRASH_STOP_PENDING=1",
+      "-DINERTIA_RUNTIME_GUARDIAN_TEST_HOLD_GATE_FAILURE=1",
+      join(process.cwd(), "native/runtime-process-guardian/linux.c"), "-o", guardian,
+    ]);
+    const executable = statSync(guardian, { bigint: true });
+    const marker = join(root, "ran");
+    const child = spawn(guardian, [
+      "watch", String(process.pid), String(executable.dev), String(executable.ino),
+      "--", "/bin/sh", "-c", `touch ${marker}`,
+    ], { detached: true, stdio: "ignore" });
+    const pid = child.pid ?? 0;
+    try {
+      await expect(readLinuxGuardianReadyAsync(
+        pid,
+        guardian,
+        process.pid,
+      )).resolves.not.toBeNull();
+      await expect(stopPendingLinuxGuardianAsync(
+        pid,
+        guardian,
+        process.pid,
+      )).resolves.toBe(false);
+      await waitForChild(child);
+      expect(() => process.kill(-pid, 0)).not.toThrow();
+      expect(existsSync(marker)).toBe(false);
+    } finally {
+      try { process.kill(-pid, "SIGKILL"); } catch { /* The exact group is gone. */ }
+      await stopChild(child);
+    }
+  }, 15_000);
+
   linuxIt("rejects a guardian with the wrong runtime-parent identity before exec", async () => {
     const root = mkdtempSync(join(tmpdir(), "inertia-linux-parent-mismatch-")); roots.push(root);
     const guardian = compileGuardian(root);

@@ -210,6 +210,7 @@ export const RUNTIME_COMMAND_POLICIES = {
     timeoutDelivery: "ambiguous",
   },
   "terminal.close": shortMutation,
+  "terminal.attach": shortMutation,
   "terminal.create": shortMutation,
   "terminal.input": shortMutation,
   "terminal.provider.resume": {

@@ -40,8 +40,17 @@ export interface WorkspaceActionTerminalManager<Owner> {
     onExit?: (exitCode: number) => void,
     onOutput?: (data: string) => void,
   ): string;
+  replace(
+    owner: Owner,
+    terminalId: string,
+    cwd: string,
+    cols: number,
+    rows: number,
+    onExit?: (exitCode: number) => void,
+    onOutput?: (data: string) => void,
+  ): Promise<string>;
   input(owner: Owner, terminalId: string, data: string): void;
-  close(owner: Owner, terminalId: string): void;
+  close(owner: Owner, terminalId: string): Promise<void>;
   closeManaged(terminalId: string): Promise<boolean>;
 }
 
@@ -96,6 +105,7 @@ export interface StartWorkspaceActionInput<Owner> {
   projectId: string;
   conversationId?: string;
   actionId: string;
+  terminalId: string;
   cols: number;
   rows: number;
   /** Called after the process accepted its command and before its first snapshot is published. */
@@ -220,8 +230,9 @@ export class WorkspaceRunController<Owner> {
       let startingFailed = false;
       let terminalId: string;
       try {
-        terminalId = this.terminals.create(
+        terminalId = await this.terminals.replace(
           input.owner,
+          input.terminalId,
           input.cwd,
           input.cols,
           input.rows,
@@ -282,7 +293,7 @@ export class WorkspaceRunController<Owner> {
       } catch (error) {
         startingFailed = true;
         try {
-          this.terminals.close(input.owner, terminalId);
+          await this.terminals.close(input.owner, terminalId);
         } catch {
           this.managedActions.delete(activity.id);
           terminalOwnsReservation = false;

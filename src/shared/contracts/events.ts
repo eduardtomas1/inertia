@@ -220,11 +220,19 @@ export type ServerEvent =
         | ConversationDetailResult;
     }
   | RuntimeMutationEvent
-  | {
+  | ({
       type: "terminal.created";
       requestId: string;
       terminalId: string;
-      providerResume?: ProviderTerminalResumeDescriptor;
-    }
+    } & (
+      | {
+          providerResume: ProviderTerminalResumeDescriptor;
+          providerResumeConversationId: string;
+        }
+      | {
+          providerResume?: undefined;
+          providerResumeConversationId?: undefined;
+        }
+    ))
   | { type: "terminal.output"; terminalId: string; data: string }
   | { type: "terminal.exit"; terminalId: string; exitCode: number };

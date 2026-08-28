@@ -4,7 +4,10 @@ import { randomUUID } from "node:crypto";
 import { spawn, type IDisposable, type IPty } from "node-pty";
 import WebSocket from "ws";
 
-import type { ServerEvent } from "../shared/contracts";
+import type {
+  ProviderTerminalResumeDescriptor,
+  ServerEvent,
+} from "../shared/contracts";
 import {
   spawnRuntimeOwnedPidProcess,
   type RuntimeOwnedPidProcess,
@@ -19,8 +22,12 @@ import {
 const MAX_TERMINALS = 8;
 const MAX_TERMINALS_PER_CLIENT = 4;
 const MAX_BUFFERED_OUTPUT = 1024 * 1024;
+const MAX_REATTACH_OUTPUT = 256 * 1024;
 const OUTPUT_CHUNK_CODE_UNITS = 16 * 1024;
 const OUTPUT_FLUSH_MS = 8;
+const TERMINAL_REATTACH_TIMEOUT_MS = 30_000;
+const TERMINAL_REATTACH_TRUNCATION_NOTICE =
+  "\r\n\x1b[2mEarlier terminal output was truncated while reconnecting.\x1b[0m\r\n";
 // node-pty's Windows ConPTY backend intentionally delays its public exit event
 // for 1 second while output drains. Leave bounded headroom for that signal and
 // the final resource-settle check while still finishing well before the
@@ -31,8 +38,11 @@ const TERMINAL_SHUTDOWN_TIMEOUT_MS = process.platform === "win32"
 
 interface TerminalSession {
   id: string;
-  owner: WebSocket;
+  owner: WebSocket | null;
   cwd: string;
+  reattachScope: TerminalReattachScope | null;
+  providerResume: TerminalProviderResumeAttachment | null;
+  detachTimer: ReturnType<typeof setTimeout> | null;
   pty: IPty;
   dataListener: IDisposable;
   exitListener: IDisposable;
@@ -51,6 +61,8 @@ interface TerminalSession {
   requestOwnedGuardianStop: () => boolean;
   waitForOwnedGuardianStop: () => Promise<boolean>;
   flushOutput: () => void;
+  detachOutput: () => void;
+  replayOutput: (owner: WebSocket) => boolean;
   disposeOutput: () => void;
   onExit?: (exitCode: number) => void;
 }
@@ -59,6 +71,7 @@ export interface TerminalManagerOptions {
   spawnTerminal?: typeof spawn;
   shutdownTimeoutMs?: number;
   outputFlushMs?: number;
+  reattachTimeoutMs?: number;
   platform?: NodeJS.Platform;
   createProcessTreeTermination?: (
     pid: number,
@@ -72,6 +85,29 @@ export interface TerminalManagerOptions {
     spawnProcess: () => IPty,
     options: { readonly darwinGuardianCommand?: string },
   ) => RuntimeOwnedPidProcess<IPty>;
+}
+
+export interface TerminalReattachScope {
+  projectId: string;
+  conversationId: string | null;
+}
+
+export type TerminalAttachment = {
+  terminalId: string;
+} & (
+  | {
+      providerResume: ProviderTerminalResumeDescriptor;
+      providerResumeConversationId: string;
+    }
+  | {
+      providerResume?: undefined;
+      providerResumeConversationId?: undefined;
+    }
+);
+
+export interface TerminalProviderResumeAttachment {
+  descriptor: ProviderTerminalResumeDescriptor;
+  conversationId: string;
 }
 
 function userShell(platform: NodeJS.Platform): { executable: string; args: string[] } {
@@ -224,6 +260,7 @@ export class TerminalManager {
   private readonly spawnTerminal: typeof spawn;
   private readonly shutdownTimeoutMs: number;
   private readonly outputFlushMs: number;
+  private readonly reattachTimeoutMs: number;
   private readonly platform: NodeJS.Platform;
   private readonly createProcessTreeTermination: (
     pid: number,
@@ -251,6 +288,13 @@ export class TerminalManager {
       1,
       Math.min(Math.trunc(options.outputFlushMs ?? OUTPUT_FLUSH_MS), 50),
     );
+    this.reattachTimeoutMs = Math.max(
+      1,
+      Math.min(
+        Math.trunc(options.reattachTimeoutMs ?? TERMINAL_REATTACH_TIMEOUT_MS),
+        120_000,
+      ),
+    );
     this.spawnOwnedTerminalProcess = options.spawnOwnedTerminalProcess
       ?? spawnRuntimeOwnedPidProcess;
     const terminateProcessTree = options.terminateProcessTree;
@@ -274,6 +318,7 @@ export class TerminalManager {
     rows: number,
     onExit?: (exitCode: number) => void,
     onOutput?: (data: string) => void,
+    reattachScope: TerminalReattachScope | null = null,
   ): string {
     const shell = userShell(this.platform);
     return this.createProcessReplacing(
@@ -288,7 +333,99 @@ export class TerminalManager {
       onExit,
       onOutput,
       this.platform === "darwin",
+      reattachScope,
+      null,
     );
+  }
+
+  async replace(
+    owner: WebSocket,
+    terminalId: string,
+    cwd: string,
+    cols: number,
+    rows: number,
+    onExit?: (exitCode: number) => void,
+    onOutput?: (data: string) => void,
+  ): Promise<string> {
+    const shell = userShell(this.platform);
+    return await this.replaceProcess(
+      owner,
+      terminalId,
+      cwd,
+      shell.executable,
+      shell.args,
+      process.env,
+      cols,
+      rows,
+      onExit,
+      onOutput,
+      null,
+      this.platform === "darwin",
+    );
+  }
+
+  attach(
+    owner: WebSocket,
+    terminalId: string,
+    cwd: string,
+    scope: TerminalReattachScope,
+    cols: number,
+    rows: number,
+  ): TerminalAttachment {
+    if (this.disposingAll || this.updatePreparationHeld) {
+      throw new TerminalError("The terminal service is stopping.");
+    }
+    const session = this.sessions.get(terminalId);
+    if (
+      !session
+      || session.cwd !== cwd
+      || session.reattachScope?.projectId !== scope.projectId
+      || session.reattachScope.conversationId !== scope.conversationId
+    ) {
+      throw new TerminalError("Terminal not found.");
+    }
+    if (owner.readyState !== WebSocket.OPEN) {
+      throw new TerminalError("The terminal client disconnected.");
+    }
+    if (session.terminationRequested || session.closing) {
+      const failure = this.closingFailures.get(session.id);
+      if (!failure) {
+        throw new TerminalError(
+          "The terminal process is still stopping. Retry reconnecting.",
+        );
+      }
+      // A reconnect may be the only remaining authority able to retry a
+      // failed process-tree retirement. Transfer only that cleanup capability;
+      // input, resize, and replay remain unavailable while termination is
+      // pending.
+      session.owner = owner;
+      if (session.detachTimer) clearTimeout(session.detachTimer);
+      session.detachTimer = null;
+      throw new TerminalError(failure.message);
+    }
+    this.assertCapacity(owner, session, scope);
+    // Keep the former owner authoritative until resize and bounded replay both
+    // succeed. A failed transfer must not evict a still-healthy renderer.
+    session.flushOutput();
+    try {
+      session.pty.resize(cols, rows);
+    } catch {
+      throw new TerminalError("Unable to resize this terminal.");
+    }
+    if (!session.replayOutput(owner)) {
+      throw new TerminalError("The terminal client disconnected.");
+    }
+    if (session.detachTimer) clearTimeout(session.detachTimer);
+    session.detachTimer = null;
+    session.owner = owner;
+    if (session.providerResume) {
+      return {
+        terminalId: session.id,
+        providerResume: session.providerResume.descriptor,
+        providerResumeConversationId: session.providerResume.conversationId,
+      };
+    }
+    return { terminalId: session.id };
   }
 
   createProcess(
@@ -314,6 +451,8 @@ export class TerminalManager {
       onExit,
       onOutput,
       false,
+      null,
+      null,
     );
   }
 
@@ -328,6 +467,8 @@ export class TerminalManager {
     rows: number,
     onExit?: (exitCode: number) => void,
     onOutput?: (data: string) => void,
+    providerResume: TerminalProviderResumeAttachment | null = null,
+    gracefulReplacement = false,
   ): Promise<string> {
     const replaced = this.ownedSession(owner, terminalId);
     if (replaced.cwd !== cwd) {
@@ -338,18 +479,14 @@ export class TerminalManager {
     if (owner.readyState !== WebSocket.OPEN) {
       throw new TerminalError("The terminal client disconnected.");
     }
-    this.assertCapacity(owner, replaced);
+    this.assertCapacity(owner, replaced, replaced.reattachScope);
     this.replacementReservations.set(replaced.id, replaced);
     try {
       await this.trackDisposal(replaced, replaced.gracefulReplacement);
-      if (
-        owner.readyState !== WebSocket.OPEN
-        || !send(owner, {
-          type: "terminal.exit",
-          terminalId: replaced.id,
-          exitCode: 130,
-        })
-      ) {
+      // The replacement keeps the same public terminal identity. Publishing
+      // an intermediate exit would make the renderer discard the only safe
+      // capability it can use to reconcile an ambiguously delivered result.
+      if (owner.readyState !== WebSocket.OPEN) {
         throw new TerminalError("The terminal client disconnected.");
       }
       return this.createProcessReplacing(
@@ -363,6 +500,9 @@ export class TerminalManager {
         rows,
         onExit,
         onOutput,
+        gracefulReplacement,
+        replaced.reattachScope,
+        providerResume,
       );
     } finally {
       this.replacementReservations.delete(replaced.id);
@@ -372,9 +512,24 @@ export class TerminalManager {
   private assertCapacity(
     owner: WebSocket,
     replaced: TerminalSession | null,
+    reattachScope: TerminalReattachScope | null = null,
   ): void {
     if (this.disposingAll || this.updatePreparationHeld) {
       throw new TerminalError("The terminal service is stopping.");
+    }
+    const failedRetirement = [...this.sessions.values()].some((session) => (
+      this.closingFailures.has(session.id)
+      && (
+        reattachScope === null
+          ? session.owner === owner
+          : session.reattachScope?.projectId === reattachScope.projectId
+            && session.reattachScope.conversationId === reattachScope.conversationId
+      )
+    ));
+    if (failedRetirement) {
+      throw new TerminalError(
+        "A previous terminal process could not be confirmed stopped. Retry closing it before starting another terminal.",
+      );
     }
     const reservedOnly = [...this.replacementReservations.values()].filter(
       (session) => !this.sessions.has(session.id),
@@ -387,7 +542,18 @@ export class TerminalManager {
       throw new TerminalError("The terminal session limit has been reached.");
     }
     const ownerCount = [...this.sessions.values(), ...reservedOnly].filter(
-      (session) => session.owner === owner && session !== replaced,
+      (session) => (
+        session !== replaced
+        && (
+          session.owner === owner
+          || (
+            reattachScope !== null
+            && session.reattachScope?.projectId === reattachScope.projectId
+            && session.reattachScope.conversationId
+              === reattachScope.conversationId
+          )
+        )
+      ),
     ).length;
     if (ownerCount >= MAX_TERMINALS_PER_CLIENT) {
       throw new TerminalError(
@@ -423,10 +589,15 @@ export class TerminalManager {
     onExit?: (exitCode: number) => void,
     onOutput?: (data: string) => void,
     gracefulReplacement = false,
+    reattachScope: TerminalReattachScope | null = null,
+    providerResume: TerminalProviderResumeAttachment | null = null,
   ): string {
-    this.assertCapacity(owner, replaced);
+    this.assertCapacity(owner, replaced, reattachScope);
 
-    const id = randomUUID();
+    // Replacement shells retain their public identity. If delivery of the
+    // replacement response is ambiguous, the renderer can safely reconcile by
+    // attaching the same terminal ID instead of leaking an unknown process.
+    const id = replaced?.id ?? randomUUID();
     let settleShutdownDeadline!: (deadlineAt: number) => void;
     const waitForShutdownDeadline = new Promise<number>((resolve) => {
       settleShutdownDeadline = resolve;
@@ -462,16 +633,28 @@ export class TerminalManager {
 
     let session!: TerminalSession;
     let pendingOutput = "";
+    const outputHistory: string[] = [];
+    let outputHistoryLength = 0;
+    let outputHistoryTruncated = false;
     let outputTimer: ReturnType<typeof setTimeout> | null = null;
-    let outputTransportOpen = true;
     const sendOutput = (data: string): boolean => {
-      if (!outputTransportOpen) return false;
-      outputTransportOpen = send(owner, {
+      const outputOwner = session ? session.owner : owner;
+      if (!outputOwner) return false;
+      const sent = send(outputOwner, {
         type: "terminal.output",
         terminalId: id,
         data,
       });
-      return outputTransportOpen;
+      if (!sent && session?.owner === outputOwner) {
+        session.owner = null;
+        session.detachOutput();
+        if (session.reattachScope) {
+          this.scheduleDetachedDisposal(session);
+        } else {
+          void this.trackDisposal(session, session.gracefulReplacement);
+        }
+      }
+      return sent;
     };
     const flushOutput = (): void => {
       if (outputTimer) {
@@ -487,8 +670,46 @@ export class TerminalManager {
         }
       }
     };
+    const appendOutputHistory = (data: string): void => {
+      let remaining = data;
+      if (remaining.length > MAX_REATTACH_OUTPUT) {
+        remaining = remaining.slice(-MAX_REATTACH_OUTPUT);
+        outputHistoryTruncated = true;
+      }
+      while (remaining.length > 0) {
+        const lastIndex = outputHistory.length - 1;
+        const last = outputHistory[lastIndex];
+        const room = last === undefined
+          ? 0
+          : OUTPUT_CHUNK_CODE_UNITS - last.length;
+        if (room > 0) {
+          const addition = remaining.slice(0, room);
+          outputHistory[lastIndex] = last + addition;
+          outputHistoryLength += addition.length;
+          remaining = remaining.slice(addition.length);
+        } else {
+          const addition = remaining.slice(0, OUTPUT_CHUNK_CODE_UNITS);
+          outputHistory.push(addition);
+          outputHistoryLength += addition.length;
+          remaining = remaining.slice(addition.length);
+        }
+      }
+      while (outputHistoryLength > MAX_REATTACH_OUTPUT) {
+        const excess = outputHistoryLength - MAX_REATTACH_OUTPUT;
+        const first = outputHistory[0];
+        if (first.length <= excess) {
+          outputHistory.shift();
+          outputHistoryLength -= first.length;
+        } else {
+          outputHistory[0] = first.slice(excess);
+          outputHistoryLength -= excess;
+        }
+        outputHistoryTruncated = true;
+      }
+    };
     const queueOutput = (data: string): void => {
-      if (!outputTransportOpen) return;
+      if (reattachScope) appendOutputHistory(data);
+      if (!session?.owner) return;
       pendingOutput += data;
       while (pendingOutput.length >= OUTPUT_CHUNK_CODE_UNITS) {
         const chunk = pendingOutput.slice(0, OUTPUT_CHUNK_CODE_UNITS);
@@ -503,10 +724,31 @@ export class TerminalManager {
         outputTimer.unref();
       }
     };
-    const disposeOutput = (): void => {
-      flushOutput();
+    const detachOutput = (): void => {
       if (outputTimer) clearTimeout(outputTimer);
       outputTimer = null;
+      pendingOutput = "";
+    };
+    const replayOutput = (replayOwner: WebSocket): boolean => {
+      detachOutput();
+      const replay = outputHistoryTruncated
+        ? [TERMINAL_REATTACH_TRUNCATION_NOTICE, ...outputHistory]
+        : outputHistory;
+      for (const data of replay) {
+        if (!send(replayOwner, {
+          type: "terminal.output",
+          terminalId: id,
+          data,
+        })) return false;
+      }
+      return true;
+    };
+    const disposeOutput = (): void => {
+      if (session?.owner) flushOutput();
+      else detachOutput();
+      outputHistory.length = 0;
+      outputHistoryLength = 0;
+      outputHistoryTruncated = false;
     };
     const dataListener = pseudoterminal.onData((data) => {
       onOutput?.(data);
@@ -519,14 +761,20 @@ export class TerminalManager {
       session.exitWaiters.clear();
       releaseOwnedProcessIfExited(signal);
       if (session.terminationRequested) return;
+      const exitOwner = session.owner;
       this.dispose(id, false);
-      send(owner, { type: "terminal.exit", terminalId: id, exitCode });
+      if (exitOwner) {
+        send(exitOwner, { type: "terminal.exit", terminalId: id, exitCode });
+      }
       onExit?.(exitCode);
     });
     session = {
       id,
       owner,
       cwd,
+      reattachScope,
+      providerResume,
+      detachTimer: null,
       pty: pseudoterminal,
       dataListener,
       exitListener,
@@ -552,6 +800,8 @@ export class TerminalManager {
       requestOwnedGuardianStop,
       waitForOwnedGuardianStop,
       flushOutput,
+      detachOutput,
+      replayOutput,
       disposeOutput,
       onExit,
     };
@@ -603,19 +853,17 @@ export class TerminalManager {
     }
   }
 
-  close(owner: WebSocket, terminalId: string): void {
+  async close(owner: WebSocket, terminalId: string): Promise<void> {
     const session = this.ownedSession(owner, terminalId, true);
-    if (session.closing) return;
-    void this.trackDisposal(session, session.gracefulReplacement).then(
-      () => {
-        send(owner, {
-          type: "terminal.exit",
-          terminalId: session.id,
-          exitCode: 130,
-        });
-      },
-      () => undefined,
-    );
+    const initiated = session.closing === null;
+    await this.trackDisposal(session, session.gracefulReplacement);
+    if (initiated) {
+      send(owner, {
+        type: "terminal.exit",
+        terminalId: session.id,
+        exitCode: 130,
+      });
+    }
   }
 
   /**
@@ -633,14 +881,40 @@ export class TerminalManager {
   disposeOwner(owner: WebSocket): void {
     for (const session of this.sessions.values()) {
       if (session.owner === owner) {
-        void this.trackDisposal(session, session.gracefulReplacement);
+        if (session.reattachScope && !session.terminationRequested) {
+          session.owner = null;
+          session.detachOutput();
+          this.scheduleDetachedDisposal(session);
+        } else {
+          if (session.reattachScope) session.owner = null;
+          void this.trackDisposal(session, session.gracefulReplacement);
+        }
       }
     }
+  }
+
+  private scheduleDetachedDisposal(session: TerminalSession): void {
+    if (
+      session.owner !== null
+      || session.terminationRequested
+      || session.closing
+      || session.detachTimer
+    ) return;
+    const timer = setTimeout(() => {
+      if (session.detachTimer !== timer) return;
+      session.detachTimer = null;
+      if (session.owner !== null || session.terminationRequested) return;
+      void this.trackDisposal(session, session.gracefulReplacement);
+    }, this.reattachTimeoutMs);
+    timer.unref();
+    session.detachTimer = timer;
   }
 
   async disposeAll(deadlineAt?: number): Promise<void> {
     this.disposingAll = true;
     for (const session of this.sessions.values()) {
+      if (session.detachTimer) clearTimeout(session.detachTimer);
+      session.detachTimer = null;
       if (deadlineAt !== undefined) {
         session.setShutdownDeadline(deadlineAt);
       }
@@ -687,6 +961,8 @@ export class TerminalManager {
     const session = this.sessions.get(terminalId);
     if (!session) return;
     this.sessions.delete(terminalId);
+    if (session.detachTimer) clearTimeout(session.detachTimer);
+    session.detachTimer = null;
     session.disposeOutput();
     session.dataListener.dispose();
     session.exitListener.dispose();
@@ -706,7 +982,6 @@ export class TerminalManager {
   ): Promise<void> {
     // Let trackDisposal publish the memoized closing promise before a graceful
     // payload exit can synchronously trigger the PTY exit listener.
-    // synchronously trigger the PTY exit listener.
     await Promise.resolve();
     let fallbackDeadlineAt: number | null = null;
     if (
@@ -786,7 +1061,6 @@ export class TerminalManager {
             ));
             return;
           }
-          this.dispose(session.id, false);
           // A native guardian exit proves only that the local PTY handle is
           // gone. Replacement also requires the exact durable ownership claim
           // to be retired; a fork-tainted guardian exit deliberately keeps it
@@ -801,6 +1075,7 @@ export class TerminalManager {
             ));
             return;
           }
+          this.dispose(session.id, false);
           try {
             session.onExit?.(130);
           } catch {
@@ -821,6 +1096,8 @@ export class TerminalManager {
     gracefulReplacement = false,
   ): Promise<void> {
     if (session.closing) return session.closing;
+    if (session.detachTimer) clearTimeout(session.detachTimer);
+    session.detachTimer = null;
     session.terminationRequested = true;
     const closing = this.disposeAndWait(session, gracefulReplacement);
     session.closing = closing;
@@ -833,11 +1110,12 @@ export class TerminalManager {
       },
       (error: unknown) => {
         this.closingSessions.delete(closing);
-        this.closingFailures.set(session.id, error instanceof Error
+        const failure = error instanceof Error
           ? error
           : new TerminalError(
               "A terminal process did not exit during runtime shutdown.",
-            ));
+            );
+        this.closingFailures.set(session.id, failure);
         if (session.closing === closing) session.closing = null;
       },
     );

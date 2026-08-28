@@ -367,6 +367,57 @@ describe("client command contract", () => {
     }
   });
 
+  it("requires an existing terminal capability for project actions", () => {
+    const command = {
+      type: "project.action.run",
+      requestId: crypto.randomUUID(),
+      payload: {
+        projectId: crypto.randomUUID(),
+        conversationId: crypto.randomUUID(),
+        actionId: "preview",
+        terminalId: crypto.randomUUID(),
+        cols: 80,
+        rows: 24,
+      },
+    };
+    expect(clientCommandSchema.safeParse(command).success).toBe(true);
+    const { terminalId: _, ...withoutTerminalId } = command.payload;
+    expect(clientCommandSchema.safeParse({
+      ...command,
+      payload: withoutTerminalId,
+    }).success).toBe(false);
+    expect(clientCommandSchema.safeParse({
+      ...command,
+      payload: { ...command.payload, terminalId: "renderer-invented-id" },
+    }).success).toBe(false);
+  });
+
+  it("accepts only an exact terminal attach scope and bounded dimensions", () => {
+    const command = {
+      type: "terminal.attach",
+      requestId: crypto.randomUUID(),
+      payload: {
+        projectId: crypto.randomUUID(),
+        conversationId: crypto.randomUUID(),
+        terminalId: crypto.randomUUID(),
+        cols: 80,
+        rows: 24,
+      },
+    };
+    expect(clientCommandSchema.safeParse(command).success).toBe(true);
+    for (const injected of [
+      { cwd: "/tmp" },
+      { replayBytes: 10_000_000 },
+      { owner: "renderer" },
+      { cols: 10_000 },
+    ]) {
+      expect(clientCommandSchema.safeParse({
+        ...command,
+        payload: { ...command.payload, ...injected },
+      }).success).toBe(false);
+    }
+  });
+
   it("accepts conflict-checked workspace writes and rejects unbounded payloads", () => {
     const base = {
       type: "workspace.file.write",

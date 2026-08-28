@@ -25,6 +25,9 @@ const budgets = {
   deferredDiscordSettingsJavaScript: 6 * kibibyte,
   deferredCanaryRollbackJavaScript: 4 * kibibyte,
   deferredAppUpdateNoticeJavaScript: 6 * kibibyte,
+  // The terminal owns reload recovery, bounded replay, and provider-resume UI.
+  // Keep that optional surface isolated from the workbench and capped here.
+  deferredTerminalJavaScript: 25 * kibibyte,
   detachedChatJavaScript: 16 * kibibyte,
   preMergeConfidenceJavaScript: 28 * kibibyte,
   morphiconsJavaScript: 20 * kibibyte,
@@ -129,6 +132,9 @@ const deferredCanaryRollbackJavaScript = assetNames.find(
 const deferredAppUpdateNoticeJavaScript = assetNames.find(
   (name) => /^AppUpdateNotice-.*\.js$/u.test(name),
 );
+const deferredTerminalJavaScript = assetNames.find(
+  (name) => /^TerminalPanel-.*\.js$/u.test(name),
+);
 const mainWorkbenchJavaScript = assetNames.find(
   (name) => /^App-.*\.js$/u.test(name),
 );
@@ -203,6 +209,11 @@ if (!deferredCanaryRollbackJavaScript) {
 if (!deferredAppUpdateNoticeJavaScript) {
   throw new Error(
     "Renderer bundle check could not find the deferred update notice chunk.",
+  );
+}
+if (!deferredTerminalJavaScript) {
+  throw new Error(
+    "Renderer bundle check could not find the deferred Terminal chunk.",
   );
 }
 if (!mainWorkbenchJavaScript) {
@@ -323,6 +334,9 @@ const deferredCanaryRollbackJavaScriptBytes = await assetBytes(
 const deferredAppUpdateNoticeJavaScriptBytes = await assetBytes(
   `assets/${deferredAppUpdateNoticeJavaScript}`,
 );
+const deferredTerminalJavaScriptBytes = await assetBytes(
+  `assets/${deferredTerminalJavaScript}`,
+);
 const detachedChatJavaScriptBytes = await closureBytes(
   detachedChatJavaScriptClosure,
   mainWorkbenchJavaScriptClosure,
@@ -366,6 +380,7 @@ const coreJavaScriptBytes =
   - deferredDiscordSettingsJavaScriptBytes
   - deferredCanaryRollbackJavaScriptBytes
   - deferredAppUpdateNoticeJavaScriptBytes
+  - deferredTerminalJavaScriptBytes
   - detachedChatJavaScriptBytes
   - preMergeConfidenceJavaScriptBytes
   // The dependency and feature adapter each have strict ceilings above, so do
@@ -392,6 +407,7 @@ const measurements = {
   deferredDiscordSettingsJavaScript: deferredDiscordSettingsJavaScriptBytes,
   deferredCanaryRollbackJavaScript: deferredCanaryRollbackJavaScriptBytes,
   deferredAppUpdateNoticeJavaScript: deferredAppUpdateNoticeJavaScriptBytes,
+  deferredTerminalJavaScript: deferredTerminalJavaScriptBytes,
   detachedChatJavaScript: detachedChatJavaScriptBytes,
   preMergeConfidenceJavaScript: preMergeConfidenceJavaScriptBytes,
   morphiconsJavaScript: morphiconsJavaScriptBytes,

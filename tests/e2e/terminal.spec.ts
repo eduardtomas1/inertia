@@ -35,6 +35,10 @@ async function ensureWorkspaceTools(): Promise<void> {
   }
 }
 
+function quotePosix(value: string): string {
+  return `'${value.replaceAll("'", `'"'"'`)}'`;
+}
+
 test("switches workspace tools, opens multiple terminals, and loads a safe native preview", async () => {
   await resizeWindow(1440, 920);
   await ensureWorkspaceTools();
@@ -56,7 +60,24 @@ test("switches workspace tools, opens multiple terminals, and loads a safe nativ
   await expect(page.locator(".terminal-session-grid")).toHaveClass(/is-split/);
   const liveTerminals = page.locator(".terminal-panel[data-terminal-id]");
   await expect(liveTerminals).toHaveCount(2);
+  await expect(page.locator(
+    '.terminal-panel[data-terminal-id][data-terminal-state="ready"]',
+  )).toHaveCount(2);
   const terminalIdsBefore = (await liveTerminals.evaluateAll((terminals) => terminals.map((terminal) => terminal.getAttribute("data-terminal-id")).sort())).filter(Boolean);
+  const beforeReloadPath = join(workspaceDirectory, "terminal-before-reload.txt");
+  const afterReloadPath = join(workspaceDirectory, "terminal-after-reload.txt");
+  const terminalInput = page.locator(".xterm-helper-textarea:visible").first();
+  await terminalInput.focus();
+  const marker = "inertia-terminal-reattach";
+  const beforeCommand = process.platform === "win32"
+    ? `set INERTIA_REATTACH_MARKER=${marker}`
+    : `export INERTIA_REATTACH_MARKER=${marker}; printf '%s:%s\\n' "$$" "$INERTIA_REATTACH_MARKER" > ${quotePosix(beforeReloadPath)}; /usr/bin/true`;
+  await page.keyboard.insertText(beforeCommand);
+  await page.keyboard.press("Enter");
+  if (process.platform !== "win32") {
+    await expect.poll(async () => await readFile(beforeReloadPath, "utf8")
+      .catch(() => "")).toContain(marker);
+  }
 
   await selectWorkspaceTool(page.locator(".workspace-panel"), "Changes");
   await selectWorkspaceTool(page.locator(".workspace-panel"), "Files");
@@ -75,6 +96,45 @@ test("switches workspace tools, opens multiple terminals, and loads a safe nativ
   await expect(liveTerminals).toHaveCount(2);
   const terminalIdsAfter = (await liveTerminals.evaluateAll((terminals) => terminals.map((terminal) => terminal.getAttribute("data-terminal-id")).sort())).filter(Boolean);
   expect(terminalIdsAfter).toEqual(terminalIdsBefore);
+
+  await page.reload();
+  await expect(page.locator(".app-shell")).toHaveAttribute(
+    "data-connection-status",
+    "online",
+    { timeout: 15_000 },
+  );
+  await ensureWorkspaceTools();
+  await selectWorkspaceTool(page.locator(".workspace-panel"), "Terminal");
+  await expect(liveTerminals).toHaveCount(2);
+  await expect(page.locator(
+    '.terminal-panel[data-terminal-id][data-terminal-state="ready"]',
+  )).toHaveCount(2);
+  const terminalIdsAfterReload = (await liveTerminals.evaluateAll((terminals) => terminals.map((terminal) => terminal.getAttribute("data-terminal-id")).sort())).filter(Boolean);
+  expect(terminalIdsAfterReload).toEqual(terminalIdsBefore);
+
+  const reattachedInput = page.locator(".xterm-helper-textarea:visible").first();
+  await reattachedInput.focus();
+  const afterCommand = process.platform === "win32"
+    ? `echo %INERTIA_REATTACH_MARKER%>"${afterReloadPath}"`
+    : `printf '%s:%s\\n' "$$" "$INERTIA_REATTACH_MARKER" > ${quotePosix(afterReloadPath)}`;
+  await page.keyboard.insertText(afterCommand);
+  await page.keyboard.press("Enter");
+  await expect.poll(async () => await readFile(afterReloadPath, "utf8")
+    .catch(() => "")).toContain(marker);
+  if (process.platform !== "win32") {
+    expect(await readFile(afterReloadPath, "utf8"))
+      .toBe(await readFile(beforeReloadPath, "utf8"));
+  }
+  for (const tabName of ["Terminal 2", "Terminal 1"]) {
+    await page.getByRole("tab", { name: tabName, exact: true }).click();
+    const activePanel = page.locator(
+      ".terminal-session-slot:not([hidden]) .terminal-panel",
+    );
+    await activePanel.locator(".xterm-helper-textarea").focus();
+    await page.keyboard.insertText("exit");
+    await page.keyboard.press("Enter");
+    await expect(activePanel).not.toHaveAttribute("data-terminal-id", /.+/u);
+  }
   expect(rendererErrors).toEqual([]);
 });
 
@@ -91,7 +151,9 @@ test("keeps hostile native previews beneath trusted workspace overlays", async (
   ).toBe(true);
 
   await selectWorkspaceTool(page.locator(".workspace-panel"), "Environment");
-  expect(await app.nativePreviewIsVisible(hostilePreviewUrl)).toBe(false);
+  await expect.poll(
+    () => app.nativePreviewIsVisible(hostilePreviewUrl),
+  ).toBe(false);
   await expect(page.getByRole("tabpanel", { name: "Environment" })).toBeVisible();
   const localServer = new URL(hostilePreviewUrl);
   await page.getByText("Local Servers", { exact: true }).click();

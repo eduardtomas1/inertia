@@ -11,6 +11,8 @@ import type {
 
 const terminalState = vi.hoisted(() => ({
   textarea: null as HTMLTextAreaElement | null,
+  onData: null as ((data: string) => void) | null,
+  writes: [] as string[],
 }));
 
 vi.mock("@xterm/addon-fit", () => ({
@@ -41,13 +43,20 @@ vi.mock("@xterm/xterm", () => ({
       terminalState.textarea?.focus();
     }
 
-    onData(): { dispose: () => void } {
+    onData(callback: (data: string) => void): { dispose: () => void } {
+      terminalState.onData = callback;
       return { dispose: () => undefined };
     }
 
-    clear(): void {}
-    writeln(): void {}
-    write(): void {}
+    clear(): void {
+      terminalState.writes = [];
+    }
+    writeln(data: string): void {
+      terminalState.writes.push(data);
+    }
+    write(data: string): void {
+      terminalState.writes.push(data);
+    }
     dispose(): void {}
   },
 }));
@@ -67,6 +76,9 @@ class TestResizeObserver implements ResizeObserver {
 describe("TerminalPanel focus lifecycle", () => {
   beforeEach(() => {
     terminalState.textarea = null;
+    terminalState.onData = null;
+    terminalState.writes = [];
+    window.sessionStorage.clear();
     vi.stubGlobal("ResizeObserver", TestResizeObserver);
     vi.stubGlobal("matchMedia", () => ({
       matches: false,
@@ -78,6 +90,548 @@ describe("TerminalPanel focus lifecycle", () => {
       removeListener: vi.fn(),
       dispatchEvent: vi.fn(),
     }));
+  });
+
+  it("reattaches a bounded persisted terminal before creating a new shell", async () => {
+    const projectId = "11111111-1111-4111-8111-111111111111";
+    const conversationId = "22222222-2222-4222-8222-222222222222";
+    const terminalId = "44444444-4444-4444-8444-444444444444";
+    window.sessionStorage.setItem(
+      `inertia:terminal-sessions:v1:${projectId}:${conversationId}`,
+      JSON.stringify([terminalId]),
+    );
+    const sendCommand = vi.fn(async (sent: ClientCommand): Promise<ServerEvent> => {
+      if (sent.type === "terminal.attach") {
+        return {
+          type: "terminal.created",
+          requestId: sent.requestId,
+          terminalId,
+        };
+      }
+      return { type: "request.ok", requestId: sent.requestId };
+    });
+
+    render(
+      <TerminalPanel
+        projectId={projectId}
+        conversationId={conversationId}
+        projectName="Inertia"
+        status="online"
+        fontSize={13}
+        theme="dark"
+        sendCommand={sendCommand}
+        subscribe={() => () => undefined}
+        onClose={() => undefined}
+      />,
+    );
+
+    await waitFor(() => expect(document.querySelector(".terminal-panel"))
+      .toHaveAttribute("data-terminal-id", terminalId));
+    expect(sendCommand.mock.calls[0]?.[0]).toMatchObject({
+      type: "terminal.attach",
+      payload: { projectId, conversationId, terminalId, cols: 80, rows: 24 },
+    });
+    expect(sendCommand.mock.calls.some(([sent]) => sent.type === "terminal.create"))
+      .toBe(false);
+  });
+
+  it("keeps one bounded replay when an ambiguous reattach succeeds on retry", async () => {
+    vi.useFakeTimers();
+    const projectId = "11111111-1111-4111-8111-111111111111";
+    const terminalId = "44444444-4444-4444-8444-444444444444";
+    window.sessionStorage.setItem(
+      `inertia:terminal-sessions:v1:${projectId}:project`,
+      JSON.stringify([terminalId]),
+    );
+    const listeners = new Set<(event: ServerEvent) => void>();
+    let attempts = 0;
+    let settleSecond!: (event: ServerEvent) => void;
+    const secondResult = new Promise<ServerEvent>((resolve) => {
+      settleSecond = resolve;
+    });
+    const sendCommand = vi.fn(async (sent: ClientCommand): Promise<ServerEvent> => {
+      if (sent.type !== "terminal.attach") {
+        return { type: "request.ok", requestId: sent.requestId };
+      }
+      attempts += 1;
+      for (const listener of listeners) {
+        listener({ type: "terminal.output", terminalId, data: "restored output" });
+      }
+      if (attempts === 1) {
+        throw new RuntimeCommandError("The request took too long to complete.", "ambiguous");
+      }
+      return await secondResult;
+    });
+
+    render(
+      <TerminalPanel
+        projectId={projectId}
+        projectName="Inertia"
+        status="online"
+        fontSize={13}
+        theme="dark"
+        sendCommand={sendCommand}
+        subscribe={(next) => {
+          listeners.add(next);
+          return () => listeners.delete(next);
+        }}
+        onClose={() => undefined}
+      />,
+    );
+    await act(async () => Promise.resolve());
+    await act(async () => vi.advanceTimersByTimeAsync(400));
+    await act(async () => {
+      settleSecond({
+        type: "terminal.created",
+        requestId: crypto.randomUUID(),
+        terminalId,
+      });
+      await secondResult;
+    });
+    await act(async () => vi.advanceTimersByTimeAsync(1));
+    vi.useRealTimers();
+
+    expect(attempts).toBe(2);
+    await waitFor(() => expect(terminalState.writes).toEqual(["restored output"]));
+  });
+
+  it("does not trust duplicate persisted terminal identities", async () => {
+    const projectId = "11111111-1111-4111-8111-111111111111";
+    const terminalId = "44444444-4444-4444-8444-444444444444";
+    window.sessionStorage.setItem(
+      `inertia:terminal-sessions:v1:${projectId}:project`,
+      JSON.stringify([terminalId, terminalId]),
+    );
+    const sendCommand = vi.fn(async (sent: ClientCommand): Promise<ServerEvent> => (
+      sent.type === "terminal.create"
+        ? { type: "terminal.created", requestId: sent.requestId, terminalId }
+        : { type: "request.ok", requestId: sent.requestId }
+    ));
+
+    render(
+      <TerminalPanel
+        projectId={projectId}
+        projectName="Inertia"
+        status="online"
+        fontSize={13}
+        theme="dark"
+        sendCommand={sendCommand}
+        subscribe={() => () => undefined}
+        onClose={() => undefined}
+      />,
+    );
+    await waitFor(() => expect(sendCommand).toHaveBeenCalled());
+    expect(sendCommand.mock.calls.filter(([sent]) => sent.type === "terminal.attach"))
+      .toHaveLength(0);
+    expect(sendCommand.mock.calls.filter(([sent]) => sent.type === "terminal.create"))
+      .toHaveLength(1);
+  });
+
+  it("does not send terminal input until reattach ownership is confirmed", async () => {
+    const projectId = "11111111-1111-4111-8111-111111111111";
+    const terminalId = "44444444-4444-4444-8444-444444444444";
+    window.sessionStorage.setItem(
+      `inertia:terminal-sessions:v1:${projectId}:project`,
+      JSON.stringify([terminalId]),
+    );
+    let settle!: (event: ServerEvent) => void;
+    const pending = new Promise<ServerEvent>((resolve) => { settle = resolve; });
+    const sendCommand = vi.fn((sent: ClientCommand): Promise<ServerEvent> => (
+      sent.type === "terminal.attach"
+        ? pending
+        : Promise.resolve({ type: "request.ok", requestId: sent.requestId })
+    ));
+
+    render(
+      <TerminalPanel
+        projectId={projectId}
+        projectName="Inertia"
+        status="online"
+        fontSize={13}
+        theme="dark"
+        sendCommand={sendCommand}
+        subscribe={() => () => undefined}
+        onClose={() => undefined}
+      />,
+    );
+    await waitFor(() => expect(terminalState.onData).not.toBeNull());
+    expect(document.querySelector(".terminal-panel"))
+      .toHaveAttribute("data-terminal-state", "starting");
+    expect(document.querySelector(".terminal-panel"))
+      .toHaveAttribute("aria-busy", "true");
+    terminalState.onData?.("pwd\r");
+    expect(sendCommand.mock.calls.some(([sent]) => sent.type === "terminal.input"))
+      .toBe(false);
+
+    settle({ type: "terminal.created", requestId: crypto.randomUUID(), terminalId });
+    await waitFor(() => expect(document.querySelector(".terminal-panel"))
+      .toHaveAttribute("data-terminal-state", "ready"));
+    expect(document.querySelector(".terminal-panel"))
+      .toHaveAttribute("aria-busy", "false");
+    terminalState.onData?.("pwd\r");
+    await waitFor(() => expect(sendCommand.mock.calls.some(
+      ([sent]) => sent.type === "terminal.input",
+    )).toBe(true));
+  });
+
+  it("creates once after the server authoritatively rejects a stale persisted terminal", async () => {
+    const projectId = "11111111-1111-4111-8111-111111111111";
+    const staleId = "44444444-4444-4444-8444-444444444444";
+    const replacementId = "55555555-5555-4555-8555-555555555555";
+    window.sessionStorage.setItem(
+      `inertia:terminal-sessions:v1:${projectId}:project`,
+      JSON.stringify([staleId]),
+    );
+    const sentTypes: string[] = [];
+    const sendCommand = vi.fn(async (sent: ClientCommand): Promise<ServerEvent> => {
+      sentTypes.push(sent.type);
+      if (sent.type === "terminal.attach") {
+        throw new RuntimeCommandError("Terminal not found.", "rejected");
+      }
+      if (sent.type === "terminal.create") {
+        return {
+          type: "terminal.created",
+          requestId: sent.requestId,
+          terminalId: replacementId,
+        };
+      }
+      return { type: "request.ok", requestId: sent.requestId };
+    });
+
+    render(
+      <TerminalPanel
+        projectId={projectId}
+        projectName="Inertia"
+        status="online"
+        fontSize={13}
+        theme="dark"
+        sendCommand={sendCommand}
+        subscribe={() => () => undefined}
+        onClose={() => undefined}
+      />,
+    );
+
+    await waitFor(() => expect(document.querySelector(".terminal-panel"))
+      .toHaveAttribute("data-terminal-id", replacementId));
+    expect(sentTypes.slice(0, 2)).toEqual(["terminal.attach", "terminal.create"]);
+  });
+
+  it("retries an in-progress replacement before one authoritative fallback", async () => {
+    const projectId = "11111111-1111-4111-8111-111111111111";
+    const staleId = "44444444-4444-4444-8444-444444444444";
+    const replacementId = "55555555-5555-4555-8555-555555555555";
+    window.sessionStorage.setItem(
+      `inertia:terminal-sessions:v1:${projectId}:project`,
+      JSON.stringify([staleId]),
+    );
+    let attachAttempts = 0;
+    const sentTypes: string[] = [];
+    const sendCommand = vi.fn(async (sent: ClientCommand): Promise<ServerEvent> => {
+      sentTypes.push(sent.type);
+      if (sent.type === "terminal.attach") {
+        attachAttempts += 1;
+        throw new RuntimeCommandError(
+          attachAttempts === 1
+            ? "The terminal process is still stopping. Retry reconnecting."
+            : "Terminal not found.",
+          "rejected",
+        );
+      }
+      if (sent.type === "terminal.create") {
+        return {
+          type: "terminal.created",
+          requestId: sent.requestId,
+          terminalId: replacementId,
+        };
+      }
+      return { type: "request.ok", requestId: sent.requestId };
+    });
+
+    render(
+      <TerminalPanel
+        projectId={projectId}
+        projectName="Inertia"
+        status="online"
+        fontSize={13}
+        theme="dark"
+        sendCommand={sendCommand}
+        subscribe={() => () => undefined}
+        onClose={() => undefined}
+      />,
+    );
+
+    await waitFor(() => expect(document.querySelector(".terminal-panel"))
+      .toHaveAttribute("data-terminal-id", replacementId), { timeout: 2_000 });
+    expect(sentTypes.slice(0, 3)).toEqual([
+      "terminal.attach",
+      "terminal.attach",
+      "terminal.create",
+    ]);
+    expect(sendCommand.mock.calls.filter(([sent]) => sent.type === "terminal.create"))
+      .toHaveLength(1);
+  });
+
+  it("never discards a stable terminal while replacement remains in progress", async () => {
+    vi.useFakeTimers();
+    const projectId = "11111111-1111-4111-8111-111111111111";
+    const terminalId = "44444444-4444-4444-8444-444444444444";
+    window.sessionStorage.setItem(
+      `inertia:terminal-sessions:v1:${projectId}:project`,
+      JSON.stringify([terminalId]),
+    );
+    const sendCommand = vi.fn(async (sent: ClientCommand): Promise<ServerEvent> => {
+      if (sent.type === "terminal.attach") {
+        throw new RuntimeCommandError(
+          "The terminal process is still stopping. Retry reconnecting.",
+          "rejected",
+        );
+      }
+      return { type: "request.ok", requestId: sent.requestId };
+    });
+
+    render(
+      <TerminalPanel
+        projectId={projectId}
+        projectName="Inertia"
+        status="online"
+        fontSize={13}
+        theme="dark"
+        sendCommand={sendCommand}
+        subscribe={() => () => undefined}
+        onClose={() => undefined}
+      />,
+    );
+    await act(async () => Promise.resolve());
+    for (const delay of [400, 900, 900]) {
+      await act(async () => vi.advanceTimersByTimeAsync(delay));
+    }
+
+    expect(sendCommand.mock.calls.filter(([sent]) => sent.type === "terminal.attach"))
+      .toHaveLength(4);
+    expect(sendCommand.mock.calls.some(([sent]) => sent.type === "terminal.create"))
+      .toBe(false);
+    expect(document.querySelector(".terminal-panel"))
+      .toHaveAttribute("data-terminal-id", terminalId);
+    expect(document.querySelector(".terminal-panel"))
+      .toHaveAttribute("data-terminal-state", "error");
+  });
+
+  it("reattaches a healthy replacement that settles after the Windows deadline", async () => {
+    vi.useFakeTimers();
+    const projectId = "11111111-1111-4111-8111-111111111111";
+    const terminalId = "44444444-4444-4444-8444-444444444444";
+    window.sessionStorage.setItem(
+      `inertia:terminal-sessions:v1:${projectId}:project`,
+      JSON.stringify([terminalId]),
+    );
+    let attempts = 0;
+    const sendCommand = vi.fn(async (sent: ClientCommand): Promise<ServerEvent> => {
+      if (sent.type === "terminal.attach") {
+        attempts += 1;
+        if (attempts < 4) {
+          throw new RuntimeCommandError(
+            "The terminal process is still stopping. Retry reconnecting.",
+            "rejected",
+          );
+        }
+        return { type: "terminal.created", requestId: sent.requestId, terminalId };
+      }
+      return { type: "request.ok", requestId: sent.requestId };
+    });
+
+    render(
+      <TerminalPanel
+        projectId={projectId}
+        projectName="Inertia"
+        status="online"
+        fontSize={13}
+        theme="dark"
+        sendCommand={sendCommand}
+        subscribe={() => () => undefined}
+        onClose={() => undefined}
+      />,
+    );
+    await act(async () => Promise.resolve());
+    for (const delay of [400, 900, 900]) {
+      await act(async () => vi.advanceTimersByTimeAsync(delay));
+    }
+
+    expect(attempts).toBe(4);
+    expect(sendCommand.mock.calls.some(([sent]) => sent.type === "terminal.create"))
+      .toBe(false);
+    expect(document.querySelector(".terminal-panel"))
+      .toHaveAttribute("data-terminal-id", terminalId);
+    expect(document.querySelector(".terminal-panel"))
+      .toHaveAttribute("data-terminal-state", "ready");
+  });
+
+  it("retains a failed-retirement terminal identity for authoritative cleanup", async () => {
+    const projectId = "11111111-1111-4111-8111-111111111111";
+    const terminalId = "44444444-4444-4444-8444-444444444444";
+    window.sessionStorage.setItem(
+      `inertia:terminal-sessions:v1:${projectId}:project`,
+      JSON.stringify([terminalId]),
+    );
+    const sendCommand = vi.fn(async (sent: ClientCommand): Promise<ServerEvent> => {
+      if (sent.type === "terminal.attach") {
+        throw new RuntimeCommandError(
+          "A terminal process ownership claim could not be retired during runtime shutdown.",
+          "rejected",
+        );
+      }
+      return { type: "request.ok", requestId: sent.requestId };
+    });
+
+    render(
+      <TerminalPanel
+        projectId={projectId}
+        projectName="Inertia"
+        status="online"
+        fontSize={13}
+        theme="dark"
+        sendCommand={sendCommand}
+        subscribe={() => () => undefined}
+        onClose={() => undefined}
+      />,
+    );
+
+    await waitFor(() => expect(document.querySelector(".terminal-panel"))
+      .toHaveAttribute("data-terminal-state", "error"));
+    expect(document.querySelector(".terminal-panel"))
+      .toHaveAttribute("data-terminal-id", terminalId);
+    expect(sendCommand.mock.calls.some(([sent]) => sent.type === "terminal.create"))
+      .toBe(false);
+  });
+
+  it("preserves a live terminal across an offline reconnect without closing it", async () => {
+    const terminalId = "11111111-1111-4111-8111-111111111111";
+    const sendCommand = vi.fn(async (sent: ClientCommand): Promise<ServerEvent> => {
+      if (sent.type === "terminal.create" || sent.type === "terminal.attach") {
+        return {
+          type: "terminal.created",
+          requestId: sent.requestId,
+          terminalId,
+        };
+      }
+      return { type: "request.ok", requestId: sent.requestId };
+    });
+    const panel = (status: "online" | "offline") => (
+      <TerminalPanel
+        projectId="project-1"
+        projectName="Inertia"
+        status={status}
+        fontSize={13}
+        theme="dark"
+        sendCommand={sendCommand}
+        subscribe={() => () => undefined}
+        onClose={() => undefined}
+      />
+    );
+    const view = render(panel("online"));
+    await waitFor(() => expect(document.querySelector(".terminal-panel"))
+      .toHaveAttribute("data-terminal-id", terminalId));
+
+    view.rerender(panel("offline"));
+    await act(async () => Promise.resolve());
+    expect(sendCommand.mock.calls.some(([sent]) => sent.type === "terminal.close"))
+      .toBe(false);
+    view.rerender(panel("online"));
+    await waitFor(() => expect(sendCommand.mock.calls.some(
+      ([sent]) => sent.type === "terminal.attach",
+    )).toBe(true));
+    expect(sendCommand.mock.calls.filter(([sent]) => sent.type === "terminal.create"))
+      .toHaveLength(1);
+  });
+
+  it("never creates a duplicate after an ambiguously delivered reattach", async () => {
+    vi.useFakeTimers();
+    const projectId = "11111111-1111-4111-8111-111111111111";
+    const terminalId = "33333333-3333-4333-8333-333333333333";
+    window.sessionStorage.setItem(
+      `inertia:terminal-sessions:v1:${projectId}:project`,
+      JSON.stringify([terminalId]),
+    );
+    const sendCommand = vi.fn(async (sent: ClientCommand): Promise<ServerEvent> => {
+      if (sent.type === "terminal.attach") {
+        throw new RuntimeCommandError(
+          "The request took too long to complete.",
+          "ambiguous",
+        );
+      }
+      return { type: "request.ok", requestId: sent.requestId };
+    });
+
+    render(
+      <TerminalPanel
+        projectId={projectId}
+        projectName="Inertia"
+        status="online"
+        fontSize={13}
+        theme="dark"
+        sendCommand={sendCommand}
+        subscribe={() => () => undefined}
+        onClose={() => undefined}
+      />,
+    );
+    await act(async () => Promise.resolve());
+    await act(async () => vi.advanceTimersByTimeAsync(400));
+    await act(async () => vi.advanceTimersByTimeAsync(900));
+
+    expect(sendCommand.mock.calls.filter(([sent]) => sent.type === "terminal.attach"))
+      .toHaveLength(3);
+    expect(sendCommand.mock.calls.some(([sent]) => sent.type === "terminal.create"))
+      .toBe(false);
+    expect(screen.getByText("The request took too long to complete."))
+      .toBeInTheDocument();
+    expect(window.sessionStorage.getItem(
+      `inertia:terminal-sessions:v1:${projectId}:project`,
+    )).toContain(terminalId);
+  });
+
+  it("preserves a terminal on page teardown but closes it on an ordinary unmount", async () => {
+    const terminalId = "11111111-1111-4111-8111-111111111111";
+    const sendCommand = vi.fn(async (sent: ClientCommand): Promise<ServerEvent> => {
+      if (sent.type === "terminal.create") {
+        return {
+          type: "terminal.created",
+          requestId: sent.requestId,
+          terminalId,
+        };
+      }
+      return { type: "request.ok", requestId: sent.requestId };
+    });
+    const props = {
+      projectId: "project-1",
+      projectName: "Inertia",
+      status: "online" as const,
+      fontSize: 13,
+      theme: "dark" as const,
+      sendCommand,
+      subscribe: () => () => undefined,
+      onClose: () => undefined,
+    };
+    const reloading = render(<TerminalPanel {...props} />);
+    await waitFor(() => expect(document.querySelector(".terminal-panel"))
+      .toHaveAttribute("data-terminal-id", terminalId));
+    fireEvent(window, new Event("pagehide"));
+    reloading.unmount();
+    await act(async () => Promise.resolve());
+    expect(sendCommand.mock.calls.some(([sent]) => sent.type === "terminal.close"))
+      .toBe(false);
+    expect(window.sessionStorage.getItem(
+      "inertia:terminal-sessions:v1:project-1:project",
+    )).toContain(terminalId);
+
+    window.sessionStorage.clear();
+    sendCommand.mockClear();
+    const navigating = render(<TerminalPanel {...props} />);
+    await waitFor(() => expect(document.querySelector(".terminal-panel"))
+      .toHaveAttribute("data-terminal-id", terminalId));
+    navigating.unmount();
+    await act(async () => Promise.resolve());
+    expect(sendCommand.mock.calls.some(([sent]) => (
+      sent.type === "terminal.close" && sent.payload.terminalId === terminalId
+    ))).toBe(true);
   });
 
   afterEach(() => {
@@ -242,19 +796,24 @@ describe("TerminalPanel focus lifecycle", () => {
     const sendCommand = vi.fn(async (command: ClientCommand): Promise<ServerEvent> => {
       if (command.type === "terminal.create" || command.type === "terminal.provider.resume") {
         created += 1;
+        const terminalId = `${created}0000000-0000-4000-8000-000000000000`;
+        if (command.type === "terminal.provider.resume") {
+          return {
+            type: "terminal.created",
+            requestId: command.requestId,
+            terminalId,
+            providerResumeConversationId: command.payload.conversationId,
+            providerResume: {
+              providerId: "claude",
+              providerLabel: "Claude",
+              sessionId: authoritativeSessionId,
+            },
+          };
+        }
         return {
           type: "terminal.created",
           requestId: command.requestId,
-          terminalId: `${created}0000000-0000-4000-8000-000000000000`,
-          ...(command.type === "terminal.provider.resume"
-            ? {
-                providerResume: {
-                  providerId: "claude" as const,
-                  providerLabel: "Claude",
-                  sessionId: authoritativeSessionId,
-                },
-              }
-            : {}),
+          terminalId,
         };
       }
       return { type: "request.ok", requestId: command.requestId };
@@ -323,11 +882,19 @@ describe("TerminalPanel focus lifecycle", () => {
           terminalId: "55555555-5555-4555-8555-555555555555",
         };
       }
+      if (sent.type === "terminal.attach") {
+        return {
+          type: "terminal.created",
+          requestId: sent.requestId,
+          terminalId: sent.payload.terminalId,
+        };
+      }
       if (sent.type === "terminal.provider.resume") {
         return {
           type: "terminal.created",
           requestId: sent.requestId,
           terminalId: "66666666-6666-4666-8666-666666666666",
+          providerResumeConversationId: sent.payload.conversationId,
           providerResume: {
             providerId: "claude",
             providerLabel: "Claude",
@@ -436,6 +1003,13 @@ describe("TerminalPanel focus lifecycle", () => {
           terminalId: "55555555-5555-4555-8555-555555555555",
         };
       }
+      if (sent.type === "terminal.attach") {
+        return {
+          type: "terminal.created",
+          requestId: sent.requestId,
+          terminalId: sent.payload.terminalId,
+        };
+      }
       if (sent.type === "terminal.provider.resume") {
         resumeAttempts += 1;
         if (resumeAttempts === 1) throw new Error("Provider was temporarily busy.");
@@ -443,6 +1017,7 @@ describe("TerminalPanel focus lifecycle", () => {
           type: "terminal.created",
           requestId: sent.requestId,
           terminalId: "66666666-6666-4666-8666-666666666666",
+          providerResumeConversationId: sent.payload.conversationId,
           providerResume: {
             providerId: "claude",
             providerLabel: "Claude",
@@ -591,6 +1166,7 @@ describe("TerminalPanel focus lifecycle", () => {
         type: "terminal.created",
         requestId: "77777777-7777-4777-8777-777777777777",
         terminalId: "88888888-8888-4888-8888-888888888888",
+        providerResumeConversationId: "22222222-2222-4222-8222-222222222222",
         providerResume: {
           providerId: "claude",
           providerLabel: "Claude",
@@ -605,6 +1181,167 @@ describe("TerminalPanel focus lifecycle", () => {
       selector: "code",
     })).toBeVisible();
     expect(screen.getByRole("button", { name: "Restart terminal" })).toBeEnabled();
+  });
+
+  it("retains same-ID provider startup output emitted before resume settles", async () => {
+    const projectId = "11111111-1111-4111-8111-111111111111";
+    const conversationId = "22222222-2222-4222-8222-222222222222";
+    const terminalId = "33333333-3333-4333-8333-333333333333";
+    const listeners = new Set<(event: ServerEvent) => void>();
+    let settleResume!: (event: ServerEvent) => void;
+    const resumed = new Promise<ServerEvent>((resolve) => {
+      settleResume = resolve;
+    });
+    const sendCommand = vi.fn((sent: ClientCommand): Promise<ServerEvent> => {
+      if (sent.type === "terminal.create") {
+        return Promise.resolve({
+          type: "terminal.created",
+          requestId: sent.requestId,
+          terminalId,
+        });
+      }
+      if (sent.type === "terminal.provider.resume") return resumed;
+      return Promise.resolve({ type: "request.ok", requestId: sent.requestId });
+    });
+    render(
+      <TerminalPanel
+        projectId={projectId}
+        conversationId={conversationId}
+        projectName="Inertia"
+        status="online"
+        fontSize={13}
+        theme="dark"
+        visible
+        providerResume={{
+          kind: "available",
+          resume: {
+            providerId: "claude",
+            providerLabel: "Claude",
+            sessionId: "44444444-4444-4444-8444-444444444444",
+          },
+          reason: null,
+        }}
+        sendCommand={sendCommand}
+        subscribe={(listener) => {
+          listeners.add(listener);
+          return () => listeners.delete(listener);
+        }}
+        onClose={() => undefined}
+      />,
+    );
+
+    const resume = await screen.findByRole("button", {
+      name: "Resume Claude session in Inertia",
+    });
+    await waitFor(() => expect(resume).toBeEnabled());
+    fireEvent.click(resume);
+    await waitFor(() => expect(sendCommand.mock.calls.some(
+      ([sent]) => sent.type === "terminal.provider.resume",
+    )).toBe(true));
+    await act(async () => {
+      for (const listener of listeners) {
+        listener({
+          type: "terminal.output",
+          terminalId,
+          data: "provider startup prompt",
+        });
+      }
+    });
+    expect(terminalState.writes).not.toContain("provider startup prompt");
+
+    await act(async () => {
+      settleResume({
+        type: "terminal.created",
+        requestId: crypto.randomUUID(),
+        terminalId,
+        providerResume: {
+          providerId: "claude",
+          providerLabel: "Claude",
+          sessionId: "55555555-5555-4555-8555-555555555555",
+        },
+        providerResumeConversationId: conversationId,
+      });
+      await resumed;
+    });
+    await waitFor(() => expect(terminalState.writes.filter(
+      (value) => value === "provider startup prompt",
+    )).toHaveLength(1));
+  });
+
+  it("creates a usable local shell after provider replacement teardown fails", async () => {
+    const projectId = "11111111-1111-4111-8111-111111111111";
+    const conversationId = "22222222-2222-4222-8222-222222222222";
+    const originalId = "33333333-3333-4333-8333-333333333333";
+    const replacementId = "44444444-4444-4444-8444-444444444444";
+    let creates = 0;
+    const sendCommand = vi.fn(async (sent: ClientCommand): Promise<ServerEvent> => {
+      if (sent.type === "terminal.create") {
+        creates += 1;
+        return {
+          type: "terminal.created",
+          requestId: sent.requestId,
+          terminalId: creates === 1 ? originalId : replacementId,
+        };
+      }
+      if (sent.type === "terminal.provider.resume") {
+        throw new RuntimeCommandError(
+          "Unable to start the provider terminal.",
+          "rejected",
+        );
+      }
+      if (sent.type === "terminal.attach") {
+        throw new RuntimeCommandError("Terminal not found.", "rejected");
+      }
+      return { type: "request.ok", requestId: sent.requestId };
+    });
+    render(
+      <TerminalPanel
+        projectId={projectId}
+        conversationId={conversationId}
+        projectName="Inertia"
+        status="online"
+        fontSize={13}
+        theme="dark"
+        visible
+        providerResume={{
+          kind: "available",
+          resume: {
+            providerId: "claude",
+            providerLabel: "Claude",
+            sessionId: "55555555-5555-4555-8555-555555555555",
+          },
+          reason: null,
+        }}
+        sendCommand={sendCommand}
+        subscribe={() => () => undefined}
+        onClose={() => undefined}
+      />,
+    );
+
+    const resume = await screen.findByRole("button", {
+      name: "Resume Claude session in Inertia",
+    });
+    await waitFor(() => expect(resume).toBeEnabled());
+    fireEvent.click(resume);
+
+    await waitFor(() => expect(document.querySelector(".terminal-panel"))
+      .toHaveAttribute("data-terminal-id", replacementId));
+    expect(sendCommand.mock.calls.map(([sent]) => sent.type).filter((type) => (
+      type !== "terminal.resize"
+    )).slice(0, 4))
+      .toEqual([
+        "terminal.create",
+        "terminal.provider.resume",
+        "terminal.attach",
+        "terminal.create",
+      ]);
+    expect(await screen.findByText("Unable to start the provider terminal."))
+      .toBeVisible();
+    terminalState.onData?.("pwd\r");
+    await waitFor(() => expect(sendCommand.mock.calls.some(
+      ([sent]) => sent.type === "terminal.input"
+        && sent.payload.terminalId === replacementId,
+    )).toBe(true));
   });
 
   it("explains a nonzero provider exit as a possibly stale saved session", async () => {
@@ -625,6 +1362,7 @@ describe("TerminalPanel focus lifecycle", () => {
           type: "terminal.created",
           requestId: command.requestId,
           terminalId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          providerResumeConversationId: command.payload.conversationId,
           providerResume: {
             providerId: "claude",
             providerLabel: "Claude",
@@ -697,6 +1435,7 @@ describe("TerminalPanel focus lifecycle", () => {
           type: "terminal.created",
           requestId: sent.requestId,
           terminalId: resumedTerminalId,
+          providerResumeConversationId: sent.payload.conversationId,
           providerResume: {
             providerId: "claude",
             providerLabel: "Claude",
@@ -798,6 +1537,7 @@ describe("TerminalPanel focus lifecycle", () => {
           terminalId: secondary
             ? "44444444-4444-4444-8444-444444444444"
             : "55555555-5555-4555-8555-555555555555",
+          providerResumeConversationId: sent.payload.conversationId,
           providerResume: {
             providerId: "claude",
             providerLabel: "Claude",
@@ -903,6 +1643,7 @@ describe("TerminalPanel focus lifecycle", () => {
           type: "terminal.created",
           requestId: sent.requestId,
           terminalId: "resumed-primary",
+          providerResumeConversationId: sent.payload.conversationId,
           providerResume: {
             providerId: "claude",
             providerLabel: "Claude",
@@ -988,6 +1729,7 @@ describe("TerminalPanel focus lifecycle", () => {
           type: "terminal.created",
           requestId: sent.requestId,
           terminalId: secondary ? "resumed-secondary" : "resumed-primary",
+          providerResumeConversationId: sent.payload.conversationId,
           providerResume: {
             providerId: "claude",
             providerLabel: "Claude",
@@ -1068,6 +1810,314 @@ describe("TerminalPanel focus lifecycle", () => {
     expect(screen.getByRole("tab", { name: /Terminal 2/u }))
       .toHaveAttribute("aria-selected", "true");
     expect(onResumeRequestHandled).toHaveBeenCalled();
+  });
+
+  it("waits for authoritative close before releasing the four-terminal capacity", async () => {
+    let created = 0;
+    let confirmClose: (() => void) | undefined;
+    const sendCommand = vi.fn((sent: ClientCommand): Promise<ServerEvent> => {
+      if (sent.type === "terminal.create") {
+        created += 1;
+        return Promise.resolve({
+          type: "terminal.created",
+          requestId: sent.requestId,
+          terminalId: `${created}0000000-0000-4000-8000-000000000000`,
+        });
+      }
+      if (sent.type === "terminal.close") {
+        return new Promise((resolve) => {
+          confirmClose = () => resolve({
+            type: "request.ok",
+            requestId: sent.requestId,
+          });
+        });
+      }
+      return Promise.resolve({ type: "request.ok", requestId: sent.requestId });
+    });
+    render(
+      <TerminalPanel
+        projectId="11111111-1111-4111-8111-111111111111"
+        conversationId="22222222-2222-4222-8222-222222222222"
+        projectName="Inertia"
+        status="online"
+        fontSize={13}
+        theme="dark"
+        visible
+        sendCommand={sendCommand}
+        subscribe={() => () => undefined}
+        onClose={() => undefined}
+      />,
+    );
+    await waitFor(() => expect(created).toBe(1));
+    for (let index = 0; index < 3; index += 1) {
+      fireEvent.click(screen.getByRole("button", { name: "New terminal" }));
+      await waitFor(() => expect(created).toBe(index + 2));
+    }
+    expect(screen.getAllByRole("tab")).toHaveLength(4);
+    const maximum = screen.getByRole("button", {
+      name: "Maximum of 4 terminals open",
+    });
+    expect(maximum).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Close Terminal 4" }));
+    await waitFor(() => expect(confirmClose).toBeTypeOf("function"));
+    expect(screen.getAllByRole("tab")).toHaveLength(4);
+    expect(maximum).toBeDisabled();
+
+    await act(async () => {
+      confirmClose?.();
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(screen.getAllByRole("tab")).toHaveLength(3));
+    fireEvent.click(screen.getByRole("button", { name: "New terminal" }));
+    await waitFor(() => expect(created).toBe(5));
+    expect(screen.getAllByRole("tab")).toHaveLength(4);
+  });
+
+  it("runs a project action from four normal tabs by replacing the active terminal", async () => {
+    const terminalIds = [
+      "10000000-0000-4000-8000-000000000001",
+      "10000000-0000-4000-8000-000000000002",
+      "10000000-0000-4000-8000-000000000003",
+      "10000000-0000-4000-8000-000000000004",
+    ];
+    let created = 0;
+    const sendCommand = vi.fn((sent: ClientCommand): Promise<ServerEvent> => {
+      if (sent.type === "terminal.create") {
+        return Promise.resolve({
+          type: "terminal.created",
+          requestId: sent.requestId,
+          terminalId: terminalIds[created++]!,
+        });
+      }
+      if (sent.type === "project.action.run") return new Promise(() => undefined);
+      return Promise.resolve({ type: "request.ok", requestId: sent.requestId });
+    });
+    const props = {
+      projectId: "11111111-1111-4111-8111-111111111111",
+      conversationId: "22222222-2222-4222-8222-222222222222",
+      projectName: "Inertia",
+      status: "online" as const,
+      fontSize: 13,
+      theme: "dark" as const,
+      visible: true,
+      sendCommand,
+      subscribe: () => () => undefined,
+      onClose: () => undefined,
+    };
+    const view = render(<TerminalPanel {...props} />);
+    await waitFor(() => expect(created).toBe(1));
+    for (let index = 0; index < 3; index += 1) {
+      fireEvent.click(screen.getByRole("button", { name: "New terminal" }));
+      await waitFor(() => expect(created).toBe(index + 2));
+    }
+
+    view.rerender(<TerminalPanel {...props} actionId="check" />);
+    await waitFor(() => expect(sendCommand.mock.calls.some(
+      ([sent]) => sent.type === "project.action.run",
+    )).toBe(true));
+    const action = sendCommand.mock.calls.find(
+      ([sent]) => sent.type === "project.action.run",
+    )?.[0];
+    expect(action).toMatchObject({
+      type: "project.action.run",
+      payload: { terminalId: terminalIds[3], actionId: "check" },
+    });
+    expect(screen.getAllByRole("tab")).toHaveLength(4);
+    expect(sendCommand.mock.calls.some(([sent]) => sent.type === "terminal.close"))
+      .toBe(false);
+  });
+
+  it("routes a project action away from the only resumed terminal", async () => {
+    const projectId = "11111111-1111-4111-8111-111111111111";
+    const conversationId = "22222222-2222-4222-8222-222222222222";
+    const resumedTerminalId = "40000000-0000-4000-8000-000000000001";
+    const idleTerminalId = "40000000-0000-4000-8000-000000000002";
+    window.sessionStorage.setItem(
+      `inertia:terminal-sessions:v1:${projectId}:${conversationId}`,
+      JSON.stringify([resumedTerminalId]),
+    );
+    const sendCommand = vi.fn((sent: ClientCommand): Promise<ServerEvent> => {
+      if (sent.type === "terminal.attach") {
+        return Promise.resolve({
+          type: "terminal.created",
+          requestId: sent.requestId,
+          terminalId: resumedTerminalId,
+          providerResume: {
+            providerId: "claude",
+            providerLabel: "Claude",
+            sessionId: "session-resumed",
+          },
+          providerResumeConversationId: "50000000-0000-4000-8000-000000000001",
+        });
+      }
+      if (sent.type === "terminal.create") {
+        return Promise.resolve({
+          type: "terminal.created",
+          requestId: sent.requestId,
+          terminalId: idleTerminalId,
+        });
+      }
+      if (sent.type === "project.action.run") return new Promise(() => undefined);
+      return Promise.resolve({ type: "request.ok", requestId: sent.requestId });
+    });
+    const props = {
+      projectId,
+      conversationId,
+      projectName: "Inertia",
+      status: "online" as const,
+      fontSize: 13,
+      theme: "dark" as const,
+      visible: true,
+      sendCommand,
+      subscribe: () => () => undefined,
+      onClose: () => undefined,
+    };
+    const view = render(<TerminalPanel {...props} />);
+    await waitFor(() => expect(document.querySelector(".terminal-panel"))
+      .toHaveAttribute("data-terminal-id", resumedTerminalId));
+
+    view.rerender(<TerminalPanel {...props} actionId="check" />);
+    await waitFor(() => expect(sendCommand.mock.calls.some(
+      ([sent]) => sent.type === "project.action.run",
+    )).toBe(true));
+    expect(screen.getAllByRole("tab")).toHaveLength(2);
+    expect(screen.getByRole("tab", { name: /Terminal 2/u }))
+      .toHaveAttribute("aria-selected", "true");
+    const action = sendCommand.mock.calls.find(
+      ([sent]) => sent.type === "project.action.run",
+    )?.[0];
+    expect(action).toMatchObject({
+      type: "project.action.run",
+      payload: { terminalId: idleTerminalId },
+    });
+    expect(action).not.toMatchObject({
+      payload: { terminalId: resumedTerminalId },
+    });
+  });
+
+  it("refuses a project action without disturbing four resumed terminals", async () => {
+    const projectId = "11111111-1111-4111-8111-111111111111";
+    const conversationId = "22222222-2222-4222-8222-222222222222";
+    const terminalIds = [
+      "20000000-0000-4000-8000-000000000001",
+      "20000000-0000-4000-8000-000000000002",
+      "20000000-0000-4000-8000-000000000003",
+      "20000000-0000-4000-8000-000000000004",
+    ];
+    window.sessionStorage.setItem(
+      `inertia:terminal-sessions:v1:${projectId}:${conversationId}`,
+      JSON.stringify(terminalIds),
+    );
+    const sendCommand = vi.fn(async (sent: ClientCommand): Promise<ServerEvent> => {
+      if (sent.type === "terminal.attach") {
+        const index = terminalIds.indexOf(sent.payload.terminalId);
+        return {
+          type: "terminal.created",
+          requestId: sent.requestId,
+          terminalId: sent.payload.terminalId,
+          providerResume: {
+            providerId: "claude",
+            providerLabel: "Claude",
+            sessionId: `session-${index + 1}`,
+          },
+          providerResumeConversationId: `30000000-0000-4000-8000-00000000000${index + 1}`,
+        };
+      }
+      return { type: "request.ok", requestId: sent.requestId };
+    });
+    const onActionStarted = vi.fn();
+    const props = {
+      projectId,
+      conversationId,
+      projectName: "Inertia",
+      status: "online" as const,
+      fontSize: 13,
+      theme: "dark" as const,
+      visible: true,
+      sendCommand,
+      subscribe: () => () => undefined,
+      onActionStarted,
+      onClose: () => undefined,
+    };
+    const view = render(<TerminalPanel {...props} />);
+    await waitFor(() => expect(document.querySelectorAll(
+      '.terminal-panel[data-terminal-state="ready"]',
+    )).toHaveLength(4));
+
+    view.rerender(<TerminalPanel {...props} actionId="check" />);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "End a resumed provider terminal before starting this project action.",
+    );
+    expect(onActionStarted).toHaveBeenCalledOnce();
+    expect(sendCommand.mock.calls.some(([sent]) => sent.type === "project.action.run"))
+      .toBe(false);
+    expect(sendCommand.mock.calls.some(([sent]) => sent.type === "terminal.close"))
+      .toBe(false);
+    expect(screen.getAllByRole("tab")).toHaveLength(4);
+  });
+
+  it("reconciles an ambiguously delivered action through the same terminal identity", async () => {
+    const terminalId = "60000000-0000-4000-8000-000000000001";
+    let created = false;
+    const sendCommand = vi.fn(async (sent: ClientCommand): Promise<ServerEvent> => {
+      if (sent.type === "terminal.create") {
+        created = true;
+        return { type: "terminal.created", requestId: sent.requestId, terminalId };
+      }
+      if (sent.type === "project.action.run") {
+        throw new RuntimeCommandError("The request took too long to complete.", "ambiguous");
+      }
+      if (sent.type === "terminal.attach") {
+        return { type: "terminal.created", requestId: sent.requestId, terminalId };
+      }
+      return { type: "request.ok", requestId: sent.requestId };
+    });
+    const props = {
+      projectId: "11111111-1111-4111-8111-111111111111",
+      conversationId: "22222222-2222-4222-8222-222222222222",
+      projectName: "Inertia",
+      status: "online" as const,
+      fontSize: 13,
+      theme: "dark" as const,
+      visible: true,
+      onActionStarted: vi.fn(),
+      sendCommand,
+      subscribe: () => () => undefined,
+      onClose: () => undefined,
+    };
+    const view = render(
+      <TerminalPanel
+        {...props}
+        actionId="check"
+      />,
+    );
+
+    await waitFor(() => expect(sendCommand.mock.calls.filter(
+      ([sent]) => sent.type === "terminal.attach",
+    )).toHaveLength(1));
+    expect(created).toBe(true);
+    expect(sendCommand.mock.calls.filter(
+      ([sent]) => sent.type === "project.action.run",
+    )).toHaveLength(1);
+    expect(sendCommand.mock.calls.filter(
+      ([sent]) => sent.type === "terminal.create",
+    )).toHaveLength(1);
+    expect(document.querySelector(".terminal-panel"))
+      .toHaveAttribute("data-terminal-id", terminalId);
+    expect(terminalState.writes.join("\n")).toContain(
+      "The action may still be running; check Work before retrying.",
+    );
+
+    view.rerender(<TerminalPanel {...props} actionId={null} />);
+    await act(async () => Promise.resolve());
+    view.rerender(<TerminalPanel {...props} actionId="check" />);
+    await waitFor(() => expect(sendCommand.mock.calls.filter(
+      ([sent]) => sent.type === "project.action.run",
+    )).toHaveLength(2));
+    await waitFor(() => expect(sendCommand.mock.calls.filter(
+      ([sent]) => sent.type === "terminal.attach",
+    )).toHaveLength(2));
   });
 
   it("does not attach a delayed project action to a newly selected chat", async () => {

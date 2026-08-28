@@ -65,6 +65,7 @@ export function createProjectWorkspaceCommandHandler(
     "project.action.run",
     "checkpoint.revert",
     "terminal.create",
+    "terminal.attach",
     "terminal.provider.resume",
     "terminal.input",
     "terminal.resize",
@@ -398,6 +399,7 @@ export function createProjectWorkspaceCommandHandler(
           projectId: command.payload.projectId,
           conversationId: command.payload.conversationId,
           actionId: command.payload.actionId,
+          terminalId: command.payload.terminalId,
           cols: command.payload.cols,
           rows: command.payload.rows,
           onStarted: (terminalId) => {
@@ -459,12 +461,50 @@ export function createProjectWorkspaceCommandHandler(
           cwd,
           command.payload.cols,
           command.payload.rows,
+          undefined,
+          undefined,
+          {
+            projectId: command.payload.projectId,
+            conversationId: command.payload.conversationId ?? null,
+          },
         );
         dependencies.send(socket, {
           type: "terminal.created",
           requestId: command.requestId,
           terminalId,
         });
+        return "handled";
+      }
+      case "terminal.attach": {
+        const cwd = dependencies.workspacePath(
+          command.payload.projectId,
+          command.payload.conversationId,
+        );
+        const attachment = dependencies.terminals.attach(
+          socket,
+          command.payload.terminalId,
+          cwd,
+          {
+            projectId: command.payload.projectId,
+            conversationId: command.payload.conversationId ?? null,
+          },
+          command.payload.cols,
+          command.payload.rows,
+        );
+        dependencies.send(socket, attachment.providerResume
+          ? {
+              type: "terminal.created",
+              requestId: command.requestId,
+              terminalId: attachment.terminalId,
+              providerResume: attachment.providerResume,
+              providerResumeConversationId:
+                attachment.providerResumeConversationId,
+            }
+          : {
+              type: "terminal.created",
+              requestId: command.requestId,
+              terminalId: attachment.terminalId,
+            });
         return "handled";
       }
       case "terminal.provider.resume": {
@@ -532,6 +572,11 @@ export function createProjectWorkspaceCommandHandler(
                 : "Stop the active provider session for this chat before resuming it in another terminal.",
             );
           }
+          const providerResume = {
+            providerId: conversation.providerId,
+            providerLabel: PROVIDER_INFO[conversation.providerId].name,
+            sessionId: conversation.providerSessionId,
+          };
           const terminalId = await dependencies.terminals.replaceProcess(
             socket,
             command.payload.terminalId,
@@ -542,16 +587,18 @@ export function createProjectWorkspaceCommandHandler(
             command.payload.cols,
             command.payload.rows,
             () => dependencies.providerTerminalResumes.release(conversation.id),
+            undefined,
+            {
+              descriptor: providerResume,
+              conversationId: conversation.id,
+            },
           );
           dependencies.send(socket, {
             type: "terminal.created",
             requestId: command.requestId,
             terminalId,
-            providerResume: {
-              providerId: conversation.providerId,
-              providerLabel: PROVIDER_INFO[conversation.providerId].name,
-              sessionId: conversation.providerSessionId,
-            },
+            providerResume,
+            providerResumeConversationId: conversation.id,
           });
         } catch (error) {
           dependencies.providerTerminalResumes.release(conversation.id);
@@ -583,7 +630,7 @@ export function createProjectWorkspaceCommandHandler(
         });
         return "handled";
       case "terminal.close":
-        dependencies.terminals.close(socket, command.payload.terminalId);
+        await dependencies.terminals.close(socket, command.payload.terminalId);
         dependencies.send(socket, {
           type: "request.ok",
           requestId: command.requestId,

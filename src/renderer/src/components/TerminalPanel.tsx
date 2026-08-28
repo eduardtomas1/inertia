@@ -1,8 +1,8 @@
-import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
-import { ChevronDown, Columns2, Maximize2, MessagesSquare, Plus, RotateCcw, TerminalSquare, X } from "lucide-react";
+import { Columns2, Maximize2, Plus, RotateCcw, TerminalSquare, X } from "lucide-react";
 import type {
   ClientCommand,
   ColorThemeId,
@@ -16,8 +16,21 @@ import { usePersistedSize } from "../hooks/usePersistedSize";
 import { runtimeCommandDelivery } from "../utils/connectionMessages";
 import { terminalInputChunks } from "../utils/terminalInputChunks";
 import { PaneResizeHandle } from "./PaneResizeHandle";
-import { ProviderResumePicker } from "./ProviderResumePicker";
 import type { ProviderTerminalResumeOption } from "./providerResumeOptions";
+import {
+  command,
+  MAX_PERSISTED_TERMINAL_TABS,
+  newTerminalTab,
+  nextTerminalTabIndex,
+  readPersistedTerminalTabs,
+  TERMINAL_CREATE_RETRY_DELAYS_MS,
+  TERMINAL_SETTLING_RETRY_DELAYS_MS,
+  terminalStorageKey,
+  terminalTheme,
+  TerminalResumeStatus,
+  type TerminalTab,
+  waitForTerminalRetry,
+} from "./TerminalPanelSupport";
 import { IconButton, LoadingMark } from "./ui";
 
 type TerminalPanelProps = {
@@ -41,39 +54,12 @@ type TerminalPanelProps = {
 };
 
 type TerminalSessionProps = TerminalPanelProps & {
+  initialTerminalId: string | null;
   siblingResumedConversationIds: ReadonlySet<string>;
-  onProviderResumeStarted: (
-    terminalId: string,
-    conversationId: string,
-  ) => void;
+  onRestorableTerminalChange: (terminalId: string | null) => void;
+  onProviderResumeStarted: (terminalId: string, conversationId: string) => void;
 };
-
-type CommandWithoutId = ClientCommand extends infer Command
-  ? Command extends { requestId: string }
-    ? Omit<Command, "requestId">
-    : never
-  : never;
-
-const command = (value: CommandWithoutId): ClientCommand => ({
-  ...value,
-  requestId: crypto.randomUUID(),
-}) as ClientCommand;
-
-const TERMINAL_CREATE_RETRY_DELAYS_MS = [400, 900] as const;
-
-function waitForTerminalRetry(delayMs: number): Promise<void> {
-  return new Promise((resolve) => window.setTimeout(resolve, delayMs));
-}
-
-function terminalTheme(_theme: ThemePreference): { background: string; foreground: string; cursor: string; selectionBackground: string } {
-  const styles = window.getComputedStyle(document.documentElement);
-  return {
-    background: styles.getPropertyValue("--terminal-bg").trim(),
-    foreground: styles.getPropertyValue("--terminal-fg").trim(),
-    cursor: styles.getPropertyValue("--accent").trim(),
-    selectionBackground: styles.getPropertyValue("--terminal-selection").trim(),
-  };
-}
+const MAX_PENDING_TERMINAL_OUTPUT = 256 * 1_024 + 256;
 
 function TerminalSession({
   projectId,
@@ -91,7 +77,9 @@ function TerminalSession({
   providerResumes,
   resumeRequestConversationId,
   onResumeRequestHandled,
+  initialTerminalId,
   siblingResumedConversationIds,
+  onRestorableTerminalChange,
   onProviderResumeStarted,
   onClose,
   visible = true,
@@ -99,12 +87,21 @@ function TerminalSession({
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
-  const terminalIdRef = useRef<string | null>(null);
+  const terminalIdRef = useRef<string | null>(initialTerminalId);
+  const terminalReadyRef = useRef(false);
   const managedActionTerminalRef = useRef(false);
   const resumedProviderRef = useRef<ProviderTerminalResumeDescriptor | null>(null);
   const actionInFlightRef = useRef<string | null>(null);
   const ownerRef = useRef(`${projectId}:${conversationId ?? ""}`);
+  const statusRef = useRef(status);
   const pendingOutputRef = useRef(new Map<string, string>());
+  const pendingExitRef = useRef(new Map<string, number>());
+  const operationInFlightRef = useRef(false);
+  const reattachPendingRef = useRef(false);
+  const reconciliationNoticeRef = useRef<{
+    message: string;
+    source: "action" | "provider";
+  } | null>(null);
   const resumeAttemptRef = useRef(0);
   const mountedRef = useRef(false);
   const initialOptionsRef = useRef({ fontSize, theme });
@@ -137,33 +134,15 @@ function TerminalSession({
     ?? null;
   const resumeBlockedBySibling = selectedResumeOption !== null
     && siblingResumedConversationIds.has(selectedResumeOption.conversationId);
-  const [terminalId, setTerminalId] = useState<string | null>(null);
-  const [resumePickerOpen, setResumePickerOpen] = useState(false);
-  const resumePickerRef = useRef<HTMLSpanElement>(null);
-  const resumeTriggerRef = useRef<HTMLButtonElement>(null);
+  const [terminalId, setTerminalId] = useState<string | null>(initialTerminalId);
   const resumeProviderSessionRef = useRef<() => boolean>(() => false);
   const handledResumeRequestRef = useRef<string | null>(null);
+  const onRestorableTerminalChangeRef = useRef(onRestorableTerminalChange);
+  const onProviderResumeStartedRef = useRef(onProviderResumeStarted);
+  onRestorableTerminalChangeRef.current = onRestorableTerminalChange;
+  onProviderResumeStartedRef.current = onProviderResumeStarted;
   ownerRef.current = `${projectId}:${conversationId ?? ""}`;
-  const resumeDescriptionId = useId();
-
-  useEffect(() => {
-    if (!resumePickerOpen) return;
-    const dismissOnOutsidePointer = (event: PointerEvent): void => {
-      const anchor = resumePickerRef.current;
-      if (!anchor || anchor.contains(event.target as Node)) return;
-      setResumePickerOpen(false);
-    };
-    document.addEventListener("pointerdown", dismissOnOutsidePointer);
-    return () => {
-      document.removeEventListener("pointerdown", dismissOnOutsidePointer);
-    };
-  }, [resumePickerOpen]);
-
-  const closeResumePicker = (): void => {
-    setResumePickerOpen(false);
-    window.requestAnimationFrame(() => resumeTriggerRef.current?.focus());
-  };
-
+  statusRef.current = status;
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -189,6 +168,7 @@ function TerminalSession({
       convertEol: true,
       cursorBlink: true,
       cursorStyle: "bar",
+      disableStdin: true,
       fontFamily: '"SFMono-Regular", Consolas, "Liberation Mono", monospace',
       fontSize: initialOptionsRef.current.fontSize,
       lineHeight: 1.35,
@@ -205,7 +185,11 @@ function TerminalSession({
 
     const inputDisposable = terminal.onData((data) => {
       const terminalId = terminalIdRef.current;
-      if (!terminalId) return;
+      if (
+        !terminalId
+        || !terminalReadyRef.current
+        || statusRef.current !== "online"
+      ) return;
       for (const chunk of terminalInputChunks(data)) {
         void sendCommand(command({ type: "terminal.input", payload: { terminalId, data: chunk } })).catch(() => undefined);
       }
@@ -222,7 +206,11 @@ function TerminalSession({
           if (next.cols === previous.cols && next.rows === previous.rows) return;
           lastSizeRef.current = next;
           const terminalId = terminalIdRef.current;
-          if (terminalId) {
+          if (
+            terminalId
+            && terminalReadyRef.current
+            && statusRef.current === "online"
+          ) {
             void sendCommand(command({ type: "terminal.resize", payload: { terminalId, ...next } })).catch(() => undefined);
           }
         } catch {
@@ -242,6 +230,12 @@ function TerminalSession({
       terminal.dispose();
     };
   }, [sendCommand]);
+
+  useLayoutEffect(() => {
+    const terminal = terminalRef.current;
+    if (!terminal) return;
+    terminal.options.disableStdin = sessionState !== "ready" || status !== "online";
+  }, [sessionState, status]);
 
   useEffect(() => {
     const terminal = terminalRef.current;
@@ -270,7 +264,12 @@ function TerminalSession({
           fitRef.current?.fit();
           const terminal = terminalRef.current;
           const terminalId = terminalIdRef.current;
-          if (!terminal || !terminalId) return;
+          if (
+            !terminal
+            || !terminalId
+            || !terminalReadyRef.current
+            || statusRef.current !== "online"
+          ) return;
           const next = { cols: Math.max(20, terminal.cols), rows: Math.max(4, terminal.rows) };
           lastSizeRef.current = next;
           void sendCommand(command({ type: "terminal.resize", payload: { terminalId, ...next } })).catch(() => undefined);
@@ -287,21 +286,53 @@ function TerminalSession({
 
   useEffect(() => subscribe((event) => {
     if (event.type === "terminal.output") {
-      if (event.terminalId === terminalIdRef.current) {
+      if (
+        event.terminalId === terminalIdRef.current
+        && terminalReadyRef.current
+        && statusRef.current === "online"
+      ) {
         terminalRef.current?.write(event.data);
-      } else {
+      } else if (
+        event.terminalId === terminalIdRef.current
+        || operationInFlightRef.current
+      ) {
         const buffered = pendingOutputRef.current.get(event.terminalId) ?? "";
-        pendingOutputRef.current.set(event.terminalId, `${buffered}${event.data}`.slice(-65_536));
+        if (
+          !pendingOutputRef.current.has(event.terminalId)
+          && pendingOutputRef.current.size >= MAX_PERSISTED_TERMINAL_TABS
+        ) {
+          const oldest = pendingOutputRef.current.keys().next().value;
+          if (oldest) pendingOutputRef.current.delete(oldest);
+        }
+        pendingOutputRef.current.set(
+          event.terminalId,
+          `${buffered}${event.data}`.slice(-MAX_PENDING_TERMINAL_OUTPUT),
+        );
       }
+    }
+    if (event.type === "terminal.exit" && operationInFlightRef.current) {
+      if (
+        event.terminalId === terminalIdRef.current
+        || pendingOutputRef.current.has(event.terminalId)
+      ) {
+        pendingExitRef.current.set(event.terminalId, event.exitCode);
+        return;
+      }
+    }
+    if (event.type === "terminal.exit") {
+      pendingOutputRef.current.delete(event.terminalId);
+      pendingExitRef.current.delete(event.terminalId);
     }
     if (event.type === "terminal.exit" && event.terminalId === terminalIdRef.current) {
       const resumedProvider = resumedProviderRef.current;
       terminalRef.current?.writeln(`\r\n\x1b[2mProcess exited with code ${event.exitCode}.\x1b[0m`);
       terminalIdRef.current = null;
+      terminalReadyRef.current = false;
       managedActionTerminalRef.current = false;
       resumedProviderRef.current = null;
       setActiveResume(null);
       setTerminalId(null);
+      onRestorableTerminalChangeRef.current(null);
       if (resumedProvider && event.exitCode !== 0) {
         setSessionError(
           `${resumedProvider.providerLabel} could not resume session ${resumedProvider.sessionId}. The saved session may be stale or unavailable; review the provider output above.`,
@@ -318,13 +349,10 @@ function TerminalSession({
 
   useEffect(() => {
     resumeAttemptRef.current += 1;
-    if (!instanceReady || status !== "online") {
-      terminalIdRef.current = null;
-      managedActionTerminalRef.current = false;
-      resumedProviderRef.current = null;
-      setActiveResume(null);
-      setTerminalId(null);
-      if (status === "offline") setSessionState("error");
+    if (!instanceReady) return;
+    terminalReadyRef.current = false;
+    if (status !== "online") {
+      setSessionState(status === "offline" ? "error" : "starting");
       return;
     }
 
@@ -332,14 +360,21 @@ function TerminalSession({
     const terminal = terminalRef.current;
     const fitAddon = fitRef.current;
     const pendingOutput = pendingOutputRef.current;
+    const pendingExit = pendingExitRef.current;
     setSessionState("starting");
     setSessionError(null);
     setResumeError(null);
     setResumeInFlight(false);
     setActiveResume(null);
     pendingOutput.clear();
+    pendingExit.clear();
+    operationInFlightRef.current = true;
     terminal?.clear();
-    terminal?.writeln(`\x1b[2mStarting a local terminal for ${projectName}…\x1b[0m`);
+    terminal?.writeln(
+      terminalIdRef.current
+        ? `\x1b[2mReconnecting the local terminal for ${projectName}…\x1b[0m`
+        : `\x1b[2mStarting a local terminal for ${projectName}…\x1b[0m`,
+    );
 
     try {
       fitAddon?.fit();
@@ -352,40 +387,139 @@ function TerminalSession({
     };
     lastSizeRef.current = size;
 
-    const createTerminal = async (): Promise<void> => {
+    const finishTerminal = (
+      event: Extract<ServerEvent, { type: "terminal.created" }>,
+    ): void => {
+      terminalIdRef.current = event.terminalId;
+      reattachPendingRef.current = false;
+      managedActionTerminalRef.current = false;
+      resumedProviderRef.current = event.providerResume ?? null;
+      setActiveResume(event.providerResume ?? null);
+      setTerminalId(event.terminalId);
+      onRestorableTerminalChangeRef.current(event.terminalId);
+      if (event.providerResume && event.providerResumeConversationId) {
+        onProviderResumeStartedRef.current(
+          event.terminalId,
+          event.providerResumeConversationId,
+        );
+      }
+      const bufferedOutput = pendingOutputRef.current.get(event.terminalId);
+      const earlyExitCode = pendingExit.get(event.terminalId);
+      pendingOutput.clear();
+      pendingExit.clear();
+      operationInFlightRef.current = false;
+      if (earlyExitCode !== undefined) {
+        terminalIdRef.current = null;
+        managedActionTerminalRef.current = false;
+        resumedProviderRef.current = null;
+        setActiveResume(null);
+        setTerminalId(null);
+        onRestorableTerminalChangeRef.current(null);
+        if (bufferedOutput) terminal?.write(bufferedOutput);
+        terminal?.writeln(`\r\n\x1b[2mProcess exited with code ${earlyExitCode}.\x1b[0m`);
+        setSessionState("closed");
+        return;
+      }
+      terminalReadyRef.current = true;
+      setSessionState("ready");
+      if (bufferedOutput) terminal?.write(bufferedOutput);
+      const reconciliationNotice = reconciliationNoticeRef.current;
+      reconciliationNoticeRef.current = null;
+      if (reconciliationNotice) {
+        terminal?.writeln(`\r\n\x1b[31m${reconciliationNotice.message}\x1b[0m`);
+        setSessionError(reconciliationNotice.message);
+        if (reconciliationNotice.source === "provider") {
+          setResumeError(reconciliationNotice.message);
+        }
+      }
+    };
+
+    const startTerminal = async (): Promise<void> => {
+      const reattachId = terminalIdRef.current;
       for (let attempt = 0; ; attempt += 1) {
         try {
-          const event = await sendCommand(command({
-            type: "terminal.create",
-            payload: { projectId, conversationId, ...size },
-          }));
-          if (event.type !== "terminal.created") {
+          if (reattachId) {
+            terminal?.clear();
+            pendingOutput.delete(reattachId);
+          }
+          const event = await sendCommand(command(reattachId
+              ? {
+                  type: "terminal.attach" as const,
+                  payload: { projectId, conversationId, terminalId: reattachId, ...size },
+                }
+              : {
+                  type: "terminal.create" as const,
+                  payload: { projectId, conversationId, ...size },
+                }));
+          if (
+            event.type !== "terminal.created"
+            || (reattachId && event.terminalId !== reattachId)
+          ) {
             throw new Error("The terminal service returned an unexpected response.");
           }
           if (cancelled) {
-            void sendCommand(command({
+            operationInFlightRef.current = false;
+            if (!reattachId) void sendCommand(command({
               type: "terminal.close",
               payload: { terminalId: event.terminalId },
             })).catch(() => undefined);
             return;
           }
-          terminalIdRef.current = event.terminalId;
-          managedActionTerminalRef.current = false;
-          resumedProviderRef.current = null;
-          setActiveResume(null);
-          setTerminalId(event.terminalId);
-          const bufferedOutput = pendingOutputRef.current.get(event.terminalId);
-          pendingOutput.clear();
-          setSessionState("ready");
-          terminal?.clear();
-          if (bufferedOutput) terminal?.write(bufferedOutput);
+          if (event.providerResume && !event.providerResumeConversationId) {
+            throw new Error("The terminal service omitted its resumed chat identity.");
+          }
+          if (!reattachId) terminal?.clear();
+          finishTerminal(event);
           return;
         } catch (terminalError) {
           if (cancelled) return;
+          const delivery = runtimeCommandDelivery(terminalError);
           const retryDelay = TERMINAL_CREATE_RETRY_DELAYS_MS[attempt];
-          if (retryDelay === undefined || runtimeCommandDelivery(terminalError) !== "not-sent") {
+          if (reattachId && delivery === "rejected") {
+            if (
+              terminalError instanceof Error
+              && terminalError.message.includes("is still stopping")
+            ) {
+              const settlingRetryDelay = TERMINAL_SETTLING_RETRY_DELAYS_MS[attempt];
+              if (settlingRetryDelay !== undefined) {
+                terminal?.writeln(`\r\n\x1b[2mTerminal cleanup is still settling. Retrying reconnect (${attempt + 2}/${TERMINAL_SETTLING_RETRY_DELAYS_MS.length + 1})…\x1b[0m`);
+                await waitForTerminalRetry(settlingRetryDelay);
+                continue;
+              }
+              operationInFlightRef.current = false;
+              reattachPendingRef.current = true;
+              setSessionState("error");
+              setSessionError(terminalError.message);
+              return;
+            }
+            if (
+              terminalError instanceof Error
+              && /(?:could not be confirmed stopped|could not be retired|has not been confirmed stopped)/iu
+                .test(terminalError.message)
+            ) {
+              operationInFlightRef.current = false;
+              setSessionState("error");
+              setSessionError(terminalError.message);
+              return;
+            }
+            operationInFlightRef.current = false;
+            terminalIdRef.current = null;
+            setTerminalId(null);
+            onRestorableTerminalChangeRef.current(null);
+            setSessionKey((value) => value + 1);
+            return;
+          }
+          if (
+            retryDelay === undefined
+            || (delivery !== "not-sent" && (!reattachId || delivery !== "ambiguous"))
+          ) {
             setSessionState("error");
-            setSessionError(terminalError instanceof Error ? terminalError.message : "The terminal could not be started.");
+            setSessionError(terminalError instanceof Error
+              ? terminalError.message
+              : reattachId
+                ? "The terminal could not be reconnected."
+                : "The terminal could not be started.");
+            operationInFlightRef.current = false;
             return;
           }
           terminal?.writeln(`\r\n\x1b[2mConnection interrupted. Retrying terminal (${attempt + 2}/3)…\x1b[0m`);
@@ -393,72 +527,102 @@ function TerminalSession({
         }
       }
     };
-    void createTerminal();
+    void startTerminal();
 
     return () => {
       resumeAttemptRef.current += 1;
       cancelled = true;
-      const terminalId = terminalIdRef.current;
-      const managedActionTerminal = managedActionTerminalRef.current;
-      terminalIdRef.current = null;
-      managedActionTerminalRef.current = false;
-      resumedProviderRef.current = null;
-      setTerminalId(null);
       pendingOutput.clear();
-      // Project actions are runtime-managed so checks and preview services can
-      // continue across workspace navigation and remain stoppable by run ID.
-      if (terminalId && !managedActionTerminal) {
-        void sendCommand(command({ type: "terminal.close", payload: { terminalId } })).catch(() => undefined);
-      }
+      pendingExit.clear();
+      operationInFlightRef.current = false;
     };
-  }, [conversationId, instanceReady, projectId, projectName, sendCommand, sessionKey, status]);
+  }, [
+    conversationId,
+    instanceReady,
+    projectId,
+    projectName,
+    sendCommand,
+    sessionKey,
+    status,
+  ]);
 
   useEffect(() => {
     const owner = `${projectId}:${conversationId ?? ""}`;
     const actionIdentity = `${owner}:${actionId ?? ""}`;
+    if (!actionId) {
+      actionInFlightRef.current = null;
+      return;
+    }
     if (
-      !actionId
-      || actionInFlightRef.current === actionIdentity
+      actionInFlightRef.current === actionIdentity
       || resumeInFlight
       || sessionState !== "ready"
       || status !== "online"
+      || !terminalIdRef.current
     ) return;
     actionInFlightRef.current = actionIdentity;
+    const previousId = terminalIdRef.current;
     const ownsResponse = (): boolean => (
-      ownerRef.current === owner
+      mountedRef.current
+      && ownerRef.current === owner
       && actionInFlightRef.current === actionIdentity
     );
     const size = {
       cols: Math.max(20, terminalRef.current?.cols ?? lastSizeRef.current.cols ?? 80),
       rows: Math.max(4, terminalRef.current?.rows ?? lastSizeRef.current.rows ?? 24),
     };
+    terminalReadyRef.current = false;
+    operationInFlightRef.current = true;
     setSessionState("starting");
     terminalRef.current?.clear();
     terminalRef.current?.writeln(`\x1b[2mStarting ${actionId}…\x1b[0m`);
-    void sendCommand(command({ type: "project.action.run", payload: { projectId, conversationId, actionId, ...size } }))
+    void sendCommand(command({
+      type: "project.action.run",
+      payload: {
+        projectId,
+        conversationId,
+        actionId,
+        terminalId: previousId,
+        ...size,
+      },
+    }))
       .then((event) => {
-        if (event.type !== "terminal.created") throw new Error("The action terminal returned an unexpected response.");
+        if (event.type !== "terminal.created" || event.terminalId !== previousId) {
+          throw new Error("The action terminal returned an unexpected response.");
+        }
         if (!ownsResponse()) {
           if (actionInFlightRef.current === actionIdentity) {
             actionInFlightRef.current = null;
           }
           pendingOutputRef.current.delete(event.terminalId);
+          pendingExitRef.current.delete(event.terminalId);
+          operationInFlightRef.current = false;
           return;
         }
-        const previousId = terminalIdRef.current;
-        const previousWasManagedAction = managedActionTerminalRef.current;
         terminalIdRef.current = event.terminalId;
         managedActionTerminalRef.current = true;
         resumedProviderRef.current = null;
         setActiveResume(null);
         setTerminalId(event.terminalId);
-        if (previousId && !previousWasManagedAction) {
-          void sendCommand(command({ type: "terminal.close", payload: { terminalId: previousId } })).catch(() => undefined);
-        }
+        onRestorableTerminalChangeRef.current(null);
         const bufferedOutput = pendingOutputRef.current.get(event.terminalId);
+        const earlyExitCode = pendingExitRef.current.get(event.terminalId);
         pendingOutputRef.current.clear();
+        pendingExitRef.current.clear();
+        operationInFlightRef.current = false;
         terminalRef.current?.clear();
         if (bufferedOutput) terminalRef.current?.write(bufferedOutput);
+        if (earlyExitCode !== undefined) {
+          terminalIdRef.current = null;
+          managedActionTerminalRef.current = false;
+          setTerminalId(null);
+          terminalRef.current?.writeln(`\r\n\x1b[2mProcess exited with code ${earlyExitCode}.\x1b[0m`);
+          setSessionState("closed");
+          actionInFlightRef.current = null;
+          onActionStarted?.();
+          return;
+        }
+        terminalReadyRef.current = true;
         setSessionState("ready");
         actionInFlightRef.current = null;
         onActionStarted?.();
@@ -470,10 +634,20 @@ function TerminalSession({
           }
           return;
         }
-        setSessionError(error instanceof Error ? error.message : "The project action could not be started.");
-        setSessionState("error");
-        actionInFlightRef.current = null;
+        const delivery = runtimeCommandDelivery(error);
+        const message = error instanceof Error
+          ? error.message
+          : "The project action could not be started.";
+        const visibleMessage = delivery === "ambiguous"
+          ? `${message} The action may still be running; check Work before retrying.`
+          : message;
+        reconciliationNoticeRef.current = {
+          message: visibleMessage,
+          source: "action",
+        };
+        operationInFlightRef.current = false;
         onActionStarted?.();
+        setSessionKey((value) => value + 1);
       });
   }, [actionId, conversationId, onActionStarted, projectId, resumeInFlight, sendCommand, sessionState, status]);
 
@@ -494,6 +668,9 @@ function TerminalSession({
     const previousId = terminalIdRef.current;
     const attempt = resumeAttemptRef.current + 1;
     resumeAttemptRef.current = attempt;
+    terminalReadyRef.current = false;
+    operationInFlightRef.current = true;
+    setSessionState("starting");
     setResumeInFlight(true);
     setResumeError(null);
     terminalRef.current?.writeln(
@@ -512,7 +689,7 @@ function TerminalSession({
         if (event.type !== "terminal.created") {
           throw new Error("The provider terminal returned an unexpected response.");
         }
-        if (!event.providerResume) {
+        if (!event.providerResume || !event.providerResumeConversationId) {
           void sendCommand(command({
             type: "terminal.close",
             payload: { terminalId: event.terminalId },
@@ -520,38 +697,58 @@ function TerminalSession({
           throw new Error("The provider terminal omitted its authoritative session identity.");
         }
         if (!mountedRef.current || attempt !== resumeAttemptRef.current) {
-          void sendCommand(command({
-            type: "terminal.close",
-            payload: { terminalId: event.terminalId },
-          })).catch(() => undefined);
+          if (event.terminalId !== terminalIdRef.current) {
+            void sendCommand(command({
+              type: "terminal.close",
+              payload: { terminalId: event.terminalId },
+            })).catch(() => undefined);
+          }
           return;
         }
         const authoritativeResume = event.providerResume;
         terminalIdRef.current = event.terminalId;
         managedActionTerminalRef.current = false;
         resumedProviderRef.current = authoritativeResume;
-        onProviderResumeStarted(
+        onProviderResumeStartedRef.current(
           event.terminalId,
-          selectedResumeOption.conversationId,
+          event.providerResumeConversationId,
         );
         setActiveResume(authoritativeResume);
         setTerminalId(event.terminalId);
+        onRestorableTerminalChangeRef.current(event.terminalId);
         const bufferedOutput = pendingOutputRef.current.get(event.terminalId);
+        const earlyExitCode = pendingExitRef.current.get(event.terminalId);
         pendingOutputRef.current.clear();
+        pendingExitRef.current.clear();
+        operationInFlightRef.current = false;
         terminalRef.current?.clear();
         terminalRef.current?.writeln(
           `\x1b[2mResuming ${authoritativeResume.providerLabel} session ${authoritativeResume.sessionId} in ${selectedResumeOption.projectName}…\x1b[0m`,
         );
         if (bufferedOutput) terminalRef.current?.write(bufferedOutput);
+        if (earlyExitCode !== undefined) {
+          terminalIdRef.current = null;
+          managedActionTerminalRef.current = false;
+          resumedProviderRef.current = null;
+          setActiveResume(null);
+          setTerminalId(null);
+          onRestorableTerminalChangeRef.current(null);
+          terminalRef.current?.writeln(`\r\n\x1b[2mProcess exited with code ${earlyExitCode}.\x1b[0m`);
+          setSessionState("closed");
+          return;
+        }
+        terminalReadyRef.current = true;
         setSessionState("ready");
       })
       .catch((error) => {
         if (!mountedRef.current || attempt !== resumeAttemptRef.current) return;
+        operationInFlightRef.current = false;
         const message = error instanceof Error
           ? error.message
           : `${resume.providerLabel} could not resume this session.`;
-        setResumeError(message);
         terminalRef.current?.writeln(`\r\n\x1b[31m${message}\x1b[0m`);
+        reconciliationNoticeRef.current = { message, source: "provider" };
+        setSessionKey((value) => value + 1);
       })
       .finally(() => {
         if (mountedRef.current && attempt === resumeAttemptRef.current) {
@@ -607,9 +804,42 @@ function TerminalSession({
   ]);
 
   const restartTerminal = () => {
-    resumeAttemptRef.current += 1;
+    const attempt = resumeAttemptRef.current + 1;
+    resumeAttemptRef.current = attempt;
     setResumeInFlight(false);
-    setSessionKey((value) => value + 1);
+    const terminalId = terminalIdRef.current;
+    terminalReadyRef.current = false;
+    setSessionState("starting");
+    if (reattachPendingRef.current) {
+      reattachPendingRef.current = false;
+      setSessionKey((value) => value + 1);
+      return;
+    }
+    const restart = (): void => {
+      if (!mountedRef.current || resumeAttemptRef.current !== attempt) return;
+      terminalIdRef.current = null;
+      managedActionTerminalRef.current = false;
+      resumedProviderRef.current = null;
+      setActiveResume(null);
+      setTerminalId(null);
+      onRestorableTerminalChangeRef.current(null);
+      setSessionKey((value) => value + 1);
+    };
+    if (!terminalId || managedActionTerminalRef.current) {
+      restart();
+      return;
+    }
+    void sendCommand(command({
+      type: "terminal.close",
+      payload: { terminalId },
+    })).then(restart, (error: unknown) => {
+      if (!mountedRef.current || resumeAttemptRef.current !== attempt) return;
+      const message = error instanceof Error
+        ? error.message
+        : "The terminal could not be confirmed stopped.";
+      setSessionError(message);
+      setSessionState("error");
+    });
   };
 
   const fitTerminal = () => {
@@ -622,7 +852,14 @@ function TerminalSession({
   };
 
   return (
-    <aside className="terminal-panel" aria-label="Terminal panel" data-terminal-id={terminalId ?? undefined} data-terminal-font-size={fontSize}>
+    <aside
+      className="terminal-panel"
+      aria-label="Terminal panel"
+      aria-busy={sessionState === "starting"}
+      data-terminal-id={terminalId ?? undefined}
+      data-terminal-state={sessionState}
+      data-terminal-font-size={fontSize}
+    >
       <div className="terminal-header">
         <div className="terminal-title">
           <TerminalSquare size={16} />
@@ -637,114 +874,25 @@ function TerminalSession({
           <IconButton label="Close terminal" onClick={onClose}><X size={16} /></IconButton>
         </div>
       </div>
-      {selectedResumeOption && (() => {
-        const availability = selectedResumeOption.availability;
-        const displayedResume = activeResume ?? availability.resume;
-        return (
-        <div
-          className={`terminal-resume-status is-${availability.kind}`}
-          role={resumeError ? "alert" : "status"}
-        >
-          <MessagesSquare size={14} />
-          <span id={resumeDescriptionId}>
-            {resumeOptions.length > 1 && (
-              <span className="terminal-resume-picker">
-                <span className="terminal-resume-picker-caption">
-                  Resume provider chat
-                </span>
-                <span
-                  ref={resumePickerRef}
-                  className={`terminal-resume-anchor${resumePickerOpen ? " is-open" : ""}`}
-                >
-                  <button
-                    ref={resumeTriggerRef}
-                    type="button"
-                    className="terminal-resume-trigger"
-                    aria-label={`Chat to resume: ${selectedResumeOption.conversationTitle} in ${selectedResumeOption.projectName}`}
-                    aria-haspopup="dialog"
-                    aria-expanded={resumePickerOpen}
-                    disabled={Boolean(activeResume) || resumeInFlight}
-                    onClick={() => setResumePickerOpen((open) => !open)}
-                  >
-                    <span className="terminal-resume-trigger-copy">
-                      <strong>{selectedResumeOption.conversationTitle}</strong>
-                      <small>{selectedResumeOption.projectName}</small>
-                    </span>
-                    <ChevronDown size={13} aria-hidden="true" />
-                  </button>
-                  {resumePickerOpen && (
-                    <span
-                      className="terminal-resume-popover"
-                      role="dialog"
-                      aria-label="Choose a chat to resume"
-                    >
-                      <ProviderResumePicker
-                        options={resumeOptions}
-                        selectedConversationId={selectedResumeOption.conversationId}
-                        blockedConversationIds={siblingResumedConversationIds}
-                        autoFocus
-                        onSelect={(nextConversationId) => {
-                          setResumeError(null);
-                          setSelectedResumeConversationId(nextConversationId);
-                          closeResumePicker();
-                        }}
-                        onCancel={closeResumePicker}
-                      />
-                    </span>
-                  )}
-                </span>
-              </span>
-            )}
-            {displayedResume ? (
-              <>
-                <span>{displayedResume.providerLabel} session</span>
-                <code title={displayedResume.sessionId}>
-                  {displayedResume.sessionId}
-                </code>
-              </>
-            ) : (
-              <span>{availability.reason}</span>
-            )}
-            {availability.resume && availability.kind === "unavailable" && (
-              <small>{availability.reason}</small>
-            )}
-            {activeResume && (
-              <small>
-                End this terminal session before sending another message in Inertia.
-              </small>
-            )}
-            {resumeBlockedBySibling && (
-              <small>
-                This provider session is already resumed in another terminal tab.
-              </small>
-            )}
-            {resumeError && <small>{resumeError}</small>}
-          </span>
-          {availability.kind === "available" && (
-            <button
-              type="button"
-              className="secondary-button"
-              aria-label={activeResume
-                ? `${activeResume.providerLabel} session is resumed in ${projectName}`
-                : resumeBlockedBySibling
-                  ? `${availability.resume.providerLabel} session is resumed in another ${projectName} terminal`
-                : resumeOptions.length === 1
-                  ? `Resume ${availability.resume.providerLabel} session in ${selectedResumeOption.projectName}`
-                  : `Resume ${availability.resume.providerLabel} chat ${selectedResumeOption.conversationTitle} in ${selectedResumeOption.projectName}`}
-              aria-describedby={resumeDescriptionId}
-              disabled={Boolean(activeResume) || resumeBlockedBySibling || resumeInFlight || sessionState !== "ready" || status !== "online"}
-              onClick={resumeProviderSession}
-            >
-              {activeResume
-                ? "Resumed"
-                : resumeBlockedBySibling
-                  ? "Resumed elsewhere"
-                  : resumeInFlight ? "Resuming…" : "Resume chat"}
-            </button>
-          )}
-        </div>
-        );
-      })()}
+      {selectedResumeOption && (
+        <TerminalResumeStatus
+          selectedResumeOption={selectedResumeOption}
+          resumeOptions={resumeOptions}
+          activeResume={activeResume}
+          siblingResumedConversationIds={siblingResumedConversationIds}
+          resumeBlockedBySibling={resumeBlockedBySibling}
+          resumeInFlight={resumeInFlight}
+          sessionState={sessionState}
+          status={status}
+          projectName={projectName}
+          resumeError={resumeError}
+          onSelect={(conversationId) => {
+            setResumeError(null);
+            setSelectedResumeConversationId(conversationId);
+          }}
+          onResume={resumeProviderSession}
+        />
+      )}
       <div className="terminal-stage">
         <div className="terminal-mount" ref={containerRef} />
         {sessionState !== "ready" && (
@@ -767,14 +915,18 @@ function TerminalSession({
   );
 }
 
-type TerminalTab = { id: string; label: string };
-
-export function TerminalPanel(props: TerminalPanelProps): React.JSX.Element {
+function ScopedTerminalPanel(props: TerminalPanelProps): React.JSX.Element {
   const subscribe = props.subscribe;
+  const sendCommand = props.sendCommand;
   const resumeRequestConversationId = props.resumeRequestConversationId;
   const onResumeRequestHandled = props.onResumeRequestHandled;
-  const [tabs, setTabs] = useState<TerminalTab[]>([{ id: crypto.randomUUID(), label: "Terminal 1" }]);
-  const [activeId, setActiveId] = useState(() => tabs[0].id);
+  const actionRequestId = props.actionId;
+  const onActionRequestHandled = props.onActionStarted;
+  const actionScopeIdentity = `${props.projectId}:${props.conversationId ?? ""}`;
+  const storageKey = terminalStorageKey(props.projectId, props.conversationId);
+  const [initialTabs] = useState(() => readPersistedTerminalTabs(storageKey));
+  const [tabs, setTabs] = useState<TerminalTab[]>(initialTabs);
+  const [activeId, setActiveId] = useState(initialTabs[0].id);
   const [split, setSplit] = useState(false);
   const [persistedSplitPercent, setPersistedSplitPercent] = usePersistedSize("inertia:layout:terminal-split-percent:v1", 50, { min: 25, max: 75 });
   const [splitPercent, setSplitPercent] = useState(persistedSplitPercent);
@@ -783,8 +935,65 @@ export function TerminalPanel(props: TerminalPanelProps): React.JSX.Element {
     tabId: string;
     terminalId: string;
   }>>(() => new Map());
+  const [closingTabIds, setClosingTabIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const [actionRoutingError, setActionRoutingError] = useState<string | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
+  const tabsRef = useRef(tabs);
+  const pageUnloadingRef = useRef(false);
+  const lifecycleGenerationRef = useRef(0);
   const handledPanelResumeRequestRef = useRef<string | null>(null);
+  const handledBlockedActionRef = useRef<string | null>(null);
+  tabsRef.current = tabs;
+
+  useEffect(() => {
+    try {
+      if (tabs.length === 0) {
+        window.sessionStorage.removeItem(storageKey);
+        return;
+      }
+      window.sessionStorage.setItem(
+        storageKey,
+        JSON.stringify(tabs.map(({ terminalId }) => terminalId)),
+      );
+    } catch {
+      // Session restoration is a convenience; terminal ownership stays server-side.
+    }
+  }, [storageKey, tabs]);
+
+  useEffect(() => {
+    const generation = lifecycleGenerationRef.current + 1;
+    lifecycleGenerationRef.current = generation;
+    pageUnloadingRef.current = false;
+    const markPageUnloading = (): void => {
+      pageUnloadingRef.current = true;
+    };
+    window.addEventListener("beforeunload", markPageUnloading);
+    window.addEventListener("pagehide", markPageUnloading);
+    return () => {
+      window.removeEventListener("beforeunload", markPageUnloading);
+      window.removeEventListener("pagehide", markPageUnloading);
+      window.queueMicrotask(() => {
+        if (
+          lifecycleGenerationRef.current !== generation
+          || pageUnloadingRef.current
+        ) return;
+        for (const { terminalId } of tabsRef.current) {
+          if (!terminalId) continue;
+          void sendCommand(command({
+            type: "terminal.close",
+            payload: { terminalId },
+          })).catch(() => undefined);
+        }
+        try {
+          window.sessionStorage.removeItem(storageKey);
+        } catch {
+          // The scoped sessions are still closed authoritatively above.
+        }
+      });
+    };
+  }, [sendCommand, storageKey]);
 
   useEffect(() => setSplitPercent(persistedSplitPercent), [persistedSplitPercent]);
 
@@ -810,11 +1019,57 @@ export function TerminalPanel(props: TerminalPanelProps): React.JSX.Element {
     });
   }), [subscribe]);
 
+  const resumedTabIds = useMemo(() => new Set(
+    [...resumedTerminals.values()].map(({ tabId }) => tabId),
+  ), [resumedTerminals]);
+  const actionTargetId = useMemo<string | null>(() => {
+    if (!props.actionId) return activeId;
+    if (!resumedTabIds.has(activeId)) return activeId;
+    return tabs.find(({ id }) => !resumedTabIds.has(id))?.id ?? null;
+  }, [activeId, props.actionId, resumedTabIds, tabs]);
+
+  useEffect(() => {
+    const actionId = actionRequestId;
+    if (!actionId) {
+      handledBlockedActionRef.current = null;
+      return;
+    }
+    if (actionTargetId) {
+      setActionRoutingError(null);
+      if (actionTargetId !== activeId) setActiveId(actionTargetId);
+      return;
+    }
+    if (tabs.length < MAX_PERSISTED_TERMINAL_TABS) {
+      setTabs((current) => {
+        if (current.length >= MAX_PERSISTED_TERMINAL_TABS) return current;
+        const tab = newTerminalTab(nextTerminalTabIndex(current));
+        window.queueMicrotask(() => setActiveId(tab.id));
+        return [...current, tab];
+      });
+      return;
+    }
+    const identity = `${actionScopeIdentity}:${actionId}`;
+    setActionRoutingError(
+      "End a resumed provider terminal before starting this project action.",
+    );
+    if (handledBlockedActionRef.current !== identity) {
+      handledBlockedActionRef.current = identity;
+      onActionRequestHandled?.();
+    }
+  }, [
+    actionTargetId,
+    activeId,
+    actionRequestId,
+    actionScopeIdentity,
+    onActionRequestHandled,
+    tabs.length,
+  ]);
+
   useEffect(() => {
     if (!props.visible || tabs.length > 0) return;
-    const id = crypto.randomUUID();
-    setTabs([{ id, label: "Terminal 1" }]);
-    setActiveId(id);
+    const tab = newTerminalTab();
+    setTabs([tab]);
+    setActiveId(tab.id);
   }, [props.visible, tabs.length]);
 
   useEffect(() => {
@@ -828,11 +1083,13 @@ export function TerminalPanel(props: TerminalPanelProps): React.JSX.Element {
     return () => observer.disconnect();
   }, []);
 
-  const addTerminal = (): string => {
-    const id = crypto.randomUUID();
-    setTabs((current) => [...current, { id, label: `Terminal ${current.length + 1}` }]);
-    setActiveId(id);
-    return id;
+  const addTerminal = (): void => {
+    setTabs((current) => {
+      if (current.length >= MAX_PERSISTED_TERMINAL_TABS) return current;
+      const tab = newTerminalTab(nextTerminalTabIndex(current));
+      window.queueMicrotask(() => setActiveId(tab.id));
+      return [...current, tab];
+    });
   };
 
   useEffect(() => {
@@ -853,15 +1110,23 @@ export function TerminalPanel(props: TerminalPanelProps): React.JSX.Element {
       ({ tabId }) => tabId === activeId,
     );
     if (!activeTabAlreadyResumed) return;
+    const idleTab = tabs.find(({ id }) => ![...resumedTerminals.values()].some(
+      ({ tabId }) => tabId === id,
+    ));
+    if (idleTab) {
+      setActiveId(idleTab.id);
+      return;
+    }
+    if (tabs.length >= MAX_PERSISTED_TERMINAL_TABS) return;
 
     // A resumed provider owns its terminal until that process exits. Preserve
     // it and give the explicit composer request a fresh terminal to start in.
-    const id = crypto.randomUUID();
-    setTabs((current) => [
-      ...current,
-      { id, label: `Terminal ${current.length + 1}` },
-    ]);
-    setActiveId(id);
+    setTabs((current) => {
+      if (current.length >= MAX_PERSISTED_TERMINAL_TABS) return current;
+      const tab = newTerminalTab(nextTerminalTabIndex(current));
+      window.queueMicrotask(() => setActiveId(tab.id));
+      return [...current, tab];
+    });
   }, [
     activeId,
     onResumeRequestHandled,
@@ -870,18 +1135,45 @@ export function TerminalPanel(props: TerminalPanelProps): React.JSX.Element {
     tabs,
   ]);
 
-  const closeTerminal = (id: string) => {
-    const next = tabs.filter((tab) => tab.id !== id);
-    if (next.length === tabs.length) return;
-    setTabs(next);
-    if (next.length === 0) {
-      setActiveId("");
-      setSplit(false);
-      props.onClose();
+  const closeTerminal = (id: string): void => {
+    if (closingTabIds.has(id)) return;
+    const closing = tabsRef.current.find((tab) => tab.id === id);
+    if (!closing) return;
+    const finish = (): void => {
+      const current = tabsRef.current;
+      const next = current.filter((tab) => tab.id !== id);
+      if (next.length === current.length) return;
+      setClosingTabIds((closingIds) => {
+        const updated = new Set(closingIds);
+        updated.delete(id);
+        return updated;
+      });
+      setTabs(next);
+      setActiveId((selected) => selected === id
+        ? (next.at(-1)?.id ?? "")
+        : selected);
+      if (next.length === 0) {
+        setSplit(false);
+        props.onClose();
+      } else if (next.length < 2) {
+        setSplit(false);
+      }
+    };
+    if (!closing.terminalId) {
+      finish();
       return;
     }
-    if (activeId === id) setActiveId(next.at(-1)!.id);
-    if (next.length < 2) setSplit(false);
+    setClosingTabIds((closingIds) => new Set(closingIds).add(id));
+    void sendCommand(command({
+      type: "terminal.close",
+      payload: { terminalId: closing.terminalId },
+    })).then(finish, () => {
+      setClosingTabIds((closingIds) => {
+        const updated = new Set(closingIds);
+        updated.delete(id);
+        return updated;
+      });
+    });
   };
 
   const splitTerminal = () => {
@@ -897,10 +1189,15 @@ export function TerminalPanel(props: TerminalPanelProps): React.JSX.Element {
     <aside className="terminal-tabs-panel" aria-label="Terminal panel" hidden={!props.visible}>
       <header className="terminal-tabbar">
         <div className="terminal-tablist" role="tablist" aria-label="Terminals">
-          {tabs.map((tab) => <div className={tab.id === activeId ? "terminal-tab is-active" : "terminal-tab"} key={tab.id}><button type="button" id={`terminal-tab-${tab.id}`} role="tab" aria-selected={tab.id === activeId} aria-controls={sessionIds.get(tab.id)} onClick={() => setActiveId(tab.id)}><TerminalSquare size={13} /><span>{tab.label}</span></button><button type="button" aria-label={`Close ${tab.label}`} onClick={() => closeTerminal(tab.id)}><X size={11} /></button></div>)}
+          {tabs.map((tab) => <div className={tab.id === activeId ? "terminal-tab is-active" : "terminal-tab"} key={tab.id}><button type="button" id={`terminal-tab-${tab.id}`} role="tab" aria-selected={tab.id === activeId} aria-controls={sessionIds.get(tab.id)} onClick={() => setActiveId(tab.id)}><TerminalSquare size={13} /><span>{tab.label}</span></button><button type="button" aria-label={`Close ${tab.label}`} disabled={closingTabIds.has(tab.id)} onClick={() => closeTerminal(tab.id)}><X size={11} /></button></div>)}
         </div>
-        <div className="terminal-tab-actions"><IconButton label="New terminal" onClick={() => addTerminal()}><Plus size={14} /></IconButton><IconButton label="Split terminals" aria-pressed={split} onClick={splitTerminal}><Columns2 size={14} /></IconButton></div>
+        <div className="terminal-tab-actions"><IconButton label={tabs.length >= MAX_PERSISTED_TERMINAL_TABS ? "Maximum of 4 terminals open" : "New terminal"} disabled={tabs.length >= MAX_PERSISTED_TERMINAL_TABS} onClick={() => addTerminal()}><Plus size={14} /></IconButton><IconButton label="Split terminals" aria-pressed={split} onClick={splitTerminal}><Columns2 size={14} /></IconButton></div>
       </header>
+      {actionRoutingError && (
+        <div className="terminal-resume-status is-unavailable" role="alert">
+          {actionRoutingError}
+        </div>
+      )}
       <div
         ref={gridRef}
         className={split ? `terminal-session-grid is-split is-${splitOrientation}` : "terminal-session-grid"}
@@ -914,7 +1211,15 @@ export function TerminalPanel(props: TerminalPanelProps): React.JSX.Element {
               .filter(([, resumed]) => resumed.tabId !== tab.id)
               .map(([conversationId]) => conversationId),
           );
-          return <div id={sessionIds.get(tab.id)} role="tabpanel" aria-labelledby={`terminal-tab-${tab.id}`} className={`terminal-session-slot ${placement}`} hidden={!visible} key={tab.id}><TerminalSession {...props} visible={Boolean(props.visible && visible)} actionId={tab.id === activeId ? props.actionId : null} onActionStarted={tab.id === activeId ? props.onActionStarted : undefined} resumeRequestConversationId={tab.id === activeId ? props.resumeRequestConversationId : null} onResumeRequestHandled={tab.id === activeId ? props.onResumeRequestHandled : undefined} siblingResumedConversationIds={siblingResumedConversationIds} onProviderResumeStarted={(terminalId, resumedConversationId) => setResumedTerminals((current) => new Map(current).set(resumedConversationId, { tabId: tab.id, terminalId }))} onClose={() => closeTerminal(tab.id)} /></div>;
+          return <div id={sessionIds.get(tab.id)} role="tabpanel" aria-labelledby={`terminal-tab-${tab.id}`} className={`terminal-session-slot ${placement}`} hidden={!visible} key={tab.id}><TerminalSession {...props} initialTerminalId={tab.terminalId} visible={Boolean(props.visible && visible)} actionId={tab.id === actionTargetId ? props.actionId : null} onActionStarted={tab.id === actionTargetId ? props.onActionStarted : undefined} resumeRequestConversationId={tab.id === activeId ? props.resumeRequestConversationId : null} onResumeRequestHandled={tab.id === activeId ? props.onResumeRequestHandled : undefined} siblingResumedConversationIds={siblingResumedConversationIds} onRestorableTerminalChange={(terminalId) => setTabs((current) => {
+            let changed = false;
+            const next = current.map((candidate) => {
+              if (candidate.id !== tab.id || candidate.terminalId === terminalId) return candidate;
+              changed = true;
+              return { ...candidate, terminalId };
+            });
+            return changed ? next : current;
+          })} onProviderResumeStarted={(terminalId, resumedConversationId) => setResumedTerminals((current) => new Map(current).set(resumedConversationId, { tabId: tab.id, terminalId }))} onClose={() => closeTerminal(tab.id)} /></div>;
         })}
         {split && secondaryId && (
           <PaneResizeHandle
@@ -936,4 +1241,9 @@ export function TerminalPanel(props: TerminalPanelProps): React.JSX.Element {
       </div>
     </aside>
   );
+}
+
+export function TerminalPanel(props: TerminalPanelProps): React.JSX.Element {
+  const scope = `${props.projectId}:${props.conversationId ?? "project"}`;
+  return <ScopedTerminalPanel key={scope} {...props} />;
 }

@@ -1003,17 +1003,22 @@ process.exit(child.status ?? 1);
       (event): event is Extract<ServerEvent, { type: "server.welcome" }> => event.type === "server.welcome",
     );
     const projectId = welcome.snapshot.projects[0]!.id;
+    const createActionTerminal = async (): Promise<string> => {
+      const requestId = randomUUID();
+      send(client.socket, { type: "terminal.create", requestId, payload: { projectId, cols: 80, rows: 24 } });
+      const created = await client.events.next(
+        (event): event is Extract<ServerEvent, { type: "terminal.created" }> => event.type === "terminal.created" && event.requestId === requestId,
+      );
+      return created.terminalId;
+    };
 
+    const actionTerminalId = await createActionTerminal();
     const runRequestId = randomUUID();
-    send(client.socket, {
-      type: "project.action.run",
-      requestId: runRequestId,
-      payload: { projectId, actionId: "preview", cols: 80, rows: 24 },
-    });
-    await client.events.next(
-      (event): event is Extract<ServerEvent, { type: "terminal.created" }> =>
-        event.type === "terminal.created" && event.requestId === runRequestId,
+    send(client.socket, { type: "project.action.run", requestId: runRequestId, payload: { projectId, actionId: "preview", terminalId: actionTerminalId, cols: 80, rows: 24 } });
+    const actionCreated = await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "terminal.created" }> => event.type === "terminal.created" && event.requestId === runRequestId,
     );
+    expect(actionCreated.terminalId).toBe(actionTerminalId);
     const running = await client.events.next(
       (event): event is Extract<ServerEvent, { type: "snapshot.updated" }> =>
         event.type === "snapshot.updated"
@@ -1072,16 +1077,13 @@ process.exit(child.status ?? 1);
       finishedAt: expect.any(String),
     });
 
+    const rerunTerminalId = await createActionTerminal();
     const rerunRequestId = randomUUID();
-    send(client.socket, {
-      type: "project.action.run",
-      requestId: rerunRequestId,
-      payload: { projectId, actionId: activity.actionId, cols: 80, rows: 24 },
-    });
-    await client.events.next(
-      (event): event is Extract<ServerEvent, { type: "terminal.created" }> =>
-        event.type === "terminal.created" && event.requestId === rerunRequestId,
+    send(client.socket, { type: "project.action.run", requestId: rerunRequestId, payload: { projectId, actionId: activity.actionId, terminalId: rerunTerminalId, cols: 80, rows: 24 } });
+    const rerunCreated = await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "terminal.created" }> => event.type === "terminal.created" && event.requestId === rerunRequestId,
     );
+    expect(rerunCreated.terminalId).toBe(rerunTerminalId);
     const rerunning = await client.events.next(
       (event): event is Extract<ServerEvent, { type: "snapshot.updated" }> =>
         event.type === "snapshot.updated"

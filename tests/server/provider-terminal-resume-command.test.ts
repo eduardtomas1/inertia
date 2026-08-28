@@ -164,6 +164,15 @@ describe("terminal.provider.resume command", () => {
       91,
       31,
       expect.any(Function),
+      undefined,
+      {
+        descriptor: {
+          providerId: "codex",
+          providerLabel: "Codex",
+          sessionId,
+        },
+        conversationId,
+      },
     );
     expect(fixture.send).toHaveBeenCalledWith(expect.anything(), {
       type: "terminal.created",
@@ -174,6 +183,7 @@ describe("terminal.provider.resume command", () => {
         providerLabel: "Codex",
         sessionId,
       },
+      providerResumeConversationId: conversationId,
     });
   });
 

@@ -64,7 +64,7 @@ interface BrokerChildOptions {
   readonly commandLogPath?: string;
   readonly malformedResult?: string;
   readonly shutdownDelayMs?: number;
-  readonly omitShutdownBye?: boolean;
+  readonly retainedHelperExitUnconfirmable?: boolean;
 }
 
 function verifiedExecutableBrokerChild(
@@ -79,9 +79,9 @@ const encode = (value) => Buffer.from((value ?? "").slice(0, 2048), "utf8").toSt
 const respond = (line) => {
   if (options.commandLogPath) fs.appendFileSync(options.commandLogPath, line + "\\n");
   if (line === "SHUTDOWN") {
+    if (options.retainedHelperExitUnconfirmable) return;
     setTimeout(() => {
-      if (options.omitShutdownBye) process.exit(0);
-      else process.stdout.write("BYE\\n", () => process.exit(0));
+      process.stdout.write("BYE\\n", () => process.exit(0));
     }, options.shutdownDelayMs ?? 0);
     return;
   }
@@ -481,6 +481,12 @@ describe("Windows runtime Job Object containment", () => {
     expect(launchSource).toContain("$info.FileName = $path");
     expect(launchSource).toContain("$processes[$id] = $process");
     expect(launchSource).toContain("Write-Frame '${EXECUTABLE_LOCK_BYE_MARKER}'");
+    expect(launchSource).toContain("throw 'guardian-exit-unconfirmed'");
+    expect(launchSource.indexOf(
+      "Stop-Helpers ([Diagnostics.Process[]]@($processes.Values))",
+    )).toBeLessThan(launchSource.indexOf(
+      "Write-Frame '${EXECUTABLE_LOCK_BYE_MARKER}'",
+    ));
     expect(launchSource).toContain("INERTIA_JOB_ERROR stage=verified-file-lock");
     expect(launchSource).not.toContain("[Reflection.Assembly]::Load");
     expect(launchSource).not.toContain("spawnWindowsRuntimeJobExecutable");
@@ -534,9 +540,11 @@ describe("Windows runtime Job Object containment", () => {
     expect(broker.exitCode).toBe(0);
   });
 
-  it("fails update and quit cleanup closed when shutdown is not acknowledged", async () => {
+  it("fails update and quit cleanup closed when retained guardian exit is unconfirmed", async () => {
     await disposeWindowsRuntimeJobExecutableLock();
-    const broker = verifiedExecutableBrokerChild({ omitShutdownBye: true });
+    const broker = verifiedExecutableBrokerChild({
+      retainedHelperExitUnconfirmable: true,
+    });
     await prepareWindowsRuntimeJobExecutableLock(stubAssembly, {
       spawnLockBroker: () => broker,
     });

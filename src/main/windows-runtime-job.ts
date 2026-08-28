@@ -391,15 +391,51 @@ function Start-Helper([string] $arguments) {
   if (-not $process.Start()) { throw 'process-start' }
   return $process
 }
-function Stop-Helper([Diagnostics.Process] $process) {
-  try { $process.StandardInput.Close() } catch {}
-  try {
-    if (-not $process.HasExited -and -not $process.WaitForExit(2000)) {
-      $process.Kill()
+function Stop-Helpers([Diagnostics.Process[]] $helpers) {
+  foreach ($process in $helpers) {
+    if (-not $process.HasExited) {
+      try { $process.StandardInput.Close() } catch {
+        if (-not $process.HasExited) { throw }
+      }
     }
-    if (-not $process.HasExited) { $process.WaitForExit() }
-  } catch {}
-  $process.Dispose()
+  }
+  $grace = [Diagnostics.Stopwatch]::StartNew()
+  foreach ($process in $helpers) {
+    if (-not $process.HasExited) {
+      $remaining = [Math]::Max(0, 2000 - [Int32]$grace.ElapsedMilliseconds)
+      if ($remaining -gt 0) { $process.WaitForExit($remaining) | Out-Null }
+    }
+  }
+  foreach ($process in $helpers) {
+    if (-not $process.HasExited) {
+      try { $process.Kill() } catch {
+        if (-not $process.HasExited) { throw }
+      }
+    }
+  }
+  $forced = [Diagnostics.Stopwatch]::StartNew()
+  foreach ($process in $helpers) {
+    if (-not $process.HasExited) {
+      $remaining = [Math]::Max(0, 1000 - [Int32]$forced.ElapsedMilliseconds)
+      if ($remaining -gt 0) { $process.WaitForExit($remaining) | Out-Null }
+    }
+  }
+  foreach ($process in $helpers) {
+    if (-not $process.HasExited) { throw 'guardian-exit-unconfirmed' }
+  }
+  foreach ($process in $helpers) { $process.Dispose() }
+}
+function Abort-Helpers([Diagnostics.Process[]] $helpers) {
+  foreach ($process in $helpers) {
+    try { $process.StandardInput.Close() } catch {}
+  }
+  foreach ($process in $helpers) {
+    try { if (-not $process.HasExited) { $process.Kill() } } catch {}
+  }
+  foreach ($process in $helpers) {
+    try { if (-not $process.HasExited) { $process.WaitForExit(1000) | Out-Null } } catch {}
+    try { $process.Dispose() } catch {}
+  }
 }
 function Remove-ExitedHelpers() {
   foreach ($key in @($processes.Keys)) {
@@ -452,7 +488,7 @@ try {
     $line = [Console]::In.ReadLine()
     if ($null -eq $line) { break }
     if ($line -ceq '${EXECUTABLE_LOCK_SHUTDOWN.trim()}') {
-      foreach ($process in @($processes.Values)) { Stop-Helper $process }
+      Stop-Helpers ([Diagnostics.Process[]]@($processes.Values))
       $processes.Clear()
       Write-Frame '${EXECUTABLE_LOCK_BYE_MARKER}'
       break
@@ -529,7 +565,7 @@ try {
   $stderr.Flush()
   exit 25
 } finally {
-  foreach ($process in @($processes.Values)) { Stop-Helper $process }
+  Abort-Helpers ([Diagnostics.Process[]]@($processes.Values))
   if ($null -ne $stream) { $stream.Dispose() }
 }`;
 }

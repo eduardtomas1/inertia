@@ -1,4 +1,12 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
@@ -16,10 +24,13 @@ import {
   terminalTheme,
   type TerminalPanelProps,
   type TerminalReplacement,
-  TerminalResumeStatus,
   waitForTerminalRetry,
 } from "./TerminalPanelSupport";
 import { IconButton, LoadingMark } from "./ui";
+
+const TerminalResumeStatus = lazy(async () => ({
+  default: (await import("./TerminalResumeStatus")).TerminalResumeStatus,
+}));
 
 type TerminalSessionProps = TerminalPanelProps & {
   initialTerminalId: string | null;
@@ -1014,23 +1025,29 @@ export function TerminalSession({
         </div>
       </div>
       {selectedResumeOption && (
-        <TerminalResumeStatus
-          selectedResumeOption={selectedResumeOption}
-          resumeOptions={resumeOptions}
-          activeResume={activeResume}
-          siblingResumedConversationIds={siblingResumedConversationIds}
-          resumeBlockedBySibling={resumeBlockedBySibling}
-          resumeInFlight={resumeInFlight}
-          sessionState={sessionState}
-          status={status}
-          projectName={projectName}
-          resumeError={resumeError}
-          onSelect={(conversationId) => {
-            setResumeError(null);
-            setSelectedResumeConversationId(conversationId);
-          }}
-          onResume={resumeProviderSession}
-        />
+        <Suspense fallback={(
+          <div className="terminal-resume-status" role="status">
+            Loading provider resume controls…
+          </div>
+        )}>
+          <TerminalResumeStatus
+            selectedResumeOption={selectedResumeOption}
+            resumeOptions={resumeOptions}
+            activeResume={activeResume}
+            siblingResumedConversationIds={siblingResumedConversationIds}
+            resumeBlockedBySibling={resumeBlockedBySibling}
+            resumeInFlight={resumeInFlight}
+            sessionState={sessionState}
+            status={status}
+            projectName={projectName}
+            resumeError={resumeError}
+            onSelect={(conversationId) => {
+              setResumeError(null);
+              setSelectedResumeConversationId(conversationId);
+            }}
+            onResume={resumeProviderSession}
+          />
+        </Suspense>
       )}
       <div className="terminal-stage">
         <div className="terminal-mount" ref={containerRef} />

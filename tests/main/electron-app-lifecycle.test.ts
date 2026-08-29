@@ -276,45 +276,32 @@ describe("Electron E2E application lifecycle", () => {
   });
 
   it("does not accept an abnormal child exit as privileged shutdown proof", async () => {
-    vi.useFakeTimers();
-    try {
-      const process = Object.assign(new EventEmitter(), {
-        exitCode: null as number | null,
-        signalCode: null as NodeJS.Signals | null,
-        kill: vi.fn(() => true),
-      });
-      const closing = closeElectronFixtureBounded({
-        current: {
-          process: () => process,
-          close: async () => { throw new Error("Playwright disconnected during crash"); },
-        } as unknown as ElectronApplication,
-        requestRuntimeQuit: () => new Promise<number | null>(() => undefined),
-        waitForRuntimeExit: vi.fn(async () => undefined),
-        closeServer: vi.fn(async () => undefined),
-        removeDirectory: vi.fn(async () => undefined),
-        rpcTimeoutMs: 5,
-        serverTimeoutMs: 50,
-        removeTimeoutMs: 50,
-      });
-      const outcome = closing.then(() => null, (error: unknown) => error);
+    const process = Object.assign(new EventEmitter(), {
+      exitCode: 1,
+      signalCode: null as NodeJS.Signals | null,
+      kill: vi.fn(() => true),
+    });
+    const failure = await closeElectronFixtureBounded({
+      current: {
+        process: () => process,
+        close: async () => { throw new Error("Playwright disconnected during crash"); },
+      } as unknown as ElectronApplication,
+      requestRuntimeQuit: async () => { throw new Error("runtime quit failed"); },
+      waitForRuntimeExit: vi.fn(async () => undefined),
+      closeServer: vi.fn(async () => undefined),
+      removeDirectory: vi.fn(async () => undefined),
+      serverTimeoutMs: 50,
+      removeTimeoutMs: 50,
+    }).then(() => null, (error: unknown) => error);
 
-      await vi.advanceTimersByTimeAsync(5 + 12_750);
-      process.exitCode = 1;
-      process.emit("exit", 1, null);
-      const failure = await outcome;
-      expect(process.kill).not.toHaveBeenCalled();
-      expect(failure).toBeInstanceOf(AggregateError);
-      expect((failure as AggregateError).errors).toEqual([
-        expect.objectContaining({
-          message: expect.stringContaining("exited abnormally during close"),
-        }),
-        expect.objectContaining({
-          message: "The Electron fixture runtime quit request did not settle in time.",
-        }),
-      ]);
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(process.kill).not.toHaveBeenCalled();
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect((failure as AggregateError).errors).toEqual([
+      expect.objectContaining({
+        message: expect.stringContaining("exited abnormally during close"),
+      }),
+      expect.objectContaining({ message: "runtime quit failed" }),
+    ]);
   });
 
   it("does not accept a fulfilled close with an abnormal child exit", async () => {

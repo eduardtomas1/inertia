@@ -19,6 +19,7 @@ import {
   type WaitForProcessExit,
 } from "./process-lifecycle";
 import { requestRecoveryFromTaintedOwnedProcess } from "./terminal-runtime-recovery";
+import { terminalShutdownTimeoutMs } from "./terminal-shutdown-deadline";
 
 const MAX_TERMINALS = 8;
 const MAX_TERMINALS_PER_CLIENT = 4;
@@ -29,13 +30,6 @@ const OUTPUT_FLUSH_MS = 8;
 const TERMINAL_REATTACH_TIMEOUT_MS = 30_000;
 const TERMINAL_REATTACH_TRUNCATION_NOTICE =
   "\r\n\x1b[2mEarlier terminal output was truncated while reconnecting.\x1b[0m\r\n";
-// node-pty's Windows ConPTY backend intentionally delays its public exit event
-// for 1 second while output drains. Leave bounded headroom for that signal and
-// the final resource-settle check while still finishing well before the
-// supervisor's 3-second process-tree fallback.
-const TERMINAL_SHUTDOWN_TIMEOUT_MS = process.platform === "win32"
-  ? 1_500
-  : 1_000;
 
 interface TerminalSession {
   id: string;
@@ -289,7 +283,7 @@ export class TerminalManager {
       1,
       Math.min(
         Math.trunc(
-          options.shutdownTimeoutMs ?? TERMINAL_SHUTDOWN_TIMEOUT_MS,
+          options.shutdownTimeoutMs ?? terminalShutdownTimeoutMs(this.platform),
         ),
         30_000,
       ),

@@ -17,7 +17,7 @@ import { RuntimeStore } from "../../src/server/database";
 import {
   TURN_GIT_ARTIFACT_FINALIZATION_TIMEOUT_MS,
 } from "../../src/shared/runtime-command-timeouts";
-import { processExists } from "../e2e/support/app-fixture";
+import { processExists } from "../e2e/support/electron-app-lifecycle";
 import { selectWorkspaceTool } from "../e2e/support/workspace-tools";
 import { driveBoundedWheelNavigation } from "../helpers/bounded-wheel-navigation";
 import {

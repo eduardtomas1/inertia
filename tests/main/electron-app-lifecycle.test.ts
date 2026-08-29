@@ -90,6 +90,90 @@ describe("Electron E2E application lifecycle", () => {
     expect(fixture.killed).toHaveBeenCalledWith("SIGKILL");
   });
 
+  it.runIf(process.platform === "darwin")(
+    "lets Electron finish the complete macOS runtime shutdown envelope",
+    async () => {
+      vi.useFakeTimers();
+      try {
+        const process = Object.assign(new EventEmitter(), {
+          exitCode: null as number | null,
+          signalCode: null as NodeJS.Signals | null,
+          kill: vi.fn(() => true),
+        });
+        let resolveClose!: () => void;
+        const gracefulClose = new Promise<void>((resolve) => {
+          resolveClose = resolve;
+        });
+        const close = closeElectronAppBounded({
+          process: () => process,
+          close: () => gracefulClose,
+        } as unknown as ElectronApplication);
+
+        await vi.advanceTimersByTimeAsync(12_750);
+        expect(process.kill).not.toHaveBeenCalled();
+        resolveClose();
+        await expect(close).resolves.toBeUndefined();
+        expect(process.kill).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it("lets an OS child exit naturally after Playwright rejects close early", async () => {
+    vi.useFakeTimers();
+    try {
+      const process = Object.assign(new EventEmitter(), {
+        exitCode: null as number | null,
+        signalCode: null as NodeJS.Signals | null,
+        kill: vi.fn(() => true),
+      });
+      const close = closeElectronAppBounded({
+        process: () => process,
+        close: async () => { throw new Error("Playwright disconnected"); },
+      } as unknown as ElectronApplication, { gracefulTimeoutMs: 13_000 });
+
+      await vi.advanceTimersByTimeAsync(12_750);
+      expect(process.kill).not.toHaveBeenCalled();
+      process.exitCode = 0;
+      process.emit("exit", 0, null);
+      await expect(close).resolves.toBeUndefined();
+      expect(process.kill).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("kills an OS child still live after an early close rejection deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      const process = Object.assign(new EventEmitter(), {
+        exitCode: null as number | null,
+        signalCode: null as NodeJS.Signals | null,
+        kill: vi.fn((signal: NodeJS.Signals) => {
+          process.signalCode = signal;
+          process.emit("exit", null, signal);
+          return true;
+        }),
+      });
+      const close = closeElectronAppBounded({
+        process: () => process,
+        close: async () => { throw new Error("Playwright disconnected"); },
+      } as unknown as ElectronApplication, {
+        gracefulTimeoutMs: 13_000,
+        forcedExitTimeoutMs: 100,
+      });
+
+      await vi.advanceTimersByTimeAsync(12_999);
+      expect(process.kill).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(close).resolves.toBeUndefined();
+      expect(process.kill).toHaveBeenCalledWith("SIGKILL");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("closes Electron and removes fixture data despite hung teardown steps", async () => {
     const process = Object.assign(new EventEmitter(), {
       exitCode: 0,

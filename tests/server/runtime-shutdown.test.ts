@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  runtimeShutdownDeadlineMs,
+  runtimeSupervisorShutdownEnvelopeMs,
+} from "../../src/node/runtime-shutdown-deadline";
+import {
+  RUNTIME_SHUTDOWN_DEADLINE_MS,
   runRuntimeShutdownPhases,
   RuntimeShutdownDeadlineError,
 } from "../../src/server/runtime-shutdown";
@@ -17,6 +22,53 @@ function deferred(): {
 }
 
 describe("runtime shutdown phases", () => {
+  it("keeps the extended cleanup proof window scoped to macOS", () => {
+    expect(runtimeShutdownDeadlineMs("darwin")).toBe(10_000);
+    expect(runtimeShutdownDeadlineMs("linux")).toBe(2_500);
+    expect(runtimeShutdownDeadlineMs("win32")).toBe(2_500);
+    expect(runtimeSupervisorShutdownEnvelopeMs("darwin")).toBe(12_500);
+    expect(runtimeSupervisorShutdownEnvelopeMs("linux")).toBe(5_000);
+    expect(runtimeSupervisorShutdownEnvelopeMs("win32")).toBe(5_000);
+  });
+
+  it.runIf(process.platform === "darwin")(
+    "reserves post-terminal headroom for ordered server and store cleanup",
+    async () => {
+      vi.useFakeTimers();
+      try {
+        const calls: string[] = [];
+        const delayed = (name: string, delayMs: number) => async (): Promise<void> => {
+          await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+          calls.push(name);
+        };
+        const shutdown = runRuntimeShutdownPhases({
+          independentDrains: [delayed("terminal", 7_750)],
+          stopIsolatedRuns: delayed("isolated", 0),
+          disposeTurnsAndProviders: delayed("providers", 0),
+          settleArtifacts: delayed("artifacts", 250),
+          terminateClients: delayed("clients", 250),
+          closeServer: delayed("server", 250),
+          closeStore: delayed("store", 250),
+        });
+
+        await vi.advanceTimersByTimeAsync(8_750);
+        await shutdown;
+
+        expect(calls).toEqual([
+          "isolated",
+          "providers",
+          "terminal",
+          "artifacts",
+          "clients",
+          "server",
+          "store",
+        ]);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
   it("passes one absolute deadline through every shutdown phase", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(1_000);
@@ -176,7 +228,7 @@ describe("runtime shutdown phases", () => {
       const rejected = expect(shutdown).rejects.toBeInstanceOf(
         RuntimeShutdownDeadlineError,
       );
-      await vi.advanceTimersByTimeAsync(2_500);
+      await vi.advanceTimersByTimeAsync(RUNTIME_SHUTDOWN_DEADLINE_MS);
       await rejected;
       expect(calls).toEqual([]);
 

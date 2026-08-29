@@ -1,5 +1,5 @@
-import { expect, _electron as electron,
-  type ElectronApplication, type Page } from "@playwright/test";
+import { _electron as electron, type ElectronApplication,
+  type Page } from "@playwright/test";
 import { execFile } from "node:child_process";
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
@@ -13,7 +13,7 @@ import { seedAppConversation } from "../../support/seed-app-conversation";
 import { serveAgentBrowserPrivacyFixture } from "./agent-browser-fixture-pages";
 import { closeElectronAppBounded, closeElectronFixtureBounded,
   closePreviewServerBounded, observeElectronPage, observeElectronProcess,
-  removeFixtureDirectory } from "./electron-app-lifecycle";
+  removeFixtureDirectory, waitForRuntimeProcessExit } from "./electron-app-lifecycle";
 import { expectNoViewportOverflow as expectPageNoViewportOverflow } from "./layout-assertions";
 
 const execFileAsync = promisify(execFile);
@@ -68,15 +68,6 @@ interface AppFixtureOptions {
     workspaceDirectory: string;
     secondWorkspaceDirectory: string | null;
   }) => void | Promise<void>;
-}
-
-export function processExists(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 async function createPreviewServer(): Promise<{
@@ -923,12 +914,8 @@ export async function createAppFixture(
         runtime?.quit?.();
       }).catch(() => undefined);
       await closeElectronAppBounded(previousApp);
-      if (runtimePid) {
-        await expect.poll(
-          () => processExists(runtimePid),
-          { timeout: 5_000 },
-        ).toBe(false);
-      }
+      electronApp = null;
+      if (runtimePid) await waitForRuntimeProcessExit(runtimePid);
 
       const diagnosticStart = startupDiagnostics.length;
       const nextApp = await electron.launch(launchOptions);
@@ -981,12 +968,7 @@ export async function createAppFixture(
           });
           return snapshot?.pid ?? null;
         },
-        waitForRuntimeExit: async (runtimePid) => {
-          await expect.poll(
-            () => processExists(runtimePid),
-            { timeout: 5_000 },
-          ).toBe(false);
-        },
+        waitForRuntimeExit: waitForRuntimeProcessExit,
         closeServer: async () => closePreviewServerBounded(preview.server),
         removeDirectory: async () => removeFixtureDirectory(testDirectory),
       });

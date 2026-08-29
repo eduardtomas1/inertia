@@ -12,11 +12,8 @@ import {
   readLinuxProcessIdentity,
   RuntimeOwnedProcessJournal,
 } from "../../../src/node/runtime-owned-processes";
-import {
-  processExists,
-  type AppFixture,
-  type RuntimeTestSnapshot,
-} from "./app-fixture";
+import type { AppFixture, RuntimeTestSnapshot } from "./app-fixture";
+import { processExists } from "./electron-app-lifecycle";
 import {
   ensureWorkspaceTools,
   selectWorkspaceTool,

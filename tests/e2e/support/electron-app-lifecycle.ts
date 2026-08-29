@@ -3,7 +3,34 @@ import type { ChildProcess } from "node:child_process";
 import { rm } from "node:fs/promises";
 import type { Server } from "node:http";
 
+import { runtimeSupervisorShutdownEnvelopeMs } from "../../../src/node/runtime-shutdown-deadline";
+
 const FIXTURE_SERVER_TEARDOWN_TIMEOUT_MS = 2_000;
+const FIXTURE_ELECTRON_GRACEFUL_TIMEOUT_MS = process.platform === "darwin"
+  ? runtimeSupervisorShutdownEnvelopeMs("darwin") + 500
+  : 5_000;
+export const FIXTURE_RUNTIME_EXIT_TIMEOUT_MS = process.platform === "darwin"
+  ? runtimeSupervisorShutdownEnvelopeMs("darwin") + 500
+  : 5_000;
+
+export function processExists(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function waitForRuntimeProcessExit(pid: number): Promise<void> {
+  const deadline = Date.now() + FIXTURE_RUNTIME_EXIT_TIMEOUT_MS;
+  while (processExists(pid)) {
+    if (Date.now() >= deadline) {
+      throw new Error("The Electron fixture runtime did not exit in time.");
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, 25));
+  }
+}
 
 export type BoundedOperationResult<T> =
   | { readonly status: "fulfilled"; readonly value: T }
@@ -82,6 +109,30 @@ export function observeElectronPage(
   currentPage.on("pageerror", (error) => rendererErrors.push(error.message));
 }
 
+async function waitForChildExitBounded(
+  child: ChildProcess,
+  timeoutMs: number,
+): Promise<boolean> {
+  if (child.exitCode !== null || child.signalCode !== null) return true;
+  return new Promise<boolean>((resolve) => {
+    const onExit = (): void => {
+      clearTimeout(timer);
+      resolve(true);
+    };
+    const timer = setTimeout(() => {
+      child.off("exit", onExit);
+      resolve(false);
+    }, Math.max(0, Math.trunc(timeoutMs)));
+    timer.unref();
+    child.once("exit", onExit);
+    if (child.exitCode !== null || child.signalCode !== null) {
+      child.off("exit", onExit);
+      clearTimeout(timer);
+      resolve(true);
+    }
+  });
+}
+
 export async function closeElectronAppBounded(
   current: ElectronApplication,
   options: {
@@ -92,34 +143,29 @@ export async function closeElectronAppBounded(
   } = {},
 ): Promise<void> {
   const child = options.childProcess ?? current.process();
+  const gracefulTimeoutMs = options.gracefulTimeoutMs
+    ?? FIXTURE_ELECTRON_GRACEFUL_TIMEOUT_MS;
+  const gracefulDeadlineAt = Date.now() + gracefulTimeoutMs;
   const closeResult = Promise.resolve().then(() => current.close());
   const graceful = await settleOperationBounded(
     closeResult,
-    options.gracefulTimeoutMs ?? 5_000,
+    gracefulTimeoutMs,
   );
   if (graceful.status === "fulfilled") return;
+  if (
+    graceful.status === "rejected"
+    && await waitForChildExitBounded(
+      child,
+      gracefulDeadlineAt - Date.now(),
+    )
+  ) return;
   if (child.exitCode === null && child.signalCode === null) {
     child.kill("SIGKILL");
   }
-  const exited = child.exitCode !== null || child.signalCode !== null
-    ? true
-    : await new Promise<boolean>((resolve) => {
-        const onExit = (): void => {
-          clearTimeout(timer);
-          resolve(true);
-        };
-        const timer = setTimeout(() => {
-          child.off("exit", onExit);
-          resolve(false);
-        }, options.forcedExitTimeoutMs ?? 5_000);
-        timer.unref();
-        child.once("exit", onExit);
-        if (child.exitCode !== null || child.signalCode !== null) {
-          child.off("exit", onExit);
-          clearTimeout(timer);
-          resolve(true);
-        }
-      });
+  const exited = await waitForChildExitBounded(
+    child,
+    options.forcedExitTimeoutMs ?? 5_000,
+  );
   if (!exited) {
     throw new Error("The Electron fixture process did not exit after forced close.");
   }

@@ -133,15 +133,17 @@ async function waitForChildExitBounded(
   });
 }
 
-export async function closeElectronAppBounded(
+interface ElectronAppCloseOptions {
+  readonly childProcess?: ChildProcess;
+  readonly gracefulTimeoutMs?: number;
+  readonly forcedExitTimeoutMs?: number;
+  readonly protocolSettleTimeoutMs?: number;
+}
+
+async function closeElectronAppWithOutcome(
   current: ElectronApplication,
-  options: {
-    readonly childProcess?: ChildProcess;
-    readonly gracefulTimeoutMs?: number;
-    readonly forcedExitTimeoutMs?: number;
-    readonly protocolSettleTimeoutMs?: number;
-  } = {},
-): Promise<void> {
+  options: ElectronAppCloseOptions = {},
+): Promise<"graceful" | "abnormal" | "forced"> {
   const child = options.childProcess ?? current.process();
   const gracefulTimeoutMs = options.gracefulTimeoutMs
     ?? FIXTURE_ELECTRON_GRACEFUL_TIMEOUT_MS;
@@ -151,14 +153,17 @@ export async function closeElectronAppBounded(
     closeResult,
     gracefulTimeoutMs,
   );
-  if (graceful.status === "fulfilled") return;
   if (
-    graceful.status === "rejected"
+    (graceful.status === "fulfilled" || graceful.status === "rejected")
     && await waitForChildExitBounded(
       child,
       gracefulDeadlineAt - Date.now(),
     )
-  ) return;
+  ) {
+    return child.exitCode === 0 && child.signalCode === null
+      ? "graceful"
+      : "abnormal";
+  }
   if (child.exitCode === null && child.signalCode === null) {
     child.kill("SIGKILL");
   }
@@ -176,6 +181,14 @@ export async function closeElectronAppBounded(
     closeResult,
     options.protocolSettleTimeoutMs ?? 1_000,
   );
+  return "forced";
+}
+
+export async function closeElectronAppBounded(
+  current: ElectronApplication,
+  options: ElectronAppCloseOptions = {},
+): Promise<void> {
+  await closeElectronAppWithOutcome(current, options);
 }
 
 export async function closeElectronFixtureBounded(options: {
@@ -200,6 +213,7 @@ export async function closeElectronFixtureBounded(options: {
       } catch (error) {
         cleanupErrors.push(error);
       }
+      let quitFailure: unknown;
       const quitResult = await settleOperationBounded(
         Promise.resolve().then(options.requestRuntimeQuit),
         options.rpcTimeoutMs ?? 1_000,
@@ -207,18 +221,36 @@ export async function closeElectronFixtureBounded(options: {
       if (quitResult.status === "fulfilled") {
         runtimePid = quitResult.value;
       } else if (quitResult.status === "rejected") {
-        cleanupErrors.push(quitResult.reason);
+        quitFailure = quitResult.reason;
       } else {
-        cleanupErrors.push(new Error(
+        quitFailure = new Error(
           "The Electron fixture runtime quit request did not settle in time.",
-        ));
+        );
       }
+      let appCloseConfirmed = false;
       if (childProcess) {
         try {
-          await closeElectronAppBounded(options.current, { childProcess });
+          const appCloseOutcome = await closeElectronAppWithOutcome(
+            options.current,
+            { childProcess },
+          );
+          appCloseConfirmed = appCloseOutcome === "graceful";
+          if (appCloseOutcome === "abnormal") {
+            cleanupErrors.push(new Error(
+              `The Electron fixture process exited abnormally during close (exitCode=${String(childProcess.exitCode)}, signal=${String(childProcess.signalCode)}).`,
+            ));
+          }
         } catch (error) {
           cleanupErrors.push(error);
         }
+      }
+      // app.quit intentionally disconnects Playwright while its evaluate call
+      // is returning. A captured Electron child that then completes the
+      // privileged before-quit cleanup is the stronger lifecycle authority;
+      // only surface the advisory RPC failure when that bounded close proof is
+      // unavailable.
+      if (quitFailure !== undefined && !appCloseConfirmed) {
+        cleanupErrors.push(quitFailure);
       }
       if (runtimePid) {
         try {

@@ -10,8 +10,8 @@ export const runtimeSupervisorDefaults = {
   startupTimeoutMs: 20_000,
   stableUptimeMs: 30_000,
   // Let the utility runtime finish its complete platform-owned cleanup proof
-  // before main begins the process-tree fallback. macOS has a longer bounded
-  // guardian admission/retirement envelope; other platforms remain at 3 s.
+  // before main begins the process-tree fallback. macOS includes bounded
+  // guardian admission/retirement; Windows includes ConPTY drain headroom.
   shutdownGraceMs: runtimeSupervisorShutdownGraceMs(),
   forceKillWaitMs: RUNTIME_SUPERVISOR_FORCE_KILL_WAIT_MS,
   requestTimeoutMs: 10_000,

@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   activateRuntimeOwnedProcessRegistry,
   RuntimeOwnedProcessJournal,
+  spawnRuntimeOwnedPidProcess,
   spawnRuntimeOwnedProcess,
 } from "../../src/node/runtime-owned-processes";
 import { terminateProcessTreeAndWait } from "../../src/server/process-lifecycle";
@@ -56,6 +57,8 @@ function fakeGuardian(closeSignal: NodeJS.Signals | null, stopResult: boolean) {
 function activate(
   directory: string,
   ready: Promise<typeof expectedIdentity>,
+  readDarwinIdentityAsync: () => Promise<typeof expectedIdentity> =
+    async () => expectedIdentity,
 ): void {
   const deactivate = activateRuntimeOwnedProcessRegistry(
     directory,
@@ -65,7 +68,7 @@ function activate(
       platform: "darwin",
       darwinGuardianPath: guardianPath,
       readDarwinGuardianReadyAsync: async () => await ready,
-      readDarwinIdentityAsync: async () => expectedIdentity,
+      readDarwinIdentityAsync,
     },
   );
   if (deactivate) deactivators.push(deactivate);
@@ -84,7 +87,10 @@ describe("runtime-owned guardian stop barrier", () => {
     const directory = temporaryDirectory();
     let resolveReady!: (identity: typeof expectedIdentity) => void;
     const ready = new Promise<typeof expectedIdentity>((resolve) => { resolveReady = resolve; });
-    activate(directory, ready);
+    const readDarwinIdentityAsync = vi.fn(
+      () => new Promise<typeof expectedIdentity>(() => undefined),
+    );
+    activate(directory, ready, readDarwinIdentityAsync);
     const guardian = fakeGuardian(null, true);
     const child = guardian as unknown as ChildProcess;
     spawnRuntimeOwnedProcess(() => child);
@@ -99,8 +105,62 @@ describe("runtime-owned guardian stop barrier", () => {
 
     await expect(termination).resolves.toBe(true);
     expect(guardian.kill).toHaveBeenCalledWith("SIGTERM");
+    expect(readDarwinIdentityAsync).not.toHaveBeenCalled();
     expect(new RuntimeOwnedProcessJournal(directory)
       .records(runtimeGenerationId)).toEqual([]);
+  });
+
+  it("cancels a pending authorization census when an admitted PTY guardian is stopped", async () => {
+    const directory = temporaryDirectory();
+    const readDarwinIdentityAsync = vi.fn(
+      () => new Promise<typeof expectedIdentity>(() => undefined),
+    );
+    activate(directory, Promise.resolve(expectedIdentity), readDarwinIdentityAsync);
+    const processKill = vi.spyOn(process, "kill").mockReturnValue(true);
+    const owned = spawnRuntimeOwnedPidProcess(
+      () => ({ pid: expectedIdentity.pid }),
+      { darwinGuardianCommand: guardianPath },
+    );
+    await vi.waitFor(() => expect(readDarwinIdentityAsync).toHaveBeenCalledOnce());
+
+    expect(owned.requestGuardianStop()).toBe(true);
+    await expect(owned.waitForGuardianStop()).resolves.toBe(true);
+    expect(processKill).toHaveBeenCalledWith(expectedIdentity.pid, "SIGTERM");
+    expect(processKill).not.toHaveBeenCalledWith(expectedIdentity.pid, "SIGUSR1");
+
+    owned.releaseIfGroupExited(0);
+    await expect.poll(() => owned.confirmStopped()).toBe(true);
+    expect(new RuntimeOwnedProcessJournal(directory)
+      .records(runtimeGenerationId)).toEqual([]);
+  });
+
+  it("rechecks cancellation at the final guardian authorization boundary", async () => {
+    const directory = temporaryDirectory();
+    let resolveAuthorization!: (identity: typeof expectedIdentity) => void;
+    const authorization = new Promise<typeof expectedIdentity>((resolve) => {
+      resolveAuthorization = resolve;
+    });
+    activate(directory, Promise.resolve(expectedIdentity), async () => await authorization);
+    const processKill = vi.spyOn(process, "kill").mockReturnValue(true);
+    const identityMatches = RuntimeOwnedProcessJournal.identityMatches;
+    let owned!: ReturnType<typeof spawnRuntimeOwnedPidProcess>;
+    vi.spyOn(RuntimeOwnedProcessJournal, "identityMatches").mockImplementation((...args) => {
+      const matches = identityMatches(...args);
+      owned.requestGuardianStop();
+      return matches;
+    });
+    owned = spawnRuntimeOwnedPidProcess(
+      () => ({ pid: expectedIdentity.pid }),
+      { darwinGuardianCommand: guardianPath },
+    );
+
+    resolveAuthorization(expectedIdentity);
+    await expect(owned.waitForGuardianStop()).resolves.toBe(true);
+    expect(processKill).toHaveBeenCalledWith(expectedIdentity.pid, "SIGTERM");
+    expect(processKill).not.toHaveBeenCalledWith(expectedIdentity.pid, "SIGUSR1");
+
+    owned.releaseIfGroupExited(0);
+    await expect.poll(() => owned.confirmStopped()).toBe(true);
   });
 
   it.each([

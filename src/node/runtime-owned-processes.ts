@@ -1,5 +1,4 @@
 import type { ChildProcess } from "node:child_process";
-import { statSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import {
   darwinProcessGuardianReady,
@@ -30,6 +29,8 @@ import {
   type RuntimeOwnedProcessClaim,
   type RuntimeOwnedProcessPlatform,
 } from "./runtime-owned-process-journal.js";
+import { runtimeOwnedProcessInvocationFor } from "./runtime-owned-process-invocation.js";
+import type { RuntimeOwnedProcessInvocation } from "./runtime-owned-process-invocation.js";
 export {
   RuntimeOwnedProcessJournal,
   readLinuxProcessIdentity,
@@ -57,6 +58,7 @@ export {
   readDarwinProcessIdentityAsync,
 } from "./runtime-owned-process-darwin.js";
 export type { DarwinProcessIdentity } from "./runtime-owned-process-darwin.js";
+export type { RuntimeOwnedProcessInvocation } from "./runtime-owned-process-invocation.js";
 
 const PROCESS_GROUP_EXIT_WAIT_MS = 1_000;
 const PROCESS_GROUP_EXIT_POLL_MS = 10;
@@ -96,6 +98,8 @@ interface ActiveRuntimeOwnedProcessClaim {
   readonly ownershipId: string;
   released: boolean;
   stopRequested: boolean;
+  readonly waitForStopRequest: Promise<void>;
+  readonly settleStopRequest: () => void;
   authorizationObserved: boolean;
   admissionSucceeded: boolean;
   groupExitReleaseAttempts: number;
@@ -211,46 +215,17 @@ export function activateRuntimeOwnedProcessRegistry(
   };
 }
 
-export interface RuntimeOwnedProcessInvocation {
-  readonly command: string;
-  readonly args: string[];
-}
-
-/**
- * Places each macOS runtime child in a private process session and performs
- * bounded best-effort cleanup of the processes still attributable to it.
- * macOS exposes no unprivileged job primitive that can prove containment of
- * an arbitrary descendant after it double-forks and calls setsid(); normal
- * completed commands therefore preserve Git/provider fork compatibility,
- * while cancellation or runtime-authority loss remains fail-closed.
- * The helper always execs the requested program without a shell.
- */
 export function runtimeOwnedProcessInvocation(
   command: string,
   args: readonly string[],
 ): RuntimeOwnedProcessInvocation {
   const registry = activeRegistry;
-  if (registry?.platform !== "darwin" && registry?.platform !== "linux") {
-    return { command, args: [...args] };
-  }
-  if (!registry.darwinGuardianPath) {
-    throw new Error("The runtime process guardian is unavailable.");
-  }
-  if (registry.platform === "linux") {
-    const executable = statSync(registry.darwinGuardianPath, { bigint: true });
-    if (!executable.isFile()) throw new Error("The Linux runtime process guardian is invalid.");
-    return {
-      command: registry.darwinGuardianPath,
-      args: [
-        "watch", String(process.pid), String(executable.dev), String(executable.ino),
-        "--", command, ...args,
-      ],
-    };
-  }
-  return {
-    command: registry.darwinGuardianPath,
-    args: ["watch", String(process.pid), "--", command, ...args],
-  };
+  return runtimeOwnedProcessInvocationFor(
+    registry?.platform ?? null,
+    registry?.darwinGuardianPath ?? null,
+    command,
+    args,
+  );
 }
 
 export function activeRuntimeOwnedProcessPlatform(): RuntimeOwnedProcessPlatform | null {
@@ -286,6 +261,7 @@ export function requestRuntimeOwnedGuardianStop(
     return Promise.resolve(false);
   }
   claim.stopRequested = true;
+  claim.settleStopRequest();
   if (claim.admission) return claim.admission;
   if (claim.darwinIdentity) {
     try { return Promise.resolve(child.kill("SIGTERM")); } catch {
@@ -819,13 +795,23 @@ async function admitDarwinGuardian(
         observedDarwinIdentity: readyIdentity,
       },
     );
-    // Keep the distinct post-persistence check immediately before SIGUSR1.
-    // This is the authorization boundary that detects PID reuse or identity
-    // change after the durable claim has been written.
-    const authorizationIdentity = await registry.readDarwinIdentityAsync(
-      pid,
-      registry.admissionController.signal,
-    );
+    if (claim.stopRequested || registry.tainted) {
+      // The durable readiness claim identifies the still-gated guardian; stop
+      // it without waiting for or issuing payload authorization.
+      child.kill("SIGTERM");
+      return true;
+    }
+    // Recheck identity after persistence and immediately before authorization.
+    const authorization = await Promise.race([
+      registry.readDarwinIdentityAsync(pid, registry.admissionController.signal)
+        .then((identity) => ({ kind: "identity" as const, identity })),
+      claim.waitForStopRequest.then(() => ({ kind: "stop" as const })),
+    ]);
+    if (authorization.kind === "stop") {
+      child.kill("SIGTERM");
+      return true;
+    }
+    const authorizationIdentity = authorization.identity;
     if (
       !authorizationIdentity
       || !RuntimeOwnedProcessJournal.identityMatches(
@@ -835,6 +821,7 @@ async function admitDarwinGuardian(
     ) throw new Error("The macOS owned process guardian identity changed.");
     claim.darwinIdentity = authorizationIdentity;
     if (claim.stopRequested || registry.tainted) {
+      // Close the final race without authorizing the still-gated payload.
       child.kill("SIGTERM");
       return true;
     }
@@ -887,10 +874,16 @@ export function spawnRuntimeOwnedProcess<T extends ChildProcess>(
     registry.journal.release(ownershipId);
     throw error;
   }
+  let settleStopRequest!: () => void;
+  const waitForStopRequest = new Promise<void>((resolve) => {
+    settleStopRequest = resolve;
+  });
   const claim: ActiveRuntimeOwnedProcessClaim = {
     ownershipId,
     released: false,
     stopRequested: false,
+    waitForStopRequest,
+    settleStopRequest,
     authorizationObserved: false,
     admissionSucceeded: false,
     groupExitReleaseAttempts: 0,
@@ -1007,10 +1000,16 @@ export function spawnRuntimeOwnedPidProcess<T extends { readonly pid: number }>(
     registry.runtimeGenerationId,
     registry.systemBootId,
   );
+  let settleStopRequest!: () => void;
+  const waitForStopRequest = new Promise<void>((resolve) => {
+    settleStopRequest = resolve;
+  });
   const claim: ActiveRuntimeOwnedProcessClaim = {
     ownershipId,
     released: false,
     stopRequested: false,
+    waitForStopRequest,
+    settleStopRequest,
     authorizationObserved: false,
     admissionSucceeded: false,
     groupExitReleaseAttempts: 0,
@@ -1097,6 +1096,7 @@ export function spawnRuntimeOwnedPidProcess<T extends { readonly pid: number }>(
         requestGuardianStop: () => {
           if (claim.released) return true;
           claim.stopRequested = true;
+          claim.settleStopRequest();
           if (!claim.admission && claim.darwinIdentity) {
             try { process.kill(confirmedOwned.pid, "SIGTERM"); } catch {
               // The durable claim remains authoritative when the guardian is gone.

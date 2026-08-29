@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useMultiSpawn } from "../../src/renderer/src/hooks/useMultiSpawn";
 import {
   useAsyncOperationQueue,
+  useAuthoritativeConversationCreateQueue,
   useConversationSelectionQueue,
   useRuntimeCommandQueue,
 } from "../../src/renderer/src/hooks/useConversationSelectionQueue";
@@ -137,6 +138,77 @@ beforeEach(() => window.localStorage.clear());
 afterEach(() => vi.useRealTimers());
 
 describe("Duo comparison navigation", () => {
+  it("releases a published create into the shared workspace-authority order", async () => {
+    const createdConversationId = "88888888-8888-4888-8888-888888888888";
+    let currentSnapshot = snapshot;
+    let settleFirstCreate!: (event: ServerEvent) => void;
+    const operations: string[] = [];
+    const run = vi.fn((
+      _key: string,
+      command: CommandWithoutId,
+    ): Promise<ServerEvent> => {
+      operations.push(command.type);
+      if (run.mock.calls.length === 1) {
+        return new Promise<ServerEvent>((resolve) => {
+          settleFirstCreate = resolve;
+        });
+      }
+      if (command.type === "conversation.select") {
+        return Promise.resolve({ type: "request.ok", requestId: crypto.randomUUID() });
+      }
+      expect(command.type).toBe("conversation.create");
+      return Promise.resolve({ type: "request.ok", requestId: crypto.randomUUID() });
+    });
+    const hook = renderHook(() => {
+      const enqueue = useAsyncOperationQueue();
+      return {
+        create: useAuthoritativeConversationCreateQueue(
+          run,
+          currentSnapshot,
+          enqueue,
+        ),
+        select: (conversationId: string) => enqueue(() => run("conversation.select", {
+          type: "conversation.select",
+          payload: { conversationId },
+        })),
+      };
+    });
+    const create = (title: string) => hook.result.current.create("conversation.create", {
+      type: "conversation.create",
+      payload: { projectId: projectIds[0], title },
+    });
+
+    let first!: Promise<void>;
+    let selection!: Promise<ServerEvent>;
+    let second!: Promise<void>;
+    await act(async () => {
+      first = create("First new chat");
+      selection = hook.result.current.select(conversationIds[1]);
+      second = create("Second new chat");
+    });
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+
+    currentSnapshot = {
+      ...snapshot,
+      activeConversationId: createdConversationId,
+      conversations: [{
+        id: createdConversationId,
+        projectId: projectIds[0],
+      }] as AppSnapshot["conversations"],
+    };
+    hook.rerender();
+
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(3));
+    expect(operations).toEqual([
+      "conversation.create",
+      "conversation.select",
+      "conversation.create",
+    ]);
+    await expect(first).resolves.toBeUndefined();
+    await expect(selection).resolves.toMatchObject({ type: "request.ok" });
+    await expect(second).resolves.toBeUndefined();
+    settleFirstCreate({ type: "request.ok", requestId: crypto.randomUUID() });
+  });
   it("polls a live comparison without entering the foreground action runner", async () => {
     vi.useFakeTimers();
     const baseRuntime = runtime();

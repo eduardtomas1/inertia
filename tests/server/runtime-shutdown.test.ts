@@ -22,13 +22,13 @@ function deferred(): {
 }
 
 describe("runtime shutdown phases", () => {
-  it("keeps the extended cleanup proof window scoped to macOS", () => {
+  it("preserves each platform's complete cleanup proof window", () => {
     expect(runtimeShutdownDeadlineMs("darwin")).toBe(10_000);
     expect(runtimeShutdownDeadlineMs("linux")).toBe(2_500);
-    expect(runtimeShutdownDeadlineMs("win32")).toBe(2_500);
+    expect(runtimeShutdownDeadlineMs("win32")).toBe(5_500);
     expect(runtimeSupervisorShutdownEnvelopeMs("darwin")).toBe(12_500);
     expect(runtimeSupervisorShutdownEnvelopeMs("linux")).toBe(5_000);
-    expect(runtimeSupervisorShutdownEnvelopeMs("win32")).toBe(5_000);
+    expect(runtimeSupervisorShutdownEnvelopeMs("win32")).toBe(8_000);
   });
 
   it.runIf(process.platform === "darwin")(

@@ -1,11 +1,19 @@
 import { expect, type TestInfo } from "@playwright/test";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { copyFileSync, readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import Database from "better-sqlite3";
 
 import { readSystemBootId } from "../../../src/main/system-boot-id";
+import { RuntimeCleanupReceiptJournal } from
+  "../../../src/main/runtime-cleanup-receipts";
+import {
+  listDirectRuntimeJournalLeaves,
+  pinDirectRuntimeJournalRoot,
+} from "../../../src/node/direct-runtime-journal";
 import { RuntimeGenerationLeaseJournal } from "../../../src/node/runtime-generation-leases";
+import { ModernDarwinRecoveryAuthorityJournal } from
+  "../../../src/node/runtime-modern-recovery-authorities";
 import {
   type ObservedRuntimeOwnedProcessIdentity,
   readDarwinProcessIdentity,
@@ -27,6 +35,155 @@ interface RuntimeObservation {
   readonly generation: number;
   readonly phase: string;
   readonly pid: number | null;
+}
+
+const RUNTIME_RECOVERY_DIALOG_RESTORE_TIMEOUT_MS = 5_000;
+
+class InterceptedRuntimeRecoveryError extends Error {
+  readonly contentBytes: number;
+  readonly contentSha256: string;
+  readonly recoveryTitle: string;
+
+  constructor(title: string, content: string) {
+    super(`${title}: ${content}`);
+    this.name = "InterceptedRuntimeRecoveryError";
+    this.recoveryTitle = title;
+    this.contentBytes = Buffer.byteLength(content, "utf8");
+    this.contentSha256 = createHash("sha256").update(content).digest("hex");
+  }
+}
+
+type DiagnosticRead<T> =
+  | { readonly status: "ok"; readonly value: T }
+  | {
+    readonly status: "error";
+    readonly errorName: string;
+    readonly errorCode: string | null;
+  };
+
+function diagnosticRead<T>(read: () => T): DiagnosticRead<T> {
+  try {
+    return { status: "ok", value: read() };
+  } catch (error) {
+    return {
+      status: "error",
+      errorName: error instanceof Error ? error.name : "UnknownError",
+      errorCode: error && typeof error === "object" && "code" in error
+        ? String(error.code)
+        : null,
+    };
+  }
+}
+
+async function attachDarwinRecoverySafetyLockDiagnostic(
+  testInfo: TestInfo,
+  dataDirectory: string,
+  priorGenerationId: string | null,
+  error: unknown,
+): Promise<void> {
+  if (process.platform !== "darwin") return;
+  // Capture the bounded raw topology before production readers get a chance
+  // to finish or discard any safely repairable atomic-write transient.
+  const rawTopology = diagnosticRead(() => {
+    const root = pinDirectRuntimeJournalRoot(dataDirectory);
+    return {
+      rootIdentity: {
+        device: String(root.device),
+        inode: String(root.inode),
+      },
+      leaves: listDirectRuntimeJournalLeaves(
+        root,
+        ".runtime-",
+        512,
+      ).sort(),
+    };
+  });
+  const leases = diagnosticRead(() => {
+    const journal = new RuntimeGenerationLeaseJournal(dataDirectory);
+    return {
+      valid: journal.isValid(),
+      entries: journal.all().map((lease) => ({ ...lease }))
+        .sort((left, right) => left.runtimeGenerationId.localeCompare(
+          right.runtimeGenerationId,
+        )),
+    };
+  });
+  const receipts = diagnosticRead(() => (
+    new RuntimeCleanupReceiptJournal(dataDirectory).pending().sort()
+  ));
+  const owned = diagnosticRead(() => {
+    if (!priorGenerationId) return { sessionPresent: null, records: [] };
+    const records = new RuntimeOwnedProcessJournal(dataDirectory, {
+      platform: "darwin",
+    }).records(priorGenerationId);
+    return {
+      sessionPresent: records !== null,
+      records: (records ?? []).map((record) => ({
+        ownershipId: record.ownershipId,
+        state: record.state,
+        pid: record.state === "pending" ? null : record.process.pid,
+        parentPid: record.state === "pending"
+          ? record.runtimeParentPid
+          : "parentPid" in record.process
+            ? record.process.parentPid
+            : null,
+        processGroupId: record.state === "pending"
+          ? null
+          : "processGroupId" in record.process
+            ? record.process.processGroupId
+            : null,
+        sessionId: record.state === "pending"
+          ? null
+          : "sessionId" in record.process
+            ? record.process.sessionId
+            : null,
+      })).sort((left, right) => left.ownershipId.localeCompare(
+        right.ownershipId,
+      )),
+    };
+  });
+  const modernAuthority = diagnosticRead(() => {
+    const journal = new ModernDarwinRecoveryAuthorityJournal(dataDirectory);
+    const summarize = (authority: ReturnType<typeof journal.pending>) => (
+      authority
+        ? {
+          operationId: authority.operationId,
+          snapshotDigest: authority.snapshotDigest,
+          generationIds: authority.snapshot.generations.map(
+            ({ lease }) => lease.runtimeGenerationId,
+          ).sort(),
+        }
+        : null
+    );
+    return {
+      pending: summarize(journal.pending()),
+      retiring: summarize(journal.retiring()),
+    };
+  });
+  const intercepted = error instanceof InterceptedRuntimeRecoveryError
+    ? {
+      title: error.recoveryTitle,
+      contentBytes: error.contentBytes,
+      contentSha256: error.contentSha256,
+    }
+    : null;
+  await testInfo.attach("darwin-runtime-recovery-safety-lock", {
+    body: Buffer.from(JSON.stringify({
+      schemaVersion: 1,
+      observedAt: new Date().toISOString(),
+      observedAfterSafetyLock: true,
+      rawTopology,
+      semanticReadsAfterRawTopologyCapture: true,
+      semanticReadsMayRepairAtomicTransients: true,
+      priorGenerationId,
+      intercepted,
+      leases,
+      receipts,
+      owned,
+      modernAuthority,
+    }, null, 2), "utf8"),
+    contentType: "application/json",
+  });
 }
 
 function runtimeObservation(snapshot: RuntimeTestSnapshot): RuntimeObservation {
@@ -157,12 +314,19 @@ export async function installRuntimeRecoveryConsent(
         delete owner.__inertiaRuntimeRecoveryError;
         return recoveryError;
       })),
-      1_000,
+      RUNTIME_RECOVERY_DIALOG_RESTORE_TIMEOUT_MS,
     );
     if (result.status === "fulfilled" && result.value) {
-      throw new Error(
-        `${result.value.title}: ${result.value.content}`,
+      throw new InterceptedRuntimeRecoveryError(
+        result.value.title,
+        result.value.content,
       );
+    }
+    if (result.status === "rejected") {
+      throw new Error("The runtime recovery dialog could not be restored.");
+    }
+    if (result.status === "timed-out") {
+      throw new Error("The runtime recovery dialog did not restore in time.");
     }
   };
 }
@@ -481,8 +645,9 @@ export async function expectRuntimeCrashRecovery(
   const restoreRuntimeRecoveryConsent = await installRuntimeRecoveryConsent(
     electronApp,
   );
-  let crashed: RuntimeTestSnapshot;
-  let after: RuntimeTestSnapshot;
+  let crashed: RuntimeTestSnapshot | null = null;
+  let after: RuntimeTestSnapshot | null = null;
+  let recoveryOperationError: unknown = null;
   try {
     crashed = await electronApp.evaluate((_electron) => {
       const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
@@ -506,8 +671,25 @@ export async function expectRuntimeCrashRecovery(
     after = await runtimeSnapshot();
     expect(after.phase).toBe("ready");
     expect(after.generation).toBeGreaterThan(before.generation);
-  } finally {
+  } catch (error) {
+    recoveryOperationError = error;
+  }
+  try {
     await restoreRuntimeRecoveryConsent();
+  } catch (error) {
+    if (testInfo) {
+      await attachDarwinRecoverySafetyLockDiagnostic(
+        testInfo,
+        dataDirectory,
+        priorLease?.runtimeGenerationId ?? null,
+        error,
+      ).catch(() => undefined);
+    }
+    throw error;
+  }
+  if (recoveryOperationError) throw recoveryOperationError;
+  if (!crashed || !after) {
+    throw new Error("The runtime crash-recovery result was incomplete.");
   }
   const crashReturnedObservation = runtimeObservation(crashed);
   expect(crashed.pid).toBe(before.pid);

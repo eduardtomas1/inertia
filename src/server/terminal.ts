@@ -17,7 +17,10 @@ import {
   type WaitForProcessExit,
 } from "./process-lifecycle";
 import { requestRecoveryFromTaintedOwnedProcess } from "./terminal-runtime-recovery";
-import { terminalShutdownTimeoutMs } from "./terminal-shutdown-deadline";
+import {
+  terminalCloseTimeoutMs,
+  terminalShutdownTimeoutMs,
+} from "./terminal-shutdown-deadline";
 import { beforeTerminalDeadline } from "./terminal-deadline";
 import {
   runtimeOwnedPtyInvocationForBoundary,
@@ -35,6 +38,10 @@ const TERMINAL_REATTACH_TIMEOUT_MS = 30_000;
 const TERMINAL_REATTACH_TRUNCATION_NOTICE =
   "\r\n\x1b[2mEarlier terminal output was truncated while reconnecting.\x1b[0m\r\n";
 
+function boundedMilliseconds(value: number, maximum: number): number {
+  return Math.max(1, Math.min(Math.trunc(value), maximum));
+}
+
 interface TerminalSession {
   id: string;
   owner: WebSocket | null;
@@ -46,6 +53,8 @@ interface TerminalSession {
   dataListener: IDisposable;
   exitListener: IDisposable;
   exitObserved: boolean;
+  exitCode: number | null;
+  exitSignal: number | null;
   exitWaiters: Set<() => void>;
   terminationRequested: boolean;
   supportsGracefulReplacement: boolean;
@@ -69,6 +78,7 @@ interface TerminalSession {
 export interface TerminalManagerOptions {
   spawnTerminal?: typeof spawn;
   shutdownTimeoutMs?: number;
+  closeTimeoutMs?: number;
   outputFlushMs?: number;
   reattachTimeoutMs?: number;
   platform?: NodeJS.Platform;
@@ -178,6 +188,15 @@ async function waitForOwnedProcessStoppedWithinDeadline(
   return true;
 }
 
+function ownershipRetirementFailure(session: TerminalSession): TerminalError {
+  const outcome = session.exitObserved
+    ? ` Guardian exit code: ${session.exitCode ?? "unknown"}; signal: ${session.exitSignal ?? "unknown"}.`
+    : "";
+  return new TerminalError(
+    `A terminal process ownership claim could not be retired during runtime shutdown.${outcome}`,
+  );
+}
+
 function stopSlowSocket(socket: WebSocket): void {
   try {
     socket.terminate();
@@ -213,6 +232,7 @@ export class TerminalManager {
   private updatePreparationHeld = false;
   private readonly spawnTerminal: typeof spawn;
   private readonly shutdownTimeoutMs: number;
+  private readonly closeTimeoutMs: number;
   private readonly outputFlushMs: number;
   private readonly reattachTimeoutMs: number;
   private readonly platform: NodeJS.Platform;
@@ -231,25 +251,21 @@ export class TerminalManager {
   constructor(options: TerminalManagerOptions = {}) {
     this.platform = options.platform ?? process.platform;
     this.spawnTerminal = options.spawnTerminal ?? spawn;
-    this.shutdownTimeoutMs = Math.max(
-      1,
-      Math.min(
-        Math.trunc(
-          options.shutdownTimeoutMs ?? terminalShutdownTimeoutMs(this.platform),
-        ),
-        30_000,
-      ),
+    this.shutdownTimeoutMs = boundedMilliseconds(
+      options.shutdownTimeoutMs ?? terminalShutdownTimeoutMs(this.platform),
+      30_000,
     );
-    this.outputFlushMs = Math.max(
-      1,
-      Math.min(Math.trunc(options.outputFlushMs ?? OUTPUT_FLUSH_MS), 50),
+    this.closeTimeoutMs = boundedMilliseconds(
+      options.closeTimeoutMs ?? terminalCloseTimeoutMs(this.platform),
+      30_000,
     );
-    this.reattachTimeoutMs = Math.max(
-      1,
-      Math.min(
-        Math.trunc(options.reattachTimeoutMs ?? TERMINAL_REATTACH_TIMEOUT_MS),
-        120_000,
-      ),
+    this.outputFlushMs = boundedMilliseconds(
+      options.outputFlushMs ?? OUTPUT_FLUSH_MS,
+      50,
+    );
+    this.reattachTimeoutMs = boundedMilliseconds(
+      options.reattachTimeoutMs ?? TERMINAL_REATTACH_TIMEOUT_MS,
+      120_000,
     );
     this.spawnOwnedTerminalProcess = options.spawnOwnedTerminalProcess
       ?? spawnRuntimeOwnedPidProcess;
@@ -817,6 +833,8 @@ export class TerminalManager {
     const exitListener = pseudoterminal.onExit(({ exitCode, signal }) => {
       flushOutput();
       session.exitObserved = true;
+      session.exitCode = exitCode;
+      session.exitSignal = signal ?? null;
       for (const resolveExit of session.exitWaiters) resolveExit();
       session.exitWaiters.clear();
       releaseOwnedProcessIfExited(signal);
@@ -826,9 +844,7 @@ export class TerminalManager {
         && !session.confirmOwnedProcessStopped()
       ) {
         session.terminationRequested = true;
-        this.recordCleanupFailure(session, new TerminalError(
-          "A terminal process ownership claim could not be retired during runtime shutdown.",
-        ));
+        this.recordCleanupFailure(session, ownershipRetirementFailure(session));
         return;
       }
       if (session.terminationRequested) return;
@@ -850,6 +866,8 @@ export class TerminalManager {
       dataListener,
       exitListener,
       exitObserved: false,
+      exitCode: null,
+      exitSignal: null,
       exitWaiters: new Set(),
       terminationRequested: false,
       supportsGracefulReplacement,
@@ -1070,7 +1088,6 @@ export class TerminalManager {
     // Let trackDisposal publish the memoized closing promise before a graceful
     // payload exit can synchronously trigger the PTY exit listener.
     await Promise.resolve();
-    let fallbackDeadlineAt: number | null = null;
     if (
       attemptGracefulReplacement
       && await this.gracefullyRetireReplacementShell(session)
@@ -1083,12 +1100,11 @@ export class TerminalManager {
       }
       return;
     }
-    if (attemptGracefulReplacement) {
-      // The graceful prepass is an optional convenience for an interactive Darwin
-      // shell. Give the fail-closed guardian path its complete configured
-      // budget when no enclosing runtime-shutdown deadline is already tighter.
-      fallbackDeadlineAt = Date.now() + this.shutdownTimeoutMs;
-    }
+    // One ordinary-close envelope includes asynchronous admission plus the
+    // stop proof; the authoritative runtime-shutdown deadline can tighten it.
+    const fallbackDeadlineAt = session.shutdownDeadlineAt === null
+      ? Date.now() + this.closeTimeoutMs
+      : null;
 
     await new Promise<void>((resolve, reject) => {
       let settled = false;
@@ -1162,9 +1178,7 @@ export class TerminalManager {
             this.shutdownTimeoutMs,
             fallbackDeadlineAt,
           )) {
-            finish(new TerminalError(
-              "A terminal process ownership claim could not be retired during runtime shutdown.",
-            ));
+            finish(ownershipRetirementFailure(session));
             return;
           }
           this.dispose(session.id, false);

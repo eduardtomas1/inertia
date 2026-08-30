@@ -36,6 +36,59 @@ function fakeTerminal(): {
 }
 
 describe("TerminalManager macOS shutdown", () => {
+  it("composes guardian admission, stop, and durable retirement for close", async () => {
+    vi.useFakeTimers();
+    try {
+      const terminal = fakeTerminal();
+      let ownershipStopped = false;
+      const cleanupUnconfirmed = vi.fn();
+      const owner = {
+        readyState: 1,
+        bufferedAmount: 0,
+        send: vi.fn(),
+      } as unknown as WebSocket;
+      const manager = new TerminalManager({
+        platform: "darwin",
+        preserveDarwinShellOnReplacement: false,
+        shutdownTimeoutMs: 5_000,
+        spawnTerminal: vi.fn(() => terminal.pty),
+        spawnOwnedTerminalProcess: (spawnProcess) => ({
+          process: spawnProcess(),
+          confirmStopped: () => ownershipStopped,
+          releaseIfGroupExited: () => undefined,
+          requestPayloadExit: () => false,
+          requestGuardianStop: () => true,
+          waitForGuardianStop: async () => {
+            await new Promise<void>((resolve) => setTimeout(resolve, 5_500));
+            return true;
+          },
+        }),
+        onOwnedProcessCleanupUnconfirmed: cleanupUnconfirmed,
+      });
+      const terminalId = manager.create(owner, process.cwd(), 80, 24);
+
+      const closing = manager.close(owner, terminalId);
+      await vi.advanceTimersByTimeAsync(5_500);
+      expect(cleanupUnconfirmed).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(4_999);
+
+      terminal.emitExit();
+      await vi.advanceTimersByTimeAsync(2_240);
+      ownershipStopped = true;
+      await vi.advanceTimersByTimeAsync(10);
+
+      await expect(closing).resolves.toBeUndefined();
+      expect(cleanupUnconfirmed).not.toHaveBeenCalled();
+      expect(owner.send).toHaveBeenCalledWith(JSON.stringify({
+        type: "terminal.exit",
+        terminalId,
+        exitCode: 130,
+      }));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("lets the bounded guardian drain complete beyond the generic POSIX budget", async () => {
     vi.useFakeTimers();
     try {

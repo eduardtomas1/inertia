@@ -13,7 +13,7 @@ export interface DarwinProcessIdentity {
 
 const DARWIN_GUARDIAN_HELPER_OUTPUT_BYTES = 4 * 1024;
 const DARWIN_IDENTITY_HELPER_TIMEOUT_MS = 5_000;
-const DARWIN_READY_HELPER_TIMEOUT_MS = 5_500;
+export const DARWIN_RUNTIME_OWNED_GUARDIAN_ADMISSION_TIMEOUT_MS = 5_500;
 
 interface DarwinGuardianHelperResult {
   readonly stdout: string;
@@ -322,7 +322,7 @@ export async function darwinProcessGuardianReadyAsync(
   const result = await runDarwinGuardianHelper(
     guardianPath,
     ["ready", String(pid)],
-    DARWIN_READY_HELPER_TIMEOUT_MS,
+    DARWIN_RUNTIME_OWNED_GUARDIAN_ADMISSION_TIMEOUT_MS,
     abortSignal,
   );
   if (result.failed || result.signal || result.stderr.trim()) return null;

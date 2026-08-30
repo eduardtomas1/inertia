@@ -140,6 +140,66 @@ interface ElectronAppCloseOptions {
   readonly protocolSettleTimeoutMs?: number;
 }
 
+export interface ElectronAppQuitOptions extends ElectronAppCloseOptions {
+  readonly quitRequestTimeoutMs?: number;
+}
+
+export interface ElectronAppQuitResult<T> {
+  readonly outcome: "graceful" | "abnormal" | "forced";
+  readonly requestResult: BoundedOperationResult<T>;
+  readonly transportSettled: boolean;
+}
+
+export async function quitElectronAppBounded<T>(
+  current: ElectronApplication,
+  requestQuit: () => Promise<T>,
+  options: ElectronAppQuitOptions = {},
+): Promise<ElectronAppQuitResult<T>> {
+  const child = options.childProcess ?? current.process();
+  const requestResultPromise = settleOperationBounded(
+    Promise.resolve().then(requestQuit),
+    options.quitRequestTimeoutMs ?? 1_000,
+  );
+  const exitedNaturally = await waitForChildExitBounded(
+    child,
+    options.gracefulTimeoutMs ?? FIXTURE_ELECTRON_GRACEFUL_TIMEOUT_MS,
+  );
+  let outcome: ElectronAppQuitResult<T>["outcome"];
+  if (exitedNaturally) {
+    outcome = child.exitCode === 0 && child.signalCode === null
+      ? "graceful"
+      : "abnormal";
+  } else {
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill("SIGKILL");
+    }
+    const exitedAfterForce = await waitForChildExitBounded(
+      child,
+      options.forcedExitTimeoutMs ?? 5_000,
+    );
+    if (!exitedAfterForce) {
+      throw new Error(
+        "The Electron fixture process did not exit after forced quit.",
+      );
+    }
+    outcome = "forced";
+  }
+
+  // app.quit disconnects Playwright as the native process exits. Settle that
+  // transport only after OS process authority proves the profile is no longer
+  // owned; starting BrowserContext.close earlier races Electron's before-quit
+  // cleanup and can leave the next launch contending for the same profile.
+  const transportResult = await settleOperationBounded(
+    Promise.resolve().then(() => current.close()),
+    options.protocolSettleTimeoutMs ?? 1_000,
+  );
+  return {
+    outcome,
+    requestResult: await requestResultPromise,
+    transportSettled: transportResult.status !== "timed-out",
+  };
+}
+
 async function closeElectronAppWithOutcome(
   current: ElectronApplication,
   options: ElectronAppCloseOptions = {},
@@ -193,6 +253,7 @@ export async function closeElectronAppBounded(
 
 export async function closeElectronFixtureBounded(options: {
   readonly current: ElectronApplication | null;
+  readonly priorRuntimePid?: number | null;
   readonly requestRuntimeQuit: () => Promise<number | null>;
   readonly waitForRuntimeExit: (pid: number) => Promise<void>;
   readonly closeServer: () => Promise<void>;
@@ -202,7 +263,7 @@ export async function closeElectronFixtureBounded(options: {
   readonly removeTimeoutMs?: number;
 }): Promise<void> {
   const cleanupErrors: unknown[] = [];
-  let runtimePid: number | null = null;
+  let runtimePid: number | null = options.priorRuntimePid ?? null;
   try {
     if (options.current) {
       // The quit RPC can close Playwright's Electron dispatcher before the
@@ -214,35 +275,52 @@ export async function closeElectronFixtureBounded(options: {
         cleanupErrors.push(error);
       }
       let quitFailure: unknown;
-      const quitResult = await settleOperationBounded(
-        Promise.resolve().then(options.requestRuntimeQuit),
-        options.rpcTimeoutMs ?? 1_000,
-      );
+      let quitResult: BoundedOperationResult<number | null>;
+      let appCloseConfirmed = false;
+      if (childProcess) {
+        try {
+          const appQuit = await quitElectronAppBounded(
+            options.current,
+            options.requestRuntimeQuit,
+            {
+              childProcess,
+              quitRequestTimeoutMs: options.rpcTimeoutMs ?? 1_000,
+            },
+          );
+          quitResult = appQuit.requestResult;
+          appCloseConfirmed = appQuit.outcome === "graceful";
+          if (!appQuit.transportSettled && appCloseConfirmed) {
+            cleanupErrors.push(new Error(
+              "The Electron fixture transport did not settle after process exit.",
+            ));
+          }
+          if (appQuit.outcome === "abnormal") {
+            cleanupErrors.push(new Error(
+              `The Electron fixture process exited abnormally during close (exitCode=${String(childProcess.exitCode)}, signal=${String(childProcess.signalCode)}).`,
+            ));
+          } else if (appQuit.outcome === "forced") {
+            cleanupErrors.push(new Error(
+              "The Electron fixture process required forced termination during close.",
+            ));
+          }
+        } catch (error) {
+          cleanupErrors.push(error);
+          quitResult = { status: "fulfilled", value: null };
+        }
+      } else {
+        quitResult = await settleOperationBounded(
+          Promise.resolve().then(options.requestRuntimeQuit),
+          options.rpcTimeoutMs ?? 1_000,
+        );
+      }
       if (quitResult.status === "fulfilled") {
-        runtimePid = quitResult.value;
+        if (quitResult.value !== null) runtimePid = quitResult.value;
       } else if (quitResult.status === "rejected") {
         quitFailure = quitResult.reason;
       } else {
         quitFailure = new Error(
           "The Electron fixture runtime quit request did not settle in time.",
         );
-      }
-      let appCloseConfirmed = false;
-      if (childProcess) {
-        try {
-          const appCloseOutcome = await closeElectronAppWithOutcome(
-            options.current,
-            { childProcess },
-          );
-          appCloseConfirmed = appCloseOutcome === "graceful";
-          if (appCloseOutcome === "abnormal") {
-            cleanupErrors.push(new Error(
-              `The Electron fixture process exited abnormally during close (exitCode=${String(childProcess.exitCode)}, signal=${String(childProcess.signalCode)}).`,
-            ));
-          }
-        } catch (error) {
-          cleanupErrors.push(error);
-        }
       }
       // app.quit intentionally disconnects Playwright while its evaluate call
       // is returning. A captured Electron child that then completes the

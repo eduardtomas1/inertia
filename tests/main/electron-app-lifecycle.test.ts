@@ -7,6 +7,7 @@ import { runtimeSupervisorShutdownEnvelopeMs } from "../../src/node/runtime-shut
 import {
   closeElectronAppBounded,
   closeElectronFixtureBounded,
+  quitElectronAppBounded,
   settleOperationBounded,
 } from "../e2e/support/electron-app-lifecycle";
 
@@ -89,6 +90,91 @@ describe("Electron E2E application lifecycle", () => {
       protocolSettleTimeoutMs: 5,
     })).resolves.toBeUndefined();
     expect(fixture.killed).toHaveBeenCalledWith("SIGKILL");
+  });
+
+  it("waits for native app exit before settling restart transport", async () => {
+    const process = Object.assign(new EventEmitter(), {
+      exitCode: null as number | null,
+      signalCode: null as NodeJS.Signals | null,
+      kill: vi.fn(() => true),
+    });
+    const close = vi.fn(async () => {
+      throw new Error("Playwright disconnected after app.quit");
+    });
+    const requestQuit = vi.fn(async () => "quit-requested");
+    const quitting = quitElectronAppBounded({
+      process: () => process,
+      close,
+    } as unknown as ElectronApplication, requestQuit, {
+      gracefulTimeoutMs: 1_000,
+      protocolSettleTimeoutMs: 50,
+    });
+
+    await vi.waitFor(() => expect(requestQuit).toHaveBeenCalledOnce());
+    expect(close).not.toHaveBeenCalled();
+    process.exitCode = 0;
+    process.emit("exit", 0, null);
+
+    await expect(quitting).resolves.toEqual({
+      outcome: "graceful",
+      requestResult: { status: "fulfilled", value: "quit-requested" },
+      transportSettled: true,
+    });
+    expect(close).toHaveBeenCalledOnce();
+    expect(process.kill).not.toHaveBeenCalled();
+  });
+
+  it("reports an abnormal native exit instead of permitting restart", async () => {
+    const process = Object.assign(new EventEmitter(), {
+      exitCode: 1,
+      signalCode: null as NodeJS.Signals | null,
+      kill: vi.fn(() => true),
+    });
+    const close = vi.fn(async () => undefined);
+    await expect(quitElectronAppBounded({
+      process: () => process,
+      close,
+    } as unknown as ElectronApplication, async () => undefined, {
+      gracefulTimeoutMs: 50,
+      protocolSettleTimeoutMs: 50,
+    })).resolves.toMatchObject({ outcome: "abnormal" });
+    expect(close).toHaveBeenCalledOnce();
+    expect(process.kill).not.toHaveBeenCalled();
+  });
+
+  it("forces a hung native quit only after its graceful deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      const process = Object.assign(new EventEmitter(), {
+        exitCode: null as number | null,
+        signalCode: null as NodeJS.Signals | null,
+        kill: vi.fn((signal: NodeJS.Signals) => {
+          process.signalCode = signal;
+          process.emit("exit", null, signal);
+          return true;
+        }),
+      });
+      const close = vi.fn(async () => undefined);
+      const quitting = quitElectronAppBounded({
+        process: () => process,
+        close,
+      } as unknown as ElectronApplication, async () => undefined, {
+        gracefulTimeoutMs: 5,
+        forcedExitTimeoutMs: 50,
+        protocolSettleTimeoutMs: 50,
+      });
+
+      await vi.advanceTimersByTimeAsync(4);
+      expect(process.kill).not.toHaveBeenCalled();
+      expect(close).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+
+      await expect(quitting).resolves.toMatchObject({ outcome: "forced" });
+      expect(process.kill).toHaveBeenCalledWith("SIGKILL");
+      expect(close).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it.runIf(process.platform === "darwin")(
@@ -305,6 +391,37 @@ describe("Electron E2E application lifecycle", () => {
     ]);
   });
 
+  it("awaits a pre-captured runtime before deleting a failed fixture profile", async () => {
+    const process = Object.assign(new EventEmitter(), {
+      exitCode: 1,
+      signalCode: null as NodeJS.Signals | null,
+      kill: vi.fn(() => true),
+    });
+    const waitForRuntimeExit = vi.fn(async () => undefined);
+    const removeDirectory = vi.fn(async () => undefined);
+    const failure = await closeElectronFixtureBounded({
+      current: {
+        process: () => process,
+        close: async () => undefined,
+      } as unknown as ElectronApplication,
+      priorRuntimePid: 777,
+      requestRuntimeQuit: async () => {
+        throw new Error("runtime quit disconnected");
+      },
+      waitForRuntimeExit,
+      closeServer: vi.fn(async () => undefined),
+      removeDirectory,
+      serverTimeoutMs: 50,
+      removeTimeoutMs: 50,
+    }).then(() => null, (error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect(waitForRuntimeExit).toHaveBeenCalledWith(777);
+    expect(waitForRuntimeExit.mock.invocationCallOrder[0]).toBeLessThan(
+      removeDirectory.mock.invocationCallOrder[0]!,
+    );
+  });
+
   it("does not accept a fulfilled close with an abnormal child exit", async () => {
     const process = Object.assign(new EventEmitter(), {
       exitCode: 1,
@@ -355,7 +472,7 @@ describe("Electron E2E application lifecycle", () => {
             process: () => process,
             close: () => new Promise<void>(() => undefined),
           } as unknown as ElectronApplication,
-          requestRuntimeQuit: () => new Promise<number | null>(() => undefined),
+          requestRuntimeQuit: async () => null,
           waitForRuntimeExit: vi.fn(async () => undefined),
           closeServer: vi.fn(async () => undefined),
           removeDirectory: vi.fn(async () => undefined),
@@ -373,7 +490,7 @@ describe("Electron E2E application lifecycle", () => {
         expect(failure).toBeInstanceOf(AggregateError);
         expect((failure as AggregateError).errors).toEqual([
           expect.objectContaining({
-            message: "The Electron fixture runtime quit request did not settle in time.",
+            message: "The Electron fixture process required forced termination during close.",
           }),
         ]);
       } finally {

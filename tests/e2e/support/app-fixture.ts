@@ -13,7 +13,8 @@ import { seedAppConversation } from "../../support/seed-app-conversation";
 import { serveAgentBrowserPrivacyFixture } from "./agent-browser-fixture-pages";
 import { closeElectronAppBounded, closeElectronFixtureBounded,
   closePreviewServerBounded, observeElectronPage, observeElectronProcess,
-  removeFixtureDirectory, waitForRuntimeProcessExit } from "./electron-app-lifecycle";
+  quitElectronAppBounded, removeFixtureDirectory,
+  waitForRuntimeProcessExit } from "./electron-app-lifecycle";
 import { expectNoViewportOverflow as expectPageNoViewportOverflow } from "./layout-assertions";
 
 const execFileAsync = promisify(execFile);
@@ -904,18 +905,30 @@ export async function createAppFixture(
     restart: async () => {
       const previousApp = electronApp;
       if (!previousApp) throw new Error("The Electron fixture is unavailable");
+      const previousChild = previousApp.process();
       const runtimePid = (await runtimeSnapshot().catch(() => null))?.pid
         ?? null;
-      await previousApp.evaluate(() => {
-        const runtime = Reflect.get(
-          globalThis,
-          "__inertiaTestRuntime",
-        ) as { quit?: () => unknown } | undefined;
-        runtime?.quit?.();
-      }).catch(() => undefined);
-      await closeElectronAppBounded(previousApp);
+      const quit = await quitElectronAppBounded(
+        previousApp,
+        () => previousApp.evaluate(() => {
+          const runtime = Reflect.get(
+            globalThis,
+            "__inertiaTestRuntime",
+          ) as { quit?: () => unknown } | undefined;
+          return runtime?.quit?.();
+        }),
+        {
+          childProcess: previousChild,
+          quitRequestTimeoutMs: FIXTURE_RPC_TEARDOWN_TIMEOUT_MS,
+        },
+      );
       electronApp = null;
       if (runtimePid) await waitForRuntimeProcessExit(runtimePid);
+      if (quit.outcome !== "graceful" || !quit.transportSettled) {
+        throw new Error(
+          `Electron fixture restart requires a graceful application exit and settled transport; received ${quit.outcome}/${quit.transportSettled ? "settled" : "unsettled"}.`,
+        );
+      }
 
       const diagnosticStart = startupDiagnostics.length;
       const nextApp = await electron.launch(launchOptions);
@@ -953,9 +966,13 @@ export async function createAppFixture(
     },
     close: async () => {
       const activeApp = electronApp;
+      const priorRuntimePid = activeApp
+        ? (await runtimeSnapshot().catch(() => null))?.pid ?? null
+        : null;
       electronApp = null;
       await closeElectronFixtureBounded({
         current: activeApp,
+        priorRuntimePid,
         rpcTimeoutMs: FIXTURE_RPC_TEARDOWN_TIMEOUT_MS,
         requestRuntimeQuit: async () => {
           if (!activeApp) return null;

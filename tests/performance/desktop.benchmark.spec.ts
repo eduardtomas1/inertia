@@ -14,10 +14,15 @@ import {
 } from "@playwright/test";
 
 import { RuntimeStore } from "../../src/server/database";
+import { terminalCloseTimeoutMs } from "../../src/server/terminal-shutdown-deadline";
 import {
   TURN_GIT_ARTIFACT_FINALIZATION_TIMEOUT_MS,
 } from "../../src/shared/runtime-command-timeouts";
-import { processExists } from "../e2e/support/electron-app-lifecycle";
+import { runtimeSupervisorShutdownEnvelopeMs } from "../../src/node/runtime-shutdown-deadline";
+import {
+  quitElectronAppBounded,
+  waitForRuntimeProcessExit,
+} from "../e2e/support/electron-app-lifecycle";
 import { selectWorkspaceTool } from "../e2e/support/workspace-tools";
 import { driveBoundedWheelNavigation } from "../helpers/bounded-wheel-navigation";
 import {
@@ -61,6 +66,12 @@ const CI_PREFETCHED_SURFACE_TARGET_MS = 100;
 // answer restores the final settled view without rewarding broken auto-follow.
 const CI_STREAM_MIN_VISIBLE_UPDATES = 4;
 const CI_STREAM_VISIBLE_UPDATE_BARRIER_TIMEOUT_MS = 5_000;
+const TERMINAL_CLOSE_ASSERTION_TIMEOUT_MS = terminalCloseTimeoutMs(
+  process.platform,
+) + 1_000;
+const APP_SHUTDOWN_ASSERTION_TIMEOUT_MS = runtimeSupervisorShutdownEnvelopeMs(
+  process.platform,
+) + 1_000;
 const READER_NAVIGATION_MAX_WHEEL_GESTURES = 16;
 const READER_NAVIGATION_MAX_PROGRESS_SAMPLES = 10;
 const READER_NAVIGATION_TARGET_SCROLL_TOP = 120;
@@ -1374,9 +1385,35 @@ async function openAndCloseToolCycle(page: Page): Promise<void> {
   await selectWorkspaceTool(tools, "Files");
   await tools.getByRole("tree", { name: "Files" }).waitFor();
   await selectWorkspaceTool(tools, "Terminal");
-  await tools.locator(".terminal-panel[data-terminal-id]").waitFor();
-  await tools.getByRole("button", { name: "Close terminal" }).first().click();
-  await expect(tools.locator(".terminal-panel[data-terminal-id]")).toHaveCount(0);
+  const panels = tools.locator(".terminal-panel[data-terminal-id]");
+  await panels.waitFor();
+  const closeButton = tools.getByRole("button", { name: "Close terminal" })
+    .first();
+  await closeButton.click();
+  try {
+    await expect(panels).toHaveCount(
+      0,
+      { timeout: TERMINAL_CLOSE_ASSERTION_TIMEOUT_MS },
+    );
+  } catch (cause) {
+    const diagnostics = {
+      alerts: await tools.getByRole("alert").allTextContents(),
+      closeDisabled: await closeButton.isDisabled().catch(() => null),
+      terminalIds: await panels.evaluateAll((elements) => elements.map(
+        (element) => element.getAttribute("data-terminal-id"),
+      )),
+      terminalStates: await panels.evaluateAll((elements) => elements.map(
+        (element) => element.getAttribute("data-terminal-state"),
+      )),
+      terminalOutput: await panels.evaluateAll((elements) => elements.map(
+        (element) => element.textContent?.slice(-1_000) ?? "",
+      )),
+    };
+    throw new Error(
+      `Rapid terminal close did not settle: ${JSON.stringify(diagnostics)}`,
+      { cause },
+    );
+  }
 }
 
 interface RendererInteractionMeasurement {
@@ -1473,18 +1510,20 @@ async function closeApp(
   runtimePid: number | null,
 ): Promise<number> {
   const startedAt = performance.now();
-  await electronApp.evaluate(() => {
-    const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
-      quit?: () => unknown;
-    } | undefined;
-    runtime?.quit?.();
-  });
-  await electronApp.close();
-  if (runtimePid) {
-    await expect.poll(
-      () => processExists(runtimePid),
-      { timeout: 5_000 },
-    ).toBe(false);
+  const result = await quitElectronAppBounded(
+    electronApp,
+    () => electronApp.evaluate(() => {
+      const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
+        quit?: () => unknown;
+      } | undefined;
+      return runtime?.quit?.();
+    }),
+  );
+  if (runtimePid) await waitForRuntimeProcessExit(runtimePid);
+  if (result.outcome !== "graceful" || !result.transportSettled) {
+    throw new Error(
+      `Desktop benchmark shutdown was ${result.outcome}/${result.transportSettled ? "settled" : "unsettled"}, not graceful/settled.`,
+    );
   }
   return performance.now() - startedAt;
 }
@@ -1607,7 +1646,7 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
     }
     await expect(workspacePanel).not.toBeVisible();
     await expect(cold.page.locator(".terminal-panel[data-terminal-id]"))
-      .toHaveCount(0);
+      .toHaveCount(0, { timeout: TERMINAL_CLOSE_ASSERTION_TIMEOUT_MS });
     await expect(cold.page.getByRole("main", {
       name: "Split conversation workspace",
     })).toHaveCount(0);
@@ -1923,8 +1962,10 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
         report.scenarios.rendererMemory.soak.before.usedJsHeapBytes
           + 32 * 1024 * 1024,
       );
-    expect(report.scenarios.shutdown.coldMs).toBeLessThan(15_000);
-    expect(report.scenarios.shutdown.warmMs).toBeLessThan(15_000);
+    expect(report.scenarios.shutdown.coldMs)
+      .toBeLessThan(APP_SHUTDOWN_ASSERTION_TIMEOUT_MS);
+    expect(report.scenarios.shutdown.warmMs)
+      .toBeLessThan(APP_SHUTDOWN_ASSERTION_TIMEOUT_MS);
   } finally {
     if (cold) {
       const runtimePid = (await runtimeSnapshot(cold.electronApp).catch(() => null))?.pid ?? null;

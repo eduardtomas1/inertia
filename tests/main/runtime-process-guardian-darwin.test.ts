@@ -10,6 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { spawn as spawnPty } from "node-pty";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
@@ -18,6 +19,7 @@ import {
   darwinProcessGuardianReady,
   darwinProcessGuardianReadyAsync,
   runtimeOwnedProcessInvocation,
+  runtimeOwnedTerminalSessionInvocation,
   RuntimeOwnedProcessJournal,
   spawnRuntimeOwnedPidProcess,
   spawnRuntimeOwnedProcess,
@@ -49,6 +51,27 @@ function activate(directory: string): void {
     },
   );
   if (deactivate) deactivators.push(deactivate);
+}
+
+function buildDarwinGuardian(
+  directory: string,
+  name: string,
+  defines: readonly string[],
+): string {
+  const guardianPath = join(directory, name);
+  const built = spawnSync("/usr/bin/xcrun", [
+    "clang", "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
+    ...defines,
+    join(process.cwd(), "native/runtime-process-guardian/darwin.c"),
+    "-o", guardianPath,
+  ], {
+    encoding: "utf8",
+    env: { PATH: "/usr/bin:/bin:/usr/sbin:/sbin" },
+    shell: false,
+    timeout: 30_000,
+  });
+  expect(built.status, `${built.stderr}\n${built.stdout}`).toBe(0);
+  return guardianPath;
 }
 
 function closeOf(child: ChildProcess): Promise<void> {
@@ -87,6 +110,389 @@ afterEach(async () => {
 });
 
 describe("macOS runtime process guardian", () => {
+  it.runIf(process.platform === "darwin")(
+    "retires an immediate PTY stop without a pre-fork machine census",
+    async () => {
+      const directory = temporaryDirectory();
+      const guardianPath = join(directory, "runtime-process-guardian-no-early-census");
+      const built = spawnSync("/usr/bin/xcrun", [
+        "clang", "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
+        "-DINERTIA_RUNTIME_GUARDIAN_TEST_REJECT_EARLY_CENSUS=1",
+        join(process.cwd(), "native/runtime-process-guardian/darwin.c"),
+        "-o", guardianPath,
+      ], {
+        encoding: "utf8",
+        env: { PATH: "/usr/bin:/bin:/usr/sbin:/sbin" },
+        shell: false,
+        timeout: 30_000,
+      });
+      expect(built.status, `${built.stderr}\n${built.stdout}`).toBe(0);
+      const deactivate = activateRuntimeOwnedProcessRegistry(
+        directory,
+        runtimeGenerationId,
+        systemBootId,
+        { darwinGuardianPath: guardianPath },
+      );
+      if (deactivate) deactivators.push(deactivate);
+      const invocation = runtimeOwnedTerminalSessionInvocation("/bin/sleep", ["8"]);
+      const owned = spawnRuntimeOwnedPidProcess(() => spawnPty(
+        invocation.command,
+        invocation.args,
+        { cwd: directory, env: { PATH: "/usr/bin:/bin" } },
+      ), { darwinGuardianCommand: invocation.command });
+      const exited = new Promise<{ exitCode: number; signal: number | undefined }>(
+        (resolve) => {
+          owned.process.onExit((event) => {
+            owned.releaseIfGroupExited(event.signal);
+            resolve({ exitCode: event.exitCode, signal: event.signal });
+          });
+        },
+      );
+
+      expect(owned.requestGuardianStop()).toBe(true);
+      await expect(owned.waitForGuardianStop()).resolves.toBe(true);
+      await expect(exited).resolves.toEqual({ exitCode: 137, signal: 0 });
+      await expect.poll(() => owned.confirmStopped()).toBe(true);
+      expect(new RuntimeOwnedProcessJournal(directory, {
+        platform: "darwin",
+        darwinGuardianPath: guardianPath,
+      }).records(runtimeGenerationId)).toEqual([]);
+    },
+    15_000,
+  );
+
+  it.runIf(process.platform === "darwin")(
+    "falls back to the exact kernel identity during a strict PTY stop",
+    async () => {
+      const directory = temporaryDirectory();
+      const guardianPath = buildDarwinGuardian(
+        directory,
+        "runtime-process-guardian-kernel-identity-fallback",
+        [
+          "-DINERTIA_RUNTIME_GUARDIAN_TEST_FORCE_LIBPROC_IDENTITY_FAILURE_DURING_STOP=1",
+        ],
+      );
+      const deactivate = activateRuntimeOwnedProcessRegistry(
+        directory,
+        runtimeGenerationId,
+        systemBootId,
+        { darwinGuardianPath: guardianPath },
+      );
+      if (deactivate) deactivators.push(deactivate);
+      const invocation = runtimeOwnedTerminalSessionInvocation("/bin/sleep", ["8"]);
+      const owned = spawnRuntimeOwnedPidProcess(() => spawnPty(
+        invocation.command,
+        invocation.args,
+        { cwd: directory, env: { PATH: "/usr/bin:/bin" } },
+      ), { darwinGuardianCommand: invocation.command });
+      const exited = new Promise<{ exitCode: number; signal: number | undefined }>(
+        (resolve) => {
+          owned.process.onExit((event) => {
+            owned.releaseIfGroupExited(event.signal);
+            resolve({ exitCode: event.exitCode, signal: event.signal });
+          });
+        },
+      );
+
+      await expect(owned.waitForGuardianStop()).resolves.toBe(true);
+      expect(owned.requestGuardianStop()).toBe(true);
+      await expect(owned.waitForGuardianStop()).resolves.toBe(true);
+      await expect(exited).resolves.toEqual({ exitCode: 137, signal: 0 });
+      await expect.poll(() => owned.confirmStopped()).toBe(true);
+      expect(new RuntimeOwnedProcessJournal(directory, {
+        platform: "darwin",
+        darwinGuardianPath: guardianPath,
+      }).records(runtimeGenerationId)).toEqual([]);
+    },
+    15_000,
+  );
+
+  it.runIf(process.platform === "darwin")(
+    "retains the ownership claim when both exact identity sources fail",
+    async () => {
+      const directory = temporaryDirectory();
+      const guardianPath = buildDarwinGuardian(
+        directory,
+        "runtime-process-guardian-unreadable-identities",
+        [
+          "-DINERTIA_RUNTIME_GUARDIAN_TEST_FORCE_LIBPROC_IDENTITY_FAILURE_DURING_STOP=1",
+          "-DINERTIA_RUNTIME_GUARDIAN_TEST_FORCE_KERNEL_IDENTITY_FAILURE_DURING_STOP=1",
+        ],
+      );
+      const deactivate = activateRuntimeOwnedProcessRegistry(
+        directory,
+        runtimeGenerationId,
+        systemBootId,
+        { darwinGuardianPath: guardianPath },
+      );
+      if (deactivate) deactivators.push(deactivate);
+      const invocation = runtimeOwnedTerminalSessionInvocation("/bin/sleep", ["8"]);
+      const owned = spawnRuntimeOwnedPidProcess(() => spawnPty(
+        invocation.command,
+        invocation.args,
+        { cwd: directory, env: { PATH: "/usr/bin:/bin" } },
+      ), { darwinGuardianCommand: invocation.command });
+      const exited = new Promise<{ exitCode: number; signal: number | undefined }>(
+        (resolve) => {
+          owned.process.onExit((event) => {
+            owned.releaseIfGroupExited(event.signal);
+            resolve({ exitCode: event.exitCode, signal: event.signal });
+          });
+        },
+      );
+
+      await expect(owned.waitForGuardianStop()).resolves.toBe(true);
+      try {
+        expect(owned.requestGuardianStop()).toBe(true);
+        await expect(owned.waitForGuardianStop()).resolves.toBe(true);
+        await expect(exited).resolves.toEqual({ exitCode: 0, signal: 31 });
+        expect(owned.confirmStopped()).toBe(false);
+        expect(new RuntimeOwnedProcessJournal(directory, {
+          platform: "darwin",
+          darwinGuardianPath: guardianPath,
+        }).records(runtimeGenerationId)).toHaveLength(1);
+      } finally {
+        try { process.kill(-owned.process.pid, "SIGKILL"); } catch {
+          // The guardian or its payload may already have exited.
+        }
+      }
+    },
+    15_000,
+  );
+
+  it.runIf(process.platform === "darwin")(
+    "maps the exact live-process identity through KERN_PROC_PID",
+    async () => {
+      const directory = temporaryDirectory();
+      const fallbackGuardianPath = buildDarwinGuardian(
+        directory,
+        "runtime-process-guardian-kernel-identity",
+        ["-DINERTIA_RUNTIME_GUARDIAN_TEST_FORCE_KERNEL_IDENTITY=1"],
+      );
+      const guardianPath = join(
+        process.cwd(),
+        "resources/generated/runtime-process-guardian/runtime-process-guardian",
+      );
+      const probe = spawn("/bin/sleep", ["8"], {
+        shell: false,
+        stdio: "ignore",
+      });
+      liveChildren.add(probe);
+      probe.once("close", () => liveChildren.delete(probe));
+      const probePid = probe.pid ?? 0;
+      expect(probePid).toBeGreaterThan(1);
+      try {
+        const primary = spawnSync(guardianPath, ["identity", String(probePid)], {
+          encoding: "utf8",
+          shell: false,
+          timeout: 5_000,
+        });
+        const fallback = spawnSync(
+          fallbackGuardianPath,
+          ["identity", String(probePid)],
+          { encoding: "utf8", shell: false, timeout: 5_000 },
+        );
+        expect(primary.status, primary.stderr).toBe(0);
+        expect(fallback.status, fallback.stderr).toBe(0);
+        expect(fallback.stdout.trim()).toBe(primary.stdout.trim());
+      } finally {
+        probe.kill("SIGKILL");
+        await closeOf(probe);
+      }
+    },
+    15_000,
+  );
+
+  it.runIf(process.platform === "darwin")(
+    "rejects incomplete KERN_PROC_PID birth identities",
+    async () => {
+      const directory = temporaryDirectory();
+      const probe = spawn("/bin/sleep", ["8"], {
+        shell: false,
+        stdio: "ignore",
+      });
+      liveChildren.add(probe);
+      probe.once("close", () => liveChildren.delete(probe));
+      const probePid = probe.pid ?? 0;
+      expect(probePid).toBeGreaterThan(1);
+      try {
+        for (const [name, invalidIdentity] of [
+          ["zero-start", "-DINERTIA_RUNTIME_GUARDIAN_TEST_FORCE_KERNEL_ZERO_START=1"],
+          ["sidl", "-DINERTIA_RUNTIME_GUARDIAN_TEST_FORCE_KERNEL_SIDL=1"],
+        ] as const) {
+          const guardianPath = buildDarwinGuardian(
+            directory,
+            `runtime-process-guardian-kernel-${name}`,
+            [
+              "-DINERTIA_RUNTIME_GUARDIAN_TEST_FORCE_KERNEL_IDENTITY=1",
+              invalidIdentity,
+            ],
+          );
+          const identity = spawnSync(
+            guardianPath,
+            ["identity", String(probePid)],
+            { encoding: "utf8", shell: false, timeout: 5_000 },
+          );
+          expect(identity.status, identity.stderr).toBe(2);
+          expect(identity.stdout).toBe("");
+        }
+      } finally {
+        probe.kill("SIGKILL");
+        await closeOf(probe);
+      }
+    },
+    15_000,
+  );
+
+  it.runIf(process.platform === "darwin")(
+    "retires pre-fork parent loss without a machine census",
+    async () => {
+      const directory = temporaryDirectory();
+      const guardianPath = join(directory, "runtime-process-guardian-parent-loss");
+      const payloadMarkerPath = join(directory, "payload-started");
+      const built = spawnSync("/usr/bin/xcrun", [
+        "clang", "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
+        "-DINERTIA_RUNTIME_GUARDIAN_TEST_REJECT_EARLY_CENSUS=1",
+        join(process.cwd(), "native/runtime-process-guardian/darwin.c"),
+        "-o", guardianPath,
+      ], {
+        encoding: "utf8",
+        env: { PATH: "/usr/bin:/bin:/usr/sbin:/sbin" },
+        shell: false,
+        timeout: 30_000,
+      });
+      expect(built.status, `${built.stderr}\n${built.stdout}`).toBe(0);
+      const runtimeParent = spawn("/bin/sleep", ["8"], {
+        shell: false,
+        stdio: "ignore",
+      });
+      liveChildren.add(runtimeParent);
+      runtimeParent.once("close", () => liveChildren.delete(runtimeParent));
+      const runtimePid = runtimeParent.pid ?? 0;
+      expect(runtimePid).toBeGreaterThan(1);
+      const guardian = spawn(guardianPath, [
+        "watch-terminal-session",
+        String(runtimePid),
+        "--",
+        "/usr/bin/touch",
+        payloadMarkerPath,
+      ], { detached: true, shell: false, stdio: "ignore" });
+      liveChildren.add(guardian);
+      guardian.once("close", () => liveChildren.delete(guardian));
+      const guardianPid = guardian.pid ?? 0;
+      expect(guardianPid).toBeGreaterThan(1);
+
+      await expect(darwinProcessGuardianReadyAsync(
+        guardianPid,
+        guardianPath,
+      )).resolves.toMatchObject({ pid: guardianPid, sessionId: guardianPid });
+      runtimeParent.kill("SIGTERM");
+      await closeOf(runtimeParent);
+      await closeOf(guardian);
+
+      expect(guardian.exitCode).toBe(137);
+      expect(guardian.signalCode).toBeNull();
+      expect(existsSync(payloadMarkerPath)).toBe(false);
+    },
+    15_000,
+  );
+
+  it.runIf(process.platform === "darwin")(
+    "retires a terminal session with an unreaped helper zombie",
+    async () => {
+      const directory = temporaryDirectory();
+      const payloadSourcePath = join(directory, "terminal-zombie-payload.c");
+      const payloadPath = join(directory, "terminal-zombie-payload");
+      const helperPidPath = join(directory, "helper.pid");
+      writeFileSync(payloadSourcePath, [
+        "#include <stdio.h>",
+        "#include <sys/types.h>",
+        "#include <unistd.h>",
+        "int main(int argc, char **argv) {",
+        "  if (argc != 2) return 64;",
+        "  const pid_t helper = fork();",
+        "  if (helper < 0) return 71;",
+        "  if (helper == 0) _exit(0);",
+        "  FILE *stream = fopen(argv[1], \"w\");",
+        "  if (!stream) return 72;",
+        "  const int written = fprintf(stream, \"%d\\n\", helper) > 0;",
+        "  if (fclose(stream) != 0 || !written) return 73;",
+        "  for (;;) pause();",
+        "}",
+      ].join("\n"), { encoding: "utf8", mode: 0o600 });
+      const built = spawnSync("/usr/bin/xcrun", [
+        "clang", "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
+        payloadSourcePath, "-o", payloadPath,
+      ], {
+        encoding: "utf8",
+        env: { PATH: "/usr/bin:/bin:/usr/sbin:/sbin" },
+        shell: false,
+        timeout: 30_000,
+      });
+      expect(built.status, `${built.stderr}\n${built.stdout}`).toBe(0);
+      const guardianPath = buildDarwinGuardian(
+        directory,
+        "runtime-process-guardian-zombie-identity-failure",
+        [
+          "-DINERTIA_RUNTIME_GUARDIAN_TEST_FORCE_ZOMBIE_IDENTITY_FAILURE_DURING_STOP=1",
+        ],
+      );
+      const deactivate = activateRuntimeOwnedProcessRegistry(
+        directory,
+        runtimeGenerationId,
+        systemBootId,
+        { darwinGuardianPath: guardianPath },
+      );
+      if (deactivate) deactivators.push(deactivate);
+      const invocation = runtimeOwnedTerminalSessionInvocation(
+        payloadPath,
+        [helperPidPath],
+      );
+      const owned = spawnRuntimeOwnedPidProcess(() => spawnPty(
+        invocation.command,
+        invocation.args,
+        { cwd: directory, env: { PATH: "/usr/bin:/bin" } },
+      ), { darwinGuardianCommand: invocation.command });
+      const exited = new Promise<{ exitCode: number; signal: number | undefined }>(
+        (resolve) => {
+          owned.process.onExit((event) => {
+            owned.releaseIfGroupExited(event.signal);
+            resolve({ exitCode: event.exitCode, signal: event.signal });
+          });
+        },
+      );
+      try {
+        await expect(owned.waitForGuardianStop()).resolves.toBe(true);
+        let helperPid = 0;
+        await expect.poll(() => {
+          if (existsSync(helperPidPath)) {
+            helperPid = Number(readFileSync(helperPidPath, "utf8").trim());
+          }
+          if (helperPid <= 1) return "";
+          return spawnSync("/bin/ps", ["-o", "state=", "-p", String(helperPid)], {
+            encoding: "utf8",
+            shell: false,
+          }).stdout.trim();
+        }, { timeout: 5_000 }).toMatch(/^Z/u);
+
+        expect(owned.requestGuardianStop()).toBe(true);
+        await expect(exited).resolves.toEqual({ exitCode: 137, signal: 0 });
+        await expect.poll(() => owned.confirmStopped()).toBe(true);
+        expect(new RuntimeOwnedProcessJournal(directory, {
+          platform: "darwin",
+          darwinGuardianPath: guardianPath,
+        }).records(runtimeGenerationId)).toEqual([]);
+      } finally {
+        if (!owned.confirmStopped()) {
+          try { process.kill(-owned.process.pid, "SIGKILL"); } catch {
+            // The failed guardian may already have drained its session.
+          }
+        }
+      }
+    },
+    15_000,
+  );
+
   it.runIf(process.platform === "darwin")(
     "admits a guardian whose readiness is scheduler-delayed beyond 1.5 seconds",
     async () => {

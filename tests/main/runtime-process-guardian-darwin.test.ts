@@ -9,6 +9,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 
 import { spawn as spawnPty } from "node-pty";
 import { afterEach, describe, expect, it } from "vitest";
@@ -274,6 +275,7 @@ describe("macOS runtime process guardian", () => {
         "resources/generated/runtime-process-guardian/runtime-process-guardian",
       );
       const probe = spawn("/bin/sleep", ["8"], {
+        detached: true,
         shell: false,
         stdio: "ignore",
       });
@@ -282,11 +284,16 @@ describe("macOS runtime process guardian", () => {
       const probePid = probe.pid ?? 0;
       expect(probePid).toBeGreaterThan(1);
       try {
-        const primary = spawnSync(guardianPath, ["identity", String(probePid)], {
-          encoding: "utf8",
-          shell: false,
-          timeout: 5_000,
-        });
+        const readPrimaryIdentity = () => spawnSync(
+          guardianPath,
+          ["identity", String(probePid)],
+          { encoding: "utf8", shell: false, timeout: 5_000 },
+        );
+        let primary = readPrimaryIdentity();
+        for (let attempt = 1; primary.status === 2 && attempt < 50; attempt += 1) {
+          await sleep(10);
+          primary = readPrimaryIdentity();
+        }
         const fallback = spawnSync(
           fallbackGuardianPath,
           ["identity", String(probePid)],

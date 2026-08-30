@@ -342,6 +342,38 @@ export async function prepareModernDarwinBootstrapRecovery(
       dataDirectory,
       systemBootId,
     );
+    if (!candidate) {
+      // A normal supervisor shutdown can complete while the recovery loop is
+      // yielding: it removes the owned session before consuming the exact
+      // generation lease. Re-read the durable journals so that a completely
+      // retired batch with its confirmed cleanup receipt is not mistaken for
+      // corrupt state, while unproved, partial, or unrelated ownership state
+      // remains fail-closed.
+      const refreshedLeases = new RuntimeGenerationLeaseJournal(dataDirectory);
+      const priorIds = new Set(prior.map(({ runtimeGenerationId }) => (
+        runtimeGenerationId
+      )));
+      const cleanupReceiptIds = new Set(runtimeCleanupReceiptIds(dataDirectory));
+      const everyPriorLeaseRetired = refreshedLeases.isValid()
+        && refreshedLeases.all().every(({ runtimeGenerationId }) => (
+          !priorIds.has(runtimeGenerationId)
+        ));
+      const everyPriorRetirementConfirmed = [...priorIds].every(
+        (runtimeGenerationId) => cleanupReceiptIds.has(runtimeGenerationId),
+      );
+      const ownedLeaves = listDirectRuntimeJournalLeaves(
+        pinDirectRuntimeJournalRoot(dataDirectory),
+        ".runtime-owned-",
+        MAX_RUNTIME_OWNERSHIP_LEAVES,
+      );
+      if (
+        everyPriorLeaseRetired
+        && everyPriorRetirementConfirmed
+        && ownedLeaves.length === 0
+      ) {
+        return { authority: null, candidate: null, blocked: false };
+      }
+    }
     return {
       authority: null,
       candidate,

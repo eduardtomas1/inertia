@@ -13,7 +13,10 @@ import {
   RuntimeOwnedProcessJournal,
 } from "../../../src/node/runtime-owned-processes";
 import type { AppFixture, RuntimeTestSnapshot } from "./app-fixture";
-import { processExists } from "./electron-app-lifecycle";
+import {
+  processExists,
+  settleOperationBounded,
+} from "./electron-app-lifecycle";
 import {
   ensureWorkspaceTools,
   selectWorkspaceTool,
@@ -86,34 +89,81 @@ export async function installRuntimeRecoveryConsent(
   electronApp: AppFixture["electronApp"],
 ): Promise<() => Promise<void>> {
   if (process.platform !== "darwin") return async () => undefined;
-  await electronApp.evaluate(({ dialog }) => {
+  await electronApp.evaluate(({ dialog }, recoveryErrorTitles) => {
     const owner = globalThis as typeof globalThis & {
       __inertiaOriginalRuntimeRecoveryMessageBox?: typeof dialog.showMessageBox;
+      __inertiaOriginalRuntimeRecoveryErrorBox?: typeof dialog.showErrorBox;
+      __inertiaRuntimeRecoveryError?: {
+        readonly title: string;
+        readonly content: string;
+      };
     };
     owner.__inertiaOriginalRuntimeRecoveryMessageBox ??=
       dialog.showMessageBox.bind(dialog);
-    const original = owner.__inertiaOriginalRuntimeRecoveryMessageBox;
+    owner.__inertiaOriginalRuntimeRecoveryErrorBox ??=
+      dialog.showErrorBox.bind(dialog);
+    const originalMessageBox = owner.__inertiaOriginalRuntimeRecoveryMessageBox;
+    const originalErrorBox = owner.__inertiaOriginalRuntimeRecoveryErrorBox;
     Reflect.set(dialog, "showMessageBox", async (...args: unknown[]) => {
       const options = args.at(-1) as { title?: unknown } | undefined;
       if (options?.title === "Recover unproven macOS runtime state?") {
+        // This consent is intentionally one-shot. Restore inside Electron main
+        // before recovery continues so a failed utility restart never leaves
+        // cleanup dependent on a second main-process transport round trip.
+        if (originalMessageBox) {
+          Reflect.set(dialog, "showMessageBox", originalMessageBox);
+        }
+        delete owner.__inertiaOriginalRuntimeRecoveryMessageBox;
         return { response: 0, checkboxChecked: false };
       }
-      return Reflect.apply(original!, dialog, args);
+      return Reflect.apply(originalMessageBox!, dialog, args);
     });
-  });
+    Reflect.set(dialog, "showErrorBox", (title: string, content: string) => {
+      if (recoveryErrorTitles.includes(title)) {
+        owner.__inertiaRuntimeRecoveryError = { title, content };
+        return;
+      }
+      Reflect.apply(originalErrorBox!, dialog, [title, content]);
+    });
+  }, [
+    "Runtime recovery remains safety locked",
+    "Runtime recovery was not authorized",
+    "Legacy runtime recovery was not authorized",
+  ]);
 
   let restored = false;
   return async () => {
     if (restored) return;
     restored = true;
-    await electronApp.evaluate(({ dialog }) => {
-      const owner = globalThis as typeof globalThis & {
-        __inertiaOriginalRuntimeRecoveryMessageBox?: typeof dialog.showMessageBox;
-      };
-      const original = owner.__inertiaOriginalRuntimeRecoveryMessageBox;
-      if (original) Reflect.set(dialog, "showMessageBox", original);
-      delete owner.__inertiaOriginalRuntimeRecoveryMessageBox;
-    }).catch(() => undefined);
+    const result = await settleOperationBounded(
+      Promise.resolve().then(() => electronApp.evaluate(({ dialog }) => {
+        const owner = globalThis as typeof globalThis & {
+          __inertiaOriginalRuntimeRecoveryMessageBox?: typeof dialog.showMessageBox;
+          __inertiaOriginalRuntimeRecoveryErrorBox?: typeof dialog.showErrorBox;
+          __inertiaRuntimeRecoveryError?: {
+            readonly title: string;
+            readonly content: string;
+          };
+        };
+        const originalMessageBox = owner.__inertiaOriginalRuntimeRecoveryMessageBox;
+        const originalErrorBox = owner.__inertiaOriginalRuntimeRecoveryErrorBox;
+        if (originalMessageBox) {
+          Reflect.set(dialog, "showMessageBox", originalMessageBox);
+        }
+        if (originalErrorBox) Reflect.set(dialog, "showErrorBox", originalErrorBox);
+        const recoveryError = owner.__inertiaRuntimeRecoveryError ?? null;
+        delete owner.__inertiaOriginalRuntimeRecoveryMessageBox;
+        delete owner.__inertiaOriginalRuntimeRecoveryErrorBox;
+        delete owner.__inertiaRuntimeRecoveryError;
+        return recoveryError;
+      })),
+      1_000,
+    );
+    if (result.status === "fulfilled" && result.value) {
+      throw new Error(
+        `${result.value.title}: ${result.value.content}`,
+      );
+    }
   };
 }
 

@@ -30,6 +30,8 @@ import {
   prepareModernDarwinBootstrapRecovery,
   prepareRuntimeBootstrapSafety,
 } from "../../src/main/runtime-bootstrap-safety";
+import { RuntimeCleanupReceiptJournal } from
+  "../../src/main/runtime-cleanup-receipts";
 import {
   captureModernDarwinRecoverySnapshot,
   ModernDarwinRecoveryAuthorityJournal,
@@ -232,6 +234,125 @@ describe("runtime bootstrap safety", () => {
         operationId: descriptor?.operationId,
         snapshotDigest: descriptor?.snapshotDigest,
       });
+  });
+
+  it("accepts exact Darwin retirement completed during automatic recovery", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-bootstrap-safety-"));
+    const dataDirectory = join(root, "runtime");
+    const generationId = "30000000-0000-4000-8000-000000000003:36";
+    const bootId = "test:00000000-0000-4000-8000-000000000001";
+    directories.push(root);
+    mkdirSync(dataDirectory, { recursive: true, mode: 0o700 });
+    expect(new RuntimeGenerationLeaseJournal(dataDirectory).publish(
+      generationId,
+      bootId,
+    )).toBe(true);
+    expect(new RuntimeOwnedProcessJournal(dataDirectory, {
+      platform: "darwin",
+    }).startSession(generationId, bootId)).toBe(true);
+
+    let cleanupCompleted = false;
+    queueMicrotask(() => {
+      const owned = new RuntimeOwnedProcessJournal(dataDirectory, {
+        platform: "darwin",
+      });
+      const receipts = new RuntimeCleanupReceiptJournal(dataDirectory);
+      const leases = new RuntimeGenerationLeaseJournal(dataDirectory);
+      cleanupCompleted = owned.finishSession(generationId)
+        && receipts.publish(generationId)
+        && leases.clearRuntimeGeneration(generationId);
+    });
+
+    await expect(prepareModernDarwinBootstrapRecovery(
+      dataDirectory,
+      bootId,
+      "/private/tmp/inertia-test-guardian",
+      { platform: "darwin", deadlineAt: Date.now() + 100 },
+    )).resolves.toEqual({
+      authority: null,
+      candidate: null,
+      blocked: false,
+    });
+    expect(cleanupCompleted).toBe(true);
+    expect(new RuntimeGenerationLeaseJournal(dataDirectory).all()).toEqual([]);
+    expect(readdirSync(dataDirectory).filter((name) =>
+      name.startsWith(".runtime-owned-"))).toEqual([]);
+  });
+
+  it("rejects Darwin journal disappearance without a cleanup receipt", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-bootstrap-safety-"));
+    const dataDirectory = join(root, "runtime");
+    const generationId = "30000000-0000-4000-8000-000000000003:38";
+    const bootId = "test:00000000-0000-4000-8000-000000000001";
+    directories.push(root);
+    mkdirSync(dataDirectory, { recursive: true, mode: 0o700 });
+    expect(new RuntimeGenerationLeaseJournal(dataDirectory).publish(
+      generationId,
+      bootId,
+    )).toBe(true);
+    expect(new RuntimeOwnedProcessJournal(dataDirectory, {
+      platform: "darwin",
+    }).startSession(generationId, bootId)).toBe(true);
+
+    let journalsRemoved = false;
+    queueMicrotask(() => {
+      const owned = new RuntimeOwnedProcessJournal(dataDirectory, {
+        platform: "darwin",
+      });
+      const leases = new RuntimeGenerationLeaseJournal(dataDirectory);
+      journalsRemoved = owned.finishSession(generationId)
+        && leases.clearRuntimeGeneration(generationId);
+    });
+
+    await expect(prepareModernDarwinBootstrapRecovery(
+      dataDirectory,
+      bootId,
+      "/private/tmp/inertia-test-guardian",
+      { platform: "darwin", deadlineAt: Date.now() + 100 },
+    )).resolves.toEqual({
+      authority: null,
+      candidate: null,
+      blocked: true,
+    });
+    expect(journalsRemoved).toBe(true);
+    expect(new RuntimeCleanupReceiptJournal(dataDirectory).pending()).toEqual([]);
+  });
+
+  it("keeps partial Darwin retirement safety locked", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-bootstrap-safety-"));
+    const dataDirectory = join(root, "runtime");
+    const generationId = "30000000-0000-4000-8000-000000000003:37";
+    const bootId = "test:00000000-0000-4000-8000-000000000001";
+    directories.push(root);
+    mkdirSync(dataDirectory, { recursive: true, mode: 0o700 });
+    expect(new RuntimeGenerationLeaseJournal(dataDirectory).publish(
+      generationId,
+      bootId,
+    )).toBe(true);
+    expect(new RuntimeOwnedProcessJournal(dataDirectory, {
+      platform: "darwin",
+    }).startSession(generationId, bootId)).toBe(true);
+
+    let sessionRetired = false;
+    queueMicrotask(() => {
+      sessionRetired = new RuntimeOwnedProcessJournal(dataDirectory, {
+        platform: "darwin",
+      }).finishSession(generationId);
+    });
+
+    await expect(prepareModernDarwinBootstrapRecovery(
+      dataDirectory,
+      bootId,
+      "/private/tmp/inertia-test-guardian",
+      { platform: "darwin", deadlineAt: Date.now() + 100 },
+    )).resolves.toEqual({
+      authority: null,
+      candidate: null,
+      blocked: true,
+    });
+    expect(sessionRetired).toBe(true);
+    expect(new RuntimeGenerationLeaseJournal(dataDirectory).all())
+      .toEqual([expect.objectContaining({ runtimeGenerationId: generationId })]);
   });
 
   it("rejects confirmation while an exact recorded Darwin root is still alive", () => {

@@ -185,13 +185,13 @@ test("keeps a clamped accepted turn pending until its delayed answer can follow"
       "ready\n",
       "utf8",
     );
-    await expect(latestLine).toBeVisible({ timeout: 5_000 });
+    await expect(latestLine).toBeVisible();
     // The fixture publishes the complete stream before its terminal event.
     // Wait for this turn's persisted answer so the reader gesture exercises
     // post-settlement navigation instead of racing the live-to-final swap.
     await expect(acceptedRow.locator(
       '[data-answer-phase="persisted"][aria-label="Final assistant answer"]',
-    )).toBeVisible({ timeout: 5_000 });
+    )).toBeVisible();
     await expect.poll(() => latestLine.evaluate((line) => {
       const viewport = document.querySelector<HTMLElement>(".message-scroll")
         ?.getBoundingClientRect();

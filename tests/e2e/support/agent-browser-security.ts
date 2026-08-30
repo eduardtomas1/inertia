@@ -1,6 +1,5 @@
 import { expect, type Locator } from "@playwright/test";
 
-import { AGENT_BROWSER_WORLD_ID } from "../../../src/main/preview-agent-page";
 import type { AppFixture } from "./app-fixture";
 import { NATIVE_CREDENTIAL_AUDIT_ROUTES } from "./agent-browser-fixture-pages";
 
@@ -547,33 +546,16 @@ export async function expectClosedShadowActivationBlocked(
     const interleavedEnter = await runtime.agentBrowser(request.conversationId, { action: "press", key: "Enter" });
     const interleavedClicked = await interleaveContents?.executeJavaScript("window.__lateDisabledClicked === true");
     const interleavedFocus = await interleaveContents?.executeJavaScript("document.activeElement?.id");
-    const finalNavigation = await runtime.agentBrowser(request.conversationId, {
+    const brokerPhaseNavigation = await runtime.agentBrowser(request.conversationId, {
       action: "navigate",
       url: `${new URL(request.url).origin}/agent-browser-key-phase-interleave`,
     });
     interleaveContents?.focus();
-    const finalPreflight = await interleaveContents?.executeJavaScript("document.querySelector('#safe-focus').focus();document.activeElement?.id", true);
-    const finalGuardState = await interleaveContents?.executeJavaScriptInIsolatedWorld(request.worldId, [{
-      code: "globalThis.__inertiaAgentBrowser.agentInputActive=true;({active:globalThis.__inertiaAgentBrowser.agentInputActive,nested:globalThis.__inertiaAgentBrowser.nestedContentObserved===true})",
-    }], true);
-    interleaveContents?.sendInputEvent({ type: "keyDown", keyCode: "Enter" });
-    let finalFocus = "";
-    for (let attempt = 0; attempt < 20 && finalFocus !== "late-disabled"; attempt += 1) {
-      finalFocus = await interleaveContents?.executeJavaScript(
-        "new Promise(resolve=>setTimeout(()=>resolve(document.activeElement?.id),10))",
-        true,
-      ) as string || "";
-    }
-    interleaveContents?.sendInputEvent({ type: "char", keyCode: "\r" });
-    interleaveContents?.sendInputEvent({ type: "keyUp", keyCode: "Enter" });
-    await interleaveContents?.executeJavaScript("new Promise(resolve=>setTimeout(resolve,0))", true);
-    await interleaveContents?.executeJavaScriptInIsolatedWorld(request.worldId, [{
-      code: "globalThis.__inertiaAgentBrowser.agentInputActive=false;true",
-    }], true);
-    const finalInterleavedClicked = await interleaveContents?.executeJavaScript("window.__lateDisabledClicked === true");
-    const finalTrustedKeydown = await interleaveContents?.executeJavaScript("window.__trustedKeydown === true");
+    // Exercise the supported broker command so its authoritative keydown,
+    // renderer settlement, focus revalidation, and continuation suppression
+    // remain one realistic cross-platform activation sequence.
     const brokerPhasePreflight = await interleaveContents?.executeJavaScript(
-      "document.querySelector('#safe-focus').focus();document.activeElement?.id",
+      "window.__lateDisabledClicked=false;document.querySelector('#safe-focus').focus();document.activeElement?.id",
       true,
     );
     const brokerPhaseRefusal = await runtime.agentBrowser(request.conversationId, {
@@ -581,6 +563,10 @@ export async function expectClosedShadowActivationBlocked(
     });
     const brokerPhaseClicked = await interleaveContents?.executeJavaScript(
       "window.__lateDisabledClicked === true",
+    );
+    const brokerPhaseFocus = await interleaveContents?.executeJavaScript("document.activeElement?.id");
+    const brokerPhaseTrustedKeydown = await interleaveContents?.executeJavaScript(
+      "window.__trustedKeydown === true",
     );
     const navigationRefusalPreflight = await interleaveContents?.executeJavaScript(
       "document.querySelector('#safe-focus').focus();window.__navigateAfterKey=true;document.activeElement?.id",
@@ -599,30 +585,27 @@ export async function expectClosedShadowActivationBlocked(
     const recoveryClicked = await recoveryContents?.executeJavaScript("window.__safeRecoveryClicked === true");
     return {
       armed, clicked, enter, hostFocused, interleaveNavigation, interleavedClicked,
-      finalFocus, finalGuardState, finalInterleavedClicked, finalNavigation, finalPreflight,
-      finalTrustedKeydown, interleavedEnter, navigationRefusal, navigationRefusalPreflight,
-      navigationRefusalUrl, brokerPhaseClicked, brokerPhasePreflight, brokerPhaseRefusal,
+      interleavedEnter, navigationRefusal, navigationRefusalPreflight,
+      navigationRefusalUrl, brokerPhaseClicked, brokerPhaseFocus, brokerPhaseNavigation,
+      brokerPhasePreflight, brokerPhaseRefusal, brokerPhaseTrustedKeydown,
       recoveryClicked, recoveryNavigation, recoveryPress,
       interleavedFocus, navigation, prepared, space,
     };
-  }, { conversationId, url, worldId: AGENT_BROWSER_WORLD_ID });
+  }, { conversationId, url });
   expect(evidence).toMatchObject({
     clicked: false,
     enter: { code: "invalid", ok: false },
-    finalFocus: "late-disabled",
-    finalGuardState: { active: true, nested: false },
-    finalInterleavedClicked: false,
-    finalNavigation: { ok: true },
-    finalPreflight: "safe-focus",
-    finalTrustedKeydown: true,
     hostFocused: true,
     interleaveNavigation: { ok: true },
     interleavedClicked: false,
     interleavedEnter: { code: "invalid", ok: false },
     interleavedFocus: "late-disabled",
     brokerPhaseClicked: false,
+    brokerPhaseFocus: "late-disabled",
+    brokerPhaseNavigation: { ok: true },
     brokerPhasePreflight: "safe-focus",
     brokerPhaseRefusal: { code: "invalid", ok: false },
+    brokerPhaseTrustedKeydown: true,
     navigationRefusal: { code: "invalid", ok: false },
     navigationRefusalPreflight: "safe-focus",
     navigationRefusalUrl: expect.stringContaining("/agent-browser-focus-destination"),

@@ -8,6 +8,7 @@ import {
   useAuthoritativeConversationCreateQueue,
   useConversationSelectionQueue,
   useRuntimeCommandQueue,
+  useWorkspaceAuthorityCommandQueue,
 } from "../../src/renderer/src/hooks/useConversationSelectionQueue";
 import type { CommandWithoutId } from "../../src/renderer/src/lib/runtimeCommands";
 import type { MultiSpawnDraft } from "../../src/renderer/src/utils/multiSpawn";
@@ -138,6 +139,170 @@ beforeEach(() => window.localStorage.clear());
 afterEach(() => vi.useRealTimers());
 
 describe("Duo comparison navigation", () => {
+  it.each([
+    {
+      label: "conversation",
+      selection: {
+        type: "conversation.select" as const,
+        payload: { conversationId: conversationIds[1] },
+      },
+      published: {
+        ...snapshot,
+        activeConversationId: conversationIds[1],
+      },
+      unrelated: {
+        ...snapshot,
+        activeConversationId: conversationIds[0],
+      },
+      createProjectId: projectIds[0],
+    },
+    {
+      label: "project",
+      selection: {
+        type: "project.select" as const,
+        payload: { projectId: projectIds[1] },
+      },
+      published: {
+        ...snapshot,
+        activeProjectId: projectIds[1],
+      },
+      unrelated: {
+        ...snapshot,
+        activeProjectId: projectIds[0],
+      },
+      createProjectId: projectIds[1],
+    },
+  ])("releases an authoritative $label selection without hiding its delayed rejection", async ({
+    selection,
+    published,
+    unrelated,
+    createProjectId,
+  }) => {
+    const usesSyncCursor = selection.type === "conversation.select";
+    const syncAtDispatch = {
+      runtimeGeneration: "runtime-selection-queue",
+      latestSequence: 7,
+    };
+    let currentSnapshot: AppSnapshot = usesSyncCursor
+      ? { ...snapshot, sync: syncAtDispatch }
+      : snapshot;
+    let rejectSelection!: (error: Error) => void;
+    const delayedFailure = new Error("Selection settlement failed.");
+    const run = vi.fn((
+      _key: string,
+      command: CommandWithoutId,
+    ): Promise<ServerEvent> => {
+      if (run.mock.calls.length === 1) {
+        expect(command).toEqual(selection);
+        return new Promise<ServerEvent>((_resolve, reject) => {
+          rejectSelection = reject;
+        });
+      }
+      expect(command.type).toBe("conversation.create");
+      return Promise.resolve({
+        type: "request.ok",
+        requestId: crypto.randomUUID(),
+      });
+    });
+    const hook = renderHook(() => {
+      const enqueue = useAsyncOperationQueue();
+      return {
+        create: useAuthoritativeConversationCreateQueue(
+          run,
+          currentSnapshot,
+          enqueue,
+        ),
+        select: useWorkspaceAuthorityCommandQueue(
+          run,
+          currentSnapshot,
+          enqueue,
+        ),
+      };
+    });
+
+    let selected!: Promise<ServerEvent>;
+    let created!: Promise<void>;
+    await act(async () => {
+      selected = hook.result.current.select("selection", selection);
+      created = hook.result.current.create("conversation.create", {
+        type: "conversation.create",
+        payload: { projectId: createProjectId, title: "After selection" },
+      });
+    });
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+    let selectionSettled = false;
+    void selected.then(
+      () => { selectionSettled = true; },
+      () => { selectionSettled = true; },
+    );
+
+    currentSnapshot = usesSyncCursor
+      ? { ...published, sync: syncAtDispatch }
+      : unrelated;
+    hook.rerender();
+    await act(async () => Promise.resolve());
+    expect(run).toHaveBeenCalledTimes(1);
+
+    currentSnapshot = usesSyncCursor
+      ? {
+        ...published,
+        sync: { ...syncAtDispatch, latestSequence: syncAtDispatch.latestSequence + 1 },
+      }
+      : published;
+    hook.rerender();
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(2));
+    await expect(created).resolves.toBeUndefined();
+    expect(selectionSettled).toBe(false);
+
+    rejectSelection(delayedFailure);
+    await expect(selected).rejects.toBe(delayedFailure);
+  });
+
+  it("does not strand legacy work behind a delayed re-selection of the active conversation", async () => {
+    let rejectSelection!: (error: Error) => void;
+    const delayedFailure = new Error("Repeated selection settlement failed.");
+    const run = vi.fn((
+      _key: string,
+      command: CommandWithoutId,
+    ): Promise<ServerEvent> => {
+      if (command.type === "conversation.select") {
+        return new Promise<ServerEvent>((_resolve, reject) => {
+          rejectSelection = reject;
+        });
+      }
+      expect(command.type).toBe("conversation.create");
+      return Promise.resolve({
+        type: "request.ok",
+        requestId: crypto.randomUUID(),
+      });
+    });
+    const hook = renderHook(() => {
+      const enqueue = useAsyncOperationQueue();
+      return {
+        create: useAuthoritativeConversationCreateQueue(run, snapshot, enqueue),
+        select: useWorkspaceAuthorityCommandQueue(run, snapshot, enqueue),
+      };
+    });
+
+    let selected!: Promise<ServerEvent>;
+    let created!: Promise<void>;
+    await act(async () => {
+      selected = hook.result.current.select("selection", {
+        type: "conversation.select",
+        payload: { conversationId: snapshot.activeConversationId! },
+      });
+      created = hook.result.current.create("conversation.create", {
+        type: "conversation.create",
+        payload: { projectId: projectIds[0], title: "After repeated selection" },
+      });
+    });
+
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(2));
+    await expect(created).resolves.toBeUndefined();
+    rejectSelection(delayedFailure);
+    await expect(selected).rejects.toBe(delayedFailure);
+  });
+
   it("releases a published create into the shared workspace-authority order", async () => {
     const createdConversationId = "88888888-8888-4888-8888-888888888888";
     let currentSnapshot = snapshot;

@@ -7,12 +7,12 @@ export interface RuntimeOwnedProcessInvocation {
   readonly args: string[];
 }
 
-/** Wraps POSIX runtime children in the native guardian without a shell. */
-export function runtimeOwnedProcessInvocationFor(
+function invocationFor(
   platform: RuntimeOwnedProcessPlatform | null,
   guardianPath: string | null,
   command: string,
   args: readonly string[],
+  darwinMode: "watch" | "watch-terminal-session",
 ): RuntimeOwnedProcessInvocation {
   if (platform !== "darwin" && platform !== "linux") {
     return { command, args: [...args] };
@@ -35,6 +35,38 @@ export function runtimeOwnedProcessInvocationFor(
   }
   return {
     command: guardianPath,
-    args: ["watch", String(process.pid), "--", command, ...args],
+    args: [
+      darwinMode,
+      String(process.pid),
+      "--",
+      command,
+      ...args,
+    ],
   };
+}
+
+/** Wraps POSIX runtime children in the strict native guardian without a shell. */
+export function runtimeOwnedProcessInvocationFor(
+  platform: RuntimeOwnedProcessPlatform | null,
+  guardianPath: string | null,
+  command: string,
+  args: readonly string[],
+): RuntimeOwnedProcessInvocation {
+  return invocationFor(platform, guardianPath, command, args, "watch");
+}
+
+/** Wraps only a user-interactive PTY in its explicit macOS session boundary. */
+export function runtimeOwnedTerminalSessionInvocationFor(
+  platform: RuntimeOwnedProcessPlatform | null,
+  guardianPath: string | null,
+  command: string,
+  args: readonly string[],
+): RuntimeOwnedProcessInvocation {
+  return invocationFor(
+    platform,
+    guardianPath,
+    command,
+    args,
+    "watch-terminal-session",
+  );
 }

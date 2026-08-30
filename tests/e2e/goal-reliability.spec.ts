@@ -6,10 +6,7 @@ import {
   continuationIdentityForSelection,
   nativeModelSelection,
 } from "../../src/shared/model-routing";
-import {
-  createAppFixture,
-  type RuntimeTestSnapshot,
-} from "./support/app-fixture";
+import { createAppFixture } from "./support/app-fixture";
 import { installRuntimeRecoveryConsent } from "./support/runtime-crash-safety";
 import {
   ensureWorkspaceTools,
@@ -193,21 +190,33 @@ test("starts a sessionless goal and recovers it after Stop and runtime crash", a
       "data-runtime-generation",
     );
     expect(beforeRuntimeGeneration).toMatch(/^[0-9a-f-]{36}$/iu);
+    const noReloadMarker = await page.evaluate(() => {
+      const marker = crypto.randomUUID();
+      Reflect.set(window, "__inertiaGoalNoReloadMarker", marker);
+      return marker;
+    });
     const restoreRuntimeRecoveryConsent = await installRuntimeRecoveryConsent(
       app.electronApp,
     );
     try {
       await app.electronApp.evaluate(() => {
         const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
-          crash: () => RuntimeTestSnapshot;
+          crash: () => unknown;
         } | undefined;
         if (!runtime) throw new Error("The test runtime supervisor is unavailable");
         runtime.crash();
       });
+      // The app-shell recovery scenario owns privileged supervisor/PID proof.
+      // This goal-specific scenario observes the replacement runtime through
+      // the renderer contract instead: an Electron main-process evaluate is
+      // not cancellable, so polling it across a deliberate utility crash can
+      // poison the Playwright transport even after a Promise.race times out.
       await expect.poll(async () => {
         const [connectionStatus, runtimeGeneration] = await Promise.all([
-          shell.getAttribute("data-connection-status"),
-          shell.getAttribute("data-runtime-generation"),
+          shell.getAttribute("data-connection-status", { timeout: 500 })
+            .catch(() => null),
+          shell.getAttribute("data-runtime-generation", { timeout: 500 })
+            .catch(() => null),
         ]);
         return connectionStatus === "online"
           && runtimeGeneration !== null
@@ -216,10 +225,8 @@ test("starts a sessionless goal and recovers it after Stop and runtime crash", a
     } finally {
       await restoreRuntimeRecoveryConsent();
     }
-    await expect(shell).toHaveAttribute(
-      "data-connection-status",
-      "online",
-    );
+    expect(await page.evaluate(() =>
+      Reflect.get(window, "__inertiaGoalNoReloadMarker"))).toBe(noReloadMarker);
     await expect(tools.getByText("Ship the reliable goal flow", {
       exact: true,
     })).toBeVisible({ timeout: 10_000 });

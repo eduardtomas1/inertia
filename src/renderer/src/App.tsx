@@ -22,7 +22,7 @@ import { useGlobalShortcuts } from "./hooks/useGlobalShortcuts";
 import { useProviderMaintenance } from "./hooks/useProviderMaintenance";
 import { useProviderQuotaNotices } from "./hooks/useProviderQuotaNotices";
 import { useConversationProjection } from "./hooks/useConversationProjection";
-import { useAsyncOperationQueue, useAuthoritativeConversationCreateQueue } from "./hooks/useConversationSelectionQueue";
+import { useAsyncOperationQueue, useAuthoritativeConversationCreateQueue, useWorkspaceAuthorityCommandQueue } from "./hooks/useConversationSelectionQueue";
 import {
   agentWorkflowRouteIdentity,
   agentWorkflowTargetConversation,
@@ -368,13 +368,11 @@ export default function App(): React.JSX.Element {
     setActionError,
   });
   const enqueueWorkspaceAuthority = useAsyncOperationQueue();
-  const selectionCommandQueue = useCallback((
-    key: string,
-    command: CommandWithoutId,
-  ) => enqueueWorkspaceAuthority(() => run(key, command)), [
-    enqueueWorkspaceAuthority,
+  const selectionCommandQueue = useWorkspaceAuthorityCommandQueue(
     run,
-  ]);
+    connection.snapshot,
+    enqueueWorkspaceAuthority,
+  );
   const conversationCreateQueue = useAuthoritativeConversationCreateQueue(run, connection.snapshot, enqueueWorkspaceAuthority);
   const runUserCommand = useCallback((
     key: string,

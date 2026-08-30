@@ -583,6 +583,7 @@ static int bounded_owned_tree_cleanup(
   pid_t guardian_pid,
   struct owned_tree_tracker *tracker,
   int allow_completed_payload_forks,
+  int allow_terminal_session_escape,
   pid_t runtime_pid,
   const struct proc_bsdinfo *runtime_identity
 ) {
@@ -602,7 +603,9 @@ static int bounded_owned_tree_cleanup(
         && exact_identity_matches_bounded(runtime_pid, runtime_identity)
         && !stop_requested
         && !graceful_exit_requested;
-      return tracker->fork_tainted && !completed_authority_intact ? 0 : 1;
+      return tracker->fork_tainted
+        && !completed_authority_intact
+        && !allow_terminal_session_escape ? 0 : 1;
     }
   }
   // Do not resume the stable frozen set to deliver TERM: a resumed signal
@@ -646,7 +649,9 @@ static int bounded_owned_tree_cleanup(
         && exact_identity_matches_bounded(runtime_pid, runtime_identity)
         && !stop_requested
         && !graceful_exit_requested;
-      return tracker->fork_tainted && !completed_authority_intact ? 0 : 1;
+      return tracker->fork_tainted
+        && !completed_authority_intact
+        && !allow_terminal_session_escape ? 0 : 1;
     }
     (void)nanosleep(&pause, NULL);
   }
@@ -658,6 +663,7 @@ static int drain_owned_tree(
   pid_t guardian_pid,
   struct owned_tree_tracker *tracker,
   int allow_completed_payload_forks,
+  int allow_terminal_session_escape,
   pid_t runtime_pid,
   const struct proc_bsdinfo *runtime_identity
 ) {
@@ -670,6 +676,7 @@ static int drain_owned_tree(
     guardian_pid,
     tracker,
     allow_completed_payload_forks,
+    allow_terminal_session_escape,
     runtime_pid,
     runtime_identity
   );
@@ -778,7 +785,11 @@ static int session_empty_mode(const char *raw_session_id) {
   return count == 0 ? 0 : 4;
 }
 
-static int watch_mode(int argc, char *argv[]) {
+static int watch_mode(
+  int argc,
+  char *argv[],
+  int allow_terminal_session_escape
+) {
   if (argc < 5 || strcmp(argv[3], "--") != 0) return 64;
   pid_t runtime_pid = 0;
   if (!parse_pid(argv[2], &runtime_pid)) return 64;
@@ -846,7 +857,8 @@ static int watch_mode(int argc, char *argv[]) {
     if (stop_requested
       || !exact_identity_matches_bounded(runtime_pid, &runtime_identity)) {
       const int drained = drain_owned_tree(
-        self, self, &tracker, 0, runtime_pid, &runtime_identity
+        self, self, &tracker, 0, allow_terminal_session_escape,
+        runtime_pid, &runtime_identity
       );
       free_owned_tree_tracker(&tracker);
       if (!drained) terminate_with_uncertain_containment();
@@ -861,7 +873,8 @@ static int watch_mode(int argc, char *argv[]) {
   if (stop_requested
     || !exact_identity_matches_bounded(runtime_pid, &runtime_identity)) {
     const int drained = drain_owned_tree(
-      self, self, &tracker, 0, runtime_pid, &runtime_identity
+      self, self, &tracker, 0, allow_terminal_session_escape,
+      runtime_pid, &runtime_identity
     );
     free_owned_tree_tracker(&tracker);
     if (!drained) terminate_with_uncertain_containment();
@@ -971,7 +984,8 @@ static int watch_mode(int argc, char *argv[]) {
   (void)close(execution_gate[1]);
   if (!execution_released) {
     const int drained = drain_owned_tree(
-      self, self, &tracker, 0, runtime_pid, &runtime_identity
+      self, self, &tracker, 0, allow_terminal_session_escape,
+      runtime_pid, &runtime_identity
     );
     free_owned_tree_tracker(&tracker);
     if (!drained) terminate_with_uncertain_containment();
@@ -979,7 +993,8 @@ static int watch_mode(int argc, char *argv[]) {
   }
   if (sigprocmask(SIG_SETMASK, &previous_signals, NULL) != 0) {
     const int drained = drain_owned_tree(
-      self, self, &tracker, 0, runtime_pid, &runtime_identity
+      self, self, &tracker, 0, allow_terminal_session_escape,
+      runtime_pid, &runtime_identity
     );
     free_owned_tree_tracker(&tracker);
     if (!drained) terminate_with_uncertain_containment();
@@ -1083,6 +1098,7 @@ static int watch_mode(int argc, char *argv[]) {
     self,
     &tracker,
     payload_settled,
+    allow_terminal_session_escape,
     runtime_pid,
     &runtime_identity
   );
@@ -1102,7 +1118,14 @@ int main(int argc, char *argv[]) {
     return ready_mode(argv[2]);
   }
   if (argc >= 5 && strcmp(argv[1], "watch") == 0) {
-    return watch_mode(argc, argv);
+    return watch_mode(argc, argv, 0);
+  }
+  if (argc >= 5 && strcmp(argv[1], "watch-terminal-session") == 0) {
+    // User-created interactive terminals explicitly own their macOS session,
+    // not daemonized descendants that deliberately escape it with setsid().
+    // The same exact-identity checks and frozen session drain still apply;
+    // only the permanent NOTE_FORK uncertainty is outside this narrower scope.
+    return watch_mode(argc, argv, 1);
   }
   return 64;
 }

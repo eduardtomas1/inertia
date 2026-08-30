@@ -7,9 +7,10 @@ export function terminalShutdownTimeoutMs(platform: NodeJS.Platform): number {
   // The native macOS guardian can legitimately consume about 1.76 seconds in
   // its bounded worst case: two stable 16-pass freezes, a 5-poll TERM grace,
   // the post-KILL commit poll, and a 50-poll drain, all at 20 ms. Preserve
-  // bounded scheduler/identity headroom instead of declaring that still-live
-  // proof operation unsafe at the former generic 1-second deadline. An outer
-  // runtime-shutdown deadline remains authoritative and can tighten this.
-  if (platform === "darwin") return 2_250;
+  // bounded scheduler/identity headroom, including one retry of the exact
+  // guardian identity helper, instead of declaring that still-live proof
+  // operation unsafe under host load. An outer runtime-shutdown deadline
+  // remains authoritative and can tighten this.
+  if (platform === "darwin") return 5_000;
   return 1_000;
 }

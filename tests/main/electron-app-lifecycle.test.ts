@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import type { ElectronApplication } from "@playwright/test";
 import { describe, expect, it, vi } from "vitest";
 
+import { runtimeSupervisorShutdownEnvelopeMs } from "../../src/node/runtime-shutdown-deadline";
 import {
   closeElectronAppBounded,
   closeElectronFixtureBounded,
@@ -364,7 +365,9 @@ describe("Electron E2E application lifecycle", () => {
         });
         const outcome = closing.then(() => null, (error: unknown) => error);
 
-        await vi.advanceTimersByTimeAsync(5 + 13_000 + 1_000);
+        await vi.advanceTimersByTimeAsync(
+          5 + runtimeSupervisorShutdownEnvelopeMs("darwin") + 500 + 1_000,
+        );
         const failure = await outcome;
         expect(process.kill).toHaveBeenCalledWith("SIGKILL");
         expect(failure).toBeInstanceOf(AggregateError);

@@ -29,7 +29,16 @@ import {
   type RuntimeOwnedProcessClaim,
   type RuntimeOwnedProcessPlatform,
 } from "./runtime-owned-process-journal.js";
-import { runtimeOwnedProcessInvocationFor } from "./runtime-owned-process-invocation.js";
+import {
+  runtimeOwnedProcessInvocationFor,
+  runtimeOwnedTerminalSessionInvocationFor,
+} from "./runtime-owned-process-invocation.js";
+import {
+  hardStopUnclaimedDarwinGuardian,
+  requestExactDarwinGuardianStop as requestExactDarwinGuardianStopWith,
+  signalExactDarwinGuardianAuthorization,
+  signalExactDarwinGuardianStop as signalExactDarwinGuardianStopWith,
+} from "./runtime-owned-process-darwin-stop.js";
 import type { RuntimeOwnedProcessInvocation } from "./runtime-owned-process-invocation.js";
 export {
   RuntimeOwnedProcessJournal,
@@ -108,6 +117,8 @@ interface ActiveRuntimeOwnedProcessClaim {
   settleReleaseConfirmation: ((confirmed: boolean) => void) | null;
   linuxIdentity?: LinuxProcessIdentity;
   darwinIdentity?: DarwinProcessIdentity;
+  darwinStopSignalSent?: boolean;
+  darwinStopBarrier?: Promise<boolean>;
   settleLinuxMonitorConfirmation?: (confirmed: boolean) => void;
   stopLinuxMonitor?: () => void;
 }
@@ -228,6 +239,24 @@ export function runtimeOwnedProcessInvocation(
   );
 }
 
+/**
+ * Selects session-scoped macOS ownership only for a user-interactive terminal.
+ * Provider, Git, and other runtime callers intentionally have no opt-in on
+ * runtimeOwnedProcessInvocation and retain strict complete-tree containment.
+ */
+export function runtimeOwnedTerminalSessionInvocation(
+  command: string,
+  args: readonly string[],
+): RuntimeOwnedProcessInvocation {
+  const registry = activeRegistry;
+  return runtimeOwnedTerminalSessionInvocationFor(
+    registry?.platform ?? null,
+    registry?.darwinGuardianPath ?? null,
+    command,
+    args,
+  );
+}
+
 export function activeRuntimeOwnedProcessPlatform(): RuntimeOwnedProcessPlatform | null {
   return activeRegistry?.platform ?? null;
 }
@@ -260,17 +289,7 @@ export function requestRuntimeOwnedGuardianStop(
     // claim retained; the caller must never use an unsafe raw-PID fallback.
     return Promise.resolve(false);
   }
-  claim.stopRequested = true;
-  claim.settleStopRequest();
-  if (claim.admission) return claim.admission;
-  if (claim.darwinIdentity) {
-    try { return Promise.resolve(child.kill("SIGTERM")); } catch {
-      return Promise.resolve(false);
-    }
-  }
-  // The guardian owns the stop even while asynchronous admission is pending;
-  // never authorize a caller fallback against a recyclable raw PID.
-  return Promise.resolve(false);
+  return requestExactDarwinGuardianStopWith(registry, (candidate) => activeRegistry === candidate, registry.readDarwinIdentity, claim, child);
 }
 
 function hardStopUnclaimed(
@@ -283,26 +302,6 @@ function hardStopUnclaimed(
     try { process.kill(-pid, "SIGKILL"); } catch { /* The group may be gone. */ }
   }
   try { child.kill("SIGKILL"); } catch { /* The child may be gone. */ }
-}
-
-async function hardStopUnclaimedDarwinGuardian(
-  child: Pick<ChildProcess, "pid" | "kill">,
-  registry: ActiveRuntimeOwnedProcessRegistry,
-  expectedIdentity: DarwinProcessIdentity | null,
-): Promise<void> {
-  const pid = child.pid;
-  if (!pid || !expectedIdentity || !registry.darwinGuardianPath) return;
-  let current: DarwinProcessIdentity | null = null;
-  try {
-    current = await registry.readDarwinIdentityAsync(
-      pid,
-      registry.admissionController.signal,
-    );
-  } catch {
-    return;
-  }
-  if (!current || !sameProcess(expectedIdentity, current)) return;
-  try { child.kill("SIGKILL"); } catch { /* The exact guardian may be gone. */ }
 }
 
 function exactUnownedClaim(
@@ -798,7 +797,9 @@ async function admitDarwinGuardian(
     if (claim.stopRequested || registry.tainted) {
       // The durable readiness claim identifies the still-gated guardian; stop
       // it without waiting for or issuing payload authorization.
-      child.kill("SIGTERM");
+      if (!signalExactDarwinGuardianStopWith(registry, (candidate) => activeRegistry === candidate, registry.readDarwinIdentity, claim, child)) {
+        throw new Error("The macOS owned process guardian identity changed before stop.");
+      }
       return true;
     }
     // Recheck identity after persistence and immediately before authorization.
@@ -808,7 +809,9 @@ async function admitDarwinGuardian(
       claim.waitForStopRequest.then(() => ({ kind: "stop" as const })),
     ]);
     if (authorization.kind === "stop") {
-      child.kill("SIGTERM");
+      if (!signalExactDarwinGuardianStopWith(registry, (candidate) => activeRegistry === candidate, registry.readDarwinIdentity, claim, child)) {
+        throw new Error("The macOS owned process guardian identity changed before stop.");
+      }
       return true;
     }
     const authorizationIdentity = authorization.identity;
@@ -822,19 +825,19 @@ async function admitDarwinGuardian(
     claim.darwinIdentity = authorizationIdentity;
     if (claim.stopRequested || registry.tainted) {
       // Close the final race without authorizing the still-gated payload.
-      child.kill("SIGTERM");
+      if (!signalExactDarwinGuardianStopWith(registry, (candidate) => activeRegistry === candidate, registry.readDarwinIdentity, claim, child)) {
+        throw new Error("The macOS owned process guardian identity changed before stop.");
+      }
       return true;
     }
-    process.kill(authorizationIdentity.pid, "SIGUSR1");
+    if (!signalExactDarwinGuardianAuthorization(registry, (candidate) => activeRegistry === candidate, registry.readDarwinIdentity, authorizationIdentity, process.kill)) {
+      throw new Error("The macOS owned process guardian identity changed.");
+    }
     return true;
   } catch {
     if (activeRegistry !== registry) return false;
     registry.tainted = true;
-    await hardStopUnclaimedDarwinGuardian(
-      child,
-      registry,
-      claim.darwinIdentity ?? readyIdentity,
-    );
+    hardStopUnclaimedDarwinGuardian(registry, (candidate) => activeRegistry === candidate, registry.readDarwinIdentity, claim.darwinIdentity ?? readyIdentity, child);
     const processCanExecute = failedClaimProcessCanExecute(
       registry.platform,
       guardianPath,
@@ -1076,6 +1079,7 @@ export function spawnRuntimeOwnedPidProcess<T extends { readonly pid: number }>(
         spawnedAfterMs,
       );
       trackAdmission(registry, claim, admission);
+      let stopBarrier = admission;
       return {
         process: confirmedOwned,
         // Only a normal guardian close may retire an admitted live claim.
@@ -1095,16 +1099,10 @@ export function spawnRuntimeOwnedPidProcess<T extends { readonly pid: number }>(
         },
         requestGuardianStop: () => {
           if (claim.released) return true;
-          claim.stopRequested = true;
-          claim.settleStopRequest();
-          if (!claim.admission && claim.darwinIdentity) {
-            try { process.kill(confirmedOwned.pid, "SIGTERM"); } catch {
-              // The durable claim remains authoritative when the guardian is gone.
-            }
-          }
+          stopBarrier = requestExactDarwinGuardianStopWith(registry, (candidate) => activeRegistry === candidate, registry.readDarwinIdentity, claim, guardian);
           return true;
         },
-        waitForGuardianStop: async () => await admission,
+        waitForGuardianStop: async () => await stopBarrier,
         releaseIfGroupExited: (exitSignal) => {
           if (exitSignal !== 0) {
             registry.tainted = true;

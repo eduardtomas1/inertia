@@ -1403,6 +1403,7 @@ describe("cross-platform runtime owned process recovery", () => {
         readDarwinGuardianReadyAsync: async (pid) =>
           pid === 4_242 ? await ready : identity(pid),
         readDarwinIdentityAsync,
+        readDarwinIdentity: (pid) => identity(pid),
       },
     );
     if (deactivate) deactivators.push(deactivate);
@@ -1505,7 +1506,7 @@ describe("cross-platform runtime owned process recovery", () => {
         platform: "darwin",
         darwinGuardianPath: "/trusted/runtime-process-guardian",
         readDarwinGuardianReadyAsync: async () => expected,
-        readDarwinIdentityAsync: async () => expected,
+        readDarwinIdentity: () => expected,
         readDarwinSessionEmptyAsync,
       },
     );
@@ -1567,7 +1568,7 @@ describe("cross-platform runtime owned process recovery", () => {
         platform: "darwin",
         darwinGuardianPath: "/trusted/runtime-process-guardian",
         readDarwinGuardianReadyAsync: async () => await ready,
-        readDarwinIdentityAsync: async () => expected,
+        readDarwinIdentity: () => expected,
         readDarwinSessionEmptyAsync,
       },
     );
@@ -1735,7 +1736,7 @@ describe("cross-platform runtime owned process recovery", () => {
         platform: "darwin",
         darwinGuardianPath: "/trusted/runtime-process-guardian",
         readDarwinGuardianReadyAsync: async () => expected,
-        readDarwinIdentityAsync: async () => expected,
+        readDarwinIdentity: () => expected,
         readDarwinSessionEmptyAsync,
       },
     );
@@ -1792,7 +1793,7 @@ describe("cross-platform runtime owned process recovery", () => {
         platform: "darwin",
         darwinGuardianPath: "/trusted/runtime-process-guardian",
         readDarwinGuardianReadyAsync: async (pid) => identity(pid),
-        readDarwinIdentityAsync: async (pid) => identity(pid),
+        readDarwinIdentity: (pid) => identity(pid),
         readDarwinSessionEmptyAsync,
       },
     );

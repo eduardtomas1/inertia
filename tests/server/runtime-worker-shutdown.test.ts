@@ -71,7 +71,7 @@ describe("runtime worker shutdown", () => {
         await vi.advanceTimersByTimeAsync(RUNTIME_SHUTDOWN_DEADLINE_MS - 250);
         await shutdown;
 
-        expect(RUNTIME_SHUTDOWN_DEADLINE_MS).toBe(10_000);
+        expect(RUNTIME_SHUTDOWN_DEADLINE_MS).toBe(12_750);
         expect(post).toHaveBeenCalledWith({ type: "runtime.stopped" });
         expect(post).not.toHaveBeenCalledWith({
           type: "runtime.shutdown-unconfirmed",

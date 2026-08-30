@@ -367,12 +367,134 @@ describe("modern Darwin runtime recovery authority", () => {
       currentGeneration,
       {
         ...absentRoots,
+        pidExists: () => true,
         readDarwinIdentity: (pid) => identity(pid),
       },
     )).toBe(false);
     expect(new ModernDarwinRecoveryAuthorityJournal(path).pending())
       .not.toBeNull();
     expect(new RuntimeGenerationLeaseJournal(path).all()).toHaveLength(2);
+  });
+
+  it("retries one unreadable guardian identity before retiring absent roots", () => {
+    const path = directory();
+    seedOwned(path, generationA, 447);
+    const snapshot = captureModernDarwinRecoverySnapshot(path, bootId)!;
+    const journal = new ModernDarwinRecoveryAuthorityJournal(path);
+    expect(journal.publish(snapshot)).not.toBeNull();
+    const authority = journal.pending()!;
+    const leases = new RuntimeGenerationLeaseJournal(path);
+    expect(leases.publish(currentGeneration, bootId)).toBe(true);
+    expect(new RuntimeOwnedProcessJournal(path, { platform: "darwin" })
+      .startSession(currentGeneration, bootId)).toBe(true);
+    let reads = 0;
+
+    expect(journal.beginRetirement(
+      authority,
+      path,
+      currentGeneration,
+      {
+        ...absentRoots,
+        pidExists: () => true,
+        readDarwinIdentity: () => {
+          reads += 1;
+          if (reads === 1) throw new Error("transient helper failure");
+          return null;
+        },
+      },
+    )).toBe(true);
+    expect(reads).toBe(2);
+  });
+
+  it("rejects an exact live guardian found by the unreadable retry", () => {
+    const path = directory();
+    seedOwned(path, generationA, 448);
+    const snapshot = captureModernDarwinRecoverySnapshot(path, bootId)!;
+    const journal = new ModernDarwinRecoveryAuthorityJournal(path);
+    expect(journal.publish(snapshot)).not.toBeNull();
+    const authority = journal.pending()!;
+    const leases = new RuntimeGenerationLeaseJournal(path);
+    expect(leases.publish(currentGeneration, bootId)).toBe(true);
+    expect(new RuntimeOwnedProcessJournal(path, { platform: "darwin" })
+      .startSession(currentGeneration, bootId)).toBe(true);
+    let reads = 0;
+
+    expect(journal.beginRetirement(
+      authority,
+      path,
+      currentGeneration,
+      {
+        ...absentRoots,
+        pidExists: () => true,
+        readDarwinIdentity: (pid) => {
+          reads += 1;
+          if (reads === 1) throw new Error("transient helper failure");
+          return identity(pid);
+        },
+      },
+    )).toBe(false);
+    expect(reads).toBe(2);
+    expect(journal.pending()).not.toBeNull();
+    expect(leases.all()).toHaveLength(2);
+  });
+
+  it("fails closed after two unreadable guardian identity probes", () => {
+    const path = directory();
+    seedOwned(path, generationA, 449);
+    const snapshot = captureModernDarwinRecoverySnapshot(path, bootId)!;
+    const journal = new ModernDarwinRecoveryAuthorityJournal(path);
+    expect(journal.publish(snapshot)).not.toBeNull();
+    const authority = journal.pending()!;
+    const leases = new RuntimeGenerationLeaseJournal(path);
+    expect(leases.publish(currentGeneration, bootId)).toBe(true);
+    expect(new RuntimeOwnedProcessJournal(path, { platform: "darwin" })
+      .startSession(currentGeneration, bootId)).toBe(true);
+    let reads = 0;
+
+    expect(journal.beginRetirement(
+      authority,
+      path,
+      currentGeneration,
+      {
+        ...absentRoots,
+        pidExists: () => true,
+        readDarwinIdentity: () => {
+          reads += 1;
+          throw new Error("helper unavailable");
+        },
+      },
+    )).toBe(false);
+    expect(reads).toBe(2);
+    expect(journal.pending()).not.toBeNull();
+    expect(leases.all()).toHaveLength(2);
+  });
+
+  it("does not invoke the identity helper after exact PID absence", () => {
+    const path = directory();
+    seedOwned(path, generationA, 450);
+    const snapshot = captureModernDarwinRecoverySnapshot(path, bootId)!;
+    const journal = new ModernDarwinRecoveryAuthorityJournal(path);
+    expect(journal.publish(snapshot)).not.toBeNull();
+    const authority = journal.pending()!;
+    const leases = new RuntimeGenerationLeaseJournal(path);
+    expect(leases.publish(currentGeneration, bootId)).toBe(true);
+    expect(new RuntimeOwnedProcessJournal(path, { platform: "darwin" })
+      .startSession(currentGeneration, bootId)).toBe(true);
+    let reads = 0;
+
+    expect(journal.beginRetirement(
+      authority,
+      path,
+      currentGeneration,
+      {
+        ...absentRoots,
+        readDarwinIdentity: () => {
+          reads += 1;
+          throw new Error("the absent PID must not need a helper");
+        },
+      },
+    )).toBe(true);
+    expect(reads).toBe(0);
   });
 
   it("discards only malformed publish transients and re-prompts", () => {

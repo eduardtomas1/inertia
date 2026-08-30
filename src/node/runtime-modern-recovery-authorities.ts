@@ -472,7 +472,7 @@ export function modernDarwinRecoverySnapshotRootsAbsent(
     (observation.platform ?? process.platform) !== "darwin"
     || !isAbsolute(observation.guardianPath)
   ) return false;
-  const deadlineAt = observation.deadlineAt ?? Date.now() + 2_000;
+  const deadlineAt = observation.deadlineAt ?? Date.now() + 2_250;
   const readIdentity = observation.readDarwinIdentity
     ?? ((pid: number) => readDarwinProcessIdentity(
       pid,
@@ -492,7 +492,26 @@ export function modernDarwinRecoverySnapshotRootsAbsent(
           continue;
         }
         const expected = record.process as unknown as DarwinProcessIdentity;
-        const observed = readIdentity(expected.pid);
+        // ESRCH proves that no process currently occupies the recorded PID,
+        // so the exact old identity cannot still be live. Avoid spawning the
+        // native identity helper in that authoritative absence case: on a
+        // loaded macOS host an unnecessary synchronous helper can consume the
+        // complete recovery deadline while the crashed runtime is reaped.
+        // When any process does occupy the PID, retain the identity probe so
+        // an exact old root remains locked and PID reuse remains distinguishable.
+        if (!pidExists(expected.pid)) continue;
+        let observed: DarwinProcessIdentity | null;
+        try {
+          observed = readIdentity(expected.pid);
+        } catch {
+          // The native helper is a bounded child process and can be briefly
+          // unreadable while a loaded host is reaping the crashed runtime.
+          // Retry that transport failure exactly once. A readable null,
+          // changed identity, or exact live identity is authoritative and is
+          // never retried.
+          if (Date.now() >= deadlineAt) return false;
+          observed = readIdentity(expected.pid);
+        }
         if (observed && JSON.stringify(observed) === JSON.stringify(expected)) {
           return false;
         }

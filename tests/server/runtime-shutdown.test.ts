@@ -23,10 +23,10 @@ function deferred(): {
 
 describe("runtime shutdown phases", () => {
   it("preserves each platform's complete cleanup proof window", () => {
-    expect(runtimeShutdownDeadlineMs("darwin")).toBe(10_000);
+    expect(runtimeShutdownDeadlineMs("darwin")).toBe(12_750);
     expect(runtimeShutdownDeadlineMs("linux")).toBe(2_500);
     expect(runtimeShutdownDeadlineMs("win32")).toBe(5_500);
-    expect(runtimeSupervisorShutdownEnvelopeMs("darwin")).toBe(12_500);
+    expect(runtimeSupervisorShutdownEnvelopeMs("darwin")).toBe(15_250);
     expect(runtimeSupervisorShutdownEnvelopeMs("linux")).toBe(5_000);
     expect(runtimeSupervisorShutdownEnvelopeMs("win32")).toBe(8_000);
   });
@@ -42,7 +42,7 @@ describe("runtime shutdown phases", () => {
           calls.push(name);
         };
         const shutdown = runRuntimeShutdownPhases({
-          independentDrains: [delayed("terminal", 7_750)],
+          independentDrains: [delayed("terminal", 10_500)],
           stopIsolatedRuns: delayed("isolated", 0),
           disposeTurnsAndProviders: delayed("providers", 0),
           settleArtifacts: delayed("artifacts", 250),
@@ -51,7 +51,7 @@ describe("runtime shutdown phases", () => {
           closeStore: delayed("store", 250),
         });
 
-        await vi.advanceTimersByTimeAsync(8_750);
+        await vi.advanceTimersByTimeAsync(11_500);
         await shutdown;
 
         expect(calls).toEqual([

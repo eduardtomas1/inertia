@@ -275,7 +275,7 @@ describe("runtime bootstrap safety", () => {
       {
         platform: "darwin",
         readDarwinIdentity: () => guardianIdentity,
-        pidExists: () => false,
+        pidExists: () => true,
       },
     )).toBeNull();
     expect(new ModernDarwinRecoveryAuthorityJournal(dataDirectory).pending())
@@ -328,7 +328,7 @@ describe("runtime bootstrap safety", () => {
         platform: "darwin",
         deadlineAt: Date.now() + 100,
         readDarwinIdentity: () => guardianIdentity,
-        pidExists: () => false,
+        pidExists: () => true,
       },
     );
     expect(replay.authority).toBeNull();

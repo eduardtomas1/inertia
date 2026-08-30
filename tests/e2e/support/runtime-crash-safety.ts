@@ -432,6 +432,7 @@ export async function expectRuntimeCrashRecovery(
     electronApp,
   );
   let crashed: RuntimeTestSnapshot;
+  let after: RuntimeTestSnapshot;
   try {
     crashed = await electronApp.evaluate((_electron) => {
       const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
@@ -441,15 +442,25 @@ export async function expectRuntimeCrashRecovery(
       return runtime.crash();
     });
     await expect.poll(async () => {
-      const current = await runtimeSnapshot();
-      return current.phase === "ready" && current.generation > before.generation;
+      const shell = page.locator(".app-shell");
+      const [connectionStatus, runtimeGeneration] = await Promise.all([
+        shell.getAttribute("data-connection-status", { timeout: 500 })
+          .catch(() => null),
+        shell.getAttribute("data-runtime-generation", { timeout: 500 })
+          .catch(() => null),
+      ]);
+      return connectionStatus === "online"
+        && runtimeGeneration !== null
+        && runtimeGeneration !== beforeRuntimeGeneration;
     }, { timeout: 20_000 }).toBe(true);
+    after = await runtimeSnapshot();
+    expect(after.phase).toBe("ready");
+    expect(after.generation).toBeGreaterThan(before.generation);
   } finally {
     await restoreRuntimeRecoveryConsent();
   }
   const crashReturnedObservation = runtimeObservation(crashed);
   expect(crashed.pid).toBe(before.pid);
-  const after = await runtimeSnapshot();
   const replacementReadyObservation = runtimeObservation(after);
   const afterUrl = await runtimeWebsocketUrl(page);
   expect(after.generation).toBeGreaterThan(before.generation);

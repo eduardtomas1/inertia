@@ -385,6 +385,132 @@ describe("macOS runtime process guardian", () => {
   );
 
   it.runIf(process.platform === "darwin")(
+    "drains a user terminal session while leaving an escaped daemon outside its scope",
+    async () => {
+      const directory = temporaryDirectory();
+      const payloadSourcePath = join(directory, "terminal-session-payload.c");
+      const payloadPath = join(directory, "terminal-session-payload");
+      const rootPidPath = join(directory, "root.pid");
+      const sessionChildPidPath = join(directory, "session-child.pid");
+      const escapedPidPath = join(directory, "escaped.pid");
+      writeFileSync(payloadSourcePath, [
+        "#include <signal.h>",
+        "#include <stdio.h>",
+        "#include <sys/types.h>",
+        "#include <unistd.h>",
+        "static int write_pid(const char *path, pid_t pid) {",
+        "  FILE *stream = fopen(path, \"w\");",
+        "  if (!stream) return 0;",
+        "  const int written = fprintf(stream, \"%d\\n\", pid) > 0;",
+        "  return fclose(stream) == 0 && written;",
+        "}",
+        "int main(int argc, char **argv) {",
+        "  if (argc != 4 || !write_pid(argv[1], getpid())) return 64;",
+        "  const pid_t session_child = fork();",
+        "  if (session_child < 0) return 71;",
+        "  if (session_child == 0) for (;;) pause();",
+        "  if (!write_pid(argv[2], session_child)) return 75;",
+        "  const pid_t child = fork();",
+        "  if (child < 0) return 76;",
+        "  if (child > 0) for (;;) pause();",
+        "  if (setsid() != getpid()) _exit(72);",
+        "  const pid_t grandchild = fork();",
+        "  if (grandchild < 0) _exit(73);",
+        "  if (grandchild > 0) _exit(0);",
+        "  if (!write_pid(argv[3], getpid())) _exit(74);",
+        "  for (;;) pause();",
+        "}",
+      ].join("\n"), { encoding: "utf8", mode: 0o600 });
+      const built = spawnSync(
+        "/usr/bin/xcrun",
+        [
+          "clang", "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
+          payloadSourcePath, "-o", payloadPath,
+        ],
+        {
+          encoding: "utf8",
+          env: { PATH: "/usr/bin:/bin:/usr/sbin:/sbin" },
+          shell: false,
+          timeout: 30_000,
+        },
+      );
+      expect(built.status, `${built.stderr}\n${built.stdout}`).toBe(0);
+
+      const guardianPath = join(
+        process.cwd(),
+        "resources/generated/runtime-process-guardian/runtime-process-guardian",
+      );
+      activate(directory);
+      const owned = spawnRuntimeOwnedPidProcess(() => {
+        const child = spawn(guardianPath, [
+          "watch-terminal-session",
+          String(process.pid),
+          "--",
+          payloadPath,
+          rootPidPath,
+          sessionChildPidPath,
+          escapedPidPath,
+        ], {
+          detached: true,
+          shell: false,
+          stdio: "ignore",
+        });
+        if (!child.pid) throw new Error("Guardian did not publish its PID");
+        return child as ChildProcess & { readonly pid: number };
+      }, { darwinGuardianCommand: guardianPath });
+      const guardian = owned.process;
+      liveChildren.add(guardian);
+      guardian.once("close", () => liveChildren.delete(guardian));
+
+      let rootPid = 0;
+      let sessionChildPid = 0;
+      let escapedPid = 0;
+      await expect(owned.waitForGuardianStop()).resolves.toBe(true);
+      await expect.poll(() => {
+        if (existsSync(rootPidPath)) {
+          rootPid = Number(readFileSync(rootPidPath, "utf8").trim());
+        }
+        if (existsSync(sessionChildPidPath)) {
+          sessionChildPid = Number(
+            readFileSync(sessionChildPidPath, "utf8").trim(),
+          );
+        }
+        if (existsSync(escapedPidPath)) {
+          escapedPid = Number(readFileSync(escapedPidPath, "utf8").trim());
+        }
+        return rootPid > 1 && sessionChildPid > 1 && escapedPid > 1;
+      }, { timeout: 5_000 }).toBe(true);
+      try {
+        expect(owned.requestPayloadExit?.()).toBe(true);
+        await closeOf(guardian);
+
+        expect(guardian.signalCode).toBeNull();
+        expect(guardian.exitCode).toBe(129);
+        expect(processIsAlive(rootPid)).toBe(false);
+        expect(processIsAlive(sessionChildPid)).toBe(false);
+        expect(processIsAlive(escapedPid)).toBe(true);
+        owned.releaseIfGroupExited(0);
+        await expect.poll(() => owned.confirmStopped()).toBe(true);
+        expect(new RuntimeOwnedProcessJournal(directory, {
+          platform: "darwin",
+          darwinGuardianPath: guardianPath,
+        }).records(runtimeGenerationId)).toEqual([]);
+      } finally {
+        for (const pid of [rootPid, sessionChildPid, escapedPid]) {
+          if (pid <= 1 || !processIsAlive(pid)) continue;
+          try { process.kill(pid, "SIGKILL"); } catch { /* Already gone. */ }
+        }
+        await Promise.all([rootPid, sessionChildPid, escapedPid]
+          .filter((pid) => pid > 1)
+          .map(async (pid) => await expect.poll(() => !processIsAlive(pid), {
+            timeout: 5_000,
+          }).toBe(true)));
+      }
+    },
+    15_000,
+  );
+
+  it.runIf(process.platform === "darwin")(
     "does not census the full machine while no-fork payloads run",
     async () => {
       const guardianPath = join(

@@ -4,7 +4,7 @@ The useful changes in each Inertia release, in plain language.
 
 ## Next
 
-## 0.0.45 — 2026-08-28
+## 0.0.45 — 2026-08-30
 
 ### The Browser is ready when the chat is
 

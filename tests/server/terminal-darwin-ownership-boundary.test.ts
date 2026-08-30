@@ -7,7 +7,8 @@ import type WebSocket from "ws";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { activateRuntimeOwnedProcessRegistry } from "../../src/node/runtime-owned-processes";
+import { activatePreparedRuntimeOwnedProcessRegistry as activateRuntimeOwnedProcessRegistry } from
+  "../helpers/prepared-runtime-owned-process-registry";
 import { TerminalManager } from "../../src/server/terminal";
 
 function fakeTerminal(pid: number): IPty {

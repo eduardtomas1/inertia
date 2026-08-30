@@ -5,9 +5,10 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
-  activateRuntimeOwnedProcessRegistry,
   runtimeOwnedProcessInvocation,
 } from "../../src/node/runtime-owned-processes";
+import { activatePreparedRuntimeOwnedProcessRegistry as activateRuntimeOwnedProcessRegistry } from
+  "../helpers/prepared-runtime-owned-process-registry";
 import { runtimeOwnedTerminalSessionPtyInvocation } from "../../src/node/runtime-owned-pty-invocation";
 
 describe("runtime-owned process invocation boundary", () => {

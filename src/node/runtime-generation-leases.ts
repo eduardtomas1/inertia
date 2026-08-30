@@ -345,6 +345,45 @@ export class RuntimeGenerationLeaseJournal {
     return true;
   }
 
+  consumeExact(expected: RuntimeGenerationLease): boolean {
+    if (this.invalid || !this.root) return false;
+    this.refresh();
+    if (this.invalid || !this.root) return false;
+    const current = this.leases.get(expected.runtimeGenerationId);
+    if (!current || JSON.stringify(current) !== JSON.stringify(expected)) {
+      return false;
+    }
+    const hash = generationHash(expected.runtimeGenerationId);
+    const canonical = canonicalName(hash);
+    const source = readDirectRuntimeJournalLeaf(
+      this.root,
+      canonical,
+      MAX_LEASE_BYTES,
+    );
+    const parsed = source && parseLease(source.bytes, hash);
+    if (
+      !source
+      || !parsed
+      || JSON.stringify(parsed) !== JSON.stringify(expected)
+    ) return this.failedMutation();
+    const consuming = transientName(hash, "consume");
+    if (!renameDirectRuntimeJournalLeaf(
+      this.root,
+      canonical,
+      consuming,
+      source.identity,
+      this.testHooks,
+    )) return this.failedMutation();
+    if (!unlinkDirectRuntimeJournalLeaf(
+      this.root,
+      consuming,
+      source.identity,
+      this.testHooks,
+    )) return this.failedMutation();
+    this.leases.delete(expected.runtimeGenerationId);
+    return true;
+  }
+
   clearRuntimeGeneration(runtimeGenerationId: string): boolean {
     this.refresh();
     if (this.invalid) return false;
@@ -363,8 +402,14 @@ export class RuntimeGenerationLeaseJournal {
       );
   }
 
-  clearPriorBootSessions(systemBootId: string): boolean {
+  clearPriorBootSessions(
+    systemBootId: string,
+    preservedRuntimeGenerationIds: ReadonlySet<string> = new Set(),
+  ): boolean {
     if (!validSystemBootId(systemBootId)) return false;
+    if ([...preservedRuntimeGenerationIds].some((runtimeGenerationId) => (
+      !validRuntimeGenerationId(runtimeGenerationId)
+    ))) return false;
     this.refresh();
     if (this.invalid) return false;
     if (systemBootId === "unavailable") return true;
@@ -372,6 +417,7 @@ export class RuntimeGenerationLeaseJournal {
       .filter((lease) => (
         lease.systemBootId !== "unavailable"
         && lease.systemBootId !== systemBootId
+        && !preservedRuntimeGenerationIds.has(lease.runtimeGenerationId)
       ))
       .every((lease) => this.consume(lease.runtimeGenerationId));
   }

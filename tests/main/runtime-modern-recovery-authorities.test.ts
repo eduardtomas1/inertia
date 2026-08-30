@@ -1,14 +1,20 @@
 import {
   mkdtempSync,
+  readFileSync,
   readdirSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
+import {
+  pinDirectRuntimeJournalRoot,
+  writeDirectRuntimeJournalLeafFromRoot,
+} from "../../src/node/direct-runtime-journal";
 import { RuntimeGenerationLeaseJournal } from "../../src/node/runtime-generation-leases";
 import {
   captureModernDarwinRecoverySnapshot,
@@ -63,7 +69,11 @@ function seedOwned(
     readDarwinIdentity: (target) => target === pid ? identity(pid) : null,
   });
   expect(journal.startSession(runtimeGenerationId, bootId)).toBe(true);
-  const ownershipId = journal.begin(runtimeGenerationId, bootId);
+  const ownershipId = journal.begin(
+    runtimeGenerationId,
+    bootId,
+    journal.sessionCapability(runtimeGenerationId, bootId)!,
+  );
   journal.claim(ownershipId, runtimeGenerationId, bootId, pid, 77);
   return { journal, ownershipId };
 }
@@ -84,8 +94,24 @@ function seedPending(
   expect(journal.startSession(runtimeGenerationId, bootId)).toBe(true);
   return {
     journal,
-    ownershipId: journal.begin(runtimeGenerationId, bootId),
+    ownershipId: journal.begin(
+      runtimeGenerationId,
+      bootId,
+      journal.sessionCapability(runtimeGenerationId, bootId)!,
+    ),
   };
+}
+
+function seedCurrentSession(path: string): RuntimeOwnedProcessJournal {
+  expect(new RuntimeGenerationLeaseJournal(path).publish(
+    currentGeneration,
+    bootId,
+  )).toBe(true);
+  const journal = new RuntimeOwnedProcessJournal(path, {
+    platform: "darwin",
+  });
+  expect(journal.startSession(currentGeneration, bootId)).toBe(true);
+  return journal;
 }
 
 afterEach(() => {
@@ -238,7 +264,11 @@ describe("modern Darwin runtime recovery authority", () => {
     new ModernDarwinRecoveryAuthorityJournal(path).publish(snapshot);
     const authority = new ModernDarwinRecoveryAuthorityJournal(path).pending()!;
 
-    journal.begin(generationB, bootId);
+    journal.begin(
+      generationB,
+      bootId,
+      journal.sessionCapability(generationB, bootId)!,
+    );
     expect(modernDarwinRecoveryAuthorityMatches(
       path,
       authority,
@@ -280,6 +310,537 @@ describe("modern Darwin runtime recovery authority", () => {
     ]);
     expect(new RuntimeOwnedProcessJournal(path, { platform: "darwin" })
       .records(currentGeneration)).toEqual([]);
+  });
+
+  it("replays exact old ownership after its lease disappeared without touching current ownership", () => {
+    const path = directory();
+    const old = seedOwned(path, generationA, 432);
+    const snapshot = captureModernDarwinRecoverySnapshot(path, bootId)!;
+    const journal = new ModernDarwinRecoveryAuthorityJournal(path);
+    expect(journal.publish(snapshot)).not.toBeNull();
+    const authority = journal.pending()!;
+    const current = seedOwned(path, currentGeneration, 433);
+    expect(journal.beginRetirement(
+      authority,
+      path,
+      currentGeneration,
+      absentRoots,
+    )).toBe(true);
+    const leases = new RuntimeGenerationLeaseJournal(path);
+    const currentLease = leases.all().find(({ runtimeGenerationId }) => (
+      runtimeGenerationId === currentGeneration
+    ));
+    const currentRecords = current.journal.records(currentGeneration);
+    expect(leases.clearRuntimeGeneration(generationA)).toBe(true);
+
+    expect(old.journal.records(generationA)).toHaveLength(1);
+    expect(new ModernDarwinRecoveryAuthorityJournal(path)
+      .completeRetirement(path, authority)).toBe(true);
+    expect(new ModernDarwinRecoveryAuthorityJournal(path).retiring()).toBeNull();
+    expect(new RuntimeGenerationLeaseJournal(path).all()).toEqual([
+      currentLease,
+    ]);
+    expect(current.journal.records(currentGeneration)).toEqual(currentRecords);
+  });
+
+  it("replays an exact subset after lease-free retirement partially completed", () => {
+    const path = directory();
+    const first = seedOwned(path, generationA, 434);
+    const second = seedOwned(path, generationA, 435);
+    const snapshot = captureModernDarwinRecoverySnapshot(path, bootId)!;
+    const journal = new ModernDarwinRecoveryAuthorityJournal(path);
+    expect(journal.publish(snapshot)).not.toBeNull();
+    const authority = journal.pending()!;
+    seedCurrentSession(path);
+    expect(journal.beginRetirement(
+      authority,
+      path,
+      currentGeneration,
+      absentRoots,
+    )).toBe(true);
+    expect(new RuntimeGenerationLeaseJournal(path)
+      .clearRuntimeGeneration(generationA)).toBe(true);
+    expect(first.journal.release(first.ownershipId)).toBe(true);
+    expect(second.journal.records(generationA)).toHaveLength(1);
+
+    expect(new ModernDarwinRecoveryAuthorityJournal(path)
+      .completeRetirement(path, authority)).toBe(true);
+    expect(second.journal.records(generationA)).toBeNull();
+  });
+
+  it("replays an exact record already moved into its consuming leaf", () => {
+    const path = directory();
+    const old = seedOwned(path, generationA, 435);
+    const snapshot = captureModernDarwinRecoverySnapshot(path, bootId)!;
+    const journal = new ModernDarwinRecoveryAuthorityJournal(path);
+    expect(journal.publish(snapshot)).not.toBeNull();
+    const authority = journal.pending()!;
+    seedCurrentSession(path);
+    expect(journal.beginRetirement(
+      authority,
+      path,
+      currentGeneration,
+      absentRoots,
+    )).toBe(true);
+    const canonical = join(
+      path,
+      `.runtime-owned-child-${old.ownershipId}.json`,
+    );
+    const consuming = join(
+      path,
+      `.runtime-owned-child-${old.ownershipId}.consume.tmp`,
+    );
+    renameSync(canonical, consuming);
+
+    expect(new ModernDarwinRecoveryAuthorityJournal(path)
+      .completeRetirement(path, authority)).toBe(true);
+    expect(new ModernDarwinRecoveryAuthorityJournal(path).retiring()).toBeNull();
+    expect(readdirSync(path)).not.toContain(
+      `.runtime-owned-child-${old.ownershipId}.consume.tmp`,
+    );
+  });
+
+  it("rejects changed old ownership after its exact lease disappeared", () => {
+    const path = directory();
+    const old = seedOwned(path, generationA, 436);
+    const snapshot = captureModernDarwinRecoverySnapshot(path, bootId)!;
+    const journal = new ModernDarwinRecoveryAuthorityJournal(path);
+    expect(journal.publish(snapshot)).not.toBeNull();
+    const authority = journal.pending()!;
+    seedCurrentSession(path);
+    expect(journal.beginRetirement(
+      authority,
+      path,
+      currentGeneration,
+      absentRoots,
+    )).toBe(true);
+    expect(new RuntimeGenerationLeaseJournal(path)
+      .clearRuntimeGeneration(generationA)).toBe(true);
+    expect(old.journal.retire(old.ownershipId)).toBe(true);
+    const changed = old.journal.records(generationA);
+
+    expect(new ModernDarwinRecoveryAuthorityJournal(path)
+      .completeRetirement(path, authority)).toBe(false);
+    expect(new ModernDarwinRecoveryAuthorityJournal(path).retiring())
+      .toEqual(authority);
+    expect(old.journal.records(generationA)).toEqual(changed);
+  });
+
+  it("rechecks exact ownership at conditional release time", () => {
+    const path = directory();
+    const old = seedOwned(path, generationA, 436);
+    const snapshot = captureModernDarwinRecoverySnapshot(path, bootId)!;
+    const journal = new ModernDarwinRecoveryAuthorityJournal(path);
+    expect(journal.publish(snapshot)).not.toBeNull();
+    const authority = journal.pending()!;
+    seedCurrentSession(path);
+    expect(journal.beginRetirement(
+      authority,
+      path,
+      currentGeneration,
+      absentRoots,
+    )).toBe(true);
+    const releaseExact = Object.getOwnPropertyDescriptor(
+      RuntimeOwnedProcessJournal.prototype,
+      "releaseExact",
+    )?.value as RuntimeOwnedProcessJournal["releaseExact"];
+    let replaced = false;
+    const conditionalRelease = vi.spyOn(
+      RuntimeOwnedProcessJournal.prototype,
+      "releaseExact",
+    ).mockImplementation(function (
+      this: RuntimeOwnedProcessJournal,
+      expected,
+    ) {
+      if (!replaced) {
+        replaced = true;
+        expect(old.journal.release(old.ownershipId)).toBe(true);
+      }
+      return releaseExact.call(this, expected);
+    });
+    try {
+      expect(new ModernDarwinRecoveryAuthorityJournal(path)
+        .completeRetirement(path, authority)).toBe(false);
+    } finally {
+      conditionalRelease.mockRestore();
+    }
+    expect(new ModernDarwinRecoveryAuthorityJournal(path).retiring())
+      .toEqual(authority);
+    expect(old.journal.records(generationA)).toEqual([]);
+  });
+
+  it("rejects additional old ownership after its exact lease disappeared", () => {
+    const path = directory();
+    const old = seedOwned(path, generationA, 437);
+    const snapshot = captureModernDarwinRecoverySnapshot(path, bootId)!;
+    const journal = new ModernDarwinRecoveryAuthorityJournal(path);
+    expect(journal.publish(snapshot)).not.toBeNull();
+    const authority = journal.pending()!;
+    seedCurrentSession(path);
+    expect(journal.beginRetirement(
+      authority,
+      path,
+      currentGeneration,
+      absentRoots,
+    )).toBe(true);
+    expect(new RuntimeGenerationLeaseJournal(path)
+      .clearRuntimeGeneration(generationA)).toBe(true);
+    const staleWriter = new RuntimeOwnedProcessJournal(path, {
+      platform: "darwin",
+      darwinGuardianPath: guardianPath,
+      readDarwinIdentity: (pid) => pid === 438 ? identity(pid) : null,
+    });
+    const additionalOwnershipId = staleWriter.begin(
+      generationA,
+      bootId,
+      staleWriter.sessionCapability(generationA, bootId)!,
+    );
+    staleWriter.claim(additionalOwnershipId, generationA, bootId, 438, 77);
+    const expanded = old.journal.records(generationA);
+    expect(expanded).toHaveLength(2);
+
+    expect(new ModernDarwinRecoveryAuthorityJournal(path)
+      .completeRetirement(path, authority)).toBe(false);
+    expect(new ModernDarwinRecoveryAuthorityJournal(path).retiring())
+      .toEqual(authority);
+    expect(old.journal.records(generationA)).toEqual(expanded);
+  });
+
+  it("rejects an orphan old claim when its session and exact lease disappeared", () => {
+    const path = directory();
+    const old = seedOwned(path, generationA, 439);
+    const claimPath = join(
+      path,
+      `.runtime-owned-child-${old.ownershipId}.json`,
+    );
+    const claim = readFileSync(claimPath);
+    const snapshot = captureModernDarwinRecoverySnapshot(path, bootId)!;
+    const journal = new ModernDarwinRecoveryAuthorityJournal(path);
+    expect(journal.publish(snapshot)).not.toBeNull();
+    const authority = journal.pending()!;
+    seedCurrentSession(path);
+    expect(journal.beginRetirement(
+      authority,
+      path,
+      currentGeneration,
+      absentRoots,
+    )).toBe(true);
+    expect(old.journal.release(old.ownershipId)).toBe(true);
+    expect(old.journal.finishSession(generationA)).toBe(true);
+    expect(new RuntimeGenerationLeaseJournal(path)
+      .clearRuntimeGeneration(generationA)).toBe(true);
+    writeFileSync(claimPath, claim, { mode: 0o600 });
+
+    expect(new ModernDarwinRecoveryAuthorityJournal(path)
+      .completeRetirement(path, authority)).toBe(false);
+    expect(new ModernDarwinRecoveryAuthorityJournal(path).retiring())
+      .toEqual(authority);
+    expect(readFileSync(claimPath)).toEqual(claim);
+  });
+
+  it("finishes an exact empty old session after its lease disappeared", () => {
+    const path = directory();
+    const old = seedOwned(path, generationA, 451);
+    const snapshot = captureModernDarwinRecoverySnapshot(path, bootId)!;
+    const journal = new ModernDarwinRecoveryAuthorityJournal(path);
+    expect(journal.publish(snapshot)).not.toBeNull();
+    const authority = journal.pending()!;
+    seedCurrentSession(path);
+    expect(journal.beginRetirement(
+      authority,
+      path,
+      currentGeneration,
+      absentRoots,
+    )).toBe(true);
+    expect(old.journal.release(old.ownershipId)).toBe(true);
+    expect(new RuntimeGenerationLeaseJournal(path)
+      .clearRuntimeGeneration(generationA)).toBe(true);
+    expect(old.journal.records(generationA)).toEqual([]);
+
+    expect(new ModernDarwinRecoveryAuthorityJournal(path)
+      .completeRetirement(path, authority)).toBe(true);
+    expect(old.journal.records(generationA)).toBeNull();
+  });
+
+  it("rejects an empty old session whose boot changed after its lease disappeared", () => {
+    const path = directory();
+    const old = seedOwned(path, generationA, 452);
+    const snapshot = captureModernDarwinRecoverySnapshot(path, bootId)!;
+    const journal = new ModernDarwinRecoveryAuthorityJournal(path);
+    expect(journal.publish(snapshot)).not.toBeNull();
+    const authority = journal.pending()!;
+    seedCurrentSession(path);
+    expect(journal.beginRetirement(
+      authority,
+      path,
+      currentGeneration,
+      absentRoots,
+    )).toBe(true);
+    expect(old.journal.release(old.ownershipId)).toBe(true);
+    expect(old.journal.finishSession(generationA)).toBe(true);
+    expect(new RuntimeGenerationLeaseJournal(path)
+      .clearRuntimeGeneration(generationA)).toBe(true);
+    const changedBoot = "test:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    expect(old.journal.startSession(generationA, changedBoot)).toBe(true);
+    expect(old.journal.records(generationA)).toEqual([]);
+
+    expect(new ModernDarwinRecoveryAuthorityJournal(path)
+      .completeRetirement(path, authority)).toBe(false);
+    expect(new ModernDarwinRecoveryAuthorityJournal(path).retiring())
+      .toEqual(authority);
+    expect(old.journal.records(generationA)).toEqual([]);
+  });
+
+  it("does not delete a session replaced at conditional retirement time", () => {
+    const path = directory();
+    expect(new RuntimeGenerationLeaseJournal(path).publish(
+      generationA,
+      bootId,
+    )).toBe(true);
+    const old = new RuntimeOwnedProcessJournal(path, { platform: "darwin" });
+    expect(old.startSession(generationA, bootId)).toBe(true);
+    const snapshot = captureModernDarwinRecoverySnapshot(path, bootId)!;
+    const authorities = new ModernDarwinRecoveryAuthorityJournal(path);
+    expect(authorities.publish(snapshot)).not.toBeNull();
+    const authority = authorities.pending()!;
+    seedCurrentSession(path);
+    expect(authorities.beginRetirement(
+      authority,
+      path,
+      currentGeneration,
+      absentRoots,
+    )).toBe(true);
+    const changedBoot = "test:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const fenceSessionExact = Object.getOwnPropertyDescriptor(
+      RuntimeOwnedProcessJournal.prototype,
+      "fenceSessionExact",
+    )?.value as RuntimeOwnedProcessJournal["fenceSessionExact"];
+    let replaced = false;
+    const conditionalFence = vi.spyOn(
+      RuntimeOwnedProcessJournal.prototype,
+      "fenceSessionExact",
+    ).mockImplementation(function (
+      this: RuntimeOwnedProcessJournal,
+      expected,
+    ) {
+      if (!replaced) {
+        replaced = true;
+        expect(old.finishSession(generationA)).toBe(true);
+        expect(old.startSession(generationA, changedBoot)).toBe(true);
+      }
+      return fenceSessionExact.call(this, expected);
+    });
+    try {
+      expect(new ModernDarwinRecoveryAuthorityJournal(path)
+        .completeRetirement(path, authority)).toBe(false);
+    } finally {
+      conditionalFence.mockRestore();
+    }
+    expect(new ModernDarwinRecoveryAuthorityJournal(path).retiring())
+      .toEqual(authority);
+    expect(old.inspectGeneration(generationA)?.session?.systemBootId)
+      .toBe(changedBoot);
+  });
+
+  it("fences a surviving utility writer before retiring its empty session", () => {
+    const path = directory();
+    expect(new RuntimeGenerationLeaseJournal(path).publish(
+      generationA,
+      bootId,
+    )).toBe(true);
+    const stale = new RuntimeOwnedProcessJournal(path, { platform: "darwin" });
+    expect(stale.startSession(generationA, bootId)).toBe(true);
+    const capability = stale.sessionCapability(generationA, bootId)!;
+    const snapshot = captureModernDarwinRecoverySnapshot(path, bootId)!;
+    const authorities = new ModernDarwinRecoveryAuthorityJournal(path);
+    expect(authorities.publish(snapshot)).not.toBeNull();
+    const authority = authorities.pending()!;
+    seedCurrentSession(path);
+    expect(authorities.beginRetirement(
+      authority,
+      path,
+      currentGeneration,
+      absentRoots,
+    )).toBe(true);
+
+    expect(stale.fenceSessionExact(capability.session)).toBe(true);
+    expect(() => stale.begin(
+      generationA,
+      bootId,
+      capability,
+    )).toThrow("session is unavailable");
+    expect(stale.inspectGeneration(generationA)).toMatchObject({
+      sessionState: "retiring",
+      records: [],
+      consumingRecords: [],
+    });
+
+    expect(new ModernDarwinRecoveryAuthorityJournal(path)
+      .completeRetirement(path, authority)).toBe(true);
+    expect(() => stale.begin(
+      generationA,
+      bootId,
+      capability,
+    )).toThrow("session is unavailable");
+    expect(stale.inspectGeneration(generationA)).toMatchObject({
+      session: null,
+      sessionState: null,
+      records: [],
+      consumingRecords: [],
+    });
+  });
+
+  it("makes a delayed stale publication impossible after retirement wins the fence", () => {
+    const path = directory();
+    expect(new RuntimeGenerationLeaseJournal(path).publish(
+      generationA,
+      bootId,
+    )).toBe(true);
+    const stale = new RuntimeOwnedProcessJournal(path, { platform: "darwin" });
+    expect(stale.startSession(generationA, bootId)).toBe(true);
+    const capability = stale.sessionCapability(generationA, bootId)!;
+    const snapshot = captureModernDarwinRecoverySnapshot(path, bootId)!;
+    const authorities = new ModernDarwinRecoveryAuthorityJournal(path);
+    expect(authorities.publish(snapshot)).not.toBeNull();
+    const authority = authorities.pending()!;
+    seedCurrentSession(path);
+    expect(authorities.beginRetirement(
+      authority,
+      path,
+      currentGeneration,
+      absentRoots,
+    )).toBe(true);
+
+    const ownershipId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+    let completed = false;
+    expect(writeDirectRuntimeJournalLeafFromRoot(
+      capability.writerRoot,
+      `.runtime-owned-child-${ownershipId}.begin.tmp`,
+      pinDirectRuntimeJournalRoot(path),
+      `.runtime-owned-child-${ownershipId}.json`,
+      Buffer.from(JSON.stringify({
+        version: 1,
+        state: "pending",
+        ownershipId,
+        runtimeGenerationId: generationA,
+        systemBootId: bootId,
+      }), "utf8"),
+      {
+        afterTemporaryFileClosed: () => {
+          completed = new ModernDarwinRecoveryAuthorityJournal(path)
+            .completeRetirement(path, authority);
+        },
+      },
+    )).toBe(false);
+    expect(completed).toBe(true);
+    expect(stale.inspectGeneration(generationA)).toMatchObject({
+      sessionState: null,
+      records: [],
+      consumingRecords: [],
+    });
+    expect(readdirSync(path)).not.toContain(
+      `.runtime-owned-child-${ownershipId}.json`,
+    );
+    expect(new ModernDarwinRecoveryAuthorityJournal(path).retiring()).toBeNull();
+  });
+
+  it("replays a crash-left writer temporary through the exact authority", () => {
+    const path = directory();
+    expect(new RuntimeGenerationLeaseJournal(path).publish(
+      generationA,
+      bootId,
+    )).toBe(true);
+    const old = new RuntimeOwnedProcessJournal(path, { platform: "darwin" });
+    expect(old.startSession(generationA, bootId)).toBe(true);
+    const capability = old.sessionCapability(generationA, bootId)!;
+    const ownershipId = "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff";
+    expect(writeDirectRuntimeJournalLeafFromRoot(
+      capability.writerRoot,
+      `.runtime-owned-child-${ownershipId}.begin.tmp`,
+      pinDirectRuntimeJournalRoot(path),
+      `.runtime-owned-child-${ownershipId}.json`,
+      Buffer.from(JSON.stringify({
+        version: 1,
+        state: "pending",
+        ownershipId,
+        runtimeGenerationId: generationA,
+        systemBootId: bootId,
+      }), "utf8"),
+      { afterTemporaryFileClosed: () => { throw new Error("simulated crash"); } },
+    )).toBe(false);
+
+    const snapshot = captureModernDarwinRecoverySnapshot(path, bootId)!;
+    expect(snapshot.generations[0]?.records).toEqual([]);
+    const authorities = new ModernDarwinRecoveryAuthorityJournal(path);
+    expect(authorities.publish(snapshot)).not.toBeNull();
+    const authority = authorities.pending()!;
+    seedCurrentSession(path);
+    expect(authorities.beginRetirement(
+      authority,
+      path,
+      currentGeneration,
+      absentRoots,
+    )).toBe(true);
+    expect(authorities.completeRetirement(path, authority)).toBe(true);
+    expect(old.inspectGeneration(generationA)).toMatchObject({
+      session: null,
+      sessionState: null,
+      records: [],
+      consumingRecords: [],
+    });
+  });
+
+  it("does not delete a lease replaced at conditional retirement time", () => {
+    const path = directory();
+    const leases = new RuntimeGenerationLeaseJournal(path);
+    expect(leases.publish(generationA, bootId)).toBe(true);
+    const old = new RuntimeOwnedProcessJournal(path, { platform: "darwin" });
+    expect(old.startSession(generationA, bootId)).toBe(true);
+    const snapshot = captureModernDarwinRecoverySnapshot(path, bootId)!;
+    const authorities = new ModernDarwinRecoveryAuthorityJournal(path);
+    expect(authorities.publish(snapshot)).not.toBeNull();
+    const authority = authorities.pending()!;
+    seedCurrentSession(path);
+    expect(authorities.beginRetirement(
+      authority,
+      path,
+      currentGeneration,
+      absentRoots,
+    )).toBe(true);
+    const changedBoot = "test:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const consumeExact = Object.getOwnPropertyDescriptor(
+      RuntimeGenerationLeaseJournal.prototype,
+      "consumeExact",
+    )?.value as RuntimeGenerationLeaseJournal["consumeExact"];
+    let replaced = false;
+    const conditionalConsume = vi.spyOn(
+      RuntimeGenerationLeaseJournal.prototype,
+      "consumeExact",
+    ).mockImplementation(function (
+      this: RuntimeGenerationLeaseJournal,
+      expected,
+    ) {
+      if (!replaced) {
+        replaced = true;
+        expect(leases.clearRuntimeGeneration(generationA)).toBe(true);
+        expect(leases.publish(generationA, changedBoot)).toBe(true);
+      }
+      return consumeExact.call(this, expected);
+    });
+    try {
+      expect(new ModernDarwinRecoveryAuthorityJournal(path)
+        .completeRetirement(path, authority)).toBe(false);
+    } finally {
+      conditionalConsume.mockRestore();
+    }
+    expect(new ModernDarwinRecoveryAuthorityJournal(path).retiring())
+      .toEqual(authority);
+    expect(new RuntimeGenerationLeaseJournal(path).all()).toContainEqual(
+      expect.objectContaining({
+        runtimeGenerationId: generationA,
+        systemBootId: changedBoot,
+      }),
+    );
   });
 
   it("finishes a crash after leaves and leases cleared but before authority consume", () => {

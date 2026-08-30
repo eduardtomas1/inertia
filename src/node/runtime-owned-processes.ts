@@ -28,6 +28,7 @@ import {
   type LinuxProcessIdentity,
   type RuntimeOwnedProcessClaim,
   type RuntimeOwnedProcessPlatform,
+  type RuntimeOwnedProcessSessionCapability,
 } from "./runtime-owned-process-journal.js";
 import {
   runtimeOwnedProcessInvocationFor,
@@ -68,7 +69,6 @@ export {
 } from "./runtime-owned-process-darwin.js";
 export type { DarwinProcessIdentity } from "./runtime-owned-process-darwin.js";
 export type { RuntimeOwnedProcessInvocation } from "./runtime-owned-process-invocation.js";
-
 const PROCESS_GROUP_EXIT_WAIT_MS = 1_000;
 const PROCESS_GROUP_EXIT_POLL_MS = 10;
 interface ActiveRuntimeOwnedProcessRegistry {
@@ -76,6 +76,7 @@ interface ActiveRuntimeOwnedProcessRegistry {
   readonly platform: RuntimeOwnedProcessPlatform;
   readonly runtimeGenerationId: string;
   readonly systemBootId: string;
+  readonly sessionCapability: RuntimeOwnedProcessSessionCapability;
   readonly darwinGuardianPath: string | null;
   readonly readDarwinIdentity: (
     pid: number,
@@ -172,14 +173,16 @@ export function activateRuntimeOwnedProcessRegistry(
       ? { readDarwinGuardianReady: options.readDarwinGuardianReady }
       : {}),
   });
-  if (!journal.startSession(runtimeGenerationId, systemBootId)) {
-    throw new Error("The runtime process ownership session could not be persisted.");
+  const sessionCapability = journal.sessionCapability(runtimeGenerationId, systemBootId);
+  if (!sessionCapability) {
+    throw new Error("The runtime process ownership session identity is unavailable.");
   }
   const registry: ActiveRuntimeOwnedProcessRegistry = {
     journal,
     platform,
     runtimeGenerationId,
     systemBootId,
+    sessionCapability,
     darwinGuardianPath,
     readDarwinIdentity: options.readDarwinIdentity
       ?? ((pid) => darwinGuardianPath
@@ -507,7 +510,7 @@ function monitorLinuxGuardian(
     durableClaim.process,
     registry.darwinGuardianPath,
     (authorizationObserved) => {
-      const retired = registry.journal.retire(claim.ownershipId);
+      const retired = registry.journal.retire(claim.ownershipId, registry.sessionCapability);
       if (retired && authorizationObserved) claim.authorizationObserved = true;
       return retired;
     },
@@ -530,7 +533,7 @@ function monitorLinuxGuardian(
       },
       missing: () => {
         if (exactProcessGroupAbsent(durableClaim.process.pid) !== true) return false;
-        if (!registry.journal.retire(claim.ownershipId)) return false;
+        if (!registry.journal.retire(claim.ownershipId, registry.sessionCapability)) return false;
         try { return releaseActiveClaim(registry, claim); } catch { return false; }
       },
     },
@@ -571,6 +574,7 @@ async function admitLinuxGuardian(
         spawnedAfterMs,
         spawnedBeforeMs: Date.now(),
         expectedLinuxIdentity: identity,
+        sessionCapability: registry.sessionCapability,
       },
     );
     monitorLinuxGuardian(registry, claim, durableClaim);
@@ -595,7 +599,7 @@ async function admitLinuxGuardian(
     if (!claimed) {
       throw new Error("The Linux owned process guardian could not be claimed.");
     }
-    const owned = registry.journal.own(claim.ownershipId);
+    const owned = registry.journal.own(claim.ownershipId, registry.sessionCapability);
     if (!owned) {
       throw new Error("The Linux owned process authorization could not be persisted.");
     }
@@ -731,7 +735,7 @@ function settleClosedLinuxGuardian(
     const record = registry.journal.records(registry.runtimeGenerationId)
       ?.find((candidate) => candidate.ownershipId === claim.ownershipId);
     if (record?.state === "owned" || record?.state === "retiring") {
-      if (!registry.journal.retire(claim.ownershipId)) return;
+      if (!registry.journal.retire(claim.ownershipId, registry.sessionCapability)) return;
       void releaseIfGroupExited(registry, claim, pid);
       return;
     }
@@ -792,6 +796,7 @@ async function admitDarwinGuardian(
         spawnedBeforeMs: Date.now(),
         expectedDarwinIdentity: readyIdentity,
         observedDarwinIdentity: readyIdentity,
+        sessionCapability: registry.sessionCapability,
       },
     );
     if (claim.stopRequested || registry.tainted) {
@@ -861,10 +866,7 @@ export function spawnRuntimeOwnedProcess<T extends ChildProcess>(
   const registry = activeRegistry;
   if (!registry) return spawnProcess();
   if (registry.tainted) throw new Error("Runtime process ownership is tainted until restart.");
-  const ownershipId = registry.journal.begin(
-    registry.runtimeGenerationId,
-    registry.systemBootId,
-  );
+  const ownershipId = registry.journal.begin(registry.runtimeGenerationId, registry.systemBootId, registry.sessionCapability);
   const spawnedAfterMs = Date.now();
   let child: T;
   try {
@@ -936,6 +938,7 @@ export function spawnRuntimeOwnedProcess<T extends ChildProcess>(
       {
         spawnedAfterMs,
         spawnedBeforeMs: Date.now(),
+        sessionCapability: registry.sessionCapability,
       },
     );
     monitorLinuxGuardian(registry, claim, durableClaim);
@@ -999,10 +1002,7 @@ export function spawnRuntimeOwnedPidProcess<T extends { readonly pid: number }>(
     };
   }
   if (registry.tainted) throw new Error("Runtime process ownership is tainted until restart.");
-  const ownershipId = registry.journal.begin(
-    registry.runtimeGenerationId,
-    registry.systemBootId,
-  );
+  const ownershipId = registry.journal.begin(registry.runtimeGenerationId, registry.systemBootId, registry.sessionCapability);
   let settleStopRequest!: () => void;
   const waitForStopRequest = new Promise<void>((resolve) => {
     settleStopRequest = resolve;
@@ -1121,6 +1121,7 @@ export function spawnRuntimeOwnedPidProcess<T extends { readonly pid: number }>(
         {
           spawnedAfterMs,
           spawnedBeforeMs: Date.now(),
+          sessionCapability: registry.sessionCapability,
         },
       );
       void durableClaim;

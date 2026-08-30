@@ -142,7 +142,13 @@ function unavailableLegacyRecoveryCandidates(
         if (records === null || owned.containment(
           lease.runtimeGenerationId,
         ) !== null) return [];
-        expectedLeaves += 1 + records.length;
+        const inspection = owned.inspectGeneration(
+          lease.runtimeGenerationId,
+        );
+        if (!inspection?.session) return [];
+        expectedLeaves += 1
+          + Number(inspection.sessionWriterPresent)
+          + records.length;
       }
       // records() repairs only safe pre-admission/consume transients. Exact
       // leaf accounting rejects any unbound session, claim, or foreign modern
@@ -190,6 +196,15 @@ export function prepareRuntimeBootstrapSafety(
   const systemBootId = readSystemBootId() ?? "unavailable";
   const generationLeases = new RuntimeGenerationLeaseJournal(dataDirectory);
   const ownedProcesses = new RuntimeOwnedProcessJournal(dataDirectory);
+  const ownedProcessCrashPrefixesRepaired =
+    ownedProcesses.repairSessionCrashPrefixes();
+  const unleasedOwnedProcessSessionsRepaired =
+    ownedProcessCrashPrefixesRepaired
+    && generationLeases.isValid()
+    && ownedProcesses.repairUnleasedEmptySessions(new Set(
+      generationLeases.all().map(({ runtimeGenerationId }) =>
+        runtimeGenerationId),
+    ));
   const legacyAuthorities = new LegacyRuntimeRecoveryAuthorityJournal(
     dataDirectory,
   );
@@ -206,7 +221,8 @@ export function prepareRuntimeBootstrapSafety(
     && generationLeases.clearPriorBootSessions(systemBootId);
   return {
     systemBootId,
-    preserveAttachments: !receiptsRetired
+    preserveAttachments: !unleasedOwnedProcessSessionsRepaired
+      || !receiptsRetired
       || !priorBootRetired
       || generationLeases.safetyLocked(),
     legacyRecoveryCandidates: legacyAuthoritiesReady
@@ -288,8 +304,13 @@ export async function prepareModernDarwinBootstrapRecovery(
     const authorities = new ModernDarwinRecoveryAuthorityJournal(
       dataDirectory,
     );
-    if (authorities.retiring()) {
-      if (!authorities.completeRetirement(dataDirectory)) {
+    const retiring = authorities.retiring();
+    if (retiring) {
+      if (!authorities.settleRetirement(dataDirectory, retiring)) {
+        return { authority: null, candidate: null, blocked: true };
+      }
+      await waitForTimeout(DARWIN_RETIREMENT_POLL_MS);
+      if (!authorities.completeRetirement(dataDirectory, retiring)) {
         return { authority: null, candidate: null, blocked: true };
       }
     }
@@ -437,10 +458,19 @@ export async function prepareModernDarwinBootstrapRecovery(
           ".runtime-owned-",
           MAX_RUNTIME_OWNERSHIP_LEAVES,
         );
-        const expectedOwnedLeafCount = [...candidateGenerations.values()]
-          .reduce((count, generation) => (
-            count + 1 + generation.records.length
-          ), 0);
+        let expectedOwnedLeafCount = 0;
+        for (const generation of candidateGenerations.values()) {
+          const inspection = owned.inspectGeneration(
+            generation.lease.runtimeGenerationId,
+          );
+          if (!inspection?.session) {
+            coherent = false;
+            break;
+          }
+          expectedOwnedLeafCount += 1
+            + Number(inspection.sessionWriterPresent)
+            + generation.records.length;
+        }
         coherent &&= ownedLeaves.length === expectedOwnedLeafCount;
 
         let settling = false;

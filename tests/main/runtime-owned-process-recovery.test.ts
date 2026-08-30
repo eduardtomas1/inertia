@@ -24,7 +24,6 @@ import { windowsRuntimeJobName } from "../../src/main/windows-runtime-job";
 import { RuntimeCleanupReceiptJournal } from "../../src/main/runtime-cleanup-receipts";
 import { RuntimeGenerationLeaseJournal } from "../../src/node/runtime-generation-leases";
 import {
-  activateRuntimeOwnedProcessRegistry,
   confirmRuntimeOwnedProcessStopped,
   darwinProcessGuardianReady,
   darwinProcessSessionEmpty,
@@ -34,6 +33,7 @@ import {
   spawnRuntimeOwnedPidProcess,
   spawnRuntimeOwnedProcess,
 } from "../../src/node/runtime-owned-processes";
+import { activatePreparedRuntimeOwnedProcessRegistry as activateRuntimeOwnedProcessRegistry } from "../helpers/prepared-runtime-owned-process-registry";
 import {
   readLinuxGuardianReadyAsync,
   signalLinuxGuardianExact,
@@ -128,7 +128,7 @@ async function completedLinuxGuardian(
     darwinGuardianPath: guardianPath,
   });
   expect(journal.startSession(runtimeGenerationId, systemBootId)).toBe(true);
-  const ownershipId = journal.begin(runtimeGenerationId, systemBootId);
+  const ownershipId = journal.begin(runtimeGenerationId, systemBootId, journal.sessionCapability(runtimeGenerationId, systemBootId)!);
   const guardian = spawn(guardianPath, [
     "watch",
     String(process.pid),
@@ -318,7 +318,7 @@ describe.skipIf(process.platform !== "linux")(
       const directory = temporaryDirectory();
       const journal = new RuntimeOwnedProcessJournal(directory);
       expect(journal.startSession(runtimeGenerationId, systemBootId)).toBe(true);
-      const ownershipId = journal.begin(runtimeGenerationId, systemBootId);
+      const ownershipId = journal.begin(runtimeGenerationId, systemBootId, journal.sessionCapability(runtimeGenerationId, systemBootId)!);
       const forceKill = vi.fn(async () => true);
 
       const recovery = recoverRuntimeOwnedProcesses(
@@ -686,7 +686,7 @@ describe("cross-platform runtime owned process recovery", () => {
       darwinGuardianPath: "/trusted/runtime-process-guardian",
     });
     expect(journal.startSession(runtimeGenerationId, systemBootId)).toBe(true);
-    journal.begin(runtimeGenerationId, systemBootId);
+    journal.begin(runtimeGenerationId, systemBootId, journal.sessionCapability(runtimeGenerationId, systemBootId)!);
     const kill = vi.fn<typeof process.kill>((pid, signal) => {
       expect(pid).toBe(process.pid);
       expect(signal).toBe(0);
@@ -719,7 +719,7 @@ describe("cross-platform runtime owned process recovery", () => {
       darwinGuardianPath: "/trusted/runtime-process-guardian",
     });
     expect(journal.startSession(runtimeGenerationId, priorBootId)).toBe(true);
-    journal.begin(runtimeGenerationId, priorBootId);
+    journal.begin(runtimeGenerationId, priorBootId, journal.sessionCapability(runtimeGenerationId, priorBootId)!);
     const kill = vi.fn<typeof process.kill>(() => true);
 
     await expect(recoverRuntimeOwnedProcesses(
@@ -744,7 +744,7 @@ describe("cross-platform runtime owned process recovery", () => {
       darwinGuardianPath: "/trusted/runtime-process-guardian",
     });
     expect(journal.startSession(runtimeGenerationId, systemBootId)).toBe(true);
-    journal.begin(runtimeGenerationId, systemBootId);
+    journal.begin(runtimeGenerationId, systemBootId, journal.sessionCapability(runtimeGenerationId, systemBootId)!);
 
     await expect(recoverRuntimeOwnedProcesses(
       directory,
@@ -771,7 +771,7 @@ describe("cross-platform runtime owned process recovery", () => {
       platform: "darwin",
     });
     expect(journal.startSession(runtimeGenerationId, systemBootId)).toBe(true);
-    journal.begin(runtimeGenerationId, systemBootId);
+    journal.begin(runtimeGenerationId, systemBootId, journal.sessionCapability(runtimeGenerationId, systemBootId)!);
 
     await expect(recoverRuntimeOwnedProcesses(
       directory,
@@ -813,7 +813,7 @@ describe("cross-platform runtime owned process recovery", () => {
         : {}),
     });
     expect(journal.startSession(runtimeGenerationId, systemBootId)).toBe(true);
-    const ownershipId = journal.begin(runtimeGenerationId, systemBootId);
+    const ownershipId = journal.begin(runtimeGenerationId, systemBootId, journal.sessionCapability(runtimeGenerationId, systemBootId)!);
     const claim = journal.claim(
       ownershipId,
       runtimeGenerationId,
@@ -871,7 +871,7 @@ describe("cross-platform runtime owned process recovery", () => {
       }),
     });
     expect(journal.startSession(runtimeGenerationId, systemBootId)).toBe(true);
-    const ownershipId = journal.begin(runtimeGenerationId, systemBootId);
+    const ownershipId = journal.begin(runtimeGenerationId, systemBootId, journal.sessionCapability(runtimeGenerationId, systemBootId)!);
 
     expect(() => journal.claim(
       ownershipId,
@@ -1305,7 +1305,7 @@ describe("cross-platform runtime owned process recovery", () => {
       }),
     });
     expect(journal.startSession(runtimeGenerationId, systemBootId)).toBe(true);
-    const ownershipId = journal.begin(runtimeGenerationId, systemBootId);
+    const ownershipId = journal.begin(runtimeGenerationId, systemBootId, journal.sessionCapability(runtimeGenerationId, systemBootId)!);
     expect(() => journal.claim(
       ownershipId,
       runtimeGenerationId,

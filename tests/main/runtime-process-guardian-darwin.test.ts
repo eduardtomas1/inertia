@@ -15,7 +15,6 @@ import { spawn as spawnPty } from "node-pty";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
-  activateRuntimeOwnedProcessRegistry,
   confirmRuntimeOwnedProcessStopped,
   darwinProcessGuardianReady,
   darwinProcessGuardianReadyAsync,
@@ -25,6 +24,8 @@ import {
   spawnRuntimeOwnedPidProcess,
   spawnRuntimeOwnedProcess,
 } from "../../src/node/runtime-owned-processes";
+import { activatePreparedRuntimeOwnedProcessRegistry as activateRuntimeOwnedProcessRegistry } from
+  "../helpers/prepared-runtime-owned-process-registry";
 
 const systemBootId = "test:10000000-0000-4000-8000-000000000001";
 const runtimeGenerationId = "20000000-0000-4000-8000-000000000002:1";

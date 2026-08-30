@@ -7,7 +7,6 @@ import { afterEach, describe, it, vi } from "vitest";
 import { expect } from "vitest";
 import { terminateProcessTreeAndWait } from "../../src/server/process-lifecycle";
 import {
-  activateRuntimeOwnedProcessRegistry,
   awaitRuntimeOwnedProcessCleanupConfirmed,
   runtimeOwnedProcessCleanupConfirmed,
   runtimeOwnedProcessInvocation,
@@ -15,6 +14,8 @@ import {
   spawnRuntimeOwnedPidProcess,
   spawnRuntimeOwnedProcess,
 } from "../../src/node/runtime-owned-processes";
+import { activatePreparedRuntimeOwnedProcessRegistry as activateRuntimeOwnedProcessRegistry } from
+  "../helpers/prepared-runtime-owned-process-registry";
 import { runtimeOwnedPtyInvocation } from "../../src/node/runtime-owned-pty-invocation";
 import {
   linuxGuardianTerminalAuthority,

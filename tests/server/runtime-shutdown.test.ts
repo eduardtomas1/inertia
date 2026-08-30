@@ -24,11 +24,46 @@ function deferred(): {
 describe("runtime shutdown phases", () => {
   it("preserves each platform's complete cleanup proof window", () => {
     expect(runtimeShutdownDeadlineMs("darwin")).toBe(12_750);
-    expect(runtimeShutdownDeadlineMs("linux")).toBe(2_500);
+    expect(runtimeShutdownDeadlineMs("linux")).toBe(12_000);
     expect(runtimeShutdownDeadlineMs("win32")).toBe(5_500);
     expect(runtimeSupervisorShutdownEnvelopeMs("darwin")).toBe(15_250);
-    expect(runtimeSupervisorShutdownEnvelopeMs("linux")).toBe(5_000);
+    expect(runtimeSupervisorShutdownEnvelopeMs("linux")).toBe(14_500);
     expect(runtimeSupervisorShutdownEnvelopeMs("win32")).toBe(8_000);
+  });
+
+  it("reserves Linux post-terminal headroom for ordered cleanup", async () => {
+    vi.useFakeTimers();
+    try {
+      const calls: string[] = [];
+      const delayed = (name: string, delayMs: number) => async (): Promise<void> => {
+        await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+        calls.push(name);
+      };
+      const shutdown = runRuntimeShutdownPhases({
+        independentDrains: [delayed("terminal", 9_500)],
+        stopIsolatedRuns: delayed("isolated", 0),
+        disposeTurnsAndProviders: delayed("providers", 0),
+        settleArtifacts: delayed("artifacts", 500),
+        terminateClients: delayed("clients", 500),
+        closeServer: delayed("server", 500),
+        closeStore: delayed("store", 500),
+      }, runtimeShutdownDeadlineMs("linux"));
+
+      await vi.advanceTimersByTimeAsync(11_500);
+      await shutdown;
+
+      expect(calls).toEqual([
+        "isolated",
+        "providers",
+        "terminal",
+        "artifacts",
+        "clients",
+        "server",
+        "store",
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it.runIf(process.platform === "darwin")(

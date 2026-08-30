@@ -5,6 +5,12 @@ const DEFAULT_RUNTIME_SHUTDOWN_DEADLINE_MS = 2_500;
 // for the ordered artifact, client, server, and SQLite cleanup that follows.
 const WINDOWS_RUNTIME_SHUTDOWN_DEADLINE_MS = 5_500;
 
+// An immediate Linux terminal close can spend 7.5 seconds admitting the
+// native guardian and two further 1-second intervals proving the owned
+// process stopped. Preserve the original 2.5-second allowance after that for
+// the ordered artifact, client, server, and SQLite cleanup phases.
+const LINUX_RUNTIME_SHUTDOWN_DEADLINE_MS = 12_000;
+
 // A close can race the macOS guardian's 5.5-second bounded asynchronous
 // admission. Once admitted, the native two-freeze/TERM/KILL/drain proof owns a
 // further 5-second bounded terminal budget. Keep another 2.25 seconds for
@@ -19,6 +25,7 @@ export function runtimeShutdownDeadlineMs(
 ): number {
   if (platform === "darwin") return DARWIN_RUNTIME_SHUTDOWN_DEADLINE_MS;
   if (platform === "win32") return WINDOWS_RUNTIME_SHUTDOWN_DEADLINE_MS;
+  if (platform === "linux") return LINUX_RUNTIME_SHUTDOWN_DEADLINE_MS;
   return DEFAULT_RUNTIME_SHUTDOWN_DEADLINE_MS;
 }
 

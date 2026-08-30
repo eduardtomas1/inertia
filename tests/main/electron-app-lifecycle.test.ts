@@ -75,6 +75,15 @@ describe("Electron E2E application lifecycle", () => {
     );
   });
 
+  it("covers the complete Linux runtime shutdown envelope", () => {
+    expect(fixtureRuntimeExitTimeoutMs("linux")).toBe(
+      runtimeSupervisorShutdownEnvelopeMs("linux") + 500,
+    );
+    expect(fixtureElectronGracefulTimeoutMs("linux")).toBe(
+      privilegedShutdownEnvelopeMs("linux") + 500,
+    );
+  });
+
   it("bounds an operation while safely consuming a later rejection", async () => {
     let reject!: (reason: unknown) => void;
     const operation = new Promise<void>((_resolve, rejectOperation) => {

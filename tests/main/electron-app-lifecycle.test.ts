@@ -4,9 +4,13 @@ import type { ElectronApplication } from "@playwright/test";
 import { describe, expect, it, vi } from "vitest";
 
 import { runtimeSupervisorShutdownEnvelopeMs } from "../../src/node/runtime-shutdown-deadline";
+import { privilegedShutdownEnvelopeMs } from
+  "../../src/main/privileged-shutdown-deadline";
 import {
   closeElectronAppBounded,
   closeElectronFixtureBounded,
+  fixtureElectronGracefulTimeoutMs,
+  fixtureRuntimeExitTimeoutMs,
   quitElectronAppBounded,
   settleOperationBounded,
 } from "../e2e/support/electron-app-lifecycle";
@@ -59,6 +63,18 @@ function controlledElectronApp(options: {
 }
 
 describe("Electron E2E application lifecycle", () => {
+  it("covers the complete Windows runtime and Job-broker shutdown envelopes", () => {
+    expect(fixtureRuntimeExitTimeoutMs("win32")).toBe(
+      runtimeSupervisorShutdownEnvelopeMs("win32") + 500,
+    );
+    expect(fixtureElectronGracefulTimeoutMs("win32")).toBe(
+      privilegedShutdownEnvelopeMs("win32") + 500,
+    );
+    expect(fixtureElectronGracefulTimeoutMs("win32")).toBeGreaterThan(
+      fixtureRuntimeExitTimeoutMs("win32"),
+    );
+  });
+
   it("bounds an operation while safely consuming a later rejection", async () => {
     let reject!: (reason: unknown) => void;
     const operation = new Promise<void>((_resolve, rejectOperation) => {

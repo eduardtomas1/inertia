@@ -17,6 +17,10 @@ import windowsRuntimeJobIntegrity from
 import type { WindowsRuntimeJobContainment } from "../node/runtime-owned-processes.js";
 import { validRuntimeGenerationId } from "../node/runtime-process-protocol.js";
 import {
+  WINDOWS_RUNTIME_JOB_BROKER_FORCE_CLOSE_MARGIN_MS,
+  WINDOWS_RUNTIME_JOB_BROKER_SHUTDOWN_TIMEOUT_MS,
+} from "./privileged-shutdown-deadline.js";
+import {
   resolveWindowsRuntimeJobAssemblyPath,
   type RuntimeAssetLocations,
 } from "./runtime-assets.js";
@@ -39,11 +43,14 @@ const BROKER_HELPER_GRACEFUL_EXIT_MS = 2_000;
 const BROKER_HELPER_FORCED_EXIT_MS = 1_000;
 // Stop-Helpers can consume both exit budgets before it writes BYE.
 const BROKER_SHUTDOWN_ACK_MARGIN_MS = 1_000;
-const BROKER_SHUTDOWN_TIMEOUT_MS =
+if (
   BROKER_HELPER_GRACEFUL_EXIT_MS
-  + BROKER_HELPER_FORCED_EXIT_MS
-  + BROKER_SHUTDOWN_ACK_MARGIN_MS;
-const BROKER_FORCE_CLOSE_MARGIN_MS = 1_000;
+    + BROKER_HELPER_FORCED_EXIT_MS
+    + BROKER_SHUTDOWN_ACK_MARGIN_MS
+  !== WINDOWS_RUNTIME_JOB_BROKER_SHUTDOWN_TIMEOUT_MS
+) {
+  throw new Error("The Windows runtime broker shutdown budget is inconsistent.");
+}
 
 type WindowsRuntimeJobStage = "native-guard-start";
 
@@ -760,9 +767,10 @@ async function acquireWindowsRuntimeJobExecutableLock(
           if (!closed) {
             const terminate = setTimeout(() => {
               if (child.exitCode === null && child.signalCode === null) child.kill();
-            }, BROKER_SHUTDOWN_TIMEOUT_MS);
+            }, WINDOWS_RUNTIME_JOB_BROKER_SHUTDOWN_TIMEOUT_MS);
             const didClose = await awaitChildClose(
-              BROKER_SHUTDOWN_TIMEOUT_MS + BROKER_FORCE_CLOSE_MARGIN_MS,
+              WINDOWS_RUNTIME_JOB_BROKER_SHUTDOWN_TIMEOUT_MS
+                + WINDOWS_RUNTIME_JOB_BROKER_FORCE_CLOSE_MARGIN_MS,
             );
             clearTimeout(terminate);
             if (!didClose) {

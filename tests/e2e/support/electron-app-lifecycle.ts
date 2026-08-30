@@ -3,15 +3,24 @@ import type { ChildProcess } from "node:child_process";
 import { rm } from "node:fs/promises";
 import type { Server } from "node:http";
 
+import { privilegedShutdownEnvelopeMs } from
+  "../../../src/main/privileged-shutdown-deadline";
 import { runtimeSupervisorShutdownEnvelopeMs } from "../../../src/node/runtime-shutdown-deadline";
 
 const FIXTURE_SERVER_TEARDOWN_TIMEOUT_MS = 2_000;
-const FIXTURE_ELECTRON_GRACEFUL_TIMEOUT_MS = process.platform === "darwin"
-  ? runtimeSupervisorShutdownEnvelopeMs("darwin") + 500
-  : 5_000;
-export const FIXTURE_RUNTIME_EXIT_TIMEOUT_MS = process.platform === "darwin"
-  ? runtimeSupervisorShutdownEnvelopeMs("darwin") + 500
-  : 5_000;
+export function fixtureElectronGracefulTimeoutMs(
+  platform: NodeJS.Platform = process.platform,
+): number {
+  return privilegedShutdownEnvelopeMs(platform) + 500;
+}
+export function fixtureRuntimeExitTimeoutMs(
+  platform: NodeJS.Platform = process.platform,
+): number {
+  return runtimeSupervisorShutdownEnvelopeMs(platform) + 500;
+}
+const FIXTURE_ELECTRON_GRACEFUL_TIMEOUT_MS =
+  fixtureElectronGracefulTimeoutMs();
+export const FIXTURE_RUNTIME_EXIT_TIMEOUT_MS = fixtureRuntimeExitTimeoutMs();
 
 export function processExists(pid: number): boolean {
   try {

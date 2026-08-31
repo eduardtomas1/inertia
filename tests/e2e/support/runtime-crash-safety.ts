@@ -254,6 +254,12 @@ export async function installRuntimeRecoveryConsent(
         readonly title: string;
         readonly content: string;
       };
+      __inertiaRuntimeRecoveryPromptCount?: number;
+      __inertiaRuntimeRecoveryPrompts?: Array<{
+        readonly generation: number | null;
+        readonly phase: string | null;
+        readonly lastError: string | null;
+      }>;
     };
     owner.__inertiaOriginalRuntimeRecoveryMessageBox ??=
       dialog.showMessageBox.bind(dialog);
@@ -261,17 +267,38 @@ export async function installRuntimeRecoveryConsent(
       dialog.showErrorBox.bind(dialog);
     const originalMessageBox = owner.__inertiaOriginalRuntimeRecoveryMessageBox;
     const originalErrorBox = owner.__inertiaOriginalRuntimeRecoveryErrorBox;
+    owner.__inertiaRuntimeRecoveryPromptCount = 0;
+    owner.__inertiaRuntimeRecoveryPrompts = [];
     Reflect.set(dialog, "showMessageBox", async (...args: unknown[]) => {
       const options = args.at(-1) as { title?: unknown } | undefined;
       if (options?.title === "Recover unproven macOS runtime state?") {
-        // This consent is intentionally one-shot. Restore inside Electron main
-        // before recovery continues so a failed utility restart never leaves
-        // cleanup dependent on a second main-process transport round trip.
-        if (originalMessageBox) {
-          Reflect.set(dialog, "showMessageBox", originalMessageBox);
-        }
-        delete owner.__inertiaOriginalRuntimeRecoveryMessageBox;
-        return { response: 0, checkboxChecked: false };
+        owner.__inertiaRuntimeRecoveryPromptCount =
+          (owner.__inertiaRuntimeRecoveryPromptCount ?? 0) + 1;
+        const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
+          snapshot?: () => {
+            readonly generation?: unknown;
+            readonly phase?: unknown;
+            readonly lastError?: unknown;
+          } | null;
+        } | undefined;
+        const snapshot = runtime?.snapshot?.() ?? null;
+        owner.__inertiaRuntimeRecoveryPrompts?.push({
+          generation: typeof snapshot?.generation === "number"
+            ? snapshot.generation
+            : null,
+          phase: typeof snapshot?.phase === "string" ? snapshot.phase : null,
+          lastError: typeof snapshot?.lastError === "string"
+            ? snapshot.lastError
+            : null,
+        });
+        // Keep the exact-title interception installed until bounded cleanup.
+        // A failed replacement may offer another generation-specific prompt;
+        // letting that prompt become native would block Electron main and hide
+        // the actual repeated-recovery failure from the test runner.
+        return {
+          response: owner.__inertiaRuntimeRecoveryPromptCount === 1 ? 0 : 1,
+          checkboxChecked: false,
+        };
       }
       return Reflect.apply(originalMessageBox!, dialog, args);
     });
@@ -301,6 +328,12 @@ export async function installRuntimeRecoveryConsent(
             readonly title: string;
             readonly content: string;
           };
+          __inertiaRuntimeRecoveryPromptCount?: number;
+          __inertiaRuntimeRecoveryPrompts?: Array<{
+            readonly generation: number | null;
+            readonly phase: string | null;
+            readonly lastError: string | null;
+          }>;
         };
         const originalMessageBox = owner.__inertiaOriginalRuntimeRecoveryMessageBox;
         const originalErrorBox = owner.__inertiaOriginalRuntimeRecoveryErrorBox;
@@ -309,17 +342,26 @@ export async function installRuntimeRecoveryConsent(
         }
         if (originalErrorBox) Reflect.set(dialog, "showErrorBox", originalErrorBox);
         const recoveryError = owner.__inertiaRuntimeRecoveryError ?? null;
+        const promptCount = owner.__inertiaRuntimeRecoveryPromptCount ?? 0;
+        const prompts = owner.__inertiaRuntimeRecoveryPrompts ?? [];
         delete owner.__inertiaOriginalRuntimeRecoveryMessageBox;
         delete owner.__inertiaOriginalRuntimeRecoveryErrorBox;
         delete owner.__inertiaRuntimeRecoveryError;
-        return recoveryError;
+        delete owner.__inertiaRuntimeRecoveryPromptCount;
+        delete owner.__inertiaRuntimeRecoveryPrompts;
+        return { promptCount, prompts, recoveryError };
       })),
       RUNTIME_RECOVERY_DIALOG_RESTORE_TIMEOUT_MS,
     );
-    if (result.status === "fulfilled" && result.value) {
+    if (result.status === "fulfilled" && result.value.recoveryError) {
       throw new InterceptedRuntimeRecoveryError(
-        result.value.title,
-        result.value.content,
+        result.value.recoveryError.title,
+        result.value.recoveryError.content,
+      );
+    }
+    if (result.status === "fulfilled" && result.value.promptCount > 1) {
+      throw new Error(
+        `One deliberate crash required ${result.value.promptCount} explicit macOS runtime recovery decisions: ${JSON.stringify(result.value.prompts)}.`,
       );
     }
     if (result.status === "rejected") {

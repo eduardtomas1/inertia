@@ -39,6 +39,7 @@ export interface RuntimeProcessRecord {
   readonly legacyRecoveryAuthorityBatchIds: readonly string[];
   modernDarwinRecoveryAuthority:
     ModernDarwinRecoveryAuthorityDescriptor | null;
+  readonly manualModernRecoveryGeneration: boolean;
   ready: boolean;
   acceptingReady: boolean;
   cleanupConfirmed: boolean;

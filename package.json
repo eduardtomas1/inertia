@@ -216,7 +216,7 @@
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^5.2.0",
     "@vitest/coverage-v8": "^4.1.10",
-    "electron": "^43.4.0",
+    "electron": "^44.0.0",
     "electron-builder": "26.15.6",
     "electron-vite": "^5.0.0",
     "happy-dom": "20.11.2",

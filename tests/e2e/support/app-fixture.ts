@@ -1,11 +1,7 @@
-import {
-  expect,
-  _electron as electron,
-  type ElectronApplication,
-  type Page,
-} from "@playwright/test";
+import { _electron as electron, type ElectronApplication,
+  type Page } from "@playwright/test";
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
@@ -15,9 +11,14 @@ import { RuntimeStore } from "../../../src/server/database";
 import { portableNodeExecutable } from "../../helpers/portable-provider-fixture";
 import { seedAppConversation } from "../../support/seed-app-conversation";
 import { serveAgentBrowserPrivacyFixture } from "./agent-browser-fixture-pages";
+import { closeElectronAppBounded, closeElectronFixtureBounded,
+  closePreviewServerBounded, observeElectronPage, observeElectronProcess,
+  quitElectronAppBounded, removeFixtureDirectory,
+  waitForRuntimeProcessExit } from "./electron-app-lifecycle";
 import { expectNoViewportOverflow as expectPageNoViewportOverflow } from "./layout-assertions";
 
 const execFileAsync = promisify(execFile);
+const FIXTURE_RPC_TEARDOWN_TIMEOUT_MS = 5_000;
 
 export interface RuntimeTestSnapshot {
   phase: string;
@@ -68,15 +69,6 @@ interface AppFixtureOptions {
     workspaceDirectory: string;
     secondWorkspaceDirectory: string | null;
   }) => void | Promise<void>;
-}
-
-export function processExists(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 async function createPreviewServer(): Promise<{
@@ -795,24 +787,13 @@ export async function createAppFixture(
     startupDiagnostics.push(`${source}: ${String(chunk)}`.slice(0, 16_384));
     if (startupDiagnostics.length > 40) startupDiagnostics.shift();
   };
-  const observeApp = (current: ElectronApplication, currentPage: Page): void => {
-    current.process().stdout?.on("data", (chunk: Buffer) => {
-      appendDiagnostic("stdout", chunk);
-    });
-    current.process().stderr?.on("data", (chunk: Buffer) => {
-      appendDiagnostic("stderr", chunk);
-    });
-    currentPage.on("console", (message) => {
-      if (message.type() === "error") rendererErrors.push(message.text());
-    });
-    currentPage.on("pageerror", (error) => rendererErrors.push(error.message));
-  };
   let electronApp: ElectronApplication | null = null;
   let page: Page;
   try {
     electronApp = await electron.launch(launchOptions);
+    observeElectronProcess(electronApp, appendDiagnostic);
     page = await electronApp.firstWindow();
-    observeApp(electronApp, page);
+    observeElectronPage(page, rendererErrors);
     if (options.windowDisplay === "primary") {
       await electronApp.evaluate(
         ({ BrowserWindow, screen }) => {
@@ -830,15 +811,14 @@ export async function createAppFixture(
       await page.getByRole("textbox", { name: "Message" }).waitFor();
     }
   } catch (cause) {
-    preview.server.closeAllConnections();
-    await new Promise<void>((resolve) => preview.server.close(() => resolve()));
-    await electronApp?.close().catch(() => undefined);
-    await rm(testDirectory, {
-      recursive: true,
-      force: true,
-      maxRetries: 8,
-      retryDelay: 100,
-    });
+    try {
+      if (electronApp) {
+        await closeElectronAppBounded(electronApp).catch(() => undefined);
+      }
+    } finally {
+      await closePreviewServerBounded(preview.server).catch(() => undefined);
+      await removeFixtureDirectory(testDirectory);
+    }
     const diagnostics = [...startupDiagnostics, ...rendererErrors]
       .join("\n")
       .trim();
@@ -925,71 +905,89 @@ export async function createAppFixture(
     restart: async () => {
       const previousApp = electronApp;
       if (!previousApp) throw new Error("The Electron fixture is unavailable");
+      const previousChild = previousApp.process();
       const runtimePid = (await runtimeSnapshot().catch(() => null))?.pid
         ?? null;
-      await previousApp.evaluate(() => {
-        const runtime = Reflect.get(
-          globalThis,
-          "__inertiaTestRuntime",
-        ) as { quit?: () => unknown } | undefined;
-        runtime?.quit?.();
-      }).catch(() => undefined);
-      await previousApp.close();
-      if (runtimePid) {
-        await expect.poll(
-          () => processExists(runtimePid),
-          { timeout: 5_000 },
-        ).toBe(false);
-      }
-
-      const nextApp = await electron.launch(launchOptions);
-      electronApp = nextApp;
-      const nextPage = await nextApp.firstWindow();
-      page = nextPage;
-      observeApp(nextApp, nextPage);
-      if (options.windowDisplay === "primary") {
-        await nextApp.evaluate(
-          ({ BrowserWindow, screen }) => {
-            const origin = screen.getPrimaryDisplay().workArea;
-            BrowserWindow.getAllWindows()[0]?.setPosition(origin.x, origin.y);
-          },
+      const quit = await quitElectronAppBounded(
+        previousApp,
+        () => previousApp.evaluate(() => {
+          const runtime = Reflect.get(
+            globalThis,
+            "__inertiaTestRuntime",
+          ) as { quit?: () => unknown } | undefined;
+          return runtime?.quit?.();
+        }),
+        {
+          childProcess: previousChild,
+          quitRequestTimeoutMs: FIXTURE_RPC_TEARDOWN_TIMEOUT_MS,
+        },
+      );
+      electronApp = null;
+      if (runtimePid) await waitForRuntimeProcessExit(runtimePid);
+      if (quit.outcome !== "graceful" || !quit.transportSettled) {
+        throw new Error(
+          `Electron fixture restart requires a graceful application exit and settled transport; received ${quit.outcome}/${quit.transportSettled ? "settled" : "unsettled"}.`,
         );
       }
-      await nextPage.locator(
-        '.app-shell[data-connection-status="online"]',
-      ).waitFor();
-      await nextPage.getByRole("textbox", { name: "Message" }).waitFor();
-      return { electronApp: nextApp, page: nextPage };
+
+      const diagnosticStart = startupDiagnostics.length;
+      const nextApp = await electron.launch(launchOptions);
+      observeElectronProcess(nextApp, appendDiagnostic);
+      try {
+        const nextPage = await nextApp.firstWindow();
+        observeElectronPage(nextPage, rendererErrors);
+        if (options.windowDisplay === "primary") {
+          await nextApp.evaluate(
+            ({ BrowserWindow, screen }) => {
+              const origin = screen.getPrimaryDisplay().workArea;
+              BrowserWindow.getAllWindows()[0]?.setPosition(origin.x, origin.y);
+            },
+          );
+        }
+        await nextPage.locator(
+          '.app-shell[data-connection-status="online"]',
+        ).waitFor();
+        await nextPage.getByRole("textbox", { name: "Message" }).waitFor();
+        electronApp = nextApp;
+        page = nextPage;
+        return { electronApp: nextApp, page: nextPage };
+      } catch (cause) {
+        await closeElectronAppBounded(nextApp);
+        const diagnostics = startupDiagnostics.slice(diagnosticStart)
+          .join("\n")
+          .trim();
+        throw new Error(
+          `Electron fixture restart did not reach its ready state${
+            diagnostics ? `:\n${diagnostics}` : "."
+          }`,
+          { cause },
+        );
+      }
     },
     close: async () => {
-      preview.server.closeAllConnections();
-      await new Promise<void>((resolve) => preview.server.close(() => resolve()));
-      const runtimePid = (await runtimeSnapshot().catch(() => null))?.pid ?? null;
-      const activeApp = currentApp();
-      await activeApp.evaluate(() => {
-        const runtime = Reflect.get(
-          globalThis,
-          "__inertiaTestRuntime",
-        ) as { quit?: () => unknown } | undefined;
-        runtime?.quit?.();
-      }).catch(() => undefined);
-      await activeApp.close();
-      if (runtimePid) {
-        await expect.poll(
-          () => processExists(runtimePid),
-          { timeout: 5_000 },
-        ).toBe(false);
-      }
-      // Closed SQLite handles on Windows and recently-settled Git checkpoint
-      // writes on macOS can remain visible for a brief interval after their
-      // owning process exits. Node's recursive removal retries the bounded set
-      // of transient EBUSY/ENOTEMPTY/EPERM failures without hiding a persistent
-      // cleanup problem.
-      await rm(testDirectory, {
-        recursive: true,
-        force: true,
-        maxRetries: 8,
-        retryDelay: 100,
+      const activeApp = electronApp;
+      const priorRuntimePid = activeApp
+        ? (await runtimeSnapshot().catch(() => null))?.pid ?? null
+        : null;
+      electronApp = null;
+      await closeElectronFixtureBounded({
+        current: activeApp,
+        priorRuntimePid,
+        rpcTimeoutMs: FIXTURE_RPC_TEARDOWN_TIMEOUT_MS,
+        requestRuntimeQuit: async () => {
+          if (!activeApp) return null;
+          const snapshot = await activeApp.evaluate(() => {
+            const runtime = Reflect.get(
+              globalThis,
+              "__inertiaTestRuntime",
+            ) as { quit?: () => RuntimeTestSnapshot | null } | undefined;
+            return runtime?.quit?.() ?? null;
+          });
+          return snapshot?.pid ?? null;
+        },
+        waitForRuntimeExit: waitForRuntimeProcessExit,
+        closeServer: async () => closePreviewServerBounded(preview.server),
+        removeDirectory: async () => removeFixtureDirectory(testDirectory),
       });
     },
   };

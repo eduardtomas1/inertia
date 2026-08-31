@@ -254,6 +254,26 @@ function responseTurns(items: ResponseTimelineItem[]): ResponseTurn[] {
   return items.flatMap((item) => item.kind === "turn" ? [item.turn] : []);
 }
 
+function observeIndexedReads<T>(values: T[]): {
+  values: T[];
+  readCount: () => number;
+} {
+  let reads = 0;
+  return {
+    values: new Proxy(values, {
+      get(target, property, receiver) {
+        if (
+          typeof property === "string"
+          && /^(?:0|[1-9]\d*)$/.test(property)
+          && Number(property) < target.length
+        ) reads += 1;
+        return Reflect.get(target, property, receiver) as unknown;
+      },
+    }),
+    readCount: () => reads,
+  };
+}
+
 describe("quiet-ledger timeline virtualization estimates", () => {
   it("gives every virtualized feed article a stable request-derived name", () => {
     expect(responseTimelineArticleLabel(buildItem({
@@ -270,7 +290,7 @@ describe("quiet-ledger timeline virtualization estimates", () => {
     }))).toBe("Turn 1: Request");
   });
 
-  it("virtualizes short histories when mounted content weight exceeds ordinary rows", () => {
+  it("virtualizes short histories with bounded input scans when content is heavy", () => {
     const turns = Array.from({ length: 36 }, (_, index) =>
       agentTurn(`weighted-${index}`));
     const messages = turns.flatMap((turn, index) => {
@@ -292,16 +312,21 @@ describe("quiet-ledger timeline virtualization estimates", () => {
         activity(`weighted-${turnIndex}-${activityIndex}`, turn.id, {
           detail: "x".repeat(2_778),
         })));
-    const startedAt = performance.now();
+    const observedTurns = observeIndexedReads(turns);
+    const observedMessages = observeIndexedReads(messages);
+    const observedActivities = observeIndexedReads(activities);
     const timeline = buildResponseTimeline({
-      turns,
-      messages,
-      activities,
+      turns: observedTurns.values,
+      messages: observedMessages.values,
+      activities: observedActivities.values,
       reasonings: [],
       checkpoints: [],
     });
     const weight = estimateTimelineRenderWeight(timeline);
-    const elapsed = performance.now() - startedAt;
+    const inputRecordCount = turns.length + messages.length + activities.length;
+    const indexedReads = observedTurns.readCount()
+      + observedMessages.readCount()
+      + observedActivities.readCount();
 
     expect(timeline).toHaveLength(36);
     expect(messages.filter(({ role }) => role === "assistant")).toHaveLength(137);
@@ -316,7 +341,11 @@ describe("quiet-ledger timeline virtualization estimates", () => {
     expect(shouldVirtualizeTimeline(9, 9)).toBe(false);
     expect(shouldVirtualizeTimeline(9, 10)).toBe(false);
     expect(shouldVirtualizeTimeline(10, 10)).toBe(true);
-    expect(elapsed).toBeLessThan(250);
+    // Each collection may be indexed and grouped, then checked once for
+    // compatibility history. This deterministic linear bound catches the
+    // per-turn rescanning regression that the old wall-clock assertion was
+    // intended to guard without depending on shared-runner scheduling.
+    expect(indexedReads).toBeLessThanOrEqual(inputRecordCount * 3);
   });
 
   it("keeps compact answers compact and scales with structurally long Markdown", () => {

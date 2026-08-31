@@ -222,7 +222,7 @@ describe("Settings composite updates", () => {
       message: "Inertia Canary is up to date.",
     }} />);
 
-    expect(screen.getByText("Inertia Canary · v0.0.44")).toBeInTheDocument();
+    expect(screen.getByText("Inertia Canary · v0.0.45")).toBeInTheDocument();
     expect(await screen.findByText("Canary channel · isolated profile")).toBeInTheDocument();
     expect(await screen.findByText("Verified Canary 0.0.40 is retained for rollback."))
       .toBeInTheDocument();

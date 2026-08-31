@@ -1,22 +1,30 @@
 import { expect, type TestInfo } from "@playwright/test";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { copyFileSync, readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import Database from "better-sqlite3";
 
 import { readSystemBootId } from "../../../src/main/system-boot-id";
+import { RuntimeCleanupReceiptJournal } from
+  "../../../src/main/runtime-cleanup-receipts";
+import {
+  listDirectRuntimeJournalLeaves,
+  pinDirectRuntimeJournalRoot,
+} from "../../../src/node/direct-runtime-journal";
 import { RuntimeGenerationLeaseJournal } from "../../../src/node/runtime-generation-leases";
+import { ModernDarwinRecoveryAuthorityJournal } from
+  "../../../src/node/runtime-modern-recovery-authorities";
 import {
   type ObservedRuntimeOwnedProcessIdentity,
   readDarwinProcessIdentity,
   readLinuxProcessIdentity,
   RuntimeOwnedProcessJournal,
 } from "../../../src/node/runtime-owned-processes";
+import type { AppFixture, RuntimeTestSnapshot } from "./app-fixture";
 import {
   processExists,
-  type AppFixture,
-  type RuntimeTestSnapshot,
-} from "./app-fixture";
+  settleOperationBounded,
+} from "./electron-app-lifecycle";
 import {
   ensureWorkspaceTools,
   selectWorkspaceTool,
@@ -27,6 +35,155 @@ interface RuntimeObservation {
   readonly generation: number;
   readonly phase: string;
   readonly pid: number | null;
+}
+
+const RUNTIME_RECOVERY_DIALOG_RESTORE_TIMEOUT_MS = 5_000;
+
+class InterceptedRuntimeRecoveryError extends Error {
+  readonly contentBytes: number;
+  readonly contentSha256: string;
+  readonly recoveryTitle: string;
+
+  constructor(title: string, content: string) {
+    super(`${title}: ${content}`);
+    this.name = "InterceptedRuntimeRecoveryError";
+    this.recoveryTitle = title;
+    this.contentBytes = Buffer.byteLength(content, "utf8");
+    this.contentSha256 = createHash("sha256").update(content).digest("hex");
+  }
+}
+
+type DiagnosticRead<T> =
+  | { readonly status: "ok"; readonly value: T }
+  | {
+    readonly status: "error";
+    readonly errorName: string;
+    readonly errorCode: string | null;
+  };
+
+function diagnosticRead<T>(read: () => T): DiagnosticRead<T> {
+  try {
+    return { status: "ok", value: read() };
+  } catch (error) {
+    return {
+      status: "error",
+      errorName: error instanceof Error ? error.name : "UnknownError",
+      errorCode: error && typeof error === "object" && "code" in error
+        ? String(error.code)
+        : null,
+    };
+  }
+}
+
+async function attachDarwinRecoverySafetyLockDiagnostic(
+  testInfo: TestInfo,
+  dataDirectory: string,
+  priorGenerationId: string | null,
+  error: unknown,
+): Promise<void> {
+  if (process.platform !== "darwin") return;
+  // Capture the bounded raw topology before production readers get a chance
+  // to finish or discard any safely repairable atomic-write transient.
+  const rawTopology = diagnosticRead(() => {
+    const root = pinDirectRuntimeJournalRoot(dataDirectory);
+    return {
+      rootIdentity: {
+        device: String(root.device),
+        inode: String(root.inode),
+      },
+      leaves: listDirectRuntimeJournalLeaves(
+        root,
+        ".runtime-",
+        512,
+      ).sort(),
+    };
+  });
+  const leases = diagnosticRead(() => {
+    const journal = new RuntimeGenerationLeaseJournal(dataDirectory);
+    return {
+      valid: journal.isValid(),
+      entries: journal.all().map((lease) => ({ ...lease }))
+        .sort((left, right) => left.runtimeGenerationId.localeCompare(
+          right.runtimeGenerationId,
+        )),
+    };
+  });
+  const receipts = diagnosticRead(() => (
+    new RuntimeCleanupReceiptJournal(dataDirectory).pending().sort()
+  ));
+  const owned = diagnosticRead(() => {
+    if (!priorGenerationId) return { sessionPresent: null, records: [] };
+    const records = new RuntimeOwnedProcessJournal(dataDirectory, {
+      platform: "darwin",
+    }).records(priorGenerationId);
+    return {
+      sessionPresent: records !== null,
+      records: (records ?? []).map((record) => ({
+        ownershipId: record.ownershipId,
+        state: record.state,
+        pid: record.state === "pending" ? null : record.process.pid,
+        parentPid: record.state === "pending"
+          ? record.runtimeParentPid
+          : "parentPid" in record.process
+            ? record.process.parentPid
+            : null,
+        processGroupId: record.state === "pending"
+          ? null
+          : "processGroupId" in record.process
+            ? record.process.processGroupId
+            : null,
+        sessionId: record.state === "pending"
+          ? null
+          : "sessionId" in record.process
+            ? record.process.sessionId
+            : null,
+      })).sort((left, right) => left.ownershipId.localeCompare(
+        right.ownershipId,
+      )),
+    };
+  });
+  const modernAuthority = diagnosticRead(() => {
+    const journal = new ModernDarwinRecoveryAuthorityJournal(dataDirectory);
+    const summarize = (authority: ReturnType<typeof journal.pending>) => (
+      authority
+        ? {
+          operationId: authority.operationId,
+          snapshotDigest: authority.snapshotDigest,
+          generationIds: authority.snapshot.generations.map(
+            ({ lease }) => lease.runtimeGenerationId,
+          ).sort(),
+        }
+        : null
+    );
+    return {
+      pending: summarize(journal.pending()),
+      retiring: summarize(journal.retiring()),
+    };
+  });
+  const intercepted = error instanceof InterceptedRuntimeRecoveryError
+    ? {
+      title: error.recoveryTitle,
+      contentBytes: error.contentBytes,
+      contentSha256: error.contentSha256,
+    }
+    : null;
+  await testInfo.attach("darwin-runtime-recovery-safety-lock", {
+    body: Buffer.from(JSON.stringify({
+      schemaVersion: 1,
+      observedAt: new Date().toISOString(),
+      observedAfterSafetyLock: true,
+      rawTopology,
+      semanticReadsAfterRawTopologyCapture: true,
+      semanticReadsMayRepairAtomicTransients: true,
+      priorGenerationId,
+      intercepted,
+      leases,
+      receipts,
+      owned,
+      modernAuthority,
+    }, null, 2), "utf8"),
+    contentType: "application/json",
+  });
 }
 
 function runtimeObservation(snapshot: RuntimeTestSnapshot): RuntimeObservation {
@@ -83,6 +240,137 @@ async function runtimeWebsocketUrl(page: AppFixture["page"]): Promise<string> {
     }
     return connection.websocketUrl;
   });
+}
+
+export async function installRuntimeRecoveryConsent(
+  electronApp: AppFixture["electronApp"],
+): Promise<() => Promise<void>> {
+  if (process.platform !== "darwin") return async () => undefined;
+  await electronApp.evaluate(({ dialog }, recoveryErrorTitles) => {
+    const owner = globalThis as typeof globalThis & {
+      __inertiaOriginalRuntimeRecoveryMessageBox?: typeof dialog.showMessageBox;
+      __inertiaOriginalRuntimeRecoveryErrorBox?: typeof dialog.showErrorBox;
+      __inertiaRuntimeRecoveryError?: {
+        readonly title: string;
+        readonly content: string;
+      };
+      __inertiaRuntimeRecoveryPromptCount?: number;
+      __inertiaRuntimeRecoveryPrompts?: Array<{
+        readonly generation: number | null;
+        readonly phase: string | null;
+        readonly lastError: string | null;
+      }>;
+    };
+    owner.__inertiaOriginalRuntimeRecoveryMessageBox ??=
+      dialog.showMessageBox.bind(dialog);
+    owner.__inertiaOriginalRuntimeRecoveryErrorBox ??=
+      dialog.showErrorBox.bind(dialog);
+    const originalMessageBox = owner.__inertiaOriginalRuntimeRecoveryMessageBox;
+    const originalErrorBox = owner.__inertiaOriginalRuntimeRecoveryErrorBox;
+    owner.__inertiaRuntimeRecoveryPromptCount = 0;
+    owner.__inertiaRuntimeRecoveryPrompts = [];
+    Reflect.set(dialog, "showMessageBox", async (...args: unknown[]) => {
+      const options = args.at(-1) as { title?: unknown } | undefined;
+      if (options?.title === "Recover unproven macOS runtime state?") {
+        owner.__inertiaRuntimeRecoveryPromptCount =
+          (owner.__inertiaRuntimeRecoveryPromptCount ?? 0) + 1;
+        const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
+          snapshot?: () => {
+            readonly generation?: unknown;
+            readonly phase?: unknown;
+            readonly lastError?: unknown;
+          } | null;
+        } | undefined;
+        const snapshot = runtime?.snapshot?.() ?? null;
+        owner.__inertiaRuntimeRecoveryPrompts?.push({
+          generation: typeof snapshot?.generation === "number"
+            ? snapshot.generation
+            : null,
+          phase: typeof snapshot?.phase === "string" ? snapshot.phase : null,
+          lastError: typeof snapshot?.lastError === "string"
+            ? snapshot.lastError
+            : null,
+        });
+        // Keep the exact-title interception installed until bounded cleanup.
+        // A failed replacement may offer another generation-specific prompt;
+        // letting that prompt become native would block Electron main and hide
+        // the actual repeated-recovery failure from the test runner.
+        return {
+          response: owner.__inertiaRuntimeRecoveryPromptCount === 1 ? 0 : 1,
+          checkboxChecked: false,
+        };
+      }
+      return Reflect.apply(originalMessageBox!, dialog, args);
+    });
+    Reflect.set(dialog, "showErrorBox", (title: string, content: string) => {
+      if (recoveryErrorTitles.includes(title)) {
+        owner.__inertiaRuntimeRecoveryError = { title, content };
+        return;
+      }
+      Reflect.apply(originalErrorBox!, dialog, [title, content]);
+    });
+  }, [
+    "Runtime recovery remains safety locked",
+    "Runtime recovery was not authorized",
+    "Legacy runtime recovery was not authorized",
+  ]);
+
+  let restored = false;
+  return async () => {
+    if (restored) return;
+    restored = true;
+    const result = await settleOperationBounded(
+      Promise.resolve().then(() => electronApp.evaluate(({ dialog }) => {
+        const owner = globalThis as typeof globalThis & {
+          __inertiaOriginalRuntimeRecoveryMessageBox?: typeof dialog.showMessageBox;
+          __inertiaOriginalRuntimeRecoveryErrorBox?: typeof dialog.showErrorBox;
+          __inertiaRuntimeRecoveryError?: {
+            readonly title: string;
+            readonly content: string;
+          };
+          __inertiaRuntimeRecoveryPromptCount?: number;
+          __inertiaRuntimeRecoveryPrompts?: Array<{
+            readonly generation: number | null;
+            readonly phase: string | null;
+            readonly lastError: string | null;
+          }>;
+        };
+        const originalMessageBox = owner.__inertiaOriginalRuntimeRecoveryMessageBox;
+        const originalErrorBox = owner.__inertiaOriginalRuntimeRecoveryErrorBox;
+        if (originalMessageBox) {
+          Reflect.set(dialog, "showMessageBox", originalMessageBox);
+        }
+        if (originalErrorBox) Reflect.set(dialog, "showErrorBox", originalErrorBox);
+        const recoveryError = owner.__inertiaRuntimeRecoveryError ?? null;
+        const promptCount = owner.__inertiaRuntimeRecoveryPromptCount ?? 0;
+        const prompts = owner.__inertiaRuntimeRecoveryPrompts ?? [];
+        delete owner.__inertiaOriginalRuntimeRecoveryMessageBox;
+        delete owner.__inertiaOriginalRuntimeRecoveryErrorBox;
+        delete owner.__inertiaRuntimeRecoveryError;
+        delete owner.__inertiaRuntimeRecoveryPromptCount;
+        delete owner.__inertiaRuntimeRecoveryPrompts;
+        return { promptCount, prompts, recoveryError };
+      })),
+      RUNTIME_RECOVERY_DIALOG_RESTORE_TIMEOUT_MS,
+    );
+    if (result.status === "fulfilled" && result.value.recoveryError) {
+      throw new InterceptedRuntimeRecoveryError(
+        result.value.recoveryError.title,
+        result.value.recoveryError.content,
+      );
+    }
+    if (result.status === "fulfilled" && result.value.promptCount > 1) {
+      throw new Error(
+        `One deliberate crash required ${result.value.promptCount} explicit macOS runtime recovery decisions: ${JSON.stringify(result.value.prompts)}.`,
+      );
+    }
+    if (result.status === "rejected") {
+      throw new Error("The runtime recovery dialog could not be restored.");
+    }
+    if (result.status === "timed-out") {
+      throw new Error("The runtime recovery dialog did not restore in time.");
+    }
+  };
 }
 
 export async function expectRuntimeCrashRecovery(
@@ -396,48 +684,57 @@ export async function expectRuntimeCrashRecovery(
     }
   }
 
-  if (process.platform === "darwin") {
-    await electronApp.evaluate(({ dialog }) => {
-      const owner = globalThis as typeof globalThis & {
-        __inertiaOriginalRuntimeRecoveryMessageBox?: typeof dialog.showMessageBox;
-      };
-      owner.__inertiaOriginalRuntimeRecoveryMessageBox ??=
-        dialog.showMessageBox.bind(dialog);
-      const original = owner.__inertiaOriginalRuntimeRecoveryMessageBox;
-      Reflect.set(dialog, "showMessageBox", async (...args: unknown[]) => {
-        const options = args.at(-1) as { title?: unknown } | undefined;
-        if (options?.title === "Recover unproven macOS runtime state?") {
-          return { response: 0, checkboxChecked: false };
-        }
-        return Reflect.apply(original!, dialog, args);
-      });
+  const restoreRuntimeRecoveryConsent = await installRuntimeRecoveryConsent(
+    electronApp,
+  );
+  let crashed: RuntimeTestSnapshot | null = null;
+  let after: RuntimeTestSnapshot | null = null;
+  let recoveryOperationError: unknown = null;
+  try {
+    crashed = await electronApp.evaluate((_electron) => {
+      const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
+        crash: () => RuntimeTestSnapshot;
+      } | undefined;
+      if (!runtime) throw new Error("The test runtime supervisor is unavailable");
+      return runtime.crash();
     });
+    await expect.poll(async () => {
+      const shell = page.locator(".app-shell");
+      const [connectionStatus, runtimeGeneration] = await Promise.all([
+        shell.getAttribute("data-connection-status", { timeout: 500 })
+          .catch(() => null),
+        shell.getAttribute("data-runtime-generation", { timeout: 500 })
+          .catch(() => null),
+      ]);
+      return connectionStatus === "online"
+        && runtimeGeneration !== null
+        && runtimeGeneration !== beforeRuntimeGeneration;
+    }, { timeout: 20_000 }).toBe(true);
+    after = await runtimeSnapshot();
+    expect(after.phase).toBe("ready");
+    expect(after.generation).toBeGreaterThan(before.generation);
+  } catch (error) {
+    recoveryOperationError = error;
   }
-  const crashed = await electronApp.evaluate((_electron) => {
-    const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
-      crash: () => RuntimeTestSnapshot;
-    } | undefined;
-    if (!runtime) throw new Error("The test runtime supervisor is unavailable");
-    return runtime.crash();
-  });
+  try {
+    await restoreRuntimeRecoveryConsent();
+  } catch (error) {
+    if (testInfo) {
+      await attachDarwinRecoverySafetyLockDiagnostic(
+        testInfo,
+        dataDirectory,
+        priorLease?.runtimeGenerationId ?? null,
+        error,
+      ).catch(() => undefined);
+    }
+    throw error;
+  }
+  if (recoveryOperationError) throw recoveryOperationError;
+  if (!crashed || !after) {
+    throw new Error("The runtime crash-recovery result was incomplete.");
+  }
   const crashReturnedObservation = runtimeObservation(crashed);
   expect(crashed.pid).toBe(before.pid);
-
-  await expect.poll(async () => {
-    const current = await runtimeSnapshot();
-    return current.phase === "ready" && current.generation > before.generation;
-  }, { timeout: 20_000 }).toBe(true);
-  if (process.platform === "darwin") {
-    await electronApp.evaluate(({ dialog }) => {
-      const owner = globalThis as typeof globalThis & {
-        __inertiaOriginalRuntimeRecoveryMessageBox?: typeof dialog.showMessageBox;
-      };
-      const original = owner.__inertiaOriginalRuntimeRecoveryMessageBox;
-      if (original) Reflect.set(dialog, "showMessageBox", original);
-      delete owner.__inertiaOriginalRuntimeRecoveryMessageBox;
-    });
-  }
-  const after = await runtimeSnapshot();
   const replacementReadyObservation = runtimeObservation(after);
   const afterUrl = await runtimeWebsocketUrl(page);
   expect(after.generation).toBeGreaterThan(before.generation);

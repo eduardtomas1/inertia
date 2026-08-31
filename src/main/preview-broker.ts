@@ -20,7 +20,7 @@ import {
   locateAgentPageRef, semanticPageSnapshot, setAgentPageInputGuard, showAgentPageCursor,
 } from "./preview-agent-page.js";
 import {
-  agentPageActivationBlock, agentPageHasUnguardedNestedContent, beginAgentFileChooserBlock, beginAgentPageInputRefusalCapture, captureAgentPageInputRefusal, capturedAgentPageInputRefusal, endAgentPageInputRefusalCapture, ensureAgentFileChooserBlock, hoverAgentPageRef, releaseAgentFileChooserBlock, setAgentPageFrozen, settleAgentPageDebuggerBootstrap, settleAgentPageInput,
+  agentPageActivationFailureMessage, agentPageHasUnguardedNestedContent, beginAgentFileChooserBlock, beginAgentPageInputRefusalCapture, captureAgentPageInputRefusal, capturedAgentPageInputRefusal, deliverAgentPageActivation, endAgentPageInputRefusalCapture, ensureAgentFileChooserBlock, hoverAgentPageRef, releaseAgentFileChooserBlock, setAgentPageFrozen, settleAgentPageDebuggerBootstrap, settleAgentPageInput,
 } from "./preview-agent-input.js";
 import { capturedAgentScreenshotResult } from "./preview-agent-screenshot.js";
 import { BrowserEvidenceCapture, type BrowserEvidenceAuthority, type BrowserEvidencePage } from "./browser-evidence-capture.js";
@@ -1093,23 +1093,23 @@ export class PreviewBroker {
     stopForAbort(signal);
     const contents = this.#active(slot).view.webContents;
     await this.#prepareAgentPage(contents, signal);
-    const keyCode = key === "Space" ? " " : key;
-    let activationBlocked: "disabled" | "file" | "nested" | null = null;
+    let activationBlocked: "disabled" | "file" | "nested" | "retargeted" | null = null;
     const deliveryRefusal = await this.#sendInputAndWait(contents, async () => {
       if (key === "Enter" || key === "Space") {
-        activationBlocked = await this.#rendererOperation(contents,
-          () => agentPageActivationBlock(contents), { signal });
+        activationBlocked = await deliverAgentPageActivation(
+          contents,
+          key,
+          async (operation) => await this.#rendererOperation(contents, operation, { signal }),
+          signal,
+        );
         if (activationBlocked) return;
+      } else {
+        contents.sendInputEvent({ type: "keyDown", keyCode: key });
+        contents.sendInputEvent({ type: "keyUp", keyCode: key });
       }
-      contents.sendInputEvent({ type: "keyDown", keyCode });
-      if (key === "Enter" || key === "Space") {
-        contents.sendInputEvent({ type: "char", keyCode: key === "Enter" ? "\r" : " " });
-      }
-      contents.sendInputEvent({ type: "keyUp", keyCode });
     }, signal);
     const refusal = activationBlocked || deliveryRefusal;
-    if (refusal) return failure("invalid", refusal === "file" ? "File inputs cannot be activated by the Browser agent."
-      : refusal === "disabled" ? "The focused page element is disabled." : "Activation keys are unavailable for nested page content.");
+    if (refusal) return failure("invalid", agentPageActivationFailureMessage(refusal));
     this.#record(ownerId, slot, "press", `Agent pressed ${key}`);
     return successfulAgentBrowserResult(JSON.stringify({ pressed: key }), this.#agentState(slot));
   }

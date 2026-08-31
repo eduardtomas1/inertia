@@ -773,6 +773,9 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       forgetRemoteTranscript: (conversationId: string) =>
           privateConnectTranscriptCache.invalidateConversation(conversationId),
         broadcastSnapshot,
+        reportTerminalProviderResumeRejection: (diagnostic) => {
+          console.warn("Terminal provider resume rejected.", diagnostic);
+        },
         send,
       }),
     ],

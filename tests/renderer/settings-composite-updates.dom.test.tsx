@@ -375,6 +375,40 @@ describe("Settings composite updates", () => {
       .toHaveAttribute("placeholder", "Claude account");
   });
 
+  it("moves provider detail tabs with the composite keyboard pattern", () => {
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: { getPlatform: () => "darwin" },
+    });
+    render(<SettingsView
+      {...settingsProps(vi.fn(async () => undefined))}
+      providers={[codexWithModels()]}
+    />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Providers" }));
+    const configuration = screen.getByRole("tab", {
+      name: "Configuration",
+    });
+    configuration.focus();
+    fireEvent.keyDown(configuration, { key: "ArrowRight" });
+
+    const models = screen.getByRole("tab", { name: /Models/u });
+    expect(document.activeElement).toBe(models);
+    expect(models).toHaveAttribute("aria-selected", "true");
+    expect(models).toHaveAttribute("tabindex", "0");
+    expect(configuration).toHaveAttribute("tabindex", "-1");
+    expect(screen.getByRole("tabpanel"))
+      .toHaveAttribute("aria-labelledby", "provider-settings-models-tab");
+
+    fireEvent.keyDown(models, { key: "Home" });
+    expect(document.activeElement).toBe(configuration);
+    expect(configuration).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tabpanel")).toHaveAttribute(
+      "aria-labelledby",
+      "provider-settings-configuration-tab",
+    );
+  });
+
   it("keeps the Discord webhook in privileged credential storage", async () => {
     const getBackendCredentialState = vi.fn(async () => ({
       profileId: "discord-release-webhook",

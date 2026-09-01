@@ -285,6 +285,8 @@ export function SettingsView({
   const [providerDetailTab, setProviderDetailTab] = useState<
     "configuration" | "models"
   >("configuration");
+  const providerConfigurationTabRef = useRef<HTMLButtonElement>(null);
+  const providerModelsTabRef = useRef<HTMLButtonElement>(null);
   const [providerAdvancedOpen, setProviderAdvancedOpen] = useState(false);
   const [providerIdentityLabelsDraft, setProviderIdentityLabelsDraft] = useState(
     () => settings.providerIdentityLabels,
@@ -342,6 +344,28 @@ export function SettingsView({
   const selectedProviderIdentityLabel = selectedProvider
     ? providerIdentityLabelsDraft[selectedProvider.id]
     : undefined;
+  const onProviderDetailTabKeyDown = (
+    event: React.KeyboardEvent<HTMLButtonElement>,
+  ): void => {
+    let nextTab: "configuration" | "models" | null = null;
+    if (event.key === "Home") nextTab = "configuration";
+    else if (event.key === "End") nextTab = "models";
+    else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+      nextTab = providerDetailTab === "configuration"
+        ? "models"
+        : "configuration";
+    } else if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+      nextTab = providerDetailTab === "configuration"
+        ? "models"
+        : "configuration";
+    }
+    if (!nextTab) return;
+    event.preventDefault();
+    setProviderDetailTab(nextTab);
+    (nextTab === "configuration"
+      ? providerConfigurationTabRef
+      : providerModelsTabRef).current?.focus();
+  };
   const storedDefaultModel = defaultProvider?.models.find(
     ({ id }) => id === settings.defaultModel,
   );
@@ -777,20 +801,30 @@ export function SettingsView({
 
                     <div className="provider-settings-tabs" role="tablist" aria-label={`${selectedProvider.label} settings`}>
                       <button
+                        ref={providerConfigurationTabRef}
                         type="button"
                         role="tab"
+                        id="provider-settings-configuration-tab"
+                        aria-controls="provider-settings-configuration-panel"
                         aria-selected={providerDetailTab === "configuration"}
+                        tabIndex={providerDetailTab === "configuration" ? 0 : -1}
                         className={clsx(providerDetailTab === "configuration" && "is-active")}
                         onClick={() => setProviderDetailTab("configuration")}
+                        onKeyDown={onProviderDetailTabKeyDown}
                       >
                         Configuration
                       </button>
                       <button
+                        ref={providerModelsTabRef}
                         type="button"
                         role="tab"
+                        id="provider-settings-models-tab"
+                        aria-controls="provider-settings-models-panel"
                         aria-selected={providerDetailTab === "models"}
+                        tabIndex={providerDetailTab === "models" ? 0 : -1}
                         className={clsx(providerDetailTab === "models" && "is-active")}
                         onClick={() => setProviderDetailTab("models")}
+                        onKeyDown={onProviderDetailTabKeyDown}
                       >
                         Models
                         {selectedProvider.models.length > 0 && (
@@ -800,7 +834,12 @@ export function SettingsView({
                     </div>
 
                     {providerDetailTab === "configuration" ? (
-                      <div className="provider-settings-editor-body" role="tabpanel">
+                      <div
+                        className="provider-settings-editor-body"
+                        role="tabpanel"
+                        id="provider-settings-configuration-panel"
+                        aria-labelledby="provider-settings-configuration-tab"
+                      >
                         <label className="provider-settings-field">
                           <span>Display name</span>
                           <input
@@ -898,7 +937,12 @@ export function SettingsView({
                         </p>
                       </div>
                     ) : (
-                      <div className="provider-settings-editor-body provider-settings-models" role="tabpanel">
+                      <div
+                        className="provider-settings-editor-body provider-settings-models"
+                        role="tabpanel"
+                        id="provider-settings-models-panel"
+                        aria-labelledby="provider-settings-models-tab"
+                      >
                         {selectedProvider.models.length > 0 ? (
                           selectedProvider.models.map((model) => (
                             <div className="provider-settings-model-row" key={model.id}>

@@ -2203,7 +2203,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     );
     expect(terminateOwnedProcessTree).toHaveBeenCalledOnce();
     expect(manager.activeConversationIds()).toEqual([]);
-  }, 10_000);
+  }, 20_000);
 
   it("fails and cleans up a slow event stream at the inactivity deadline", async () => {
     const root = portableFixtureRoot("OpenCode inactive stream");

@@ -1,4 +1,3 @@
-import { existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 
 import { spawn, type IDisposable, type IPty } from "node-pty";
@@ -12,12 +11,22 @@ import {
   spawnRuntimeOwnedPidProcess,
   type RuntimeOwnedPidProcess,
 } from "../node/runtime-owned-processes";
-import { runtimeOwnedPtyInvocation } from "../node/runtime-owned-pty-invocation";
 import {
   createOwnedPidProcessTreeTermination,
   type OwnedPidProcessTreeTermination,
   type WaitForProcessExit,
 } from "./process-lifecycle";
+import { requestRecoveryFromTaintedOwnedProcess } from "./terminal-runtime-recovery";
+import {
+  terminalCloseTimeoutMs,
+  terminalShutdownTimeoutMs,
+} from "./terminal-shutdown-deadline";
+import { beforeTerminalDeadline } from "./terminal-deadline";
+import {
+  runtimeOwnedPtyInvocationForBoundary,
+  type TerminalOwnershipBoundary,
+  userShell,
+} from "./terminal-invocation";
 
 const MAX_TERMINALS = 8;
 const MAX_TERMINALS_PER_CLIENT = 4;
@@ -28,13 +37,10 @@ const OUTPUT_FLUSH_MS = 8;
 const TERMINAL_REATTACH_TIMEOUT_MS = 30_000;
 const TERMINAL_REATTACH_TRUNCATION_NOTICE =
   "\r\n\x1b[2mEarlier terminal output was truncated while reconnecting.\x1b[0m\r\n";
-// node-pty's Windows ConPTY backend intentionally delays its public exit event
-// for 1 second while output drains. Leave bounded headroom for that signal and
-// the final resource-settle check while still finishing well before the
-// supervisor's 3-second process-tree fallback.
-const TERMINAL_SHUTDOWN_TIMEOUT_MS = process.platform === "win32"
-  ? 1_500
-  : 1_000;
+
+function boundedMilliseconds(value: number, maximum: number): number {
+  return Math.max(1, Math.min(Math.trunc(value), maximum));
+}
 
 interface TerminalSession {
   id: string;
@@ -47,6 +53,8 @@ interface TerminalSession {
   dataListener: IDisposable;
   exitListener: IDisposable;
   exitObserved: boolean;
+  exitCode: number | null;
+  exitSignal: number | null;
   exitWaiters: Set<() => void>;
   terminationRequested: boolean;
   supportsGracefulReplacement: boolean;
@@ -70,6 +78,7 @@ interface TerminalSession {
 export interface TerminalManagerOptions {
   spawnTerminal?: typeof spawn;
   shutdownTimeoutMs?: number;
+  closeTimeoutMs?: number;
   outputFlushMs?: number;
   reattachTimeoutMs?: number;
   platform?: NodeJS.Platform;
@@ -111,58 +120,6 @@ export type TerminalAttachment = {
 export interface TerminalProviderResumeAttachment {
   descriptor: ProviderTerminalResumeDescriptor;
   conversationId: string;
-}
-
-function userShell(platform: NodeJS.Platform): { executable: string; args: string[] } {
-  if (platform === "win32") {
-    return { executable: process.env.ComSpec || "powershell.exe", args: [] };
-  }
-
-  const configuredShell = process.env.SHELL;
-  if (configuredShell && configuredShell.startsWith("/") && existsSync(configuredShell)) {
-    return { executable: configuredShell, args: ["-l"] };
-  }
-
-  const fallback = platform === "darwin" ? "/bin/zsh" : "/bin/bash";
-  return { executable: fallback, args: ["-l"] };
-}
-
-async function beforeTerminalDeadline(
-  operation: Promise<boolean>,
-  deadlineAt: number,
-): Promise<boolean> {
-  type Settlement =
-    | { kind: "pending" }
-    | { kind: "settled"; value: boolean };
-  const settlement: { current: Settlement } = { current: { kind: "pending" } };
-  const observedSettlement = (): Settlement => settlement.current;
-  void operation.then(
-    (value) => { settlement.current = { kind: "settled", value }; },
-    () => { settlement.current = { kind: "settled", value: false }; },
-  );
-  await Promise.resolve();
-  const immediate = observedSettlement();
-  if (immediate.kind === "settled") return immediate.value;
-  const remainingMs = Math.trunc(deadlineAt - Date.now());
-  if (remainingMs <= 0) {
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    const delayed = observedSettlement();
-    return delayed.kind === "settled"
-      ? delayed.value
-      : false;
-  }
-  return await new Promise<boolean>((resolve) => {
-    let settled = false;
-    const finish = (value: boolean): void => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve(value);
-    };
-    const timer = setTimeout(() => finish(false), remainingMs);
-    timer.unref();
-    void operation.then(finish, () => finish(false));
-  });
 }
 
 async function waitForBooleanWithinTerminalDeadline(
@@ -231,6 +188,15 @@ async function waitForOwnedProcessStoppedWithinDeadline(
   return true;
 }
 
+function ownershipRetirementFailure(session: TerminalSession): TerminalError {
+  const outcome = session.exitObserved
+    ? ` Guardian exit code: ${session.exitCode ?? "unknown"}; signal: ${session.exitSignal ?? "unknown"}.`
+    : "";
+  return new TerminalError(
+    `A terminal process ownership claim could not be retired during runtime shutdown.${outcome}`,
+  );
+}
+
 function stopSlowSocket(socket: WebSocket): void {
   try {
     socket.terminate();
@@ -266,6 +232,7 @@ export class TerminalManager {
   private updatePreparationHeld = false;
   private readonly spawnTerminal: typeof spawn;
   private readonly shutdownTimeoutMs: number;
+  private readonly closeTimeoutMs: number;
   private readonly outputFlushMs: number;
   private readonly reattachTimeoutMs: number;
   private readonly platform: NodeJS.Platform;
@@ -284,25 +251,21 @@ export class TerminalManager {
   constructor(options: TerminalManagerOptions = {}) {
     this.platform = options.platform ?? process.platform;
     this.spawnTerminal = options.spawnTerminal ?? spawn;
-    this.shutdownTimeoutMs = Math.max(
-      1,
-      Math.min(
-        Math.trunc(
-          options.shutdownTimeoutMs ?? TERMINAL_SHUTDOWN_TIMEOUT_MS,
-        ),
-        30_000,
-      ),
+    this.shutdownTimeoutMs = boundedMilliseconds(
+      options.shutdownTimeoutMs ?? terminalShutdownTimeoutMs(this.platform),
+      30_000,
     );
-    this.outputFlushMs = Math.max(
-      1,
-      Math.min(Math.trunc(options.outputFlushMs ?? OUTPUT_FLUSH_MS), 50),
+    this.closeTimeoutMs = boundedMilliseconds(
+      options.closeTimeoutMs ?? terminalCloseTimeoutMs(this.platform),
+      30_000,
     );
-    this.reattachTimeoutMs = Math.max(
-      1,
-      Math.min(
-        Math.trunc(options.reattachTimeoutMs ?? TERMINAL_REATTACH_TIMEOUT_MS),
-        120_000,
-      ),
+    this.outputFlushMs = boundedMilliseconds(
+      options.outputFlushMs ?? OUTPUT_FLUSH_MS,
+      50,
+    );
+    this.reattachTimeoutMs = boundedMilliseconds(
+      options.reattachTimeoutMs ?? TERMINAL_REATTACH_TIMEOUT_MS,
+      120_000,
     );
     this.spawnOwnedTerminalProcess = options.spawnOwnedTerminalProcess
       ?? spawnRuntimeOwnedPidProcess;
@@ -348,6 +311,7 @@ export class TerminalManager {
       this.platform === "darwin",
       reattachScope,
       null,
+      "terminal-session",
     );
   }
 
@@ -362,7 +326,7 @@ export class TerminalManager {
     replacementRequestId?: string,
   ): Promise<string> {
     const shell = userShell(this.platform);
-    return await this.replaceProcess(
+    return await this.replaceProcessWithBoundary(
       owner,
       terminalId,
       cwd,
@@ -376,6 +340,7 @@ export class TerminalManager {
       null,
       this.platform === "darwin",
       replacementRequestId,
+      "terminal-session",
     );
   }
 
@@ -499,6 +464,40 @@ export class TerminalManager {
     replacementSupportsGracefulRetirement = false,
     replacementRequestId?: string,
   ): Promise<string> {
+    return await this.replaceProcessWithBoundary(
+      owner,
+      terminalId,
+      cwd,
+      executable,
+      args,
+      env,
+      cols,
+      rows,
+      onExit,
+      onOutput,
+      providerResume,
+      replacementSupportsGracefulRetirement,
+      replacementRequestId,
+      "complete-tree",
+    );
+  }
+
+  private async replaceProcessWithBoundary(
+    owner: WebSocket,
+    terminalId: string,
+    cwd: string,
+    executable: string,
+    args: readonly string[] | string,
+    env: NodeJS.ProcessEnv,
+    cols: number,
+    rows: number,
+    onExit: ((exitCode: number) => void) | undefined,
+    onOutput: ((data: string) => void) | undefined,
+    providerResume: TerminalProviderResumeAttachment | null,
+    replacementSupportsGracefulRetirement: boolean,
+    replacementRequestId: string | undefined,
+    ownershipBoundary: TerminalOwnershipBoundary,
+  ): Promise<string> {
     const replaced = this.ownedSession(owner, terminalId);
     if (replaced.cwd !== cwd) {
       throw new TerminalError(
@@ -513,13 +512,10 @@ export class TerminalManager {
       && replaced.supportsGracefulReplacement
       && this.preserveDarwinShellOnReplacement
     ) {
-      // An interactive macOS shell may have forked while loading the user's
-      // startup files. The native guardian deliberately cannot retire that
-      // durable claim on cancellation because an unobserved double-fork could
-      // have escaped its session. Preserve the still-visible shell under its
-      // existing identity and start the requested process as a separately
-      // owned terminal instead of either weakening containment or orphaning
-      // the shell behind a reused public ID.
+      // Preserve an interactive macOS shell under its visible identity when a
+      // provider process starts beside it. The provider receives a separate,
+      // strict complete-tree guardian instead of inheriting the shell's
+      // terminal-session ownership boundary.
       const replacementId = this.createProcessReplacing(
         owner,
         null,
@@ -534,6 +530,7 @@ export class TerminalManager {
         replacementSupportsGracefulRetirement,
         replaced.reattachScope,
         providerResume,
+        ownershipBoundary,
       );
       if (replacementRequestId && this.sessions.has(replacementId)) {
         this.distinctReplacements.set(replacementRequestId, {
@@ -567,6 +564,7 @@ export class TerminalManager {
         replacementSupportsGracefulRetirement,
         replaced.reattachScope,
         providerResume,
+        ownershipBoundary,
       );
       if (replacementRequestId && this.sessions.has(replacementId)) {
         this.distinctReplacements.set(replacementRequestId, {
@@ -662,6 +660,7 @@ export class TerminalManager {
     supportsGracefulReplacement = false,
     reattachScope: TerminalReattachScope | null = null,
     providerResume: TerminalProviderResumeAttachment | null = null,
+    ownershipBoundary: TerminalOwnershipBoundary = "complete-tree",
   ): string {
     this.assertCapacity(owner, replaced, reattachScope);
 
@@ -680,7 +679,12 @@ export class TerminalManager {
     let requestOwnedGuardianStop!: () => boolean;
     let waitForOwnedGuardianStop!: () => Promise<boolean>;
     try {
-      const invocation = runtimeOwnedPtyInvocation(executable, args);
+      const invocation = runtimeOwnedPtyInvocationForBoundary(
+        this.platform,
+        ownershipBoundary,
+        executable,
+        args,
+      );
       const owned = this.spawnOwnedTerminalProcess(() => this.spawnTerminal(
         invocation.command,
         invocation.args,
@@ -699,6 +703,7 @@ export class TerminalManager {
       requestOwnedGuardianStop = owned.requestGuardianStop;
       waitForOwnedGuardianStop = owned.waitForGuardianStop;
     } catch {
+      requestRecoveryFromTaintedOwnedProcess(this.onOwnedProcessCleanupUnconfirmed);
       throw new TerminalError("Unable to start a terminal for this project.");
     }
 
@@ -828,6 +833,8 @@ export class TerminalManager {
     const exitListener = pseudoterminal.onExit(({ exitCode, signal }) => {
       flushOutput();
       session.exitObserved = true;
+      session.exitCode = exitCode;
+      session.exitSignal = signal ?? null;
       for (const resolveExit of session.exitWaiters) resolveExit();
       session.exitWaiters.clear();
       releaseOwnedProcessIfExited(signal);
@@ -837,9 +844,7 @@ export class TerminalManager {
         && !session.confirmOwnedProcessStopped()
       ) {
         session.terminationRequested = true;
-        this.recordCleanupFailure(session, new TerminalError(
-          "A terminal process ownership claim could not be retired during runtime shutdown.",
-        ));
+        this.recordCleanupFailure(session, ownershipRetirementFailure(session));
         return;
       }
       if (session.terminationRequested) return;
@@ -861,6 +866,8 @@ export class TerminalManager {
       dataListener,
       exitListener,
       exitObserved: false,
+      exitCode: null,
+      exitSignal: null,
       exitWaiters: new Set(),
       terminationRequested: false,
       supportsGracefulReplacement,
@@ -1081,7 +1088,6 @@ export class TerminalManager {
     // Let trackDisposal publish the memoized closing promise before a graceful
     // payload exit can synchronously trigger the PTY exit listener.
     await Promise.resolve();
-    let fallbackDeadlineAt: number | null = null;
     if (
       attemptGracefulReplacement
       && await this.gracefullyRetireReplacementShell(session)
@@ -1094,12 +1100,11 @@ export class TerminalManager {
       }
       return;
     }
-    if (attemptGracefulReplacement) {
-      // The graceful prepass is an optional convenience for an interactive Darwin
-      // shell. Give the fail-closed guardian path its complete configured
-      // budget when no enclosing runtime-shutdown deadline is already tighter.
-      fallbackDeadlineAt = Date.now() + this.shutdownTimeoutMs;
-    }
+    // One ordinary-close envelope includes asynchronous admission plus the
+    // stop proof; the authoritative runtime-shutdown deadline can tighten it.
+    const fallbackDeadlineAt = session.shutdownDeadlineAt === null
+      ? Date.now() + this.closeTimeoutMs
+      : null;
 
     await new Promise<void>((resolve, reject) => {
       let settled = false;
@@ -1173,9 +1178,7 @@ export class TerminalManager {
             this.shutdownTimeoutMs,
             fallbackDeadlineAt,
           )) {
-            finish(new TerminalError(
-              "A terminal process ownership claim could not be retired during runtime shutdown.",
-            ));
+            finish(ownershipRetirementFailure(session));
             return;
           }
           this.dispose(session.id, false);

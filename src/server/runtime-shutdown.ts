@@ -1,4 +1,6 @@
-export const RUNTIME_SHUTDOWN_DEADLINE_MS = 2_500;
+import { runtimeShutdownDeadlineMs } from "../node/runtime-shutdown-deadline.js";
+
+export const RUNTIME_SHUTDOWN_DEADLINE_MS = runtimeShutdownDeadlineMs();
 
 export interface RuntimeShutdownContext {
   readonly deadlineAt: number;

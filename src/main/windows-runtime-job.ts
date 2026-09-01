@@ -17,6 +17,10 @@ import windowsRuntimeJobIntegrity from
 import type { WindowsRuntimeJobContainment } from "../node/runtime-owned-processes.js";
 import { validRuntimeGenerationId } from "../node/runtime-process-protocol.js";
 import {
+  WINDOWS_RUNTIME_JOB_BROKER_FORCE_CLOSE_MARGIN_MS,
+  WINDOWS_RUNTIME_JOB_BROKER_SHUTDOWN_TIMEOUT_MS,
+} from "./privileged-shutdown-deadline.js";
+import {
   resolveWindowsRuntimeJobAssemblyPath,
   type RuntimeAssetLocations,
 } from "./runtime-assets.js";
@@ -27,6 +31,9 @@ const EXECUTABLE_LOCK_SHUTDOWN = "SHUTDOWN\n";
 const EXECUTABLE_LOCK_BYE_MARKER = "BYE";
 const MAX_OUTPUT_BYTES = 8_192;
 const MAX_BROKER_FIELD_CHARS = 2_048;
+const MAX_BROKER_BOOTSTRAP_SCRIPT_BYTES = 64 * 1024;
+const MAX_BROKER_BOOTSTRAP_LINE_CHARS =
+  Math.ceil(MAX_BROKER_BOOTSTRAP_SCRIPT_BYTES / 3) * 4;
 const MAX_PROCESS_METRICS = 1_024;
 const PROCESS_METRIC_POLL_MS = 10;
 const PROCESS_METRIC_TIMEOUT_MS = 5_000;
@@ -36,11 +43,14 @@ const BROKER_HELPER_GRACEFUL_EXIT_MS = 2_000;
 const BROKER_HELPER_FORCED_EXIT_MS = 1_000;
 // Stop-Helpers can consume both exit budgets before it writes BYE.
 const BROKER_SHUTDOWN_ACK_MARGIN_MS = 1_000;
-const BROKER_SHUTDOWN_TIMEOUT_MS =
+if (
   BROKER_HELPER_GRACEFUL_EXIT_MS
-  + BROKER_HELPER_FORCED_EXIT_MS
-  + BROKER_SHUTDOWN_ACK_MARGIN_MS;
-const BROKER_FORCE_CLOSE_MARGIN_MS = 1_000;
+    + BROKER_HELPER_FORCED_EXIT_MS
+    + BROKER_SHUTDOWN_ACK_MARGIN_MS
+  !== WINDOWS_RUNTIME_JOB_BROKER_SHUTDOWN_TIMEOUT_MS
+) {
+  throw new Error("The Windows runtime broker shutdown budget is inconsistent.");
+}
 
 type WindowsRuntimeJobStage = "native-guard-start";
 
@@ -361,6 +371,43 @@ function encodedPowerShell(value: string): string {
   return Buffer.from(value, "utf16le").toString("base64");
 }
 
+function windowsRuntimeJobBootstrapScript(): string {
+  return `$ErrorActionPreference = 'Stop'
+try {
+  $line = [Console]::In.ReadLine()
+  if ($null -eq $line -or
+    $line.Length -lt 1 -or
+    $line.Length -gt ${MAX_BROKER_BOOTSTRAP_LINE_CHARS}) {
+    throw 'bootstrap-size'
+  }
+  $bytes = [Convert]::FromBase64String($line)
+  if ($bytes.Length -lt 1 -or
+    $bytes.Length -gt ${MAX_BROKER_BOOTSTRAP_SCRIPT_BYTES} -or
+    [Convert]::ToBase64String($bytes) -cne $line) {
+    throw 'bootstrap-encoding'
+  }
+  $utf8 = [Text.UTF8Encoding]::new($false, $true)
+  $script = $utf8.GetString($bytes)
+  & ([ScriptBlock]::Create($script))
+} catch {
+  [Console]::Error.WriteLine('INERTIA_JOB_ERROR stage=broker-bootstrap')
+  exit 25
+}`;
+}
+
+function encodedWindowsRuntimeJobLockScript(
+  assembly: WindowsRuntimeJobAssembly,
+): string {
+  const bytes = Buffer.from(windowsRuntimeJobLockScript(assembly), "utf8");
+  if (
+    bytes.length < 1
+    || bytes.length > MAX_BROKER_BOOTSTRAP_SCRIPT_BYTES
+  ) {
+    throw new Error("The Windows runtime broker bootstrap is oversized.");
+  }
+  return bytes.toString("base64");
+}
+
 function windowsRuntimeJobLockScript(
   assembly: WindowsRuntimeJobAssembly,
 ): string {
@@ -521,7 +568,8 @@ function spawnWindowsRuntimeJobLockBroker(
   if (!trustedEnvironment || !systemRoot) {
     throw new Error("The trusted Windows runtime environment is unavailable.");
   }
-  return spawn(
+  const bootstrapLine = encodedWindowsRuntimeJobLockScript(assembly);
+  const child = spawn(
     win32.join(
       systemRoot,
       "System32",
@@ -536,7 +584,7 @@ function spawnWindowsRuntimeJobLockBroker(
       "-ExecutionPolicy",
       "Bypass",
       "-EncodedCommand",
-      encodedPowerShell(windowsRuntimeJobLockScript(assembly)),
+      encodedPowerShell(windowsRuntimeJobBootstrapScript()),
     ],
     {
       env: trustedEnvironment,
@@ -545,6 +593,12 @@ function spawnWindowsRuntimeJobLockBroker(
       stdio: ["pipe", "pipe", "pipe"],
     },
   );
+  // Keep the trusted command line small on Windows ARM64. The complete,
+  // internally generated broker remains bounded and crosses the inherited
+  // pipe before LOCKED; all later protocol frames use that same pipe.
+  child.stdin.on("error", () => undefined);
+  child.stdin.write(`${bootstrapLine}\n`);
+  return child;
 }
 
 async function acquireWindowsRuntimeJobExecutableLock(
@@ -713,9 +767,10 @@ async function acquireWindowsRuntimeJobExecutableLock(
           if (!closed) {
             const terminate = setTimeout(() => {
               if (child.exitCode === null && child.signalCode === null) child.kill();
-            }, BROKER_SHUTDOWN_TIMEOUT_MS);
+            }, WINDOWS_RUNTIME_JOB_BROKER_SHUTDOWN_TIMEOUT_MS);
             const didClose = await awaitChildClose(
-              BROKER_SHUTDOWN_TIMEOUT_MS + BROKER_FORCE_CLOSE_MARGIN_MS,
+              WINDOWS_RUNTIME_JOB_BROKER_SHUTDOWN_TIMEOUT_MS
+                + WINDOWS_RUNTIME_JOB_BROKER_FORCE_CLOSE_MARGIN_MS,
             );
             clearTimeout(terminate);
             if (!didClose) {

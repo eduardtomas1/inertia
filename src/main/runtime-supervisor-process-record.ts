@@ -80,6 +80,9 @@ export function createRuntimeProcessRecord(options: {
     legacyRecoveryAuthorityBatchIds,
     modernDarwinRecoveryAuthority:
       options.modernDarwinRecoveryAuthority ?? null,
+    manualModernRecoveryGeneration:
+      options.modernDarwinRecoveryAuthority !== undefined
+      && options.modernDarwinRecoveryAuthority !== null,
     ready: false,
     acceptingReady: true,
     cleanupConfirmed: false,

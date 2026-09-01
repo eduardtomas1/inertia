@@ -1,11 +1,19 @@
+import {
+  RUNTIME_SUPERVISOR_FORCE_KILL_WAIT_MS,
+  runtimeSupervisorShutdownGraceMs,
+} from "../node/runtime-shutdown-deadline.js";
+
 const INITIAL_RESTART_DELAY_MS = 500;
 const MAX_RESTART_DELAY_MS = 8_000;
 
 export const runtimeSupervisorDefaults = {
   startupTimeoutMs: 20_000,
   stableUptimeMs: 30_000,
-  shutdownGraceMs: 3_000,
-  forceKillWaitMs: 1_000,
+  // Let the utility runtime finish its complete platform-owned cleanup proof
+  // before main begins the process-tree fallback. macOS includes bounded
+  // guardian admission/retirement; Windows includes ConPTY drain headroom.
+  shutdownGraceMs: runtimeSupervisorShutdownGraceMs(),
+  forceKillWaitMs: RUNTIME_SUPERVISOR_FORCE_KILL_WAIT_MS,
   requestTimeoutMs: 10_000,
   databaseRecoveryTimeoutMs: 120_000,
   databaseRecoveryCancelTimeoutMs: 5_000,

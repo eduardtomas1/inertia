@@ -1058,6 +1058,16 @@ export class RuntimeSupervisor {
     const pid = child.pid;
     const record = this.current;
     if (pid && record?.child === child) {
+      // A manual-recovery replacement that is forced out cannot supply the
+      // worker's ordered `runtime.stopped` proof. Even when its root tree was
+      // killed, recover its exact empty/owned journal before reusing the still
+      // pending authority. Other pre-ready generations may hold attachment
+      // capabilities that must remain preserved without runtime confirmation.
+      if (
+        record.manualModernRecoveryGeneration
+        && !record.ready
+        && !record.cleanupConfirmed
+      ) record.cleanupRecoveryRequired = true;
       if (record.processTreeTermination) return;
       record.processTreeTerminationConfirmed = false;
       record.processTreeTerminationSettled = false;

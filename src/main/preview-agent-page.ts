@@ -672,6 +672,7 @@ export async function setAgentPageInputGuard(
     const state = globalThis.__inertiaAgentBrowser;
     if (state?.privacyGuardInstalled !== true) return false;
     state.agentActivationKey = undefined;
+    state.agentActivationTarget = undefined;
     state.blockedAgentActivationKey = undefined;
     state.expectedAgentClickRef = ${active && expectedClickRef ? JSON.stringify(expectedClickRef) : "undefined"};
     state.agentInputRefused = undefined;
@@ -1025,6 +1026,30 @@ export async function agentPageActivationBlocked(
     return current ? "disabled" : null;
   })()`);
   return value === "file" || value === "disabled" ? value : null;
+}
+
+/**
+ * A press action has no semantic ref to re-resolve after its keydown phase.
+ * Keep that phase bound to the exact focused DOM target captured by the
+ * privacy guard instead. A missing or changed target is deliberately unsafe:
+ * subsequent key phases must not be delivered to a different control.
+ */
+export async function agentPageActivationTargetStillFocused(
+  contents: WebContents,
+): Promise<boolean> {
+  const value = await execute(contents, `(() => {
+    const target = globalThis.__inertiaAgentBrowser?.agentActivationTarget;
+    if (!(target instanceof Element) || !target.isConnected) return false;
+    let active = document.activeElement;
+    let depth = 0;
+    while (active?.shadowRoot?.activeElement && depth < ${MAX_SEMANTIC_SCAN_NODES}) {
+      active = active.shadowRoot.activeElement;
+      depth += 1;
+    }
+    if (active?.shadowRoot?.activeElement) return false;
+    return active === target;
+  })()`);
+  return value === true;
 }
 
 export async function showAgentPageCursor(

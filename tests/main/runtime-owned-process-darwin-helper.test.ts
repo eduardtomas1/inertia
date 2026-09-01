@@ -11,7 +11,11 @@ vi.mock("node:child_process", async (importOriginal) => ({
   spawn: childProcess.spawn,
 }));
 
-import { darwinProcessGuardianReadyAsync } from "../../src/node/runtime-owned-process-darwin";
+import {
+  darwinProcessGuardianReady,
+  darwinProcessGuardianReadyAsync,
+  readDarwinProcessIdentityAsync,
+} from "../../src/node/runtime-owned-process-darwin";
 
 interface FakeHelper extends EventEmitter {
   readonly stdout: EventEmitter;
@@ -37,7 +41,25 @@ describe("macOS runtime guardian helper", () => {
     vi.restoreAllMocks();
   });
 
-  it("accepts an in-deadline helper exit whose pipe close is observed after the timer", async () => {
+  it("maps only a synchronous readiness timeout to not ready", () => {
+    const timedOut = vi.fn(() => ({
+      error: Object.assign(new Error("timed out"), { code: "ETIMEDOUT" }),
+      status: null, stdout: "", stderr: "",
+    }));
+    expect(darwinProcessGuardianReady(4_242, "/trusted/guardian", {
+      platform: "darwin", spawnProcessSync: timedOut as never,
+    })).toBeNull();
+
+    const unavailable = new Error("unavailable");
+    const failed = vi.fn(() => ({
+      error: unavailable, status: null, stdout: "", stderr: "",
+    }));
+    expect(() => darwinProcessGuardianReady(4_242, "/trusted/guardian", {
+      platform: "darwin", spawnProcessSync: failed as never,
+    })).toThrow(unavailable);
+  });
+
+  it("accepts a readiness helper delayed beyond the former deadline", async () => {
     vi.useFakeTimers();
     vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
     const helper = fakeHelper();
@@ -47,14 +69,13 @@ describe("macOS runtime guardian helper", () => {
       4_242,
       "/trusted/runtime-process-guardian",
     );
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(helper.kill).not.toHaveBeenCalled();
     helper.stdout.emit(
       "data",
       Buffer.from("4242|101|4242|4242|1756100000|123456\n"),
     );
     helper.exitCode = 0;
-
-    vi.advanceTimersByTime(1_500);
-    expect(helper.kill).not.toHaveBeenCalled();
     helper.emit("close", 0, null);
 
     await expect(result).resolves.toMatchObject({
@@ -74,7 +95,44 @@ describe("macOS runtime guardian helper", () => {
       4_242,
       "/trusted/runtime-process-guardian",
     );
-    vi.advanceTimersByTime(1_500);
+    await vi.advanceTimersByTimeAsync(5_500);
+    expect(helper.kill).toHaveBeenCalledExactlyOnceWith("SIGKILL");
+    await expect(result).resolves.toBeNull();
+  });
+
+  it("accepts an identity helper delayed beyond the former deadline", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
+    const helper = fakeHelper();
+    childProcess.spawn.mockReturnValue(helper);
+
+    const result = readDarwinProcessIdentityAsync(
+      4_242,
+      "/trusted/runtime-process-guardian",
+    );
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(helper.kill).not.toHaveBeenCalled();
+    helper.stdout.emit(
+      "data",
+      Buffer.from("4242|101|4242|4242|1756100000|123456\n"),
+    );
+    helper.exitCode = 0;
+    helper.emit("close", 0, null);
+
+    await expect(result).resolves.toMatchObject({ pid: 4_242 });
+  });
+
+  it("terminates an identity helper that exceeds its new bounded deadline", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
+    const helper = fakeHelper();
+    childProcess.spawn.mockReturnValue(helper);
+
+    const result = readDarwinProcessIdentityAsync(
+      4_242,
+      "/trusted/runtime-process-guardian",
+    );
+    await vi.advanceTimersByTimeAsync(5_000);
     expect(helper.kill).toHaveBeenCalledExactlyOnceWith("SIGKILL");
     await expect(result).resolves.toBeNull();
   });
@@ -90,7 +148,7 @@ describe("macOS runtime guardian helper", () => {
       "/trusted/runtime-process-guardian",
     );
     helper.exitCode = 0;
-    vi.advanceTimersByTime(1_500);
+    await vi.advanceTimersByTimeAsync(5_500);
     expect(helper.kill).not.toHaveBeenCalled();
     await vi.runAllTimersAsync();
 

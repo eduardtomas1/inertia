@@ -17,8 +17,41 @@ async function cleanupConfirmedBefore(
   confirmation: Promise<boolean>,
   deadlineAt: number,
 ): Promise<boolean> {
+  type Settlement =
+    | { kind: "pending" }
+    | { kind: "resolved"; confirmed: boolean }
+    | { kind: "rejected"; error: unknown };
+  const settlement: { current: Settlement } = {
+    current: { kind: "pending" },
+  };
+  void confirmation.then(
+    (confirmed) => {
+      settlement.current = { kind: "resolved", confirmed };
+    },
+    (error: unknown) => {
+      settlement.current = { kind: "rejected", error };
+    },
+  );
+  const observed = (): boolean | null => {
+    if (settlement.current.kind === "resolved") {
+      return settlement.current.confirmed;
+    }
+    if (settlement.current.kind === "rejected") throw settlement.current.error;
+    return null;
+  };
+
+  // runtime.close() owns its own bounded shutdown phases and can safely use
+  // the whole shared budget. Observe a cleanup check that has already settled
+  // before treating an exhausted wall-clock budget as unconfirmed.
+  await Promise.resolve();
+  const immediate = observed();
+  if (immediate !== null) return immediate;
+
   const remainingMs = Math.trunc(deadlineAt - Date.now());
-  if (remainingMs <= 0) return false;
+  if (remainingMs <= 0) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    return observed() ?? false;
+  }
   return await new Promise<boolean>((resolve, reject) => {
     const timer = setTimeout(() => resolve(false), remainingMs);
     timer.unref();

@@ -86,6 +86,12 @@ function fakeTerminal(pid = 42): {
   };
 }
 
+function createTestShell(manager: TerminalManager, owner: WebSocket): string {
+  return manager.createProcess(
+    owner, process.cwd(), "test-shell", [], {}, 80, 24,
+  );
+}
+
 describe("TerminalManager", () => {
   it("preserves a pre-escaped Windows PTY command line verbatim", () => {
     const terminal = fakeTerminal();
@@ -1138,6 +1144,7 @@ describe("TerminalManager", () => {
         platform: "darwin",
         preserveDarwinShellOnReplacement: false,
         shutdownTimeoutMs: 20,
+        closeTimeoutMs: 20,
         spawnTerminal,
         spawnOwnedTerminalProcess: (spawnProcess) => ({
           process: spawnProcess(),
@@ -1577,6 +1584,7 @@ describe("TerminalManager", () => {
       spawnTerminal,
       terminateProcessTree,
       shutdownTimeoutMs: 5,
+      closeTimeoutMs: 5,
       spawnOwnedTerminalProcess: (spawnProcess) => ({
         process: spawnProcess(),
         confirmStopped: () => ownershipStopped,
@@ -1918,15 +1926,7 @@ describe("TerminalManager", () => {
         await waitForExit(100),
     });
     const owner = {} as WebSocket;
-    manager.createProcess(
-      owner,
-      process.cwd(),
-      "test-shell",
-      [],
-      {},
-      80,
-      24,
-    );
+    createTestShell(manager, owner);
 
     manager.disposeOwner(owner);
     let shutdownFinished = false;
@@ -1944,7 +1944,7 @@ describe("TerminalManager", () => {
     expect(shutdownFinished).toBe(true);
   });
 
-  it("starts the guarded exit deadline after pending admission consumes stop", async () => {
+  it("bounds pending guardian admission within the terminal close budget", async () => {
     vi.useFakeTimers();
     try {
       const terminal = fakeTerminal();
@@ -1957,6 +1957,7 @@ describe("TerminalManager", () => {
       const manager = new TerminalManager({
         spawnTerminal: vi.fn(() => terminal.pty),
         shutdownTimeoutMs: 20,
+        closeTimeoutMs: 20,
         spawnOwnedTerminalProcess: (spawnProcess) => ({
           process: spawnProcess(),
           confirmStopped: () => ownershipStopped,
@@ -1966,30 +1967,68 @@ describe("TerminalManager", () => {
         }),
       });
       const owner = {} as WebSocket;
-      const terminalId = manager.createProcess(
-        owner,
-        process.cwd(),
-        "test-shell",
-        [],
-        {},
-        80,
-        24,
-      );
+      const terminalId = createTestShell(manager, owner);
 
       let closeSettled = false;
       const closing = manager.closeManaged(terminalId).finally(() => {
         closeSettled = true;
       });
-      await vi.advanceTimersByTimeAsync(100);
+      const rejected = expect(closing).rejects.toThrow(
+        "A terminal process tree could not be confirmed stopped during runtime shutdown.",
+      );
+      await vi.advanceTimersByTimeAsync(19);
 
       expect(requestGuardianStop).toHaveBeenCalledOnce();
       expect(closeSettled).toBe(false);
 
+      await vi.advanceTimersByTimeAsync(1);
+      await rejected;
+      expect(closeSettled).toBe(true);
+
       ownershipStopped = true;
       terminal.emitExit();
       settleGuardianStop(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("composes Linux admission, exit, and ownership proof for close", async () => {
+    vi.useFakeTimers();
+    try {
+      const terminal = fakeTerminal();
+      let ownershipStopped = false;
+      const cleanupUnconfirmed = vi.fn();
+      const manager = new TerminalManager({
+        platform: "linux",
+        shutdownTimeoutMs: 10,
+        closeTimeoutMs: 95,
+        spawnTerminal: vi.fn(() => terminal.pty),
+        spawnOwnedTerminalProcess: (spawnProcess) => ({
+          process: spawnProcess(),
+          confirmStopped: () => ownershipStopped,
+          releaseIfGroupExited: () => undefined,
+          requestGuardianStop: () => true,
+          waitForGuardianStop: async () => {
+            await new Promise<void>((resolve) => setTimeout(resolve, 75));
+            return true;
+          },
+        }),
+        onOwnedProcessCleanupUnconfirmed: cleanupUnconfirmed,
+      });
+      const owner = {} as WebSocket;
+      const terminalId = createTestShell(manager, owner);
+
+      const closing = manager.closeManaged(terminalId);
+      await vi.advanceTimersByTimeAsync(75);
+      await vi.advanceTimersByTimeAsync(9);
+      terminal.emitExit();
+      await vi.advanceTimersByTimeAsync(9);
+      ownershipStopped = true;
+      await vi.advanceTimersByTimeAsync(1);
+
       await expect(closing).resolves.toBe(true);
-      await expect(manager.disposeAll()).resolves.toBeUndefined();
+      expect(cleanupUnconfirmed).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }
@@ -2006,6 +2045,8 @@ describe("TerminalManager", () => {
       .mockReturnValueOnce(replacementTerminal.pty);
     const manager = new TerminalManager({
       spawnTerminal,
+      shutdownTimeoutMs: 20,
+      closeTimeoutMs: 20,
       onOwnedProcessCleanupUnconfirmed,
       spawnOwnedTerminalProcess: (spawnProcess) => {
         const process = spawnProcess();
@@ -2033,15 +2074,7 @@ describe("TerminalManager", () => {
       bufferedAmount: 0,
       send: vi.fn(),
     } as unknown as WebSocket;
-    const terminalId = manager.createProcess(
-      owner,
-      process.cwd(),
-      "test-shell",
-      [],
-      {},
-      80,
-      24,
-    );
+    const terminalId = createTestShell(manager, owner);
 
     const replacement = manager.replaceProcess(
       owner,
@@ -2101,15 +2134,7 @@ describe("TerminalManager", () => {
       bufferedAmount: 0,
       send: vi.fn(),
     } as unknown as WebSocket;
-    const terminalId = manager.createProcess(
-      owner,
-      process.cwd(),
-      "test-shell",
-      [],
-      {},
-      80,
-      24,
-    );
+    const terminalId = createTestShell(manager, owner);
 
     const replacement = manager.replaceProcess(
       owner,
@@ -2144,15 +2169,7 @@ describe("TerminalManager", () => {
         }),
       });
       const owner = {} as WebSocket;
-      const terminalId = manager.createProcess(
-        owner,
-        process.cwd(),
-        "test-shell",
-        [],
-        {},
-        80,
-        24,
-      );
+      const terminalId = createTestShell(manager, owner);
 
       const earlyClose = manager.closeManaged(terminalId);
       const rejectedEarlyClose = expect(earlyClose).rejects.toThrow(
@@ -2290,15 +2307,7 @@ describe("TerminalManager", () => {
         terminateProcessTree,
       });
       const owner = {} as WebSocket;
-      manager.createProcess(
-        owner,
-        process.cwd(),
-        "test-shell",
-        [],
-        {},
-        80,
-        24,
-      );
+      createTestShell(manager, owner);
 
       manager.disposeOwner(owner);
       const shutdown = manager.disposeAll();
@@ -2334,15 +2343,7 @@ describe("TerminalManager", () => {
         terminateProcessTree,
       });
       const owner = {} as WebSocket;
-      manager.createProcess(
-        owner,
-        process.cwd(),
-        "test-shell",
-        [],
-        {},
-        80,
-        24,
-      );
+      createTestShell(manager, owner);
 
       const shutdown = manager.disposeAll();
 

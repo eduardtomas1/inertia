@@ -5,8 +5,9 @@ import { join } from "node:path";
 import {
   createAppFixture,
   type AppFixture,
-  type RuntimeTestSnapshot,
 } from "./support/app-fixture";
+import { installRuntimeRecoveryConsent } from
+  "./support/runtime-crash-safety";
 
 let app!: AppFixture;
 let electronApp!: AppFixture["electronApp"];
@@ -16,7 +17,6 @@ let attachmentImagePath!: AppFixture["attachmentImagePath"];
 let attachmentDocumentPath!: AppFixture["attachmentDocumentPath"];
 let malformedAttachmentPath!: AppFixture["malformedAttachmentPath"];
 let rendererErrors!: AppFixture["rendererErrors"];
-let runtimeSnapshot!: AppFixture["runtimeSnapshot"];
 let resizeWindow!: AppFixture["resizeWindow"];
 
 async function expectImagePreviewSettled(image: Locator): Promise<void> {
@@ -61,7 +61,6 @@ test.beforeAll(async () => {
   attachmentDocumentPath = app.attachmentDocumentPath;
   malformedAttachmentPath = app.malformedAttachmentPath;
   rendererErrors = app.rendererErrors;
-  runtimeSnapshot = app.runtimeSnapshot;
   resizeWindow = app.resizeWindow;
 });
 
@@ -70,6 +69,11 @@ test.afterAll(async () => {
 });
 
 test("previews, validates, removes, and cleans up secure composer attachments", async ({ browserName: _browserName }, testInfo) => {
+  // The deliberate macOS crash can consume the complete bounded 20-second
+  // recovery path before this long attachment journey performs its final
+  // restart assertions. Keep the inner recovery bound authoritative while
+  // leaving enough outer headroom for the remaining real desktop checks.
+  test.setTimeout(75_000);
   await resizeWindow(1440, 920);
   await electronApp.evaluate(({ dialog }, paths) => {
     Reflect.set(dialog, "showOpenDialog", async () => ({
@@ -351,20 +355,42 @@ test("previews, validates, removes, and cleans up secure composer attachments", 
   await expect.poll(async () => stat(unsentTempPath).then(() => true, () => false)).toBe(false);
   await page.getByRole("button", { name: "Go to workspace" }).click();
 
-  const beforeReconnect = await runtimeSnapshot();
-  await electronApp.evaluate(() => {
-    const runtime = Reflect.get(
-      globalThis,
-      "__inertiaTestRuntime",
-    ) as { crash: () => RuntimeTestSnapshot } | undefined;
-    if (!runtime) throw new Error("The test runtime supervisor is unavailable");
-    runtime.crash();
-  });
-  await expect.poll(async () => {
-    const current = await runtimeSnapshot();
-    return current.phase === "ready"
-      && current.generation > beforeReconnect.generation;
-  }, { timeout: 10_000 }).toBe(true);
+  const shell = page.locator(".app-shell");
+  const beforeRuntimeGeneration = await shell.getAttribute(
+    "data-runtime-generation",
+  );
+  expect(beforeRuntimeGeneration).toMatch(/^[0-9a-f-]{36}$/iu);
+  const restoreRuntimeRecoveryConsent = await installRuntimeRecoveryConsent(
+    electronApp,
+  );
+  let recoveryOperationError: unknown = null;
+  try {
+    await electronApp.evaluate(() => {
+      const runtime = Reflect.get(
+        globalThis,
+        "__inertiaTestRuntime",
+      ) as { crash: () => unknown } | undefined;
+      if (!runtime) {
+        throw new Error("The test runtime supervisor is unavailable");
+      }
+      runtime.crash();
+    });
+    await expect.poll(async () => {
+      const [connectionStatus, runtimeGeneration] = await Promise.all([
+        shell.getAttribute("data-connection-status", { timeout: 500 })
+          .catch(() => null),
+        shell.getAttribute("data-runtime-generation", { timeout: 500 })
+          .catch(() => null),
+      ]);
+      return connectionStatus === "online"
+        && runtimeGeneration !== null
+        && runtimeGeneration !== beforeRuntimeGeneration;
+    }, { timeout: 20_000 }).toBe(true);
+  } catch (error) {
+    recoveryOperationError = error;
+  }
+  await restoreRuntimeRecoveryConsent();
+  if (recoveryOperationError) throw recoveryOperationError;
   await expect(sentAttachments).toBeVisible();
   await expect.poll(() => sentPreview.evaluate((element) => {
     const image = element as HTMLImageElement;

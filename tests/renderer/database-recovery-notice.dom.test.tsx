@@ -30,6 +30,9 @@ describe("DatabaseRecoveryNotice", () => {
     expect(screen.getByText(/No valid backup was available/u)).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: /Import recovery file/u }));
     await waitFor(() => expect(onImportRecovery).toHaveBeenCalledOnce());
+    await waitFor(() => expect(
+      screen.getByRole("button", { name: /Import recovery file/u }),
+    ).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: /Copy report/u }));
     await waitFor(() => expect(onCopyReport).toHaveBeenCalledOnce());
     fireEvent.click(screen.getByRole("button", {

@@ -95,7 +95,9 @@ export function WorkspaceHeader({
   const pendingPrivateConnectPairing = privateConnect?.pendingPairings[0] ?? null;
   useNativePreviewSuspension(menu !== null);
   const headerActionsRef = useRef<HTMLDivElement>(null);
-  const title = view === "settings"
+  const title = view === "home"
+    ? "Inertia"
+    : view === "settings"
     ? "Settings"
     : view === "usage"
       ? "Usage"

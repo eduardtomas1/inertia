@@ -122,6 +122,7 @@ function renderSidebar(
   const onSnoozeConversation = vi.fn();
   const onOpenDailyWork = vi.fn();
   const onClose = vi.fn();
+  const onViewChange = vi.fn();
   const sidebarProps = {
     connectionStatus: "online" as const,
     view: "workspace" as const,
@@ -129,7 +130,7 @@ function renderSidebar(
     busy: false,
     layoutWidth: 276,
     onClose,
-    onViewChange: vi.fn(),
+    onViewChange,
     onImportProject: vi.fn(),
     onSelectProject: vi.fn(),
     onSelectConversation,
@@ -174,6 +175,7 @@ function renderSidebar(
     onSnoozeConversation,
     onOpenDailyWork,
     onClose,
+    onViewChange,
     rerenderSnapshot(nextSnapshot: AppSnapshot) {
       view.rerender(<Sidebar snapshot={nextSnapshot} {...sidebarProps} />);
     },
@@ -188,6 +190,15 @@ afterEach(() => {
 });
 
 describe("compact Work sidebar", () => {
+  it("opens the global project launcher from the Inertia logo", () => {
+    const view = renderSidebar([]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Go to home" }));
+
+    expect(view.onViewChange).toHaveBeenCalledWith("home");
+    expect(view.onClose).toHaveBeenCalledOnce();
+  });
+
   it("does not reshuffle working rows when providers publish activity updates", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 7, 11, 12));

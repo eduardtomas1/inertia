@@ -28,6 +28,7 @@ import type { CommandWithoutId } from "../lib/runtimeCommands";
 import { rootGitMutationScope } from "../utils/workspaceGit";
 import { AppNavigationOverlays } from "./AppNavigationOverlays";
 import { AppStatusOverlays } from "./AppStatusOverlays";
+import { HomeView } from "./HomeView";
 import type { CommitDialogProps } from "./CommitDialog";
 import { PaneResizeHandle } from "./PaneResizeHandle";
 import { LoadingMark } from "./ui";
@@ -624,13 +625,23 @@ export function AppLayout({
             ref={workspaceBodyRef}
             id="workspace-content"
             className={`workspace-body${
-              !splitConversationId && toolsVisible ? " has-tools" : ""
-            }${!splitConversationId && stackedTools
+              view === "workspace" && !splitConversationId && toolsVisible
+                ? " has-tools"
+                : ""
+            }${view === "workspace" && !splitConversationId && stackedTools
               ? " is-tools-stacked"
               : ""}`}
             style={workspaceBodyStyle}
           >
-            {view === "usage" ? (
+            {view === "home" ? (
+              <HomeView
+                projects={connection.snapshot?.projects ?? []}
+                connectionStatus={connection.status}
+                importingProject={busyAction === "project.create"}
+                onCreateConversation={actions.createConversation}
+                onImportProject={() => void actions.importProject()}
+              />
+            ) : view === "usage" ? (
               <Suspense fallback={(
                 <div className="workspace-tool-loading usage-surface-loading">
                   <LoadingMark label="Loading usage" />

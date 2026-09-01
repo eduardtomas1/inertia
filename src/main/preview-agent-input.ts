@@ -2,7 +2,7 @@ import type { WebContents } from "electron";
 
 import type { PreviewAgentInputRefusal } from "../shared/preview-agent-privacy-guard.js";
 import { previewNavigationTarget } from "../shared/preview-url.js";
-import { AGENT_BROWSER_WORLD_ID, agentPageActivationBlocked, locateAgentPageRef, type PreviewAgentTarget, waitForAgentPageHover } from "./preview-agent-page.js";
+import { AGENT_BROWSER_WORLD_ID, agentPageActivationBlocked, agentPageActivationTargetStillFocused, agentPageInputRefusal, locateAgentPageRef, type PreviewAgentTarget, waitForAgentPageHover } from "./preview-agent-page.js";
 import { agentPageHasUnguardedNestedContent as hasUnguardedNestedContent, installAgentFileChooserBlock } from "./preview-agent-boundary.js";
 
 export {
@@ -101,6 +101,75 @@ async function dispatchAgentPageHover(
       finish(error instanceof Error ? error : new Error("The Browser hover failed."));
     }
   });
+}
+
+/**
+ * Input injection is asynchronous: `sendInputEvent` returning only confirms
+ * that main queued it, not that the renderer ran page key handlers. Electron's
+ * `input-event` is not a reliable acknowledgement for synthetic delivery on
+ * every supported platform, so cross a renderer animation-frame boundary
+ * before deciding whether it is safe to send
+ * char/keyup. That makes the phase boundary authoritative in main rather than
+ * depending on listener ordering between the page and isolated worlds.
+ */
+export async function dispatchAgentPageKeyDownAndSettle(
+  contents: WebContents,
+  keyCode: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  stopForAbort(signal);
+  if (contents.isDestroyed()) {
+    throw new Error("The active Browser tab closed before key delivery.");
+  }
+  try {
+    contents.sendInputEvent({ type: "keyDown", keyCode });
+  } catch (error) {
+    throw error instanceof Error ? error : new Error("The Browser key delivery failed.");
+  }
+  stopForAbort(signal);
+  await waitForAgentPageHover(contents);
+  stopForAbort(signal);
+}
+
+/**
+ * Execute the security-critical half of an activation key in the Browser
+ * input layer. The caller supplies its bounded renderer-operation wrapper;
+ * this module owns the phase order and fails closed if focus changes.
+ */
+export async function deliverAgentPageActivation(
+  contents: WebContents,
+  key: "Enter" | "Space",
+  rendererOperation: <Result>(operation: () => Promise<Result>) => Promise<Result>,
+  signal?: AbortSignal,
+): Promise<PreviewAgentInputRefusal | null> {
+  const initial = await rendererOperation(() => agentPageActivationBlock(contents));
+  if (initial) return initial;
+  const keyCode = key === "Space" ? " " : key;
+  await dispatchAgentPageKeyDownAndSettle(contents, keyCode, signal);
+  const guardRefusal = await rendererOperation(() => agentPageInputRefusal(contents));
+  const targetStillFocused = await rendererOperation(
+    () => agentPageActivationTargetStillFocused(contents),
+  );
+  const postKeydownBlocked = await rendererOperation(
+    () => agentPageActivationBlock(contents),
+  );
+  const refusal = guardRefusal ?? postKeydownBlocked
+    ?? (targetStillFocused ? null : "retargeted");
+  if (refusal) return refusal;
+  contents.sendInputEvent({ type: "char", keyCode: key === "Enter" ? "\r" : " " });
+  contents.sendInputEvent({ type: "keyUp", keyCode });
+  return null;
+}
+
+export function agentPageActivationFailureMessage(
+  refusal: PreviewAgentInputRefusal,
+): string {
+  if (refusal === "file") return "File inputs cannot be activated by the Browser agent.";
+  if (refusal === "disabled") return "The focused page element is disabled.";
+  if (refusal === "retargeted") {
+    return "The focused page element changed during activation. Inspect the page again for current refs.";
+  }
+  return "Activation keys are unavailable for nested page content.";
 }
 
 export async function hoverAgentPageRef(

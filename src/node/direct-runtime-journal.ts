@@ -5,11 +5,13 @@ import {
   fstatSync,
   fsyncSync,
   lstatSync,
+  mkdirSync,
   openSync,
   opendirSync,
   readSync,
   realpathSync,
   renameSync,
+  rmdirSync,
   type BigIntStats,
   unlinkSync,
   writeFileSync,
@@ -125,6 +127,141 @@ export function directRuntimeJournalRootIsPinned(
   if (!info || !directRuntimeJournalIdentityMatches(root, info)) return false;
   try {
     return samePath(realpathSync(root.path), root.path);
+  } catch {
+    return false;
+  }
+}
+
+export function pinDirectRuntimeJournalChildRoot(
+  parent: DirectRuntimeJournalRoot,
+  name: string,
+): DirectRuntimeJournalRoot | null {
+  if (!directRuntimeJournalRootIsPinned(parent)) return null;
+  const path = leafPath(parent, name);
+  const info = directoryInfo(path);
+  if (!info) return null;
+  try {
+    return samePath(realpathSync(path), path)
+      && directRuntimeJournalRootIsPinned(parent)
+      ? { path, device: info.dev, inode: info.ino }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export function createDirectRuntimeJournalChildRoot(
+  parent: DirectRuntimeJournalRoot,
+  name: string,
+): DirectRuntimeJournalRoot | null {
+  if (!directRuntimeJournalRootIsPinned(parent)) return null;
+  const path = leafPath(parent, name);
+  try {
+    mkdirSync(path, { mode: 0o700 });
+    if (!fsyncRoot(parent)) return null;
+  } catch (error) {
+    if (
+      !error
+      || typeof error !== "object"
+      || !("code" in error)
+      || error.code !== "EEXIST"
+    ) return null;
+  }
+  return pinDirectRuntimeJournalChildRoot(parent, name);
+}
+
+export function renameDirectRuntimeJournalChildRoot(
+  parent: DirectRuntimeJournalRoot,
+  sourceName: string,
+  targetName: string,
+  identity: DirectRuntimeJournalIdentity,
+  hooks?: DirectRuntimeJournalTestHooks,
+): DirectRuntimeJournalRoot | null {
+  const sourcePath = leafPath(parent, sourceName);
+  const targetPath = leafPath(parent, targetName);
+  try {
+    const source = directoryInfo(sourcePath);
+    if (
+      !source
+      || !directRuntimeJournalIdentityMatches(identity, source)
+      || !directRuntimeJournalRootIsPinned(parent)
+    ) return null;
+    try {
+      lstatSync(targetPath);
+      return null;
+    } catch (error) {
+      if (
+        !error
+        || typeof error !== "object"
+        || !("code" in error)
+        || error.code !== "ENOENT"
+      ) return null;
+    }
+    hooks?.beforeRename?.(sourcePath, targetPath);
+    const confirmed = directoryInfo(sourcePath);
+    if (
+      !confirmed
+      || !directRuntimeJournalIdentityMatches(identity, confirmed)
+      || !directRuntimeJournalRootIsPinned(parent)
+    ) return null;
+    renameSync(sourcePath, targetPath);
+    hooks?.afterRename?.(sourcePath, targetPath);
+    const target = directoryInfo(targetPath);
+    if (
+      !target
+      || !directRuntimeJournalIdentityMatches(identity, target)
+      || !fsyncRoot(parent)
+    ) return null;
+    return { path: targetPath, device: target.dev, inode: target.ino };
+  } catch {
+    return null;
+  }
+}
+
+export function removeDirectRuntimeJournalChildRoot(
+  parent: DirectRuntimeJournalRoot,
+  name: string,
+  identity: DirectRuntimeJournalIdentity,
+): boolean {
+  const path = leafPath(parent, name);
+  try {
+    const current = directoryInfo(path);
+    if (
+      !current
+      || !directRuntimeJournalIdentityMatches(identity, current)
+      || !directRuntimeJournalRootIsPinned(parent)
+    ) return false;
+    const directory = opendirSync(path);
+    try {
+      if (directory.readSync() !== null) return false;
+    } finally {
+      directory.closeSync();
+    }
+    const confirmed = directoryInfo(path);
+    if (
+      !confirmed
+      || !directRuntimeJournalIdentityMatches(identity, confirmed)
+      || !directRuntimeJournalRootIsPinned(parent)
+    ) return false;
+    rmdirSync(path);
+    return fsyncRoot(parent);
+  } catch {
+    return false;
+  }
+}
+
+export function directRuntimeJournalRootIsEmpty(
+  root: DirectRuntimeJournalRoot,
+): boolean {
+  if (!directRuntimeJournalRootIsPinned(root)) return false;
+  try {
+    const directory = opendirSync(root.path);
+    try {
+      if (directory.readSync() !== null) return false;
+    } finally {
+      directory.closeSync();
+    }
+    return directRuntimeJournalRootIsPinned(root);
   } catch {
     return false;
   }
@@ -343,6 +480,75 @@ export function writeDirectRuntimeJournalLeaf(
       || !fsyncRoot(root)
     ) return false;
     return true;
+  } catch {
+    return false;
+  } finally {
+    if (handle !== null) {
+      try { closeSync(handle); } catch { /* The write already failed closed. */ }
+    }
+  }
+}
+
+/**
+ * Publishes a leaf whose exclusive temporary file lives inside a separately
+ * pinned session directory. Renaming that directory makes every delayed
+ * publisher's source path disappear atomically before retirement scans the
+ * canonical journal root.
+ */
+export function writeDirectRuntimeJournalLeafFromRoot(
+  temporaryRoot: DirectRuntimeJournalRoot,
+  temporaryName: string,
+  targetRoot: DirectRuntimeJournalRoot,
+  targetName: string,
+  bytes: Buffer,
+  hooks?: DirectRuntimeJournalTestHooks,
+): boolean {
+  if (
+    bytes.byteLength < 1
+    || temporaryRoot.device !== targetRoot.device
+    || !directRuntimeJournalRootIsPinned(temporaryRoot)
+    || !directRuntimeJournalRootIsPinned(targetRoot)
+  ) return false;
+  const temporaryPath = leafPath(temporaryRoot, temporaryName);
+  const targetPath = leafPath(targetRoot, targetName);
+  let handle: number | null = null;
+  let identity: DirectRuntimeJournalIdentity | null = null;
+  try {
+    const flags = fsConstants.O_WRONLY
+      | fsConstants.O_CREAT
+      | fsConstants.O_EXCL
+      | (process.platform === "win32" ? 0 : fsConstants.O_NOFOLLOW);
+    handle = openSync(temporaryPath, flags, 0o600);
+    if (process.platform !== "win32") fchmodSync(handle, 0o600);
+    writeFileSync(handle, bytes);
+    fsyncSync(handle);
+    const opened = fstatSync(handle, { bigint: true });
+    identity = { device: opened.dev, inode: opened.ino };
+    closeSync(handle);
+    handle = null;
+    if (!fsyncRoot(temporaryRoot)) return false;
+    hooks?.afterTemporaryFileClosed?.(temporaryPath);
+    const named = leafInfo(temporaryPath);
+    if (
+      !named
+      || !directRuntimeJournalIdentityMatches(identity, named)
+      || !directRuntimeJournalRootIsPinned(temporaryRoot)
+      || !directRuntimeJournalRootIsPinned(targetRoot)
+    ) return false;
+    hooks?.beforeRename?.(temporaryPath, targetPath);
+    const confirmed = leafInfo(temporaryPath);
+    if (
+      !confirmed
+      || !directRuntimeJournalIdentityMatches(identity, confirmed)
+      || !directRuntimeJournalRootIsPinned(temporaryRoot)
+      || !directRuntimeJournalRootIsPinned(targetRoot)
+    ) return false;
+    renameSync(temporaryPath, targetPath);
+    hooks?.afterRename?.(temporaryPath, targetPath);
+    const committed = leafInfo(targetPath);
+    return !!committed
+      && directRuntimeJournalIdentityMatches(identity, committed)
+      && fsyncRoot(targetRoot);
   } catch {
     return false;
   } finally {

@@ -27,7 +27,11 @@ describe("runtime supervisor startup recovery", () => {
       .publish(priorGeneration, bootId)).toBe(true);
     const journal = new RuntimeOwnedProcessJournal(dataDirectory);
     expect(journal.startSession(priorGeneration, bootId)).toBe(true);
-    journal.begin(priorGeneration, bootId);
+    journal.begin(
+      priorGeneration,
+      bootId,
+      journal.sessionCapability(priorGeneration, bootId)!,
+    );
     const spawn = vi.fn(() => new EventEmitter() as never);
     const supervisor = new RuntimeSupervisor({
       systemBootId: bootId,

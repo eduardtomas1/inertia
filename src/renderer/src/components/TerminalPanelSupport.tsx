@@ -54,6 +54,7 @@ export function providerTerminalExitPresentation(
 export const MAX_PERSISTED_TERMINAL_TABS = 4;
 export const TERMINAL_CREATE_RETRY_DELAYS_MS = [400, 900] as const;
 export const TERMINAL_SETTLING_RETRY_DELAYS_MS = [400, 900, 900] as const;
+export const TERMINAL_CLOSE_FAILURE_MESSAGE = "Terminal did not stop";
 
 type CommandWithoutId = ClientCommand extends infer Command
   ? Command extends { requestId: string }
@@ -65,6 +66,28 @@ export const command = (value: CommandWithoutId): ClientCommand => ({
   ...value,
   requestId: crypto.randomUUID(),
 }) as ClientCommand;
+
+export const terminalCloseCommand = (terminalId: string): ClientCommand => command({
+  type: "terminal.close",
+  payload: { terminalId },
+});
+
+export const terminalDetachCommand = (terminalId: string): ClientCommand => command({
+  type: "terminal.detach",
+  payload: { terminalId },
+});
+
+export const terminalResizeCommand = (
+  terminalId: string,
+  size: { cols: number; rows: number },
+): ClientCommand => command({
+  type: "terminal.resize",
+  payload: { terminalId, ...size },
+});
+
+export const ignoreCommandFailure = (result: Promise<ServerEvent>): void => {
+  void result.catch(() => undefined);
+};
 
 const MAX_TERMINAL_STORAGE_LENGTH = 4_096;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -123,6 +146,16 @@ export function nextTerminalTabIndex(tabs: readonly TerminalTab[]): number {
   let index = 0;
   while (used.has(index)) index += 1;
   return index;
+}
+
+export function appendTerminalTab(
+  tabs: TerminalTab[],
+  activate: (id: string) => void,
+): TerminalTab[] {
+  if (tabs.length >= MAX_PERSISTED_TERMINAL_TABS) return tabs;
+  const tab = newTerminalTab(nextTerminalTabIndex(tabs));
+  window.queueMicrotask(() => activate(tab.id));
+  return [...tabs, tab];
 }
 
 export function replaceTerminalTabWithoutHiding(
@@ -191,10 +224,7 @@ export function useTerminalTabsLifecycle(
   useEffect(() => () => {
     for (const { terminalId } of tabsRef.current) {
       if (!terminalId) continue;
-      void sendCommand(command({
-        type: "terminal.detach",
-        payload: { terminalId },
-      })).catch(() => undefined);
+      ignoreCommandFailure(sendCommand(terminalDetachCommand(terminalId)));
     }
   }, [sendCommand, storageKey]);
   return tabsRef;

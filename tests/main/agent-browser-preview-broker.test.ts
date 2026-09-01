@@ -235,6 +235,7 @@ vi.mock("electron", () => {
 const pageTools = vi.hoisted(() => ({
   AGENT_BROWSER_WORLD_ID: 999,
   agentPageActivationBlocked: vi.fn<() => Promise<"disabled" | "file" | null>>(async () => null),
+  agentPageActivationTargetStillFocused: vi.fn<() => Promise<boolean>>(async () => true),
   agentPageHasSensitiveEvidence: vi.fn(async () => false),
   agentPageHasSensitiveScreenshotEvidence: vi.fn(async () => false),
   agentPageInputRefusal: vi.fn<() => Promise<"disabled" | "file" | "nested" | "retargeted" | null>>(async () => null),
@@ -671,6 +672,34 @@ describe("agent-owned native Browser", () => {
         code: "invalid",
         message: "The focused page element is disabled.",
       });
+  });
+
+  it("stops an activation after keydown retargets its focused control", async () => {
+    const contentsOffset = electronState.contents.length;
+    const { broker } = harness();
+    await broker.navigate({
+      ownerId: "primary",
+      contextId: conversationId,
+      url: "http://127.0.0.1:3000/",
+    });
+    const contents = electronState.contents[contentsOffset]!;
+    pageTools.agentPageActivationTargetStillFocused.mockResolvedValueOnce(false);
+
+    await expect(broker.perform(conversationId, { action: "press", key: "Enter" }))
+      .resolves.toMatchObject({
+        ok: false,
+        code: "invalid",
+        message: "The focused page element changed during activation. Inspect the page again for current refs.",
+      });
+    expect(contents.sentInputs).toEqual([{ type: "keyDown", keyCode: "Enter" }]);
+    await expect(broker.perform(conversationId, { action: "press", key: "Enter" }))
+      .resolves.toMatchObject({ ok: true });
+    expect(contents.sentInputs).toEqual([
+      { type: "keyDown", keyCode: "Enter" },
+      { type: "keyDown", keyCode: "Enter" },
+      { type: "char", keyCode: "\r" },
+      { type: "keyUp", keyCode: "Enter" },
+    ]);
   });
 
   it("preserves a preload refusal while the rejected document navigates away", async () => {

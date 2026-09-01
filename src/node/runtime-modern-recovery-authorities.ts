@@ -472,7 +472,7 @@ export function modernDarwinRecoverySnapshotRootsAbsent(
     (observation.platform ?? process.platform) !== "darwin"
     || !isAbsolute(observation.guardianPath)
   ) return false;
-  const deadlineAt = observation.deadlineAt ?? Date.now() + 2_000;
+  const deadlineAt = observation.deadlineAt ?? Date.now() + 2_250;
   const readIdentity = observation.readDarwinIdentity
     ?? ((pid: number) => readDarwinProcessIdentity(
       pid,
@@ -492,7 +492,26 @@ export function modernDarwinRecoverySnapshotRootsAbsent(
           continue;
         }
         const expected = record.process as unknown as DarwinProcessIdentity;
-        const observed = readIdentity(expected.pid);
+        // ESRCH proves that no process currently occupies the recorded PID,
+        // so the exact old identity cannot still be live. Avoid spawning the
+        // native identity helper in that authoritative absence case: on a
+        // loaded macOS host an unnecessary synchronous helper can consume the
+        // complete recovery deadline while the crashed runtime is reaped.
+        // When any process does occupy the PID, retain the identity probe so
+        // an exact old root remains locked and PID reuse remains distinguishable.
+        if (!pidExists(expected.pid)) continue;
+        let observed: DarwinProcessIdentity | null;
+        try {
+          observed = readIdentity(expected.pid);
+        } catch {
+          // The native helper is a bounded child process and can be briefly
+          // unreadable while a loaded host is reaping the crashed runtime.
+          // Retry that transport failure exactly once. A readable null,
+          // changed identity, or exact live identity is authoritative and is
+          // never retried.
+          if (Date.now() >= deadlineAt) return false;
+          observed = readIdentity(expected.pid);
+        }
         if (observed && JSON.stringify(observed) === JSON.stringify(expected)) {
           return false;
         }
@@ -549,54 +568,84 @@ function clearRetiringSnapshot(
     const currentLease = leases.all().find(({ runtimeGenerationId }) => (
       runtimeGenerationId === generation.lease.runtimeGenerationId
     ));
-    const currentRecords = owned.records(generation.lease.runtimeGenerationId);
-    if (!currentLease) {
-      if (currentRecords !== null) return false;
-      continue;
-    }
-    if (JSON.stringify(currentLease) !== JSON.stringify(generation.lease)) {
+    if (
+      currentLease
+      && JSON.stringify(currentLease) !== JSON.stringify(generation.lease)
+    ) {
       return false;
     }
-    // Retirement is deliberately ordered records -> session -> lease. A crash
-    // after finishSession() can therefore leave the exact lease behind with no
-    // session leaf. The durable retire authority proves that the database
-    // transition was already acknowledged, so this one exact partial state is
-    // safe to resume by clearing only the snapshot-bound lease.
-    if (!currentRecords) {
-      if (!leases.clearRuntimeGeneration(generation.lease.runtimeGenerationId)) {
-        return false;
-      }
-      continue;
-    }
+    const expectedSession = {
+      version: 1 as const,
+      runtimeGenerationId: generation.lease.runtimeGenerationId,
+      systemBootId: generation.lease.systemBootId,
+    };
+    const session = owned.sessionExact(generation.lease.runtimeGenerationId);
+    if (
+      session === undefined
+      || (session && JSON.stringify(session) !== JSON.stringify(expectedSession))
+      || (session && !owned.fenceSessionExact(expectedSession))
+    ) return false;
+    const inspection = owned.inspectGeneration(
+      generation.lease.runtimeGenerationId,
+    );
+    if (!inspection || inspection.containment !== null) return false;
+    if (
+      inspection.session
+      && inspection.session.systemBootId !== generation.lease.systemBootId
+    ) return false;
+    if (
+      !inspection.session
+      && (inspection.records.length > 0
+        || inspection.consumingRecords.length > 0)
+    ) return false;
+    if (inspection.session && inspection.sessionState !== "retiring") return false;
     const expectedRecords = new Map(generation.records.map((record) => [
       String(record.ownershipId),
       JSON.stringify(record),
     ]));
-    const normalized = currentRecords.map((record) => normalizeRecord(
+    const inspectedRecords = [
+      ...inspection.records,
+      ...inspection.consumingRecords,
+    ];
+    const normalized = inspectedRecords.map((record) => normalizeRecord(
       record,
       generation.lease.runtimeGenerationId,
       generation.lease.systemBootId,
     ));
     if (normalized.some((record) => record === null)) return false;
+    const observedOwnershipIds = new Set<string>();
     for (const record of normalized as Readonly<Record<string, unknown>>[]) {
-      if (expectedRecords.get(String(record.ownershipId))
-        !== JSON.stringify(record)) return false;
+      const ownershipId = String(record.ownershipId);
+      if (
+        observedOwnershipIds.has(ownershipId)
+        || expectedRecords.get(ownershipId) !== JSON.stringify(record)
+      ) return false;
+      observedOwnershipIds.add(ownershipId);
     }
-    for (const record of normalized as Readonly<Record<string, unknown>>[]) {
-      if (!owned.release(String(record.ownershipId))) return false;
+    for (const record of inspection.records) {
+      if (!owned.releaseExact(record)) return false;
+    }
+    for (const record of inspection.consumingRecords) {
+      if (!owned.releaseConsumingExact(record)) return false;
     }
     if (
-      !owned.finishSession(generation.lease.runtimeGenerationId)
-      || !leases.clearRuntimeGeneration(generation.lease.runtimeGenerationId)
+      inspection.session
+      && !owned.finishSessionExact(inspection.session)
     ) return false;
+    if (currentLease && !leases.consumeExact(currentLease)) return false;
   }
   return authority.snapshot.generations.every(({ lease }) => {
     leases.refresh();
+    const inspection = owned.inspectGeneration(lease.runtimeGenerationId);
     return leases.isValid()
       && !leases.all().some(({ runtimeGenerationId }) => (
         runtimeGenerationId === lease.runtimeGenerationId
       ))
-      && owned.records(lease.runtimeGenerationId) === null;
+      && inspection !== null
+      && inspection.session === null
+      && inspection.records.length === 0
+      && inspection.consumingRecords.length === 0
+      && inspection.containment === null;
   });
 }
 
@@ -789,14 +838,30 @@ export class ModernDarwinRecoveryAuthorityJournal {
     }
     if (!clearRetiringSnapshot(dataDirectory, current.authority)) return false;
     const refreshed = this.stored("retiring");
-    return !!refreshed
-      && sameAuthority(refreshed.authority, current.authority)
+    if (
+      !refreshed
+      || !sameAuthority(refreshed.authority, current.authority)
+      || !clearRetiringSnapshot(dataDirectory, refreshed.authority)
+    ) return false;
+    const settled = this.stored("retiring");
+    return !!settled
+      && sameAuthority(settled.authority, refreshed.authority)
       && unlinkDirectRuntimeJournalLeaf(
         this.root,
         RETIRE_NAME,
-        refreshed.leaf.identity,
+        settled.leaf.identity,
         this.testHooks,
       );
+  }
+
+  settleRetirement(
+    dataDirectory: string,
+    expected?: ModernDarwinRecoveryAuthority,
+  ): boolean {
+    const current = this.stored("retiring");
+    return !!current
+      && (!expected || sameAuthority(current.authority, expected))
+      && clearRetiringSnapshot(dataDirectory, current.authority);
   }
 }
 

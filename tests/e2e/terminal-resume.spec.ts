@@ -22,7 +22,27 @@ if (process.argv[2] === "--help") {
   process.stdout.write("Usage: codex app-server [OPTIONS] - Run the app server\\n");
   process.exit(0);
 }
-setInterval(() => {}, 1000);
+const readline = require("node:readline");
+const send = (message) => process.stdout.write(JSON.stringify(message) + "\\n");
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize") {
+    send({ id: message.id, result: { userAgent: "terminal-resume-fixture" } });
+    return;
+  }
+  if (message.method === "initialized") return;
+  if (message.method === "model/list") {
+    send({ id: message.id, result: { data: [], nextCursor: null } });
+    return;
+  }
+  if (message.method === "account/rateLimits/read") {
+    send({ id: message.id, result: { rateLimits: null, rateLimitsByLimitId: null } });
+    return;
+  }
+  if (message.method === "thread/goal/get") {
+    send({ id: message.id, result: { goal: null } });
+  }
+});
 `;
 
 const codexResumeSource = `
@@ -158,13 +178,24 @@ test("resumes the selected provider session only in its owning split pane", asyn
     app.secondWorkspaceDirectory!,
     ".terminal-preserved-shell",
   );
+  const preservedShellReadyPath = join(
+    app.secondWorkspaceDirectory!,
+    ".terminal-preserved-shell-ready",
+  );
   if (process.platform === "darwin") {
     await expect(secondaryPanel).toHaveAttribute("data-terminal-state", "ready");
-    await secondaryPanel.locator(".xterm-helper-textarea").focus();
+    const terminalInput = secondaryPanel.locator(".xterm-helper-textarea");
+    await terminalInput.focus();
     await page.keyboard.insertText(
-      `export INERTIA_PRESERVED_SHELL=${preservedShellMarker}`,
+      [
+        `export INERTIA_PRESERVED_SHELL=${preservedShellMarker}`,
+        `printf ready > ${quotePosix(preservedShellReadyPath)}`,
+      ].join("; "),
     );
-    await page.keyboard.press("Enter");
+    await terminalInput.press("Enter");
+    await expect.poll(
+      () => readFile(preservedShellReadyPath, "utf8").catch(() => null),
+    ).toBe("ready");
   }
   await secondaryTools.getByRole("button", {
     name: "Resume Codex session in Companion",
@@ -186,11 +217,12 @@ test("resumes the selected provider session only in its owning split pane", asyn
       secondaryTerminalId!,
     );
     await expect(secondaryPanel).toHaveAttribute("data-terminal-state", "ready");
-    await secondaryPanel.locator(".xterm-helper-textarea").focus();
+    const terminalInput = secondaryPanel.locator(".xterm-helper-textarea");
+    await terminalInput.focus();
     await page.keyboard.insertText(
       `printf '%s' "$INERTIA_PRESERVED_SHELL" > ${quotePosix(preservedShellPath)}`,
     );
-    await page.keyboard.press("Enter");
+    await terminalInput.press("Enter");
     await expect.poll(
       () => readFile(preservedShellPath, "utf8").catch(() => null),
     ).toBe(preservedShellMarker);

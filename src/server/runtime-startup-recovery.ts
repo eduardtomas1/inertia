@@ -202,18 +202,19 @@ export function prepareRuntimeStartupRecovery(
     }
   }
 
+  const authorizedLegacyGenerationIds = new Set(manuallyRetiredGenerations);
+  const authorizedModernGenerationIds = new Set(
+    manualModernDarwinRecovery?.runtimeGenerationIds ?? [],
+  );
   const priorBootLeasesCleared = runtimeGenerationLeases.clearPriorBootSessions(
     options.systemBootId,
+    authorizedModernGenerationIds,
   );
   const retainedGenerationLeases = runtimeGenerationLeases.all();
   const currentGenerationOwner = (
     lease: typeof retainedGenerationLeases[number],
   ): boolean => lease.runtimeGenerationId === options.runtimeGenerationId
     && lease.systemBootId === options.systemBootId;
-  const authorizedLegacyGenerationIds = new Set(manuallyRetiredGenerations);
-  const authorizedModernGenerationIds = new Set(
-    manualModernDarwinRecovery?.runtimeGenerationIds ?? [],
-  );
   const runtimeSafetyLock = options.priorRuntimeCleanupUnconfirmed === true
     || !runtimeGenerationLeases.isValid()
     || !retainedGenerationLeases.some(currentGenerationOwner)

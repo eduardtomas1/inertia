@@ -127,22 +127,31 @@ async function closeChild(child: ChildProcessWithoutNullStreams): Promise<void> 
   await new Promise<void>((resolve) => child.once("close", () => resolve()));
 }
 
-async function windowsProcessCreationIdentity(pid: number): Promise<string> {
-  const trustedEnvironment = windowsRuntimeJobEnvironment(process.env);
-  const systemRoot = trustedEnvironment?.SystemRoot;
-  if (!trustedEnvironment || !systemRoot) {
-    throw new Error("Trusted Windows runtime environment is unavailable.");
-  }
-  const script = `$process = [Diagnostics.Process]::GetProcessById(${pid})
+function windowsProcessCreationIdentityScript(pid: number): string {
+  return `$process = [Diagnostics.Process]::GetProcessById(${pid})
 try {
-  $unixMicroseconds = [Math]::Floor(
-    ($process.StartTime.ToUniversalTime().Ticks - 621355968000000000) / 10
+  $startTimeUtc = $process.StartTime.ToUniversalTime()
+  $creationTicks = [Decimal]($startTimeUtc.Ticks)
+  $unixMicroseconds = [Decimal]::Floor(
+    [Decimal]::Divide(
+      [Decimal]::Subtract($creationTicks, [Decimal]621355968000000000),
+      [Decimal]10
+    )
   )
   $creationTimeMs = [double]$unixMicroseconds / 1000.0
   [Console]::Out.Write([BitConverter]::DoubleToInt64Bits($creationTimeMs))
 } finally {
   $process.Dispose()
 }`;
+}
+
+async function windowsProcessCreationIdentity(pid: number): Promise<string> {
+  const trustedEnvironment = windowsRuntimeJobEnvironment(process.env);
+  const systemRoot = trustedEnvironment?.SystemRoot;
+  if (!trustedEnvironment || !systemRoot) {
+    throw new Error("Trusted Windows runtime environment is unavailable.");
+  }
+  const script = windowsProcessCreationIdentityScript(pid);
   const child = spawn(win32.join(
     systemRoot,
     "System32",
@@ -246,6 +255,24 @@ describe("Windows runtime Job Object containment", () => {
         },
       ], 4_242)).toThrow("creation identity is invalid");
     }
+  });
+
+  it("keeps the real Windows identity oracle exact and PowerShell 5.1 compatible", () => {
+    const adversarialTickDelta = 176_000_000_000_000_010n;
+    const roundedThroughDouble = BigInt(Math.floor(
+      Number(adversarialTickDelta) / 10,
+    ));
+    expect(roundedThroughDouble).not.toBe(adversarialTickDelta / 10n);
+    expect(adversarialTickDelta / 10n).toBe(17_600_000_000_000_001n);
+
+    const script = windowsProcessCreationIdentityScript(4_242);
+    expect(script).toContain(
+      "$startTimeUtc = $process.StartTime.ToUniversalTime()",
+    );
+    expect(script).toContain("$creationTicks = [Decimal]($startTimeUtc.Ticks)");
+    expect(script).toContain("[Decimal]::Divide(");
+    expect(script).toContain("[Decimal]::Subtract(");
+    expect(script).not.toContain("ToUniversalTime().Ticks");
   });
 
   it("waits boundedly for Electron to publish the exact Utility metric", async () => {
@@ -507,12 +534,34 @@ describe("Windows runtime Job Object containment", () => {
       "Write-Frame '${EXECUTABLE_LOCK_BYE_MARKER}'",
     ));
     expect(launchSource).toContain("INERTIA_JOB_ERROR stage=verified-file-lock");
+    expect(launchSource).toContain(
+      "MAX_BROKER_BOOTSTRAP_SCRIPT_BYTES = 64 * 1024",
+    );
+    expect(launchSource).toContain(
+      "$utf8 = [Text.UTF8Encoding]::new($false, $true)",
+    );
+    expect(launchSource).toContain(
+      "[Convert]::ToBase64String($bytes) -cne $line",
+    );
+    expect(launchSource).toContain(
+      "encodedPowerShell(windowsRuntimeJobBootstrapScript())",
+    );
+    expect(launchSource).toContain(
+      "const bootstrapLine = encodedWindowsRuntimeJobLockScript(assembly)",
+    );
+    expect(launchSource).toContain("child.stdin.write(`${bootstrapLine}\\n`)");
+    expect(launchSource).not.toContain(
+      "encodedPowerShell(windowsRuntimeJobLockScript(assembly))",
+    );
     expect(launchSource).not.toContain("function Start-Helper");
     expect(launchSource).not.toContain("Diagnostics.ProcessStartInfo");
     expect(launchSource).not.toContain("[InertiaRuntimeJob]::");
     expect(launchSource).not.toContain("spawnWindowsRuntimeJobExecutable");
     expect(launchSource.indexOf("[IO.File]::Open("))
       .toBeLessThan(launchSource.indexOf("$sha256.ComputeHash($assemblyBytes)"));
+    expect(launchSource.indexOf(
+      "const bootstrapLine = encodedWindowsRuntimeJobLockScript(assembly)",
+    )).toBeLessThan(launchSource.indexOf("const child = spawn("));
     expect(launchSource.indexOf("$sha256.ComputeHash($assemblyBytes)"))
       .toBeLessThan(launchSource.indexOf("$loadedAssembly = [Reflection.Assembly]::Load($assemblyBytes)"));
     expect(launchSource.indexOf("$loadedAssembly = [Reflection.Assembly]::Load($assemblyBytes)"))

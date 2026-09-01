@@ -583,9 +583,12 @@ parentPort.on("message", (messageEvent) => {
       command.options.dataDirectory,
       command.options.runtimeGenerationId,
       command.options.systemBootId,
-      command.options.runtimeProcessGuardianPath
-        ? { darwinGuardianPath: command.options.runtimeProcessGuardianPath }
-        : {},
+      {
+        ...(command.options.runtimeProcessGuardianPath
+          ? { darwinGuardianPath: command.options.runtimeProcessGuardianPath }
+          : {}),
+        onTainted: () => { void shutdown(1); },
+      },
     );
   } catch (error) {
     starting = false;

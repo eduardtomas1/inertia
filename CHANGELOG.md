@@ -4,6 +4,18 @@ The useful changes in each Inertia release, in plain language.
 
 ## Next
 
+## 0.0.46 — 2026-09-01
+
+### Provider work recovers after ownership uncertainty
+
+- When owned-process containment or cleanup becomes unconfirmable, the first registry taint now stops the local runtime once so the supervisor can replace it. Later provider and terminal requests no longer remain permanently fail-closed inside a poisoned runtime.
+- Recovery is wired at the shared owned-process registry, so it covers Codex, Claude, Cursor, Kimi Code, and OpenCode as well as provider discovery, validation, metadata, maintenance, and run subprocesses. Non-run provider work receives the same recovery boundary as an active chat.
+- Admission remains fail-closed before restart notification. Repeated taint signals are idempotent, stale or deactivated registries cannot restart the current runtime, and a failing notification callback cannot reopen process admission.
+
+### Release confidence
+
+- Integration coverage taints a provider subprocess outside an active run and proves the runtime notification fires exactly once. Provider coverage, both lint layers, type safety, architecture and migration checks, and the complete Linux, macOS, and Windows pull-request matrix remain green at the exact merged fix head.
+
 ## 0.0.45 — 2026-08-30
 
 ### The Browser is ready when the chat is

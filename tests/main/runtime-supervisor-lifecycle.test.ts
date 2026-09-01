@@ -277,6 +277,29 @@ describe("RuntimeSupervisor lifecycle", () => {
     });
   });
 
+  it.each([
+    [
+      "owned-process-tainted",
+      "The runtime restarted because owned process containment could not be confirmed.",
+    ],
+    [
+      "owned-process-cleanup-unconfirmed",
+      "The runtime restarted because owned process cleanup could not be confirmed.",
+    ],
+  ] as const)("preserves the bounded %s restart reason", (reason, message) => {
+    const { children, supervisor } = createHarness();
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: runtimeUrl });
+    children[0].message({ type: "runtime.restart-requested", reason });
+    children[0].exit(1);
+
+    expect(supervisor.snapshot()).toMatchObject({
+      phase: "restarting",
+      lastError: message,
+    });
+  });
+
   it("does not start after shutdown closes an unused supervisor", async () => {
     const { children, forceKill, supervisor } = createHarness();
 

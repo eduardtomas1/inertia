@@ -22,6 +22,7 @@ import {
   runtimeOwnedProcessInvocation,
   spawnRuntimeOwnedProcess,
 } from "../../node/runtime-owned-processes";
+import { createOwnedProcessTreeTermination } from "../process-lifecycle";
 import { MAX_PATH_LENGTH } from "./constants";
 import {
   repositoryRoot,
@@ -276,15 +277,24 @@ async function verifyLinuxDirectoryBirthtime(
         stdio: ["ignore", "pipe", "ignore", fileDescriptor],
         windowsHide: true,
       }));
+      const terminateOwnedTree = createOwnedProcessTreeTermination(
+        child,
+        "Linux filesystem birth-time probe process tree",
+      );
+      let observeClose!: () => void;
+      const closeObserved = new Promise<void>((resolveClose) => {
+        observeClose = resolveClose;
+      });
       const chunks: Buffer[] = [];
       let bytes = 0;
       let failure: Error | null = null;
       const fail = (error: Error): void => {
         if (failure) return;
         failure = error;
-        if (child.exitCode === null && child.signalCode === null) {
-          child.kill("SIGTERM");
-        }
+        void Promise.all([terminateOwnedTree(true), closeObserved]).then(
+          () => rejectProbe(error),
+          (terminationError: unknown) => rejectProbe(terminationError),
+        );
       };
       const timer = setTimeout(() => {
         fail(new Error("linux-stat-timeout"));
@@ -305,10 +315,8 @@ async function verifyLinuxDirectoryBirthtime(
       child.once("close", (code, signal) => {
         clearTimeout(timer);
         dependencies.afterLinuxStatClose?.();
-        if (failure) {
-          rejectProbe(failure);
-          return;
-        }
+        observeClose();
+        if (failure) return;
         if (code !== 0 || signal !== null) {
           rejectProbe(new Error("linux-stat-failed"));
           return;

@@ -121,15 +121,6 @@ async function openExactJavaRange(opener: "code" | "link"): Promise<void> {
       : false;
   });
   expect(focusedGeometry).toBe(true);
-  await panel.getByRole("button", { name: "Show file explorer" }).click();
-  await expect(tree).toBeVisible();
-  await expect(panel.getByRole("treeitem", {
-    name: "OrderService.java",
-  })).toHaveAttribute("aria-selected", "true");
-  await expect(panel.getByRole("treeitem", { name: "src" }))
-    .toHaveAttribute("aria-expanded", "true");
-  await expect(panel.getByRole("treeitem", { name: "demo" }))
-    .toHaveAttribute("aria-expanded", "true");
   const firstReferencedLine = panel.locator('[data-source-line="41"]');
   await expect(firstReferencedLine).toHaveClass(/is-referenced/u);
   await expect(firstReferencedLine).toBeFocused();
@@ -137,6 +128,20 @@ async function openExactJavaRange(opener: "code" | "link"): Promise<void> {
     .toHaveCount(3);
   await expect(panel.locator(".file-preview-code .hljs-keyword").first())
     .toBeVisible();
+  const explorerToggle = panel.getByRole("button", {
+    name: "Show file explorer",
+  });
+  await explorerToggle.click();
+  await expect(tree).toBeVisible();
+  await expect(panel.getByRole("button", { name: "Hide file explorer" }))
+    .toBeFocused();
+  await expect(panel.getByRole("treeitem", {
+    name: "OrderService.java",
+  })).toHaveAttribute("aria-selected", "true");
+  await expect(panel.getByRole("treeitem", { name: "src" }))
+    .toHaveAttribute("aria-expanded", "true");
+  await expect(panel.getByRole("treeitem", { name: "demo" }))
+    .toHaveAttribute("aria-expanded", "true");
   expect(await panel.evaluate((element) => {
     const search = element.querySelector<HTMLElement>(".file-search-wrap")
       ?.getBoundingClientRect();

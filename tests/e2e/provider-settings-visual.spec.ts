@@ -72,7 +72,7 @@ test.afterAll(async () => {
   await app.close();
 });
 
-test("keeps provider settings coherent across details, themes, and widths", async (_fixtures, testInfo) => {
+test("keeps provider settings coherent across details, themes, and widths", async ({ browserName: _browserName }, testInfo) => {
   await app.resizeWindow(1440, 920);
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("radio", { name: "Light" }).click();

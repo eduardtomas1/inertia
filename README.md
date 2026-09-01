@@ -236,9 +236,9 @@ If something goes wrong, first refresh the affected provider in **Settings → P
 
 Report suspected vulnerabilities privately through the [security policy](SECURITY.md), never through a public issue.
 
-### Version 0.0.45
+### Version 0.0.46
 
-Inertia 0.0.45 makes the integrated Browser immediately usable from new and existing chats, composes reviewed Inertia-owned capabilities above every provider's native harness, fixes the Windows ARM64 installer path, and restores runtime work after an app or runtime crash without asking the user to reboot. Daily Work durations now exclude time while the computer is suspended, so sleep no longer inflates recorded work. Windows containment is bound to the exact native process creation identity, Linux guardian completion is authenticated, and macOS retries transient privileged process reads within a strict fail-closed bound.
+Inertia 0.0.46 prevents one unconfirmed provider subprocess cleanup from leaving every later provider or terminal request permanently fail-closed. The first owned-process registry taint now stops the local runtime exactly once and lets the supervisor replace it. Because recovery is owned by the shared registry, the same boundary covers Codex, Claude, Cursor, Kimi Code, and OpenCode, including discovery, validation, metadata, maintenance, and active-run subprocesses. Admission still fails closed before notification, stale registries cannot restart the current runtime, and callback failure cannot reopen process admission.
 
 Inertia now gives each chat a visible local Browser with bounded agent actions and an inspectable, fail-closed evidence timeline for screenshots, console failures, failed requests, navigation, and actions. The pre-merge confidence view collects exact-head CI, review freshness, affected areas, focused evidence, portability, bundle deltas, and release readiness without letting stale status look green.
 
@@ -250,7 +250,7 @@ Newly completed answers also retain their intended reading position across ordin
 
 Stable builds now cover six native architectures. Unsigned Windows and ad-hoc macOS packages remain manual downloads until signing credentials exist; Linux AppImages keep verified in-app delivery. The separately identified Canary prerelease channel can test and roll back Canary packages without changing Stable's feed or local state.
 
-Download [Inertia v0.0.45](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.45):
+Download [Inertia v0.0.46](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.46):
 
 | Platform | Architecture | Package | Update delivery after the first manual install |
 | --- | --- | --- | --- |

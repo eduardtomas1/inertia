@@ -44,14 +44,17 @@ describe("Codex App Server generated lifecycle surfaces", () => {
     expect(codexHookActivityPhase("hook/completed", "future-status")).toBe("failed");
   });
 
-  it("keeps an explicit disposition for every reviewed 0.149 notification", () => {
-    expect(Object.keys(CODEX_APP_SERVER_NOTIFICATION_DISPOSITIONS)).toHaveLength(77);
+  it("keeps an explicit disposition for every reviewed 0.152 notification", () => {
+    expect(Object.keys(CODEX_APP_SERVER_NOTIFICATION_DISPOSITIONS)).toHaveLength(83);
     expect(CODEX_APP_SERVER_NOTIFICATION_DISPOSITIONS).toMatchObject({
       "autoApprovalReview/strictReviewRequired": "projected",
       "hook/completed": "projected",
       "item/autoApprovalReview/completed": "projected",
       "item/plan/delta": "projected",
       "mcpServer/startupStatus/updated": "projected",
+      "mcpServer/event/stream/notification": "ignored",
+      "modelProvider/authRecoveryStarted": "projected",
+      "modelProvider/authRecoveryCompleted": "projected",
       "model/safetyBuffering/updated": "projected",
       "model/verification": "projected",
       "process/outputDelta": "ignored",
@@ -60,6 +63,9 @@ describe("Codex App Server generated lifecycle surfaces", () => {
       "thread/environment/connected": "projected",
       "thread/project/updated": "ignored",
       "thread/realtime/transcript/delta": "ignored",
+      "thread/realtime/item/started": "ignored",
+      "thread/realtime/item/transcript/delta": "ignored",
+      "thread/realtime/item/completed": "ignored",
       "thread/settings/updated": "projected",
       "turn/diff/updated": "projected",
       "windows/worldWritableWarning": "projected",

@@ -7031,6 +7031,7 @@ button.environment-row:focus-visible,
 }
 
 .changes-diff { container-type: inline-size; }
+.file-preview { container: file-preview / inline-size; }
 
 .diff-code,
 .file-preview-code {
@@ -7280,7 +7281,7 @@ button.environment-row:focus-visible,
   bottom: 0;
   z-index: 1;
 }
-.file-preview-header { display: flex; min-height: 39px; align-items: center; justify-content: space-between; gap: 6px 8px; padding: 5px 10px; border-bottom: 1px solid var(--border); }
+.file-preview-header { display: flex; min-width: 0; min-height: 39px; align-items: center; gap: 6px; padding: 5px 8px 5px 10px; border-bottom: 1px solid var(--border); }
 .file-explorer-toggle[aria-pressed="true"] {
   color: var(--accent-strong);
   background: var(--accent-soft);
@@ -7288,6 +7289,17 @@ button.environment-row:focus-visible,
 .file-preview-identity { display: flex; min-width: 0; flex: 1 1 120px; flex-direction: column; gap: 1px; }
 .file-preview-header strong { font-size: 9px; }
 .file-preview-header span { overflow: hidden; color: var(--text-muted); font-size: 7.5px; text-overflow: ellipsis; white-space: nowrap; }
+.file-preview-metadata,
+.file-preview-actions {
+  display: flex;
+  min-width: 0;
+  flex: 0 0 auto;
+  align-items: center;
+}
+.file-preview-metadata { gap: 5px; }
+.file-preview-actions { gap: 1px; margin-left: auto; }
+.file-preview-actions > .icon-button { width: 27px; height: 27px; }
+.file-preview-metadata .file-location { max-width: 92px; }
 .file-preview-view-toggle {
   display: flex;
   min-width: max-content;
@@ -7399,6 +7411,25 @@ button.environment-row:focus-visible,
   background: color-mix(in srgb, var(--file-language-accent, var(--text-muted)) 8%, var(--surface));
 }
 .file-location { color: var(--accent-strong) !important; }
+
+@container file-preview (max-width: 370px) {
+  .file-preview-header { gap: 4px; padding-inline: 8px 6px; }
+  .file-preview-identity > span { display: none; }
+  .file-preview-metadata .file-location { max-width: 72px; }
+  .file-preview-actions { gap: 0; }
+  .file-preview-actions > .icon-button { width: 25px; height: 25px; }
+  .file-preview-view-toggle button {
+    width: 25px;
+    min-height: 23px;
+    justify-content: center;
+    padding: 0;
+  }
+  .file-preview-view-toggle button span { display: none; }
+}
+
+@container file-preview (max-width: 275px) {
+  .file-preview-metadata { display: none; }
+}
 
 [data-language-family] { --file-language-accent: var(--text-muted); }
 [data-language-family="java"] { --file-language-accent: var(--language-java); }

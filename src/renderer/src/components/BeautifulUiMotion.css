@@ -419,16 +419,19 @@
 /* Shared by transcript and lazy file-preview Markdown; keep these styles deferred. */
 .response-markdown a.response-project-file-link {
   display: inline-flex;
-  height: 1.41em;
+  box-sizing: border-box;
+  height: 1.55em;
+  min-width: 0;
+  min-height: 18px;
   max-width: 100%;
   align-items: center;
-  gap: 0.33em;
-  padding: 0 0.5em;
-  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
-  border-radius: 0.5em;
+  gap: 0.36em;
+  padding: 0 0.48em;
+  border: 1px solid var(--code-border);
+  border-radius: var(--radius-small);
   color: var(--text);
-  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
-  font-size: 12px;
+  background: var(--inline-code-surface);
+  font-size: max(var(--ui-font-micro), 0.8em);
   font-weight: 560;
   line-height: 1;
   text-decoration: none;
@@ -440,7 +443,7 @@
 
 .response-markdown a.response-project-file-link:hover {
   border-color: color-mix(in srgb, var(--file-language-accent, var(--accent)) 30%, var(--border));
-  background: color-mix(in srgb, var(--accent) 16%, var(--surface));
+  background: var(--surface-hover);
   text-decoration: none;
 }
 
@@ -453,6 +456,8 @@
 
 .response-markdown a.response-project-file-link .response-project-file-icon {
   display: block;
+  width: 1em;
+  height: 1em;
   flex: 0 0 auto;
   margin: 0;
   color: var(--file-language-accent, var(--text-muted));
@@ -461,15 +466,13 @@
 }
 
 .response-markdown a.response-web-link {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 0.22em;
+  display: inline;
 }
 
 .response-markdown a.response-web-link svg {
-  display: block;
-  flex: 0 0 auto;
-  align-self: center;
-  margin: 0;
-  vertical-align: initial;
+  display: inline;
+  width: 0.9em;
+  height: 0.9em;
+  margin: 0 0.24em 0 0;
+  vertical-align: -0.1em;
 }

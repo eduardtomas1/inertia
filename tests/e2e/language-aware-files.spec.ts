@@ -147,18 +147,24 @@ async function openExactJavaRange(opener: "code" | "link"): Promise<void> {
     const previewHeader = element.querySelector<HTMLElement>(
       ".file-preview-header",
     )?.getBoundingClientRect();
-    return search && tree && preview && previewHeader
+    const previewHeaderElement = element.querySelector<HTMLElement>(
+      ".file-preview-header",
+    );
+    return search && tree && preview && previewHeader && previewHeaderElement
       ? {
           browserColumnAligns: Math.abs(search.left - tree.left) <= 1
             && Math.abs(search.right - tree.right) <= 1,
           columnsMeet: Math.abs(preview.right - tree.left) <= 1,
           localHeadersAlign: Math.abs(search.top - previewHeader.top) <= 1,
+          previewHeaderFits: previewHeaderElement.scrollWidth
+            <= previewHeaderElement.clientWidth + 1,
         }
       : null;
   })).toEqual({
     browserColumnAligns: true,
     columnsMeet: true,
     localHeadersAlign: true,
+    previewHeaderFits: true,
   });
 }
 
@@ -325,7 +331,10 @@ test("opens a language-aware project link at its exact validated Java range", as
     const line = element.querySelector<HTMLElement>(
       '[data-source-line="41"]',
     )?.getBoundingClientRect();
-    return tree && selected && preview && line
+    const previewHeader = element.querySelector<HTMLElement>(
+      ".file-preview-header",
+    );
+    return tree && selected && preview && line && previewHeader
       ? {
           previewInside: preview.left >= panelBounds.left - 1
             && preview.right <= panelBounds.right + 1,
@@ -333,6 +342,8 @@ test("opens a language-aware project link at its exact validated Java range", as
             && line.bottom <= preview.bottom + 1,
           selectedFileVisible: selected.top >= tree.top - 1
             && selected.bottom <= tree.bottom + 1,
+          previewHeaderFits: previewHeader.scrollWidth
+            <= previewHeader.clientWidth + 1,
         }
       : null;
   });
@@ -340,6 +351,7 @@ test("opens a language-aware project link at its exact validated Java range", as
     previewInside: true,
     lineVisible: true,
     selectedFileVisible: true,
+    previewHeaderFits: true,
   });
 
   const previewCode = narrowPanel.getByLabel(

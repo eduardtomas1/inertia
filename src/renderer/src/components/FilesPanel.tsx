@@ -1036,82 +1036,86 @@ export function FilesPanel({
                 : "Project files"}</strong>
               <span>{preview?.path ?? selectedPath ?? countLabel}</span>
             </div>
-            {previewLanguage && (
-              <span
-                className={FILE_LANGUAGE_CLASS}
-                data-language-family={previewLanguage.family}
-                title={`${previewLanguage.label} recognized locally`}
-              >
-                {previewLanguage.label}
-              </span>
-            )}
-            {selectedLocation && (
-              <span className="file-location">
-                {workspaceFileLocationLabel(selectedLocation)}
-              </span>
-            )}
-            {markdownPreview && preview && (
-              <div
-                className={`${FILE_PREVIEW_CLASS}-view-toggle`}
-                role="group"
-                aria-label="Markdown"
-              >
-                <button
-                  type="button"
-                  aria-pressed={renderedMarkdownPreview}
-                  disabled={markdownPreviewBlockedReason !== null}
-                  title={markdownPreviewBlockedReason ?? "Preview"}
-                  onClick={() => setPreviewViewState({
-                    identity: previewViewIdentity,
-                    view: "preview",
-                  })}
+            <div className={`${FILE_PREVIEW_CLASS}-metadata`}>
+              {previewLanguage && (
+                <span
+                  className={FILE_LANGUAGE_CLASS}
+                  data-language-family={previewLanguage.family}
+                  title={`${previewLanguage.label} recognized locally`}
                 >
-                  <Eye size={11} aria-hidden="true" />
-                  <span>Preview</span>
-                </button>
-                <button
-                  type="button"
-                  aria-pressed={!renderedMarkdownPreview}
-                  title="Source"
-                  onClick={() => setPreviewViewState({
-                    identity: previewViewIdentity,
-                    view: "source",
-                  })}
+                  {previewLanguage.label}
+                </span>
+              )}
+              {selectedLocation && (
+                <span className="file-location">
+                  {workspaceFileLocationLabel(selectedLocation)}
+                </span>
+              )}
+            </div>
+            <div className={`${FILE_PREVIEW_CLASS}-actions`}>
+              {markdownPreview && preview && (
+                <div
+                  className={`${FILE_PREVIEW_CLASS}-view-toggle`}
+                  role="group"
+                  aria-label="Markdown"
                 >
-                  <Code2 size={11} aria-hidden="true" />
-                  <span>Source</span>
-                </button>
-              </div>
-            )}
-            {preview && onSaveFile && (
+                  <button
+                    type="button"
+                    aria-pressed={renderedMarkdownPreview}
+                    disabled={markdownPreviewBlockedReason !== null}
+                    title={markdownPreviewBlockedReason ?? "Preview"}
+                    onClick={() => setPreviewViewState({
+                      identity: previewViewIdentity,
+                      view: "preview",
+                    })}
+                  >
+                    <Eye size={11} aria-hidden="true" />
+                    <span>Preview</span>
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={!renderedMarkdownPreview}
+                    title="Source"
+                    onClick={() => setPreviewViewState({
+                      identity: previewViewIdentity,
+                      view: "source",
+                    })}
+                  >
+                    <Code2 size={11} aria-hidden="true" />
+                    <span>Source</span>
+                  </button>
+                </div>
+              )}
+              {preview && onSaveFile && (
+                <IconButton
+                  label={previewEditable
+                    ? `Edit ${preview.path}`
+                    : `${preview.path} is too large to edit`}
+                  disabled={!previewEditable}
+                  onClick={() => setEditingFile(preview)}
+                >
+                  <Pencil size={14} />
+                </IconButton>
+              )}
+              {preview && onOpenFile && (
+                <IconButton
+                  label="Open file"
+                  onClick={() => onOpenFile(preview.path)}
+                >
+                  <ExternalLink size={14} />
+                </IconButton>
+              )}
               <IconButton
-                label={previewEditable
-                  ? `Edit ${preview.path}`
-                  : `${preview.path} is too large to edit`}
-                disabled={!previewEditable}
-                onClick={() => setEditingFile(preview)}
+                label={fileExplorerOpen
+                  ? "Hide file explorer"
+                  : "Show file explorer"}
+                aria-pressed={fileExplorerOpen}
+                className="file-explorer-toggle"
+                onClick={() => setFileExplorerOpen(!fileExplorerOpen)}
               >
-                <Pencil size={14} />
+                <FolderTree size={14} />
               </IconButton>
-            )}
-            {preview && onOpenFile && (
-              <IconButton
-                label="Open file"
-                onClick={() => onOpenFile(preview.path)}
-              >
-                <ExternalLink size={14} />
-              </IconButton>
-            )}
-            <IconButton
-              label={fileExplorerOpen
-                ? "Hide file explorer"
-                : "Show file explorer"}
-              aria-pressed={fileExplorerOpen}
-              className="file-explorer-toggle"
-              onClick={() => setFileExplorerOpen(!fileExplorerOpen)}
-            >
-              <FolderTree size={14} />
-            </IconButton>
+            </div>
           </header>
           {previewLoading && selectedPath ? (
             <div className={PANEL_LOADING_CLASS} role="status" aria-live="polite">

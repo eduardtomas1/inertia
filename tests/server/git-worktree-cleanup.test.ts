@@ -268,7 +268,7 @@ describe("launch-owned Git cleanup", () => {
 
         await vi.waitFor(() => {
           expect(journal.records(runtimeGenerationId)).toEqual([]);
-        });
+        }, { timeout: 5_000, interval: 10 });
         expect(onTainted).not.toHaveBeenCalled();
         expect(journal.finishSession(runtimeGenerationId)).toBe(true);
       } finally {

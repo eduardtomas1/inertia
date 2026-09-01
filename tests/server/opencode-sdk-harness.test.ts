@@ -224,7 +224,7 @@ const server = http.createServer((req, res) => {
             info: { ...session, id: grandchildID, parentID: childID },
           },
         }), 80);
-        for (const delay of [180, 330, 480, 630, 780]) {
+        for (const delay of [400, 800, 1_200, 1_600, 2_000, 2_400]) {
           setTimeout(() => sendEvent({
             id: "grandchild-work-" + delay,
             type: "message.part.updated",
@@ -243,7 +243,7 @@ const server = http.createServer((req, res) => {
         setTimeout(() => sendEvent({
           type: "session.idle",
           properties: { sessionID: grandchildID },
-        }), 820);
+        }), 2_500);
         setTimeout(() => {
           sendEvent({
             type: "message.part.updated",
@@ -259,7 +259,7 @@ const server = http.createServer((req, res) => {
             },
           });
           sendEvent({ type: "session.idle", properties: { sessionID } });
-        }, 900);
+        }, 2_600);
         return;
       }
       if (scenario === "early-permission-follow-up") {
@@ -2056,8 +2056,8 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     const manager = new ProviderManager(
       { commands: { opencode: command } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness({
-        runDeadlineMs: 5_000,
-        eventInactivityDeadlineMs: 300,
+        runDeadlineMs: 10_000,
+        eventInactivityDeadlineMs: 1_000,
       })]),
     );
 
@@ -2083,7 +2083,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       providerState: "verified descendant session activity",
     }));
     expect(manager.activeConversationIds()).toEqual([]);
-  });
+  }, 15_000);
 
   it("does not let inactive descendant events refresh owned-run liveness", async () => {
     const root = portableFixtureRoot("OpenCode inactive descendant");

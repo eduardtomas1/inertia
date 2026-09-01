@@ -6,9 +6,10 @@ import type WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
-  activateRuntimeOwnedProcessRegistry,
   RuntimeOwnedProcessJournal,
 } from "../../src/node/runtime-owned-processes";
+import { activatePreparedRuntimeOwnedProcessRegistry as activateRuntimeOwnedProcessRegistry } from
+  "../helpers/prepared-runtime-owned-process-registry";
 import { withCodexControlClient } from "../../src/server/codex/control-client";
 import { TerminalManager } from "../../src/server/terminal";
 

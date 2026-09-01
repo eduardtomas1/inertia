@@ -17,7 +17,7 @@
 #define SESSION_FREEZE_PASSES 16
 #define SESSION_DRAIN_POLLS 50
 #define TERM_GRACE_POLLS 5
-#define GUARDIAN_READY_POLLS 50
+#define GUARDIAN_READY_POLLS 250
 #define TRANSIENT_PROBE_POLLS 5
 #define POLL_NANOSECONDS 20000000L
 #define ACTIVE_CENSUS_INTERVAL_POLLS 12
@@ -41,7 +41,13 @@ static volatile sig_atomic_t stop_requested = 0;
 static volatile sig_atomic_t authorization_requested = 0;
 static volatile sig_atomic_t graceful_exit_requested = 0;
 static volatile sig_atomic_t authorization_runtime_pid = 0;
-#if defined(INERTIA_RUNTIME_GUARDIAN_TEST_REJECT_PREEXEC_CENSUS)
+static const char *cleanup_failure_reason = "unknown";
+static const char *census_failure_reason = "none";
+static int process_status(pid_t pid);
+#if defined(INERTIA_RUNTIME_GUARDIAN_TEST_REJECT_PREEXEC_CENSUS) \
+  || defined(INERTIA_RUNTIME_GUARDIAN_TEST_FORCE_LIBPROC_IDENTITY_FAILURE_DURING_STOP) \
+  || defined(INERTIA_RUNTIME_GUARDIAN_TEST_FORCE_KERNEL_IDENTITY_FAILURE_DURING_STOP) \
+  || defined(INERTIA_RUNTIME_GUARDIAN_TEST_FORCE_ZOMBIE_IDENTITY_FAILURE_DURING_STOP)
 static int payload_execution_released_for_test = 0;
 #endif
 
@@ -76,7 +82,18 @@ static void request_graceful_exit(
   }
 }
 
+static int cleanup_failed(const char *reason) {
+  cleanup_failure_reason = reason;
+  return 0;
+}
+
 static void terminate_with_uncertain_containment(void) {
+  (void)dprintf(
+    STDERR_FILENO,
+    "\r\n[Inertia guardian cleanup unproved: %s/%s]\r\n",
+    cleanup_failure_reason,
+    census_failure_reason
+  );
   // A signal is an unambiguous guardian-level marker: payload signals are
   // translated into ordinary numeric exit statuses by the guardian. Restore
   // and unblock SIGUSR2 so inherited process state cannot suppress it. If the
@@ -97,8 +114,57 @@ static void terminate_with_uncertain_containment(void) {
   _exit(127);
 }
 
+static int read_kernel_identity(
+  pid_t pid,
+  struct proc_bsdinfo *info,
+  int *status
+) {
+#if defined(INERTIA_RUNTIME_GUARDIAN_TEST_FORCE_KERNEL_IDENTITY_FAILURE_DURING_STOP)
+  if (payload_execution_released_for_test && stop_requested) return 0;
+#endif
+  int query[] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, pid };
+  struct kinfo_proc process;
+  memset(&process, 0, sizeof(process));
+  size_t size = sizeof(process);
+  if (sysctl(query, 4, &process, &size, NULL, 0) != 0
+    || size != sizeof(process)
+    || process.kp_proc.p_pid != pid) return 0;
+#if defined(INERTIA_RUNTIME_GUARDIAN_TEST_FORCE_KERNEL_ZERO_START)
+  process.kp_proc.p_starttime.tv_sec = 0;
+  process.kp_proc.p_starttime.tv_usec = 0;
+#endif
+#if defined(INERTIA_RUNTIME_GUARDIAN_TEST_FORCE_KERNEL_SIDL)
+  process.kp_proc.p_stat = SIDL;
+#endif
+  if (process.kp_eproc.e_ppid < 0
+    || process.kp_eproc.e_pgid <= 0
+    || process.kp_proc.p_starttime.tv_sec <= 0
+    || process.kp_proc.p_starttime.tv_usec < 0
+    || process.kp_proc.p_starttime.tv_usec >= 1000000) return 0;
+  memset(info, 0, sizeof(*info));
+  info->pbi_pid = (uint32_t)process.kp_proc.p_pid;
+  info->pbi_ppid = (uint32_t)process.kp_eproc.e_ppid;
+  info->pbi_pgid = (uint32_t)process.kp_eproc.e_pgid;
+  info->pbi_start_tvsec = (uint64_t)process.kp_proc.p_starttime.tv_sec;
+  info->pbi_start_tvusec = (uint64_t)process.kp_proc.p_starttime.tv_usec;
+  if (status != NULL) *status = process.kp_proc.p_stat;
+  return 1;
+}
+
 static int read_identity(pid_t pid, struct proc_bsdinfo *info) {
   memset(info, 0, sizeof(*info));
+#if defined(INERTIA_RUNTIME_GUARDIAN_TEST_FORCE_ZOMBIE_IDENTITY_FAILURE_DURING_STOP)
+  if (payload_execution_released_for_test
+    && stop_requested
+    && process_status(pid) == SZOMB) return 0;
+#endif
+#if defined(INERTIA_RUNTIME_GUARDIAN_TEST_FORCE_KERNEL_IDENTITY)
+  const int bytes = 0;
+#elif defined(INERTIA_RUNTIME_GUARDIAN_TEST_FORCE_LIBPROC_IDENTITY_FAILURE_DURING_STOP)
+  const int bytes = payload_execution_released_for_test && stop_requested
+    ? 0
+    : proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, info, (int)sizeof(*info));
+#else
   const int bytes = proc_pidinfo(
     pid,
     PROC_PIDTBSDINFO,
@@ -106,7 +172,12 @@ static int read_identity(pid_t pid, struct proc_bsdinfo *info) {
     info,
     (int)sizeof(*info)
   );
-  return bytes == (int)sizeof(*info) && info->pbi_pid == (uint32_t)pid;
+#endif
+  if (bytes == (int)sizeof(*info) && info->pbi_pid == (uint32_t)pid) return 1;
+  int status = 0;
+  return read_kernel_identity(pid, info, &status)
+    && status != SIDL
+    && status != SZOMB;
 }
 
 static int same_identity(
@@ -207,12 +278,16 @@ static int list_session_members(
   if (authorization_requested && !payload_execution_released_for_test) return -1;
 #endif
   pid_t *pids = calloc((size_t)capacity, sizeof(*pids));
-  if (pids == NULL) return -1;
+  if (pids == NULL) {
+    census_failure_reason = "pid-buffer-allocation";
+    return -1;
+  }
   const int buffer_bytes = capacity * (int)sizeof(*pids);
   const int bytes = proc_listpids(PROC_ALL_PIDS, 0, pids, buffer_bytes);
   if (bytes < 0
     || bytes % (int)sizeof(*pids) != 0
     || bytes >= buffer_bytes) {
+    census_failure_reason = "pid-list";
     free(pids);
     return -1;
   }
@@ -231,6 +306,8 @@ static int list_session_members(
     if (observed_session != session_id) continue;
     struct proc_bsdinfo identity;
     if (!read_identity(pid, &identity)) {
+      if (process_status(pid) == SZOMB) continue;
+      errno = 0;
       if (kill(pid, 0) != 0 && errno == ESRCH) continue;
       free(pids);
       return -1;
@@ -259,13 +336,25 @@ static int list_all_members(
   int capacity,
   const struct owned_tree_tracker *tracker
 ) {
+#if defined(INERTIA_RUNTIME_GUARDIAN_TEST_REJECT_EARLY_CENSUS)
+  (void)session_id;
+  (void)excluded_pid;
+  (void)members;
+  (void)capacity;
+  (void)tracker;
+  return -1;
+#endif
   pid_t *pids = calloc((size_t)capacity, sizeof(*pids));
-  if (pids == NULL) return -1;
+  if (pids == NULL) {
+    census_failure_reason = "pid-buffer-allocation";
+    return -1;
+  }
   const int buffer_bytes = capacity * (int)sizeof(*pids);
   const int bytes = proc_listpids(PROC_ALL_PIDS, 0, pids, buffer_bytes);
   if (bytes < 0
     || bytes % (int)sizeof(*pids) != 0
     || bytes >= buffer_bytes) {
+    census_failure_reason = "pid-list";
     free(pids);
     return -1;
   }
@@ -276,22 +365,34 @@ static int list_all_members(
     if (pid <= 1 || pid == excluded_pid) continue;
     struct proc_bsdinfo identity;
     if (!read_identity(pid, &identity)) {
+      const int status = process_status(pid);
+      if (status == SZOMB) continue;
+      errno = 0;
       if (kill(pid, 0) != 0 && errno == ESRCH) continue;
-      int must_inspect = 0;
+      int same_session = 0;
+      int previously_tracked = 0;
       errno = 0;
       const pid_t observed_session = getsid(pid);
-      must_inspect = observed_session == session_id;
+      same_session = observed_session == session_id;
       for (int tracked = 0;
-        !must_inspect && tracked < tracker->count;
+        !same_session && !previously_tracked && tracked < tracker->count;
         tracked += 1) {
-        must_inspect = tracker->members[tracked].identity.pbi_pid
+        previously_tracked = tracker->members[tracked].identity.pbi_pid
           == (uint32_t)pid;
       }
-      if (!must_inspect) continue;
+      if (!same_session && !previously_tracked) continue;
+      census_failure_reason = same_session
+        ? status < 0
+            ? "session-status-unreadable"
+            : "session-live-identity-unreadable"
+        : status < 0
+            ? "tracked-status-unreadable"
+            : "tracked-live-identity-unreadable";
       free(pids);
       return -1;
     }
     if (member_count >= capacity) {
+      census_failure_reason = "member-capacity";
       free(pids);
       return -1;
     }
@@ -305,6 +406,7 @@ static int list_all_members(
     sizeof(*members),
     compare_session_members
   );
+  census_failure_reason = "none";
   return member_count;
 }
 
@@ -381,7 +483,10 @@ static int refresh_owned_tree(
   int owned_count = 0;
   for (int index = 0; index < count; index += 1) {
     if (!tracker->owned[index]) continue;
-    if (owned_count >= tracker->capacity) return 0;
+    if (owned_count >= tracker->capacity) {
+      census_failure_reason = "owned-capacity";
+      return 0;
+    }
     tracker->previous[owned_count] = tracker->all[index];
     owned_count += 1;
   }
@@ -554,7 +659,9 @@ static int freeze_owned_tree(
     // turn an otherwise empty tree into a permanent unreadable boundary.
     reap_children();
     observe_root_forks(tracker);
-    if (!refresh_owned_tree_bounded(session_id, guardian_pid, tracker)) return 0;
+    if (!refresh_owned_tree_bounded(session_id, guardian_pid, tracker)) {
+      return cleanup_failed("freeze-initial-census");
+    }
     memcpy(
       tracker->previous,
       tracker->members,
@@ -562,12 +669,16 @@ static int freeze_owned_tree(
     );
     const int previous_count = tracker->count;
     for (int index = 0; index < previous_count; index += 1) {
-      if (!signal_exact_owned_member(&tracker->previous[index], SIGSTOP)) return 0;
+      if (!signal_exact_owned_member(&tracker->previous[index], SIGSTOP)) {
+        return cleanup_failed("freeze-stop-signal");
+      }
     }
     const struct timespec pause = { .tv_sec = 0, .tv_nsec = POLL_NANOSECONDS };
     (void)nanosleep(&pause, NULL);
     reap_children();
-    if (!refresh_owned_tree_bounded(session_id, guardian_pid, tracker)) return 0;
+    if (!refresh_owned_tree_bounded(session_id, guardian_pid, tracker)) {
+      return cleanup_failed("freeze-post-stop-census");
+    }
     if (same_member_sets(
       tracker->previous,
       previous_count,
@@ -575,7 +686,7 @@ static int freeze_owned_tree(
       tracker->count
     )) return 1;
   }
-  return 0;
+  return cleanup_failed("freeze-unstable-members");
 }
 
 static int bounded_owned_tree_cleanup(
@@ -583,18 +694,23 @@ static int bounded_owned_tree_cleanup(
   pid_t guardian_pid,
   struct owned_tree_tracker *tracker,
   int allow_completed_payload_forks,
+  int allow_terminal_session_escape,
   pid_t runtime_pid,
   const struct proc_bsdinfo *runtime_identity
 ) {
   if (!freeze_owned_tree(session_id, guardian_pid, tracker)) return 0;
   const struct timespec pause = { .tv_sec = 0, .tv_nsec = POLL_NANOSECONDS };
   for (int index = 0; index < tracker->count; index += 1) {
-    if (!signal_exact_owned_member(&tracker->members[index], SIGTERM)) return 0;
+    if (!signal_exact_owned_member(&tracker->members[index], SIGTERM)) {
+      return cleanup_failed("term-signal");
+    }
   }
   for (int poll = 0; poll < TERM_GRACE_POLLS; poll += 1) {
     (void)nanosleep(&pause, NULL);
     reap_children();
-    if (!refresh_owned_tree_bounded(session_id, guardian_pid, tracker)) return 0;
+    if (!refresh_owned_tree_bounded(session_id, guardian_pid, tracker)) {
+      return cleanup_failed("term-census");
+    }
     if (tracker->count == 0) {
       const int completed_authority_intact = allow_completed_payload_forks
         && !stop_requested
@@ -602,7 +718,12 @@ static int bounded_owned_tree_cleanup(
         && exact_identity_matches_bounded(runtime_pid, runtime_identity)
         && !stop_requested
         && !graceful_exit_requested;
-      return tracker->fork_tainted && !completed_authority_intact ? 0 : 1;
+      if (tracker->fork_tainted
+        && !completed_authority_intact
+        && !allow_terminal_session_escape) {
+        return cleanup_failed("term-fork-taint");
+      }
+      return 1;
     }
   }
   // Do not resume the stable frozen set to deliver TERM: a resumed signal
@@ -611,7 +732,9 @@ static int bounded_owned_tree_cleanup(
   // exact survivors are then killed without reopening that escape window.
   if (!freeze_owned_tree(session_id, guardian_pid, tracker)) return 0;
   for (int index = 0; index < tracker->count; index += 1) {
-    if (!signal_exact_owned_member(&tracker->members[index], SIGKILL)) return 0;
+    if (!signal_exact_owned_member(&tracker->members[index], SIGKILL)) {
+      return cleanup_failed("kill-signal");
+    }
     // Darwin can leave a SIGKILL-pending Node process suspended after
     // SIGSTOP. The bounded resume below is safe only after every exact member
     // has accepted this uncatchable kill.
@@ -628,17 +751,21 @@ static int bounded_owned_tree_cleanup(
       // birth identity unreadable while the kill remains pending under STOP,
       // so use that still-exclusive child PID capability here.
       const pid_t child_pid = (pid_t)member->identity.pbi_pid;
-      if (kill(child_pid, SIGCONT) != 0 && errno != ESRCH) return 0;
+      if (kill(child_pid, SIGCONT) != 0 && errno != ESRCH) {
+        return cleanup_failed("resume-direct-child");
+      }
     } else if (!signal_exact_owned_member(member, SIGCONT)) {
       // Every non-child PID can be reaped and recycled during the delay and
       // therefore must remain bound to its exact stored birth identity.
-      return 0;
+      return cleanup_failed("resume-descendant");
     }
   }
   for (int poll = 0; poll < SESSION_DRAIN_POLLS; poll += 1) {
     reap_children();
     observe_root_forks(tracker);
-    if (!refresh_owned_tree_bounded(session_id, guardian_pid, tracker)) return 0;
+    if (!refresh_owned_tree_bounded(session_id, guardian_pid, tracker)) {
+      return cleanup_failed("drain-census");
+    }
     if (tracker->count == 0) {
       const int completed_authority_intact = allow_completed_payload_forks
         && !stop_requested
@@ -646,11 +773,16 @@ static int bounded_owned_tree_cleanup(
         && exact_identity_matches_bounded(runtime_pid, runtime_identity)
         && !stop_requested
         && !graceful_exit_requested;
-      return tracker->fork_tainted && !completed_authority_intact ? 0 : 1;
+      if (tracker->fork_tainted
+        && !completed_authority_intact
+        && !allow_terminal_session_escape) {
+        return cleanup_failed("drain-fork-taint");
+      }
+      return 1;
     }
     (void)nanosleep(&pause, NULL);
   }
-  return 0;
+  return cleanup_failed("drain-timeout");
 }
 
 static int drain_owned_tree(
@@ -658,6 +790,7 @@ static int drain_owned_tree(
   pid_t guardian_pid,
   struct owned_tree_tracker *tracker,
   int allow_completed_payload_forks,
+  int allow_terminal_session_escape,
   pid_t runtime_pid,
   const struct proc_bsdinfo *runtime_identity
 ) {
@@ -670,6 +803,7 @@ static int drain_owned_tree(
     guardian_pid,
     tracker,
     allow_completed_payload_forks,
+    allow_terminal_session_escape,
     runtime_pid,
     runtime_identity
   );
@@ -679,7 +813,7 @@ static int drain_owned_tree(
   // fork event tainted the exact payload root. Production builds never define
   // the macro and therefore return the real bounded-cleanup result.
   (void)drained;
-  return 0;
+  return cleanup_failed("forced-test-failure");
 #else
   return drained;
 #endif
@@ -721,6 +855,17 @@ static int guardian_signal_handlers_ready(pid_t pid) {
     && sigismember(&process.kp_proc.p_sigcatch, SIGHUP) == 1
     && sigismember(&process.kp_proc.p_sigcatch, SIGUSR1) == 1
     && sigismember(&process.kp_proc.p_sigcatch, SIGUSR2) == 1;
+}
+
+static int process_status(pid_t pid) {
+  int query[] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, pid };
+  struct kinfo_proc process;
+  memset(&process, 0, sizeof(process));
+  size_t size = sizeof(process);
+  if (sysctl(query, 4, &process, &size, NULL, 0) != 0
+    || size != sizeof(process)
+    || process.kp_proc.p_pid != pid) return -1;
+  return process.kp_proc.p_stat;
 }
 
 static int ready_mode(const char *raw_pid) {
@@ -778,10 +923,19 @@ static int session_empty_mode(const char *raw_session_id) {
   return count == 0 ? 0 : 4;
 }
 
-static int watch_mode(int argc, char *argv[]) {
+static int watch_mode(
+  int argc,
+  char *argv[],
+  int allow_terminal_session_escape
+) {
   if (argc < 5 || strcmp(argv[3], "--") != 0) return 64;
   pid_t runtime_pid = 0;
   if (!parse_pid(argv[2], &runtime_pid)) return 64;
+
+#if defined(INERTIA_RUNTIME_GUARDIAN_TEST_READY_DELAY)
+  const struct timespec ready_delay = { .tv_sec = 2, .tv_nsec = 0 };
+  (void)nanosleep(&ready_delay, NULL);
+#endif
 
   struct proc_bsdinfo runtime_identity;
   if (!read_identity(runtime_pid, &runtime_identity)) return 69;
@@ -840,11 +994,10 @@ static int watch_mode(int argc, char *argv[]) {
   while (!authorization_requested) {
     if (stop_requested
       || !exact_identity_matches_bounded(runtime_pid, &runtime_identity)) {
-      const int drained = drain_owned_tree(
-        self, self, &tracker, 0, runtime_pid, &runtime_identity
-      );
+      // No payload has been forked before authorization. The guardian's new
+      // private session is therefore provably empty and does not need a
+      // machine-wide census before it can retire normally.
       free_owned_tree_tracker(&tracker);
-      if (!drained) terminate_with_uncertain_containment();
       return 137;
     }
     (void)nanosleep(&pause, NULL);
@@ -855,11 +1008,9 @@ static int watch_mode(int argc, char *argv[]) {
   }
   if (stop_requested
     || !exact_identity_matches_bounded(runtime_pid, &runtime_identity)) {
-    const int drained = drain_owned_tree(
-      self, self, &tracker, 0, runtime_pid, &runtime_identity
-    );
+    // Authorization can race a stop request, but this remains before the
+    // first fork. There is still no payload or descendant to drain.
     free_owned_tree_tracker(&tracker);
-    if (!drained) terminate_with_uncertain_containment();
     return 137;
   }
 
@@ -960,13 +1111,17 @@ static int watch_mode(int argc, char *argv[]) {
   const char authorization = 'A';
   const int execution_released = child_tracked
     && write(execution_gate[1], &authorization, sizeof(authorization)) == 1;
-#if defined(INERTIA_RUNTIME_GUARDIAN_TEST_REJECT_PREEXEC_CENSUS)
+#if defined(INERTIA_RUNTIME_GUARDIAN_TEST_REJECT_PREEXEC_CENSUS) \
+  || defined(INERTIA_RUNTIME_GUARDIAN_TEST_FORCE_LIBPROC_IDENTITY_FAILURE_DURING_STOP) \
+  || defined(INERTIA_RUNTIME_GUARDIAN_TEST_FORCE_KERNEL_IDENTITY_FAILURE_DURING_STOP) \
+  || defined(INERTIA_RUNTIME_GUARDIAN_TEST_FORCE_ZOMBIE_IDENTITY_FAILURE_DURING_STOP)
   if (execution_released) payload_execution_released_for_test = 1;
 #endif
   (void)close(execution_gate[1]);
   if (!execution_released) {
     const int drained = drain_owned_tree(
-      self, self, &tracker, 0, runtime_pid, &runtime_identity
+      self, self, &tracker, 0, allow_terminal_session_escape,
+      runtime_pid, &runtime_identity
     );
     free_owned_tree_tracker(&tracker);
     if (!drained) terminate_with_uncertain_containment();
@@ -974,7 +1129,8 @@ static int watch_mode(int argc, char *argv[]) {
   }
   if (sigprocmask(SIG_SETMASK, &previous_signals, NULL) != 0) {
     const int drained = drain_owned_tree(
-      self, self, &tracker, 0, runtime_pid, &runtime_identity
+      self, self, &tracker, 0, allow_terminal_session_escape,
+      runtime_pid, &runtime_identity
     );
     free_owned_tree_tracker(&tracker);
     if (!drained) terminate_with_uncertain_containment();
@@ -1078,6 +1234,7 @@ static int watch_mode(int argc, char *argv[]) {
     self,
     &tracker,
     payload_settled,
+    allow_terminal_session_escape,
     runtime_pid,
     &runtime_identity
   );
@@ -1097,7 +1254,14 @@ int main(int argc, char *argv[]) {
     return ready_mode(argv[2]);
   }
   if (argc >= 5 && strcmp(argv[1], "watch") == 0) {
-    return watch_mode(argc, argv);
+    return watch_mode(argc, argv, 0);
+  }
+  if (argc >= 5 && strcmp(argv[1], "watch-terminal-session") == 0) {
+    // User-created interactive terminals explicitly own their macOS session,
+    // not daemonized descendants that deliberately escape it with setsid().
+    // The same exact-identity checks and frozen session drain still apply;
+    // only the permanent NOTE_FORK uncertainty is outside this narrower scope.
+    return watch_mode(argc, argv, 1);
   }
   return 64;
 }

@@ -120,6 +120,10 @@ test("moves one live chat between a remembered native window and the main app", 
   { browserName: _browserName },
   testInfo,
 ) => {
+  // This scenario proves two complete Electron lifecycles. On macOS the first
+  // app may legitimately consume the full supervised shutdown envelope before
+  // the replacement process can acquire the same profile and create a window.
+  test.setTimeout(75_000);
   const title = "detached-chat-window fixture";
   const draft = "Keep this exact draft while the view moves.";
   const popupDraft = `${draft} Updated inside the popup.`;

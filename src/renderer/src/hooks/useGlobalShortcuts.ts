@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useLayoutEffect, useRef } from "react";
 
 import {
   installGlobalShortcuts,
@@ -13,7 +13,7 @@ export function useGlobalShortcuts(actions: GlobalShortcutActions): void {
   // latest actions through the ref, so unrelated renders never re-bind it.
   // Capture is intentional so focused widgets such as xterm cannot consume
   // platform combinations like Ctrl+K first.
-  useEffect(() => {
+  useLayoutEffect(() => {
     return installGlobalShortcuts(window, currentActions);
   }, []);
 }

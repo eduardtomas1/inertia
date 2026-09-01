@@ -261,9 +261,9 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
     );
     await expect(firstMinimapMarker).not.toHaveAttribute("title");
     const markerBoundsBeforeHover = await firstMinimapMarker.boundingBox();
-    const markerWidthBeforeHover = await firstMinimapMarker.evaluate((element) =>
-      Number.parseFloat(getComputedStyle(element, "::before").width));
-    expect(markerWidthBeforeHover).toBeCloseTo(6, 1);
+    await expect.poll(() => firstMinimapMarker.evaluate((element) =>
+      Number.parseFloat(getComputedStyle(element, "::before").width)))
+      .toBeCloseTo(6, 1);
     await firstMinimapMarker.hover();
     await expect(firstMinimapMarker).toHaveAttribute(
       "data-emphasized",

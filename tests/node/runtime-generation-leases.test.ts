@@ -108,6 +108,28 @@ describe("runtime generation lease journal", () => {
     expect(journal.all()).toHaveLength(1);
   });
 
+  it("preserves authority-bound prior-boot generations", () => {
+    const path = directory();
+    const journal = new RuntimeGenerationLeaseJournal(path);
+    expect(journal.publish(generationA, bootA)).toBe(true);
+    expect(journal.publish(generationB, bootA)).toBe(true);
+
+    expect(journal.clearPriorBootSessions(
+      bootB,
+      new Set([generationA]),
+    )).toBe(true);
+    expect(journal.all()).toEqual([
+      expect.objectContaining({ runtimeGenerationId: generationA }),
+    ]);
+    expect(journal.clearPriorBootSessions(
+      bootB,
+      new Set(["invalid"]),
+    )).toBe(false);
+    expect(journal.all()).toEqual([
+      expect.objectContaining({ runtimeGenerationId: generationA }),
+    ]);
+  });
+
   it("discards publisher and finishes consumer transients after a crash", () => {
     const path = directory();
     const journal = new RuntimeGenerationLeaseJournal(path);

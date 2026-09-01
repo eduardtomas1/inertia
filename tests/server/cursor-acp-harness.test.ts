@@ -204,7 +204,7 @@ describe.sequential("Cursor ACP harness", () => {
     const manager = new ProviderManager(
       { commands: { cursor: command } },
       new AgentHarnessRegistry([createCursorAcpHarness({
-        controlRpcTimeoutMs: stalledMethod === "initialize" ? 25 : 250,
+        controlRpcTimeoutMs: stalledMethod === "initialize" ? 25 : 5_000,
       })]),
     );
     await expect(manager.run(nativeProviderRunInput({

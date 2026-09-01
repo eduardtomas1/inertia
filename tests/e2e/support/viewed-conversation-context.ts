@@ -21,6 +21,7 @@ export async function seedViewedConversationContext(
     database.prepare(`
       UPDATE conversations
       SET
+        title = 'Viewed context fixture',
         provider_id = 'claude',
         model_selection_json = json_set(model_selection_json, '$.harnessId', 'claude-agent-sdk', '$.backendProfileId', 'builtin:anthropic', '$.backendProfileDisplayName', 'Anthropic', '$.modelId', 'viewed-model', '$.alias', 'viewed-model', '$.reasoningEffort', 'viewed-effort'),
         continuation_identity_json = json_object('harnessId', 'claude-agent-sdk', 'backendProfileId', 'builtin:anthropic', 'backendConfigurationRevision', 0, 'modelIdentity', 'viewed-model', 'endpointIdentity', NULL),
@@ -44,11 +45,18 @@ export async function seedViewedConversationContext(
   ).get() as { count: number }).count;
   database.close();
   await page.reload();
-  await expect(page.getByRole("heading", { name: "New chat", level: 1 }))
+  await expect(page.getByRole("heading", {
+    name: "Viewed context fixture",
+    level: 1,
+  }))
     .toBeVisible();
-  await expect(page.locator(".app-shell")).toHaveAttribute(
+  const shell = page.locator(".app-shell");
+  await expect(shell).toHaveAttribute(
     "data-runtime-generation",
     /^[0-9a-f-]{36}$/iu,
   );
+  // A generation is published before the renderer websocket is ready. New-chat
+  // commands are only authoritative once this reloaded client is online.
+  await expect(shell).toHaveAttribute("data-connection-status", "online");
   return count;
 }

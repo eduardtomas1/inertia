@@ -671,8 +671,13 @@ process.stdin.on("data", (chunk) => {
 
   it("removes Git descendants before an aborted inspection settles", async () => {
     const directory = await mkdtemp(join(tmpdir(), "inertia-git-abort-tree-"));
+    const executableDirectory = await mkdtemp(join(
+      tmpdir(),
+      "inertia-git-abort-tree-bin-",
+    ));
     temporaryDirectories.push(directory);
-    portableNodeExecutable(directory, "git");
+    temporaryDirectories.push(executableDirectory);
+    portableNodeExecutable(executableDirectory, "git");
     const pidPath = join(directory, "descendant.pid");
     writeNodeSubcommand(directory, "status", `
 const { spawn } = require("node:child_process");
@@ -686,7 +691,7 @@ fs.writeFileSync(${JSON.stringify(pidPath)}, String(descendant.pid));
 setInterval(() => {}, 1000);
 `);
     const previousPath = process.env.PATH;
-    process.env.PATH = directory;
+    process.env.PATH = executableDirectory;
     try {
       const controller = new AbortController();
       const running = runGit(directory, ["status"], {

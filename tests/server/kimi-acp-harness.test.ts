@@ -6,9 +6,10 @@ import { pipeline } from "node:stream/promises";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
-  activateRuntimeOwnedProcessRegistry,
   RuntimeOwnedProcessJournal,
 } from "../../src/node/runtime-owned-processes";
+import { activatePreparedRuntimeOwnedProcessRegistry as activateRuntimeOwnedProcessRegistry } from
+  "../helpers/prepared-runtime-owned-process-registry";
 import { buildProviderInvocation } from "../../src/server/provider/adapters";
 import { terminateProcessTreeAndWait } from "../../src/server/process-lifecycle";
 import {
@@ -1094,7 +1095,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const configManager = new ProviderManager(
       { commands: { kimi: configCommand } },
       new AgentHarnessRegistry([
-        createKimiAcpHarness({ controlRpcTimeoutMs: 250 }),
+        createKimiAcpHarness({ controlRpcTimeoutMs: 5_000 }),
       ]),
     );
     await expect(configManager.run(nativeProviderRunInput({

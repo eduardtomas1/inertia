@@ -257,6 +257,9 @@ describe("cross-platform packaged behavior contract", () => {
       "native/runtime-process-guardian/windows.cs",
     );
     const processSafety = await source("src/main/runtime-supervisor-process-safety.ts");
+    expect(smoke).toContain(
+      'import { createHash, randomUUID } from "node:crypto";',
+    );
     expect(smoke).toContain('process.platform === "darwin"');
     expect(smoke).toContain('process.platform === "win32"');
     expect(smoke).toContain('process.platform === "linux"');

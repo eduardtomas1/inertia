@@ -538,7 +538,11 @@ describe("runtime recovery safety command boundary", () => {
       readDarwinIdentity: (target) => target === pid ? processIdentity : null,
     });
     expect(owned.startSession(oldGeneration, currentBootId)).toBe(true);
-    const ownershipId = owned.begin(oldGeneration, currentBootId);
+    const ownershipId = owned.begin(
+      oldGeneration,
+      currentBootId,
+      owned.sessionCapability(oldGeneration, currentBootId)!,
+    );
     owned.claim(ownershipId, oldGeneration, currentBootId, pid, 77);
     const oldSnapshot = captureModernDarwinRecoverySnapshot(
       dataDirectory,
@@ -669,6 +673,126 @@ describe("runtime recovery safety command boundary", () => {
     } finally {
       closeAttachments.mockRestore();
       closeStore.mockRestore();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("retains authority-bound modern state across an available boot probe change", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-runtime-safety-"));
+    const dataDirectory = join(root, "data");
+    const workspaceDirectory = join(root, "workspace");
+    const oldGeneration = "60000000-0000-4000-8000-000000000006:1";
+    const currentGeneration = "70000000-0000-4000-8000-000000000007:2";
+    const recordedBootId = "test:00000000-0000-4000-8000-000000000001";
+    const currentBootId = "test:00000000-0000-4000-8000-000000000002";
+    const pid = 702;
+    const processIdentity: DarwinProcessIdentity = {
+      platform: "darwin",
+      pid,
+      parentPid: 77,
+      processGroupId: pid,
+      sessionId: pid,
+      startTimeSeconds: "1800000702",
+      startTimeMicroseconds: 123_456,
+    };
+    mkdirSync(dataDirectory, { recursive: true, mode: 0o700 });
+    mkdirSync(workspaceDirectory);
+    const leases = new RuntimeGenerationLeaseJournal(dataDirectory);
+    expect(leases.publish(oldGeneration, recordedBootId)).toBe(true);
+    const owned = new RuntimeOwnedProcessJournal(dataDirectory, {
+      platform: "darwin",
+      darwinGuardianPath: "/private/tmp/inertia-test-guardian",
+      readDarwinIdentity: (target) => target === pid ? processIdentity : null,
+    });
+    expect(owned.startSession(oldGeneration, recordedBootId)).toBe(true);
+    const ownershipId = owned.begin(
+      oldGeneration,
+      recordedBootId,
+      owned.sessionCapability(oldGeneration, recordedBootId)!,
+    );
+    owned.claim(ownershipId, oldGeneration, recordedBootId, pid, 77);
+    const snapshot = captureModernDarwinRecoverySnapshot(
+      dataDirectory,
+      currentBootId,
+    );
+    expect(snapshot).toMatchObject({
+      systemBootId: currentBootId,
+      generations: [{
+        lease: {
+          runtimeGenerationId: oldGeneration,
+          systemBootId: recordedBootId,
+        },
+      }],
+    });
+    const descriptor = snapshot
+      ? new ModernDarwinRecoveryAuthorityJournal(dataDirectory)
+        .publish(snapshot)
+      : null;
+    expect(descriptor).not.toBeNull();
+    expect(leases.publish(currentGeneration, currentBootId)).toBe(true);
+    expect(owned.startSession(currentGeneration, currentBootId)).toBe(true);
+
+    let acknowledged = false;
+    try {
+      const runtime = await startTestRuntime({
+        dataDirectory,
+        defaultWorkspacePath: workspaceDirectory,
+        enableProviders: false,
+        runtimeGenerationId: currentGeneration,
+        systemBootId: currentBootId,
+        manualModernDarwinRecovery: descriptor!,
+        onModernDarwinRecoveryAuthorityAcknowledged: (
+          acknowledgedDescriptor,
+          acknowledgedGeneration,
+        ) => {
+          acknowledged = true;
+          expect(acknowledgedDescriptor).toEqual(descriptor);
+          expect(acknowledgedGeneration).toBe(currentGeneration);
+          expect(new RuntimeGenerationLeaseJournal(dataDirectory).all())
+            .toEqual(expect.arrayContaining([
+              expect.objectContaining({ runtimeGenerationId: oldGeneration }),
+              expect.objectContaining({
+                runtimeGenerationId: currentGeneration,
+              }),
+            ]));
+          expect(new RuntimeOwnedProcessJournal(dataDirectory, {
+            platform: "darwin",
+          }).records(oldGeneration)).toHaveLength(1);
+          const authorities = new ModernDarwinRecoveryAuthorityJournal(
+            dataDirectory,
+          );
+          const pending = authorities.pending();
+          expect(pending).not.toBeNull();
+          expect(authorities.beginRetirement(
+            pending!,
+            dataDirectory,
+            currentGeneration,
+            {
+              guardianPath: "/private/tmp/inertia-test-guardian",
+              platform: "darwin",
+              readDarwinIdentity: () => null,
+              pidExists: () => false,
+            },
+          )).toBe(true);
+          expect(authorities.completeRetirement(dataDirectory, pending!))
+            .toBe(true);
+        },
+      });
+      await runtime.close();
+
+      expect(acknowledged).toBe(true);
+      expect(new RuntimeGenerationLeaseJournal(dataDirectory).all()).toEqual([
+        expect.objectContaining({ runtimeGenerationId: currentGeneration }),
+      ]);
+      expect(new RuntimeOwnedProcessJournal(dataDirectory, {
+        platform: "darwin",
+      }).records(oldGeneration)).toBeNull();
+      const authorities = new ModernDarwinRecoveryAuthorityJournal(
+        dataDirectory,
+      );
+      expect(authorities.pending()).toBeNull();
+      expect(authorities.retiring()).toBeNull();
+    } finally {
       rmSync(root, { recursive: true, force: true });
     }
   });

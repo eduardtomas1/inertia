@@ -108,8 +108,8 @@ describe("cross-platform packaged behavior contract", () => {
     const readme = await source("README.md");
     const normalizedReadme = readme.replace(/\s+/gu, " ");
     for (const choice of [
-      "| macOS 13 or later | Apple silicon (arm64) |",
-      "| macOS 13 or later | Intel (x64) |",
+      "| macOS | Apple silicon (arm64) |",
+      "| macOS | Intel (x64) |",
       "| Windows | x64 |",
       "| Windows | ARM64 |",
       "| Linux | x64 |",
@@ -129,6 +129,9 @@ describe("cross-platform packaged behavior contract", () => {
       expect(normalizedReadme).toContain(expected);
     }
     expect(normalizedReadme).toContain("Do not disable SmartScreen.");
+    expect(normalizedReadme).toContain(
+      "Building the current source for macOS requires macOS 13 or later.",
+    );
     expect(readme).not.toContain("xattr");
     expect(readme).not.toContain("spctl --master-disable");
 

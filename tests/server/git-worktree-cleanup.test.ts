@@ -105,6 +105,7 @@ function linuxBirthtimeProbe(
     | "trailing"
     | "nonzero-exit"
     | "overflow"
+    | "overflow-hang"
     | "timeout"
     | "missing",
 ): WorktreeFilesystemIdentityDependencies {
@@ -125,6 +126,8 @@ function linuxBirthtimeProbe(
                 ? "process.exit(7)"
         : mode === "overflow"
           ? "process.stdout.write('x'.repeat(1024))"
+          : mode === "overflow-hang"
+            ? "process.stdout.write('x'.repeat(1024));setInterval(() => undefined, 1000)"
           : "setInterval(() => undefined, 1000)";
   return {
     platform: "linux",
@@ -219,6 +222,7 @@ describe("launch-owned Git cleanup", () => {
 
   it.runIf(process.platform === "linux").each([
     "overflow",
+    "overflow-hang",
     "timeout",
   ] as const)(
     "retires a runtime-owned Linux %s birth-time probe without tainting the runtime",

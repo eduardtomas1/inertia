@@ -111,6 +111,7 @@ export type UnacknowledgedWorktreeCreationInspection = "absent" | "retained";
 
 const MAX_GIT_IDENTITY_FILE_BYTES = 16 * 1024;
 const MAX_LINUX_BIRTHTIME_OUTPUT_BYTES = 256;
+const LINUX_BIRTHTIME_OVERFLOW_EXIT_GRACE_MS = 100;
 const LINUX_BIRTHTIME_TIMEOUT_MS = 2_000;
 const ADMINISTRATIVE_IDENTITY_SCAN_TIMEOUT_MS = 15_000;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -285,16 +286,38 @@ async function verifyLinuxDirectoryBirthtime(
       const closeObserved = new Promise<void>((resolveClose) => {
         observeClose = resolveClose;
       });
+      const settleFailure = async (error: Error): Promise<void> => {
+        if (error.message === "linux-stat-overflow") {
+          const closedNaturally = await Promise.race([
+            closeObserved.then(() => true),
+            new Promise<false>((resolveGrace) => {
+              const graceTimer = setTimeout(
+                () => resolveGrace(false),
+                LINUX_BIRTHTIME_OVERFLOW_EXIT_GRACE_MS,
+              );
+              graceTimer.unref();
+            }),
+          ]);
+          if (closedNaturally) {
+            rejectProbe(error);
+            return;
+          }
+        }
+        try {
+          await terminateOwnedTree(true);
+          await closeObserved;
+          rejectProbe(error);
+        } catch (terminationError) {
+          rejectProbe(terminationError);
+        }
+      };
       const chunks: Buffer[] = [];
       let bytes = 0;
       let failure: Error | null = null;
       const fail = (error: Error): void => {
         if (failure) return;
         failure = error;
-        void Promise.all([terminateOwnedTree(true), closeObserved]).then(
-          () => rejectProbe(error),
-          (terminationError: unknown) => rejectProbe(terminationError),
-        );
+        void settleFailure(error);
       };
       const timer = setTimeout(() => {
         fail(new Error("linux-stat-timeout"));

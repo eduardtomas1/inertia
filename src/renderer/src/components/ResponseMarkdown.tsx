@@ -16,7 +16,6 @@ import {
   Code2,
   Copy,
   FileCode2,
-  Globe2,
   Table2,
   WrapText,
 } from "lucide-react";
@@ -708,7 +707,18 @@ function MarkdownLink({
           void window.inertia.openExternal(target.url);
         }}
       >
-        <Globe2 size={12} aria-hidden="true" />
+        <svg
+          aria-hidden="true"
+          fill="none"
+          height="12"
+          stroke="currentColor"
+          strokeWidth="2"
+          viewBox="0 0 24 24"
+          width="12"
+        >
+          <circle cx="12" cy="12" r="10" />
+          <path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20" />
+        </svg>
         {children}
       </a>
     );

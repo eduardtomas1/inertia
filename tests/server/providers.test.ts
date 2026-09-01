@@ -8,8 +8,10 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
+import type { ChildProcess } from "node:child_process";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { spawnRuntimeOwnedProcess } from "../../src/node/runtime-owned-processes";
 import { providerEnvironment } from "../../src/server/environment";
 import { AgentHarnessRegistry, detectProvider, ProviderManager } from "../../src/server/providers";
 import { providerFailureMessage } from "../../src/server/provider/adapters";
@@ -23,6 +25,8 @@ import {
   writeNodeSubcommand,
 } from "../helpers/portable-provider-fixture";
 import { nativeProviderRunInput } from "./model-route-fixture";
+import { activatePreparedRuntimeOwnedProcessRegistry as activateRuntimeOwnedProcessRegistry } from
+  "../helpers/prepared-runtime-owned-process-registry";
 
 const MUTATED_ENVIRONMENT_KEYS = [
   "CODEX_HOME",
@@ -37,9 +41,11 @@ const MUTATED_ENVIRONMENT_KEYS = [
 describe.sequential("provider runtime", () => {
   const roots: string[] = [];
   const descendantPids: number[] = [];
+  const ownershipDeactivators: Array<() => void> = [];
   const originalEnvironment = Object.fromEntries(MUTATED_ENVIRONMENT_KEYS.map((key) => [key, process.env[key]]));
 
   afterEach(async () => {
+    while (ownershipDeactivators.length > 0) ownershipDeactivators.pop()?.();
     for (const pid of descendantPids.splice(0)) {
       try {
         process.kill(pid, "SIGKILL");
@@ -241,6 +247,85 @@ process.exit(2);
       authState: "authenticated",
       canRun: true,
     });
+  });
+
+  it("requests recovery once when provider discovery asynchronously taints ownership", async () => {
+    const root = temporaryRoot();
+    const executable = join(root, "codex");
+    const identity = {
+      platform: "darwin" as const,
+      pid: 4_242,
+      parentPid: process.pid,
+      processGroupId: 4_242,
+      sessionId: 4_242,
+      startTimeSeconds: "1756100000",
+      startTimeMicroseconds: 123_456,
+    };
+    const requestRecovery = vi.fn();
+    const deactivate = activateRuntimeOwnedProcessRegistry(
+      root,
+      "40000000-0000-4000-8000-000000000004:1",
+      "test:30000000-0000-4000-8000-000000000003",
+      {
+        platform: "darwin",
+        darwinGuardianPath: "/trusted/runtime-process-guardian",
+        readDarwinGuardianReadyAsync: async () => identity,
+        readDarwinIdentity: () => identity,
+        onTainted: requestRecovery,
+      },
+    );
+    if (deactivate) ownershipDeactivators.push(deactivate);
+    const processKill = vi.spyOn(process, "kill").mockReturnValue(true);
+    let closeHandler = (
+      _code: number | null,
+      _signal: NodeJS.Signals | null,
+    ): void => { throw new Error("The close handler was not registered."); };
+    const child = {
+      pid: identity.pid,
+      spawnfile: "/trusted/runtime-process-guardian",
+      kill: vi.fn(() => true),
+      once: vi.fn((event: string, listener: typeof closeHandler) => {
+        if (event === "close") closeHandler = listener;
+        return child;
+      }),
+    } as unknown as ChildProcess;
+    let spawnedProbe = false;
+    try {
+      const detection = await detectProvider("codex", {
+        command: executable,
+        cwd: root,
+      }, {
+        executableCandidates: async () => [executable],
+        probeProcess: async (_candidate, args) => {
+          if (!spawnedProbe) {
+            spawnedProbe = true;
+            spawnRuntimeOwnedProcess(() => child);
+            await vi.waitFor(() => {
+              expect(processKill).toHaveBeenCalledWith(identity.pid, "SIGUSR1");
+            });
+            await new Promise<void>((resolve) => setImmediate(resolve));
+            closeHandler(null, "SIGUSR2");
+            closeHandler(null, "SIGUSR2");
+          }
+          return {
+            started: true,
+            timedOut: false,
+            exitCode: 0,
+            output: args[0] === "--version"
+              ? "codex 2.3.1"
+              : args[0] === "login"
+                ? "Logged in using ChatGPT"
+                : "codex app-server - Run the app server",
+            cleanupConfirmed: true,
+          };
+        },
+      });
+
+      expect(detection).toMatchObject({ available: true, canRun: true });
+      expect(requestRecovery).toHaveBeenCalledOnce();
+    } finally {
+      processKill.mockRestore();
+    }
   });
 
   it("checks installation readiness without probing or forwarding authentication", async () => {

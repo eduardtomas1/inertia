@@ -39,12 +39,19 @@ vi.mock("../../src/renderer/src/components/Composer", async () => {
     Composer: memo(function MockComposer({
       onSend,
       running,
+      newChatProjectPicker,
     }: {
       onSend(
         content: string,
         attachments: [],
       ): Promise<TranscriptMessageSendAcceptance | null | void>;
       running: boolean;
+      newChatProjectPicker?: {
+        projects: readonly Project[];
+        selectedProject: Project;
+        disabled: boolean;
+        onChange: (project: Project) => void;
+      };
     }): React.JSX.Element {
       composerRenderCount.value += 1;
       return (
@@ -52,6 +59,22 @@ vi.mock("../../src/renderer/src/components/Composer", async () => {
           <span data-testid="composer-running-state">
             {running ? "running" : "settled"}
           </span>
+          {newChatProjectPicker && (
+            <select
+              aria-label="Project"
+              value={newChatProjectPicker.selectedProject.id}
+              disabled={newChatProjectPicker.disabled}
+              onChange={(event) => newChatProjectPicker.onChange(
+                newChatProjectPicker.projects[event.currentTarget.selectedIndex]!,
+              )}
+            >
+              {newChatProjectPicker.projects.map((candidate) => (
+                <option value={candidate.id} key={candidate.id}>
+                  {candidate.name}
+                </option>
+              ))}
+            </select>
+          )}
           <button
             type="button"
             onClick={() => {
@@ -362,7 +385,7 @@ describe("draft turn anchoring", () => {
     })).toBeVisible();
   });
 
-  it("chooses a project inside the real empty-chat composer", () => {
+  it("passes project choice into the empty-chat composer", () => {
     const studioProject: Project = {
       ...project,
       id: "22222222-2222-4222-8222-222222222222",
@@ -375,9 +398,9 @@ describe("draft turn anchoring", () => {
     render(
       <ChatWorkspace
         {...workspaceProps(conversation("conversation-global"), async () => null)}
-        emptyThreadProjectPicker={{
+        newChatProjectPicker={{
           projects: [project, studioProject],
-          selectedProjectId: project.id,
+          selectedProject: project,
           disabled: false,
           onChange,
         }}
@@ -405,9 +428,9 @@ describe("draft turn anchoring", () => {
     render(
       <ChatWorkspace
         {...workspaceProps(conversation("conversation-switching"), async () => null)}
-        emptyThreadProjectPicker={{
+        newChatProjectPicker={{
           projects: [project],
-          selectedProjectId: project.id,
+          selectedProject: project,
           disabled: true,
           onChange: vi.fn(),
         }}

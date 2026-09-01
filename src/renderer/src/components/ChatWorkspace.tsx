@@ -78,7 +78,10 @@ import {
 } from "../utils/testStreamingTrace";
 import { Composer } from "./Composer";
 import type { ChatGoalControlProps } from "./ChatGoalControl";
-import type { PromptPresetCommandRunner } from "./composer/types";
+import type {
+  NewChatProjectPicker,
+  PromptPresetCommandRunner,
+} from "./composer/types";
 import type { ProviderTerminalResumeOption } from "./providerResumeOptions";
 import type {
   ConversationContextCommandRunner,
@@ -111,12 +114,7 @@ type ChatWorkspaceProps = {
   embedded?: boolean;
   project: Project | null;
   conversation: Conversation | null;
-  emptyThreadProjectPicker?: {
-    projects: readonly Project[];
-    selectedProjectId: string;
-    disabled: boolean;
-    onChange: (project: Project) => void;
-  };
+  newChatProjectPicker?: NewChatProjectPicker;
   checkoutBranch?: string | null;
   showCheckoutContext?: boolean;
   latestTurnSummary: ConversationLatestTurnSummary | null;
@@ -229,7 +227,7 @@ export function ChatWorkspace({
   embedded = false,
   project,
   conversation,
-  emptyThreadProjectPicker,
+  newChatProjectPicker,
   checkoutBranch = null,
   showCheckoutContext = true,
   latestTurnSummary,
@@ -801,37 +799,8 @@ export function ChatWorkspace({
           {detailLoading && <LoadingMark label="Loading conversation" />}
           {isEmptyThread && (
             <div className="empty-thread">
-              {emptyThreadProjectPicker ? (
-                <>
-                  <h3>What should we build today?</h3>
-                  <label className="empty-thread-project-picker">
-                    <span
-                      className="empty-thread-project-dot"
-                      style={{
-                        "--project-color": project?.color ?? "var(--accent)",
-                      } as React.CSSProperties}
-                      aria-hidden="true"
-                    />
-                    <span className="visually-hidden">Project</span>
-                    <select
-                      aria-label="Project"
-                      value={emptyThreadProjectPicker.selectedProjectId}
-                      disabled={emptyThreadProjectPicker.disabled}
-                      onChange={(event) => {
-                        const selected = emptyThreadProjectPicker.projects.find(
-                          ({ id }) => id === event.target.value,
-                        );
-                        if (selected) emptyThreadProjectPicker.onChange(selected);
-                      }}
-                    >
-                      {emptyThreadProjectPicker.projects.map((candidate) => (
-                        <option value={candidate.id} key={candidate.id}>
-                          {candidate.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </>
+              {newChatProjectPicker ? (
+                <h3>What should we build today?</h3>
               ) : (
                 <h3 aria-label={emptyThreadTitle}>
                   What should we build in{" "}
@@ -939,6 +908,7 @@ export function ChatWorkspace({
           conversation={conversation}
           checkoutBranch={checkoutBranch}
           showCheckoutContext={showCheckoutContext}
+          newChatProjectPicker={newChatProjectPicker}
           providers={providers}
           actions={actions}
           mentionResults={mentionResults}

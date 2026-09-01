@@ -519,9 +519,9 @@ export function createWorkspaceSceneModel({
         && draftConversation
         && project
         && actions.selectGlobalChatProject ? {
-        emptyThreadProjectPicker: {
+        newChatProjectPicker: {
           projects: snapshotProjects,
-          selectedProjectId: draftConversation.projectId,
+          selectedProject: project,
           disabled: connection.status !== "online"
             || globalProjectChangeId !== null,
           onChange: actions.selectGlobalChatProject,

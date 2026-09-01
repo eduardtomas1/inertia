@@ -246,7 +246,8 @@ test("keeps the macOS brand in the native titlebar row and starts a new chat", a
   await expect(page.getByRole("heading", {
     name: "What should we build today?",
   })).toBeVisible();
-  await expect(page.getByRole("combobox", { name: "Project" })).toBeVisible();
-  await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
+  const composer = page.getByLabel("Message composer");
+  await expect(composer.getByRole("combobox", { name: "Project" })).toBeVisible();
+  await expect(composer.getByRole("textbox", { name: "Message" })).toBeVisible();
   expect(rendererErrors).toEqual([]);
 });

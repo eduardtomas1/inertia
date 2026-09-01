@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
@@ -14,8 +15,10 @@ import {
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { RuntimeOwnedProcessJournal } from
+  "../../src/node/runtime-owned-processes";
 import {
   createWorktree,
   createWorktreeWithOwnershipReceipt,
@@ -31,6 +34,8 @@ import {
   type WorktreeFilesystemIdentityDependencies,
   worktreeFilesystemIdentitiesEqual,
 } from "../../src/server/git";
+import { activatePreparedRuntimeOwnedProcessRegistry } from
+  "../helpers/prepared-runtime-owned-process-registry";
 
 const roots: string[] = [];
 
@@ -100,6 +105,7 @@ function linuxBirthtimeProbe(
     | "trailing"
     | "nonzero-exit"
     | "overflow"
+    | "overflow-hang"
     | "timeout"
     | "missing",
 ): WorktreeFilesystemIdentityDependencies {
@@ -120,6 +126,8 @@ function linuxBirthtimeProbe(
                 ? "process.exit(7)"
         : mode === "overflow"
           ? "process.stdout.write('x'.repeat(1024))"
+          : mode === "overflow-hang"
+            ? "process.stdout.write('x'.repeat(1024));setInterval(() => undefined, 1000)"
           : "setInterval(() => undefined, 1000)";
   return {
     platform: "linux",
@@ -209,6 +217,63 @@ describe("launch-owned Git cleanup", () => {
       expect(git(root, "worktree", "list", "--porcelain").match(
         /^worktree /gmu,
       )).toHaveLength(1);
+    },
+  );
+
+  it.runIf(process.platform === "linux").each([
+    "overflow",
+    "overflow-hang",
+    "timeout",
+  ] as const)(
+    "retires a runtime-owned Linux %s birth-time probe without tainting the runtime",
+    async (mode) => {
+      const root = repository();
+      const runtimeDirectory = mkdtempSync(join(tmpdir(), "inertia worktree probe runtime "));
+      roots.push(runtimeDirectory);
+      const runtimeGenerationId = `${randomUUID()}:1`;
+      const systemBootId = `test:${randomUUID()}`;
+      const onTainted = vi.fn();
+      const deactivate = activatePreparedRuntimeOwnedProcessRegistry(
+        runtimeDirectory,
+        runtimeGenerationId,
+        systemBootId,
+        {
+          platform: "linux",
+          darwinGuardianPath: join(
+            process.cwd(),
+            "resources/generated/runtime-process-guardian/runtime-process-guardian",
+          ),
+          onTainted,
+        },
+      );
+      const journal = new RuntimeOwnedProcessJournal(runtimeDirectory, {
+        platform: "linux",
+      });
+      try {
+        await expect(createWorktreeWithOwnershipReceipt(
+          root,
+          ownedPath(root, `owned ${mode} birthtime`),
+          {
+            branch: `inertia/owned-birthtime-${mode}`,
+            createBranch: true,
+            startPoint: "main",
+          },
+          {
+            beforeAdd: () => undefined,
+            notAdded: () => undefined,
+            added: () => undefined,
+          },
+          { filesystemIdentity: linuxBirthtimeProbe(mode) },
+        )).rejects.toThrow(/birth time.*isolated Duo worktrees are unsupported/iu);
+
+        await vi.waitFor(() => {
+          expect(journal.records(runtimeGenerationId)).toEqual([]);
+        });
+        expect(onTainted).not.toHaveBeenCalled();
+        expect(journal.finishSession(runtimeGenerationId)).toBe(true);
+      } finally {
+        deactivate?.();
+      }
     },
   );
 

@@ -98,7 +98,7 @@ describe("project chat navigation", () => {
       "project.select:global-chat",
       { type: "project.select", payload: { projectId: second.id } },
     );
-    expect(generation.current).toBe(1);
+    expect(generation.current).toBe(2);
     await waitFor(() => expect(start).toHaveBeenLastCalledWith(second.id));
     expect(hook.result.current.globalProjectChangeId).toBeNull();
   });
@@ -125,5 +125,52 @@ describe("project chat navigation", () => {
     expect(discard).toHaveBeenCalledOnce();
     expect(setView).toHaveBeenLastCalledWith("settings");
     expect(hook.result.current.globalChatActive).toBe(false);
+  });
+
+  it("does not restore a draft after navigation overtakes its project change", async () => {
+    const { hook, second, selectionCommandQueue, setView, start } = setup();
+    let completeSelection: ((event: ServerEvent) => void) | undefined;
+    selectionCommandQueue.mockImplementationOnce(() => new Promise(
+      (resolve) => {
+        completeSelection = resolve;
+      },
+    ));
+
+    act(() => hook.result.current.openGlobalChat());
+    act(() => hook.result.current.selectGlobalChatProject(second));
+    act(() => hook.result.current.navigateToView("workspace"));
+    await act(async () => {
+      completeSelection?.({} as ServerEvent);
+      await Promise.resolve();
+    });
+
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(start).not.toHaveBeenCalledWith(second.id);
+    expect(setView).toHaveBeenLastCalledWith("workspace");
+    expect(hook.result.current.globalChatActive).toBe(false);
+  });
+
+  it("does not let an older project change replace a reopened draft", async () => {
+    const { first, hook, second, selectionCommandQueue, setView, start } = setup();
+    let completeSelection: ((event: ServerEvent) => void) | undefined;
+    selectionCommandQueue.mockImplementationOnce(() => new Promise(
+      (resolve) => {
+        completeSelection = resolve;
+      },
+    ));
+
+    act(() => hook.result.current.openGlobalChat());
+    act(() => hook.result.current.selectGlobalChatProject(second));
+    act(() => hook.result.current.openGlobalChat());
+    await act(async () => {
+      completeSelection?.({} as ServerEvent);
+      await Promise.resolve();
+    });
+
+    expect(start).toHaveBeenCalledTimes(2);
+    expect(start).toHaveBeenLastCalledWith(first.id);
+    expect(start).not.toHaveBeenCalledWith(second.id);
+    expect(setView).toHaveBeenLastCalledWith("home");
+    expect(hook.result.current.globalChatActive).toBe(true);
   });
 });

@@ -65,9 +65,10 @@ export function useProjectChatNavigation({
     useState<string | null>(null);
 
   const deactivateGlobalChat = useCallback(() => {
+    conversationSelectionGenerationRef.current += 1;
     setGlobalChatActive(false);
     setGlobalProjectChangeId(null);
-  }, []);
+  }, [conversationSelectionGenerationRef]);
   const exitGlobalChat = useCallback(() => {
     deactivateGlobalChat();
     draftConversation.discard();
@@ -102,6 +103,7 @@ export function useProjectChatNavigation({
   }, [draftConversation, globalChatActive, setView]);
 
   const openGlobalChat = useCallback((): void => {
+    conversationSelectionGenerationRef.current += 1;
     const targetProject = project ?? projects[0] ?? null;
     setGlobalProjectChangeId(null);
     setView("home");
@@ -112,7 +114,14 @@ export function useProjectChatNavigation({
     }
     draftConversation.start(targetProject.id);
     setGlobalChatActive(true);
-  }, [draftConversation, project, projects, setSidebarOpen, setView]);
+  }, [
+    conversationSelectionGenerationRef,
+    draftConversation,
+    project,
+    projects,
+    setSidebarOpen,
+    setView,
+  ]);
 
   const selectGlobalChatProject = useCallback((nextProject: Project): void => {
     if (nextProject.id === project?.id || globalProjectChangeId) return;

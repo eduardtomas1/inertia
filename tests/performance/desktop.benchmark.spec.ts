@@ -463,6 +463,16 @@ async function processSample(electronApp: ElectronApplication) {
     const window = BrowserWindow.getAllWindows()[0];
     const rendererPid = window?.webContents.getOSProcessId() ?? null;
     const mainMemory = await process.getProcessMemoryInfo();
+    let gpuInfo: unknown = null;
+    let gpuInfoUnavailableReason: string | null = null;
+    try {
+      gpuInfo = await app.getGPUInfo("basic");
+    } catch (error) {
+      // Electron documents this promise as rejecting when both hardware and
+      // software GPU implementations are unavailable. Keep measuring the
+      // renderer in that real fallback state and retain the reason as evidence.
+      gpuInfoUnavailableReason = error instanceof Error ? error.message : String(error);
+    }
     const metrics = app.getAppMetrics().map((metric) => ({
       pid: metric.pid,
       type: metric.type,
@@ -491,7 +501,8 @@ async function processSample(electronApp: ElectronApplication) {
       mainMemoryKb: mainMemory,
       metrics,
       gpuFeatureStatus: app.getGPUFeatureStatus(),
-      gpuInfo: await app.getGPUInfo("basic"),
+      gpuInfo,
+      gpuInfoUnavailableReason,
       display: {
         scaleFactor: display.scaleFactor,
         width: display.size.width,

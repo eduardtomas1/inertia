@@ -605,9 +605,9 @@ test("pins the minimal fixed builder and gates installed Windows binaries", asyn
     "utf8",
   );
 
-  expect(manifest.devDependencies["electron-builder"]).toBe("26.15.6");
-  expect(lock.packages["node_modules/electron-builder"]?.version).toBe("26.15.6");
-  expect(lock.packages["node_modules/app-builder-lib"]?.version).toBe("26.15.6");
+  expect(manifest.devDependencies["electron-builder"]).toBe("26.15.7");
+  expect(lock.packages["node_modules/electron-builder"]?.version).toBe("26.15.7");
+  expect(lock.packages["node_modules/app-builder-lib"]?.version).toBe("26.15.7");
   expect(manifest.scripts["test:windows-installer-smoke"])
     .toBe("node scripts/windows-installer-smoke.mjs");
   expect(source).toContain("NSIS application archive verified");

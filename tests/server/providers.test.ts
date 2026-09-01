@@ -32,6 +32,7 @@ const MUTATED_ENVIRONMENT_KEYS = [
   "CODEX_HOME",
   "CODEX_INSTALL_DIR",
   "HOME",
+  "HTTPS_PROXY",
   "OPENAI_API_KEY",
   "PATH",
   "SHELL",
@@ -383,6 +384,83 @@ process.exit(2);
     });
   });
 
+  it("isolates every candidate probe and authenticates only the verified selection", async () => {
+    const root = temporaryRoot();
+    const older = join(root, "adversarial-codex");
+    const selected = join(root, "verified-codex");
+    process.env.HOME = join(root, "private-home");
+    process.env.HTTPS_PROXY = "https://user:password@proxy.example";
+    process.env.OPENAI_API_KEY = "selected-auth-only";
+    process.env.CODEX_HOME = join(root, "candidate-codex-home");
+    process.env.CODEX_INSTALL_DIR = join(root, "candidate-codex-install");
+    const calls: Array<{
+      executable: string;
+      args: readonly string[];
+      environment: NodeJS.ProcessEnv;
+    }> = [];
+
+    const detection = await detectProvider("codex", {
+      command: "codex",
+      cwd: root,
+      refreshEnvironment: true,
+    }, {
+      executableCandidates: async (_command, environment) => {
+        expect(environment.env).toMatchObject({
+          CODEX_HOME: process.env.CODEX_HOME,
+          CODEX_INSTALL_DIR: process.env.CODEX_INSTALL_DIR,
+        });
+        expect(environment.env).not.toHaveProperty("HOME");
+        expect(environment.env).not.toHaveProperty("HTTPS_PROXY");
+        expect(environment.env).not.toHaveProperty("OPENAI_API_KEY");
+        return [older, selected];
+      },
+      probeProcess: async (executable, args, environment) => {
+        calls.push({ executable, args: [...args], environment: { ...environment.env } });
+        if (args[0] === "login") {
+          expect(executable).toBe(selected);
+          expect(environment.env).toMatchObject({
+            CODEX_HOME: process.env.CODEX_HOME,
+            CODEX_INSTALL_DIR: process.env.CODEX_INSTALL_DIR,
+            HOME: process.env.HOME,
+            HTTPS_PROXY: process.env.HTTPS_PROXY,
+            OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+          });
+          return {
+            started: true,
+            timedOut: false,
+            exitCode: 0,
+            output: "Logged in using ChatGPT",
+            cleanupConfirmed: true,
+          };
+        }
+        expect(environment.env).not.toHaveProperty("HOME");
+        expect(environment.env).not.toHaveProperty("HTTPS_PROXY");
+        expect(environment.env).not.toHaveProperty("OPENAI_API_KEY");
+        expect(environment.env).not.toHaveProperty("CODEX_HOME");
+        expect(environment.env).not.toHaveProperty("CODEX_INSTALL_DIR");
+        return {
+          started: true,
+          timedOut: false,
+          exitCode: 0,
+          output: args[0] === "--version"
+            ? `codex ${executable === selected ? "2.0.0" : "1.0.0"}`
+            : "codex app-server - Run the app server",
+          cleanupConfirmed: true,
+        };
+      },
+    });
+
+    expect(detection).toMatchObject({
+      executable: selected,
+      authState: "authenticated",
+      canRun: true,
+    });
+    expect(calls.filter(({ args }) => args[0] === "login")).toHaveLength(1);
+    expect(calls.filter(({ executable }) => executable === older).every(
+      ({ environment }) => environment.OPENAI_API_KEY === undefined,
+    )).toBe(true);
+  });
+
   it("uses the newest App Server-capable Codex candidate and prefers a native executable at the same version", async () => {
     const root = temporaryRoot();
     const oldCompatible = join(root, "codex-old.exe");
@@ -612,10 +690,12 @@ setInterval(() => {}, 1000);
     const root = temporaryRoot();
     const unconfirmed = join(root, "old-codex");
     const selected = join(root, "new-codex");
+    let authenticationProbes = 0;
 
     await expect(detectProvider("codex", { cwd: root }, {
       executableCandidates: async () => [unconfirmed, selected],
       probeProcess: async (executable, args) => {
+        if (args[0] === "login") authenticationProbes += 1;
         if (executable === unconfirmed) {
           return {
             started: true,
@@ -639,10 +719,12 @@ setInterval(() => {}, 1000);
       },
     })).resolves.toMatchObject({
       available: true,
+      authState: "unknown",
       canRun: false,
       cleanupConfirmed: false,
       statusMessage: "Codex probe cleanup could not be confirmed stopped",
     });
+    expect(authenticationProbes).toBe(0);
   });
 
   it("reports a candidate with a failing version probe as an installation error", async () => {
@@ -690,7 +772,7 @@ setInterval(() => {}, 1000);
 
     await expect(detectProvider("codex", { command, cwd: root })).resolves.toMatchObject({
       installState: "installed",
-      authState: "authenticated",
+      authState: "unknown",
       canRun: false,
       statusMessage: "Codex App Server is unsupported; update the selected CLI",
     });

@@ -31,7 +31,11 @@ import {
   type AgentHarnessStartOptions,
   type KimiAcpHarnessCapabilities,
 } from "./agent-harness";
-import { isSafeApprovalDisplayText } from "./approval-display";
+import {
+  interactionDisplayIdentity,
+  isSafeApprovalDisplayText,
+  isSafeInteractionDisplayText,
+} from "./approval-display";
 import type { ProviderRunFailure, ProviderRunResult } from "./contracts";
 import type {
   AgentApprovalDecision,
@@ -84,6 +88,8 @@ const MAX_RESULT_TEXT_CHARS = 4 * 1024 * 1024;
 const MAX_STDERR_CHARS = 32 * 1024;
 const MAX_PENDING_INTERACTIONS = 64;
 const MAX_INPUT_OPTIONS = 20;
+const MAX_INPUT_QUESTION_CHARS = 16_384;
+const MAX_INPUT_OPTION_LABEL_CHARS = 512;
 const MAX_TRACKED_TOOL_ACTIVITIES = 1_024;
 const MAX_TOOL_STATE_TEXT_CHARS = 4 * 1024;
 const MAX_AVAILABLE_COMMANDS = 256;
@@ -834,46 +840,158 @@ interface KimiInputOptions {
 export function kimiInputOptions(
   params: Pick<RequestPermissionRequest, "options" | "toolCall">,
 ): KimiInputOptions | null {
-  const questionOptions = params.options.filter((option) =>
-    /^q\d+_opt_\d+$/u.test(option.optionId),
-  );
-  if (questionOptions.length > 0) {
-    return {
-      kind: "question",
-      options: boundedInputOptions(questionOptions),
-    };
-  }
-  const planOptions = params.options.filter((option) =>
-    /^plan_(?:opt_\d+|approve|revise|reject_and_exit)$/u.test(option.optionId),
-  );
-  if (planOptions.length > 0) {
-    return {
-      kind: "plan",
-      options: boundedInputOptions(planOptions),
-    };
-  }
-  return null;
+  if (
+    !Array.isArray(params.options)
+    || params.options.length === 0
+    || params.options.length > MAX_INPUT_OPTIONS
+    || !isTrustedKimiInputToolKind(params.toolCall.kind)
+  ) return null;
+
+  const title = params.toolCall.title;
+  const kind = title === "AskUserQuestion"
+    ? "question" as const
+    : title === "ExitPlanMode"
+      ? "plan" as const
+      : null;
+  if (!kind || permissionQuestionText(params, kind) === null) return null;
+
+  const options = parseKimiInputOptions(params.options);
+  if (!options) return null;
+  return kind === "question"
+    ? kimiQuestionInputOptions(options)
+    : kimiPlanInputOptions(options);
 }
 
-function boundedInputOptions(options: PermissionOption[]): KimiInputOption[] {
-  if (options.length > MAX_INPUT_OPTIONS) {
-    throw new Error(
-      `Kimi Code sent more than ${MAX_INPUT_OPTIONS} input options.`,
-    );
-  }
-  const seen = new Set<string>();
-  return options.map((option) => {
+interface ParsedKimiInputOption extends KimiInputOption {
+  kind: PermissionOption["kind"];
+}
+
+function parseKimiInputOptions(
+  options: PermissionOption[],
+): ParsedKimiInputOption[] | null {
+  const optionIds = new Set<string>();
+  const optionLabels = new Set<string>();
+  const parsed: ParsedKimiInputOption[] = [];
+  for (const option of options) {
     if (
-      !option.optionId
+      typeof option?.optionId !== "string"
+      || option.optionId.length === 0
       || option.optionId.length > 160
-      || seen.has(option.optionId)
-    ) throw new Error("Kimi Code sent an invalid input option identity.");
-    seen.add(option.optionId);
-    return {
+      || optionIds.has(option.optionId)
+      || !isSafeInteractionDisplayText(option.name, {
+        maxChars: MAX_INPUT_OPTION_LABEL_CHARS,
+      })
+      || !isKimiPermissionOptionKind(option.kind)
+    ) return null;
+    const labelIdentity = interactionDisplayIdentity(option.name);
+    if (optionLabels.has(labelIdentity)) return null;
+    optionIds.add(option.optionId);
+    optionLabels.add(labelIdentity);
+    parsed.push({
       id: option.optionId,
-      label: bounded(option.name || option.optionId),
-    };
-  });
+      label: option.name,
+      kind: option.kind,
+    });
+  }
+  return parsed;
+}
+
+function kimiQuestionInputOptions(
+  options: ParsedKimiInputOption[],
+): KimiInputOptions | null {
+  let questionIndex: string | undefined;
+  let skipSeen = false;
+  const optionIndexes = new Set<number>();
+  const inputOptions: KimiInputOption[] = [];
+  for (const option of options) {
+    const match = /^q(\d+)_(opt_(\d+)|skip)$/u.exec(option.id);
+    if (!match || (questionIndex !== undefined && match[1] !== questionIndex)) {
+      return null;
+    }
+    questionIndex = match[1];
+    if (match[2] === "skip") {
+      if (skipSeen || option.kind !== "reject_once") return null;
+      skipSeen = true;
+      continue;
+    }
+    const optionIndex = Number(match[3]);
+    if (
+      option.kind !== "allow_once"
+      || !Number.isSafeInteger(optionIndex)
+      || optionIndexes.has(optionIndex)
+    ) return null;
+    optionIndexes.add(optionIndex);
+    inputOptions.push({ id: option.id, label: option.label });
+  }
+  if (inputOptions.length === 0) return null;
+  const orderedIndexes = [...optionIndexes].sort((left, right) => left - right);
+  if (orderedIndexes.some((value, index) => value !== index)) return null;
+  return { kind: "question", options: inputOptions };
+}
+
+function kimiPlanInputOptions(
+  options: ParsedKimiInputOption[],
+): KimiInputOptions | null {
+  let approveSeen = false;
+  let reviseSeen = false;
+  let rejectAndExitSeen = false;
+  const optionIndexes = new Set<number>();
+  for (const option of options) {
+    const match = /^plan_opt_(\d+)$/u.exec(option.id);
+    if (match) {
+      const optionIndex = Number(match[1]);
+      if (
+        option.kind !== "allow_once"
+        || !Number.isSafeInteger(optionIndex)
+        || optionIndexes.has(optionIndex)
+      ) return null;
+      optionIndexes.add(optionIndex);
+      continue;
+    }
+    if (option.id === "plan_approve") {
+      if (approveSeen || option.kind !== "allow_once") return null;
+      approveSeen = true;
+      continue;
+    }
+    if (option.id === "plan_revise") {
+      if (reviseSeen || option.kind !== "reject_once") return null;
+      reviseSeen = true;
+      continue;
+    }
+    if (option.id === "plan_reject_and_exit") {
+      if (rejectAndExitSeen || option.kind !== "reject_once") return null;
+      rejectAndExitSeen = true;
+      continue;
+    }
+    return null;
+  }
+  if (
+    reviseSeen === false
+    || rejectAndExitSeen === false
+    || approveSeen === (optionIndexes.size > 0)
+    || optionIndexes.size === 1
+  ) return null;
+  const orderedIndexes = [...optionIndexes].sort((left, right) => left - right);
+  if (orderedIndexes.some((value, index) => value !== index)) return null;
+  return {
+    kind: "plan",
+    options: options.map(({ id, label }) => ({ id, label })),
+  };
+}
+
+function isTrustedKimiInputToolKind(
+  kind: ToolKind | null | undefined,
+): boolean {
+  return kind === undefined || kind === null || kind === "other";
+}
+
+function isKimiPermissionOptionKind(
+  kind: unknown,
+): kind is PermissionOption["kind"] {
+  return kind === "allow_once"
+    || kind === "allow_always"
+    || kind === "reject_once"
+    || kind === "reject_always";
 }
 
 async function kimiInputPermission(
@@ -892,7 +1010,7 @@ async function kimiInputPermission(
     questions: [{
       id: questionId,
       header: input.kind === "plan" ? "Plan review" : "Question",
-      question: permissionQuestionText(displayParams, input.kind),
+      question: permissionQuestionText(displayParams, input.kind)!,
       isOther: false,
       isSecret: false,
       allowMultiple: false,
@@ -919,37 +1037,44 @@ async function kimiInputPermission(
   });
   if (signal.aborted) return { outcome: { outcome: "cancelled" } };
   const answer = answers[questionId]?.[0];
-  const selectedIndex = input.options.findIndex((option) =>
+  const selected = input.options.find((option) =>
     option.id === answer || option.label === answer,
   );
-  const selected = selectedIndex >= 0
-    ? kimiInputOptions(params)?.options[selectedIndex]
+  const sourceInput = kimiInputOptions(params);
+  const sourceOption = sourceInput?.kind === input.kind && selected
+    ? sourceInput.options.find(({ id }) => id === selected.id)
     : undefined;
-  return selected
-    ? { outcome: { outcome: "selected", optionId: selected.id } }
+  return sourceOption
+    ? { outcome: { outcome: "selected", optionId: sourceOption.id } }
     : { outcome: { outcome: "cancelled" } };
 }
 
 function permissionQuestionText(
   params: Pick<RequestPermissionRequest, "toolCall">,
   kind: KimiInputOptions["kind"],
-): string {
+): string | null {
+  let text: string | undefined;
   for (const content of params.toolCall.content ?? []) {
     const value = objectValue(content);
     if (value?.type === "content" && typeof value.content === "object") {
       const nested = objectValue(value.content);
       if (nested?.type === "text" && typeof nested.text === "string") {
-        return bounded(nested.text);
+        text = nested.text;
+        break;
       }
     }
     if (value?.type === "text" && typeof value.text === "string") {
-      return bounded(value.text);
+      text = value.text;
+      break;
     }
   }
-  return bounded(
-    params.toolCall.title
-      || (kind === "plan" ? "How should Kimi Code proceed with this plan?" : "Kimi Code needs your input."),
-  );
+  text ??= kind === "plan"
+    ? "How should Kimi Code proceed with this plan?"
+    : "Kimi Code needs your input.";
+  return isSafeInteractionDisplayText(text, {
+    allowLineBreaks: true,
+    maxChars: MAX_INPUT_QUESTION_CHARS,
+  }) ? text : null;
 }
 
 export function permissionDisplayIsSafe(

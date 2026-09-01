@@ -7,9 +7,17 @@ import {
 } from "@opencode-ai/sdk/v2";
 
 import { environmentValue } from "../environment";
+import {
+  interactionDisplayIdentity,
+  isSafeInteractionDisplayText,
+} from "./approval-display";
 import type { AgentInputRequest } from "./interactions";
 
 const MAX_INTERACTION_ID_CHARS = 256;
+const MAX_QUESTION_CHARS = 16_384;
+const MAX_HEADER_CHARS = 256;
+const MAX_OPTION_LABEL_CHARS = 512;
+const MAX_OPTION_DESCRIPTION_CHARS = 4_096;
 const MAX_INPUT_QUESTIONS = 3;
 const MAX_INPUT_OPTIONS = 20;
 
@@ -84,6 +92,7 @@ export function openCodeQuestionPayload(value: unknown): QuestionInfo[] {
   if (value.length > MAX_INPUT_QUESTIONS) {
     throw new Error("OpenCode sent more questions than Inertia can represent safely.");
   }
+  const promptIdentities = new Set<string>();
   return value.map((rawQuestion, questionIndex) => {
     const question = objectValue(rawQuestion);
     if (
@@ -99,6 +108,23 @@ export function openCodeQuestionPayload(value: unknown): QuestionInfo[] {
     if (question.options.length > MAX_INPUT_OPTIONS) {
       throw new Error(`OpenCode sent too many options for question ${questionIndex + 1}.`);
     }
+    const prompt = strictOpenCodeInteractionText(
+      question.question,
+      `question ${questionIndex + 1} prompt`,
+      MAX_QUESTION_CHARS,
+      true,
+    );
+    const promptIdentity = interactionDisplayIdentity(prompt);
+    if (promptIdentities.has(promptIdentity)) {
+      throw new Error("OpenCode sent duplicate question prompts.");
+    }
+    promptIdentities.add(promptIdentity);
+    const header = strictOpenCodeInteractionText(
+      question.header,
+      `question ${questionIndex + 1} header`,
+      MAX_HEADER_CHARS,
+    );
+    const optionLabelIdentities = new Set<string>();
     const options = question.options.map((rawOption, optionIndex) => {
       const option = objectValue(rawOption);
       if (
@@ -110,14 +136,31 @@ export function openCodeQuestionPayload(value: unknown): QuestionInfo[] {
           `OpenCode sent an invalid option ${optionIndex + 1} for question ${questionIndex + 1}.`,
         );
       }
+      const label = strictOpenCodeInteractionText(
+        option.label,
+        `option ${optionIndex + 1} label for question ${questionIndex + 1}`,
+        MAX_OPTION_LABEL_CHARS,
+      );
+      const labelIdentity = interactionDisplayIdentity(label);
+      if (optionLabelIdentities.has(labelIdentity)) {
+        throw new Error(
+          `OpenCode sent a duplicate option label for question ${questionIndex + 1}.`,
+        );
+      }
+      optionLabelIdentities.add(labelIdentity);
       return {
-        label: option.label,
-        description: option.description,
+        label,
+        description: strictOpenCodeInteractionText(
+          option.description,
+          `option ${optionIndex + 1} description for question ${questionIndex + 1}`,
+          MAX_OPTION_DESCRIPTION_CHARS,
+          true,
+        ),
       };
     });
     return {
-      question: question.question,
-      header: question.header,
+      question: prompt,
+      header,
       options,
       ...(question.multiple !== undefined ? { multiple: question.multiple } : {}),
       ...(question.custom !== undefined ? { custom: question.custom } : {}),
@@ -154,6 +197,18 @@ export function openCodeQuestionId(index: number): string {
 
 export function openCodeOptionId(index: number): string {
   return `option-${index + 1}`;
+}
+
+function strictOpenCodeInteractionText(
+  value: unknown,
+  label: string,
+  maxChars: number,
+  allowLineBreaks = false,
+): string {
+  if (!isSafeInteractionDisplayText(value, { allowLineBreaks, maxChars })) {
+    throw new Error(`OpenCode sent invalid ${label}.`);
+  }
+  return value;
 }
 
 function objectValue(value: unknown): Record<string, unknown> | undefined {

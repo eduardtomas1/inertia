@@ -1,6 +1,13 @@
 import type { AgentInputRequest } from "./interactions";
+import {
+  interactionDisplayIdentity,
+  isSafeInteractionDisplayText,
+} from "./approval-display";
 
-const MAX_EVENT_TEXT_CHARS = 1024 * 1024;
+const MAX_QUESTION_CHARS = 16_384;
+const MAX_HEADER_CHARS = 256;
+const MAX_OPTION_LABEL_CHARS = 512;
+const MAX_OPTION_DESCRIPTION_CHARS = 4_096;
 const MAX_INPUT_QUESTIONS = 4;
 const MAX_INPUT_OPTIONS = 4;
 
@@ -32,14 +39,18 @@ export function claudeQuestions(
       const text = strictClaudeText(
         question.question,
         `question ${index + 1}`,
+        MAX_QUESTION_CHARS,
+        true,
       );
-      if (prompts.has(text)) {
+      const promptIdentity = interactionDisplayIdentity(text);
+      if (prompts.has(promptIdentity)) {
         throw new Error("Claude sent duplicate question prompts.");
       }
-      prompts.add(text);
+      prompts.add(promptIdentity);
       const header = strictClaudeText(
         question.header,
         `question ${index + 1} header`,
+        MAX_HEADER_CHARS,
       );
       if (!Array.isArray(question.options)) {
         throw new Error(`Claude sent invalid options for question ${index + 1}.`);
@@ -81,19 +92,23 @@ export function claudeQuestions(
           const label = strictClaudeText(
             item.label,
             `option ${optionIndex + 1} label`,
+            MAX_OPTION_LABEL_CHARS,
           );
-          if (optionLabels.has(label)) {
+          const labelIdentity = interactionDisplayIdentity(label);
+          if (optionLabels.has(labelIdentity)) {
             throw new Error(
               `Claude sent a duplicate option label for question ${index + 1}.`,
             );
           }
-          optionLabels.add(label);
+          optionLabels.add(labelIdentity);
           return {
             id: `option-${optionIndex + 1}`,
             label,
             description: strictClaudeText(
               item.description,
               `option ${optionIndex + 1} description`,
+              MAX_OPTION_DESCRIPTION_CHARS,
+              true,
               true,
             ),
           };
@@ -106,13 +121,16 @@ export function claudeQuestions(
 function strictClaudeText(
   value: unknown,
   label: string,
+  maxChars: number,
+  allowLineBreaks = false,
   allowEmpty = false,
 ): string {
   if (
-    typeof value !== "string"
-    || value.includes("\0")
-    || value.length > MAX_EVENT_TEXT_CHARS
-    || (!allowEmpty && value.trim().length === 0)
+    !isSafeInteractionDisplayText(value, {
+      allowEmpty,
+      allowLineBreaks,
+      maxChars,
+    })
   ) {
     throw new Error(`Claude sent an invalid ${label}.`);
   }

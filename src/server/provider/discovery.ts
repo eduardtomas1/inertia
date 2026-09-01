@@ -34,6 +34,10 @@ import { windowsCodexExecutableCandidates } from "./windows-codex";
 import { cursorAgentCommandArgs } from "./cursor-command";
 
 const DEFAULT_DETECTION_TIMEOUT_MS = 2_500;
+const CODEX_PATH_RESOLUTION_ENVIRONMENT_KEYS = new Set([
+  "CODEX_HOME",
+  "CODEX_INSTALL_DIR",
+]);
 
 function cursorExecutablePreference(executable: string): number {
   const name = basename(executable).toLowerCase().replace(/\.(?:bat|cmd|exe)$/u, "");
@@ -276,19 +280,16 @@ export async function detectProvider(
     options.refreshEnvironment === true,
   );
   const probeAuthentication = options.probeAuthentication !== false;
-  const environment: ProviderEnvironment = {
-    env: probeAuthentication
-      ? providerChildEnvironment(providerId, discoveredEnvironment.env)
-      : credentialFreeProviderEnvironment(discoveredEnvironment.env),
+  const probeEnvironment: ProviderEnvironment = {
+    env: credentialFreeProviderEnvironment(discoveredEnvironment.env),
     pathEntries: discoveredEnvironment.pathEntries,
   };
-  const candidateEnvironment: ProviderEnvironment = !probeAuthentication
-    && providerId === "codex"
+  const candidateEnvironment: ProviderEnvironment = providerId === "codex"
     ? {
         env: {
-          ...environment.env,
+          ...probeEnvironment.env,
           ...Object.fromEntries(
-            ["CODEX_HOME", "CODEX_INSTALL_DIR"].flatMap((name) => {
+            [...CODEX_PATH_RESOLUTION_ENVIRONMENT_KEYS].flatMap((name) => {
               const value = environmentValue(
                 discoveredEnvironment.env,
                 name,
@@ -298,9 +299,9 @@ export async function detectProvider(
             }),
           ),
         },
-        pathEntries: environment.pathEntries,
+        pathEntries: probeEnvironment.pathEntries,
       }
-    : environment;
+    : probeEnvironment;
   const candidateCommands = providerId === "cursor" && command === PROVIDER_INFO.cursor.command
     ? [command, "agent"]
     : [command];
@@ -329,7 +330,7 @@ export async function detectProvider(
   }
 
   const versionProbes = await Promise.all(candidates.map(async (executable) => {
-    const probe = await runProbe(executable, ["--version"], environment, cwd, timeoutMs);
+    const probe = await runProbe(executable, ["--version"], probeEnvironment, cwd, timeoutMs);
     const acpProbe = (providerId === "cursor" || providerId === "kimi")
       && probe.started && !probe.timedOut && probe.exitCode === 0
       ? await runProbe(
@@ -337,7 +338,7 @@ export async function detectProvider(
           providerId === "cursor"
             ? cursorAgentCommandArgs(executable, ["acp", "--help"])
             : ["acp", "--help"],
-          environment,
+          probeEnvironment,
           cwd,
           timeoutMs,
         )
@@ -352,7 +353,7 @@ export async function detectProvider(
         : kimiCandidateIsIdentified(executable, probe.output, acpProbe.output))
     );
     const appServerProbe = providerId === "codex" && probe.started && !probe.timedOut && probe.exitCode === 0
-      ? await runProbe(executable, ["app-server", "--help"], environment, cwd, timeoutMs)
+      ? await runProbe(executable, ["app-server", "--help"], probeEnvironment, cwd, timeoutMs)
       : undefined;
     const appServerReady = !appServerProbe || (
       appServerProbe.started
@@ -422,6 +423,25 @@ export async function detectProvider(
     };
   }
 
+  const versionCleanupConfirmed = versionProbes.every(
+    (probe) => probe.cleanupConfirmed,
+  );
+  if (!versionCleanupConfirmed || (providerId === "codex" && !selected.appServerReady)) {
+    return {
+      provider,
+      available: true,
+      executable: selected.executable,
+      ...(selected.version ? { version: selected.version } : {}),
+      installState: "installed",
+      authState: "unknown",
+      canRun: false,
+      cleanupConfirmed: versionCleanupConfirmed,
+      statusMessage: !versionCleanupConfirmed
+        ? `${provider.name} probe cleanup could not be confirmed stopped`
+        : "Codex App Server is unsupported; update the selected CLI",
+    };
+  }
+
   const authArgs = providerId === "cursor"
     ? cursorAgentCommandArgs(
         selected.executable,
@@ -431,7 +451,10 @@ export async function detectProvider(
   const authProbe = await runProbe(
     selected.executable,
     authArgs,
-    environment,
+    {
+      env: providerChildEnvironment(providerId, discoveredEnvironment.env),
+      pathEntries: discoveredEnvironment.pathEntries,
+    },
     cwd,
     timeoutMs,
   );
@@ -446,9 +469,6 @@ export async function detectProvider(
   const runtimeNegotiatesAuthentication = providerId === "kimi"
     && authState === "unknown";
   const appServerReady = selected.appServerReady;
-  const versionCleanupConfirmed = versionProbes.every(
-    (probe) => probe.cleanupConfirmed,
-  );
   const cleanupConfirmed = authProbe.cleanupConfirmed === true
     && versionCleanupConfirmed;
   const canRun = (authenticated || runtimeNegotiatesAuthentication)

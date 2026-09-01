@@ -254,8 +254,8 @@ Download [Inertia v0.0.46](https://github.com/eduardtomas1/inertia/releases/tag/
 
 | Platform | Architecture | Package | Update delivery after the first manual install |
 | --- | --- | --- | --- |
-| macOS | Apple silicon (arm64) | DMG or ZIP | Manual while Developer ID signing and notarization are unavailable |
-| macOS | Intel (x64) | DMG or ZIP | Manual while Developer ID signing and notarization are unavailable |
+| macOS 13 or later | Apple silicon (arm64) | DMG or ZIP | Manual while Developer ID signing and notarization are unavailable |
+| macOS 13 or later | Intel (x64) | DMG or ZIP | Manual while Developer ID signing and notarization are unavailable |
 | Windows | x64 | Installer | Manual while Authenticode signing is unavailable |
 | Windows | ARM64 | Installer | Manual while Authenticode signing is unavailable |
 | Linux | x64 | AppImage | Verified in-app updates |

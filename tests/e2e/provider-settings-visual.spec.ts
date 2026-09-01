@@ -99,13 +99,14 @@ test("keeps provider settings coherent across details, themes, and widths", asyn
   await page.getByRole("tab", { name: "Configuration" }).click();
   await page.getByRole("button", { name: "Advanced", exact: true }).click();
   await expect(page.getByText("New chat defaults", { exact: true })).toBeVisible();
+  await app.resizeWindow(1440, 1180);
   await capture(testInfo, "provider-settings-advanced-light-wide");
 
   await page.getByRole("button", { name: "General", exact: true }).click();
   await page.getByRole("radio", { name: "Dark" }).click();
   await page.getByRole("button", { name: "Providers", exact: true }).click();
   await page.getByRole("button", { name: "Advanced", exact: true }).click();
-  await app.resizeWindow(760, 800);
+  await app.resizeWindow(760, 1100);
   const narrowGeometry = await Promise.all([rail.boundingBox(), editor.boundingBox()]);
   expect(narrowGeometry[0]?.y ?? 0).toBeLessThan(narrowGeometry[1]?.y ?? 0);
   await app.expectNoViewportOverflow();

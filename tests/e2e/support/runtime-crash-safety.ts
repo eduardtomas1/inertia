@@ -745,7 +745,10 @@ export async function expectRuntimeCrashRecovery(
   expect(await page.evaluate(() =>
     Reflect.get(window, "__inertiaNoReloadMarker"))).toBe(marker);
   await expect(page.getByRole("heading", { name: "New chat", level: 1 })).toBeVisible();
-  const newChat = page.getByRole("button", { name: "New chat" }).first();
+  const newChat = page.getByRole("button", {
+    name: "New chat",
+    exact: true,
+  });
   const interruptedNotice = page.getByText(
     "The previous run ended when Inertia closed. Send another message to continue.",
   );

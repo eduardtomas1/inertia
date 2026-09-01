@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
-import { ChevronDown, FolderOpen, GitBranch, Globe2, Info, ListFilter, MessageSquarePlus, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, PictureInPicture2, Plus, RadioTower, Settings, SunMoon } from "lucide-react";
+import { ChevronDown, FolderOpen, GitBranch, Globe2, Info, ListFilter, MessageSquarePlus, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, PictureInPicture2, RadioTower, Settings, SunMoon } from "lucide-react";
 import type { Conversation, GitBranchInfo, GitStatusSnapshot, Project, ProjectAction, ThemePreference } from "@shared/contracts";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import { conversationContextMismatch } from "../lib/newConversation";
@@ -224,7 +224,7 @@ export function WorkspaceHeader({
             {actions.length > 0 && (
               <div className="header-popover-anchor" data-header-menu="action">
                 <button type="button" className="header-button" aria-haspopup="menu" aria-controls="workspace-header-action-menu" aria-expanded={menu === "action"} onClick={() => setMenu(menu === "action" ? null : "action")}>
-                  <Plus size={14} /><span>Add action</span>
+                  <span className="header-plus-icon" aria-hidden="true" /><span>Add action</span>
                 </button>
                 {menu === "action" && (
                   <div className="header-popover action-header-popover" id="workspace-header-action-menu" role="menu" aria-label="Project actions" onKeyDown={navigateMenuItems}>

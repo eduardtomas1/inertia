@@ -63,6 +63,7 @@ import {
 } from "./settingsSectionLoaders";
 import { useLoadedSurface } from "../hooks/useLoadedSurface";
 import { ThemeLibrary } from "./ThemeLibrary";
+import "./SettingsView.css";
 
 export type SettingsViewProps = {
   target?: {

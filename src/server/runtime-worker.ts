@@ -1,5 +1,6 @@
 import {
   parseRuntimeWorkerCommand,
+  type RuntimeRestartReason,
   type RuntimeWorkerEvent,
 } from "../node/runtime-process-protocol.js";
 import { startRuntime, type RunningRuntime } from "./index.js";
@@ -44,6 +45,7 @@ let updatePreparation: {
 } | null = null;
 let lastReleasedUpdatePreparation: { operationId: string; generation: number } | null = null;
 let shutdownExitCode = 0;
+let restartReason: RuntimeRestartReason | null = null;
 let packageSmokePdfController: AbortController | null = null;
 let packageSmokePdfOperation: Promise<void> | null = null;
 let packageSmokeImageController: AbortController | null = null;
@@ -120,6 +122,17 @@ async function shutdown(exitCode = 0): Promise<void> {
   // startRuntime owns completion if a shutdown request races its startup.
   if (starting && !activeRuntime) return;
   await finishShutdown(activeRuntime, shutdownExitCode);
+}
+
+function requestRuntimeRestart(reason: RuntimeRestartReason): void {
+  try {
+    if (!restartReason) {
+      restartReason = reason;
+      post({ type: "runtime.restart-requested", reason });
+    }
+  } finally {
+    void shutdown(1);
+  }
 }
 
 parentPort.on("message", (messageEvent) => {
@@ -587,7 +600,7 @@ parentPort.on("message", (messageEvent) => {
         ...(command.options.runtimeProcessGuardianPath
           ? { darwinGuardianPath: command.options.runtimeProcessGuardianPath }
           : {}),
-        onTainted: () => { void shutdown(1); },
+        onTainted: () => requestRuntimeRestart("owned-process-tainted"),
       },
     );
   } catch (error) {
@@ -628,7 +641,9 @@ parentPort.on("message", (messageEvent) => {
       snapshotDigest: authority.snapshotDigest,
       currentRuntimeGenerationId,
     }),
-    onOwnedProcessCleanupUnconfirmed: () => { void shutdown(1); },
+    onOwnedProcessCleanupUnconfirmed: () => requestRuntimeRestart(
+      "owned-process-cleanup-unconfirmed",
+    ),
     backendCredentials: credentials,
     attachments,
     conversationAttachmentStoreOperations: conversationAttachmentStore.runner,

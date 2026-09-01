@@ -103,6 +103,34 @@ describe("provider maintenance runner", () => {
     expect(terminateProcessTree).not.toHaveBeenCalled();
   });
 
+  it("runs npm with its owning Node installation first on PATH", async () => {
+    const nvmRoot = "/home/ada/.nvm/versions/node/v22.19.0";
+    let spawnedEnvironment: NodeJS.ProcessEnv | undefined;
+    const result = await runProviderMaintenanceAction(action({
+      executable: `${nvmRoot}/lib/node_modules/npm/bin/npm-cli.js`,
+      args: ["install", "-g", "@openai/codex@latest"],
+      environmentPathPrefix: `${nvmRoot}/bin`,
+      lockKey: "package-manager:npm-global",
+      installMethod: "npm-global",
+    }), {
+      environment: {
+        HOME: "/home/ada",
+        PATH: "/usr/bin:/bin",
+      },
+      signal: new AbortController().signal,
+      spawn: (_command, _args, options) => {
+        spawnedEnvironment = options.env;
+        const child = fakeChild();
+        queueMicrotask(() => child.emit("close", 0, null));
+        return child;
+      },
+    });
+
+    expect(result.status).toBe("succeeded");
+    expect(spawnedEnvironment?.PATH)
+      .toBe(`${nvmRoot}/bin:/usr/bin:/bin`);
+  });
+
   it("routes Windows npm.cmd through a quoted cmd.exe invocation without generic shell mode", async () => {
     const calls: Array<{
       command: string;
@@ -119,6 +147,7 @@ describe("provider maintenance runner", () => {
     const result = await runProviderMaintenanceAction(action({
       executable: "C:\\Users\\Ada\\AppData\\Roaming\\npm\\npm.cmd",
       args: ["install", "-g", "@openai/codex@latest"],
+      environmentPathPrefix: "C:\\Users\\Ada\\AppData\\Roaming\\npm",
       lockKey: "package-manager:npm-global",
       installMethod: "npm-global",
     }), {
@@ -147,6 +176,9 @@ describe("provider maintenance runner", () => {
       shell: false,
       windowsVerbatimArguments: true,
     });
+    expect(calls[0]?.options.env?.PATH).toBe(
+      "C:\\Users\\Ada\\AppData\\Roaming\\npm;C:\\Tools",
+    );
   });
 
   it("cancels the owned process and reports cancellation", async () => {

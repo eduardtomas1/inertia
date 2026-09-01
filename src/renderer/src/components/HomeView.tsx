@@ -2,13 +2,18 @@ import { FolderPlus, MessageSquarePlus } from "lucide-react";
 import type { Project } from "@shared/contracts";
 
 import type { ConnectionStatus } from "../hooks/useInertiaConnection";
+import "./HomeView.css";
 
 interface HomeViewProps {
-  projects: Project[];
-  connectionStatus: ConnectionStatus;
-  importingProject: boolean;
-  onCreateConversation: (project: Project) => void;
-  onImportProject: () => void;
+  connection: {
+    snapshot: { projects: Project[] } | null;
+    status: ConnectionStatus;
+  };
+  busyAction: string | null;
+  actions: {
+    createConversation: (project: Project) => void;
+    importProject: () => Promise<void>;
+  };
 }
 
 function projectLocation(project: Project): string {
@@ -22,13 +27,12 @@ function projectLocation(project: Project): string {
 }
 
 export function HomeView({
-  projects,
-  connectionStatus,
-  importingProject,
-  onCreateConversation,
-  onImportProject,
+  connection,
+  busyAction,
+  actions,
 }: HomeViewProps): React.JSX.Element {
-  const online = connectionStatus === "online";
+  const projects = connection.snapshot?.projects ?? [];
+  const online = connection.status === "online";
   return (
     <main className="home-view" aria-labelledby="home-view-title">
       <section className="home-launcher">
@@ -46,7 +50,7 @@ export function HomeView({
                   type="button"
                   className="home-project"
                   disabled={!online}
-                  onClick={() => onCreateConversation(project)}
+                  onClick={() => actions.createConversation(project)}
                   aria-label={`New chat in ${project.name}`}
                 >
                   <span
@@ -80,11 +84,11 @@ export function HomeView({
         <button
           type="button"
           className="home-add-project"
-          disabled={!online || importingProject}
-          onClick={onImportProject}
+          disabled={!online || busyAction === "project.create"}
+          onClick={() => void actions.importProject()}
         >
           <FolderPlus size={15} />
-          <span>{importingProject ? "Adding project…" : "Add project"}</span>
+          <span>{busyAction === "project.create" ? "Adding project…" : "Add project"}</span>
         </button>
       </section>
     </main>

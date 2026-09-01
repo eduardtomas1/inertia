@@ -956,7 +956,7 @@ function SidebarView({
         }}
       >
         <div className="sidebar-brand drag-region">
-          <button type="button" className="brand-lockup no-drag" aria-label="Go to home" aria-current={view === "home" ? "page" : undefined} onClick={() => navigate("home")}>
+          <button type="button" className="brand-lockup no-drag" aria-label="Go to home" onClick={() => navigate("home")}>
             <img src="./inertia-logo.png" alt="" className="brand-logo" />
             <span className="brand-name">Inertia</span>
           </button>

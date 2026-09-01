@@ -28,10 +28,8 @@ import type { CommandWithoutId } from "../lib/runtimeCommands";
 import { rootGitMutationScope } from "../utils/workspaceGit";
 import { AppNavigationOverlays } from "./AppNavigationOverlays";
 import { AppStatusOverlays } from "./AppStatusOverlays";
-import { HomeView } from "./HomeView";
 import type { CommitDialogProps } from "./CommitDialog";
 import { PaneResizeHandle } from "./PaneResizeHandle";
-import { LoadingMark } from "./ui";
 import { WorkspaceHeader } from "./WorkspaceHeader";
 import {
   WorkspaceScene,
@@ -47,7 +45,6 @@ import {
   loadDailyWorkDialog,
   loadMultiSpawnDialog,
   scheduleFrequentSurfacePrefetch,
-  loadUsageView,
 } from "./lazySurfaceLoaders";
 
 const RootCommitDialog = lazy(async () => ({
@@ -66,9 +63,7 @@ const ThreadNotifications = lazy(async () => ({
 const Sidebar = lazy(async () => ({
   default: (await import("./Sidebar")).Sidebar,
 }));
-const UsageView = lazy(async () => ({
-  default: (await loadUsageView()).UsageView,
-}));
+const NonWorkspaceView = lazy(() => import("./NonWorkspaceView"));
 
 type Connection = ReturnType<typeof useInertiaConnection>;
 type AppUpdate = ReturnType<typeof useAppUpdate>;
@@ -625,29 +620,25 @@ export function AppLayout({
             ref={workspaceBodyRef}
             id="workspace-content"
             className={`workspace-body${
-              view === "workspace" && !splitConversationId && toolsVisible
-                ? " has-tools"
-                : ""
-            }${view === "workspace" && !splitConversationId && stackedTools
+              !splitConversationId && toolsVisible ? " has-tools" : ""
+            }${!splitConversationId && stackedTools
               ? " is-tools-stacked"
               : ""}`}
             style={workspaceBodyStyle}
           >
-            {view === "home" ? (
-              <HomeView
-                projects={connection.snapshot?.projects ?? []}
-                connectionStatus={connection.status}
-                importingProject={busyAction === "project.create"}
-                onCreateConversation={actions.createConversation}
-                onImportProject={() => void actions.importProject()}
-              />
-            ) : view === "usage" ? (
+            {view === "home" || view === "usage" ? (
               <Suspense fallback={(
-                <div className="workspace-tool-loading usage-surface-loading">
-                  <LoadingMark label="Loading usage" />
+                <div className="workspace-tool-loading usage-surface-loading" role="status">
+                  Loading…
                 </div>
               )}>
-                <UsageView {...usage} />
+                <NonWorkspaceView
+                  view={view}
+                  connection={connection}
+                  busyAction={busyAction}
+                  actions={actions}
+                  usage={usage}
+                />
               </Suspense>
             ) : (
               <WorkspaceScene {...scene} />

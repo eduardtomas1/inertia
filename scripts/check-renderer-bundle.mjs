@@ -9,7 +9,9 @@ const kibibyte = 1024;
 // visible even when Rollup moves shared modules between chunks.
 const budgets = {
   entryJavaScript: 205 * kibibyte,
-  mainWorkbenchFirstLoadJavaScript: 700 * kibibyte,
+  // The project launcher adds only its deferred route selector here; its UI
+  // and CSS stay outside the initial workbench closure.
+  mainWorkbenchFirstLoadJavaScript: 701 * kibibyte,
   detachedChatFirstLoadJavaScript: 535 * kibibyte,
   entryCss: 340 * kibibyte,
   detachedChatCss: 8 * kibibyte,

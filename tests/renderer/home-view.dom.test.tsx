@@ -42,11 +42,12 @@ describe("global project launcher", () => {
     const onCreateConversation = vi.fn();
     render(
       <HomeView
-        projects={projects}
-        connectionStatus="online"
-        importingProject={false}
-        onCreateConversation={onCreateConversation}
-        onImportProject={vi.fn()}
+        connection={{ snapshot: { projects }, status: "online" }}
+        busyAction={null}
+        actions={{
+          createConversation: onCreateConversation,
+          importProject: vi.fn(),
+        }}
       />,
     );
 
@@ -67,11 +68,12 @@ describe("global project launcher", () => {
   it("keeps project actions safe while the runtime is offline", () => {
     render(
       <HomeView
-        projects={projects}
-        connectionStatus="offline"
-        importingProject={false}
-        onCreateConversation={vi.fn()}
-        onImportProject={vi.fn()}
+        connection={{ snapshot: { projects }, status: "offline" }}
+        busyAction={null}
+        actions={{
+          createConversation: vi.fn(),
+          importProject: vi.fn(),
+        }}
       />,
     );
 
@@ -85,11 +87,12 @@ describe("global project launcher", () => {
     const onImportProject = vi.fn();
     render(
       <HomeView
-        projects={[]}
-        connectionStatus="online"
-        importingProject={false}
-        onCreateConversation={vi.fn()}
-        onImportProject={onImportProject}
+        connection={{ snapshot: { projects: [] }, status: "online" }}
+        busyAction={null}
+        actions={{
+          createConversation: vi.fn(),
+          importProject: onImportProject,
+        }}
       />,
     );
 

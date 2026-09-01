@@ -641,6 +641,13 @@ describe("cross-platform packaged behavior contract", () => {
     expect(workflow).toContain(
       '["Canary job", process.env.PROVIDER_DRIFT_RESULT]',
     );
+    expect(workflow).toContain(
+      '["Linux guardian toolchain", process.env.GUARDIAN_TOOLCHAIN_OUTCOME]',
+    );
+    expect(workflow).toContain(
+      "sudo apt-get install --no-install-recommends --yes binutils linux-libc-dev musl-tools=1.2.4-2",
+    );
+    expect(workflow).toContain("npm run pretest");
     expect(workflow.match(/--connect-timeout 20 --max-time 120/gu)).toHaveLength(2);
   });
 });

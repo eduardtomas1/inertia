@@ -8,13 +8,18 @@ import {
 import type { ChatAttachment } from "@shared/contracts";
 
 import type { ComposerQueuedPrompt } from "./types";
+import {
+  composerMediaQueueConversationId,
+  composerMediaQueueKey,
+} from "./composerQueuedMediaOwnership";
+
+export { composerMediaQueueKey } from "./composerQueuedMediaOwnership";
 
 export const MAX_COMPOSER_QUEUED_PROMPTS = 3;
 export const QUEUED_PROMPTS_CHANGED_EVENT = "inertia:queued-prompts-changed";
 
 const QUEUE_STORAGE_VERSION = "v2";
 const QUEUE_KEY_PREFIX = `inertia:queued-prompts:${QUEUE_STORAGE_VERSION}:`;
-const MEDIA_QUEUE_KEY_PREFIX = `inertia:queued-media:${QUEUE_STORAGE_VERSION}:`;
 const LEGACY_QUEUE_KEY_PREFIX = "inertia:queued-prompts:";
 const MAX_STORED_QUEUE_ENTRIES = 10;
 const MAX_QUEUED_CONTENT_CHARS = 20_000;
@@ -25,10 +30,6 @@ const UUID_PATTERN =
 
 export function composerQueueKey(conversationId: string): string {
   return `${QUEUE_KEY_PREFIX}${conversationId}`;
-}
-
-export function composerMediaQueueKey(conversationId: string): string {
-  return `${MEDIA_QUEUE_KEY_PREFIX}${conversationId}`;
 }
 
 function legacyQueueKey(conversationId: string): string {
@@ -168,6 +169,7 @@ function storeQueue(
   prompts: readonly ComposerQueuedPrompt[],
   notify: boolean,
 ): void {
+  const mediaPrompts = prompts.filter(({ attachments }) => attachments.length > 0);
   setStoredQueue(
     window.localStorage,
     composerQueueKey(conversationId),
@@ -176,7 +178,7 @@ function storeQueue(
   setStoredQueue(
     window.sessionStorage,
     composerMediaQueueKey(conversationId),
-    prompts.filter(({ attachments }) => attachments.length > 0),
+    mediaPrompts,
   );
   if (notify) window.dispatchEvent(new Event(QUEUED_PROMPTS_CHANGED_EVENT));
 }
@@ -289,7 +291,7 @@ export function takeAllSessionQueuedMedia(): ComposerQueuedPrompt[] {
     const keys: string[] = [];
     for (let index = 0; index < window.sessionStorage.length; index += 1) {
       const key = window.sessionStorage.key(index);
-      if (key?.startsWith(MEDIA_QUEUE_KEY_PREFIX)) keys.push(key);
+      if (key && composerMediaQueueConversationId(key) !== null) keys.push(key);
     }
     for (const key of keys) {
       removed.push(...parseQueue(window.sessionStorage.getItem(key), "media"));

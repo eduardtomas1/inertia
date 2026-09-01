@@ -45,7 +45,6 @@ import { useComposerPrefill } from "./useComposerPrefill";
 import { useComposerPromptStash } from "./useComposerPromptStash";
 import { useComposerSkillCompletion } from "./useComposerSkillCompletion";
 import { clearPersistedComposerDraft, persistComposerDraft } from "../../utils/composerDraftPersistence";
-import { composerQueueHasCapacity, composerQueuedAttachmentCount, enqueueComposerPrompt } from "./composerQueuedPrompts";
 
 /*
  * The resume surface only matters once /resume runs, and the composer sits in
@@ -240,7 +239,7 @@ export const Composer = memo(function Composer({
     flushDraftPersistence,
     readDraft: () => draftValueRef.current,
     readState: () => ({
-      attachmentCount: attachmentsRef.current.length + composerQueuedAttachmentCount(conversation.id),
+      attachmentCount: attachmentsRef.current.length,
       conversationContextPending: conversationContextHandoffEnabled && (conversationContext.draftContextPackets.length > 0 || conversationContext.dialog !== null || agentContextRequest !== null),
       fileReferenceCount: fileReferences.length,
       mutationInFlight: attachmentImportingRef.current || submittingRef.current
@@ -720,6 +719,8 @@ export const Composer = memo(function Composer({
     stopping,
   });
   const canSend = primaryAction === "send-ready";
+  const attachmentsAreImages = attachments.every(({ mimeType }) =>
+    chatAttachmentKind(mimeType) === "image");
   const { compactNotice, clearCompactNotice, compact } = useComposerCompaction({
     conversationId: conversation.id, message, canSend, running,
     blocked: attachments.length > 0
@@ -736,7 +737,7 @@ export const Composer = memo(function Composer({
     harnessId: latestTurn?.harnessId ?? null,
     hasDraft: Boolean(message.trim()) || attachments.length > 0,
     textOnly:
-      attachments.every(({ mimeType }) => chatAttachmentKind(mimeType) === "image")
+      attachmentsAreImages
       && !promptContext
       && !previewContextSelected
       && fileReferences.length === 0
@@ -745,24 +746,22 @@ export const Composer = memo(function Composer({
     submitting,
     sending,
   });
-  const canQueue = running && sendEligible
-    && attachments.every(({ mimeType }) => chatAttachmentKind(mimeType) === "image")
-    && !promptContext && !previewContextSelected
-    && fileReferences.length === 0 && contextPacketIds.length === 0
-    && !submitting && !sending
-    && composerQueueHasCapacity(conversation.id);
-  const queueCurrentMessage = (): void => {
+  const canQueue = running && sendEligible && attachmentsAreImages && !promptContext
+    && !previewContextSelected && fileReferences.length === 0 && contextPacketIds.length === 0 && !submitting && !sending;
+  const queueCurrentMessage = async (): Promise<void> => {
     if (!canQueue) return;
-    const content = message.trim() || attachmentFallback; const queuedAttachments = [...attachmentsRef.current];
-    if (!enqueueComposerPrompt(conversation.id, content, queuedAttachments)) return;
+    const queuedConversationId = conversation.id;
+    const queuedMessage = message;
+    const queuedAttachments = attachmentsRef.current;
+    const { enqueueComposerPrompt } = await import("./ComposerQueuedActions");
+    if (conversationIdRef.current !== queuedConversationId || draftValueRef.current !== queuedMessage
+      || attachmentsRef.current !== queuedAttachments || !enqueueComposerPrompt(
+        queuedConversationId, queuedMessage.trim() || attachmentFallback, queuedAttachments,
+      )) return;
     attachmentsRef.current = []; setAttachments([]);
     pendingAttachmentIdsRef.current = new Set(); setPendingAttachmentIds(new Set());
-    flushDraftPersistence();
-    clearPersistedComposerDraft(conversation.id, message);
-    markEditorChanged();
-    draftValueRef.current = "";
-    setMessage("");
-    window.requestAnimationFrame(() => textareaRef.current?.focus());
+    flushDraftPersistence(); clearPersistedComposerDraft(queuedConversationId, queuedMessage);
+    markEditorChanged(); draftValueRef.current = ""; setMessage(""); window.requestAnimationFrame(() => textareaRef.current?.focus());
   };
   const runRouteRepair = async (): Promise<void> => {
     if (routeReadiness.ready || !routeReadiness.action || routeRepairing) return;
@@ -1129,7 +1128,7 @@ export const Composer = memo(function Composer({
           onImportAttachments={importAttachments}
           onSubmit={submit}
           canQueue={canQueue}
-          onQueue={queueCurrentMessage}
+          onQueue={() => void queueCurrentMessage()}
           running={running}
           submissionPending={submissionPending}
           followUpPending={followUpPending}

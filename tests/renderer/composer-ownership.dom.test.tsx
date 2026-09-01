@@ -489,7 +489,8 @@ describe("composer detachment ownership", () => {
     ) ?? "[]")).toHaveLength(3);
     fireEvent.change(textbox, { target: { value: "D stays in the composer" } });
     fireEvent.keyDown(textbox, { key: "Tab" });
-    expect(textbox).toHaveValue("D stays in the composer");
+    await waitFor(() => expect(textbox).toHaveValue("D stays in the composer"));
+    await act(async () => Promise.resolve());
 
     const completeTurn = async (id: string, callCount: number): Promise<void> => {
       view.rerender(<Composer {...composerProps(current, {

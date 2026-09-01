@@ -101,10 +101,17 @@ describe("composer morphing send actions", () => {
       />,
     );
 
-    expect(screen.getByText("Run the release checks")).toBeInTheDocument();
+    expect(await screen.findByText(
+      "Run the release checks",
+      undefined,
+      { timeout: 5_000 },
+    )).toBeInTheDocument();
     expect(screen.getByText("1 of 2")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Send queued message now" }));
-    expect(onSendQueued).toHaveBeenCalledWith("Run the release checks", []);
+    await waitFor(() => expect(onSendQueued).toHaveBeenCalledWith(
+      "Run the release checks",
+      [],
+    ));
     expect(await screen.findByText("Update the changelog")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Remove queued message" }));
     await waitFor(() => expect(screen.queryByRole("list", {
@@ -140,7 +147,7 @@ describe("composer morphing send actions", () => {
       />,
     );
 
-    expect(screen.getByText("1 image")).toBeInTheDocument();
+    expect(await screen.findByText("1 image")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", {
       name: "Send queued message now",
     }));
@@ -174,7 +181,9 @@ describe("composer morphing send actions", () => {
         onReleaseAttachment={onReleaseAttachment}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Remove queued message" }));
+    fireEvent.click(await screen.findByRole("button", {
+      name: "Remove queued message",
+    }));
 
     await waitFor(() => expect(onReleaseAttachment).toHaveBeenCalledTimes(1));
     expect(onReleaseAttachment).toHaveBeenCalledWith(attachment.id);
@@ -207,7 +216,7 @@ describe("composer morphing send actions", () => {
         onReleaseAttachment={onReleaseAttachment}
       />,
     );
-    fireEvent.click(screen.getByRole("button", {
+    fireEvent.click(await screen.findByRole("button", {
       name: "Send queued message now",
     }));
 

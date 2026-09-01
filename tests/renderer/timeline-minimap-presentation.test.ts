@@ -29,6 +29,15 @@ describe("timeline minimap presentation", () => {
     expect(css).toContain("--timeline-marker-progress: 1;");
   });
 
+  it("keeps the current marker visually plain until hover or focus", () => {
+    expect(css).not.toMatch(
+      /\.timeline-minimap button\[aria-current="true"\]::before/u,
+    );
+    expect(css).not.toMatch(
+      /button\[aria-current="true"\]:not\(\[data-emphasized="true"\]\)::before/u,
+    );
+  });
+
   it("keeps the rail monochrome and free of a decorative container", () => {
     const start = css.indexOf(".timeline-minimap {");
     const end = css.indexOf(".response-turn > .message", start);

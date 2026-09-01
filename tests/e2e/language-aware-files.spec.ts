@@ -38,6 +38,14 @@ test.beforeAll(async () => {
         java,
         "utf8",
       );
+      await writeFile(
+        join(workspaceDirectory, "LongFixture.txt"),
+        Array.from(
+          { length: 5_000 },
+          (_, index) => `Long fixture line ${index + 1}`,
+        ).join("\n"),
+        "utf8",
+      );
       await Promise.all(Array.from({ length: 12 }, (_, index) =>
         writeFile(
           join(workspaceDirectory, `zz-fixture-${index + 1}.txt`),
@@ -66,6 +74,8 @@ test.beforeAll(async () => {
           '  return "ready";',
           "}",
           "```",
+          "",
+          "The long-scroll fixture is [LongFixture.txt](LongFixture.txt).",
         ].join("\n"),
         "assistant",
       );
@@ -97,6 +107,22 @@ async function openExactJavaRange(opener: "code" | "link"): Promise<void> {
   await expect(panel.getByTitle("Java recognized locally"))
     .toHaveText("Java");
   await expect(panel.getByText("Lines 41–43", { exact: true })).toBeVisible();
+  const tree = panel.locator('[role="tree"]');
+  await expect(tree).toBeHidden();
+  await expect(panel.getByRole("button", { name: "Show file explorer" }))
+    .toHaveAttribute("aria-pressed", "false");
+  const focusedGeometry = await panel.evaluate((element) => {
+    const panelBounds = element.getBoundingClientRect();
+    const preview = element.querySelector<HTMLElement>(".file-preview")
+      ?.getBoundingClientRect();
+    return preview
+      ? Math.abs(preview.left - panelBounds.left) <= 1
+        && Math.abs(preview.right - panelBounds.right) <= 1
+      : false;
+  });
+  expect(focusedGeometry).toBe(true);
+  await panel.getByRole("button", { name: "Show file explorer" }).click();
+  await expect(tree).toBeVisible();
   await expect(panel.getByRole("treeitem", {
     name: "OrderService.java",
   })).toHaveAttribute("aria-selected", "true");
@@ -125,7 +151,7 @@ async function openExactJavaRange(opener: "code" | "link"): Promise<void> {
       ? {
           browserColumnAligns: Math.abs(search.left - tree.left) <= 1
             && Math.abs(search.right - tree.right) <= 1,
-          columnsMeet: Math.abs(tree.right - preview.left) <= 1,
+          columnsMeet: Math.abs(preview.right - tree.left) <= 1,
           localHeadersAlign: Math.abs(search.top - previewHeader.top) <= 1,
         }
       : null;
@@ -343,5 +369,36 @@ test("opens a language-aware project link at its exact validated Java range", as
     contentType: "image/png",
   });
   await app.expectNoViewportOverflow();
+  expect(app.rendererErrors).toEqual([]);
+});
+
+test("scrolls from the first to the last line of a long linked file", async () => {
+  await app.resizeWindow(1440, 920);
+  await page.getByRole("link", { name: "LongFixture.txt" }).click();
+  const panel = page.getByRole("region", { name: "Project files" });
+  const preview = panel.getByLabel("Contents of LongFixture.txt");
+  await expect(preview).toBeVisible();
+  await expect(panel.locator('[role="tree"]')).toBeHidden();
+  await expect(panel.locator('[data-source-line="1"]')).toContainText(
+    "Long fixture line 1",
+  );
+  expect(await preview.evaluate((element) => (
+    element.scrollHeight > element.clientHeight * 10
+  ))).toBe(true);
+
+  await preview.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+  });
+  await expect(panel.locator('[data-source-line="5000"]')).toContainText(
+    "Long fixture line 5000",
+  );
+  expect(await panel.locator(".file-preview-line").count()).toBeLessThan(200);
+
+  await preview.evaluate((element) => {
+    element.scrollTop = 0;
+  });
+  await expect(panel.locator('[data-source-line="1"]')).toContainText(
+    "Long fixture line 1",
+  );
   expect(app.rendererErrors).toEqual([]);
 });

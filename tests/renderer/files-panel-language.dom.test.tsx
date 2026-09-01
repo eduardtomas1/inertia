@@ -125,7 +125,7 @@ describe("FilesPanel language presentation", () => {
     expect(container.querySelector(".file-preview-code .hljs")).toBeNull();
   });
 
-  it("bounds a newline-dense preview while keeping its requested line visible", () => {
+  it("virtualizes a newline-dense preview without truncating its scroll range", () => {
     const { container } = render(
       <FilesPanel
         {...FILES_PROJECT}
@@ -145,12 +145,10 @@ describe("FilesPanel language presentation", () => {
       />,
     );
 
-    expect(container.querySelectorAll(".file-preview-line")).toHaveLength(2_000);
-    expect(container.querySelector('[data-source-line="900000"]'))
-      .toHaveClass("is-referenced");
-    expect(container.querySelector('[data-source-line="1"]')).toBeNull();
-    expect(screen.getByText(
-      "Lines 899000–900999 / 1048577.",
-    )).toBeInTheDocument();
+    expect(container.querySelectorAll(".file-preview-line").length)
+      .toBeLessThan(200);
+    expect(screen.queryByText(/Lines 899000–900999/u)).not.toBeInTheDocument();
+    expect(container.querySelector(".file-preview-code > code"))
+      .toHaveStyle({ height: `${1_048_577 * 13}px` });
   });
 });

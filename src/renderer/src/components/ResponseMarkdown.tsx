@@ -15,8 +15,8 @@ import {
   Check,
   Code2,
   Copy,
-  ExternalLink,
   FileCode2,
+  Globe2,
   Table2,
   WrapText,
 } from "lucide-react";
@@ -693,7 +693,25 @@ function MarkdownLink({
     markdownBasePath,
   );
   if (target.kind === "external") {
-    return <a {...props} href={target.url} rel="noreferrer noopener" target="_blank" onClick={(event) => { event.preventDefault(); void window.inertia.openExternal(target.url); }}>{children}<ExternalLink size={11} aria-hidden="true" /></a>;
+    const externalLinkClass = [props.className, "response-web-link"]
+      .filter(Boolean)
+      .join(" ");
+    return (
+      <a
+        {...props}
+        className={externalLinkClass}
+        href={target.url}
+        rel="noreferrer noopener"
+        target="_blank"
+        onClick={(event) => {
+          event.preventDefault();
+          void window.inertia.openExternal(target.url);
+        }}
+      >
+        <Globe2 size={12} aria-hidden="true" />
+        {children}
+      </a>
+    );
   }
   if (target.kind === "project") {
     const language = sourceLanguageForFile(
@@ -703,36 +721,52 @@ function MarkdownLink({
     const projectLinkClass = [props.className, "response-project-file-link"]
       .filter(Boolean)
       .join(" ");
-    return <a {...props} className={projectLinkClass} data-language-family={language.family} href={href} onClick={(event) => {
-      event.preventDefault();
-      if (onOpenProjectFile) {
-        if (target.headingId) {
-          onOpenProjectFile(
-            target.relativePath,
-            target.location,
-            target.literalPath,
-            target.headingId,
-          );
-        } else if (target.literalPath) {
-          onOpenProjectFile(
-            target.relativePath,
-            target.location ?? undefined,
-            true,
-          );
-        } else if (target.location) {
-          onOpenProjectFile(target.relativePath, target.location);
-        } else {
-          onOpenProjectFile(target.relativePath);
-        }
-        return;
-      }
-      void window.inertia.openProjectPath({
-        projectId,
-        ...(conversationId ? { conversationId } : {}),
-        relativePath: target.relativePath,
-        action: target.action,
-      }).catch(() => undefined);
-    }}>{children}</a>;
+    const FileIcon = language.id === "sql" ? Table2 : FileCode2;
+    return (
+      <a
+        {...props}
+        className={projectLinkClass}
+        data-language-family={language.family}
+        href={href}
+        onClick={(event) => {
+          event.preventDefault();
+          if (onOpenProjectFile) {
+            if (target.headingId) {
+              onOpenProjectFile(
+                target.relativePath,
+                target.location,
+                target.literalPath,
+                target.headingId,
+              );
+            } else if (target.literalPath) {
+              onOpenProjectFile(
+                target.relativePath,
+                target.location ?? undefined,
+                true,
+              );
+            } else if (target.location) {
+              onOpenProjectFile(target.relativePath, target.location);
+            } else {
+              onOpenProjectFile(target.relativePath);
+            }
+            return;
+          }
+          void window.inertia.openProjectPath({
+            projectId,
+            ...(conversationId ? { conversationId } : {}),
+            relativePath: target.relativePath,
+            action: target.action,
+          }).catch(() => undefined);
+        }}
+      >
+        <FileIcon
+          className="response-project-file-icon"
+          size={13}
+          aria-hidden="true"
+        />
+        <span>{children}</span>
+      </a>
+    );
   }
   if (target.kind === "anchor") {
     return <a {...props} href={target.href} onClick={(event) => {

@@ -49,6 +49,67 @@ function preview(path: string) {
 }
 
 describe("FilesPanel root refresh", () => {
+  it("shows a directly linked file without the explorer", async () => {
+    beginWorkspaceFileOpen(
+      FILES_PROJECT.projectId,
+      undefined,
+      "README.md",
+    );
+    const { container } = render(
+      <FilesPanel
+        {...FILES_PROJECT}
+        entries={ROOT_ENTRIES}
+        preview={preview("README.md")}
+        selectedPath="README.md"
+        onSelectFile={vi.fn()}
+        onLoadEntries={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => expect(
+      screen.queryByRole("tree", { name: "Files" }),
+    ).not.toBeInTheDocument());
+    expect(screen.queryByRole("searchbox", { name: "Search files" }))
+      .not.toBeInTheDocument();
+    expect(container.querySelector(".files-layout"))
+      .not.toHaveClass("is-explorer-open");
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "Show file explorer",
+    }));
+    expect(screen.getByRole("tree", { name: "Files" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Hide file explorer" }))
+      .toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("toggles the uncontrolled explorer without losing the preview", () => {
+    render(
+      <FilesPanel
+        {...FILES_PROJECT}
+        entries={ROOT_ENTRIES}
+        preview={preview("README.md")}
+        selectedPath="README.md"
+        onSelectFile={vi.fn()}
+        onLoadEntries={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "Hide file explorer",
+    }));
+    expect(screen.queryByRole("tree", { name: "Files" }))
+      .not.toBeInTheDocument();
+    expect(screen.getByRole("document", { name: "Preview of README.md" }))
+      .toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "Show file explorer",
+    }));
+    expect(screen.getByRole("tree", { name: "Files" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Hide file explorer" }))
+      .toHaveAttribute("aria-pressed", "true");
+  });
+
   it("reveals an externally opened file through its lazy ancestor chain", async () => {
     const onLoadEntries = vi.fn(async ({
       directory = "",
@@ -291,8 +352,9 @@ describe("FilesPanel root refresh", () => {
         onLoadEntries={onLoadEntries}
       />,
     );
-    expect(await screen.findByRole("treeitem", { name: "README.md" }))
-      .toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", {
+      name: "Show file explorer",
+    })).toHaveAttribute("aria-pressed", "false"));
     view.rerender(
       <FilesPanel
         {...FILES_PROJECT}
@@ -305,6 +367,9 @@ describe("FilesPanel root refresh", () => {
     );
 
     await waitFor(() => expect(search).toHaveValue("readme"));
+    fireEvent.click(screen.getByRole("button", {
+      name: "Show file explorer",
+    }));
     expect(screen.getByRole("tree", { name: "Search results" }))
       .toBeInTheDocument();
   });
@@ -365,6 +430,9 @@ describe("FilesPanel root refresh", () => {
     );
 
     await waitFor(() => expect(search).toHaveValue(""));
+    fireEvent.click(screen.getByRole("button", {
+      name: "Show file explorer",
+    }));
     expect(await screen.findByRole("treeitem", { name: "example.ts:42:7" }))
       .toHaveAttribute("aria-current", "true");
   });

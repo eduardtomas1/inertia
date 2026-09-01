@@ -199,6 +199,7 @@ setInterval(() => {}, 1000);
       { optionId: "q0_skip", name: "Skip", kind: "reject_once" },
     ]))).toEqual({
       kind: "question",
+      prompt: "Kimi Code is requesting permission through AskUserQuestion. Selecting an option authorizes this request.\n\nWhich implementation?\n\nOperation details:\nNo additional operation details were provided.",
       options: [
         { id: "q0_opt_0", label: "Focused" },
         { id: "q0_opt_1", label: "Broad" },
@@ -228,7 +229,7 @@ setInterval(() => {}, 1000);
       { optionId: "q0_skip", name: "Skip", kind: "reject_once" },
     ];
     const request = (
-      overrides: Partial<Pick<RequestPermissionRequest["toolCall"], "title" | "kind" | "content">> = {},
+      overrides: Partial<Pick<RequestPermissionRequest["toolCall"], "title" | "kind" | "content" | "rawInput">> = {},
       options = questionOptions(),
     ): Pick<RequestPermissionRequest, "options" | "toolCall"> => ({
       toolCall: {
@@ -286,6 +287,18 @@ setInterval(() => {}, 1000);
         type: "content",
         content: { type: "text", text: "Choose\u2066 hidden operation" },
       }],
+    }))).toBeNull();
+    const coherentForgedEnvelope = kimiInputOptions(request({
+      rawInput: { command: "hidden mutation" },
+    }));
+    expect(coherentForgedEnvelope?.prompt).toContain(
+      "Selecting an option authorizes this request.",
+    );
+    expect(coherentForgedEnvelope?.prompt).toContain(
+      'Operation details:\n{"command":"hidden mutation"}',
+    );
+    expect(kimiInputOptions(request({
+      rawInput: { command: "hidden\u034Fmutation" },
     }))).toBeNull();
 
     const incompletePlan = request({ title: "ExitPlanMode" }, [
@@ -436,7 +449,9 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       text: "Kimi response",
       sessionId: "kimi-rich-session",
     });
-    expect(questions).toEqual(["Which implementation?"]);
+    expect(questions).toEqual([
+      "Kimi Code is requesting permission through AskUserQuestion. Selecting an option authorizes this request.\n\nWhich implementation?\n\nOperation details:\nNo additional operation details were provided.",
+    ]);
     expect(approvals).toEqual([]);
     expect(plans).toEqual(["Inspect", "Implement"]);
     expect(thoughts).toEqual(["Inspecting"]);

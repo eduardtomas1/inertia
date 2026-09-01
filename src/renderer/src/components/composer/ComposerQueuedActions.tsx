@@ -6,14 +6,32 @@ import type { ChatAttachment } from "@shared/contracts";
 import type { AgentTurnStatus } from "../../../../shared/turn-lifecycle";
 import {
   QUEUED_PROMPTS_CHANGED_EVENT,
+  composerQueueLockName,
   composerQueueKey,
   enqueueComposerPrompt,
   readComposerQueue,
   removeComposerQueuedPrompt,
   takeAllSessionQueuedMedia,
+  takeComposerQueuedPrompts,
 } from "./composerQueuedPrompts";
 
 export { enqueueComposerPrompt };
+
+export async function releaseDeletedComposerQueue(
+  conversationId: string,
+  releaseAttachment: (attachmentId: string) => Promise<void>,
+): Promise<void> {
+  const drain = async (): Promise<void> => {
+    const prompts = takeComposerQueuedPrompts(conversationId);
+    await Promise.allSettled(prompts.flatMap(({ attachments }) =>
+      attachments.map(({ id }) => releaseAttachment(id))));
+  };
+  if (!navigator.locks) {
+    await drain();
+    return;
+  }
+  await navigator.locks.request(composerQueueLockName(conversationId), drain);
+}
 
 export function ComposerQueuedActions({
   conversationId,
@@ -118,7 +136,7 @@ export function ComposerQueuedActions({
       return;
     }
     await navigator.locks.request(
-      `inertia:queued-prompt:${conversationId}`,
+      composerQueueLockName(conversationId),
       { ifAvailable: true },
       async (lock) => {
         if (lock) await dispatch();

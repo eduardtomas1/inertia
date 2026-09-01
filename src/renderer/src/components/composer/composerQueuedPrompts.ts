@@ -32,6 +32,10 @@ export function composerQueueKey(conversationId: string): string {
   return `${QUEUE_KEY_PREFIX}${conversationId}`;
 }
 
+export function composerQueueLockName(conversationId: string): string {
+  return `inertia:queued-prompt:${conversationId}`;
+}
+
 function legacyQueueKey(conversationId: string): string {
   return `${LEGACY_QUEUE_KEY_PREFIX}${conversationId}`;
 }
@@ -282,6 +286,18 @@ export function removeComposerQueuedPrompt(
     return removed;
   } catch {
     return null;
+  }
+}
+
+export function takeComposerQueuedPrompts(
+  conversationId: string,
+): ComposerQueuedPrompt[] {
+  try {
+    const current = readComposerQueue(conversationId);
+    storeQueue(conversationId, [], true);
+    return current;
+  } catch {
+    return [];
   }
 }
 

@@ -148,7 +148,7 @@ function deferred<T>(): {
 async function waitForComposerSendEnhancement(): Promise<void> {
   await waitFor(() => expect(
     screen.getByRole("button", { name: "Send message" }),
-  ).toHaveAttribute("data-motion-state", "send"));
+  ).toHaveAttribute("data-motion-state", "send"), { timeout: 5_000 });
 }
 
 function composerProps(

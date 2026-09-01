@@ -1,4 +1,5 @@
-const UNSAFE_APPROVAL_FORMATTING = /(?:\p{Cf}|\p{Zl}|\p{Zp})/u;
+const UNSAFE_APPROVAL_FORMATTING =
+  /(?:\p{Default_Ignorable_Code_Point}|\p{Zl}|\p{Zp})/u;
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/u;
 const CONTROL_CHARACTERS_EXCEPT_LINE_BREAKS =
   /[\u0000-\u0009\u000b\u000c\u000e-\u001f\u007f-\u009f]/u;

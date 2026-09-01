@@ -12,6 +12,8 @@ import {
 const MAX_INPUT_OPTIONS = 20;
 const MAX_INPUT_QUESTION_CHARS = 16_384;
 const MAX_INPUT_OPTION_LABEL_CHARS = 512;
+const MAX_INPUT_OPERATION_CHARS = 4_096;
+const MAX_INPUT_PERMISSION_PROMPT_CHARS = 21_000;
 
 interface KimiInputOption {
   id: string;
@@ -20,6 +22,7 @@ interface KimiInputOption {
 
 export interface KimiInputOptions {
   kind: "question" | "plan";
+  prompt: string;
   options: KimiInputOption[];
 }
 
@@ -39,13 +42,16 @@ export function kimiInputOptions(
     : title === "ExitPlanMode"
       ? "plan" as const
       : null;
-  if (!kind || kimiPermissionQuestionText(params, kind) === null) return null;
+  if (!kind) return null;
+  const prompt = kimiPermissionInputText(params, kind);
+  if (prompt === null) return null;
 
   const options = parseKimiInputOptions(params.options);
   if (!options) return null;
-  return kind === "question"
+  const input = kind === "question"
     ? kimiQuestionInputOptions(options)
     : kimiPlanInputOptions(options);
+  return input ? { ...input, prompt } : null;
 }
 
 interface ParsedKimiInputOption extends KimiInputOption {
@@ -84,7 +90,7 @@ function parseKimiInputOptions(
 
 function kimiQuestionInputOptions(
   options: ParsedKimiInputOption[],
-): KimiInputOptions | null {
+): Omit<KimiInputOptions, "prompt"> | null {
   let questionIndex: string | undefined;
   let skipSeen = false;
   const optionIndexes = new Set<number>();
@@ -117,7 +123,7 @@ function kimiQuestionInputOptions(
 
 function kimiPlanInputOptions(
   options: ParsedKimiInputOption[],
-): KimiInputOptions | null {
+): Omit<KimiInputOptions, "prompt"> | null {
   let approveSeen = false;
   let reviseSeen = false;
   let rejectAndExitSeen = false;
@@ -180,7 +186,7 @@ function isKimiPermissionOptionKind(
     || kind === "reject_always";
 }
 
-export function kimiPermissionQuestionText(
+function kimiPermissionQuestionText(
   params: Pick<RequestPermissionRequest, "toolCall">,
   kind: KimiInputOptions["kind"],
 ): string | null {
@@ -206,6 +212,31 @@ export function kimiPermissionQuestionText(
     allowLineBreaks: true,
     maxChars: MAX_INPUT_QUESTION_CHARS,
   }) ? text : null;
+}
+
+function kimiPermissionInputText(
+  params: Pick<RequestPermissionRequest, "toolCall">,
+  kind: KimiInputOptions["kind"],
+): string | null {
+  const question = kimiPermissionQuestionText(params, kind);
+  if (!question) return null;
+  let operation: string | undefined;
+  try {
+    operation = params.toolCall.rawInput === undefined
+      ? "No additional operation details were provided."
+      : JSON.stringify(params.toolCall.rawInput);
+  } catch {
+    return null;
+  }
+  if (!isSafeInteractionDisplayText(operation, {
+    allowLineBreaks: true,
+    maxChars: MAX_INPUT_OPERATION_CHARS,
+  })) return null;
+  const prompt = `Kimi Code is requesting permission through ${params.toolCall.title}. Selecting an option authorizes this request.\n\n${question}\n\nOperation details:\n${operation}`;
+  return isSafeInteractionDisplayText(prompt, {
+    allowLineBreaks: true,
+    maxChars: MAX_INPUT_PERMISSION_PROMPT_CHARS,
+  }) ? prompt : null;
 }
 
 function objectValue(value: unknown): Record<string, unknown> | undefined {

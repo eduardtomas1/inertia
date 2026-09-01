@@ -9,8 +9,8 @@ const kibibyte = 1024;
 // visible even when Rollup moves shared modules between chunks.
 const budgets = {
   entryJavaScript: 205 * kibibyte,
-  // The in-chat project selector and media queue admission/detachment
-  // ownership live on the workbench path while their larger UI stays deferred.
+  // The in-chat project selector plus media queue admission, deletion cleanup,
+  // and detachment ownership live here while their larger UI stays deferred.
   mainWorkbenchFirstLoadJavaScript: 704 * kibibyte,
   detachedChatFirstLoadJavaScript: 535 * kibibyte,
   entryCss: 340 * kibibyte,

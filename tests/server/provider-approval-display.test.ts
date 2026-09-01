@@ -18,6 +18,8 @@ describe("provider approval display safety", () => {
     "Run\u0000npm test",
     "Run\u0085npm test",
     "Run\u2028npm test",
+    "Approve\uFE0F",
+    "Approve\u034F",
   ])("rejects invisible or direction-changing approval copy", (value) => {
     expect(isSafeApprovalDisplayText(value, true)).toBe(false);
   });
@@ -35,6 +37,7 @@ describe("provider approval display safety", () => {
     })).toBe(true);
     expect(isSafeInteractionDisplayText("   ", { maxChars: 64 })).toBe(false);
     expect(isSafeInteractionDisplayText("safe\u200b-looking", { maxChars: 64 })).toBe(false);
+    expect(isSafeInteractionDisplayText("Approve\uFE0F", { maxChars: 64 })).toBe(false);
     expect(isSafeInteractionDisplayText("x".repeat(65), { maxChars: 64 })).toBe(false);
   });
 

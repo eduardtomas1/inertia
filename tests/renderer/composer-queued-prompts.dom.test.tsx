@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ChatAttachment } from "../../src/shared/contracts";
 import {
@@ -10,6 +10,7 @@ import {
   removeComposerQueuedPrompt,
   takeAllSessionQueuedMedia,
 } from "../../src/renderer/src/components/composer/composerQueuedPrompts";
+import { releaseDeletedComposerQueue } from "../../src/renderer/src/components/composer/ComposerQueuedActions";
 
 const conversationId = "queued-media";
 
@@ -77,6 +78,29 @@ describe("composer queued prompt storage", () => {
       content: "Text only",
       attachments: [],
     }]);
+  });
+
+  it("drains text and releases media after conversation deletion", async () => {
+    const attachment = image(
+      "55555555-5555-4555-8555-555555555555",
+      "deleted.png",
+    );
+    expect(enqueueComposerPrompt(conversationId, "Text only")).toBe(true);
+    expect(enqueueComposerPrompt(
+      conversationId,
+      "Delete with the conversation",
+      [attachment],
+    )).toBe(true);
+    const releaseAttachment = vi.fn(async () => undefined);
+
+    await releaseDeletedComposerQueue(conversationId, releaseAttachment);
+
+    expect(releaseAttachment).toHaveBeenCalledExactlyOnceWith(attachment.id);
+    expect(readComposerQueue(conversationId)).toEqual([]);
+    expect(window.localStorage.getItem(composerQueueKey(conversationId))).toBeNull();
+    expect(window.sessionStorage.getItem(
+      composerMediaQueueKey(conversationId),
+    )).toBeNull();
   });
 
   it("rejects duplicate capabilities and forged session metadata", () => {

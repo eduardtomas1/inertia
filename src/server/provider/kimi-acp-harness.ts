@@ -79,7 +79,6 @@ import {
 import { parseAcpSessionNotification } from "./acp-json-rpc";
 import {
   kimiInputOptions,
-  kimiPermissionQuestionText,
   type KimiInputOptions,
 } from "./kimi-input-options";
 
@@ -763,7 +762,6 @@ async function kimiPermission(
   if (inputOptions) {
     return kimiInputPermission(
       params,
-      displayParams,
       inputOptions,
       signal,
       emit,
@@ -829,7 +827,6 @@ async function kimiPermission(
 
 async function kimiInputPermission(
   params: RequestPermissionRequest,
-  displayParams: RequestPermissionRequest,
   input: KimiInputOptions,
   signal: AbortSignal,
   emit: ReturnType<typeof createAgentHarnessEmitter>["rich"],
@@ -842,14 +839,14 @@ async function kimiInputPermission(
     autoResolutionMs: null,
     questions: [{
       id: questionId,
-      header: input.kind === "plan" ? "Plan review" : "Question",
-      question: kimiPermissionQuestionText(displayParams, input.kind)!,
+      header: "Kimi permission",
+      question: input.prompt,
       isOther: false,
       isSecret: false,
       allowMultiple: false,
       options: input.options.map((option) => ({
         ...option,
-        description: "",
+        description: "Selecting this option authorizes the Kimi request.",
       })),
     }],
   };

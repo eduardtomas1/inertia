@@ -117,6 +117,7 @@ describe("provider maintenance runner", () => {
         HOME: "/home/ada",
         PATH: "/usr/bin:/bin",
       },
+      platform: "linux",
       signal: new AbortController().signal,
       spawn: (_command, _args, options) => {
         spawnedEnvironment = options.env;

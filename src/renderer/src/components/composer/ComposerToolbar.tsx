@@ -14,6 +14,7 @@ import type {
   AgentTurn,
   AgentSkillSummary,
   AgentWorkflowSkillsCapability,
+  ChatAttachment,
   Conversation,
   ModelBackendProfileView,
   ProjectAction,
@@ -149,7 +150,11 @@ export interface ComposerToolbarProps {
   queuedTurnId: string | null;
   queuedTurnStatus: AgentTurnStatus | null;
   queuedTurnAuthoritative: boolean;
-  onSendQueued: (content: string) => Promise<unknown>;
+  onSendQueued: (
+    content: string,
+    attachments: ChatAttachment[],
+  ) => Promise<unknown>;
+  onReleaseAttachment: (attachmentId: string) => Promise<void>;
   onSubmit: () => Promise<void>;
   onStop: () => Promise<void>;
 }
@@ -219,10 +224,11 @@ export function ComposerToolbar({
   queuedTurnStatus,
   queuedTurnAuthoritative,
   onSendQueued,
+  onReleaseAttachment,
   onSubmit,
   onStop,
 }: ComposerToolbarProps): React.JSX.Element {
-  const canAttachWhileRunning = supportsActiveParentFollowUp(
+  const canSendAttachmentWhileRunning = supportsActiveParentFollowUp(
     latestTurn?.harnessId ?? null,
   );
   const visibleCheckoutBranch = composerCheckoutBranch(
@@ -322,14 +328,15 @@ export function ComposerToolbar({
         >
         <IconButton
           label={running
-            ? "Attach follow-up images"
+            ? canSendAttachmentWhileRunning
+              ? "Attach follow-up images"
+              : "Attach queued images"
             : "Attach images, documents, or spreadsheets"}
           onClick={() => void onChooseAttachments()}
           disabled={
             disabled
             || attachmentImporting
             || primaryAction === "submitting"
-            || (running && !canAttachWhileRunning)
             || attachmentCount >= MAX_CHAT_ATTACHMENTS
           }
         >
@@ -512,6 +519,7 @@ export function ComposerToolbar({
             latestTurnStatus={queuedTurnStatus}
             latestTurnAuthoritative={queuedTurnAuthoritative}
             onSendQueued={onSendQueued}
+            onReleaseAttachment={onReleaseAttachment}
             onSubmit={onSubmit}
             onStop={onStop}
           />

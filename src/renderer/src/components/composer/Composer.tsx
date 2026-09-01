@@ -45,6 +45,11 @@ import { useComposerPrefill } from "./useComposerPrefill";
 import { useComposerPromptStash } from "./useComposerPromptStash";
 import { useComposerSkillCompletion } from "./useComposerSkillCompletion";
 import { clearPersistedComposerDraft, persistComposerDraft } from "../../utils/composerDraftPersistence";
+import {
+  composerQueueHasCapacity,
+  composerQueuedAttachmentCount,
+  enqueueComposerPrompt,
+} from "./composerQueuedPrompts";
 
 /*
  * The resume surface only matters once /resume runs, and the composer sits in
@@ -239,7 +244,8 @@ export const Composer = memo(function Composer({
     flushDraftPersistence,
     readDraft: () => draftValueRef.current,
     readState: () => ({
-      attachmentCount: attachmentsRef.current.length,
+      attachmentCount: attachmentsRef.current.length
+        + composerQueuedAttachmentCount(conversation.id),
       conversationContextPending: conversationContextHandoffEnabled && (conversationContext.draftContextPackets.length > 0 || conversationContext.dialog !== null || agentContextRequest !== null),
       fileReferenceCount: fileReferences.length,
       mutationInFlight: attachmentImportingRef.current || submittingRef.current
@@ -664,7 +670,6 @@ export const Composer = memo(function Composer({
       attachmentsRef, pendingAttachmentIdsRef,
       blocked: disabled || sending,
       conversationId: conversation.id,
-      harnessId: latestTurn?.harnessId ?? null,
       markEditorChanged,
       mountedRef,
       onChooseAttachments,
@@ -746,17 +751,26 @@ export const Composer = memo(function Composer({
     sending,
   });
   const canQueue = running && sendEligible
-    && attachments.length === 0 && !promptContext && !previewContextSelected
+    && attachments.every(
+      ({ mimeType }) => chatAttachmentKind(mimeType) === "image",
+    )
+    && !promptContext && !previewContextSelected
     && fileReferences.length === 0 && contextPacketIds.length === 0
-    && !submitting && !sending;
-  const queueCurrentMessage = async (): Promise<void> => {
+    && !submitting && !sending
+    && composerQueueHasCapacity(conversation.id);
+  const queueCurrentMessage = (): void => {
     if (!canQueue) return;
-    const content = message.trim();
-    if (!(await import("./ComposerSendActions")).enqueueComposerPrompt(
-      conversation.id, content,
+    const content = message.trim() || attachmentFallback;
+    const queuedAttachments = [...attachmentsRef.current];
+    if (!enqueueComposerPrompt(
+      conversation.id,
+      content,
+      queuedAttachments,
     )) return;
-    if (conversationIdRef.current !== conversation.id
-      || draftValueRef.current !== message) return;
+    attachmentsRef.current = [];
+    setAttachments([]);
+    pendingAttachmentIdsRef.current = new Set();
+    setPendingAttachmentIds(new Set());
     flushDraftPersistence();
     clearPersistedComposerDraft(conversation.id, message);
     markEditorChanged();
@@ -1129,7 +1143,7 @@ export const Composer = memo(function Composer({
           onImportAttachments={importAttachments}
           onSubmit={submit}
           canQueue={canQueue}
-          onQueue={() => void queueCurrentMessage()}
+          onQueue={queueCurrentMessage}
           running={running}
           submissionPending={submissionPending}
           followUpPending={followUpPending}
@@ -1238,7 +1252,9 @@ export const Composer = memo(function Composer({
           queuedTurnId={(latestTurnSummary ?? latestTurn)?.id ?? null}
           queuedTurnStatus={(latestTurnSummary ?? latestTurn)?.status ?? null}
           queuedTurnAuthoritative={queuedTurnAuthoritative}
-          onSendQueued={(content) => onSend(content, [], undefined)}
+          onSendQueued={(content, queuedAttachments) =>
+            onSend(content, queuedAttachments, undefined)}
+          onReleaseAttachment={onReleaseAttachment}
           onSubmit={submit}
           onStop={stop}
         />

@@ -20,6 +20,7 @@ import {
   nativeModelSelection,
 } from "../../src/shared/model-routing";
 import { Composer } from "../../src/renderer/src/components/Composer";
+import { enqueueComposerPrompt } from "../../src/renderer/src/components/composer/composerQueuedPrompts";
 import {
   prepareComposerDetachment,
   registerComposerOwnership,
@@ -172,6 +173,7 @@ function composerProps(
 afterEach(() => {
   vi.useRealTimers();
   window.localStorage.clear();
+  window.sessionStorage.clear();
 });
 
 describe("composer detachment ownership", () => {
@@ -396,6 +398,30 @@ describe("composer detachment ownership", () => {
       blocker: "file-references",
       reason: "Remove file references before moving this chat to a window.",
       draft: "@src/index.ts ",
+    });
+  });
+
+  it("blocks detachment while renderer-session queued media owns capabilities", () => {
+    const current = conversation("queued-media-owner");
+    render(<Composer {...composerProps(current)} />);
+    const queuedAttachment: ChatAttachment = {
+      id: "11111111-1111-4111-8111-111111111111",
+      name: "queued.png",
+      path: "11111111-1111-4111-8111-111111111111",
+      mimeType: "image/png",
+      size: 128,
+    };
+    expect(enqueueComposerPrompt(
+      current.id,
+      "Move only after this sends",
+      [queuedAttachment],
+    )).toBe(true);
+
+    expect(prepareComposerDetachment(current.id)).toEqual({
+      status: "blocked",
+      blocker: "attachments",
+      reason: "Send or remove attachments before moving this chat to a window.",
+      draft: "",
     });
   });
 

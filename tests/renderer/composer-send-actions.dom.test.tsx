@@ -3,6 +3,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ComposerSendActions } from "../../src/renderer/src/components/composer/ComposerSendActions";
 import { ComposerSendActionsFallback } from "../../src/renderer/src/components/composer/ComposerSendActionsFallback";
+import {
+  enqueueComposerPrompt,
+  readComposerQueue,
+} from "../../src/renderer/src/components/composer/composerQueuedPrompts";
+import type { ChatAttachment } from "../../src/shared/contracts";
 
 const idle = {
   conversationId: "composer-actions",
@@ -11,6 +16,7 @@ const idle = {
   latestTurnId: null,
   latestTurnStatus: null,
   onSendQueued: vi.fn(async () => undefined),
+  onReleaseAttachment: vi.fn(async () => undefined),
   onSubmit: vi.fn(async () => undefined),
   onStop: vi.fn(async () => undefined),
 };
@@ -18,6 +24,7 @@ const idle = {
 afterEach(() => {
   vi.unstubAllGlobals();
   window.localStorage.clear();
+  window.sessionStorage.clear();
 });
 
 describe("composer morphing send actions", () => {
@@ -97,7 +104,7 @@ describe("composer morphing send actions", () => {
     expect(screen.getByText("Run the release checks")).toBeInTheDocument();
     expect(screen.getByText("1 of 2")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Send queued message now" }));
-    expect(onSendQueued).toHaveBeenCalledWith("Run the release checks");
+    expect(onSendQueued).toHaveBeenCalledWith("Run the release checks", []);
     expect(await screen.findByText("Update the changelog")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Remove queued message" }));
     await waitFor(() => expect(screen.queryByRole("list", {
@@ -106,6 +113,111 @@ describe("composer morphing send actions", () => {
     expect(window.localStorage.getItem(
       "inertia:queued-prompts:composer-actions",
     )).toBeNull();
+  });
+
+  it("sends queued media without releasing the transferred capability", async () => {
+    const attachment: ChatAttachment = {
+      id: "11111111-1111-4111-8111-111111111111",
+      name: "release.png",
+      path: "11111111-1111-4111-8111-111111111111",
+      mimeType: "image/png",
+      size: 128,
+    };
+    const onSendQueued = vi.fn(async () => undefined);
+    const onReleaseAttachment = vi.fn(async () => undefined);
+    expect(enqueueComposerPrompt(
+      idle.conversationId,
+      "Review the screenshot",
+      [attachment],
+    )).toBe(true);
+
+    render(
+      <ComposerSendActions
+        {...idle}
+        primaryAction="stop-ready"
+        onSendQueued={onSendQueued}
+        onReleaseAttachment={onReleaseAttachment}
+      />,
+    );
+
+    expect(screen.getByText("1 image")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", {
+      name: "Send queued message now",
+    }));
+    await waitFor(() => expect(onSendQueued).toHaveBeenCalledWith(
+      "Review the screenshot",
+      [attachment],
+    ));
+    expect(onReleaseAttachment).not.toHaveBeenCalled();
+    expect(readComposerQueue(idle.conversationId)).toEqual([]);
+  });
+
+  it("releases queued media once when the user removes the entry", async () => {
+    const attachment: ChatAttachment = {
+      id: "22222222-2222-4222-8222-222222222222",
+      name: "discard.png",
+      path: "22222222-2222-4222-8222-222222222222",
+      mimeType: "image/png",
+      size: 128,
+    };
+    const onReleaseAttachment = vi.fn(async () => undefined);
+    expect(enqueueComposerPrompt(
+      idle.conversationId,
+      "Discard the screenshot",
+      [attachment],
+    )).toBe(true);
+
+    render(
+      <ComposerSendActions
+        {...idle}
+        primaryAction="stop-ready"
+        onReleaseAttachment={onReleaseAttachment}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Remove queued message" }));
+
+    await waitFor(() => expect(onReleaseAttachment).toHaveBeenCalledTimes(1));
+    expect(onReleaseAttachment).toHaveBeenCalledWith(attachment.id);
+    expect(readComposerQueue(idle.conversationId)).toEqual([]);
+  });
+
+  it("keeps queued media owned by the queue when sending rejects", async () => {
+    const attachment: ChatAttachment = {
+      id: "33333333-3333-4333-8333-333333333333",
+      name: "retry.png",
+      path: "33333333-3333-4333-8333-333333333333",
+      mimeType: "image/png",
+      size: 128,
+    };
+    const onSendQueued = vi.fn(async () => {
+      throw new Error("send rejected");
+    });
+    const onReleaseAttachment = vi.fn(async () => undefined);
+    expect(enqueueComposerPrompt(
+      idle.conversationId,
+      "Retry the screenshot",
+      [attachment],
+    )).toBe(true);
+
+    render(
+      <ComposerSendActions
+        {...idle}
+        primaryAction="stop-ready"
+        onSendQueued={onSendQueued}
+        onReleaseAttachment={onReleaseAttachment}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", {
+      name: "Send queued message now",
+    }));
+
+    await waitFor(() => expect(onSendQueued).toHaveBeenCalledOnce());
+    expect(await screen.findByText("Retry the screenshot")).toBeInTheDocument();
+    expect(readComposerQueue(idle.conversationId)).toMatchObject([{
+      content: "Retry the screenshot",
+      attachments: [attachment],
+    }]);
+    expect(onReleaseAttachment).not.toHaveBeenCalled();
   });
 
   it("keeps Stop authoritative without a separate new-turn acceptance", () => {

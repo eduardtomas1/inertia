@@ -123,6 +123,7 @@ export interface ComposerQueuedPrompt {
   id: string;
   content: string;
   createdAt: string;
+  attachments: ChatAttachment[];
 }
 
 export type PromptPresetCommand = Extract<

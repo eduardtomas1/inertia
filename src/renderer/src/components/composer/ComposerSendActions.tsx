@@ -6,7 +6,8 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
-import { CornerDownRight, Trash2 } from "lucide-react";
+import { CornerDownRight, Paperclip, Trash2 } from "lucide-react";
+import type { ChatAttachment } from "@shared/contracts";
 import { InertiaMorphIcon } from "../motion/InertiaMorphIcon";
 import {
   loaderCircleMorphIcon,
@@ -15,67 +16,15 @@ import {
   squareMorphIcon,
 } from "../motion/lucideMorphData";
 import type { ComposerPrimaryActionState } from "../../utils/composerPrimaryAction";
-import type { ComposerQueuedPrompt } from "./types";
 import type { AgentTurnStatus } from "../../../../shared/turn-lifecycle";
+import {
+  QUEUED_PROMPTS_CHANGED_EVENT,
+  composerQueueKey,
+  readComposerQueue,
+  removeComposerQueuedPrompt,
+  takeAllSessionQueuedMedia,
+} from "./composerQueuedPrompts";
 import "./ComposerSendActions.css";
-
-const QUEUED_PROMPTS_CHANGED_EVENT = "inertia:queued-prompts-changed";
-
-function queueKey(conversationId: string): string {
-  return `inertia:queued-prompts:${conversationId}`;
-}
-
-function readQueue(conversationId: string): ComposerQueuedPrompt[] {
-  try {
-    const value: unknown = JSON.parse(
-      window.localStorage.getItem(queueKey(conversationId)) ?? "[]",
-    );
-    return Array.isArray(value)
-      ? value.filter((entry): entry is ComposerQueuedPrompt => Boolean(
-          entry
-          && typeof entry === "object"
-          && typeof entry.id === "string"
-          && typeof entry.content === "string"
-          && entry.content.length > 0
-          && entry.content.length <= 20_000
-          && typeof entry.createdAt === "string",
-        )).slice(0, 10)
-      : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeQueue(
-  conversationId: string,
-  prompts: readonly ComposerQueuedPrompt[],
-): void {
-  const key = queueKey(conversationId);
-  if (prompts.length > 0) {
-    window.localStorage.setItem(key, JSON.stringify(prompts));
-  } else {
-    window.localStorage.removeItem(key);
-  }
-  window.dispatchEvent(new Event(QUEUED_PROMPTS_CHANGED_EVENT));
-}
-
-export function enqueueComposerPrompt(
-  conversationId: string,
-  content: string,
-): boolean {
-  try {
-    const current = readQueue(conversationId);
-    if (current.length >= 10) return false;
-    writeQueue(conversationId, [...current, {
-      id: window.crypto.randomUUID(),
-      content,
-      createdAt: new Date().toISOString(),
-    }]);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 function primaryPresentation(
   state: ComposerPrimaryActionState,
@@ -122,6 +71,7 @@ export function ComposerSendActions({
   latestTurnStatus,
   latestTurnAuthoritative = true,
   onSendQueued,
+  onReleaseAttachment,
   onSubmit,
   onStop,
 }: {
@@ -132,23 +82,25 @@ export function ComposerSendActions({
   latestTurnId: string | null;
   latestTurnStatus: AgentTurnStatus | null;
   latestTurnAuthoritative?: boolean;
-  onSendQueued: (content: string) => Promise<unknown>;
+  onSendQueued: (
+    content: string,
+    attachments: ChatAttachment[],
+  ) => Promise<unknown>;
+  onReleaseAttachment: (attachmentId: string) => Promise<void>;
   onSubmit: () => Promise<void>;
   onStop: () => Promise<void>;
 }): React.JSX.Element {
   const [intent, setIntent] = useState(false);
-  const [queuedPrompts, setQueuedPrompts] = useState(() => readQueue(conversationId));
+  const [queuedPrompts, setQueuedPrompts] = useState(() =>
+    readComposerQueue(conversationId));
   const [queueSendingId, setQueueSendingId] = useState<string | null>(null);
   const [queueHost, setQueueHost] = useState<HTMLElement | null>(null);
-  const queuedPromptsRef = useRef(queuedPrompts);
   const queueSendingRef = useRef<string | null>(null);
   const conversationIdRef = useRef(conversationId);
   const autoQueuedTurnRef = useRef<string | null>(null);
   conversationIdRef.current = conversationId;
-  queuedPromptsRef.current = queuedPrompts;
   const syncQueue = useCallback((): void => {
-    const next = readQueue(conversationId);
-    queuedPromptsRef.current = next;
+    const next = readComposerQueue(conversationId);
     setQueuedPrompts(next);
   }, [conversationId]);
   useEffect(() => {
@@ -157,7 +109,7 @@ export function ComposerSendActions({
     setQueueSendingId(null);
     syncQueue();
     const onStorage = (event: StorageEvent): void => {
-      if (event.key === queueKey(conversationId)) syncQueue();
+      if (event.key === composerQueueKey(conversationId)) syncQueue();
     };
     window.addEventListener("storage", onStorage);
     window.addEventListener(QUEUED_PROMPTS_CHANGED_EVENT, syncQueue);
@@ -166,22 +118,39 @@ export function ComposerSendActions({
       window.removeEventListener(QUEUED_PROMPTS_CHANGED_EVENT, syncQueue);
     };
   }, [conversationId, syncQueue]);
-  const removeQueued = useCallback((promptId: string): void => {
-    writeQueue(
-      conversationId,
-      readQueue(conversationId).filter(({ id }) => id !== promptId),
-    );
-  }, [conversationId]);
+  useEffect(() => {
+    const releaseQueuedMedia = (): void => {
+      for (const prompt of takeAllSessionQueuedMedia()) {
+        for (const attachment of prompt.attachments) {
+          void onReleaseAttachment(attachment.id);
+        }
+      }
+    };
+    window.addEventListener("beforeunload", releaseQueuedMedia);
+    return () => window.removeEventListener("beforeunload", releaseQueuedMedia);
+  }, [onReleaseAttachment]);
+  const removeQueued = useCallback((
+    promptId: string,
+    releaseAttachments = true,
+  ): void => {
+    const removed = removeComposerQueuedPrompt(conversationId, promptId);
+    if (!removed || !releaseAttachments) return;
+    for (const attachment of removed.attachments) {
+      void onReleaseAttachment(attachment.id);
+    }
+  }, [conversationId, onReleaseAttachment]);
   const sendQueued = useCallback(async (promptId: string): Promise<void> => {
     const dispatch = async (): Promise<void> => {
       if (queueSendingRef.current || !canSendQueuedNow) return;
-      const queued = readQueue(conversationId).find(({ id }) => id === promptId);
+      const queued = readComposerQueue(conversationId).find(
+        ({ id }) => id === promptId,
+      );
       if (!queued) return;
       queueSendingRef.current = promptId;
       setQueueSendingId(promptId);
       try {
-        await onSendQueued(queued.content);
-        removeQueued(promptId);
+        await onSendQueued(queued.content, queued.attachments);
+        removeQueued(promptId, false);
       } catch {
         // The workspace owns the error surface; keep the draft for retry.
       } finally {
@@ -249,11 +218,27 @@ export function ComposerSendActions({
   const queued = queuedPrompts[0] ?? null;
   const queueElement = queued ? (
     <div className="composer-queue" role="list" aria-label="Queued messages">
-      <div className="composer-queue-item" role="listitem">
+      <div
+        className={`composer-queue-item${
+          queued.attachments.length > 0 ? " has-media" : ""
+        }`}
+        role="listitem"
+      >
         <CornerDownRight size={15} aria-hidden="true" />
         <span className="composer-queue-copy" title={queued.content}>
           {queued.content}
         </span>
+        {queued.attachments.length > 0 && (
+          <span
+            className="composer-queue-media"
+            title={queued.attachments.map(({ name }) => name).join("\n")}
+          >
+            <Paperclip size={13} aria-hidden="true" />
+            {queued.attachments.length === 1
+              ? "1 image"
+              : `${queued.attachments.length} images`}
+          </span>
+        )}
         <small className="composer-queue-count">
           {queuedPrompts.length === 1 ? "Queued" : `1 of ${queuedPrompts.length}`}
         </small>

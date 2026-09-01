@@ -161,15 +161,47 @@ describe("private staged attachment validation", () => {
       bytes,
       50,
     );
-    const validation = expect(
-      validateAttachmentImportFile(operation),
-    ).rejects.toMatchObject({ code: "unsafe" });
-    await new Promise<void>((resolveWait) => setTimeout(resolveWait, 10));
+    const sample = await open(path, "r");
+    const fileHandlePrototype = Object.getPrototypeOf(sample) as {
+      read(
+        buffer: Buffer,
+        offset: number,
+        length: number,
+        position: number,
+      ): Promise<{ bytesRead: number; buffer: Buffer }>;
+    };
+    await sample.close();
+    const originalRead = fileHandlePrototype.read;
     const replacement = Buffer.from(bytes);
     replacement[replacement.length - 1] ^= 0x01;
-    await writeFile(path, replacement, { mode: 0o600 });
-
-    await validation;
+    let mutated = false;
+    const readSpy = vi.spyOn(fileHandlePrototype, "read")
+      .mockImplementation(async function (
+        this: typeof fileHandlePrototype,
+        buffer,
+        offset,
+        length,
+        position,
+      ) {
+        if (!mutated && position === 0) {
+          mutated = true;
+          await writeFile(path, replacement, { mode: 0o600 });
+        }
+        return await originalRead.call(
+          this,
+          buffer,
+          offset,
+          length,
+          position,
+        );
+      });
+    try {
+      await expect(validateAttachmentImportFile(operation))
+        .rejects.toMatchObject({ code: "unsafe" });
+      expect(mutated).toBe(true);
+    } finally {
+      readSpy.mockRestore();
+    }
   });
 
   it("bounds reads when a staged file grows during validation", async () => {

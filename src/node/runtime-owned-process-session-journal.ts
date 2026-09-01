@@ -143,7 +143,30 @@ export class RuntimeOwnedProcessSessionJournal {
         this.root,
         runtimeOwnedProcessRetiringWriterName(session.runtimeGenerationId),
       );
-      const fileRetiring = match[3] === "retire";
+      let fileRetiring = match[3] === "retire";
+      if (
+        repairCrashPrefixes
+        && !fileRetiring
+        && !activeWriter
+        && !retiringWriter
+      ) {
+        // A lost writer directory used to make an otherwise exact session
+        // unreadable forever. Fence the canonical session before exposing it
+        // to startup recovery. A surviving utility process can no longer pass
+        // capabilityCurrent(), even on a filesystem that immediately reuses
+        // a removed directory's inode.
+        if (!renameDirectRuntimeJournalLeaf(
+          this.root,
+          name,
+          runtimeOwnedProcessRetiringSessionName(
+            session.runtimeGenerationId,
+          ),
+          leaf.identity,
+        )) {
+          throw new Error("Runtime process ownership storage could not be repaired.");
+        }
+        fileRetiring = true;
+      }
       if (
         (activeWriter && retiringWriter)
         || (!fileRetiring && !activeWriter && !retiringWriter)

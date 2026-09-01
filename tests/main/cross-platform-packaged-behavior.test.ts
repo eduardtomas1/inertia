@@ -108,8 +108,8 @@ describe("cross-platform packaged behavior contract", () => {
     const readme = await source("README.md");
     const normalizedReadme = readme.replace(/\s+/gu, " ");
     for (const choice of [
-      "| macOS | Apple silicon (arm64) |",
-      "| macOS | Intel (x64) |",
+      "| macOS 13 or later | Apple silicon (arm64) |",
+      "| macOS 13 or later | Intel (x64) |",
       "| Windows | x64 |",
       "| Windows | ARM64 |",
       "| Linux | x64 |",

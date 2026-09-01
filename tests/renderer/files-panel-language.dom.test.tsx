@@ -126,6 +126,21 @@ describe("FilesPanel language presentation", () => {
   });
 
   it("virtualizes a newline-dense preview without truncating its scroll range", () => {
+    const measure = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(function (this: HTMLElement) {
+        const height = this.classList.contains("file-preview-line") ? 21 : 0;
+        return {
+          bottom: height,
+          height,
+          left: 0,
+          right: 0,
+          top: 0,
+          width: 0,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        };
+      });
     const { container } = render(
       <FilesPanel
         {...FILES_PROJECT}
@@ -148,7 +163,12 @@ describe("FilesPanel language presentation", () => {
     expect(container.querySelectorAll(".file-preview-line").length)
       .toBeLessThan(200);
     expect(screen.queryByText(/Lines 899000–900999/u)).not.toBeInTheDocument();
-    expect(container.querySelector(".file-preview-code > code"))
-      .toHaveStyle({ height: `${1_048_577 * 13}px` });
+    const totalHeight = Number.parseFloat(
+      container.querySelector<HTMLElement>(".file-preview-code > code")
+        ?.style.height ?? "0",
+    );
+    measure.mockRestore();
+    expect(totalHeight).toBeGreaterThan(1_048_577 * 17);
+    expect(totalHeight).toBeLessThanOrEqual(1_048_577 * 21);
   });
 });

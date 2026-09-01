@@ -354,7 +354,8 @@ export function FilesPanel({
     enabled: virtualizedSourcePreview,
     count: virtualizedSourcePreview ? previewLines.length : 0,
     getScrollElement: () => previewCodeRef.current,
-    estimateSize: () => 13,
+    estimateSize: () => 17,
+    measureElement: (element, entry) => Math.ceil(entry?.borderBoxSize[0]?.blockSize || element.getBoundingClientRect().height || 17),
     overscan: 24,
     initialRect: { width: 720, height: 480 },
     getItemKey: (index) => index,
@@ -1188,6 +1189,7 @@ export function FilesPanel({
                           ref={(node) => {
                             if (node) previewLineRefs.current.set(lineNumber, node);
                             else previewLineRefs.current.delete(lineNumber);
+                            if (node && virtual) sourceVirtualizer.measureElement(node);
                           }}
                           tabIndex={referenceStart ? -1 : undefined}
                           aria-label={referenceStart && selectedLocation
@@ -1195,7 +1197,6 @@ export function FilesPanel({
                             : undefined}
                           style={virtual
                             ? {
-                                height: `${virtual.size}px`,
                                 transform: `translateY(${virtual.start}px)`,
                               } as CSSProperties
                             : undefined}

@@ -63,6 +63,10 @@ export class AuthoritativeRunStateEngine {
     return this.terminal !== null;
   }
 
+  hasLiveDescendants(): boolean {
+    return this.liveDescendants.size > 0;
+  }
+
   acceptsProviderEvents(): boolean {
     return !this.quarantined
       && this.terminal === null

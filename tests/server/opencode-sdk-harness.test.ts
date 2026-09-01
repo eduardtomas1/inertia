@@ -60,7 +60,6 @@ type LifecycleScenario =
   | "slow"
   | "endless"
   | "no-image";
-
 function readStableCapture<T>(capturePath: string): T {
   let lastError: unknown;
   for (const candidate of [`${capturePath}.next`, capturePath]) {
@@ -200,6 +199,7 @@ const server = http.createServer((req, res) => {
           return;
         }
         if (scenario === "descendant-cancel") {
+          setTimeout(() => sendEvent({ type: "session.idle", properties: { sessionID } }), 50);
           let childEvent = 0;
           setInterval(() => sendEvent({
             id: "child-work-" + (++childEvent),
@@ -244,6 +244,7 @@ const server = http.createServer((req, res) => {
           type: "session.idle",
           properties: { sessionID: grandchildID },
         }), 2_500);
+        setTimeout(() => sendEvent({ type: "session.status", properties: { sessionID: childID, status: { type: "idle" } } }), 2_520);
         setTimeout(() => {
           sendEvent({
             type: "message.part.updated",

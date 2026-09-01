@@ -774,19 +774,38 @@ function startClaudeRun(
           sessionId = record.session_id;
           emitter.session(sessionId);
         }
-        const lifecycle = delegateLifecycle.observe(message);
+        const hadLiveTaskTrace = subagentTracker.hasLiveTasks();
+        const lifecycle = delegateLifecycle.observe(message, hadLiveTaskTrace);
         subagentTracker.observe(message);
+        const hasLiveTaskTrace = subagentTracker.hasLiveTasks();
         messageProjector.observe(message, provesRequestedCompaction);
+        if (message.type === "result" && lifecycle.turnEnded === false
+          && delegateLifecycle.hasProvisionalResult()) {
+          // A result emitted while delegated work is live is the parent's
+          // pre-notification snapshot. Reset per-result output eligibility so
+          // a later resumed result can provide the terminal text fallback.
+          messageProjector.resetResultOutput();
+        }
+        if (delegateLifecycle.shouldBoundParentResumeWait(
+          message,
+          hadLiveTaskTrace,
+          hasLiveTaskTrace,
+        )) {
+          // Once the provider says the roster is empty, or the exact typed
+          // trace settles, the parent should auto-resume promptly. Bound a
+          // missing resume edge without imposing a timeout on live long work.
+          drainTerminalSubagents = true;
+        }
         if (
           lifecycle.turnEnded
           && message.type !== "result"
           && pendingFollowUpIds.size === 0
-          && !subagentTracker.hasLiveTasks()
+          && !hasLiveTaskTrace
         ) break;
         if (
           lifecycle.turnEnded
           && pendingFollowUpIds.size === 0
-          && subagentTracker.hasLiveTasks()
+          && hasLiveTaskTrace
         ) {
           drainTerminalSubagents = true;
         }
@@ -807,7 +826,7 @@ function startClaudeRun(
               continue;
             }
           }
-          if (lifecycle.turnEnded && !subagentTracker.hasLiveTasks()) break;
+          if (lifecycle.turnEnded && !hasLiveTaskTrace) break;
           if (lifecycle.turnEnded) drainTerminalSubagents = true;
           continue;
         }

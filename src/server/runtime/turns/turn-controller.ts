@@ -1126,7 +1126,17 @@ export class TurnController {
     }
     if (!outcomeAlreadyRequested) this.streams.reconcileAssistant(active, result);
     if (result.status === "completed") {
-      this.settle(active, "completed", "provider-completed");
+      if (!outcomeAlreadyRequested && active.runState.hasLiveDescendants()) {
+        const message = "The provider ended while delegated work was still running.";
+        this.settle(active, "failed", "provider-error", message, {
+          reason: "transport-closed",
+          message,
+          phase: active.turn.status,
+          terminalEvent: "result/completed-with-live-descendants",
+        });
+      } else {
+        this.settle(active, "completed", "provider-completed");
+      }
     } else if (result.status === "cancelled") {
       this.settle(active, "cancelled", "user-cancelled", "Stopped");
     } else {

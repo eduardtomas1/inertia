@@ -76,6 +76,12 @@ describe("bounded structured turn request context", () => {
       BUILD_MODE_INSTRUCTION.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"),
       "gu",
     ))).toHaveLength(1);
+    expect(BUILD_MODE_INSTRUCTION).toContain(
+      "Do not finish while delegated, background, or other tool work you started is pending",
+    );
+    expect(BUILD_MODE_INSTRUCTION).toContain(
+      "The runtime cannot continue work or notify the user after the final response",
+    );
     const injectedBuildLabelIndex = build.executionPrompt.indexOf(
       "[build-mode]",
       visibleContent.length,

@@ -226,8 +226,6 @@ describe("final release container smoke", () => {
     expect(source).toContain('"macos-dmg"');
     expect(source).toContain('"linux-appimage"');
     for (const name of [
-      "libEGL.dylib",
-      "libGLESv2.dylib",
       "libffmpeg.dylib",
       "libvk_swiftshader.dylib",
       "Mantle",
@@ -236,6 +234,9 @@ describe("final release container smoke", () => {
       "ShipIt",
     ]) {
       expect(source).toContain(name);
+    }
+    for (const removedAngleLibrary of ["libEGL", "libGLESv2"]) {
+      expect(source).not.toContain(removedAngleLibrary);
     }
     expect(source).toContain("inspectNativeBinaryArchitecture");
   });

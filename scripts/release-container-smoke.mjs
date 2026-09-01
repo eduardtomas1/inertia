@@ -170,7 +170,7 @@ function nativeModulePaths(resources, platform, productName, app) {
     ? [
         join(app, "Contents", "Frameworks", "Electron Framework.framework", "Versions", "A", "Electron Framework"),
         join(app, "Contents", "Frameworks", "Electron Framework.framework", "Versions", "A", "Helpers", "chrome_crashpad_handler"),
-        ...["libEGL.dylib", "libGLESv2.dylib", "libffmpeg.dylib", "libvk_swiftshader.dylib"]
+        ...["libffmpeg.dylib", "libvk_swiftshader.dylib"]
           .map((name) => join(
             app,
             "Contents",
@@ -213,7 +213,7 @@ function nativeModulePaths(resources, platform, productName, app) {
     : [
         join(app, "chrome-sandbox"),
         join(app, "chrome_crashpad_handler"),
-        ...["libEGL.so", "libGLESv2.so", "libffmpeg.so", "libvk_swiftshader.so", "libvulkan.so.1"]
+        ...["libffmpeg.so", "libvk_swiftshader.so", "libvulkan.so.1"]
           .map((name) => join(app, name)),
       ];
   return [

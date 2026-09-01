@@ -6,6 +6,10 @@ import {
   MAX_CHAT_ATTACHMENT_BYTES,
   chatAttachmentStorageExtension,
 } from "../shared/attachments.js";
+import {
+  FILE_OPEN_DIRECTORY,
+  FILE_OPEN_NO_FOLLOW,
+} from "./platform-file-open-flags.js";
 
 const STORE_CHILD_TIMEOUT_MS = 30_000;
 const MAX_METADATA_BYTES = 4 * 1024;
@@ -104,7 +108,7 @@ export const CONVERSATION_ATTACHMENT_STORE_OPERATION_SOURCE = `
 
   async function syncDirectory(path) {
     if (process.platform === "win32") return;
-    const directoryOnly = "O_DIRECTORY" in constants ? constants.O_DIRECTORY : 0;
+    const directoryOnly = ${FILE_OPEN_DIRECTORY};
     const directory = await open(path, constants.O_RDONLY | directoryOnly);
     try {
       await directory.sync();
@@ -158,7 +162,7 @@ export const CONVERSATION_ATTACHMENT_STORE_OPERATION_SOURCE = `
       || named.size < BigInt(minimum)
       || named.size > BigInt(maximum)
     ) throw new Error("The attachment file is unsafe.");
-    const noFollow = "O_NOFOLLOW" in constants ? constants.O_NOFOLLOW : 0;
+    const noFollow = ${FILE_OPEN_NO_FOLLOW};
     const nonBlock = nonBlocking && "O_NONBLOCK" in constants
       ? constants.O_NONBLOCK
       : 0;

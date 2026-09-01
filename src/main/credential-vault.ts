@@ -14,6 +14,8 @@ import {
 import { basename, dirname, join } from "node:path";
 import type { SafeStorage } from "electron";
 import { backendSecretReferenceForProfile } from "../node/backend-secret-reference.js";
+import { FILE_OPEN_NO_FOLLOW } from
+  "../node/platform-file-open-flags.js";
 
 import {
   BACKEND_CREDENTIAL_MASK,
@@ -216,7 +218,7 @@ export class FileCredentialVaultPersistence implements CredentialVaultPersistenc
       }
       file = await open(
         paths.target,
-        fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0),
+        fsConstants.O_RDONLY | FILE_OPEN_NO_FOLLOW,
       );
       const metadata = await file.stat();
       if (

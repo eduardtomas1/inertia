@@ -236,9 +236,9 @@ If something goes wrong, first refresh the affected provider in **Settings → P
 
 Report suspected vulnerabilities privately through the [security policy](SECURITY.md), never through a public issue.
 
-### Version 0.0.44
+### Version 0.0.45
 
-Inertia 0.0.44 is a maintenance release for deterministic CI ownership. It preserves the public feature set shipped in 0.0.43 while giving the compact Browser evidence control an explicit accessible name with its current evidence count, making the PTY lifecycle benchmark wait for a complete acknowledged stream instead of node-pty's nondeterministic close tail, and measuring stream first projection from three raw persistence-path samples without changing the shipped cadence or hosted ceiling.
+Inertia 0.0.45 makes the integrated Browser immediately usable from new and existing chats, composes reviewed Inertia-owned capabilities above every provider's native harness, fixes the Windows ARM64 installer path, and restores runtime work after an app or runtime crash without asking the user to reboot. Daily Work durations now exclude time while the computer is suspended, so sleep no longer inflates recorded work. Windows containment is bound to the exact native process creation identity, Linux guardian completion is authenticated, and macOS retries transient privileged process reads within a strict fail-closed bound.
 
 Inertia now gives each chat a visible local Browser with bounded agent actions and an inspectable, fail-closed evidence timeline for screenshots, console failures, failed requests, navigation, and actions. The pre-merge confidence view collects exact-head CI, review freshness, affected areas, focused evidence, portability, bundle deltas, and release readiness without letting stale status look green.
 
@@ -250,7 +250,7 @@ Newly completed answers also retain their intended reading position across ordin
 
 Stable builds now cover six native architectures. Unsigned Windows and ad-hoc macOS packages remain manual downloads until signing credentials exist; Linux AppImages keep verified in-app delivery. The separately identified Canary prerelease channel can test and roll back Canary packages without changing Stable's feed or local state.
 
-Download [Inertia v0.0.44](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.44):
+Download [Inertia v0.0.45](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.45):
 
 | Platform | Architecture | Package | Update delivery after the first manual install |
 | --- | --- | --- | --- |

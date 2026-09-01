@@ -22,7 +22,7 @@ import { useGlobalShortcuts } from "./hooks/useGlobalShortcuts";
 import { useProviderMaintenance } from "./hooks/useProviderMaintenance";
 import { useProviderQuotaNotices } from "./hooks/useProviderQuotaNotices";
 import { useConversationProjection } from "./hooks/useConversationProjection";
-import { useAsyncOperationQueue } from "./hooks/useConversationSelectionQueue";
+import { useAsyncOperationQueue, useAuthoritativeConversationCreateQueue, useWorkspaceAuthorityCommandQueue } from "./hooks/useConversationSelectionQueue";
 import {
   agentWorkflowRouteIdentity,
   agentWorkflowTargetConversation,
@@ -368,13 +368,12 @@ export default function App(): React.JSX.Element {
     setActionError,
   });
   const enqueueWorkspaceAuthority = useAsyncOperationQueue();
-  const selectionCommandQueue = useCallback((
-    key: string,
-    command: CommandWithoutId,
-  ) => enqueueWorkspaceAuthority(() => run(key, command)), [
-    enqueueWorkspaceAuthority,
+  const selectionCommandQueue = useWorkspaceAuthorityCommandQueue(
     run,
-  ]);
+    connection.snapshot,
+    enqueueWorkspaceAuthority,
+  );
+  const conversationCreateQueue = useAuthoritativeConversationCreateQueue(run, connection.snapshot, enqueueWorkspaceAuthority);
   const runUserCommand = useCallback((
     key: string,
     command: CommandWithoutId,
@@ -768,10 +767,8 @@ export default function App(): React.JSX.Element {
       targetProject.id,
       location,
     );
-    const creationGeneration =
-      conversationSelectionGenerationRef.current + 1;
-    conversationSelectionGenerationRef.current = creationGeneration;
-    void selectionCommandQueue("conversation.create", {
+    const creationGeneration = ++conversationSelectionGenerationRef.current;
+    void conversationCreateQueue("conversation.create", {
       type: "conversation.create",
       payload,
     })
@@ -784,7 +781,11 @@ export default function App(): React.JSX.Element {
           setSidebarOpen(false);
         }
       })
-      .catch(() => undefined);
+      .catch((error: unknown) => {
+        if (creationGeneration === conversationSelectionGenerationRef.current) {
+          setActionError(error instanceof Error ? error.message : "The new chat could not be created.");
+        }
+      });
   };
   useGlobalShortcuts({
     keybindings: settings.keybindings,

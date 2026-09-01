@@ -1,16 +1,34 @@
 import { randomUUID, createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import {
+  directRuntimeJournalRootIsEmpty,
   discardDirectRuntimeJournalLeaf,
   listDirectRuntimeJournalLeaves,
+  pinDirectRuntimeJournalChildRoot,
   pinDirectRuntimeJournalRoot,
   readDirectRuntimeJournalLeaf,
+  removeDirectRuntimeJournalChildRoot,
   renameDirectRuntimeJournalLeaf,
   unlinkDirectRuntimeJournalLeaf,
-  writeDirectRuntimeJournalLeaf,
+  writeDirectRuntimeJournalLeafFromRoot,
+  type DirectRuntimeJournalIdentity,
   type DirectRuntimeJournalRoot,
 } from "./direct-runtime-journal.js";
 import { validRuntimeGenerationId, validSystemBootId } from "./runtime-process-protocol.js";
+import {
+  RUNTIME_OWNED_PROCESS_SESSION_VERSION,
+  RuntimeOwnedProcessSessionJournal,
+  runtimeOwnedProcessRetiringSessionName,
+  runtimeOwnedProcessRetiringWriterName,
+  runtimeOwnedProcessWriterName,
+  type RuntimeOwnedProcessSession,
+  type RuntimeOwnedProcessSessionCapability,
+  type StoredRuntimeOwnedProcessSessionLeaf,
+} from "./runtime-owned-process-session-journal.js";
+export type {
+  RuntimeOwnedProcessSession,
+  RuntimeOwnedProcessSessionCapability,
+} from "./runtime-owned-process-session-journal.js";
 import {
   darwinProcessGuardianReady,
   type DarwinProcessIdentity,
@@ -18,12 +36,10 @@ import {
 import { readLinuxGuardianReady } from "./runtime-owned-process-linux.js";
 
 const CLAIM_PREFIX = ".runtime-owned-child-";
-const SESSION_PREFIX = ".runtime-owned-process-session-";
 const CONTAINMENT_PREFIX = ".runtime-owned-process-containment-";
 const MAX_CLAIMS = 256;
-const MAX_SESSIONS = 32;
 const MAX_RECORD_BYTES = 768;
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = RUNTIME_OWNED_PROCESS_SESSION_VERSION;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
 export interface LinuxProcessIdentity {
@@ -61,12 +77,6 @@ export type ObservedRuntimeOwnedProcessIdentity =
   | LinuxProcessIdentity
   | DarwinProcessIdentity
   | ObservedWindowsProcessIdentity;
-
-interface RuntimeOwnedProcessSession {
-  readonly version: typeof SCHEMA_VERSION;
-  readonly runtimeGenerationId: string;
-  readonly systemBootId: string;
-}
 
 export interface WindowsRuntimeJobContainment {
   readonly kind: "windows-job-v1";
@@ -106,14 +116,20 @@ export interface RuntimeOwnedProcessClaim extends RuntimeOwnedProcessSession {
   readonly process: RuntimeOwnedProcessIdentity;
 }
 
-type RuntimeOwnedProcessRecord = RuntimeOwnedProcessPending | RuntimeOwnedProcessClaim;
+export type RuntimeOwnedProcessRecord =
+  RuntimeOwnedProcessPending | RuntimeOwnedProcessClaim;
+
+export interface RuntimeOwnedProcessGenerationInspection {
+  readonly session: RuntimeOwnedProcessSession | null;
+  readonly sessionState: "active" | "retiring" | null;
+  readonly sessionWriterPresent: boolean;
+  readonly records: readonly RuntimeOwnedProcessRecord[];
+  readonly consumingRecords: readonly RuntimeOwnedProcessRecord[];
+  readonly containment: RuntimeOwnedProcessContainment | null;
+}
 
 function generationHash(runtimeGenerationId: string): string {
   return createHash("sha256").update(runtimeGenerationId).digest("hex");
-}
-
-function sessionName(runtimeGenerationId: string): string {
-  return `${SESSION_PREFIX}${generationHash(runtimeGenerationId)}.json`;
 }
 
 function containmentName(runtimeGenerationId: string): string {
@@ -158,25 +174,6 @@ export function supportedRuntimeOwnedProcessPlatform(
   platform: NodeJS.Platform,
 ): platform is RuntimeOwnedProcessPlatform {
   return platform === "linux" || platform === "darwin" || platform === "win32";
-}
-
-function parseSession(bytes: Buffer): RuntimeOwnedProcessSession | null {
-  try {
-    const value = JSON.parse(bytes.toString("utf8")) as unknown;
-    if (!value || typeof value !== "object" || !exactKeys(value, [
-      "runtimeGenerationId",
-      "systemBootId",
-      "version",
-    ])) return null;
-    const session = value as Partial<RuntimeOwnedProcessSession>;
-    return session.version === SCHEMA_VERSION
-      && validRuntimeGenerationId(session.runtimeGenerationId)
-      && validSystemBootId(session.systemBootId)
-      ? session as RuntimeOwnedProcessSession
-      : null;
-  } catch {
-    return null;
-  }
 }
 
 function parseContainment(
@@ -403,49 +400,66 @@ function stored(
   return Buffer.from(JSON.stringify(value), "utf8");
 }
 
-function readSessions(
-  root: DirectRuntimeJournalRoot,
-): RuntimeOwnedProcessSession[] {
-  const names = listDirectRuntimeJournalLeaves(
-    root,
-    SESSION_PREFIX,
-    MAX_SESSIONS * 2,
-  );
-  const sessions: RuntimeOwnedProcessSession[] = [];
-  for (const name of names) {
-    const match = name.match(
-      /^\.runtime-owned-process-session-([0-9a-f]{64})\.(?:(json)|(publish)\.tmp)$/u,
-    );
-    if (!match) throw new Error("Runtime process ownership storage is invalid.");
-    if (match[3]) {
-      // Session publication precedes registry admission, so a torn temporary
-      // session cannot have authorized a child and is safe to discard.
-      if (!discardDirectRuntimeJournalLeaf(root, name)) {
-        throw new Error("Runtime process ownership storage could not be repaired.");
-      }
-      continue;
-    }
-    const leaf = readDirectRuntimeJournalLeaf(root, name, MAX_RECORD_BYTES);
-    const session = leaf && parseSession(leaf.bytes);
-    if (
-      !session
-      || generationHash(session.runtimeGenerationId) !== match[1]
-    ) throw new Error("Runtime process ownership storage is invalid.");
-    sessions.push(session);
-  }
-  if (sessions.length > MAX_SESSIONS) {
-    throw new Error("The runtime process ownership session bound was exceeded.");
-  }
-  return sessions;
-}
-
 function removeLeaf(root: DirectRuntimeJournalRoot, name: string): boolean {
   const leaf = readDirectRuntimeJournalLeaf(root, name, MAX_RECORD_BYTES);
   return !leaf || unlinkDirectRuntimeJournalLeaf(root, name, leaf.identity);
 }
 
+function settleSessionWriter(entry: StoredRuntimeOwnedProcessSessionLeaf): boolean {
+  if (!entry.writerRoot) return entry.state === "retiring";
+  const names = listDirectRuntimeJournalLeaves(
+    entry.writerRoot,
+    ".runtime-owned-",
+    MAX_CLAIMS * 3 + 1,
+  );
+  const leaves: Array<{
+    readonly name: string;
+    readonly identity: DirectRuntimeJournalIdentity;
+  }> = [];
+  for (const name of names) {
+    const claim = name.match(
+      /^\.runtime-owned-child-([0-9a-f-]{36})\.(?:begin|claim|retire)\.tmp$/iu,
+    );
+    const containment = name === `${containmentName(
+      entry.session.runtimeGenerationId,
+    )}.publish.tmp`;
+    if ((!claim || !UUID_PATTERN.test(claim[1]!)) && !containment) return false;
+    const leaf = readDirectRuntimeJournalLeaf(
+      entry.writerRoot,
+      name,
+      MAX_RECORD_BYTES,
+    );
+    if (!leaf) return false;
+    if (claim) {
+      const record = parseRecord(leaf.bytes);
+      if (
+        !record
+        || record.ownershipId !== claim[1]
+        || record.runtimeGenerationId !== entry.session.runtimeGenerationId
+        || record.systemBootId !== entry.session.systemBootId
+      ) return false;
+    } else if (!parseContainment(
+      leaf.bytes,
+      entry.session.runtimeGenerationId,
+      entry.session.systemBootId,
+    )) return false;
+    leaves.push({ name, identity: leaf.identity });
+  }
+  // The canonical record remains authoritative until the cross-directory
+  // rename commits. A validated active temporary is therefore observable but
+  // never repaired in place; retirement first renames the whole writer root,
+  // after which the same uncommitted leaf is safe to discard.
+  if (entry.state === "active") return true;
+  return leaves.every(({ name, identity }) => unlinkDirectRuntimeJournalLeaf(
+    entry.writerRoot!,
+    name,
+    identity,
+  ));
+}
+
 export class RuntimeOwnedProcessJournal {
   private readonly root: DirectRuntimeJournalRoot;
+  private readonly sessions: RuntimeOwnedProcessSessionJournal;
   readonly platform: NodeJS.Platform;
   private readonly darwinGuardianPath: string | null;
   private readonly darwinGuardianReadyReader: (
@@ -464,6 +478,7 @@ export class RuntimeOwnedProcessJournal {
     } = {},
   ) {
     this.root = pinDirectRuntimeJournalRoot(dataDirectory);
+    this.sessions = new RuntimeOwnedProcessSessionJournal(this.root);
     this.platform = options.platform ?? process.platform;
     this.darwinGuardianPath = options.darwinGuardianPath ?? null;
     this.darwinGuardianReadyReader = options.readDarwinGuardianReady
@@ -475,22 +490,102 @@ export class RuntimeOwnedProcessJournal {
 
   startSession(runtimeGenerationId: string, systemBootId: string): boolean {
     if (!supportedRuntimeOwnedProcessPlatform(this.platform)) return true;
+    try { return this.sessions.start(runtimeGenerationId, systemBootId); } catch { return false; }
+  }
+
+  repairSessionCrashPrefixes(): boolean {
+    return this.sessions.repairCrashPrefixes();
+  }
+
+  repairUnleasedEmptySessions(
+    leasedRuntimeGenerationIds: ReadonlySet<string>,
+  ): boolean {
     if (
-      !validRuntimeGenerationId(runtimeGenerationId)
-      || !validSystemBootId(systemBootId)
+      leasedRuntimeGenerationIds.size > 33
+      || [...leasedRuntimeGenerationIds].some((runtimeGenerationId) =>
+        !validRuntimeGenerationId(runtimeGenerationId))
     ) return false;
-    let sessions: RuntimeOwnedProcessSession[];
-    try { sessions = readSessions(this.root); } catch { return false; }
-    const existing = sessions.find((session) =>
-      session.runtimeGenerationId === runtimeGenerationId);
-    if (existing) return existing.systemBootId === systemBootId;
-    if (sessions.length >= MAX_SESSIONS) return false;
-    const name = sessionName(runtimeGenerationId);
-    return writeDirectRuntimeJournalLeaf(
+    try {
+      const unleased = this.sessions.all().filter(({ session }) =>
+        !leasedRuntimeGenerationIds.has(session.runtimeGenerationId));
+      for (const entry of unleased) {
+        if (
+          (entry.state === "active" && !entry.writerRoot)
+          || (entry.writerRoot
+            && !directRuntimeJournalRootIsEmpty(entry.writerRoot))
+        ) return false;
+        const inspection = this.inspectGeneration(
+          entry.session.runtimeGenerationId,
+        );
+        if (
+          !inspection
+          || inspection.sessionState !== entry.state
+          || !inspection.session
+          || JSON.stringify(inspection.session)
+            !== JSON.stringify(entry.session)
+          || inspection.records.length > 0
+          || inspection.consumingRecords.length > 0
+          || inspection.containment !== null
+        ) return false;
+        if (!this.finishSessionExact(entry.session)) return false;
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  sessionExact(
+    runtimeGenerationId: string,
+  ): RuntimeOwnedProcessSession | null | undefined {
+    return this.sessions.exact(runtimeGenerationId);
+  }
+
+  sessionCapability(
+    runtimeGenerationId: string,
+    systemBootId: string,
+  ): RuntimeOwnedProcessSessionCapability | null {
+    return this.sessions.capability(runtimeGenerationId, systemBootId);
+  }
+
+  sessionCapabilityCurrent(
+    capability: RuntimeOwnedProcessSessionCapability,
+  ): boolean {
+    return this.sessions.capabilityCurrent(capability);
+  }
+
+  fenceSessionExact(expected: RuntimeOwnedProcessSession): boolean {
+    if (!supportedRuntimeOwnedProcessPlatform(this.platform)) return true;
+    try { return this.sessions.fence(expected); } catch { return false; }
+  }
+
+  private writerCapability(
+    runtimeGenerationId: string,
+    systemBootId: string,
+    supplied?: RuntimeOwnedProcessSessionCapability,
+  ): RuntimeOwnedProcessSessionCapability | null {
+    const capability = supplied
+      ?? this.sessionCapability(runtimeGenerationId, systemBootId);
+    return capability
+      && capability.session.runtimeGenerationId === runtimeGenerationId
+      && capability.session.systemBootId === systemBootId
+      && this.sessionCapabilityCurrent(capability)
+      ? capability
+      : null;
+  }
+
+  private publishForSession(
+    capability: RuntimeOwnedProcessSessionCapability,
+    temporaryName: string,
+    targetName: string,
+    bytes: Buffer,
+  ): boolean {
+    return writeDirectRuntimeJournalLeafFromRoot(
+      capability.writerRoot,
+      temporaryName,
       this.root,
-      `${SESSION_PREFIX}${generationHash(runtimeGenerationId)}.publish.tmp`,
-      name,
-      stored({ version: SCHEMA_VERSION, runtimeGenerationId, systemBootId }),
+      targetName,
+      bytes,
     );
   }
 
@@ -501,7 +596,7 @@ export class RuntimeOwnedProcessJournal {
   ): boolean {
     if (this.platform !== "win32") return false;
     const sessions = (() => {
-      try { return readSessions(this.root); } catch { return null; }
+      try { return this.sessions.all().map(({ session }) => session); } catch { return null; }
     })();
     const session = sessions?.find((candidate) =>
       candidate.runtimeGenerationId === runtimeGenerationId);
@@ -520,8 +615,9 @@ export class RuntimeOwnedProcessJournal {
       );
       return parsed?.kind === containment.kind && parsed.name === containment.name;
     }
-    return writeDirectRuntimeJournalLeaf(
-      this.root,
+    const capability = this.writerCapability(runtimeGenerationId, systemBootId);
+    return !!capability && this.publishForSession(
+      capability,
       `${name}.publish.tmp`,
       name,
       stored({
@@ -537,9 +633,10 @@ export class RuntimeOwnedProcessJournal {
     runtimeGenerationId: string,
   ): RuntimeOwnedProcessContainment | null | undefined {
     try {
-      const session = readSessions(this.root).find((candidate) =>
-        candidate.runtimeGenerationId === runtimeGenerationId);
-      if (!session) return undefined;
+      const entry = this.sessions.all().find(({ session }) =>
+        session.runtimeGenerationId === runtimeGenerationId);
+      if (!entry || !settleSessionWriter(entry)) return undefined;
+      const session = entry.session;
       const canonical = containmentName(runtimeGenerationId);
       const temporary = `${canonical}.publish.tmp`;
       if (readDirectRuntimeJournalLeaf(this.root, temporary, MAX_RECORD_BYTES)) {
@@ -561,9 +658,18 @@ export class RuntimeOwnedProcessJournal {
     }
   }
 
-  begin(runtimeGenerationId: string, systemBootId: string): string {
+  begin(
+    runtimeGenerationId: string,
+    systemBootId: string,
+    suppliedCapability: RuntimeOwnedProcessSessionCapability,
+  ): string {
     const ownershipId = randomUUID();
-    if (!this.startSession(runtimeGenerationId, systemBootId)) {
+    const capability = this.writerCapability(
+      runtimeGenerationId,
+      systemBootId,
+      suppliedCapability,
+    );
+    if (!capability) {
       throw new Error("The runtime process ownership session is unavailable.");
     }
     const names = listDirectRuntimeJournalLeaves(
@@ -598,8 +704,8 @@ export class RuntimeOwnedProcessJournal {
           runtimeParentPid: process.pid,
         }
       : base;
-    if (!writeDirectRuntimeJournalLeaf(
-      this.root,
+    if (!this.publishForSession(
+      capability,
       temporaryClaimName(ownershipId, "begin"),
       claimName(ownershipId),
       stored(pending),
@@ -619,6 +725,7 @@ export class RuntimeOwnedProcessJournal {
       readonly expectedDarwinIdentity?: DarwinProcessIdentity;
       readonly observedDarwinIdentity?: DarwinProcessIdentity;
       readonly expectedLinuxIdentity?: LinuxProcessIdentity;
+      readonly sessionCapability?: RuntimeOwnedProcessSessionCapability;
     } = {},
   ): RuntimeOwnedProcessClaim {
     if (!UUID_PATTERN.test(ownershipId)) {
@@ -681,8 +788,16 @@ export class RuntimeOwnedProcessJournal {
       systemBootId: pending.systemBootId,
       process: identity,
     };
-    if (!writeDirectRuntimeJournalLeaf(
-      this.root,
+    const capability = this.writerCapability(
+      runtimeGenerationId,
+      systemBootId,
+      options.sessionCapability,
+    );
+    if (!capability) {
+      throw new Error("The runtime process ownership session retired during admission.");
+    }
+    if (!this.publishForSession(
+      capability,
       temporaryClaimName(ownershipId, "claim"),
       claimName(ownershipId),
       stored(claim),
@@ -690,18 +805,29 @@ export class RuntimeOwnedProcessJournal {
     return claim;
   }
 
-  own(ownershipId: string): RuntimeOwnedProcessClaim | null {
+  own(
+    ownershipId: string,
+    sessionCapability?: RuntimeOwnedProcessSessionCapability,
+  ): RuntimeOwnedProcessClaim | null {
     if (!UUID_PATTERN.test(ownershipId)) return null;
     const current = readDirectRuntimeJournalLeaf(this.root, claimName(ownershipId), MAX_RECORD_BYTES);
     const preauth = current && parseRecord(current.bytes);
     if (!preauth || preauth.state !== "preauth") return null;
     const owned: RuntimeOwnedProcessClaim = { ...preauth, state: "owned" };
-    return writeDirectRuntimeJournalLeaf(
-      this.root,
+    const capability = this.writerCapability(
+      preauth.runtimeGenerationId,
+      preauth.systemBootId,
+      sessionCapability,
+    );
+    if (!capability) return null;
+    const written = this.publishForSession(
+      capability,
       temporaryClaimName(ownershipId, "claim"),
       claimName(ownershipId),
       stored(owned),
-    ) ? owned : null;
+    );
+    if (!written) return null;
+    return owned;
   }
 
   release(ownershipId: string): boolean {
@@ -719,7 +845,57 @@ export class RuntimeOwnedProcessJournal {
       canonical,
       consuming,
       current.identity,
-    ) && removeLeaf(this.root, consuming);
+    ) && unlinkDirectRuntimeJournalLeaf(
+      this.root,
+      consuming,
+      current.identity,
+    );
+  }
+
+  releaseExact(expected: RuntimeOwnedProcessRecord): boolean {
+    if (!UUID_PATTERN.test(expected.ownershipId)) return false;
+    const canonical = claimName(expected.ownershipId);
+    const current = readDirectRuntimeJournalLeaf(
+      this.root,
+      canonical,
+      MAX_RECORD_BYTES,
+    );
+    const parsed = current && parseRecord(current.bytes);
+    if (
+      !current
+      || !parsed
+      || JSON.stringify(parsed) !== JSON.stringify(expected)
+    ) return false;
+    const consuming = temporaryClaimName(expected.ownershipId, "consume");
+    return renameDirectRuntimeJournalLeaf(
+      this.root,
+      canonical,
+      consuming,
+      current.identity,
+    ) && unlinkDirectRuntimeJournalLeaf(
+      this.root,
+      consuming,
+      current.identity,
+    );
+  }
+
+  releaseConsumingExact(expected: RuntimeOwnedProcessRecord): boolean {
+    if (!UUID_PATTERN.test(expected.ownershipId)) return false;
+    const consuming = temporaryClaimName(expected.ownershipId, "consume");
+    const current = readDirectRuntimeJournalLeaf(
+      this.root,
+      consuming,
+      MAX_RECORD_BYTES,
+    );
+    const parsed = current && parseRecord(current.bytes);
+    return !!current
+      && !!parsed
+      && JSON.stringify(parsed) === JSON.stringify(expected)
+      && unlinkDirectRuntimeJournalLeaf(
+        this.root,
+        consuming,
+        current.identity,
+      );
   }
 
   releaseRetiring(ownershipId: string): boolean {
@@ -729,7 +905,10 @@ export class RuntimeOwnedProcessJournal {
     return record?.state === "retiring" && this.release(ownershipId);
   }
 
-  retire(ownershipId: string): boolean {
+  retire(
+    ownershipId: string,
+    sessionCapability?: RuntimeOwnedProcessSessionCapability,
+  ): boolean {
     const canonical = claimName(ownershipId);
     const current = readDirectRuntimeJournalLeaf(
       this.root,
@@ -740,20 +919,28 @@ export class RuntimeOwnedProcessJournal {
     if (!current || record?.state !== "owned") {
       return record?.state === "retiring";
     }
+    const capability = this.writerCapability(
+      record.runtimeGenerationId,
+      record.systemBootId,
+      sessionCapability,
+    );
+    if (!capability) return false;
     const retiring: RuntimeOwnedProcessClaim = { ...record, state: "retiring" };
-    return writeDirectRuntimeJournalLeaf(
-      this.root,
+    const written = this.publishForSession(
+      capability,
       temporaryClaimName(ownershipId, "retire"),
       canonical,
       stored(retiring),
     );
+    return written;
   }
 
   records(runtimeGenerationId: string): RuntimeOwnedProcessRecord[] | null {
     try {
-      const parsedSession = readSessions(this.root).find((session) =>
+      const entry = this.sessions.all().find(({ session }) =>
         session.runtimeGenerationId === runtimeGenerationId);
-      if (!parsedSession) return null;
+      if (!entry || !settleSessionWriter(entry)) return null;
+      const parsedSession = entry.session;
       const names = listDirectRuntimeJournalLeaves(
         this.root,
         CLAIM_PREFIX,
@@ -797,13 +984,158 @@ export class RuntimeOwnedProcessJournal {
     }
   }
 
+  inspectGeneration(
+    runtimeGenerationId: string,
+  ): RuntimeOwnedProcessGenerationInspection | null {
+    if (!validRuntimeGenerationId(runtimeGenerationId)) return null;
+    try {
+      const sessionEntry = this.sessions.all().find(({ session }) => (
+        session.runtimeGenerationId === runtimeGenerationId
+      )) ?? null;
+      if (sessionEntry && !settleSessionWriter(sessionEntry)) return null;
+      const session = sessionEntry?.session ?? null;
+      const containmentCanonical = containmentName(runtimeGenerationId);
+      const containmentTemporary = `${containmentCanonical}.publish.tmp`;
+      if (readDirectRuntimeJournalLeaf(
+        this.root,
+        containmentTemporary,
+        MAX_RECORD_BYTES,
+      )) return null;
+      const containmentLeaf = readDirectRuntimeJournalLeaf(
+        this.root,
+        containmentCanonical,
+        MAX_RECORD_BYTES,
+      );
+      if (containmentLeaf && !session) return null;
+      const containment = containmentLeaf && session
+        ? parseContainment(
+            containmentLeaf.bytes,
+            runtimeGenerationId,
+            session.systemBootId,
+          )
+        : null;
+      if (containmentLeaf && !containment) return null;
+
+      const names = listDirectRuntimeJournalLeaves(
+        this.root,
+        CLAIM_PREFIX,
+        MAX_CLAIMS * 4,
+      );
+      const records: RuntimeOwnedProcessRecord[] = [];
+      const consumingRecords: RuntimeOwnedProcessRecord[] = [];
+      for (const name of names) {
+        const match = name.match(
+          /^\.runtime-owned-child-([0-9a-f-]{36})\.(?:(json)|(begin|claim|retire|consume)\.tmp)$/iu,
+        );
+        if (!match || !UUID_PATTERN.test(match[1]!)) return null;
+        const leaf = readDirectRuntimeJournalLeaf(
+          this.root,
+          name,
+          MAX_RECORD_BYTES,
+        );
+        const record = leaf && parseRecord(leaf.bytes);
+        if (!record || record.ownershipId !== match[1]) return null;
+        if (match[3]) {
+          if (record.runtimeGenerationId !== runtimeGenerationId) continue;
+          if (match[3] === "consume") {
+            consumingRecords.push(record);
+            continue;
+          }
+          return null;
+        }
+        if (record.runtimeGenerationId === runtimeGenerationId) {
+          records.push(record);
+        }
+      }
+      return {
+        session,
+        sessionState: sessionEntry?.state ?? null,
+        sessionWriterPresent: sessionEntry?.writerRoot !== null,
+        records,
+        consumingRecords,
+        containment,
+      };
+    } catch {
+      return null;
+    }
+  }
+
   finishSession(runtimeGenerationId: string): boolean {
     if (!supportedRuntimeOwnedProcessPlatform(this.platform)) return true;
+    const entry = (() => {
+      try {
+        return this.sessions.all().find(({ session }) =>
+          session.runtimeGenerationId === runtimeGenerationId) ?? null;
+      } catch {
+        return null;
+      }
+    })();
+    if (!entry) return false;
     const records = this.records(runtimeGenerationId);
     if (!records || records.length > 0) return false;
     const containment = containmentName(runtimeGenerationId);
     if (!removeLeaf(this.root, containment)) return false;
-    return removeLeaf(this.root, sessionName(runtimeGenerationId));
+    return this.finishSessionExact(entry.session);
+  }
+
+  finishSessionExact(expected: RuntimeOwnedProcessSession): boolean {
+    if (!supportedRuntimeOwnedProcessPlatform(this.platform)) return true;
+    let inspection = this.inspectGeneration(expected.runtimeGenerationId);
+    if (
+      !inspection
+      || !inspection.session
+      || JSON.stringify(inspection.session) !== JSON.stringify(expected)
+      || inspection.sessionState === null
+      || inspection.records.length > 0
+      || inspection.consumingRecords.length > 0
+      || inspection.containment !== null
+    ) return false;
+    const retiredSession = readDirectRuntimeJournalLeaf(
+      this.root,
+      runtimeOwnedProcessRetiringSessionName(expected.runtimeGenerationId),
+      MAX_RECORD_BYTES,
+    );
+    if (inspection.sessionState === "active" || !retiredSession) {
+      if (!this.fenceSessionExact(expected)) return false;
+      inspection = this.inspectGeneration(expected.runtimeGenerationId);
+      if (
+        !inspection
+        || inspection.sessionState !== "retiring"
+        || !inspection.session
+        || JSON.stringify(inspection.session) !== JSON.stringify(expected)
+        || inspection.records.length > 0
+        || inspection.consumingRecords.length > 0
+        || inspection.containment !== null
+      ) return false;
+    }
+    const canonical = runtimeOwnedProcessRetiringSessionName(
+      expected.runtimeGenerationId,
+    );
+    const current = this.sessions.retiredLeaf(expected);
+    if (!current) return false;
+    const retiredWriterName = runtimeOwnedProcessRetiringWriterName(
+      expected.runtimeGenerationId,
+    );
+    const retiredWriter = pinDirectRuntimeJournalChildRoot(
+      this.root,
+      retiredWriterName,
+    );
+    if (
+      retiredWriter
+      && !removeDirectRuntimeJournalChildRoot(
+        this.root,
+        retiredWriterName,
+        retiredWriter,
+      )
+    ) return false;
+    return !pinDirectRuntimeJournalChildRoot(
+      this.root,
+      runtimeOwnedProcessWriterName(expected.runtimeGenerationId),
+    ) && unlinkDirectRuntimeJournalLeaf(
+      this.root,
+      canonical,
+      current.identity,
+    );
   }
 
   clearPriorBootSessions(systemBootId: string): boolean {
@@ -811,7 +1143,7 @@ export class RuntimeOwnedProcessJournal {
     if (!validSystemBootId(systemBootId)) return false;
     if (systemBootId === "unavailable") return true;
     let sessions: RuntimeOwnedProcessSession[];
-    try { sessions = readSessions(this.root); } catch { return false; }
+    try { sessions = this.sessions.all().map(({ session }) => session); } catch { return false; }
     const prior = sessions.filter((session) => (
       session.systemBootId !== "unavailable"
       && session.systemBootId !== systemBootId
@@ -833,7 +1165,7 @@ export class RuntimeOwnedProcessJournal {
     if (!supportedRuntimeOwnedProcessPlatform(this.platform)) return true;
     if (!validRuntimeGenerationId(runtimeGenerationId)) return false;
     let sessions: RuntimeOwnedProcessSession[];
-    try { sessions = readSessions(this.root); } catch { return false; }
+    try { sessions = this.sessions.all().map(({ session }) => session); } catch { return false; }
     if (!sessions.some((session) =>
       session.runtimeGenerationId === runtimeGenerationId)) return true;
     const records = this.records(runtimeGenerationId);

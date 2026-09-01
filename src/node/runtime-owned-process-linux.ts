@@ -2,7 +2,12 @@ import { spawn, spawnSync } from "node:child_process";
 import { readFileSync, statSync } from "node:fs";
 import { isAbsolute } from "node:path";
 
-const LINUX_GUARDIAN_HELPER_TIMEOUT_MS = 1_500;
+export const LINUX_RUNTIME_OWNED_GUARDIAN_HELPER_TIMEOUT_MS = 1_500;
+// An immediate close can consume two readiness probes, a claim signal, an
+// observed-claim confirmation after an ambiguously delivered signal, and the
+// exact pending-stop signal before admission settles.
+export const LINUX_RUNTIME_OWNED_GUARDIAN_IMMEDIATE_STOP_ADMISSION_TIMEOUT_MS =
+  5 * LINUX_RUNTIME_OWNED_GUARDIAN_HELPER_TIMEOUT_MS;
 const LINUX_GUARDIAN_HELPER_OUTPUT_BYTES = 4 * 1024;
 
 interface LinuxProcessIdentity {
@@ -70,7 +75,10 @@ function runLinuxGuardianHelper(
       resolve({ stdout: "", stderr: "", status: null, signal: null, failed: true });
       return;
     }
-    const timer = setTimeout(stop, LINUX_GUARDIAN_HELPER_TIMEOUT_MS);
+    const timer = setTimeout(
+      stop,
+      LINUX_RUNTIME_OWNED_GUARDIAN_HELPER_TIMEOUT_MS,
+    );
     timer.unref();
     child.stdout!.on("data", (data: Buffer) => collect("stdout", data));
     child.stderr!.on("data", (data: Buffer) => collect("stderr", data));
@@ -121,7 +129,7 @@ export function readLinuxGuardianReady(
   if (!Number.isSafeInteger(pid) || pid <= 1 || !isAbsolute(guardianPath)) return null;
   const result = spawnSync(guardianPath, ["ready", String(pid)], {
     encoding: "utf8", env: { PATH: "/usr/bin:/bin" }, shell: false,
-    timeout: LINUX_GUARDIAN_HELPER_TIMEOUT_MS,
+    timeout: LINUX_RUNTIME_OWNED_GUARDIAN_HELPER_TIMEOUT_MS,
     maxBuffer: LINUX_GUARDIAN_HELPER_OUTPUT_BYTES,
   });
   if (result.error || result.status !== 0 || result.signal || result.stderr !== "") return null;
@@ -210,7 +218,7 @@ export function readLinuxGuardianClaimed(
   if (!Number.isSafeInteger(pid) || pid <= 1 || !isAbsolute(guardianPath)) return null;
   const result = spawnSync(guardianPath, ["claimed", String(pid)], {
     encoding: "utf8", env: { PATH: "/usr/bin:/bin" }, shell: false,
-    timeout: LINUX_GUARDIAN_HELPER_TIMEOUT_MS,
+    timeout: LINUX_RUNTIME_OWNED_GUARDIAN_HELPER_TIMEOUT_MS,
     maxBuffer: LINUX_GUARDIAN_HELPER_OUTPUT_BYTES,
   });
   if (result.error || result.status !== 0 || result.signal || result.stderr !== "") return null;

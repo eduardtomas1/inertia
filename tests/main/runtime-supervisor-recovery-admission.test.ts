@@ -5,7 +5,12 @@ import { join, resolve } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { RuntimeSupervisor } from "../../src/main/runtime-supervisor";
+import {
+  RuntimeSupervisor,
+  type RuntimeAttachmentBroker,
+} from "../../src/main/runtime-supervisor";
+import { prepareModernDarwinBootstrapRecovery } from
+  "../../src/main/runtime-bootstrap-safety";
 import { LegacyRuntimeRecoveryAuthorityJournal } from
   "../../src/main/runtime-legacy-recovery-authorities";
 import {
@@ -22,6 +27,16 @@ import type { RuntimeWorkerCommand } from
 
 const firstUrl = `ws://127.0.0.1:41001/runtime/${"a".repeat(43)}`;
 const workspaceDirectory = resolve(tmpdir(), "inertia workspace");
+const attachmentId = "33333333-3333-4333-8333-333333333333";
+const attachmentHandoffId = "44444444-4444-4444-8444-444444444444";
+const trustedAttachment = {
+  id: attachmentId,
+  name: "recovery.png",
+  path: resolve(tmpdir(), "inertia attachments", `${attachmentId}.png`),
+  mimeType: "image/png" as const,
+  size: 8,
+  digest: "a".repeat(64),
+};
 let dataDirectory: string;
 
 class FakeUtilityProcess extends EventEmitter {
@@ -79,6 +94,7 @@ class FakeUtilityProcess extends EventEmitter {
 function createHarness(options: {
   systemBootId?: string;
   recoverOwnedProcesses?: () => boolean;
+  attachmentBroker?: RuntimeAttachmentBroker;
   manualModernDarwinRecovery?: ModernDarwinRecoveryAuthorityDescriptor;
   runtimeProcessGuardianPath?: string;
   runtimeRecoveryBlocked?: boolean;
@@ -112,6 +128,7 @@ function createHarness(options: {
     forceKillWaitMs: 500,
     forceKill: () => true,
     recoverOwnedProcesses: options.recoverOwnedProcesses ?? (() => true),
+    attachmentBroker: options.attachmentBroker,
     armProcessContainment: () => process.platform === "win32"
       ? {
           kind: "windows-job-v1",
@@ -203,6 +220,329 @@ describe("RuntimeSupervisor recovery admission", () => {
       });
       children[1].message({ type: "runtime.ready", websocketUrl: firstUrl });
       expect(supervisor.snapshot()).toMatchObject({ phase: "ready" });
+      expect(new ModernDarwinRecoveryAuthorityJournal(dataDirectory).pending())
+        .toBeNull();
+    },
+  );
+
+  it.runIf(process.platform === "darwin")(
+    "recovers a forced pre-ready replacement before reusing its recovery authority",
+    async () => {
+      const bootId = "test:00000000-0000-4000-8000-000000000001";
+      const recoverOwnedProcesses = vi.fn()
+        .mockReturnValueOnce(false)
+        .mockReturnValueOnce(true);
+      const { children, supervisor } = createHarness({
+        systemBootId: bootId,
+        recoverOwnedProcesses,
+        runtimeProcessGuardianPath: "/private/tmp/inertia-test-guardian",
+      });
+
+      supervisor.start();
+      children[0].spawn();
+      children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+      children[0].emit("exit", 17);
+      await vi.advanceTimersByTimeAsync(0);
+
+      const snapshot = captureModernDarwinRecoverySnapshot(
+        dataDirectory,
+        bootId,
+      );
+      const descriptor = snapshot
+        ? new ModernDarwinRecoveryAuthorityJournal(dataDirectory)
+          .publish(snapshot)
+        : null;
+      expect(descriptor).not.toBeNull();
+      expect(supervisor.resumeWithModernDarwinRecovery(descriptor!)).toBe(true);
+
+      children[1].spawn();
+      const replacementStart = children[1].messages.findLast((message) =>
+        message.type === "runtime.start");
+      expect(replacementStart).toMatchObject({
+        type: "runtime.start",
+        options: { manualModernDarwinRecovery: descriptor },
+      });
+      if (replacementStart?.type !== "runtime.start") {
+        throw new Error("Expected the manual-recovery replacement to start.");
+      }
+      children[1].message({
+        type: "runtime.modern-darwin-recovery-authority-acknowledged",
+        operationId: "00000000-0000-4000-8000-000000000099",
+        snapshotDigest: descriptor!.snapshotDigest,
+        currentRuntimeGenerationId:
+          replacementStart.options.runtimeGenerationId,
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      children[1].emit("exit", 1);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(recoverOwnedProcesses).toHaveBeenLastCalledWith(
+        replacementStart.options.runtimeGenerationId,
+        bootId,
+        expect.any(Number),
+      );
+      expect(supervisor.snapshot()).toMatchObject({
+        phase: "restarting",
+        restartScheduled: true,
+      });
+      await vi.advanceTimersByTimeAsync(500);
+
+      expect(children).toHaveLength(3);
+      children[2].spawn();
+      expect(children[2].messages.at(-1)).toMatchObject({
+        type: "runtime.start",
+        options: { manualModernDarwinRecovery: descriptor },
+      });
+      expect(new ModernDarwinRecoveryAuthorityJournal(dataDirectory).pending())
+        .not.toBeNull();
+    },
+  );
+
+  it.runIf(process.platform === "darwin")(
+    "keeps an acknowledged retiring authority fail-closed until bootstrap replay",
+    async () => {
+      const bootId = "test:00000000-0000-4000-8000-000000000001";
+      const guardianPath = "/private/tmp/inertia-test-guardian";
+      const recoverOwnedProcesses = vi.fn()
+        .mockReturnValueOnce(false)
+        .mockReturnValueOnce(true);
+      const { children, supervisor } = createHarness({
+        systemBootId: bootId,
+        recoverOwnedProcesses,
+        runtimeProcessGuardianPath: guardianPath,
+      });
+
+      supervisor.start();
+      children[0].spawn();
+      children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+      children[0].emit("exit", 17);
+      await vi.advanceTimersByTimeAsync(0);
+
+      const snapshot = captureModernDarwinRecoverySnapshot(
+        dataDirectory,
+        bootId,
+      );
+      const authorities = new ModernDarwinRecoveryAuthorityJournal(
+        dataDirectory,
+      );
+      const descriptor = snapshot ? authorities.publish(snapshot) : null;
+      const authority = authorities.pending();
+      expect(descriptor).not.toBeNull();
+      expect(authority).not.toBeNull();
+      expect(supervisor.resumeWithModernDarwinRecovery(descriptor!)).toBe(true);
+
+      children[1].spawn();
+      const replacementStart = children[1].messages.findLast((message) =>
+        message.type === "runtime.start");
+      if (replacementStart?.type !== "runtime.start") {
+        throw new Error("Expected the manual-recovery replacement to start.");
+      }
+      const completeRetirement = vi.spyOn(
+        ModernDarwinRecoveryAuthorityJournal.prototype,
+        "completeRetirement",
+      ).mockReturnValueOnce(false);
+      try {
+        children[1].message({
+          type: "runtime.modern-darwin-recovery-authority-acknowledged",
+          operationId: descriptor!.operationId,
+          snapshotDigest: descriptor!.snapshotDigest,
+          currentRuntimeGenerationId:
+            replacementStart.options.runtimeGenerationId,
+        });
+      } finally {
+        completeRetirement.mockRestore();
+      }
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(new ModernDarwinRecoveryAuthorityJournal(dataDirectory).pending())
+        .toBeNull();
+      expect(new ModernDarwinRecoveryAuthorityJournal(dataDirectory).retiring())
+        .toEqual(authority);
+      children[1].emit("exit", 1);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(recoverOwnedProcesses).toHaveBeenLastCalledWith(
+        replacementStart.options.runtimeGenerationId,
+        bootId,
+        expect.any(Number),
+      );
+      await vi.advanceTimersByTimeAsync(500);
+
+      expect(children).toHaveLength(2);
+      expect(supervisor.snapshot()).toMatchObject({
+        phase: "stopped",
+        generation: 3,
+        restartScheduled: false,
+        lastError: expect.stringMatching(
+          /manual macOS runtime recovery authority changed/iu,
+        ),
+      });
+      expect(supervisor.canResumeWithModernDarwinRecovery()).toBe(false);
+      expect(new ModernDarwinRecoveryAuthorityJournal(dataDirectory).retiring())
+        .toEqual(authority);
+
+      const bootstrapReplay = prepareModernDarwinBootstrapRecovery(
+        dataDirectory,
+        bootId,
+        guardianPath,
+        {
+          platform: "darwin",
+          readDarwinIdentity: () => null,
+          pidExists: () => false,
+        },
+      );
+      await vi.advanceTimersByTimeAsync(20);
+      await expect(bootstrapReplay).resolves.toEqual({
+        authority: null,
+        candidate: null,
+        blocked: false,
+      });
+      expect(new ModernDarwinRecoveryAuthorityJournal(dataDirectory).pending())
+        .toBeNull();
+      expect(new ModernDarwinRecoveryAuthorityJournal(dataDirectory).retiring())
+        .toBeNull();
+      expect(new RuntimeGenerationLeaseJournal(dataDirectory).all()).toEqual([]);
+      expect(new RuntimeOwnedProcessJournal(dataDirectory, {
+        platform: "darwin",
+      }).records(snapshot!.generations[0]!.lease.runtimeGenerationId))
+        .toBeNull();
+    },
+  );
+
+  it.runIf(process.platform === "darwin")(
+    "keeps post-ready attachment claims quarantined after manual recovery",
+    async () => {
+      const bootId = "test:00000000-0000-4000-8000-000000000001";
+      const recoverOwnedProcesses = vi.fn()
+        .mockReturnValueOnce(false)
+        .mockReturnValueOnce(true);
+      const attachmentBroker: RuntimeAttachmentBroker = {
+        resolve: vi.fn(async () => trustedAttachment),
+        release: vi.fn(async () => true),
+      };
+      const { children, supervisor } = createHarness({
+        systemBootId: bootId,
+        recoverOwnedProcesses,
+        attachmentBroker,
+        runtimeProcessGuardianPath: "/private/tmp/inertia-test-guardian",
+      });
+
+      supervisor.start();
+      children[0].spawn();
+      children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+      children[0].emit("exit", 17);
+      await vi.advanceTimersByTimeAsync(0);
+
+      const snapshot = captureModernDarwinRecoverySnapshot(
+        dataDirectory,
+        bootId,
+      );
+      const descriptor = snapshot
+        ? new ModernDarwinRecoveryAuthorityJournal(dataDirectory)
+          .publish(snapshot)
+        : null;
+      expect(descriptor).not.toBeNull();
+      expect(supervisor.resumeWithModernDarwinRecovery(descriptor!)).toBe(true);
+
+      children[1].spawn();
+      children[1].message({ type: "runtime.ready", websocketUrl: firstUrl });
+      expect(new ModernDarwinRecoveryAuthorityJournal(dataDirectory).pending())
+        .toBeNull();
+      children[1].message({
+        type: "runtime.attachment-request",
+        requestId: crypto.randomUUID(),
+        attachmentId,
+        handoffId: attachmentHandoffId,
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(supervisor.ownsAttachment(attachmentId)).toBe(true);
+
+      children[1].message({ type: "invalid-runtime-message" });
+      children[1].emit("exit", 1);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(recoverOwnedProcesses).toHaveBeenCalledTimes(1);
+      expect(supervisor.snapshot()).toMatchObject({
+        phase: "stopped",
+        restartScheduled: false,
+      });
+      expect(supervisor.ownsAttachment(attachmentId)).toBe(true);
+      expect(attachmentBroker.release).not.toHaveBeenCalled();
+      expect(children).toHaveLength(2);
+    },
+  );
+
+  it.runIf(process.platform === "darwin")(
+    "does not replay consumed authority after a distinct pre-ready failure",
+    async () => {
+      const bootId = "test:00000000-0000-4000-8000-000000000001";
+      const recoverOwnedProcesses = vi.fn()
+        .mockReturnValueOnce(false)
+        .mockReturnValueOnce(true);
+      const { children, supervisor } = createHarness({
+        systemBootId: bootId,
+        recoverOwnedProcesses,
+        runtimeProcessGuardianPath: "/private/tmp/inertia-test-guardian",
+      });
+
+      supervisor.start();
+      children[0].spawn();
+      children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+      children[0].emit("exit", 17);
+      await vi.advanceTimersByTimeAsync(0);
+
+      const snapshot = captureModernDarwinRecoverySnapshot(
+        dataDirectory,
+        bootId,
+      );
+      const descriptor = snapshot
+        ? new ModernDarwinRecoveryAuthorityJournal(dataDirectory)
+          .publish(snapshot)
+        : null;
+      expect(descriptor).not.toBeNull();
+      expect(supervisor.resumeWithModernDarwinRecovery(descriptor!)).toBe(true);
+
+      children[1].spawn();
+      const replacementStart = children[1].messages.findLast((message) =>
+        message.type === "runtime.start");
+      if (replacementStart?.type !== "runtime.start") {
+        throw new Error("Expected the manual-recovery replacement to start.");
+      }
+      children[1].message({
+        type: "runtime.modern-darwin-recovery-authority-acknowledged",
+        operationId: descriptor!.operationId,
+        snapshotDigest: descriptor!.snapshotDigest,
+        currentRuntimeGenerationId:
+          replacementStart.options.runtimeGenerationId,
+      });
+      expect(new ModernDarwinRecoveryAuthorityJournal(dataDirectory).pending())
+        .toBeNull();
+
+      children[1].message({ type: "invalid-runtime-message" });
+      children[1].emit("exit", 1);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(recoverOwnedProcesses).toHaveBeenLastCalledWith(
+        replacementStart.options.runtimeGenerationId,
+        bootId,
+        expect.any(Number),
+      );
+      expect(supervisor.snapshot()).toMatchObject({
+        phase: "restarting",
+        restartScheduled: true,
+      });
+      await vi.advanceTimersByTimeAsync(500);
+
+      expect(children).toHaveLength(3);
+      children[2].spawn();
+      const restarted = children[2].messages.findLast((message) =>
+        message.type === "runtime.start");
+      expect(restarted).toMatchObject({ type: "runtime.start" });
+      if (restarted?.type !== "runtime.start") {
+        throw new Error("Expected the ordinary replacement to start.");
+      }
+      expect(restarted.options).not.toHaveProperty(
+        "manualModernDarwinRecovery",
+      );
       expect(new ModernDarwinRecoveryAuthorityJournal(dataDirectory).pending())
         .toBeNull();
     },

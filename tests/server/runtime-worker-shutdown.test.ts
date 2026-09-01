@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { RunningRuntime } from "../../src/server";
-import { runRuntimeShutdownPhases } from "../../src/server/runtime-shutdown";
+import {
+  RUNTIME_SHUTDOWN_DEADLINE_MS,
+  runRuntimeShutdownPhases,
+} from "../../src/server/runtime-shutdown";
 import { completeRuntimeWorkerShutdown } from "../../src/server/runtime-worker-shutdown";
 
 function runtimeWithClose(
@@ -45,6 +48,41 @@ function runtimeWithClose(
 }
 
 describe("runtime worker shutdown", () => {
+  it.runIf(process.platform === "darwin")(
+    "allows delayed macOS guardian admission and retirement inside the shared deadline",
+    async () => {
+      vi.useFakeTimers();
+      try {
+        const post = vi.fn();
+        const exit = vi.fn();
+        const shutdown = completeRuntimeWorkerShutdown({
+          runtime: runtimeWithClose(() => new Promise<void>((resolve) => {
+            setTimeout(resolve, RUNTIME_SHUTDOWN_DEADLINE_MS - 250);
+          })),
+          cause: "runtime-shutdown",
+          exitCode: 0,
+          closeBrokers: vi.fn(),
+          ownedProcessCleanupConfirmed: async () => true,
+          post,
+          awaitStoppedAcknowledgement: async () => undefined,
+          exit,
+        });
+
+        await vi.advanceTimersByTimeAsync(RUNTIME_SHUTDOWN_DEADLINE_MS - 250);
+        await shutdown;
+
+        expect(RUNTIME_SHUTDOWN_DEADLINE_MS).toBe(12_750);
+        expect(post).toHaveBeenCalledWith({ type: "runtime.stopped" });
+        expect(post).not.toHaveBeenCalledWith({
+          type: "runtime.shutdown-unconfirmed",
+        });
+        expect(exit).toHaveBeenCalledWith(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
   it("reports stopped and exits only after runtime cleanup succeeds", async () => {
     const post = vi.fn();
     const exit = vi.fn();
@@ -140,6 +178,66 @@ describe("runtime worker shutdown", () => {
     expect(exit).toHaveBeenCalledWith(0);
   });
 
+  it("accepts completed cleanup when runtime close consumes the shared deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      const post = vi.fn();
+      const exit = vi.fn();
+      const shutdown = completeRuntimeWorkerShutdown({
+        runtime: runtimeWithClose(() => new Promise<void>((resolve) => {
+          setTimeout(resolve, RUNTIME_SHUTDOWN_DEADLINE_MS);
+        })),
+        cause: "runtime-shutdown",
+        exitCode: 0,
+        closeBrokers: vi.fn(),
+        ownedProcessCleanupConfirmed: async () => true,
+        post,
+        awaitStoppedAcknowledgement: async () => undefined,
+        exit,
+      });
+
+      await vi.advanceTimersByTimeAsync(RUNTIME_SHUTDOWN_DEADLINE_MS);
+      await shutdown;
+      expect(post).toHaveBeenCalledWith({ type: "runtime.stopped" });
+      expect(post).not.toHaveBeenCalledWith({
+        type: "runtime.shutdown-unconfirmed",
+      });
+      expect(exit).toHaveBeenCalledWith(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("fails closed when a completed boundary cleanup check returns false", async () => {
+    vi.useFakeTimers();
+    try {
+      const post = vi.fn();
+      const exit = vi.fn();
+      const shutdown = completeRuntimeWorkerShutdown({
+        runtime: runtimeWithClose(() => new Promise<void>((resolve) => {
+          setTimeout(resolve, RUNTIME_SHUTDOWN_DEADLINE_MS);
+        })),
+        cause: "runtime-shutdown",
+        exitCode: 0,
+        closeBrokers: vi.fn(),
+        ownedProcessCleanupConfirmed: async () => false,
+        post,
+        awaitStoppedAcknowledgement: async () => undefined,
+        exit,
+      });
+
+      await vi.advanceTimersByTimeAsync(RUNTIME_SHUTDOWN_DEADLINE_MS);
+      await shutdown;
+      expect(post).toHaveBeenCalledWith({
+        type: "runtime.shutdown-unconfirmed",
+      });
+      expect(post).not.toHaveBeenCalledWith({ type: "runtime.stopped" });
+      expect(exit).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("does not wait beyond the runtime shutdown deadline for claim retirement", async () => {
     vi.useFakeTimers();
     try {
@@ -156,7 +254,7 @@ describe("runtime worker shutdown", () => {
         exit,
       });
 
-      await vi.advanceTimersByTimeAsync(2_500);
+      await vi.advanceTimersByTimeAsync(RUNTIME_SHUTDOWN_DEADLINE_MS);
       await shutdown;
       expect(post).toHaveBeenCalledWith({
         type: "runtime.shutdown-unconfirmed",

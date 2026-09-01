@@ -394,6 +394,7 @@ test("opens a settled chat directly and does not redirect when Work filters hide
 });
 
 test("keeps every ordinary New chat entry point isolated from the viewed chat", async ({ browserName: _browserName }, testInfo) => {
+  test.setTimeout(75_000);
   type ConversationRow = {
     id: string;
     provider_id: string;
@@ -458,6 +459,8 @@ test("keeps every ordinary New chat entry point isolated from the viewed chat", 
     expect(conversation.branch).not.toBe("viewed/branch");
     expect(messageCount).toBe(0);
     expect(turnCount).toBe(0);
+    await expect(page.getByRole("heading", { name: "New chat", level: 1 }))
+      .toBeVisible();
   };
 
   let count = await seedViewedConversationContext(

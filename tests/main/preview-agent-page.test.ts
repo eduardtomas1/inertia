@@ -1750,6 +1750,7 @@ describe("agent browser semantic snapshots", () => {
       getAttribute: () => null,
       matches: () => false,
     };
+    const alternateSafeTarget = { ...safeTarget };
     const lateDisabledTarget = {
       disabled: false,
       getAttribute: (name: string) => name === "aria-disabled" ? "true" : null,
@@ -1764,6 +1765,23 @@ describe("agent browser semantic snapshots", () => {
       stopImmediatePropagation: vi.fn(),
     });
     expect(allowedKeydownPrevented).not.toHaveBeenCalled();
+    const retargetedKeypressPrevented = vi.fn();
+    activationListeners.get("keypress")?.({
+      composedPath: () => [alternateSafeTarget], isTrusted: true, key: "Enter",
+      preventDefault: retargetedKeypressPrevented, stopImmediatePropagation: vi.fn(),
+    });
+    expect(retargetedKeypressPrevented).toHaveBeenCalledOnce();
+    await setAgentPageInputGuard(contents as never, true);
+    activationListeners.get("keydown")?.({
+      composedPath: () => [safeTarget], isTrusted: true, key: "Enter",
+      preventDefault: vi.fn(), stopImmediatePropagation: vi.fn(),
+    });
+    const retargetedClickPrevented = vi.fn();
+    activationListeners.get("click")?.({
+      composedPath: () => [alternateSafeTarget], isTrusted: true,
+      preventDefault: retargetedClickPrevented, stopImmediatePropagation: vi.fn(),
+    });
+    expect(retargetedClickPrevented).toHaveBeenCalledOnce();
     const syntheticKeyupPrevented = vi.fn();
     activationListeners.get("keyup")?.({
       composedPath: () => [safeTarget],

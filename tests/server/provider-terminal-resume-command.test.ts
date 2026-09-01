@@ -8,6 +8,7 @@ import {
 import type { RuntimeStore } from "../../src/server/database";
 import type { ProviderManager } from "../../src/server/providers";
 import { ProviderTerminalResumeRegistry } from "../../src/server/provider/terminal-resume";
+import { ConversationWorkAuthority } from "../../src/server/runtime/conversation-work-authority";
 import {
   createProjectWorkspaceCommandHandler,
   type ProjectWorkspaceCommandDependencies,
@@ -75,11 +76,13 @@ function dependencies(input: {
   activeCheckout?: boolean;
   activeCheckoutChecks?: boolean[];
   workspaceRunActive?: boolean;
+  workspaceRunChecks?: boolean[];
   providerTerminalResumes?: ProviderTerminalResumeRegistry;
 } = {}) {
   const current = input.current ?? conversation();
   const onExitCallbacks: Array<(exitCode: number) => void> = [];
   const send = vi.fn<(socket: never, event: ServerEvent) => void>();
+  const reportTerminalProviderResumeRejection = vi.fn();
   const workspacePath = vi.fn(() => current.worktreePath!);
   const terminalResumeLaunch = vi.fn(async () => ({
     executable: "/Applications/Codex CLI/codex",
@@ -104,11 +107,13 @@ function dependencies(input: {
     ?? new ProviderTerminalResumeRegistry();
   const runningChecks = [...(input.runningChecks ?? [])];
   const activeCheckoutChecks = [...(input.activeCheckoutChecks ?? [])];
+  const workspaceRunChecks = [...(input.workspaceRunChecks ?? [])];
   const value: ProjectWorkspaceCommandDependencies = {
     store: {
       conversation: vi.fn(() => current),
       hasActiveWorkspaceRunForConversation: vi.fn(() => input.workspaceRunActive ?? false),
-      hasRecordedActiveWorkspaceRunForConversation: vi.fn(() => input.workspaceRunActive ?? false),
+      hasRecordedActiveWorkspaceRunForConversation: vi.fn(() =>
+        workspaceRunChecks.shift() ?? input.workspaceRunActive ?? false),
     } as unknown as RuntimeStore,
     conversationAttachments: {} as never,
     workspaceRuns: {} as never,
@@ -129,6 +134,7 @@ function dependencies(input: {
     rememberDeletedConversation: vi.fn(),
     forgetRemoteTranscript: vi.fn(),
     broadcastSnapshot: vi.fn(),
+    reportTerminalProviderResumeRejection,
     send: send as never,
   };
   return {
@@ -139,6 +145,7 @@ function dependencies(input: {
     replaceProcess,
     onExitCallbacks,
     providerTerminalResumes,
+    reportTerminalProviderResumeRejection,
   };
 }
 
@@ -219,6 +226,13 @@ describe("terminal.provider.resume command", () => {
       await expect(handler({ readyState: 1 } as never, resumeCommand())).rejects.toThrow(testCase.message);
       expect(fixture.terminalResumeLaunch).not.toHaveBeenCalled();
       expect(fixture.replaceProcess).not.toHaveBeenCalled();
+      if (testCase.running) {
+        expect(fixture.reportTerminalProviderResumeRejection)
+          .toHaveBeenCalledWith({
+            phase: "preflight",
+            reason: "provider-running",
+          });
+      }
     }
   });
 
@@ -229,6 +243,10 @@ describe("terminal.provider.resume command", () => {
     await expect(handler({ readyState: 1 } as never, resumeCommand())).rejects.toThrow(
       "Stop the active provider session",
     );
+    expect(fixture.reportTerminalProviderResumeRejection).toHaveBeenLastCalledWith({
+      phase: "authority",
+      reason: "resume-authority-unavailable",
+    });
 
     fixture.onExitCallbacks[0]!(0);
     await expect(handler({ readyState: 1 } as never, resumeCommand())).resolves.toBe("handled");
@@ -255,6 +273,66 @@ describe("terminal.provider.resume command", () => {
     expect(fixture.terminalResumeLaunch).toHaveBeenCalledOnce();
   });
 
+  it("waits for a transient sibling checkout reservation before resuming", async () => {
+    const checkoutPath = "/workspace/.inertia/worktrees/owned";
+    const authority = new ConversationWorkAuthority(() => ({
+      projectId,
+      checkoutPath,
+    }));
+    expect(authority.reserve("66666666-6666-4666-8666-666666666666")).toBe(true);
+    const fixture = dependencies({
+      providerTerminalResumes: new ProviderTerminalResumeRegistry(authority),
+    });
+    const pending = createProjectWorkspaceCommandHandler(fixture.value)(
+      { readyState: 1 } as never,
+      resumeCommand(),
+    );
+    await Promise.resolve();
+    expect(fixture.terminalResumeLaunch).not.toHaveBeenCalled();
+
+    authority.release("66666666-6666-4666-8666-666666666666");
+    await expect(pending).resolves.toBe("handled");
+    expect(fixture.terminalResumeLaunch).toHaveBeenCalledOnce();
+  });
+
+  it("holds real checkout authority across detection and releases it with the resumed process", async () => {
+    const checkoutPath = "/workspace/.inertia/worktrees/owned";
+    const authority = new ConversationWorkAuthority(() => ({
+      projectId,
+      checkoutPath,
+    }));
+    const fixture = dependencies({
+      providerTerminalResumes: new ProviderTerminalResumeRegistry(authority),
+    });
+    let completeDiscovery!: (launch: {
+      executable: string;
+      args: string[];
+      env: { PATH: string };
+    }) => void;
+    fixture.terminalResumeLaunch.mockImplementation(() => new Promise((resolve) => {
+      completeDiscovery = resolve;
+    }));
+    const pending = createProjectWorkspaceCommandHandler(fixture.value)(
+      { readyState: 1 } as never,
+      resumeCommand(),
+    );
+    await vi.waitFor(() => expect(completeDiscovery).toBeTypeOf("function"));
+
+    expect(authority.reserve("88888888-8888-4888-8888-888888888888"))
+      .toBe(false);
+    completeDiscovery({
+      executable: "/Applications/Codex CLI/codex",
+      args: ["resume", sessionId],
+      env: { PATH: "/usr/bin" },
+    });
+    await expect(pending).resolves.toBe("handled");
+    expect(fixture.reportTerminalProviderResumeRejection).not.toHaveBeenCalled();
+
+    fixture.onExitCallbacks[0]!(0);
+    expect(authority.reserve("88888888-8888-4888-8888-888888888888"))
+      .toBe(true);
+  });
+
   it("abandons the launch if an app provider turn starts during CLI detection", async () => {
     const fixture = dependencies({ runningChecks: [false, true] });
     const handler = createProjectWorkspaceCommandHandler(fixture.value);
@@ -265,6 +343,10 @@ describe("terminal.provider.resume command", () => {
     expect(fixture.terminalResumeLaunch).toHaveBeenCalledOnce();
     expect(fixture.replaceProcess).not.toHaveBeenCalled();
     expect(fixture.providerTerminalResumes.isActive(conversationId)).toBe(false);
+    expect(fixture.reportTerminalProviderResumeRejection).toHaveBeenCalledWith({
+      phase: "post-launch",
+      reason: "provider-running",
+    });
   });
 
   it("abandons discovery if the owning socket disconnects before spawn", async () => {
@@ -294,6 +376,10 @@ describe("terminal.provider.resume command", () => {
     await expect(pending).rejects.toThrow("connection closed");
     expect(fixture.replaceProcess).not.toHaveBeenCalled();
     expect(fixture.providerTerminalResumes.isActive(conversationId)).toBe(false);
+    expect(fixture.reportTerminalProviderResumeRejection).toHaveBeenCalledWith({
+      phase: "post-launch",
+      reason: "socket-closed",
+    });
   });
 
   it("rejects a queued or active Inertia turn before and after discovery", async () => {
@@ -303,6 +389,10 @@ describe("terminal.provider.resume command", () => {
       resumeCommand(),
     )).rejects.toThrow("Stop the active provider session");
     expect(before.terminalResumeLaunch).not.toHaveBeenCalled();
+    expect(before.reportTerminalProviderResumeRejection).toHaveBeenCalledWith({
+      phase: "preflight",
+      reason: "turn-active",
+    });
 
     const after = dependencies();
     const activeChecks = [false, true];
@@ -312,24 +402,25 @@ describe("terminal.provider.resume command", () => {
       resumeCommand(),
     )).rejects.toThrow("Stop the active provider session");
     expect(after.replaceProcess).not.toHaveBeenCalled();
+    expect(after.reportTerminalProviderResumeRejection).toHaveBeenCalledWith({
+      phase: "post-launch",
+      reason: "turn-active",
+    });
   });
 
-  it("rejects an agent in a sibling chat sharing the checkout before and after discovery", async () => {
-    const before = dependencies({ activeCheckout: true });
-    await expect(createProjectWorkspaceCommandHandler(before.value)(
+  it("rejects an agent in a sibling chat sharing the checkout after discovery", async () => {
+    const fixture = dependencies({ activeCheckout: true });
+    await expect(createProjectWorkspaceCommandHandler(fixture.value)(
       { readyState: 1 } as never,
       resumeCommand(),
     )).rejects.toThrow("Stop the active provider session");
-    expect(before.terminalResumeLaunch).not.toHaveBeenCalled();
-
-    const after = dependencies({ activeCheckoutChecks: [false, true] });
-    await expect(createProjectWorkspaceCommandHandler(after.value)(
-      { readyState: 1 } as never,
-      resumeCommand(),
-    )).rejects.toThrow("Stop the active provider session");
-    expect(after.terminalResumeLaunch).toHaveBeenCalledOnce();
-    expect(after.replaceProcess).not.toHaveBeenCalled();
-    expect(after.providerTerminalResumes.isActive(conversationId)).toBe(false);
+    expect(fixture.terminalResumeLaunch).toHaveBeenCalledOnce();
+    expect(fixture.replaceProcess).not.toHaveBeenCalled();
+    expect(fixture.providerTerminalResumes.isActive(conversationId)).toBe(false);
+    expect(fixture.reportTerminalProviderResumeRejection).toHaveBeenCalledWith({
+      phase: "post-launch",
+      reason: "checkout-active",
+    });
   });
 
   it("rejects another workspace run that owns the conversation worktree", async () => {
@@ -339,6 +430,24 @@ describe("terminal.provider.resume command", () => {
       resumeCommand(),
     )).rejects.toThrow("Stop the active provider session");
     expect(fixture.terminalResumeLaunch).not.toHaveBeenCalled();
+    expect(fixture.reportTerminalProviderResumeRejection).toHaveBeenCalledWith({
+      phase: "preflight",
+      reason: "workspace-run-active",
+    });
+  });
+
+  it("diagnoses a workspace run that starts during provider discovery", async () => {
+    const fixture = dependencies({ workspaceRunChecks: [false, true] });
+    await expect(createProjectWorkspaceCommandHandler(fixture.value)(
+      { readyState: 1 } as never,
+      resumeCommand(),
+    )).rejects.toThrow("Stop the active provider session");
+    expect(fixture.terminalResumeLaunch).toHaveBeenCalledOnce();
+    expect(fixture.replaceProcess).not.toHaveBeenCalled();
+    expect(fixture.reportTerminalProviderResumeRejection).toHaveBeenCalledWith({
+      phase: "post-launch",
+      reason: "workspace-run-active",
+    });
   });
 
   it("blocks checkpoint restore while the resumed terminal owns the worktree", async () => {

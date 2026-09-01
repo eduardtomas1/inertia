@@ -122,21 +122,34 @@ export function useInertiaConnection(): InertiaConnection {
           resumeCursor,
           detailSubscriptionsRef.current.conversationIds(),
         ));
+        let acceptingFrames = true;
         let mutationReconciliationPending = false;
         socketRef.current = socket;
 
+        const condemnSocket = (): void => {
+          acceptingFrames = false;
+          if (
+            socket.readyState === WebSocket.CONNECTING
+            || socket.readyState === WebSocket.OPEN
+          ) socket.close();
+        };
+
         socket.addEventListener("open", () => {
-          if (disposed || socketRef.current !== socket) return;
+          if (disposed || socketRef.current !== socket || !acceptingFrames) return;
           setStatus("connecting");
         });
 
         socket.addEventListener("message", (message) => {
-          if (disposed || socketRef.current !== socket) return;
+          if (disposed || socketRef.current !== socket || !acceptingFrames) return;
 
           void deliverDecodedServerEvent(
             message.data,
             (receivedEvent) => {
-              if (disposed || socketRef.current !== socket) return;
+              if (
+                disposed
+                || socketRef.current !== socket
+                || !acceptingFrames
+              ) return;
               if (
                 receivedEvent.type === "runtime.event"
                 && receivedEvent.event.type === "agent.text"
@@ -147,7 +160,7 @@ export function useInertiaConnection(): InertiaConnection {
               const requireAuthoritativeRefresh = (): void => {
                 forceSnapshot = true;
                 projectionRef.current.reset();
-                if (socket.readyState === WebSocket.OPEN) socket.close();
+                condemnSocket();
               };
 
               if (event.type === "server.welcome") {
@@ -239,15 +252,24 @@ export function useInertiaConnection(): InertiaConnection {
               notifyConnectionListeners(event, listenersRef.current);
             },
             () => {
-              if (!disposed && socketRef.current === socket) {
+              if (
+                !disposed
+                && socketRef.current === socket
+                && acceptingFrames
+              ) {
                 setError(UNREADABLE_RUNTIME_RESPONSE);
+                condemnSocket();
               }
             },
           ).catch((error: unknown) => {
-            if (disposed || socketRef.current !== socket) return;
+            if (
+              disposed
+              || socketRef.current !== socket
+              || !acceptingFrames
+            ) return;
             console.error(error);
             setError("Inertia could not apply a response from its local service.");
-            if (socket.readyState === WebSocket.OPEN) socket.close();
+            condemnSocket();
           });
         });
 
@@ -265,7 +287,7 @@ export function useInertiaConnection(): InertiaConnection {
         });
 
         socket.addEventListener("error", () => {
-          if (!disposed && socketRef.current === socket) socket.close();
+          if (!disposed && socketRef.current === socket) condemnSocket();
         });
       } catch (connectionError) {
         if (disposed) return;

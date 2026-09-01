@@ -8,6 +8,7 @@ interface AgentBrowserPrivacyState {
   privacyObserver?: MutationObserver;
   agentInputActive?: boolean;
   agentActivationKey?: "Enter" | "Space";
+  agentActivationTarget?: EventTarget;
   blockedAgentActivationKey?: "Enter" | "Space";
   expectedAgentClickRef?: string;
   agentInputRefused?: "disabled" | "file" | "nested" | "retargeted";
@@ -786,16 +787,21 @@ export function installPreviewAgentPrivacyGuard(
     }
     return disabled ? "disabled" : null;
   };
+  const activationRetargeted = (path: EventTarget[] | null): boolean => (
+    state.agentActivationTarget !== undefined
+    && (path === null || !path.includes(state.agentActivationTarget))
+  );
   for (const eventName of ["mousedown", "mouseup", "click"] as const) {
     activationTarget.addEventListener(eventName, (event) => {
       if (!state.agentInputActive || event.isTrusted !== true) return;
       const expectedRef = state.expectedAgentClickRef;
-      if (!expectedRef) return;
-      const expected = state.refs.get(expectedRef);
+      if (!expectedRef && state.agentActivationTarget === undefined) return;
+      const expected = expectedRef ? state.refs.get(expectedRef) : undefined;
       const path = boundedEventPath(event);
       const refusal = state.agentInputRefused
         || activationEventRefusal(event, path)
-        || (!expected?.isConnected || path === null || !path.includes(expected)
+        || (activationRetargeted(path) ? "retargeted" : null)
+        || (expectedRef && (!expected?.isConnected || path === null || !path.includes(expected))
           ? "retargeted"
           : null);
       if (!refusal) return;
@@ -808,7 +814,9 @@ export function installPreviewAgentPrivacyGuard(
     const key = activationKey(event);
     if (!key) return;
     state.agentActivationKey = key;
-    const refusal = activationEventRefusal(event);
+    const path = boundedEventPath(event);
+    state.agentActivationTarget = path?.[0];
+    const refusal = activationEventRefusal(event, path);
     if (!refusal) return;
     recordRefusal(refusal);
     state.blockedAgentActivationKey = key;
@@ -819,22 +827,22 @@ export function installPreviewAgentPrivacyGuard(
       if (!state.agentInputActive || event.isTrusted !== true) return;
       const key = activationKey(event);
       if (!key || key !== state.agentActivationKey) return;
-      const refusal = activationEventRefusal(event);
+      const path = boundedEventPath(event);
+      const refusal = activationEventRefusal(event, path)
+        || (activationRetargeted(path) ? "retargeted" : null);
       if (state.blockedAgentActivationKey === key || refusal) {
         if (refusal) recordRefusal(refusal);
         state.blockedAgentActivationKey = key;
         stopActivationEvent(event);
-      }
-      if (eventName === "keyup") {
-        state.agentActivationKey = undefined;
-        state.blockedAgentActivationKey = undefined;
       }
     }, true);
   }
   for (const eventName of ["beforeinput", "input"] as const) {
     activationTarget.addEventListener(eventName, (event) => {
       if (!state.agentInputActive || event.isTrusted !== true || !state.agentActivationKey) return;
-      const refusal = activationEventRefusal(event);
+      const path = boundedEventPath(event);
+      const refusal = activationEventRefusal(event, path)
+        || (activationRetargeted(path) ? "retargeted" : null);
       if (!state.blockedAgentActivationKey && !refusal) return;
       if (refusal) recordRefusal(refusal);
       state.blockedAgentActivationKey = state.agentActivationKey;

@@ -747,6 +747,11 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     await expect(finalizedRecentTurn.locator(".turn-execution-rail.is-live")).toHaveCount(0);
     await expect(finalizedRecentTurn.locator("[data-active-work-region]")).toHaveCount(0);
     await expect(finalizedRecentTurn.getByRole("button", { name: /^Stop /u })).toHaveCount(0);
+    // Reload also starts the ordinary repository-status refresh. Wait for its
+    // rendered branch result before asking the runtime to prove that every
+    // owned process has stopped; recycling during that refresh would be a
+    // lifecycle race rather than the reconnect behavior this scenario owns.
+    await expect(page.locator('[data-header-menu="branch"] > button')).toHaveCount(1);
 
     const beforeReconnect = await runtimeSnapshot();
     const rendererGenerationBeforeReconnect = await page.locator(".app-shell")
@@ -781,19 +786,5 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     cleanup.selectConversation(previousConversationId);
     cleanup.deleteConversation(conversation.id);
     cleanup.close();
-    await resizeWindow(1440, 920);
-    await page.reload();
-    await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible({
-      timeout: 10_000,
-    });
-    const navigation = page.getByRole("complementary", { name: "Project navigation", exact: true });
-    if (!await navigation.isVisible()) {
-      await page.getByRole("button", { name: "Toggle project navigation" }).click();
-      await expect(navigation).toBeVisible();
-    }
-    if (!await page.locator(".workspace-panel").isVisible()) {
-      await page.getByRole("button", { name: "Open workspace tools" }).click();
-      await expect(page.locator(".workspace-panel")).toBeVisible();
-    }
   }
 });

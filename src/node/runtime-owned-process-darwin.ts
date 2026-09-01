@@ -12,6 +12,8 @@ export interface DarwinProcessIdentity {
 }
 
 const DARWIN_GUARDIAN_HELPER_OUTPUT_BYTES = 4 * 1024;
+const DARWIN_IDENTITY_HELPER_TIMEOUT_MS = 5_000;
+export const DARWIN_RUNTIME_OWNED_GUARDIAN_ADMISSION_TIMEOUT_MS = 5_500;
 
 interface DarwinGuardianHelperResult {
   readonly stdout: string;
@@ -188,7 +190,7 @@ export async function readDarwinProcessIdentityAsync(
   const result = await runDarwinGuardianHelper(
     guardianPath,
     ["identity", String(pid)],
-    1_000,
+    DARWIN_IDENTITY_HELPER_TIMEOUT_MS,
     abortSignal,
   );
   if (result.failed || result.signal || result.stderr.trim()) return null;
@@ -290,7 +292,10 @@ export function darwinProcessGuardianReady(
       timeout: Math.max(1, Math.min(1_500, remainingMs)),
     },
   );
-  if (result.error) throw result.error;
+  if (result.error) {
+    if ("code" in result.error && result.error.code === "ETIMEDOUT") return null;
+    throw result.error;
+  }
   if (result.stderr?.trim()) {
     throw new Error("The macOS process guardian readiness result is invalid.");
   }
@@ -317,7 +322,7 @@ export async function darwinProcessGuardianReadyAsync(
   const result = await runDarwinGuardianHelper(
     guardianPath,
     ["ready", String(pid)],
-    1_500,
+    DARWIN_RUNTIME_OWNED_GUARDIAN_ADMISSION_TIMEOUT_MS,
     abortSignal,
   );
   if (result.failed || result.signal || result.stderr.trim()) return null;

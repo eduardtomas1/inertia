@@ -32,6 +32,17 @@ import {
   type RuntimeCommandHandler,
 } from "./command-router";
 
+export interface TerminalProviderResumeRejectionDiagnostic {
+  phase: "preflight" | "authority" | "post-launch";
+  reason:
+    | "provider-running"
+    | "turn-active"
+    | "workspace-run-active"
+    | "resume-authority-unavailable"
+    | "socket-closed"
+    | "checkout-active";
+}
+
 export interface ProjectWorkspaceCommandDependencies {
   store: RuntimeStore;
   conversationAttachments: ConversationAttachmentStore;
@@ -48,6 +59,9 @@ export interface ProjectWorkspaceCommandDependencies {
   forgetRemoteTranscript(conversationId: string): void;
   broadcastSnapshot(): void;
   send(socket: WebSocket, event: ServerEvent): void;
+  reportTerminalProviderResumeRejection?(
+    diagnostic: TerminalProviderResumeRejectionDiagnostic,
+  ): void;
 }
 
 export function createProjectWorkspaceCommandHandler(
@@ -518,6 +532,17 @@ export function createProjectWorkspaceCommandHandler(
         });
         return "handled";
       case "terminal.provider.resume": {
+        const rejectResume = (
+          phase: TerminalProviderResumeRejectionDiagnostic["phase"],
+          reason: TerminalProviderResumeRejectionDiagnostic["reason"],
+          message = "Stop the active provider session for this chat before resuming it in another terminal.",
+        ): never => {
+          dependencies.reportTerminalProviderResumeRejection?.({
+            phase,
+            reason,
+          });
+          throw new RuntimeRequestError(message);
+        };
         const conversation = dependencies.store.conversation(
           command.payload.conversationId,
         );
@@ -545,23 +570,24 @@ export function createProjectWorkspaceCommandHandler(
           command.payload.projectId,
           conversation.id,
         );
-        if (
-          dependencies.providers.isRunning(conversation.id)
-          || dependencies.turns.isActive(conversation.id)
-          || dependencies.turns.hasActiveCheckout(cwd)
-          || dependencies.store.hasRecordedActiveWorkspaceRunForConversation(conversation.id)
-          || dependencies.providerTerminalResumes.isActive(conversation.id)
-        ) {
-          throw new RuntimeRequestError(
-            "Stop the active provider session for this chat before resuming it in another terminal.",
-          );
+        if (dependencies.providers.isRunning(conversation.id)) {
+          rejectResume("preflight", "provider-running");
+        }
+        if (dependencies.turns.isActive(conversation.id)) {
+          rejectResume("preflight", "turn-active");
+        }
+        if (dependencies.store.hasRecordedActiveWorkspaceRunForConversation(
+          conversation.id,
+        )) {
+          rejectResume("preflight", "workspace-run-active");
+        }
+        if (dependencies.providerTerminalResumes.isActive(conversation.id)) {
+          rejectResume("authority", "resume-authority-unavailable");
         }
         if (!await dependencies.providerTerminalResumes.acquireWhenAvailable(
           conversation.id,
         )) {
-          throw new RuntimeRequestError(
-            "Stop the active provider session for this chat before resuming it in another terminal.",
-          );
+          rejectResume("authority", "resume-authority-unavailable");
         }
         try {
           const launch = await dependencies.providers.terminalResumeLaunch(
@@ -569,18 +595,26 @@ export function createProjectWorkspaceCommandHandler(
             conversation.providerSessionId,
             cwd,
           );
-          if (
-            socket.readyState !== WebSocket.OPEN
-            || dependencies.providers.isRunning(conversation.id)
-            || dependencies.turns.isActive(conversation.id)
-            || dependencies.turns.hasActiveCheckout(cwd)
-            || dependencies.store.hasRecordedActiveWorkspaceRunForConversation(conversation.id)
-          ) {
-            throw new RuntimeRequestError(
-              socket.readyState !== WebSocket.OPEN
-                ? "The terminal connection closed before the provider session could start."
-                : "Stop the active provider session for this chat before resuming it in another terminal.",
+          if (socket.readyState !== WebSocket.OPEN) {
+            rejectResume(
+              "post-launch",
+              "socket-closed",
+              "The terminal connection closed before the provider session could start.",
             );
+          }
+          if (dependencies.providers.isRunning(conversation.id)) {
+            rejectResume("post-launch", "provider-running");
+          }
+          if (dependencies.turns.isActive(conversation.id)) {
+            rejectResume("post-launch", "turn-active");
+          }
+          if (dependencies.turns.hasActiveCheckout(cwd)) {
+            rejectResume("post-launch", "checkout-active");
+          }
+          if (dependencies.store.hasRecordedActiveWorkspaceRunForConversation(
+            conversation.id,
+          )) {
+            rejectResume("post-launch", "workspace-run-active");
           }
           const providerResume = {
             providerId: conversation.providerId,

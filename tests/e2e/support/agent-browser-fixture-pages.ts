@@ -66,6 +66,19 @@ export function serveAgentBrowserPrivacyFixture(
   url: string | undefined,
   response: ServerResponse,
 ): boolean {
+  if (url === "/agent-browser-post-refusal-safe") {
+    response.writeHead(200, {
+      "Content-Type": "text/html",
+      "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline'",
+    });
+    response.end(
+      "<!doctype html><title>Activation recovery</title>"
+      + "<button id='safe-recovery' type='button'>Safe recovery</button>"
+      + "<script>const button=document.querySelector('#safe-recovery');"
+      + "button.addEventListener('click',()=>{window.__safeRecoveryClicked=true});button.focus()</script>",
+    );
+    return true;
+  }
   if (url === "/agent-browser-window-capture-privacy") {
     response.writeHead(200, {
       "Content-Type": "text/html",

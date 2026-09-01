@@ -136,7 +136,7 @@ function SidebarView({
   busy,
   layoutWidth,
   onClose,
-  onViewChange,
+  onViewChange, onOpenHome,
   onImportProject,
   onSelectProject,
   onSelectConversation,
@@ -956,7 +956,7 @@ function SidebarView({
         }}
       >
         <div className="sidebar-brand drag-region">
-          <button type="button" className="brand-lockup no-drag" aria-label="Go to home" onClick={() => navigate("home")}>
+          <button type="button" className="brand-lockup no-drag" aria-label="Start a new chat" onClick={onOpenHome}>
             <img src="./inertia-logo.png" alt="" className="brand-logo" />
             <span className="brand-name">Inertia</span>
           </button>

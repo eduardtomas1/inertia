@@ -30,6 +30,7 @@ import { AppNavigationOverlays } from "./AppNavigationOverlays";
 import { AppStatusOverlays } from "./AppStatusOverlays";
 import type { CommitDialogProps } from "./CommitDialog";
 import { PaneResizeHandle } from "./PaneResizeHandle";
+import { LoadingMark } from "./ui";
 import { WorkspaceHeader } from "./WorkspaceHeader";
 import {
   WorkspaceScene,
@@ -45,6 +46,7 @@ import {
   loadDailyWorkDialog,
   loadMultiSpawnDialog,
   scheduleFrequentSurfacePrefetch,
+  loadUsageView,
 } from "./lazySurfaceLoaders";
 
 const RootCommitDialog = lazy(async () => ({
@@ -63,7 +65,9 @@ const ThreadNotifications = lazy(async () => ({
 const Sidebar = lazy(async () => ({
   default: (await import("./Sidebar")).Sidebar,
 }));
-const NonWorkspaceView = lazy(() => import("./NonWorkspaceView"));
+const UsageView = lazy(async () => ({
+  default: (await loadUsageView()).UsageView,
+}));
 
 type Connection = ReturnType<typeof useInertiaConnection>;
 type AppUpdate = ReturnType<typeof useAppUpdate>;
@@ -75,6 +79,7 @@ interface AppLayoutActions {
     command: CommandWithoutId,
   ) => Promise<ServerEvent>;
   importProject: () => Promise<void>;
+  openGlobalChat: () => void;
   selectProject: (project: Project) => void;
   selectConversation: (conversation: Conversation) => void;
   openConversationInSplit: (conversation: Conversation) => void;
@@ -137,6 +142,7 @@ interface AppLayoutProps {
   setPaletteOpen: Dispatch<SetStateAction<boolean>>;
   project: Project | null;
   conversation: Conversation | null;
+  headerConversation: Conversation | null;
   splitConversationId: string | null;
   detachedConversationIds: ReadonlySet<string>;
   detachedChatLimitReached: boolean;
@@ -227,6 +233,7 @@ export function AppLayout({
   setPaletteOpen,
   project,
   conversation,
+  headerConversation,
   splitConversationId,
   detachedConversationIds,
   detachedChatLimitReached,
@@ -281,6 +288,7 @@ export function AppLayout({
   const sidebarActions = useStableActions({
     close: () => setSidebarOpen(false),
     viewChange: setView,
+    openHome: actions.openGlobalChat,
     importProject: () => void actions.importProject(),
     selectProject: actions.selectProject,
     selectConversation: actions.selectConversation,
@@ -456,6 +464,7 @@ export function AppLayout({
             layoutWidth={sidebarLayout.value}
             onClose={sidebarActions.close}
             onViewChange={sidebarActions.viewChange}
+            onOpenHome={sidebarActions.openHome}
             onImportProject={sidebarActions.importProject}
             onSelectProject={sidebarActions.selectProject}
             onSelectConversation={sidebarActions.selectConversation}
@@ -516,7 +525,7 @@ export function AppLayout({
         <div className="workspace-frame">
           <WorkspaceHeader
             project={project}
-            conversation={conversation}
+            conversation={headerConversation}
             view={view}
             activeTool={sceneActiveTool}
             sidebarCollapsed={sidebarCollapsed}
@@ -620,25 +629,21 @@ export function AppLayout({
             ref={workspaceBodyRef}
             id="workspace-content"
             className={`workspace-body${
-              !splitConversationId && toolsVisible ? " has-tools" : ""
-            }${!splitConversationId && stackedTools
+              view === "workspace" && !splitConversationId && toolsVisible
+                ? " has-tools"
+                : ""
+            }${view === "workspace" && !splitConversationId && stackedTools
               ? " is-tools-stacked"
               : ""}`}
             style={workspaceBodyStyle}
           >
-            {view === "home" || view === "usage" ? (
+            {view === "usage" ? (
               <Suspense fallback={(
-                <div className="workspace-tool-loading usage-surface-loading" role="status">
-                  Loading…
+                <div className="workspace-tool-loading usage-surface-loading">
+                  <LoadingMark label="Loading usage" />
                 </div>
               )}>
-                <NonWorkspaceView
-                  view={view}
-                  connection={connection}
-                  busyAction={busyAction}
-                  actions={actions}
-                  usage={usage}
-                />
+                <UsageView {...usage} />
               </Suspense>
             ) : (
               <WorkspaceScene {...scene} />

@@ -362,6 +362,61 @@ describe("draft turn anchoring", () => {
     })).toBeVisible();
   });
 
+  it("chooses a project inside the real empty-chat composer", () => {
+    const studioProject: Project = {
+      ...project,
+      id: "22222222-2222-4222-8222-222222222222",
+      name: "Studio",
+      path: "/workspace/studio",
+      normalizedPath: "/workspace/studio",
+      color: "#2d8a64",
+    };
+    const onChange = vi.fn();
+    render(
+      <ChatWorkspace
+        {...workspaceProps(conversation("conversation-global"), async () => null)}
+        emptyThreadProjectPicker={{
+          projects: [project, studioProject],
+          selectedProjectId: project.id,
+          disabled: false,
+          onChange,
+        }}
+      />,
+    );
+
+    expect(screen.getByRole("heading", {
+      name: "What should we build today?",
+      level: 3,
+    })).toBeVisible();
+    const picker = screen.getByRole("combobox", { name: "Project" });
+    expect(picker).toHaveValue(project.id);
+    expect(screen.getByRole("option", { name: "Anchor project" })).toBeVisible();
+    expect(screen.getByRole("option", { name: "Studio" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Send materialized draft" }))
+      .toBeVisible();
+
+    fireEvent.change(picker, { target: { value: studioProject.id } });
+
+    expect(onChange).toHaveBeenCalledOnce();
+    expect(onChange).toHaveBeenCalledWith(studioProject);
+  });
+
+  it("locks the in-chat project dropdown during project switching", () => {
+    render(
+      <ChatWorkspace
+        {...workspaceProps(conversation("conversation-switching"), async () => null)}
+        emptyThreadProjectPicker={{
+          projects: [project],
+          selectedProjectId: project.id,
+          disabled: true,
+          onChange: vi.fn(),
+        }}
+      />,
+    );
+
+    expect(screen.getByRole("combobox", { name: "Project" })).toBeDisabled();
+  });
+
   it("keeps the timeline mounted behind an owner-correct detail-loading boundary", async () => {
     HTMLElement.prototype.scrollTo = vi.fn();
     const first = conversation("conversation-loading-first");

@@ -282,6 +282,7 @@ describe("detached chat leaf controls", () => {
         dailyWorkOpen={false}
         onClose={noOp}
         onViewChange={noOp}
+        onOpenHome={noOp}
         onImportProject={noOp}
         onSelectProject={noOp}
         onSelectConversation={onSelectConversation}

@@ -96,7 +96,7 @@ export function WorkspaceHeader({
   useNativePreviewSuspension(menu !== null);
   const headerActionsRef = useRef<HTMLDivElement>(null);
   const title = view === "home"
-    ? "Inertia"
+    ? "New chat"
     : view === "settings"
     ? "Settings"
     : view === "usage"

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rename, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -720,6 +720,55 @@ setInterval(() => {}, 1000);
       );
       await rm(directory, { force: true, recursive: true });
       temporaryDirectories.splice(temporaryDirectories.indexOf(directory), 1);
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+    }
+  });
+
+  it("lets an already-finishing Git inspection close before abort cleanup", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "inertia-git-abort-drain-"));
+    temporaryDirectories.push(directory);
+    portableNodeExecutable(directory, "git");
+    const readyPath = join(directory, "ready.txt");
+    const releasePath = join(directory, "release.txt");
+    writeNodeSubcommand(directory, "status", `
+const fs = require("node:fs");
+fs.writeFileSync(${JSON.stringify(readyPath)}, "ready");
+const releasePoll = setInterval(() => {
+  if (!fs.existsSync(${JSON.stringify(releasePath)})) return;
+  clearInterval(releasePoll);
+}, 1);
+`);
+    const previousPath = process.env.PATH;
+    process.env.PATH = directory;
+    const terminateProcessTree = vi.fn(async () => true);
+    try {
+      const controller = new AbortController();
+      const running = runGit(directory, ["status"], {
+        signal: controller.signal,
+        timeoutMs: 5_000,
+        failureMessage: "Git status failed.",
+      }, {
+        terminateProcessTree,
+      });
+      const cancellation = expect(running).rejects.toMatchObject({
+        code: "timeout",
+        message: "Git inspection was cancelled.",
+      } satisfies Partial<GitError>);
+      await waitFor("the finishing Git inspection", async () => {
+        try {
+          return (await readFile(readyPath, "utf8")) === "ready";
+        } catch {
+          return false;
+        }
+      });
+
+      controller.abort();
+      await writeFile(releasePath, "release");
+
+      await cancellation;
+      expect(terminateProcessTree).not.toHaveBeenCalled();
     } finally {
       if (previousPath === undefined) delete process.env.PATH;
       else process.env.PATH = previousPath;

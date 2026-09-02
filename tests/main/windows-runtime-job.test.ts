@@ -30,6 +30,8 @@ import {
   windowsRuntimeProcessCreationIdentity,
   waitForWindowsRuntimeProcessCreationIdentity,
 } from "../../src/main/windows-runtime-job";
+import { runtimeSupervisorRecoveryWaitMs } from
+  "../../src/node/runtime-shutdown-deadline";
 
 const runtimeGenerationId = "20000000-0000-4000-8000-000000000002:1";
 const runtimeCreationTimeMs = 1_700_000_000_123.456;
@@ -793,6 +795,23 @@ describe("Windows runtime Job Object containment", () => {
       // Native exit 22 means OpenJobObject failed for a reason other than
       // ERROR_FILE_NOT_FOUND and must never be projected as an absent job.
     })).resolves.toBe(false);
+  });
+
+  it("observes a valid Windows recovery result beyond the native drain bound", async () => {
+    await disposeWindowsRuntimeJobExecutableLock();
+    await prepareWindowsRuntimeJobExecutableLock(stubAssembly, {
+      spawnLockBroker: () => verifiedExecutableBrokerChild({
+        responseDelayMs: 2_200,
+      }),
+    });
+
+    await expect(recoverWindowsRuntimeJob({
+      kind: "windows-job-v1",
+      name: windowsRuntimeJobName(runtimeGenerationId),
+    }, Date.now() + runtimeSupervisorRecoveryWaitMs("win32"), {
+      platform: "win32",
+      assembly: stubAssembly,
+    })).resolves.toBe(true);
   });
 
   it("reuses one prepared broker across multiple native launches", async () => {

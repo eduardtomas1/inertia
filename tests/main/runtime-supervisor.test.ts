@@ -2038,7 +2038,7 @@ describe("RuntimeSupervisor", () => {
       /shutdown deadline|process tree/u,
     );
     children[0].message({ type: "runtime.stopped" });
-    await vi.advanceTimersByTimeAsync(2_000);
+    await vi.advanceTimersByTimeAsync(2_000 + (process.platform === "win32" ? 3_000 : 1_000));
     await rejected;
     children[0].exit(0);
     await vi.advanceTimersByTimeAsync(0);
@@ -2061,7 +2061,7 @@ describe("RuntimeSupervisor", () => {
 
     const recycled = supervisor.testOnlyRecycle();
     const rejected = expect(recycled).rejects.toThrow(/shutdown deadline/u);
-    await vi.advanceTimersByTimeAsync(2_000);
+    await vi.advanceTimersByTimeAsync(2_000 + (process.platform === "win32" ? 3_000 : 1_000));
     await rejected;
     expect(forceKill).toHaveBeenCalledWith(10_000, expect.any(Number));
     children[0].exit(137);
@@ -2377,7 +2377,7 @@ describe("RuntimeSupervisor", () => {
 
     await vi.advanceTimersByTimeAsync(1_000);
     expect(forceKill).toHaveBeenCalledOnce();
-    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(1_000 + (process.platform === "win32" ? 3_000 : 1_000));
     await expect(stopped).resolves.toBe(false);
     expect(forceKill).toHaveBeenCalledOnce();
 
@@ -2460,7 +2460,7 @@ describe("RuntimeSupervisor", () => {
     await vi.advanceTimersByTimeAsync(999);
     expect(forceKill).toHaveBeenCalledOnce();
     expect(stopSettled).toBe(false);
-    await vi.advanceTimersByTimeAsync(1);
+    await vi.advanceTimersByTimeAsync(1 + (process.platform === "win32" ? 3_000 : 1_000));
     await expect(stopped).resolves.toBe(false);
     expect(forceKill).toHaveBeenCalledOnce();
     expect(supervisor.snapshot()).toMatchObject({

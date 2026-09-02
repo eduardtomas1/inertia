@@ -16,21 +16,26 @@ const displaySensitiveSpecs = readdirSync(testDir)
   )
   .sort();
 
-// Keyboard and mouse input reaches these specs over CDP rather than through the
-// window manager, so operating-system focus is not contended. Electron startup
-// is the real cost, and each fixture already owns a private temporary
-// directory, Electron profile, and workspace.
+// Measured on the hosted runners rather than assumed: a second concurrent
+// Electron instance does not pay for itself. Electron startup here is bound by
+// disk rather than by cores, so on windows-2025 two workers ran the suite in
+// 10.6m against 9.58m serial — slower — and pushed six specs past their
+// deadlines. macOS ARM64 and Linux x64 also lost specs; only Linux ARM64
+// gained (8.2m to 4.5m). Serial stays the default because that trade is not
+// worth a weaker deadline on every assertion.
+//
+// The override remains so the trade can be re-measured on future runner
+// images without a code change, and everything below keeps that safe: budgets
+// scale with the worker count, and the specs that share one machine resource
+// are held in their own phase.
 const parsedWorkers = Number.parseInt(process.env.INERTIA_E2E_WORKERS ?? "", 10);
 const workers =
-  Number.isInteger(parsedWorkers) && parsedWorkers > 0 ? parsedWorkers : 2;
+  Number.isInteger(parsedWorkers) && parsedWorkers > 0 ? parsedWorkers : 1;
 
-// Deadlines have to be stated per concurrent Electron instance, not per run.
-// The hosted runners have four cores, so a second instance roughly halves the
-// cycles available to secure attachment import, which hashes and copies real
-// files: at one worker it settles well inside 15s, and at two it overran that
-// budget on Linux x64 while the same specs passed on Linux ARM64. Scaling with
-// the worker count keeps the assertion honest instead of retrying a green test
-// until it passes; a genuine break still fails inside one scaled budget.
+// Deadlines belong to a concurrent Electron instance, not to a run. At one
+// worker this reproduces the deadlines exactly as they were; raising the
+// worker count raises them with it, so nobody has to rediscover that secure
+// attachment import needs more than 15s while sharing four cores.
 const budgetScale = workers;
 
 export default defineConfig({

@@ -325,9 +325,10 @@ describe("cross-platform packaged behavior contract", () => {
     expect(vitest).toContain("INERTIA_VITEST_MAX_WORKERS");
     expect(vitest).toContain("testTimeout: isWindowsCi ? 30_000 : 15_000");
 
-    // Specs that pin a window to the primary display share one machine
-    // resource, so they are discovered rather than listed and run to
-    // completion before anything else launches Electron.
+    // Electron end-to-end runs stay serial by default because two workers
+    // measured slower on windows-2025 (10.6m against 9.58m) while losing
+    // specs. The override and the safeguards below stay in place so the trade
+    // can be re-measured on future runner images.
     const playwright = await source("playwright.config.ts");
     expect(playwright).toContain('windowDisplay: "primary"');
     expect(playwright).toContain('name: "display-sensitive"');
@@ -336,6 +337,7 @@ describe("cross-platform packaged behavior contract", () => {
     expect(playwright).toContain("INERTIA_E2E_WORKERS");
     // Deadlines scale with the number of concurrent Electron instances rather
     // than being retried until a flake passes.
+    expect(playwright).toContain("? parsedWorkers : 1;");
     expect(playwright).toContain("const budgetScale = workers;");
     expect(playwright).toContain("timeout: 45_000 * budgetScale");
     expect(playwright).toContain("expect: { timeout: 15_000 * budgetScale }");

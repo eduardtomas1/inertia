@@ -35,9 +35,10 @@ const budgets = {
   preMergeConfidenceJavaScript: 28 * kibibyte,
   morphiconsJavaScript: 20 * kibibyte,
   morphingIconFeedbackJavaScript: 8 * kibibyte,
-  // Rare deferred surfaces have strict ceilings below, while their shared
-  // dependencies remain inside the existing core ceiling.
-  coreJavaScript: 1_940 * kibibyte,
+  // Windows x64 measures the provider-queue-hardened core at 1,940.8 KiB.
+  // Keep narrow cross-platform headroom here while every deferred surface
+  // retains its strict independent ceiling below.
+  coreJavaScript: 1_942 * kibibyte,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

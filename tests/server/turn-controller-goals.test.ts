@@ -260,7 +260,7 @@ describe("TurnController native goal lifecycle", () => {
     expect(() => runtime.controller.queue({
       conversationId: runtime.conversationId,
       content: "Do not race the control mutation.",
-    })).toThrow("A Codex goal update is in progress");
+    })).toThrow("A provider goal update is in progress");
 
     release();
     await pending;

@@ -415,3 +415,64 @@
   .agent-pixel-loader { color: CanvasText; forced-color-adjust: auto; }
   .subagent-status-mark, .agent-activity-icon { border: 1px solid CanvasText; color: CanvasText; background: Canvas; forced-color-adjust: auto; }
 }
+
+/* Shared by transcript and lazy file-preview Markdown; keep these styles deferred. */
+.response-markdown a.response-project-file-link {
+  display: inline-flex;
+  box-sizing: border-box;
+  height: 1.55em;
+  min-width: 0;
+  min-height: 18px;
+  max-width: 100%;
+  align-items: center;
+  gap: 0.36em;
+  padding: 0 0.48em;
+  border: 1px solid var(--code-border);
+  border-radius: var(--radius-small);
+  color: var(--text);
+  background: var(--inline-code-surface);
+  font-size: max(var(--ui-font-micro), 0.8em);
+  font-weight: 560;
+  line-height: 1;
+  text-decoration: none;
+  vertical-align: middle;
+  transition: background 120ms ease, border-color 120ms ease;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.response-markdown a.response-project-file-link:hover {
+  border-color: color-mix(in srgb, var(--file-language-accent, var(--accent)) 30%, var(--border));
+  background: var(--surface-hover);
+  text-decoration: none;
+}
+
+.response-project-file-link > span {
+  overflow: hidden;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.response-markdown a.response-project-file-link .response-project-file-icon {
+  display: block;
+  width: 1em;
+  height: 1em;
+  flex: 0 0 auto;
+  margin: 0;
+  color: var(--file-language-accent, var(--text-muted));
+  opacity: 0.9;
+  vertical-align: initial;
+}
+
+.response-markdown a.response-web-link {
+  display: inline;
+}
+
+.response-markdown a.response-web-link svg {
+  display: inline;
+  width: 0.9em;
+  height: 0.9em;
+  margin: 0 0.24em 0 0;
+  vertical-align: -0.1em;
+}

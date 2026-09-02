@@ -73,10 +73,18 @@ function createDurableFile(path, content, mode) {
   }
 }
 
+export function guardianFileSyncOpenFlags(platform = process.platform) {
+  // Windows rejects FlushFileBuffers (Node's fsync) for handles opened without
+  // write access. Every file passed to syncFile is an Inertia-owned lock,
+  // staging, backup, or publication artifact, so requesting write access is
+  // both safe and required there. Keep the narrower read-only handle elsewhere.
+  return platform === "win32" ? "r+" : "r";
+}
+
 function syncFile(path) {
   let descriptor;
   try {
-    descriptor = openSync(path, "r");
+    descriptor = openSync(path, guardianFileSyncOpenFlags());
     fsyncSync(descriptor);
   } finally {
     if (descriptor !== undefined) closeSync(descriptor);

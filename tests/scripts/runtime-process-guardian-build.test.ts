@@ -25,6 +25,7 @@ import { runBounded } from "../../scripts/bounded-process-tree.mjs";
 import {
   acquireGuardianBuildLock,
   cleanGuardianLockArtifacts,
+  guardianFileSyncOpenFlags,
   publishGuardianArtifacts,
   reclaimStaleGuardianBuildLock,
   recoverGuardianPublication,
@@ -45,6 +46,14 @@ const packageScript = join(
   "run-electron-builder.mjs",
 );
 const roots: string[] = [];
+
+describe("runtime guardian durability", () => {
+  it("opens Windows files with write access before flushing them", () => {
+    expect(guardianFileSyncOpenFlags("win32")).toBe("r+");
+    expect(guardianFileSyncOpenFlags("linux")).toBe("r");
+    expect(guardianFileSyncOpenFlags("darwin")).toBe("r");
+  });
+});
 
 interface Fixture {
   readonly bundledIntegrity: string;

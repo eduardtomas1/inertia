@@ -5,6 +5,10 @@ export interface GuardianBuildLock {
   readonly token: string;
 }
 
+export function guardianFileSyncOpenFlags(
+  platform?: NodeJS.Platform,
+): "r" | "r+";
+
 export interface GuardianBuildTargets {
   readonly guardian: string;
   readonly integrity: string;

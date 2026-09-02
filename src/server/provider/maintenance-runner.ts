@@ -126,6 +126,13 @@ export async function runProviderMaintenanceAction(
     options.environment,
     platform,
   );
+  if (action.environmentPathPrefix) {
+    const currentPath = environmentValue(environment, "PATH", platform);
+    const separator = platform === "win32" ? ";" : ":";
+    environment.PATH = currentPath
+      ? `${action.environmentPathPrefix}${separator}${currentPath}`
+      : action.environmentPathPrefix;
+  }
   const invocation = providerProcessInvocation(
     action.executable,
     action.args,

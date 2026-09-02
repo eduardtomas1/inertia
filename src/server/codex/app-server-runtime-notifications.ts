@@ -283,6 +283,35 @@ function projectModelSafety(
   return "handled";
 }
 
+function projectModelProviderAuthRecovery(
+  host: CodexRuntimeNotificationHost,
+  method: string,
+  params: JsonObject,
+): CodexRuntimeNotificationOutcome {
+  if (
+    method !== "modelProvider/authRecoveryStarted"
+    && method !== "modelProvider/authRecoveryCompleted"
+  ) return "not-handled";
+  if (!ownsTurn(host, params)) return "handled";
+
+  const provider = boundedText(params.provider, 160);
+  const message = boundedText(params.message, 4_000);
+  const detail = [
+    provider ? `Provider: ${provider}` : null,
+    message ? `Message:\n${message}` : null,
+  ].filter((part): part is string => Boolean(part)).join("\n\n");
+  const started = method === "modelProvider/authRecoveryStarted";
+  host.emitActivity(
+    "system",
+    started ? "started" : "completed",
+    started
+      ? "Codex is recovering model-provider authentication"
+      : "Codex model-provider authentication recovered",
+    detail ? { detail } : undefined,
+  );
+  return "handled";
+}
+
 function settingsDetail(params: JsonObject): string | null {
   const settings = objectValue(params.threadSettings);
   if (!settings) return null;
@@ -363,6 +392,7 @@ export function projectCodexRuntimeNotification(
     projectMcpStartup(host, method, params),
     projectAutoApprovalReview(host, method, params),
     projectModelSafety(host, method, params),
+    projectModelProviderAuthRecovery(host, method, params),
     projectThreadRuntime(host, method, params),
   ];
   return projections.find((outcome) => outcome !== "not-handled")

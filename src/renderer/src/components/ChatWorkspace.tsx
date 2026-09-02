@@ -78,7 +78,10 @@ import {
 } from "../utils/testStreamingTrace";
 import { Composer } from "./Composer";
 import type { ChatGoalControlProps } from "./ChatGoalControl";
-import type { PromptPresetCommandRunner } from "./composer/types";
+import type {
+  NewChatProjectPicker,
+  PromptPresetCommandRunner,
+} from "./composer/types";
 import type { ProviderTerminalResumeOption } from "./providerResumeOptions";
 import type {
   ConversationContextCommandRunner,
@@ -87,6 +90,7 @@ import type {
 import type { FinalAnswerAutoScrollEvent } from "./response-timeline/types";
 import { LoadingMark } from "./ui";
 import { ProviderMaintenanceNotice } from "./ProviderMaintenanceNotice";
+import "./ChatWorkspace.css";
 
 const ResponseTimeline = lazy(async () => ({
   default: (await import("./ResponseTimeline")).ResponseTimeline,
@@ -110,6 +114,7 @@ type ChatWorkspaceProps = {
   embedded?: boolean;
   project: Project | null;
   conversation: Conversation | null;
+  newChatProjectPicker?: NewChatProjectPicker;
   checkoutBranch?: string | null;
   showCheckoutContext?: boolean;
   latestTurnSummary: ConversationLatestTurnSummary | null;
@@ -222,6 +227,7 @@ export function ChatWorkspace({
   embedded = false,
   project,
   conversation,
+  newChatProjectPicker,
   checkoutBranch = null,
   showCheckoutContext = true,
   latestTurnSummary,
@@ -793,10 +799,14 @@ export function ChatWorkspace({
           {detailLoading && <LoadingMark label="Loading conversation" />}
           {isEmptyThread && (
             <div className="empty-thread">
-              <h3 aria-label={emptyThreadTitle}>
-                What should we build in{" "}
-                <span className="empty-thread-project">{emptyThreadProject}</span>?
-              </h3>
+              {newChatProjectPicker ? (
+                <h3>What should we build today?</h3>
+              ) : (
+                <h3 aria-label={emptyThreadTitle}>
+                  What should we build in{" "}
+                  <span className="empty-thread-project">{emptyThreadProject}</span>?
+                </h3>
+              )}
             </div>
           )}
           <Suspense fallback={<LoadingMark label="Loading conversation" />}>
@@ -898,6 +908,7 @@ export function ChatWorkspace({
           conversation={conversation}
           checkoutBranch={checkoutBranch}
           showCheckoutContext={showCheckoutContext}
+          newChatProjectPicker={newChatProjectPicker}
           providers={providers}
           actions={actions}
           mentionResults={mentionResults}

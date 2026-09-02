@@ -6,6 +6,8 @@ import {
 } from "node:fs/promises";
 import { basename } from "node:path";
 
+import { FILE_OPEN_NO_FOLLOW } from
+  "../node/platform-file-open-flags.js";
 import type { ChatAttachment } from "../shared/contracts.js";
 import type { AttachmentPickerMode } from "../shared/desktop.js";
 import {
@@ -163,7 +165,7 @@ export async function importSelectedAttachmentPaths(
   signal: AbortSignal,
 ): Promise<ChatAttachment[]> {
   const selections = await inspectSelections(paths, mode, signal);
-  const noFollow = "O_NOFOLLOW" in constants ? constants.O_NOFOLLOW : 0;
+  const noFollow = "O_NOFOLLOW" in constants ? FILE_OPEN_NO_FOLLOW : 0;
   const nonBlocking = "O_NONBLOCK" in constants ? constants.O_NONBLOCK : 0;
   const batchDigests = new Set<string>();
   const imported: ChatAttachment[] = [];

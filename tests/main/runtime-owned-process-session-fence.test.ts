@@ -14,6 +14,7 @@ import {
   createDirectRuntimeJournalChildRoot,
   pinDirectRuntimeJournalChildRoot,
   pinDirectRuntimeJournalRoot,
+  removeDirectRuntimeJournalChildRoot,
   writeDirectRuntimeJournalLeaf,
 } from "../../src/node/direct-runtime-journal";
 import {
@@ -100,6 +101,39 @@ describe("runtime owned-process session fence", () => {
       root,
       runtimeOwnedProcessWriterName(generation),
     )).toBeNull();
+  });
+
+  it("re-fences a valid session whose empty writer directory disappeared", () => {
+    const directory = mkdtempSync(join(tmpdir(), "inertia-session-fence-"));
+    directories.push(directory);
+    const root = pinDirectRuntimeJournalRoot(directory);
+    const journal = new RuntimeOwnedProcessJournal(directory, {
+      platform: "darwin",
+    });
+    expect(journal.startSession(generation, boot)).toBe(true);
+    const staleCapability = journal.sessionCapability(generation, boot);
+    expect(staleCapability).not.toBeNull();
+    const writerName = runtimeOwnedProcessWriterName(generation);
+    const writer = pinDirectRuntimeJournalChildRoot(root, writerName);
+    expect(writer).not.toBeNull();
+    expect(removeDirectRuntimeJournalChildRoot(
+      root,
+      writerName,
+      writer!,
+    )).toBe(true);
+
+    expect(journal.inspectGeneration(generation)).toBeNull();
+    expect(journal.repairSessionCrashPrefixes()).toBe(true);
+    expect(journal.inspectGeneration(generation)).toMatchObject({
+      session: { runtimeGenerationId: generation, systemBootId: boot },
+      sessionState: "retiring",
+      sessionWriterPresent: false,
+      records: [],
+      consumingRecords: [],
+    });
+    expect(journal.sessionCapabilityCurrent(staleCapability!)).toBe(false);
+    expect(journal.sessionCapability(generation, boot)).toBeNull();
+    expect(journal.finishSession(generation)).toBe(true);
   });
 
   it("never spawns from a surviving registry after its session is fenced", () => {

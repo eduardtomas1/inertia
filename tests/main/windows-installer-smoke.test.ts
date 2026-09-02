@@ -129,8 +129,8 @@ test("gates the exact runtime-selected and fallback node-pty binaries per Window
     const releaseRoot = join(nodePtyRoot, "build", "Release");
     const prebuildRoot = join(nodePtyRoot, "prebuilds", `win32-${architecture}`);
 
-    expect(paths).toHaveLength(26);
-    expect(new Set(paths).size).toBe(26);
+    expect(paths).toHaveLength(24);
+    expect(new Set(paths).size).toBe(24);
     expect(paths.filter((path) => path.includes(releaseRoot))).toEqual(
       expect.arrayContaining([
         expect.stringContaining(join(releaseRoot, "pty.node")),
@@ -605,9 +605,9 @@ test("pins the minimal fixed builder and gates installed Windows binaries", asyn
     "utf8",
   );
 
-  expect(manifest.devDependencies["electron-builder"]).toBe("26.15.6");
-  expect(lock.packages["node_modules/electron-builder"]?.version).toBe("26.15.6");
-  expect(lock.packages["node_modules/app-builder-lib"]?.version).toBe("26.15.6");
+  expect(manifest.devDependencies["electron-builder"]).toBe("26.15.7");
+  expect(lock.packages["node_modules/electron-builder"]?.version).toBe("26.15.7");
+  expect(lock.packages["node_modules/app-builder-lib"]?.version).toBe("26.15.7");
   expect(manifest.scripts["test:windows-installer-smoke"])
     .toBe("node scripts/windows-installer-smoke.mjs");
   expect(source).toContain("NSIS application archive verified");
@@ -621,6 +621,8 @@ test("pins the minimal fixed builder and gates installed Windows binaries", asyn
   expect(source).toContain("changed required file");
   expect(source).toContain("requireExactNodePtyNativeInventory(unpackedDirectory, architecture)");
   expect(source).toContain('"d3dcompiler_47.dll"');
+  expect(source).not.toContain('"libEGL.dll"');
+  expect(source).not.toContain('"libGLESv2.dll"');
   expect(source).toContain('"prebuilds", `win32-${architecture}`');
   expect(source).toContain('["conpty.dll", "OpenConsole.exe"]');
   expect(source).not.toContain('"build", "Release", "conpty", name');

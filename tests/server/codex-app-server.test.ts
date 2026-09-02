@@ -319,6 +319,8 @@ describe.sequential("Codex App Server runtime", () => {
       expect.objectContaining({ phase: "info", label: "Approval auto-review escalated to strict review" }),
       expect.objectContaining({ phase: "started", label: "Codex is applying a safety review", detail: expect.stringContaining("Verifying trusted access") }),
       expect.objectContaining({ phase: "info", label: "Additional model verification required", detail: expect.stringContaining("trustedAccessForCyber") }),
+      expect.objectContaining({ phase: "started", label: "Codex is recovering model-provider authentication", detail: expect.stringContaining("Provider: workspace-model") }),
+      expect.objectContaining({ phase: "completed", label: "Codex model-provider authentication recovered", detail: expect.stringContaining("Provider authentication refreshed.") }),
       expect.objectContaining({ phase: "completed", label: "Codex safety review completed" }),
       expect.objectContaining({ phase: "info", label: "Codex thread history was reverted" }),
       expect.objectContaining({ phase: "completed", label: "Codex environment connected", detail: "Environment: workspace-environment" }),

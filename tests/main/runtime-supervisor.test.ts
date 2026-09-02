@@ -1911,8 +1911,9 @@ describe("RuntimeSupervisor", () => {
     children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
 
     const recycled = supervisor.testOnlyRecycle();
-    const rejected = expect(recycled).rejects.toThrow(/complete process cleanup/u);
-    children[0].message({ type: "runtime.shutdown-unconfirmed" });
+    const rejected = expect(recycled).rejects.toThrow(/owned-process cleanup/u);
+    children[0].message({ type: "runtime.shutdown-unconfirmed",
+      reason: "owned-process-cleanup" });
     await rejected;
     expect(forceKill).toHaveBeenCalledWith(10_000, expect.any(Number));
     children[0].exit(137);
@@ -2337,7 +2338,7 @@ describe("RuntimeSupervisor", () => {
     await expect(stopped).resolves.toBe(false);
   });
 
-  it("executes the supervisor tree fallback while an unconfirmed runtime close keeps the worker alive", async () => {
+  it("confirms exact fallback cleanup when an unconfirmed close keeps the worker alive", async () => {
     const { children, forceKill, supervisor } = createHarness();
     supervisor.start();
     children[0].spawn();
@@ -2348,13 +2349,14 @@ describe("RuntimeSupervisor", () => {
       settled = true;
       return confirmed;
     });
-    children[0].message({ type: "runtime.shutdown-unconfirmed" });
+    children[0].message({ type: "runtime.shutdown-unconfirmed",
+      reason: "owned-process-cleanup" });
 
     expect(settled).toBe(false);
     expect(forceKill).toHaveBeenCalledWith(10_000, expect.any(Number));
 
     children[0].exit(137);
-    await expect(stopped).resolves.toBe(false);
+    await expect(stopped).resolves.toBe(true);
     vi.runAllTimers();
     expect(forceKill).toHaveBeenCalledOnce();
   });
@@ -2367,7 +2369,8 @@ describe("RuntimeSupervisor", () => {
 
     const stopped = supervisor.stop();
     const shutdownDeadlineAt = Date.now() + 2_000;
-    children[0].message({ type: "runtime.shutdown-unconfirmed" });
+    children[0].message({ type: "runtime.shutdown-unconfirmed",
+      reason: "owned-process-cleanup" });
     await Promise.resolve();
     expect(forceKill).toHaveBeenCalledWith(10_000, shutdownDeadlineAt);
     expect(forceKill).toHaveBeenCalledOnce();

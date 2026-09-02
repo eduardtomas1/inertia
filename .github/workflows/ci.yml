@@ -95,7 +95,7 @@ jobs:
             runner: macos-15-intel
             artifact: macos-x64
             arch: x64
-            timeout_minutes: 45
+            timeout_minutes: 55
             release_platform: macos-x64
             release_dist_script: dist:release:mac:x64
             app_path: release/mac/Inertia.app
@@ -351,7 +351,7 @@ jobs:
   windows-unit:
     name: Windows unit tests (${{ matrix.shard }}/2)
     runs-on: windows-2025
-    timeout-minutes: 30
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:

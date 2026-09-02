@@ -18,6 +18,7 @@ export interface SidebarProps {
   layoutWidth: number;
   onClose: () => void;
   onViewChange: (view: AppView) => void;
+  onOpenHome: () => void;
   onImportProject: () => void;
   onSelectProject: (project: Project) => void;
   onSelectConversation: (conversation: Conversation) => void;

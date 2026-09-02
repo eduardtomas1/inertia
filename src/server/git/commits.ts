@@ -15,6 +15,8 @@ import {
 import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
+import { FILE_OPEN_NO_FOLLOW } from
+  "../../node/platform-file-open-flags";
 import { NETWORK_TIMEOUT_MS } from "./constants";
 import {
   repositoryRoot,
@@ -148,7 +150,7 @@ async function readOptionalRegularFile(path: string): Promise<Buffer | null> {
   try {
     handle = await open(
       path,
-      fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0),
+      fsConstants.O_RDONLY | FILE_OPEN_NO_FOLLOW,
     );
   } catch (error) {
     if (
@@ -755,7 +757,7 @@ export async function commitReviewedChanges(
         fsConstants.O_CREAT
           | fsConstants.O_EXCL
           | fsConstants.O_WRONLY
-          | (fsConstants.O_NOFOLLOW ?? 0),
+          | FILE_OPEN_NO_FOLLOW,
         0o600,
       );
       stageCreated = true;
@@ -848,7 +850,7 @@ export async function commitReviewedChanges(
                 fsConstants.O_CREAT
                   | fsConstants.O_EXCL
                   | fsConstants.O_WRONLY
-                  | (fsConstants.O_NOFOLLOW ?? 0),
+                  | FILE_OPEN_NO_FOLLOW,
                 0o600,
               );
             } catch {

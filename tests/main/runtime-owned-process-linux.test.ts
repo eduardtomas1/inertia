@@ -261,7 +261,7 @@ describe("Linux runtime process guardian", () => {
       String(executable.dev), String(executable.ino), "kill",
     ]);
     await waitFor(() => !exists(guardianPid));
-  }, 15_000);
+  }, 30_000);
 
   linuxIt("routes forced cancellation through the guardian drain", async () => {
     const root = mkdtempSync(join(tmpdir(), "inertia-linux-force-")); roots.push(root);

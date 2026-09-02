@@ -251,6 +251,8 @@ export interface RuntimeSecureFileResult {
   result: SecureFileResult;
 }
 
+export type RuntimeRestartReason = "owned-process-tainted" | "owned-process-cleanup-unconfirmed";
+
 export type RuntimeWorkerEvent =
   | {
       type: "runtime.ready";
@@ -259,6 +261,7 @@ export type RuntimeWorkerEvent =
     }
   | { type: "runtime.system-suspend-result"; id: string; recorded: boolean }
   | { type: "runtime.startup-failed"; message: string }
+  | { type: "runtime.restart-requested"; reason: RuntimeRestartReason }
   | { type: "runtime.shutdown-unconfirmed" }
   | { type: "runtime.stopped" }
   | RuntimeUpdateWorkerEvent
@@ -939,6 +942,16 @@ export function parseRuntimeWorkerEvent(value: unknown): RuntimeWorkerEvent | nu
   if (value.type === "runtime.startup-failed" && Object.keys(value).length === 2 && typeof value.message === "string") {
     const message = value.message.trim();
     return message && message.length <= 1000 ? { type: "runtime.startup-failed", message } : null;
+  }
+  if (
+    value.type === "runtime.restart-requested"
+    && Object.keys(value).length === 2
+    && (
+      value.reason === "owned-process-tainted"
+      || value.reason === "owned-process-cleanup-unconfirmed"
+    )
+  ) {
+    return { type: "runtime.restart-requested", reason: value.reason };
   }
   if (
     value.type === "runtime.ready"

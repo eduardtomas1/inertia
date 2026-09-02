@@ -19,9 +19,14 @@ import {
 } from "node:path";
 
 import {
+  FILE_OPEN_DIRECTORY,
+  FILE_OPEN_NO_FOLLOW,
+} from "../../node/platform-file-open-flags";
+import {
   runtimeOwnedProcessInvocation,
   spawnRuntimeOwnedProcess,
 } from "../../node/runtime-owned-processes";
+import { createOwnedProcessTreeTermination } from "../process-lifecycle";
 import { MAX_PATH_LENGTH } from "./constants";
 import {
   repositoryRoot,
@@ -110,6 +115,7 @@ export type UnacknowledgedWorktreeCreationInspection = "absent" | "retained";
 
 const MAX_GIT_IDENTITY_FILE_BYTES = 16 * 1024;
 const MAX_LINUX_BIRTHTIME_OUTPUT_BYTES = 256;
+const LINUX_BIRTHTIME_OVERFLOW_EXIT_GRACE_MS = 100;
 const LINUX_BIRTHTIME_TIMEOUT_MS = 2_000;
 const ADMINISTRATIVE_IDENTITY_SCAN_TIMEOUT_MS = 15_000;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -276,15 +282,46 @@ async function verifyLinuxDirectoryBirthtime(
         stdio: ["ignore", "pipe", "ignore", fileDescriptor],
         windowsHide: true,
       }));
+      const terminateOwnedTree = createOwnedProcessTreeTermination(
+        child,
+        "Linux filesystem birth-time probe process tree",
+      );
+      let observeClose!: () => void;
+      const closeObserved = new Promise<void>((resolveClose) => {
+        observeClose = resolveClose;
+      });
+      const settleFailure = async (error: Error): Promise<void> => {
+        if (error.message === "linux-stat-overflow") {
+          const closedNaturally = await Promise.race([
+            closeObserved.then(() => true),
+            new Promise<false>((resolveGrace) => {
+              const graceTimer = setTimeout(
+                () => resolveGrace(false),
+                LINUX_BIRTHTIME_OVERFLOW_EXIT_GRACE_MS,
+              );
+              graceTimer.unref();
+            }),
+          ]);
+          if (closedNaturally) {
+            rejectProbe(error);
+            return;
+          }
+        }
+        try {
+          await terminateOwnedTree(true);
+          await closeObserved;
+          rejectProbe(error);
+        } catch (terminationError) {
+          rejectProbe(terminationError);
+        }
+      };
       const chunks: Buffer[] = [];
       let bytes = 0;
       let failure: Error | null = null;
       const fail = (error: Error): void => {
         if (failure) return;
         failure = error;
-        if (child.exitCode === null && child.signalCode === null) {
-          child.kill("SIGTERM");
-        }
+        void settleFailure(error);
       };
       const timer = setTimeout(() => {
         fail(new Error("linux-stat-timeout"));
@@ -305,10 +342,8 @@ async function verifyLinuxDirectoryBirthtime(
       child.once("close", (code, signal) => {
         clearTimeout(timer);
         dependencies.afterLinuxStatClose?.();
-        if (failure) {
-          rejectProbe(failure);
-          return;
-        }
+        observeClose();
+        if (failure) return;
         if (code !== 0 || signal !== null) {
           rejectProbe(new Error("linux-stat-failed"));
           return;
@@ -369,8 +404,8 @@ async function captureDirectoryIdentity(
   const handle = await open(
     path,
     fsConstants.O_RDONLY
-      | (fsConstants.O_NOFOLLOW ?? 0)
-      | (fsConstants.O_DIRECTORY ?? 0),
+      | FILE_OPEN_NO_FOLLOW
+      | FILE_OPEN_DIRECTORY,
   );
   try {
     const opened = await handle.stat({ bigint: true });
@@ -470,7 +505,7 @@ async function readBoundedIdentityFile(
   await dependencies.afterIdentityFileStat?.(path);
   const handle = await open(
     path,
-    fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0),
+    fsConstants.O_RDONLY | FILE_OPEN_NO_FOLLOW,
   );
   try {
     const opened = await handle.stat({ bigint: true });

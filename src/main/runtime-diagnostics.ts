@@ -15,6 +15,8 @@ import {
 } from "node:fs";
 import { join, resolve } from "node:path";
 
+import { FILE_OPEN_NO_FOLLOW } from
+  "../node/platform-file-open-flags.js";
 import type { RuntimeSupervisorSnapshot } from "./runtime-supervisor.js";
 
 const DEFAULT_MAX_FILE_BYTES = 256 * 1024;
@@ -347,7 +349,7 @@ export class RuntimeDiagnostics {
   }
 
   private append(line: string): void {
-    const noFollow = "O_NOFOLLOW" in constants ? constants.O_NOFOLLOW : 0;
+    const noFollow = "O_NOFOLLOW" in constants ? FILE_OPEN_NO_FOLLOW : 0;
     const descriptor = openSync(
       this.activePath,
       constants.O_APPEND | constants.O_CREAT | constants.O_WRONLY | noFollow,

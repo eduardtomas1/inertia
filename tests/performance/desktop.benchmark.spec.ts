@@ -66,6 +66,10 @@ const CI_PREFETCHED_SURFACE_TARGET_MS = 100;
 // answer restores the final settled view without rewarding broken auto-follow.
 const CI_STREAM_MIN_VISIBLE_UPDATES = 4;
 const CI_STREAM_VISIBLE_UPDATE_BARRIER_TIMEOUT_MS = 5_000;
+// Provider admission and the post-ready reader phase each have one bounded
+// fixture window. This outer guard covers both without changing paint targets.
+const STREAMING_MEASUREMENT_TIMEOUT_MS =
+  STREAMING_COMPLETION_GATE_TIMEOUT_MS * 2;
 const TERMINAL_CLOSE_ASSERTION_TIMEOUT_MS = terminalCloseTimeoutMs(
   process.platform,
 ) + 1_000;
@@ -463,6 +467,16 @@ async function processSample(electronApp: ElectronApplication) {
     const window = BrowserWindow.getAllWindows()[0];
     const rendererPid = window?.webContents.getOSProcessId() ?? null;
     const mainMemory = await process.getProcessMemoryInfo();
+    let gpuInfo: unknown = null;
+    let gpuInfoUnavailableReason: string | null = null;
+    try {
+      gpuInfo = await app.getGPUInfo("basic");
+    } catch (error) {
+      // Electron documents this promise as rejecting when both hardware and
+      // software GPU implementations are unavailable. Keep measuring the
+      // renderer in that real fallback state and retain the reason as evidence.
+      gpuInfoUnavailableReason = error instanceof Error ? error.message : String(error);
+    }
     const metrics = app.getAppMetrics().map((metric) => ({
       pid: metric.pid,
       type: metric.type,
@@ -491,7 +505,8 @@ async function processSample(electronApp: ElectronApplication) {
       mainMemoryKb: mainMemory,
       metrics,
       gpuFeatureStatus: app.getGPUFeatureStatus(),
-      gpuInfo: await app.getGPUInfo("basic"),
+      gpuInfo,
+      gpuInfoUnavailableReason,
       display: {
         scaleFactor: display.scaleFactor,
         width: display.size.width,
@@ -695,7 +710,11 @@ async function streamingResponsivenessSample(
     "stream-before",
   );
   const processBefore = await processSample(electronApp);
-  const measurementOutcomePromise = page.evaluate(({ liveEdgeThreshold, sampleNumber }) => (
+  const measurementOutcomePromise = page.evaluate(({
+    liveEdgeThreshold,
+    measurementTimeoutMs,
+    sampleNumber,
+  }) => (
       new Promise<StreamingPaintMeasurement>((resolveMeasurement, rejectMeasurement) => {
       for (const entry of performance.getEntriesByType("mark")) {
         if (entry.name.startsWith("inertia-stream:")) {
@@ -732,7 +751,7 @@ async function streamingResponsivenessSample(
             .find((element) => element.textContent?.includes(`STREAM_PROVIDER_COMPLETE_${sampleNumber}_`))
             ?.textContent?.slice(-120) ?? null,
         })));
-      }, 15_000);
+      }, measurementTimeoutMs);
       let longTaskObserver: PerformanceObserver | null = null;
 
       const percentile = (values: readonly number[], fraction: number): number => {
@@ -913,6 +932,7 @@ async function streamingResponsivenessSample(
     })
   ), {
     liveEdgeThreshold: FOLLOW_LATEST_LIVE_EDGE_THRESHOLD,
+    measurementTimeoutMs: STREAMING_MEASUREMENT_TIMEOUT_MS,
     sampleNumber,
   }).then(
     (value) => ({ status: "fulfilled" as const, value }),
@@ -924,7 +944,7 @@ async function streamingResponsivenessSample(
     .fill(`Run deterministic streaming responsiveness sample ${sampleNumber}.`);
   await composer.getByRole("button", { name: "Send message" }).click();
   await page.locator('[data-stream-renderer="plain-text"]').waitFor({
-    timeout: 10_000,
+    timeout: STREAMING_COMPLETION_GATE_TIMEOUT_MS,
   });
   await expect.poll(
     () => page.evaluate(() => performance.getEntriesByName(

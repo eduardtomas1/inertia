@@ -712,6 +712,12 @@ export class RuntimeSupervisor {
       this.privateConnectPrompts.handle(record, event);
       return;
     }
+    if (event.type === "runtime.restart-requested") {
+      record.reportedFailure ??= event.reason === "owned-process-tainted"
+        ? "The runtime restarted because owned process containment could not be confirmed."
+        : "The runtime restarted because owned process cleanup could not be confirmed.";
+      return;
+    }
     if (event.type === "runtime.startup-failed") {
       record.reportedFailure = event.message;
       record.acceptingReady = false;

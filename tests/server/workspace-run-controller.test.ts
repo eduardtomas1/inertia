@@ -407,6 +407,7 @@ describe("workspace run controller", () => {
 
   it("tracks source-control success and failure as durable workspace activity", async () => {
     const runtime = await fixture();
+    const mutationInvalidations: string[] = [];
     try {
       await expect(runtime.controller.trackSourceControl(
         "Commit changes",
@@ -415,6 +416,10 @@ describe("workspace run controller", () => {
         runtime.workspace,
         "11111111-1111-4111-8111-111111111111",
         async () => "commit-id",
+        {
+          onMutationSettled: () => mutationInvalidations.push("commit:settled"),
+          onMutationStarting: () => mutationInvalidations.push("commit:starting"),
+        },
       )).resolves.toBe("commit-id");
       await expect(runtime.controller.trackSourceControl(
         "Push branch",
@@ -424,6 +429,10 @@ describe("workspace run controller", () => {
         "22222222-2222-4222-8222-222222222222",
         async () => {
           throw new Error("remote unavailable");
+        },
+        {
+          onMutationSettled: () => mutationInvalidations.push("push:settled"),
+          onMutationStarting: () => mutationInvalidations.push("push:starting"),
         },
       )).rejects.toThrow("remote unavailable");
 
@@ -448,6 +457,12 @@ describe("workspace run controller", () => {
           runtime.project.id,
           null,
         ],
+      ]);
+      expect(mutationInvalidations).toEqual([
+        "commit:starting",
+        "commit:settled",
+        "push:starting",
+        "push:settled",
       ]);
     } finally {
       runtime.store.close();

@@ -1061,9 +1061,7 @@ textarea {
 }
 
 .thread-status-dot.is-running::before,
-.thread-status-dot.is-running::after,
-.thread-status-dot.is-working::before,
-.thread-status-dot.is-working::after {
+.thread-status-dot.is-working::before {
   position: absolute;
   inset: 0;
   border: 1px solid currentcolor;
@@ -1071,13 +1069,6 @@ textarea {
   content: "";
   animation: thread-working-ripple var(--thread-ripple-duration)
     var(--thread-ripple-ease) infinite;
-}
-
-/* The negative delay starts the trailing wave mid-flight, so the pair is
-   already evenly spaced on the first frame instead of bunching up. */
-.thread-status-dot.is-running::after,
-.thread-status-dot.is-working::after {
-  animation-delay: calc(var(--thread-ripple-duration) / -2);
 }
 
 .thread-status-dot.is-running { background: var(--accent); color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent); }
@@ -1528,14 +1519,11 @@ textarea {
     transition: none;
   }
 
-  /* The travelling waves are the whole effect, so they are removed outright
-     rather than parked at their first frame as a static ring. */
+  /* The travelling wave is the whole effect, so it is removed outright
+     rather than parked at its first frame as a static ring. */
   .thread-status-dot.is-running::before,
-  .thread-status-dot.is-running::after,
   .thread-status-dot.is-working::before,
-  .thread-status-dot.is-working::after,
-  .activity-thread.status-working .activity-thread-state-mark::before,
-  .activity-thread.status-working .activity-thread-state-mark::after {
+  .activity-thread.status-working .activity-thread-state-mark::before {
     display: none;
   }
 }
@@ -2918,10 +2906,8 @@ button.environment-row:focus-visible,
 @keyframes pulse { 50% { opacity: 0.45; } }
 
 /* A working indicator should emanate, not throb. The wave only ever travels
-   outward and fades; a second copy runs half a period behind it so the motion
-   reads as continuous rather than as a heartbeat with a gap. Scale and opacity
-   stay on the compositor, where animating box-shadow spread repainted the ring
-   every frame. */
+   outward and fades. Scale and opacity stay on the compositor, where animating
+   box-shadow spread repainted the ring every frame. */
 @keyframes thread-working-ripple {
   from {
     opacity: 0.55;
@@ -11387,6 +11373,11 @@ button.sent-attachment-open:focus-visible {
 }
 
 .app-shell[data-document-visible="false"] .streaming-caret,
+.app-shell[data-document-visible="false"] .loading-mark,
+.app-shell[data-document-visible="false"] .pdf-attachment-preview-loading svg,
+.app-shell[data-document-visible="false"] .document-attachment-preview-loading svg,
+.app-shell[data-document-visible="false"] .provider-status-spinner,
+.app-shell[data-document-visible="false"] .app-update-spin,
 .app-shell[data-document-visible="false"]
   .response-markdown.is-streaming > :is(p, h1, h2, h3, h4, h5, h6):last-child::after,
 .app-shell[data-document-visible="false"]
@@ -11399,15 +11390,12 @@ button.sent-attachment-open:focus-visible {
   .response-markdown.is-streaming > .response-table-shell:last-child tbody tr:last-child > :last-child::after,
 .app-shell[data-document-visible="false"]
   .response-turn.is-active .agent-activity.is-running svg,
-.app-shell[data-document-visible="false"] .thread-status-dot.is-working,
 .app-shell[data-document-visible="false"] .thread-status-dot.is-running::before,
-.app-shell[data-document-visible="false"] .thread-status-dot.is-running::after,
 .app-shell[data-document-visible="false"] .thread-status-dot.is-working::before,
-.app-shell[data-document-visible="false"] .thread-status-dot.is-working::after,
 .app-shell[data-document-visible="false"]
   .activity-thread.status-working .activity-thread-state-mark::before,
 .app-shell[data-document-visible="false"]
-  .activity-thread.status-working .activity-thread-state-mark::after {
+  .turn-reasoning-step.is-active::before {
   animation-play-state: paused;
 }
 

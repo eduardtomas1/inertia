@@ -46,6 +46,13 @@ export type WorkIndexItem =
       remaining: number;
     };
 
+export function sidebarWorkLayoutKey(
+  compact: boolean,
+  items: readonly { id: string }[],
+): string {
+  return JSON.stringify([compact, items.map(({ id }) => id)]);
+}
+
 interface SidebarWorkIndexOptions {
   activeConversationId: string | null;
   compact: boolean;
@@ -228,10 +235,14 @@ export function useSidebarWorkIndex({
   const renderedConversationIds = new Set(renderedItems.flatMap(({ item }) => (
     item.kind === "thread" ? [item.conversation.id] : []
   )));
+  const layoutKey = useMemo(
+    () => sidebarWorkLayoutKey(compact, items),
+    [compact, items],
+  );
   useSidebarIndexMotion({
     containerRef: streamRef,
     enabled: motionEnabled,
-    layoutKey: items,
+    layoutKey,
   });
   const focusIdentity = useCallback((identity: string): boolean => {
     const itemIdentity = identity.startsWith("thread-actions:")

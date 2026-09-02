@@ -6,6 +6,11 @@
   to { transform: rotate(360deg); }
 }
 
+.app-shell[data-document-visible="false"]
+  .send-button[data-motion-state="sending"] .composer-send-motion-icon {
+  animation-play-state: paused;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .send-button[data-motion-state="sending"] .composer-send-motion-icon {
     animation: none;

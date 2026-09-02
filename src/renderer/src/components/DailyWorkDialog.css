@@ -543,6 +543,11 @@
   50% { opacity: 0.32; }
 }
 
+.app-shell[data-document-visible="false"] .daily-work-skeleton i,
+.app-shell[data-document-visible="false"] .daily-work-badge.is-running::before {
+  animation-play-state: paused;
+}
+
 .daily-work-card-metrics {
   display: grid;
   grid-template-columns: repeat(2, minmax(62px, auto));

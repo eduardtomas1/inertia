@@ -3,7 +3,7 @@ import { useLayoutEffect, type RefObject } from "react";
 interface SidebarIndexMotionOptions {
   containerRef: RefObject<HTMLElement | null>;
   enabled: boolean;
-  layoutKey: unknown;
+  layoutKey: string;
 }
 
 let runtimePromise: Promise<typeof import("../utils/sidebarIndexMotionRuntime")> | null = null;

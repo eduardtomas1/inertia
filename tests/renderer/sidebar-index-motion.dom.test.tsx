@@ -3,16 +3,19 @@ import { useRef } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { useSidebarIndexMotion } from "../../src/renderer/src/hooks/useSidebarIndexMotion";
+import { sidebarWorkLayoutKey } from "../../src/renderer/src/hooks/useSidebarWorkIndex";
 
 function MotionHarness({
   active = true,
   enabled,
   order,
+  metadata = "initial",
   visible = true,
 }: {
   active?: boolean;
   enabled: boolean;
   order: string[];
+  metadata?: string;
   visible?: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -29,7 +32,9 @@ function MotionHarness({
     >
       <div ref={containerRef}>
         {order.map((identity) => (
-          <div data-sidebar-motion-id={identity} key={identity}>{identity}</div>
+          <div data-sidebar-motion-id={identity} key={identity}>
+            {identity}<span>{metadata}</span>
+          </div>
         ))}
       </div>
     </div>
@@ -58,6 +63,26 @@ afterEach(() => {
 });
 
 describe("sidebar index position motion", () => {
+  it("keys layout only to density and ordered row identity", () => {
+    const initial = sidebarWorkLayoutKey(false, [
+      { id: "thread:alpha" },
+      { id: "thread:beta" },
+    ]);
+    const metadataOnlyUpdate = [
+      { id: "thread:alpha", metadata: "updated" },
+      { id: "thread:beta", status: "working" },
+    ];
+    expect(sidebarWorkLayoutKey(false, metadataOnlyUpdate)).toBe(initial);
+    expect(sidebarWorkLayoutKey(true, [
+      { id: "thread:alpha" },
+      { id: "thread:beta" },
+    ])).not.toBe(initial);
+    expect(sidebarWorkLayoutKey(false, [
+      { id: "thread:beta" },
+      { id: "thread:alpha" },
+    ])).not.toBe(initial);
+  });
+
   it("animates only retained rows that actually move", async () => {
     let viewportShift = 0;
     const getBounds = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect")
@@ -102,6 +127,37 @@ describe("sidebar index position motion", () => {
       duration: expect.any(Number),
       easing: "cubic-bezier(0.2, 0.8, 0.2, 1)",
     });
+  });
+
+  it("does not read rectangles again for metadata-only row updates", async () => {
+    const getBounds = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockReturnValue({
+        bottom: 48,
+        height: 48,
+        left: 0,
+        right: 240,
+        top: 0,
+        width: 240,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      });
+    installAnimateStub();
+    const view = render(
+      <MotionHarness enabled order={["thread:alpha", "thread:beta"]} />,
+    );
+    await vi.dynamicImportSettled();
+    expect(getBounds).toHaveBeenCalledTimes(3);
+
+    view.rerender(
+      <MotionHarness
+        enabled
+        metadata="new elapsed/status metadata"
+        order={["thread:alpha", "thread:beta"]}
+      />,
+    );
+    await vi.dynamicImportSettled();
+    expect(getBounds).toHaveBeenCalledTimes(3);
   });
 
   it.each([

@@ -6,6 +6,7 @@ import {
   closeSync,
   constants,
   copyFileSync,
+  fstatSync,
   fsyncSync,
   linkSync,
   lstatSync,
@@ -27,6 +28,11 @@ const maximumExecutableSize = 1024 * 1024;
 // slow signing/notarization queue) to lose live ownership.
 const ownershipLeaseMs = 4 * 60 * 60_000;
 const malformedLockGraceMs = ownershipLeaseMs;
+// A claimant file is published synchronously before its exact-inode proof. A
+// crashed publisher can therefore leave an empty or partial file behind. Keep
+// enough headroom for a slow filesystem flush, but recover well inside the
+// three-minute build-lock acquisition deadline.
+const claimantPublicationGraceMs = 30_000;
 
 function wait(milliseconds) {
   Atomics.wait(waitBuffer, 0, 0, milliseconds);
@@ -286,17 +292,32 @@ function childAuthorityIsActive(stateDirectory, record) {
   return currentIdentity === authority.processIdentity;
 }
 
-function claimMalformedLock(stateDirectory, lockPath, metadata, beforeUnlink) {
-  const claimPath = join(
+function claimMalformedLock(
+  stateDirectory,
+  lockPath,
+  metadata,
+  beforeUnlink,
+  beforeClaimantPublication,
+) {
+  const ownerToken = malformedClaimantToken(metadata);
+  if (
+    activeClaimantGenerations(stateDirectory, ownerToken, metadata).length > 0
+  ) {
+    return false;
+  }
+  const legacyClaimPath = join(
     stateDirectory,
     `reclaim-malformed-${metadata.dev}-${metadata.ino}`,
   );
+  const legacyClaim = lstatSync(legacyClaimPath, { throwIfNoEntry: false });
+  if (legacyClaim) {
+    // Fixed-path claims contain no claimant identity. No timeout can prove an
+    // old process is not paused between its final inode check and unlink, so
+    // automatic takeover could delete a replacement lock. Fail closed; clean
+    // hosted checkouts never create these pre-generation artifacts.
+    return false;
+  }
   if (Date.now() - metadata.mtimeMs < malformedLockGraceMs) {
-    const existingClaim = lstatSync(claimPath, { throwIfNoEntry: false });
-    const sameClaim =
-      existingClaim &&
-      existingClaim.dev === metadata.dev &&
-      existingClaim.ino === metadata.ino;
     const sameOwner = readdirSync(stateDirectory).some((name) => {
       if (!name.startsWith("owner-")) return false;
       const owner = lstatSync(join(stateDirectory, name), {
@@ -304,67 +325,301 @@ function claimMalformedLock(stateDirectory, lockPath, metadata, beforeUnlink) {
       });
       return owner && owner.dev === metadata.dev && owner.ino === metadata.ino;
     });
-    if (!sameClaim && sameOwner) return false;
+    if (sameOwner) return false;
   }
+
+  beforeClaimantPublication?.();
+  let claimant;
   try {
-    linkSync(lockPath, claimPath);
+    claimant = createClaimantAuthority(
+      stateDirectory,
+      ownerToken,
+      metadata,
+      lockPath,
+    );
   } catch (error) {
     if (error?.code === "ENOENT") return false;
-    if (error?.code === "EEXIST") {
-      const claim = lstatSync(claimPath, { throwIfNoEntry: false });
-      if (!claim || claim.dev !== metadata.dev || claim.ino !== metadata.ino) {
-        return false;
-      }
-    } else {
-      throw error;
-    }
+    throw error;
   }
-  beforeUnlink?.();
-  const current = lstatSync(lockPath, { throwIfNoEntry: false });
-  const claim = lstatSync(claimPath, { throwIfNoEntry: false });
-  if (
-    current &&
-    claim &&
-    current.dev === claim.dev &&
-    current.ino === claim.ino
-  ) {
+  try {
+    const active = activeClaimantGenerations(
+      stateDirectory,
+      ownerToken,
+      metadata,
+    );
+    if (active.length !== 1 || active[0] !== claimant.generation) return false;
+    const electedProof = lstatSync(claimant.proofPath, {
+      throwIfNoEntry: false,
+    });
+    const electedLock = lstatSync(lockPath, { throwIfNoEntry: false });
+    if (
+      !electedProof ||
+      !electedLock ||
+      electedProof.dev !== metadata.dev ||
+      electedProof.ino !== metadata.ino ||
+      electedLock.dev !== metadata.dev ||
+      electedLock.ino !== metadata.ino
+    ) {
+      return false;
+    }
+    beforeUnlink?.();
+    const finalActive = activeClaimantGenerations(
+      stateDirectory,
+      ownerToken,
+      metadata,
+    );
+    const authority = lstatSync(claimant.authorityPath, {
+      throwIfNoEntry: false,
+    });
+    const current = lstatSync(lockPath, { throwIfNoEntry: false });
+    const proof = lstatSync(claimant.proofPath, { throwIfNoEntry: false });
+    if (
+      finalActive.length !== 1 ||
+      finalActive[0] !== claimant.generation ||
+      !authority ||
+      !current ||
+      !proof ||
+      current.dev !== metadata.dev ||
+      current.ino !== metadata.ino ||
+      proof.dev !== metadata.dev ||
+      proof.ino !== metadata.ino
+    ) {
+      return false;
+    }
     try {
       unlinkSync(lockPath);
     } catch (error) {
       if (error?.code !== "ENOENT") throw error;
     }
     syncDirectory(stateDirectory);
-    rmSync(claimPath, { force: true });
     return true;
+  } finally {
+    releaseClaimantAuthority(claimant);
   }
-  rmSync(claimPath, { force: true });
-  return false;
+}
+
+function malformedClaimantToken(metadata) {
+  const digest = createHash("sha256")
+    .update(`${String(metadata.dev)}:${String(metadata.ino)}`)
+    .digest("hex")
+    .slice(0, 32);
+  return `${digest.slice(0, 8)}-${digest.slice(8, 12)}-${digest.slice(12, 16)}-${digest.slice(16, 20)}-${digest.slice(20)}`;
+}
+
+function claimantAuthorityName(ownerToken, generation) {
+  return `claimant-${ownerToken}-${generation}.json`;
+}
+
+function claimantProofName(ownerToken, generation) {
+  return `reclaim-${ownerToken}-${generation}`;
+}
+
+function validClaimantAuthority(authority, ownerToken, generation, metadata) {
+  return (
+    authority?.version === 1 &&
+    authority.ownerToken === ownerToken &&
+    authority.generation === generation &&
+    Number.isSafeInteger(authority.pid) &&
+    authority.pid > 0 &&
+    (authority.processIdentity === null ||
+      typeof authority.processIdentity === "string") &&
+    authority.targetDevice === String(metadata.dev) &&
+    authority.targetInode === String(metadata.ino)
+  );
+}
+
+function claimantAuthorityIsActive(metadata, authority) {
+  if (!processIsAlive(authority.pid)) return false;
+  const currentIdentity = processIdentity(authority.pid);
+  if (
+    typeof authority.processIdentity === "string" &&
+    currentIdentity !== null
+  ) {
+    return currentIdentity === authority.processIdentity;
+  }
+  return Date.now() - metadata.mtimeMs <= ownershipLeaseMs;
+}
+
+function removeClaimantGeneration(stateDirectory, ownerToken, generation) {
+  rmSync(join(stateDirectory, claimantAuthorityName(ownerToken, generation)), {
+    force: true,
+  });
+  rmSync(join(stateDirectory, claimantProofName(ownerToken, generation)), {
+    force: true,
+  });
+}
+
+function activeClaimantGenerations(stateDirectory, ownerToken, targetMetadata) {
+  const prefix = `claimant-${ownerToken}-`;
+  const active = [];
+  for (const name of readdirSync(stateDirectory)) {
+    if (!name.startsWith(prefix) || !name.endsWith(".json")) continue;
+    const generation = name.slice(prefix.length, -".json".length);
+    const authorityPath = join(stateDirectory, name);
+    const authorityMetadata = lstatSync(authorityPath, {
+      throwIfNoEntry: false,
+    });
+    if (!authorityMetadata) continue;
+    let authority = null;
+    if (
+      !authorityMetadata.isSymbolicLink() &&
+      authorityMetadata.isFile() &&
+      authorityMetadata.size > 0 &&
+      authorityMetadata.size <= 4_096
+    ) {
+      try {
+        authority = JSON.parse(readFileSync(authorityPath, "utf8"));
+      } catch {
+        // Invalid fresh authority is fail-closed until its lease expires.
+      }
+    }
+    if (
+      !validClaimantAuthority(authority, ownerToken, generation, targetMetadata)
+    ) {
+      if (
+        Date.now() - authorityMetadata.mtimeMs <=
+        claimantPublicationGraceMs
+      ) {
+        active.push(generation);
+      } else {
+        removeClaimantGeneration(stateDirectory, ownerToken, generation);
+      }
+      continue;
+    }
+    if (claimantAuthorityIsActive(authorityMetadata, authority)) {
+      active.push(generation);
+    } else {
+      removeClaimantGeneration(stateDirectory, ownerToken, generation);
+    }
+  }
+  return active;
+}
+
+function releaseClaimantAuthority(claimant) {
+  rmSync(claimant.proofPath, { force: true });
+  rmSync(claimant.authorityPath, { force: true });
+  syncDirectory(dirname(claimant.authorityPath));
+}
+
+function createClaimantAuthority(
+  stateDirectory,
+  ownerToken,
+  targetMetadata,
+  proofSource,
+) {
+  const generation = randomUUID();
+  const authorityPath = join(
+    stateDirectory,
+    claimantAuthorityName(ownerToken, generation),
+  );
+  const proofPath = join(
+    stateDirectory,
+    claimantProofName(ownerToken, generation),
+  );
+  createDurableFile(
+    authorityPath,
+    `${JSON.stringify({
+      generation,
+      ownerToken,
+      pid: process.pid,
+      processIdentity: processIdentity(process.pid),
+      targetDevice: String(targetMetadata.dev),
+      targetInode: String(targetMetadata.ino),
+      version: 1,
+    })}\n`,
+    0o600,
+  );
+  try {
+    linkSync(proofSource, proofPath);
+    syncDirectory(stateDirectory);
+  } catch (error) {
+    releaseClaimantAuthority({ authorityPath, proofPath });
+    throw error;
+  }
+  return { authorityPath, generation, proofPath };
 }
 
 export function reclaimStaleGuardianBuildLock(
   stateDirectory,
   lockPath,
-  { beforeUnlink } = {},
+  options = {},
 ) {
-  const metadata = lstatSync(lockPath, { throwIfNoEntry: false });
-  if (!metadata) return true;
-  if (!metadata.isFile() || metadata.isSymbolicLink()) return false;
+  let descriptor;
+  try {
+    const flags =
+      process.platform === "win32"
+        ? "r"
+        : constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
+    descriptor = openSync(lockPath, flags);
+  } catch (error) {
+    if (error?.code === "ENOENT") return true;
+    if (
+      ["ELOOP", "ENODEV", "ENOTSUP", "ENXIO", "EOPNOTSUPP"].includes(
+        error?.code,
+      )
+    ) {
+      return false;
+    }
+    throw error;
+  }
+  try {
+    const metadata = fstatSync(descriptor);
+    const current = lstatSync(lockPath, { throwIfNoEntry: false });
+    if (!current) return true;
+    if (
+      !metadata.isFile() ||
+      !current.isFile() ||
+      current.isSymbolicLink() ||
+      current.dev !== metadata.dev ||
+      current.ino !== metadata.ino
+    ) {
+      return false;
+    }
+    return reclaimHeldGuardianBuildLock(
+      stateDirectory,
+      lockPath,
+      descriptor,
+      metadata,
+      options,
+    );
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
+function reclaimHeldGuardianBuildLock(
+  stateDirectory,
+  lockPath,
+  descriptor,
+  metadata,
+  { beforeClaimantPublication, beforeUnlink },
+) {
   let record;
   try {
-    record = JSON.parse(readFileSync(lockPath, "utf8"));
+    record = JSON.parse(readFileSync(descriptor, "utf8"));
   } catch {
-    return claimMalformedLock(stateDirectory, lockPath, metadata, beforeUnlink);
+    return claimMalformedLock(
+      stateDirectory,
+      lockPath,
+      metadata,
+      beforeUnlink,
+      beforeClaimantPublication,
+    );
   }
   if (!validLockRecord(record)) {
-    return claimMalformedLock(stateDirectory, lockPath, metadata, beforeUnlink);
+    return claimMalformedLock(
+      stateDirectory,
+      lockPath,
+      metadata,
+      beforeUnlink,
+      beforeClaimantPublication,
+    );
   }
   const ownerPath = join(stateDirectory, `owner-${record.token}`);
   const owner = lstatSync(ownerPath, { throwIfNoEntry: false });
-  if (!owner || owner.dev !== metadata.dev || owner.ino !== metadata.ino) {
-    if (childAuthorityIsActive(stateDirectory, record)) return false;
-    return claimMalformedLock(stateDirectory, lockPath, metadata, beforeUnlink);
-  }
-  if (processIsAlive(record.pid)) {
+  const ownerMatches =
+    owner && owner.dev === metadata.dev && owner.ino === metadata.ino;
+  if (ownerMatches && processIsAlive(record.pid)) {
     const currentIdentity = processIdentity(record.pid);
     if (typeof record.processIdentity !== "string") {
       if (Date.now() - owner.mtimeMs <= ownershipLeaseMs) return false;
@@ -373,34 +628,81 @@ export function reclaimStaleGuardianBuildLock(
     } else if (currentIdentity === record.processIdentity) return false;
   }
   if (childAuthorityIsActive(stateDirectory, record)) return false;
-  const claimPath = join(stateDirectory, `reclaim-${record.token}`);
+  if (
+    activeClaimantGenerations(stateDirectory, record.token, metadata).length > 0
+  ) {
+    return false;
+  }
+
+  const legacyClaimPath = join(stateDirectory, `reclaim-${record.token}`);
+  const legacyClaim = lstatSync(legacyClaimPath, { throwIfNoEntry: false });
+  if (legacyClaim) {
+    // As above, a fixed claim cannot safely be timed out across binary
+    // versions because it has no unique claimant generation to fence.
+    return false;
+  }
+
+  const proofSource = ownerMatches ? ownerPath : lockPath;
+  let claimant;
   try {
-    linkSync(ownerPath, claimPath);
+    claimant = createClaimantAuthority(
+      stateDirectory,
+      record.token,
+      metadata,
+      proofSource,
+    );
   } catch (error) {
     if (error?.code === "ENOENT") return false;
-    if (error?.code === "EEXIST") {
-      const claim = lstatSync(claimPath, { throwIfNoEntry: false });
-      if (!claim || claim.dev !== owner.dev || claim.ino !== owner.ino) {
-        return false;
-      }
-    } else {
-      throw error;
-    }
+    throw error;
   }
   try {
-    unlinkSync(ownerPath);
-  } catch (error) {
-    if (error?.code !== "ENOENT") throw error;
-  }
-  beforeUnlink?.();
-  const current = lstatSync(lockPath, { throwIfNoEntry: false });
-  const claim = lstatSync(claimPath, { throwIfNoEntry: false });
-  if (
-    current &&
-    claim &&
-    current.dev === claim.dev &&
-    current.ino === claim.ino
-  ) {
+    const active = activeClaimantGenerations(
+      stateDirectory,
+      record.token,
+      metadata,
+    );
+    if (active.length !== 1 || active[0] !== claimant.generation) return false;
+    const electedOwner = lstatSync(ownerPath, { throwIfNoEntry: false });
+    const electedProof = lstatSync(claimant.proofPath, {
+      throwIfNoEntry: false,
+    });
+    const electedLock = lstatSync(lockPath, { throwIfNoEntry: false });
+    if (
+      (electedOwner &&
+        (electedOwner.dev !== metadata.dev ||
+          electedOwner.ino !== metadata.ino)) ||
+      !electedProof ||
+      !electedLock ||
+      electedProof.dev !== metadata.dev ||
+      electedProof.ino !== metadata.ino ||
+      electedLock.dev !== metadata.dev ||
+      electedLock.ino !== metadata.ino
+    ) {
+      return false;
+    }
+    if (electedOwner) unlinkSync(ownerPath);
+    beforeUnlink?.();
+    const finalActive = activeClaimantGenerations(
+      stateDirectory,
+      record.token,
+      metadata,
+    );
+    const authority = lstatSync(claimant.authorityPath, {
+      throwIfNoEntry: false,
+    });
+    const current = lstatSync(lockPath, { throwIfNoEntry: false });
+    const proof = lstatSync(claimant.proofPath, { throwIfNoEntry: false });
+    if (
+      finalActive.length !== 1 ||
+      finalActive[0] !== claimant.generation ||
+      !authority ||
+      !current ||
+      !proof ||
+      current.dev !== proof.dev ||
+      current.ino !== proof.ino
+    ) {
+      return false;
+    }
     try {
       unlinkSync(lockPath);
     } catch (error) {
@@ -408,11 +710,10 @@ export function reclaimStaleGuardianBuildLock(
     }
     rmSync(childAuthorityPath(stateDirectory, record.token), { force: true });
     syncDirectory(stateDirectory);
-    rmSync(claimPath, { force: true });
     return true;
+  } finally {
+    releaseClaimantAuthority(claimant);
   }
-  rmSync(claimPath, { force: true });
-  return false;
 }
 
 export function acquireGuardianBuildLock(
@@ -625,8 +926,21 @@ export function startGuardianBuildLockHeartbeat(
 export function cleanGuardianLockArtifacts(stateDirectory, lock) {
   const fixed = lstatSync(lock.lockPath, { throwIfNoEntry: false });
   for (const name of readdirSync(stateDirectory)) {
-    if (!name.startsWith("reclaim-")) continue;
     const path = join(stateDirectory, name);
+    if (name.startsWith("claimant-")) {
+      const match = /^claimant-([0-9a-f-]{36})-([0-9a-f-]{36})\.json$/u.exec(
+        name,
+      );
+      if (match?.[1] === lock.token) continue;
+      rmSync(path, { force: true });
+      if (match) {
+        rmSync(join(stateDirectory, claimantProofName(match[1], match[2])), {
+          force: true,
+        });
+      }
+      continue;
+    }
+    if (!name.startsWith("reclaim-")) continue;
     const candidate = lstatSync(path, { throwIfNoEntry: false });
     if (
       !candidate ||

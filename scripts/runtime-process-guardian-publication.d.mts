@@ -53,7 +53,10 @@ export function cleanGuardianLockArtifacts(
 export function reclaimStaleGuardianBuildLock(
   stateDirectory: string,
   lockPath: string,
-  options?: { readonly beforeUnlink?: () => void },
+  options?: {
+    readonly beforeClaimantPublication?: () => void;
+    readonly beforeUnlink?: () => void;
+  },
 ): boolean;
 
 export function validateGuardianExecutable(path: string, label: string): void;

@@ -135,10 +135,17 @@ async function buildAsync(subject: Fixture, trace: string): Promise<number> {
         INERTIA_TEST_GUARDIAN_COMPILER_TRACE: trace,
         INERTIA_TEST_GUARDIAN_OUTPUT_DIRECTORY: subject.outputDirectory,
       },
-      stdio: "ignore",
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    let stderr = "";
+    child.stderr.on("data", (chunk) => {
+      stderr = `${stderr}${chunk.toString("utf8")}`.slice(-64 * 1024);
     });
     child.once("error", reject);
-    child.once("exit", (code) => resolveExit(code ?? -1));
+    child.once("exit", (code) => {
+      if (code !== 0 && stderr) process.stderr.write(stderr);
+      resolveExit(code ?? -1);
+    });
   });
 }
 
@@ -494,12 +501,10 @@ describe("runtime guardian build ownership", () => {
   it("reclaims a fresh orphaned malformed lock with no owner inode", () => {
     const subject = fixture("exit 1");
     writeFileSync(join(subject.stateDirectory, "build.lock"), "malformed");
-
     const lock = acquireGuardianBuildLock(subject.stateDirectory, {
       timeoutMs: 200,
     });
     releaseGuardianBuildLock(lock);
-
     expect(readdirSync(subject.stateDirectory)).toEqual([]);
   });
 
@@ -509,51 +514,60 @@ describe("runtime guardian build ownership", () => {
     const ownerPath = join(subject.stateDirectory, "owner-malformed");
     writeFileSync(ownerPath, "malformed");
     linkSync(ownerPath, lockPath);
-
     expect(() =>
       acquireGuardianBuildLock(subject.stateDirectory, {
         timeoutMs: 40,
       }),
     ).toThrow("Timed out waiting");
-
     expect(readFileSync(lockPath, "utf8")).toBe("malformed");
   });
 
-  it("reclaims an aged malformed lock through one inode-specific claim", () => {
+  it.skipIf(process.platform === "win32")(
+    "fails closed without blocking on a FIFO lock",
+    () => {
+      const subject = fixture("exit 1");
+      const lockPath = join(subject.stateDirectory, "build.lock");
+      expect(spawnSync("mkfifo", [lockPath]).status).toBe(0);
+      const publication = join(
+        repositoryRoot,
+        "scripts/runtime-process-guardian-publication.mjs",
+      );
+      const source = [
+        `import { reclaimStaleGuardianBuildLock as reclaim } from ${JSON.stringify(publication)};`,
+        `if (reclaim(${JSON.stringify(subject.stateDirectory)}, ${JSON.stringify(lockPath)}) !== false) process.exitCode = 2;`,
+      ].join("\n");
+      const child = spawnSync(
+        process.execPath,
+        ["--input-type=module", "--eval", source],
+        { encoding: "utf8", timeout: 1_000 },
+      );
+      expect(child.error).toBeUndefined();
+      expect(child.status, child.stderr).toBe(0);
+    },
+  );
+
+  it("recovers an incomplete claimant publication after its grace", () => {
     const subject = fixture("exit 1");
     const lockPath = join(subject.stateDirectory, "build.lock");
-    writeFileSync(lockPath, "malformed");
-    const aged = new Date(Date.now() - 4 * 60 * 60_000 - 1_000);
-    utimesSync(lockPath, aged, aged);
-
-    const lock = acquireGuardianBuildLock(subject.stateDirectory, {
-      timeoutMs: 200,
+    const token = "56565656-5656-4656-8656-565656565656";
+    writeSyntheticLock(subject, {
+      expiresAtMs: Date.now() - 1,
+      pid: 2_147_483_647,
+      token,
     });
-    releaseGuardianBuildLock(lock);
-
-    expect(readdirSync(subject.stateDirectory)).toEqual([]);
-  });
-
-  it("recovers an abandoned malformed-lock claim", () => {
-    const subject = fixture("exit 1");
-    const lockPath = join(subject.stateDirectory, "build.lock");
-    writeFileSync(lockPath, "malformed");
-    const metadata = statSync(lockPath);
-    linkSync(
-      lockPath,
-      join(
-        subject.stateDirectory,
-        `reclaim-malformed-${metadata.dev}-${metadata.ino}`,
-      ),
+    const incomplete = join(
+      subject.stateDirectory,
+      `claimant-${token}-67676767-6767-4767-8767-676767676767.json`,
     );
-    const aged = new Date(Date.now() - 4 * 60 * 60_000 - 1_000);
-    utimesSync(lockPath, aged, aged);
-
-    const lock = acquireGuardianBuildLock(subject.stateDirectory, {
-      timeoutMs: 200,
-    });
-    releaseGuardianBuildLock(lock);
-
+    writeFileSync(incomplete, "");
+    expect(
+      reclaimStaleGuardianBuildLock(subject.stateDirectory, lockPath),
+    ).toBe(false);
+    const abandonedAt = new Date(Date.now() - 31_000);
+    utimesSync(incomplete, abandonedAt, abandonedAt);
+    expect(
+      reclaimStaleGuardianBuildLock(subject.stateDirectory, lockPath),
+    ).toBe(true);
     expect(readdirSync(subject.stateDirectory)).toEqual([]);
   });
 
@@ -908,26 +922,114 @@ describe("runtime guardian build ownership", () => {
     expect(readdirSync(subject.stateDirectory)).toEqual([]);
   });
 
-  it("recovers an abandoned valid-lock reclaim link", () => {
-    const subject = fixture("exit 1");
-    const token = "55555555-5555-4555-8555-555555555555";
-    writeSyntheticLock(subject, {
-      expiresAtMs: Date.now() - 1,
-      pid: 2_147_483_647,
-      token,
-    });
-    const owner = join(subject.stateDirectory, `owner-${token}`);
-    linkSync(owner, join(subject.stateDirectory, `reclaim-${token}`));
-    const aged = new Date(Date.now() - 4 * 60 * 60_000 - 1_000);
-    utimesSync(owner, aged, aged);
+  it.each([
+    [
+      "valid",
+      (subject: Fixture) =>
+        writeSyntheticLock(subject, {
+          expiresAtMs: Date.now() - 1,
+          pid: 2_147_483_647,
+          token: "58585858-5858-4858-8858-585858585858",
+        }),
+      false,
+    ],
+    [
+      "partially-written",
+      (subject: Fixture) =>
+        writeFileSync(join(subject.stateDirectory, "build.lock"), "partial"),
+      false,
+    ],
+    [
+      "pre-publication partially-written",
+      (subject: Fixture) =>
+        writeFileSync(join(subject.stateDirectory, "build.lock"), "partial"),
+      true,
+    ],
+  ])(
+    "fences a paused %s claimant after replacement",
+    (_kind, setup, prePublication) => {
+      const subject = fixture("exit 1");
+      const lockPath = join(subject.stateDirectory, "build.lock");
+      setup(subject);
+      let nestedReclaim: boolean | null = null;
+      const interleave = (): void => {
+        if (!prePublication) {
+          const name = readdirSync(subject.stateDirectory).find((candidate) =>
+            candidate.startsWith("claimant-"),
+          );
+          const authorityPath = join(subject.stateDirectory, name ?? "missing");
+          const authority = JSON.parse(readFileSync(authorityPath, "utf8"));
+          writeFileSync(
+            authorityPath,
+            `${JSON.stringify({ ...authority, pid: 2_147_483_647, processIdentity: null })}\n`,
+          );
+        }
+        nestedReclaim = reclaimStaleGuardianBuildLock(
+          subject.stateDirectory,
+          lockPath,
+        );
+        writeFileSync(lockPath, "replacement-owner");
+      };
+      const pausedReclaim = reclaimStaleGuardianBuildLock(
+        subject.stateDirectory,
+        lockPath,
+        prePublication
+          ? { beforeClaimantPublication: interleave }
+          : { beforeUnlink: interleave },
+      );
+      expect(nestedReclaim).toBe(true);
+      expect(pausedReclaim).toBe(false);
+      expect(readFileSync(lockPath, "utf8")).toBe("replacement-owner");
+      expect(
+        readdirSync(subject.stateDirectory).some(
+          (name) => name.startsWith("claimant-") || name.startsWith("reclaim-"),
+        ),
+      ).toBe(false);
+    },
+  );
 
-    const lock = acquireGuardianBuildLock(subject.stateDirectory, {
-      timeoutMs: 200,
-    });
-    releaseGuardianBuildLock(lock);
-
-    expect(readdirSync(subject.stateDirectory)).toEqual([]);
-  });
+  it.each(["valid", "malformed"])(
+    "fails closed on an aged %s legacy claim until explicit cleanup",
+    (kind) => {
+      const subject = fixture("exit 1");
+      const token = "57575757-5757-4757-8757-575757575757";
+      const lockPath = join(subject.stateDirectory, "build.lock");
+      let owner: string | null = null;
+      let claim: string;
+      if (kind === "valid") {
+        writeSyntheticLock(subject, {
+          expiresAtMs: Date.now() - 1,
+          pid: 2_147_483_647,
+          token,
+        });
+        owner = join(subject.stateDirectory, `owner-${token}`);
+        claim = join(subject.stateDirectory, `reclaim-${token}`);
+        linkSync(owner, claim);
+        rmSync(owner);
+      } else {
+        writeFileSync(lockPath, "malformed");
+        const metadata = statSync(lockPath);
+        claim = join(
+          subject.stateDirectory,
+          `reclaim-malformed-${metadata.dev}-${metadata.ino}`,
+        );
+        linkSync(lockPath, claim);
+      }
+      const aged = new Date(Date.now() - 4 * 60 * 60_000 - 1_000);
+      utimesSync(claim, aged, aged);
+      expect(
+        reclaimStaleGuardianBuildLock(subject.stateDirectory, lockPath),
+      ).toBe(false);
+      if (owner) expect(existsSync(owner)).toBe(false);
+      expect(existsSync(claim)).toBe(true);
+      expect(existsSync(lockPath)).toBe(true);
+      rmSync(claim);
+      expect(
+        reclaimStaleGuardianBuildLock(subject.stateDirectory, lockPath),
+      ).toBe(true);
+      expect(readdirSync(subject.stateDirectory)).toEqual([]);
+    },
+  );
 
   it("does not unlink a replacement lock during release", () => {
     const subject = fixture("exit 1");
@@ -985,13 +1087,27 @@ describe("runtime guardian build ownership", () => {
     const lock = acquireGuardianBuildLock(subject.stateDirectory);
     const abandoned = join(subject.stateDirectory, "reclaim-abandoned");
     const activeClaim = join(subject.stateDirectory, "reclaim-active");
+    const abandonedToken = "59595959-5959-4959-8959-595959595959";
+    const abandonedGeneration = "60606060-6060-4060-8060-606060606060";
+    const abandonedAuthority = join(
+      subject.stateDirectory,
+      `claimant-${abandonedToken}-${abandonedGeneration}.json`,
+    );
+    const abandonedProof = join(
+      subject.stateDirectory,
+      `reclaim-${abandonedToken}-${abandonedGeneration}`,
+    );
     writeFileSync(abandoned, "abandoned");
     linkSync(lock.ownerPath, activeClaim);
+    writeFileSync(abandonedAuthority, "abandoned-authority");
+    linkSync(lock.ownerPath, abandonedProof);
 
     cleanGuardianLockArtifacts(subject.stateDirectory, lock);
 
     expect(existsSync(abandoned)).toBe(false);
     expect(existsSync(activeClaim)).toBe(true);
+    expect(existsSync(abandonedAuthority)).toBe(false);
+    expect(existsSync(abandonedProof)).toBe(false);
     rmSync(activeClaim);
     releaseGuardianBuildLock(lock);
     expect(readdirSync(subject.stateDirectory)).toEqual([]);

@@ -75,6 +75,7 @@ export interface OpenCodePromptLifecycle {
   messageId: string;
   observed: boolean;
   activityObserved: boolean;
+  workingActivityStarted: boolean;
 }
 
 export interface OpenCodeFailureState {
@@ -611,8 +612,11 @@ export function handleOpenCodeEvent(
     } else if (status?.type === "busy") {
       if (!ownership.markActivePromptWork()) return;
       promptLifecycle.activityObserved = true;
+      promptLifecycle.workingActivityStarted = true;
       emitter.status("running", undefined, "session.status/busy");
-      emitter.activity("turn", "started", "OpenCode is working");
+      emitter.activity("turn", "started", "OpenCode is working", {
+        activityId: promptLifecycle.messageId,
+      });
     }
   } else if (event.type === "session.error") {
     const error = objectValue(properties.error);

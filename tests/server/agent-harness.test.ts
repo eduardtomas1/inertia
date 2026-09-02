@@ -135,6 +135,28 @@ describe("agent harness architecture", () => {
     ]);
   });
 
+  it("settles an anonymous start at the shared harness boundary", () => {
+    const events: AgentHarnessEvent[] = [];
+    const emitter = createAgentHarnessEmitter("codex", "conversation-1", {
+      onEvent: (event) => events.push(event),
+    });
+
+    emitter.activity("tool", "started", "Unidentified provider notice");
+
+    expect(events).toEqual([
+      {
+        providerId: "codex",
+        conversationId: "conversation-1",
+        runId: "conversation-1",
+        turnId: null,
+        type: "activity",
+        kind: "tool",
+        phase: "info",
+        label: "Unidentified provider notice",
+      },
+    ]);
+  });
+
   it("bridges lifecycle, session, text, and Codex interaction extensions to current callbacks", async () => {
     let resolveResult!: (result: ProviderRunResult) => void;
     let harnessOptions!: Parameters<AgentHarness["start"]>[0];

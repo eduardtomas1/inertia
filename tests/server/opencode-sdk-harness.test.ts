@@ -310,6 +310,8 @@ const server = http.createServer((req, res) => {
       }, 10);
       if (scenario === "next-events") setTimeout(() => {
         sendEvent({ type: "session.next.prompt.admitted", properties: { timestamp: Date.now(), sessionID, messageID: parsed.messageID, prompt: { text: "Continue", files: [] }, delivery: "queue" } });
+        sendEvent({ type: "session.status", properties: { sessionID, status: { type: "busy" } } });
+        sendEvent({ type: "session.status", properties: { sessionID, status: { type: "busy" } } });
         sendEvent({ type: "session.next.step.started", properties: { timestamp: Date.now(), sessionID, assistantMessageID: "next-assistant", agent: "review", model: { providerID: "fake", modelID: "model-a" } } });
         sendEvent({ type: "session.next.agent.switched", properties: { timestamp: Date.now(), sessionID, messageID: "next-assistant", agent: "review" } });
         sendEvent({ type: "session.next.model.switched", properties: { timestamp: Date.now(), sessionID, messageID: "next-assistant", model: { providerID: "fake", modelID: "model-a" } } });
@@ -1194,7 +1196,6 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
     );
     const events: Array<Record<string, unknown>> = [];
-
     await expect(manager.run(nativeProviderRunInput({
       providerId: "opencode",
       conversationId: "opencode-out-of-order",
@@ -1297,15 +1298,15 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     }), {
       onEvent: (event) => events.push(event as unknown as Record<string, unknown>),
     })).resolves.toMatchObject({ status: "completed", text: "Next response" });
-    expect(events).toContainEqual(expect.objectContaining({
-      type: "reasoning-summary",
-      text: "Checked",
-    }));
-    expect(events).toContainEqual(expect.objectContaining({
-      type: "status",
-      status: "retrying",
-      providerState: "session.status/retry attempt 2",
-    }));
+    const workingLifecycle = events.filter(({ label }) =>
+      label === "OpenCode is working" || label === "OpenCode completed work");
+    const workingActivityId = workingLifecycle[0]?.activityId;
+    expect(workingActivityId).toBeTruthy();
+    expect(workingLifecycle.map(({ phase, activityId }) => [phase, activityId])).toEqual([
+      ["started", workingActivityId], ["started", workingActivityId], ["completed", workingActivityId],
+    ]);
+    expect(events).toContainEqual(expect.objectContaining({ type: "reasoning-summary", text: "Checked" }));
+    expect(events).toContainEqual(expect.objectContaining({ type: "status", status: "retrying", providerState: "session.status/retry attempt 2" }));
     expect(events).toContainEqual(expect.objectContaining({
       type: "activity",
       kind: "command",
@@ -1359,7 +1360,6 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       }),
     }));
   });
-
   it("turns an authoritative assistant error into a typed terminal failure", async () => {
     const root = portableFixtureRoot("OpenCode assistant failure");
     roots.push(root);

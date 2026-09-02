@@ -314,8 +314,8 @@ describe.sequential("Codex App Server runtime", () => {
       expect.objectContaining({ phase: "info", label: "Guardian is reviewing a sensitive action." }),
       expect.objectContaining({ phase: "started", label: "MCP server starting · workspace-tools" }),
       expect.objectContaining({ phase: "failed", label: "MCP server failed to start · workspace-tools", detail: expect.stringContaining("Authentication must be renewed") }),
-      expect.objectContaining({ phase: "started", label: "Approval auto-review started", activityId: "review-rich", detail: expect.stringContaining("npm run check") }),
-      expect.objectContaining({ phase: "completed", label: "Approval auto-review approved", activityId: "review-rich", detail: expect.stringContaining("Risk: low") }),
+      expect.objectContaining({ phase: "started", label: "Approval auto-review started", activityId: expect.stringMatching(/^inertia:codex-auto-approval:/u), detail: expect.stringContaining("npm run check") }),
+      expect.objectContaining({ phase: "completed", label: "Approval auto-review approved", activityId: expect.stringMatching(/^inertia:codex-auto-approval:/u), detail: expect.stringContaining("Risk: low") }),
       expect.objectContaining({ phase: "info", label: "Approval auto-review escalated to strict review" }),
       expect.objectContaining({ phase: "started", label: "Codex is applying a safety review", detail: expect.stringContaining("Verifying trusted access") }),
       expect.objectContaining({ phase: "info", label: "Additional model verification required", detail: expect.stringContaining("trustedAccessForCyber") }),
@@ -347,10 +347,25 @@ describe.sequential("Codex App Server runtime", () => {
       expect.objectContaining({ phase: "info", label: "Entered review mode" }),
       expect.objectContaining({ phase: "info", label: "Exited review mode" }),
       expect.objectContaining({ phase: "completed", label: "Context compacted" }),
-      expect.objectContaining({ phase: "started", label: "Plan updated", activityId: "plan-rich", detail: "Progress:\nVerifying implementation" }),
-      expect.objectContaining({ phase: "started", label: "Patch updated", detail: expect.stringContaining("diff --git") }),
+      expect.objectContaining({ phase: "started", label: "Plan updated", detail: "Progress:\nVerifying implementation" }),
+      expect.objectContaining({ phase: "completed", label: "Plan completed" }),
+      expect.objectContaining({ phase: "completed", label: "Patch updated", detail: expect.stringContaining("diff --git") }),
     ]));
     expect(JSON.stringify(activities)).not.toContain("UNRELATED_");
+    expect(JSON.stringify(activities)).not.toContain("STALE_PLAN_DELTA");
+    for (const lifecycleLabels of [
+      ["Turn started", "Turn completed"],
+      ["MCP server starting · workspace-tools", "MCP server failed to start · workspace-tools"],
+      ["Codex is applying a safety review", "Codex safety review completed"],
+      ["Codex is recovering model-provider authentication", "Codex model-provider authentication recovered"],
+      ["Plan updated", "Plan completed"],
+    ]) {
+      const lifecycle = activities.filter(({ label }) =>
+        lifecycleLabels.includes(label));
+      expect(lifecycle).toHaveLength(2);
+      expect(lifecycle[0]?.activityId).toBeTruthy();
+      expect(lifecycle[1]?.activityId).toBe(lifecycle[0]?.activityId);
+    }
   });
 
   it("treats an owned thread closure as a terminal provider failure", async () => {

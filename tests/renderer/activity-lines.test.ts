@@ -138,6 +138,8 @@ describe("Minimal Workstream activity lines", () => {
     }));
 
     expect(completed).toContain('data-activity-severity="neutral"');
+    expect(completed).toContain("agent-activity is-completed");
+    expect(completed).not.toContain("agent-activity is-running");
     expect(completed).toContain("lucide-check");
     expect(warning).toContain('data-activity-severity="warning"');
     expect(warning).toContain("Warning:");

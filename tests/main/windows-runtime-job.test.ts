@@ -503,6 +503,7 @@ describe("Windows runtime Job Object containment", () => {
       resolve(process.cwd(), "native/runtime-process-guardian/windows.cs"),
       "utf8",
     );
+    const normalizedNativeSource = nativeSource.replaceAll("\r\n", "\n");
     expect(nativeSource).toContain("CultureInfo.InvariantCulture");
     expect(nativeSource).not.toContain("OpenProcess(");
     expect(nativeSource).toContain("OpenVerifiedExecutable(");
@@ -515,10 +516,11 @@ describe("Windows runtime Job Object containment", () => {
     expect(nativeSource).toContain("processId > Int32.MaxValue");
     expect(nativeSource).toContain("public static int ShutdownAll(");
     expect(nativeSource).toContain("private sealed class GuardLease");
-    expect(nativeSource).toContain(
+    expect(normalizedNativeSource).toContain(
       "int timeoutMilliseconds,\n    out string diagnostic",
     );
-    expect(nativeSource).toContain("MANAGED_JOB_DRAIN_TIMEOUT_MS = 2500");
+    expect(nativeSource).toContain("GUARD_LEASE_JOB_DRAIN_TIMEOUT_MS = 2500");
+    expect(nativeSource).toContain("RECOVERY_JOB_DRAIN_TIMEOUT_MS = 5000");
     expect(nativeSource).toContain("if (!TryActiveProcesses(");
     expect(nativeSource).toContain("lease.ConfirmRecovery()");
     expect(nativeSource).toContain("GetProcessTimes(");
@@ -851,6 +853,7 @@ describe("Windows runtime Job Object containment", () => {
       platform: "win32",
       assembly: stubAssembly,
     })).resolves.toBe(true);
+    expect(runtimeSupervisorRecoveryWaitMs("win32")).toBe(6_000);
   });
 
   it("reuses one prepared broker across multiple native launches", async () => {

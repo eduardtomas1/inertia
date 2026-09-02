@@ -503,7 +503,7 @@ describe.skipIf(process.platform !== "linux")(
       hardStop(child);
     });
 
-    it("rejects malformed ownership instead of clearing the generation", () => {
+    it("rejects malformed ownership instead of clearing the generation", async () => {
       const directory = temporaryDirectory();
       activate(directory);
       const child = longRunningChild();
@@ -516,12 +516,12 @@ describe.skipIf(process.platform !== "linux")(
         mode: 0o600,
       });
 
-      expect(recoverRuntimeOwnedProcesses(
+      await expect(recoverRuntimeOwnedProcesses(
         directory,
         runtimeGenerationId,
         systemBootId,
-        { deadlineAt: Date.now() + 2_000 },
-      )).toBeNull();
+        { deadlineAt: Date.now() + 25 },
+      )).resolves.toBe(false);
       deactivate();
       hardStop(child);
     });

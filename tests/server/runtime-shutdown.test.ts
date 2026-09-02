@@ -29,10 +29,10 @@ describe("runtime shutdown phases", () => {
     expect(runtimeShutdownDeadlineMs("win32")).toBe(5_500);
     expect(runtimeSupervisorRecoveryWaitMs("darwin")).toBe(2_000);
     expect(runtimeSupervisorRecoveryWaitMs("linux")).toBe(2_000);
-    expect(runtimeSupervisorRecoveryWaitMs("win32")).toBe(3_000);
+    expect(runtimeSupervisorRecoveryWaitMs("win32")).toBe(6_000);
     expect(runtimeSupervisorShutdownEnvelopeMs("darwin")).toBe(17_250);
     expect(runtimeSupervisorShutdownEnvelopeMs("linux")).toBe(16_500);
-    expect(runtimeSupervisorShutdownEnvelopeMs("win32")).toBe(11_000);
+    expect(runtimeSupervisorShutdownEnvelopeMs("win32")).toBe(14_000);
   });
 
   it("reserves Linux post-terminal headroom for ordered cleanup", async () => {

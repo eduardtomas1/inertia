@@ -117,7 +117,8 @@ public static class InertiaRuntimeJob {
   private const int JobObjectBasicAccountingInformation = 1;
   private const int JobObjectExtendedLimitInformation = 9;
   private const int JOB_DRAIN_POLL_MS = 10;
-  private const int MANAGED_JOB_DRAIN_TIMEOUT_MS = 2500;
+  private const int GUARD_LEASE_JOB_DRAIN_TIMEOUT_MS = 2500;
+  private const int RECOVERY_JOB_DRAIN_TIMEOUT_MS = 5000;
 
   private sealed class GuardLease : IDisposable {
     private readonly object gate = new object();
@@ -174,7 +175,7 @@ public static class InertiaRuntimeJob {
       int win32Error;
       int drainResult = DrainTerminatedJob(
         currentJob,
-        MANAGED_JOB_DRAIN_TIMEOUT_MS,
+        GUARD_LEASE_JOB_DRAIN_TIMEOUT_MS,
         16,
         out failureStage,
         out win32Error
@@ -631,7 +632,7 @@ public static class InertiaRuntimeJob {
         job,
         Math.Min(
           Math.Max(1, timeoutMilliseconds),
-          MANAGED_JOB_DRAIN_TIMEOUT_MS
+          RECOVERY_JOB_DRAIN_TIMEOUT_MS
         ),
         21,
         out failureStage,

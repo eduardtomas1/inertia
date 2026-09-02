@@ -9,7 +9,6 @@ import {
   realpath,
   rm,
   symlink,
-  unlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -178,7 +177,7 @@ describe.skipIf(process.platform === "win32")("stable AppImage installed identit
     }
   });
 
-  it("finalizes an interrupted versioned migration only after the stable candidate launches", async () => {
+  it("finalizes stable-path recovery after the candidate starts while the versioned original still exists", async () => {
     const root = await temporaryRoot();
     const original = await appImage(join(root, "Inertia-0.0.46.AppImage"), "known-good");
     const stable = await appImage(join(root, "Inertia.AppImage"), "replacement");
@@ -195,18 +194,17 @@ describe.skipIf(process.platform === "win32")("stable AppImage installed identit
       original: originalIdentity,
       candidate: candidateIdentity,
     })}\n`, { mode: 0o600 });
-    await unlink(original);
-
     await expect(recoverAppImageUpdate({
       channel: "stable",
       activePath: stable,
     })).resolves.toBe(join(await realpath(root), "Inertia.AppImage"));
     expect(await readFile(stable, "utf8")).toBe("replacement");
+    expect(await missing(original)).toBe(true);
     expect(await missing(backup)).toBe(true);
     expect(await missing(join(root, ".Inertia.AppImage.inertia-update.json"))).toBe(true);
   });
 
-  it("rolls an abandoned candidate back when the versioned original relaunches", async () => {
+  it("rolls back a crash after the stable rename and before launch when the versioned original relaunches", async () => {
     const root = await temporaryRoot();
     const original = await appImage(join(root, "Inertia-0.0.46.AppImage"), "known-good");
     const stable = await appImage(join(root, "Inertia.AppImage"), "unconfirmed");

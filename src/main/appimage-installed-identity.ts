@@ -552,13 +552,13 @@ export async function installAppImageUpdate(
     }
     await rename(paths.candidate, paths.stable);
     await syncDirectory(paths.directory);
-    if (paths.original !== paths.stable) {
-      await unlinkOwnedIdentity(paths.original, originalIdentity);
-    }
     await (options.launch ?? launchAppImage)(
       paths.stable,
       options.environment ?? process.env,
     );
+    if (paths.original !== paths.stable) {
+      await unlinkOwnedIdentity(paths.original, originalIdentity);
+    }
     await unlinkOwnedIdentity(paths.backup, originalIdentity);
     await unlinkOwnedRegular(paths.journal);
     await syncDirectory(paths.directory);

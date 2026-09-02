@@ -640,7 +640,13 @@ test("pins the minimal fixed builder and gates installed Windows binaries", asyn
   );
   expect(source).toContain("INERTIA_PACKAGE_SMOKE_EXECUTABLE: installedExecutable");
   expect(source).toContain('["/S", `/D=${installDirectory}`]');
-  expect(source).toContain('runBounded(uninstaller, ["/S"]');
+  expect(source).toContain('`_?=${installDirectory}`');
+  expect(source).toContain("windowsVerbatimArguments: true");
+  expect(source).toContain("await copyFile(");
+  expect(source).toContain("uninstaller,\n      stagedUninstaller,");
+  expect(source).toContain('join(temporaryRoot, "staged-uninstaller.exe")');
+  expect(source).toContain('join(temporaryRoot, "installed with spaces")');
+  expect(source).toContain("constants.COPYFILE_EXCL");
   expect(boundedRunnerSource).toContain('"guard-owned"');
   expect(boundedRunnerSource).toContain("authority.sha256");
   expect(boundedRunnerSource).toContain("its Windows Job authority");
@@ -648,7 +654,7 @@ test("pins the minimal fixed builder and gates installed Windows binaries", asyn
     '["/PID", String(child.pid), "/T", "/F"]',
   );
   expect(boundedRunnerSource).toContain("its process tree could not be confirmed stopped");
-  expect(source).toContain("return waitForRemoval(installDirectory)");
+  expect(source).toContain("return await waitForRemoval(installDirectory)");
   expect(source).toContain("completed without a reboot");
 });
 

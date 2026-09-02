@@ -398,6 +398,17 @@ async function terminateProcessTree(child, completion, windowsGuardian) {
 
 export async function runBounded(command, args, options) {
   const environment = options.env ?? process.env;
+  if (
+    options.windowsVerbatimArguments !== undefined &&
+    typeof options.windowsVerbatimArguments !== "boolean"
+  ) {
+    throw new Error(`${options.label} Windows argument mode is invalid.`);
+  }
+  if (options.windowsVerbatimArguments === true && process.platform !== "win32") {
+    throw new Error(
+      `${options.label} requested Windows argument mode on another platform.`,
+    );
+  }
   const input =
     options.input === undefined
       ? null
@@ -418,6 +429,7 @@ export async function runBounded(command, args, options) {
           args,
           command,
           input: input === null ? null : input.toString("base64"),
+          windowsVerbatimArguments: options.windowsVerbatimArguments,
         }),
       ).toString("base64")
     : null;

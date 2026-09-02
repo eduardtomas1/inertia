@@ -231,6 +231,25 @@ function useNativeWindowsGuardian(subject: Fixture): void {
   writeFileSync(subject.bundledIntegrity, JSON.stringify({ sha256 }));
 }
 
+function writeLinuxIdentityGuardian(
+  path: string,
+  inodeOffset = 0n,
+): void {
+  writeFileSync(path, "identity-placeholder", { mode: 0o755 });
+  const identity = statSync(path, { bigint: true });
+  writeFileSync(
+    path,
+    [
+      "#!/bin/sh",
+      'if [ "$1" = "seccomp-selftest-identity" ]; then',
+      `  printf '1|1|1|1|${identity.dev}|${identity.ino + inodeOffset}\\n'`,
+      "  exit 0",
+      "fi",
+      "exit 64",
+    ].join("\n"),
+  );
+}
+
 function expectKnownGoodArtifacts(subject: Fixture): void {
   expect(readFileSync(subject.guardian, "utf8")).toBe("known-good-guardian");
   expect(readFileSync(subject.windowsJob, "utf8")).toBe(
@@ -1239,27 +1258,53 @@ describe.runIf(process.platform === "win32")(
         const subject = fixture("exit 1");
         useNativeWindowsGuardian(subject);
         const pidFile = join(subject.root, "windows-descendant.pid");
+        const stopFile = join(subject.root, "stop-windows-descendant");
+        const watchdogFile = join(subject.root, "windows-descendant-watchdog");
+        const descendantSource = [
+          'import { existsSync, writeFileSync } from "node:fs";',
+          `const pidFile = ${JSON.stringify(pidFile)};`,
+          `const stopFile = ${JSON.stringify(stopFile)};`,
+          `const watchdogFile = ${JSON.stringify(watchdogFile)};`,
+          "setTimeout(() => { writeFileSync(watchdogFile, 'expired'); process.exit(124); }, 15_000);",
+          "setInterval(() => { if (existsSync(stopFile)) process.exit(0); }, 10);",
+          "writeFileSync(pidFile, String(process.pid));",
+        ].join("\n");
         const builder = join(subject.root, "fake-electron-builder.mjs");
         writeFileSync(
           builder,
           [
             'import { spawn } from "node:child_process";',
-            'import { writeFileSync } from "node:fs";',
-            'const descendant = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });',
+            'import { existsSync } from "node:fs";',
+            `const pidFile = ${JSON.stringify(pidFile)};`,
+            `const descendant = spawn(process.execPath, ["--input-type=module", "-e", ${JSON.stringify(descendantSource)}], { detached: true, stdio: "ignore" });`,
             "descendant.unref();",
-            `writeFileSync(${JSON.stringify(pidFile)}, String(descendant.pid));`,
+            "for (let attempt = 0; attempt < 200 && !existsSync(pidFile); attempt += 1) await new Promise((resolve) => setTimeout(resolve, 10));",
+            "if (!existsSync(pidFile)) process.exit(123);",
             `process.exit(${exitCode});`,
           ].join("\n"),
         );
 
-        const status = await packageAsync(subject, builder, "win32");
-        const descendantPid = Number.parseInt(
-          readFileSync(pidFile, "utf8"),
-          10,
-        );
-        expect(status).not.toBe(0);
-        await waitForProcessExit(descendantPid);
-        expectCleanBuildState(subject);
+        let descendantPid: number | null = null;
+        try {
+          const status = await packageAsync(subject, builder, "win32");
+          descendantPid = Number.parseInt(readFileSync(pidFile, "utf8"), 10);
+          expect(Number.isSafeInteger(descendantPid)).toBe(true);
+          expect(descendantPid).toBeGreaterThan(1);
+          expect(status).not.toBe(0);
+          await waitForProcessExit(descendantPid);
+          expect(existsSync(watchdogFile)).toBe(false);
+          expectCleanBuildState(subject);
+        } finally {
+          writeFileSync(stopFile, "stop");
+          if (descendantPid !== null && processExists(descendantPid)) {
+            try {
+              await waitForProcessExit(descendantPid);
+            } catch {
+              process.kill(descendantPid, "SIGKILL");
+              await waitForProcessExit(descendantPid);
+            }
+          }
+        }
       },
     );
 
@@ -1591,21 +1636,7 @@ describe.skipIf(process.platform === "win32")(
       rmSync(subject.windowsJob);
       writeFileSync(subject.integrity, JSON.stringify({ sha256: null }));
       writeFileSync(subject.bundledIntegrity, JSON.stringify({ sha256: null }));
-      writeFileSync(
-        subject.guardian,
-        [
-          "#!/bin/sh",
-          'if [ "$1" = "seccomp-selftest-identity" ]; then',
-          "  identity=$(stat -Lc '%d|%i' \"$0\") || exit 65",
-          "  device=${identity%|*}",
-          "  inode=${identity#*|}",
-          '  printf \'1|1|1|1|%s|%s\\n\' "$device" "$inode"',
-          "  exit 0",
-          "fi",
-          "exit 64",
-        ].join("\n"),
-        { mode: 0o755 },
-      );
+      writeLinuxIdentityGuardian(subject.guardian);
       const marker = join(subject.root, "linux-builder-ran");
       const builder = join(subject.root, "fake-electron-builder.mjs");
       writeFileSync(
@@ -1651,21 +1682,7 @@ describe.skipIf(process.platform === "win32")(
       rmSync(subject.windowsJob);
       writeFileSync(subject.integrity, JSON.stringify({ sha256: null }));
       writeFileSync(subject.bundledIntegrity, JSON.stringify({ sha256: null }));
-      writeFileSync(
-        subject.guardian,
-        [
-          "#!/bin/sh",
-          'if [ "$1" = "seccomp-selftest-identity" ]; then',
-          "  identity=$(stat -Lc '%d|%i' \"$0\") || exit 65",
-          "  device=${identity%|*}",
-          "  inode=${identity#*|}",
-          '  printf \'1|1|1|1|%s|%s\\n\' "$device" "$((inode + 1))"',
-          "  exit 0",
-          "fi",
-          "exit 64",
-        ].join("\n"),
-        { mode: 0o755 },
-      );
+      writeLinuxIdentityGuardian(subject.guardian, 1n);
       const marker = join(subject.root, "wrong-inode-builder-ran");
       const builder = join(subject.root, "fake-electron-builder.mjs");
       writeFileSync(

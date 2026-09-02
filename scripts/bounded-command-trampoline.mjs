@@ -43,6 +43,8 @@ function decodedPayload(value) {
     (payload.input !== null && typeof payload.input !== "string") ||
     (payload.holdAuthority !== undefined &&
       typeof payload.holdAuthority !== "boolean") ||
+    (payload.windowsVerbatimArguments !== undefined &&
+      typeof payload.windowsVerbatimArguments !== "boolean") ||
     (payload.settlementToken !== undefined &&
       (typeof payload.settlementToken !== "string" ||
         !/^[0-9a-f-]{36}$/u.test(payload.settlementToken)))
@@ -65,6 +67,7 @@ const child = spawn(payload.command, payload.args, {
   env: process.env,
   shell: false,
   stdio: [payload.input === null ? "ignore" : "pipe", "inherit", "inherit"],
+  windowsVerbatimArguments: payload.windowsVerbatimArguments === true,
   windowsHide: true,
 });
 let childSettled = false;

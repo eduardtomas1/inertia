@@ -65,6 +65,7 @@ import {
   handleOpenCodeInteractionEvent,
   handleOpenCodeEvent,
   openCodeEventRequiresPromptAdmission,
+  openCodeWorkingActivityId,
   replyOpenCodePermission,
   type OpenCodeFailureState,
   type OpenCodePendingApproval,
@@ -883,7 +884,7 @@ function startOpenCodeRun(
           : status === "cancelled"
             ? "OpenCode stopped work"
             : "OpenCode work failed",
-        { activityId: promptLifecycle.messageId },
+        { activityId: openCodeWorkingActivityId(promptLifecycle.messageId) },
       );
       promptLifecycle.workingActivityStarted = false;
     }

@@ -15,6 +15,9 @@ export default defineConfig({
     },
   },
   test: {
+    // #74 established that two hosted-Windows workers contend across native
+    // Git, SQLite, and WebSocket fixtures. Sharding reduces wall time without
+    // reintroducing that per-runner race.
     maxWorkers: isWindowsCi ? 1 : undefined,
     testTimeout: isWindowsCi ? 30_000 : 15_000,
     projects: [

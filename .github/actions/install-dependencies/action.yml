@@ -1,0 +1,61 @@
+name: Install dependencies
+description: >-
+  Set up Node.js and provide the locked dependency graph, restoring the
+  resolved node_modules tree from cache when the lockfile is unchanged.
+
+inputs:
+  node-version:
+    description: Node.js version to set up.
+    required: false
+    default: "22"
+  npm-ci-arguments:
+    description: Extra arguments appended to npm ci when the cache misses.
+    required: false
+    default: ""
+
+outputs:
+  cache-hit:
+    description: Whether the exact node_modules tree was restored from cache.
+    value: ${{ steps.dependencies.outputs.cache-hit }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Node.js
+      id: node
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: npm
+        cache-dependency-path: package-lock.json
+
+    # A partially restored dependency tree is worse than no cache at all, so
+    # this deliberately offers no fallback key. The key covers the lockfile,
+    # package and lock manifests, the postinstall helper, this action's own
+    # cache contract, the runner OS and architecture, and the resolved Node.js
+    # version. Postinstall rebuilds native modules against the pinned Electron
+    # ABI for one specific architecture. Electron itself downloads its binary
+    # lazily on first require, so that payload is excluded and left to the step
+    # that actually needs it.
+    - name: Restore resolved dependency tree
+      id: dependencies
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          node_modules
+          !node_modules/electron/dist
+        key: node-modules-${{ runner.os }}-${{ runner.arch }}-node${{ steps.node.outputs.node-version }}-${{ hashFiles('package-lock.json', 'package.json', '.github/actions/install-dependencies/action.yml', 'scripts/ensure-node-pty-helper.mjs') }}
+
+    - name: Install locked dependencies
+      if: steps.dependencies.outputs.cache-hit != 'true'
+      shell: bash
+      run: npm ci ${{ inputs.npm-ci-arguments }}
+
+    # The cached tree already contains the postinstall result, so npm ci is
+    # skipped. Re-run only the node-pty helper: it is idempotent, costs
+    # milliseconds, and restores the spawn-helper executable bit that a cache
+    # round trip is not guaranteed to carry.
+    - name: Restore native helper permissions
+      if: steps.dependencies.outputs.cache-hit == 'true'
+      shell: bash
+      run: node scripts/ensure-node-pty-helper.mjs

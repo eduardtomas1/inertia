@@ -184,11 +184,8 @@ export function useComposerMenus(): ComposerMenuController {
     menuName: ComposerMenu,
     edge: "first" | "last" = "first",
   ): void => {
-    window.requestAnimationFrame(() => {
-      const items = [...(document.getElementById(menuId(menuName))
-        ?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") ?? [])];
-      (edge === "first" ? items[0] : items.at(-1))?.focus();
-    });
+    void import("../../utils/composerPopoverPlacement").then((module) =>
+      module.focusComposerPopoverEdge(menuId(menuName), edge));
   };
 
   const handleComposerMenuNavigation = (

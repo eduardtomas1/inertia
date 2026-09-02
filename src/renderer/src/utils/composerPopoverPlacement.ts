@@ -284,3 +284,29 @@ export function observeComposerPopover(
     window.visualViewport?.removeEventListener("scroll", schedule);
   };
 }
+
+export function focusComposerPopoverEdge(
+  id: string,
+  edge: "first" | "last",
+): void {
+  const focus = (attempt = 0): void => {
+    const menu = document.getElementById(id);
+    if (
+      !menu
+      || (
+        menu.closest(".composer")
+        && !menu.closest('[data-composer-popover-positioned="true"]')
+      )
+    ) {
+      if (attempt < 60) {
+        window.requestAnimationFrame(() => focus(attempt + 1));
+      }
+      return;
+    }
+    const items = [...menu.querySelectorAll<HTMLButtonElement>(
+      "button:not(:disabled)",
+    )];
+    (edge === "first" ? items[0] : items.at(-1))?.focus();
+  };
+  window.requestAnimationFrame(() => focus());
+}

@@ -1,8 +1,24 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   positionComposerPopover,
 } from "../../src/renderer/src/utils/composerPopoverPlacement";
+
+const styles = readFileSync(
+  resolve("src/renderer/src/styles.css"),
+  "utf8",
+);
+const visibilityRulesStart = styles.indexOf(".composer .popover-anchor\n  >");
+const visibilityRulesEnd = styles.indexOf(
+  "\n\n.action-popover",
+  visibilityRulesStart,
+);
+const visibilityRules = styles.slice(
+  visibilityRulesStart,
+  visibilityRulesEnd,
+);
 
 function rect({
   top,
@@ -34,6 +50,46 @@ afterEach(() => {
 });
 
 describe("composer popover DOM placement", () => {
+  it("keeps only outer composer surfaces hidden until placement completes", () => {
+    expect(visibilityRulesStart).toBeGreaterThanOrEqual(0);
+    expect(visibilityRulesEnd).toBeGreaterThan(visibilityRulesStart);
+    const style = document.createElement("style");
+    style.textContent = visibilityRules;
+    document.head.append(style);
+    document.body.innerHTML = `
+      <div class="composer">
+        <div class="popover-anchor">
+          <div class="composer-popover prompt-stash-popover"></div>
+          <div class="composer-more-layer">
+            <div class="composer-popover composer-more-popover"></div>
+            <div class="composer-popover composer-more-submenu"></div>
+          </div>
+        </div>
+      </div>
+    `;
+    const topLevel = document.querySelector<HTMLElement>(
+      ".prompt-stash-popover",
+    )!;
+    const layer = document.querySelector<HTMLElement>(
+      ".composer-more-layer",
+    )!;
+    const moreRoot = document.querySelector<HTMLElement>(
+      ".composer-more-popover",
+    )!;
+    const submenu = document.querySelector<HTMLElement>(
+      ".composer-more-submenu",
+    )!;
+
+    expect(getComputedStyle(topLevel).visibility).toBe("hidden");
+    expect(getComputedStyle(layer).visibility).toBe("hidden");
+    topLevel.dataset.composerPopoverPositioned = "true";
+    layer.dataset.composerPopoverPositioned = "true";
+    expect(getComputedStyle(topLevel).visibility).toBe("visible");
+    expect(getComputedStyle(layer).visibility).toBe("visible");
+    expect(getComputedStyle(moreRoot).visibility).toBe("visible");
+    expect(getComputedStyle(submenu).visibility).toBe("visible");
+  });
+
   it("moves and narrows a scratch menu that would otherwise cross its pane", () => {
     document.body.innerHTML = `
       <section class="conversation-split-pane">

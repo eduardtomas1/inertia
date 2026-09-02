@@ -262,11 +262,41 @@ test("keeps every composer utility popover inside both split panes", async (
     { exact: true },
   )).toHaveCount(0, { timeout: 20_000 });
 
+  await page.evaluate(() => {
+    const root = document.documentElement;
+    root.dataset.composerUnpositionedVisible = "false";
+    const inspect = (): void => {
+      for (const element of document.querySelectorAll<HTMLElement>(
+        ".composer .popover-anchor > .composer-popover, "
+          + ".composer .composer-more-layer",
+      )) {
+        if (
+          element.dataset.composerPopoverPositioned !== "true"
+          && getComputedStyle(element).visibility !== "hidden"
+        ) {
+          root.dataset.composerUnpositionedVisible = "true";
+        }
+      }
+    };
+    new MutationObserver(inspect).observe(document.body, {
+      attributes: true,
+      childList: true,
+      subtree: true,
+    });
+  });
   await primary.getByRole("button", {
     name: /^Scratch prompts/u,
   }).click();
   const menu = primary.getByRole("menu", { name: "Scratch prompts" });
   await expect(menu).toBeVisible();
+  await expect(menu).toHaveAttribute(
+    "data-composer-popover-positioned",
+    "true",
+  );
+  await expect(page.locator("html")).toHaveAttribute(
+    "data-composer-unpositioned-visible",
+    "false",
+  );
   await separator.focus();
   await separator.press("Home");
   await expect(separator).toHaveAttribute("aria-valuenow", "30");
@@ -365,5 +395,9 @@ test("keeps every composer utility popover inside both split panes", async (
   await capture(testInfo, "pr-221-popover-bottom-right-scratch");
   await page.keyboard.press("Escape");
 
+  await expect(page.locator("html")).toHaveAttribute(
+    "data-composer-unpositioned-visible",
+    "false",
+  );
   expect(app.rendererErrors).toEqual([]);
 });

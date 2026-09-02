@@ -5620,6 +5620,18 @@ button.environment-row:focus-visible,
   overscroll-behavior: contain;
 }
 
+.composer .popover-anchor
+  > .composer-popover,
+.composer .composer-more-layer {
+  visibility: hidden;
+}
+
+.composer .popover-anchor
+  > .composer-popover[data-composer-popover-positioned="true"],
+.composer .composer-more-layer[data-composer-popover-positioned="true"] {
+  visibility: visible;
+}
+
 .action-popover { left: 0; }
 .prompt-stash-popover {
   left: 0;

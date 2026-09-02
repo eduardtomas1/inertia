@@ -1,10 +1,28 @@
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { defineConfig } from "vitest/config";
 
 // Native Git, SQLite, and WebSocket fixtures contend heavily on hosted Windows.
 const isWindowsCi = process.platform === "win32" && process.env.CI === "true";
+const windowsRuntimeJobIntegrity: unknown = JSON.parse(readFileSync(resolve(
+  "resources/generated/windows-runtime-job-integrity.json",
+), "utf8"));
+if (
+  !windowsRuntimeJobIntegrity
+  || typeof windowsRuntimeJobIntegrity !== "object"
+  || Object.keys(windowsRuntimeJobIntegrity).length !== 1
+  || !("sha256" in windowsRuntimeJobIntegrity)
+  || (windowsRuntimeJobIntegrity.sha256 !== null
+    && (typeof windowsRuntimeJobIntegrity.sha256 !== "string"
+      || !/^[0-9a-f]{64}$/u.test(windowsRuntimeJobIntegrity.sha256)))
+) throw new Error("The Windows runtime Job Object integrity manifest is invalid.");
 
 export default defineConfig({
+  define: {
+    __INERTIA_WINDOWS_RUNTIME_JOB_SHA256__: JSON.stringify(
+      windowsRuntimeJobIntegrity.sha256,
+    ),
+  },
   esbuild: {
     jsx: "automatic",
   },

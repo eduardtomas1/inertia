@@ -5,10 +5,12 @@ import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const repositoryRoot = process.cwd();
-const moduleUrl = pathToFileURL(join(repositoryRoot, "scripts", "release-container-smoke.mjs")).href;
+const moduleUrl = pathToFileURL(
+  join(repositoryRoot, "scripts", "release-container-smoke.mjs"),
+).href;
 
 async function smokeModule() {
-  return await import(moduleUrl) as {
+  return (await import(moduleUrl)) as {
     macImageIsMounted: (value: unknown, mountPoint: string) => boolean;
     reconcileMacImageMount: (
       mountPoint: string,
@@ -77,42 +79,61 @@ describe("final release container smoke", () => {
       " 0x0000000000000001 (NEEDED)             Shared library: [libc.so.6]",
     ].join("\n");
     expect(unversionedAppImageDependencies(legacy)).toEqual(["libz.so"]);
-    expect(unversionedAppImageDependencies(
-      "0x0000000000000001 (NEEDED) Shared library: [libz.so.1]",
-    )).toEqual([]);
+    expect(
+      unversionedAppImageDependencies(
+        "0x0000000000000001 (NEEDED) Shared library: [libz.so.1]",
+      ),
+    ).toEqual([]);
   });
 
   it("reconciles interrupted DMG mount state before temporary cleanup", async () => {
     const { macImageIsMounted, reconcileMacImageMount } = await smokeModule();
     const mountPoint = "/private/tmp/inertia smoke/dmg";
-    expect(macImageIsMounted({
-      images: [{
-        "system-entities": [
-          { "dev-entry": "/dev/disk9s1", "mount-point": mountPoint },
-        ],
-      }],
-    }, mountPoint)).toBe(true);
+    expect(
+      macImageIsMounted(
+        {
+          images: [
+            {
+              "system-entities": [
+                { "dev-entry": "/dev/disk9s1", "mount-point": mountPoint },
+              ],
+            },
+          ],
+        },
+        mountPoint,
+      ),
+    ).toBe(true);
     expect(macImageIsMounted({ images: [] }, mountPoint)).toBe(false);
 
     let mounted = true;
     let detachCalls = 0;
-    await expect(reconcileMacImageMount(mountPoint, {
-      queryMount: async () => mounted,
-      detach: async () => {
-        detachCalls += 1;
-        mounted = false;
-      },
-    })).resolves.toBeUndefined();
+    await expect(
+      reconcileMacImageMount(mountPoint, {
+        queryMount: async () => mounted,
+        detach: async () => {
+          detachCalls += 1;
+          mounted = false;
+        },
+      }),
+    ).resolves.toBeUndefined();
     expect(detachCalls).toBe(1);
 
-    await expect(reconcileMacImageMount(mountPoint, {
-      queryMount: async () => true,
-      detach: async () => { throw new Error("interrupted detach"); },
-    })).rejects.toMatchObject({ preserveTemporaryRoot: true });
-    await expect(reconcileMacImageMount(mountPoint, {
-      queryMount: async () => { throw new Error("unknown mount state"); },
-      detach: async () => {},
-    })).rejects.toMatchObject({ preserveTemporaryRoot: true });
+    await expect(
+      reconcileMacImageMount(mountPoint, {
+        queryMount: async () => true,
+        detach: async () => {
+          throw new Error("interrupted detach");
+        },
+      }),
+    ).rejects.toMatchObject({ preserveTemporaryRoot: true });
+    await expect(
+      reconcileMacImageMount(mountPoint, {
+        queryMount: async () => {
+          throw new Error("unknown mount state");
+        },
+        detach: async () => {},
+      }),
+    ).rejects.toMatchObject({ preserveTemporaryRoot: true });
   });
 
   it("uses the canonical physical macOS mountpoint identity", async () => {
@@ -128,7 +149,9 @@ describe("final release container smoke", () => {
   });
 
   it("pins the corrected builder and static AppImage runtime toolsets", async () => {
-    const manifest = JSON.parse(await readFile(join(repositoryRoot, "package.json"), "utf8")) as {
+    const manifest = JSON.parse(
+      await readFile(join(repositoryRoot, "package.json"), "utf8"),
+    ) as {
       build: {
         mac?: { minimumSystemVersion?: string };
         toolsets?: { appimage?: string };
@@ -139,8 +162,9 @@ describe("final release container smoke", () => {
     expect(manifest.devDependencies["electron-builder"]).toBe("26.15.7");
     expect(manifest.build.toolsets?.appimage).toBe("1.0.3");
     expect(manifest.build.mac?.minimumSystemVersion).toBe("13.0");
-    expect(manifest.scripts["test:release-container-smoke"])
-      .toBe("node scripts/release-container-smoke.mjs");
+    expect(manifest.scripts["test:release-container-smoke"]).toBe(
+      "node scripts/release-container-smoke.mjs",
+    );
   });
 
   it("executes final containers and clean native AppImage runtimes in CI and release", async () => {
@@ -165,15 +189,21 @@ describe("final release container smoke", () => {
       expect(workflow).toContain("Install Linux guardian toolchain");
       expect(workflow).toContain("binutils linux-libc-dev musl-tools");
       expect(workflow).toContain("musl-tools=1.2.4-2");
-      expect(workflow).toContain("Verify the packaged Linux guardian is static");
+      expect(workflow).toContain(
+        "Verify the packaged Linux guardian is static",
+      );
       expect(workflow).toContain("readelf --program-headers");
       expect(workflow).toContain("readelf --dynamic");
-      expect(workflow).toContain("Smoke final macOS and Linux release containers");
+      expect(workflow).toContain(
+        "Smoke final macOS and Linux release containers",
+      );
       expect(workflow).toContain("run: npm run test:release-container-smoke");
       expect(workflow).toContain(
         "Smoke final Linux AppImage default and fallback launches under Xvfb",
       );
-      expect(workflow).toContain("xvfb-run --auto-servernum npm run test:release-container-smoke");
+      expect(workflow).toContain(
+        "xvfb-run --auto-servernum npm run test:release-container-smoke",
+      );
     }
   });
 
@@ -185,7 +215,7 @@ describe("final release container smoke", () => {
     expect(source).toContain('"/usr/bin/musl-gcc"');
     expect(source).toContain('"-static-pie"');
     expect(source).toContain('"-s"');
-    expect(source).toContain('`/usr/include/${linuxGnuTriplet}`');
+    expect(source).toContain("`/usr/include/${linuxGnuTriplet}`");
     expect(source).toContain("musl-tools, linux-libc-dev, and binutils");
   });
 
@@ -195,38 +225,46 @@ describe("final release container smoke", () => {
       "utf8",
     );
     expect(source).toContain('"windows-runtime-job.exe"');
-    expect(source).toContain('"native", "runtime-process-guardian", "windows.cs"');
-    expect(source).toContain("[Microsoft.CSharp.CSharpCodeProvider]::new()");
-    expect(source).toContain("[System.CodeDom.Compiler.CompilerParameters]::new()");
-    expect(source).toContain("$parameters.GenerateExecutable = $true");
-    expect(source).toContain("$parameters.GenerateInMemory = $false");
-    expect(source).toContain("$parameters.OutputAssembly = $outputPath");
-    expect(source).toContain("$parameters.MainClass = 'InertiaRuntimeJob'");
+    expect(source).toContain('"runtime-process-guardian"');
+    expect(source).toContain('"windows.cs"');
     expect(source).toContain(
-      "$parameters.ReferencedAssemblies.Add('System.dll') | Out-Null",
+      '"Microsoft.NET", framework, "v4.0.30319", "csc.exe"',
     );
-    expect(source).toContain(
-      "$parameters.CompilerOptions = '/platform:anycpu /optimize+ /target:exe'",
-    );
-    expect(source).toContain("$provider.CompileAssemblyFromSource(");
-    expect(source).toContain("$results.Errors.HasErrors");
-    expect(source).not.toContain("Add-Type -TypeDefinition");
-    expect(source).toContain('shell: false');
-    expect(source).toContain('timeout: 60_000');
-    expect(source).toContain('metadata.size > 1024 * 1024');
+    expect(source).toContain('"/platform:anycpu"');
+    expect(source).toContain('"/main:InertiaRuntimeJob"');
+    expect(source).toContain('"/reference:System.dll"');
+    expect(source).toContain("runBootstrapLeaf(compiler");
+    expect(source).toContain("windowsJobGuardian: {");
+    expect(source).toContain("integrityPath: bootstrapIntegrity");
+    expect(source).toContain("shell: false");
+    expect(source).toContain("timeoutMs: 60_000");
+    expect(source).toContain("metadata.size > 1024 * 1024");
     expect(source).toContain('createHash("sha256")');
     expect(source).toContain('"windows-runtime-job-integrity.json"');
-    expect(source).toContain('JSON.stringify({ sha256 }');
+    expect(source).toContain("JSON.stringify({ sha256 }");
   });
 
   it("keeps container validation bounded to native architectures", async () => {
-    const source = await readFile(join(repositoryRoot, "scripts", "release-container-smoke.mjs"), "utf8");
-    expect(source).toContain('import { runBounded } from "./bounded-process-tree.mjs"');
+    const source = await readFile(
+      join(repositoryRoot, "scripts", "release-container-smoke.mjs"),
+      "utf8",
+    );
+    expect(source).toContain(
+      'import { runBounded } from "./bounded-process-tree.mjs"',
+    );
     expect(source).not.toContain("spawnSync");
-    expect(source).toContain('await runContainerCommand(appImage, ["--appimage-version"]');
-    expect(source).toContain('await runContainerCommand(appImage, ["--appimage-extract"]');
-    expect(source).toContain("copyFile(appImage, installedAppImage, constants.COPYFILE_EXCL)");
-    expect(source).toContain('runPackageSmoke(repositoryRoot, installedAppImage');
+    expect(source).toContain(
+      'await runContainerCommand(appImage, ["--appimage-version"]',
+    );
+    expect(source).toContain(
+      'await runContainerCommand(appImage, ["--appimage-extract"]',
+    );
+    expect(source).toContain(
+      "copyFile(appImage, installedAppImage, constants.COPYFILE_EXCL)",
+    );
+    expect(source).toContain(
+      "runPackageSmoke(repositoryRoot, installedAppImage",
+    );
     expect(source).toContain("operationError?.preserveTemporaryRoot === true");
     expect(source).toContain("mountAttempted = true");
     expect(source).toContain("await realpath(requestedExtractionRoot)");
@@ -241,7 +279,7 @@ describe("final release container smoke", () => {
     expect(source).toContain('APPIMAGE_EXTRACT_AND_RUN: "1"');
     expect(source).toContain("AppImage default mount/AppRun smoke passed");
     expect(source).toContain("AppImage extract-and-run fallback smoke passed");
-    expect(source).toContain('INERTIA_PACKAGE_SMOKE_KIND: packageKind');
+    expect(source).toContain("INERTIA_PACKAGE_SMOKE_KIND: packageKind");
     expect(source).toContain('"macos-zip"');
     expect(source).toContain('"macos-dmg"');
     expect(source).toContain('"linux-appimage"');

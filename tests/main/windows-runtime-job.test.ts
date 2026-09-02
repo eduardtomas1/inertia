@@ -122,6 +122,19 @@ function realWindowsRuntimeJobAssembly() {
   return assembly;
 }
 
+it.runIf(process.platform === "win32")(
+  "uses the validated bundled integrity by default in the direct module",
+  () => {
+    const integrity = JSON.parse(readFileSync(resolve(
+      process.cwd(),
+      "resources/generated/windows-runtime-job-integrity.json",
+    ), "utf8")) as { readonly sha256: string };
+    const assembly = realWindowsRuntimeJobAssembly();
+
+    expect(assembly.sha256).toBe(integrity.sha256);
+  },
+);
+
 async function closeChild(child: ChildProcessWithoutNullStreams): Promise<void> {
   if (!children.has(child)) return;
   await new Promise<void>((resolve) => child.once("close", () => resolve()));

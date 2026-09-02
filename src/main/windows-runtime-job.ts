@@ -12,8 +12,6 @@ import {
 } from "node:fs";
 import { dirname, join, resolve, win32 } from "node:path";
 
-import windowsRuntimeJobIntegrity from
-  "../../resources/generated/windows-runtime-job-integrity.json";
 import type { WindowsRuntimeJobContainment } from "../node/runtime-owned-processes.js";
 import { validRuntimeGenerationId } from "../node/runtime-process-protocol.js";
 import {
@@ -24,6 +22,16 @@ import {
   resolveWindowsRuntimeJobAssemblyPath,
   type RuntimeAssetLocations,
 } from "./runtime-assets.js";
+
+declare const __INERTIA_WINDOWS_RUNTIME_JOB_SHA256__: string | null;
+
+// Generated from windows-runtime-job-integrity.json by electron.vite.config.ts.
+// The same captured value is emitted as a package-time verification sidecar.
+const windowsRuntimeJobIntegrity = Object.freeze({
+  sha256: typeof __INERTIA_WINDOWS_RUNTIME_JOB_SHA256__ === "undefined"
+    ? null
+    : __INERTIA_WINDOWS_RUNTIME_JOB_SHA256__,
+});
 
 const NATIVE_READY_TIMEOUT_MS = 15_000;
 const EXECUTABLE_LOCKED_MARKER = "LOCKED";

@@ -1,11 +1,54 @@
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { defineConfig, externalizeDepsPlugin } from "electron-vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
+const windowsRuntimeJobIntegrityPath = resolve(
+  "resources/generated/windows-runtime-job-integrity.json",
+);
+
+function readWindowsRuntimeJobIntegrity(): { readonly sha256: string | null } {
+  const value: unknown = JSON.parse(readFileSync(
+    windowsRuntimeJobIntegrityPath,
+    "utf8",
+  ));
+  if (
+    !value
+    || typeof value !== "object"
+    || Object.keys(value).length !== 1
+    || !("sha256" in value)
+    || (value.sha256 !== null
+      && (typeof value.sha256 !== "string"
+        || !/^[0-9a-f]{64}$/u.test(value.sha256)))
+  ) throw new Error("The Windows runtime Job Object integrity manifest is invalid.");
+  return { sha256: value.sha256 };
+}
+
+// Capture once. The compiled constant and emitted package-gate snapshot are
+// therefore guaranteed to describe the same source manifest.
+const bundledWindowsRuntimeJobIntegrity = readWindowsRuntimeJobIntegrity();
+
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin()],
+    define: {
+      __INERTIA_WINDOWS_RUNTIME_JOB_SHA256__: JSON.stringify(
+        bundledWindowsRuntimeJobIntegrity.sha256,
+      ),
+    },
+    plugins: [
+      externalizeDepsPlugin(),
+      {
+        name: "windows-runtime-job-integrity-snapshot",
+        generateBundle() {
+          this.emitFile({
+            fileName: "windows-runtime-job-bundled-integrity.json",
+            source: `${JSON.stringify(bundledWindowsRuntimeJobIntegrity, null, 2)}\n`,
+            type: "asset",
+          });
+        },
+      },
+    ],
     build: {
       target: "node22",
       sourcemap: false,

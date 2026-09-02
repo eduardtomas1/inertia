@@ -641,7 +641,12 @@ test("pins the minimal fixed builder and gates installed Windows binaries", asyn
   expect(source).toContain("INERTIA_PACKAGE_SMOKE_EXECUTABLE: installedExecutable");
   expect(source).toContain('["/S", `/D=${installDirectory}`]');
   expect(source).toContain('runBounded(uninstaller, ["/S"]');
-  expect(boundedRunnerSource).toContain('["/PID", String(child.pid), "/T", "/F"]');
+  expect(boundedRunnerSource).toContain('"guard-owned"');
+  expect(boundedRunnerSource).toContain("authority.sha256");
+  expect(boundedRunnerSource).toContain("its Windows Job authority");
+  expect(boundedRunnerSource).not.toContain(
+    '["/PID", String(child.pid), "/T", "/F"]',
+  );
   expect(boundedRunnerSource).toContain("its process tree could not be confirmed stopped");
   expect(source).toContain("return waitForRemoval(installDirectory)");
   expect(source).toContain("completed without a reboot");

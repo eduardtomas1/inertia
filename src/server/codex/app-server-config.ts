@@ -30,6 +30,7 @@ export type CodexRunPhase =
   | "starting-turn"
   | "running"
   | "awaiting-goal-continuation"
+  | "awaiting-subagent-continuation"
   | "settled";
 
 export interface CodexAccessPolicy {

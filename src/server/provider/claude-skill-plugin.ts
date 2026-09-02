@@ -25,6 +25,8 @@ import type {
   SlashCommand,
 } from "@anthropic-ai/claude-agent-sdk";
 
+import { FILE_OPEN_NO_FOLLOW } from
+  "../../node/platform-file-open-flags";
 import type { ProviderSkillInput } from "../../shared/contracts";
 import {
   checkClaudeSkillOperation,
@@ -297,7 +299,7 @@ async function readBoundedRegularFile(
     return null;
   }
 
-  const noFollow = process.platform === "win32" ? 0 : constants.O_NOFOLLOW;
+  const noFollow = process.platform === "win32" ? 0 : FILE_OPEN_NO_FOLLOW;
   let handle: Awaited<ReturnType<typeof open>> | undefined;
   try {
     handle = await runClaudeSkillFilesystemOperation(

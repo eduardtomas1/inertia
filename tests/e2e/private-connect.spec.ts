@@ -43,7 +43,7 @@ test("wires the packaged Private Connect state through the desktop settings boun
   await expect(diagnostics.getByText("Protocol", { exact: true })).toBeVisible();
   await expect(diagnostics.getByText("1", { exact: true })).toBeVisible();
 
-  await page.getByRole("button", { name: "Go to workspace" }).click();
+  await page.getByRole("button", { name: "Workspace", exact: true }).click();
   const indicator = page.getByRole("button", {
     name: /^Connections & devices/u,
   });

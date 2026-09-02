@@ -3,6 +3,8 @@ import { lstat, open, realpath, stat } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { setTimeout as wait } from "node:timers/promises";
 
+import { FILE_OPEN_NO_FOLLOW } from
+  "../node/platform-file-open-flags.js";
 import {
   CHAT_ATTACHMENT_MIME_TYPES,
   MAX_CHAT_ATTACHMENT_BYTES,
@@ -219,7 +221,7 @@ export async function validateAttachmentImportFile(
     || canonical !== path
   ) throw new AttachmentImportValidationError("unsafe");
 
-  const noFollow = "O_NOFOLLOW" in constants ? constants.O_NOFOLLOW : 0;
+  const noFollow = "O_NOFOLLOW" in constants ? FILE_OPEN_NO_FOLLOW : 0;
   const nonBlocking = "O_NONBLOCK" in constants ? constants.O_NONBLOCK : 0;
   const file = await open(path, constants.O_RDONLY | noFollow | nonBlocking);
   try {

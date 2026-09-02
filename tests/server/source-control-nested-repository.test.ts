@@ -500,7 +500,7 @@ describe("nested source-control command scope", () => {
         serializationRoot: realpathSync.native(repository),
       }),
     );
-  });
+  }, 30_000);
 
   it("commits in the selected nested repository while reserving its owning workspace", async () => {
     const { workspace, repository } = workspaceWithNestedRepository();

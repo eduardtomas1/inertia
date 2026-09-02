@@ -712,6 +712,12 @@ export class RuntimeSupervisor {
       this.privateConnectPrompts.handle(record, event);
       return;
     }
+    if (event.type === "runtime.restart-requested") {
+      record.reportedFailure ??= event.reason === "owned-process-tainted"
+        ? "The runtime restarted because owned process containment could not be confirmed."
+        : "The runtime restarted because owned process cleanup could not be confirmed.";
+      return;
+    }
     if (event.type === "runtime.startup-failed") {
       record.reportedFailure = event.message;
       record.acceptingReady = false;
@@ -736,7 +742,15 @@ export class RuntimeSupervisor {
       record.cleanupRecoveryRequired = true;
       this.websocketUrl = null;
       this.phase = this.desiredRunning ? "restarting" : "stopping";
-      this.lastError = "The runtime could not confirm complete process cleanup.";
+      this.lastError = event.reason === "runtime-close-deadline"
+        ? "Runtime shutdown exceeded its deadline while closing local resources."
+        : event.reason === "runtime-close"
+          ? "Runtime shutdown failed while closing local resources."
+          : event.reason === "owned-process-cleanup"
+            ? "Runtime shutdown could not confirm owned-process cleanup."
+            : event.reason === "incomplete-startup"
+              ? "Runtime shutdown could not confirm cleanup after incomplete startup."
+              : "The runtime could not confirm complete process cleanup.";
       this.rejectTestRecycle(record, this.lastError, true);
       this.clearTimerValue("startupTimer");
       this.credentials.clear(record);
@@ -920,20 +934,16 @@ export class RuntimeSupervisor {
       else finishRecovery(false);
       return;
     }
-    if (!this.desiredRunning) {
-      this.settleStopped(record);
-      return;
-    }
     const continueAfterTermination = (confirmed: boolean): void => {
       if (this.current !== record) return;
-      if (!this.desiredRunning) {
-        this.settleStopped(record);
-        return;
-      }
       if (confirmed && record.cleanupConfirmed
         && !this.completeGenerationCleanup(record)) return;
       this.clearShutdownTimers();
       if (!confirmed) {
+        if (!this.desiredRunning) {
+          this.settleStopped(record);
+          return;
+        }
         this.current = null;
         this.rejectTestRecycle(record, "The recycled runtime process tree could not be confirmed stopped.", false);
         this.quarantined.add(record);
@@ -975,6 +985,10 @@ export class RuntimeSupervisor {
             this.emitState();
           },
         });
+        return;
+      }
+      if (!this.desiredRunning) {
+        this.settleStopped(record);
         return;
       }
       if (!record.cleanupConfirmed) {

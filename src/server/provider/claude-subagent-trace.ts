@@ -62,6 +62,7 @@ export class ClaudeSubagentTraceTracker {
   private sequence = 0;
   private readonly tools = new Map<string, ClaudeAgentTool>();
   private readonly tasks = new Map<string, ClaudeTaskState>();
+  private readonly pendingTasksByToolUse = new Map<string, ClaudeTaskState>();
   private readonly taskByToolUse = new Map<string, string>();
   private readonly ignoredTaskIds = new Set<string>();
   private readonly terminalTaskIds: string[] = [];
@@ -109,6 +110,9 @@ export class ClaudeSubagentTraceTracker {
   }
 
   hasLiveTasks(): boolean {
+    for (const task of this.pendingTasksByToolUse.values()) {
+      if (task.live) return true;
+    }
     for (const task of this.tasks.values()) {
       if (task.live) return true;
     }
@@ -118,12 +122,14 @@ export class ClaudeSubagentTraceTracker {
   retainedStateCounts(): {
     tools: number;
     tasks: number;
+    pendingTasksByToolUse: number;
     taskByToolUse: number;
     ignoredTaskIds: number;
   } {
     return {
       tools: this.tools.size,
       tasks: this.tasks.size,
+      pendingTasksByToolUse: this.pendingTasksByToolUse.size,
       taskByToolUse: this.taskByToolUse.size,
       ignoredTaskIds: this.ignoredTaskIds.size,
     };
@@ -164,10 +170,14 @@ export class ClaudeSubagentTraceTracker {
     if (!taskId) return;
     if (this.tasks.get(taskId)?.terminal) return;
     const metadata = toolUseId ? this.tools.get(toolUseId) : undefined;
+    const pending = toolUseId
+      ? this.pendingTasksByToolUse.get(toolUseId)
+      : undefined;
     const subagentType = boundedSubagentIdentifier(record.subagent_type, 200);
     const taskType = boundedSubagentIdentifier(record.task_type, 200);
     const isSubagent = Boolean(
       metadata
+      || pending
       || subagentType
       || (taskType && SUBAGENT_TASK_TYPES.has(taskType)),
     );
@@ -181,26 +191,33 @@ export class ClaudeSubagentTraceTracker {
         );
       }
       this.ignoredTaskIds.add(taskId);
-      if (toolUseId) this.tools.delete(toolUseId);
+      if (toolUseId) {
+        this.pendingTasksByToolUse.delete(toolUseId);
+        this.tools.delete(toolUseId);
+      }
       return;
     }
     const state: ClaudeTaskState = {
       taskId,
       toolUseId: toolUseId ?? metadata?.toolUseId ?? "",
-      parentToolUseId: metadata?.parentToolUseId ?? null,
-      role: subagentType ?? metadata?.role ?? null,
+      parentToolUseId: pending?.parentToolUseId
+        ?? metadata?.parentToolUseId
+        ?? null,
+      role: subagentType ?? pending?.role ?? metadata?.role ?? null,
       name: boundedSubagentIdentifier(record.workflow_name, 200)
+        ?? pending?.name
         ?? metadata?.name
         ?? null,
       description: boundedSubagentText(
         record.description ?? record.prompt,
         MAX_SUBAGENT_DESCRIPTION_CHARS,
-      ) ?? metadata?.description ?? null,
-      agentId: null,
+      ) ?? pending?.description ?? metadata?.description ?? null,
+      agentId: pending?.agentId ?? null,
       live: true,
       terminal: false,
       terminalStatus: null,
     };
+    if (toolUseId) this.pendingTasksByToolUse.delete(toolUseId);
     this.rememberLiveTask(state);
     if (state.toolUseId) this.taskByToolUse.set(state.toolUseId, taskId);
     if (toolUseId) this.tools.delete(toolUseId);
@@ -213,23 +230,32 @@ export class ClaudeSubagentTraceTracker {
     let state = this.tasks.get(taskId);
     const toolUseId = boundedSubagentIdentifier(record.tool_use_id);
     const subagentType = boundedSubagentIdentifier(record.subagent_type, 200);
-    if (!state && (subagentType || (toolUseId && this.tools.has(toolUseId)))) {
+    const pending = toolUseId
+      ? this.pendingTasksByToolUse.get(toolUseId)
+      : undefined;
+    if (
+      !state
+      && (pending || subagentType || (toolUseId && this.tools.has(toolUseId)))
+    ) {
       const metadata = toolUseId ? this.tools.get(toolUseId) : undefined;
       state = {
         taskId,
         toolUseId: toolUseId ?? "",
-        parentToolUseId: metadata?.parentToolUseId ?? null,
-        role: subagentType ?? metadata?.role ?? null,
-        name: metadata?.name ?? null,
+        parentToolUseId: pending?.parentToolUseId
+          ?? metadata?.parentToolUseId
+          ?? null,
+        role: subagentType ?? pending?.role ?? metadata?.role ?? null,
+        name: pending?.name ?? metadata?.name ?? null,
         description: boundedSubagentText(
           record.description,
           MAX_SUBAGENT_DESCRIPTION_CHARS,
-        ) ?? metadata?.description ?? null,
-        agentId: null,
+        ) ?? pending?.description ?? metadata?.description ?? null,
+        agentId: pending?.agentId ?? null,
         live: true,
         terminal: false,
         terminalStatus: null,
       };
+      if (toolUseId) this.pendingTasksByToolUse.delete(toolUseId);
       this.rememberLiveTask(state);
       if (state.toolUseId) this.taskByToolUse.set(state.toolUseId, taskId);
       if (toolUseId) this.tools.delete(toolUseId);
@@ -334,7 +360,18 @@ export class ClaudeSubagentTraceTracker {
   private observeTaskNotification(record: Record<string, unknown>): void {
     const taskId = boundedSubagentIdentifier(record.task_id);
     if (!taskId || this.ignoredTaskIds.has(taskId)) return;
-    const state = this.tasks.get(taskId);
+    let state = this.tasks.get(taskId);
+    const toolUseId = boundedSubagentIdentifier(record.tool_use_id);
+    const pending = toolUseId
+      ? this.pendingTasksByToolUse.get(toolUseId)
+      : undefined;
+    if (!state && pending && toolUseId) {
+      this.pendingTasksByToolUse.delete(toolUseId);
+      pending.taskId = taskId;
+      state = pending;
+      this.rememberLiveTask(state);
+      this.taskByToolUse.set(toolUseId, taskId);
+    }
     if (!state) return;
     const providerStatus = boundedSubagentIdentifier(record.status, 200);
     const status = providerStatus === "completed"
@@ -382,6 +419,9 @@ export class ClaudeSubagentTraceTracker {
     const toolUseId = boundedSubagentIdentifier(toolResult?.tool_use_id);
     const taskId = toolUseId ? this.taskByToolUse.get(toolUseId) : undefined;
     let state = taskId ? this.tasks.get(taskId) : undefined;
+    if (!state && toolUseId) {
+      state = this.pendingTasksByToolUse.get(toolUseId);
+    }
     const metadata = toolUseId ? this.tools.get(toolUseId) : undefined;
     if (!state) {
       state = {
@@ -412,7 +452,13 @@ export class ClaudeSubagentTraceTracker {
       state.terminal = output.status === "completed";
       state.terminalStatus = state.terminal ? status : null;
     }
-    if (state.terminal && state.taskId) this.rememberTerminalTask(state);
+    if (state.live && !state.taskId && toolUseId) {
+      this.rememberPendingTask(toolUseId, state);
+    }
+    if (state.terminal) {
+      if (toolUseId) this.pendingTasksByToolUse.delete(toolUseId);
+      if (state.taskId) this.rememberTerminalTask(state);
+    }
     const result = Array.isArray(output.content)
       ? output.content.flatMap((value) => {
           const block = objectValue(value);
@@ -473,7 +519,7 @@ export class ClaudeSubagentTraceTracker {
 
   private rememberLiveTask(state: ClaudeTaskState): void {
     if (!this.tasks.has(state.taskId)) {
-      let liveTasks = 0;
+      let liveTasks = this.pendingTasksByToolUse.size;
       for (const task of this.tasks.values()) {
         if (task.live) liveTasks += 1;
       }
@@ -482,6 +528,22 @@ export class ClaudeSubagentTraceTracker {
       }
     }
     this.tasks.set(state.taskId, state);
+  }
+
+  private rememberPendingTask(
+    toolUseId: string,
+    state: ClaudeTaskState,
+  ): void {
+    if (!this.pendingTasksByToolUse.has(toolUseId)) {
+      let liveTasks = this.pendingTasksByToolUse.size;
+      for (const task of this.tasks.values()) {
+        if (task.live) liveTasks += 1;
+      }
+      if (liveTasks >= MAX_CLAUDE_LIVE_SUBAGENT_TASKS) {
+        throw new Error("Claude exceeded the bounded live-subagent trace state.");
+      }
+    }
+    this.pendingTasksByToolUse.set(toolUseId, state);
   }
 
   private rememberTerminalTask(state: ClaudeTaskState): void {

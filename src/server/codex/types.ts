@@ -56,8 +56,8 @@ export interface CodexAppServerOptions {
   /** Testable bound for one JSON-RPC response; defaults to 30 seconds. */
   rpcTimeoutMs?: number;
   /**
-   * Test seam that may shorten, but never extend, the bounded wait for child
-   * turn outcomes after the parent completes.
+   * Test seam that may shorten, but never extend, the bounded grace for a
+   * fresh parent continuation after delegated work settles.
    */
   subagentDrainTimeoutMs?: number;
   goalContinuationGraceMs?: number;
@@ -77,7 +77,7 @@ export interface CodexAppServerOptions {
   ) => void;
   onSession?: (sessionId: string) => void;
   onStatus?: (
-    status: "running" | "retrying",
+    status: "running" | "delegated" | "retrying",
     providerState?: string,
   ) => void;
   onApproval?: (request: AgentApprovalRequest) => void;

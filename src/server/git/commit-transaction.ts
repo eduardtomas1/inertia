@@ -15,6 +15,8 @@ import {
 import { link, lstat, open } from "node:fs/promises";
 import { dirname } from "node:path";
 
+import { FILE_OPEN_NO_FOLLOW } from
+  "../../node/platform-file-open-flags";
 import { GitError } from "./types";
 
 export interface CommitTransactionJournal {
@@ -161,7 +163,7 @@ export function observeCommitTransactionJournalSync(
   try {
     descriptor = openSync(
       path,
-      fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0),
+      fsConstants.O_RDONLY | FILE_OPEN_NO_FOLLOW,
     );
   } catch (error) {
     if (
@@ -211,7 +213,7 @@ function removeExactCommitTransactionFileSync(
   try {
     descriptor = openSync(
       path,
-      fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0),
+      fsConstants.O_RDONLY | FILE_OPEN_NO_FOLLOW,
     );
   } catch {
     throw new GitError(
@@ -383,7 +385,7 @@ export function acquireCommitReservationSync(
       fsConstants.O_CREAT
         | fsConstants.O_EXCL
         | fsConstants.O_WRONLY
-        | (fsConstants.O_NOFOLLOW ?? 0),
+        | FILE_OPEN_NO_FOLLOW,
       0o600,
     );
     identity = lockIdentityFromStat(fstatSync(descriptor, { bigint: true }));
@@ -446,15 +448,15 @@ export function installPrivateIndexStageSync(options: {
   try {
     lockDescriptor = openSync(
       options.lockPath,
-      fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0),
+      fsConstants.O_RDONLY | FILE_OPEN_NO_FOLLOW,
     );
     stageDescriptor = openSync(
       options.stagePath,
-      fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0),
+      fsConstants.O_RDONLY | FILE_OPEN_NO_FOLLOW,
     );
     headDescriptor = openSync(
       options.headPath,
-      fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0),
+      fsConstants.O_RDONLY | FILE_OPEN_NO_FOLLOW,
     );
     options.beforeFinalValidation?.();
     const openedLockInfo = fstatSync(lockDescriptor, { bigint: true });
@@ -639,7 +641,7 @@ export async function releaseOwnedCommitReservation(
   try {
     descriptor = openSync(
       lockPath,
-      fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0),
+      fsConstants.O_RDONLY | FILE_OPEN_NO_FOLLOW,
     );
   } catch (error) {
     if (

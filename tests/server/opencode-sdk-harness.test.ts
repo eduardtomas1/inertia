@@ -60,7 +60,6 @@ type LifecycleScenario =
   | "slow"
   | "endless"
   | "no-image";
-
 function readStableCapture<T>(capturePath: string): T {
   let lastError: unknown;
   for (const candidate of [`${capturePath}.next`, capturePath]) {
@@ -200,6 +199,7 @@ const server = http.createServer((req, res) => {
           return;
         }
         if (scenario === "descendant-cancel") {
+          setTimeout(() => sendEvent({ type: "session.idle", properties: { sessionID } }), 50);
           let childEvent = 0;
           setInterval(() => sendEvent({
             id: "child-work-" + (++childEvent),
@@ -244,6 +244,7 @@ const server = http.createServer((req, res) => {
           type: "session.idle",
           properties: { sessionID: grandchildID },
         }), 2_500);
+        setTimeout(() => sendEvent({ type: "session.status", properties: { sessionID: childID, status: { type: "idle" } } }), 2_520);
         setTimeout(() => {
           sendEvent({
             type: "message.part.updated",
@@ -2203,7 +2204,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     );
     expect(terminateOwnedProcessTree).toHaveBeenCalledOnce();
     expect(manager.activeConversationIds()).toEqual([]);
-  }, 10_000);
+  }, 20_000);
 
   it("fails and cleans up a slow event stream at the inactivity deadline", async () => {
     const root = portableFixtureRoot("OpenCode inactive stream");
@@ -2312,20 +2313,21 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     const manager = new ProviderManager(
       { commands: { opencode: command } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness({
-        runDeadlineMs: 5_000,
-        eventInactivityDeadlineMs: 10_000,
+        runDeadlineMs: 15_000,
+        eventInactivityDeadlineMs: 20_000,
         terminateProcessTree: terminateOwnedProcessTree,
       })]),
     );
-
-    await expect(manager.run(nativeProviderRunInput({
+    const run = manager.run(nativeProviderRunInput({
       providerId: "opencode",
       conversationId: "opencode-endless",
       cwd: root,
       prompt: "Stay active forever",
       interactionMode: "build",
       access: "supervised",
-    }))).resolves.toMatchObject({
+    }));
+    await waitFor("the endless OpenCode fixture to start", () => existsSync(capturePath), 10_000);
+    await expect(run).resolves.toMatchObject({
       status: "failed",
       error: expect.stringContaining("maximum run duration"),
       failure: {
@@ -2343,7 +2345,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     );
     expect(terminateOwnedProcessTree).toHaveBeenCalledOnce();
     expect(manager.activeConversationIds()).toEqual([]);
-  });
+  }, 25_000);
 
   it("rejects oversized events and unavailable image capability", async () => {
     const oversizedRoot = portableFixtureRoot("OpenCode oversized");

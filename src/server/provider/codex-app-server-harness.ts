@@ -114,9 +114,11 @@ function startCodexRun(
   );
   emitter.status("starting");
   let runningEmitted = false;
+  let runningTransitionRequired = false;
   const emitRunning = (): void => {
-    if (runningEmitted) return;
+    if (runningEmitted && !runningTransitionRequired) return;
     runningEmitted = true;
+    runningTransitionRequired = false;
     emitter.status("running");
   };
 
@@ -162,7 +164,10 @@ function startCodexRun(
       onSession: emitter.session,
       onStatus: (status, providerState) => {
         if (status === "running") emitRunning();
-        else emitter.status(status, undefined, providerState);
+        else {
+          runningTransitionRequired = true;
+          emitter.status(status, undefined, providerState);
+        }
       },
       onApproval: (request) => emitter.codex({ type: "approval", request }),
       onApprovalResolved: (requestId, decision) => emitter.codex({ type: "approval-resolved", requestId, decision }),

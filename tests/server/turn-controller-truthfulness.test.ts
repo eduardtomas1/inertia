@@ -132,6 +132,64 @@ describe("TurnController terminal truthfulness", () => {
     value.store.close();
   });
 
+  it("fails closed when a provider reports completion with live delegated work", async () => {
+    const value = await runtime();
+    const queued = value.controller.queue({
+      conversationId: value.conversationId,
+      content: "Do not complete before delegated work settles.",
+    });
+    expect(value.controller.start(queued.turn.id)).toBe(true);
+    const base = identity(value);
+    value.provider.emit({
+      ...base,
+      type: "subagent",
+      sequence: 1,
+      providerTaskId: "child-still-running",
+      providerAgentId: "agent-still-running",
+      parentProviderAgentId: null,
+      parentProviderToolUseId: null,
+      providerToolUseId: "tool-still-running",
+      providerRole: "worker",
+      providerName: null,
+      providerStatus: "running",
+      status: "running",
+      isLive: true,
+      description: "Finish delegated verification",
+      progress: "Still verifying",
+      result: null,
+    });
+    expect(value.store.agentTurn(queued.turn.id)?.runState?.state).toBe("delegated");
+
+    value.provider.resolve({
+      status: "completed",
+      text: "I will notify you when the delegate finishes.",
+    });
+    await flushPromises();
+
+    expect(value.store.agentTurn(queued.turn.id)).toMatchObject({
+      status: "failed",
+      terminalReason: "provider-error",
+      runState: { state: "failed" },
+    });
+    expect(value.store.conversationDetail(value.conversationId)?.subagents)
+      .toContainEqual(expect.objectContaining({
+        providerTaskId: "child-still-running",
+        status: "lost",
+        isLive: false,
+      }));
+    expect(value.events).toContainEqual(expect.objectContaining({
+      type: "agent.failed",
+      turnId: queued.turn.id,
+      message: "The provider ended while delegated work was still running.",
+    }));
+    expect(value.events).not.toContainEqual(expect.objectContaining({
+      type: "agent.completed",
+      turnId: queued.turn.id,
+      status: "completed",
+    }));
+    value.store.close();
+  });
+
   it("persists one terminal-first ACP compaction row across mutable patches", async () => {
     const value = await runtime();
     const queued = value.controller.queue({

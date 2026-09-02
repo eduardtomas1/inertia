@@ -1,3 +1,5 @@
+import { posix, win32 } from "node:path";
+
 import {
   executableCandidates,
   providerEnvironment,
@@ -19,6 +21,7 @@ export interface ProviderMaintenanceTarget {
 export interface ProviderMaintenanceUpdateAction {
   executable: string;
   args: readonly string[];
+  environmentPathPrefix?: string;
   lockKey: string;
   installMethod: ProviderMaintenanceInstallMethod;
   label: string;
@@ -92,7 +95,7 @@ export function codexInstallMethodFromPath(
 }
 
 async function resolvedManager(
-  command: "brew" | "npm",
+  command: string,
   environment: ProviderEnvironment,
   dependencies: ProviderMaintenanceCapabilityDependencies,
 ): Promise<string | null> {
@@ -100,6 +103,49 @@ async function resolvedManager(
     dependencies.executableCandidates ?? executableCandidates
   )(command, environment);
   return candidates[0] ?? null;
+}
+
+interface CodexNpmManagerLocation {
+  command: string;
+  pathPrefix: string;
+}
+
+/**
+ * Bind npm maintenance to the installation root that owns Codex. Selecting an
+ * unrelated npm from PATH can update a different global prefix or require
+ * privileges that the detected per-user installation does not need.
+ */
+function codexNpmManagerLocation(
+  executable: string,
+  platform: NodeJS.Platform,
+): CodexNpmManagerLocation | null {
+  const path = platform === "win32" ? win32 : posix;
+  const normalized = path.normalize(executable);
+  if (!path.isAbsolute(normalized)) return null;
+  const comparable = normalized.replaceAll("\\", "/");
+  const searched = platform === "win32"
+    ? comparable.toLocaleLowerCase("en-US")
+    : comparable;
+  const marker = platform === "win32"
+    ? "/node_modules/@openai/codex/"
+    : "/lib/node_modules/@openai/codex/";
+  const markerIndex = searched.indexOf(marker);
+  if (markerIndex >= 0) {
+    const prefix = normalized.slice(0, markerIndex);
+    const pathPrefix = platform === "win32" ? prefix : path.join(prefix, "bin");
+    return {
+      command: path.join(pathPrefix, platform === "win32" ? "npm.cmd" : "npm"),
+      pathPrefix,
+    };
+  }
+  if (
+    platform === "win32"
+    && /^codex\.(?:bat|cmd|exe)$/iu.test(path.basename(normalized))
+  ) {
+    const pathPrefix = path.dirname(normalized);
+    return { command: path.join(pathPrefix, "npm.cmd"), pathPrefix };
+  }
+  return null;
 }
 
 function manualCapabilities(
@@ -169,8 +215,15 @@ export async function resolveProviderMaintenanceCapabilities(
   const environment = await (
     dependencies.environment ?? (() => providerEnvironment())
   )();
+  const platform = dependencies.platform ?? process.platform;
+  const npmManager = installMethod === "npm-global"
+    ? codexNpmManagerLocation(target.executable, platform)
+    : null;
+  if (installMethod === "npm-global" && !npmManager) {
+    return manualCapabilities(target, installMethod);
+  }
   const manager = await resolvedManager(
-    installMethod === "npm-global" ? "npm" : "brew",
+    npmManager?.command ?? "brew",
     environment,
     dependencies,
   );
@@ -185,6 +238,7 @@ export async function resolveProviderMaintenanceCapabilities(
       ? {
           executable: manager,
           args: ["install", "-g", "@openai/codex@latest"],
+          environmentPathPrefix: npmManager?.pathPrefix,
           lockKey: "package-manager:npm-global",
           installMethod,
           label: "Update Codex with npm",

@@ -76,6 +76,27 @@ describe("runtime diagnostics", () => {
     expect(sanitized).not.toContain("\u0000");
   });
 
+  it("retains allowlisted lifecycle failure detail without admitting raw errors", () => {
+    const root = fixture();
+    const directory = runtimeDiagnosticsDirectory(root);
+    const diagnostics = new RuntimeDiagnostics(directory);
+    diagnostics.record("runtime.failure", {
+      phase: "stopping",
+      message: "Runtime shutdown could not confirm owned-process cleanup.",
+    });
+    diagnostics.record("runtime.failure", {
+      phase: "stopped",
+      message: "arbitrary provider failure detail",
+    });
+
+    const content = readFileSync(join(directory, "runtime.log"), "utf8");
+    expect(content).toContain(
+      "Runtime shutdown could not confirm owned-process cleanup.",
+    );
+    expect(content).not.toContain("arbitrary provider failure detail");
+    expect(content).toContain("Runtime lifecycle failure detail omitted.");
+  });
+
   it("exposes only classified detached-draft recovery diagnostics", () => {
     const root = fixture();
     const diagnostics = new RuntimeDiagnostics(runtimeDiagnosticsDirectory(root));

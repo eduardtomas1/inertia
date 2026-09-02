@@ -47,15 +47,19 @@ describe("provider maintenance capabilities", () => {
   });
 
   it("uses npm only when Codex has proven npm-global provenance", async () => {
+    const resolveExecutable = vi.fn(async (command: string) => (
+      command === "/usr/local/bin/npm"
+        ? ["/usr/local/lib/node_modules/npm/bin/npm-cli.js"]
+        : []
+    ));
     const capabilities = await resolveProviderMaintenanceCapabilities(
       target({
         executable: "/usr/local/lib/node_modules/@openai/codex/bin/codex",
       }),
       {
         environment: async () => environment,
-        executableCandidates: async (command) => (
-          command === "npm" ? ["/tools/npm"] : []
-        ),
+        executableCandidates: resolveExecutable,
+        platform: "linux",
       },
     );
 
@@ -63,11 +67,89 @@ describe("provider maintenance capabilities", () => {
       installMethod: "npm-global",
       updateAvailability: "available",
       update: {
-        executable: "/tools/npm",
+        executable: "/usr/local/lib/node_modules/npm/bin/npm-cli.js",
         args: ["install", "-g", "@openai/codex@latest"],
+        environmentPathPrefix: "/usr/local/bin",
         lockKey: "package-manager:npm-global",
       },
     });
+    expect(resolveExecutable).toHaveBeenCalledWith(
+      "/usr/local/bin/npm",
+      environment,
+    );
+  });
+
+  it("uses npm from the detected NVM version instead of an earlier system npm", async () => {
+    const nvmRoot = "/home/user/.nvm/versions/node/v22.19.0";
+    const desktopEnvironment: ProviderEnvironment = {
+      env: { PATH: `/usr/bin:${nvmRoot}/bin` },
+      pathEntries: ["/usr/bin", `${nvmRoot}/bin`],
+    };
+    const resolveExecutable = vi.fn(async (command: string) => {
+      if (command === `${nvmRoot}/bin/npm`) {
+        return [`${nvmRoot}/lib/node_modules/npm/bin/npm-cli.js`];
+      }
+      return command === "npm" ? ["/usr/share/nodejs/npm/bin/npm-cli.js"] : [];
+    });
+    const capabilities = await resolveProviderMaintenanceCapabilities(
+      target({
+        executable: `${nvmRoot}/lib/node_modules/@openai/codex/bin/codex.js`,
+      }),
+      {
+        environment: async () => desktopEnvironment,
+        executableCandidates: resolveExecutable,
+        platform: "linux",
+      },
+    );
+
+    expect(capabilities.update).toMatchObject({
+      executable: `${nvmRoot}/lib/node_modules/npm/bin/npm-cli.js`,
+      environmentPathPrefix: `${nvmRoot}/bin`,
+    });
+    expect(resolveExecutable).toHaveBeenCalledTimes(1);
+    expect(resolveExecutable).not.toHaveBeenCalledWith(
+      "npm",
+      expect.anything(),
+    );
+  });
+
+  it("keeps npm-installed Codex manual when its owning npm is unavailable", async () => {
+    const capabilities = await resolveProviderMaintenanceCapabilities(
+      target({
+        executable: "/home/user/.nvm/versions/node/v22/lib/node_modules/@openai/codex/bin/codex.js",
+      }),
+      {
+        environment: async () => environment,
+        executableCandidates: async () => [],
+        platform: "linux",
+      },
+    );
+
+    expect(capabilities).toMatchObject({
+      installMethod: "npm-global",
+      updateAvailability: "instructions-only",
+      update: null,
+    });
+  });
+
+  it("does not derive an updater from relative npm package paths", async () => {
+    const resolveExecutable = vi.fn(async () => ["/tools/npm"]);
+    const capabilities = await resolveProviderMaintenanceCapabilities(
+      target({
+        executable: "relative/lib/node_modules/@openai/codex/bin/codex.js",
+      }),
+      {
+        environment: async () => environment,
+        executableCandidates: resolveExecutable,
+        platform: "linux",
+      },
+    );
+
+    expect(capabilities).toMatchObject({
+      updateAvailability: "instructions-only",
+      update: null,
+    });
+    expect(resolveExecutable).not.toHaveBeenCalled();
   });
 
   it("recognizes the standard Windows npm shim location", () => {
@@ -77,6 +159,26 @@ describe("provider maintenance capabilities", () => {
     expect(codexInstallMethodFromPath(
       "C:\\Tools\\codex.cmd",
     )).toBe("manual");
+  });
+
+  it("binds a Windows Codex shim to npm in the same global directory", async () => {
+    const npmDirectory = "C:\\Users\\Ada\\AppData\\Roaming\\npm";
+    const resolveExecutable = vi.fn(async (command: string) => (
+      command === `${npmDirectory}\\npm.cmd` ? [command] : []
+    ));
+    const capabilities = await resolveProviderMaintenanceCapabilities(
+      target({ executable: `${npmDirectory}\\codex.cmd` }),
+      {
+        environment: async () => environment,
+        executableCandidates: resolveExecutable,
+        platform: "win32",
+      },
+    );
+
+    expect(capabilities.update).toMatchObject({
+      executable: `${npmDirectory}\\npm.cmd`,
+      environmentPathPrefix: npmDirectory,
+    });
   });
 
   it("uses Homebrew only for a canonical Cellar or Caskroom path", async () => {

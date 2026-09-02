@@ -72,6 +72,27 @@ afterEach(() => {
 });
 
 describe("ResponseMarkdown project files", () => {
+  it("styles project files as language-aware chips and web links with a globe", () => {
+    render(
+      <ResponseMarkdown
+        content="[schema](db/schema.sql) and [OpenAI](https://openai.com)"
+        projectRoot="/workspace"
+        projectId={PROJECT_ID}
+        defaultCodeWrap={false}
+        onOpenProjectFile={vi.fn()}
+      />,
+    );
+
+    const file = screen.getByRole("link", { name: "schema" });
+    expect(file).toHaveClass("response-project-file-link");
+    expect(file).toHaveAttribute("data-language-family", "data");
+    expect(file.querySelector(".response-project-file-icon"))
+      .toBeInTheDocument();
+    const web = screen.getByRole("link", { name: "OpenAI" });
+    expect(web).toHaveClass("response-web-link");
+    expect(web.querySelector("svg")).toBeInTheDocument();
+  });
+
   it("keeps encoded delimiters as literal project filenames", () => {
     const onOpenProjectFile = vi.fn();
     render(

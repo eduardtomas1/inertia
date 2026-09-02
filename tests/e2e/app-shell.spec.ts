@@ -500,6 +500,7 @@ test("keeps every ordinary New chat entry point isolated from the viewed chat", 
     workspaceDirectory,
   );
   const projectQuickChat = sidebar.getByRole("button", { name: "New chat in Inertia", exact: true });
+  await page.mouse.move(800, 400);
   await expect(projectQuickChat).toHaveCSS("opacity", "0");
   await projectQuickChat.locator("xpath=..").hover();
   await expect(projectQuickChat).toHaveCSS("opacity", "1");

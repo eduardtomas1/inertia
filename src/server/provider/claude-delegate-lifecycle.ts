@@ -15,10 +15,12 @@ export type ClaudeDelegateCompletion =
  * harness result. A non-deferred result is terminal even when the persistent
  * SDK input stream remains open for another prompt. Claude can also emit an
  * intermediate result to release SDK stdin while background agents report
- * back; only that explicitly deferred path waits for the parent to resume.
+ * back. Explicit deferral and exact live delegated-work evidence both require
+ * a newer parent result after the provider reports that work settled.
  */
 export class ClaudeDelegateLifecycle {
   private liveBackgroundTaskIds = new Set<string>();
+  private observedBackgroundTaskLevel = false;
   private latestResult:
     | {
         message: SDKResultMessage;
@@ -27,11 +29,18 @@ export class ClaudeDelegateLifecycle {
     | undefined;
   private endedAtAuthoritativeIdle = false;
 
-  observe(message: SDKMessage): { turnEnded: boolean } {
+  observe(
+    message: SDKMessage,
+    hasLiveTaskTrace = false,
+  ): { turnEnded: boolean } {
     if (message.type === "result") {
       const candidate = {
         message,
-        deferred: isDeferredResult(message, this.liveBackgroundTaskIds.size > 0),
+        deferred: isDeferredResult(
+          message,
+          this.liveBackgroundTaskIds.size > 0
+            || (!this.observedBackgroundTaskLevel && hasLiveTaskTrace),
+        ),
       };
       this.latestResult = candidate;
       return {
@@ -48,6 +57,7 @@ export class ClaudeDelegateLifecycle {
       // The background-task level is process-local. A restarted CLI begins
       // with an empty level until it publishes the next membership change.
       this.liveBackgroundTaskIds.clear();
+      this.observedBackgroundTaskLevel = false;
       return { turnEnded: false };
     }
 
@@ -60,6 +70,7 @@ export class ClaudeDelegateLifecycle {
           .map((task) => task.task_id)
           .filter((taskId) => taskId.length > 0),
       );
+      this.observedBackgroundTaskLevel = true;
       return { turnEnded: this.canEndTurn() };
     }
 
@@ -85,19 +96,39 @@ export class ClaudeDelegateLifecycle {
     if (!candidate) {
       return { kind: "incomplete", reason: "missing-result" };
     }
-    if (candidate.deferred) {
-      return { kind: "incomplete", reason: "parent-not-resumed" };
-    }
     if (!this.endedAtAuthoritativeIdle && this.liveBackgroundTaskIds.size > 0) {
       return { kind: "incomplete", reason: "delegates-abandoned" };
+    }
+    if (candidate.deferred) {
+      return { kind: "incomplete", reason: "parent-not-resumed" };
     }
     return { kind: "result", result: candidate.message };
   }
 
   dispose(): void {
     this.liveBackgroundTaskIds.clear();
+    this.observedBackgroundTaskLevel = false;
     this.latestResult = undefined;
     this.endedAtAuthoritativeIdle = false;
+  }
+
+  hasProvisionalResult(): boolean {
+    return this.latestResult?.deferred === true;
+  }
+
+  shouldBoundParentResumeWait(
+    message: SDKMessage,
+    hadLiveTaskTrace: boolean,
+    hasLiveTaskTrace: boolean,
+  ): boolean {
+    return this.hasProvisionalResult() && (
+      (message.type === "system"
+        && message.subtype === "background_tasks_changed"
+        && message.tasks.length === 0)
+      || (!this.observedBackgroundTaskLevel
+        && hadLiveTaskTrace
+        && !hasLiveTaskTrace)
+    );
   }
 
   private canEndTurn(): boolean {
@@ -109,13 +140,15 @@ export class ClaudeDelegateLifecycle {
 
 function isDeferredResult(
   result: SDKResultMessage,
-  hadLiveBackgroundTasks: boolean,
+  hadLiveDelegatedWork: boolean,
 ): boolean {
   if (result.terminal_reason === "background_requested") {
     return true;
   }
-  // terminal_reason was added after background task support. On older
-  // emitters, a result observed while the authoritative level is non-empty is
-  // conservatively treated as the parent's pre-notification result.
-  return result.terminal_reason === undefined && hadLiveBackgroundTasks;
+  // A result is only authoritative for the state observed when it was
+  // emitted. Claude can report `completed` before a background delegate's
+  // completion auto-resumes the parent, so roster/trace liveness makes that
+  // result provisional regardless of terminal_reason. A later parent result
+  // replaces it after the exact delegated-work terminal edge.
+  return hadLiveDelegatedWork;
 }

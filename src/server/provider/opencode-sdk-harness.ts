@@ -599,7 +599,11 @@ function startOpenCodeRun(
         startedAt: null,
       };
       let sessionIdleObserved = false;
+      let awaitingParentContinuation = false;
       const pump = pumpOpenCodeEvents(subscribed.stream, sessionId, {
+        onDescendantLive: () => {
+          awaitingParentContinuation = true;
+        },
         onDescendantActivity: () => {
           armEventInactivityDeadline();
           emitter.status(
@@ -624,7 +628,11 @@ function startOpenCodeRun(
             failInteraction,
           );
         },
-        onEvent: async (event) => {
+        onEvent: async (
+          event,
+          hasLiveDescendants,
+          novelRootActivity,
+        ) => {
           if (openCodeEventRequiresPromptAdmission(event)) {
             const admission = ownership.pendingPromptAdmission();
             if (admission && !(await admission)) return;
@@ -649,12 +657,25 @@ function startOpenCodeRun(
             failInteraction,
           );
           if (
-            ownership.eventSequence() !== ownershipSequence
+            awaitingParentContinuation
+            && !hasLiveDescendants
+            && novelRootActivity
+            && ownership.eventSequence() !== ownershipSequence
+            && event.type !== "session.next.prompt.admitted"
+            && event.type !== "session.next.prompted"
+          ) {
+            awaitingParentContinuation = false;
+          }
+          if (
+            (
+              ownership.eventSequence() !== ownershipSequence
+              && (!awaitingParentContinuation || novelRootActivity)
+            )
             || event.type === "session.error"
             || event.type === "session.deleted"
           ) armEventInactivityDeadline();
         },
-        isDone: async (event) => {
+        isDone: async (event, hasLiveDescendants) => {
           if (compacting) {
             return event.type === "session.error"
               || completesRequestedOpenCodeCompaction(event, manualCompaction);
@@ -667,6 +688,11 @@ function startOpenCodeRun(
             failureState.terminal = failureState.pending;
             return true;
           }
+          if (hasLiveDescendants) {
+            awaitingParentContinuation = true;
+            return false;
+          }
+          if (awaitingParentContinuation) return false;
           acceptingFollowUps = false;
           const admissions = [...pendingFollowUps];
           if (admissions.length > 0) {
@@ -1110,10 +1136,18 @@ async function pumpOpenCodeEvents(
   stream: AsyncGenerator<Event>,
   sessionId: string,
   handlers: {
+    onDescendantLive: () => void;
     onDescendantActivity: () => void;
     onDescendantInteraction: (event: Event) => void | Promise<void>;
-    onEvent: (event: Event) => void | Promise<void>;
-    isDone: (event: Event) => boolean | Promise<boolean>;
+    onEvent: (
+      event: Event,
+      hasLiveDescendants: boolean,
+      novelRootActivity: boolean,
+    ) => void | Promise<void>;
+    isDone: (
+      event: Event,
+      hasLiveDescendants: boolean,
+    ) => boolean | Promise<boolean>;
   },
 ): Promise<void> {
   const maxRunEvents = MAX_RUN_EVENTS * PROVIDER_RUN_BUDGET_BURSTS;
@@ -1130,17 +1164,30 @@ async function pumpOpenCodeEvents(
   );
   for await (const event of stream) {
     eventBudget.observe(event);
-    const { scope, active } = sessionOwnership.observe(event);
+    const {
+      scope,
+      active,
+      lifecycleProgress,
+      novelRootActivity,
+    } = sessionOwnership.observe(event);
     if (scope === "unrelated") continue;
     if (scope === "descendant") {
-      if (active) handlers.onDescendantActivity();
+      if (sessionOwnership.hasLiveDescendants()) handlers.onDescendantLive();
+      if (active || lifecycleProgress) handlers.onDescendantActivity();
       if (active && openCodeEventRequiresPromptAdmission(event)) {
         await handlers.onDescendantInteraction(event);
       }
       continue;
     }
-    await handlers.onEvent(event);
-    if (await handlers.isDone(event)) return;
+    await handlers.onEvent(
+      event,
+      sessionOwnership.hasLiveDescendants(),
+      novelRootActivity === true,
+    );
+    if (await handlers.isDone(
+      event,
+      sessionOwnership.hasLiveDescendants(),
+    )) return;
   }
   throw new Error("OpenCode closed its event stream before the session completed.");
 }

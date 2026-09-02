@@ -38,6 +38,14 @@ test.beforeAll(async () => {
         java,
         "utf8",
       );
+      await writeFile(
+        join(workspaceDirectory, "LongFixture.txt"),
+        Array.from(
+          { length: 5_000 },
+          (_, index) => `Long fixture line ${index + 1}`,
+        ).join("\n"),
+        "utf8",
+      );
       await Promise.all(Array.from({ length: 12 }, (_, index) =>
         writeFile(
           join(workspaceDirectory, `zz-fixture-${index + 1}.txt`),
@@ -66,6 +74,8 @@ test.beforeAll(async () => {
           '  return "ready";',
           "}",
           "```",
+          "",
+          "The long-scroll fixture is [LongFixture.txt](LongFixture.txt).",
         ].join("\n"),
         "assistant",
       );
@@ -97,13 +107,20 @@ async function openExactJavaRange(opener: "code" | "link"): Promise<void> {
   await expect(panel.getByTitle("Java recognized locally"))
     .toHaveText("Java");
   await expect(panel.getByText("Lines 41–43", { exact: true })).toBeVisible();
-  await expect(panel.getByRole("treeitem", {
-    name: "OrderService.java",
-  })).toHaveAttribute("aria-selected", "true");
-  await expect(panel.getByRole("treeitem", { name: "src" }))
-    .toHaveAttribute("aria-expanded", "true");
-  await expect(panel.getByRole("treeitem", { name: "demo" }))
-    .toHaveAttribute("aria-expanded", "true");
+  const tree = panel.locator('[role="tree"]');
+  await expect(tree).toBeHidden();
+  await expect(panel.getByRole("button", { name: "Show file explorer" }))
+    .toHaveAttribute("aria-pressed", "false");
+  const focusedGeometry = await panel.evaluate((element) => {
+    const panelBounds = element.getBoundingClientRect();
+    const preview = element.querySelector<HTMLElement>(".file-preview")
+      ?.getBoundingClientRect();
+    return preview
+      ? Math.abs(preview.left - panelBounds.left) <= 1
+        && Math.abs(preview.right - panelBounds.right) <= 1
+      : false;
+  });
+  expect(focusedGeometry).toBe(true);
   const firstReferencedLine = panel.locator('[data-source-line="41"]');
   await expect(firstReferencedLine).toHaveClass(/is-referenced/u);
   await expect(firstReferencedLine).toBeFocused();
@@ -111,6 +128,20 @@ async function openExactJavaRange(opener: "code" | "link"): Promise<void> {
     .toHaveCount(3);
   await expect(panel.locator(".file-preview-code .hljs-keyword").first())
     .toBeVisible();
+  const explorerToggle = panel.getByRole("button", {
+    name: "Show file explorer",
+  });
+  await explorerToggle.click();
+  await expect(tree).toBeVisible();
+  await expect(panel.getByRole("button", { name: "Hide file explorer" }))
+    .toBeFocused();
+  await expect(panel.getByRole("treeitem", {
+    name: "OrderService.java",
+  })).toHaveAttribute("aria-selected", "true");
+  await expect(panel.getByRole("treeitem", { name: "src" }))
+    .toHaveAttribute("aria-expanded", "true");
+  await expect(panel.getByRole("treeitem", { name: "demo" }))
+    .toHaveAttribute("aria-expanded", "true");
   expect(await panel.evaluate((element) => {
     const search = element.querySelector<HTMLElement>(".file-search-wrap")
       ?.getBoundingClientRect();
@@ -121,18 +152,24 @@ async function openExactJavaRange(opener: "code" | "link"): Promise<void> {
     const previewHeader = element.querySelector<HTMLElement>(
       ".file-preview-header",
     )?.getBoundingClientRect();
-    return search && tree && preview && previewHeader
+    const previewHeaderElement = element.querySelector<HTMLElement>(
+      ".file-preview-header",
+    );
+    return search && tree && preview && previewHeader && previewHeaderElement
       ? {
           browserColumnAligns: Math.abs(search.left - tree.left) <= 1
             && Math.abs(search.right - tree.right) <= 1,
-          columnsMeet: Math.abs(tree.right - preview.left) <= 1,
+          columnsMeet: Math.abs(preview.right - tree.left) <= 1,
           localHeadersAlign: Math.abs(search.top - previewHeader.top) <= 1,
+          previewHeaderFits: previewHeaderElement.scrollWidth
+            <= previewHeaderElement.clientWidth + 1,
         }
       : null;
   })).toEqual({
     browserColumnAligns: true,
     columnsMeet: true,
     localHeadersAlign: true,
+    previewHeaderFits: true,
   });
 }
 
@@ -299,7 +336,10 @@ test("opens a language-aware project link at its exact validated Java range", as
     const line = element.querySelector<HTMLElement>(
       '[data-source-line="41"]',
     )?.getBoundingClientRect();
-    return tree && selected && preview && line
+    const previewHeader = element.querySelector<HTMLElement>(
+      ".file-preview-header",
+    );
+    return tree && selected && preview && line && previewHeader
       ? {
           previewInside: preview.left >= panelBounds.left - 1
             && preview.right <= panelBounds.right + 1,
@@ -307,6 +347,8 @@ test("opens a language-aware project link at its exact validated Java range", as
             && line.bottom <= preview.bottom + 1,
           selectedFileVisible: selected.top >= tree.top - 1
             && selected.bottom <= tree.bottom + 1,
+          previewHeaderFits: previewHeader.scrollWidth
+            <= previewHeader.clientWidth + 1,
         }
       : null;
   });
@@ -314,6 +356,7 @@ test("opens a language-aware project link at its exact validated Java range", as
     previewInside: true,
     lineVisible: true,
     selectedFileVisible: true,
+    previewHeaderFits: true,
   });
 
   const previewCode = narrowPanel.getByLabel(
@@ -343,5 +386,36 @@ test("opens a language-aware project link at its exact validated Java range", as
     contentType: "image/png",
   });
   await app.expectNoViewportOverflow();
+  expect(app.rendererErrors).toEqual([]);
+});
+
+test("scrolls from the first to the last line of a long linked file", async () => {
+  await app.resizeWindow(1440, 920);
+  await page.getByRole("link", { name: "LongFixture.txt" }).click();
+  const panel = page.getByRole("region", { name: "Project files" });
+  const preview = panel.getByLabel("Contents of LongFixture.txt");
+  await expect(preview).toBeVisible();
+  await expect(panel.locator('[role="tree"]')).toBeHidden();
+  await expect(panel.locator('[data-source-line="1"]')).toContainText(
+    "Long fixture line 1",
+  );
+  expect(await preview.evaluate((element) => (
+    element.scrollHeight > element.clientHeight * 10
+  ))).toBe(true);
+
+  await preview.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+  });
+  await expect(panel.locator('[data-source-line="5000"]')).toContainText(
+    "Long fixture line 5000",
+  );
+  expect(await panel.locator(".file-preview-line").count()).toBeLessThan(200);
+
+  await preview.evaluate((element) => {
+    element.scrollTop = 0;
+  });
+  await expect(panel.locator('[data-source-line="1"]')).toContainText(
+    "Long fixture line 1",
+  );
   expect(app.rendererErrors).toEqual([]);
 });

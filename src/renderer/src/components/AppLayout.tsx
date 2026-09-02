@@ -79,6 +79,7 @@ interface AppLayoutActions {
     command: CommandWithoutId,
   ) => Promise<ServerEvent>;
   importProject: () => Promise<void>;
+  openGlobalChat: () => void;
   selectProject: (project: Project) => void;
   selectConversation: (conversation: Conversation) => void;
   openConversationInSplit: (conversation: Conversation) => void;
@@ -141,6 +142,7 @@ interface AppLayoutProps {
   setPaletteOpen: Dispatch<SetStateAction<boolean>>;
   project: Project | null;
   conversation: Conversation | null;
+  headerConversation: Conversation | null;
   splitConversationId: string | null;
   detachedConversationIds: ReadonlySet<string>;
   detachedChatLimitReached: boolean;
@@ -231,6 +233,7 @@ export function AppLayout({
   setPaletteOpen,
   project,
   conversation,
+  headerConversation,
   splitConversationId,
   detachedConversationIds,
   detachedChatLimitReached,
@@ -285,6 +288,7 @@ export function AppLayout({
   const sidebarActions = useStableActions({
     close: () => setSidebarOpen(false),
     viewChange: setView,
+    openHome: actions.openGlobalChat,
     importProject: () => void actions.importProject(),
     selectProject: actions.selectProject,
     selectConversation: actions.selectConversation,
@@ -460,6 +464,7 @@ export function AppLayout({
             layoutWidth={sidebarLayout.value}
             onClose={sidebarActions.close}
             onViewChange={sidebarActions.viewChange}
+            onOpenHome={sidebarActions.openHome}
             onImportProject={sidebarActions.importProject}
             onSelectProject={sidebarActions.selectProject}
             onSelectConversation={sidebarActions.selectConversation}
@@ -520,7 +525,7 @@ export function AppLayout({
         <div className="workspace-frame">
           <WorkspaceHeader
             project={project}
-            conversation={conversation}
+            conversation={headerConversation}
             view={view}
             activeTool={sceneActiveTool}
             sidebarCollapsed={sidebarCollapsed}
@@ -624,8 +629,10 @@ export function AppLayout({
             ref={workspaceBodyRef}
             id="workspace-content"
             className={`workspace-body${
-              !splitConversationId && toolsVisible ? " has-tools" : ""
-            }${!splitConversationId && stackedTools
+              view === "workspace" && !splitConversationId && toolsVisible
+                ? " has-tools"
+                : ""
+            }${view === "workspace" && !splitConversationId && stackedTools
               ? " is-tools-stacked"
               : ""}`}
             style={workspaceBodyStyle}

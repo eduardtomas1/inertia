@@ -21,7 +21,7 @@ export type {
  * owns at most three simultaneous Git inspections (numstat plus the two remote
  * probes), so the shared logical process budget is twelve Git payloads. Linux
  * and macOS wrap each payload in one guardian, making the corresponding
- * operating-system descendant ceilings six per key and twenty-four globally.
+ * guarded-tree descendant ceilings six per key and twenty-four globally.
  */
 export const GIT_SCAN_MAX_CONCURRENT_KEYS = 4;
 export const GIT_SCAN_PROCESS_BUDGET_PER_KEY = 3;

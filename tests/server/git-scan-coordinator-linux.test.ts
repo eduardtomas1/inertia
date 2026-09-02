@@ -9,6 +9,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { Worker } from "node:worker_threads";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -21,8 +22,9 @@ import { getRepositoryStatus } from "../../src/server/git";
 import { repositoryMetadataMarkerIdentity } from "../../src/server/git/paths";
 import {
   GIT_SCAN_GLOBAL_GUARDED_DESCENDANT_BUDGET,
-  GIT_SCAN_GUARDED_DESCENDANT_BUDGET_PER_KEY,
   GIT_SCAN_MAX_CONCURRENT_KEYS,
+  GIT_SCAN_GUARDED_DESCENDANT_BUDGET_PER_KEY,
+  GIT_SCAN_PROCESS_BUDGET_PER_KEY,
   GitScanCoordinator,
   validatedGitScanIdentity,
   type GitScanRequest,
@@ -33,7 +35,8 @@ import { activatePreparedRuntimeOwnedProcessRegistry } from
 const linuxIt = process.platform === "linux" ? it : it.skip;
 const roots: string[] = [];
 const STATUS_INSPECTION_CEILING = 6;
-const GUARDED_PROCESSES_PER_INSPECTION = 2;
+const CONTROL_HELPERS_PER_ACTIVE_INSPECTION = 1;
+const LINUX_FORKS_PER_INSPECTION = 5;
 
 afterEach(() => {
   for (const root of roots.splice(0)) {
@@ -66,125 +69,65 @@ function repository(parent: string, name: string): string {
   return root;
 }
 
-function procChildren(pid: number): number[] {
-  try {
-    const children = readFileSync(
-      `/proc/${pid}/task/${pid}/children`,
-      "utf8",
-    ).trim();
-    return children ? children.split(/\s+/u).map(Number) : [];
-  } catch {
-    return [];
-  }
+interface LinuxProcessMetrics {
+  durationMs: number;
+  finalDescendants: number[];
+  forkRatePerSecond: number;
+  peakControlHelpers: number;
+  peakDescendants: number;
+  peakGuardedTreeDescendants: number;
+  peakDescendantRssKb: number;
+  peakDescendantThreads: number;
+  settlementMs: number;
+  uniqueDescendants: number;
+  zombiesAtSettlement: number;
 }
 
-function descendants(pid: number): number[] {
-  const found: number[] = [];
-  const pending = [...procChildren(pid)];
-  const visited = new Set<number>();
-  while (pending.length > 0) {
-    const child = pending.pop();
-    if (!child || visited.has(child)) continue;
-    visited.add(child);
-    found.push(child);
-    pending.push(...procChildren(child));
-  }
-  return found;
-}
-
-function procState(pid: number): string | null {
-  try {
-    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
-    const commandEnd = stat.lastIndexOf(")");
-    return commandEnd < 0 ? null : stat.slice(commandEnd + 2, commandEnd + 3);
-  } catch {
-    return null;
-  }
-}
-
-function procResourceUsage(pid: number): { rssKb: number; threads: number } {
-  try {
-    const status = readFileSync(`/proc/${pid}/status`, "utf8");
-    return {
-      rssKb: Number(/^VmRSS:\s+(\d+)/mu.exec(status)?.[1] ?? 0),
-      threads: Number(/^Threads:\s+(\d+)/mu.exec(status)?.[1] ?? 0),
-    };
-  } catch {
-    return { rssKb: 0, threads: 0 };
-  }
-}
-
-async function awaitDescendantSettlement(timeoutMs = 5_000): Promise<number> {
-  const startedAt = performance.now();
-  const deadlineAt = startedAt + timeoutMs;
-  let consecutiveEmptySamples = 0;
-  while (performance.now() < deadlineAt) {
-    if (descendants(process.pid).length === 0) {
-      consecutiveEmptySamples += 1;
-      if (consecutiveEmptySamples === 2) {
-        return performance.now() - startedAt;
-      }
-    } else {
-      consecutiveEmptySamples = 0;
-    }
-    await new Promise<void>((resolve) => setTimeout(resolve, 5));
-  }
-  return performance.now() - startedAt;
-}
-
-function observeDescendants(): {
-  finish: (settlementMs?: number) => {
-    durationMs: number;
-    finalDescendants: number[];
-    forkRatePerSecond: number;
-    peakDescendants: number;
-    peakDescendantRssKb: number;
-    peakDescendantThreads: number;
-    settlementMs: number;
-    uniqueDescendants: number;
-    zombiesAtSettlement: number;
-  };
-} {
-  const startedAt = performance.now();
-  const observed = new Set<number>();
-  let peakDescendants = 0;
-  let peakDescendantRssKb = 0;
-  let peakDescendantThreads = 0;
-  const sample = (): void => {
-    const current = descendants(process.pid);
-    peakDescendants = Math.max(peakDescendants, current.length);
-    const usage = current.map(procResourceUsage);
-    peakDescendantRssKb = Math.max(
-      peakDescendantRssKb,
-      usage.reduce((sum, entry) => sum + entry.rssKb, 0),
-    );
-    peakDescendantThreads = Math.max(
-      peakDescendantThreads,
-      usage.reduce((sum, entry) => sum + entry.threads, 0),
-    );
-    current.forEach((pid) => observed.add(pid));
-  };
-  sample();
-  const timer = setInterval(sample, 1);
+async function observeDescendants(repositoryRoots: readonly string[]): Promise<{
+  finish: () => Promise<LinuxProcessMetrics>;
+}> {
+  const worker = new Worker(new URL(
+    "../helpers/linux-git-scan-process-observer.mjs",
+    import.meta.url,
+  ), {
+    workerData: { parentPid: process.pid, repositoryRoots },
+  });
+  await new Promise<void>((resolve, reject) => {
+    const failed = (error: Error): void => reject(error);
+    worker.once("error", failed);
+    worker.on("message", (message: { type?: string }) => {
+      if (message.type !== "ready") return;
+      worker.removeListener("error", failed);
+      resolve();
+    });
+  });
+  let metricsPromise: Promise<LinuxProcessMetrics> | null = null;
   return {
-    finish: (settlementMs = 0) => {
-      clearInterval(timer);
-      sample();
-      const durationMs = Math.max(1, performance.now() - startedAt);
-      const finalDescendants = descendants(process.pid);
-      return {
-        durationMs,
-        finalDescendants,
-        forkRatePerSecond: observed.size / (durationMs / 1_000),
-        peakDescendants,
-        peakDescendantRssKb,
-        peakDescendantThreads,
-        settlementMs,
-        uniqueDescendants: observed.size,
-        zombiesAtSettlement: finalDescendants.filter(
-          (pid) => procState(pid) === "Z",
-        ).length,
-      };
+    finish: () => {
+      metricsPromise ??= new Promise<LinuxProcessMetrics>((resolve, reject) => {
+        let settled = false;
+        const fail = (error: Error): void => {
+          if (settled) return;
+          settled = true;
+          reject(error);
+        };
+        worker.once("error", fail);
+        worker.once("exit", (code) => {
+          if (!settled) {
+            fail(new Error(`The Linux process observer exited with code ${code}.`));
+          }
+        });
+        worker.on("message", (message: {
+          type?: string;
+          value?: LinuxProcessMetrics;
+        }) => {
+          if (settled || message.type !== "metrics" || !message.value) return;
+          settled = true;
+          resolve(message.value);
+        });
+        worker.postMessage("finish");
+      });
+      return metricsPromise;
     },
   };
 }
@@ -233,7 +176,7 @@ describe("Git scan coordinator with the real Linux guardian", () => {
       },
     );
     const journal = new RuntimeOwnedProcessJournal(root, { platform: "linux" });
-    const observer = observeDescendants();
+    const observer = await observeDescendants([repositoryRoot]);
     let finishFirst!: () => void;
     let firstCaptured!: () => void;
     const firstCapturedPromise = new Promise<void>((resolve) => {
@@ -283,32 +226,41 @@ describe("Git scan coordinator with the real Linux guardian", () => {
       ))).toBe(true);
       expect(await awaitRuntimeOwnedProcessCleanupConfirmed()).toBe(true);
 
-      // A ChildProcess close and the registry's durable cleanup can settle in
-      // the same event-loop turn that Linux still exposes the just-exited PID
-      // as a zombie. Require two bounded empty /proc samples so a persistent
-      // orphan still fails while the kernel/libuv reap boundary can complete.
-      const settlementMs = await awaitDescendantSettlement();
-      const metrics = observer.finish(settlementMs);
+      // The independent observer requires two bounded empty /proc samples, so
+      // a persistent orphan fails while the kernel/libuv reap boundary can
+      // complete after the registry's durable cleanup settles.
+      const metrics = await observer.finish();
       const forkBudget = 2
         * STATUS_INSPECTION_CEILING
-        * GUARDED_PROCESSES_PER_INSPECTION;
+        * LINUX_FORKS_PER_INSPECTION;
+      console.info("issue-220 Linux burst trace", JSON.stringify(metrics));
       expect(metrics).toMatchObject({
         finalDescendants: [],
         zombiesAtSettlement: 0,
       });
-      expect(metrics.peakDescendants)
-        .toBeLessThanOrEqual(GIT_SCAN_GUARDED_DESCENDANT_BUDGET_PER_KEY);
+      expect(metrics.peakGuardedTreeDescendants).toBeLessThanOrEqual(
+        GIT_SCAN_GUARDED_DESCENDANT_BUDGET_PER_KEY,
+      );
+      expect(metrics.peakControlHelpers).toBeLessThanOrEqual(
+        GIT_SCAN_PROCESS_BUDGET_PER_KEY
+          * CONTROL_HELPERS_PER_ACTIVE_INSPECTION,
+      );
+      expect(metrics.peakDescendants).toBeLessThanOrEqual(
+        GIT_SCAN_GUARDED_DESCENDANT_BUDGET_PER_KEY
+          + GIT_SCAN_PROCESS_BUDGET_PER_KEY
+            * CONTROL_HELPERS_PER_ACTIVE_INSPECTION,
+      );
       expect(metrics.uniqueDescendants).toBeLessThanOrEqual(forkBudget);
       expect(metrics.forkRatePerSecond).toBeGreaterThan(0);
+      expect(metrics.peakControlHelpers).toBeGreaterThan(0);
       expect(metrics.peakDescendantRssKb).toBeGreaterThan(0);
       expect(metrics.peakDescendantThreads).toBeGreaterThan(0);
       expect(journal.records(generation)).toEqual([]);
       expect(runtimeOwnedProcessOwnershipIsTainted()).toBe(false);
       expect(restartRuntimeAfterTaint).not.toHaveBeenCalled();
-      console.info("issue-220 Linux burst trace", JSON.stringify(metrics));
     } finally {
       finishFirst();
-      observer.finish();
+      await observer.finish();
       deactivate?.();
     }
   }, 30_000);
@@ -344,7 +296,7 @@ describe("Git scan coordinator with the real Linux guardian", () => {
       },
     );
     const journal = new RuntimeOwnedProcessJournal(root, { platform: "linux" });
-    const observer = observeDescendants();
+    const observer = await observeDescendants(repositoryRoots);
     let activeKeys = 0;
     let peakActiveKeys = 0;
 
@@ -364,27 +316,39 @@ describe("Git scan coordinator with the real Linux guardian", () => {
       expect(peakActiveKeys).toBe(GIT_SCAN_MAX_CONCURRENT_KEYS);
       expect(await awaitRuntimeOwnedProcessCleanupConfirmed()).toBe(true);
 
-      const settlementMs = await awaitDescendantSettlement();
-      const metrics = observer.finish(settlementMs);
+      const metrics = await observer.finish();
       const forkBudget = repositoryRoots.length
         * STATUS_INSPECTION_CEILING
-        * GUARDED_PROCESSES_PER_INSPECTION;
+        * LINUX_FORKS_PER_INSPECTION;
+      console.info("issue-220 Linux global trace", JSON.stringify(metrics));
       expect(metrics).toMatchObject({
         finalDescendants: [],
         zombiesAtSettlement: 0,
       });
-      expect(metrics.peakDescendants)
-        .toBeLessThanOrEqual(GIT_SCAN_GLOBAL_GUARDED_DESCENDANT_BUDGET);
+      expect(metrics.peakGuardedTreeDescendants).toBeLessThanOrEqual(
+        GIT_SCAN_GLOBAL_GUARDED_DESCENDANT_BUDGET,
+      );
+      expect(metrics.peakControlHelpers).toBeLessThanOrEqual(
+        GIT_SCAN_MAX_CONCURRENT_KEYS
+          * GIT_SCAN_PROCESS_BUDGET_PER_KEY
+          * CONTROL_HELPERS_PER_ACTIVE_INSPECTION,
+      );
+      expect(metrics.peakDescendants).toBeLessThanOrEqual(
+        GIT_SCAN_GLOBAL_GUARDED_DESCENDANT_BUDGET
+          + GIT_SCAN_MAX_CONCURRENT_KEYS
+            * GIT_SCAN_PROCESS_BUDGET_PER_KEY
+            * CONTROL_HELPERS_PER_ACTIVE_INSPECTION,
+      );
       expect(metrics.uniqueDescendants).toBeLessThanOrEqual(forkBudget);
       expect(metrics.forkRatePerSecond).toBeGreaterThan(0);
+      expect(metrics.peakControlHelpers).toBeGreaterThan(0);
       expect(metrics.peakDescendantRssKb).toBeGreaterThan(0);
       expect(metrics.peakDescendantThreads).toBeGreaterThan(0);
       expect(journal.records(generation)).toEqual([]);
       expect(runtimeOwnedProcessOwnershipIsTainted()).toBe(false);
       expect(restartRuntimeAfterTaint).not.toHaveBeenCalled();
-      console.info("issue-220 Linux global trace", JSON.stringify(metrics));
     } finally {
-      observer.finish();
+      await observer.finish();
       deactivate?.();
     }
   }, 30_000);

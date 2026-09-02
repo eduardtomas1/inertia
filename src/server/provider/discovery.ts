@@ -386,19 +386,36 @@ export async function detectProvider(
       && appServerProbe.exitCode === 0
       && /(?:codex\s+app-server|run the app server|\bapp-server\b)/iu.test(appServerProbe.output)
     );
+    const serveProbe = providerId === "opencode" && probe.started && !probe.timedOut && probe.exitCode === 0
+      ? await runProbe(executable, ["serve", "--help"], probeEnvironment, cwd, timeoutMs)
+      : undefined;
+    const serveReady = !serveProbe || (
+      serveProbe.started
+      && !serveProbe.timedOut
+      && serveProbe.exitCode === 0
+      && /(?:^|\s)--pure(?:\s|,|$)/mu.test(serveProbe.output)
+    );
     return {
       executable,
       probe,
       version: versionFromOutput(probe.output),
       acpReady,
       appServerReady,
+      serveReady,
       cleanupConfirmed: probe.cleanupConfirmed === true
         && (acpProbe === undefined || acpProbe.cleanupConfirmed === true)
-        && (appServerProbe === undefined || appServerProbe.cleanupConfirmed === true),
+        && (appServerProbe === undefined || appServerProbe.cleanupConfirmed === true)
+        && (serveProbe === undefined || serveProbe.cleanupConfirmed === true),
     };
   }));
   const working = versionProbes
-    .filter(({ probe, acpReady }) => probe.started && !probe.timedOut && probe.exitCode === 0 && acpReady)
+    .filter(({ probe, acpReady, serveReady }) => (
+      probe.started
+      && !probe.timedOut
+      && probe.exitCode === 0
+      && acpReady
+      && serveReady
+    ))
     .sort((left, right) =>
       (providerId === "cursor"
         ? cursorExecutablePreference(right.executable)
@@ -416,10 +433,13 @@ export async function detectProvider(
     const providerWithoutAcp = (providerId === "cursor" || providerId === "kimi") && versionProbes.some(
       ({ probe }) => probe.started && !probe.timedOut && probe.exitCode === 0,
     );
+    const providerWithoutPureServe = providerId === "opencode" && versionProbes.some(
+      ({ probe }) => probe.started && !probe.timedOut && probe.exitCode === 0,
+    );
     return {
       provider,
-      available: providerWithoutAcp,
-      installState: providerWithoutAcp ? "installed" : "error",
+      available: providerWithoutAcp || providerWithoutPureServe,
+      installState: providerWithoutAcp || providerWithoutPureServe ? "installed" : "error",
       authState: "unknown",
       canRun: false,
       cleanupConfirmed: !cleanupUnconfirmed,
@@ -427,6 +447,8 @@ export async function detectProvider(
         ? `${provider.name} probe timed out, and its process tree could not be confirmed stopped`
         : providerWithoutAcp
         ? `${provider.name} CLI found, but ACP is unavailable`
+        : providerWithoutPureServe
+        ? "OpenCode CLI found, but secure plugin-free serve mode is unavailable; update the selected CLI"
         : providerId === "codex" ? "Codex CLI was found but failed to start" : statusMessage("error", "unknown"),
     };
   }

@@ -53,7 +53,7 @@ export function openCodeServerProcessInvocation(
 ) {
   return providerProcessInvocation(
     executable,
-    ["serve", "--hostname=127.0.0.1", "--port=0"],
+    ["serve", "--pure", "--hostname=127.0.0.1", "--port=0"],
     environment,
     platform,
   );

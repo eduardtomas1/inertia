@@ -3,6 +3,8 @@ import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { requireAcpInitializeHandshake } from "./provider-drift-process.mjs";
+
 const repositoryRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const MAX_OUTPUT_CHARS = 64 * 1024;
 const INSTALL_TIMEOUT_MS = 8 * 60 * 1_000;
@@ -12,6 +14,8 @@ const CLI_TIMEOUT_MS = 20_000;
 const productSdks = [
   "@agentclientprotocol/sdk",
   "@anthropic-ai/claude-agent-sdk",
+  "@anthropic-ai/sdk",
+  "@modelcontextprotocol/sdk",
   "@opencode-ai/sdk",
 ];
 const latestPackages = [
@@ -378,6 +382,15 @@ async function main() {
       }
     });
 
+    await check("Kimi latest CLI completes a secret-free ACP initialize", async () => {
+      await requireAcpInitializeHandshake(
+        bin("kimi"),
+        ["acp"],
+        { cwd: options.workspace, environment },
+        /kimi/iu,
+      );
+    });
+
     await check("OpenCode latest CLI exposes version and server help", async () => {
       const version = await requireSuccessfulCommand(
         bin("opencode"),
@@ -389,9 +402,45 @@ async function main() {
         ["serve", "--help"],
         { cwd: options.workspace, environment },
       );
-      if (!/\d+\.\d+/u.test(version) || !/(?:port|hostname|serve)/iu.test(help)) {
+      if (!/\d+\.\d+/u.test(version)
+        || !/(?:port|hostname|serve)/iu.test(help)
+        || !/(?:^|\s)--pure(?:\s|,|$)/mu.test(help)) {
         throw new Error("OpenCode CLI output no longer identifies its server surface.");
       }
+    });
+
+    await check("OpenCode latest CLI completes a plugin-free SDK runtime handshake", async () => {
+      const pluginDirectory = join(options.workspace, ".opencode", "plugins");
+      const sentinel = join(options.workspace, "external-plugin-executed");
+      await mkdir(pluginDirectory, { recursive: true });
+      await writeFile(
+        join(pluginDirectory, "provider-drift-sentinel.js"),
+        [
+          'import { writeFileSync } from "node:fs";',
+          `writeFileSync(${JSON.stringify(sentinel)}, "executed", "utf8");`,
+          "export const ProviderDriftSentinel = async () => ({});",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+      const source = join(
+        repositoryRoot,
+        "scripts",
+        "provider-drift-opencode-runtime.mjs",
+      );
+      const target = join(options.workspace, "provider-drift-opencode-runtime.mjs");
+      await Promise.all([
+        copyFile(source, target),
+        copyFile(
+          join(repositoryRoot, "scripts", "provider-drift-process.mjs"),
+          join(options.workspace, "provider-drift-process.mjs"),
+        ),
+      ]);
+      await requireSuccessfulCommand(
+        process.execPath,
+        [target, bin("opencode"), options.workspace, sentinel],
+        { cwd: options.workspace, environment },
+      );
     });
   }
 
@@ -410,6 +459,15 @@ async function main() {
       if (!version.trim() || !/(?:acp|agent client protocol)/iu.test(help)) {
         throw new Error("Cursor CLI output no longer identifies its ACP surface.");
       }
+    });
+
+    await check("Cursor latest CLI completes a secret-free ACP initialize", async () => {
+      await requireAcpInitializeHandshake(
+        options.cursorAgent,
+        ["acp"],
+        { cwd: options.workspace, environment },
+        /cursor/iu,
+      );
     });
   }
 

@@ -34,6 +34,7 @@ import {
   type SpreadsheetPreviewWorkbook,
 } from "@shared/spreadsheet-workbook";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
+import { useDocumentVisibility } from "../hooks/useDocumentPresence";
 import {
   attachmentPreviewKind,
   attachmentPreviewUrl,
@@ -335,6 +336,7 @@ export function AttachmentPreviewDialog({
   const [openFailed, setOpenFailed] = useState(false);
   const previewKind = attachmentPreviewKind(attachment);
   const previewUrl = attachmentPreviewUrl(attachment);
+  const documentVisible = useDocumentVisibility();
   const markLoadFailed = useCallback(() => setLoadFailed(true), []);
   useNativePreviewSuspension(true);
 
@@ -358,6 +360,7 @@ export function AttachmentPreviewDialog({
   return createPortal(
     <div
       className="attachment-preview-backdrop"
+      data-document-visible={documentVisible}
       role="presentation"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();

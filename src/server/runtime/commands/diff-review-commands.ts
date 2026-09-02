@@ -20,6 +20,7 @@ import {
 } from "../../git";
 import { RuntimeRequestError } from "../../runtime-errors";
 import type { RuntimeSecureFileBroker } from "../../secure-files";
+import { repositoryMetadataMarkerIdentity } from "../../git/paths";
 import { changedFiles } from "../../runtime-snapshots";
 import {
   resolveWorkspaceGitRepository,
@@ -31,6 +32,7 @@ import {
   defineRuntimeCommandHandler,
   type RuntimeCommandHandler,
 } from "./command-router";
+import { sourceControlMutationInvalidation } from "./source-control-scan-coordination";
 
 export interface DiffReviewCommandDependencies {
   store: RuntimeStore;
@@ -133,6 +135,10 @@ export function createDiffReviewCommandHandler(
           ),
           { consume: true },
         );
+        const scanInvalidation = sourceControlMutationInvalidation(
+          secureRoot.root,
+          await repositoryMetadataMarkerIdentity(secureRoot.root),
+        );
         const reversed = await dependencies.workspaceRuns.trackSourceControl(
           `Revert ${command.payload.lineIds.length} selected ${command.payload.lineIds.length === 1 ? "line" : "lines"} · ${workspaceGitFilePath(repositoryPath, command.payload.filePath)}`,
           command.payload.projectId,
@@ -156,6 +162,7 @@ export function createDiffReviewCommandHandler(
           {
             recoverReviewedCommit: false,
             serializationRoot: secureRoot.root,
+            ...scanInvalidation,
           },
         );
         if (command.payload.comment && command.payload.conversationId) {
@@ -279,6 +286,10 @@ export function createDiffReviewCommandHandler(
           ),
           { consume: true },
         );
+        const scanInvalidation = sourceControlMutationInvalidation(
+          secureRoot.root,
+          await repositoryMetadataMarkerIdentity(secureRoot.root),
+        );
         const diff = await dependencies.workspaceRuns.trackSourceControl(
           "Undo selective reversal",
           command.payload.projectId,
@@ -294,6 +305,7 @@ export function createDiffReviewCommandHandler(
           {
             recoverReviewedCommit: false,
             serializationRoot: secureRoot.root,
+            ...scanInvalidation,
           },
         );
         const status = await getRepositoryStatus(secureRoot.root);

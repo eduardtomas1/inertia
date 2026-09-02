@@ -158,15 +158,39 @@ describe("Git scan coordinator", () => {
     expect(execute).toHaveBeenCalledOnce();
   });
 
-  it("force-settles an execution that ignores cancellation", async () => {
-    const coordinator = new GitScanCoordinator(20);
-    const neverSettles = vi.fn(async () => await new Promise<never>(() => {}));
+  it("retains ownership after timeout until cancellation cleanup settles", async () => {
+    const reportLateFailure = vi.fn();
+    const coordinator = new GitScanCoordinator(20, reportLateFailure);
+    let rejectCleanup!: (error: Error) => void;
+    const cleanupStarted = vi.fn();
+    const firstExecution = vi.fn(async ({ signal }: GitScanExecution) =>
+      await new Promise<never>((_resolve, reject) => {
+        rejectCleanup = reject;
+        signal.addEventListener("abort", cleanupStarted, { once: true });
+      }));
+    const successor = vi.fn(async ({ invalidation, scope }: GitScanExecution) => ({
+      invalidation,
+      scope,
+    }));
 
-    await expect(coordinator.request(request(), neverSettles))
+    await expect(coordinator.request(request(), firstExecution))
       .rejects.toMatchObject({ code: "timeout" });
-    await expect(coordinator.request(
-      request(),
-      async ({ invalidation, scope }) => ({ invalidation, scope }),
-    )).resolves.toEqual({ invalidation: 0, scope: "status" });
+    expect(cleanupStarted).toHaveBeenCalledOnce();
+
+    const trailing = coordinator.request(
+      request({ invalidation: 1 }),
+      successor,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(successor).not.toHaveBeenCalled();
+
+    const cleanupFailure = new Error("Injected process-tree cleanup failure.");
+    rejectCleanup(cleanupFailure);
+    await expect(trailing).resolves.toEqual({
+      invalidation: 1,
+      scope: "status",
+    });
+    expect(successor).toHaveBeenCalledOnce();
+    expect(reportLateFailure).toHaveBeenCalledWith(cleanupFailure);
   });
 });

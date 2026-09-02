@@ -1038,7 +1038,24 @@ async function streamingResponsivenessSample(
   ).filter({ hasText: `STREAM_PROVIDER_COMPLETE_${sampleNumber}_` }).last();
   await expect(finalAnswer).toHaveCount(0);
   const streamingBottomGapBeforeReaderNavigation = await liveViewport.evaluate(
-    (viewport) => viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop,
+    async (viewport, frameTimeoutMs) => {
+      // The keyed receipt is emitted from the same effect that deliberately
+      // schedules follow-latest for the next paint. Measure after that one
+      // promised frame so host/renderer IPC timing cannot sample between the
+      // commit and its scroll, while retaining the exact spatial threshold.
+      await new Promise<void>((resolveFrame, rejectFrame) => {
+        const frame = requestAnimationFrame(() => {
+          clearTimeout(timeout);
+          resolveFrame();
+        });
+        const timeout = window.setTimeout(() => {
+          cancelAnimationFrame(frame);
+          rejectFrame(new Error("Follow-latest did not reach its next paint."));
+        }, frameTimeoutMs);
+      });
+      return viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop;
+    },
+    CI_STREAM_FIRST_PAINT_CATASTROPHIC_MS,
   );
   expect(streamingBottomGapBeforeReaderNavigation)
     .toBeLessThanOrEqual(FOLLOW_LATEST_LIVE_EDGE_THRESHOLD);

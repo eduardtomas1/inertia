@@ -28,6 +28,7 @@ import {
 import type { RuntimeSecureFileBroker } from "../../src/server/secure-files";
 import { issueAuthorityForLiveOwner } from "../../src/server/runtime/live-authority";
 import { discoverFreshWorkspaceGitRepositories } from "../../src/server/runtime/commands/source-control-commands";
+import { SecureFileTestBroker } from "../support/secure-file-test-broker";
 
 const roots: string[] = [];
 
@@ -161,10 +162,12 @@ describe("workspace Git repository discovery", () => {
       ));
 
     try {
-      const [diff, status] = await Promise.all([
-        getUnifiedDiff(root, { statusScan: scan }),
-        getRepositoryStatus(root, { scan }),
-      ]);
+      const diffPromise = getUnifiedDiff(root, { statusScan: scan });
+      // A supplied scan identity already owns the validated repository root,
+      // so diff must join the coordinator before yielding to path discovery.
+      expect(requestSpy).toHaveBeenCalledOnce();
+      const statusPromise = getRepositoryStatus(root, { scan });
+      const [diff, status] = await Promise.all([diffPromise, statusPromise]);
       expect(diff.text).toContain("+after");
       expect(status.files).toContainEqual(expect.objectContaining({
         path: "tracked.txt",
@@ -172,6 +175,42 @@ describe("workspace Git repository discovery", () => {
       }));
       expect(requestSpy).toHaveBeenCalledTimes(2);
       expect(rawExecutions).toBe(1);
+    } finally {
+      requestSpy.mockRestore();
+    }
+  });
+
+  it("rejects a status scan for a different authorized repository before scanning", async () => {
+    const parent = temporaryRoot("git-diff-status-authority");
+    const authorized = join(parent, "authorized");
+    const mismatched = join(parent, "mismatched");
+    initializeRepository(authorized, "authorized.txt");
+    initializeRepository(mismatched, "mismatched.txt");
+    writeFileSync(join(mismatched, "mismatched.txt"), "changed\n");
+    const secureFiles = new SecureFileTestBroker();
+    const secureRoot = await secureFiles.authorizeRoot(authorized);
+    const identity = validatedGitScanIdentity(
+      realpathSync.native(mismatched),
+      await repositoryMetadataMarkerIdentity(mismatched),
+    );
+    const requestSpy = vi.spyOn(gitScanCoordinator, "request");
+
+    try {
+      await expect(getUnifiedDiff(
+        authorized,
+        {
+          statusScan: {
+            authorityGeneration: "project:conversation:generation-mismatch",
+            identity,
+            invalidation: gitScanCoordinator.currentInvalidation(identity),
+            scope: "workspace",
+          },
+        },
+        undefined,
+        secureFiles,
+        secureRoot,
+      )).rejects.toMatchObject({ code: "invalid-input" });
+      expect(requestSpy).not.toHaveBeenCalled();
     } finally {
       requestSpy.mockRestore();
     }

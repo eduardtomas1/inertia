@@ -87,13 +87,25 @@ export async function getUnifiedDiff(
   if (options.signal?.aborted) {
     throw new GitError("timeout", "Git inspection was cancelled.");
   }
+  if (
+    secureRoot
+    && options.statusScan
+    && secureRoot.root !== options.statusScan.identity.repositoryRoot
+  ) {
+    throw new GitError(
+      "invalid-input",
+      "The Git status scan does not match the authorized repository.",
+    );
+  }
   if (secureRoot) {
     await secureFiles!.verifyRoot(secureRoot, options.signal);
   }
-  const root = secureRoot?.root ?? await repositoryRoot(repositoryPath, {
-    deadlineAt: options.deadlineAt,
-    signal: options.signal,
-  });
+  const root = secureRoot?.root
+    ?? options.statusScan?.identity.repositoryRoot
+    ?? await repositoryRoot(repositoryPath, {
+      deadlineAt: options.deadlineAt,
+      signal: options.signal,
+    });
   const maxFiles = boundedInteger(
     options.maxFiles,
     DEFAULT_DIFF_FILES,

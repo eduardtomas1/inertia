@@ -202,11 +202,25 @@ function processExists(pid: number): boolean {
   }
 }
 
-async function waitForFile(path: string): Promise<void> {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
+function readFixturePid(path: string): number | null {
+  if (!existsSync(path)) return null;
+  const pid = Number.parseInt(readFileSync(path, "utf8"), 10);
+  return Number.isSafeInteger(pid) && pid > 1 ? pid : null;
+}
+
+async function waitForFile(
+  path: string,
+  timeoutMs = 1_000,
+  signal?: AbortSignal,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    signal?.throwIfAborted();
     if (existsSync(path)) return;
-    await delay(10);
+    await delay(10, undefined, { signal });
   }
+  signal?.throwIfAborted();
+  if (existsSync(path)) return;
   throw new Error(`Timed out waiting for ${path}.`);
 }
 
@@ -215,6 +229,7 @@ async function waitForProcessExit(pid: number): Promise<void> {
     if (!processExists(pid)) return;
     await delay(50);
   }
+  if (!processExists(pid)) return;
   throw new Error(`Timed out waiting for test-owned process ${pid} to exit.`);
 }
 
@@ -231,10 +246,7 @@ function useNativeWindowsGuardian(subject: Fixture): void {
   writeFileSync(subject.bundledIntegrity, JSON.stringify({ sha256 }));
 }
 
-function writeLinuxIdentityGuardian(
-  path: string,
-  inodeOffset = 0n,
-): void {
+function writeLinuxIdentityGuardian(path: string, inodeOffset = 0n): void {
   writeFileSync(path, "identity-placeholder", { mode: 0o755 });
   const identity = statSync(path, { bigint: true });
   writeFileSync(
@@ -305,7 +317,12 @@ function writeSyntheticLock(
 
 afterEach(() => {
   for (const root of roots.splice(0)) {
-    rmSync(root, { recursive: true, force: true });
+    rmSync(root, {
+      recursive: true,
+      force: true,
+      maxRetries: 10,
+      retryDelay: 50,
+    });
   }
 });
 
@@ -1285,24 +1302,23 @@ describe.runIf(process.platform === "win32")(
         );
 
         let descendantPid: number | null = null;
+        let descendantSettled = false;
         try {
           const status = await packageAsync(subject, builder, "win32");
-          descendantPid = Number.parseInt(readFileSync(pidFile, "utf8"), 10);
-          expect(Number.isSafeInteger(descendantPid)).toBe(true);
-          expect(descendantPid).toBeGreaterThan(1);
+          const parsedPid = Number.parseInt(readFileSync(pidFile, "utf8"), 10);
+          expect(Number.isSafeInteger(parsedPid)).toBe(true);
+          expect(parsedPid).toBeGreaterThan(1);
+          descendantPid = parsedPid;
           expect(status).not.toBe(0);
           await waitForProcessExit(descendantPid);
+          descendantSettled = true;
           expect(existsSync(watchdogFile)).toBe(false);
           expectCleanBuildState(subject);
         } finally {
           writeFileSync(stopFile, "stop");
-          if (descendantPid !== null && processExists(descendantPid)) {
-            try {
-              await waitForProcessExit(descendantPid);
-            } catch {
-              process.kill(descendantPid, "SIGKILL");
-              await waitForProcessExit(descendantPid);
-            }
+          if (!descendantSettled) {
+            const cleanupPid = descendantPid ?? readFixturePid(pidFile);
+            if (cleanupPid !== null) await waitForProcessExit(cleanupPid);
           }
         }
       },
@@ -1312,40 +1328,124 @@ describe.runIf(process.platform === "win32")(
       const subject = fixture("exit 1");
       useNativeWindowsGuardian(subject);
       const pidFile = join(subject.root, "windows-builder-pids.json");
+      const descendantPidFile = join(
+        subject.root,
+        "windows-builder-descendant.pid",
+      );
+      const rootPidFile = join(subject.root, "windows-builder-root.pid");
+      const stopFile = join(subject.root, "stop-windows-builder-tree");
+      const watchdogFile = join(subject.root, "windows-builder-watchdog");
+      const descendantSource = [
+        'import { existsSync, writeFileSync } from "node:fs";',
+        `const pidFile = ${JSON.stringify(descendantPidFile)};`,
+        `const stopFile = ${JSON.stringify(stopFile)};`,
+        `const watchdogFile = ${JSON.stringify(watchdogFile)};`,
+        "setTimeout(() => { writeFileSync(watchdogFile, 'descendant'); process.exit(124); }, 20_000);",
+        "setInterval(() => { if (existsSync(stopFile)) process.exit(0); }, 10);",
+        "writeFileSync(pidFile, String(process.pid));",
+      ].join("\n");
       const builder = join(subject.root, "fake-electron-builder.mjs");
       writeFileSync(
         builder,
         [
           'import { spawn } from "node:child_process";',
-          'import { writeFileSync } from "node:fs";',
-          'const descendant = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });',
-          `writeFileSync(${JSON.stringify(pidFile)}, JSON.stringify({ root: process.pid, descendant: descendant.pid }));`,
-          "setInterval(() => {}, 1000);",
+          'import { existsSync, readFileSync, writeFileSync } from "node:fs";',
+          `const descendantPidFile = ${JSON.stringify(descendantPidFile)};`,
+          `const rootPidFile = ${JSON.stringify(rootPidFile)};`,
+          `const stopFile = ${JSON.stringify(stopFile)};`,
+          `const watchdogFile = ${JSON.stringify(watchdogFile)};`,
+          "setTimeout(() => { writeFileSync(watchdogFile, 'root'); process.exit(124); }, 20_000);",
+          "setInterval(() => { if (existsSync(stopFile)) process.exit(0); }, 10);",
+          "writeFileSync(rootPidFile, String(process.pid));",
+          `spawn(process.execPath, ["--input-type=module", "-e", ${JSON.stringify(descendantSource)}], { stdio: "ignore" });`,
+          "for (let attempt = 0; attempt < 1000 && !existsSync(descendantPidFile); attempt += 1) await new Promise((resolve) => setTimeout(resolve, 10));",
+          "if (!existsSync(descendantPidFile)) process.exit(123);",
+          "const descendant = Number.parseInt(readFileSync(descendantPidFile, 'utf8'), 10);",
+          "if (!Number.isSafeInteger(descendant) || descendant <= 1) process.exit(122);",
+          `writeFileSync(${JSON.stringify(pidFile)}, JSON.stringify({ root: process.pid, descendant }));`,
         ].join("\n"),
       );
       const wrapper = packageProcess(subject, builder, "win32");
-      await waitForFile(pidFile);
-      const pids = JSON.parse(readFileSync(pidFile, "utf8")) as {
+      if (!Number.isSafeInteger(wrapper.pid) || !wrapper.pid)
+        throw new Error("The package wrapper did not start.");
+      const wrapperCompletion = new Promise<{
+        readonly code?: number | null;
+        readonly error?: Error;
+        readonly signal?: NodeJS.Signals | null;
+      }>((resolveExit) => {
+        wrapper.once("error", (error) => resolveExit({ error }));
+        wrapper.once("exit", (code, signal) => resolveExit({ code, signal }));
+      });
+      let pids: {
         readonly root: number;
         readonly descendant: number;
-      };
-      const systemRoot = process.env.SystemRoot ?? process.env.SYSTEMROOT;
-      if (!systemRoot)
-        throw new Error("The Windows system root is unavailable.");
-      const result = spawnSync(
-        join(systemRoot, "System32", "taskkill.exe"),
-        ["/PID", String(wrapper.pid), "/F"],
-        { encoding: "utf8", windowsHide: true },
-      );
-      expect(result.status, result.stderr).toBe(0);
-      await waitForProcessExit(pids.root);
-      await waitForProcessExit(pids.descendant);
-      const lock = acquireGuardianBuildLock(subject.stateDirectory, {
-        timeoutMs: 1_000,
-      });
-      releaseGuardianBuildLock(lock);
-      expectCleanBuildState(subject);
-    });
+      } | null = null;
+      let treeSettled = false;
+      try {
+        const readinessController = new AbortController();
+        const readiness = waitForFile(
+          pidFile,
+          10_000,
+          readinessController.signal,
+        );
+        try {
+          await Promise.race([
+            readiness,
+            wrapperCompletion.then((result) => {
+              if (result.error) throw result.error;
+              throw new Error(
+                `The package wrapper exited before its builder was ready (${String(result.code ?? result.signal)}).`,
+              );
+            }),
+          ]);
+        } finally {
+          readinessController.abort();
+          await readiness.catch(() => undefined);
+        }
+        const parsedPids = JSON.parse(readFileSync(pidFile, "utf8")) as {
+          readonly root: number;
+          readonly descendant: number;
+        };
+        expect(Number.isSafeInteger(parsedPids.root)).toBe(true);
+        expect(parsedPids.root).toBeGreaterThan(1);
+        expect(Number.isSafeInteger(parsedPids.descendant)).toBe(true);
+        expect(parsedPids.descendant).toBeGreaterThan(1);
+        pids = parsedPids;
+        expect(wrapper.kill("SIGKILL")).toBe(true);
+        const wrapperResult = await wrapperCompletion;
+        if (wrapperResult.error) throw wrapperResult.error;
+        await Promise.all([
+          waitForProcessExit(pids.root),
+          waitForProcessExit(pids.descendant),
+        ]);
+        treeSettled = true;
+        expect(existsSync(watchdogFile)).toBe(false);
+        const lock = acquireGuardianBuildLock(subject.stateDirectory, {
+          timeoutMs: 1_000,
+        });
+        releaseGuardianBuildLock(lock);
+        expectCleanBuildState(subject);
+      } finally {
+        if (wrapper.exitCode === null && wrapper.signalCode === null) {
+          try {
+            wrapper.kill("SIGKILL");
+          } catch {
+            // The retained child handle's completion remains authoritative.
+          }
+        }
+        writeFileSync(stopFile, "stop");
+        if (!treeSettled) {
+          const cleanupPids = pids
+            ? [pids.root, pids.descendant]
+            : [
+                readFixturePid(rootPidFile),
+                readFixturePid(descendantPidFile),
+              ].filter((pid) => pid !== null);
+          await Promise.all(cleanupPids.map((pid) => waitForProcessExit(pid)));
+        }
+        await wrapperCompletion;
+      }
+    }, 30_000);
   },
 );
 
@@ -1385,23 +1485,53 @@ describe("runtime guardian cross-platform publication", () => {
     async () => {
       const subject = fixture(
         [
-          "sleep 1000 &",
+          "(",
+          "  remaining=240",
+          '  while [ "$remaining" -gt 0 ]; do',
+          '    if [ -e "$INERTIA_TEST_GUARDIAN_COMPILER_TRACE.stop" ]; then exit 0; fi',
+          "    remaining=$((remaining - 1))",
+          "    sleep 0.05",
+          "  done",
+          "  printf 'expired' > \"$INERTIA_TEST_GUARDIAN_COMPILER_TRACE.watchdog\"",
+          "  exit 124",
+          ") &",
           "descendant=$!",
           'printf \'%s\' "$descendant" > "$INERTIA_TEST_GUARDIAN_COMPILER_TRACE"',
-          "wait",
+          'wait "$descendant"',
         ].join("\n"),
       );
       const pidFile = join(subject.root, "compiler-descendant-pid");
-      const result = build(subject, {
-        INERTIA_TEST_GUARDIAN_COMPILER_TIMEOUT_MS: "50",
-        INERTIA_TEST_GUARDIAN_COMPILER_TRACE: pidFile,
-      });
-      expect(result.status).not.toBe(0);
-      const descendantPid = Number.parseInt(readFileSync(pidFile, "utf8"), 10);
-      await waitForProcessExit(descendantPid);
-      expectKnownGoodArtifacts(subject);
-      expectCleanBuildState(subject);
+      const stopFile = `${pidFile}.stop`;
+      const watchdogFile = `${pidFile}.watchdog`;
+      let descendantPid: number | null = null;
+      let descendantSettled = false;
+      try {
+        // The timeout must leave enough admission time for the fixture to
+        // publish its descendant PID. Its 12-second watchdog loop still
+        // guarantees this five-second result can only come from cleanup.
+        const result = build(subject, {
+          INERTIA_TEST_GUARDIAN_COMPILER_TIMEOUT_MS: "5000",
+          INERTIA_TEST_GUARDIAN_COMPILER_TRACE: pidFile,
+        });
+        expect(result.status).not.toBe(0);
+        const parsedPid = Number.parseInt(readFileSync(pidFile, "utf8"), 10);
+        expect(Number.isSafeInteger(parsedPid)).toBe(true);
+        expect(parsedPid).toBeGreaterThan(1);
+        descendantPid = parsedPid;
+        await waitForProcessExit(descendantPid);
+        descendantSettled = true;
+        expect(existsSync(watchdogFile)).toBe(false);
+        expectKnownGoodArtifacts(subject);
+        expectCleanBuildState(subject);
+      } finally {
+        writeFileSync(stopFile, "stop");
+        if (!descendantSettled) {
+          const cleanupPid = descendantPid ?? readFixturePid(pidFile);
+          if (cleanupPid !== null) await waitForProcessExit(cleanupPid);
+        }
+      }
     },
+    30_000,
   );
 
   it("restores an entirely absent target set after publication failure", () => {

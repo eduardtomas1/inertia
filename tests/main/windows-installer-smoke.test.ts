@@ -604,6 +604,7 @@ test("pins the minimal fixed builder and gates installed Windows binaries", asyn
     join(repositoryRoot, "scripts", "windows-installer-smoke.mjs"),
     "utf8",
   );
+  const normalizedSource = source.replaceAll(/\r\n?/gu, "\n");
   const boundedRunnerSource = await readFile(
     join(repositoryRoot, "scripts", "bounded-process-tree.mjs"),
     "utf8",
@@ -643,7 +644,7 @@ test("pins the minimal fixed builder and gates installed Windows binaries", asyn
   expect(source).toContain('`_?=${installDirectory}`');
   expect(source).toContain("windowsVerbatimArguments: true");
   expect(source).toContain("await copyFile(");
-  expect(source).toContain("uninstaller,\n      stagedUninstaller,");
+  expect(normalizedSource).toContain("uninstaller,\n      stagedUninstaller,");
   expect(source).toContain('join(temporaryRoot, "staged-uninstaller.exe")');
   expect(source).toContain('join(temporaryRoot, "installed with spaces")');
   expect(source).toContain("constants.COPYFILE_EXCL");

@@ -2,7 +2,6 @@ import { spawn } from "node:child_process";
 import { constants } from "node:fs";
 import {
   access,
-  chmod,
   lstat,
   link,
   open,
@@ -237,6 +236,8 @@ function parseJournal(
     || typeof candidate.originalName !== "string"
     || basename(candidate.originalName) !== candidate.originalName
     || candidate.originalName.length === 0
+    || candidate.originalName === "."
+    || candidate.originalName === ".."
     || candidate.stableName !== stableName
     || !validIdentity(candidate.original)
     || (candidate.phase === "prepared" && !validIdentity(candidate.candidate))
@@ -322,11 +323,15 @@ async function copyVerifiedAppImage(
     | (constants.O_NOFOLLOW ?? 0);
   const source = await open(actualPath, sourceFlags);
   let destination: Awaited<ReturnType<typeof open>> | null = null;
+  let copiedIdentity: FileIdentity | null = null;
   try {
     const sourceMetadata = await source.stat();
     requireOwnedRegularFile(sourceMetadata, "The downloaded AppImage");
     if (!sameFile(sourceMetadata, directMetadata)) {
       throw new Error("The downloaded AppImage changed during validation.");
+    }
+    if (sourceMetadata.size !== directMetadata.size) {
+      throw new Error("The downloaded AppImage changed size during validation.");
     }
     destination = await open(candidatePath, destinationFlags, 0o600);
     const buffer = Buffer.allocUnsafe(COPY_BUFFER_BYTES);
@@ -346,15 +351,21 @@ async function copyVerifiedAppImage(
     if (position !== sourceMetadata.size) {
       throw new Error("The downloaded AppImage changed size during the update copy.");
     }
+    await destination.chmod(0o755);
     await destination.sync();
+    const copiedMetadata = await destination.stat();
+    requireOwnedRegularFile(copiedMetadata, "The AppImage update candidate");
+    if (copiedMetadata.size !== directMetadata.size) {
+      throw new Error("The copied AppImage update has an unexpected size.");
+    }
+    copiedIdentity = identity(copiedMetadata);
   } finally {
     await Promise.allSettled([source.close(), destination?.close() ?? Promise.resolve()]);
   }
-  await chmod(candidatePath, 0o755);
   const candidateMetadata = await lstat(candidatePath);
   requireOwnedRegularFile(candidateMetadata, "The AppImage update candidate");
-  if (candidateMetadata.size !== directMetadata.size) {
-    throw new Error("The copied AppImage update has an unexpected size.");
+  if (!copiedIdentity || !sameIdentity(candidateMetadata, copiedIdentity)) {
+    throw new Error("The AppImage update candidate changed after it was copied.");
   }
   return candidateMetadata;
 }
@@ -528,6 +539,7 @@ export async function installAppImageUpdate(
     original: originalIdentity,
   };
   let candidateIdentity: FileIdentity | null = null;
+  let replacementLaunched = false;
   try {
     await installRecoveryJournal(paths, preparing);
     const candidateMetadata = await copyVerifiedAppImage(
@@ -550,20 +562,37 @@ export async function installAppImageUpdate(
     if (!sameIdentity(currentMetadata, originalIdentity)) {
       throw new Error("The active AppImage changed before the atomic update.");
     }
-    await rename(paths.candidate, paths.stable);
+    const currentCandidate = await lstat(paths.candidate);
+    requireOwnedRegularFile(currentCandidate, "The AppImage update candidate");
+    if (!sameIdentity(currentCandidate, candidateIdentity)) {
+      throw new Error("The AppImage update candidate changed before installation.");
+    }
+    if (paths.original === paths.stable) {
+      await rename(paths.candidate, paths.stable);
+    } else {
+      // link(2) is an atomic no-clobber install. A stable path created after
+      // validation makes the transaction fail closed instead of being replaced.
+      await link(paths.candidate, paths.stable);
+      await unlinkOwnedIdentity(paths.candidate, candidateIdentity);
+    }
     await syncDirectory(paths.directory);
     await (options.launch ?? launchAppImage)(
       paths.stable,
       options.environment ?? process.env,
     );
+    replacementLaunched = true;
+    // Once the stable executable has launched, it is the recovery authority.
+    // Remove the hard-link backup before the versioned original so every
+    // interrupted cleanup still leaves at least one known-good executable.
+    await unlinkOwnedIdentity(paths.backup, originalIdentity);
     if (paths.original !== paths.stable) {
       await unlinkOwnedIdentity(paths.original, originalIdentity);
     }
-    await unlinkOwnedIdentity(paths.backup, originalIdentity);
     await unlinkOwnedRegular(paths.journal);
     await syncDirectory(paths.directory);
     return paths.stable;
   } catch (error) {
+    if (replacementLaunched) return paths.stable;
     try {
       await rollbackTransaction(paths, originalIdentity, candidateIdentity);
     } catch (rollbackError) {

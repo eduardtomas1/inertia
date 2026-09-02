@@ -9,6 +9,7 @@ import {
   realpath,
   rm,
   symlink,
+  unlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -175,6 +176,28 @@ describe.skipIf(process.platform === "win32")("stable AppImage installed identit
     if (name !== "Inertia.AppImage") {
       expect(await missing(join(root, "Inertia.AppImage"))).toBe(true);
     }
+  });
+
+  it("keeps both launchable paths when cleanup is interrupted after the replacement starts", async () => {
+    const root = await temporaryRoot();
+    const active = await appImage(join(root, "Inertia-0.0.46.AppImage"), "known-good");
+    const downloaded = await appImage(join(root, "downloaded.AppImage"), "replacement");
+    const backup = join(root, ".Inertia.AppImage.inertia-update-backup");
+
+    const installed = await installAppImageUpdate({
+      channel: "stable",
+      activePath: active,
+      downloadedPath: downloaded,
+      launch: async (path) => {
+        expect(await readFile(path, "utf8")).toBe("replacement");
+        await unlink(backup);
+        await appImage(backup, "interfering-file");
+      },
+    });
+
+    expect(installed).toBe(join(await realpath(root), "Inertia.AppImage"));
+    expect(await readFile(installed, "utf8")).toBe("replacement");
+    expect(await readFile(active, "utf8")).toBe("known-good");
   });
 
   it("finalizes stable-path recovery after the candidate starts while the versioned original still exists", async () => {

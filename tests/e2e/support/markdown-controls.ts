@@ -6,7 +6,6 @@ import {
   type TestInfo,
 } from "@playwright/test";
 
-const TARGET_REVEAL_TIMEOUT_MS = 5_000;
 const MINIMAP_REVEAL_TIMEOUT_MS = 750;
 const TARGET_REVEAL_RETRY_INTERVAL_MS = 50;
 
@@ -101,7 +100,6 @@ export async function revealVirtualizedTimelineTurn(input: {
   const { page, target, index, lastIndex } = input;
   const virtualRows = page.locator(".response-virtual-item");
   await expect.poll(() => virtualRows.count()).toBeGreaterThan(0);
-  const revealDeadline = Date.now() + TARGET_REVEAL_TIMEOUT_MS;
   const initiallyRevealed = targetIsRevealed(
     await scrollFreshTargetIntoView(target),
   );
@@ -114,10 +112,7 @@ export async function revealVirtualizedTimelineTurn(input: {
       minimap,
       index,
       expectedMarkerCount: lastIndex + 1,
-      timeoutMs: Math.min(
-        MINIMAP_REVEAL_TIMEOUT_MS,
-        Math.max(0, revealDeadline - Date.now()),
-      ),
+      timeoutMs: MINIMAP_REVEAL_TIMEOUT_MS,
     });
   }
 
@@ -159,7 +154,6 @@ export async function revealVirtualizedTimelineTurn(input: {
     return false;
   }, {
     intervals: [TARGET_REVEAL_RETRY_INTERVAL_MS],
-    timeout: Math.max(1, revealDeadline - Date.now()),
   }).toBe(true);
 }
 

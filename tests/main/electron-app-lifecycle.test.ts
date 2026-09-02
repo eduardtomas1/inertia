@@ -68,7 +68,7 @@ describe("Electron E2E application lifecycle", () => {
       runtimeSupervisorShutdownEnvelopeMs("win32") + 500,
     );
     expect(fixtureElectronGracefulTimeoutMs("win32")).toBe(
-      privilegedShutdownEnvelopeMs("win32") + 500,
+      privilegedShutdownEnvelopeMs("win32") + 2_000,
     );
     expect(fixtureElectronGracefulTimeoutMs("win32")).toBeGreaterThan(
       fixtureRuntimeExitTimeoutMs("win32"),

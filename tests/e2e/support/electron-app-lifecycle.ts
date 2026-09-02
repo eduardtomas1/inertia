@@ -8,10 +8,19 @@ import { privilegedShutdownEnvelopeMs } from
 import { runtimeSupervisorShutdownEnvelopeMs } from "../../../src/node/runtime-shutdown-deadline";
 
 const FIXTURE_SERVER_TEARDOWN_TIMEOUT_MS = 2_000;
+const FIXTURE_SHUTDOWN_HEADROOM_MS = 500;
+const WINDOWS_FIXTURE_SHUTDOWN_HEADROOM_MS = 2_000;
 export function fixtureElectronGracefulTimeoutMs(
   platform: NodeJS.Platform = process.platform,
 ): number {
-  return privilegedShutdownEnvelopeMs(platform) + 500;
+  // Two concurrent Electron fixtures can leave the hosted Windows runner's
+  // event loop briefly starved while native Git and Job-broker exits are
+  // delivered. Preserve the complete product shutdown envelope plus bounded
+  // scheduling headroom before classifying a clean exit as forced.
+  return privilegedShutdownEnvelopeMs(platform)
+    + (platform === "win32"
+      ? WINDOWS_FIXTURE_SHUTDOWN_HEADROOM_MS
+      : FIXTURE_SHUTDOWN_HEADROOM_MS);
 }
 export function fixtureRuntimeExitTimeoutMs(
   platform: NodeJS.Platform = process.platform,

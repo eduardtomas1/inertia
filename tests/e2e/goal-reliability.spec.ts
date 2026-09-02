@@ -119,7 +119,9 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
 `;
 
 test("starts a sessionless goal and recovers it after Stop and runtime crash", async () => {
-  test.setTimeout(75_000);
+  // Two Git-protected activations plus runtime recovery need a test budget
+  // that does not preempt either activation's own bounded assertion.
+  test.setTimeout(120_000);
   const app = await createAppFixture({
     name: "goal-reliability",
     initialState: "conversation",
@@ -165,9 +167,12 @@ test("starts a sessionless goal and recovers it after Stop and runtime crash", a
     await expect(page.getByText("/goal Ship the reliable goal flow", {
       exact: true,
     })).toBeVisible();
+    // The first provider start also owns a pre-turn Git artifact capture. Its
+    // subprocess may use the full 30-second deadline; retain 15 seconds for
+    // request delivery, provider output, and renderer projection afterward.
     await expect(page.getByText("First-action goal run is active.", {
       exact: true,
-    })).toBeVisible({ timeout: 15_000 });
+    })).toBeVisible({ timeout: 45_000 });
 
     const tools = await ensureWorkspaceTools(page);
     await selectWorkspaceTool(tools, "Goal");
@@ -178,11 +183,11 @@ test("starts a sessionless goal and recovers it after Stop and runtime crash", a
       .toBeVisible({ timeout: 10_000 });
     await tools.getByRole("button", { name: "Resume goal" }).click();
     // Resume projects the authoritative Starting state before its protective
-    // Git checkpoint. Allow one bounded 30-second local Git operation, while
-    // still requiring the exact provider output before accepting success.
+    // Git checkpoint. Keep the same post-Git delivery, provider, and renderer
+    // headroom while still requiring the exact output before accepting success.
     await expect(page.getByText("Resumed goal run is active.", {
       exact: true,
-    })).toBeVisible({ timeout: 30_000 });
+    })).toBeVisible({ timeout: 45_000 });
     await expect(tools.getByRole("button", { name: "Pause" })).toBeVisible();
 
     const shell = page.locator(".app-shell");

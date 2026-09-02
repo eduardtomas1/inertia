@@ -1,8 +1,11 @@
 import type { DarwinProcessIdentity } from "./runtime-owned-process-darwin.js";
+import type { LinuxGuardianExecutableIdentity } from
+  "./runtime-owned-process-linux.js";
 
 export interface RuntimeOwnedProcessRegistryOptions {
   readonly platform?: NodeJS.Platform;
   readonly darwinGuardianPath?: string;
+  readonly linuxGuardianExecutable?: LinuxGuardianExecutableIdentity;
   readonly readDarwinIdentity?: (pid: number) => DarwinProcessIdentity | null;
   readonly readDarwinGuardianReady?: (pid: number) => DarwinProcessIdentity | null;
   readonly readDarwinIdentityAsync?: (pid: number, abortSignal?: AbortSignal) =>

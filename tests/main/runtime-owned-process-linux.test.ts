@@ -22,6 +22,7 @@ import {
   monitorLinuxGuardianTerminal,
   readLinuxGuardianReadyAsync,
   stopPendingLinuxGuardianAsync,
+  verifyLinuxRuntimeOwnedGuardianSandbox,
 } from "../../src/node/runtime-owned-process-linux";
 
 const linuxIt = process.platform === "linux" ? it : it.skip;
@@ -40,10 +41,20 @@ function exists(pid: number): boolean {
   } catch { return false; }
 }
 
-function compileGuardian(root: string): string {
+function readRecordedPid(marker: string): number | null {
+  if (!existsSync(marker)) return null;
+  const pid = Number(readFileSync(marker, "utf8").trim());
+  if (!Number.isSafeInteger(pid) || pid <= 1) {
+    throw new Error("The guardian test recorded an invalid process id.");
+  }
+  return pid;
+}
+
+function compileGuardian(root: string, extraFlags: readonly string[] = []): string {
   const guardian = join(root, "guardian");
   execFileSync("cc", [
     "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
+    ...extraFlags,
     join(process.cwd(), "native/runtime-process-guardian/linux.c"), "-o", guardian,
   ]);
   return guardian;
@@ -84,6 +95,139 @@ function waitForPtyExit<T>(exited: Promise<T>, timeout = 5_000): Promise<T> {
 }
 
 describe("Linux runtime process guardian", () => {
+  linuxIt("admits watch mode without invoking the seccomp self-test", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-linux-watch-no-selftest-"));
+    roots.push(root);
+    const guardian = compileGuardian(root, [
+      "-DINERTIA_RUNTIME_GUARDIAN_TEST_HANG_SECCOMP_CHILD=1",
+    ]);
+    const executable = statSync(guardian, { bigint: true });
+    const guardianIdentity = {
+      guardianExecutableDevice: String(executable.dev),
+      guardianExecutableInode: String(executable.ino),
+    };
+    const child = spawn(guardian, [
+      "watch", String(process.pid),
+      guardianIdentity.guardianExecutableDevice,
+      guardianIdentity.guardianExecutableInode,
+      "--", "/bin/true",
+    ], { detached: true, stdio: "ignore" });
+    try {
+      const identity = await readLinuxGuardianReadyAsync(
+        child.pid!,
+        guardian,
+        process.pid,
+        undefined,
+        guardianIdentity,
+      );
+      expect(identity).not.toBeNull();
+      await expect(stopPendingLinuxGuardianAsync(
+        child.pid!,
+        guardian,
+        process.pid,
+        undefined,
+        guardianIdentity,
+      )).resolves.toBe(true);
+      await waitForChild(child);
+    } finally {
+      await stopChild(child);
+    }
+  }, 10_000);
+
+  linuxIt("runs the bounded seccomp self-test as an explicit preflight", () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-linux-selftest-")); roots.push(root);
+    const guardian = compileGuardian(root);
+    const executable = statSync(guardian, { bigint: true });
+    expect(verifyLinuxRuntimeOwnedGuardianSandbox(guardian)).toEqual({
+      guardianExecutableDevice: String(executable.dev),
+      guardianExecutableInode: String(executable.ino),
+    });
+  });
+
+  linuxIt("fails the explicit seccomp preflight closed", () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-linux-selftest-fail-")); roots.push(root);
+    const helper = join(root, "guardian");
+    writeFileSync(helper, "#!/bin/sh\nexit 1\n");
+    chmodSync(helper, 0o700);
+    expect(verifyLinuxRuntimeOwnedGuardianSandbox(helper)).toBeNull();
+  });
+
+  linuxIt("hard-kills a timed-out preflight helper", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-linux-selftest-timeout-"));
+    roots.push(root);
+    const marker = join(root, "helper.pid");
+    const helper = join(root, "guardian");
+    writeFileSync(helper, `#!/bin/sh\ntrap '' TERM\necho $$ > ${JSON.stringify(marker)}\nwhile :; do sleep 1; done\n`);
+    chmodSync(helper, 0o700);
+
+    const startedAt = Date.now();
+    expect(verifyLinuxRuntimeOwnedGuardianSandbox(helper)).toBeNull();
+    expect(Date.now() - startedAt).toBeLessThan(4_000);
+    const helperPid = readRecordedPid(marker);
+    if (helperPid !== null) await waitFor(() => !exists(helperPid));
+  }, 6_000);
+
+  linuxIt("kills a hung native self-test child with its timed-out parent", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-linux-selftest-child-"));
+    roots.push(root);
+    const marker = join(root, "child.pid");
+    const guardian = compileGuardian(root, [
+      "-DINERTIA_RUNTIME_GUARDIAN_TEST_HANG_SECCOMP_CHILD=1",
+      `-DINERTIA_RUNTIME_GUARDIAN_TEST_CHILD_PID_FILE=${JSON.stringify(marker)}`,
+    ]);
+
+    const startedAt = Date.now();
+    expect(verifyLinuxRuntimeOwnedGuardianSandbox(guardian)).toBeNull();
+    expect(Date.now() - startedAt).toBeLessThan(4_000);
+    const childPid = readRecordedPid(marker);
+    if (childPid !== null) await waitFor(() => !exists(childPid));
+  }, 6_000);
+
+  linuxIt("rejects a guardian inode swap after successful preflight", () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-linux-selftest-swap-"));
+    roots.push(root);
+    const replacementRoot = join(root, "replacement");
+    mkdirSync(replacementRoot);
+    const guardian = compileGuardian(root);
+    const verified = verifyLinuxRuntimeOwnedGuardianSandbox(guardian);
+    expect(verified).not.toBeNull();
+    const replacement = compileGuardian(replacementRoot);
+    renameSync(replacement, guardian);
+
+    const generation = "19000000-0000-4000-8000-000000000019:1";
+    const boot = "test:20000000-0000-4000-8000-000000000020";
+    expect(() => activateRuntimeOwnedProcessRegistry(root, generation, boot, {
+      platform: "linux",
+      darwinGuardianPath: guardian,
+      linuxGuardianExecutable: verified!,
+    })).toThrow("The verified Linux runtime process guardian changed.");
+  });
+
+  linuxIt("rejects new invocations after an active guardian inode swap", () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-linux-active-swap-"));
+    roots.push(root);
+    const replacementRoot = join(root, "replacement");
+    mkdirSync(replacementRoot);
+    const guardian = compileGuardian(root);
+    const verified = verifyLinuxRuntimeOwnedGuardianSandbox(guardian);
+    expect(verified).not.toBeNull();
+    const generation = "23000000-0000-4000-8000-000000000023:1";
+    const boot = "test:24000000-0000-4000-8000-000000000024";
+    const deactivate = activateRuntimeOwnedProcessRegistry(root, generation, boot, {
+      platform: "linux",
+      darwinGuardianPath: guardian,
+      linuxGuardianExecutable: verified!,
+    });
+    try {
+      const replacement = compileGuardian(replacementRoot);
+      renameSync(replacement, guardian);
+      expect(() => runtimeOwnedProcessInvocation("/bin/true", []))
+        .toThrow("The Linux runtime process guardian is invalid.");
+    } finally {
+      deactivate?.();
+    }
+  });
+
   linuxIt("passes the terminal seccomp self-test in the generated static binary", () => {
     const guardian = join(
       process.cwd(),

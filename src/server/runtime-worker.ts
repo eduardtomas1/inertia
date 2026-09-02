@@ -24,6 +24,10 @@ import {
   activateRuntimeOwnedProcessRegistry,
   awaitRuntimeOwnedProcessCleanupConfirmed,
 } from "../node/runtime-owned-processes.js";
+import {
+  activateAfterRuntimeWorkerStartupPreflight,
+  RuntimeWorkerStartupPreflightError,
+} from "./runtime-worker-startup-preflight.js";
 
 let runtime: RunningRuntime | null = null;
 const databaseRecoveryOperations = new DatabaseRecoveryOperationQueue();
@@ -87,6 +91,7 @@ const agentBrowser = new RuntimeAgentBrowserBrokerClient(post);
 async function finishShutdown(
   activeRuntime: RunningRuntime | null,
   exitCode: number,
+  preRegistryNoRuntime = false,
 ): Promise<void> {
   await completeRuntimeWorkerShutdown({
     runtime: activeRuntime,
@@ -100,6 +105,9 @@ async function finishShutdown(
       agentBrowser.close();
     },
     ownedProcessCleanupConfirmed: awaitRuntimeOwnedProcessCleanupConfirmed,
+    ...(preRegistryNoRuntime
+      ? { noRuntimeCleanupProof: { kind: "pre-registry-no-runtime" as const } }
+      : {}),
     post,
     awaitStoppedAcknowledgement: () => stoppedAcknowledged,
     exit: (code) => process.exit(code),
@@ -592,16 +600,19 @@ parentPort.on("message", (messageEvent) => {
   updatePreparation = null;
   lastReleasedUpdatePreparation = null;
   try {
-    activateRuntimeOwnedProcessRegistry(
-      command.options.dataDirectory,
-      command.options.runtimeGenerationId,
-      command.options.systemBootId,
-      {
-        ...(command.options.runtimeProcessGuardianPath
-          ? { darwinGuardianPath: command.options.runtimeProcessGuardianPath }
-          : {}),
-        onTainted: () => requestRuntimeRestart("owned-process-tainted"),
-      },
+    const guardianPath = command.options.runtimeProcessGuardianPath;
+    activateAfterRuntimeWorkerStartupPreflight(
+      { platform: process.platform, ...(guardianPath ? { guardianPath } : {}) },
+      (linuxGuardianExecutable) => activateRuntimeOwnedProcessRegistry(
+        command.options.dataDirectory,
+        command.options.runtimeGenerationId,
+        command.options.systemBootId,
+        {
+          ...(guardianPath ? { darwinGuardianPath: guardianPath } : {}),
+          ...(linuxGuardianExecutable ? { linuxGuardianExecutable } : {}),
+          onTainted: () => requestRuntimeRestart("owned-process-tainted"),
+        },
+      ),
     );
   } catch (error) {
     starting = false;
@@ -611,6 +622,11 @@ parentPort.on("message", (messageEvent) => {
         ? error.message
         : "Runtime process ownership could not be initialized.",
     });
+    if (error instanceof RuntimeWorkerStartupPreflightError) {
+      stopping = true;
+      void finishShutdown(null, 1, true);
+      return;
+    }
     void shutdown(1);
     return;
   }

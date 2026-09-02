@@ -443,10 +443,30 @@ static int exact_signal_mode(int argc, char **argv) {
   }
   close(pidfd); return 0;
 }
+static int bind_selftest_child_to_parent(pid_t expected_parent) {
+  return prctl(PR_SET_PDEATHSIG, SIGKILL) == 0 && getppid() == expected_parent;
+}
 static int seccomp_selftest(void) {
+  const pid_t selftest_parent = getpid();
   const pid_t allowed = fork();
   if (allowed < 0) return 2;
   if (allowed == 0) {
+    if (!bind_selftest_child_to_parent(selftest_parent)) _exit(3);
+#if defined(INERTIA_RUNTIME_GUARDIAN_TEST_HANG_SECCOMP_CHILD)
+#if defined(INERTIA_RUNTIME_GUARDIAN_TEST_CHILD_PID_FILE)
+    int marker = open(INERTIA_RUNTIME_GUARDIAN_TEST_CHILD_PID_FILE,
+      O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
+    if (marker >= 0) {
+      char value[32]; const int size = snprintf(value, sizeof(value), "%d\n", (int)getpid());
+      if (size > 0) {
+        const ssize_t written = write(marker, value, (size_t)size);
+        if (written != size) { close(marker); _exit(3); }
+      }
+      close(marker);
+    }
+#endif
+    for (;;) pause();
+#endif
     const pid_t pid = getpid(); const pid_t tid = (pid_t)syscall(SYS_gettid);
     unsigned long long start = 0;
     if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)
@@ -462,6 +482,7 @@ static int seccomp_selftest(void) {
   const pid_t denied_fcntl = fork();
   if (denied_fcntl < 0) return 2;
   if (denied_fcntl == 0) {
+    if (!bind_selftest_child_to_parent(selftest_parent)) _exit(3);
     const pid_t pid = getpid(); const pid_t tid = (pid_t)syscall(SYS_gettid);
     if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) || !install_terminal_filter(pid, tid)) _exit(3);
     (void)fcntl(STDIN_FILENO, F_GETFD);
@@ -473,6 +494,7 @@ static int seccomp_selftest(void) {
   const pid_t denied_flag = fork();
   if (denied_flag < 0) return 2;
   if (denied_flag == 0) {
+    if (!bind_selftest_child_to_parent(selftest_parent)) _exit(3);
     const pid_t pid = getpid(); const pid_t tid = (pid_t)syscall(SYS_gettid);
     if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) || !install_terminal_filter(pid, tid)) _exit(3);
     (void)fcntl(STDIN_FILENO, F_SETFD, 0);
@@ -484,6 +506,7 @@ static int seccomp_selftest(void) {
   const pid_t denied_syscall = fork();
   if (denied_syscall < 0) return 2;
   if (denied_syscall == 0) {
+    if (!bind_selftest_child_to_parent(selftest_parent)) _exit(3);
     const pid_t pid = getpid(); const pid_t tid = (pid_t)syscall(SYS_gettid);
     if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) || !install_terminal_filter(pid, tid)) _exit(3);
     (void)syscall(SYS_getuid);
@@ -492,6 +515,12 @@ static int seccomp_selftest(void) {
   status = 0;
   if (waitpid(denied_syscall, &status, 0) != denied_syscall) return 2;
   return WIFSIGNALED(status) && WTERMSIG(status) == SIGSYS ? 0 : 1;
+}
+static int seccomp_selftest_identity_mode(void) {
+  const int result = seccomp_selftest();
+  if (result != 0) return result;
+  char self[32]; snprintf(self, sizeof(self), "%d", (int)getpid());
+  return identity_mode(self);
 }
 static int watch_mode(int argc, char **argv) {
   if (argc < 7 || strcmp(argv[5], "--")) return 64;
@@ -532,7 +561,7 @@ static int watch_mode(int argc, char **argv) {
     execvp(argv[6], &argv[6]); _exit(127);
   }
   struct child preflight_children[MAX_CHILDREN]; int preflight_count = 0;
-  if (seccomp_selftest() != 0 || census(preflight_children, &preflight_count) != 1
+  if (census(preflight_children, &preflight_count) != 1
     || preflight_count != 1 || preflight_children[0].pid != payload
     || !pidfd_signal(preflight_children[0].pidfd, 0)) {
     close_children(preflight_children, preflight_count);
@@ -608,6 +637,9 @@ int main(int argc, char **argv) {
   const struct rlimit no_core = { .rlim_cur = 0, .rlim_max = 0 };
   if (setrlimit(RLIMIT_CORE, &no_core)) return 70;
   if (argc == 2 && !strcmp(argv[1], "seccomp-selftest")) return seccomp_selftest();
+  if (argc == 2 && !strcmp(argv[1], "seccomp-selftest-identity")) {
+    return seccomp_selftest_identity_mode();
+  }
   if (argc == 3 && !strcmp(argv[1], "identity")) return identity_mode(argv[2]);
   if (argc == 3 && !strcmp(argv[1], "ready")) return ready_mode(argv[2]);
   if (argc == 6 && !strcmp(argv[1], "stop-pending")) return stop_pending_mode(argc, argv);

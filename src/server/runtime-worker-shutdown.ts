@@ -10,6 +10,9 @@ interface RuntimeWorkerShutdownOptions {
   exitCode: number;
   closeBrokers: () => void;
   ownedProcessCleanupConfirmed?: () => boolean | Promise<boolean>;
+  noRuntimeCleanupProof?: {
+    readonly kind: "pre-registry-no-runtime";
+  };
   post: (event: RuntimeWorkerEvent) => void;
   awaitStoppedAcknowledgement: () => Promise<void>;
   exit: (code: number) => void;
@@ -79,10 +82,12 @@ export async function completeRuntimeWorkerShutdown(
   options: RuntimeWorkerShutdownOptions,
 ): Promise<void> {
   const deadlineAt = Date.now() + RUNTIME_SHUTDOWN_DEADLINE_MS;
-  // A failed/partial startup has no returned runtime whose full owner set can
-  // be drained. Treat it as unconfirmed even when the visible start promise
-  // rejected before the supervisor observed a child.
-  let shutdownConfirmed = options.runtime !== null;
+  // A failed/partial startup after ownership activation has no returned
+  // runtime whose full owner set can be drained. Only the explicit
+  // pre-registry path can prove that no runtime cleanup is required.
+  const preRegistryNoRuntime = options.runtime === null
+    && options.noRuntimeCleanupProof?.kind === "pre-registry-no-runtime";
+  let shutdownConfirmed = options.runtime !== null || preRegistryNoRuntime;
   let unconfirmedReason: RuntimeShutdownUnconfirmedReason =
     "incomplete-startup";
   try {
@@ -95,7 +100,7 @@ export async function completeRuntimeWorkerShutdown(
       : "runtime-close";
   }
   options.closeBrokers();
-  if (shutdownConfirmed) {
+  if (shutdownConfirmed && !preRegistryNoRuntime) {
     try {
       const confirmation = options.ownedProcessCleanupConfirmed?.() ?? true;
       if (typeof confirmation === "boolean") shutdownConfirmed = confirmation;

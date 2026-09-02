@@ -21,6 +21,9 @@ async function installerSmokeModule() {
       applicationName: string,
       architecture: "arm64" | "x64",
     ) => string[];
+    installedWindowsApplicationName: (
+      releaseChannel: "canary" | "stable",
+    ) => string;
     nsisApplicationArchiveName: (
       sanitizedName: string,
       version: string,
@@ -91,7 +94,10 @@ async function writeFixture(path: string, contents: string | Buffer) {
 }
 
 test("selects the exact stable and Canary Windows installer identities", async () => {
-  const { windowsInstallerAssetName } = await installerSmokeModule();
+  const {
+    installedWindowsApplicationName,
+    windowsInstallerAssetName,
+  } = await installerSmokeModule();
 
   expect(windowsInstallerAssetName("0.0.44", "stable", "x64"))
     .toBe("Inertia.Setup.0.0.44.exe");
@@ -103,6 +109,8 @@ test("selects the exact stable and Canary Windows installer identities", async (
     .toBe("Inertia.Canary.Setup.0.0.44.arm64.exe");
   expect(() => windowsInstallerAssetName("v0.0.44", "stable", "x64"))
     .toThrow("version is invalid");
+  expect(installedWindowsApplicationName("stable")).toBe("Inertia.exe");
+  expect(installedWindowsApplicationName("canary")).toBe("Inertia Canary.exe");
 });
 
 test("selects the exact generated NSIS application archive", async () => {

@@ -4,6 +4,25 @@ The useful changes in each Inertia release, in plain language.
 
 ## Next
 
+### Installed application names stay stable across updates
+
+- Stable production packages keep the installed identity `Inertia` on macOS
+  and Windows and `Inertia.AppImage` on Linux. Canary remains separate as
+  `Inertia Canary` / `Inertia Canary.AppImage`, while development builds stay
+  outside in-app delivery. Public release assets can remain versioned.
+- A first in-app update from a manually downloaded versioned AppImage now
+  migrates to the durable channel filename, and repeated updates preserve it.
+  The Linux handoff validates direct files and realpath containment, copies the
+  verified download into the active directory, swaps only within that
+  directory, retains an inode-bound rollback link, and recovers interrupted
+  transactions from a bounded journal.
+- Focused coverage exercises first migration, unversioned and repeated
+  updates, spaces and directory aliases, hostile symlinks and occupied paths,
+  launch rollback, interrupted recovery, channel isolation, and all three
+  platform identities. Native release-container smoke launches Linux through
+  its installed filename while macOS and Windows retain their exact bundle and
+  executable names.
+
 ## 0.0.46 — 2026-09-01
 
 ### Provider work recovers after ownership uncertainty

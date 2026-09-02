@@ -181,6 +181,15 @@ export function releaseArtifactName(
     : `Inertia-Canary-${version}.AppImage`;
 }
 
+/** Durable installed identity; public release artifact names may remain versioned. */
+export function installedApplicationName(
+  channel: InertiaReleaseChannel,
+  platform: "darwin" | "win32" | "linux",
+): string {
+  const productName = CHANNELS[channel].productName;
+  return platform === "linux" ? `${productName}.AppImage` : productName;
+}
+
 export function releasePageUrl(
   channel: InertiaReleaseChannel,
   version: string,

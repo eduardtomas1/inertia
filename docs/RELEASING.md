@@ -85,6 +85,14 @@ GitHub/browser downloads do not retain an AppImage's executable permission.
 Linux instructions must name the exact architecture-qualified file, verify that
 exact line from `SHA256SUMS.txt`, then use `chmod 0755 ./<exact filename>` before
 launch. Never recommend a wildcard chmod or installing development libraries.
+The public AppImage assets remain architecture-qualified and versioned. The
+first successful in-app update installs Stable as `Inertia.AppImage` and
+Canary as `Inertia Canary.AppImage`; every later update preserves that channel
+identity. The updater copies into the active AppImage's real containing
+directory, uses only same-directory atomic renames, retains an inode-verified
+rollback link until the replacement launches, and journals bounded recovery.
+Symlinked files, escaping or occupied paths, ownership changes, and incomplete
+rollback proof fail closed without cross-directory renames or broad deletion.
 
 For a signed macOS release, configure these GitHub Actions secrets:
 
@@ -157,7 +165,8 @@ AppImage wrapper and its statically linked process guardian in pristine
 identity paths, extract through that wrapper
 without an `unsquashfs` fallback, verify selected native binaries, and run the
 complete smoke twice through the exact AppImage entry point: once through the
-advertised default FUSE mount/AppRun path and once through the explicit
+durable installed filename and advertised default FUSE mount/AppRun path, and
+once through the versioned public asset's explicit
 extract-and-run fallback. These final-container gates do
 not replace the separate checksum, provenance, signature, fuse, update-metadata,
 or unpacked-package checks.

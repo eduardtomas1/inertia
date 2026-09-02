@@ -21,7 +21,13 @@ async function smokeModule() {
       version: string,
       channel: "canary" | "stable",
       architecture: "arm64" | "x64",
-    ) => { appImage: string; dmg: string; zip: string };
+    ) => {
+      appImage: string;
+      dmg: string;
+      installedAppImage: string;
+      productName: string;
+      zip: string;
+    };
     unversionedAppImageDependencies: (dynamicSection: string) => string[];
   };
 }
@@ -30,11 +36,15 @@ describe("final release container smoke", () => {
   it("resolves every stable architecture-qualified final container exactly", async () => {
     const { releaseContainerNames } = await smokeModule();
     expect(releaseContainerNames("0.0.44", "stable", "x64")).toEqual({
+      productName: "Inertia",
+      installedAppImage: "Inertia.AppImage",
       appImage: "Inertia-0.0.44.AppImage",
       dmg: "Inertia-0.0.44.dmg",
       zip: "Inertia-0.0.44-mac.zip",
     });
     expect(releaseContainerNames("0.0.44", "stable", "arm64")).toEqual({
+      productName: "Inertia",
+      installedAppImage: "Inertia.AppImage",
       appImage: "Inertia-0.0.44-arm64.AppImage",
       dmg: "Inertia-0.0.44-arm64.dmg",
       zip: "Inertia-0.0.44-arm64-mac.zip",
@@ -44,11 +54,15 @@ describe("final release container smoke", () => {
   it("resolves every Canary architecture-qualified final container exactly", async () => {
     const { releaseContainerNames } = await smokeModule();
     expect(releaseContainerNames("1.2.3", "canary", "x64")).toEqual({
+      productName: "Inertia Canary",
+      installedAppImage: "Inertia Canary.AppImage",
       appImage: "Inertia-Canary-1.2.3.AppImage",
       dmg: "Inertia-Canary-1.2.3-x64.dmg",
       zip: "Inertia-Canary-1.2.3-x64.zip",
     });
     expect(releaseContainerNames("1.2.3", "canary", "arm64")).toEqual({
+      productName: "Inertia Canary",
+      installedAppImage: "Inertia Canary.AppImage",
       appImage: "Inertia-Canary-1.2.3-arm64.AppImage",
       dmg: "Inertia-Canary-1.2.3-arm64.dmg",
       zip: "Inertia-Canary-1.2.3-arm64.zip",
@@ -211,6 +225,8 @@ describe("final release container smoke", () => {
     expect(source).not.toContain("spawnSync");
     expect(source).toContain('await runContainerCommand(appImage, ["--appimage-version"]');
     expect(source).toContain('await runContainerCommand(appImage, ["--appimage-extract"]');
+    expect(source).toContain("copyFile(appImage, installedAppImage, constants.COPYFILE_EXCL)");
+    expect(source).toContain('runPackageSmoke(repositoryRoot, installedAppImage');
     expect(source).toContain("operationError?.preserveTemporaryRoot === true");
     expect(source).toContain("mountAttempted = true");
     expect(source).toContain("await realpath(requestedExtractionRoot)");

@@ -27,6 +27,7 @@ const budgets = {
   deferredDiscordSettingsJavaScript: 6 * kibibyte,
   deferredCanaryRollbackJavaScript: 4 * kibibyte,
   deferredAppUpdateNoticeJavaScript: 6 * kibibyte,
+  deferredComposerQueueJavaScript: 8 * kibibyte,
   // The terminal owns reload recovery, bounded replay, and provider-resume UI.
   // Keep that optional surface isolated from the workbench and capped here.
   deferredTerminalJavaScript: 25 * kibibyte,
@@ -134,6 +135,9 @@ const deferredCanaryRollbackJavaScript = assetNames.find(
 const deferredAppUpdateNoticeJavaScript = assetNames.find(
   (name) => /^AppUpdateNotice-.*\.js$/u.test(name),
 );
+const deferredComposerQueueJavaScript = assetNames.find(
+  (name) => /^ComposerQueuedActions-.*\.js$/u.test(name),
+);
 const deferredTerminalJavaScript = assetNames.find(
   (name) => /^TerminalPanel-.*\.js$/u.test(name),
 );
@@ -211,6 +215,11 @@ if (!deferredCanaryRollbackJavaScript) {
 if (!deferredAppUpdateNoticeJavaScript) {
   throw new Error(
     "Renderer bundle check could not find the deferred update notice chunk.",
+  );
+}
+if (!deferredComposerQueueJavaScript) {
+  throw new Error(
+    "Renderer bundle check could not find the deferred composer queue chunk.",
   );
 }
 if (!deferredTerminalJavaScript) {
@@ -336,6 +345,9 @@ const deferredCanaryRollbackJavaScriptBytes = await assetBytes(
 const deferredAppUpdateNoticeJavaScriptBytes = await assetBytes(
   `assets/${deferredAppUpdateNoticeJavaScript}`,
 );
+const deferredComposerQueueJavaScriptBytes = await assetBytes(
+  `assets/${deferredComposerQueueJavaScript}`,
+);
 const deferredTerminalJavaScriptBytes = await assetBytes(
   `assets/${deferredTerminalJavaScript}`,
 );
@@ -382,6 +394,7 @@ const coreJavaScriptBytes =
   - deferredDiscordSettingsJavaScriptBytes
   - deferredCanaryRollbackJavaScriptBytes
   - deferredAppUpdateNoticeJavaScriptBytes
+  - deferredComposerQueueJavaScriptBytes
   - deferredTerminalJavaScriptBytes
   - detachedChatJavaScriptBytes
   - preMergeConfidenceJavaScriptBytes
@@ -409,6 +422,7 @@ const measurements = {
   deferredDiscordSettingsJavaScript: deferredDiscordSettingsJavaScriptBytes,
   deferredCanaryRollbackJavaScript: deferredCanaryRollbackJavaScriptBytes,
   deferredAppUpdateNoticeJavaScript: deferredAppUpdateNoticeJavaScriptBytes,
+  deferredComposerQueueJavaScript: deferredComposerQueueJavaScriptBytes,
   deferredTerminalJavaScript: deferredTerminalJavaScriptBytes,
   detachedChatJavaScript: detachedChatJavaScriptBytes,
   preMergeConfidenceJavaScript: preMergeConfidenceJavaScriptBytes,

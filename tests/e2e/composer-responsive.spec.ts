@@ -599,33 +599,24 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     await expect(splitAccessMenu).toBeVisible();
     await expect(splitAccessMenu.getByRole("menuitemradio").first())
       .toBeFocused();
+    await expect(splitDock.locator(".composer-more-submenu")).toHaveCount(0);
     const splitPopoverGeometry = await splitDock.evaluate((element) => {
       const workspace = element.closest<HTMLElement>(".workspace-body");
       const rootMenu = element.querySelector<HTMLElement>(
         "#composer-more-menu",
       );
-      const submenu = element.querySelector<HTMLElement>(
-        ".composer-more-submenu",
-      );
       const workspaceBounds = workspace?.getBoundingClientRect();
       const rootBounds = rootMenu?.getBoundingClientRect();
-      const submenuBounds = submenu?.getBoundingClientRect();
       return {
         workspaceLeft: workspaceBounds?.left ?? Number.POSITIVE_INFINITY,
         workspaceRight: workspaceBounds?.right ?? Number.NEGATIVE_INFINITY,
         rootLeft: rootBounds?.left ?? Number.NEGATIVE_INFINITY,
         rootRight: rootBounds?.right ?? Number.POSITIVE_INFINITY,
-        submenuLeft: submenuBounds?.left ?? Number.NEGATIVE_INFINITY,
-        submenuRight: submenuBounds?.right ?? Number.POSITIVE_INFINITY,
       };
     });
     expect(splitPopoverGeometry.rootLeft)
       .toBeGreaterThanOrEqual(splitPopoverGeometry.workspaceLeft);
     expect(splitPopoverGeometry.rootRight)
-      .toBeLessThanOrEqual(splitPopoverGeometry.workspaceRight);
-    expect(splitPopoverGeometry.submenuLeft)
-      .toBeGreaterThanOrEqual(splitPopoverGeometry.workspaceLeft);
-    expect(splitPopoverGeometry.submenuRight)
       .toBeLessThanOrEqual(splitPopoverGeometry.workspaceRight);
     await capture("composer-controls-more-access-dark-split-1180x720");
     await page.keyboard.press("Escape");

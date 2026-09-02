@@ -5075,7 +5075,10 @@ button.environment-row:focus-visible,
   position: absolute !important;
   bottom: 0 !important;
   width: 280px;
-  max-height: min(560px, calc(100vh - 120px));
+  max-height: min(
+    560px,
+    var(--composer-popover-available-height, calc(100vh - 120px))
+  );
   overflow-y: auto;
 }
 
@@ -5085,6 +5088,12 @@ button.environment-row:focus-visible,
 
 .composer-more-submenu.opens-left {
   right: calc(100% + 8px) !important;
+}
+
+.composer-more-layer[data-popover-vertical="below"]
+  .composer-more-submenu {
+  top: 0 !important;
+  bottom: auto !important;
 }
 
 .composer-more-drilldown-header {
@@ -5608,6 +5617,7 @@ button.environment-row:focus-visible,
   border-radius: 12px;
   background: var(--surface-strong);
   box-shadow: var(--shadow);
+  overscroll-behavior: contain;
 }
 
 .action-popover { left: 0; }

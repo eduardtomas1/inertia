@@ -495,6 +495,8 @@ describe("Windows runtime Job Object containment", () => {
     expect(guardParts.slice(3, 5)).toEqual(["4242", runtimeCreationTimeBits]);
     expect(recoverParts[0]).toBe("RECOVER");
     expect(Buffer.from(recoverParts[2]!, "base64").toString("utf8")).toBe(jobName);
+    expect(Number(recoverParts[3])).toBeGreaterThan(0);
+    expect(Number(recoverParts[3])).toBeLessThanOrEqual(1_000);
     expect(brokerSpawns).toBe(1);
 
     const nativeSource = readFileSync(
@@ -513,6 +515,12 @@ describe("Windows runtime Job Object containment", () => {
     expect(nativeSource).toContain("processId > Int32.MaxValue");
     expect(nativeSource).toContain("public static int ShutdownAll(");
     expect(nativeSource).toContain("private sealed class GuardLease");
+    expect(nativeSource).toContain(
+      "int timeoutMilliseconds,\n    out string diagnostic",
+    );
+    expect(nativeSource).toContain("MANAGED_JOB_DRAIN_TIMEOUT_MS = 2500");
+    expect(nativeSource).toContain("if (!TryActiveProcesses(");
+    expect(nativeSource).toContain("lease.ConfirmRecovery()");
     expect(nativeSource).toContain("GetProcessTimes(");
     expect(nativeSource).toContain("read-process-identity");
     expect(nativeSource).toContain("process-identity-mismatch");
@@ -541,6 +549,10 @@ describe("Windows runtime Job Object containment", () => {
     );
     expect(launchSource).toContain("$beginGuardMethod.Invoke($null, $guardArguments)");
     expect(launchSource).toContain("$recoverMethod.Invoke(");
+    expect(launchSource).toContain("$timeout - ${BROKER_RECOVERY_RESULT_MARGIN_MS}");
+    expect(launchSource).toContain(
+      "$recoverArguments = [Object[]]@($name, $nativeTimeout, $null)",
+    );
     expect(launchSource).toContain("Write-Frame '${EXECUTABLE_LOCK_BYE_MARKER}'");
     expect(launchSource).toContain("throw 'guardian-exit-unconfirmed'");
     expect(launchSource.indexOf(
@@ -795,6 +807,33 @@ describe("Windows runtime Job Object containment", () => {
       // Native exit 22 means OpenJobObject failed for a reason other than
       // ERROR_FILE_NOT_FOUND and must never be projected as an absent job.
     })).resolves.toBe(false);
+  });
+
+  it("logs only structured native diagnostics when exact recovery fails", async () => {
+    const report = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    await disposeWindowsRuntimeJobExecutableLock();
+    await prepareWindowsRuntimeJobExecutableLock(stubAssembly, {
+      spawnLockBroker: () => verifiedExecutableBrokerChild({
+        recoverStatus: "EXIT:21",
+        recoverStderr: "INERTIA_JOB_ERROR stage=drain-job win32=0\nsecret path",
+      }),
+    });
+
+    await expect(recoverWindowsRuntimeJob({
+      kind: "windows-job-v1",
+      name: windowsRuntimeJobName(runtimeGenerationId),
+    }, Date.now() + 1_000, {
+      platform: "win32",
+      assembly: stubAssembly,
+    })).resolves.toBe(false);
+
+    expect(report).toHaveBeenCalledWith(
+      "Windows runtime Job recovery was not confirmed.",
+      "EXIT:21",
+      "INERTIA_JOB_ERROR stage=drain-job win32=0",
+    );
+    expect(report.mock.calls.flat().join(" ")).not.toContain("secret path");
+    report.mockRestore();
   });
 
   it("observes a valid Windows recovery result beyond the native drain bound", async () => {

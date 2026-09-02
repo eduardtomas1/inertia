@@ -30,7 +30,7 @@ import type { ModernDarwinRecoveryAuthorityDescriptor } from
 import {
   createRuntimeProcessRecord,
   drainRuntimeRecordRequests,
-  recoverUnconfirmedRuntimeCleanup,
+  recoverUnconfirmedRuntimeCleanup, shouldRecoverUnconfirmedWindowsTree,
 } from "./runtime-supervisor-process-record.js";
 import { runtimeSupervisorRecoveryWaitMs } from
   "../node/runtime-shutdown-deadline.js";
@@ -942,8 +942,23 @@ export class RuntimeSupervisor {
       else finishRecovery(false);
       return;
     }
-    const continueAfterTermination = (confirmed: boolean): void => {
+    const continueAfterTermination = (confirmed: boolean, exactRecoveryAttempted = false): void => {
       if (this.current !== record) return;
+      if (shouldRecoverUnconfirmedWindowsTree(record, confirmed, exactRecoveryAttempted)) {
+        this.phase = this.desiredRunning ? "restarting" : "stopping";
+        this.emitState(); recoverUnconfirmedRuntimeCleanup({
+          record, systemBootId: this.systemBootId,
+          recoverOwnedProcesses: this.recoverOwnedProcesses,
+          deadlineAt: record.shutdownDeadlineAt ?? Date.now() + this.recoveryWaitMs,
+          isCurrent: () => this.current === record,
+          onSettled: (outcome) => {
+            const recovered = outcome === "recovered";
+            if (recovered) { record.processTreeTerminationConfirmed = true;
+              record.processTreeTerminationSettled = true; this.lastError = null; }
+            continueAfterTermination(recovered, true);
+          },
+        }); return;
+      }
       if (confirmed && record.cleanupConfirmed
         && !this.completeGenerationCleanup(record)) return;
       this.clearShutdownTimers();

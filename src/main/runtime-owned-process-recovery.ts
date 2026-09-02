@@ -269,10 +269,24 @@ export function recoverRuntimeOwnedProcesses(
           })
         : recover(containment, options.deadlineAt));
       if (!recovered) return false;
-      for (const record of records) {
-        if (!journal.release(record.ownershipId)) return false;
+      // RecoverManaged proves the complete named Job Object is empty before it
+      // returns. The dying runtime can still deliver a child `close` callback
+      // and retire the same durable claim while that native proof is in
+      // flight. Read the post-recovery journal and accept a failed release only
+      // when another writer already removed that exact ownership identity.
+      const recoveredRecords = journal.records(runtimeGenerationId);
+      if (!recoveredRecords) return false;
+      for (const record of recoveredRecords) {
+        if (journal.release(record.ownershipId)) continue;
+        const current = journal.records(runtimeGenerationId);
+        if (
+          !current
+          || current.some((candidate) =>
+            candidate.ownershipId === record.ownershipId)
+        ) return false;
       }
-      return true;
+      const remaining = journal.records(runtimeGenerationId);
+      return remaining !== null && remaining.length === 0;
     })();
   }
   if (records.length === 0) return true;

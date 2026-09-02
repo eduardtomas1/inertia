@@ -116,6 +116,8 @@ public static class InertiaRuntimeJob {
   private const Int32 ERROR_FILE_NOT_FOUND = 2;
   private const int JobObjectBasicAccountingInformation = 1;
   private const int JobObjectExtendedLimitInformation = 9;
+  private const int JOB_DRAIN_POLL_MS = 10;
+  private const int MANAGED_JOB_DRAIN_TIMEOUT_MS = 2500;
 
   private sealed class GuardLease : IDisposable {
     private readonly object gate = new object();
@@ -126,6 +128,7 @@ public static class InertiaRuntimeJob {
     private IntPtr job;
     private int resultCode;
     private string diagnostic = "";
+    private bool recoveryConfirmed;
     private bool disposed;
 
     public GuardLease(IntPtr ownedJob, Process ownedProcess) {
@@ -142,8 +145,8 @@ public static class InertiaRuntimeJob {
 
     private void Complete(int code, string detail) {
       lock (gate) {
-        resultCode = code;
-        diagnostic = detail;
+        resultCode = recoveryConfirmed ? 0 : code;
+        diagnostic = recoveryConfirmed ? "" : detail;
       }
       completed.Set();
     }
@@ -167,14 +170,19 @@ public static class InertiaRuntimeJob {
         Complete(15, ErrorLine("terminate-job", Marshal.GetLastWin32Error()));
         return;
       }
-      for (int index = 0; index < 200 && ActiveProcesses(currentJob) != 0; index += 1) {
-        Thread.Sleep(10);
-      }
-      if (ActiveProcesses(currentJob) != 0) {
-        Complete(16, ErrorLine("drain-job", 0));
-        return;
-      }
-      Complete(0, "");
+      string failureStage;
+      int win32Error;
+      int drainResult = DrainTerminatedJob(
+        currentJob,
+        MANAGED_JOB_DRAIN_TIMEOUT_MS,
+        16,
+        out failureStage,
+        out win32Error
+      );
+      Complete(
+        drainResult,
+        drainResult == 0 ? "" : ErrorLine(failureStage, win32Error)
+      );
     }
 
     public bool IsCompleted {
@@ -199,6 +207,10 @@ public static class InertiaRuntimeJob {
           detail = diagnostic;
           return resultCode == 0;
         }
+        if (recoveryConfirmed) {
+          detail = "";
+          return true;
+        }
         if (job == IntPtr.Zero || !TerminateJobObject(job, 137)) {
           detail = ErrorLine("terminate-job", Marshal.GetLastWin32Error());
           return false;
@@ -210,6 +222,15 @@ public static class InertiaRuntimeJob {
 
     public bool WaitForCompletion(int timeoutMilliseconds) {
       return completed.WaitOne(Math.Max(0, timeoutMilliseconds));
+    }
+
+    public void ConfirmRecovery() {
+      lock (gate) {
+        if (disposed) return;
+        recoveryConfirmed = true;
+        resultCode = 0;
+        diagnostic = "";
+      }
     }
 
     public void Dispose() {
@@ -331,19 +352,56 @@ public static class InertiaRuntimeJob {
     }
   }
 
-  private static UInt32 ActiveProcesses(IntPtr job) {
+  private static bool TryActiveProcesses(
+    IntPtr job,
+    out UInt32 activeProcesses,
+    out int win32Error
+  ) {
     int length = Marshal.SizeOf(typeof(JOBOBJECT_BASIC_ACCOUNTING_INFORMATION));
     IntPtr pointer = Marshal.AllocHGlobal(length);
     try {
       if (!QueryInformationJobObject(job, JobObjectBasicAccountingInformation, pointer, (UInt32)length, IntPtr.Zero)) {
-        return UInt32.MaxValue;
+        activeProcesses = 0;
+        win32Error = Marshal.GetLastWin32Error();
+        return false;
       }
-      return ((JOBOBJECT_BASIC_ACCOUNTING_INFORMATION)Marshal.PtrToStructure(
+      activeProcesses = ((JOBOBJECT_BASIC_ACCOUNTING_INFORMATION)Marshal.PtrToStructure(
         pointer,
         typeof(JOBOBJECT_BASIC_ACCOUNTING_INFORMATION)
       )).ActiveProcesses;
+      win32Error = 0;
+      return true;
     } finally {
       Marshal.FreeHGlobal(pointer);
+    }
+  }
+
+  private static int DrainTerminatedJob(
+    IntPtr job,
+    int timeoutMilliseconds,
+    int timeoutCode,
+    out string failureStage,
+    out int win32Error
+  ) {
+    failureStage = "";
+    win32Error = 0;
+    var elapsed = Stopwatch.StartNew();
+    int boundedTimeout = Math.Max(1, timeoutMilliseconds);
+    while (true) {
+      UInt32 activeProcesses;
+      int queryError;
+      if (!TryActiveProcesses(job, out activeProcesses, out queryError)) {
+        failureStage = "query-job";
+        win32Error = queryError;
+        return 29;
+      }
+      if (activeProcesses == 0) return 0;
+      int remaining = boundedTimeout - (Int32)elapsed.ElapsedMilliseconds;
+      if (remaining <= 0) {
+        failureStage = "drain-job";
+        return timeoutCode;
+      }
+      Thread.Sleep(Math.Min(JOB_DRAIN_POLL_MS, remaining));
     }
   }
 
@@ -549,19 +607,46 @@ public static class InertiaRuntimeJob {
     }
   }
 
-  public static int RecoverManaged(string name) {
-    string ignored;
-    if (!PruneCompletedLeases(out ignored)) return 27;
+  public static int RecoverManaged(
+    string name,
+    int timeoutMilliseconds,
+    out string diagnostic
+  ) {
+    diagnostic = "";
     IntPtr job = OpenJobObject(JOB_OBJECT_QUERY | JOB_OBJECT_TERMINATE, false, name);
     if (job == IntPtr.Zero) {
-      return Marshal.GetLastWin32Error() == ERROR_FILE_NOT_FOUND ? 0 : 22;
+      int openError = Marshal.GetLastWin32Error();
+      if (openError == ERROR_FILE_NOT_FOUND) return 0;
+      diagnostic = ErrorLine("open-job", openError);
+      return 22;
     }
     try {
-      if (!TerminateJobObject(job, 137)) return 20;
-      for (int index = 0; index < 200 && ActiveProcesses(job) != 0; index += 1) {
-        Thread.Sleep(10);
+      if (!TerminateJobObject(job, 137)) {
+        diagnostic = ErrorLine("terminate-job", Marshal.GetLastWin32Error());
+        return 20;
       }
-      return ActiveProcesses(job) == 0 ? 0 : 21;
+      string failureStage;
+      int win32Error;
+      int result = DrainTerminatedJob(
+        job,
+        Math.Min(
+          Math.Max(1, timeoutMilliseconds),
+          MANAGED_JOB_DRAIN_TIMEOUT_MS
+        ),
+        21,
+        out failureStage,
+        out win32Error
+      );
+      if (result != 0) {
+        diagnostic = ErrorLine(failureStage, win32Error);
+        return result;
+      }
+      GuardLease lease = null;
+      lock (LeaseGate) {
+        GuardLeases.TryGetValue(name, out lease);
+      }
+      if (lease != null) lease.ConfirmRecovery();
+      return 0;
     } finally {
       CloseHandle(job);
     }
@@ -699,17 +784,30 @@ public static class InertiaRuntimeJob {
           : 0;
         return Failure("wait-process", 14, waitError);
       }
-      UInt32 residualProcesses = ActiveProcesses(job);
-      if (residualProcesses == UInt32.MaxValue) {
-        return Failure("query-job", 29, Marshal.GetLastWin32Error());
+      UInt32 residualProcesses;
+      int queryError;
+      if (!TryActiveProcesses(job, out residualProcesses, out queryError)) {
+        return Failure("query-job", 29, queryError);
       }
       if (!TerminateJobObject(job, 137)) {
         return Failure("terminate-job", 15, Marshal.GetLastWin32Error());
       }
-      for (int index = 0; index < 200 && ActiveProcesses(job) != 0; index += 1) {
-        System.Threading.Thread.Sleep(10);
+      string drainFailureStage;
+      int drainWin32Error;
+      int drainResult = DrainTerminatedJob(
+        job,
+        2000,
+        16,
+        out drainFailureStage,
+        out drainWin32Error
+      );
+      if (drainResult != 0) {
+        return Failure(
+          drainFailureStage,
+          drainResult,
+          drainWin32Error
+        );
       }
-      if (ActiveProcesses(job) != 0) return 16;
       return residualProcesses == 0 ? 0 : 28;
     } finally {
       CloseHandle(job);
@@ -776,10 +874,15 @@ public static class InertiaRuntimeJob {
     }
     try {
       if (!TerminateJobObject(job, 137)) return 20;
-      for (int index = 0; index < 200 && ActiveProcesses(job) != 0; index += 1) {
-        System.Threading.Thread.Sleep(10);
-      }
-      return ActiveProcesses(job) == 0 ? 0 : 21;
+      string failureStage;
+      int win32Error;
+      return DrainTerminatedJob(
+        job,
+        2000,
+        21,
+        out failureStage,
+        out win32Error
+      );
     } finally {
       CloseHandle(job);
     }

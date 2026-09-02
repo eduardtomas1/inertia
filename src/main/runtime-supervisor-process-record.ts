@@ -24,6 +24,20 @@ export function drainRuntimeRecordRequests<
 
 export type RuntimeCleanupRecoveryOutcome = "recovered" | "blocked";
 
+export function shouldRecoverUnconfirmedWindowsTree(
+  record: RuntimeProcessRecord,
+  confirmed: boolean,
+  attempted: boolean,
+  platform = process.platform,
+): boolean {
+  // A persisted named Job is the only Windows authority that proves the
+  // runtime root and every descendant are covered when taskkill loses a race.
+  return !confirmed
+    && !attempted
+    && platform === "win32"
+    && record.durableProcessContainment?.kind === "windows-job-v1";
+}
+
 export function recoverUnconfirmedRuntimeCleanup(options: {
   record: RuntimeProcessRecord;
   recoverOwnedProcesses: NonNullable<RuntimeSupervisorOptions["recoverOwnedProcesses"]>;
@@ -87,6 +101,7 @@ export function createRuntimeProcessRecord(options: {
     acceptingReady: true,
     cleanupConfirmed: false,
     cleanupRecoveryRequired: false,
+    durableProcessContainment: null,
     generationCleanupConfirmed: false,
     processTreeTerminationConfirmed: true,
     processTreeTermination: null,

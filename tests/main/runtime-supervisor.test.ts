@@ -2025,7 +2025,8 @@ describe("RuntimeSupervisor", () => {
 
   it("rejects when a trusted stopped worker cannot be terminated", async () => {
     let resolveForceKill!: (confirmed: boolean) => void;
-    const { children, forceKill, supervisor } = createHarness();
+    const { children, forceKill, supervisor } = createHarness(
+      { recoverOwnedProcesses: () => false });
     forceKill.mockImplementation(() => new Promise<boolean>((resolve) => {
       resolveForceKill = resolve;
     }));
@@ -2087,9 +2088,8 @@ describe("RuntimeSupervisor", () => {
         resolve: vi.fn(async () => trustedAttachment),
         release: vi.fn(async () => true),
       };
-      const { children, forceKill, supervisor } = createHarness({
-        attachmentBroker,
-      });
+      const { children, forceKill, supervisor } = createHarness(
+        { attachmentBroker, recoverOwnedProcesses: () => false });
       forceKill.mockImplementation(() => new Promise<boolean>((resolve) => {
         resolveForceKill = resolve;
       }));
@@ -2386,7 +2386,8 @@ describe("RuntimeSupervisor", () => {
   });
 
   it("reports shutdown as unconfirmed when forced tree termination cannot be verified", async () => {
-    const { children, forceKill, supervisor } = createHarness();
+    const { children, forceKill, supervisor } = createHarness(
+      { recoverOwnedProcesses: () => false });
     forceKill.mockReturnValue(false);
     supervisor.start();
     children[0].spawn();
@@ -2427,9 +2428,8 @@ describe("RuntimeSupervisor", () => {
       resolve: vi.fn(async () => trustedAttachment),
       release: vi.fn(async () => true),
     };
-    const { children, forceKill, supervisor } = createHarness({
-      attachmentBroker,
-    });
+    const { children, forceKill, supervisor } = createHarness(
+      { attachmentBroker, recoverOwnedProcesses: () => false });
     let resolveForceKill!: (confirmed: boolean) => void;
     forceKill.mockImplementation(() =>
       new Promise<boolean>((resolve) => {

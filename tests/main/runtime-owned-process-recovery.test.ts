@@ -884,7 +884,7 @@ describe("cross-platform runtime owned process recovery", () => {
 
   it("recovers an exact Windows Job Object without rebooting", async () => {
     const directory = temporaryDirectory();
-    const { journal } = portableClaim(directory, "win32");
+    const { claim, journal } = portableClaim(directory, "win32");
     const containment = {
       kind: "windows-job-v1" as const,
       name: windowsRuntimeJobName(runtimeGenerationId),
@@ -894,7 +894,7 @@ describe("cross-platform runtime owned process recovery", () => {
       systemBootId,
       containment,
     )).toBe(true);
-    const recoverWindowsJob = vi.fn(async () => true);
+    const recoverWindowsJob = vi.fn(async () => journal.release(claim.ownershipId));
 
     await expect(recoverRuntimeOwnedProcesses(
       directory,

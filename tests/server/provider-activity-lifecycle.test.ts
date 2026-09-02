@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
   AgentApprovalRequest,
@@ -23,6 +23,12 @@ import type {
   ProviderId,
 } from "../../src/server/provider/contracts";
 import { TurnController } from "../../src/server/runtime/turns/turn-controller";
+import { TurnActivityProjection } from
+  "../../src/server/runtime/turns/turn-activity-projection";
+import type {
+  ActiveTurn,
+  TurnControllerHooks,
+} from "../../src/server/runtime/turns/turn-controller-types";
 import { FakeTurnProvider, FakeTurnScheduler } from
   "../support/fake-turn-provider";
 
@@ -143,6 +149,8 @@ async function runtime(providerId: ProviderId = "codex") {
     store,
     provider,
     controller,
+    conversation,
+    turn: queued.turn,
     conversationId: conversation.id,
     turnId: queued.turn.id,
     emitter,
@@ -289,6 +297,95 @@ describe("durable provider activity lifecycle contract", () => {
       expect.objectContaining({ title: "Same label", status: "completed" }),
     ]));
     expect(turnActivities(value)).toHaveLength(2);
+    await finish(value);
+  });
+
+  it("keeps OpenCode prompt facts separate from its working lifecycle", async () => {
+    const value = await runtime("opencode");
+    const promptId = "owned-prompt";
+    const workingId = stableProviderActivityId("opencode-working", promptId);
+
+    value.emitter.activity("turn", "started", "OpenCode is working", {
+      activityId: workingId,
+    });
+    value.emitter.activity(
+      "system",
+      "info",
+      "OpenCode switched to the plan agent",
+      { activityId: promptId },
+    );
+    value.emitter.activity("turn", "started", "OpenCode is working", {
+      activityId: workingId,
+    });
+    value.emitter.activity("turn", "completed", "OpenCode completed work", {
+      activityId: workingId,
+    });
+
+    expect(turnActivities(value)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        title: "OpenCode completed work",
+        status: "completed",
+      }),
+      expect.objectContaining({
+        title: "OpenCode switched to the plan agent",
+        status: "completed",
+      }),
+    ]));
+    expect(turnActivities(value)).toHaveLength(2);
+    await finish(value);
+  });
+
+  it("indexes identified rows once for a high-cardinality anonymous terminal fact", async () => {
+    const value = await runtime();
+    const candidates = Array.from({ length: 512 }, (_, index) => ({
+      id: "identified-" + index,
+      conversationId: value.conversationId,
+      runId: value.turn.runId,
+      turnId: value.turnId,
+      kind: "tool" as const,
+      title: "Concurrent tool",
+      detail: null,
+      status: "running" as const,
+      createdAt: "2030-01-01T00:00:00.000Z",
+    }));
+    const identified = new Map(candidates.map((activity) =>
+      [activity.id, activity]));
+    const values = vi.spyOn(identified, "values");
+    const active = {
+      conversation: value.conversation,
+      turn: value.turn,
+      runningActivities: new Map([["tool", candidates]]),
+      providerActivitiesById: identified,
+      providerActivityDetailChars: 0,
+      providerCommandRuns: new Map(),
+    } as ActiveTurn;
+    const projection = new TurnActivityProjection({
+      store: value.store,
+      hooks: {} as TurnControllerHooks,
+      now: () => "2030-01-01T00:00:01.000Z",
+    });
+
+    const fact = projection.record(
+      active,
+      {
+        providerId: "codex",
+        conversationId: value.conversationId,
+        runId: value.turn.runId,
+        turnId: value.turnId,
+        type: "activity",
+        kind: "tool",
+        phase: "completed",
+        label: "Anonymous terminal fact",
+      },
+      "tool",
+      "completed",
+    );
+
+    expect(fact).toMatchObject({
+      title: "Anonymous terminal fact",
+      status: "completed",
+    });
+    expect(values).toHaveBeenCalledTimes(1);
     await finish(value);
   });
 

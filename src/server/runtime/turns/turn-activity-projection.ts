@@ -57,10 +57,11 @@ export class TurnActivityProjection {
       return activity;
     }
     if (event.phase !== "started" && event.phase !== "info") {
+      const identifiedActivityIds = new Set(
+        [...active.providerActivitiesById.values()].map(({ id }) => id),
+      );
       const legacyCandidateIndexes = candidates.flatMap((candidate, index) =>
-        [...active.providerActivitiesById.values()].some(
-          ({ id }) => id === candidate.id,
-        )
+        identifiedActivityIds.has(candidate.id)
           ? []
           : [index]);
       if (legacyCandidateIndexes.length === 1) {

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import type { Event, OpencodeClient, QuestionInfo } from "@opencode-ai/sdk/v2";
 
+import { stableProviderActivityId } from "./activity-lifecycle";
 import type { AgentHarnessStartOptions } from "./agent-harness";
 import { createAgentHarnessEmitter } from "./agent-harness";
 import { type ProviderRunFailure } from "./contracts";
@@ -81,6 +82,10 @@ export interface OpenCodePromptLifecycle {
 export interface OpenCodeFailureState {
   pending?: ProviderRunFailure;
   terminal?: ProviderRunFailure;
+}
+
+export function openCodeWorkingActivityId(messageId: string): string {
+  return stableProviderActivityId("opencode-working", messageId);
 }
 
 export function openCodeEventRequiresPromptAdmission(event: Event): boolean {
@@ -615,7 +620,7 @@ export function handleOpenCodeEvent(
       promptLifecycle.workingActivityStarted = true;
       emitter.status("running", undefined, "session.status/busy");
       emitter.activity("turn", "started", "OpenCode is working", {
-        activityId: promptLifecycle.messageId,
+        activityId: openCodeWorkingActivityId(promptLifecycle.messageId),
       });
     }
   } else if (event.type === "session.error") {

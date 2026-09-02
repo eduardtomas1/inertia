@@ -311,6 +311,7 @@ const server = http.createServer((req, res) => {
       if (scenario === "next-events") setTimeout(() => {
         sendEvent({ type: "session.next.prompt.admitted", properties: { timestamp: Date.now(), sessionID, messageID: parsed.messageID, prompt: { text: "Continue", files: [] }, delivery: "queue" } });
         sendEvent({ type: "session.status", properties: { sessionID, status: { type: "busy" } } });
+        sendEvent({ type: "session.next.agent.switched", properties: { timestamp: Date.now(), sessionID, messageID: parsed.messageID, agent: "plan" } });
         sendEvent({ type: "session.status", properties: { sessionID, status: { type: "busy" } } });
         sendEvent({ type: "session.next.step.started", properties: { timestamp: Date.now(), sessionID, assistantMessageID: "next-assistant", agent: "review", model: { providerID: "fake", modelID: "model-a" } } });
         sendEvent({ type: "session.next.agent.switched", properties: { timestamp: Date.now(), sessionID, messageID: "next-assistant", agent: "review" } });
@@ -1305,6 +1306,10 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     expect(workingLifecycle.map(({ phase, activityId }) => [phase, activityId])).toEqual([
       ["started", workingActivityId], ["started", workingActivityId], ["completed", workingActivityId],
     ]);
+    const promptSwitch = events.find(({ label }) =>
+      label === "OpenCode switched to the plan agent");
+    expect(promptSwitch?.activityId).toBeTruthy();
+    expect(promptSwitch?.activityId).not.toBe(workingActivityId);
     expect(events).toContainEqual(expect.objectContaining({ type: "reasoning-summary", text: "Checked" }));
     expect(events).toContainEqual(expect.objectContaining({ type: "status", status: "retrying", providerState: "session.status/retry attempt 2" }));
     expect(events).toContainEqual(expect.objectContaining({

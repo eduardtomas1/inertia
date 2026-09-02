@@ -68,7 +68,9 @@ test.afterAll(async () => {
   await app.close();
 });
 
-test("previews, validates, removes, and cleans up secure composer attachments", async ({ browserName: _browserName }, testInfo) => {
+test("previews, validates, removes, and cleans up secure composer attachments", {
+  tag: "@runtime-recovery",
+}, async ({ browserName: _browserName }, testInfo) => {
   // The deliberate macOS crash can consume the complete bounded 20-second
   // recovery path before this long attachment journey performs its final
   // restart assertions. Keep the inner recovery bound authoritative while

@@ -3,7 +3,10 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 
-import { runGit as runBoundedGit } from "./git/runner";
+import {
+  isGitProcessTreeTerminationFailure,
+  runGit as runBoundedGit,
+} from "./git/runner";
 import { GitError } from "./git/types";
 import { hasHead } from "./git/status";
 
@@ -66,6 +69,7 @@ async function runGit(
     });
     return { stdout: result.stdout, stderr: result.stderr };
   } catch (error) {
+    if (isGitProcessTreeTerminationFailure(error)) throw error;
     if (error instanceof GitError) {
       if (error.code === "timeout") {
         throw new CheckpointError("Checkpoint operation timed out.");
@@ -346,7 +350,8 @@ export async function createCheckpoint(
           options.deadlineAt,
         )
       ).stdout.toString("utf8").trim();
-    } catch {
+    } catch (error) {
+      if (isGitProcessTreeTerminationFailure(error)) throw error;
       // Repositories without a first commit are supported. A spent aggregate
       // deadline is caught by the next bounded checkpoint operation.
     }

@@ -238,6 +238,10 @@ jobs:
         if: ${{ !cancelled() && steps.application_bundle.outcome == 'success' && runner.os != 'Linux' }}
         run: npm exec -- playwright test --project=isolated --output=test-results/isolated
 
+      - name: Run destructive runtime-recovery tests sequentially
+        if: ${{ !cancelled() && steps.application_bundle.outcome == 'success' && runner.os != 'Linux' }}
+        run: npm exec -- playwright test --project=runtime-recovery --output=test-results/runtime-recovery
+
       - name: Run display-sensitive Electron end-to-end tests under Xvfb
         if: runner.os == 'Linux'
         run: xvfb-run --auto-servernum npm exec -- playwright test --project=display-sensitive --output=test-results/display-sensitive
@@ -245,6 +249,10 @@ jobs:
       - name: Run isolated Electron end-to-end tests under Xvfb
         if: ${{ !cancelled() && steps.application_bundle.outcome == 'success' && runner.os == 'Linux' }}
         run: xvfb-run --auto-servernum npm exec -- playwright test --project=isolated --output=test-results/isolated
+
+      - name: Run destructive runtime-recovery tests sequentially under Xvfb
+        if: ${{ !cancelled() && steps.application_bundle.outcome == 'success' && runner.os == 'Linux' }}
+        run: xvfb-run --auto-servernum npm exec -- playwright test --project=runtime-recovery --output=test-results/runtime-recovery
 
       - name: Keep provider settings visual evidence
         if: runner.os == 'Linux' && matrix.arch == 'x64'

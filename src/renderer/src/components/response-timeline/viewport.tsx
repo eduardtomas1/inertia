@@ -799,8 +799,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
       removeIntentListeners();
     };
   }, [
-    props.scrollElementRef,
-    props.timelineElementRef,
+    props.scrollElementRef, props.timelineElementRef,
     props.turnAnchorId,
     turnAnchorIndex,
     virtualized,

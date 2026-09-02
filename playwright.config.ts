@@ -26,6 +26,7 @@ const workers =
 
 const testTimeout = 45_000;
 const assertionTimeout = 15_000;
+const runtimeRecoveryTag = /@runtime-recovery/u;
 
 export default defineConfig({
   testDir,
@@ -49,12 +50,21 @@ export default defineConfig({
     {
       name: "isolated",
       testIgnore: displaySensitiveSpecs,
+      grepInvert: runtimeRecoveryTag,
       workers,
       // Only this phase launches concurrent Electron instances. The hosted
       // runners have four cores, so each instance gets proportional deadline
       // headroom without weakening the single-worker geometry phase.
       timeout: testTimeout * workers,
       expect: { timeout: assertionTimeout * workers },
+    },
+    {
+      name: "runtime-recovery",
+      testIgnore: displaySensitiveSpecs,
+      grep: runtimeRecoveryTag,
+      workers: 1,
+      timeout: testTimeout * 2,
+      expect: { timeout: assertionTimeout * 2 },
     },
   ],
 });

@@ -549,15 +549,9 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
       "rich-markdown-light",
       lightCompletedTurn.locator('[data-turn-layer="final-answer"]'),
     );
-    await revealTurn(
-      page.locator(`[data-turn-id="${kimi.turn.id}"]`),
-      kimi.turn.id,
-    );
+    await revealTurn(page.locator(`[data-turn-id="${kimi.turn.id}"]`), kimi.turn.id);
     await captureScenario("settled-history-light-1440x920");
-    await revealTurn(
-      page.locator(`[data-turn-id="${failed.turn.id}"]`),
-      failed.turn.id,
-    );
+    await revealTurn(page.locator(`[data-turn-id="${failed.turn.id}"]`), failed.turn.id);
     await captureScenario("exception-history-light-1440x920");
     const darkSettings = new RuntimeStore(databasePath, workspaceDirectory, { recoverInterruptedRuns: false });
     darkSettings.updateSettings({ theme: "dark" });

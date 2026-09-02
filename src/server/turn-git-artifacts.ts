@@ -18,6 +18,7 @@ import type {
 } from "../shared/contracts";
 import {
   TURN_GIT_ARTIFACT_FINALIZATION_TIMEOUT_MS,
+  TURN_GIT_ARTIFACT_PRE_CAPTURE_TIMEOUT_MS,
 } from "../shared/runtime-command-timeouts";
 import {
   RuntimeStore,
@@ -43,6 +44,8 @@ export interface CaptureTurnGitArtifactInput {
 }
 
 export interface TurnGitArtifactManagerOptions {
+  clockMs?: () => number;
+  preCaptureTimeoutMs?: number;
   finalizationTimeoutMs?: number;
 }
 
@@ -54,8 +57,15 @@ export class TurnGitArtifactError extends Error {
 }
 
 function safeFailure(error: unknown): string {
-  if (error instanceof GitError) return error.message;
+  if (error instanceof GitError) {
+    return error.code === "timeout"
+      ? "Capturing the pre-turn repository state timed out."
+      : error.message;
+  }
   if (error instanceof CheckpointError) {
+    if (error.message === "Checkpoint operation timed out.") {
+      return "Capturing the pre-turn repository state timed out.";
+    }
     return error.message === "not-repository"
       ? "This workspace is not a Git repository."
       : "The repository snapshot could not be captured.";
@@ -101,6 +111,8 @@ function truncatedCaptureReason(input: {
 export class TurnGitArtifactManager {
   readonly #patchDirectory: string;
   readonly #checkpointDirectory: string;
+  readonly #clockMs: () => number;
+  readonly #preCaptureTimeoutMs: number;
   readonly #finalizationTimeoutMs: number;
   readonly #finalizations = new Map<string, Promise<void>>();
 
@@ -112,6 +124,12 @@ export class TurnGitArtifactManager {
   ) {
     this.#patchDirectory = resolve(dataDirectory, "turn-git-artifacts");
     this.#checkpointDirectory = resolve(dataDirectory, "checkpoint-indexes");
+    this.#clockMs = options.clockMs ?? Date.now;
+    this.#preCaptureTimeoutMs = Math.max(
+      1,
+      options.preCaptureTimeoutMs
+        ?? TURN_GIT_ARTIFACT_PRE_CAPTURE_TIMEOUT_MS,
+    );
     this.#finalizationTimeoutMs = Math.max(
       1,
       options.finalizationTimeoutMs
@@ -121,6 +139,7 @@ export class TurnGitArtifactManager {
 
   async captureBefore(input: CaptureTurnGitArtifactInput): Promise<void> {
     if (this.store.turnGitArtifact(input.turn.id)) return;
+    const deadlineAt = this.#clockMs() + this.#preCaptureTimeoutMs;
     const repositoryPath = this.store.conversationPath(input.turn.conversationId);
     let checkpointId = input.checkpointId;
     let beforeRef: string | null = null;
@@ -137,11 +156,14 @@ export class TurnGitArtifactManager {
           repositoryPath,
           this.#checkpointDirectory,
           input.turn.conversationId,
+          { deadlineAt },
         );
         beforeRef = privateCheckpoint.ref;
         checkpointId = null;
       }
-      const state = await captureGitArtifactState(repositoryPath, beforeRef);
+      const state = await captureGitArtifactState(repositoryPath, beforeRef, {
+        deadlineAt,
+      });
       this.store.createTurnGitArtifact({
         turnId: input.turn.id,
         repositoryIdentity: state.repositoryIdentity,

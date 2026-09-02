@@ -535,6 +535,8 @@ test("keeps every ordinary New chat entry point isolated from the viewed chat", 
   expect(rendererErrors).toEqual([]);
 });
 
-test("keeps the window alive and reconnects with a rotated capability after a runtime crash", async () => {
+test("keeps the window alive and reconnects with a rotated capability after a runtime crash", {
+  tag: "@runtime-recovery",
+}, async () => {
   await expectRuntimeCrashRecovery(app, test.info());
 });

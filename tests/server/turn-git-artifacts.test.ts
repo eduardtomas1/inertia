@@ -485,6 +485,77 @@ describe("turn Git artifacts", () => {
     runtime.store.close();
   });
 
+  it("fails a spent aggregate pre-capture deadline closed exactly once", async () => {
+    const runtime = workspace();
+    const turn = beginTurn(
+      runtime.store,
+      runtime.conversationId,
+      "turn-pre-capture-timeout",
+    );
+    const checkpoint = await checkpointFor(
+      runtime.store,
+      runtime.repository,
+      runtime.data,
+      runtime.conversationId,
+      1,
+    );
+    const createArtifact = vi.spyOn(runtime.store, "createTurnGitArtifact");
+    const manager = new TurnGitArtifactManager(
+      runtime.store,
+      runtime.data,
+      () => new Date(),
+      {
+        clockMs: () => 0,
+        preCaptureTimeoutMs: 1,
+      },
+    );
+
+    await manager.captureBefore({ turn, checkpointId: checkpoint.id });
+    await manager.captureBefore({ turn, checkpointId: checkpoint.id });
+
+    expect(createArtifact).toHaveBeenCalledTimes(1);
+    expect(runtime.store.turnGitArtifact(turn.id)).toMatchObject({
+      status: "unavailable",
+      completeness: "unavailable",
+      beforeCheckpointId: checkpoint.id,
+      absenceReason: null,
+      failureReason: "Capturing the pre-turn repository state timed out.",
+    });
+    runtime.store.close();
+  });
+
+  it("does not publish a private checkpoint after its pre-capture deadline", async () => {
+    const runtime = workspace();
+    const turn = beginTurn(
+      runtime.store,
+      runtime.conversationId,
+      "turn-private-checkpoint-timeout",
+    );
+    const manager = new TurnGitArtifactManager(
+      runtime.store,
+      runtime.data,
+      () => new Date(),
+      {
+        clockMs: () => 0,
+        preCaptureTimeoutMs: 1,
+      },
+    );
+
+    await manager.captureBefore({ turn, checkpointId: null });
+
+    expect(runtime.store.turnGitArtifact(turn.id)).toMatchObject({
+      status: "unavailable",
+      completeness: "unavailable",
+      beforeCheckpointId: null,
+      failureReason: "Capturing the pre-turn repository state timed out.",
+    });
+    expect(git(runtime.repository, [
+      "for-each-ref",
+      `refs/inertia/checkpoints/${runtime.conversationId}/`,
+    ])).toBe("");
+    runtime.store.close();
+  });
+
   it("bounds oversized patches and rejects tampered or out-of-artifact reads", async () => {
     const runtime = workspace();
     const turn = beginTurn(runtime.store, runtime.conversationId, "turn-bounded");

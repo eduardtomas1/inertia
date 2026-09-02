@@ -7,7 +7,9 @@ import {
   nativeModelSelection,
 } from "../../src/shared/model-routing";
 import { createAppFixture } from "./support/app-fixture";
-import { installRuntimeRecoveryConsent } from "./support/runtime-crash-safety";
+import {
+  installRuntimeRecoveryConsent,
+} from "./support/runtime-crash-safety";
 import {
   ensureWorkspaceTools,
   selectWorkspaceTool,
@@ -118,7 +120,9 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
 });
 `;
 
-test("starts a sessionless goal and recovers it after Stop and runtime crash", async () => {
+test("starts a sessionless goal and recovers it after Stop and runtime crash", {
+  tag: "@runtime-recovery",
+}, async () => {
   // Two Git-protected activations plus runtime recovery need a test budget
   // that does not preempt either activation's own bounded assertion.
   test.setTimeout(120_000);
@@ -167,9 +171,9 @@ test("starts a sessionless goal and recovers it after Stop and runtime crash", a
     await expect(page.getByText("/goal Ship the reliable goal flow", {
       exact: true,
     })).toBeVisible();
-    // The first provider start also owns a pre-turn Git artifact capture. Its
-    // subprocess may use the full 30-second deadline; retain 15 seconds for
-    // request delivery, provider output, and renderer projection afterward.
+    // The first provider start also owns the bounded pre-turn Git artifact
+    // capture. Retain ample time for its process cleanup, request delivery,
+    // provider output, and renderer projection afterward.
     await expect(page.getByText("First-action goal run is active.", {
       exact: true,
     })).toBeVisible({ timeout: 45_000 });
@@ -216,17 +220,37 @@ test("starts a sessionless goal and recovers it after Stop and runtime crash", a
       // the renderer contract instead: an Electron main-process evaluate is
       // not cancellable, so polling it across a deliberate utility crash can
       // poison the Playwright transport even after a Promise.race times out.
-      await expect.poll(async () => {
-        const [connectionStatus, runtimeGeneration] = await Promise.all([
-          shell.getAttribute("data-connection-status", { timeout: 500 })
-            .catch(() => null),
-          shell.getAttribute("data-runtime-generation", { timeout: 500 })
-            .catch(() => null),
-        ]);
-        return connectionStatus === "online"
-          && runtimeGeneration !== null
-          && runtimeGeneration !== beforeRuntimeGeneration;
-      }, { timeout: 35_000 }).toBe(true);
+      let latestRendererObservation: {
+        connectionStatus: string | null;
+        runtimeGeneration: string | null;
+      } | null = null;
+      try {
+        await expect.poll(async () => {
+          const [connectionStatus, runtimeGeneration] = await Promise.all([
+            shell.getAttribute("data-connection-status", { timeout: 500 })
+              .catch(() => null),
+            shell.getAttribute("data-runtime-generation", { timeout: 500 })
+              .catch(() => null),
+          ]);
+          latestRendererObservation = {
+            connectionStatus,
+            runtimeGeneration,
+          };
+          return connectionStatus === "online"
+            && runtimeGeneration !== null
+            && runtimeGeneration !== beforeRuntimeGeneration;
+        }, { timeout: 35_000 }).toBe(true);
+      } catch (error) {
+        await test.info().attach("goal runtime recovery diagnostic", {
+          body: Buffer.from(JSON.stringify({
+            beforeRuntimeGeneration,
+            latestRendererObservation,
+            rendererErrorCount: app.rendererErrors.length,
+          }, null, 2)),
+          contentType: "application/json",
+        });
+        throw error;
+      }
     } finally {
       await restoreRuntimeRecoveryConsent();
     }

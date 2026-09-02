@@ -56,6 +56,7 @@ import { parseCodexRateLimits } from "../codex-metadata";
 import {
   providerActivityDetailSections,
 } from "../provider/activity-detail";
+import { stableProviderActivityId } from "../provider/activity-lifecycle";
 import type {
   ProviderGoalSnapshot,
   ProviderRunFailure,
@@ -130,6 +131,7 @@ export class CodexAppServerEvents {
   private readonly deltaItems = new Set<string>();
   private readonly reasoningDeltaItems = new Set<string>();
   private readonly itemActivities = new Map<string, CodexItemActivity>();
+  private readonly completedPlanItemIds = new Set<string>();
   private readonly completedTurnIds = new Set<string>();
   private readonly subagentProjection = new Map<
     string,
@@ -204,6 +206,7 @@ export class CodexAppServerEvents {
     this.deltaItems.clear();
     this.reasoningDeltaItems.clear();
     this.itemActivities.clear();
+    this.completedPlanItemIds.clear();
     this.subagents.dispose();
     this.hostTools.settle("cancel");
   }
@@ -688,7 +691,9 @@ export class CodexAppServerEvents {
       this.host.setActiveTurnId(notificationTurnId);
       this.host.setPhase("running");
       this.host.options.onStatus?.("running");
-      this.emitActivity("turn", "started", "Turn started");
+      this.emitActivity("turn", "started", "Turn started", {
+        activityId: stableProviderActivityId("codex-turn", notificationThreadId, notificationTurnId),
+      });
       return;
     }
 
@@ -738,6 +743,7 @@ export class CodexAppServerEvents {
           deltaItems: this.deltaItems,
           reasoningDeltaItems: this.reasoningDeltaItems,
           itemActivities: this.itemActivities,
+          completedPlanItemIds: this.completedPlanItemIds,
           maxTrackedActivities: MAX_CODEX_TRACKED_ITEM_ACTIVITIES,
         },
         method,
@@ -858,9 +864,13 @@ export class CodexAppServerEvents {
     if (method === "item/plan/delta") {
       const itemId = boundedText(params.itemId, 1_000);
       const delta = boundedText(params.delta, 8_000);
-      if (!delta) return;
+      if (!delta || (itemId && this.completedPlanItemIds.has(itemId))) return;
       this.emitActivity("turn", "started", "Plan updated", {
-        ...(itemId ? { activityId: itemId } : {}),
+        ...(itemId
+          ? {
+              activityId: stableProviderActivityId("codex-plan", itemId),
+            }
+          : {}),
         detail: `Progress:\n${delta}`,
       });
       return;
@@ -869,7 +879,7 @@ export class CodexAppServerEvents {
       const diff = boundedText(params.diff, 128_000);
       this.emitActivity(
         "tool",
-        "started",
+        "completed",
         "Patch updated",
         diff ? { detail: `Diff:\n${diff}` } : undefined,
       );
@@ -906,6 +916,9 @@ export class CodexAppServerEvents {
         "turn",
         activityPhase,
         activityLabel,
+        {
+          activityId: stableProviderActivityId("codex-turn", notificationThreadId, notificationTurnId),
+        },
       );
       if (this.host.cancelRequested() || status === "interrupted") {
         this.completeParentTurn("cancelled", null);
@@ -939,6 +952,7 @@ export class CodexAppServerEvents {
       this.deltaItems.clear();
       this.reasoningDeltaItems.clear();
       this.itemActivities.clear();
+      this.completedPlanItemIds.clear();
     }
   }
 

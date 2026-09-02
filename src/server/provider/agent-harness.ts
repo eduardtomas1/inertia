@@ -26,6 +26,7 @@ import type {
   ProviderHarnessLaunchConfiguration,
 } from "./contracts";
 import { sanitizeProviderActivityDetail } from "./activity-detail";
+import { contractActivityPhase } from "./activity-lifecycle";
 
 /** @deprecated Prefer the shared harness identity contract. */
 export type AgentHarnessId = KnownHarnessId;
@@ -344,8 +345,6 @@ export function createAgentHarnessEmitter(
     }
   };
   const base = { providerId, conversationId, runId, turnId };
-  let localActivitySequence = 0;
-  const localActivityIds = new Map<string, string[]>();
   return {
     text: (text, itemId) => emit({
       ...base,
@@ -365,18 +364,11 @@ export function createAgentHarnessEmitter(
         .replace(/\s+/gu, " ")
         .trim()
         .slice(0, 240) || "Activity";
-      const correlationKey = `${kind}\0${safeLabel}`;
-      let activityId = detail.activityId?.replace(/\0/gu, "").trim().slice(0, 1_000);
-      if (!activityId && phase === "started") {
-        activityId = `local:${++localActivitySequence}`;
-        const queued = localActivityIds.get(correlationKey) ?? [];
-        queued.push(activityId);
-        localActivityIds.set(correlationKey, queued);
-      } else if (!activityId && phase !== "info") {
-        const queued = localActivityIds.get(correlationKey);
-        activityId = queued?.shift();
-        if (queued?.length === 0) localActivityIds.delete(correlationKey);
-      }
+      const activityId = detail.activityId
+        ?.replace(/\0/gu, "")
+        .trim()
+        .slice(0, 1_000);
+      const safePhase = contractActivityPhase(phase, activityId);
       const safeDetail = sanitizeProviderActivityDetail(detail.detail, {
         workspaceRoot,
       });
@@ -384,7 +376,7 @@ export function createAgentHarnessEmitter(
         ...base,
         type: "activity",
         kind,
-        phase,
+        phase: safePhase,
         label: safeLabel,
         ...(activityId ? { activityId } : {}),
         ...(safeDetail ? { detail: safeDetail } : {}),

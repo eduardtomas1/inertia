@@ -19,6 +19,7 @@ import type {
   AgentPlanStep,
 } from "./interactions";
 import type { AgentHarnessCallbacks, AgentHarnessEvent } from "./agent-harness";
+import { contractActivityPhase } from "./activity-lifecycle";
 
 function safeCallback(callback: (() => void) | undefined): void {
   if (!callback) return;
@@ -140,14 +141,19 @@ export function createProviderEmitter(
       itemId,
       text,
     }),
-    activity: (kind, phase, label, detail = {}) => event({
-      ...base,
-      type: "activity",
-      kind,
-      phase,
-      label,
-      ...detail,
-    }),
+    activity: (kind, phase, label, detail = {}) => {
+      const { activityId: rawActivityId, ...safeDetail } = detail;
+      const activityId = rawActivityId?.trim() || undefined;
+      event({
+        ...base,
+        type: "activity",
+        kind,
+        phase: contractActivityPhase(phase, activityId),
+        label,
+        ...safeDetail,
+        ...(activityId ? { activityId } : {}),
+      });
+    },
     status: (status, message, providerState) => event({
       ...base,
       type: "status",

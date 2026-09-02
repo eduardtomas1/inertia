@@ -290,6 +290,7 @@ function startOpenCodeRun(
     messageId: `msg_${randomUUID().replaceAll("-", "")}`,
     observed: false,
     activityObserved: false,
+    workingActivityStarted: false,
   };
   const hostTools = createOpenCodeHostTools({
     bridge: options.hostTools,
@@ -847,6 +848,19 @@ function startOpenCodeRun(
     cleanupConfirmed = true,
   ): ProviderRunResult {
     const canonical = openCodeCanonicalResult(emittedParts, eventState);
+    if (promptLifecycle.workingActivityStarted) {
+      emitter.activity(
+        "turn",
+        status === "failed" ? "failed" : "completed",
+        status === "completed"
+          ? "OpenCode completed work"
+          : status === "cancelled"
+            ? "OpenCode stopped work"
+            : "OpenCode work failed",
+        { activityId: promptLifecycle.messageId },
+      );
+      promptLifecycle.workingActivityStarted = false;
+    }
     emitter.status(status, error);
     return {
       providerId: "opencode",

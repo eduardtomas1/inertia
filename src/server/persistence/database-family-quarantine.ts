@@ -9,6 +9,9 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 
+import { FILE_OPEN_NO_FOLLOW } from
+  "../../node/platform-file-open-flags";
+
 const FILE_MODE = 0o600;
 const DATABASE_FAMILY_SUFFIXES = ["", "-wal", "-shm"] as const;
 
@@ -63,7 +66,7 @@ export function quarantineDatabaseFamily(
     for (const move of moves) {
       renameSync(move.source, move.target);
       completed.push(move);
-      const noFollow = "O_NOFOLLOW" in constants ? constants.O_NOFOLLOW : 0;
+      const noFollow = "O_NOFOLLOW" in constants ? FILE_OPEN_NO_FOLLOW : 0;
       const descriptor = openSync(move.target, constants.O_RDONLY | noFollow);
       try {
         const moved = fstatSync(descriptor);

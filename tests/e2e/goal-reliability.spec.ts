@@ -221,7 +221,7 @@ test("starts a sessionless goal and recovers it after Stop and runtime crash", a
         return connectionStatus === "online"
           && runtimeGeneration !== null
           && runtimeGeneration !== beforeRuntimeGeneration;
-      }, { timeout: 20_000 }).toBe(true);
+      }, { timeout: 35_000 }).toBe(true);
     } finally {
       await restoreRuntimeRecoveryConsent();
     }

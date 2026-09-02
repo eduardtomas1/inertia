@@ -13,6 +13,8 @@ import {
   sep,
 } from "node:path";
 
+import { FILE_OPEN_NO_FOLLOW } from
+  "../node/platform-file-open-flags";
 import { secureFilePathSegments } from "../node/secure-file-protocol";
 import { MAX_WORKSPACE_FILE_EDIT_BYTES } from "../shared/contracts/workspace";
 import {
@@ -604,7 +606,7 @@ async function readSecureFile(
   try {
     handle = await open(
       target.absolute,
-      fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0),
+      fsConstants.O_RDONLY | FILE_OPEN_NO_FOLLOW,
     );
     const info = await handle.stat();
     if (!sameIdentity(target.identity, info)) {

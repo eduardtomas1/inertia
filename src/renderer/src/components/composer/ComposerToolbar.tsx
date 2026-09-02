@@ -47,7 +47,7 @@ import {
 } from "./ComposerSettings";
 import { ComposerSendActionsFallback } from "./ComposerSendActionsFallback";
 import type { ComposerMenuController } from "./useComposerMenus";
-import type { PromptPresetCommandRunner } from "./types";
+import type { NewChatProjectPicker, PromptPresetCommandRunner } from "./types";
 import type { AgentTurnStatus } from "../../../../shared/turn-lifecycle";
 import type { PromptStashEntry } from "../../utils/promptStash";
 
@@ -127,6 +127,7 @@ export interface ComposerToolbarProps {
   conversation: Conversation;
   checkoutBranch?: string | null;
   showCheckoutContext: boolean;
+  newChatProjectPicker?: NewChatProjectPicker;
   onUpdateConversation: (
     update: Partial<Pick<
       Conversation,
@@ -200,6 +201,7 @@ export function ComposerToolbar({
   conversation,
   checkoutBranch,
   showCheckoutContext,
+  newChatProjectPicker,
   onUpdateConversation,
   conversationUpdatePending,
   conversationUpdateError,
@@ -522,10 +524,39 @@ export function ComposerToolbar({
           role="group"
           aria-label="Chat checkout context"
         >
-          <span className="composer-checkout-location">
-            <FolderGit2 size={12} aria-hidden="true" />
-            <span>{conversation.worktreePath ? "Isolated worktree" : "Current checkout"}</span>
-          </span>
+          {newChatProjectPicker ? (
+            <label className="composer-project-picker">
+              <span
+                className="composer-project-picker-dot"
+                style={{
+                  "--project-color": newChatProjectPicker.selectedProject.color
+                    ?? "var(--accent)",
+                } as React.CSSProperties}
+                aria-hidden="true"
+              />
+              <span className="composer-project-picker-label">Project</span>
+              <select
+                aria-label="Project"
+                value={newChatProjectPicker.selectedProject.id}
+                disabled={newChatProjectPicker.disabled}
+                onChange={(event) => newChatProjectPicker.onChange(
+                  newChatProjectPicker.projects[event.currentTarget.selectedIndex]!,
+                )}
+              >
+                {newChatProjectPicker.projects.map((project) => (
+                  <option value={project.id} key={project.id}>
+                    {project.name}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown size={11} aria-hidden="true" />
+            </label>
+          ) : (
+            <span className="composer-checkout-location">
+              <FolderGit2 size={12} aria-hidden="true" />
+              <span>{conversation.worktreePath ? "Isolated worktree" : "Current checkout"}</span>
+            </span>
+          )}
           <span
             className="composer-checkout-branch"
             title={visibleCheckoutBranch}

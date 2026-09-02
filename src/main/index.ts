@@ -502,7 +502,7 @@ function registerIpcHandlers(): void {
     return await shell.openPath(directory);
   });
 
-  ipcMain.handle(IPC.copyRuntimeDiagnosticReport, (event, ...args) => {
+  ipcMain.handle(IPC.copyRuntimeDiagnosticReport, async (event, ...args) => {
     assertTrustedIpc(event, args.length);
     const diagnostics = runtimeDiagnostics
       ?? new RuntimeDiagnostics(runtimeDiagnosticsDirectory(app.getPath("userData")));
@@ -514,7 +514,7 @@ function registerIpcHandlers(): void {
       architecture: process.arch,
       runtime: runtimeSupervisor?.snapshot() ?? null,
     });
-    clipboard.writeText(report.text);
+    await clipboard.writeText(report.text);
     diagnostics.record("report.copy");
     return { copied: true, eventCount: report.eventCount };
   });

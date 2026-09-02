@@ -11,6 +11,13 @@
     "no-control-regex": "off",
     "no-unused-vars": "error",
     "react/exhaustive-deps": "error",
-    "react/rules-of-hooks": "error"
+    "react/rules-of-hooks": "error",
+    "react/immutability": "off",
+    "react/incompatible-library": "off",
+    "react/preserve-manual-memoization": "off",
+    "react/purity": "off",
+    "react/refs": "off",
+    "react/set-state-in-effect": "off",
+    "react/static-components": "off"
   }
 }

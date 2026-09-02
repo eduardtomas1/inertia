@@ -8,9 +8,11 @@ import {
   useRef,
   useState,
   type ComponentProps,
+  type CSSProperties,
   type KeyboardEvent,
   type ReactNode,
 } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import clsx from "clsx";
 import {
   AlertCircle,
@@ -21,6 +23,7 @@ import {
   File,
   FileSearch,
   Folder,
+  FolderTree,
   Pencil,
   RefreshCw,
   Search,
@@ -213,62 +216,6 @@ interface FilePreviewViewState {
   view: FilePreviewView;
 }
 
-interface FilePreviewLine {
-  lineNumber: number;
-  text: string;
-}
-
-interface FilePreviewWindow {
-  lines: FilePreviewLine[];
-  totalLines: number;
-}
-
-function filePreviewWindow(
-  content: string,
-  selectedLocation: WorkspaceFileLocation | null,
-): FilePreviewWindow {
-  const boundedLines = content.split("\n", MAX_RENDERED_PREVIEW_LINES + 1);
-  if (boundedLines.length <= MAX_RENDERED_PREVIEW_LINES) {
-    return {
-      lines: boundedLines.map((text, index) => ({
-        lineNumber: index + 1,
-        text,
-      })),
-      totalLines: boundedLines.length,
-    };
-  }
-
-  const firstRenderedLine = selectedLocation
-    ? Math.max(
-        1,
-        selectedLocation.startLine
-          - Math.floor(MAX_RENDERED_PREVIEW_LINES / 2),
-      )
-    : 1;
-  const lastRenderedLine = firstRenderedLine
-    + MAX_RENDERED_PREVIEW_LINES - 1;
-  const lines: FilePreviewLine[] = [];
-  let lineNumber = 1;
-  let lineStart = 0;
-  while (true) {
-    const newline = content.indexOf("\n", lineStart);
-    const lineEnd = newline === -1 ? content.length : newline;
-    if (
-      lineNumber >= firstRenderedLine
-      && lineNumber <= lastRenderedLine
-    ) {
-      lines.push({
-        lineNumber,
-        text: content.slice(lineStart, lineEnd),
-      });
-    }
-    if (newline === -1) break;
-    lineNumber += 1;
-    lineStart = newline + 1;
-  }
-  return { lines, totalLines: lineNumber };
-}
-
 function safeError(error: unknown, fallback: string): string {
   return error instanceof Error && error.message.trim()
     ? error.message
@@ -325,6 +272,7 @@ export function FilesPanel({
   onSaveFile,
   canSaveFile,
 }: FilesPanelProps): React.JSX.Element {
+  const [fileExplorerOpen, setFileExplorerOpen] = useState(true);
   const [directoryPages, setDirectoryPages] = useState(
     () => freshWorkspaceDirectoryPages(entries, entriesTruncated),
   );
@@ -369,9 +317,9 @@ export function FilesPanel({
       : null,
     [preview],
   );
-  const previewWindow = useMemo(
-    () => filePreviewWindow(preview?.content ?? "", selectedLocation),
-    [preview, selectedLocation],
+  const previewLines = useMemo(
+    () => preview?.content.split("\n") ?? [],
+    [preview],
   );
   const markdownPreview = previewLanguage?.id === "markdown";
   const markdownPreviewBlockedReason = markdownPreview && preview
@@ -379,7 +327,7 @@ export function FilesPanel({
       ? "Full file needed."
       : preview.content.length > MAX_RENDERED_MARKDOWN_PREVIEW_CHARACTERS
         ? `Limit: ${MAX_RENDERED_MARKDOWN_PREVIEW_CHARACTERS.toLocaleString("en-US")} characters.`
-        : previewWindow.totalLines > MAX_RENDERED_PREVIEW_LINES
+        : previewLines.length > MAX_RENDERED_PREVIEW_LINES
           ? `Limit: ${MAX_RENDERED_PREVIEW_LINES.toLocaleString("en-US")} lines.`
           : null
     : null;
@@ -400,6 +348,29 @@ export function FilesPanel({
   const renderedMarkdownPreview = markdownPreview
     && markdownPreviewBlockedReason === null
     && requestedPreviewView === "preview";
+  const virtualizedSourcePreview = !renderedMarkdownPreview
+    && previewLines.length > MAX_RENDERED_PREVIEW_LINES;
+  const sourceVirtualizer = useVirtualizer({
+    enabled: virtualizedSourcePreview,
+    count: virtualizedSourcePreview ? previewLines.length : 0,
+    getScrollElement: () => previewCodeRef.current,
+    estimateSize: () => 17,
+    measureElement: (element, entry) => Math.ceil(entry?.borderBoxSize[0]?.blockSize || element.getBoundingClientRect().height || 17),
+    overscan: 24,
+    initialRect: { width: 720, height: 480 },
+    getItemKey: (index) => index,
+  });
+  const renderedPreviewLines = virtualizedSourcePreview
+    ? sourceVirtualizer.getVirtualItems().map((item) => ({
+        lineNumber: item.index + 1,
+        text: previewLines[item.index] ?? "",
+        virtual: item,
+      }))
+    : previewLines.map((text, index) => ({
+        lineNumber: index + 1,
+        text,
+        virtual: null,
+      }));
   const highlightedPreviewLines = useMemo(
     () => preview && previewLanguage && !renderedMarkdownPreview
       ? highlightedSourceLines(preview.content, previewLanguage)
@@ -530,14 +501,22 @@ export function FilesPanel({
     let frame: number | null = null;
     let observer: ResizeObserver | null = null;
     let userMoved = false;
-    const reveal = (moveFocus: boolean): void => {
+    const reveal = (moveFocus: boolean, attempts = 0): void => {
       if (userMoved) return;
+      if (virtualizedSourcePreview) {
+        sourceVirtualizer.scrollToIndex(selectedLocation.startLine - 1, {
+          align: "center",
+        });
+      }
       if (frame !== null) window.cancelAnimationFrame(frame);
       frame = window.requestAnimationFrame(() => {
         frame = null;
         if (userMoved) return;
         const line = previewLineRefs.current.get(selectedLocation.startLine);
-        if (!line) return;
+        if (!line) {
+          if (attempts < 3) reveal(moveFocus, attempts + 1);
+          return;
+        }
         line.scrollIntoView({ block: "center", inline: "nearest" });
         if (moveFocus) line.focus({ preventScroll: true });
       });
@@ -570,7 +549,13 @@ export function FilesPanel({
       previewCode?.removeEventListener("touchstart", stopRecentering);
       previewCode?.removeEventListener("wheel", stopRecentering);
     };
-  }, [previewPath, renderedMarkdownPreview, selectedLocation]);
+  }, [
+    previewPath,
+    renderedMarkdownPreview,
+    selectedLocation,
+    sourceVirtualizer,
+    virtualizedSourcePreview,
+  ]);
 
   useEffect(() => {
     mounted.current = true;
@@ -802,12 +787,17 @@ export function FilesPanel({
   };
 
   useEffect(() => {
+    setFileExplorerOpen(true);
+  }, [conversationId, projectId]);
+
+  useEffect(() => {
     const openEdit = consumeWorkspaceFileOpenEdit(
       projectId,
       conversationId,
       selectedPath,
       preview?.path ?? (previewError ? selectedPath : null),
     );
+    if (openEdit !== undefined) setFileExplorerOpen(false);
     if (
       openEdit
       || (
@@ -871,23 +861,11 @@ export function FilesPanel({
 
   return (
     <section className="files-panel" aria-label="Project files" aria-busy={treeBusy}>
-      <header className="panel-toolbar files-toolbar">
-        <div className="panel-heading">
-          <Folder size={17} aria-hidden="true" />
-          <div className="panel-heading-copy">
-            <h2>Files</h2>
-            <span>{countLabel}</span>
-          </div>
-        </div>
-        {onRefresh && (
-          <IconButton label="Refresh" onClick={onRefresh} disabled={loading}>
-            {loading ? <LoadingMark label="Refreshing" /> : <RefreshCw size={15} />}
-          </IconButton>
-        )}
-      </header>
-
-      <div className="files-layout">
-        <div className="file-search-wrap">
+      <div className={clsx(
+        "files-layout",
+        fileExplorerOpen && "is-explorer-open",
+      )}>
+        <div className="file-search-wrap" hidden={!fileExplorerOpen}>
           <Search size={15} aria-hidden="true" />
           <input
             type="search"
@@ -908,10 +886,18 @@ export function FilesPanel({
               <X size={14} />
             </IconButton>
           )}
+          {onRefresh && (
+            <IconButton label="Refresh" onClick={onRefresh} disabled={loading}>
+              {loading
+                ? <LoadingMark label="Refreshing" />
+                : <RefreshCw size={14} />}
+            </IconButton>
+          )}
         </div>
 
         <div
           className={`${FILE_ENTRY_CLASS}-list`}
+          hidden={!fileExplorerOpen}
           ref={fileListRef}
           role="tree"
           aria-label={searchActive ? "Search results" : "Files"}
@@ -1039,6 +1025,99 @@ export function FilesPanel({
         </div>
 
         <div className={FILE_PREVIEW_CLASS}>
+          <header className={`${FILE_PREVIEW_CLASS}-header`}>
+            <div
+              className={`${FILE_PREVIEW_CLASS}-identity`}
+              title={preview?.path ?? selectedPath ?? "Project files"}
+              role="status"
+              aria-live="polite"
+            >
+              <strong>{preview || selectedPath
+                ? workspacePathName(preview?.path ?? selectedPath ?? "")
+                : "Project files"}</strong>
+              <span>{preview?.path ?? selectedPath ?? countLabel}</span>
+            </div>
+            <div className={`${FILE_PREVIEW_CLASS}-metadata`}>
+              {previewLanguage && (
+                <span
+                  className={FILE_LANGUAGE_CLASS}
+                  data-language-family={previewLanguage.family}
+                  title={`${previewLanguage.label} recognized locally`}
+                >
+                  {previewLanguage.label}
+                </span>
+              )}
+              {selectedLocation && (
+                <span className="file-location">
+                  {workspaceFileLocationLabel(selectedLocation)}
+                </span>
+              )}
+            </div>
+            <div className={`${FILE_PREVIEW_CLASS}-actions`}>
+              {markdownPreview && preview && (
+                <div
+                  className={`${FILE_PREVIEW_CLASS}-view-toggle`}
+                  role="group"
+                  aria-label="Markdown"
+                >
+                  <button
+                    type="button"
+                    aria-pressed={renderedMarkdownPreview}
+                    disabled={markdownPreviewBlockedReason !== null}
+                    title={markdownPreviewBlockedReason ?? "Preview"}
+                    onClick={() => setPreviewViewState({
+                      identity: previewViewIdentity,
+                      view: "preview",
+                    })}
+                  >
+                    <Eye size={11} aria-hidden="true" />
+                    <span>Preview</span>
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={!renderedMarkdownPreview}
+                    title="Source"
+                    onClick={() => setPreviewViewState({
+                      identity: previewViewIdentity,
+                      view: "source",
+                    })}
+                  >
+                    <Code2 size={11} aria-hidden="true" />
+                    <span>Source</span>
+                  </button>
+                </div>
+              )}
+              {preview && onSaveFile && (
+                <IconButton
+                  label={previewEditable
+                    ? `Edit ${preview.path}`
+                    : `${preview.path} is too large to edit`}
+                  disabled={!previewEditable}
+                  onClick={() => setEditingFile(preview)}
+                >
+                  <Pencil size={14} />
+                </IconButton>
+              )}
+              {preview && onOpenFile && (
+                <IconButton
+                  label="Open file"
+                  onClick={() => onOpenFile(preview.path)}
+                >
+                  <ExternalLink size={14} />
+                </IconButton>
+              )}
+              <IconButton
+                label={fileExplorerOpen
+                  ? "Hide file explorer"
+                  : "Show file explorer"}
+                aria-pressed={fileExplorerOpen}
+                className="file-explorer-toggle"
+                onClick={() => setFileExplorerOpen(!fileExplorerOpen)}
+              >
+                <FolderTree size={14} />
+              </IconButton>
+            </div>
+          </header>
           {previewLoading && selectedPath ? (
             <div className={PANEL_LOADING_CLASS} role="status" aria-live="polite">
               <LoadingMark label="Loading" />
@@ -1052,83 +1131,6 @@ export function FilesPanel({
             </div>
           ) : preview ? (
             <>
-              <header className={`${FILE_PREVIEW_CLASS}-header`}>
-                <div
-                  className={`${FILE_PREVIEW_CLASS}-identity`}
-                  title={preview.path}
-                  role="status"
-                  aria-live="polite"
-                >
-                  <strong>{workspacePathName(preview.path)}</strong>
-                  <span>{preview.path}</span>
-                </div>
-                {previewLanguage && (
-                  <span
-                    className={FILE_LANGUAGE_CLASS}
-                    data-language-family={previewLanguage.family}
-                    title={`${previewLanguage.label} recognized locally`}
-                  >
-                    {previewLanguage.label}
-                  </span>
-                )}
-                {selectedLocation && (
-                  <span className="file-location">
-                    {workspaceFileLocationLabel(selectedLocation)}
-                  </span>
-                )}
-                {markdownPreview && (
-                  <div
-                    className={`${FILE_PREVIEW_CLASS}-view-toggle`}
-                    role="group"
-                    aria-label="Markdown"
-                  >
-                    <button
-                      type="button"
-                      aria-pressed={renderedMarkdownPreview}
-                      disabled={markdownPreviewBlockedReason !== null}
-                      title={markdownPreviewBlockedReason ?? "Preview"}
-                      onClick={() => setPreviewViewState({
-                        identity: previewViewIdentity,
-                        view: "preview",
-                      })}
-                    >
-                      <Eye size={11} aria-hidden="true" />
-                      <span>Preview</span>
-                    </button>
-                    <button
-                      type="button"
-                      aria-pressed={!renderedMarkdownPreview}
-                      title="Source"
-                      onClick={() => setPreviewViewState({
-                        identity: previewViewIdentity,
-                        view: "source",
-                      })}
-                    >
-                      <Code2 size={11} aria-hidden="true" />
-                      <span>Source</span>
-                    </button>
-                  </div>
-                )}
-                {onSaveFile && (
-                  <IconButton
-                    label={previewEditable
-                      ? `Edit ${preview.path}`
-                      : `${preview.path} is too large to edit`}
-                    disabled={!previewEditable}
-                    onClick={() => setEditingFile(preview)}
-                  >
-                    <Pencil size={14} />
-                  </IconButton>
-                )}
-                {onOpenFile && (
-                  <IconButton
-                    label="Open file"
-                    onClick={() => onOpenFile(preview.path)}
-                  >
-                    <ExternalLink size={14} />
-                  </IconButton>
-                )}
-              </header>
               {renderedMarkdownPreview ? (
                 <div
                   ref={previewMarkdownRef}
@@ -1160,8 +1162,16 @@ export function FilesPanel({
                 </div>
               ) : (
                 <pre ref={previewCodeRef} className={`${FILE_PREVIEW_CLASS}-code`} tabIndex={0} aria-label={`Contents of ${preview.path}`}>
-                  <code className={highlightedPreviewLines ? "hljs" : undefined}>
-                    {previewWindow.lines.map(({ lineNumber, text }) => {
+                  <code
+                    className={clsx(
+                      highlightedPreviewLines && "hljs",
+                      virtualizedSourcePreview && "is-virtualized",
+                    )}
+                    style={virtualizedSourcePreview
+                      ? { height: `${sourceVirtualizer.getTotalSize()}px` }
+                      : undefined}
+                  >
+                    {renderedPreviewLines.map(({ lineNumber, text, virtual }) => {
                       const referenced = selectedLocation !== null
                         && lineNumber >= selectedLocation.startLine
                         && lineNumber <= selectedLocation.endLine;
@@ -1174,14 +1184,21 @@ export function FilesPanel({
                             referenced && "is-referenced",
                           )}
                           data-source-line={lineNumber}
+                          data-index={virtual?.index}
                           key={lineNumber}
                           ref={(node) => {
                             if (node) previewLineRefs.current.set(lineNumber, node);
                             else previewLineRefs.current.delete(lineNumber);
+                            if (node && virtual) sourceVirtualizer.measureElement(node);
                           }}
                           tabIndex={referenceStart ? -1 : undefined}
                           aria-label={referenceStart && selectedLocation
                             ? `${workspaceFileLocationLabel(selectedLocation)} in ${preview.path}`
+                            : undefined}
+                          style={virtual
+                            ? {
+                                transform: `translateY(${virtual.start}px)`,
+                              } as CSSProperties
                             : undefined}
                         >
                           <span className={`${FILE_PREVIEW_CLASS}-line-number`} aria-hidden="true">{lineNumber}</span>
@@ -1199,11 +1216,6 @@ export function FilesPanel({
                     })}
                   </code>
                 </pre>
-              )}
-              {!renderedMarkdownPreview && previewWindow.lines.length < previewWindow.totalLines && (
-                <p className={`${PANEL_NOTICE_CLASS} ${FILE_PREVIEW_TRUNCATED_CLASS}`}>
-                  Lines {previewWindow.lines[0]?.lineNumber ?? 1}–{previewWindow.lines.at(-1)?.lineNumber ?? 1} / {previewWindow.totalLines}.
-                </p>
               )}
               {markdownPreviewBlockedReason && (
                 <p className={`${PANEL_NOTICE_CLASS} ${FILE_PREVIEW_TRUNCATED_CLASS}`} role="status">

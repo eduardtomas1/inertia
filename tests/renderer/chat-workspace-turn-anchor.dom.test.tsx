@@ -39,12 +39,19 @@ vi.mock("../../src/renderer/src/components/Composer", async () => {
     Composer: memo(function MockComposer({
       onSend,
       running,
+      newChatProjectPicker,
     }: {
       onSend(
         content: string,
         attachments: [],
       ): Promise<TranscriptMessageSendAcceptance | null | void>;
       running: boolean;
+      newChatProjectPicker?: {
+        projects: readonly Project[];
+        selectedProject: Project;
+        disabled: boolean;
+        onChange: (project: Project) => void;
+      };
     }): React.JSX.Element {
       composerRenderCount.value += 1;
       return (
@@ -52,6 +59,22 @@ vi.mock("../../src/renderer/src/components/Composer", async () => {
           <span data-testid="composer-running-state">
             {running ? "running" : "settled"}
           </span>
+          {newChatProjectPicker && (
+            <select
+              aria-label="Project"
+              value={newChatProjectPicker.selectedProject.id}
+              disabled={newChatProjectPicker.disabled}
+              onChange={(event) => newChatProjectPicker.onChange(
+                newChatProjectPicker.projects[event.currentTarget.selectedIndex]!,
+              )}
+            >
+              {newChatProjectPicker.projects.map((candidate) => (
+                <option value={candidate.id} key={candidate.id}>
+                  {candidate.name}
+                </option>
+              ))}
+            </select>
+          )}
           <button
             type="button"
             onClick={() => {
@@ -360,6 +383,61 @@ describe("draft turn anchoring", () => {
       name: `What should we build in ${longName}?`,
       level: 3,
     })).toBeVisible();
+  });
+
+  it("passes project choice into the empty-chat composer", () => {
+    const studioProject: Project = {
+      ...project,
+      id: "22222222-2222-4222-8222-222222222222",
+      name: "Studio",
+      path: "/workspace/studio",
+      normalizedPath: "/workspace/studio",
+      color: "#2d8a64",
+    };
+    const onChange = vi.fn();
+    render(
+      <ChatWorkspace
+        {...workspaceProps(conversation("conversation-global"), async () => null)}
+        newChatProjectPicker={{
+          projects: [project, studioProject],
+          selectedProject: project,
+          disabled: false,
+          onChange,
+        }}
+      />,
+    );
+
+    expect(screen.getByRole("heading", {
+      name: "What should we build today?",
+      level: 3,
+    })).toBeVisible();
+    const picker = screen.getByRole("combobox", { name: "Project" });
+    expect(picker).toHaveValue(project.id);
+    expect(screen.getByRole("option", { name: "Anchor project" })).toBeVisible();
+    expect(screen.getByRole("option", { name: "Studio" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Send materialized draft" }))
+      .toBeVisible();
+
+    fireEvent.change(picker, { target: { value: studioProject.id } });
+
+    expect(onChange).toHaveBeenCalledOnce();
+    expect(onChange).toHaveBeenCalledWith(studioProject);
+  });
+
+  it("locks the in-chat project dropdown during project switching", () => {
+    render(
+      <ChatWorkspace
+        {...workspaceProps(conversation("conversation-switching"), async () => null)}
+        newChatProjectPicker={{
+          projects: [project],
+          selectedProject: project,
+          disabled: true,
+          onChange: vi.fn(),
+        }}
+      />,
+    );
+
+    expect(screen.getByRole("combobox", { name: "Project" })).toBeDisabled();
   });
 
   it("keeps the timeline mounted behind an owner-correct detail-loading boundary", async () => {

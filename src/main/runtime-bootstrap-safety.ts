@@ -197,7 +197,8 @@ export function prepareRuntimeBootstrapSafety(
   const generationLeases = new RuntimeGenerationLeaseJournal(dataDirectory);
   const ownedProcesses = new RuntimeOwnedProcessJournal(dataDirectory);
   const ownedProcessCrashPrefixesRepaired =
-    ownedProcesses.repairSessionCrashPrefixes();
+    generationLeases.isValid()
+    && ownedProcesses.repairSessionCrashPrefixes();
   const unleasedOwnedProcessSessionsRepaired =
     ownedProcessCrashPrefixesRepaired
     && generationLeases.isValid()

@@ -2,13 +2,15 @@ import { expect, type Locator, type Page } from "@playwright/test";
 
 export async function ensureWorkspaceTools(page: Page): Promise<Locator> {
   const panel = page.locator(".workspace-panel");
-  if (!await panel.isVisible().catch(() => false)) {
+  if (!await panel.isVisible({ timeout: 500 }).catch(() => false)) {
     const opener = page.getByRole("button", { name: "Open workspace tools" });
     await expect.poll(async () =>
-      await panel.isVisible().catch(() => false)
-      || await opener.isEnabled().catch(() => false),
+      await panel.isVisible({ timeout: 500 }).catch(() => false)
+      || await opener.isEnabled({ timeout: 500 }).catch(() => false),
     ).toBe(true);
-    if (!await panel.isVisible().catch(() => false)) await opener.click();
+    if (!await panel.isVisible({ timeout: 500 }).catch(() => false)) {
+      await opener.click();
+    }
   }
   await panel.waitFor({ state: "visible" });
   return panel;

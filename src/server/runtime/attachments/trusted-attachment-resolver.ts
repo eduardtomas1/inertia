@@ -12,6 +12,8 @@ import {
   sep,
 } from "node:path";
 
+import { FILE_OPEN_NO_FOLLOW } from
+  "../../../node/platform-file-open-flags.js";
 import {
   MAX_CHAT_ATTACHMENTS,
   MAX_CHAT_ATTACHMENT_BYTES,
@@ -158,7 +160,7 @@ export class TrustedAttachmentResolver {
         || basename(canonicalPath)
           !== `${trusted.id}.${chatAttachmentStorageExtension(trusted.mimeType)}`
       ) throw publicAttachmentError();
-      const noFollow = "O_NOFOLLOW" in constants ? constants.O_NOFOLLOW : 0;
+      const noFollow = "O_NOFOLLOW" in constants ? FILE_OPEN_NO_FOLLOW : 0;
       const nonBlocking =
         "O_NONBLOCK" in constants ? constants.O_NONBLOCK : 0;
       const file = await open(

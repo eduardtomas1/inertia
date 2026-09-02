@@ -67,7 +67,7 @@ test("applies paired color themes and restores them after restart", async ({
     return value;
   }).toBe("ocean");
 
-  await page.getByRole("button", { name: "Go to workspace" }).click();
+  await page.getByRole("button", { name: "Workspace", exact: true }).click();
   const workspaceScreenshot = testInfo.outputPath("workspace-ocean-light.png");
   await page.screenshot({ path: workspaceScreenshot, animations: "disabled" });
   await testInfo.attach("Workspace · Ocean light", {
@@ -80,6 +80,6 @@ test("applies paired color themes and restores them after restart", async ({
   await expect(page.locator("html")).toHaveAttribute("data-color-theme", "ocean");
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await expect(page.getByRole("radio", { name: "Ocean theme" })).toBeChecked();
-  await page.getByRole("button", { name: "Go to workspace" }).click();
+  await page.getByRole("button", { name: "Workspace", exact: true }).click();
   expect(app.rendererErrors).toEqual([]);
 });

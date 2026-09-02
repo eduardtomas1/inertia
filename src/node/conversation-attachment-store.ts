@@ -19,6 +19,10 @@ import {
 } from "node:path";
 
 import {
+  FILE_OPEN_DIRECTORY,
+  FILE_OPEN_NO_FOLLOW,
+} from "./platform-file-open-flags.js";
+import {
   CHAT_ATTACHMENT_MIME_TYPES,
   MAX_CHAT_ATTACHMENTS,
   MAX_CHAT_ATTACHMENT_BYTES,
@@ -212,9 +216,9 @@ async function secureStoreDirectory(
     throw new Error("Conversation attachment storage is not a safe directory.");
   }
   if (process.platform !== "win32") {
-    const noFollow = "O_NOFOLLOW" in constants ? constants.O_NOFOLLOW : 0;
+    const noFollow = "O_NOFOLLOW" in constants ? FILE_OPEN_NO_FOLLOW : 0;
     const directoryOnly = "O_DIRECTORY" in constants
-      ? constants.O_DIRECTORY
+      ? FILE_OPEN_DIRECTORY
       : 0;
     const directory = await open(
       requested,

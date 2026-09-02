@@ -353,7 +353,7 @@ test("previews, validates, removes, and cleans up secure composer attachments", 
   await expect.poll(async () => stat(unsentTempPath).then(() => true, () => false)).toBe(true);
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await expect.poll(async () => stat(unsentTempPath).then(() => true, () => false)).toBe(false);
-  await page.getByRole("button", { name: "Go to workspace" }).click();
+  await page.getByRole("button", { name: "Workspace", exact: true }).click();
 
   const shell = page.locator(".app-shell");
   const beforeRuntimeGeneration = await shell.getAttribute(

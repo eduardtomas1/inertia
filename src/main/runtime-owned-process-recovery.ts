@@ -485,12 +485,16 @@ export function recoverPriorRuntimeGenerations(options: {
   const platform = options.platform ?? process.platform;
   if (!supportedRuntimeOwnedProcessPlatform(platform)) return null;
   options.leases.refresh();
+  if (!options.leases.isValid()) return null;
   const journal = new RuntimeOwnedProcessJournal(options.dataDirectory, {
     platform,
     ...(options.darwinGuardianPath
       ? { darwinGuardianPath: options.darwinGuardianPath }
       : {}),
   });
+  // Startup is the only mutation boundary allowed to repair an interrupted
+  // session fence. Keep direct RuntimeOwnedProcessJournal readers fail-closed.
+  if (!journal.repairSessionCrashPrefixes()) return null;
   const prior = options.leases.all().filter((lease) => (
     lease.systemBootId === options.systemBootId
     || (platform === "linux"

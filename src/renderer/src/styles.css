@@ -6582,10 +6582,21 @@ button.environment-row:focus-visible,
   min-width: 0;
   min-height: 0;
   flex: 1;
+}
+
+.changes-layout {
   grid-template-columns: minmax(145px, 34%) minmax(0, 1fr);
 }
 
-.files-layout { grid-template-rows: 39px minmax(0, 1fr); }
+.files-layout {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.files-layout.is-explorer-open {
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 34%);
+  grid-template-rows: 39px minmax(0, 1fr);
+}
 
 .changes-file-picker { display: none; }
 
@@ -7020,6 +7031,7 @@ button.environment-row:focus-visible,
 }
 
 .changes-diff { container-type: inline-size; }
+.file-preview { container: file-preview / inline-size; }
 
 .diff-code,
 .file-preview-code {
@@ -7037,6 +7049,18 @@ button.environment-row:focus-visible,
 
 .diff-code.wraps .diff-line { min-width: 0; }
 .diff-code.wraps .diff-line-content { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.file-preview-code > code {
+  position: relative;
+  display: block;
+  min-width: 100%;
+  min-height: 100%;
+}
+.file-preview-code > code.is-virtualized .file-preview-line {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+}
 .diff-line, .file-preview-line { display: grid; min-width: max-content; grid-template-columns: 34px minmax(0, 1fr); }
 .diff-line-number, .file-preview-line-number { padding-right: 8px; color: var(--text-muted); background: var(--surface); text-align: right; user-select: none; }
 .diff-line-content, .file-preview-line > span:last-child { padding: 0 10px; white-space: pre; }
@@ -7179,14 +7203,16 @@ button.environment-row:focus-visible,
   align-items: center;
   gap: 7px;
   padding: 0 8px 0 12px;
-  border-right: 1px solid var(--border);
+  border-left: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
   color: var(--text-muted);
 }
 
-.files-layout .file-search-wrap { grid-column: 1; grid-row: 1; }
-.files-layout .file-entry-list { grid-column: 1; grid-row: 2; }
-.files-layout .file-preview { grid-column: 2; grid-row: 1 / span 2; }
+.files-layout .file-preview { grid-column: 1; grid-row: 1 / -1; }
+.files-layout .file-search-wrap { grid-column: 2; grid-row: 1; }
+.files-layout .file-entry-list { grid-column: 2; grid-row: 2; }
+.file-search-wrap[hidden],
+.file-entry-list[hidden] { display: none; }
 
 .file-search-wrap input { min-width: 0; flex: 1; border: 0; outline: 0; background: transparent; font-size: 9px; }
 .file-search-wrap .icon-button { width: 25px; height: 25px; }
@@ -7195,6 +7221,10 @@ button.environment-row:focus-visible,
   color: var(--text-soft);
 }
 .file-entry-list[role="tree"] { position: relative; }
+.files-layout.is-explorer-open .file-entry-list {
+  border-right: 0;
+  border-left: 1px solid var(--border);
+}
 .file-tree-row-group { min-width: 0; }
 .file-entry-list[role="tree"] .file-entry {
   min-height: 34px;
@@ -7251,10 +7281,25 @@ button.environment-row:focus-visible,
   bottom: 0;
   z-index: 1;
 }
-.file-preview-header { display: flex; min-height: 39px; align-items: center; justify-content: space-between; gap: 6px 8px; padding: 5px 10px; border-bottom: 1px solid var(--border); }
+.file-preview-header { display: flex; min-width: 0; min-height: 39px; align-items: center; gap: 6px; padding: 5px 8px 5px 10px; border-bottom: 1px solid var(--border); }
+.file-explorer-toggle[aria-pressed="true"] {
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+}
 .file-preview-identity { display: flex; min-width: 0; flex: 1 1 120px; flex-direction: column; gap: 1px; }
 .file-preview-header strong { font-size: 9px; }
 .file-preview-header span { overflow: hidden; color: var(--text-muted); font-size: 7.5px; text-overflow: ellipsis; white-space: nowrap; }
+.file-preview-metadata,
+.file-preview-actions {
+  display: flex;
+  min-width: 0;
+  flex: 0 0 auto;
+  align-items: center;
+}
+.file-preview-metadata { gap: 5px; }
+.file-preview-actions { gap: 1px; margin-left: auto; }
+.file-preview-actions > .icon-button { width: 27px; height: 27px; }
+.file-preview-metadata .file-location { max-width: 92px; }
 .file-preview-view-toggle {
   display: flex;
   min-width: max-content;
@@ -7367,6 +7412,25 @@ button.environment-row:focus-visible,
 }
 .file-location { color: var(--accent-strong) !important; }
 
+@container file-preview (max-width: 370px) {
+  .file-preview-header { gap: 4px; padding-inline: 8px 6px; }
+  .file-preview-identity > span { display: none; }
+  .file-preview-metadata .file-location { max-width: 72px; }
+  .file-preview-actions { gap: 0; }
+  .file-preview-actions > .icon-button { width: 25px; height: 25px; }
+  .file-preview-view-toggle button {
+    width: 25px;
+    min-height: 23px;
+    justify-content: center;
+    padding: 0;
+  }
+  .file-preview-view-toggle button span { display: none; }
+}
+
+@container file-preview (max-width: 275px) {
+  .file-preview-metadata { display: none; }
+}
+
 [data-language-family] { --file-language-accent: var(--text-muted); }
 [data-language-family="java"] { --file-language-accent: var(--language-java); }
 [data-language-family="web"] { --file-language-accent: var(--syntax-function); }
@@ -7376,7 +7440,7 @@ button.environment-row:focus-visible,
 [data-language-family="markup"] { --file-language-accent: var(--syntax-number); }
 
 @container (max-width: 440px) {
-  .files-layout {
+  .files-layout.is-explorer-open {
     display: flex;
     flex-direction: column;
   }
@@ -7387,10 +7451,16 @@ button.environment-row:focus-visible,
   .file-entry-list {
     min-height: 96px;
     flex: 0 1 42%;
+    order: 3;
+    border-left: 0;
     border-right: 0;
     border-bottom: 1px solid var(--border);
   }
-  .file-preview { flex: 1 1 58%; }
+  .file-search-wrap {
+    order: 2;
+    border-left: 0;
+  }
+  .file-preview { flex: 1 1 58%; order: 1; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -10859,19 +10929,7 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
   }
 }
 
-.timeline-minimap button[aria-current="true"]::before {
-  --timeline-marker-progress: 0.55;
-  background: var(--text-soft);
-  opacity: 0.75;
-}
-
 /* Let the hovered or keyboard-focused prompt lead a restrained line swell. */
-.timeline-minimap:has(button[data-emphasized="true"])
-  button[aria-current="true"]:not([data-emphasized="true"])::before {
-  background: var(--text-muted);
-  opacity: 0.4;
-}
-
 .timeline-minimap button[data-emphasized="true"] + button + button + button,
 .timeline-minimap button:has(+ button + button + button[data-emphasized="true"]) {
   --timeline-marker-progress: 0.2;
@@ -12783,14 +12841,6 @@ button.sent-attachment-open:focus-visible {
 
 .response-markdown a:hover {
   text-decoration-color: currentColor;
-}
-
-.response-markdown a.response-project-file-link {
-  text-decoration-color: color-mix(
-    in srgb,
-    var(--file-language-accent, var(--accent)) 58%,
-    transparent
-  );
 }
 
 .response-markdown a svg {

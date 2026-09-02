@@ -205,6 +205,10 @@ Access mode is a real safety boundary. Supervised keeps the selected provider's 
 
 ### Get started
 
+Building the current source for macOS requires macOS 13 or later. The release
+table below describes the immutable version it links rather than retroactively
+changing older package requirements.
+
 Download the build for your platform, add a project, then open **Settings → Providers**. Inertia checks Codex, Claude, Cursor, Kimi Code, and OpenCode locally and shows the exact Install, Connect, or Refresh action each route needs. Authentication stays in the provider's own official flow.
 
 You only need one ready provider to begin. If none is available yet, projects, files, Git review, and terminals still work; agent runs remain disabled with a route-specific explanation instead of failing after you send a message.

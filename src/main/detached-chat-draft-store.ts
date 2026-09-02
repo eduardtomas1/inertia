@@ -12,6 +12,8 @@ import {
 } from "node:fs";
 import { basename, join } from "node:path";
 
+import { FILE_OPEN_DIRECTORY } from
+  "../node/platform-file-open-flags.js";
 import {
   parseDetachedChatDraftAcknowledgement,
   parseDetachedChatDraftHandoff,
@@ -197,7 +199,7 @@ export function detachedChatDraftRecoveryPaths(
 function syncDirectory(path: string): void {
   try {
     const directoryOnly = "O_DIRECTORY" in constants
-      ? constants.O_DIRECTORY
+      ? FILE_OPEN_DIRECTORY
       : 0;
     const descriptor = openSync(path, constants.O_RDONLY | directoryOnly);
     try {

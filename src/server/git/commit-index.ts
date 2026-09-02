@@ -7,6 +7,8 @@ import {
 } from "node:fs";
 import { open } from "node:fs/promises";
 
+import { FILE_OPEN_NO_FOLLOW } from
+  "../../node/platform-file-open-flags";
 import { runGit } from "./runner";
 import { GitError } from "./types";
 
@@ -44,7 +46,7 @@ export function readIndexSync(path: string): Buffer {
   try {
     descriptor = openSync(
       path,
-      fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0),
+      fsConstants.O_RDONLY | FILE_OPEN_NO_FOLLOW,
     );
   } catch (error) {
     if (

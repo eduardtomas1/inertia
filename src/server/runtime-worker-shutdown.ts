@@ -1,4 +1,6 @@
 import type { RuntimeWorkerEvent } from "../node/runtime-process-protocol.js";
+import type { RuntimeShutdownUnconfirmedReason } from
+  "../node/runtime-process-protocol.js";
 import type { RunningRuntime } from "./index.js";
 import { RUNTIME_SHUTDOWN_DEADLINE_MS } from "./runtime-shutdown.js";
 
@@ -81,10 +83,16 @@ export async function completeRuntimeWorkerShutdown(
   // be drained. Treat it as unconfirmed even when the visible start promise
   // rejected before the supervisor observed a child.
   let shutdownConfirmed = options.runtime !== null;
+  let unconfirmedReason: RuntimeShutdownUnconfirmedReason =
+    "incomplete-startup";
   try {
     await options.runtime?.close(options.cause);
-  } catch {
+  } catch (error) {
     shutdownConfirmed = false;
+    unconfirmedReason = error instanceof Error
+      && /shutdown deadline|before its shutdown deadline/iu.test(error.message)
+      ? "runtime-close-deadline"
+      : "runtime-close";
   }
   options.closeBrokers();
   if (shutdownConfirmed) {
@@ -95,12 +103,17 @@ export async function completeRuntimeWorkerShutdown(
         confirmation,
         deadlineAt,
       );
+      if (!shutdownConfirmed) unconfirmedReason = "owned-process-cleanup";
     } catch {
       shutdownConfirmed = false;
+      unconfirmedReason = "owned-process-cleanup";
     }
   }
   if (!shutdownConfirmed) {
-    options.post({ type: "runtime.shutdown-unconfirmed" });
+    options.post({
+      type: "runtime.shutdown-unconfirmed",
+      reason: unconfirmedReason,
+    });
     return;
   }
   options.post({ type: "runtime.stopped" });

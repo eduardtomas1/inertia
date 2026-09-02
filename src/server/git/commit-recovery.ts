@@ -4,6 +4,8 @@ import { lstat, open } from "node:fs/promises";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
+import { FILE_OPEN_NO_FOLLOW } from
+  "../../node/platform-file-open-flags";
 import {
   runGitInspection,
   withPreparedGitRefReservation,
@@ -85,7 +87,7 @@ async function readOptionalRegularFile(path: string): Promise<Buffer | null> {
   try {
     handle = await open(
       path,
-      fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0),
+      fsConstants.O_RDONLY | FILE_OPEN_NO_FOLLOW,
     );
   } catch (error) {
     if (

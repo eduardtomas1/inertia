@@ -73,9 +73,9 @@ describe("runtime worker shutdown", () => {
 
         expect(RUNTIME_SHUTDOWN_DEADLINE_MS).toBe(12_750);
         expect(post).toHaveBeenCalledWith({ type: "runtime.stopped" });
-        expect(post).not.toHaveBeenCalledWith({
+        expect(post).not.toHaveBeenCalledWith(expect.objectContaining({
           type: "runtime.shutdown-unconfirmed",
-        });
+        }));
         expect(exit).toHaveBeenCalledWith(0);
       } finally {
         vi.useRealTimers();
@@ -132,6 +132,7 @@ describe("runtime worker shutdown", () => {
     expect(closeBrokers).toHaveBeenCalledOnce();
     expect(post).toHaveBeenCalledWith({
       type: "runtime.shutdown-unconfirmed",
+      reason: "runtime-close",
     });
     expect(post).not.toHaveBeenCalledWith({ type: "runtime.stopped" });
     expect(exit).not.toHaveBeenCalled();
@@ -152,7 +153,10 @@ describe("runtime worker shutdown", () => {
       exit,
     });
 
-    expect(post).toHaveBeenCalledWith({ type: "runtime.shutdown-unconfirmed" });
+    expect(post).toHaveBeenCalledWith({
+      type: "runtime.shutdown-unconfirmed",
+      reason: "owned-process-cleanup",
+    });
     expect(post).not.toHaveBeenCalledWith({ type: "runtime.stopped" });
     expect(exit).not.toHaveBeenCalled();
   });
@@ -199,9 +203,9 @@ describe("runtime worker shutdown", () => {
       await vi.advanceTimersByTimeAsync(RUNTIME_SHUTDOWN_DEADLINE_MS);
       await shutdown;
       expect(post).toHaveBeenCalledWith({ type: "runtime.stopped" });
-      expect(post).not.toHaveBeenCalledWith({
+      expect(post).not.toHaveBeenCalledWith(expect.objectContaining({
         type: "runtime.shutdown-unconfirmed",
-      });
+      }));
       expect(exit).toHaveBeenCalledWith(0);
     } finally {
       vi.useRealTimers();
@@ -230,6 +234,7 @@ describe("runtime worker shutdown", () => {
       await shutdown;
       expect(post).toHaveBeenCalledWith({
         type: "runtime.shutdown-unconfirmed",
+        reason: "owned-process-cleanup",
       });
       expect(post).not.toHaveBeenCalledWith({ type: "runtime.stopped" });
       expect(exit).not.toHaveBeenCalled();
@@ -258,6 +263,7 @@ describe("runtime worker shutdown", () => {
       await shutdown;
       expect(post).toHaveBeenCalledWith({
         type: "runtime.shutdown-unconfirmed",
+        reason: "owned-process-cleanup",
       });
       expect(exit).not.toHaveBeenCalled();
     } finally {
@@ -293,6 +299,7 @@ describe("runtime worker shutdown", () => {
       await shutdown;
       expect(post).toHaveBeenCalledWith({
         type: "runtime.shutdown-unconfirmed",
+        reason: "runtime-close-deadline",
       });
       expect(post).not.toHaveBeenCalledWith({ type: "runtime.stopped" });
       expect(exit).not.toHaveBeenCalled();

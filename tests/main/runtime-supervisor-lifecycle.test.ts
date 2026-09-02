@@ -6,6 +6,8 @@ import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { RuntimeSupervisor } from "../../src/main/runtime-supervisor";
+import { runtimeSupervisorDefaults } from
+  "../../src/main/runtime-supervisor-values";
 import { RuntimeGenerationLeaseJournal } from "../../src/node/runtime-generation-leases";
 import { RuntimeOwnedProcessJournal } from "../../src/node/runtime-owned-processes";
 import type { RuntimeOwnedProcessContainment } from
@@ -96,6 +98,20 @@ afterEach(() => {
 });
 
 describe("RuntimeSupervisor lifecycle", () => {
+  it("keeps recovery startup alive through the bounded Intel headroom", async () => {
+    expect(runtimeSupervisorDefaults.startupTimeoutMs).toBe(30_000);
+    const { children, forceKill, supervisor } = createHarness({
+      startupTimeoutMs: runtimeSupervisorDefaults.startupTimeoutMs,
+    });
+    supervisor.start();
+    children[0].spawn();
+
+    await vi.advanceTimersByTimeAsync(25_000);
+    expect(forceKill).not.toHaveBeenCalled();
+    children[0].message({ type: "runtime.ready", websocketUrl: runtimeUrl });
+    expect(supervisor.snapshot()).toMatchObject({ phase: "ready" });
+  });
+
   it("recovers exact owned claims after an unconfirmed close before restarting", async () => {
     const recoverOwnedProcesses = vi.fn(async () => true);
     const { children, supervisor } = createHarness({ recoverOwnedProcesses });
@@ -103,13 +119,16 @@ describe("RuntimeSupervisor lifecycle", () => {
     children[0].spawn();
     children[0].message({ type: "runtime.ready", websocketUrl: runtimeUrl });
 
-    children[0].message({ type: "runtime.shutdown-unconfirmed" });
+    children[0].message({
+      type: "runtime.shutdown-unconfirmed",
+      reason: "owned-process-cleanup",
+    });
     expect(supervisor.snapshot()).toMatchObject({
       phase: "restarting",
       websocketUrl: null,
     });
     expect(() => supervisor.connection()).toThrow(
-      "could not confirm complete process cleanup",
+      "could not confirm owned-process cleanup",
     );
     children[0].exit(137);
     await vi.advanceTimersByTimeAsync(0);
@@ -135,6 +154,38 @@ describe("RuntimeSupervisor lifecycle", () => {
     });
   });
 
+  it("finishes exact cleanup when app shutdown receives an unconfirmed close", async () => {
+    const recoverOwnedProcesses = vi.fn(() => true);
+    const { children, supervisor } = createHarness({ recoverOwnedProcesses });
+    supervisor.start();
+    children[0].spawn();
+    const start = children[0].messages.find(
+      (message) => message.type === "runtime.start",
+    );
+    if (start?.type !== "runtime.start") {
+      throw new Error("Expected the runtime generation to start.");
+    }
+    children[0].message({ type: "runtime.ready", websocketUrl: runtimeUrl });
+
+    const stopped = supervisor.stop();
+    children[0].message({
+      type: "runtime.shutdown-unconfirmed",
+      reason: "owned-process-cleanup",
+    });
+    children[0].exit(137);
+    await vi.advanceTimersByTimeAsync(0);
+
+    await expect(stopped).resolves.toBe(true);
+    expect(recoverOwnedProcesses).toHaveBeenCalledWith(
+      start.options.runtimeGenerationId,
+      "test:00000000-0000-4000-8000-000000000001",
+      expect.any(Number),
+    );
+    expect(new RuntimeGenerationLeaseJournal(dataDirectory).all()).toEqual([]);
+    expect(new RuntimeOwnedProcessJournal(dataDirectory)
+      .sessionExact(start.options.runtimeGenerationId)).toBeNull();
+  });
+
   it("settles stop when pending exact cleanup recovery fails", async () => {
     let resolveRecovery!: (recovered: boolean) => void;
     const recoverOwnedProcesses = vi.fn(() => new Promise<boolean>((resolve) => {
@@ -145,7 +196,10 @@ describe("RuntimeSupervisor lifecycle", () => {
     children[0].spawn();
     children[0].message({ type: "runtime.ready", websocketUrl: runtimeUrl });
 
-    children[0].message({ type: "runtime.shutdown-unconfirmed" });
+    children[0].message({
+      type: "runtime.shutdown-unconfirmed",
+      reason: "owned-process-cleanup",
+    });
     children[0].exit(137);
     await vi.advanceTimersByTimeAsync(0);
     const stopped = supervisor.stop();
@@ -167,7 +221,10 @@ describe("RuntimeSupervisor lifecycle", () => {
     children[0].spawn();
     children[0].message({ type: "runtime.ready", websocketUrl: runtimeUrl });
 
-    children[0].message({ type: "runtime.shutdown-unconfirmed" });
+    children[0].message({
+      type: "runtime.shutdown-unconfirmed",
+      reason: "owned-process-cleanup",
+    });
     children[0].exit(137);
     await vi.advanceTimersByTimeAsync(60_000);
 
@@ -188,7 +245,10 @@ describe("RuntimeSupervisor lifecycle", () => {
     children[0].spawn();
     children[0].message({ type: "runtime.ready", websocketUrl: runtimeUrl });
 
-    children[0].message({ type: "runtime.shutdown-unconfirmed" });
+    children[0].message({
+      type: "runtime.shutdown-unconfirmed",
+      reason: "owned-process-cleanup",
+    });
     expect(() => children[0].exit(137)).not.toThrow();
     await vi.advanceTimersByTimeAsync(0);
 
@@ -274,6 +334,29 @@ describe("RuntimeSupervisor lifecycle", () => {
       generation: 1,
       pid: null,
       restartScheduled: false,
+    });
+  });
+
+  it.each([
+    [
+      "owned-process-tainted",
+      "The runtime restarted because owned process containment could not be confirmed.",
+    ],
+    [
+      "owned-process-cleanup-unconfirmed",
+      "The runtime restarted because owned process cleanup could not be confirmed.",
+    ],
+  ] as const)("preserves the bounded %s restart reason", (reason, message) => {
+    const { children, supervisor } = createHarness();
+    supervisor.start();
+    children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: runtimeUrl });
+    children[0].message({ type: "runtime.restart-requested", reason });
+    children[0].exit(1);
+
+    expect(supervisor.snapshot()).toMatchObject({
+      phase: "restarting",
+      lastError: message,
     });
   });
 

@@ -118,6 +118,7 @@ import {
   restoreMainWindowState,
   type MainWindowState,
 } from "./main-window-state.js";
+import { handleStartupFailure } from "./startup-failure.js";
 const { configuration: releaseChannel, packageSmokeRoot } = initializeInertiaReleaseChannel(app, process.env);
 const IPC = {
   getRuntimeConnection: "inertia:runtime-connection",
@@ -1221,19 +1222,18 @@ if (!hasSingleInstanceLock) {
     .whenReady()
     .then(bootstrap)
     .catch((error: unknown) => {
-      runtimeDiagnostics?.record("runtime.failure", {
-        phase: "starting",
-        message: error instanceof Error ? error.message : "Inertia could not start.",
+      handleStartupFailure(error, {
+        environment: process.env,
+        recordDiagnostic: (message) => runtimeDiagnostics?.record("runtime.failure", {
+          phase: "starting",
+          message,
+        }),
+        logFailure: (failure) => console.error("Failed to start Inertia", failure),
+        showErrorBox: (title, content) => dialog.showErrorBox(title, content),
+        quit: () => app.quit(),
       });
-      console.error("Failed to start Inertia", error);
-      dialog.showErrorBox(
-        "Inertia could not start",
-        "The local workspace runtime failed to start. Please reopen Inertia and try again.",
-      );
-      app.quit();
     });
 }
-
 function recordPackageSmokeStage(stage: string): void {
   if (!packageSmokeFilePath) return;
   try {

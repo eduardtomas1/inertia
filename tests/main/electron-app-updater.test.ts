@@ -86,7 +86,7 @@ beforeEach(() => {
   updaterFixture.updater.disableWebInstaller = false;
   updaterFixture.updater.requestHeaders = undefined;
   updaterFixture.updater.logger = {};
-  updaterFixture.updater.downloadUpdate.mockResolvedValue(["/private/download/path"]);
+  updaterFixture.updater.downloadUpdate.mockReset().mockResolvedValue(["/private/download/path"]);
 });
 
 afterEach(async () => {
@@ -96,7 +96,7 @@ afterEach(async () => {
 
 describe("electron updater adapter", () => {
   it("applies the exact safe stable configuration without overriding the feed", async () => {
-    const adapter = await loadElectronAppUpdater();
+    const adapter = await loadElectronAppUpdater("stable", { platform: "darwin" });
     expect(updaterFixture.updater).toMatchObject({
       autoDownload: false,
       autoInstallOnAppQuit: false,
@@ -116,7 +116,7 @@ describe("electron updater adapter", () => {
   });
 
   it("opts Canary into prereleases while keeping its rollout identity isolated", async () => {
-    await loadElectronAppUpdater("canary");
+    await loadElectronAppUpdater("canary", { platform: "darwin" });
     expect(updaterFixture.updater).toMatchObject({
       autoDownload: false,
       autoInstallOnAppQuit: false,
@@ -134,7 +134,7 @@ describe("electron updater adapter", () => {
       isUpdateAvailable: false,
       updateInfo: { version: "0.0.36" },
     });
-    const adapter = await loadElectronAppUpdater();
+    const adapter = await loadElectronAppUpdater("stable", { platform: "darwin" });
     await expect(adapter.check()).resolves.toEqual({
       available: false,
       version: "0.0.36",
@@ -142,7 +142,7 @@ describe("electron updater adapter", () => {
   });
 
   it("contains download paths, forwards progress, cancels one token, and removes listeners", async () => {
-    const adapter = await loadElectronAppUpdater();
+    const adapter = await loadElectronAppUpdater("stable", { platform: "darwin" });
     const onProgress = vi.fn();
     const onCancelled = vi.fn();
     const download = adapter.download({ onProgress, onCancelled });
@@ -172,7 +172,7 @@ describe("electron updater adapter", () => {
     updaterFixture.updater.downloadUpdate.mockImplementationOnce(() => {
       throw new Error("native start failed");
     });
-    const adapter = await loadElectronAppUpdater();
+    const adapter = await loadElectronAppUpdater("stable", { platform: "darwin" });
     const download = adapter.download({
       onProgress: vi.fn(),
       onCancelled: vi.fn(),
@@ -183,7 +183,7 @@ describe("electron updater adapter", () => {
   });
 
   it("requests one visible restart/install handoff", async () => {
-    const adapter = await loadElectronAppUpdater();
+    const adapter = await loadElectronAppUpdater("stable", { platform: "darwin" });
     const onHandoff = vi.fn();
     const handoff = adapter.quitAndInstall(onHandoff);
     updaterFixture.emitNative("before-quit-for-update");
@@ -196,7 +196,7 @@ describe("electron updater adapter", () => {
   });
 
   it("rejects handoff when the native installer reports an error", async () => {
-    const adapter = await loadElectronAppUpdater();
+    const adapter = await loadElectronAppUpdater("stable", { platform: "darwin" });
     const handoff = adapter.quitAndInstall();
     updaterFixture.emit("error", new Error("installer failed"));
     await expect(handoff).resolves.toBe(false);

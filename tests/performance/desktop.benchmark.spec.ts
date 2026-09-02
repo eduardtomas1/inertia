@@ -43,8 +43,10 @@ import {
   beginStreamingReaderActivity,
   beginStreamingReaderAwayActivity,
   cleanupStreamingCompletionGate,
+  releaseStreamingCadence,
   releaseStreamingCompletion,
   STREAMING_COMPLETION_GATE_TIMEOUT_MS,
+  STREAMING_PROGRESSIVE_PAINT_COUNT,
   streamingReaderActivityMarker,
   streamingAppServer,
   waitForStreamingCompletionCleanup,
@@ -73,7 +75,6 @@ const CI_PREFETCHED_SURFACE_TARGET_MS = 100;
 // Prove progressive rendering before the scenario deliberately leaves the live
 // edge. Follow-latest assertions separately prove that returning to the live
 // answer restores the final settled view without rewarding broken auto-follow.
-const CI_STREAM_MIN_VISIBLE_UPDATES = 4;
 const CI_STREAM_VISIBLE_UPDATE_BARRIER_TIMEOUT_MS = 5_000;
 // Provider admission and the post-ready reader phase each have one bounded
 // fixture window. This outer guard covers both without changing paint targets.
@@ -998,15 +999,26 @@ async function streamingResponsivenessSample(
   await page.locator('[data-stream-renderer="plain-text"]').waitFor({
     timeout: STREAMING_COMPLETION_GATE_TIMEOUT_MS,
   });
-  await expect.poll(
-    () => page.evaluate(() => performance.getEntriesByName(
-      "inertia-stream:stream-paint",
-    ).length),
-    {
-      message: `streaming sample ${sampleNumber} should paint progressively before reader navigation`,
-      timeout: CI_STREAM_VISIBLE_UPDATE_BARRIER_TIMEOUT_MS,
-    },
-  ).toBeGreaterThanOrEqual(CI_STREAM_MIN_VISIBLE_UPDATES);
+  const progressivePaintDeadline = Date.now()
+    + CI_STREAM_VISIBLE_UPDATE_BARRIER_TIMEOUT_MS;
+  for (
+    let expectedPaintCount = 1;
+    expectedPaintCount <= STREAMING_PROGRESSIVE_PAINT_COUNT;
+    expectedPaintCount += 1
+  ) {
+    const paintHandle = await page.waitForFunction(
+      (minimumPaintCount) => performance.getEntriesByName(
+        "inertia-stream:stream-paint",
+      ).length >= minimumPaintCount,
+      expectedPaintCount,
+      {
+        polling: "raf",
+        timeout: Math.max(1, progressivePaintDeadline - Date.now()),
+      },
+    );
+    await paintHandle.dispose();
+    await releaseStreamingCadence(workspace, sampleNumber);
+  }
   await waitForStreamingCompletionReady(workspace, sampleNumber);
   await beginStreamingReaderActivity(workspace, sampleNumber);
   await waitForStreamingReaderActivity(workspace, sampleNumber);
@@ -2007,7 +2019,7 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
       limitations: [
         "The authoritative long-conversation fixture creates 300 queued, running, and settled turns through RuntimeStore lifecycle APIs; the compatibility scenario separately stresses collapsed orphan history.",
         "Desktop streaming uses a deterministic local Codex app-server fixture; it exercises the production provider, utility-runtime, SQLite, WebSocket, React, and paint path without network variance.",
-        "The streaming fixture holds terminal completion behind a bounded local gate, acknowledges one activity pulse before reader navigation and one after it, returns through Jump to latest, and releases completion immediately before the terminal-paint await.",
+        "The streaming fixture acknowledges four exact visible-paint cadence markers, then holds terminal completion behind a bounded local gate, acknowledges one activity pulse before reader navigation and one after it, returns through Jump to latest, and releases completion immediately before the terminal-paint await.",
         "Cross-process streaming attribution uses bounded wall-clock markers only for comparison; WebSocket receipt starts at the causal pre-send marker, each first-delta and terminal chain is isolated to one run, and stage ordering remains authoritative within each process.",
         "Animation-frame intervals describe compositor scheduling, while PerformanceObserver long-task durations describe main-thread stalls; hosted frame intervals are retained as observational evidence rather than a 60-fps claim.",
         "Chromium process working-set retention after panels close is not classified as a leak when JavaScript heap, DOM, terminal, workspace-surface, and split-pane counters are released.",
@@ -2046,7 +2058,7 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
     expect(report.scenarios.streamingResponsiveness.p95VisibleGapMs)
       .toBeLessThan(CI_STREAM_VISIBLE_GAP_CATASTROPHIC_MS);
     expect(report.scenarios.streamingResponsiveness.visibleUpdates)
-      .toBeGreaterThanOrEqual(CI_STREAM_MIN_VISIBLE_UPDATES);
+      .toBeGreaterThanOrEqual(STREAMING_PROGRESSIVE_PAINT_COUNT);
     expect(report.scenarios.streamingResponsiveness.walBytes)
       .toBeGreaterThan(0);
     expect(report.scenarios.streamingResponsiveness.completionToFinalPaintMs)

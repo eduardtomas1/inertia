@@ -2,6 +2,7 @@ import { access, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 export const STREAMING_COMPLETION_GATE_TIMEOUT_MS = 15_000;
+export const STREAMING_PROGRESSIVE_PAINT_COUNT = 4;
 const STREAMING_COMPLETION_GATE_POLL_MS = 10;
 export type StreamingReaderActivityPhase = "BEFORE" | "AWAY";
 
@@ -19,6 +20,7 @@ export function streamingCompletionGatePaths(
   workspace: string,
   sampleNumber: number,
 ): {
+  cadence: string;
   reader: string;
   readerActive: string;
   readerAway: string;
@@ -31,6 +33,7 @@ export function streamingCompletionGatePaths(
   }
   const prefix = `.inertia-stream-completion-${sampleNumber}`;
   return {
+    cadence: join(workspace, `${prefix}.cadence`),
     reader: join(workspace, `${prefix}.reader`),
     readerActive: join(workspace, `${prefix}.reader-active`),
     readerAway: join(workspace, `${prefix}.reader-away`),
@@ -46,6 +49,7 @@ export async function cleanupStreamingCompletionGate(
 ): Promise<void> {
   const paths = streamingCompletionGatePaths(workspace, sampleNumber);
   await Promise.all([
+    rm(paths.cadence, { force: true }),
     rm(paths.reader, { force: true }),
     rm(paths.readerActive, { force: true }),
     rm(paths.readerAway, { force: true }),
@@ -53,6 +57,14 @@ export async function cleanupStreamingCompletionGate(
     rm(paths.ready, { force: true }),
     rm(paths.release, { force: true }),
   ]);
+}
+
+export async function releaseStreamingCadence(
+  workspace: string,
+  sampleNumber: number,
+): Promise<void> {
+  const { cadence } = streamingCompletionGatePaths(workspace, sampleNumber);
+  await writeFile(cadence, "cadence\n", { encoding: "utf8", flag: "wx" });
 }
 
 async function waitForPath(path: string, timeoutMs: number): Promise<void> {
@@ -167,6 +179,7 @@ const completionGateTimeoutMs = boundedSetting(
 const gatePaths = (sampleNumber) => {
   const prefix = ".inertia-stream-completion-" + sampleNumber;
   return {
+    cadence: join(process.cwd(), prefix + ".cadence"),
     reader: join(process.cwd(), prefix + ".reader"),
     readerActive: join(process.cwd(), prefix + ".reader-active"),
     readerAway: join(process.cwd(), prefix + ".reader-away"),
@@ -176,6 +189,7 @@ const gatePaths = (sampleNumber) => {
   };
 };
 const cleanupGate = ({
+  cadence,
   reader,
   readerActive,
   readerAway,
@@ -183,6 +197,7 @@ const cleanupGate = ({
   ready,
   release,
 }) => {
+  rmSync(cadence, { force: true });
   rmSync(reader, { force: true });
   rmSync(readerActive, { force: true });
   rmSync(readerAway, { force: true });
@@ -229,53 +244,76 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   const itemId = "performance-answer-" + sampleNumber;
   send({ id: message.id, result: { turn: { id: turnId, status: "inProgress", items: [], error: null } } });
   send({ method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress", items: [], error: null } } });
-  let index = 0;
-  const timer = setInterval(() => {
-    if (index === 0) {
-      send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId, delta: "STREAM_PROVIDER_DELTA_" + sampleNumber + "_" + Date.now() + " " } });
-    } else if (index < 128) {
-      send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId, delta: "chunk-" + index + "🙂 " } });
-    } else {
-      clearInterval(timer);
-      const paths = gatePaths(sampleNumber);
-      cleanupGate(paths);
-      writeFileSync(paths.ready, "ready\\n", { encoding: "utf8", flag: "wx" });
-      const gateStartedAt = Date.now();
-      let readerPulseSent = false;
-      let readerAwayPulseSent = false;
-      const gateTimer = setInterval(() => {
-        if (existsSync(paths.release)) {
-          clearInterval(gateTimer);
-          cleanupGate(paths);
-          send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId, delta: " STREAM_PROVIDER_COMPLETE_" + sampleNumber + "_" + Date.now() } });
-          send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
-          return;
-        }
-        if (!readerPulseSent && existsSync(paths.reader)) {
-          readerPulseSent = true;
-          send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId, delta: " STREAM_PROVIDER_READER_ACTIVITY_" + sampleNumber + "_BEFORE " } });
-          writeFileSync(paths.readerActive, "active\\n", {
-            encoding: "utf8",
-            flag: "wx",
-          });
-        }
-        if (!readerAwayPulseSent && existsSync(paths.readerAway)) {
-          readerAwayPulseSent = true;
-          send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId, delta: " STREAM_PROVIDER_READER_ACTIVITY_" + sampleNumber + "_AWAY " } });
-          writeFileSync(paths.readerAwayActive, "active\\n", {
-            encoding: "utf8",
-            flag: "wx",
-          });
-        }
-        if (Date.now() - gateStartedAt >= completionGateTimeoutMs) {
-          clearInterval(gateTimer);
-          cleanupGate(paths);
-          process.stderr.write("Benchmark completion gate timed out.\\n");
-          process.exit(2);
-        }
-      }, Math.min(10, streamIntervalMs));
+  const paths = gatePaths(sampleNumber);
+  cleanupGate(paths);
+  let cadenceOrdinal = 1;
+  send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId, delta: "STREAM_PROVIDER_DELTA_" + sampleNumber + "_" + Date.now() + " STREAM_PROVIDER_CADENCE_" + sampleNumber + "_" + cadenceOrdinal + " " } });
+  let index = ${STREAMING_PROGRESSIVE_PAINT_COUNT};
+  const beginRemainingCadence = () => {
+    const timer = setInterval(() => {
+      if (index < 128) {
+        send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId, delta: "chunk-" + index + "🙂 " } });
+      } else {
+        clearInterval(timer);
+        cleanupGate(paths);
+        writeFileSync(paths.ready, "ready\\n", { encoding: "utf8", flag: "wx" });
+        const gateStartedAt = Date.now();
+        let readerPulseSent = false;
+        let readerAwayPulseSent = false;
+        const gateTimer = setInterval(() => {
+          if (existsSync(paths.release)) {
+            clearInterval(gateTimer);
+            cleanupGate(paths);
+            send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId, delta: " STREAM_PROVIDER_COMPLETE_" + sampleNumber + "_" + Date.now() } });
+            send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
+            return;
+          }
+          if (!readerPulseSent && existsSync(paths.reader)) {
+            readerPulseSent = true;
+            send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId, delta: " STREAM_PROVIDER_READER_ACTIVITY_" + sampleNumber + "_BEFORE " } });
+            writeFileSync(paths.readerActive, "active\\n", {
+              encoding: "utf8",
+              flag: "wx",
+            });
+          }
+          if (!readerAwayPulseSent && existsSync(paths.readerAway)) {
+            readerAwayPulseSent = true;
+            send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId, delta: " STREAM_PROVIDER_READER_ACTIVITY_" + sampleNumber + "_AWAY " } });
+            writeFileSync(paths.readerAwayActive, "active\\n", {
+              encoding: "utf8",
+              flag: "wx",
+            });
+          }
+          if (Date.now() - gateStartedAt >= completionGateTimeoutMs) {
+            clearInterval(gateTimer);
+            cleanupGate(paths);
+            process.stderr.write("Benchmark completion gate timed out.\\n");
+            process.exit(2);
+          }
+        }, Math.min(10, streamIntervalMs));
+      }
+      index += 1;
+    }, streamIntervalMs);
+  };
+  const cadenceStartedAt = Date.now();
+  const cadenceTimer = setInterval(() => {
+    if (existsSync(paths.cadence)) {
+      rmSync(paths.cadence, { force: true });
+      if (cadenceOrdinal < ${STREAMING_PROGRESSIVE_PAINT_COUNT}) {
+        cadenceOrdinal += 1;
+        send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId, delta: "STREAM_PROVIDER_CADENCE_" + sampleNumber + "_" + cadenceOrdinal + " " } });
+        return;
+      }
+      clearInterval(cadenceTimer);
+      beginRemainingCadence();
+      return;
     }
-    index += 1;
-  }, streamIntervalMs);
+    if (Date.now() - cadenceStartedAt >= completionGateTimeoutMs) {
+      clearInterval(cadenceTimer);
+      cleanupGate(paths);
+      process.stderr.write("Benchmark cadence gate timed out at ordinal " + cadenceOrdinal + ".\\n");
+      process.exit(2);
+    }
+  }, Math.min(10, streamIntervalMs));
 });
 `;

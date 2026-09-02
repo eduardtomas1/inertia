@@ -1237,8 +1237,7 @@ export const Composer = memo(function Composer({
           queuedTurnId={(latestTurnSummary ?? latestTurn)?.id ?? null}
           queuedTurnStatus={(latestTurnSummary ?? latestTurn)?.status ?? null}
           queuedTurnAuthoritative={queuedTurnAuthoritative}
-          onSendQueued={(content, queuedAttachments) =>
-            onSend(content, queuedAttachments, undefined)}
+          onSendQueued={(content, queuedAttachments) => onSend(content, queuedAttachments, undefined)}
           onReleaseAttachment={onReleaseAttachment}
           onSubmit={submit}
           onStop={stop}

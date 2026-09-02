@@ -410,6 +410,144 @@ describe("Electron E2E application lifecycle", () => {
     expect(removeDirectory).toHaveBeenCalledOnce();
   });
 
+  it("receives privileged-cleanup proof before requesting Electron exit", async () => {
+    const process = Object.assign(new EventEmitter(), {
+      exitCode: null as number | null,
+      signalCode: null as NodeJS.Signals | null,
+      kill: vi.fn(() => true),
+    });
+    let releaseCleanup!: () => void;
+    const cleanupReady = new Promise<void>((resolve) => {
+      releaseCleanup = resolve;
+    });
+    const prepareRuntimeQuit = vi.fn(async () => {
+      await cleanupReady;
+      return {
+        phase: "privileged-cleanup-complete",
+        runtimePid: 777,
+        cleanupConfirmed: true,
+        errorMessage: null,
+      };
+    });
+    const requestRuntimeQuit = vi.fn(async () => {
+      process.exitCode = 0;
+      process.emit("exit", 0, null);
+      return 777;
+    });
+    const waitForRuntimeExit = vi.fn(async () => undefined);
+    const closing = closeElectronFixtureBounded({
+      current: {
+        process: () => process,
+        close: async () => undefined,
+      } as unknown as ElectronApplication,
+      prepareRuntimeQuit,
+      readRuntimeQuitPhase: async () => "privileged-cleanup",
+      requestRuntimeQuit,
+      waitForRuntimeExit,
+      closeServer: vi.fn(async () => undefined),
+      removeDirectory: vi.fn(async () => undefined),
+      rpcTimeoutMs: 50,
+      cleanupReceiptTimeoutMs: 1_000,
+      serverTimeoutMs: 50,
+      removeTimeoutMs: 50,
+    });
+
+    await vi.waitFor(() => expect(prepareRuntimeQuit).toHaveBeenCalledOnce());
+    expect(requestRuntimeQuit).not.toHaveBeenCalled();
+    expect(process.kill).not.toHaveBeenCalled();
+    releaseCleanup();
+
+    await expect(closing).resolves.toBeUndefined();
+    expect(requestRuntimeQuit).toHaveBeenCalledOnce();
+    expect(waitForRuntimeExit).toHaveBeenCalledWith(777);
+    expect(process.kill).not.toHaveBeenCalled();
+  });
+
+  it("force-cleans when privileged cleanup cannot confirm every owner stopped", async () => {
+    const process = Object.assign(new EventEmitter(), {
+      exitCode: null as number | null,
+      signalCode: null as NodeJS.Signals | null,
+      kill: vi.fn((signal: NodeJS.Signals) => {
+        process.signalCode = signal;
+        process.emit("exit", null, signal);
+        return true;
+      }),
+    });
+    const requestRuntimeQuit = vi.fn(async () => 777);
+    const failure = await closeElectronFixtureBounded({
+      current: {
+        process: () => process,
+        close: async () => undefined,
+      } as unknown as ElectronApplication,
+      prepareRuntimeQuit: async () => ({
+        phase: "privileged-cleanup-complete",
+        runtimePid: 777,
+        cleanupConfirmed: false,
+        errorMessage: null,
+      }),
+      readRuntimeQuitPhase: async () => "privileged-cleanup-complete",
+      requestRuntimeQuit,
+      waitForRuntimeExit: vi.fn(async () => undefined),
+      closeServer: vi.fn(async () => undefined),
+      removeDirectory: vi.fn(async () => undefined),
+      rpcTimeoutMs: 50,
+      cleanupReceiptTimeoutMs: 50,
+      serverTimeoutMs: 50,
+      removeTimeoutMs: 50,
+    }).then(() => null, (error: unknown) => error);
+
+    expect(requestRuntimeQuit).not.toHaveBeenCalled();
+    expect(process.kill).toHaveBeenCalledWith("SIGKILL");
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect((failure as AggregateError).errors).toEqual([
+      expect.objectContaining({
+        message: "The Electron fixture privileged cleanup completed without confirming every owner stopped.",
+      }),
+      expect.objectContaining({
+        message: "The Electron fixture process required forced termination during close (phase=privileged-cleanup-complete).",
+      }),
+    ]);
+  });
+
+  it("force-cleans a missing privileged-cleanup receipt with phase diagnostics", async () => {
+    const process = Object.assign(new EventEmitter(), {
+      exitCode: null as number | null,
+      signalCode: null as NodeJS.Signals | null,
+      kill: vi.fn((signal: NodeJS.Signals) => {
+        process.signalCode = signal;
+        process.emit("exit", null, signal);
+        return true;
+      }),
+    });
+    const failure = await closeElectronFixtureBounded({
+      current: {
+        process: () => process,
+        close: async () => undefined,
+      } as unknown as ElectronApplication,
+      prepareRuntimeQuit: () => new Promise(() => undefined),
+      readRuntimeQuitPhase: async () => "privileged-cleanup",
+      requestRuntimeQuit: vi.fn(async () => null),
+      waitForRuntimeExit: vi.fn(async () => undefined),
+      closeServer: vi.fn(async () => undefined),
+      removeDirectory: vi.fn(async () => undefined),
+      rpcTimeoutMs: 50,
+      cleanupReceiptTimeoutMs: 5,
+      serverTimeoutMs: 50,
+      removeTimeoutMs: 50,
+    }).then(() => null, (error: unknown) => error);
+
+    expect(process.kill).toHaveBeenCalledWith("SIGKILL");
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect((failure as AggregateError).errors).toEqual([
+      expect.objectContaining({
+        message: "The Electron fixture privileged cleanup receipt did not settle in time (phase=privileged-cleanup).",
+      }),
+      expect.objectContaining({
+        message: "The Electron fixture process required forced termination during close (phase=privileged-cleanup).",
+      }),
+    ]);
+  });
+
   it.runIf(process.platform === "darwin")(
     "accepts authoritative child exit when the advisory runtime quit RPC hangs",
     async () => {

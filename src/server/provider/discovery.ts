@@ -82,10 +82,29 @@ type ProviderProbeProcess = (
   timeoutMs: number,
 ) => Promise<ProbeResult>;
 
+interface ProviderProbeDeadline {
+  cancel(): void;
+}
+
+type ProviderProbeDeadlineScheduler = (
+  onDeadline: () => void,
+  timeoutMs: number,
+) => ProviderProbeDeadline;
+
+function scheduleProviderProbeDeadline(
+  onDeadline: () => void,
+  timeoutMs: number,
+): ProviderProbeDeadline {
+  const timer = setTimeout(onDeadline, timeoutMs);
+  timer.unref();
+  return { cancel: () => clearTimeout(timer) };
+}
+
 interface ProviderDiscoveryDependencies {
   executableCandidates?: typeof executableCandidates;
   probeProcess?: ProviderProbeProcess;
   terminateProcessTree?: ProcessTreeTerminator;
+  scheduleProbeDeadline?: ProviderProbeDeadlineScheduler;
 }
 
 async function probeProcess(
@@ -95,20 +114,21 @@ async function probeProcess(
   cwd: string,
   timeoutMs: number,
   terminateProcessTree: ProcessTreeTerminator = terminateProcessTreeAndWait,
+  scheduleDeadline: ProviderProbeDeadlineScheduler = scheduleProviderProbeDeadline,
 ): Promise<ProbeResult> {
   return await new Promise<ProbeResult>((resolveProbe) => {
     const output = new CappedProviderBuffer(16 * 1024);
     let settled = false;
     let started = false;
     let timedOut = false;
-    let timer: NodeJS.Timeout | undefined;
+    let deadline: ProviderProbeDeadline | undefined;
     const finish = (
       exitCode: number | null,
       cleanupConfirmed = true,
     ): void => {
       if (settled) return;
       settled = true;
-      if (timer) clearTimeout(timer);
+      deadline?.cancel();
       resolveProbe({
         exitCode,
         output: output.toString(),
@@ -145,7 +165,7 @@ async function probeProcess(
     const terminateAndFinish = (): void => {
       if (settled) return;
       settled = true;
-      if (timer) clearTimeout(timer);
+      deadline?.cancel();
       void requireProcessTreeTermination(
         terminateProcessTree,
         child,
@@ -175,12 +195,11 @@ async function probeProcess(
     child.once("close", (code) => finish(code));
     child.stdin.end();
 
-    timer = setTimeout(() => {
+    deadline = scheduleDeadline(() => {
       if (settled) return;
       timedOut = true;
       terminateAndFinish();
     }, timeoutMs);
-    timer.unref();
   });
 }
 
@@ -270,8 +289,14 @@ export async function detectProvider(
   const resolveCandidates = dependencies.executableCandidates ?? executableCandidates;
   const terminateProcessTree = dependencies.terminateProcessTree
     ?? terminateProcessTreeAndWait;
+  const scheduleProbeDeadline = dependencies.scheduleProbeDeadline
+    ?? scheduleProviderProbeDeadline;
   const runProbe: ProviderProbeProcess = dependencies.probeProcess
-    ?? (async (...args) => await probeProcess(...args, terminateProcessTree));
+    ?? (async (...args) => await probeProcess(
+      ...args,
+      terminateProcessTree,
+      scheduleProbeDeadline,
+    ));
   const provider = PROVIDER_INFO[providerId];
   const command = options.command?.trim() || provider.command;
   const timeoutMs = Math.max(250, Math.min(options.timeoutMs ?? DEFAULT_DETECTION_TIMEOUT_MS, 10_000));

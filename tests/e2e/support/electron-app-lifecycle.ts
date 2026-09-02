@@ -260,6 +260,13 @@ export interface ElectronAppQuitResult<T> {
   readonly transportSettled: boolean;
 }
 
+export interface ElectronPrivilegedCleanupReceipt {
+  readonly phase: string;
+  readonly runtimePid: number | null;
+  readonly cleanupConfirmed: boolean | null;
+  readonly errorMessage: string | null;
+}
+
 export async function quitElectronAppBounded<T>(
   current: ElectronApplication,
   requestQuit: () => Promise<T>,
@@ -364,11 +371,14 @@ export async function closeElectronAppBounded(
 export async function closeElectronFixtureBounded(options: {
   readonly current: ElectronApplication | null;
   readonly priorRuntimePid?: number | null;
+  readonly prepareRuntimeQuit?: () => Promise<ElectronPrivilegedCleanupReceipt>;
+  readonly readRuntimeQuitPhase?: () => Promise<string>;
   readonly requestRuntimeQuit: () => Promise<number | null>;
   readonly waitForRuntimeExit: (pid: number) => Promise<void>;
   readonly closeServer: () => Promise<void>;
   readonly removeDirectory: () => Promise<void>;
   readonly rpcTimeoutMs?: number;
+  readonly cleanupReceiptTimeoutMs?: number;
   readonly serverTimeoutMs?: number;
   readonly removeTimeoutMs?: number;
 }): Promise<void> {
@@ -388,13 +398,73 @@ export async function closeElectronFixtureBounded(options: {
       let quitResult: BoundedOperationResult<number | null>;
       let appCloseConfirmed = false;
       if (childProcess) {
+        let cleanupPrepared = options.prepareRuntimeQuit === undefined;
+        let cleanupPhase = cleanupPrepared ? "legacy-quit" : "not-requested";
+        if (options.prepareRuntimeQuit) {
+          const preparation = await settleOperationBounded(
+            Promise.resolve().then(options.prepareRuntimeQuit),
+            options.cleanupReceiptTimeoutMs
+              ?? FIXTURE_ELECTRON_GRACEFUL_TIMEOUT_MS,
+          );
+          if (preparation.status === "fulfilled") {
+            cleanupPhase = preparation.value.phase;
+            if (preparation.value.runtimePid !== null) {
+              runtimePid = preparation.value.runtimePid;
+            }
+            const cleanupReachedTerminalPhase =
+              cleanupPhase === "privileged-cleanup-complete";
+            cleanupPrepared = cleanupReachedTerminalPhase
+              && preparation.value.cleanupConfirmed === true;
+            if (!cleanupReachedTerminalPhase) {
+              cleanupErrors.push(new Error(
+                `The Electron fixture privileged cleanup returned an unexpected phase (${cleanupPhase}).`,
+              ));
+            } else if (preparation.value.cleanupConfirmed !== true) {
+              cleanupErrors.push(new Error(
+                "The Electron fixture privileged cleanup completed without confirming every owner stopped.",
+              ));
+            }
+          } else {
+            if (options.readRuntimeQuitPhase) {
+              const phaseResult = await settleOperationBounded(
+                Promise.resolve().then(options.readRuntimeQuitPhase),
+                options.rpcTimeoutMs ?? 1_000,
+              );
+              if (phaseResult.status === "fulfilled") {
+                cleanupPhase = phaseResult.value;
+              } else if (phaseResult.status === "rejected") {
+                cleanupPhase = "phase-read-rejected";
+              } else {
+                cleanupPhase = "phase-read-timed-out";
+              }
+            }
+            const message = preparation.status === "timed-out"
+              ? "The Electron fixture privileged cleanup receipt did not settle in time"
+              : "The Electron fixture privileged cleanup failed";
+            cleanupErrors.push(new Error(
+              `${message} (phase=${cleanupPhase}).`,
+              preparation.status === "rejected"
+                ? { cause: preparation.reason }
+                : undefined,
+            ));
+          }
+        }
         try {
           const appQuit = await quitElectronAppBounded(
             options.current,
-            options.requestRuntimeQuit,
+            cleanupPrepared
+              ? options.requestRuntimeQuit
+              : async () => runtimePid,
             {
               childProcess,
               quitRequestTimeoutMs: options.rpcTimeoutMs ?? 1_000,
+              ...(options.prepareRuntimeQuit
+                ? {
+                    gracefulTimeoutMs: cleanupPrepared
+                      ? options.rpcTimeoutMs ?? 1_000
+                      : 0,
+                  }
+                : {}),
             },
           );
           quitResult = appQuit.requestResult;
@@ -410,7 +480,9 @@ export async function closeElectronFixtureBounded(options: {
             ));
           } else if (appQuit.outcome === "forced") {
             cleanupErrors.push(new Error(
-              "The Electron fixture process required forced termination during close.",
+              options.prepareRuntimeQuit
+                ? `The Electron fixture process required forced termination during close (phase=${cleanupPhase}).`
+                : "The Electron fixture process required forced termination during close.",
             ));
           }
         } catch (error) {

@@ -561,11 +561,6 @@ process.exit(2);
   it("removes descendants from a timed-out provider discovery probe", async () => {
     const root = temporaryRoot();
     const childPidPath = join(root, "discovery-child.pid");
-    // Starting a copied Node executable can exceed the production discovery
-    // deadline on a contended Windows runner. This test proves descendant
-    // cleanup, not startup latency, so leave enough time for the fixture to
-    // establish the descendant whose ownership is being asserted.
-    const probeTimeoutMs = process.platform === "win32" ? 5_000 : 250;
     const descendantExecutable = portableNodeExecutable(
       root,
       "discovery-descendant",
@@ -582,32 +577,60 @@ fs.writeFileSync(${JSON.stringify(childPidPath)}, String(descendant.pid));
 setInterval(() => {}, 1000);
 `);
 
-    await expect(detectProvider("codex", {
+    const deadlineControl: { fire: (() => void) | null } = { fire: null };
+    let notifyDeadlineScheduled!: () => void;
+    const deadlineScheduled = new Promise<void>((resolve) => {
+      notifyDeadlineScheduled = resolve;
+    });
+
+    const detection = detectProvider("codex", {
       command,
       cwd: root,
       refreshEnvironment: true,
-      timeoutMs: probeTimeoutMs,
-    })).resolves.toMatchObject({
+      timeoutMs: 250,
+    }, {
+      scheduleProbeDeadline: (onDeadline) => {
+        deadlineControl.fire = onDeadline;
+        notifyDeadlineScheduled();
+        return {
+          cancel: () => {
+            deadlineControl.fire = null;
+          },
+        };
+      },
+    });
+
+    await deadlineScheduled;
+    let descendantPid = 0;
+    let readinessError: unknown;
+    try {
+      await waitFor("the discovery descendant PID to be recorded", () => {
+        try {
+          descendantPid = Number(readFileSync(childPidPath, "utf8"));
+          return Number.isSafeInteger(descendantPid) && descendantPid > 0;
+        } catch {
+          return false;
+        }
+      });
+    } catch (error) {
+      readinessError = error;
+    }
+    if (descendantPid > 0) descendantPids.push(descendantPid);
+    const fireDeadline = deadlineControl.fire;
+    expect(fireDeadline).not.toBeNull();
+    fireDeadline?.();
+    await expect(detection).resolves.toMatchObject({
       available: false,
       installState: "error",
       canRun: false,
     });
+    if (readinessError) throw readinessError;
 
-    let descendantPid = 0;
-    await waitFor("the discovery descendant PID to be recorded", () => {
-      try {
-        descendantPid = Number(readFileSync(childPidPath, "utf8"));
-        return Number.isSafeInteger(descendantPid) && descendantPid > 0;
-      } catch {
-        return false;
-      }
-    });
     expect(Number.isSafeInteger(descendantPid) && descendantPid > 0).toBe(true);
     if (process.platform === "win32") {
       // A stopped Windows PID can be recycled by another Vitest worker before
       // this assertion runs. The owned executable remains a stable identity:
       // Windows cannot delete it until the original descendant releases it.
-      descendantPids.push(descendantPid);
       await waitFor("the discovery descendant executable to be released", () => {
         try {
           rmSync(descendantExecutable);
@@ -621,7 +644,6 @@ setInterval(() => {}, 1000);
       // the PID remains registered for best-effort failure-path cleanup.
       descendantPids.pop();
     } else {
-      descendantPids.push(descendantPid);
       await waitFor(
         "the discovery descendant to stop",
         () => !processExists(descendantPid),

@@ -14,6 +14,8 @@ import { closeElectronAppBounded, closeElectronFixtureBounded,
   closePreviewServerBounded, observeElectronPage, observeElectronProcess,
   quitElectronAppBounded, removeFixtureDirectory,
   waitForRuntimeProcessExit } from "./electron-app-lifecycle";
+import { finishElectronPreparedQuit, prepareElectronPrivilegedCleanup,
+  readElectronPrivilegedCleanupPhase } from "./electron-runtime-shutdown";
 import {
   createFixtureTemporaryDirectories,
   fixtureTemporaryEnvironment,
@@ -977,17 +979,9 @@ export async function createAppFixture(
         current: activeApp,
         priorRuntimePid,
         rpcTimeoutMs: FIXTURE_RPC_TEARDOWN_TIMEOUT_MS,
-        requestRuntimeQuit: async () => {
-          if (!activeApp) return null;
-          const snapshot = await activeApp.evaluate(() => {
-            const runtime = Reflect.get(
-              globalThis,
-              "__inertiaTestRuntime",
-            ) as { quit?: () => RuntimeTestSnapshot | null } | undefined;
-            return runtime?.quit?.() ?? null;
-          });
-          return snapshot?.pid ?? null;
-        },
+        prepareRuntimeQuit: async () => await prepareElectronPrivilegedCleanup(activeApp),
+        readRuntimeQuitPhase: async () => await readElectronPrivilegedCleanupPhase(activeApp),
+        requestRuntimeQuit: async () => await finishElectronPreparedQuit(activeApp),
         waitForRuntimeExit: waitForRuntimeProcessExit,
         closeServer: async () => closePreviewServerBounded(preview.server),
         removeDirectory: async () => removeFixtureDirectory(testDirectory),

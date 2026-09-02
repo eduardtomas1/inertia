@@ -113,12 +113,10 @@ import {
   type WindowThemePreference,
   writeWindowThemePreference,
 } from "./window-appearance.js";
-import {
-  MAIN_WINDOW_DEFAULT_STATE,
-  restoreMainWindowState,
-  type MainWindowState,
-} from "./main-window-state.js";
+import { MAIN_WINDOW_DEFAULT_STATE, restoreMainWindowState,
+  type MainWindowState } from "./main-window-state.js";
 import { handleStartupFailure } from "./startup-failure.js";
+import { createTestPrivilegedCleanupController } from "./test-privileged-cleanup-controller.js";
 const { configuration: releaseChannel, packageSmokeRoot } = initializeInertiaReleaseChannel(app, process.env);
 const IPC = {
   getRuntimeConnection: "inertia:runtime-connection",
@@ -1186,6 +1184,8 @@ async function bootstrap(): Promise<void> {
         recycle: () => runtimeSupervisor?.testOnlyRecycle()
           ?? Promise.reject(new Error("The test runtime is not running")),
         agentBrowser: (id: string, command: Parameters<PreviewBroker["perform"]>[1]) => previewBroker.perform(id, command),
+        ...createTestPrivilegedCleanupController({ runtimePid: () => runtimeSupervisor?.snapshot().pid ?? null,
+          cleanup: runPrivilegedCleanup, exit: finishQuitAfterCleanup }),
         quit: () => {
           const snapshot = runtimeSupervisor?.snapshot() ?? null;
           setTimeout(() => app.quit(), 100);

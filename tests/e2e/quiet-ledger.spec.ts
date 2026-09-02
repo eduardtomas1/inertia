@@ -104,7 +104,7 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     });
 
   try {
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await expect(page.getByRole("heading", { name: "Quiet Ledger visual fixture", level: 1 })).toBeVisible();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
 

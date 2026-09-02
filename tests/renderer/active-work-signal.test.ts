@@ -181,4 +181,13 @@ describe("Minimal Workstream active pixel signal", () => {
       expect(hiddenRules).toContain(selector);
     }
   });
+
+  it("pauses document-preview portal spinners while hidden", () => {
+    const portalRule = css.match(
+      /\.attachment-preview-backdrop\[data-document-visible="false"\][\s\S]*?animation-play-state:\s*paused;/u,
+    )?.[0] ?? "";
+
+    expect(portalRule).toContain(".pdf-attachment-preview-loading");
+    expect(portalRule).toContain(".document-attachment-preview-loading");
+  });
 });

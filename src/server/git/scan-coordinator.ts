@@ -34,10 +34,20 @@ export const GIT_SCAN_GLOBAL_GUARDED_DESCENDANT_BUDGET =
 
 const GIT_SCAN_TIMEOUT_MS = 15_000;
 
+export type GitScanLateFailureReporter = (error: unknown) => void;
+
+function reportGitScanLateFailure(error: unknown): void {
+  const detail = error instanceof GitError
+    ? `[${error.code}] ${error.message}`
+    : "An unexpected Git scan cleanup failure occurred.";
+  console.error("Git scan cleanup failed after the scan timed out.", detail);
+}
+
 interface ScanRun<Result> {
   execute: (execution: GitScanExecution) => Promise<Result>;
   invalidation: number;
   promise: Promise<Result>;
+  settlement: Promise<void>;
   scope: GitScanScope;
 }
 
@@ -240,7 +250,11 @@ export class GitScanCoordinator {
   private readonly invalidations = new Map<string, number>();
   private readonly states = new Map<string, ScanState<unknown>>();
 
-  constructor(private readonly scanTimeoutMs = GIT_SCAN_TIMEOUT_MS) {}
+  constructor(
+    private readonly scanTimeoutMs = GIT_SCAN_TIMEOUT_MS,
+    private readonly reportLateFailure: GitScanLateFailureReporter =
+      reportGitScanLateFailure,
+  ) {}
 
   currentInvalidation(identity: ValidatedGitScanIdentity): number {
     return this.invalidations.get(identity.key) ?? 0;
@@ -330,32 +344,53 @@ export class GitScanCoordinator {
     execute: (execution: GitScanExecution) => Promise<Result>,
   ): ScanRun<Result> {
     const deadlineAt = Date.now() + this.scanTimeoutMs;
-    const promise = this.activeKeyGate.acquire({ deadlineAt }).then(async (release) => {
+    const started = this.activeKeyGate.acquire({ deadlineAt }).then((release) => {
       const controller = new AbortController();
       const timedOut = deferred<never>();
+      let didTimeOut = false;
       const timer = setTimeout(() => {
+        didTimeOut = true;
         controller.abort();
         timedOut.reject(timeoutError());
       }, Math.max(1, deadlineAt - Date.now()));
       timer.unref();
-      try {
-        const operation = scanExecution.run(
-          { processKey },
-          async () => await execute({
-            deadlineAt,
-            invalidation,
-            scope,
-            signal: controller.signal,
-          }),
-        );
-        return await Promise.race([operation, timedOut.promise]);
-      } finally {
+      const operation = scanExecution.run(
+        { processKey },
+        async () => await execute({
+          deadlineAt,
+          invalidation,
+          scope,
+          signal: controller.signal,
+        }),
+      );
+      const promise = Promise.race([operation, timedOut.promise]);
+      const settlement = operation.then(
+        () => undefined,
+        (error: unknown) => {
+          if (
+            didTimeOut
+            && !(error instanceof GitError && error.code === "timeout")
+          ) {
+            try {
+              this.reportLateFailure(error);
+            } catch {
+              // Diagnostics cannot release process ownership early.
+            }
+          }
+        },
+      ).finally(() => {
         controller.abort();
         clearTimeout(timer);
         release();
-      }
+      });
+      return { promise, settlement };
     });
-    return { execute, invalidation, promise, scope };
+    const promise = started.then(({ promise: result }) => result);
+    const settlement = started.then(
+      ({ settlement: cleanup }) => cleanup,
+      () => undefined,
+    );
+    return { execute, invalidation, promise, settlement, scope };
   }
 
   private observeCompletion<Result>(
@@ -363,7 +398,7 @@ export class GitScanCoordinator {
     state: ScanState<Result>,
     run: ScanRun<Result>,
   ): void {
-    void run.promise.then(
+    void run.settlement.then(
       () => this.promoteTrailing(key, state, run),
       () => this.promoteTrailing(key, state, run),
     );

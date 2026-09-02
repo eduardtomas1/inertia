@@ -1,5 +1,5 @@
 import * as XLSX from "xlsx";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -55,9 +55,35 @@ function previewResponse(bytes: Uint8Array, mimeType: string): Response {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe("document attachment previews", () => {
+  it("projects document visibility onto the body-level preview portal", async () => {
+    let visibility: DocumentVisibilityState = "visible";
+    vi.spyOn(document, "visibilityState", "get")
+      .mockImplementation(() => visibility);
+    vi.stubGlobal("fetch", vi.fn(async () => await new Promise<Response>(() => {})));
+    const user = userEvent.setup();
+    render(
+      <ComposerAttachmentList attachments={[attachment()]} onRemove={vi.fn()} />,
+    );
+
+    await user.click(screen.getByRole("button", {
+      name: "Preview attachment forecast.xlsx",
+    }));
+    await screen.findByRole("dialog", { name: "forecast.xlsx" });
+    const portal = document.querySelector(".attachment-preview-backdrop");
+    expect(portal).toHaveAttribute("data-document-visible", "true");
+    expect(portal?.parentElement).toBe(document.body);
+
+    visibility = "hidden";
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    expect(portal).toHaveAttribute("data-document-visible", "false");
+  });
+
   it("renders bounded workbook sheets and cells only after the user opens it", async () => {
     const bytes = workbookBytes();
     const fetchPreview = vi.fn(async () => previewResponse(

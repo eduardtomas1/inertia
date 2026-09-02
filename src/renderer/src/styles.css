@@ -11463,6 +11463,11 @@ button.sent-attachment-open:focus-visible {
   animation-play-state: paused;
 }
 
+.attachment-preview-backdrop[data-document-visible="false"]
+  :is(.pdf-attachment-preview-loading, .document-attachment-preview-loading) svg {
+  animation-play-state: paused;
+}
+
 .app-shell[data-document-visible="false"] .streaming-caret,
 .app-shell[data-document-visible="false"] .loading-mark,
 .app-shell[data-document-visible="false"] .pdf-attachment-preview-loading svg,

@@ -32,6 +32,10 @@ import { CappedProviderBuffer } from "./io";
 import { providerProcessInvocation } from "./process";
 import { windowsCodexExecutableCandidates } from "./windows-codex";
 import { cursorAgentCommandArgs } from "./cursor-command";
+import {
+  probeOpenCodePureIsolation,
+  type OpenCodePureIsolationProbe,
+} from "./opencode-pure-isolation";
 
 const DEFAULT_DETECTION_TIMEOUT_MS = 2_500;
 const CODEX_PATH_RESOLUTION_ENVIRONMENT_KEYS = new Set([
@@ -102,6 +106,7 @@ function scheduleProviderProbeDeadline(
 
 interface ProviderDiscoveryDependencies {
   executableCandidates?: typeof executableCandidates;
+  probeOpenCodePureIsolation?: OpenCodePureIsolationProbe;
   probeProcess?: ProviderProbeProcess;
   terminateProcessTree?: ProcessTreeTerminator;
   scheduleProbeDeadline?: ProviderProbeDeadlineScheduler;
@@ -297,6 +302,8 @@ export async function detectProvider(
       terminateProcessTree,
       scheduleProbeDeadline,
     ));
+  const runOpenCodeIsolationProbe = dependencies.probeOpenCodePureIsolation
+    ?? probeOpenCodePureIsolation;
   const provider = PROVIDER_INFO[providerId];
   const command = options.command?.trim() || provider.command;
   const timeoutMs = Math.max(250, Math.min(options.timeoutMs ?? DEFAULT_DETECTION_TIMEOUT_MS, 10_000));
@@ -453,8 +460,38 @@ export async function detectProvider(
     };
   }
 
+  const versionProbeCleanupConfirmed = versionProbes.every(
+    (probe) => probe.cleanupConfirmed,
+  );
+  const openCodeIsolation = providerId === "opencode"
+    ? await runOpenCodeIsolationProbe(
+        selected.executable,
+        selected.version,
+        probeEnvironment,
+        terminateProcessTree,
+      )
+    : { cleanupConfirmed: true, verified: true };
+  if (!openCodeIsolation.verified) {
+    const cleanupConfirmed = openCodeIsolation.cleanupConfirmed
+      && versionProbeCleanupConfirmed;
+    return {
+      provider,
+      available: true,
+      executable: selected.executable,
+      ...(selected.version ? { version: selected.version } : {}),
+      installState: "installed",
+      authState: "unknown",
+      canRun: false,
+      cleanupConfirmed,
+      statusMessage: cleanupConfirmed
+        ? "OpenCode failed secure plugin-free runtime verification; update the selected CLI"
+        : "OpenCode discovery or plugin-free verification cleanup could not be confirmed stopped",
+    };
+  }
+
   if (!probeAuthentication) {
-    const cleanupConfirmed = versionProbes.every((probe) => probe.cleanupConfirmed);
+    const cleanupConfirmed = openCodeIsolation.cleanupConfirmed
+      && versionProbeCleanupConfirmed;
     return {
       provider,
       available: true,
@@ -470,9 +507,8 @@ export async function detectProvider(
     };
   }
 
-  const versionCleanupConfirmed = versionProbes.every(
-    (probe) => probe.cleanupConfirmed,
-  );
+  const versionCleanupConfirmed = openCodeIsolation.cleanupConfirmed
+    && versionProbeCleanupConfirmed;
   if (!versionCleanupConfirmed || (providerId === "codex" && !selected.appServerReady)) {
     return {
       provider,

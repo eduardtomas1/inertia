@@ -50,10 +50,11 @@ export function openCodeServerProcessInvocation(
   executable: string,
   environment: NodeJS.ProcessEnv,
   platform: NodeJS.Platform = process.platform,
+  pure = true,
 ) {
   return providerProcessInvocation(
     executable,
-    ["serve", "--pure", "--hostname=127.0.0.1", "--port=0"],
+    ["serve", ...(pure ? ["--pure"] : []), "--hostname=127.0.0.1", "--port=0"],
     environment,
     platform,
   );
@@ -67,12 +68,18 @@ export async function startOwnedOpenCodeServer(
   terminateOwnedProcessTree: ProcessTreeTerminator,
   terminationSubject: string,
   signal?: AbortSignal,
+  pure = true,
 ): Promise<{
   child: ChildProcessWithoutNullStreams;
   terminate: OwnedProcessTreeTermination;
   url: string;
 }> {
-  const invocation = openCodeServerProcessInvocation(executable, environment);
+  const invocation = openCodeServerProcessInvocation(
+    executable,
+    environment,
+    process.platform,
+    pure,
+  );
   const ownedInvocation = runtimeOwnedProcessInvocation(
     invocation.command,
     invocation.args,

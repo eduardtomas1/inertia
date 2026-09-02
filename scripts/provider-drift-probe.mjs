@@ -1,12 +1,16 @@
-import { spawn } from "node:child_process";
-import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { requireAcpInitializeHandshake } from "./provider-drift-process.mjs";
+import { runBounded } from "./bounded-process-tree.mjs";
+import {
+  providerDriftEnvironment,
+  prepareProviderDriftEnvironment,
+} from "./provider-drift-environment.mjs";
 
 const repositoryRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const MAX_OUTPUT_CHARS = 64 * 1024;
+const MAX_OUTPUT_BYTES = 64 * 1024;
 const INSTALL_TIMEOUT_MS = 8 * 60 * 1_000;
 const TYPECHECK_TIMEOUT_MS = 2 * 60 * 1_000;
 const CLI_TIMEOUT_MS = 20_000;
@@ -44,92 +48,25 @@ function parseArguments(argv) {
   return values;
 }
 
-function sanitizedEnvironment(isolatedRoot) {
-  const environment = {};
-  for (const [name, value] of Object.entries(process.env)) {
-    if (value === undefined) continue;
-    if (/(?:TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|API_KEY|AUTH)/iu.test(name)) continue;
-    if (/^(?:ACTIONS_|GITHUB_)/u.test(name)) continue;
-    environment[name] = value;
-  }
-  return {
-    ...environment,
-    CI: "true",
-    NO_COLOR: "1",
-    XDG_CACHE_HOME: join(isolatedRoot, "xdg-cache"),
-    XDG_CONFIG_HOME: join(isolatedRoot, "xdg-config"),
-    XDG_DATA_HOME: join(isolatedRoot, "xdg-data"),
-    CLAUDE_CONFIG_DIR: join(isolatedRoot, "claude-config"),
-    NPM_CONFIG_USERCONFIG: join(isolatedRoot, "npmrc"),
-  };
-}
-
-function terminate(child) {
-  if (!child.pid || child.exitCode !== null) return;
-  try {
-    process.kill(-child.pid, "SIGKILL");
-  } catch {
-    try {
-      child.kill("SIGKILL");
-    } catch {
-      // The process may have exited between the checks.
-    }
-  }
-}
-
-function commandResult(command, args, options = {}) {
+async function commandResult(command, args, options = {}) {
   const timeoutMs = options.timeoutMs ?? CLI_TIMEOUT_MS;
-  return new Promise((settle, reject) => {
-    const child = spawn(command, args, {
-      cwd: options.cwd,
-      detached: process.platform !== "win32",
-      env: options.environment,
-      stdio: ["ignore", "pipe", "pipe"],
-      windowsHide: true,
-    });
-    let output = "";
-    let outputTruncated = false;
-    const capture = (chunk) => {
-      if (output.length >= MAX_OUTPUT_CHARS) {
-        outputTruncated = true;
-        return;
-      }
-      const text = chunk.toString("utf8");
-      const remaining = MAX_OUTPUT_CHARS - output.length;
-      output += text.slice(0, remaining);
-      if (text.length > remaining) outputTruncated = true;
-    };
-    child.stdout.on("data", capture);
-    child.stderr.on("data", capture);
-    const timer = setTimeout(() => {
-      terminate(child);
-      reject(new Error(`${basename(command)} timed out after ${timeoutMs}ms.`));
-    }, timeoutMs);
-    timer.unref();
-    child.once("error", (error) => {
-      clearTimeout(timer);
-      reject(error);
-    });
-    child.once("exit", (code, signal) => {
-      clearTimeout(timer);
-      settle({ code, signal, output, outputTruncated });
-    });
+  return await runBounded(command, args, {
+    combineOutput: true,
+    cwd: options.cwd,
+    env: options.environment,
+    label: `${basename(command)} provider drift command`,
+    maxOutputBytes: MAX_OUTPUT_BYTES,
+    ...(options.onSpawn ? { onSpawn: options.onSpawn } : {}),
+    timeoutMs,
   });
 }
 
 async function requireSuccessfulCommand(command, args, options = {}) {
-  const result = await commandResult(command, args, options);
-  if (result.code !== 0) {
-    const suffix = result.outputTruncated ? "\n[output capped]" : "";
-    console.error(`${result.output}${suffix}`);
-    throw new Error(
-      `${basename(command)} exited with ${result.code ?? result.signal ?? "unknown status"}.`,
-    );
-  }
-  if (!options.allowEmpty && !result.output.trim()) {
+  const output = await commandResult(command, args, options);
+  if (!options.allowEmpty && !output.trim()) {
     throw new Error(`${basename(command)} returned no help or version output.`);
   }
-  return result.output;
+  return output;
 }
 
 async function packageVersion(root, name) {
@@ -174,9 +111,8 @@ async function main() {
   };
 
   await mkdir(options.workspace, { recursive: true });
-  await mkdir(isolatedConfig, { recursive: true });
-  await writeFile(join(isolatedConfig, "npmrc"), "", "utf8");
-  const environment = sanitizedEnvironment(isolatedConfig);
+  const environment = providerDriftEnvironment(isolatedConfig);
+  await prepareProviderDriftEnvironment(isolatedConfig, environment);
 
   await check("product SDK manifests are exact and match the locked install", async () => {
     const packageJson = JSON.parse(await readFile(join(repositoryRoot, "package.json"), "utf8"));
@@ -387,7 +323,11 @@ async function main() {
         bin("kimi"),
         ["acp"],
         { cwd: options.workspace, environment },
-        /kimi/iu,
+        {
+          allowSessionCapabilitiesResume: true,
+          expectedAgent: "Kimi Code CLI",
+          requireLoadSession: true,
+        },
       );
     });
 
@@ -435,12 +375,28 @@ async function main() {
           join(repositoryRoot, "scripts", "provider-drift-process.mjs"),
           join(options.workspace, "provider-drift-process.mjs"),
         ),
+        copyFile(
+          join(repositoryRoot, "scripts", "bounded-process-tree.mjs"),
+          join(options.workspace, "bounded-process-tree.mjs"),
+        ),
       ]);
-      await requireSuccessfulCommand(
+      const requireOwnedRuntime = async (mode) => await requireSuccessfulCommand(
         process.execPath,
-        [target, bin("opencode"), options.workspace, sentinel],
-        { cwd: options.workspace, environment },
+        [target, bin("opencode"), options.workspace, sentinel, mode],
+        {
+          cwd: options.workspace,
+          environment,
+          onSpawn: ({ pid, processGroupId }) => {
+            if (!Number.isSafeInteger(pid) || pid <= 1
+              || (process.platform !== "win32" && processGroupId !== pid)) {
+              throw new Error("OpenCode runtime ownership admission failed.");
+            }
+          },
+        },
       );
+      await requireOwnedRuntime("discover");
+      await unlink(sentinel);
+      await requireOwnedRuntime("pure");
     });
   }
 
@@ -466,7 +422,7 @@ async function main() {
         options.cursorAgent,
         ["acp"],
         { cwd: options.workspace, environment },
-        /cursor/iu,
+        { expectedAgent: "Cursor", requireLoadSession: true },
       );
     });
   }

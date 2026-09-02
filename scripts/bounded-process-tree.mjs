@@ -409,6 +409,10 @@ export async function runBounded(command, args, options) {
       `${options.label} requested Windows argument mode on another platform.`,
     );
   }
+  const maxOutputBytes =
+    Number.isSafeInteger(options.maxOutputBytes) && options.maxOutputBytes > 0
+      ? Math.min(options.maxOutputBytes, MAX_COMMAND_OUTPUT_BYTES)
+      : MAX_COMMAND_OUTPUT_BYTES;
   const input =
     options.input === undefined
       ? null
@@ -464,7 +468,7 @@ export async function runBounded(command, args, options) {
   });
   const appendOutput = (chunks, chunk) => {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    const remaining = Math.max(0, MAX_COMMAND_OUTPUT_BYTES - outputBytes);
+    const remaining = Math.max(0, maxOutputBytes - outputBytes);
     if (remaining > 0) chunks.push(buffer.subarray(0, remaining));
     outputBytes += buffer.length;
     const text = buffer.toString("utf8");
@@ -472,7 +476,7 @@ export async function runBounded(command, args, options) {
     if (options.echoOutputLive) {
       (chunks === stdoutChunks ? process.stdout : process.stderr).write(buffer);
     }
-    if (outputBytes > MAX_COMMAND_OUTPUT_BYTES) signalOverflow();
+    if (outputBytes > maxOutputBytes) signalOverflow();
   };
   child.stdout?.on("data", (chunk) => appendOutput(stdoutChunks, chunk));
   child.stderr?.on("data", (chunk) => appendOutput(stderrChunks, chunk));
@@ -718,5 +722,5 @@ export async function runBounded(command, args, options) {
     if (stdout.length > 0) process.stdout.write(stdout);
     if (stderr.length > 0) process.stderr.write(stderr);
   }
-  return stdout;
+  return options.combineOutput ? `${stdout}${stderr}` : stdout;
 }

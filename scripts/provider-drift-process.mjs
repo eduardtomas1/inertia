@@ -1,4 +1,7 @@
 import { spawn } from "node:child_process";
+import { join } from "node:path";
+
+import { runBounded } from "./bounded-process-tree.mjs";
 
 const DEFAULT_TIMEOUT_MS = 20_000;
 const DEFAULT_CLEANUP_TIMEOUT_MS = 3_000;
@@ -8,60 +11,98 @@ export function processIsTerminal(child) {
   return child.exitCode !== null || child.signalCode !== null;
 }
 
-export function terminateProviderProcess(child) {
-  if (!child.pid || processIsTerminal(child)) return;
-  try {
-    process.kill(-child.pid, "SIGKILL");
-  } catch {
-    try {
-      child.kill("SIGKILL");
-    } catch {
-      // The process may have exited between the checks.
-    }
-  }
-}
-
 export async function confirmProviderProcessTermination(
   child,
-  terminate = terminateProviderProcess,
   timeoutMs = DEFAULT_CLEANUP_TIMEOUT_MS,
 ) {
   if (processIsTerminal(child)) return true;
-  return await new Promise((resolve) => {
-    let settled = false;
-    let timer;
-    const finish = (confirmed) => {
-      if (settled) return;
-      settled = true;
-      if (timer) clearTimeout(timer);
-      child.removeListener("exit", onTerminal);
-      child.removeListener("close", onTerminal);
-      resolve(confirmed);
-    };
-    const onTerminal = () => finish(true);
-    child.once("exit", onTerminal);
-    child.once("close", onTerminal);
-    timer = setTimeout(() => finish(processIsTerminal(child)), timeoutMs);
-    timer.unref();
-    if (processIsTerminal(child)) {
-      finish(true);
-      return;
-    }
-    try {
-      terminate(child);
-    } catch {
-      finish(processIsTerminal(child));
-      return;
-    }
-    if (processIsTerminal(child)) finish(true);
+  let timer;
+  const onError = () => settleCompletion(processIsTerminal(child));
+  const onClose = () => settleCompletion(true);
+  let settleCompletion;
+  const completion = new Promise((resolve) => {
+    settleCompletion = resolve;
+    child.once("error", onError);
+    child.once("close", onClose);
   });
+  const removeListeners = () => {
+    child.off("error", onError);
+    child.off("close", onClose);
+  };
+  if (processIsTerminal(child)) {
+    removeListeners();
+    return true;
+  }
+  try {
+    child.kill("SIGKILL");
+  } catch {
+    removeListeners();
+    return processIsTerminal(child);
+  }
+  if (processIsTerminal(child)) {
+    removeListeners();
+    return true;
+  }
+  const confirmed = await Promise.race([
+    completion,
+    new Promise((resolve) => {
+      timer = setTimeout(() => resolve(processIsTerminal(child)), timeoutMs);
+    }),
+  ]);
+  clearTimeout(timer);
+  removeListeners();
+  return confirmed;
 }
 
-export async function requireAcpInitializeHandshake(
+function validInitializeEnvelope(message) {
+  if (!message || typeof message !== "object" || Array.isArray(message)) return false;
+  const hasResult = Object.prototype.hasOwnProperty.call(message, "result");
+  const hasError = Object.prototype.hasOwnProperty.call(message, "error");
+  if (message.jsonrpc !== "2.0" || message.id !== 1 || hasResult === hasError
+    || Object.prototype.hasOwnProperty.call(message, "method")) return false;
+  if (!hasError) return true;
+  return message.error
+    && typeof message.error === "object"
+    && !Array.isArray(message.error)
+    && Number.isInteger(message.error.code)
+    && typeof message.error.message === "string";
+}
+
+function validateInitializeResult(initialized, validation) {
+  if (!initialized || typeof initialized !== "object" || Array.isArray(initialized)
+    || initialized.protocolVersion !== 1) {
+    throw new Error(`${validation.expectedAgent} ACP initialize response is incompatible.`);
+  }
+  const capabilities = initialized.agentCapabilities;
+  if (capabilities !== undefined && (
+    !capabilities
+    || typeof capabilities !== "object"
+    || Array.isArray(capabilities)
+  )) throw new Error(`${validation.expectedAgent} ACP initialize response is incompatible.`);
+  const sessionResume = capabilities?.sessionCapabilities?.resume;
+  const hasSessionResumeCapability = validation.allowSessionCapabilitiesResume === true
+    && sessionResume
+    && typeof sessionResume === "object"
+    && !Array.isArray(sessionResume);
+  if (validation.requireLoadSession
+    && capabilities?.loadSession !== true
+    && !hasSessionResumeCapability) {
+    throw new Error(`${validation.expectedAgent} ACP does not advertise session resume support.`);
+  }
+  const agentInfo = initialized.agentInfo;
+  if (!agentInfo || typeof agentInfo !== "object"
+    || Array.isArray(agentInfo)
+    || typeof agentInfo.name !== "string"
+    || typeof agentInfo.version !== "string"
+    || agentInfo.name !== validation.expectedAgent
+  ) throw new Error(`${validation.expectedAgent} ACP initialize response is incompatible.`);
+}
+
+export async function runAcpInitializeHandshake(
   command,
   args,
   options,
-  expectedAgent,
+  validation,
   dependencies = {},
 ) {
   const spawnImplementation = dependencies.spawn ?? spawn;
@@ -70,10 +111,9 @@ export async function requireAcpInitializeHandshake(
     ?? DEFAULT_CLEANUP_TIMEOUT_MS;
   const maxOutputChars = dependencies.maxOutputChars
     ?? DEFAULT_MAX_OUTPUT_CHARS;
-  const terminate = dependencies.terminate ?? terminateProviderProcess;
   const child = spawnImplementation(command, args, {
     cwd: options.cwd,
-    detached: process.platform !== "win32",
+    detached: false,
     env: options.environment,
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
@@ -96,12 +136,12 @@ export async function requireAcpInitializeHandshake(
       const fail = (error) => finish(() => rejectHandshake(error));
       const onChildError = (error) => fail(error);
       const onEarlyExit = (code, signal) => fail(new Error(
-        `${expectedAgent} ACP exited during initialize (${code ?? signal ?? "unknown"}).`,
+        `${validation.expectedAgent} ACP exited during initialize (${code ?? signal ?? "unknown"}).`,
       ));
       const onOutput = (chunk) => {
         output += chunk.toString("utf8");
         if (output.length > maxOutputChars) {
-          fail(new Error(`${expectedAgent} ACP initialize output exceeded the limit.`));
+          fail(new Error(`${validation.expectedAgent} ACP initialize output exceeded the limit.`));
           return;
         }
         while (output.includes("\n")) {
@@ -113,12 +153,30 @@ export async function requireAcpInitializeHandshake(
           try {
             message = JSON.parse(line);
           } catch {
-            fail(new Error(`${expectedAgent} ACP returned malformed JSON.`));
+            fail(new Error(`${validation.expectedAgent} ACP returned malformed JSON.`));
             return;
           }
-          if (message?.id !== 1) continue;
-          if (message.error) {
-            fail(new Error(`${expectedAgent} ACP rejected initialize.`));
+          if (!message || typeof message !== "object" || Array.isArray(message)) {
+            fail(new Error(`${validation.expectedAgent} ACP returned an invalid JSON-RPC message.`));
+            return;
+          }
+          if (!Object.prototype.hasOwnProperty.call(message, "id")) {
+            const validNotification = message.jsonrpc === "2.0"
+              && typeof message.method === "string"
+              && !Object.prototype.hasOwnProperty.call(message, "result")
+              && !Object.prototype.hasOwnProperty.call(message, "error");
+            if (!validNotification) {
+              fail(new Error(`${validation.expectedAgent} ACP returned an invalid JSON-RPC message.`));
+              return;
+            }
+            continue;
+          }
+          if (!validInitializeEnvelope(message)) {
+            fail(new Error(`${validation.expectedAgent} ACP returned an invalid JSON-RPC response.`));
+            return;
+          }
+          if (Object.prototype.hasOwnProperty.call(message, "error")) {
+            fail(new Error(`${validation.expectedAgent} ACP rejected initialize.`));
           } else {
             finish(() => resolveHandshake(message.result));
           }
@@ -126,7 +184,7 @@ export async function requireAcpInitializeHandshake(
         }
       };
       const timer = setTimeout(
-        () => fail(new Error(`${expectedAgent} ACP initialize timed out.`)),
+        () => fail(new Error(`${validation.expectedAgent} ACP initialize timed out.`)),
         timeoutMs,
       );
       timer.unref();
@@ -153,30 +211,56 @@ export async function requireAcpInitializeHandshake(
         fail(error);
       }
     });
-    const agentName = initialized?.agentInfo?.name;
-    const capabilities = initialized?.agentCapabilities;
-    if (initialized?.protocolVersion !== 1
-      || !capabilities
-      || typeof capabilities !== "object"
-      || Array.isArray(capabilities)
-      || (agentName !== undefined
-        && (typeof agentName !== "string" || !expectedAgent.test(agentName)))) {
-      throw new Error(`${expectedAgent} ACP initialize response is incompatible.`);
-    }
+    validateInitializeResult(initialized, validation);
   } catch (error) {
     handshakeError = error;
   }
   child.stdin.destroy();
   const cleanupConfirmed = await confirmProviderProcessTermination(
     child,
-    terminate,
     cleanupTimeoutMs,
   );
   if (!cleanupConfirmed) {
     throw new AggregateError(
       handshakeError ? [handshakeError] : [],
-      `${expectedAgent} ACP cleanup could not be confirmed.`,
+      `${validation.expectedAgent} ACP cleanup could not be confirmed.`,
     );
   }
   if (handshakeError) throw handshakeError;
+}
+
+export async function requireAcpInitializeHandshake(
+  command,
+  args,
+  options,
+  validation,
+  dependencies = {},
+) {
+  const timeoutMs = dependencies.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const cleanupTimeoutMs = dependencies.cleanupTimeoutMs
+    ?? DEFAULT_CLEANUP_TIMEOUT_MS;
+  const maxOutputChars = dependencies.maxOutputChars
+    ?? DEFAULT_MAX_OUTPUT_CHARS;
+  const payload = Buffer.from(JSON.stringify({
+    args,
+    command,
+    validation,
+  }), "utf8").toString("base64");
+  await runBounded(
+    process.execPath,
+    [join(import.meta.dirname, "provider-drift-acp-runtime.mjs"), payload],
+    {
+      cwd: options.cwd,
+      env: options.environment,
+      label: `${validation.expectedAgent} ACP initialize probe`,
+      maxOutputBytes: maxOutputChars,
+      onSpawn: ({ pid, processGroupId }) => {
+        if (!Number.isSafeInteger(pid) || pid <= 1
+          || (process.platform !== "win32" && processGroupId !== pid)) {
+          throw new Error(`${validation.expectedAgent} ACP ownership admission failed.`);
+        }
+      },
+      timeoutMs: timeoutMs + cleanupTimeoutMs + 1_000,
+    },
+  );
 }

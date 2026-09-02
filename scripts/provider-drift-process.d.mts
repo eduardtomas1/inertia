@@ -20,34 +20,45 @@ export interface ProviderAcpHandshakeOptions {
   environment: NodeJS.ProcessEnv;
 }
 
-export interface ProviderAcpHandshakeDependencies {
-  spawn?(
-    command: string,
-    args: readonly string[],
-    options: SpawnOptions,
-  ): ProviderAcpProcess;
-  terminate?(child: ProviderProcessLifecycle): void;
+export interface ProviderAcpProbeDependencies {
   timeoutMs?: number;
   cleanupTimeoutMs?: number;
   maxOutputChars?: number;
 }
 
-export function processIsTerminal(child: ProviderProcessLifecycle): boolean;
+export interface ProviderAcpHandshakeDependencies extends ProviderAcpProbeDependencies {
+  spawn?(
+    command: string,
+    args: readonly string[],
+    options: SpawnOptions,
+  ): ProviderAcpProcess;
+}
 
-export function terminateProviderProcess(
-  child: ProviderProcessLifecycle,
-): void;
+export interface ProviderAcpInitializeValidation {
+  allowSessionCapabilitiesResume?: boolean;
+  expectedAgent: string;
+  requireLoadSession: boolean;
+}
+
+export function processIsTerminal(child: ProviderProcessLifecycle): boolean;
 
 export function confirmProviderProcessTermination(
   child: ProviderProcessLifecycle,
-  terminate?: (child: ProviderProcessLifecycle) => void,
   timeoutMs?: number,
 ): Promise<boolean>;
+
+export function runAcpInitializeHandshake(
+  command: string,
+  args: readonly string[],
+  options: ProviderAcpHandshakeOptions,
+  validation: ProviderAcpInitializeValidation,
+  dependencies?: ProviderAcpHandshakeDependencies,
+): Promise<void>;
 
 export function requireAcpInitializeHandshake(
   command: string,
   args: readonly string[],
   options: ProviderAcpHandshakeOptions,
-  expectedAgent: RegExp,
-  dependencies?: ProviderAcpHandshakeDependencies,
+  validation: ProviderAcpInitializeValidation,
+  dependencies?: ProviderAcpProbeDependencies,
 ): Promise<void>;

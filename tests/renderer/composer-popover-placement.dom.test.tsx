@@ -9,7 +9,7 @@ import {
 const styles = readFileSync(
   resolve("src/renderer/src/styles.css"),
   "utf8",
-);
+).replace(/\r\n?/gu, "\n");
 const visibilityRulesStart = styles.indexOf(".composer .popover-anchor\n  >");
 const visibilityRulesEnd = styles.indexOf(
   "\n\n.action-popover",

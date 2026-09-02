@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -48,7 +49,7 @@ export function useComposerMenus(): ComposerMenuController {
     menu,
     toggleMenu,
     dismissMenu,
-    setMenuTrigger,
+    setMenuTrigger: setDismissibleMenuTrigger,
     setMenuPopover: setDismissibleMenuPopover,
   } = useDismissibleMenu<ComposerMenu>();
   const [moreSection, setMoreSection] = useState<MoreSection | null>(null);
@@ -58,7 +59,17 @@ export function useComposerMenus(): ComposerMenuController {
   const moreSectionTriggerRefs =
     useRef(new Map<MoreSection, HTMLButtonElement>());
   const moreHoverTimerRef = useRef<number | null>(null);
+  const menuTriggerRefs = useRef(new Map<ComposerMenu, HTMLButtonElement>());
   const menuPopoverRef = useRef<HTMLDivElement | null>(null);
+
+  const setMenuTrigger = useCallback((
+    name: ComposerMenu,
+    node: HTMLButtonElement | null,
+  ): void => {
+    setDismissibleMenuTrigger(name, node);
+    if (node) menuTriggerRefs.current.set(name, node);
+    else menuTriggerRefs.current.delete(name);
+  }, [setDismissibleMenuTrigger]);
 
   const setMenuPopover = (
     name: ComposerMenu,
@@ -83,8 +94,7 @@ export function useComposerMenus(): ComposerMenuController {
   useLayoutEffect(() => {
     if (!menu) return;
     const popover = menuPopoverRef.current;
-    const trigger = popover?.closest<HTMLElement>(".composer")
-      ?.querySelector<HTMLButtonElement>(`[aria-controls="${menuId(menu)}"]`);
+    const trigger = menuTriggerRefs.current.get(menu);
     if (!trigger || !popover) return;
     let active = true;
     let stopObserving: (() => void) | null = null;

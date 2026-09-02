@@ -134,13 +134,13 @@ test("collapses composer settings without displacing send and right-aligns user 
   await expect(compactOptions.getByRole("menuitem", { name: /^Access\b/ })).toBeVisible();
   await modeItem.hover();
   const modeOptions = page.getByRole("menu", { name: "Mode options" });
-  await expect(modeOptions).toBeVisible();
-  await expect(modeOptions.getByRole("menuitemradio").first()).toBeVisible();
+  await expect(modeOptions).toHaveCount(0);
   await modeItem.click();
   await expect(modeOptions).toBeVisible();
-  await page.mouse.move(20, 20);
-  await expect(modeOptions).toBeHidden();
+  await expect(modeOptions.getByRole("menuitemradio").first()).toBeFocused();
+  await modeOptions.getByRole("button", { name: "Back to composer options" }).click();
   await expect(compactOptions).toBeVisible();
+  await expect(modeItem).toBeFocused();
   await page.keyboard.press("Escape");
 
   const userAlignmentGap = await page.evaluate(() => {

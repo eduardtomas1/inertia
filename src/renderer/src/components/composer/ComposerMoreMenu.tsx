@@ -70,7 +70,6 @@ export function ComposerMoreMenu({
     setMenuPopover,
     moreSection,
     moreSubmenuSide,
-    morePopoverMaxHeight,
     morePopoverRef,
     moreSectionTriggerRefs,
     clearMoreHoverTimer,
@@ -289,9 +288,6 @@ export function ComposerMoreMenu({
             ref={morePopoverRef}
             id={menuId("more")}
             className="composer-popover composer-more-popover"
-            style={morePopoverMaxHeight === null
-              ? undefined
-              : { maxHeight: morePopoverMaxHeight }}
             role="menu"
             aria-label={moreSection && !moreSubmenuSide
               ? `${moreSectionLabel(moreSection)} options`
@@ -373,9 +369,6 @@ export function ComposerMoreMenu({
                 "composer-popover composer-more-submenu",
                 `opens-${moreSubmenuSide}`,
               )}
-              style={morePopoverMaxHeight === null
-                ? undefined
-                : { maxHeight: morePopoverMaxHeight }}
               role="menu"
               aria-label={`${moreSectionLabel(moreSection)} options`}
               data-more-submenu

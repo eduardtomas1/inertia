@@ -16,9 +16,10 @@ export async function createFixtureTemporaryDirectories(): Promise<{
 
 export function fixtureTemporaryEnvironment(
   processTemporaryDirectory: string,
-): Record<"TEMP" | "TMP" | "TMPDIR", string> {
+): Record<"INERTIA_TEST_TEMP_DIR" | "TEMP" | "TMP" | "TMPDIR", string> {
   // Electron and Node consult different variables across desktop platforms.
   return {
+    INERTIA_TEST_TEMP_DIR: processTemporaryDirectory,
     TEMP: processTemporaryDirectory,
     TMP: processTemporaryDirectory,
     TMPDIR: processTemporaryDirectory,

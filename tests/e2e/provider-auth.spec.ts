@@ -55,11 +55,12 @@ test.afterAll(async () => {
 test("hands Claude's PTY OAuth URL to the desktop browser exactly once", async () => {
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("button", { name: "Providers", exact: true }).click();
-  const claude = page.locator(".provider-account-row").filter({
-    has: page.getByText("Claude", { exact: true }),
-  });
+  const claude = page.getByRole("button", { name: "Configure Claude" });
   await expect(claude).toContainText("Sign in required", { timeout: 20_000 });
-  await claude.getByRole("button", { name: "Connect" }).click();
+  await claude.click();
+  await page.locator(".provider-settings-editor")
+    .getByRole("button", { name: "Connect" })
+    .click();
 
   const dialog = page.getByRole("dialog", { name: "Connect Claude" });
   await expect(dialog).toBeVisible();

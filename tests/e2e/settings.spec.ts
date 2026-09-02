@@ -83,7 +83,7 @@ test("navigates settings, changes theme, and returns to chat", async () => {
   const providers = page.getByRole("button", { name: "Providers", exact: true });
   await providers.click();
   await expect(providers).toHaveAttribute("aria-current", "page");
-  await expect(page.getByRole("heading", { name: "Agent accounts" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 3, name: "Providers" })).toBeVisible();
   await page.getByRole("button", { name: "Keybindings", exact: true }).click();
   await expect(page.getByText("Toggle project navigation", { exact: true })).toBeVisible();
 

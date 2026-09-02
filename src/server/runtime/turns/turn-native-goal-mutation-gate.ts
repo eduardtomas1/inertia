@@ -3,7 +3,25 @@ export class TurnNativeGoalMutationGate {
   private readonly inProgress = new Set<string>();
 
   blocksTurnAdmission(conversationId: string): boolean {
-    return this.inProgress.has(conversationId);
+    return this.tails.has(conversationId);
+  }
+
+  async waitForIdle(
+    conversationId: string,
+    deadlineAt = Number.POSITIVE_INFINITY,
+  ): Promise<boolean> {
+    if (!Number.isFinite(deadlineAt)) {
+      await this.tails.get(conversationId)?.catch(() => undefined);
+      return true;
+    }
+    while (this.tails.has(conversationId)) {
+      const remaining = deadlineAt - Date.now();
+      if (remaining <= 0) return false;
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, Math.min(25, remaining));
+      });
+    }
+    return true;
   }
 
   async run<T>(

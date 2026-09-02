@@ -686,6 +686,9 @@ describe("RuntimeStore conversation lifecycle", () => {
     expect(snapshot.plans).toContainEqual(expect.objectContaining({ runId: turn.runId, turnId: turn.id }));
     expect(usage.turnId).toBe(turn.id);
     expect(checkpoint.turnId).toBe(turn.id);
+    expect(store.removeUnassociatedCheckpoint(checkpoint.id, conversation.id))
+      .toBe(false);
+    expect(store.checkpoint(checkpoint.id).turnId).toBe(turn.id);
 
     const other = store.createConversation(conversation.projectId, "Other conversation");
     expect(() => store.addActivity({

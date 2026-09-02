@@ -1035,9 +1035,7 @@ export class RuntimeStore {
   }
   usageDashboard(range: UsageDashboardRange) { return this.turnLedgerRepository.usageDashboard(range); }
   dailyWork(range: DailyWorkRange) { return this.turnLedgerRepository.dailyWork(range); }
-  checkpointCount(conversationId: string): number {
-    return this.executionLedgerRepository.checkpointCount(conversationId);
-  }
+  checkpointCount(conversationId: string): number { return this.executionLedgerRepository.checkpointCount(conversationId); }
 
   addCheckpoint(
     input: Omit<CheckpointSummary, "id" | "createdAt" | "turnId"> & {
@@ -1046,6 +1044,8 @@ export class RuntimeStore {
   ): CheckpointSummary {
     return this.executionLedgerRepository.addCheckpoint(input);
   }
+
+  removeUnassociatedCheckpoint(checkpointId: string, conversationId: string): boolean { return this.executionLedgerRepository.removeUnassociatedCheckpoint(checkpointId, conversationId); }
 
   associateCheckpointWithTurn(
     checkpointId: string,

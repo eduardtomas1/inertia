@@ -14,6 +14,7 @@ import {
   type SubagentTrace,
 } from "../../../shared/contracts";
 import { RuntimeStore } from "../../database";
+import { RuntimeRequestError } from "../../runtime-errors";
 import type {
   ProviderEvent,
   ProviderRunFailure,
@@ -26,6 +27,7 @@ import type {
   ProviderStartAttempt,
   QueuedTurn,
   QueueTurnRequest,
+  TurnAdmissionLease,
   TurnControllerHooks,
   TurnProviderRuntime,
   TurnTerminalCause,
@@ -44,7 +46,6 @@ import {
 } from "./turn-controller-support";
 import {
   prepareTurnRequest,
-  resolveTurnRequest,
   type PreparedTurnRequest,
 } from "./turn-request-preparation";
 import { TurnStreamProjection } from "./turn-stream-projection";
@@ -63,10 +64,20 @@ import { providerFailureCause } from "./turn-provider-result";
 import { TurnFollowUpCoordinator } from "./turn-follow-up-coordinator";
 import { TurnTimeoutCoordinator } from "./turn-timeout-coordinator";
 import { TurnRunStateCoordinator } from "./turn-run-state-coordinator";
+import {
+  TurnAdmissionCoordinator,
+  waitForProviderCleanupBarriers,
+} from "./turn-admission-coordinator";
+import { queuePairedTurns } from "./turn-paired-queue";
+import {
+  adoptLiveTurn,
+  settleQueuedAdoptionFailure,
+} from "./turn-live-adoption";
 
 export type {
   QueuedTurn,
   QueueTurnRequest,
+  TurnAdmissionLease,
   TurnControllerHooks,
   TurnGitArtifactHookInput,
   TurnMetadataRefreshHookInput,
@@ -101,6 +112,7 @@ export class TurnController {
   private readonly settlementTasks = new Set<Promise<unknown>>();
   private readonly gitArtifactBarriers = new Map<string, Promise<void>>();
   private readonly providerRunOwnershipBarriers = new Map<string, Promise<void>>();
+  private readonly admissions: TurnAdmissionCoordinator;
   private readonly followUps: TurnFollowUpCoordinator;
   private readonly timeouts: TurnTimeoutCoordinator;
   private readonly nativeGoalMutations = new TurnNativeGoalMutationGate();
@@ -133,6 +145,18 @@ export class TurnController {
     );
     this.runtimeGenerationId = options.runtimeGenerationId ?? `${randomUUID()}:1`;
     this.systemBootId = options.systemBootId ?? `test:${randomUUID()}`;
+    this.admissions = new TurnAdmissionCoordinator({
+      isClosing: () => this.closing,
+      isActive: (conversationId) => this.isActive(conversationId),
+      hasProviderCleanup: (conversationId) =>
+        this.providerRunOwnershipBarriers.has(conversationId),
+      waitForProviderCleanup: async (conversationId, deadlineAt) =>
+        await this.waitForProviderCleanup([conversationId], deadlineAt),
+      blocksForGoalMutation: (conversationId) =>
+        this.nativeGoalMutations.blocksTurnAdmission(conversationId),
+      waitForGoalIdle: async (conversationId, deadlineAt) =>
+        await this.nativeGoalMutations.waitForIdle(conversationId, deadlineAt),
+    });
     this.followUps = new TurnFollowUpCoordinator({
       store: this.store,
       providers: this.providers,
@@ -251,22 +275,19 @@ export class TurnController {
   }
 
   async withNativeGoalMutation<T>(conversationId: string, operation: () => Promise<T>): Promise<T> {
+    while (true) {
+      const release = this.admissions.releaseBarrier(conversationId);
+      if (!release) break;
+      await release;
+    }
     return await this.nativeGoalMutations.run(conversationId, operation);
   }
 
-  async setNativeGoal(
-    input: Parameters<TurnNativeGoalCoordinator["set"]>[0],
-  ): ReturnType<TurnNativeGoalCoordinator["set"]> {
-    return this.nativeGoals.set(input);
-  }
+  async setNativeGoal(input: Parameters<TurnNativeGoalCoordinator["set"]>[0]): ReturnType<TurnNativeGoalCoordinator["set"]> { return this.nativeGoals.set(input); }
 
-  async clearNativeGoal(conversationId: string): Promise<boolean | "superseded" | null> {
-    return await this.nativeGoals.clear(conversationId);
-  }
+  async clearNativeGoal(conversationId: string): Promise<boolean | "superseded" | null> { return await this.nativeGoals.clear(conversationId); }
 
-  isClosing(): boolean {
-    return this.closing;
-  }
+  isClosing(): boolean { return this.closing; }
 
   hasActiveCheckout(checkoutPath: string): boolean {
     const tracked = [
@@ -277,25 +298,20 @@ export class TurnController {
     return hasActiveTurnCheckout(this.store, this.providers, tracked, checkoutPath);
   }
 
-  /**
-   * Wait for exact conversations whose provider processes are still detaching.
-   * Yield once before inspecting the barriers because a terminal hook runs
-   * during settlement, immediately before that settlement registers its own
-   * cleanup barrier.
-   */
+  waitForProviderCleanup(conversationIds: readonly string[]): Promise<void>;
+  waitForProviderCleanup(conversationIds: readonly string[], deadlineAt: number): Promise<boolean>;
   async waitForProviderCleanup(
     conversationIds: readonly string[],
-  ): Promise<void> {
-    const expected = new Set(conversationIds);
-    await Promise.resolve();
-    while (true) {
-      const barriers = [...this.providerRunOwnershipBarriers.entries()]
-        .filter(([conversationId]) => expected.has(conversationId))
-        .map(([, barrier]) => barrier);
-      if (barriers.length === 0) return;
-      await Promise.allSettled(barriers);
-    }
+    deadlineAt = Number.POSITIVE_INFINITY,
+  ): Promise<void | boolean> {
+    return await waitForProviderCleanupBarriers(
+      this.providerRunOwnershipBarriers,
+      conversationIds,
+      deadlineAt,
+    );
   }
+
+  async acquireTurnAdmission(conversationId: string, timeoutMs: number): Promise<TurnAdmissionLease | null> { return await this.admissions.acquire(conversationId, timeoutMs); }
 
   async reconcileInactiveDuoTurn(
     launchId: string,
@@ -500,20 +516,31 @@ export class TurnController {
   }
 
   /** Synchronous ownership handoff runs after commit and before live adoption. */
-  queue(request: QueueTurnRequest, onPersisted?: () => void): QueuedTurn {
-    if (this.closing) throw new Error("The local runtime is shutting down.");
+  queue(
+    request: QueueTurnRequest,
+    onPersisted?: () => void,
+    admission?: TurnAdmissionLease,
+  ): QueuedTurn {
+    if (this.closing) {
+      throw new RuntimeRequestError("The local runtime is shutting down.");
+    }
+    this.admissions.assertQueueAuthority(request.conversationId, admission);
     if (
       !request.goalStart
       && this.nativeGoalMutations.blocksTurnAdmission(request.conversationId)
     ) {
-      throw new Error("A Codex goal update is in progress for this conversation.");
+      throw new RuntimeRequestError(
+        "A provider goal update is in progress for this conversation.",
+      );
     }
     this.store.assertDuoComparisonTurnAllowed(
       request.conversationId,
       request.authorizedDuoComparisonLaunchId,
     );
     if (this.isActive(request.conversationId)) {
-      throw new Error("This conversation already has an active turn.");
+      throw new RuntimeRequestError(
+        "This conversation already has an active turn.",
+      );
     }
 
     const prepared = prepareTurnRequest({
@@ -523,7 +550,13 @@ export class TurnController {
       id: this.id,
       now: () => this.now(),
       clock: this.clock,
-    }, request, onPersisted);
+    }, request, onPersisted, (queued) => this.failQueuedAdoption(
+      queued,
+      request.checkpointId ?? null,
+    ));
+    if (admission) {
+      this.admissions.consume(admission);
+    }
     return this.adoptPreparedTurn(prepared);
   }
 
@@ -531,88 +564,53 @@ export class TurnController {
     launchId: string,
     requests: readonly [QueueTurnRequest, QueueTurnRequest],
   ): [QueuedTurn, QueuedTurn] {
-    if (this.closing) throw new Error("The local runtime is shutting down.");
-    for (const request of requests) {
-      this.store.assertDuoComparisonTurnAllowed(request.conversationId);
-      if (this.nativeGoalMutations.blocksTurnAdmission(request.conversationId)) {
-        throw new Error("A Codex goal update is in progress for this conversation.");
-      }
-      if (this.isActive(request.conversationId)) {
-        throw new Error("A Duo conversation already has an active turn.");
-      }
-    }
-    if (requests[0].conversationId === requests[1].conversationId) {
-      throw new Error("A Duo requires two distinct conversations.");
-    }
-    const dependencies = {
+    return queuePairedTurns({
       store: this.store,
       providers: this.providers,
       hooks: this.hooks,
       id: this.id,
       now: () => this.now(),
       clock: this.clock,
-    };
-    const resolved = requests.map((request) =>
-      resolveTurnRequest(dependencies, request)) as [
-        ReturnType<typeof resolveTurnRequest>,
-        ReturnType<typeof resolveTurnRequest>,
-      ];
-    const durable = this.store.beginPairedAgentTurns(
-      launchId,
-      [resolved[0].input, resolved[1].input],
-      this.now(),
-    );
-    const prepared: [PreparedTurnRequest, PreparedTurnRequest] = [
-      resolved[0].adopt(durable[0]),
-      resolved[1].adopt(durable[1]),
-    ];
-    return [
-      this.adoptPreparedTurn(prepared[0]),
-      this.adoptPreparedTurn(prepared[1]),
-    ];
+      isClosing: () => this.closing,
+      hasAdmission: (conversationId) => this.admissions.has(conversationId),
+      blocksForGoalMutation: (conversationId) =>
+        this.nativeGoalMutations.blocksTurnAdmission(conversationId),
+      isActive: (conversationId) => this.isActive(conversationId),
+      adopt: (prepared) => this.adoptPreparedTurn(prepared),
+      failAdoption: (queued, checkpointId, error) =>
+        this.failPairedAdoption(queued, checkpointId, error),
+    }, launchId, requests);
   }
 
   private adoptPreparedTurn(prepared: PreparedTurnRequest): QueuedTurn {
-    const { queued } = prepared;
-    let active: ActiveTurn;
-    const assistantStream = this.streams.create(
-      () => active,
-      "assistant",
-    );
-    const reasoningStream = this.streams.create(
-      () => active,
-      "reasoning",
-    );
-    active = {
-      ...prepared.active,
-      assistantStream,
-      reasoningStream,
-    };
-    this.activeByConversation.set(active.conversation.id, active);
-    this.activeByTurn.set(queued.turn.id, active);
-    this.agentPlans.delete(active.conversation.id);
+    return adoptLiveTurn({
+      store: this.store,
+      streams: this.streams,
+      hooks: this.hooks,
+      activeByConversation: this.activeByConversation,
+      activeByTurn: this.activeByTurn,
+      agentPlans: this.agentPlans,
+      failActive: (active, message) => this.settle(
+        active,
+        "failed",
+        "turn-adoption-failed",
+        message,
+      ),
+      failQueued: (queued, checkpointId) =>
+        this.failQueuedAdoption(queued, checkpointId),
+      cleanup: (active) => this.cleanup(active),
+      track: (value) => this.track(value),
+    }, prepared);
+  }
 
-    try {
-      if (active.checkpointId) {
-        this.store.associateCheckpointWithTurn(
-          active.checkpointId,
-          active.conversation.id,
-          active.turn.runId,
-          active.turn.id,
-        );
-      }
-    } catch (error) {
-      this.settle(active, "failed", "checkpoint-association-failed", publicTurnError(error));
-      throw error;
-    }
+  private failPairedAdoption(queued: QueuedTurn, checkpointId: string | null, error: unknown): void {
+    const active = this.activeByTurn.get(queued.turn.id);
+    if (!active) return this.failQueuedAdoption(queued, checkpointId);
+    this.settle(active, "failed", "turn-adoption-failed", publicTurnError(error));
+  }
 
-    if (active.structuredContext !== undefined) {
-      this.track(this.hooks.onStructuredContextCaptured?.({
-        turn: queued.turn,
-        context: active.structuredContext,
-      }));
-    }
-    return queued;
+  private failQueuedAdoption(queued: QueuedTurn, checkpointId: string | null): void {
+    settleQueuedAdoptionFailure(this.store, queued, this.now(), checkpointId);
   }
 
   async startPair(turnIds: readonly [string, string]): Promise<[boolean, boolean]> {
@@ -1028,6 +1026,7 @@ export class TurnController {
   async dispose(cause: "runtime-shutdown" | "runtime-crash" = "runtime-shutdown"): Promise<void> {
     if (this.closing) return;
     this.closing = true;
+    this.admissions.dispose();
     for (const active of this.activeByConversation.values()) {
       this.providers.cancel(active.conversation.id);
       this.settle(
@@ -1129,9 +1128,7 @@ export class TurnController {
       if (!outcomeAlreadyRequested && active.runState.hasLiveDescendants()) {
         const message = "The provider ended while delegated work was still running.";
         this.settle(active, "failed", "provider-error", message, {
-          reason: "transport-closed",
-          message,
-          phase: active.turn.status,
+          reason: "transport-closed", message, phase: active.turn.status,
           terminalEvent: "result/completed-with-live-descendants",
         });
       } else {

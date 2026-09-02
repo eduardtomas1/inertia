@@ -15,7 +15,14 @@ import {
   AttachmentResolutionError,
 } from "./runtime/attachments/attachment-errors";
 
-export class RuntimeRequestError extends Error {}
+export class RuntimeRequestError extends Error {
+  constructor(
+    message: string,
+    readonly code?: string,
+  ) {
+    super(message);
+  }
+}
 
 export function publicRuntimeError(error: unknown): string {
   if (error instanceof AttachmentResolutionError) {

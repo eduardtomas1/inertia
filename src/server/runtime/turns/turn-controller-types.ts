@@ -208,6 +208,17 @@ export interface QueuedTurn {
   turn: AgentTurn;
 }
 
+/**
+ * Server-only ownership for one new-turn preparation window. The controller
+ * consumes the exact lease when queue() commits the durable turn; callers may
+ * always release it in finally because release becomes a no-op after handoff.
+ */
+export interface TurnAdmissionLease {
+  readonly conversationId: string;
+  readonly token: symbol;
+  release(): void;
+}
+
 export type TurnTerminalCause =
   | "provider-completed"
   | "provider-error"
@@ -223,6 +234,7 @@ export type TurnTerminalCause =
   | "turn-timeout"
   | "renderer-disconnected"
   | "turn-start-failed"
+  | "turn-adoption-failed"
   | "stream-persistence-failed"
   | "checkpoint-association-failed";
 

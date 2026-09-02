@@ -57,11 +57,17 @@ export function prepareTurnRequest(
   dependencies: PrepareTurnRequestDependencies,
   request: QueueTurnRequest,
   onPersisted?: () => void,
+  onAdoptionFailure?: (queued: QueuedTurn, error: unknown) => void,
 ): PreparedTurnRequest {
   const resolved = resolveTurnRequest(dependencies, request);
   const queued = dependencies.store.beginAgentTurn(resolved.input);
-  onPersisted?.();
-  return resolved.adopt(queued);
+  try {
+    onPersisted?.();
+    return resolved.adopt(queued);
+  } catch (error) {
+    onAdoptionFailure?.(queued, error);
+    throw error;
+  }
 }
 
 /**

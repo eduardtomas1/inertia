@@ -221,7 +221,7 @@ describe("cross-platform packaged behavior contract", () => {
     expect(windowsReleaseCheck).toContain("run: npm run check");
 
     expect(workflow).toContain("name: Windows unit tests (${{ matrix.shard }}/2)");
-    expect(workflow).toContain("timeout-minutes: 30");
+    expect(workflow).toContain("timeout-minutes: 45");
     expect(workflow).toContain("shard: [1, 2]");
     expect(workflow).toContain(
       "run: npm test -- --shard=${{ matrix.shard }}/2",

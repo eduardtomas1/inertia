@@ -334,6 +334,12 @@ describe("cross-platform packaged behavior contract", () => {
     expect(playwright).toContain("workers: 1");
     expect(playwright).toContain('dependencies: ["display-sensitive"]');
     expect(playwright).toContain("INERTIA_E2E_WORKERS");
+    // Deadlines scale with the number of concurrent Electron instances rather
+    // than being retried until a flake passes.
+    expect(playwright).toContain("const budgetScale = workers;");
+    expect(playwright).toContain("timeout: 45_000 * budgetScale");
+    expect(playwright).toContain("expect: { timeout: 15_000 * budgetScale }");
+    expect(playwright).not.toContain("retries:");
   });
 
   it("keeps one native smoke implementation for macOS, Windows, and Linux runtime supervision", async () => {

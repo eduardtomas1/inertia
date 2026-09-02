@@ -24,12 +24,21 @@ const parsedWorkers = Number.parseInt(process.env.INERTIA_E2E_WORKERS ?? "", 10)
 const workers =
   Number.isInteger(parsedWorkers) && parsedWorkers > 0 ? parsedWorkers : 2;
 
+// Deadlines have to be stated per concurrent Electron instance, not per run.
+// The hosted runners have four cores, so a second instance roughly halves the
+// cycles available to secure attachment import, which hashes and copies real
+// files: at one worker it settles well inside 15s, and at two it overran that
+// budget on Linux x64 while the same specs passed on Linux ARM64. Scaling with
+// the worker count keeps the assertion honest instead of retrying a green test
+// until it passes; a genuine break still fails inside one scaled budget.
+const budgetScale = workers;
+
 export default defineConfig({
   testDir,
-  timeout: 45_000,
+  timeout: 45_000 * budgetScale,
   // Cold Electron runtime, Git, and fixture readiness on macOS ARM64 can exceed
   // Playwright's five-second default; explicit shorter protocol waits still win.
-  expect: { timeout: 15_000 },
+  expect: { timeout: 15_000 * budgetScale },
   fullyParallel: false,
   workers,
   reporter: "line",

@@ -111,15 +111,22 @@ function sample() {
   const current = all.filter((pid) => (
     guardedTreePids.has(pid) || controlHelperPids.has(pid)
   ));
-  const guardedCurrent = current.filter((pid) => guardedTreePids.has(pid));
-  const helpersCurrent = current.filter((pid) => controlHelperPids.has(pid));
+  // Exited children remain in /proc until libuv gets its waitpid turn. They
+  // no longer execute control work or own RSS/threads, but remain in `current`
+  // so settlement still requires the parent to reap every zombie.
+  const liveCurrent = current.filter((pid) => {
+    const state = procState(pid);
+    return state !== null && state !== "Z";
+  });
+  const guardedCurrent = liveCurrent.filter((pid) => guardedTreePids.has(pid));
+  const helpersCurrent = liveCurrent.filter((pid) => controlHelperPids.has(pid));
   peakControlHelpers = Math.max(peakControlHelpers, helpersCurrent.length);
-  peakDescendants = Math.max(peakDescendants, current.length);
+  peakDescendants = Math.max(peakDescendants, liveCurrent.length);
   peakGuardedTreeDescendants = Math.max(
     peakGuardedTreeDescendants,
     guardedCurrent.length,
   );
-  const usage = current.map(procResourceUsage);
+  const usage = liveCurrent.map(procResourceUsage);
   peakDescendantRssKb = Math.max(
     peakDescendantRssKb,
     usage.reduce((sum, entry) => sum + entry.rssKb, 0),

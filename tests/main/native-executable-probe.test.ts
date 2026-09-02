@@ -519,11 +519,12 @@ test.skipIf(process.platform === "win32")(
     const temporaryDirectory = await mkdtemp(join(tmpdir(), "inertia-native-pty-probe-"));
     const pidFile = join(temporaryDirectory, "pty.pid");
     let ptyPid = 0;
+    let probeRootPid = 0;
     let probeOutcome: Promise<unknown> | null = null;
     try {
       const moduleUrl = pathToFileURL(join(root, "scripts", "native-executable-probe.mjs")).href;
-      const { probeNativeExecutable } = await import(moduleUrl) as {
-        probeNativeExecutable: (
+      const { probeNativeExecutableWithDependencies } = await import(moduleUrl) as {
+        probeNativeExecutableWithDependencies: (
           command: string,
           args: string[],
           options: {
@@ -531,9 +532,33 @@ test.skipIf(process.platform === "win32")(
             startAfterOwnership: boolean;
             timeoutMs: number;
           },
+          dependencies: {
+            processTracker: {
+              readPipeOwners: () => Set<number> | null;
+              readPipeToken: (child: { pid?: number }) => {
+                identities: Set<string>;
+                ownerPids: Set<number>;
+              } | null;
+              readProcesses: () => Array<{
+                groupPid: number;
+                parentPid: number;
+                pid: number;
+              }> | null;
+            };
+          },
         ) => Promise<unknown>;
       };
-      const probe = probeNativeExecutable(process.execPath, [
+      const recordedPtyPid = (): number | null => {
+        try {
+          const candidate = Number(readFileSync(pidFile, "utf8"));
+          return Number.isSafeInteger(candidate) && candidate > 1
+            ? candidate
+            : null;
+        } catch {
+          return null;
+        }
+      };
+      const probe = probeNativeExecutableWithDependencies(process.execPath, [
         join(root, "scripts", "native-pty-probe.mjs"),
         join(import.meta.dirname, "..", "fixtures", "native-pty-probe-hang.sh"),
       ], {
@@ -542,11 +567,45 @@ test.skipIf(process.platform === "win32")(
           INERTIA_PTY_PID_FILE: pidFile,
         },
         startAfterOwnership: true,
-        // This test proves native PTY process-group cleanup. The initial
-        // ownership scan may share a heavily loaded process table with the
-        // full suite, so keep observation within the production probe bound
-        // without racing the configured cleanup deadline.
         timeoutMs: 10_000,
+      }, {
+        // Pipe-token discovery has focused coverage above. Keep this native
+        // PTY cleanup case independent of full-suite lsof process-table load,
+        // while still exercising the real tracker, signals, and process groups.
+        processTracker: {
+          readPipeOwners: () => {
+            const candidate = recordedPtyPid();
+            return candidate === null ? null : new Set([candidate]);
+          },
+          readPipeToken: (child) => {
+            const candidate = child.pid;
+            if (!Number.isSafeInteger(candidate) || !candidate || candidate <= 1) {
+              return null;
+            }
+            probeRootPid = candidate;
+            return {
+              identities: new Set(["native-pty-probe-test-pipe"]),
+              ownerPids: new Set([candidate]),
+            };
+          },
+          readProcesses: () => {
+            const candidate = recordedPtyPid();
+            return candidate === null || probeRootPid <= 1
+              ? null
+              : [
+                  {
+                    groupPid: probeRootPid,
+                    parentPid: process.pid,
+                    pid: probeRootPid,
+                  },
+                  {
+                    groupPid: candidate,
+                    parentPid: probeRootPid,
+                    pid: candidate,
+                  },
+                ];
+          },
+        },
       });
       probeOutcome = probe.then(() => null, (error: unknown) => error);
       const pidFileDeadline = Date.now() + 8_000;

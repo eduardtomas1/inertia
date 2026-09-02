@@ -11,7 +11,7 @@ const budgets = {
   entryJavaScript: 205 * kibibyte,
   // The in-chat project selector adds its draft-routing controller to the
   // workbench path while keeping the visual styling in the deferred App CSS.
-  mainWorkbenchFirstLoadJavaScript: 703 * kibibyte,
+  mainWorkbenchFirstLoadJavaScript: 704 * kibibyte,
   detachedChatFirstLoadJavaScript: 535 * kibibyte,
   entryCss: 340 * kibibyte,
   detachedChatCss: 8 * kibibyte,

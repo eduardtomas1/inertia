@@ -1,12 +1,18 @@
 import { randomUUID } from "node:crypto";
 
-import type { Event, OpencodeClient, QuestionInfo } from "@opencode-ai/sdk/v2";
+import type {
+  Event,
+  OpencodeClient,
+  PermissionV2Reply,
+  QuestionInfo,
+} from "@opencode-ai/sdk/v2";
 
 import { stableProviderActivityId } from "./activity-lifecycle";
 import type { AgentHarnessStartOptions } from "./agent-harness";
 import { createAgentHarnessEmitter } from "./agent-harness";
 import { type ProviderRunFailure } from "./contracts";
 import { CappedProviderBuffer } from "./io";
+import type { AgentApprovalDecision } from "./interactions";
 import {
   openCodeInteractionId,
   openCodeQuestionPayload,
@@ -41,6 +47,8 @@ import {
 
 const MAX_PENDING_INTERACTIONS = 64;
 const MAX_OBSERVED_INTERACTIONS = 256;
+const AFFIRMATIVE_PERMISSION_REPLIES = ["once", "always"] as const satisfies
+  readonly Exclude<PermissionV2Reply, "reject">[];
 
 export type OpenCodeInteractionProtocol = "legacy" | "v2";
 
@@ -729,9 +737,18 @@ function resolveOpenCodeApproval(
     emitter.rich({
       type: "approval-resolved",
       requestId,
-      decision: reply === "reject" ? "deny" : "approve",
+      decision: openCodeExternalApprovalDecision(reply),
     });
   }
+}
+
+export function openCodeExternalApprovalDecision(
+  reply: unknown,
+): AgentApprovalDecision | "cancelled" {
+  if (reply === "reject") return "deny";
+  return AFFIRMATIVE_PERMISSION_REPLIES.some((candidate) => candidate === reply)
+    ? "approve"
+    : "cancelled";
 }
 
 function resolveOpenCodeInput(

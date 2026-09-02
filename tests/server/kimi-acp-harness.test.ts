@@ -3,6 +3,11 @@ import { chmodSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Readable, Writable } from "node:stream";
 import { pipeline } from "node:stream/promises";
+import type {
+  PermissionOption,
+  RequestPermissionRequest,
+  ToolKind,
+} from "@agentclientprotocol/sdk";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
@@ -170,32 +175,146 @@ setInterval(() => {}, 1000);
       .toThrow("Kimi Code requires its native ACP harness");
   });
 
-  it("recognizes only bounded Kimi question and plan-review options as input", () => {
-    const request = (options: Array<{
-      optionId: string;
-      name: string;
-      kind: "allow_once" | "reject_once";
-    }>) => ({
+  it("recognizes only coherent Kimi question and plan-review envelopes as input", () => {
+    const request = (
+      title: string,
+      options: PermissionOption[],
+      kind: ToolKind | null | undefined = "other",
+      question = "Which implementation?",
+    ): Pick<RequestPermissionRequest, "options" | "toolCall"> => ({
       toolCall: {
         toolCallId: "tool",
-        title: "Question",
+        title,
+        kind,
+        content: [{
+          type: "content",
+          content: { type: "text", text: question },
+        }],
       },
       options,
     });
-    expect(kimiInputOptions(request([
+    expect(kimiInputOptions(request("AskUserQuestion", [
       { optionId: "q0_opt_0", name: "Focused", kind: "allow_once" },
+      { optionId: "q0_opt_1", name: "Broad", kind: "allow_once" },
       { optionId: "q0_skip", name: "Skip", kind: "reject_once" },
     ]))).toEqual({
       kind: "question",
-      options: [{ id: "q0_opt_0", label: "Focused" }],
+      prompt: "Kimi Code is requesting permission through AskUserQuestion. Selecting an option authorizes this request.\n\nWhich implementation?\n\nOperation details:\nNo additional operation details were provided.",
+      options: [
+        { id: "q0_opt_0", label: "Focused" },
+        { id: "q0_opt_1", label: "Broad" },
+      ],
     });
-    expect(kimiInputOptions(request([
+    expect(kimiInputOptions(request("ExitPlanMode", [
       { optionId: "plan_approve", name: "Approve", kind: "allow_once" },
       { optionId: "plan_revise", name: "Revise", kind: "reject_once" },
+      { optionId: "plan_reject_and_exit", name: "Reject and Exit", kind: "reject_once" },
     ]))).toMatchObject({ kind: "plan" });
-    expect(kimiInputOptions(request([
+    expect(kimiInputOptions(request("ExitPlanMode", [
+      { optionId: "plan_opt_0", name: "Focused", kind: "allow_once" },
+      { optionId: "plan_opt_1", name: "Broad", kind: "allow_once" },
+      { optionId: "plan_revise", name: "Revise", kind: "reject_once" },
+      { optionId: "plan_reject_and_exit", name: "Reject and Exit", kind: "reject_once" },
+    ]))).toMatchObject({ kind: "plan" });
+    expect(kimiInputOptions(request("AskUserQuestion", [
       { optionId: "approve_once", name: "Approve once", kind: "allow_once" },
       { optionId: "reject", name: "Reject", kind: "reject_once" },
+    ]))).toBeNull();
+  });
+
+  it("rejects adversarial Kimi input lookalikes before they reach the input UI", () => {
+    const questionOptions = (): PermissionOption[] => [
+      { optionId: "q0_opt_0", name: "Café", kind: "allow_once" },
+      { optionId: "q0_opt_1", name: "Broad", kind: "allow_once" },
+      { optionId: "q0_skip", name: "Skip", kind: "reject_once" },
+    ];
+    const request = (
+      overrides: Partial<Pick<RequestPermissionRequest["toolCall"], "title" | "kind" | "content" | "rawInput">> = {},
+      options = questionOptions(),
+    ): Pick<RequestPermissionRequest, "options" | "toolCall"> => ({
+      toolCall: {
+        toolCallId: "tool",
+        title: "AskUserQuestion",
+        kind: "other",
+        content: [{
+          type: "content",
+          content: { type: "text", text: "Choose safely" },
+        }],
+        ...overrides,
+      },
+      options,
+    });
+
+    for (const kind of [
+      "read",
+      "search",
+      "fetch",
+      "think",
+      "switch_mode",
+      "edit",
+      "delete",
+      "move",
+      "execute",
+    ] satisfies ToolKind[]) {
+      expect(kimiInputOptions(request({ kind }))).toBeNull();
+    }
+    expect(kimiInputOptions(request({ title: "Write" }))).toBeNull();
+    expect(kimiInputOptions(request({ title: "askuserquestion" }))).toBeNull();
+    expect(kimiInputOptions(request({}, [
+      ...questionOptions(),
+      { optionId: "approve_once", name: "Approve once", kind: "allow_once" },
+    ]))).toBeNull();
+    expect(kimiInputOptions(request({}, [
+      { optionId: "q0_opt_0", name: "Focused", kind: "reject_once" },
+      { optionId: "q0_skip", name: "Skip", kind: "reject_once" },
+    ]))).toBeNull();
+    expect(kimiInputOptions(request({}, [
+      { optionId: "q0_opt_0", name: "Focused", kind: "allow_once" },
+      { optionId: "q1_opt_1", name: "Broad", kind: "allow_once" },
+      { optionId: "q0_skip", name: "Skip", kind: "reject_once" },
+    ]))).toBeNull();
+    expect(kimiInputOptions(request({}, [
+      { optionId: "q0_opt_0", name: "Café", kind: "allow_once" },
+      { optionId: "q0_opt_1", name: "cafe\u0301", kind: "allow_once" },
+      { optionId: "q0_skip", name: "Skip", kind: "reject_once" },
+    ]))).toBeNull();
+    expect(kimiInputOptions(request({}, [
+      { optionId: "q0_opt_0", name: "Focused\u202Etxt.exe", kind: "allow_once" },
+      { optionId: "q0_skip", name: "Skip", kind: "reject_once" },
+    ]))).toBeNull();
+    expect(kimiInputOptions(request({
+      content: [{
+        type: "content",
+        content: { type: "text", text: "Choose\u2066 hidden operation" },
+      }],
+    }))).toBeNull();
+    const coherentForgedEnvelope = kimiInputOptions(request({
+      rawInput: { command: "hidden mutation" },
+    }));
+    expect(coherentForgedEnvelope?.prompt).toContain(
+      "Selecting an option authorizes this request.",
+    );
+    expect(coherentForgedEnvelope?.prompt).toContain(
+      'Operation details:\n{"command":"hidden mutation"}',
+    );
+    expect(kimiInputOptions(request({
+      rawInput: { command: "hidden\u034Fmutation" },
+    }))).toBeNull();
+
+    const incompletePlan = request({ title: "ExitPlanMode" }, [
+      { optionId: "plan_approve", name: "Approve", kind: "allow_once" },
+      { optionId: "plan_revise", name: "Revise", kind: "reject_once" },
+    ]);
+    expect(kimiInputOptions(incompletePlan)).toBeNull();
+    expect(kimiInputOptions(request({ title: "ExitPlanMode" }, [
+      { optionId: "plan_opt_0", name: "Only approach", kind: "allow_once" },
+      { optionId: "plan_revise", name: "Revise", kind: "reject_once" },
+      { optionId: "plan_reject_and_exit", name: "Reject and Exit", kind: "reject_once" },
+    ]))).toBeNull();
+    expect(kimiInputOptions(request({ title: "ExitPlanMode" }, [
+      { optionId: "plan_approve", name: "Approve", kind: "allow_once" },
+      { optionId: "plan_revise", name: "Revise", kind: "reject_once" },
+      { optionId: "plan_reject_and_exit", name: "Exit", kind: "allow_once" },
     ]))).toBeNull();
   });
 
@@ -330,7 +449,9 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       text: "Kimi response",
       sessionId: "kimi-rich-session",
     });
-    expect(questions).toEqual(["Which implementation?"]);
+    expect(questions).toEqual([
+      "Kimi Code is requesting permission through AskUserQuestion. Selecting an option authorizes this request.\n\nWhich implementation?\n\nOperation details:\nNo additional operation details were provided.",
+    ]);
     expect(approvals).toEqual([]);
     expect(plans).toEqual(["Inspect", "Implement"]);
     expect(thoughts).toEqual(["Inspecting"]);

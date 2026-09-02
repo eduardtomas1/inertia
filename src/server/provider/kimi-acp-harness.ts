@@ -77,13 +77,18 @@ import {
   unconfirmedAcpCompactionFailure,
 } from "./acp-compaction-projection";
 import { parseAcpSessionNotification } from "./acp-json-rpc";
+import {
+  kimiInputOptions,
+  type KimiInputOptions,
+} from "./kimi-input-options";
+
+export { kimiInputOptions };
 
 const MAX_WIRE_LINE_BYTES = 1024 * 1024;
 const MAX_EVENT_TEXT_CHARS = 1024 * 1024;
 const MAX_RESULT_TEXT_CHARS = 4 * 1024 * 1024;
 const MAX_STDERR_CHARS = 32 * 1024;
 const MAX_PENDING_INTERACTIONS = 64;
-const MAX_INPUT_OPTIONS = 20;
 const MAX_TRACKED_TOOL_ACTIVITIES = 1_024;
 const MAX_TOOL_STATE_TEXT_CHARS = 4 * 1024;
 const MAX_AVAILABLE_COMMANDS = 256;
@@ -757,7 +762,6 @@ async function kimiPermission(
   if (inputOptions) {
     return kimiInputPermission(
       params,
-      displayParams,
       inputOptions,
       signal,
       emit,
@@ -821,64 +825,8 @@ async function kimiPermission(
     : { outcome: { outcome: "cancelled" } };
 }
 
-interface KimiInputOption {
-  id: string;
-  label: string;
-}
-
-interface KimiInputOptions {
-  kind: "question" | "plan";
-  options: KimiInputOption[];
-}
-
-export function kimiInputOptions(
-  params: Pick<RequestPermissionRequest, "options" | "toolCall">,
-): KimiInputOptions | null {
-  const questionOptions = params.options.filter((option) =>
-    /^q\d+_opt_\d+$/u.test(option.optionId),
-  );
-  if (questionOptions.length > 0) {
-    return {
-      kind: "question",
-      options: boundedInputOptions(questionOptions),
-    };
-  }
-  const planOptions = params.options.filter((option) =>
-    /^plan_(?:opt_\d+|approve|revise|reject_and_exit)$/u.test(option.optionId),
-  );
-  if (planOptions.length > 0) {
-    return {
-      kind: "plan",
-      options: boundedInputOptions(planOptions),
-    };
-  }
-  return null;
-}
-
-function boundedInputOptions(options: PermissionOption[]): KimiInputOption[] {
-  if (options.length > MAX_INPUT_OPTIONS) {
-    throw new Error(
-      `Kimi Code sent more than ${MAX_INPUT_OPTIONS} input options.`,
-    );
-  }
-  const seen = new Set<string>();
-  return options.map((option) => {
-    if (
-      !option.optionId
-      || option.optionId.length > 160
-      || seen.has(option.optionId)
-    ) throw new Error("Kimi Code sent an invalid input option identity.");
-    seen.add(option.optionId);
-    return {
-      id: option.optionId,
-      label: bounded(option.name || option.optionId),
-    };
-  });
-}
-
 async function kimiInputPermission(
   params: RequestPermissionRequest,
-  displayParams: RequestPermissionRequest,
   input: KimiInputOptions,
   signal: AbortSignal,
   emit: ReturnType<typeof createAgentHarnessEmitter>["rich"],
@@ -891,14 +839,14 @@ async function kimiInputPermission(
     autoResolutionMs: null,
     questions: [{
       id: questionId,
-      header: input.kind === "plan" ? "Plan review" : "Question",
-      question: permissionQuestionText(displayParams, input.kind),
+      header: "Kimi permission",
+      question: input.prompt,
       isOther: false,
       isSecret: false,
       allowMultiple: false,
       options: input.options.map((option) => ({
         ...option,
-        description: "",
+        description: "Selecting this option authorizes the Kimi request.",
       })),
     }],
   };
@@ -919,37 +867,16 @@ async function kimiInputPermission(
   });
   if (signal.aborted) return { outcome: { outcome: "cancelled" } };
   const answer = answers[questionId]?.[0];
-  const selectedIndex = input.options.findIndex((option) =>
+  const selected = input.options.find((option) =>
     option.id === answer || option.label === answer,
   );
-  const selected = selectedIndex >= 0
-    ? kimiInputOptions(params)?.options[selectedIndex]
+  const sourceInput = kimiInputOptions(params);
+  const sourceOption = sourceInput?.kind === input.kind && selected
+    ? sourceInput.options.find(({ id }) => id === selected.id)
     : undefined;
-  return selected
-    ? { outcome: { outcome: "selected", optionId: selected.id } }
+  return sourceOption
+    ? { outcome: { outcome: "selected", optionId: sourceOption.id } }
     : { outcome: { outcome: "cancelled" } };
-}
-
-function permissionQuestionText(
-  params: Pick<RequestPermissionRequest, "toolCall">,
-  kind: KimiInputOptions["kind"],
-): string {
-  for (const content of params.toolCall.content ?? []) {
-    const value = objectValue(content);
-    if (value?.type === "content" && typeof value.content === "object") {
-      const nested = objectValue(value.content);
-      if (nested?.type === "text" && typeof nested.text === "string") {
-        return bounded(nested.text);
-      }
-    }
-    if (value?.type === "text" && typeof value.text === "string") {
-      return bounded(value.text);
-    }
-  }
-  return bounded(
-    params.toolCall.title
-      || (kind === "plan" ? "How should Kimi Code proceed with this plan?" : "Kimi Code needs your input."),
-  );
 }
 
 export function permissionDisplayIsSafe(

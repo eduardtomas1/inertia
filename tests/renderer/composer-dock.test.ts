@@ -18,8 +18,8 @@ const toolbarSource = readFileSync(
   new URL("../../src/renderer/src/components/composer/ComposerToolbar.tsx", import.meta.url),
   "utf8",
 );
-const sendActionsSource = readFileSync(
-  new URL("../../src/renderer/src/components/composer/ComposerSendActions.tsx", import.meta.url),
+const queuedActionsSource = readFileSync(
+  new URL("../../src/renderer/src/components/composer/ComposerQueuedActions.tsx", import.meta.url),
   "utf8",
 );
 const settingsSource = readFileSync(
@@ -155,8 +155,8 @@ describe("cohesive composer dock", () => {
       "textarea.style.overflowY = contentHeight > MAX_TEXTAREA_HEIGHT_PX",
     );
     expect(inputSource).toContain("if (shouldSubmitComposerKey(event))");
-    expect(sendActionsSource).toContain('className="composer-queue"');
-    expect(sendActionsSource).toContain('aria-label="Send queued message now"');
+    expect(queuedActionsSource).toContain('className="composer-queue"');
+    expect(queuedActionsSource).toContain('aria-label="Send queued message now"');
     expect(composerSource).toContain('event.dataTransfer.types.includes("Files")');
     expect(inputSource).toContain("event.clipboardData.files.length > 0");
     expect(inputSource).toContain('aria-label="Project files"');

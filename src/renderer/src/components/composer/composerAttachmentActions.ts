@@ -7,7 +7,6 @@ import {
   chatAttachmentMimeTypeForName,
 } from "@shared/attachments";
 import { mergeComposerAttachments } from "../../utils/composerAttachments";
-import { supportsActiveParentFollowUp } from "../../utils/composerPrimaryAction";
 import type { ComposerProps } from "./types";
 
 interface ComposerAttachmentActionOptions {
@@ -22,7 +21,6 @@ interface ComposerAttachmentActionOptions {
   pendingAttachmentIdsRef: MutableRefObject<Set<string>>;
   blocked: boolean;
   conversationId: string;
-  harnessId: string | null;
   markEditorChanged: () => void;
   mountedRef: MutableRefObject<boolean>;
   onChooseAttachments: ComposerProps["onChooseAttachments"];
@@ -50,7 +48,6 @@ export function composerAttachmentActions({
   pendingAttachmentIdsRef,
   blocked,
   conversationId,
-  harnessId,
   markEditorChanged,
   mountedRef,
   onChooseAttachments,
@@ -121,8 +118,7 @@ export function composerAttachmentActions({
   const actionBlocked = (): boolean =>
     submittingRef.current
     || attachmentImportingRef.current
-    || blocked
-    || (running && !supportsActiveParentFollowUp(harnessId));
+    || blocked;
   const beginImport = (): number => {
     const sequence = attachmentImportSequenceRef.current + 1;
     attachmentImportSequenceRef.current = sequence;

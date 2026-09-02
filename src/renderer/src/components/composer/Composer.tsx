@@ -664,7 +664,6 @@ export const Composer = memo(function Composer({
       attachmentsRef, pendingAttachmentIdsRef,
       blocked: disabled || sending,
       conversationId: conversation.id,
-      harnessId: latestTurn?.harnessId ?? null,
       markEditorChanged,
       mountedRef,
       onChooseAttachments,
@@ -720,6 +719,8 @@ export const Composer = memo(function Composer({
     stopping,
   });
   const canSend = primaryAction === "send-ready";
+  const attachmentsAreImages = attachments.every(({ mimeType }) =>
+    chatAttachmentKind(mimeType) === "image");
   const { compactNotice, clearCompactNotice, compact } = useComposerCompaction({
     conversationId: conversation.id, message, canSend, running,
     blocked: attachments.length > 0
@@ -736,7 +737,7 @@ export const Composer = memo(function Composer({
     harnessId: latestTurn?.harnessId ?? null,
     hasDraft: Boolean(message.trim()) || attachments.length > 0,
     textOnly:
-      attachments.every(({ mimeType }) => chatAttachmentKind(mimeType) === "image")
+      attachmentsAreImages
       && !promptContext
       && !previewContextSelected
       && fileReferences.length === 0
@@ -745,24 +746,22 @@ export const Composer = memo(function Composer({
     submitting,
     sending,
   });
-  const canQueue = running && sendEligible
-    && attachments.length === 0 && !promptContext && !previewContextSelected
-    && fileReferences.length === 0 && contextPacketIds.length === 0
-    && !submitting && !sending;
+  const canQueue = running && sendEligible && attachmentsAreImages && !promptContext
+    && !previewContextSelected && fileReferences.length === 0 && contextPacketIds.length === 0 && !submitting && !sending;
   const queueCurrentMessage = async (): Promise<void> => {
     if (!canQueue) return;
-    const content = message.trim();
-    if (!(await import("./ComposerSendActions")).enqueueComposerPrompt(
-      conversation.id, content,
-    )) return;
-    if (conversationIdRef.current !== conversation.id
-      || draftValueRef.current !== message) return;
-    flushDraftPersistence();
-    clearPersistedComposerDraft(conversation.id, message);
-    markEditorChanged();
-    draftValueRef.current = "";
-    setMessage("");
-    window.requestAnimationFrame(() => textareaRef.current?.focus());
+    const queuedConversationId = conversation.id;
+    const queuedMessage = message;
+    const queuedAttachments = attachmentsRef.current;
+    const { enqueueComposerPrompt } = await import("./ComposerQueuedActions");
+    if (conversationIdRef.current !== queuedConversationId || draftValueRef.current !== queuedMessage
+      || attachmentsRef.current !== queuedAttachments || !enqueueComposerPrompt(
+        queuedConversationId, queuedMessage.trim() || attachmentFallback, queuedAttachments,
+      )) return;
+    attachmentsRef.current = []; setAttachments([]);
+    pendingAttachmentIdsRef.current = new Set(); setPendingAttachmentIds(new Set());
+    flushDraftPersistence(); clearPersistedComposerDraft(queuedConversationId, queuedMessage);
+    markEditorChanged(); draftValueRef.current = ""; setMessage(""); window.requestAnimationFrame(() => textareaRef.current?.focus());
   };
   const runRouteRepair = async (): Promise<void> => {
     if (routeReadiness.ready || !routeReadiness.action || routeRepairing) return;
@@ -1238,7 +1237,8 @@ export const Composer = memo(function Composer({
           queuedTurnId={(latestTurnSummary ?? latestTurn)?.id ?? null}
           queuedTurnStatus={(latestTurnSummary ?? latestTurn)?.status ?? null}
           queuedTurnAuthoritative={queuedTurnAuthoritative}
-          onSendQueued={(content) => onSend(content, [], undefined)}
+          onSendQueued={(content, queuedAttachments) => onSend(content, queuedAttachments, undefined)}
+          onReleaseAttachment={onReleaseAttachment}
           onSubmit={submit}
           onStop={stop}
         />

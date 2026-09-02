@@ -122,6 +122,21 @@ describe("Claude Agent SDK harness", () => {
         ],
       }],
     })).toThrow("duplicate option label");
+    expect(() => claudeQuestions("request-unsafe", "tool-unsafe", {
+      questions: [{
+        ...questions[0],
+        question: "Approve\u202Etxt.exe",
+      }],
+    })).toThrow("invalid question 1");
+    expect(() => claudeQuestions("request-normalized", "tool-normalized", {
+      questions: [{
+        ...questions[0],
+        options: [
+          { label: "Café", description: "First" },
+          { label: "cafe\u0301", description: "Second" },
+        ],
+      }],
+    })).toThrow("duplicate option label");
   });
 
   it("fails and cleans up a run that floods bounded provider events", async () => {

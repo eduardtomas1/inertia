@@ -148,11 +148,12 @@ export async function exerciseComposerQueue({
   store.close();
   await page.evaluate(({ targetId }) => {
     window.localStorage.setItem(
-      `inertia:queued-prompts:${targetId}`,
+      `inertia:queued-prompts:v2:${targetId}`,
       JSON.stringify([{
         id: "queued-responsive-proof",
         content: "After this pass, update the release notes and run the full gate",
         createdAt: "2026-08-21T10:00:00.000Z",
+        attachments: [],
       }]),
     );
   }, { targetId: conversationId });
@@ -182,7 +183,7 @@ export async function exerciseComposerQueue({
     cleanup.updateConversation(conversationId, { status: originalStatus });
     cleanup.close();
     await page.evaluate(({ targetId }) => {
-      window.localStorage.removeItem(`inertia:queued-prompts:${targetId}`);
+      window.localStorage.removeItem(`inertia:queued-prompts:v2:${targetId}`);
     }, { targetId: conversationId });
     await page.reload();
   }

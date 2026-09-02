@@ -1,12 +1,11 @@
 import {
-  useCallback,
-  useEffect,
+  lazy,
+  Suspense,
   useLayoutEffect,
   useRef,
   useState,
 } from "react";
-import { createPortal } from "react-dom";
-import { CornerDownRight, Trash2 } from "lucide-react";
+import type { ChatAttachment } from "@shared/contracts";
 import { InertiaMorphIcon } from "../motion/InertiaMorphIcon";
 import {
   loaderCircleMorphIcon,
@@ -15,67 +14,12 @@ import {
   squareMorphIcon,
 } from "../motion/lucideMorphData";
 import type { ComposerPrimaryActionState } from "../../utils/composerPrimaryAction";
-import type { ComposerQueuedPrompt } from "./types";
 import type { AgentTurnStatus } from "../../../../shared/turn-lifecycle";
 import "./ComposerSendActions.css";
 
-const QUEUED_PROMPTS_CHANGED_EVENT = "inertia:queued-prompts-changed";
-
-function queueKey(conversationId: string): string {
-  return `inertia:queued-prompts:${conversationId}`;
-}
-
-function readQueue(conversationId: string): ComposerQueuedPrompt[] {
-  try {
-    const value: unknown = JSON.parse(
-      window.localStorage.getItem(queueKey(conversationId)) ?? "[]",
-    );
-    return Array.isArray(value)
-      ? value.filter((entry): entry is ComposerQueuedPrompt => Boolean(
-          entry
-          && typeof entry === "object"
-          && typeof entry.id === "string"
-          && typeof entry.content === "string"
-          && entry.content.length > 0
-          && entry.content.length <= 20_000
-          && typeof entry.createdAt === "string",
-        )).slice(0, 10)
-      : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeQueue(
-  conversationId: string,
-  prompts: readonly ComposerQueuedPrompt[],
-): void {
-  const key = queueKey(conversationId);
-  if (prompts.length > 0) {
-    window.localStorage.setItem(key, JSON.stringify(prompts));
-  } else {
-    window.localStorage.removeItem(key);
-  }
-  window.dispatchEvent(new Event(QUEUED_PROMPTS_CHANGED_EVENT));
-}
-
-export function enqueueComposerPrompt(
-  conversationId: string,
-  content: string,
-): boolean {
-  try {
-    const current = readQueue(conversationId);
-    if (current.length >= 10) return false;
-    writeQueue(conversationId, [...current, {
-      id: window.crypto.randomUUID(),
-      content,
-      createdAt: new Date().toISOString(),
-    }]);
-    return true;
-  } catch {
-    return false;
-  }
-}
+const ComposerQueuedActions = lazy(async () => ({
+  default: (await import("./ComposerQueuedActions")).ComposerQueuedActions,
+}));
 
 function primaryPresentation(
   state: ComposerPrimaryActionState,
@@ -122,6 +66,7 @@ export function ComposerSendActions({
   latestTurnStatus,
   latestTurnAuthoritative = true,
   onSendQueued,
+  onReleaseAttachment,
   onSubmit,
   onStop,
 }: {
@@ -132,105 +77,16 @@ export function ComposerSendActions({
   latestTurnId: string | null;
   latestTurnStatus: AgentTurnStatus | null;
   latestTurnAuthoritative?: boolean;
-  onSendQueued: (content: string) => Promise<unknown>;
+  onSendQueued: (
+    content: string,
+    attachments: ChatAttachment[],
+  ) => Promise<unknown>;
+  onReleaseAttachment: (attachmentId: string) => Promise<void>;
   onSubmit: () => Promise<void>;
   onStop: () => Promise<void>;
 }): React.JSX.Element {
   const [intent, setIntent] = useState(false);
-  const [queuedPrompts, setQueuedPrompts] = useState(() => readQueue(conversationId));
-  const [queueSendingId, setQueueSendingId] = useState<string | null>(null);
   const [queueHost, setQueueHost] = useState<HTMLElement | null>(null);
-  const queuedPromptsRef = useRef(queuedPrompts);
-  const queueSendingRef = useRef<string | null>(null);
-  const conversationIdRef = useRef(conversationId);
-  const autoQueuedTurnRef = useRef<string | null>(null);
-  conversationIdRef.current = conversationId;
-  queuedPromptsRef.current = queuedPrompts;
-  const syncQueue = useCallback((): void => {
-    const next = readQueue(conversationId);
-    queuedPromptsRef.current = next;
-    setQueuedPrompts(next);
-  }, [conversationId]);
-  useEffect(() => {
-    queueSendingRef.current = null;
-    autoQueuedTurnRef.current = null;
-    setQueueSendingId(null);
-    syncQueue();
-    const onStorage = (event: StorageEvent): void => {
-      if (event.key === queueKey(conversationId)) syncQueue();
-    };
-    window.addEventListener("storage", onStorage);
-    window.addEventListener(QUEUED_PROMPTS_CHANGED_EVENT, syncQueue);
-    return () => {
-      window.removeEventListener("storage", onStorage);
-      window.removeEventListener(QUEUED_PROMPTS_CHANGED_EVENT, syncQueue);
-    };
-  }, [conversationId, syncQueue]);
-  const removeQueued = useCallback((promptId: string): void => {
-    writeQueue(
-      conversationId,
-      readQueue(conversationId).filter(({ id }) => id !== promptId),
-    );
-  }, [conversationId]);
-  const sendQueued = useCallback(async (promptId: string): Promise<void> => {
-    const dispatch = async (): Promise<void> => {
-      if (queueSendingRef.current || !canSendQueuedNow) return;
-      const queued = readQueue(conversationId).find(({ id }) => id === promptId);
-      if (!queued) return;
-      queueSendingRef.current = promptId;
-      setQueueSendingId(promptId);
-      try {
-        await onSendQueued(queued.content);
-        removeQueued(promptId);
-      } catch {
-        // The workspace owns the error surface; keep the draft for retry.
-      } finally {
-        if (
-          conversationIdRef.current === conversationId
-          && queueSendingRef.current === promptId
-        ) {
-          queueSendingRef.current = null;
-          setQueueSendingId(null);
-        }
-      }
-    };
-    if (!navigator.locks) {
-      await dispatch();
-      return;
-    }
-    await navigator.locks.request(
-      `inertia:queued-prompt:${conversationId}`,
-      { ifAvailable: true },
-      async (lock) => {
-        if (lock) await dispatch();
-      },
-    );
-  }, [canSendQueuedNow, conversationId, onSendQueued, removeQueued]);
-  useEffect(() => {
-    const queued = queuedPrompts[0];
-    if (
-      running
-      || queueSendingRef.current
-      || !canSendQueuedNow
-      || !queued
-      || !latestTurnId
-      || latestTurnStatus !== "completed"
-      || !latestTurnAuthoritative
-    ) return;
-    const terminalKey = `${conversationId}:${latestTurnId}`;
-    if (autoQueuedTurnRef.current === terminalKey) return;
-    autoQueuedTurnRef.current = terminalKey;
-    void sendQueued(queued.id);
-  }, [
-    canSendQueuedNow,
-    conversationId,
-    latestTurnId,
-    latestTurnAuthoritative,
-    latestTurnStatus,
-    queuedPrompts,
-    running,
-    sendQueued,
-  ]);
   const primaryRef = useRef<HTMLButtonElement>(null);
   useLayoutEffect(() => {
     setQueueHost(primaryRef.current?.closest<HTMLElement>(".composer") ?? null);
@@ -246,41 +102,21 @@ export function ComposerSendActions({
     if (focusedAction === "primary") primaryRef.current?.focus();
   }, [focusedAction, focusedGroup]);
   const presentation = primaryPresentation(primaryAction, intent);
-  const queued = queuedPrompts[0] ?? null;
-  const queueElement = queued ? (
-    <div className="composer-queue" role="list" aria-label="Queued messages">
-      <div className="composer-queue-item" role="listitem">
-        <CornerDownRight size={15} aria-hidden="true" />
-        <span className="composer-queue-copy" title={queued.content}>
-          {queued.content}
-        </span>
-        <small className="composer-queue-count">
-          {queuedPrompts.length === 1 ? "Queued" : `1 of ${queuedPrompts.length}`}
-        </small>
-        <button
-          type="button"
-          className="composer-queue-send"
-          aria-label="Send queued message now"
-          disabled={!canSendQueuedNow || queueSendingId !== null}
-          onClick={() => void sendQueued(queued.id)}
-        >
-          {queueSendingId === queued.id ? "Sending…" : "Send now"}
-        </button>
-        <button
-          type="button"
-          className="composer-queue-remove"
-          aria-label="Remove queued message"
-          disabled={queueSendingId === queued.id}
-          onClick={() => removeQueued(queued.id)}
-        >
-          <Trash2 size={14} aria-hidden="true" />
-        </button>
-      </div>
-    </div>
-  ) : null;
   return (
     <>
-      {queueElement && (queueHost ? createPortal(queueElement, queueHost) : queueElement)}
+      <Suspense fallback={null}>
+        <ComposerQueuedActions
+          conversationId={conversationId}
+          canSendQueuedNow={canSendQueuedNow}
+          running={running}
+          latestTurnId={latestTurnId}
+          latestTurnStatus={latestTurnStatus}
+          latestTurnAuthoritative={latestTurnAuthoritative}
+          queueHost={queueHost}
+          onSendQueued={onSendQueued}
+          onReleaseAttachment={onReleaseAttachment}
+        />
+      </Suspense>
       <button
         ref={primaryRef}
         type="button"

@@ -29,6 +29,9 @@ import {
   DRAFT_PERSISTENCE_DELAY_MS,
   DRAFT_PERSISTENCE_MAX_WAIT_MS,
 } from "../../src/renderer/src/components/composer/Composer";
+import {
+  composerQueueKey,
+} from "../../src/renderer/src/components/composer/composerQueuedPrompts";
 import type { PromptPresetCommandRunner } from "../../src/renderer/src/components/composer/types";
 import { useAppRuntimeActions } from "../../src/renderer/src/hooks/useAppRuntimeActions";
 import { useDesktopTools } from "../../src/renderer/src/hooks/useDesktopTools";
@@ -145,7 +148,7 @@ function deferred<T>(): {
 async function waitForComposerSendEnhancement(): Promise<void> {
   await waitFor(() => expect(
     screen.getByRole("button", { name: "Send message" }),
-  ).toHaveAttribute("data-motion-state", "send"));
+  ).toHaveAttribute("data-motion-state", "send"), { timeout: 5_000 });
 }
 
 function composerProps(
@@ -190,6 +193,7 @@ function composerProps(
 afterEach(() => {
   vi.useRealTimers();
   window.localStorage.clear();
+  window.sessionStorage.clear();
 });
 
 describe("composer asynchronous ownership", () => {
@@ -387,7 +391,7 @@ describe("composer asynchronous ownership", () => {
       .toBeInTheDocument();
     expect(onSend).not.toHaveBeenCalled();
     expect(window.localStorage.getItem(
-      `inertia:queued-prompts:${current.id}`,
+      composerQueueKey(current.id),
     )).toContain("Run the release checks next");
 
     view.rerender(<Composer {...composerProps(current, {
@@ -414,7 +418,7 @@ describe("composer asynchronous ownership", () => {
     await waitFor(() => expect(screen.queryByText("Run the release checks next"))
       .not.toBeInTheDocument());
     expect(window.localStorage.getItem(
-      `inertia:queued-prompts:${current.id}`,
+      composerQueueKey(current.id),
     )).toBeNull();
   });
 

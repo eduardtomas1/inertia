@@ -268,6 +268,23 @@ describe.sequential("Cursor ACP harness", () => {
         ],
       }],
     })).toThrow("duplicate option ID");
+    expect(() => parseCursorQuestionRequest({
+      toolCallId: "tool-unsafe",
+      questions: [{
+        ...question(1),
+        prompt: "Choose\u2066 hidden text",
+      }],
+    })).toThrow("safe bounded display text");
+    expect(() => parseCursorQuestionRequest({
+      toolCallId: "tool-duplicate-label",
+      questions: [{
+        ...question(1),
+        options: [
+          { id: "one", label: "Café" },
+          { id: "two", label: "cafe\u0301" },
+        ],
+      }],
+    })).toThrow("duplicate option labels");
   });
 
   it("validates Cursor task and generated-image extension notifications", () => {

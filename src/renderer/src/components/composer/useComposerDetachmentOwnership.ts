@@ -101,7 +101,15 @@ export function useComposerDetachmentOwnership({
     // current text durable before the main composer can be unmounted, then
     // return it for the privileged cross-session handoff.
     flushDraftPersistence();
-    return prepareDetachment(readState(), readDraft());
+    const state = readState();
+    try {
+      if (window.sessionStorage.getItem(
+        `inertia:queued-media:v2:${conversationId}`,
+      ) !== null) state.attachmentCount += 1;
+    } catch {
+      // Storage can be unavailable; current in-memory ownership still applies.
+    }
+    return prepareDetachment(state, readDraft());
   };
 
   useEffect(() => registerComposerOwnership(

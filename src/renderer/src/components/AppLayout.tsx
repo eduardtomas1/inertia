@@ -341,6 +341,14 @@ export function AppLayout({
         void actions.run("conversation.delete", {
           type: "conversation.delete",
           payload: { conversationId: thread.id },
+        }).then(async () => {
+          const { releaseDeletedComposerQueue } = await import(
+            "./composer/ComposerQueuedActions"
+          );
+          await releaseDeletedComposerQueue(
+            thread.id,
+            (attachmentId) => window.inertia.releaseAttachment(attachmentId),
+          );
         }).catch(() => undefined);
       }
     },

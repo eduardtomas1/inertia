@@ -16,6 +16,7 @@ type RunResult = { stdout: Buffer; stderr: Buffer };
 
 export interface CheckpointOperationOptions {
   deadlineAt?: number;
+  signal?: AbortSignal;
 }
 
 const MAX_CHECKPOINT_PATH_BYTES = 16 * 1024 * 1024;
@@ -57,10 +58,12 @@ async function runGit(
   input?: Buffer,
   maxStdoutBytes = 1024 * 1024,
   deadlineAt?: number,
+  signal?: AbortSignal,
 ): Promise<RunResult> {
   try {
     const result = await runBoundedGit(cwd, args, {
       deadlineAt,
+      signal,
       environment,
       input,
       maxOutputBytes: maxStdoutBytes,
@@ -104,6 +107,7 @@ async function checkpointEnvironment(
   checkpointId: string,
   environment: NodeJS.ProcessEnv,
   deadlineAt?: number,
+  signal?: AbortSignal,
   isolateNewObjects = false,
 ): Promise<{
   environment: NodeJS.ProcessEnv;
@@ -136,83 +140,97 @@ async function checkpointEnvironment(
   isolatedConfiguration.GIT_CONFIG_NOSYSTEM = "1";
   isolatedConfiguration.GIT_CONFIG_GLOBAL = globalConfigPath;
   isolatedConfiguration.GIT_ATTR_NOSYSTEM = "1";
-  await writeFile(globalConfigPath, "", {
-    encoding: "utf8",
-    flag: "wx",
-    mode: 0o600,
-  });
-  const objectFormat = (
+  let configurationOwned = false;
+  try {
+    await writeFile(globalConfigPath, "", {
+      encoding: "utf8",
+      flag: "wx",
+      mode: 0o600,
+    });
+    configurationOwned = true;
+    const objectFormat = (
+      await runGit(
+        repositoryPath,
+        checkpointGitArguments(["rev-parse", "--show-object-format"]),
+        isolatedConfiguration,
+        undefined,
+        1024 * 1024,
+        deadlineAt,
+        signal,
+      )
+    ).stdout.toString("utf8").trim();
+    const objectDirectory = (
+      await runGit(
+        repositoryPath,
+        checkpointGitArguments([
+          "rev-parse",
+          "--path-format=absolute",
+          "--git-path",
+          "objects",
+        ]),
+        isolatedConfiguration,
+        undefined,
+        1024 * 1024,
+        deadlineAt,
+        signal,
+      )
+    ).stdout.toString("utf8").replace(/(?:\r\n|\n)$/u, "");
+    if (
+      (objectFormat !== "sha1" && objectFormat !== "sha256")
+      || !objectDirectory
+      || objectDirectory.includes("\0")
+    ) {
+      throw new CheckpointError(
+        "Git could not isolate the checkpoint object store.",
+      );
+    }
     await runGit(
-      repositoryPath,
-      checkpointGitArguments(["rev-parse", "--show-object-format"]),
+      storageDirectory,
+      [
+        "init",
+        "--bare",
+        "--quiet",
+        ...(objectFormat === "sha256"
+          ? ["--object-format=sha256"]
+          : []),
+        metadataDirectory,
+      ],
       isolatedConfiguration,
       undefined,
       1024 * 1024,
       deadlineAt,
-    )
-  ).stdout.toString("utf8").trim();
-  const objectDirectory = (
-    await runGit(
-      repositoryPath,
-      checkpointGitArguments([
-        "rev-parse",
-        "--path-format=absolute",
-        "--git-path",
-        "objects",
-      ]),
-      isolatedConfiguration,
-      undefined,
-      1024 * 1024,
-      deadlineAt,
-    )
-  ).stdout.toString("utf8").replace(/(?:\r\n|\n)$/u, "");
-  if (
-    (objectFormat !== "sha1" && objectFormat !== "sha256")
-    || !objectDirectory
-    || objectDirectory.includes("\0")
-  ) {
-    throw new CheckpointError(
-      "Git could not isolate the checkpoint object store.",
+      signal,
     );
-  }
-  await runGit(
-    storageDirectory,
-    [
-      "init",
-      "--bare",
-      "--quiet",
-      ...(objectFormat === "sha256"
-        ? ["--object-format=sha256"]
-        : []),
+    await mkdir(hooksDirectory, { mode: 0o700 });
+    await writeFile(
+      resolve(metadataDirectory, "info", "attributes"),
+      RAW_CHECKPOINT_ATTRIBUTES,
+      { encoding: "utf8", mode: 0o600 },
+    );
+    return {
       metadataDirectory,
-    ],
-    isolatedConfiguration,
-    undefined,
-    1024 * 1024,
-    deadlineAt,
-  );
-  await mkdir(hooksDirectory, { mode: 0o700 });
-  await writeFile(
-    resolve(metadataDirectory, "info", "attributes"),
-    RAW_CHECKPOINT_ATTRIBUTES,
-    { encoding: "utf8", mode: 0o600 },
-  );
-  return {
-    metadataDirectory,
-    globalConfigPath,
-    hooksDirectory,
-    environment: {
-      ...isolatedConfiguration,
-      GIT_DIR: metadataDirectory,
-      GIT_WORK_TREE: resolve(repositoryPath),
-      GIT_OBJECT_DIRECTORY: isolateNewObjects
-        ? resolve(metadataDirectory, "objects")
-        : objectDirectory,
-      ...(isolateNewObjects
-        ? { GIT_ALTERNATE_OBJECT_DIRECTORIES: JSON.stringify(objectDirectory) }
-        : {}),
-    },
-  };
+      globalConfigPath,
+      hooksDirectory,
+      environment: {
+        ...isolatedConfiguration,
+        GIT_DIR: metadataDirectory,
+        GIT_WORK_TREE: resolve(repositoryPath),
+        GIT_OBJECT_DIRECTORY: isolateNewObjects
+          ? resolve(metadataDirectory, "objects")
+          : objectDirectory,
+        ...(isolateNewObjects
+          ? { GIT_ALTERNATE_OBJECT_DIRECTORIES: JSON.stringify(objectDirectory) }
+          : {}),
+      },
+    };
+  } catch (error) {
+    if (configurationOwned) {
+      await rm(metadataDirectory, { force: true, recursive: true })
+        .catch(() => undefined);
+      await rm(globalConfigPath, { force: true }).catch(() => undefined);
+    }
+    throw error;
+  }
 }
 
 /**
@@ -237,6 +255,7 @@ export async function captureRawWorktreeTree(
   try {
     const hasCurrentHead = await hasHead(repositoryPath, {
       deadlineAt: options.deadlineAt,
+      signal: options.signal,
     });
     const head = hasCurrentHead
       ? (
@@ -247,6 +266,7 @@ export async function captureRawWorktreeTree(
             undefined,
             1024,
             options.deadlineAt,
+            options.signal,
           )
         ).stdout.toString("utf8").trim()
       : null;
@@ -256,6 +276,7 @@ export async function captureRawWorktreeTree(
       captureId,
       baseEnvironment,
       options.deadlineAt,
+      options.signal,
       true,
     );
     await runGit(
@@ -267,6 +288,7 @@ export async function captureRawWorktreeTree(
       undefined,
       1024,
       options.deadlineAt,
+      options.signal,
     );
     if (options.removedPaths && options.removedPaths.length > 0) {
       await runGit(
@@ -281,6 +303,7 @@ export async function captureRawWorktreeTree(
         options.removedPaths,
         1024,
         options.deadlineAt,
+        options.signal,
       );
     }
     if (paths.length > 0) {
@@ -297,6 +320,7 @@ export async function captureRawWorktreeTree(
         paths,
         1024,
         options.deadlineAt,
+        options.signal,
       );
     }
     const tree = (
@@ -307,6 +331,7 @@ export async function captureRawWorktreeTree(
         undefined,
         1024,
         options.deadlineAt,
+        options.signal,
       )
     ).stdout.toString("utf8").trim();
     if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u.test(tree)) {
@@ -348,6 +373,7 @@ export async function createCheckpoint(
           undefined,
           1024 * 1024,
           options.deadlineAt,
+          options.signal,
         )
       ).stdout.toString("utf8").trim();
     } catch (error) {
@@ -370,6 +396,7 @@ export async function createCheckpoint(
         undefined,
         MAX_CHECKPOINT_PATH_BYTES,
         options.deadlineAt,
+        options.signal,
       )
     ).stdout;
     const includedPaths =
@@ -382,6 +409,7 @@ export async function createCheckpoint(
         undefined,
         MAX_CHECKPOINT_PATH_BYTES,
         options.deadlineAt,
+        options.signal,
       )
     ).stdout;
     isolated = await checkpointEnvironment(
@@ -390,6 +418,7 @@ export async function createCheckpoint(
       checkpointId,
       baseEnvironment,
       options.deadlineAt,
+      options.signal,
     );
     const environment = isolated.environment;
     if (indexEntries.length > 0) {
@@ -400,6 +429,7 @@ export async function createCheckpoint(
         indexEntries,
         1024 * 1024,
         options.deadlineAt,
+        options.signal,
       );
     } else {
       await runGit(
@@ -409,6 +439,7 @@ export async function createCheckpoint(
         undefined,
         1024 * 1024,
         options.deadlineAt,
+        options.signal,
       );
     }
     if (includedPaths.length > 0) {
@@ -425,6 +456,7 @@ export async function createCheckpoint(
         includedPaths,
         1024 * 1024,
         options.deadlineAt,
+        options.signal,
       );
     }
     const tree = (
@@ -435,6 +467,7 @@ export async function createCheckpoint(
         undefined,
         1024 * 1024,
         options.deadlineAt,
+        options.signal,
       )
     ).stdout.toString("utf8").trim();
     const commitArgs = ["commit-tree", tree, "-m", "Inertia checkpoint"];
@@ -447,6 +480,7 @@ export async function createCheckpoint(
         undefined,
         1024 * 1024,
         options.deadlineAt,
+        options.signal,
       )
     ).stdout.toString("utf8").trim();
     // The isolated metadata directory is temporary. Persist the checkpoint
@@ -464,6 +498,7 @@ export async function createCheckpoint(
       undefined,
       1024 * 1024,
       options.deadlineAt,
+      options.signal,
     );
     return { id: checkpointId, ref };
   } finally {

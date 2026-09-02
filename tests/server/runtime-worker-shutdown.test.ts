@@ -5,6 +5,7 @@ import {
   RUNTIME_SHUTDOWN_DEADLINE_MS,
   runRuntimeShutdownPhases,
 } from "../../src/server/runtime-shutdown";
+import { GitError } from "../../src/server/git";
 import { completeRuntimeWorkerShutdown } from "../../src/server/runtime-worker-shutdown";
 
 function runtimeWithClose(
@@ -194,6 +195,32 @@ describe("runtime worker shutdown", () => {
       reason: "runtime-close",
     });
     expect(post).not.toHaveBeenCalledWith({ type: "runtime.stopped" });
+    expect(exit).not.toHaveBeenCalled();
+  });
+
+  it("identifies an escaped Git process tree as owned-process cleanup", async () => {
+    const post = vi.fn();
+    const exit = vi.fn();
+
+    await completeRuntimeWorkerShutdown({
+      runtime: runtimeWithClose(vi.fn(async () => {
+        throw new GitError(
+          "operation-failed",
+          "Git stopped responding, and its process tree could not be confirmed stopped.",
+        );
+      })),
+      cause: "runtime-shutdown",
+      exitCode: 0,
+      closeBrokers: vi.fn(),
+      post,
+      awaitStoppedAcknowledgement: async () => undefined,
+      exit,
+    });
+
+    expect(post).toHaveBeenCalledWith({
+      type: "runtime.shutdown-unconfirmed",
+      reason: "owned-process-cleanup",
+    });
     expect(exit).not.toHaveBeenCalled();
   });
 

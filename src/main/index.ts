@@ -88,7 +88,7 @@ import { RuntimeLiveDarwinRecoveryCoordinator } from "./runtime-live-darwin-reco
 import { resolveDesktopRuntimeProcessSafetyAssets } from "./runtime-windows-job-bootstrap.js";
 import { disposeWindowsRuntimeJobExecutableLock, prepareWindowsRuntimeJobExecutableLock } from "./windows-runtime-job.js";
 import {
-  cleanupPrivilegedOwners,
+  cleanupPrivilegedOwners, finishNormalShutdownAfterCleanup,
   finishPrivilegedExit,
 } from "./privileged-shutdown.js";
 import { registerClipboardIpc } from "./clipboard-ipc.js";
@@ -959,6 +959,7 @@ async function bootstrap(): Promise<void> {
     service: appUpdateService, runtime: () => runtimeSupervisor,
     privateConnect: () => privateConnectHost, cleanup: runPrivilegedCleanup,
     finishNormalShutdown: finishQuitAfterCleanup,
+    onUnconfirmedShutdown: () => console.error("Refusing to exit because privileged shutdown could not be confirmed."),
     reportError: (error) => console.error("Failed to prepare the application update", error),
   });
   nativeTheme.on("updated", () => {
@@ -1185,7 +1186,7 @@ async function bootstrap(): Promise<void> {
           ?? Promise.reject(new Error("The test runtime is not running")),
         agentBrowser: (id: string, command: Parameters<PreviewBroker["perform"]>[1]) => previewBroker.perform(id, command),
         ...createTestPrivilegedCleanupController({ runtimePid: () => runtimeSupervisor?.snapshot().pid ?? null,
-          cleanup: runPrivilegedCleanup, exit: finishQuitAfterCleanup }),
+          cleanup: runPrivilegedCleanup, unconfirmedMessage: () => runtimeSupervisor?.snapshot().lastError ?? null, exit: finishQuitAfterCleanup }),
         quit: () => {
           const snapshot = runtimeSupervisor?.snapshot() ?? null;
           setTimeout(() => app.quit(), 100);
@@ -1202,19 +1203,18 @@ if (!hasSingleInstanceLock) {
 } else {
   app.on("second-instance", focusMainWindow);
   app.on("activate", focusMainWindow);
-  app.on("window-all-closed", () => {
-    if (process.platform !== "darwin") {
-      app.quit();
-    }
-  });
+  app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
   app.on("before-quit", (event) => {
     if (appUpdateInstallCoordinator?.allowBeforeQuit()) return;
     event.preventDefault();
     recordPackageSmokeStage("before-quit");
     if (!appUpdateInstallCoordinator) {
-      void runPrivilegedCleanup().then(finishQuitAfterCleanup, (error: unknown) => {
-        console.error("Failed to finish privileged shutdown", error);
-      });
+      void runPrivilegedCleanup().then((cleanupConfirmed) => {
+        finishNormalShutdownAfterCleanup({ cleanupConfirmed,
+          finish: finishQuitAfterCleanup, onUnconfirmed: () => console.error(
+            "Refusing to exit because privileged shutdown could not be confirmed."),
+        });
+      }, (error: unknown) => console.error("Failed to finish privileged shutdown", error));
     }
   });
 

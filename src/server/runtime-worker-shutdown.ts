@@ -2,6 +2,7 @@ import type { RuntimeWorkerEvent } from "../node/runtime-process-protocol.js";
 import type { RuntimeShutdownUnconfirmedReason } from
   "../node/runtime-process-protocol.js";
 import type { RunningRuntime } from "./index.js";
+import { isGitProcessTreeTerminationFailure } from "./git/runner.js";
 import { RUNTIME_SHUTDOWN_DEADLINE_MS } from "./runtime-shutdown.js";
 
 interface RuntimeWorkerShutdownOptions {
@@ -94,10 +95,12 @@ export async function completeRuntimeWorkerShutdown(
     await options.runtime?.close(options.cause);
   } catch (error) {
     shutdownConfirmed = false;
-    unconfirmedReason = error instanceof Error
-      && /shutdown deadline|before its shutdown deadline/iu.test(error.message)
-      ? "runtime-close-deadline"
-      : "runtime-close";
+    unconfirmedReason = isGitProcessTreeTerminationFailure(error)
+      ? "owned-process-cleanup"
+      : error instanceof Error
+        && /shutdown deadline|before its shutdown deadline/iu.test(error.message)
+        ? "runtime-close-deadline"
+        : "runtime-close";
   }
   options.closeBrokers();
   if (shutdownConfirmed && !preRegistryNoRuntime) {

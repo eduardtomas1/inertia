@@ -18,6 +18,7 @@ import {
   isGitProcessTreeTerminationFailure,
   runGit,
   runGitInspection,
+  settleGitInspections,
   utf8Prefix,
 } from "./runner";
 import {
@@ -321,16 +322,18 @@ export async function compareGitSnapshots(
     MAX_DIFF_BYTES,
     MAX_DIFF_BYTES,
   );
-  await Promise.all(
-    [beforeRef, afterRef].map((ref) =>
-      runGitInspection(root, ["rev-parse", "--verify", `${ref}^{commit}`], {
-        deadlineAt: options.deadlineAt,
-        maxOutputBytes: 256,
-        failureMessage: "A historical Git snapshot is unavailable.",
-      })),
-  );
-  const [names, stats, patch] = await Promise.all([
-    runGitInspection(
+  for (const ref of [beforeRef, afterRef]) {
+    await runGitInspection(root, ["rev-parse", "--verify", `${ref}^{commit}`], {
+      deadlineAt: options.deadlineAt,
+      signal: options.signal,
+      maxOutputBytes: 256,
+      failureMessage: "A historical Git snapshot is unavailable.",
+    });
+  }
+  const signal = options.signal ?? new AbortController().signal;
+  const [names, stats, patch] = await settleGitInspections(
+    signal,
+    (inspectionSignal) => runGitInspection(
       root,
       [
         "diff",
@@ -343,12 +346,13 @@ export async function compareGitSnapshots(
       ],
       {
         deadlineAt: options.deadlineAt,
+        signal: inspectionSignal,
         maxOutputBytes: DEFAULT_OUTPUT_BYTES,
         truncateOutput: true,
         failureMessage: "Unable to inspect historical changed files.",
       },
     ),
-    runGitInspection(
+    (inspectionSignal) => runGitInspection(
       root,
       [
         "diff",
@@ -361,12 +365,13 @@ export async function compareGitSnapshots(
       ],
       {
         deadlineAt: options.deadlineAt,
+        signal: inspectionSignal,
         maxOutputBytes: DEFAULT_OUTPUT_BYTES,
         truncateOutput: true,
         failureMessage: "Unable to inspect historical change totals.",
       },
     ),
-    runGitInspection(
+    (inspectionSignal) => runGitInspection(
       root,
       [
         "diff",
@@ -381,12 +386,13 @@ export async function compareGitSnapshots(
       ],
       {
         deadlineAt: options.deadlineAt,
+        signal: inspectionSignal,
         maxOutputBytes: maxBytes,
         truncateOutput: true,
         failureMessage: "Unable to generate the historical Git diff.",
       },
     ),
-  ]);
+  );
   const statByPath = parseNumstat(stats.stdout);
   const allFiles = parseSnapshotNames(names.stdout).map(
     (file): TurnGitArtifactFile => {

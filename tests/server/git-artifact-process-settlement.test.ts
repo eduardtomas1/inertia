@@ -25,11 +25,16 @@ vi.mock("../../src/server/git/status", async (importOriginal) => ({
   ...gitStatus,
 }));
 
-import { captureGitArtifactState } from "../../src/server/git/artifacts";
+import {
+  captureGitArtifactState,
+  compareGitSnapshots,
+} from "../../src/server/git/artifacts";
 import { GitError } from "../../src/server/git/types";
 
 const snapshotRef =
   "refs/inertia/checkpoints/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222";
+const afterSnapshotRef =
+  "refs/inertia/checkpoints/11111111-1111-4111-8111-111111111111/33333333-3333-4333-8333-333333333333";
 
 const processResult = (stdout = "") => ({
   stdout: Buffer.from(stdout),
@@ -112,6 +117,37 @@ describe("Git artifact process settlement", () => {
 
     await expect(captureGitArtifactState("/repository", snapshotRef))
       .rejects.toBe(cleanupFailure);
+  });
+
+  it("keeps comparison ownership until every cancelled Git child settles", async () => {
+    const cancellation = new GitError(
+      "timeout",
+      "Git inspection was cancelled.",
+    );
+    let releaseSibling!: () => void;
+    let comparisonSignal: AbortSignal | undefined;
+    const sibling = new Promise<ReturnType<typeof processResult>>((resolve) => {
+      releaseSibling = () => resolve(processResult());
+    });
+    gitRunner.runGitInspection.mockImplementation((root, args, options) => {
+      if (args[0] !== "diff") return defaultInspection(root, args);
+      comparisonSignal = options.signal;
+      if (args.includes("--name-status")) return Promise.reject(cancellation);
+      if (args.includes("--numstat")) return sibling;
+      return Promise.resolve(processResult());
+    });
+
+    let settled = false;
+    const comparison = compareGitSnapshots(
+      "/repository",
+      snapshotRef,
+      afterSnapshotRef,
+    ).finally(() => { settled = true; });
+    await vi.waitFor(() => expect(comparisonSignal?.aborted).toBe(true));
+    expect(settled).toBe(false);
+
+    releaseSibling();
+    await expect(comparison).rejects.toBe(cancellation);
   });
 
   it("does not swallow an optional HEAD timeout", async () => {

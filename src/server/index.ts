@@ -1157,11 +1157,11 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       if (closed) return;
       closed = true;
       projectIdentities.dispose();
-      await projectIdentityRefresh;
       snapshotBroadcasts.close();
       secureFileAuthorities.clear();
       await runRuntimeShutdownPhases({
-        quiesceRuntimeWork: async () => {
+        quiesceRuntimeWork: async ({ deadlineAt }) => {
+          turnGitArtifacts.beginShutdown(deadlineAt);
           await updatePreparation.drainTracked();
           await projectIdentities.drain();
         },
@@ -1174,6 +1174,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         disposeTurnsAndProviders: () => turns.dispose(cause),
         settleArtifacts: async () => {
           await artifactReconciliation;
+          await turnGitArtifacts.settleShutdown();
         },
         terminateClients: () => {
           runtimeSync.terminateAll((client) => client.terminate());

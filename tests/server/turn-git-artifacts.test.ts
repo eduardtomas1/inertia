@@ -330,9 +330,14 @@ describe("turn Git artifacts", () => {
       checkpointId: checkpoint.id,
     }).turn;
     let resolveCapture!: () => void;
+    let captureSignal: AbortSignal | undefined;
     const capture = vi.spyOn(manager, "captureAfter").mockImplementation(
-      () => new Promise<void>((resolve) => {
+      (_input, options) => new Promise<void>((resolve) => {
         resolveCapture = resolve;
+        captureSignal = options?.signal;
+        options?.signal?.addEventListener("abort", () => resolve(), {
+          once: true,
+        });
       }),
     );
 
@@ -350,6 +355,7 @@ describe("turn Git artifacts", () => {
     await first;
 
     expect(capture).toHaveBeenCalledTimes(1);
+    expect(captureSignal?.aborted).toBe(true);
     expect(runtime.store.turnGitArtifact(turn.id)).toMatchObject({
       status: "failed",
       completeness: "partial",
@@ -361,6 +367,26 @@ describe("turn Git artifacts", () => {
     resolveCapture();
     await Promise.resolve();
     expect(runtime.store.turnGitArtifact(turn.id)?.status).toBe("failed");
+    runtime.store.close();
+  });
+
+  it("refuses new Git capture after runtime shutdown begins", async () => {
+    const runtime = workspace();
+    const turn = beginTurn(
+      runtime.store,
+      runtime.conversationId,
+      "turn-shutdown-capture",
+    );
+    const manager = new TurnGitArtifactManager(runtime.store, runtime.data);
+
+    manager.beginShutdown(Date.now() + 1_000);
+    await manager.captureBefore({ turn, checkpointId: null });
+
+    expect(runtime.store.turnGitArtifact(turn.id)).toMatchObject({
+      status: "unavailable",
+      completeness: "unavailable",
+      failureReason: "Capturing the pre-turn repository state timed out.",
+    });
     runtime.store.close();
   });
 

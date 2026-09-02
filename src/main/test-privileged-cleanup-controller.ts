@@ -15,6 +15,7 @@ export interface TestPrivilegedCleanupReceipt {
 interface TestPrivilegedCleanupDependencies {
   runtimePid: () => number | null;
   cleanup: () => Promise<boolean>;
+  unconfirmedMessage?: () => string | null;
   exit: () => void;
 }
 
@@ -49,7 +50,10 @@ export function createTestPrivilegedCleanupController(
           phase: "privileged-cleanup-complete",
           runtimePid,
           cleanupConfirmed,
-          errorMessage: null,
+          errorMessage: cleanupConfirmed
+            ? null
+            : dependencies.unconfirmedMessage?.()
+              ?? "Privileged cleanup completed without confirming every owner stopped.",
         };
         return snapshot();
       },

@@ -421,7 +421,9 @@ export async function closeElectronFixtureBounded(options: {
               ));
             } else if (preparation.value.cleanupConfirmed !== true) {
               cleanupErrors.push(new Error(
-                "The Electron fixture privileged cleanup completed without confirming every owner stopped.",
+                preparation.value.errorMessage
+                  ? `The Electron fixture privileged cleanup was unconfirmed: ${preparation.value.errorMessage}`
+                  : "The Electron fixture privileged cleanup completed without confirming every owner stopped.",
               ));
             }
           } else {

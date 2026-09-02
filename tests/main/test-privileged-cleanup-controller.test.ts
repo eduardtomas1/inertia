@@ -71,12 +71,14 @@ describe("test privileged-cleanup controller", () => {
     const controller = createTestPrivilegedCleanupController({
       runtimePid: () => 999,
       cleanup: async () => false,
+      unconfirmedMessage: () => "Runtime shutdown exceeded its deadline.",
       exit,
     });
 
     await expect(controller.preparePrivilegedCleanup()).resolves.toMatchObject({
       phase: "privileged-cleanup-complete",
       cleanupConfirmed: false,
+      errorMessage: "Runtime shutdown exceeded its deadline.",
     });
     expect(() => controller.finishPreparedQuit()).toThrow(
       "Cannot finish the test quit without confirmed privileged cleanup (phase=privileged-cleanup-complete, cleanupConfirmed=false).",

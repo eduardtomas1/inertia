@@ -134,8 +134,12 @@ export async function runRuntimeShutdownPhases(
       deadlineAt,
       "owned-resource cleanup",
     );
+    await beforeDeadline(
+      attempt(phases.settleArtifacts, true),
+      deadlineAt,
+      "artifact cleanup",
+    );
     for (const [phase, operation] of [
-      ["artifact cleanup", phases.settleArtifacts],
       ["client cleanup", phases.terminateClients],
       ["server cleanup", phases.closeServer],
     ] as const) {

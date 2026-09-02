@@ -659,7 +659,9 @@ describe("cross-platform packaged behavior contract", () => {
     const quitEnd = main.indexOf("\n  });", quitStart);
     const quitHandler = main.slice(quitStart, quitEnd);
     expect(quitHandler).toContain("appUpdateInstallCoordinator?.allowBeforeQuit()");
-    expect(quitHandler).toContain("runPrivilegedCleanup().then(finishQuitAfterCleanup");
+    expect(quitHandler).toContain("runPrivilegedCleanup().then(");
+    expect(quitHandler).toContain("finishNormalShutdownAfterCleanup({");
+    expect(quitHandler).toContain("cleanupConfirmed,");
     expect(main.indexOf("conversationAttachments = null")).toBeLessThan(
       main.indexOf("closeConversationAttachmentAccess(retainedAttachments)"),
     );

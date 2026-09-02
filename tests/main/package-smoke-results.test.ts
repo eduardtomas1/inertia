@@ -41,18 +41,32 @@ describe("package smoke result receipts", () => {
   });
 
   it("waits for every requested receipt before settling", async () => {
-    const pdf = await resultPath("pdf.json");
-    const image = join(pdf, "..", "image.json");
-    const settled = vi.fn();
-    const waiting = waitForRequestedPackageSmokeResults(
-      { pdf, image },
-      { timeoutMs: 1_000, pollIntervalMs: 2 },
-    ).then(settled);
-    await writePackagedSmokeResult(pdf, { ok: true, content: "PDF text" });
-    await new Promise<void>((resolve) => setTimeout(resolve, 10));
-    expect(settled).not.toHaveBeenCalled();
-    await writePackagedSmokeResult(image, { ok: true });
-    await waiting;
-    expect(settled).toHaveBeenCalledOnce();
+    vi.useFakeTimers();
+    try {
+      const pdf = await resultPath("pdf.json");
+      const image = join(pdf, "..", "image.json");
+      let settled = false;
+      const waiting = waitForRequestedPackageSmokeResults(
+        { pdf, image },
+        { timeoutMs: 1_000, pollIntervalMs: 2 },
+      ).then(
+        () => {
+          settled = true;
+          return { status: "fulfilled" as const };
+        },
+        (error: unknown) => {
+          settled = true;
+          return { status: "rejected" as const, error };
+        },
+      );
+      await writePackagedSmokeResult(pdf, { ok: true, content: "PDF text" });
+      await vi.advanceTimersByTimeAsync(10);
+      expect(settled).toBe(false);
+      await writePackagedSmokeResult(image, { ok: true });
+      await vi.advanceTimersByTimeAsync(2);
+      await expect(waiting).resolves.toEqual({ status: "fulfilled" });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

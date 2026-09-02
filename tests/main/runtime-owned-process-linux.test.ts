@@ -41,6 +41,46 @@ function exists(pid: number): boolean {
   } catch { return false; }
 }
 
+interface RecordedLinuxProcess {
+  readonly pid: number;
+  readonly startTimeTicks: string;
+}
+
+function recordLinuxProcess(pid: number): RecordedLinuxProcess | null {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+    const tail = stat.lastIndexOf(")");
+    const fields = tail >= 0 ? stat.slice(tail + 2).trim().split(/\s+/u) : [];
+    return fields[19] ? { pid, startTimeTicks: fields[19] } : null;
+  } catch {
+    return null;
+  }
+}
+
+function recordLinuxProcessTree(rootPid: number): RecordedLinuxProcess[] {
+  const recorded: RecordedLinuxProcess[] = [];
+  const pending = [rootPid];
+  const visited = new Set<number>();
+  while (pending.length > 0) {
+    const pid = pending.shift()!;
+    if (visited.has(pid)) continue;
+    visited.add(pid);
+    const identity = recordLinuxProcess(pid);
+    if (!identity) continue;
+    recorded.push(identity);
+    try {
+      const children = readFileSync(`/proc/${pid}/task/${pid}/children`, "utf8").trim();
+      if (children) pending.push(...children.split(/\s+/u).map(Number));
+    } catch { /* The exact process exited while its test identity was recorded. */ }
+  }
+  return recorded;
+}
+
+function killRecordedLinuxProcess(identity: RecordedLinuxProcess): void {
+  if (recordLinuxProcess(identity.pid)?.startTimeTicks !== identity.startTimeTicks) return;
+  try { process.kill(identity.pid, "SIGKILL"); } catch { /* The exact process already exited. */ }
+}
+
 function readRecordedPid(marker: string): number | null {
   if (!existsSync(marker)) return null;
   const pid = Number(readFileSync(marker, "utf8").trim());
@@ -380,31 +420,85 @@ describe("Linux runtime process guardian", () => {
       join(process.cwd(), "tests/fixtures/linux-double-fork.c"), "-o", payload,
     ]);
 
+    const guardianPidPath = join(root, "guardian.pid");
     const harness = spawn(process.execPath, [
       join(process.cwd(), "tests/fixtures/linux-guardian-parent.cjs"),
-      guardian, payload, descendantPid, join(root, "guardian.pid"),
+      guardian, payload, descendantPid, guardianPidPath,
     ], { stdio: "ignore" });
-    await new Promise<void>((resolve, reject) => {
-      harness.once("exit", (code) => code === 0 ? resolve() : reject(new Error(`harness exited ${code}`)));
-    });
-    await waitFor(() => {
-      try { return readFileSync(descendantPid, "utf8").trim().length > 0; } catch { return false; }
-    });
-    const guardianPid = Number(readFileSync(join(root, "guardian.pid"), "utf8"));
-    const escapedPid = Number(readFileSync(descendantPid, "utf8"));
-    await waitFor(() => {
-      try {
-        return readFileSync(`/proc/${guardianPid}/comm`, "utf8").trim() === "inertia-exdone"
-          && !exists(escapedPid);
-      } catch { return false; }
-    });
-    const identity = execFileSync(guardian, ["identity", String(guardianPid)], { encoding: "utf8" }).trim().split("|");
     const executable = statSync(guardian, { bigint: true });
-    execFileSync(guardian, [
-      "signal", String(guardianPid), identity[3]!,
-      String(executable.dev), String(executable.ino), "kill",
-    ]);
-    await waitFor(() => !exists(guardianPid));
+    let guardianPid: number | null = null;
+    let guardianStartTime = "";
+    let escapedIdentity: RecordedLinuxProcess | null = null;
+    try {
+      await waitFor(() => readRecordedPid(guardianPidPath) !== null);
+      guardianPid = readRecordedPid(guardianPidPath)!;
+      const identity = execFileSync(
+        guardian,
+        ["identity", String(guardianPid)],
+        { encoding: "utf8" },
+      ).trim().split("|");
+      guardianStartTime = identity[3]!;
+      expect(guardianStartTime).toMatch(/^[1-9][0-9]*$/u);
+
+      await new Promise<void>((resolve, reject) => {
+        harness.once("exit", (code) => code === 0 ? resolve() : reject(new Error(`harness exited ${code}`)));
+      });
+      await waitFor(() => {
+        try { return readFileSync(descendantPid, "utf8").trim().length > 0; } catch { return false; }
+      });
+      const escapedPid = Number(readFileSync(descendantPid, "utf8"));
+      escapedIdentity = recordLinuxProcess(escapedPid);
+      await waitFor(() => {
+        try {
+          return readFileSync(`/proc/${guardianPid}/comm`, "utf8").trim() === "inertia-exdone"
+            && !exists(escapedPid);
+        } catch { return false; }
+      });
+      execFileSync(guardian, [
+        "signal", String(guardianPid), guardianStartTime,
+        String(executable.dev), String(executable.ino), "kill",
+      ]);
+      await waitFor(() => !exists(guardianPid!));
+    } finally {
+      const recordedPayloads = guardianPid === null
+        ? []
+        : recordLinuxProcessTree(guardianPid).slice(1);
+      if (escapedIdentity) recordedPayloads.push(escapedIdentity);
+      await stopChild(harness);
+      if (guardianPid !== null && guardianStartTime) {
+        try {
+          execFileSync(guardian, [
+            "signal", String(guardianPid), guardianStartTime,
+            String(executable.dev), String(executable.ino), "stop",
+          ]);
+        } catch { /* A terminal guardian rejects stop and is killed below. */ }
+        try {
+          await waitFor(() => {
+            try {
+              const comm = readFileSync(`/proc/${guardianPid}/comm`, "utf8").trim();
+              return comm === "inertia-done" || comm === "inertia-exdone";
+            } catch { return true; }
+          }, 2_000);
+        } catch { /* The identity-checked fallback below handles a regression. */ }
+        try {
+          execFileSync(guardian, [
+            "signal", String(guardianPid), guardianStartTime,
+            String(executable.dev), String(executable.ino), "kill",
+          ]);
+        } catch { /* The exact terminal guardian already exited or did not drain. */ }
+        const recordedGuardian = recordLinuxProcess(guardianPid);
+        if (recordedGuardian?.startTimeTicks === guardianStartTime) {
+          killRecordedLinuxProcess(recordedGuardian);
+        }
+      }
+      for (const identity of recordedPayloads) killRecordedLinuxProcess(identity);
+      await Promise.all(recordedPayloads.map(async ({ pid }) => {
+        try { await waitFor(() => !exists(pid), 2_000); } catch { /* Best-effort test cleanup. */ }
+      }));
+      if (guardianPid !== null) {
+        try { await waitFor(() => !exists(guardianPid!), 2_000); } catch { /* Best-effort test cleanup. */ }
+      }
+    }
   }, 30_000);
 
   linuxIt("routes forced cancellation through the guardian drain", async () => {

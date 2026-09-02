@@ -247,7 +247,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   const paths = gatePaths(sampleNumber);
   cleanupGate(paths);
   let cadenceOrdinal = 1;
-  send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId, delta: "STREAM_PROVIDER_DELTA_" + sampleNumber + "_" + Date.now() + " STREAM_PROVIDER_CADENCE_" + sampleNumber + "_" + cadenceOrdinal + " " } });
+  send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId, delta: "STREAM_PROVIDER_DELTA_" + sampleNumber + "_" + Date.now() + " " } });
   let index = ${STREAMING_PROGRESSIVE_PAINT_COUNT};
   const beginRemainingCadence = () => {
     const timer = setInterval(() => {
@@ -301,7 +301,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       rmSync(paths.cadence, { force: true });
       if (cadenceOrdinal < ${STREAMING_PROGRESSIVE_PAINT_COUNT}) {
         cadenceOrdinal += 1;
-        send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId, delta: "STREAM_PROVIDER_CADENCE_" + sampleNumber + "_" + cadenceOrdinal + " " } });
+        send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId, delta: "chunk-" + (cadenceOrdinal - 1) + "🙂 " } });
         return;
       }
       clearInterval(cadenceTimer);

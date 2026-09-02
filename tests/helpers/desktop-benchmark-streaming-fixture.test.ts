@@ -90,6 +90,13 @@ function providerDeltaMessages(run: FixtureRun): Record<string, unknown>[] {
   ));
 }
 
+function providerDeltaText(run: FixtureRun): string[] {
+  return providerDeltaMessages(run).map((message) => {
+    const params = message.params as { delta?: unknown } | undefined;
+    return typeof params?.delta === "string" ? params.delta : "";
+  });
+}
+
 async function waitFor(
   predicate: () => boolean,
   timeoutMs = STREAMING_COMPLETION_GATE_TIMEOUT_MS,
@@ -128,9 +135,7 @@ describe("desktop benchmark streaming completion gate", () => {
       ordinal <= STREAMING_PROGRESSIVE_PAINT_COUNT;
       ordinal += 1
     ) {
-      await waitFor(() => providerDeltaMessages(run).some((message) => (
-        JSON.stringify(message).includes(`STREAM_PROVIDER_CADENCE_7_${ordinal}`)
-      )));
+      await waitFor(() => providerDeltaMessages(run).length >= ordinal);
       expect(providerDeltaMessages(run)).toHaveLength(ordinal);
       await new Promise<void>((resolveDelay) => setTimeout(resolveDelay, 20));
       expect(providerDeltaMessages(run)).toHaveLength(ordinal);
@@ -138,6 +143,13 @@ describe("desktop benchmark streaming completion gate", () => {
     }
 
     await waitForStreamingCompletionReady(workspace, 7);
+    const streamedPayload = providerDeltaText(run);
+    expect(streamedPayload).toHaveLength(128);
+    expect(streamedPayload[0]).toMatch(/^STREAM_PROVIDER_DELTA_7_\d+ $/u);
+    expect(streamedPayload.slice(1)).toEqual(Array.from(
+      { length: 127 },
+      (_, index) => `chunk-${index + 1}🙂 `,
+    ));
     expect(run.messages.some(isTerminalMessage)).toBe(false);
     await beginStreamingReaderActivity(workspace, 7);
     await waitForStreamingReaderActivity(workspace, 7);
@@ -171,18 +183,14 @@ describe("desktop benchmark streaming completion gate", () => {
     });
     beginSample(run, 9);
 
-    await waitFor(() => providerDeltaMessages(run).some((message) => (
-      JSON.stringify(message).includes("STREAM_PROVIDER_CADENCE_9_1")
-    )));
+    await waitFor(() => providerDeltaMessages(run).length >= 1);
     for (
       let ordinal = 1;
       ordinal <= STREAMING_PROGRESSIVE_PAINT_COUNT;
       ordinal += 1
     ) {
       if (ordinal > 1) {
-        await waitFor(() => providerDeltaMessages(run).some((message) => (
-          JSON.stringify(message).includes(`STREAM_PROVIDER_CADENCE_9_${ordinal}`)
-        )));
+        await waitFor(() => providerDeltaMessages(run).length >= ordinal);
       }
       await releaseStreamingCadence(workspace, 9);
     }
@@ -202,9 +210,7 @@ describe("desktop benchmark streaming completion gate", () => {
     });
     beginSample(run, 11);
 
-    await waitFor(() => providerDeltaMessages(run).some((message) => (
-      JSON.stringify(message).includes("STREAM_PROVIDER_CADENCE_11_1")
-    )));
+    await waitFor(() => providerDeltaMessages(run).length >= 1);
     expect(await exitCode(run.child)).toBe(2);
     children.delete(run.child);
     await waitForStreamingCompletionCleanup(workspace, 11);

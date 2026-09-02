@@ -72,6 +72,8 @@ const CI_STREAM_LONG_TASK_CATASTROPHIC_MS = 2_000;
 // These surfaces are loaded during idle time. Their first interaction should
 // therefore be a synchronous render, not React's delayed first lazy handoff.
 const CI_PREFETCHED_SURFACE_TARGET_MS = 100;
+const AUTHORITATIVE_SCROLL_EDGE_TOLERANCE_PX = 2;
+const AUTHORITATIVE_SCROLL_MAX_PREFLIGHT_FRAMES = 8;
 // Prove progressive rendering before the scenario deliberately leaves the live
 // edge. Follow-latest assertions separately prove that returning to the live
 // answer restores the final settled view without rewarding broken auto-follow.
@@ -574,7 +576,11 @@ async function authoritativeScrollSample(page: Page, expectedRows = 300) {
   const viewportLocator = page.locator(".message-scroll");
   await viewportLocator.hover();
   await page.mouse.wheel(0, -1);
-  const result = await viewportLocator.evaluate(async (viewport, expectedRows) => {
+  const result = await viewportLocator.evaluate(async (viewport, {
+    edgeTolerancePx,
+    expectedRows,
+    maximumPreflightFrames,
+  }) => {
     const frameIntervals: number[] = [];
     const topPositions: number[] = [];
     const bottomGaps: number[] = [];
@@ -600,6 +606,57 @@ async function authoritativeScrollSample(page: Page, expectedRows = 300) {
     const waitForFrame = (): Promise<number> => new Promise((resolveFrame) => {
       requestAnimationFrame((now) => resolveFrame(now));
     });
+    const scrollTo = (target: number): void => {
+      viewport.dispatchEvent(new WheelEvent("wheel", {
+        bubbles: true,
+        deltaY: target === 0 ? -1 : 1,
+      }));
+      viewport.scrollTop = target;
+    };
+    // Calibrate the dynamically measured bottom range before starting the
+    // exact 120-frame sample. The virtualizer wraps ResizeObserver work in
+    // rAF, so newly appended rows need a bounded geometry handshake rather
+    // than an assumed single-frame warmup.
+    scrollTo(viewport.scrollHeight);
+    let previousPreflightHeight: number | null = null;
+    let stablePreflightFrames = 0;
+    let preflightFrames = 0;
+    let preflightHeightChanges = 0;
+    let preflightBottomGap = Number.POSITIVE_INFINITY;
+    while (
+      stablePreflightFrames < 2
+      && preflightFrames < maximumPreflightFrames
+    ) {
+      viewport.scrollTop = viewport.scrollHeight;
+      await waitForFrame();
+      preflightFrames += 1;
+      const currentHeight = viewport.scrollHeight;
+      preflightBottomGap = currentHeight
+        - viewport.clientHeight
+        - viewport.scrollTop;
+      const heightStable = previousPreflightHeight !== null
+        && currentHeight === previousPreflightHeight;
+      if (previousPreflightHeight !== null && !heightStable) {
+        preflightHeightChanges += 1;
+      }
+      stablePreflightFrames = heightStable
+        && preflightBottomGap <= edgeTolerancePx
+        ? stablePreflightFrames + 1
+        : 0;
+      previousPreflightHeight = currentHeight;
+    }
+    if (stablePreflightFrames < 2) {
+      throw new Error(
+        `The authoritative bottom range did not stabilize within ${maximumPreflightFrames} preflight frames: gap ${preflightBottomGap}.`,
+      );
+    }
+    scrollTo(0);
+    await waitForFrame();
+    if (viewport.scrollTop > edgeTolerancePx) {
+      throw new Error(
+        `The authoritative top range did not stabilize after preflight: ${viewport.scrollTop}.`,
+      );
+    }
     let longTaskObserver: PerformanceObserver | null = null;
     try {
       longTaskObserver = new PerformanceObserver((list) => {
@@ -609,15 +666,6 @@ async function authoritativeScrollSample(page: Page, expectedRows = 300) {
     } catch {
       longTaskObserver = null;
     }
-    const scrollTo = (target: number): void => {
-      viewport.dispatchEvent(new WheelEvent("wheel", {
-        bubbles: true,
-        deltaY: target === 0 ? -1 : 1,
-      }));
-      viewport.scrollTop = target;
-    };
-    scrollTo(0);
-    await waitForFrame();
     let previous = performance.now();
     let previousRowCount = feed.querySelectorAll(".response-virtual-item").length;
     for (let index = 0; index < 120; index += 1) {
@@ -645,10 +693,10 @@ async function authoritativeScrollSample(page: Page, expectedRows = 300) {
       if (target > 0 && Math.abs(top - before) < 1) {
         throw new Error("A benchmark scroll assignment was a no-op.");
       }
-      if (index % 2 === 0 && bottomGap > 2) {
+      if (index % 2 === 0 && bottomGap > edgeTolerancePx) {
         throw new Error(`The viewport did not reach the bottom: gap ${bottomGap}.`);
       }
-      if (index % 2 === 1 && top > 2) {
+      if (index % 2 === 1 && top > edgeTolerancePx) {
         throw new Error(`The viewport did not reach the top: ${top}.`);
       }
       topPositions.push(top);
@@ -702,6 +750,11 @@ async function authoritativeScrollSample(page: Page, expectedRows = 300) {
         maximum: Math.max(...rowCounts),
       },
       layoutMeasurementMs: summarize(layoutMeasurementMs),
+      preflight: {
+        bottomGap: preflightBottomGap,
+        frames: preflightFrames,
+        heightChanges: preflightHeightChanges,
+      },
       totalTimelineRows: totalRows,
       maximumDomDescendants: maximumDescendants,
       scrollHeight: viewport.scrollHeight,
@@ -710,7 +763,11 @@ async function authoritativeScrollSample(page: Page, expectedRows = 300) {
         ...bottomGaps.filter((_, index) => index % 2 === 0),
       ),
     };
-  }, expectedRows);
+  }, {
+    edgeTolerancePx: AUTHORITATIVE_SCROLL_EDGE_TOLERANCE_PX,
+    expectedRows,
+    maximumPreflightFrames: AUTHORITATIVE_SCROLL_MAX_PREFLIGHT_FRAMES,
+  });
   return result;
 }
 
@@ -2004,6 +2061,7 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
               (sum, sample) => sum + sample.frames,
               0,
             ),
+            scrollPreflights: soakScrollSamples.map((sample) => sample.preflight),
             before: soakBefore,
             after: soakAfter,
             retainedJsHeapBytes: Math.max(
@@ -2017,9 +2075,9 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
         shutdown: { coldMs: coldShutdownMs, warmMs: warmShutdownMs },
       },
       limitations: [
-        "The authoritative long-conversation fixture creates 300 queued, running, and settled turns through RuntimeStore lifecycle APIs; the compatibility scenario separately stresses collapsed orphan history.",
+        "The authoritative long-conversation fixture creates 300 queued, running, and settled turns through RuntimeStore lifecycle APIs; a bounded, unmeasured bottom-range preflight settles deferred virtualizer measurements before the exact 120-frame sample, and the compatibility scenario separately stresses collapsed orphan history.",
         "Desktop streaming uses a deterministic local Codex app-server fixture; it exercises the production provider, utility-runtime, SQLite, WebSocket, React, and paint path without network variance.",
-        "The streaming fixture acknowledges four exact visible-paint cadence markers, then holds terminal completion behind a bounded local gate, acknowledges one activity pulse before reader navigation and one after it, returns through Jump to latest, and releases completion immediately before the terminal-paint await.",
+        "The streaming fixture acknowledges the first four exact visible payload fragments before resuming its unchanged bulk cadence, then holds terminal completion behind a bounded local gate, acknowledges one activity pulse before reader navigation and one after it, returns through Jump to latest, and releases completion immediately before the terminal-paint await.",
         "Cross-process streaming attribution uses bounded wall-clock markers only for comparison; WebSocket receipt starts at the causal pre-send marker, each first-delta and terminal chain is isolated to one run, and stage ordering remains authoritative within each process.",
         "Animation-frame intervals describe compositor scheduling, while PerformanceObserver long-task durations describe main-thread stalls; hosted frame intervals are retained as observational evidence rather than a 60-fps claim.",
         "Chromium process working-set retention after panels close is not classified as a leak when JavaScript heap, DOM, terminal, workspace-surface, and split-pane counters are released.",
@@ -2035,8 +2093,16 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
 
     expect(report.scenarios.authoritativeLongConversation.frames).toBe(120);
     expect(report.scenarios.authoritativeLongConversation.totalTimelineRows).toBe(300);
-    expect(report.scenarios.authoritativeLongConversation.actualTopPosition).toBeLessThanOrEqual(2);
-    expect(report.scenarios.authoritativeLongConversation.actualBottomGap).toBeLessThanOrEqual(2);
+    expect(report.scenarios.authoritativeLongConversation.actualTopPosition)
+      .toBeLessThanOrEqual(AUTHORITATIVE_SCROLL_EDGE_TOLERANCE_PX);
+    expect(report.scenarios.authoritativeLongConversation.actualBottomGap)
+      .toBeLessThanOrEqual(AUTHORITATIVE_SCROLL_EDGE_TOLERANCE_PX);
+    expect(report.scenarios.authoritativeLongConversation.preflight.frames)
+      .toBeGreaterThanOrEqual(2);
+    expect(report.scenarios.authoritativeLongConversation.preflight.frames)
+      .toBeLessThanOrEqual(AUTHORITATIVE_SCROLL_MAX_PREFLIGHT_FRAMES);
+    expect(report.scenarios.authoritativeLongConversation.preflight.bottomGap)
+      .toBeLessThanOrEqual(AUTHORITATIVE_SCROLL_EDGE_TOLERANCE_PX);
     expect(report.scenarios.authoritativeLongConversation.mountedAuthoritativeRows).toBeLessThan(40);
     expect(report.scenarios.compatibilityHistory.releasedOnClose).toBe(true);
     expect(report.scenarios.streamingResponsiveness.sampleCount)
@@ -2136,6 +2202,15 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
     expect(report.scenarios.rendererMemory.postClose30s.activeXtermContainers).toBe(0);
     expect(report.scenarios.rendererMemory.postClose30s.splitPaneCount).toBe(0);
     expect(report.scenarios.rendererMemory.repeatedOpenClose).toHaveLength(8);
+    expect(report.scenarios.rendererMemory.soak.scrollFrames).toBe(600);
+    expect(report.scenarios.rendererMemory.soak.scrollPreflights).toHaveLength(5);
+    for (const preflight of report.scenarios.rendererMemory.soak.scrollPreflights) {
+      expect(preflight.frames).toBeGreaterThanOrEqual(2);
+      expect(preflight.frames)
+        .toBeLessThanOrEqual(AUTHORITATIVE_SCROLL_MAX_PREFLIGHT_FRAMES);
+      expect(preflight.bottomGap)
+        .toBeLessThanOrEqual(AUTHORITATIVE_SCROLL_EDGE_TOLERANCE_PX);
+    }
     const firstOpenClose = report.scenarios.rendererMemory.repeatedOpenClose[0]!;
     const lastOpenClose = report.scenarios.rendererMemory.repeatedOpenClose.at(-1)!;
     expect(lastOpenClose.usedJsHeapBytes).toBeLessThanOrEqual(

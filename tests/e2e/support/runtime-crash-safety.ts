@@ -533,6 +533,10 @@ export async function expectRuntimeCrashRecovery(
     const journal = new RuntimeOwnedProcessJournal(dataDirectory, {
       platform: "win32",
     });
+    // An active terminal admission can briefly make an ordinary journal read
+    // fail closed while its temporary leaf is being committed. Require the
+    // durable containment record before crashing the runtime, but do not turn
+    // that safe transient into an ARM64-only timing failure.
     await expect.poll(
       () => journal.containment(priorLease!.runtimeGenerationId),
       { timeout: 15_000, intervals: [25] },
@@ -748,7 +752,10 @@ export async function expectRuntimeCrashRecovery(
   expect(await page.evaluate(() =>
     Reflect.get(window, "__inertiaNoReloadMarker"))).toBe(marker);
   await expect(page.getByRole("heading", { name: "New chat", level: 1 })).toBeVisible();
-  const newChat = page.getByRole("button", { name: "New chat" }).first();
+  const newChat = page.getByRole("button", {
+    name: "New chat",
+    exact: true,
+  });
   const interruptedNotice = page.getByText(
     "The previous run ended when Inertia closed. Send another message to continue.",
   );

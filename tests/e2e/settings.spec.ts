@@ -87,7 +87,7 @@ test("navigates settings, changes theme, and returns to chat", async () => {
   await page.getByRole("button", { name: "Keybindings", exact: true }).click();
   await expect(page.getByText("Toggle project navigation", { exact: true })).toBeVisible();
 
-  await page.getByRole("button", { name: "Go to workspace" }).click();
+  await page.getByRole("button", { name: "Workspace", exact: true }).click();
   await expect(page.locator("aside.terminal-panel").first()).toHaveAttribute("data-terminal-font-size", terminalFontSize ?? "13");
   await expect(page.locator(".chat-workspace")).toHaveClass(/response-density-comfortable/u);
   await expect(page.locator(".response-code-block pre").first()).toHaveClass(/wraps/u);
@@ -322,7 +322,7 @@ test("manages backend profiles across the responsive theme and scale matrix", as
   )).toHaveCount(0);
   await expectBackendLayoutContained();
   await resizeWindow(1440, 920);
-  await page.getByRole("button", { name: "Go to workspace" }).click();
+  await page.getByRole("button", { name: "Workspace", exact: true }).click();
   expect(rendererErrors).toEqual([]);
 });
 
@@ -407,7 +407,7 @@ test("keeps runtime support and application update checks explicit in settings",
   await page.getByRole("button", { name: "Check now" }).click();
   await expect(page.getByText("Inertia is up to date.", { exact: true })).toBeVisible();
   await expect(page.getByText("Install", { exact: true })).toHaveCount(0);
-  await page.getByRole("button", { name: "Go to workspace" }).click();
+  await page.getByRole("button", { name: "Workspace", exact: true }).click();
   expect(rendererErrors).toEqual([]);
 });
 
@@ -585,7 +585,7 @@ test("persists composer usage modes without losing the followed transcript", asy
   const usageModes = page.getByRole("radiogroup", { name: "Usage and context display" });
   await expect(usageModes.getByRole("radio", { name: "Hidden" })).toHaveAttribute("aria-checked", "true");
   await usageModes.getByRole("radio", { name: "Expanded" }).click();
-  await page.getByRole("button", { name: "Go to workspace" }).click();
+  await page.getByRole("button", { name: "Workspace", exact: true }).click();
   const expanded = page.getByRole("region", { name: "Usage and context" });
   await expect(expanded).toHaveAttribute("data-mode", "expanded");
   await expectComposerEndsAtDock(page.getByRole("region", {
@@ -689,9 +689,9 @@ test("applies every interface scale live and remains usable at common Linux disp
   });
   await resizeWindow(900, 720);
   await expectNoViewportOverflow();
-  await expect(page.getByRole("button", { name: "Go to workspace" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Workspace", exact: true })).toBeVisible();
   await scaleGroup.getByRole("radio", { name: "Comfortable", exact: true }).click();
-  await page.getByRole("button", { name: "Go to workspace" }).click();
+  await page.getByRole("button", { name: "Workspace", exact: true }).click();
   await expect(page.locator("aside.terminal-panel").first()).toHaveAttribute("data-terminal-font-size", terminalFontSize ?? "13");
   await expectNoViewportOverflow();
   const scaledDock = page.getByRole("region", { name: "Message composer" });

@@ -93,6 +93,22 @@ export function sanitizeRuntimeDiagnosticText(value: unknown): string | undefine
 function runtimeFailureSummary(value: unknown): string | undefined {
   const text = sanitizeRuntimeDiagnosticText(value);
   if (!text) return undefined;
+  if ([
+    /^The runtime generation ownership lease could not be persisted\.$/u,
+    /^The unstarted runtime generation lease could not be retired\.$/u,
+    /^The confirmed runtime cleanup receipt could not be persisted\.$/u,
+    /^The runtime cleanup receipt could not be consumed safely\.$/u,
+    /^The runtime could not confirm complete process cleanup\.$/u,
+    /^Runtime shutdown failed while closing local resources\.$/u,
+    /^Runtime shutdown exceeded its deadline while closing local resources\.$/u,
+    /^Runtime shutdown could not confirm owned-process cleanup\.$/u,
+    /^Runtime shutdown could not confirm cleanup after incomplete startup\.$/u,
+    /^The runtime process tree could not be confirmed stopped\..*$/u,
+    /^The runtime exited before complete process-tree cleanup was confirmed\..*$/u,
+    /^The runtime process tree was stopped, but prior detached work could not be confirmed cleaned up\..*$/u,
+    /^A prior runtime generation still has unconfirmed process cleanup\..*$/u,
+    /^Conversation attachment storage shutdown could not be confirmed\.$/u,
+  ].some((pattern) => pattern.test(text))) return text;
   if (/did not become ready|startup.*timed out|start.*timed out/iu.test(text)) return "Runtime startup timed out.";
   if (/invalid lifecycle (?:command|message)/iu.test(text)) return "Runtime lifecycle validation failed.";
   if (/could not be created|spawn/iu.test(text)) return "Runtime process could not be created.";

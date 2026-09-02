@@ -10,6 +10,7 @@ import type {
   MessageSendAcceptance,
   ModelBackendProfileView,
   ModelSelection,
+  Project,
   ProjectAction,
   ProviderId,
   ProviderInfo,
@@ -34,6 +35,7 @@ export interface ComposerProps {
   conversation: Conversation;
   checkoutBranch?: string | null;
   showCheckoutContext?: boolean;
+  newChatProjectPicker?: NewChatProjectPicker;
   providers: ProviderInfo[];
   actions: ProjectAction[];
   disabled: boolean;
@@ -108,6 +110,13 @@ export interface ComposerProps {
   onResumeConversation?: (conversationId: string) => void;
   onStop: () => Promise<void>;
   onClearPromptContext?: () => void;
+}
+
+export interface NewChatProjectPicker {
+  projects: readonly Project[];
+  selectedProject: Project;
+  disabled: boolean;
+  onChange: (project: Project) => void;
 }
 
 export interface ComposerQueuedPrompt {

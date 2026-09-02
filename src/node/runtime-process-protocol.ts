@@ -52,8 +52,10 @@ import {
   parseRuntimeDatabaseStartupRecovery,
   type RuntimeDatabaseStartupRecoveryReport,
 } from "./runtime-database-recovery-protocol";
+import { parseRuntimeShutdownUnconfirmedEvent, type RuntimeShutdownUnconfirmedEvent } from "./runtime-shutdown-protocol.js";
 export { validRuntimeGenerationId, validSystemBootId } from "./runtime-identity-protocol";
 export type { RuntimeDatabaseStartupRecoveryReport } from "./runtime-database-recovery-protocol";
+export type { RuntimeShutdownUnconfirmedReason } from "./runtime-shutdown-protocol.js";
 export type { RuntimeUpdatePreparationBlocker, RuntimeUpdatePreparationResult } from "./runtime-update-process-protocol";
 
 export type { RuntimeConversationAttachmentStoreResult }
@@ -262,7 +264,7 @@ export type RuntimeWorkerEvent =
   | { type: "runtime.system-suspend-result"; id: string; recorded: boolean }
   | { type: "runtime.startup-failed"; message: string }
   | { type: "runtime.restart-requested"; reason: RuntimeRestartReason }
-  | { type: "runtime.shutdown-unconfirmed" }
+  | RuntimeShutdownUnconfirmedEvent
   | { type: "runtime.stopped" }
   | RuntimeUpdateWorkerEvent
   | {
@@ -707,6 +709,8 @@ export function parseRuntimeWorkerEvent(value: unknown): RuntimeWorkerEvent | nu
   const browserEvent = parseRuntimeAgentBrowserEvent(value); if (browserEvent) return browserEvent;
   const recoveryEvent = parseRuntimeRecoveryWorkerEvent(value);
   if (recoveryEvent) return recoveryEvent;
+  const shutdownEvent = parseRuntimeShutdownUnconfirmedEvent(value);
+  if (shutdownEvent) return shutdownEvent;
   if (
     value.type === "runtime.cleanup-receipt-consumed"
     && Object.keys(value).length === 3
@@ -718,9 +722,6 @@ export function parseRuntimeWorkerEvent(value: unknown): RuntimeWorkerEvent | nu
     receiptRuntimeGenerationId: value.receiptRuntimeGenerationId,
     currentRuntimeGenerationId: value.currentRuntimeGenerationId,
   };
-  if (value.type === "runtime.shutdown-unconfirmed" && Object.keys(value).length === 1) {
-    return { type: "runtime.shutdown-unconfirmed" };
-  }
   if (
     value.type === "runtime.private-connect-response"
     && Object.keys(value).length === 3

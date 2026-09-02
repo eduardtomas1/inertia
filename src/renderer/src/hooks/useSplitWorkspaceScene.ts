@@ -410,6 +410,8 @@ export function useSplitWorkspaceScene({
       : null,
     project: splitProject,
     draftConversation: null,
+    globalChatActive: false,
+    globalProjectChangeId: null,
     workspaceToolsUnavailable: false,
     connection,
     providerMaintenance,

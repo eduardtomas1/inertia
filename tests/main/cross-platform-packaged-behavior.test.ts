@@ -156,12 +156,13 @@ describe("cross-platform packaged behavior contract", () => {
       "runner: windows-11-arm",
       "runner: macos-15",
       "runner: macos-15-intel",
-      "run: npm run check",
+      "run: npm run check:quality",
+      "run: npm run build:packaged",
       "run: npm run test:native-architecture",
       "run: npm exec -- playwright test",
       "run: xvfb-run --auto-servernum npm exec -- playwright test",
-      'run: npm run "${{ matrix.release_dist_script }}"',
-      'run: npm run "${{ matrix.dist_script }}"',
+      'run: npm run "${{ matrix.release_package_script }}"',
+      'run: npm run "${{ matrix.package_script }}"',
       "npm run verify:fuses -- \"$app\"",
       "run: npm run test:package-smoke",
       "run: xvfb-run --auto-servernum npm run test:package-smoke",
@@ -191,41 +192,63 @@ describe("cross-platform packaged behavior contract", () => {
     }
   });
 
-  it("shards ordinary Windows units and runs the complete gate for release candidates", async () => {
+  it("proves quality once and keeps every platform's unit signal sharded or explicit", async () => {
     const workflow = await source(".github/workflows/ci.yml");
-    const ordinaryCheck = workflowStep(
-      workflow,
-      "Typecheck, unit test, and build",
-    );
-    expect(ordinaryCheck).toContain("if: runner.os != 'Windows'");
-    expect(ordinaryCheck).toContain("run: npm run check");
 
-    const windowsPlatformCheck = workflowStep(
+    // Migrations, architecture, lint, and types are platform independent, so
+    // one gate job owns them and every expensive job waits on it.
+    const qualityGate = workflowStep(
       workflow,
-      "Typecheck and build the Windows platform gate",
+      "Verify migrations, architecture, lint, and types",
     );
-    expect(windowsPlatformCheck).toContain("runner.os == 'Windows'");
-    expect(windowsPlatformCheck).toContain(
-      "!startsWith(github.head_ref, 'codex/release-')",
-    );
-    expect(windowsPlatformCheck).toContain("run: npm run check:platform");
+    expect(qualityGate).toContain("run: npm run check:quality");
+    expect(workflow.match(/^ {4}needs: gate$/gmu)).toHaveLength(3);
 
-    const windowsReleaseCheck = workflowStep(
+    // macOS is the only platform whose unit signal is a plain suite run: Linux
+    // gets the same suite through coverage, and Windows gets it sharded.
+    const macosUnits = workflowStep(workflow, "Run the unit suite");
+    expect(macosUnits).toContain("if: runner.os == 'macOS'");
+    expect(macosUnits).toContain("run: npm test");
+
+    const linuxUnits = workflowStep(
       workflow,
-      "Run the complete Windows release-candidate gate",
+      "Run the unit suite and enforce all-source coverage baselines",
     );
-    expect(windowsReleaseCheck).toContain("runner.os == 'Windows'");
-    expect(windowsReleaseCheck).toContain(
-      "startsWith(github.head_ref, 'codex/release-')",
-    );
-    expect(windowsReleaseCheck).toContain("run: npm run check");
+    expect(linuxUnits).toContain("if: runner.os == 'Linux'");
+    expect(linuxUnits).toContain("run: npm run test:coverage");
 
-    expect(workflow).toContain("name: Windows unit tests (${{ matrix.shard }}/2)");
-    expect(workflow).toContain("timeout-minutes: 45");
-    expect(workflow).toContain("shard: [1, 2]");
+    // The sharded windows-2025 job already runs the whole suite, so the x64
+    // matrix entry must not repeat the portable subset. ARM64 has no sharded
+    // job and therefore keeps it as its only Windows unit signal.
+    const portable = workflowStep(
+      workflow,
+      "Run portable runtime and provider protocol suite",
+    );
+    expect(portable).toContain(
+      "if: runner.os != 'Windows' || matrix.arch != 'x64'",
+    );
+    expect(portable).toContain("run: npm run test:portable");
+
+    // Exactly one build per job, carrying notices and the guardian but not the
+    // typecheck the gate already ran, and consumed by packaging unchanged.
+    const build = workflowStep(workflow, "Build the application bundle");
+    expect(build).toContain("run: npm run build:packaged");
+    expect(workflow).not.toContain('run: npm run "${{ matrix.dist_script }}"');
+    expect(workflow).not.toContain("run: npm run check:platform");
+
+    expect(workflow).toContain("name: Windows unit tests (${{ matrix.shard }}/4)");
+    expect(workflow).toContain("timeout-minutes: 30");
+    expect(workflow).toContain("shard: [1, 2, 3, 4]");
     expect(workflow).toContain(
-      "run: npm test -- --shard=${{ matrix.shard }}/2",
+      "run: npm test -- --shard=${{ matrix.shard }}/4",
     );
+
+    // Real-time scanning dominates hosted Windows install and fixture cost, so
+    // both Windows jobs exclude the throwaway workspace without being able to
+    // fail the run if the cmdlet is unavailable.
+    expect(workflow.match(/Exclude the workspace from Microsoft Defender/gu))
+      .toHaveLength(2);
+    expect(workflow.match(/Add-MpPreference -ExclusionPath/gu)).toHaveLength(4);
 
     const packageJson = JSON.parse(await source("package.json")) as {
       build: { files: string[] };
@@ -244,8 +267,73 @@ describe("cross-platform packaged behavior contract", () => {
       "resources/generated/windows-runtime-job-integrity.json",
     );
 
+    // Packaging consumes the build instead of repeating it, so every dist
+    // script must stay a build followed by its own packaging script and no
+    // packaging script may rebuild from source.
+    for (const [target, packaged] of [
+      ["dist:release:win", "package:release:win"],
+      ["dist:release:win:arm64", "package:release:win:arm64"],
+      ["dist:release:mac", "package:release:mac"],
+      ["dist:release:mac:x64", "package:release:mac:x64"],
+      ["dist:linux", "package:linux"],
+      ["dist:linux:arm64", "package:linux:arm64"],
+    ] as const) {
+      expect(packageJson.scripts[target]).toBe(
+        `npm run build && npm run ${packaged}`,
+      );
+      expect(packageJson.scripts[packaged]).toContain("electron-builder");
+      expect(packageJson.scripts[packaged]).not.toContain("npm run build");
+    }
+    expect(packageJson.scripts["build:packaged"]).toBe(
+      "npm run notices:generate && npm run build:bundle",
+    );
+
+    // These suites read the generated guardian, so each one builds it through
+    // its own npm pre-hook rather than depending on an earlier CI step having
+    // happened to build it first.
+    for (const hook of ["pretest", "pretest:coverage", "pretest:portable"]) {
+      expect(packageJson.scripts[hook]).toBe(
+        "node scripts/build-runtime-process-guardian.mjs",
+      );
+    }
+
+    // A partially restored dependency tree is worse than none, so the shared
+    // install action pins the whole lockfile, runner, and Node identity into
+    // one exact key and offers no restore-keys fallback.
+    const install = await source(
+      ".github/actions/install-dependencies/action.yml",
+    );
+    expect(install).toContain(
+      "key: node-modules-${{ runner.os }}-${{ runner.arch }}-node${{ steps.node.outputs.node-version }}-${{ hashFiles('package-lock.json') }}",
+    );
+    expect(install).not.toContain("restore-keys");
+    expect(install).toContain("if: steps.dependencies.outputs.cache-hit != 'true'");
+    expect(install).toContain("run: node scripts/ensure-node-pty-helper.mjs");
+
+    // The minimum-runtime job deliberately keeps an uncached engine-strict
+    // install: proving npm ci itself succeeds on Node 22.13 is its purpose.
+    const minimumRuntime = workflowStep(
+      workflow,
+      "Install locked dependencies without a cache",
+    );
+    expect(minimumRuntime).toContain("run: npm ci --engine-strict");
+    expect(workflow.match(/uses: \.\/\.github\/actions\/install-dependencies/gu))
+      .toHaveLength(3);
+
     const vitest = await source("vitest.config.ts");
-    expect(vitest).toContain("maxWorkers: isWindowsCi ? 1 : undefined");
+    expect(vitest).toContain("maxWorkers: isWindowsCi ? windowsCiMaxWorkers : undefined");
+    expect(vitest).toContain("INERTIA_VITEST_MAX_WORKERS");
+    expect(vitest).toContain("testTimeout: isWindowsCi ? 30_000 : 15_000");
+
+    // Specs that pin a window to the primary display share one machine
+    // resource, so they are discovered rather than listed and run to
+    // completion before anything else launches Electron.
+    const playwright = await source("playwright.config.ts");
+    expect(playwright).toContain('windowDisplay: "primary"');
+    expect(playwright).toContain('name: "display-sensitive"');
+    expect(playwright).toContain("workers: 1");
+    expect(playwright).toContain('dependencies: ["display-sensitive"]');
+    expect(playwright).toContain("INERTIA_E2E_WORKERS");
   });
 
   it("keeps one native smoke implementation for macOS, Windows, and Linux runtime supervision", async () => {

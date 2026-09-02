@@ -648,9 +648,9 @@ test("runs the real installer gate on Windows x64 and ARM64 CI and releases", as
 
   expect(ci).toContain("release_platform: windows-x64");
   expect(ci).toContain("release_platform: windows-arm64");
-  expect(ci).toContain("release_dist_script: dist:release:win");
-  expect(ci).toContain("release_dist_script: dist:release:win:arm64");
-  expect(ci).toContain("Build native Windows installer and unpacked app");
+  expect(ci).toContain("release_package_script: package:release:win");
+  expect(ci).toContain("release_package_script: package:release:win:arm64");
+  expect(ci).toContain("Package native Windows installer and unpacked app");
   expect(ci).toContain("Install, smoke, and uninstall Windows package");
   expect(ci).toContain("run: npm run test:windows-installer-smoke");
   expect(release).toContain("Install, smoke, and uninstall Windows package");

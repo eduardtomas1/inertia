@@ -14,9 +14,34 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Migrations, architecture, lint, and types are platform independent, so they
+  # are proven once here instead of six times across the matrix. Every
+  # expensive job depends on this, which keeps a typo from occupying the
+  # Windows, macOS, and ARM runner pools that the rest of the matrix queues on.
+  gate:
+    name: Quality gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      CI: "true"
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Install locked dependencies
+        uses: ./.github/actions/install-dependencies
+
+      - name: Verify migrations, architecture, lint, and types
+        run: npm run check:quality
+
   node-22-minimum:
     name: Node 22.13 minimum runtime
     runs-on: ubuntu-24.04
+    needs: gate
     timeout-minutes: 20
     env:
       CI: "true"
@@ -35,7 +60,10 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
 
-      - name: Install locked dependencies
+      # Deliberately uncached: proving that npm ci itself resolves and installs
+      # the locked graph on exactly Node 22.13 is this job's whole purpose, and
+      # restoring a tree built elsewhere would prove nothing.
+      - name: Install locked dependencies without a cache
         run: npm ci --engine-strict
 
       - name: Compile and execute Node runtime entry points
@@ -44,6 +72,7 @@ jobs:
   test:
     name: ${{ matrix.label }}
     runs-on: ${{ matrix.runner }}
+    needs: gate
     timeout-minutes: ${{ matrix.timeout_minutes }}
     strategy:
       fail-fast: false
@@ -54,7 +83,7 @@ jobs:
             artifact: linux-x64
             arch: x64
             timeout_minutes: 40
-            dist_script: dist:linux
+            package_script: package:linux
             app_path: release/linux-unpacked/inertia
             unpacked_dir: release/linux-unpacked
             docker_platform: linux/amd64
@@ -63,7 +92,7 @@ jobs:
             artifact: linux-arm64
             arch: arm64
             timeout_minutes: 55
-            dist_script: dist:linux:arm64
+            package_script: package:linux:arm64
             app_path: release/linux-arm64-unpacked/inertia
             unpacked_dir: release/linux-arm64-unpacked
             docker_platform: linux/arm64
@@ -73,7 +102,7 @@ jobs:
             arch: x64
             timeout_minutes: 55
             release_platform: windows-x64
-            release_dist_script: dist:release:win
+            release_package_script: package:release:win
             app_path: release/win-unpacked/Inertia.exe
           - label: Windows ARM64
             runner: windows-11-arm
@@ -81,7 +110,7 @@ jobs:
             arch: arm64
             timeout_minutes: 70
             release_platform: windows-arm64
-            release_dist_script: dist:release:win:arm64
+            release_package_script: package:release:win:arm64
             app_path: release/win-arm64-unpacked/Inertia.exe
           - label: macOS arm64
             runner: macos-15
@@ -89,7 +118,7 @@ jobs:
             arch: arm64
             timeout_minutes: 40
             release_platform: macos-arm64
-            release_dist_script: dist:release:mac
+            release_package_script: package:release:mac
             app_path: release/mac-arm64/Inertia.app
           - label: macOS x64
             runner: macos-15-intel
@@ -97,7 +126,7 @@ jobs:
             arch: x64
             timeout_minutes: 55
             release_platform: macos-x64
-            release_dist_script: dist:release:mac:x64
+            release_package_script: package:release:mac:x64
             app_path: release/mac/Inertia.app
     env:
       CI: "true"
@@ -112,12 +141,18 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: package-lock.json
+      # Real-time scanning inspects every file npm writes and every executable
+      # the native Git, SQLite, and PTY fixtures spawn, which is the dominant
+      # cost of both installing and testing on the hosted Windows images. The
+      # runner user is an administrator and the workspace is discarded when the
+      # job ends, so the exclusion is scoped to that throwaway tree.
+      - name: Exclude the workspace from Microsoft Defender
+        if: runner.os == 'Windows'
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          Add-MpPreference -ExclusionPath "$env:GITHUB_WORKSPACE"
+          Add-MpPreference -ExclusionPath "$env:RUNNER_TEMP"
 
       - name: Install Linux guardian toolchain
         if: runner.os == 'Linux'
@@ -126,7 +161,7 @@ jobs:
           sudo apt-get install --no-install-recommends --yes binutils linux-libc-dev musl-tools=1.2.4-2
 
       - name: Install locked dependencies
-        run: npm ci
+        uses: ./.github/actions/install-dependencies
 
       - name: Verify native dependency architecture
         env:
@@ -136,28 +171,26 @@ jobs:
       - name: Run cross-platform performance smoke
         run: npm run benchmark:platform:smoke
 
-      - name: Typecheck, unit test, and build
-        if: runner.os != 'Windows'
-        run: npm run check
+      # Migrations, architecture, lint, and types are already proven by the
+      # quality gate, so each platform runs only what is genuinely platform
+      # dependent: the unit suite and the build.
+      - name: Run the unit suite
+        if: runner.os == 'macOS'
+        run: npm test
 
-      - name: Typecheck and build the Windows platform gate
-        if: >-
-          runner.os == 'Windows'
-          && !startsWith(github.head_ref, 'codex/release-')
-        run: npm run check:platform
-
-      - name: Run the complete Windows release-candidate gate
-        if: >-
-          runner.os == 'Windows'
-          && startsWith(github.head_ref, 'codex/release-')
-        run: npm run check
-
-      - name: Run portable runtime and provider protocol suite
-        run: npm run test:portable
-
-      - name: Enforce all-source coverage baselines
+      # Coverage runs the same suite as npm test, so Linux runs it once here
+      # instead of running the suite twice.
+      - name: Run the unit suite and enforce all-source coverage baselines
         if: runner.os == 'Linux'
         run: npm run test:coverage
+
+      # The sharded Windows unit job already runs this whole suite on the same
+      # windows-2025 image, so repeating it here would only duplicate it. The
+      # ARM64 image has no sharded job, which makes it the only Windows unit
+      # signal for that architecture.
+      - name: Run portable runtime and provider protocol suite
+        if: runner.os != 'Windows' || matrix.arch != 'x64'
+        run: npm run test:portable
 
       - name: Run opt-in Kimi through Claude integration
         if: runner.os == 'Linux'
@@ -186,6 +219,13 @@ jobs:
         continue-on-error: true
         run: npm audit --audit-level=high
 
+      # The one build in the job. It carries the generated third-party notices
+      # and the runtime guardian that packaging requires, but not the typecheck
+      # the quality gate already ran. Everything below consumes this output, so
+      # the packaging steps no longer rebuild it from source.
+      - name: Build the application bundle
+        run: npm run build:packaged
+
       - name: Run Electron end-to-end tests
         if: runner.os != 'Linux'
         run: npm exec -- playwright test
@@ -202,14 +242,14 @@ jobs:
         if: runner.os == 'Linux'
         run: xvfb-run --auto-servernum npm run benchmark:desktop:built
 
-      - name: Build native Windows installer and unpacked app
+      - name: Package native Windows installer and unpacked app
         if: runner.os == 'Windows'
         env:
           INERTIA_RELEASE_CHANNEL: stable
           INERTIA_RELEASE_PLATFORM: ${{ matrix.release_platform }}
-        run: npm run "${{ matrix.release_dist_script }}"
+        run: npm run "${{ matrix.release_package_script }}"
 
-      - name: Build native macOS containers and unpacked app
+      - name: Package native macOS containers and unpacked app
         if: runner.os == 'macOS'
         env:
           # The builder is configured for ad-hoc signing (identity "-"), so no
@@ -217,11 +257,11 @@ jobs:
           CSC_FOR_PULL_REQUEST: "true"
           INERTIA_RELEASE_CHANNEL: stable
           INERTIA_RELEASE_PLATFORM: ${{ matrix.release_platform }}
-        run: npm run "${{ matrix.release_dist_script }}"
+        run: npm run "${{ matrix.release_package_script }}"
 
-      - name: Build Linux AppImage and unpacked app
+      - name: Package Linux AppImage and unpacked app
         if: runner.os == 'Linux'
-        run: npm run "${{ matrix.dist_script }}"
+        run: npm run "${{ matrix.package_script }}"
 
       - name: Validate Linux AppImage identity, icons, and runtime resource
         if: runner.os == 'Linux'
@@ -349,16 +389,19 @@ jobs:
           retention-days: 14
 
   windows-unit:
-    name: Windows unit tests (${{ matrix.shard }}/2)
+    name: Windows unit tests (${{ matrix.shard }}/4)
     runs-on: windows-2025
-    timeout-minutes: 45
+    needs: gate
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        shard: [1, 2, 3, 4]
     env:
-      # Vitest keeps each Windows shard on one worker so native Git, SQLite,
-      # and WebSocket fixtures remain isolated exactly as they are today.
+      # Vitest shards by path hash rather than by measured duration, so two
+      # shards drifted apart by roughly a third. Four shards narrow that spread
+      # and shorten the longest shard, which is what the pull-request loop
+      # actually waits on.
       CI: "true"
 
     steps:
@@ -368,18 +411,18 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: package-lock.json
+      - name: Exclude the workspace from Microsoft Defender
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          Add-MpPreference -ExclusionPath "$env:GITHUB_WORKSPACE"
+          Add-MpPreference -ExclusionPath "$env:RUNNER_TEMP"
 
       - name: Install locked dependencies
-        run: npm ci
+        uses: ./.github/actions/install-dependencies
 
       - name: Run Windows unit-test shard
-        run: npm test -- --shard=${{ matrix.shard }}/2
+        run: npm test -- --shard=${{ matrix.shard }}/4
 
       - name: Keep failure diagnostics
         if: failure()

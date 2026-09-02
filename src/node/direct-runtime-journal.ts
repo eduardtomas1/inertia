@@ -18,6 +18,8 @@ import {
 } from "node:fs";
 import { join, normalize } from "node:path";
 
+import { FILE_OPEN_NO_FOLLOW } from "./platform-file-open-flags.js";
+
 export interface DirectRuntimeJournalRoot {
   readonly path: string;
   readonly device: bigint;
@@ -379,7 +381,7 @@ export function readDirectRuntimeJournalLeaf(
   const flags = fsConstants.O_RDONLY
     | (process.platform === "win32"
       ? 0
-      : fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK | fsConstants.O_NOCTTY);
+      : FILE_OPEN_NO_FOLLOW | fsConstants.O_NONBLOCK | fsConstants.O_NOCTTY);
   const handle = openSync(path, flags);
   try {
     const opened = fstatSync(handle, { bigint: true });
@@ -448,7 +450,7 @@ export function writeDirectRuntimeJournalLeaf(
     const flags = fsConstants.O_WRONLY
       | fsConstants.O_CREAT
       | fsConstants.O_EXCL
-      | (process.platform === "win32" ? 0 : fsConstants.O_NOFOLLOW);
+      | (process.platform === "win32" ? 0 : FILE_OPEN_NO_FOLLOW);
     handle = openSync(temporaryPath, flags, 0o600);
     if (process.platform !== "win32") fchmodSync(handle, 0o600);
     writeFileSync(handle, bytes);
@@ -517,7 +519,7 @@ export function writeDirectRuntimeJournalLeafFromRoot(
     const flags = fsConstants.O_WRONLY
       | fsConstants.O_CREAT
       | fsConstants.O_EXCL
-      | (process.platform === "win32" ? 0 : fsConstants.O_NOFOLLOW);
+      | (process.platform === "win32" ? 0 : FILE_OPEN_NO_FOLLOW);
     handle = openSync(temporaryPath, flags, 0o600);
     if (process.platform !== "win32") fchmodSync(handle, 0o600);
     writeFileSync(handle, bytes);

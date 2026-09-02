@@ -19,6 +19,10 @@ import {
 } from "node:path";
 
 import {
+  FILE_OPEN_DIRECTORY,
+  FILE_OPEN_NO_FOLLOW,
+} from "../../node/platform-file-open-flags";
+import {
   runtimeOwnedProcessInvocation,
   spawnRuntimeOwnedProcess,
 } from "../../node/runtime-owned-processes";
@@ -400,8 +404,8 @@ async function captureDirectoryIdentity(
   const handle = await open(
     path,
     fsConstants.O_RDONLY
-      | (fsConstants.O_NOFOLLOW ?? 0)
-      | (fsConstants.O_DIRECTORY ?? 0),
+      | FILE_OPEN_NO_FOLLOW
+      | FILE_OPEN_DIRECTORY,
   );
   try {
     const opened = await handle.stat({ bigint: true });
@@ -501,7 +505,7 @@ async function readBoundedIdentityFile(
   await dependencies.afterIdentityFileStat?.(path);
   const handle = await open(
     path,
-    fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0),
+    fsConstants.O_RDONLY | FILE_OPEN_NO_FOLLOW,
   );
   try {
     const opened = await handle.stat({ bigint: true });

@@ -297,7 +297,7 @@ const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
 appendFileSync(${JSON.stringify(pidsPath)}, String(child.pid) + "\\n");
 setInterval(() => {}, 1000);
 `);
-    const deadlineAt = Date.now() + 5_000;
+    const deadlineAt = Date.now() + 8_000;
 
     await expect(commitReviewedChanges(
       root,
@@ -308,7 +308,9 @@ setInterval(() => {}, 1000);
         deadlineAt,
         testHooks: {
           afterFinalReview: async () => {
-            const waitMs = deadlineAt - Date.now() - 2_000;
+            // Preserve enough host-only startup headroom for the fixture to
+            // publish both PIDs before exercising the original deadline.
+            const waitMs = deadlineAt - Date.now() - 5_000;
             if (waitMs > 0) await delay(waitMs);
           },
           runCommitTree: async (_cwd, args, options) => await runGit(
@@ -338,7 +340,7 @@ setInterval(() => {}, 1000);
     expect(existsSync(`${indexPath}.lock`)).toBe(false);
     expect(existsSync(`${indexPath}.inertia-commit-transaction.json`))
       .toBe(false);
-  }, 12_000);
+  }, 18_000);
 
   it("commits only reviewed selected paths and preserves unrelated staged work", async () => {
     const root = repository();

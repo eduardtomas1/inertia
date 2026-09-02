@@ -165,6 +165,11 @@ test("opens a rendered project Markdown file directly from the chat", async () =
   await expect(primaryTools.getByRole("document", {
     name: "Preview of docs/guide.md",
   })).toBeVisible();
+  // Finish the first pane's asynchronous heading handoff before issuing the
+  // second. Otherwise a slower first render can legitimately steal focus back
+  // after the later click and make the split-pane assertion order-dependent.
+  await expect(primaryTools.getByRole("heading", { name: "Details" }))
+    .toBeFocused();
   await secondary.getByRole("link", { name: "companion guide" }).click();
   const secondaryTools = secondary.getByRole("complementary", {
     name: "Workspace tools",

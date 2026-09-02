@@ -2,6 +2,8 @@ import { constants as fsConstants } from "node:fs";
 import { access, open, readdir, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { delimiter, isAbsolute, join, resolve } from "node:path";
+import { FILE_OPEN_NO_FOLLOW } from
+  "../node/platform-file-open-flags";
 import {
   isClaudeCloudRoutingEnvironmentEnabled,
   isClaudeCloudRoutingEnvironmentKey,
@@ -259,7 +261,7 @@ async function boundedNvmDefaultVersion(home: string): Promise<readonly bigint[]
   try {
     const flags = fsConstants.O_RDONLY | (process.platform === "win32"
       ? 0
-      : fsConstants.O_NONBLOCK | fsConstants.O_NOFOLLOW);
+      : fsConstants.O_NONBLOCK | FILE_OPEN_NO_FOLLOW);
     handle = await open(join(home, ".nvm", "alias", "default"), flags);
     const info = await handle.stat();
     if (!info.isFile()) return null;

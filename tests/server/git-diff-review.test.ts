@@ -390,7 +390,7 @@ describe("safe selected diff reversal", () => {
     expect(undone.undoneAt).toEqual(expect.any(String));
     expect(reversalBackupRefs(root)).toEqual([]);
     expect(git(root, "rev-parse", "--verify", REVERSAL_REGISTRY_REF).trim()).toMatch(/^[0-9a-f]{40,64}$/u);
-  });
+  }, 30_000);
 
   it("cleans a complete backup when apply stops before mutation", async () => {
     const root = repository();

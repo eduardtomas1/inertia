@@ -7,6 +7,8 @@ import {
   readdir,
 } from "node:fs/promises";
 
+import { FILE_OPEN_NO_FOLLOW } from
+  "../node/platform-file-open-flags.js";
 import type {
   SecureFileIdentity,
   SecureFileRequest,
@@ -577,7 +579,7 @@ async function writeJournal(
     fsConstants.O_CREAT
       | fsConstants.O_EXCL
       | fsConstants.O_WRONLY
-      | (fsConstants.O_NOFOLLOW ?? 0),
+      | FILE_OPEN_NO_FOLLOW,
     0o600,
   );
   let pendingIdentity: SecureFileIdentity | null = null;
@@ -725,7 +727,7 @@ export async function replaceSecureFileTransaction(
       fsConstants.O_CREAT
         | fsConstants.O_EXCL
         | fsConstants.O_WRONLY
-        | (fsConstants.O_NOFOLLOW ?? 0),
+        | FILE_OPEN_NO_FOLLOW,
       0o600,
     );
     try {

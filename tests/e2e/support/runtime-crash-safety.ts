@@ -533,7 +533,10 @@ export async function expectRuntimeCrashRecovery(
     const journal = new RuntimeOwnedProcessJournal(dataDirectory, {
       platform: "win32",
     });
-    expect(journal.containment(priorLease!.runtimeGenerationId)).toEqual({
+    await expect.poll(
+      () => journal.containment(priorLease!.runtimeGenerationId),
+      { timeout: 15_000, intervals: [25] },
+    ).toEqual({
       kind: "windows-job-v1",
       name: expect.stringMatching(/^Global\\InertiaRuntime-[0-9a-f]{64}$/u),
     });

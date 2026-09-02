@@ -159,8 +159,10 @@ describe("cross-platform packaged behavior contract", () => {
       "run: npm run check:quality",
       "run: npm run build:packaged",
       "run: npm run test:native-architecture",
-      "run: npm exec -- playwright test",
-      "run: xvfb-run --auto-servernum npm exec -- playwright test",
+      "run: npm exec -- playwright test --project=display-sensitive",
+      "run: npm exec -- playwright test --project=isolated",
+      "run: xvfb-run --auto-servernum npm exec -- playwright test --project=display-sensitive",
+      "run: xvfb-run --auto-servernum npm exec -- playwright test --project=isolated",
       'run: npm run "${{ matrix.release_package_script }}"',
       'run: npm run "${{ matrix.package_script }}"',
       "npm run verify:fuses -- \"$app\"",
@@ -232,6 +234,7 @@ describe("cross-platform packaged behavior contract", () => {
     // Exactly one build per job, carrying notices and the guardian but not the
     // typecheck the gate already ran, and consumed by packaging unchanged.
     const build = workflowStep(workflow, "Build the application bundle");
+    expect(build).toContain("id: application_bundle");
     expect(build).toContain("run: npm run build:packaged");
     expect(workflow).not.toContain('run: npm run "${{ matrix.dist_script }}"');
     expect(workflow).not.toContain("run: npm run check:platform");
@@ -288,6 +291,19 @@ describe("cross-platform packaged behavior contract", () => {
       "npm run notices:generate && npm run build:bundle",
     );
 
+    // Keep the provider regressions that arrived on main while this CI work
+    // was in flight. A conflict resolution must not silently narrow the
+    // portable protocol surface.
+    for (const portableTest of [
+      "tests/server/codex-app-server-subagent-continuation.test.ts",
+      "tests/server/opencode-descendant-completion.test.ts",
+      "tests/server/opencode-descendant-interactions.test.ts",
+      "tests/server/opencode-interactions.test.ts",
+      "tests/server/opencode-sdk-harness.test.ts",
+    ]) {
+      expect(packageJson.scripts["test:portable"]).toContain(portableTest);
+    }
+
     // These suites read the generated guardian, so each one builds it through
     // its own npm pre-hook rather than depending on an earlier CI step having
     // happened to build it first.
@@ -304,7 +320,7 @@ describe("cross-platform packaged behavior contract", () => {
       ".github/actions/install-dependencies/action.yml",
     );
     expect(install).toContain(
-      "key: node-modules-${{ runner.os }}-${{ runner.arch }}-node${{ steps.node.outputs.node-version }}-${{ hashFiles('package-lock.json') }}",
+      "key: node-modules-${{ runner.os }}-${{ runner.arch }}-node${{ steps.node.outputs.node-version }}-${{ hashFiles('package-lock.json', 'package.json', '.github/actions/install-dependencies/action.yml', 'scripts/ensure-node-pty-helper.mjs') }}",
     );
     expect(install).not.toContain("restore-keys");
     expect(install).toContain("if: steps.dependencies.outputs.cache-hit != 'true'");
@@ -321,25 +337,42 @@ describe("cross-platform packaged behavior contract", () => {
       .toHaveLength(3);
 
     const vitest = await source("vitest.config.ts");
-    expect(vitest).toContain("maxWorkers: isWindowsCi ? windowsCiMaxWorkers : undefined");
-    expect(vitest).toContain("INERTIA_VITEST_MAX_WORKERS");
+    expect(vitest).toContain("maxWorkers: isWindowsCi ? 1 : undefined");
+    expect(vitest).not.toContain("INERTIA_VITEST_MAX_WORKERS");
     expect(vitest).toContain("testTimeout: isWindowsCi ? 30_000 : 15_000");
 
     // Specs that pin a window to the primary display share one machine
-    // resource, so they are discovered rather than listed and run to
-    // completion before anything else launches Electron.
+    // resource, so they are discovered rather than listed. Separate workflow
+    // steps ensure a display assertion cannot suppress the isolated coverage.
     const playwright = await source("playwright.config.ts");
     expect(playwright).toContain('windowDisplay: "primary"');
     expect(playwright).toContain('name: "display-sensitive"');
     expect(playwright).toContain("workers: 1");
-    expect(playwright).toContain('dependencies: ["display-sensitive"]');
+    expect(playwright).not.toContain("dependencies:");
     expect(playwright).toContain("INERTIA_E2E_WORKERS");
-    // Deadlines scale with the number of concurrent Electron instances rather
-    // than being retried until a flake passes.
-    expect(playwright).toContain("const budgetScale = workers;");
-    expect(playwright).toContain("timeout: 45_000 * budgetScale");
-    expect(playwright).toContain("expect: { timeout: 15_000 * budgetScale }");
+    expect(playwright).toContain("const testTimeout = 45_000;");
+    expect(playwright).toContain("const assertionTimeout = 15_000;");
+    expect(playwright).toContain("timeout: testTimeout,");
+    expect(playwright).toContain("expect: { timeout: assertionTimeout },");
+    // Only the phase with concurrent Electron instances receives proportional
+    // headroom; the one-worker geometry phase retains its original deadlines.
+    expect(playwright).toContain("timeout: testTimeout * workers");
+    expect(playwright).toContain(
+      "expect: { timeout: assertionTimeout * workers }",
+    );
     expect(playwright).not.toContain("retries:");
+
+    for (const name of [
+      "Run isolated Electron end-to-end tests",
+      "Run isolated Electron end-to-end tests under Xvfb",
+    ]) {
+      const isolatedPhase = workflowStep(workflow, name);
+      expect(isolatedPhase).toContain("if: ${{ !cancelled()");
+      expect(isolatedPhase).toContain(
+        "steps.application_bundle.outcome == 'success'",
+      );
+      expect(isolatedPhase).toContain("--project=isolated");
+    }
   });
 
   it("keeps one native smoke implementation for macOS, Windows, and Linux runtime supervision", async () => {

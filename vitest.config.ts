@@ -4,22 +4,6 @@ import { defineConfig } from "vitest/config";
 // Native Git, SQLite, and WebSocket fixtures contend heavily on hosted Windows.
 const isWindowsCi = process.platform === "win32" && process.env.CI === "true";
 
-// Hosted Windows was fully serialized in #74 because two workers produced a
-// random distribution of *timeouts* — not cross-file interference. #121 then
-// raised the hosted-Windows deadline to 30s, which removed that cause without
-// restoring concurrency. Vitest shards by path hash rather than by duration,
-// so sharding alone cannot balance the wall clock; concurrency has to come
-// back for the shards to get cheaper. This stays overridable so a hosted
-// Windows regression is a workflow-level revert instead of a code change.
-const parsedWindowsCiMaxWorkers = Number.parseInt(
-  process.env.INERTIA_VITEST_MAX_WORKERS ?? "",
-  10,
-);
-const windowsCiMaxWorkers =
-  Number.isInteger(parsedWindowsCiMaxWorkers) && parsedWindowsCiMaxWorkers > 0
-    ? parsedWindowsCiMaxWorkers
-    : 2;
-
 export default defineConfig({
   esbuild: {
     jsx: "automatic",
@@ -31,7 +15,10 @@ export default defineConfig({
     },
   },
   test: {
-    maxWorkers: isWindowsCi ? windowsCiMaxWorkers : undefined,
+    // #74 established that two hosted-Windows workers contend across native
+    // Git, SQLite, and WebSocket fixtures. Sharding reduces wall time without
+    // reintroducing that per-runner race.
+    maxWorkers: isWindowsCi ? 1 : undefined,
     testTimeout: isWindowsCi ? 30_000 : 15_000,
     projects: [
       {

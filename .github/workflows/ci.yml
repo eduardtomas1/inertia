@@ -224,15 +224,27 @@ jobs:
       # the quality gate already ran. Everything below consumes this output, so
       # the packaging steps no longer rebuild it from source.
       - name: Build the application bundle
+        id: application_bundle
         run: npm run build:packaged
 
-      - name: Run Electron end-to-end tests
+      - name: Run display-sensitive Electron end-to-end tests
         if: runner.os != 'Linux'
-        run: npm exec -- playwright test
+        run: npm exec -- playwright test --project=display-sensitive
 
-      - name: Run Electron end-to-end tests under Xvfb
+      # Keep this as a separate step with an explicit status condition: an
+      # assertion in the display-sensitive phase must fail the job without
+      # preventing the independent coverage from running.
+      - name: Run isolated Electron end-to-end tests
+        if: ${{ !cancelled() && steps.application_bundle.outcome == 'success' && runner.os != 'Linux' }}
+        run: npm exec -- playwright test --project=isolated
+
+      - name: Run display-sensitive Electron end-to-end tests under Xvfb
         if: runner.os == 'Linux'
-        run: xvfb-run --auto-servernum npm exec -- playwright test
+        run: xvfb-run --auto-servernum npm exec -- playwright test --project=display-sensitive
+
+      - name: Run isolated Electron end-to-end tests under Xvfb
+        if: ${{ !cancelled() && steps.application_bundle.outcome == 'success' && runner.os == 'Linux' }}
+        run: xvfb-run --auto-servernum npm exec -- playwright test --project=isolated
 
       - name: Keep provider settings visual evidence
         if: runner.os == 'Linux' && matrix.arch == 'x64'
@@ -410,7 +422,8 @@ jobs:
       # Vitest shards by path hash rather than by measured duration, so two
       # shards drifted apart by roughly a third. Four shards narrow that spread
       # and shorten the longest shard, which is what the pull-request loop
-      # actually waits on.
+      # actually waits on. Each shard remains single-worker because #74 proved
+      # that concurrent hosted-Windows fixtures contend for native resources.
       CI: "true"
 
     steps:

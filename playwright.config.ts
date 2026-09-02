@@ -16,29 +16,23 @@ const displaySensitiveSpecs = readdirSync(testDir)
   )
   .sort();
 
-// Keyboard and mouse input reaches these specs over CDP rather than through the
-// window manager, so operating-system focus is not contended. Electron startup
-// is the real cost, and each fixture already owns a private temporary
-// directory, Electron profile, and workspace.
+// Keyboard and mouse input reaches the isolated specs over CDP rather than
+// through the window manager, so operating-system focus is not contended.
+// Electron startup is the real cost, and each fixture owns a private temporary
+// directory, profile, and workspace.
 const parsedWorkers = Number.parseInt(process.env.INERTIA_E2E_WORKERS ?? "", 10);
 const workers =
   Number.isInteger(parsedWorkers) && parsedWorkers > 0 ? parsedWorkers : 2;
 
-// Deadlines have to be stated per concurrent Electron instance, not per run.
-// The hosted runners have four cores, so a second instance roughly halves the
-// cycles available to secure attachment import, which hashes and copies real
-// files: at one worker it settles well inside 15s, and at two it overran that
-// budget on Linux x64 while the same specs passed on Linux ARM64. Scaling with
-// the worker count keeps the assertion honest instead of retrying a green test
-// until it passes; a genuine break still fails inside one scaled budget.
-const budgetScale = workers;
+const testTimeout = 45_000;
+const assertionTimeout = 15_000;
 
 export default defineConfig({
   testDir,
-  timeout: 45_000 * budgetScale,
+  timeout: testTimeout,
   // Cold Electron runtime, Git, and fixture readiness on macOS ARM64 can exceed
   // Playwright's five-second default; explicit shorter protocol waits still win.
-  expect: { timeout: 15_000 * budgetScale },
+  expect: { timeout: assertionTimeout },
   fullyParallel: false,
   workers,
   reporter: "line",
@@ -55,9 +49,12 @@ export default defineConfig({
     {
       name: "isolated",
       testIgnore: displaySensitiveSpecs,
-      // Runs only once the display-sensitive phase has released the primary
-      // display, so no spec that positions a window competes for it.
-      dependencies: ["display-sensitive"],
+      workers,
+      // Only this phase launches concurrent Electron instances. The hosted
+      // runners have four cores, so each instance gets proportional deadline
+      // headroom without weakening the single-worker geometry phase.
+      timeout: testTimeout * workers,
+      expect: { timeout: assertionTimeout * workers },
     },
   ],
 });

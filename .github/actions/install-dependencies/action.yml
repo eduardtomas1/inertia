@@ -31,11 +31,12 @@ runs:
 
     # A partially restored dependency tree is worse than no cache at all, so
     # this deliberately offers no fallback key. The key covers the lockfile,
-    # the runner OS and architecture, and the resolved Node.js version, because
-    # postinstall rebuilds native modules against the pinned Electron ABI for
-    # one specific architecture. Electron itself downloads its binary lazily on
-    # first require rather than during npm ci, so that payload is excluded and
-    # left to the step that actually needs it.
+    # package and lock manifests, the postinstall helper, this action's own
+    # cache contract, the runner OS and architecture, and the resolved Node.js
+    # version. Postinstall rebuilds native modules against the pinned Electron
+    # ABI for one specific architecture. Electron itself downloads its binary
+    # lazily on first require, so that payload is excluded and left to the step
+    # that actually needs it.
     - name: Restore resolved dependency tree
       id: dependencies
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -43,7 +44,7 @@ runs:
         path: |
           node_modules
           !node_modules/electron/dist
-        key: node-modules-${{ runner.os }}-${{ runner.arch }}-node${{ steps.node.outputs.node-version }}-${{ hashFiles('package-lock.json') }}
+        key: node-modules-${{ runner.os }}-${{ runner.arch }}-node${{ steps.node.outputs.node-version }}-${{ hashFiles('package-lock.json', 'package.json', '.github/actions/install-dependencies/action.yml', 'scripts/ensure-node-pty-helper.mjs') }}
 
     - name: Install locked dependencies
       if: steps.dependencies.outputs.cache-hit != 'true'

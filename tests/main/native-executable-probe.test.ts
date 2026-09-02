@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, win32 } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -131,6 +131,48 @@ test("bounds parsed lsof ownership output", async () => {
   expect(parseLsofRecords("x".repeat(1024 * 1024 + 1))).toBeNull();
 });
 
+test("parses only anonymous connected Linux stream socket pairs", async () => {
+  const moduleUrl = pathToFileURL(join(root, "scripts", "native-executable-probe.mjs")).href;
+  const { parseLinuxSocketPairs } = await import(moduleUrl) as {
+    parseLinuxSocketPairs: (output: string) => Set<string> | null;
+  };
+  expect(parseLinuxSocketPairs([
+    "u_str ESTAB 0 0 * 167905 * 167904",
+    "u_str ESTAB 0 0 /run/user/1000/bus 200 * 100",
+    "u_dgr ESTAB 0 0 * 301 * 302",
+    "u_str LISTEN 0 10 * 401 * 0",
+    "u_str ESTAB 0 0 * invalid * 502",
+  ].join("\n"))).toEqual(new Set(["socket:167904:167905"]));
+  expect(parseLinuxSocketPairs("x".repeat(1024 * 1024 + 1))).toBeNull();
+});
+
+test("fails closed when the bounded Linux socket table cannot be read", async () => {
+  const moduleUrl = pathToFileURL(join(root, "scripts", "native-executable-probe.mjs")).href;
+  const { readLinuxSocketPairs } = await import(moduleUrl) as {
+    readLinuxSocketPairs: (dependencies: Record<string, unknown>) => Set<string> | null;
+  };
+  expect(readLinuxSocketPairs({
+    run: () => ({ error: new Error("timed out"), status: null, stdout: "" }),
+  })).toBeNull();
+  expect(readLinuxSocketPairs({
+    run: () => ({ status: 1, stdout: "" }),
+  })).toBeNull();
+  let invocation: unknown[] = [];
+  expect(readLinuxSocketPairs({
+    run: (...args: unknown[]) => {
+      invocation = args;
+      return { status: 0, stdout: "u_str ESTAB 0 0 * 222 * 111\n" };
+    },
+  })).toEqual(new Set(["socket:111:222"]));
+  expect(invocation[0]).toBe("/usr/bin/ss");
+  expect(invocation[1]).toEqual(["-x", "-n", "-a", "-H", "-O"]);
+  expect(invocation[2]).toMatchObject({
+    maxBuffer: 1024 * 1024,
+    shell: false,
+    timeout: 500,
+  });
+});
+
 test("retries a raced Linux endpoint snapshot and fails closed without peer data", async () => {
   const moduleUrl = pathToFileURL(join(root, "scripts", "native-executable-probe.mjs")).href;
   const { readPosixProbePipeIdentities } = await import(moduleUrl) as {
@@ -138,7 +180,11 @@ test("retries a raced Linux endpoint snapshot and fails closed without peer data
       child: object,
       readRecords: () => Array<{ device: string; inode: string; name: string; pid: number }>,
       platform: NodeJS.Platform,
-    ) => { identities: Set<string>; ownerPids: Set<number> } | null;
+    ) => {
+      descriptorTargets: Set<string>;
+      identities: Set<string>;
+      ownerPids: Set<number>;
+    } | null;
   };
   const child = {
     stderr: { _handle: { fd: 20 } },
@@ -174,6 +220,10 @@ test("retries a raced Linux endpoint snapshot and fails closed without peer data
     "socket:167904:167905",
     "socket:167906:167907",
   ]));
+  expect(token?.descriptorTargets).toEqual(new Set([
+    "socket:[167905]",
+    "socket:[167907]",
+  ]));
   expect(token?.ownerPids).toEqual(new Set([30224]));
 
   reads = 0;
@@ -185,7 +235,285 @@ test("retries a raced Linux endpoint snapshot and fails closed without peer data
     },
     "linux",
   )).toBeNull();
-  expect(reads).toBe(3);
+  expect(reads).toBe(2);
+});
+
+test.skipIf(process.platform === "win32")(
+  "captures Linux pipe pairs from the same direct child generation without lsof",
+  async () => {
+    const temporaryDirectory = await mkdtemp(join(tmpdir(), "inertia-proc-child-token-"));
+    try {
+      await mkdir(join(temporaryDirectory, "3000", "fd"), { recursive: true });
+      await mkdir(join(temporaryDirectory, "4301", "fd"), { recursive: true });
+      await symlink("socket:[111]", join(temporaryDirectory, "3000", "fd", "18"));
+      await symlink("socket:[333]", join(temporaryDirectory, "3000", "fd", "20"));
+      await symlink("socket:[222]", join(temporaryDirectory, "4301", "fd", "1"));
+      await symlink("socket:[444]", join(temporaryDirectory, "4301", "fd", "2"));
+      await writeFile(
+        join(temporaryDirectory, "4301", "stat"),
+        `4301 (node worker) S 3000 ${"0 ".repeat(17)}9001\n`,
+        "utf8",
+      );
+      const moduleUrl = pathToFileURL(join(root, "scripts", "native-executable-probe.mjs")).href;
+      const { readLinuxDirectChildPipeCandidate } = await import(moduleUrl) as {
+        readLinuxDirectChildPipeCandidate: (
+          child: object,
+          dependencies: { parentPid: number; procRoot: string; userId: number },
+        ) => {
+          descriptorIdentities: Map<string, string>;
+          descriptorTargets: Set<string>;
+          identities: Set<string>;
+          ownerPids: Set<number>;
+        } | null;
+      };
+      const token = readLinuxDirectChildPipeCandidate({
+        pid: 4301,
+        stderr: { _handle: { fd: 20 } },
+        stdout: { _handle: { fd: 18 } },
+      }, {
+        parentPid: 3000,
+        procRoot: temporaryDirectory,
+        userId: process.getuid?.() ?? -1,
+      });
+
+      expect(token).toEqual({
+        descriptorIdentities: new Map([
+          ["socket:[222]", "socket:111:222"],
+          ["socket:[444]", "socket:333:444"],
+        ]),
+        descriptorTargets: new Set(["socket:[222]", "socket:[444]"]),
+        identities: new Set(["socket:111:222", "socket:333:444"]),
+        ownerPids: new Set([4301]),
+      });
+    } finally {
+      await rm(temporaryDirectory, { force: true, recursive: true });
+    }
+  },
+);
+
+test("confirms a direct Linux child token only through two-sided kernel peer proof", async () => {
+  const moduleUrl = pathToFileURL(join(root, "scripts", "native-executable-probe.mjs")).href;
+  const { readPosixProbePipeIdentities } = await import(moduleUrl) as {
+    readPosixProbePipeIdentities: (
+      child: object,
+      readRecords: () => null,
+      platform: NodeJS.Platform,
+      dependencies: Record<string, unknown>,
+    ) => object | null;
+  };
+  const candidate = {
+    descriptorIdentities: new Map([
+      ["socket:[222]", "socket:111:222"],
+      ["socket:[444]", "socket:333:444"],
+    ]),
+    descriptorTargets: new Set(["socket:[222]", "socket:[444]"]),
+    identities: new Set(["socket:111:222", "socket:333:444"]),
+    ownerPids: new Set([4301]),
+  };
+  let peerReads = 0;
+  const token = readPosixProbePipeIdentities({}, () => null, "linux", {
+    readDirectCandidate: () => candidate,
+    readSocketPairs: () => {
+      peerReads += 1;
+      return new Set(candidate.identities);
+    },
+  });
+
+  expect(token).toEqual(candidate);
+  expect(peerReads).toBe(2);
+  expect(readPosixProbePipeIdentities({}, () => null, "linux", {
+    readDirectCandidate: () => candidate,
+    readSocketPairs: () => new Set(["socket:111:222"]),
+  })).toBeNull();
+});
+
+test.skipIf(process.platform === "win32")(
+  "prefilters same-user Linux descriptor owners within a monotonic bound",
+  async () => {
+    const temporaryDirectory = await mkdtemp(join(tmpdir(), "inertia-proc-prefilter-"));
+    try {
+      const processDirectory = join(temporaryDirectory, "4301", "fd");
+      await mkdir(processDirectory, { recursive: true });
+      await symlink("socket:[167905]", join(processDirectory, "1"));
+      await symlink("pipe:[9001]", join(processDirectory, "2"));
+      const moduleUrl = pathToFileURL(join(root, "scripts", "native-executable-probe.mjs")).href;
+      const { readLinuxProbePipeOwnerCandidates } = await import(moduleUrl) as {
+        readLinuxProbePipeOwnerCandidates: (
+          targets: Set<string>,
+          dependencies: { now?: () => number; procRoot: string; userId: number },
+        ) => Map<number, Set<string>> | null;
+      };
+      const userId = process.getuid?.();
+      expect(Number.isSafeInteger(userId)).toBe(true);
+
+      expect(readLinuxProbePipeOwnerCandidates(
+        new Set(["socket:[167905]", "pipe:[unused]"]),
+        { procRoot: temporaryDirectory, userId: userId ?? -1 },
+      )).toEqual(new Map([[4301, new Set(["socket:[167905]"])]]));
+      let clockRead = 0;
+      expect(readLinuxProbePipeOwnerCandidates(
+        new Set(["socket:[167905]"]),
+        {
+          now: () => clockRead++ === 0 ? 0 : 501,
+          procRoot: temporaryDirectory,
+          userId: userId ?? -1,
+        },
+      )).toBeNull();
+    } finally {
+      await rm(temporaryDirectory, { force: true, recursive: true });
+    }
+  },
+);
+
+test("verifies Linux descriptor candidates by full pipe identity before returning them", async () => {
+  const moduleUrl = pathToFileURL(join(root, "scripts", "native-executable-probe.mjs")).href;
+  const { readPosixProbePipeOwners } = await import(moduleUrl) as {
+    readPosixProbePipeOwners: (
+      identities: Set<string>,
+      dependencies: {
+        descriptorTargets: Set<string>;
+        platform: NodeJS.Platform;
+        readLinuxCandidates: () => Map<number, Set<string>>;
+        readRecords: (args: string[]) => Array<{
+          device: string;
+          inode: string;
+          name: string;
+          pid: number;
+        }>;
+        readSocketPairs: () => null;
+        userId: number;
+      },
+    ) => Set<number> | null;
+  };
+  const scans: string[][] = [];
+  const owners = readPosixProbePipeOwners(new Set(["socket:111:222"]), {
+    descriptorTargets: new Set(["socket:[222]"]),
+    platform: "linux",
+    readLinuxCandidates: () => new Map([[4301, new Set(["socket:[222]"])]]),
+    readRecords: (args) => {
+      scans.push(args);
+      return scans.length === 1
+        ? [{
+            device: "0x0",
+            inode: "222",
+            name: "type=STREAM ->INO=999 4309,node,1u",
+            pid: 4301,
+          }]
+        : [{
+            device: "0x0",
+            inode: "222",
+            name: "type=STREAM ->INO=111 4310,node,1u",
+            pid: 4310,
+          }];
+    },
+    readSocketPairs: () => null,
+    userId: 501,
+  });
+
+  expect(scans).toEqual([
+    ["-a", "-p", "4301", "-u", "501", "-d", "1,2"],
+    ["-a", "-p", "4301", "-u", "501", "-d", "1,2"],
+    ["-a", "-u", "501", "-d", "1,2"],
+  ]);
+  expect(owners).toEqual(new Set([4310]));
+});
+
+test("accepts a scoped Linux candidate only with its captured full pipe identity", async () => {
+  const moduleUrl = pathToFileURL(join(root, "scripts", "native-executable-probe.mjs")).href;
+  const { readPosixProbePipeOwners } = await import(moduleUrl) as {
+    readPosixProbePipeOwners: (
+      identities: Set<string>,
+      dependencies: Record<string, unknown>,
+    ) => Set<number> | null;
+  };
+  let recordReads = 0;
+  const owners = readPosixProbePipeOwners(new Set(["socket:111:222"]), {
+    descriptorTargets: new Set(["socket:[222]"]),
+    platform: "linux",
+    readLinuxCandidates: () => new Map([[4301, new Set(["socket:[222]"])]]),
+    readRecords: () => {
+      recordReads += 1;
+      return [{
+        device: "0x0",
+        inode: "222",
+        name: "type=STREAM ->INO=111 4302,node,1u",
+        pid: 4301,
+      }];
+    },
+    readSocketPairs: () => null,
+    userId: 501,
+  });
+
+  expect(owners).toEqual(new Set([4301]));
+  expect(recordReads).toBe(1);
+});
+
+test("requires stable proc candidates and two kernel peer proofs before fast cleanup", async () => {
+  const moduleUrl = pathToFileURL(join(root, "scripts", "native-executable-probe.mjs")).href;
+  const { readPosixProbePipeOwners } = await import(moduleUrl) as {
+    readPosixProbePipeOwners: (
+      identities: Set<string>,
+      dependencies: Record<string, unknown>,
+    ) => Set<number> | null;
+  };
+  let candidateReads = 0;
+  let peerReads = 0;
+  const owners = readPosixProbePipeOwners(new Set(["socket:111:222"]), {
+    descriptorIdentities: new Map([["socket:[222]", "socket:111:222"]]),
+    descriptorTargets: new Set(["socket:[222]"]),
+    platform: "linux",
+    readLinuxCandidates: () => {
+      candidateReads += 1;
+      return new Map([[4301, new Set(["socket:[222]"])]]);
+    },
+    readRecords: () => {
+      throw new Error("The lsof fallback must not run after complete kernel proof.");
+    },
+    readSocketPairs: () => {
+      peerReads += 1;
+      return new Set(["socket:111:222"]);
+    },
+    userId: 501,
+  });
+
+  expect(owners).toEqual(new Set([4301]));
+  expect(candidateReads).toBe(2);
+  expect(peerReads).toBe(2);
+});
+
+test.each([
+  ["unreadable", null],
+  ["empty", []],
+] as const)("falls back globally after %s scoped Linux ownership scans", async (_label, scopedResult) => {
+  const moduleUrl = pathToFileURL(join(root, "scripts", "native-executable-probe.mjs")).href;
+  const { readPosixProbePipeOwners } = await import(moduleUrl) as {
+    readPosixProbePipeOwners: (
+      identities: Set<string>,
+      dependencies: Record<string, unknown>,
+    ) => Set<number> | null;
+  };
+  let recordReads = 0;
+  const owners = readPosixProbePipeOwners(new Set(["socket:111:222"]), {
+    descriptorTargets: new Set(["socket:[222]"]),
+    platform: "linux",
+    readLinuxCandidates: () => new Map([[4301, new Set(["socket:[222]"])]]),
+    readRecords: () => {
+      recordReads += 1;
+      return recordReads <= 2
+        ? scopedResult
+        : [{
+            device: "0x0",
+            inode: "222",
+            name: "type=STREAM ->INO=111 4310,node,1u",
+            pid: 4310,
+          }];
+    },
+    readSocketPairs: () => null,
+    userId: 501,
+  });
+
+  expect(owners).toEqual(new Set([4310]));
+  expect(recordReads).toBe(3);
 });
 
 test("reacquires a missing ownership token during tracker refresh", async () => {

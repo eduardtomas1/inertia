@@ -22,9 +22,7 @@ import {
   type OpenCodeSdkHarnessCapabilities,
 } from "./agent-harness";
 import type { ProviderRunFailure, ProviderRunResult } from "./contracts";
-import type {
-  AgentApprovalDecision,
-} from "./interactions";
+import type { AgentApprovalDecision } from "./interactions";
 import {
   sanitizeProviderActivityDetail,
   sanitizeProviderFailureSummary,

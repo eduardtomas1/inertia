@@ -1306,8 +1306,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     expect(workingLifecycle.map(({ phase, activityId }) => [phase, activityId])).toEqual([
       ["started", workingActivityId], ["started", workingActivityId], ["completed", workingActivityId],
     ]);
-    const promptSwitch = events.find(({ label }) =>
-      label === "OpenCode switched to the plan agent");
+    const promptSwitch = events.find(({ label }) => label === "OpenCode switched to the plan agent");
     expect(promptSwitch?.activityId).toBeTruthy();
     expect(promptSwitch?.activityId).not.toBe(workingActivityId);
     expect(events).toContainEqual(expect.objectContaining({ type: "reasoning-summary", text: "Checked" }));
@@ -2250,9 +2249,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
         terminalEvent: "event/inactivity-deadline",
       },
     });
-    const capture = JSON.parse(readFileSync(capturePath, "utf8")) as {
-      port: number;
-    };
+    const capture = JSON.parse(readFileSync(capturePath, "utf8")) as { port: number };
     await waitFor(
       "the inactive OpenCode server to close",
       async () => !(await loopbackPortIsOpen(capture.port)),
@@ -2340,9 +2337,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
         terminalEvent: "run/deadline",
       },
     });
-    const capture = JSON.parse(readFileSync(capturePath, "utf8")) as {
-      port: number;
-    };
+    const capture = JSON.parse(readFileSync(capturePath, "utf8")) as { port: number };
     await waitFor(
       "the overlong OpenCode server to close",
       async () => !(await loopbackPortIsOpen(capture.port)),

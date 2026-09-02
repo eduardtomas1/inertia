@@ -69,6 +69,7 @@ const server = http.createServer((req, res) => {
       json(res, true);
       sendEvent({ type: "question.v2.replied", properties: { sessionID: childID, requestID: "child-question", answers: [["Yes"]] } });
       sendEvent({ type: "message.part.updated", properties: { sessionID: childID, part: { id: "private-child-text", sessionID: childID, messageID: "child-assistant", type: "text", text: "Private child interaction output" } } });
+      sendEvent({ type: "session.idle", properties: { sessionID: childID } });
       if (emitRootActivity) sendEvent({ type: "message.part.updated", properties: { sessionID, part: { id: "root-text", sessionID, messageID: "root-assistant", type: "text", text: "Parent resumed after child interaction" } } });
       sendEvent({ type: "session.idle", properties: { sessionID } });
       return;

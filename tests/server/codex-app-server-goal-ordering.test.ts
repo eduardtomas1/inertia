@@ -34,11 +34,11 @@ function goalUpdate(
   };
 }
 
-function completedTurn(): JsonObject {
+function completedTurn(turnId = TURN_ID): JsonObject {
   return {
     threadId: THREAD_ID,
     turn: {
-      id: TURN_ID,
+      id: turnId,
       status: "completed",
       items: [],
       error: null,
@@ -336,7 +336,7 @@ describe("Codex App Server goal event ordering", () => {
         },
       });
       harness.events.handleNotification("turn/completed", completedTurn());
-      vi.advanceTimersByTime(24);
+      vi.advanceTimersByTime(100);
       expect(harness.finish).not.toHaveBeenCalled();
 
       harness.events.beginGoalMutation(true);
@@ -394,7 +394,7 @@ describe("Codex App Server goal event ordering", () => {
         },
       });
       harness.events.handleNotification("turn/completed", completedTurn());
-      expect(harness.phase()).toBe("running");
+      expect(harness.phase()).toBe("awaiting-subagent-continuation");
 
       harness.events.beginGoalMutation(true);
       expect(harness.phase()).toBe("awaiting-goal-continuation");
@@ -453,7 +453,7 @@ describe("Codex App Server goal event ordering", () => {
     }
   });
 
-  it("rejects a continuation after the goal becomes terminal", () => {
+  it("accepts a delegated continuation after the goal becomes terminal", () => {
     vi.useFakeTimers();
     const harness = eventHarness();
     try {
@@ -495,9 +495,21 @@ describe("Codex App Server goal event ordering", () => {
         },
       });
 
-      expect(harness.phase()).toBe("awaiting-goal-continuation");
-      expect(harness.activeTurnId()).toBeUndefined();
-      vi.advanceTimersByTime(25);
+      expect(harness.phase()).toBe("running");
+      expect(harness.activeTurnId()).toBe("turn-after-terminal-goal");
+      harness.events.handleNotification("turn/completed", {
+        threadId: "child-before-terminal-goal",
+        turn: {
+          id: "child-before-terminal-goal-turn",
+          status: "completed",
+          items: [],
+          error: null,
+        },
+      });
+      harness.events.handleNotification(
+        "turn/completed",
+        completedTurn("turn-after-terminal-goal"),
+      );
       expect(harness.finish).toHaveBeenCalledWith("completed", 0, null);
     } finally {
       harness.events.dispose();

@@ -85,6 +85,9 @@ send({ method: "thread/tokenUsage/updated", params: { threadId, turnId, tokenUsa
 send({ method: "account/rateLimits/updated", params: { rateLimits: { limitId: "codex", limitName: null, primary: { usedPercent: 41, windowDurationMins: 300, resetsAt: 1893456000 }, secondary: null }, rateLimitsByLimitId: null } });
 send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "message-1", delta: "Hello " } });
 send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "message-1", delta: "from Codex" } });
+if (process.env.INERTIA_APP_SERVER_SCENARIO === "child-approval") {
+  send({ method: "turn/completed", params: { threadId: "child-approval", turn: { id: "child-approval-turn", status: "completed", items: [], error: null } } });
+}
 send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
 };
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
@@ -442,13 +445,22 @@ if (message.method === "turn/start") {
     send({ method: "turn/completed", params: { threadId: "child-1", turn: { id: "child-turn-1", status: "completed", items: [], error: null } } });
     return;
   }
-  if (process.env.INERTIA_APP_SERVER_SCENARIO === "parent-before-child") {
+  if (
+    process.env.INERTIA_APP_SERVER_SCENARIO === "parent-before-child"
+    || process.env.INERTIA_APP_SERVER_SCENARIO === "parent-before-child-cancel"
+  ) {
     send({ method: "item/started", params: { threadId, turnId, item: { type: "collabAgentToolCall", id: "spawn-late", tool: "spawnAgent", status: "inProgress", senderThreadId: threadId, receiverThreadIds: ["child-late"], prompt: "Finish after the parent", model: null, reasoningEffort: null, agentsStates: { "child-late": { status: "running", message: "Still checking" } } } } });
     send({ method: "thread/started", params: { thread: { id: "child-late", parentThreadId: threadId, agentNickname: "Late verifier", agentRole: "reviewer", preview: "Finish after the parent" } } });
+    send({ method: "turn/started", params: { threadId: "child-late", turn: { id: "child-late-turn", status: "inProgress", items: [], error: null } } });
     send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
+    if (process.env.INERTIA_APP_SERVER_SCENARIO === "parent-before-child-cancel") return;
     setTimeout(() => {
       send({ method: "item/completed", params: { threadId: "child-late", turnId: "child-late-turn", item: { type: "agentMessage", id: "child-late-message", text: "Verified after the parent." } } });
       send({ method: "turn/completed", params: { threadId: "child-late", turn: { id: "child-late-turn", status: "completed", items: [], error: null } } });
+      turnId = "turn-after-child-late";
+      send({ method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress", items: [], error: null } } });
+      send({ method: "item/agentMessage/delta", params: { threadId, turnId, itemId: "message-after-child-late", delta: "Integrated the delegated result." } });
+      send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
     }, 20);
     return;
   }
@@ -481,6 +493,9 @@ if (message.method === "turn/start") {
       send({ method: "turn/completed", params: { threadId: "child-shutdown", turn: { id: "child-shutdown-turn", status: "completed", items: [], error: null } } });
       send({ method: "item/completed", params: { threadId: "child-future", turnId: "child-future-turn", item: { type: "agentMessage", id: "child-future-message", text: "The future state completed directly." } } });
       send({ method: "turn/completed", params: { threadId: "child-future", turn: { id: "child-future-turn", status: "completed", items: [], error: null } } });
+      turnId = "turn-after-future-child";
+      send({ method: "turn/started", params: { threadId, turn: { id: turnId, status: "inProgress", items: [], error: null } } });
+      send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: "completed", items: [], error: null } } });
     }, 20);
     return;
   }

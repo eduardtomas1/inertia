@@ -122,6 +122,87 @@ describe("Claude delegated-agent projection", () => {
     }));
   });
 
+  it("retains an async Agent receipt until it migrates to an exact task", () => {
+    const updates: Parameters<AgentHarnessEmitter["subagent"]>[0][] = [];
+    const tracker = new ClaudeSubagentTraceTracker((event) => {
+      updates.push(event);
+    });
+
+    tracker.observe(sdkMessage({
+      type: "assistant",
+      parent_tool_use_id: null,
+      message: {
+        content: [{
+          type: "tool_use",
+          id: "tool-async",
+          name: "Agent",
+          input: {
+            subagent_type: "researcher",
+            description: "Research in the background",
+          },
+        }],
+      },
+    }));
+    tracker.observe(sdkMessage({
+      type: "user",
+      parent_tool_use_id: null,
+      message: {
+        content: [{
+          type: "tool_result",
+          tool_use_id: "tool-async",
+          content: "Async agent launched successfully.",
+        }],
+      },
+      tool_use_result: {
+        status: "async_launched",
+        agentId: "agent-async",
+        agentType: "researcher",
+        description: "Research in the background",
+      },
+    }));
+
+    expect(tracker.hasLiveTasks()).toBe(true);
+    expect(tracker.retainedStateCounts().pendingTasksByToolUse).toBe(1);
+
+    tracker.observe(sdkMessage({
+      type: "system",
+      subtype: "task_started",
+      task_id: "task-async",
+      tool_use_id: "tool-async",
+      description: "Research in the background",
+      subagent_type: "researcher",
+      is_backgrounded: true,
+    }));
+
+    expect(tracker.retainedStateCounts().pendingTasksByToolUse).toBe(0);
+    expect(tracker.isLiveTask("task-async")).toBe(true);
+    expect(updates.at(-1)).toMatchObject({
+      providerTaskId: "task-async",
+      providerAgentId: "agent-async",
+      providerToolUseId: "tool-async",
+      status: "spawned",
+      isLive: true,
+    });
+
+    tracker.observe(sdkMessage({
+      type: "system",
+      subtype: "task_notification",
+      task_id: "task-async",
+      tool_use_id: "tool-async",
+      status: "completed",
+      summary: "Background research complete",
+    }));
+
+    expect(tracker.hasLiveTasks()).toBe(false);
+    expect(updates.at(-1)).toMatchObject({
+      providerTaskId: "task-async",
+      providerAgentId: "agent-async",
+      status: "completed",
+      isLive: false,
+      result: "Background research complete",
+    });
+  });
+
   it("retains exact nested tool ownership and ignores unrelated background tasks", () => {
     const updates: Parameters<AgentHarnessEmitter["subagent"]>[0][] = [];
     const tracker = new ClaudeSubagentTraceTracker((event) => {
@@ -539,6 +620,7 @@ describe("Claude delegated-agent projection", () => {
     expect(tracker.retainedStateCounts()).toEqual({
       tools: 0,
       tasks: MAX_CLAUDE_TERMINAL_SUBAGENT_TASKS,
+      pendingTasksByToolUse: 0,
       taskByToolUse: MAX_CLAUDE_TERMINAL_SUBAGENT_TASKS,
       ignoredTaskIds: 0,
     });

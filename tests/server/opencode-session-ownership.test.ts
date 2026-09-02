@@ -24,13 +24,135 @@ function created(
 }
 
 describe("OpenCode descendant session ownership", () => {
+  it("reasserts liveness for repeated busy state without replay progress credit", () => {
+    const ownership = new OpenCodeSessionOwnership("root-session", 1_024);
+    const busy = event({
+      id: "child-busy",
+      type: "session.status",
+      properties: {
+        sessionID: "child-session",
+        status: { type: "busy" },
+      },
+    });
+
+    ownership.observe(created("child-session", "root-session"));
+    expect(ownership.observe(busy))
+      .toEqual({ scope: "descendant", active: true });
+    expect(ownership.observe(event({
+      type: "session.idle",
+      properties: { sessionID: "child-session" },
+    }))).toEqual({
+      scope: "descendant",
+      active: false,
+      lifecycleProgress: true,
+    });
+    expect(ownership.hasLiveDescendants()).toBe(false);
+
+    expect(ownership.observe(event({ ...busy, id: "repeated-child-busy" })))
+      .toEqual({ scope: "descendant", active: false });
+    expect(ownership.hasLiveDescendants()).toBe(true);
+  });
+
+  it("tracks verified descendant liveness independently across the session graph", () => {
+    const ownership = new OpenCodeSessionOwnership("root-session", 1_024);
+    const childWork = (id: string, sessionID = "child-session"): Event => event({
+      id,
+      type: "message.updated",
+      properties: {
+        sessionID,
+        info: {
+          id: `${sessionID}-message-${id}`,
+          sessionID,
+          role: "assistant",
+        },
+      },
+    });
+
+    expect(ownership.hasLiveDescendants()).toBe(false);
+    ownership.observe(created("child-session", "root-session"));
+    ownership.observe(created("grandchild-session", "child-session"));
+    expect(ownership.hasLiveDescendants()).toBe(true);
+
+    const childIdle = event({
+      id: "initial-child-idle",
+      type: "session.idle",
+      properties: { sessionID: "child-session" },
+    });
+    expect(ownership.observe(childIdle)).toEqual({
+      scope: "descendant",
+      active: false,
+      lifecycleProgress: true,
+    });
+    expect(ownership.hasLiveDescendants()).toBe(true);
+    expect(ownership.observe(event({
+      type: "session.status",
+      properties: {
+        sessionID: "grandchild-session",
+        status: { type: "idle" },
+      },
+    }))).toEqual({
+      scope: "descendant",
+      active: false,
+      lifecycleProgress: true,
+    });
+    expect(ownership.hasLiveDescendants()).toBe(false);
+
+    ownership.observe(childWork("fresh-after-idle"));
+    expect(ownership.hasLiveDescendants()).toBe(true);
+    expect(ownership.observe(event({ ...childIdle, id: "replayed-idle" })))
+      .toEqual({ scope: "descendant", active: false });
+    expect(ownership.hasLiveDescendants()).toBe(true);
+    expect(ownership.observe(event({
+      type: "session.error",
+      properties: {
+        sessionID: "child-session",
+        error: { name: "UnknownError", data: { message: "failed" } },
+      },
+    }))).toEqual({
+      scope: "descendant",
+      active: false,
+      lifecycleProgress: true,
+    });
+    expect(ownership.hasLiveDescendants()).toBe(false);
+    ownership.observe(childWork("after-error"));
+    expect(ownership.hasLiveDescendants()).toBe(true);
+    ownership.observe(event({
+      type: "session.status",
+      properties: {
+        sessionID: "child-session",
+        status: { type: "idle" },
+      },
+    }));
+    expect(ownership.hasLiveDescendants()).toBe(false);
+
+    ownership.observe(created("deleted-child", "root-session"));
+    expect(ownership.hasLiveDescendants()).toBe(true);
+    ownership.observe(event({
+      type: "session.deleted",
+      properties: { info: { id: "deleted-child" } },
+    }));
+    ownership.observe(childWork("after-delete", "deleted-child"));
+    expect(ownership.hasLiveDescendants()).toBe(false);
+
+    ownership.observe(event({
+      type: "session.status",
+      properties: { sessionID: "root-session", status: { type: "busy" } },
+    }));
+    ownership.observe(childWork("foreign", "foreign-session"));
+    expect(ownership.hasLiveDescendants()).toBe(false);
+  });
+
   it("accepts only exact parent-linked descendants, including transitive ones", () => {
     const ownership = new OpenCodeSessionOwnership("root-session", 1_024);
 
     expect(ownership.observe(event({
       type: "session.status",
       properties: { sessionID: "root-session", status: { type: "busy" } },
-    }))).toEqual({ scope: "root", active: false });
+    }))).toEqual({
+      scope: "root",
+      active: false,
+      novelRootActivity: true,
+    });
     expect(ownership.observe(created(
       "mismatched-child",
       "root-session",
@@ -99,7 +221,11 @@ describe("OpenCode descendant session ownership", () => {
       id: "idle-event",
       type: "session.idle",
       properties: { sessionID: "child-session" },
-    }))).toEqual({ scope: "descendant", active: false });
+    }))).toEqual({
+      scope: "descendant",
+      active: false,
+      lifecycleProgress: true,
+    });
     expect(ownership.observe(event({
       id: "metadata-event",
       type: "session.updated",
@@ -246,8 +372,18 @@ describe("OpenCode descendant session ownership", () => {
       .toEqual({ scope: "descendant", active: true });
     expect(ownership.observe(messageEvent("child-message-2", "second")))
       .toEqual({ scope: "descendant", active: false });
+    expect(ownership.hasLiveDescendants()).toBe(true);
+    ownership.observe(event({
+      type: "session.idle",
+      properties: { sessionID: "child-session" },
+    }));
+    expect(ownership.hasLiveDescendants()).toBe(true);
     expect(ownership.observe(event({ ...first, id: "replayed-first" })))
       .toEqual({ scope: "descendant", active: false });
+    expect(ownership.hasLiveDescendants()).toBe(true);
+    expect(ownership.observe(messageEvent("child-message-3", "third")))
+      .toEqual({ scope: "descendant", active: false });
+    expect(ownership.hasLiveDescendants()).toBe(true);
     expect(() => new OpenCodeSessionOwnership("root-session", 0))
       .toThrow("activity-evidence budget is invalid");
   });
@@ -258,6 +394,16 @@ describe("OpenCode descendant session ownership", () => {
       .toEqual({ scope: "descendant", active: true });
     const recursiveInput: Record<string, unknown> = {};
     recursiveInput.self = recursiveInput;
+
+    expect(ownership.observe(event({
+      id: "uncanonicalizable-terminal",
+      type: "session.error",
+      properties: {
+        sessionID: "child-session",
+        error: recursiveInput,
+      },
+    }))).toEqual({ scope: "descendant", active: false });
+    expect(ownership.hasLiveDescendants()).toBe(true);
 
     expect(ownership.observe(event({
       id: "uncanonicalizable-event",

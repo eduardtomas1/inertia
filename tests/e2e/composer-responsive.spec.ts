@@ -468,7 +468,18 @@ test("keeps the composer as one cohesive dock across themes and responsive split
       name: "Attach images, documents, or spreadsheets",
     }).click();
     const attachmentList = dock.getByRole("list", { name: "Attachments" });
-    await expect(attachmentList.locator("img")).toHaveCount(1);
+    const attachmentImage = attachmentList.locator("img");
+    await expect(attachmentImage).toHaveCount(1);
+    await expect.poll(async () => await attachmentImage.evaluate((element) => {
+      const image = element as HTMLImageElement;
+      return {
+        complete: image.complete,
+        decoded: image.naturalHeight > 0 && image.naturalWidth > 0,
+      };
+    })).toEqual({
+      complete: true,
+      decoded: true,
+    });
     await expect(attachmentList.getByText("PNG image · 68 B", {
       exact: true,
     })).toBeVisible();

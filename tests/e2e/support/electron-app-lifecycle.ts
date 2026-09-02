@@ -1,4 +1,4 @@
-import type { ElectronApplication, Page } from "@playwright/test";
+import type { ConsoleMessage, ElectronApplication, Page } from "@playwright/test";
 import type { ChildProcess } from "node:child_process";
 import { rm } from "node:fs/promises";
 import type { Server } from "node:http";
@@ -10,6 +10,10 @@ import { runtimeSupervisorShutdownEnvelopeMs } from "../../../src/node/runtime-s
 const FIXTURE_SERVER_TEARDOWN_TIMEOUT_MS = 2_000;
 const FIXTURE_SHUTDOWN_HEADROOM_MS = 500;
 const WINDOWS_FIXTURE_SHUTDOWN_HEADROOM_MS = 2_000;
+const MAX_RENDERER_DIAGNOSTIC_ENTRIES = 40;
+const MAX_RENDERER_DIAGNOSTIC_CHARACTERS = 2_048;
+const OMITTED_RENDERER_DIAGNOSTICS =
+  /^\[(\d+) earlier renderer diagnostics omitted\]$/u;
 export function fixtureElectronGracefulTimeoutMs(
   platform: NodeJS.Platform = process.platform,
 ): number {
@@ -122,9 +126,97 @@ export function observeElectronPage(
   rendererErrors: string[],
 ): void {
   currentPage.on("console", (message) => {
-    if (message.type() === "error") rendererErrors.push(message.text());
+    if (message.type() === "error") {
+      appendElectronRendererDiagnostic(
+        rendererErrors,
+        formatElectronConsoleError(message),
+      );
+    }
   });
-  currentPage.on("pageerror", (error) => rendererErrors.push(error.message));
+  currentPage.on("pageerror", (error) => {
+    appendElectronRendererDiagnostic(rendererErrors, error.message);
+  });
+  currentPage.on("response", (response) => {
+    if (response.status() < 400) return;
+    const request = response.request();
+    appendElectronRendererDiagnostic(
+      rendererErrors,
+      `HTTP ${response.status()} ${request.method()} ${request.resourceType()} ${rendererDiagnosticUrl(response.url())}`,
+    );
+  });
+  currentPage.on("requestfailed", (request) => {
+    const failure = request.failure()?.errorText ?? "unknown network error";
+    // Chromium reports intentional navigation/resource cancellation with this
+    // exact code during page reload and component teardown. Those requests did
+    // not fail at their source and must not contaminate the renderer ledger.
+    if (failure === "net::ERR_ABORTED") return;
+    appendElectronRendererDiagnostic(
+      rendererErrors,
+      `Request failed ${request.method()} ${request.resourceType()} ${rendererDiagnosticUrl(request.url())}: ${failure}`,
+    );
+  });
+}
+
+function boundedRendererDiagnostic(value: string): string {
+  return value.length <= MAX_RENDERER_DIAGNOSTIC_CHARACTERS
+    ? value
+    : `${value.slice(0, MAX_RENDERER_DIAGNOSTIC_CHARACTERS - 1)}…`;
+}
+
+function appendElectronRendererDiagnostic(
+  rendererErrors: string[],
+  value: string,
+): void {
+  const diagnostic = boundedRendererDiagnostic(value);
+  if (rendererErrors.length < MAX_RENDERER_DIAGNOSTIC_ENTRIES) {
+    rendererErrors.push(diagnostic);
+    return;
+  }
+  const previousOmissions = OMITTED_RENDERER_DIAGNOSTICS
+    .exec(rendererErrors[0] ?? "");
+  const omitted = previousOmissions
+    ? Number(previousOmissions[1]) + 1
+    : 2;
+  if (previousOmissions) {
+    rendererErrors.splice(1, 1);
+    rendererErrors[0] = `[${omitted} earlier renderer diagnostics omitted]`;
+  } else {
+    rendererErrors.splice(0, 2);
+    rendererErrors.unshift(
+      `[${omitted} earlier renderer diagnostics omitted]`,
+    );
+  }
+  rendererErrors.push(diagnostic);
+}
+
+function rendererDiagnosticUrl(value: string): string {
+  try {
+    const url = new URL(value);
+    url.username = "";
+    url.password = "";
+    url.search = "";
+    url.hash = "";
+    if (/^inertia(?:-canary)?:$/u.test(url.protocol)) {
+      if (/^\/attachment-preview\/[0-9a-f-]{36}$/iu.test(url.pathname)) {
+        url.pathname = "/attachment-preview/redacted";
+      } else if (url.pathname.startsWith("/workspace-image/")) {
+        url.pathname = "/workspace-image/redacted";
+      }
+    }
+    return url.toString();
+  } catch {
+    return "unparseable-renderer-url";
+  }
+}
+
+export function formatElectronConsoleError(
+  message: Pick<ConsoleMessage, "location" | "text">,
+): string {
+  const location = message.location();
+  const source = location.url
+    ? `${rendererDiagnosticUrl(location.url)}:${location.lineNumber + 1}:${location.columnNumber + 1}`
+    : "unknown renderer resource";
+  return boundedRendererDiagnostic(`${message.text()} (${source})`);
 }
 
 async function waitForChildExitBounded(

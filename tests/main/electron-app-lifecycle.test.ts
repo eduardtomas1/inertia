@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 
-import type { ElectronApplication } from "@playwright/test";
+import type { ElectronApplication, Page } from "@playwright/test";
 import { describe, expect, it, vi } from "vitest";
 
 import { runtimeSupervisorShutdownEnvelopeMs } from "../../src/node/runtime-shutdown-deadline";
@@ -11,6 +11,8 @@ import {
   closeElectronFixtureBounded,
   fixtureElectronGracefulTimeoutMs,
   fixtureRuntimeExitTimeoutMs,
+  formatElectronConsoleError,
+  observeElectronPage,
   quitElectronAppBounded,
   settleOperationBounded,
 } from "../e2e/support/electron-app-lifecycle";
@@ -63,6 +65,99 @@ function controlledElectronApp(options: {
 }
 
 describe("Electron E2E application lifecycle", () => {
+  it("retains exact renderer resource failures and ignores successful traffic", () => {
+    const events = new EventEmitter();
+    const rendererErrors: string[] = [];
+    observeElectronPage(events as unknown as Page, rendererErrors);
+
+    events.emit("console", {
+      type: () => "warning",
+      location: () => ({
+        url: "inertia://bundle/warning.js",
+        line: 0,
+        column: 0,
+        lineNumber: 0,
+        columnNumber: 0,
+      }),
+      text: () => "Expected warning",
+    });
+    events.emit("response", {
+      status: () => 399,
+      request: () => ({ method: () => "GET", resourceType: () => "script" }),
+      url: () => "inertia://bundle/healthy.js",
+    });
+    events.emit("response", {
+      status: () => 404,
+      request: () => ({ method: () => "GET", resourceType: () => "image" }),
+      url: () => "https://user:password@example.test/missing.png?token=secret#fragment",
+    });
+    events.emit("requestfailed", {
+      failure: () => ({ errorText: "net::ERR_ABORTED" }),
+      method: () => "GET",
+      resourceType: () => "script",
+      url: () => "inertia://bundle/cancelled.js",
+    });
+    events.emit("requestfailed", {
+      failure: () => ({ errorText: "net::ERR_CONNECTION_RESET" }),
+      method: () => "POST",
+      resourceType: () => "fetch",
+      url: () => "http://127.0.0.1:31337/messages?credential=secret",
+    });
+    events.emit("pageerror", new Error("Renderer exception"));
+
+    expect(rendererErrors).toEqual([
+      "HTTP 404 GET image https://example.test/missing.png",
+      "Request failed POST fetch http://127.0.0.1:31337/messages: net::ERR_CONNECTION_RESET",
+      "Renderer exception",
+    ]);
+  });
+
+  it("bounds renderer error storms while retaining recent diagnostics", () => {
+    const events = new EventEmitter();
+    const rendererErrors: string[] = [];
+    observeElectronPage(events as unknown as Page, rendererErrors);
+
+    for (let index = 1; index <= 45; index += 1) {
+      events.emit("pageerror", new Error(
+        `Renderer exception ${index}: ${"x".repeat(3_000)}`,
+      ));
+    }
+
+    expect(rendererErrors).toHaveLength(40);
+    expect(rendererErrors[0]).toBe(
+      "[6 earlier renderer diagnostics omitted]",
+    );
+    expect(rendererErrors[1]).toContain("Renderer exception 7:");
+    expect(rendererErrors.at(-1)).toContain("Renderer exception 45:");
+    expect(rendererErrors.at(-1)?.length).toBeLessThanOrEqual(2_048);
+    expect(rendererErrors.at(-1)).toMatch(/…$/u);
+  });
+
+  it("retains renderer console source locations for hosted diagnostics", () => {
+    expect(formatElectronConsoleError({
+      location: () => ({
+        url: "inertia://bundle/attachment-preview/11111111-1111-4111-8111-111111111111?token=secret#fragment",
+        line: 0,
+        column: 0,
+        lineNumber: 0,
+        columnNumber: 0,
+      }),
+      text: () => "Failed to load resource: 404",
+    })).toBe(
+      "Failed to load resource: 404 (inertia://bundle/attachment-preview/redacted:1:1)",
+    );
+    expect(formatElectronConsoleError({
+      location: () => ({
+        url: "",
+        line: 0,
+        column: 0,
+        lineNumber: 0,
+        columnNumber: 0,
+      }),
+      text: () => "Renderer failure",
+    })).toBe("Renderer failure (unknown renderer resource)");
+  });
+
   it("covers the complete Windows runtime and Job-broker shutdown envelopes", () => {
     expect(fixtureRuntimeExitTimeoutMs("win32")).toBe(
       runtimeSupervisorShutdownEnvelopeMs("win32") + 500,

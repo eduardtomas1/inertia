@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { access, lstat, mkdtemp, mkdir, realpath, rm } from "node:fs/promises";
+import { access, chmod, copyFile, lstat, mkdtemp, mkdir, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -123,8 +123,11 @@ export function releaseContainerNames(version, channel, architecture) {
   if (!CHANNELS.has(channel)) throw new Error("The release container channel is invalid.");
   if (!ARCHITECTURES.has(architecture)) throw new Error("The release container architecture is invalid.");
   const canary = channel === "canary";
+  const productName = canary ? "Inertia Canary" : "Inertia";
   if (canary) {
     return {
+      productName,
+      installedAppImage: `${productName}.AppImage`,
       appImage: architecture === "arm64"
         ? `Inertia-Canary-${version}-arm64.AppImage`
         : `Inertia-Canary-${version}.AppImage`,
@@ -133,6 +136,8 @@ export function releaseContainerNames(version, channel, architecture) {
     };
   }
   return {
+    productName,
+    installedAppImage: `${productName}.AppImage`,
     appImage: architecture === "arm64"
       ? `Inertia-${version}-arm64.AppImage`
       : `Inertia-${version}.AppImage`,
@@ -382,7 +387,11 @@ async function smokeLinux(repositoryRoot, releaseDirectory, names, productName) 
       [embeddedExecutable, ...nativeModulePaths(resources, "linux", productName, app)],
       "linux",
     );
-    await runPackageSmoke(repositoryRoot, appImage, resources, "linux-appimage", temporaryRoot, "direct-app", {
+    const installedAppImage = join(temporaryRoot, names.installedAppImage);
+    await copyFile(appImage, installedAppImage, constants.COPYFILE_EXCL);
+    await chmod(installedAppImage, 0o755);
+    await requireRegularFile(installedAppImage, true);
+    await runPackageSmoke(repositoryRoot, installedAppImage, resources, "linux-appimage", temporaryRoot, "direct-app", {
       INERTIA_PACKAGE_SMOKE_NO_SANDBOX: "1",
     }, ["APPIMAGE_EXTRACT_AND_RUN"]);
     console.log(`Linux ${process.arch} AppImage default mount/AppRun smoke passed.`);
@@ -414,7 +423,7 @@ export async function main() {
   const manifest = (await import(join(repositoryRoot, "package.json"), { with: { type: "json" } })).default;
   const channel = process.env.INERTIA_RELEASE_CHANNEL ?? "stable";
   const names = releaseContainerNames(manifest.version, channel, process.arch);
-  const productName = channel === "canary" ? "Inertia Canary" : "Inertia";
+  const productName = names.productName;
   const releaseDirectory = join(repositoryRoot, "release");
   if (process.platform === "darwin") {
     await smokeMac(repositoryRoot, releaseDirectory, names, productName);

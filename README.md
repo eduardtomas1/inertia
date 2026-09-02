@@ -283,6 +283,11 @@ chmod 0755 ./Inertia-VERSION-arm64.AppImage
 ```
 
 Do not apply executable permissions to a wildcard or to an unverified download.
+The first verified in-app update moves a versioned Stable download to the
+durable installed name `Inertia.AppImage`; later updates keep that exact path.
+Canary uses the separate `Inertia Canary.AppImage` identity. The migration
+stops on indirect or occupied paths and restores the previous executable when
+the replacement cannot be launched.
 
 Every platform requires a manual first install. Every stable release and Canary prerelease includes `SHA256SUMS.txt`; download it from the same exact tagged release and compare the selected package's SHA-256 before opening it.
 

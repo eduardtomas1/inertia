@@ -8,6 +8,7 @@ import {
   canaryUserDataPath,
   channelConfiguration,
   initializeInertiaReleaseChannel,
+  installedApplicationName,
   releaseArtifactName,
   resolveInertiaReleaseChannel,
 } from "../../src/main/release-channel";
@@ -134,5 +135,20 @@ describe("stable and Canary coexistence", () => {
       "Inertia-Canary-1.2.3.AppImage",
       "Inertia-Canary-1.2.3-arm64.AppImage",
     ]);
+  });
+
+  it("separates public artifact names from stable installed identities on all platforms", () => {
+    expect([
+      installedApplicationName("stable", "darwin"),
+      installedApplicationName("stable", "win32"),
+      installedApplicationName("stable", "linux"),
+    ]).toEqual(["Inertia", "Inertia", "Inertia.AppImage"]);
+    expect([
+      installedApplicationName("canary", "darwin"),
+      installedApplicationName("canary", "win32"),
+      installedApplicationName("canary", "linux"),
+    ]).toEqual(["Inertia Canary", "Inertia Canary", "Inertia Canary.AppImage"]);
+    expect(releaseArtifactName("stable", "linux", "1.2.3", "x64"))
+      .toBe("Inertia-1.2.3.AppImage");
   });
 });

@@ -33,7 +33,11 @@ export function initializeReleaseUpdates(options: ReleaseUpdatesOptions): {
       currentVersion: options.currentVersion,
       channel,
       capability: options.capability,
-      loadUpdater: () => loadElectronAppUpdater(channel),
+      loadUpdater: () => loadElectronAppUpdater(channel, {
+        platform: options.platform,
+        ...(options.activeAppImagePath === undefined
+          ? {} : { activeAppImagePath: options.activeAppImagePath }),
+      }),
       fetch,
     }),
     rollbackManager: channel === "canary"

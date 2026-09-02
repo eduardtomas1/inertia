@@ -421,7 +421,8 @@ describe("cross-platform packaged behavior contract", () => {
     expect(releaseUpdates).toContain('channel === "canary"');
     expect(releaseUpdates).toContain("{ version:");
     expect(releaseUpdates).toContain("{ tag_name:");
-    expect(releaseUpdates).toContain("loadElectronAppUpdater(channel)");
+    expect(releaseUpdates).toContain("loadElectronAppUpdater(channel, {");
+    expect(releaseUpdates).toContain("activeAppImagePath: options.activeAppImagePath");
   });
 
   it("registers runtime socket handlers before sending the first hydration frame", async () => {

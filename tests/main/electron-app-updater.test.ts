@@ -1,4 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { chmod, mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const updaterFixture = vi.hoisted(() => {
   const listeners = new Map<string, Set<(...args: unknown[]) => void>>();
@@ -45,6 +48,7 @@ const updaterFixture = vi.hoisted(() => {
         nativeListeners.get(event)?.delete(listener);
       }),
     },
+    app: { quit: vi.fn() },
     nativeListeners,
     CancellationToken,
     emit(event: string, value?: unknown) {
@@ -63,9 +67,12 @@ vi.mock("electron-updater", () => ({
 
 vi.mock("electron", () => ({
   autoUpdater: updaterFixture.nativeUpdater,
+  app: updaterFixture.app,
 }));
 
 import { loadElectronAppUpdater } from "../../src/main/electron-app-updater";
+
+const roots: string[] = [];
 
 beforeEach(() => {
   updaterFixture.listeners.clear();
@@ -79,11 +86,17 @@ beforeEach(() => {
   updaterFixture.updater.disableWebInstaller = false;
   updaterFixture.updater.requestHeaders = undefined;
   updaterFixture.updater.logger = {};
+  updaterFixture.updater.downloadUpdate.mockReset().mockResolvedValue(["/private/download/path"]);
+});
+
+afterEach(async () => {
+  await Promise.all(roots.splice(0).map(async (root) =>
+    await rm(root, { recursive: true, force: true })));
 });
 
 describe("electron updater adapter", () => {
   it("applies the exact safe stable configuration without overriding the feed", async () => {
-    const adapter = await loadElectronAppUpdater();
+    const adapter = await loadElectronAppUpdater("stable", { platform: "darwin" });
     expect(updaterFixture.updater).toMatchObject({
       autoDownload: false,
       autoInstallOnAppQuit: false,
@@ -103,7 +116,7 @@ describe("electron updater adapter", () => {
   });
 
   it("opts Canary into prereleases while keeping its rollout identity isolated", async () => {
-    await loadElectronAppUpdater("canary");
+    await loadElectronAppUpdater("canary", { platform: "darwin" });
     expect(updaterFixture.updater).toMatchObject({
       autoDownload: false,
       autoInstallOnAppQuit: false,
@@ -121,7 +134,7 @@ describe("electron updater adapter", () => {
       isUpdateAvailable: false,
       updateInfo: { version: "0.0.36" },
     });
-    const adapter = await loadElectronAppUpdater();
+    const adapter = await loadElectronAppUpdater("stable", { platform: "darwin" });
     await expect(adapter.check()).resolves.toEqual({
       available: false,
       version: "0.0.36",
@@ -129,7 +142,7 @@ describe("electron updater adapter", () => {
   });
 
   it("contains download paths, forwards progress, cancels one token, and removes listeners", async () => {
-    const adapter = await loadElectronAppUpdater();
+    const adapter = await loadElectronAppUpdater("stable", { platform: "darwin" });
     const onProgress = vi.fn();
     const onCancelled = vi.fn();
     const download = adapter.download({ onProgress, onCancelled });
@@ -159,7 +172,7 @@ describe("electron updater adapter", () => {
     updaterFixture.updater.downloadUpdate.mockImplementationOnce(() => {
       throw new Error("native start failed");
     });
-    const adapter = await loadElectronAppUpdater();
+    const adapter = await loadElectronAppUpdater("stable", { platform: "darwin" });
     const download = adapter.download({
       onProgress: vi.fn(),
       onCancelled: vi.fn(),
@@ -170,7 +183,7 @@ describe("electron updater adapter", () => {
   });
 
   it("requests one visible restart/install handoff", async () => {
-    const adapter = await loadElectronAppUpdater();
+    const adapter = await loadElectronAppUpdater("stable", { platform: "darwin" });
     const onHandoff = vi.fn();
     const handoff = adapter.quitAndInstall(onHandoff);
     updaterFixture.emitNative("before-quit-for-update");
@@ -183,9 +196,44 @@ describe("electron updater adapter", () => {
   });
 
   it("rejects handoff when the native installer reports an error", async () => {
-    const adapter = await loadElectronAppUpdater();
+    const adapter = await loadElectronAppUpdater("stable", { platform: "darwin" });
     const handoff = adapter.quitAndInstall();
     updaterFixture.emit("error", new Error("installer failed"));
     await expect(handoff).resolves.toBe(false);
+  });
+
+  it.skipIf(process.platform === "win32")("uses the repository-owned stable AppImage handoff on Linux", async () => {
+    const root = await mkdtemp(join(tmpdir(), "inertia-electron-updater-"));
+    roots.push(root);
+    const cache = join(root, "cache");
+    await mkdir(cache);
+    const active = join(root, "Inertia-0.0.46.AppImage");
+    const downloaded = join(cache, "Inertia-0.0.47.AppImage");
+    await Promise.all([
+      writeFile(active, "old", { mode: 0o755 }),
+      writeFile(downloaded, "new", { mode: 0o755 }),
+    ]);
+    await Promise.all([chmod(active, 0o755), chmod(downloaded, 0o755)]);
+    updaterFixture.updater.downloadUpdate.mockResolvedValueOnce([downloaded]);
+    const environment = { APPIMAGE: active };
+    const launch = vi.fn(async () => undefined);
+    const adapter = await loadElectronAppUpdater("stable", {
+      platform: "linux",
+      activeAppImagePath: active,
+      environment,
+      launchAppImage: launch,
+    });
+    await adapter.download({ onProgress: vi.fn(), onCancelled: vi.fn() }).promise;
+    const onHandoff = vi.fn();
+
+    await expect(adapter.quitAndInstall(onHandoff)).resolves.toBe(true);
+
+    const stable = join(await realpath(root), "Inertia.AppImage");
+    expect(await readFile(stable, "utf8")).toBe("new");
+    expect(environment.APPIMAGE).toBe(stable);
+    expect(launch).toHaveBeenCalledWith(stable, environment);
+    expect(onHandoff).toHaveBeenCalledOnce();
+    expect(updaterFixture.app.quit).toHaveBeenCalledOnce();
+    expect(updaterFixture.updater.quitAndInstall).not.toHaveBeenCalled();
   });
 });

@@ -153,6 +153,13 @@ export function windowsInstallerAssetName(version, releaseChannel, architecture)
   return `${prefix}.${version}${architectureSuffix}.exe`;
 }
 
+export function installedWindowsApplicationName(releaseChannel) {
+  if (!RELEASE_CHANNELS.has(releaseChannel)) {
+    throw new Error("The installed Windows application channel is invalid.");
+  }
+  return releaseChannel === "canary" ? "Inertia Canary.exe" : "Inertia.exe";
+}
+
 function archiveHeader(listing) {
   const normalized = listing.replaceAll("\r\n", "\n").replaceAll("\r", "\n");
   const boundary = normalized.indexOf("\n----------");
@@ -376,8 +383,8 @@ export async function main() {
 
   const temporaryRoot = await mkdtemp(join(tmpdir(), "inertia-installer-smoke-"));
   const installDirectory = join(temporaryRoot, "installed");
-  const productName = releaseChannel === "canary" ? "Inertia Canary" : "Inertia";
-  const applicationName = `${productName}.exe`;
+  const applicationName = installedWindowsApplicationName(releaseChannel);
+  const productName = applicationName.slice(0, -".exe".length);
   const uninstallerName = `Uninstall ${productName}.exe`;
   const installedExecutable = join(installDirectory, applicationName);
   const unpackedDirectory = join(

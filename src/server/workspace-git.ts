@@ -16,6 +16,10 @@ import {
   repositoryMetadataMarkerIdentity,
   repositoryRoot,
 } from "./git/paths";
+import {
+  gitScanCoordinator,
+  validatedGitScanIdentity,
+} from "./git/scan-coordinator";
 import type {
   RuntimeSecureFileBroker,
   SecureFileRootCapability,
@@ -41,6 +45,8 @@ export interface WorkspaceGitDiscoveryOptions
   extends Partial<WorkspaceGitDiscoveryLimits> {
   deadlineAt?: number;
   secureFiles?: RuntimeSecureFileBroker;
+  /** Validated project/conversation authority binding for shared raw scans. */
+  scanAuthorityGeneration?: string;
   onRepositoryAuthorized?: (
     repositoryPath: string,
     root: SecureFileRootCapability,
@@ -508,7 +514,27 @@ export async function discoverWorkspaceGitRepositories(
       );
       const status = await getRepositoryStatus(
         secureRoot?.root ?? candidate.absolutePath,
-        { deadlineAt: inputLimits.deadlineAt },
+        {
+          deadlineAt: inputLimits.deadlineAt,
+          ...(inputLimits.scanAuthorityGeneration
+            ? (() => {
+                const identity = validatedGitScanIdentity(
+                  secureRoot?.root ?? candidate.absolutePath,
+                  metadataMarkerIdentity,
+                );
+                return {
+                  scan: {
+                    authorityGeneration:
+                      inputLimits.scanAuthorityGeneration,
+                    identity,
+                    invalidation:
+                      gitScanCoordinator.currentInvalidation(identity),
+                    scope: "workspace" as const,
+                  },
+                };
+              })()
+            : {}),
+        },
       );
       const verifiedMetadataMarkerIdentity = await beforeDiscoveryDeadline(
         () => repositoryMetadataMarkerIdentity(

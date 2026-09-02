@@ -4,6 +4,7 @@ import type {
   GitPullRequestCapability,
   TurnGitArtifactFile,
 } from "../../shared/contracts";
+import type { GitScanRequest } from "./scan-contracts";
 
 export type GitErrorCode =
   | "invalid-input"
@@ -75,6 +76,7 @@ export interface GitDiffOptions {
   maxBytes?: number;
   paths?: string[];
   ignoreWhitespace?: boolean;
+  statusScan?: Omit<GitScanRequest, "deadlineAt" | "optionsKey" | "signal">;
 }
 
 export interface GitUnifiedDiff {

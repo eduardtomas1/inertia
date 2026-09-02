@@ -343,6 +343,8 @@ export class WorkspaceRunController<Owner> {
       recoverReviewedCommit?: boolean;
       serializationRoot?: string;
       verifyRepositoryIdentity?: () => void | Promise<void>;
+      onMutationStarting?: () => void;
+      onMutationSettled?: () => void;
     } = {},
   ): Promise<T> {
     // Multiple projects may point at different folders in one Git checkout.
@@ -396,10 +398,20 @@ export class WorkspaceRunController<Owner> {
         } catch {
           // A live projection failure must not prevent the authoritative Git operation.
         }
+        try {
+          options.onMutationStarting?.();
+        } catch {
+          // Scan invalidation is best effort; mutation authority is unchanged.
+        }
         const outcome = await Promise.resolve().then(operation).then(
           (value) => ({ ok: true as const, value }),
           (error: unknown) => ({ ok: false as const, error }),
         );
+        try {
+          options.onMutationSettled?.();
+        } catch {
+          // The authoritative Git outcome must survive projection invalidation.
+        }
         try {
           this.store.updateWorkspaceRun(activity.id, outcome.ok
             ? { status: "succeeded" }

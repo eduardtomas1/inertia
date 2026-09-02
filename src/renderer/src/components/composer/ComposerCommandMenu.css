@@ -177,6 +177,10 @@
   35% { opacity: 1; transform: translateY(-1px); }
 }
 
+.app-shell[data-document-visible="false"] .composer-status-dots i {
+  animation-play-state: paused;
+}
+
 @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
   .composer-command-menu { background: var(--surface-strong); }
 }

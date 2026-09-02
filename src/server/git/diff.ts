@@ -107,6 +107,7 @@ export async function getUnifiedDiff(
   const status = await getRepositoryStatus(root, {
     deadlineAt: options.deadlineAt,
     signal: options.signal,
+    scan: options.statusScan,
   });
   const requested = options.paths
     ? await validatedPaths(root, options.paths, {

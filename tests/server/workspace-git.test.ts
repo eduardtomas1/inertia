@@ -21,6 +21,10 @@ import {
 } from "../../src/server/workspace-git";
 import { getRepositoryStatus, getUnifiedDiff } from "../../src/server/git";
 import { repositoryMetadataMarkerIdentity } from "../../src/server/git/paths";
+import {
+  gitScanCoordinator,
+  validatedGitScanIdentity,
+} from "../../src/server/git/scan-coordinator";
 import type { RuntimeSecureFileBroker } from "../../src/server/secure-files";
 import { issueAuthorityForLiveOwner } from "../../src/server/runtime/live-authority";
 import { discoverFreshWorkspaceGitRepositories } from "../../src/server/runtime/commands/source-control-commands";
@@ -129,6 +133,48 @@ describe("workspace Git repository discovery", () => {
     await expect(getUnifiedDiff(root, {
       deadlineAt: Date.now() - 1,
     })).rejects.toThrow("Git took too long to complete the operation.");
+  });
+
+  it("shares the raw status scan used concurrently by diff and status", async () => {
+    const root = temporaryRoot("git-diff-status-coalescing");
+    initializeRepository(root, "tracked.txt");
+    writeFileSync(join(root, "tracked.txt"), "after\n");
+    const identity = validatedGitScanIdentity(
+      realpathSync.native(root),
+      await repositoryMetadataMarkerIdentity(root),
+    );
+    const scan = {
+      authorityGeneration: "project:conversation:generation-1",
+      identity,
+      invalidation: gitScanCoordinator.currentInvalidation(identity),
+      scope: "workspace" as const,
+    };
+    const originalRequest = gitScanCoordinator.request.bind(gitScanCoordinator);
+    let rawExecutions = 0;
+    const requestSpy = vi.spyOn(gitScanCoordinator, "request")
+      .mockImplementation((request, execute) => originalRequest(
+        request,
+        async (execution) => {
+          rawExecutions += 1;
+          return await execute(execution);
+        },
+      ));
+
+    try {
+      const [diff, status] = await Promise.all([
+        getUnifiedDiff(root, { statusScan: scan }),
+        getRepositoryStatus(root, { scan }),
+      ]);
+      expect(diff.text).toContain("+after");
+      expect(status.files).toContainEqual(expect.objectContaining({
+        path: "tracked.txt",
+        status: "modified",
+      }));
+      expect(requestSpy).toHaveBeenCalledTimes(2);
+      expect(rawExecutions).toBe(1);
+    } finally {
+      requestSpy.mockRestore();
+    }
   });
 
   it("discovers fresh workspace state again across a mutation boundary", async () => {

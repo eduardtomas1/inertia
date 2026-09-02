@@ -13,7 +13,6 @@ import {
   createBranch,
   createGitHubPullRequest,
   getPullRequestCreateUrl,
-  getRepositoryStatus,
   getUnifiedDiff,
   gitCommitReviewFingerprintsEqual,
   gitCommitReviewStatusMatches,
@@ -47,9 +46,14 @@ import { reconcileReviews } from "./review-support";
 import { handlePreMergeConfidenceCommand } from "./pre-merge-confidence-command";
 import {
   mapWithinSourceControlDeadline,
-  settleSourceControlInspections,
   SourceControlDeadline,
 } from "./source-control-deadline";
+import {
+  readSourceControlDiffAndStatus,
+  readSourceControlStatus,
+  sourceControlMutationInvalidation,
+  sourceControlScanAuthorityGeneration,
+} from "./source-control-scan-coordination";
 
 export interface SourceControlCommandDependencies {
   store: RuntimeStore;
@@ -219,6 +223,10 @@ export function createSourceControlCommandHandler(
     repository: Awaited<ReturnType<typeof resolveCommandRepository>>,
     recoverReviewedCommit = true,
   ) => {
+    const scanInvalidation = sourceControlMutationInvalidation(
+      repository.repositoryRoot,
+      repository.metadataMarkerIdentity,
+    );
     if (
       !recoverReviewedCommit
       || !repository.secureRoot
@@ -227,11 +235,13 @@ export function createSourceControlCommandHandler(
       return {
         recoverReviewedCommit: false,
         serializationRoot: repository.serializationRoot,
+        ...scanInvalidation,
       };
     }
     return {
       recoverReviewedCommit: true,
       serializationRoot: repository.serializationRoot,
+      ...scanInvalidation,
       verifyRepositoryIdentity: async () => await verifyCommandRepository(
         repository.secureRoot,
         repository.metadataMarkerIdentity,
@@ -298,8 +308,13 @@ export function createSourceControlCommandHandler(
             }),
           );
           const inspected = await deadline.run(
-            async () => await getRepositoryStatus(secureRoot.root, {
+            async () => await readSourceControlStatus({
+              conversationId: command.payload.conversationId,
               deadlineAt,
+              metadataMarkerIdentity,
+              projectId: command.payload.projectId,
+              repositoryRoot: secureRoot.root,
+              workspaceRoot: path,
             }),
           );
           const verifiedMetadataMarkerIdentity = await deadline.run(
@@ -453,27 +468,20 @@ export function createSourceControlCommandHandler(
             }
           } else {
             [diff, status] = await deadline.runToSettlement(
-              (signal, recordTriggeringFailure) => settleSourceControlInspections(
-                signal,
-                async (inspectionSignal) => await getUnifiedDiff(
-                  secureRoot.root,
-                  {
-                    deadlineAt,
-                    signal: inspectionSignal,
-                    ...(command.payload.path
-                      ? { paths: [command.payload.path] }
-                      : {}),
-                    ignoreWhitespace: command.payload.ignoreWhitespace,
-                  },
-                  undefined,
-                  dependencies.secureFiles,
-                  secureRoot,
-                ),
-                (inspectionSignal) => getRepositoryStatus(secureRoot.root, {
-                  deadlineAt, signal: inspectionSignal,
-                }),
+              (signal, recordTriggeringFailure) => readSourceControlDiffAndStatus({
+                conversationId: command.payload.conversationId,
+                deadlineAt,
+                filePath: command.payload.path,
+                ignoreWhitespace: command.payload.ignoreWhitespace,
+                metadataMarkerIdentity,
+                projectId: command.payload.projectId,
                 recordTriggeringFailure,
-              ),
+                repositoryRoot: secureRoot.root,
+                secureFiles: dependencies.secureFiles,
+                secureRoot,
+                signal,
+                workspaceRoot: path,
+              }),
             );
           }
           await deadline.run(
@@ -539,6 +547,11 @@ export function createSourceControlCommandHandler(
               deadlineAt,
               maxRepositories,
               secureFiles: dependencies.secureFiles,
+              scanAuthorityGeneration: sourceControlScanAuthorityGeneration(
+                command.payload.projectId,
+                command.payload.conversationId,
+                path,
+              ),
             },
           );
           deadline.requireTime();
@@ -701,27 +714,20 @@ export function createSourceControlCommandHandler(
             }
           } else {
             [diff, repositoryStatus] = await deadline.runToSettlement(
-              (signal, recordTriggeringFailure) => settleSourceControlInspections(
-                signal,
-                async (inspectionSignal) => await getUnifiedDiff(
-                  secureRoot.root,
-                  {
-                    deadlineAt,
-                    signal: inspectionSignal,
-                    ...(command.payload.path
-                      ? { paths: [command.payload.path] }
-                      : {}),
-                    ignoreWhitespace: command.payload.ignoreWhitespace,
-                  },
-                  undefined,
-                  dependencies.secureFiles,
-                  secureRoot,
-                ),
-                (inspectionSignal) => getRepositoryStatus(secureRoot.root, {
-                  deadlineAt, signal: inspectionSignal,
-                }),
+              (signal, recordTriggeringFailure) => readSourceControlDiffAndStatus({
+                conversationId: command.payload.conversationId,
+                deadlineAt,
+                filePath: command.payload.path,
+                ignoreWhitespace: command.payload.ignoreWhitespace,
+                metadataMarkerIdentity: repository.metadataMarkerIdentity,
+                projectId: command.payload.projectId,
                 recordTriggeringFailure,
-              ),
+                repositoryRoot: secureRoot.root,
+                secureFiles: dependencies.secureFiles,
+                secureRoot,
+                signal,
+                workspaceRoot: path,
+              }),
             );
           }
           await deadline.run(

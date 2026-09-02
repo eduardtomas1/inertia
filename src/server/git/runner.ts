@@ -15,6 +15,7 @@ import {
   type ProcessTreeTerminator,
 } from "../process-lifecycle";
 import { gitProcessEnvironment } from "./environment";
+import { withGitScanProcessSlot } from "./scan-coordinator";
 import { GitError } from "./types";
 
 const TRUNCATED_OUTPUT_DRAIN_MS = 250;
@@ -419,7 +420,11 @@ export function runGitInspection(
   args: readonly string[],
   options: RunGitInspectionOptions,
 ): Promise<GitProcessResult> {
-  return runGit(cwd, inspectionArguments(args), options);
+  const prepared = inspectionArguments(args);
+  return withGitScanProcessSlot(
+    options,
+    async () => await runGit(cwd, prepared, options),
+  );
 }
 
 /**

@@ -114,14 +114,33 @@ function procResourceUsage(pid: number): { rssKb: number; threads: number } {
   }
 }
 
+async function awaitDescendantSettlement(timeoutMs = 5_000): Promise<number> {
+  const startedAt = performance.now();
+  const deadlineAt = startedAt + timeoutMs;
+  let consecutiveEmptySamples = 0;
+  while (performance.now() < deadlineAt) {
+    if (descendants(process.pid).length === 0) {
+      consecutiveEmptySamples += 1;
+      if (consecutiveEmptySamples === 2) {
+        return performance.now() - startedAt;
+      }
+    } else {
+      consecutiveEmptySamples = 0;
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+  }
+  return performance.now() - startedAt;
+}
+
 function observeDescendants(): {
-  finish: () => {
+  finish: (settlementMs?: number) => {
     durationMs: number;
     finalDescendants: number[];
     forkRatePerSecond: number;
     peakDescendants: number;
     peakDescendantRssKb: number;
     peakDescendantThreads: number;
+    settlementMs: number;
     uniqueDescendants: number;
     zombiesAtSettlement: number;
   };
@@ -148,7 +167,7 @@ function observeDescendants(): {
   sample();
   const timer = setInterval(sample, 1);
   return {
-    finish: () => {
+    finish: (settlementMs = 0) => {
       clearInterval(timer);
       sample();
       const durationMs = Math.max(1, performance.now() - startedAt);
@@ -160,6 +179,7 @@ function observeDescendants(): {
         peakDescendants,
         peakDescendantRssKb,
         peakDescendantThreads,
+        settlementMs,
         uniqueDescendants: observed.size,
         zombiesAtSettlement: finalDescendants.filter(
           (pid) => procState(pid) === "Z",
@@ -263,7 +283,12 @@ describe("Git scan coordinator with the real Linux guardian", () => {
       ))).toBe(true);
       expect(await awaitRuntimeOwnedProcessCleanupConfirmed()).toBe(true);
 
-      const metrics = observer.finish();
+      // A ChildProcess close and the registry's durable cleanup can settle in
+      // the same event-loop turn that Linux still exposes the just-exited PID
+      // as a zombie. Require two bounded empty /proc samples so a persistent
+      // orphan still fails while the kernel/libuv reap boundary can complete.
+      const settlementMs = await awaitDescendantSettlement();
+      const metrics = observer.finish(settlementMs);
       const forkBudget = 2
         * STATUS_INSPECTION_CEILING
         * GUARDED_PROCESSES_PER_INSPECTION;
@@ -339,7 +364,8 @@ describe("Git scan coordinator with the real Linux guardian", () => {
       expect(peakActiveKeys).toBe(GIT_SCAN_MAX_CONCURRENT_KEYS);
       expect(await awaitRuntimeOwnedProcessCleanupConfirmed()).toBe(true);
 
-      const metrics = observer.finish();
+      const settlementMs = await awaitDescendantSettlement();
+      const metrics = observer.finish(settlementMs);
       const forkBudget = repositoryRoots.length
         * STATUS_INSPECTION_CEILING
         * GUARDED_PROCESSES_PER_INSPECTION;

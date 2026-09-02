@@ -129,6 +129,9 @@ describe("cross-platform packaged behavior contract", () => {
       expect(normalizedReadme).toContain(expected);
     }
     expect(normalizedReadme).toContain("Do not disable SmartScreen.");
+    expect(normalizedReadme).toContain(
+      "Building the current source for macOS requires macOS 13 or later.",
+    );
     expect(readme).not.toContain("xattr");
     expect(readme).not.toContain("spctl --master-disable");
 
@@ -178,7 +181,7 @@ describe("cross-platform packaged behavior contract", () => {
       ["Windows x64", "windows-2025", "windows-x64", "x64", 55],
       ["Windows ARM64", "windows-11-arm", "windows-arm64", "arm64", 70],
       ["macOS arm64", "macos-15", "macos-arm64", "arm64", 40],
-      ["macOS x64", "macos-15-intel", "macos-x64", "x64", 45],
+      ["macOS x64", "macos-15-intel", "macos-x64", "x64", 55],
     ] as const) {
       const entry = workflowMatrixEntry(workflow, label);
       expect(entry).toContain(`runner: ${runner}`);
@@ -218,7 +221,7 @@ describe("cross-platform packaged behavior contract", () => {
     expect(windowsReleaseCheck).toContain("run: npm run check");
 
     expect(workflow).toContain("name: Windows unit tests (${{ matrix.shard }}/2)");
-    expect(workflow).toContain("timeout-minutes: 30");
+    expect(workflow).toContain("timeout-minutes: 45");
     expect(workflow).toContain("shard: [1, 2]");
     expect(workflow).toContain(
       "run: npm test -- --shard=${{ matrix.shard }}/2",

@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import { lstat, open } from "node:fs/promises";
 
+import { FILE_OPEN_NO_FOLLOW } from
+  "../node/platform-file-open-flags.js";
 import type {
   SecureFileIdentity,
   SecureFileMetadata,
@@ -146,7 +148,7 @@ export async function openVerifiedFile(
   const handle = await open(
     basename,
     fsConstants.O_RDONLY
-      | (fsConstants.O_NOFOLLOW ?? 0)
+      | FILE_OPEN_NO_FOLLOW
       | (fsConstants.O_NONBLOCK ?? 0),
   );
   try {
@@ -198,7 +200,7 @@ export async function snapshotNamedFile(
   const handle = await open(
     name,
     fsConstants.O_RDONLY
-      | (fsConstants.O_NOFOLLOW ?? 0)
+      | FILE_OPEN_NO_FOLLOW
       | (fsConstants.O_NONBLOCK ?? 0),
   );
   try {

@@ -115,12 +115,16 @@ describe("final release container smoke", () => {
 
   it("pins the corrected builder and static AppImage runtime toolsets", async () => {
     const manifest = JSON.parse(await readFile(join(repositoryRoot, "package.json"), "utf8")) as {
-      build: { toolsets?: { appimage?: string } };
+      build: {
+        mac?: { minimumSystemVersion?: string };
+        toolsets?: { appimage?: string };
+      };
       devDependencies: { "electron-builder"?: string };
       scripts: Record<string, string>;
     };
     expect(manifest.devDependencies["electron-builder"]).toBe("26.15.7");
     expect(manifest.build.toolsets?.appimage).toBe("1.0.3");
+    expect(manifest.build.mac?.minimumSystemVersion).toBe("13.0");
     expect(manifest.scripts["test:release-container-smoke"])
       .toBe("node scripts/release-container-smoke.mjs");
   });
@@ -226,8 +230,6 @@ describe("final release container smoke", () => {
     expect(source).toContain('"macos-dmg"');
     expect(source).toContain('"linux-appimage"');
     for (const name of [
-      "libEGL.dylib",
-      "libGLESv2.dylib",
       "libffmpeg.dylib",
       "libvk_swiftshader.dylib",
       "Mantle",
@@ -236,6 +238,9 @@ describe("final release container smoke", () => {
       "ShipIt",
     ]) {
       expect(source).toContain(name);
+    }
+    for (const removedAngleLibrary of ["libEGL", "libGLESv2"]) {
+      expect(source).not.toContain(removedAngleLibrary);
     }
     expect(source).toContain("inspectNativeBinaryArchitecture");
   });

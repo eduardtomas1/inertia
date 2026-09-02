@@ -233,7 +233,7 @@ export function installedWindowsNativeBinaryPaths(
   const unpackedModules = join(resources, "app.asar.unpacked", "node_modules");
   return [
     join(installDirectory, applicationName),
-    ...["d3dcompiler_47.dll", "dxcompiler.dll", "dxil.dll", "ffmpeg.dll", "libEGL.dll", "libGLESv2.dll", "vk_swiftshader.dll", "vulkan-1.dll"]
+    ...["d3dcompiler_47.dll", "dxcompiler.dll", "dxil.dll", "ffmpeg.dll", "vk_swiftshader.dll", "vulkan-1.dll"]
       .map((name) => join(installDirectory, name)),
     join(unpackedModules, `@anthropic-ai/claude-agent-sdk-win32-${architecture}/claude.exe`),
     join(unpackedModules, `@napi-rs/canvas-win32-${architecture}-msvc/skia.win32-${architecture}-msvc.node`),

@@ -7,7 +7,11 @@ const INITIAL_RESTART_DELAY_MS = 500;
 const MAX_RESTART_DELAY_MS = 8_000;
 
 export const runtimeSupervisorDefaults = {
-  startupTimeoutMs: 20_000,
+  // Startup can include an explicitly authorized macOS ownership retirement,
+  // attachment reconciliation, and interrupted-run recovery before readiness.
+  // Electron's Intel utility startup must retain enough bounded headroom for
+  // that complete sequence without forcing a second recovery decision.
+  startupTimeoutMs: 30_000,
   stableUptimeMs: 30_000,
   // Let the utility runtime finish its complete platform-owned cleanup proof
   // before main begins the process-tree fallback. macOS includes bounded

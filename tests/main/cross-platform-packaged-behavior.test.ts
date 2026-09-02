@@ -238,6 +238,20 @@ describe("cross-platform packaged behavior contract", () => {
     const build = workflowStep(workflow, "Build the application bundle");
     expect(build).toContain("id: application_bundle");
     expect(build).toContain("run: npm run build:packaged");
+    const electronPreparation = workflowStep(
+      workflow,
+      "Prepare Electron end-to-end binary",
+    );
+    expect(electronPreparation).toContain("id: electron_test_binary");
+    expect(electronPreparation).toContain(
+      `run: node -e "console.log(require('electron'))"`,
+    );
+    expect(workflow.indexOf("Prepare Electron end-to-end binary"))
+      .toBeGreaterThan(workflow.indexOf("Build the application bundle"));
+    expect(workflow.indexOf("Prepare Electron end-to-end binary"))
+      .toBeLessThan(workflow.indexOf(
+        "Run display-sensitive Electron end-to-end tests",
+      ));
     expect(workflow).not.toContain('run: npm run "${{ matrix.dist_script }}"');
     expect(workflow).not.toContain("run: npm run check:platform");
 
@@ -381,6 +395,9 @@ describe("cross-platform packaged behavior contract", () => {
       expect(isolatedPhase).toContain(
         "steps.application_bundle.outcome == 'success'",
       );
+      expect(isolatedPhase).toContain(
+        "steps.electron_test_binary.outcome == 'success'",
+      );
       expect(isolatedPhase).toContain("--project=isolated");
       expect(isolatedPhase).toContain("--output=test-results/isolated");
     }
@@ -393,6 +410,9 @@ describe("cross-platform packaged behavior contract", () => {
       expect(recoveryPhase).toContain("if: ${{ !cancelled()");
       expect(recoveryPhase).toContain(
         "steps.application_bundle.outcome == 'success'",
+      );
+      expect(recoveryPhase).toContain(
+        "steps.electron_test_binary.outcome == 'success'",
       );
       expect(recoveryPhase).toContain("--project=runtime-recovery");
       expect(recoveryPhase).toContain("--output=test-results/runtime-recovery");

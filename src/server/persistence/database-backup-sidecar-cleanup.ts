@@ -2,8 +2,8 @@ import { existsSync, lstatSync, readdirSync } from "node:fs";
 import { basename, extname, join } from "node:path";
 
 import {
-  removeDatabaseFileFamily,
   removeIfRegularFile,
+  removeInterruptedDatabaseFileFamily,
 } from "./database-backup-cancellation";
 
 function safeDatabaseStem(databasePath: string): string {
@@ -66,11 +66,11 @@ export function cleanAutomaticBackupSidecars(
   );
   for (const filename of readdirSync(backupsDirectory)) {
     if (partialPattern.test(filename)) {
-      removeDatabaseFileFamily(join(backupsDirectory, filename));
+      removeInterruptedDatabaseFileFamily(join(backupsDirectory, filename));
       continue;
     }
     if (partialSidecarPattern.test(filename)) {
-      removeDatabaseFileFamily(sidecarDatabasePath(join(
+      removeInterruptedDatabaseFileFamily(sidecarDatabasePath(join(
         backupsDirectory,
         filename,
       )));

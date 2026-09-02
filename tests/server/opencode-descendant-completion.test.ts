@@ -258,7 +258,6 @@ describe("OpenCode descendant completion", () => {
       root,
       "replayed-root-does-not-refresh",
       250,
-      1_200,
     )).resolves.toMatchObject({
       status: "failed",
       failure: {

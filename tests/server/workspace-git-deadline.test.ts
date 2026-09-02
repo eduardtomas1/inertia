@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const fsGate = vi.hoisted(() => ({
   blockedName: null as string | null,
   inspectedPaths: [] as string[],
+  markBlockedInspection: null as (() => void) | null,
 }));
 
 vi.mock("node:fs/promises", async (importOriginal) => {
@@ -17,6 +18,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
       const path = String(args[0]);
       fsGate.inspectedPaths.push(path);
       if (path.split(/[\\/]/u).at(-1) === fsGate.blockedName) {
+        fsGate.markBlockedInspection?.();
         return await new Promise<never>(() => undefined);
       }
       return await actual.lstat(...args);
@@ -33,19 +35,29 @@ afterEach(() => {
   vi.useRealTimers();
   fsGate.blockedName = null;
   fsGate.inspectedPaths = [];
+  fsGate.markBlockedInspection = null;
   while (roots.length > 0) rmSync(roots.pop()!, { recursive: true, force: true });
 });
 
 describe("workspace Git traversal deadline", () => {
   it("rejects at the aggregate deadline when one entry inspection stalls", async () => {
+    vi.useFakeTimers({ now: 10_000 });
     const root = mkdtempSync(join(tmpdir(), "inertia-workspace-entry-deadline-"));
     roots.push(root);
     mkdirSync(join(root, "blocked"));
     fsGate.blockedName = "blocked";
+    let markBlockedInspection!: () => void;
+    const blockedInspection = new Promise<void>((resolve) => {
+      markBlockedInspection = resolve;
+    });
+    fsGate.markBlockedInspection = markBlockedInspection;
 
-    await expect(discoverWorkspaceGitRepositories(root, {
+    const discovery = expect(discoverWorkspaceGitRepositories(root, {
       deadlineAt: Date.now() + 40,
     })).rejects.toThrow("Workspace repository discovery took too long.");
+    await blockedInspection;
+    await vi.advanceTimersByTimeAsync(40);
+    await discovery;
     expect(fsGate.inspectedPaths.some(
       (path) => path.split(/[\\/]/u).at(-1) === fsGate.blockedName,
     )).toBe(true);

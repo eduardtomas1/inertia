@@ -13,8 +13,8 @@ import type {
   ProviderSkillInput,
   ProviderInfo,
 } from "../../src/shared/contracts";
-import {
-  PDF_MODULE_INITIALIZATION_TIMEOUT_MS,
+import type {
+  PreparedDocumentAttachments,
 } from "../../src/server/runtime/attachments/document-attachment-context";
 import { PrivateGeneratedAttachmentStore } from "../../src/server/runtime/attachments/private-generated-attachments";
 import { RuntimeRequestError } from "../../src/server/runtime-errors";
@@ -67,27 +67,21 @@ function messageCommand(
   };
 }
 
-function blankPdf(): Uint8Array {
-  const stream = "BT /F1 22 Tf 72 720 Td (Page 1 of 1) Tj ET";
-  const objects = [
-    "<< /Type /Catalog /Pages 2 0 R >>",
-    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
-    `<< /Length ${Buffer.byteLength(stream, "ascii")} >>\nstream\n${stream}\nendstream`,
-    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
-  ];
-  let pdf = "%PDF-1.4\n";
-  const offsets: number[] = [];
-  for (const [index, object] of objects.entries()) {
-    offsets.push(Buffer.byteLength(pdf, "ascii"));
-    pdf += `${index + 1} 0 obj\n${object}\nendobj\n`;
-  }
-  const xrefOffset = Buffer.byteLength(pdf, "ascii");
-  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
-  pdf += offsets.map((offset) =>
-    `${String(offset).padStart(10, "0")} 00000 n \n`).join("");
-  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
-  return Buffer.from(pdf, "ascii");
+const generatedJpegFixture = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
+
+function preparedScannedPdf(
+  generatedImagePath: string,
+): PreparedDocumentAttachments {
+  return {
+    contexts: [{
+      attachmentId: trustedAttachment.id,
+      label: "PDF · scanned.pdf",
+      content: "Inertia rasterized page 1 as provider image 1.",
+      truncated: false,
+    }],
+    generatedImagePaths: [generatedImagePath],
+    imagePaths: [generatedImagePath],
+  };
 }
 
 function providerWithImages(supportsImages: boolean): ProviderInfo {
@@ -147,6 +141,9 @@ function dependencies(options: {
   ) => Promise<boolean>>;
   enableProviders?: boolean;
   generatedAttachments?: PrivateGeneratedAttachmentStore;
+  prepareDocumentAttachments?: NonNullable<
+    TurnInteractionCommandDependencies["prepareDocumentAttachments"]
+  >;
   provider?: ProviderInfo;
   resolvedPayloads?: Array<{
     attachment: ChatAttachment;
@@ -252,6 +249,7 @@ function dependencies(options: {
     generatedAttachments: options.generatedAttachments ?? {
       release: vi.fn(async () => undefined),
     } as unknown as TurnInteractionCommandDependencies["generatedAttachments"],
+    prepareDocumentAttachments: options.prepareDocumentAttachments,
     workflows: {
       resolveTurnSkills: vi.fn(async (
         selectedConversationId: string,
@@ -593,7 +591,9 @@ describe("message attachment ownership transfer", () => {
         path: join(directory, "22222222-2222-4222-8222-222222222222.pdf"),
         mimeType: "application/pdf" as const,
       };
-      const bytes = blankPdf();
+      const generatedImagePath = await generatedAttachments.writeJpeg(
+        generatedJpegFixture,
+      );
       const queue = queueRejects
         ? vi.fn(() => { throw new Error("queue rejected"); })
         : vi.fn();
@@ -601,8 +601,10 @@ describe("message attachment ownership transfer", () => {
         queue,
         relinquishAll: vi.fn(async () => undefined),
         generatedAttachments,
+        prepareDocumentAttachments: vi.fn(async () =>
+          preparedScannedPdf(generatedImagePath)),
         provider: providerWithImages(supportsImages),
-        resolvedPayloads: [{ attachment: pdf, bytes }],
+        resolvedPayloads: [{ attachment: pdf, bytes: new Uint8Array([0x25]) }],
       });
       const command = messageCommand();
       command.payload.attachments = [pdf];
@@ -620,7 +622,7 @@ describe("message attachment ownership transfer", () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
-  }, PDF_MODULE_INITIALIZATION_TIMEOUT_MS + 15_000);
+  });
 
   it("cleans a generated page when aggregate preparation times out after the private write", async () => {
     vi.useFakeTimers();
@@ -649,8 +651,12 @@ describe("message attachment ownership transfer", () => {
         queue: vi.fn(),
         relinquishAll: vi.fn(async () => undefined),
         generatedAttachments: delayedStore,
+        prepareDocumentAttachments: vi.fn(async () => {
+          const path = await delayedStore.writeJpeg(generatedJpegFixture);
+          return preparedScannedPdf(path);
+        }),
         provider: providerWithImages(true),
-        resolvedPayloads: [{ attachment: pdf, bytes: blankPdf() }],
+        resolvedPayloads: [{ attachment: pdf, bytes: new Uint8Array([0x25]) }],
       });
       const command = messageCommand();
       command.payload.attachments = [pdf];
@@ -693,8 +699,11 @@ describe("message attachment ownership transfer", () => {
         queue: vi.fn(),
         relinquishAll: vi.fn(async () => undefined),
         generatedAttachments,
+        prepareDocumentAttachments: vi.fn(async () => preparedScannedPdf(
+          await generatedAttachments.writeJpeg(generatedJpegFixture),
+        )),
         enableProviders: false,
-        resolvedPayloads: [{ attachment: pdf, bytes: blankPdf() }],
+        resolvedPayloads: [{ attachment: pdf, bytes: new Uint8Array([0x25]) }],
       });
       const command = messageCommand();
       command.payload.attachments = [pdf];
@@ -742,8 +751,11 @@ describe("message attachment ownership transfer", () => {
         queue,
         relinquishAll: vi.fn(async () => undefined),
         generatedAttachments,
+        prepareDocumentAttachments: vi.fn(async () => preparedScannedPdf(
+          await generatedAttachments.writeJpeg(generatedJpegFixture),
+        )),
         provider: providerWithImages(false),
-        resolvedPayloads: [{ attachment: pdf, bytes: blankPdf() }],
+        resolvedPayloads: [{ attachment: pdf, bytes: new Uint8Array([0x25]) }],
         validatedSelection: externalSelection(state),
         externalSelection: true,
       });

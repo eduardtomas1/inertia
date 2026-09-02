@@ -299,10 +299,9 @@ test("keeps the composer as one cohesive dock across themes and responsive split
       (button) => getComputedStyle(button).backgroundColor,
     );
     await model.hover();
-    const modelHoverBackground = await model.evaluate(
-      (button) => getComputedStyle(button).backgroundColor,
-    );
-    expect(modelHoverBackground).not.toBe(modelIdleBackground);
+    await expect.poll(() => model.evaluate((button, idleBackground) =>
+      button.matches(":hover") && getComputedStyle(button).backgroundColor !== idleBackground,
+    modelIdleBackground)).toBe(true);
     await model.focus();
     await expect(model).toBeFocused();
     expect(await model.evaluate(
@@ -360,9 +359,9 @@ test("keeps the composer as one cohesive dock across themes and responsive split
       (button) => getComputedStyle(button).backgroundColor,
     );
     await accessTrigger.hover();
-    expect(await accessTrigger.evaluate(
-      (button) => getComputedStyle(button).backgroundColor,
-    )).not.toBe(accessIdleBackground);
+    await expect.poll(() => accessTrigger.evaluate((button, idleBackground) =>
+      button.matches(":hover") && getComputedStyle(button).backgroundColor !== idleBackground,
+    accessIdleBackground)).toBe(true);
     await accessTrigger.focus();
     expect(await accessTrigger.evaluate(
       (button) => Number.parseFloat(getComputedStyle(button).outlineWidth),

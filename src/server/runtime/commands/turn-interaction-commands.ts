@@ -118,6 +118,7 @@ export interface TurnInteractionCommandDependencies {
   enableProviders: boolean;
   attachmentResolver: TrustedAttachmentResolver | null;
   generatedAttachments: PrivateGeneratedAttachmentStore;
+  prepareDocumentAttachments?: typeof prepareDocumentAttachments;
   workflows: AgentWorkflowController;
   providerTerminalResumes: ProviderTerminalResumeRegistry;
   providerInfo(): readonly ProviderInfo[];
@@ -452,7 +453,10 @@ export function createTurnInteractionCommandHandler(
         let extraction: Promise<PreparedDocumentAttachments> | null = null;
         try {
           const extractionAbort = new AbortController();
-          extraction = prepareDocumentAttachments(resolvedAttachments, {
+          extraction = (
+            dependencies.prepareDocumentAttachments
+            ?? prepareDocumentAttachments
+          )(resolvedAttachments, {
             deadlineAt: preparationDeadlineAt,
             generatedAttachmentStore: dependencies.generatedAttachments,
             signal: extractionAbort.signal,

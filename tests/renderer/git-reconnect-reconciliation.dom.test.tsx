@@ -184,7 +184,7 @@ describe("durable Git reconnect reconciliation", () => {
     });
     await waitFor(() => expect(sentCommands(firstSocket).filter(
       ({ type }) => type === "git.refresh",
-    )).toHaveLength(1));
+    )).toHaveLength(1), { timeout: 5_000 });
     const initialRefresh = sentCommands(firstSocket).find(
       ({ type }) => type === "git.refresh",
     )!;

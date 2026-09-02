@@ -17,6 +17,30 @@ import { useComposerSkillCompletion } from "../../src/renderer/src/components/co
 import { useComposerMenus } from "../../src/renderer/src/components/composer/useComposerMenus";
 import type { AgentSkillSummary } from "../../src/shared/contracts";
 
+function rect({
+  top,
+  right,
+  bottom,
+  left,
+}: {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+}): DOMRect {
+  return {
+    top,
+    right,
+    bottom,
+    left,
+    width: right - left,
+    height: bottom - top,
+    x: left,
+    y: top,
+    toJSON: () => ({}),
+  };
+}
+
 function skill(index: number): AgentSkillSummary {
   return {
     id: `skill-${index}`,
@@ -124,6 +148,77 @@ describe("ComposerSkillsMenu", () => {
       expect(id).not.toBeNull();
       expect(document.getElementById(id ?? "")).not.toBeNull();
     }
+  });
+
+  it("positions the generated Skills popover inside its split pane", async () => {
+    render(
+      <section className="conversation-split-pane">
+        <div className="chat-workspace">
+          <div className="composer">
+            <Harness {...defaults} listboxId="split-skills-generated" />
+          </div>
+        </div>
+      </section>,
+    );
+    const pane = document.querySelector<HTMLElement>(
+      ".conversation-split-pane",
+    )!;
+    const workspace = document.querySelector<HTMLElement>(
+      ".chat-workspace",
+    )!;
+    const trigger = screen.getByRole("button", {
+      name: "Insert a codex skills invocation",
+    });
+    vi.spyOn(window, "innerWidth", "get").mockReturnValue(1_180);
+    vi.spyOn(window, "innerHeight", "get").mockReturnValue(640);
+    vi.spyOn(pane, "getBoundingClientRect").mockReturnValue(rect({
+      top: 0,
+      right: 260,
+      bottom: 600,
+      left: 0,
+    }));
+    vi.spyOn(workspace, "getBoundingClientRect").mockReturnValue(rect({
+      top: 0,
+      right: 260,
+      bottom: 600,
+      left: 0,
+    }));
+    vi.spyOn(trigger, "getBoundingClientRect").mockReturnValue(rect({
+      top: 520,
+      right: 252,
+      bottom: 552,
+      left: 220,
+    }));
+
+    fireEvent.click(trigger);
+    const popover = screen.getByRole("menu", {
+      name: "Insert Codex skills",
+    });
+    vi.spyOn(popover, "getBoundingClientRect").mockImplementation(() => {
+      const width = Number.parseFloat(popover.style.maxWidth) || 300;
+      const [shiftX = 0, shiftY = 0] = popover.style.translate
+        .match(/-?\d+(?:\.\d+)?/gu)
+        ?.map(Number) ?? [];
+      return rect({
+        top: 300 + shiftY,
+        right: 220 + shiftX + width,
+        bottom: 500 + shiftY,
+        left: 220 + shiftX,
+      });
+    });
+    Object.defineProperties(popover, {
+      clientHeight: { configurable: true, value: 200 },
+      scrollHeight: { configurable: true, value: 200 },
+    });
+
+    expect(trigger).toHaveAttribute("aria-controls", popover.id);
+    await waitFor(() => expect(popover).toHaveAttribute(
+      "data-composer-popover-positioned",
+      "true",
+    ));
+    const positioned = popover.getBoundingClientRect();
+    expect(positioned.left).toBeGreaterThanOrEqual(8);
+    expect(positioned.right).toBeLessThanOrEqual(252);
   });
 
   it("searches, navigates, and inserts the exact canonical token", async () => {

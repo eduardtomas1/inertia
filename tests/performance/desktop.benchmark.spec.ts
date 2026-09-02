@@ -25,6 +25,15 @@ import {
 } from "../e2e/support/electron-app-lifecycle";
 import { selectWorkspaceTool } from "../e2e/support/workspace-tools";
 import { driveBoundedWheelNavigation } from "../helpers/bounded-wheel-navigation";
+import { captureBoundedFailureDiagnostic } from "../helpers/bounded-failure-diagnostic";
+import {
+  AsyncCleanupCoordinator,
+  type AsyncCleanupOwnership,
+} from "../helpers/async-cleanup-coordinator";
+import {
+  completeDesktopBenchmarkShutdown,
+  type DesktopBenchmarkShutdown,
+} from "../helpers/desktop-benchmark-app-shutdown";
 import {
   distribution,
   summarizeStreamingBenchmarkEvidence,
@@ -73,6 +82,14 @@ const STREAMING_MEASUREMENT_TIMEOUT_MS =
 const TERMINAL_CLOSE_ASSERTION_TIMEOUT_MS = terminalCloseTimeoutMs(
   process.platform,
 ) + 1_000;
+// A wedged renderer is itself useful failure evidence. Never let reading that
+// evidence consume the benchmark timeout or prevent Electron cleanup.
+const FAILURE_DIAGNOSTIC_TIMEOUT_MS = 1_000;
+const BENCHMARK_BODY_SETTLE_TIMEOUT_MS = 5_000;
+// The cleanup coordinator deliberately awaits every acquisition that started
+// before teardown. Give Playwright's launcher its own deadline so that wait is
+// bounded without allowing a late ElectronApplication to escape afterEach.
+const ELECTRON_LAUNCH_TIMEOUT_MS = 30_000;
 const APP_SHUTDOWN_ASSERTION_TIMEOUT_MS = runtimeSupervisorShutdownEnvelopeMs(
   process.platform,
 ) + 1_000;
@@ -84,6 +101,8 @@ const FOLLOW_LATEST_LIVE_EDGE_THRESHOLD = 120;
 interface RuntimeSnapshot {
   phase: string;
   pid: number | null;
+  lastError?: string | null;
+  restartScheduled?: boolean;
 }
 
 interface AppRun {
@@ -91,7 +110,24 @@ interface AppRun {
   page: Page;
   startupMs: number;
   firstWindowMs: number;
+  cleanup: AsyncCleanupOwnership<BenchmarkAppResource, BenchmarkAppShutdown>;
 }
+
+interface BenchmarkAppResource {
+  electronApp: ElectronApplication;
+  runtimePid: number | null;
+}
+
+type BenchmarkAppShutdown = DesktopBenchmarkShutdown;
+
+interface BenchmarkCleanupContext {
+  applications: AsyncCleanupCoordinator<BenchmarkAppResource, BenchmarkAppShutdown>;
+  fixtureRoots: AsyncCleanupCoordinator<string, void>;
+  bodyFinished: Promise<void>;
+  finishBody(): void;
+}
+
+let activeBenchmarkCleanup: BenchmarkCleanupContext | null = null;
 
 interface StreamingTraceMarker {
   stage: string;
@@ -412,39 +448,55 @@ function seedRuntime(dataDirectory: string, workspace: string): BenchmarkConvers
 }
 
 async function launchApp(
+  cleanupContext: BenchmarkCleanupContext,
   dataDirectory: string,
   workspace: string,
   profile: string,
 ): Promise<AppRun> {
+  const acquisition = cleanupContext.applications.beginAcquisition();
   const startedAt = performance.now();
-  const electronApp = await electron.launch({
-    args: [".", `--user-data-dir=${profile}`],
-    env: {
-      ...process.env,
-      NODE_ENV: "test",
-      INERTIA_STREAMING_TRACE: "1",
-      INERTIA_DATA_DIR: dataDirectory,
-      INERTIA_WORKSPACE_DIR: workspace,
-      INERTIA_PACKAGE_SMOKE_CODEX_EXPECTED: process.execPath,
-    },
-  });
-  const page = await electronApp.firstWindow();
-  const firstWindowMs = performance.now() - startedAt;
-  await page.locator('.app-shell[data-connection-status="online"]').waitFor();
-  await page.getByRole("textbox", { name: "Message" }).first().waitFor();
-  await page.evaluate(() => {
-    Reflect.set(globalThis, "__inertiaTestStreamingTrace", (stage: string) => {
-      performance.mark(`inertia-stream:${stage}`, {
-        detail: { wallTimeMs: Date.now() },
-      });
+  try {
+    const electronApp = await electron.launch({
+      args: [".", `--user-data-dir=${profile}`],
+      timeout: ELECTRON_LAUNCH_TIMEOUT_MS,
+      env: {
+        ...process.env,
+        NODE_ENV: "test",
+        INERTIA_STREAMING_TRACE: "1",
+        INERTIA_DATA_DIR: dataDirectory,
+        INERTIA_WORKSPACE_DIR: workspace,
+        INERTIA_PACKAGE_SMOKE_CODEX_EXPECTED: process.execPath,
+      },
     });
-  });
-  return {
-    electronApp,
-    page,
-    startupMs: performance.now() - startedAt,
-    firstWindowMs,
-  };
+    const resource: BenchmarkAppResource = { electronApp, runtimePid: null };
+    const cleanup = acquisition.adopt(resource);
+    try {
+      const page = await electronApp.firstWindow();
+      const firstWindowMs = performance.now() - startedAt;
+      await page.locator('.app-shell[data-connection-status="online"]').waitFor();
+      await page.getByRole("textbox", { name: "Message" }).first().waitFor();
+      await page.evaluate(() => {
+        Reflect.set(globalThis, "__inertiaTestStreamingTrace", (stage: string) => {
+          performance.mark(`inertia-stream:${stage}`, {
+            detail: { wallTimeMs: Date.now() },
+          });
+        });
+      });
+      return {
+        electronApp,
+        page,
+        startupMs: performance.now() - startedAt,
+        firstWindowMs,
+        cleanup,
+      };
+    } catch (error) {
+      await cleanup.close().catch(() => undefined);
+      throw error;
+    }
+  } catch (error) {
+    acquisition.abandon();
+    throw error;
+  }
 }
 
 async function runtimeSnapshot(electronApp: ElectronApplication): Promise<RuntimeSnapshot> {
@@ -1416,19 +1468,34 @@ async function openAndCloseToolCycle(page: Page): Promise<void> {
       { timeout: TERMINAL_CLOSE_ASSERTION_TIMEOUT_MS },
     );
   } catch (cause) {
-    const diagnostics = {
-      alerts: await tools.getByRole("alert").allTextContents(),
-      closeDisabled: await closeButton.isDisabled().catch(() => null),
-      terminalIds: await panels.evaluateAll((elements) => elements.map(
-        (element) => element.getAttribute("data-terminal-id"),
-      )),
-      terminalStates: await panels.evaluateAll((elements) => elements.map(
-        (element) => element.getAttribute("data-terminal-state"),
-      )),
-      terminalOutput: await panels.evaluateAll((elements) => elements.map(
-        (element) => element.textContent?.slice(-1_000) ?? "",
-      )),
-    };
+    const diagnostics = await captureBoundedFailureDiagnostic(
+      () => page.evaluate(() => {
+        const workspaceTools = document.querySelector<HTMLElement>(
+          '.workspace-panel[aria-label="Workspace tools"]',
+        );
+        const terminalPanels = [...(workspaceTools?.querySelectorAll<HTMLElement>(
+          ".terminal-panel[data-terminal-id]",
+        ) ?? [])];
+        const closeTerminal = [...(workspaceTools?.querySelectorAll<HTMLButtonElement>(
+          "button",
+        ) ?? [])].find((button) => button.getAttribute("aria-label") === "Close terminal");
+        return {
+          alerts: [...(workspaceTools?.querySelectorAll<HTMLElement>('[role="alert"]') ?? [])]
+            .map((element) => element.textContent ?? ""),
+          closeDisabled: closeTerminal?.disabled ?? null,
+          terminalIds: terminalPanels.map(
+            (element) => element.getAttribute("data-terminal-id"),
+          ),
+          terminalStates: terminalPanels.map(
+            (element) => element.getAttribute("data-terminal-state"),
+          ),
+          terminalOutput: terminalPanels.map(
+            (element) => element.textContent?.slice(-1_000) ?? "",
+          ),
+        };
+      }),
+      FAILURE_DIAGNOSTIC_TIMEOUT_MS,
+    );
     throw new Error(
       `Rapid terminal close did not settle: ${JSON.stringify(diagnostics)}`,
       { cause },
@@ -1526,48 +1593,123 @@ async function prefetchedOverlayMeasurements(page: Page): Promise<{
 }
 
 async function closeApp(
-  electronApp: ElectronApplication,
+  resource: BenchmarkAppResource,
+): Promise<BenchmarkAppShutdown> {
+  return await completeDesktopBenchmarkShutdown(resource, {
+    quit: async () => await quitElectronAppBounded(
+      resource.electronApp,
+      () => resource.electronApp.evaluate(() => {
+        const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
+          quit?: () => RuntimeSnapshot | null;
+        } | undefined;
+        return runtime?.quit?.() ?? { phase: "unavailable", pid: null };
+      }),
+    ),
+    waitForRuntimeExit: waitForRuntimeProcessExit,
+    now: performance.now.bind(performance),
+  });
+}
+
+async function closeMeasuredBenchmarkApp(
+  run: AppRun,
   runtimePid: number | null,
 ): Promise<number> {
-  const startedAt = performance.now();
-  const result = await quitElectronAppBounded(
-    electronApp,
-    () => electronApp.evaluate(() => {
-      const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
-        quit?: () => unknown;
-      } | undefined;
-      return runtime?.quit?.();
-    }),
-  );
-  if (runtimePid) await waitForRuntimeProcessExit(runtimePid);
+  if (runtimePid !== null) run.cleanup.resource.runtimePid = runtimePid;
+  const result = await run.cleanup.close();
   if (result.outcome !== "graceful" || !result.transportSettled) {
     throw new Error(
       `Desktop benchmark shutdown was ${result.outcome}/${result.transportSettled ? "settled" : "unsettled"}, not graceful/settled.`,
     );
   }
-  return performance.now() - startedAt;
+  return result.durationMs;
 }
+
+function createBenchmarkCleanupContext(): BenchmarkCleanupContext {
+  let finishBody!: () => void;
+  let bodySettled = false;
+  const context: BenchmarkCleanupContext = {
+    applications: new AsyncCleanupCoordinator(closeApp),
+    fixtureRoots: new AsyncCleanupCoordinator(async (fixtureRoot) => {
+      await rm(fixtureRoot, {
+        recursive: true,
+        force: true,
+        ...(process.platform === "win32"
+          ? { maxRetries: 10, retryDelay: 100 }
+          : {}),
+      });
+    }),
+    bodyFinished: new Promise<void>((resolveBody) => {
+      finishBody = resolveBody;
+    }),
+    finishBody: () => {
+      if (bodySettled) return;
+      bodySettled = true;
+      finishBody();
+    },
+  };
+  return context;
+}
+
+async function cleanupDesktopBenchmarkResources(
+  context: BenchmarkCleanupContext,
+): Promise<void> {
+  await context.applications.cleanup();
+  const body = await captureBoundedFailureDiagnostic(
+    async () => await context.bodyFinished,
+    BENCHMARK_BODY_SETTLE_TIMEOUT_MS,
+  );
+  if (body.outcome !== "captured") {
+    throw new Error("The desktop benchmark callback did not settle before cleanup.");
+  }
+  await context.fixtureRoots.cleanup();
+  if (activeBenchmarkCleanup === context) activeBenchmarkCleanup = null;
+}
+
+// Playwright gives afterEach a fresh timeout slot after the test body. Keep an
+// independent owner for manual Electron resources when the benchmark-wide
+// timeout wins its race with the still-running test callback.
+test.afterEach(async () => {
+  const context = activeBenchmarkCleanup;
+  if (context) await cleanupDesktopBenchmarkResources(context);
+});
 
 test("records desktop startup, process, scroll, split, terminal, and shutdown costs", async () => {
   expect(process.version).toMatch(/^v22\./u);
-  const fixtureRoot = await mkdtemp(join(tmpdir(), "inertia-desktop-benchmark-"));
+  const cleanupContext = createBenchmarkCleanupContext();
+  activeBenchmarkCleanup = cleanupContext;
+  const rootAcquisition = cleanupContext.fixtureRoots.beginAcquisition();
+  let fixtureRoot: string;
+  try {
+    fixtureRoot = await mkdtemp(join(tmpdir(), "inertia-desktop-benchmark-"));
+    rootAcquisition.adopt(fixtureRoot);
+  } catch (error) {
+    rootAcquisition.abandon();
+    cleanupContext.finishBody();
+    await cleanupDesktopBenchmarkResources(cleanupContext)
+      .catch(() => undefined);
+    throw error;
+  }
   const dataDirectory = join(fixtureRoot, "data");
   const workspace = join(fixtureRoot, "workspace");
   const profile = join(fixtureRoot, "profile");
-  await Promise.all([
-    mkdir(dataDirectory, { recursive: true }),
-    mkdir(workspace, { recursive: true }),
-    mkdir(profile, { recursive: true }),
-  ]);
-  await initializeWorkspace(workspace);
-  const fixtureConversationIds = seedRuntime(dataDirectory, workspace);
-
-  let cold: AppRun | null = null;
-  let warm: AppRun | null = null;
   try {
-    cold = await launchApp(dataDirectory, workspace, profile);
+    await Promise.all([
+      mkdir(dataDirectory, { recursive: true }),
+      mkdir(workspace, { recursive: true }),
+      mkdir(profile, { recursive: true }),
+    ]);
+    await initializeWorkspace(workspace);
+    const fixtureConversationIds = seedRuntime(dataDirectory, workspace);
+
+    const cold = await launchApp(
+      cleanupContext,
+      dataDirectory,
+      workspace,
+      profile,
+    );
     const coldIntentDialogMs = await coldIntentDialogMeasurement(cold.page);
     const idleStart = await processSample(cold.electronApp);
+    cold.cleanup.resource.runtimePid = idleStart.runtimePid;
     await cold.page.waitForTimeout(1_500);
     const idleEnd = await processSample(cold.electronApp);
     const prefetchedOverlays = await prefetchedOverlayMeasurements(cold.page);
@@ -1722,24 +1864,26 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
       firstWindowMs: cold.firstWindowMs,
       runtimeInteractiveMs: cold.startupMs,
     };
-    const coldShutdownMs = await closeApp(
-      cold.electronApp,
+    const coldShutdownMs = await closeMeasuredBenchmarkApp(
+      cold,
       activeSample.runtimePid,
     );
-    cold = null;
-
-    warm = await launchApp(dataDirectory, workspace, profile);
+    const warm = await launchApp(
+      cleanupContext,
+      dataDirectory,
+      workspace,
+      profile,
+    );
     const warmSample = await processSample(warm.electronApp);
+    warm.cleanup.resource.runtimePid = warmSample.runtimePid;
     const warmStartup = {
       firstWindowMs: warm.firstWindowMs,
       runtimeInteractiveMs: warm.startupMs,
     };
-    const warmShutdownMs = await closeApp(
-      warm.electronApp,
+    const warmShutdownMs = await closeMeasuredBenchmarkApp(
+      warm,
       warmSample.runtimePid,
     );
-    warm = null;
-
     const cpu = cpus();
     const sessionType = process.env.XDG_SESSION_TYPE?.trim().toLocaleLowerCase()
       || null;
@@ -1987,18 +2131,10 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
     expect(report.scenarios.shutdown.warmMs)
       .toBeLessThan(APP_SHUTDOWN_ASSERTION_TIMEOUT_MS);
   } finally {
-    if (cold) {
-      const runtimePid = (await runtimeSnapshot(cold.electronApp).catch(() => null))?.pid ?? null;
-      await closeApp(cold.electronApp, runtimePid).catch(() => undefined);
-    }
-    if (warm) {
-      const runtimePid = (await runtimeSnapshot(warm.electronApp).catch(() => null))?.pid ?? null;
-      await closeApp(warm.electronApp, runtimePid).catch(() => undefined);
-    }
-    await rm(fixtureRoot, {
-      recursive: true,
-      force: true,
-      ...(process.platform === "win32" ? { maxRetries: 10, retryDelay: 100 } : {}),
-    });
+    cleanupContext.finishBody();
+    // afterEach owns the final retry and failure report from its fresh timeout
+    // slot; this attempt lets the normal path release resources immediately.
+    await cleanupDesktopBenchmarkResources(cleanupContext)
+      .catch(() => undefined);
   }
 });

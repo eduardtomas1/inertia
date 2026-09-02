@@ -894,11 +894,14 @@ describe("Linux runtime process guardian", () => {
     const invocation = runtimeOwnedProcessInvocation("/bin/sh", ["-c", `touch ${join(root, "ran")}`]);
     const own = vi.spyOn(RuntimeOwnedProcessJournal.prototype, "own")
       .mockReturnValueOnce(null);
-    let child: ChildProcess | null = null;
+    const childHolder: { current: ChildProcess | null } = { current: null };
     try {
       spawnRuntimeOwnedProcess(() => {
-        child = spawn(invocation.command, invocation.args, { detached: true, stdio: "ignore" });
-        return child;
+        childHolder.current = spawn(invocation.command, invocation.args, {
+          detached: true,
+          stdio: "ignore",
+        });
+        return childHolder.current;
       });
       await waitFor(() => own.mock.calls.length === 1);
       expect(new RuntimeOwnedProcessJournal(root, {
@@ -909,8 +912,17 @@ describe("Linux runtime process guardian", () => {
       expect(() => statSync(join(root, "ran"))).toThrow();
     } finally {
       own.mockRestore();
-      if (child) await stopChild(child);
       deactivate?.();
+      const child = childHolder.current;
+      const pid = child?.pid ?? 0;
+      if (Number.isSafeInteger(pid) && pid > 1) {
+        try { process.kill(-pid, "SIGKILL"); } catch { /* The exact test group is gone. */ }
+        try { process.kill(pid, "SIGKILL"); } catch { /* The exact test leader is gone. */ }
+      }
+      if (child) await stopChild(child);
+      if (Number.isSafeInteger(pid) && pid > 1) {
+        await waitFor(() => !exists(pid));
+      }
     }
   }, 15_000);
 

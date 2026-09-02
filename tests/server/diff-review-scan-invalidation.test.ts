@@ -157,7 +157,7 @@ describe("selective reversal Git scan invalidation", () => {
       send,
     } as unknown as DiffReviewCommandDependencies);
 
-    const revertHold = await holdStaleStatusScan(root);
+    const revertHold = await holdStaleStatusScan(secureRoot.root);
     try {
       await expect(handler(socket, clientCommandSchema.parse({
         type: "git.selection.revert",
@@ -200,7 +200,7 @@ describe("selective reversal Git scan invalidation", () => {
       || reverted.result.kind !== "git.reversal"
     ) throw new Error("Expected a selective reversal result.");
 
-    const undoHold = await holdStaleStatusScan(root);
+    const undoHold = await holdStaleStatusScan(secureRoot.root);
     try {
       await expect(handler(socket, clientCommandSchema.parse({
         type: "git.selection.undo",

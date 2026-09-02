@@ -1,9 +1,8 @@
 import { _electron as electron, type ElectronApplication,
   type Page } from "@playwright/test";
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
-import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { promisify } from "node:util";
 
@@ -15,6 +14,10 @@ import { closeElectronAppBounded, closeElectronFixtureBounded,
   closePreviewServerBounded, observeElectronPage, observeElectronProcess,
   quitElectronAppBounded, removeFixtureDirectory,
   waitForRuntimeProcessExit } from "./electron-app-lifecycle";
+import {
+  createFixtureTemporaryDirectories,
+  fixtureTemporaryEnvironment,
+} from "./fixture-temporary-directory";
 import { expectNoViewportOverflow as expectPageNoViewportOverflow } from "./layout-assertions";
 
 const execFileAsync = promisify(execFile);
@@ -643,9 +646,8 @@ export async function createAppFixture(
   options: AppFixtureOptions,
 ): Promise<AppFixture> {
   const preview = await createPreviewServer();
-  const testDirectory = await mkdtemp(
-    join(tmpdir(), `inertia-${options.name}-`),
-  );
+  const { processTemporaryDirectory, testDirectory } =
+    await createFixtureTemporaryDirectories();
   const workspace = await createWorkspace(testDirectory);
   let providerBinDirectory: string | null = null;
   const secondWorkspaceDirectory = options.seedSecondProject
@@ -781,6 +783,7 @@ export async function createAppFixture(
         ? { INERTIA_PACKAGE_SMOKE_CODEX_EXPECTED: process.execPath }
         : {}),
       ...options.additionalEnvironment,
+      ...fixtureTemporaryEnvironment(processTemporaryDirectory),
     },
   };
   const appendDiagnostic = (source: string, chunk: Buffer | string): void => {

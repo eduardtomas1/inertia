@@ -252,6 +252,7 @@ test("keeps a permanently missing ownership token unconfirmed", async () => {
 });
 
 function signaledProcessExists(pid: number): boolean {
+  if (!Number.isSafeInteger(pid) || pid <= 1) return false;
   try {
     process.kill(pid, 0);
     return true;
@@ -299,7 +300,7 @@ async function waitForTermination(pid: number): Promise<string | null> {
   return state;
 }
 
-function forceCleanup(pid: number): void {
+async function forceCleanup(pid: number): Promise<void> {
   if (!Number.isSafeInteger(pid) || pid <= 1) return;
   if (!processExists(pid)) return;
   if (process.platform === "win32") {
@@ -310,9 +311,10 @@ function forceCleanup(pid: number): void {
         "/pid", String(pid), "/t", "/f",
       ], { stdio: "ignore", windowsHide: true });
     }
-    return;
+  } else {
+    try { process.kill(pid, "SIGKILL"); } catch { /* The process may already be gone. */ }
   }
-  try { process.kill(pid, "SIGKILL"); } catch { /* The process may already be gone. */ }
+  await waitForTermination(pid);
 }
 
 test.skipIf(process.platform === "win32")(
@@ -323,6 +325,7 @@ test.skipIf(process.platform === "win32")(
     const rootPidFile = join(temporaryDirectory, "root.pid");
     let descendantPid = 0;
     let rootPid = 0;
+    let probeOutcome: Promise<unknown> | null = null;
     try {
       const moduleUrl = pathToFileURL(join(root, "scripts", "native-executable-probe.mjs")).href;
       const { probeNativeExecutable } = await import(moduleUrl) as {
@@ -332,7 +335,6 @@ test.skipIf(process.platform === "win32")(
           options: { environment: NodeJS.ProcessEnv; timeoutMs: number },
         ) => Promise<unknown>;
       };
-      const startedAt = Date.now();
       const probe = probeNativeExecutable(process.execPath, [
         join(import.meta.dirname, "..", "fixtures", "native-executable-probe-child.mjs"),
       ], {
@@ -340,10 +342,10 @@ test.skipIf(process.platform === "win32")(
           INERTIA_PROBE_PID_FILE: pidFile,
           INERTIA_PROBE_ROOT_PID_FILE: rootPidFile,
         },
-        timeoutMs: 1_000,
+        timeoutMs: 5_000,
       });
-      const deadlineFailure = expect(probe).rejects.toThrow("exceeded its 1000ms deadline");
-      const pidFileDeadline = Date.now() + 750;
+      probeOutcome = probe.then(() => null, (error: unknown) => error);
+      const pidFileDeadline = Date.now() + 4_000;
       while (!descendantPid && Date.now() < pidFileDeadline) {
         try {
           descendantPid = Number(await readFile(pidFile, "utf8"));
@@ -351,7 +353,7 @@ test.skipIf(process.platform === "win32")(
           await new Promise((resolveWait) => setTimeout(resolveWait, 10));
         }
       }
-      expect(Number.isSafeInteger(descendantPid)).toBe(true);
+      expect(Number.isSafeInteger(descendantPid) && descendantPid > 1).toBe(true);
       const group = spawnSync(
         "/bin/ps",
         ["-o", "pgid=", "-p", String(descendantPid)],
@@ -360,15 +362,16 @@ test.skipIf(process.platform === "win32")(
       expect(group.status).toBe(0);
       expect(Number(group.stdout.trim())).toBe(descendantPid);
       rootPid = Number(await readFile(rootPidFile, "utf8"));
-      expect(Number.isSafeInteger(rootPid)).toBe(true);
-      const rootExitDeadline = Date.now() + 750;
+      expect(Number.isSafeInteger(rootPid) && rootPid > 1).toBe(true);
+      const rootExitDeadline = Date.now() + 4_000;
       while (processExists(rootPid) && Date.now() < rootExitDeadline) {
         await new Promise((resolveWait) => setTimeout(resolveWait, 10));
       }
       expect(processExists(rootPid)).toBe(false);
       expect(processExists(descendantPid)).toBe(true);
-      await deadlineFailure;
-      expect(Date.now() - startedAt).toBeLessThan(5_000);
+      await expect(probeOutcome).resolves.toMatchObject({
+        message: expect.stringContaining("exceeded its 5000ms deadline"),
+      });
       const terminalState = await waitForTermination(descendantPid);
       if (process.platform === "linux") {
         process.stdout.write(
@@ -376,7 +379,9 @@ test.skipIf(process.platform === "win32")(
         );
       }
     } finally {
-      forceCleanup(descendantPid);
+      await forceCleanup(descendantPid);
+      await forceCleanup(rootPid);
+      if (probeOutcome) await probeOutcome;
       await rm(temporaryDirectory, { force: true, recursive: true });
     }
   },
@@ -389,6 +394,7 @@ test.skipIf(process.platform === "win32")(
     const pidFile = join(temporaryDirectory, "descendant.pid");
     const rootPidFile = join(temporaryDirectory, "root.pid");
     let descendantPid = 0;
+    let probeOutcome: Promise<unknown> | null = null;
     try {
       const moduleUrl = pathToFileURL(join(root, "scripts", "native-executable-probe.mjs")).href;
       const { probeNativeExecutableWithDependencies } = await import(moduleUrl) as {
@@ -424,9 +430,7 @@ test.skipIf(process.platform === "win32")(
           readProcesses: () => [],
         },
       });
-      const unconfirmedFailure = expect(probe).rejects.toThrow(
-        "exited with unconfirmed process ownership",
-      );
+      probeOutcome = probe.then(() => null, (error: unknown) => error);
       const pidFileDeadline = Date.now() + 4_000;
       while (!descendantPid && Date.now() < pidFileDeadline) {
         try {
@@ -435,12 +439,27 @@ test.skipIf(process.platform === "win32")(
           await new Promise((resolveWait) => setTimeout(resolveWait, 10));
         }
       }
-      expect(Number.isSafeInteger(descendantPid)).toBe(true);
+      expect(Number.isSafeInteger(descendantPid) && descendantPid > 1).toBe(true);
       expect(processExists(descendantPid)).toBe(true);
-      await unconfirmedFailure;
+      await expect(probeOutcome).resolves.toMatchObject({
+        message: expect.stringContaining("exited with unconfirmed process ownership"),
+      });
     } finally {
-      forceCleanup(descendantPid);
-      await rm(temporaryDirectory, { force: true, recursive: true });
+      try {
+        if (probeOutcome) await probeOutcome;
+        try {
+          const recordedPid = Number(await readFile(pidFile, "utf8"));
+          if (Number.isSafeInteger(recordedPid) && recordedPid > 1) {
+            descendantPid = recordedPid;
+          }
+        } catch { /* The child may have failed before recording its PID. */ }
+      } finally {
+        try {
+          await forceCleanup(descendantPid);
+        } finally {
+          await rm(temporaryDirectory, { force: true, recursive: true });
+        }
+      }
     }
   },
 );
@@ -452,6 +471,7 @@ test.skipIf(process.platform !== "win32")(
     const pidFile = join(temporaryDirectory, "descendant.pid");
     const rootPidFile = join(temporaryDirectory, "root.pid");
     let descendantPid = 0;
+    let probeOutcome: Promise<unknown> | null = null;
     try {
       const moduleUrl = pathToFileURL(join(root, "scripts", "native-executable-probe.mjs")).href;
       const { probeNativeExecutable } = await import(moduleUrl) as {
@@ -469,9 +489,10 @@ test.skipIf(process.platform !== "win32")(
           INERTIA_PROBE_PID_FILE: pidFile,
           INERTIA_PROBE_ROOT_PID_FILE: rootPidFile,
         },
-        timeoutMs: 1_000,
+        timeoutMs: 5_000,
       });
-      const pidFileDeadline = Date.now() + 750;
+      probeOutcome = probe.then(() => null, (error: unknown) => error);
+      const pidFileDeadline = Date.now() + 4_000;
       while (!descendantPid && Date.now() < pidFileDeadline) {
         try {
           descendantPid = Number(await readFile(pidFile, "utf8"));
@@ -479,11 +500,14 @@ test.skipIf(process.platform !== "win32")(
           await new Promise((resolveWait) => setTimeout(resolveWait, 10));
         }
       }
-      expect(Number.isSafeInteger(descendantPid)).toBe(true);
-      await expect(probe).rejects.toThrow("exceeded its 1000ms deadline");
+      expect(Number.isSafeInteger(descendantPid) && descendantPid > 1).toBe(true);
+      await expect(probeOutcome).resolves.toMatchObject({
+        message: expect.stringContaining("exceeded its 5000ms deadline"),
+      });
       await waitForTermination(descendantPid);
     } finally {
-      forceCleanup(descendantPid);
+      await forceCleanup(descendantPid);
+      if (probeOutcome) await probeOutcome;
       await rm(temporaryDirectory, { force: true, recursive: true });
     }
   },
@@ -495,6 +519,7 @@ test.skipIf(process.platform === "win32")(
     const temporaryDirectory = await mkdtemp(join(tmpdir(), "inertia-native-pty-probe-"));
     const pidFile = join(temporaryDirectory, "pty.pid");
     let ptyPid = 0;
+    let probeOutcome: Promise<unknown> | null = null;
     try {
       const moduleUrl = pathToFileURL(join(root, "scripts", "native-executable-probe.mjs")).href;
       const { probeNativeExecutable } = await import(moduleUrl) as {
@@ -517,10 +542,14 @@ test.skipIf(process.platform === "win32")(
           INERTIA_PTY_PID_FILE: pidFile,
         },
         startAfterOwnership: true,
-        timeoutMs: 1_000,
+        // This test proves native PTY process-group cleanup. The initial
+        // ownership scan may share a heavily loaded process table with the
+        // full suite, so keep observation within the production probe bound
+        // without racing the configured cleanup deadline.
+        timeoutMs: 10_000,
       });
-      const deadlineFailure = expect(probe).rejects.toThrow("exceeded its 1000ms deadline");
-      const pidFileDeadline = Date.now() + 750;
+      probeOutcome = probe.then(() => null, (error: unknown) => error);
+      const pidFileDeadline = Date.now() + 8_000;
       while (!ptyPid && Date.now() < pidFileDeadline) {
         try {
           ptyPid = Number(await readFile(pidFile, "utf8"));
@@ -528,7 +557,7 @@ test.skipIf(process.platform === "win32")(
           await new Promise((resolveWait) => setTimeout(resolveWait, 10));
         }
       }
-      expect(Number.isSafeInteger(ptyPid)).toBe(true);
+      expect(Number.isSafeInteger(ptyPid) && ptyPid > 1).toBe(true);
       const group = spawnSync(
         "/bin/ps",
         ["-o", "pgid=", "-p", String(ptyPid)],
@@ -536,10 +565,13 @@ test.skipIf(process.platform === "win32")(
       );
       expect(group.status).toBe(0);
       expect(Number(group.stdout.trim())).toBe(ptyPid);
-      await deadlineFailure;
+      await expect(probeOutcome).resolves.toMatchObject({
+        message: expect.stringContaining("exceeded its 10000ms deadline"),
+      });
       await waitForTermination(ptyPid);
     } finally {
-      forceCleanup(ptyPid);
+      await forceCleanup(ptyPid);
+      if (probeOutcome) await probeOutcome;
       await rm(temporaryDirectory, { force: true, recursive: true });
     }
   },

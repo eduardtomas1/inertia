@@ -72,7 +72,6 @@ function readStableCapture<T>(capturePath: string): T {
   }
   throw lastError ?? new Error(`No fixture capture was written to ${capturePath}.`);
 }
-
 function lifecycleServerSource(root: string, capturePath: string, scenario: LifecycleScenario): string {
   return `
 const http = require("node:http");

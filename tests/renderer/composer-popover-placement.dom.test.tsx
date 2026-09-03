@@ -160,7 +160,7 @@ describe("composer popover DOM placement", () => {
     expect(popover.dataset.composerPopoverPositioned).toBe("true");
   });
 
-  it("keeps an explicitly opened section through incidental pointer leave", () => {
+  it("keeps an explicitly opened section through later hover and pointer leave", () => {
     vi.useFakeTimers();
     const { result } = renderHook(() => useComposerMenus());
     const layer = document.createElement("div");
@@ -188,6 +188,32 @@ describe("composer popover DOM placement", () => {
       result.current.closeMorePreview();
       vi.advanceTimersByTime(180);
     });
+    expect(result.current.moreSection).toBe("reasoning");
+
+    act(() => result.current.returnToMoreRoot());
     expect(result.current.moreSection).toBeNull();
   });
+
+  it("dismisses a hover-only section after the pointer leaves", () => {
+    vi.useFakeTimers();
+    const { result } = renderHook(() => useComposerMenus());
+    const layer = document.createElement("div");
+    const popover = document.createElement("div");
+    layer.dataset.composerSubmenuSide = "right";
+    layer.append(popover);
+    result.current.morePopoverRef.current = popover;
+
+    act(() => result.current.previewMoreSection("reasoning"));
+    act(() => {
+      vi.advanceTimersByTime(140);
+    });
+    expect(result.current.moreSection).toBe("reasoning");
+
+    act(() => {
+      result.current.closeMorePreview();
+      vi.advanceTimersByTime(180);
+    });
+    expect(result.current.moreSection).toBeNull();
+  });
+
 });

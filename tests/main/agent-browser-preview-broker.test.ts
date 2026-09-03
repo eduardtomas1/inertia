@@ -361,12 +361,12 @@ describe("agent-owned native Browser", () => {
       contextId: conversationId,
       connectionId: replacementConnectionId,
     });
-    broker.setBounds({
+    expect(broker.setBounds({
       ownerId: "primary",
       contextId: conversationId,
       connectionId,
       bounds: null,
-    });
+    })).toBe(true);
     broker.closeRequest({
       ownerId: "primary",
       contextId: conversationId,
@@ -385,6 +385,43 @@ describe("agent-owned native Browser", () => {
       connectionId: replacementConnectionId,
     });
     expect(children).toHaveLength(0);
+  });
+
+  it("reports a missing Browser lease so its live preload can reconnect and replay bounds", () => {
+    const { broker, children } = harness();
+    const bounds = { x: 10, y: 20, width: 900, height: 600 };
+    broker.connect({ ownerId: "primary", contextId: conversationId, connectionId });
+    broker.close();
+
+    expect(broker.setBounds({
+      ownerId: "primary", contextId: conversationId, connectionId, bounds,
+    })).toBe(false);
+    expect(children).toHaveLength(0);
+
+    broker.connect({
+      ownerId: "primary", contextId: conversationId, connectionId,
+      recoverMissingLease: true,
+    });
+    expect(broker.setBounds({
+      ownerId: "primary", contextId: conversationId, connectionId, bounds,
+    })).toBe(true);
+    expect(children).toHaveLength(1);
+    expect(Reflect.get(children[0]!, "bounds")).toEqual(bounds);
+
+    const replacementConnectionId = "33333333-3333-4333-8333-333333333333";
+    broker.connect({
+      ownerId: "primary", contextId: conversationId,
+      connectionId: replacementConnectionId,
+    });
+    broker.connect({
+      ownerId: "primary", contextId: conversationId, connectionId,
+      recoverMissingLease: true,
+    });
+    expect(broker.setBounds({
+      ownerId: "primary", contextId: conversationId, connectionId,
+      bounds: null,
+    })).toBe(true);
+    expect(Reflect.get(children[0]!, "bounds")).toEqual(bounds);
   });
 
   it("rejects malformed renderer connection leases", () => {

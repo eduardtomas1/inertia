@@ -17,6 +17,7 @@ export class PreviewContextRegistry {
     ownerId: PreviewOwner;
     contextId: string;
     priorContextId: string | undefined;
+    accepted: boolean;
   } {
     if (!value || typeof value !== "object") {
       throw new Error("Invalid Browser connection request");
@@ -25,13 +26,15 @@ export class PreviewContextRegistry {
       ownerId?: unknown;
       contextId?: unknown;
       connectionId?: unknown;
+      recoverMissingLease?: unknown;
     };
     const ownerId = previewOwner(request.ownerId);
     const contextId = previewContext(request.contextId);
     const connectionId = previewConnection(request.connectionId);
     const priorContextId = this.#contexts.get(ownerId)?.contextId;
-    this.#contexts.set(ownerId, { contextId, connectionId });
-    return { ownerId, contextId, priorContextId };
+    const accepted = request.recoverMissingLease !== true || !priorContextId;
+    if (accepted) this.#contexts.set(ownerId, { contextId, connectionId });
+    return { ownerId, contextId, priorContextId, accepted };
   }
 
   ownerFor(contextId: string): PreviewOwner | undefined {
@@ -49,6 +52,8 @@ export class PreviewContextRegistry {
     return current?.contextId === contextId
       && current.connectionId === connectionId;
   }
+
+  has(ownerId: PreviewOwner): boolean { return this.#contexts.has(ownerId); }
 
   release(ownerId: PreviewOwner, contextId?: string): void {
     if (!contextId || this.#contexts.get(ownerId)?.contextId === contextId) {

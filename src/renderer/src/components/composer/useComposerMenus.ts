@@ -160,7 +160,6 @@ export function useComposerMenus(): ComposerMenuController {
 
   const previewMoreSection = (section: MoreSection) => {
     clearMoreHoverTimer();
-    moreSectionExplicitRef.current = false;
     moreHoverTimerRef.current = window.setTimeout(() => {
       moreHoverTimerRef.current = null;
       const side = availableMoreSubmenuSide();

@@ -695,7 +695,7 @@ function registerIpcHandlers(): void {
   });
   ipcMain.handle(IPC.previewSetBounds, (event, ...args) => {
     assertTrustedIpc(event, args.length, 1);
-    previewBroker.setBounds(args[0]);
+    return previewBroker.setBounds(args[0]);
   });
   ipcMain.handle(IPC.previewClose, (event, ...args) => {
     assertTrustedIpc(event, args.length, 1);

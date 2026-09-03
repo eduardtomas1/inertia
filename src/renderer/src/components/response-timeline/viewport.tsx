@@ -1123,7 +1123,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     onReaderNavigationIntent?.();
   }, [cancelFinalAnswerAnchor, onReaderNavigationIntent]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const focusRequestedTurn = (event: Event): void => {
       const detail = (event as CustomEvent<unknown>).detail;
       if (

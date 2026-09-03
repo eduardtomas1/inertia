@@ -4,7 +4,7 @@ import type { DesktopBridge } from "../../src/shared/desktop";
 
 const electron = vi.hoisted(() => ({
   exposeInMainWorld: vi.fn(),
-  invoke: vi.fn(async () => []),
+  invoke: vi.fn(async (..._args: unknown[]): Promise<unknown> => []),
   sendSync: vi.fn(() => true),
   on: vi.fn(),
   removeListener: vi.fn(),
@@ -34,6 +34,31 @@ describe("preload attachment picker", () => {
       "inertia:select-attachments",
       "images",
     );
+  });
+
+  it("reconnects and replays Browser bounds when main has no live lease", async () => {
+    electron.invoke.mockReset();
+    electron.invoke
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce(true);
+    const request = {
+      ownerId: "primary" as const,
+      contextId: "11111111-1111-4111-8111-111111111111",
+      connectionId: "22222222-2222-4222-8222-222222222222",
+      bounds: { x: 10, y: 20, width: 900, height: 600 },
+    };
+
+    await bridge.previewSetBounds(request);
+
+    expect(electron.invoke.mock.calls).toEqual([
+      ["inertia:preview-set-bounds", request],
+      ["inertia:preview-connect", {
+        ...request, recoverMissingLease: true,
+      }],
+      ["inertia:preview-set-bounds", request],
+    ]);
+    electron.invoke.mockResolvedValue([]);
   });
 
   it("forwards only the opaque lifecycle token with sequential renderer imports", async () => {

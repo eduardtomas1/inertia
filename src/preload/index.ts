@@ -287,8 +287,15 @@ const bridge: DesktopBridge = Object.freeze({
     ipcRenderer.invoke(IPC.previewTab, request) as ReturnType<
       DesktopBridge["previewTab"]
     >,
-  previewSetBounds: (request: Parameters<DesktopBridge["previewSetBounds"]>[0]) =>
-    ipcRenderer.invoke(IPC.previewSetBounds, request) as Promise<void>,
+  previewSetBounds: async (request: Parameters<DesktopBridge["previewSetBounds"]>[0]) => {
+    const accepted = await ipcRenderer.invoke(IPC.previewSetBounds, request) as
+      boolean | undefined;
+    if (accepted !== false) return;
+    await ipcRenderer.invoke(IPC.previewConnect, {
+      ...request, recoverMissingLease: true,
+    });
+    await ipcRenderer.invoke(IPC.previewSetBounds, request);
+  },
   previewClose: (request: Parameters<DesktopBridge["previewClose"]>[0]) =>
     ipcRenderer.invoke(IPC.previewClose, request) as Promise<void>,
   previewInspectEvidenceImage: (

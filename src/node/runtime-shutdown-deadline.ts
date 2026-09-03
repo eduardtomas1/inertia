@@ -1,9 +1,12 @@
 const DEFAULT_RUNTIME_SHUTDOWN_DEADLINE_MS = 2_500;
 
-// ConPTY can consume the complete 3-second terminal proof window while its
-// public exit event drains. Preserve the existing 2.5-second outer allowance
-// for the ordered artifact, client, server, and SQLite cleanup that follows.
-const WINDOWS_RUNTIME_SHUTDOWN_DEADLINE_MS = 5_500;
+// Command quiescence can spend 2.5 seconds draining an already-admitted Git
+// process before the owned-resource phase begins. ConPTY can then consume its
+// complete 3-second terminal proof while the public exit event drains. Keep
+// the original 2.5-second allowance for the ordered artifact, client, server,
+// and SQLite cleanup that follows; shortening this combined envelope made a
+// clean Windows shutdown look unconfirmed under hosted-runner contention.
+const WINDOWS_RUNTIME_SHUTDOWN_DEADLINE_MS = 8_000;
 
 // An immediate Linux terminal close can spend 7.5 seconds admitting the
 // native guardian and two further 1-second intervals proving the owned

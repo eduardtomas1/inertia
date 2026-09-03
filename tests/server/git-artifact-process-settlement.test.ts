@@ -8,9 +8,6 @@ const gitRunner = vi.hoisted(() => ({
   runGit: vi.fn(),
   runGitInspection: vi.fn(),
 }));
-const gitStatus = vi.hoisted(() => ({
-  getRepositoryStatus: vi.fn(),
-}));
 
 vi.mock("../../src/server/git/paths", async (importOriginal) => ({
   ...await importOriginal<typeof import("../../src/server/git/paths")>(),
@@ -20,11 +17,6 @@ vi.mock("../../src/server/git/runner", async (importOriginal) => ({
   ...await importOriginal<typeof import("../../src/server/git/runner")>(),
   ...gitRunner,
 }));
-vi.mock("../../src/server/git/status", async (importOriginal) => ({
-  ...await importOriginal<typeof import("../../src/server/git/status")>(),
-  ...gitStatus,
-}));
-
 import {
   captureGitArtifactState,
   compareGitSnapshots,
@@ -69,7 +61,6 @@ describe("Git artifact process settlement", () => {
     gitPaths.canonicalDirectoryPath.mockImplementation(
       async (path: string) => path,
     );
-    gitStatus.getRepositoryStatus.mockResolvedValue({ branch: "main" });
     gitRunner.runGit.mockResolvedValue(processResult("c".repeat(40)));
     gitRunner.runGitInspection.mockImplementation(defaultInspection);
   });
@@ -83,9 +74,13 @@ describe("Git artifact process settlement", () => {
     const sibling = new Promise<ReturnType<typeof processResult>>((resolve) => {
       settleSibling = () => resolve(processResult("# branch.head main\0"));
     });
-    gitStatus.getRepositoryStatus.mockRejectedValueOnce(primaryFailure);
-    gitRunner.runGitInspection.mockImplementation((root, args) =>
-      args[0] === "status" ? sibling : defaultInspection(root, args));
+    gitRunner.runGitInspection.mockImplementation((root, args) => {
+      if (args[0] === "status") return sibling;
+      if (args.includes(`${snapshotRef}^{commit}`)) {
+        return Promise.reject(primaryFailure);
+      }
+      return defaultInspection(root, args);
+    });
 
     let settled = false;
     const capture = captureGitArtifactState("/repository", snapshotRef)
@@ -109,14 +104,38 @@ describe("Git artifact process settlement", () => {
       "operation-failed",
       "Git stopped responding, and its process tree could not be confirmed stopped.",
     );
-    gitStatus.getRepositoryStatus.mockRejectedValueOnce(cancellation);
-    gitRunner.runGitInspection.mockImplementation((root, args) =>
-      args[0] === "status"
-        ? Promise.reject(cleanupFailure)
-        : defaultInspection(root, args));
+    gitRunner.runGitInspection.mockImplementation((root, args) => {
+      if (args[0] === "status") return Promise.reject(cleanupFailure);
+      if (args.includes(`${snapshotRef}^{commit}`)) {
+        return Promise.reject(cancellation);
+      }
+      return defaultInspection(root, args);
+    });
 
     await expect(captureGitArtifactState("/repository", snapshotRef))
       .rejects.toBe(cleanupFailure);
+  });
+
+  it("derives the branch from the captured porcelain frame without a full status scan", async () => {
+    gitRunner.runGitInspection.mockImplementation((root, args) =>
+      args[0] === "status"
+        ? Promise.resolve(processResult(
+            "# branch.oid abcdef\0# branch.head feature/artifact\0",
+          ))
+        : defaultInspection(root, args));
+
+    await expect(captureGitArtifactState("/repository", snapshotRef))
+      .resolves.toMatchObject({ branch: "feature/artifact" });
+
+    const commands = gitRunner.runGitInspection.mock.calls.map(
+      ([, args]) => args[0],
+    );
+    expect(commands.filter((command) => command === "status")).toHaveLength(1);
+    expect(commands).not.toContain("diff");
+    expect(commands).not.toContain("remote");
+    expect(commands).not.toContain("for-each-ref");
+    expect(gitRunner.runGitInspection).toHaveBeenCalledTimes(5);
+    expect(gitRunner.runGit).toHaveBeenCalledTimes(1);
   });
 
   it("keeps comparison ownership until every cancelled Git child settles", async () => {

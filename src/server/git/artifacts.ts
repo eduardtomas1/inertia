@@ -21,10 +21,7 @@ import {
   settleGitInspections,
   utf8Prefix,
 } from "./runner";
-import {
-  getRepositoryStatus,
-  parseNumstat,
-} from "./status";
+import { parseNumstat } from "./status";
 import {
   GitError,
   type GitArtifactState,
@@ -112,6 +109,17 @@ async function optionalCaptureValue<T>(
   }
 }
 
+function branchFromPorcelainStatus(status: Buffer): string | null {
+  for (const field of status.toString("utf8").split("\0")) {
+    if (!field.startsWith("# branch.head ")) continue;
+    const branch = field.slice(14);
+    return branch && branch !== "(detached)" && branch !== "(unknown)"
+      ? branch
+      : null;
+  }
+  return null;
+}
+
 /**
  * Captures a path-safe identity and full-state fingerprint. The fingerprint
  * includes the durable snapshot tree, HEAD, index tree and porcelain state;
@@ -145,7 +153,6 @@ export async function captureGitArtifactState(
   };
   try {
     const results = await Promise.allSettled([
-      track(getRepositoryStatus(root, captureOptions)),
       track(withCompatibilityFallback(
         canonicalGitDirectory(
           root,
@@ -216,7 +223,6 @@ export async function captureGitArtifactState(
     }
     if (hasFailure) throw firstFailure;
     const [
-      status,
       commonDirectory,
       gitDirectory,
       snapshotOid,
@@ -226,7 +232,6 @@ export async function captureGitArtifactState(
     ] = results.map((result) => (
       (result as PromiseFulfilledResult<unknown>).value
     )) as [
-      Awaited<ReturnType<typeof getRepositoryStatus>>,
       string,
       string,
       string,
@@ -242,7 +247,7 @@ export async function captureGitArtifactState(
       .digest("hex");
     return {
       root,
-      branch: status.branch,
+      branch: branchFromPorcelainStatus(porcelain.stdout),
       repositoryIdentity,
       worktreeIdentity,
       fingerprint: createHash("sha256")

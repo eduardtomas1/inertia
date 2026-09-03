@@ -155,6 +155,9 @@ describe("turn Git artifacts", () => {
     });
     expect(artifact?.repositoryIdentity).toMatch(/^[0-9a-f]{64}$/u);
     expect(artifact?.worktreeIdentity).toMatch(/^[0-9a-f]{64}$/u);
+    expect(artifact?.branch).toBe(
+      git(runtime.repository, ["branch", "--show-current"]),
+    );
     expect(artifact?.beforeFingerprint).toMatch(/^[0-9a-f]{64}$/u);
     expect(artifact?.afterFingerprint).toMatch(/^[0-9a-f]{64}$/u);
     expect(artifact?.files.map(({ path }) => path)).toEqual([

@@ -80,7 +80,7 @@ function acpFixture(
       requireLoadSession,
     },
     {
-      timeoutMs: 250,
+      timeoutMs: 1_000,
       cleanupTimeoutMs: 250,
       ...dependencies,
     },

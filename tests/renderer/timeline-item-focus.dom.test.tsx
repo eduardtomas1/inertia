@@ -153,12 +153,40 @@ describe("timeline item focus settlement", () => {
       resolveTarget: () => ({ row, destination: row }),
       onSettled: secondSettled,
     });
-    for (let attempt = 0; attempt < 8; attempt += 1) frames.runNext();
+    for (let attempt = 0; attempt < 7; attempt += 1) frames.runNext();
 
     expect(firstSettled).toHaveBeenCalledWith(false);
     expect(firstSettled).toHaveBeenCalledTimes(1);
     expect(secondSettled).toHaveBeenCalledWith(true);
     expect(row).toHaveFocus();
+  });
+
+  it("focuses an already-mounted destination before the first frame", () => {
+    vi.useFakeTimers();
+    const frames = frameHarness();
+    const { root, row, scrollElement } = fixture();
+    root.append(row);
+    const onSettled = vi.fn();
+
+    startTimelineItemFocus({
+      root,
+      scrollElement,
+      index: 9,
+      align: "center",
+      virtualized: true,
+      resolveTarget: () => ({ row, destination: row }),
+      scrollToIndex: vi.fn(),
+      onSettled,
+    });
+
+    expect(row).toHaveFocus();
+    expect(onSettled).not.toHaveBeenCalled();
+    expect(frames.pending()).toBe(1);
+
+    for (let attempt = 0; attempt < 7; attempt += 1) frames.runNext();
+    expect(onSettled).toHaveBeenCalledWith(true);
+    expect(frames.pending()).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("does not settle an overscanned row until exact navigation reveals it", () => {

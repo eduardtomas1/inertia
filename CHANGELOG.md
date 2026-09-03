@@ -4,6 +4,50 @@ The useful changes in each Inertia release, in plain language.
 
 ## Next
 
+## 0.0.47 — 2026-09-03
+
+### Messages and local work recover without an app restart
+
+- Sending a normal prompt is now one atomic admission: a failed request rolls
+  back its provisional turn and releases the conversation instead of leaving
+  every later prompt blocked until Inertia is reopened.
+- Startup and replacement retire stale runtime generations through bounded,
+  platform-specific ownership proof. Transient Windows journal reads, Linux
+  guardian publication, native probes, Git shutdown, and interrupted cleanup
+  reconcile without treating uncertain processes as safe or spamming restart
+  dialogs.
+- Delegated continuations, one-shot provider actions, patch and command
+  activities, and recovered turns settle against their exact run and item
+  identities. Late events cannot keep a completed activity spinning or attach
+  a failure to a newer turn.
+
+### Providers stay current, bounded, and attributable
+
+- Claude coalesced follow-ups retain every exact receipt, including queued
+  media, while Codex delegation waits for its owned continuations. OpenCode
+  descendant work remains project-isolated and its server identity is poisoned
+  whenever shutdown cannot be confirmed.
+- Provider discovery, validation, drift probes, output limits, and process-tree
+  cleanup now share stricter executable and runtime boundaries. Diagnostic
+  output remains available without consuming a provider's output allowance or
+  weakening descendant cleanup checks.
+- The reviewed provider contracts now target ACP 1.4.0, Claude Agent SDK
+  0.3.259, Anthropic SDK 0.123.0, MCP 1.30.0, and OpenCode SDK 1.18.27, with
+  secret-free drift checks and deterministic portable coverage for each
+  shipped integration.
+
+### Large and split workspaces stay responsive
+
+- Git refreshes, pre-turn artifact capture, renderer projections, and shutdown
+  drains are coalesced and bounded, avoiding duplicate process storms and long
+  UI stalls while preserving exact repository and conversation ownership.
+- Linked files open at the requested target and long previews virtualize their
+  content. A new chat opened from the Inertia mark remains scoped to the active
+  project, and provider settings use a clearer master-detail layout.
+- Composer utilities, Skills, reasoning, response-speed, and scratch-prompt
+  menus are positioned inside their active split pane instead of extending
+  beneath the screen edge.
+
 ### Installed application names stay stable across updates
 
 - Stable production packages keep the installed identity `Inertia` on macOS
@@ -22,6 +66,13 @@ The useful changes in each Inertia release, in plain language.
   platform identities. Native release-container smoke launches Linux through
   its installed filename while macOS and Windows retain their exact bundle and
   executable names.
+
+### Release confidence
+
+- Electron 44 packaging, macOS 13 compatibility, native x64 and ARM64 package
+  paths, process containment, migration lineage, provider portability, and the
+  exact-tag checksum and provenance boundary remain covered across Linux,
+  macOS, and Windows.
 
 ## 0.0.46 — 2026-09-01
 

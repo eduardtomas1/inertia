@@ -677,6 +677,7 @@ parentPort.on("message", (messageEvent) => {
       websocketUrl: startedRuntime.websocketUrl,
       databaseRecovery: startedRuntime.databaseRecovery,
     });
+    void startedRuntime.startPostReadyWork();
     if (command.options.packageSmokePdf) {
       packageSmokePdfController = new AbortController();
       packageSmokePdfOperation = runPackagedPdfSmoke(

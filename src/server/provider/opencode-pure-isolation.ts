@@ -36,6 +36,7 @@ const MAX_PROOF_CACHE_ENTRIES = 16;
 const proofCache = new Set<string>();
 const cleanupFailureCache = new Set<string>();
 const inFlightProofs = new Map<string, Promise<void>>();
+const lifetimeInFlightProofs = new WeakMap<AbortSignal, Map<string, Promise<void>>>();
 
 export interface OpenCodePureIsolationProof {
   readonly cleanupConfirmed: boolean;
@@ -47,6 +48,8 @@ export interface OpenCodePureIsolationProbeOptions {
   readonly pluginObservationMs?: number;
   /** Test-only request-deadline shortening; production always uses the full deadline. */
   readonly requestTimeoutMs?: number;
+  /** Cancels proofs owned by this runtime lifetime without affecting another runtime. */
+  readonly signal?: AbortSignal;
 }
 
 export type OpenCodePureIsolationProbe = (
@@ -111,6 +114,7 @@ async function waitForSentinel(
   sentinel: string,
   shouldExist: boolean,
   observationMs: number,
+  signal?: AbortSignal,
 ): Promise<void> {
   const sentinelExists = async (): Promise<boolean> => {
     try {
@@ -124,6 +128,9 @@ async function waitForSentinel(
   };
   const deadline = Date.now() + observationMs;
   do {
+    if (signal?.aborted) {
+      throw new Error("OpenCode isolation proof was cancelled.");
+    }
     const exists = await sentinelExists();
     if (exists === shouldExist) {
       if (shouldExist) return;
@@ -151,6 +158,7 @@ async function exerciseServer(
   expectedVersion: string,
   observationMs: number,
   requestTimeoutMs: number,
+  signal: AbortSignal,
 ): Promise<void> {
   const credentials = ownedOpenCodeCredentials(environment);
   let started: Awaited<ReturnType<typeof startOwnedOpenCodeServer>>;
@@ -162,7 +170,7 @@ async function exerciseServer(
       new CappedProviderBuffer(16 * 1024),
       terminateProcessTree,
       "OpenCode isolation-proof server process tree",
-      undefined,
+      signal,
       pure,
     );
   } catch (error) {
@@ -174,11 +182,17 @@ async function exerciseServer(
   let operationError: unknown;
   try {
     const client = createOwnedOpenCodeClient(started.url, root, credentials);
-    await waitForOpenCodeHealth(client, started.child, requestTimeoutMs);
+    await waitForOpenCodeHealth(
+      client,
+      started.child,
+      requestTimeoutMs,
+      signal,
+    );
     const health = await withOpenCodeRequestDeadline(
       requestTimeoutMs,
       "Timed out reading the OpenCode isolation-proof version.",
       async (signal) => await client.global.health({ signal, throwOnError: true }),
+      signal,
     );
     if (health.data?.version?.replace(/^v/u, "") !== expectedVersion.replace(/^v/u, "")) {
       throw new Error("OpenCode isolation proof observed a different executable version.");
@@ -196,8 +210,9 @@ async function exerciseServer(
           { signal, throwOnError: true },
         );
       },
+      signal,
     );
-    await waitForSentinel(sentinel, !pure, observationMs);
+    await waitForSentinel(sentinel, !pure, observationMs, signal);
   } catch (error) {
     operationError = error;
   }
@@ -219,6 +234,7 @@ async function runProof(
   terminateProcessTree: ProcessTreeTerminator,
   observationMs: number,
   requestTimeoutMs: number,
+  signal: AbortSignal,
 ): Promise<void> {
   const root = await mkdtemp(join(tmpdir(), "inertia-opencode-isolation-"));
   let preserveForCleanupFailure = false;
@@ -257,6 +273,7 @@ async function runProof(
       version,
       observationMs,
       requestTimeoutMs,
+      signal,
     );
     await unlink(sentinel);
     await exerciseServer(
@@ -269,6 +286,7 @@ async function runProof(
       version,
       observationMs,
       requestTimeoutMs,
+      signal,
     );
   } catch (error) {
     preserveForCleanupFailure = error instanceof OpenCodePureIsolationCleanupError;
@@ -289,6 +307,9 @@ export const probeOpenCodePureIsolation: OpenCodePureIsolationProbe = async (
 ) => {
   let identity: string | undefined;
   try {
+    if (options?.signal?.aborted) {
+      throw new Error("OpenCode isolation proof was cancelled.");
+    }
     if (!version) throw new Error("OpenCode did not report a usable version.");
     const observationMs = process.env.NODE_ENV === "test"
       && Number.isSafeInteger(options?.pluginObservationMs)
@@ -307,8 +328,19 @@ export const probeOpenCodePureIsolation: OpenCodePureIsolationProbe = async (
     if (proofCache.has(identity)) {
       return { cleanupConfirmed: true, verified: true };
     }
-    let proof = inFlightProofs.get(identity);
+    const proofKey = identity;
+    const lifetimeSignal = options?.signal;
+    let scopedProofs = lifetimeSignal
+      ? lifetimeInFlightProofs.get(lifetimeSignal)
+      : inFlightProofs;
+    if (!scopedProofs && lifetimeSignal) {
+      scopedProofs = new Map<string, Promise<void>>();
+      lifetimeInFlightProofs.set(lifetimeSignal, scopedProofs);
+    }
+    if (!scopedProofs) throw new Error("OpenCode isolation proof scope is unavailable.");
+    let proof = scopedProofs.get(proofKey);
     if (!proof) {
+      const proofSignal = lifetimeSignal ?? new AbortController().signal;
       proof = (async () => {
         await runProof(
           executable,
@@ -317,23 +349,33 @@ export const probeOpenCodePureIsolation: OpenCodePureIsolationProbe = async (
           terminateProcessTree,
           observationMs,
           requestTimeoutMs,
+          proofSignal,
         );
-        if (await executableIdentity(executable, version) !== identity) {
+        if (await executableIdentity(executable, version) !== proofKey) {
           throw new Error("The selected OpenCode executable changed during isolation proof.");
         }
         if (proofCache.size >= MAX_PROOF_CACHE_ENTRIES) {
           proofCache.delete(proofCache.values().next().value as string);
         }
-        proofCache.add(identity);
+        proofCache.add(proofKey);
       })();
-      inFlightProofs.set(identity, proof);
+      scopedProofs.set(proofKey, proof);
+      void proof.then(
+        () => {
+          if (scopedProofs.get(proofKey) === proof) {
+            scopedProofs.delete(proofKey);
+          }
+        },
+        () => {
+          if (scopedProofs.get(proofKey) === proof) {
+            scopedProofs.delete(proofKey);
+          }
+        },
+      );
     }
-    try {
-      await proof;
-    } finally {
-      if (inFlightProofs.get(identity) === proof) {
-        inFlightProofs.delete(identity);
-      }
+    await proof;
+    if (options?.signal?.aborted) {
+      throw new Error("OpenCode isolation proof was cancelled.");
     }
     return { cleanupConfirmed: true, verified: true };
   } catch (error) {

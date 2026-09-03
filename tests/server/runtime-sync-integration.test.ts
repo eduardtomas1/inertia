@@ -108,7 +108,9 @@ describe("runtime incremental synchronization", () => {
     });
     const first = await client.next(
       (event): event is Extract<ServerEvent, { type: "runtime.event" }> =>
-        event.type === "runtime.event",
+        event.type === "runtime.event"
+        && event.event.type === "snapshot.updated"
+        && event.event.snapshot.settings.theme === "dark",
     );
     expect(first.scope).toEqual({ kind: "shell" });
     expect(first.event.type).toBe("snapshot.updated");

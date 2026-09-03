@@ -299,12 +299,34 @@ export function recoverRuntimeOwnedProcesses(
     // A valid journal with no such generation is a stable absence, not an
     // in-flight writer transition. Preserve the synchronous fail-closed signal
     // used by startup recovery while retrying only an unreadable generation.
-    if (journal.sessionExact(runtimeGenerationId) === null) return null;
+    const initialSession = journal.sessionExact(runtimeGenerationId);
+    if (initialSession === null) return null;
     return (async () => {
       const waitForJournalSettle = options.waitForProcessGroupDrain
         ?? ((durationMs: number) => new Promise<void>((resolve) => {
           setTimeout(resolve, durationMs);
         }));
+      let exactSession = initialSession;
+      while (!exactSession) {
+        if (
+          Date.now() + RUNTIME_OWNED_JOURNAL_SETTLE_POLL_MS
+            >= options.deadlineAt
+        ) return false;
+        await waitForJournalSettle(RUNTIME_OWNED_JOURNAL_SETTLE_POLL_MS);
+        const observedSession = journal.sessionExact(runtimeGenerationId);
+        if (observedSession === null) return false;
+        exactSession = observedSession;
+      }
+      // Recovery is entered only for an exited/prior generation. Fence its
+      // writer capability before inspecting it so an admission interrupted by
+      // process death becomes an uncommitted, safely discardable prefix.
+      while (!journal.fenceSessionExact(exactSession)) {
+        if (
+          Date.now() + RUNTIME_OWNED_JOURNAL_SETTLE_POLL_MS
+            >= options.deadlineAt
+        ) return false;
+        await waitForJournalSettle(RUNTIME_OWNED_JOURNAL_SETTLE_POLL_MS);
+      }
       let inspection = journal.inspectGeneration(runtimeGenerationId);
       while (!inspection) {
         if (

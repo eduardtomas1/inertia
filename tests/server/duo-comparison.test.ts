@@ -560,11 +560,12 @@ describe("Duo third-model comparison", () => {
     observeTerminalProjection = true;
 
     runtime.provider.completeAll(["Source A", "Source B"]);
-    await new Promise<void>((resolve) => setTimeout(resolve, 150));
+    await vi.waitFor(() => {
+      expect(runtime.store.pairedLaunch(prepared.launchId).comparison)
+        .toMatchObject({ state: "running", attempt: 1 });
+    }, { timeout: 5_000 });
 
     expect(workflowReservation).toBe(true);
-    expect(runtime.store.pairedLaunch(prepared.launchId).comparison)
-      .toMatchObject({ state: "running", attempt: 1 });
     expect(runtime.provider.inputs).toHaveLength(3);
     runtime.store.close();
   });
@@ -1304,6 +1305,69 @@ describe("Duo third-model comparison", () => {
     expect(provider.inputs[0]?.prompt).toContain("First persisted result");
     expect(provider.inputs[0]?.prompt).toContain("Second persisted result");
     await restarted.cancelComparison(prepared.launchId);
+    await controller.dispose();
+    reopened.close();
+  });
+
+  it("does not start a recovered judge after runtime shutdown begins", async () => {
+    const runtime = await createRuntime();
+    const launches = comparisonCoordinator(runtime);
+    const prepared = await launches.prepare(comparisonPreparePayload(runtime));
+    await launches.dispatch(prepared.launchId);
+    runtime.provider.completeAll(["First persisted result", "Second persisted result"]);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(launches.status(prepared.launchId).comparison?.state).toBe("waiting");
+    runtime.store.close();
+
+    const reopened = new RuntimeStore(
+      runtime.databasePath,
+      runtime.workspace,
+      { recoverInterruptedRuns: false },
+    );
+    const provider = new PairProvider();
+    const controller = new TurnController(
+      reopened,
+      provider,
+      new Map(),
+      new Map(),
+      new Map(),
+      {
+        broadcast: () => undefined,
+        broadcastSnapshot: () => undefined,
+        providerInfo: () => [providerInfo()],
+      },
+    );
+    let releaseCleanup = (): void => undefined;
+    const cleanupGate = new Promise<void>((resolve) => {
+      releaseCleanup = resolve;
+    });
+    const waitForCleanup = vi.spyOn(controller, "waitForProviderCleanup")
+      .mockReturnValue(cleanupGate as never);
+    let runtimeClosed = false;
+    const restarted = new DuoLaunchCoordinator(
+      reopened,
+      { resolveModelRoute: resolveNativeModelRoute },
+      {
+        validateSelection: (selection: unknown) => selection,
+        readiness: async () => null,
+      } as never,
+      controller,
+      join(runtime.workspace, ".inertia"),
+      () => [providerInfo()],
+      { runtimeClosed: () => runtimeClosed },
+    );
+
+    const resuming = restarted.resumeComparisons();
+    await vi.waitFor(() => expect(waitForCleanup).toHaveBeenCalledOnce());
+    runtimeClosed = true;
+    releaseCleanup();
+    await resuming;
+
+    expect(restarted.status(prepared.launchId).comparison).toMatchObject({
+      state: "waiting",
+      attempt: 0,
+    });
+    expect(provider.inputs).toHaveLength(0);
     await controller.dispose();
     reopened.close();
   });

@@ -15,6 +15,9 @@ import {
 } from "../node/runtime-owned-processes";
 
 const DEFAULT_TERMINATION_WAIT_MS = 2_000;
+// The native macOS guardian owns a five-second bounded tree-drain proof; keep
+// the caller alive for that complete proof inside the runtime shutdown budget.
+const DARWIN_TERMINATION_WAIT_MS = 5_000;
 const PROCESS_GROUP_POLL_MS = 10;
 const WINDOWS_RESOURCE_SETTLE_MS = 100;
 
@@ -224,8 +227,15 @@ export function terminateProcessTree(
   killDirectChild(child, force);
 }
 
-function boundedWaitMs(value: number | undefined): number {
-  if (value === undefined) return DEFAULT_TERMINATION_WAIT_MS;
+function boundedWaitMs(
+  value: number | undefined,
+  platform: NodeJS.Platform,
+): number {
+  if (value === undefined) {
+    return platform === "darwin"
+      ? DARWIN_TERMINATION_WAIT_MS
+      : DEFAULT_TERMINATION_WAIT_MS;
+  }
   return Math.max(1, Math.min(Math.trunc(value), 30_000));
 }
 
@@ -427,7 +437,7 @@ export function createOwnedPidProcessTreeTermination(
   const windowsSystemRoot = dependencies.windowsSystemRoot === undefined
     ? inheritedWindowsSystemRoot()
     : dependencies.windowsSystemRoot;
-  const waitMs = boundedWaitMs(dependencies.waitMs);
+  const waitMs = boundedWaitMs(dependencies.waitMs, platform);
   let started = false;
   let treeTerminationConfirmed = false;
   let snapshotConfirmed = false;
@@ -513,7 +523,7 @@ export async function terminateProcessTreeAndWait(
   const windowsSystemRoot = dependencies.windowsSystemRoot === undefined
     ? inheritedWindowsSystemRoot()
     : dependencies.windowsSystemRoot;
-  const waitMs = boundedWaitMs(dependencies.waitMs);
+  const waitMs = boundedWaitMs(dependencies.waitMs, platform);
 
   if (platform === "win32") {
     // Never target a reused Windows PID after Node has already observed the

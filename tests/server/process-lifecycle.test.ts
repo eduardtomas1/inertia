@@ -480,6 +480,62 @@ describe("provider process-tree termination", () => {
     expect(child.kill).not.toHaveBeenCalled();
   });
 
+  it("preserves the native macOS guardian termination window by default", async () => {
+    vi.useFakeTimers();
+    try {
+      const child = fakeChild();
+      let running = true;
+      const killProcess = vi.fn((pid: number, signal?: NodeJS.Signals | number) => {
+        if (signal === 0 && pid < 0) {
+          if (!running) throw new Error("group gone");
+          return true as const;
+        }
+        return true as const;
+      });
+      let settled = false;
+      const termination = terminateProcessTreeAndWait(
+        child as never,
+        false,
+        { platform: "darwin", killProcess },
+      ).then((confirmed) => {
+        settled = true;
+        return confirmed;
+      });
+      setTimeout(() => {
+        running = false;
+        child.exitCode = 0;
+        child.emit("close", 0);
+      }, 2_100);
+
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(100);
+      await expect(termination).resolves.toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the default non-macOS termination wait bounded", async () => {
+    vi.useFakeTimers();
+    try {
+      const child = fakeChild();
+      const termination = terminateProcessTreeAndWait(
+        child as never,
+        false,
+        {
+          platform: "linux",
+          killProcess: vi.fn(() => true as const),
+        },
+      );
+
+      await vi.advanceTimersByTimeAsync(2_000);
+      await expect(termination).resolves.toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("does not confirm POSIX termination before the direct child closes", async () => {
     const child = fakeChild();
     let running = true;

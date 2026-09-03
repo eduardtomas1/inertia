@@ -56,6 +56,8 @@ export interface ProviderDetectionOptions {
   refreshEnvironment?: boolean;
   /** Installation/protocol readiness only; never probes or forwards credentials. */
   probeAuthentication?: boolean;
+  /** Cancels owned discovery processes and resolves only after their cleanup settles. */
+  signal?: AbortSignal;
 }
 
 interface ProviderRunRequest {
@@ -442,6 +444,8 @@ export class ProviderRuntimeError extends Error {
 export interface ProviderManagerOptions {
   commands?: Partial<Record<ProviderId, string>>;
   cancelGraceMs?: number;
+  /** Runtime-owned cancellation authority shared by passive provider operations. */
+  lifetimeSignal?: AbortSignal;
   backendProfiles?: readonly ModelBackendProfile[];
   backendCompatibilities?: readonly HarnessBackendCompatibility[];
   /** Latest safe compatibility evidence, keyed to an exact profile revision and model. */

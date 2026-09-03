@@ -10,7 +10,6 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 
 import { NATIVE_ANTHROPIC_PROFILE_ID } from "../../shared/claude-backend-profiles";
-import type { ProviderModel, ProviderRateLimit } from "../../shared/contracts";
 import {
   MAX_PROVIDER_FAILURE_DETAIL_CHARS,
   sanitizeProviderActivityDetail,
@@ -20,6 +19,7 @@ import {
   createClaudeOwnedQueryProcess,
   type ClaudeOwnedQueryDependencies,
 } from "./claude-owned-query";
+import { claudeModels } from "./claude-agent-sdk-metadata";
 import { CappedProviderBuffer, ProviderRunEventBudget } from "./io";
 import { ClaudeRunEventBudget } from "./claude-event-budget";
 import {
@@ -57,7 +57,6 @@ import { ClaudeSubagentTraceTracker } from "./claude-subagent-trace";
 import {
   readClaudeContextUsage,
 } from "./claude-usage";
-import { clampProviderPercent, providerTimestamp } from "./usage-values";
 import { createClaudeHostTools } from "./claude-host-tools";
 import { ProviderHostToolRuntime } from "./host-tool-runtime";
 import { INERTIA_HOST_MCP_NAME } from "./host-tool-mcp-config";
@@ -111,6 +110,11 @@ export interface ClaudeAgentSdkHarnessOptions
 
 export { readClaudeAgentSdkSkills } from "./claude-skill-query";
 export { claudeQuestions } from "./claude-questions";
+export {
+  parseClaudeRateLimits,
+  readClaudeAgentSdkMetadata,
+  readClaudeAgentSdkModels,
+} from "./claude-agent-sdk-metadata";
 
 function claudeStopTaskTimeout(value: number | undefined): number {
   if (
@@ -159,33 +163,6 @@ async function nextClaudeMessage(
   }
 }
 
-function claudeModels(models: Awaited<ReturnType<Query["supportedModels"]>>): ProviderModel[] {
-  return models.slice(0, 64).map((model, index) => {
-    const efforts = model.supportedEffortLevels ?? [];
-    return {
-      id: model.value,
-      label: model.displayName || model.value,
-      description: model.description || "Claude model",
-      isDefault: index === 0,
-      inputModalities: ["text", "image"],
-      reasoningOptions: efforts.map((effort) => ({
-        value: effort,
-        label: effort === "xhigh" ? "Extra high" : `${effort[0]?.toUpperCase() ?? ""}${effort.slice(1)}`,
-        description: `${effort === "xhigh" ? "Extra-high" : effort} reasoning effort`,
-      })),
-      defaultReasoningEffort: efforts.includes("high") ? "high" : efforts[0] ?? "",
-      fastMode: model.supportsFastMode === true
-        ? {
-            providerValue: "fast",
-            label: "Fast",
-            description: "Faster output with premium usage.",
-            isDefault: false,
-          }
-        : null,
-    };
-  });
-}
-
 function claudeFastModeFailure(record: Record<string, unknown>): string {
   const reason = stringValue(record.fast_mode_disabled_reason);
   const detail = reason === "model_not_allowed"
@@ -202,128 +179,6 @@ function claudeFastModeFailure(record: Record<string, unknown>): string {
               ? "Fast mode is unavailable on this Claude account tier."
               : "Claude did not activate Fast mode for this session.";
   return `${detail} Choose Standard, refresh models, or update Claude Code.`;
-}
-
-export function parseClaudeRateLimits(value: unknown): ProviderRateLimit[] {
-  const response = objectValue(value);
-  if (response?.rate_limits_available !== true) return [];
-  const limits = objectValue(response.rate_limits);
-  if (!limits) return [];
-  const windows: Array<{ key: string; label: string; minutes: number | null; value: unknown }> = [
-    { key: "five_hour", label: "Claude · 5 hour", minutes: 300, value: limits.five_hour },
-    { key: "seven_day", label: "Claude · 7 day", minutes: 10_080, value: limits.seven_day },
-    { key: "seven_day_oauth_apps", label: "Claude apps · 7 day", minutes: 10_080, value: limits.seven_day_oauth_apps },
-    { key: "seven_day_opus", label: "Claude Opus · 7 day", minutes: 10_080, value: limits.seven_day_opus },
-    { key: "seven_day_sonnet", label: "Claude Sonnet · 7 day", minutes: 10_080, value: limits.seven_day_sonnet },
-  ];
-  const modelScoped = Array.isArray(limits.model_scoped) ? limits.model_scoped : [];
-  modelScoped.slice(0, 8).forEach((entry, index) => {
-    const model = objectValue(entry);
-    windows.push({
-      key: `model_${index}`,
-      label: stringValue(model?.display_name) ?? `Claude model ${index + 1}`,
-      minutes: 10_080,
-      value: model,
-    });
-  });
-  return windows.flatMap((window) => {
-    const current = objectValue(window.value);
-    const utilization = clampProviderPercent(current?.utilization);
-    if (utilization === null) return [];
-    return [{
-      id: `claude:${window.key}`,
-      label: window.label,
-      usedPercent: utilization,
-      remainingPercent: 100 - utilization,
-      windowMinutes: window.minutes,
-      resetsAt: providerTimestamp(current?.resets_at),
-    }];
-  }).slice(0, 12);
-}
-
-export async function readClaudeAgentSdkMetadata(
-  executable: string,
-  environment: NodeJS.ProcessEnv,
-  cwd: string,
-  timeoutMs = 6_000,
-  createQuery: ClaudeQueryFactory = claudeQuery,
-  fields: readonly ("models" | "rateLimits")[] = ["models", "rateLimits"],
-  lifecycleDependencies: ClaudeOwnedQueryDependencies = {},
-): Promise<{ models?: ProviderModel[]; rateLimits?: ProviderRateLimit[] }> {
-  const abortController = new AbortController();
-  const ownedProcess = createClaudeOwnedQueryProcess(
-    "Claude metadata process tree",
-    lifecycleDependencies,
-  );
-  let release!: () => void;
-  const hold = new Promise<void>((resolve) => { release = resolve; });
-  async function* dormantPrompt(): AsyncIterable<SDKUserMessage> {
-    await hold;
-    yield* [] as SDKUserMessage[];
-  }
-  let query: Query | undefined;
-  let timer: NodeJS.Timeout | undefined;
-  try {
-    query = createQuery({
-      prompt: dormantPrompt(),
-      options: {
-        abortController,
-        cwd,
-        env: environment,
-        pathToClaudeCodeExecutable: executable,
-        spawnClaudeCodeProcess: ownedProcess.spawnClaudeCodeProcess,
-        settingSources: [],
-        managedSettings: CLAUDE_ISOLATED_SKILL_SETTINGS,
-      },
-    });
-    const usageReader = query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET;
-    const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => {
-        abortController.abort();
-        reject(new Error("Claude metadata discovery timed out."));
-      }, timeoutMs);
-      timer.unref();
-    });
-    const [modelsResult, limitsResult] = await Promise.race([
-      Promise.allSettled([
-        fields.includes("models") ? query.supportedModels() : Promise.resolve(undefined),
-        fields.includes("rateLimits") && typeof usageReader === "function"
-          ? usageReader.call(query)
-          : Promise.resolve(undefined),
-      ]),
-      timeout,
-    ]);
-    return {
-      ...(modelsResult.status === "fulfilled" && modelsResult.value !== undefined ? { models: claudeModels(modelsResult.value) } : {}),
-      ...(limitsResult.status === "fulfilled" && limitsResult.value !== undefined ? { rateLimits: parseClaudeRateLimits(limitsResult.value) } : {}),
-    };
-  } finally {
-    if (timer) clearTimeout(timer);
-    ownedProcess.requestTermination(true);
-    release();
-    abortController.abort();
-    try { query?.close(); } catch { /* The metadata subprocess may already have exited. */ }
-    await ownedProcess.terminate(true);
-  }
-}
-
-export async function readClaudeAgentSdkModels(
-  executable: string,
-  environment: NodeJS.ProcessEnv,
-  cwd: string,
-  timeoutMs = 6_000,
-  createQuery: ClaudeQueryFactory = claudeQuery,
-  lifecycleDependencies: ClaudeOwnedQueryDependencies = {},
-): Promise<ProviderModel[]> {
-  return (await readClaudeAgentSdkMetadata(
-    executable,
-    environment,
-    cwd,
-    timeoutMs,
-    createQuery,
-    ["models"],
-    lifecycleDependencies,
-  )).models ?? [];
 }
 
 interface PendingApproval {
@@ -1226,10 +1081,6 @@ function bounded(value: string): string {
 
 function summarizeInput(input: Record<string, unknown>): string {
   try { return bounded(JSON.stringify(input)); } catch { return "Claude requested permission to use a tool."; }
-}
-
-function objectValue(value: unknown): Record<string, unknown> | undefined {
-  return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 }
 
 function stringValue(value: unknown): string | undefined {

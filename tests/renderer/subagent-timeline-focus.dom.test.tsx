@@ -92,10 +92,9 @@ function RequestTimelineFocusOnCommit({
 
 describe("delegated-agent parent-turn navigation", () => {
   it("accepts a focus request as soon as the matching timeline commits", () => {
-    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
-      callback(0);
-      return 1;
-    });
+    // Keep queued frames pending so this integration proves the initial focus
+    // handoff occurs in the commit-time navigation task itself.
+    vi.spyOn(window, "requestAnimationFrame").mockReturnValue(1);
     vi.spyOn(HTMLElement.prototype, "scrollIntoView")
       .mockImplementation(() => undefined);
     const firstConversation = "11111111-1111-4111-8111-111111111111";

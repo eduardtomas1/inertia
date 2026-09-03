@@ -14,6 +14,8 @@ import {
   type ProviderEnvironment,
 } from "../environment";
 import {
+  isProcessTreeTerminationUnconfirmed,
+  ProcessTreeTerminationError,
   requireProcessTreeTermination,
   terminateProcessTreeAndWait,
   type ProcessTreeTerminator,
@@ -76,6 +78,7 @@ interface ProbeResult {
   started: boolean;
   timedOut: boolean;
   cleanupConfirmed?: boolean;
+  aborted?: boolean;
 }
 
 type ProviderProbeProcess = (
@@ -84,6 +87,7 @@ type ProviderProbeProcess = (
   environment: ProviderEnvironment,
   cwd: string,
   timeoutMs: number,
+  signal?: AbortSignal,
 ) => Promise<ProbeResult>;
 
 interface ProviderProbeDeadline {
@@ -118,9 +122,20 @@ async function probeProcess(
   environment: ProviderEnvironment,
   cwd: string,
   timeoutMs: number,
+  signal?: AbortSignal,
   terminateProcessTree: ProcessTreeTerminator = terminateProcessTreeAndWait,
   scheduleDeadline: ProviderProbeDeadlineScheduler = scheduleProviderProbeDeadline,
 ): Promise<ProbeResult> {
+  if (signal?.aborted) {
+    return {
+      exitCode: null,
+      output: "",
+      started: false,
+      timedOut: false,
+      cleanupConfirmed: true,
+      aborted: true,
+    };
+  }
   return await new Promise<ProbeResult>((resolveProbe) => {
     const output = new CappedProviderBuffer(16 * 1024);
     let settled = false;
@@ -134,6 +149,7 @@ async function probeProcess(
       if (settled) return;
       settled = true;
       deadline?.cancel();
+      signal?.removeEventListener("abort", abortProbe);
       resolveProbe({
         exitCode,
         output: output.toString(),
@@ -142,6 +158,7 @@ async function probeProcess(
         cleanupConfirmed,
       });
     };
+    const abortProbe = (): void => terminateAndFinish(true);
 
     let child: ChildProcessWithoutNullStreams;
     try {
@@ -167,10 +184,11 @@ async function probeProcess(
     child.once("spawn", () => { started = true; });
     child.stdout.on("data", (chunk: Buffer) => output.append(chunk.toString("utf8")));
     child.stderr.on("data", (chunk: Buffer) => output.append(chunk.toString("utf8")));
-    const terminateAndFinish = (): void => {
+    const terminateAndFinish = (aborted = false): void => {
       if (settled) return;
       settled = true;
       deadline?.cancel();
+      signal?.removeEventListener("abort", abortProbe);
       void requireProcessTreeTermination(
         terminateProcessTree,
         child,
@@ -183,6 +201,7 @@ async function probeProcess(
           started,
           timedOut,
           cleanupConfirmed: true,
+          aborted,
         }),
         () => resolveProbe({
           exitCode: null,
@@ -190,6 +209,7 @@ async function probeProcess(
           started,
           timedOut,
           cleanupConfirmed: false,
+          aborted,
         }),
       );
     };
@@ -199,6 +219,12 @@ async function probeProcess(
     });
     child.once("close", (code) => finish(code));
     child.stdin.end();
+
+    signal?.addEventListener("abort", abortProbe, { once: true });
+    if (signal?.aborted) {
+      abortProbe();
+      return;
+    }
 
     deadline = scheduleDeadline(() => {
       if (settled) return;
@@ -224,6 +250,21 @@ function compareVersions(left: string | undefined, right: string | undefined): n
 
 function nativeExecutablePreference(executable: string): number {
   return /\.exe$/iu.test(executable) ? 1 : 0;
+}
+
+async function settleAllOrThrow<T>(operations: readonly Promise<T>[]): Promise<T[]> {
+  const settled = await Promise.allSettled(operations);
+  const cleanupFailure = settled.find(
+    (result): result is PromiseRejectedResult =>
+      result.status === "rejected"
+      && isProcessTreeTerminationUnconfirmed(result.reason),
+  );
+  if (cleanupFailure) throw cleanupFailure.reason;
+  const failed = settled.find(
+    (result): result is PromiseRejectedResult => result.status === "rejected",
+  );
+  if (failed) throw failed.reason;
+  return settled.map((result) => (result as PromiseFulfilledResult<T>).value);
 }
 
 function authStateFromProbe(providerId: ProviderId, probe: ProbeResult): ProviderAuthState {
@@ -291,17 +332,59 @@ export async function detectProvider(
   options: ProviderDetectionOptions = {},
   dependencies: ProviderDiscoveryDependencies = {},
 ): Promise<ProviderDetection> {
+  const requireActive = (cleanupConfirmed = true): void => {
+    if (options.signal?.aborted) {
+      if (!cleanupConfirmed) {
+        throw new ProcessTreeTerminationError("Provider discovery process tree");
+      }
+      throw new Error("Provider discovery was cancelled.");
+    }
+  };
+  requireActive();
   const resolveCandidates = dependencies.executableCandidates ?? executableCandidates;
   const terminateProcessTree = dependencies.terminateProcessTree
     ?? terminateProcessTreeAndWait;
   const scheduleProbeDeadline = dependencies.scheduleProbeDeadline
     ?? scheduleProviderProbeDeadline;
-  const runProbe: ProviderProbeProcess = dependencies.probeProcess
-    ?? (async (...args) => await probeProcess(
-      ...args,
+  const processProbe = dependencies.probeProcess
+    ?? (async (
+      executable: string,
+      args: readonly string[],
+      environment: ProviderEnvironment,
+      cwd: string,
+      probeTimeoutMs: number,
+      signal?: AbortSignal,
+    ) => await probeProcess(
+      executable,
+      args,
+      environment,
+      cwd,
+      probeTimeoutMs,
+      signal,
       terminateProcessTree,
       scheduleProbeDeadline,
     ));
+  const runProbe = async (
+    executable: string,
+    args: readonly string[],
+    environment: ProviderEnvironment,
+    cwd: string,
+    probeTimeoutMs: number,
+  ): Promise<ProbeResult> => {
+    const result = await processProbe(
+      executable,
+      args,
+      environment,
+      cwd,
+      probeTimeoutMs,
+      options.signal,
+    );
+    if (!result.aborted) return result;
+    if (result.cleanupConfirmed !== true) {
+      throw new ProcessTreeTerminationError("Provider discovery process tree");
+    }
+    throw new Error("Provider discovery was cancelled.");
+  };
   const runOpenCodeIsolationProbe = dependencies.probeOpenCodePureIsolation
     ?? probeOpenCodePureIsolation;
   const provider = PROVIDER_INFO[providerId];
@@ -311,6 +394,7 @@ export async function detectProvider(
   const discoveredEnvironment = await providerEnvironment(
     options.refreshEnvironment === true,
   );
+  requireActive();
   const probeAuthentication = options.probeAuthentication !== false;
   const probeEnvironment: ProviderEnvironment = {
     env: credentialFreeProviderEnvironment(discoveredEnvironment.env),
@@ -349,6 +433,7 @@ export async function detectProvider(
         cwd,
       ),
     ))).flat())];
+  requireActive();
   if (candidates.length === 0) {
     return {
       provider,
@@ -361,7 +446,7 @@ export async function detectProvider(
     };
   }
 
-  const versionProbes = await Promise.all(candidates.map(async (executable) => {
+  const versionProbes = await settleAllOrThrow(candidates.map(async (executable) => {
     const probe = await runProbe(executable, ["--version"], probeEnvironment, cwd, timeoutMs);
     const acpProbe = (providerId === "cursor" || providerId === "kimi")
       && probe.started && !probe.timedOut && probe.exitCode === 0
@@ -415,6 +500,7 @@ export async function detectProvider(
         && (serveProbe === undefined || serveProbe.cleanupConfirmed === true),
     };
   }));
+  requireActive(versionProbes.every(({ cleanupConfirmed }) => cleanupConfirmed));
   const working = versionProbes
     .filter(({ probe, acpReady, serveReady }) => (
       probe.started
@@ -464,13 +550,29 @@ export async function detectProvider(
     (probe) => probe.cleanupConfirmed,
   );
   const openCodeIsolation = providerId === "opencode"
-    ? await runOpenCodeIsolationProbe(
-        selected.executable,
-        selected.version,
-        probeEnvironment,
-        terminateProcessTree,
-      )
+    ? options.signal
+      ? await runOpenCodeIsolationProbe(
+          selected.executable,
+          selected.version,
+          probeEnvironment,
+          terminateProcessTree,
+          { signal: options.signal },
+        )
+      : await runOpenCodeIsolationProbe(
+          selected.executable,
+          selected.version,
+          probeEnvironment,
+          terminateProcessTree,
+        )
     : { cleanupConfirmed: true, verified: true };
+  if (options.signal?.aborted) {
+    if (!openCodeIsolation.cleanupConfirmed) {
+      throw new ProcessTreeTerminationError(
+        "OpenCode isolation-proof server process tree",
+      );
+    }
+    throw new Error("Provider discovery was cancelled.");
+  }
   if (!openCodeIsolation.verified) {
     const cleanupConfirmed = openCodeIsolation.cleanupConfirmed
       && versionProbeCleanupConfirmed;
@@ -541,6 +643,10 @@ export async function detectProvider(
     cwd,
     timeoutMs,
   );
+  requireActive(
+    authProbe.cleanupConfirmed === true
+      && versionCleanupConfirmed,
+  );
   const authState = authStateFromProbe(providerId, authProbe);
   const authenticated = authState === "authenticated" || authState === "configured";
   // `kimi provider list --json` enumerates configured API providers, but a
@@ -581,5 +687,6 @@ export async function detectProvider(
 export async function detectProviders(
   options: Partial<Record<ProviderId, ProviderDetectionOptions>> = {},
 ): Promise<ProviderDetection[]> {
-  return await Promise.all(PROVIDER_IDS.map((id) => detectProvider(id, options[id])));
+  return await settleAllOrThrow(PROVIDER_IDS.map((id) =>
+    detectProvider(id, options[id])));
 }

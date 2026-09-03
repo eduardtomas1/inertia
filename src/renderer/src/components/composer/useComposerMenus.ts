@@ -125,8 +125,9 @@ export function useComposerMenus(): ComposerMenuController {
   }, []);
 
   const clearMoreHoverTimer = () => {
-    if (moreHoverTimerRef.current === null) return;
-    window.clearTimeout(moreHoverTimerRef.current);
+    const timer = moreHoverTimerRef.current;
+    if (timer === null) return;
+    clearTimeout(timer);
     moreHoverTimerRef.current = null;
   };
 
@@ -160,13 +161,15 @@ export function useComposerMenus(): ComposerMenuController {
 
   const previewMoreSection = (section: MoreSection) => {
     clearMoreHoverTimer();
-    moreHoverTimerRef.current = window.setTimeout(() => {
-      moreHoverTimerRef.current = null;
-      const side = availableMoreSubmenuSide();
-      if (!side) return;
-      setMoreSection(section);
-      setMoreSubmenuSide(side);
-    }, 140);
+    if (!moreSectionExplicitRef.current) {
+      moreHoverTimerRef.current = window.setTimeout(() => {
+        moreHoverTimerRef.current = null;
+        const side = availableMoreSubmenuSide();
+        if (!side) return;
+        setMoreSection(section);
+        setMoreSubmenuSide(side);
+      }, 140);
+    }
   };
 
   const closeMorePreview = () => {
@@ -174,6 +177,7 @@ export function useComposerMenus(): ComposerMenuController {
     if (moreSectionExplicitRef.current) return;
     moreHoverTimerRef.current = window.setTimeout(() => {
       moreHoverTimerRef.current = null;
+      if (moreSectionExplicitRef.current) return;
       setMoreSection(null);
       setMoreSubmenuSide(null);
     }, 180);

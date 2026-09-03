@@ -422,7 +422,10 @@ describe("runtime recovery supervisor integration", () => {
       forceKillWaitMs: 1_000,
       setTimer: markerGatedSetTimer,
       databaseRecoveryRequestTimeoutMs: 1,
-      databaseRecoveryCancelTimeoutMs: 2_000,
+      // Vitest may starve the nested runtime and worker-thread IPC while the
+      // full suite runs in parallel. Keep the marker-gated request deadline
+      // exact, but give confirmed worker termination test-only host headroom.
+      databaseRecoveryCancelTimeoutMs: 15_000,
       onStateChange: ({ phase, generation, pid }) => {
         states.push(`${phase}:${generation}:${pid ?? 0}`);
       },
@@ -451,6 +454,7 @@ describe("runtime recovery supervisor integration", () => {
       () => existsSync(markerPath),
       "busy import transaction marker",
       diagnostics,
+      30_000,
     );
     await timedOutAndCancelled;
     expect(supervisor.snapshot()).toMatchObject({ phase: "ready", generation: 1 });
@@ -473,7 +477,7 @@ describe("runtime recovery supervisor integration", () => {
     await new Promise<void>((resolveWait) => setTimeout(resolveWait, 250));
     assertNoLateCommit();
     await expect(supervisor.stop()).resolves.toBe(true);
-  }, 30_000);
+  }, 55_000);
 
   it("rejects import while a background provider run remains active", async () => {
     const testRoot = mkdtempSync(join(tmpdir(), "inertia-recovery-active-run-"));

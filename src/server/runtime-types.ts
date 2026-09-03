@@ -72,7 +72,7 @@ export interface RuntimeOptions {
   testOnlyBeforeModernDarwinRecoveryAcknowledged?: () => void;
   testOnlyProjectIdentityRefresh?: Promise<void>;
   testOnlyBeforeRuntimeCommand?: () => Promise<void>;
-  testOnlyProviderRefresh?: () => Promise<void>;
+  testOnlyProviderRefresh?: (signal: AbortSignal) => Promise<void>;
 }
 
 export interface RuntimeBackendCredentialBroker {
@@ -89,6 +89,8 @@ export interface RunningRuntime {
     resultPath: string,
     signal?: AbortSignal,
   ) => Promise<void>;
+  /** Starts passive maintenance only after the worker has published runtime.ready. */
+  startPostReadyWork: () => Promise<void>;
   websocketUrl: string;
   databaseRecovery: ReturnType<RuntimeStore["databaseRecoveryReport"]>;
   recordSystemSuspendInterval: (interval: RuntimeSystemSuspendInterval) => boolean;

@@ -155,6 +155,37 @@ describe("selected OpenCode semantic isolation", () => {
     expect(proofFixture.terminateCalls).toBe(2);
   });
 
+  it("cancels only the proof owned by the matching runtime lifetime", async () => {
+    const executable = selectedExecutable();
+    proofFixture.neverResolveVersionHealth = true;
+    const firstLifetime = new AbortController();
+    const secondLifetime = new AbortController();
+    const prove = (signal: AbortSignal) => probeOpenCodePureIsolation(
+      executable,
+      "1.18.26",
+      { env: process.env, pathEntries: [] },
+      vi.fn(),
+      { pluginObservationMs: 1, requestTimeoutMs: 5_000, signal },
+    );
+
+    const first = prove(firstLifetime.signal);
+    const second = prove(secondLifetime.signal);
+    await vi.waitFor(() => expect(proofFixture.starts).toHaveLength(2));
+    firstLifetime.abort();
+    await expect(first).resolves.toEqual({
+      cleanupConfirmed: true,
+      verified: false,
+    });
+    expect(proofFixture.terminateCalls).toBe(1);
+
+    secondLifetime.abort();
+    await expect(second).resolves.toEqual({
+      cleanupConfirmed: true,
+      verified: false,
+    });
+    expect(proofFixture.terminateCalls).toBe(2);
+  });
+
   it("invalidates successful proofs on executable identity or version changes", async () => {
     const executable = selectedExecutable();
     const prove = async (version: string) => await probeOpenCodePureIsolation(

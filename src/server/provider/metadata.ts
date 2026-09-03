@@ -87,6 +87,8 @@ export interface ProviderMetadataCacheOptions {
 export interface ProviderMetadataRequestOptions {
   fields?: readonly ProviderMetadataField[];
   force?: boolean;
+  /** Cancels the provider read and drains its owned process tree before settling. */
+  signal?: AbortSignal;
 }
 
 interface CachedField<T> {
@@ -375,11 +377,12 @@ export async function readProviderMetadata(
   environment: NodeJS.ProcessEnv,
   cwd: string,
   fields: readonly ProviderMetadataField[] = PROBE_FIELDS[providerId],
+  signal?: AbortSignal,
 ): Promise<ProviderMetadataReadResult> {
-  if (providerId === "codex") return await readCodexMetadata(executable, environment, cwd, 6_000, fields);
-  if (providerId === "claude") return await readClaudeAgentSdkMetadata(executable, environment, cwd, 6_000, undefined, fields);
+  if (providerId === "codex") return await readCodexMetadata(executable, environment, cwd, 6_000, fields, { signal });
+  if (providerId === "claude") return await readClaudeAgentSdkMetadata(executable, environment, cwd, 6_000, undefined, fields, {}, signal);
   if (providerId === "opencode" && fields.includes("models")) {
-    return { models: await readOpenCodeSdkModels(executable, environment, cwd) };
+    return { models: await readOpenCodeSdkModels(executable, environment, cwd, { signal }) };
   }
   return {};
 }
@@ -590,6 +593,7 @@ export class ProviderMetadataCache {
   ): Promise<ProviderMetadata> {
     const scope = this.requireScope(scopeInput);
     if (!scope.executable) return this.currentScoped(scope);
+    if (options.signal?.aborted) return this.currentScoped(scope);
     const available = new Set(AVAILABLE_FIELDS[scope.providerId]);
     const probeable = new Set(PROBE_FIELDS[scope.providerId]);
     const requested = [
@@ -626,7 +630,14 @@ export class ProviderMetadataCache {
 
     const inFlightFields = new Set(fields);
     const revision = entry.revision;
-    const promise = this.refresh(scope, environment, cwd, fields, revision)
+    const promise = this.refresh(
+      scope,
+      environment,
+      cwd,
+      fields,
+      revision,
+      options.signal,
+    )
       .finally(() => {
         if (this.inFlight.get(key)?.promise === promise) {
           this.inFlight.delete(key);
@@ -643,10 +654,10 @@ export class ProviderMetadataCache {
     cwd: string,
     fields: readonly ProviderMetadataField[],
     revision: number,
+    signal?: AbortSignal,
   ): Promise<void> {
     const entry = this.entry(scope);
     const attemptedAt = this.now();
-    for (const field of fields) entry[field].lastAttemptedAt = attemptedAt;
     let result: ProviderMetadataReadResult;
     try {
       result = await this.reader(
@@ -655,16 +666,20 @@ export class ProviderMetadataCache {
         environment,
         cwd,
         fields,
+        signal,
       );
     } catch (error) {
       this.cleanupUnconfirmed ||= isProcessTreeTerminationUnconfirmed(error);
+      if (signal?.aborted) return;
       if (entry.revision !== revision) return;
+      for (const field of fields) entry[field].lastAttemptedAt = attemptedAt;
       for (const field of fields) if (entry[field].values.length > 0) entry[field].stale = true;
       this.persist(entry);
       return;
     }
 
     if (entry.revision !== revision) return;
+    for (const field of fields) entry[field].lastAttemptedAt = attemptedAt;
 
     for (const field of fields) {
       const values = field === "models" ? validateProviderModels(result.models) : validateProviderRateLimits(result.rateLimits);

@@ -26,13 +26,49 @@ describe("runtime shutdown phases", () => {
   it("preserves each platform's complete cleanup proof window", () => {
     expect(runtimeShutdownDeadlineMs("darwin")).toBe(12_750);
     expect(runtimeShutdownDeadlineMs("linux")).toBe(12_000);
-    expect(runtimeShutdownDeadlineMs("win32")).toBe(5_500);
+    expect(runtimeShutdownDeadlineMs("win32")).toBe(8_000);
     expect(runtimeSupervisorRecoveryWaitMs("darwin")).toBe(2_000);
     expect(runtimeSupervisorRecoveryWaitMs("linux")).toBe(2_000);
     expect(runtimeSupervisorRecoveryWaitMs("win32")).toBe(6_000);
     expect(runtimeSupervisorShutdownEnvelopeMs("darwin")).toBe(17_250);
     expect(runtimeSupervisorShutdownEnvelopeMs("linux")).toBe(16_500);
-    expect(runtimeSupervisorShutdownEnvelopeMs("win32")).toBe(14_000);
+    expect(runtimeSupervisorShutdownEnvelopeMs("win32")).toBe(16_500);
+  });
+
+  it("reserves Windows command, ConPTY, and ordered cleanup headroom", async () => {
+    vi.useFakeTimers();
+    try {
+      const calls: string[] = [];
+      const delayed = (name: string, delayMs: number) => async (): Promise<void> => {
+        await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+        calls.push(name);
+      };
+      const shutdown = runRuntimeShutdownPhases({
+        quiesceRuntimeWork: delayed("commands", 2_500),
+        independentDrains: [delayed("terminal", 3_000)],
+        stopIsolatedRuns: delayed("isolated", 0),
+        disposeTurnsAndProviders: delayed("providers", 2_000),
+        settleArtifacts: delayed("artifacts", 625),
+        terminateClients: delayed("clients", 625),
+        closeServer: delayed("server", 625),
+        closeStore: delayed("store", 625),
+      }, runtimeShutdownDeadlineMs("win32"));
+
+      await vi.advanceTimersByTimeAsync(8_000);
+      await expect(shutdown).resolves.toBeUndefined();
+      expect(calls).toEqual([
+        "commands",
+        "isolated",
+        "providers",
+        "terminal",
+        "artifacts",
+        "clients",
+        "server",
+        "store",
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("reserves Linux post-terminal headroom for ordered cleanup", async () => {

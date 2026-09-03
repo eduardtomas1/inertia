@@ -657,6 +657,7 @@ export interface DesktopBridge {
   previewConnect: (request: {
     ownerId: string;
     contextId: string;
+    connectionId: string;
   }) => Promise<PreviewState>;
   previewNavigate: (request: {
     ownerId: string;
@@ -678,11 +679,13 @@ export interface DesktopBridge {
   previewSetBounds: (request: {
     ownerId: string;
     contextId: string;
+    connectionId: string;
     bounds: PreviewBounds | null;
   }) => Promise<void>;
   previewClose: (request: {
     ownerId: string;
     contextId: string;
+    connectionId: string;
   }) => Promise<void>;
   /** Requests native approval to inspect one exact bounded local screenshot. */
   previewInspectEvidenceImage: (request: {

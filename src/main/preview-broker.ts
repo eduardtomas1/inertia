@@ -1,5 +1,4 @@
 import type { BrowserWindow, NativeImage, Rectangle, WebContents } from "electron";
-
 import type {
   AgentBrowserActivity,
   AgentBrowserCommand,
@@ -28,6 +27,7 @@ import { BrowserEvidenceInspectorRegistry, type BrowserEvidenceImageApproval, ty
 import { PreviewContextRegistry } from "./preview-lifecycle.js";
 import {
   agentBrowserIdentity,
+  previewConnection,
   previewContext,
   previewOwner,
   previewTabId,
@@ -310,10 +310,13 @@ export class PreviewBroker {
     const request = value as {
       ownerId?: unknown;
       contextId?: unknown;
+      connectionId?: unknown;
       bounds?: unknown;
     };
     const ownerId = previewOwner(request.ownerId);
     const contextId = previewContext(request.contextId);
+    const connectionId = previewConnection(request.connectionId);
+    if (!this.#registeredContexts.owns(ownerId, contextId, connectionId)) return;
     if (request.bounds === null) {
       const pending = this.#pendingBounds.get(ownerId);
       if (pending?.contextId === contextId) this.#pendingBounds.delete(ownerId);
@@ -362,11 +365,8 @@ export class PreviewBroker {
   }
 
   closeRequest(value: unknown): void {
-    if (!value || typeof value !== "object") {
-      throw new Error("Invalid preview request");
-    }
-    const request = value as { ownerId?: unknown; contextId?: unknown };
-    this.close(previewOwner(request.ownerId), previewContext(request.contextId));
+    const released = this.#registeredContexts.releaseRequest(value);
+    if (released) this.close(released.ownerId, released.contextId);
   }
   async inspectEvidenceImage(value: unknown, requestApproval: BrowserEvidenceImageApproval, inspect: BrowserEvidenceImageInspection): Promise<boolean> {
     if (!value || typeof value !== "object") throw new Error("Invalid Browser evidence request");

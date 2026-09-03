@@ -19,6 +19,13 @@ export function previewContext(value: unknown): string {
   return value;
 }
 
+export function previewConnection(value: unknown): string {
+  if (typeof value !== "string" || !UUID_PATTERN.test(value)) {
+    throw new Error("Invalid preview connection");
+  }
+  return value;
+}
+
 export function previewTabId(value: unknown): string {
   if (typeof value !== "string" || !UUID_PATTERN.test(value)) {
     throw new Error("Invalid preview tab");

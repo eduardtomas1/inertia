@@ -130,4 +130,47 @@ describe("runtime post-ready work", () => {
     expect(reconcileArtifacts).not.toHaveBeenCalled();
     expect(resumeComparisons).not.toHaveBeenCalled();
   });
+
+  it("cancels and drains an admitted provider refresh when shutdown starts", async () => {
+    const paths = await runtimePaths();
+    let notifyRefreshStarted!: () => void;
+    const refreshStarted = new Promise<void>((resolve) => {
+      notifyRefreshStarted = resolve;
+    });
+    let refreshSettled = false;
+    const providerRefresh = vi.fn(async (signal: AbortSignal) => {
+      notifyRefreshStarted();
+      try {
+        await new Promise<void>((resolve) => {
+          if (signal.aborted) resolve();
+          else signal.addEventListener("abort", () => resolve(), { once: true });
+        });
+      } finally {
+        refreshSettled = true;
+      }
+    });
+    const runtime = await startRuntime({
+      ...paths,
+      defaultWorkspacePath: paths.workspaceDirectory,
+      enableProviders: true,
+      testOnlyProviderRefresh: providerRefresh,
+    });
+    runtimes.push(runtime);
+
+    void runtime.startPostReadyWork();
+    await refreshStarted;
+    const closeDeadline = new Promise<never>((_resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error("Runtime close did not drain provider refresh.")),
+        2_000,
+      );
+      timer.unref();
+    });
+    await expect(Promise.race([runtime.close(), closeDeadline])).resolves.toBeUndefined();
+
+    expect(providerRefresh).toHaveBeenCalledOnce();
+    expect(providerRefresh.mock.calls[0]?.[0].aborted).toBe(true);
+    expect(refreshSettled).toBe(true);
+    runtimes.splice(runtimes.indexOf(runtime), 1);
+  });
 });

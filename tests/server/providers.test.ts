@@ -651,6 +651,61 @@ setInterval(() => {}, 1000);
     }
   });
 
+  it("drains every concurrent discovery probe before aborted detection settles", async () => {
+    const root = temporaryRoot();
+    const candidates = [join(root, "codex-one"), join(root, "codex-two")];
+    const cleanupResolvers = new Map<string, () => void>();
+    const probeStarted = new Set<string>();
+    const cleanupStarted = new Set<string>();
+    const controller = new AbortController();
+    const detection = detectProvider("codex", {
+      cwd: root,
+      signal: controller.signal,
+    }, {
+      executableCandidates: async () => candidates,
+      probeProcess: async (executable, _args, _environment, _cwd, _timeoutMs, signal) => {
+        probeStarted.add(executable);
+        await new Promise<void>((resolve) => {
+          if (signal?.aborted) resolve();
+          else signal?.addEventListener("abort", () => resolve(), { once: true });
+        });
+        cleanupStarted.add(executable);
+        await new Promise<void>((resolve) => {
+          cleanupResolvers.set(executable, resolve);
+        });
+        return {
+          started: true,
+          timedOut: false,
+          exitCode: null,
+          output: "",
+          cleanupConfirmed: executable === candidates[0],
+          aborted: true,
+        };
+      },
+    });
+    let settled = false;
+    const observed = detection.then(
+      () => { settled = true; },
+      (error: unknown) => {
+        settled = true;
+        throw error;
+      },
+    );
+
+    await vi.waitFor(() => expect(probeStarted).toEqual(new Set(candidates)));
+    controller.abort();
+    await vi.waitFor(() => expect(cleanupStarted).toEqual(new Set(candidates)));
+    cleanupResolvers.get(candidates[0]!)?.();
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    cleanupResolvers.get(candidates[1]!)?.();
+
+    await expect(observed).rejects.toThrow(
+      "Provider discovery process tree could not be confirmed stopped",
+    );
+    expect(settled).toBe(true);
+  });
+
   it("reports an unconfirmed timed-out discovery cleanup instead of readiness", async () => {
     const root = temporaryRoot();
     const command = nodeCommand(

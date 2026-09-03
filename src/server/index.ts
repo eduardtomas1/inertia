@@ -144,6 +144,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   let agentThreads: AgentThreadRuntime | undefined;
   let duoLaunches: DuoLaunchCoordinator | null = null;
   let closed = false;
+  const runtimeLifetimeAbort = new AbortController();
   let postReadyWorkStarted = false;
   let postReadyWork: Promise<void> = Promise.resolve();
   let databaseRecoveryImportActive = false;
@@ -296,6 +297,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   });
   const providers = new ProviderManager({
     metadataCache,
+    lifetimeSignal: runtimeLifetimeAbort.signal,
     commands: options.codexBinaryPath
       ? { codex: options.codexBinaryPath }
       : savedSettings.codexBinaryPath
@@ -448,7 +450,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       const metadata = await providers.metadata(
         detection.provider.id,
         options.defaultWorkspacePath,
-        { force: forceMetadata },
+        { force: forceMetadata, signal: runtimeLifetimeAbort.signal },
       ).catch(() => providers.cachedMetadata(detection.provider.id));
       return providerSnapshot(detection, metadata);
     };
@@ -457,6 +459,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         cwd: options.defaultWorkspacePath,
         timeoutMs: 4_000,
         refreshEnvironment,
+        signal: runtimeLifetimeAbort.signal,
       });
       const detected = providerSnapshot(
         detection,
@@ -476,6 +479,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         cwd: options.defaultWorkspacePath,
         timeoutMs: 4_000,
         refreshEnvironment,
+        signal: runtimeLifetimeAbort.signal,
       });
       const previous = new Map(providerInfo.map((provider) => [provider.id, provider]));
       providerInfo = detections.map((detection) => {
@@ -503,7 +507,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     await trackRuntimeOperation(async () => {
       activeProviderRefreshes += 1;
       try {
-        await testOnlyProviderRefresh?.();
+        await testOnlyProviderRefresh?.(runtimeLifetimeAbort.signal);
         if (closed) return;
         await refreshProviderInfoCore(
           providerId,
@@ -612,7 +616,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         const metadata = await providers.metadata(
           providerId,
           options.defaultWorkspacePath,
-          { fields, force: true },
+          { fields, force: true, signal: runtimeLifetimeAbort.signal },
         );
         applyProviderMetadata(providerId, metadata);
       },
@@ -1180,6 +1184,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     close: async (cause = "runtime-shutdown") => {
       if (closed) return;
       closed = true;
+      runtimeLifetimeAbort.abort(new Error("The runtime is shutting down."));
       projectIdentities.dispose();
       snapshotBroadcasts.close();
       secureFileAuthorities.clear();

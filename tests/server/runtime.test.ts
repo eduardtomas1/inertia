@@ -745,7 +745,7 @@ process.exit(child.status ?? 1);
     const selected = await client.events.next(
       (event): event is Extract<ServerEvent, { type: "snapshot.updated" }> =>
         event.type === "snapshot.updated"
-        && event.snapshot.activeConversationId === firstId,
+        && event.snapshot.activeConversationId === firstId && event.snapshot.conversations.some(({ id, settledAt }) => id === firstId && settledAt !== null),
     );
     expect(selected.snapshot.activeProjectId).toBe(firstProjectId);
     expect(selected.snapshot.conversations.find(({ id }) => id === firstId)?.settledAt).not.toBeNull();

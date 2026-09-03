@@ -72,7 +72,7 @@ export interface RuntimeOptions {
   testOnlyBeforeModernDarwinRecoveryAcknowledged?: () => void;
   testOnlyProjectIdentityRefresh?: Promise<void>;
   testOnlyBeforeRuntimeCommand?: () => Promise<void>;
-  testOnlyProviderRefresh?: () => Promise<void>;
+  testOnlyProviderRefresh?: (signal: AbortSignal) => Promise<void>;
 }
 
 export interface RuntimeBackendCredentialBroker {

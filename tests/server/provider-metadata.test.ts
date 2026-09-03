@@ -196,6 +196,40 @@ describe("provider metadata cache", () => {
     });
   });
 
+  it("forwards cancellation without recording an aborted metadata attempt", async () => {
+    const controller = new AbortController();
+    let notifyReadStarted!: () => void;
+    const readStarted = new Promise<void>((resolve) => {
+      notifyReadStarted = resolve;
+    });
+    const cache = new ProviderMetadataCache({
+      read: async (_providerId, _executable, _environment, _cwd, _fields, signal) => {
+        notifyReadStarted();
+        await new Promise<void>((resolve) => {
+          if (signal?.aborted) resolve();
+          else signal?.addEventListener("abort", () => resolve(), { once: true });
+        });
+        throw new Error("Provider metadata discovery was cancelled.");
+      },
+    });
+
+    const refresh = cache.metadata(
+      "codex",
+      codexExecutable,
+      {},
+      workspacePath,
+      { force: true, signal: controller.signal },
+    );
+    await readStarted;
+    controller.abort();
+    await expect(refresh).resolves.toMatchObject({ models: [], rateLimits: [] });
+
+    expect(cache.current("codex").metadataState).toMatchObject({
+      models: { lastAttemptedAt: null, refreshing: false },
+      rateLimits: { lastAttemptedAt: null, refreshing: false },
+    });
+  });
+
   it("bounds untrusted inventories, merges sparse rate updates, and never probes Cursor outside an ACP session", async () => {
     const models = validateProviderModels(Array.from({ length: 150 }, (_, index) => ({
       ...model(`model-${index}`),

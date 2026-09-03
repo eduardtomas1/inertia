@@ -34,6 +34,7 @@ export type RuntimeRecoveryAdmissionResult =
 
 export interface RuntimeRecoveryEventResult {
   readonly handled: boolean;
+  readonly consumed?: boolean;
   readonly error?: string;
 }
 
@@ -252,7 +253,7 @@ export class RuntimeSupervisorRecoveryAdmission {
         event.retiredRuntimeGenerationId,
       );
       if (record.legacyRecoveryAuthorityIds.size > 0) {
-        return { handled: true };
+        return { handled: true, consumed: true };
       }
       for (const runtimeGenerationId of
         record.legacyRecoveryAuthorityBatchIds) {
@@ -266,7 +267,7 @@ export class RuntimeSupervisorRecoveryAdmission {
             "The manual legacy runtime recovery authority could not be consumed safely.",
         };
       }
-      return { handled: true };
+      return { handled: true, consumed: true };
     }
 
     const descriptor = record.modernDarwinRecoveryAuthority;
@@ -294,7 +295,7 @@ export class RuntimeSupervisorRecoveryAdmission {
     };
     record.modernDarwinRecoveryAuthority = null;
     this.#manualModernRecovery = null;
-    return { handled: true };
+    return { handled: true, consumed: true };
   }
 
   #rollback(

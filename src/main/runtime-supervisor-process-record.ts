@@ -24,13 +24,6 @@ export function drainRuntimeRecordRequests<
 
 export type RuntimeCleanupRecoveryOutcome = "recovered" | "blocked";
 
-export function recoveryReadinessTimeoutMs(startupTimeoutMs: number): number {
-  // Exact destructive retirement and ordinary replacement initialization own
-  // separate bounded phases. Hosted Intel macOS runners can need more than
-  // one normal cold-start window for the second phase under load.
-  return Math.min(startupTimeoutMs * 2, 120_000);
-}
-
 export function claimStartupRecoveryDeadlineExtension(
   record: RuntimeProcessRecord,
 ): boolean {

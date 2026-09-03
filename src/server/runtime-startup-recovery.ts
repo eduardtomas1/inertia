@@ -56,10 +56,6 @@ export async function initializeRuntimePersistence(
   try {
     for (const generationId of confirmedGenerations) {
       store.providerRunOwnership.clearRuntimeGeneration(generationId);
-      options.onCleanupReceiptConsumed?.(
-        generationId,
-        options.runtimeGenerationId,
-      );
     }
     for (const generationId of manuallyRetiredGenerations) {
       store.providerRunOwnership.clearRuntimeGeneration(generationId);
@@ -81,7 +77,6 @@ export async function initializeRuntimePersistence(
     );
     if (!runtimeSafetyLock) {
       await conversationAttachments.reconcile(store.attachments());
-      store.startBackups();
       if (manuallyRetiredGenerations.length > 0
         && process.env.NODE_ENV === "test") {
         options.testOnlyBeforeLegacyInterruptedRecovery?.();
@@ -101,6 +96,18 @@ export async function initializeRuntimePersistence(
         )) {
           throw new Error("Manual legacy provider ownership could not be retired.");
         }
+      }
+      await reconcileInterruptedDuoLaunches(store);
+      // Recovery receipts reset the supervisor's one fresh readiness window.
+      // Emit them only after every mandatory startup reconciliation succeeds;
+      // otherwise remaining recovery work would consume that second phase.
+      for (const generationId of confirmedGenerations) {
+        options.onCleanupReceiptConsumed?.(
+          generationId,
+          options.runtimeGenerationId,
+        );
+      }
+      for (const generationId of manuallyRetiredGenerations) {
         options.onLegacyRecoveryAuthorityConsumed?.(
           generationId,
           options.runtimeGenerationId,
@@ -112,7 +119,6 @@ export async function initializeRuntimePersistence(
           options.runtimeGenerationId,
         );
       }
-      await reconcileInterruptedDuoLaunches(store);
     }
     return { conversationAttachments, recovery };
   } catch (error) {

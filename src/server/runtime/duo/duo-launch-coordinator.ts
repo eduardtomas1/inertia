@@ -120,6 +120,7 @@ export class DuoLaunchCoordinator {
   private readonly worktrees: DuoWorktreeOperations;
   private readonly workspaceRuns: DuoSourceControlOperations | null;
   private readonly comparisonCheckoutAcquireTimeoutMs: number;
+  private readonly runtimeClosed: () => boolean;
 
   constructor(
     private readonly store: RuntimeStore,
@@ -132,10 +133,12 @@ export class DuoLaunchCoordinator {
       worktrees?: DuoWorktreeOperations;
       workspaceRuns?: DuoSourceControlOperations;
       comparisonCheckoutAcquireTimeoutMs?: number;
+      runtimeClosed?: () => boolean;
     } = {},
   ) {
     this.worktrees = options.worktrees ?? defaultDuoWorktreeOperations();
     this.workspaceRuns = options.workspaceRuns ?? null;
+    this.runtimeClosed = options.runtimeClosed ?? (() => false);
     this.comparisonCheckoutAcquireTimeoutMs = Math.max(
       0,
       Math.min(
@@ -347,6 +350,7 @@ export class DuoLaunchCoordinator {
 
   async resumeComparisons(): Promise<void> {
     for (const launchId of this.store.pairedLaunchComparisonIds()) {
+      if (this.runtimeClosed()) return;
       const launch = this.store.pairedLaunch(launchId);
       const comparison = launch.comparison;
       if (!comparison) continue;
@@ -505,6 +509,9 @@ export class DuoLaunchCoordinator {
     retry: boolean,
   ): Promise<DuoLaunchStatus> {
     let launch = this.store.pairedLaunch(launchId);
+    if (this.runtimeClosed() || this.turns.isClosing()) {
+      return publicStatus(this.store, launch);
+    }
     const comparison = launch.comparison;
     if (!comparison?.conversationId) return publicStatus(this.store, launch);
     if (
@@ -540,7 +547,7 @@ export class DuoLaunchCoordinator {
       .filter((id): id is string => id !== null);
     await this.turns.waitForProviderCleanup(sourceConversationIds);
     // Shutdown settlements stay waiting so startup can recover them.
-    if (this.turns.isClosing())
+    if (this.runtimeClosed() || this.turns.isClosing())
       return publicStatus(this.store, this.store.pairedLaunch(launchId));
 
     let turnId: string | null = null;
@@ -622,7 +629,7 @@ export class DuoLaunchCoordinator {
     const deadlineAt = Date.now()
       + this.comparisonCheckoutAcquireTimeoutMs;
     while (true) {
-      if (this.turns.isClosing()) return "closing";
+      if (this.runtimeClosed() || this.turns.isClosing()) return "closing";
       try {
         if (this.store.conversationWork.reserve(conversationId)) {
           return "reserved";

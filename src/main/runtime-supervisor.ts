@@ -27,7 +27,7 @@ import { RuntimeSupervisorStartupRecovery } from "./runtime-supervisor-startup-r
 import { RuntimeOwnedProcessJournal } from "../node/runtime-owned-processes.js";
 import type { ModernDarwinRecoveryAuthorityDescriptor } from "../node/runtime-modern-recovery-authorities.js";
 import {
-  claimStartupRecoveryDeadlineExtension, createRuntimeProcessRecord, recoveryReadinessTimeoutMs,
+  claimStartupRecoveryDeadlineExtension, createRuntimeProcessRecord,
   drainRuntimeRecordRequests, recoverUnconfirmedRuntimeCleanup, shouldRecoverUnconfirmedWindowsTree,
 } from "./runtime-supervisor-process-record.js";
 import { runtimeSupervisorRecoveryWaitMs } from
@@ -635,7 +635,7 @@ export class RuntimeSupervisor {
     child.once("exit", (code) => this.handleExit(record, code));
     this.emitState();
   }
-  private startReadinessDeadline(record: RuntimeProcessRecord, timeoutMs = this.startupTimeoutMs): void {
+  private startReadinessDeadline(record: RuntimeProcessRecord): void {
     if (this.current !== record || !this.desiredRunning ||
       !record.acceptingReady || record.ready) return;
     this.clearTimerValue("startupTimer");
@@ -647,7 +647,7 @@ export class RuntimeSupervisor {
       this.rejectTestRecycle(record, this.lastError, true);
       this.emitState();
       this.forceTerminate(record.child);
-    }, timeoutMs);
+    }, this.startupTimeoutMs);
   }
   private handleMessage(record: RuntimeProcessRecord, message: unknown): void {
     if (this.current !== record) return;
@@ -790,7 +790,7 @@ export class RuntimeSupervisor {
         return;
       }
       record.cleanupReceiptIds.delete(event.receiptRuntimeGenerationId);
-      if (claimStartupRecoveryDeadlineExtension(record)) this.startReadinessDeadline(record, recoveryReadinessTimeoutMs(this.startupTimeoutMs));
+      if (claimStartupRecoveryDeadlineExtension(record)) this.startReadinessDeadline(record);
       return;
     }
     if (
@@ -805,7 +805,7 @@ export class RuntimeSupervisor {
         this.forceTerminate(record.child);
         this.emitState();
       }
-      if (recovery.consumed && claimStartupRecoveryDeadlineExtension(record)) this.startReadinessDeadline(record, recoveryReadinessTimeoutMs(this.startupTimeoutMs));
+      if (recovery.consumed && claimStartupRecoveryDeadlineExtension(record)) this.startReadinessDeadline(record);
       return;
     }
     if (!this.desiredRunning || !record.acceptingReady || record.ready) return;

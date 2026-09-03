@@ -179,7 +179,11 @@ export function startTimelineItemFocus(input: {
   window.addEventListener("keydown", cancelForUserIntent, true);
   if (virtualized) scrollToIndex(index, align);
   timer = window.setTimeout(() => finish(false), TIMELINE_FOCUS_TIMEOUT_MS);
-  schedule();
+  // Acquire an already-mounted destination in the navigation event's own
+  // task. Deferring the first attempt lets unrelated queued focus work win
+  // before this request has established ownership. Missing or offscreen
+  // virtual rows still enter the same bounded animation-frame retry loop.
+  settle();
 
   return () => finish(false);
 }

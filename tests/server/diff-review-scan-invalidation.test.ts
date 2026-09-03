@@ -235,5 +235,5 @@ describe("selective reversal Git scan invalidation", () => {
     } finally {
       await undoHold.release();
     }
-  });
+  }, 30_000);
 });

@@ -1192,7 +1192,9 @@ describe("launch-owned Git cleanup", () => {
     )).resolves.toBeDefined();
   });
 
-  it("bounds the aggregate Linux administrative identity scan", async () => {
+  it.runIf(process.platform === "linux")(
+    "bounds the aggregate Linux administrative identity scan",
+    async () => {
     const root = repository();
     const path = ownedPath(root, "aggregate scan owned path");
     const branch = "inertia/aggregate-scan";
@@ -1244,7 +1246,8 @@ describe("launch-owned Git cleanup", () => {
     expect(slowProbeCount).toBeGreaterThan(0);
     expect(slowProbeCount).toBeLessThan(6);
     expect(git(root, "rev-parse", branch)).toBe(ownership.head);
-  });
+    },
+  );
 
   it("bounds the final Linux parent revalidation by the aggregate deadline", async () => {
     const root = repository();

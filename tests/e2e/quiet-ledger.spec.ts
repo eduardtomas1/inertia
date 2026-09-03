@@ -94,11 +94,17 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
       contentType: "image/png",
     });
   };
-  const revealTurn = (target: Locator, index: number): Promise<void> =>
-    revealVirtualizedTimelineTurn({ page, target, index, lastIndex: 9 });
+  const revealTurn = (target: Locator, turnId: string): Promise<void> =>
+    revealVirtualizedTimelineTurn({
+      page,
+      target,
+      conversationId: conversation.id,
+      turnId,
+      testInfo,
+    });
 
   try {
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
     await expect(page.getByRole("heading", { name: "Quiet Ledger visual fixture", level: 1 })).toBeVisible();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
 
@@ -113,7 +119,7 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
       await expect(workspacePanel).toBeHidden();
     }
     const activeTurn = page.locator(`[data-turn-id="${active.turn.id}"]`);
-    await revealTurn(activeTurn, 9);
+    await revealTurn(activeTurn, active.turn.id);
     await expect(activeTurn.locator(".turn-execution-rail.is-live")).toBeVisible();
     await expect(activeTurn.locator(".turn-commentary-row")).toHaveCount(2);
     await expect(activeTurn.locator(".turn-activity-group")).toHaveCount(2);
@@ -253,7 +259,7 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     const approvalTurn = page.locator(
       `[data-turn-id="${approval.turn.id}"]`,
     );
-    await revealTurn(approvalTurn, 6);
+    await revealTurn(approvalTurn, approval.turn.id);
     const approvalCard = approvalTurn.locator(
       '[data-agent-request-state="approval"]',
     );
@@ -274,7 +280,7 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     const providerQuestionTurn = page.locator(
       `[data-turn-id="${providerQuestion.turn.id}"]`,
     );
-    await revealTurn(providerQuestionTurn, 7);
+    await revealTurn(providerQuestionTurn, providerQuestion.turn.id);
     const providerQuestionCard = providerQuestionTurn.locator(
       '[data-agent-request-state="question"]',
     );
@@ -295,7 +301,7 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     const completedTurn = page.locator(`[data-turn-id="${completed.turn.id}"]`);
     const detailedTurn = page.locator(`[data-turn-id="${detailed.turn.id}"]`);
     const kimiTurn = page.locator(`[data-turn-id="${kimi.turn.id}"]`);
-    await revealTurn(completedTurn, 0);
+    await revealTurn(completedTurn, completed.turn.id);
     for (const successfulFixture of [completed, detailed, kimi]) {
       const successfulTurn = page.locator(`[data-turn-id="${successfulFixture.turn.id}"]`);
       await expect(successfulTurn.locator(".turn-settled-summary")).toHaveCount(0);
@@ -442,9 +448,9 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
       page, electronApp, completedTurn, testInfo,
     });
 
-    await revealTurn(detailedTurn, 1);
+    await revealTurn(detailedTurn, detailed.turn.id);
     await captureScenario("settled-history-dark-1440x920");
-    await revealTurn(detailedTurn, 1);
+    await revealTurn(detailedTurn, detailed.turn.id);
     const detailsSummary = detailedTurn.getByRole("button", { name: "Run details" });
     await expect(detailsSummary).toHaveAttribute("aria-expanded", "false");
     const followingKimiTurn = page.locator(`[data-turn-id="${kimi.turn.id}"]`);
@@ -460,20 +466,20 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     )).toBeLessThanOrEqual(2);
     await captureScenario("expanded-details");
 
-    await revealTurn(kimiTurn, 2);
+    await revealTurn(kimiTurn, kimi.turn.id);
     await expect(kimiTurn.locator('[data-final-answer-identity="historical-model-selection"]'))
       .toHaveText("Claude · Kimi · K3");
     await captureScenario("kimi-through-claude");
 
     const warningTurn = page.locator(`[data-turn-id="${warning.turn.id}"]`);
-    await revealTurn(warningTurn, 3);
+    await revealTurn(warningTurn, warning.turn.id);
     await expect(warningTurn.locator(".turn-settled-summary")).toContainText("Worked for 42s · 1 action");
     await expect(warningTurn.locator('[data-activity-severity="warning"]'))
       .toContainText("optional provider capability skipped");
     await expect(warningTurn.locator('[data-activity-severity="warning"]')).toBeVisible();
 
     const failedTurn = page.locator(`[data-turn-id="${failed.turn.id}"]`);
-    await revealTurn(failedTurn, 4);
+    await revealTurn(failedTurn, failed.turn.id);
     await expect(failedTurn.locator(".turn-settled-summary")).toContainText("Failed after 42s · 2 actions");
     await expect(failedTurn.locator(".agent-activity.is-failed")).toContainText("Renderer verification failed");
     await expect(failedTurn.locator(".agent-activity.is-failed")).toBeVisible();
@@ -522,7 +528,7 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     await captureScenario("exception-history-dark-1440x920");
 
     const cancelledTurn = page.locator(`[data-turn-id="${cancelled.turn.id}"]`);
-    await revealTurn(cancelledTurn, 5);
+    await revealTurn(cancelledTurn, cancelled.turn.id);
     await expect(cancelledTurn.locator(".turn-settled-summary"))
       .toContainText("Stopped after 42s · 1 action");
     await expect(cancelledTurn.locator(".turn-settled-summary")).toBeVisible();
@@ -532,20 +538,20 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     await page.reload();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
     const lightActiveTurn = page.locator(`[data-turn-id="${active.turn.id}"]`);
-    await revealTurn(lightActiveTurn, 9);
+    await revealTurn(lightActiveTurn, active.turn.id);
     await expect(lightActiveTurn.locator('[data-active-agent-phase="command"]')).toBeVisible();
     await captureElementScenario("active-command-light", lightActiveTurn);
     const lightCompletedTurn = page.locator(`[data-turn-id="${completed.turn.id}"]`);
-    await revealTurn(lightCompletedTurn, 0);
+    await revealTurn(lightCompletedTurn, completed.turn.id);
     await expect(lightCompletedTurn.locator(".turn-settled-summary")).toHaveCount(0);
     await expect(lightCompletedTurn.getByText("Worked 42s", { exact: true })).toHaveCount(1);
     await captureElementScenario(
       "rich-markdown-light",
       lightCompletedTurn.locator('[data-turn-layer="final-answer"]'),
     );
-    await revealTurn(page.locator(`[data-turn-id="${kimi.turn.id}"]`), 2);
+    await revealTurn(page.locator(`[data-turn-id="${kimi.turn.id}"]`), kimi.turn.id);
     await captureScenario("settled-history-light-1440x920");
-    await revealTurn(page.locator(`[data-turn-id="${failed.turn.id}"]`), 4);
+    await revealTurn(page.locator(`[data-turn-id="${failed.turn.id}"]`), failed.turn.id);
     await captureScenario("exception-history-light-1440x920");
     const darkSettings = new RuntimeStore(databasePath, workspaceDirectory, { recoverInterruptedRuns: false });
     darkSettings.updateSettings({ theme: "dark" });
@@ -559,9 +565,9 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
       await page.getByRole("button", { name: "Toggle project navigation" }).click();
       await expect(navigation).toBeHidden();
     }
-    await revealTurn(kimiTurn, 2);
+    await revealTurn(kimiTurn, kimi.turn.id);
     await captureScenario("settled-history-narrow-760x680");
-    await revealTurn(activeTurn, 9);
+    await revealTurn(activeTurn, active.turn.id);
     await expect(activeTurn.getByRole("button", { name: "Stop Codex · OpenAI run" })).toBeVisible();
     await expect(activeTurn.locator('[data-active-agent-phase="command"]')).toBeVisible();
     await expect(activeTurn.locator(".agent-pixel-loader > span")).toHaveCount(9);
@@ -586,7 +592,7 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     await captureElementScenario("active-command-narrow", activeTurn);
     await captureScenario("narrow-workspace");
 
-    await revealTurn(completedTurn, 0);
+    await revealTurn(completedTurn, completed.turn.id);
     await runDetailsToggle.click();
     await changedFilesSummary.click();
     await expect(runDetails).toBeVisible();

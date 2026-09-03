@@ -1,9 +1,138 @@
 import { expect, test } from "@playwright/test";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
 
 import {
   createAppFixture,
   type AppFixture,
 } from "./support/app-fixture";
+
+const sourceAnswerGate = "multi-spawn-source-answer-ready";
+const judgeAnswerGate = "multi-spawn-judge-answer-ready";
+
+const multiSpawnAppServer = `
+const fs = require("node:fs");
+const path = require("node:path");
+const readline = require("node:readline");
+const send = (message) => process.stdout.write(JSON.stringify(message) + "\\n");
+const args = process.argv.slice(2);
+if (args[0] === "--help") {
+  process.stdout.write("Usage: codex app-server [OPTIONS] - Run the app server\\n");
+  process.exit(0);
+}
+let threadId = "multi-spawn-thread-" + process.pid;
+let turnSequence = 0;
+let activeTurnId = null;
+let responseTimer = null;
+let responseSettled = false;
+// Provider children intentionally receive an allow-listed environment, so
+// test-only Electron variables do not cross that boundary. Both seeded
+// project checkouts are direct children of the fixture root.
+const dataDirectory = path.resolve(process.cwd(), "..", "data");
+const waitForGate = (gate, callback) => {
+  const deadlineAt = Date.now() + 30000;
+  const inspect = () => {
+    if (responseSettled) return;
+    if (fs.existsSync(path.join(dataDirectory, gate))) {
+      callback();
+      return;
+    }
+    if (Date.now() >= deadlineAt) {
+      responseSettled = true;
+      send({ method: "turn/completed", params: {
+        threadId,
+        turn: {
+          id: activeTurnId,
+          status: "failed",
+          items: [],
+          error: { message: "Multi-spawn fixture response gate timed out." },
+        },
+      } });
+      return;
+    }
+    responseTimer = setTimeout(inspect, 20);
+  };
+  inspect();
+};
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize") {
+    send({ id: message.id, result: { userAgent: "multi-spawn-fixture" } });
+    return;
+  }
+  if (message.method === "initialized") return;
+  if (message.method === "model/list") {
+    send({ id: message.id, result: { data: [], nextCursor: null } });
+    return;
+  }
+  if (message.method === "account/rateLimits/read") {
+    send({ id: message.id, result: { rateLimits: null, rateLimitsByLimitId: null } });
+    return;
+  }
+  if (message.method === "thread/goal/get") {
+    send({ id: message.id, result: { goal: null } });
+    return;
+  }
+  if (message.method === "thread/start" || message.method === "thread/resume") {
+    threadId = message.params.threadId || threadId;
+    send({ id: message.id, result: {
+      thread: { id: threadId }, cwd: process.cwd(), model: "fixture",
+      serviceTier: null, initialTurnsPage: null,
+    } });
+    return;
+  }
+  if (message.method === "turn/interrupt") {
+    send({ id: message.id, result: {} });
+    if (responseSettled || !activeTurnId) return;
+    responseSettled = true;
+    if (responseTimer) clearTimeout(responseTimer);
+    send({ method: "turn/completed", params: {
+      threadId,
+      turn: {
+        id: activeTurnId,
+        status: "interrupted",
+        items: [],
+        error: null,
+      },
+    } });
+    return;
+  }
+  if (message.method !== "turn/start") return;
+  turnSequence += 1;
+  const turnId = "multi-spawn-turn-" + turnSequence;
+  activeTurnId = turnId;
+  responseSettled = false;
+  send({ id: message.id, result: {
+    turn: { id: turnId, status: "inProgress", items: [], error: null },
+  } });
+  send({ method: "turn/started", params: {
+    threadId, turn: { id: turnId, status: "inProgress", items: [], error: null },
+  } });
+  const inputText = (message.params.input || [])
+    .filter((item) => item && item.type === "text")
+    .map((item) => item.text || "")
+    .join("\\n");
+  const isJudge = inputText.includes("# Independent Duo comparison");
+  const answer = isJudge
+    ? "Multi-spawn judge response from " + path.basename(process.cwd()) + "."
+    : "Multi-spawn source response from " + path.basename(process.cwd()) + ".";
+  waitForGate(
+    isJudge ? "${judgeAnswerGate}" : "${sourceAnswerGate}",
+    () => {
+      if (responseSettled) return;
+      responseSettled = true;
+      send({ method: "item/agentMessage/delta", params: {
+        threadId, turnId, itemId: "multi-spawn-answer-" + turnId,
+        delta: answer,
+      } });
+      send({ method: "turn/completed", params: {
+        threadId,
+        turn: { id: turnId, status: "completed", items: [], error: null },
+      } });
+    },
+  );
+});
+`;
 
 let app!: AppFixture;
 let page!: AppFixture["page"];
@@ -13,6 +142,7 @@ test.beforeAll(async () => {
     name: "multi-spawn",
     initialState: "conversation",
     seedSecondProject: true,
+    codexAppServerSource: multiSpawnAppServer,
   });
   page = app.page;
 });
@@ -159,6 +289,27 @@ test("launches two truthful routes and locks a bounded third-model judge", async
     sidebar.locator("button.conversation-row")
       .filter({ hasText: "Independent judge" }),
   ).toBeVisible();
+  await writeFile(
+    join(app.testDirectory, "data", sourceAnswerGate),
+    "ready\n",
+    "utf8",
+  );
+  const primaryAnswers = page.getByRole("region", {
+    name: "Primary chat: Inertia · Lifecycle review",
+  }).locator(
+    '[data-answer-phase="persisted"][aria-label="Final assistant answer"]',
+  );
+  const secondaryAnswers = page.getByRole("region", {
+    name: "Second chat: Companion · Independent review",
+  }).locator(
+    '[data-answer-phase="persisted"][aria-label="Final assistant answer"]',
+  );
+  await expect(primaryAnswers).toContainText(
+    "Multi-spawn source response from Inertia.",
+  );
+  await expect(secondaryAnswers).toContainText(
+    "Multi-spawn source response from Companion.",
+  );
   await app.expectNoViewportOverflow();
 
   const splitResult = testInfo.outputPath("multi-spawn-split-result.png");
@@ -171,5 +322,16 @@ test("launches two truthful routes and locks a bounded third-model judge", async
     path: splitResult,
     contentType: "image/png",
   });
+  await writeFile(
+    join(app.testDirectory, "data", judgeAnswerGate),
+    "ready\n",
+    "utf8",
+  );
+  const judgeRow = sidebar.locator("button.conversation-row")
+    .filter({ hasText: "Independent judge" });
+  await expect(judgeRow).toHaveAttribute("aria-current", "page");
+  await expect(page.locator(
+    '[data-answer-phase="persisted"][aria-label="Final assistant answer"]',
+  )).toContainText("Multi-spawn judge response from Companion.");
   expect(app.rendererErrors).toEqual([]);
 });

@@ -16,13 +16,15 @@ import {
 } from "../process-lifecycle";
 import { gitProcessEnvironment } from "./environment";
 import { withGitScanProcessSlot } from "./scan-coordinator";
-import { GitError } from "./types";
+import {
+  GIT_PROCESS_TREE_TERMINATION_FAILURE,
+  GitError,
+  isGitProcessTreeTerminationFailure as isProcessTreeTerminationFailure,
+} from "./types";
 
 const TRUNCATED_OUTPUT_DRAIN_MS = 250;
+const ABORTED_PROCESS_DRAIN_MS = 250;
 const PREPARED_ABORT_CLEANUP_MS = 500;
-const PROCESS_TREE_TERMINATION_FAILURE =
-  "Git stopped responding, and its process tree could not be confirmed stopped.";
-
 export interface GitProcessResult {
   stdout: Buffer;
   stderr: Buffer;
@@ -65,9 +67,7 @@ export interface PreparedGitRefUpdateContext {
 export function isGitProcessTreeTerminationFailure(
   error: unknown,
 ): error is GitError {
-  return error instanceof GitError
-    && error.code === "operation-failed"
-    && error.message === PROCESS_TREE_TERMINATION_FAILURE;
+  return isProcessTreeTerminationFailure(error);
 }
 
 export function gitInspectionSettlementValues<First, Second>(
@@ -272,11 +272,24 @@ export function runGit(
     let termination: Promise<void> | undefined;
     let terminalError: GitError | undefined;
     let truncatedOutputDrainTimer: NodeJS.Timeout | undefined;
+    let abortedProcessDrainTimer: NodeJS.Timeout | undefined;
     const abortError = new GitError(
       "timeout",
       "Git inspection was cancelled.",
     );
-    const onAbort = (): void => terminateAndFinish(abortError);
+    const onAbort = (): void => {
+      terminalError ??= abortError;
+      if (termination || abortedProcessDrainTimer) return;
+      // Fast Git inspections can have exited while Node is still waiting for
+      // their stdio handles to close. Give that already-finishing child one
+      // bounded window before invoking Windows taskkill, whose PID-not-found
+      // result cannot prove that detached descendants were cleaned up.
+      abortedProcessDrainTimer = setTimeout(() => {
+        abortedProcessDrainTimer = undefined;
+        terminateAndFinish();
+      }, ABORTED_PROCESS_DRAIN_MS);
+      abortedProcessDrainTimer.unref();
+    };
 
     const finish = (
       error?: GitError,
@@ -287,6 +300,9 @@ export function runGit(
       clearTimeout(timer);
       if (truncatedOutputDrainTimer) {
         clearTimeout(truncatedOutputDrainTimer);
+      }
+      if (abortedProcessDrainTimer) {
+        clearTimeout(abortedProcessDrainTimer);
       }
       options.signal?.removeEventListener("abort", onAbort);
       if (error) rejectProcess(error);
@@ -317,7 +333,7 @@ export function runGit(
         () => {
           finish(new GitError(
             "operation-failed",
-            PROCESS_TREE_TERMINATION_FAILURE,
+            GIT_PROCESS_TREE_TERMINATION_FAILURE,
           ));
         },
       );
@@ -374,7 +390,9 @@ export function runGit(
     });
     child.on("error", (error: NodeJS.ErrnoException) => {
       if (termination) return;
-      if (error.code === "ENOENT") {
+      if (terminalError) {
+        finish(terminalError);
+      } else if (error.code === "ENOENT") {
         finish(
           new GitError(
             "git-unavailable",
@@ -388,7 +406,9 @@ export function runGit(
     child.on("close", (code) => {
       if (termination) return;
       const result = bufferedResult();
-      if (truncated && !options.truncateOutput) {
+      if (terminalError) {
+        finish(terminalError);
+      } else if (truncated && !options.truncateOutput) {
         finish(
           new GitError(
             "output-limit",
@@ -423,7 +443,7 @@ export function runGitInspection(
   const prepared = inspectionArguments(args);
   return withGitScanProcessSlot(
     options,
-    async () => await runGit(cwd, prepared, options),
+    async (signal) => await runGit(cwd, prepared, { ...options, signal }),
   );
 }
 
@@ -532,7 +552,7 @@ function runPreparedGitRefTransaction(
         () => finish(error),
         () => finish(new GitError(
           "operation-failed",
-          PROCESS_TREE_TERMINATION_FAILURE,
+          GIT_PROCESS_TREE_TERMINATION_FAILURE,
         )),
       );
     };

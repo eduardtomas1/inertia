@@ -1,4 +1,4 @@
-import type { ElectronApplication, Page } from "@playwright/test";
+import type { ConsoleMessage, ElectronApplication, Page } from "@playwright/test";
 import type { ChildProcess } from "node:child_process";
 import { rm } from "node:fs/promises";
 import type { Server } from "node:http";
@@ -8,10 +8,23 @@ import { privilegedShutdownEnvelopeMs } from
 import { runtimeSupervisorShutdownEnvelopeMs } from "../../../src/node/runtime-shutdown-deadline";
 
 const FIXTURE_SERVER_TEARDOWN_TIMEOUT_MS = 2_000;
+const FIXTURE_SHUTDOWN_HEADROOM_MS = 500;
+const WINDOWS_FIXTURE_SHUTDOWN_HEADROOM_MS = 2_000;
+const MAX_RENDERER_DIAGNOSTIC_ENTRIES = 40;
+const MAX_RENDERER_DIAGNOSTIC_CHARACTERS = 2_048;
+const OMITTED_RENDERER_DIAGNOSTICS =
+  /^\[(\d+) earlier renderer diagnostics omitted\]$/u;
 export function fixtureElectronGracefulTimeoutMs(
   platform: NodeJS.Platform = process.platform,
 ): number {
-  return privilegedShutdownEnvelopeMs(platform) + 500;
+  // Two concurrent Electron fixtures can leave the hosted Windows runner's
+  // event loop briefly starved while native Git and Job-broker exits are
+  // delivered. Preserve the complete product shutdown envelope plus bounded
+  // scheduling headroom before classifying a clean exit as forced.
+  return privilegedShutdownEnvelopeMs(platform)
+    + (platform === "win32"
+      ? WINDOWS_FIXTURE_SHUTDOWN_HEADROOM_MS
+      : FIXTURE_SHUTDOWN_HEADROOM_MS);
 }
 export function fixtureRuntimeExitTimeoutMs(
   platform: NodeJS.Platform = process.platform,
@@ -113,9 +126,97 @@ export function observeElectronPage(
   rendererErrors: string[],
 ): void {
   currentPage.on("console", (message) => {
-    if (message.type() === "error") rendererErrors.push(message.text());
+    if (message.type() === "error") {
+      appendElectronRendererDiagnostic(
+        rendererErrors,
+        formatElectronConsoleError(message),
+      );
+    }
   });
-  currentPage.on("pageerror", (error) => rendererErrors.push(error.message));
+  currentPage.on("pageerror", (error) => {
+    appendElectronRendererDiagnostic(rendererErrors, error.message);
+  });
+  currentPage.on("response", (response) => {
+    if (response.status() < 400) return;
+    const request = response.request();
+    appendElectronRendererDiagnostic(
+      rendererErrors,
+      `HTTP ${response.status()} ${request.method()} ${request.resourceType()} ${rendererDiagnosticUrl(response.url())}`,
+    );
+  });
+  currentPage.on("requestfailed", (request) => {
+    const failure = request.failure()?.errorText ?? "unknown network error";
+    // Chromium reports intentional navigation/resource cancellation with this
+    // exact code during page reload and component teardown. Those requests did
+    // not fail at their source and must not contaminate the renderer ledger.
+    if (failure === "net::ERR_ABORTED") return;
+    appendElectronRendererDiagnostic(
+      rendererErrors,
+      `Request failed ${request.method()} ${request.resourceType()} ${rendererDiagnosticUrl(request.url())}: ${failure}`,
+    );
+  });
+}
+
+function boundedRendererDiagnostic(value: string): string {
+  return value.length <= MAX_RENDERER_DIAGNOSTIC_CHARACTERS
+    ? value
+    : `${value.slice(0, MAX_RENDERER_DIAGNOSTIC_CHARACTERS - 1)}…`;
+}
+
+function appendElectronRendererDiagnostic(
+  rendererErrors: string[],
+  value: string,
+): void {
+  const diagnostic = boundedRendererDiagnostic(value);
+  if (rendererErrors.length < MAX_RENDERER_DIAGNOSTIC_ENTRIES) {
+    rendererErrors.push(diagnostic);
+    return;
+  }
+  const previousOmissions = OMITTED_RENDERER_DIAGNOSTICS
+    .exec(rendererErrors[0] ?? "");
+  const omitted = previousOmissions
+    ? Number(previousOmissions[1]) + 1
+    : 2;
+  if (previousOmissions) {
+    rendererErrors.splice(1, 1);
+    rendererErrors[0] = `[${omitted} earlier renderer diagnostics omitted]`;
+  } else {
+    rendererErrors.splice(0, 2);
+    rendererErrors.unshift(
+      `[${omitted} earlier renderer diagnostics omitted]`,
+    );
+  }
+  rendererErrors.push(diagnostic);
+}
+
+function rendererDiagnosticUrl(value: string): string {
+  try {
+    const url = new URL(value);
+    url.username = "";
+    url.password = "";
+    url.search = "";
+    url.hash = "";
+    if (/^inertia(?:-canary)?:$/u.test(url.protocol)) {
+      if (/^\/attachment-preview\/[0-9a-f-]{36}$/iu.test(url.pathname)) {
+        url.pathname = "/attachment-preview/redacted";
+      } else if (url.pathname.startsWith("/workspace-image/")) {
+        url.pathname = "/workspace-image/redacted";
+      }
+    }
+    return url.toString();
+  } catch {
+    return "unparseable-renderer-url";
+  }
+}
+
+export function formatElectronConsoleError(
+  message: Pick<ConsoleMessage, "location" | "text">,
+): string {
+  const location = message.location();
+  const source = location.url
+    ? `${rendererDiagnosticUrl(location.url)}:${location.lineNumber + 1}:${location.columnNumber + 1}`
+    : "unknown renderer resource";
+  return boundedRendererDiagnostic(`${message.text()} (${source})`);
 }
 
 async function waitForChildExitBounded(
@@ -157,6 +258,13 @@ export interface ElectronAppQuitResult<T> {
   readonly outcome: "graceful" | "abnormal" | "forced";
   readonly requestResult: BoundedOperationResult<T>;
   readonly transportSettled: boolean;
+}
+
+export interface ElectronPrivilegedCleanupReceipt {
+  readonly phase: string;
+  readonly runtimePid: number | null;
+  readonly cleanupConfirmed: boolean | null;
+  readonly errorMessage: string | null;
 }
 
 export async function quitElectronAppBounded<T>(
@@ -263,11 +371,14 @@ export async function closeElectronAppBounded(
 export async function closeElectronFixtureBounded(options: {
   readonly current: ElectronApplication | null;
   readonly priorRuntimePid?: number | null;
+  readonly prepareRuntimeQuit?: () => Promise<ElectronPrivilegedCleanupReceipt>;
+  readonly readRuntimeQuitPhase?: () => Promise<string>;
   readonly requestRuntimeQuit: () => Promise<number | null>;
   readonly waitForRuntimeExit: (pid: number) => Promise<void>;
   readonly closeServer: () => Promise<void>;
   readonly removeDirectory: () => Promise<void>;
   readonly rpcTimeoutMs?: number;
+  readonly cleanupReceiptTimeoutMs?: number;
   readonly serverTimeoutMs?: number;
   readonly removeTimeoutMs?: number;
 }): Promise<void> {
@@ -287,13 +398,75 @@ export async function closeElectronFixtureBounded(options: {
       let quitResult: BoundedOperationResult<number | null>;
       let appCloseConfirmed = false;
       if (childProcess) {
+        let cleanupPrepared = options.prepareRuntimeQuit === undefined;
+        let cleanupPhase = cleanupPrepared ? "legacy-quit" : "not-requested";
+        if (options.prepareRuntimeQuit) {
+          const preparation = await settleOperationBounded(
+            Promise.resolve().then(options.prepareRuntimeQuit),
+            options.cleanupReceiptTimeoutMs
+              ?? FIXTURE_ELECTRON_GRACEFUL_TIMEOUT_MS,
+          );
+          if (preparation.status === "fulfilled") {
+            cleanupPhase = preparation.value.phase;
+            if (preparation.value.runtimePid !== null) {
+              runtimePid = preparation.value.runtimePid;
+            }
+            const cleanupReachedTerminalPhase =
+              cleanupPhase === "privileged-cleanup-complete";
+            cleanupPrepared = cleanupReachedTerminalPhase
+              && preparation.value.cleanupConfirmed === true;
+            if (!cleanupReachedTerminalPhase) {
+              cleanupErrors.push(new Error(
+                `The Electron fixture privileged cleanup returned an unexpected phase (${cleanupPhase}).`,
+              ));
+            } else if (preparation.value.cleanupConfirmed !== true) {
+              cleanupErrors.push(new Error(
+                preparation.value.errorMessage
+                  ? `The Electron fixture privileged cleanup was unconfirmed: ${preparation.value.errorMessage}`
+                  : "The Electron fixture privileged cleanup completed without confirming every owner stopped.",
+              ));
+            }
+          } else {
+            if (options.readRuntimeQuitPhase) {
+              const phaseResult = await settleOperationBounded(
+                Promise.resolve().then(options.readRuntimeQuitPhase),
+                options.rpcTimeoutMs ?? 1_000,
+              );
+              if (phaseResult.status === "fulfilled") {
+                cleanupPhase = phaseResult.value;
+              } else if (phaseResult.status === "rejected") {
+                cleanupPhase = "phase-read-rejected";
+              } else {
+                cleanupPhase = "phase-read-timed-out";
+              }
+            }
+            const message = preparation.status === "timed-out"
+              ? "The Electron fixture privileged cleanup receipt did not settle in time"
+              : "The Electron fixture privileged cleanup failed";
+            cleanupErrors.push(new Error(
+              `${message} (phase=${cleanupPhase}).`,
+              preparation.status === "rejected"
+                ? { cause: preparation.reason }
+                : undefined,
+            ));
+          }
+        }
         try {
           const appQuit = await quitElectronAppBounded(
             options.current,
-            options.requestRuntimeQuit,
+            cleanupPrepared
+              ? options.requestRuntimeQuit
+              : async () => runtimePid,
             {
               childProcess,
               quitRequestTimeoutMs: options.rpcTimeoutMs ?? 1_000,
+              ...(options.prepareRuntimeQuit
+                ? {
+                    gracefulTimeoutMs: cleanupPrepared
+                      ? options.rpcTimeoutMs ?? 1_000
+                      : 0,
+                  }
+                : {}),
             },
           );
           quitResult = appQuit.requestResult;
@@ -309,7 +482,9 @@ export async function closeElectronFixtureBounded(options: {
             ));
           } else if (appQuit.outcome === "forced") {
             cleanupErrors.push(new Error(
-              "The Electron fixture process required forced termination during close.",
+              options.prepareRuntimeQuit
+                ? `The Electron fixture process required forced termination during close (phase=${cleanupPhase}).`
+                : "The Electron fixture process required forced termination during close.",
             ));
           }
         } catch (error) {

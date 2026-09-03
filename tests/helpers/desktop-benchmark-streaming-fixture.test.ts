@@ -7,8 +7,10 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   STREAMING_COMPLETION_GATE_TIMEOUT_MS,
+  STREAMING_PROGRESSIVE_PAINT_COUNT,
   beginStreamingReaderActivity,
   beginStreamingReaderAwayActivity,
+  releaseStreamingCadence,
   releaseStreamingCompletion,
   streamingReaderActivityMarker,
   streamingAppServer,
@@ -82,6 +84,19 @@ function isTerminalMessage(message: Record<string, unknown>): boolean {
   return message.method === "turn/completed";
 }
 
+function providerDeltaMessages(run: FixtureRun): Record<string, unknown>[] {
+  return run.messages.filter((message) => (
+    message.method === "item/agentMessage/delta"
+  ));
+}
+
+function providerDeltaText(run: FixtureRun): string[] {
+  return providerDeltaMessages(run).map((message) => {
+    const params = message.params as { delta?: unknown } | undefined;
+    return typeof params?.delta === "string" ? params.delta : "";
+  });
+}
+
 async function waitFor(
   predicate: () => boolean,
   timeoutMs = STREAMING_COMPLETION_GATE_TIMEOUT_MS,
@@ -115,7 +130,26 @@ describe("desktop benchmark streaming completion gate", () => {
     });
     beginSample(run, 7);
 
+    for (
+      let ordinal = 1;
+      ordinal <= STREAMING_PROGRESSIVE_PAINT_COUNT;
+      ordinal += 1
+    ) {
+      await waitFor(() => providerDeltaMessages(run).length >= ordinal);
+      expect(providerDeltaMessages(run)).toHaveLength(ordinal);
+      await new Promise<void>((resolveDelay) => setTimeout(resolveDelay, 20));
+      expect(providerDeltaMessages(run)).toHaveLength(ordinal);
+      await releaseStreamingCadence(workspace, 7);
+    }
+
     await waitForStreamingCompletionReady(workspace, 7);
+    const streamedPayload = providerDeltaText(run);
+    expect(streamedPayload).toHaveLength(128);
+    expect(streamedPayload[0]).toMatch(/^STREAM_PROVIDER_DELTA_7_\d+ $/u);
+    expect(streamedPayload.slice(1)).toEqual(Array.from(
+      { length: 127 },
+      (_, index) => `chunk-${index + 1}🙂 `,
+    ));
     expect(run.messages.some(isTerminalMessage)).toBe(false);
     await beginStreamingReaderActivity(workspace, 7);
     await waitForStreamingReaderActivity(workspace, 7);
@@ -149,11 +183,40 @@ describe("desktop benchmark streaming completion gate", () => {
     });
     beginSample(run, 9);
 
+    await waitFor(() => providerDeltaMessages(run).length >= 1);
+    for (
+      let ordinal = 1;
+      ordinal <= STREAMING_PROGRESSIVE_PAINT_COUNT;
+      ordinal += 1
+    ) {
+      if (ordinal > 1) {
+        await waitFor(() => providerDeltaMessages(run).length >= ordinal);
+      }
+      await releaseStreamingCadence(workspace, 9);
+    }
+
     await waitForStreamingCompletionReady(workspace, 9);
     expect(await exitCode(run.child)).toBe(2);
     children.delete(run.child);
     await waitForStreamingCompletionCleanup(workspace, 9);
     expect(run.messages.some(isTerminalMessage)).toBe(false);
     expect(run.stderr.join("")).toContain("Benchmark completion gate timed out.");
+  });
+
+  it("fails closed when a progressive cadence acknowledgement is withheld", async () => {
+    const { run, workspace } = await startFixture({
+      INERTIA_BENCHMARK_COMPLETION_GATE_TIMEOUT_MS: "200",
+      INERTIA_BENCHMARK_STREAM_INTERVAL_MS: "1",
+    });
+    beginSample(run, 11);
+
+    await waitFor(() => providerDeltaMessages(run).length >= 1);
+    expect(await exitCode(run.child)).toBe(2);
+    children.delete(run.child);
+    await waitForStreamingCompletionCleanup(workspace, 11);
+    expect(providerDeltaMessages(run)).toHaveLength(1);
+    expect(run.messages.some(isTerminalMessage)).toBe(false);
+    expect(run.stderr.join(""))
+      .toContain("Benchmark cadence gate timed out at ordinal 1.");
   });
 });

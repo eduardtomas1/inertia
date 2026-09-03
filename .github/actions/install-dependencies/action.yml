@@ -35,8 +35,8 @@ runs:
     # cache contract, the runner OS and architecture, and the resolved Node.js
     # version. Postinstall rebuilds native modules against the pinned Electron
     # ABI for one specific architecture. Electron itself downloads its binary
-    # lazily on first require, so that payload is excluded and left to the step
-    # that actually needs it.
+    # lazily on first require, so that payload is excluded and left to the
+    # explicit end-to-end preparation step outside Playwright's hook deadline.
     - name: Restore resolved dependency tree
       id: dependencies
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

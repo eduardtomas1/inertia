@@ -1,7 +1,7 @@
 import { createRequire } from "node:module";
 import { createHash } from "node:crypto";
-import { createReadStream } from "node:fs";
-import { lstat, mkdtemp, readdir, rm } from "node:fs/promises";
+import { constants, createReadStream } from "node:fs";
+import { copyFile, lstat, mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -354,12 +354,33 @@ async function waitForRemoval(path) {
   throw new Error(`The Windows uninstaller left ${path} behind.`);
 }
 
-async function runUninstaller(uninstaller, installDirectory) {
-  await runBounded(uninstaller, ["/S"], {
-    label: "Silent Windows uninstaller",
-    timeoutMs: UNINSTALL_TIMEOUT_MS,
-  });
-  return waitForRemoval(installDirectory);
+async function runUninstaller(
+  uninstaller,
+  stagedUninstaller,
+  installDirectory,
+) {
+  // NSIS normally copies itself to TEMP, launches that worker, and lets the
+  // installed launcher exit first. Stage it outside $INSTDIR and use NSIS's
+  // synchronous _?= form so the bounded process remains the real uninstall
+  // worker and its exit status/cleanup stay authoritative. NSIS requires this
+  // final parameter to be passed verbatim, including paths with spaces.
+  if (!await existsAsRegularFile(stagedUninstaller)) {
+    await copyFile(
+      uninstaller,
+      stagedUninstaller,
+      constants.COPYFILE_EXCL,
+    );
+  }
+  await runBounded(
+    stagedUninstaller,
+    ["/S", `_?=${installDirectory}`],
+    {
+      label: "Silent Windows uninstaller",
+      timeoutMs: UNINSTALL_TIMEOUT_MS,
+      windowsVerbatimArguments: true,
+    },
+  );
+  return await waitForRemoval(installDirectory);
 }
 
 export async function main() {
@@ -382,7 +403,8 @@ export async function main() {
   }
 
   const temporaryRoot = await mkdtemp(join(tmpdir(), "inertia-installer-smoke-"));
-  const installDirectory = join(temporaryRoot, "installed");
+  const installDirectory = join(temporaryRoot, "installed with spaces");
+  const stagedUninstaller = join(temporaryRoot, "staged-uninstaller.exe");
   const applicationName = installedWindowsApplicationName(releaseChannel);
   const productName = applicationName.slice(0, -".exe".length);
   const uninstallerName = `Uninstall ${productName}.exe`;
@@ -399,6 +421,7 @@ export async function main() {
     await runBounded(installer, ["/S", `/D=${installDirectory}`], {
       label: "Silent Windows installer",
       timeoutMs: INSTALL_TIMEOUT_MS,
+      windowsVerbatimArguments: true,
     });
     await requireInstalledFiles(
       installDirectory,
@@ -418,7 +441,7 @@ export async function main() {
       label: "Installed Windows application smoke",
       timeoutMs: PACKAGE_SMOKE_TIMEOUT_MS,
     });
-    await runUninstaller(uninstaller, installDirectory);
+    await runUninstaller(uninstaller, stagedUninstaller, installDirectory);
     uninstalled = true;
     console.log(
       `Windows installer smoke passed for ${process.arch}: install, native runtime, and uninstall completed without a reboot.`,
@@ -427,9 +450,20 @@ export async function main() {
     operationError = error;
   } finally {
     const preserveTemporaryRoot = operationError?.preserveTemporaryRoot === true;
-    if (!preserveTemporaryRoot && !uninstalled && await existsAsRegularFile(uninstaller)) {
+    if (
+      !preserveTemporaryRoot &&
+      !uninstalled &&
+      (
+        await existsAsRegularFile(stagedUninstaller) ||
+        await existsAsRegularFile(uninstaller)
+      )
+    ) {
       try {
-        await runUninstaller(uninstaller, installDirectory);
+        await runUninstaller(
+          uninstaller,
+          stagedUninstaller,
+          installDirectory,
+        );
       } catch (cleanupError) {
         if (!operationError || cleanupError?.preserveTemporaryRoot === true) {
           operationError = cleanupError;

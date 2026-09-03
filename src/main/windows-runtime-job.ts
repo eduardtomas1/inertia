@@ -12,8 +12,6 @@ import {
 } from "node:fs";
 import { dirname, join, resolve, win32 } from "node:path";
 
-import windowsRuntimeJobIntegrity from
-  "../../resources/generated/windows-runtime-job-integrity.json";
 import type { WindowsRuntimeJobContainment } from "../node/runtime-owned-processes.js";
 import { validRuntimeGenerationId } from "../node/runtime-process-protocol.js";
 import {
@@ -24,6 +22,16 @@ import {
   resolveWindowsRuntimeJobAssemblyPath,
   type RuntimeAssetLocations,
 } from "./runtime-assets.js";
+
+declare const __INERTIA_WINDOWS_RUNTIME_JOB_SHA256__: string | null;
+
+// Generated from windows-runtime-job-integrity.json by electron.vite.config.ts.
+// The same captured value is emitted as a package-time verification sidecar.
+const windowsRuntimeJobIntegrity = Object.freeze({
+  sha256: typeof __INERTIA_WINDOWS_RUNTIME_JOB_SHA256__ === "undefined"
+    ? null
+    : __INERTIA_WINDOWS_RUNTIME_JOB_SHA256__,
+});
 
 const NATIVE_READY_TIMEOUT_MS = 15_000;
 const EXECUTABLE_LOCKED_MARKER = "LOCKED";
@@ -43,6 +51,8 @@ const BROKER_HELPER_GRACEFUL_EXIT_MS = 2_000;
 const BROKER_HELPER_FORCED_EXIT_MS = 1_000;
 // Stop-Helpers can consume both exit budgets before it writes BYE.
 const BROKER_SHUTDOWN_ACK_MARGIN_MS = 1_000;
+// Keep result framing and broker delivery outside the native Job drain.
+const BROKER_RECOVERY_RESULT_MARGIN_MS = 250;
 if (
   BROKER_HELPER_GRACEFUL_EXIT_MS
     + BROKER_HELPER_FORCED_EXIT_MS
@@ -538,11 +548,14 @@ try {
       if ($id -notmatch '^[1-9][0-9]{0,9}$' -or
         $name -notmatch '^Global\\\\InertiaRuntime-[0-9a-f]{64}$' -or
         $timeout -lt 1 -or $timeout -gt ${NATIVE_READY_TIMEOUT_MS}) { throw 'recover-command' }
-      $recoverCode = [Int32]$recoverMethod.Invoke(
-        $null,
-        [Object[]]@($name)
+      $nativeTimeout = [Math]::Max(
+        1,
+        $timeout - ${BROKER_RECOVERY_RESULT_MARGIN_MS}
       )
-      Write-Result $id ('EXIT:' + $recoverCode) '' ''
+      $recoverArguments = [Object[]]@($name, $nativeTimeout, $null)
+      $recoverCode = [Int32]$recoverMethod.Invoke($null, $recoverArguments)
+      $recoverDiagnostic = [string]$recoverArguments[2]
+      Write-Result $id ('EXIT:' + $recoverCode) '' $recoverDiagnostic
       continue
     }
     throw 'command-invalid'
@@ -992,7 +1005,15 @@ export async function recoverWindowsRuntimeJob(
       [containment.name],
       deadlineAt,
     );
-    return result.status === "EXIT:0" && executableLock.isHeld();
+    const recovered = result.status === "EXIT:0" && executableLock.isHeld();
+    const diagnostic = result.stderr.match(
+      /^INERTIA_JOB_ERROR stage=(?:open-job|terminate-job|query-job|drain-job) win32=[0-9]+$/mu,
+    )?.[0];
+    if (!recovered && diagnostic) {
+      console.error("Windows runtime Job recovery was not confirmed.",
+        result.status, diagnostic);
+    }
+    return recovered;
   } catch {
     return false;
   }

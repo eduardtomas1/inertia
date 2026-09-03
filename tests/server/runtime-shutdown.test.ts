@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   runtimeShutdownDeadlineMs,
+  runtimeSupervisorRecoveryWaitMs,
   runtimeSupervisorShutdownEnvelopeMs,
 } from "../../src/node/runtime-shutdown-deadline";
 import {
@@ -26,9 +27,12 @@ describe("runtime shutdown phases", () => {
     expect(runtimeShutdownDeadlineMs("darwin")).toBe(12_750);
     expect(runtimeShutdownDeadlineMs("linux")).toBe(12_000);
     expect(runtimeShutdownDeadlineMs("win32")).toBe(5_500);
-    expect(runtimeSupervisorShutdownEnvelopeMs("darwin")).toBe(15_250);
-    expect(runtimeSupervisorShutdownEnvelopeMs("linux")).toBe(14_500);
-    expect(runtimeSupervisorShutdownEnvelopeMs("win32")).toBe(8_000);
+    expect(runtimeSupervisorRecoveryWaitMs("darwin")).toBe(2_000);
+    expect(runtimeSupervisorRecoveryWaitMs("linux")).toBe(2_000);
+    expect(runtimeSupervisorRecoveryWaitMs("win32")).toBe(6_000);
+    expect(runtimeSupervisorShutdownEnvelopeMs("darwin")).toBe(17_250);
+    expect(runtimeSupervisorShutdownEnvelopeMs("linux")).toBe(16_500);
+    expect(runtimeSupervisorShutdownEnvelopeMs("win32")).toBe(14_000);
   });
 
   it("reserves Linux post-terminal headroom for ordered cleanup", async () => {
@@ -367,6 +371,32 @@ describe("runtime shutdown phases", () => {
         throw cleanupError;
       },
       settleArtifacts: () => { calls.push("artifacts"); },
+      terminateClients: () => { calls.push("clients"); },
+      closeServer: () => { calls.push("server"); },
+      closeStore: () => { calls.push("store"); },
+    })).rejects.toBe(cleanupError);
+
+    expect(calls).toEqual([
+      "isolated",
+      "turns",
+      "artifacts",
+      "clients",
+      "server",
+    ]);
+  });
+
+  it("keeps the database open when artifact process cleanup is unconfirmed", async () => {
+    const cleanupError = new Error("artifact process cleanup is unconfirmed");
+    const calls: string[] = [];
+
+    await expect(runRuntimeShutdownPhases({
+      independentDrains: [],
+      stopIsolatedRuns: () => { calls.push("isolated"); },
+      disposeTurnsAndProviders: () => { calls.push("turns"); },
+      settleArtifacts: () => {
+        calls.push("artifacts");
+        throw cleanupError;
+      },
       terminateClients: () => { calls.push("clients"); },
       closeServer: () => { calls.push("server"); },
       closeStore: () => { calls.push("store"); },

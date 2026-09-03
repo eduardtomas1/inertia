@@ -264,6 +264,7 @@ import {
 } from "../../src/shared/agent-browser";
 
 const conversationId = "11111111-1111-4111-8111-111111111111";
+const connectionId = "22222222-2222-4222-8222-222222222222";
 const runIdentity = {
   conversationId,
   runId: "22222222-2222-4222-8222-222222222222",
@@ -308,15 +309,18 @@ describe("agent-owned native Browser", () => {
     expect(broker.connect({
       ownerId: "primary",
       contextId: conversationId,
+      connectionId,
     }).tabs).toEqual([]);
     broker.setBounds({
       ownerId: "primary",
       contextId: conversationId,
+      connectionId,
       bounds: { x: 10, y: 20, width: 900, height: 600 },
     });
     const state = broker.connect({
       ownerId: "primary",
       contextId: conversationId,
+      connectionId,
     });
 
     expect(children).toHaveLength(1);
@@ -335,11 +339,117 @@ describe("agent-owned native Browser", () => {
     );
   });
 
+  it("ignores stale renderer bounds and close after the same Browser context reconnects", async () => {
+    const { broker, children } = harness();
+    const contentsOffset = electronState.contents.length;
+    const replacementConnectionId = "33333333-3333-4333-8333-333333333333";
+    broker.connect({ ownerId: "primary", contextId: conversationId, connectionId });
+    broker.setBounds({
+      ownerId: "primary",
+      contextId: conversationId,
+      connectionId,
+      bounds: { x: 10, y: 20, width: 900, height: 600 },
+    });
+    await broker.navigate({
+      ownerId: "primary",
+      contextId: conversationId,
+      url: "http://127.0.0.1:3000/reconnected",
+    });
+
+    broker.connect({
+      ownerId: "primary",
+      contextId: conversationId,
+      connectionId: replacementConnectionId,
+    });
+    expect(broker.setBounds({
+      ownerId: "primary",
+      contextId: conversationId,
+      connectionId,
+      bounds: null,
+    })).toBe(true);
+    broker.closeRequest({
+      ownerId: "primary",
+      contextId: conversationId,
+      connectionId,
+    });
+
+    expect(children).toHaveLength(1);
+    expect(electronState.contents[contentsOffset]?.getURL())
+      .toBe("http://127.0.0.1:3000/reconnected");
+    expect(Reflect.get(children[0]!, "bounds"))
+      .toEqual({ x: 10, y: 20, width: 900, height: 600 });
+
+    broker.closeRequest({
+      ownerId: "primary",
+      contextId: conversationId,
+      connectionId: replacementConnectionId,
+    });
+    expect(children).toHaveLength(0);
+  });
+
+  it("reports a missing Browser lease so its live preload can reconnect and replay bounds", () => {
+    const { broker, children } = harness();
+    const bounds = { x: 10, y: 20, width: 900, height: 600 };
+    broker.connect({ ownerId: "primary", contextId: conversationId, connectionId });
+    broker.close();
+
+    expect(broker.setBounds({
+      ownerId: "primary", contextId: conversationId, connectionId, bounds,
+    })).toBe(false);
+    expect(children).toHaveLength(0);
+
+    broker.connect({
+      ownerId: "primary", contextId: conversationId, connectionId,
+      recoverMissingLease: true,
+    });
+    expect(broker.setBounds({
+      ownerId: "primary", contextId: conversationId, connectionId, bounds,
+    })).toBe(true);
+    expect(children).toHaveLength(1);
+    expect(Reflect.get(children[0]!, "bounds")).toEqual(bounds);
+
+    const replacementConnectionId = "33333333-3333-4333-8333-333333333333";
+    broker.connect({
+      ownerId: "primary", contextId: conversationId,
+      connectionId: replacementConnectionId,
+    });
+    broker.connect({
+      ownerId: "primary", contextId: conversationId, connectionId,
+      recoverMissingLease: true,
+    });
+    expect(broker.setBounds({
+      ownerId: "primary", contextId: conversationId, connectionId,
+      bounds: null,
+    })).toBe(true);
+    expect(Reflect.get(children[0]!, "bounds")).toEqual(bounds);
+  });
+
+  it("rejects malformed renderer connection leases", () => {
+    const { broker } = harness();
+    expect(() => broker.connect({
+      ownerId: "primary",
+      contextId: conversationId,
+      connectionId: "not-a-lease",
+    })).toThrow("Invalid preview connection");
+    expect(() => broker.setBounds({
+      ownerId: "primary",
+      contextId: conversationId,
+      connectionId: "not-a-lease",
+      bounds: null,
+    })).toThrow("Invalid preview connection");
+    expect(() => broker.closeRequest({
+      ownerId: "primary",
+      contextId: conversationId,
+      connectionId: "not-a-lease",
+    })).toThrow("Invalid preview connection");
+  });
+
   it("lazily provisions the registered user Browser for an agent and returns its authoritative state", async () => {
     const { broker, children, window } = harness();
     expect(broker.connect({
       ownerId: "primary",
       contextId: conversationId,
+      connectionId,
     }).tabs).toEqual([]);
     expect(children).toHaveLength(0);
 
@@ -354,6 +464,7 @@ describe("agent-owned native Browser", () => {
     const userState = broker.connect({
       ownerId: "primary",
       contextId: conversationId,
+      connectionId,
     });
     expect(userState.url).toBe("http://127.0.0.1:3000/shared-state");
     expect(userState.tabs).toHaveLength(1);
@@ -372,6 +483,7 @@ describe("agent-owned native Browser", () => {
     broker.connect({
       ownerId: "primary",
       contextId: conversationId,
+      connectionId,
     });
     const controller = new AbortController();
     controller.abort();
@@ -385,6 +497,7 @@ describe("agent-owned native Browser", () => {
     expect(broker.connect({
       ownerId: "primary",
       contextId: conversationId,
+      connectionId,
     }).tabs).toEqual([]);
 
     broker.close("primary", conversationId);
@@ -1489,6 +1602,7 @@ describe("agent-owned native Browser", () => {
   it("invalidates exact agent interactions when Preview geometry changes", async () => {
     const timelineOffset = electronState.interactionTimeline.length;
     const { broker, children } = harness();
+    broker.connect({ ownerId: "primary", contextId: conversationId, connectionId });
     await broker.navigate({
       ownerId: "primary",
       contextId: conversationId,
@@ -1497,6 +1611,7 @@ describe("agent-owned native Browser", () => {
     broker.setBounds({
       ownerId: "primary",
       contextId: conversationId,
+      connectionId,
       bounds: { x: 10, y: 20, width: 600, height: 400 },
     });
     await broker.perform(conversationId, { action: "tabs" });
@@ -1515,6 +1630,7 @@ describe("agent-owned native Browser", () => {
     broker.setBounds({
       ownerId: "primary",
       contextId: conversationId,
+      connectionId,
       bounds: { x: 30, y: 40, width: 420, height: 280 },
     });
     await Promise.resolve();
@@ -1553,6 +1669,7 @@ describe("agent-owned native Browser", () => {
     broker.setBounds({
       ownerId: "primary",
       contextId: conversationId,
+      connectionId,
       bounds: { x: 50, y: 60, width: 360, height: 240 },
     });
     releaseTypeCursor();

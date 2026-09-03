@@ -60,6 +60,21 @@ public static class InertiaRuntimeJob {
     public UInt32 TotalTerminatedProcesses;
   }
 
+  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+  private struct PROCESSENTRY32 {
+    public UInt32 dwSize;
+    public UInt32 cntUsage;
+    public UInt32 th32ProcessID;
+    public UIntPtr th32DefaultHeapID;
+    public UInt32 th32ModuleID;
+    public UInt32 cntThreads;
+    public UInt32 th32ParentProcessID;
+    public Int32 pcPriClassBase;
+    public UInt32 dwFlags;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
+    public string szExeFile;
+  }
+
   [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
   private static extern IntPtr CreateJobObject(IntPtr attributes, string name);
   [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
@@ -84,16 +99,26 @@ public static class InertiaRuntimeJob {
   private static extern UInt32 WaitForSingleObject(IntPtr handle, UInt32 milliseconds);
   [DllImport("kernel32.dll", SetLastError = true)]
   private static extern bool CloseHandle(IntPtr handle);
+  [DllImport("kernel32.dll", SetLastError = true)]
+  private static extern IntPtr CreateToolhelp32Snapshot(UInt32 flags, UInt32 processId);
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+  private static extern bool Process32First(IntPtr snapshot, ref PROCESSENTRY32 entry);
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+  private static extern bool Process32Next(IntPtr snapshot, ref PROCESSENTRY32 entry);
 
   private const UInt32 JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000;
   private const UInt32 JOB_OBJECT_QUERY = 0x0004;
   private const UInt32 JOB_OBJECT_TERMINATE = 0x0008;
   private const UInt32 INFINITE = 0xffffffff;
+  private const UInt32 TH32CS_SNAPPROCESS = 0x00000002;
   private const Int64 MAX_EXECUTABLE_BYTES = 1024 * 1024;
   private const UInt64 WINDOWS_TO_UNIX_EPOCH_TICKS = 116444736000000000;
   private const Int32 ERROR_FILE_NOT_FOUND = 2;
   private const int JobObjectBasicAccountingInformation = 1;
   private const int JobObjectExtendedLimitInformation = 9;
+  private const int JOB_DRAIN_POLL_MS = 10;
+  private const int GUARD_LEASE_JOB_DRAIN_TIMEOUT_MS = 2500;
+  private const int RECOVERY_JOB_DRAIN_TIMEOUT_MS = 5000;
 
   private sealed class GuardLease : IDisposable {
     private readonly object gate = new object();
@@ -104,6 +129,7 @@ public static class InertiaRuntimeJob {
     private IntPtr job;
     private int resultCode;
     private string diagnostic = "";
+    private bool recoveryConfirmed;
     private bool disposed;
 
     public GuardLease(IntPtr ownedJob, Process ownedProcess) {
@@ -120,8 +146,8 @@ public static class InertiaRuntimeJob {
 
     private void Complete(int code, string detail) {
       lock (gate) {
-        resultCode = code;
-        diagnostic = detail;
+        resultCode = recoveryConfirmed ? 0 : code;
+        diagnostic = recoveryConfirmed ? "" : detail;
       }
       completed.Set();
     }
@@ -145,14 +171,19 @@ public static class InertiaRuntimeJob {
         Complete(15, ErrorLine("terminate-job", Marshal.GetLastWin32Error()));
         return;
       }
-      for (int index = 0; index < 200 && ActiveProcesses(currentJob) != 0; index += 1) {
-        Thread.Sleep(10);
-      }
-      if (ActiveProcesses(currentJob) != 0) {
-        Complete(16, ErrorLine("drain-job", 0));
-        return;
-      }
-      Complete(0, "");
+      string failureStage;
+      int win32Error;
+      int drainResult = DrainTerminatedJob(
+        currentJob,
+        GUARD_LEASE_JOB_DRAIN_TIMEOUT_MS,
+        16,
+        out failureStage,
+        out win32Error
+      );
+      Complete(
+        drainResult,
+        drainResult == 0 ? "" : ErrorLine(failureStage, win32Error)
+      );
     }
 
     public bool IsCompleted {
@@ -177,6 +208,10 @@ public static class InertiaRuntimeJob {
           detail = diagnostic;
           return resultCode == 0;
         }
+        if (recoveryConfirmed) {
+          detail = "";
+          return true;
+        }
         if (job == IntPtr.Zero || !TerminateJobObject(job, 137)) {
           detail = ErrorLine("terminate-job", Marshal.GetLastWin32Error());
           return false;
@@ -188,6 +223,15 @@ public static class InertiaRuntimeJob {
 
     public bool WaitForCompletion(int timeoutMilliseconds) {
       return completed.WaitOne(Math.Max(0, timeoutMilliseconds));
+    }
+
+    public void ConfirmRecovery() {
+      lock (gate) {
+        if (disposed) return;
+        recoveryConfirmed = true;
+        resultCode = 0;
+        diagnostic = "";
+      }
     }
 
     public void Dispose() {
@@ -309,19 +353,56 @@ public static class InertiaRuntimeJob {
     }
   }
 
-  private static UInt32 ActiveProcesses(IntPtr job) {
+  private static bool TryActiveProcesses(
+    IntPtr job,
+    out UInt32 activeProcesses,
+    out int win32Error
+  ) {
     int length = Marshal.SizeOf(typeof(JOBOBJECT_BASIC_ACCOUNTING_INFORMATION));
     IntPtr pointer = Marshal.AllocHGlobal(length);
     try {
       if (!QueryInformationJobObject(job, JobObjectBasicAccountingInformation, pointer, (UInt32)length, IntPtr.Zero)) {
-        return UInt32.MaxValue;
+        activeProcesses = 0;
+        win32Error = Marshal.GetLastWin32Error();
+        return false;
       }
-      return ((JOBOBJECT_BASIC_ACCOUNTING_INFORMATION)Marshal.PtrToStructure(
+      activeProcesses = ((JOBOBJECT_BASIC_ACCOUNTING_INFORMATION)Marshal.PtrToStructure(
         pointer,
         typeof(JOBOBJECT_BASIC_ACCOUNTING_INFORMATION)
       )).ActiveProcesses;
+      win32Error = 0;
+      return true;
     } finally {
       Marshal.FreeHGlobal(pointer);
+    }
+  }
+
+  private static int DrainTerminatedJob(
+    IntPtr job,
+    int timeoutMilliseconds,
+    int timeoutCode,
+    out string failureStage,
+    out int win32Error
+  ) {
+    failureStage = "";
+    win32Error = 0;
+    var elapsed = Stopwatch.StartNew();
+    int boundedTimeout = Math.Max(1, timeoutMilliseconds);
+    while (true) {
+      UInt32 activeProcesses;
+      int queryError;
+      if (!TryActiveProcesses(job, out activeProcesses, out queryError)) {
+        failureStage = "query-job";
+        win32Error = queryError;
+        return 29;
+      }
+      if (activeProcesses == 0) return 0;
+      int remaining = boundedTimeout - (Int32)elapsed.ElapsedMilliseconds;
+      if (remaining <= 0) {
+        failureStage = "drain-job";
+        return timeoutCode;
+      }
+      Thread.Sleep(Math.Min(JOB_DRAIN_POLL_MS, remaining));
     }
   }
 
@@ -349,6 +430,56 @@ public static class InertiaRuntimeJob {
       (UInt64)BitConverter.DoubleToInt64Bits(actualCreationTimeMs)
     );
     return actualCreationTimeBits == expectedCreationTimeBits ? 0 : 2;
+  }
+
+  private static bool ProcessIdentity(
+    IntPtr process,
+    out UInt64 creationBits,
+    out double creationTimeMs,
+    out int win32Error
+  ) {
+    FILETIME creation;
+    FILETIME exit;
+    FILETIME kernel;
+    FILETIME user;
+    creationBits = 0;
+    creationTimeMs = 0;
+    if (!GetProcessTimes(process, out creation, out exit, out kernel, out user)) {
+      win32Error = Marshal.GetLastWin32Error();
+      return false;
+    }
+    UInt64 ticks = ((UInt64)creation.dwHighDateTime << 32)
+      | creation.dwLowDateTime;
+    if (ticks < WINDOWS_TO_UNIX_EPOCH_TICKS) {
+      win32Error = 0;
+      return false;
+    }
+    UInt64 unixMicroseconds = (ticks / 10)
+      - (WINDOWS_TO_UNIX_EPOCH_TICKS / 10);
+    creationTimeMs = (double)unixMicroseconds / 1000.0;
+    creationBits = unchecked(
+      (UInt64)BitConverter.DoubleToInt64Bits(creationTimeMs)
+    );
+    win32Error = 0;
+    return true;
+  }
+
+  private static bool ExpectedParent(UInt32 processId, UInt32 expectedParent) {
+    IntPtr snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snapshot == new IntPtr(-1)) return false;
+    try {
+      PROCESSENTRY32 entry = new PROCESSENTRY32();
+      entry.dwSize = (UInt32)Marshal.SizeOf(typeof(PROCESSENTRY32));
+      if (!Process32First(snapshot, ref entry)) return false;
+      do {
+        if (entry.th32ProcessID == processId) {
+          return entry.th32ParentProcessID == expectedParent;
+        }
+      } while (Process32Next(snapshot, ref entry));
+      return false;
+    } finally {
+      CloseHandle(snapshot);
+    }
   }
 
   private static bool PruneCompletedLeases(out string diagnostic) {
@@ -477,19 +608,46 @@ public static class InertiaRuntimeJob {
     }
   }
 
-  public static int RecoverManaged(string name) {
-    string ignored;
-    if (!PruneCompletedLeases(out ignored)) return 27;
+  public static int RecoverManaged(
+    string name,
+    int timeoutMilliseconds,
+    out string diagnostic
+  ) {
+    diagnostic = "";
     IntPtr job = OpenJobObject(JOB_OBJECT_QUERY | JOB_OBJECT_TERMINATE, false, name);
     if (job == IntPtr.Zero) {
-      return Marshal.GetLastWin32Error() == ERROR_FILE_NOT_FOUND ? 0 : 22;
+      int openError = Marshal.GetLastWin32Error();
+      if (openError == ERROR_FILE_NOT_FOUND) return 0;
+      diagnostic = ErrorLine("open-job", openError);
+      return 22;
     }
     try {
-      if (!TerminateJobObject(job, 137)) return 20;
-      for (int index = 0; index < 200 && ActiveProcesses(job) != 0; index += 1) {
-        Thread.Sleep(10);
+      if (!TerminateJobObject(job, 137)) {
+        diagnostic = ErrorLine("terminate-job", Marshal.GetLastWin32Error());
+        return 20;
       }
-      return ActiveProcesses(job) == 0 ? 0 : 21;
+      string failureStage;
+      int win32Error;
+      int result = DrainTerminatedJob(
+        job,
+        Math.Min(
+          Math.Max(1, timeoutMilliseconds),
+          RECOVERY_JOB_DRAIN_TIMEOUT_MS
+        ),
+        21,
+        out failureStage,
+        out win32Error
+      );
+      if (result != 0) {
+        diagnostic = ErrorLine(failureStage, win32Error);
+        return result;
+      }
+      GuardLease lease = null;
+      lock (LeaseGate) {
+        GuardLeases.TryGetValue(name, out lease);
+      }
+      if (lease != null) lease.ConfirmRecovery();
+      return 0;
     } finally {
       CloseHandle(job);
     }
@@ -609,6 +767,14 @@ public static class InertiaRuntimeJob {
       });
       brokerWatcher.IsBackground = true;
       brokerWatcher.Start();
+      if (
+        Environment.GetEnvironmentVariable("NODE_ENV") == "test" &&
+        Environment.GetEnvironmentVariable(
+          "INERTIA_TEST_WINDOWS_GUARDIAN_HANG_BEFORE_READY"
+        ) == "1"
+      ) {
+        Thread.Sleep(5000);
+      }
       // Write the private readiness protocol to the native stream so Node
       // always receives the bounded UTF-8 marker it parses on every build.
       WriteProtocolLine(Console.OpenStandardOutput(), "READY");
@@ -619,15 +785,84 @@ public static class InertiaRuntimeJob {
           : 0;
         return Failure("wait-process", 14, waitError);
       }
+      UInt32 residualProcesses;
+      int queryError;
+      if (!TryActiveProcesses(job, out residualProcesses, out queryError)) {
+        return Failure("query-job", 29, queryError);
+      }
       if (!TerminateJobObject(job, 137)) {
         return Failure("terminate-job", 15, Marshal.GetLastWin32Error());
       }
-      for (int index = 0; index < 200 && ActiveProcesses(job) != 0; index += 1) {
-        System.Threading.Thread.Sleep(10);
+      string drainFailureStage;
+      int drainWin32Error;
+      int drainResult = DrainTerminatedJob(
+        job,
+        2000,
+        16,
+        out drainFailureStage,
+        out drainWin32Error
+      );
+      if (drainResult != 0) {
+        return Failure(
+          drainFailureStage,
+          drainResult,
+          drainWin32Error
+        );
       }
-      return ActiveProcesses(job) == 0 ? 0 : 16;
+      return residualProcesses == 0 ? 0 : 28;
     } finally {
       CloseHandle(job);
+    }
+  }
+
+  public static int GuardOwned(
+    string name,
+    string processIdValue,
+    string expectedParentValue,
+    string earliestCreationTimeMsValue
+  ) {
+    UInt32 processId;
+    UInt32 expectedParent;
+    double earliestCreationTimeMs;
+    if (
+      !UInt32.TryParse(processIdValue, NumberStyles.None,
+        CultureInfo.InvariantCulture, out processId)
+      || processId <= 1
+      || processId > Int32.MaxValue
+      || !UInt32.TryParse(expectedParentValue, NumberStyles.None,
+        CultureInfo.InvariantCulture, out expectedParent)
+      || expectedParent <= 1
+      || expectedParent > Int32.MaxValue
+      || !Double.TryParse(earliestCreationTimeMsValue,
+        NumberStyles.AllowDecimalPoint,
+        CultureInfo.InvariantCulture,
+        out earliestCreationTimeMs)
+      || earliestCreationTimeMs <= 0
+      || !ExpectedParent(processId, expectedParent)
+    ) return Failure("owned-process-identity", 30, 0);
+    Process process = null;
+    try {
+      process = Process.GetProcessById((Int32)processId);
+      UInt64 creationBits;
+      double creationTimeMs;
+      int identityError;
+      if (!ProcessIdentity(
+        process.Handle,
+        out creationBits,
+        out creationTimeMs,
+        out identityError
+      ) || creationTimeMs < earliestCreationTimeMs) {
+        return Failure("owned-process-identity", 30, identityError);
+      }
+      return Guard(
+        name,
+        process.Handle,
+        creationBits.ToString(CultureInfo.InvariantCulture)
+      );
+    } catch {
+      return Failure("capture-process-handle", 12, 0);
+    } finally {
+      if (process != null) process.Dispose();
     }
   }
 
@@ -640,10 +875,15 @@ public static class InertiaRuntimeJob {
     }
     try {
       if (!TerminateJobObject(job, 137)) return 20;
-      for (int index = 0; index < 200 && ActiveProcesses(job) != 0; index += 1) {
-        System.Threading.Thread.Sleep(10);
-      }
-      return ActiveProcesses(job) == 0 ? 0 : 21;
+      string failureStage;
+      int win32Error;
+      return DrainTerminatedJob(
+        job,
+        2000,
+        21,
+        out failureStage,
+        out win32Error
+      );
     } finally {
       CloseHandle(job);
     }
@@ -658,6 +898,11 @@ public static class InertiaRuntimeJob {
       if (executable == null) return Failure("self-integrity", 23, 0);
       if (String.Equals(arguments[0], "recover", StringComparison.Ordinal)) {
         return arguments.Length == 3 ? Recover(arguments[1]) : 24;
+      }
+      if (String.Equals(arguments[0], "guard-owned", StringComparison.Ordinal)) {
+        return arguments.Length == 6
+          ? GuardOwned(arguments[1], arguments[2], arguments[3], arguments[4])
+          : 24;
       }
       if (!String.Equals(arguments[0], "guard", StringComparison.Ordinal)
         || arguments.Length != 5) return 24;

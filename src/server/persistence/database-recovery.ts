@@ -31,6 +31,8 @@ import {
   removeInterruptedDatabaseFileFamily,
   waitForOperationOrAbort,
 } from "./database-backup-cancellation";
+import { cleanAutomaticBackupSidecars } from
+  "./database-backup-sidecar-cleanup";
 import { CURRENT_DATABASE_SCHEMA_VERSION } from "./migrations/catalog";
 import {
   indexColumns,
@@ -138,10 +140,6 @@ function backupPattern(databasePath: string, partial = false): RegExp {
     `^${escapedRegularExpression(safeDatabaseStem(databasePath))}-[0-9TZ]+(?:-[0-9]+)?\\.sqlite${partial ? "\\.partial" : ""}$`,
     "u",
   );
-}
-
-function partialBackupPattern(databasePath: string): RegExp {
-  return backupPattern(databasePath, true);
 }
 
 function ensureOwnedDirectory(path: string): void {
@@ -676,13 +674,7 @@ function availableName(directory: string, stem: string, suffix: string): string 
 function cleanInterruptedFiles(databasePath: string): void {
   const paths = databaseRecoveryPaths(databasePath);
   removeDatabaseFileFamily(paths.restorePartialPath);
-  if (!existsSync(paths.backupsDirectory)) return;
-  const partialPattern = partialBackupPattern(databasePath);
-  for (const filename of readdirSync(paths.backupsDirectory)) {
-    if (partialPattern.test(filename)) {
-      removeDatabaseFileFamily(join(paths.backupsDirectory, filename));
-    }
-  }
+  cleanAutomaticBackupSidecars(databasePath, paths.backupsDirectory);
 }
 
 function quarantinePrimary(
@@ -977,6 +969,10 @@ export class DatabaseBackupManager {
       }
       if (signal.aborted) throw new DatabaseBackupCancelledError();
       renameSync(partialPath, finalPath);
+      // Read-only integrity validation can still create WAL/SHM companions for
+      // a WAL-mode database. They belong to the unpublished partial name and
+      // must not accumulate after the validated database is published.
+      removeInterruptedDatabaseFileFamily(partialPath);
       chmodSync(finalPath, FILE_MODE);
       this.prune(finalPath);
       const result = {
@@ -1218,7 +1214,7 @@ export class DatabaseBackupManager {
       if (oldestIndex < 0) break;
       const [oldest] = retained.splice(oldestIndex, 1);
       if (!oldest) break;
-      removeIfRegularFile(oldest.path);
+      removeDatabaseFileFamily(oldest.path);
       totalBytes -= oldest.size;
     }
   }

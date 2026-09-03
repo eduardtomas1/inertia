@@ -97,11 +97,24 @@ describe("stable and Canary coexistence", () => {
 
     configuredPaths.length = 0;
     Object.assign(app, { isPackaged: false });
+    const isolatedTemporaryDirectory = join(tmpdir(), "isolated-electron-temp");
     initializeInertiaReleaseChannel(app, {
       NODE_ENV: "test",
       INERTIA_TEST_RELEASE_CHANNEL: "canary",
+      INERTIA_TEST_TEMP_DIR: isolatedTemporaryDirectory,
     });
-    expect(configuredPaths).toEqual([["userData", "/tmp/e2e-profile"]]);
+    expect(configuredPaths).toEqual([
+      ["temp", isolatedTemporaryDirectory],
+      ["userData", "/tmp/e2e-profile"],
+    ]);
+
+    configuredPaths.length = 0;
+    Object.assign(app, { isPackaged: false });
+    initializeInertiaReleaseChannel(app, {
+      NODE_ENV: "production",
+      INERTIA_TEST_TEMP_DIR: join(tmpdir(), "untrusted-production-temp"),
+    });
+    expect(configuredPaths).toEqual([]);
   });
 
   it("uses channel-specific package names on every release platform", () => {

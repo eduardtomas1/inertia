@@ -22,6 +22,7 @@ import {
   monitorLinuxGuardianTerminal,
   readLinuxGuardianReadyAsync,
   stopPendingLinuxGuardianAsync,
+  verifyLinuxRuntimeOwnedGuardianSandbox,
 } from "../../src/node/runtime-owned-process-linux";
 
 const linuxIt = process.platform === "linux" ? it : it.skip;
@@ -40,10 +41,60 @@ function exists(pid: number): boolean {
   } catch { return false; }
 }
 
-function compileGuardian(root: string): string {
+interface RecordedLinuxProcess {
+  readonly pid: number;
+  readonly startTimeTicks: string;
+}
+
+function recordLinuxProcess(pid: number): RecordedLinuxProcess | null {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+    const tail = stat.lastIndexOf(")");
+    const fields = tail >= 0 ? stat.slice(tail + 2).trim().split(/\s+/u) : [];
+    return fields[19] ? { pid, startTimeTicks: fields[19] } : null;
+  } catch {
+    return null;
+  }
+}
+
+function recordLinuxProcessTree(rootPid: number): RecordedLinuxProcess[] {
+  const recorded: RecordedLinuxProcess[] = [];
+  const pending = [rootPid];
+  const visited = new Set<number>();
+  while (pending.length > 0) {
+    const pid = pending.shift()!;
+    if (visited.has(pid)) continue;
+    visited.add(pid);
+    const identity = recordLinuxProcess(pid);
+    if (!identity) continue;
+    recorded.push(identity);
+    try {
+      const children = readFileSync(`/proc/${pid}/task/${pid}/children`, "utf8").trim();
+      if (children) pending.push(...children.split(/\s+/u).map(Number));
+    } catch { /* The exact process exited while its test identity was recorded. */ }
+  }
+  return recorded;
+}
+
+function killRecordedLinuxProcess(identity: RecordedLinuxProcess): void {
+  if (recordLinuxProcess(identity.pid)?.startTimeTicks !== identity.startTimeTicks) return;
+  try { process.kill(identity.pid, "SIGKILL"); } catch { /* The exact process already exited. */ }
+}
+
+function readRecordedPid(marker: string): number | null {
+  if (!existsSync(marker)) return null;
+  const pid = Number(readFileSync(marker, "utf8").trim());
+  if (!Number.isSafeInteger(pid) || pid <= 1) {
+    throw new Error("The guardian test recorded an invalid process id.");
+  }
+  return pid;
+}
+
+function compileGuardian(root: string, extraFlags: readonly string[] = []): string {
   const guardian = join(root, "guardian");
   execFileSync("cc", [
     "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
+    ...extraFlags,
     join(process.cwd(), "native/runtime-process-guardian/linux.c"), "-o", guardian,
   ]);
   return guardian;
@@ -84,6 +135,139 @@ function waitForPtyExit<T>(exited: Promise<T>, timeout = 5_000): Promise<T> {
 }
 
 describe("Linux runtime process guardian", () => {
+  linuxIt("admits watch mode without invoking the seccomp self-test", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-linux-watch-no-selftest-"));
+    roots.push(root);
+    const guardian = compileGuardian(root, [
+      "-DINERTIA_RUNTIME_GUARDIAN_TEST_HANG_SECCOMP_CHILD=1",
+    ]);
+    const executable = statSync(guardian, { bigint: true });
+    const guardianIdentity = {
+      guardianExecutableDevice: String(executable.dev),
+      guardianExecutableInode: String(executable.ino),
+    };
+    const child = spawn(guardian, [
+      "watch", String(process.pid),
+      guardianIdentity.guardianExecutableDevice,
+      guardianIdentity.guardianExecutableInode,
+      "--", "/bin/true",
+    ], { detached: true, stdio: "ignore" });
+    try {
+      const identity = await readLinuxGuardianReadyAsync(
+        child.pid!,
+        guardian,
+        process.pid,
+        undefined,
+        guardianIdentity,
+      );
+      expect(identity).not.toBeNull();
+      await expect(stopPendingLinuxGuardianAsync(
+        child.pid!,
+        guardian,
+        process.pid,
+        undefined,
+        guardianIdentity,
+      )).resolves.toBe(true);
+      await waitForChild(child);
+    } finally {
+      await stopChild(child);
+    }
+  }, 10_000);
+
+  linuxIt("runs the bounded seccomp self-test as an explicit preflight", () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-linux-selftest-")); roots.push(root);
+    const guardian = compileGuardian(root);
+    const executable = statSync(guardian, { bigint: true });
+    expect(verifyLinuxRuntimeOwnedGuardianSandbox(guardian)).toEqual({
+      guardianExecutableDevice: String(executable.dev),
+      guardianExecutableInode: String(executable.ino),
+    });
+  });
+
+  linuxIt("fails the explicit seccomp preflight closed", () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-linux-selftest-fail-")); roots.push(root);
+    const helper = join(root, "guardian");
+    writeFileSync(helper, "#!/bin/sh\nexit 1\n");
+    chmodSync(helper, 0o700);
+    expect(verifyLinuxRuntimeOwnedGuardianSandbox(helper)).toBeNull();
+  });
+
+  linuxIt("hard-kills a timed-out preflight helper", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-linux-selftest-timeout-"));
+    roots.push(root);
+    const marker = join(root, "helper.pid");
+    const helper = join(root, "guardian");
+    writeFileSync(helper, `#!/bin/sh\ntrap '' TERM\necho $$ > ${JSON.stringify(marker)}\nwhile :; do sleep 1; done\n`);
+    chmodSync(helper, 0o700);
+
+    const startedAt = Date.now();
+    expect(verifyLinuxRuntimeOwnedGuardianSandbox(helper)).toBeNull();
+    expect(Date.now() - startedAt).toBeLessThan(4_000);
+    const helperPid = readRecordedPid(marker);
+    if (helperPid !== null) await waitFor(() => !exists(helperPid));
+  }, 6_000);
+
+  linuxIt("kills a hung native self-test child with its timed-out parent", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-linux-selftest-child-"));
+    roots.push(root);
+    const marker = join(root, "child.pid");
+    const guardian = compileGuardian(root, [
+      "-DINERTIA_RUNTIME_GUARDIAN_TEST_HANG_SECCOMP_CHILD=1",
+      `-DINERTIA_RUNTIME_GUARDIAN_TEST_CHILD_PID_FILE=${JSON.stringify(marker)}`,
+    ]);
+
+    const startedAt = Date.now();
+    expect(verifyLinuxRuntimeOwnedGuardianSandbox(guardian)).toBeNull();
+    expect(Date.now() - startedAt).toBeLessThan(4_000);
+    const childPid = readRecordedPid(marker);
+    if (childPid !== null) await waitFor(() => !exists(childPid));
+  }, 6_000);
+
+  linuxIt("rejects a guardian inode swap after successful preflight", () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-linux-selftest-swap-"));
+    roots.push(root);
+    const replacementRoot = join(root, "replacement");
+    mkdirSync(replacementRoot);
+    const guardian = compileGuardian(root);
+    const verified = verifyLinuxRuntimeOwnedGuardianSandbox(guardian);
+    expect(verified).not.toBeNull();
+    const replacement = compileGuardian(replacementRoot);
+    renameSync(replacement, guardian);
+
+    const generation = "19000000-0000-4000-8000-000000000019:1";
+    const boot = "test:20000000-0000-4000-8000-000000000020";
+    expect(() => activateRuntimeOwnedProcessRegistry(root, generation, boot, {
+      platform: "linux",
+      darwinGuardianPath: guardian,
+      linuxGuardianExecutable: verified!,
+    })).toThrow("The verified Linux runtime process guardian changed.");
+  });
+
+  linuxIt("rejects new invocations after an active guardian inode swap", () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-linux-active-swap-"));
+    roots.push(root);
+    const replacementRoot = join(root, "replacement");
+    mkdirSync(replacementRoot);
+    const guardian = compileGuardian(root);
+    const verified = verifyLinuxRuntimeOwnedGuardianSandbox(guardian);
+    expect(verified).not.toBeNull();
+    const generation = "23000000-0000-4000-8000-000000000023:1";
+    const boot = "test:24000000-0000-4000-8000-000000000024";
+    const deactivate = activateRuntimeOwnedProcessRegistry(root, generation, boot, {
+      platform: "linux",
+      darwinGuardianPath: guardian,
+      linuxGuardianExecutable: verified!,
+    });
+    try {
+      const replacement = compileGuardian(replacementRoot);
+      renameSync(replacement, guardian);
+      expect(() => runtimeOwnedProcessInvocation("/bin/true", []))
+        .toThrow("The Linux runtime process guardian is invalid.");
+    } finally {
+      deactivate?.();
+    }
+  });
+
   linuxIt("passes the terminal seccomp self-test in the generated static binary", () => {
     const guardian = join(
       process.cwd(),
@@ -236,31 +420,85 @@ describe("Linux runtime process guardian", () => {
       join(process.cwd(), "tests/fixtures/linux-double-fork.c"), "-o", payload,
     ]);
 
+    const guardianPidPath = join(root, "guardian.pid");
     const harness = spawn(process.execPath, [
       join(process.cwd(), "tests/fixtures/linux-guardian-parent.cjs"),
-      guardian, payload, descendantPid, join(root, "guardian.pid"),
+      guardian, payload, descendantPid, guardianPidPath,
     ], { stdio: "ignore" });
-    await new Promise<void>((resolve, reject) => {
-      harness.once("exit", (code) => code === 0 ? resolve() : reject(new Error(`harness exited ${code}`)));
-    });
-    await waitFor(() => {
-      try { return readFileSync(descendantPid, "utf8").trim().length > 0; } catch { return false; }
-    });
-    const guardianPid = Number(readFileSync(join(root, "guardian.pid"), "utf8"));
-    const escapedPid = Number(readFileSync(descendantPid, "utf8"));
-    await waitFor(() => {
-      try {
-        return readFileSync(`/proc/${guardianPid}/comm`, "utf8").trim() === "inertia-exdone"
-          && !exists(escapedPid);
-      } catch { return false; }
-    });
-    const identity = execFileSync(guardian, ["identity", String(guardianPid)], { encoding: "utf8" }).trim().split("|");
     const executable = statSync(guardian, { bigint: true });
-    execFileSync(guardian, [
-      "signal", String(guardianPid), identity[3]!,
-      String(executable.dev), String(executable.ino), "kill",
-    ]);
-    await waitFor(() => !exists(guardianPid));
+    let guardianPid: number | null = null;
+    let guardianStartTime = "";
+    let escapedIdentity: RecordedLinuxProcess | null = null;
+    try {
+      await waitFor(() => readRecordedPid(guardianPidPath) !== null);
+      guardianPid = readRecordedPid(guardianPidPath)!;
+      const identity = execFileSync(
+        guardian,
+        ["identity", String(guardianPid)],
+        { encoding: "utf8" },
+      ).trim().split("|");
+      guardianStartTime = identity[3]!;
+      expect(guardianStartTime).toMatch(/^[1-9][0-9]*$/u);
+
+      await new Promise<void>((resolve, reject) => {
+        harness.once("exit", (code) => code === 0 ? resolve() : reject(new Error(`harness exited ${code}`)));
+      });
+      await waitFor(() => {
+        try { return readFileSync(descendantPid, "utf8").trim().length > 0; } catch { return false; }
+      });
+      const escapedPid = Number(readFileSync(descendantPid, "utf8"));
+      escapedIdentity = recordLinuxProcess(escapedPid);
+      await waitFor(() => {
+        try {
+          return readFileSync(`/proc/${guardianPid}/comm`, "utf8").trim() === "inertia-exdone"
+            && !exists(escapedPid);
+        } catch { return false; }
+      });
+      execFileSync(guardian, [
+        "signal", String(guardianPid), guardianStartTime,
+        String(executable.dev), String(executable.ino), "kill",
+      ]);
+      await waitFor(() => !exists(guardianPid!));
+    } finally {
+      const recordedPayloads = guardianPid === null
+        ? []
+        : recordLinuxProcessTree(guardianPid).slice(1);
+      if (escapedIdentity) recordedPayloads.push(escapedIdentity);
+      await stopChild(harness);
+      if (guardianPid !== null && guardianStartTime) {
+        try {
+          execFileSync(guardian, [
+            "signal", String(guardianPid), guardianStartTime,
+            String(executable.dev), String(executable.ino), "stop",
+          ]);
+        } catch { /* A terminal guardian rejects stop and is killed below. */ }
+        try {
+          await waitFor(() => {
+            try {
+              const comm = readFileSync(`/proc/${guardianPid}/comm`, "utf8").trim();
+              return comm === "inertia-done" || comm === "inertia-exdone";
+            } catch { return true; }
+          }, 2_000);
+        } catch { /* The identity-checked fallback below handles a regression. */ }
+        try {
+          execFileSync(guardian, [
+            "signal", String(guardianPid), guardianStartTime,
+            String(executable.dev), String(executable.ino), "kill",
+          ]);
+        } catch { /* The exact terminal guardian already exited or did not drain. */ }
+        const recordedGuardian = recordLinuxProcess(guardianPid);
+        if (recordedGuardian?.startTimeTicks === guardianStartTime) {
+          killRecordedLinuxProcess(recordedGuardian);
+        }
+      }
+      for (const identity of recordedPayloads) killRecordedLinuxProcess(identity);
+      await Promise.all(recordedPayloads.map(async ({ pid }) => {
+        try { await waitFor(() => !exists(pid), 2_000); } catch { /* Best-effort test cleanup. */ }
+      }));
+      if (guardianPid !== null) {
+        try { await waitFor(() => !exists(guardianPid!), 2_000); } catch { /* Best-effort test cleanup. */ }
+      }
+    }
   }, 30_000);
 
   linuxIt("routes forced cancellation through the guardian drain", async () => {
@@ -894,11 +1132,14 @@ describe("Linux runtime process guardian", () => {
     const invocation = runtimeOwnedProcessInvocation("/bin/sh", ["-c", `touch ${join(root, "ran")}`]);
     const own = vi.spyOn(RuntimeOwnedProcessJournal.prototype, "own")
       .mockReturnValueOnce(null);
-    let child: ChildProcess | null = null;
+    const childHolder: { current: ChildProcess | null } = { current: null };
     try {
       spawnRuntimeOwnedProcess(() => {
-        child = spawn(invocation.command, invocation.args, { detached: true, stdio: "ignore" });
-        return child;
+        childHolder.current = spawn(invocation.command, invocation.args, {
+          detached: true,
+          stdio: "ignore",
+        });
+        return childHolder.current;
       });
       await waitFor(() => own.mock.calls.length === 1);
       expect(new RuntimeOwnedProcessJournal(root, {
@@ -909,8 +1150,17 @@ describe("Linux runtime process guardian", () => {
       expect(() => statSync(join(root, "ran"))).toThrow();
     } finally {
       own.mockRestore();
-      if (child) await stopChild(child);
       deactivate?.();
+      const child = childHolder.current;
+      const pid = child?.pid ?? 0;
+      if (Number.isSafeInteger(pid) && pid > 1) {
+        try { process.kill(-pid, "SIGKILL"); } catch { /* The exact test group is gone. */ }
+        try { process.kill(pid, "SIGKILL"); } catch { /* The exact test leader is gone. */ }
+      }
+      if (child) await stopChild(child);
+      if (Number.isSafeInteger(pid) && pid > 1) {
+        await waitFor(() => !exists(pid));
+      }
     }
   }, 15_000);
 

@@ -123,6 +123,14 @@ export function initializeInertiaReleaseChannel(
     && !marker.includes("\0")
     ? dirname(marker)
     : null;
+  const testTemporaryDirectory = environment.INERTIA_TEST_TEMP_DIR;
+  if (
+    environment.NODE_ENV === "test"
+    && typeof testTemporaryDirectory === "string"
+    && isAbsolute(testTemporaryDirectory)
+    && testTemporaryDirectory.length <= 4_096
+    && !testTemporaryDirectory.includes("\0")
+  ) app.setPath("temp", testTemporaryDirectory);
   if (configuration.channel === "canary") {
     app.setName(configuration.productName);
     app.setPath("userData", packageSmokeRoot

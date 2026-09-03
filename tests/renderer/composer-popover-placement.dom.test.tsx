@@ -1,7 +1,11 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { act, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import {
+  useComposerMenus,
+} from "../../src/renderer/src/components/composer/useComposerMenus";
 import {
   positionComposerPopover,
 } from "../../src/renderer/src/utils/composerPopoverPlacement";
@@ -45,6 +49,7 @@ function rect({
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   document.body.replaceChildren();
   vi.restoreAllMocks();
 });
@@ -154,4 +159,61 @@ describe("composer popover DOM placement", () => {
     expect(popover.style.overflowY).toBe("auto");
     expect(popover.dataset.composerPopoverPositioned).toBe("true");
   });
+
+  it("keeps an explicitly opened section through later hover and pointer leave", () => {
+    vi.useFakeTimers();
+    const { result } = renderHook(() => useComposerMenus());
+    const layer = document.createElement("div");
+    const popover = document.createElement("div");
+    layer.dataset.composerSubmenuSide = "right";
+    layer.append(popover);
+    result.current.morePopoverRef.current = popover;
+
+    act(() => result.current.openMoreSection("speed"));
+    expect(result.current.moreSection).toBe("speed");
+
+    act(() => {
+      result.current.closeMorePreview();
+      vi.advanceTimersByTime(180);
+    });
+    expect(result.current.moreSection).toBe("speed");
+
+    act(() => result.current.previewMoreSection("reasoning"));
+    act(() => {
+      vi.advanceTimersByTime(140);
+    });
+    expect(result.current.moreSection).toBe("reasoning");
+
+    act(() => {
+      result.current.closeMorePreview();
+      vi.advanceTimersByTime(180);
+    });
+    expect(result.current.moreSection).toBe("reasoning");
+
+    act(() => result.current.returnToMoreRoot());
+    expect(result.current.moreSection).toBeNull();
+  });
+
+  it("dismisses a hover-only section after the pointer leaves", () => {
+    vi.useFakeTimers();
+    const { result } = renderHook(() => useComposerMenus());
+    const layer = document.createElement("div");
+    const popover = document.createElement("div");
+    layer.dataset.composerSubmenuSide = "right";
+    layer.append(popover);
+    result.current.morePopoverRef.current = popover;
+
+    act(() => result.current.previewMoreSection("reasoning"));
+    act(() => {
+      vi.advanceTimersByTime(140);
+    });
+    expect(result.current.moreSection).toBe("reasoning");
+
+    act(() => {
+      result.current.closeMorePreview();
+      vi.advanceTimersByTime(180);
+    });
+    expect(result.current.moreSection).toBeNull();
+  });
+
 });

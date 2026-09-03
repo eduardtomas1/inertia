@@ -19,6 +19,10 @@ const LINUX_RUNTIME_SHUTDOWN_DEADLINE_MS = 12_000;
 const DARWIN_RUNTIME_SHUTDOWN_DEADLINE_MS = 12_750;
 const RUNTIME_SUPERVISOR_SHUTDOWN_GRACE_HEADROOM_MS = 500;
 export const RUNTIME_SUPERVISOR_FORCE_KILL_WAIT_MS = 1_000;
+// Hosted ConPTY/provider descendants can remain active beyond the ordinary
+// 3-second terminal proof after TerminateJobObject succeeds. Preserve a full
+// 5-second native drain plus broker delivery and journal-settlement headroom.
+const WINDOWS_RUNTIME_RECOVERY_MINIMUM_MS = 6_000;
 
 export function runtimeShutdownDeadlineMs(
   platform: NodeJS.Platform = process.platform,
@@ -33,7 +37,21 @@ export function runtimeSupervisorShutdownEnvelopeMs(
   platform: NodeJS.Platform = process.platform,
 ): number {
   return runtimeSupervisorShutdownGraceMs(platform)
-    + RUNTIME_SUPERVISOR_FORCE_KILL_WAIT_MS * 2;
+    + RUNTIME_SUPERVISOR_FORCE_KILL_WAIT_MS * 2
+    + runtimeSupervisorRecoveryWaitMs(
+      platform,
+      RUNTIME_SUPERVISOR_FORCE_KILL_WAIT_MS,
+    );
+}
+
+export function runtimeSupervisorRecoveryWaitMs(
+  platform: NodeJS.Platform = process.platform,
+  forceKillWaitMs = RUNTIME_SUPERVISOR_FORCE_KILL_WAIT_MS,
+): number {
+  const genericRecoveryMs = forceKillWaitMs * 2;
+  return platform === "win32"
+    ? Math.max(genericRecoveryMs, WINDOWS_RUNTIME_RECOVERY_MINIMUM_MS)
+    : genericRecoveryMs;
 }
 
 export function runtimeSupervisorShutdownGraceMs(

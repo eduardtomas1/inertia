@@ -503,7 +503,7 @@ describe.skipIf(process.platform !== "linux")(
       hardStop(child);
     });
 
-    it("rejects malformed ownership instead of clearing the generation", () => {
+    it("rejects malformed ownership instead of clearing the generation", async () => {
       const directory = temporaryDirectory();
       activate(directory);
       const child = longRunningChild();
@@ -516,12 +516,12 @@ describe.skipIf(process.platform !== "linux")(
         mode: 0o600,
       });
 
-      expect(recoverRuntimeOwnedProcesses(
+      await expect(recoverRuntimeOwnedProcesses(
         directory,
         runtimeGenerationId,
         systemBootId,
-        { deadlineAt: Date.now() + 2_000 },
-      )).toBeNull();
+        { deadlineAt: Date.now() + 25 },
+      )).resolves.toBe(false);
       deactivate();
       hardStop(child);
     });
@@ -884,7 +884,7 @@ describe("cross-platform runtime owned process recovery", () => {
 
   it("recovers an exact Windows Job Object without rebooting", async () => {
     const directory = temporaryDirectory();
-    const { journal } = portableClaim(directory, "win32");
+    const { claim, journal } = portableClaim(directory, "win32");
     const containment = {
       kind: "windows-job-v1" as const,
       name: windowsRuntimeJobName(runtimeGenerationId),
@@ -894,7 +894,7 @@ describe("cross-platform runtime owned process recovery", () => {
       systemBootId,
       containment,
     )).toBe(true);
-    const recoverWindowsJob = vi.fn(async () => true);
+    const recoverWindowsJob = vi.fn(async () => journal.release(claim.ownershipId));
 
     await expect(recoverRuntimeOwnedProcesses(
       directory,
@@ -982,16 +982,16 @@ describe("cross-platform runtime owned process recovery", () => {
     writeFileSync(join(directory, marker), "{}", { mode: 0o600 });
     const recoverWindowsJob = vi.fn(async () => true);
 
-    expect(recoverRuntimeOwnedProcesses(
+    await expect(recoverRuntimeOwnedProcesses(
       directory,
       runtimeGenerationId,
       systemBootId,
       {
         platform: "win32",
-        deadlineAt: Date.now() + 2_000,
+        deadlineAt: Date.now() + 20,
         recoverWindowsJob,
       },
-    )).toBeNull();
+    )).resolves.toBe(false);
 
     expect(recoverWindowsJob).not.toHaveBeenCalled();
     expect(journal.records(runtimeGenerationId)).toEqual([claim]);

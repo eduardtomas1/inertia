@@ -1,4 +1,12 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import { Columns2, Plus, TerminalSquare, X } from "lucide-react";
 import { usePersistedSize } from "../hooks/usePersistedSize";
 import { runtimeCommandDelivery } from "../utils/connectionMessages";
@@ -30,7 +38,10 @@ function ScopedTerminalPanel(props: TerminalPanelProps): React.JSX.Element {
   const actionRequestId = props.actionId;
   const onActionRequestHandled = props.onActionStarted;
   const storageKey = terminalStorageKey(props.projectId, props.conversationId);
-  const [panelOwner] = useState(() => claimTerminalPanelOwner(storageKey));
+  const panelOwner = useId();
+  useLayoutEffect(() => {
+    claimTerminalPanelOwner(storageKey, panelOwner);
+  }, [panelOwner, storageKey]);
   const [initialTabs] = useState(() => readPersistedTerminalTabs(storageKey));
   const [tabs, setTabs] = useState<TerminalTab[]>(initialTabs);
   const [activeId, setActiveId] = useState(initialTabs[0].id);

@@ -8,7 +8,10 @@ const child = spawn(
   guardian,
   [
     "watch", String(process.pid), String(guardianIdentity.dev), String(guardianIdentity.ino),
-    "--", payload, descendantPidPath,
+    // Keep the direct owned payload alive until this runtime-parent harness
+    // exits. Otherwise the guardian can correctly drain a fast-exiting root
+    // before the double-forked descendant records the identity this test needs.
+    "--", payload, descendantPidPath, "keep-root",
   ],
   { detached: true, stdio: "ignore" },
 );

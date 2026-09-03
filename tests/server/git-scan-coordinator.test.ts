@@ -7,6 +7,10 @@ import {
   type GitScanExecution,
   type GitScanRequest,
 } from "../../src/server/git/scan-coordinator";
+import {
+  GIT_PROCESS_TREE_TERMINATION_FAILURE,
+  GitError,
+} from "../../src/server/git/types";
 
 const identity = validatedGitScanIdentity(
   "/validated/repository",
@@ -158,6 +162,65 @@ describe("Git scan coordinator", () => {
     expect(execute).toHaveBeenCalledOnce();
   });
 
+  it("does not admit scans for callers already cancelled or expired", async () => {
+    const coordinator = new GitScanCoordinator();
+    const cancelled = new AbortController();
+    cancelled.abort();
+    const unreachable = vi.fn(async () => ({ unreachable: true }));
+
+    await expect(coordinator.request(request({
+      signal: cancelled.signal,
+    }), unreachable)).rejects.toMatchObject({ code: "timeout" });
+    await expect(coordinator.request(request({
+      deadlineAt: Date.now() - 1,
+    }), unreachable)).rejects.toMatchObject({ code: "timeout" });
+    expect(unreachable).not.toHaveBeenCalled();
+
+    const { execute, releases } = controlledExecutions();
+    const active = coordinator.request(request(), execute);
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledOnce());
+    await expect(coordinator.request(request({
+      invalidation: 1,
+      signal: cancelled.signal,
+    }), execute)).rejects.toMatchObject({ code: "timeout" });
+
+    releases.shift()?.();
+    await expect(active).resolves.toEqual({
+      invalidation: 0,
+      scope: "status",
+    });
+    await coordinator.cancelAndDrain();
+    expect(execute).toHaveBeenCalledOnce();
+  });
+
+  it("observes admitted work when a deadline crosses during request setup", async () => {
+    const coordinator = new GitScanCoordinator();
+    const execute = vi.fn(async ({ signal }: GitScanExecution) =>
+      await new Promise<never>((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(new GitError(
+          "timeout",
+          "Injected scan cancellation.",
+        )), { once: true });
+      }));
+    const active = coordinator.request(request(), execute);
+    const activeRejected = expect(active).rejects.toMatchObject({
+      code: "timeout",
+    });
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledOnce());
+
+    const now = vi.spyOn(Date, "now");
+    now.mockReturnValueOnce(0).mockReturnValueOnce(2);
+    const expired = coordinator.request(request({
+      deadlineAt: 1,
+      invalidation: 1,
+    }), execute);
+    now.mockRestore();
+
+    await expect(expired).rejects.toMatchObject({ code: "timeout" });
+    await Promise.all([activeRejected, coordinator.cancelAndDrain()]);
+    expect(execute).toHaveBeenCalledOnce();
+  });
+
   it("retains ownership after timeout until cancellation cleanup settles", async () => {
     const reportLateFailure = vi.fn();
     const coordinator = new GitScanCoordinator(20, reportLateFailure);
@@ -192,5 +255,129 @@ describe("Git scan coordinator", () => {
     });
     expect(successor).toHaveBeenCalledOnce();
     expect(reportLateFailure).toHaveBeenCalledWith(cleanupFailure);
+  });
+
+  it("cancels and drains shared scans before runtime shutdown continues", async () => {
+    const coordinator = new GitScanCoordinator();
+    let releaseCleanup!: () => void;
+    const cleanupStarted = vi.fn();
+    const activeExecution = vi.fn(async ({ signal }: GitScanExecution) =>
+      await new Promise<never>((_resolve, reject) => {
+        signal.addEventListener("abort", () => {
+          cleanupStarted();
+          void new Promise<void>((resolve) => {
+            releaseCleanup = resolve;
+          }).then(() => reject(new Error("Cancellation cleanup settled.")));
+        }, { once: true });
+      }));
+    const trailingExecution = vi.fn(async () => ({ unreachable: true }));
+    const active = coordinator.request(request(), activeExecution);
+    const activeRejected = expect(active).rejects.toThrow(
+      "Cancellation cleanup settled.",
+    );
+    await vi.waitFor(() => expect(activeExecution).toHaveBeenCalledOnce());
+    const trailing = coordinator.request(
+      request({ invalidation: 1 }),
+      trailingExecution,
+    );
+    const trailingRejected = expect(trailing).rejects.toMatchObject({
+      code: "timeout",
+    });
+
+    let drained = false;
+    const drain = coordinator.cancelAndDrain().then(() => { drained = true; });
+    await vi.waitFor(() => expect(cleanupStarted).toHaveBeenCalledOnce());
+    expect(drained).toBe(false);
+    expect(trailingExecution).not.toHaveBeenCalled();
+
+    releaseCleanup();
+    await Promise.all([activeRejected, trailingRejected, drain]);
+    expect(drained).toBe(true);
+    await expect(coordinator.request(
+      request({ invalidation: 2 }),
+      async () => ({ reusable: true }),
+    )).resolves.toEqual({ reusable: true });
+  });
+
+  it("keeps admission closed while already-admitted runtime work drains", async () => {
+    const coordinator = new GitScanCoordinator();
+    let releaseRuntimeWork!: () => void;
+    const runtimeWork = new Promise<void>((resolve) => {
+      releaseRuntimeWork = resolve;
+    });
+
+    const drain = coordinator.cancelAndDrainWhile(async () => {
+      await runtimeWork;
+    });
+    await expect(coordinator.request(
+      request(),
+      async () => ({ unreachable: true }),
+    )).rejects.toMatchObject({ code: "timeout" });
+
+    releaseRuntimeWork();
+    await drain;
+    await expect(coordinator.request(
+      request({ invalidation: 1 }),
+      async () => ({ reusable: true }),
+    )).resolves.toEqual({ reusable: true });
+  });
+
+  it("cancels scans waiting for the active-key budget without executing them", async () => {
+    const coordinator = new GitScanCoordinator();
+    const execute = vi.fn(async ({ signal }: GitScanExecution) =>
+      await new Promise<never>((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(new GitError(
+          "timeout",
+          "Injected scan cancellation.",
+        )), { once: true });
+      }));
+    const scans = Array.from(
+      { length: GIT_SCAN_MAX_CONCURRENT_KEYS + 1 },
+      (_, index) => coordinator.request(request({
+        identity: validatedGitScanIdentity(
+          `/validated/drain-${index}`,
+          `drain-marker-${index}`,
+        ),
+      }), execute),
+    );
+    const rejectedScans = scans.map((scan) => expect(scan).rejects.toMatchObject({
+      code: "timeout",
+    }));
+    await vi.waitFor(() => {
+      expect(execute).toHaveBeenCalledTimes(GIT_SCAN_MAX_CONCURRENT_KEYS);
+    });
+
+    await coordinator.cancelAndDrain();
+    await Promise.all(rejectedScans);
+    expect(execute).toHaveBeenCalledTimes(GIT_SCAN_MAX_CONCURRENT_KEYS);
+  });
+
+  it("fails the drain closed when Git process-tree cleanup is unconfirmed", async () => {
+    const coordinator = new GitScanCoordinator();
+    const cleanupFailure = new GitError(
+      "operation-failed",
+      GIT_PROCESS_TREE_TERMINATION_FAILURE,
+    );
+    const execute = vi.fn(
+      async ({ signal }: GitScanExecution) =>
+        await new Promise<never>((_resolve, reject) => {
+          signal.addEventListener("abort", () => reject(cleanupFailure), {
+            once: true,
+          });
+        }),
+    );
+    const active = coordinator.request(
+      request(),
+      execute,
+    );
+    const activeRejected = expect(active).rejects.toBe(cleanupFailure);
+    await vi.waitFor(() => expect(execute).toHaveBeenCalledOnce());
+    const drainRejected = expect(coordinator.cancelAndDrain())
+      .rejects.toBe(cleanupFailure);
+    await Promise.all([activeRejected, drainRejected]);
+    await expect(coordinator.request(
+      request({ invalidation: 1 }),
+      async () => ({ reusable: true }),
+    )).resolves.toEqual({ reusable: true });
   });
 });

@@ -61,8 +61,9 @@ test("keeps an edit-heavy completed patch history terminal without historical an
   await revealVirtualizedTimelineTurn({
     page: app.page,
     target: activeTurn,
-    index: 9,
-    lastIndex: 9,
+    conversationId: fixture.conversation.id,
+    turnId: fixture.active.turn.id,
+    testInfo,
   });
 
   const historyButton = activeTurn.getByRole("button", {

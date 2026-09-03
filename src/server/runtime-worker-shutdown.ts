@@ -2,6 +2,7 @@ import type { RuntimeWorkerEvent } from "../node/runtime-process-protocol.js";
 import type { RuntimeShutdownUnconfirmedReason } from
   "../node/runtime-process-protocol.js";
 import type { RunningRuntime } from "./index.js";
+import { isGitProcessTreeTerminationFailure } from "./git/runner.js";
 import { RUNTIME_SHUTDOWN_DEADLINE_MS } from "./runtime-shutdown.js";
 
 interface RuntimeWorkerShutdownOptions {
@@ -10,6 +11,9 @@ interface RuntimeWorkerShutdownOptions {
   exitCode: number;
   closeBrokers: () => void;
   ownedProcessCleanupConfirmed?: () => boolean | Promise<boolean>;
+  noRuntimeCleanupProof?: {
+    readonly kind: "pre-registry-no-runtime";
+  };
   post: (event: RuntimeWorkerEvent) => void;
   awaitStoppedAcknowledgement: () => Promise<void>;
   exit: (code: number) => void;
@@ -79,23 +83,27 @@ export async function completeRuntimeWorkerShutdown(
   options: RuntimeWorkerShutdownOptions,
 ): Promise<void> {
   const deadlineAt = Date.now() + RUNTIME_SHUTDOWN_DEADLINE_MS;
-  // A failed/partial startup has no returned runtime whose full owner set can
-  // be drained. Treat it as unconfirmed even when the visible start promise
-  // rejected before the supervisor observed a child.
-  let shutdownConfirmed = options.runtime !== null;
+  // A failed/partial startup after ownership activation has no returned
+  // runtime whose full owner set can be drained. Only the explicit
+  // pre-registry path can prove that no runtime cleanup is required.
+  const preRegistryNoRuntime = options.runtime === null
+    && options.noRuntimeCleanupProof?.kind === "pre-registry-no-runtime";
+  let shutdownConfirmed = options.runtime !== null || preRegistryNoRuntime;
   let unconfirmedReason: RuntimeShutdownUnconfirmedReason =
     "incomplete-startup";
   try {
     await options.runtime?.close(options.cause);
   } catch (error) {
     shutdownConfirmed = false;
-    unconfirmedReason = error instanceof Error
-      && /shutdown deadline|before its shutdown deadline/iu.test(error.message)
-      ? "runtime-close-deadline"
-      : "runtime-close";
+    unconfirmedReason = isGitProcessTreeTerminationFailure(error)
+      ? "owned-process-cleanup"
+      : error instanceof Error
+        && /shutdown deadline|before its shutdown deadline/iu.test(error.message)
+        ? "runtime-close-deadline"
+        : "runtime-close";
   }
   options.closeBrokers();
-  if (shutdownConfirmed) {
+  if (shutdownConfirmed && !preRegistryNoRuntime) {
     try {
       const confirmation = options.ownedProcessCleanupConfirmed?.() ?? true;
       if (typeof confirmation === "boolean") shutdownConfirmed = confirmation;

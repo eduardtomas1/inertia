@@ -882,8 +882,7 @@ describe("TurnController authoritative lifecycle", () => {
       content: "Implement the first change.",
     });
     expect(runtime.controller.start(first.turn.id)).toBe(true);
-    expect(runtime.provider.input?.prompt.split(BUILD_MODE_INSTRUCTION))
-      .toHaveLength(2);
+    expect(runtime.provider.input?.prompt.split(BUILD_MODE_INSTRUCTION)).toHaveLength(2);
     runtime.provider.emit({
       ...identity(runtime),
       type: "session",
@@ -967,6 +966,7 @@ describe("TurnController authoritative lifecycle", () => {
     expect(runtime.provider.input).toBeNull();
     resolveBefore();
     await flushPromises();
+    expect(runtime.provider.runCount).toBe(1);
     expect(runtime.provider.input?.turnId).toBe(queued.turn.id);
     runtime.provider.resolve({ status: "completed", text: "Captured." });
     await flushPromises();

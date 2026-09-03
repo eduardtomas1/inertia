@@ -5,6 +5,7 @@ import {
   RUNTIME_SHUTDOWN_DEADLINE_MS,
   runRuntimeShutdownPhases,
 } from "../../src/server/runtime-shutdown";
+import { GitError } from "../../src/server/git";
 import { completeRuntimeWorkerShutdown } from "../../src/server/runtime-worker-shutdown";
 
 function runtimeWithClose(
@@ -48,6 +49,65 @@ function runtimeWithClose(
 }
 
 describe("runtime worker shutdown", () => {
+  it("settles a pre-registry startup failure without incomplete-startup cleanup", async () => {
+    const post = vi.fn();
+    const exit = vi.fn();
+    const ownedProcessCleanupConfirmed = vi.fn(() => false);
+    let acknowledgeStopped!: () => void;
+    const stoppedAcknowledged = new Promise<void>((resolve) => {
+      acknowledgeStopped = resolve;
+    });
+    const shutdown = completeRuntimeWorkerShutdown({
+      runtime: null,
+      cause: "runtime-crash",
+      exitCode: 1,
+      closeBrokers: vi.fn(),
+      ownedProcessCleanupConfirmed,
+      noRuntimeCleanupProof: { kind: "pre-registry-no-runtime" },
+      post,
+      awaitStoppedAcknowledgement: () => stoppedAcknowledged,
+      exit,
+    });
+
+    await vi.waitFor(() => {
+      expect(post).toHaveBeenCalledWith({ type: "runtime.stopped" });
+    });
+    expect(post).not.toHaveBeenCalledWith(expect.objectContaining({
+      type: "runtime.shutdown-unconfirmed",
+    }));
+    expect(ownedProcessCleanupConfirmed).not.toHaveBeenCalled();
+    expect(exit).not.toHaveBeenCalled();
+    acknowledgeStopped();
+    await shutdown;
+    expect(exit).toHaveBeenCalledWith(1);
+  });
+
+  it("rejects a pre-registry proof when a runtime exists", async () => {
+    const post = vi.fn();
+    const exit = vi.fn();
+    const ownedProcessCleanupConfirmed = vi.fn(() => false);
+
+    await completeRuntimeWorkerShutdown({
+      runtime: runtimeWithClose(vi.fn(async () => undefined)),
+      cause: "runtime-shutdown",
+      exitCode: 0,
+      closeBrokers: vi.fn(),
+      ownedProcessCleanupConfirmed,
+      noRuntimeCleanupProof: { kind: "pre-registry-no-runtime" },
+      post,
+      awaitStoppedAcknowledgement: async () => undefined,
+      exit,
+    });
+
+    expect(ownedProcessCleanupConfirmed).toHaveBeenCalledOnce();
+    expect(post).toHaveBeenCalledWith({
+      type: "runtime.shutdown-unconfirmed",
+      reason: "owned-process-cleanup",
+    });
+    expect(post).not.toHaveBeenCalledWith({ type: "runtime.stopped" });
+    expect(exit).not.toHaveBeenCalled();
+  });
+
   it.runIf(process.platform === "darwin")(
     "allows delayed macOS guardian admission and retirement inside the shared deadline",
     async () => {
@@ -135,6 +195,32 @@ describe("runtime worker shutdown", () => {
       reason: "runtime-close",
     });
     expect(post).not.toHaveBeenCalledWith({ type: "runtime.stopped" });
+    expect(exit).not.toHaveBeenCalled();
+  });
+
+  it("identifies an escaped Git process tree as owned-process cleanup", async () => {
+    const post = vi.fn();
+    const exit = vi.fn();
+
+    await completeRuntimeWorkerShutdown({
+      runtime: runtimeWithClose(vi.fn(async () => {
+        throw new GitError(
+          "operation-failed",
+          "Git stopped responding, and its process tree could not be confirmed stopped.",
+        );
+      })),
+      cause: "runtime-shutdown",
+      exitCode: 0,
+      closeBrokers: vi.fn(),
+      post,
+      awaitStoppedAcknowledgement: async () => undefined,
+      exit,
+    });
+
+    expect(post).toHaveBeenCalledWith({
+      type: "runtime.shutdown-unconfirmed",
+      reason: "owned-process-cleanup",
+    });
     expect(exit).not.toHaveBeenCalled();
   });
 

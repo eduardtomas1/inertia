@@ -642,6 +642,26 @@ export function ChatWorkspace({
     }, READER_INTENT_GUARD_MS);
   }, [clearPendingFinalAnswerNavigation]);
 
+  const noteResponseTimelineNavigationIntent = useCallback((): void => {
+    noteReaderIntent();
+    if (!conversationId) return;
+    navigationRef.current = {
+      mode: "reading-history",
+      conversationId,
+    };
+    dispatchNavigation({
+      type: "reader.scrolled",
+      conversationId,
+      followsLatest: false,
+      intentional: true,
+    });
+    onLatestContentVisibilityChange?.(false);
+  }, [
+    conversationId,
+    noteReaderIntent,
+    onLatestContentVisibilityChange,
+  ]);
+
   const noteReaderKeyboardIntent = (
     event: React.KeyboardEvent<HTMLDivElement>,
   ): void => {
@@ -848,7 +868,7 @@ export function ChatWorkspace({
               onTurnAnchorSettled={onTurnAnchorSettled}
               onTurnAnchorCancelled={onTurnAnchorCancelled}
               onFinalAnswerAutoScroll={onFinalAnswerAutoScroll}
-              onReaderNavigationIntent={noteReaderIntent}
+              onReaderNavigationIntent={noteResponseTimelineNavigationIntent}
               scrollElementRef={scrollRef}
               timelineElementRef={timelineRef}
               checkpointRestoreDisabled={conversation.status === "running"

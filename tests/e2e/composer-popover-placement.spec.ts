@@ -363,9 +363,10 @@ test("keeps every composer utility popover inside both split panes", async (
   await expect(speedItem).toBeVisible();
   await speedItem.focus();
   await speedItem.press("ArrowRight");
-  const speedMenu = secondary.locator(
-    '.composer-more-submenu[aria-label="Response speed options"]',
-  );
+  const speedMenu = secondary.getByRole("menu", {
+    name: "Response speed options",
+    exact: true,
+  });
   await expect(speedMenu).toBeVisible();
   await expect(speedMenu.getByRole("menuitemradio").first()).toBeFocused();
   await expectContained(secondaryRootSurface);

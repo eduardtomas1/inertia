@@ -25,17 +25,29 @@ import {
 } from "../e2e/support/electron-app-lifecycle";
 import { selectWorkspaceTool } from "../e2e/support/workspace-tools";
 import { driveBoundedWheelNavigation } from "../helpers/bounded-wheel-navigation";
+import { captureBoundedFailureDiagnostic } from "../helpers/bounded-failure-diagnostic";
+import {
+  AsyncCleanupCoordinator,
+  type AsyncCleanupOwnership,
+} from "../helpers/async-cleanup-coordinator";
+import {
+  completeDesktopBenchmarkShutdown,
+  type DesktopBenchmarkShutdown,
+} from "../helpers/desktop-benchmark-app-shutdown";
 import {
   distribution,
   summarizeStreamingBenchmarkEvidence,
+  summarizeVisibleStreamingCadence,
 } from "../helpers/desktop-benchmark-summary";
 import { streamingReaderActivityReceiptStage } from "../../src/renderer/src/utils/testStreamingTrace";
 import {
   beginStreamingReaderActivity,
   beginStreamingReaderAwayActivity,
   cleanupStreamingCompletionGate,
+  releaseStreamingCadence,
   releaseStreamingCompletion,
   STREAMING_COMPLETION_GATE_TIMEOUT_MS,
+  STREAMING_PROGRESSIVE_PAINT_COUNT,
   streamingReaderActivityMarker,
   streamingAppServer,
   waitForStreamingCompletionCleanup,
@@ -61,10 +73,11 @@ const CI_STREAM_LONG_TASK_CATASTROPHIC_MS = 2_000;
 // These surfaces are loaded during idle time. Their first interaction should
 // therefore be a synchronous render, not React's delayed first lazy handoff.
 const CI_PREFETCHED_SURFACE_TARGET_MS = 100;
+const AUTHORITATIVE_SCROLL_EDGE_TOLERANCE_PX = 2;
+const AUTHORITATIVE_SCROLL_MAX_PREFLIGHT_FRAMES = 8;
 // Prove progressive rendering before the scenario deliberately leaves the live
 // edge. Follow-latest assertions separately prove that returning to the live
 // answer restores the final settled view without rewarding broken auto-follow.
-const CI_STREAM_MIN_VISIBLE_UPDATES = 4;
 const CI_STREAM_VISIBLE_UPDATE_BARRIER_TIMEOUT_MS = 5_000;
 // Provider admission and the post-ready reader phase each have one bounded
 // fixture window. This outer guard covers both without changing paint targets.
@@ -73,6 +86,14 @@ const STREAMING_MEASUREMENT_TIMEOUT_MS =
 const TERMINAL_CLOSE_ASSERTION_TIMEOUT_MS = terminalCloseTimeoutMs(
   process.platform,
 ) + 1_000;
+// A wedged renderer is itself useful failure evidence. Never let reading that
+// evidence consume the benchmark timeout or prevent Electron cleanup.
+const FAILURE_DIAGNOSTIC_TIMEOUT_MS = 1_000;
+const BENCHMARK_BODY_SETTLE_TIMEOUT_MS = 5_000;
+// The cleanup coordinator deliberately awaits every acquisition that started
+// before teardown. Give Playwright's launcher its own deadline so that wait is
+// bounded without allowing a late ElectronApplication to escape afterEach.
+const ELECTRON_LAUNCH_TIMEOUT_MS = 30_000;
 const APP_SHUTDOWN_ASSERTION_TIMEOUT_MS = runtimeSupervisorShutdownEnvelopeMs(
   process.platform,
 ) + 1_000;
@@ -84,6 +105,8 @@ const FOLLOW_LATEST_LIVE_EDGE_THRESHOLD = 120;
 interface RuntimeSnapshot {
   phase: string;
   pid: number | null;
+  lastError?: string | null;
+  restartScheduled?: boolean;
 }
 
 interface AppRun {
@@ -91,7 +114,24 @@ interface AppRun {
   page: Page;
   startupMs: number;
   firstWindowMs: number;
+  cleanup: AsyncCleanupOwnership<BenchmarkAppResource, BenchmarkAppShutdown>;
 }
+
+interface BenchmarkAppResource {
+  electronApp: ElectronApplication;
+  runtimePid: number | null;
+}
+
+type BenchmarkAppShutdown = DesktopBenchmarkShutdown;
+
+interface BenchmarkCleanupContext {
+  applications: AsyncCleanupCoordinator<BenchmarkAppResource, BenchmarkAppShutdown>;
+  fixtureRoots: AsyncCleanupCoordinator<string, void>;
+  bodyFinished: Promise<void>;
+  finishBody(): void;
+}
+
+let activeBenchmarkCleanup: BenchmarkCleanupContext | null = null;
 
 interface StreamingTraceMarker {
   stage: string;
@@ -115,6 +155,13 @@ interface StreamingPaintMeasurement {
   frameBudgetMs: number;
   rendererTraceMarks: StreamingTraceMarker[];
 }
+
+type StreamingPaintObservation = Omit<
+  StreamingPaintMeasurement,
+  "medianVisibleGapMs" | "p95VisibleGapMs" | "visibleUpdatesPerSecond"
+> & {
+  readonly visibleUpdateGaps: readonly number[];
+};
 
 const stageMetricDefinitions = [
   ["providerDeltaToChannelAcceptedMs", "provider-delta-received", "delta-accepted-by-channel"],
@@ -412,39 +459,55 @@ function seedRuntime(dataDirectory: string, workspace: string): BenchmarkConvers
 }
 
 async function launchApp(
+  cleanupContext: BenchmarkCleanupContext,
   dataDirectory: string,
   workspace: string,
   profile: string,
 ): Promise<AppRun> {
+  const acquisition = cleanupContext.applications.beginAcquisition();
   const startedAt = performance.now();
-  const electronApp = await electron.launch({
-    args: [".", `--user-data-dir=${profile}`],
-    env: {
-      ...process.env,
-      NODE_ENV: "test",
-      INERTIA_STREAMING_TRACE: "1",
-      INERTIA_DATA_DIR: dataDirectory,
-      INERTIA_WORKSPACE_DIR: workspace,
-      INERTIA_PACKAGE_SMOKE_CODEX_EXPECTED: process.execPath,
-    },
-  });
-  const page = await electronApp.firstWindow();
-  const firstWindowMs = performance.now() - startedAt;
-  await page.locator('.app-shell[data-connection-status="online"]').waitFor();
-  await page.getByRole("textbox", { name: "Message" }).first().waitFor();
-  await page.evaluate(() => {
-    Reflect.set(globalThis, "__inertiaTestStreamingTrace", (stage: string) => {
-      performance.mark(`inertia-stream:${stage}`, {
-        detail: { wallTimeMs: Date.now() },
-      });
+  try {
+    const electronApp = await electron.launch({
+      args: [".", `--user-data-dir=${profile}`],
+      timeout: ELECTRON_LAUNCH_TIMEOUT_MS,
+      env: {
+        ...process.env,
+        NODE_ENV: "test",
+        INERTIA_STREAMING_TRACE: "1",
+        INERTIA_DATA_DIR: dataDirectory,
+        INERTIA_WORKSPACE_DIR: workspace,
+        INERTIA_PACKAGE_SMOKE_CODEX_EXPECTED: process.execPath,
+      },
     });
-  });
-  return {
-    electronApp,
-    page,
-    startupMs: performance.now() - startedAt,
-    firstWindowMs,
-  };
+    const resource: BenchmarkAppResource = { electronApp, runtimePid: null };
+    const cleanup = acquisition.adopt(resource);
+    try {
+      const page = await electronApp.firstWindow();
+      const firstWindowMs = performance.now() - startedAt;
+      await page.locator('.app-shell[data-connection-status="online"]').waitFor();
+      await page.getByRole("textbox", { name: "Message" }).first().waitFor();
+      await page.evaluate(() => {
+        Reflect.set(globalThis, "__inertiaTestStreamingTrace", (stage: string) => {
+          performance.mark(`inertia-stream:${stage}`, {
+            detail: { wallTimeMs: Date.now() },
+          });
+        });
+      });
+      return {
+        electronApp,
+        page,
+        startupMs: performance.now() - startedAt,
+        firstWindowMs,
+        cleanup,
+      };
+    } catch (error) {
+      await cleanup.close().catch(() => undefined);
+      throw error;
+    }
+  } catch (error) {
+    acquisition.abandon();
+    throw error;
+  }
 }
 
 async function runtimeSnapshot(electronApp: ElectronApplication): Promise<RuntimeSnapshot> {
@@ -521,7 +584,11 @@ async function authoritativeScrollSample(page: Page, expectedRows = 300) {
   const viewportLocator = page.locator(".message-scroll");
   await viewportLocator.hover();
   await page.mouse.wheel(0, -1);
-  const result = await viewportLocator.evaluate(async (viewport, expectedRows) => {
+  const result = await viewportLocator.evaluate(async (viewport, {
+    edgeTolerancePx,
+    expectedRows,
+    maximumPreflightFrames,
+  }) => {
     const frameIntervals: number[] = [];
     const topPositions: number[] = [];
     const bottomGaps: number[] = [];
@@ -547,6 +614,57 @@ async function authoritativeScrollSample(page: Page, expectedRows = 300) {
     const waitForFrame = (): Promise<number> => new Promise((resolveFrame) => {
       requestAnimationFrame((now) => resolveFrame(now));
     });
+    const scrollTo = (target: number): void => {
+      viewport.dispatchEvent(new WheelEvent("wheel", {
+        bubbles: true,
+        deltaY: target === 0 ? -1 : 1,
+      }));
+      viewport.scrollTop = target;
+    };
+    // Calibrate the dynamically measured bottom range before starting the
+    // exact 120-frame sample. The virtualizer wraps ResizeObserver work in
+    // rAF, so newly appended rows need a bounded geometry handshake rather
+    // than an assumed single-frame warmup.
+    scrollTo(viewport.scrollHeight);
+    let previousPreflightHeight: number | null = null;
+    let stablePreflightFrames = 0;
+    let preflightFrames = 0;
+    let preflightHeightChanges = 0;
+    let preflightBottomGap = Number.POSITIVE_INFINITY;
+    while (
+      stablePreflightFrames < 2
+      && preflightFrames < maximumPreflightFrames
+    ) {
+      viewport.scrollTop = viewport.scrollHeight;
+      await waitForFrame();
+      preflightFrames += 1;
+      const currentHeight = viewport.scrollHeight;
+      preflightBottomGap = currentHeight
+        - viewport.clientHeight
+        - viewport.scrollTop;
+      const heightStable = previousPreflightHeight !== null
+        && currentHeight === previousPreflightHeight;
+      if (previousPreflightHeight !== null && !heightStable) {
+        preflightHeightChanges += 1;
+      }
+      stablePreflightFrames = heightStable
+        && preflightBottomGap <= edgeTolerancePx
+        ? stablePreflightFrames + 1
+        : 0;
+      previousPreflightHeight = currentHeight;
+    }
+    if (stablePreflightFrames < 2) {
+      throw new Error(
+        `The authoritative bottom range did not stabilize within ${maximumPreflightFrames} preflight frames: gap ${preflightBottomGap}.`,
+      );
+    }
+    scrollTo(0);
+    await waitForFrame();
+    if (viewport.scrollTop > edgeTolerancePx) {
+      throw new Error(
+        `The authoritative top range did not stabilize after preflight: ${viewport.scrollTop}.`,
+      );
+    }
     let longTaskObserver: PerformanceObserver | null = null;
     try {
       longTaskObserver = new PerformanceObserver((list) => {
@@ -556,15 +674,6 @@ async function authoritativeScrollSample(page: Page, expectedRows = 300) {
     } catch {
       longTaskObserver = null;
     }
-    const scrollTo = (target: number): void => {
-      viewport.dispatchEvent(new WheelEvent("wheel", {
-        bubbles: true,
-        deltaY: target === 0 ? -1 : 1,
-      }));
-      viewport.scrollTop = target;
-    };
-    scrollTo(0);
-    await waitForFrame();
     let previous = performance.now();
     let previousRowCount = feed.querySelectorAll(".response-virtual-item").length;
     for (let index = 0; index < 120; index += 1) {
@@ -592,10 +701,10 @@ async function authoritativeScrollSample(page: Page, expectedRows = 300) {
       if (target > 0 && Math.abs(top - before) < 1) {
         throw new Error("A benchmark scroll assignment was a no-op.");
       }
-      if (index % 2 === 0 && bottomGap > 2) {
+      if (index % 2 === 0 && bottomGap > edgeTolerancePx) {
         throw new Error(`The viewport did not reach the bottom: gap ${bottomGap}.`);
       }
-      if (index % 2 === 1 && top > 2) {
+      if (index % 2 === 1 && top > edgeTolerancePx) {
         throw new Error(`The viewport did not reach the top: ${top}.`);
       }
       topPositions.push(top);
@@ -649,6 +758,11 @@ async function authoritativeScrollSample(page: Page, expectedRows = 300) {
         maximum: Math.max(...rowCounts),
       },
       layoutMeasurementMs: summarize(layoutMeasurementMs),
+      preflight: {
+        bottomGap: preflightBottomGap,
+        frames: preflightFrames,
+        heightChanges: preflightHeightChanges,
+      },
       totalTimelineRows: totalRows,
       maximumDomDescendants: maximumDescendants,
       scrollHeight: viewport.scrollHeight,
@@ -657,7 +771,11 @@ async function authoritativeScrollSample(page: Page, expectedRows = 300) {
         ...bottomGaps.filter((_, index) => index % 2 === 0),
       ),
     };
-  }, expectedRows);
+  }, {
+    edgeTolerancePx: AUTHORITATIVE_SCROLL_EDGE_TOLERANCE_PX,
+    expectedRows,
+    maximumPreflightFrames: AUTHORITATIVE_SCROLL_MAX_PREFLIGHT_FRAMES,
+  });
   return result;
 }
 
@@ -715,7 +833,7 @@ async function streamingResponsivenessSample(
     measurementTimeoutMs,
     sampleNumber,
   }) => (
-      new Promise<StreamingPaintMeasurement>((resolveMeasurement, rejectMeasurement) => {
+      new Promise<StreamingPaintObservation>((resolveMeasurement, rejectMeasurement) => {
       for (const entry of performance.getEntriesByType("mark")) {
         if (entry.name.startsWith("inertia-stream:")) {
           performance.clearMarks(entry.name);
@@ -785,21 +903,14 @@ async function streamingResponsivenessSample(
         const stableFrames = frameIntervals.filter((value) => value > 0 && value < 50);
         const observedFrameMs = percentile(stableFrames, 0.5) || 16.667;
         const frameBudgetMs = Math.min(25, Math.max(10, observedFrameMs * 1.75));
-        const visibleDurationMs = Math.max(
-          1,
-          visibleUpdateGaps.reduce((sum, gap) => sum + gap, 0),
-        );
         resolveMeasurement({
           firstProviderDeltaToPaintMs,
           completionToFinalPaintMs,
           terminalAnswerBottomGapAtPaint:
             terminalAnswerBottomGapAtPaint ?? Number.POSITIVE_INFINITY,
           terminalAnswerVisibleAtPaint,
-          medianVisibleGapMs: percentile(visibleUpdateGaps, 0.5),
-          p95VisibleGapMs: percentile(visibleUpdateGaps, 0.95),
+          visibleUpdateGaps,
           visibleUpdates: visibleUpdates.length,
-          visibleUpdatesPerSecond:
-            visibleUpdateGaps.length / (visibleDurationMs / 1_000),
           longTasks: longTaskDurations.length,
           longTaskTotalMs: longTaskDurations.reduce((sum, value) => sum + value, 0),
           frames: frameIntervals.length,
@@ -946,15 +1057,26 @@ async function streamingResponsivenessSample(
   await page.locator('[data-stream-renderer="plain-text"]').waitFor({
     timeout: STREAMING_COMPLETION_GATE_TIMEOUT_MS,
   });
-  await expect.poll(
-    () => page.evaluate(() => performance.getEntriesByName(
-      "inertia-stream:stream-paint",
-    ).length),
-    {
-      message: `streaming sample ${sampleNumber} should paint progressively before reader navigation`,
-      timeout: CI_STREAM_VISIBLE_UPDATE_BARRIER_TIMEOUT_MS,
-    },
-  ).toBeGreaterThanOrEqual(CI_STREAM_MIN_VISIBLE_UPDATES);
+  const progressivePaintDeadline = Date.now()
+    + CI_STREAM_VISIBLE_UPDATE_BARRIER_TIMEOUT_MS;
+  for (
+    let expectedPaintCount = 1;
+    expectedPaintCount <= STREAMING_PROGRESSIVE_PAINT_COUNT;
+    expectedPaintCount += 1
+  ) {
+    const paintHandle = await page.waitForFunction(
+      (minimumPaintCount) => performance.getEntriesByName(
+        "inertia-stream:stream-paint",
+      ).length >= minimumPaintCount,
+      expectedPaintCount,
+      {
+        polling: "raf",
+        timeout: Math.max(1, progressivePaintDeadline - Date.now()),
+      },
+    );
+    await paintHandle.dispose();
+    await releaseStreamingCadence(workspace, sampleNumber);
+  }
   await waitForStreamingCompletionReady(workspace, sampleNumber);
   await beginStreamingReaderActivity(workspace, sampleNumber);
   await waitForStreamingReaderActivity(workspace, sampleNumber);
@@ -986,7 +1108,24 @@ async function streamingResponsivenessSample(
   ).filter({ hasText: `STREAM_PROVIDER_COMPLETE_${sampleNumber}_` }).last();
   await expect(finalAnswer).toHaveCount(0);
   const streamingBottomGapBeforeReaderNavigation = await liveViewport.evaluate(
-    (viewport) => viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop,
+    async (viewport, frameTimeoutMs) => {
+      // The keyed receipt is emitted from the same effect that deliberately
+      // schedules follow-latest for the next paint. Measure after that one
+      // promised frame so host/renderer IPC timing cannot sample between the
+      // commit and its scroll, while retaining the exact spatial threshold.
+      await new Promise<void>((resolveFrame, rejectFrame) => {
+        const frame = requestAnimationFrame(() => {
+          clearTimeout(timeout);
+          resolveFrame();
+        });
+        const timeout = window.setTimeout(() => {
+          cancelAnimationFrame(frame);
+          rejectFrame(new Error("Follow-latest did not reach its next paint."));
+        }, frameTimeoutMs);
+      });
+      return viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop;
+    },
+    CI_STREAM_FIRST_PAINT_CATASTROPHIC_MS,
   );
   expect(streamingBottomGapBeforeReaderNavigation)
     .toBeLessThanOrEqual(FOLLOW_LATEST_LIVE_EDGE_THRESHOLD);
@@ -1083,7 +1222,14 @@ async function streamingResponsivenessSample(
     await releaseStreamingCompletion(workspace, sampleNumber);
     const measurementOutcome = await measurementOutcomePromise;
     if (measurementOutcome.status === "rejected") throw measurementOutcome.error;
-    visible = measurementOutcome.value;
+    const { visibleUpdateGaps, ...paintObservation } = measurementOutcome.value;
+    visible = {
+      ...paintObservation,
+      ...summarizeVisibleStreamingCadence(
+        visibleUpdateGaps,
+        STREAMING_PROGRESSIVE_PAINT_COUNT,
+      ),
+    };
     await waitForStreamingCompletionCleanup(workspace, sampleNumber);
     expect(visible.terminalAnswerVisibleAtPaint).toBe(true);
     expect(visible.terminalAnswerBottomGapAtPaint)
@@ -1416,19 +1562,34 @@ async function openAndCloseToolCycle(page: Page): Promise<void> {
       { timeout: TERMINAL_CLOSE_ASSERTION_TIMEOUT_MS },
     );
   } catch (cause) {
-    const diagnostics = {
-      alerts: await tools.getByRole("alert").allTextContents(),
-      closeDisabled: await closeButton.isDisabled().catch(() => null),
-      terminalIds: await panels.evaluateAll((elements) => elements.map(
-        (element) => element.getAttribute("data-terminal-id"),
-      )),
-      terminalStates: await panels.evaluateAll((elements) => elements.map(
-        (element) => element.getAttribute("data-terminal-state"),
-      )),
-      terminalOutput: await panels.evaluateAll((elements) => elements.map(
-        (element) => element.textContent?.slice(-1_000) ?? "",
-      )),
-    };
+    const diagnostics = await captureBoundedFailureDiagnostic(
+      () => page.evaluate(() => {
+        const workspaceTools = document.querySelector<HTMLElement>(
+          '.workspace-panel[aria-label="Workspace tools"]',
+        );
+        const terminalPanels = [...(workspaceTools?.querySelectorAll<HTMLElement>(
+          ".terminal-panel[data-terminal-id]",
+        ) ?? [])];
+        const closeTerminal = [...(workspaceTools?.querySelectorAll<HTMLButtonElement>(
+          "button",
+        ) ?? [])].find((button) => button.getAttribute("aria-label") === "Close terminal");
+        return {
+          alerts: [...(workspaceTools?.querySelectorAll<HTMLElement>('[role="alert"]') ?? [])]
+            .map((element) => element.textContent ?? ""),
+          closeDisabled: closeTerminal?.disabled ?? null,
+          terminalIds: terminalPanels.map(
+            (element) => element.getAttribute("data-terminal-id"),
+          ),
+          terminalStates: terminalPanels.map(
+            (element) => element.getAttribute("data-terminal-state"),
+          ),
+          terminalOutput: terminalPanels.map(
+            (element) => element.textContent?.slice(-1_000) ?? "",
+          ),
+        };
+      }),
+      FAILURE_DIAGNOSTIC_TIMEOUT_MS,
+    );
     throw new Error(
       `Rapid terminal close did not settle: ${JSON.stringify(diagnostics)}`,
       { cause },
@@ -1526,48 +1687,123 @@ async function prefetchedOverlayMeasurements(page: Page): Promise<{
 }
 
 async function closeApp(
-  electronApp: ElectronApplication,
+  resource: BenchmarkAppResource,
+): Promise<BenchmarkAppShutdown> {
+  return await completeDesktopBenchmarkShutdown(resource, {
+    quit: async () => await quitElectronAppBounded(
+      resource.electronApp,
+      () => resource.electronApp.evaluate(() => {
+        const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
+          quit?: () => RuntimeSnapshot | null;
+        } | undefined;
+        return runtime?.quit?.() ?? { phase: "unavailable", pid: null };
+      }),
+    ),
+    waitForRuntimeExit: waitForRuntimeProcessExit,
+    now: performance.now.bind(performance),
+  });
+}
+
+async function closeMeasuredBenchmarkApp(
+  run: AppRun,
   runtimePid: number | null,
 ): Promise<number> {
-  const startedAt = performance.now();
-  const result = await quitElectronAppBounded(
-    electronApp,
-    () => electronApp.evaluate(() => {
-      const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
-        quit?: () => unknown;
-      } | undefined;
-      return runtime?.quit?.();
-    }),
-  );
-  if (runtimePid) await waitForRuntimeProcessExit(runtimePid);
+  if (runtimePid !== null) run.cleanup.resource.runtimePid = runtimePid;
+  const result = await run.cleanup.close();
   if (result.outcome !== "graceful" || !result.transportSettled) {
     throw new Error(
       `Desktop benchmark shutdown was ${result.outcome}/${result.transportSettled ? "settled" : "unsettled"}, not graceful/settled.`,
     );
   }
-  return performance.now() - startedAt;
+  return result.durationMs;
 }
+
+function createBenchmarkCleanupContext(): BenchmarkCleanupContext {
+  let finishBody!: () => void;
+  let bodySettled = false;
+  const context: BenchmarkCleanupContext = {
+    applications: new AsyncCleanupCoordinator(closeApp),
+    fixtureRoots: new AsyncCleanupCoordinator(async (fixtureRoot) => {
+      await rm(fixtureRoot, {
+        recursive: true,
+        force: true,
+        ...(process.platform === "win32"
+          ? { maxRetries: 10, retryDelay: 100 }
+          : {}),
+      });
+    }),
+    bodyFinished: new Promise<void>((resolveBody) => {
+      finishBody = resolveBody;
+    }),
+    finishBody: () => {
+      if (bodySettled) return;
+      bodySettled = true;
+      finishBody();
+    },
+  };
+  return context;
+}
+
+async function cleanupDesktopBenchmarkResources(
+  context: BenchmarkCleanupContext,
+): Promise<void> {
+  await context.applications.cleanup();
+  const body = await captureBoundedFailureDiagnostic(
+    async () => await context.bodyFinished,
+    BENCHMARK_BODY_SETTLE_TIMEOUT_MS,
+  );
+  if (body.outcome !== "captured") {
+    throw new Error("The desktop benchmark callback did not settle before cleanup.");
+  }
+  await context.fixtureRoots.cleanup();
+  if (activeBenchmarkCleanup === context) activeBenchmarkCleanup = null;
+}
+
+// Playwright gives afterEach a fresh timeout slot after the test body. Keep an
+// independent owner for manual Electron resources when the benchmark-wide
+// timeout wins its race with the still-running test callback.
+test.afterEach(async () => {
+  const context = activeBenchmarkCleanup;
+  if (context) await cleanupDesktopBenchmarkResources(context);
+});
 
 test("records desktop startup, process, scroll, split, terminal, and shutdown costs", async () => {
   expect(process.version).toMatch(/^v22\./u);
-  const fixtureRoot = await mkdtemp(join(tmpdir(), "inertia-desktop-benchmark-"));
+  const cleanupContext = createBenchmarkCleanupContext();
+  activeBenchmarkCleanup = cleanupContext;
+  const rootAcquisition = cleanupContext.fixtureRoots.beginAcquisition();
+  let fixtureRoot: string;
+  try {
+    fixtureRoot = await mkdtemp(join(tmpdir(), "inertia-desktop-benchmark-"));
+    rootAcquisition.adopt(fixtureRoot);
+  } catch (error) {
+    rootAcquisition.abandon();
+    cleanupContext.finishBody();
+    await cleanupDesktopBenchmarkResources(cleanupContext)
+      .catch(() => undefined);
+    throw error;
+  }
   const dataDirectory = join(fixtureRoot, "data");
   const workspace = join(fixtureRoot, "workspace");
   const profile = join(fixtureRoot, "profile");
-  await Promise.all([
-    mkdir(dataDirectory, { recursive: true }),
-    mkdir(workspace, { recursive: true }),
-    mkdir(profile, { recursive: true }),
-  ]);
-  await initializeWorkspace(workspace);
-  const fixtureConversationIds = seedRuntime(dataDirectory, workspace);
-
-  let cold: AppRun | null = null;
-  let warm: AppRun | null = null;
   try {
-    cold = await launchApp(dataDirectory, workspace, profile);
+    await Promise.all([
+      mkdir(dataDirectory, { recursive: true }),
+      mkdir(workspace, { recursive: true }),
+      mkdir(profile, { recursive: true }),
+    ]);
+    await initializeWorkspace(workspace);
+    const fixtureConversationIds = seedRuntime(dataDirectory, workspace);
+
+    const cold = await launchApp(
+      cleanupContext,
+      dataDirectory,
+      workspace,
+      profile,
+    );
     const coldIntentDialogMs = await coldIntentDialogMeasurement(cold.page);
     const idleStart = await processSample(cold.electronApp);
+    cold.cleanup.resource.runtimePid = idleStart.runtimePid;
     await cold.page.waitForTimeout(1_500);
     const idleEnd = await processSample(cold.electronApp);
     const prefetchedOverlays = await prefetchedOverlayMeasurements(cold.page);
@@ -1722,24 +1958,26 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
       firstWindowMs: cold.firstWindowMs,
       runtimeInteractiveMs: cold.startupMs,
     };
-    const coldShutdownMs = await closeApp(
-      cold.electronApp,
+    const coldShutdownMs = await closeMeasuredBenchmarkApp(
+      cold,
       activeSample.runtimePid,
     );
-    cold = null;
-
-    warm = await launchApp(dataDirectory, workspace, profile);
+    const warm = await launchApp(
+      cleanupContext,
+      dataDirectory,
+      workspace,
+      profile,
+    );
     const warmSample = await processSample(warm.electronApp);
+    warm.cleanup.resource.runtimePid = warmSample.runtimePid;
     const warmStartup = {
       firstWindowMs: warm.firstWindowMs,
       runtimeInteractiveMs: warm.startupMs,
     };
-    const warmShutdownMs = await closeApp(
-      warm.electronApp,
+    const warmShutdownMs = await closeMeasuredBenchmarkApp(
+      warm,
       warmSample.runtimePid,
     );
-    warm = null;
-
     const cpu = cpus();
     const sessionType = process.env.XDG_SESSION_TYPE?.trim().toLocaleLowerCase()
       || null;
@@ -1831,6 +2069,7 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
               (sum, sample) => sum + sample.frames,
               0,
             ),
+            scrollPreflights: soakScrollSamples.map((sample) => sample.preflight),
             before: soakBefore,
             after: soakAfter,
             retainedJsHeapBytes: Math.max(
@@ -1844,9 +2083,9 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
         shutdown: { coldMs: coldShutdownMs, warmMs: warmShutdownMs },
       },
       limitations: [
-        "The authoritative long-conversation fixture creates 300 queued, running, and settled turns through RuntimeStore lifecycle APIs; the compatibility scenario separately stresses collapsed orphan history.",
+        "The authoritative long-conversation fixture creates 300 queued, running, and settled turns through RuntimeStore lifecycle APIs; a bounded, unmeasured bottom-range preflight settles deferred virtualizer measurements before the exact 120-frame sample, and the compatibility scenario separately stresses collapsed orphan history.",
         "Desktop streaming uses a deterministic local Codex app-server fixture; it exercises the production provider, utility-runtime, SQLite, WebSocket, React, and paint path without network variance.",
-        "The streaming fixture holds terminal completion behind a bounded local gate, acknowledges one activity pulse before reader navigation and one after it, returns through Jump to latest, and releases completion immediately before the terminal-paint await.",
+        "The streaming fixture acknowledges the first four exact visible payload fragments before resuming its unchanged bulk cadence; those four gate-controlled intervals are excluded from visible-cadence statistics, while every later visible interval remains measured. It then holds terminal completion behind a bounded local gate, acknowledges one activity pulse before reader navigation and one after it, returns through Jump to latest, and releases completion immediately before the terminal-paint await.",
         "Cross-process streaming attribution uses bounded wall-clock markers only for comparison; WebSocket receipt starts at the causal pre-send marker, each first-delta and terminal chain is isolated to one run, and stage ordering remains authoritative within each process.",
         "Animation-frame intervals describe compositor scheduling, while PerformanceObserver long-task durations describe main-thread stalls; hosted frame intervals are retained as observational evidence rather than a 60-fps claim.",
         "Chromium process working-set retention after panels close is not classified as a leak when JavaScript heap, DOM, terminal, workspace-surface, and split-pane counters are released.",
@@ -1862,8 +2101,16 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
 
     expect(report.scenarios.authoritativeLongConversation.frames).toBe(120);
     expect(report.scenarios.authoritativeLongConversation.totalTimelineRows).toBe(300);
-    expect(report.scenarios.authoritativeLongConversation.actualTopPosition).toBeLessThanOrEqual(2);
-    expect(report.scenarios.authoritativeLongConversation.actualBottomGap).toBeLessThanOrEqual(2);
+    expect(report.scenarios.authoritativeLongConversation.actualTopPosition)
+      .toBeLessThanOrEqual(AUTHORITATIVE_SCROLL_EDGE_TOLERANCE_PX);
+    expect(report.scenarios.authoritativeLongConversation.actualBottomGap)
+      .toBeLessThanOrEqual(AUTHORITATIVE_SCROLL_EDGE_TOLERANCE_PX);
+    expect(report.scenarios.authoritativeLongConversation.preflight.frames)
+      .toBeGreaterThanOrEqual(2);
+    expect(report.scenarios.authoritativeLongConversation.preflight.frames)
+      .toBeLessThanOrEqual(AUTHORITATIVE_SCROLL_MAX_PREFLIGHT_FRAMES);
+    expect(report.scenarios.authoritativeLongConversation.preflight.bottomGap)
+      .toBeLessThanOrEqual(AUTHORITATIVE_SCROLL_EDGE_TOLERANCE_PX);
     expect(report.scenarios.authoritativeLongConversation.mountedAuthoritativeRows).toBeLessThan(40);
     expect(report.scenarios.compatibilityHistory.releasedOnClose).toBe(true);
     expect(report.scenarios.streamingResponsiveness.sampleCount)
@@ -1885,7 +2132,7 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
     expect(report.scenarios.streamingResponsiveness.p95VisibleGapMs)
       .toBeLessThan(CI_STREAM_VISIBLE_GAP_CATASTROPHIC_MS);
     expect(report.scenarios.streamingResponsiveness.visibleUpdates)
-      .toBeGreaterThanOrEqual(CI_STREAM_MIN_VISIBLE_UPDATES);
+      .toBeGreaterThanOrEqual(STREAMING_PROGRESSIVE_PAINT_COUNT);
     expect(report.scenarios.streamingResponsiveness.walBytes)
       .toBeGreaterThan(0);
     expect(report.scenarios.streamingResponsiveness.completionToFinalPaintMs)
@@ -1963,6 +2210,15 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
     expect(report.scenarios.rendererMemory.postClose30s.activeXtermContainers).toBe(0);
     expect(report.scenarios.rendererMemory.postClose30s.splitPaneCount).toBe(0);
     expect(report.scenarios.rendererMemory.repeatedOpenClose).toHaveLength(8);
+    expect(report.scenarios.rendererMemory.soak.scrollFrames).toBe(600);
+    expect(report.scenarios.rendererMemory.soak.scrollPreflights).toHaveLength(5);
+    for (const preflight of report.scenarios.rendererMemory.soak.scrollPreflights) {
+      expect(preflight.frames).toBeGreaterThanOrEqual(2);
+      expect(preflight.frames)
+        .toBeLessThanOrEqual(AUTHORITATIVE_SCROLL_MAX_PREFLIGHT_FRAMES);
+      expect(preflight.bottomGap)
+        .toBeLessThanOrEqual(AUTHORITATIVE_SCROLL_EDGE_TOLERANCE_PX);
+    }
     const firstOpenClose = report.scenarios.rendererMemory.repeatedOpenClose[0]!;
     const lastOpenClose = report.scenarios.rendererMemory.repeatedOpenClose.at(-1)!;
     expect(lastOpenClose.usedJsHeapBytes).toBeLessThanOrEqual(
@@ -1987,18 +2243,10 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
     expect(report.scenarios.shutdown.warmMs)
       .toBeLessThan(APP_SHUTDOWN_ASSERTION_TIMEOUT_MS);
   } finally {
-    if (cold) {
-      const runtimePid = (await runtimeSnapshot(cold.electronApp).catch(() => null))?.pid ?? null;
-      await closeApp(cold.electronApp, runtimePid).catch(() => undefined);
-    }
-    if (warm) {
-      const runtimePid = (await runtimeSnapshot(warm.electronApp).catch(() => null))?.pid ?? null;
-      await closeApp(warm.electronApp, runtimePid).catch(() => undefined);
-    }
-    await rm(fixtureRoot, {
-      recursive: true,
-      force: true,
-      ...(process.platform === "win32" ? { maxRetries: 10, retryDelay: 100 } : {}),
-    });
+    cleanupContext.finishBody();
+    // afterEach owns the final retry and failure report from its fresh timeout
+    // slot; this attempt lets the normal path release resources immediately.
+    await cleanupDesktopBenchmarkResources(cleanupContext)
+      .catch(() => undefined);
   }
 });

@@ -7,7 +7,11 @@ import {
   nativeModelSelection,
 } from "../../src/shared/model-routing";
 import { createAppFixture } from "./support/app-fixture";
-import { installRuntimeRecoveryConsent } from "./support/runtime-crash-safety";
+import {
+  attachDarwinRecoverySafetyLockDiagnostic,
+  installRuntimeRecoveryConsent,
+  runtimeRecoveryConsentDiagnostic,
+} from "./support/runtime-crash-safety";
 import {
   ensureWorkspaceTools,
   selectWorkspaceTool,
@@ -118,8 +122,12 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
 });
 `;
 
-test("starts a sessionless goal and recovers it after Stop and runtime crash", async () => {
-  test.setTimeout(75_000);
+test("starts a sessionless goal and recovers it after Stop and runtime crash", {
+  tag: "@runtime-recovery",
+}, async () => {
+  // Two Git-protected activations plus runtime recovery need a test budget
+  // that does not preempt either activation's own bounded assertion.
+  test.setTimeout(120_000);
   const app = await createAppFixture({
     name: "goal-reliability",
     initialState: "conversation",
@@ -146,6 +154,8 @@ test("starts a sessionless goal and recovers it after Stop and runtime crash", a
     },
   });
 
+  let scenarioError: unknown = null;
+  let scenarioFailed = false;
   try {
     await app.resizeWindow(1280, 860);
     const { page } = app;
@@ -165,9 +175,12 @@ test("starts a sessionless goal and recovers it after Stop and runtime crash", a
     await expect(page.getByText("/goal Ship the reliable goal flow", {
       exact: true,
     })).toBeVisible();
+    // The first provider start also owns the bounded pre-turn Git artifact
+    // capture. Retain ample time for its process cleanup, request delivery,
+    // provider output, and renderer projection afterward.
     await expect(page.getByText("First-action goal run is active.", {
       exact: true,
-    })).toBeVisible({ timeout: 15_000 });
+    })).toBeVisible({ timeout: 45_000 });
 
     const tools = await ensureWorkspaceTools(page);
     await selectWorkspaceTool(tools, "Goal");
@@ -178,11 +191,11 @@ test("starts a sessionless goal and recovers it after Stop and runtime crash", a
       .toBeVisible({ timeout: 10_000 });
     await tools.getByRole("button", { name: "Resume goal" }).click();
     // Resume projects the authoritative Starting state before its protective
-    // Git checkpoint. Allow one bounded 30-second local Git operation, while
-    // still requiring the exact provider output before accepting success.
+    // Git checkpoint. Keep the same post-Git delivery, provider, and renderer
+    // headroom while still requiring the exact output before accepting success.
     await expect(page.getByText("Resumed goal run is active.", {
       exact: true,
-    })).toBeVisible({ timeout: 30_000 });
+    })).toBeVisible({ timeout: 45_000 });
     await expect(tools.getByRole("button", { name: "Pause" })).toBeVisible();
 
     const shell = page.locator(".app-shell");
@@ -198,6 +211,12 @@ test("starts a sessionless goal and recovers it after Stop and runtime crash", a
     const restoreRuntimeRecoveryConsent = await installRuntimeRecoveryConsent(
       app.electronApp,
     );
+    let latestRendererObservation: {
+      connectionStatus: string | null;
+      runtimeGeneration: string | null;
+    } | null = null;
+    let recoveryOperationError: unknown = null;
+    let recoveryOperationFailed = false;
     try {
       await app.electronApp.evaluate(() => {
         const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
@@ -218,12 +237,57 @@ test("starts a sessionless goal and recovers it after Stop and runtime crash", a
           shell.getAttribute("data-runtime-generation", { timeout: 500 })
             .catch(() => null),
         ]);
+        latestRendererObservation = {
+          connectionStatus,
+          runtimeGeneration,
+        };
         return connectionStatus === "online"
           && runtimeGeneration !== null
           && runtimeGeneration !== beforeRuntimeGeneration;
       }, { timeout: 35_000 }).toBe(true);
-    } finally {
-      await restoreRuntimeRecoveryConsent();
+    } catch (error) {
+      recoveryOperationFailed = true;
+      recoveryOperationError = error;
+    }
+    let recoveryConsent = null as Awaited<ReturnType<
+      typeof restoreRuntimeRecoveryConsent
+    >> | null;
+    let recoveryConsentError: unknown = null;
+    let recoveryConsentFailed = false;
+    try {
+      recoveryConsent = await restoreRuntimeRecoveryConsent();
+    } catch (error) {
+      recoveryConsentFailed = true;
+      recoveryConsentError = error;
+      recoveryConsent = runtimeRecoveryConsentDiagnostic(error);
+    }
+    if (recoveryOperationFailed || recoveryConsentFailed) {
+      await test.info().attach("goal runtime recovery diagnostic", {
+        body: Buffer.from(JSON.stringify({
+          beforeRuntimeGeneration,
+          latestRendererObservation,
+          recoveryConsent,
+          rendererErrorCount: app.rendererErrors.length,
+          rendererErrors: app.rendererErrors.slice(-25),
+        }, null, 2)),
+        contentType: "application/json",
+      }).catch(() => undefined);
+      const recoveryError = recoveryOperationFailed
+        ? recoveryOperationError
+        : recoveryConsentError;
+      await attachDarwinRecoverySafetyLockDiagnostic(
+        test.info(),
+        join(app.testDirectory, "data"),
+        null,
+        recoveryConsentFailed ? recoveryConsentError : recoveryError,
+      ).catch(() => undefined);
+      if (recoveryOperationFailed && recoveryConsentFailed) {
+        throw new AggregateError(
+          [recoveryOperationError, recoveryConsentError],
+          "Runtime recovery and recovery-consent restoration both failed.",
+        );
+      }
+      throw recoveryError;
     }
     expect(await page.evaluate(() =>
       Reflect.get(window, "__inertiaGoalNoReloadMarker"))).toBe(noReloadMarker);
@@ -253,7 +317,23 @@ test("starts a sessionless goal and recovers it after Stop and runtime crash", a
       .toBeVisible();
     await expectResumeGoalState(reloadedTools);
     expect(app.rendererErrors).toEqual([]);
-  } finally {
-    await app.close();
+  } catch (error) {
+    scenarioFailed = true;
+    scenarioError = error;
   }
+  // Fail-closed cleanup is independently authoritative. Retain both failures
+  // when recovery fails first, rather than replacing its evidence with the
+  // expected downstream cleanup refusal.
+  try {
+    await app.close();
+  } catch (cleanupError) {
+    if (scenarioFailed) {
+      throw new AggregateError(
+        [scenarioError, cleanupError],
+        "The goal reliability scenario failed and its Electron fixture did not close cleanly.",
+      );
+    }
+    throw cleanupError;
+  }
+  if (scenarioFailed) throw scenarioError;
 });

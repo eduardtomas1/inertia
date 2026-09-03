@@ -13,6 +13,7 @@ import {
   resultEvent,
   type CommandWithoutId,
 } from "../../lib/runtimeCommands";
+import { runtimeCommandDelivery } from "../../utils/connectionMessages";
 import {
   rootGitMutationScope,
   type RootGitMutationScope,
@@ -44,6 +45,30 @@ export interface WorkspaceGitLoadOptions {
 export type LoadWorkspaceGit = (
   options?: WorkspaceGitLoadOptions,
 ) => Promise<void>;
+
+function gitErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message.trim()
+    ? error.message
+    : fallback;
+}
+
+function reportPassiveGitError(
+  error: unknown,
+  fallback: string,
+  setActionError: (message: string) => void,
+): string {
+  const message = gitErrorMessage(error, fallback);
+  const delivery = runtimeCommandDelivery(error);
+  // A runtime recycle can authoritatively reject an in-flight background Git
+  // scan before its socket closes. Keep that expected cancellation local to
+  // the Git surface instead of obscuring unrelated workspace content with a
+  // global alert. Other server rejections and ordinary failures remain global.
+  if (delivery === "rejected" && message === "Git inspection was cancelled.") {
+    return message;
+  }
+  if (!delivery || delivery === "rejected") setActionError(message);
+  return message;
+}
 
 export function useWorkspaceGit({
   project,
@@ -212,11 +237,7 @@ export function useWorkspaceGit({
       }
     })().catch((error: unknown) => {
       if (ownsResponse()) {
-        setLoadError(
-          error instanceof Error && error.message.trim()
-            ? error.message
-            : "Git changes could not be loaded.",
-        );
+        setLoadError(gitErrorMessage(error, "Git changes could not be loaded."));
       }
       throw error;
     }).finally(() => {
@@ -297,11 +318,11 @@ export function useWorkspaceGit({
           authorityRef.current !== owner
           || requestGenerationRef.current !== generation
         ) return;
-        const message = error instanceof Error && error.message.trim()
-          ? error.message
-          : "Git changes could not be loaded.";
-        setLoadError(message);
-        setActionError(message);
+        setLoadError(reportPassiveGitError(
+          error,
+          "Git changes could not be loaded.",
+          setActionError,
+        ));
       }
     });
     return () => {
@@ -388,7 +409,7 @@ export function useWorkspaceGit({
     commitReviewRef.current = null;
   }, []);
 
-  const loadBranches = useCallback(() => {
+  const loadBranches = useCallback((passive = false) => {
     if (!project || !gitStatus?.isRepository) return;
     const owner = `${project.id}:${conversation?.id ?? ""}`;
     void request({
@@ -405,11 +426,12 @@ export function useWorkspaceGit({
         setBranches(event.result.branches);
       }
     }).catch((error) => {
-      setActionError(
-        error instanceof Error
-          ? error.message
-          : "Branches could not be loaded.",
-      );
+      const fallback = "Branches could not be loaded.";
+      if (passive) {
+        reportPassiveGitError(error, fallback, setActionError);
+      } else {
+        setActionError(gitErrorMessage(error, fallback));
+      }
     });
   }, [
     conversation?.id,
@@ -443,17 +465,17 @@ export function useWorkspaceGit({
         authorityRef.current !== owner
         || requestGenerationRef.current !== generation
       ) return;
-      loadBranches();
+      loadBranches(true);
     }).catch((error) => {
       if (
         authorityRef.current !== owner
         || requestGenerationRef.current !== generation
       ) return;
-      const message = error instanceof Error && error.message.trim()
-        ? error.message
-        : "Git changes could not be reconciled.";
-      setLoadError(message);
-      setActionError(message);
+      setLoadError(reportPassiveGitError(
+        error,
+        "Git changes could not be reconciled.",
+        setActionError,
+      ));
     }).finally(() => {
       if (
         authorityRef.current === owner
@@ -551,9 +573,10 @@ export function useWorkspaceGit({
         });
       } catch (error) {
         setActionError(
-          `The commit was created, but push failed. ${error instanceof Error && error.message.trim()
-            ? error.message
-            : "Refresh Git status before retrying the push."}`,
+          `The commit was created, but push failed. ${gitErrorMessage(
+            error,
+            "Refresh Git status before retrying the push.",
+          )}`,
         );
       }
     }

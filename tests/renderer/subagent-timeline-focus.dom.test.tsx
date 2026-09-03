@@ -1,5 +1,5 @@
 import { act, render } from "@testing-library/react";
-import { createRef } from "react";
+import { createRef, useLayoutEffect } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ResponseTimeline } from "../../src/renderer/src/components/ResponseTimeline";
@@ -77,8 +77,21 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+function RequestTimelineFocusOnCommit({
+  conversationId,
+  turnId,
+}: {
+  conversationId: string;
+  turnId: string;
+}): null {
+  useLayoutEffect(() => {
+    requestTimelineFocus({ conversationId, turnId });
+  }, [conversationId, turnId]);
+  return null;
+}
+
 describe("delegated-agent parent-turn navigation", () => {
-  it("focuses only the matching split transcript and ignores malformed requests", () => {
+  it("accepts a focus request as soon as the matching timeline commits", () => {
     vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
       callback(0);
       return 1;
@@ -141,13 +154,13 @@ describe("delegated-agent parent-turn navigation", () => {
             onReaderNavigationIntent={secondNavigationIntent}
           />
         </div>
+        <RequestTimelineFocusOnCommit
+          conversationId={secondConversation}
+          turnId={secondTurn.id}
+        />
       </>,
     );
 
-    act(() => requestTimelineFocus({
-      conversationId: secondConversation,
-      turnId: secondTurn.id,
-    }));
     expect(document.activeElement).toHaveAttribute("data-turn-id", secondTurn.id);
     expect(secondNavigationIntent).toHaveBeenCalledTimes(1);
     expect(firstNavigationIntent).not.toHaveBeenCalled();

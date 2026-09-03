@@ -79,8 +79,11 @@ export class RuntimeProcessContainmentAdmission {
       !this.options.isCurrent(record)
       || !this.options.isRunningDesired()
     ) return;
-    if (containment && !this.options.persist(record, containment)) {
-      throw new Error("The runtime process containment could not be persisted.");
+    if (containment) {
+      if (!this.options.persist(record, containment)) {
+        throw new Error("The runtime process containment could not be persisted.");
+      }
+      record.durableProcessContainment = containment;
     }
     if (process.platform === "win32" && !containment) {
       throw new Error("The Windows runtime Job Object is unavailable.");

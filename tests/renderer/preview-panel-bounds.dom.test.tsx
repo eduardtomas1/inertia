@@ -22,6 +22,39 @@ afterEach(() => {
 });
 
 describe("PreviewPanel native bounds", () => {
+  it("finishes StrictMode effect replay with visible bounds", () => {
+    vi.stubGlobal("ResizeObserver", TestResizeObserver);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+      x: 20,
+      y: 30,
+      width: 640,
+      height: 420,
+      top: 30,
+      left: 20,
+      right: 660,
+      bottom: 450,
+      toJSON: () => ({}),
+    });
+    const onBoundsChange = vi.fn();
+
+    render(
+      <PreviewPanel
+        owner="primary"
+        url="http://127.0.0.1:4173/strict"
+        onNavigate={vi.fn()}
+        onOpenExternal={vi.fn()}
+        onBoundsChange={onBoundsChange}
+      />,
+      { reactStrictMode: true },
+    );
+
+    expect(onBoundsChange.mock.calls).toEqual([
+      [{ x: 20, y: 30, width: 640, height: 420 }],
+      [null],
+      [{ x: 20, y: 30, width: 640, height: 420 }],
+    ]);
+  });
+
   it("keeps bounds stable across URL-only rerenders", () => {
     vi.stubGlobal("ResizeObserver", TestResizeObserver);
     const bounds = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect")

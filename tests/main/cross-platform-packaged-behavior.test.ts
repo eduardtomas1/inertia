@@ -161,8 +161,10 @@ describe("cross-platform packaged behavior contract", () => {
       "run: npm run test:native-architecture",
       "run: npm exec -- playwright test --project=display-sensitive",
       "run: npm exec -- playwright test --project=isolated",
+      "run: npm exec -- playwright test --project=runtime-recovery",
       "run: xvfb-run --auto-servernum npm exec -- playwright test --project=display-sensitive",
       "run: xvfb-run --auto-servernum npm exec -- playwright test --project=isolated",
+      "run: xvfb-run --auto-servernum npm exec -- playwright test --project=runtime-recovery",
       'run: npm run "${{ matrix.release_package_script }}"',
       'run: npm run "${{ matrix.package_script }}"',
       "npm run verify:fuses -- \"$app\"",
@@ -236,6 +238,20 @@ describe("cross-platform packaged behavior contract", () => {
     const build = workflowStep(workflow, "Build the application bundle");
     expect(build).toContain("id: application_bundle");
     expect(build).toContain("run: npm run build:packaged");
+    const electronPreparation = workflowStep(
+      workflow,
+      "Prepare Electron end-to-end binary",
+    );
+    expect(electronPreparation).toContain("id: electron_test_binary");
+    expect(electronPreparation).toContain(
+      `run: node -e "console.log(require('electron'))"`,
+    );
+    expect(workflow.indexOf("Prepare Electron end-to-end binary"))
+      .toBeGreaterThan(workflow.indexOf("Build the application bundle"));
+    expect(workflow.indexOf("Prepare Electron end-to-end binary"))
+      .toBeLessThan(workflow.indexOf(
+        "Run display-sensitive Electron end-to-end tests",
+      ));
     expect(workflow).not.toContain('run: npm run "${{ matrix.dist_script }}"');
     expect(workflow).not.toContain("run: npm run check:platform");
 
@@ -347,9 +363,13 @@ describe("cross-platform packaged behavior contract", () => {
     const playwright = await source("playwright.config.ts");
     expect(playwright).toContain('windowDisplay: "primary"');
     expect(playwright).toContain('name: "display-sensitive"');
-    expect(playwright).toContain("workers: 1");
+    expect(playwright).toContain('name: "runtime-recovery"');
+    expect(playwright.match(/workers: 1,/gu)).toHaveLength(2);
     expect(playwright).not.toContain("dependencies:");
     expect(playwright).toContain("INERTIA_E2E_WORKERS");
+    expect(playwright).toContain("const runtimeRecoveryTag = /@runtime-recovery/u;");
+    expect(playwright).toContain("grepInvert: runtimeRecoveryTag,");
+    expect(playwright).toContain("grep: runtimeRecoveryTag,");
     expect(playwright).toContain("const testTimeout = 45_000;");
     expect(playwright).toContain("const assertionTimeout = 15_000;");
     expect(playwright).toContain("timeout: testTimeout,");
@@ -359,6 +379,10 @@ describe("cross-platform packaged behavior contract", () => {
     expect(playwright).toContain("timeout: testTimeout * workers");
     expect(playwright).toContain(
       "expect: { timeout: assertionTimeout * workers }",
+    );
+    expect(playwright).toContain("timeout: testTimeout * 2,");
+    expect(playwright).toContain(
+      "expect: { timeout: assertionTimeout * 2 }",
     );
     expect(playwright).not.toContain("retries:");
 
@@ -371,7 +395,27 @@ describe("cross-platform packaged behavior contract", () => {
       expect(isolatedPhase).toContain(
         "steps.application_bundle.outcome == 'success'",
       );
+      expect(isolatedPhase).toContain(
+        "steps.electron_test_binary.outcome == 'success'",
+      );
       expect(isolatedPhase).toContain("--project=isolated");
+      expect(isolatedPhase).toContain("--output=test-results/isolated");
+    }
+
+    for (const name of [
+      "Run destructive runtime-recovery tests sequentially",
+      "Run destructive runtime-recovery tests sequentially under Xvfb",
+    ]) {
+      const recoveryPhase = workflowStep(workflow, name);
+      expect(recoveryPhase).toContain("if: ${{ !cancelled()");
+      expect(recoveryPhase).toContain(
+        "steps.application_bundle.outcome == 'success'",
+      );
+      expect(recoveryPhase).toContain(
+        "steps.electron_test_binary.outcome == 'success'",
+      );
+      expect(recoveryPhase).toContain("--project=runtime-recovery");
+      expect(recoveryPhase).toContain("--output=test-results/runtime-recovery");
     }
   });
 
@@ -615,7 +659,9 @@ describe("cross-platform packaged behavior contract", () => {
     const quitEnd = main.indexOf("\n  });", quitStart);
     const quitHandler = main.slice(quitStart, quitEnd);
     expect(quitHandler).toContain("appUpdateInstallCoordinator?.allowBeforeQuit()");
-    expect(quitHandler).toContain("runPrivilegedCleanup().then(finishQuitAfterCleanup");
+    expect(quitHandler).toContain("runPrivilegedCleanup().then(");
+    expect(quitHandler).toContain("finishNormalShutdownAfterCleanup({");
+    expect(quitHandler).toContain("cleanupConfirmed,");
     expect(main.indexOf("conversationAttachments = null")).toBeLessThan(
       main.indexOf("closeConversationAttachmentAccess(retainedAttachments)"),
     );

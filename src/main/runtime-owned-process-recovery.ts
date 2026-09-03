@@ -26,6 +26,8 @@ export { readDarwinProcessIdentity } from "../node/runtime-owned-processes.js";
 type Kill = (pid: number, signal?: NodeJS.Signals | number) => true;
 const PROCESS_GROUP_DRAIN_POLL_MS = 20;
 const PROCESS_GROUP_DRAIN_POLLS = 50;
+const RUNTIME_OWNED_JOURNAL_SETTLE_POLL_MS = 10;
+const RUNTIME_OWNED_JOURNAL_SETTLE_BUDGET_MS = 100;
 
 export interface RuntimeOwnedProcessRecoveryOptions {
   readonly deadlineAt: number;
@@ -226,6 +228,44 @@ async function waitForDarwinSessionDrain(
   return false;
 }
 
+async function releaseRuntimeOwnedProcessClaimAfterProof(
+  journal: RuntimeOwnedProcessJournal,
+  runtimeGenerationId: string,
+  ownershipId: string,
+  deadlineAt: number,
+  wait: (durationMs: number) => Promise<void>,
+): Promise<boolean> {
+  while (true) {
+    // Cleanup proof may become observable on the event-loop turn that reaches
+    // the deadline. Preserve the pre-settlement behavior of making one exact
+    // release attempt, then keep any race settlement inside the outer bound.
+    if (journal.release(ownershipId)) return true;
+    const current = journal.records(runtimeGenerationId);
+    if (current && !current.some((record) =>
+      record.ownershipId === ownershipId)) return true;
+    if (Date.now() + RUNTIME_OWNED_JOURNAL_SETTLE_POLL_MS >= deadlineAt) {
+      return false;
+    }
+    await wait(RUNTIME_OWNED_JOURNAL_SETTLE_POLL_MS);
+  }
+}
+
+async function readRuntimeOwnedProcessRecordsAfterSettle(
+  journal: RuntimeOwnedProcessJournal,
+  runtimeGenerationId: string,
+  deadlineAt: number,
+  wait: (durationMs: number) => Promise<void>,
+): Promise<ReturnType<RuntimeOwnedProcessJournal["records"]>> {
+  while (
+    Date.now() + RUNTIME_OWNED_JOURNAL_SETTLE_POLL_MS < deadlineAt
+  ) {
+    await wait(RUNTIME_OWNED_JOURNAL_SETTLE_POLL_MS);
+    const records = journal.records(runtimeGenerationId);
+    if (records) return records;
+  }
+  return null;
+}
+
 /**
  * Recovers one durable generation without guessing process ownership.
  *
@@ -255,13 +295,32 @@ export function recoverRuntimeOwnedProcesses(
       ? { darwinGuardianPath: options.darwinGuardianPath }
       : {}),
   });
-  const records = journal.records(runtimeGenerationId);
-  if (!records) return null;
   if (platform === "win32") {
-    const containment = journal.containment(runtimeGenerationId);
-    if (containment === undefined) return null;
-    if (!containment) return records.length === 0 ? true : Promise.resolve(false);
+    // A valid journal with no such generation is a stable absence, not an
+    // in-flight writer transition. Preserve the synchronous fail-closed signal
+    // used by startup recovery while retrying only an unreadable generation.
+    if (journal.sessionExact(runtimeGenerationId) === null) return null;
     return (async () => {
+      const waitForJournalSettle = options.waitForProcessGroupDrain
+        ?? ((durationMs: number) => new Promise<void>((resolve) => {
+          setTimeout(resolve, durationMs);
+        }));
+      let inspection = journal.inspectGeneration(runtimeGenerationId);
+      while (!inspection) {
+        if (
+          Date.now() + RUNTIME_OWNED_JOURNAL_SETTLE_POLL_MS
+            >= options.deadlineAt
+        ) return false;
+        await waitForJournalSettle(RUNTIME_OWNED_JOURNAL_SETTLE_POLL_MS);
+        inspection = journal.inspectGeneration(runtimeGenerationId);
+      }
+      const { containment, records, session } = inspection;
+      if (
+        !session
+        || records.some((record) =>
+          record.systemBootId !== session.systemBootId)
+      ) return false;
+      if (!containment) return records.length === 0;
       const recover = options.recoverWindowsJob ?? recoverWindowsRuntimeJob;
       const recovered = await (options.windowsRuntimeJobAssembly
         ? recover(containment, options.deadlineAt, {
@@ -269,32 +328,74 @@ export function recoverRuntimeOwnedProcesses(
           })
         : recover(containment, options.deadlineAt));
       if (!recovered) return false;
-      for (const record of records) {
-        if (!journal.release(record.ownershipId)) return false;
+      // RecoverManaged proves the complete named Job Object is empty before it
+      // returns. The dying runtime can still deliver a child `close` callback
+      // and retire the same durable claim while that native proof is in
+      // flight. Journal rename/unlink is deliberately fail closed, so a reader
+      // can transiently observe null while that exact retirement commits. Once
+      // the Job is proven empty, retry only journal settlement to the existing
+      // supervisor deadline; never guess ownership or clear a malformed record.
+      while (true) {
+        const recoveredRecords = journal.records(runtimeGenerationId);
+        if (recoveredRecords?.length === 0) return true;
+        for (const record of recoveredRecords ?? []) {
+          journal.release(record.ownershipId);
+        }
+        const remaining = journal.records(runtimeGenerationId);
+        if (remaining?.length === 0) return true;
+        if (Date.now() + RUNTIME_OWNED_JOURNAL_SETTLE_POLL_MS >= options.deadlineAt) {
+          return false;
+        }
+        await waitForJournalSettle(RUNTIME_OWNED_JOURNAL_SETTLE_POLL_MS);
       }
-      return true;
     })();
   }
-  if (records.length === 0) return true;
+  let records = journal.records(runtimeGenerationId);
+  const session = journal.sessionExact(runtimeGenerationId);
+  if (!records && session === null) return null;
+  if (records?.length === 0) return true;
   return (async () => {
     const kill = options.kill ?? process.kill;
     const waitForProcessGroupDrain = options.waitForProcessGroupDrain
       ?? ((durationMs: number) => new Promise<void>((resolve) => {
         setTimeout(resolve, durationMs);
       }));
+    // Keep journal retry time inside the existing supervisor envelope. Process
+    // proofs stop slightly earlier; the original deadline remains authoritative
+    // for post-proof claim settlement.
+    const processProofDeadlineAt =
+      options.deadlineAt - RUNTIME_OWNED_JOURNAL_SETTLE_BUDGET_MS;
+    records ??= await readRuntimeOwnedProcessRecordsAfterSettle(
+      journal,
+      runtimeGenerationId,
+      options.deadlineAt,
+      waitForProcessGroupDrain,
+    );
+    if (!records) return false;
+    if (records.length === 0) return true;
     const pending = records.filter((record) => record.state === "pending");
     for (const record of pending) {
       if (record.systemBootId !== systemBootId) {
-        if (!journal.release(record.ownershipId)) return false;
+        if (!await releaseRuntimeOwnedProcessClaimAfterProof(
+          journal,
+          runtimeGenerationId,
+          record.ownershipId,
+          options.deadlineAt,
+          waitForProcessGroupDrain,
+        )) return false;
         continue;
       }
-      if (
-        !((platform === "darwin" && guardedDarwinPending(record)
+      const unstarted = (platform === "darwin" && guardedDarwinPending(record)
           && exactPidAbsent(record.runtimeParentPid, kill))
           || (platform === "linux" && guardedLinuxPending(record)
-            && exactLinuxParentAbsent(record)))
-        || !journal.release(record.ownershipId)
-      ) return false;
+            && exactLinuxParentAbsent(record));
+      if (!unstarted || !await releaseRuntimeOwnedProcessClaimAfterProof(
+        journal,
+        runtimeGenerationId,
+        record.ownershipId,
+        options.deadlineAt,
+        waitForProcessGroupDrain,
+      )) return false;
     }
     const forceKill = options.forceKill ?? forceKillRuntimeProcessTree;
     const readIdentity = options.readIdentity
@@ -319,7 +420,13 @@ export function recoverRuntimeOwnedProcesses(
       if (record.state !== "preauth" && record.state !== "owned" && record.state !== "retiring") continue;
       if (!claimMatchesPlatform(record, platform)) return false;
       if (record.systemBootId !== systemBootId) {
-        if (!journal.release(record.ownershipId)) return false;
+        if (!await releaseRuntimeOwnedProcessClaimAfterProof(
+          journal,
+          runtimeGenerationId,
+          record.ownershipId,
+          options.deadlineAt,
+          waitForProcessGroupDrain,
+        )) return false;
         continue;
       }
       let identity;
@@ -332,7 +439,13 @@ export function recoverRuntimeOwnedProcesses(
         if (
           platform === "linux"
           && (record.state === "preauth" || record.state === "retiring")
-          && journal.release(record.ownershipId)
+          && await releaseRuntimeOwnedProcessClaimAfterProof(
+            journal,
+            runtimeGenerationId,
+            record.ownershipId,
+            options.deadlineAt,
+            waitForProcessGroupDrain,
+          )
         ) continue;
         if (platform === "linux" && options.darwinGuardianPath) return false;
         if (platform === "darwin") {
@@ -354,13 +467,19 @@ export function recoverRuntimeOwnedProcesses(
         }
         if (
           !await waitForMissingRootCleanup(
-            record,
-            platform,
-            kill,
+          record,
+          platform,
+          kill,
+          processProofDeadlineAt,
+          waitForProcessGroupDrain,
+        )
+          || !await releaseRuntimeOwnedProcessClaimAfterProof(
+            journal,
+            runtimeGenerationId,
+            record.ownershipId,
             options.deadlineAt,
             waitForProcessGroupDrain,
           )
-          || !journal.release(record.ownershipId)
         ) return false;
         continue;
       }
@@ -377,11 +496,18 @@ export function recoverRuntimeOwnedProcesses(
           options.darwinGuardianPath,
           linuxTerminalAuthority,
         )) {
-          if (Date.now() + PROCESS_GROUP_DRAIN_POLL_MS >= options.deadlineAt) return false;
+          if (Date.now() + PROCESS_GROUP_DRAIN_POLL_MS >= processProofDeadlineAt) return false;
           await waitForProcessGroupDrain(PROCESS_GROUP_DRAIN_POLL_MS);
           const current = readIdentity(identity.pid);
           if (!current) {
-            if (record.state === "preauth" && journal.release(record.ownershipId)) break;
+            if (record.state === "preauth" &&
+              await releaseRuntimeOwnedProcessClaimAfterProof(
+                journal,
+                runtimeGenerationId,
+                record.ownershipId,
+                options.deadlineAt,
+                waitForProcessGroupDrain,
+              )) break;
             return false;
           }
           if (!RuntimeOwnedProcessJournal.identityMatches(record, current)) return false;
@@ -392,12 +518,20 @@ export function recoverRuntimeOwnedProcesses(
           if (!currentRecords.some((candidate) =>
             candidate.ownershipId === record.ownershipId)) continue;
         }
+        if (Date.now() >= processProofDeadlineAt) return false;
         if (record.state === "owned" && !journal.retire(record.ownershipId)) return false;
         if (!signalLinuxGuardian(record.process, options.darwinGuardianPath, "kill")) return false;
-        while (Date.now() < options.deadlineAt && readIdentity(identity.pid)) {
+        while (Date.now() < processProofDeadlineAt && readIdentity(identity.pid)) {
           await waitForProcessGroupDrain(PROCESS_GROUP_DRAIN_POLL_MS);
         }
-        if (readIdentity(identity.pid) || !journal.release(record.ownershipId)) return false;
+        if (readIdentity(identity.pid) ||
+          !await releaseRuntimeOwnedProcessClaimAfterProof(
+            journal,
+            runtimeGenerationId,
+            record.ownershipId,
+            options.deadlineAt,
+            waitForProcessGroupDrain,
+          )) return false;
         continue;
       }
       if (platform === "linux" && record.state === "retiring") {
@@ -411,14 +545,22 @@ export function recoverRuntimeOwnedProcesses(
             linuxTerminalAuthority,
           )
         ) return false;
+        if (Date.now() >= processProofDeadlineAt) return false;
         if (!signalLinuxGuardian(record.process, options.darwinGuardianPath, "kill")) return false;
-        while (Date.now() < options.deadlineAt) {
+        while (Date.now() < processProofDeadlineAt) {
           const current = readIdentity(identity.pid);
           if (!current) break;
           if (!RuntimeOwnedProcessJournal.identityMatches(record, current)) return false;
           await waitForProcessGroupDrain(PROCESS_GROUP_DRAIN_POLL_MS);
         }
-        if (readIdentity(identity.pid) || !journal.release(record.ownershipId)) return false;
+        if (readIdentity(identity.pid) ||
+          !await releaseRuntimeOwnedProcessClaimAfterProof(
+            journal,
+            runtimeGenerationId,
+            record.ownershipId,
+            options.deadlineAt,
+            waitForProcessGroupDrain,
+          )) return false;
         continue;
       }
       if (platform === "darwin") {
@@ -453,7 +595,7 @@ export function recoverRuntimeOwnedProcesses(
       }
       if (
         identity.processGroupId !== identity.pid
-        || Date.now() >= options.deadlineAt
+        || Date.now() >= processProofDeadlineAt
       ) return false;
       if (
         platform === "linux"
@@ -463,10 +605,16 @@ export function recoverRuntimeOwnedProcesses(
       ) return false;
       const confirmed = await forceKill(identity.pid, {
         rootProcessGroup: true,
-        deadlineAt: options.deadlineAt,
+        deadlineAt: processProofDeadlineAt,
         kill: verifiedKill(record, kill, readIdentity),
       }).catch(() => false);
-      if (!confirmed || !journal.release(record.ownershipId)) return false;
+      if (!confirmed || !await releaseRuntimeOwnedProcessClaimAfterProof(
+        journal,
+        runtimeGenerationId,
+        record.ownershipId,
+        options.deadlineAt,
+        waitForProcessGroupDrain,
+      )) return false;
     }
     return true;
   })();

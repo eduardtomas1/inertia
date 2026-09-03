@@ -7,13 +7,17 @@ import {
   defaultSettings,
   type Conversation,
   type Project,
+  type ServerEvent,
 } from "../../src/shared/contracts";
 import { nativeModelSelection } from "../../src/shared/model-routing";
 import { GIT_MUTATION_REQUEST_TIMEOUT_MS } from "../../src/shared/runtime-command-timeouts";
 import { useInertiaConnection } from "../../src/renderer/src/hooks/useInertiaConnection";
 import { useWorkspaceGit } from "../../src/renderer/src/hooks/workspace-tools/useWorkspaceGit";
 import type { CommandWithoutId } from "../../src/renderer/src/lib/runtimeCommands";
-import { runtimeCommandDelivery } from "../../src/renderer/src/utils/connectionMessages";
+import {
+  RuntimeCommandError,
+  runtimeCommandDelivery,
+} from "../../src/renderer/src/utils/connectionMessages";
 
 class FakeWebSocket extends EventTarget {
   static readonly OPEN = 1;
@@ -81,7 +85,7 @@ function sentCommands(socket: FakeWebSocket) {
     clientCommandSchema.parse(JSON.parse(String(data))));
 }
 
-function gitStatusResult(requestId: string, branch: string) {
+function gitStatusResult(requestId: string, branch: string): ServerEvent {
   return {
     type: "request.result",
     requestId,
@@ -142,6 +146,261 @@ afterEach(() => {
 });
 
 describe("durable Git reconnect reconciliation", () => {
+  it.each([
+    {
+      label: "an ambiguous transport interruption",
+      error: new RuntimeCommandError(
+        "The local service disconnected before finishing the request.",
+        "ambiguous",
+      ),
+    },
+    {
+      label: "an authoritative background cancellation",
+      error: new RuntimeCommandError(
+        "Git inspection was cancelled.",
+        "rejected",
+      ),
+    },
+  ])("does not promote $label from a mounted refresh", async ({ error }) => {
+    let refreshes = 0;
+    let interrupt!: (error: Error) => void;
+    const request = vi.fn((command: CommandWithoutId) => {
+      if (command.type !== "git.refresh") {
+        return Promise.reject(new Error(`Unexpected ${command.type} command`));
+      }
+      refreshes += 1;
+      if (refreshes === 1) {
+        return new Promise<ServerEvent>((_resolve, reject) => {
+          interrupt = reject;
+        });
+      }
+      return Promise.resolve(gitStatusResult("reconnected-refresh", "main"));
+    });
+    const setActionError = vi.fn();
+    const hook = renderHook(
+      ({ online }: { online: boolean }) => useWorkspaceGit({
+        enabled: true,
+        loadStatusOnMount: true,
+        loadWorkspaceOnMount: false,
+        project,
+        conversation,
+        online,
+        ignoreWhitespace: false,
+        refreshVersion: 0,
+        request,
+        run: async (_key, command) => await request(command),
+        subscribe: () => () => undefined,
+        setActionError,
+      }),
+      { initialProps: { online: true } },
+    );
+
+    await waitFor(() => expect(refreshes).toBe(1));
+    await act(async () => {
+      interrupt(error);
+      await Promise.resolve();
+    });
+    expect(hook.result.current.loadError).toBe(error.message);
+    expect(setActionError).not.toHaveBeenCalled();
+
+    hook.rerender({ online: false });
+    hook.rerender({ online: true });
+    await waitFor(() => {
+      expect(refreshes).toBe(2);
+      expect(hook.result.current.loadError).toBeNull();
+      expect(hook.result.current.gitStatus?.branch).toBe("main");
+    });
+    expect(setActionError).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      label: "ambiguous transport",
+      error: new RuntimeCommandError(
+        "The local service disconnected before finishing the request.",
+        "ambiguous",
+      ),
+      promoted: false,
+    },
+    {
+      label: "not-sent transport",
+      error: new RuntimeCommandError(
+        "The local service disconnected before receiving the request.",
+        "not-sent",
+      ),
+      promoted: false,
+    },
+    {
+      label: "server rejection",
+      error: new RuntimeCommandError(
+        "The repository is no longer available.",
+        "rejected",
+      ),
+      promoted: true,
+    },
+    {
+      label: "server-rejected background cancellation",
+      error: new RuntimeCommandError(
+        "Git inspection was cancelled.",
+        "rejected",
+      ),
+      promoted: false,
+    },
+    {
+      label: "ordinary failure",
+      error: new Error("The Git response was unreadable."),
+      promoted: true,
+    },
+    {
+      label: "ordinary cancellation-shaped failure",
+      error: new Error("Git inspection was cancelled."),
+      promoted: true,
+    },
+  ])("classifies $label invalidation refresh failures", async ({
+    error,
+    promoted,
+  }) => {
+    const message = error.message;
+    const request = vi.fn((_command: CommandWithoutId) => Promise.reject(
+      error,
+    ));
+    let publish!: (event: ServerEvent) => void;
+    const setActionError = vi.fn();
+    const hook = renderHook(() => useWorkspaceGit({
+      enabled: true,
+      loadStatusOnMount: false,
+      loadWorkspaceOnMount: false,
+      project,
+      conversation,
+      online: true,
+      ignoreWhitespace: false,
+      refreshVersion: 0,
+      request,
+      run: async (_key, command) => await request(command),
+      subscribe: (listener) => {
+        publish = listener;
+        return () => undefined;
+      },
+      setActionError,
+    }));
+
+    act(() => publish({
+      type: "workspace.git.invalidated",
+      requestId: "99999999-9999-4999-8999-999999999999",
+      projectId: project.id,
+      conversationId: conversation.id,
+    }));
+
+    await waitFor(() => expect(hook.result.current.loadError).toBe(message));
+    if (promoted) {
+      expect(setActionError).toHaveBeenCalledWith(message);
+    } else {
+      expect(setActionError).not.toHaveBeenCalled();
+    }
+  });
+
+  it.each([
+    {
+      label: "ambiguous transport",
+      error: new RuntimeCommandError(
+        "The local service disconnected before finishing the request.",
+        "ambiguous",
+      ),
+      promoted: false,
+    },
+    {
+      label: "not-sent transport",
+      error: new RuntimeCommandError(
+        "The local service disconnected before receiving the request.",
+        "not-sent",
+      ),
+      promoted: false,
+    },
+    {
+      label: "server rejection",
+      error: new RuntimeCommandError(
+        "The repository is no longer available.",
+        "rejected",
+      ),
+      promoted: true,
+    },
+    {
+      label: "server-rejected background cancellation",
+      error: new RuntimeCommandError(
+        "Git inspection was cancelled.",
+        "rejected",
+      ),
+      promoted: false,
+    },
+    {
+      label: "ordinary failure",
+      error: new Error("The branch response was unreadable."),
+      promoted: true,
+    },
+  ])("classifies $label during passive branch reconciliation", async ({
+    error,
+    promoted,
+  }) => {
+    let refreshes = 0;
+    let rejectBranches!: (error: unknown) => void;
+    const request = vi.fn((command: CommandWithoutId) => {
+      if (command.type === "git.refresh") {
+        refreshes += 1;
+        return Promise.resolve(gitStatusResult(
+          `branch-refresh-${refreshes}`,
+          "main",
+        ));
+      }
+      if (command.type === "git.branches") {
+        return new Promise<ServerEvent>((_resolve, reject) => {
+          rejectBranches = reject;
+        });
+      }
+      return Promise.reject(new Error(`Unexpected ${command.type} command`));
+    });
+    let publish!: (event: ServerEvent) => void;
+    const setActionError = vi.fn();
+    const hook = renderHook(() => useWorkspaceGit({
+      enabled: true,
+      loadStatusOnMount: true,
+      loadWorkspaceOnMount: false,
+      project,
+      conversation,
+      online: true,
+      ignoreWhitespace: false,
+      refreshVersion: 0,
+      request,
+      run: async (_key, command) => await request(command),
+      subscribe: (listener) => {
+        publish = listener;
+        return () => undefined;
+      },
+      setActionError,
+    }));
+
+    await waitFor(() => expect(hook.result.current.gitStatus?.branch).toBe("main"));
+    setActionError.mockClear();
+    act(() => publish({
+      type: "workspace.git.invalidated",
+      requestId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      projectId: project.id,
+      conversationId: conversation.id,
+    }));
+    await waitFor(() => expect(rejectBranches).toBeTypeOf("function"));
+    await act(async () => {
+      rejectBranches(error);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(hook.result.current.loadError).toBeNull();
+    if (promoted) {
+      expect(setActionError).toHaveBeenCalledWith(error.message);
+    } else {
+      expect(setActionError).not.toHaveBeenCalled();
+    }
+  });
+
   it("publishes the final projection after two timeouts and socket loss", async () => {
     const getRuntimeConnection = vi.fn(async () => ({
       websocketUrl: "ws://127.0.0.1:12345/runtime/test",
@@ -184,7 +443,7 @@ describe("durable Git reconnect reconciliation", () => {
     });
     await waitFor(() => expect(sentCommands(firstSocket).filter(
       ({ type }) => type === "git.refresh",
-    )).toHaveLength(1));
+    )).toHaveLength(1), { timeout: 5_000 });
     const initialRefresh = sentCommands(firstSocket).find(
       ({ type }) => type === "git.refresh",
     )!;

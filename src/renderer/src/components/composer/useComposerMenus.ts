@@ -59,6 +59,7 @@ export function useComposerMenus(): ComposerMenuController {
   const moreSectionTriggerRefs =
     useRef(new Map<MoreSection, HTMLButtonElement>());
   const moreHoverTimerRef = useRef<number | null>(null);
+  const moreSectionExplicitRef = useRef(false);
   const menuTriggerRefs = useRef(new Map<ComposerMenu, HTMLButtonElement>());
   const menuPopoverRef = useRef<HTMLDivElement | null>(null);
 
@@ -87,6 +88,7 @@ export function useComposerMenus(): ComposerMenuController {
       window.clearTimeout(moreHoverTimerRef.current);
     }
     moreHoverTimerRef.current = null;
+    moreSectionExplicitRef.current = false;
     setMoreSection(null);
     setMoreSubmenuSide(null);
   }, [menu]);
@@ -149,6 +151,7 @@ export function useComposerMenus(): ComposerMenuController {
     focusSubmenu = false,
   ) => {
     clearMoreHoverTimer();
+    moreSectionExplicitRef.current = true;
     const side = availableMoreSubmenuSide();
     setMoreSection(section);
     setMoreSubmenuSide(side);
@@ -168,6 +171,7 @@ export function useComposerMenus(): ComposerMenuController {
 
   const closeMorePreview = () => {
     clearMoreHoverTimer();
+    if (moreSectionExplicitRef.current) return;
     moreHoverTimerRef.current = window.setTimeout(() => {
       moreHoverTimerRef.current = null;
       setMoreSection(null);
@@ -178,6 +182,7 @@ export function useComposerMenus(): ComposerMenuController {
   const returnToMoreRoot = (focusTrigger = false) => {
     const previousSection = moreSection;
     clearMoreHoverTimer();
+    moreSectionExplicitRef.current = false;
     setMoreSection(null);
     setMoreSubmenuSide(null);
     if (focusTrigger && previousSection) {

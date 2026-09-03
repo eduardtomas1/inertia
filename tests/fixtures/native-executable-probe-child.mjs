@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { closeSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const pidFile = process.env.INERTIA_PROBE_PID_FILE;
@@ -10,12 +10,6 @@ if (!pidFile || !rootPidFile) {
 writeFileSync(rootPidFile, String(process.pid));
 
 const redirectsDescendant = process.env.INERTIA_PROBE_REDIRECT_DESCENDANT === "1";
-if (redirectsDescendant) {
-  for (const descriptor of [1, 2]) {
-    try { closeSync(descriptor); } catch { /* The descriptor may already be closed. */ }
-  }
-}
-
 const descendant = spawn(process.execPath, [
   join(import.meta.dirname, "native-executable-probe-descendant.mjs"),
 ], {

@@ -642,6 +642,55 @@ describe("FilesPanel root refresh", () => {
     }
   });
 
+  it("retires a search-result control before its live directory replaces it", async () => {
+    const user = userEvent.setup();
+    const rootEntries = [
+      { path: "deep", kind: "directory" },
+    ] satisfies WorkspaceEntry[];
+    const onLoadEntries = vi.fn(async ({
+      directory = "",
+      query,
+    }: {
+      directory?: string;
+      query?: string;
+    }): Promise<WorkspaceEntriesPage> => {
+      if (query === "deep") return page("", rootEntries);
+      if (directory === "deep") {
+        return page(directory, [
+          { path: "deep/CaseSensitiveLeaf.ts", kind: "file" },
+        ]);
+      }
+      return page(directory, rootEntries);
+    });
+    render(
+      <FilesPanel
+        {...FILES_PROJECT}
+        entries={rootEntries}
+        preview={null}
+        selectedPath={null}
+        onSelectFile={vi.fn()}
+        onLoadEntries={onLoadEntries}
+      />,
+    );
+
+    const search = screen.getByRole("searchbox", { name: "Search files" });
+    await user.type(search, "deep");
+    const retiredResult = await screen.findByRole("treeitem", { name: /deep/u });
+    retiredResult.focus();
+    await user.keyboard("{Enter}");
+
+    const leaf = await screen.findByRole("treeitem", {
+      name: "CaseSensitiveLeaf.ts",
+    });
+    expect(retiredResult).not.toBeInTheDocument();
+    // A delayed native activation is still owned by the removed search
+    // result, never by the live disclosure control with the same path.
+    fireEvent.click(retiredResult);
+    expect(leaf).toBeInTheDocument();
+    expect(screen.getByRole("treeitem", { name: "deep" }))
+      .toHaveAttribute("aria-expanded", "true");
+  });
+
   it("preserves and reloads expanded search paths after a late root refresh", async () => {
     const onLoadEntries = vi.fn(async ({
       directory = "",

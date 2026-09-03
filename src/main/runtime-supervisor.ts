@@ -30,8 +30,10 @@ import type { ModernDarwinRecoveryAuthorityDescriptor } from
 import {
   createRuntimeProcessRecord,
   drainRuntimeRecordRequests,
-  recoverUnconfirmedRuntimeCleanup,
+  recoverUnconfirmedRuntimeCleanup, shouldRecoverUnconfirmedWindowsTree,
 } from "./runtime-supervisor-process-record.js";
+import { runtimeSupervisorRecoveryWaitMs } from
+  "../node/runtime-shutdown-deadline.js";
 import type { RuntimeProcessContainmentAdmission } from "./runtime-process-containment-admission.js";
 import { RuntimeSupervisorRecoveryAdmission } from "./runtime-supervisor-recovery-admission.js";
 import { createRuntimeProcessContainmentAdmission,
@@ -56,6 +58,7 @@ export class RuntimeSupervisor {
   private readonly stableUptimeMs: number;
   private readonly shutdownGraceMs: number;
   private readonly forceKillWaitMs: number;
+  private readonly recoveryWaitMs: number;
   private readonly setTimer: typeof setTimeout;
   private readonly clearTimer: typeof clearTimeout;
   private readonly forceKill: NonNullable<RuntimeSupervisorOptions["forceKill"]>;
@@ -126,6 +129,10 @@ export class RuntimeSupervisor {
     this.stableUptimeMs = boundedDuration(options.stableUptimeMs, runtimeSupervisorDefaults.stableUptimeMs);
     this.shutdownGraceMs = boundedDuration(options.shutdownGraceMs, runtimeSupervisorDefaults.shutdownGraceMs);
     this.forceKillWaitMs = boundedDuration(options.forceKillWaitMs, runtimeSupervisorDefaults.forceKillWaitMs);
+    this.recoveryWaitMs = runtimeSupervisorRecoveryWaitMs(
+      process.platform,
+      this.forceKillWaitMs,
+    );
     this.setTimer = options.setTimer ?? setTimeout;
     this.clearTimer = options.clearTimer ?? clearTimeout;
     const processSafety = createRuntimeSupervisorProcessSafety({
@@ -542,7 +549,7 @@ export class RuntimeSupervisor {
     this.clearShutdownTimers();
     const child = record.child;
     const shutdownDeadlineMs =
-      this.shutdownGraceMs + this.forceKillWaitMs * 2;
+      this.shutdownGraceMs + this.forceKillWaitMs * 2 + this.recoveryWaitMs;
     record.shutdownDeadlineAt = Date.now() + shutdownDeadlineMs;
     this.shutdownTimer = this.setTimer(() => {
       this.shutdownTimer = null;
@@ -891,7 +898,8 @@ export class RuntimeSupervisor {
     if (!record.cleanupConfirmed && !record.processTreeTermination) {
       this.phase = this.desiredRunning ? "restarting" : "stopping";
       this.emitState();
-      const deadlineAt = Date.now() + this.forceKillWaitMs * 2;
+      const deadlineAt = record.shutdownDeadlineAt
+        ?? Date.now() + this.recoveryWaitMs;
       const finishRecovery = (confirmed: boolean): void => {
         if (this.current !== record) return;
         if (confirmed) {
@@ -934,8 +942,23 @@ export class RuntimeSupervisor {
       else finishRecovery(false);
       return;
     }
-    const continueAfterTermination = (confirmed: boolean): void => {
+    const continueAfterTermination = (confirmed: boolean, exactRecoveryAttempted = false): void => {
       if (this.current !== record) return;
+      if (shouldRecoverUnconfirmedWindowsTree(record, confirmed, exactRecoveryAttempted)) {
+        this.phase = this.desiredRunning ? "restarting" : "stopping";
+        this.emitState(); recoverUnconfirmedRuntimeCleanup({
+          record, systemBootId: this.systemBootId,
+          recoverOwnedProcesses: this.recoverOwnedProcesses,
+          deadlineAt: record.shutdownDeadlineAt ?? Date.now() + this.recoveryWaitMs,
+          isCurrent: () => this.current === record,
+          onSettled: (outcome) => {
+            const recovered = outcome === "recovered";
+            if (recovered) { record.processTreeTerminationConfirmed = true;
+              record.processTreeTerminationSettled = true; this.lastError = null; }
+            continueAfterTermination(recovered, true);
+          },
+        }); return;
+      }
       if (confirmed && record.cleanupConfirmed
         && !this.completeGenerationCleanup(record)) return;
       this.clearShutdownTimers();
@@ -963,7 +986,8 @@ export class RuntimeSupervisor {
           record,
           recoverOwnedProcesses: this.recoverOwnedProcesses,
           systemBootId: this.systemBootId,
-          deadlineAt: Date.now() + this.forceKillWaitMs * 2,
+          deadlineAt: record.shutdownDeadlineAt
+            ?? Date.now() + this.recoveryWaitMs,
           isCurrent: () => this.current === record,
           onSettled: (outcome) => {
             if (outcome === "recovered") {
@@ -1085,8 +1109,9 @@ export class RuntimeSupervisor {
       if (record.processTreeTermination) return;
       record.processTreeTerminationConfirmed = false;
       record.processTreeTerminationSettled = false;
-      const deadlineAt = record.shutdownDeadlineAt
-        ?? Date.now() + this.forceKillWaitMs * 2;
+      const deadlineAt = record.shutdownDeadlineAt === null
+        ? Date.now() + this.forceKillWaitMs * 2
+        : record.shutdownDeadlineAt - this.recoveryWaitMs;
       let resolveTermination!: (confirmed: boolean) => void;
       const termination = new Promise<boolean>((resolve) => {
         resolveTermination = resolve;

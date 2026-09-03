@@ -9,15 +9,14 @@ import {
   type RuntimeCredentialBroker, type RuntimeSecureFileBroker,
 } from "../../src/main/runtime-supervisor";
 import { RuntimeCleanupReceiptJournal } from "../../src/main/runtime-cleanup-receipts";
-import {
-  type ModernDarwinRecoveryAuthorityDescriptor,
-} from "../../src/node/runtime-modern-recovery-authorities";
+import type { ModernDarwinRecoveryAuthorityDescriptor } from "../../src/node/runtime-modern-recovery-authorities";
 import {
   encodeConversationAttachmentStoreOperation,
   type ConversationAttachmentStoreAnyOperationRunner,
   type ConversationAttachmentStoreAuthority,
 } from "../../src/node/conversation-attachment-store-child";
 import type { RuntimeWorkerCommand } from "../../src/node/runtime-process-protocol";
+import { runtimeSupervisorRecoveryWaitMs } from "../../src/node/runtime-shutdown-deadline";
 import { privateConnectRuntimeGrantsFromProjectIds }
   from "../../src/shared/private-connect/runtime-grants";
 
@@ -2025,7 +2024,8 @@ describe("RuntimeSupervisor", () => {
 
   it("rejects when a trusted stopped worker cannot be terminated", async () => {
     let resolveForceKill!: (confirmed: boolean) => void;
-    const { children, forceKill, supervisor } = createHarness();
+    const { children, forceKill, supervisor } = createHarness(
+      { recoverOwnedProcesses: () => false });
     forceKill.mockImplementation(() => new Promise<boolean>((resolve) => {
       resolveForceKill = resolve;
     }));
@@ -2038,7 +2038,7 @@ describe("RuntimeSupervisor", () => {
       /shutdown deadline|process tree/u,
     );
     children[0].message({ type: "runtime.stopped" });
-    await vi.advanceTimersByTimeAsync(2_000);
+    await vi.advanceTimersByTimeAsync(2_000 + runtimeSupervisorRecoveryWaitMs(process.platform, 500));
     await rejected;
     children[0].exit(0);
     await vi.advanceTimersByTimeAsync(0);
@@ -2061,7 +2061,7 @@ describe("RuntimeSupervisor", () => {
 
     const recycled = supervisor.testOnlyRecycle();
     const rejected = expect(recycled).rejects.toThrow(/shutdown deadline/u);
-    await vi.advanceTimersByTimeAsync(2_000);
+    await vi.advanceTimersByTimeAsync(2_000 + runtimeSupervisorRecoveryWaitMs(process.platform, 500));
     await rejected;
     expect(forceKill).toHaveBeenCalledWith(10_000, expect.any(Number));
     children[0].exit(137);
@@ -2087,9 +2087,8 @@ describe("RuntimeSupervisor", () => {
         resolve: vi.fn(async () => trustedAttachment),
         release: vi.fn(async () => true),
       };
-      const { children, forceKill, supervisor } = createHarness({
-        attachmentBroker,
-      });
+      const { children, forceKill, supervisor } = createHarness(
+        { attachmentBroker, recoverOwnedProcesses: () => false });
       forceKill.mockImplementation(() => new Promise<boolean>((resolve) => {
         resolveForceKill = resolve;
       }));
@@ -2377,7 +2376,7 @@ describe("RuntimeSupervisor", () => {
 
     await vi.advanceTimersByTimeAsync(1_000);
     expect(forceKill).toHaveBeenCalledOnce();
-    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(1_000 + runtimeSupervisorRecoveryWaitMs(process.platform, 500));
     await expect(stopped).resolves.toBe(false);
     expect(forceKill).toHaveBeenCalledOnce();
 
@@ -2386,7 +2385,8 @@ describe("RuntimeSupervisor", () => {
   });
 
   it("reports shutdown as unconfirmed when forced tree termination cannot be verified", async () => {
-    const { children, forceKill, supervisor } = createHarness();
+    const { children, forceKill, supervisor } = createHarness(
+      { recoverOwnedProcesses: () => false });
     forceKill.mockReturnValue(false);
     supervisor.start();
     children[0].spawn();
@@ -2427,9 +2427,8 @@ describe("RuntimeSupervisor", () => {
       resolve: vi.fn(async () => trustedAttachment),
       release: vi.fn(async () => true),
     };
-    const { children, forceKill, supervisor } = createHarness({
-      attachmentBroker,
-    });
+    const { children, forceKill, supervisor } = createHarness(
+      { attachmentBroker, recoverOwnedProcesses: () => false });
     let resolveForceKill!: (confirmed: boolean) => void;
     forceKill.mockImplementation(() =>
       new Promise<boolean>((resolve) => {
@@ -2460,7 +2459,7 @@ describe("RuntimeSupervisor", () => {
     await vi.advanceTimersByTimeAsync(999);
     expect(forceKill).toHaveBeenCalledOnce();
     expect(stopSettled).toBe(false);
-    await vi.advanceTimersByTimeAsync(1);
+    await vi.advanceTimersByTimeAsync(1 + runtimeSupervisorRecoveryWaitMs(process.platform, 500));
     await expect(stopped).resolves.toBe(false);
     expect(forceKill).toHaveBeenCalledOnce();
     expect(supervisor.snapshot()).toMatchObject({

@@ -227,24 +227,39 @@ jobs:
         id: application_bundle
         run: npm run build:packaged
 
+      # The shared dependency cache deliberately excludes Electron's platform
+      # payload. Download it outside Playwright's hook deadline so a cold cache
+      # cannot consume the first display-sensitive suite's startup budget.
+      - name: Prepare Electron end-to-end binary
+        id: electron_test_binary
+        run: node -e "console.log(require('electron'))"
+
       - name: Run display-sensitive Electron end-to-end tests
         if: runner.os != 'Linux'
-        run: npm exec -- playwright test --project=display-sensitive
+        run: npm exec -- playwright test --project=display-sensitive --output=test-results/display-sensitive
 
       # Keep this as a separate step with an explicit status condition: an
       # assertion in the display-sensitive phase must fail the job without
       # preventing the independent coverage from running.
       - name: Run isolated Electron end-to-end tests
-        if: ${{ !cancelled() && steps.application_bundle.outcome == 'success' && runner.os != 'Linux' }}
-        run: npm exec -- playwright test --project=isolated
+        if: ${{ !cancelled() && steps.application_bundle.outcome == 'success' && steps.electron_test_binary.outcome == 'success' && runner.os != 'Linux' }}
+        run: npm exec -- playwright test --project=isolated --output=test-results/isolated
+
+      - name: Run destructive runtime-recovery tests sequentially
+        if: ${{ !cancelled() && steps.application_bundle.outcome == 'success' && steps.electron_test_binary.outcome == 'success' && runner.os != 'Linux' }}
+        run: npm exec -- playwright test --project=runtime-recovery --output=test-results/runtime-recovery
 
       - name: Run display-sensitive Electron end-to-end tests under Xvfb
         if: runner.os == 'Linux'
-        run: xvfb-run --auto-servernum npm exec -- playwright test --project=display-sensitive
+        run: xvfb-run --auto-servernum npm exec -- playwright test --project=display-sensitive --output=test-results/display-sensitive
 
       - name: Run isolated Electron end-to-end tests under Xvfb
-        if: ${{ !cancelled() && steps.application_bundle.outcome == 'success' && runner.os == 'Linux' }}
-        run: xvfb-run --auto-servernum npm exec -- playwright test --project=isolated
+        if: ${{ !cancelled() && steps.application_bundle.outcome == 'success' && steps.electron_test_binary.outcome == 'success' && runner.os == 'Linux' }}
+        run: xvfb-run --auto-servernum npm exec -- playwright test --project=isolated --output=test-results/isolated
+
+      - name: Run destructive runtime-recovery tests sequentially under Xvfb
+        if: ${{ !cancelled() && steps.application_bundle.outcome == 'success' && steps.electron_test_binary.outcome == 'success' && runner.os == 'Linux' }}
+        run: xvfb-run --auto-servernum npm exec -- playwright test --project=runtime-recovery --output=test-results/runtime-recovery
 
       - name: Keep provider settings visual evidence
         if: runner.os == 'Linux' && matrix.arch == 'x64'

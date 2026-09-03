@@ -18,6 +18,19 @@ export function finishPrivilegedExit(options: {
   return options.exit();
 }
 
+export function finishNormalShutdownAfterCleanup(options: {
+  cleanupConfirmed: boolean;
+  finish(): void;
+  onUnconfirmed(): void;
+}): boolean {
+  if (!options.cleanupConfirmed) {
+    options.onUnconfirmed();
+    return false;
+  }
+  options.finish();
+  return true;
+}
+
 export async function runPrivilegedCleanupSequence(options: {
   stopRuntime(): Promise<boolean>;
   stopPrivateConnect(): Promise<void>;

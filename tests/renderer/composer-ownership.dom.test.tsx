@@ -483,7 +483,9 @@ describe("composer detachment ownership", () => {
       await waitFor(() => expect(textbox).toHaveValue(""));
     }
 
-    expect(screen.getByText("1 of 3")).toBeInTheDocument();
+    // The queue is persisted synchronously, while its deferred UI chunk can
+    // finish loading on a later render under a busy full-shard worker.
+    expect(await screen.findByText("1 of 3")).toBeInTheDocument();
     expect(JSON.parse(window.sessionStorage.getItem(
       composerMediaQueueKey(current.id),
     ) ?? "[]")).toHaveLength(3);

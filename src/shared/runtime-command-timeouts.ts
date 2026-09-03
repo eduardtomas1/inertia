@@ -15,6 +15,10 @@ export const CONVERSATION_COMPACTION_REQUEST_TIMEOUT_MS =
 // Give the server one aggregate deadline, then leave transport/cleanup
 // headroom so its authoritative response reaches the renderer first.
 export const GIT_READ_OPERATION_TIMEOUT_MS = 120_000;
+// Pre-turn artifacts are auxiliary to provider delivery. A single slow Git
+// inspection must fail the artifact closed without holding the user request
+// behind a chain of independently bounded subprocesses.
+export const TURN_GIT_ARTIFACT_PRE_CAPTURE_TIMEOUT_MS = 10_000;
 export const TURN_GIT_ARTIFACT_FINALIZATION_TIMEOUT_MS = 60_000;
 export const GIT_READ_REQUEST_TIMEOUT_MS =
   GIT_READ_OPERATION_TIMEOUT_MS + 60_000;

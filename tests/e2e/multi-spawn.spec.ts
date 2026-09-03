@@ -25,8 +25,10 @@ let turnSequence = 0;
 let activeTurnId = null;
 let responseTimer = null;
 let responseSettled = false;
-const dataDirectory = process.env.INERTIA_DATA_DIR;
-if (!dataDirectory) throw new Error("The multi-spawn fixture data directory is unavailable.");
+// Provider children intentionally receive an allow-listed environment, so
+// test-only Electron variables do not cross that boundary. Both seeded
+// project checkouts are direct children of the fixture root.
+const dataDirectory = path.resolve(process.cwd(), "..", "data");
 const waitForGate = (gate, callback) => {
   const deadlineAt = Date.now() + 30000;
   const inspect = () => {

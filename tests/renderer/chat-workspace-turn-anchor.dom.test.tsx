@@ -690,10 +690,48 @@ describe("draft turn anchoring", () => {
       scrollTop: { configurable: true, writable: true, value: 200 },
     });
     fireEvent.click(screen.getByRole("button", { name: "Navigate response timeline" }));
-    fireEvent.scroll(transcript);
 
     expect(await screen.findByRole("button", { name: "Jump to latest" }))
       .toBeVisible();
+  });
+
+  it("does not reclaim an exact timeline jump after its intent guard expires", async () => {
+    const activeConversation = conversation("conversation-durable-timeline-navigation");
+    const scrollTo = vi.fn();
+    HTMLElement.prototype.scrollTo = scrollTo;
+    const props = workspaceProps(activeConversation, async () => null);
+    const view = render(<ChatWorkspace {...props} messages={[]} />);
+    await screen.findByTestId("turn-anchor-projection");
+    scrollTo.mockClear();
+
+    vi.useFakeTimers();
+    try {
+      fireEvent.click(screen.getByRole("button", {
+        name: "Navigate response timeline",
+      }));
+      expect(screen.getByRole("button", { name: "Jump to latest" }))
+        .toBeVisible();
+      await act(async () => vi.advanceTimersByTime(1_000));
+
+      const lateMessage: ChatMessage = {
+        id: "timeline-navigation-late-message",
+        conversationId: activeConversation.id,
+        turnId: null,
+        role: "assistant",
+        content: "A delayed measurement must not return to the active turn.",
+        attachments: [],
+        createdAt: "2026-08-02T10:00:03.000Z",
+      };
+      view.rerender(<ChatWorkspace {...props} messages={[lateMessage]} />);
+      await act(async () => undefined);
+
+      expect(scrollTo).not.toHaveBeenCalled();
+      expect(screen.getByRole("button", { name: "Jump to latest" }))
+        .toBeVisible();
+    } finally {
+      await act(async () => vi.runOnlyPendingTimers());
+      vi.useRealTimers();
+    }
   });
 
   it("yields a followed turn to explicit response timeline navigation", async () => {

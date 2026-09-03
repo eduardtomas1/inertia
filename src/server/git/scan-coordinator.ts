@@ -7,7 +7,10 @@ import type {
   GitScanScope,
   ValidatedGitScanIdentity,
 } from "./scan-contracts";
-import { GitError } from "./types";
+import {
+  GitError,
+  isGitProcessTreeTerminationFailure,
+} from "./types";
 
 export type {
   GitScanExecution,
@@ -44,6 +47,7 @@ function reportGitScanLateFailure(error: unknown): void {
 }
 
 interface ScanRun<Result> {
+  cancel: () => void;
   execute: (execution: GitScanExecution) => Promise<Result>;
   invalidation: number;
   promise: Promise<Result>;
@@ -201,14 +205,22 @@ function deferred<Result>(): Deferred<Result> {
   return { promise, reject, resolve };
 }
 
+function isCallerUnavailable(
+  request: Pick<GitScanRequest, "deadlineAt" | "signal">,
+): boolean {
+  return request.signal?.aborted === true
+    || request.deadlineAt !== undefined && Date.now() >= request.deadlineAt;
+}
+
 function waitForCaller<Result>(
   promise: Promise<Result>,
   request: Pick<GitScanRequest, "deadlineAt" | "signal">,
 ): Promise<Result> {
-  if (
-    request.signal?.aborted
-    || request.deadlineAt !== undefined && Date.now() >= request.deadlineAt
-  ) {
+  if (isCallerUnavailable(request)) {
+    // The coordinator may have admitted shared work immediately before a
+    // wall-clock deadline elapsed. Keep observing that owned work even though
+    // this caller must receive its timeout now.
+    void promise.catch(() => undefined);
     return Promise.reject(timeoutError());
   }
   if (!request.signal && request.deadlineAt === undefined) return promise;
@@ -249,6 +261,8 @@ export class GitScanCoordinator {
   );
   private readonly invalidations = new Map<string, number>();
   private readonly states = new Map<string, ScanState<unknown>>();
+  private drainPromise: Promise<void> | null = null;
+  private drainHolds = 0;
 
   constructor(
     private readonly scanTimeoutMs = GIT_SCAN_TIMEOUT_MS,
@@ -270,6 +284,7 @@ export class GitScanCoordinator {
     request: GitScanRequest,
     execute: (execution: GitScanExecution) => Promise<Result>,
   ): Promise<Result> {
+    if (this.drainHolds > 0) return Promise.reject(timeoutError());
     if (
       !request.authorityGeneration
       || !request.optionsKey
@@ -281,6 +296,7 @@ export class GitScanCoordinator {
         "The Git scan identity is invalid.",
       ));
     }
+    if (isCallerUnavailable(request)) return Promise.reject(timeoutError());
     const key = JSON.stringify([
       request.identity.key,
       request.authorityGeneration,
@@ -337,6 +353,64 @@ export class GitScanCoordinator {
     return waitForCaller(state.trailing.promise, request);
   }
 
+  /**
+   * Stops every active or queued scan and retains ownership until each
+   * cancellation path settles. Runtime commands may stop awaiting a shared
+   * scan when their own caller disappears, so runtime shutdown must drain the
+   * coordinator itself before checking the owned-process journal.
+   */
+  cancelAndDrain(): Promise<void> {
+    return this.cancelAndDrainWhile(async () => undefined);
+  }
+
+  /**
+   * Keeps scan admission closed while a caller drains work that was admitted
+   * before shutdown. Such work can reach its first Git scan after the scans
+   * known at shutdown entry have already settled.
+   */
+  async cancelAndDrainWhile<Result>(
+    operation: () => Promise<Result>,
+  ): Promise<Result> {
+    this.drainHolds += 1;
+    try {
+      const [drain, operationResult] = await Promise.allSettled([
+        this.drainStates(),
+        Promise.resolve().then(operation),
+      ]);
+      if (drain.status === "rejected") throw drain.reason;
+      if (operationResult.status === "rejected") throw operationResult.reason;
+      return operationResult.value;
+    } finally {
+      this.drainHolds -= 1;
+    }
+  }
+
+  private drainStates(): Promise<void> {
+    if (this.drainPromise) return this.drainPromise;
+    this.drainPromise = (async () => {
+      let cleanupFailure: unknown;
+      while (this.states.size > 0) {
+        const settlements: Promise<void>[] = [];
+        for (const state of this.states.values()) {
+          const trailing = state.trailing;
+          state.trailing = null;
+          trailing?.reject(timeoutError());
+          state.active.cancel();
+          settlements.push(state.active.settlement);
+        }
+        const results = await Promise.allSettled(settlements);
+        cleanupFailure ??= results.find(
+          (result): result is PromiseRejectedResult =>
+            result.status === "rejected",
+        )?.reason;
+      }
+      if (cleanupFailure !== undefined) throw cleanupFailure;
+    })().finally(() => {
+      this.drainPromise = null;
+    });
+    return this.drainPromise;
+  }
+
   private start<Result>(
     processKey: string,
     invalidation: number,
@@ -344,8 +418,15 @@ export class GitScanCoordinator {
     execute: (execution: GitScanExecution) => Promise<Result>,
   ): ScanRun<Result> {
     const deadlineAt = Date.now() + this.scanTimeoutMs;
-    const started = this.activeKeyGate.acquire({ deadlineAt }).then((release) => {
-      const controller = new AbortController();
+    const controller = new AbortController();
+    const started = this.activeKeyGate.acquire({
+      deadlineAt,
+      signal: controller.signal,
+    }).then((release) => {
+      if (controller.signal.aborted) {
+        release();
+        throw timeoutError();
+      }
       const timedOut = deferred<never>();
       let didTimeOut = false;
       const timer = setTimeout(() => {
@@ -377,6 +458,7 @@ export class GitScanCoordinator {
               // Diagnostics cannot release process ownership early.
             }
           }
+          if (isGitProcessTreeTerminationFailure(error)) throw error;
         },
       ).finally(() => {
         controller.abort();
@@ -390,7 +472,14 @@ export class GitScanCoordinator {
       ({ settlement: cleanup }) => cleanup,
       () => undefined,
     );
-    return { execute, invalidation, promise, settlement, scope };
+    return {
+      cancel: () => controller.abort(),
+      execute,
+      invalidation,
+      promise,
+      settlement,
+      scope,
+    };
   }
 
   private observeCompletion<Result>(

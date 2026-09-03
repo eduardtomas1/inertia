@@ -106,6 +106,7 @@ import { runRecoveryImportWorker } from "./persistence/database-recovery-import-
 import { runPackagedImageRetentionSmoke } from "./runtime/attachments/package-smoke-image";
 import type { RunningRuntime, RuntimeOptions } from "./runtime-types";
 import { RuntimeUpdatePreparationGate } from "./runtime-update-preparation";
+import { gitScanCoordinator } from "./git/scan-coordinator";
 import { recordSystemSuspendInterval } from "./runtime/system-suspend-coordinator";
 import {
   initializeRuntimePersistence,
@@ -1162,8 +1163,10 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       await runRuntimeShutdownPhases({
         quiesceRuntimeWork: async ({ deadlineAt }) => {
           turnGitArtifacts.beginShutdown(deadlineAt);
-          await updatePreparation.drainTracked();
-          await projectIdentities.drain();
+          await gitScanCoordinator.cancelAndDrainWhile(async () => {
+            await updatePreparation.drainTracked();
+            await projectIdentities.drain();
+          });
         },
         independentDrains: [
           () => initializedConversationAttachments.close(),

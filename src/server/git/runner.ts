@@ -16,14 +16,15 @@ import {
 } from "../process-lifecycle";
 import { gitProcessEnvironment } from "./environment";
 import { withGitScanProcessSlot } from "./scan-coordinator";
-import { GitError } from "./types";
+import {
+  GIT_PROCESS_TREE_TERMINATION_FAILURE,
+  GitError,
+  isGitProcessTreeTerminationFailure as isProcessTreeTerminationFailure,
+} from "./types";
 
 const TRUNCATED_OUTPUT_DRAIN_MS = 250;
 const ABORTED_PROCESS_DRAIN_MS = 250;
 const PREPARED_ABORT_CLEANUP_MS = 500;
-const PROCESS_TREE_TERMINATION_FAILURE =
-  "Git stopped responding, and its process tree could not be confirmed stopped.";
-
 export interface GitProcessResult {
   stdout: Buffer;
   stderr: Buffer;
@@ -66,9 +67,7 @@ export interface PreparedGitRefUpdateContext {
 export function isGitProcessTreeTerminationFailure(
   error: unknown,
 ): error is GitError {
-  return error instanceof GitError
-    && error.code === "operation-failed"
-    && error.message === PROCESS_TREE_TERMINATION_FAILURE;
+  return isProcessTreeTerminationFailure(error);
 }
 
 export function gitInspectionSettlementValues<First, Second>(
@@ -334,7 +333,7 @@ export function runGit(
         () => {
           finish(new GitError(
             "operation-failed",
-            PROCESS_TREE_TERMINATION_FAILURE,
+            GIT_PROCESS_TREE_TERMINATION_FAILURE,
           ));
         },
       );
@@ -553,7 +552,7 @@ function runPreparedGitRefTransaction(
         () => finish(error),
         () => finish(new GitError(
           "operation-failed",
-          PROCESS_TREE_TERMINATION_FAILURE,
+          GIT_PROCESS_TREE_TERMINATION_FAILURE,
         )),
       );
     };

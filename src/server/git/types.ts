@@ -18,6 +18,9 @@ export type GitErrorCode =
   | "git-unavailable"
   | "operation-failed";
 
+export const GIT_PROCESS_TREE_TERMINATION_FAILURE =
+  "Git stopped responding, and its process tree could not be confirmed stopped.";
+
 /** An error whose message is safe to show directly in the application UI. */
 export class GitError extends Error {
   readonly code: GitErrorCode;
@@ -27,6 +30,14 @@ export class GitError extends Error {
     this.name = "GitError";
     this.code = code;
   }
+}
+
+export function isGitProcessTreeTerminationFailure(
+  error: unknown,
+): error is GitError {
+  return error instanceof GitError
+    && error.code === "operation-failed"
+    && error.message === GIT_PROCESS_TREE_TERMINATION_FAILURE;
 }
 
 export type GitFileStatus =

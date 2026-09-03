@@ -116,6 +116,20 @@
   max-width: 34px;
 }
 
+.work-thread-meta > .activity-thread-repository-meta,
+.work-thread-meta > .activity-thread-branch-meta {
+  display: none;
+}
+
+.sidebar.is-wide .work-thread-meta > .activity-thread-repository-meta,
+.sidebar.is-wide .work-thread-meta > .activity-thread-branch-meta {
+  display: inline-flex;
+}
+
+.work-thread-meta > .activity-thread-project-meta {
+  flex: 1 1 auto;
+}
+
 .sidebar.is-wide .activity-thread-select {
   padding-right: 9px;
   padding-left: 9px;

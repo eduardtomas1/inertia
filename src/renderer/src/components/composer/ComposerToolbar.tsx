@@ -1,7 +1,9 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import {
   ChevronDown,
   Command,
+  Check,
+  Folder,
   FolderGit2,
   GitBranch,
   LoaderCircle,
@@ -49,6 +51,89 @@ import {
 import { ComposerSendActionsFallback } from "./ComposerSendActionsFallback";
 import type { ComposerMenuController } from "./useComposerMenus";
 import type { NewChatProjectPicker, PromptPresetCommandRunner } from "./types";
+
+function ProjectPicker({ picker }: { picker: NewChatProjectPicker }): React.JSX.Element {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: PointerEvent): void => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        setOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      document.removeEventListener("keydown", onKeyDown, true);
+    };
+  }, [open]);
+
+  return (
+    <div className="composer-project-picker" ref={rootRef}>
+      <Folder
+        className="composer-project-picker-mark"
+        size={12}
+        style={{ color: picker.selectedProject.color ?? "var(--accent)" }}
+        aria-hidden="true"
+      />
+      <span className="composer-project-picker-label">Project</span>
+      <button
+        type="button"
+        role="combobox"
+        aria-label="Project"
+        aria-haspopup="listbox"
+        aria-expanded={open ? "true" : "false"}
+        aria-controls="composer-project-listbox"
+        className="composer-project-picker-trigger"
+        disabled={picker.disabled}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <span>{picker.selectedProject.name}</span>
+      </button>
+      <ChevronDown size={11} aria-hidden="true" />
+      {open && (
+        <div
+          className="composer-project-listbox"
+          id="composer-project-listbox"
+          role="listbox"
+          aria-label="Project"
+        >
+          {picker.projects.map((project) => {
+            const selected = project.id === picker.selectedProject.id;
+            return (
+              <button
+                type="button"
+                role="option"
+                aria-selected={selected}
+                className={clsx("composer-project-option", selected && "is-selected")}
+                key={project.id}
+                onClick={() => {
+                  setOpen(false);
+                  if (!selected) picker.onChange(project);
+                }}
+              >
+                <Folder
+                  size={12}
+                  style={{ color: project.color ?? "var(--accent)" }}
+                  aria-hidden="true"
+                />
+                <span>{project.name}</span>
+                {selected && <Check size={12} aria-hidden="true" />}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
 import type { AgentTurnStatus } from "../../../../shared/turn-lifecycle";
 import type { PromptStashEntry } from "../../utils/promptStash";
 
@@ -533,32 +618,7 @@ export function ComposerToolbar({
           aria-label="Chat checkout context"
         >
           {newChatProjectPicker ? (
-            <label className="composer-project-picker">
-              <span
-                className="composer-project-picker-dot"
-                style={{
-                  "--project-color": newChatProjectPicker.selectedProject.color
-                    ?? "var(--accent)",
-                } as React.CSSProperties}
-                aria-hidden="true"
-              />
-              <span className="composer-project-picker-label">Project</span>
-              <select
-                aria-label="Project"
-                value={newChatProjectPicker.selectedProject.id}
-                disabled={newChatProjectPicker.disabled}
-                onChange={(event) => newChatProjectPicker.onChange(
-                  newChatProjectPicker.projects[event.currentTarget.selectedIndex]!,
-                )}
-              >
-                {newChatProjectPicker.projects.map((project) => (
-                  <option value={project.id} key={project.id}>
-                    {project.name}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown size={11} aria-hidden="true" />
-            </label>
+            <ProjectPicker picker={newChatProjectPicker} />
           ) : (
             <span className="composer-checkout-location">
               <FolderGit2 size={12} aria-hidden="true" />

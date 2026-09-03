@@ -104,6 +104,14 @@ export function visibleWorkspaceConversation(
   return draft ?? persisted;
 }
 
+export function visibleChatConversation(
+  draft: Conversation | null,
+  detail: Conversation | null,
+  fallback: Conversation | null,
+): Conversation | null {
+  return draft ?? detail ?? fallback;
+}
+
 export function visibleConversationLatestTurnSummary(
   persisted: Pick<Conversation, "id"> | null,
   visible: Pick<Conversation, "id"> | null,
@@ -514,7 +522,11 @@ export function createWorkspaceSceneModel({
     } : null,
     chat: {
       project,
-      conversation: detail?.conversation ?? conversation,
+      conversation: visibleChatConversation(
+        draftConversation,
+        detail?.conversation ?? null,
+        conversation,
+      ),
       ...(globalChatActive
         && draftConversation
         && project

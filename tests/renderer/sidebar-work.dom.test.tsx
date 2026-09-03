@@ -295,6 +295,7 @@ describe("compact Work sidebar", () => {
       .getAllByRole("button");
 
     expect(footerButtons.map((button) => button.textContent)).toEqual([
+      "Workspace",
       "Daily work",
       "Usage",
       "Settings",

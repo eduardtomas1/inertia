@@ -50,17 +50,10 @@
   width: 34px;
   height: 34px;
   place-items: center;
-  border: 1px solid color-mix(in srgb, var(--text) 12%, var(--border));
+  border: 1px solid var(--border-strong);
   border-radius: 10px;
   color: var(--text-soft);
-  background: linear-gradient(
-    145deg,
-    color-mix(in srgb, var(--surface-strong) 86%, var(--surface-muted)),
-    color-mix(in srgb, var(--surface-muted) 72%, var(--surface))
-  );
-  box-shadow:
-    0 1px 4px color-mix(in srgb, var(--text) 7%, transparent),
-    inset 0 1px color-mix(in srgb, var(--surface-strong) 92%, transparent);
+  background: var(--surface-muted);
 }
 
 .daily-work-header h2,
@@ -96,17 +89,18 @@
 }
 
 .daily-work-date-input {
-  width: 136px;
+  width: 152px;
   height: 30px;
   min-width: 0;
-  padding: 0 8px;
+  padding: 0 9px;
   border: 1px solid var(--border);
   border-radius: 8px;
   outline: 0;
   color: var(--text-soft);
   background: color-mix(in srgb, var(--surface) 76%, transparent);
   font: inherit;
-  font-size: max(var(--ui-font-micro), 9px);
+  font-size: max(var(--ui-font-secondary), 11px);
+  font-variant-numeric: tabular-nums;
 }
 
 :root[data-theme="dark"] .daily-work-date-input {
@@ -247,26 +241,29 @@
 
 .daily-work-totals article:last-child { border-right: 0; }
 
-.daily-work-totals .is-primary {
-  background: linear-gradient(
-    to bottom,
-    color-mix(in srgb, var(--accent) 5%, transparent),
-    transparent 68%
-  );
+.daily-work-totals article > span {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
 }
 
-.daily-work-totals article > span,
 .daily-work-card-metrics small {
   color: var(--text-muted);
-  font-size: 9px;
-  font-weight: 650;
-  letter-spacing: 0.075em;
+  font-size: 9.5px;
+  font-weight: 560;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
 .daily-work-totals strong {
+  display: flex;
+  min-height: calc(clamp(24px, 3vw, 32px) * 1.05);
+  align-items: center;
   overflow: hidden;
   font-size: clamp(24px, 3vw, 32px);
+  font-variant-numeric: tabular-nums;
   font-weight: 650;
   letter-spacing: -0.045em;
   line-height: 1.05;
@@ -516,11 +513,23 @@
   border-radius: 999px;
   padding: 1px 7px;
   color: var(--text-muted);
-  font-size: 8.5px;
+  font-size: 9.5px;
   font-style: normal;
-  font-weight: 620;
+  font-weight: 600;
   letter-spacing: 0.01em;
   white-space: nowrap;
+}
+
+.daily-work-badge.is-new {
+  border-color: transparent;
+  padding-inline: 0;
+  color: var(--text-muted);
+  font-weight: 560;
+}
+
+.daily-work-badge.is-new::before {
+  margin-right: 5px;
+  content: "·";
 }
 
 .daily-work-badge.is-running {
@@ -564,8 +573,8 @@
 
 .daily-work-unavailable {
   color: var(--text-muted);
-  font-size: 0.78em;
-  font-weight: 580;
+  font-size: max(var(--ui-font-secondary), 12px);
+  font-weight: 520;
   letter-spacing: 0;
 }
 

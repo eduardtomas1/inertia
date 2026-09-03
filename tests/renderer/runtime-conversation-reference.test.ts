@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   runtimeConversationReference,
   terminalResumeDirectory,
+  visibleChatConversation,
   visibleConversationLatestTurnSummary,
   visibleWorkspaceConversation,
   workspaceDirectoryIdentity,
@@ -197,5 +198,29 @@ describe("runtime conversation references", () => {
     expect(appSource).toContain(
       "conversationSelectionGenerationRef.current += 1;",
     );
+  });
+});
+
+describe("global chat draft visibility", () => {
+  const draft = { id: "44444444-4444-4444-8444-444444444444" };
+  const detail = { id: "55555555-5555-4555-8555-555555555555" };
+  const fallback = { id: "66666666-6666-4666-8666-666666666666" };
+
+  it("shows the draft even while a selected chat detail is loaded", () => {
+    expect(visibleChatConversation(
+      draft as never,
+      detail as never,
+      fallback as never,
+    )).toBe(draft);
+  });
+
+  it("falls back to the loaded detail when no draft is open", () => {
+    expect(visibleChatConversation(null, detail as never, fallback as never))
+      .toBe(detail);
+  });
+
+  it("uses the persisted conversation when neither draft nor detail exists", () => {
+    expect(visibleChatConversation(null, null, fallback as never))
+      .toBe(fallback);
   });
 });

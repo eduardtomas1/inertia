@@ -178,7 +178,7 @@ describe("RuntimeSupervisor recovery admission", () => {
     });
   });
 
-  it("extends startup once after the final exact cleanup receipt", async () => {
+  it("grants the final exact cleanup receipt a doubled bounded readiness window", async () => {
     const retiredGenerationId =
       "30000000-0000-4000-8000-000000000003:901";
     expect(new RuntimeCleanupReceiptJournal(dataDirectory)
@@ -198,7 +198,7 @@ describe("RuntimeSupervisor recovery admission", () => {
       receiptRuntimeGenerationId: retiredGenerationId,
       currentRuntimeGenerationId: start.options.runtimeGenerationId,
     });
-    await vi.advanceTimersByTimeAsync(200);
+    await vi.advanceTimersByTimeAsync(2_100);
 
     expect(forceKill).not.toHaveBeenCalled();
     expect(supervisor.snapshot().lastError).toBeNull();
@@ -227,7 +227,7 @@ describe("RuntimeSupervisor recovery admission", () => {
       currentRuntimeGenerationId: start.options.runtimeGenerationId,
     };
     children[0].message(acknowledgement);
-    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(3_000);
     children[0].message(acknowledgement);
     children[0].message({
       ...acknowledgement,
@@ -756,8 +756,8 @@ describe("RuntimeSupervisor recovery admission", () => {
       .pending(platform, bootId)).toEqual([]);
     // The partial acknowledgement at 900 ms must not move the deadline to
     // 2,900 ms; the final exact acknowledgement at 1,900 ms owns the single
-    // fresh window through 3,900 ms.
-    await vi.advanceTimersByTimeAsync(1_100);
+    // doubled recovery-readiness window through 5,900 ms.
+    await vi.advanceTimersByTimeAsync(2_100);
     expect(supervisor.snapshot().lastError).toBeNull();
     children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
     expect(supervisor.snapshot()).toMatchObject({ phase: "ready" });
@@ -810,10 +810,10 @@ describe("RuntimeSupervisor recovery admission", () => {
       snapshotDigest: descriptor!.snapshotDigest,
       currentRuntimeGenerationId: start.options.runtimeGenerationId,
     });
-    // Exact recovery progress owns one fresh startup window. A loaded host
-    // may need the first window to retire the old generation before ordinary
-    // runtime initialization can finish.
-    await vi.advanceTimersByTimeAsync(200);
+    // Exact recovery progress owns one doubled, bounded readiness window. A
+    // loaded host may need the first window to retire the old generation
+    // before ordinary runtime initialization can finish.
+    await vi.advanceTimersByTimeAsync(2_100);
     expect(supervisor.snapshot().lastError).toBeNull();
     children[0].emit("message", {
       type: "runtime.ready",

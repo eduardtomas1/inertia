@@ -127,7 +127,7 @@ test("starts a sessionless goal and recovers it after Stop and runtime crash", {
 }, async () => {
   // Two Git-protected activations plus runtime recovery need a test budget
   // that does not preempt either activation's own bounded assertion.
-  test.setTimeout(150_000);
+  test.setTimeout(180_000);
   const app = await createAppFixture({
     name: "goal-reliability",
     initialState: "conversation",
@@ -245,10 +245,10 @@ test("starts a sessionless goal and recovers it after Stop and runtime crash", {
           && runtimeGeneration !== null
           && runtimeGeneration !== beforeRuntimeGeneration;
       // An explicitly authorized macOS replacement owns one bounded recovery
-      // window and, after consuming that exact authority, one bounded normal
-      // startup window. Observe the complete production envelope without
-      // weakening either supervisor deadline.
-      }, { timeout: 70_000 }).toBe(true);
+      // window and, after consuming that exact authority, one separately
+      // bounded recovery-readiness window. Observe the complete production
+      // envelope without weakening either supervisor deadline.
+      }, { timeout: 100_000 }).toBe(true);
     } catch (error) {
       recoveryOperationFailed = true;
       recoveryOperationError = error;

@@ -11,6 +11,7 @@ import {
   GitError,
   isGitProcessTreeTerminationFailure,
 } from "./types";
+import { gitInspectionLifecycle } from "./inspection-lifecycle";
 
 export type {
   GitScanExecution,
@@ -165,26 +166,29 @@ const processGatesByKey = new Map<string, ConcurrencyGate>();
 /** Applies the documented process budget to every Git inspection. */
 export async function withGitScanProcessSlot<Result>(
   options: { deadlineAt?: number; signal?: AbortSignal },
-  operation: () => Promise<Result>,
+  operation: (signal: AbortSignal) => Promise<Result>,
 ): Promise<Result> {
-  const processKey = scanExecution.getStore()?.processKey;
-  const keyGate = processKey
-    ? processGatesByKey.get(processKey)
-      ?? new ConcurrencyGate(GIT_SCAN_PROCESS_BUDGET_PER_KEY)
-    : null;
-  if (processKey && keyGate && !processGatesByKey.has(processKey)) {
-    processGatesByKey.set(processKey, keyGate);
-  }
-  const releaseKey = keyGate ? await keyGate.acquire(options) : null;
-  let releaseGlobal: (() => void) | null = null;
-  try {
-    releaseGlobal = await globalProcessGate.acquire(options);
-    return await operation();
-  } finally {
-    releaseGlobal?.();
-    releaseKey?.();
-    if (processKey && keyGate?.empty) processGatesByKey.delete(processKey);
-  }
+  return await gitInspectionLifecycle.run(options, async (signal) => {
+    const processKey = scanExecution.getStore()?.processKey;
+    const keyGate = processKey
+      ? processGatesByKey.get(processKey)
+        ?? new ConcurrencyGate(GIT_SCAN_PROCESS_BUDGET_PER_KEY)
+      : null;
+    if (processKey && keyGate && !processGatesByKey.has(processKey)) {
+      processGatesByKey.set(processKey, keyGate);
+    }
+    const lifecycleOptions = { ...options, signal };
+    const releaseKey = keyGate ? await keyGate.acquire(lifecycleOptions) : null;
+    let releaseGlobal: (() => void) | null = null;
+    try {
+      releaseGlobal = await globalProcessGate.acquire(lifecycleOptions);
+      return await operation(signal);
+    } finally {
+      releaseGlobal?.();
+      releaseKey?.();
+      if (processKey && keyGate?.empty) processGatesByKey.delete(processKey);
+    }
+  });
 }
 
 function scopeRank(scope: GitScanScope): number {

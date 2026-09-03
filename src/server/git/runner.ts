@@ -443,7 +443,7 @@ export function runGitInspection(
   const prepared = inspectionArguments(args);
   return withGitScanProcessSlot(
     options,
-    async () => await runGit(cwd, prepared, options),
+    async (signal) => await runGit(cwd, prepared, { ...options, signal }),
   );
 }
 

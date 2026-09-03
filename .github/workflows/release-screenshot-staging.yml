@@ -11,7 +11,7 @@ permissions:
 jobs:
   canary:
     name: Capture v0.0.47 Canary screenshot
-    runs-on: macos-15
+    runs-on: macos-15-intel
     timeout-minutes: 20
     steps:
       - name: Check out release branch

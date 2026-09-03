@@ -940,7 +940,7 @@ export function FilesPanel({
                 || directoryPage?.truncated
               );
             return (
-              <div className={`${FILE_TREE_CLASS}-row-group`} key={entry.path}>
+              <div className={`${FILE_TREE_CLASS}-row-group`} key={`${searchActive ? "search" : "tree"}:${entry.path}`}>
                 <button
                   type="button"
                   role="treeitem"

@@ -86,6 +86,73 @@ ipcRenderer.on(
   },
 );
 
+type PreviewConnectionRequest = Parameters<DesktopBridge["previewConnect"]>[0];
+type PreviewBoundsRequest = Parameters<DesktopBridge["previewSetBounds"]>[0];
+
+interface PreviewConnectionState {
+  readonly ready: ReturnType<DesktopBridge["previewConnect"]>;
+  tail: Promise<void>;
+  closed: boolean;
+}
+
+const previewConnections = new Map<string, PreviewConnectionState>();
+
+function previewConnectionKey(request: PreviewConnectionRequest): string {
+  return `${request.ownerId}:${request.contextId}:${request.connectionId}`;
+}
+
+function connectPreview(
+  request: PreviewConnectionRequest,
+): ReturnType<DesktopBridge["previewConnect"]> {
+  const ready = ipcRenderer.invoke(IPC.previewConnect, request) as ReturnType<
+    DesktopBridge["previewConnect"]
+  >;
+  previewConnections.set(previewConnectionKey(request), {
+    ready,
+    tail: Promise.resolve(),
+    closed: false,
+  });
+  return ready;
+}
+
+function setPreviewBounds(request: PreviewBoundsRequest): Promise<void> {
+  const state = previewConnections.get(previewConnectionKey(request));
+  if (!state || state.closed) return Promise.resolve();
+  const operation = state.tail.then(async () => {
+    await state.ready;
+    if (state.closed) return;
+    const accepted = await ipcRenderer.invoke(IPC.previewSetBounds, request) as
+      boolean | undefined;
+    if (accepted !== false || request.bounds === null || state.closed) return;
+    await ipcRenderer.invoke(IPC.previewConnect, {
+      ...request, recoverMissingLease: true,
+    });
+    if (state.closed) return;
+    await ipcRenderer.invoke(IPC.previewSetBounds, request);
+  });
+  state.tail = operation.catch(() => undefined);
+  return operation;
+}
+
+function closePreview(
+  request: Parameters<DesktopBridge["previewClose"]>[0],
+): Promise<void> {
+  const key = previewConnectionKey(request);
+  const state = previewConnections.get(key);
+  if (!state) {
+    return ipcRenderer.invoke(IPC.previewClose, request).then(() => undefined);
+  }
+  state.closed = true;
+  const operation = state.tail.then(async () => {
+    await state.ready.catch(() => undefined);
+    await ipcRenderer.invoke(IPC.previewClose, request);
+  });
+  state.tail = operation.catch(() => undefined);
+  return operation.finally(() => {
+    if (previewConnections.get(key) === state) previewConnections.delete(key);
+  });
+}
+
 const bridge: DesktopBridge = Object.freeze({
   getWindowContext: () =>
     ipcRenderer.invoke(DETACHED_CHAT_IPC.getWindowContext) as ReturnType<
@@ -271,10 +338,7 @@ const bridge: DesktopBridge = Object.freeze({
     ipcRenderer.invoke(IPC.getAppHealth) as ReturnType<DesktopBridge["getAppHealth"]>,
   clearAppCache: () =>
     ipcRenderer.invoke(IPC.clearAppCache) as ReturnType<DesktopBridge["clearAppCache"]>,
-  previewConnect: (request: Parameters<DesktopBridge["previewConnect"]>[0]) =>
-    ipcRenderer.invoke(IPC.previewConnect, request) as ReturnType<
-      DesktopBridge["previewConnect"]
-    >,
+  previewConnect: connectPreview,
   previewNavigate: (request: Parameters<DesktopBridge["previewNavigate"]>[0]) =>
     ipcRenderer.invoke(IPC.previewNavigate, request) as ReturnType<
       DesktopBridge["previewNavigate"]
@@ -287,17 +351,8 @@ const bridge: DesktopBridge = Object.freeze({
     ipcRenderer.invoke(IPC.previewTab, request) as ReturnType<
       DesktopBridge["previewTab"]
     >,
-  previewSetBounds: async (request: Parameters<DesktopBridge["previewSetBounds"]>[0]) => {
-    const accepted = await ipcRenderer.invoke(IPC.previewSetBounds, request) as
-      boolean | undefined;
-    if (accepted !== false) return;
-    await ipcRenderer.invoke(IPC.previewConnect, {
-      ...request, recoverMissingLease: true,
-    });
-    await ipcRenderer.invoke(IPC.previewSetBounds, request);
-  },
-  previewClose: (request: Parameters<DesktopBridge["previewClose"]>[0]) =>
-    ipcRenderer.invoke(IPC.previewClose, request) as Promise<void>,
+  previewSetBounds: setPreviewBounds,
+  previewClose: closePreview,
   previewInspectEvidenceImage: (
     request: Parameters<DesktopBridge["previewInspectEvidenceImage"]>[0],
   ) => ipcRenderer.invoke(IPC.previewInspectEvidenceImage, request) as ReturnType<

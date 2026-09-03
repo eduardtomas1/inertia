@@ -37,6 +37,7 @@ import {
 import {
   distribution,
   summarizeStreamingBenchmarkEvidence,
+  summarizeVisibleStreamingCadence,
 } from "../helpers/desktop-benchmark-summary";
 import { streamingReaderActivityReceiptStage } from "../../src/renderer/src/utils/testStreamingTrace";
 import {
@@ -154,6 +155,13 @@ interface StreamingPaintMeasurement {
   frameBudgetMs: number;
   rendererTraceMarks: StreamingTraceMarker[];
 }
+
+type StreamingPaintObservation = Omit<
+  StreamingPaintMeasurement,
+  "medianVisibleGapMs" | "p95VisibleGapMs" | "visibleUpdatesPerSecond"
+> & {
+  readonly visibleUpdateGaps: readonly number[];
+};
 
 const stageMetricDefinitions = [
   ["providerDeltaToChannelAcceptedMs", "provider-delta-received", "delta-accepted-by-channel"],
@@ -825,7 +833,7 @@ async function streamingResponsivenessSample(
     measurementTimeoutMs,
     sampleNumber,
   }) => (
-      new Promise<StreamingPaintMeasurement>((resolveMeasurement, rejectMeasurement) => {
+      new Promise<StreamingPaintObservation>((resolveMeasurement, rejectMeasurement) => {
       for (const entry of performance.getEntriesByType("mark")) {
         if (entry.name.startsWith("inertia-stream:")) {
           performance.clearMarks(entry.name);
@@ -895,21 +903,14 @@ async function streamingResponsivenessSample(
         const stableFrames = frameIntervals.filter((value) => value > 0 && value < 50);
         const observedFrameMs = percentile(stableFrames, 0.5) || 16.667;
         const frameBudgetMs = Math.min(25, Math.max(10, observedFrameMs * 1.75));
-        const visibleDurationMs = Math.max(
-          1,
-          visibleUpdateGaps.reduce((sum, gap) => sum + gap, 0),
-        );
         resolveMeasurement({
           firstProviderDeltaToPaintMs,
           completionToFinalPaintMs,
           terminalAnswerBottomGapAtPaint:
             terminalAnswerBottomGapAtPaint ?? Number.POSITIVE_INFINITY,
           terminalAnswerVisibleAtPaint,
-          medianVisibleGapMs: percentile(visibleUpdateGaps, 0.5),
-          p95VisibleGapMs: percentile(visibleUpdateGaps, 0.95),
+          visibleUpdateGaps,
           visibleUpdates: visibleUpdates.length,
-          visibleUpdatesPerSecond:
-            visibleUpdateGaps.length / (visibleDurationMs / 1_000),
           longTasks: longTaskDurations.length,
           longTaskTotalMs: longTaskDurations.reduce((sum, value) => sum + value, 0),
           frames: frameIntervals.length,
@@ -1221,7 +1222,14 @@ async function streamingResponsivenessSample(
     await releaseStreamingCompletion(workspace, sampleNumber);
     const measurementOutcome = await measurementOutcomePromise;
     if (measurementOutcome.status === "rejected") throw measurementOutcome.error;
-    visible = measurementOutcome.value;
+    const { visibleUpdateGaps, ...paintObservation } = measurementOutcome.value;
+    visible = {
+      ...paintObservation,
+      ...summarizeVisibleStreamingCadence(
+        visibleUpdateGaps,
+        STREAMING_PROGRESSIVE_PAINT_COUNT,
+      ),
+    };
     await waitForStreamingCompletionCleanup(workspace, sampleNumber);
     expect(visible.terminalAnswerVisibleAtPaint).toBe(true);
     expect(visible.terminalAnswerBottomGapAtPaint)
@@ -2077,7 +2085,7 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
       limitations: [
         "The authoritative long-conversation fixture creates 300 queued, running, and settled turns through RuntimeStore lifecycle APIs; a bounded, unmeasured bottom-range preflight settles deferred virtualizer measurements before the exact 120-frame sample, and the compatibility scenario separately stresses collapsed orphan history.",
         "Desktop streaming uses a deterministic local Codex app-server fixture; it exercises the production provider, utility-runtime, SQLite, WebSocket, React, and paint path without network variance.",
-        "The streaming fixture acknowledges the first four exact visible payload fragments before resuming its unchanged bulk cadence, then holds terminal completion behind a bounded local gate, acknowledges one activity pulse before reader navigation and one after it, returns through Jump to latest, and releases completion immediately before the terminal-paint await.",
+        "The streaming fixture acknowledges the first four exact visible payload fragments before resuming its unchanged bulk cadence; those four gate-controlled intervals are excluded from visible-cadence statistics, while every later visible interval remains measured. It then holds terminal completion behind a bounded local gate, acknowledges one activity pulse before reader navigation and one after it, returns through Jump to latest, and releases completion immediately before the terminal-paint await.",
         "Cross-process streaming attribution uses bounded wall-clock markers only for comparison; WebSocket receipt starts at the causal pre-send marker, each first-delta and terminal chain is isolated to one run, and stage ordering remains authoritative within each process.",
         "Animation-frame intervals describe compositor scheduling, while PerformanceObserver long-task durations describe main-thread stalls; hosted frame intervals are retained as observational evidence rather than a 60-fps claim.",
         "Chromium process working-set retention after panels close is not classified as a leak when JavaScript heap, DOM, terminal, workspace-surface, and split-pane counters are released.",

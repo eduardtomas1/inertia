@@ -114,8 +114,7 @@ describe("timeline item focus settlement", () => {
     expect(onSettled).not.toHaveBeenCalled();
 
     root.append(row);
-    frames.runNext();
-    frames.runNext();
+    for (let attempt = 0; attempt < 8; attempt += 1) frames.runNext();
 
     expect(row).toHaveFocus();
     expect(onSettled).toHaveBeenCalledWith(true);
@@ -151,8 +150,7 @@ describe("timeline item focus settlement", () => {
       resolveTarget: () => ({ row, destination: row }),
       onSettled: secondSettled,
     });
-    frames.runNext();
-    frames.runNext();
+    for (let attempt = 0; attempt < 8; attempt += 1) frames.runNext();
 
     expect(firstSettled).toHaveBeenCalledWith(false);
     expect(firstSettled).toHaveBeenCalledTimes(1);
@@ -191,9 +189,45 @@ describe("timeline item focus settlement", () => {
     expect(row).not.toHaveFocus();
 
     rowTop = 100;
-    frames.runNext();
+    for (let attempt = 0; attempt < 7; attempt += 1) frames.runNext();
     expect(onSettled).not.toHaveBeenCalled();
     frames.runNext();
+    expect(row).toHaveFocus();
+    expect(onSettled).toHaveBeenCalledWith(true);
+  });
+
+  it("reasserts focus when deferred renderer work briefly claims it", () => {
+    vi.useFakeTimers();
+    const frames = frameHarness();
+    const { root, row, scrollElement } = fixture();
+    root.append(row);
+    const deferredOwner = document.createElement("button");
+    document.body.append(deferredOwner);
+    const onSettled = vi.fn();
+
+    startTimelineItemFocus({
+      root,
+      scrollElement,
+      index: 9,
+      align: "center",
+      virtualized: true,
+      resolveTarget: () => ({ row, destination: row }),
+      scrollToIndex: vi.fn(),
+      onSettled,
+    });
+
+    frames.runNext();
+    frames.runNext();
+    expect(row).toHaveFocus();
+    expect(onSettled).not.toHaveBeenCalled();
+
+    deferredOwner.focus();
+    expect(deferredOwner).toHaveFocus();
+    frames.runNext();
+    expect(row).toHaveFocus();
+    expect(onSettled).not.toHaveBeenCalled();
+
+    for (let attempt = 0; attempt < 7; attempt += 1) frames.runNext();
     expect(row).toHaveFocus();
     expect(onSettled).toHaveBeenCalledWith(true);
   });

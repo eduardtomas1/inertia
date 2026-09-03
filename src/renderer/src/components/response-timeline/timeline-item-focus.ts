@@ -2,7 +2,11 @@
 // Give that reconciliation its full lifetime after our initial exact request;
 // elapsed time, rather than animation-frame count, is the only lifetime bound.
 const TIMELINE_FOCUS_RESCROLL_INTERVAL = 4;
-const TIMELINE_FOCUS_STABLE_SAMPLES = 2;
+// Two frames are not a meaningful stability window for a virtual row: a
+// follow-up React commit or a deferred virtualizer measurement can replace the
+// destination immediately after that. Keep the request alive for a short,
+// bounded window while direct user input can still cancel it immediately.
+const TIMELINE_FOCUS_STABLE_SAMPLES = 8;
 const TIMELINE_FOCUS_TIMEOUT_MS = 5_250;
 
 export type TimelineItemFocusTarget = {
@@ -106,9 +110,14 @@ export function startTimelineItemFocus(input: {
         schedule();
         return;
       }
-      target.destination.focus({ preventScroll: true });
+      const retainedFocus = document.activeElement === target.destination;
+      const retainedDestination = retainedFocus
+        && lastDestination === target.destination;
+      if (!retainedFocus) {
+        target.destination.focus({ preventScroll: true });
+      }
       if (document.activeElement === target.destination) {
-        consecutiveStableSamples = lastDestination === target.destination
+        consecutiveStableSamples = retainedDestination
           ? consecutiveStableSamples + 1
           : 1;
         lastDestination = target.destination;

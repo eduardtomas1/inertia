@@ -53,6 +53,13 @@ type DuoSidePayload = DuoPreparePayload["sides"][number];
 type DuoComparisonPayload = NonNullable<DuoPreparePayload["comparison"]>;
 const MAX_PENDING_DUO_LAUNCHES = 16;
 const MAX_DUO_DELETION_RECOVERIES = 16;
+// Terminal projections can trigger a bounded native-workflow refresh for a
+// source conversation before the locked judge claims that same checkout.
+// A native-goal read is bounded at six seconds and its owned process cleanup
+// at two more. Leave scheduling headroom so this local handoff can drain
+// without retrying a provider or leaving the comparison waiting forever.
+const DEFAULT_COMPARISON_CHECKOUT_ACQUIRE_TIMEOUT_MS = 10_000;
+const COMPARISON_CHECKOUT_ACQUIRE_POLL_MS = 50;
 
 export interface PreparedDuoLaunch {
   launchId: string;
@@ -112,6 +119,7 @@ export class DuoLaunchCoordinator {
   private readonly comparisonRechecks = new Map<string, boolean>();
   private readonly worktrees: DuoWorktreeOperations;
   private readonly workspaceRuns: DuoSourceControlOperations | null;
+  private readonly comparisonCheckoutAcquireTimeoutMs: number;
 
   constructor(
     private readonly store: RuntimeStore,
@@ -123,10 +131,19 @@ export class DuoLaunchCoordinator {
     options: {
       worktrees?: DuoWorktreeOperations;
       workspaceRuns?: DuoSourceControlOperations;
+      comparisonCheckoutAcquireTimeoutMs?: number;
     } = {},
   ) {
     this.worktrees = options.worktrees ?? defaultDuoWorktreeOperations();
     this.workspaceRuns = options.workspaceRuns ?? null;
+    this.comparisonCheckoutAcquireTimeoutMs = Math.max(
+      0,
+      Math.min(
+        options.comparisonCheckoutAcquireTimeoutMs
+          ?? DEFAULT_COMPARISON_CHECKOUT_ACQUIRE_TIMEOUT_MS,
+        DEFAULT_COMPARISON_CHECKOUT_ACQUIRE_TIMEOUT_MS,
+      ),
+    );
   }
 
   prepare(payload: DuoPreparePayload): Promise<PreparedDuoLaunch> {
@@ -525,23 +542,31 @@ export class DuoLaunchCoordinator {
     // Shutdown settlements stay waiting so startup can recover them.
     if (this.turns.isClosing())
       return publicStatus(this.store, this.store.pairedLaunch(launchId));
-    if (!this.store.claimPairedLaunchComparison(launchId, retry)) {
-      return publicStatus(this.store, this.store.pairedLaunch(launchId));
-    }
 
     let turnId: string | null = null;
     let startAccepted = false;
     let transitionReserved = false;
+    const checkoutPath = this.store.conversationPath(
+      comparison.conversationId,
+    );
+    const reservation = await this.reserveComparisonCheckout(
+      comparison.conversationId,
+    );
+    if (reservation === "closing") {
+      return publicStatus(this.store, this.store.pairedLaunch(launchId));
+    }
+    transitionReserved = reservation === "reserved";
+    let comparisonClaimed = false;
     try {
-      const checkoutPath = this.store.conversationPath(
-        comparison.conversationId,
-      );
-      if (!this.store.conversationWork.reserve(comparison.conversationId)) {
+      if (!this.store.claimPairedLaunchComparison(launchId, retry)) {
+        return publicStatus(this.store, this.store.pairedLaunch(launchId));
+      }
+      comparisonClaimed = true;
+      if (reservation !== "reserved") {
         throw new Error(
           "The judge checkout is already owned by another provider or workspace operation.",
         );
       }
-      transitionReserved = true;
       if (this.turns.hasActiveCheckout(checkoutPath)) {
         throw new Error(
           "Another agent is already working in the judge checkout.",
@@ -574,7 +599,8 @@ export class DuoLaunchCoordinator {
         turnId,
       );
       return publicStatus(this.store, launch);
-    } catch {
+    } catch (error) {
+      if (!comparisonClaimed) throw error;
       this.turns.cancel(comparison.conversationId);
       return publicStatus(this.store, this.store.failPairedLaunchComparison(
         launchId,
@@ -587,6 +613,32 @@ export class DuoLaunchCoordinator {
       if (transitionReserved) {
         this.store.conversationWork.release(comparison.conversationId);
       }
+    }
+  }
+
+  private async reserveComparisonCheckout(
+    conversationId: string,
+  ): Promise<"reserved" | "busy" | "closing"> {
+    const deadlineAt = Date.now()
+      + this.comparisonCheckoutAcquireTimeoutMs;
+    while (true) {
+      if (this.turns.isClosing()) return "closing";
+      try {
+        if (this.store.conversationWork.reserve(conversationId)) {
+          return "reserved";
+        }
+      } catch {
+        return "busy";
+      }
+      const remainingMs = deadlineAt - Date.now();
+      if (remainingMs <= 0) return "busy";
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(
+          resolve,
+          Math.min(COMPARISON_CHECKOUT_ACQUIRE_POLL_MS, remainingMs),
+        );
+        timer.unref();
+      });
     }
   }
 

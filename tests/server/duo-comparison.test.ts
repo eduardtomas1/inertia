@@ -313,6 +313,7 @@ function comparisonPreparePayload(
 
 function comparisonCoordinator(
   runtime: DuoTestRuntime,
+  options: ConstructorParameters<typeof DuoLaunchCoordinator>[6] = {},
 ): DuoLaunchCoordinator {
   return new DuoLaunchCoordinator(
     runtime.store,
@@ -324,6 +325,7 @@ function comparisonCoordinator(
     runtime.controller,
     join(runtime.workspace, ".inertia"),
     () => [providerInfo()],
+    options,
   );
 }
 
@@ -519,6 +521,146 @@ describe("Duo third-model comparison", () => {
       .toContain("Source A settled together");
     expect(runtime.provider.inputs[2]?.prompt)
       .toContain("Source B settled together");
+    runtime.store.close();
+  });
+
+  it("waits for a terminal-projection workflow refresh before starting the judge", async () => {
+    let launches!: DuoLaunchCoordinator;
+    let runtime!: DuoTestRuntime;
+    let observeTerminalProjection = false;
+    let workflowReservation: boolean | null = null;
+    const broadcastSnapshot = (): void => {
+      if (!observeTerminalProjection || workflowReservation !== null) return;
+      const launch = runtime.store.pairedLaunch(prepared.launchId);
+      if (launch.sides.some(({ turnId }) => (
+        !turnId || runtime.store.agentTurn(turnId).status !== "completed"
+      ))) return;
+      // A terminal snapshot changes the renderer workflow route identity from
+      // a new thread to the provider session. The resulting background native
+      // workflow refresh arrives on a later microtask and reserves the source
+      // checkout while its one-shot provider control request is in flight.
+      queueMicrotask(() => {
+        workflowReservation = runtime.store.conversationWork.reserve(
+          prepared.sides[1].conversationId,
+        );
+        setTimeout(() => {
+          runtime.store.conversationWork.release(
+            prepared.sides[1].conversationId,
+          );
+        }, 10);
+      });
+    };
+    runtime = await createRuntime({
+      broadcastSnapshot,
+      onTurnSettled: (turn) => launches.onTurnSettled(turn),
+    });
+    launches = comparisonCoordinator(runtime);
+    const prepared = await launches.prepare(comparisonPreparePayload(runtime));
+    await launches.dispatch(prepared.launchId);
+    observeTerminalProjection = true;
+
+    runtime.provider.completeAll(["Source A", "Source B"]);
+    await new Promise<void>((resolve) => setTimeout(resolve, 150));
+
+    expect(workflowReservation).toBe(true);
+    expect(runtime.store.pairedLaunch(prepared.launchId).comparison)
+      .toMatchObject({ state: "running", attempt: 1 });
+    expect(runtime.provider.inputs).toHaveLength(3);
+    runtime.store.close();
+  });
+
+  it("fails the judge once bounded checkout acquisition expires", async () => {
+    const runtime = await createRuntime();
+    const launches = comparisonCoordinator(runtime, {
+      comparisonCheckoutAcquireTimeoutMs: 20,
+    });
+    const prepared = await launches.prepare(comparisonPreparePayload(runtime));
+    await launches.dispatch(prepared.launchId);
+    expect(runtime.store.conversationWork.reserve(
+      prepared.sides[1].conversationId,
+    )).toBe(true);
+    runtime.provider.completeAll(["Source A", "Source B"]);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    await launches.onTurnSettled(
+      runtime.store.agentTurn(prepared.sides[1].turnId),
+    );
+
+    expect(launches.status(prepared.launchId).comparison).toMatchObject({
+      state: "failed",
+      attempt: 1,
+      error:
+        "The judge could not be queued and was not retried automatically.",
+    });
+    expect(runtime.provider.inputs).toHaveLength(2);
+    runtime.store.conversationWork.release(prepared.sides[1].conversationId);
+    runtime.store.close();
+  });
+
+  it("leaves checkout-blocked judge admission waiting during shutdown", async () => {
+    const runtime = await createRuntime();
+    const launches = comparisonCoordinator(runtime);
+    const prepared = await launches.prepare(comparisonPreparePayload(runtime));
+    await launches.dispatch(prepared.launchId);
+    expect(runtime.store.conversationWork.reserve(
+      prepared.sides[1].conversationId,
+    )).toBe(true);
+    runtime.provider.completeAll(["Source A", "Source B"]);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    const transition = launches.onTurnSettled(
+      runtime.store.agentTurn(prepared.sides[1].turnId),
+    );
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    const shutdown = runtime.controller.dispose("runtime-shutdown");
+    await Promise.all([transition, shutdown]);
+
+    expect(launches.status(prepared.launchId).comparison).toMatchObject({
+      state: "waiting",
+      attempt: 0,
+    });
+    expect(runtime.provider.inputs).toHaveLength(2);
+    runtime.store.conversationWork.release(prepared.sides[1].conversationId);
+    runtime.store.close();
+  });
+
+  it.each([
+    { label: "returns false", throws: false },
+    { label: "throws", throws: true },
+  ])("releases acquired judge checkout when the durable claim $label", async ({
+    throws,
+  }) => {
+    const runtime = await createRuntime();
+    const launches = comparisonCoordinator(runtime);
+    const prepared = await launches.prepare(comparisonPreparePayload(runtime));
+    await launches.dispatch(prepared.launchId);
+    runtime.provider.completeAll(["Source A", "Source B"]);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const claim = vi.spyOn(runtime.store, "claimPairedLaunchComparison");
+    if (throws) {
+      claim.mockImplementation(() => {
+        throw new Error("claim failed");
+      });
+    } else {
+      claim.mockReturnValue(false);
+    }
+
+    const transition = launches.onTurnSettled(
+      runtime.store.agentTurn(prepared.sides[1].turnId),
+    );
+    if (throws) {
+      await expect(transition).rejects.toThrow("claim failed");
+    } else {
+      await expect(transition).resolves.toBeUndefined();
+    }
+
+    expect(runtime.store.conversationWork.hasConversation(
+      prepared.comparison!.conversationId,
+    )).toBe(false);
+    expect(launches.status(prepared.launchId).comparison).toMatchObject({
+      state: "waiting",
+      attempt: 0,
+    });
     runtime.store.close();
   });
 
@@ -1062,18 +1204,18 @@ describe("Duo third-model comparison", () => {
     expect(runtime.store.conversationWork.reserve(
       prepared.comparison!.conversationId,
     )).toBe(true);
-    await expect(launches.retryComparison(prepared.launchId)).resolves
-      .toMatchObject({ comparison: { state: "failed", attempt: 2 } });
-    expect(runtime.provider.inputs).toHaveLength(3);
-    runtime.store.conversationWork.release(
-      prepared.comparison!.conversationId,
-    );
-    await expect(launches.retryComparison(prepared.launchId)).resolves
-      .toMatchObject({ comparison: { state: "running", attempt: 3 } });
+    const retry = launches.retryComparison(prepared.launchId);
+    setTimeout(() => {
+      runtime.store.conversationWork.release(
+        prepared.comparison!.conversationId,
+      );
+    }, 10);
+    await expect(retry).resolves
+      .toMatchObject({ comparison: { state: "running", attempt: 2 } });
     expect(runtime.provider.inputs).toHaveLength(4);
     expect(runtime.provider.inputs[3]?.prompt).toContain("Only surviving result");
     await expect(launches.cancelComparison(prepared.launchId)).resolves
-      .toMatchObject({ comparison: { state: "cancelled", attempt: 3 } });
+      .toMatchObject({ comparison: { state: "cancelled", attempt: 2 } });
     expect(runtime.provider.cancellations).toContain(
       prepared.comparison!.conversationId,
     );

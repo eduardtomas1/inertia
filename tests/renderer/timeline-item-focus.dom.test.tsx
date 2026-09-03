@@ -91,6 +91,9 @@ describe("timeline item focus settlement", () => {
     const scrollToIndex = vi.fn();
     const onSettled = vi.fn();
     const disconnect = vi.spyOn(MutationObserver.prototype, "disconnect");
+    const navigationTrigger = document.createElement("button");
+    document.body.append(navigationTrigger);
+    navigationTrigger.focus();
 
     startTimelineItemFocus({
       root,
@@ -196,13 +199,12 @@ describe("timeline item focus settlement", () => {
     expect(onSettled).toHaveBeenCalledWith(true);
   });
 
-  it("reasserts focus when deferred renderer work briefly claims it", () => {
+  it("reasserts focus when deferred renderer work replaces its destination", () => {
     vi.useFakeTimers();
     const frames = frameHarness();
-    const { root, row, scrollElement } = fixture();
+    const { root, row: initialRow, scrollElement } = fixture();
+    let row = initialRow;
     root.append(row);
-    const deferredOwner = document.createElement("button");
-    document.body.append(deferredOwner);
     const onSettled = vi.fn();
 
     startTimelineItemFocus({
@@ -221,8 +223,11 @@ describe("timeline item focus settlement", () => {
     expect(row).toHaveFocus();
     expect(onSettled).not.toHaveBeenCalled();
 
-    deferredOwner.focus();
-    expect(deferredOwner).toHaveFocus();
+    const replacement = row.cloneNode() as HTMLElement;
+    replacement.getBoundingClientRect = row.getBoundingClientRect;
+    row.replaceWith(replacement);
+    row = replacement;
+    expect(document.body).toHaveFocus();
     frames.runNext();
     expect(row).toHaveFocus();
     expect(onSettled).not.toHaveBeenCalled();
@@ -230,6 +235,80 @@ describe("timeline item focus settlement", () => {
     for (let attempt = 0; attempt < 7; attempt += 1) frames.runNext();
     expect(row).toHaveFocus();
     expect(onSettled).toHaveBeenCalledWith(true);
+  });
+
+  it("yields when an interactive control claims focus after navigation", () => {
+    vi.useFakeTimers();
+    const frames = frameHarness();
+    const { root, row, scrollElement } = fixture();
+    root.append(row);
+    const option = document.createElement("input");
+    option.type = "radio";
+    document.body.append(option);
+    const onSettled = vi.fn();
+
+    startTimelineItemFocus({
+      root,
+      scrollElement,
+      index: 9,
+      align: "center",
+      virtualized: true,
+      resolveTarget: () => ({ row, destination: row }),
+      scrollToIndex: vi.fn(),
+      onSettled,
+    });
+
+    frames.runNext();
+    frames.runNext();
+    expect(row).toHaveFocus();
+    expect(onSettled).not.toHaveBeenCalled();
+
+    option.focus();
+    frames.runNext();
+
+    expect(option).toHaveFocus();
+    expect(onSettled).toHaveBeenCalledWith(false);
+    expect(onSettled).toHaveBeenCalledTimes(1);
+    expect(frames.pending()).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("yields when focus moves while a delayed destination is mounting", () => {
+    vi.useFakeTimers();
+    const frames = frameHarness();
+    const { root, row, scrollElement } = fixture();
+    const origin = document.createElement("button");
+    const option = document.createElement("input");
+    option.type = "radio";
+    document.body.append(origin, option);
+    origin.focus();
+    const onSettled = vi.fn();
+
+    startTimelineItemFocus({
+      root,
+      scrollElement,
+      index: 9,
+      align: "center",
+      virtualized: true,
+      resolveTarget: (currentRoot) => {
+        const target = currentRoot.querySelector<HTMLElement>(
+          '[data-turn-id="target-turn"]',
+        );
+        return target ? { row: target, destination: target } : null;
+      },
+      scrollToIndex: vi.fn(),
+      onSettled,
+    });
+
+    frames.runNext();
+    option.focus();
+    root.append(row);
+    frames.runNext();
+
+    expect(option).toHaveFocus();
+    expect(onSettled).toHaveBeenCalledWith(false);
+    expect(frames.pending()).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("yields immediately to direct transcript input", () => {

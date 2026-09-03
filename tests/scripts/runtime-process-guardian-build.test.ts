@@ -2247,7 +2247,7 @@ describe.skipIf(process.platform === "win32")(
       expectCleanBuildState(subject);
     });
 
-    it("preserves durable ownership after unconfirmed tree cleanup", async () => {
+    it("reclaims cleanup-unconfirmed authority after the exact child exits", async () => {
       const subject = fixture("exit 1");
       rmSync(subject.guardian);
       writeFileSync(subject.windowsJob, "package-windows-job");
@@ -2273,13 +2273,6 @@ describe.skipIf(process.platform === "win32")(
       expect(JSON.parse(readFileSync(childPath, "utf8")).state).toBe(
         "cleanup-unconfirmed",
       );
-      expect(() =>
-        acquireGuardianBuildLock(subject.stateDirectory, {
-          timeoutMs: 40,
-        }),
-      ).toThrow("Timed out waiting");
-      const aged = new Date(Date.now() - 4 * 60 * 60_000 - 1_000);
-      utimesSync(childPath, aged, aged);
       const recovered = acquireGuardianBuildLock(subject.stateDirectory, {
         timeoutMs: 1_500,
       });

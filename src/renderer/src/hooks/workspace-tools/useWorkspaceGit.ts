@@ -13,6 +13,7 @@ import {
   resultEvent,
   type CommandWithoutId,
 } from "../../lib/runtimeCommands";
+import { runtimeCommandDelivery } from "../../utils/connectionMessages";
 import {
   rootGitMutationScope,
   type RootGitMutationScope,
@@ -44,6 +45,19 @@ export interface WorkspaceGitLoadOptions {
 export type LoadWorkspaceGit = (
   options?: WorkspaceGitLoadOptions,
 ) => Promise<void>;
+
+function reportPassiveGitError(
+  error: unknown,
+  fallback: string,
+  setActionError: (message: string) => void,
+): string {
+  const message = error instanceof Error && error.message.trim()
+    ? error.message
+    : fallback;
+  const delivery = runtimeCommandDelivery(error);
+  if (!delivery || delivery === "rejected") setActionError(message);
+  return message;
+}
 
 export function useWorkspaceGit({
   project,
@@ -297,11 +311,11 @@ export function useWorkspaceGit({
           authorityRef.current !== owner
           || requestGenerationRef.current !== generation
         ) return;
-        const message = error instanceof Error && error.message.trim()
-          ? error.message
-          : "Git changes could not be loaded.";
-        setLoadError(message);
-        setActionError(message);
+        setLoadError(reportPassiveGitError(
+          error,
+          "Git changes could not be loaded.",
+          setActionError,
+        ));
       }
     });
     return () => {
@@ -388,7 +402,7 @@ export function useWorkspaceGit({
     commitReviewRef.current = null;
   }, []);
 
-  const loadBranches = useCallback(() => {
+  const loadBranches = useCallback((passive = false) => {
     if (!project || !gitStatus?.isRepository) return;
     const owner = `${project.id}:${conversation?.id ?? ""}`;
     void request({
@@ -405,11 +419,12 @@ export function useWorkspaceGit({
         setBranches(event.result.branches);
       }
     }).catch((error) => {
-      setActionError(
-        error instanceof Error
-          ? error.message
-          : "Branches could not be loaded.",
-      );
+      const fallback = "Branches could not be loaded.";
+      if (passive) {
+        reportPassiveGitError(error, fallback, setActionError);
+      } else {
+        setActionError(error instanceof Error ? error.message : fallback);
+      }
     });
   }, [
     conversation?.id,
@@ -443,17 +458,17 @@ export function useWorkspaceGit({
         authorityRef.current !== owner
         || requestGenerationRef.current !== generation
       ) return;
-      loadBranches();
+      loadBranches(true);
     }).catch((error) => {
       if (
         authorityRef.current !== owner
         || requestGenerationRef.current !== generation
       ) return;
-      const message = error instanceof Error && error.message.trim()
-        ? error.message
-        : "Git changes could not be reconciled.";
-      setLoadError(message);
-      setActionError(message);
+      setLoadError(reportPassiveGitError(
+        error,
+        "Git changes could not be reconciled.",
+        setActionError,
+      ));
     }).finally(() => {
       if (
         authorityRef.current === owner

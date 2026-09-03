@@ -56,6 +56,7 @@ export function reclaimStaleGuardianBuildLock(
   options?: {
     readonly beforeClaimantPublication?: () => void;
     readonly beforeUnlink?: () => void;
+    readonly testAuthorityPlatform?: NodeJS.Platform;
   },
 ): boolean;
 

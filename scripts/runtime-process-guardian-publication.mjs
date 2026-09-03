@@ -241,7 +241,11 @@ function childAuthorityPath(stateDirectory, token) {
   return join(stateDirectory, `child-${token}.json`);
 }
 
-function childAuthorityIsActive(stateDirectory, record) {
+function childAuthorityIsActive(
+  stateDirectory,
+  record,
+  authorityPlatform = process.platform,
+) {
   const path = childAuthorityPath(stateDirectory, record.token);
   const metadata = lstatSync(path, { throwIfNoEntry: false });
   if (!metadata) return false;
@@ -268,11 +272,9 @@ function childAuthorityIsActive(stateDirectory, record) {
     // no live wrapper remains that could admit it.
     return false;
   }
-  if (authority.state === "cleanup-unconfirmed") {
-    return Date.now() - metadata.mtimeMs <= ownershipLeaseMs;
-  }
   if (
-    authority.state !== "running" ||
+    (authority.state !== "running" &&
+      authority.state !== "cleanup-unconfirmed") ||
     !Number.isSafeInteger(authority.pid) ||
     authority.pid <= 0 ||
     (authority.processGroupId !== null &&
@@ -280,6 +282,16 @@ function childAuthorityIsActive(stateDirectory, record) {
         authority.processGroupId <= 0))
   )
     return Date.now() - metadata.mtimeMs <= ownershipLeaseMs;
+  // On Windows, the root builder process can exit while descendants remain
+  // contained by its Job Object. The quarantined authority is the only
+  // durable evidence that cleanup never settled, so PID death, PID reuse, and
+  // elapsed time cannot safely release it without a persisted Job settlement
+  // proof.
+  if (
+    authority.state === "cleanup-unconfirmed" &&
+    authorityPlatform === "win32"
+  )
+    return true;
   if (processGroupIsAlive(authority.processGroupId)) return true;
   if (!processIsAlive(authority.pid)) return false;
   const currentIdentity = processIdentity(authority.pid);
@@ -592,8 +604,12 @@ function reclaimHeldGuardianBuildLock(
   lockPath,
   descriptor,
   metadata,
-  { beforeClaimantPublication, beforeUnlink },
+  { beforeClaimantPublication, beforeUnlink, testAuthorityPlatform },
 ) {
+  const authorityPlatform =
+    process.env.NODE_ENV === "test" && testAuthorityPlatform === "win32"
+      ? "win32"
+      : process.platform;
   let record;
   try {
     record = JSON.parse(readFileSync(descriptor, "utf8"));
@@ -627,7 +643,8 @@ function reclaimHeldGuardianBuildLock(
       if (Date.now() - owner.mtimeMs <= ownershipLeaseMs) return false;
     } else if (currentIdentity === record.processIdentity) return false;
   }
-  if (childAuthorityIsActive(stateDirectory, record)) return false;
+  if (childAuthorityIsActive(stateDirectory, record, authorityPlatform))
+    return false;
   if (
     activeClaimantGenerations(stateDirectory, record.token, metadata).length > 0
   ) {

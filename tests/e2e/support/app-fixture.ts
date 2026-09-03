@@ -21,6 +21,10 @@ import {
   fixtureTemporaryEnvironment,
 } from "./fixture-temporary-directory";
 import { expectNoViewportOverflow as expectPageNoViewportOverflow } from "./layout-assertions";
+import {
+  readNativePreviewSnapshot,
+  type NativePreviewTestSnapshot,
+} from "./native-preview-diagnostics";
 
 const execFileAsync = promisify(execFile);
 const FIXTURE_RPC_TEARDOWN_TIMEOUT_MS = 5_000;
@@ -46,6 +50,7 @@ export interface AppFixture {
   malformedAttachmentPath: string;
   rendererErrors: string[];
   previewUrl: string;
+  nativePreviewSnapshot: (url: string) => Promise<NativePreviewTestSnapshot>;
   nativePreviewIsVisible: (url: string) => Promise<boolean>;
   runtimeSnapshot: () => Promise<RuntimeTestSnapshot>;
   recycleRuntime: () => Promise<void>;
@@ -875,23 +880,12 @@ export async function createAppFixture(
     );
     await page.waitForTimeout(250);
   };
+  const nativePreviewSnapshot = async (
+    url: string,
+  ): Promise<NativePreviewTestSnapshot> =>
+    await readNativePreviewSnapshot(currentApp(), url);
   const nativePreviewIsVisible = async (url: string): Promise<boolean> =>
-    await currentApp().evaluate(
-      ({ BrowserWindow }, previewUrl) => {
-        const window = BrowserWindow.getAllWindows()[0];
-        if (!window) return false;
-        const preview = window.contentView.children.find((view) => {
-          const contents = Reflect.get(view, "webContents") as
-            | { getURL: () => string }
-            | undefined;
-          return contents?.getURL() === previewUrl;
-        });
-        if (!preview) return false;
-        const bounds = preview.getBounds();
-        return bounds.width > 0 && bounds.height > 0;
-      },
-      url,
-    );
+    (await nativePreviewSnapshot(url)).visible;
 
   return {
     get electronApp() {
@@ -905,6 +899,7 @@ export async function createAppFixture(
     secondWorkspaceDirectory,
     rendererErrors,
     previewUrl: preview.url,
+    nativePreviewSnapshot,
     nativePreviewIsVisible,
     runtimeSnapshot,
     recycleRuntime,

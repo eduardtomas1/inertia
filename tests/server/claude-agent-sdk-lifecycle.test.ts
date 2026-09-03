@@ -375,6 +375,10 @@ describe("Claude Agent SDK lifecycle isolation", () => {
             // the conflicting singular value must not settle other work.
             user_message_uuid: second.uuid,
             user_message_uuids: [
+              ...Array.from(
+                { length: 80 },
+                (_, index) => `foreign-correlation-${index}`,
+              ),
               first.uuid,
               first.uuid,
               "99999999-9999-4999-8999-999999999999",

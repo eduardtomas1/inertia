@@ -812,7 +812,7 @@ function startClaudeRun(
         }
         if (message.type === "result") {
           if (message.subtype === "success" && pendingFollowUpIds.size > 0) {
-            const userMessageIds = claudeResultUserMessageIds(record);
+            const userMessageIds = claudeResultUserMessageIds(record, pendingFollowUpIds);
             if (userMessageIds.length === 0) {
               throw new Error(
                 "Claude returned a successful result without correlating an accepted follow-up.",

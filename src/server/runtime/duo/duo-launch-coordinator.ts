@@ -509,11 +509,11 @@ export class DuoLaunchCoordinator {
     retry: boolean,
   ): Promise<DuoLaunchStatus> {
     let launch = this.store.pairedLaunch(launchId);
+    const comparison = launch.comparison;
+    if (!comparison?.conversationId) return publicStatus(this.store, launch);
     if (this.runtimeClosed() || this.turns.isClosing()) {
       return publicStatus(this.store, launch);
     }
-    const comparison = launch.comparison;
-    if (!comparison?.conversationId) return publicStatus(this.store, launch);
     if (
       launch.state !== "running"
       || launch.sides.some(({ dispatchState }) => dispatchState !== "started")

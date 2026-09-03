@@ -231,12 +231,13 @@ test("keeps hostile native previews beneath trusted workspace overlays", async (
   await expect(commitButton).toBeEnabled();
   await commitButton.click();
   expect(await app.nativePreviewIsVisible(hostilePreviewUrl)).toBe(false);
-  await expect(page.getByRole("dialog", { name: "Commit changes" }))
-    .toBeVisible();
+  const commitDialog = page.getByRole("dialog", { name: "Commit changes" });
+  await expect(commitDialog).toBeVisible();
   await expect.poll(
     () => app.nativePreviewIsVisible(hostilePreviewUrl),
   ).toBe(false);
-  await page.getByRole("button", { name: "Close commit dialog" }).click();
+  await page.keyboard.press("Escape");
+  await expect(commitDialog).toHaveCount(0);
   await expect.poll(
     () => app.nativePreviewIsVisible(hostilePreviewUrl),
   ).toBe(true);

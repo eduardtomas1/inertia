@@ -753,6 +753,24 @@ describe("cross-platform packaged behavior contract", () => {
     expect(windowsBuild).toContain('unset "$name"');
     expect(windowsBuild).not.toContain("MACOS_CSC_LINK");
 
+    const portableCoverage = workflow.indexOf(
+      "Run portable runtime and provider protocol suite",
+    );
+    const windowsBundleRefresh = workflowStep(
+      workflow,
+      "Refresh Windows app bundle after portable helper rebuild",
+    );
+    expect(windowsBundleRefresh).toContain("if: runner.os == 'Windows'");
+    expect(windowsBundleRefresh).toContain("run: npm run build:bundle");
+    expect(workflow.indexOf(
+      "Refresh Windows app bundle after portable helper rebuild",
+    ))
+      .toBeGreaterThan(portableCoverage);
+    expect(workflow.indexOf("Run Electron end-to-end tests"))
+      .toBeGreaterThan(
+        workflow.indexOf("Refresh Windows app bundle after portable helper rebuild"),
+      );
+
     const linuxBuild = workflowStep(workflow, "Build Linux release package");
     expect(linuxBuild).toContain("if: runner.os == 'Linux'");
     expect(linuxBuild).not.toContain("_CSC_");

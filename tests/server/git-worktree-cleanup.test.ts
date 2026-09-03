@@ -1210,7 +1210,7 @@ describe("launch-owned Git cleanup", () => {
     }
     let slowProbeCount = 0;
     const validScript = "const {fstatSync}=require('node:fs');const s=fstatSync(3,{bigint:true});const b=s.birthtimeNs;const z=String.fromCharCode(0);process.stdout.write([s.dev,s.ino,`${b/1000000000n}.${String(b%1000000000n).padStart(9,'0')}`].join(z)+z);";
-    const slowScript = "const {fstatSync}=require('node:fs');setTimeout(()=>{const s=fstatSync(3,{bigint:true});const b=s.birthtimeNs;const z=String.fromCharCode(0);process.stdout.write([s.dev,s.ino,`${b/1000000000n}.${String(b%1000000000n).padStart(9,'0')}`].join(z)+z);},75);";
+    const slowScript = "const {fstatSync}=require('node:fs');setTimeout(()=>{const s=fstatSync(3,{bigint:true});const z=String.fromCharCode(0);process.stdout.write([s.dev,s.ino,'1.000000000'].join(z)+z);},75);";
     const startedAt = Date.now();
 
     await expect(inspectOwnedWorktreeCleanupState(

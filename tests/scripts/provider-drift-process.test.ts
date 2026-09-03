@@ -107,19 +107,16 @@ function validResponse(
 
 describe("provider drift process cleanup", () => {
   it("enforces the output ceiling and proves ordinary tree cleanup", async () => {
-    const root = mkdtempSync(join(tmpdir(), "inertia-provider-output-"));
-    const marker = join(root, "pid");
     let childPid = 0;
     try {
       const script = [
-        'const { writeFileSync } = require("node:fs");',
-        "writeFileSync(process.argv[1], String(process.pid));",
+        'process.stdout.write(`PID:${process.pid}\\n`);',
         'process.stdout.write("x".repeat(33));',
         "setInterval(() => {}, 1_000);",
       ].join("");
       let failure: unknown;
       try {
-        await runBounded(process.execPath, ["-e", script, marker], {
+        await runBounded(process.execPath, ["-e", script], {
           env: process.env,
           label: "Provider output limit fixture",
           maxOutputBytes: 32,
@@ -132,13 +129,14 @@ describe("provider drift process cleanup", () => {
       expect((failure as Error).message.split("\n")[0]).toBe(
         "Provider output limit fixture exceeded its output limit; its complete process tree was terminated.",
       );
-      childPid = Number.parseInt(readFileSync(marker, "utf8"), 10);
+      const reportedPid = /PID:(\d+)/u.exec((failure as Error).message)?.[1];
+      expect(reportedPid).toBeDefined();
+      childPid = Number.parseInt(reportedPid!, 10);
       expect(processExists(childPid)).toBe(false);
     } finally {
       if (childPid > 0 && processExists(childPid)) {
         try { process.kill(childPid, "SIGKILL"); } catch { /* already gone */ }
       }
-      rmSync(root, { recursive: true, force: true });
     }
   });
 
@@ -200,14 +198,15 @@ describe("provider drift process cleanup", () => {
       const script = [
         'const { spawn } = require("node:child_process");',
         'const { writeFileSync } = require("node:fs");',
-        'const descendant = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });',
-        "writeFileSync(process.argv[1], String(descendant.pid));",
+        'const descendant = spawn(process.execPath, ["-e", "process.send?.(\\"ready\\"); process.on(\\"disconnect\\", () => {}); setInterval(() => {}, 1000)"], { detached: process.platform === "win32", stdio: ["ignore", "ignore", "ignore", "ipc"], windowsHide: true });',
         'const readline = require("node:readline");',
-        'readline.createInterface({ input: process.stdin }).once("line", (line) => {',
-        "const message = JSON.parse(line);",
+        "let message; let descendantReady = false; let responded = false;",
+        "const respond = () => { if (responded || !message || !descendantReady) return; responded = true;",
         'process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: {',
         'protocolVersion: 1, agentCapabilities: {}, agentInfo: { name: "Fixture Agent", version: "1.0.0" }',
-        '}}) + "\\n"); });',
+        '}}) + "\\n"); };',
+        'readline.createInterface({ input: process.stdin }).once("line", (line) => { message = JSON.parse(line); respond(); });',
+        'descendant.once("message", () => { if (process.platform === "win32") { descendant.disconnect(); descendant.unref(); } writeFileSync(process.argv[1], String(descendant.pid)); descendantReady = true; respond(); });',
         "setInterval(() => {}, 1_000);",
       ].join("");
       await expect(requireAcpInitializeHandshake(

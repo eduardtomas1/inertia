@@ -32,6 +32,10 @@ import { CappedProviderBuffer } from "./io";
 import { providerProcessInvocation } from "./process";
 import { windowsCodexExecutableCandidates } from "./windows-codex";
 import { cursorAgentCommandArgs } from "./cursor-command";
+import {
+  probeOpenCodePureIsolation,
+  type OpenCodePureIsolationProbe,
+} from "./opencode-pure-isolation";
 
 const DEFAULT_DETECTION_TIMEOUT_MS = 2_500;
 const CODEX_PATH_RESOLUTION_ENVIRONMENT_KEYS = new Set([
@@ -102,6 +106,7 @@ function scheduleProviderProbeDeadline(
 
 interface ProviderDiscoveryDependencies {
   executableCandidates?: typeof executableCandidates;
+  probeOpenCodePureIsolation?: OpenCodePureIsolationProbe;
   probeProcess?: ProviderProbeProcess;
   terminateProcessTree?: ProcessTreeTerminator;
   scheduleProbeDeadline?: ProviderProbeDeadlineScheduler;
@@ -297,6 +302,8 @@ export async function detectProvider(
       terminateProcessTree,
       scheduleProbeDeadline,
     ));
+  const runOpenCodeIsolationProbe = dependencies.probeOpenCodePureIsolation
+    ?? probeOpenCodePureIsolation;
   const provider = PROVIDER_INFO[providerId];
   const command = options.command?.trim() || provider.command;
   const timeoutMs = Math.max(250, Math.min(options.timeoutMs ?? DEFAULT_DETECTION_TIMEOUT_MS, 10_000));
@@ -386,19 +393,36 @@ export async function detectProvider(
       && appServerProbe.exitCode === 0
       && /(?:codex\s+app-server|run the app server|\bapp-server\b)/iu.test(appServerProbe.output)
     );
+    const serveProbe = providerId === "opencode" && probe.started && !probe.timedOut && probe.exitCode === 0
+      ? await runProbe(executable, ["serve", "--help"], probeEnvironment, cwd, timeoutMs)
+      : undefined;
+    const serveReady = !serveProbe || (
+      serveProbe.started
+      && !serveProbe.timedOut
+      && serveProbe.exitCode === 0
+      && /(?:^|\s)--pure(?:\s|,|$)/mu.test(serveProbe.output)
+    );
     return {
       executable,
       probe,
       version: versionFromOutput(probe.output),
       acpReady,
       appServerReady,
+      serveReady,
       cleanupConfirmed: probe.cleanupConfirmed === true
         && (acpProbe === undefined || acpProbe.cleanupConfirmed === true)
-        && (appServerProbe === undefined || appServerProbe.cleanupConfirmed === true),
+        && (appServerProbe === undefined || appServerProbe.cleanupConfirmed === true)
+        && (serveProbe === undefined || serveProbe.cleanupConfirmed === true),
     };
   }));
   const working = versionProbes
-    .filter(({ probe, acpReady }) => probe.started && !probe.timedOut && probe.exitCode === 0 && acpReady)
+    .filter(({ probe, acpReady, serveReady }) => (
+      probe.started
+      && !probe.timedOut
+      && probe.exitCode === 0
+      && acpReady
+      && serveReady
+    ))
     .sort((left, right) =>
       (providerId === "cursor"
         ? cursorExecutablePreference(right.executable)
@@ -416,10 +440,13 @@ export async function detectProvider(
     const providerWithoutAcp = (providerId === "cursor" || providerId === "kimi") && versionProbes.some(
       ({ probe }) => probe.started && !probe.timedOut && probe.exitCode === 0,
     );
+    const providerWithoutPureServe = providerId === "opencode" && versionProbes.some(
+      ({ probe }) => probe.started && !probe.timedOut && probe.exitCode === 0,
+    );
     return {
       provider,
-      available: providerWithoutAcp,
-      installState: providerWithoutAcp ? "installed" : "error",
+      available: providerWithoutAcp || providerWithoutPureServe,
+      installState: providerWithoutAcp || providerWithoutPureServe ? "installed" : "error",
       authState: "unknown",
       canRun: false,
       cleanupConfirmed: !cleanupUnconfirmed,
@@ -427,12 +454,44 @@ export async function detectProvider(
         ? `${provider.name} probe timed out, and its process tree could not be confirmed stopped`
         : providerWithoutAcp
         ? `${provider.name} CLI found, but ACP is unavailable`
+        : providerWithoutPureServe
+        ? "OpenCode CLI found, but secure plugin-free serve mode is unavailable; update the selected CLI"
         : providerId === "codex" ? "Codex CLI was found but failed to start" : statusMessage("error", "unknown"),
     };
   }
 
+  const versionProbeCleanupConfirmed = versionProbes.every(
+    (probe) => probe.cleanupConfirmed,
+  );
+  const openCodeIsolation = providerId === "opencode"
+    ? await runOpenCodeIsolationProbe(
+        selected.executable,
+        selected.version,
+        probeEnvironment,
+        terminateProcessTree,
+      )
+    : { cleanupConfirmed: true, verified: true };
+  if (!openCodeIsolation.verified) {
+    const cleanupConfirmed = openCodeIsolation.cleanupConfirmed
+      && versionProbeCleanupConfirmed;
+    return {
+      provider,
+      available: true,
+      executable: selected.executable,
+      ...(selected.version ? { version: selected.version } : {}),
+      installState: "installed",
+      authState: "unknown",
+      canRun: false,
+      cleanupConfirmed,
+      statusMessage: cleanupConfirmed
+        ? "OpenCode failed secure plugin-free runtime verification; update the selected CLI"
+        : "OpenCode discovery or plugin-free verification cleanup could not be confirmed stopped",
+    };
+  }
+
   if (!probeAuthentication) {
-    const cleanupConfirmed = versionProbes.every((probe) => probe.cleanupConfirmed);
+    const cleanupConfirmed = openCodeIsolation.cleanupConfirmed
+      && versionProbeCleanupConfirmed;
     return {
       provider,
       available: true,
@@ -448,9 +507,8 @@ export async function detectProvider(
     };
   }
 
-  const versionCleanupConfirmed = versionProbes.every(
-    (probe) => probe.cleanupConfirmed,
-  );
+  const versionCleanupConfirmed = openCodeIsolation.cleanupConfirmed
+    && versionProbeCleanupConfirmed;
   if (!versionCleanupConfirmed || (providerId === "codex" && !selected.appServerReady)) {
     return {
       provider,

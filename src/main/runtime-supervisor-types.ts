@@ -40,6 +40,7 @@ export interface RuntimeProcessRecord {
   modernDarwinRecoveryAuthority:
     ModernDarwinRecoveryAuthorityDescriptor | null;
   readonly manualModernRecoveryGeneration: boolean;
+  startupRecoveryDeadlineExtended: boolean;
   ready: boolean;
   acceptingReady: boolean;
   cleanupConfirmed: boolean;

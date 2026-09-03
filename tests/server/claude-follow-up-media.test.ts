@@ -53,17 +53,18 @@ describe("Claude media follow-up queue", () => {
         ]();
         return fixtureClaudeQuery(
           (async function* (): AsyncGenerator<SDKMessage> {
-            await promptIterator!.next();
+            const initial = (await promptIterator!.next()).value!;
             markInitialPromptRead();
             yield claudeSessionState("running");
             await streamReleased;
             yield {
-              ...claudeSuccessResult("First queued media handled", "completed"),
-              user_message_uuid: consumedFollowUps[0]?.uuid,
-            } as SDKMessage;
-            yield {
-              ...claudeSuccessResult("Queued media handled", "completed"),
+              ...claudeSuccessResult("Coalesced media handled", "completed"),
               user_message_uuid: consumedFollowUps[1]?.uuid,
+              user_message_uuids: [
+                initial.uuid,
+                consumedFollowUps[0]?.uuid,
+                consumedFollowUps[1]?.uuid,
+              ],
             } as SDKMessage;
             yield claudeSessionState("idle");
           })(),
@@ -115,7 +116,26 @@ describe("Claude media follow-up queue", () => {
 
     await expect(result).resolves.toMatchObject({
       status: "completed",
-      text: "Queued media handled",
+      text: "Coalesced media handled",
     });
+    expect(consumedFollowUps).toHaveLength(2);
+    for (const followUp of consumedFollowUps) {
+      const content = followUp.message.content as unknown as Array<{
+        type?: string;
+        text?: string;
+      }>;
+      expect(content).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          type: "image",
+          source: expect.objectContaining({ media_type: "image/png" }),
+        }),
+      ]));
+    }
+    expect(consumedFollowUps.map((followUp) =>
+      (followUp.message.content as unknown as Array<{ text?: string }>)
+        .find(({ text }) => text)?.text)).toEqual([
+      "First queued image",
+      "Accepted after SDK consumption",
+    ]);
   });
 });

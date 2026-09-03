@@ -35,6 +35,8 @@ updates:
         exclude-patterns:
           - "@agentclientprotocol/sdk"
           - "@anthropic-ai/claude-agent-sdk"
+          - "@anthropic-ai/sdk"
+          - "@modelcontextprotocol/sdk"
           - "@opencode-ai/sdk"
       development-patch-and-minor:
         dependency-type: development

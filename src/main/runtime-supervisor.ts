@@ -25,12 +25,10 @@ import { RuntimeUpdatePreparationCoordinator } from "./runtime-update-preparatio
 import { RuntimeDatabaseRecoveryCoordinator } from "./runtime-database-recovery-coordinator.js";
 import { RuntimeSupervisorStartupRecovery } from "./runtime-supervisor-startup-recovery.js";
 import { RuntimeOwnedProcessJournal } from "../node/runtime-owned-processes.js";
-import type { ModernDarwinRecoveryAuthorityDescriptor } from
-  "../node/runtime-modern-recovery-authorities.js";
+import type { ModernDarwinRecoveryAuthorityDescriptor } from "../node/runtime-modern-recovery-authorities.js";
 import {
-  createRuntimeProcessRecord,
-  drainRuntimeRecordRequests,
-  recoverUnconfirmedRuntimeCleanup, shouldRecoverUnconfirmedWindowsTree,
+  claimStartupRecoveryDeadlineExtension, createRuntimeProcessRecord,
+  drainRuntimeRecordRequests, recoverUnconfirmedRuntimeCleanup, shouldRecoverUnconfirmedWindowsTree,
 } from "./runtime-supervisor-process-record.js";
 import { runtimeSupervisorRecoveryWaitMs } from
   "../node/runtime-shutdown-deadline.js";
@@ -792,6 +790,7 @@ export class RuntimeSupervisor {
         return;
       }
       record.cleanupReceiptIds.delete(event.receiptRuntimeGenerationId);
+      if (claimStartupRecoveryDeadlineExtension(record)) this.startReadinessDeadline(record);
       return;
     }
     if (
@@ -806,6 +805,7 @@ export class RuntimeSupervisor {
         this.forceTerminate(record.child);
         this.emitState();
       }
+      if (recovery.consumed && claimStartupRecoveryDeadlineExtension(record)) this.startReadinessDeadline(record);
       return;
     }
     if (!this.desiredRunning || !record.acceptingReady || record.ready) return;

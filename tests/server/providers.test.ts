@@ -816,9 +816,17 @@ setInterval(() => {}, 1000);
     const executable = join(temporaryRoot(), "opencode");
     await expect(detectProvider("opencode", { command: executable }, {
       executableCandidates: async () => [executable],
+      probeOpenCodePureIsolation: async () => ({
+        cleanupConfirmed: true,
+        verified: true,
+      }),
       probeProcess: async (_candidate, args) => ({
         exitCode: 0,
-        output: args[0] === "--version" ? "opencode 1.18.10" : "Credentials\n0 credentials",
+        output: args[0] === "--version"
+          ? "opencode 1.18.10"
+          : args[0] === "serve"
+            ? "--pure run without external plugins"
+            : "Credentials\n0 credentials",
         started: true,
         timedOut: false,
         cleanupConfirmed: true,
@@ -836,16 +844,99 @@ setInterval(() => {}, 1000);
     const executable = join(temporaryRoot(), "opencode");
     await expect(detectProvider("opencode", { command: executable }, {
       executableCandidates: async () => [executable],
+      probeOpenCodePureIsolation: async () => ({
+        cleanupConfirmed: true,
+        verified: true,
+      }),
       probeProcess: async (_candidate, args) => ({
         exitCode: 0,
         output: args[0] === "--version"
           ? "opencode 1.18.10"
+          : args[0] === "serve"
+            ? "--pure run without external plugins"
           : "Credentials\n0 credentials\nEnvironment\n1 environment variable",
         started: true,
         timedOut: false,
         cleanupConfirmed: true,
       }),
     })).resolves.toMatchObject({ authState: "configured", canRun: true, statusMessage: "Configured" });
+  });
+
+  it("rejects OpenCode CLIs without secure plugin-free serve mode", async () => {
+    const executable = join(temporaryRoot(), "opencode");
+    const probes: string[][] = [];
+    await expect(detectProvider("opencode", { command: executable }, {
+      executableCandidates: async () => [executable],
+      probeProcess: async (_candidate, args) => {
+        probes.push([...args]);
+        return {
+          exitCode: 0,
+          output: args[0] === "--version"
+            ? "opencode 1.17.0"
+            : "serve --hostname --port",
+          started: true,
+          timedOut: false,
+          cleanupConfirmed: true,
+        };
+      },
+    })).resolves.toMatchObject({
+      available: true,
+      installState: "installed",
+      authState: "unknown",
+      canRun: false,
+      cleanupConfirmed: true,
+      statusMessage: "OpenCode CLI found, but secure plugin-free serve mode is unavailable; update the selected CLI",
+    });
+    expect(probes).toEqual([
+      ["--version"],
+      ["serve", "--help"],
+    ]);
+  });
+
+  it.each([
+    {
+      cleanupConfirmed: true,
+      statusMessage: "OpenCode failed secure plugin-free runtime verification; update the selected CLI",
+    },
+    {
+      cleanupConfirmed: false,
+      statusMessage: "OpenCode discovery or plugin-free verification cleanup could not be confirmed stopped",
+    },
+  ])("fails closed when selected OpenCode semantic isolation is rejected", async ({
+    cleanupConfirmed,
+    statusMessage,
+  }) => {
+    const executable = join(temporaryRoot(), "opencode");
+    const isolationProbe = vi.fn(async () => ({
+      cleanupConfirmed,
+      verified: false,
+    }));
+    await expect(detectProvider("opencode", { command: executable }, {
+      executableCandidates: async () => [executable],
+      probeOpenCodePureIsolation: isolationProbe,
+      probeProcess: async (_candidate, args) => ({
+        exitCode: 0,
+        output: args[0] === "--version"
+          ? "opencode 1.18.26"
+          : "serve --pure",
+        started: true,
+        timedOut: false,
+        cleanupConfirmed: true,
+      }),
+    })).resolves.toMatchObject({
+      available: true,
+      installState: "installed",
+      authState: "unknown",
+      canRun: false,
+      cleanupConfirmed,
+      statusMessage,
+    });
+    expect(isolationProbe).toHaveBeenCalledWith(
+      executable,
+      "1.18.26",
+      expect.objectContaining({ env: expect.any(Object) }),
+      expect.any(Function),
+    );
   });
 
   it("admits an OAuth-only Kimi install for authoritative ACP authentication", async () => {

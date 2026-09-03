@@ -47,6 +47,7 @@ const crypto = require("node:crypto");
 const fs = require("node:fs");
 const args = process.argv.slice(2);
 const requestedPort = Number(args.find((arg) => arg.startsWith("--port="))?.slice(7));
+const pure = args.includes("--pure");
 let port = requestedPort;
 const scenario = ${JSON.stringify(scenario)};
 const sessionID = "opencode-boundary-session";
@@ -59,7 +60,7 @@ const secretDigest = crypto.createHash("sha256")
 const capturePath = ${JSON.stringify(capturePath)};
 const save = () => {
   const nextPath = capturePath + ".next";
-  fs.writeFileSync(nextPath, JSON.stringify({ port, requestedPort, authorizedRequests, unauthorizedRequests, secretDigest }));
+  fs.writeFileSync(nextPath, JSON.stringify({ port, requestedPort, pure, authorizedRequests, unauthorizedRequests, secretDigest }));
   try {
     fs.renameSync(nextPath, capturePath);
   } catch (error) {
@@ -181,9 +182,11 @@ describe.sequential("OpenCode owned-server boundary", () => {
     });
 
     const capture = readStableCapture<{
+      pure: boolean;
       authorizedRequests: number;
       unauthorizedRequests: number;
     }>(capturePath);
+    expect(capture.pure).toBe(true);
     expect(capture.authorizedRequests).toBeGreaterThan(0);
     expect(capture.unauthorizedRequests).toBe(0);
     expect(JSON.stringify(capture)).not.toContain("private-test-password");
@@ -226,8 +229,10 @@ describe.sequential("OpenCode owned-server boundary", () => {
     const firstListening = readStableCapture<{
       port: number;
       requestedPort: number;
+      pure: boolean;
     }>(capturePath);
     expect(firstListening.requestedPort).toBe(0);
+    expect(firstListening.pure).toBe(true);
     const unauthenticated = await fetch(
       `http://127.0.0.1:${firstListening.port}/global/health`,
     );

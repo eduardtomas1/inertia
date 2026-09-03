@@ -153,6 +153,8 @@ jobs:
               const allowed = new Set([
                 "@agentclientprotocol/sdk",
                 "@anthropic-ai/claude-agent-sdk",
+                "@anthropic-ai/sdk",
+                "@modelcontextprotocol/sdk",
                 "@opencode-ai/sdk",
                 "@openai/codex",
                 "@anthropic-ai/claude-code",

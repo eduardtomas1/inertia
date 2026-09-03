@@ -314,7 +314,10 @@ describe("Claude Agent SDK lifecycle isolation", () => {
           ]();
           await iterator.next();
           await iterator.next();
-          yield claudeSuccessResult("Uncorrelated result", "completed");
+          yield {
+            ...claudeSuccessResult("Uncorrelated result", "completed"),
+            user_message_uuids: [null, "", 47],
+          } as unknown as SDKMessage;
         })(),
       ),
     });
@@ -346,6 +349,82 @@ describe("Claude Agent SDK lifecycle isolation", () => {
       error: "Claude returned a successful result without correlating an accepted follow-up.",
     });
     await expect(followUpAccepted).resolves.toBe(true);
+    expect(manager.activeConversationIds()).toEqual([]);
+  });
+
+  it("ignores malformed, foreign, and duplicate coalesced correlations", async () => {
+    const root = portableFixtureRoot("Claude SDK guarded coalescing");
+    roots.push(root);
+    let markInitialPromptRead!: () => void;
+    const initialPromptRead = new Promise<void>((resolve) => {
+      markInitialPromptRead = resolve;
+    });
+    const harness = createClaudeAgentSdkHarness({
+      createQuery: ({ prompt }) => fixtureClaudeQuery(
+        (async function* (): AsyncGenerator<SDKMessage> {
+          const iterator = (prompt as AsyncIterable<SDKUserMessage>)[
+            Symbol.asyncIterator
+          ]();
+          await iterator.next();
+          markInitialPromptRead();
+          const first = (await iterator.next()).value!;
+          const second = (await iterator.next()).value!;
+          yield {
+            ...claudeSuccessResult("Only the first follow-up", "completed"),
+            // The plural field is authoritative when it contains usable IDs;
+            // the conflicting singular value must not settle other work.
+            user_message_uuid: second.uuid,
+            user_message_uuids: [
+              ...Array.from(
+                { length: 80 },
+                (_, index) => `foreign-correlation-${index}`,
+              ),
+              first.uuid,
+              first.uuid,
+              "99999999-9999-4999-8999-999999999999",
+            ],
+          } as unknown as SDKMessage;
+          yield {
+            ...claudeSuccessResult("Both follow-ups complete", "completed"),
+            user_message_uuid: second.uuid,
+          } as SDKMessage;
+        })(),
+      ),
+    });
+    const manager = new ProviderManager(
+      { commands: { claude: process.execPath } },
+      new AgentHarnessRegistry([harness]),
+    );
+    const identity = {
+      runId: "claude-guarded-coalescing-run",
+      turnId: "claude-guarded-coalescing-turn",
+    };
+    const run = manager.run(nativeProviderRunInput({
+      providerId: "claude",
+      conversationId: "claude-guarded-coalescing",
+      ...identity,
+      cwd: root,
+      prompt: "Handle the first turn",
+      interactionMode: "build",
+      access: "full",
+    }));
+
+    await initialPromptRead;
+    await expect(manager.steer(
+      "claude-guarded-coalescing",
+      { content: "Handle the first follow-up", imagePaths: [] },
+      identity,
+    )).resolves.toBe(true);
+    await expect(manager.steer(
+      "claude-guarded-coalescing",
+      { content: "Handle the second follow-up", imagePaths: [] },
+      identity,
+    )).resolves.toBe(true);
+
+    await expect(run).resolves.toMatchObject({
+      status: "completed",
+      text: "Both follow-ups complete",
+    });
     expect(manager.activeConversationIds()).toEqual([]);
   });
 });

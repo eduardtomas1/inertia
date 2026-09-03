@@ -24,6 +24,22 @@ export function drainRuntimeRecordRequests<
 
 export type RuntimeCleanupRecoveryOutcome = "recovered" | "blocked";
 
+export function claimStartupRecoveryDeadlineExtension(
+  record: RuntimeProcessRecord,
+): boolean {
+  // Recovery work owns one bounded window; the exact final receipt owns one
+  // fresh readiness window. Replays cannot claim another extension.
+  if (
+    record.ready || !record.acceptingReady
+    || record.startupRecoveryDeadlineExtended
+    || record.cleanupReceiptIds.size > 0
+    || record.legacyRecoveryAuthorityIds.size > 0
+    || record.modernDarwinRecoveryAuthority !== null
+  ) return false;
+  record.startupRecoveryDeadlineExtended = true;
+  return true;
+}
+
 export function shouldRecoverUnconfirmedWindowsTree(
   record: RuntimeProcessRecord,
   confirmed: boolean,
@@ -97,6 +113,7 @@ export function createRuntimeProcessRecord(options: {
     manualModernRecoveryGeneration:
       options.modernDarwinRecoveryAuthority !== undefined
       && options.modernDarwinRecoveryAuthority !== null,
+    startupRecoveryDeadlineExtended: false,
     ready: false,
     acceptingReady: true,
     cleanupConfirmed: false,

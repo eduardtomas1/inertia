@@ -13,6 +13,12 @@ import {
   type SDKTaskStartedMessage,
   type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
+import type {
+  MessageCreateParamsNonStreaming,
+  MessageParam,
+} from "@anthropic-ai/sdk/resources/messages/messages.js";
+import { Client as McpClient } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import {
   createOpencodeClient,
   type Agent,
@@ -128,6 +134,26 @@ export type ClaudeLifecycleMessageSurface =
   | SDKTaskStartedMessage
   | SDKTaskNotificationMessage;
 
+export type AnthropicMessagesSurface = {
+  message: MessageParam;
+  request: MessageCreateParamsNonStreaming;
+};
+
+export const mcpClient = new McpClient({
+  name: "Inertia provider drift",
+  version: "1.0.0",
+});
+export const mcpLinkedTransports: [InMemoryTransport, InMemoryTransport] =
+  InMemoryTransport.createLinkedPair();
+export const mcpCriticalMethods = {
+  connect: mcpClient.connect,
+  close: mcpClient.close,
+  listTools: mcpClient.listTools,
+  callTool: mcpClient.callTool,
+  listResources: mcpClient.listResources,
+  readResource: mcpClient.readResource,
+} as const;
+
 /**
  * Compile-time drift fence for the message discriminants intentionally
  * projected by claude-message-projector.ts. A newly added SDK message or
@@ -192,6 +218,21 @@ export type ClaudeAssistantRecoverySurface = Pick<
   | "supersedes"
   | "resumed_from_incomplete_thinking"
   | "context_usage"
+>;
+export type ClaudeAssistantCorrelationSurface = Pick<
+  SDKAssistantMessage,
+  | "user_message_uuid"
+  | "user_message_uuids"
+>;
+export type ClaudePartialAssistantCorrelationSurface = Pick<
+  SDKPartialAssistantMessage,
+  | "user_message_uuid"
+  | "user_message_uuids"
+>;
+export type ClaudeResultCorrelationSurface = Pick<
+  SDKResultMessage,
+  | "user_message_uuid"
+  | "user_message_uuids"
 >;
 
 export const openCodeClient: OpencodeClient = createOpencodeClient({

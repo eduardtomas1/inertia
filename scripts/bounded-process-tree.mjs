@@ -409,6 +409,10 @@ export async function runBounded(command, args, options) {
       `${options.label} requested Windows argument mode on another platform.`,
     );
   }
+  const maxOutputBytes =
+    Number.isSafeInteger(options.maxOutputBytes) && options.maxOutputBytes > 0
+      ? Math.min(options.maxOutputBytes, MAX_COMMAND_OUTPUT_BYTES)
+      : MAX_COMMAND_OUTPUT_BYTES;
   const input =
     options.input === undefined
       ? null
@@ -458,13 +462,14 @@ export async function runBounded(command, args, options) {
   const stdoutChunks = [];
   const stderrChunks = [];
   let outputTail = "";
+  let guardianDiagnosticTail = "";
   let signalOverflow;
   const overflowed = new Promise((resolveOverflow) => {
     signalOverflow = resolveOverflow;
   });
   const appendOutput = (chunks, chunk) => {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    const remaining = Math.max(0, MAX_COMMAND_OUTPUT_BYTES - outputBytes);
+    const remaining = Math.max(0, maxOutputBytes - outputBytes);
     if (remaining > 0) chunks.push(buffer.subarray(0, remaining));
     outputBytes += buffer.length;
     const text = buffer.toString("utf8");
@@ -472,8 +477,17 @@ export async function runBounded(command, args, options) {
     if (options.echoOutputLive) {
       (chunks === stdoutChunks ? process.stdout : process.stderr).write(buffer);
     }
-    if (outputBytes > MAX_COMMAND_OUTPUT_BYTES) signalOverflow();
+    if (outputBytes > maxOutputBytes) signalOverflow();
   };
+  const appendGuardianDiagnostic = (chunk) => {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    guardianDiagnosticTail = `${guardianDiagnosticTail}${buffer.toString("utf8")}`
+      .slice(-DIAGNOSTIC_TAIL_BYTES);
+    if (options.echoOutputLive) process.stderr.write(buffer);
+  };
+  const cleanupDiagnosticTail = () => [outputTail, guardianDiagnosticTail]
+    .filter((value) => value.length > 0)
+    .join("\n");
   child.stdout?.on("data", (chunk) => appendOutput(stdoutChunks, chunk));
   child.stderr?.on("data", (chunk) => appendOutput(stderrChunks, chunk));
   const completion = new Promise((settle) => {
@@ -506,7 +520,7 @@ export async function runBounded(command, args, options) {
       launchedAt,
       windowsAuthority,
       environment,
-      (chunk) => appendOutput(stderrChunks, chunk),
+      appendGuardianDiagnostic,
     );
     if (!windowsGuardian.admitted) {
       const stopped = await terminateProcessTree(
@@ -516,11 +530,11 @@ export async function runBounded(command, args, options) {
       );
       if (!stopped || !windowsGuardian.cleanupConfirmed) {
         throw new ProcessTreeCleanupError(
-          `${options.label} could not establish or clean its Windows Job authority.\n${outputTail}`,
+          `${options.label} could not establish or clean its Windows Job authority.\n${cleanupDiagnosticTail()}`,
         );
       }
       throw new Error(
-        `${options.label} could not establish its Windows Job authority.\n${outputTail}`,
+        `${options.label} could not establish its Windows Job authority.\n${cleanupDiagnosticTail()}`,
       );
     }
   }
@@ -588,7 +602,7 @@ export async function runBounded(command, args, options) {
           : "exceeded its output limit";
     if (!treeStopped || !handedOffTreeStopped) {
       throw new ProcessTreeCleanupError(
-        `${options.label} ${reason}, and its process tree or handed-off process group could not be confirmed stopped.\n${outputTail}`,
+        `${options.label} ${reason}, and its process tree or handed-off process group could not be confirmed stopped.\n${cleanupDiagnosticTail()}`,
       );
     }
     throw new Error(
@@ -609,11 +623,11 @@ export async function runBounded(command, args, options) {
       );
       if (!treeStopped) {
         throw new ProcessTreeCleanupError(
-          `${options.label} exited, but its Windows Job authority did not settle.\n${outputTail}`,
+          `${options.label} exited, but its Windows Job authority did not settle.\n${cleanupDiagnosticTail()}`,
         );
       }
       throw new Error(
-        `${options.label} exited, but its Windows Job authority timed out and was terminated.\n${outputTail}`,
+        `${options.label} exited, but its Windows Job authority timed out and was terminated.\n${cleanupDiagnosticTail()}`,
       );
     }
     if (
@@ -622,7 +636,7 @@ export async function runBounded(command, args, options) {
       (guardianResult.code !== 0 && guardianResult.code !== 28)
     ) {
       throw new ProcessTreeCleanupError(
-        `${options.label} exited with a failed Windows Job authority.\n${outputTail}`,
+        `${options.label} exited with a failed Windows Job authority.\n${cleanupDiagnosticTail()}`,
       );
     }
     removedResidualProcessTree = guardianResult.code === 28;
@@ -640,7 +654,7 @@ export async function runBounded(command, args, options) {
       );
       if (!treeStopped) {
         throw new ProcessTreeCleanupError(
-          `${options.label} exited, but its process tree could not be confirmed stopped.\n${outputTail}`,
+          `${options.label} exited, but its process tree could not be confirmed stopped.\n${cleanupDiagnosticTail()}`,
         );
       }
       removedResidualProcessTree = true;
@@ -709,7 +723,7 @@ export async function runBounded(command, args, options) {
   }
   if (removedResidualProcessTree) {
     throw new Error(
-      `${options.label} exited successfully but left descendant processes running; its complete process tree was terminated.\n${outputTail}`,
+      `${options.label} exited successfully but left descendant processes running; its complete process tree was terminated.\n${cleanupDiagnosticTail()}`,
     );
   }
   const stdout = Buffer.concat(stdoutChunks).toString("utf8");
@@ -718,5 +732,5 @@ export async function runBounded(command, args, options) {
     if (stdout.length > 0) process.stdout.write(stdout);
     if (stderr.length > 0) process.stderr.write(stderr);
   }
-  return stdout;
+  return options.combineOutput ? `${stdout}${stderr}` : stdout;
 }

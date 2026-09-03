@@ -170,9 +170,9 @@ async function exerciseServer(
     }
     throw error;
   }
-  const client = createOwnedOpenCodeClient(started.url, root, credentials);
   let operationError: unknown;
   try {
+    const client = createOwnedOpenCodeClient(started.url, root, credentials);
     await waitForOpenCodeHealth(client, started.child, requestTimeoutMs);
     const health = await withOpenCodeRequestDeadline(
       requestTimeoutMs,

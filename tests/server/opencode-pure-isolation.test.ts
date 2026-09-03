@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const proofFixture = vi.hoisted(() => ({
+  clientCreationFails: false,
   cleanupFails: false,
   healthVersion: "1.18.26",
   neverResolveVersionHealth: false,
@@ -25,19 +26,24 @@ vi.mock("../../src/server/provider/opencode-boundary", async (importOriginal) =>
   >();
   return {
     ...original,
-    createOwnedOpenCodeClient: () => ({
-      app: {
-        agents: vi.fn(async () => ({ data: [] })),
-      },
-      global: {
-        health: vi.fn(async () => proofFixture.neverResolveVersionHealth
-          ? await new Promise<never>(() => undefined)
-          : { data: { healthy: true, version: proofFixture.healthVersion } }),
-      },
-      provider: {
-        list: vi.fn(async () => ({ data: { all: [], connected: [], default: {} } })),
-      },
-    }),
+    createOwnedOpenCodeClient: () => {
+      if (proofFixture.clientCreationFails) {
+        throw new Error("fixture client construction failed");
+      }
+      return {
+        app: {
+          agents: vi.fn(async () => ({ data: [] })),
+        },
+        global: {
+          health: vi.fn(async () => proofFixture.neverResolveVersionHealth
+            ? await new Promise<never>(() => undefined)
+            : { data: { healthy: true, version: proofFixture.healthVersion } }),
+        },
+        provider: {
+          list: vi.fn(async () => ({ data: { all: [], connected: [], default: {} } })),
+        },
+      };
+    },
   };
 });
 
@@ -94,6 +100,7 @@ describe("selected OpenCode semantic isolation", () => {
   };
 
   afterEach(() => {
+    proofFixture.clientCreationFails = false;
     proofFixture.cleanupFails = false;
     proofFixture.healthVersion = "1.18.26";
     proofFixture.neverResolveVersionHealth = false;
@@ -228,5 +235,26 @@ describe("selected OpenCode semantic isolation", () => {
     )).resolves.toEqual({ cleanupConfirmed: true, verified: false });
     expect(proofFixture.starts).toHaveLength(1);
     expect(proofFixture.terminateCalls).toBe(1);
+  });
+
+  it("always terminates a started server when SDK client construction throws", async () => {
+    const executable = selectedExecutable();
+    proofFixture.clientCreationFails = true;
+    const prove = async () => await probeOpenCodePureIsolation(
+      executable,
+      "1.18.26",
+      { env: process.env, pathEntries: [] },
+      vi.fn(),
+      { pluginObservationMs: 1 },
+    );
+
+    await expect(prove()).resolves.toEqual({ cleanupConfirmed: true, verified: false });
+    expect(proofFixture.starts).toHaveLength(1);
+    expect(proofFixture.terminateCalls).toBe(1);
+
+    proofFixture.cleanupFails = true;
+    await expect(prove()).resolves.toEqual({ cleanupConfirmed: false, verified: false });
+    expect(proofFixture.starts).toHaveLength(2);
+    expect(proofFixture.terminateCalls).toBe(2);
   });
 });

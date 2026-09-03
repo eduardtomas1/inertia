@@ -57,11 +57,11 @@ export function startTimelineItemFocus(input: {
 
   let attempts = 0;
   let consecutiveStableSamples = 0;
+  const focusDocument = document;
   let finished = false;
   let frame = 0;
   let lastDestination: HTMLElement | null = null;
-  let ownedDestination: HTMLElement | null = null;
-  const initialActiveElement = document.activeElement;
+  let ownedDestination: Element | null = focusDocument.activeElement;
   let mutationObserver: MutationObserver | null = null;
   let resizeObserver: ResizeObserver | null = null;
   let timer = 0;
@@ -98,6 +98,7 @@ export function startTimelineItemFocus(input: {
     attempts += 1;
     const target = resolveTarget(root);
     if (target?.row.isConnected && target.destination.isConnected) {
+      const destination = target.destination;
       if (!virtualized) {
         target.row.scrollIntoView({ block: align, inline: "nearest" });
       } else if (
@@ -112,33 +113,32 @@ export function startTimelineItemFocus(input: {
         schedule();
         return;
       }
-      const retainedFocus = document.activeElement === target.destination;
+      const retainedFocus = focusDocument.activeElement === destination;
       const retainedDestination = retainedFocus
-        && lastDestination === target.destination;
+        && lastDestination === destination;
       if (!retainedFocus) {
-        const activeElement = document.activeElement;
-        const focusIsNeutral = activeElement === null
-          || activeElement === document.body
-          || activeElement === document.documentElement;
+        const activeElement = focusDocument.activeElement;
         // The control that launched navigation may retain focus until the row
         // mounts. After we have acquired focus, only our own prior destination
         // or a neutral document can be superseded; any other owner is newer
         // focus intent and must win.
-        const focusBelongsToRequest = ownedDestination
-          ? activeElement === ownedDestination
-          : activeElement === initialActiveElement;
-        if (!focusIsNeutral && !focusBelongsToRequest) {
+        if (
+          activeElement
+          && activeElement !== focusDocument.body
+          && activeElement !== focusDocument.documentElement
+          && activeElement !== ownedDestination
+        ) {
           finish(false);
           return;
         }
-        target.destination.focus({ preventScroll: true });
+        destination.focus({ preventScroll: true });
       }
-      if (document.activeElement === target.destination) {
-        ownedDestination = target.destination;
+      if (focusDocument.activeElement === destination) {
+        ownedDestination = destination;
         consecutiveStableSamples = retainedDestination
           ? consecutiveStableSamples + 1
           : 1;
-        lastDestination = target.destination;
+        lastDestination = destination;
         if (consecutiveStableSamples >= TIMELINE_FOCUS_STABLE_SAMPLES) {
           finish(true);
           return;

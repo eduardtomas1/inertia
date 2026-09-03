@@ -20,6 +20,12 @@ interface OwnedPreviewState {
   navigation: PreviewState;
 }
 
+interface PreviewConnection {
+  ownerId: "primary" | "secondary";
+  contextId: string;
+  connectionId: string;
+}
+
 export function mergePreviewStateUpdate(
   current: OwnedPreviewState,
   state: PreviewStateUpdate,
@@ -122,11 +128,7 @@ export function useDesktopTools({
   previewOwnerId = "primary",
   previewContextId = null,
 }: DesktopToolsOptions) {
-  const previewConnectionRef = useRef<{
-    ownerId: "primary" | "secondary";
-    contextId: string;
-    connectionId: string;
-  } | null>(null);
+  const previewConnectionRef = useRef<PreviewConnection | null>(null);
   const authorityRef = useRef({ previewOwnerId, previewContextId });
   authorityRef.current = { previewOwnerId, previewContextId };
   const [ownedPreview, setOwnedPreview] = useState<OwnedPreviewState>({
@@ -148,8 +150,6 @@ export function useDesktopTools({
       connectionId: crypto.randomUUID(),
     };
     previewConnectionRef.current = connection;
-    const { connectionId } = connection;
-    let cancelled = false;
     const unsubscribe = window.inertia.onPreviewState((state) => {
       const authority = authorityRef.current;
       if (
@@ -158,17 +158,8 @@ export function useDesktopTools({
       ) return;
       setOwnedPreview((current) => mergePreviewStateUpdate(current, state));
     });
-    void window.inertia.previewConnect({
-      ownerId: previewOwnerId,
-      contextId: previewContextId,
-      connectionId,
-    }).then((state) => {
-      const authority = authorityRef.current;
-      if (
-        cancelled
-        || authority.previewOwnerId !== previewOwnerId
-        || authority.previewContextId !== previewContextId
-      ) return;
+    void window.inertia.previewConnect(connection).then((state) => {
+      if (previewConnectionRef.current !== connection) return;
       setOwnedPreview({
         contextId: previewContextId,
         url: state.url,
@@ -176,16 +167,9 @@ export function useDesktopTools({
       });
     }).catch(() => undefined);
     return () => {
-      cancelled = true;
       unsubscribe();
-      if (previewConnectionRef.current === connection) {
-        previewConnectionRef.current = null;
-      }
-      void window.inertia.previewClose({
-        ownerId: previewOwnerId,
-        contextId: previewContextId,
-        connectionId,
-      }).catch(() => undefined);
+      previewConnectionRef.current = null;
+      void window.inertia.previewClose(connection).catch(() => undefined);
     };
   }, [previewContextId, previewOwnerId]);
 
@@ -404,19 +388,12 @@ export function useDesktopTools({
 
   const setPreviewBounds = useCallback((bounds: PreviewBounds | null) => {
     const connection = previewConnectionRef.current;
-    if (
-      !previewContextId
-      || !connection
-      || connection.ownerId !== previewOwnerId
-      || connection.contextId !== previewContextId
-    ) return;
+    if (!connection) return;
     void window.inertia.previewSetBounds({
-      ownerId: previewOwnerId,
-      contextId: previewContextId,
-      connectionId: connection.connectionId,
+      ...connection,
       bounds,
     }).catch(() => undefined);
-  }, [previewContextId, previewOwnerId]);
+  }, []);
 
   const inspectPreviewEvidenceImage = useCallback(async (
     evidenceId: string,

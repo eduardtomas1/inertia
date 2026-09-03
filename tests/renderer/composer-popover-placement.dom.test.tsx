@@ -182,13 +182,13 @@ describe("composer popover DOM placement", () => {
     act(() => {
       vi.advanceTimersByTime(140);
     });
-    expect(result.current.moreSection).toBe("reasoning");
+    expect(result.current.moreSection).toBe("speed");
 
     act(() => {
       result.current.closeMorePreview();
       vi.advanceTimersByTime(180);
     });
-    expect(result.current.moreSection).toBe("reasoning");
+    expect(result.current.moreSection).toBe("speed");
 
     act(() => result.current.returnToMoreRoot());
     expect(result.current.moreSection).toBeNull();

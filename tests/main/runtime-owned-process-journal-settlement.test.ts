@@ -1,5 +1,6 @@
 import {
   chmodSync,
+  existsSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -15,6 +16,8 @@ import { recoverRuntimeOwnedProcesses } from
 import { windowsRuntimeJobName } from "../../src/main/windows-runtime-job";
 import { RuntimeOwnedProcessJournal } from
   "../../src/node/runtime-owned-processes";
+import { runtimeOwnedProcessRetiringWriterName } from
+  "../../src/node/runtime-owned-process-session-journal";
 
 const systemBootId = "test:10000000-0000-4000-8000-000000000001";
 const runtimeGenerationId = "20000000-0000-4000-8000-000000000002:1";
@@ -103,6 +106,185 @@ afterEach(() => {
 });
 
 describe("runtime-owned journal settlement", () => {
+  it("fences and discards a crash-partial Windows writer before recovery", async () => {
+    const directory = temporaryDirectory();
+    const journal = portableClaim(directory, "win32");
+    const containment = {
+      kind: "windows-job-v1" as const,
+      name: windowsRuntimeJobName(runtimeGenerationId),
+    };
+    expect(journal.armContainment(
+      runtimeGenerationId,
+      systemBootId,
+      containment,
+    )).toBe(true);
+    const capability = journal.sessionCapability(
+      runtimeGenerationId,
+      systemBootId,
+    );
+    expect(capability).not.toBeNull();
+    const interruptedOwnershipId = "30000000-0000-4000-8000-000000000003";
+    const interruptedTemporary = join(
+      capability!.writerRoot.path,
+      `.runtime-owned-child-${interruptedOwnershipId}.begin.tmp`,
+    );
+    writeFileSync(interruptedTemporary, "{", { encoding: "utf8", mode: 0o600 });
+    expect(journal.inspectGeneration(runtimeGenerationId)).toBeNull();
+    expect(journal.records(runtimeGenerationId)).toBeNull();
+    const recoverWindowsJob = vi.fn(async () => true);
+
+    await expect(recoverRuntimeOwnedProcesses(
+      directory,
+      runtimeGenerationId,
+      systemBootId,
+      {
+        platform: "win32",
+        deadlineAt: Date.now() + 2_000,
+        recoverWindowsJob,
+        waitForProcessGroupDrain: async () => undefined,
+      },
+    )).resolves.toBe(true);
+
+    expect(recoverWindowsJob).toHaveBeenCalledWith(
+      containment,
+      expect.any(Number),
+    );
+    expect(journal.inspectGeneration(runtimeGenerationId)).toMatchObject({
+      sessionState: "retiring",
+      records: [],
+      consumingRecords: [],
+    });
+    expect(journal.records(runtimeGenerationId)).toEqual([]);
+  });
+
+  it("keeps malformed canonical Windows ownership fail-closed after fencing", async () => {
+    const directory = temporaryDirectory();
+    const journal = portableClaim(directory, "win32");
+    const record = journal.records(runtimeGenerationId)?.[0];
+    expect(record).toBeDefined();
+    const claimPath = join(
+      directory,
+      `.runtime-owned-child-${record!.ownershipId}.json`,
+    );
+    writeFileSync(claimPath, "{", { encoding: "utf8", mode: 0o600 });
+    const containment = {
+      kind: "windows-job-v1" as const,
+      name: windowsRuntimeJobName(runtimeGenerationId),
+    };
+    expect(journal.armContainment(
+      runtimeGenerationId,
+      systemBootId,
+      containment,
+    )).toBe(true);
+    let now = 10_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    const recoverWindowsJob = vi.fn(async () => true);
+
+    await expect(recoverRuntimeOwnedProcesses(
+      directory,
+      runtimeGenerationId,
+      systemBootId,
+      {
+        platform: "win32",
+        deadlineAt: 10_030,
+        recoverWindowsJob,
+        waitForProcessGroupDrain: async (durationMs) => {
+          now += durationMs;
+        },
+      },
+    )).resolves.toBe(false);
+
+    expect(recoverWindowsJob).not.toHaveBeenCalled();
+    expect(readFileSync(claimPath, "utf8")).toBe("{");
+    expect(journal.records(runtimeGenerationId)).toBeNull();
+  });
+
+  it("preserves a crash-partial Windows containment temporary after fencing", async () => {
+    const directory = temporaryDirectory();
+    const journal = portableClaim(directory, "win32");
+    const capability = journal.sessionCapability(
+      runtimeGenerationId,
+      systemBootId,
+    );
+    expect(capability).not.toBeNull();
+    const containmentHash = windowsRuntimeJobName(runtimeGenerationId)
+      .slice("Global\\InertiaRuntime-".length);
+    const temporaryName =
+      `.runtime-owned-process-containment-${containmentHash}.json.publish.tmp`;
+    writeFileSync(join(capability!.writerRoot.path, temporaryName), "{", {
+      encoding: "utf8",
+      mode: 0o600,
+    });
+    const recoverWindowsJob = vi.fn(async () => true);
+    let now = 10_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+
+    await expect(recoverRuntimeOwnedProcesses(
+      directory,
+      runtimeGenerationId,
+      systemBootId,
+      {
+        platform: "win32",
+        deadlineAt: 10_030,
+        recoverWindowsJob,
+        waitForProcessGroupDrain: async (durationMs) => {
+          now += durationMs;
+        },
+      },
+    )).resolves.toBe(false);
+
+    expect(recoverWindowsJob).not.toHaveBeenCalled();
+    expect(existsSync(join(
+      directory,
+      runtimeOwnedProcessRetiringWriterName(runtimeGenerationId),
+      temporaryName,
+    ))).toBe(true);
+    expect(journal.records(runtimeGenerationId)).toBeNull();
+  });
+
+  it("authenticates and settles a valid retiring Windows containment temporary", () => {
+    const directory = temporaryDirectory();
+    const journal = portableClaim(directory, "win32");
+    const capability = journal.sessionCapability(
+      runtimeGenerationId,
+      systemBootId,
+    );
+    expect(capability).not.toBeNull();
+    const containment = {
+      kind: "windows-job-v1" as const,
+      name: windowsRuntimeJobName(runtimeGenerationId),
+    };
+    const containmentHash = containment.name
+      .slice("Global\\InertiaRuntime-".length);
+    const temporaryName =
+      `.runtime-owned-process-containment-${containmentHash}.json.publish.tmp`;
+    writeFileSync(
+      join(capability!.writerRoot.path, temporaryName),
+      JSON.stringify({
+        version: 1,
+        runtimeGenerationId,
+        systemBootId,
+        containment,
+      }),
+      { encoding: "utf8", mode: 0o600 },
+    );
+
+    expect(journal.fenceSessionExact(capability!.session)).toBe(true);
+    const retiringTemporary = join(
+      directory,
+      runtimeOwnedProcessRetiringWriterName(runtimeGenerationId),
+      temporaryName,
+    );
+    expect(existsSync(retiringTemporary)).toBe(true);
+    expect(journal.inspectGeneration(runtimeGenerationId)).toMatchObject({
+      sessionState: "retiring",
+      records: [expect.objectContaining({ state: "owned" })],
+      consumingRecords: [],
+      containment: null,
+    });
+    expect(existsSync(retiringTemporary)).toBe(false);
+  });
+
   it("settles a transient Windows generation inspection before exact recovery", async () => {
     const directory = temporaryDirectory();
     const journal = portableClaim(directory, "win32");

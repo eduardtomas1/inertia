@@ -295,13 +295,14 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     }
     await expect(send).toBeDisabled();
     await page.mouse.move(0, 0);
-    const modelIdleBackground = await model.evaluate(
-      (button) => getComputedStyle(button).backgroundColor,
-    );
-    await model.hover();
-    await expect.poll(() => model.evaluate((button, idleBackground) =>
-      button.matches(":hover") && getComputedStyle(button).backgroundColor !== idleBackground,
-    modelIdleBackground)).toBe(true);
+    const modelIdleBackground = await model.evaluate((button) => getComputedStyle(button).backgroundColor);
+    await expect.poll(async () => {
+      await page.mouse.move(0, 0);
+      await model.hover();
+      return model.evaluate((button, idleBackground) =>
+        button.matches(":hover") && getComputedStyle(button).backgroundColor !== idleBackground,
+      modelIdleBackground);
+    }).toBe(true);
     await model.focus();
     await expect(model).toBeFocused();
     expect(await model.evaluate(

@@ -46,15 +46,26 @@ export type LoadWorkspaceGit = (
   options?: WorkspaceGitLoadOptions,
 ) => Promise<void>;
 
+function gitErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message.trim()
+    ? error.message
+    : fallback;
+}
+
 function reportPassiveGitError(
   error: unknown,
   fallback: string,
   setActionError: (message: string) => void,
 ): string {
-  const message = error instanceof Error && error.message.trim()
-    ? error.message
-    : fallback;
+  const message = gitErrorMessage(error, fallback);
   const delivery = runtimeCommandDelivery(error);
+  // A runtime recycle can authoritatively reject an in-flight background Git
+  // scan before its socket closes. Keep that expected cancellation local to
+  // the Git surface instead of obscuring unrelated workspace content with a
+  // global alert. Other server rejections and ordinary failures remain global.
+  if (delivery === "rejected" && message === "Git inspection was cancelled.") {
+    return message;
+  }
   if (!delivery || delivery === "rejected") setActionError(message);
   return message;
 }
@@ -226,11 +237,7 @@ export function useWorkspaceGit({
       }
     })().catch((error: unknown) => {
       if (ownsResponse()) {
-        setLoadError(
-          error instanceof Error && error.message.trim()
-            ? error.message
-            : "Git changes could not be loaded.",
-        );
+        setLoadError(gitErrorMessage(error, "Git changes could not be loaded."));
       }
       throw error;
     }).finally(() => {
@@ -423,7 +430,7 @@ export function useWorkspaceGit({
       if (passive) {
         reportPassiveGitError(error, fallback, setActionError);
       } else {
-        setActionError(error instanceof Error ? error.message : fallback);
+        setActionError(gitErrorMessage(error, fallback));
       }
     });
   }, [
@@ -566,9 +573,10 @@ export function useWorkspaceGit({
         });
       } catch (error) {
         setActionError(
-          `The commit was created, but push failed. ${error instanceof Error && error.message.trim()
-            ? error.message
-            : "Refresh Git status before retrying the push."}`,
+          `The commit was created, but push failed. ${gitErrorMessage(
+            error,
+            "Refresh Git status before retrying the push.",
+          )}`,
         );
       }
     }

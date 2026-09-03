@@ -146,7 +146,22 @@ afterEach(() => {
 });
 
 describe("durable Git reconnect reconciliation", () => {
-  it("does not promote an interrupted mounted refresh to a persistent app error", async () => {
+  it.each([
+    {
+      label: "an ambiguous transport interruption",
+      error: new RuntimeCommandError(
+        "The local service disconnected before finishing the request.",
+        "ambiguous",
+      ),
+    },
+    {
+      label: "an authoritative background cancellation",
+      error: new RuntimeCommandError(
+        "Git inspection was cancelled.",
+        "rejected",
+      ),
+    },
+  ])("does not promote $label from a mounted refresh", async ({ error }) => {
     let refreshes = 0;
     let interrupt!: (error: Error) => void;
     const request = vi.fn((command: CommandWithoutId) => {
@@ -182,14 +197,10 @@ describe("durable Git reconnect reconciliation", () => {
 
     await waitFor(() => expect(refreshes).toBe(1));
     await act(async () => {
-      interrupt(new RuntimeCommandError(
-        "The local service disconnected before finishing the request.",
-        "ambiguous",
-      ));
+      interrupt(error);
       await Promise.resolve();
     });
-    expect(hook.result.current.loadError)
-      .toBe("The local service disconnected before finishing the request.");
+    expect(hook.result.current.loadError).toBe(error.message);
     expect(setActionError).not.toHaveBeenCalled();
 
     hook.rerender({ online: false });
@@ -228,8 +239,21 @@ describe("durable Git reconnect reconciliation", () => {
       promoted: true,
     },
     {
+      label: "server-rejected background cancellation",
+      error: new RuntimeCommandError(
+        "Git inspection was cancelled.",
+        "rejected",
+      ),
+      promoted: false,
+    },
+    {
       label: "ordinary failure",
       error: new Error("The Git response was unreadable."),
+      promoted: true,
+    },
+    {
+      label: "ordinary cancellation-shaped failure",
+      error: new Error("Git inspection was cancelled."),
       promoted: true,
     },
   ])("classifies $label invalidation refresh failures", async ({
@@ -299,6 +323,14 @@ describe("durable Git reconnect reconciliation", () => {
         "rejected",
       ),
       promoted: true,
+    },
+    {
+      label: "server-rejected background cancellation",
+      error: new RuntimeCommandError(
+        "Git inspection was cancelled.",
+        "rejected",
+      ),
+      promoted: false,
     },
     {
       label: "ordinary failure",

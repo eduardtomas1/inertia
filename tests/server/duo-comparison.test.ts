@@ -560,11 +560,12 @@ describe("Duo third-model comparison", () => {
     observeTerminalProjection = true;
 
     runtime.provider.completeAll(["Source A", "Source B"]);
-    await new Promise<void>((resolve) => setTimeout(resolve, 150));
+    await vi.waitFor(() => {
+      expect(runtime.store.pairedLaunch(prepared.launchId).comparison)
+        .toMatchObject({ state: "running", attempt: 1 });
+    }, { timeout: 5_000 });
 
     expect(workflowReservation).toBe(true);
-    expect(runtime.store.pairedLaunch(prepared.launchId).comparison)
-      .toMatchObject({ state: "running", attempt: 1 });
     expect(runtime.provider.inputs).toHaveLength(3);
     runtime.store.close();
   });

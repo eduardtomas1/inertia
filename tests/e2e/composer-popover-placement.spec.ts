@@ -107,7 +107,9 @@ async function expectContained(popover: Locator): Promise<{
   vertical: string | undefined;
   horizontal: string | undefined;
 }> {
-  const inspect = () => popover.evaluate((element) => {
+  const inspect = () => popover.evaluateAll((elements) => {
+    const element = elements.length === 1 ? elements[0] : undefined;
+    if (!(element instanceof HTMLElement)) return null;
     const bounds = element.getBoundingClientRect();
     const workspace = element.closest<HTMLElement>(".chat-workspace")
       ?.getBoundingClientRect();
@@ -181,6 +183,7 @@ async function expectContained(popover: Locator): Promise<{
     insidePane: true,
     insideViewport: true,
   });
+  if (!geometry) throw new Error("The composer popover was not attached.");
   return geometry;
 }
 

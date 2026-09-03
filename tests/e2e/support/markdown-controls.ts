@@ -96,6 +96,11 @@ export async function revealVirtualizedTimelineTurn(input: {
   const virtualRows = page.locator(".response-virtual-item");
   await expect.poll(() => virtualRows.count()).toBeGreaterThan(0);
   await page.evaluate((detail) => {
+    // This helper dispatches navigation without a real activating control.
+    // Clear fixture auto-focus so the production focus guard sees the same
+    // neutral document state that follows an intentional navigation action.
+    const activeElement = document.activeElement;
+    if (activeElement instanceof HTMLElement) activeElement.blur();
     window.dispatchEvent(new CustomEvent("inertia:timeline-focus", {
       detail,
     }));

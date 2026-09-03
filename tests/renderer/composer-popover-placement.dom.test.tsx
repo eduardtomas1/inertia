@@ -194,6 +194,25 @@ describe("composer popover DOM placement", () => {
     expect(result.current.moreSection).toBeNull();
   });
 
+  it("does not let an admitted hover dismissal override a later explicit open", () => {
+    vi.useFakeTimers();
+    const { result } = renderHook(() => useComposerMenus());
+    const layer = document.createElement("div");
+    const popover = document.createElement("div");
+    layer.dataset.composerSubmenuSide = "right";
+    layer.append(popover);
+    result.current.morePopoverRef.current = popover;
+
+    act(() => result.current.closeMorePreview());
+    vi.spyOn(window, "clearTimeout").mockImplementation(() => undefined);
+    act(() => result.current.openMoreSection("speed"));
+    act(() => {
+      vi.advanceTimersByTime(180);
+    });
+
+    expect(result.current.moreSection).toBe("speed");
+  });
+
   it("dismisses a hover-only section after the pointer leaves", () => {
     vi.useFakeTimers();
     const { result } = renderHook(() => useComposerMenus());

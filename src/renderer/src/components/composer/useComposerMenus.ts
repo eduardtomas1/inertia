@@ -174,6 +174,7 @@ export function useComposerMenus(): ComposerMenuController {
     if (moreSectionExplicitRef.current) return;
     moreHoverTimerRef.current = window.setTimeout(() => {
       moreHoverTimerRef.current = null;
+      if (moreSectionExplicitRef.current) return;
       setMoreSection(null);
       setMoreSubmenuSide(null);
     }, 180);

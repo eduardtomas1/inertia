@@ -982,16 +982,16 @@ describe("cross-platform runtime owned process recovery", () => {
     writeFileSync(join(directory, marker), "{}", { mode: 0o600 });
     const recoverWindowsJob = vi.fn(async () => true);
 
-    expect(recoverRuntimeOwnedProcesses(
+    await expect(recoverRuntimeOwnedProcesses(
       directory,
       runtimeGenerationId,
       systemBootId,
       {
         platform: "win32",
-        deadlineAt: Date.now() + 2_000,
+        deadlineAt: Date.now() + 20,
         recoverWindowsJob,
       },
-    )).toBeNull();
+    )).resolves.toBe(false);
 
     expect(recoverWindowsJob).not.toHaveBeenCalled();
     expect(journal.records(runtimeGenerationId)).toEqual([claim]);

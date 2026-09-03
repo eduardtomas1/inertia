@@ -103,6 +103,51 @@ afterEach(() => {
 });
 
 describe("runtime-owned journal settlement", () => {
+  it("settles a transient Windows generation inspection before exact recovery", async () => {
+    const directory = temporaryDirectory();
+    const journal = portableClaim(directory, "win32");
+    const containment = {
+      kind: "windows-job-v1" as const,
+      name: windowsRuntimeJobName(runtimeGenerationId),
+    };
+    expect(journal.armContainment(
+      runtimeGenerationId,
+      systemBootId,
+      containment,
+    )).toBe(true);
+    const originalInspection =
+      RuntimeOwnedProcessJournal.prototype.inspectGeneration;
+    vi.spyOn(RuntimeOwnedProcessJournal.prototype, "inspectGeneration")
+      .mockImplementationOnce(() => null)
+      .mockImplementation(function (
+        this: RuntimeOwnedProcessJournal,
+        generation: string,
+      ) {
+        return originalInspection.call(this, generation);
+      });
+    const recoverWindowsJob = vi.fn(async () => true);
+    const waitForProcessGroupDrain = vi.fn(async () => undefined);
+
+    await expect(recoverRuntimeOwnedProcesses(
+      directory,
+      runtimeGenerationId,
+      systemBootId,
+      {
+        platform: "win32",
+        deadlineAt: Date.now() + 2_000,
+        recoverWindowsJob,
+        waitForProcessGroupDrain,
+      },
+    )).resolves.toBe(true);
+
+    expect(recoverWindowsJob).toHaveBeenCalledWith(
+      containment,
+      expect.any(Number),
+    );
+    expect(waitForProcessGroupDrain).toHaveBeenCalledWith(10);
+    expect(journal.records(runtimeGenerationId)).toEqual([]);
+  });
+
   it("settles a Windows claim read racing child-close retirement", async () => {
     const directory = temporaryDirectory();
     const journal = portableClaim(directory, "win32");

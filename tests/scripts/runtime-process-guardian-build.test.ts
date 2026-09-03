@@ -432,13 +432,18 @@ describe("runtime guardian build ownership", () => {
   it("flushes every bootstrap settlement marker before exit", async () => {
     const subject = fixture("exit 1");
     const leaf = join(subject.root, "settled-bootstrap-leaf.mjs");
-    writeFileSync(leaf, "// exits successfully\n");
+    writeFileSync(
+      leaf,
+      'import { writeSync } from "node:fs";\n'
+        + 'writeSync(2, `INERTIA_READY:${process.argv[2]}\\n`);',
+    );
     await Promise.all(
       Array.from({ length: 12 }, async (_, index) => {
         const settlementToken = `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`;
+        const readyMarker = `INERTIA_READY:${settlementToken}\n`;
         const payload = Buffer.from(
           JSON.stringify({
-            args: [leaf],
+            args: [leaf, settlementToken],
             command: process.execPath,
             holdAuthority: true,
             input: null,
@@ -447,26 +452,32 @@ describe("runtime guardian build ownership", () => {
         ).toString("base64");
         const trampoline = spawn(
           process.execPath,
-          [
-            join(repositoryRoot, "scripts/bounded-command-trampoline.mjs"),
-            payload,
-          ],
+          [join(repositoryRoot, "scripts/bounded-command-trampoline.mjs"), payload],
           { stdio: ["pipe", "ignore", "pipe"] },
         );
         let stderr = "";
-        trampoline.stderr.on("data", (chunk) => {
-          stderr += chunk.toString("utf8");
+        const ready = new Promise<boolean>((resolveReady) => {
+          trampoline.stderr.on("data", (chunk) => {
+            stderr += chunk.toString("utf8");
+            if (stderr.includes(readyMarker)) resolveReady(true);
+          });
         });
-        const completion = new Promise<number>((resolveExit, reject) => {
-          trampoline.once("error", reject);
-          trampoline.once("exit", (code) => resolveExit(code ?? -1));
+        const completion = new Promise<number>((resolveExit) => {
+          trampoline.once("error", () => resolveExit(-1));
+          trampoline.once("close", (code) => resolveExit(code ?? -1));
         });
         let status = -2;
         try {
           trampoline.stdin.write("GO\n");
+          const started = await Promise.race([
+            ready,
+            completion.then(() => false),
+            delay(8_000, false, { ref: false }),
+          ]);
+          expect(started).toBe(true);
           status = await Promise.race([
             completion,
-            delay(2_000).then(() => -2),
+            delay(2_000, -2, { ref: false }),
           ]);
         } finally {
           trampoline.stdin.end();
@@ -476,7 +487,9 @@ describe("runtime guardian build ownership", () => {
           }
         }
         expect(status).toBe(0);
-        expect(stderr).toBe(`INERTIA_SETTLED:${settlementToken}\n`);
+        expect(stderr).toBe(
+          `${readyMarker}INERTIA_SETTLED:${settlementToken}\n`,
+        );
       }),
     );
   });

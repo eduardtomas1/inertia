@@ -296,23 +296,30 @@ export function recoverRuntimeOwnedProcesses(
       : {}),
   });
   if (platform === "win32") {
-    const containment = journal.containment(runtimeGenerationId);
-    if (containment === undefined) return null;
-    let records = journal.records(runtimeGenerationId);
-    const session = journal.sessionExact(runtimeGenerationId);
-    if (!records && session === null) return null;
+    // A valid journal with no such generation is a stable absence, not an
+    // in-flight writer transition. Preserve the synchronous fail-closed signal
+    // used by startup recovery while retrying only an unreadable generation.
+    if (journal.sessionExact(runtimeGenerationId) === null) return null;
     return (async () => {
       const waitForJournalSettle = options.waitForProcessGroupDrain
         ?? ((durationMs: number) => new Promise<void>((resolve) => {
           setTimeout(resolve, durationMs);
         }));
-      records ??= await readRuntimeOwnedProcessRecordsAfterSettle(
-        journal,
-        runtimeGenerationId,
-        options.deadlineAt,
-        waitForJournalSettle,
-      );
-      if (!records) return false;
+      let inspection = journal.inspectGeneration(runtimeGenerationId);
+      while (!inspection) {
+        if (
+          Date.now() + RUNTIME_OWNED_JOURNAL_SETTLE_POLL_MS
+            >= options.deadlineAt
+        ) return false;
+        await waitForJournalSettle(RUNTIME_OWNED_JOURNAL_SETTLE_POLL_MS);
+        inspection = journal.inspectGeneration(runtimeGenerationId);
+      }
+      const { containment, records, session } = inspection;
+      if (
+        !session
+        || records.some((record) =>
+          record.systemBootId !== session.systemBootId)
+      ) return false;
       if (!containment) return records.length === 0;
       const recover = options.recoverWindowsJob ?? recoverWindowsRuntimeJob;
       const recovered = await (options.windowsRuntimeJobAssembly

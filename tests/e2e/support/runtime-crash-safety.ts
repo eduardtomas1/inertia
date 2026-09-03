@@ -877,13 +877,19 @@ export async function expectRuntimeCrashRecovery(
   expect(await page.evaluate(() =>
     Reflect.get(window, "__unsafeMarkdown"))).toBeUndefined();
   const safetyAlert = page.locator(".error-toast[role=\"alert\"]").filter({
-    hasText: /unconfirmed process cleanup|confirm complete process cleanup/iu,
+    hasText: /recovery safety mode|prior runtime-owned process|unconfirmed process cleanup|confirm complete process cleanup/iu,
   });
   await expect(newChat).toBeEnabled();
+  let safetyAlertWon = false;
+  await expect.poll(async () => {
+    safetyAlertWon = await safetyAlert.isVisible().catch(() => false);
+    return safetyAlertWon
+      || await interruptedNotice.isVisible().catch(() => false);
+  }).toBe(true);
   if (
     testInfo
     && priorLease
-    && await safetyAlert.isVisible().catch(() => false)
+    && safetyAlertWon
   ) {
     const systemBootId = readSystemBootId();
     const records = new RuntimeOwnedProcessJournal(dataDirectory)

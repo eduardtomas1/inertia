@@ -34,6 +34,7 @@ const PROOF_TIMEOUT_MS = 10_000;
 const PLUGIN_OBSERVATION_MS = 5_000;
 const MAX_PROOF_CACHE_ENTRIES = 16;
 const proofCache = new Set<string>();
+const inFlightProofs = new Map<string, Promise<void>>();
 
 export interface OpenCodePureIsolationProof {
   readonly cleanupConfirmed: boolean;
@@ -301,21 +302,34 @@ export const probeOpenCodePureIsolation: OpenCodePureIsolationProbe = async (
     if (proofCache.has(identity)) {
       return { cleanupConfirmed: true, verified: true };
     }
-    await runProof(
-      executable,
-      version,
-      environment,
-      terminateProcessTree,
-      observationMs,
-      requestTimeoutMs,
-    );
-    if (await executableIdentity(executable, version) !== identity) {
-      throw new Error("The selected OpenCode executable changed during isolation proof.");
+    let proof = inFlightProofs.get(identity);
+    if (!proof) {
+      proof = (async () => {
+        await runProof(
+          executable,
+          version,
+          environment,
+          terminateProcessTree,
+          observationMs,
+          requestTimeoutMs,
+        );
+        if (await executableIdentity(executable, version) !== identity) {
+          throw new Error("The selected OpenCode executable changed during isolation proof.");
+        }
+        if (proofCache.size >= MAX_PROOF_CACHE_ENTRIES) {
+          proofCache.delete(proofCache.values().next().value as string);
+        }
+        proofCache.add(identity);
+      })();
+      inFlightProofs.set(identity, proof);
     }
-    if (proofCache.size >= MAX_PROOF_CACHE_ENTRIES) {
-      proofCache.delete(proofCache.values().next().value as string);
+    try {
+      await proof;
+    } finally {
+      if (inFlightProofs.get(identity) === proof) {
+        inFlightProofs.delete(identity);
+      }
     }
-    proofCache.add(identity);
     return { cleanupConfirmed: true, verified: true };
   } catch (error) {
     return {

@@ -124,6 +124,30 @@ describe("selected OpenCode semantic isolation", () => {
     expect(proofFixture.terminateCalls).toBe(2);
   });
 
+  it("shares one proof across concurrent callers", async () => {
+    const executable = selectedExecutable();
+    const prove = async () => await probeOpenCodePureIsolation(
+      executable,
+      "1.18.26",
+      { env: process.env, pathEntries: [] },
+      vi.fn(),
+      { pluginObservationMs: 1 },
+    );
+
+    await expect(Promise.all(Array.from({ length: 12 }, prove))).resolves.toEqual(
+      Array.from(
+        { length: 12 },
+        () => ({ cleanupConfirmed: true, verified: true }),
+      ),
+    );
+    expect(proofFixture.starts.map(({ executable, pure }) => ({ executable, pure })))
+      .toEqual([
+        { executable, pure: false },
+        { executable, pure: true },
+      ]);
+    expect(proofFixture.terminateCalls).toBe(2);
+  });
+
   it("invalidates successful proofs on executable identity or version changes", async () => {
     const executable = selectedExecutable();
     const prove = async (version: string) => await probeOpenCodePureIsolation(

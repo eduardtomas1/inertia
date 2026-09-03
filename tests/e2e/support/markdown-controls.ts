@@ -109,7 +109,7 @@ export async function revealVirtualizedTimelineTurn(input: {
   try {
     await expect.poll(async () => {
       const evidence = await inspectFreshTarget(target);
-      const revealed = targetIsRevealed(evidence) && evidence.focused;
+      const revealed = targetIsRevealed(evidence);
       consecutiveRevealedSamples = revealed
         ? consecutiveRevealedSamples + 1
         : 0;

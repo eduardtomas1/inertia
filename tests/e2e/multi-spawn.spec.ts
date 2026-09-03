@@ -330,8 +330,12 @@ test("launches two truthful routes and locks a bounded third-model judge", async
   const judgeRow = sidebar.locator("button.conversation-row")
     .filter({ hasText: "Independent judge" });
   await expect(judgeRow).toHaveAttribute("aria-current", "page");
-  await expect(page.locator(
+  const judgeAnswer = page.locator(
     '[data-answer-phase="persisted"][aria-label="Final assistant answer"]',
-  )).toContainText("Multi-spawn judge response from Companion.");
+  ).filter({ hasText: "Multi-spawn judge response from Companion." });
+  await expect(judgeAnswer).toBeVisible();
+  const judgeTurn = page.locator(".response-turn").filter({ has: judgeAnswer });
+  await expect(judgeTurn.locator('[data-turn-status="completed"]'))
+    .toBeVisible();
   expect(app.rendererErrors).toEqual([]);
 });

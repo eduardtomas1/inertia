@@ -35,6 +35,7 @@ import { providerFailureMessage } from "./adapters";
 import { ClaudeDelegateLifecycle } from "./claude-delegate-lifecycle";
 import { ClaudeMessageProjector } from "./claude-message-projector";
 import { ClaudePromptChannel } from "./claude-prompt-channel";
+import { claudeResultUserMessageIds } from "./claude-follow-up-correlation";
 import { claudeQuestions } from "./claude-questions";
 import {
   claudePrompt,
@@ -811,13 +812,15 @@ function startClaudeRun(
         }
         if (message.type === "result") {
           if (message.subtype === "success" && pendingFollowUpIds.size > 0) {
-            const userMessageId = stringValue(record.user_message_uuid);
-            if (!userMessageId) {
+            const userMessageIds = claudeResultUserMessageIds(record);
+            if (userMessageIds.length === 0) {
               throw new Error(
                 "Claude returned a successful result without correlating an accepted follow-up.",
               );
             }
-            pendingFollowUpIds.delete(userMessageId);
+            for (const userMessageId of userMessageIds) {
+              pendingFollowUpIds.delete(userMessageId);
+            }
             if (pendingFollowUpIds.size > 0) {
               // Each streaming-input result ends one SDK user turn. Parent
               // snapshots from the next turn must not be suppressed by text

@@ -219,6 +219,21 @@ export type ClaudeAssistantRecoverySurface = Pick<
   | "resumed_from_incomplete_thinking"
   | "context_usage"
 >;
+export type ClaudeAssistantCorrelationSurface = Pick<
+  SDKAssistantMessage,
+  | "user_message_uuid"
+  | "user_message_uuids"
+>;
+export type ClaudePartialAssistantCorrelationSurface = Pick<
+  SDKPartialAssistantMessage,
+  | "user_message_uuid"
+  | "user_message_uuids"
+>;
+export type ClaudeResultCorrelationSurface = Pick<
+  SDKResultMessage,
+  | "user_message_uuid"
+  | "user_message_uuids"
+>;
 
 export const openCodeClient: OpencodeClient = createOpencodeClient({
   baseUrl: "http://127.0.0.1:9",

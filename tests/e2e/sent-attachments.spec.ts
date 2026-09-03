@@ -366,6 +366,7 @@ test("previews, validates, removes, and cleans up secure composer attachments", 
     electronApp,
   );
   let recoveryOperationError: unknown = null;
+  let recoveryOperationFailed = false;
   try {
     await electronApp.evaluate(() => {
       const runtime = Reflect.get(
@@ -389,10 +390,21 @@ test("previews, validates, removes, and cleans up secure composer attachments", 
         && runtimeGeneration !== beforeRuntimeGeneration;
     }, { timeout: 20_000 }).toBe(true);
   } catch (error) {
+    recoveryOperationFailed = true;
     recoveryOperationError = error;
   }
-  await restoreRuntimeRecoveryConsent();
-  if (recoveryOperationError) throw recoveryOperationError;
+  try {
+    await restoreRuntimeRecoveryConsent();
+  } catch (recoveryConsentError) {
+    if (recoveryOperationFailed) {
+      throw new AggregateError(
+        [recoveryOperationError, recoveryConsentError],
+        "Runtime recovery and recovery-consent restoration both failed.",
+      );
+    }
+    throw recoveryConsentError;
+  }
+  if (recoveryOperationFailed) throw recoveryOperationError;
   await expect(sentAttachments).toBeVisible();
   await expect.poll(() => sentPreview.evaluate((element) => {
     const image = element as HTMLImageElement;

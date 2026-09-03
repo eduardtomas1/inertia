@@ -30,6 +30,9 @@ export interface RuntimeTestSnapshot {
   generation: number;
   pid: number | null;
   websocketUrl: string | null;
+  restartAttempt: number;
+  restartScheduled: boolean;
+  lastError: string | null;
 }
 
 export interface AppFixture {

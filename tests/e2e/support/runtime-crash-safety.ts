@@ -39,13 +39,71 @@ interface RuntimeObservation {
 
 const RUNTIME_RECOVERY_DIALOG_RESTORE_TIMEOUT_MS = 5_000;
 
-class InterceptedRuntimeRecoveryError extends Error {
+interface RuntimeRecoveryPromptObservation {
+  readonly generation: number | null;
+  readonly phase: string | null;
+  readonly lastError: string | null;
+}
+
+interface RuntimeRecoveryErrorObservation {
+  readonly title: string;
+  readonly content: string;
+}
+
+export interface RuntimeRecoveryConsentDiagnostic {
+  readonly promptCount: number;
+  readonly prompts: readonly RuntimeRecoveryPromptObservation[];
+  readonly runtimeSnapshot: RuntimeTestSnapshot | null;
+  readonly recoveryError: {
+    readonly title: string;
+    readonly contentBytes: number;
+    readonly contentSha256: string;
+  } | null;
+}
+
+function consentDiagnostic(options: {
+  readonly promptCount: number;
+  readonly prompts: readonly RuntimeRecoveryPromptObservation[];
+  readonly runtimeSnapshot: RuntimeTestSnapshot | null;
+  readonly recoveryError: RuntimeRecoveryErrorObservation | null;
+}): RuntimeRecoveryConsentDiagnostic {
+  return {
+    promptCount: options.promptCount,
+    prompts: options.prompts,
+    runtimeSnapshot: options.runtimeSnapshot,
+    recoveryError: options.recoveryError
+      ? {
+          title: options.recoveryError.title,
+          contentBytes: Buffer.byteLength(options.recoveryError.content, "utf8"),
+          contentSha256: createHash("sha256")
+            .update(options.recoveryError.content)
+            .digest("hex"),
+        }
+      : null,
+  };
+}
+
+class RuntimeRecoveryConsentValidationError extends Error {
+  readonly diagnostic: RuntimeRecoveryConsentDiagnostic;
+
+  constructor(message: string, diagnostic: RuntimeRecoveryConsentDiagnostic) {
+    super(message);
+    this.name = "RuntimeRecoveryConsentValidationError";
+    this.diagnostic = diagnostic;
+  }
+}
+
+class InterceptedRuntimeRecoveryError extends RuntimeRecoveryConsentValidationError {
   readonly contentBytes: number;
   readonly contentSha256: string;
   readonly recoveryTitle: string;
 
-  constructor(title: string, content: string) {
-    super(`${title}: ${content}`);
+  constructor(
+    title: string,
+    content: string,
+    diagnostic: RuntimeRecoveryConsentDiagnostic,
+  ) {
+    super(`${title}: ${content}`, diagnostic);
     this.name = "InterceptedRuntimeRecoveryError";
     this.recoveryTitle = title;
     this.contentBytes = Buffer.byteLength(content, "utf8");
@@ -75,7 +133,7 @@ function diagnosticRead<T>(read: () => T): DiagnosticRead<T> {
   }
 }
 
-async function attachDarwinRecoverySafetyLockDiagnostic(
+export async function attachDarwinRecoverySafetyLockDiagnostic(
   testInfo: TestInfo,
   dataDirectory: string,
   priorGenerationId: string | null,
@@ -244,8 +302,15 @@ async function runtimeWebsocketUrl(page: AppFixture["page"]): Promise<string> {
 
 export async function installRuntimeRecoveryConsent(
   electronApp: AppFixture["electronApp"],
-): Promise<() => Promise<void>> {
-  if (process.platform !== "darwin") return async () => undefined;
+): Promise<() => Promise<RuntimeRecoveryConsentDiagnostic>> {
+  if (process.platform !== "darwin") {
+    return async () => ({
+      promptCount: 0,
+      prompts: [],
+      runtimeSnapshot: null,
+      recoveryError: null,
+    });
+  }
   await electronApp.evaluate(({ dialog }, recoveryErrorTitles) => {
     const owner = globalThis as typeof globalThis & {
       __inertiaOriginalRuntimeRecoveryMessageBox?: typeof dialog.showMessageBox;
@@ -315,62 +380,90 @@ export async function installRuntimeRecoveryConsent(
     "Legacy runtime recovery was not authorized",
   ]);
 
-  let restored = false;
-  return async () => {
-    if (restored) return;
-    restored = true;
-    const result = await settleOperationBounded(
-      Promise.resolve().then(() => electronApp.evaluate(({ dialog }) => {
-        const owner = globalThis as typeof globalThis & {
-          __inertiaOriginalRuntimeRecoveryMessageBox?: typeof dialog.showMessageBox;
-          __inertiaOriginalRuntimeRecoveryErrorBox?: typeof dialog.showErrorBox;
-          __inertiaRuntimeRecoveryError?: {
-            readonly title: string;
-            readonly content: string;
+  let restoration: Promise<RuntimeRecoveryConsentDiagnostic> | null = null;
+  return () => {
+    restoration ??= (async () => {
+      const result = await settleOperationBounded(
+        Promise.resolve().then(() => electronApp.evaluate(({ dialog }) => {
+          const owner = globalThis as typeof globalThis & {
+            __inertiaOriginalRuntimeRecoveryMessageBox?:
+              typeof dialog.showMessageBox;
+            __inertiaOriginalRuntimeRecoveryErrorBox?:
+              typeof dialog.showErrorBox;
+            __inertiaRuntimeRecoveryError?: {
+              readonly title: string;
+              readonly content: string;
+            };
+            __inertiaRuntimeRecoveryPromptCount?: number;
+            __inertiaRuntimeRecoveryPrompts?: Array<{
+              readonly generation: number | null;
+              readonly phase: string | null;
+              readonly lastError: string | null;
+            }>;
           };
-          __inertiaRuntimeRecoveryPromptCount?: number;
-          __inertiaRuntimeRecoveryPrompts?: Array<{
-            readonly generation: number | null;
-            readonly phase: string | null;
-            readonly lastError: string | null;
-          }>;
-        };
-        const originalMessageBox = owner.__inertiaOriginalRuntimeRecoveryMessageBox;
-        const originalErrorBox = owner.__inertiaOriginalRuntimeRecoveryErrorBox;
-        if (originalMessageBox) {
-          Reflect.set(dialog, "showMessageBox", originalMessageBox);
+          const originalMessageBox =
+            owner.__inertiaOriginalRuntimeRecoveryMessageBox;
+          const originalErrorBox = owner.__inertiaOriginalRuntimeRecoveryErrorBox;
+          if (originalMessageBox) {
+            Reflect.set(dialog, "showMessageBox", originalMessageBox);
+          }
+          if (originalErrorBox) {
+            Reflect.set(dialog, "showErrorBox", originalErrorBox);
+          }
+          const recoveryError = owner.__inertiaRuntimeRecoveryError ?? null;
+          const promptCount = owner.__inertiaRuntimeRecoveryPromptCount ?? 0;
+          const prompts = owner.__inertiaRuntimeRecoveryPrompts ?? [];
+          // Capture the supervisor state inside this already-bounded main
+          // evaluation. A second evaluate after a crash could leave another
+          // unresolved Playwright transport operation during fixture cleanup.
+          const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
+            snapshot?: () => RuntimeTestSnapshot | null;
+          } | undefined;
+          const runtimeSnapshot = runtime?.snapshot?.() ?? null;
+          delete owner.__inertiaOriginalRuntimeRecoveryMessageBox;
+          delete owner.__inertiaOriginalRuntimeRecoveryErrorBox;
+          delete owner.__inertiaRuntimeRecoveryError;
+          delete owner.__inertiaRuntimeRecoveryPromptCount;
+          delete owner.__inertiaRuntimeRecoveryPrompts;
+          return { promptCount, prompts, runtimeSnapshot, recoveryError };
+        })),
+        RUNTIME_RECOVERY_DIALOG_RESTORE_TIMEOUT_MS,
+      );
+      if (result.status === "fulfilled") {
+        const diagnostic = consentDiagnostic(result.value);
+        if (result.value.recoveryError) {
+          throw new InterceptedRuntimeRecoveryError(
+            result.value.recoveryError.title,
+            result.value.recoveryError.content,
+            diagnostic,
+          );
         }
-        if (originalErrorBox) Reflect.set(dialog, "showErrorBox", originalErrorBox);
-        const recoveryError = owner.__inertiaRuntimeRecoveryError ?? null;
-        const promptCount = owner.__inertiaRuntimeRecoveryPromptCount ?? 0;
-        const prompts = owner.__inertiaRuntimeRecoveryPrompts ?? [];
-        delete owner.__inertiaOriginalRuntimeRecoveryMessageBox;
-        delete owner.__inertiaOriginalRuntimeRecoveryErrorBox;
-        delete owner.__inertiaRuntimeRecoveryError;
-        delete owner.__inertiaRuntimeRecoveryPromptCount;
-        delete owner.__inertiaRuntimeRecoveryPrompts;
-        return { promptCount, prompts, recoveryError };
-      })),
-      RUNTIME_RECOVERY_DIALOG_RESTORE_TIMEOUT_MS,
-    );
-    if (result.status === "fulfilled" && result.value.recoveryError) {
-      throw new InterceptedRuntimeRecoveryError(
-        result.value.recoveryError.title,
-        result.value.recoveryError.content,
-      );
-    }
-    if (result.status === "fulfilled" && result.value.promptCount > 1) {
-      throw new Error(
-        `One deliberate crash required ${result.value.promptCount} explicit macOS runtime recovery decisions: ${JSON.stringify(result.value.prompts)}.`,
-      );
-    }
-    if (result.status === "rejected") {
-      throw new Error("The runtime recovery dialog could not be restored.");
-    }
-    if (result.status === "timed-out") {
+        if (result.value.promptCount > 1) {
+          throw new RuntimeRecoveryConsentValidationError(
+            `One deliberate crash required ${result.value.promptCount} explicit macOS runtime recovery decisions: ${JSON.stringify(result.value.prompts)}.`,
+            diagnostic,
+          );
+        }
+        return diagnostic;
+      }
+      if (result.status === "rejected") {
+        throw new Error(
+          "The runtime recovery dialog could not be restored.",
+          { cause: result.reason },
+        );
+      }
       throw new Error("The runtime recovery dialog did not restore in time.");
-    }
+    })();
+    return restoration;
   };
+}
+
+export function runtimeRecoveryConsentDiagnostic(
+  error: unknown,
+): RuntimeRecoveryConsentDiagnostic | null {
+  return error instanceof RuntimeRecoveryConsentValidationError
+    ? error.diagnostic
+    : null;
 }
 
 export async function expectRuntimeCrashRecovery(
@@ -697,6 +790,7 @@ export async function expectRuntimeCrashRecovery(
   let crashed: RuntimeTestSnapshot | null = null;
   let after: RuntimeTestSnapshot | null = null;
   let recoveryOperationError: unknown = null;
+  let recoveryOperationFailed = false;
   try {
     crashed = await electronApp.evaluate((_electron) => {
       const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
@@ -721,22 +815,39 @@ export async function expectRuntimeCrashRecovery(
     expect(after.phase).toBe("ready");
     expect(after.generation).toBeGreaterThan(before.generation);
   } catch (error) {
+    recoveryOperationFailed = true;
     recoveryOperationError = error;
   }
+  let recoveryConsentError: unknown = null;
+  let recoveryConsentFailed = false;
+  let recoveryConsent: RuntimeRecoveryConsentDiagnostic | null = null;
   try {
-    await restoreRuntimeRecoveryConsent();
+    recoveryConsent = await restoreRuntimeRecoveryConsent();
   } catch (error) {
-    if (testInfo) {
-      await attachDarwinRecoverySafetyLockDiagnostic(
-        testInfo,
-        dataDirectory,
-        priorLease?.runtimeGenerationId ?? null,
-        error,
-      ).catch(() => undefined);
-    }
-    throw error;
+    recoveryConsentFailed = true;
+    recoveryConsentError = error;
+    recoveryConsent = runtimeRecoveryConsentDiagnostic(error);
   }
-  if (recoveryOperationError) throw recoveryOperationError;
+  if ((recoveryOperationFailed || recoveryConsentFailed) && testInfo) {
+    await testInfo.attach("runtime recovery consent diagnostic", {
+      body: Buffer.from(JSON.stringify({ recoveryConsent }, null, 2), "utf8"),
+      contentType: "application/json",
+    }).catch(() => undefined);
+    await attachDarwinRecoverySafetyLockDiagnostic(
+      testInfo,
+      dataDirectory,
+      priorLease?.runtimeGenerationId ?? null,
+      recoveryConsentFailed ? recoveryConsentError : recoveryOperationError,
+    ).catch(() => undefined);
+  }
+  if (recoveryOperationFailed && recoveryConsentFailed) {
+    throw new AggregateError(
+      [recoveryOperationError, recoveryConsentError],
+      "Runtime recovery and recovery-consent restoration both failed.",
+    );
+  }
+  if (recoveryConsentFailed) throw recoveryConsentError;
+  if (recoveryOperationFailed) throw recoveryOperationError;
   if (!crashed || !after) {
     throw new Error("The runtime crash-recovery result was incomplete.");
   }

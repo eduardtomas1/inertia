@@ -8,7 +8,9 @@ import {
 } from "../../src/shared/model-routing";
 import { createAppFixture } from "./support/app-fixture";
 import {
+  attachDarwinRecoverySafetyLockDiagnostic,
   installRuntimeRecoveryConsent,
+  runtimeRecoveryConsentDiagnostic,
 } from "./support/runtime-crash-safety";
 import {
   ensureWorkspaceTools,
@@ -152,6 +154,8 @@ test("starts a sessionless goal and recovers it after Stop and runtime crash", {
     },
   });
 
+  let scenarioError: unknown = null;
+  let scenarioFailed = false;
   try {
     await app.resizeWindow(1280, 860);
     const { page } = app;
@@ -207,6 +211,12 @@ test("starts a sessionless goal and recovers it after Stop and runtime crash", {
     const restoreRuntimeRecoveryConsent = await installRuntimeRecoveryConsent(
       app.electronApp,
     );
+    let latestRendererObservation: {
+      connectionStatus: string | null;
+      runtimeGeneration: string | null;
+    } | null = null;
+    let recoveryOperationError: unknown = null;
+    let recoveryOperationFailed = false;
     try {
       await app.electronApp.evaluate(() => {
         const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
@@ -220,39 +230,64 @@ test("starts a sessionless goal and recovers it after Stop and runtime crash", {
       // the renderer contract instead: an Electron main-process evaluate is
       // not cancellable, so polling it across a deliberate utility crash can
       // poison the Playwright transport even after a Promise.race times out.
-      let latestRendererObservation: {
-        connectionStatus: string | null;
-        runtimeGeneration: string | null;
-      } | null = null;
-      try {
-        await expect.poll(async () => {
-          const [connectionStatus, runtimeGeneration] = await Promise.all([
-            shell.getAttribute("data-connection-status", { timeout: 500 })
-              .catch(() => null),
-            shell.getAttribute("data-runtime-generation", { timeout: 500 })
-              .catch(() => null),
-          ]);
-          latestRendererObservation = {
-            connectionStatus,
-            runtimeGeneration,
-          };
-          return connectionStatus === "online"
-            && runtimeGeneration !== null
-            && runtimeGeneration !== beforeRuntimeGeneration;
-        }, { timeout: 35_000 }).toBe(true);
-      } catch (error) {
-        await test.info().attach("goal runtime recovery diagnostic", {
-          body: Buffer.from(JSON.stringify({
-            beforeRuntimeGeneration,
-            latestRendererObservation,
-            rendererErrorCount: app.rendererErrors.length,
-          }, null, 2)),
-          contentType: "application/json",
-        });
-        throw error;
+      await expect.poll(async () => {
+        const [connectionStatus, runtimeGeneration] = await Promise.all([
+          shell.getAttribute("data-connection-status", { timeout: 500 })
+            .catch(() => null),
+          shell.getAttribute("data-runtime-generation", { timeout: 500 })
+            .catch(() => null),
+        ]);
+        latestRendererObservation = {
+          connectionStatus,
+          runtimeGeneration,
+        };
+        return connectionStatus === "online"
+          && runtimeGeneration !== null
+          && runtimeGeneration !== beforeRuntimeGeneration;
+      }, { timeout: 35_000 }).toBe(true);
+    } catch (error) {
+      recoveryOperationFailed = true;
+      recoveryOperationError = error;
+    }
+    let recoveryConsent = null as Awaited<ReturnType<
+      typeof restoreRuntimeRecoveryConsent
+    >> | null;
+    let recoveryConsentError: unknown = null;
+    let recoveryConsentFailed = false;
+    try {
+      recoveryConsent = await restoreRuntimeRecoveryConsent();
+    } catch (error) {
+      recoveryConsentFailed = true;
+      recoveryConsentError = error;
+      recoveryConsent = runtimeRecoveryConsentDiagnostic(error);
+    }
+    if (recoveryOperationFailed || recoveryConsentFailed) {
+      await test.info().attach("goal runtime recovery diagnostic", {
+        body: Buffer.from(JSON.stringify({
+          beforeRuntimeGeneration,
+          latestRendererObservation,
+          recoveryConsent,
+          rendererErrorCount: app.rendererErrors.length,
+          rendererErrors: app.rendererErrors.slice(-25),
+        }, null, 2)),
+        contentType: "application/json",
+      }).catch(() => undefined);
+      const recoveryError = recoveryOperationFailed
+        ? recoveryOperationError
+        : recoveryConsentError;
+      await attachDarwinRecoverySafetyLockDiagnostic(
+        test.info(),
+        join(app.testDirectory, "data"),
+        null,
+        recoveryConsentFailed ? recoveryConsentError : recoveryError,
+      ).catch(() => undefined);
+      if (recoveryOperationFailed && recoveryConsentFailed) {
+        throw new AggregateError(
+          [recoveryOperationError, recoveryConsentError],
+          "Runtime recovery and recovery-consent restoration both failed.",
+        );
       }
-    } finally {
-      await restoreRuntimeRecoveryConsent();
+      throw recoveryError;
     }
     expect(await page.evaluate(() =>
       Reflect.get(window, "__inertiaGoalNoReloadMarker"))).toBe(noReloadMarker);
@@ -282,7 +317,23 @@ test("starts a sessionless goal and recovers it after Stop and runtime crash", {
       .toBeVisible();
     await expectResumeGoalState(reloadedTools);
     expect(app.rendererErrors).toEqual([]);
-  } finally {
-    await app.close();
+  } catch (error) {
+    scenarioFailed = true;
+    scenarioError = error;
   }
+  // Fail-closed cleanup is independently authoritative. Retain both failures
+  // when recovery fails first, rather than replacing its evidence with the
+  // expected downstream cleanup refusal.
+  try {
+    await app.close();
+  } catch (cleanupError) {
+    if (scenarioFailed) {
+      throw new AggregateError(
+        [scenarioError, cleanupError],
+        "The goal reliability scenario failed and its Electron fixture did not close cleanly.",
+      );
+    }
+    throw cleanupError;
+  }
+  if (scenarioFailed) throw scenarioError;
 });

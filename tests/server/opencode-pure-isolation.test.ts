@@ -221,6 +221,17 @@ describe("selected OpenCode semantic isolation", () => {
       vi.fn(),
       { pluginObservationMs: 1 },
     )).resolves.toEqual({ cleanupConfirmed: false, verified: false });
+    const startsAfterCleanupFailure = proofFixture.starts.length;
+    const terminationsAfterCleanupFailure = proofFixture.terminateCalls;
+    await expect(probeOpenCodePureIsolation(
+      executable,
+      "1.18.26",
+      { env: process.env, pathEntries: [] },
+      vi.fn(),
+      { pluginObservationMs: 1 },
+    )).resolves.toEqual({ cleanupConfirmed: false, verified: false });
+    expect(proofFixture.starts).toHaveLength(startsAfterCleanupFailure);
+    expect(proofFixture.terminateCalls).toBe(terminationsAfterCleanupFailure);
   });
 
   it("bounds a version health request that never resolves and still cleans up", async () => {

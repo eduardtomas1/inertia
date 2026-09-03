@@ -34,6 +34,7 @@ const PROOF_TIMEOUT_MS = 10_000;
 const PLUGIN_OBSERVATION_MS = 5_000;
 const MAX_PROOF_CACHE_ENTRIES = 16;
 const proofCache = new Set<string>();
+const cleanupFailureCache = new Set<string>();
 const inFlightProofs = new Map<string, Promise<void>>();
 
 export interface OpenCodePureIsolationProof {
@@ -286,6 +287,7 @@ export const probeOpenCodePureIsolation: OpenCodePureIsolationProbe = async (
   terminateProcessTree,
   options,
 ) => {
+  let identity: string | undefined;
   try {
     if (!version) throw new Error("OpenCode did not report a usable version.");
     const observationMs = process.env.NODE_ENV === "test"
@@ -298,7 +300,10 @@ export const probeOpenCodePureIsolation: OpenCodePureIsolationProbe = async (
       && (options?.requestTimeoutMs ?? 0) > 0
       ? Math.min(options?.requestTimeoutMs ?? PROOF_TIMEOUT_MS, PROOF_TIMEOUT_MS)
       : PROOF_TIMEOUT_MS;
-    const identity = await executableIdentity(executable, version);
+    identity = await executableIdentity(executable, version);
+    if (cleanupFailureCache.has(identity)) {
+      return { cleanupConfirmed: false, verified: false };
+    }
     if (proofCache.has(identity)) {
       return { cleanupConfirmed: true, verified: true };
     }
@@ -332,6 +337,9 @@ export const probeOpenCodePureIsolation: OpenCodePureIsolationProbe = async (
     }
     return { cleanupConfirmed: true, verified: true };
   } catch (error) {
+    if (identity && error instanceof OpenCodePureIsolationCleanupError) {
+      cleanupFailureCache.add(identity);
+    }
     return {
       cleanupConfirmed: !(error instanceof OpenCodePureIsolationCleanupError),
       verified: false,

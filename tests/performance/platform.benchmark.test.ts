@@ -30,7 +30,7 @@ import { describe, expect, it } from "vitest";
 import { RuntimeStore } from "../../src/server/database";
 import { terminateProcessTreeAndWait } from "../../src/server/process-lifecycle";
 import { AgentHarnessRegistry, ProviderManager } from "../../src/server/providers";
-import { createCliAgentHarness } from "../../src/server/provider/cli-agent-harness";
+import { createLegacyCliAgentHarnessForTests } from "../../src/server/provider/cli-agent-harness";
 import {
   ProviderNdjsonDecoder,
   ProviderRunEventBudget,
@@ -622,10 +622,10 @@ setInterval(() => undefined, 1_000);
       turnId: `${conversationId}:turn`,
     };
     const textEvents: string[] = [];
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { claude: executable } },
       new AgentHarnessRegistry([
-        createCliAgentHarness("claude", { prefixArgs: [program] }),
+        createLegacyCliAgentHarnessForTests("claude", { prefixArgs: [program] }),
       ]),
     );
     const startedAt = performance.now();

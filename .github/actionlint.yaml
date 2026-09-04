@@ -1,0 +1,7 @@
+# actionlint 1.7.7 predates these GitHub-hosted runner labels. Listing them
+# here keeps typo detection strict for every other label while acknowledging
+# the two preview pools used by the six-target certification matrix.
+self-hosted-runner:
+  labels:
+    - macos-15-intel
+    - windows-11-arm

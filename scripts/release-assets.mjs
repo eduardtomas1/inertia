@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import { constants, createReadStream } from "node:fs";
 import { copyFile, lstat, mkdir, open, readFile, readdir, writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
@@ -12,6 +13,8 @@ const MAX_DOCUMENT_NODES = 256;
 const MAX_STRING_BYTES = 32 * 1024;
 const MAX_PACKAGED_MANIFEST_BYTES = 256 * 1024;
 const MAX_ASAR_HEADER_BYTES = 64 * 1024 * 1024;
+const MAX_SBOM_BYTES = 4 * 1024 * 1024;
+const MAX_SBOM_COMPONENTS = 4_096;
 const releaseChannel = process.env.INERTIA_RELEASE_CHANNEL ?? "stable";
 if (releaseChannel !== "stable" && releaseChannel !== "canary") {
   throw new Error("INERTIA_RELEASE_CHANNEL must be stable or canary.");
@@ -32,6 +35,10 @@ const releaseTag = process.env.RELEASE_TAG;
 const expectedReleaseTag = `${canary ? "canary-v" : "v"}${version}`;
 if (releaseTag !== expectedReleaseTag) {
   throw new Error(`RELEASE_TAG must exactly match package version ${expectedReleaseTag}.`);
+}
+const releaseSourceSha = process.env.RELEASE_SOURCE_SHA ?? "";
+if (!/^[0-9a-f]{40}$/u.test(releaseSourceSha)) {
+  throw new Error("RELEASE_SOURCE_SHA must be a canonical 40-hex commit SHA.");
 }
 
 const platformPolicies = {
@@ -112,6 +119,87 @@ const sharedMetadataByName = new Map(
 );
 
 const releaseSourceRoot = resolve(process.env.INERTIA_RELEASE_SOURCE_DIR ?? "release");
+
+async function generateReleaseSbom() {
+  const result = spawnSync(
+    "npm",
+    ["sbom", "--omit=dev", "--sbom-format", "cyclonedx"],
+    {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      maxBuffer: MAX_SBOM_BYTES,
+    },
+  );
+  if (result.error || result.status !== 0) {
+    throw new Error("The release dependency SBOM could not be generated.");
+  }
+  if (
+    typeof result.stdout !== "string"
+    || Buffer.byteLength(result.stdout, "utf8") <= 0
+    || Buffer.byteLength(result.stdout, "utf8") > MAX_SBOM_BYTES
+  ) throw new Error("The release dependency SBOM is empty or oversized.");
+  let document;
+  try {
+    document = JSON.parse(result.stdout);
+  } catch {
+    throw new Error("The release dependency SBOM is invalid JSON.");
+  }
+  if (
+    !isPlainRecord(document)
+    || document.bomFormat !== "CycloneDX"
+    || document.specVersion !== "1.5"
+    || document.version !== 1
+    || !isPlainRecord(document.metadata)
+    || !isPlainRecord(document.metadata.component)
+    || document.metadata.component.name !== packageJson.name
+    || document.metadata.component.version !== version
+    || !Array.isArray(document.components)
+    || document.components.length === 0
+    || document.components.length > MAX_SBOM_COMPONENTS
+    || !Array.isArray(document.dependencies)
+    || document.dependencies.length > MAX_SBOM_COMPONENTS
+    || (document.metadata.properties !== undefined
+      && !Array.isArray(document.metadata.properties))
+  ) throw new Error("The release dependency SBOM has an invalid identity or shape.");
+  const lockfileDigest = createHash("sha256")
+    .update(await readFile("package-lock.json"))
+    .digest("hex");
+  const electronManifest = JSON.parse(
+    await readFile("node_modules/electron/package.json", "utf8"),
+  );
+  if (
+    !isPlainRecord(electronManifest)
+    || electronManifest.name !== "electron"
+    || typeof electronManifest.version !== "string"
+    || !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?$/u
+      .test(electronManifest.version)
+  ) throw new Error("The release Electron build identity is invalid.");
+  const serialSeed = createHash("sha256")
+    .update("inertia.release-sbom-identity.v1\0", "utf8")
+    .update(JSON.stringify([releaseSourceSha, releaseTag, lockfileDigest]), "utf8")
+    .digest("hex");
+  const serial = serialSeed.slice(0, 32).split("");
+  serial[12] = "5";
+  serial[16] = ((Number.parseInt(serial[16], 16) & 0x3) | 0x8).toString(16);
+  document.serialNumber = `urn:uuid:${serial.slice(0, 8).join("")}-${serial.slice(8, 12).join("")}-${serial.slice(12, 16).join("")}-${serial.slice(16, 20).join("")}-${serial.slice(20).join("")}`;
+  delete document.metadata.timestamp;
+  document.metadata = {
+    ...document.metadata,
+    properties: [
+      ...(document.metadata.properties ?? []),
+      { name: "inertia:release-source-sha", value: releaseSourceSha },
+      { name: "inertia:release-tag", value: releaseTag },
+      { name: "inertia:package-lock-sha256", value: lockfileDigest },
+      { name: "inertia:node-version", value: process.version },
+      { name: "inertia:electron-version", value: electronManifest.version },
+    ],
+  };
+  const bytes = Buffer.from(`${JSON.stringify(document, null, 2)}\n`, "utf8");
+  if (bytes.byteLength > MAX_SBOM_BYTES) {
+    throw new Error("The annotated release dependency SBOM is oversized.");
+  }
+  return bytes;
+}
 
 function releaseSource(name) {
   return join(releaseSourceRoot, name);
@@ -476,7 +564,7 @@ async function readArtifactManifest(path, platform) {
   if (!isPlainRecord(manifest)) throw new Error(`Invalid ${platform} artifact manifest.`);
   assertExactKeys(
     manifest,
-    new Set(["version", "tag", "channel", "platform", "updateCapability", "assets"]),
+    new Set(["version", "tag", "channel", "platform", "sourceSha", "updateCapability", "assets"]),
     "Artifact manifest",
   );
   if (
@@ -487,6 +575,9 @@ async function readArtifactManifest(path, platform) {
     || !Array.isArray(manifest.assets)
   ) {
     throw new Error(`Invalid ${platform} artifact manifest.`);
+  }
+  if (manifest.sourceSha !== releaseSourceSha) {
+    throw new Error(`${platform} artifact source SHA does not match the frozen release commit.`);
   }
   const updateCapability = validateUpdateCapability(
     manifest.updateCapability,
@@ -528,6 +619,7 @@ if (command === "stage") {
       tag: releaseTag,
       channel: releaseChannel,
       platform,
+      sourceSha: releaseSourceSha,
       updateCapability,
       assets,
     }, null, 2)}\n`,
@@ -624,6 +716,13 @@ if (command === "stage") {
     combined.push(actual);
     combinedNames.add(actual.name);
   }
+  const sbomName = `Inertia-${version}.sbom.cdx.json`;
+  assertSafeAssetName(sbomName, "Release SBOM");
+  const sbomPath = join(finalDirectory, sbomName);
+  await writeFile(sbomPath, await generateReleaseSbom(), { flag: "wx" });
+  const sbomMetadata = await fileMetadata(sbomPath);
+  combined.push(sbomMetadata);
+  combinedNames.add(sbomMetadata.name);
   combined.sort((left, right) => left.name.localeCompare(right.name, "en"));
   await writeFile(
     join(finalDirectory, "SHA256SUMS.txt"),

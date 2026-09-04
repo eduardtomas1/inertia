@@ -4,8 +4,10 @@ import { readFileSync } from "node:fs";
 const tag = process.env.RELEASE_TAG ?? "";
 const releaseRef = process.env.RELEASE_REF ?? "";
 const eventSha = (process.env.RELEASE_EVENT_SHA ?? "").toLowerCase();
+const expectedCommit = process.env.RELEASE_EXPECTED_COMMIT ?? "";
 const releaseTagPattern = /^(canary-)?v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u;
 const gitObjectPattern = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u;
+const commitPattern = /^[0-9a-f]{40}$/u;
 
 function fail(message) {
   throw new Error(`Release integrity check failed: ${message}`);
@@ -16,8 +18,9 @@ function git(...arguments_) {
 }
 
 if (!releaseTagPattern.test(tag)) fail("the event tag is not a strict stable or Canary version tag");
-if (releaseRef !== `refs/tags/${tag}`) fail("GITHUB_REF does not identify the validated tag");
+if (releaseRef !== `refs/tags/${tag}`) fail("RELEASE_REF does not identify the validated tag");
 if (!gitObjectPattern.test(eventSha)) fail("the event SHA is not a Git object ID");
+if (!commitPattern.test(expectedCommit)) fail("the frozen release commit is not a canonical 40-hex SHA");
 
 const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
 const packageLock = JSON.parse(readFileSync("package-lock.json", "utf8"));
@@ -32,7 +35,8 @@ if (packageLock.version !== packageJson.version || packageLock.packages?.[""]?.v
 const headCommit = git("rev-parse", "--verify", "HEAD^{commit}");
 const tagObject = git("rev-parse", "--verify", `refs/tags/${tag}`);
 const tagCommit = git("rev-parse", "--verify", `refs/tags/${tag}^{commit}`);
-if (headCommit !== tagCommit) fail("checked-out HEAD is not the commit peeled from the release tag");
+if (headCommit !== expectedCommit) fail("checked-out HEAD does not equal the frozen release commit");
+if (tagCommit !== expectedCommit) fail("the release tag no longer points to the frozen release commit");
 if (eventSha !== tagObject && eventSha !== tagCommit) fail("the event SHA identifies neither the tag object nor its peeled commit");
 if (git("status", "--porcelain") !== "") fail("the exact-tag checkout is not clean");
 

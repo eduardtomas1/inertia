@@ -20,8 +20,46 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  release_identity:
+    name: Resolve immutable release identity
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    defaults:
+      run:
+        shell: bash
+    outputs:
+      release_sha: ${{ steps.freeze.outputs.release_sha }}
+    steps:
+      - name: Check out requested release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate and freeze release commit
+        id: freeze
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+          PUSH_EVENT_SHA: ${{ github.event_name == 'push' && github.sha || '' }}
+        run: |
+          set -euo pipefail
+          release_ref="refs/tags/$RELEASE_TAG"
+          release_sha="$(git rev-parse --verify "${release_ref}^{commit}")"
+          if [[ ! "$release_sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "The resolved release commit is not a canonical 40-hex SHA." >&2
+            exit 1
+          fi
+          event_sha="${PUSH_EVENT_SHA:-$release_sha}"
+          RELEASE_REF="$release_ref" \
+            RELEASE_EVENT_SHA="$event_sha" \
+            RELEASE_EXPECTED_COMMIT="$release_sha" \
+            node scripts/validate-release.mjs
+          printf 'release_sha=%s\n' "$release_sha" >> "$GITHUB_OUTPUT"
+
   build:
     name: Build ${{ matrix.label }}
+    needs: release_identity
     runs-on: ${{ matrix.runner }}
     timeout-minutes: ${{ matrix.timeout_minutes }}
     defaults:
@@ -35,21 +73,21 @@ jobs:
             runner: macos-15-intel
             platform: macos-x64
             arch: x64
-            dist_script: dist:release:mac:x64
+            package_script: package:release:mac:x64
             timeout_minutes: 55
             app_path: release/mac/Inertia.app
           - label: macOS arm64
             runner: macos-15
             platform: macos-arm64
             arch: arm64
-            dist_script: dist:release:mac
+            package_script: package:release:mac
             timeout_minutes: 50
             app_path: release/mac-arm64/Inertia.app
           - label: Windows x64
             runner: windows-2025
             platform: windows-x64
             arch: x64
-            dist_script: dist:release:win
+            package_script: package:release:win
             timeout_minutes: 60
             app_path: release/win-unpacked/Inertia.exe
             windows_asset_suffix: ""
@@ -57,7 +95,7 @@ jobs:
             runner: windows-11-arm
             platform: windows-arm64
             arch: arm64
-            dist_script: dist:release:win:arm64
+            package_script: package:release:win:arm64
             timeout_minutes: 75
             app_path: release/win-arm64-unpacked/Inertia.exe
             windows_asset_suffix: .arm64
@@ -65,7 +103,7 @@ jobs:
             runner: ubuntu-24.04
             platform: linux-x64
             arch: x64
-            dist_script: dist:release:linux
+            package_script: package:release:linux
             timeout_minutes: 55
             app_path: release/linux-unpacked/inertia
             unpacked_dir: release/linux-unpacked
@@ -74,7 +112,7 @@ jobs:
             runner: ubuntu-24.04-arm
             platform: linux-arm64
             arch: arm64
-            dist_script: dist:release:linux:arm64
+            package_script: package:release:linux:arm64
             timeout_minutes: 65
             app_path: release/linux-arm64-unpacked/inertia
             unpacked_dir: release/linux-arm64-unpacked
@@ -82,12 +120,16 @@ jobs:
     env:
       CI: "true"
       INERTIA_RELEASE_CHANNEL: ${{ startsWith(inputs.release_tag || github.ref_name, 'canary-v') && 'canary' || 'stable' }}
+      RELEASE_SOURCE_SHA: ${{ needs.release_identity.outputs.release_sha }}
+      INERTIA_BENCHMARK_REPORT: performance-results/platform-${{ matrix.platform }}.json
+      INERTIA_DESKTOP_BENCHMARK_REPORT: performance-results/desktop-${{ matrix.platform }}.json
+      INERTIA_PACKAGE_BENCHMARK_REPORT: performance-results/package-${{ matrix.platform }}.json
 
     steps:
-      - name: Check out exact release tag
+      - name: Check out frozen release commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.release_tag || github.ref }}
+          ref: ${{ needs.release_identity.outputs.release_sha }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -95,16 +137,17 @@ jobs:
         env:
           RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
           PUSH_EVENT_SHA: ${{ github.event_name == 'push' && github.sha || '' }}
+          RELEASE_EXPECTED_COMMIT: ${{ needs.release_identity.outputs.release_sha }}
         run: |
           set -euo pipefail
           release_ref="refs/tags/$RELEASE_TAG"
-          event_sha="${PUSH_EVENT_SHA:-$(git rev-parse "$release_ref")}"
+          event_sha="${PUSH_EVENT_SHA:-$RELEASE_EXPECTED_COMMIT}"
           RELEASE_REF="$release_ref" RELEASE_EVENT_SHA="$event_sha" node scripts/validate-release.mjs
 
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22
+          node-version: 22.23.2
           cache: npm
           cache-dependency-path: package-lock.json
 
@@ -122,15 +165,24 @@ jobs:
           INERTIA_EXPECTED_ARCH: ${{ matrix.arch }}
         run: npm run test:native-architecture
 
-      - name: Typecheck, unit test, and build
-        run: npm run check
+      - name: Run release-candidate platform performance guard
+        run: npm run benchmark:platform:smoke
 
-      - name: Run portable runtime and provider protocol suite
-        run: npm run test:portable
+      - name: Verify quality and run the complete unit suite
+        run: npm run check:quality && npm test
 
-      - name: Refresh Windows app bundle after portable helper rebuild
-        if: runner.os == 'Windows'
-        run: npm run build:bundle
+      # Package and every subsequent smoke consume this exact bundle. The
+      # package commands below deliberately do not rebuild it.
+      - name: Build the release application bundle once
+        run: npm run build:packaged
+
+      - name: Measure release-candidate desktop workloads
+        if: runner.os != 'Linux'
+        run: npm run benchmark:desktop:built
+
+      - name: Measure release-candidate desktop workloads under Xvfb
+        if: runner.os == 'Linux'
+        run: xvfb-run --auto-servernum npm run benchmark:desktop:built
 
       - name: Audit production dependencies
         if: runner.os == 'Linux'
@@ -166,7 +218,7 @@ jobs:
       - name: Build macOS release package
         if: runner.os == 'macOS'
         env:
-          DIST_SCRIPT: ${{ matrix.dist_script }}
+          PACKAGE_SCRIPT: ${{ matrix.package_script }}
           INERTIA_RELEASE_PLATFORM: ${{ matrix.platform }}
           CSC_LINK: ${{ secrets.MACOS_CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.MACOS_CSC_KEY_PASSWORD }}
@@ -179,12 +231,12 @@ jobs:
               unset "$name"
             fi
           done
-          npm run "$DIST_SCRIPT"
+          npm run "$PACKAGE_SCRIPT"
 
       - name: Build Windows release package
         if: runner.os == 'Windows'
         env:
-          DIST_SCRIPT: ${{ matrix.dist_script }}
+          PACKAGE_SCRIPT: ${{ matrix.package_script }}
           INERTIA_RELEASE_PLATFORM: ${{ matrix.platform }}
           WIN_CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
           WIN_CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
@@ -195,14 +247,14 @@ jobs:
               unset "$name"
             fi
           done
-          npm run "$DIST_SCRIPT"
+          npm run "$PACKAGE_SCRIPT"
 
       - name: Build Linux release package
         if: runner.os == 'Linux'
         env:
-          DIST_SCRIPT: ${{ matrix.dist_script }}
+          PACKAGE_SCRIPT: ${{ matrix.package_script }}
           INERTIA_RELEASE_PLATFORM: ${{ matrix.platform }}
-        run: npm run "$DIST_SCRIPT"
+        run: npm run "$PACKAGE_SCRIPT"
 
       - name: Validate Linux AppImage identity, icons, and runtime resource
         if: runner.os == 'Linux'
@@ -365,6 +417,15 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      - name: Keep release benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-performance-${{ matrix.platform }}
+          path: performance-results
+          if-no-files-found: warn
+          retention-days: 14
+
       - name: Keep failure diagnostics
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -376,7 +437,7 @@ jobs:
 
   upload:
     name: Publish exact-tag release
-    needs: build
+    needs: [release_identity, build]
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     permissions:
@@ -388,12 +449,13 @@ jobs:
         shell: bash
     env:
       INERTIA_RELEASE_CHANNEL: ${{ startsWith(inputs.release_tag || github.ref_name, 'canary-v') && 'canary' || 'stable' }}
+      RELEASE_SOURCE_SHA: ${{ needs.release_identity.outputs.release_sha }}
 
     steps:
-      - name: Check out exact release tag
+      - name: Check out frozen release commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.release_tag || github.ref }}
+          ref: ${{ needs.release_identity.outputs.release_sha }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -401,16 +463,17 @@ jobs:
         env:
           RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
           PUSH_EVENT_SHA: ${{ github.event_name == 'push' && github.sha || '' }}
+          RELEASE_EXPECTED_COMMIT: ${{ needs.release_identity.outputs.release_sha }}
         run: |
           set -euo pipefail
           release_ref="refs/tags/$RELEASE_TAG"
-          event_sha="${PUSH_EVENT_SHA:-$(git rev-parse "$release_ref")}"
+          event_sha="${PUSH_EVENT_SHA:-$RELEASE_EXPECTED_COMMIT}"
           RELEASE_REF="$release_ref" RELEASE_EVENT_SHA="$event_sha" node scripts/validate-release.mjs
 
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22
+          node-version: 22.23.2
           cache: npm
           cache-dependency-path: package-lock.json
 
@@ -655,7 +718,7 @@ jobs:
 
   publish-canary-feed:
     name: Publish atomic Canary feed
-    needs: upload
+    needs: [release_identity, upload]
     if: ${{ startsWith(inputs.release_tag || github.ref_name, 'canary-v') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -665,12 +728,23 @@ jobs:
       run:
         shell: bash
     steps:
-      - name: Check out exact release implementation
+      - name: Check out frozen release implementation
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.release_tag || github.ref }}
-          fetch-depth: 1
+          ref: ${{ needs.release_identity.outputs.release_sha }}
+          fetch-depth: 0
           persist-credentials: false
+
+      - name: Revalidate exact tag and commit
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+          PUSH_EVENT_SHA: ${{ github.event_name == 'push' && github.sha || '' }}
+          RELEASE_EXPECTED_COMMIT: ${{ needs.release_identity.outputs.release_sha }}
+        run: |
+          set -euo pipefail
+          release_ref="refs/tags/$RELEASE_TAG"
+          event_sha="${PUSH_EVENT_SHA:-$RELEASE_EXPECTED_COMMIT}"
+          RELEASE_REF="$release_ref" RELEASE_EVENT_SHA="$event_sha" node scripts/validate-release.mjs
 
       - name: Download exact Canary feed metadata
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1

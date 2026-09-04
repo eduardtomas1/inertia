@@ -14,8 +14,13 @@ const packageJson = JSON.parse(await readFile(join(root, "package.json"), "utf8"
   name: string;
   version: string;
 };
+const electronVersion = (JSON.parse(
+  await readFile(join(root, "node_modules/electron/package.json"), "utf8"),
+) as { version: string }).version;
 const version = packageJson.version;
 const releaseTag = `v${version}`;
+const releaseSourceSha = "1".repeat(40);
+const releaseSbomName = `Inertia-${version}.sbom.cdx.json`;
 const temporaryDirectories = new Set<string>();
 const require = createRequire(import.meta.url);
 
@@ -247,6 +252,7 @@ function runReleaseAssets(
     env: {
       ...process.env,
       RELEASE_TAG: releaseTag,
+      RELEASE_SOURCE_SHA: releaseSourceSha,
       ...environment,
     },
   });
@@ -266,9 +272,10 @@ async function expectExactUnsignedAssetUnion(
     ...Object.values(selectedPolicies).flatMap((policy) => policy.packages),
     channel === "canary" ? "canary-linux.yml" : "latest-linux.yml",
     channel === "canary" ? "canary-linux-arm64.yml" : "latest-linux-arm64.yml",
+    releaseSbomName,
     "SHA256SUMS.txt",
   ].sort();
-  expect(expected).toHaveLength(11);
+  expect(expected).toHaveLength(12);
 
   const entries = (await readdir(finalDirectory)).sort();
   expect(entries).toEqual(expected);
@@ -344,6 +351,7 @@ describe("release asset staging", () => {
         policy.metadata,
         ...policy.companions,
       ]),
+      releaseSbomName,
       "SHA256SUMS.txt",
     ])].sort());
     for (const [metadata, platforms] of [
@@ -426,11 +434,43 @@ describe("release asset staging", () => {
         policy.metadata,
         ...policy.companions,
       ]),
+      releaseSbomName,
       "SHA256SUMS.txt",
     ])].sort();
     expect(entries).toEqual(expected);
     const checksums = await readFile(join(stageRoot, "final", "SHA256SUMS.txt"), "utf8");
     expect(checksums.trim().split("\n")).toHaveLength(expected.length - 1);
+
+    const sbom = JSON.parse(
+      await readFile(join(stageRoot, "final", releaseSbomName), "utf8"),
+    ) as {
+      bomFormat: string;
+      serialNumber: string;
+      metadata: {
+        component: { name: string; version: string };
+        properties: Array<{ name: string; value: string }>;
+        timestamp?: string;
+      };
+    };
+    expect(sbom.bomFormat).toBe("CycloneDX");
+    expect(sbom.serialNumber).toMatch(
+      /^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
+    );
+    expect(sbom.metadata).not.toHaveProperty("timestamp");
+    expect(sbom.metadata.component).toMatchObject({
+      name: packageJson.name,
+      version,
+    });
+    expect(sbom.metadata.properties).toEqual(expect.arrayContaining([
+      { name: "inertia:release-source-sha", value: releaseSourceSha },
+      { name: "inertia:release-tag", value: releaseTag },
+      {
+        name: "inertia:package-lock-sha256",
+        value: expect.stringMatching(/^[0-9a-f]{64}$/u),
+      },
+      { name: "inertia:node-version", value: process.version },
+      { name: "inertia:electron-version", value: electronVersion },
+    ]));
 
     const macMetadata = parse(
       await readFile(join(stageRoot, "final", "latest-mac.yml"), "utf8"),
@@ -541,11 +581,52 @@ describe("release asset staging", () => {
     ]);
     const manifest = JSON.parse(
       await readFile(join(stageRoot, "windows-x64", "manifest.json"), "utf8"),
-    ) as { updateCapability: unknown };
+    ) as { sourceSha: string; updateCapability: unknown };
+    expect(manifest.sourceSha).toBe(releaseSourceSha);
     expect(manifest.updateCapability).toEqual({
       delivery: "manual",
       reason: "windows-signing-unavailable",
     });
+  });
+
+  it("rejects a non-canonical release source commit", () => {
+    const result = runReleaseAssets(["stage", "linux-x64"], {
+      RELEASE_SOURCE_SHA: "not-a-commit",
+    });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
+      "RELEASE_SOURCE_SHA must be a canonical 40-hex commit SHA",
+    );
+  });
+
+  it("rejects staged artifacts from a different frozen release commit", async () => {
+    const fixtureRoot = await temporaryDirectory();
+    const sourceRoot = join(fixtureRoot, "source");
+    const stageRoot = join(fixtureRoot, "stage");
+    await mkdir(sourceRoot);
+    for (const platform of Object.keys(policies) as Array<keyof typeof policies>) {
+      await writeFixture(sourceRoot, platform);
+      const staged = runReleaseAssets(["stage", platform], {
+        INERTIA_RELEASE_SOURCE_DIR: sourceRoot,
+        INERTIA_RELEASE_STAGE_DIR: stageRoot,
+      });
+      expect(staged.status, staged.stderr).toBe(0);
+    }
+
+    const manifestPath = join(stageRoot, "linux-arm64", "manifest.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as {
+      sourceSha: string;
+    };
+    manifest.sourceSha = "2".repeat(40);
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+    const finalized = runReleaseAssets(["finalize"], {
+      INERTIA_RELEASE_DOWNLOAD_DIR: stageRoot,
+    });
+    expect(finalized.status).not.toBe(0);
+    expect(finalized.stderr).toContain(
+      "linux-arm64 artifact source SHA does not match the frozen release commit",
+    );
   });
 
   it("requires publisher identity only for signed Windows update channels", async () => {

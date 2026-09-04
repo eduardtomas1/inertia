@@ -1,4 +1,6 @@
-import { readFile, readdir } from "node:fs/promises";
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -28,6 +30,15 @@ function workflowMatrixEntry(workflow: string, label: string): string {
     throw new Error(`Unbounded CI matrix entry for ${label}.`);
   }
   return workflow.slice(start, Math.min(...boundaries));
+}
+
+function workflowJob(workflow: string, id: string): string {
+  const marker = `\n  ${id}:\n`;
+  const start = workflow.indexOf(marker);
+  if (start < 0) throw new Error(`Missing CI job ${id}.`);
+  const remainder = workflow.slice(start + marker.length);
+  const next = remainder.search(/^  [A-Za-z0-9_-]+:\s*$/mu);
+  return workflow.slice(start, next < 0 ? undefined : start + marker.length + next);
 }
 
 describe("cross-platform packaged behavior contract", () => {
@@ -196,6 +207,48 @@ describe("cross-platform packaged behavior contract", () => {
     }
   });
 
+  it("keeps a compact every-PR tier and fail-open full certification", async () => {
+    const workflow = await source(".github/workflows/ci.yml");
+    expect(workflow).toContain("merge_group:");
+    expect(workflow).toContain('cron: "17 3 * * *"');
+    expect(workflow).toContain("node scripts/ci/change-classifier.mjs");
+
+    const linuxCore = workflowJob(workflow, "pr-linux-core");
+    expect(linuxCore).toContain("if: github.event_name == 'pull_request'");
+    expect(linuxCore).toContain("run: npm run test:coverage");
+    expect(linuxCore).not.toContain("run: npm run test:portable");
+
+    const linuxLifecycle = workflowJob(workflow, "pr-linux-lifecycle");
+    expect(linuxLifecycle).toContain("runs-on: ubuntu-24.04");
+    expect(linuxLifecycle).toContain("tests/main/app-update-handoff.test.ts");
+    expect(linuxLifecycle).toContain("tests/main/appimage-installed-identity.test.ts");
+    expect(linuxLifecycle).toContain("--project=runtime-recovery");
+    expect(linuxLifecycle).toContain("run: npm run package:linux");
+    expect(linuxLifecycle).toContain("run: npm run validate:linux-package");
+
+    const windowsLifecycle = workflowJob(workflow, "pr-windows-lifecycle");
+    expect(windowsLifecycle).toContain("runs-on: windows-2025");
+    expect(windowsLifecycle).toContain("tests/main/windows-runtime-job.test.ts");
+    expect(windowsLifecycle).toContain(
+      "tests/main/runtime-supervisor-windows-tree-recovery.test.ts",
+    );
+    expect(windowsLifecycle).toContain("--project=runtime-recovery");
+
+    const macosLifecycle = workflowJob(workflow, "pr-macos-lifecycle");
+    expect(macosLifecycle).toContain("runs-on: macos-15");
+    expect(macosLifecycle).toContain("tests/main/runtime-live-darwin-recovery.test.ts");
+    expect(macosLifecycle).toContain("tests/main/terminal-darwin-shutdown.test.ts");
+    expect(macosLifecycle).toContain("--project=runtime-recovery");
+
+    for (const jobId of ["test", "windows-unit"]) {
+      const certification = workflowJob(workflow, jobId);
+      expect(certification).toContain("github.event_name != 'pull_request'");
+      expect(certification).toContain(
+        "needs.classify.outputs.full_certification == 'true'",
+      );
+    }
+  });
+
   it("proves quality once and keeps every platform's unit signal sharded or explicit", async () => {
     const workflow = await source(".github/workflows/ci.yml");
 
@@ -206,7 +259,8 @@ describe("cross-platform packaged behavior contract", () => {
       "Verify migrations, architecture, lint, and types",
     );
     expect(qualityGate).toContain("run: npm run check:quality");
-    expect(workflow.match(/^ {4}needs: gate$/gmu)).toHaveLength(3);
+    expect(workflow.match(/^ {4}needs: gate$/gmu)).toHaveLength(1);
+    expect(workflow.match(/needs: \[classify, gate\]/gu)).toHaveLength(6);
 
     // macOS is the only platform whose unit signal is a plain suite run: Linux
     // gets the same suite through coverage, and Windows gets it sharded.
@@ -221,15 +275,15 @@ describe("cross-platform packaged behavior contract", () => {
     expect(linuxUnits).toContain("if: runner.os == 'Linux'");
     expect(linuxUnits).toContain("run: npm run test:coverage");
 
-    // The sharded windows-2025 job already runs the whole suite, so the x64
-    // matrix entry must not repeat the portable subset. ARM64 has no sharded
-    // job and therefore keeps it as its only Windows unit signal.
+    // Linux coverage, macOS units, and the sharded Windows x64 job already run
+    // the marked tests. ARM64 has no complete Windows unit job, so only that
+    // matrix entry keeps the generated portable subset.
     const portable = workflowStep(
       workflow,
-      "Run portable runtime and provider protocol suite",
+      "Run Windows ARM64 portable runtime and provider protocol suite",
     );
     expect(portable).toContain(
-      "if: runner.os != 'Windows' || matrix.arch != 'x64'",
+      "if: runner.os == 'Windows' && matrix.arch == 'arm64'",
     );
     expect(portable).toContain("run: npm run test:portable");
 
@@ -259,15 +313,15 @@ describe("cross-platform packaged behavior contract", () => {
     expect(workflow).toContain("timeout-minutes: 30");
     expect(workflow).toContain("shard: [1, 2, 3, 4]");
     expect(workflow).toContain(
-      "run: npm test -- --shard=${{ matrix.shard }}/4",
+      "run: npm run test:windows:shard -- --shard=${{ matrix.shard }}/4",
     );
 
     // Real-time scanning dominates hosted Windows install and fixture cost, so
-    // both Windows jobs exclude the throwaway workspace without being able to
+    // all Windows jobs exclude the throwaway workspace without being able to
     // fail the run if the cmdlet is unavailable.
     expect(workflow.match(/Exclude the workspace from Microsoft Defender/gu))
-      .toHaveLength(2);
-    expect(workflow.match(/Add-MpPreference -ExclusionPath/gu)).toHaveLength(4);
+      .toHaveLength(3);
+    expect(workflow.match(/Add-MpPreference -ExclusionPath/gu)).toHaveLength(6);
 
     const packageJson = JSON.parse(await source("package.json")) as {
       build: { files: string[] };
@@ -310,6 +364,12 @@ describe("cross-platform packaged behavior contract", () => {
     // Keep the provider regressions that arrived on main while this CI work
     // was in flight. A conflict resolution must not silently narrow the
     // portable protocol surface.
+    expect(packageJson.scripts["test:portable"]).toBe(
+      "node scripts/ci/run-portable-tests.mjs",
+    );
+    const portableRunner = await source("scripts/ci/run-portable-tests.mjs");
+    expect(portableRunner).toContain("discoverPortableTests");
+    expect(portableRunner).toContain('"--maxWorkers=1"');
     for (const portableTest of [
       "tests/server/codex-app-server-subagent-continuation.test.ts",
       "tests/server/opencode-descendant-completion.test.ts",
@@ -317,13 +377,20 @@ describe("cross-platform packaged behavior contract", () => {
       "tests/server/opencode-interactions.test.ts",
       "tests/server/opencode-sdk-harness.test.ts",
     ]) {
-      expect(packageJson.scripts["test:portable"]).toContain(portableTest);
+      expect(await source(portableTest)).toMatch(
+        /^\/\/ @inertia-test-suite portable\r?\n/u,
+      );
     }
 
     // These suites read the generated guardian, so each one builds it through
     // its own npm pre-hook rather than depending on an earlier CI step having
     // happened to build it first.
-    for (const hook of ["pretest", "pretest:coverage", "pretest:portable"]) {
+    for (const hook of [
+      "pretest",
+      "pretest:coverage",
+      "pretest:portable",
+      "pretest:windows:shard",
+    ]) {
       expect(packageJson.scripts[hook]).toBe(
         "node scripts/build-runtime-process-guardian.mjs",
       );
@@ -350,7 +417,7 @@ describe("cross-platform packaged behavior contract", () => {
     );
     expect(minimumRuntime).toContain("run: npm ci --engine-strict");
     expect(workflow.match(/uses: \.\/\.github\/actions\/install-dependencies/gu))
-      .toHaveLength(3);
+      .toHaveLength(7);
 
     const vitest = await source("vitest.config.ts");
     expect(vitest).toContain("maxWorkers: isWindowsCi ? 1 : undefined");
@@ -533,7 +600,12 @@ describe("cross-platform packaged behavior contract", () => {
     const runtimeFork = main.slice(runtimeForkStart, runtimeForkStart + 500);
     expect(runtimeForkStart).toBeGreaterThanOrEqual(0);
     expect(runtimeFork).toContain("env: runtimeBootstrap.runtimeProcessEnvironment(),");
-    expect(main.match(/timestampMs: Date\.now\(\)/gu)).toHaveLength(2);
+    const packageSmokeEnvironment = await source(
+      "src/main/package-smoke-environment.ts",
+    );
+    expect(`${main}\n${packageSmokeEnvironment}`.match(
+      /timestampMs: Date\.now\(\)/gu,
+    )).toHaveLength(2);
     expect(main).toContain("packageSmokePdf:");
     expect(main).toContain("waitForRequestedPackageSmokeResults({");
     const results = await source("src/main/package-smoke-results.ts");
@@ -610,6 +682,7 @@ describe("cross-platform packaged behavior contract", () => {
 
   it("keeps attachment cleanup behind runtime ownership and shutdown", async () => {
     const main = await source("src/main/index.ts");
+    const updateStartup = await source("src/main/app-update-startup.ts");
     const closedStart = main.indexOf('window.on("closed"');
     const closedEnd = main.indexOf("\n  });", closedStart);
     const closedHandler = main.slice(closedStart, closedEnd);
@@ -655,11 +728,11 @@ describe("cross-platform packaged behavior contract", () => {
       cleanupSequence.indexOf("options.disposeTemporaryAttachments()"),
     );
     expect(cleanupSequence).toContain("if (runtimeExitConfirmed)");
-    const quitStart = main.indexOf('app.on("before-quit"');
-    const quitEnd = main.indexOf("\n  });", quitStart);
-    const quitHandler = main.slice(quitStart, quitEnd);
-    expect(quitHandler).toContain("appUpdateInstallCoordinator?.allowBeforeQuit()");
-    expect(quitHandler).toContain("runPrivilegedCleanup().then(");
+    const quitStart = updateStartup.indexOf('application.on("before-quit"');
+    const quitEnd = updateStartup.indexOf("\n  });", quitStart);
+    const quitHandler = updateStartup.slice(quitStart, quitEnd);
+    expect(quitHandler).toContain("coordinator?.allowBeforeQuit()");
+    expect(quitHandler).toContain("options.cleanupBeforeQuit().then(");
     expect(quitHandler).toContain("finishNormalShutdownAfterCleanup({");
     expect(quitHandler).toContain("cleanupConfirmed,");
     expect(main.indexOf("conversationAttachments = null")).toBeLessThan(
@@ -695,15 +768,17 @@ describe("cross-platform packaged behavior contract", () => {
 
   it("keeps exact-tag release packages and smoke validation aligned across every platform", async () => {
     const workflow = await source(".github/workflows/release-platforms.yml");
+    const releaseValidator = await source("scripts/validate-release.mjs");
+    const releaseAssets = await source("scripts/release-assets.mjs");
     for (const expected of [
       'tags:',
       '- "v*.*.*"',
-      "dist_script: dist:release:mac",
-      "dist_script: dist:release:mac:x64",
-      "dist_script: dist:release:win",
-      "dist_script: dist:release:win:arm64",
-      "dist_script: dist:release:linux",
-      "dist_script: dist:release:linux:arm64",
+      "package_script: package:release:mac",
+      "package_script: package:release:mac:x64",
+      "package_script: package:release:win",
+      "package_script: package:release:win:arm64",
+      "package_script: package:release:linux",
+      "package_script: package:release:linux:arm64",
       "name: release-macos-x64",
       "name: release-macos-arm64",
       "name: release-windows-x64",
@@ -724,23 +799,88 @@ describe("cross-platform packaged behavior contract", () => {
     expect(workflow).toContain("MACOS_APPLE_API_KEY_BASE64");
     expect(workflow).toContain("WINDOWS_CSC_LINK");
     expect(workflow).not.toContain("BEGIN PRIVATE KEY");
-    for (const [label, runner, platform, architecture, distScript] of [
-      ["macOS x64", "macos-15-intel", "macos-x64", "x64", "dist:release:mac:x64"],
-      ["macOS arm64", "macos-15", "macos-arm64", "arm64", "dist:release:mac"],
-      ["Windows x64", "windows-2025", "windows-x64", "x64", "dist:release:win"],
-      ["Windows ARM64", "windows-11-arm", "windows-arm64", "arm64", "dist:release:win:arm64"],
-      ["Linux x64", "ubuntu-24.04", "linux-x64", "x64", "dist:release:linux"],
-      ["Linux ARM64", "ubuntu-24.04-arm", "linux-arm64", "arm64", "dist:release:linux:arm64"],
+
+    const releaseIdentity = workflowJob(workflow, "release_identity");
+    expect(releaseIdentity).toContain("release_sha: ${{ steps.freeze.outputs.release_sha }}");
+    expect(releaseIdentity).toContain('release_sha="$(git rev-parse --verify "${release_ref}^{commit}")"');
+    expect(releaseIdentity).toContain('[[ ! "$release_sha" =~ ^[0-9a-f]{40}$ ]]');
+    expect(releaseIdentity).toContain('printf \'release_sha=%s\\n\' "$release_sha" >> "$GITHUB_OUTPUT"');
+
+    for (const [jobId, prerequisite] of [
+      ["build", "needs: release_identity"],
+      ["upload", "needs: [release_identity, build]"],
+      ["publish-canary-feed", "needs: [release_identity, upload]"],
+    ] as const) {
+      const job = workflowJob(workflow, jobId);
+      expect(job).toContain(prerequisite);
+      expect(job).toContain("ref: ${{ needs.release_identity.outputs.release_sha }}");
+      expect(job).toContain("RELEASE_EXPECTED_COMMIT: ${{ needs.release_identity.outputs.release_sha }}");
+      expect(job).toContain('event_sha="${PUSH_EVENT_SHA:-$RELEASE_EXPECTED_COMMIT}"');
+    }
+    expect(workflowJob(workflow, "build")).toContain(
+      "RELEASE_SOURCE_SHA: ${{ needs.release_identity.outputs.release_sha }}",
+    );
+    expect(workflowJob(workflow, "upload")).toContain(
+      "RELEASE_SOURCE_SHA: ${{ needs.release_identity.outputs.release_sha }}",
+    );
+    expect(releaseValidator).toContain('const commitPattern = /^[0-9a-f]{40}$/u;');
+    expect(releaseValidator).toContain(
+      'if (headCommit !== expectedCommit) fail("checked-out HEAD does not equal the frozen release commit")',
+    );
+    expect(releaseValidator).toContain(
+      'if (tagCommit !== expectedCommit) fail("the release tag no longer points to the frozen release commit")',
+    );
+    expect(releaseAssets).toContain(
+      '["sbom", "--omit=dev", "--sbom-format", "cyclonedx"]',
+    );
+    expect(releaseAssets).toContain(
+      'const sbomName = `Inertia-${version}.sbom.cdx.json`',
+    );
+    expect(releaseAssets).toContain("inertia:release-source-sha");
+    expect(releaseAssets).toContain("inertia:package-lock-sha256");
+    expect(releaseAssets).toContain("inertia:electron-version");
+    expect(workflow.match(/node-version: 22\.23\.2/gu)).toHaveLength(2);
+
+    for (const [label, runner, platform, architecture, packageScript] of [
+      ["macOS x64", "macos-15-intel", "macos-x64", "x64", "package:release:mac:x64"],
+      ["macOS arm64", "macos-15", "macos-arm64", "arm64", "package:release:mac"],
+      ["Windows x64", "windows-2025", "windows-x64", "x64", "package:release:win"],
+      ["Windows ARM64", "windows-11-arm", "windows-arm64", "arm64", "package:release:win:arm64"],
+      ["Linux x64", "ubuntu-24.04", "linux-x64", "x64", "package:release:linux"],
+      ["Linux ARM64", "ubuntu-24.04-arm", "linux-arm64", "arm64", "package:release:linux:arm64"],
     ] as const) {
       const entry = workflowMatrixEntry(workflow, label);
       expect(entry).toContain(`runner: ${runner}`);
       expect(entry).toContain(`platform: ${platform}`);
       expect(entry).toContain(`arch: ${architecture}`);
-      expect(entry).toContain(`dist_script: ${distScript}`);
+      expect(entry).toContain(`package_script: ${packageScript}`);
     }
+
+    const releaseBundle = workflowStep(
+      workflow,
+      "Build the release application bundle once",
+    );
+    expect(releaseBundle).toContain("run: npm run build:packaged");
+    expect(workflow.match(/run: npm run build:packaged/gu)).toHaveLength(1);
+    expect(workflow).not.toContain("dist:release:");
+    expect(workflowStep(
+      workflow,
+      "Run release-candidate platform performance guard",
+    )).toContain("run: npm run benchmark:platform:smoke");
+    expect(workflowStep(
+      workflow,
+      "Measure release-candidate desktop workloads",
+    )).toContain("run: npm run benchmark:desktop:built");
+    expect(workflowStep(
+      workflow,
+      "Measure release-candidate desktop workloads under Xvfb",
+    )).toContain("xvfb-run --auto-servernum npm run benchmark:desktop:built");
+    expect(workflowStep(workflow, "Keep release benchmark evidence"))
+      .toContain("name: release-performance-${{ matrix.platform }}");
 
     const macBuild = workflowStep(workflow, "Build macOS release package");
     expect(macBuild).toContain("if: runner.os == 'macOS'");
+    expect(macBuild).toContain("PACKAGE_SCRIPT: ${{ matrix.package_script }}");
     expect(macBuild).toContain("MACOS_CSC_LINK");
     expect(macBuild).toContain('if [[ -z "${!name:-}" ]]');
     expect(macBuild).toContain('unset "$name"');
@@ -748,31 +888,21 @@ describe("cross-platform packaged behavior contract", () => {
 
     const windowsBuild = workflowStep(workflow, "Build Windows release package");
     expect(windowsBuild).toContain("if: runner.os == 'Windows'");
+    expect(windowsBuild).toContain("PACKAGE_SCRIPT: ${{ matrix.package_script }}");
     expect(windowsBuild).toContain("WINDOWS_CSC_LINK");
     expect(windowsBuild).toContain('if [[ -z "${!name:-}" ]]');
     expect(windowsBuild).toContain('unset "$name"');
     expect(windowsBuild).not.toContain("MACOS_CSC_LINK");
 
-    const portableCoverage = workflow.indexOf(
-      "Run portable runtime and provider protocol suite",
-    );
-    const windowsBundleRefresh = workflowStep(
-      workflow,
+    expect(workflow).not.toContain(
       "Refresh Windows app bundle after portable helper rebuild",
     );
-    expect(windowsBundleRefresh).toContain("if: runner.os == 'Windows'");
-    expect(windowsBundleRefresh).toContain("run: npm run build:bundle");
-    expect(workflow.indexOf(
-      "Refresh Windows app bundle after portable helper rebuild",
-    ))
-      .toBeGreaterThan(portableCoverage);
     expect(workflow.indexOf("Run Electron end-to-end tests"))
-      .toBeGreaterThan(
-        workflow.indexOf("Refresh Windows app bundle after portable helper rebuild"),
-      );
+      .toBeGreaterThan(workflow.indexOf("Build the release application bundle once"));
 
     const linuxBuild = workflowStep(workflow, "Build Linux release package");
     expect(linuxBuild).toContain("if: runner.os == 'Linux'");
+    expect(linuxBuild).toContain("PACKAGE_SCRIPT: ${{ matrix.package_script }}");
     expect(linuxBuild).not.toContain("_CSC_");
     expect(linuxBuild).not.toContain("APPLE_API_");
 
@@ -793,6 +923,69 @@ describe("cross-platform packaged behavior contract", () => {
     expect(releaseUpload).toContain("for attempt in {1..7}; do");
     expect(releaseUpload).toContain('sleep "$delay"');
     expect(releaseUpload).not.toContain("releases/tags/$RELEASE_TAG");
+  });
+
+  it("rejects a release tag moved after its commit identity was frozen", async () => {
+    const fixture = await mkdtemp(join(tmpdir(), "inertia-release-identity-"));
+    const tag = "v1.2.3";
+    const gitEnvironment = {
+      ...process.env,
+      GIT_AUTHOR_EMAIL: "release-test@example.invalid",
+      GIT_AUTHOR_NAME: "Release Test",
+      GIT_COMMITTER_EMAIL: "release-test@example.invalid",
+      GIT_COMMITTER_NAME: "Release Test",
+    };
+    const git = (...args: string[]): string => execFileSync("git", args, {
+      cwd: fixture,
+      encoding: "utf8",
+      env: gitEnvironment,
+      stdio: ["ignore", "pipe", "pipe"],
+    }).trim();
+
+    try {
+      await writeFile(join(fixture, "package.json"), JSON.stringify({ version: "1.2.3" }));
+      await writeFile(join(fixture, "package-lock.json"), JSON.stringify({
+        version: "1.2.3",
+        packages: { "": { version: "1.2.3" } },
+      }));
+      git("init", "--quiet");
+      git("add", "package.json", "package-lock.json");
+      git("commit", "--quiet", "-m", "release source");
+      git("tag", tag);
+      const frozenCommit = git("rev-parse", "HEAD^{commit}");
+      const validator = join(repositoryRoot, "scripts/validate-release.mjs");
+      const validatorEnvironment = {
+        ...process.env,
+        RELEASE_EVENT_SHA: frozenCommit,
+        RELEASE_EXPECTED_COMMIT: frozenCommit,
+        RELEASE_REF: `refs/tags/${tag}`,
+        RELEASE_TAG: tag,
+      };
+      const valid = spawnSync(process.execPath, [validator], {
+        cwd: fixture,
+        encoding: "utf8",
+        env: validatorEnvironment,
+      });
+      expect(valid.status, valid.stderr).toBe(0);
+
+      await writeFile(join(fixture, "moved-tag.txt"), "different commit\n");
+      git("add", "moved-tag.txt");
+      git("commit", "--quiet", "-m", "move release tag");
+      git("tag", "--force", tag);
+      git("checkout", "--quiet", "--detach", frozenCommit);
+
+      const moved = spawnSync(process.execPath, [validator], {
+        cwd: fixture,
+        encoding: "utf8",
+        env: validatorEnvironment,
+      });
+      expect(moved.status).not.toBe(0);
+      expect(moved.stderr).toContain(
+        "the release tag no longer points to the frozen release commit",
+      );
+    } finally {
+      await rm(fixture, { recursive: true, force: true });
+    }
   });
 
   it("supervises the native PTY architecture probe outside the binding process", async () => {

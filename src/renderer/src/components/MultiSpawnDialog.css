@@ -19,7 +19,6 @@
   box-shadow:
     0 30px 84px color-mix(in srgb, var(--shadow) 96%, transparent),
     0 0 0 1px color-mix(in srgb, var(--text) 3%, transparent);
-  animation: quiet-ledger-document-reveal var(--motion-base) var(--motion-ease) both;
 }
 
 .multi-spawn-dialog-body {

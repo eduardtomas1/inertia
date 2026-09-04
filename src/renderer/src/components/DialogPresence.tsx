@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 const DIALOG_EXIT_MS = 90;
 
@@ -10,33 +10,31 @@ export function DialogPresence({
   children: React.ReactNode;
 }): React.JSX.Element | null {
   const [mounted, setMounted] = useState(open);
-  const [closing, setClosing] = useState(false);
-  const lastChildren = useRef<React.ReactNode>(children);
-
-  if (open) lastChildren.current = children;
 
   useEffect(() => {
     if (open) {
       setMounted(true);
-      setClosing(false);
       return;
     }
-    setClosing((wasClosing) => {
-      if (!wasClosing) return true;
-      return wasClosing;
-    });
-    const timer = setTimeout(() => {
+    if (!mounted) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       setMounted(false);
-      setClosing(false);
-    }, DIALOG_EXIT_MS);
-    return () => clearTimeout(timer);
-  }, [open]);
+      return;
+    }
+    const timer = window.setTimeout(() => setMounted(false), DIALOG_EXIT_MS);
+    return () => window.clearTimeout(timer);
+  }, [mounted, open]);
 
   if (!mounted && !open) return null;
 
+  const closing = !open;
   return (
-    <div className={closing ? "dialog-presence is-closing" : "dialog-presence"}>
-      {open ? children : lastChildren.current}
+    <div
+      className={closing ? "dialog-presence is-closing" : "dialog-presence"}
+      aria-hidden={closing ? "true" : undefined}
+      inert={closing ? true : undefined}
+    >
+      {children}
     </div>
   );
 }

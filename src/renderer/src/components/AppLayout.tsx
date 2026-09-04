@@ -688,6 +688,7 @@ export function AppLayout({
       <DialogPresence open={dailyWorkOpen}>
         <Suspense fallback={null}>
           <DailyWorkDialog
+            open={dailyWorkOpen}
             status={usage.status}
             request={usage.request}
             onClose={() => setDailyWorkOpen(false)}
@@ -723,7 +724,7 @@ export function AppLayout({
       <DialogPresence open={multiSpawn.open}>
         <Suspense fallback={null}>
           <MultiSpawnDialog
-            open
+            open={multiSpawn.open}
             snapshot={connection.snapshot}
             settings={settings}
             submitting={multiSpawn.submitting}

@@ -112,6 +112,39 @@ export function visibleChatConversation(
   return draft ?? detail ?? fallback;
 }
 
+export function visibleChatProjection(
+  conversation: Pick<Conversation, "id"> | null,
+  projection: Pick<
+    ConversationProjection,
+    | "conversation"
+    | "detail"
+    | "streamingText"
+    | "streamingReasoning"
+    | "streamingChannel"
+    | "terminalProjections"
+    | "usage"
+  >,
+  detailLoading: boolean,
+) {
+  const projectionOwned = Boolean(
+    conversation && projection.conversation?.id === conversation.id,
+  );
+  const detailOwned = Boolean(
+    conversation && projection.detail?.conversation.id === conversation.id,
+  );
+  return {
+    detailLoading: projectionOwned && detailLoading,
+    streamingText: projectionOwned ? projection.streamingText : "",
+    streamingReasoning: projectionOwned ? projection.streamingReasoning : "",
+    streamingChannel: projectionOwned ? projection.streamingChannel : null,
+    terminalProjections: projectionOwned ? projection.terminalProjections : {},
+    usage: projection.usage?.conversationId === conversation?.id
+      ? projection.usage
+      : null,
+    contextPackets: detailOwned ? projection.detail?.contextPackets ?? [] : [],
+  };
+}
+
 export function visibleConversationLatestTurnSummary(
   persisted: Pick<Conversation, "id"> | null,
   visible: Pick<Conversation, "id"> | null,
@@ -267,6 +300,11 @@ export function createWorkspaceSceneModel({
   const conversation = visibleWorkspaceConversation(
     persistedConversation,
     draftConversation,
+  );
+  const chatProjection = visibleChatProjection(
+    conversation,
+    projection,
+    detailLoading,
   );
   const currentWorkflow = workflow.state?.conversationId
     === persistedConversation?.id
@@ -553,11 +591,11 @@ export function createWorkspaceSceneModel({
       plans: projection.plans,
       checkpoints: projection.checkpoints,
       turnGitArtifacts: projection.turnGitArtifacts,
-      streamingText: projection.streamingText,
-      streamingReasoning: projection.streamingReasoning,
-      streamingChannel: projection.streamingChannel,
-      terminalProjections: projection.terminalProjections,
-      usage: projection.usage,
+      streamingText: chatProjection.streamingText,
+      streamingReasoning: chatProjection.streamingReasoning,
+      streamingChannel: chatProjection.streamingChannel,
+      terminalProjections: chatProjection.terminalProjections,
+      usage: chatProjection.usage,
       skills: currentWorkflow?.skills ?? [],
       skillsCapability: currentWorkflow?.skillsCapability ?? null,
       skillsLoading: workflow.loading,
@@ -591,13 +629,13 @@ export function createWorkspaceSceneModel({
       autoScrollToFinalAnswer: settings.autoScrollToFinalAnswer,
       promptContext: workspaceTools.pendingDiffContext,
       contextSources,
-      contextPackets: detail?.contextPackets ?? [],
+      contextPackets: chatProjection.contextPackets,
       onConversationContextCommand: actions.run,
       previewContextUrl: desktopTools.previewUrl || null,
       providerIdentityLabels: settings.providerIdentityLabels,
       loading: (!connection.snapshot && connection.status !== "offline")
-        || detailLoading,
-      detailLoading,
+        || chatProjection.detailLoading,
+      detailLoading: chatProjection.detailLoading,
       sending: busyAction === "message.send",
       onAddProject: () => void actions.importProject(),
       onCreateConversation: () => actions.createConversation(),

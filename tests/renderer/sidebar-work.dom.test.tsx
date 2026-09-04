@@ -308,9 +308,12 @@ describe("compact Work sidebar", () => {
     expect(dailyWork).toHaveAttribute("aria-haspopup", "dialog");
     expect(dailyWork).toHaveAttribute("aria-expanded", "false");
     expect(dailyWork.className).not.toContain("is-open");
+    fireEvent.click(screen.getByRole("button", { name: "Workspace" }));
+    expect(view.onViewChange).toHaveBeenCalledWith("workspace");
+    expect(view.onClose).toHaveBeenCalledTimes(1);
     fireEvent.click(dailyWork);
     expect(view.onOpenDailyWork).toHaveBeenCalledTimes(1);
-    expect(view.onClose).toHaveBeenCalledTimes(1);
+    expect(view.onClose).toHaveBeenCalledTimes(2);
   });
 
   it("marks the Daily work destination while its dialog is open", () => {
@@ -702,6 +705,26 @@ describe("compact Work sidebar", () => {
 
     expect(screen.getByRole("textbox", { name: "Rename Classic actions 79" }))
       .toHaveFocus();
+  });
+
+  it("labels project state and caps large chat-list entrance delays", () => {
+    const entries = Array.from({ length: 20 }, (_, index) => conversation(
+      `classic-state-${index}`,
+      `Classic state ${index}`,
+      new Date(2026, 7, 11, 11, 59 - index),
+    ));
+    const view = renderSidebar(entries, vi.fn(), [], { sidebarMode: "classic" });
+    const projectSelect = view.container.querySelector(".project-select");
+
+    expect(projectSelect).toHaveAccessibleName("Studio Working 20 chats");
+    expect(projectSelect?.querySelector(".project-status"))
+      .toHaveAttribute("aria-hidden", "true");
+    const chatRows = view.container.querySelectorAll<HTMLElement>(
+      ".conversation-item",
+    );
+    expect(chatRows).toHaveLength(20);
+    expect(chatRows[8]?.style.getPropertyValue("--chat-index")).toBe("8");
+    expect(chatRows[19]?.style.getPropertyValue("--chat-index")).toBe("8");
   });
 
   it("dismisses the Projects overflow menu when pointing outside it", () => {

@@ -72,13 +72,7 @@ import {
   EMPTY_DETACHED_CONVERSATION_IDS,
   SidebarConversationMarks,
 } from "./sidebar/SidebarConversationMarks";
-
-const PROJECT_STATUS_LABELS: Record<Project["status"], string> = {
-  ready: "Idle",
-  working: "Working",
-  attention: "Needs attention",
-};
-
+import { sidebarChatEntranceStyle, SidebarProjectDisclosure, SidebarProjectState } from "./sidebar/SidebarProjectState";
 const WORK_DONE_PAGE_SIZE = 10;
 const WORK_SECTIONS_STORAGE_KEY = "inertia:sidebar:work-sections:v1";
 const EMPTY_CONVERSATIONS: readonly Conversation[] = [];
@@ -1055,15 +1049,11 @@ function SidebarView({
                 return (
                   <div className="project-group" role="listitem" key={project.id}>
                     <div className={clsx("project-row", isActive && view === "workspace" && "is-active")}>
-                      <button
-                        type="button"
-                        className="project-expand"
-                        aria-label={`${isExpanded ? "Collapse" : "Expand"} ${project.name}`}
-                        aria-expanded={isExpanded}
-                        onClick={() => toggleExpanded(project.id)}
-                      >
-                        {isExpanded ? <FolderOpen size={15} /> : <Folder size={15} />}
-                      </button>
+                      <SidebarProjectDisclosure
+                        expanded={isExpanded}
+                        projectName={project.name}
+                        onToggle={() => toggleExpanded(project.id)}
+                      />
                       <button
                         type="button"
                         className="project-select"
@@ -1077,19 +1067,10 @@ function SidebarView({
                           <span className="project-name">{project.name}</span>
                           {group.projects.length > 1 && <span className="project-scope">{project.repositoryRelativePath === "." ? "Repository root" : project.repositoryRelativePath}</span>}
                         </span>
-                        {project.status === "ready" ? null : (
-                          <span className={clsx("project-state", `state-${project.status}`)}>
-                            <span
-                              className={clsx("project-status", `status-${project.status}`)}
-                              aria-label={`Project status: ${project.status}`}
-                              title={project.status}
-                            />
-                            {PROJECT_STATUS_LABELS[project.status]}
-                          </span>
-                        )}
-                        {conversations.length > 0 && (
-                          <span className="project-count">{conversations.length}</span>
-                        )}
+                        <SidebarProjectState
+                          status={project.status}
+                          conversationCount={conversations.length}
+                        />
                       </button>
                       <span className="project-row-actions">
                         <IconButton
@@ -1136,7 +1117,7 @@ function SidebarView({
                                 "conversation-item",
                                 thread.unread && "is-unread",
                               )}
-                              style={{ "--chat-index": conversationIndex } as React.CSSProperties}
+                              style={sidebarChatEntranceStyle(conversationIndex)}
                               key={conversation.id}
                             >
                               {renaming === conversation.id ? renameForm(conversation) : (

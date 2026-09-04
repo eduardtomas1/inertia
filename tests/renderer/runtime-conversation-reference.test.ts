@@ -6,6 +6,7 @@ import {
   runtimeConversationReference,
   terminalResumeDirectory,
   visibleChatConversation,
+  visibleChatProjection,
   visibleConversationLatestTurnSummary,
   visibleWorkspaceConversation,
   workspaceDirectoryIdentity,
@@ -222,5 +223,79 @@ describe("global chat draft visibility", () => {
   it("uses the persisted conversation when neither draft nor detail exists", () => {
     expect(visibleChatConversation(null, null, fallback as never))
       .toBe(fallback);
+  });
+
+  it("clears scalar and context projections owned by the previous chat", () => {
+    const contextPacket = { id: "stale-context" };
+    const usage = { conversationId: detail.id };
+    const projection = visibleChatProjection(draft as never, {
+      conversation: detail as never,
+      detail: {
+        conversation: detail,
+        contextPackets: [contextPacket],
+      } as never,
+      streamingText: "stale answer",
+      streamingReasoning: "stale reasoning",
+      streamingChannel: "reasoning",
+      terminalProjections: { stale: {} } as never,
+      usage: usage as never,
+    }, true);
+
+    expect(projection).toEqual({
+      detailLoading: false,
+      streamingText: "",
+      streamingReasoning: "",
+      streamingChannel: null,
+      terminalProjections: {},
+      usage: null,
+      contextPackets: [],
+    });
+  });
+
+  it("preserves scalar and context projections owned by the visible chat", () => {
+    const contextPackets = [{ id: "draft-context" }];
+    const usage = { conversationId: draft.id };
+    const terminalProjections = { current: {} };
+    const projection = visibleChatProjection(draft as never, {
+      conversation: draft as never,
+      detail: {
+        conversation: draft,
+        contextPackets,
+      } as never,
+      streamingText: "current answer",
+      streamingReasoning: "current reasoning",
+      streamingChannel: "reasoning",
+      terminalProjections: terminalProjections as never,
+      usage: usage as never,
+    }, true);
+
+    expect(projection.detailLoading).toBe(true);
+    expect(projection.streamingText).toBe("current answer");
+    expect(projection.streamingReasoning).toBe("current reasoning");
+    expect(projection.streamingChannel).toBe("reasoning");
+    expect(projection.terminalProjections).toBe(terminalProjections);
+    expect(projection.usage).toBe(usage);
+    expect(projection.contextPackets).toBe(contextPackets);
+  });
+
+  it("keeps live scalars but rejects detail context with mixed ownership", () => {
+    const usage = { conversationId: draft.id };
+    const projection = visibleChatProjection(draft as never, {
+      conversation: draft as never,
+      detail: {
+        conversation: detail,
+        contextPackets: [{ id: "stale-context" }],
+      } as never,
+      streamingText: "draft answer",
+      streamingReasoning: "draft reasoning",
+      streamingChannel: "text",
+      terminalProjections: { draft: {} } as never,
+      usage: usage as never,
+    }, false);
+
+    expect(projection.streamingText).toBe("draft answer");
+    expect(projection.streamingReasoning).toBe("draft reasoning");
+    expect(projection.usage).toBe(usage);
+    expect(projection.contextPackets).toEqual([]);
   });
 });

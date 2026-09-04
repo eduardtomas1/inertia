@@ -452,7 +452,7 @@ button:disabled {
   grid-template-columns: 0 0 minmax(0, 1fr);
 }
 
-@media (prefers-reduced-motion: no-preference) {
+@media (min-width: 761px) and (prefers-reduced-motion: no-preference) {
   .app-shell[data-app-boot] .sidebar {
     transition:
       opacity 230ms var(--motion-ease-expo) 10ms,
@@ -1725,13 +1725,6 @@ textarea {
     display: none;
   }
 
-  .loading-mark,
-  .provider-status-spinner,
-  .app-update-spin,
-  .pdf-attachment-preview-loading svg,
-  .document-attachment-preview-loading svg {
-    animation-duration: 2.4s;
-  }
 }
 
 /* Workspace shell */
@@ -7760,6 +7753,10 @@ button.environment-row:focus-visible,
   display: contents;
 }
 
+.dialog-presence.is-closing > .dialog-backdrop {
+  pointer-events: none;
+}
+
 @keyframes view-swap-workspace { from { opacity: 0; transform: translateY(9px); } }
 @keyframes view-swap-settings { from { opacity: 0; transform: translateY(9px); } }
 @keyframes view-swap-usage { from { opacity: 0; transform: translateY(9px); } }
@@ -7815,7 +7812,6 @@ button.environment-row:focus-visible,
   }
 
   .dialog-presence.is-closing > .dialog-backdrop {
-    pointer-events: none;
     animation: dialog-veil-out 90ms var(--motion-ease-inout) both;
   }
 
@@ -10947,6 +10943,15 @@ html.is-resizing-horizontal * { cursor: row-resize !important; user-select: none
 
   .provider-quota-notice {
     animation: none !important;
+  }
+
+  .loading-mark,
+  .provider-status-spinner,
+  .app-update-spin,
+  .pdf-attachment-preview-loading svg,
+  .document-attachment-preview-loading svg {
+    animation-duration: 2.4s !important;
+    animation-iteration-count: infinite !important;
   }
 }
 

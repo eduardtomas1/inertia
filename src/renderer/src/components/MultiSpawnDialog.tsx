@@ -313,7 +313,7 @@ export function MultiSpawnDialog({
   const [copiedRecoveryCommand, setCopiedRecoveryCommand] = useState<
     string | null
   >(null);
-  useNativePreviewSuspension(open);
+  useNativePreviewSuspension(true);
   const busy = submitting
     || cancelling
     || acknowledgingRecovery
@@ -435,7 +435,7 @@ export function MultiSpawnDialog({
     return () => document.removeEventListener("keydown", handleKeyDown, true);
   }, [cancelling, onClose, open]);
 
-  if (!open || !snapshot || !draft) return null;
+  if (!snapshot || !draft) return null;
 
   const routeStateFor = (side: MultiSpawnSideDraft): RouteState => {
     const providerId = legacyProviderIdForHarness(side.selection.harnessId);

@@ -1,9 +1,7 @@
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { lazy, Suspense } from "react";
 import {
   ChevronDown,
   Command,
-  Check,
-  Folder,
   FolderGit2,
   GitBranch,
   LoaderCircle,
@@ -49,91 +47,9 @@ import {
   type ComposerSettingsModel,
 } from "./ComposerSettings";
 import { ComposerSendActionsFallback } from "./ComposerSendActionsFallback";
+import { ProjectPicker } from "./ProjectPicker";
 import type { ComposerMenuController } from "./useComposerMenus";
 import type { NewChatProjectPicker, PromptPresetCommandRunner } from "./types";
-
-function ProjectPicker({ picker }: { picker: NewChatProjectPicker }): React.JSX.Element {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (event: PointerEvent): void => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
-    };
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") {
-        event.stopPropagation();
-        setOpen(false);
-      }
-    };
-    document.addEventListener("pointerdown", onPointerDown, true);
-    document.addEventListener("keydown", onKeyDown, true);
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown, true);
-      document.removeEventListener("keydown", onKeyDown, true);
-    };
-  }, [open]);
-
-  return (
-    <div className="composer-project-picker" ref={rootRef}>
-      <Folder
-        className="composer-project-picker-mark"
-        size={12}
-        style={{ color: picker.selectedProject.color ?? "var(--accent)" }}
-        aria-hidden="true"
-      />
-      <span className="composer-project-picker-label">Project</span>
-      <button
-        type="button"
-        role="combobox"
-        aria-label="Project"
-        aria-haspopup="listbox"
-        aria-expanded={open ? "true" : "false"}
-        aria-controls="composer-project-listbox"
-        className="composer-project-picker-trigger"
-        disabled={picker.disabled}
-        onClick={() => setOpen((current) => !current)}
-      >
-        <span>{picker.selectedProject.name}</span>
-      </button>
-      <ChevronDown size={11} aria-hidden="true" />
-      {open && (
-        <div
-          className="composer-project-listbox"
-          id="composer-project-listbox"
-          role="listbox"
-          aria-label="Project"
-        >
-          {picker.projects.map((project) => {
-            const selected = project.id === picker.selectedProject.id;
-            return (
-              <button
-                type="button"
-                role="option"
-                aria-selected={selected}
-                className={clsx("composer-project-option", selected && "is-selected")}
-                key={project.id}
-                onClick={() => {
-                  setOpen(false);
-                  if (!selected) picker.onChange(project);
-                }}
-              >
-                <Folder
-                  size={12}
-                  style={{ color: project.color ?? "var(--accent)" }}
-                  aria-hidden="true"
-                />
-                <span>{project.name}</span>
-                {selected && <Check size={12} aria-hidden="true" />}
-              </button>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
 import type { AgentTurnStatus } from "../../../../shared/turn-lifecycle";
 import type { PromptStashEntry } from "../../utils/promptStash";
 

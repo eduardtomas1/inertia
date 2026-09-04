@@ -303,15 +303,6 @@ export default function App(): React.JSX.Element {
     () => connection.snapshot?.providers.find(({ id }) => id === authProviderId) ?? null,
     [authProviderId, connection.snapshot?.providers],
   );
-  const selectedMaintenanceProviderId = conversation?.providerId as
-    | ProviderMaintenanceProviderId
-    | undefined;
-  const selectedMaintenanceStatus = selectedMaintenanceProviderId
-    ? providerMaintenance.statuses.get(selectedMaintenanceProviderId) ?? null
-    : null;
-  const selectedMaintenanceOperation = selectedMaintenanceProviderId
-    ? providerMaintenance.operations.get(selectedMaintenanceProviderId) ?? null
-    : null;
   const visibleConversationRun = useMemo(
     () => conversation
       ? selectConversationWorkspaceRun(conversation.id, connection.snapshot?.runs ?? [])
@@ -426,6 +417,15 @@ export default function App(): React.JSX.Element {
   });
   const updateConversation = draftConversation.updateConversation;
   const discardDraftConversation = draftConversation.discard;
+  const selectedMaintenanceProviderId = (
+    draftConversation.conversation ?? conversation
+  )?.providerId as ProviderMaintenanceProviderId | undefined;
+  const selectedMaintenanceStatus = selectedMaintenanceProviderId
+    ? providerMaintenance.statuses.get(selectedMaintenanceProviderId) ?? null
+    : null;
+  const selectedMaintenanceOperation = selectedMaintenanceProviderId
+    ? providerMaintenance.operations.get(selectedMaintenanceProviderId) ?? null
+    : null;
   const workflowConversation = agentWorkflowTargetConversation(
     conversation,
     draftConversation.conversation,

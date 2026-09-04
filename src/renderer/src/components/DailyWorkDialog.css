@@ -22,7 +22,6 @@
   background: var(--surface-strong);
   box-shadow: 0 30px 84px color-mix(in srgb, var(--shadow) 96%, transparent);
   font-variant-numeric: tabular-nums;
-  animation: quiet-ledger-document-reveal var(--motion-base) var(--motion-ease) both;
 }
 
 :root[data-theme="dark"] .daily-work-dialog {

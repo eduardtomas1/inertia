@@ -119,7 +119,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       }],
       resolveSecret: async () => "owned-integration-secret",
     });
-    const manager = new ProviderManager({
+    const manager = ProviderManager.createForTests({
       commands: { codex: command },
       backendProfiles: [profile],
       backendProbeResults: [probe],
@@ -148,6 +148,8 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       modelSelection,
       continuationIdentity: route.continuationIdentity,
       conversationId: "conversation-custom",
+      runId: "run-conversation-custom",
+      turnId: "turn-conversation-custom",
       cwd: root,
       prompt: "Inspect",
       model: modelSelection.modelId,

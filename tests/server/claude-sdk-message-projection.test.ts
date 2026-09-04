@@ -1,3 +1,4 @@
+// @inertia-test-suite portable
 import { afterEach, describe, expect, it } from "vitest";
 
 import type {
@@ -82,6 +83,8 @@ function unitProjector(events?: AgentHarnessEvent[]): ClaudeMessageProjector {
       "claude",
       "unit-projector",
       events ? { onEvent: (event) => events.push(event) } : undefined,
+      "unit-projector-run",
+      "unit-projector-turn",
     ),
     text: new CappedProviderBuffer(8 * 1024 * 1024),
     usesNativeAnthropic: false,

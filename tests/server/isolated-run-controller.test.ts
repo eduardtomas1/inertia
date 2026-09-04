@@ -15,6 +15,7 @@ import type {
   ProviderRunInput,
   ProviderRunResult,
 } from "../../src/server/providers";
+import { providerRunTerminal } from "../../src/server/provider/contracts";
 import {
   IsolatedRunController,
   type IsolatedRunFileSystem,
@@ -147,9 +148,7 @@ function resultFor(
   text = "Answer",
 ): ProviderRunResult {
   return {
-    providerId: input.providerId,
-    conversationId: input.conversationId!,
-    status,
+    ...providerRunTerminal(input, status),
     text,
     textTruncated: false,
     exitCode: status === "failed" ? 1 : 0,
@@ -759,6 +758,7 @@ describe("IsolatedRunController", () => {
       reason: "result-rejected",
       message: "Structured output was invalid.",
     });
+    expect(rejectingProvider.stops).toEqual([]);
 
     const oversizedProvider = new FakeProvider();
     const oversized = new IsolatedRunController(

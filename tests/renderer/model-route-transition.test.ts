@@ -1,25 +1,24 @@
 import { describe, expect, it } from "vitest";
 
-import { defaultSettings } from "../../src/shared/contracts";
 import {
-  continuationIdentityForSelection,
   modelSelectionSchema,
   nativeBackendProfile,
   nativeModelSelection,
   resolveHarnessBackendCompatibility,
+  versionedContinuationIdentityForSelection,
   withModelSelectionFastMode,
   type HarnessBackendCompatibility,
   type ModelBackendProfile,
   type ModelSelection,
 } from "../../src/shared/model-routing";
 import {
-  buildModelRouteConversationPayload,
   resolveModelRouteTransition,
   type ModelRouteTransitionCandidate,
   type ModelRouteTransitionContext,
 } from "../../src/renderer/src/utils/modelRouteTransition";
 
 const projectId = "11111111-1111-4111-8111-111111111111";
+const compatibilityToken = "a".repeat(64);
 
 function nativeCandidate(
   selection: ModelSelection,
@@ -37,10 +36,11 @@ function nativeCandidate(
   );
   return {
     selection,
-    continuationIdentity: continuationIdentityForSelection(
+    continuationIdentity: versionedContinuationIdentityForSelection(
       selection,
       null,
       !compatibility.allowsModelSwitchWithinSession,
+      compatibilityToken,
     ),
     compatibility,
   };
@@ -109,10 +109,11 @@ function customRoute(
     selection,
     candidate: {
       selection,
-      continuationIdentity: continuationIdentityForSelection(
+      continuationIdentity: versionedContinuationIdentityForSelection(
         selection,
         profile.endpointIdentity,
         true,
+        compatibilityToken,
       ),
       compatibility,
     },
@@ -158,9 +159,11 @@ describe("model route transition policy", () => {
       context(fast, currentCandidate),
       unsupportedStandard,
     )).toMatchObject({
-      kind: "create-new-conversation",
+      kind: "update-current-conversation",
       changeKind: "performance-mode",
       reasonCode: "incompatible-performance-mode-changed",
+      providerSessionDisposition: "retain-current-conversation",
+      continuationAction: "start-session",
     });
 
     expect(resolveModelRouteTransition(
@@ -186,7 +189,7 @@ describe("model route transition policy", () => {
     });
   });
 
-  it("requires a fresh conversation for a custom-backend model change", () => {
+  it("keeps history while starting a fresh session for a custom-backend model change", () => {
     const route = customRoute();
     const nextSelection = {
       ...route.selection,
@@ -206,12 +209,11 @@ describe("model route transition policy", () => {
       context(route.selection, route.candidate),
       nextCandidate,
     )).toMatchObject({
-      kind: "create-new-conversation",
+      kind: "update-current-conversation",
       changeKind: "model",
       reasonCode: "incompatible-model-changed",
-      providerSessionDisposition: "start-unbound",
-      continuationAction: "new-conversation-required",
-      reason: "This agent cannot change models inside an existing session. Start a new chat to use the selected model.",
+      providerSessionDisposition: "retain-current-conversation",
+      continuationAction: "start-session",
     });
   });
 
@@ -234,10 +236,11 @@ describe("model route transition policy", () => {
       context(currentSelection, currentCandidate),
       nextCandidate,
     )).toMatchObject({
-      kind: "create-new-conversation",
+      kind: "update-current-conversation",
       changeKind: "model",
       reasonCode: "incompatible-model-changed",
-      providerSessionDisposition: "start-unbound",
+      providerSessionDisposition: "retain-current-conversation",
+      continuationAction: "start-session",
     });
   });
 
@@ -246,13 +249,13 @@ describe("model route transition policy", () => {
       "harness",
       { harnessId: "claude-agent-sdk" },
       "harness-changed",
-      "different agent harness",
+      "agent harness changed",
     ],
     [
       "backend-profile",
       { backendProfileId: "custom:other-gateway" },
       "backend-profile-changed",
-      "different model backend",
+      "model backend changed",
     ],
     [
       "backend-configuration",
@@ -267,7 +270,7 @@ describe("model route transition policy", () => {
       "different endpoint",
     ],
   ] as const)(
-    "requires a new conversation when the %s boundary changes",
+    "starts a fresh session in the current conversation when the %s boundary changes",
     (changeKind, identityChange, reasonCode, truthfulReason) => {
       const route = customRoute();
       const nextCandidate: ModelRouteTransitionCandidate = {
@@ -283,10 +286,11 @@ describe("model route transition policy", () => {
         nextCandidate,
       );
       expect(transition).toMatchObject({
-        kind: "create-new-conversation",
+        kind: "update-current-conversation",
         changeKind,
         reasonCode,
-        providerSessionDisposition: "start-unbound",
+        providerSessionDisposition: "retain-current-conversation",
+        continuationAction: "start-session",
       });
       expect(transition.reason).toContain(truthfulReason);
     },
@@ -304,7 +308,7 @@ describe("model route transition policy", () => {
       context(route.selection, route.candidate),
       other.candidate,
     )).toMatchObject({
-      kind: "create-new-conversation",
+      kind: "update-current-conversation",
       changeKind: "backend-profile",
       reasonCode: "backend-profile-changed",
     });
@@ -332,35 +336,27 @@ describe("model route transition policy", () => {
     });
   });
 
-  it("preserves the selected project in a fresh payload without transferring session state", () => {
+  it("rejects an installation-token change for resume without moving the conversation", () => {
     const route = customRoute();
-    const other = customRoute({
-      id: "custom:other-gateway",
-      displayName: "Other gateway",
-      endpointIdentity: "endpoint:other-gateway:7",
-    });
+    const changedInstallation = {
+      ...route.candidate,
+      continuationIdentity: {
+        ...route.candidate.continuationIdentity,
+        providerCompatibilityToken: "b".repeat(64),
+      },
+    };
     const transition = resolveModelRouteTransition(
       context(route.selection, route.candidate),
-      other.candidate,
+      changedInstallation,
     );
-    if (transition.kind !== "create-new-conversation") {
-      throw new Error("Expected a new-conversation transition.");
-    }
-
-    const payload = buildModelRouteConversationPayload(
-      transition,
-      { ...defaultSettings, newThreadMode: "local" },
-    );
-    expect(payload).toMatchObject({
+    expect(transition).toMatchObject({
+      kind: "update-current-conversation",
       projectId,
-      title: "New chat",
-      providerId: "codex",
-      modelSelection: other.selection,
-      useWorktree: false,
+      changeKind: "provider-installation",
+      reasonCode: "provider-installation-changed",
+      providerSessionDisposition: "retain-current-conversation",
+      continuationAction: "start-session",
     });
-    expect(payload).not.toHaveProperty("providerSessionId");
-    expect(payload).not.toHaveProperty("continuationIdentity");
-    expect(payload).not.toHaveProperty("conversationId");
   });
 
   it("does not lock an unstarted draft conversation to its placeholder route", () => {

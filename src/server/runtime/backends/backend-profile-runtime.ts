@@ -13,10 +13,12 @@ import {
   claudeHarnessBackendCompatibility,
   claudeCompatibleBackendProfileSchema,
   createCustomClaudeBackendProfile,
+  modelBackendProfileForClaudeProfile,
   type ClaudeCompatibleBackendProfile,
 } from "../../../shared/claude-backend-profiles";
 import type { BackendCompatibilityProbeResult } from "../../../shared/backend-probe";
 import {
+  legacyProviderIdForHarness,
   resolveHarnessBackendCompatibility,
   type HarnessBackendCompatibility,
 } from "../../../shared/model-routing";
@@ -57,8 +59,10 @@ export class BackendProfileRuntime {
     new Map<string, CodexResponsesBackendProfile>();
   private readonly credentialStatuses =
     new Map<string, BackendCredentialStatus | null>();
+  private readonly profileHarnessIds = new Map<string, string>();
   private readonly providerInfo = new Map<ProviderId, ProviderInfo>();
   private providers: ProviderManager | null = null;
+  private providerMaintenanceBlocked: ((providerId: ProviderId) => boolean) | null = null;
   private readonly resolveClaudeLaunch;
   private readonly resolveCodexLaunch;
 
@@ -111,6 +115,31 @@ export class BackendProfileRuntime {
     this.providers = providers;
   }
 
+  attachProviderMutationGuard(
+    providerMaintenanceBlocked: (providerId: ProviderId) => boolean,
+  ): void {
+    if (
+      this.providerMaintenanceBlocked
+      && this.providerMaintenanceBlocked !== providerMaintenanceBlocked
+    ) {
+      throw new BackendProfileControllerError(
+        "The backend profile maintenance guard is already attached.",
+      );
+    }
+    this.providerMaintenanceBlocked = providerMaintenanceBlocked;
+  }
+
+  assertConfigurationMutable(harnessId: string): void {
+    const providerId = legacyProviderIdForHarness(harnessId);
+    if (!providerId) return;
+    if (this.providerMaintenanceBlocked?.(providerId)) {
+      throw new BackendProfileControllerError(
+        "Provider configuration cannot change while maintenance owns it.",
+      );
+    }
+    this.providers?.assertProviderConfigurationMutable(providerId);
+  }
+
   providerManagerOptions(
     records: readonly StoredModelBackendProfile[],
   ): Pick<
@@ -120,17 +149,33 @@ export class BackendProfileRuntime {
     | "backendProbeResults"
     | "resolveBackendLaunchOptions"
   > {
+    // Startup maintenance recovery must run before credential reconciliation
+    // mutates the store. Hydrate the read-only runtime projection here so the
+    // ProviderManager still receives exact compatibility for profiles that
+    // already exist, plus configured built-ins that initialization will
+    // persist only after recovery has cleared admission.
+    for (const { profile } of records) this.registerProfile(profile);
+    const backendProfiles = records.map(({ profile }) =>
+      safeBackendProfile(profile));
+    const backendCompatibilities = records.flatMap(({ profile, latestProbe }) => {
+      if (profile.source === "custom") return [];
+      return [this.compatibility(
+        profile,
+        profile.routing.primaryModelId,
+        latestProbe,
+      )];
+    });
+    const registeredProfileIds = new Set(
+      backendProfiles.map(({ id }) => id),
+    );
+    for (const builtIn of this.builtInClaudeProfiles.values()) {
+      if (registeredProfileIds.has(builtIn.id)) continue;
+      backendProfiles.push(modelBackendProfileForClaudeProfile(builtIn));
+      backendCompatibilities.push(claudeHarnessBackendCompatibility(builtIn));
+    }
     return {
-      backendProfiles: records.map(({ profile }) =>
-        safeBackendProfile(profile)),
-      backendCompatibilities: records.flatMap(({ profile, latestProbe }) => {
-        if (profile.source === "custom") return [];
-        return [this.compatibility(
-          profile,
-          profile.routing.primaryModelId,
-          latestProbe,
-        )];
-      }),
+      backendProfiles,
+      backendCompatibilities,
       backendProbeResults: records.flatMap(({ latestProbe }) =>
         latestProbe ? [latestProbe] : []),
       resolveBackendLaunchOptions: (input, environment, context) =>
@@ -139,15 +184,27 @@ export class BackendProfileRuntime {
   }
 
   publishProfile(profile: PersistedModelBackendProfile): void {
+    this.assertConfigurationMutable(profile.harnessId);
     this.registerProfile(profile);
-    this.providers?.upsertBackendProfile(safeBackendProfile(profile));
+    this.providers?.upsertBackendProfile(
+      safeBackendProfile(profile),
+      legacyProviderIdForHarness(profile.harnessId) ?? undefined,
+    );
   }
 
   removeProfile(profileId: string): void {
+    const harnessId = this.profileHarnessIds.get(profileId);
+    if (harnessId) this.assertConfigurationMutable(harnessId);
     this.claudeProfiles.delete(profileId);
     this.codexProfiles.delete(profileId);
     this.credentialStatuses.delete(profileId);
-    this.providers?.removeBackendProfile(profileId);
+    this.profileHarnessIds.delete(profileId);
+    this.providers?.removeBackendProfile(
+      profileId,
+      harnessId
+        ? legacyProviderIdForHarness(harnessId) ?? undefined
+        : undefined,
+    );
   }
 
   removeProbeResults(profileId: string): void {
@@ -264,6 +321,7 @@ export class BackendProfileRuntime {
   }
 
   private registerProfile(profile: PersistedModelBackendProfile): void {
+    this.profileHarnessIds.set(profile.id, profile.harnessId);
     if (profile.protocol === "anthropic-messages") {
       const secretReference = backendProfileUsesCredential(profile)
         ? this.secretReference(profile.id)

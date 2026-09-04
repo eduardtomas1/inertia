@@ -1,3 +1,4 @@
+// @inertia-test-suite portable
 import { describe, expect, it } from "vitest";
 
 import { parseAcpSessionNotification } from "../../src/server/provider/acp-json-rpc";

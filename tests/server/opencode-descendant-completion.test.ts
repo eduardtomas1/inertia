@@ -1,3 +1,4 @@
+// @inertia-test-suite portable
 import { afterEach, describe, expect, it } from "vitest";
 
 import { AgentHarnessRegistry, ProviderManager } from "../../src/server/providers";
@@ -187,7 +188,7 @@ function runCompletionScenario(
     "serve",
     descendantCompletionServer(root, scenario),
   );
-  const manager = new ProviderManager(
+  const manager = ProviderManager.createForTests(
     { commands: { opencode: command } },
     new AgentHarnessRegistry([createOpenCodeSdkHarness({
       runDeadlineMs,

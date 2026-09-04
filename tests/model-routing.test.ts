@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   continuationIdentityForSelection,
+  versionedContinuationIdentityForSelection,
   fastModeProviderValue,
   modelSelectionSchema,
   nativeBackendProfile,
@@ -75,9 +76,20 @@ describe("model routing contracts", () => {
 
   it("locks continuation to harness, backend revision, endpoint identity, and model", () => {
     const selection = nativeModelSelection({ providerId: "codex", modelId: "gpt-5.4" });
-    const identity = continuationIdentityForSelection(selection, "endpoint:openai");
+    const identity = versionedContinuationIdentityForSelection(
+      selection,
+      "endpoint:openai",
+      true,
+      "a".repeat(64),
+    );
 
     expect(sameContinuationIdentity(identity, { ...identity })).toBe(true);
+    const { providerCompatibilityToken: _legacyToken, ...legacyIdentity } =
+      identity;
+    expect(sameContinuationIdentity(
+      legacyIdentity,
+      { ...legacyIdentity },
+    )).toBe(false);
     expect(sameContinuationIdentity(identity, {
       ...identity,
       backendConfigurationRevision: identity.backendConfigurationRevision + 1,
@@ -95,6 +107,7 @@ describe("model routing contracts", () => {
       modelId: "gpt-5.4",
     });
     const fast = withModelSelectionFastMode(standard, "priority");
+    const providerCompatibilityToken = "a".repeat(64);
 
     expect(fastModeProviderValue(fast)).toBe("priority");
     expect(fast.providerOptions).toEqual({ fastMode: "priority" });
@@ -102,8 +115,18 @@ describe("model routing contracts", () => {
       performanceModeIdentity: "fast:priority",
     });
     expect(sameContinuationIdentity(
-      continuationIdentityForSelection(standard),
-      continuationIdentityForSelection(fast),
+      versionedContinuationIdentityForSelection(
+        standard,
+        null,
+        true,
+        providerCompatibilityToken,
+      ),
+      versionedContinuationIdentityForSelection(
+        fast,
+        null,
+        true,
+        providerCompatibilityToken,
+      ),
     )).toBe(false);
     expect(withModelSelectionFastMode(fast, null).providerOptions).toEqual({});
   });

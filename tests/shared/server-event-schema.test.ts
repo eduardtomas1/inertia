@@ -948,6 +948,38 @@ describe("server event conversation discriminant boundary", () => {
       result: { kind: "conversation.detail", state: "ready" },
     });
   });
+  it("accepts only finite continuation reason codes in shell and turn projections", () => {
+    expect(parseServerEvent(snapshotEvent({
+      ...conversationShell,
+      latestTurn: {
+        ...conversationShell.latestTurn,
+        continuationReasonCode: "provider-installation-changed",
+      },
+    }))).toMatchObject({ type: "conversation.shell.updated" });
+    expect(() => parseServerEvent(snapshotEvent({
+      ...conversationShell,
+      latestTurn: {
+        ...conversationShell.latestTurn,
+        continuationReasonCode: "provider supplied arbitrary text",
+      },
+    }))).toThrow("Malformed server event");
+
+    expect(parseServerEvent(detailEvent(conversation))).toMatchObject({
+      type: "request.result",
+    });
+    expect(() => parseServerEvent(event({
+      kind: "conversation.detail",
+      conversationId: conversation.id,
+      state: "ready",
+      detail: {
+        ...conversationDetail,
+        agentTurns: [{
+          ...conversationDetail.agentTurns[0],
+          continuationReasonCode: "unbounded provider reason",
+        }],
+      },
+    }))).toThrow("Malformed server event");
+  });
   it("validates response-speed identity while allowing pending conversation transitions", () => {
     expect(() => parseServerEvent(snapshotEvent({
       ...conversationShell,

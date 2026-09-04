@@ -1,3 +1,4 @@
+// @inertia-test-suite portable
 import { EventEmitter } from "node:events";
 
 import { describe, expect, it, vi } from "vitest";
@@ -480,6 +481,39 @@ describe("provider process-tree termination", () => {
     expect(child.kill).not.toHaveBeenCalled();
   });
 
+  it("confirms a killed POSIX tree whose remaining members are zombies", async () => {
+    const child = fakeChild();
+    const killProcess = vi.fn((pid: number, signal?: NodeJS.Signals | number) => {
+      if (pid === -4_242 && signal === "SIGKILL") {
+        child.exitCode = 1;
+        queueMicrotask(() => child.emit("close", 1));
+      }
+      // A zombie remains addressable by kill(2) until an external subreaper
+      // collects it, so the no-signal probe alone cannot prove cleanup.
+      return true as const;
+    });
+    const processCanExecute = vi.fn(() => false);
+
+    await expect(terminateProcessTreeAndWait(
+      child as never,
+      true,
+      {
+        platform: "linux",
+        killProcess,
+        processCanExecute,
+        spawnProcessSync: vi.fn(() => ({
+          status: 0,
+          stdout: "4242 1 T\n4243 4242 T\n",
+        })) as never,
+        waitMs: 100,
+      },
+    )).resolves.toBe(true);
+
+    expect(killProcess).toHaveBeenCalledWith(-4_242, 0);
+    expect(processCanExecute).toHaveBeenCalledWith(4_242);
+    expect(processCanExecute).toHaveBeenCalledWith(4_243);
+  });
+
   it("preserves the native macOS guardian termination window by default", async () => {
     vi.useFakeTimers();
     try {
@@ -592,6 +626,29 @@ describe("provider process-tree termination", () => {
     expect(killProcess).toHaveBeenCalledWith(-4_242, 0);
     expect(spawnProcessSync).not.toHaveBeenCalled();
     expect(child.kill).not.toHaveBeenCalled();
+  });
+
+  it("accepts a closed Linux child when its extant group is zombie-only", async () => {
+    const child = fakeChild();
+    child.exitCode = 0;
+    child.stdio[1] = { closed: true };
+    const killProcess = vi.fn(() => true as const);
+    const processGroupCanExecute = vi.fn(() => false);
+
+    await expect(terminateProcessTreeAndWait(
+      child as never,
+      true,
+      {
+        platform: "linux",
+        killProcess,
+        processGroupCanExecute,
+        waitMs: 25,
+      },
+    )).resolves.toBe(true);
+
+    expect(killProcess).toHaveBeenCalledOnce();
+    expect(killProcess).toHaveBeenCalledWith(-4_242, 0);
+    expect(processGroupCanExecute).toHaveBeenCalledWith(4_242);
   });
 
   it("confirms a naturally exited POSIX process group is already gone", async () => {

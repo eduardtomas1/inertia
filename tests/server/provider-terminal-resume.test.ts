@@ -319,7 +319,7 @@ describe("provider terminal resume availability", () => {
 
 describe("ProviderManager terminal resume launch", () => {
   it("rechecks the resolved CLI in the owning cwd before returning a PTY launch", async () => {
-    const manager = new ProviderManager();
+    const manager = ProviderManager.createForTests();
     const detect = vi.spyOn(manager, "detect").mockResolvedValue({
       provider: { id: "claude", name: "Claude", command: "claude" },
       available: true,
@@ -347,7 +347,7 @@ describe("ProviderManager terminal resume launch", () => {
   });
 
   it("rejects a runnable but unverified Cursor CLI version", async () => {
-    const manager = new ProviderManager();
+    const manager = ProviderManager.createForTests();
     vi.spyOn(manager, "detect").mockResolvedValue({
       provider: { id: "cursor", name: "Cursor", command: "cursor-agent" },
       available: true,

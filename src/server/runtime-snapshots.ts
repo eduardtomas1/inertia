@@ -10,6 +10,27 @@ import {
   type ProviderActivityEvent,
   type ProviderDetection,
 } from "./providers";
+import { productionProviderCapabilityManifests } from "./provider/capability-manifest";
+
+function declaredCapabilityContract(
+  providerId: ProviderInfo["id"],
+): ProviderInfo["capabilityContract"] {
+  const manifest = productionProviderCapabilityManifests().find(
+    (candidate) => candidate.providerId === providerId,
+  );
+  return manifest
+    ? {
+        schemaVersion: 1,
+        harnessId: manifest.harnessId,
+        manifestDigest: manifest.digest,
+        installationVerified: false,
+        installedVersion: null,
+        currentlyAvailableCount: 0,
+        declaredCapabilityCount: manifest.capabilities.length,
+        hostToolBridgeAvailable: false,
+      }
+    : undefined;
+}
 
 function emptyMetadataState(): ProviderInfo["metadataState"] {
   const missing = () => ({ freshness: "unavailable" as const, provenance: null, updatedAt: null, lastAttemptedAt: null, refreshing: false });
@@ -18,6 +39,7 @@ function emptyMetadataState(): ProviderInfo["metadataState"] {
 
 function agentThreadManagement(
   providerId: ProviderInfo["id"],
+  capabilityContract: ProviderInfo["capabilityContract"],
 ): NonNullable<ProviderInfo["agentThreadManagement"]> {
   const transport = {
     codex: "Codex dynamic tools",
@@ -26,37 +48,53 @@ function agentThreadManagement(
     kimi: "Kimi Code's scoped MCP session",
     opencode: "OpenCode's scoped MCP session",
   }[providerId];
-  return {
-    state: "supported",
-    detail: `${transport} can use approved Inertia tools to create and manage top-level chats in this project.`,
-  };
+  return capabilityContract?.installationVerified
+    && capabilityContract.hostToolBridgeAvailable
+    ? {
+        state: "supported",
+        detail: `${transport} can use approved Inertia tools to create and manage top-level chats in this project.`,
+      }
+    : {
+        state: "unavailable",
+        detail: "Top-level chat tools stay unavailable until this exact provider installation and its host-tool bridge are verified.",
+      };
 }
 
 export function initialProviderSnapshots(
   executionEnabled = true,
   cached: Partial<Record<ProviderInfo["id"], Pick<ProviderInfo, "models" | "rateLimits" | "metadataState">>> = {},
 ): ProviderInfo[] {
-  return PROVIDERS.map((provider) => ({
-    id: provider.id,
-    label: provider.name,
-    command: provider.command,
-    available: false,
-    version: null,
-    executable: null,
-    installState: "checking",
-    authState: "checking",
-    canRun: !executionEnabled,
-    statusMessage: "Checking installation and connection",
-    models: cached[provider.id]?.models ?? [],
-    rateLimits: cached[provider.id]?.rateLimits ?? [],
-    metadataState: cached[provider.id]?.metadataState ?? emptyMetadataState(),
-    agentThreadManagement: agentThreadManagement(provider.id),
-  }));
+  return PROVIDERS.map((provider) => {
+    const capabilityContract = declaredCapabilityContract(provider.id);
+    return {
+      id: provider.id,
+      label: provider.name,
+      command: provider.command,
+      available: false,
+      version: null,
+      executable: null,
+      installState: "checking" as const,
+      authState: "checking" as const,
+      canRun: !executionEnabled,
+      statusMessage: "Checking installation and connection",
+      models: cached[provider.id]?.models ?? [],
+      rateLimits: cached[provider.id]?.rateLimits ?? [],
+      metadataState: cached[provider.id]?.metadataState ?? emptyMetadataState(),
+      capabilityContract,
+      agentThreadManagement: agentThreadManagement(
+        provider.id,
+        capabilityContract,
+      ),
+    };
+  });
 }
 
 export function providerSnapshot(
   detection: ProviderDetection,
   metadata: Pick<ProviderInfo, "models" | "rateLimits" | "metadataState"> = { models: [], rateLimits: [], metadataState: emptyMetadataState() },
+  capabilityContract: ProviderInfo["capabilityContract"] = declaredCapabilityContract(
+    detection.provider.id,
+  ),
 ): ProviderInfo {
   return {
     id: detection.provider.id,
@@ -72,7 +110,11 @@ export function providerSnapshot(
     models: metadata.models,
     rateLimits: metadata.rateLimits,
     metadataState: metadata.metadataState,
-    agentThreadManagement: agentThreadManagement(detection.provider.id),
+    capabilityContract,
+    agentThreadManagement: agentThreadManagement(
+      detection.provider.id,
+      capabilityContract,
+    ),
   };
 }
 

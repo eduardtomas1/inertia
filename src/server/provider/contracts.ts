@@ -44,6 +44,8 @@ export interface ProviderDetection {
   installState: ProviderInstallState;
   authState: ProviderAuthState;
   canRun: boolean;
+  /** Exact executable/version protocol probes succeeded independently of auth. */
+  protocolVerified?: boolean;
   /** Fixed probe owner completion; false poisons clean runtime shutdown. */
   cleanupConfirmed: boolean;
   statusMessage?: string;
@@ -68,10 +70,10 @@ interface ProviderRunRequest {
   backendCompatibility: HarnessBackendCompatibility;
   modelSelection: ModelSelection;
   continuationIdentity: ContinuationIdentity;
-  /** Caller-owned run identity. Omitted only by legacy direct harness consumers. */
-  runId?: string;
-  /** Durable authoritative turn identity. Omitted only by legacy direct harness consumers. */
-  turnId?: string;
+  /** Caller-owned immutable run identity. */
+  runId: string;
+  /** Caller-owned immutable turn or control-operation identity. */
+  turnId: string;
   cwd: string;
   prompt: string;
   /** @deprecated Compatibility projections of modelSelection. */
@@ -109,11 +111,7 @@ interface ProviderRunRequest {
   };
 }
 
-export type ProviderRunInput = ProviderRunRequest &
-  (
-    | { conversationId: string; threadId?: never }
-    | { threadId: string; conversationId?: never }
-  );
+export type ProviderRunInput = ProviderRunRequest & { conversationId: string };
 
 /**
  * Privileged input for one parent-turn follow-up. Local image paths never
@@ -162,12 +160,12 @@ export interface ProviderRunFailure {
 
 export interface ProviderEventBase {
   providerId: ProviderId;
-  /** The caller's thread or conversation identifier, normalized to one key. */
+  /** The caller's exact conversation identifier. */
   conversationId: string;
-  /** Always present on callbacks; legacy direct runs fall back to conversationId. */
+  /** Exact caller-owned run identity. */
   runId: string;
-  /** Null for legacy direct runs and owned control operations without a durable turn. */
-  turnId: string | null;
+  /** Exact caller-owned turn or control-operation identity. */
+  turnId: string;
 }
 
 export interface ProviderTextEvent extends ProviderEventBase {
@@ -404,10 +402,22 @@ export interface ProviderHostToolBridge {
   invoke(call: ProviderHostToolCall): Promise<ProviderHostToolResult>;
 }
 
-export interface ProviderRunResult {
+export type ProviderTerminalOutcome =
+  | { outcome: "completed"; reason: "provider-completed" }
+  | { outcome: "cancelled"; reason: "provider-cancelled" }
+  | { outcome: "failed"; reason: ProviderFailureReason };
+
+export interface ProviderRunIdentity {
   providerId: ProviderId;
   conversationId: string;
+  runId: string;
+  turnId: string;
+}
+
+export interface ProviderRunResult extends ProviderRunIdentity {
   status: "completed" | "failed" | "cancelled";
+  /** Structured terminal truth. Its outcome must equal status. */
+  terminalReason: ProviderTerminalOutcome;
   sessionId?: string;
   text: string;
   textTruncated: boolean;
@@ -419,17 +429,106 @@ export interface ProviderRunResult {
   cleanupConfirmed: boolean;
 }
 
+export function providerRunIdentity(
+  input: Pick<ProviderRunInput, "providerId" | "conversationId" | "runId" | "turnId">,
+): ProviderRunIdentity {
+  return {
+    providerId: input.providerId,
+    conversationId: input.conversationId,
+    runId: input.runId,
+    turnId: input.turnId,
+  };
+}
+
+export function providerTerminalOutcome(
+  status: ProviderRunResult["status"],
+  failure?: ProviderRunFailure,
+): ProviderTerminalOutcome {
+  if (status === "completed") {
+    return { outcome: "completed", reason: "provider-completed" };
+  }
+  if (status === "cancelled") {
+    return { outcome: "cancelled", reason: "provider-cancelled" };
+  }
+  return { outcome: "failed", reason: failure?.reason ?? "provider-error" };
+}
+
+export function providerRunTerminal(
+  input: Pick<ProviderRunInput, "providerId" | "conversationId" | "runId" | "turnId">,
+  status: ProviderRunResult["status"],
+  failure?: ProviderRunFailure,
+): Pick<
+  ProviderRunResult,
+  "providerId" | "conversationId" | "runId" | "turnId" | "status" | "terminalReason"
+> {
+  return {
+    ...providerRunIdentity(input),
+    status,
+    terminalReason: providerTerminalOutcome(status, failure),
+  };
+}
+
+export function hasExactProviderRunIdentity(
+  value: unknown,
+  expected: ProviderRunIdentity,
+): value is ProviderRunIdentity {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as Record<string, unknown>;
+  return candidate.providerId === expected.providerId
+    && candidate.conversationId === expected.conversationId
+    && candidate.runId === expected.runId
+    && candidate.turnId === expected.turnId;
+}
+
+export function hasConsistentProviderTerminalOutcome(
+  result: unknown,
+): boolean {
+  if (typeof result !== "object" || result === null) return false;
+  const candidate = result as Record<string, unknown>;
+  const terminalReason = candidate.terminalReason;
+  if (typeof terminalReason !== "object" || terminalReason === null) return false;
+  const terminal = terminalReason as Record<string, unknown>;
+  if (candidate.status === "completed") {
+    return terminal.outcome === "completed"
+      && terminal.reason === "provider-completed";
+  }
+  if (candidate.status === "cancelled") {
+    return terminal.outcome === "cancelled"
+      && terminal.reason === "provider-cancelled";
+  }
+  if (candidate.status !== "failed") return false;
+  if (
+    typeof terminal.reason !== "string"
+    || !PROVIDER_FAILURE_REASONS.includes(
+      terminal.reason as ProviderFailureReason,
+    )
+    || terminal.outcome !== "failed"
+  ) return false;
+  if (candidate.failure === undefined) return true;
+  if (typeof candidate.failure !== "object" || candidate.failure === null) {
+    return false;
+  }
+  return (candidate.failure as Record<string, unknown>).reason
+    === terminal.reason;
+}
+
 export interface ProviderCompactionResult {
   providerId: ProviderId;
   conversationId: string;
+  runId: string;
+  turnId: string;
   status: "completed" | "failed" | "cancelled";
+  terminalReason: ProviderTerminalOutcome;
   instructionForwarded: boolean;
   message: string;
   error?: string;
   cleanupConfirmed: boolean;
 }
 
-export type ProviderRuntimeErrorCode = "invalid_input" | "already_running";
+export type ProviderRuntimeErrorCode =
+  | "invalid_input"
+  | "already_running"
+  | "lifecycle_corruption";
 
 export class ProviderRuntimeError extends Error {
   readonly code: ProviderRuntimeErrorCode;
@@ -499,4 +598,20 @@ export interface ProviderAuthLaunch {
   executable: string;
   args: readonly string[] | string;
   env: NodeJS.ProcessEnv;
+  installationUse: ProviderInstallationUseTransfer;
+}
+
+/** Settlement authority available only after a downstream owner accepts it. */
+export interface ProviderInstallationTransferredUse {
+  release(receipt: { cleanupConfirmed: true }): boolean;
+  quarantine(reason: string): boolean;
+}
+
+/**
+ * One-shot, path-free handoff from descriptor construction to the component
+ * that actually spawns and proves cleanup of the owned process tree.
+ */
+export interface ProviderInstallationUseTransfer {
+  accept(): ProviderInstallationTransferredUse | null;
+  abandonBeforeSpawn(): boolean;
 }

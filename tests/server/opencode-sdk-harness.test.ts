@@ -1,3 +1,5 @@
+// @inertia-test-suite portable
+// @inertia-harness opencode-sdk
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -14,6 +16,7 @@ import {
   loopbackPortIsOpen,
   portableFixtureRoot,
   portableNodeExecutable,
+  readStableFixtureCapture as readStableCapture,
   removePortableFixture,
   waitFor,
   writeNodeSubcommand,
@@ -60,18 +63,6 @@ type LifecycleScenario =
   | "slow"
   | "endless"
   | "no-image";
-function readStableCapture<T>(capturePath: string): T {
-  let lastError: unknown;
-  for (const candidate of [`${capturePath}.next`, capturePath]) {
-    if (!existsSync(candidate)) continue;
-    try {
-      return JSON.parse(readFileSync(candidate, "utf8")) as T;
-    } catch (error) {
-      lastError = error;
-    }
-  }
-  throw lastError ?? new Error(`No fixture capture was written to ${capturePath}.`);
-}
 function lifecycleServerSource(root: string, capturePath: string, scenario: LifecycleScenario): string {
   return `
 const http = require("node:http");
@@ -775,7 +766,7 @@ server.listen(port, "127.0.0.1", () => {
       reasoningOptions: [expect.objectContaining({ value: "high" })],
       defaultReasoningEffort: "",
     })]);
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { opencode: command } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
     );
@@ -801,12 +792,12 @@ server.listen(port, "127.0.0.1", () => {
     }), {
       onApproval: (event) => {
         approvals.push(event.request.title);
-        expect(manager.respondToApproval(event.conversationId, event.request.requestId, "approve")).toBe(true);
+        expect(manager.respondToApproval(event.conversationId, event.request.requestId, "approve", { runId: event.runId, turnId: event.turnId })).toBe(true);
       },
       onInput: (event) => {
         questions.push(event.request.questions[0]!.question);
         const questionId = event.request.questions[0]!.id;
-        expect(manager.respondToInput(event.conversationId, event.request.requestId, { [questionId]: ["Focused"] })).toBe(true);
+        expect(manager.respondToInput(event.conversationId, event.request.requestId, { [questionId]: ["Focused"] }, { runId: event.runId, turnId: event.turnId })).toBe(true);
       },
       onPlan: (event) => plans.push(...event.steps.map((step) => step.step)),
       onReasoning: (event) => reasoning.push(event.text),
@@ -920,7 +911,7 @@ fs.writeFileSync(${JSON.stringify(markerPath)}, "started");
 setTimeout(() => fs.appendFileSync(${JSON.stringify(markerPath)}, ":still-running"), 500);
 setTimeout(() => console.log("opencode server listening on http://127.0.0.1:65530"), 5_000);
 `);
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { opencode: command }, cancelGraceMs: 100 },
       new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
     );
@@ -953,7 +944,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       "serve",
       stalledRunInitializationServerSource(capturePath),
     );
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { opencode: command } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness({
         // Leave enough headroom for both concurrent discovery requests to
@@ -1021,7 +1012,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
     ]));
     writeNodeSubcommand(root, "serve", lifecycleServerSource(root, capturePath, "resume"));
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { opencode: command } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
     );
@@ -1074,7 +1065,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       "serve",
       lifecycleServerSource(root, capturePath, "early-permission-follow-up"),
     );
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { opencode: command } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
     );
@@ -1103,6 +1094,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
           event.conversationId,
           event.request.requestId,
           "deny",
+          { runId: event.runId, turnId: event.turnId },
         )).toBe(true);
       },
     })).resolves.toMatchObject({
@@ -1132,7 +1124,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       "serve",
       lifecycleServerSource(root, capturePath, scenario),
     );
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { opencode: command } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
     );
@@ -1167,7 +1159,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     const capturePath = join(root, "capture.json");
     const command = portableNodeExecutable(root, "opencode");
     writeNodeSubcommand(root, "serve", lifecycleServerSource(root, capturePath, "idle-after-admission"));
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { opencode: command } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
     );
@@ -1192,7 +1184,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     const capturePath = join(root, "capture.json");
     const command = portableNodeExecutable(root, "opencode");
     writeNodeSubcommand(root, "serve", lifecycleServerSource(root, capturePath, "out-of-order-parts"));
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { opencode: command } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
     );
@@ -1228,7 +1220,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     const capturePath = join(root, "capture.json");
     const command = portableNodeExecutable(root, "opencode");
     writeNodeSubcommand(root, "serve", lifecycleServerSource(root, capturePath, "out-of-order-buffer-overflow"));
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { opencode: command } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness({ eventInactivityDeadlineMs: 1_000 })]),
     );
@@ -1257,7 +1249,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       "serve",
       lifecycleServerSource(root, capturePath, "snapshot-ordering"),
     );
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { opencode: command } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
     );
@@ -1282,7 +1274,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     const capturePath = join(root, "capture.json");
     const command = portableNodeExecutable(root, "opencode");
     writeNodeSubcommand(root, "serve", lifecycleServerSource(root, capturePath, "next-events"));
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { opencode: command } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
     );
@@ -1374,7 +1366,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       "serve",
       lifecycleServerSource(root, capturePath, "assistant-error"),
     );
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { opencode: command } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
     );
@@ -1411,7 +1403,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       "serve",
       lifecycleServerSource(root, capturePath, "unowned-session-error"),
     );
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { opencode: command } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
     );
@@ -1436,7 +1428,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     const capturePath = join(root, "capture.json");
     const command = portableNodeExecutable(root, "opencode");
     writeNodeSubcommand(root, "serve", lifecycleServerSource(root, capturePath, "external-interactions"));
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { opencode: command } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
     );
@@ -1470,7 +1462,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       "serve",
       lifecycleServerSource(root, capturePath, "v2-local-interaction-race"),
     );
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { opencode: command } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
     );
@@ -1492,6 +1484,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
           event.conversationId,
           event.request.requestId,
           "approve",
+          { runId: event.runId, turnId: event.turnId },
         )).toBe(true);
       },
       onInput: (event) => {
@@ -1500,6 +1493,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
           event.conversationId,
           event.request.requestId,
           { [event.request.questions[0]!.id]: ["Focused"] },
+          { runId: event.runId, turnId: event.turnId },
         )).toBe(true);
       },
     });
@@ -1532,7 +1526,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     const capturePath = join(root, "capture.json");
     const command = portableNodeExecutable(root, "opencode");
     writeNodeSubcommand(root, "serve", lifecycleServerSource(root, capturePath, "session-deleted"));
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { opencode: command } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
     );
@@ -1557,7 +1551,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     const capturePath = join(root, "capture.json");
     const command = portableNodeExecutable(root, "opencode");
     writeNodeSubcommand(root, "serve", lifecycleServerSource(root, capturePath, "message-role-mutation"));
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { opencode: command } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
     );
@@ -1587,7 +1581,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       "serve",
       lifecycleServerSource(root, capturePath, "resume-rejected-steer"),
     );
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { opencode: command } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
     );
@@ -1623,7 +1617,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       "serve",
       lifecycleServerSource(root, capturePath, "resume-stuck-steer"),
     );
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { opencode: command }, cancelGraceMs: 500 },
       new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
     );
@@ -1671,7 +1665,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       "serve",
       lifecycleServerSource(root, capturePath, "resume-admitted-stuck-steer"),
     );
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { opencode: command }, cancelGraceMs: 500 },
       new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
     );
@@ -1719,7 +1713,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       "serve",
       lifecycleServerSource(root, capturePath, "compact"),
     );
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { opencode: command } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
     );
@@ -1758,7 +1752,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       "serve",
       lifecycleServerSource(root, capturePath, "compact-stale"),
     );
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { opencode: command }, cancelGraceMs: 500 },
       new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
     );
@@ -1809,7 +1803,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       "serve",
       lifecycleServerSource(root, capturePath, scenario),
     );
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { opencode: command } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness({
         eventInactivityDeadlineMs: 100,
@@ -1840,7 +1834,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       "serve",
       lifecycleServerSource(root, capturePath, "compact-equal-timestamp"),
     );
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { opencode: command } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness({
         eventInactivityDeadlineMs: 5_000, // Keep cleanup bounded below Vitest's 15-second timeout.
@@ -1870,7 +1864,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       lifecycleServerSource(root, capturePath, "resume"),
     );
     const statuses: string[] = [];
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { opencode: command } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness({
         terminateProcessTree: async (child, force) => {
@@ -1913,7 +1907,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     const capturePath = join(root, "capture.json");
     const command = portableNodeExecutable(root, "opencode");
     writeNodeSubcommand(root, "serve", permissionDecisionServerSource(root, capturePath));
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { opencode: command }, cancelGraceMs: 500 },
       new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
     );
@@ -1929,7 +1923,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       onApproval: (event) => {
         approvals += 1;
         const decision = approvals === 1 ? "deny" : "cancel";
-        expect(manager.respondToApproval(event.conversationId, event.request.requestId, decision)).toBe(true);
+        expect(manager.respondToApproval(event.conversationId, event.request.requestId, decision, { runId: event.runId, turnId: event.turnId })).toBe(true);
       },
     });
 
@@ -1952,7 +1946,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     const capturePath = join(root, "capture.json");
     const command = portableNodeExecutable(root, "opencode");
     writeNodeSubcommand(root, "serve", lifecycleServerSource(root, capturePath, "cancel"));
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { opencode: command }, cancelGraceMs: 500 },
       new AgentHarnessRegistry([createOpenCodeSdkHarness({
         runDeadlineMs: 5_000,
@@ -2018,7 +2012,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     const terminateOwnedProcessTree = vi.fn(
       async (child, force) => await terminateProcessTreeAndWait(child, force),
     );
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { opencode: command }, cancelGraceMs: 500 },
       new AgentHarnessRegistry([createOpenCodeSdkHarness({
         terminateProcessTree: terminateOwnedProcessTree,
@@ -2057,7 +2051,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       "serve",
       lifecycleServerSource(root, capturePath, "descendant-liveness"),
     );
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { opencode: command } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness({
         runDeadlineMs: 10_000,
@@ -2099,7 +2093,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       "serve",
       lifecycleServerSource(root, capturePath, "inactive-descendant"),
     );
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { opencode: command } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness({
         runDeadlineMs: 5_000,
@@ -2134,7 +2128,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       "serve",
       lifecycleServerSource(root, capturePath, "unrelated-liveness"),
     );
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { opencode: command } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness({
         runDeadlineMs: 5_000,
@@ -2172,7 +2166,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     const terminateOwnedProcessTree = vi.fn(
       async (child, force) => await terminateProcessTreeAndWait(child, force),
     );
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { opencode: command }, cancelGraceMs: 500 },
       new AgentHarnessRegistry([createOpenCodeSdkHarness({
         runDeadlineMs: 5_000,
@@ -2222,7 +2216,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     const terminateOwnedProcessTree = vi.fn(
       async (child, force) => await terminateProcessTreeAndWait(child, force),
     );
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { opencode: command } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness({
         // Keep the absolute deadline well outside the inactivity boundary so
@@ -2268,7 +2262,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       "serve",
       lifecycleServerSource(root, capturePath, "slow"),
     );
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { opencode: command } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness({
         eventInactivityDeadlineMs: 100,
@@ -2311,7 +2305,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     const terminateOwnedProcessTree = vi.fn(
       async (child, force) => await terminateProcessTreeAndWait(child, force),
     );
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { opencode: command } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness({
         runDeadlineMs: 15_000,
@@ -2352,7 +2346,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     const oversizedCapture = join(oversizedRoot, "capture.json");
     const oversizedCommand = portableNodeExecutable(oversizedRoot, "opencode");
     writeNodeSubcommand(oversizedRoot, "serve", lifecycleServerSource(oversizedRoot, oversizedCapture, "oversized"));
-    const oversizedManager = new ProviderManager(
+    const oversizedManager = ProviderManager.createForTests(
       { commands: { opencode: oversizedCommand } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
     );
@@ -2374,7 +2368,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     const utf8Capture = join(utf8Root, "capture.json");
     const utf8Command = portableNodeExecutable(utf8Root, "opencode");
     writeNodeSubcommand(utf8Root, "serve", lifecycleServerSource(utf8Root, utf8Capture, "utf8-oversized"));
-    const utf8Manager = new ProviderManager(
+    const utf8Manager = ProviderManager.createForTests(
       { commands: { opencode: utf8Command } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
     );
@@ -2397,7 +2391,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     writeFileSync(imagePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
     const capabilityCommand = portableNodeExecutable(capabilityRoot, "opencode");
     writeNodeSubcommand(capabilityRoot, "serve", lifecycleServerSource(capabilityRoot, capabilityCapture, "no-image"));
-    const capabilityManager = new ProviderManager(
+    const capabilityManager = ProviderManager.createForTests(
       { commands: { opencode: capabilityCommand } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
     );
@@ -2422,7 +2416,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       "serve",
       lifecycleServerSource(root, capturePath, "event-flood"),
     );
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { opencode: command } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
     );
@@ -2452,7 +2446,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     const missingRoot = portableFixtureRoot("OpenCode missing");
     roots.push(missingRoot);
     const missing = join(missingRoot, process.platform === "win32" ? "missing.exe" : "missing");
-    const missingManager = new ProviderManager(
+    const missingManager = ProviderManager.createForTests(
       { commands: { opencode: missing } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
     );
@@ -2469,7 +2463,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
     roots.push(exitRoot);
     const exitCommand = portableNodeExecutable(exitRoot, "opencode");
     writeNodeSubcommand(exitRoot, "serve", `process.stderr.write("fixture startup failed\\n"); process.exit(7);`);
-    const exitManager = new ProviderManager(
+    const exitManager = ProviderManager.createForTests(
       { commands: { opencode: exitCommand } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
     );

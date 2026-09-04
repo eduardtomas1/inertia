@@ -34,6 +34,7 @@ import {
   waitFor,
   writeNodeSubcommand,
 } from "../helpers/portable-provider-fixture";
+import { executableProcessExists } from "../helpers/executable-process";
 
 const roots: string[] = [];
 const descendantPids: number[] = [];
@@ -111,15 +112,6 @@ function commitObjects(root: string): string[] {
     "--batch-all-objects",
     "--batch-check=%(objecttype) %(objectname)",
   ).split(/\r?\n/u).filter((line) => line.startsWith("commit ")).sort();
-}
-
-function processExists(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 afterEach(() => {
@@ -333,7 +325,7 @@ setInterval(() => {}, 1000);
     descendantPids.push(...pids);
     await waitFor(
       "the stalled commit-tree process tree to terminate",
-      () => pids.every((pid) => !processExists(pid)),
+      () => pids.every((pid) => !executableProcessExists(pid)),
     );
     expect(git(root, "rev-parse", "HEAD")).toBe(head);
     expect(readFileSync(indexPath)).toEqual(index);

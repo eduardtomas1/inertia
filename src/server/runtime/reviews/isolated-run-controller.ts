@@ -26,6 +26,11 @@ import type {
   ProviderRunInput,
   ProviderRunResult,
 } from "../../providers";
+import {
+  hasConsistentProviderTerminalOutcome,
+  hasExactProviderRunIdentity,
+  providerRunIdentity,
+} from "../../provider/contracts";
 import { assembleTurnRequest } from "../turns/request-context";
 
 export const DEFAULT_ISOLATED_RUN_TIMEOUT_MS = 120_000;
@@ -480,6 +485,26 @@ export class IsolatedRunController<Owner extends object> {
       ]);
       if (first.kind === "stopped") throw new IsolatedRunError(first.outcome.reason, first.outcome.message);
       if (first.kind === "provider-error") throw new IsolatedRunError("provider-failed");
+      if (
+        !hasExactProviderRunIdentity(
+          first.result,
+          providerRunIdentity(providerInput),
+        )
+        || !hasConsistentProviderTerminalOutcome(first.result)
+      ) {
+        throw new IsolatedRunError(
+          "provider-failed",
+          "The provider returned a terminal result for a different run owner.",
+        );
+      }
+      if (first.result.cleanupConfirmed) {
+        // An exact terminal result carrying cleanup confirmation is the
+        // provider manager's receipt for this isolated owner. Remember it
+        // before applying status/output/result policy: those later checks may
+        // reject otherwise-valid output, but must not try to stop a process
+        // whose cleanup has already been confirmed.
+        active.providerStarted = false;
+      }
       if (first.result.status === "cancelled") throw new IsolatedRunError("provider-cancelled");
       if (first.result.status !== "completed") throw new IsolatedRunError("provider-failed");
       if (first.result.cleanupConfirmed !== true) {
@@ -666,12 +691,7 @@ export class IsolatedRunController<Owner extends object> {
       if (reason !== "completed" && active.providerStarted) {
         const providerStop = await this.stopProvider(active)
           .catch(() => "force-detached" as const);
-        if (
-          providerStop !== "settled"
-          && !(providerStop === "missing" && !this.providers.isRunning(
-            active.providerConversationId,
-          ))
-        ) {
+        if (providerStop !== "settled") {
           active.providerStopPromise = null;
           return;
         }

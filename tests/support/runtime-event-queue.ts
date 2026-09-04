@@ -18,8 +18,9 @@ export class RuntimeEventQueue {
 
   async next<T extends ServerEvent>(
     predicate: (event: ServerEvent) => event is T,
+    description = "a server event",
   ): Promise<T> {
-    return await this.waitFor(predicate, 6_000);
+    return await this.waitFor(predicate, 6_000, description);
   }
 
   async nextForRequest<T extends Extract<
@@ -43,6 +44,7 @@ export class RuntimeEventQueue {
         && event.requestId === requestId
       ),
       Math.max(1, deadlineAt - Date.now()),
+      `request ${requestId}`,
     );
     if (terminal.type === "request.error") {
       throw new Error(
@@ -60,6 +62,7 @@ export class RuntimeEventQueue {
   private async waitFor<T extends ServerEvent>(
     predicate: (event: ServerEvent) => event is T,
     timeoutMs: number,
+    description: string,
   ): Promise<T> {
     const take = (): T | undefined => {
       const index = this.events.findIndex(predicate);
@@ -79,9 +82,18 @@ export class RuntimeEventQueue {
           : [];
         const turns = latestSnapshot?.type === "snapshot.updated"
           ? latestSnapshot.snapshot.conversations.flatMap(({ latestTurn }) =>
-            latestTurn ? [{ id: latestTurn.id, status: latestTurn.status }] : [])
+            latestTurn ? [{ id: latestTurn.id, runId: latestTurn.runId, status: latestTurn.status }] : [])
           : [];
-        reject(new Error(`Timed out waiting for a server event. Pending event types: ${pending}. Providers: ${JSON.stringify(providers)}. Turns: ${JSON.stringify(turns)}.`));
+        const snapshotRuns = latestSnapshot?.type === "snapshot.updated"
+          ? latestSnapshot.snapshot.runs.map(({ id, conversationId, kind, label, status }) => ({ id, conversationId, kind, label, status }))
+          : [];
+        const latestShell = [...this.events].reverse().find(
+          (event) => event.type === "conversation.shell.updated",
+        );
+        const shellRuns = latestShell?.type === "conversation.shell.updated"
+          ? latestShell.runs.map(({ id, kind, label, status, finishedAt }) => ({ id, kind, label, status, finishedAt }))
+          : [];
+        reject(new Error(`Timed out waiting for ${description}. Pending event types: ${pending}. Providers: ${JSON.stringify(providers)}. Turns: ${JSON.stringify(turns)}. Snapshot runs: ${JSON.stringify(snapshotRuns)}. Shell runs: ${JSON.stringify(shellRuns)}.`));
       }, timeoutMs);
       const check = (): void => {
         const event = take();

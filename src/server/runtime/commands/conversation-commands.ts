@@ -360,6 +360,7 @@ export function createConversationCommandHandler(
         );
         let canonicalSelection: ModelSelection | null = null;
         let canonicalProviderId: Conversation["providerId"] | null = null;
+        let resetProviderSession = false;
         if (changesSelection) {
           const selection = dependencies.backendProfileController
             .validateSelection(
@@ -405,6 +406,8 @@ export function createConversationCommandHandler(
           if (decision.action === "new-conversation-required") {
             throw new RuntimeRequestError(decision.reason);
           }
+          resetProviderSession = decision.action === "start-session"
+            && (current.providerSessionId !== null || latestTurn !== null);
         }
         const changesRunConfiguration = (
           update.providerId !== undefined
@@ -450,6 +453,12 @@ export function createConversationCommandHandler(
         }
         dependencies.store.updateConversation(conversationId, {
           ...canonicalUpdate,
+          ...(resetProviderSession
+            ? {
+                providerSessionId: null,
+                continuationIdentity: null,
+              }
+            : {}),
           pinnedAt: pinned === undefined
             ? current.pinnedAt ?? null
             : pinned ? new Date().toISOString() : null,

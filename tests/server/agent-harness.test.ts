@@ -1,3 +1,4 @@
+// @inertia-test-suite portable
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -11,7 +12,12 @@ import {
   type ProviderRunResult,
 } from "../../src/server/providers";
 import { createAgentHarnessEmitter } from "../../src/server/provider/agent-harness";
-import { CLI_AGENT_HARNESS_CAPABILITIES, createCliAgentHarness } from "../../src/server/provider/cli-agent-harness";
+import { providerCapabilityManifest } from "../../src/server/provider/capability-manifest";
+import { providerRunTerminal } from "../../src/server/provider/contracts";
+import {
+  LEGACY_CLI_AGENT_HARNESS_CAPABILITIES_FOR_TESTS,
+  createLegacyCliAgentHarnessForTests,
+} from "../../src/server/provider/cli-agent-harness";
 import { CODEX_APP_SERVER_HARNESS_CAPABILITIES } from "../../src/server/provider/codex-app-server-harness";
 import { nativeProviderRunFields } from "./model-route-fixture";
 
@@ -35,9 +41,7 @@ function input(
 
 function resultForHarness(input: ProviderRunInput, text: string): ProviderRunResult {
   return {
-    providerId: input.providerId,
-    conversationId: input.conversationId!,
-    status: "completed",
+    ...providerRunTerminal(input, "completed"),
     text,
     textTruncated: false,
     exitCode: 0,
@@ -58,8 +62,139 @@ describe("agent harness architecture", () => {
     expect(registry.resolve(input("opencode")).id).toBe("opencode-sdk");
   });
 
+  it("keeps the sunset legacy CLI fixture outside the production registry", () => {
+    const productionIds = createDefaultAgentHarnessRegistry().list().map(
+      ({ id }) => id,
+    );
+    const legacyIds = Object.keys(
+      LEGACY_CLI_AGENT_HARNESS_CAPABILITIES_FOR_TESTS,
+    ).map((providerId) =>
+      createLegacyCliAgentHarnessForTests(
+        providerId as "codex" | "claude" | "cursor" | "opencode",
+      ).id);
+
+    expect(productionIds).not.toEqual(expect.arrayContaining(legacyIds));
+    expect(legacyIds.sort()).toEqual([
+      "claude-cli",
+      "codex-cli",
+      "cursor-cli",
+      "opencode-cli",
+    ]);
+  });
+
+  it("freezes the exact test-only legacy CLI feature surface", () => {
+    expect(LEGACY_CLI_AGENT_HARNESS_CAPABILITIES_FOR_TESTS).toStrictEqual({
+      codex: {
+        lifecycle: {
+          events: "push",
+          terminalStatuses: ["completed", "failed", "cancelled"],
+        },
+        session: { resume: "native", identity: "thread" },
+        cancellation: {
+          graceful: "process-tree-signal",
+          forceFallback: "process-tree-kill",
+        },
+        extension: {
+          kind: "codex-cli",
+          protocol: "exec-jsonl",
+          routing: "full-access-compatibility",
+          approvals: "unavailable",
+          questions: "unavailable",
+          plans: "unavailable",
+          reasoning: "unavailable",
+          usage: "unavailable",
+          images: "native-cli-path",
+          authentication: "codex-cli",
+          modelMetadata: "unavailable",
+        },
+      },
+      claude: {
+        lifecycle: {
+          events: "push",
+          terminalStatuses: ["completed", "failed", "cancelled"],
+        },
+        session: { resume: "native", identity: "session" },
+        cancellation: {
+          graceful: "process-tree-signal",
+          forceFallback: "process-tree-kill",
+        },
+        extension: {
+          kind: "claude-cli",
+          protocol: "stream-json",
+          partialMessages: "enabled",
+          permissionModes: "native-cli",
+          planMode: "native-cli",
+          approvals: "unavailable-in-current-harness",
+          questions: "unavailable-in-current-harness",
+          reasoning: "unavailable-in-current-harness",
+          usage: "unavailable-in-current-harness",
+          images: "prompt-path-reference",
+          authentication: "claude-cli",
+          modelMetadata: "unavailable-in-current-harness",
+        },
+      },
+      cursor: {
+        lifecycle: {
+          events: "push",
+          terminalStatuses: ["completed", "failed", "cancelled"],
+        },
+        session: { resume: "native", identity: "session" },
+        cancellation: {
+          graceful: "process-tree-signal",
+          forceFallback: "process-tree-kill",
+        },
+        extension: {
+          kind: "cursor-cli",
+          protocol: "stream-json",
+          approvals: "unavailable-in-current-harness",
+          questions: "unavailable-in-current-harness",
+          plans: "prompt-emulated",
+          reasoning: "suppressed-by-print-mode",
+          usage: "unavailable-in-current-harness",
+          images: "prompt-path-reference",
+          authentication: "cursor-cli",
+          modelMetadata: "unavailable-in-current-harness",
+        },
+      },
+      opencode: {
+        lifecycle: {
+          events: "push",
+          terminalStatuses: ["completed", "failed", "cancelled"],
+        },
+        session: { resume: "native", identity: "session" },
+        cancellation: {
+          graceful: "process-tree-signal",
+          forceFallback: "process-tree-kill",
+        },
+        extension: {
+          kind: "opencode-cli",
+          protocol: "json-events",
+          planMode: "native-agent-selection",
+          approvals: "unavailable-in-current-harness",
+          questions: "unavailable-in-current-harness",
+          reasoning: "unavailable-in-current-harness",
+          usage: "unavailable-in-current-harness",
+          images: "native-cli-file",
+          authentication: "opencode-cli",
+          modelMetadata: "unavailable-in-current-harness",
+        },
+      },
+    });
+
+    for (const providerId of ["codex", "claude", "cursor", "opencode"] as const) {
+      const harness = createLegacyCliAgentHarnessForTests(providerId);
+      expect(harness.capabilities).toBe(
+        LEGACY_CLI_AGENT_HARNESS_CAPABILITIES_FOR_TESTS[providerId],
+      );
+      expect(providerCapabilityManifest(harness.id)).toBeNull();
+    }
+    expect(() => createLegacyCliAgentHarnessForTests("kimi")).toThrow(
+      "Kimi Code is available only through its native ACP harness.",
+    );
+  });
+
   it("advertises typed provider extensions instead of common capability booleans", () => {
-    const manager = new ProviderManager();
+    const manager = ProviderManager.createForTests();
     const codex = manager.harnessCapabilities("codex");
     const claude = manager.harnessCapabilities("claude")[0];
     const cursor = manager.harnessCapabilities("cursor")[0];
@@ -108,7 +243,7 @@ describe("agent harness architecture", () => {
     const events: AgentHarnessEvent[] = [];
     const emitter = createAgentHarnessEmitter("codex", "conversation-1", {
       onEvent: (event) => events.push(event),
-    });
+    }, "run-1", "turn-1");
 
     emitter.status("starting");
     emitter.codex({
@@ -118,12 +253,12 @@ describe("agent harness architecture", () => {
     });
 
     expect(events).toEqual([
-      { providerId: "codex", conversationId: "conversation-1", runId: "conversation-1", turnId: null, type: "status", status: "starting" },
+      { providerId: "codex", conversationId: "conversation-1", runId: "run-1", turnId: "turn-1", type: "status", status: "starting" },
       {
         providerId: "codex",
         conversationId: "conversation-1",
-        runId: "conversation-1",
-        turnId: null,
+        runId: "run-1",
+        turnId: "turn-1",
         type: "extension",
         extension: "codex-app-server",
         event: {
@@ -135,11 +270,11 @@ describe("agent harness architecture", () => {
     ]);
   });
 
-  it("settles an anonymous start at the shared harness boundary", () => {
+  it("keeps exact identity on an otherwise unidentified harness notice", () => {
     const events: AgentHarnessEvent[] = [];
     const emitter = createAgentHarnessEmitter("codex", "conversation-1", {
       onEvent: (event) => events.push(event),
-    });
+    }, "run-1", "turn-1");
 
     emitter.activity("tool", "started", "Unidentified provider notice");
 
@@ -147,8 +282,8 @@ describe("agent harness architecture", () => {
       {
         providerId: "codex",
         conversationId: "conversation-1",
-        runId: "conversation-1",
-        turnId: null,
+        runId: "run-1",
+        turnId: "turn-1",
         type: "activity",
         kind: "tool",
         phase: "info",
@@ -171,8 +306,8 @@ describe("agent harness architecture", () => {
         const identity = {
           providerId: "codex" as const,
           conversationId: "conversation-codex",
-          runId: options.input.runId!,
-          turnId: options.input.turnId ?? null,
+          runId: options.input.runId,
+          turnId: options.input.turnId,
         };
         const result = new Promise<ProviderRunResult>((resolve) => {
           resolveResult = resolve;
@@ -237,9 +372,7 @@ describe("agent harness architecture", () => {
               });
               options.callbacks?.onEvent?.({ ...identity, type: "status", status: "completed" });
               resolveResult({
-                providerId: "codex",
-                conversationId: "conversation-codex",
-                status: "completed",
+                ...providerRunTerminal(options.input, "completed"),
                 sessionId: "thread-1",
                 text: "Hello",
                 textTruncated: false,
@@ -264,7 +397,7 @@ describe("agent harness architecture", () => {
         };
       },
     };
-    const manager = new ProviderManager({}, new AgentHarnessRegistry([harness]));
+    const manager = ProviderManager.createForTests({}, new AgentHarnessRegistry([harness]));
     const statuses: string[] = [];
     const sessions: string[] = [];
     const text: string[] = [];
@@ -279,7 +412,12 @@ describe("agent harness architecture", () => {
       onApproval: (event) => {
         expect(event).toMatchObject({ runId: "run-codex", turnId: "turn-codex" });
         approvals.push(event.request.requestId);
-        expect(manager.respondToApproval(event.conversationId, event.request.requestId, "approve")).toBe(true);
+        expect(manager.respondToApproval(
+          event.conversationId,
+          event.request.requestId,
+          "approve",
+          { runId: event.runId, turnId: event.turnId },
+        )).toBe(true);
       },
       onInput: (event) => {
         expect(event).toMatchObject({ runId: "run-codex", turnId: "turn-codex" });
@@ -341,7 +479,7 @@ describe("agent harness architecture", () => {
         };
       },
     };
-    const manager = new ProviderManager({
+    const manager = ProviderManager.createForTests({
       resolveBackendLaunchOptions: (runInput, baseEnvironment) => {
         expect(JSON.stringify(runInput)).not.toContain("temporary-secret");
         expect(runInput.backendProfile.id).toBe("builtin:openai");
@@ -416,7 +554,7 @@ describe("agent harness architecture", () => {
         },
       }),
     };
-    const manager = new ProviderManager({}, new AgentHarnessRegistry([harness]));
+    const manager = ProviderManager.createForTests({}, new AgentHarnessRegistry([harness]));
     const run = manager.run(input("codex"));
 
     await expect(manager.setGoal(
@@ -458,7 +596,7 @@ describe("agent harness architecture", () => {
     const harness: AgentHarness = {
       id: "claude-cli",
       providerId: "claude",
-      capabilities: CLI_AGENT_HARNESS_CAPABILITIES.claude,
+      capabilities: LEGACY_CLI_AGENT_HARNESS_CAPABILITIES_FOR_TESTS.claude,
       supports: () => true,
       start: (options) => {
         emit = options.callbacks?.onEvent;
@@ -472,7 +610,7 @@ describe("agent harness architecture", () => {
         };
       },
     };
-    const manager = new ProviderManager({}, new AgentHarnessRegistry([harness]));
+    const manager = ProviderManager.createForTests({}, new AgentHarnessRegistry([harness]));
     const text: string[] = [];
     const run = manager.run(input("claude", { harnessId: "claude-cli" }), {
       onText: (event) => text.push(event.text),
@@ -488,9 +626,7 @@ describe("agent harness architecture", () => {
     emit?.({ ...identity, turnId: "turn-later", type: "text", text: "wrong turn" });
     emit?.({ ...identity, runId: "run-later", type: "text", text: "wrong run" });
     resolveResult({
-      providerId: "claude",
-      conversationId: "conversation-claude",
-      status: "completed",
+      ...providerRunTerminal(input("claude"), "completed"),
       text: "accepted",
       textTruncated: false,
       exitCode: 0,
@@ -510,14 +646,14 @@ describe("agent harness architecture", () => {
     const harness: AgentHarness = {
       id: "claude-cli",
       providerId: "claude",
-      capabilities: CLI_AGENT_HARNESS_CAPABILITIES.claude,
+      capabilities: LEGACY_CLI_AGENT_HARNESS_CAPABILITIES_FOR_TESTS.claude,
       supports: () => true,
       start: (options) => {
         const identity = {
           providerId: "claude" as const,
           conversationId: "conversation-claude",
-          runId: options.input.runId!,
-          turnId: options.input.turnId ?? null,
+          runId: options.input.runId,
+          turnId: options.input.turnId,
         };
         const result = new Promise<ProviderRunResult>((resolve) => {
           resolveResult = resolve;
@@ -537,9 +673,7 @@ describe("agent harness architecture", () => {
             options.callbacks?.onEvent?.({ ...identity, type: "status", status: "cancelling" });
             options.callbacks?.onEvent?.({ ...identity, type: "status", status: "cancelled" });
             resolveResult({
-              providerId: "claude",
-              conversationId: "conversation-claude",
-              status: "cancelled",
+              ...providerRunTerminal(options.input, "cancelled"),
               sessionId: "session-1",
               text: "",
               textTruncated: false,
@@ -552,7 +686,7 @@ describe("agent harness architecture", () => {
         };
       },
     };
-    const manager = new ProviderManager({ cancelGraceMs: 100 }, new AgentHarnessRegistry([harness]));
+    const manager = ProviderManager.createForTests({ cancelGraceMs: 100 }, new AgentHarnessRegistry([harness]));
     const run = manager.run(input("claude", { harnessId: "claude-cli" }), {
       onStatus: (event) => statuses.push(event.status),
     });
@@ -574,7 +708,7 @@ describe("agent harness architecture", () => {
     const harness: AgentHarness = {
       id: "claude-cli",
       providerId: "claude",
-      capabilities: CLI_AGENT_HARNESS_CAPABILITIES.claude,
+      capabilities: LEGACY_CLI_AGENT_HARNESS_CAPABILITIES_FOR_TESTS.claude,
       supports: () => true,
       start: (options) => {
         const conversationId = options.input.conversationId!;
@@ -596,7 +730,7 @@ describe("agent harness architecture", () => {
         };
       },
     };
-    const manager = new ProviderManager({ cancelGraceMs: 10_000 }, new AgentHarnessRegistry([harness]));
+    const manager = ProviderManager.createForTests({ cancelGraceMs: 10_000 }, new AgentHarnessRegistry([harness]));
     const ordinaryInput = input("claude", {
       harnessId: "claude-cli",
       conversationId: "ordinary-conversation",
@@ -624,7 +758,7 @@ describe("agent harness architecture", () => {
       { runId: "wrong-run", turnId: "isolated-turn" },
       1,
     )).resolves.toBe("identity-mismatch");
-    expect(cancelCalls.get("isolated-conversation")).toEqual([]);
+    expect(cancelCalls.get("isolated-conversation")).toEqual([false]);
 
     await expect(manager.stopOwned(
       "isolated-conversation",
@@ -671,7 +805,7 @@ describe("agent harness architecture", () => {
     const harness: AgentHarness = {
       id: "claude-cli",
       providerId: "claude",
-      capabilities: CLI_AGENT_HARNESS_CAPABILITIES.claude,
+      capabilities: LEGACY_CLI_AGENT_HARNESS_CAPABILITIES_FOR_TESTS.claude,
       supports: () => true,
       start: (options) => {
         const conversationId = options.input.conversationId!;
@@ -687,7 +821,7 @@ describe("agent harness architecture", () => {
         };
       },
     };
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { cancelGraceMs: 100 },
       new AgentHarnessRegistry([harness]),
     );
@@ -719,7 +853,7 @@ describe("agent harness architecture", () => {
     const harness = (id: "claude-cli" | "cursor-cli", providerId: "claude" | "cursor"): AgentHarness => ({
       id,
       providerId,
-      capabilities: CLI_AGENT_HARNESS_CAPABILITIES[providerId],
+      capabilities: LEGACY_CLI_AGENT_HARNESS_CAPABILITIES_FOR_TESTS[providerId],
       supports: () => true,
       start: () => { throw new Error("not reached"); },
     });
@@ -731,7 +865,7 @@ describe("agent harness architecture", () => {
     );
     expect(() => new AgentHarnessRegistry([
       { ...createDefaultAgentHarnessRegistry().list("codex")[0]!, supports: () => true },
-      createCliAgentHarness("codex", { supports: () => true }),
+      createLegacyCliAgentHarnessForTests("codex", { supports: () => true }),
     ]).resolve(input("codex", {
       harnessId: "codex-cli",
       access: "supervised",

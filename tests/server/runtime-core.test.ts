@@ -196,7 +196,11 @@ describe("runtime boundary helpers", () => {
     ]);
     expect(providers.every(({ canRun, installState, authState }) => !canRun && installState === "checking" && authState === "checking")).toBe(true);
     expect(providers.every(
-      ({ agentThreadManagement }) => agentThreadManagement?.state === "supported",
+      ({ agentThreadManagement, capabilityContract }) => (
+        agentThreadManagement?.state === "unavailable"
+        && capabilityContract?.installationVerified === false
+        && capabilityContract.hostToolBridgeAvailable === false
+      ),
     )).toBe(true);
   });
 

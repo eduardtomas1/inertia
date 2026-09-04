@@ -20,7 +20,7 @@ describe("real Claude Agent SDK smoke", () => {
     async () => {
       const root = mkdtempSync(join(tmpdir(), "inertia-real-claude-"));
       roots.push(root);
-      const manager = new ProviderManager({
+      const manager = ProviderManager.createForTests({
         commands: { claude: executable },
         cancelGraceMs: 2_000,
       });

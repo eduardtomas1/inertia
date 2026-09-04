@@ -1,4 +1,7 @@
 import type {
+  ProviderCapabilityId,
+} from "../../provider/capability-manifest";
+import type {
   AgentActivity,
   AgentApprovalDecision,
   AgentTurn,
@@ -48,17 +51,22 @@ export interface TurnProviderRuntime {
     continuationIdentity: ContinuationIdentity;
   };
   harnessIdFor(input: ProviderRunInput): string;
+  providerCapabilityAvailable(
+    input: ProviderRunInput,
+    capabilityId: ProviderCapabilityId,
+    configured?: readonly ProviderCapabilityId[],
+  ): boolean;
   run(input: ProviderRunInput, callbacks: ProviderRunCallbacks): Promise<ProviderRunResult>;
   cancel(conversationId: string): boolean;
   stopOwned(
     conversationId: string,
-    identity: { runId: string; turnId: string | null },
+    identity: { runId: string; turnId: string },
     graceMs?: number,
   ): Promise<"missing" | "identity-mismatch" | "settled" | "force-detached">;
   isRunning(conversationId: string): boolean;
-  ownsRun?(
+  ownsRun(
     conversationId: string,
-    identity: { runId: string; turnId: string | null },
+    identity: { runId: string; turnId: string },
   ): boolean;
   respondToApproval(
     conversationId: string,

@@ -562,6 +562,11 @@
       "version": 66,
       "name": "PersistSuspendAwareTurnTiming",
       "digest": "8ba0779bf58baa8c3d7ed8661756815986b37f14a2d597bd8b65eaefaf136ae5"
+    },
+    {
+      "version": 67,
+      "name": "PersistTurnContinuationEvidence",
+      "digest": "3c30e9db2d42b3fcb05f490558ccc1b68828534cedb32db320c0abee845df969"
     }
   ]
 }

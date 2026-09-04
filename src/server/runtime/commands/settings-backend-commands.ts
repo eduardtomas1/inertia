@@ -4,8 +4,10 @@ import type WebSocket from "ws";
 
 import type {
   ProviderInfo,
+  ProviderId,
   ServerEvent,
 } from "../../../shared/contracts";
+import { legacyProviderIdForHarness } from "../../../shared/model-routing";
 import type { RuntimeStore } from "../../database";
 import type { ProviderManager } from "../../providers";
 import { RuntimeRequestError } from "../../runtime-errors";
@@ -20,6 +22,7 @@ export interface SettingsBackendCommandDependencies {
   providers: ProviderManager;
   backendProfileController: BackendProfileController;
   defaultWorkspacePath: string;
+  providerMaintenanceBlocked(providerId: ProviderId): boolean;
   refreshProviderInfo(
     providerId?: ProviderInfo["id"],
     refreshEnvironment?: boolean,
@@ -32,6 +35,16 @@ export interface SettingsBackendCommandDependencies {
 export function createSettingsBackendCommandHandler(
   dependencies: SettingsBackendCommandDependencies,
 ): RuntimeCommandHandler {
+  const assertMaintenanceIdle = (providerId: ProviderId): void => {
+    if (!dependencies.providerMaintenanceBlocked(providerId)) return;
+    throw new RuntimeRequestError(
+      "Provider configuration cannot change while maintenance owns it.",
+    );
+  };
+  const assertHarnessMaintenanceIdle = (harnessId: string): void => {
+    const providerId = legacyProviderIdForHarness(harnessId);
+    if (providerId) assertMaintenanceIdle(providerId);
+  };
   return defineRuntimeCommandHandler([
     "settings.update",
     "prompt-preset.create",
@@ -51,6 +64,7 @@ export function createSettingsBackendCommandHandler(
     switch (command.type) {
       case "settings.update": {
         if (command.payload.codexBinaryPath !== undefined) {
+          assertMaintenanceIdle("codex");
           const manualPath = command.payload.codexBinaryPath.trim();
           if (manualPath) {
             if (!isAbsolute(manualPath)) {
@@ -76,6 +90,7 @@ export function createSettingsBackendCommandHandler(
               );
             }
           }
+          assertMaintenanceIdle("codex");
           dependencies.providers.setCommand(
             "codex",
             manualPath || undefined,
@@ -136,6 +151,7 @@ export function createSettingsBackendCommandHandler(
         });
         return "handled";
       case "backend.profile.create": {
+        assertHarnessMaintenanceIdle(command.payload.harnessId);
         const profile = await dependencies.backendProfileController
           .createProfile(command.payload);
         dependencies.broadcastSnapshot();
@@ -147,6 +163,11 @@ export function createSettingsBackendCommandHandler(
         return "handled";
       }
       case "backend.profile.update": {
+        assertHarnessMaintenanceIdle(
+          dependencies.backendProfileController.detail(
+            command.payload.profileId,
+          ).harnessId,
+        );
         const profile = await dependencies.backendProfileController
           .updateProfile(
             command.payload.profileId,
@@ -161,6 +182,11 @@ export function createSettingsBackendCommandHandler(
         return "handled";
       }
       case "backend.profile.credential-revision": {
+        assertHarnessMaintenanceIdle(
+          dependencies.backendProfileController.detail(
+            command.payload.profileId,
+          ).harnessId,
+        );
         const profile = await dependencies.backendProfileController
           .reconcileCredentialRevision(
             command.payload.profileId,
@@ -175,6 +201,11 @@ export function createSettingsBackendCommandHandler(
         return "handled";
       }
       case "backend.profile.probe": {
+        assertHarnessMaintenanceIdle(
+          dependencies.backendProfileController.detail(
+            command.payload.profileId,
+          ).harnessId,
+        );
         const profile = await dependencies.backendProfileController.probe(
           command.payload.profileId,
           command.payload.modelId,
@@ -188,11 +219,17 @@ export function createSettingsBackendCommandHandler(
         return "handled";
       }
       case "backend.profile.delete":
+        assertHarnessMaintenanceIdle(
+          dependencies.backendProfileController.detail(
+            command.payload.profileId,
+          ).harnessId,
+        );
         await dependencies.backendProfileController.deleteProfile(
           command.payload.profileId,
         );
         return "mutation";
       case "backend.default.set": {
+        assertHarnessMaintenanceIdle(command.payload.selection.harnessId);
         const value = dependencies.backendProfileController.setDefault(
           command.payload.projectId,
           command.payload.selection,
@@ -205,11 +242,18 @@ export function createSettingsBackendCommandHandler(
         });
         return "handled";
       }
-      case "backend.default.clear":
+      case "backend.default.clear": {
+        const current = dependencies.backendProfileController.defaults().find(
+          (candidate) => candidate.projectId === command.payload.projectId,
+        );
+        if (current) {
+          assertHarnessMaintenanceIdle(current.selection.harnessId);
+        }
         dependencies.backendProfileController.clearDefault(
           command.payload.projectId,
         );
         return "mutation";
+      }
       default:
         return "not-handled";
     }

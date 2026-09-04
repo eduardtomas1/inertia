@@ -1,3 +1,4 @@
+// @inertia-test-suite portable
 import { describe, expect, it } from "vitest";
 
 import { openCodeQuestionPayload } from "../../src/server/provider/opencode-boundary";

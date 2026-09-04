@@ -16,8 +16,8 @@ import type {
   ProviderInfo,
 } from "../../src/shared/contracts";
 import {
-  continuationIdentityForSelection,
   nativeModelSelection,
+  versionedContinuationIdentityForSelection,
 } from "../../src/shared/model-routing";
 import { Composer } from "../../src/renderer/src/components/Composer";
 import {
@@ -638,7 +638,7 @@ describe("composer detachment ownership", () => {
     });
   });
 
-  it("blocks a pending model-route transfer", async () => {
+  it("blocks a pending model-route mutation", async () => {
     const current = conversation("route-owner");
     current.modelSelection = nativeModelSelection({
       providerId: "codex",
@@ -648,8 +648,11 @@ describe("composer detachment ownership", () => {
     });
     current.model = "codex-route";
     current.reasoningEffort = "high";
-    current.continuationIdentity = continuationIdentityForSelection(
+    current.continuationIdentity = versionedContinuationIdentityForSelection(
       current.modelSelection,
+      null,
+      false,
+      "a".repeat(64),
     );
     current.providerSessionId = "codex-session";
     const catalogState = {
@@ -683,8 +686,14 @@ describe("composer detachment ownership", () => {
         description: "Destination route",
       }],
     };
+    let finishUpdate!: () => void;
+    const update = new Promise<void>((resolve) => {
+      finishUpdate = resolve;
+    });
+    const onUpdateConversation = vi.fn(() => update);
     render(<Composer {...composerProps(current, {
       providers: [codexProvider, claudeProvider],
+      onUpdateConversation,
       latestTurnSummary: {
         id: "turn-source",
         runId: "run-source",
@@ -709,12 +718,18 @@ describe("composer detachment ownership", () => {
     const destination = screen.getByTitle("Claude Route").closest("button");
     if (!destination) throw new Error("Expected the destination model route.");
     fireEvent.click(destination);
-    await waitFor(() => expect(screen.getByRole("alertdialog")).toBeVisible());
+    await waitFor(() => expect(onUpdateConversation).toHaveBeenCalledOnce());
 
     expect(prepareComposerDetachment(current.id)).toEqual({
       status: "blocked",
-      blocker: "pending-model-route",
-      reason: "Finish or cancel the pending model change before moving this chat to a window.",
+      blocker: "mutation-in-flight",
+      reason: "Wait for the current composer action to finish before moving this chat to a window.",
+      draft: "",
+    });
+
+    await act(async () => finishUpdate());
+    expect(prepareComposerDetachment(current.id)).toEqual({
+      status: "ready",
       draft: "",
     });
   });

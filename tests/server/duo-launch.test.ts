@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { execFile, execFileSync } from "node:child_process";
-import { existsSync, statSync, type BigIntStats } from "node:fs";
+import { existsSync, type BigIntStats } from "node:fs";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -28,10 +28,11 @@ import {
   type GitRepositoryStatus,
   type OwnedWorktreeCreationHooks,
 } from "../../src/server/git";
-import type {
-  ProviderRunCallbacks,
-  ProviderRunInput,
-  ProviderRunResult,
+import {
+  providerRunTerminal,
+  type ProviderRunCallbacks,
+  type ProviderRunInput,
+  type ProviderRunResult,
 } from "../../src/server/provider/contracts";
 import {
   DuoLaunchCoordinator,
@@ -46,6 +47,7 @@ import {
 import { recoverInterruptedTurns } from "../../src/server/runtime/turns/turn-recovery";
 import { resolveNativeModelRoute } from "./model-route-fixture";
 import { createMockLinkedCheckout } from "../support/mock-linked-checkout";
+import { expectSameExistingPath } from "../support/path-identity-assertion";
 
 const temporaryDirectories: string[] = [];
 const execFileAsync = promisify(execFile);
@@ -139,18 +141,8 @@ function providerInfo(): ProviderInfo {
   };
 }
 
-function expectSameExistingPath(actual: string, expected: string): void {
-  const actualIdentity = statSync(actual, { bigint: true });
-  const expectedIdentity = statSync(expected, { bigint: true });
-  expect(actualIdentity.isDirectory()).toBe(true);
-  expect(expectedIdentity.isDirectory()).toBe(true);
-  expect({ device: actualIdentity.dev, inode: actualIdentity.ino }).toEqual({
-    device: expectedIdentity.dev,
-    inode: expectedIdentity.ino,
-  });
-}
-
 class PairProvider implements TurnProviderRuntime {
+  providerCapabilityAvailable(): boolean { return true; }
   readonly inputs: ProviderRunInput[] = [];
   readonly cancellations: string[] = [];
   readonly callbacks: ProviderRunCallbacks[] = [];
@@ -188,9 +180,7 @@ class PairProvider implements TurnProviderRuntime {
   completeAll(texts: readonly string[] = []): void {
     for (const [index, { input, resolve }] of this.completions.splice(0).entries()) {
       resolve({
-        providerId: input.providerId,
-        conversationId: input.conversationId ?? input.threadId,
-        status: "completed",
+        ...providerRunTerminal(input, "completed"),
         text: texts[index] ?? "",
         textTruncated: false,
         exitCode: 0,
@@ -211,6 +201,15 @@ class PairProvider implements TurnProviderRuntime {
 
   isRunning(): boolean {
     return this.inputs.length > 0;
+  }
+
+  ownsRun(
+    conversationId: string,
+    identity: { runId: string; turnId: string },
+  ): boolean {
+    return this.inputs.some((input) => input.conversationId === conversationId
+      && input.runId === identity.runId
+      && input.turnId === identity.turnId);
   }
 
   respondToApproval(

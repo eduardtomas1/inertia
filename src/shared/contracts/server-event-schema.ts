@@ -1,7 +1,8 @@
 import type { RuntimeMutationEvent, ServerEvent } from "./events";
 import { conversationDetailCollectionsCoherent, modelRouteIdentityCoherent, pullRequestCapabilityStateCoherent, runtimeEventScopeMatches, SERVER_EVENT_OPTIONS, snapshotIdentityCollectionsCoherent } from "./server-event-discriminants";
 import { APP_SHORTCUT_KEYS, DEFAULT_APP_KEYBINDINGS } from "../keybindings";
-import { continuationIdentitySchema, modelSelectionSchema } from "../model-routing";
+import { modelSelectionSchema, versionedContinuationIdentitySchema } from "../model-routing";
+import { isContinuationReasonCode } from "../continuation-policy";
 import { modelBackendDefaultSchema, modelBackendProfileDetailSchema, modelBackendProfileViewSchema } from "../backend-profile-settings";
 import { AGENT_TURN_STATUSES, type AgentTurnStatus } from "../turn-lifecycle";
 import { AGENT_GOAL_STATUSES } from "./agent-workflows";
@@ -73,9 +74,11 @@ function uniqueRecordField(values: unknown[], key: string): boolean {
 function modelSelection(value: unknown): boolean {
   return modelSelectionSchema.safeParse(value).success;
 }
-
 function continuationIdentity(value: unknown): boolean {
-  return continuationIdentitySchema.safeParse(value).success;
+  return versionedContinuationIdentitySchema.safeParse(value).success;
+}
+function optionalContinuationReasonCode(value: UnknownRecord): boolean {
+  const reason = value.continuationReasonCode; return reason === undefined || reason === null || isContinuationReasonCode(reason);
 }
 function backendProfile(value: unknown, detail = false): boolean {
   return (detail ? modelBackendProfileDetailSchema : modelBackendProfileViewSchema)
@@ -171,6 +174,7 @@ function latestTurn(value: unknown): boolean {
     && nullableStringField(value, "startedAt")
     && nullableStringField(value, "completedAt")
     && nullableStringField(value, "terminalReason")
+    && optionalContinuationReasonCode(value)
     && modelSelection(value.modelSelection) && continuationIdentity(value.continuationIdentity)
     && modelRouteIdentityCoherent(value);
 }
@@ -908,6 +912,7 @@ function agentTurn(value: unknown): boolean {
     && oneOf(value, "interactionMode", SERVER_EVENT_OPTIONS.interactionModes)
     && oneOf(value, "accessMode", SERVER_EVENT_OPTIONS.accessModes)
     && nullableStringField(value, "terminalAssistantMessageId")
+    && optionalContinuationReasonCode(value)
     && modelSelection(value.modelSelection) && continuationIdentity(value.continuationIdentity)
     && modelRouteIdentityCoherent(value)
     && nullableStringField(value, "modelAlias")

@@ -19,7 +19,12 @@ import {
   type AgentHarnessRun,
   type AgentHarnessStartOptions,
 } from "./agent-harness";
-import type { ProviderId, ProviderRunResult } from "./contracts";
+import {
+  providerRunTerminal,
+  type ProviderId,
+  type ProviderRunInput,
+  type ProviderRunResult,
+} from "./contracts";
 import { CappedProviderBuffer, ProviderNdjsonDecoder } from "./io";
 import { providerProcessInvocation } from "./process";
 import {
@@ -46,7 +51,7 @@ const CORE_CAPABILITIES = {
   },
 } as const;
 
-export const CLI_AGENT_HARNESS_CAPABILITIES = {
+export const LEGACY_CLI_AGENT_HARNESS_CAPABILITIES_FOR_TESTS = {
   codex: {
     ...CORE_CAPABILITIES,
     session: { resume: "native", identity: "thread" },
@@ -120,7 +125,7 @@ const HARNESS_IDS: Readonly<Record<Exclude<ProviderId, "kimi">, AgentHarnessId>>
   opencode: "opencode-cli",
 };
 
-export interface CliAgentHarnessOptions {
+export interface LegacyCliAgentHarnessForTestsOptions {
   supports?: (input: AgentHarnessStartOptions["input"]) => boolean;
   /** Arguments inserted before the provider CLI arguments (for native test launchers). */
   prefixArgs?: readonly string[];
@@ -128,9 +133,13 @@ export interface CliAgentHarnessOptions {
   terminateProcessTree?: ProcessTreeTerminator;
 }
 
-export function createCliAgentHarness(
+/**
+ * Sunset compatibility fixture for lifecycle tests and benchmarks. Production
+ * routes use the native harness registry and must never register this adapter.
+ */
+export function createLegacyCliAgentHarnessForTests(
   providerId: ProviderId,
-  options: CliAgentHarnessOptions = {},
+  options: LegacyCliAgentHarnessForTestsOptions = {},
 ): AgentHarness {
   if (providerId === "kimi") {
     throw new Error("Kimi Code is available only through its native ACP harness.");
@@ -139,7 +148,7 @@ export function createCliAgentHarness(
   return {
     id: harnessId,
     providerId,
-    capabilities: CLI_AGENT_HARNESS_CAPABILITIES[providerId],
+    capabilities: LEGACY_CLI_AGENT_HARNESS_CAPABILITIES_FOR_TESTS[providerId],
     supports: options.supports ?? ((input) => input.providerId === providerId),
     start: (startOptions) => startCliRun(
       harnessId,
@@ -158,13 +167,13 @@ function startCliRun(
   prefixArgs: readonly string[],
   terminateProcessTree?: ProcessTreeTerminator,
 ): AgentHarnessRun {
-  const conversationId = options.input.conversationId ?? options.input.threadId ?? "";
+  const conversationId = options.input.conversationId;
   const emitter = createAgentHarnessEmitter(
     providerId,
     conversationId,
     options.callbacks,
-    options.input.runId ?? conversationId,
-    options.input.turnId ?? null,
+    options.input.runId,
+    options.input.turnId,
     options.input.cwd,
   );
   const parserState: ProviderParserState = {
@@ -215,7 +224,7 @@ function startCliRun(
     const message = "The provider could not be started.";
     emitter.status("starting");
     emitter.status("failed", message);
-    return settledCliRun(harnessId, providerId, conversationId, parserState.sessionId, message);
+    return settledCliRun(harnessId, providerId, options.input, message);
   }
 
   emitter.status("starting");
@@ -245,7 +254,7 @@ function startCliRun(
       options.input.backendProfile,
     );
     emitter.status("failed", message);
-    return settledCliRun(harnessId, providerId, conversationId, parserState.sessionId, message);
+    return settledCliRun(harnessId, providerId, options.input, message);
   }
 
   let cancelRequested = false;
@@ -275,9 +284,7 @@ function startCliRun(
           settled = true;
           emitter.status("failed", message);
           resolveResult({
-            providerId,
-            conversationId,
-            status: "failed",
+            ...providerRunTerminal(options.input, "failed"),
             sessionId: parserState.sessionId,
             text: resultText.toString(),
             textTruncated: resultText.truncated,
@@ -299,9 +306,7 @@ function startCliRun(
         settled = true;
         emitter.status("failed", message);
         resolveResult({
-          providerId,
-          conversationId,
-          status: "failed",
+          ...providerRunTerminal(options.input, "failed"),
           sessionId: parserState.sessionId,
           text: resultText.toString(),
           textTruncated: resultText.truncated,
@@ -317,9 +322,7 @@ function startCliRun(
       if (cancelRequested) {
         emitter.status("cancelled");
         resolveResult({
-          providerId,
-          conversationId,
-          status: "cancelled",
+          ...providerRunTerminal(options.input, "cancelled"),
           sessionId: parserState.sessionId,
           text: resultText.toString(),
           textTruncated: resultText.truncated,
@@ -344,9 +347,7 @@ function startCliRun(
         );
         emitter.status("failed", message);
         resolveResult({
-          providerId,
-          conversationId,
-          status: "failed",
+          ...providerRunTerminal(options.input, "failed"),
           sessionId: parserState.sessionId,
           text: resultText.toString(),
           textTruncated: resultText.truncated,
@@ -360,9 +361,7 @@ function startCliRun(
 
       emitter.status("completed");
       resolveResult({
-        providerId,
-        conversationId,
-        status: "completed",
+        ...providerRunTerminal(options.input, "completed"),
         sessionId: parserState.sessionId,
         text: resultText.toString(),
         textTruncated: resultText.truncated,
@@ -432,18 +431,15 @@ function startCliRun(
 function settledCliRun(
   harnessId: AgentHarnessId,
   providerId: ProviderId,
-  conversationId: string,
-  sessionId: string | undefined,
+  input: ProviderRunInput,
   error: string,
 ): AgentHarnessRun {
   return {
     harnessId,
     providerId,
     result: Promise.resolve({
-      providerId,
-      conversationId,
-      status: "failed",
-      sessionId,
+      ...providerRunTerminal(input, "failed"),
+      sessionId: input.sessionId,
       text: "",
       textTruncated: false,
       exitCode: null,

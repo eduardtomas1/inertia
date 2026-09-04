@@ -1,3 +1,4 @@
+// @inertia-test-suite portable
 import {
   chmodSync,
   mkdirSync,
@@ -12,10 +13,11 @@ import type { ChildProcess } from "node:child_process";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { spawnRuntimeOwnedProcess } from "../../src/node/runtime-owned-processes";
+import { linuxProcessCanExecute } from "../../src/node/runtime-owned-process-posix";
 import { providerEnvironment } from "../../src/server/environment";
 import { AgentHarnessRegistry, detectProvider, ProviderManager } from "../../src/server/providers";
 import { providerFailureMessage } from "../../src/server/provider/adapters";
-import { createCliAgentHarness } from "../../src/server/provider/cli-agent-harness";
+import { createLegacyCliAgentHarnessForTests } from "../../src/server/provider/cli-agent-harness";
 import { terminateProcessTreeAndWait } from "../../src/server/process-lifecycle";
 import {
   portableFixtureRoot,
@@ -100,6 +102,10 @@ describe.sequential("provider runtime", () => {
   }
 
   function processExists(pid: number): boolean {
+    if (process.platform === "linux") {
+      const executable = linuxProcessCanExecute(pid);
+      if (executable !== null) return executable;
+    }
     try {
       process.kill(pid, 0);
       return true;
@@ -183,7 +189,7 @@ process.exit(2);
 
   it("detects, normalizes, and completes a streamed Codex-style session", async () => {
     const fake = fakeCodex();
-    const manager = new ProviderManager({ commands: { codex: fake.command } });
+    const manager = ProviderManager.createForTests({ commands: { codex: fake.command } });
     const detection = await manager.detect("codex", { cwd: fake.root });
     expect(detection).toMatchObject({ available: true, version: process.version, installState: "installed", authState: "authenticated", canRun: true });
 
@@ -202,7 +208,7 @@ process.exit(2);
   it("expands CODEX_HOME before launching a shell-free Codex App Server", async () => {
     const fake = fakeCodex();
     process.env.CODEX_HOME = "~/.codex-work";
-    const manager = new ProviderManager({ commands: { codex: fake.command } });
+    const manager = ProviderManager.createForTests({ commands: { codex: fake.command } });
 
     const result = await manager.run(
       nativeProviderRunInput({
@@ -504,7 +510,7 @@ process.exit(2);
     process.env.PATH = path;
     process.env.CODEX_HOME = "from-discovery";
 
-    const manager = new ProviderManager({ commands: { codex: "codex" } });
+    const manager = ProviderManager.createForTests({ commands: { codex: "codex" } });
     const detection = await manager.detect("codex", { cwd: root, refreshEnvironment: true });
     expect(detection).toMatchObject({ available: true, version: process.version, executable: realpathSync.native(selectedCommand), authState: "authenticated" });
 
@@ -1202,9 +1208,9 @@ setInterval(() => {}, 1000);
       const { command, program } = nodeProgram(root, `fake-${fixture.providerId}`, `${fixture.lines.map((line) => `console.log(${JSON.stringify(JSON.stringify(line))});`).join("\n")}
 setInterval(() => {}, 1000);
 `);
-      const manager = new ProviderManager(
+      const manager = ProviderManager.createForTests(
         { commands: { [fixture.providerId]: command } },
-        new AgentHarnessRegistry([createCliAgentHarness(fixture.providerId, { prefixArgs: [program] })]),
+        new AgentHarnessRegistry([createLegacyCliAgentHarnessForTests(fixture.providerId, { prefixArgs: [program] })]),
       );
       try {
         const result = await manager.run(nativeProviderRunInput({ providerId: fixture.providerId, harnessId: `${fixture.providerId}-cli`, conversationId: `${fixture.providerId}-conversation`, cwd: root, prompt: "Respond", interactionMode: "build", access: "auto-edit" }));
@@ -1224,10 +1230,10 @@ console.log(JSON.stringify({ type: "item.completed", item: { type: "agent_messag
 console.log(JSON.stringify({ type: "turn.completed" }));
 `);
     const terminateProcessTree = vi.fn(async () => true);
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { codex: command } },
       new AgentHarnessRegistry([
-        createCliAgentHarness("codex", {
+        createLegacyCliAgentHarnessForTests("codex", {
           prefixArgs: [program],
           terminateProcessTree,
         }),
@@ -1262,7 +1268,7 @@ setInterval(() => {}, 1000);
     const backend = new Promise<NodeJS.ProcessEnv>((resolve) => {
       releaseBackend = resolve;
     });
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       {
         commands: { codex: command },
         resolveBackendLaunchOptions: async (_input, environment) => ({
@@ -1270,7 +1276,7 @@ setInterval(() => {}, 1000);
         }),
       },
       new AgentHarnessRegistry([
-        createCliAgentHarness("codex", { prefixArgs: [program] }),
+        createLegacyCliAgentHarnessForTests("codex", { prefixArgs: [program] }),
       ]),
     );
     let acknowledgeStart!: () => void;
@@ -1307,7 +1313,7 @@ setInterval(() => {}, 1000);
   it("does not acknowledge an async backend rejection before harness start", async () => {
     const root = temporaryRoot();
     const onStarted = vi.fn();
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       {
         commands: { codex: "codex" },
         resolveBackendLaunchOptions: async () => {
@@ -1315,7 +1321,7 @@ setInterval(() => {}, 1000);
           throw new Error("credential resolution rejected");
         },
       },
-      new AgentHarnessRegistry([createCliAgentHarness("codex")]),
+      new AgentHarnessRegistry([createLegacyCliAgentHarnessForTests("codex")]),
     );
 
     await expect(manager.run(nativeProviderRunInput({
@@ -1342,10 +1348,10 @@ setInterval(() => {}, 1000);
       await terminateProcessTreeAndWait(child, true);
       return false;
     });
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { codex: command } },
       new AgentHarnessRegistry([
-        createCliAgentHarness("codex", {
+        createLegacyCliAgentHarnessForTests("codex", {
           prefixArgs: [program],
           terminateProcessTree,
         }),
@@ -1402,7 +1408,7 @@ console.log(JSON.stringify({ type: "assistant", message: { content: [{ type: "te
 console.log(JSON.stringify({ type: "result", is_error: false }));
 setInterval(() => {}, 1000);
 `);
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       {
         commands: { claude: command },
         resolveBackendLaunchOptions: (_input, environment) => ({
@@ -1412,7 +1418,7 @@ setInterval(() => {}, 1000);
           },
         }),
       },
-      new AgentHarnessRegistry([createCliAgentHarness("claude", { prefixArgs: [program] })]),
+      new AgentHarnessRegistry([createLegacyCliAgentHarnessForTests("claude", { prefixArgs: [program] })]),
     );
 
     try {
@@ -1432,9 +1438,9 @@ setInterval(() => {}, 1000);
 process.stderr.write("Authentication required. Please log in.\\n");
 process.exit(1);
 `);
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { codex: command } },
-      new AgentHarnessRegistry([createCliAgentHarness("codex", { prefixArgs: [program] })]),
+      new AgentHarnessRegistry([createLegacyCliAgentHarnessForTests("codex", { prefixArgs: [program] })]),
     );
 
     const result = await manager.run(nativeProviderRunInput({ providerId: "codex", harnessId: "codex-cli", conversationId: "failed-conversation", cwd: root, prompt: "Respond", interactionMode: "build", access: "full" }));
@@ -1452,10 +1458,10 @@ process.exit(1);
       "incomplete-codex",
       "process.exit(0);",
     );
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { codex: command } },
       new AgentHarnessRegistry([
-        createCliAgentHarness("codex", { prefixArgs: [program] }),
+        createLegacyCliAgentHarnessForTests("codex", { prefixArgs: [program] }),
       ]),
     );
 
@@ -1499,7 +1505,7 @@ process.exit(1);
   it("cancels a running provider and settles its run exactly once", async () => {
     const root = temporaryRoot();
     const command = codexExecutable(root, "waiting-codex", { stayAlive: true });
-    const manager = new ProviderManager({ commands: { codex: command }, cancelGraceMs: 100 });
+    const manager = ProviderManager.createForTests({ commands: { codex: command }, cancelGraceMs: 100 });
     let markRunning!: () => void;
     const running = new Promise<void>((resolve) => { markRunning = resolve; });
     const statuses: string[] = [];

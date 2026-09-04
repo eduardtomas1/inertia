@@ -24,7 +24,9 @@ import type {
   ProviderTextSnapshotEvent,
   ProviderUsageEvent,
   ProviderHarnessLaunchConfiguration,
+  ProviderEventBase,
 } from "./contracts";
+import type { ProviderCapabilityId } from "./capability-manifest";
 import { sanitizeProviderActivityDetail } from "./activity-detail";
 import { contractActivityPhase } from "./activity-lifecycle";
 
@@ -219,11 +221,24 @@ export type AgentInteractiveHarnessEvent =
 /** Canonical interactive event surface shared by rich provider transports. */
 export type ProviderInteractiveHarnessEvent = AgentInteractiveHarnessEvent;
 
+/**
+ * Internal run-scoped evidence emitted only after a transport has observed an
+ * optional protocol feature on the exact live connection. It is deliberately
+ * not part of ProviderEvent: capability negotiation is runtime authority, not
+ * a UI event.
+ */
+interface AgentHarnessCapabilityObservationEvent
+  extends ProviderEventBase {
+  type: "capability-observation";
+  capabilityId: ProviderCapabilityId;
+  available: boolean;
+}
+
 export interface CodexAppServerHarnessExtensionEvent {
   providerId: "codex";
   conversationId: string;
   runId: string;
-  turnId: string | null;
+  turnId: string;
   type: "extension";
   extension: "codex-app-server";
   event: AgentInteractiveHarnessEvent;
@@ -232,7 +247,7 @@ export interface CodexAppServerHarnessExtensionEvent {
 interface ProviderInteractiveHarnessExtensionEventBase {
   conversationId: string;
   runId: string;
-  turnId: string | null;
+  turnId: string;
   type: "extension";
   event: ProviderInteractiveHarnessEvent;
 }
@@ -246,7 +261,8 @@ export type ProviderInteractiveHarnessExtensionEvent =
 export type AgentHarnessEvent =
   | AgentHarnessCoreEvent
   | CodexAppServerHarnessExtensionEvent
-  | ProviderInteractiveHarnessExtensionEvent;
+  | ProviderInteractiveHarnessExtensionEvent
+  | AgentHarnessCapabilityObservationEvent;
 
 export interface AgentHarnessCallbacks {
   onEvent?: (event: AgentHarnessEvent) => void;
@@ -308,6 +324,10 @@ export interface AgentHarness {
 }
 
 export interface AgentHarnessEmitter {
+  capability: (
+    capabilityId: ProviderCapabilityId,
+    available: boolean,
+  ) => void;
   text: (text: string, itemId?: string) => void;
   textSnapshot: (itemId: string, text: string) => void;
   activity: (
@@ -332,20 +352,26 @@ export interface AgentHarnessEmitter {
 export function createAgentHarnessEmitter(
   providerId: ProviderId,
   conversationId: string,
-  callbacks: AgentHarnessCallbacks = {},
-  runId = conversationId,
-  turnId: string | null = null,
+  callbacks: AgentHarnessCallbacks | undefined,
+  runId: string,
+  turnId: string,
   workspaceRoot?: string,
 ): AgentHarnessEmitter {
   const emit = (event: AgentHarnessEvent): void => {
     try {
-      callbacks.onEvent?.(event);
+      callbacks?.onEvent?.(event);
     } catch {
       // A UI callback must not interrupt provider execution.
     }
   };
   const base = { providerId, conversationId, runId, turnId };
   return {
+    capability: (capabilityId, available) => emit({
+      ...base,
+      type: "capability-observation",
+      capabilityId,
+      available,
+    }),
     text: (text, itemId) => emit({
       ...base,
       type: "text",
@@ -401,7 +427,7 @@ export function createAgentHarnessEmitter(
       type: "goal-cleared",
       sessionId,
     }),
-    subagent: (event) => emit({ ...base, type: "subagent", ...event }),
+    subagent: (event) => emit({ ...event, ...base, type: "subagent" }),
     codex: (event) => {
       if (providerId !== "codex") return;
       emit({

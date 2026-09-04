@@ -31,7 +31,7 @@ describe("Claude Agent SDK truthfulness boundaries", () => {
         })(), { interrupt: async () => { releaseStream(); } });
       },
     });
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { claude: process.execPath } },
       new AgentHarnessRegistry([harness]),
     );
@@ -80,7 +80,15 @@ describe("Claude Agent SDK truthfulness boundaries", () => {
     });
     const originalRun = value.run;
     await waitForImmediateCondition(() => requestId.length > 0);
-    expect(manager.respondToApproval("claude-approval-cancel-race", requestId, "approve")).toBe(true);
+    expect(manager.respondToApproval(
+      "claude-approval-cancel-race",
+      requestId,
+      "approve",
+      {
+        runId: "run-claude-approval-cancel-race",
+        turnId: "turn-claude-approval-cancel-race",
+      },
+    )).toBe(true);
     expect(manager.cancel("claude-approval-cancel-race")).toBe(true);
     await expect(permission).resolves.toMatchObject({ behavior: "deny", interrupt: true });
     await expect(originalRun).resolves.toMatchObject({ status: "cancelled" });
@@ -136,7 +144,7 @@ describe("Claude Agent SDK truthfulness boundaries", () => {
         yield claudeSuccessResult("Must not be accepted", "completed");
       })()),
     });
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { claude: process.execPath } },
       new AgentHarnessRegistry([harness]),
     );
@@ -164,7 +172,7 @@ describe("Claude Agent SDK truthfulness boundaries", () => {
         yield { ...claudeSuccessResult("Must not switch", "completed"), session_id: "session-second" };
       })()),
     });
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { claude: process.execPath } },
       new AgentHarnessRegistry([harness]),
     );

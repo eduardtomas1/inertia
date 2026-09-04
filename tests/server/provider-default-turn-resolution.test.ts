@@ -241,7 +241,7 @@ describe("provider-default turn resolution", () => {
     store.close();
   });
 
-  it("does not resume a Fast session when Standard is no longer forceable", async () => {
+  it("starts fresh when a Fast session can no longer be forced to Standard", async () => {
     const directory = await mkdtemp(join(tmpdir(), "inertia-provider-lost-fast-"));
     directories.push(directory);
     const workspace = join(directory, "workspace");
@@ -250,15 +250,18 @@ describe("provider-default turn resolution", () => {
       recoverInterruptedRuns: false,
     });
     const project = store.createProject("Lost Fast support", workspace);
+    const fastSelection = nativeModelSelection({
+      providerId: "codex",
+      modelId: "gpt-old",
+      providerOptions: { fastMode: "priority" },
+    });
     const conversation = store.createConversation(project.id, "Fast route", {
-      modelSelection: nativeModelSelection({
-        providerId: "codex",
-        modelId: "gpt-old",
-        providerOptions: { fastMode: "priority" },
-      }),
+      modelSelection: fastSelection,
     });
     store.updateConversation(conversation.id, {
       providerSessionId: "fast-session",
+      continuationIdentity:
+        resolveNativeModelRoute(fastSelection).continuationIdentity,
     });
     store.updateConversation(conversation.id, {
       modelSelection: nativeModelSelection({
@@ -271,7 +274,7 @@ describe("provider-default turn resolution", () => {
       harnessIdFor: (input: ProviderRunInput) => input.harnessId,
     } as unknown as TurnProviderRuntime;
 
-    expect(() => resolveTurnRequest({
+    const resolved = resolveTurnRequest({
       store,
       providers,
       hooks: {
@@ -285,7 +288,18 @@ describe("provider-default turn resolution", () => {
     }, {
       conversationId: conversation.id,
       content: "Do not silently inherit Fast.",
-    })).toThrow("Start a new chat to change response speed");
+    });
+    expect(resolved.input).toMatchObject({
+      providerSessionBefore: null,
+      continuationReasonCode: "incompatible-performance-mode-changed",
+    });
+    const queued = store.beginAgentTurn(resolved.input);
+    const adopted = resolved.adopt(queued);
+    expect(adopted.active.providerInput).toMatchObject({
+      sessionId: undefined,
+    });
+    expect(adopted.active.providerInput)
+      .not.toHaveProperty("performanceModeTransition");
     store.close();
   });
 

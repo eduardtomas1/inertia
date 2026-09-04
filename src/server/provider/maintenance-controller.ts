@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type {
+  ProviderMaintenanceDiagnosticState,
   ProviderMaintenanceOperation,
   ProviderMaintenanceProviderId,
   ProviderMaintenanceStatus,
@@ -27,6 +28,20 @@ import {
   type ProviderMaintenanceRunProgress,
   type ProviderMaintenanceRunResult,
 } from "./maintenance-runner";
+import {
+  ProviderInstallationAdmissionError,
+  ProviderInstallationLeaseCoordinator,
+  providerInstallationIdentity,
+  sameProviderInstallationBoundary,
+  sameProviderInstallationIdentity,
+  type ProviderInstallationBlocker,
+  type ProviderInstallationIdentity,
+  type ProviderInstallationMaintenanceLease,
+  type ProviderInstallationVerificationAuthority,
+} from "./installation-lease";
+import type {
+  ProviderMaintenanceJournalAuthority,
+} from "./maintenance-journal";
 
 const MAX_RETAINED_OPERATIONS = 64;
 
@@ -41,6 +56,7 @@ export interface ProviderMaintenanceControllerOptions {
   target(providerId: ProviderMaintenanceProviderId): ProviderMaintenanceTarget;
   refreshTarget(
     providerId: ProviderMaintenanceProviderId,
+    verificationAuthority?: ProviderInstallationVerificationAuthority,
   ): Promise<ProviderMaintenanceTarget>;
   onStatus?(status: ProviderMaintenanceStatus): void;
   onOperation?(operation: ProviderMaintenanceOperation): void;
@@ -48,6 +64,10 @@ export interface ProviderMaintenanceControllerOptions {
   resolveCapabilities?: (
     target: ProviderMaintenanceTarget,
   ) => Promise<ProviderMaintenanceCapabilities>;
+  capabilityAvailable?: (
+    target: ProviderMaintenanceTarget,
+    capabilities: ProviderMaintenanceCapabilities,
+  ) => boolean;
   runAction?: (
     action: ProviderMaintenanceUpdateAction,
     options: {
@@ -57,13 +77,40 @@ export interface ProviderMaintenanceControllerOptions {
   ) => Promise<ProviderMaintenanceRunResult>;
   now?: () => number;
   operationId?: () => string;
+  installationLeases?: ProviderInstallationLeaseCoordinator;
+  installationIdentity?: (
+    target: ProviderMaintenanceTarget,
+    capabilities: ProviderMaintenanceCapabilities,
+  ) => ProviderInstallationIdentity;
+  maintenanceAdmissionTimeoutMs?: number;
+  onBlockers?(
+    providerId: ProviderMaintenanceProviderId,
+    blockers: readonly ProviderInstallationBlocker[],
+  ): void;
+  invalidateInstallationEvidence?(
+    providerId: ProviderMaintenanceProviderId,
+    verificationAuthority: ProviderInstallationVerificationAuthority | null,
+    reason: "post-maintenance-verification" | "installation-uncertain",
+  ): void | Promise<void>;
+  /** Durable authority written before installation replacement is admitted. */
+  maintenanceJournal: ProviderMaintenanceJournalAuthority;
 }
 
 interface ActiveProviderMaintenanceOperation {
   abort: AbortController;
   operation: ProviderMaintenanceOperation;
   completion: Promise<void> | null;
+  installationIdentity: ProviderInstallationIdentity;
+  installationLease: ProviderInstallationMaintenanceLease | null;
+  verificationAuthority: ProviderInstallationVerificationAuthority | null;
+  journalQuarantined: boolean;
+  journalRetired: boolean;
 }
+
+type ProviderMaintenanceTerminalUpdate = Partial<ProviderMaintenanceOperation> & {
+  status: "succeeded" | "unchanged" | "failed" | "cancelled";
+  message: string;
+};
 
 class MaintenanceLockCancelled extends Error {}
 
@@ -152,15 +199,25 @@ export class ProviderMaintenanceController {
   >();
   private readonly reservations = new Set<ProviderMaintenanceProviderId>();
   private readonly coordinator = new ProviderMaintenanceCommandCoordinator();
+  private readonly installationLeases: ProviderInstallationLeaseCoordinator;
   private readonly latestVersions: ProviderLatestVersionCache;
   private readonly now: () => number;
   private readonly operationId: () => string;
+  private readonly maintenanceAdmissionTimeoutMs: number;
   private cleanupUnconfirmed = false;
+  private readonly quarantinedProviders =
+    new Set<ProviderMaintenanceProviderId>();
 
   constructor(private readonly options: ProviderMaintenanceControllerOptions) {
     this.latestVersions = options.latestVersions ?? new ProviderLatestVersionCache();
+    this.installationLeases = options.installationLeases
+      ?? new ProviderInstallationLeaseCoordinator();
     this.now = options.now ?? Date.now;
     this.operationId = options.operationId ?? randomUUID;
+    this.maintenanceAdmissionTimeoutMs = Math.max(
+      1,
+      Math.min(options.maintenanceAdmissionTimeoutMs ?? 10_000, 60_000),
+    );
   }
 
   current(
@@ -202,6 +259,45 @@ export class ProviderMaintenanceController {
     });
   }
 
+  /** Bounded diagnostic state with no operation or installation identity. */
+  diagnosticStates(): ProviderMaintenanceDiagnosticState[] {
+    return PROVIDER_MAINTENANCE_PROVIDER_IDS.map((providerId) => {
+      const operation = this.active.get(providerId)?.operation;
+      const state: ProviderMaintenanceDiagnosticState["state"] =
+        this.quarantinedProviders.has(providerId)
+          ? "quarantined"
+          : this.active.get(providerId)?.verificationAuthority
+            ? "verifying"
+            : operation?.status === "running"
+              ? "running"
+              : operation?.status === "queued"
+                || this.reservations.has(providerId)
+                ? "queued"
+                : "idle";
+      return { providerId, state };
+    });
+  }
+
+  hasBlockingAuthority(providerId?: ProviderMaintenanceProviderId): boolean {
+    let journalPending = true;
+    try {
+      journalPending = this.options.maintenanceJournal.pending().some(
+        (record) => !providerId
+          || record.installationIdentity.providerId === providerId,
+      );
+    } catch {
+      // An unreadable or integrity-invalid journal is itself a blocker.
+    }
+    return (providerId ? this.active.has(providerId) : this.active.size > 0)
+      || (providerId
+        ? this.reservations.has(providerId)
+        : this.reservations.size > 0)
+      || (providerId
+        ? this.quarantinedProviders.has(providerId)
+        : this.quarantinedProviders.size > 0)
+      || journalPending;
+  }
+
   async refresh(
     providerIds: readonly ProviderMaintenanceProviderId[],
     force = false,
@@ -228,7 +324,15 @@ export class ProviderMaintenanceController {
           "This installation cannot be updated safely from Inertia. Review the official update instructions.",
         );
       }
-      const advisory = await this.refreshOne(providerId, false);
+      if (
+        this.options.capabilityAvailable
+        && !this.options.capabilityAvailable(target, capabilities)
+      ) {
+        throw new ProviderMaintenanceError(
+          "The verified provider capability contract does not authorize an in-app update.",
+        );
+      }
+      const installationIdentity = this.identity(target, capabilities);
       const operation: ProviderMaintenanceOperation = {
         id: this.operationId(),
         providerId,
@@ -237,7 +341,7 @@ export class ProviderMaintenanceController {
         finishedAt: null,
         beforeVersion: target.installedVersion,
         afterVersion: null,
-        targetVersion: advisory.latestVersion,
+        targetVersion: this.statuses.get(providerId)?.latestVersion ?? null,
         message: "Waiting to start the provider update.",
         output: null,
         outputTruncated: false,
@@ -246,11 +350,42 @@ export class ProviderMaintenanceController {
         abort: new AbortController(),
         operation,
         completion: null,
+        installationIdentity,
+        installationLease: null,
+        verificationAuthority: null,
+        journalQuarantined: false,
+        journalRetired: false,
       };
+      if (!this.options.maintenanceJournal.begin(
+        operation.id,
+        installationIdentity,
+      )) {
+        throw new ProviderMaintenanceError(
+          "Provider maintenance ownership could not be recorded durably.",
+        );
+      }
       this.active.set(providerId, active);
       this.rememberOperation(operation);
       this.emitOperation(operation);
-      active.completion = this.executeUpdate(active, capabilities.update);
+      const lease = this.installationLeases.acquireMaintenance(
+        installationIdentity,
+        {
+          operationId: operation.id,
+          signal: active.abort.signal,
+          waitTimeoutMs: this.maintenanceAdmissionTimeoutMs,
+          onBlockers: (blockers) => {
+            this.options.onBlockers?.(providerId, blockers);
+            this.updateOperation(active, {
+              message: this.blockedMessage(blockers),
+            });
+          },
+        },
+      );
+      active.completion = this.executeUpdate(
+        active,
+        capabilities,
+        lease,
+      );
       return operation;
     } finally {
       this.reservations.delete(providerId);
@@ -275,6 +410,12 @@ export class ProviderMaintenanceController {
     );
     if (this.cleanupUnconfirmed) {
       throw new Error("Provider maintenance process cleanup could not be confirmed.");
+    }
+    if (this.quarantinedProviders.size > 0) {
+      throw new Error("Provider maintenance installation quarantine remains unresolved.");
+    }
+    if (this.options.maintenanceJournal.pending().length > 0) {
+      throw new Error("Provider maintenance journal ownership remains unresolved.");
     }
   }
 
@@ -324,42 +465,152 @@ export class ProviderMaintenanceController {
 
   private async executeUpdate(
     active: ActiveProviderMaintenanceOperation,
-    action: ProviderMaintenanceUpdateAction,
+    capabilities: ProviderMaintenanceCapabilities,
+    leaseAcquisition: Promise<ProviderInstallationMaintenanceLease>,
   ): Promise<void> {
     const { providerId } = active.operation;
+    const action = capabilities.update!;
+    let commandStarted = false;
+    let result: ProviderMaintenanceRunResult | null = null;
+    let installationAuthoritySettled = false;
     try {
-      const result = await this.coordinator.run(
+      const lease = await leaseAcquisition;
+      active.installationLease = lease;
+      const beforeAction = this.identity(
+        this.options.target(providerId),
+        capabilities,
+      );
+      if (!sameProviderInstallationIdentity(
+        active.installationIdentity,
+        beforeAction,
+      )) {
+        this.quarantineInstallation(
+          active,
+          "installation-changed-before-maintenance",
+          beforeAction,
+        );
+        await this.invalidateUncertainInstallationEvidence(active);
+        installationAuthoritySettled = true;
+        this.finishOperation(active, {
+          status: "failed",
+          message: "The provider installation changed before the update could start. It remains quarantined for verification.",
+        });
+        return;
+      }
+
+      const advisory = await this.refreshOne(providerId, false);
+      result = await this.coordinator.run(
         action.lockKey,
         active.abort.signal,
         async () => {
+          commandStarted = true;
           this.updateOperation(active, {
             status: "running",
             startedAt: this.isoNow(),
+            targetVersion: advisory.latestVersion,
             message: "Updating provider.",
           });
           return await this.runAction(action, active);
         },
       );
       this.cleanupUnconfirmed ||= !result.cleanupConfirmed;
-      if (result.status === "cancelled") {
+      if (!result.cleanupConfirmed) {
+        this.quarantineInstallation(
+          active,
+          "maintenance-process-cleanup-unconfirmed",
+        );
+        await this.invalidateUncertainInstallationEvidence(active);
+        installationAuthoritySettled = true;
         this.finishOperation(active, {
-          status: "cancelled",
-          message: result.message,
+          status: "failed",
+          message: "Provider update cleanup could not be confirmed. The installation remains quarantined.",
           output: result.output,
           outputTruncated: result.outputTruncated,
         });
+        return;
+      }
+      if (!await this.beginPostMaintenanceVerification(active)) {
+        installationAuthoritySettled = true;
+        this.finishOperation(active, {
+          status: "failed",
+          message: "The provider update ended without exact verification authority. The installation remains quarantined.",
+        });
+        return;
+      }
+      if (result.status === "cancelled") {
+        const observed = await this.revalidateUnchangedInstallation(
+          active,
+          capabilities,
+        );
+        if (!observed) {
+          installationAuthoritySettled = true;
+          return;
+        }
+        const completed = await this.completeInstallationAuthority(
+          active,
+          observed,
+        );
+        installationAuthoritySettled = true;
+        this.finishOperation(active, completed
+          ? {
+              status: "cancelled",
+              message: result.message,
+              output: result.output,
+              outputTruncated: result.outputTruncated,
+            }
+          : {
+              status: "failed",
+              message: "The cancelled update could not release exact installation authority. The installation remains quarantined.",
+            });
         return;
       }
       if (result.status !== "succeeded") {
-        this.finishOperation(active, {
-          status: "failed",
-          message: result.message,
-          output: result.output,
-          outputTruncated: result.outputTruncated,
-        });
+        const observed = await this.revalidateUnchangedInstallation(
+          active,
+          capabilities,
+        );
+        if (!observed) {
+          installationAuthoritySettled = true;
+          return;
+        }
+        const completed = await this.completeInstallationAuthority(
+          active,
+          observed,
+        );
+        installationAuthoritySettled = true;
+        this.finishOperation(active, completed
+          ? {
+              status: "failed",
+              message: result.message,
+              output: result.output,
+              outputTruncated: result.outputTruncated,
+            }
+          : {
+              status: "failed",
+              message: "The failed update could not release exact installation authority. The installation remains quarantined.",
+              output: result.output,
+              outputTruncated: result.outputTruncated,
+            });
         return;
       }
-      await this.verifyUpdate(active, result);
+      const verified = await this.verifyUpdate(active, result, capabilities);
+      if (!verified) {
+        installationAuthoritySettled = true;
+        return;
+      }
+      const completed = await this.completeInstallationAuthority(
+        active,
+        verified.observedIdentity,
+      );
+      installationAuthoritySettled = true;
+      this.finishOperation(active, completed
+        ? verified.terminal
+        : {
+            status: "failed",
+            message: "The provider update was verified, but exact installation authority could not be released. The installation remains quarantined.",
+            output: result.output,
+            outputTruncated: result.outputTruncated,
+          });
     } catch (error) {
       if (error instanceof MaintenanceLockCancelled || active.abort.signal.aborted) {
         this.finishOperation(active, {
@@ -369,12 +620,43 @@ export class ProviderMaintenanceController {
       } else {
         this.finishOperation(active, {
           status: "failed",
-          message: error instanceof ProviderMaintenanceError
-            ? error.message
-            : "Provider update failed.",
+          message: this.maintenanceErrorMessage(error),
         });
       }
     } finally {
+      if (active.installationLease && !installationAuthoritySettled) {
+        if (!commandStarted) {
+          installationAuthoritySettled = await this.completeInstallationAuthority(
+            active,
+            active.installationIdentity,
+          );
+        } else {
+          this.quarantineInstallation(
+            active,
+            result?.cleanupConfirmed === true
+              ? "maintenance-terminal-state-unverified"
+              : "maintenance-process-cleanup-unconfirmed",
+          );
+          this.cleanupUnconfirmed ||= result?.cleanupConfirmed !== true;
+          await this.invalidateUncertainInstallationEvidence(active);
+          installationAuthoritySettled = true;
+        }
+      }
+      if (
+        !active.installationLease
+        && !commandStarted
+        && !active.journalQuarantined
+        && !active.journalRetired
+      ) {
+        active.journalRetired = this.options.maintenanceJournal.abandonUnadmitted(
+          active.operation.id,
+          active.installationIdentity,
+        );
+        if (!active.journalRetired) {
+          this.quarantinedProviders.add(active.operation.providerId);
+          active.journalQuarantined = true;
+        }
+      }
       if (this.active.get(providerId)?.operation.id === active.operation.id) {
         this.active.delete(providerId);
       }
@@ -384,18 +666,50 @@ export class ProviderMaintenanceController {
   private async verifyUpdate(
     active: ActiveProviderMaintenanceOperation,
     result: ProviderMaintenanceRunResult,
-  ): Promise<void> {
+    capabilities: ProviderMaintenanceCapabilities,
+  ): Promise<{
+    observedIdentity: ProviderInstallationIdentity;
+    terminal: ProviderMaintenanceTerminalUpdate;
+  } | null> {
     let refreshed: ProviderMaintenanceTarget;
     try {
-      refreshed = await this.options.refreshTarget(active.operation.providerId);
+      refreshed = await this.options.refreshTarget(
+        active.operation.providerId,
+        active.verificationAuthority ?? undefined,
+      );
     } catch {
+      this.quarantineInstallation(
+        active,
+        "maintenance-post-update-verification-unavailable",
+      );
+      await this.invalidateUncertainInstallationEvidence(active);
       this.finishOperation(active, {
         status: "unchanged",
-        message: "Update completed, but Inertia could not verify the installed version.",
+        message: "Update completed, but Inertia could not verify the installed version. The installation remains quarantined.",
         output: result.output,
         outputTruncated: result.outputTruncated,
       });
-      return;
+      return null;
+    }
+    const observedIdentity = this.identity(refreshed, capabilities);
+    if (!sameProviderInstallationBoundary(
+      active.installationIdentity,
+      observedIdentity,
+    )) {
+      this.quarantineInstallation(
+        active,
+        "maintenance-changed-installation-scope",
+        observedIdentity,
+      );
+      await this.invalidateUncertainInstallationEvidence(active);
+      this.finishOperation(active, {
+        status: "failed",
+        afterVersion: refreshed.installedVersion,
+        message: "The update resolved to a different provider installation. Both installations remain quarantined for verification.",
+        output: result.output,
+        outputTruncated: result.outputTruncated,
+      });
+      return null;
     }
     const advisory = await this.refreshOne(active.operation.providerId, true);
     const targetReached = advisory.versionStatus === "current";
@@ -403,17 +717,222 @@ export class ProviderMaintenanceController {
       refreshed.installedVersion,
       active.operation.beforeVersion,
     );
-    this.finishOperation(active, {
-      status: targetReached || (versionChanged !== null && versionChanged > 0)
-        ? "succeeded"
-        : "unchanged",
-      afterVersion: refreshed.installedVersion,
-      message: targetReached || (versionChanged !== null && versionChanged > 0)
-        ? "Provider updated."
-        : "Update completed, but the installed version still appears unchanged.",
-      output: result.output,
-      outputTruncated: result.outputTruncated,
+    return {
+      observedIdentity,
+      terminal: {
+        status: targetReached || (versionChanged !== null && versionChanged > 0)
+          ? "succeeded"
+          : "unchanged",
+        afterVersion: refreshed.installedVersion,
+        message: targetReached || (versionChanged !== null && versionChanged > 0)
+          ? "Provider updated."
+          : "Update completed, but the installed version still appears unchanged.",
+        output: result.output,
+        outputTruncated: result.outputTruncated,
+      },
+    };
+  }
+
+  private async revalidateUnchangedInstallation(
+    active: ActiveProviderMaintenanceOperation,
+    capabilities: ProviderMaintenanceCapabilities,
+  ): Promise<ProviderInstallationIdentity | null> {
+    let refreshed: ProviderMaintenanceTarget;
+    try {
+      refreshed = await this.options.refreshTarget(
+        active.operation.providerId,
+        active.verificationAuthority ?? undefined,
+      );
+    } catch {
+      this.quarantineInstallation(
+        active,
+        "maintenance-post-action-verification-unavailable",
+      );
+      await this.invalidateUncertainInstallationEvidence(active);
+      this.finishOperation(active, {
+        status: "failed",
+        message: "The provider update ended, but the installation could not be reverified. It remains quarantined.",
+      });
+      return null;
+    }
+    const observed = this.identity(refreshed, capabilities);
+    if (!sameProviderInstallationIdentity(
+      active.installationIdentity,
+      observed,
+    )) {
+      this.quarantineInstallation(
+        active,
+        "installation-changed-after-unsuccessful-maintenance",
+        observed,
+      );
+      await this.invalidateUncertainInstallationEvidence(active);
+      this.finishOperation(active, {
+        status: "failed",
+        afterVersion: refreshed.installedVersion,
+        message: "The provider installation changed without a verified successful update. It remains quarantined.",
+      });
+      return null;
+    }
+    return observed;
+  }
+
+  private async beginPostMaintenanceVerification(
+    active: ActiveProviderMaintenanceOperation,
+  ): Promise<boolean> {
+    const lease = active.installationLease;
+    if (!lease) return false;
+    const authority = lease.authorizePostMaintenanceVerification({
+      cleanupConfirmed: true,
     });
+    if (!authority) {
+      this.quarantineInstallation(
+        active,
+        "post-maintenance-verification-authority-unavailable",
+      );
+      await this.invalidateUncertainInstallationEvidence(active);
+      return false;
+    }
+    active.verificationAuthority = authority;
+    try {
+      await this.options.invalidateInstallationEvidence?.(
+        active.operation.providerId,
+        authority,
+        "post-maintenance-verification",
+      );
+      return true;
+    } catch {
+      this.quarantineInstallation(
+        active,
+        "maintenance-evidence-invalidation-failed",
+      );
+      await this.invalidateUncertainInstallationEvidence(active);
+      return false;
+    }
+  }
+
+  private async completeInstallationAuthority(
+    active: ActiveProviderMaintenanceOperation,
+    observedIdentity: ProviderInstallationIdentity,
+  ): Promise<boolean> {
+    const lease = active.installationLease;
+    if (!lease) return false;
+    active.verificationAuthority ??=
+      lease.authorizePostMaintenanceVerification({ cleanupConfirmed: true });
+    if (!active.verificationAuthority) {
+      this.quarantineInstallation(
+        active,
+        "post-maintenance-verification-authority-unavailable",
+        observedIdentity,
+      );
+      await this.invalidateUncertainInstallationEvidence(active);
+      return false;
+    }
+    if (!this.options.maintenanceJournal.markVerified(
+      active.operation.id,
+      observedIdentity,
+    )) {
+      this.quarantineInstallation(
+        active,
+        "maintenance-terminal-state-not-durable",
+        observedIdentity,
+      );
+      await this.invalidateUncertainInstallationEvidence(active);
+      return false;
+    }
+    const completed = lease.complete({
+      cleanupConfirmed: true,
+      stateDurable: true,
+      observedIdentity,
+    });
+    active.installationLease = null;
+    if (!completed) {
+      this.quarantinedProviders.add(active.operation.providerId);
+      await this.invalidateUncertainInstallationEvidence(active);
+      return false;
+    }
+    active.journalRetired = this.options.maintenanceJournal.retireVerified(
+      active.operation.id,
+      observedIdentity,
+    );
+    if (!active.journalRetired) {
+      this.quarantinedProviders.add(active.operation.providerId);
+      active.journalQuarantined = true;
+      this.installationLeases.quarantineObservation(
+        observedIdentity,
+        { kind: "startup-recovery", operationId: active.operation.id },
+        "maintenance-journal-retirement-unconfirmed",
+      );
+      await this.invalidateUncertainInstallationEvidence(active);
+      return false;
+    }
+    return true;
+  }
+
+  private quarantineInstallation(
+    active: ActiveProviderMaintenanceOperation,
+    reason: string,
+    observedIdentity?: ProviderInstallationIdentity,
+  ): void {
+    this.quarantinedProviders.add(active.operation.providerId);
+    active.journalQuarantined = true;
+    active.installationLease?.quarantine(reason, observedIdentity);
+    active.installationLease = null;
+  }
+
+  private async invalidateUncertainInstallationEvidence(
+    active: ActiveProviderMaintenanceOperation,
+  ): Promise<void> {
+    try {
+      await this.options.invalidateInstallationEvidence?.(
+        active.operation.providerId,
+        null,
+        "installation-uncertain",
+      );
+    } catch {
+      // Quarantine is already latched. Cache invalidation failure cannot make
+      // the installation eligible for new work or continuation.
+    }
+  }
+
+  private identity(
+    target: ProviderMaintenanceTarget,
+    capabilities: ProviderMaintenanceCapabilities,
+  ): ProviderInstallationIdentity {
+    if (this.options.installationIdentity) {
+      return this.options.installationIdentity(target, capabilities);
+    }
+    return providerInstallationIdentity({
+      providerId: target.providerId,
+      executable: target.executable,
+      installationRootIdentity: null,
+      packageIdentity: capabilities.packageName,
+      version: target.installedVersion,
+      environmentIdentity: "runtime-provider-environment",
+    });
+  }
+
+  private blockedMessage(
+    blockers: readonly ProviderInstallationBlocker[],
+  ): string {
+    const counts = new Map<string, number>();
+    for (const blocker of blockers) {
+      counts.set(blocker.kind, (counts.get(blocker.kind) ?? 0) + 1);
+    }
+    const summary = [...counts]
+      .map(([kind, count]) => `${count} ${kind}`)
+      .join(", ");
+    return summary
+      ? `Waiting for provider installation owners to finish (${summary}).`
+      : "Waiting for provider installation owners to finish.";
+  }
+
+  private maintenanceErrorMessage(error: unknown): string {
+    if (error instanceof ProviderMaintenanceError) return error.message;
+    if (error instanceof ProviderInstallationAdmissionError) {
+      const blocked = this.blockedMessage(error.blockers);
+      return error.blockers.length > 0 ? blocked : error.message;
+    }
+    return "Provider update failed.";
   }
 
   private async capabilities(
@@ -460,10 +979,7 @@ export class ProviderMaintenanceController {
 
   private finishOperation(
     active: ActiveProviderMaintenanceOperation,
-    update: Partial<ProviderMaintenanceOperation> & {
-      status: "succeeded" | "unchanged" | "failed" | "cancelled";
-      message: string;
-    },
+    update: ProviderMaintenanceTerminalUpdate,
   ): void {
     this.updateOperation(active, {
       ...update,

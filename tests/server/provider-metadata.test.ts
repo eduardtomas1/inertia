@@ -1,3 +1,4 @@
+// @inertia-test-suite portable
 import { writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
@@ -282,7 +283,7 @@ describe("provider metadata cache", () => {
         throw new ProcessTreeTerminationError("Provider metadata process tree");
       },
     });
-    const manager = new ProviderManager({ metadataCache: cache });
+    const manager = ProviderManager.createForTests({ metadataCache: cache });
 
     await expect(cache.metadata(
       "codex",
@@ -495,7 +496,7 @@ process.exit(1);
 `);
     writeNodeSubcommand(root, "app-server", `console.log("codex app-server - Run the app server");`);
     const cache = new ProviderMetadataCache({ read: async () => ({ models: [model("model-a")] }) });
-    const manager = new ProviderManager({ commands: { codex: command }, metadataCache: cache });
+    const manager = ProviderManager.createForTests({ commands: { codex: command }, metadataCache: cache });
 
     await manager.detect("codex", { cwd: root });
     await manager.metadata("codex", root);

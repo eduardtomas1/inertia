@@ -50,7 +50,10 @@ import {
 } from "../../src/server/provider/agent-harness";
 import { AgentHarnessRegistry } from "../../src/server/provider/agent-harness-registry";
 import { CLAUDE_AGENT_SDK_CAPABILITIES } from "../../src/server/provider/claude-agent-sdk-harness";
-import type { ProviderRunResult } from "../../src/server/provider/contracts";
+import {
+  providerRunTerminal,
+  type ProviderRunResult,
+} from "../../src/server/provider/contracts";
 import type { RunningRuntime } from "../../src/server";
 import { startTestRuntime as startRuntime } from "../support/test-runtime";
 
@@ -100,7 +103,9 @@ class EventQueue {
           `Timed out waiting for Kimi runtime event; pending: ${
             this.events.map((event) => event.type === "request.error"
               ? `${event.type}:${event.requestId}:${event.message}`
-              : event.type).join(", ") || "none"
+              : event.type === "agent.failed"
+                ? `${event.type}:${event.message}`
+                : event.type).join(", ") || "none"
           }.`,
         ));
       }, 8_000);
@@ -203,7 +208,7 @@ function capturingClaudeHarness(
         conversationId,
         options.callbacks,
         input.runId,
-        input.turnId ?? null,
+        input.turnId,
       );
       const sessionId = "kimi-session-1";
       emitter.status("starting");
@@ -227,9 +232,7 @@ function capturingClaudeHarness(
       });
       emitter.status("completed");
       const result: ProviderRunResult = {
-        providerId: "claude",
-        conversationId,
-        status: "completed",
+        ...providerRunTerminal(input, "completed"),
         sessionId,
         text: "Kimi runtime lifecycle complete.",
         textTruncated: false,

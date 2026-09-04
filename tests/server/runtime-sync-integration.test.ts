@@ -236,6 +236,9 @@ describe("runtime incremental synchronization", () => {
       (event): event is Extract<ServerEvent, { type: "server.welcome" }> =>
         event.type === "server.welcome",
     );
+    expect(refreshed.sync?.runtimeGeneration).toBe(
+      published.sync.runtimeGeneration,
+    );
     expect(refreshed.sync?.latestSequence).toBeGreaterThanOrEqual(
       published.sync.latestSequence,
     );

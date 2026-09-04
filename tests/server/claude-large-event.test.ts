@@ -1,3 +1,4 @@
+// @inertia-test-suite portable
 import { existsSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -166,7 +167,7 @@ describe("Claude Agent SDK large event boundary", () => {
           { close: () => { closeCalls += 1; } },
         ),
       });
-      const manager = new ProviderManager(
+      const manager = ProviderManager.createForTests(
         { commands: { claude: process.execPath } },
         new AgentHarnessRegistry([harness]),
       );
@@ -429,7 +430,7 @@ describe("Claude Agent SDK large event boundary", () => {
         );
       },
     });
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { claude: process.execPath }, cancelGraceMs: 500 },
       new AgentHarnessRegistry([harness]),
     );
@@ -519,7 +520,7 @@ describe("Claude Agent SDK large event boundary", () => {
         );
       },
     });
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { claude: process.execPath } },
       new AgentHarnessRegistry([harness]),
     );

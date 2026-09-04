@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 
 import {
-  isAgentTurnTerminalStatus,
   type AgentApprovalDecision,
   type AgentApprovalRequest,
   type AgentInputRequest,
@@ -60,7 +59,11 @@ import { hasActiveTurnCheckout, providerConversationIds } from "./turn-checkout-
 import { settleInactiveDuoTurn } from "../duo/duo-inactive-turn-settlement";
 import { TurnNativeGoalCoordinator } from "./turn-native-goal-coordinator";
 import { TurnNativeGoalMutationGate } from "./turn-native-goal-mutation-gate";
-import { providerFailureCause } from "./turn-provider-result";
+import {
+  providerEventMatchesActiveTurn,
+  providerFailureCause,
+  providerTerminalResultMatchesActiveTurn,
+} from "./turn-provider-result";
 import { TurnFollowUpCoordinator } from "./turn-follow-up-coordinator";
 import { TurnTimeoutCoordinator } from "./turn-timeout-coordinator";
 import { TurnRunStateCoordinator } from "./turn-run-state-coordinator";
@@ -366,7 +369,7 @@ export class TurnController {
       allowProviderStop
       && this.providers.isRunning(conversationId)
     ) {
-      if (!this.providers.ownsRun?.(conversationId, {
+      if (!this.providers.ownsRun(conversationId, {
         runId: turn.runId,
         turnId,
       })) return false;
@@ -401,7 +404,8 @@ export class TurnController {
       conversationId,
       { runId: turn.runId, turnId },
       {
-        cleanupAlreadyConfirmed: providerRunOwnershipConfirmed,
+        cleanupAlreadyConfirmed:
+          providerRunOwnershipConfirmed || turn.status === "queued",
         allowStop: allowProviderStop,
       },
     );
@@ -792,11 +796,20 @@ export class TurnController {
         this.now(),
       );
       active.providerRunStarted = true;
+      const capabilityContract = this.hooks.providerInfo().find(
+        ({ id }) => id === active.providerInput.providerId,
+      )?.capabilityContract;
+      const hostToolsAttested = capabilityContract !== undefined
+        && capabilityContract.installationVerified
+        && capabilityContract.hostToolBridgeAvailable
+        && capabilityContract.harnessId === active.providerInput.harnessId;
       const result = this.providers.run(active.providerInput, {
-        hostTools: this.hooks.hostToolsForTurn?.({
-          conversation: active.conversation,
-          turn: active.turn,
-        }),
+        hostTools: hostToolsAttested
+          ? this.hooks.hostToolsForTurn?.({
+              conversation: active.conversation,
+              turn: active.turn,
+            })
+          : undefined,
         onStarted: () => {
           if (active.runState.isTerminal() || this.closing) {
             this.providers.cancel(active.conversation.id);
@@ -837,9 +850,7 @@ export class TurnController {
           );
         },
       ).finally(() => {
-        const cleanupConfirmed = !this.providers.isRunning(
-          active.conversation.id,
-        );
+        const cleanupConfirmed = !active.providerRunStarted;
         if (cleanupConfirmed) {
           this.store.providerRunOwnership.clear(
             active.turn.id,
@@ -1051,7 +1062,9 @@ export class TurnController {
    */
   handleProviderEvent(event: ProviderEvent): boolean {
     const active = this.activeByConversation.get(event.conversationId);
-    if (!active || !this.accepts(active, event)) return false;
+    if (!active || !providerEventMatchesActiveTurn(this.store, active, event)) {
+      return false;
+    }
     try {
       this.timeouts.activity(active);
       const currentRunState = active.runState.snapshot().state;
@@ -1080,31 +1093,19 @@ export class TurnController {
     }
   }
 
-  private accepts(
-    active: ActiveTurn,
-    event: Pick<ProviderEvent, "providerId" | "conversationId" | "runId" | "turnId">,
-  ): boolean {
-    if (
-      !active.runState.acceptsProviderEvents()
-      || event.providerId !== active.turn.providerId
-      || event.conversationId !== active.conversation.id
-      || event.runId !== active.turn.runId
-      || event.turnId !== active.turn.id
-    ) return false;
-    try {
-      const authoritative = this.store.assertAgentTurnIdentity(
-        active.conversation.id,
-        active.turn.runId,
-        active.turn.id,
-      );
-      return !isAgentTurnTerminalStatus(authoritative.status);
-    } catch {
-      return false;
-    }
-  }
-
   private handleProviderResult(active: ActiveTurn, result: ProviderRunResult): void {
-    if (active.runState.isTerminal()) return;
+    const rootAlreadyTerminal = active.runState.isTerminal();
+    if (!providerTerminalResultMatchesActiveTurn(active, result)) {
+      if (rootAlreadyTerminal) return;
+      const message = "The provider returned a terminal result for a different run owner.";
+      this.settle(active, "failed", "provider-error", message, {
+        reason: "malformed-protocol",
+        message,
+        phase: active.turn.status,
+        terminalEvent: "result/identity-mismatch",
+      });
+      return;
+    }
     if (result.cleanupConfirmed) {
       // A result carrying cleanup confirmation is the provider manager's
       // exact-process exit receipt. It is stronger than a potentially stale
@@ -1112,6 +1113,8 @@ export class TurnController {
       active.providerRunStarted = false;
       this.store.providerRunOwnership.clear(active.turn.id, active.turn.runId);
     }
+    // Exact cleanup stays authoritative; the result cannot replace the root outcome.
+    if (rootAlreadyTerminal) return;
     if (result.status === "completed") {
       this.hooks.testOnlyStreamingTrace?.mark("provider-completion-received");
     }

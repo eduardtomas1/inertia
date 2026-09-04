@@ -29,7 +29,11 @@ import {
   type AgentHarnessStartOptions,
   type ClaudeAgentSdkHarnessCapabilities,
 } from "./agent-harness";
-import type { ProviderRunFailure, ProviderRunResult } from "./contracts";
+import {
+  providerRunTerminal,
+  type ProviderRunFailure,
+  type ProviderRunResult,
+} from "./contracts";
 import type { AgentApprovalDecision, AgentPlanStep } from "./interactions";
 import { providerFailureMessage } from "./adapters";
 import { ClaudeDelegateLifecycle } from "./claude-delegate-lifecycle";
@@ -222,13 +226,13 @@ function startClaudeRun(
   terminalSubagentDrainTimeoutMs: number,
   skillFilesystem: ClaudeSkillFilesystemTestSeam | undefined,
 ): AgentHarnessRun {
-  const conversationId = options.input.conversationId ?? options.input.threadId ?? "";
+  const conversationId = options.input.conversationId;
   const emitter = createAgentHarnessEmitter(
     "claude",
     conversationId,
     options.callbacks,
-    options.input.runId ?? conversationId,
-    options.input.turnId ?? null,
+    options.input.runId,
+    options.input.turnId,
     options.input.cwd,
   );
   const text = new CappedProviderBuffer(MAX_RESULT_TEXT_CHARS);
@@ -861,7 +865,10 @@ function startClaudeRun(
       signal: child?.signalCode ?? null,
     };
     emitter.status(terminal.status, terminal.error);
-    return terminal;
+    return {
+      ...terminal,
+      ...providerRunTerminal(options.input, terminal.status, terminal.failure),
+    };
   });
 
   function finishResult(
@@ -874,9 +881,7 @@ function startClaudeRun(
       ? text.toString()
       : textOverride.slice(0, MAX_RESULT_TEXT_CHARS);
     return {
-      providerId: "claude",
-      conversationId,
-      status,
+      ...providerRunTerminal(options.input, status, failure),
       ...(sessionId ? { sessionId } : {}),
       text: resultText,
       textTruncated: textOverride === undefined

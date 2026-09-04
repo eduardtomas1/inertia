@@ -95,16 +95,14 @@ function invalidateStaleContextUsage(
 async function confirmCompactionCleanup(
   dependencies: ConversationCompactionCommandDependencies,
   conversationId: string,
-  runId: string,
+  identity: { runId: string; turnId: string },
 ): Promise<boolean> {
   try {
     const stopped = await dependencies.providers.stopOwned(
       conversationId,
-      { runId, turnId: null },
+      identity,
     );
-    return stopped === "settled"
-      || (stopped === "missing"
-        && !dependencies.providers.isRunning(conversationId));
+    return stopped === "settled";
   } catch {
     return false;
   }
@@ -219,6 +217,9 @@ export function createConversationCompactionCommandHandler(
     }
     let releaseAuthority = true;
     const compactionRunId = randomUUID();
+    // Compaction does not create a durable AgentTurn, but it still receives an
+    // independently allocated exact turn identity for provider correlation.
+    const compactionTurnId = randomUUID();
     try {
       if (
         dependencies.turns.isActive(conversation.id)
@@ -248,6 +249,7 @@ export function createConversationCompactionCommandHandler(
           continuationIdentity: route.continuationIdentity,
           conversationId: conversation.id,
           runId: compactionRunId,
+          turnId: compactionTurnId,
           cwd: dependencies.store.conversationPath(conversation.id),
           prompt: "/compact",
           model: selection.modelId === "provider-default"
@@ -268,7 +270,7 @@ export function createConversationCompactionCommandHandler(
         if (!await confirmCompactionCleanup(
           dependencies,
           conversation.id,
-          compactionRunId,
+          { runId: compactionRunId, turnId: compactionTurnId },
         )) {
           releaseAuthority = false;
           throw new RuntimeRequestError(
@@ -282,7 +284,7 @@ export function createConversationCompactionCommandHandler(
         && !await confirmCompactionCleanup(
           dependencies,
           conversation.id,
-          compactionRunId,
+          { runId: compactionRunId, turnId: compactionTurnId },
         )
       ) {
         releaseAuthority = false;

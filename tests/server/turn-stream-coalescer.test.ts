@@ -13,11 +13,12 @@ import type {
   ServerEvent,
 } from "../../src/shared/contracts";
 import { RuntimeStore } from "../../src/server/database";
-import type {
-  ProviderEvent,
-  ProviderRunCallbacks,
-  ProviderRunInput,
-  ProviderRunResult,
+import {
+  providerRunTerminal,
+  type ProviderEvent,
+  type ProviderRunCallbacks,
+  type ProviderRunInput,
+  type ProviderRunResult,
 } from "../../src/server/provider/contracts";
 import {
   TurnController,
@@ -104,6 +105,9 @@ class ClockScheduler implements TurnTimerScheduler {
 }
 
 class ControlledProvider implements TurnProviderRuntime {
+  providerCapabilityAvailable(): boolean {
+    return true;
+  }
   input: ProviderRunInput | null = null;
   callbacks: ProviderRunCallbacks | null = null;
   cancelCount = 0;
@@ -130,10 +134,9 @@ class ControlledProvider implements TurnProviderRuntime {
 
   resolve(result: Partial<ProviderRunResult> = {}): void {
     if (!this.input || !this.resolveRun) throw new Error("Provider is not running.");
+    const status = result.status ?? "completed";
     this.resolveRun({
-      providerId: this.input.providerId,
-      conversationId: this.input.conversationId ?? this.input.threadId,
-      status: "completed",
+      ...providerRunTerminal(this.input, status, result.failure),
       text: "",
       textTruncated: false,
       exitCode: 0,
@@ -154,6 +157,15 @@ class ControlledProvider implements TurnProviderRuntime {
 
   isRunning(): boolean {
     return this.input !== null;
+  }
+
+  ownsRun(
+    conversationId: string,
+    identity: { runId: string; turnId: string },
+  ): boolean {
+    return this.input?.conversationId === conversationId
+      && this.input.runId === identity.runId
+      && this.input.turnId === identity.turnId;
   }
 
   respondToApproval(

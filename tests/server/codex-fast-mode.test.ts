@@ -1,3 +1,4 @@
+// @inertia-test-suite portable
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -88,7 +89,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   }
 });
 `);
-    const manager = new ProviderManager({
+    const manager = ProviderManager.createForTests({
       commands: { codex: command },
       resolveBackendLaunchOptions: (_input, environment) => ({
         environment: { ...environment, INERTIA_FAST_CAPTURE: capturePath },

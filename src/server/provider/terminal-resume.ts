@@ -1,4 +1,7 @@
-import type { ProviderId } from "./contracts";
+import type {
+  ProviderId,
+  ProviderInstallationUseTransfer,
+} from "./contracts";
 import { isProviderTerminalSessionId } from "../../shared/provider-terminal-resume";
 import {
   providerProcessInvocation,
@@ -10,6 +13,8 @@ export interface ProviderTerminalResumeLaunch {
   executable: string;
   args: readonly string[] | string;
   env: NodeJS.ProcessEnv;
+  /** Present on ProviderManager descriptors; direct argument helpers omit it. */
+  installationUse?: ProviderInstallationUseTransfer;
 }
 
 export interface ProviderTerminalResumeAuthority {

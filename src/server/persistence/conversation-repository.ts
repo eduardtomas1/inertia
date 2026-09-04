@@ -4,7 +4,7 @@ import type { Conversation } from "../../shared/contracts";
 import { officiallyAllowsModelSwitchWithinSession } from "../../shared/continuation-policy";
 import {
   continuationIdentityForSelection,
-  continuationIdentitySchema,
+  versionedContinuationIdentitySchema,
   knownHarnessIdSchema,
   legacyProviderIdForHarness,
   modelSelectionSchema,
@@ -246,7 +246,7 @@ export class ConversationRepository {
     }
     const modelSelectionJson = JSON.stringify(modelSelection);
     const continuationIdentityJson = next.continuationIdentity
-      ? JSON.stringify(continuationIdentitySchema.parse(next.continuationIdentity))
+      ? JSON.stringify(versionedContinuationIdentitySchema.parse(next.continuationIdentity))
       : null;
     this.context.database.prepare(`
       UPDATE conversations SET

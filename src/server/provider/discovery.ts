@@ -602,6 +602,8 @@ export async function detectProvider(
       installState: "installed",
       authState: "unknown",
       canRun: false,
+      protocolVerified: cleanupConfirmed
+        && (providerId !== "codex" || selected.appServerReady),
       cleanupConfirmed,
       statusMessage: providerId === "codex" && !selected.appServerReady
         ? "Codex App Server is unsupported; update the selected CLI"
@@ -671,6 +673,7 @@ export async function detectProvider(
     installState: "installed",
     authState,
     canRun,
+    protocolVerified: cleanupConfirmed,
     cleanupConfirmed,
     statusMessage: !versionCleanupConfirmed
       ? `${provider.name} probe cleanup could not be confirmed stopped`

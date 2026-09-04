@@ -93,9 +93,15 @@ export class BackendProfileController {
   static async create(
     options: BackendProfileControllerOptions,
   ): Promise<BackendProfileController> {
-    const controller = new BackendProfileController(options);
+    const controller = BackendProfileController.open(options);
     await controller.initialize();
     return controller;
+  }
+
+  static open(
+    options: BackendProfileControllerOptions,
+  ): BackendProfileController {
+    return new BackendProfileController(options);
   }
 
   providerManagerOptions(): Pick<
@@ -112,6 +118,14 @@ export class BackendProfileController {
 
   attachProviderManager(providers: ProviderManager): void {
     this.runtime.attachProviderManager(providers);
+  }
+
+  attachProviderMutationGuard(
+    providerMaintenanceBlocked: Parameters<
+      BackendProfileRuntime["attachProviderMutationGuard"]
+    >[0],
+  ): void {
+    this.runtime.attachProviderMutationGuard(providerMaintenanceBlocked);
   }
 
   profiles(providerInfo: readonly ProviderInfo[]): ModelBackendProfileView[] {
@@ -183,6 +197,7 @@ export class BackendProfileController {
       createdAt: now,
       updatedAt: now,
     });
+    this.runtime.assertConfigurationMutable(profile.harnessId);
     const stored = this.store.saveModelBackendProfile(profile);
     this.runtime.publishProfile(stored.profile);
     return this.runtime.detailView(stored);
@@ -251,6 +266,7 @@ export class BackendProfileController {
         );
       }
     }
+    this.runtime.assertConfigurationMutable(candidate.harnessId);
     const next = this.store.saveModelBackendProfile(candidate);
     this.runtime.publishProfile(next.profile);
     return this.runtime.detailView(next);
@@ -266,6 +282,8 @@ export class BackendProfileController {
         "The secure credential changed again before the runtime could reconcile it.",
       );
     }
+    const current = this.store.modelBackendProfile(profileId);
+    this.runtime.assertConfigurationMutable(current.profile.harnessId);
     const next = this.store.reconcileModelBackendCredentialGeneration(
       profileId,
       status.credentialGeneration,
@@ -289,6 +307,7 @@ export class BackendProfileController {
     if (backendProfileUsesCredential(profile)) {
       const status = await this.runtime.credentialStatus(profile.id, true);
       if (status?.credentialGeneration !== profile.credentialGeneration) {
+        this.runtime.assertConfigurationMutable(profile.harnessId);
         stored = this.store.reconcileModelBackendCredentialGeneration(
           profile.id,
           status?.credentialGeneration ?? null,
@@ -323,6 +342,7 @@ export class BackendProfileController {
       resolveCredential: (reference, signal) =>
         this.runtime.resolveCredential(reference, signal),
     });
+    this.runtime.assertConfigurationMutable(current.harnessId);
     const next = this.store.recordModelBackendProbe(profileId, result);
     this.runtime.recordProbeResult(result);
     return this.runtime.detailView(next);
@@ -333,6 +353,7 @@ export class BackendProfileController {
     selectionInput: ModelSelection,
   ): ModelBackendDefault {
     const selection = this.validateSelection(selectionInput);
+    this.runtime.assertConfigurationMutable(selection.harnessId);
     const record = this.recordForSelection(selection);
     const compatibility = this.runtime.compatibility(
       record.profile,
@@ -348,10 +369,22 @@ export class BackendProfileController {
   }
 
   clearDefault(projectId: string | null): void {
+    const current = this.store.listModelBackendDefaults().find(
+      (candidate) => candidate.projectId === projectId,
+    );
+    if (current) {
+      this.runtime.assertConfigurationMutable(current.selection.harnessId);
+    }
     this.store.clearModelBackendDefault(projectId);
   }
 
   async deleteProfile(profileId: string): Promise<void> {
+    try {
+      const existing = this.store.modelBackendProfile(profileId);
+      this.runtime.assertConfigurationMutable(existing.profile.harnessId);
+    } catch (error) {
+      if (!(error instanceof RecordNotFoundError)) throw error;
+    }
     try {
       this.store.deleteModelBackendProfile(profileId);
     } catch (error) {
@@ -599,6 +632,7 @@ export class BackendProfileController {
         true,
       );
       if (status?.credentialGeneration !== record.profile.credentialGeneration) {
+        this.runtime.assertConfigurationMutable(record.profile.harnessId);
         record = this.store.reconcileModelBackendCredentialGeneration(
           record.profile.id,
           status?.credentialGeneration ?? null,
@@ -627,9 +661,10 @@ export class BackendProfileController {
     return { ready: true, message: null };
   }
 
-  private async initialize(): Promise<void> {
+  async initialize(): Promise<void> {
     for (const builtIn of this.runtime.builtInProfiles()) {
       if (builtIn.preset !== "kimi-code") continue;
+      this.runtime.assertConfigurationMutable("claude-agent-sdk");
       const status = await this.runtime.credentialStatus(builtIn.id, true);
       let existing: StoredModelBackendProfile | undefined;
       try {
@@ -657,6 +692,7 @@ export class BackendProfileController {
     }
 
     for (let stored of this.store.listModelBackendProfiles()) {
+      this.runtime.assertConfigurationMutable(stored.profile.harnessId);
       if (backendProfileUsesCredential(stored.profile)) {
         const status = await this.runtime.credentialStatus(
           stored.profile.id,

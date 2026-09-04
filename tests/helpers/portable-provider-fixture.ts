@@ -1,4 +1,12 @@
-import { copyFileSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { connect } from "node:net";
@@ -27,6 +35,19 @@ export function writeNodeSubcommand(root: string, name: string, source: string):
   const path = join(root, name);
   writeFileSync(path, `${source.trimStart()}\n`, "utf8");
   return path;
+}
+
+export function readStableFixtureCapture<T>(capturePath: string): T {
+  let lastError: unknown;
+  for (const candidate of [`${capturePath}.next`, capturePath]) {
+    if (!existsSync(candidate)) continue;
+    try {
+      return JSON.parse(readFileSync(candidate, "utf8")) as T;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError ?? new Error(`No fixture capture was written to ${capturePath}.`);
 }
 
 export async function waitFor(

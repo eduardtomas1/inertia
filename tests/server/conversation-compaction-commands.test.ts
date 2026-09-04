@@ -21,8 +21,10 @@ import {
 import {
   AgentHarnessRegistry,
   ProviderManager,
+  type ProviderDetection,
 } from "../../src/server/providers";
 import type { AgentHarness } from "../../src/server/provider/agent-harness";
+import { providerRunTerminal } from "../../src/server/provider/contracts";
 import {
   CLAUDE_AGENT_SDK_CAPABILITIES,
   createClaudeAgentSdkHarness,
@@ -49,6 +51,50 @@ import {
 
 const conversationId = "11111111-1111-4111-8111-111111111111";
 const requestId = "22222222-2222-4222-8222-222222222222";
+
+function detectedProviderAt(executable: string) {
+  return async (providerId: ProviderId): Promise<ProviderDetection> => ({
+    provider: {
+      id: providerId,
+      name: providerId,
+      command: executable,
+    },
+    available: true,
+    version: "test-1.0.0",
+    executable,
+    installState: "installed",
+    authState: "authenticated",
+    canRun: true,
+    cleanupConfirmed: true,
+    statusMessage: "Connected",
+  });
+}
+
+async function adoptVerifiedManager(
+  dependencies: ConversationCompactionCommandDependencies,
+  manager: ProviderManager,
+): Promise<void> {
+  const conversation = dependencies.store.conversation(conversationId);
+  const latestTurn = dependencies.store.latestAgentTurnForConversation(
+    conversationId,
+  );
+  await manager.detect(conversation.providerId);
+  const route = manager.resolveModelRoute(conversation.modelSelection);
+  const exactConversation = {
+    ...conversation,
+    continuationIdentity: route.continuationIdentity,
+  };
+  dependencies.store.conversation = vi.fn(() => exactConversation);
+  dependencies.store.latestAgentTurnForConversation = vi.fn(() =>
+    latestTurn
+      ? {
+          ...latestTurn,
+          modelSelection: conversation.modelSelection,
+          continuationIdentity: route.continuationIdentity,
+        }
+      : null);
+  dependencies.providers = manager;
+}
 
 function fixture(options: {
   sessionId?: string | null;
@@ -200,8 +246,11 @@ describe("conversation compaction command", () => {
   it("launches the real provider compaction boundary without inventing a durable turn", async () => {
     const { dependencies, send } = fixture();
     let launches = 0;
-    dependencies.providers = new ProviderManager(
-      { commands: { claude: "/fake/claude" } },
+    const manager = ProviderManager.createForTests(
+      {
+        commands: { claude: "/fake/claude" },
+        detectProvider: detectedProviderAt("/fake/claude"),
+      },
       new AgentHarnessRegistry([createClaudeAgentSdkHarness({
         createQuery: () => {
           launches += 1;
@@ -223,6 +272,7 @@ describe("conversation compaction command", () => {
         },
       })]),
     );
+    await adoptVerifiedManager(dependencies, manager);
     const handler = createConversationCompactionCommandHandler(dependencies);
 
     await expect(handler({} as WebSocket, {
@@ -244,8 +294,11 @@ describe("conversation compaction command", () => {
     async (speed) => {
       const { dependencies, send } = fixture({ fastMode: speed });
       let capturedOptions: ClaudeOptions | undefined;
-      dependencies.providers = new ProviderManager(
-        { commands: { claude: "/fake/claude" } },
+      const manager = ProviderManager.createForTests(
+        {
+          commands: { claude: "/fake/claude" },
+          detectProvider: detectedProviderAt("/fake/claude"),
+        },
         new AgentHarnessRegistry([createClaudeAgentSdkHarness({
           createQuery: ({ options }) => {
             capturedOptions = options;
@@ -273,6 +326,7 @@ describe("conversation compaction command", () => {
           },
         })]),
       );
+      await adoptVerifiedManager(dependencies, manager);
       const handler = createConversationCompactionCommandHandler(dependencies);
 
       await expect(handler({} as WebSocket, {
@@ -333,12 +387,16 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       providerDefault: true,
       accessMode,
     });
-    const manager = new ProviderManager(
-      { commands: { cursor: command }, cancelGraceMs: 100 },
+    const manager = ProviderManager.createForTests(
+      {
+        commands: { cursor: command },
+        cancelGraceMs: 100,
+        detectProvider: detectedProviderAt(command),
+      },
       new AgentHarnessRegistry([createCursorAcpHarness()]),
     );
-    dependencies.providers = manager;
     dependencies.store.conversationPath = vi.fn(() => root);
+    await adoptVerifiedManager(dependencies, manager);
     const handler = createConversationCompactionCommandHandler(dependencies);
 
     await expect(handler({} as WebSocket, {
@@ -369,8 +427,11 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
 
   it("rejects a provider that compacts a different resumed session", async () => {
     const { dependencies, release, send } = fixture();
-    dependencies.providers = new ProviderManager(
-      { commands: { claude: "/fake/claude" } },
+    const manager = ProviderManager.createForTests(
+      {
+        commands: { claude: "/fake/claude" },
+        detectProvider: detectedProviderAt("/fake/claude"),
+      },
       new AgentHarnessRegistry([createClaudeAgentSdkHarness({
         createQuery: () => fixtureClaudeQuery(
           (async function* (): AsyncGenerator<SDKMessage> {
@@ -383,6 +444,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
         ),
       })]),
     );
+    await adoptVerifiedManager(dependencies, manager);
     const handler = createConversationCompactionCommandHandler(dependencies);
 
     await expect(handler({} as WebSocket, {
@@ -414,9 +476,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
         harnessId: "claude-agent-sdk",
         providerId: "claude",
         result: Promise.resolve({
-          providerId: "claude",
-          conversationId,
-          status: "completed",
+          ...providerRunTerminal(input, "completed"),
           sessionId: input.sessionId,
           text: "",
           textTruncated: false,
@@ -432,11 +492,15 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
         },
       }),
     };
-    const manager = new ProviderManager(
-      { commands: { claude: "/fake/claude" }, cancelGraceMs: 100 },
+    const manager = ProviderManager.createForTests(
+      {
+        commands: { claude: "/fake/claude" },
+        cancelGraceMs: 100,
+        detectProvider: detectedProviderAt("/fake/claude"),
+      },
       new AgentHarnessRegistry([harness]),
     );
-    dependencies.providers = manager;
+    await adoptVerifiedManager(dependencies, manager);
     dependencies.providerTerminalResumes = reservations;
     const handler = createConversationCompactionCommandHandler(dependencies);
 

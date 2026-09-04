@@ -35,6 +35,60 @@ afterEach(async () => {
 });
 
 describe("Fast mode persistence", () => {
+  it("persists only finite continuation evidence across restart", async () => {
+    const { databasePath, workspacePath, store } = await createStore();
+    const project = store.createProject("Continuation evidence", workspacePath);
+    const conversation = store.createConversation(project.id, "Changed provider");
+    const selection = nativeModelSelection({
+      providerId: "codex",
+      modelId: "gpt-safe",
+    });
+    const rejectedMessage = store.createMessage(
+      conversation.id,
+      "Do not persist a raw reason.",
+    );
+    expect(() => store.createAgentTurn({
+      conversationId: conversation.id,
+      runId: "invalid-continuation-reason-run",
+      userMessageId: rejectedMessage.id,
+      providerId: "codex",
+      modelSelection: selection,
+      continuationReasonCode: "token=/private/reason" as never,
+      reasoningEffort: "",
+      interactionMode: "build",
+      accessMode: "supervised",
+      configurationRevision: 0,
+      association: "authoritative",
+    })).toThrow("continuation reason code is invalid");
+
+    const message = store.createMessage(
+      conversation.id,
+      "Start with the reverified provider.",
+    );
+    const turn = store.createAgentTurn({
+      conversationId: conversation.id,
+      runId: "provider-installation-change-run",
+      userMessageId: message.id,
+      providerId: "codex",
+      modelSelection: selection,
+      continuationReasonCode: "provider-installation-changed",
+      reasoningEffort: "",
+      interactionMode: "build",
+      accessMode: "supervised",
+      configurationRevision: 0,
+      association: "authoritative",
+    });
+    expect(turn.continuationReasonCode).toBe("provider-installation-changed");
+    store.close();
+
+    const reopened = new RuntimeStore(databasePath, workspacePath);
+    expect(reopened.agentTurn(turn.id).continuationReasonCode)
+      .toBe("provider-installation-changed");
+    expect(JSON.stringify(reopened.agentTurn(turn.id)))
+      .not.toContain("/private/reason");
+    reopened.close();
+  });
+
   it("requires turn speed provenance to match its model selection", async () => {
     const { store, workspacePath } = await createStore();
     const project = store.createProject("Fast provenance", workspacePath);

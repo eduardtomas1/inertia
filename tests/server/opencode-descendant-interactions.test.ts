@@ -1,3 +1,4 @@
+// @inertia-test-suite portable
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -104,7 +105,7 @@ describe("OpenCode descendant interactions", () => {
       "serve",
       descendantInteractionServer(root, capturePath),
     );
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { opencode: command } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness({
         runDeadlineMs: 5_000,
@@ -128,6 +129,7 @@ describe("OpenCode descendant interactions", () => {
           approval.conversationId,
           approval.request.requestId,
           "approve",
+          { runId: approval.runId, turnId: approval.turnId },
         )).toBe(true);
       },
       onInput: (input) => {
@@ -136,6 +138,7 @@ describe("OpenCode descendant interactions", () => {
           input.conversationId,
           input.request.requestId,
           { [input.request.questions[0]!.id]: ["Yes"] },
+          { runId: input.runId, turnId: input.turnId },
         )).toBe(true);
       },
     });
@@ -173,7 +176,7 @@ describe("OpenCode descendant interactions", () => {
       "serve",
       descendantInteractionServer(root, capturePath, false),
     );
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { opencode: command } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness({
         runDeadlineMs: 5_000,
@@ -194,6 +197,7 @@ describe("OpenCode descendant interactions", () => {
           approval.conversationId,
           approval.request.requestId,
           "approve",
+          { runId: approval.runId, turnId: approval.turnId },
         )).toBe(true);
       },
       onInput: (input) => {
@@ -201,6 +205,7 @@ describe("OpenCode descendant interactions", () => {
           input.conversationId,
           input.request.requestId,
           { [input.request.questions[0]!.id]: ["Yes"] },
+          { runId: input.runId, turnId: input.turnId },
         )).toBe(true);
       },
     })).resolves.toMatchObject({

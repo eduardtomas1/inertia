@@ -10,8 +10,13 @@ import {
   forceKillPosixProcessTreeWithStatus,
 } from "../node/posix-process-tree";
 import {
+  linuxProcessCanExecute,
+  linuxProcessGroupCanExecute,
+} from "../node/runtime-owned-process-posix";
+import {
   confirmRuntimeOwnedProcessStopped,
   requestRuntimeOwnedGuardianStop,
+  runtimeOwnedProcessStopConfirmation,
 } from "../node/runtime-owned-processes";
 
 const DEFAULT_TERMINATION_WAIT_MS = 2_000;
@@ -32,6 +37,8 @@ export interface AwaitableProcessLifecycleDependencies
   extends Partial<ProcessLifecycleDependencies> {
   spawnProcessSync?: typeof spawnSync;
   waitMs?: number;
+  processCanExecute?: (pid: number) => boolean | null;
+  processGroupCanExecute?: (processGroupId: number) => boolean | null;
 }
 
 export type WaitForProcessExit = (waitMs: number) => Promise<boolean>;
@@ -296,6 +303,10 @@ function waitForPosixProcessGroupExit(
   pid: number,
   killProcess: typeof process.kill,
   waitMs: number,
+  knownMembers: readonly number[] = [],
+  processCanExecute: ((pid: number) => boolean | null) | null = null,
+  processGroupCanExecute:
+    ((processGroupId: number) => boolean | null) | null = null,
 ): Promise<boolean> {
   const deadline = Date.now() + waitMs;
   return new Promise<boolean>((resolve) => {
@@ -303,6 +314,18 @@ function waitForPosixProcessGroupExit(
       try {
         killProcess(-pid, 0);
       } catch {
+        resolve(true);
+        return;
+      }
+      if (processGroupCanExecute?.(pid) === false) {
+        resolve(true);
+        return;
+      }
+      if (
+        processCanExecute
+        && knownMembers.length > 0
+        && knownMembers.every((member) => processCanExecute(member) === false)
+      ) {
         resolve(true);
         return;
       }
@@ -323,12 +346,17 @@ function waitForPosixProcessesExit(
   pids: readonly number[],
   killProcess: typeof process.kill,
   waitMs: number,
+  processCanExecute: ((pid: number) => boolean | null) | null = null,
 ): Promise<boolean> {
   const remaining = new Set(pids);
   const deadline = Date.now() + waitMs;
   return new Promise<boolean>((resolve) => {
     const inspect = (): void => {
       for (const pid of remaining) {
+        if (processCanExecute?.(pid) === false) {
+          remaining.delete(pid);
+          continue;
+        }
         try {
           killProcess(pid, 0);
         } catch {
@@ -350,6 +378,32 @@ function waitForPosixProcessesExit(
     };
     inspect();
   });
+}
+
+function nativePosixProcessObserver(
+  platform: NodeJS.Platform,
+  dependencies: AwaitableProcessLifecycleDependencies,
+): ((pid: number) => boolean | null) | null {
+  if (dependencies.processCanExecute) return dependencies.processCanExecute;
+  return platform === "linux"
+    && dependencies.platform === undefined
+    && dependencies.killProcess === undefined
+    ? linuxProcessCanExecute
+    : null;
+}
+
+function nativePosixProcessGroupObserver(
+  platform: NodeJS.Platform,
+  dependencies: AwaitableProcessLifecycleDependencies,
+): ((processGroupId: number) => boolean | null) | null {
+  if (dependencies.processGroupCanExecute) {
+    return dependencies.processGroupCanExecute;
+  }
+  return platform === "linux"
+    && dependencies.platform === undefined
+    && dependencies.killProcess === undefined
+    ? linuxProcessGroupCanExecute
+    : null;
 }
 
 function terminateWindowsProcessTree(
@@ -438,6 +492,11 @@ export function createOwnedPidProcessTreeTermination(
     ? inheritedWindowsSystemRoot()
     : dependencies.windowsSystemRoot;
   const waitMs = boundedWaitMs(dependencies.waitMs, platform);
+  const processCanExecute = nativePosixProcessObserver(platform, dependencies);
+  const processGroupCanExecute = nativePosixProcessGroupObserver(
+    platform,
+    dependencies,
+  );
   let started = false;
   let treeTerminationConfirmed = false;
   let snapshotConfirmed = false;
@@ -494,8 +553,20 @@ export function createOwnedPidProcessTreeTermination(
     const exitWaitMs = Math.trunc(deadlineAt - Date.now());
     if (exitWaitMs <= 0) return false;
     const [groupExited, descendantsExited, rootExited] = await Promise.all([
-      waitForPosixProcessGroupExit(pid, killProcess, exitWaitMs),
-      waitForPosixProcessesExit(descendants, killProcess, exitWaitMs),
+      waitForPosixProcessGroupExit(
+        pid,
+        killProcess,
+        exitWaitMs,
+        [pid, ...descendants],
+        processCanExecute,
+        processGroupCanExecute,
+      ),
+      waitForPosixProcessesExit(
+        descendants,
+        killProcess,
+        exitWaitMs,
+        processCanExecute,
+      ),
       waitForRootExit(exitWaitMs),
     ]);
     return groupExited && descendantsExited && rootExited;
@@ -524,6 +595,11 @@ export async function terminateProcessTreeAndWait(
     ? inheritedWindowsSystemRoot()
     : dependencies.windowsSystemRoot;
   const waitMs = boundedWaitMs(dependencies.waitMs, platform);
+  const processCanExecute = nativePosixProcessObserver(platform, dependencies);
+  const processGroupCanExecute = nativePosixProcessGroupObserver(
+    platform,
+    dependencies,
+  );
 
   if (platform === "win32") {
     // Never target a reused Windows PID after Node has already observed the
@@ -563,12 +639,20 @@ export async function terminateProcessTreeAndWait(
   // descendants therefore start their memoized owned termination before
   // closing/reaping the provider and await that original attempt afterward.
   if (directChildResourcesAreClosed(child)) {
+    const ownedStopConfirmation = runtimeOwnedProcessStopConfirmation(child);
+    if (ownedStopConfirmation !== null) {
+      // A released runtime-owned claim is an exact, durable cleanup receipt.
+      // Conversely, map presence without release must stay fail-closed; never
+      // reinterpret the now-reapable numeric PGID as ownership evidence.
+      return ownedStopConfirmation;
+    }
     // A no-signal existence probe can still prove that the owned group is
-    // already gone. Never signal a group after this point: an extant numeric
-    // PGID may have been recycled and therefore remains unconfirmed.
+    // already gone for an untracked child. Never signal a group after this
+    // point: an extant numeric PGID may have been recycled.
     try {
       killProcess(-pid, 0);
-      return false;
+      const canExecute = processGroupCanExecute?.(pid);
+      return canExecute === false;
     } catch (error) {
       // `ESRCH` is the only proof that the group no longer exists. `EPERM`
       // still means an extant group, and unexpected probe failures must remain
@@ -605,8 +689,20 @@ export async function terminateProcessTreeAndWait(
       rootProcessGroup: true,
     });
     const [groupExited, descendantsExited, childClosed] = await Promise.all([
-      waitForPosixProcessGroupExit(pid, killProcess, waitMs),
-      waitForPosixProcessesExit(descendants, killProcess, waitMs),
+      waitForPosixProcessGroupExit(
+        pid,
+        killProcess,
+        waitMs,
+        [pid, ...descendants],
+        processCanExecute,
+        processGroupCanExecute,
+      ),
+      waitForPosixProcessesExit(
+        descendants,
+        killProcess,
+        waitMs,
+        processCanExecute,
+      ),
       waitForObservedDirectChildClose(waitMs),
     ]);
     return groupExited && descendantsExited && childClosed;
@@ -614,7 +710,14 @@ export async function terminateProcessTreeAndWait(
   try {
     killProcess(-pid, "SIGTERM");
     const [groupExited, childClosed] = await Promise.all([
-      waitForPosixProcessGroupExit(pid, killProcess, waitMs),
+      waitForPosixProcessGroupExit(
+        pid,
+        killProcess,
+        waitMs,
+        [],
+        processCanExecute,
+        processGroupCanExecute,
+      ),
       waitForObservedDirectChildClose(waitMs),
     ]);
     return groupExited && childClosed;

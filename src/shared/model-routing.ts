@@ -189,6 +189,13 @@ export interface ContinuationIdentity {
   backendConfigurationRevision: number;
   modelIdentity: string | null;
   endpointIdentity: string | null;
+  /**
+   * Opaque server-generated digest binding the provider executable/version,
+   * protocol revision, harness implementation and capability manifest. A
+   * missing historical value is deliberately unverified and cannot authorize
+   * reuse of provider-owned session state.
+   */
+  providerCompatibilityToken?: string | null;
   /** Missing historical values are equivalent to Standard provider speed. */
   performanceModeIdentity?: string | null;
 }
@@ -326,6 +333,20 @@ export const continuationIdentitySchema = z.object({
     .nullable()
     .optional(),
 }).strict();
+
+/**
+ * Current continuation records add an installation/capability-bound token.
+ * Keep the legacy schema above immutable because released migration 24 uses
+ * it to decode historical rows; changing that implementation would rewrite
+ * migration lineage for already-published databases.
+ */
+export const versionedContinuationIdentitySchema = continuationIdentitySchema
+  .extend({
+    providerCompatibilityToken: z.string().regex(/^[0-9a-f]{64}$/u)
+      .nullable()
+      .optional(),
+  })
+  .strict();
 
 const NATIVE_HARNESS: Readonly<Record<ProviderId, KnownHarnessId>> = {
   codex: "codex-app-server",
@@ -639,17 +660,36 @@ export function continuationIdentityForSelection(
   });
 }
 
+export function versionedContinuationIdentityForSelection(
+  selection: ModelSelection,
+  endpointIdentity: string | null,
+  modelIdentityRequired: boolean,
+  providerCompatibilityToken: string | null,
+): ContinuationIdentity {
+  return versionedContinuationIdentitySchema.parse({
+    ...continuationIdentityForSelection(
+      selection,
+      endpointIdentity,
+      modelIdentityRequired,
+    ),
+    ...(providerCompatibilityToken ? { providerCompatibilityToken } : {}),
+  });
+}
+
 export function sameContinuationIdentity(
   left: ContinuationIdentity | null,
   right: ContinuationIdentity | null,
 ): boolean {
   return left !== null
     && right !== null
+    && typeof left.providerCompatibilityToken === "string"
+    && typeof right.providerCompatibilityToken === "string"
     && left.harnessId === right.harnessId
     && left.backendProfileId === right.backendProfileId
     && left.backendConfigurationRevision === right.backendConfigurationRevision
     && left.modelIdentity === right.modelIdentity
     && left.endpointIdentity === right.endpointIdentity
+    && left.providerCompatibilityToken === right.providerCompatibilityToken
     && (left.performanceModeIdentity ?? null)
       === (right.performanceModeIdentity ?? null);
 }

@@ -40,7 +40,10 @@ describe("turn failure diagnostics", () => {
     const failure = normalizedProviderRunFailure(activeTurn(), {
       providerId: "codex",
       conversationId: "conversation-1",
+      runId: "run-1",
+      turnId: "turn-1",
       status: "failed",
+      terminalReason: { outcome: "failed", reason: "provider-error" },
       text: "",
       textTruncated: false,
       exitCode: 23,

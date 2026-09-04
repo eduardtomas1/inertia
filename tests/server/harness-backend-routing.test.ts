@@ -9,7 +9,10 @@ import {
   modelSelectionSchema,
   type ModelBackendProfile,
 } from "../../src/shared/model-routing";
-import { ProviderManager } from "../../src/server/providers";
+import {
+  ProviderManager,
+  type ProviderDetection,
+} from "../../src/server/providers";
 import {
   AgentHarnessRegistry,
 } from "../../src/server/provider/agent-harness-registry";
@@ -18,6 +21,7 @@ import {
   type AgentHarness,
 } from "../../src/server/provider/agent-harness";
 import { CLAUDE_AGENT_SDK_CAPABILITIES } from "../../src/server/provider/claude-agent-sdk-harness";
+import { providerRunTerminal } from "../../src/server/provider/contracts";
 import { ProviderMetadataCache } from "../../src/server/provider/metadata";
 import { resolveOpenCodeModel } from "../../src/server/provider/opencode-sdk-harness";
 import { findCursorAdvertisedConfigValue } from "../../src/server/provider/cursor-acp-harness";
@@ -91,6 +95,88 @@ function selection(
 }
 
 describe("ProviderManager harness backend routing", () => {
+  it("revokes installation attestation when discovery cleanup or discovery fails", async () => {
+    const backend = profile("anthropic-messages");
+    const selected = selection(backend, "claude-agent-sdk", "model");
+    let cleanupConfirmed = true;
+    let rejectDetection = false;
+    const detection = async (): Promise<ProviderDetection> => {
+      if (rejectDetection) throw new Error("detection failed");
+      return {
+        provider: { id: "claude", name: "Claude", command: "claude" },
+        available: true,
+        executable: "/opt/provider/claude",
+        version: "2.1.0",
+        installState: "installed",
+        authState: "authenticated",
+        canRun: true,
+        cleanupConfirmed,
+        statusMessage: "Connected",
+      };
+    };
+    const manager = ProviderManager.createForTests({
+      commands: { claude: "/opt/provider/claude" },
+      backendProfiles: [backend],
+      backendProbeResults: [probe(backend, selected.modelId)],
+      detectProvider: detection,
+    });
+
+    expect(manager.providerCapabilityContract("claude")).toMatchObject({
+      schemaVersion: 1,
+      harnessId: "claude-agent-sdk",
+      installationVerified: false,
+      installedVersion: null,
+      currentlyAvailableCount: 0,
+      declaredCapabilityCount: 28,
+      hostToolBridgeAvailable: false,
+    });
+    await manager.detect("claude");
+    expect(manager.resolveModelRoute(selected).continuationIdentity
+      .providerCompatibilityToken).toMatch(/^[0-9a-f]{64}$/u);
+    const verifiedContract = manager.providerCapabilityContract("claude");
+    expect(verifiedContract).toMatchObject({
+      schemaVersion: 1,
+      harnessId: "claude-agent-sdk",
+      installationVerified: true,
+      installedVersion: "2.1.0",
+      declaredCapabilityCount: 28,
+      hostToolBridgeAvailable: true,
+    });
+    expect(verifiedContract.currentlyAvailableCount).toBeGreaterThan(0);
+    expect(verifiedContract.manifestDigest).toMatch(/^[0-9a-f]{64}$/u);
+    expect(JSON.stringify(verifiedContract)).not.toContain("/opt/provider");
+
+    rejectDetection = true;
+    await expect(manager.detect("claude")).rejects.toThrow("detection failed");
+    expect(manager.resolveModelRoute(selected).continuationIdentity
+      .providerCompatibilityToken).toBeUndefined();
+    expect(manager.providerCapabilityContract("claude")).toMatchObject({
+      installationVerified: false,
+      installedVersion: null,
+      currentlyAvailableCount: 0,
+      hostToolBridgeAvailable: false,
+    });
+
+    rejectDetection = false;
+    await manager.detect("claude");
+    expect(manager.resolveModelRoute(selected).continuationIdentity
+      .providerCompatibilityToken).toMatch(/^[0-9a-f]{64}$/u);
+
+    cleanupConfirmed = false;
+    await manager.detect("claude");
+    expect(manager.resolveModelRoute(selected).continuationIdentity
+      .providerCompatibilityToken).toBeUndefined();
+    expect(manager.providerCapabilityContract("claude").installationVerified)
+      .toBe(false);
+
+    cleanupConfirmed = true;
+    await manager.detect("claude");
+    expect(manager.resolveModelRoute(selected).continuationIdentity
+      .providerCompatibilityToken).toBeUndefined();
+    expect(manager.providerCapabilityContract("claude").installationVerified)
+      .toBe(false);
+  });
+
   it.each([
     ["openai-responses", "codex-app-server", "responses-probe-verified"],
     ["anthropic-messages", "claude-agent-sdk", "anthropic-probe-verified"],
@@ -99,7 +185,7 @@ describe("ProviderManager harness backend routing", () => {
     (protocol, harnessId, reasonCode) => {
       const backend = profile(protocol);
       const modelId = `${protocol}-model`;
-      const manager = new ProviderManager({
+      const manager = ProviderManager.createForTests({
         backendProfiles: [backend],
         backendProbeResults: [probe(backend, modelId)],
       });
@@ -118,7 +204,7 @@ describe("ProviderManager harness backend routing", () => {
 
   it("never lets an optimistic custom registration bypass exact probe evidence", () => {
     const backend = profile("openai-responses");
-    const manager = new ProviderManager({
+    const manager = ProviderManager.createForTests({
       backendProfiles: [backend],
       backendCompatibilities: [{
         harnessId: "codex-app-server",
@@ -145,7 +231,7 @@ describe("ProviderManager harness backend routing", () => {
     const backend = profile("anthropic-messages");
     const result = probe(backend, "model");
     const revised = { ...backend, configurationRevision: 3 };
-    const manager = new ProviderManager({
+    const manager = ProviderManager.createForTests({
       backendProfiles: [revised],
       backendProbeResults: [result],
     });
@@ -161,7 +247,7 @@ describe("ProviderManager harness backend routing", () => {
 
   it("refreshes one exact model without enabling a different model", () => {
     const backend = profile("openai-responses");
-    const manager = new ProviderManager({ backendProfiles: [backend] });
+    const manager = ProviderManager.createForTests({ backendProfiles: [backend] });
     manager.recordBackendProbeResult(probe(backend, "verified-model"));
 
     expect(manager.resolveModelRoute(selection(
@@ -178,7 +264,7 @@ describe("ProviderManager harness backend routing", () => {
 
   it("supports safe profile CRUD while protecting built-ins and clearing stale evidence", () => {
     const backend = profile("openai-responses");
-    const manager = new ProviderManager({
+    const manager = ProviderManager.createForTests({
       backendProfiles: [backend],
       backendProbeResults: [probe(backend, "model")],
     });
@@ -283,7 +369,7 @@ describe("ProviderManager harness backend routing", () => {
           conversationId,
           options.callbacks,
           options.input.runId,
-          options.input.turnId ?? null,
+          options.input.turnId,
         );
         emitter.rich({
           type: "metadata",
@@ -301,9 +387,7 @@ describe("ProviderManager harness backend routing", () => {
             respondToInput: () => false,
           },
           result: Promise.resolve({
-            providerId: "claude",
-            conversationId,
-            status: "completed",
+            ...providerRunTerminal(options.input, "completed"),
             text: "",
             textTruncated: false,
             exitCode: 0,
@@ -313,13 +397,31 @@ describe("ProviderManager harness backend routing", () => {
         };
       },
     };
-    const manager = new ProviderManager({
+    const manager = ProviderManager.createForTests({
       commands: { claude: "claude" },
       backendProfiles: [backend],
       backendProbeResults: [probe(backend, selected.modelId)],
       metadataCache,
+      detectProvider: async () => ({
+        provider: { id: "claude", name: "Claude", command: "claude" },
+        available: true,
+        executable: "claude",
+        version: "2.1.0",
+        installState: "installed",
+        authState: "authenticated",
+        canRun: true,
+        cleanupConfirmed: true,
+        statusMessage: "Connected",
+      }),
     }, new AgentHarnessRegistry([harness]));
+    expect(manager.resolveModelRoute(selected).continuationIdentity
+      .providerCompatibilityToken ?? null)
+      .toBeNull();
+    await manager.detect("claude");
     const route = manager.resolveModelRoute(selected);
+    const verifiedToken = route.continuationIdentity
+      .providerCompatibilityToken;
+    expect(verifiedToken).toMatch(/^[0-9a-f]{64}$/u);
     const observedMetadata: string[] = [];
     await manager.run({
       providerId: route.providerId,
@@ -352,6 +454,25 @@ describe("ProviderManager harness backend routing", () => {
       metadataState: { rateLimits: { freshness: "unavailable" } },
     });
     expect(observedMetadata).toEqual(["kimi-model"]);
+
+    expect(manager.resolveModelRoute(selected).continuationIdentity
+      .providerCompatibilityToken).toBe(verifiedToken);
+
+    metadataCache.correlate("claude", {
+      executable: "claude",
+      version: "2.1.1",
+      authState: "authenticated",
+    });
+    expect(manager.resolveModelRoute(selected).continuationIdentity
+      .providerCompatibilityToken).toBeUndefined();
+
+    metadataCache.correlate("claude", {
+      executable: "claude",
+      version: null,
+      authState: "authenticated",
+    });
+    expect(manager.resolveModelRoute(selected).continuationIdentity
+      .providerCompatibilityToken).toBeUndefined();
   });
 });
 

@@ -18,10 +18,7 @@ export async function confirmDuoProviderCleanup(
       identity,
       undefined,
     );
-    if (
-      result === "settled"
-      || (result === "missing" && !providers.isRunning(conversationId))
-    ) return "confirmed";
+    if (result === "settled") return "confirmed";
     return result === "force-detached" ? "unconfirmed" : "rejected";
   } catch {
     return "unconfirmed";

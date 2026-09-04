@@ -182,6 +182,7 @@ describe("terminal.provider.resume command", () => {
       },
       false,
       "55555555-5555-4555-8555-555555555555",
+      undefined,
     );
     expect(fixture.send).toHaveBeenCalledWith(expect.anything(), {
       type: "terminal.created",

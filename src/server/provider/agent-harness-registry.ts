@@ -3,6 +3,11 @@ import { createCodexAppServerHarness } from "./codex-app-server-harness";
 import { createCursorAcpHarness } from "./cursor-acp-harness";
 import { createKimiAcpHarness } from "./kimi-acp-harness";
 import { createOpenCodeSdkHarness } from "./opencode-sdk-harness";
+import {
+  productionProviderCapabilityManifests,
+  providerCapabilityManifest,
+  type ProviderCapabilityManifest,
+} from "./capability-manifest";
 import type {
   AgentHarness,
   AgentHarnessCapabilities,
@@ -101,17 +106,44 @@ export class AgentHarnessRegistry {
       .map((harness) => harness.capabilities);
   }
 
+  capabilityManifests(
+    providerId?: ProviderId,
+  ): readonly ProviderCapabilityManifest[] {
+    return this.harnesses.flatMap((harness) => {
+      if (providerId !== undefined && harness.providerId !== providerId) {
+        return [];
+      }
+      const manifest = providerCapabilityManifest(harness.id);
+      return manifest && manifest.providerId === harness.providerId
+        ? [manifest]
+        : [];
+    });
+  }
+
   list(providerId?: ProviderId): readonly AgentHarness[] {
     return this.harnesses.filter((harness) => providerId === undefined || harness.providerId === providerId);
   }
 }
 
 export function createDefaultAgentHarnessRegistry(): AgentHarnessRegistry {
-  return new AgentHarnessRegistry([
+  const registry = new AgentHarnessRegistry([
     createCodexAppServerHarness(),
     createClaudeAgentSdkHarness(),
     createCursorAcpHarness(),
     createKimiAcpHarness(),
     createOpenCodeSdkHarness(),
   ]);
+  const registered = registry.list().map((harness) =>
+    `${harness.providerId}\0${harness.id}`);
+  const manifested = productionProviderCapabilityManifests().map((manifest) =>
+    `${manifest.providerId}\0${manifest.harnessId}`);
+  if (
+    registered.length !== manifested.length
+    || registered.some((identity, index) => identity !== manifested[index])
+  ) {
+    throw new Error(
+      "The production harness registry and capability manifests are inconsistent.",
+    );
+  }
+  return registry;
 }

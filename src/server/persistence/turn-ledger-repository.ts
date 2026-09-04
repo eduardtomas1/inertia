@@ -11,10 +11,11 @@ import {
 } from "../../shared/contracts";
 import {
   continuationIdentityForSelection,
-  continuationIdentitySchema,
+  versionedContinuationIdentitySchema,
   legacyProviderIdForHarness,
   modelSelectionSchema,
 } from "../../shared/model-routing";
+import { isContinuationReasonCode } from "../../shared/continuation-policy";
 import {
   parseSanitizedTurnExecutionManifest,
   validateExecutionContextReference,
@@ -105,7 +106,7 @@ export class TurnLedgerRepository {
       throw new Error("The turn configuration revision does not match its model selection.");
     }
     const continuationIdentity = input.continuationIdentity
-      ? continuationIdentitySchema.parse(input.continuationIdentity)
+      ? versionedContinuationIdentitySchema.parse(input.continuationIdentity)
       : continuationIdentityForSelection(modelSelection);
     if (
       continuationIdentity.harnessId !== modelSelection.harnessId
@@ -119,6 +120,13 @@ export class TurnLedgerRepository {
     }
     const modelSelectionJson = JSON.stringify(modelSelection);
     const continuationIdentityJson = JSON.stringify(continuationIdentity);
+    const continuationReasonCode = input.continuationReasonCode ?? null;
+    if (
+      continuationReasonCode !== null
+      && !isContinuationReasonCode(continuationReasonCode)
+    ) {
+      throw new Error("The turn continuation reason code is invalid.");
+    }
     if (new TextEncoder().encode(modelSelectionJson).byteLength > 65_536) {
       throw new Error("Turn model selection is too large.");
     }
@@ -142,6 +150,7 @@ export class TurnLedgerRepository {
       providerId: input.providerId,
       modelSelection,
       continuationIdentity,
+      continuationReasonCode,
       harnessId: modelSelection.harnessId,
       backendProfileId: modelSelection.backendProfileId,
       model: modelSelection.modelId,
@@ -183,6 +192,7 @@ export class TurnLedgerRepository {
       INSERT INTO agent_turns (
         id, conversation_id, run_id, user_message_id, terminal_assistant_message_id,
         provider_id, model_selection_json, continuation_identity_json,
+        continuation_reason_code,
         harness_id, backend_profile_id, model, model_alias, reasoning_effort,
         interaction_mode, access_mode, provider_session_before, provider_session_after,
         requested_at, started_at, completed_at, status, run_state,
@@ -192,6 +202,7 @@ export class TurnLedgerRepository {
       ) VALUES (
         @id, @conversationId, @runId, @userMessageId, @terminalAssistantMessageId,
         @providerId, @modelSelectionJson, @continuationIdentityJson,
+        @continuationReasonCode,
         @harnessId, @backendProfileId, @model, @modelAlias, @reasoningEffort,
         @interactionMode, @accessMode, @providerSessionBefore, @providerSessionAfter,
         @requestedAt, @startedAt, @completedAt, @status, @runStateValue,

@@ -1,3 +1,4 @@
+// @inertia-test-suite portable
 import { afterEach, describe, expect, it } from "vitest";
 
 import type {
@@ -39,7 +40,7 @@ describe("Claude Agent SDK lifecycle isolation", () => {
         })(),
       ),
     });
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { claude: process.execPath } },
       new AgentHarnessRegistry([harness]),
     );
@@ -191,7 +192,7 @@ describe("Claude Agent SDK lifecycle isolation", () => {
         })(),
       ),
     });
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { claude: process.execPath } },
       new AgentHarnessRegistry([harness]),
     );
@@ -268,7 +269,7 @@ describe("Claude Agent SDK lifecycle isolation", () => {
         })(),
       ),
     });
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { claude: process.execPath } },
       new AgentHarnessRegistry([harness]),
     );
@@ -321,7 +322,7 @@ describe("Claude Agent SDK lifecycle isolation", () => {
         })(),
       ),
     });
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { claude: process.execPath } },
       new AgentHarnessRegistry([harness]),
     );
@@ -391,7 +392,7 @@ describe("Claude Agent SDK lifecycle isolation", () => {
         })(),
       ),
     });
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { claude: process.execPath } },
       new AgentHarnessRegistry([harness]),
     );

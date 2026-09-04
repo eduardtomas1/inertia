@@ -81,8 +81,18 @@ export function resolveTurnRequest(
 ): ResolvedTurnRequest {
   const conversation = dependencies.store.conversation(request.conversationId);
   const attachments = [...(request.attachments ?? [])];
-  const capabilityInstructions = dependencies.hooks
-    .harnessInstructionsForTurn?.({ conversation }) ?? [];
+  const providerInfo = dependencies.hooks.providerInfo();
+  const selectedProvider = providerInfo.find(
+    ({ id }) => id === conversation.providerId,
+  );
+  const capabilityContract = selectedProvider?.capabilityContract;
+  const hostToolBridgeAttested = capabilityContract !== undefined
+    && capabilityContract.installationVerified
+    && capabilityContract.hostToolBridgeAvailable
+    && capabilityContract.harnessId === conversation.modelSelection.harnessId;
+  const capabilityInstructions = hostToolBridgeAttested
+    ? dependencies.hooks.harnessInstructionsForTurn?.({ conversation }) ?? []
+    : [];
   const assembled = assembleTurnRequest({
     cwd: dependencies.store.conversationPath(conversation.id),
     visibleContent: request.content,
@@ -98,10 +108,6 @@ export function resolveTurnRequest(
   });
   const runId = dependencies.id();
   const turnId = dependencies.id();
-  const providerInfo = dependencies.hooks.providerInfo();
-  const selectedProvider = providerInfo.find(
-    ({ id }) => id === conversation.providerId,
-  );
   const requestedModelId = conversation.modelSelection.modelId;
   const selectedModel = requestedModelId !== "provider-default"
     ? selectedProvider?.models.find(({ id }) => id === requestedModelId)
@@ -257,6 +263,7 @@ export function resolveTurnRequest(
     providerId: route.providerId,
     modelSelection,
     continuationIdentity: route.continuationIdentity,
+    continuationReasonCode: continuation.reasonCode,
     harnessId,
     backendProfileId: modelSelection.backendProfileId,
     model: modelSelection.modelId,

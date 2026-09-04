@@ -11,6 +11,7 @@ import type { PrivateConnectStateView } from "./private-connect/protocol";
 import type {
   BrowserEvidenceSnapshot,
 } from "./browser-evidence";
+import type { RuntimeLifecycleDiagnosticSnapshot } from "./lifecycle-diagnostics";
 export { PRIVATE_CONNECT_IPC } from "./private-connect/ipc";
 
 export interface RuntimeConnection {
@@ -595,7 +596,9 @@ export interface DesktopBridge {
   /** Reveals Inertia's fixed local diagnostics directory; no caller-supplied path is accepted. */
   revealRuntimeLogs: () => Promise<string>;
   /** Copies a fixed, allowlisted lifecycle summary. Prompts, source, paths, and credentials are excluded. */
-  copyRuntimeDiagnosticReport: () => Promise<{ copied: boolean; eventCount: number }>;
+  copyRuntimeDiagnosticReport: (
+    lifecycle: RuntimeLifecycleDiagnosticSnapshot | null,
+  ) => Promise<{ copied: boolean; eventCount: number }>;
   /** Writes renderer-visible text to the system clipboard; the hardened renderer session denies direct clipboard access. */
   copyText: (text: string) => Promise<boolean>;
   /** Checks the fixed release channel; unsupported packages remain manual-only. */

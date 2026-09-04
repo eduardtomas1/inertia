@@ -1,3 +1,4 @@
+// @inertia-test-suite portable
 import { Writable } from "node:stream";
 
 import { describe, expect, it } from "vitest";

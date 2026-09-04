@@ -111,10 +111,10 @@ export class TurnRunStateCoordinator {
     };
     const requiresOwnedStop = active.providerRunStarted
       && this.options.providers.isRunning(active.conversation.id)
-      && (this.options.providers.ownsRun?.(active.conversation.id, {
+      && this.options.providers.ownsRun(active.conversation.id, {
         runId: active.turn.runId,
         turnId: active.turn.id,
-      }) ?? true);
+      });
     if (requiresOwnedStop) {
       active.runState.requestTerminal(active.deferredSettlement.status);
       this.suspendForProviderStop(active);
@@ -224,9 +224,7 @@ export class TurnRunStateCoordinator {
           runId: active.turn.runId,
           turnId: active.turn.id,
         });
-        cleanupConfirmed = result === "settled"
-          || (result === "missing"
-            && !this.options.providers.isRunning(conversationId));
+        cleanupConfirmed = result === "settled";
       } catch {
         // The durable pre-stop marker intentionally remains fail-closed.
       }

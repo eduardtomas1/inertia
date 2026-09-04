@@ -6,10 +6,11 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { ProviderInfo } from "../../src/shared/contracts";
 import { RuntimeStore } from "../../src/server/database";
-import type {
-  ProviderRunCallbacks,
-  ProviderRunInput,
-  ProviderRunResult,
+import {
+  providerRunTerminal,
+  type ProviderRunCallbacks,
+  type ProviderRunInput,
+  type ProviderRunResult,
 } from "../../src/server/provider/contracts";
 import { PrivateGeneratedAttachmentStore } from "../../src/server/runtime/attachments/private-generated-attachments";
 import { TurnController } from "../../src/server/runtime/turns/turn-controller";
@@ -92,6 +93,10 @@ describe("generated turn attachment lifecycle", () => {
       cancel: () => true,
       stopOwned: () => stopGate,
       isRunning: () => resolveRun !== null,
+      ownsRun: (
+        _conversationId: string,
+        identity: { runId: string; turnId: string },
+      ) => input?.runId === identity.runId && input.turnId === identity.turnId,
     } as unknown as TurnProviderRuntime;
     let observeFirstGeneratedRelease!: (release: Promise<void>) => void;
     const firstGeneratedRelease = new Promise<void>((resolve, reject) => {
@@ -121,9 +126,7 @@ describe("generated turn attachment lifecycle", () => {
     const settleProvider = (status: ProviderRunResult["status"]): void => {
       const current = input!;
       resolveRun!({
-        providerId: current.providerId,
-        conversationId: current.conversationId ?? current.threadId,
-        status,
+        ...providerRunTerminal(current, status),
         text: "",
         textTruncated: false,
         exitCode: 0,

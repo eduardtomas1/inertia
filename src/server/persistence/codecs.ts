@@ -28,12 +28,15 @@ import {
   MAX_CHAT_ATTACHMENT_TOTAL_BYTES,
   chatAttachmentMimeTypeForName,
 } from "../../shared/attachments";
-import { officiallyAllowsModelSwitchWithinSession } from "../../shared/continuation-policy";
+import {
+  isContinuationReasonCode,
+  officiallyAllowsModelSwitchWithinSession,
+} from "../../shared/continuation-policy";
 import { parseProviderIdentityLabels } from "../../shared/provider-identities";
 import { parseAppKeybindings } from "../../shared/keybindings";
 import {
   continuationIdentityForSelection,
-  continuationIdentitySchema,
+  versionedContinuationIdentitySchema,
   knownHarnessIdSchema,
   legacyProviderIdForHarness,
   modelSelectionSchema,
@@ -147,7 +150,7 @@ function parseConversationContinuationIdentity(
 ): ContinuationIdentity | null {
   if (value !== null) {
     try {
-      const parsed = continuationIdentitySchema.safeParse(JSON.parse(value));
+      const parsed = versionedContinuationIdentitySchema.safeParse(JSON.parse(value));
       if (parsed.success) return parsed.data;
     } catch {
       // A persisted but unreadable identity must never be guessed.
@@ -290,6 +293,7 @@ function conversationTurnSummary(
     backendProfileId: turn.backendProfileId,
     modelSelection: turn.modelSelection,
     continuationIdentity: turn.continuationIdentity,
+    continuationReasonCode: turn.continuationReasonCode ?? null,
     model: turn.model,
     reasoningEffort: turn.reasoningEffort,
     requestedAt: turn.requestedAt,
@@ -448,6 +452,14 @@ export function parseAgentTurnUsage(
   }
 }
 
+function persistedContinuationReasonCode(
+  value: unknown,
+): AgentTurn["continuationReasonCode"] {
+  if (value === null || value === undefined) return null;
+  if (isContinuationReasonCode(value)) return value;
+  throw new Error("The persisted turn continuation reason is invalid.");
+}
+
 export function agentTurnFromRow(row: AgentTurnRow): AgentTurn {
   const modelSelection = parseModelSelection(
     row.model_selection_json,
@@ -472,6 +484,9 @@ export function agentTurnFromRow(row: AgentTurnRow): AgentTurn {
     continuationIdentity: parseAgentTurnContinuationIdentity(
       row.continuation_identity_json,
       modelSelection,
+    ),
+    continuationReasonCode: persistedContinuationReasonCode(
+      row.continuation_reason_code,
     ),
     harnessId: modelSelection.harnessId,
     backendProfileId: modelSelection.backendProfileId,

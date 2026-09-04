@@ -21,8 +21,8 @@ import type {
   ServerEvent,
 } from "../../src/shared/contracts";
 import {
-  continuationIdentityForSelection,
   nativeModelSelection,
+  versionedContinuationIdentityForSelection,
 } from "../../src/shared/model-routing";
 import { Composer } from "../../src/renderer/src/components/Composer";
 import {
@@ -1275,7 +1275,7 @@ describe("composer asynchronous ownership", () => {
     });
   });
 
-  it("binds new-chat confirmation, transfers text, and supports failure retry", async () => {
+  it("keeps history and draft while a fresh-session route change retries safely", async () => {
     const current = conversation("route-source");
     current.modelSelection = nativeModelSelection({
       providerId: "codex",
@@ -1285,8 +1285,11 @@ describe("composer asynchronous ownership", () => {
     });
     current.model = "codex-route";
     current.reasoningEffort = "high";
-    current.continuationIdentity = continuationIdentityForSelection(
+    current.continuationIdentity = versionedContinuationIdentityForSelection(
       current.modelSelection,
+      null,
+      false,
+      "a".repeat(64),
     );
     current.providerSessionId = "codex-session";
     const catalogState = {
@@ -1320,8 +1323,8 @@ describe("composer asynchronous ownership", () => {
         description: "Destination route",
       }],
     };
-    const onCreateConversationForSelection = vi.fn()
-      .mockRejectedValueOnce(new Error("Creation failed safely."))
+    const onUpdateConversation = vi.fn()
+      .mockRejectedValueOnce(new Error("Route update failed safely."))
       .mockResolvedValueOnce(undefined);
     render(<Composer {...composerProps(current, {
       providers: [codexProvider, claudeProvider],
@@ -1342,7 +1345,7 @@ describe("composer asynchronous ownership", () => {
         terminalReason: null,
         updatedAt: current.updatedAt,
       },
-      onCreateConversationForSelection,
+      onUpdateConversation,
     })} />);
     fireEvent.change(screen.getByRole("textbox", { name: "Message" }), {
       target: { value: "Carry this exact text." },
@@ -1353,27 +1356,29 @@ describe("composer asynchronous ownership", () => {
     if (!claudeRoute) throw new Error("Expected the Claude route action.");
     fireEvent.click(claudeRoute);
 
-    const confirmation = screen.getByRole("alertdialog");
-    await waitFor(() => expect(screen.getByRole("button", { name: "Cancel" }))
-      .toHaveFocus());
-    fireEvent.click(screen.getByRole("button", { name: "New chat" }));
-    await waitFor(() => expect(confirmation).toHaveTextContent(
-      "Creation failed safely.",
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(
+      "Route update failed safely.",
     ));
+    expect(onUpdateConversation).toHaveBeenCalledTimes(1);
+    expect(onUpdateConversation.mock.calls[0]?.[0]).toMatchObject({
+      providerId: "claude",
+      modelSelection: { modelId: "claude-route" },
+    });
     expect(screen.getByRole("textbox", { name: "Message" }))
       .toHaveValue("Carry this exact text.");
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "New chat" }));
-    await waitFor(() => expect(onCreateConversationForSelection)
+    fireEvent.click(claudeRoute);
+    await waitFor(() => expect(onUpdateConversation)
       .toHaveBeenCalledTimes(2));
-    expect(onCreateConversationForSelection.mock.calls[1]?.[0]).toMatchObject({
-      modelId: "claude-route",
+    expect(onUpdateConversation.mock.calls[1]?.[0]).toMatchObject({
+      providerId: "claude",
+      modelSelection: { modelId: "claude-route" },
     });
-    expect(onCreateConversationForSelection.mock.calls[1]?.[1]).toEqual({
-      prefillText: "Carry this exact text.",
-    });
-    await waitFor(() => expect(screen.queryByRole("alertdialog"))
+    await waitFor(() => expect(screen.queryByRole("alert"))
       .not.toBeInTheDocument());
+    expect(screen.getByRole("textbox", { name: "Message" }))
+      .toHaveValue("Carry this exact text.");
   });
 
   it("makes the leading draft durable, bounds trailing loss, and flushes ownership boundaries", async () => {

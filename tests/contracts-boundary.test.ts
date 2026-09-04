@@ -10,6 +10,7 @@ import * as clientCommandExports from "../src/shared/contracts/client-command";
 import * as conversationContextExports from "../src/shared/conversation-context";
 import * as duoExports from "../src/shared/contracts/duo";
 import * as eventExports from "../src/shared/contracts/events";
+import * as lifecycleDiagnosticExports from "../src/shared/lifecycle-diagnostics";
 import * as modelRoutingExports from "../src/shared/model-routing";
 import * as providerMaintenanceExports from "../src/shared/provider-maintenance";
 import * as providerTerminalResumeExports from "../src/shared/provider-terminal-resume";
@@ -27,6 +28,7 @@ describe("shared contracts boundary", () => {
       ...providerMaintenanceExports,
       ...providerTerminalResumeExports,
       ...runStateExports,
+      ...lifecycleDiagnosticExports,
       ...agentExports,
       ...agentWorkflowExports,
       ...appExports,

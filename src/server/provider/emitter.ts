@@ -18,8 +18,16 @@ import type {
   AgentInputRequest,
   AgentPlanStep,
 } from "./interactions";
-import type { AgentHarnessCallbacks, AgentHarnessEvent } from "./agent-harness";
+import type {
+  AgentHarnessCallbacks,
+  AgentHarnessEvent,
+} from "./agent-harness";
 import { contractActivityPhase } from "./activity-lifecycle";
+
+type AgentHarnessCapabilityObservationEvent = Extract<
+  AgentHarnessEvent,
+  { type: "capability-observation" }
+>;
 
 function safeCallback(callback: (() => void) | undefined): void {
   if (!callback) return;
@@ -61,12 +69,18 @@ export interface ProviderEmitter {
   subagent: (event: Omit<ProviderSubagentEvent, "providerId" | "conversationId" | "runId" | "turnId" | "type">) => void;
 }
 
+export interface ProviderEmitterPolicy {
+  accept(event: ProviderEvent): boolean;
+  reject(event: ProviderEvent): void;
+}
+
 export function createProviderEmitter(
   providerId: ProviderId,
   conversationId: string,
   callbacks: ProviderRunCallbacks,
-  runId = conversationId,
-  turnId: string | null = null,
+  runId: string,
+  turnId: string,
+  policy?: ProviderEmitterPolicy,
 ): ProviderEmitter {
   const base = { providerId, conversationId, runId, turnId };
   let accepting = true;
@@ -77,6 +91,10 @@ export function createProviderEmitter(
     && identity.turnId === turnId;
   const event = (providerEvent: ProviderEvent): void => {
     if (!accepting || !matches(providerEvent)) return;
+    if (policy && !policy.accept(providerEvent)) {
+      policy.reject(providerEvent);
+      return;
+    }
     safeCallback(() => callbacks.onEvent?.(providerEvent));
     switch (providerEvent.type) {
       case "text":
@@ -181,7 +199,7 @@ export function createProviderEmitter(
     reasoning: (text) => event({ ...base, type: "reasoning-summary", text }),
     usage: (usage) => event({ ...base, type: "usage", usage }),
     metadata: (metadata, source, complete) => event({ ...base, type: "metadata", metadata, source, complete }),
-    subagent: (subagent) => event({ ...base, type: "subagent", ...subagent }),
+    subagent: (subagent) => event({ ...subagent, ...base, type: "subagent" }),
   };
 }
 
@@ -191,9 +209,18 @@ export function createProviderEmitter(
  * continue consuming its existing callbacks until that transport contract is
  * migrated independently.
  */
-export function providerCallbacksFromHarness(emitter: ProviderEmitter): AgentHarnessCallbacks {
+export function providerCallbacksFromHarness(
+  emitter: ProviderEmitter,
+  observeCapability?: (
+    event: AgentHarnessCapabilityObservationEvent,
+  ) => void,
+): AgentHarnessCallbacks {
   return {
     onEvent: (event) => {
+      if (event.type === "capability-observation") {
+        if (emitter.matches(event)) observeCapability?.(event);
+        return;
+      }
       if (event.type !== "extension") {
         emitter.event(event);
         return;

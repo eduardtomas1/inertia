@@ -5,13 +5,27 @@ import { resolvePlatformFileOpenFlags } from
   "../../src/node/platform-file-open-flags";
 
 describe("platform file open flags", () => {
-  it("corrects Electron 44 Linux ARM64 snapshot constants", () => {
+  it("corrects affected Electron 44.0 Linux ARM64 snapshot constants", () => {
     expect(resolvePlatformFileOpenFlags({
       platform: "linux",
       architecture: "arm64",
       constants: {
         O_DIRECTORY: 0x1_0000,
         O_NOFOLLOW: 0x2_0000,
+      },
+    })).toEqual({
+      directory: 0x4000,
+      noFollow: 0x8000,
+    });
+  });
+
+  it("keeps Electron 44.1 Linux ARM64 constants on the canonical ABI", () => {
+    expect(resolvePlatformFileOpenFlags({
+      platform: "linux",
+      architecture: "arm64",
+      constants: {
+        O_DIRECTORY: 0x4000,
+        O_NOFOLLOW: 0x8000,
       },
     })).toEqual({
       directory: 0x4000,

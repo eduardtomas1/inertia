@@ -283,7 +283,7 @@ async function seedShowcaseData() {
       now,
     );
     database.prepare(`
-      UPDATE conversations SET branch = 'codex/release-0.0.47'
+      UPDATE conversations SET branch = 'codex/release-0.0.48'
       WHERE id = ?
     `).run(conversationId);
     database.prepare(`

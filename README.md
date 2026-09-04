@@ -240,9 +240,9 @@ If something goes wrong, first refresh the affected provider in **Settings → P
 
 Report suspected vulnerabilities privately through the [security policy](SECURITY.md), never through a public issue.
 
-### Version 0.0.47
+### Version 0.0.48
 
-Inertia 0.0.47 makes repeated prompts and recovered work reliable without reopening the app. Normal message admission is atomic, stale runtime generations retire through bounded platform-specific ownership proof, and provider continuations and activities settle against their exact identities instead of leaving a chat or spinner wedged. Git refreshes, pre-turn capture, renderer work, and long linked-file previews are bounded or coalesced to keep large workspaces responsive. Split-pane composer utilities stay on screen, provider settings use a clearer master-detail layout, new chats opened from the Inertia mark stay in the active project, and installed application names remain stable across self-updates. Reviewed provider contracts now target ACP 1.4.0, Claude Agent SDK 0.3.259, Anthropic SDK 0.123.0, MCP 1.30.0, and OpenCode SDK 1.18.27.
+Inertia 0.0.48 restores dependable work immediately after a Linux AppImage update and across repeated attachment-backed prompts. Startup can safely retire the exact prior runtime generation after an update changes the packaged guardian inode. Attachment retention, import, and secure-file helpers now correlate each result with an operation UUID, wait for the parent's exact acknowledgement, and retry a cancellation that arrived before a cold helper spawned. Valid results no longer disappear in an IPC/exit race, late workers cannot poison later prompts, and uncertain ownership still fails closed.
 
 Inertia now gives each chat a visible local Browser with bounded agent actions and an inspectable, fail-closed evidence timeline for screenshots, console failures, failed requests, navigation, and actions. The pre-merge confidence view collects exact-head CI, review freshness, affected areas, focused evidence, portability, bundle deltas, and release readiness without letting stale status look green.
 
@@ -254,7 +254,7 @@ Newly completed answers also retain their intended reading position across ordin
 
 Stable builds now cover six native architectures. Unsigned Windows and ad-hoc macOS packages remain manual downloads until signing credentials exist; Linux AppImages keep verified in-app delivery. The separately identified Canary prerelease channel can test and roll back Canary packages without changing Stable's feed or local state.
 
-Download [Inertia v0.0.47](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.47):
+Download [Inertia v0.0.48](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.48):
 
 | Platform | Architecture | Package | Update delivery after the first manual install |
 | --- | --- | --- | --- |

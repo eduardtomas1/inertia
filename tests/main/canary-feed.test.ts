@@ -13,7 +13,7 @@ import {
 } from "../../scripts/validate-canary-feed-advance.mjs";
 
 const roots: string[] = [];
-const version = "0.0.47";
+const version = "0.0.48";
 const metadata = [
   `version: ${version}`,
   "files:",
@@ -116,12 +116,12 @@ describe("Canary feed publication", () => {
       version: candidateVersion,
       tag: `canary-v${candidateVersion}`,
     });
-    const initiallyPublished = status("0.0.46");
-    const newerWinner = status("0.0.48");
-    const olderLateJob = status("0.0.47");
+    const initiallyPublished = status("0.0.47");
+    const newerWinner = status("0.0.49");
+    const olderLateJob = status("0.0.48");
 
     expect(validateCanaryFeedAdvance(initiallyPublished, newerWinner))
-      .toEqual({ version: "0.0.48", tag: "canary-v0.0.48" });
+      .toEqual({ version: "0.0.49", tag: "canary-v0.0.49" });
     expect(validateCanaryFeedAdvance(newerWinner, olderLateJob)).toBeNull();
     expect(validateCanaryFeedAdvance(newerWinner, newerWinner)).toBeNull();
     expect(compareCanaryVersions("10.0.0", "9.999.999")).toBe(1);

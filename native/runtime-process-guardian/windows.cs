@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.IO.Pipes;
 using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
@@ -10,6 +11,28 @@ using System.Threading;
 using Microsoft.Win32.SafeHandles;
 
 public static class InertiaRuntimeJob {
+  [StructLayout(LayoutKind.Sequential)]
+  private struct STARTUPINFO {
+    public Int32 cb;
+    public IntPtr lpReserved, lpDesktop, lpTitle;
+    public UInt32 dwX, dwY, dwXSize, dwYSize, dwXCountChars, dwYCountChars;
+    public UInt32 dwFillAttribute, dwFlags;
+    public UInt16 wShowWindow, cbReserved2;
+    public IntPtr lpReserved2, hStdInput, hStdOutput, hStdError;
+  }
+
+  [StructLayout(LayoutKind.Sequential)]
+  private struct STARTUPINFOEX {
+    public STARTUPINFO StartupInfo;
+    public IntPtr lpAttributeList;
+  }
+
+  [StructLayout(LayoutKind.Sequential)]
+  private struct PROCESS_INFORMATION {
+    public IntPtr hProcess, hThread;
+    public UInt32 dwProcessId, dwThreadId;
+  }
+
   [StructLayout(LayoutKind.Sequential)]
   private struct FILETIME {
     public UInt32 dwLowDateTime;
@@ -120,13 +143,25 @@ public static class InertiaRuntimeJob {
   [DllImport("kernel32.dll", SetLastError = true)]
   private static extern bool CloseHandle(IntPtr handle);
   [DllImport("kernel32.dll", SetLastError = true)]
-  private static extern IntPtr GetStdHandle(Int32 standardHandle);
-  [DllImport("kernel32.dll", SetLastError = true)]
-  private static extern bool SetHandleInformation(
-    IntPtr handle,
-    UInt32 mask,
-    UInt32 flags
+  private static extern bool InitializeProcThreadAttributeList(
+    IntPtr attributes, Int32 count, UInt32 flags, ref UIntPtr size
   );
+  [DllImport("kernel32.dll", SetLastError = true)]
+  private static extern bool UpdateProcThreadAttribute(
+    IntPtr attributes, UInt32 flags, UIntPtr attribute,
+    IntPtr value, UIntPtr size, IntPtr previousValue, IntPtr returnSize
+  );
+  [DllImport("kernel32.dll")]
+  private static extern void DeleteProcThreadAttributeList(IntPtr attributes);
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+  private static extern bool CreateProcessW(
+    string applicationName, StringBuilder commandLine,
+    IntPtr processAttributes, IntPtr threadAttributes, bool inheritHandles,
+    UInt32 creationFlags, IntPtr environment, string currentDirectory,
+    ref STARTUPINFOEX startupInfo, out PROCESS_INFORMATION processInformation
+  );
+  [DllImport("kernel32.dll", SetLastError = true)]
+  private static extern bool TerminateProcess(IntPtr process, UInt32 exitCode);
   [DllImport("kernel32.dll", SetLastError = true)]
   private static extern IntPtr CreateToolhelp32Snapshot(UInt32 flags, UInt32 processId);
   [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
@@ -178,7 +213,10 @@ public static class InertiaRuntimeJob {
   private const UInt32 CREATE_NEW_FILE = 1;
   private const UInt32 FILE_ATTRIBUTE_NORMAL = 0x00000080;
   private const UInt32 FILE_FLAG_WRITE_THROUGH = 0x80000000;
-  private const UInt32 HANDLE_FLAG_INHERIT = 0x00000001;
+  private const UInt32 STARTF_USESTDHANDLES = 0x00000100;
+  private const UInt32 EXTENDED_STARTUPINFO_PRESENT = 0x00080000;
+  private const UInt32 CREATE_NO_WINDOW = 0x08000000;
+  private const UInt32 PROC_THREAD_ATTRIBUTE_HANDLE_LIST = 0x00020002;
   private const Int32 FileRenameInfo = 3;
   private const Int64 MAX_EXECUTABLE_BYTES = 1024 * 1024;
   private const Int64 MAX_UPDATE_ARTIFACT_BYTES = 1024L * 1024L * 1024L;
@@ -1658,19 +1696,129 @@ public static class InertiaRuntimeJob {
     }
   }
 
-  private static bool IsolateBrokerStandardHandles() {
-    // .NET Framework Process.Start copies every inheritable handle, including
-    // the original broker pipes even when the child uses redirected streams.
-    // These handles belong only to the broker and must close with it.
-    foreach (Int32 standardHandle in new Int32[] { -10, -11, -12 }) {
-      IntPtr handle = GetStdHandle(standardHandle);
-      if (
-        handle == IntPtr.Zero
-        || handle == new IntPtr(-1)
-        || !SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0)
-      ) return false;
+  private sealed class UpdateSupervisorProcess : IDisposable {
+    private IntPtr processHandle;
+    private AnonymousPipeServerStream inputPipe, outputPipe, errorPipe;
+    public StreamWriter StandardInput;
+    public StreamReader StandardOutput;
+
+    public static UpdateSupervisorProcess Start(string executable, string arguments) {
+      var child = new UpdateSupervisorProcess();
+      IntPtr attributes = IntPtr.Zero;
+      IntPtr handleList = IntPtr.Zero;
+      bool attributesInitialized = false;
+      bool started = false;
+      var information = new PROCESS_INFORMATION();
+      try {
+        child.inputPipe = new AnonymousPipeServerStream(
+          PipeDirection.Out, HandleInheritability.Inheritable
+        );
+        child.outputPipe = new AnonymousPipeServerStream(
+          PipeDirection.In, HandleInheritability.Inheritable
+        );
+        child.errorPipe = new AnonymousPipeServerStream(
+          PipeDirection.In, HandleInheritability.Inheritable
+        );
+        child.StandardInput = new StreamWriter(
+          child.inputPipe, new UTF8Encoding(false)
+        );
+        child.StandardInput.AutoFlush = true;
+        child.StandardOutput = new StreamReader(child.outputPipe, Encoding.UTF8);
+
+        // Redirection alone in .NET Framework still copies other inheritable
+        // handles, including cached copies of the broker's console pipes.
+        // This list transfers only the supervisor's three private pipe ends.
+        IntPtr[] handles = {
+          child.inputPipe.ClientSafePipeHandle.DangerousGetHandle(),
+          child.outputPipe.ClientSafePipeHandle.DangerousGetHandle(),
+          child.errorPipe.ClientSafePipeHandle.DangerousGetHandle()
+        };
+        UIntPtr attributeSize = UIntPtr.Zero;
+        InitializeProcThreadAttributeList(IntPtr.Zero, 1, 0, ref attributeSize);
+        if (attributeSize.ToUInt64() == 0 || attributeSize.ToUInt64() > 65536) {
+          throw new InvalidOperationException("Invalid process attribute size.");
+        }
+        attributes = Marshal.AllocHGlobal((Int32)attributeSize.ToUInt64());
+        if (!InitializeProcThreadAttributeList(attributes, 1, 0, ref attributeSize)) {
+          throw new System.ComponentModel.Win32Exception();
+        }
+        attributesInitialized = true;
+        handleList = Marshal.AllocHGlobal(handles.Length * IntPtr.Size);
+        for (int index = 0; index < handles.Length; index += 1) {
+          Marshal.WriteIntPtr(handleList, index * IntPtr.Size, handles[index]);
+        }
+        if (!UpdateProcThreadAttribute(
+          attributes, 0, new UIntPtr(PROC_THREAD_ATTRIBUTE_HANDLE_LIST),
+          handleList, new UIntPtr((UInt32)(handles.Length * IntPtr.Size)),
+          IntPtr.Zero, IntPtr.Zero
+        )) {
+          throw new System.ComponentModel.Win32Exception();
+        }
+        var startup = new STARTUPINFOEX();
+        startup.StartupInfo.cb = Marshal.SizeOf(typeof(STARTUPINFOEX));
+        startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+        startup.StartupInfo.hStdInput = handles[0];
+        startup.StartupInfo.hStdOutput = handles[1];
+        startup.StartupInfo.hStdError = handles[2];
+        startup.lpAttributeList = attributes;
+        var commandLine = new StringBuilder("\"" + executable + "\" " + arguments);
+        if (!CreateProcessW(
+          executable, commandLine, IntPtr.Zero, IntPtr.Zero, true,
+          EXTENDED_STARTUPINFO_PRESENT | CREATE_NO_WINDOW,
+          IntPtr.Zero, null, ref startup, out information
+        )) {
+          throw new System.ComponentModel.Win32Exception();
+        }
+        // Retain the exact creation handle rather than reopening a reusable PID.
+        child.processHandle = information.hProcess;
+        started = true;
+        return child;
+      } finally {
+        if (information.hThread != IntPtr.Zero) CloseHandle(information.hThread);
+        if (attributesInitialized) DeleteProcThreadAttributeList(attributes);
+        if (attributes != IntPtr.Zero) Marshal.FreeHGlobal(attributes);
+        if (handleList != IntPtr.Zero) Marshal.FreeHGlobal(handleList);
+        if (child.inputPipe != null) child.inputPipe.DisposeLocalCopyOfClientHandle();
+        if (child.outputPipe != null) child.outputPipe.DisposeLocalCopyOfClientHandle();
+        if (child.errorPipe != null) child.errorPipe.DisposeLocalCopyOfClientHandle();
+        if (!started) child.Dispose();
+      }
     }
-    return true;
+
+    public bool HasExited {
+      get { return WaitForExit(0); }
+    }
+
+    public bool WaitForExit(int timeoutMilliseconds) {
+      UInt32 result = WaitForSingleObject(
+        processHandle, (UInt32)Math.Max(0, timeoutMilliseconds)
+      );
+      if (result == WAIT_OBJECT_0) return true;
+      if (result == WAIT_TIMEOUT) return false;
+      throw new System.ComponentModel.Win32Exception();
+    }
+
+    public void Kill() {
+      if (!TerminateProcess(processHandle, 137)) {
+        throw new System.ComponentModel.Win32Exception();
+      }
+    }
+
+    private static void DisposeStream(IDisposable stream) {
+      try { if (stream != null) stream.Dispose(); } catch (IOException) { }
+    }
+
+    public void Dispose() {
+      DisposeStream(StandardInput);
+      DisposeStream(StandardOutput);
+      DisposeStream(inputPipe);
+      DisposeStream(outputPipe);
+      DisposeStream(errorPipe);
+      if (processHandle != IntPtr.Zero) {
+        CloseHandle(processHandle);
+        processHandle = IntPtr.Zero;
+      }
+    }
   }
 
   public static int LaunchUpdateSupervisor(
@@ -1683,7 +1831,7 @@ public static class InertiaRuntimeJob {
   ) {
     output = "";
     diagnostic = "";
-    Process child = null;
+    UpdateSupervisorProcess child = null;
     FileStream supervisor = null;
     try {
       if (
@@ -1805,27 +1953,11 @@ try {
         diagnostic = ErrorLine("update-launch-powershell", 0);
         return 46;
       }
-      var start = new ProcessStartInfo();
-      start.FileName = powershellPath;
-      start.Arguments = "-NoLogo -NoProfile -NonInteractive "
-        + "-ExecutionPolicy Bypass -EncodedCommand " + encodedLoader;
-      start.UseShellExecute = false;
-      start.CreateNoWindow = true;
-      start.RedirectStandardInput = true;
-      start.RedirectStandardOutput = true;
-      // The supervisor outlives this broker after READY. Its bounded loader
-      // diagnostic must not inherit the broker's stderr pipe and keep the
-      // broker's parent waiting for stdio closure after the broker exits.
-      start.RedirectStandardError = true;
-      if (!IsolateBrokerStandardHandles()) {
-        diagnostic = ErrorLine("update-launch-stdio", Marshal.GetLastWin32Error());
-        return 46;
-      }
-      child = Process.Start(start);
-      if (child == null) {
-        diagnostic = ErrorLine("update-launch-start", 0);
-        return 46;
-      }
+      child = UpdateSupervisorProcess.Start(
+        powershellPath,
+        "-NoLogo -NoProfile -NonInteractive "
+          + "-ExecutionPolicy Bypass -EncodedCommand " + encodedLoader
+      );
       child.StandardInput.WriteLine(Convert.ToBase64String(supervisorBytes));
       child.StandardInput.WriteLine(expectedSupervisorDigest);
       child.StandardInput.WriteLine(Convert.ToBase64String(
@@ -1850,7 +1982,8 @@ try {
           } catch (Exception error) {
             readFailure = error;
           } finally {
-            ready.Set();
+            // A timed-out admission can dispose the waiter before EOF arrives.
+            try { ready.Set(); } catch (ObjectDisposedException) { }
           }
         });
         reader.IsBackground = true;

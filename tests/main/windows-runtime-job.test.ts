@@ -620,18 +620,28 @@ describe("Windows runtime Job Object containment", () => {
       nativeSource.indexOf("public static int LaunchUpdateSupervisor("),
       nativeSource.indexOf("private static string TrustedPowerShellPath("),
     );
-    for (const stream of ["Input", "Output", "Error"]) {
-      expect(boundSupervisorLaunch).toContain(
-        `start.RedirectStandard${stream} = true;`,
+    const supervisorProcessSource = nativeSource.slice(
+      nativeSource.indexOf("private sealed class UpdateSupervisorProcess"),
+      nativeSource.indexOf("public static int LaunchUpdateSupervisor("),
+    );
+    expect(supervisorProcessSource).toContain("PROC_THREAD_ATTRIBUTE_HANDLE_LIST");
+    expect(supervisorProcessSource).toContain(
+      "EXTENDED_STARTUPINFO_PRESENT | CREATE_NO_WINDOW",
+    );
+    for (const [index, stream] of ["Input", "Output", "Error"].entries()) {
+      expect(supervisorProcessSource).toContain(
+        `startup.StartupInfo.hStd${stream} = handles[${index}];`,
       );
     }
-    expect(nativeSource).toContain(
-      "SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0)",
+    expect(supervisorProcessSource).toContain("DisposeLocalCopyOfClientHandle()");
+    expect(supervisorProcessSource).toContain(
+      "child.processHandle = information.hProcess;",
     );
-    expect(boundSupervisorLaunch.indexOf("if (!IsolateBrokerStandardHandles())"))
-      .toBeLessThan(boundSupervisorLaunch.indexOf("Process.Start(start)"));
+    expect(supervisorProcessSource).not.toContain("Process.GetProcessById(");
+    expect(boundSupervisorLaunch).toContain("UpdateSupervisorProcess.Start(");
+    expect(boundSupervisorLaunch).not.toMatch(/\bProcess\.Start\(/u);
     expect(boundSupervisorLaunch.indexOf("OpenUpdateArtifact(supervisorPath"))
-      .toBeLessThan(boundSupervisorLaunch.indexOf("Process.Start(start)"));
+      .toBeLessThan(boundSupervisorLaunch.indexOf("UpdateSupervisorProcess.Start("));
     expect(boundSupervisorLaunch).toContain(
       "$loaded = [Reflection.Assembly]::Load($assemblyBytes)",
     );

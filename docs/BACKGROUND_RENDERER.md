@@ -24,6 +24,8 @@ Ultra reasoning. There is no provider execution or user content.
 
 The test focuses a small second Electron window while keeping Inertia mapped,
 then minimizes Inertia, restores it, and verifies foreground animation resumes.
+Bare Xvfb without a window manager uses native window hiding when minimization
+is unavailable, and records which native state was reached.
 Playwright disables Chromium background/occlusion throttling; the test disables
 its synthetic focus emulation and records actual focus and visibility. On this
 X11 fixture the minimized document still reports `visible`, so hidden-document
@@ -74,8 +76,8 @@ CPU-settle timestamp. Before the fix, paint continued through the full sample.
 ## Bounds and regression coverage
 
 `renderer-background.spec.ts` exercises both small and large histories, writes
-JSON process/heap/callback summaries to `performance-results`, and attaches CDP
-traces to the Playwright results. It asserts paused/frozen background animation,
+JSON process/heap/callback summaries and CDP traces to `performance-results`,
+and attaches traces to the Playwright results. It asserts paused/frozen background animation,
 zero idle React commits/RAF callbacks, fewer than 24 mounted rows, advancing
 foreground animation, and the Ultra reduced-motion rule. CPU and memory are
 evidence rather than machine-dependent pass/fail thresholds.

@@ -105,7 +105,9 @@ async function sample(page: Page, electronApp: ElectronApplication, name: string
   await session.send("Tracing.end");
   await completed;
   await session.detach();
-  const tracePath = testInfo.outputPath(`${name}-renderer-trace.json`);
+  const traceDirectory = join("performance-results", "renderer-background", testInfo.testId.replace(/[^a-zA-Z0-9_-]/gu, "_"));
+  await mkdir(traceDirectory, { recursive: true });
+  const tracePath = join(traceDirectory, `${name}-renderer-trace.json`);
   await writeFile(tracePath, JSON.stringify({ traceEvents: trace }));
   await testInfo.attach(`${name}-renderer-trace`, { path: tracePath, contentType: "application/json" });
   const eventTotals: Record<string, { count: number; durationMs: number }> = {};
@@ -178,13 +180,21 @@ test(`bounds background motion for ${turns} turns and resumes on focus`, async (
     })).toBe(true);
     const pauseObservedMs = performance.now() - backgroundRequestedAt;
     const background = await sample(page, electronApp, "mapped-unfocused", testInfo);
-    await mainWindow.evaluate((window) => window.minimize());
-    await expect.poll(() => mainWindow.evaluate((window) => window.isMinimized())).toBe(true);
+    await mainWindow.evaluate((window) => {
+      window.minimize();
+      // Bare Xvfb has no window manager to honor minimization. Native hiding
+      // still exercises an unmapped window there without faking DOM state.
+      if (!window.isMinimized()) window.hide();
+    });
+    const nativeWindowState = await mainWindow.evaluate((window) => ({
+      minimized: window.isMinimized(), visible: window.isVisible(),
+    }));
+    expect(nativeWindowState.minimized || !nativeWindowState.visible).toBe(true);
     await expect.poll(() => page.evaluate(() => document.hasFocus())).toBe(false);
     // Playwright disables Chromium occlusion/background throttling, so record
     // the actual visibility state instead of assuming minimization hides it.
-    const minimized = await sample(page, electronApp, "minimized", testInfo);
-    await mainWindow.evaluate((window) => window.restore());
+    const minimized = { ...await sample(page, electronApp, "minimized-or-hidden", testInfo), nativeWindowState };
+    await mainWindow.evaluate((window) => { window.restore(); window.show(); });
     await electronApp.evaluate(({ BrowserWindow }, id) => {
       for (const window of BrowserWindow.getAllWindows()) {
         if (window.id !== id) window.destroy();

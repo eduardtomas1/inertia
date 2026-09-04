@@ -82,7 +82,9 @@ zero idle React commits/RAF callbacks, fewer than 24 mounted rows, advancing
 foreground animation, and the Ultra reduced-motion rule. CPU and memory are
 evidence rather than machine-dependent pass/fail thresholds.
 
-Before each sample, the regression fixture requires two seconds without a React
+The fixture first waits for the runtime snapshot to confirm its initial
+validated backup, whose scheduled publication is startup work. Before each
+sample, the regression fixture requires two seconds without a React
 commit or RAF callback, bounded by a 15-second deadline. This lets initial
 runtime replies and native focus effects settle before the full five-second
 idle assertion begins. Reports retain up to 100 runtime event types and receipt

@@ -2,6 +2,7 @@ import { expect, test, type ElectronApplication, type Page, type TestInfo } from
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { RuntimeStore } from "../../src/server/database";
+import type { ServerEvent } from "../../src/shared/contracts";
 import { createAppFixture } from "./support/app-fixture";
 
 declare global {
@@ -142,10 +143,14 @@ test(`bounds background motion for ${turns} turns and resumes on focus`, async (
   const mainWindow = await electronApp.browserWindow(page);
   const mainWindowId = await mainWindow.evaluate((window) => window.id);
   const runtimeEvents: { type: string; receivedAtMs: number }[] = [];
+  let initialBackupReady = false;
   page.on("websocket", (socket) => socket.on("framereceived", ({ payload }) => {
-    const message = JSON.parse(String(payload)) as { type?: string; event?: { type?: string } };
+    const message = JSON.parse(String(payload)) as ServerEvent;
+    const event = message.type === "runtime.event" ? message.event : message;
+    if ((event.type === "server.welcome" || event.type === "snapshot.updated")
+      && event.snapshot.databaseBackup?.lastValidatedAt) initialBackupReady = true;
     if (runtimeEvents.length < 100) runtimeEvents.push({
-      type: message.event?.type ?? message.type ?? "unknown", receivedAtMs: performance.now(),
+      type: event.type, receivedAtMs: performance.now(),
     });
   }));
   try {
@@ -175,6 +180,9 @@ test(`bounds background motion for ${turns} turns and resumes on focus`, async (
     } else {
       await expect(page.locator(".response-static-item")).toHaveCount(turns);
     }
+    // The scheduled initial backup publishes a real snapshot after its quiet
+    // grace. Measure idle motion after that one-time startup work completes.
+    await expect.poll(() => initialBackupReady, { timeout: 60_000 }).toBe(true);
     await page.emulateMedia({ reducedMotion: "no-preference" });
     await mainWindow.evaluate((window) => { window.focus(); window.webContents.focus(); });
     await expect.poll(() => page.evaluate(() => document.hasFocus())).toBe(true);

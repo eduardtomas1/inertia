@@ -7,6 +7,7 @@ export type ChangeDomain =
   | "provider_codex"
   | "provider_claude"
   | "provider_cursor"
+  | "provider_gemini"
   | "provider_kimi"
   | "provider_opencode"
   | "turn_session"

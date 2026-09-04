@@ -190,6 +190,7 @@ export const backendCompatibilityProbeResultSchema = z.object({
     "openai-responses",
     "anthropic-messages",
     "cursor-managed",
+    "gemini-managed",
     "kimi-managed",
     "opencode-native",
   ]),

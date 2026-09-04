@@ -7,8 +7,8 @@ import type {
 } from "@shared/contracts";
 import {
   fastModeProviderValue,
-  legacyProviderIdForHarness,
-  nativeBackendProfile,
+  providerIdForHarness,
+  providerNativeBackendProfile,
 } from "../../../shared/model-routing";
 import {
   composerRouteReadiness,
@@ -129,7 +129,7 @@ export function resolveComposerRouteState(input: {
   providers: readonly ProviderInfo[];
   profiles: readonly ModelBackendProfileView[];
 }): ComposerRouteState {
-  const providerId = legacyProviderIdForHarness(input.selection.harnessId);
+  const providerId = providerIdForHarness(input.selection.harnessId);
   const provider = input.providers.find(({ id }) => id === providerId);
   const profile = input.profiles.find(({ id }) =>
     id === input.selection.backendProfileId);
@@ -150,7 +150,7 @@ export function resolveComposerRouteState(input: {
     );
   }
 
-  const native = nativeBackendProfile(providerId);
+  const native = providerNativeBackendProfile(providerId);
   const nativeRoute = input.selection.backendProfileId === native.id;
   if (!nativeRoute && !profile) {
     return resolved(

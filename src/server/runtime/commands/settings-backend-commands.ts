@@ -7,7 +7,7 @@ import type {
   ProviderId,
   ServerEvent,
 } from "../../../shared/contracts";
-import { legacyProviderIdForHarness } from "../../../shared/model-routing";
+import { providerIdForHarness } from "../../../shared/model-routing";
 import type { RuntimeStore } from "../../database";
 import type { ProviderManager } from "../../providers";
 import { RuntimeRequestError } from "../../runtime-errors";
@@ -42,7 +42,7 @@ export function createSettingsBackendCommandHandler(
     );
   };
   const assertHarnessMaintenanceIdle = (harnessId: string): void => {
-    const providerId = legacyProviderIdForHarness(harnessId);
+    const providerId = providerIdForHarness(harnessId);
     if (providerId) assertMaintenanceIdle(providerId);
   };
   return defineRuntimeCommandHandler([

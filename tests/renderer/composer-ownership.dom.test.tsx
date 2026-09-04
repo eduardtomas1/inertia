@@ -16,8 +16,8 @@ import type {
   ProviderInfo,
 } from "../../src/shared/contracts";
 import {
-  nativeModelSelection,
   versionedContinuationIdentityForSelection,
+  providerNativeModelSelection,
 } from "../../src/shared/model-routing";
 import { Composer } from "../../src/renderer/src/components/Composer";
 import {
@@ -67,7 +67,7 @@ function conversation(id: string): Conversation {
     projectId: "11111111-1111-4111-8111-111111111111",
     title: id,
     providerId: "codex",
-    modelSelection: nativeModelSelection({
+    modelSelection: providerNativeModelSelection({
       providerId: "codex",
       modelId: "provider-default",
       reasoningEffort: null,
@@ -640,7 +640,7 @@ describe("composer detachment ownership", () => {
 
   it("blocks a pending model-route mutation", async () => {
     const current = conversation("route-owner");
-    current.modelSelection = nativeModelSelection({
+    current.modelSelection = providerNativeModelSelection({
       providerId: "codex",
       modelId: "codex-route",
       alias: "Codex Route",

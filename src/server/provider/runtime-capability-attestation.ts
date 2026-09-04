@@ -1,8 +1,8 @@
 import type { ProviderCapabilityContractView } from "../../shared/contracts/app";
 import {
   resolveHarnessBackendCompatibility,
-  nativeBackendProfile,
-  nativeHarnessId,
+  providerNativeBackendProfile,
+  providerNativeHarnessId,
   type HarnessBackendCompatibility,
   type KnownHarnessId,
   type ModelBackendProfile,
@@ -147,7 +147,7 @@ export function runtimeProviderCapabilityContract(
   providerId: ProviderId,
   attestation: ProviderCapabilityAttestation | null,
 ): ProviderCapabilityContractView {
-  const harnessId = nativeHarnessId(providerId);
+  const harnessId = providerNativeHarnessId(providerId);
   const manifest = providerCapabilityManifest(harnessId);
   if (!attestation || !manifest || manifest.providerId !== providerId) {
     return {
@@ -184,8 +184,8 @@ export function nativeRuntimeCapabilityInput(
   RuntimeProviderCapabilityInput,
   "harnessId" | "backendProfile" | "compatibility"
 > {
-  const harnessId = nativeHarnessId(providerId);
-  const backendProfile = nativeBackendProfile(providerId);
+  const harnessId = providerNativeHarnessId(providerId);
+  const backendProfile = providerNativeBackendProfile(providerId);
   return {
     harnessId,
     backendProfile,

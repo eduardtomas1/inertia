@@ -3,7 +3,7 @@ import type {
   ModelSelection,
   ProviderInfo,
 } from "@shared/contracts";
-import { nativeBackendProfile } from "../../../shared/model-routing";
+import { providerNativeBackendProfile } from "../../../shared/model-routing";
 
 export type ComposerRouteRepair =
   | "install"
@@ -48,6 +48,7 @@ function harnessLabel(harnessId: string): string {
   if (harnessId.startsWith("claude")) return "Claude harness";
   if (harnessId.startsWith("codex")) return "Codex harness";
   if (harnessId.startsWith("cursor")) return "Cursor harness";
+  if (harnessId.startsWith("gemini")) return "Gemini";
   if (harnessId.startsWith("opencode")) return "OpenCode harness";
   return "Selected harness";
 }
@@ -134,6 +135,14 @@ function nativeReadiness(
       "Connection issue",
       `${provider.label} connection check failed`,
       provider.statusMessage ?? "Refresh the selected agent connection.",
+      "refresh",
+    );
+  }
+  if (provider.id === "gemini" && provider.authState === "unknown") {
+    return unavailable(
+      "Update needed",
+      `${provider.label} cannot run this route`,
+      provider.statusMessage ?? "Update Gemini CLI, then refresh agent status.",
       "refresh",
     );
   }
@@ -250,7 +259,7 @@ export function composerRouteReadiness(input: {
   >;
 }): ComposerRouteReadiness {
   const nativeBackendId = input.provider
-    ? nativeBackendProfile(input.provider.id).id
+    ? providerNativeBackendProfile(input.provider.id).id
     : null;
   const native = nativeBackendId === input.selection.backendProfileId;
   return native

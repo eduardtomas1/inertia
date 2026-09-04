@@ -37,6 +37,7 @@ const sourceIcons: Readonly<Record<SelectedModelChipGlyph, LucideIcon>> = {
   codex: Command,
   claude: Bot,
   cursor: MousePointer2,
+  gemini: Sparkles,
   kimi: Bot,
   opencode: Code2,
   custom: CloudCog,

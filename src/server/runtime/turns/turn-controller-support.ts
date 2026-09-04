@@ -55,9 +55,11 @@ export function providerLabel(providerId: ProviderId): string {
       ? "Claude"
       : providerId === "cursor"
         ? "Cursor"
-        : providerId === "kimi"
-          ? "Kimi Code"
-          : "OpenCode";
+        : providerId === "gemini"
+          ? "Gemini"
+          : providerId === "kimi"
+            ? "Kimi Code"
+            : "OpenCode";
 }
 
 export function projectActionKind(name: string): "check" | "service" {

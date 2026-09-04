@@ -56,6 +56,7 @@ describe("CI change classifier", () => {
       "provider_codex",
       "provider_claude",
       "provider_cursor",
+      "provider_gemini",
       "provider_kimi",
       "provider_opencode",
     ]));
@@ -116,6 +117,7 @@ describe("CI change classifier", () => {
         "provider_codex",
         "provider_claude",
         "provider_cursor",
+        "provider_gemini",
         "provider_kimi",
         "provider_opencode",
         "turn_session",
@@ -155,6 +157,20 @@ describe("CI change classifier", () => {
     expect(updater.allEvidence).toBe(false);
     expect(updater.fullCertification).toBe(true);
     expect(updater.domains).toContain("updater");
+
+    const gemini = classifyChangedPaths([
+      "tests/server/gemini-acp-validation.test.ts",
+      "tests/server/native-gemini-provider-migration.test.ts",
+    ]);
+    expect(gemini.allEvidence).toBe(false);
+    expect(gemini.fullCertification).toBe(false);
+    expect(gemini.domains).toEqual([
+      "quality_shared",
+      "provider_common",
+      "provider_gemini",
+      "turn_session",
+      "agent_management",
+    ]);
   });
 
   it("emits stable, explicit GitHub job outputs", () => {
@@ -165,6 +181,16 @@ describe("CI change classifier", () => {
     expect(output).toContain("full_certification=false\n");
     expect(output).toContain("provider_kimi=true\n");
     expect(output).toContain("provider_codex=false\n");
+    expect(output).toContain("provider_gemini=false\n");
     expect(output).toContain('domains_json=["quality_shared","provider_common","provider_kimi","turn_session","agent_management"]\n');
+
+    const geminiOutput = githubOutputsForClassification(
+      classifyChangedPaths(["src/server/provider/gemini-acp-harness.ts"]),
+    );
+    expect(geminiOutput).toContain("provider_gemini=true\n");
+    expect(geminiOutput).toContain("provider_kimi=false\n");
+    expect(geminiOutput).toContain(
+      'domains_json=["quality_shared","provider_common","provider_gemini","turn_session","agent_management"]\n',
+    );
   });
 });

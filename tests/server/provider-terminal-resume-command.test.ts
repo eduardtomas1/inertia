@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { ClientCommand, Conversation, ServerEvent } from "../../src/shared/contracts";
 import {
   continuationIdentityForSelection,
-  nativeModelSelection,
+  providerNativeModelSelection,
 } from "../../src/shared/model-routing";
 import type { RuntimeStore } from "../../src/server/database";
 import type { ProviderManager } from "../../src/server/providers";
@@ -21,7 +21,7 @@ const conversationId = "33333333-3333-4333-8333-333333333333";
 const sessionId = "44444444-4444-4444-8444-444444444444";
 
 function conversation(): Conversation {
-  const modelSelection = nativeModelSelection({ providerId: "codex" });
+  const modelSelection = providerNativeModelSelection({ providerId: "codex" });
   return {
     id: conversationId,
     projectId,

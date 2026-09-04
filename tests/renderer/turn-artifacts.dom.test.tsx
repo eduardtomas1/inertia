@@ -6,7 +6,7 @@ import type {
   Project,
   ServerEvent,
 } from "../../src/shared/contracts";
-import { nativeModelSelection } from "../../src/shared/model-routing";
+import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import {
   useTurnArtifacts,
 } from "../../src/renderer/src/hooks/workspace-tools/useTurnArtifacts";
@@ -49,7 +49,7 @@ const primaryConversation: Conversation = {
   projectId: project.id,
   title: "Primary",
   providerId: "codex",
-  modelSelection: nativeModelSelection({
+  modelSelection: providerNativeModelSelection({
     providerId: "codex",
     modelId: "default",
     reasoningEffort: "medium",

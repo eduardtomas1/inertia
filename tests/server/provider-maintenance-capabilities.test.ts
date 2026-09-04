@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { ProviderEnvironment } from "../../src/server/environment";
 import {
   codexInstallMethodFromPath,
+  geminiInstallMethodFromPath,
   resolveProviderMaintenanceCapabilities,
   type ProviderMaintenanceTarget,
 } from "../../src/server/provider/maintenance-capabilities";
@@ -219,6 +220,156 @@ describe("provider maintenance capabilities", () => {
       updateAvailability: "instructions-only",
       update: null,
     });
+  });
+
+  it("keeps arbitrary Gemini paths instructions-only without guessing ownership", async () => {
+    const loadEnvironment = vi.fn(async () => environment);
+    const resolveExecutable = vi.fn(async () => ["/tools/npm"]);
+    const capabilities = await resolveProviderMaintenanceCapabilities(
+      target({
+        providerId: "gemini",
+        executable: "/home/user/bin/gemini",
+      }),
+      {
+        environment: loadEnvironment,
+        executableCandidates: resolveExecutable,
+      },
+    );
+
+    expect(capabilities).toMatchObject({
+      providerId: "gemini",
+      packageName: "@google/gemini-cli",
+      installMethod: "manual",
+      updateAvailability: "instructions-only",
+      update: null,
+    });
+    expect(loadEnvironment).not.toHaveBeenCalled();
+    expect(resolveExecutable).not.toHaveBeenCalled();
+  });
+
+  it("does not update a project-local Gemini package with an unrelated global npm", async () => {
+    const loadEnvironment = vi.fn(async () => environment);
+    const resolveExecutable = vi.fn(async () => ["/usr/bin/npm"]);
+    const capabilities = await resolveProviderMaintenanceCapabilities(
+      target({
+        providerId: "gemini",
+        executable:
+          "/work/project/node_modules/@google/gemini-cli/dist/index.js",
+      }),
+      {
+        environment: loadEnvironment,
+        executableCandidates: resolveExecutable,
+        platform: "linux",
+      },
+    );
+
+    expect(capabilities).toMatchObject({
+      installMethod: "npm-global",
+      updateAvailability: "instructions-only",
+      update: null,
+    });
+    expect(loadEnvironment).not.toHaveBeenCalled();
+    expect(resolveExecutable).not.toHaveBeenCalled();
+  });
+
+  it("updates Gemini through the npm that owns its selected NVM installation", async () => {
+    const nvmRoot = "/home/user/.nvm/versions/node/v22.19.0";
+    const desktopEnvironment: ProviderEnvironment = {
+      env: { PATH: `/usr/bin:${nvmRoot}/bin` },
+      pathEntries: ["/usr/bin", `${nvmRoot}/bin`],
+    };
+    const resolveExecutable = vi.fn(async (command: string) =>
+      command === `${nvmRoot}/bin/npm`
+        ? [`${nvmRoot}/lib/node_modules/npm/bin/npm-cli.js`]
+        : [],
+    );
+    const capabilities = await resolveProviderMaintenanceCapabilities(
+      target({
+        providerId: "gemini",
+        executable: `${nvmRoot}/lib/node_modules/@google/gemini-cli/dist/index.js`,
+      }),
+      {
+        environment: async () => desktopEnvironment,
+        executableCandidates: resolveExecutable,
+        platform: "linux",
+      },
+    );
+
+    expect(capabilities).toMatchObject({
+      providerId: "gemini",
+      packageName: "@google/gemini-cli",
+      installMethod: "npm-global",
+      updateAvailability: "available",
+      update: {
+        executable: `${nvmRoot}/lib/node_modules/npm/bin/npm-cli.js`,
+        args: ["install", "-g", "@google/gemini-cli@latest"],
+        environmentPathPrefix: `${nvmRoot}/bin`,
+        lockKey: "package-manager:npm-global",
+        label: "Update Gemini CLI with npm",
+      },
+    });
+    expect(resolveExecutable).toHaveBeenCalledTimes(1);
+    expect(resolveExecutable).toHaveBeenCalledWith(
+      `${nvmRoot}/bin/npm`,
+      desktopEnvironment,
+    );
+  });
+
+  it("binds the standard Windows Gemini shim to npm in the same directory", async () => {
+    const npmDirectory = "C:\\Users\\Ada\\AppData\\Roaming\\npm";
+    expect(geminiInstallMethodFromPath(`${npmDirectory}\\gemini.cmd`)).toBe(
+      "npm-global",
+    );
+    expect(geminiInstallMethodFromPath("C:\\Tools\\gemini.cmd")).toBe("manual");
+
+    const resolveExecutable = vi.fn(async (command: string) =>
+      command === `${npmDirectory}\\npm.cmd` ? [command] : [],
+    );
+    const capabilities = await resolveProviderMaintenanceCapabilities(
+      target({
+        providerId: "gemini",
+        executable: `${npmDirectory}\\gemini.cmd`,
+      }),
+      {
+        environment: async () => environment,
+        executableCandidates: resolveExecutable,
+        platform: "win32",
+      },
+    );
+
+    expect(capabilities.update).toMatchObject({
+      executable: `${npmDirectory}\\npm.cmd`,
+      args: ["install", "-g", "@google/gemini-cli@latest"],
+      environmentPathPrefix: npmDirectory,
+    });
+  });
+
+  it("updates canonical Homebrew Gemini installations with the owning formula", async () => {
+    const resolveExecutable = vi.fn(async (command: string) =>
+      command === "/opt/homebrew/bin/brew" ? [command] : [],
+    );
+    const capabilities = await resolveProviderMaintenanceCapabilities(
+      target({
+        providerId: "gemini",
+        executable: "/opt/homebrew/Cellar/gemini-cli/0.58.0/bin/gemini",
+      }),
+      {
+        environment: async () => environment,
+        executableCandidates: resolveExecutable,
+      },
+    );
+
+    expect(capabilities.update).toEqual({
+      executable: "/opt/homebrew/bin/brew",
+      args: ["upgrade", "gemini-cli"],
+      lockKey: "package-manager:homebrew",
+      installMethod: "homebrew",
+      label: "Update Gemini CLI with Homebrew",
+    });
+    expect(resolveExecutable).toHaveBeenCalledWith(
+      "/opt/homebrew/bin/brew",
+      environment,
+    );
   });
 
   it.each([

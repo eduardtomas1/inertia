@@ -83,6 +83,7 @@ describe("agent input answers", () => {
     expect(agentRequestProviderName("claude")).toBe("Claude");
     expect(inputRequestTitle("claude")).toBe("Claude needs your input");
     expect(inputRequestTitle("cursor")).toBe("Cursor needs your input");
+    expect(inputRequestTitle("gemini")).toBe("Gemini needs your input");
     expect(inputRequestTitle("kimi")).toBe("Kimi Code needs your input");
     expect(inputRequestTitle("opencode")).toBe("OpenCode needs your input");
     expect(inputRequestTitle("codex")).toBe("Codex needs your input");

@@ -36,13 +36,14 @@ import { parseProviderIdentityLabels } from "../../shared/provider-identities";
 import { parseAppKeybindings } from "../../shared/keybindings";
 import {
   continuationIdentityForSelection,
-  versionedContinuationIdentitySchema,
-  knownHarnessIdSchema,
-  legacyProviderIdForHarness,
+  currentKnownHarnessIdSchema,
+  providerIdForHarness,
   modelSelectionSchema,
   nativeBackendProfile,
-  nativeModelSelection,
+  providerNativeBackendProfile,
+  providerNativeModelSelection,
   resolveHarnessBackendCompatibility,
+  versionedContinuationIdentitySchema,
 } from "../../shared/model-routing";
 import { providerTimestamp, validateProviderUsage } from "../provider/usage-values";
 import { parseWorktreeFilesystemReceipt } from "../worktree-filesystem-identity";
@@ -110,6 +111,35 @@ export function legacyModelSelection(input: {
   });
 }
 
+/** Current-provider companion; the schema-24 helper above is lineage-pinned. */
+export function providerModelSelectionFromLegacyFields(input: {
+  providerId: ProviderId;
+  harnessId: string;
+  backendProfileId: string;
+  model: string;
+  modelAlias: string | null;
+  reasoningEffort: string;
+  configurationRevision: number;
+}): ModelSelection {
+  const native = providerNativeBackendProfile(input.providerId);
+  const nativeProfile = input.backendProfileId === native.id;
+  const backendProfileDisplayName = nativeProfile
+    ? native.displayName
+    : `Unavailable backend (${input.backendProfileId})`.slice(0, 200);
+  return modelSelectionSchema.parse({
+    harnessId: input.harnessId,
+    backendProfileId: input.backendProfileId,
+    backendProfileDisplayName,
+    modelId: input.model || "provider-default",
+    alias: input.modelAlias || null,
+    reasoningEffort: input.reasoningEffort || null,
+    contextWindowOverride: null,
+    providerOptions: {},
+    capabilities: [],
+    backendConfigurationRevision: input.configurationRevision,
+  });
+}
+
 export function parseModelSelection(
   value: string | null,
   fallback: () => ModelSelection,
@@ -128,10 +158,10 @@ export function parseModelSelection(
 function legacyNativeContinuationIdentity(
   selection: ModelSelection,
 ): ContinuationIdentity | null {
-  const providerId = legacyProviderIdForHarness(selection.harnessId);
-  const harnessId = knownHarnessIdSchema.safeParse(selection.harnessId);
+  const providerId = providerIdForHarness(selection.harnessId);
+  const harnessId = currentKnownHarnessIdSchema.safeParse(selection.harnessId);
   if (!providerId || !harnessId.success) return null;
-  const native = nativeBackendProfile(providerId);
+  const native = providerNativeBackendProfile(providerId);
   if (native.id !== selection.backendProfileId) return null;
   const compatibility = resolveHarnessBackendCompatibility(
     harnessId.data,
@@ -174,7 +204,7 @@ export function parseAgentTurnContinuationIdentity(
 export function conversationFromRow(row: ConversationRow): Conversation {
   const modelSelection = parseModelSelection(
     row.model_selection_json,
-    () => nativeModelSelection({
+    () => providerNativeModelSelection({
       providerId: row.provider_id,
       modelId: row.model || "provider-default",
       alias: row.model || null,
@@ -463,7 +493,7 @@ function persistedContinuationReasonCode(
 export function agentTurnFromRow(row: AgentTurnRow): AgentTurn {
   const modelSelection = parseModelSelection(
     row.model_selection_json,
-    () => legacyModelSelection({
+    () => providerModelSelectionFromLegacyFields({
       providerId: row.provider_id,
       harnessId: row.harness_id,
       backendProfileId: row.backend_profile_id,

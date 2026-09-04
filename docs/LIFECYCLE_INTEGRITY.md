@@ -6,10 +6,12 @@ resource has identical mechanics. Native Windows containment, Linux process
 identity and guardian evidence, and conservative Darwin recovery remain
 different implementations of the same fail-closed law.
 
-The implementation in this change is based on `origin/main` at
+Work began from `origin/main` at
 `7f770c918bfd92fcc761e7eae73e7d47b4c66f69`. The previously audited baseline
-was `56ce34f75ce11843584a04e495d4a3cf6ef87cc8`. The intervening Linux guardian
-recovery and utility-worker result-acknowledgement fixes are preserved.
+was `56ce34f75ce11843584a04e495d4a3cf6ef87cc8`. Before final validation the
+branch integrated `origin/main` at
+`7c923afc724b9d18fd801f7e3cbb379455358caf`, preserving the intervening Linux
+guardian, utility-worker acknowledgement, and native Gemini provider work.
 
 ## Common law
 
@@ -111,27 +113,29 @@ maintenance evidence remains quarantined and provider admission stays closed.
 `native` means the exact production transport exposes the operation;
 `negotiated` means availability must be learned for the installed protocol;
 `host` means Inertia supplies a separately labelled exact-turn host feature;
-`none` is a deterministic unsupported result, not silent emulation.
+`application-context` means visible conversation history is reconstructed into
+a fresh provider session rather than claiming native resume; `none` is a
+deterministic unsupported result, not silent emulation.
 
-| Capability | Codex App Server | Claude Agent SDK | Cursor ACP | Kimi ACP | OpenCode SDK |
-| --- | --- | --- | --- | --- | --- |
-| Streaming text | native | native | native | native | native |
-| Reasoning/thinking | native summary | native streaming | native | native | native |
-| Tool/file activity | native | native | native | native | native |
-| Images/attachments | native local input | native structured input | negotiated ACP | negotiated ACP | native file input |
-| Plans | native | native | native | native | native |
-| Approvals | native | native | native | native | native |
-| Structured input | native | native | Cursor extension | native-over-permission | native |
-| Follow-up/steer | native parent steer | native persistent stream | none unless attested | none unless attested | native prompt input |
-| Session resume | native thread | native session | native session | native session | native session |
-| Usage/rate limits | native | native result usage | optional ACP / negotiated | optional ACP / negotiated | native token usage |
-| Provider-native subagent state | native events | native task IDs | protocol-specific | protocol-specific | protocol-specific |
-| Exact subagent stop | none; parent steer only | native task stop | none unless attested | none unless attested | none unless attested |
-| Host-tool bridge | host, exact-turn | host, exact-turn | host, exact-turn | host, exact-turn | host, exact-turn |
-| Model/auth discovery | App Server / CLI | SDK / CLI | ACP/config | ACP/config | owned server/config |
-| Cancellation and cleanup | protocol interrupt + process containment | SDK abort/close + containment | ACP cancel + containment | ACP cancel + containment | prompt abort + owned-server cleanup |
-| Provider-owned server | none | none | none | none | native, run-owned |
-| In-app maintenance | installation-dependent | installation-dependent | installation-dependent | installation-dependent | installation-dependent |
+| Capability | Codex App Server | Claude Agent SDK | Cursor ACP | Gemini ACP | Kimi ACP | OpenCode SDK |
+| --- | --- | --- | --- | --- | --- | --- |
+| Streaming text | native | native | native | native | native | native |
+| Reasoning/thinking | native summary | native streaming | native | native output; no effort selector | native | native |
+| Tool/file activity | native | native | native | native | native | native |
+| Images/attachments | native local input | native structured input | negotiated ACP | negotiated at initialize | negotiated ACP | native file input |
+| Plans | native | native | native | negotiated session mode | native | native |
+| Approvals | native | native | native | native ACP request; exact-turn Inertia/user decision | native | native |
+| Structured input | native | native | Cursor extension | none | native-over-permission | native |
+| Follow-up/steer | native parent steer | native persistent stream | none unless attested | none | none unless attested | native prompt input |
+| Session resume | native thread | native session | native session | application-context | native session | native session |
+| Usage/rate limits | native | native result usage | optional ACP / negotiated | negotiated usage / no rate limits | optional ACP / negotiated | native token usage |
+| Structured subagent create/stop | events / no exact stop | native task IDs / stop | none unless attested | none | protocol-specific | none unless attested |
+| Host-tool bridge | host, exact-turn | host, exact-turn | host, exact-turn | host, exact-turn on built-in route | host, exact-turn | host, exact-turn |
+| Model/auth discovery | App Server / CLI | SDK / CLI | ACP/config | session catalog / no separate auth-state probe | ACP/config | owned server/config |
+| Cancellation and cleanup | protocol interrupt + process containment | SDK abort/close + containment | ACP cancel + containment | ACP cancel + session/process cleanup | ACP cancel + containment | prompt abort + owned-server cleanup |
+| Provider-owned server | none | none | none | none | none | native, run-owned |
+| Custom backend / endpoint / performance mode | attested route / endpoint / native mode | attested route / endpoint / native mode | none | none | none | none |
+| In-app maintenance | installation-dependent | installation-dependent | installation-dependent | npm/Homebrew installation-dependent | manual only; non-interactive update unavailable | installation-dependent |
 
 The machine-readable manifest and runtime attestation are versioned and bound
 to one harness, provider installation/configuration identity (including
@@ -145,10 +149,12 @@ widen the manifest. A custom HTTP backend receives only lifecycle-safe harness
 capabilities plus features positively exercised by its exact stored probe. The
 bounded HTTP check first attests streaming text and, when present, usage. A
 Responses backend then receives a separate bounded request containing one
-randomized inert function whose call is inspected but never executed; only the
-exact synthetic function name and nonce attest `tools`. An unsupported or
-inexact second response preserves the text result without granting tool
-authority. Model hints cannot authorize images, reasoning, goals, plans,
+randomized inert function. Authority is granted only after the exact call is
+observed and the backend accepts a second response containing the matching
+function result; the result nonce exists only in that authoritative tool
+output. An unsupported or inexact continuation preserves the text result
+without granting tool authority. Model hints cannot authorize images,
+reasoning, goals, plans,
 approvals, compaction, session resume, or host tools. Plan-mode admission
 therefore requires a positive `plans` attestation. A text-only custom Claude
 route starts the SDK with an empty built-in tool set and a deny-before-execution
@@ -160,7 +166,16 @@ evidence is durable and monotonic independently per profile/model, bounded to
 restart. Custom host-tool injection remains disabled until a dedicated bridge
 probe exists, even when the provider's native summary advertises that bridge;
 the immutable built-in Kimi-through-Claude profile retains Claude's trusted
-exact-turn host bridge. Custom runs also bind the persisted selection,
+exact-turn host bridge. Gemini's host bridge is likewise admitted only for the
+exact built-in `gemini` / `gemini-acp` / `builtin:gemini` route and only when
+the ACP HTTP MCP channel is available; foreign or custom profiles cannot
+inherit that authority. Gemini also requires provider-native tools before
+spawn because persisted allowlists can bypass a permission callback. Each
+Gemini turn creates a fresh ACP process and session, never calls
+`session/load`, never exposes its internal session ID, and reconstructs only
+bounded visible user/assistant history. Explicit model selection is accepted
+only after the new session advertises that exact model and `session/set_model`
+succeeds. Custom runs also bind the persisted selection,
 deprecated model projection, privileged launch spelling, and exact probe to one
 model identity. A changed executable or backend probe withdraws its prior
 attestation, and maintenance is available only when the exact verified installation
@@ -282,8 +297,9 @@ tools, and the classifier itself select broad evidence.
 - Pushes to main, merge-queue groups, schedules, and full-certification changes
   retain the six OS/architecture matrix, destructive recovery, package and
   installer/container evidence, dependency audit, and conditional benchmarks.
-  Scheduled runs repeat selected lifecycle invariants three times per target,
-  retain every attempt, fail on mixed results, and update a bounded tracked issue
+  Scheduled runs attempt selected lifecycle invariants up to three times per
+  target, stopping early only when cleanup is unconfirmed, retain every attempted
+  run, fail on mixed results, and update a bounded tracked issue
   on certification failure. Stable Windows x64 installs a checksummed published
   N-1 artifact, smokes it, installs N over the same directory, reopens the same
   profile/database state, verifies N against the unpacked candidate, and
@@ -322,6 +338,8 @@ observed after measurement.
   strict bounded keys, canonical integrity digests, and atomic publication.
   Capability manifests are versioned code constants; the bounded continuation
   reason is a checked nullable database column migrated at schema 67.
+- Schema 68 performs the native Gemini provider rebuild on top of the complete
+  schema-67 shape; it does not reuse the earlier schema-66 table definition.
 - Existing provider continuation records without the full compatibility token
   are readable but cannot authorize resume. They fall back to a fresh session
   without deleting conversation data.
@@ -351,7 +369,7 @@ snapshot does not yet receive the main-owned handoff phase. A malformed runtime
 start timestamp projects as unavailable with zero derived uptime rather than
 escaping the strict diagnostic schema. Provider cleanup compares the exact
 durable and live conversation-owner sets rather than their counts alone. The
-maintenance-controller projection is bounded to the five known provider IDs
+maintenance-controller projection is bounded to the six known provider IDs
 and a fixed state; it can expose that a provider is quarantined without
 exposing installation identity, reason text, command output, or paths.
 

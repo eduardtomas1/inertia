@@ -33,7 +33,7 @@ import {
 } from "./emitter";
 import type { ProviderMetadataCache } from "./metadata";
 import { providerChildEnvironment } from "../environment";
-import { nativeBackendProfile } from "../../shared/model-routing";
+import { providerNativeBackendProfile } from "../../shared/model-routing";
 import { PROVIDER_COMPACTION_OPERATION_TIMEOUT_MS } from "../../shared/runtime-command-timeouts";
 
 interface ProviderRunInstallationUse {
@@ -249,7 +249,7 @@ export class ProviderRunCoordinator {
     }
     const expectedIdentity = providerRunIdentity(input);
     const executable = this.options.commandFor(providerId);
-    const nativeProfile = nativeBackendProfile(providerId);
+    const nativeProfile = providerNativeBackendProfile(providerId);
     const ownsLegacyProviderMetadata = input.backendProfile.id === nativeProfile.id
       && input.backendProfile.configurationRevision === nativeProfile.configurationRevision;
     const runMetadataScope = this.options.metadataCache.scopeForSelection(

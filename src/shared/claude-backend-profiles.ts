@@ -18,7 +18,7 @@ import {
   modelBackendProfileSchema,
   modelCapabilitySchema,
   modelSelectionSchema,
-  nativeBackendProfile,
+  providerNativeBackendProfile,
   resolveHarnessBackendCompatibility,
 } from "./model-routing";
 
@@ -505,7 +505,7 @@ function defaultRuntimeOptions(preset: ClaudeBackendPreset): ClaudeBackendRuntim
 }
 
 export function nativeAnthropicBackendProfile(): ClaudeCompatibleBackendProfile {
-  const native = nativeBackendProfile("claude");
+  const native = providerNativeBackendProfile("claude");
   return claudeCompatibleBackendProfileSchema.parse({
     ...native,
     schemaVersion: CLAUDE_BACKEND_PROFILE_SCHEMA_VERSION,

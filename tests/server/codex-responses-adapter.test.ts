@@ -4,8 +4,8 @@ import { backendEndpointIdentity } from "../../src/shared/backend-endpoint-ident
 import {
   continuationIdentityForSelection,
   modelSelectionSchema,
-  nativeBackendProfile,
-  nativeModelSelection,
+  providerNativeBackendProfile,
+  providerNativeModelSelection,
   resolveHarnessBackendCompatibility,
   type ModelBackendProfile,
 } from "../../src/shared/model-routing";
@@ -116,8 +116,8 @@ describe("Codex Responses backend launch adapter", () => {
   });
 
   it("leaves the native OpenAI App Server launch unchanged", async () => {
-    const profile = nativeBackendProfile("codex");
-    const selection = nativeModelSelection({ providerId: "codex", modelId: "gpt-native" });
+    const profile = providerNativeBackendProfile("codex");
+    const selection = providerNativeModelSelection({ providerId: "codex", modelId: "gpt-native" });
     const resolver = createCodexResponsesBackendLaunchResolver();
     const launch = await resolver({
       providerId: "codex",

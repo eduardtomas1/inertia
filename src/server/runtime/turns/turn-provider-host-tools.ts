@@ -1,4 +1,7 @@
-import { nativeBackendProfile } from "../../../shared/model-routing";
+import {
+  providerNativeBackendProfile,
+  providerNativeHarnessId,
+} from "../../../shared/model-routing";
 import { KIMI_CLAUDE_BUILTIN_PROFILE_ID } from "../../../shared/claude-backend-profiles";
 import type { ProviderId } from "../../../shared/contracts";
 import type { ModelBackendProfile } from "../../../shared/model-routing";
@@ -44,7 +47,11 @@ export function routeUsesTrustedHostBridge(input: {
   backendProfile: ModelBackendProfile;
 }): boolean {
   if (input.backendProfile.source !== "built-in") return false;
-  if (input.backendProfile.id === nativeBackendProfile(input.providerId).id) {
+  if (
+    input.harnessId === providerNativeHarnessId(input.providerId)
+    && input.backendProfile.id
+      === providerNativeBackendProfile(input.providerId).id
+  ) {
     return true;
   }
   return input.providerId === "claude"

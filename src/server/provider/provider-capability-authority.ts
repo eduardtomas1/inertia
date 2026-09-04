@@ -1,7 +1,7 @@
 import type { ProviderCapabilityContractView } from "../../shared/contracts/app";
 import {
-  knownHarnessIdSchema,
-  nativeHarnessId,
+  currentKnownHarnessIdSchema,
+  providerNativeHarnessId,
   type HarnessBackendCompatibility,
   type KnownHarnessId,
   type ModelBackendProfile,
@@ -160,7 +160,7 @@ export class ProviderCapabilityAuthority {
 
   rememberDetection(detection: ProviderDetection): void {
     const providerId = detection.provider.id;
-    const harnessId = nativeHarnessId(providerId);
+    const harnessId = providerNativeHarnessId(providerId);
     const manifest = providerCapabilityManifest(harnessId);
     if (
       !manifest
@@ -193,7 +193,7 @@ export class ProviderCapabilityAuthority {
   ) {
     try {
       validateProviderRunInput(input);
-      const harnessId = knownHarnessIdSchema.parse(input.harnessId);
+      const harnessId = currentKnownHarnessIdSchema.parse(input.harnessId);
       const attestation = this.attestation(
         input.providerId,
         harnessId,

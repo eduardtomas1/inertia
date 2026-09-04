@@ -7,8 +7,8 @@ import type {
   Project,
 } from "@shared/contracts";
 import {
-  legacyProviderIdForHarness,
-  nativeModelSelection,
+  providerIdForHarness,
+  providerNativeModelSelection,
 } from "../../../shared/model-routing";
 
 type ConversationCreateCommand = Extract<ClientCommand, { type: "conversation.create" }>;
@@ -89,7 +89,7 @@ export function withNewConversationModelSelection(
   payload: NewConversationPayload,
   selection: ModelSelection,
 ): NewConversationPayload {
-  const providerId = legacyProviderIdForHarness(selection.harnessId);
+  const providerId = providerIdForHarness(selection.harnessId);
   if (!providerId) {
     throw new Error("The selected agent harness is unavailable in this build.");
   }
@@ -119,13 +119,13 @@ export function buildDraftConversation(
     now?: string;
   } = {},
 ): Conversation {
-  const selection = payload.modelSelection ?? nativeModelSelection({
+  const selection = payload.modelSelection ?? providerNativeModelSelection({
     providerId: payload.providerId ?? "codex",
     modelId: payload.model || "provider-default",
     alias: payload.model || null,
     reasoningEffort: payload.reasoningEffort,
   });
-  const providerId = legacyProviderIdForHarness(selection.harnessId);
+  const providerId = providerIdForHarness(selection.harnessId);
   if (!providerId) {
     throw new Error("The selected agent harness is unavailable in this build.");
   }

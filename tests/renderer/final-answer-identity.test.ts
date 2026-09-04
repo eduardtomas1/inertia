@@ -89,6 +89,14 @@ describe("final answer identity", () => {
       modelId: "gpt-5.6",
       alias: null,
     }))).toBe("Codex · OpenAI · gpt-5.6");
+
+    expect(finalAnswerIdentityLabel(selection({
+      harnessId: "gemini-acp",
+      backendProfileId: "builtin:gemini",
+      backendProfileDisplayName: "Mutable Gemini catalog label",
+      modelId: "provider-default",
+      alias: null,
+    }))).toBe("Gemini · Google Gemini · Provider default");
   });
 
   it("does not invent a model name for provider-default selections", () => {

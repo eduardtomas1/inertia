@@ -5,7 +5,7 @@ import {
   type AppSnapshot,
   type ConversationShell,
 } from "../../src/shared/contracts";
-import { nativeModelSelection } from "../../src/shared/model-routing";
+import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import {
   persistSplitConversationId,
   readSplitConversationId,
@@ -24,7 +24,7 @@ function conversation(
     title: id,
     providerId: "codex",
     model: "default",
-    modelSelection: nativeModelSelection({
+    modelSelection: providerNativeModelSelection({
       providerId: "codex",
       modelId: "default",
       reasoningEffort: "medium",

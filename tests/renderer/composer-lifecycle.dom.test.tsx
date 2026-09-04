@@ -21,8 +21,8 @@ import type {
   ServerEvent,
 } from "../../src/shared/contracts";
 import {
-  nativeModelSelection,
   versionedContinuationIdentityForSelection,
+  providerNativeModelSelection,
 } from "../../src/shared/model-routing";
 import { Composer } from "../../src/renderer/src/components/Composer";
 import {
@@ -76,7 +76,7 @@ function conversation(id: string): Conversation {
     projectId: "11111111-1111-4111-8111-111111111111",
     title: id,
     providerId: "codex",
-    modelSelection: nativeModelSelection({
+    modelSelection: providerNativeModelSelection({
       providerId: "codex",
       modelId: "provider-default",
       reasoningEffort: null,
@@ -864,6 +864,47 @@ describe("composer asynchronous ownership", () => {
     );
   });
 
+  it("keeps Gemini compaction visibly unavailable without sending a provider request", async () => {
+    const current = conversation("16161616-1616-4616-8616-161616161616");
+    current.providerId = "gemini";
+    current.modelSelection = providerNativeModelSelection({
+      providerId: "gemini",
+      modelId: "provider-default",
+      reasoningEffort: null,
+    });
+    const geminiProvider: ProviderInfo = {
+      ...provider,
+      id: "gemini",
+      label: "Gemini",
+      command: "gemini",
+      version: "0.58.0",
+      statusMessage: "Authentication is verified when a Gemini session starts",
+    };
+    const onCompact = vi.fn(async () => ({
+      message: "This must not run.",
+      instructionForwarded: false,
+    }));
+    render(<Composer {...composerProps(current, {
+      providers: [geminiProvider],
+      onCompact,
+    })} />);
+    const input = screen.getByRole("textbox", { name: "Message" });
+
+    fireEvent.change(input, { target: { value: "/" } });
+    expect(screen.getByRole("option", { name: /\/compact/u })).toBeDisabled();
+    expect(screen.getByRole("option", { name: /\/compact/u })).toHaveTextContent(
+      "Gemini ACP does not expose explicit context compaction",
+    );
+
+    fireEvent.change(input, { target: { value: "/compact" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onCompact).not.toHaveBeenCalled();
+    expect(input).toHaveValue("/compact");
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Gemini ACP does not expose explicit context compaction",
+    );
+  });
+
   it("never turns a compact command into an active-run follow-up", async () => {
     const current = conversation("05050505-0505-4505-8505-050505050505");
     const onCompact = vi.fn(async () => ({
@@ -1112,7 +1153,7 @@ describe("composer asynchronous ownership", () => {
 
   it("submits reasoning as a complete selection and keeps the control open on failure", async () => {
     const current = conversation("09090909-0909-4909-8909-090909090909");
-    current.modelSelection = nativeModelSelection({
+    current.modelSelection = providerNativeModelSelection({
       providerId: "codex",
       modelId: "gpt-route",
       alias: "GPT Route",
@@ -1166,7 +1207,7 @@ describe("composer asynchronous ownership", () => {
 
   it("shows Fast mode only for advertised models and persists the exact native value", async () => {
     const current = conversation("composer-fast-mode");
-    current.modelSelection = nativeModelSelection({
+    current.modelSelection = providerNativeModelSelection({
       providerId: "codex",
       modelId: "gpt-fast",
     });
@@ -1212,7 +1253,7 @@ describe("composer asynchronous ownership", () => {
 
   it("hides Fast mode on unsupported routes", () => {
     const current = conversation("composer-standard-only");
-    current.modelSelection = nativeModelSelection({
+    current.modelSelection = providerNativeModelSelection({
       providerId: "codex",
       modelId: "gpt-standard",
     });
@@ -1239,7 +1280,7 @@ describe("composer asynchronous ownership", () => {
 
   it("preserves a saved Fast identity when provider metadata becomes unavailable", async () => {
     const current = conversation("composer-fast-metadata-unavailable");
-    current.modelSelection = nativeModelSelection({
+    current.modelSelection = providerNativeModelSelection({
       providerId: "codex",
       modelId: "gpt-fast",
       providerOptions: { fastMode: "priority" },
@@ -1277,7 +1318,7 @@ describe("composer asynchronous ownership", () => {
 
   it("keeps history and draft while a fresh-session route change retries safely", async () => {
     const current = conversation("route-source");
-    current.modelSelection = nativeModelSelection({
+    current.modelSelection = providerNativeModelSelection({
       providerId: "codex",
       modelId: "codex-route",
       alias: "Codex Route",

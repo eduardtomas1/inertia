@@ -34,6 +34,11 @@ test("keeps compact Work sidebar geometry", async ({
       );
       store.createConversation(
         project.id,
+        "Exercise Gemini ACP",
+        { providerId: "gemini", branch: "gemini/acp-provider", activate: false },
+      );
+      store.createConversation(
+        project.id,
         "Inspect Kimi ACP bridge",
         { providerId: "kimi", branch: "kimi/acp-bridge", activate: false },
       );
@@ -59,6 +64,7 @@ test("keeps compact Work sidebar geometry", async ({
           codex: "OpenAI",
           claude: "Anthropic",
           cursor: "Cursor",
+          gemini: "Google",
           kimi: "Kimi Code",
           opencode: "OpenCode",
         },
@@ -99,7 +105,7 @@ test("keeps compact Work sidebar geometry", async ({
     expect(statusBox).not.toBeNull();
     expect(statusBox!.width).toBeCloseTo(11, 3);
     expect(statusBox!.height).toBeCloseTo(11, 3);
-    for (const providerId of ["codex", "claude", "cursor", "kimi", "opencode"]) {
+    for (const providerId of ["codex", "claude", "cursor", "gemini", "kimi", "opencode"]) {
       const icon = sidebar.locator(
         `.provider-brand-icon[data-provider-id="${providerId}"][data-provider-icon-kind="official"]`,
       ).first();

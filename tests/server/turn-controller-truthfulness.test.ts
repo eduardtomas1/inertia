@@ -10,7 +10,7 @@ import type { AgentApprovalRequest, AgentInputRequest, AgentPlan, ProviderInfo, 
 import { RuntimeStore } from "../../src/server/database";
 import { createAgentHarnessEmitter } from "../../src/server/provider/agent-harness";
 import { AcpCompactionProjection } from "../../src/server/provider/acp-compaction-projection";
-import { nativeModelSelection } from "../../src/shared/model-routing";
+import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import { TurnController } from "../../src/server/runtime/turns/turn-controller";
 import type { TurnControllerHooks } from "../../src/server/runtime/turns/turn-controller-types";
 import { FakeTurnProvider, FakeTurnScheduler } from "../support/fake-turn-provider";
@@ -342,7 +342,7 @@ describe("TurnController terminal truthfulness", () => {
         ownsWorktree: false,
       },
     ]);
-    const selection = nativeModelSelection({
+    const selection = providerNativeModelSelection({
       providerId: "codex",
       modelId: "gpt-test",
       alias: "GPT Test",

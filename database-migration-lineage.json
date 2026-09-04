@@ -567,6 +567,27 @@
       "version": 67,
       "name": "PersistTurnContinuationEvidence",
       "digest": "3c30e9db2d42b3fcb05f490558ccc1b68828534cedb32db320c0abee845df969"
+    },
+    {
+      "version": 68,
+      "name": "SupportNativeGeminiProvider",
+      "digest": "6e6b8728704e4945cfc178fa336a3cf9978a583a1aef4aafacd4a455787015f6",
+      "sources": [
+        {
+          "path": "src/server/persistence/migrations/duo-deletion-trigger.ts",
+          "symbols": [
+            "protectCancellingDuoDeletion"
+          ],
+          "digest": "6a78e59cb995847c2c51cb11cbc7116e1b8eef324e9f95f7d5cea542c5625565"
+        },
+        {
+          "path": "src/server/persistence/migrations/native-gemini-provider.ts",
+          "symbols": [
+            "nativeGeminiProviderMigration"
+          ],
+          "digest": "52a4c9a844b0a27e9a7a2370a2b86be566935b29c10e79356a3d524fc1b4cf32"
+        }
+      ]
     }
   ]
 }

@@ -59,6 +59,8 @@ describe("agent harness architecture", () => {
     expect(registry.resolve(input("codex", { access: "full" })).id).toBe("codex-app-server");
     expect(registry.resolve(input("claude")).id).toBe("claude-agent-sdk");
     expect(registry.resolve(input("cursor")).id).toBe("cursor-acp");
+    expect(registry.resolve(input("gemini")).id).toBe("gemini-acp");
+    expect(registry.resolve(input("kimi")).id).toBe("kimi-acp");
     expect(registry.resolve(input("opencode")).id).toBe("opencode-sdk");
   });
 
@@ -198,6 +200,7 @@ describe("agent harness architecture", () => {
     const codex = manager.harnessCapabilities("codex");
     const claude = manager.harnessCapabilities("claude")[0];
     const cursor = manager.harnessCapabilities("cursor")[0];
+    const gemini = manager.harnessCapabilities("gemini")[0];
     const opencode = manager.harnessCapabilities("opencode")[0];
 
     expect(codex.map(({ extension }) => extension.kind)).toEqual(["codex-app-server"]);
@@ -228,6 +231,16 @@ describe("agent harness architecture", () => {
       reasoning: "native",
       usage: "optional-acp-v1",
       images: "capability-negotiated",
+    });
+    expect(gemini?.extension).toMatchObject({
+      kind: "gemini-acp",
+      approvals: "native",
+      questions: "unavailable-in-current-acp",
+      plans: "mode-and-acp-updates",
+      reasoning: "native",
+      usage: "prompt-response-and-acp-updates",
+      images: "capability-negotiated",
+      modelMetadata: "experimental-session-models",
     });
     expect(opencode?.extension).toMatchObject({
       kind: "opencode-sdk",

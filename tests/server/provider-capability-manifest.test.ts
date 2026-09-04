@@ -22,6 +22,7 @@ const productionMappings = [
   ["codex", "codex-app-server"],
   ["claude", "claude-agent-sdk"],
   ["cursor", "cursor-acp"],
+  ["gemini", "gemini-acp"],
   ["kimi", "kimi-acp"],
   ["opencode", "opencode-sdk"],
 ] as const;
@@ -79,12 +80,12 @@ function canonicalManifestDigest(value: ProviderCapabilityManifest): string {
 }
 
 describe("provider capability manifests", () => {
-  it("publishes exactly five complete canonical provider-harness mappings", () => {
+  it("publishes exactly six complete canonical provider-harness mappings", () => {
     const manifests = productionProviderCapabilityManifests();
     expect(manifests.map(({ providerId, harnessId }) =>
       [providerId, harnessId])).toEqual(productionMappings);
-    expect(new Set(manifests.map(({ providerId }) => providerId)).size).toBe(5);
-    expect(new Set(manifests.map(({ harnessId }) => harnessId)).size).toBe(5);
+    expect(new Set(manifests.map(({ providerId }) => providerId)).size).toBe(6);
+    expect(new Set(manifests.map(({ harnessId }) => harnessId)).size).toBe(6);
 
     for (const value of manifests) {
       expect(value.schemaVersion).toBe(1);
@@ -117,6 +118,8 @@ describe("provider capability manifests", () => {
     expect(manifest("claude-agent-sdk").bundledSdkVersion)
       .toBe(packageJson.dependencies["@anthropic-ai/claude-agent-sdk"]);
     expect(manifest("cursor-acp").bundledSdkVersion)
+      .toBe(packageJson.dependencies["@agentclientprotocol/sdk"]);
+    expect(manifest("gemini-acp").bundledSdkVersion)
       .toBe(packageJson.dependencies["@agentclientprotocol/sdk"]);
     expect(manifest("kimi-acp").bundledSdkVersion)
       .toBe(packageJson.dependencies["@agentclientprotocol/sdk"]);
@@ -169,6 +172,20 @@ describe("provider capability manifests", () => {
       "model-discovery",
     ] as const) expect(capability(cursor, id).support).toBe("negotiated");
     expect(capability(cursor, "follow-up-steer").support).toBe("unavailable");
+
+    const gemini = manifest("gemini-acp");
+    for (const id of [
+      "images",
+      "plans",
+      "usage-tokens",
+      "model-discovery",
+      "maintenance-update",
+    ] as const) expect(capability(gemini, id).support).toBe("negotiated");
+    expect(capability(gemini, "provider-native-tools").support).toBe("native");
+    expect(capability(gemini, "host-tool-bridge").support)
+      .toBe("host-exact-turn");
+    expect(capability(gemini, "session-resume").support).toBe("unavailable");
+    expect(capability(gemini, "native-session-id").support).toBe("unavailable");
 
     const kimi = manifest("kimi-acp");
     expect(capability(kimi, "structured-input").support).toBe("native");

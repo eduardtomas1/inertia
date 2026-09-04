@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   normalizedProviderRunFailure,
+  providerLabel,
   providerPromiseFailure,
 } from "../../src/server/runtime/turns/turn-controller-support";
 import type { ActiveTurn } from "../../src/server/runtime/turns/turn-controller-types";
@@ -18,6 +19,10 @@ function activeTurn(): ActiveTurn {
 }
 
 describe("turn failure diagnostics", () => {
+  it("uses the Gemini provider identity in fallback failures", () => {
+    expect(providerLabel("gemini")).toBe("Gemini");
+  });
+
   it("captures a scrubbed stack for an in-process provider rejection", () => {
     const rejection = new Error("socket closed token=super-secret-value");
     rejection.stack = [

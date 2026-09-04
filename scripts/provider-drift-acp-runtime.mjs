@@ -21,6 +21,8 @@ function parsePayload(encoded) {
     || typeof value.validation.expectedAgent !== "string"
     || value.validation.expectedAgent.length < 1
     || typeof value.validation.requireLoadSession !== "boolean"
+    || (value.validation.advertiseCompaction !== undefined
+      && typeof value.validation.advertiseCompaction !== "boolean")
     || (value.validation.allowSessionCapabilitiesResume !== undefined
       && typeof value.validation.allowSessionCapabilitiesResume !== "boolean")) {
     throw new Error("ACP runtime probe payload is invalid.");

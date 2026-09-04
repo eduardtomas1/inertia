@@ -27,7 +27,7 @@ import { RuntimeStore } from "../../src/server/database";
 import {
   continuationIdentityForSelection,
   modelSelectionSchema,
-  nativeModelSelection,
+  providerNativeModelSelection,
   withModelSelectionFastMode,
 } from "../../src/shared/model-routing";
 import { resolveNativeModelRoute } from "./model-route-fixture";
@@ -253,7 +253,7 @@ function request(
     conversationId: "conversation-1",
     owner,
     selection: {
-      modelSelection: nativeModelSelection({
+      modelSelection: providerNativeModelSelection({
         providerId: "codex",
         modelId: "gpt-test",
         reasoningEffort: "high",
@@ -301,7 +301,7 @@ describe("IsolatedRunController", () => {
       { id: ids(), fileSystem: fakeFileSystem() },
     );
     const selection = isolatedRunSelection({
-      modelSelection: nativeModelSelection({
+      modelSelection: providerNativeModelSelection({
         providerId: "codex",
         modelId: "gpt-test",
       }),
@@ -339,7 +339,7 @@ describe("IsolatedRunController", () => {
 
   it("omits Fast when an isolated model override does not advertise it", () => {
     const fastSelection = withModelSelectionFastMode(
-      nativeModelSelection({
+      providerNativeModelSelection({
         providerId: "codex",
         modelId: "gpt-fast",
       }),
@@ -370,7 +370,7 @@ describe("IsolatedRunController", () => {
 
   it("omits native speed controls from isolated custom backend routes", () => {
     const custom = modelSelectionSchema.parse({
-      ...nativeModelSelection({
+      ...providerNativeModelSelection({
         providerId: "codex",
         modelId: "gpt-fast",
       }),
@@ -673,7 +673,7 @@ describe("IsolatedRunController", () => {
     const provider = new FakeProvider();
     const fileSystem = fakeFileSystem();
     const customSelection = {
-      ...nativeModelSelection({
+      ...providerNativeModelSelection({
         providerId: "claude",
         modelId: "k3",
         reasoningEffort: "high",

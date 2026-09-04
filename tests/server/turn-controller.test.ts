@@ -7,8 +7,8 @@ import { RuntimeStore } from "../../src/server/database";
 import {
   continuationIdentityForSelection,
   modelSelectionSchema,
-  nativeBackendProfile,
-  nativeModelSelection,
+  providerNativeBackendProfile,
+  providerNativeModelSelection,
   resolveHarnessBackendCompatibility,
 } from "../../src/shared/model-routing";
 import type {
@@ -212,7 +212,7 @@ describe("TurnController authoritative lifecycle", () => {
 
   it("keeps provider sequence authoritative across stop acknowledgement and terminal enrichment", async () => {
     const runtime = await testRuntime({}, {
-      modelSelection: nativeModelSelection({
+      modelSelection: providerNativeModelSelection({
         providerId: "claude",
         modelId: "provider-default",
       }),
@@ -308,7 +308,7 @@ describe("TurnController authoritative lifecycle", () => {
 
   it("marks a delegated trace cancelled only after the provider acknowledges stop", async () => {
     const runtime = await testRuntime({}, {
-      modelSelection: nativeModelSelection({
+      modelSelection: providerNativeModelSelection({
         providerId: "claude",
         modelId: "provider-default",
       }),
@@ -402,7 +402,7 @@ describe("TurnController authoritative lifecycle", () => {
     "preserves %s subagent state when it settles before stop acknowledgement",
     async (terminalStatus) => {
     const runtime = await testRuntime({}, {
-      modelSelection: nativeModelSelection({
+      modelSelection: providerNativeModelSelection({
         providerId: "claude",
         modelId: "provider-default",
       }),
@@ -467,7 +467,7 @@ describe("TurnController authoritative lifecycle", () => {
 
   it("preserves settlement-owned subagent state when the parent settles before stop acknowledgement", async () => {
     const runtime = await testRuntime({}, {
-      modelSelection: nativeModelSelection({
+      modelSelection: providerNativeModelSelection({
         providerId: "claude",
         modelId: "provider-default",
       }),
@@ -561,10 +561,10 @@ describe("TurnController authoritative lifecycle", () => {
   });
 
   it("injects one Build instruction before every native or custom adapter and never in Plan mode", async () => {
-    const nativeProviders = ["codex", "claude", "cursor", "kimi", "opencode"] as const;
+    const nativeProviders = ["codex", "claude", "cursor", "gemini", "kimi", "opencode"] as const;
     for (const providerId of nativeProviders) {
       const runtime = await testRuntime({}, {
-        modelSelection: nativeModelSelection({
+        modelSelection: providerNativeModelSelection({
           providerId,
           modelId: "provider-default",
         }),
@@ -589,7 +589,7 @@ describe("TurnController authoritative lifecycle", () => {
     }
 
     const customProfile = {
-      ...nativeBackendProfile("codex"),
+      ...providerNativeBackendProfile("codex"),
       id: "custom:responses-task-51",
       displayName: "Task 51 custom Responses",
       protocol: "openai-responses" as const,
@@ -600,7 +600,7 @@ describe("TurnController authoritative lifecycle", () => {
     };
     const customHarnessId = "codex-app-server" as const;
     const customSelection = modelSelectionSchema.parse({
-      ...nativeModelSelection({
+      ...providerNativeModelSelection({
         providerId: "codex",
         modelId: "custom-model",
       }),
@@ -1407,7 +1407,7 @@ describe("TurnController authoritative lifecycle", () => {
       text: "NATIVE_HOST_TOOLS_MUST_NOT_CROSS_CUSTOM_ROUTE",
     }]);
     const customProfile = {
-      ...nativeBackendProfile("codex"),
+      ...providerNativeBackendProfile("codex"),
       id: "custom:no-native-host-bridge",
       displayName: "Custom Responses",
       source: "custom" as const,
@@ -1416,7 +1416,7 @@ describe("TurnController authoritative lifecycle", () => {
       endpointIdentity: "endpoint:no-native-host-bridge:12",
     };
     const customSelection = modelSelectionSchema.parse({
-      ...nativeModelSelection({
+      ...providerNativeModelSelection({
         providerId: "codex",
         modelId: "custom-model",
       }),
@@ -1741,7 +1741,7 @@ describe("TurnController authoritative lifecycle", () => {
   });
 
   it("resumes the same native session across explicit Fast and Standard transitions", async () => {
-    const standardSelection = nativeModelSelection({
+    const standardSelection = providerNativeModelSelection({
       providerId: "codex",
       modelId: "gpt-test",
       reasoningEffort: "high",
@@ -1766,7 +1766,7 @@ describe("TurnController authoritative lifecycle", () => {
     await flushPromises();
 
     runtime.store.updateConversation(runtime.conversationId, {
-      modelSelection: nativeModelSelection({
+      modelSelection: providerNativeModelSelection({
         providerId: "codex",
         modelId: "gpt-test",
         reasoningEffort: "high",
@@ -1788,7 +1788,7 @@ describe("TurnController authoritative lifecycle", () => {
     runtime.provider.resolve({ status: "completed", text: "Fast." });
     await flushPromises();
 
-    const nextStandardSelection = nativeModelSelection({
+    const nextStandardSelection = providerNativeModelSelection({
       providerId: "codex",
       modelId: "gpt-next",
       reasoningEffort: "high",

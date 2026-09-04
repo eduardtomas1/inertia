@@ -34,6 +34,7 @@ jobs:
       provider_codex: ${{ steps.changes.outputs.provider_codex }}
       provider_claude: ${{ steps.changes.outputs.provider_claude }}
       provider_cursor: ${{ steps.changes.outputs.provider_cursor }}
+      provider_gemini: ${{ steps.changes.outputs.provider_gemini }}
       provider_kimi: ${{ steps.changes.outputs.provider_kimi }}
       provider_opencode: ${{ steps.changes.outputs.provider_opencode }}
       turn_session: ${{ steps.changes.outputs.turn_session }}

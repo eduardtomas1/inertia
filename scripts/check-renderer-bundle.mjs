@@ -10,11 +10,13 @@ const kibibyte = 1024;
 const budgets = {
   entryJavaScript: 205 * kibibyte,
   // The keyboard-complete themed project selector, draft ownership guards,
-  // media queue admission, deletion cleanup, and detachment ownership live
-  // here while their larger UI stays deferred. Prompt-history recall and
-  // cancellation recovery bring Linux x64 to 712.6 KiB.
-  mainWorkbenchFirstLoadJavaScript: 714 * kibibyte,
-  detachedChatFirstLoadJavaScript: 542 * kibibyte,
+  // media queue admission, deletion cleanup, native-provider route state, and
+  // detachment ownership live here while their larger UI stays deferred.
+  // Prompt-history recall, cancellation recovery, and the Gemini-aware route
+  // measure 714.2 KiB on Linux x64; the detached route measures 542.3 KiB.
+  // Keep less than 1 KiB of headroom on each surface.
+  mainWorkbenchFirstLoadJavaScript: 715 * kibibyte,
+  detachedChatFirstLoadJavaScript: 543 * kibibyte,
   // The surface and reduced-motion-safe transition system measure 344.7 KiB
   // on Linux x64; keep only narrow cross-platform headroom.
   entryCss: 346 * kibibyte,
@@ -35,6 +37,8 @@ const budgets = {
   deferredCanaryRollbackJavaScript: 4 * kibibyte,
   deferredLifecycleIntegritySettingsJavaScript: 5 * kibibyte,
   deferredAppUpdateNoticeJavaScript: 6 * kibibyte,
+  // Provider OAuth validation and its terminal UI remain off the initial route.
+  deferredProviderAuthJavaScript: 12 * kibibyte,
   deferredComposerQueueJavaScript: 8 * kibibyte,
   // The terminal owns reload recovery, bounded replay, and provider-resume UI.
   // Keep that optional surface isolated from the workbench and capped here.
@@ -147,6 +151,9 @@ const deferredLifecycleIntegritySettingsJavaScript = assetNames.find(
 const deferredAppUpdateNoticeJavaScript = assetNames.find(
   (name) => /^AppUpdateNotice-.*\.js$/u.test(name),
 );
+const deferredProviderAuthJavaScript = assetNames.find(
+  (name) => /^ProviderAuthDialog-.*\.js$/u.test(name),
+);
 const deferredComposerQueueJavaScript = assetNames.find(
   (name) => /^ComposerQueuedActions-.*\.js$/u.test(name),
 );
@@ -232,6 +239,11 @@ if (!deferredLifecycleIntegritySettingsJavaScript) {
 if (!deferredAppUpdateNoticeJavaScript) {
   throw new Error(
     "Renderer bundle check could not find the deferred update notice chunk.",
+  );
+}
+if (!deferredProviderAuthJavaScript) {
+  throw new Error(
+    "Renderer bundle check could not find the deferred provider auth chunk.",
   );
 }
 if (!deferredComposerQueueJavaScript) {
@@ -366,6 +378,9 @@ const deferredLifecycleIntegritySettingsJavaScriptBytes = await assetBytes(
 const deferredAppUpdateNoticeJavaScriptBytes = await assetBytes(
   `assets/${deferredAppUpdateNoticeJavaScript}`,
 );
+const deferredProviderAuthJavaScriptBytes = await assetBytes(
+  `assets/${deferredProviderAuthJavaScript}`,
+);
 const deferredComposerQueueJavaScriptBytes = await assetBytes(
   `assets/${deferredComposerQueueJavaScript}`,
 );
@@ -416,6 +431,7 @@ const coreJavaScriptBytes =
   - deferredCanaryRollbackJavaScriptBytes
   - deferredLifecycleIntegritySettingsJavaScriptBytes
   - deferredAppUpdateNoticeJavaScriptBytes
+  - deferredProviderAuthJavaScriptBytes
   - deferredComposerQueueJavaScriptBytes
   - deferredTerminalJavaScriptBytes
   - detachedChatJavaScriptBytes
@@ -447,6 +463,7 @@ const measurements = {
   deferredLifecycleIntegritySettingsJavaScript:
     deferredLifecycleIntegritySettingsJavaScriptBytes,
   deferredAppUpdateNoticeJavaScript: deferredAppUpdateNoticeJavaScriptBytes,
+  deferredProviderAuthJavaScript: deferredProviderAuthJavaScriptBytes,
   deferredComposerQueueJavaScript: deferredComposerQueueJavaScriptBytes,
   deferredTerminalJavaScript: deferredTerminalJavaScriptBytes,
   detachedChatJavaScript: detachedChatJavaScriptBytes,

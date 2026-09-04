@@ -15,7 +15,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ClientCommand } from "../../src/shared/contracts";
 import {
   modelSelectionSchema,
-  nativeModelSelection,
+  providerNativeModelSelection,
 } from "../../src/shared/model-routing";
 import {
   createConversationCommandHandler,
@@ -185,7 +185,7 @@ describe("conversation isolated-worktree source identity", () => {
       payload: {
         projectId,
         title: "Redirect-safe isolated chat",
-        modelSelection: modelSelectionSchema.parse(nativeModelSelection({
+        modelSelection: modelSelectionSchema.parse(providerNativeModelSelection({
           providerId: "codex",
           modelId: "gpt-test",
           alias: "GPT Test",
@@ -283,7 +283,7 @@ describe("conversation isolated-worktree source identity", () => {
       payload: {
         projectId,
         title: "Recoverable isolated chat",
-        modelSelection: modelSelectionSchema.parse(nativeModelSelection({
+        modelSelection: modelSelectionSchema.parse(providerNativeModelSelection({
           providerId: "codex",
           modelId: "gpt-test",
           alias: "GPT Test",

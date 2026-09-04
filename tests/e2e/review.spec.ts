@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 
 import type { DiffSelectionReviewAnswer } from "../../src/shared/contracts";
 import {
-  nativeModelSelection,
+  providerNativeModelSelection,
 } from "../../src/shared/model-routing";
 import { selectionAnswerFixtureMarkup } from "./support/selection-answer-fixture";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
@@ -90,7 +90,7 @@ test("keeps a contextual selection answer readable and dismissible across respon
   const longModelName =
     "Claude Sonnet research preview with an intentionally long model display name";
   const modelSelection = {
-    ...nativeModelSelection({
+    ...providerNativeModelSelection({
       providerId: "claude",
       modelId: "claude-sonnet-research-preview-with-a-long-identifier",
       alias: longModelName,

@@ -3,7 +3,7 @@ import clsx from "clsx";
 import type { ChatAttachment, PromptPreset } from "@shared/contracts";
 import { chatAttachmentKind } from "@shared/attachments";
 import { MAX_CHAT_MESSAGE_CHARS } from "../../../../shared/diff-review";
-import { fastModeProviderValue, legacyProviderIdForHarness, routeSupportsNativeFastModeIdentity, withModelSelectionFastMode } from "../../../../shared/model-routing";
+import { fastModeProviderValue, providerIdForHarness, routeSupportsNativeFastModeIdentity, withModelSelectionFastMode } from "../../../../shared/model-routing";
 import { useNativePreviewSuspension } from "../../hooks/useNativePreviewSuspension";
 import { resolveComposerRouteState } from "../../utils/composerRouteState";
 import {
@@ -718,10 +718,9 @@ export const Composer = memo(function Composer({
     stopping,
   });
   const canSend = primaryAction === "send-ready";
-  const attachmentsAreImages = attachments.every(({ mimeType }) =>
-    chatAttachmentKind(mimeType) === "image");
-  const { compactNotice, clearCompactNotice, compact } = useComposerCompaction({
-    conversationId: conversation.id, message, canSend, running,
+  const attachmentsAreImages = attachments.every(({ mimeType }) => chatAttachmentKind(mimeType) === "image");
+  const { compactNotice, clearCompactNotice, compact, compactUnavailableReason } = useComposerCompaction({
+    conversationId: conversation.id, providerId: conversation.providerId, message, canSend, running,
     blocked: attachments.length > 0
       || Boolean(promptContext)
       || previewContextSelected
@@ -908,7 +907,7 @@ export const Composer = memo(function Composer({
       return;
     }
     const providerId = route.providerId
-      ?? legacyProviderIdForHarness(route.selection.harnessId);
+      ?? providerIdForHarness(route.selection.harnessId);
     await updateConversation({
       ...(providerId ? { providerId } : {}),
       modelSelection: transition.selection,
@@ -1142,6 +1141,7 @@ export const Composer = memo(function Composer({
           dismissSkills={() => dismissMenu("context-change")}
           slashMatch={slashMatch}
           onCompactCommand={() => void compact({ kind: "compact" })}
+          compactUnavailableReason={compactUnavailableReason}
           compactNotice={compactNotice}
           goalAvailable={Boolean(goal)}
           onOpenGoal={() => {

@@ -11,9 +11,9 @@ import {
 } from "../../shared/contracts";
 import {
   continuationIdentityForSelection,
-  versionedContinuationIdentitySchema,
-  legacyProviderIdForHarness,
+  providerIdForHarness,
   modelSelectionSchema,
+  versionedContinuationIdentitySchema,
 } from "../../shared/model-routing";
 import { isContinuationReasonCode } from "../../shared/continuation-policy";
 import {
@@ -25,9 +25,9 @@ import {
 } from "../runtime/turns/request-context";
 import {
   agentTurnFromRow,
-  legacyModelSelection,
   normalizeAgentTurnUsage,
   optionalTurnString,
+  providerModelSelectionFromLegacyFields,
   requiredTurnString,
   requireTimestamp,
 } from "./codecs";
@@ -82,7 +82,7 @@ export class TurnLedgerRepository {
 
     const modelSelection = input.modelSelection
       ? modelSelectionSchema.parse(input.modelSelection)
-      : legacyModelSelection({
+      : providerModelSelectionFromLegacyFields({
         providerId: input.providerId,
         harnessId: requiredTurnString(input.harnessId ?? "", "Turn harness ID", 200),
         backendProfileId: requiredTurnString(
@@ -95,7 +95,7 @@ export class TurnLedgerRepository {
         reasoningEffort: input.reasoningEffort,
         configurationRevision: input.configurationRevision,
       });
-    const selectedProviderId = legacyProviderIdForHarness(modelSelection.harnessId);
+    const selectedProviderId = providerIdForHarness(modelSelection.harnessId);
     if (selectedProviderId && selectedProviderId !== input.providerId) {
       throw new Error("The turn provider and harness identities do not match.");
     }

@@ -40,6 +40,7 @@ import {
 } from "./opencode-pure-isolation";
 
 const DEFAULT_DETECTION_TIMEOUT_MS = 2_500;
+export const GEMINI_MINIMUM_STABLE_ACP_VERSION = "0.58.0";
 const CODEX_PATH_RESOLUTION_ENVIRONMENT_KEYS = new Set([
   "CODEX_HOME",
   "CODEX_INSTALL_DIR",
@@ -66,6 +67,15 @@ function kimiCandidateIsIdentified(
 ): boolean {
   const name = basename(executable).toLowerCase().replace(/\.(?:bat|cmd|exe)$/u, "");
   return name === "kimi" || /\bkimi(?:[ -]code)?\b/iu.test(`${versionOutput}\n${acpOutput}`);
+}
+
+function geminiCandidateIsIdentified(
+  executable: string,
+  versionOutput: string,
+  acpOutput: string,
+): boolean {
+  const name = basename(executable).toLowerCase().replace(/\.(?:bat|cmd|exe)$/u, "");
+  return name === "gemini" || /\bgemini(?:[ -]cli)?\b/iu.test(`${versionOutput}\n${acpOutput}`);
 }
 
 function versionFromOutput(output: string): string | undefined {
@@ -246,6 +256,14 @@ function compareVersions(left: string | undefined, right: string | undefined): n
     if (difference !== 0) return difference;
   }
   return 0;
+}
+
+function geminiVersionSupportsStableAcp(version: string | undefined): boolean {
+  if (!version) return false;
+  const comparison = compareVersions(version, GEMINI_MINIMUM_STABLE_ACP_VERSION);
+  if (comparison !== 0) return comparison > 0;
+  // A prerelease of the minimum version does not meet the stable boundary.
+  return !/-[0-9A-Za-z.-]+(?:\+|$)/u.test(version);
 }
 
 function nativeExecutablePreference(executable: string): number {
@@ -448,12 +466,15 @@ export async function detectProvider(
 
   const versionProbes = await settleAllOrThrow(candidates.map(async (executable) => {
     const probe = await runProbe(executable, ["--version"], probeEnvironment, cwd, timeoutMs);
-    const acpProbe = (providerId === "cursor" || providerId === "kimi")
+    const version = versionFromOutput(probe.output);
+    const acpProbe = (providerId === "cursor" || providerId === "gemini" || providerId === "kimi")
       && probe.started && !probe.timedOut && probe.exitCode === 0
       ? await runProbe(
           executable,
           providerId === "cursor"
             ? cursorAgentCommandArgs(executable, ["acp", "--help"])
+            : providerId === "gemini"
+            ? ["--help"]
             : ["acp", "--help"],
           probeEnvironment,
           cwd,
@@ -464,9 +485,13 @@ export async function detectProvider(
       acpProbe.started
       && !acpProbe.timedOut
       && acpProbe.exitCode === 0
-      && /(?:agent client protocol|\bacp\b|cursor|kimi)/iu.test(acpProbe.output)
+      && /(?:agent client protocol|\bacp\b|cursor|gemini|kimi)/iu.test(acpProbe.output)
       && (providerId === "cursor"
         ? cursorCandidateIsIdentified(executable, probe.output, acpProbe.output)
+        : providerId === "gemini"
+        ? geminiCandidateIsIdentified(executable, probe.output, acpProbe.output)
+          && /(?:^|\s)--acp(?:\s|,|$)/mu.test(acpProbe.output)
+          && /(?:^|\s)--session-id(?:\s|,|$)/mu.test(acpProbe.output)
         : kimiCandidateIsIdentified(executable, probe.output, acpProbe.output))
     );
     const appServerProbe = providerId === "codex" && probe.started && !probe.timedOut && probe.exitCode === 0
@@ -490,7 +515,8 @@ export async function detectProvider(
     return {
       executable,
       probe,
-      version: versionFromOutput(probe.output),
+      version,
+      versionReady: providerId !== "gemini" || geminiVersionSupportsStableAcp(version),
       acpReady,
       appServerReady,
       serveReady,
@@ -502,12 +528,13 @@ export async function detectProvider(
   }));
   requireActive(versionProbes.every(({ cleanupConfirmed }) => cleanupConfirmed));
   const working = versionProbes
-    .filter(({ probe, acpReady, serveReady }) => (
+    .filter(({ probe, acpReady, serveReady, versionReady }) => (
       probe.started
       && !probe.timedOut
       && probe.exitCode === 0
       && acpReady
       && serveReady
+      && versionReady
     ))
     .sort((left, right) =>
       (providerId === "cursor"
@@ -523,26 +550,66 @@ export async function detectProvider(
     const cleanupUnconfirmed = versionProbes.some(
       ({ cleanupConfirmed }) => !cleanupConfirmed,
     );
-    const providerWithoutAcp = (providerId === "cursor" || providerId === "kimi") && versionProbes.some(
-      ({ probe }) => probe.started && !probe.timedOut && probe.exitCode === 0,
+    const providerWithoutAcp =
+      (providerId === "cursor" ||
+        providerId === "gemini" ||
+        providerId === "kimi") &&
+      versionProbes.some(
+        ({ probe }) => probe.started && !probe.timedOut && probe.exitCode === 0,
+      );
+    const bestGeminiInstall =
+      providerId === "gemini"
+        ? versionProbes
+            .filter(
+              ({ probe }) =>
+                probe.started && !probe.timedOut && probe.exitCode === 0,
+            )
+            .sort(
+              (left, right) =>
+                compareVersions(right.version, left.version) ||
+                nativeExecutablePreference(right.executable) -
+                  nativeExecutablePreference(left.executable),
+            )[0]
+        : undefined;
+    const geminiRequiresStableUpgrade = Boolean(
+      bestGeminiInstall && !bestGeminiInstall.versionReady,
     );
-    const providerWithoutPureServe = providerId === "opencode" && versionProbes.some(
-      ({ probe }) => probe.started && !probe.timedOut && probe.exitCode === 0,
-    );
+    const providerWithoutPureServe =
+      providerId === "opencode" &&
+      versionProbes.some(
+        ({ probe }) => probe.started && !probe.timedOut && probe.exitCode === 0,
+      );
     return {
       provider,
       available: providerWithoutAcp || providerWithoutPureServe,
-      installState: providerWithoutAcp || providerWithoutPureServe ? "installed" : "error",
+      ...(bestGeminiInstall
+        ? {
+            executable: bestGeminiInstall.executable,
+            ...(bestGeminiInstall.version
+              ? { version: bestGeminiInstall.version }
+              : {}),
+          }
+        : {}),
+      installState:
+        providerWithoutAcp || providerWithoutPureServe ? "installed" : "error",
       authState: "unknown",
       canRun: false,
       cleanupConfirmed: !cleanupUnconfirmed,
       statusMessage: cleanupUnconfirmed
         ? `${provider.name} probe timed out, and its process tree could not be confirmed stopped`
-        : providerWithoutAcp
-        ? `${provider.name} CLI found, but ACP is unavailable`
-        : providerWithoutPureServe
-        ? "OpenCode CLI found, but secure plugin-free serve mode is unavailable; update the selected CLI"
-        : providerId === "codex" ? "Codex CLI was found but failed to start" : statusMessage("error", "unknown"),
+        : geminiRequiresStableUpgrade
+          ? bestGeminiInstall?.version
+            ? `${provider.name} ${bestGeminiInstall.version} is installed, but stable ACP requires ${GEMINI_MINIMUM_STABLE_ACP_VERSION} or newer; update ${provider.name}`
+            : `${provider.name} is installed, but its version could not be verified; install ${GEMINI_MINIMUM_STABLE_ACP_VERSION} or newer for stable ACP`
+          : providerWithoutAcp
+            ? providerId === "gemini"
+              ? `${provider.name} CLI found, but stable ACP is unavailable; update the selected CLI`
+              : `${provider.name} CLI found, but ACP is unavailable`
+            : providerWithoutPureServe
+              ? "OpenCode CLI found, but secure plugin-free serve mode is unavailable; update the selected CLI"
+              : providerId === "codex"
+                ? "Codex CLI was found but failed to start"
+                : statusMessage("error", "unknown"),
     };
   }
 
@@ -629,12 +696,24 @@ export async function detectProvider(
     };
   }
 
-  const authArgs = providerId === "cursor"
-    ? cursorAgentCommandArgs(
-        selected.executable,
-        providerAuthStatusArgs(providerId),
-      )
-    : providerAuthStatusArgs(providerId);
+  const providerAuthArgs = providerAuthStatusArgs(providerId);
+  if (providerAuthArgs === null) {
+    return {
+      provider,
+      available: true,
+      executable: selected.executable,
+      ...(selected.version ? { version: selected.version } : {}),
+      installState: "installed",
+      authState: "unknown",
+      canRun: true,
+      cleanupConfirmed: true,
+      statusMessage: `Installed; ${provider.name} ACP will verify authentication when a session starts`,
+    };
+  }
+  const authArgs =
+    providerId === "cursor"
+      ? cursorAgentCommandArgs(selected.executable, providerAuthArgs)
+      : providerAuthArgs;
   const authProbe = await runProbe(
     selected.executable,
     authArgs,

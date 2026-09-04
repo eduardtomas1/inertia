@@ -16,8 +16,8 @@ import {
 import type { BackendCompatibilityProbeResult } from "../../../shared/backend-probe";
 import {
   modelBackendProfileSchema,
-  nativeBackendProfile,
-  nativeHarnessId,
+  providerNativeBackendProfile,
+  providerNativeHarnessId,
   type HarnessBackendCompatibility,
   type ModelBackendProfile,
 } from "../../../shared/model-routing";
@@ -32,6 +32,7 @@ export const PROVIDER_IDS: readonly ProviderId[] = [
   "codex",
   "claude",
   "cursor",
+  "gemini",
   "kimi",
   "opencode",
 ];
@@ -101,11 +102,11 @@ export function nativeProfile(
   providerId: ProviderId,
   provider: ProviderInfo | undefined,
 ): PersistedModelBackendProfile {
-  const profile = nativeBackendProfile(providerId);
+  const profile = providerNativeBackendProfile(providerId);
   const models = nativeModelDefinitions(provider);
   return persistedModelBackendProfileSchema.parse({
     ...profile,
-    harnessId: nativeHarnessId(providerId),
+    harnessId: providerNativeHarnessId(providerId),
     preset: "native",
     baseUrl: null,
     allowInsecureLocalhost: false,

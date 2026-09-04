@@ -18,7 +18,7 @@ import {
 } from "../../../shared/claude-backend-profiles";
 import type { BackendCompatibilityProbeResult } from "../../../shared/backend-probe";
 import {
-  legacyProviderIdForHarness,
+  providerIdForHarness,
   resolveHarnessBackendCompatibility,
   type HarnessBackendCompatibility,
 } from "../../../shared/model-routing";
@@ -120,7 +120,7 @@ export class BackendProfileRuntime {
   }
 
   installationFingerprint(harnessId: string): string | null {
-    const providerId = legacyProviderIdForHarness(harnessId);
+    const providerId = providerIdForHarness(harnessId);
     return providerId
       ? this.providers?.providerInstallationFingerprint(providerId) ?? null
       : null;
@@ -141,7 +141,7 @@ export class BackendProfileRuntime {
   }
 
   assertConfigurationMutable(harnessId: string): void {
-    const providerId = legacyProviderIdForHarness(harnessId);
+    const providerId = providerIdForHarness(harnessId);
     if (!providerId) return;
     if (this.providerMaintenanceBlocked?.(providerId)) {
       throw new BackendProfileControllerError(
@@ -201,7 +201,7 @@ export class BackendProfileRuntime {
     this.registerProfile(profile);
     this.providers?.upsertBackendProfile(
       safeBackendProfile(profile),
-      legacyProviderIdForHarness(profile.harnessId) ?? undefined,
+      providerIdForHarness(profile.harnessId) ?? undefined,
     );
   }
 
@@ -215,7 +215,7 @@ export class BackendProfileRuntime {
     this.providers?.removeBackendProfile(
       profileId,
       harnessId
-        ? legacyProviderIdForHarness(harnessId) ?? undefined
+        ? providerIdForHarness(harnessId) ?? undefined
         : undefined,
     );
   }

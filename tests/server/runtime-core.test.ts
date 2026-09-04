@@ -191,6 +191,7 @@ describe("runtime boundary helpers", () => {
       "codex",
       "claude",
       "cursor",
+      "gemini",
       "kimi",
       "opencode",
     ]);

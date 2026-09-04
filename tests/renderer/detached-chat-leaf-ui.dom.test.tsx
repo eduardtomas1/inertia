@@ -15,7 +15,7 @@ import {
   type ConversationShell,
   type Project,
 } from "../../src/shared/contracts";
-import { nativeModelSelection } from "../../src/shared/model-routing";
+import { providerNativeModelSelection } from "../../src/shared/model-routing";
 
 const project: Project = {
   id: "11111111-1111-4111-8111-111111111111",
@@ -38,7 +38,7 @@ const conversation: ConversationShell = {
   projectId: project.id,
   title: "Detachable ownership",
   providerId: "codex",
-  modelSelection: nativeModelSelection({ providerId: "codex" }),
+  modelSelection: providerNativeModelSelection({ providerId: "codex" }),
   continuationIdentity: null,
   model: "",
   reasoningEffort: "",

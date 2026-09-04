@@ -56,6 +56,7 @@ body:
         - Codex app-server
         - Claude Agent SDK
         - Cursor ACP
+        - Gemini CLI ACP
         - OpenCode SDK
         - Local runtime or Git
         - Renderer or desktop shell

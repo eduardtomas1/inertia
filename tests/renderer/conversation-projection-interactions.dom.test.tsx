@@ -15,7 +15,7 @@ import {
 } from "../../src/shared/contracts";
 import {
   continuationIdentityForSelection,
-  nativeModelSelection,
+  providerNativeModelSelection,
 } from "../../src/shared/model-routing";
 import { useConversationProjection } from "../../src/renderer/src/hooks/useConversationProjection";
 import type { CommandWithoutId } from "../../src/renderer/src/lib/runtimeCommands";
@@ -30,7 +30,7 @@ function conversation(id: string): ConversationShell {
     title: id === primaryId ? "Primary" : "Secondary",
     providerId: "codex",
     model: "default",
-    modelSelection: nativeModelSelection({
+    modelSelection: providerNativeModelSelection({
       providerId: "codex",
       modelId: "default",
       reasoningEffort: "medium",
@@ -72,7 +72,7 @@ const snapshot: AppSnapshot = {
 };
 
 function runningTurn(conversationId = primaryId): AgentTurn {
-  const modelSelection = nativeModelSelection({
+  const modelSelection = providerNativeModelSelection({
     providerId: "codex",
     modelId: "default",
     reasoningEffort: "medium",
@@ -451,7 +451,7 @@ describe("useConversationProjection pending interactions", () => {
     const messagesBeforeRefresh = hook.result.current.messages;
     const plansBeforeRefresh = hook.result.current.plans;
 
-    const latestSelection = nativeModelSelection({
+    const latestSelection = providerNativeModelSelection({
       providerId: "codex",
       modelId: "default",
       reasoningEffort: "medium",

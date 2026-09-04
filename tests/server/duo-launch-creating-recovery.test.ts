@@ -9,7 +9,7 @@ import { expect, it, vi } from "vitest";
 import type { ProviderInfo } from "../../src/shared/contracts";
 import {
   modelSelectionSchema,
-  nativeModelSelection,
+  providerNativeModelSelection,
 } from "../../src/shared/model-routing";
 import { RuntimeStore } from "../../src/server/database";
 import { GitError } from "../../src/server/git";
@@ -112,7 +112,7 @@ it("reconciles an unacknowledged creation only after manual absence across resta
     { worktrees },
   );
   const launchId = randomUUID();
-  const modelSelection = modelSelectionSchema.parse(nativeModelSelection({
+  const modelSelection = modelSelectionSchema.parse(providerNativeModelSelection({
     providerId: "codex",
     modelId: "gpt-test",
     alias: "GPT Test",

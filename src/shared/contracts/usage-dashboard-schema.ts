@@ -84,7 +84,7 @@ function metricForRequests(value: unknown, requestCount: number): boolean {
 
 function breakdown(value: unknown, model = false): boolean {
   if (!recordWithStrings(value, "key", "providerId", "providerLabel")) return false;
-  return ["codex", "claude", "cursor", "kimi", "opencode"].includes(value.providerId as string)
+  return ["codex", "claude", "cursor", "gemini", "kimi", "opencode"].includes(value.providerId as string)
     && integerField(value, "requestCount")
     && Number(value.requestCount) >= 0
     && metricForRequests(value.runtime, Number(value.requestCount))

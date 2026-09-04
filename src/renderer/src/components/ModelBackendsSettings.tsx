@@ -99,9 +99,11 @@ function identityLabel(profile: ModelBackendProfileView): string {
       ? "Codex"
       : profile.harnessId.startsWith("cursor")
         ? "Cursor"
-        : profile.harnessId.startsWith("kimi")
-          ? "Kimi Code"
-          : "OpenCode";
+        : profile.harnessId.startsWith("gemini")
+          ? "Gemini"
+          : profile.harnessId.startsWith("kimi")
+            ? "Kimi Code"
+            : "OpenCode";
   return `${harness} harness · ${profile.displayName}`;
 }
 

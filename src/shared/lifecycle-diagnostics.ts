@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { knownHarnessIdSchema } from "./model-routing";
+import { currentKnownHarnessIdSchema } from "./model-routing";
 import { providerMaintenanceProviderIdSchema } from "./provider-maintenance";
 import { lifecycleBuildMetadataSchema } from "./lifecycle-build-metadata";
 
@@ -49,7 +49,7 @@ const lifecycleOwnedResourceCountsSchema = z
 const lifecycleActiveProviderSchema = z
   .object({
     providerId: providerMaintenanceProviderIdSchema,
-    harnessId: knownHarnessIdSchema,
+    harnessId: currentKnownHarnessIdSchema,
     version: safeVersion.nullable(),
     capabilityManifestDigest: z
       .string()

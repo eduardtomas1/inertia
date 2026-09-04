@@ -11,11 +11,11 @@ import {
 } from "../shared/backend-probe";
 import {
   versionedContinuationIdentityForSelection,
-  legacyProviderIdForHarness,
+  providerIdForHarness,
   modelSelectionSchema,
   modelBackendProfileSchema,
-  knownHarnessIdSchema,
-  nativeBackendProfile,
+  currentKnownHarnessIdSchema,
+  providerNativeBackendProfile,
   resolveHarnessBackendCompatibility,
   type ContinuationIdentity,
   type HarnessBackendCompatibility,
@@ -40,7 +40,10 @@ import type {
   AgentHarnessCapabilities,
   AgentHarnessId,
 } from "./provider/agent-harness";
-import { providerAuthLoginArgs } from "./provider/auth";
+import {
+  providerAuthLaunchEnvironment,
+  providerAuthLoginArgs,
+} from "./provider/auth";
 import { PROVIDERS, PROVIDER_INFO } from "./provider/catalog";
 import {
   PROVIDER_IDS,
@@ -249,7 +252,7 @@ export class ProviderManager {
         this.installationAuthority.identity(
           providerId,
           executable,
-          nativeBackendProfile(providerId),
+          providerNativeBackendProfile(providerId),
           version,
         ).fingerprint,
       customProbeCapabilities: (providerId, backendProfile, modelId) => {
@@ -319,7 +322,7 @@ export class ProviderManager {
       },
     });
     for (const providerId of PROVIDER_IDS) {
-      const profile = nativeBackendProfile(providerId);
+      const profile = providerNativeBackendProfile(providerId);
       this.backendProfiles.set(profile.id, profile);
       this.protectedBackendProfileIds.add(profile.id);
     }
@@ -513,8 +516,8 @@ export class ProviderManager {
 
   resolveModelRoute(selectionInput: ModelSelection): ResolvedModelRoute {
     const selection = modelSelectionSchema.parse(selectionInput);
-    const harnessId = knownHarnessIdSchema.safeParse(selection.harnessId);
-    const providerId = legacyProviderIdForHarness(selection.harnessId);
+    const harnessId = currentKnownHarnessIdSchema.safeParse(selection.harnessId);
+    const providerId = providerIdForHarness(selection.harnessId);
     if (!harnessId.success || !providerId) {
       throw new ProviderRuntimeError("invalid_input", `Unknown agent harness '${selection.harnessId}'.`);
     }
@@ -583,7 +586,7 @@ export class ProviderManager {
     return this.installationAuthority.identity(
       providerId,
       executable ?? this.commandFor(providerId),
-      nativeBackendProfile(providerId),
+      providerNativeBackendProfile(providerId),
       version,
     );
   }
@@ -642,7 +645,7 @@ export class ProviderManager {
     const allowUnboundInitialResolution = !resolvedExecutable
       && !cachedExecutable
       && canonicalProviderExecutable(configured) === null;
-    const backendProfile = nativeBackendProfile(providerId);
+    const backendProfile = providerNativeBackendProfile(providerId);
     const admission = this.installationAuthority.acquire(
       providerId,
       admissionExecutable,
@@ -729,7 +732,7 @@ export class ProviderManager {
     if (this.lifetimeSignal.aborted) {
       throw new Error("Provider discovery was cancelled.");
     }
-    const backendProfile = nativeBackendProfile(providerId);
+    const backendProfile = providerNativeBackendProfile(providerId);
     const admission = this.installationAuthority.acquire(
       providerId,
       command,
@@ -820,9 +823,9 @@ export class ProviderManager {
     if (!executable) throw new ProviderRuntimeError("invalid_input", `${PROVIDER_INFO[providerId].name} CLI is not installed.`);
     const environment = await providerEnvironment();
     this.processEnvironment = environment.env;
-    const childEnvironment = providerChildEnvironment(
+    const childEnvironment = providerAuthLaunchEnvironment(
       providerId,
-      environment.env,
+      providerChildEnvironment(providerId, environment.env),
     );
     const invocation = providerProcessInvocation(
       executable,
@@ -832,7 +835,7 @@ export class ProviderManager {
     const installationUse = this.installationAuthority.acquire(
       providerId,
       executable,
-      nativeBackendProfile(providerId),
+      providerNativeBackendProfile(providerId),
       "auth-discovery",
       this.installationAuthority.operationIdentity("auth-discovery"),
     );
@@ -892,7 +895,7 @@ export class ProviderManager {
       const installationUse = this.installationAuthority.acquire(
         providerId,
         detection.executable,
-        nativeBackendProfile(providerId),
+        providerNativeBackendProfile(providerId),
         "provider-server",
         this.installationAuthority.operationIdentity("provider-server"),
       );
@@ -960,7 +963,7 @@ export class ProviderManager {
     const admission = this.installationAuthority.acquire(
       providerId,
       executable,
-      nativeBackendProfile(providerId),
+      providerNativeBackendProfile(providerId),
       "metadata-discovery",
       this.installationAuthority.operationIdentity(
         "metadata-discovery",
@@ -1040,7 +1043,7 @@ export class ProviderManager {
     return this.installationAuthority.identity(
       providerId,
       detection.executable,
-      nativeBackendProfile(providerId),
+      providerNativeBackendProfile(providerId),
       detection.version,
     );
   }
@@ -1064,7 +1067,7 @@ export class ProviderManager {
         this.installationAuthority.acquire(
           "codex",
           executable,
-          nativeBackendProfile("codex"),
+          providerNativeBackendProfile("codex"),
           "provider-server",
           this.installationAuthority.operationIdentity("provider-server"),
         ),
@@ -1091,7 +1094,7 @@ export class ProviderManager {
     const admission = this.installationAuthority.acquire(
       "claude",
       executable,
-      nativeBackendProfile("claude"),
+      providerNativeBackendProfile("claude"),
       "metadata-discovery",
       this.installationAuthority.operationIdentity("metadata-discovery", authority),
       authority,

@@ -2,7 +2,7 @@ import {
   parseRuntimeLifecycleDiagnosticSnapshot,
   safeLifecycleProviderVersion,
 } from "../lifecycle-diagnostics";
-import { knownHarnessIdSchema } from "../model-routing";
+import { currentKnownHarnessIdSchema } from "../model-routing";
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -10,6 +10,7 @@ const PROVIDER_HARNESS_IDS = {
   codex: "codex-app-server",
   claude: "claude-agent-sdk",
   cursor: "cursor-acp",
+  gemini: "gemini-acp",
   kimi: "kimi-acp",
   opencode: "opencode-sdk",
 } as const;
@@ -51,7 +52,7 @@ export function optionalProviderCapabilityContract(
     Object.keys(value).length !== CAPABILITY_CONTRACT_KEYS.length
     || !CAPABILITY_CONTRACT_KEYS.every((key) => Object.hasOwn(value, key))
     || value.schemaVersion !== 1
-    || !knownHarnessIdSchema.safeParse(value.harnessId).success
+    || !currentKnownHarnessIdSchema.safeParse(value.harnessId).success
     || value.harnessId !== expectedHarnessId
     || typeof value.manifestDigest !== "string"
     || !/^[0-9a-f]{64}$/u.test(value.manifestDigest)

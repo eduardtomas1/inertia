@@ -7,11 +7,11 @@ import {
   staleProviderSessionDecision,
 } from "../src/shared/continuation-policy";
 import {
-  nativeModelSelection,
   versionedContinuationIdentityForSelection,
+  providerNativeModelSelection,
 } from "../src/shared/model-routing";
 
-const codex = nativeModelSelection({
+const codex = providerNativeModelSelection({
   providerId: "codex",
   modelId: "gpt-5.4",
 });
@@ -167,7 +167,7 @@ describe("provider continuation policy", () => {
   });
 
   it("starts a fresh session for unsupported model changes", () => {
-    const cursor = nativeModelSelection({
+    const cursor = providerNativeModelSelection({
       providerId: "cursor",
       modelId: "cursor-model-a",
     });
@@ -193,7 +193,7 @@ describe("provider continuation policy", () => {
   });
 
   it("honors a model-bound continuation identity even if a capability flag is contradictory", () => {
-    const cursor = nativeModelSelection({
+    const cursor = providerNativeModelSelection({
       providerId: "cursor",
       modelId: "cursor-model-a",
     });

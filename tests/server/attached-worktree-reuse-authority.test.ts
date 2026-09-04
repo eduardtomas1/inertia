@@ -16,7 +16,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   modelSelectionSchema,
-  nativeModelSelection,
+  providerNativeModelSelection,
 } from "../../src/shared/model-routing";
 import { RuntimeStore } from "../../src/server/database";
 import { inspectProjectIdentity } from "../../src/server/project-identity";
@@ -109,7 +109,7 @@ function replaceWorktree(
 }
 
 function selection(modelId = "gpt-test") {
-  return modelSelectionSchema.parse(nativeModelSelection({
+  return modelSelectionSchema.parse(providerNativeModelSelection({
     providerId: "codex",
     modelId,
     alias: modelId,

@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   copyFileSync,
   existsSync,
   mkdtempSync,
@@ -48,6 +49,36 @@ export function readStableFixtureCapture<T>(capturePath: string): T {
     }
   }
   throw lastError ?? new Error(`No fixture capture was written to ${capturePath}.`);
+}
+
+/**
+ * Create a portable executable for CLIs whose protocol is selected by a flag
+ * (for example `gemini --acp`) instead of a Node-compatible subcommand.
+ */
+export function writeNodeFlagExecutable(
+  root: string,
+  name: string,
+  source: string,
+): string {
+  const script = join(root, `${name}-fixture.cjs`);
+  writeFileSync(script, `${source.trimStart()}\n`, "utf8");
+  if (process.platform === "win32") {
+    const executable = join(root, `${name}.cmd`);
+    writeFileSync(
+      executable,
+      `@echo off\r\n"${process.execPath}" "%~dp0${name}-fixture.cjs" %*\r\n`,
+      "utf8",
+    );
+    return executable;
+  }
+  const executable = join(root, name);
+  writeFileSync(
+    executable,
+    `#!${process.execPath}\nrequire(${JSON.stringify(script)});\n`,
+    "utf8",
+  );
+  chmodSync(executable, 0o755);
+  return executable;
 }
 
 export async function waitFor(

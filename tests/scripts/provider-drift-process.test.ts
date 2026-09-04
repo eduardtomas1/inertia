@@ -247,6 +247,44 @@ describe("provider drift ACP initialize", () => {
     await expect(acpFixture(validResponse())).resolves.toBeUndefined();
   });
 
+  it("can advertise the reduced Gemini client capability surface", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-provider-gemini-capabilities-"));
+    try {
+      const capture = join(root, "initialize.json");
+      const source = `
+        const fs = require("node:fs");
+        const readline = require("node:readline");
+        readline.createInterface({ input: process.stdin }).once("line", (line) => {
+          const message = JSON.parse(line);
+          fs.writeFileSync(${JSON.stringify(capture)}, JSON.stringify(message));
+          process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: {
+            protocolVersion: 1,
+            agentCapabilities: {},
+            agentInfo: { name: "gemini-cli", version: "0.58.0" },
+          } }) + "\\n");
+        });
+        setInterval(() => {}, 1_000);
+      `;
+      await expect(runAcpInitializeHandshake(
+        process.execPath,
+        ["--input-type=commonjs", "-e", source],
+        { cwd: root, environment: process.env },
+        {
+          expectedAgent: "gemini-cli",
+          requireLoadSession: false,
+          advertiseCompaction: false,
+        },
+      )).resolves.toBeUndefined();
+      expect(JSON.parse(readFileSync(capture, "utf8"))).toMatchObject({
+        params: { clientCapabilities: { plan: {} } },
+      });
+      expect(JSON.parse(readFileSync(capture, "utf8")).params.clientCapabilities)
+        .not.toHaveProperty("session");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("rejects early exit, timeout, malformed JSON, and oversized output", async () => {
     await expect(acpFixture("process.exit(0);"))
       .rejects.toThrow("exited during initialize");

@@ -1,6 +1,7 @@
 import { createClaudeAgentSdkHarness } from "./claude-agent-sdk-harness";
 import { createCodexAppServerHarness } from "./codex-app-server-harness";
 import { createCursorAcpHarness } from "./cursor-acp-harness";
+import { createGeminiAcpHarness } from "./gemini-acp-harness";
 import { createKimiAcpHarness } from "./kimi-acp-harness";
 import { createOpenCodeSdkHarness } from "./opencode-sdk-harness";
 import {
@@ -14,7 +15,7 @@ import type {
   AgentHarnessId,
 } from "./agent-harness";
 import { ProviderRuntimeError, type ProviderId, type ProviderRunInput } from "./contracts";
-import { legacyProviderIdForHarness } from "../../shared/model-routing";
+import { providerIdForHarness } from "../../shared/model-routing";
 
 const HARNESS_PROVIDERS: Readonly<Record<AgentHarnessId, ProviderId>> = {
   "codex-app-server": "codex",
@@ -24,6 +25,7 @@ const HARNESS_PROVIDERS: Readonly<Record<AgentHarnessId, ProviderId>> = {
   "opencode-cli": "opencode",
   "claude-agent-sdk": "claude",
   "cursor-acp": "cursor",
+  "gemini-acp": "gemini",
   "kimi-acp": "kimi",
   "opencode-sdk": "opencode",
 };
@@ -56,7 +58,7 @@ export class AgentHarnessRegistry {
     ) {
       throw new ProviderRuntimeError("invalid_input", "The harness and backend route is internally inconsistent.");
     }
-    const projectedProvider = legacyProviderIdForHarness(input.harnessId);
+    const projectedProvider = providerIdForHarness(input.harnessId);
     if (!projectedProvider || projectedProvider !== input.providerId) {
       throw new ProviderRuntimeError("invalid_input", "The harness does not match its provider compatibility projection.");
     }
@@ -73,11 +75,18 @@ export class AgentHarnessRegistry {
       throw new ProviderRuntimeError("invalid_input", `Backend '${input.backendProfile.displayName}' is disabled.`);
     }
     if (input.backendProfile.source === "custom") {
-      if (input.providerId === "cursor" || input.providerId === "kimi" || input.providerId === "opencode") {
+      if (
+        input.providerId === "cursor"
+        || input.providerId === "gemini"
+        || input.providerId === "kimi"
+        || input.providerId === "opencode"
+      ) {
         throw new ProviderRuntimeError(
           "invalid_input",
           input.providerId === "cursor"
             ? "Cursor controls its backend; external backend profiles cannot be injected."
+            : input.providerId === "gemini"
+              ? "Gemini CLI controls its backend; external backend profiles cannot be injected."
             : input.providerId === "kimi"
               ? "Kimi Code controls its backend; external backend profiles cannot be injected."
               : "OpenCode backends must come from OpenCode's native provider catalog.",
@@ -130,6 +139,7 @@ export function createDefaultAgentHarnessRegistry(): AgentHarnessRegistry {
     createCodexAppServerHarness(),
     createClaudeAgentSdkHarness(),
     createCursorAcpHarness(),
+    createGeminiAcpHarness(),
     createKimiAcpHarness(),
     createOpenCodeSdkHarness(),
   ]);

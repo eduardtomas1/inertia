@@ -9,7 +9,7 @@ import {
   type Project,
   type ServerEvent,
 } from "../../src/shared/contracts";
-import { nativeModelSelection } from "../../src/shared/model-routing";
+import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import { GIT_MUTATION_REQUEST_TIMEOUT_MS } from "../../src/shared/runtime-command-timeouts";
 import { useInertiaConnection } from "../../src/renderer/src/hooks/useInertiaConnection";
 import { useWorkspaceGit } from "../../src/renderer/src/hooks/workspace-tools/useWorkspaceGit";
@@ -57,7 +57,7 @@ const conversation: Conversation = {
   projectId: project.id,
   title: "Timeout fixture chat",
   providerId: "codex",
-  modelSelection: nativeModelSelection({
+  modelSelection: providerNativeModelSelection({
     providerId: "codex",
     modelId: "default",
     reasoningEffort: "medium",

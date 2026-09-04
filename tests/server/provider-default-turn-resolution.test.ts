@@ -8,8 +8,8 @@ import type { ProviderInfo } from "../../src/shared/contracts";
 import {
   continuationIdentityForSelection,
   modelSelectionSchema,
-  nativeBackendProfile,
-  nativeModelSelection,
+  providerNativeBackendProfile,
+  providerNativeModelSelection,
   resolveHarnessBackendCompatibility,
 } from "../../src/shared/model-routing";
 import { RuntimeStore } from "../../src/server/database";
@@ -82,7 +82,7 @@ describe("provider-default turn resolution", () => {
     });
     const project = store.createProject("Provider default", workspace);
     const conversation = store.createConversation(project.id, "Default route", {
-      modelSelection: nativeModelSelection({
+      modelSelection: providerNativeModelSelection({
         providerId: "codex",
         modelId: "provider-default",
         providerOptions: { fastMode: "priority" },
@@ -164,7 +164,7 @@ describe("provider-default turn resolution", () => {
     const initial = createStore();
     const project = initial.createProject("Provider default Fast", workspace);
     const conversation = initial.createConversation(project.id, "Standard route", {
-      modelSelection: nativeModelSelection({
+      modelSelection: providerNativeModelSelection({
         providerId: "codex",
         modelId: "provider-default",
       }),
@@ -214,7 +214,7 @@ describe("provider-default turn resolution", () => {
     });
     const project = store.createProject("No Fast support", workspace);
     const conversation = store.createConversation(project.id, "Standard route", {
-      modelSelection: nativeModelSelection({ providerId: "codex" }),
+      modelSelection: providerNativeModelSelection({ providerId: "codex" }),
     });
     const providers = {
       resolveModelRoute: resolveNativeModelRoute,
@@ -250,7 +250,7 @@ describe("provider-default turn resolution", () => {
       recoverInterruptedRuns: false,
     });
     const project = store.createProject("Lost Fast support", workspace);
-    const fastSelection = nativeModelSelection({
+    const fastSelection = providerNativeModelSelection({
       providerId: "codex",
       modelId: "gpt-old",
       providerOptions: { fastMode: "priority" },
@@ -264,7 +264,7 @@ describe("provider-default turn resolution", () => {
         resolveNativeModelRoute(fastSelection).continuationIdentity,
     });
     store.updateConversation(conversation.id, {
-      modelSelection: nativeModelSelection({
+      modelSelection: providerNativeModelSelection({
         providerId: "codex",
         modelId: "gpt-old",
       }),
@@ -321,7 +321,7 @@ describe("provider-default turn resolution", () => {
     const createStore = () => new RuntimeStore(databasePath, workspace, {
       recoverInterruptedRuns: false,
     });
-    const selection = nativeModelSelection({
+    const selection = providerNativeModelSelection({
       providerId: "codex",
       modelId: "gpt-current",
     });
@@ -409,7 +409,7 @@ describe("provider-default turn resolution", () => {
     });
     const project = store.createProject("Provider default", workspace);
     const conversation = store.createConversation(project.id, "Default route", {
-      modelSelection: nativeModelSelection({ providerId: "codex" }),
+      modelSelection: providerNativeModelSelection({ providerId: "codex" }),
     });
     const providers = {
       resolveModelRoute: resolveNativeModelRoute,
@@ -451,7 +451,7 @@ describe("provider-default turn resolution", () => {
     const image = join(workspace, "scan.jpg");
     await writeFile(image, Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
     const customProfile = {
-      ...nativeBackendProfile("codex"),
+      ...providerNativeBackendProfile("codex"),
       id: `custom:${state}`,
       displayName: `Custom ${state}`,
       source: "custom" as const,
@@ -459,7 +459,7 @@ describe("provider-default turn resolution", () => {
       endpointIdentity: `endpoint:${state}`,
     };
     const selection = modelSelectionSchema.parse({
-      ...nativeModelSelection({ providerId: "codex", modelId: "gpt-collision" }),
+      ...providerNativeModelSelection({ providerId: "codex", modelId: "gpt-collision" }),
       backendProfileId: customProfile.id,
       backendProfileDisplayName: customProfile.displayName,
       backendConfigurationRevision: 1,

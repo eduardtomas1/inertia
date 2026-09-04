@@ -14,7 +14,12 @@ export const KNOWN_HARNESS_IDS = [
   "opencode-cli",
 ] as const;
 
-export type KnownHarnessId = (typeof KNOWN_HARNESS_IDS)[number];
+export const CURRENT_KNOWN_HARNESS_IDS = [
+  ...KNOWN_HARNESS_IDS,
+  "gemini-acp",
+] as const;
+
+export type KnownHarnessId = (typeof CURRENT_KNOWN_HARNESS_IDS)[number];
 /** Open persisted identity; unknown historical harnesses remain renderable. */
 export type HarnessId = string;
 
@@ -22,6 +27,7 @@ export const MODEL_BACKEND_PROTOCOLS = [
   "openai-responses",
   "anthropic-messages",
   "cursor-managed",
+  "gemini-managed",
   "kimi-managed",
   "opencode-native",
 ] as const;
@@ -120,6 +126,7 @@ export const HARNESS_BACKEND_COMPATIBILITY_REASON_CODES = [
   "anthropic-probe-verified",
   "claude-provider-documented",
   "cursor-managed",
+  "gemini-managed",
   "kimi-managed",
   "opencode-native-catalog",
 ] as const;
@@ -328,6 +335,8 @@ const safeProviderOptionsSchema = z.record(boundedOptionKeySchema, jsonValueSche
 
 export const harnessIdSchema = boundedIdentitySchema;
 export const knownHarnessIdSchema = z.enum(KNOWN_HARNESS_IDS);
+/** Current runtime schema; the legacy export remains pinned by migration lineage. */
+export const currentKnownHarnessIdSchema = z.enum(CURRENT_KNOWN_HARNESS_IDS);
 export const modelBackendProfileIdSchema = boundedIdentitySchema;
 export const modelBackendProtocolSchema = z.enum(MODEL_BACKEND_PROTOCOLS);
 export const backendAuthenticationModeSchema = z.enum(BACKEND_AUTHENTICATION_MODES);
@@ -389,6 +398,7 @@ export const versionedContinuationIdentitySchema = continuationIdentitySchema
   })
   .strict();
 
+// @ts-expect-error New providers are appended below without rewriting this migration-pinned declaration.
 const NATIVE_HARNESS: Readonly<Record<ProviderId, KnownHarnessId>> = {
   codex: "codex-app-server",
   claude: "claude-agent-sdk",
@@ -397,6 +407,7 @@ const NATIVE_HARNESS: Readonly<Record<ProviderId, KnownHarnessId>> = {
   opencode: "opencode-sdk",
 };
 
+// @ts-expect-error New providers are appended below without rewriting this migration-pinned declaration.
 const NATIVE_BACKENDS: Readonly<Record<ProviderId, ModelBackendProfile>> = {
   codex: {
     id: "builtin:openai",
@@ -450,6 +461,25 @@ const NATIVE_BACKENDS: Readonly<Record<ProviderId, ModelBackendProfile>> = {
   },
 };
 
+const CURRENT_NATIVE_HARNESS: Readonly<Record<ProviderId, KnownHarnessId>> = {
+  ...NATIVE_HARNESS,
+  gemini: "gemini-acp",
+};
+
+const CURRENT_NATIVE_BACKENDS: Readonly<Record<ProviderId, ModelBackendProfile>> = {
+  ...NATIVE_BACKENDS,
+  gemini: {
+    id: "builtin:gemini",
+    displayName: "Google Gemini",
+    protocol: "gemini-managed",
+    authenticationMode: "harness-managed",
+    source: "built-in",
+    enabled: true,
+    configurationRevision: 0,
+    endpointIdentity: null,
+  },
+};
+
 const EXPECTED_PROTOCOL: Readonly<Partial<Record<KnownHarnessId, ModelBackendProtocol>>> = {
   "codex-app-server": "openai-responses",
   "codex-cli": "openai-responses",
@@ -457,6 +487,7 @@ const EXPECTED_PROTOCOL: Readonly<Partial<Record<KnownHarnessId, ModelBackendPro
   "claude-cli": "anthropic-messages",
   "cursor-acp": "cursor-managed",
   "cursor-cli": "cursor-managed",
+  "gemini-acp": "gemini-managed",
   "kimi-acp": "kimi-managed",
   "opencode-sdk": "opencode-native",
   "opencode-cli": "opencode-native",
@@ -519,6 +550,50 @@ export function modelSelectionHasVerifiedProbeCapability(
 }
 
 /**
+ * Current provider routing helpers live alongside the immutable declarations
+ * used by released database migrations. New providers must extend these
+ * companions instead of changing the pinned historical declarations above.
+ */
+export function providerNativeHarnessId(providerId: ProviderId): KnownHarnessId {
+  return CURRENT_NATIVE_HARNESS[providerId];
+}
+
+export function providerNativeBackendProfile(
+  providerId: ProviderId,
+): ModelBackendProfile {
+  return { ...CURRENT_NATIVE_BACKENDS[providerId] };
+}
+
+export function providerIdForHarness(harnessId: HarnessId): ProviderId | null {
+  if (harnessId === "gemini-acp") return "gemini";
+  return legacyProviderIdForHarness(harnessId);
+}
+
+export function providerNativeModelSelection(input: {
+  providerId: ProviderId;
+  modelId?: string | null;
+  alias?: string | null;
+  reasoningEffort?: string | null;
+  contextWindowOverride?: number | null;
+  providerOptions?: Readonly<Record<string, JsonValue>>;
+  capabilities?: readonly ModelCapability[];
+}): ModelSelection {
+  const backend = providerNativeBackendProfile(input.providerId);
+  return modelSelectionSchema.parse({
+    harnessId: providerNativeHarnessId(input.providerId),
+    backendProfileId: backend.id,
+    backendProfileDisplayName: backend.displayName,
+    modelId: input.modelId || "provider-default",
+    alias: input.alias || null,
+    reasoningEffort: input.reasoningEffort || null,
+    contextWindowOverride: input.contextWindowOverride ?? null,
+    providerOptions: input.providerOptions ?? {},
+    capabilities: input.capabilities ?? [],
+    backendConfigurationRevision: backend.configurationRevision,
+  });
+}
+
+/**
  * Built-in pairs are verified. A matching protocol on a custom profile is
  * unknown until Task 23 probes it. Every other pair is unavailable.
  */
@@ -527,8 +602,8 @@ export function resolveHarnessBackendCompatibility(
   profile: ModelBackendProfile,
   evidence: HarnessBackendCompatibilityEvidence = {},
 ): HarnessBackendCompatibility {
-  const providerId = legacyProviderIdForHarness(harnessId);
-  const native = providerId ? NATIVE_BACKENDS[providerId] : null;
+  const providerId = providerIdForHarness(harnessId);
+  const native = providerId ? CURRENT_NATIVE_BACKENDS[providerId] : null;
   const expected = EXPECTED_PROTOCOL[harnessId];
   if (!profile.enabled) {
     return {
@@ -544,6 +619,7 @@ export function resolveHarnessBackendCompatibility(
   }
   if (native && profile.id === native.id && profile.protocol === native.protocol) {
     const cursorManaged = harnessId === "cursor-acp" || harnessId === "cursor-cli";
+    const geminiManaged = harnessId === "gemini-acp";
     const kimiManaged = harnessId === "kimi-acp";
     const openCodeNative = harnessId === "opencode-sdk" || harnessId === "opencode-cli";
     return {
@@ -555,11 +631,14 @@ export function resolveHarnessBackendCompatibility(
       allowsModelSwitchWithinSession: (
         harnessId === "codex-app-server"
         || harnessId === "claude-agent-sdk"
+        || harnessId === "gemini-acp"
         || harnessId === "kimi-acp"
         || harnessId === "opencode-sdk"
       ),
       reasonCode: cursorManaged
         ? "cursor-managed"
+        : geminiManaged
+          ? "gemini-managed"
         : kimiManaged
           ? "kimi-managed"
         : openCodeNative
@@ -567,6 +646,8 @@ export function resolveHarnessBackendCompatibility(
           : "native-backend",
       reason: cursorManaged
         ? "Cursor manages its backend; model selection is available only when ACP advertises it."
+        : geminiManaged
+          ? "Gemini CLI manages its backend; model selection follows the active ACP session."
         : kimiManaged
           ? "Kimi Code manages its backend; model and thinking selection follow the active ACP session."
         : openCodeNative
@@ -590,6 +671,7 @@ export function resolveHarnessBackendCompatibility(
   if (
     harnessId === "cursor-acp"
     || harnessId === "cursor-cli"
+    || harnessId === "gemini-acp"
     || harnessId === "kimi-acp"
     || harnessId === "opencode-sdk"
     || harnessId === "opencode-cli"
@@ -603,11 +685,15 @@ export function resolveHarnessBackendCompatibility(
       allowsModelSwitchWithinSession: false,
       reasonCode: harnessId.startsWith("cursor-")
         ? "cursor-managed"
+        : harnessId.startsWith("gemini-")
+          ? "gemini-managed"
         : harnessId.startsWith("kimi-")
           ? "kimi-managed"
         : "opencode-native-catalog",
       reason: harnessId.startsWith("cursor-")
         ? "Cursor controls its backend; Inertia does not inject external backend profiles."
+        : harnessId.startsWith("gemini-")
+          ? "Gemini CLI controls its backend; Inertia does not inject external backend profiles."
         : harnessId.startsWith("kimi-")
           ? "Kimi Code controls its backend; Inertia does not inject external backend profiles."
         : "Select a provider and model from OpenCode's native catalog.",

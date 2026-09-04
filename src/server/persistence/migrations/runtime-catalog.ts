@@ -26,8 +26,8 @@ import { workspacePathAuthoritiesMigration } from "./workspace-path-authorities"
 import { conversationContextPacketsMigration } from "./conversation-context-packets";
 import { persistSuspendAwareTurnTiming } from "./system-suspend-timing";
 import { persistTurnContinuationEvidence } from "./turn-continuation-evidence";
-const MODEL_SELECTION_TABLES = ["conversations", "agent_turns"] as const;
-const MODEL_SELECTION_COLUMNS = ["model_selection_json", "continuation_identity_json"] as const;
+import { nativeGeminiProviderMigration } from "./native-gemini-provider";
+const MODEL_SELECTION_TABLES = ["conversations", "agent_turns"] as const, MODEL_SELECTION_COLUMNS = ["model_selection_json", "continuation_identity_json"] as const;
 export function runtimeMigrationCatalog(): readonly DatabaseMigration[] {
     const legacyMigrations: DatabaseMigrationDefinition[] = LEGACY_SCHEMA_SQL.map(
       (sql, index) => {
@@ -1226,12 +1226,12 @@ export function runtimeMigrationCatalog(): readonly DatabaseMigration[] {
       authoritativeRunStateMigration,
       { name: "RefreshAgentBrowserCapability", up: "DELETE FROM agent_goals WHERE source = 'codex-native' AND conversation_id IN (SELECT id FROM conversations WHERE provider_id = 'codex' AND provider_session_id IS NOT NULL); UPDATE conversations SET provider_session_id = NULL, continuation_identity_json = NULL WHERE provider_id = 'codex' AND provider_session_id IS NOT NULL;" },
       persistSuspendAwareTurnTiming, persistTurnContinuationEvidence,
+      nativeGeminiProviderMigration,
     );
     return createRuntimeMigrationCatalog(legacyMigrations, migrationExtensions);
 }
 export function migrateRuntimeDatabase(database: Database.Database, maximumVersion = CURRENT_DATABASE_SCHEMA_VERSION): void {
-    const runtimeMigrations = runtimeMigrationCatalog();
-    runDatabaseMigrations(database, runtimeMigrations.slice(0, maximumVersion), {
+    runDatabaseMigrations(database, runtimeMigrationCatalog().slice(0, maximumVersion), {
       onDiagnostic: (diagnostic) => {
         if (diagnostic.outcome === "failed") {
           console.error(formatMigrationDiagnostic(diagnostic));

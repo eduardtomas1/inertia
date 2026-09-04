@@ -1,19 +1,22 @@
-import type { AgentActivity } from "../../../shared/contracts";
+import type { AgentActivity, ChatMessage } from "../../../shared/contracts";
 import {
   officiallyAllowsFastModeSwitchWithinSession,
   officiallyAllowsModelSwitchWithinSession,
   resolveContinuationDecision,
 } from "../../../shared/continuation-policy";
 import {
-  nativeBackendProfile,
-  nativeModelSelection,
   modelSelectionHasVerifiedProbeCapability,
   modelSelectionSchema,
+  providerNativeBackendProfile,
+  providerNativeModelSelection,
   routeSupportsNativeFastModeIdentity,
 } from "../../../shared/model-routing";
 import type { RuntimeStore } from "../../database";
 import type { BeginAgentTurnInput } from "../../persistence/types";
-import type { ProviderActivityEvent } from "../../provider/contracts";
+import type {
+  ProviderActivityEvent,
+  ProviderRunInput,
+} from "../../provider/contracts";
 import { AuthoritativeRunStateEngine } from "../run-state-engine";
 import { assembleTurnRequest } from "./request-context";
 import { previousTurnBoundaryUsage } from "./turn-controller-support";
@@ -48,6 +51,55 @@ export interface PreparedTurnRequest {
 export interface ResolvedTurnRequest {
   input: BeginAgentTurnInput;
   adopt(queued: QueuedTurn): PreparedTurnRequest;
+}
+
+const MAX_RECONSTRUCTED_HISTORY_MESSAGES = 64;
+const MAX_RECONSTRUCTED_MESSAGE_CHARS = 24 * 1024;
+const MAX_RECONSTRUCTED_HISTORY_CHARS = 96 * 1024;
+
+/**
+ * Gemini CLI v0.58 cannot safely load an ACP session: its floating history
+ * replay has no EOF and its recorder can overwrite the session being loaded.
+ * Preserve useful conversational continuity with a bounded copy of the
+ * visible, turn-owned transcript instead. This deliberately excludes system
+ * rows, reasoning, activities, tool payloads, and unassociated current input.
+ */
+export function reconstructedVisibleHistory(
+  messages: readonly ChatMessage[],
+): ProviderRunInput["reconstructedHistory"] {
+  const eligible = messages.filter((message) =>
+    message.turnId !== null
+    && (message.role === "user" || message.role === "assistant")
+    && message.content.length > 0);
+  const retained = eligible.slice(-MAX_RECONSTRUCTED_HISTORY_MESSAGES);
+  let truncated = retained.length !== eligible.length;
+  let remaining = MAX_RECONSTRUCTED_HISTORY_CHARS;
+  const bounded: Array<{ role: "user" | "assistant"; content: string }> = [];
+
+  for (let index = retained.length - 1; index >= 0; index -= 1) {
+    const message = retained[index]!;
+    if (remaining <= 0) {
+      truncated = true;
+      break;
+    }
+    const maximum = Math.min(MAX_RECONSTRUCTED_MESSAGE_CHARS, remaining);
+    const content = boundedHistoryText(message.content, maximum);
+    if (content.length !== message.content.length) truncated = true;
+    remaining -= content.length;
+    bounded.unshift({ role: message.role as "user" | "assistant", content });
+  }
+
+  if (bounded.length === 0) return undefined;
+  return { source: "visible-transcript", truncated, messages: bounded };
+}
+
+function boundedHistoryText(value: string, maximum: number): string {
+  if (value.length <= maximum) return value;
+  if (maximum < 64) return value.slice(0, maximum);
+  const marker = "\n[… historical message truncated by Inertia …]\n";
+  const available = maximum - marker.length;
+  const head = Math.ceil(available / 2);
+  return value.slice(0, head) + marker + value.slice(-(available - head));
 }
 
 /**
@@ -98,8 +150,15 @@ export function resolveTurnRequest(
   const routeSelection = dependencies.hooks.validateModelSelection?.(
     parsedSelection,
   ) ?? parsedSelection;
-  const modelSelection = requestedModelId === "provider-default" && selectedModel
-    ? nativeModelSelection({
+  // Gemini learns the active default only from the new ACP session. Cached
+  // metadata can be stale before that session exists, so persist the honest
+  // provider-default request instead of attributing the immutable turn and
+  // usage record to a model the provider may not actually use.
+  const canResolveDefaultBeforeRun = conversation.providerId !== "gemini";
+  const modelSelection = requestedModelId === "provider-default"
+    && selectedModel
+    && canResolveDefaultBeforeRun
+    ? providerNativeModelSelection({
         providerId: conversation.providerId,
         modelId: selectedModel.id,
         alias: selectedModel.label === selectedModel.id
@@ -144,7 +203,7 @@ export function resolveTurnRequest(
       ?? exactProvider?.models[0]
     : exactProvider?.models.find(({ id }) => id === routeSelection.modelId);
   const usesNativeCatalog = route.backendProfile.source === "built-in"
-    && route.backendProfile.id === nativeBackendProfile(route.providerId).id;
+    && route.backendProfile.id === providerNativeBackendProfile(route.providerId).id;
   const supportsImages = usesNativeCatalog
     ? exactModel?.inputModalities.includes("image") === true
     : modelSelectionHasVerifiedProbeCapability(routeSelection, "images");
@@ -154,7 +213,7 @@ export function resolveTurnRequest(
       ? "fast"
       : null;
   const supportedFastMode = selectedProvider?.id === route.providerId
-    && route.backendProfile.id === nativeBackendProfile(route.providerId).id
+    && route.backendProfile.id === providerNativeBackendProfile(route.providerId).id
     && routeSupportsNativeFastModeIdentity(routeSelection)
     && selectedModel?.fastMode?.providerValue === expectedFastMode
     ? expectedFastMode
@@ -203,7 +262,10 @@ export function resolveTurnRequest(
   if (continuation.action === "new-conversation-required") {
     throw new Error(continuation.reason);
   }
-  const canResume = continuation.action === "resume-session";
+  // Gemini ACP session/load is unsafe in v0.58. Gemini continuations use the
+  // bounded visible transcript below and always create a fresh ACP session.
+  const canResume = continuation.action === "resume-session"
+    && route.providerId !== "gemini";
   const providerSessionInvalidation = !canResume && conversation.providerSessionId
     ? { expectedSessionId: conversation.providerSessionId }
     : undefined;
@@ -231,6 +293,13 @@ export function resolveTurnRequest(
     interactionMode: conversation.interactionMode,
     access: conversation.accessMode,
     sessionId: canResume ? conversation.providerSessionId! : undefined,
+    ...(route.providerId === "gemini"
+      ? {
+          reconstructedHistory: reconstructedVisibleHistory(
+            dependencies.store.conversationDetail(conversation.id)?.messages ?? [],
+          ),
+        }
+      : {}),
     ...(supportedFastMode ? { supportedFastMode } : {}),
     ...(canResume
       && previousContinuationIdentity

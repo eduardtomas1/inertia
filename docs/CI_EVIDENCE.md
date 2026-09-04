@@ -39,9 +39,10 @@ Full benchmarks run for performance/all-evidence pull requests and for every
 retain all correctness evidence but skip benchmark-only steps. Concurrency groups
 are separate by event and ref, and only superseded pull-request runs are cancelled.
 
-Scheduled certification repeats a focused common and platform-specific lifecycle
-set three times in fresh Vitest processes on all six targets. Every attempt log and
-a structured pass/failure/flake summary are retained for 30 days; one failed
+Scheduled certification attempts a focused common and platform-specific
+lifecycle set up to three times in fresh Vitest processes on all six targets,
+stopping early only when cleanup is unconfirmed. Every attempted run and a
+structured pass/failure/flake summary are retained for 30 days; one failed
 attempt fails the target after artifact publication. A failed scheduled
 certification opens or updates one tracked issue with the exact SHA, failed job
 and step names, platform, locked provider-version link, run/artifact link, and an
@@ -62,8 +63,9 @@ Each target checks out and validates the exact tag, builds and smokes its native
 package, stages checksummed assets, and uploads those exact bytes. The publish job
 downloads and verifies the staged set before provenance attestation and upload.
 It also re-reads the direct and peeled remote tag under a bounded noninteractive
-Git operation immediately before draft creation, every missing-asset upload, and
-the final publish transition, so a remotely moved tag cannot inherit frozen
+Git operation immediately before draft creation, every missing-asset upload,
+the final publish transition, and every `canary-feed` ref push, so a remotely
+moved tag cannot inherit frozen
 artifacts from the earlier validation window.
 The CI tiering change does not weaken or reuse unverified release bytes.
 
@@ -105,7 +107,8 @@ numeric after value is claimed before the new jobs run successfully.
 ## Conservative change classification
 
 `scripts/ci/change-classifier.mjs` emits explicit Boolean outputs for the shared
-quality layer and lifecycle, provider, database, native-terminal, updater,
+quality layer and lifecycle, including distinct Codex, Claude, Cursor, Gemini,
+Kimi, and OpenCode provider domains, plus database, native-terminal, updater,
 packaging, renderer, performance, and CI/test domains. Documentation is narrow:
 every changed path must be a recognized documentation path. Empty diffs, malformed
 paths, new unclassified paths, workflow/test infrastructure, dependency manifests,
@@ -159,10 +162,10 @@ new test cannot receive a zero-cost shard assignment. Manifest input is bounded
 by path, count, file size, duration, shard count, and successful-run provenance.
 
 On the current working tree, deterministic longest-processing-time partitioning
-projects four shard weights of 512.811s, 513.534s, 512.810s, and 512.810s across
-629 discovered tests. The measured/unknown file counts are respectively
-147+9, 151+7, 149+8, and 149+9. The projected maximum is therefore about 8m 34s,
-23.7% below the observed 11m 13s Vitest maximum. This is a scheduling
+projects four shard weights of 532.500s, 532.500s, 531.776s, and 532.499s across
+647 discovered tests. The measured/unknown file counts are respectively
+148+13, 149+13, 149+12, and 150+13. The projected maximum is therefore about
+8m 53s, 20.9% below the observed 11m 13s Vitest maximum. This is a scheduling
 projection, not a hosted-run result; install time, runner variance, and queue
 time are excluded.
 

@@ -11,8 +11,8 @@ import {
   ProviderInfo,
 } from "../../../shared/contracts";
 import {
-  legacyProviderIdForHarness,
-  nativeModelSelection,
+  providerIdForHarness,
+  providerNativeModelSelection,
 } from "../../../shared/model-routing";
 import type { RuntimeStore } from "../../database";
 import {
@@ -906,7 +906,7 @@ export class DuoLaunchCoordinator {
   ): Promise<PreflightComparison> {
     const settings = this.store.shellSnapshot().settings;
     const selection = this.backendProfiles.validateSelection(
-      payload.modelSelection ?? nativeModelSelection({
+      payload.modelSelection ?? providerNativeModelSelection({
         providerId: payload.providerId ?? settings.defaultProvider,
         modelId: payload.model || settings.defaultModel || "provider-default",
         alias: payload.model || settings.defaultModel || null,
@@ -916,7 +916,7 @@ export class DuoLaunchCoordinator {
       }),
     );
     this.providers.resolveModelRoute(selection);
-    const providerId = legacyProviderIdForHarness(selection.harnessId);
+    const providerId = providerIdForHarness(selection.harnessId);
     const provider = this.providerInfo().find(({ id }) => id === providerId);
     const readiness = await this.backendProfiles.readiness(selection, provider);
     if (readiness && !readiness.ready) {
@@ -944,7 +944,7 @@ export class DuoLaunchCoordinator {
   ): Promise<PreflightSide> {
     const settings = this.store.shellSnapshot().settings;
     const selection = this.backendProfiles.validateSelection(
-      payload.modelSelection ?? nativeModelSelection({
+      payload.modelSelection ?? providerNativeModelSelection({
         providerId: payload.providerId ?? settings.defaultProvider,
         modelId: payload.model || settings.defaultModel || "provider-default",
         alias: payload.model || settings.defaultModel || null,
@@ -954,7 +954,7 @@ export class DuoLaunchCoordinator {
       }),
     );
     this.providers.resolveModelRoute(selection);
-    const providerId = legacyProviderIdForHarness(selection.harnessId);
+    const providerId = providerIdForHarness(selection.harnessId);
     const provider = this.providerInfo().find(({ id }) => id === providerId);
     const readiness = await this.backendProfiles.readiness(selection, provider);
     if (readiness && !readiness.ready) {
@@ -1061,7 +1061,7 @@ export class DuoLaunchCoordinator {
   }
 
   private conversationOptions(side: PreflightSide): NewConversationOptions {
-    const providerId = legacyProviderIdForHarness(side.selection.harnessId);
+    const providerId = providerIdForHarness(side.selection.harnessId);
     if (!providerId) {
       throw new Error("That agent harness is unavailable in this build.");
     }
@@ -1080,7 +1080,7 @@ export class DuoLaunchCoordinator {
   private comparisonConversationPlan(
     comparison: PreflightComparison,
   ): Parameters<RuntimeStore["createDuoConversations"]>[2] {
-    const providerId = legacyProviderIdForHarness(
+    const providerId = providerIdForHarness(
       comparison.selection.harnessId,
     );
     if (!providerId) {

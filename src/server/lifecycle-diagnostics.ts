@@ -18,7 +18,7 @@ import {
   lifecycleBuildMetadataSchema,
   type LifecycleBuildMetadata,
 } from "../shared/lifecycle-build-metadata";
-import { knownHarnessIdSchema } from "../shared/model-routing";
+import { currentKnownHarnessIdSchema } from "../shared/model-routing";
 
 const MAX_REPORTED_RUNTIME_UPTIME_MS = 30 * 24 * 60 * 60 * 1_000;
 export interface RuntimeLifecycleDiagnosticInput {
@@ -76,7 +76,7 @@ export function runtimeLifecycleDiagnosticSnapshot(
       input.conversations
         .filter(({ id }) => activeConversationIds.has(id))
         .flatMap((conversation) => {
-          const parsedHarness = knownHarnessIdSchema.safeParse(
+          const parsedHarness = currentKnownHarnessIdSchema.safeParse(
             conversation.modelSelection.harnessId,
           );
           if (!parsedHarness.success) return [];

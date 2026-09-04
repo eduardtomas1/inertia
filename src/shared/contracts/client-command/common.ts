@@ -30,7 +30,14 @@ export const workspaceFilePathSchema = z.string()
   .max(4_096)
   .refine((path) => isPortableWorkspacePath(path, false), "Invalid project-relative file.");
 
-export const providerIdSchema = z.enum(["codex", "claude", "cursor", "kimi", "opencode"]);
+export const providerIdSchema = z.enum([
+  "codex",
+  "claude",
+  "cursor",
+  "gemini",
+  "kimi",
+  "opencode",
+]);
 export const accessModeSchema = z.enum(["supervised", "auto-edit", "full"]);
 export const interactionModeSchema = z.enum(["build", "plan"]);
 

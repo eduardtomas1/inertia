@@ -4,13 +4,13 @@ import type { Conversation } from "../../shared/contracts";
 import { officiallyAllowsModelSwitchWithinSession } from "../../shared/continuation-policy";
 import {
   continuationIdentityForSelection,
-  versionedContinuationIdentitySchema,
-  knownHarnessIdSchema,
-  legacyProviderIdForHarness,
+  currentKnownHarnessIdSchema,
+  providerIdForHarness,
   modelSelectionSchema,
-  nativeBackendProfile,
-  nativeModelSelection,
+  providerNativeBackendProfile,
+  providerNativeModelSelection,
   resolveHarnessBackendCompatibility,
+  versionedContinuationIdentitySchema,
 } from "../../shared/model-routing";
 import { conversationFromRow } from "./codecs";
 import type { PersistenceContext } from "./context";
@@ -45,13 +45,13 @@ export class ConversationRepository {
     const legacyProviderId = options.providerId ?? state.default_provider;
     const modelSelection = options.modelSelection
       ? modelSelectionSchema.parse(options.modelSelection)
-      : nativeModelSelection({
+      : providerNativeModelSelection({
         providerId: legacyProviderId,
         modelId: options.model || state.default_model || "provider-default",
         alias: options.model || state.default_model || null,
         reasoningEffort: options.reasoningEffort ?? state.default_reasoning_effort,
       });
-    const providerId = legacyProviderIdForHarness(modelSelection.harnessId);
+    const providerId = providerIdForHarness(modelSelection.harnessId);
     if (!providerId) throw new Error("The selected harness is unavailable in this build.");
     if (options.providerId && options.providerId !== providerId) {
       throw new Error("The legacy provider and model selection harness do not match.");
@@ -163,7 +163,7 @@ export class ConversationRepository {
     const modelSelection = update.modelSelection
       ? modelSelectionSchema.parse(update.modelSelection)
       : legacySelectionChanged
-        ? nativeModelSelection({
+        ? providerNativeModelSelection({
           providerId: requestedProviderId,
           modelId: update.model ?? (
             update.providerId && update.providerId !== current.providerId
@@ -186,7 +186,7 @@ export class ConversationRepository {
             : current.modelSelection.providerOptions,
         })
         : current.modelSelection;
-    const selectedProviderId = legacyProviderIdForHarness(modelSelection.harnessId);
+    const selectedProviderId = providerIdForHarness(modelSelection.harnessId);
     if (!selectedProviderId) throw new Error("The selected harness is unavailable in this build.");
     if (update.providerId && update.providerId !== selectedProviderId) {
       throw new Error("The legacy provider and model selection harness do not match.");
@@ -229,8 +229,8 @@ export class ConversationRepository {
       updatedAt: now,
     };
     if (next.providerSessionId && !next.continuationIdentity) {
-      const native = nativeBackendProfile(selectedProviderId);
-      const harnessId = knownHarnessIdSchema.safeParse(modelSelection.harnessId);
+      const native = providerNativeBackendProfile(selectedProviderId);
+      const harnessId = currentKnownHarnessIdSchema.safeParse(modelSelection.harnessId);
       if (!harnessId.success || native.id !== modelSelection.backendProfileId) {
         throw new Error(
           "A custom or historical provider session requires an explicit continuation identity.",

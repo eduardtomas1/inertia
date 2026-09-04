@@ -39,8 +39,8 @@ export interface AgentHarnessCoreCapabilities {
     terminalStatuses: readonly ["completed", "failed", "cancelled"];
   };
   session: {
-    resume: "native";
-    identity: "thread" | "session";
+    resume: "native" | "application-context";
+    identity: "thread" | "session" | "conversation";
   };
   cancellation: {
     graceful: "protocol-interrupt" | "process-tree-signal";
@@ -172,6 +172,21 @@ export interface KimiAcpHarnessCapabilities extends AgentHarnessCoreCapabilities
   };
 }
 
+export interface GeminiAcpHarnessCapabilities extends AgentHarnessCoreCapabilities {
+  extension: {
+    kind: "gemini-acp";
+    protocol: "acp-v1-json-rpc";
+    approvals: "native";
+    questions: "unavailable-in-current-acp";
+    plans: "mode-and-acp-updates";
+    reasoning: "native";
+    usage: "prompt-response-and-acp-updates";
+    images: "capability-negotiated";
+    authentication: "gemini-cli";
+    modelMetadata: "experimental-session-models";
+  };
+}
+
 export interface OpenCodeSdkHarnessCapabilities extends AgentHarnessCoreCapabilities {
   extension: {
     kind: "opencode-sdk";
@@ -195,6 +210,7 @@ export type AgentHarnessCapabilities =
   | OpenCodeCliHarnessCapabilities
   | ClaudeAgentSdkHarnessCapabilities
   | CursorAcpHarnessCapabilities
+  | GeminiAcpHarnessCapabilities
   | KimiAcpHarnessCapabilities
   | OpenCodeSdkHarnessCapabilities;
 
@@ -255,6 +271,7 @@ interface ProviderInteractiveHarnessExtensionEventBase {
 export type ProviderInteractiveHarnessExtensionEvent =
   | (ProviderInteractiveHarnessExtensionEventBase & { providerId: "claude"; extension: "claude-agent-sdk" })
   | (ProviderInteractiveHarnessExtensionEventBase & { providerId: "cursor"; extension: "cursor-acp" })
+  | (ProviderInteractiveHarnessExtensionEventBase & { providerId: "gemini"; extension: "gemini-acp" })
   | (ProviderInteractiveHarnessExtensionEventBase & { providerId: "kimi"; extension: "kimi-acp" })
   | (ProviderInteractiveHarnessExtensionEventBase & { providerId: "opencode"; extension: "opencode-sdk" });
 
@@ -294,7 +311,7 @@ export interface CodexAppServerRunExtension {
 }
 
 export interface ProviderInteractiveRunExtension {
-  kind: "claude-agent-sdk" | "cursor-acp" | "kimi-acp" | "opencode-sdk";
+  kind: "claude-agent-sdk" | "cursor-acp" | "gemini-acp" | "kimi-acp" | "opencode-sdk";
   respondToApproval: (requestId: string, decision: AgentApprovalDecision) => boolean;
   respondToInput: (requestId: string, answers: Record<string, string[]>) => boolean;
   /** Present only for transports with a persistent parent-session input stream. */
@@ -449,6 +466,7 @@ export function createAgentHarnessEmitter(
     rich: (event) => {
       if (providerId === "claude") emit({ ...base, providerId, type: "extension", extension: "claude-agent-sdk", event });
       else if (providerId === "cursor") emit({ ...base, providerId, type: "extension", extension: "cursor-acp", event });
+      else if (providerId === "gemini") emit({ ...base, providerId, type: "extension", extension: "gemini-acp", event });
       else if (providerId === "kimi") emit({ ...base, providerId, type: "extension", extension: "kimi-acp", event });
       else if (providerId === "opencode") emit({ ...base, providerId, type: "extension", extension: "opencode-sdk", event });
     },

@@ -10,7 +10,8 @@ import { parseCodexModels } from "../../src/server/codex-metadata";
 import { ProcessTreeTerminationError } from "../../src/server/process-lifecycle";
 import {
   ProviderMetadataCache,
-  providerMetadataScopeKey,
+  currentProviderMetadataScopeKey,
+  providerNativeMetadataScope,
   type PersistedProviderMetadata,
   validateProviderModels,
   validateProviderRateLimits,
@@ -50,6 +51,28 @@ function rateLimit(id: string, usedPercent = 25): ProviderRateLimit {
 }
 
 describe("provider metadata cache", () => {
+  it("constructs Gemini catalog scopes through the current provider maps", () => {
+    const scope = providerNativeMetadataScope("gemini", {
+      executable: "/opt/bin/gemini",
+      version: "0.4.0",
+      authState: "authenticated",
+    });
+    expect(scope).toMatchObject({
+      providerId: "gemini",
+      harnessId: "gemini-acp",
+      backendProfileId: "builtin:gemini",
+      modelId: "provider-catalog",
+    });
+
+    const cache = new ProviderMetadataCache();
+    cache.correlate("gemini", {
+      executable: scope.executable,
+      version: scope.version,
+      authState: scope.authState,
+    });
+    expect(cache.nativeScope("gemini")).toEqual(scope);
+  });
+
   it("accepts only structured provider-native Fast mode metadata", () => {
     expect(parseCodexModels({
       data: [{
@@ -455,10 +478,10 @@ describe("provider metadata cache", () => {
     expect(cache.currentScoped(revisedScope).models).toEqual([]);
     expect(cache.currentScoped(unauthenticatedScope).models).toEqual([]);
     expect(new Set([
-      providerMetadataScopeKey(kimiScope),
-      providerMetadataScopeKey(otherModelScope),
-      providerMetadataScopeKey(revisedScope),
-      providerMetadataScopeKey(unauthenticatedScope),
+      currentProviderMetadataScopeKey(kimiScope),
+      currentProviderMetadataScopeKey(otherModelScope),
+      currentProviderMetadataScopeKey(revisedScope),
+      currentProviderMetadataScopeKey(unauthenticatedScope),
     ]).size).toBe(4);
 
     await cache.metadataScoped(

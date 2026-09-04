@@ -123,6 +123,7 @@ type ProductionHarnessId =
   | "codex-app-server"
   | "claude-agent-sdk"
   | "cursor-acp"
+  | "gemini-acp"
   | "kimi-acp"
   | "opencode-sdk";
 
@@ -197,6 +198,7 @@ const PROVIDER_IDS = new Set<ProviderId>([
   "codex",
   "claude",
   "cursor",
+  "gemini",
   "kimi",
   "opencode",
 ]);
@@ -231,6 +233,7 @@ const CONTRACT_TESTS: Readonly<Record<ProductionHarnessId, string>> = {
   "codex-app-server": "tests/server/codex-app-server.test.ts",
   "claude-agent-sdk": "tests/server/claude-agent-sdk-harness.test.ts",
   "cursor-acp": "tests/server/cursor-acp-harness.test.ts",
+  "gemini-acp": "tests/server/gemini-acp-harness.test.ts",
   "kimi-acp": "tests/server/kimi-acp-harness.test.ts",
   "opencode-sdk": "tests/server/opencode-sdk-harness.test.ts",
 };
@@ -312,6 +315,29 @@ const DEFINITIONS: readonly ManifestDefinition[] = [
       "usage-tokens": "negotiated",
       "model-discovery": "negotiated",
       "subagent-create": "negotiated",
+    },
+  },
+  {
+    providerId: "gemini",
+    harnessId: "gemini-acp",
+    implementationRevision: 1,
+    protocolRevision: "acp-v1/sdk-1.4.0/gemini-cli-0.58",
+    bundledSdkVersion: "1.4.0",
+    support: {
+      "text-streaming": "native",
+      reasoning: "native",
+      "tool-activity": "native",
+      "file-changes": "native",
+      images: "negotiated",
+      plans: "negotiated",
+      approvals: "native",
+      "usage-tokens": "negotiated",
+      "host-tool-bridge": "host-exact-turn",
+      "provider-native-tools": "native",
+      "model-discovery": "negotiated",
+      cancellation: "native",
+      "process-cleanup": "host-exact-turn",
+      "maintenance-update": "negotiated",
     },
   },
   {

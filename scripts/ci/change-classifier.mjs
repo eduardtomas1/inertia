@@ -12,6 +12,7 @@ export const CHANGE_DOMAINS = Object.freeze([
   "provider_codex",
   "provider_claude",
   "provider_cursor",
+  "provider_gemini",
   "provider_kimi",
   "provider_opencode",
   "turn_session",
@@ -33,6 +34,7 @@ const PROVIDER_DOMAINS = new Set([
   "provider_codex",
   "provider_claude",
   "provider_cursor",
+  "provider_gemini",
   "provider_kimi",
   "provider_opencode",
   "turn_session",
@@ -81,6 +83,7 @@ function providerDomains(path) {
     ["codex", "provider_codex"],
     ["claude", "provider_claude"],
     ["cursor", "provider_cursor"],
+    ["gemini", "provider_gemini"],
     ["kimi", "provider_kimi"],
     ["opencode", "provider_opencode"],
   ];
@@ -163,7 +166,7 @@ function domainsForTestPath(path) {
 
   if (
     path.startsWith("tests/server/")
-    && /(?:codex|claude|cursor|kimi|opencode|provider|agent-harness|acp-)/iu
+    && /(?:codex|claude|cursor|gemini|kimi|opencode|provider|agent-harness|acp-)/iu
       .test(path)
   ) return { domains: providerDomains(path) };
   if (

@@ -15,7 +15,7 @@ import type {
   WorkspaceRun,
 } from "../../../shared/contracts";
 import {
-  legacyProviderIdForHarness,
+  providerIdForHarness,
   modelSelectionSchema,
   routeSupportsNativeFastModeIdentity,
 } from "../../../shared/model-routing";
@@ -777,7 +777,7 @@ export function isolatedRunSelection(
       ? "fast"
       : null;
   const supportedFastMode = expectedFastMode !== null
-    && legacyProviderIdForHarness(conversation.modelSelection.harnessId)
+    && providerIdForHarness(conversation.modelSelection.harnessId)
       === provider?.id
     && routeSupportsNativeFastModeIdentity(conversation.modelSelection)
     && model?.fastMode?.providerValue === expectedFastMode

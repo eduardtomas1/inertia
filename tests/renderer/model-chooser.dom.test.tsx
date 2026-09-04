@@ -13,7 +13,7 @@ import type { ComposerModelRoute } from "../../src/renderer/src/utils/modelChoos
 import type { ModelSearchRoute } from "../../src/renderer/src/utils/modelSearch";
 import {
   continuationIdentityForSelection,
-  nativeModelSelection,
+  providerNativeModelSelection,
 } from "../../src/shared/model-routing";
 
 function catalogRoute(index: number): ComposerModelRoute {
@@ -71,7 +71,7 @@ function deferred(): {
 
 function currentRoute(): ComposerModelRoute {
   const selection = {
-    ...nativeModelSelection({
+    ...providerNativeModelSelection({
       providerId: "codex",
       modelId: "team-alpha",
       alias: "Team Alpha",

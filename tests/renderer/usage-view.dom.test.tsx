@@ -218,6 +218,47 @@ describe("UsageView", () => {
       .toHaveAttribute("aria-pressed", "true");
   });
 
+  it("renders Gemini as an official provider card and chart series", async () => {
+    const withGemini = dashboard();
+    withGemini.totals.processedTokens = metric(2_700, 5, 6);
+    withGemini.providers = [...withGemini.providers, {
+      key: "gemini",
+      providerId: "gemini",
+      providerLabel: "Gemini",
+      requestCount: 1,
+      runtime: metric(5_000, 1, 1),
+      processedTokens: metric(600, 1, 1),
+    }];
+    withGemini.daily = withGemini.daily.map((day, index) => index === withGemini.daily.length - 1
+      ? {
+          ...day,
+          providers: [...day.providers, {
+            key: "gemini",
+            providerId: "gemini" as const,
+            providerLabel: "Gemini",
+            requestCount: 1,
+            runtime: metric(5_000, 1, 1),
+            processedTokens: metric(600, 1, 1),
+          }],
+        }
+      : day);
+    const view = render(<UsageView
+      status="online"
+      request={vi.fn(async () => result(withGemini))}
+    />);
+
+    await screen.findByRole("heading", { name: "Daily processed tokens" });
+    const card = view.container.querySelector(
+      '.usage-provider-summary article[data-provider="gemini"]',
+    );
+    expect(card).toHaveTextContent("Gemini");
+    expect(card?.querySelector('.usage-provider-mark[data-provider-id="gemini"]'))
+      .toHaveAttribute("data-provider-icon-kind", "official");
+    expect(view.container.querySelector(
+      '.usage-chart-series[data-provider="gemini"]',
+    )).toBeVisible();
+  });
+
   it("distinguishes a measured zero from unavailable provider tokens", async () => {
     const zero = dashboard();
     zero.totals.processedTokens = metric(0, 6, 6);

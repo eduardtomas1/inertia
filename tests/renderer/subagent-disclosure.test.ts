@@ -174,6 +174,15 @@ describe("inline delegated-agent disclosure", () => {
     expect(subagentRouteLabel(codex, [])).toBe(
       "Codex · historical harness unavailable",
     );
+
+    const gemini = trace({ providerId: "gemini" });
+    const geminiTurn = turn({
+      providerId: "gemini",
+      harnessId: "gemini-acp",
+    });
+    expect(subagentRouteLabel(gemini, [geminiTurn])).toBe("Gemini · ACP");
+    expect(canFollowUpSubagentTrace(gemini, [geminiTurn])).toBe(false);
+    expect(canStopSubagentTrace(gemini, [geminiTurn])).toBe(false);
   });
 
   it("keeps future provider states visibly unknown instead of relabeling them", () => {

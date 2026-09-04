@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { BackendCompatibilityProbeResult } from "../src/shared/backend-probe";
 import {
   MODEL_CAPABILITY_IDS,
-  nativeBackendProfile,
+  providerNativeBackendProfile,
   resolveHarnessBackendCompatibility,
   type KnownHarnessId,
   type ModelBackendProfile,
@@ -70,16 +70,18 @@ function successfulProbe(
 
 describe("harness-specific backend compatibility", () => {
   it("keeps all native harnesses available without claiming Cursor owns model selection", () => {
-    const matrix: Array<[KnownHarnessId, Parameters<typeof nativeBackendProfile>[0], string]> = [
+    const matrix: Array<[KnownHarnessId, Parameters<typeof providerNativeBackendProfile>[0], string]> = [
       ["codex-app-server", "codex", "native-backend"],
       ["claude-agent-sdk", "claude", "native-backend"],
       ["cursor-acp", "cursor", "cursor-managed"],
+      ["gemini-acp", "gemini", "gemini-managed"],
+      ["kimi-acp", "kimi", "kimi-managed"],
       ["opencode-sdk", "opencode", "opencode-native-catalog"],
     ];
     for (const [harnessId, providerId, reasonCode] of matrix) {
       expect(resolveHarnessBackendCompatibility(
         harnessId,
-        nativeBackendProfile(providerId),
+        providerNativeBackendProfile(providerId),
       )).toMatchObject({
         state: "verified",
         provenance: "built-in",
@@ -88,7 +90,7 @@ describe("harness-specific backend compatibility", () => {
     }
     expect(resolveHarnessBackendCompatibility(
       "cursor-acp",
-      nativeBackendProfile("cursor"),
+      providerNativeBackendProfile("cursor"),
     ).allowsModelSwitchWithinSession).toBe(false);
   });
 

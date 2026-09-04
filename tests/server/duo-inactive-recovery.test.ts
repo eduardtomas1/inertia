@@ -10,7 +10,7 @@ import type {
   ClientCommand,
   ProviderInfo,
 } from "../../src/shared/contracts";
-import { nativeModelSelection } from "../../src/shared/model-routing";
+import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import { RuntimeStore } from "../../src/server/database";
 import { ProviderTerminalResumeRegistry } from "../../src/server/provider/terminal-resume";
 import type {
@@ -271,7 +271,7 @@ function prepareLaunch(
   })) as never, new Date().toISOString(), comparisonId
     ? { plannedConversationId: comparisonId }
     : null);
-  const selection = nativeModelSelection({
+  const selection = providerNativeModelSelection({
     providerId: "codex",
     modelId: "gpt-test",
     alias: "GPT Test",

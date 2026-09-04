@@ -26,6 +26,7 @@ const PROVIDER_INSTALLATION_PACKAGES: Readonly<
   codex: "@openai/codex",
   claude: "@anthropic-ai/claude-code",
   cursor: null,
+  gemini: "@google/gemini-cli",
   kimi: "@moonshot-ai/kimi-code",
   opencode: "opencode-ai",
 };

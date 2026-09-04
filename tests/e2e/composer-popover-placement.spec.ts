@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { RuntimeStore } from "../../src/server/database";
 import {
   continuationIdentityForSelection,
-  nativeModelSelection,
+  providerNativeModelSelection,
 } from "../../src/shared/model-routing";
 import {
   PROMPT_STASH_CHANGED_EVENT,
@@ -74,7 +74,7 @@ test.beforeAll(async () => {
         workspaceDirectory,
         { recoverInterruptedRuns: false },
       );
-      const selection = nativeModelSelection({
+      const selection = providerNativeModelSelection({
         providerId: "codex",
         modelId: "model-a",
         reasoningEffort: "high",

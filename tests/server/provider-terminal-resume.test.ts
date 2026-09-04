@@ -260,6 +260,17 @@ describe("provider terminal resume availability", () => {
       kind: "unavailable",
       reason: expect.stringContaining("application-reconstructed context"),
     });
+
+    const sessionlessGemini = nativeConversation("gemini");
+    sessionlessGemini.providerSessionId = null;
+    expect(providerTerminalResumeAvailability(
+      sessionlessGemini,
+      readyProvider("gemini"),
+    )).toMatchObject({
+      kind: "unavailable",
+      resume: null,
+      reason: expect.stringContaining("application-reconstructed context"),
+    });
   });
 
   it("explains missing, non-native, unavailable, and unverified Cursor sessions", () => {

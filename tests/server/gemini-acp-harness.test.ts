@@ -1,5 +1,6 @@
 import {
   existsSync,
+  mkdirSync,
   readFileSync,
   realpathSync,
   symlinkSync,
@@ -173,18 +174,30 @@ describe("Gemini ACP data negotiation", () => {
       GEMINI_API_KEY: "gemini-secret",
       GOOGLE_API_KEY: "google-secret",
       GOOGLE_CLOUD_ACCESS_TOKEN: "cloud-token",
+      SERVICE_TOKEN: "inherited-service-token",
       GOOGLE_APPLICATION_CREDENTIALS: "/credential/path.json",
+      SESSION: "conversation-identity",
+      SSH_AUTH_SOCK: "/tmp/agent.sock",
       GEMINI_CLI_CUSTOM_HEADERS:
-        "Authorization: Bearer header-token, X-Trace: visible",
+        "Authorization: Bearer header-token, X-Trace: visible, X-Service-Key: service-secret",
       GOOGLE_CLOUD_PROJECT: "public-project",
     })).toEqual(expect.arrayContaining([
       "gemini-secret",
       "google-secret",
       "cloud-token",
-      "Authorization: Bearer header-token, X-Trace: visible",
+      "inherited-service-token",
+      "Authorization: Bearer header-token, X-Trace: visible, X-Service-Key: service-secret",
       "Bearer header-token",
       "header-token",
+      "visible",
+      "service-secret",
     ]));
+    expect(geminiEnvironmentSecretValues({
+      SESSION: "conversation-identity",
+      SSH_AUTH_SOCK: "/tmp/agent.sock",
+      AUTH_METHOD: "oauth-personal",
+      PWD: "/workspace",
+    })).toEqual([]);
     expect(geminiEnvironmentSecretValues({
       GOOGLE_APPLICATION_CREDENTIALS: "/credential/path.json",
       GOOGLE_CLOUD_PROJECT: "public-project",
@@ -193,13 +206,14 @@ describe("Gemini ACP data negotiation", () => {
       gemini_api_key: "windows-style-key",
       gOoGlE_cLoUd_AcCeSs_ToKeN: "windows-style-token",
       gemini_cli_custom_headers:
-        "Authorization: Bearer windows-header-token, X-Trace: visible",
+        "Authorization: Bearer windows-header-token, X-Trace: windows-trace",
     })).toEqual(expect.arrayContaining([
       "windows-style-key",
       "windows-style-token",
-      "Authorization: Bearer windows-header-token, X-Trace: visible",
+      "Authorization: Bearer windows-header-token, X-Trace: windows-trace",
       "Bearer windows-header-token",
       "windows-header-token",
+      "windows-trace",
     ]));
   });
 
@@ -841,6 +855,63 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     expect(JSON.stringify(result)).not.toContain(token);
   });
 
+  it("inventories dotenv credentials before accepting any Gemini output", async () => {
+    const root = portableFixtureRoot("gemini dotenv redaction");
+    roots.push(root);
+    const token = "dotenv-service-token-$-for-redaction";
+    writeFileSync(join(root, ".env"), `SERVICE_TOKEN=${token}\n`);
+    const command = writeNodeFlagExecutable(root, "gemini", `
+const fs = require("node:fs");
+const path = require("node:path");
+const readline = require("node:readline");
+const token = fs.readFileSync(path.join(process.cwd(), ".env"), "utf8").trim().split("=")[1];
+const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
+const chunk = (sessionUpdate, text) => send({ jsonrpc: "2.0", method: "session/update", params: {
+  sessionId: "gemini-dotenv-session",
+  update: { sessionUpdate, content: { type: "text", text } },
+} });
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: ${INITIALIZE_RESULT} });
+  if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: {
+    sessionId: "gemini-dotenv-session",
+    modes: { currentModeId: "default", availableModes: [{ id: "default", name: "Default" }] },
+  } });
+  if (message.method === "session/prompt") {
+    const split = Math.floor(token.length / 2);
+    chunk("agent_message_chunk", "assistant " + token.slice(0, split));
+    chunk("agent_message_chunk", token.slice(split));
+    chunk("agent_thought_chunk", "reasoning " + token);
+    process.stderr.write("diagnostic " + token.slice(0, split));
+    setImmediate(() => {
+      process.stderr.write(token.slice(split));
+      send({ jsonrpc: "2.0", id: message.id, error: {
+        code: -32000,
+        message: "provider exposed " + token,
+      } });
+    });
+  }
+});
+`);
+    const texts: string[] = [];
+    const thoughts: string[] = [];
+
+    const result = await managerFor(command).run(geminiInput(root, {
+      conversationId: "gemini-dotenv-redaction",
+    }), {
+      onText: ({ text }) => texts.push(text),
+      onReasoning: ({ text }) => thoughts.push(text),
+    });
+
+    const exposed = JSON.stringify({ result, texts, thoughts });
+    expect(result.status).toBe("failed");
+    expect(result.text).toBe("assistant [redacted]");
+    expect(thoughts.join("")).toBe("reasoning [redacted]");
+    expect(exposed).toContain("[redacted]");
+    expect(exposed).not.toContain(token);
+    expect(exposed).not.toContain(token.slice(0, Math.floor(token.length / 2)));
+  });
+
   it("fails the public result when Gemini host-tool cleanup is not confirmed", async () => {
     const root = portableFixtureRoot("gemini host MCP cleanup failure");
     roots.push(root);
@@ -1157,6 +1228,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   it("rejects unsafe native session loading before spawning Gemini", async () => {
     const root = portableFixtureRoot("gemini ACP native resume rejection");
     roots.push(root);
+    mkdirSync(join(root, ".env"));
     const marker = join(root, "spawned.txt");
     const command = writeNodeFlagExecutable(root, "gemini", `
 require("node:fs").writeFileSync(${JSON.stringify(marker)}, "spawned");
@@ -1654,6 +1726,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   it("reports context compaction as unsupported without starting Gemini", async () => {
     const root = portableFixtureRoot("gemini compaction unsupported");
     roots.push(root);
+    mkdirSync(join(root, ".env"));
     const manager = managerFor(join(root, "must-not-spawn"));
     await expect(manager.compact(geminiInput(root, {
       conversationId: "gemini-compact",

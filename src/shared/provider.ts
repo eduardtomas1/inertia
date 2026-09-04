@@ -2,3 +2,6 @@
 export type LegacyProviderId = "codex" | "claude" | "cursor" | "kimi" | "opencode";
 
 export type ProviderId = LegacyProviderId | "gemini";
+
+export const GEMINI_EXPLICIT_COMPACTION_UNAVAILABLE_REASON =
+  "Gemini ACP does not expose explicit context compaction; Gemini manages its own context automatically.";

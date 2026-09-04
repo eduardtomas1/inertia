@@ -238,7 +238,7 @@ export function ProviderAuthDialog({
     if (event.type === "terminal.exit" && event.terminalId === terminalIdRef.current) {
       terminalIdRef.current = null;
       terminalRef.current?.writeln(isGemini
-        ? "\r\n\x1b[2mGemini setup closed. Close this window to refresh provider status.\x1b[0m"
+        ? "\r\n\x1b[2mGemini setup closed. Your next Gemini run will verify authentication.\x1b[0m"
         : "\r\n\x1b[2mConnection flow finished. You can close this window.\x1b[0m");
       setSessionState(event.exitCode === 0 ? "finished" : "error");
       if (event.exitCode !== 0) setError("The provider ended the connection flow before it completed.");
@@ -385,10 +385,10 @@ export function ProviderAuthDialog({
               : sessionState === "ready"
                 ? isGemini ? "Complete setup in Gemini, then close" : "Waiting for sign-in"
                 : sessionState === "finished"
-                  ? isGemini ? "Gemini closed — refresh will verify setup" : "Connection flow complete"
+                  ? isGemini ? "Gemini closed — your next run will verify setup" : "Connection flow complete"
                   : error ?? "Connection needs attention"}
           </span>
-          <button type="button" className="secondary-button" onClick={closeDialog}>{isGemini ? "Close & refresh" : sessionState === "finished" ? "Done" : "Close"}</button>
+          <button type="button" className="secondary-button" onClick={closeDialog}>{isGemini ? "Close" : sessionState === "finished" ? "Done" : "Close"}</button>
         </footer>
       </section>
     </div>

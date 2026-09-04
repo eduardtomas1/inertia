@@ -99,6 +99,7 @@ export interface ComposerInputZoneProps {
   dismissSkills: () => void;
   slashMatch: RegExpExecArray | null;
   onCompactCommand: () => void;
+  compactUnavailableReason: string | null;
   compactNotice: {
     kind: "working" | "success" | "error";
     message: string;
@@ -156,6 +157,7 @@ export function ComposerInputZone({
   dismissSkills,
   slashMatch,
   onCompactCommand,
+  compactUnavailableReason,
   compactNotice,
   goalAvailable,
   onOpenGoal,
@@ -167,7 +169,16 @@ export function ComposerInputZone({
     { id: "plan", label: "Switch this chat into plan mode", section: "built-in", mode: "plan", disabled: false, disabledWhileRunning: true },
     { id: "build", label: "Switch this chat back to build mode", section: "built-in", mode: "build", disabled: false, disabledWhileRunning: true },
     { id: "resume", label: "Resume a provider chat from this folder", section: "provider", action: onOpenResume, disabled: false, disabledWhileRunning: false },
-    { id: "compact", label: "Compact this chat's provider context", section: "provider", action: onCompactCommand, disabled: false, disabledWhileRunning: true },
+    {
+      id: "compact",
+      label: compactUnavailableReason
+        ? `Unavailable: ${compactUnavailableReason}`
+        : "Compact this chat's provider context",
+      section: "provider",
+      action: onCompactCommand,
+      disabled: compactUnavailableReason !== null,
+      disabledWhileRunning: true,
+    },
   ];
   const matchingSlashCommands = slashMatch
     ? slashCommands.filter(({ id }) =>

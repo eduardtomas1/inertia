@@ -110,8 +110,13 @@ export async function observeGeminiProcessExit(
 export function geminiSpawnFailure(
   error: unknown,
   workspaceRoot: string,
+  sanitize?: (value: string) => string,
 ): ProviderRunFailure {
-  const detail = geminiErrorDetail(error, "Gemini ACP could not be started.");
+  const detail = geminiErrorDetail(
+    error,
+    "Gemini ACP could not be started.",
+    sanitize,
+  );
   const technicalDetail = sanitizeProviderActivityDetail(detail, {
     workspaceRoot,
     maxChars: MAX_TECHNICAL_DETAIL_CHARS,
@@ -229,7 +234,11 @@ export function geminiRuntimeFailure(
   };
 }
 
-export function geminiErrorDetail(error: unknown, fallback: string): string {
+export function geminiErrorDetail(
+  error: unknown,
+  fallback: string,
+  sanitize: (value: string) => string = (value) => value,
+): string {
   const parts: string[] = [];
   const seen = new Set<unknown>();
   let current: unknown = error;
@@ -253,7 +262,10 @@ export function geminiErrorDetail(error: unknown, fallback: string): string {
     }
     current = record.cause;
   }
-  return (parts.join("\n") || fallback).slice(0, MAX_ERROR_DETAIL_CHARS);
+  return sanitize(parts.join("\n") || fallback).slice(
+    0,
+    MAX_ERROR_DETAIL_CHARS,
+  );
 }
 
 function objectValue(value: unknown): Record<string, unknown> | undefined {

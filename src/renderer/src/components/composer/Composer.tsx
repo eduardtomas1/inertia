@@ -718,10 +718,9 @@ export const Composer = memo(function Composer({
     stopping,
   });
   const canSend = primaryAction === "send-ready";
-  const attachmentsAreImages = attachments.every(({ mimeType }) =>
-    chatAttachmentKind(mimeType) === "image");
-  const { compactNotice, clearCompactNotice, compact } = useComposerCompaction({
-    conversationId: conversation.id, message, canSend, running,
+  const attachmentsAreImages = attachments.every(({ mimeType }) => chatAttachmentKind(mimeType) === "image");
+  const { compactNotice, clearCompactNotice, compact, compactUnavailableReason } = useComposerCompaction({
+    conversationId: conversation.id, providerId: conversation.providerId, message, canSend, running,
     blocked: attachments.length > 0
       || Boolean(promptContext)
       || previewContextSelected
@@ -1142,6 +1141,7 @@ export const Composer = memo(function Composer({
           dismissSkills={() => dismissMenu("context-change")}
           slashMatch={slashMatch}
           onCompactCommand={() => void compact({ kind: "compact" })}
+          compactUnavailableReason={compactUnavailableReason}
           compactNotice={compactNotice}
           goalAvailable={Boolean(goal)}
           onOpenGoal={() => {

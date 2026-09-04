@@ -219,7 +219,7 @@ describe("ProviderAuthDialog browser handoff", () => {
       screen.getByText("Complete setup in Gemini, then close"),
     ).toBeInTheDocument());
     expect(screen.getByText(/paste the browser code here/iu)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Close & refresh" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Close" })).toBeEnabled();
 
     act(() => dialog.emit({
       type: "terminal.output",
@@ -239,7 +239,7 @@ describe("ProviderAuthDialog browser handoff", () => {
       terminalId: TERMINAL_ID,
       exitCode: 0,
     }));
-    expect(screen.getByText("Gemini closed — refresh will verify setup"))
+    expect(screen.getByText("Gemini closed — your next run will verify setup"))
       .toBeInTheDocument();
     expect(screen.queryByText("Connection flow complete")).toBeNull();
   });

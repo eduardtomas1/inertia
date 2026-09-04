@@ -91,18 +91,18 @@ export function providerTerminalResumeAvailability(
       }
     : null;
 
-  if (!conversation.providerSessionId) {
-    return {
-      kind: "unavailable",
-      resume: null,
-      reason: `No resumable ${providerLabel} CLI session is stored for this chat. It may be new or the saved provider session may be stale.`,
-    };
-  }
   if (conversation.providerId === "gemini") {
     return {
       kind: "unavailable",
       resume,
       reason: "Gemini conversations use bounded application-reconstructed context; Inertia does not expose Gemini ACP session IDs as provider-native terminal sessions.",
+    };
+  }
+  if (!conversation.providerSessionId) {
+    return {
+      kind: "unavailable",
+      resume: null,
+      reason: `No resumable ${providerLabel} CLI session is stored for this chat. It may be new or the saved provider session may be stale.`,
     };
   }
   if (!isProviderTerminalSessionId(conversation.providerSessionId)) {

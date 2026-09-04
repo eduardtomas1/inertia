@@ -519,6 +519,24 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     expect(release).not.toHaveBeenCalled();
   });
 
+  it("explains Gemini's unsupported compaction before its intentional sessionless state", async () => {
+    const { compact, dependencies, release } = fixture({
+      providerId: "gemini",
+      sessionId: null,
+    });
+    const handler = createConversationCompactionCommandHandler(dependencies);
+
+    await expect(handler({} as WebSocket, {
+      type: "conversation.compact",
+      requestId,
+      payload: { conversationId },
+    })).rejects.toThrow(
+      "Gemini ACP does not expose explicit context compaction",
+    );
+    expect(compact).not.toHaveBeenCalled();
+    expect(release).not.toHaveBeenCalled();
+  });
+
   it("rejects a reserved Duo judge before readiness or provider authority", async () => {
     const { compact, dependencies, release } = fixture({ duoReserved: true });
     const handler = createConversationCompactionCommandHandler(dependencies);

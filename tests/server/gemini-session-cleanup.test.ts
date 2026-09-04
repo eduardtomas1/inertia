@@ -3,9 +3,12 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  rmSync,
   symlinkSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -51,6 +54,25 @@ function sessionFile(
   return path;
 }
 
+function subagentFile(
+  directory: string,
+  sessionId: string,
+  options: {
+    fileName?: string;
+    kind?: string;
+    projectHash?: string;
+  } = {},
+): string {
+  const path = join(directory, options.fileName ?? `${sessionId}.jsonl`);
+  writeFileSync(path, `${JSON.stringify({
+    sessionId,
+    projectHash: options.projectHash ?? "fixture",
+    kind: options.kind ?? "subagent",
+    startTime: "2026-09-04T10:30:00.000Z",
+  })}\n`);
+  return path;
+}
+
 afterEach(async () => {
   await Promise.all(roots.splice(0).map(removePortableFixture));
 });
@@ -69,7 +91,7 @@ describe("Gemini ACP provider-owned session cleanup", () => {
 
     const descendants = join(chats, acpId);
     mkdirSync(descendants, { recursive: true });
-    sessionFile(descendants, childId, childId);
+    subagentFile(descendants, childId);
     for (const id of [parentId, acpId, childId]) {
       mkdirSync(join(project, "tool-outputs", `session-${id}`), {
         recursive: true,
@@ -129,6 +151,26 @@ describe("Gemini ACP provider-owned session cleanup", () => {
     expect(existsSync(path)).toBe(true);
   });
 
+  it("fails closed when an owned session identity has duplicate chat records", async () => {
+    const { home, cwd, project } = fixture();
+    const sessionId = "56565656-5656-4656-8656-565656565656";
+    const first = sessionFile(join(project, "chats"), sessionId, "first");
+    const duplicate = sessionFile(
+      join(project, "chats"),
+      sessionId,
+      "duplicate",
+    );
+
+    await expect(cleanupGeminiSessionArtifacts({
+      cwd,
+      environment: { GEMINI_CLI_HOME: home },
+      sessionIds: [sessionId],
+      requiredSessionIds: [sessionId],
+    })).rejects.toThrow(/ambiguous owned chat records/iu);
+    expect(existsSync(first)).toBe(true);
+    expect(existsSync(duplicate)).toBe(true);
+  });
+
   it("does not follow a chat-file symlink or accept crafted session identities", async () => {
     const { root, home, cwd, project } = fixture();
     const sessionId = "66666666-6666-4666-8666-666666666666";
@@ -153,6 +195,240 @@ describe("Gemini ACP provider-owned session cleanup", () => {
       cwd,
       environment: { GEMINI_CLI_HOME: home },
       sessionIds: ["../outside"],
+    })).rejects.toThrow(/invalid session identity/iu);
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "rejects a symlinked provider-owned .gemini root without touching its target",
+    async () => {
+      const root = mkdtempSync(join(tmpdir(), "inertia-gemini-cleanup-link-"));
+      roots.push(root);
+      const home = join(root, "home");
+      const cwd = join(root, "workspace");
+      const outsideGemini = join(root, "outside-gemini");
+      const project = join(outsideGemini, "tmp", "workspace-project");
+      mkdirSync(home, { recursive: true });
+      mkdirSync(join(project, "chats"), { recursive: true });
+      mkdirSync(cwd, { recursive: true });
+      writeFileSync(join(project, ".project_root"), `${cwd}\n`);
+      const sessionId = "90909090-9090-4090-8090-909090909090";
+      const chat = sessionFile(join(project, "chats"), sessionId);
+      symlinkSync(outsideGemini, join(home, ".gemini"), "dir");
+
+      await expect(cleanupGeminiSessionArtifacts({
+        cwd,
+        environment: { GEMINI_CLI_HOME: home },
+        sessionIds: [sessionId],
+        requiredSessionIds: [sessionId],
+      })).rejects.toThrow(/unsafe storage directory/iu);
+      expect(readFileSync(chat, "utf8")).toContain(sessionId);
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "allows an explicitly configured home boundary to resolve through a symlink",
+    async () => {
+      const root = mkdtempSync(join(tmpdir(), "inertia-gemini-cleanup-link-"));
+      roots.push(root);
+      const actualHome = join(root, "actual-home");
+      const configuredHome = join(root, "configured-home");
+      const cwd = join(root, "workspace");
+      const project = join(
+        actualHome,
+        ".gemini",
+        "tmp",
+        "workspace-project",
+      );
+      mkdirSync(join(project, "chats"), { recursive: true });
+      mkdirSync(cwd, { recursive: true });
+      writeFileSync(join(project, ".project_root"), `${cwd}\n`);
+      const sessionId = "90919191-9091-4091-8091-909191919091";
+      const chat = sessionFile(join(project, "chats"), sessionId);
+      symlinkSync(actualHome, configuredHome, "dir");
+
+      await cleanupGeminiSessionArtifacts({
+        cwd,
+        environment: { GEMINI_CLI_HOME: configuredHome },
+        sessionIds: [sessionId],
+        requiredSessionIds: [sessionId],
+      });
+      expect(existsSync(chat)).toBe(false);
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "rejects a symlinked Gemini temp root without touching its target",
+    async () => {
+      const root = mkdtempSync(join(tmpdir(), "inertia-gemini-cleanup-link-"));
+      roots.push(root);
+      const home = join(root, "home");
+      const cwd = join(root, "workspace");
+      const outsideTemp = join(root, "outside-temp");
+      const project = join(outsideTemp, "workspace-project");
+      mkdirSync(join(home, ".gemini"), { recursive: true });
+      mkdirSync(join(project, "chats"), { recursive: true });
+      mkdirSync(cwd, { recursive: true });
+      writeFileSync(join(project, ".project_root"), `${cwd}\n`);
+      const sessionId = "91919191-9191-4191-8191-919191919191";
+      const chat = sessionFile(join(project, "chats"), sessionId);
+      symlinkSync(outsideTemp, join(home, ".gemini", "tmp"), "dir");
+
+      await expect(cleanupGeminiSessionArtifacts({
+        cwd,
+        environment: { GEMINI_CLI_HOME: home },
+        sessionIds: [sessionId],
+        requiredSessionIds: [sessionId],
+      })).rejects.toThrow(/unsafe storage directory/iu);
+      expect(readFileSync(chat, "utf8")).toContain(sessionId);
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "rejects a symlinked chats directory without touching its target",
+    async () => {
+      const { root, home, cwd, project } = fixture();
+      const sessionId = "92929292-9292-4292-8292-929292929292";
+      const outsideChats = join(root, "outside-chats");
+      mkdirSync(outsideChats, { recursive: true });
+      const chat = sessionFile(outsideChats, sessionId);
+      rmSync(join(project, "chats"), { recursive: true });
+      symlinkSync(outsideChats, join(project, "chats"), "dir");
+
+      await expect(cleanupGeminiSessionArtifacts({
+        cwd,
+        environment: { GEMINI_CLI_HOME: home },
+        sessionIds: [sessionId],
+        requiredSessionIds: [sessionId],
+      })).rejects.toThrow(/unsafe storage directory/iu);
+      expect(readFileSync(chat, "utf8")).toContain(sessionId);
+    },
+  );
+
+  it.skipIf(process.platform === "win32").each([
+    "logs",
+    "tool-outputs",
+  ])("rejects a symlinked %s ancestor before deleting any record", async (name) => {
+    const { root, home, cwd, project } = fixture();
+    const sessionId = "93939393-9393-4393-8393-939393939393";
+    const chat = sessionFile(join(project, "chats"), sessionId);
+    const outside = join(root, `outside-${name}`);
+    mkdirSync(outside, { recursive: true });
+    const artifact = name === "logs"
+      ? join(outside, `session-${sessionId}.jsonl`)
+      : join(outside, `session-${sessionId}`, "tool.txt");
+    mkdirSync(name === "logs" ? outside : join(outside, `session-${sessionId}`), {
+      recursive: true,
+    });
+    writeFileSync(artifact, "keep\n");
+    symlinkSync(outside, join(project, name), "dir");
+
+    await expect(cleanupGeminiSessionArtifacts({
+      cwd,
+      environment: { GEMINI_CLI_HOME: home },
+      sessionIds: [sessionId],
+      requiredSessionIds: [sessionId],
+    })).rejects.toThrow(/unsafe storage directory/iu);
+    expect(readFileSync(chat, "utf8")).toContain(sessionId);
+    expect(readFileSync(artifact, "utf8")).toBe("keep\n");
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "rejects a FIFO ownership marker without blocking for a writer",
+    async () => {
+      const { home, cwd, project } = fixture();
+      const marker = join(project, ".project_root");
+      unlinkSync(marker);
+      const created = spawnSync("mkfifo", [marker], { stdio: "ignore" });
+      expect(created.status).toBe(0);
+
+      await expect(cleanupGeminiSessionArtifacts({
+        cwd,
+        environment: { GEMINI_CLI_HOME: home },
+        sessionIds: ["94949494-9494-4494-8494-949494949494"],
+      })).rejects.toThrow(/invalid ownership marker/iu);
+    },
+  );
+
+  it("does not let corrupt descendant metadata target reserved or unrelated artifacts", async () => {
+    const { home, cwd, project } = fixture();
+    const parentId = "inertia-99999999-9999-4999-8999-999999999999";
+    const acpId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const wrongNameId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const wrongKindId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    const wrongProjectId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+    const nonUuidId = "not-a-uuid-child-id";
+    const childId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+    const nestedId = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+    const chats = join(project, "chats");
+    sessionFile(chats, parentId);
+    sessionFile(chats, acpId);
+    const descendants = join(chats, acpId);
+    mkdirSync(descendants, { recursive: true });
+
+    subagentFile(descendants, "tool-outputs");
+    subagentFile(descendants, wrongNameId, { fileName: "misnamed.jsonl" });
+    subagentFile(descendants, wrongKindId, { kind: "main" });
+    subagentFile(descendants, wrongProjectId, { projectHash: "other-project" });
+    subagentFile(descendants, nonUuidId);
+    subagentFile(descendants, childId);
+    const nestedDescendants = join(chats, childId);
+    mkdirSync(nestedDescendants, { recursive: true });
+    subagentFile(nestedDescendants, nestedId);
+
+    const toolOutputsMarker = join(project, "tool-outputs", "unrelated.txt");
+    mkdirSync(join(project, "tool-outputs"), { recursive: true });
+    writeFileSync(toolOutputsMarker, "keep\n");
+    for (const id of [
+      wrongNameId,
+      wrongKindId,
+      wrongProjectId,
+      nonUuidId,
+      childId,
+      nestedId,
+    ]) {
+      mkdirSync(join(project, id), { recursive: true });
+      writeFileSync(join(project, id, "keep.txt"), "keep\n");
+    }
+
+    await cleanupGeminiSessionArtifacts({
+      cwd,
+      environment: { GEMINI_CLI_HOME: home },
+      sessionIds: [parentId, acpId],
+      requiredSessionIds: [parentId, acpId],
+    });
+
+    expect(readFileSync(toolOutputsMarker, "utf8")).toBe("keep\n");
+    expect(existsSync(join(project, childId))).toBe(false);
+    for (const id of [
+      wrongNameId,
+      wrongKindId,
+      wrongProjectId,
+      nonUuidId,
+      nestedId,
+    ]) {
+      expect(readFileSync(join(project, id, "keep.txt"), "utf8"))
+        .toBe("keep\n");
+    }
+  });
+
+  it.each([
+    "chats",
+    "CHECKPOINTS",
+    "context_trace",
+    "degraded-blobs",
+    "logs",
+    "memory",
+    "plans",
+    "shell_history",
+    "tasks",
+    "tracker",
+    "TOOL-OUTPUTS",
+  ])("rejects the reserved project artifact identity %s", async (sessionId) => {
+    const { home, cwd } = fixture();
+    await expect(cleanupGeminiSessionArtifacts({
+      cwd,
+      environment: { GEMINI_CLI_HOME: home },
+      sessionIds: [sessionId],
     })).rejects.toThrow(/invalid session identity/iu);
   });
 

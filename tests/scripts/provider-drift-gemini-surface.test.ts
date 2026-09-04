@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import { inspectGeminiCliAcpSurface } from "../../scripts/provider-drift-gemini-surface.mjs";
 
-const GEMINI_ACP_SOURCE = `
+const GEMINI_ACP_SOURCE = String.raw`
 const AGENT_METHODS = { session_set_model: "session/set_model" };
 const z = { literal: (value) => value };
 const legacyPlan = { sessionUpdate: z.literal("plan") };
@@ -57,12 +57,68 @@ function promptResponse() {
   };
 }
 
+const GOOGLE_OAUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth";
+const OAUTH_CLIENT_ID =
+  "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com";
+const MANUAL_REDIRECT = "https://codeassist.google.com/authcode";
+const OAUTH_SCOPE = [
+  "https://www.googleapis.com/auth/cloud-platform",
+  "https://www.googleapis.com/auth/userinfo.email",
+  "https://www.googleapis.com/auth/userinfo.profile",
+];
+const LINE = /(?:^|^)\s*(?:export\s+)?([\w.-]+)(?:\s*=\s*?|:\s+?)([^#\r\n]+)?/gm;
+function parseDotenv(src) {
+  const lines = src.toString().replace(/\r\n?/gm, "\n");
+  let match;
+  while ((match = LINE.exec(lines)) != null) {
+    let value = match[2] || "";
+    value = value.trim();
+    const maybeQuote = value[0];
+    value = value.replace(/^(['\"\\x60])([\\s\\S]*)\\1$/gm, "$2");
+    if (maybeQuote === '"') {
+      value = value.replace(/\\n/g, "\n");
+      value = value.replace(/\\r/g, "\r");
+    }
+  }
+}
+function geminiHome() {
+  return process.env["GEMINI_CLI_HOME"] || os.homedir();
+}
+function findEnvFile(startDir, isTrusted, ignoreLocalEnv) {
+  let currentDir = path.resolve(startDir);
+  const candidates = [
+    path.join(currentDir, GEMINI_DIR, ".env"),
+    path.join(currentDir, ".env"),
+    path.join(homedir(), GEMINI_DIR, ".env"),
+    path.join(homedir(), ".env"),
+  ];
+  currentDir = path.dirname(currentDir);
+  return { candidates, isTrusted, ignoreLocalEnv };
+}
+function loadEnvironment(envFileContent, isTrusted) {
+  const parsedEnv = dotenv.parse(envFileContent);
+  for (const key in parsedEnv) {
+    let value = parsedEnv[key];
+    if (!isTrusted && !AUTH_ENV_VAR_WHITELIST.includes(key)) continue;
+    if (!isTrusted) value = sanitizeEnvVar(value);
+    if (!Object.hasOwn(process.env, key)) process.env[key] = value;
+  }
+}
+
 void AGENT_METHODS;
 void legacyPlan;
 void contextUsage;
 void newSession;
 void Agent;
 void promptResponse;
+void GOOGLE_OAUTH_ENDPOINT;
+void OAUTH_CLIENT_ID;
+void MANUAL_REDIRECT;
+void OAUTH_SCOPE;
+void parseDotenv;
+void geminiHome;
+void findEnvFile;
+void loadEnvironment;
 `;
 
 const APPROVAL_MODE_SOURCE = `
@@ -145,6 +201,46 @@ describe("Gemini provider drift artifact inspection", () => {
       'sessionUpdate: z.literal("usage_update")',
       'sessionUpdate: z.literal("context_update")',
       '"usage_update" session update variant',
+    ],
+    [
+      '"https://accounts.google.com/o/oauth2/v2/auth"',
+      '"https://accounts.google.com/signin/oauth"',
+      "Google OAuth authorization endpoint",
+    ],
+    [
+      '"681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com"',
+      '"replacement.apps.googleusercontent.com"',
+      "Gemini OAuth client ID",
+    ],
+    [
+      '"https://codeassist.google.com/authcode"',
+      '"https://codeassist.google.com/replacement"',
+      "Gemini manual OAuth redirect",
+    ],
+    [
+      '"https://www.googleapis.com/auth/userinfo.profile"',
+      '"https://www.googleapis.com/auth/userinfo.openid"',
+      "Gemini OAuth scope set",
+    ],
+    [
+      'process.env["GEMINI_CLI_HOME"]',
+      'process.env["REPLACEMENT_HOME"]',
+      "Gemini CLI home override",
+    ],
+    [
+      "(?:export\\s+)?([\\w.-]+)",
+      "([A-Z_]+)",
+      "dotenv 16 parser grammar",
+    ],
+    [
+      'path.join(currentDir, GEMINI_DIR, ".env")',
+      'path.join(currentDir, GEMINI_DIR, ".secrets")',
+      "Gemini dotenv file discovery",
+    ],
+    [
+      "AUTH_ENV_VAR_WHITELIST.includes(key)",
+      "AUTH_ENV_VAR_WHITELIST.has(key)",
+      "Gemini dotenv environment policy",
     ],
   ])("identifies missing %s evidence", async (needle, replacement, expectedDiagnostic) => {
     const root = await createFixture({ source: GEMINI_ACP_SOURCE.replaceAll(needle, replacement) });

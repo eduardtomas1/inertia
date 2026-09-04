@@ -1,8 +1,10 @@
 import { constants as fsConstants } from "node:fs";
 import {
+  type FileHandle,
   lstat,
   open,
   readdir,
+  realpath,
   rm,
   unlink,
 } from "node:fs/promises";
@@ -10,7 +12,9 @@ import { homedir } from "node:os";
 import {
   isAbsolute,
   join,
+  relative,
   resolve,
+  sep,
   win32,
 } from "node:path";
 
@@ -25,6 +29,38 @@ const MAX_SESSION_ID_CHARS = 200;
 const MAX_MARKER_BYTES = 16 * 1024;
 const MAX_METADATA_LINE_BYTES = 64 * 1024;
 const SESSION_FILE_PATTERN = /^session-[^-].*\.jsonl?$/u;
+const SUBAGENT_SESSION_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+const RESERVED_PROJECT_ARTIFACT_NAMES = new Set([
+  "chats",
+  "checkpoints",
+  "context_trace",
+  "degraded-blobs",
+  "logs",
+  "memory",
+  "plans",
+  "shell_history",
+  "tasks",
+  "tracker",
+  "tool-outputs",
+]);
+
+interface GeminiSessionMetadata {
+  sessionId: string;
+  projectHash: string | null;
+  kind: string | null;
+}
+
+interface DirectoryAuthority {
+  path: string;
+  device: number | bigint;
+  inode: number | bigint;
+}
+
+interface OptionalDirectoryAuthority {
+  path: string;
+  authority: DirectoryAuthority | null;
+}
 
 export interface GeminiSessionCleanupRequest {
   cwd: string;
@@ -51,27 +87,57 @@ export async function cleanupGeminiSessionArtifacts(
     (request.requiredSessionIds ?? []).map(validateSessionId),
   );
   if (sessionIds.length === 0) return;
+  if (sessionIds.length > MAX_SESSION_IDENTITIES) {
+    throw new Error("Gemini session cleanup exceeded its session-identity bound.");
+  }
   if ([...requiredSessionIds].some((sessionId) => !sessionIds.includes(sessionId))) {
     throw new Error(
       "Gemini session cleanup received an unowned required session identity.",
     );
   }
 
-  const geminiHome = geminiDataDirectory(
+  const geminiHomePath = geminiDataDirectory(
     request.environment,
     request.cwd,
     platform,
   );
-  const tempRoot = join(geminiHome, "tmp");
+  // The configured home is a user-selected boundary and can itself resolve
+  // through a platform-managed symlink. The provider-owned `.gemini` directory
+  // and every descendant are separately lstat/realpath-attested below.
+  const geminiHome = await optionalDirectoryAuthority(geminiHomePath);
+  const geminiHomeDirectory = geminiHome.authority;
+  if (!geminiHomeDirectory) {
+    if (requiredSessionIds.size > 0) {
+      throw new Error(
+        "Gemini session cleanup could not attest the workspace storage directory.",
+      );
+    }
+    return;
+  }
+  const tempRoot = await childDirectoryAuthority(geminiHomeDirectory, "tmp");
+  const tempRootDirectory = tempRoot.authority;
+  if (!tempRootDirectory) {
+    if (requiredSessionIds.size > 0) {
+      throw new Error(
+        "Gemini session cleanup could not attest the workspace storage directory.",
+      );
+    }
+    return;
+  }
   const projectDirectory = await ownedProjectDirectory(
-    tempRoot,
+    geminiHomeDirectory,
+    tempRootDirectory,
     request.cwd,
     platform,
   );
   if (!projectDirectory) {
     if (
       requiredSessionIds.size > 0
-      || await unattestedArtifactsExist(tempRoot, sessionIds)
+      || await unattestedArtifactsExist(
+        geminiHomeDirectory,
+        tempRootDirectory,
+        sessionIds,
+      )
     ) {
       throw new Error(
         "Gemini session cleanup could not attest the workspace storage directory.",
@@ -80,12 +146,16 @@ export async function cleanupGeminiSessionArtifacts(
     return;
   }
 
-  const chatsDirectory = join(projectDirectory, "chats");
+  const chatsDirectory = await childDirectoryAuthority(
+    projectDirectory,
+    "chats",
+  );
   const discoveredIds = new Set(sessionIds);
-  const attestedIds = await matchingAttestedChatIds(
+  const attestedSessions = await matchingAttestedChats(
     chatsDirectory,
     discoveredIds,
   );
+  const attestedIds = new Set(attestedSessions.keys());
   if ([...requiredSessionIds].some((sessionId) => !attestedIds.has(sessionId))) {
     throw new Error(
       "Gemini session cleanup could not attest every expected chat record.",
@@ -95,22 +165,60 @@ export async function cleanupGeminiSessionArtifacts(
     chatsDirectory,
     sessionIds,
     discoveredIds,
+    attestedSessions,
   );
-  await deleteAttestedChatFiles(chatsDirectory, discoveredIds);
+
+  // Validate every fixed ancestor before the first mutation. Re-attestation
+  // immediately before each unlink/rm below then detects replacements during
+  // cleanup without ever following a provider-created directory symlink.
+  const logsDirectory = await childDirectoryAuthority(projectDirectory, "logs");
+  const toolOutputsDirectory = await childDirectoryAuthority(
+    projectDirectory,
+    "tool-outputs",
+  );
+  await assertDirectoryChain(
+    geminiHomeDirectory,
+    tempRootDirectory,
+    projectDirectory,
+  );
+  await assertOptionalDirectoryAuthority(chatsDirectory, projectDirectory);
+  await assertOptionalDirectoryAuthority(logsDirectory, projectDirectory);
+  await assertOptionalDirectoryAuthority(toolOutputsDirectory, projectDirectory);
+
+  await deleteAttestedChatFiles(
+    geminiHomeDirectory,
+    tempRootDirectory,
+    projectDirectory,
+    chatsDirectory,
+    discoveredIds,
+  );
 
   for (const sessionId of discoveredIds) {
-    await removeExactArtifact(join(
+    await removeChildArtifact(
+      geminiHomeDirectory,
+      tempRootDirectory,
       projectDirectory,
-      "logs",
+      logsDirectory,
       `session-${sessionId}.jsonl`,
-    ));
-    await removeExactArtifact(join(
+    );
+    await removeChildArtifact(
+      geminiHomeDirectory,
+      tempRootDirectory,
       projectDirectory,
-      "tool-outputs",
+      toolOutputsDirectory,
       `session-${sessionId}`,
-    ));
-    await removeExactArtifact(join(projectDirectory, sessionId));
-    await removeExactArtifact(join(chatsDirectory, sessionId));
+    );
+    await removeExactArtifact(
+      join(projectDirectory.path, sessionId),
+      [geminiHomeDirectory, tempRootDirectory, projectDirectory],
+    );
+    await removeChildArtifact(
+      geminiHomeDirectory,
+      tempRootDirectory,
+      projectDirectory,
+      chatsDirectory,
+      sessionId,
+    );
   }
 
   const remaining = await matchingAttestedChatIds(
@@ -154,41 +262,52 @@ function geminiDataDirectory(
   if (!home || home.includes("\0")) {
     throw new Error("Gemini session cleanup could not resolve its data directory.");
   }
-  const absoluteHome = isAbsolute(home) ? home : resolve(cwd, home);
+  const absoluteHome = platformIsAbsolute(home, platform)
+    ? home
+    : platform === "win32"
+      ? win32.resolve(cwd, home)
+      : resolve(cwd, home);
   return join(absoluteHome, GEMINI_DIRECTORY);
 }
 
 async function ownedProjectDirectory(
-  tempRoot: string,
+  geminiHome: DirectoryAuthority,
+  tempRoot: DirectoryAuthority,
   cwd: string,
   platform: NodeJS.Platform,
-): Promise<string | null> {
-  const entries = await readdir(tempRoot, { withFileTypes: true }).catch(
-    (error: NodeJS.ErrnoException) => {
-      if (error.code === "ENOENT") return [];
-      throw error;
-    },
-  );
+): Promise<DirectoryAuthority | null> {
+  await assertDirectoryAuthority(geminiHome);
+  await assertDirectoryAuthority(tempRoot, geminiHome);
+  const entries = await readdir(tempRoot.path, { withFileTypes: true });
   if (entries.length > MAX_PROJECT_DIRECTORIES) {
     throw new Error("Gemini session cleanup exceeded its project-directory bound.");
   }
   const wanted = normalizedPath(cwd, platform);
-  const matches: string[] = [];
+  const matches: DirectoryAuthority[] = [];
   for (const entry of entries) {
     if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
-    const directory = join(tempRoot, entry.name);
+    const directory = await directoryAuthority(
+      join(tempRoot.path, entry.name),
+      tempRoot,
+    );
     const marker = await readBoundedFile(
-      join(directory, ".project_root"),
+      join(directory.path, ".project_root"),
       MAX_MARKER_BYTES,
     ).catch((error: NodeJS.ErrnoException) => {
       if (error.code === "ENOENT" || error.code === "ELOOP") return null;
       throw error;
     });
+    const markerPath = marker?.trim() ?? "";
     if (
       marker !== null
-      && normalizedPath(marker.trim(), platform) === wanted
+      && markerPath.length > 0
+      && !markerPath.includes("\0")
+      && platformIsAbsolute(markerPath, platform)
+      && normalizedPath(markerPath, platform) === wanted
     ) matches.push(directory);
   }
+  await assertDirectoryAuthority(geminiHome);
+  await assertDirectoryAuthority(tempRoot, geminiHome);
   if (matches.length > 1) {
     throw new Error("Gemini session cleanup found ambiguous workspace storage.");
   }
@@ -202,44 +321,174 @@ function normalizedPath(value: string, platform: NodeJS.Platform): string {
   return platform === "win32" ? absolute.toLowerCase() : absolute;
 }
 
+function platformIsAbsolute(
+  value: string,
+  platform: NodeJS.Platform,
+): boolean {
+  return platform === "win32" ? win32.isAbsolute(value) : isAbsolute(value);
+}
+
+function pathIsContained(parent: string, candidate: string): boolean {
+  const offset = relative(parent, candidate);
+  return offset === ""
+    || (
+      offset !== ".."
+      && !offset.startsWith(`..${sep}`)
+      && !isAbsolute(offset)
+    );
+}
+
+async function optionalDirectoryAuthority(
+  path: string,
+  parent?: DirectoryAuthority,
+): Promise<OptionalDirectoryAuthority> {
+  const info = await lstat(path).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  });
+  if (!info) return { path, authority: null };
+  if (!info.isDirectory() || info.isSymbolicLink()) {
+    throw new Error("Gemini session cleanup found an unsafe storage directory.");
+  }
+  const canonicalPath = await realpath(path);
+  const confirmed = await lstat(path);
+  if (
+    !confirmed.isDirectory()
+    || confirmed.isSymbolicLink()
+    || confirmed.dev !== info.dev
+    || confirmed.ino !== info.ino
+  ) {
+    throw new Error("Gemini session cleanup observed a changing storage directory.");
+  }
+  if (parent && !pathIsContained(parent.path, canonicalPath)) {
+    throw new Error("Gemini session cleanup found a storage path outside its owner.");
+  }
+  return {
+    path,
+    authority: {
+      path: canonicalPath,
+      device: info.dev,
+      inode: info.ino,
+    },
+  };
+}
+
+async function directoryAuthority(
+  path: string,
+  parent?: DirectoryAuthority,
+): Promise<DirectoryAuthority> {
+  const observed = await optionalDirectoryAuthority(path, parent);
+  if (!observed.authority) {
+    throw new Error("Gemini session cleanup lost a storage directory.");
+  }
+  return observed.authority;
+}
+
+async function childDirectoryAuthority(
+  parent: DirectoryAuthority,
+  name: string,
+): Promise<OptionalDirectoryAuthority> {
+  return await optionalDirectoryAuthority(join(parent.path, name), parent);
+}
+
+async function assertDirectoryAuthority(
+  expected: DirectoryAuthority,
+  parent?: DirectoryAuthority,
+): Promise<void> {
+  const observed = await directoryAuthority(expected.path, parent);
+  if (
+    observed.path !== expected.path
+    || observed.device !== expected.device
+    || observed.inode !== expected.inode
+  ) {
+    throw new Error("Gemini session cleanup observed a changing storage directory.");
+  }
+}
+
+async function assertOptionalDirectoryAuthority(
+  expected: OptionalDirectoryAuthority,
+  parent: DirectoryAuthority,
+): Promise<void> {
+  await assertDirectoryAuthority(parent);
+  const observed = await optionalDirectoryAuthority(expected.path, parent);
+  if (!expected.authority && !observed.authority) return;
+  if (
+    !expected.authority
+    || !observed.authority
+    || expected.authority.path !== observed.authority.path
+    || expected.authority.device !== observed.authority.device
+    || expected.authority.inode !== observed.authority.inode
+  ) {
+    throw new Error("Gemini session cleanup observed a changing storage directory.");
+  }
+}
+
+async function assertDirectoryChain(
+  geminiHome: DirectoryAuthority,
+  tempRoot: DirectoryAuthority,
+  project: DirectoryAuthority,
+  child?: OptionalDirectoryAuthority,
+): Promise<void> {
+  await assertDirectoryAuthority(geminiHome);
+  await assertDirectoryAuthority(tempRoot, geminiHome);
+  await assertDirectoryAuthority(project, tempRoot);
+  if (child) await assertOptionalDirectoryAuthority(child, project);
+}
+
 async function collectSubagentSessionIds(
-  chatsDirectory: string,
+  chatsDirectory: OptionalDirectoryAuthority,
   parentIds: readonly string[],
   result: Set<string>,
+  attestedSessions: ReadonlyMap<string, GeminiSessionMetadata>,
 ): Promise<void> {
-  const pending = [...parentIds];
-  for (let index = 0; index < pending.length; index += 1) {
-    const parentId = pending[index];
-    const directory = join(chatsDirectory, parentId);
-    const info = await lstat(directory).catch((error: NodeJS.ErrnoException) => {
-      if (error.code === "ENOENT") return null;
-      throw error;
+  if (!chatsDirectory.authority) return;
+  for (const sessionId of parentIds) {
+    const projectHash = attestedSessions.get(sessionId)?.projectHash;
+    if (!projectHash) continue;
+    const directory = await childDirectoryAuthority(
+      chatsDirectory.authority,
+      sessionId,
+    );
+    if (!directory.authority) continue;
+    const entries = await readdir(directory.authority.path, {
+      withFileTypes: true,
     });
-    if (!info || !info.isDirectory() || info.isSymbolicLink()) continue;
-    const entries = await readdir(directory, { withFileTypes: true });
     if (entries.length > MAX_CHAT_FILES) {
       throw new Error("Gemini session cleanup exceeded its subagent-file bound.");
     }
     for (const entry of entries) {
       if (!entry.isFile() || entry.isSymbolicLink()) continue;
-      const sessionId = await sessionIdFromMetadataFile(join(directory, entry.name));
-      if (!sessionId || result.has(sessionId)) continue;
+      const metadata = await sessionMetadataFromFile(
+        join(directory.authority.path, entry.name),
+      );
+      if (
+        !metadata
+        || !SUBAGENT_SESSION_ID_PATTERN.test(metadata.sessionId)
+        || metadata.kind !== "subagent"
+        || metadata.projectHash !== projectHash
+        || entry.name !== `${metadata.sessionId}.jsonl`
+        || result.has(metadata.sessionId)
+      ) continue;
       if (result.size >= MAX_SESSION_IDENTITIES) {
         throw new Error("Gemini session cleanup exceeded its session-identity bound.");
       }
-      result.add(sessionId);
-      pending.push(sessionId);
+      result.add(metadata.sessionId);
     }
+    await assertOptionalDirectoryAuthority(directory, chatsDirectory.authority);
   }
 }
 
 async function deleteAttestedChatFiles(
-  chatsDirectory: string,
+  geminiHome: DirectoryAuthority,
+  tempRoot: DirectoryAuthority,
+  projectDirectory: DirectoryAuthority,
+  chatsDirectory: OptionalDirectoryAuthority,
   sessionIds: ReadonlySet<string>,
 ): Promise<void> {
   const files = await chatFileNames(chatsDirectory);
+  if (!chatsDirectory.authority) return;
   for (const file of files) {
-    const path = join(chatsDirectory, file);
+    const path = join(chatsDirectory.authority.path, file);
     const sessionId = await sessionIdFromMetadataFile(path);
     if (!sessionId || !sessionIds.has(sessionId)) continue;
     const before = await lstat(path);
@@ -255,29 +504,63 @@ async function deleteAttestedChatFiles(
     ) {
       throw new Error("Gemini session cleanup observed a changing chat record.");
     }
+    await assertDirectoryChain(
+      geminiHome,
+      tempRoot,
+      projectDirectory,
+      chatsDirectory,
+    );
     await unlink(path);
   }
 }
 
 async function matchingAttestedChatIds(
-  chatsDirectory: string,
+  chatsDirectory: OptionalDirectoryAuthority,
   sessionIds: ReadonlySet<string>,
 ): Promise<Set<string>> {
-  const remaining = new Set<string>();
+  return new Set((await matchingAttestedChats(
+    chatsDirectory,
+    sessionIds,
+  )).keys());
+}
+
+async function matchingAttestedChats(
+  chatsDirectory: OptionalDirectoryAuthority,
+  sessionIds: ReadonlySet<string>,
+): Promise<Map<string, GeminiSessionMetadata>> {
+  const remaining = new Map<string, GeminiSessionMetadata>();
   for (const file of await chatFileNames(chatsDirectory)) {
-    const sessionId = await sessionIdFromMetadataFile(join(chatsDirectory, file));
-    if (sessionId && sessionIds.has(sessionId)) remaining.add(sessionId);
+    if (!chatsDirectory.authority) break;
+    const metadata = await sessionMetadataFromFile(join(
+      chatsDirectory.authority.path,
+      file,
+    ));
+    if (metadata && sessionIds.has(metadata.sessionId)) {
+      if (remaining.has(metadata.sessionId)) {
+        throw new Error(
+          "Gemini session cleanup found ambiguous owned chat records.",
+        );
+      }
+      remaining.set(metadata.sessionId, metadata);
+    }
   }
   return remaining;
 }
 
-async function chatFileNames(chatsDirectory: string): Promise<string[]> {
-  const entries = await readdir(chatsDirectory, { withFileTypes: true }).catch(
-    (error: NodeJS.ErrnoException) => {
-      if (error.code === "ENOENT") return [];
-      throw error;
-    },
-  );
+async function chatFileNames(
+  chatsDirectory: OptionalDirectoryAuthority,
+): Promise<string[]> {
+  if (!chatsDirectory.authority) {
+    const observed = await optionalDirectoryAuthority(chatsDirectory.path);
+    if (observed.authority) {
+      throw new Error("Gemini session cleanup observed a changing storage directory.");
+    }
+    return [];
+  }
+  await assertDirectoryAuthority(chatsDirectory.authority);
+  const entries = await readdir(chatsDirectory.authority.path, {
+    withFileTypes: true,
+  });
   if (entries.length > MAX_CHAT_FILES) {
     throw new Error("Gemini session cleanup exceeded its chat-file bound.");
   }
@@ -289,6 +572,12 @@ async function chatFileNames(chatsDirectory: string): Promise<string[]> {
 }
 
 async function sessionIdFromMetadataFile(path: string): Promise<string | null> {
+  return (await sessionMetadataFromFile(path))?.sessionId ?? null;
+}
+
+async function sessionMetadataFromFile(
+  path: string,
+): Promise<GeminiSessionMetadata | null> {
   const line = await readFirstLine(path, MAX_METADATA_LINE_BYTES).catch(
     (error: NodeJS.ErrnoException) => {
       if (error.code === "ENOENT" || error.code === "ELOOP") return null;
@@ -304,7 +593,21 @@ async function sessionIdFromMetadataFile(path: string): Promise<string | null> {
       || !("sessionId" in parsed)
       || typeof parsed.sessionId !== "string"
     ) return null;
-    return validateSessionId(parsed.sessionId);
+    const projectHash = "projectHash" in parsed
+      && typeof parsed.projectHash === "string"
+      && parsed.projectHash.length > 0
+      && parsed.projectHash.length <= 1_024
+      && !parsed.projectHash.includes("\0")
+      ? parsed.projectHash
+      : null;
+    const kind = "kind" in parsed && typeof parsed.kind === "string"
+      ? parsed.kind
+      : null;
+    return {
+      sessionId: validateSessionId(parsed.sessionId),
+      projectHash,
+      kind,
+    };
   } catch {
     return null;
   }
@@ -312,18 +615,22 @@ async function sessionIdFromMetadataFile(path: string): Promise<string | null> {
 
 async function readFirstLine(path: string, maxBytes: number): Promise<string> {
   const noFollow = "O_NOFOLLOW" in fsConstants ? FILE_OPEN_NO_FOLLOW : 0;
-  const handle = await open(path, fsConstants.O_RDONLY | noFollow);
+  const nonBlocking = "O_NONBLOCK" in fsConstants
+    ? fsConstants.O_NONBLOCK
+    : 0;
+  const handle = await open(
+    path,
+    fsConstants.O_RDONLY | noFollow | nonBlocking,
+  );
   try {
     const info = await handle.stat();
     if (!info.isFile() || info.size < 1) return "";
-    const length = Math.min(info.size, maxBytes + 1);
-    const buffer = Buffer.alloc(length);
-    const { bytesRead } = await handle.read(buffer, 0, length, 0);
-    const newline = buffer.subarray(0, bytesRead).indexOf(0x0a);
-    if (newline < 0 && bytesRead > maxBytes) {
+    const contents = await readDescriptorBytes(handle, maxBytes + 1);
+    const newline = contents.indexOf(0x0a);
+    if (newline < 0 && contents.byteLength > maxBytes) {
       throw new Error("Gemini session metadata exceeded its bounded first line.");
     }
-    return buffer.subarray(0, newline < 0 ? bytesRead : newline).toString("utf8");
+    return contents.subarray(0, newline < 0 ? undefined : newline).toString("utf8");
   } finally {
     await handle.close();
   }
@@ -331,24 +638,97 @@ async function readFirstLine(path: string, maxBytes: number): Promise<string> {
 
 async function readBoundedFile(path: string, maxBytes: number): Promise<string> {
   const noFollow = "O_NOFOLLOW" in fsConstants ? FILE_OPEN_NO_FOLLOW : 0;
-  const handle = await open(path, fsConstants.O_RDONLY | noFollow);
+  const nonBlocking = "O_NONBLOCK" in fsConstants
+    ? fsConstants.O_NONBLOCK
+    : 0;
+  const handle = await open(
+    path,
+    fsConstants.O_RDONLY | noFollow | nonBlocking,
+  );
   try {
     const info = await handle.stat();
     if (!info.isFile() || info.size > maxBytes) {
       throw new Error("Gemini session cleanup found an invalid ownership marker.");
     }
-    return await handle.readFile("utf8");
+    const contents = await readDescriptorBytes(handle, maxBytes + 1);
+    if (contents.byteLength > maxBytes) {
+      throw new Error("Gemini session cleanup found an oversized ownership marker.");
+    }
+    return contents.toString("utf8");
   } finally {
     await handle.close();
   }
 }
 
-async function removeExactArtifact(path: string): Promise<void> {
+async function readDescriptorBytes(
+  handle: FileHandle,
+  maxBytes: number,
+): Promise<Buffer> {
+  const buffer = Buffer.alloc(maxBytes);
+  let offset = 0;
+  while (offset < buffer.byteLength) {
+    const { bytesRead } = await handle.read(
+      buffer,
+      offset,
+      buffer.byteLength - offset,
+      offset,
+    );
+    if (bytesRead === 0) break;
+    offset += bytesRead;
+  }
+  return buffer.subarray(0, offset);
+}
+
+async function removeChildArtifact(
+  geminiHome: DirectoryAuthority,
+  tempRoot: DirectoryAuthority,
+  projectDirectory: DirectoryAuthority,
+  parent: OptionalDirectoryAuthority,
+  name: string,
+): Promise<void> {
+  await assertDirectoryChain(
+    geminiHome,
+    tempRoot,
+    projectDirectory,
+    parent,
+  );
+  if (!parent.authority) return;
+  await removeExactArtifact(
+    join(parent.authority.path, name),
+    [geminiHome, tempRoot, projectDirectory, parent.authority],
+  );
+}
+
+async function removeExactArtifact(
+  path: string,
+  ancestors: readonly DirectoryAuthority[],
+): Promise<void> {
+  for (let index = 0; index < ancestors.length; index += 1) {
+    await assertDirectoryAuthority(
+      ancestors[index]!,
+      index > 0 ? ancestors[index - 1] : undefined,
+    );
+  }
   const info = await lstat(path).catch((error: NodeJS.ErrnoException) => {
     if (error.code === "ENOENT") return null;
     throw error;
   });
   if (!info) return;
+  const confirmed = await lstat(path);
+  if (
+    confirmed.dev !== info.dev
+    || confirmed.ino !== info.ino
+    || confirmed.isDirectory() !== info.isDirectory()
+    || confirmed.isSymbolicLink() !== info.isSymbolicLink()
+  ) {
+    throw new Error("Gemini session cleanup observed a changing artifact.");
+  }
+  for (let index = 0; index < ancestors.length; index += 1) {
+    await assertDirectoryAuthority(
+      ancestors[index]!,
+      index > 0 ? ancestors[index - 1] : undefined,
+    );
+  }
   if (info.isSymbolicLink() || !info.isDirectory()) {
     await unlink(path);
     return;
@@ -364,36 +744,52 @@ async function pathExists(path: string): Promise<boolean> {
 }
 
 async function unattestedArtifactsExist(
-  tempRoot: string,
+  geminiHome: DirectoryAuthority,
+  tempRoot: DirectoryAuthority,
   sessionIds: ReadonlySet<string> | readonly string[],
 ): Promise<boolean> {
   const wanted = sessionIds instanceof Set ? sessionIds : new Set(sessionIds);
-  const entries = await readdir(tempRoot, { withFileTypes: true }).catch(
-    (error: NodeJS.ErrnoException) => {
-      if (error.code === "ENOENT") return [];
-      throw error;
-    },
-  );
+  await assertDirectoryAuthority(geminiHome);
+  await assertDirectoryAuthority(tempRoot, geminiHome);
+  const entries = await readdir(tempRoot.path, { withFileTypes: true });
   if (entries.length > MAX_PROJECT_DIRECTORIES) {
     throw new Error("Gemini session cleanup exceeded its project-directory bound.");
   }
   for (const entry of entries) {
     if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
-    const project = join(tempRoot, entry.name);
-    if ((await matchingAttestedChatIds(join(project, "chats"), wanted)).size > 0) {
+    const project = await directoryAuthority(
+      join(tempRoot.path, entry.name),
+      tempRoot,
+    );
+    const chats = await childDirectoryAuthority(project, "chats");
+    const logs = await childDirectoryAuthority(project, "logs");
+    const toolOutputs = await childDirectoryAuthority(project, "tool-outputs");
+    if ((await matchingAttestedChatIds(chats, wanted)).size > 0) {
       return true;
     }
     for (const sessionId of wanted) {
       for (const artifact of [
-        join(project, "logs", `session-${sessionId}.jsonl`),
-        join(project, "tool-outputs", `session-${sessionId}`),
-        join(project, sessionId),
-        join(project, "chats", sessionId),
+        ...(logs.authority
+          ? [join(logs.authority.path, `session-${sessionId}.jsonl`)]
+          : []),
+        ...(toolOutputs.authority
+          ? [join(toolOutputs.authority.path, `session-${sessionId}`)]
+          : []),
+        join(project.path, sessionId),
+        ...(chats.authority
+          ? [join(chats.authority.path, sessionId)]
+          : []),
       ]) {
         if (await pathExists(artifact)) return true;
       }
     }
+    await assertDirectoryChain(geminiHome, tempRoot, project);
+    await assertOptionalDirectoryAuthority(chats, project);
+    await assertOptionalDirectoryAuthority(logs, project);
+    await assertOptionalDirectoryAuthority(toolOutputs, project);
   }
+  await assertDirectoryAuthority(geminiHome);
+  await assertDirectoryAuthority(tempRoot, geminiHome);
   return false;
 }
 
@@ -402,6 +798,7 @@ function validateSessionId(value: string): string {
     value.length < 8
     || value.length > MAX_SESSION_ID_CHARS
     || !/^[A-Za-z0-9_-]+$/u.test(value)
+    || RESERVED_PROJECT_ARTIFACT_NAMES.has(value.toLowerCase())
   ) throw new Error("Gemini session cleanup received an invalid session identity.");
   return value;
 }

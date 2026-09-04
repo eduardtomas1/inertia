@@ -40,7 +40,10 @@ import {
   type ProviderHostToolMcpSession,
 } from "./host-tool-mcp-http";
 import { acpHostMcpServers } from "./host-tool-mcp-config";
-import { GeminiAcpSecretRedactor } from "./gemini-acp-redaction";
+import {
+  GeminiAcpSecretRedactor,
+  geminiDotenvSecretValues,
+} from "./gemini-acp-redaction";
 import {
   cleanupGeminiSessionArtifacts,
   type GeminiSessionCleanupRequest,
@@ -198,17 +201,6 @@ function startGeminiRun(
     options.input.turnId ?? null,
     options.input.cwd,
   );
-  const resultText = new CappedProviderBuffer(MAX_RESULT_TEXT_CHARS);
-  const stderr = new CappedProviderBuffer(MAX_STDERR_CHARS);
-  const secretRedactor = new GeminiAcpSecretRedactor(options.environment);
-  const promptPreparationAbort = new AbortController();
-  const approvals = new Map<string, PendingApproval>();
-  const toolActivities = new Map<string, ToolActivity>();
-  const turnEvidence: TurnEvidence = { assistantText: false };
-  const contextUsage: GeminiContextUsage = {
-    usedTokens: null,
-    maxTokens: null,
-  };
   if (options.input.operation?.kind === "compact") {
     return failedGeminiRun(conversationId, {
       reason: "provider-error",
@@ -226,6 +218,108 @@ function startGeminiRun(
       terminalEvent: "session/load:unsupported",
     }, emitter);
   }
+  let activeRun: AgentHarnessRun | undefined;
+  let cancelBeforeStart = false;
+  emitter.status("starting");
+
+  const result = geminiDotenvSecretValues(
+    options.input.cwd,
+    options.environment,
+  ).then(
+    (dotenvSecrets): Promise<ProviderRunResult> | ProviderRunResult => {
+      if (cancelBeforeStart) {
+        emitter.status("cancelled");
+        return {
+          providerId: "gemini",
+          conversationId,
+          status: "cancelled",
+          text: "",
+          textTruncated: false,
+          exitCode: null,
+          signal: null,
+          cleanupConfirmed: true,
+        };
+      }
+      activeRun = startPreparedGeminiRun(
+        options,
+        terminateProcessTree,
+        controlRpcTimeoutMs,
+        createHostMcpSession,
+        cleanupSessionArtifacts,
+        dotenvSecrets,
+        emitter,
+      );
+      return activeRun.result;
+    },
+    (): Promise<ProviderRunResult> => {
+      const failure: ProviderRunFailure = {
+        reason: "provider-error",
+        message: "Gemini environment files could not be inspected safely.",
+        phase: "configuration",
+        terminalEvent: "environment/dotenv",
+      };
+      return failedGeminiRun(
+        conversationId,
+        failure,
+        emitter,
+      ).result;
+    },
+  );
+
+  const cancel = (force: boolean): void => {
+    if (activeRun) {
+      activeRun.cancel(force);
+      return;
+    }
+    if (cancelBeforeStart && !force) return;
+    cancelBeforeStart = true;
+    emitter.status("cancelling");
+  };
+
+  return {
+    harnessId: "gemini-acp",
+    providerId: "gemini",
+    result,
+    cancel,
+    extension: {
+      kind: "gemini-acp",
+      respondToApproval: (requestId, decision) => {
+        const extension = activeRun?.extension;
+        return extension?.kind === "gemini-acp"
+          ? extension.respondToApproval(requestId, decision)
+          : false;
+      },
+      respondToInput: () => false,
+    },
+  };
+}
+
+function startPreparedGeminiRun(
+  options: AgentHarnessStartOptions,
+  terminateProcessTree: ProcessTreeTerminator | undefined,
+  controlRpcTimeoutMs: number,
+  createHostMcpSession: (
+    runtime: ProviderHostToolRuntime,
+  ) => ProviderHostToolMcpSession,
+  cleanupSessionArtifacts: (
+    request: GeminiSessionCleanupRequest,
+  ) => Promise<void>,
+  dotenvSecrets: readonly string[],
+  emitter: ReturnType<typeof createAgentHarnessEmitter>,
+): AgentHarnessRun {
+  const conversationId = options.input.conversationId ?? options.input.threadId ?? "";
+  const resultText = new CappedProviderBuffer(MAX_RESULT_TEXT_CHARS);
+  const stderr = new CappedProviderBuffer(MAX_STDERR_CHARS);
+  const secretRedactor = new GeminiAcpSecretRedactor(options.environment);
+  secretRedactor.addSecrets(dotenvSecrets);
+  const promptPreparationAbort = new AbortController();
+  const approvals = new Map<string, PendingApproval>();
+  const toolActivities = new Map<string, ToolActivity>();
+  const turnEvidence: TurnEvidence = { assistantText: false };
+  const contextUsage: GeminiContextUsage = {
+    usedTokens: null,
+    maxTokens: null,
+  };
   // Gemini CLI initializes one outer CLI chat before ACP session/new creates
   // its separate protocol chat. Own both exact identities so neither local
   // transcript survives this application-reconstructed session boundary.
@@ -333,7 +427,6 @@ function startGeminiRun(
       }
     });
 
-  emitter.status("starting");
   try {
     const invocation = geminiAcpProcessInvocation(
       options.executable,
@@ -354,7 +447,11 @@ function startGeminiRun(
       stdio: ["pipe", "pipe", "pipe"],
     }));
   } catch (error) {
-    const failure = geminiSpawnFailure(error, options.input.cwd);
+    const failure = geminiSpawnFailure(
+      error,
+      options.input.cwd,
+      (value) => redactGeminiPayload(value),
+    );
     return failedGeminiRun(
       conversationId,
       failure,
@@ -363,9 +460,21 @@ function startGeminiRun(
   }
   child.once("error", (error) => {
     processError = error;
-    stderr.append(geminiErrorDetail(error, "Gemini ACP process error."));
+    stderr.append(secretRedactor.stderrChunk(
+      geminiErrorDetail(
+        error,
+        "Gemini ACP process error.",
+        (value) => redactGeminiPayload(value),
+      ),
+    ));
   });
-  child.stderr.on("data", (chunk: Buffer) => stderr.append(chunk.toString("utf8")));
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk: string) => {
+    stderr.append(secretRedactor.stderrChunk(chunk));
+  });
+  child.stderr.once("end", () => {
+    stderr.append(secretRedactor.finishStderr());
+  });
   child.stdin.on("error", () => { /* The ACP SDK surfaces connection failures. */ });
 
   const wireGuard = new BoundedGeminiJsonLineTransform(
@@ -538,22 +647,26 @@ function startGeminiRun(
       return finish("cancelled");
     }
     await observeGeminiProcessExit(child);
+    stderr.append(secretRedactor.finishStderr());
     const diagnostic = redactGeminiPayload(stderr.toString().trim());
-    const safeError = redactGeminiPayload(geminiErrorDetail(
+    const safeError = geminiErrorDetail(
       callbackError ?? error,
       "Gemini ACP stopped unexpectedly.",
-    ));
+      (value) => redactGeminiPayload(value),
+    );
     const safeWireError = wireError
-      ? new Error(redactGeminiPayload(geminiErrorDetail(
+      ? new Error(geminiErrorDetail(
           wireError,
           "Gemini ACP wire error.",
-        )))
+          (value) => redactGeminiPayload(value),
+        ))
       : undefined;
     const safeProcessError = processError
-      ? new Error(redactGeminiPayload(geminiErrorDetail(
+      ? new Error(geminiErrorDetail(
           processError,
           "Gemini ACP process error.",
-        )))
+          (value) => redactGeminiPayload(value),
+        ))
       : undefined;
     const failure = geminiRuntimeFailure(safeError, {
       child,

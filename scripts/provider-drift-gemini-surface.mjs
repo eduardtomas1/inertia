@@ -186,6 +186,55 @@ function updateVariant(text, variant) {
   ).test(text);
 }
 
+function stringLiteral(text, value) {
+  return text.includes(`"${value}"`) || text.includes(`'${value}'`);
+}
+
+function oauthScopeSet(text) {
+  return [
+    "https://www.googleapis.com/auth/cloud-platform",
+    "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/userinfo.profile",
+  ].every((scope) => stringLiteral(text, scope));
+}
+
+function geminiHomeOverride(text) {
+  return nearby(text, "GEMINI_CLI_HOME", 2_000, (window) => (
+    /\bprocess\w*\.env\b/u.test(window)
+    && /\bos\w*\.homedir\s*\(/u.test(window)
+  ));
+}
+
+function dotenvParserGrammar(text) {
+  return nearby(text, "LINE =", 2_500, (window) => (
+    window.includes(String.raw`(?:export\s+)?([\w.-]+)(?:\s*=\s*?|:\s+?)`)
+    && /\bLINE\.exec\s*\(/u.test(window)
+    && /\bvalue\s*=\s*value\.trim\s*\(\)/u.test(window)
+    && /\bmaybeQuote\b/u.test(window)
+    && window.includes(String.raw`value.replace(/\\n/g`)
+    && window.includes(String.raw`value.replace(/\\r/g`)
+  ));
+}
+
+function dotenvDiscovery(text) {
+  return nearby(text, "function findEnvFile", 5_000, (window) => (
+    /\bcurrentDir\b/u.test(window)
+    && /\bcurrentDir\s*,\s*GEMINI_DIR\s*,\s*["']\.env["']/u.test(window)
+    && /\bcurrentDir\s*,\s*["']\.env["']/u.test(window)
+    && /\bhomedir\s*\(\)/u.test(window)
+    && /\bdirname\s*\(/u.test(window)
+  ));
+}
+
+function dotenvEnvironmentPolicy(text) {
+  return nearby(text, "function loadEnvironment", 5_000, (window) => (
+    /\bdotenv\.parse\s*\(/u.test(window)
+    && /\bAUTH_ENV_VAR_WHITELIST\.includes\s*\(\s*key\s*\)/u.test(window)
+    && /\bsanitizeEnvVar\s*\(\s*value\s*\)/u.test(window)
+    && /\bObject\.hasOwn\s*\(\s*process\w*\.env\s*,\s*key\s*\)/u.test(window)
+  ));
+}
+
 function contractState() {
   return [
     {
@@ -232,6 +281,52 @@ function contractState() {
       label: '"usage_update" session update variant',
       matched: false,
       match: (text) => updateVariant(text, "usage_update"),
+    },
+    {
+      label: "Google OAuth authorization endpoint",
+      matched: false,
+      match: (text) => stringLiteral(
+        text,
+        "https://accounts.google.com/o/oauth2/v2/auth",
+      ),
+    },
+    {
+      label: "Gemini OAuth client ID",
+      matched: false,
+      match: (text) => stringLiteral(
+        text,
+        "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com",
+      ),
+    },
+    {
+      label: "Gemini manual OAuth redirect",
+      matched: false,
+      match: (text) => stringLiteral(text, "https://codeassist.google.com/authcode"),
+    },
+    {
+      label: "Gemini OAuth scope set",
+      matched: false,
+      match: oauthScopeSet,
+    },
+    {
+      label: "Gemini CLI home override",
+      matched: false,
+      match: geminiHomeOverride,
+    },
+    {
+      label: "dotenv 16 parser grammar",
+      matched: false,
+      match: dotenvParserGrammar,
+    },
+    {
+      label: "Gemini dotenv file discovery",
+      matched: false,
+      match: dotenvDiscovery,
+    },
+    {
+      label: "Gemini dotenv environment policy",
+      matched: false,
+      match: dotenvEnvironmentPolicy,
     },
   ];
 }

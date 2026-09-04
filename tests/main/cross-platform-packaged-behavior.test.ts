@@ -466,6 +466,11 @@ describe("cross-platform packaged behavior contract", () => {
     expect(vitest).toContain("maxWorkers: isWindowsCi ? 1 : undefined");
     expect(vitest).not.toContain("INERTIA_VITEST_MAX_WORKERS");
     expect(vitest).toContain("testTimeout: isWindowsCi ? 30_000 : 15_000");
+    expect(vitest).toContain('name: "runtime-integration"');
+    expect(vitest.match(/"tests\/server\/runtime\.test\.ts"/gu)).toHaveLength(2);
+    expect(vitest).toContain("maxWorkers: 1");
+    expect(vitest).toContain("fileParallelism: false");
+    expect(vitest).toContain("groupOrder: 1");
 
     // Specs that pin a window to the primary display share one machine
     // resource, so they are discovered rather than listed. Separate workflow

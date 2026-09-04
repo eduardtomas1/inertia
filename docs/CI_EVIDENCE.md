@@ -162,10 +162,10 @@ new test cannot receive a zero-cost shard assignment. Manifest input is bounded
 by path, count, file size, duration, shard count, and successful-run provenance.
 
 On the current working tree, deterministic longest-processing-time partitioning
-projects four shard weights of 532.500s, 532.500s, 531.776s, and 532.499s across
-647 discovered tests. The measured/unknown file counts are respectively
-148+13, 149+13, 149+12, and 150+13. The projected maximum is therefore about
-8m 53s, 20.9% below the observed 11m 13s Vitest maximum. This is a scheduling
+projects four shard weights of 533.393s, 533.393s, 533.392s, and 533.392s across
+648 discovered tests. The measured/unknown file counts are respectively
+148+13, 149+13, 150+12, and 149+14. The projected maximum is therefore about
+8m 53s, 20.7% below the observed 11m 13s Vitest maximum. This is a scheduling
 projection, not a hosted-run result; install time, runner variance, and queue
 time are excluded.
 

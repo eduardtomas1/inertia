@@ -37,12 +37,38 @@ function retainMaintenance(
 export function createProviderInfoRefresh(
   dependencies: ProviderInfoRefreshDependencies,
 ): RefreshProviderInfo {
-  const refreshCore: RefreshProviderInfo = async (
-    providerId,
+  const owners = new Map<ProviderInfo["id"], symbol>();
+  const claim = (providerId?: ProviderInfo["id"]): symbol => {
+    const owner = Symbol("provider-info-refresh");
+    const providerIds = providerId
+      ? [providerId]
+      : dependencies.providerInfo().map(({ id }) => id);
+    for (const id of providerIds) owners.set(id, owner);
+    return owner;
+  };
+  const replaceOwned = (
+    owner: symbol,
+    candidates: readonly ProviderInfo[],
+  ): boolean => {
+    const byId = new Map(candidates.map((candidate) => [candidate.id, candidate]));
+    let replaced = false;
+    const next = dependencies.providerInfo().map((current) => {
+      const candidate = byId.get(current.id);
+      if (!candidate || owners.get(current.id) !== owner) return current;
+      replaced = true;
+      return retainMaintenance(current, candidate);
+    });
+    if (replaced) dependencies.replaceProviderInfo(next);
+    return replaced;
+  };
+
+  const refreshCore = async (
+    owner: symbol,
+    providerId?: ProviderInfo["id"],
     refreshEnvironment = false,
     forceMetadata = false,
-    verificationAuthority,
-  ) => {
+    verificationAuthority?: ProviderInstallationVerificationAuthority,
+  ): Promise<void> => {
     if (!dependencies.enabled) return;
     if (verificationAuthority && providerId !== verificationAuthority.providerId) {
       throw new Error(
@@ -92,23 +118,17 @@ export function createProviderInfoRefresh(
           ? { installationVerificationAuthority: verificationAuthority }
           : {}),
       });
-      const previous = dependencies.providerInfo().find(
-        ({ id }) => id === providerId,
-      );
-      const detected = retainMaintenance(previous, providerSnapshot(
+      const detected = providerSnapshot(
         detection,
         dependencies.providers.cachedMetadata(detection.provider.id),
         dependencies.providers.providerCapabilityContract(detection.provider.id),
-      ));
-      dependencies.replaceProviderInfo(dependencies.providerInfo().map(
-        (current) => current.id === providerId ? detected : current,
-      ));
+      );
+      if (!replaceOwned(owner, [detected])) return;
       if (!dependencies.isClosed()) dependencies.broadcastSnapshot();
       if (!detection.canRun) return;
-      const next = retainMaintenance(previous, await enrichedSnapshot(detection));
-      dependencies.replaceProviderInfo(dependencies.providerInfo().map(
-        (current) => current.id === providerId ? next : current,
-      ));
+      const next = await enrichedSnapshot(detection);
+      if (!replaceOwned(owner, [next])) return;
+      if (!dependencies.isClosed()) dependencies.broadcastSnapshot();
     } else {
       const detections = await dependencies.providers.detectAll({
         cwd: dependencies.defaultWorkspacePath,
@@ -116,34 +136,33 @@ export function createProviderInfoRefresh(
         refreshEnvironment,
         signal: dependencies.lifetimeSignal,
       });
-      const previous = new Map(dependencies.providerInfo().map(
-        (provider) => [provider.id, provider],
-      ));
-      dependencies.replaceProviderInfo(detections.map((detection) => (
-        retainMaintenance(previous.get(detection.provider.id), providerSnapshot(
+      const detected = detections.map((detection) => (
+        providerSnapshot(
           detection,
           dependencies.providers.cachedMetadata(detection.provider.id),
           dependencies.providers.providerCapabilityContract(detection.provider.id),
-        ))
-      )));
-      if (!dependencies.isClosed()) dependencies.broadcastSnapshot();
-      dependencies.replaceProviderInfo(await Promise.all(detections.map(
-        async (detection) => retainMaintenance(
-          previous.get(detection.provider.id),
-          await enrichedSnapshot(detection),
-        ),
-      )));
+        )
+      ));
+      if (replaceOwned(owner, detected) && !dependencies.isClosed()) {
+        dependencies.broadcastSnapshot();
+      }
+      const enriched = await Promise.all(detections.map(enrichedSnapshot));
+      if (replaceOwned(owner, enriched) && !dependencies.isClosed()) {
+        dependencies.broadcastSnapshot();
+      }
     }
-    if (!dependencies.isClosed()) dependencies.broadcastSnapshot();
   };
 
   return async (...args) => {
+    // Claim synchronously at invocation so an older broad refresh can still
+    // publish untouched providers without overwriting a newer targeted result.
+    const owner = claim(args[0]);
     await dependencies.track(async () => {
       dependencies.onActivityChange(1);
       try {
         await dependencies.beforeRefresh?.(dependencies.lifetimeSignal);
         if (dependencies.isClosed()) return;
-        await refreshCore(...args);
+        await refreshCore(owner, ...args);
       } finally {
         dependencies.onActivityChange(-1);
       }

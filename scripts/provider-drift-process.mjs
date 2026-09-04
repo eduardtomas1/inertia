@@ -90,6 +90,10 @@ function validateInitializeResult(initialized, validation) {
     throw new Error(`${validation.expectedAgent} ACP does not advertise session resume support.`);
   }
   const agentInfo = initialized.agentInfo;
+  // ACP v1 permits omitted/null implementation metadata. Cursor's official
+  // CLI currently omits it; keep present identities strict and opt in per probe.
+  if (validation.allowMissingAgentInfo === true
+    && (agentInfo === undefined || agentInfo === null)) return;
   if (!agentInfo || typeof agentInfo !== "object"
     || Array.isArray(agentInfo)
     || typeof agentInfo.name !== "string"

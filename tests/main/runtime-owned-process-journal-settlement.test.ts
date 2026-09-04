@@ -544,7 +544,7 @@ describe("runtime-owned journal settlement", () => {
         deadlineAt: 10_300,
         readIdentity: () => identity,
         linuxTerminalAuthority: () => true,
-        signalLinuxGuardian: () => true,
+        recoverLinuxGuardian: () => true,
         waitForProcessGroupDrain,
       },
     )).resolves.toBe(false);

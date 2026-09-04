@@ -303,6 +303,65 @@ static int named_status(pid_t pid, const char *name) {
   data[size] = 0; snprintf(expected, sizeof(expected), "Name:\t%s\n", name);
   return strstr(data, expected) != NULL;
 }
+static int hardened_terminal_status(pid_t pid) {
+  char status_path[64], status[4096], children_path[96], children[32];
+  snprintf(status_path, sizeof(status_path), "/proc/%d/status", pid);
+  int status_fd = open_exact(status_path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+  if (status_fd < 0) return 0;
+  ssize_t status_size = read(status_fd, status, sizeof(status) - 1);
+  close(status_fd);
+  if (status_size <= 0 || status_size >= (ssize_t)sizeof(status)) return 0;
+  status[status_size] = 0;
+  if ((!strstr(status, "Name:\tinertia-done\n")
+      && !strstr(status, "Name:\tinertia-exdone\n"))
+    || !strstr(status, "State:\tT")
+    || !strstr(status, "TracerPid:\t0\n")
+    || !strstr(status, "Threads:\t1\n")
+    || !strstr(status, "NoNewPrivs:\t1\n")
+    || !strstr(status, "Seccomp:\t2\n")) return 0;
+  const char *filters = strstr(status, "Seccomp_filters:\t");
+  if (filters) {
+    unsigned long long filter_count = 0;
+    if (sscanf(filters, "Seccomp_filters:\t%llu", &filter_count) != 1
+      || filter_count < 1) return 0;
+  }
+  snprintf(children_path, sizeof(children_path), "/proc/%d/task/%d/children", pid, pid);
+  int children_fd = open_exact(children_path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+  if (children_fd < 0) return 0;
+  ssize_t children_size = read(children_fd, children, sizeof(children));
+  close(children_fd);
+  return children_size == 0;
+}
+static int recover_terminal_mode(int argc, char **argv) {
+  if (argc != 8) return 64;
+  pid_t pid;
+  unsigned long long start, prior_device, prior_inode, helper_device, helper_inode;
+  if (!parse_pid(argv[2], &pid) || !parse_u64(argv[3], &start)
+    || !parse_u64(argv[4], &prior_device) || !parse_u64(argv[5], &prior_inode)
+    || !parse_u64(argv[6], &helper_device) || !parse_u64(argv[7], &helper_inode)) return 64;
+  // The prior executable identity is durable evidence that this was an
+  // admitted guardian. It need not match the current packaged helper after an
+  // update, but it must remain present and well-formed in the recovery claim.
+  (void)prior_device;
+  (void)prior_inode;
+  struct stat helper;
+  if (stat("/proc/self/exe", &helper)
+    || (unsigned long long)helper.st_dev != helper_device
+    || (unsigned long long)helper.st_ino != helper_inode) return 3;
+  int pidfd = pidfd_open_exact(pid);
+  if (pidfd < 0) return 3;
+  const int valid = same_process(pid, start)
+    && getpgid(pid) == pid
+    && getsid(pid) == pid
+    && hardened_terminal_status(pid);
+  if (!valid || !same_process(pid, start)
+    || syscall(SYS_pidfd_send_signal, pidfd, SIGKILL, NULL, 0)) {
+    close(pidfd);
+    return 3;
+  }
+  close(pidfd);
+  return 0;
+}
 static int ready_mode(const char *raw) {
 #if defined(INERTIA_RUNTIME_GUARDIAN_TEST_REJECT_READY)
   (void)raw;
@@ -645,6 +704,7 @@ int main(int argc, char **argv) {
   if (argc == 6 && !strcmp(argv[1], "stop-pending")) return stop_pending_mode(argc, argv);
   if (argc == 3 && !strcmp(argv[1], "claimed")) return state_mode(argv[2], "inertia-claim");
   if (argc == 3 && !strcmp(argv[1], "owned")) return state_mode(argv[2], "inertia-owned");
+  if (argc >= 2 && !strcmp(argv[1], "recover-terminal")) return recover_terminal_mode(argc, argv);
   if (argc >= 2 && !strcmp(argv[1], "signal")) return exact_signal_mode(argc, argv);
   if (argc >= 5 && !strcmp(argv[1], "watch")) return watch_mode(argc, argv);
   return 64;

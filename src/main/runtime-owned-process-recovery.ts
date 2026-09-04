@@ -19,7 +19,7 @@ import {
 } from "./windows-runtime-job.js";
 import {
   linuxGuardianTerminalAuthority,
-  signalLinuxGuardianExact,
+  recoverLinuxGuardianTerminalExact,
 } from "../node/runtime-owned-process-linux.js";
 export { readDarwinProcessIdentity } from "../node/runtime-owned-processes.js";
 
@@ -43,7 +43,7 @@ export interface RuntimeOwnedProcessRecoveryOptions {
   readonly darwinGuardianPath?: string;
   readonly waitForProcessGroupDrain?: (durationMs: number) => Promise<void>;
   readonly linuxTerminalAuthority?: typeof linuxGuardianTerminalAuthority;
-  readonly signalLinuxGuardian?: typeof signalLinuxGuardianExact;
+  readonly recoverLinuxGuardian?: typeof recoverLinuxGuardianTerminalExact;
 }
 
 function exactPidAbsent(pid: number, kill: Kill): boolean {
@@ -286,8 +286,8 @@ export function recoverRuntimeOwnedProcesses(
   const platform = options.platform ?? process.platform;
   const linuxTerminalAuthority = options.linuxTerminalAuthority
     ?? linuxGuardianTerminalAuthority;
-  const signalLinuxGuardian = options.signalLinuxGuardian
-    ?? signalLinuxGuardianExact;
+  const recoverLinuxGuardian = options.recoverLinuxGuardian
+    ?? recoverLinuxGuardianTerminalExact;
   if (!supportedRuntimeOwnedProcessPlatform(platform)) return null;
   const journal = new RuntimeOwnedProcessJournal(dataDirectory, {
     platform,
@@ -542,7 +542,7 @@ export function recoverRuntimeOwnedProcesses(
         }
         if (Date.now() >= processProofDeadlineAt) return false;
         if (record.state === "owned" && !journal.retire(record.ownershipId)) return false;
-        if (!signalLinuxGuardian(record.process, options.darwinGuardianPath, "kill")) return false;
+        if (!recoverLinuxGuardian(record.process, options.darwinGuardianPath)) return false;
         while (Date.now() < processProofDeadlineAt && readIdentity(identity.pid)) {
           await waitForProcessGroupDrain(PROCESS_GROUP_DRAIN_POLL_MS);
         }
@@ -568,7 +568,7 @@ export function recoverRuntimeOwnedProcesses(
           )
         ) return false;
         if (Date.now() >= processProofDeadlineAt) return false;
-        if (!signalLinuxGuardian(record.process, options.darwinGuardianPath, "kill")) return false;
+        if (!recoverLinuxGuardian(record.process, options.darwinGuardianPath)) return false;
         while (Date.now() < processProofDeadlineAt) {
           const current = readIdentity(identity.pid);
           if (!current) break;

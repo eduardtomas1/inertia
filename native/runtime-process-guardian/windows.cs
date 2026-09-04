@@ -1706,7 +1706,10 @@ public static class InertiaRuntimeJob {
     public StreamWriter StandardInput;
     public StreamReader StandardOutput;
 
-    public static UpdateSupervisorProcess Start(string executable, string arguments) {
+    public static UpdateSupervisorProcess Start(
+      string executable, string arguments, out string stage
+    ) {
+      stage = "update-launch-pipes";
       var child = new UpdateSupervisorProcess();
       IntPtr attributes = IntPtr.Zero;
       IntPtr handleList = IntPtr.Zero;
@@ -1737,6 +1740,7 @@ public static class InertiaRuntimeJob {
           child.outputPipe.ClientSafePipeHandle.DangerousGetHandle(),
           child.errorPipe.ClientSafePipeHandle.DangerousGetHandle()
         };
+        stage = "update-launch-attributes";
         UIntPtr attributeSize = UIntPtr.Zero;
         InitializeProcThreadAttributeList(IntPtr.Zero, 1, 0, ref attributeSize);
         if (attributeSize.ToUInt64() == 0 || attributeSize.ToUInt64() > 65536) {
@@ -1766,6 +1770,7 @@ public static class InertiaRuntimeJob {
         startup.StartupInfo.hStdError = handles[2];
         startup.lpAttributeList = attributes;
         var commandLine = new StringBuilder("\"" + executable + "\" " + arguments);
+        stage = "update-launch-create";
         if (!CreateProcessW(
           executable, commandLine, IntPtr.Zero, IntPtr.Zero, true,
           EXTENDED_STARTUPINFO_PRESENT | CREATE_NO_WINDOW,
@@ -1837,6 +1842,7 @@ public static class InertiaRuntimeJob {
     diagnostic = "";
     UpdateSupervisorProcess child = null;
     FileStream supervisor = null;
+    string launchStage = "update-launch";
     try {
       if (
         !String.Equals(
@@ -1960,8 +1966,10 @@ try {
       child = UpdateSupervisorProcess.Start(
         powershellPath,
         "-NoLogo -NoProfile -NonInteractive "
-          + "-ExecutionPolicy Bypass -EncodedCommand " + encodedLoader
+          + "-ExecutionPolicy Bypass -EncodedCommand " + encodedLoader,
+        out launchStage
       );
+      launchStage = "update-launch-input";
       child.StandardInput.WriteLine(Convert.ToBase64String(supervisorBytes));
       child.StandardInput.WriteLine(expectedSupervisorDigest);
       child.StandardInput.WriteLine(Convert.ToBase64String(
@@ -1977,6 +1985,7 @@ try {
       ));
       child.StandardInput.Close();
 
+      launchStage = "update-launch-ready";
       string readyLine = null;
       Exception readFailure = null;
       using (var ready = new ManualResetEvent(false)) {
@@ -2020,8 +2029,12 @@ try {
         return UPDATE_LAUNCH_CLEANUP_UNCONFIRMED;
       }
       return 46;
-    } catch {
-      diagnostic = ErrorLine("update-launch", Marshal.GetLastWin32Error());
+    } catch (Exception error) {
+      var nativeError = error as System.ComponentModel.Win32Exception;
+      diagnostic = ErrorLine(
+        launchStage,
+        nativeError != null ? nativeError.NativeErrorCode : Marshal.GetLastWin32Error()
+      );
       if (child != null && !child.HasExited) {
         try { child.Kill(); } catch { }
         try {

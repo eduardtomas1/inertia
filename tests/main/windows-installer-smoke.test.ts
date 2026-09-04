@@ -724,8 +724,8 @@ test("pins the minimal fixed builder and gates installed Windows binaries", asyn
   expect(source).toContain("INERTIA_PACKAGE_SMOKE_EXPECTED_VERSION: expectedVersion");
   expect(source).toContain("INERTIA_PACKAGE_SMOKE_STATE_ROOT: stateRoot");
   expect(source).toContain('join(temporaryRoot, "existing profile and data")');
-  expect(source).toContain('"data",\n        "inertia.sqlite"');
-  expect(packageSmokeSource).toContain(
+  expect(normalizedSource).toContain('"data",\n        "inertia.sqlite"');
+  expect(packageSmokeSource.replaceAll(/\r\n?/gu, "\n")).toContain(
     'boundedExactPathEnvironment(\n  "INERTIA_PACKAGE_SMOKE_STATE_ROOT"',
   );
   expect(packageSmokeSource).toContain(

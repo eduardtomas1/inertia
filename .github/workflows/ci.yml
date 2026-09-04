@@ -532,7 +532,8 @@ jobs:
       # dependent: the unit suite and the build.
       - name: Run the unit suite
         if: runner.os == 'macOS'
-        run: npm test
+        # Bound process-heavy fixture contention while retaining every deadline.
+        run: npm test -- --maxWorkers=2
 
       # Coverage runs the same suite as npm test, so Linux runs it once here
       # instead of running the suite twice.

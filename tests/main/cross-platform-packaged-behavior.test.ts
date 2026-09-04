@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 const repositoryRoot = process.cwd();
 
 async function source(path: string): Promise<string> {
-  return readFile(join(repositoryRoot, path), "utf8");
+  return (await readFile(join(repositoryRoot, path), "utf8")).replaceAll(/\r\n?/gu, "\n");
 }
 
 function workflowStep(workflow: string, name: string): string {
@@ -291,7 +291,7 @@ describe("cross-platform packaged behavior contract", () => {
     // gets the same suite through coverage, and Windows gets it sharded.
     const macosUnits = workflowStep(workflow, "Run the unit suite");
     expect(macosUnits).toContain("if: runner.os == 'macOS'");
-    expect(macosUnits).toContain("run: npm test");
+    expect(macosUnits).toContain("run: npm test -- --maxWorkers=2");
 
     const linuxUnits = workflowStep(
       workflow,

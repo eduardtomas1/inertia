@@ -1,6 +1,7 @@
 import { join } from "node:path";
 
 import { RuntimeStore } from "../../../src/server/database";
+import { backendEndpointIdentity } from "../../../src/shared/backend-endpoint-identity";
 import {
   backendCompatibilityProbeResultSchema,
 } from "../../../src/shared/backend-probe";
@@ -32,6 +33,7 @@ export function seedLargeModelCatalog(
           capabilities: [],
         };
       });
+      const baseUrl = `https://catalog-${profileIndex}.example.test/v1`;
       const profile = persistedModelBackendProfileSchema.parse({
         id: `custom:catalog-${profileIndex}`,
         displayName: `Catalog gateway ${profileIndex + 1}`,
@@ -41,9 +43,9 @@ export function seedLargeModelCatalog(
         source: "custom",
         enabled: true,
         configurationRevision: 1,
-        endpointIdentity: `endpoint:catalog-${profileIndex}`,
+        endpointIdentity: backendEndpointIdentity(baseUrl),
         preset: "custom",
-        baseUrl: `https://catalog-${profileIndex}.example.test/v1`,
+        baseUrl,
         allowInsecureLocalhost: false,
         credentialGeneration: null,
         models,

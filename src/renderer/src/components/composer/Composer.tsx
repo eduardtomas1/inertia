@@ -968,7 +968,7 @@ export const Composer = memo(function Composer({
     });
     if (!persisted) return;
     updateMessage(entry.content);
-    window.requestAnimationFrame(() => textareaRef.current?.focus());
+    textareaRef.current?.focus();
   };
   const applyPromptPreset = async (preset: PromptPreset): Promise<boolean> => {
     const textarea = textareaRef.current;

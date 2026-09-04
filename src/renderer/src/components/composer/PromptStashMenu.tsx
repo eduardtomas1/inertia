@@ -81,7 +81,7 @@ export function PromptStashMenu({
             onClick={() => {
               if (!canStash) return;
               onStash();
-              dismissMenu("selection");
+              dismissMenu("context-change");
             }}
           >
             <Archive size={14} />
@@ -121,7 +121,7 @@ export function PromptStashMenu({
                     onClick={() => {
                       if (restoreReason) return;
                       onRestore(entry);
-                      dismissMenu("selection");
+                      dismissMenu("context-change");
                     }}
                   >
                     <ArchiveRestore size={14} />

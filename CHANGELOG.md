@@ -4,6 +4,33 @@ The useful changes in each Inertia release, in plain language.
 
 ## Next
 
+## 0.0.48 — 2026-09-04
+
+### Updates and attachment-backed messages settle reliably
+
+- After a Linux AppImage update or remount, startup can retire the exact prior
+  runtime generation even when the newly installed guardian has a different
+  executable inode. Recovery still proves the prior PID, birth identity,
+  process group, session, stopped state, and absence of children before
+  termination, and releases the durable claim only after disappearance is
+  confirmed.
+- Attachment retention, attachment import, and secure-file utility operations
+  now correlate terminal results with an operation UUID and wait for the
+  parent's exact acknowledgement before exiting. This prevents a valid result
+  from being lost to an IPC/exit race and aborting a prompt with
+  `message-send/retention/unexpected`.
+- Missing, mismatched, duplicate, pre-delivery, or undeliverable
+  acknowledgements remain fail-closed inside existing deadlines. Cancellation
+  before a cold utility process spawns is retried at spawn, so a late helper
+  cannot remain alive and poison subsequent prompts or runtime shutdown.
+
+### Release confidence
+
+- Regression coverage exercises AppImage replacement-helper recovery, durable
+  claim clearance, strict one-shot worker correlation and acknowledgement,
+  malformed and failed acknowledgement paths, pre-spawn cancellation, and
+  repeated PNG-backed prompt sends in a real Electron non-Git workspace.
+
 ## 0.0.47 — 2026-09-03
 
 ### Messages and local work recover without an app restart

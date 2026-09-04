@@ -136,6 +136,8 @@ export function createConversationAttachmentStoreUtilityRunner(
       let readReady = false;
       let stoppingError: Error | null = null;
       let killGraceTimer: NodeJS.Timeout | null = null;
+      let killAccepted = false;
+      let exitObserved = false;
       let settled = false;
       let spawned = false;
       const cleanup = (): void => {
@@ -171,16 +173,21 @@ export function createConversationAttachmentStoreUtilityRunner(
         }
         resolveOperation(receipt);
       };
+      const requestKill = (): void => {
+        if (killAccepted || exitObserved) return;
+        killAccepted = child.kill();
+      };
       const stop = (error: Error): void => {
-        if (stoppingError || settled) return;
-        stoppingError = error;
-        child.kill();
+        if (settled) return;
+        stoppingError ??= error;
+        requestKill();
+        if (killGraceTimer) return;
         killGraceTimer = setTimeout(() => {
           const unconfirmed = new Error(
             "Conversation attachment utility shutdown is unconfirmed.",
           );
           rejectStopped(unconfirmed);
-          settle(error);
+          settle(stoppingError ?? error);
         }, killGraceMs);
         killGraceTimer.unref();
       };
@@ -192,7 +199,11 @@ export function createConversationAttachmentStoreUtilityRunner(
       signal?.addEventListener("abort", onAbort, { once: true });
       child.once("spawn", () => {
         spawned = true;
-        if (stoppingError || signal?.aborted) {
+        if (stoppingError) {
+          requestKill();
+          return;
+        }
+        if (signal?.aborted) {
           onAbort();
           return;
         }
@@ -248,6 +259,7 @@ export function createConversationAttachmentStoreUtilityRunner(
           listener: (code: number, signal?: string) => void,
         ): void;
       }).once("exit", (code, signal) => {
+        exitObserved = true;
         if (killGraceTimer) clearTimeout(killGraceTimer);
         resolveStopped();
         const expectedExit = reported?.ok === true ? code === 0 : code === 1;

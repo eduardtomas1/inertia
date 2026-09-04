@@ -204,7 +204,7 @@ export class SecureFileBroker {
       let commitInProgress = false;
       let commitStarted = false;
       let commitFinished = false;
-      let killRequested = false;
+      let killAccepted = false;
       let delivered = false;
       const settle = (
         result: SecureFileResult,
@@ -225,9 +225,9 @@ export class SecureFileBroker {
         message,
       });
       const killChild = (): void => {
-        if (killRequested || exitConfirmed || settled) return;
-        killRequested = true;
-        child.kill();
+        if (killAccepted || exitConfirmed) return;
+        killAccepted = child.kill();
+        if (killGraceTimer) return;
         killGraceTimer = setTimeout(() => {
           if (exitConfirmed || settled || !stoppingResult) return;
           this.poisonedTargets.add(key);
@@ -408,7 +408,7 @@ export class SecureFileBroker {
       let exited = false;
       let settled = false;
       let failed = false;
-      let killRequested = false;
+      let killAccepted = false;
       let killTimer: NodeJS.Timeout | null = null;
       const finish = (ok: boolean): void => {
         if (settled) return;
@@ -417,11 +417,15 @@ export class SecureFileBroker {
         if (killTimer) clearTimeout(killTimer);
         resolveRecovery(ok);
       };
+      const killChild = (): void => {
+        if (killAccepted || exited) return;
+        killAccepted = child.kill();
+      };
       const stop = (): void => {
         failed = true;
-        if (settled || exited || killRequested) return;
-        killRequested = true;
-        child.kill();
+        if (exited) return;
+        killChild();
+        if (killTimer || settled) return;
         killTimer = setTimeout(() => {
           this.poisonedTargets.add(key);
           finish(false);
@@ -431,6 +435,10 @@ export class SecureFileBroker {
       const timeout = setTimeout(stop, this.timeoutMs);
       timeout.unref();
       child.once("spawn", () => {
+        if (failed) {
+          killChild();
+          return;
+        }
         try {
           child.postMessage({
             type: "secure-file.recover",

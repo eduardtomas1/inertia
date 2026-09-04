@@ -235,6 +235,55 @@ describe("conversation attachment store utility runner", () => {
     await expect(running.stopped).resolves.toBeUndefined();
   });
 
+  it("retries a pre-spawn cancellation kill after startup", async () => {
+    const child = new FakeUtilityProcess();
+    child.kill.mockReturnValueOnce(false);
+    const controller = new AbortController();
+    const runner = createConversationAttachmentStoreUtilityRunner({
+      spawn: () => utility(child),
+    });
+    const running = runner(operation, controller.signal);
+
+    controller.abort(new Error("cancelled before spawn"));
+    expect(child.kill).toHaveBeenCalledOnce();
+    child.emit("spawn");
+    expect(child.kill).toHaveBeenCalledTimes(2);
+    expect(child.postMessage).not.toHaveBeenCalled();
+    child.emit("exit", 1);
+
+    await expect(running.result).rejects.toThrow("cancelled before spawn");
+    await expect(running.stopped).resolves.toBeUndefined();
+  });
+
+  it("retries a pre-spawn kill even when startup follows the grace deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      const child = new FakeUtilityProcess();
+      child.kill.mockReturnValue(false);
+      const controller = new AbortController();
+      const runner = createConversationAttachmentStoreUtilityRunner({
+        spawn: () => utility(child),
+        killGraceMs: 10,
+      });
+      const running = runner(operation, controller.signal);
+      const result = expect(running.result).rejects.toThrow("cancelled before spawn");
+      const stopped = expect(running.stopped).rejects.toThrow("unconfirmed");
+
+      controller.abort(new Error("cancelled before spawn"));
+      expect(child.kill).toHaveBeenCalledOnce();
+      await vi.advanceTimersByTimeAsync(10);
+      await result;
+      await stopped;
+
+      child.emit("spawn");
+      expect(child.kill).toHaveBeenCalledTimes(2);
+      expect(child.postMessage).not.toHaveBeenCalled();
+      child.emit("exit", 1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("bounds active utilities and queued operations", async () => {
     const children: FakeUtilityProcess[] = [];
     const runner = createConversationAttachmentStoreUtilityRunner({

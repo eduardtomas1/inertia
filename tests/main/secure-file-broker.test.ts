@@ -807,7 +807,102 @@ describe("secure file broker", () => {
     broker.close();
   });
 
-  it("does not deliver a cancelled replacement that spawns late", async () => {
+  it("retries a pre-spawn cancellation kill after startup", async () => {
+    const child = new FakeUtilityProcess();
+    child.kill.mockReturnValueOnce(false);
+    const spawn = vi.fn(() => utility(child));
+    const broker = new SecureFileBroker({
+      spawn,
+    });
+    const controller = new AbortController();
+    const pending = broker.perform(replacement, controller.signal);
+    await vi.waitFor(() => expect(spawn).toHaveBeenCalledOnce());
+
+    controller.abort();
+    expect(child.kill).toHaveBeenCalledOnce();
+    child.emit("spawn");
+    expect(child.kill).toHaveBeenCalledTimes(2);
+    expect(child.postMessage).not.toHaveBeenCalled();
+    child.emit("exit", 1);
+
+    await expect(pending).resolves.toMatchObject({
+      ok: false,
+      code: "unavailable",
+    });
+    await expect(broker.shutdown()).resolves.toBe(true);
+  });
+
+  it("retries a pre-spawn cancellation kill after the grace deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      const child = new FakeUtilityProcess();
+      child.kill.mockReturnValue(false);
+      const broker = new SecureFileBroker({
+        spawn: () => utility(child),
+        killGraceMs: 10,
+      });
+      const controller = new AbortController();
+      const pending = broker.perform(request, controller.signal);
+      await vi.advanceTimersByTimeAsync(0);
+
+      controller.abort();
+      expect(child.kill).toHaveBeenCalledOnce();
+      await vi.advanceTimersByTimeAsync(10);
+      await expect(pending).resolves.toMatchObject({
+        ok: false,
+        code: "unavailable",
+      });
+
+      child.emit("spawn");
+      expect(child.kill).toHaveBeenCalledTimes(2);
+      expect(child.postMessage).not.toHaveBeenCalled();
+      child.emit("exit", 1);
+      await expect(broker.shutdown()).resolves.toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("retries a pre-spawn recovery kill without delivering after timeout", async () => {
+    vi.useFakeTimers();
+    try {
+      const children: FakeUtilityProcess[] = [];
+      const broker = new SecureFileBroker({
+        spawn: () => {
+          const child = new FakeUtilityProcess();
+          children.push(child);
+          return utility(child);
+        },
+        timeoutMs: 25,
+        killGraceMs: 10,
+      });
+      const pending = broker.perform(replacement);
+      await vi.advanceTimersByTimeAsync(0);
+      children[0]!.emit("spawn");
+      children[0]!.emit("exit", 1);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(children).toHaveLength(2);
+      children[1]!.kill.mockReturnValue(false);
+
+      await vi.advanceTimersByTimeAsync(35);
+      await expect(pending).resolves.toMatchObject({
+        ok: false,
+        code: "unavailable",
+        message: "The secure file service could not verify save recovery.",
+      });
+      expect(children[1]!.kill).toHaveBeenCalledOnce();
+
+      children[1]!.emit("spawn");
+      expect(children[1]!.kill).toHaveBeenCalledTimes(2);
+      expect(children[1]!.postMessage).not.toHaveBeenCalled();
+      children[1]!.emit("exit", 1);
+      await expect(broker.shutdown()).resolves.toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("quarantines a cancelled replacement when every kill is rejected", async () => {
     vi.useFakeTimers();
     try {
       const children: FakeUtilityProcess[] = [];
@@ -823,12 +918,13 @@ describe("secure file broker", () => {
       const controller = new AbortController();
       const first = broker.perform(replacement, controller.signal);
       await vi.waitFor(() => expect(children).toHaveLength(1));
+      children[0]!.kill.mockReturnValue(false);
 
       controller.abort();
       expect(children[0]!.kill).toHaveBeenCalledOnce();
       children[0]!.emit("spawn");
       expect(children[0]!.postMessage).not.toHaveBeenCalled();
-      expect(children[0]!.kill).toHaveBeenCalledOnce();
+      expect(children[0]!.kill).toHaveBeenCalledTimes(2);
 
       let firstSettled = false;
       void first.then(() => {

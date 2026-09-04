@@ -10,11 +10,12 @@ export interface PlatformFileOpenFlags {
   readonly noFollow: number;
 }
 
-// Electron 44.0.0's Linux ARM64 binary exposes the Linux x64 values for these
+// Electron 44.0.0's Linux ARM64 binary exposed the Linux x64 values for these
 // architecture-specific open(2) flags. Passing those values to an ARM64 kernel
-// turns O_DIRECTORY | O_NOFOLLOW into an invalid O_DIRECT combination. Keep the
-// correction centralized so every privileged filesystem boundary retains its
-// no-follow and directory-only guarantees until the upstream runtime is fixed.
+// turns O_DIRECTORY | O_NOFOLLOW into an invalid O_DIRECT combination. Electron
+// 44.1.0 corrected its startup snapshot; keep the canonical kernel ABI values
+// centralized as a compatibility fallback so an older or stale runtime snapshot
+// cannot weaken privileged no-follow and directory-only filesystem boundaries.
 const LINUX_ARM64_FILE_OPEN_FLAGS: PlatformFileOpenFlags = {
   directory: 0x4000,
   noFollow: 0x8000,

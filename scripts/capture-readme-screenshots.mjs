@@ -6,7 +6,6 @@ import {
   lstat,
   mkdir,
   mkdtemp,
-  readFile,
   realpath,
   rm,
   writeFile,
@@ -19,7 +18,6 @@ import { gzipSync } from "node:zlib";
 const execFileAsync = promisify(execFile);
 if (process.platform !== "darwin") throw new Error("README screenshots must be captured on macOS so the frameless titlebar is represented accurately.");
 const repositoryRoot = resolve(import.meta.dirname, "..");
-const packageManifest = JSON.parse(await readFile(join(repositoryRoot, "package.json"), "utf8"));
 const screenshotDirectory = join(repositoryRoot, "docs", "screenshots");
 const captureRoot = await mkdtemp(join(tmpdir(), "inertia-readme-capture-"));
 const workspaceDirectory = "/tmp/inertia-demo-workspace";
@@ -62,17 +60,6 @@ async function closeWorkspaceTools(page) {
   await tools.waitFor({ state: "hidden" });
 }
 
-async function selectWorkspaceTool(page, name) {
-  const panel = page.locator(".workspace-panel");
-  const tab = panel.locator(`[data-workspace-tab="${name.toLowerCase()}"]`);
-  if (await tab.isVisible()) {
-    await tab.click();
-    return;
-  }
-  await panel.getByLabel("Choose workspace tool").click();
-  await panel.getByRole("button", { name, exact: true }).click();
-}
-
 async function workspacePathReceipt(path) {
   const canonicalPath = await realpath(path);
   const info = await lstat(canonicalPath, { bigint: true });
@@ -102,6 +89,8 @@ async function seedShowcaseData() {
   const conversationId = randomUUID();
   const companionProjectId = randomUUID();
   const companionConversationId = randomUUID();
+  const companionTurnId = randomUUID();
+  const companionRunId = randomUUID();
   const turnId = randomUUID();
   const runId = "readme-demo-run";
   const userMessageId = randomUUID();
@@ -325,7 +314,7 @@ async function seedShowcaseData() {
           active_conversation_id = ?
       WHERE id = 1
     `).run(projectId, conversationId);
-    database.prepare(`
+    const insertTurn = database.prepare(`
       INSERT INTO agent_turns (
         id, conversation_id, run_id, user_message_id,
         terminal_assistant_message_id, provider_id, model_selection_json,
@@ -341,7 +330,8 @@ async function seedShowcaseData() {
         'build', 'supervised', NULL, NULL, ?, ?, ?, 'completed', 'completed',
         'provider-completed', NULL, NULL, NULL, 0, 'authoritative', ?, ?
       )
-    `).run(
+    `);
+    insertTurn.run(
       turnId,
       conversationId,
       runId,
@@ -354,6 +344,12 @@ async function seedShowcaseData() {
       completedAt,
       requestedAt,
       completedAt,
+    );
+    insertTurn.run(
+      companionTurnId, companionConversationId, companionRunId,
+      companionUserMessageId, companionAssistantMessageId,
+      JSON.stringify(modelSelection), JSON.stringify(continuationIdentity),
+      requestedAt, startedAt, completedAt, requestedAt, completedAt,
     );
     database.prepare(`
       INSERT INTO messages (
@@ -373,29 +369,31 @@ async function seedShowcaseData() {
     `).run(
       assistantMessageId,
       conversationId,
-      "I reviewed the onboarding path, kept the update focused, and left every change ready for review.",
+      "The onboarding flow now brings you straight into your work. Projects stay close, and every chat keeps its own context.\n\n- **One place for your work.** Search conversations across projects, or narrow the list to a single repository.\n- **A quieter composer.** Keep the message in focus, with model and run settings a glance away.\n- **Room to compare.** Open a second chat beside the first without losing your place.\n\nThe changes are ready for a final visual pass in both themes.",
       assistantAt,
       turnId,
     );
     database.prepare(`
       INSERT INTO messages (
         id, conversation_id, role, content, attachments_json, created_at, turn_id
-      ) VALUES (?, ?, 'user', ?, '[]', ?, NULL)
+      ) VALUES (?, ?, 'user', ?, '[]', ?, ?)
     `).run(
       companionUserMessageId,
       companionConversationId,
       "Keep the runtime review independent from the interface chat.",
       requestedAt,
+      companionTurnId,
     );
     database.prepare(`
       INSERT INTO messages (
         id, conversation_id, role, content, attachments_json, created_at, turn_id
-      ) VALUES (?, ?, 'assistant', ?, '[]', ?, NULL)
+      ) VALUES (?, ?, 'assistant', ?, '[]', ?, ?)
     `).run(
       companionAssistantMessageId,
       companionConversationId,
-      "Keep detached chat windows scoped to their exact conversation.",
+      "Each chat keeps its own workspace and provider context.\n\n- File changes stay with the selected checkout.\n- Running commands remain attached to their chat.\n- Drafts survive switching between panes.\n\nYou can review the interface here while the runtime work continues independently.",
       assistantAt,
+      companionTurnId,
     );
     database.prepare(`
       INSERT INTO activities (
@@ -432,9 +430,9 @@ async function seedShowcaseData() {
         reasoning_output_tokens, compacts_automatically, updated_at, turn_id
       ) VALUES (
         ?, 9000, 16600, 'thread', 200000, 7200, 1100, 200, 1800, 400,
-        1, ?, NULL
+        1, ?, ?
       )
-    `).run(companionConversationId, now);
+    `).run(companionConversationId, now, companionTurnId);
     database.prepare(`
       INSERT INTO turn_git_artifacts (
         id, turn_id, conversation_id, run_id, repository_identity,
@@ -476,6 +474,28 @@ async function seedShowcaseData() {
       assistantMessageId,
       requestedAt,
       completedAt,
+    );
+    database.prepare(`
+      INSERT INTO turn_git_artifacts (
+        id, turn_id, conversation_id, run_id, repository_identity,
+        worktree_identity, branch, before_checkpoint_id, before_ref, after_ref,
+        before_fingerprint, after_fingerprint, files_json, insertions,
+        deletions, status, completeness, patch_state, patch_digest,
+        captured_at, terminal_assistant_message_id, failure_reason,
+        created_at, updated_at
+      ) VALUES (
+        ?, ?, ?, ?, ?, ?, 'main', NULL, ?, ?, ?, ?, '[]', 0, 0,
+        'ready', 'complete', 'none', NULL, ?, ?, NULL, ?, ?
+      )
+    `).run(
+      randomUUID(), companionTurnId, companionConversationId, companionRunId,
+      createHash("sha256").update("demo-runtime-repo").digest("hex"),
+      createHash("sha256").update("demo-runtime-worktree").digest("hex"),
+      createHash("sha256").update("demo-before").digest("hex"),
+      createHash("sha256").update("demo-before").digest("hex"),
+      createHash("sha256").update("demo-clean").digest("hex"),
+      createHash("sha256").update("demo-clean").digest("hex"),
+      completedAt, companionAssistantMessageId, requestedAt, completedAt,
     );
     database.prepare(`
       INSERT INTO agent_goals (
@@ -534,222 +554,6 @@ async function seedShowcaseData() {
   };
 }
 
-function seedActiveWorkstream(showcase) {
-  const database = new Database(databasePath);
-  const requestedAt = new Date(Date.now() - 21_000).toISOString();
-  const startedAt = new Date(Date.now() - 20_000).toISOString();
-  const at = (seconds) =>
-    new Date(Date.parse(startedAt) + seconds * 1_000).toISOString();
-  const turnId = randomUUID();
-  const runId = "readme-active-workstream";
-  const userMessageId = randomUUID();
-  const delegatedParentId = randomUUID();
-  const delegatedChildId = randomUUID();
-  const delegatedVerifierId = randomUUID();
-  database.transaction(() => {
-    database.prepare(`
-      UPDATE conversations
-      SET status = 'running', completed_at = NULL, updated_at = ?
-      WHERE id = ?
-    `).run(at(18), showcase.conversationId);
-    database.prepare(`
-      INSERT INTO messages (
-        id, conversation_id, role, content, attachments_json, created_at,
-        turn_id
-      ) VALUES (?, ?, 'user', ?, '[]', ?, NULL)
-    `).run(
-      userMessageId,
-      showcase.conversationId,
-      "Refine the split workspace without changing its ownership boundaries.",
-      requestedAt,
-    );
-    database.prepare(`
-      INSERT INTO agent_turns (
-        id, conversation_id, run_id, user_message_id,
-        terminal_assistant_message_id, provider_id, model_selection_json,
-        continuation_identity_json, harness_id, backend_profile_id, model,
-        model_alias, reasoning_effort, interaction_mode, access_mode,
-        provider_session_before, provider_session_after, requested_at,
-        started_at, completed_at, status, run_state, terminal_reason, checkpoint_id,
-        usage_start_json, usage_completion_json, configuration_revision,
-        association, created_at, updated_at
-      ) VALUES (
-        ?, ?, ?, ?, NULL, 'codex', ?, ?, 'codex-app-server',
-        'builtin:openai', 'gpt-5.6-sol', 'GPT-5.6-Sol', 'high',
-        'build', 'supervised', NULL, NULL, ?, ?, NULL, 'running', 'running',
-        NULL, NULL, NULL, NULL, 0, 'authoritative', ?, ?
-      )
-    `).run(
-      turnId,
-      showcase.conversationId,
-      runId,
-      userMessageId,
-      JSON.stringify(showcase.modelSelection),
-      JSON.stringify(showcase.continuationIdentity),
-      requestedAt,
-      startedAt,
-      requestedAt,
-      at(18),
-    );
-    database.prepare(`
-      UPDATE messages SET turn_id = ? WHERE id = ?
-    `).run(turnId, userMessageId);
-    database.prepare(`
-      INSERT INTO subagent_traces (
-        id, conversation_id, run_id, turn_id, provider_id,
-        provider_task_id, provider_agent_id, parent_trace_id,
-        parent_provider_agent_id, parent_provider_tool_use_id,
-        provider_tool_use_id, provider_role, provider_name, status,
-        description, progress, result, sequence, created_at, updated_at
-      ) VALUES (
-        ?, ?, ?, ?, 'codex',
-        'task-interface-audit', 'agent-interface-audit', NULL,
-        NULL, NULL, 'tool-interface-audit', 'reviewer',
-        'Interface Auditor', 'running',
-        'Review the interaction and accessibility boundaries.',
-        'Checking the split workspace ownership.', NULL,
-        1, ?, ?
-      )
-    `).run(
-      delegatedParentId,
-      showcase.conversationId,
-      runId,
-      turnId,
-      at(4),
-      at(18),
-    );
-    database.prepare(`
-      INSERT INTO subagent_traces (
-        id, conversation_id, run_id, turn_id, provider_id,
-        provider_task_id, provider_agent_id, parent_trace_id,
-        parent_provider_agent_id, parent_provider_tool_use_id,
-        provider_tool_use_id, provider_role, provider_name, status,
-        description, progress, result, sequence, created_at, updated_at
-      ) VALUES (
-        ?, ?, ?, ?, 'codex',
-        'task-keyboard-check', 'agent-keyboard-check', ?,
-        'agent-interface-audit', NULL, 'tool-keyboard-check', 'analyst',
-        'Keyboard Check', 'completed',
-        'Verify focus and keyboard ownership.',
-        NULL, 'Focus returns to the owning conversation.',
-        2, ?, ?
-      )
-    `).run(
-      delegatedChildId,
-      showcase.conversationId,
-      runId,
-      turnId,
-      delegatedParentId,
-      at(6),
-      at(14),
-    );
-    database.prepare(`
-      INSERT INTO subagent_traces (
-        id, conversation_id, run_id, turn_id, provider_id,
-        provider_task_id, provider_agent_id, parent_trace_id,
-        parent_provider_agent_id, parent_provider_tool_use_id,
-        provider_tool_use_id, provider_role, provider_name, status,
-        description, progress, result, sequence, created_at, updated_at
-      ) VALUES (
-        ?, ?, ?, ?, 'codex',
-        'task-release-verifier', 'agent-release-verifier', NULL,
-        NULL, NULL, 'tool-release-verifier', 'verifier',
-        'Release Verifier', 'waiting',
-        'Confirm the final cross-platform evidence.',
-        'Waiting for the exact release CI matrix.', NULL,
-        3, ?, ?
-      )
-    `).run(
-      delegatedVerifierId,
-      showcase.conversationId,
-      runId,
-      turnId,
-      at(8),
-      at(18),
-    );
-    database.prepare(`
-      INSERT INTO messages (
-        id, conversation_id, role, content, attachments_json, created_at,
-        turn_id
-      ) VALUES (?, ?, 'assistant', ?, '[]', ?, ?)
-    `).run(
-      randomUUID(),
-      showcase.conversationId,
-      "I’m tracing the pane state and route ownership before changing the layout.",
-      at(3),
-      turnId,
-    );
-    for (const [seconds, kind, title] of [
-      [5, "command", "Inspected the split workspace"],
-      [7, "file", "Read pane ownership state"],
-    ]) {
-      database.prepare(`
-        INSERT INTO activities (
-          id, conversation_id, run_id, kind, title, detail, status,
-          created_at, turn_id
-        ) VALUES (?, ?, ?, ?, ?, NULL, 'completed', ?, ?)
-      `).run(
-        randomUUID(),
-        showcase.conversationId,
-        runId,
-        kind,
-        title,
-        at(seconds),
-        turnId,
-      );
-    }
-    database.prepare(`
-      INSERT INTO messages (
-        id, conversation_id, role, content, attachments_json, created_at,
-        turn_id
-      ) VALUES (?, ?, 'assistant', ?, '[]', ?, ?)
-    `).run(
-      randomUUID(),
-      showcase.conversationId,
-      "The ownership model is sound. I’m tightening the focused pane behavior and validating both chats now.",
-      at(10),
-      turnId,
-    );
-    for (const [seconds, kind, title, status] of [
-      [13, "file", "Updated split workspace flow", "completed"],
-      [16, "command", "Running focused workspace tests", "running"],
-    ]) {
-      database.prepare(`
-        INSERT INTO activities (
-          id, conversation_id, run_id, kind, title, detail, status,
-          created_at, turn_id
-        ) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?)
-      `).run(
-        randomUUID(),
-        showcase.conversationId,
-        runId,
-        kind,
-        title,
-        status,
-        at(seconds),
-        turnId,
-      );
-    }
-    database.prepare(`
-      INSERT INTO workspace_runs (
-        id, kind, project_id, conversation_id, action_id, label, detail,
-        status, attention_state, port, started_at, finished_at
-      ) VALUES (
-        ?, 'agent', ?, ?, NULL, 'Refine split workspace',
-        'Validating pane ownership and focused-chat behavior.',
-        'running', 'acknowledged', NULL, ?, NULL
-      )
-    `).run(
-      runId,
-      showcase.projectId,
-      showcase.conversationId,
-      startedAt,
-    );
-  })();
-  database.pragma("wal_checkpoint(PASSIVE)");
-  database.close();
-  return turnId;
-}
 
 try {
   await mkdir(workspaceDirectory);
@@ -799,7 +603,7 @@ try {
   await app.close();
   app = undefined;
 
-  const showcase = await seedShowcaseData();
+  await seedShowcaseData();
 
   app = await launch();
   page = await app.firstWindow();
@@ -807,191 +611,31 @@ try {
   await page.locator(".app-shell[data-runtime-generation]").waitFor();
   await sizeWindow();
   await page.getByRole("tabpanel", { name: "Environment" }).waitFor();
-  await capture(page, "inertia-dark.png");
-
-  await page.getByRole("button", { name: "Daily work", exact: true }).click();
-  const dailyWorkDialog = page.getByRole("dialog", { name: "Daily work" });
-  await dailyWorkDialog.getByRole("region", {
-    name: "Daily work totals",
-  }).waitFor();
-  await capture(page, "inertia-daily-work.png");
-  await page.getByRole("button", { name: "Close daily work" }).click();
-
-  const detachedWindowOpened = app.waitForEvent("window");
-  await page.getByRole("button", {
-    name: "Open Welcome to Inertia in a new window",
-  }).click();
-  const detachedPage = await detachedWindowOpened;
-  await detachedPage.locator(".detached-chat-shell").waitFor();
-  await app.evaluate(({ BrowserWindow }) => {
-    const detached = BrowserWindow.getAllWindows().find((window) =>
-      window.getTitle().startsWith("Welcome to Inertia"));
-    detached?.setSize(1_100, 760);
-  });
-  await detachedPage.getByRole("textbox", { name: "Message" }).waitFor();
-  await capture(detachedPage, "inertia-detached-chat.png");
-  await Promise.all([
-    detachedPage.waitForEvent("close"),
-    detachedPage.getByRole("button", {
-      name: "Return chat to main window",
-    }).click({ noWaitAfter: true }),
-  ]);
-  await page.getByRole("textbox", { name: "Message" }).waitFor();
-
-  await page.getByRole("button", {
-    name: "Add context from another chat",
-  }).click();
-  const contextDialog = page.getByRole("dialog", {
-    name: "Bring context from another chat",
-  });
-  await contextDialog.getByRole("button", {
-    name: /Keep detached chat windows scoped to their exact conversation/u,
-  }).click();
-  await contextDialog.getByLabel("Context preview").getByText(
-    "Keep detached chat windows scoped to their exact conversation.",
-    { exact: true },
-  ).waitFor();
-  await capture(page, "inertia-context-handoff.png");
-  await contextDialog.getByRole("button", { name: "Cancel" }).click();
-
-  const sidebar = page.getByRole("complementary", {
-    name: "Project navigation",
-    exact: true,
-  });
-  await sidebar.getByRole("button", { name: "Launch two chats" }).click();
-  const duo = page.getByRole("dialog", {
-    name: "Launch a duo",
-  });
-  await duo.getByRole("textbox", { name: "Shared prompt" }).fill(
-    "Review the same implementation independently and compare the safest path.",
-  );
-  await duo.getByRole("textbox", { name: "Chat 1 name" }).fill(
-    "Interface review",
-  );
-  await duo.getByRole("textbox", { name: "Chat 2 name" }).fill(
-    "Runtime review",
-  );
-  await duo.getByRole("combobox", { name: "Chat 2 project" }).selectOption({
-    label: "Runtime",
-  });
-  await capture(page, "inertia-duo.png");
-  await duo.getByRole("button", { name: "Close multi-spawn" }).click();
-  await sidebar.getByRole("button", { name: "Expand Runtime" }).click();
-  await sidebar.getByRole("button", {
-    name: "Thread actions for Review runtime safeguards",
-  }).click();
-  await sidebar.getByRole("menuitem", {
-    name: "Add this chat to split view",
-  }).click();
-  const splitWorkspace = page.getByRole("main", {
-    name: "Split conversation workspace",
-  });
-  const primaryPane = page.getByRole("region", {
-    name: "Primary chat: Interface · Welcome to Inertia",
-  });
-  const secondaryPane = page.getByRole("region", {
-    name: "Second chat: Runtime · Review runtime safeguards",
-  });
-  await splitWorkspace.waitFor();
-  await primaryPane.getByRole("textbox", { name: "Message" }).waitFor();
-  await secondaryPane.getByRole("textbox", { name: "Message" }).waitFor();
-  await primaryPane.getByRole("button", {
-    name: "Open tools for Welcome to Inertia",
-  }).waitFor();
-  await secondaryPane.getByRole("button", {
-    name: "Open tools for Review runtime safeguards",
-  }).waitFor();
-  await capture(page, "inertia-split-workspace.png");
-  await secondaryPane.getByRole("button", {
-    name: "Close split chat Review runtime safeguards",
-  }).click();
-  await splitWorkspace.waitFor({ state: "detached" });
-
-  const activeTurnId = seedActiveWorkstream(showcase);
-  await page.reload();
-  await page.getByRole("heading", {
-    name: "Welcome to Inertia",
-    level: 1,
-  }).waitFor();
-  await sidebar.getByRole("button", { name: "Work", exact: true }).click();
-  await sidebar.getByRole("button", {
-    name: /^Harden sent attachment recovery,/u,
-  }).waitFor();
-  await capture(page, "inertia-work.png");
-  await sidebar.getByRole("button", { name: "Projects", exact: true }).click();
   await closeWorkspaceTools(page);
-  const activeTurn = page.locator(`[data-turn-id="${activeTurnId}"]`);
-  await activeTurn.scrollIntoViewIfNeeded();
-  await activeTurn.locator(".turn-execution-rail.is-live").waitFor();
-  await activeTurn.locator(".turn-commentary-row").nth(1).waitFor();
-  await activeTurn.locator(".agent-activity-title").filter({
-    hasText: /^Running focused workspace tests$/u,
-  }).waitFor();
-  await capture(page, "inertia-workstream.png");
-
-  await page.getByRole("button", { name: "Open workspace tools" }).click();
-  await selectWorkspaceTool(page, "Goal");
-  const goalPanel = page.getByRole("region", {
-    name: "Goals and agent workflows",
-  });
-  await goalPanel.getByText("Inertia local", { exact: true }).waitFor();
-  await goalPanel.getByText("Interface Auditor", { exact: true }).waitFor();
-  await goalPanel.getByText("Release Verifier", { exact: true }).waitFor();
-  await capture(page, "inertia-agent-workflows.png");
-  await page
-    .getByRole("complementary", { name: "Workspace tools" })
-    .getByRole("button", { name: "Close workspace tools" })
-    .click();
-
-  await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page.getByRole("radio", { name: "Light" }).click();
+  await page.locator('[data-header-menu="branch"] > button').waitFor();
+  const sidebar = page.getByRole("complementary", { name: "Project navigation", exact: true });
+  await page.getByRole("textbox", { name: "Message", exact: true }).fill("");
+  await page.mouse.move(1100, 350);
+  await capture(page, "inertia-dark.png");
+  await sidebar.getByRole("button", { name: "Filter work by project" }).click();
+  await page.getByRole("combobox", { name: "Search projects" }).fill("Interface");
+  await capture(page, "inertia-project-picker.png");
+  await page.keyboard.press("Escape");
+  await sidebar.getByRole("button", { name: "Add project", exact: true }).click();
+  await page.getByRole("dialog", { name: "Add project" }).waitFor();
+  await capture(page, "inertia-add-project.png");
+  await page.getByRole("button", { name: "Close add project" }).click();
+  await sidebar.getByRole("button", { name: "Thread actions for Review runtime safeguards", exact: true }).click();
+  await sidebar.getByRole("menuitem", { name: "Add this chat to split view", exact: true }).click();
+  await page.getByRole("main", { name: "Split conversation workspace" }).waitFor();
+  await page.mouse.move(1100, 350);
+  await capture(page, "inertia-split-workspace.png");
+  await page.getByRole("button", { name: "Close split chat Review runtime safeguards", exact: true }).click();
+  await sidebar.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByRole("radio", { name: "Light", exact: true }).click();
   await page.getByRole("button", { name: "Go to workspace" }).click();
-  await page.getByRole("button", { name: "Open workspace tools" }).click();
-  await selectWorkspaceTool(page, "Changes");
   await capture(page, "inertia-light.png");
 
-  await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page.getByRole("radio", { name: "Dark" }).click();
-  await page.getByText(
-    `Inertia · v${packageManifest.version}`,
-    { exact: true },
-  ).first().waitFor();
-  await capture(page, "inertia-settings.png");
-
-  await page.getByRole("button", { name: "Discord", exact: true }).click();
-  await page.getByRole("heading", { name: "Discord", level: 3 }).waitFor();
-  await page.getByLabel("Discord release repository URL").fill(
-    "https://github.com/eduardtomas1/inertia",
-  );
-  await page.getByText(
-    "Incoming Discord webhook stored only in the operating system credential vault.",
-    { exact: true },
-  ).waitFor();
-  await page.evaluate(() => {
-    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
-  });
-  await page.mouse.move(1_500, 900);
-  await capture(page, "inertia-discord-settings.png");
-
-  await page.getByRole("button", { name: "Go to workspace" }).click();
-  await page.keyboard.press(process.platform === "darwin" ? "Meta+K" : "Control+K");
-  await page.getByRole("dialog", { name: "Search Inertia" }).waitFor();
-  await capture(page, "inertia-search.png");
-  await page.keyboard.press("Escape");
-
-  const database = new Database(databasePath);
-  database.prepare("DELETE FROM projects").run();
-  database.close();
-  await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page.getByRole("radio", { name: "Light" }).click();
-  await page.getByRole("radio", { name: "Dark" }).click();
-  await page.getByRole("button", { name: "Go to workspace" }).click();
-  await page.getByRole("heading", { name: "Bring a project into focus.", level: 2 }).waitFor();
-  await page.evaluate(() => {
-    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
-  });
-  await page.mouse.move(900, 700);
-  await capture(page, "inertia-new-project.png");
 } finally {
   await app?.close().catch(() => undefined);
   await rm(captureRoot, { recursive: true, force: true });

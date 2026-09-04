@@ -147,16 +147,15 @@ test("launches two truthful routes and locks a bounded third-model judge", async
     ),
   ).toHaveCount(2);
   await expect(
-    sidebar.locator("button.conversation-row")
+    sidebar.locator("button.activity-thread-select")
       .filter({ hasText: "Lifecycle review" }),
   ).toBeVisible();
-  await sidebar.getByRole("button", { name: "Expand Companion" }).click();
   await expect(
-    sidebar.locator("button.conversation-row")
+    sidebar.locator("button.activity-thread-select")
       .filter({ hasText: "Independent review" }),
   ).toBeVisible();
   await expect(
-    sidebar.locator("button.conversation-row")
+    sidebar.locator("button.activity-thread-select")
       .filter({ hasText: "Independent judge" }),
   ).toBeVisible();
   await app.expectNoViewportOverflow();

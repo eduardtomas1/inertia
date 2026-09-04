@@ -1109,38 +1109,7 @@ textarea {
   display: none;
 }
 
-.sidebar-mode-switch {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-  margin-top: 7px;
-  padding: 2px 3px;
-  border: 0;
-  border-bottom: 1px solid var(--border);
-  border-radius: 0;
-  background: transparent;
-}
 
-.sidebar-mode-switch button {
-  display: flex;
-  min-width: 0;
-  min-height: 29px;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 6px;
-  border-radius: 5px;
-  color: var(--text-muted);
-  background: transparent;
-  font-size: 10px;
-  font-weight: 590;
-  transition: color var(--motion-fast) var(--motion-ease), background var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease);
-}
-
-.sidebar-mode-switch button[aria-pressed="true"] {
-  color: var(--text);
-  background: transparent;
-  box-shadow: inset 0 -2px 0 var(--accent);
-}
 
 .sidebar-project-rename {
   display: grid;
@@ -1522,7 +1491,6 @@ textarea {
 @media (prefers-reduced-motion: reduce) {
   .activity-thread,
   .activity-thread-menu-button,
-  .sidebar-mode-switch button,
   .thread-status-dot.is-working {
     animation: none;
     transition: none;
@@ -1566,9 +1534,9 @@ textarea {
   flex-direction: column;
   overflow: hidden;
   border: 1px solid var(--panel-border);
-  border-radius: var(--radius-lg);
+  border-radius: 10px;
   background: var(--surface);
-  box-shadow: var(--shadow), var(--glass-inset);
+  box-shadow: none;
 }
 
 .workspace-header {

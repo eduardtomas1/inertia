@@ -78,10 +78,11 @@ describe("cross-platform packaged behavior contract", () => {
   });
 
   it("keeps deterministic exact-head Canary screenshot wiring", async () => {
-    const readme = await source("README.md");
-    expect(readme).toContain("### Canary release channel");
+    const readme = await source("docs/INSTALLING.md");
+    expect(await source("README.md")).toContain("[Installation guide](docs/INSTALLING.md)");
+    expect(readme).toContain("## Canary release channel");
     expect(readme).toContain(
-      "![Inertia Canary channel status and rollback controls](docs/screenshots/inertia-canary-channel.png)",
+      "![Inertia Canary channel status and rollback controls](screenshots/inertia-canary-channel.png)",
     );
 
     const scenario = await source("tests/e2e/canary-channel.spec.ts");
@@ -105,7 +106,8 @@ describe("cross-platform packaged behavior contract", () => {
   });
 
   it("documents six checksum-first native choices without disabling platform security", async () => {
-    const readme = await source("README.md");
+    const readme = await source("docs/INSTALLING.md");
+    expect(await source("README.md")).toContain("[Installation guide](docs/INSTALLING.md)");
     const normalizedReadme = readme.replace(/\s+/gu, " ");
     for (const choice of [
       "| macOS | Apple silicon (arm64) |",

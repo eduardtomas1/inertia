@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   type AgentApprovalDecision,
   type AgentApprovalRequest,
@@ -14,6 +14,7 @@ import {
 import { defaultSettings } from "@shared/contracts/app";
 import { selectConversationWorkspaceRun } from "../../shared/attention";
 import "./detached-chat-workbench.css";
+import type { ProjectImportInput } from "../../shared/project-import";
 import { AppLayout } from "./components/AppLayout";
 import { LoadingMark } from "./components/ui";
 import type { WorkspaceSceneProps } from "./components/WorkspaceScene";
@@ -77,11 +78,9 @@ import { requestComposerPrefill } from "./utils/composerPrefill";
 import { canFollowUpSubagentTrace } from "./utils/subagentDisclosure";
 import { prepareComposerDetachment } from "./utils/composerOwnership";
 import type { AppView } from "./appView";
-
 const focusPrimaryPreview = (): void => {
   focusWorkspacePreviewAddress("primary");
 };
-
 export function commandMayChangeWorkspaceAuthority(
   command: CommandWithoutId,
 ): boolean {
@@ -99,7 +98,7 @@ export function commandMayChangeWorkspaceAuthority(
       return false;
   }
 }
-
+const AddProjectDialog = lazy(async () => ({ default: (await import("./components/AddProjectDialog")).AddProjectDialog }));
 export default function App(): React.JSX.Element {
   const connection = useStableController(useInertiaConnection());
   const detachedChats = useDetachedChatWindows();
@@ -128,6 +127,7 @@ export default function App(): React.JSX.Element {
   const [commitDialogOpen, setCommitDialogOpen] = useState(false);
   const [dailyWorkOpen, setDailyWorkOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [addProjectOpen, setAddProjectOpen] = useState(false);
   const [authProviderId, setAuthProviderId] = useState<ProviderId | null>(null);
   const [latestContentVisible, setLatestContentVisible] = useState(false);
   const [attentionVisibilityVersion, setAttentionVisibilityVersion] = useState(0);
@@ -154,7 +154,6 @@ export default function App(): React.JSX.Element {
     [connection.snapshot?.settings],
   );
   useTheme(settings.theme, settings.colorTheme);
-
   useEffect(() => {
     if (detachedChats.conversationIds.size === 0) return;
     setSuppressedMainConversationIds((current) => {
@@ -169,20 +168,17 @@ export default function App(): React.JSX.Element {
       return changed ? next : current;
     });
   }, [detachedChats.conversationIds]);
-
   useEffect(() => {
     const preference = connection.snapshot?.settings.theme;
     if (!preference) return;
     cacheThemePreference(window.localStorage, preference);
     void window.inertia.syncThemePreference(preference).catch(() => undefined);
   }, [connection.snapshot?.settings.theme]);
-
   useEffect(() => {
     const colorTheme = connection.snapshot?.settings.colorTheme;
     if (!colorTheme) return;
     cacheColorTheme(window.localStorage, colorTheme);
   }, [connection.snapshot?.settings.colorTheme]);
-
   useEffect(() => {
     applyInterfaceScale(settings.interfaceScale);
   }, [settings.interfaceScale]);
@@ -556,13 +552,13 @@ export default function App(): React.JSX.Element {
   ]);
 
   const importProject = async () => {
-    if (busyAction) return;
-    try {
-      if (!await draftConversation.importProject()) return;
-      setView("workspace");
-      setSidebarOpen(false);
-      showStartupSurface(effectiveWorkspaceStartupSurface);
-    } catch { /* The toast carries the error. */ }
+    if (!busyAction) setAddProjectOpen(true);
+  };
+  const confirmProjectImport = async (input: ProjectImportInput): Promise<void> => {
+    if (!await draftConversation.importProject(input)) return;
+    setView("workspace");
+    setSidebarOpen(false);
+    showStartupSurface(effectiveWorkspaceStartupSurface);
   };
   const selectProject = (nextProject: Project) => {
     if (nextProject.id === project?.id) return;
@@ -1168,6 +1164,8 @@ export default function App(): React.JSX.Element {
   }
 
   return (
+    <>
+    {addProjectOpen && <Suspense fallback={null}><AddProjectDialog onClose={() => setAddProjectOpen(false)} onImport={confirmProjectImport} /></Suspense>}
     <AppLayout
       platform={platform}
       documentActive={documentActive}
@@ -1243,5 +1241,6 @@ export default function App(): React.JSX.Element {
         dismissActivity,
       }}
     />
+    </>
   );
 }

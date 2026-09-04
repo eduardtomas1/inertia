@@ -72,7 +72,6 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
   const primaryTitle = "conversation-split fixture";
   const secondaryTitle = "conversation-split companion";
 
-  await sidebar.getByRole("button", { name: "Expand Companion" }).click();
   await sidebar.getByRole("button", {
     name: `Thread actions for ${secondaryTitle}`,
   }).click();
@@ -652,7 +651,7 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
     exact: true,
   }).click();
 
-  await sidebar.locator("button.conversation-row")
+  await sidebar.locator("button.activity-thread-select")
     .filter({ hasText: secondaryTitle })
     .click();
   primary = page.getByRole("region", {

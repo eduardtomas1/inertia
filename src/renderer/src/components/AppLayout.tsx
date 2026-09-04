@@ -457,11 +457,11 @@ export function AppLayout({
             view={view}
             open={sidebarOpen}
             busy={busyAction === "project.create"}
+            updateAvailable={appUpdate.visible}
             layoutWidth={sidebarLayout.value}
             onClose={sidebarActions.close}
             onViewChange={sidebarActions.viewChange}
             onImportProject={sidebarActions.importProject}
-            onSelectProject={sidebarActions.selectProject}
             onSelectConversation={sidebarActions.selectConversation}
             splitConversationId={splitConversationId}
             detachedConversationIds={detachedConversationIds}
@@ -488,7 +488,6 @@ export function AppLayout({
             onSetProjectGitRepositoryLimit={
               sidebarActions.setProjectGitRepositoryLimit
             }
-            onSidebarModeChange={sidebarActions.sidebarModeChange}
             onRemoveProject={sidebarActions.removeProject}
           />
         </Suspense>

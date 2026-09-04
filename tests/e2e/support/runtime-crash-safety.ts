@@ -1,3 +1,4 @@
+import { openLocalProjectFromDialog } from "./add-project";
 import { expect, type TestInfo } from "@playwright/test";
 import { createHash, randomUUID } from "node:crypto";
 import { copyFileSync, readFileSync } from "node:fs";
@@ -407,6 +408,7 @@ export async function expectRuntimeCrashRecovery(
       }));
     }, workspaceDirectory);
     await addFirstProject.click();
+    await openLocalProjectFromDialog(page);
     await expect(page.getByRole("heading", {
       name: /^What should we build in .+\?$/u,
       level: 3,
@@ -433,7 +435,7 @@ export async function expectRuntimeCrashRecovery(
   };
   const previousConversationId = activeConversationId();
   const activeConversationRow = projectNavigation.locator(
-    '.conversation-row[aria-current="page"]',
+    '.activity-thread-select[aria-current="page"]',
   );
   const previousActiveConversationRow = await activeConversationRow.count() > 0
     ? await activeConversationRow.elementHandle()

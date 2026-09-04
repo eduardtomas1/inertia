@@ -133,7 +133,6 @@ test("resumes the selected provider session only in its owning split pane", asyn
   const sidebar = page.getByRole("complementary", {
     name: "Project navigation",
   });
-  await sidebar.getByRole("button", { name: "Expand Companion" }).click();
   await sidebar.getByRole("button", {
     name: `Thread actions for ${secondaryTitle}`,
   }).click();

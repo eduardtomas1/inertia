@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture } from "./support/app-fixture";
 
-test("keeps compact Work sidebar geometry", async ({
+test("keeps three-line Work sidebar geometry", async ({
   browserName: _browserName,
 }, testInfo) => {
   const app = await createAppFixture({
@@ -85,19 +85,19 @@ test("keeps compact Work sidebar geometry", async ({
       name: "Project navigation",
       exact: true,
     });
-    await expect(sidebar.getByRole("button", { name: "Work", exact: true }))
-      .toHaveAttribute("aria-pressed", "true");
+    await expect(sidebar.getByRole("list", { name: "Work", exact: true })).toBeVisible();
+    await expect(sidebar.getByRole("button", { name: "Projects", exact: true })).toHaveCount(0);
     const row = sidebar.getByRole("button", { name: /^Polish compact Work rows,/u });
     await expect(row).toBeVisible();
     const rowBox = await row.boundingBox();
     expect(rowBox).not.toBeNull();
-    expect(rowBox!.height).toBeGreaterThanOrEqual(42);
-    expect(rowBox!.height).toBeLessThanOrEqual(48);
+    expect(rowBox!.height).toBeGreaterThanOrEqual(78);
+    expect(rowBox!.height).toBeLessThanOrEqual(84);
     const statusCue = row.locator('[data-work-status="idle"]');
     await expect(statusCue.locator("svg.lucide-minus")).toBeVisible();
     const statusBox = await statusCue.boundingBox();
-    expect(statusBox?.width).toBe(11);
-    expect(statusBox?.height).toBe(11);
+    expect(statusBox?.width).toBe(10);
+    expect(statusBox?.height).toBe(10);
     for (const providerId of ["codex", "claude", "cursor", "kimi", "opencode"]) {
       const icon = sidebar.locator(
         `.provider-brand-icon[data-provider-id="${providerId}"][data-provider-icon-kind="official"]`,
@@ -146,10 +146,10 @@ test("keeps compact Work sidebar geometry", async ({
         };
       });
     expect(narrowState).toMatchObject({
-      branchDisplay: "none",
+      branchDisplay: "flex",
       sidebarWidth: 220,
     });
-    await expect(row.locator(".activity-thread-branch-meta")).toBeHidden();
+    await expect(row.locator(".activity-thread-branch-meta")).toBeVisible();
     const narrowLightScreenshot = testInfo.outputPath(
       "chat-index-narrow-light-220px.png",
     );

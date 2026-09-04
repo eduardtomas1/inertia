@@ -1,3 +1,4 @@
+import { openLocalProjectFromDialog } from "./support/add-project";
 import { expect, test } from "@playwright/test";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -59,8 +60,7 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
     ).toBe("ready");
     await expect(
       page.getByRole("complementary", { name: "Project navigation", exact: true })
-        .locator(".sidebar-mode-switch")
-        .getByRole("button", { name: "Projects", exact: true }),
+        .getByRole("button", { name: "Add project", exact: true }),
     ).toBeEnabled({ timeout: 10_000 });
     await electronApp.evaluate(({ dialog }, directory) => {
       Reflect.set(dialog, "showOpenDialog", async () => ({
@@ -72,6 +72,7 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
     const addProject = page.getByRole("button", { name: "Add your first project" });
     await expect(addProject).toBeEnabled();
     await addProject.click();
+    await openLocalProjectFromDialog(page);
     await expect(page.getByRole("heading", {
       name: /^What should we build in .+\?$/u,
       level: 3,

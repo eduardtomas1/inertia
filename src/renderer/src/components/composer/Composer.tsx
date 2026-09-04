@@ -1,3 +1,4 @@
+import "./ComposerSurface.css";
 import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import type { ChatAttachment, PromptPreset } from "@shared/contracts";

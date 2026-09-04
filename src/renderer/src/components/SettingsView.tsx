@@ -505,13 +505,7 @@ export function SettingsView({
 
             <section className="settings-card" aria-labelledby="workspace-heading">
               <div className="settings-card-heading"><div><PanelLeft size={18} /></div><span><h3 id="workspace-heading">Workspace</h3><p>Choose which quiet details help you stay oriented.</p></span></div>
-              <div className="response-density-setting">
-                <span><strong>Project navigation</strong><small>Browse projects or focus on work that needs attention across them.</small></span>
-                <div role="radiogroup" aria-label="Project navigation">
-                  <button type="button" role="radio" aria-checked={settings.sidebarMode === "classic"} className={clsx(settings.sidebarMode === "classic" && "is-active")} disabled={disabled} onClick={() => onUpdate({ sidebarMode: "classic" })}>Projects</button>
-                  <button type="button" role="radio" aria-checked={settings.sidebarMode === "activity"} className={clsx(settings.sidebarMode === "activity" && "is-active")} disabled={disabled} onClick={() => onUpdate({ sidebarMode: "activity" })}>Work</button>
-                </div>
-              </div>
+
               <div className="response-density-setting">
                 <span><strong>Workspace startup</strong><small>Begin in Environment or restore the last workspace panel you used.</small></span>
                 <div role="radiogroup" aria-label="Workspace startup surface">

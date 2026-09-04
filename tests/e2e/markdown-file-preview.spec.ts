@@ -145,7 +145,6 @@ test("opens a rendered project Markdown file directly from the chat", async () =
   const sidebar = page.getByRole("complementary", {
     name: "Project navigation",
   });
-  await sidebar.getByRole("button", { name: "Expand Companion" }).click();
   await sidebar.getByRole("button", {
     name: "Thread actions for markdown-file-preview companion",
   }).click();

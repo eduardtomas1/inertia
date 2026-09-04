@@ -89,7 +89,7 @@ test("shares one directly openable Browser across user, agent, and restart lifec
     },
     conversationId,
   )).toMatchObject({ ok: false, code: "unavailable" });
-  await page.getByRole("button", { name: "Workspace", exact: true }).click();
+  await page.getByRole("button", { name: "Go to workspace", exact: true }).click();
   await expect(page.getByRole("button", {
     name: "Open Browser",
     exact: true,

@@ -5,6 +5,7 @@ import {
   useState,
 } from "react";
 
+import type { ProjectImportInput } from "../../../shared/project-import";
 import type {
   AppSettings,
   AppSnapshot,
@@ -133,12 +134,12 @@ export function useDraftConversation({
     });
   };
 
-  const importProject = async (): Promise<boolean> => {
-    const path = await window.inertia.selectDirectory();
+  const importProject = async (input?: ProjectImportInput): Promise<boolean> => {
+    const path = input?.path ?? await window.inertia.selectDirectory();
     if (!path) return false;
     const event = await (runNavigationCommand ?? run)("project.create", {
       type: "project.create",
-      payload: { name: projectNameFromPath(path), path },
+      payload: { name: input?.clone?.directoryName ?? projectNameFromPath(path), path, ...(input?.clone ? { clone: input.clone } : {}) },
     });
     if (
       event.type !== "request.result"

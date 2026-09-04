@@ -662,7 +662,7 @@ describe("composer asynchronous ownership", () => {
       name: "Model and run settings",
     })).toBeInTheDocument();
     expect(within(toolbar).getByRole("group", {
-      name: "Usage and message actions",
+      name: "Usage",
     })).toBeInTheDocument();
 
     fireEvent.change(input, { target: { value: "Keep every control reachable" } });
@@ -675,7 +675,8 @@ describe("composer asynchronous ownership", () => {
     const send = within(toolbar).getByRole("button", { name: "Send message" });
     attach.focus();
     await userEvent.setup().tab();
-    expect(presets).toHaveFocus();
+    expect(send).toHaveFocus();
+    expect(presets).not.toHaveAttribute("tabindex", "-1");
     expect(attach).not.toHaveAttribute("tabindex", "-1");
     expect(send).not.toHaveAttribute("tabindex", "-1");
   });

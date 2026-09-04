@@ -15,11 +15,11 @@ export interface SidebarProps {
   view: AppView;
   open: boolean;
   busy: boolean;
+  updateAvailable?: boolean;
   layoutWidth: number;
   onClose: () => void;
   onViewChange: (view: AppView) => void;
   onImportProject: () => void;
-  onSelectProject: (project: Project) => void;
   onSelectConversation: (conversation: Conversation) => void;
   detachedConversationIds?: ReadonlySet<string>;
   detachedChatLimitReached?: boolean;
@@ -47,6 +47,5 @@ export interface SidebarProps {
     groupingMode: ProjectGroupingMode | null,
   ) => void;
   onSetProjectGitRepositoryLimit: (project: Project, limit: number) => void;
-  onSidebarModeChange: (mode: AppSnapshot["settings"]["sidebarMode"]) => void;
   onRemoveProject: (project: Project) => void;
 }

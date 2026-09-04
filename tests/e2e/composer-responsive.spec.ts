@@ -1,3 +1,4 @@
+import { openLocalProjectFromDialog } from "./support/add-project";
 import { expect, test } from "@playwright/test";
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
@@ -50,8 +51,7 @@ test("keeps the composer as one cohesive dock across themes and responsive split
       page.getByRole("complementary", {
         name: "Project navigation",
         exact: true,
-      }).locator(".sidebar-mode-switch")
-        .getByRole("button", { name: "Projects", exact: true }),
+      }).getByRole("button", { name: "Add project", exact: true }),
     ).toBeEnabled({ timeout: 10_000 });
     await electronApp.evaluate(({ dialog }, directory) => {
       Reflect.set(dialog, "showOpenDialog", async () => ({
@@ -65,6 +65,7 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     });
     await expect(addProject).toBeEnabled();
     await addProject.click();
+    await openLocalProjectFromDialog(page);
     await expect(page.getByRole("heading", {
       name: /^What should we build in .+\?$/u,
       level: 3,
@@ -186,7 +187,7 @@ test("keeps the composer as one cohesive dock across themes and responsive split
       const toolbarStyle = toolbarElement ? getComputedStyle(toolbarElement) : null;
       const textareaStyle = textarea ? getComputedStyle(textarea) : null;
       const visibleControlHeights = [...element.querySelectorAll<HTMLElement>(
-        '.composer-toolbar button, .composer-toolbar [role="region"] > button',
+        '.composer-primary-rail button, .composer-primary-rail [role="region"] > button',
       )].filter((control) => {
         const style = getComputedStyle(control);
         const bounds = control.getBoundingClientRect();
@@ -216,7 +217,7 @@ test("keeps the composer as one cohesive dock across themes and responsive split
           : Number.POSITIVE_INFINITY,
         backdropFilter: computed.backdropFilter,
         webkitBackdropFilter: computed.getPropertyValue("-webkit-backdrop-filter"),
-        backgroundColor: computed.backgroundColor,
+        backgroundColor: inputStyle?.backgroundColor,
         shellOrder: [...(element.parentElement?.children ?? [])].map((child) =>
           child === element
             ? "dock"
@@ -271,8 +272,8 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     expect(wideGeometry.dockFits).toBe(true);
     expect(wideGeometry.toolbarFits).toBe(true);
     expect(wideGeometry.zoneOrder).toEqual(["input", "controls"]);
-    expect(wideGeometry.inputPaddingInline).toBe("14px");
-    expect(wideGeometry.inputPaddingBlock).toBe("10px");
+    expect(wideGeometry.inputPaddingInline).toBe("18px 105px");
+    expect(wideGeometry.inputPaddingBlock).toBe("16px 15px");
     expect(wideGeometry.toolbarBorderTop).toBe("1px");
     expect(wideGeometry.toolbarBackground)
       .not.toBe(wideGeometry.textareaBackground);
@@ -288,7 +289,6 @@ test("keeps the composer as one cohesive dock across themes and responsive split
       "access",
       "mode",
       "usage",
-      "send",
     ]);
     if (wideGeometry.optionMarkers.includes("reasoning")) {
       expect(wideGeometry.optionMarkers.indexOf("reasoning")).toBe(1);
@@ -347,8 +347,8 @@ test("keeps the composer as one cohesive dock across themes and responsive split
         }),
       };
     });
-    expect(settingGeometry.borderLeft).toBe("1px");
-    expect(settingGeometry.borderRight).toBe("1px");
+    expect(settingGeometry.borderLeft).toBe("0px");
+    expect(settingGeometry.borderRight).toBe("0px");
     expect(Math.max(...settingGeometry.heights)
       - Math.min(...settingGeometry.heights)).toBeLessThanOrEqual(1);
     expect(new Set(settingGeometry.borders)).toEqual(new Set(["0px"]));

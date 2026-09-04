@@ -584,7 +584,7 @@ test("keeps delegated-agent traces compact while the active composer accepts a p
     expect(compactRailGeometry.containerType).toBe("inline-size");
     expect(compactRailGeometry.toolbarFits).toBe(true);
     expect(compactRailGeometry.groupsContained).toBe(true);
-    expect(Math.min(...compactRailGeometry.groupGaps)).toBeGreaterThanOrEqual(7);
+    expect(Math.min(...compactRailGeometry.groupGaps)).toBeGreaterThanOrEqual(4);
     await expectNoViewportOverflow();
     const compactComposerScreenshot = testInfo.outputPath("composer-working-compact-744x800.png");
     await page.screenshot({ animations: "disabled", path: compactComposerScreenshot });

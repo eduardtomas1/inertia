@@ -9,6 +9,7 @@ import {
 } from "../../../shared/provider-terminal-resume";
 import { restoreCheckpoint } from "../../checkpoints";
 import type { RuntimeStore } from "../../database";
+import { cloneProject } from "../../project-clone";
 import { inspectProjectIdentity } from "../../project-identity";
 import { requireRuntimeDirectory } from "../../runtime-commands";
 import { RuntimeRequestError } from "../../runtime-errors";
@@ -88,7 +89,15 @@ export function createProjectWorkspaceCommandHandler(
   ], async (socket, command) => {
     switch (command.type) {
       case "project.create": {
-        const path = requireRuntimeDirectory(command.payload.path);
+        let path = requireRuntimeDirectory(command.payload.path);
+        if (command.payload.clone) {
+          const controller = new AbortController();
+          const cancel = (): void => controller.abort();
+          socket.once("close", cancel);
+          try { path = await cloneProject(path, command.payload.clone, controller.signal); }
+          finally { socket.off("close", cancel); }
+          if (socket.readyState !== WebSocket.OPEN) return "handled";
+        }
         const identity = await inspectProjectIdentity(path);
         const project = dependencies.store.createProject(
           command.payload.name,

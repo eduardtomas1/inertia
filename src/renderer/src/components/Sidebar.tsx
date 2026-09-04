@@ -15,14 +15,12 @@ import {
   ChevronRight,
   CircleDot,
   CircleX,
-  Folder,
   FolderOpen,
-  FolderPlus,
+  FolderGit2,
+  Download,
   GitBranch,
   Layers3,
-  ListTree,
   MessageCircleQuestion,
-  MessageSquare,
   Minus,
   MoreHorizontal,
   Pencil,
@@ -36,7 +34,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import type { Conversation, Project, ProjectGroupingMode } from "@shared/contracts";
-import { formatRelativeTime } from "../lib/format";
+import { formatRelativeTime, formatWorkAge } from "../lib/format";
 import { agentRequestProviderName } from "../utils/agentInput";
 import { focusModalOnAnimationFrame, trapModalFocus } from "../utils/modalFocus";
 import { useMediaQuery } from "../hooks/useMediaQuery";
@@ -49,8 +47,6 @@ import {
   type WorkIndexItem,
 } from "../hooks/useSidebarWorkIndex";
 import {
-  buildLogicalProjectGroups,
-  classicSidebarSearch,
   groupWorkThreads,
   nextSidebarNavigationIndex,
   isSidebarNavigationKey,
@@ -67,6 +63,8 @@ import { DailyWorkMark } from "./DailyWorkMark";
 import { IconButton, LoadingMark } from "./ui";
 import { loadDailyWorkDialog, loadMultiSpawnDialog, loadSettingsView, loadUsageView } from "./lazySurfaceLoaders";
 import type { AppView } from "../appView";
+import { ProjectScopePicker } from "./sidebar/ProjectScopePicker";
+import "./sidebar/workspace-navigation.css";
 import type { SidebarProps } from "./sidebar/SidebarProps";
 import {
   EMPTY_DETACHED_CONVERSATION_IDS,
@@ -138,7 +136,6 @@ function SidebarView({
   onClose,
   onViewChange,
   onImportProject,
-  onSelectProject,
   onSelectConversation,
   detachedConversationIds = EMPTY_DETACHED_CONVERSATION_IDS,
   detachedChatLimitReached = false,
@@ -163,11 +160,11 @@ function SidebarView({
   onRenameProject,
   onSetProjectGrouping,
   onSetProjectGitRepositoryLimit,
-  onSidebarModeChange,
   onRemoveProject,
+  updateAvailable = false,
 }: SidebarProps): React.JSX.Element {
   const [query, setQuery] = useState("");
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [projectScopeId, setProjectScopeId] = useState<string | null>(null);
   const {
     menu,
     toggleMenu,
@@ -207,19 +204,9 @@ function SidebarView({
       || (mobile && open),
   ));
   const compact = snapshot?.settings.compactSidebar ?? false;
-  const sidebarMode = snapshot?.settings.sidebarMode ?? "classic";
   const globalGrouping = snapshot?.settings.projectGrouping ?? "separate";
 
-  useEffect(() => {
-    if (!snapshot?.activeProjectId) return;
-    setExpanded((current) => {
-      if (current.has(snapshot.activeProjectId as string)) return current;
-      const next = new Set(current);
-      next.add(snapshot.activeProjectId as string);
-      return next;
-    });
-  }, [snapshot?.activeProjectId]);
-  useEffect(() => setDoneVisible(WORK_DONE_PAGE_SIZE), [query, sidebarMode]);
+  useEffect(() => setDoneVisible(WORK_DONE_PAGE_SIZE), [query]);
   useLayoutEffect(() => {
     if (!projectMenu) return;
     sidebarRef.current?.querySelector<HTMLButtonElement>(
@@ -236,19 +223,11 @@ function SidebarView({
     } catch { /* Storage can be unavailable in hardened renderer sessions. */ }
   }, [expandedWorkSections]);
 
-  useLayoutEffect(() => {
-    setQuery("");
-    dismissMenu("context-change");
-    setRenaming(null);
-    setRenameDraft("");
-  }, [dismissMenu, sidebarMode]);
-
   useEffect(() => {
     onCloseRef.current = onClose;
   }, [onClose]);
 
   useEffect(() => {
-    if (sidebarMode !== "activity") return;
     const clearWorkFocusIfUnowned = (event: Event): void => {
       const target = event.target;
       const focusOwner = target instanceof Element
@@ -265,7 +244,7 @@ function SidebarView({
       document.removeEventListener("focusin", clearWorkFocusIfUnowned);
       document.removeEventListener("pointerdown", clearWorkFocusIfUnowned, true);
     };
-  }, [sidebarMode]);
+  }, []);
 
   useEffect(() => {
     if (!mobile || !open) return;
@@ -288,21 +267,6 @@ function SidebarView({
     };
   }, [mobile, open]);
 
-  const classicSearch = useMemo(
-    () => classicSidebarSearch(
-      snapshot?.projects ?? [],
-      conversations,
-      query,
-      snoozeNow,
-    ),
-    [conversations, query, snapshot?.projects, snoozeNow],
-  );
-  const visibleProjects = classicSearch.projects;
-
-  const logicalGroups = useMemo(
-    () => buildLogicalProjectGroups(visibleProjects, globalGrouping),
-    [globalGrouping, visibleProjects],
-  );
   const projectById = useMemo(
     () => new Map((snapshot?.projects ?? []).map((project) => [project.id, project])),
     [snapshot?.projects],
@@ -319,11 +283,13 @@ function SidebarView({
       snapshot?.runs,
     ],
   );
+  const scopedProjectId = projectScopeId && projectById.has(projectScopeId) ? projectScopeId : null;
   const activityThreads = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase();
     return sortSidebarThreadViews(
       conversations
         .filter((conversation) => {
+          if (scopedProjectId && conversation.projectId !== scopedProjectId) return false;
           if (!needle) return true;
           const project = projectById.get(conversation.projectId);
           const providerLabel = snapshot?.settings.providerIdentityLabels[conversation.providerId]
@@ -344,6 +310,7 @@ function SidebarView({
         .map((conversation) => threadViewsById.get(conversation.id)!),
     );
   }, [
+    scopedProjectId,
     projectById,
     query,
     conversations,
@@ -371,15 +338,14 @@ function SidebarView({
     activeConversationId: snapshot?.activeConversationId ?? null,
     compact,
     doneVisible,
-    enabled: sidebarMode === "activity",
+    enabled: true,
     expandedSections: expandedWorkSections,
-    motionEnabled: sidebarMode === "activity" && !reducedMotion,
+    motionEnabled: !reducedMotion,
     navigationRef,
     searchActive: workSearchActive,
     sections: workSections,
   });
   useLayoutEffect(() => {
-    if (sidebarMode !== "activity") return;
     if (conversationMenu && !visibleWorkConversationIds.has(conversationMenu)) {
       dismissMenu("context-change");
     }
@@ -391,11 +357,10 @@ function SidebarView({
     conversationMenu,
     dismissMenu,
     renaming,
-    sidebarMode,
     visibleWorkConversationIds,
   ]);
   useLayoutEffect(() => {
-    if (sidebarMode !== "activity" || !virtualizedWorkIndex) return;
+    if (!virtualizedWorkIndex) return;
     if (conversationMenu && !renderedWorkConversationIds.has(conversationMenu)) {
       dismissMenu("context-change");
     }
@@ -408,16 +373,9 @@ function SidebarView({
     dismissMenu,
     renaming,
     renderedWorkConversationIds,
-    sidebarMode,
     virtualizedWorkIndex,
   ]);
   useLayoutEffect(() => {
-    if (sidebarMode !== "activity") {
-      workFocusIdentityRef.current = null;
-      workFocusIndexRef.current = null;
-      workFocusConversationIdsRef.current = [];
-      return;
-    }
     const identity = workFocusIdentityRef.current;
     if (!identity) return;
     const focusedSectionId = identity.startsWith("section:")
@@ -494,7 +452,6 @@ function SidebarView({
     doneVisible,
     expandedWorkSections,
     focusWorkIdentity,
-    sidebarMode,
     snoozeNow,
     workIndexByIdentity,
     workFocusOrder,
@@ -507,15 +464,6 @@ function SidebarView({
     0,
   );
   const activeRenameProject = renamingProject ? projectById.get(renamingProject) : undefined;
-
-  const toggleExpanded = (projectId: string) => {
-    setExpanded((current) => {
-      const next = new Set(current);
-      if (next.has(projectId)) next.delete(projectId);
-      else next.add(projectId);
-      return next;
-    });
-  };
 
   const navigate = (nextView: AppView) => {
     onViewChange(nextView);
@@ -535,39 +483,26 @@ function SidebarView({
       eventTarget?.matches("input, textarea, select")
       || eventTarget?.isContentEditable
     ) return;
-    if (sidebarMode === "activity") {
-      const focusOwner = eventTarget?.closest<HTMLElement>("[data-work-focus-id]");
-      const rawIdentity = focusOwner?.dataset.workFocusId;
-      const identity = rawIdentity?.startsWith("thread-actions:")
-        ? `thread:${rawIdentity.slice("thread-actions:".length)}`
-        : rawIdentity;
-      const currentIndex = identity
-        ? workNavigationOrder.indexOf(identity)
-        : -1;
-      const nextIndex = nextSidebarNavigationIndex(
-        currentIndex,
-        event.key,
-        workNavigationOrder.length,
-      );
-      const nextIdentity = workNavigationOrder[nextIndex];
-      if (!nextIdentity) return;
-      event.preventDefault();
-      focusWorkIdentity(nextIdentity);
-      workFocusIdentityRef.current = nextIdentity;
-      workFocusIndexRef.current = nextIndex;
-      return;
-    }
-    const items = [...(navigationRef.current?.querySelectorAll<HTMLElement>("[data-sidebar-nav]") ?? [])]
-      .filter((item) => !item.hasAttribute("disabled"));
-    if (items.length === 0) return;
-    const currentIndex = items.findIndex((item) => item === document.activeElement);
+    const focusOwner = eventTarget?.closest<HTMLElement>("[data-work-focus-id]");
+    const rawIdentity = focusOwner?.dataset.workFocusId;
+    const identity = rawIdentity?.startsWith("thread-actions:")
+      ? `thread:${rawIdentity.slice("thread-actions:".length)}`
+      : rawIdentity;
+    const currentIndex = identity
+      ? workNavigationOrder.indexOf(identity)
+      : -1;
     const nextIndex = nextSidebarNavigationIndex(
       currentIndex,
       event.key,
-      items.length,
+      workNavigationOrder.length,
     );
+    const nextIdentity = workNavigationOrder[nextIndex];
+    if (!nextIdentity) return;
     event.preventDefault();
-    items[nextIndex]?.focus();
+    focusWorkIdentity(nextIdentity);
+    workFocusIdentityRef.current = nextIdentity;
+    workFocusIndexRef.current = nextIndex;
+
   };
 
   const startProjectRename = (project: Project) => {
@@ -586,6 +521,7 @@ function SidebarView({
       aria-label={`Project actions for ${project.name}`}
       onKeyDown={navigateMenuItems}
     >
+      <button type="button" role="menuitem" tabIndex={-1} onClick={() => { dismissMenu("selection"); onCreateConversation(project); }}><SquarePen size={13} />New chat in {project.name}</button>
       <button type="button" role="menuitem" tabIndex={-1} onClick={() => { dismissMenu("selection"); onOpenProject(project); }}><FolderOpen size={13} />Open folder</button>
       <button type="button" role="menuitem" tabIndex={-1} onClick={() => startProjectRename(project)}><Pencil size={13} />Rename</button>
       <span className="project-menu-heading"><Layers3 size={12} />Grouping behavior</span>
@@ -665,7 +601,7 @@ function SidebarView({
     return (
       <ConversationActionsMenu
         activeConversationId={snapshot?.activeConversationId ?? null}
-        activity={sidebarMode === "activity"}
+        activity
         conversation={conversation}
         detachedChatLimitReached={detachedChatLimitReached}
         isDetached={detachedConversationIds.has(conversation.id)}
@@ -706,9 +642,7 @@ function SidebarView({
         value={renameDraft}
         maxLength={120}
         autoFocus
-        data-work-focus-id={sidebarMode === "activity"
-          ? `thread:${conversation.id}`
-          : undefined}
+        data-work-focus-id={`thread:${conversation.id}`}
         aria-label={`Rename ${conversation.title}`}
         onChange={(event) => setRenameDraft(event.target.value)}
         onBlur={() => setRenaming(null)}
@@ -777,57 +711,21 @@ function SidebarView({
             aria-label={accessibleContext}
             onClick={() => activateConversation(conversation)}
           >
-            <span
-              className="activity-thread-provider"
-              aria-hidden="true"
-            >
-              <ProviderBrandIcon
-                providerId={conversation.providerId}
-                size={15}
-              />
-              <span
-                className="activity-thread-state-mark"
-                data-work-status={model.status}
-              >
-                <WorkStatusIcon size={8} />
+            <span className="activity-thread-projectline">
+              <FolderGit2 size={15} className="activity-project-icon" style={{ color: project?.color }} aria-hidden="true" />
+              <span className="activity-thread-project-meta" title={project?.path}>{projectLabel}</span>
+              <SidebarConversationMarks pinned={Boolean(conversation.pinnedAt)} detached={isDetached} split={splitConversationId === conversation.id} />
+              <span className="activity-thread-trailing" aria-hidden="true">
+                {model.status !== "idle" ? <span className="activity-thread-status-label"><span data-work-status={model.status}><WorkStatusIcon size={12} /></span>{statusLabels[model.status]}</span> : <time dateTime={conversation.updatedAt} title={formatRelativeTime(conversation.updatedAt)}><span className="activity-idle-icon" data-work-status="idle"><Minus size={10} /></span>{formatWorkAge(conversation.updatedAt)}</time>}
               </span>
             </span>
-            <span className="activity-thread-copy">
-              <span className="activity-thread-topline">
-                <span className="activity-thread-title">{conversation.title}</span>
-                <SidebarConversationMarks
-                  pinned={Boolean(conversation.pinnedAt)}
-                  detached={isDetached}
-                  split={splitConversationId === conversation.id}
-                />
-                {model.unread && <span className="thread-unread-mark">New</span>}
-              </span>
-              <span className="work-thread-meta">
-                <span className="activity-thread-provider-label">{providerLabel}</span>
-                <span className="activity-thread-project-meta">
-                  <Folder size={10} aria-hidden="true" />
-                  {projectLabel}
-                </span>
-                {repositoryLabel && (
-                  <span className="activity-thread-repository-meta">
-                    {repositoryLabel}
-                  </span>
-                )}
-                {conversation.branch && (
-                  <span className="activity-thread-branch-meta">
-                    <GitBranch size={10} aria-hidden="true" />
-                    {conversation.branch}
-                  </span>
-                )}
-              </span>
+            <span className="activity-thread-topline">
+              <span className="activity-thread-title">{conversation.title}</span>
+              {model.unread && <span className="thread-unread-mark">New</span>}
             </span>
-            <span className="activity-thread-trailing" aria-hidden="true">
-              <span className="activity-thread-status-label">
-                {statusLabels[model.status]}
-              </span>
-              <time dateTime={conversation.updatedAt}>
-                {formatRelativeTime(conversation.updatedAt)}
-              </time>
+            <span className="work-thread-meta">
+              {conversation.branch ? <span className="activity-thread-branch-meta" title={conversation.branch}><GitBranch size={12} aria-hidden="true" />{conversation.branch}</span> : <span className="activity-thread-branch-meta">{repositoryLabel ?? "Local workspace"}</span>}
+              <span className="activity-thread-provider" title={providerLabel} aria-hidden="true"><ProviderBrandIcon providerId={conversation.providerId} size={15} /></span>
             </span>
           </button>
         )}
@@ -924,7 +822,7 @@ function SidebarView({
         className={clsx(
           "sidebar", open && "is-open", compact && "is-compact",
           layoutWidth <= 255 && "is-narrow", layoutWidth >= 335 && "is-wide",
-          `sidebar-mode-${sidebarMode}`,
+          "sidebar-mode-activity",
         )}
         aria-label="Project navigation"
         aria-hidden={mobile && !open ? true : undefined}
@@ -963,47 +861,24 @@ function SidebarView({
           <IconButton label="Close navigation" className="mobile-close no-drag" onClick={onClose}><X size={17} /></IconButton>
         </div>
 
-        {snapshot && snapshot.projects.length > 0 && (
-          <div className="new-chat-actions">
-            <button
-              type="button"
-              className="new-chat-button"
-              disabled={connectionStatus !== "online"}
-              onClick={() => {
-                const targetProject = snapshot.projects.find((project) => project.id === snapshot.activeProjectId)
-                  ?? snapshot.projects[0];
-                if (targetProject) onCreateConversation(targetProject);
-              }}
-            >
-              <SquarePen size={16} /><span>New chat</span>
-            </button>
-            <IconButton
-              label="Launch two chats"
-              className="multi-spawn-button"
-              disabled={connectionStatus !== "online"}
-              onFocus={() => void loadMultiSpawnDialog()}
-              onPointerDown={() => void loadMultiSpawnDialog()}
-              onPointerEnter={() => void loadMultiSpawnDialog()}
-              onClick={onOpenMultiSpawn}
-            >
-              <Zap size={15} fill="currentColor" />
-            </IconButton>
+        <div className="sidebar-search-row">
+          <div className="sidebar-search-wrap">
+            <Search size={16} aria-hidden="true" />
+            <input value={query} onChange={(event) => setQuery(event.target.value)} aria-label="Search projects and conversations" placeholder="Search" type="search" />
+            {query && <IconButton label="Clear search" className="search-clear" onClick={() => setQuery("")}><X size={13} /></IconButton>}
           </div>
-        )}
-
-        <button type="button" className={clsx("sidebar-destination", view === "workspace" && "is-active")} aria-current={view === "workspace" ? "page" : undefined} onClick={() => navigate("workspace")}>
-          <MessageSquare size={16} /><span>Workspace</span>
-        </button>
-
-        <div className="sidebar-mode-switch" role="group" aria-label="Sidebar mode">
-          <button type="button" aria-pressed={sidebarMode === "classic"} disabled={connectionStatus !== "online"} onClick={() => onSidebarModeChange("classic")}><ListTree size={13} />Projects</button>
-          <button type="button" aria-pressed={sidebarMode === "activity"} disabled={connectionStatus !== "online"} onClick={() => onSidebarModeChange("activity")}><Activity size={13} />Work</button>
+          <IconButton label="New chat" disabled={connectionStatus !== "online" || !snapshot?.projects.length} onClick={() => {
+            const target = snapshot?.projects.find((project) => project.id === (scopedProjectId ?? snapshot.activeProjectId)) ?? snapshot?.projects[0];
+            if (target) onCreateConversation(target);
+          }}><SquarePen size={17} /></IconButton>
+          <IconButton label="Launch two chats" className="multi-spawn-button" disabled={connectionStatus !== "online" || !snapshot?.projects.length} onFocus={() => void loadMultiSpawnDialog()} onPointerEnter={() => void loadMultiSpawnDialog()} onClick={onOpenMultiSpawn}><Zap size={15} /></IconButton>
         </div>
-
-        <div className="sidebar-search-wrap">
-          <Search size={15} aria-hidden="true" />
-          <input value={query} onChange={(event) => setQuery(event.target.value)} aria-label="Search projects and conversations" placeholder={sidebarMode === "activity" ? "Search work" : "Search projects"} type="search" />
-          {query && <IconButton label="Clear search" className="search-clear" onClick={() => setQuery("")}><X size={13} /></IconButton>}
+        <div className="sidebar-project-navigation">
+        <ProjectScopePicker projects={snapshot?.projects ?? []} selectedId={scopedProjectId} onSelect={setProjectScopeId} onAdd={onImportProject} disabled={busy || connectionStatus !== "online"} onManage={(project, trigger) => {
+          setMenuTrigger(`:${project.id}`, trigger);
+          toggleMenu(`:${project.id}`);
+        }} />
+        {projectMenu && projectById.get(projectMenu) && <div className="sidebar-scope-actions">{projectActions(projectById.get(projectMenu)!)}</div>}
         </div>
 
         {activeRenameProject && (
@@ -1027,167 +902,9 @@ function SidebarView({
           </form>
         )}
 
-        {sidebarMode === "classic" && (
-          <div className="sidebar-section-title">
-            <span>Projects</span>
-            <IconButton label="Add project" disabled={busy || connectionStatus !== "online"} onClick={onImportProject}>
-              {busy ? <LoadingMark label="Adding project" /> : <FolderPlus size={15} />}
-            </IconButton>
-          </div>
-        )}
-
-        <div className="project-list" ref={navigationRef} onKeyDown={handleNavigationKeyDown} onScroll={updateWorkViewport} role="list" aria-label={sidebarMode === "activity" ? "Work" : "Projects"}>
+        <div className="project-list" ref={navigationRef} onKeyDown={handleNavigationKeyDown} onScroll={updateWorkViewport} role="list" aria-label="Work">
           {!snapshot && <div className="sidebar-loading"><LoadingMark label="Loading projects" /><span>Opening your workspace…</span></div>}
-          {snapshot && sidebarMode === "classic" && visibleProjects.length === 0 && (
-            <div className="sidebar-empty"><Folder size={19} /><span>{query ? "No matching projects" : "No projects yet"}</span></div>
-          )}
-
-          {sidebarMode === "classic" && logicalGroups.map((group) => (
-            <section className="logical-project-group" aria-label={group.label} key={group.key}>
-              {group.projects.length > 1 && <h2><Layers3 size={12} />{group.label}<span>{group.projects.length} folders</span></h2>}
-              {group.projects.map((project) => {
-                const isExpanded = expanded.has(project.id) || Boolean(query);
-                const isActive = snapshot?.activeProjectId === project.id;
-                const conversations =
-                  classicSearch.conversationsByProject.get(project.id) ?? [];
-                return (
-                  <div className="project-group" role="listitem" key={project.id}>
-                    <div className={clsx("project-row", isActive && view === "workspace" && "is-active")}>
-                      <IconButton label={`${isExpanded ? "Collapse" : "Expand"} ${project.name}`} className="project-expand" onClick={() => toggleExpanded(project.id)}>
-                        {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                      </IconButton>
-                      <button
-                        type="button"
-                        className="project-select"
-                        data-sidebar-nav
-                        aria-current={isActive && view === "workspace"
-                          ? "page"
-                          : undefined}
-                        onClick={() => { onSelectProject(project); onViewChange("workspace"); onClose(); }}
-                      >
-                        <Folder className="project-icon" size={15} />
-                        <span className="project-copy">
-                          <span className="project-name">{project.name}</span>
-                          {group.projects.length > 1 && <span className="project-scope">{project.repositoryRelativePath === "." ? "Repository root" : project.repositoryRelativePath}</span>}
-                        </span>
-                        <span
-                          className={clsx("project-status", `status-${project.status}`)}
-                          aria-label={`Project status: ${project.status}`}
-                          title={project.status}
-                        />
-                      </button>
-                      <span className="project-row-actions">
-                        <IconButton
-                          label={`New chat in ${project.name}`}
-                          className="project-new-chat-button"
-                          disabled={connectionStatus !== "online"}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            dismissMenu("context-change");
-                            onCreateConversation(project);
-                          }}
-                        >
-                          <SquarePen size={13} />
-                        </IconButton>
-                        <IconButton
-                          ref={(node) => setMenuTrigger(`:${project.id}`, node)}
-                          label={`Project actions for ${project.name}`}
-                          className="project-menu-button"
-                          aria-haspopup="menu"
-                          aria-controls={`project-actions-${project.id}`}
-                          aria-expanded={projectMenu === project.id}
-                          onClick={() => toggleMenu(`:${project.id}`)}
-                        >
-                          <MoreHorizontal size={14} />
-                        </IconButton>
-                      </span>
-                      {projectMenu === project.id && projectActions(project)}
-                    </div>
-
-                    {isExpanded && (
-                      <div className="conversation-list" aria-label={`${project.name} threads`}>
-                        {conversations.map((conversation) => {
-                          const thread = threadViewsById.get(conversation.id)
-                            ?? sidebarThreadView(
-                              conversation,
-                              snapshot?.activeConversationId ?? null,
-                            );
-                          const isDetached = detachedConversationIds.has(
-                            conversation.id,
-                          );
-                          return (
-                            <div
-                              className={clsx(
-                                "conversation-item",
-                                thread.unread && "is-unread",
-                              )}
-                              key={conversation.id}
-                            >
-                              {renaming === conversation.id ? renameForm(conversation) : (
-                                <button
-                                  type="button"
-                                  className={clsx(
-                                    "conversation-row",
-                                    snapshot?.activeConversationId === conversation.id
-                                      && view === "workspace"
-                                      && "is-active",
-                                    isDetached && "is-detached",
-                                    splitConversationId === conversation.id
-                                      && "is-split",
-                                  )}
-                                  data-sidebar-nav
-                                  aria-current={snapshot?.activeConversationId === conversation.id
-                                    && view === "workspace"
-                                    ? "page"
-                                    : undefined}
-                                  onClick={() => activateConversation(conversation)}
-                                >
-                                  <span
-                                    className={clsx("thread-status-dot", `is-${thread.status}`)}
-                                    aria-label={`Chat status: ${statusLabels[thread.status]}`}
-                                    title={statusLabels[thread.status]}
-                                  />
-                                  <span className="conversation-title">{conversation.title}</span>
-                                  <SidebarConversationMarks
-                                    pinned={Boolean(conversation.pinnedAt)}
-                                    detached={isDetached}
-                                    split={splitConversationId === conversation.id}
-                                  />
-                                  {thread.unread && <span className="conversation-unread" aria-label="Unread completed work" />}
-                                  {!compact && <span className="conversation-time">{formatRelativeTime(conversation.updatedAt)}</span>}
-                                </button>
-                              )}
-                              <IconButton
-                                ref={(node) => setMenuTrigger(
-                                  conversation.id,
-                                  node,
-                                )}
-                                label={`Thread actions for ${conversation.title}`}
-                                className="conversation-menu-button"
-                                aria-haspopup="menu"
-                                aria-expanded={conversationMenu === conversation.id}
-                                aria-controls={conversationMenu === conversation.id
-                                  ? `conversation-actions-${conversation.id}`
-                                  : undefined}
-                                onClick={() => {
-                                  toggleMenu(conversation.id);
-                                }}
-                              >
-                                <MoreHorizontal size={13} />
-                              </IconButton>
-                              {conversationMenu === conversation.id && conversationActions(conversation)}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </section>
-          ))}
-
-          {sidebarMode === "activity" && snapshot && (
+          {snapshot && (
             <div
               ref={workStreamRef}
               className={clsx(
@@ -1229,16 +946,17 @@ function SidebarView({
           )}
         </div>
 
-        <div className="sidebar-footer">
-          <button type="button" className={clsx("sidebar-destination", dailyWorkOpen && "is-open")} aria-haspopup="dialog" aria-expanded={dailyWorkOpen} onFocus={() => void loadDailyWorkDialog()} onPointerDown={() => void loadDailyWorkDialog()} onPointerEnter={() => void loadDailyWorkDialog()} onClick={() => { onOpenDailyWork(); onClose(); }}>
+        <div className="sidebar-footer sidebar-utility-footer">
+          <button type="button" className={clsx("sidebar-destination", dailyWorkOpen && "is-open")} aria-label="Daily work" title="Daily work" aria-haspopup="dialog" aria-expanded={dailyWorkOpen} onFocus={() => void loadDailyWorkDialog()} onPointerDown={() => void loadDailyWorkDialog()} onPointerEnter={() => void loadDailyWorkDialog()} onClick={() => { onOpenDailyWork(); onClose(); }}>
             <DailyWorkMark size={16} /><span>Daily work</span>
           </button>
-          <button type="button" className={clsx("sidebar-destination", view === "usage" && "is-active")} aria-current={view === "usage" ? "page" : undefined} onFocus={() => void loadUsageView()} onPointerDown={() => void loadUsageView()} onPointerEnter={() => void loadUsageView()} onClick={() => navigate("usage")}>
+          <button type="button" className={clsx("sidebar-destination", view === "usage" && "is-active")} aria-label="Usage" title="Usage" aria-current={view === "usage" ? "page" : undefined} onFocus={() => void loadUsageView()} onPointerDown={() => void loadUsageView()} onPointerEnter={() => void loadUsageView()} onClick={() => navigate("usage")}>
             <BarChart3 size={16} /><span>Usage</span>
           </button>
-          <button type="button" className={clsx("sidebar-destination", view === "settings" && "is-active")} aria-current={view === "settings" ? "page" : undefined} onFocus={() => void loadSettingsView()} onPointerDown={() => void loadSettingsView()} onPointerEnter={() => void loadSettingsView()} onClick={() => navigate("settings")}>
+          <button type="button" className={clsx("sidebar-destination", view === "settings" && "is-active")} aria-label="Settings" title="Settings" aria-current={view === "settings" ? "page" : undefined} onFocus={() => void loadSettingsView()} onPointerDown={() => void loadSettingsView()} onPointerEnter={() => void loadSettingsView()} onClick={() => navigate("settings")}>
             <Settings size={16} /><span>Settings</span>
           </button>
+          <IconButton label={updateAvailable ? "Update available — open settings" : "Application updates"} className={clsx("sidebar-update-button", updateAvailable && "has-update")} onClick={() => navigate("settings")}><Download size={18} /></IconButton>
         </div>
       </aside>
     </>

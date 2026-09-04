@@ -85,7 +85,7 @@ export function useSidebarWorkIndex({
       const expanded = !collapsible
         || searchActive
         || expandedSections.has(section.id);
-      next.push({
+      if (section.id !== "recent" && section.id !== "yesterday") next.push({
         id: `section:${section.id}`,
         kind: "section",
         section,
@@ -149,7 +149,7 @@ export function useSidebarWorkIndex({
     const item = items[index];
     if (item?.kind === "section") return 26;
     if (item?.kind === "show-more") return 35;
-    return compact ? 42 : 48;
+    return compact ? 70 : 84;
   }, [compact, items]);
   const { offsets, totalSize } = useMemo(() => {
     const nextOffsets: number[] = [];

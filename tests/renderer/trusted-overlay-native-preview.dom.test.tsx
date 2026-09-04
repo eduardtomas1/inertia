@@ -32,6 +32,10 @@ vi.mock("@xterm/xterm", () => ({
     onData(): { dispose: () => void } {
       return { dispose: () => undefined };
     }
+    clear(): void {}
+    writeln(): void {}
+    write(): void {}
+    focus(): void {}
     dispose(): void {}
   },
 }));

@@ -15,7 +15,7 @@ import { migrateRuntimeDatabase } from "../../src/server/persistence/migrations/
 import { backendEndpointIdentity } from "../../src/shared/backend-endpoint-identity";
 import type { PersistedModelBackendProfile } from "../../src/shared/backend-profile-settings";
 
-const PREVIOUS_SCHEMA_VERSION = 67;
+const PREVIOUS_SCHEMA_VERSION = 66;
 
 const PROVIDER_ID_TABLES = [
   "provider_metadata_cache",
@@ -175,7 +175,7 @@ function foreignKeys(database: Database.Database): Record<string, unknown[]> {
   ]));
 }
 
-function copyPopulatedRowsToV67(
+function copyPopulatedRowsToPreviousSchema(
   database: Database.Database,
   populatedDatabasePath: string,
 ): void {
@@ -197,7 +197,7 @@ function copyPopulatedRowsToV67(
   expect(database.pragma("foreign_key_check")).toEqual([]);
 }
 
-async function populatedV67Fixture(): Promise<{
+async function populatedFixture(schemaVersion = PREVIOUS_SCHEMA_VERSION): Promise<{
   databasePath: string;
   workspacePath: string;
   conversationId: string;
@@ -207,7 +207,7 @@ async function populatedV67Fixture(): Promise<{
   const directory = await temporaryDirectory();
   const workspacePath = join(directory, "workspace");
   await mkdir(workspacePath);
-  const databasePath = join(directory, "schema-67.sqlite");
+  const databasePath = join(directory, `schema-${schemaVersion}.sqlite`);
   const populatedDatabasePath = join(directory, "populated-current.sqlite");
   const store = new RuntimeStore(populatedDatabasePath, workspacePath, {
     recoverInterruptedRuns: false,
@@ -356,34 +356,34 @@ async function populatedV67Fixture(): Promise<{
     UPDATE agent_turns
     SET status = 'running', run_state = 'retrying',
         provider_state = 'provider-retrying',
-        run_state_revision = 7, suspended_duration_ms = 123456,
-        continuation_reason_code = 'harness-changed'
+        run_state_revision = 7, suspended_duration_ms = 123456
     WHERE id = ?
   `).run(turn.id);
   populatedDatabase.close();
 
   const database = new Database(databasePath);
-  migrateRuntimeDatabase(database, PREVIOUS_SCHEMA_VERSION);
-  copyPopulatedRowsToV67(database, populatedDatabasePath);
+  migrateRuntimeDatabase(database, schemaVersion);
+  copyPopulatedRowsToPreviousSchema(database, populatedDatabasePath);
   expect(database.prepare(`
     SELECT profile_id FROM model_backend_profiles ORDER BY profile_id
   `).all()).toEqual([{ profile_id: backendProfile.id }]);
   expect((database.prepare(
     "SELECT MAX(version) AS version FROM schema_migrations",
-  ).get() as { version: number }).version).toBe(PREVIOUS_SCHEMA_VERSION);
-  expect(tableColumns(database, "agent_turns").slice(-5)).toEqual([
+  ).get() as { version: number }).version).toBe(schemaVersion);
+  expect(tableColumns(database, "agent_turns").slice(-4)).toEqual([
     "run_state",
     "provider_state",
     "run_state_revision",
     "suspended_duration_ms",
-    "continuation_reason_code",
   ]);
   for (const table of REBUILT_TABLES) {
     const sql = (database.prepare(`
       SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?
     `).get(table) as { sql: string }).sql;
-    expect(sql).not.toContain("'gemini'");
-    expect(sql).not.toContain("'gemini-acp'");
+    if (schemaVersion === PREVIOUS_SCHEMA_VERSION) {
+      expect(sql).not.toContain("'gemini'");
+      expect(sql).not.toContain("'gemini-acp'");
+    }
   }
   database.close();
   return {
@@ -402,8 +402,8 @@ describe.sequential("native Gemini provider migration", () => {
     ));
   });
 
-  it("preserves the complete schema-67 data and relational topology", async () => {
-    const fixture = await populatedV67Fixture();
+  it("preserves the complete schema-66 data and relational topology in released migration 67", async () => {
+    const fixture = await populatedFixture();
     const rollbackPath = join(await temporaryDirectory(), "rollback.sqlite");
     await copyFile(fixture.databasePath, rollbackPath);
 
@@ -415,7 +415,7 @@ describe.sequential("native Gemini provider migration", () => {
     const beforeTriggers = triggers(database);
     const beforeForeignKeys = foreignKeys(database);
 
-    migrateRuntimeDatabase(database);
+    migrateRuntimeDatabase(database, 67);
 
     expect(rowsByTable(database)).toEqual(beforeRows);
     expect(columnsByTable(database)).toEqual(beforeColumns);
@@ -426,18 +426,17 @@ describe.sequential("native Gemini provider migration", () => {
     expect(database.pragma("foreign_keys", { simple: true })).toBe(1);
     expect((database.prepare(`
       SELECT run_state, provider_state, run_state_revision,
-             suspended_duration_ms, continuation_reason_code
+             suspended_duration_ms
       FROM agent_turns WHERE id = ?
     `).get(fixture.turnId))).toEqual({
       run_state: "retrying",
       provider_state: "provider-retrying",
       run_state_revision: 7,
       suspended_duration_ms: 123456,
-      continuation_reason_code: "harness-changed",
     });
     expect((database.prepare(
       "SELECT MAX(version) AS version FROM schema_migrations",
-    ).get() as { version: number }).version).toBe(CURRENT_DATABASE_SCHEMA_VERSION);
+    ).get() as { version: number }).version).toBe(67);
 
     const indexes = new Set(beforeIndexes.map(({ name }) => name));
     for (const index of EXPECTED_INDEXES) expect(indexes.has(index)).toBe(true);
@@ -449,10 +448,6 @@ describe.sequential("native Gemini provider migration", () => {
     expect(backendProfileSql).toContain("'kimi-acp'");
     expect(backendProfileSql).toContain("'gemini-managed'");
     expect(backendProfileSql).toContain("'kimi-managed'");
-    expect(() => database.prepare(`
-      UPDATE agent_turns SET continuation_reason_code = 'invalid-reason'
-      WHERE id = ?
-    `).run(fixture.turnId)).toThrow();
     expect(() => database.prepare(`
       UPDATE agent_turns SET run_state = 'invalid-state' WHERE id = ?
     `).run(fixture.turnId)).toThrow();
@@ -505,8 +500,60 @@ describe.sequential("native Gemini provider migration", () => {
     rollback.close();
   });
 
+  it("appends continuation evidence to a populated released schema-67 database", async () => {
+    const fixture = await populatedFixture(67);
+    const database = new Database(fixture.databasePath);
+    database.pragma("foreign_keys = ON");
+    database.prepare(`
+      UPDATE agent_turns SET provider_id = 'gemini', harness_id = 'gemini-acp',
+        backend_profile_id = 'builtin:gemini' WHERE id = ?
+    `).run(fixture.turnId);
+    const beforeRows = rowsByTable(database);
+    const beforeColumns = columnsByTable(database);
+    const beforeIndexes = namedIndexes(database);
+    const beforeTriggers = triggers(database);
+    const beforeForeignKeys = foreignKeys(database);
+
+    migrateRuntimeDatabase(database);
+    migrateRuntimeDatabase(database);
+
+    expect(rowsByTable(database)).toEqual({
+      ...beforeRows,
+      agent_turns: beforeRows.agent_turns!.map((row) => ({
+        ...row as Record<string, unknown>, continuation_reason_code: null,
+      })),
+    });
+    expect(columnsByTable(database)).toEqual({
+      ...beforeColumns,
+      agent_turns: [...beforeColumns.agent_turns!, "continuation_reason_code"],
+    });
+    expect(namedIndexes(database)).toEqual(beforeIndexes);
+    expect(triggers(database)).toEqual(beforeTriggers);
+    expect(foreignKeys(database)).toEqual(beforeForeignKeys);
+    expect(database.pragma("foreign_key_check")).toEqual([]);
+    expect((database.prepare(
+      "SELECT MAX(version) AS version FROM schema_migrations",
+    ).get() as { version: number }).version).toBe(CURRENT_DATABASE_SCHEMA_VERSION);
+    expect(() => database.prepare(`
+      UPDATE agent_turns SET continuation_reason_code = 'invalid-reason'
+      WHERE id = ?
+    `).run(fixture.turnId)).toThrow();
+    database.prepare(`
+      UPDATE agent_turns SET continuation_reason_code = 'harness-changed'
+      WHERE id = ?
+    `).run(fixture.turnId);
+    database.close();
+
+    const reopened = new RuntimeStore(fixture.databasePath, fixture.workspacePath, {
+      recoverInterruptedRuns: false,
+    });
+    expect(reopened.agentTurn(fixture.turnId).continuationReasonCode).toBe("harness-changed");
+    expect(reopened.agentTurn(fixture.turnId).providerId).toBe("gemini");
+    reopened.close();
+  });
+
   it("round-trips native Gemini profiles through the post-migration repository", async () => {
-    const fixture = await populatedV67Fixture();
+    const fixture = await populatedFixture();
     const database = new Database(fixture.databasePath);
     migrateRuntimeDatabase(database);
     database.close();

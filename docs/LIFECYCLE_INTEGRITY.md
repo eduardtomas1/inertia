@@ -337,9 +337,10 @@ observed after measurement.
 - Handoff and maintenance journals carry explicit positive schema versions,
   strict bounded keys, canonical integrity digests, and atomic publication.
   Capability manifests are versioned code constants; the bounded continuation
-  reason is a checked nullable database column migrated at schema 67.
-- Schema 68 performs the native Gemini provider rebuild on top of the complete
-  schema-67 shape; it does not reuse the earlier schema-66 table definition.
+  reason is a checked nullable database column appended at schema 68.
+- Released schema 67 retains the native Gemini provider rebuild unchanged.
+  Schema 68 adds continuation evidence after that rebuild, preserving upgrades
+  from both pre-Gemini databases and existing schema-67 installations.
 - Existing provider continuation records without the full compatibility token
   are readable but cannot authorize resume. They fall back to a fresh session
   without deleting conversation data.

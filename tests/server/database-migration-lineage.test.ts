@@ -204,7 +204,7 @@ const IMPLEMENTATION_SOURCES = new Map<
       "nativeKimiProviderMigration",
     ),
   ]],
-  [68, [
+  [67, [
     implementation(
       "src/server/persistence/migrations/duo-deletion-trigger.ts",
       "protectCancellingDuoDeletion",
@@ -214,6 +214,10 @@ const IMPLEMENTATION_SOURCES = new Map<
       "nativeGeminiProviderMigration",
     ),
   ]],
+  [68, [implementation(
+    "src/server/persistence/migrations/turn-continuation-evidence.ts",
+    "persistTurnContinuationEvidence",
+  )]],
 ]);
 
 function sha256(source: string): string {

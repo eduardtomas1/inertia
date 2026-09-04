@@ -628,16 +628,15 @@ test("persists composer usage modes without losing the followed transcript", asy
     const controlBounds = control.getBoundingClientRect();
     const toolbar = control.closest<HTMLElement>(".composer-toolbar");
     const toolbarBounds = toolbar?.getBoundingClientRect();
-    const send = toolbar?.querySelector<HTMLElement>('[aria-label="Send message"]');
-    const sendBounds = send?.getBoundingClientRect();
+    const railBounds = control.closest(".composer-primary-rail")?.getBoundingClientRect();
     return {
       inToolbar: Boolean(toolbar),
       controlRight: controlBounds.right,
       toolbarRight: toolbarBounds?.right ?? 0,
-      centerDelta: sendBounds
+      centerDelta: railBounds
         ? Math.abs(
             (controlBounds.top + controlBounds.height / 2)
-            - (sendBounds.top + sendBounds.height / 2),
+            - (railBounds.top + railBounds.height / 2),
           )
         : Number.POSITIVE_INFINITY,
     };

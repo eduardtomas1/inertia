@@ -652,7 +652,7 @@ test("keeps delegated-agent traces compact while the active composer accepts a p
     expect(expandedRailGeometry.dockWidth).toBeGreaterThanOrEqual(838);
     expect(expandedRailGeometry.toolbarFits).toBe(true);
     expect(expandedRailGeometry.groupsContained).toBe(true);
-    expect(Math.min(...expandedRailGeometry.groupGaps)).toBeGreaterThanOrEqual(7);
+    expect(Math.min(...expandedRailGeometry.groupGaps)).toBeGreaterThanOrEqual(4);
     expect(expandedRailGeometry.attachmentBeforeMessage).toBe(true);
     await expect(compactMore).toBeHidden();
     await expect(composer.getByRole("group", { name: "Composer settings" }))

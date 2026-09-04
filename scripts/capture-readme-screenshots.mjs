@@ -272,7 +272,7 @@ async function seedShowcaseData() {
       now,
     );
     database.prepare(`
-      UPDATE conversations SET branch = 'codex/release-0.0.45'
+      UPDATE conversations SET branch = 'codex/release-0.0.48'
       WHERE id = ?
     `).run(conversationId);
     database.prepare(`
@@ -633,7 +633,7 @@ try {
   await page.getByRole("button", { name: "Close split chat Review runtime safeguards", exact: true }).click();
   await sidebar.getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("radio", { name: "Light", exact: true }).click();
-  await page.getByRole("button", { name: "Go to workspace" }).click();
+  await page.getByRole("button", { name: "Workspace", exact: true }).click();
   await capture(page, "inertia-light.png");
 
 } finally {

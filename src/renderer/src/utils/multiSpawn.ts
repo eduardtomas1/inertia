@@ -7,7 +7,7 @@ import type {
   ModelSelection,
   Project,
 } from "@shared/contracts";
-import { legacyProviderIdForHarness } from "../../../shared/model-routing";
+import { providerIdForHarness } from "../../../shared/model-routing";
 import {
   buildNewConversationPayload,
   withNewConversationModelSelection,
@@ -416,7 +416,7 @@ export function multiSpawnConversationPayload(
   side: MultiSpawnSideDraft,
   settings: AppSettings,
 ): NewConversationPayload {
-  const providerId = legacyProviderIdForHarness(side.selection.harnessId);
+  const providerId = providerIdForHarness(side.selection.harnessId);
   if (!providerId) {
     throw new Error("That agent harness is unavailable in this build.");
   }

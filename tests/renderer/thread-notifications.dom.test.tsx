@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ThreadNotifications } from "../../src/renderer/src/hooks/useThreadNotifications";
 import { activateNotificationConversation } from "../../src/renderer/src/components/AppLayout";
 import type { AppSnapshot, Conversation } from "../../src/shared/contracts";
-import { nativeModelSelection } from "../../src/shared/model-routing";
+import { providerNativeModelSelection } from "../../src/shared/model-routing";
 
 afterEach(() => {
   Reflect.deleteProperty(window, "inertia");
@@ -17,7 +17,7 @@ function conversation(status: Conversation["status"]): Conversation {
     projectId: "22222222-2222-4222-8222-222222222222",
     title: "Thread",
     providerId: "codex",
-    modelSelection: nativeModelSelection({ providerId: "codex" }),
+    modelSelection: providerNativeModelSelection({ providerId: "codex" }),
     continuationIdentity: null,
     model: "",
     reasoningEffort: "",

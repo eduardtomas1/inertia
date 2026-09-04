@@ -22,6 +22,7 @@ jobs:
       contents: read
     outputs:
       failed: ${{ steps.collect.outputs.failed }}
+      guardian_toolchain: ${{ steps.guardian_toolchain.outcome }}
       locked_install: ${{ steps.locked_install.outcome }}
       locked_tests: ${{ steps.locked_tests.outcome }}
       cursor_install: ${{ steps.cursor_install.outcome }}
@@ -44,6 +45,13 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
 
+      - name: Install Linux guardian toolchain
+        id: guardian_toolchain
+        continue-on-error: true
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes binutils linux-libc-dev musl-tools=1.2.4-2
+
       - name: Install the product's locked dependency graph
         id: locked_install
         continue-on-error: true
@@ -51,9 +59,12 @@ jobs:
 
       - name: Exercise locked provider types and protocol fixtures
         id: locked_tests
-        if: steps.locked_install.outcome == 'success'
+        if: >-
+          steps.guardian_toolchain.outcome == 'success'
+          && steps.locked_install.outcome == 'success'
         continue-on-error: true
         run: |
+          npm run pretest
           npm run typecheck
           npm run test:portable
 
@@ -116,6 +127,7 @@ jobs:
         if: always()
         shell: bash
         env:
+          GUARDIAN_TOOLCHAIN_OUTCOME: ${{ steps.guardian_toolchain.outcome }}
           LOCKED_INSTALL_OUTCOME: ${{ steps.locked_install.outcome }}
           LOCKED_TESTS_OUTCOME: ${{ steps.locked_tests.outcome }}
           CURSOR_INSTALL_OUTCOME: ${{ steps.cursor_install.outcome }}
@@ -124,6 +136,7 @@ jobs:
           set -euo pipefail
           failed=false
           for outcome in \
+            "$GUARDIAN_TOOLCHAIN_OUTCOME" \
             "$LOCKED_INSTALL_OUTCOME" \
             "$LOCKED_TESTS_OUTCOME" \
             "$CURSOR_INSTALL_OUTCOME" \
@@ -140,9 +153,12 @@ jobs:
               const allowed = new Set([
                 "@agentclientprotocol/sdk",
                 "@anthropic-ai/claude-agent-sdk",
+                "@anthropic-ai/sdk",
+                "@modelcontextprotocol/sdk",
                 "@opencode-ai/sdk",
                 "@openai/codex",
                 "@anthropic-ai/claude-code",
+                "@google/gemini-cli",
                 "@moonshot-ai/kimi-code",
                 "opencode-ai",
               ]);
@@ -176,6 +192,7 @@ jobs:
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           PROVIDER_DRIFT_RESULT: ${{ needs.provider-drift.result }}
+          GUARDIAN_TOOLCHAIN_OUTCOME: ${{ needs.provider-drift.outputs.guardian_toolchain }}
           LOCKED_INSTALL_OUTCOME: ${{ needs.provider-drift.outputs.locked_install }}
           LOCKED_TESTS_OUTCOME: ${{ needs.provider-drift.outputs.locked_tests }}
           CURSOR_INSTALL_OUTCOME: ${{ needs.provider-drift.outputs.cursor_install }}
@@ -188,6 +205,7 @@ jobs:
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             const outcomes = [
               ["Canary job", process.env.PROVIDER_DRIFT_RESULT],
+              ["Linux guardian toolchain", process.env.GUARDIAN_TOOLCHAIN_OUTCOME],
               ["Locked dependency install", process.env.LOCKED_INSTALL_OUTCOME],
               ["Locked type and protocol suite", process.env.LOCKED_TESTS_OUTCOME],
               ["Isolated Cursor CLI install", process.env.CURSOR_INSTALL_OUTCOME],

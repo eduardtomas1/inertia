@@ -15,7 +15,7 @@ import type {
 } from "../../src/shared/contracts";
 import {
   modelSelectionSchema,
-  nativeModelSelection,
+  providerNativeModelSelection,
 } from "../../src/shared/model-routing";
 import { RuntimeStore } from "../../src/server/database";
 import {
@@ -317,7 +317,7 @@ function adoptConversations(
   conversationIds: [string, string],
   projectIds: readonly [string, string] = [runtime.projectId, runtime.projectId],
 ) {
-  const selection = nativeModelSelection({
+  const selection = providerNativeModelSelection({
     providerId: "codex",
     modelId: "gpt-test",
     alias: "GPT Test",
@@ -430,7 +430,7 @@ function preparePayload(
   runtime: DuoTestRuntime,
   useWorktree = false,
 ): Parameters<DuoLaunchCoordinator["prepare"]>[0] {
-  const modelSelection = modelSelectionSchema.parse(nativeModelSelection({
+  const modelSelection = modelSelectionSchema.parse(providerNativeModelSelection({
     providerId: "codex",
     modelId: "gpt-test",
     alias: "GPT Test",

@@ -15,7 +15,7 @@ import type {
   ServerEvent,
   WorkspaceRun,
 } from "../../src/shared/contracts";
-import { nativeModelSelection } from "../../src/shared/model-routing";
+import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import { useActivityActions } from "../../src/renderer/src/hooks/useActivityActions";
 import { useDesktopTools } from "../../src/renderer/src/hooks/useDesktopTools";
 import { useWorkspaceTools } from "../../src/renderer/src/hooks/useWorkspaceTools";
@@ -60,7 +60,7 @@ function conversation(id: string, owner: Project): Conversation {
     projectId: owner.id,
     title: `${owner.name} chat`,
     providerId: "codex",
-    modelSelection: nativeModelSelection({
+    modelSelection: providerNativeModelSelection({
       providerId: "codex",
       modelId: "default",
       reasoningEffort: "medium",
@@ -2316,7 +2316,12 @@ describe("workspace pane authority", () => {
 
   it("closes and resets a native preview when its conversation changes", async () => {
     const previewClose = vi.fn(async () => undefined);
-    const previewConnect = vi.fn(async () => ({
+    const previewSetBounds = vi.fn(async () => undefined);
+    const previewConnect = vi.fn(async (_request: {
+      ownerId: string;
+      contextId: string;
+      connectionId: string;
+    }) => ({
       url: "",
       loading: false,
       canGoBack: false,
@@ -2337,6 +2342,7 @@ describe("workspace pane authority", () => {
       value: {
         previewClose,
         previewConnect,
+        previewSetBounds,
         onPreviewState: vi.fn(() => () => undefined),
         previewNavigate: vi.fn(({ url }: { url: string }) =>
           new Promise((resolve) => {
@@ -2357,10 +2363,18 @@ describe("workspace pane authority", () => {
       }),
       { initialProps: { contextId: alphaChat.id } },
     );
-    await waitFor(() => expect(previewConnect).toHaveBeenCalledWith({
-      ownerId: "primary",
-      contextId: alphaChat.id,
+    await waitFor(() => expect(previewConnect).toHaveBeenCalledOnce());
+    const connectionId = previewConnect.mock.calls[0]![0].connectionId;
+    expect(previewConnect).toHaveBeenCalledWith({
+      ownerId: "primary", contextId: alphaChat.id, connectionId,
+    });
+    act(() => hook.result.current.setPreviewBounds({
+      x: 10, y: 20, width: 800, height: 600,
     }));
+    expect(previewSetBounds).toHaveBeenCalledWith({
+      ownerId: "primary", contextId: alphaChat.id, connectionId,
+      bounds: { x: 10, y: 20, width: 800, height: 600 },
+    });
     act(() => hook.result.current.navigatePreview("http://localhost:3000"));
     expect(hook.result.current.previewUrl).toBe("http://localhost:3000");
 
@@ -2379,6 +2393,7 @@ describe("workspace pane authority", () => {
       expect(previewClose).toHaveBeenCalledWith({
         ownerId: "primary",
         contextId: alphaChat.id,
+        connectionId,
       });
     });
   });
@@ -2421,8 +2436,48 @@ describe("workspace pane authority", () => {
     expect(previewConnect).toHaveBeenLastCalledWith({
       ownerId: "primary",
       contextId: alphaChat.id,
+      connectionId: expect.any(String),
     });
     expect(hook.result.current.previewUrl).toBe(sharedState.url);
+  });
+
+  it("rotates the Browser lease when StrictMode replays its connection effect", async () => {
+    const previewClose = vi.fn(async () => undefined);
+    const previewSetBounds = vi.fn(async () => undefined);
+    const previewConnect = vi.fn(async (_request: {
+      ownerId: string; contextId: string; connectionId: string;
+    }) => ({
+      url: "", loading: false, canGoBack: false, canGoForward: false,
+      activeTabId: null, tabs: [], agentActivity: null,
+      evidence: { revision: 0, entries: [], omitted: false },
+    }));
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: {
+        previewClose, previewConnect, previewSetBounds,
+        onPreviewState: vi.fn(() => () => undefined),
+      },
+    });
+    const hook = renderHook(() => useDesktopTools({
+      setActionError: vi.fn(), previewOwnerId: "primary",
+      previewContextId: alphaChat.id,
+    }), { reactStrictMode: true });
+
+    await waitFor(() => expect(previewConnect).toHaveBeenCalledTimes(2));
+    const firstConnection = previewConnect.mock.calls[0]![0].connectionId;
+    const currentConnection = previewConnect.mock.calls[1]![0].connectionId;
+    expect(currentConnection).not.toBe(firstConnection);
+    expect(previewClose).toHaveBeenCalledWith(expect.objectContaining({
+      connectionId: firstConnection,
+    }));
+    act(() => hook.result.current.setPreviewBounds(null));
+    expect(previewSetBounds).toHaveBeenLastCalledWith(expect.objectContaining({
+      connectionId: currentConnection, bounds: null,
+    }));
+    hook.unmount();
+    await waitFor(() => expect(previewClose).toHaveBeenCalledWith(
+      expect.objectContaining({ connectionId: currentConnection }),
+    ));
   });
 
 });

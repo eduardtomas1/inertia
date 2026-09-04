@@ -22,7 +22,14 @@ import type {
   AgentPlanStep,
 } from "./interactions";
 
-export const PROVIDER_IDS = ["codex", "claude", "cursor", "kimi", "opencode"] as const;
+export const PROVIDER_IDS = [
+  "codex",
+  "claude",
+  "cursor",
+  "gemini",
+  "kimi",
+  "opencode",
+] as const;
 
 export type ProviderId = (typeof PROVIDER_IDS)[number];
 export type ProviderInteractionMode = "build" | "plan";
@@ -56,6 +63,8 @@ export interface ProviderDetectionOptions {
   refreshEnvironment?: boolean;
   /** Installation/protocol readiness only; never probes or forwards credentials. */
   probeAuthentication?: boolean;
+  /** Cancels owned discovery processes and resolves only after their cleanup settles. */
+  signal?: AbortSignal;
 }
 
 interface ProviderRunRequest {
@@ -78,6 +87,20 @@ interface ProviderRunRequest {
   interactionMode: ProviderInteractionMode;
   access: ProviderAccessMode;
   sessionId?: string;
+  /**
+   * Bounded visible transcript context reconstructed by Inertia only when a
+   * provider's native resume path cannot be used safely. This is contextual
+   * input, not a provider session identity, and never includes reasoning,
+   * activities, tool payloads, credentials, or attachment bytes.
+   */
+  reconstructedHistory?: {
+    source: "visible-transcript";
+    truncated: boolean;
+    messages: readonly {
+      role: "user" | "assistant";
+      content: string;
+    }[];
+  };
   /**
    * Exact native Fast value advertised for the selected model. Presence means
    * both Fast and Standard can be requested explicitly and must be attested by
@@ -442,6 +465,8 @@ export class ProviderRuntimeError extends Error {
 export interface ProviderManagerOptions {
   commands?: Partial<Record<ProviderId, string>>;
   cancelGraceMs?: number;
+  /** Runtime-owned cancellation authority shared by passive provider operations. */
+  lifetimeSignal?: AbortSignal;
   backendProfiles?: readonly ModelBackendProfile[];
   backendCompatibilities?: readonly HarnessBackendCompatibility[];
   /** Latest safe compatibility evidence, keyed to an exact profile revision and model. */

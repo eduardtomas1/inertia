@@ -28,7 +28,14 @@ export type OpenCodeEventSessionScope =
 export interface OpenCodeSessionObservation {
   scope: OpenCodeEventSessionScope;
   active: boolean;
+  lifecycleProgress?: true;
+  novelRootActivity?: true;
 }
+
+type OpenCodeDescendantEvidence =
+  | "accepted"
+  | "duplicate"
+  | "unretained";
 
 function exactSession(value: unknown, sessionId: string): boolean {
   return safeSessionId(value) === sessionId;
@@ -252,7 +259,7 @@ function activeDescendantEvent(event: Event, sessionId: string): boolean {
   }
 }
 
-function activityEventKey(event: Event): string | undefined {
+function openCodeEventEvidenceKey(event: Event): string | undefined {
   try {
     const { id: _eventId, ...payload } = event as Event & { id?: unknown };
     return `hash:${createHash("sha256")
@@ -282,7 +289,9 @@ function canonicalJson(value: unknown): string {
  */
 export class OpenCodeSessionOwnership {
   private readonly sessions = new Set<string>();
-  private readonly activityEventKeys = new Set<string>();
+  private readonly liveDescendants = new Set<string>();
+  private readonly deletedDescendants = new Set<string>();
+  private readonly eventEvidenceKeys = new Set<string>();
 
   constructor(
     private readonly rootSessionId: string,
@@ -295,6 +304,23 @@ export class OpenCodeSessionOwnership {
       throw new Error("The OpenCode activity-evidence budget is invalid.");
     }
     this.sessions.add(rootSessionId);
+  }
+
+  hasLiveDescendants(): boolean {
+    return this.liveDescendants.size > 0;
+  }
+
+  private recordEventEvidence(
+    event: Event,
+  ): OpenCodeDescendantEvidence {
+    const eventKey = openCodeEventEvidenceKey(event);
+    if (!eventKey) return "unretained";
+    if (this.eventEvidenceKeys.has(eventKey)) return "duplicate";
+    if (this.eventEvidenceKeys.size >= this.maxActivityEventKeys) {
+      return "unretained";
+    }
+    this.eventEvidenceKeys.add(eventKey);
+    return "accepted";
   }
 
   observe(event: Event): OpenCodeSessionObservation {
@@ -319,6 +345,7 @@ export class OpenCodeSessionOwnership {
           );
         }
         this.sessions.add(childId);
+        this.liveDescendants.add(childId);
         added = true;
       }
     }
@@ -327,15 +354,58 @@ export class OpenCodeSessionOwnership {
       : eventSessionId && this.sessions.has(eventSessionId)
         ? "descendant"
         : "unrelated";
-    if (scope !== "descendant") return { scope, active: false };
-    const active = added || activeDescendantEvent(event, eventSessionId!);
-    const eventKey = active ? activityEventKey(event) : undefined;
-    if (!eventKey) return { scope, active: false };
-    if (this.activityEventKeys.has(eventKey)) return { scope, active: false };
-    if (this.activityEventKeys.size >= this.maxActivityEventKeys) {
+    if (scope === "root") {
+      if (!activeDescendantEvent(event, this.rootSessionId)) {
+        return { scope, active: false };
+      }
+      const evidence = this.recordEventEvidence(event);
+      return {
+        scope,
+        active: false,
+        ...(evidence === "accepted" ? { novelRootActivity: true } : {}),
+      };
+    }
+    if (scope !== "descendant") {
       return { scope, active: false };
     }
-    this.activityEventKeys.add(eventKey);
-    return { scope, active };
+    if (this.deletedDescendants.has(eventSessionId!)) {
+      return { scope, active: false };
+    }
+    if (
+      event.type === "session.idle"
+      || event.type === "session.error"
+      || event.type === "session.deleted"
+      || (
+        event.type === "session.status"
+        && objectValue(
+          (event.properties as Record<string, unknown>).status,
+        )?.type === "idle"
+      )
+    ) {
+      const evidence = this.recordEventEvidence(event);
+      if (evidence !== "accepted") {
+        return { scope, active: false };
+      }
+      const wasLive = this.liveDescendants.delete(eventSessionId!);
+      const deleted = event.type === "session.deleted";
+      const becameTerminal = deleted
+        && !this.deletedDescendants.has(eventSessionId!);
+      if (deleted) {
+        this.deletedDescendants.add(eventSessionId!);
+      }
+      return {
+        scope,
+        active: false,
+        ...(wasLive || becameTerminal ? { lifecycleProgress: true } : {}),
+      };
+    }
+    const active = added || activeDescendantEvent(event, eventSessionId!);
+    if (!active) return { scope, active: false };
+    const evidence = this.recordEventEvidence(event);
+    // Every structurally valid activity observation reasserts liveness. Only
+    // novel retained evidence receives progress credit, so replay cannot keep
+    // extending the inactivity deadline.
+    this.liveDescendants.add(eventSessionId!);
+    return { scope, active: evidence === "accepted" };
   }
 }

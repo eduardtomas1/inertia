@@ -14,6 +14,7 @@ import type {
   AgentTurn,
   AgentSkillSummary,
   AgentWorkflowSkillsCapability,
+  ChatAttachment,
   Conversation,
   ModelBackendProfileView,
   ProjectAction,
@@ -46,8 +47,9 @@ import {
   type ComposerSettingsModel,
 } from "./ComposerSettings";
 import { ComposerSendActionsFallback } from "./ComposerSendActionsFallback";
+import { ProjectPicker } from "./ProjectPicker";
 import type { ComposerMenuController } from "./useComposerMenus";
-import type { PromptPresetCommandRunner } from "./types";
+import type { NewChatProjectPicker, PromptPresetCommandRunner } from "./types";
 import type { AgentTurnStatus } from "../../../../shared/turn-lifecycle";
 import type { PromptStashEntry } from "../../utils/promptStash";
 
@@ -127,6 +129,7 @@ export interface ComposerToolbarProps {
   conversation: Conversation;
   checkoutBranch?: string | null;
   showCheckoutContext: boolean;
+  newChatProjectPicker?: NewChatProjectPicker;
   onUpdateConversation: (
     update: Partial<Pick<
       Conversation,
@@ -148,7 +151,11 @@ export interface ComposerToolbarProps {
   queuedTurnId: string | null;
   queuedTurnStatus: AgentTurnStatus | null;
   queuedTurnAuthoritative: boolean;
-  onSendQueued: (content: string) => Promise<unknown>;
+  onSendQueued: (
+    content: string,
+    attachments: ChatAttachment[],
+  ) => Promise<unknown>;
+  onReleaseAttachment: (attachmentId: string) => Promise<void>;
   onSubmit: () => Promise<void>;
   onStop: () => Promise<void>;
 }
@@ -200,6 +207,7 @@ export function ComposerToolbar({
   conversation,
   checkoutBranch,
   showCheckoutContext,
+  newChatProjectPicker,
   onUpdateConversation,
   conversationUpdatePending,
   conversationUpdateError,
@@ -217,10 +225,11 @@ export function ComposerToolbar({
   queuedTurnStatus,
   queuedTurnAuthoritative,
   onSendQueued,
+  onReleaseAttachment,
   onSubmit,
   onStop,
 }: ComposerToolbarProps): React.JSX.Element {
-  const canAttachWhileRunning = supportsActiveParentFollowUp(
+  const canSendAttachmentWhileRunning = supportsActiveParentFollowUp(
     latestTurn?.harnessId ?? null,
   );
   const visibleCheckoutBranch = composerCheckoutBranch(
@@ -243,14 +252,15 @@ export function ComposerToolbar({
       <div className="composer-input-actions" role="group" aria-label="Message actions">
         <IconButton
           label={running
-            ? "Attach follow-up images"
+            ? canSendAttachmentWhileRunning
+              ? "Attach follow-up images"
+              : "Attach queued images"
             : "Attach images, documents, or spreadsheets"}
           onClick={() => void onChooseAttachments()}
           disabled={
             disabled
             || attachmentImporting
             || primaryAction === "submitting"
-            || (running && !canAttachWhileRunning)
             || attachmentCount >= MAX_CHAT_ATTACHMENTS
           }
         >
@@ -274,6 +284,7 @@ export function ComposerToolbar({
             latestTurnStatus={queuedTurnStatus}
             latestTurnAuthoritative={queuedTurnAuthoritative}
             onSendQueued={onSendQueued}
+            onReleaseAttachment={onReleaseAttachment}
             onSubmit={onSubmit}
             onStop={onStop}
           />
@@ -525,10 +536,14 @@ export function ComposerToolbar({
           role="group"
           aria-label="Chat checkout context"
         >
-          <span className="composer-checkout-location">
-            <FolderGit2 size={12} aria-hidden="true" />
-            <span>{conversation.worktreePath ? "Isolated worktree" : "Current checkout"}</span>
-          </span>
+          {newChatProjectPicker ? (
+            <ProjectPicker picker={newChatProjectPicker} />
+          ) : (
+            <span className="composer-checkout-location">
+              <FolderGit2 size={12} aria-hidden="true" />
+              <span>{conversation.worktreePath ? "Isolated worktree" : "Current checkout"}</span>
+            </span>
+          )}
           <span
             className="composer-checkout-branch"
             title={visibleCheckoutBranch}

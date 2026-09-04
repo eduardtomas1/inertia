@@ -128,6 +128,10 @@ jobs:
       - name: Run portable runtime and provider protocol suite
         run: npm run test:portable
 
+      - name: Refresh Windows app bundle after portable helper rebuild
+        if: runner.os == 'Windows'
+        run: npm run build:bundle
+
       - name: Audit production dependencies
         if: runner.os == 'Linux'
         run: npm audit --omit=dev --audit-level=high

@@ -14,7 +14,7 @@ import type { CommandWithoutId } from "../../src/renderer/src/lib/runtimeCommand
 import type { MultiSpawnDraft } from "../../src/renderer/src/utils/multiSpawn";
 import type { AppSnapshot, Project, ServerEvent } from "../../src/shared/contracts";
 import { defaultSettings } from "../../src/shared/contracts";
-import { nativeModelSelection } from "../../src/shared/model-routing";
+import { providerNativeModelSelection } from "../../src/shared/model-routing";
 
 const projectIds = [
   "11111111-1111-4111-8111-111111111111",
@@ -68,7 +68,7 @@ const snapshot: AppSnapshot = {
 };
 
 function draft(): MultiSpawnDraft {
-  const selection = nativeModelSelection({
+  const selection = providerNativeModelSelection({
     providerId: "codex",
     modelId: "gpt-5.6-sol",
     reasoningEffort: "high",

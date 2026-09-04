@@ -17,6 +17,7 @@ import {
   isLiveCodexSubagentStatus,
   shouldAcceptCodexSubagentProjection,
 } from "./app-server-subagent-projection";
+import { CodexSubagentContinuationGate } from "./app-server-subagent-continuation";
 import {
   CodexHostToolRuntime,
   isHostToolApprovalId,
@@ -56,6 +57,7 @@ import { parseCodexRateLimits } from "../codex-metadata";
 import {
   providerActivityDetailSections,
 } from "../provider/activity-detail";
+import { stableProviderActivityId } from "../provider/activity-lifecycle";
 import type {
   ProviderGoalSnapshot,
   ProviderRunFailure,
@@ -130,6 +132,7 @@ export class CodexAppServerEvents {
   private readonly deltaItems = new Set<string>();
   private readonly reasoningDeltaItems = new Set<string>();
   private readonly itemActivities = new Map<string, CodexItemActivity>();
+  private readonly completedPlanItemIds = new Set<string>();
   private readonly completedTurnIds = new Set<string>();
   private readonly subagentProjection = new Map<
     string,
@@ -137,9 +140,7 @@ export class CodexAppServerEvents {
   >();
   private readonly liveSubagentIds = new Set<string>();
   private subagentSequence = 0;
-  private pendingParentCompletion: PendingParentCompletion | null = null;
-  private subagentDrainTimer: NodeJS.Timeout | undefined;
-  private readonly subagentDrainTimeoutMs: number;
+  private readonly subagentContinuation: CodexSubagentContinuationGate;
   private goalContinuationTimer: NodeJS.Timeout | undefined;
   private readonly goalContinuationGraceMs: number;
   private pendingGoalMutationCompletion: PendingParentCompletion | null = null;
@@ -155,8 +156,9 @@ export class CodexAppServerEvents {
   private readonly hostTools: CodexHostToolRuntime;
 
   constructor(private readonly host: CodexAppServerEventHost) {
-    this.subagentDrainTimeoutMs = codexSubagentDrainTimeoutMs(
-      host.options.subagentDrainTimeoutMs,
+    this.subagentContinuation = new CodexSubagentContinuationGate(
+      codexSubagentDrainTimeoutMs(host.options.subagentDrainTimeoutMs),
+      () => this.failSubagentContinuation(),
     );
     this.goalContinuationGraceMs = codexGoalContinuationGraceMs(
       host.options.goalContinuationGraceMs,
@@ -189,29 +191,24 @@ export class CodexAppServerEvents {
   }
 
   dispose(): void {
-    if (this.subagentDrainTimer) {
-      clearTimeout(this.subagentDrainTimer);
-      this.subagentDrainTimer = undefined;
-    }
+    this.subagentContinuation.dispose();
     if (this.goalContinuationTimer) {
       clearTimeout(this.goalContinuationTimer);
       this.goalContinuationTimer = undefined;
     }
-    this.pendingParentCompletion = null;
     this.pendingGoalMutationCompletion = null;
     this.liveSubagentIds.clear();
     this.completedTurnIds.clear();
     this.deltaItems.clear();
     this.reasoningDeltaItems.clear();
     this.itemActivities.clear();
+    this.completedPlanItemIds.clear();
     this.subagents.dispose();
     this.hostTools.settle("cancel");
   }
 
   cancelPendingParentCompletion(): boolean {
-    if (!this.pendingParentCompletion) return false;
-    this.discardPendingParentCompletion();
-    return true;
+    return this.subagentContinuation.discard();
   }
 
   interruptibleChildTurns(): ReadonlyArray<{
@@ -233,8 +230,8 @@ export class CodexAppServerEvents {
   beginGoalMutation(activatesGoal: boolean): void {
     this.pendingGoalMutations += 1;
     if (activatesGoal) this.pendingGoalActivations += 1;
-    if (this.pendingParentCompletion) {
-      this.discardPendingParentCompletion();
+    if (this.subagentContinuation.hasCandidate()) {
+      this.subagentContinuation.discard();
       this.host.setActiveTurnId(undefined);
       this.host.setPhase("awaiting-goal-continuation");
     }
@@ -243,7 +240,7 @@ export class CodexAppServerEvents {
       clearTimeout(this.goalContinuationTimer);
       this.goalContinuationTimer = undefined;
     }
-    this.discardPendingParentCompletion();
+    this.subagentContinuation.discard();
   }
 
   endGoalMutation(activatesGoal: boolean): void {
@@ -661,6 +658,7 @@ export class CodexAppServerEvents {
         phase !== "starting-turn"
         && phase !== "running"
         && phase !== "awaiting-goal-continuation"
+        && phase !== "awaiting-subagent-continuation"
       ) return;
       if (
         phase === "awaiting-goal-continuation"
@@ -675,6 +673,7 @@ export class CodexAppServerEvents {
       ) return;
       if (
         phase !== "awaiting-goal-continuation"
+        && phase !== "awaiting-subagent-continuation"
         && this.host.activeTurnId()
         && notificationTurnId !== this.host.activeTurnId()
       ) return;
@@ -682,13 +681,18 @@ export class CodexAppServerEvents {
         clearTimeout(this.goalContinuationTimer);
         this.goalContinuationTimer = undefined;
       }
-      if (phase === "awaiting-goal-continuation") {
-        this.discardPendingParentCompletion();
+      if (
+        phase === "awaiting-goal-continuation"
+        || phase === "awaiting-subagent-continuation"
+      ) {
+        this.subagentContinuation.discard();
       }
       this.host.setActiveTurnId(notificationTurnId);
       this.host.setPhase("running");
       this.host.options.onStatus?.("running");
-      this.emitActivity("turn", "started", "Turn started");
+      this.emitActivity("turn", "started", "Turn started", {
+        activityId: stableProviderActivityId("codex-turn", notificationThreadId, notificationTurnId),
+      });
       return;
     }
 
@@ -738,6 +742,7 @@ export class CodexAppServerEvents {
           deltaItems: this.deltaItems,
           reasoningDeltaItems: this.reasoningDeltaItems,
           itemActivities: this.itemActivities,
+          completedPlanItemIds: this.completedPlanItemIds,
           maxTrackedActivities: MAX_CODEX_TRACKED_ITEM_ACTIVITIES,
         },
         method,
@@ -858,9 +863,13 @@ export class CodexAppServerEvents {
     if (method === "item/plan/delta") {
       const itemId = boundedText(params.itemId, 1_000);
       const delta = boundedText(params.delta, 8_000);
-      if (!delta) return;
+      if (!delta || (itemId && this.completedPlanItemIds.has(itemId))) return;
       this.emitActivity("turn", "started", "Plan updated", {
-        ...(itemId ? { activityId: itemId } : {}),
+        ...(itemId
+          ? {
+              activityId: stableProviderActivityId("codex-plan", itemId),
+            }
+          : {}),
         detail: `Progress:\n${delta}`,
       });
       return;
@@ -869,7 +878,7 @@ export class CodexAppServerEvents {
       const diff = boundedText(params.diff, 128_000);
       this.emitActivity(
         "tool",
-        "started",
+        "completed",
         "Patch updated",
         diff ? { detail: `Diff:\n${diff}` } : undefined,
       );
@@ -890,13 +899,16 @@ export class CodexAppServerEvents {
         boundedText(turnError?.message, 4_000) ?? this.host.lastError();
       if (lastError) this.host.setLastError(lastError);
       this.host.setTerminalEvent("turn/completed");
+      const hasLiveDelegatedWork = this.liveSubagentIds.size > 0;
       const activityPhase = status === "completed"
-        ? "completed"
+        ? hasLiveDelegatedWork ? "info" : "completed"
         : status === "failed"
           ? "failed"
           : "info";
       const activityLabel = status === "completed"
-        ? "Turn completed"
+        ? hasLiveDelegatedWork
+          ? "Parent turn ended while delegated work continues"
+          : "Turn completed"
         : status === "failed"
           ? "Turn failed"
           : status === "interrupted"
@@ -906,6 +918,9 @@ export class CodexAppServerEvents {
         "turn",
         activityPhase,
         activityLabel,
+        {
+          activityId: stableProviderActivityId("codex-turn", notificationThreadId, notificationTurnId),
+        },
       );
       if (this.host.cancelRequested() || status === "interrupted") {
         this.completeParentTurn("cancelled", null);
@@ -939,6 +954,7 @@ export class CodexAppServerEvents {
       this.deltaItems.clear();
       this.reasoningDeltaItems.clear();
       this.itemActivities.clear();
+      this.completedPlanItemIds.clear();
     }
   }
 
@@ -1064,6 +1080,7 @@ export class CodexAppServerEvents {
     if (
       this.goalContinuationTimer
       || this.pendingGoalMutations > 0
+      || this.liveSubagentIds.size > 0
       || this.host.phase() !== "awaiting-goal-continuation"
       || this.nativeGoalStatus !== "active"
     ) return;
@@ -1100,32 +1117,26 @@ export class CodexAppServerEvents {
       this.host.finish(status, exitCode, null);
       return;
     }
-    if (this.pendingParentCompletion) return;
-    this.pendingParentCompletion = { status, exitCode };
-    this.subagentDrainTimer = setTimeout(() => {
-      this.subagentDrainTimer = undefined;
-      this.finishPendingParentCompletion();
-    }, this.subagentDrainTimeoutMs);
-    this.subagentDrainTimer.unref();
+    if (!this.subagentContinuation.begin()) return;
+    this.host.setActiveTurnId(undefined);
+    this.host.setPhase("awaiting-subagent-continuation");
+    this.host.options.onStatus?.(
+      "delegated",
+      "awaiting delegated work and a fresh parent turn",
+    );
   }
 
-  private finishPendingParentCompletion(): void {
-    const completion = this.pendingParentCompletion;
-    if (!completion) return;
-    this.pendingParentCompletion = null;
-    if (this.subagentDrainTimer) {
-      clearTimeout(this.subagentDrainTimer);
-      this.subagentDrainTimer = undefined;
-    }
-    this.host.finish(completion.status, completion.exitCode, null);
-  }
-
-  private discardPendingParentCompletion(): void {
-    this.pendingParentCompletion = null;
-    if (this.subagentDrainTimer) {
-      clearTimeout(this.subagentDrainTimer);
-      this.subagentDrainTimer = undefined;
-    }
+  private failSubagentContinuation(): void {
+    const message =
+      "Codex ended the parent turn before delegated work finished and did not resume after that work settled.";
+    this.host.setLastError(message);
+    this.host.rememberFailure(
+      "codex-error",
+      message,
+      "No fresh parent turn started after the exact delegated-agent lifecycles became terminal.",
+    );
+    this.emitActivity("system", "failed", message);
+    this.host.finish("failed", 1, null);
   }
 
   private emitActivity(
@@ -1170,11 +1181,14 @@ export class CodexAppServerEvents {
       ...update,
       isLive,
     });
-    if (
-      this.pendingParentCompletion
-      && this.liveSubagentIds.size === 0
-    ) {
-      this.finishPendingParentCompletion();
+    this.subagentContinuation.observeLive(this.liveSubagentIds.size > 0);
+    if (this.host.phase() === "awaiting-goal-continuation") {
+      if (this.liveSubagentIds.size === 0) {
+        this.armGoalContinuationTimer();
+      } else if (this.goalContinuationTimer) {
+        clearTimeout(this.goalContinuationTimer);
+        this.goalContinuationTimer = undefined;
+      }
     }
   }
 

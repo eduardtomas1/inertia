@@ -5,7 +5,7 @@ import {
   type BackendCompatibilityProbeResult,
 } from "./backend-probe";
 import {
-  KNOWN_HARNESS_IDS,
+  CURRENT_KNOWN_HARNESS_IDS,
   HARNESS_BACKEND_COMPATIBILITY_REASON_CODES,
   MODEL_CAPABILITY_IDS,
   MODEL_CAPABILITY_STATES,
@@ -209,7 +209,7 @@ export const backendModelRoutingSchema = z.discriminatedUnion("mode", [
 ]);
 
 const persistedModelBackendProfileShape = modelBackendProfileSchema.extend({
-  harnessId: z.enum(KNOWN_HARNESS_IDS),
+  harnessId: z.enum(CURRENT_KNOWN_HARNESS_IDS),
   preset: z.enum(MODEL_BACKEND_PROFILE_PRESETS),
   baseUrl: baseUrlSchema.nullable(),
   allowInsecureLocalhost: z.boolean(),
@@ -371,7 +371,7 @@ export const modelBackendDefaultSchema = z.object({
 
 const draftShape = z.object({
   displayName: labelSchema,
-  harnessId: z.enum(KNOWN_HARNESS_IDS),
+  harnessId: z.enum(CURRENT_KNOWN_HARNESS_IDS),
   protocol: modelBackendProtocolSchema,
   authenticationMode: backendAuthenticationModeSchema,
   preset: z.enum(["kimi-code", "custom"]),

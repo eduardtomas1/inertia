@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 
 import type { Conversation, ClientCommand } from "../../shared/contracts";
 import {
-  nativeModelSelection,
+  providerNativeModelSelection,
   type ModelSelection,
 } from "../../shared/model-routing";
 import type { RuntimeStore } from "../database";
@@ -56,7 +56,7 @@ export class ConversationCreationService {
   } {
     const settings = this.dependencies.store.shellSnapshot().settings;
     const requestedSelection = payload.modelSelection
-      ?? nativeModelSelection({
+      ?? providerNativeModelSelection({
         providerId: payload.providerId ?? settings.defaultProvider,
         modelId: payload.model
           || settings.defaultModel

@@ -7,6 +7,7 @@ const PROVIDERS: readonly ProviderId[] = [
   "codex",
   "claude",
   "cursor",
+  "gemini",
   "kimi",
   "opencode",
 ];
@@ -57,11 +58,13 @@ describe("AuthoritativeRunStateEngine", () => {
     const state = engine("claude");
     state.setTransport("running");
     expect(state.observeDescendant("child-1", true, "delegate/running")).toBe(true);
+    expect(state.hasLiveDescendants()).toBe(true);
     expect(state.snapshot().state).toBe("delegated");
     expect(state.observeDescendant("child-2", true, "delegate/pending")).toBe(true);
     expect(state.observeDescendant("child-1", false, "delegate/completed")).toBe(true);
     expect(state.snapshot().state).toBe("delegated");
     expect(state.observeDescendant("child-2", false, "delegate/completed")).toBe(true);
+    expect(state.hasLiveDescendants()).toBe(false);
     expect(state.snapshot().state).toBe("running");
     expect(state.isTerminal()).toBe(false);
   });

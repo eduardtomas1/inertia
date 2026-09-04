@@ -5,9 +5,9 @@
 <h1 align="center">Inertia</h1>
 <p align="center">A calm desktop workspace for coding with agents.</p>
 
-![Inertia — Work sidebar and floating composer in dark mode](docs/screenshots/inertia-dark.png)
+![Inertia — project sidebar and floating composer in dark mode](docs/screenshots/inertia-dark.png)
 
-Inertia brings agent conversations, project files, Git review, and terminals into one local workspace. Use the coding accounts you already have with **Codex, Claude, Cursor, Kimi Code, or OpenCode**.
+Inertia brings agent conversations, project files, Git review, and terminals into one local workspace. Use the coding accounts you already have with **Codex, Claude, Cursor, Gemini CLI, Kimi Code, or OpenCode**.
 
 [Download the latest release](https://github.com/eduardtomas1/inertia/releases/latest) · [Installation guide](docs/INSTALLING.md) · [Changelog](CHANGELOG.md)
 
@@ -17,9 +17,9 @@ Inertia brings agent conversations, project files, Git review, and terminals int
 2. Add a local folder or clone a repository from its HTTPS or SSH Git URL.
 3. Open **Settings → Providers**, connect a provider, and start a chat.
 
-Work is your home for every project. Search tasks, filter through **All projects**, and keep running, waiting, completed, and snoozed work within reach. The project picker also opens project actions.
+Search chats across projects, or narrow the list through **All projects**. Open project actions from the picker. Running, waiting, completed, and snoozed chats stay in the same sidebar.
 
-![Find a project without leaving Work](docs/screenshots/inertia-project-picker.png)
+![Find a project from the sidebar](docs/screenshots/inertia-project-picker.png)
 
 ## One workspace for the coding loop
 

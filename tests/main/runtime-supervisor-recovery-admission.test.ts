@@ -9,6 +9,8 @@ import {
   RuntimeSupervisor,
   type RuntimeAttachmentBroker,
 } from "../../src/main/runtime-supervisor";
+import { RuntimeCleanupReceiptJournal } from
+  "../../src/main/runtime-cleanup-receipts";
 import { prepareModernDarwinBootstrapRecovery } from
   "../../src/main/runtime-bootstrap-safety";
 import { LegacyRuntimeRecoveryAuthorityJournal } from
@@ -100,6 +102,7 @@ function createHarness(options: {
   runtimeRecoveryBlocked?: boolean;
 } = {}) {
   const children: FakeUtilityProcess[] = [];
+  const forceKill = vi.fn(() => true);
   const supervisor = new RuntimeSupervisor({
     systemBootId: options.systemBootId
       ?? "test:00000000-0000-4000-8000-000000000001",
@@ -126,7 +129,7 @@ function createHarness(options: {
     stableUptimeMs: 5_000,
     shutdownGraceMs: 1_000,
     forceKillWaitMs: 500,
-    forceKill: () => true,
+    forceKill,
     recoverOwnedProcesses: options.recoverOwnedProcesses ?? (() => true),
     attachmentBroker: options.attachmentBroker,
     armProcessContainment: () => process.platform === "win32"
@@ -136,7 +139,7 @@ function createHarness(options: {
         }
       : null,
   });
-  return { children, supervisor };
+  return { children, forceKill, supervisor };
 }
 
 beforeEach(() => {
@@ -173,6 +176,71 @@ describe("RuntimeSupervisor recovery admission", () => {
       phase: "stopped",
       lastError: expect.stringMatching(/explicit confirmation/u),
     });
+  });
+
+  it("extends startup once after the final exact cleanup receipt", async () => {
+    const retiredGenerationId =
+      "30000000-0000-4000-8000-000000000003:901";
+    expect(new RuntimeCleanupReceiptJournal(dataDirectory)
+      .publish(retiredGenerationId)).toBe(true);
+    const { children, forceKill, supervisor } = createHarness();
+    supervisor.start();
+    children[0].spawn();
+    const start = children[0].messages.findLast((message) =>
+      message.type === "runtime.start");
+    if (start?.type !== "runtime.start") {
+      throw new Error("Expected the recovery runtime to start.");
+    }
+
+    await vi.advanceTimersByTimeAsync(1_900);
+    children[0].message({
+      type: "runtime.cleanup-receipt-consumed",
+      receiptRuntimeGenerationId: retiredGenerationId,
+      currentRuntimeGenerationId: start.options.runtimeGenerationId,
+    });
+    await vi.advanceTimersByTimeAsync(200);
+
+    expect(forceKill).not.toHaveBeenCalled();
+    expect(supervisor.snapshot().lastError).toBeNull();
+    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+    expect(supervisor.snapshot()).toMatchObject({ phase: "ready" });
+  });
+
+  it("does not let replayed or foreign recovery receipts extend startup again", async () => {
+    const retiredGenerationId =
+      "30000000-0000-4000-8000-000000000003:902";
+    expect(new RuntimeCleanupReceiptJournal(dataDirectory)
+      .publish(retiredGenerationId)).toBe(true);
+    const { children, forceKill, supervisor } = createHarness();
+    supervisor.start();
+    children[0].spawn();
+    const start = children[0].messages.findLast((message) =>
+      message.type === "runtime.start");
+    if (start?.type !== "runtime.start") {
+      throw new Error("Expected the recovery runtime to start.");
+    }
+
+    await vi.advanceTimersByTimeAsync(1_900);
+    const acknowledgement = {
+      type: "runtime.cleanup-receipt-consumed" as const,
+      receiptRuntimeGenerationId: retiredGenerationId,
+      currentRuntimeGenerationId: start.options.runtimeGenerationId,
+    };
+    children[0].message(acknowledgement);
+    await vi.advanceTimersByTimeAsync(1_000);
+    children[0].message(acknowledgement);
+    children[0].message({
+      ...acknowledgement,
+      receiptRuntimeGenerationId:
+        "30000000-0000-4000-8000-000000000003:903",
+    });
+    await vi.advanceTimersByTimeAsync(999);
+    expect(forceKill).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(forceKill).toHaveBeenCalledOnce();
+    expect(supervisor.snapshot().lastError)
+      .toBe("The runtime process did not become ready in time.");
   });
 
   it.runIf(process.platform === "darwin")(
@@ -642,7 +710,7 @@ describe("RuntimeSupervisor recovery admission", () => {
     ]);
   });
 
-  it("retains a complete legacy authority batch until its final acknowledgement", () => {
+  it("extends startup only after the final legacy authority acknowledgement", async () => {
     const legacyGenerationIds = [
       "30000000-0000-4000-8000-000000000003:702",
       "30000000-0000-4000-8000-000000000003:703",
@@ -659,33 +727,43 @@ describe("RuntimeSupervisor recovery admission", () => {
 
     supervisor.start();
     children[0].spawn();
+    const start = children[0].messages.findLast((message) =>
+      message.type === "runtime.start");
+    if (start?.type !== "runtime.start") {
+      throw new Error("Expected the legacy-recovery runtime to start.");
+    }
+    await vi.advanceTimersByTimeAsync(900);
     expect(leases.clearUnavailableRuntimeGeneration(legacyGenerationIds[0]!))
       .toBe(true);
     children[0].message({
       type: "runtime.legacy-recovery-authority-consumed",
       retiredRuntimeGenerationId: legacyGenerationIds[0],
-      currentRuntimeGenerationId: children[0].messages.findLast((message) =>
-        message.type === "runtime.start")!.options.runtimeGenerationId,
+      currentRuntimeGenerationId: start.options.runtimeGenerationId,
     });
 
     expect(new LegacyRuntimeRecoveryAuthorityJournal(dataDirectory)
       .pending(platform, bootId)).toEqual(legacyGenerationIds);
+    await vi.advanceTimersByTimeAsync(1_000);
     expect(leases.clearUnavailableRuntimeGeneration(legacyGenerationIds[1]!))
       .toBe(true);
     children[0].message({
       type: "runtime.legacy-recovery-authority-consumed",
       retiredRuntimeGenerationId: legacyGenerationIds[1],
-      currentRuntimeGenerationId: children[0].messages.findLast((message) =>
-        message.type === "runtime.start")!.options.runtimeGenerationId,
+      currentRuntimeGenerationId: start.options.runtimeGenerationId,
     });
 
     expect(new LegacyRuntimeRecoveryAuthorityJournal(dataDirectory)
       .pending(platform, bootId)).toEqual([]);
+    // The partial acknowledgement at 900 ms must not move the deadline to
+    // 2,900 ms; the final exact acknowledgement at 1,900 ms owns the single
+    // fresh window through 3,900 ms.
+    await vi.advanceTimersByTimeAsync(1_100);
+    expect(supervisor.snapshot().lastError).toBeNull();
     children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
     expect(supervisor.snapshot()).toMatchObject({ phase: "ready" });
   });
 
-  it("retires exact modern Darwin state only after the runtime DB acknowledgement", () => {
+  it("retires exact modern Darwin state only after the runtime DB acknowledgement", async () => {
     const oldGenerationId =
       "30000000-0000-4000-8000-000000000003:75";
     const bootId = "test:00000000-0000-4000-8000-000000000001";
@@ -720,7 +798,27 @@ describe("RuntimeSupervisor recovery admission", () => {
       },
     });
     expect(new RuntimeGenerationLeaseJournal(dataDirectory).all()).toHaveLength(2);
-    children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
+    const start = children[0].messages.findLast((message) =>
+      message.type === "runtime.start");
+    if (start?.type !== "runtime.start") {
+      throw new Error("Expected the manual-recovery runtime to start.");
+    }
+    await vi.advanceTimersByTimeAsync(1_900);
+    children[0].emit("message", {
+      type: "runtime.modern-darwin-recovery-authority-acknowledged",
+      operationId: descriptor!.operationId,
+      snapshotDigest: descriptor!.snapshotDigest,
+      currentRuntimeGenerationId: start.options.runtimeGenerationId,
+    });
+    // Exact recovery progress owns one fresh startup window. A loaded host
+    // may need the first window to retire the old generation before ordinary
+    // runtime initialization can finish.
+    await vi.advanceTimersByTimeAsync(200);
+    expect(supervisor.snapshot().lastError).toBeNull();
+    children[0].emit("message", {
+      type: "runtime.ready",
+      websocketUrl: firstUrl,
+    });
 
     expect(supervisor.snapshot()).toMatchObject({ phase: "ready" });
     expect(new ModernDarwinRecoveryAuthorityJournal(dataDirectory).pending())

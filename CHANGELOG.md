@@ -4,6 +4,143 @@ The useful changes in each Inertia release, in plain language.
 
 ## Next
 
+### Gemini CLI joins the native provider routes without hiding ACP gaps
+
+- Gemini CLI 0.58.0 or newer now runs through its official `--acp` JSON-RPC
+  transport with negotiated models, images, MCP host tools, cancellation, and
+  bounded process cleanup. Inertia leaves authentication selection to the
+  official interactive CLI and never calls ACP `authenticate`, which can change
+  the saved method or clear cached credentials. Google OAuth setup uses the
+  CLI's manual-code mode so one validated URL opens once, and ACP—not terminal
+  exit status—remains the authentication authority.
+- Each turn starts a fresh Gemini ACP session. Because the current CLI can
+  return from `session/load` before asynchronous history replay is complete and
+  exposes no replay-end marker, Inertia reconstructs only a bounded visible
+  user/assistant transcript as application context instead of claiming native
+  resume. Hidden reasoning, tool payloads, provider-managed credential state,
+  provider session identity, and historical attachment bytes remain outside
+  that reconstruction. Text explicitly entered into visible messages remains
+  part of the context and should be reviewed like any provider prompt.
+- Gemini's outer CLI and inner ACP chat records now have exact per-run ownership,
+  with filename-prefix entropy that avoids deterministic concurrent collisions,
+  and are removed only after verified process-tree shutdown and workspace-marker
+  attestation. Ambiguous or incomplete provider-side cleanup fails the turn
+  closed without deleting unrelated Gemini history or account configuration.
+- Gemini plan mode and bounded ACP plan updates are projected when available.
+  Structured questions and explicit compaction remain unavailable, usage comes
+  only from validated prompt-response and ACP usage-update fields, and access
+  policy applies one-shot decisions only to permission requests the provider
+  reports. Gemini's own policy and allowlists can authorize unreported actions.
+
+## 0.0.48 — 2026-09-04
+
+### Updates and attachment-backed messages settle reliably
+
+- After a Linux AppImage update or remount, startup can retire the exact prior
+  runtime generation even when the newly installed guardian has a different
+  executable inode. Recovery still proves the prior PID, birth identity,
+  process group, session, stopped state, and absence of children before
+  termination, and releases the durable claim only after disappearance is
+  confirmed.
+- Attachment retention, attachment import, and secure-file utility operations
+  now correlate terminal results with an operation UUID and wait for the
+  parent's exact acknowledgement before exiting. This prevents a valid result
+  from being lost to an IPC/exit race and aborting a prompt with
+  `message-send/retention/unexpected`.
+- Missing, mismatched, duplicate, pre-delivery, or undeliverable
+  acknowledgements remain fail-closed inside existing deadlines. Cancellation
+  before a cold utility process spawns is retried at spawn, so a late helper
+  cannot remain alive and poison subsequent prompts or runtime shutdown.
+
+### Release confidence
+
+- Regression coverage exercises AppImage replacement-helper recovery, durable
+  claim clearance, strict one-shot worker correlation and acknowledgement,
+  malformed and failed acknowledgement paths, pre-spawn cancellation, and
+  repeated PNG-backed prompt sends in a real Electron non-Git workspace.
+
+## 0.0.47 — 2026-09-03
+
+### Messages and local work recover without an app restart
+
+- Sending a normal prompt is now one atomic admission: a failed request rolls
+  back its provisional turn and releases the conversation instead of leaving
+  every later prompt blocked until Inertia is reopened.
+- Startup and replacement retire stale runtime generations through bounded,
+  platform-specific ownership proof. Transient Windows journal reads, Linux
+  guardian publication, native probes, Git shutdown, and interrupted cleanup
+  reconcile without treating uncertain processes as safe or spamming restart
+  dialogs.
+- Delegated continuations, one-shot provider actions, patch and command
+  activities, and recovered turns settle against their exact run and item
+  identities. Late events cannot keep a completed activity spinning or attach
+  a failure to a newer turn.
+
+### Providers stay current, bounded, and attributable
+
+- Claude coalesced follow-ups retain every exact receipt, including queued
+  media, while Codex delegation waits for its owned continuations. OpenCode
+  descendant work remains project-isolated and its server identity is poisoned
+  whenever shutdown cannot be confirmed.
+- Provider discovery, validation, drift probes, output limits, and process-tree
+  cleanup now share stricter executable and runtime boundaries. Diagnostic
+  output remains available without consuming a provider's output allowance or
+  weakening descendant cleanup checks.
+- The reviewed provider contracts now target ACP 1.4.0, Claude Agent SDK
+  0.3.259, Anthropic SDK 0.123.0, MCP 1.30.0, and OpenCode SDK 1.18.27, with
+  secret-free drift checks and deterministic portable coverage for each
+  shipped integration.
+
+### Large and split workspaces stay responsive
+
+- Git refreshes, pre-turn artifact capture, renderer projections, and shutdown
+  drains are coalesced and bounded, avoiding duplicate process storms and long
+  UI stalls while preserving exact repository and conversation ownership.
+- Linked files open at the requested target and long previews virtualize their
+  content. A new chat opened from the Inertia mark remains scoped to the active
+  project, and provider settings use a clearer master-detail layout.
+- Composer utilities, Skills, reasoning, response-speed, and scratch-prompt
+  menus are positioned inside their active split pane instead of extending
+  beneath the screen edge.
+
+### Installed application names stay stable across updates
+
+- Stable production packages keep the installed identity `Inertia` on macOS
+  and Windows and `Inertia.AppImage` on Linux. Canary remains separate as
+  `Inertia Canary` / `Inertia Canary.AppImage`, while development builds stay
+  outside in-app delivery. Public release assets can remain versioned.
+- A first in-app update from a manually downloaded versioned AppImage now
+  migrates to the durable channel filename, and repeated updates preserve it.
+  The Linux handoff validates direct files and realpath containment, copies the
+  verified download into the active directory, swaps only within that
+  directory, retains an inode-bound rollback link, and recovers interrupted
+  transactions from a bounded journal.
+- Focused coverage exercises first migration, unversioned and repeated
+  updates, spaces and directory aliases, hostile symlinks and occupied paths,
+  launch rollback, interrupted recovery, channel isolation, and all three
+  platform identities. Native release-container smoke launches Linux through
+  its installed filename while macOS and Windows retain their exact bundle and
+  executable names.
+
+### Release confidence
+
+- Electron 44 packaging, macOS 13 compatibility, native x64 and ARM64 package
+  paths, process containment, migration lineage, provider portability, and the
+  exact-tag checksum and provenance boundary remain covered across Linux,
+  macOS, and Windows.
+
+## 0.0.46 — 2026-09-01
+
+### Provider work recovers after ownership uncertainty
+
+- When owned-process containment or cleanup becomes unconfirmable, the first registry taint now stops the local runtime once so the supervisor can replace it. Later provider and terminal requests no longer remain permanently fail-closed inside a poisoned runtime.
+- Recovery is wired at the shared owned-process registry, so it covers Codex, Claude, Cursor, Kimi Code, and OpenCode as well as provider discovery, validation, metadata, maintenance, and run subprocesses. Non-run provider work receives the same recovery boundary as an active chat.
+- Admission remains fail-closed before restart notification. Repeated taint signals are idempotent, stale or deactivated registries cannot restart the current runtime, and a failing notification callback cannot reopen process admission.
+
+### Release confidence
+
+- Integration coverage taints a provider subprocess outside an active run and proves the runtime notification fires exactly once. Provider coverage, both lint layers, type safety, architecture and migration checks, and the complete Linux, macOS, and Windows pull-request matrix remain green at the exact merged fix head.
+
 ## 0.0.45 — 2026-08-30
 
 ### The Browser is ready when the chat is

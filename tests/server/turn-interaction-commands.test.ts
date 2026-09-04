@@ -13,14 +13,16 @@ import type {
   ProviderSkillInput,
   ProviderInfo,
 } from "../../src/shared/contracts";
-import {
-  PDF_MODULE_INITIALIZATION_TIMEOUT_MS,
+import type {
+  PreparedDocumentAttachments,
 } from "../../src/server/runtime/attachments/document-attachment-context";
 import { PrivateGeneratedAttachmentStore } from "../../src/server/runtime/attachments/private-generated-attachments";
+import { RuntimeRequestError } from "../../src/server/runtime-errors";
 import {
   createTurnInteractionCommandHandler,
   type TurnInteractionCommandDependencies,
 } from "../../src/server/runtime/commands/turn-interaction-commands";
+import type { TurnAdmissionLease } from "../../src/server/runtime/turns/turn-controller-types";
 import { MESSAGE_SEND_PREPARATION_TIMEOUT_MS } from "../../src/shared/runtime-command-timeouts";
 
 const conversationId = "11111111-1111-4111-8111-111111111111";
@@ -65,27 +67,21 @@ function messageCommand(
   };
 }
 
-function blankPdf(): Uint8Array {
-  const stream = "BT /F1 22 Tf 72 720 Td (Page 1 of 1) Tj ET";
-  const objects = [
-    "<< /Type /Catalog /Pages 2 0 R >>",
-    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
-    `<< /Length ${Buffer.byteLength(stream, "ascii")} >>\nstream\n${stream}\nendstream`,
-    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
-  ];
-  let pdf = "%PDF-1.4\n";
-  const offsets: number[] = [];
-  for (const [index, object] of objects.entries()) {
-    offsets.push(Buffer.byteLength(pdf, "ascii"));
-    pdf += `${index + 1} 0 obj\n${object}\nendobj\n`;
-  }
-  const xrefOffset = Buffer.byteLength(pdf, "ascii");
-  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
-  pdf += offsets.map((offset) =>
-    `${String(offset).padStart(10, "0")} 00000 n \n`).join("");
-  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
-  return Buffer.from(pdf, "ascii");
+const generatedJpegFixture = new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
+
+function preparedScannedPdf(
+  generatedImagePath: string,
+): PreparedDocumentAttachments {
+  return {
+    contexts: [{
+      attachmentId: trustedAttachment.id,
+      label: "PDF · scanned.pdf",
+      content: "Inertia rasterized page 1 as provider image 1.",
+      truncated: false,
+    }],
+    generatedImagePaths: [generatedImagePath],
+    imagePaths: [generatedImagePath],
+  };
 }
 
 function providerWithImages(supportsImages: boolean): ProviderInfo {
@@ -145,6 +141,9 @@ function dependencies(options: {
   ) => Promise<boolean>>;
   enableProviders?: boolean;
   generatedAttachments?: PrivateGeneratedAttachmentStore;
+  prepareDocumentAttachments?: NonNullable<
+    TurnInteractionCommandDependencies["prepareDocumentAttachments"]
+  >;
   provider?: ProviderInfo;
   resolvedPayloads?: Array<{
     attachment: ChatAttachment;
@@ -154,9 +153,12 @@ function dependencies(options: {
     TurnInteractionCommandDependencies["backendProfileController"]["validateSelection"]
   >;
   externalSelection?: boolean;
+  turnAdmissionRelease?: ReturnType<typeof vi.fn>;
+  providerId?: ProviderInfo["id"];
 }): TurnInteractionCommandDependencies {
+  const providerId = options.providerId ?? "codex";
   const provider = options.provider ?? {
-    id: "codex",
+    id: providerId,
     canRun: true,
     statusMessage: null,
     models: [],
@@ -166,7 +168,7 @@ function dependencies(options: {
       conversation: vi.fn(() => ({
         id: conversationId,
         title: "Existing conversation",
-        providerId: "codex",
+        providerId,
         model: null,
         reasoningEffort: "",
         modelSelection: {
@@ -187,6 +189,7 @@ function dependencies(options: {
       addCheckpoint: vi.fn(() => ({
         id: "55555555-5555-4555-8555-555555555555",
       })),
+      removeUnassociatedCheckpoint: vi.fn(() => true),
       createMessage: vi.fn(() => ({ id: "message-id" })),
       updateConversation: vi.fn(),
     } as unknown as TurnInteractionCommandDependencies["store"],
@@ -206,6 +209,11 @@ function dependencies(options: {
     } as unknown as TurnInteractionCommandDependencies["backendProfileController"],
     turns: {
       isActive: vi.fn(() => false),
+      acquireTurnAdmission: vi.fn(async () => ({
+        conversationId,
+        token: Symbol("test-turn-admission"),
+        release: options.turnAdmissionRelease ?? vi.fn(),
+      })),
       acquireFollowUpAdmission: vi.fn(() => ({
         conversationId,
         runId: "66666666-6666-4666-8666-666666666666",
@@ -241,6 +249,7 @@ function dependencies(options: {
     generatedAttachments: options.generatedAttachments ?? {
       release: vi.fn(async () => undefined),
     } as unknown as TurnInteractionCommandDependencies["generatedAttachments"],
+    prepareDocumentAttachments: options.prepareDocumentAttachments,
     workflows: {
       resolveTurnSkills: vi.fn(async (
         selectedConversationId: string,
@@ -336,6 +345,215 @@ describe("turn stop cleanup", () => {
   });
 });
 
+describe("new-turn admission recovery", () => {
+  it.each([
+    { stage: "conversation-state", failure: "conversation" },
+    { stage: "active-route", failure: "active-route" },
+  ] as const)(
+    "classifies an unexpected $failure preflight failure",
+    async ({ stage, failure }) => {
+      const runtime = dependencies({
+        queue: vi.fn(),
+        relinquishAll: vi.fn(async () => undefined),
+      });
+      if (failure === "conversation") {
+        vi.mocked(runtime.store.conversation).mockImplementationOnce(() => {
+          throw new Error("injected conversation read failure");
+        });
+      } else {
+        vi.mocked(runtime.turns.isActive).mockImplementationOnce(() => {
+          throw Object.assign(new Error("injected ownership read failure"), {
+            code: "sk-sensitivecredentialvalue",
+          });
+        });
+      }
+
+      const error = await createTurnInteractionCommandHandler(runtime)(
+        {} as never,
+        messageCommand(),
+      ).then(() => null, (failure: unknown) => failure);
+      const code = `message-send/${stage}/unexpected`;
+      expect(error).toBeInstanceOf(RuntimeRequestError);
+      expect((error as RuntimeRequestError).code).toBe(code);
+      expect((error as Error).message).toContain(`[${code}]`);
+      expect((error as Error).message).not.toContain(
+        "sk-sensitivecredentialvalue",
+      );
+      expect(runtime.turns.acquireTurnAdmission).not.toHaveBeenCalled();
+      expect(runtime.turns.queue).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    "codex",
+    "claude",
+    "cursor",
+    "gemini",
+    "kimi",
+    "opencode",
+  ] as const)("uses the same admission handoff for the %s provider", async (providerId) => {
+    const queue = vi.fn(() => queuedTurn());
+    const runtime = dependencies({
+      queue,
+      relinquishAll: vi.fn(async () => undefined),
+      providerId,
+    });
+    const handler = createTurnInteractionCommandHandler(runtime);
+
+    await expect(handler({} as never, messageCommand()))
+      .resolves.toBe("handled");
+    expect(runtime.turns.acquireTurnAdmission)
+      .toHaveBeenCalledWith(conversationId, expect.any(Number));
+    expect(queue).toHaveBeenCalledWith(
+      expect.objectContaining({ conversationId }),
+      expect.any(Function),
+      expect.objectContaining({ conversationId }),
+    );
+  });
+
+  it.each([
+    { failure: "readiness", stage: "backend-readiness" },
+    { failure: "skills", stage: "skills" },
+    { failure: "transition", stage: "provider-transition" },
+    { failure: "retention", stage: "retention" },
+    { failure: "persistence", stage: "turn-persistence" },
+  ] as const)(
+    "releases admission after $failure failure and accepts an immediate retry",
+    async ({ failure, stage }) => {
+      const releaseAdmission = vi.fn();
+      const queue = vi.fn(() => queuedTurn());
+      const readiness = vi.fn(async () => null);
+      const resolveSkills = vi.fn(async () => [] as ProviderSkillInput[]);
+      const acquireTransition = vi.fn(async () => true);
+      const runtime = dependencies({
+        queue,
+        relinquishAll: vi.fn(async () => undefined),
+        readiness,
+        resolveSkills,
+        providerTerminalResumeAcquireWhenAvailable: acquireTransition,
+        turnAdmissionRelease: releaseAdmission,
+      });
+      if (failure === "readiness") {
+        readiness.mockRejectedValueOnce(new Error("injected readiness failure"));
+      } else if (failure === "skills") {
+        resolveSkills.mockRejectedValueOnce(new Error("injected skills failure"));
+      } else if (failure === "transition") {
+        acquireTransition.mockResolvedValueOnce(false);
+      } else if (failure === "retention") {
+        vi.mocked(runtime.conversationAttachments.retain)
+          .mockRejectedValueOnce(new Error("injected retention failure"));
+      } else {
+        queue.mockImplementationOnce(() => {
+          throw new Error("injected persistence failure");
+        });
+      }
+      const handler = createTurnInteractionCommandHandler(runtime);
+
+      const firstError = await handler({} as never, messageCommand())
+        .then(() => null, (error: unknown) => error);
+      expect(firstError).toBeInstanceOf(RuntimeRequestError);
+      expect((firstError as Error).message)
+        .not.toBe("The request could not be completed.");
+      if (failure === "transition") {
+        expect((firstError as RuntimeRequestError).code).toBeUndefined();
+        expect((firstError as Error).message).toContain(
+          "End the resumed provider terminal",
+        );
+      } else {
+        const code = `message-send/${stage}/unexpected`;
+        expect((firstError as RuntimeRequestError).code).toBe(code);
+        expect((firstError as Error).message).toContain(`[${code}]`);
+      }
+      expect(releaseAdmission).toHaveBeenCalledTimes(1);
+
+      await expect(handler({} as never, messageCommand()))
+        .resolves.toBe("handled");
+      expect(releaseAdmission).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it("releases an admission lease that arrives after preparation timed out", async () => {
+    vi.useFakeTimers();
+    try {
+      let resolveLateAdmission!: (
+        admission: TurnAdmissionLease | null,
+      ) => void;
+      const lateRelease = vi.fn();
+      const retryRelease = vi.fn();
+      const runtime = dependencies({
+        queue: vi.fn(() => queuedTurn()),
+        relinquishAll: vi.fn(async () => undefined),
+      });
+      vi.mocked(runtime.turns.acquireTurnAdmission)
+        .mockReturnValueOnce(new Promise((resolve) => {
+          resolveLateAdmission = resolve;
+        }))
+        .mockResolvedValueOnce({
+          conversationId,
+          token: Symbol(),
+          release: retryRelease,
+        });
+      const handler = createTurnInteractionCommandHandler(runtime);
+      const handling = handler({} as never, messageCommand());
+      const rejection = expect(handling).rejects.toThrow(
+        "Preparing this message took too long. No turn was started.",
+      );
+
+      await vi.advanceTimersByTimeAsync(MESSAGE_SEND_PREPARATION_TIMEOUT_MS);
+      await rejection;
+      resolveLateAdmission({
+        conversationId,
+        token: Symbol(),
+        release: lateRelease,
+      });
+      await vi.waitFor(() => expect(lateRelease).toHaveBeenCalledOnce());
+
+      await expect(handler({} as never, messageCommand()))
+        .resolves.toBe("handled");
+      expect(retryRelease).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("accepts a detached-socket retry after the main socket publication fails", async () => {
+    const queue = vi.fn((
+      _request: unknown,
+      onPersisted: () => void,
+    ) => {
+      onPersisted();
+      if (queue.mock.calls.length === 1) {
+        throw new Error("injected main-window publication failure");
+      }
+      return queuedTurn();
+    });
+    const runtime = dependencies({
+      queue,
+      relinquishAll: vi.fn(async () => undefined),
+    });
+    const handler = createTurnInteractionCommandHandler(runtime);
+    const mainSocket = { kind: "main" } as never;
+    const detachedSocket = { kind: "detached" } as never;
+
+    await expect(handler(mainSocket, messageCommand())).rejects.toThrow(
+      "message-send/turn-publication/unexpected",
+    );
+    const retry = messageCommand();
+    retry.requestId = "77777777-7777-4777-8777-777777777777";
+    retry.payload.activate = false;
+    await expect(handler(detachedSocket, retry)).resolves.toBe("handled");
+    expect(runtime.send).toHaveBeenCalledWith(detachedSocket, {
+      type: "request.result",
+      requestId: retry.requestId,
+      result: expect.objectContaining({
+        kind: "message.accepted",
+        conversationId,
+        disposition: "new-turn",
+      }),
+    });
+  });
+});
+
 describe("attachment send handoff", () => {
   it("binds runtime attachment resolution to the message request identity", async () => {
     const runtime = dependencies({
@@ -374,7 +592,9 @@ describe("message attachment ownership transfer", () => {
         path: join(directory, "22222222-2222-4222-8222-222222222222.pdf"),
         mimeType: "application/pdf" as const,
       };
-      const bytes = blankPdf();
+      const generatedImagePath = await generatedAttachments.writeJpeg(
+        generatedJpegFixture,
+      );
       const queue = queueRejects
         ? vi.fn(() => { throw new Error("queue rejected"); })
         : vi.fn();
@@ -382,8 +602,10 @@ describe("message attachment ownership transfer", () => {
         queue,
         relinquishAll: vi.fn(async () => undefined),
         generatedAttachments,
+        prepareDocumentAttachments: vi.fn(async () =>
+          preparedScannedPdf(generatedImagePath)),
         provider: providerWithImages(supportsImages),
-        resolvedPayloads: [{ attachment: pdf, bytes }],
+        resolvedPayloads: [{ attachment: pdf, bytes: new Uint8Array([0x25]) }],
       });
       const command = messageCommand();
       command.payload.attachments = [pdf];
@@ -392,14 +614,16 @@ describe("message attachment ownership transfer", () => {
         {} as never,
         command,
       )).rejects.toThrow(
-        queueRejects ? "queue rejected" : "cannot inspect scanned PDF",
+        queueRejects
+          ? "message-send/turn-persistence/unexpected"
+          : "cannot inspect scanned PDF",
       );
       expect(generatedAttachments.usage()).toEqual({ bytes: 0, records: 0 });
       expect(queue).toHaveBeenCalledTimes(queueRejects ? 1 : 0);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
-  }, PDF_MODULE_INITIALIZATION_TIMEOUT_MS + 15_000);
+  });
 
   it("cleans a generated page when aggregate preparation times out after the private write", async () => {
     vi.useFakeTimers();
@@ -428,8 +652,12 @@ describe("message attachment ownership transfer", () => {
         queue: vi.fn(),
         relinquishAll: vi.fn(async () => undefined),
         generatedAttachments: delayedStore,
+        prepareDocumentAttachments: vi.fn(async () => {
+          const path = await delayedStore.writeJpeg(generatedJpegFixture);
+          return preparedScannedPdf(path);
+        }),
         provider: providerWithImages(true),
-        resolvedPayloads: [{ attachment: pdf, bytes: blankPdf() }],
+        resolvedPayloads: [{ attachment: pdf, bytes: new Uint8Array([0x25]) }],
       });
       const command = messageCommand();
       command.payload.attachments = [pdf];
@@ -472,8 +700,11 @@ describe("message attachment ownership transfer", () => {
         queue: vi.fn(),
         relinquishAll: vi.fn(async () => undefined),
         generatedAttachments,
+        prepareDocumentAttachments: vi.fn(async () => preparedScannedPdf(
+          await generatedAttachments.writeJpeg(generatedJpegFixture),
+        )),
         enableProviders: false,
-        resolvedPayloads: [{ attachment: pdf, bytes: blankPdf() }],
+        resolvedPayloads: [{ attachment: pdf, bytes: new Uint8Array([0x25]) }],
       });
       const command = messageCommand();
       command.payload.attachments = [pdf];
@@ -521,8 +752,11 @@ describe("message attachment ownership transfer", () => {
         queue,
         relinquishAll: vi.fn(async () => undefined),
         generatedAttachments,
+        prepareDocumentAttachments: vi.fn(async () => preparedScannedPdf(
+          await generatedAttachments.writeJpeg(generatedJpegFixture),
+        )),
         provider: providerWithImages(false),
-        resolvedPayloads: [{ attachment: pdf, bytes: blankPdf() }],
+        resolvedPayloads: [{ attachment: pdf, bytes: new Uint8Array([0x25]) }],
         validatedSelection: externalSelection(state),
         externalSelection: true,
       });
@@ -563,7 +797,7 @@ describe("message attachment ownership transfer", () => {
     await expect(createTurnInteractionCommandHandler(handlerDependencies)(
       {} as never,
       messageCommand(),
-    )).rejects.toThrow("reserved for its locked Duo comparison");
+    )).rejects.toThrow("message-send/turn-persistence/unexpected");
     expect(queue).toHaveBeenCalledOnce();
   });
 
@@ -862,6 +1096,37 @@ describe("message attachment ownership transfer", () => {
     expect(handlerDependencies.broadcastSnapshot).toHaveBeenCalledOnce();
   });
 
+  it("does not encourage a duplicate retry after follow-up persistence", async () => {
+    const followUp: ChatMessage = {
+      id: "77777777-7777-4777-8777-777777777777",
+      conversationId,
+      turnId: "88888888-8888-4888-8888-888888888888",
+      role: "user",
+      content: "Persisted follow-up.",
+      attachments: [],
+      createdAt: "2026-07-30T06:00:00.000Z",
+    };
+    const runtime = dependencies({
+      queue: vi.fn(),
+      relinquishAll: vi.fn(async () => undefined),
+    });
+    vi.mocked(runtime.turns.isActive).mockReturnValue(true);
+    vi.mocked(runtime.turns.steer).mockResolvedValue(followUp);
+    vi.mocked(runtime.send).mockImplementationOnce(() => {
+      throw new Error("injected acknowledgement failure");
+    });
+    const command = messageCommand();
+    command.payload.attachments = [];
+
+    await expect(createTurnInteractionCommandHandler(runtime)(
+      {} as never,
+      command,
+    )).rejects.toThrow(
+      "The follow-up was accepted but its acknowledgement could not finish cleanly. Refresh this chat before retrying. [message-send/follow-up-publication/unexpected]",
+    );
+    expect(runtime.turns.queue).not.toHaveBeenCalled();
+  });
+
   it("queues providers against the retained copy and persists its identity", async () => {
     const queue = vi.fn(() => queuedTurn());
     const relinquishAll = vi.fn(async () => undefined);
@@ -884,6 +1149,7 @@ describe("message attachment ownership transfer", () => {
         imagePaths: [retainedAttachment.path],
       }),
       expect.any(Function),
+      expect.objectContaining({ conversationId }),
     );
     expect(relinquishAll).not.toHaveBeenCalled();
     expect(handlerDependencies.conversationAttachments.acceptRetention)
@@ -929,7 +1195,7 @@ describe("message attachment ownership transfer", () => {
     const handler = createTurnInteractionCommandHandler(handlerDependencies);
 
     await expect(handler({} as never, messageCommand())).rejects.toThrow(
-      "queue preparation rejected",
+      "message-send/turn-persistence/unexpected",
     );
     expect(queue).toHaveBeenCalledTimes(1);
     expect(relinquishAll).toHaveBeenCalledOnce();
@@ -946,6 +1212,7 @@ describe("message attachment ownership transfer", () => {
         attachments: [trustedAttachment],
       }),
       expect.any(Function),
+      expect.objectContaining({ conversationId }),
     );
     expect(relinquishAll).toHaveBeenCalledOnce();
     expect(handlerDependencies.conversationAttachments.retain)
@@ -966,7 +1233,7 @@ describe("message attachment ownership transfer", () => {
     await expect(createTurnInteractionCommandHandler(handlerDependencies)(
       {} as never,
       messageCommand(),
-    )).rejects.toThrow("queue adoption failed after persistence");
+    )).rejects.toThrow("message-send/turn-publication/unexpected");
 
     expect(handlerDependencies.conversationAttachments.acceptRetention)
       .toHaveBeenCalledOnce();
@@ -979,7 +1246,7 @@ describe("message attachment ownership transfer", () => {
     const relinquishAll = vi.fn(async () => undefined);
     const queue = vi.fn();
     const resolveSkills = vi.fn(async () => {
-      throw new Error("Selected skill is no longer available.");
+      throw new RuntimeRequestError("Selected skill is no longer available.");
     });
     const handlerDependencies = dependencies({
       queue,
@@ -1023,6 +1290,7 @@ describe("message attachment ownership transfer", () => {
     expect(queue).toHaveBeenCalledWith(
       expect.objectContaining({ skills: [skill] }),
       expect.any(Function),
+      expect.objectContaining({ conversationId }),
     );
     expect(resolveSkills.mock.invocationCallOrder[0]).toBeLessThan(
       vi.mocked(handlerDependencies.store.conversationPath)
@@ -1243,7 +1511,7 @@ describe("message attachment ownership transfer", () => {
       const relinquishAll = vi.fn(async () => undefined);
       const queue = vi.fn();
       const assertTurnSkillsCurrent = vi.fn(() => {
-        throw new Error("The provider route changed.");
+        throw new RuntimeRequestError("The provider route changed.");
       });
       const handlerDependencies = dependencies({
         queue,
@@ -1332,12 +1600,14 @@ describe("message attachment ownership transfer", () => {
         conversationPath: repository,
       });
       vi.mocked(handlerDependencies.conversationAttachments.retain)
-        .mockRejectedValueOnce(new Error("Conversation attachment storage is full."));
+        .mockRejectedValueOnce(new Error(
+          "Conversation attachment storage is full.",
+        ));
 
       await expect(createTurnInteractionCommandHandler(handlerDependencies)(
         {} as never,
         messageCommand(),
-      )).rejects.toThrow("Conversation attachment storage is full.");
+      )).rejects.toThrow("message-send/retention/unexpected");
 
       expect(handlerDependencies.store.addCheckpoint).not.toHaveBeenCalled();
       expect(handlerDependencies.turns.queue).not.toHaveBeenCalled();
@@ -1345,6 +1615,43 @@ describe("message attachment ownership transfer", () => {
         .toHaveBeenCalledWith([trustedAttachment.id]);
       expect(handlerDependencies.conversationAttachments.releaseRetention)
         .toHaveBeenCalledWith(expect.stringMatching(/^[0-9a-f-]{36}$/u));
+      const { stdout } = await execFileAsync("git", [
+        "-C",
+        repository,
+        "for-each-ref",
+        "--format=%(refname)",
+        `refs/inertia/checkpoints/${conversationId}/`,
+      ]);
+      expect(stdout.trim()).toBe("");
+    } finally {
+      await rm(repository, { recursive: true, force: true });
+    }
+  });
+
+  it("removes unassociated checkpoint metadata and its ref before turn persistence", async () => {
+    const repository = await mkdtemp(join(tmpdir(), "inertia-checkpoint-queue-"));
+    try {
+      await execFileAsync("git", ["init", "--quiet", repository]);
+      await writeFile(join(repository, "request.txt"), "pending\n");
+      const handlerDependencies = dependencies({
+        queue: vi.fn(() => {
+          throw new Error("injected queue persistence failure");
+        }),
+        relinquishAll: vi.fn(async () => undefined),
+        conversationPath: repository,
+      });
+
+      await expect(createTurnInteractionCommandHandler(handlerDependencies)(
+        {} as never,
+        messageCommand(),
+      )).rejects.toThrow("message-send/turn-persistence/unexpected");
+
+      expect(handlerDependencies.store.addCheckpoint).toHaveBeenCalledOnce();
+      expect(handlerDependencies.store.removeUnassociatedCheckpoint)
+        .toHaveBeenCalledWith(
+          "55555555-5555-4555-8555-555555555555",
+          conversationId,
+        );
       const { stdout } = await execFileAsync("git", [
         "-C",
         repository,
@@ -1401,6 +1708,7 @@ describe("message attachment ownership transfer", () => {
         activateConversation: false,
       }),
       expect.any(Function),
+      expect.objectContaining({ conversationId }),
     );
   });
 
@@ -1419,7 +1727,7 @@ describe("message attachment ownership transfer", () => {
     const handler = createTurnInteractionCommandHandler(handlerDependencies);
 
     await expect(handler({} as never, messageCommand())).rejects.toThrow(
-      "renderer acknowledgement failed",
+      "message-send/turn-publication/unexpected",
     );
     expect(handlerDependencies.turns.failBeforeStart).toHaveBeenCalledWith(
       conversationId,

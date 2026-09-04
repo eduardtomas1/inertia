@@ -30,10 +30,15 @@ describe("sidebar index presentation contracts", () => {
 
   it("stops decorative motion for reduced motion and hidden documents", () => {
     expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.activity-thread\.status-working \.activity-thread-state-mark\s*\{[\s\S]*?animation:\s*none;/u);
-    expect(css).toContain(
-      '.app-shell[data-document-visible="false"] .activity-thread.status-working .activity-thread-state-mark',
-    );
+    expect(css).toMatch(/\.app-shell\[data-document-visible="false"\]\s+\.activity-thread\.status-working \.activity-thread-state-mark::before/u);
     expect(css).toContain("animation-play-state: paused;");
+    expect(css).toContain(
+      ".activity-thread.status-working .activity-thread-state-mark::before",
+    );
+    expect(css).not.toContain(
+      ".activity-thread.status-working .activity-thread-state-mark::after",
+    );
+    expect(css).not.toContain("will-change:");
   });
 
   it("exposes selected, focus, and status boundaries in forced colors", () => {

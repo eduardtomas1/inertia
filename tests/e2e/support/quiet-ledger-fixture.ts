@@ -6,7 +6,7 @@ import {
   createKimiClaudeBackendProfile,
   createKimiClaudeModelSelection,
 } from "../../../src/shared/claude-backend-profiles";
-import { nativeModelSelection } from "../../../src/shared/model-routing";
+import { providerNativeModelSelection } from "../../../src/shared/model-routing";
 
 export const createQuietLedgerFixture = ({
   testDirectory,
@@ -41,7 +41,7 @@ export const createQuietLedgerFixture = ({
 
   const fixturePrefix = `quiet-ledger-e2e-${randomUUID()}`;
   const fixtureBaseTime = Date.now() - 12 * 60_000;
-  const codexSelection = nativeModelSelection({
+  const codexSelection = providerNativeModelSelection({
     providerId: "codex",
     modelId: "gpt-5.6",
     alias: "GPT-5.6",

@@ -14,6 +14,8 @@ import {
   type ProviderEnvironment,
 } from "../environment";
 import {
+  isProcessTreeTerminationUnconfirmed,
+  ProcessTreeTerminationError,
   requireProcessTreeTermination,
   terminateProcessTreeAndWait,
   type ProcessTreeTerminator,
@@ -32,8 +34,17 @@ import { CappedProviderBuffer } from "./io";
 import { providerProcessInvocation } from "./process";
 import { windowsCodexExecutableCandidates } from "./windows-codex";
 import { cursorAgentCommandArgs } from "./cursor-command";
+import {
+  probeOpenCodePureIsolation,
+  type OpenCodePureIsolationProbe,
+} from "./opencode-pure-isolation";
 
 const DEFAULT_DETECTION_TIMEOUT_MS = 2_500;
+export const GEMINI_MINIMUM_STABLE_ACP_VERSION = "0.58.0";
+const CODEX_PATH_RESOLUTION_ENVIRONMENT_KEYS = new Set([
+  "CODEX_HOME",
+  "CODEX_INSTALL_DIR",
+]);
 
 function cursorExecutablePreference(executable: string): number {
   const name = basename(executable).toLowerCase().replace(/\.(?:bat|cmd|exe)$/u, "");
@@ -58,6 +69,15 @@ function kimiCandidateIsIdentified(
   return name === "kimi" || /\bkimi(?:[ -]code)?\b/iu.test(`${versionOutput}\n${acpOutput}`);
 }
 
+function geminiCandidateIsIdentified(
+  executable: string,
+  versionOutput: string,
+  acpOutput: string,
+): boolean {
+  const name = basename(executable).toLowerCase().replace(/\.(?:bat|cmd|exe)$/u, "");
+  return name === "gemini" || /\bgemini(?:[ -]cli)?\b/iu.test(`${versionOutput}\n${acpOutput}`);
+}
+
 function versionFromOutput(output: string): string | undefined {
   return output.match(/\bv?\d+\.\d+(?:\.\d+)?(?:[-+][0-9A-Za-z.-]+)?\b/u)?.[0];
 }
@@ -68,6 +88,7 @@ interface ProbeResult {
   started: boolean;
   timedOut: boolean;
   cleanupConfirmed?: boolean;
+  aborted?: boolean;
 }
 
 type ProviderProbeProcess = (
@@ -76,12 +97,33 @@ type ProviderProbeProcess = (
   environment: ProviderEnvironment,
   cwd: string,
   timeoutMs: number,
+  signal?: AbortSignal,
 ) => Promise<ProbeResult>;
+
+interface ProviderProbeDeadline {
+  cancel(): void;
+}
+
+type ProviderProbeDeadlineScheduler = (
+  onDeadline: () => void,
+  timeoutMs: number,
+) => ProviderProbeDeadline;
+
+function scheduleProviderProbeDeadline(
+  onDeadline: () => void,
+  timeoutMs: number,
+): ProviderProbeDeadline {
+  const timer = setTimeout(onDeadline, timeoutMs);
+  timer.unref();
+  return { cancel: () => clearTimeout(timer) };
+}
 
 interface ProviderDiscoveryDependencies {
   executableCandidates?: typeof executableCandidates;
+  probeOpenCodePureIsolation?: OpenCodePureIsolationProbe;
   probeProcess?: ProviderProbeProcess;
   terminateProcessTree?: ProcessTreeTerminator;
+  scheduleProbeDeadline?: ProviderProbeDeadlineScheduler;
 }
 
 async function probeProcess(
@@ -90,21 +132,34 @@ async function probeProcess(
   environment: ProviderEnvironment,
   cwd: string,
   timeoutMs: number,
+  signal?: AbortSignal,
   terminateProcessTree: ProcessTreeTerminator = terminateProcessTreeAndWait,
+  scheduleDeadline: ProviderProbeDeadlineScheduler = scheduleProviderProbeDeadline,
 ): Promise<ProbeResult> {
+  if (signal?.aborted) {
+    return {
+      exitCode: null,
+      output: "",
+      started: false,
+      timedOut: false,
+      cleanupConfirmed: true,
+      aborted: true,
+    };
+  }
   return await new Promise<ProbeResult>((resolveProbe) => {
     const output = new CappedProviderBuffer(16 * 1024);
     let settled = false;
     let started = false;
     let timedOut = false;
-    let timer: NodeJS.Timeout | undefined;
+    let deadline: ProviderProbeDeadline | undefined;
     const finish = (
       exitCode: number | null,
       cleanupConfirmed = true,
     ): void => {
       if (settled) return;
       settled = true;
-      if (timer) clearTimeout(timer);
+      deadline?.cancel();
+      signal?.removeEventListener("abort", abortProbe);
       resolveProbe({
         exitCode,
         output: output.toString(),
@@ -113,6 +168,7 @@ async function probeProcess(
         cleanupConfirmed,
       });
     };
+    const abortProbe = (): void => terminateAndFinish(true);
 
     let child: ChildProcessWithoutNullStreams;
     try {
@@ -138,10 +194,11 @@ async function probeProcess(
     child.once("spawn", () => { started = true; });
     child.stdout.on("data", (chunk: Buffer) => output.append(chunk.toString("utf8")));
     child.stderr.on("data", (chunk: Buffer) => output.append(chunk.toString("utf8")));
-    const terminateAndFinish = (): void => {
+    const terminateAndFinish = (aborted = false): void => {
       if (settled) return;
       settled = true;
-      if (timer) clearTimeout(timer);
+      deadline?.cancel();
+      signal?.removeEventListener("abort", abortProbe);
       void requireProcessTreeTermination(
         terminateProcessTree,
         child,
@@ -154,6 +211,7 @@ async function probeProcess(
           started,
           timedOut,
           cleanupConfirmed: true,
+          aborted,
         }),
         () => resolveProbe({
           exitCode: null,
@@ -161,6 +219,7 @@ async function probeProcess(
           started,
           timedOut,
           cleanupConfirmed: false,
+          aborted,
         }),
       );
     };
@@ -171,12 +230,17 @@ async function probeProcess(
     child.once("close", (code) => finish(code));
     child.stdin.end();
 
-    timer = setTimeout(() => {
+    signal?.addEventListener("abort", abortProbe, { once: true });
+    if (signal?.aborted) {
+      abortProbe();
+      return;
+    }
+
+    deadline = scheduleDeadline(() => {
       if (settled) return;
       timedOut = true;
       terminateAndFinish();
     }, timeoutMs);
-    timer.unref();
   });
 }
 
@@ -194,8 +258,31 @@ function compareVersions(left: string | undefined, right: string | undefined): n
   return 0;
 }
 
+function geminiVersionSupportsStableAcp(version: string | undefined): boolean {
+  if (!version) return false;
+  const comparison = compareVersions(version, GEMINI_MINIMUM_STABLE_ACP_VERSION);
+  if (comparison !== 0) return comparison > 0;
+  // A prerelease of the minimum version does not meet the stable boundary.
+  return !/-[0-9A-Za-z.-]+(?:\+|$)/u.test(version);
+}
+
 function nativeExecutablePreference(executable: string): number {
   return /\.exe$/iu.test(executable) ? 1 : 0;
+}
+
+async function settleAllOrThrow<T>(operations: readonly Promise<T>[]): Promise<T[]> {
+  const settled = await Promise.allSettled(operations);
+  const cleanupFailure = settled.find(
+    (result): result is PromiseRejectedResult =>
+      result.status === "rejected"
+      && isProcessTreeTerminationUnconfirmed(result.reason),
+  );
+  if (cleanupFailure) throw cleanupFailure.reason;
+  const failed = settled.find(
+    (result): result is PromiseRejectedResult => result.status === "rejected",
+  );
+  if (failed) throw failed.reason;
+  return settled.map((result) => (result as PromiseFulfilledResult<T>).value);
 }
 
 function authStateFromProbe(providerId: ProviderId, probe: ProbeResult): ProviderAuthState {
@@ -263,11 +350,61 @@ export async function detectProvider(
   options: ProviderDetectionOptions = {},
   dependencies: ProviderDiscoveryDependencies = {},
 ): Promise<ProviderDetection> {
+  const requireActive = (cleanupConfirmed = true): void => {
+    if (options.signal?.aborted) {
+      if (!cleanupConfirmed) {
+        throw new ProcessTreeTerminationError("Provider discovery process tree");
+      }
+      throw new Error("Provider discovery was cancelled.");
+    }
+  };
+  requireActive();
   const resolveCandidates = dependencies.executableCandidates ?? executableCandidates;
   const terminateProcessTree = dependencies.terminateProcessTree
     ?? terminateProcessTreeAndWait;
-  const runProbe: ProviderProbeProcess = dependencies.probeProcess
-    ?? (async (...args) => await probeProcess(...args, terminateProcessTree));
+  const scheduleProbeDeadline = dependencies.scheduleProbeDeadline
+    ?? scheduleProviderProbeDeadline;
+  const processProbe = dependencies.probeProcess
+    ?? (async (
+      executable: string,
+      args: readonly string[],
+      environment: ProviderEnvironment,
+      cwd: string,
+      probeTimeoutMs: number,
+      signal?: AbortSignal,
+    ) => await probeProcess(
+      executable,
+      args,
+      environment,
+      cwd,
+      probeTimeoutMs,
+      signal,
+      terminateProcessTree,
+      scheduleProbeDeadline,
+    ));
+  const runProbe = async (
+    executable: string,
+    args: readonly string[],
+    environment: ProviderEnvironment,
+    cwd: string,
+    probeTimeoutMs: number,
+  ): Promise<ProbeResult> => {
+    const result = await processProbe(
+      executable,
+      args,
+      environment,
+      cwd,
+      probeTimeoutMs,
+      options.signal,
+    );
+    if (!result.aborted) return result;
+    if (result.cleanupConfirmed !== true) {
+      throw new ProcessTreeTerminationError("Provider discovery process tree");
+    }
+    throw new Error("Provider discovery was cancelled.");
+  };
+  const runOpenCodeIsolationProbe = dependencies.probeOpenCodePureIsolation
+    ?? probeOpenCodePureIsolation;
   const provider = PROVIDER_INFO[providerId];
   const command = options.command?.trim() || provider.command;
   const timeoutMs = Math.max(250, Math.min(options.timeoutMs ?? DEFAULT_DETECTION_TIMEOUT_MS, 10_000));
@@ -275,20 +412,18 @@ export async function detectProvider(
   const discoveredEnvironment = await providerEnvironment(
     options.refreshEnvironment === true,
   );
+  requireActive();
   const probeAuthentication = options.probeAuthentication !== false;
-  const environment: ProviderEnvironment = {
-    env: probeAuthentication
-      ? providerChildEnvironment(providerId, discoveredEnvironment.env)
-      : credentialFreeProviderEnvironment(discoveredEnvironment.env),
+  const probeEnvironment: ProviderEnvironment = {
+    env: credentialFreeProviderEnvironment(discoveredEnvironment.env),
     pathEntries: discoveredEnvironment.pathEntries,
   };
-  const candidateEnvironment: ProviderEnvironment = !probeAuthentication
-    && providerId === "codex"
+  const candidateEnvironment: ProviderEnvironment = providerId === "codex"
     ? {
         env: {
-          ...environment.env,
+          ...probeEnvironment.env,
           ...Object.fromEntries(
-            ["CODEX_HOME", "CODEX_INSTALL_DIR"].flatMap((name) => {
+            [...CODEX_PATH_RESOLUTION_ENVIRONMENT_KEYS].flatMap((name) => {
               const value = environmentValue(
                 discoveredEnvironment.env,
                 name,
@@ -298,9 +433,9 @@ export async function detectProvider(
             }),
           ),
         },
-        pathEntries: environment.pathEntries,
+        pathEntries: probeEnvironment.pathEntries,
       }
-    : environment;
+    : probeEnvironment;
   const candidateCommands = providerId === "cursor" && command === PROVIDER_INFO.cursor.command
     ? [command, "agent"]
     : [command];
@@ -316,6 +451,7 @@ export async function detectProvider(
         cwd,
       ),
     ))).flat())];
+  requireActive();
   if (candidates.length === 0) {
     return {
       provider,
@@ -328,16 +464,19 @@ export async function detectProvider(
     };
   }
 
-  const versionProbes = await Promise.all(candidates.map(async (executable) => {
-    const probe = await runProbe(executable, ["--version"], environment, cwd, timeoutMs);
-    const acpProbe = (providerId === "cursor" || providerId === "kimi")
+  const versionProbes = await settleAllOrThrow(candidates.map(async (executable) => {
+    const probe = await runProbe(executable, ["--version"], probeEnvironment, cwd, timeoutMs);
+    const version = versionFromOutput(probe.output);
+    const acpProbe = (providerId === "cursor" || providerId === "gemini" || providerId === "kimi")
       && probe.started && !probe.timedOut && probe.exitCode === 0
       ? await runProbe(
           executable,
           providerId === "cursor"
             ? cursorAgentCommandArgs(executable, ["acp", "--help"])
+            : providerId === "gemini"
+            ? ["--help"]
             : ["acp", "--help"],
-          environment,
+          probeEnvironment,
           cwd,
           timeoutMs,
         )
@@ -346,13 +485,17 @@ export async function detectProvider(
       acpProbe.started
       && !acpProbe.timedOut
       && acpProbe.exitCode === 0
-      && /(?:agent client protocol|\bacp\b|cursor|kimi)/iu.test(acpProbe.output)
+      && /(?:agent client protocol|\bacp\b|cursor|gemini|kimi)/iu.test(acpProbe.output)
       && (providerId === "cursor"
         ? cursorCandidateIsIdentified(executable, probe.output, acpProbe.output)
+        : providerId === "gemini"
+        ? geminiCandidateIsIdentified(executable, probe.output, acpProbe.output)
+          && /(?:^|\s)--acp(?:\s|,|$)/mu.test(acpProbe.output)
+          && /(?:^|\s)--session-id(?:\s|,|$)/mu.test(acpProbe.output)
         : kimiCandidateIsIdentified(executable, probe.output, acpProbe.output))
     );
     const appServerProbe = providerId === "codex" && probe.started && !probe.timedOut && probe.exitCode === 0
-      ? await runProbe(executable, ["app-server", "--help"], environment, cwd, timeoutMs)
+      ? await runProbe(executable, ["app-server", "--help"], probeEnvironment, cwd, timeoutMs)
       : undefined;
     const appServerReady = !appServerProbe || (
       appServerProbe.started
@@ -360,19 +503,39 @@ export async function detectProvider(
       && appServerProbe.exitCode === 0
       && /(?:codex\s+app-server|run the app server|\bapp-server\b)/iu.test(appServerProbe.output)
     );
+    const serveProbe = providerId === "opencode" && probe.started && !probe.timedOut && probe.exitCode === 0
+      ? await runProbe(executable, ["serve", "--help"], probeEnvironment, cwd, timeoutMs)
+      : undefined;
+    const serveReady = !serveProbe || (
+      serveProbe.started
+      && !serveProbe.timedOut
+      && serveProbe.exitCode === 0
+      && /(?:^|\s)--pure(?:\s|,|$)/mu.test(serveProbe.output)
+    );
     return {
       executable,
       probe,
-      version: versionFromOutput(probe.output),
+      version,
+      versionReady: providerId !== "gemini" || geminiVersionSupportsStableAcp(version),
       acpReady,
       appServerReady,
+      serveReady,
       cleanupConfirmed: probe.cleanupConfirmed === true
         && (acpProbe === undefined || acpProbe.cleanupConfirmed === true)
-        && (appServerProbe === undefined || appServerProbe.cleanupConfirmed === true),
+        && (appServerProbe === undefined || appServerProbe.cleanupConfirmed === true)
+        && (serveProbe === undefined || serveProbe.cleanupConfirmed === true),
     };
   }));
+  requireActive(versionProbes.every(({ cleanupConfirmed }) => cleanupConfirmed));
   const working = versionProbes
-    .filter(({ probe, acpReady }) => probe.started && !probe.timedOut && probe.exitCode === 0 && acpReady)
+    .filter(({ probe, acpReady, serveReady, versionReady }) => (
+      probe.started
+      && !probe.timedOut
+      && probe.exitCode === 0
+      && acpReady
+      && serveReady
+      && versionReady
+    ))
     .sort((left, right) =>
       (providerId === "cursor"
         ? cursorExecutablePreference(right.executable)
@@ -387,26 +550,117 @@ export async function detectProvider(
     const cleanupUnconfirmed = versionProbes.some(
       ({ cleanupConfirmed }) => !cleanupConfirmed,
     );
-    const providerWithoutAcp = (providerId === "cursor" || providerId === "kimi") && versionProbes.some(
-      ({ probe }) => probe.started && !probe.timedOut && probe.exitCode === 0,
+    const providerWithoutAcp =
+      (providerId === "cursor" ||
+        providerId === "gemini" ||
+        providerId === "kimi") &&
+      versionProbes.some(
+        ({ probe }) => probe.started && !probe.timedOut && probe.exitCode === 0,
+      );
+    const bestGeminiInstall =
+      providerId === "gemini"
+        ? versionProbes
+            .filter(
+              ({ probe }) =>
+                probe.started && !probe.timedOut && probe.exitCode === 0,
+            )
+            .sort(
+              (left, right) =>
+                compareVersions(right.version, left.version) ||
+                nativeExecutablePreference(right.executable) -
+                  nativeExecutablePreference(left.executable),
+            )[0]
+        : undefined;
+    const geminiRequiresStableUpgrade = Boolean(
+      bestGeminiInstall && !bestGeminiInstall.versionReady,
     );
+    const providerWithoutPureServe =
+      providerId === "opencode" &&
+      versionProbes.some(
+        ({ probe }) => probe.started && !probe.timedOut && probe.exitCode === 0,
+      );
     return {
       provider,
-      available: providerWithoutAcp,
-      installState: providerWithoutAcp ? "installed" : "error",
+      available: providerWithoutAcp || providerWithoutPureServe,
+      ...(bestGeminiInstall
+        ? {
+            executable: bestGeminiInstall.executable,
+            ...(bestGeminiInstall.version
+              ? { version: bestGeminiInstall.version }
+              : {}),
+          }
+        : {}),
+      installState:
+        providerWithoutAcp || providerWithoutPureServe ? "installed" : "error",
       authState: "unknown",
       canRun: false,
       cleanupConfirmed: !cleanupUnconfirmed,
       statusMessage: cleanupUnconfirmed
         ? `${provider.name} probe timed out, and its process tree could not be confirmed stopped`
-        : providerWithoutAcp
-        ? `${provider.name} CLI found, but ACP is unavailable`
-        : providerId === "codex" ? "Codex CLI was found but failed to start" : statusMessage("error", "unknown"),
+        : geminiRequiresStableUpgrade
+          ? bestGeminiInstall?.version
+            ? `${provider.name} ${bestGeminiInstall.version} is installed, but stable ACP requires ${GEMINI_MINIMUM_STABLE_ACP_VERSION} or newer; update ${provider.name}`
+            : `${provider.name} is installed, but its version could not be verified; install ${GEMINI_MINIMUM_STABLE_ACP_VERSION} or newer for stable ACP`
+          : providerWithoutAcp
+            ? providerId === "gemini"
+              ? `${provider.name} CLI found, but stable ACP is unavailable; update the selected CLI`
+              : `${provider.name} CLI found, but ACP is unavailable`
+            : providerWithoutPureServe
+              ? "OpenCode CLI found, but secure plugin-free serve mode is unavailable; update the selected CLI"
+              : providerId === "codex"
+                ? "Codex CLI was found but failed to start"
+                : statusMessage("error", "unknown"),
+    };
+  }
+
+  const versionProbeCleanupConfirmed = versionProbes.every(
+    (probe) => probe.cleanupConfirmed,
+  );
+  const openCodeIsolation = providerId === "opencode"
+    ? options.signal
+      ? await runOpenCodeIsolationProbe(
+          selected.executable,
+          selected.version,
+          probeEnvironment,
+          terminateProcessTree,
+          { signal: options.signal },
+        )
+      : await runOpenCodeIsolationProbe(
+          selected.executable,
+          selected.version,
+          probeEnvironment,
+          terminateProcessTree,
+        )
+    : { cleanupConfirmed: true, verified: true };
+  if (options.signal?.aborted) {
+    if (!openCodeIsolation.cleanupConfirmed) {
+      throw new ProcessTreeTerminationError(
+        "OpenCode isolation-proof server process tree",
+      );
+    }
+    throw new Error("Provider discovery was cancelled.");
+  }
+  if (!openCodeIsolation.verified) {
+    const cleanupConfirmed = openCodeIsolation.cleanupConfirmed
+      && versionProbeCleanupConfirmed;
+    return {
+      provider,
+      available: true,
+      executable: selected.executable,
+      ...(selected.version ? { version: selected.version } : {}),
+      installState: "installed",
+      authState: "unknown",
+      canRun: false,
+      cleanupConfirmed,
+      statusMessage: cleanupConfirmed
+        ? "OpenCode failed secure plugin-free runtime verification; update the selected CLI"
+        : "OpenCode discovery or plugin-free verification cleanup could not be confirmed stopped",
     };
   }
 
   if (!probeAuthentication) {
-    const cleanupConfirmed = versionProbes.every((probe) => probe.cleanupConfirmed);
+    const cleanupConfirmed = openCodeIsolation.cleanupConfirmed
+      && versionProbeCleanupConfirmed;
     return {
       provider,
       available: true,
@@ -422,18 +676,55 @@ export async function detectProvider(
     };
   }
 
-  const authArgs = providerId === "cursor"
-    ? cursorAgentCommandArgs(
-        selected.executable,
-        providerAuthStatusArgs(providerId),
-      )
-    : providerAuthStatusArgs(providerId);
+  const versionCleanupConfirmed = openCodeIsolation.cleanupConfirmed
+    && versionProbeCleanupConfirmed;
+  if (!versionCleanupConfirmed || (providerId === "codex" && !selected.appServerReady)) {
+    return {
+      provider,
+      available: true,
+      executable: selected.executable,
+      ...(selected.version ? { version: selected.version } : {}),
+      installState: "installed",
+      authState: "unknown",
+      canRun: false,
+      cleanupConfirmed: versionCleanupConfirmed,
+      statusMessage: !versionCleanupConfirmed
+        ? `${provider.name} probe cleanup could not be confirmed stopped`
+        : "Codex App Server is unsupported; update the selected CLI",
+    };
+  }
+
+  const providerAuthArgs = providerAuthStatusArgs(providerId);
+  if (providerAuthArgs === null) {
+    return {
+      provider,
+      available: true,
+      executable: selected.executable,
+      ...(selected.version ? { version: selected.version } : {}),
+      installState: "installed",
+      authState: "unknown",
+      canRun: true,
+      cleanupConfirmed: true,
+      statusMessage: `Installed; ${provider.name} ACP will verify authentication when a session starts`,
+    };
+  }
+  const authArgs =
+    providerId === "cursor"
+      ? cursorAgentCommandArgs(selected.executable, providerAuthArgs)
+      : providerAuthArgs;
   const authProbe = await runProbe(
     selected.executable,
     authArgs,
-    environment,
+    {
+      env: providerChildEnvironment(providerId, discoveredEnvironment.env),
+      pathEntries: discoveredEnvironment.pathEntries,
+    },
     cwd,
     timeoutMs,
+  );
+  requireActive(
+    authProbe.cleanupConfirmed === true
+      && versionCleanupConfirmed,
   );
   const authState = authStateFromProbe(providerId, authProbe);
   const authenticated = authState === "authenticated" || authState === "configured";
@@ -446,9 +737,6 @@ export async function detectProvider(
   const runtimeNegotiatesAuthentication = providerId === "kimi"
     && authState === "unknown";
   const appServerReady = selected.appServerReady;
-  const versionCleanupConfirmed = versionProbes.every(
-    (probe) => probe.cleanupConfirmed,
-  );
   const cleanupConfirmed = authProbe.cleanupConfirmed === true
     && versionCleanupConfirmed;
   const canRun = (authenticated || runtimeNegotiatesAuthentication)
@@ -478,5 +766,6 @@ export async function detectProvider(
 export async function detectProviders(
   options: Partial<Record<ProviderId, ProviderDetectionOptions>> = {},
 ): Promise<ProviderDetection[]> {
-  return await Promise.all(PROVIDER_IDS.map((id) => detectProvider(id, options[id])));
+  return await settleAllOrThrow(PROVIDER_IDS.map((id) =>
+    detectProvider(id, options[id])));
 }

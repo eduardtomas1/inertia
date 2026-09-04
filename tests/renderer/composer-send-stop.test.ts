@@ -24,6 +24,13 @@ const sendActionsSource = readFileSync(
   ),
   "utf8",
 );
+const queuedActionsSource = readFileSync(
+  new URL(
+    "../../src/renderer/src/components/composer/ComposerQueuedActions.tsx",
+    import.meta.url,
+  ),
+  "utf8",
+);
 const morphIconSource = readFileSync(
   new URL(
     "../../src/renderer/src/components/motion/InertiaMorphIcon.tsx",
@@ -163,7 +170,7 @@ describe("composer Send and Stop", () => {
       submitting: false,
       sending: false,
     })).toBe("unavailable");
-    expect(sendActionsSource).toContain('aria-label="Queued messages"');
+    expect(queuedActionsSource).toContain('aria-label="Queued messages"');
     expect(sendActionsSource).not.toContain("Follow-up unavailable");
     const textarea = inputSource.slice(
       inputSource.indexOf("<textarea"),

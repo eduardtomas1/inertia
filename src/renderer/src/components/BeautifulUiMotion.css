@@ -2,7 +2,6 @@
  * constants mirror the reference implementation for compatible surfaces. */
 .response-stream-word {
   animation: beautiful-stream-in 420ms cubic-bezier(0.22, 0.61, 0.25, 1) both;
-  will-change: filter, opacity;
 }
 .response-markdown.is-streaming a { animation: beautiful-pop-in 250ms cubic-bezier(0.23, 1, 0.32, 1) both; }
 @keyframes beautiful-fade-in { from { opacity: 0; } to { opacity: 1; } }
@@ -124,12 +123,8 @@
 .plan-step.is-in-progress .plan-step-marker svg { animation: beautiful-spin 1.1s linear infinite; }
 
 .turn-working-status .turn-working-copy strong {
-  color: transparent;
-  background: linear-gradient(90deg, var(--text-soft) 0%, var(--text-soft) 40%, var(--text) 50%, var(--text-soft) 60%, var(--text-soft) 100%);
-  background-size: 200% 100%; background-clip: text; -webkit-background-clip: text;
-  animation: beautiful-shimmer-text 1.4s linear infinite;
+  color: var(--text-soft);
 }
-@keyframes beautiful-shimmer-text { 0% { background-position: 150%; } 100% { background-position: -50%; } }
 .agent-pixel-loader > span { opacity: .15; }
 .agent-pixel-loader[data-animated="true"] > span {
   animation: agent-pixel-shimmer 650ms ease-in-out infinite;
@@ -403,6 +398,12 @@
 }
 
 .app-shell[data-document-visible="false"] .response-stream-word,
+.app-shell[data-document-visible="false"]
+  .plan-step.is-in-progress .plan-step-marker svg,
+.app-shell[data-document-visible="false"]
+  .agent-pixel-loader[data-animated="true"] > span,
+.app-shell[data-document-visible="false"]
+  .turn-reasoning-step.is-active::before,
 .app-shell[data-document-visible="false"] .subagent-status-mark[data-live="true"]::after,
 .app-shell[data-document-visible="false"]
   .subagent-disclosure[data-active="true"] > summary > svg:first-child,
@@ -414,4 +415,65 @@
 @media (forced-colors: active) {
   .agent-pixel-loader { color: CanvasText; forced-color-adjust: auto; }
   .subagent-status-mark, .agent-activity-icon { border: 1px solid CanvasText; color: CanvasText; background: Canvas; forced-color-adjust: auto; }
+}
+
+/* Shared by transcript and lazy file-preview Markdown; keep these styles deferred. */
+.response-markdown a.response-project-file-link {
+  display: inline-flex;
+  box-sizing: border-box;
+  height: 1.55em;
+  min-width: 0;
+  min-height: 18px;
+  max-width: 100%;
+  align-items: center;
+  gap: 0.36em;
+  padding: 0 0.48em;
+  border: 1px solid var(--code-border);
+  border-radius: var(--radius-small);
+  color: var(--text);
+  background: var(--inline-code-surface);
+  font-size: max(var(--ui-font-micro), 0.8em);
+  font-weight: 560;
+  line-height: 1;
+  text-decoration: none;
+  vertical-align: middle;
+  transition: background 120ms ease, border-color 120ms ease;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.response-markdown a.response-project-file-link:hover {
+  border-color: color-mix(in srgb, var(--file-language-accent, var(--accent)) 30%, var(--border));
+  background: var(--surface-hover);
+  text-decoration: none;
+}
+
+.response-project-file-link > span {
+  overflow: hidden;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.response-markdown a.response-project-file-link .response-project-file-icon {
+  display: block;
+  width: 1em;
+  height: 1em;
+  flex: 0 0 auto;
+  margin: 0;
+  color: var(--file-language-accent, var(--text-muted));
+  opacity: 0.9;
+  vertical-align: initial;
+}
+
+.response-markdown a.response-web-link {
+  display: inline;
+}
+
+.response-markdown a.response-web-link svg {
+  display: inline;
+  width: 0.9em;
+  height: 0.9em;
+  margin: 0 0.24em 0 0;
+  vertical-align: -0.1em;
 }

@@ -8,6 +8,10 @@ import {
   type SetStateAction,
 } from "react";
 
+import {
+  GEMINI_EXPLICIT_COMPACTION_UNAVAILABLE_REASON,
+  type ProviderId,
+} from "../../../../shared/provider";
 import type { CompactComposerCommand } from "../../utils/composerCommands";
 import { clearPersistedComposerDraft } from "../../utils/composerDraftPersistence";
 
@@ -18,6 +22,7 @@ export interface ComposerCompactNotice {
 
 export function useComposerCompaction(options: {
   conversationId: string;
+  providerId: ProviderId;
   message: string;
   canSend: boolean;
   running: boolean;
@@ -29,16 +34,18 @@ export function useComposerCompaction(options: {
   submittingRef: MutableRefObject<boolean>;
   draftValueRef: MutableRefObject<string>;
   textareaRef: RefObject<HTMLTextAreaElement | null>;
-  setMessage: Dispatch<SetStateAction<string>>;
+  clearMessage: () => void;
   setSubmitting: Dispatch<SetStateAction<boolean>>;
   onCompact: (instruction?: string) => Promise<{ message: string }>;
 }): {
   compactNotice: ComposerCompactNotice | null;
+  compactUnavailableReason: string | null;
   clearCompactNotice: () => void;
   compact: (command: CompactComposerCommand) => Promise<void>;
 } {
   const {
     conversationId,
+    providerId,
     message,
     canSend,
     running,
@@ -50,7 +57,7 @@ export function useComposerCompaction(options: {
     submittingRef,
     draftValueRef,
     textareaRef,
-    setMessage,
+    clearMessage,
     setSubmitting,
     onCompact,
   } = options;
@@ -59,6 +66,9 @@ export function useComposerCompaction(options: {
   >>({});
   const operationSequence = useRef(0);
   const activeOperations = useRef(new Map<string, number>());
+  const compactUnavailableReason = providerId === "gemini"
+    ? GEMINI_EXPLICIT_COMPACTION_UNAVAILABLE_REASON
+    : null;
   const compactNotice = compactNotices[conversationId] ?? null;
   const clearCompactNotice = useCallback(() => {
     setCompactNotices((current) => {
@@ -82,6 +92,13 @@ export function useComposerCompaction(options: {
       submittingRef.current
       || activeOperations.current.has(ownerId)
     ) return;
+    if (compactUnavailableReason) {
+      setCompactNotice(conversationId, {
+        kind: "error",
+        message: compactUnavailableReason,
+      });
+      return;
+    }
     if (running) {
       setCompactNotice(conversationId, {
         kind: "error",
@@ -126,7 +143,7 @@ export function useComposerCompaction(options: {
         clearPersistedComposerDraft(ownerId, submittedDraft);
         if (ownsVisibleComposer) {
           draftValueRef.current = "";
-          setMessage("");
+          clearMessage();
         }
       }
       setCompactNotice(ownerId, { kind: "success", message: result.message });
@@ -159,5 +176,5 @@ export function useComposerCompaction(options: {
       }
     }
   };
-  return { compactNotice, clearCompactNotice, compact };
+  return { compactNotice, clearCompactNotice, compact, compactUnavailableReason };
 }

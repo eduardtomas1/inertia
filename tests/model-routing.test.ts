@@ -4,17 +4,48 @@ import {
   continuationIdentityForSelection,
   fastModeProviderValue,
   modelSelectionSchema,
-  nativeBackendProfile,
+  nativeHarnessId,
   nativeModelSelection,
+  providerIdForHarness,
+  providerNativeBackendProfile,
+  providerNativeHarnessId,
+  providerNativeModelSelection,
   resolveHarnessBackendCompatibility,
   sameContinuationIdentity,
   withModelSelectionFastMode,
   type ModelBackendProfile,
 } from "../src/shared/model-routing";
+import type { ProviderId } from "../src/shared/provider";
 
 describe("model routing contracts", () => {
+  it("keeps every current provider route internally consistent", () => {
+    const routes: Array<[ProviderId, string, string]> = [
+      ["codex", "codex-app-server", "builtin:openai"],
+      ["claude", "claude-agent-sdk", "builtin:anthropic"],
+      ["cursor", "cursor-acp", "builtin:cursor"],
+      ["gemini", "gemini-acp", "builtin:gemini"],
+      ["kimi", "kimi-acp", "builtin:kimi"],
+      ["opencode", "opencode-sdk", "builtin:opencode"],
+    ];
+
+    for (const [providerId, harnessId, backendProfileId] of routes) {
+      expect(providerNativeHarnessId(providerId)).toBe(harnessId);
+      expect(providerNativeBackendProfile(providerId).id).toBe(backendProfileId);
+      expect(providerIdForHarness(harnessId)).toBe(providerId);
+      expect(providerNativeModelSelection({ providerId })).toMatchObject({
+        harnessId,
+        backendProfileId,
+      });
+    }
+  });
+
+  it("does not mutate migration-pinned pre-Gemini routing helpers", () => {
+    expect(nativeHarnessId("gemini")).toBeUndefined();
+    expect(() => nativeModelSelection({ providerId: "gemini" })).toThrow();
+  });
+
   it("keeps harness, backend profile, and exact model as separate identities", () => {
-    const selection = nativeModelSelection({
+    const selection = providerNativeModelSelection({
       providerId: "claude",
       modelId: "claude-sonnet",
       alias: "sonnet",
@@ -33,23 +64,45 @@ describe("model routing contracts", () => {
     expect(modelSelectionSchema.parse(selection)).toEqual(selection);
   });
 
+  it("routes Gemini through its native ACP-managed backend", () => {
+    const selection = providerNativeModelSelection({
+      providerId: "gemini",
+      modelId: "gemini-2.5-pro",
+    });
+
+    expect(selection).toMatchObject({
+      harnessId: "gemini-acp",
+      backendProfileId: "builtin:gemini",
+      backendProfileDisplayName: "Google Gemini",
+      modelId: "gemini-2.5-pro",
+    });
+    expect(resolveHarnessBackendCompatibility(
+      providerNativeHarnessId("gemini"),
+      providerNativeBackendProfile("gemini"),
+    )).toMatchObject({
+      state: "verified",
+      reasonCode: "gemini-managed",
+      allowsModelSwitchWithinSession: true,
+    });
+  });
+
   it("does not imply universal interoperability from a matching model name", () => {
-    const anthropic = nativeBackendProfile("claude");
+    const anthropic = providerNativeBackendProfile("claude");
     expect(resolveHarnessBackendCompatibility("claude-agent-sdk", anthropic)).toMatchObject({
       state: "verified",
       allowsModelSwitchWithinSession: true,
     });
     expect(resolveHarnessBackendCompatibility(
       "codex-app-server",
-      nativeBackendProfile("codex"),
+      providerNativeBackendProfile("codex"),
     ).allowsModelSwitchWithinSession).toBe(true);
     expect(resolveHarnessBackendCompatibility(
       "cursor-acp",
-      nativeBackendProfile("cursor"),
+      providerNativeBackendProfile("cursor"),
     ).allowsModelSwitchWithinSession).toBe(false);
     expect(resolveHarnessBackendCompatibility(
       "opencode-sdk",
-      nativeBackendProfile("opencode"),
+      providerNativeBackendProfile("opencode"),
     ).allowsModelSwitchWithinSession).toBe(true);
     expect(resolveHarnessBackendCompatibility("codex-app-server", anthropic)).toMatchObject({
       state: "unavailable",
@@ -74,7 +127,7 @@ describe("model routing contracts", () => {
   });
 
   it("locks continuation to harness, backend revision, endpoint identity, and model", () => {
-    const selection = nativeModelSelection({ providerId: "codex", modelId: "gpt-5.4" });
+    const selection = providerNativeModelSelection({ providerId: "codex", modelId: "gpt-5.4" });
     const identity = continuationIdentityForSelection(selection, "endpoint:openai");
 
     expect(sameContinuationIdentity(identity, { ...identity })).toBe(true);
@@ -90,7 +143,7 @@ describe("model routing contracts", () => {
   });
 
   it("persists Fast mode as a non-secret provider route identity", () => {
-    const standard = nativeModelSelection({
+    const standard = providerNativeModelSelection({
       providerId: "codex",
       modelId: "gpt-5.4",
     });
@@ -109,7 +162,7 @@ describe("model routing contracts", () => {
   });
 
   it("rejects mutable or unbounded data outside the safe selection envelope", () => {
-    const selection = nativeModelSelection({ providerId: "opencode", modelId: "anthropic/claude" });
+    const selection = providerNativeModelSelection({ providerId: "opencode", modelId: "anthropic/claude" });
     expect(modelSelectionSchema.safeParse({
       ...selection,
       baseUrl: "https://example.test",
@@ -133,7 +186,7 @@ describe("model routing contracts", () => {
   });
 
   it("accepts opaque endpoint digests that begin with a digit", () => {
-    const selection = nativeModelSelection({ providerId: "codex", modelId: "gpt-5.4" });
+    const selection = providerNativeModelSelection({ providerId: "codex", modelId: "gpt-5.4" });
     expect(continuationIdentityForSelection(selection, "0123456789abcdef").endpointIdentity)
       .toBe("0123456789abcdef");
   });

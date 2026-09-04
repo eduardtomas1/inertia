@@ -183,6 +183,16 @@ export class ClaudeMessageProjector {
     this.textItemByProviderMessageId.clear();
   }
 
+  resetResultOutput(): void {
+    this.sawOutputText = false;
+    // A provisional result is still part of the same user turn, but its text
+    // must not become the terminal run snapshot. Keep the append-only events
+    // visible as progress while making later parent output authoritative.
+    this.hadSupersession = true;
+    this.projectedText.reset();
+    this.textItemByProviderMessageId.clear();
+  }
+
   authoritativeText(): string {
     return this.projectedText.snapshot();
   }

@@ -75,7 +75,8 @@ describe("Beautiful UI primitive adaptations", () => {
     expect(styles).toContain("--pixel-orbit-delay: 770ms");
     expect(styles).toContain("animation: agent-pixel-shimmer 650ms ease-in-out infinite");
     expect(styles).toContain("animation-duration: 950ms");
-    expect(styles).toContain("animation: beautiful-shimmer-text 1.4s linear infinite");
+    expect(styles).not.toContain("beautiful-shimmer-text");
+    expect(styles).toMatch(/\.turn-working-status \.turn-working-copy strong\s*\{[^}]*color:\s*var\(--text-soft\);/su);
 
     expect(responseSource).toContain('className="response-stream-word"');
     expect(styles).toContain("beautiful-stream-in 420ms cubic-bezier(0.22, 0.61, 0.25, 1)");

@@ -10,7 +10,15 @@ const exactMotionCssSource = readFileSync(
   new URL("../../src/renderer/src/components/BeautifulUiMotion.css", import.meta.url),
   "utf8",
 );
-const css = `${baseCss}\n${exactMotionCssSource}`;
+const supportingMotionCss = [
+  "DailyWorkDialog.css",
+  "composer/ComposerCommandMenu.css",
+  "composer/ComposerSendActions.css",
+].map((fileName) => readFileSync(
+  new URL(`../../src/renderer/src/components/${fileName}`, import.meta.url),
+  "utf8",
+)).join("\n");
+const css = `${baseCss}\n${exactMotionCssSource}\n${supportingMotionCss}`;
 const timelineSource = readFileSync(
   new URL("../../src/renderer/src/components/response-timeline/layers.tsx", import.meta.url),
   "utf8",
@@ -33,9 +41,14 @@ function cssBlock(source: string, marker: string): string {
 }
 
 const activePixelMarker = '.agent-pixel-loader[data-animated="true"] > span';
-const finalReducedMotionIndex = css.lastIndexOf("@media (prefers-reduced-motion: reduce)");
-const exactMotionCss = css.slice(
-  css.lastIndexOf(activePixelMarker, finalReducedMotionIndex - 1),
+const finalReducedMotionIndex = exactMotionCssSource.lastIndexOf(
+  "@media (prefers-reduced-motion: reduce)",
+);
+const exactMotionCss = exactMotionCssSource.slice(
+  exactMotionCssSource.lastIndexOf(
+    activePixelMarker,
+    finalReducedMotionIndex - 1,
+  ),
   finalReducedMotionIndex,
 );
 const activePixelRule = cssBlock(exactMotionCss, activePixelMarker);
@@ -63,14 +76,16 @@ describe("Minimal Workstream active pixel signal", () => {
     expect(settledBranch).not.toContain("<AgentPixelLoader");
   });
 
-  it("keeps pixel motion on the derived state and mirrors the reference label shimmer", () => {
+  it("keeps pixel motion on the derived state with a static working label", () => {
     expect(timelineSource).toContain("animated={activePresentation.animated}");
     expect(timelineSource).toContain('data-animated={animated ? "true" : "false"}');
     expect(timelineSource).toContain("AGENT_PIXEL_GRID_CELLS = Array.from");
     expect(exactMotionCss).toContain("--pixel-drive-delay: 90ms");
     expect(exactMotionCss).toContain("--pixel-orbit-delay: 770ms");
     expect(css).toContain('.agent-pixel-loader[data-animated="true"] > span');
-    expect(css).toContain("animation: beautiful-shimmer-text 1.4s linear infinite");
+    expect(css).not.toContain("beautiful-shimmer-text");
+    expect(css).toMatch(/\.turn-working-status \.turn-working-copy strong\s*\{[^}]*color:\s*var\(--text-soft\);/su);
+    expect(css).not.toContain("will-change:");
     expect(css).not.toContain(".turn-working-status::before");
     expect(css).not.toContain("active-work-tonal-wash");
   });
@@ -107,8 +122,8 @@ describe("Minimal Workstream active pixel signal", () => {
   });
 
   it("uses a static readable grid when reduced motion is requested", () => {
-    const reducedMotion = css.slice(
-      css.lastIndexOf("@media (prefers-reduced-motion: reduce)"),
+    const reducedMotion = exactMotionCssSource.slice(
+      exactMotionCssSource.lastIndexOf("@media (prefers-reduced-motion: reduce)"),
     );
     const reducedPixelRule = cssBlock(
       reducedMotion,
@@ -125,8 +140,8 @@ describe("Minimal Workstream active pixel signal", () => {
   });
 
   it("keeps the grid visible in forced-colors mode", () => {
-    const forcedColors = css.slice(
-      css.lastIndexOf("@media (forced-colors: active)"),
+    const forcedColors = exactMotionCssSource.slice(
+      exactMotionCssSource.lastIndexOf("@media (forced-colors: active)"),
     );
     const forcedColorsPixelRule = cssBlock(
       forcedColors,
@@ -144,5 +159,35 @@ describe("Minimal Workstream active pixel signal", () => {
     expect(css).not.toMatch(
       /^\.turn-work-log \.agent-activity\.is-running > svg\s*\{[^}]*animation:/mu,
     );
+  });
+
+  it("pauses every remaining infinite active-work animation while hidden", () => {
+    const hiddenRules = css.match(
+      /\.app-shell\[data-document-visible="false"\][\s\S]*?animation-play-state:\s*paused;/gu,
+    )?.join("\n") ?? "";
+    for (const selector of [
+      ".plan-step.is-in-progress .plan-step-marker svg",
+      '.agent-pixel-loader[data-animated="true"] > span',
+      ".turn-reasoning-step.is-active::before",
+      '.subagent-status-mark[data-live="true"]::after',
+      '.subagent-disclosure[data-active="true"] > summary > svg:first-child',
+      ".agent-activity.is-running .agent-activity-icon::after",
+      ".loading-mark",
+      ".daily-work-skeleton i",
+      ".daily-work-badge.is-running::before",
+      ".composer-status-dots i",
+      '.send-button[data-motion-state="sending"] .composer-send-motion-icon',
+    ]) {
+      expect(hiddenRules).toContain(selector);
+    }
+  });
+
+  it("pauses document-preview portal spinners while hidden", () => {
+    const portalRule = css.match(
+      /\.attachment-preview-backdrop\[data-document-visible="false"\][\s\S]*?animation-play-state:\s*paused;/u,
+    )?.[0] ?? "";
+
+    expect(portalRule).toContain(".pdf-attachment-preview-loading");
+    expect(portalRule).toContain(".document-attachment-preview-loading");
   });
 });

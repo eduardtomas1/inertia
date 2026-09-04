@@ -173,7 +173,7 @@ describe("FilesPanel Markdown preview", () => {
       .toHaveAttribute("aria-pressed", "true");
   });
 
-  it("keeps oversized and newline-dense Markdown in bounded source view", () => {
+  it("keeps oversized and newline-dense Markdown in virtualized source view", () => {
     const overCharacterLimit = render(
       <FilesPanel
         {...FILES_PROJECT}
@@ -207,7 +207,10 @@ describe("FilesPanel Markdown preview", () => {
     expect(screen.getByRole("button", { name: "Preview" })).toBeDisabled();
     expect(screen.getByText(/Limit: 2,000 lines/u))
       .toBeInTheDocument();
-    expect(container.querySelectorAll(".file-preview-line")).toHaveLength(2_000);
+    expect(container.querySelectorAll(".file-preview-line").length)
+      .toBeLessThan(200);
+    expect(container.querySelector(".file-preview-code > code"))
+      .toHaveClass("is-virtualized");
   });
 
   it("resets interactive and pending copy state when the preview identity changes", async () => {

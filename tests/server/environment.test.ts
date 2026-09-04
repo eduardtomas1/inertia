@@ -227,6 +227,57 @@ describe.sequential("provider environment discovery", () => {
     );
   });
 
+  it("passes only Gemini's documented credentials and routing settings", () => {
+    const documented = {
+      CLOUD_SHELL: "true",
+      GEMINI_API_KEY: "gemini-secret",
+      GEMINI_API_KEY_AUTH_MECHANISM: "header",
+      GEMINI_DEFAULT_AUTH_TYPE: "gemini-api-key",
+      GEMINI_MODEL: "gemini-2.5-pro",
+      GEMINI_CLI_CUSTOM_HEADERS: "X-Gemini-Header: value",
+      GEMINI_CLI_HOME: "/private/gemini-home",
+      GEMINI_CLI_SYSTEM_DEFAULTS_PATH: "/etc/gemini-cli/defaults.json",
+      GEMINI_CLI_SYSTEM_SETTINGS_PATH: "/etc/gemini-cli/settings.json",
+      GEMINI_CLI_TRUSTED_FOLDERS_PATH: "/private/gemini-trusted-folders.json",
+      GEMINI_CLI_USE_COMPUTE_ADC: "true",
+      GOOGLE_API_KEY: "google-secret",
+      GOOGLE_APPLICATION_CREDENTIALS: "/run/secrets/google-adc.json",
+      GOOGLE_CLOUD_ACCESS_TOKEN: "cloud-token",
+      GOOGLE_CLOUD_LOCATION: "europe-west4",
+      GOOGLE_CLOUD_PROJECT: "project-name",
+      GOOGLE_CLOUD_PROJECT_ID: "project-id",
+      GOOGLE_CLOUD_QUOTA_PROJECT: "quota-project",
+      GOOGLE_GENAI_API_VERSION: "v1beta",
+      GOOGLE_GENAI_USE_GCA: "true",
+      GOOGLE_GENAI_USE_VERTEXAI: "true",
+      GOOGLE_GEMINI_BASE_URL: "https://gemini.example.test",
+      GOOGLE_VERTEX_BASE_URL: "https://vertex.example.test",
+    };
+    const environment = providerChildEnvironment("gemini", {
+      PATH: "/usr/bin:/bin",
+      HOME: "/home/fixture",
+      ...documented,
+      CLOUD_SHELL_VERSION: "provider-header-only",
+      GEMINI_CLI_TRUST_WORKSPACE: "true",
+      GEMINI_CLI_IDE_AUTH_TOKEN: "unsafe-ide-token",
+      GEMINI_DEBUG_LOG_FILE: "/tmp/gemini-debug.log",
+      GEMINI_SANDBOX: "false",
+      OPENAI_API_KEY: "unrelated-secret",
+    });
+
+    expect(environment).toMatchObject({
+      PATH: "/usr/bin:/bin",
+      HOME: "/home/fixture",
+      ...documented,
+    });
+    expect(environment).not.toHaveProperty("CLOUD_SHELL_VERSION");
+    expect(environment).not.toHaveProperty("GEMINI_CLI_TRUST_WORKSPACE");
+    expect(environment).not.toHaveProperty("GEMINI_CLI_IDE_AUTH_TOKEN");
+    expect(environment).not.toHaveProperty("GEMINI_DEBUG_LOG_FILE");
+    expect(environment).not.toHaveProperty("GEMINI_SANDBOX");
+    expect(environment).not.toHaveProperty("OPENAI_API_KEY");
+  });
+
   it("preserves bounded Claude cloud routes and ordinary brokered credentials", () => {
     const routes = {
       CLAUDE_CODE_USE_ANTHROPIC_AWS: "true",
@@ -466,6 +517,7 @@ describe.sequential("provider environment discovery", () => {
       NODE_EXTRA_CA_CERTS: "/private/provider-ca.pem",
       OPENAI_API_KEY: "openai-secret",
       ANTHROPIC_API_KEY: "anthropic-secret",
+      GEMINI_API_KEY: "gemini-secret",
     });
 
     expect(environment).toMatchObject({
@@ -482,6 +534,7 @@ describe.sequential("provider environment discovery", () => {
     expect(environment).not.toHaveProperty("NODE_EXTRA_CA_CERTS");
     expect(environment).not.toHaveProperty("OPENAI_API_KEY");
     expect(environment).not.toHaveProperty("ANTHROPIC_API_KEY");
+    expect(environment).not.toHaveProperty("GEMINI_API_KEY");
   });
 
   it("expands Codex's leading home shorthand before a shell-free launch", () => {

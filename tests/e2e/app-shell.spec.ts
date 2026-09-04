@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import Database from "better-sqlite3";
 
 import { RuntimeStore } from "../../src/server/database";
+import { clientCommandSchema } from "../../src/shared/contracts";
 import { expectComposerEndsAtDock } from "./support/layout-assertions";
 import {
   createAppFixture,
@@ -25,6 +26,8 @@ let workspaceDirectory!: AppFixture["workspaceDirectory"];
 let rendererErrors!: AppFixture["rendererErrors"];
 let resizeWindow!: AppFixture["resizeWindow"];
 let expectNoViewportOverflow!: AppFixture["expectNoViewportOverflow"];
+
+test.describe.configure({ mode: "serial" });
 
 test.beforeAll(async () => {
   app = await createAppFixture({ name: "app-shell", initialState: "empty" });
@@ -130,14 +133,18 @@ test("keeps Send and Stop clear across submission, cancellation, theme, and scal
   });
   const initialSnapshot = initialStore.shellSnapshot();
   const conversationId = initialSnapshot.activeConversationId;
+  const projectId = initialSnapshot.activeProjectId;
   const originalSettings = initialSnapshot.settings;
-  if (!conversationId) throw new Error("The Send and Stop test needs an active conversation.");
+  if (!conversationId || !projectId) {
+    throw new Error("The Send and Stop test needs an active project and conversation.");
+  }
   const originalStatus = initialStore.conversation(conversationId).status;
   initialStore.updateSettings({ theme: "light", interfaceScale: "compact" });
   initialStore.updateConversation(conversationId, { status: "idle" });
   initialStore.close();
 
   const stopFrames: string[] = [];
+  let stopConversationId: string | null = null;
   let collectStopFrames = true;
   page.on("websocket", (socket) => {
     socket.on("framesent", (frame) => {
@@ -271,7 +278,13 @@ test("keeps Send and Stop clear across submission, cancellation, theme, and scal
     const runningStore = new RuntimeStore(databasePath, workspaceDirectory, {
       recoverInterruptedRuns: false,
     });
-    runningStore.updateConversation(conversationId, { status: "running" });
+    const stopConversation = runningStore.createConversation(
+      projectId,
+      "Synthetic running conversation",
+    );
+    stopConversationId = stopConversation.id;
+    runningStore.updateConversation(stopConversation.id, { status: "running" });
+    runningStore.selectConversation(stopConversation.id);
     runningStore.close();
     await resizeWindow(1180, 720);
     await page.reload();
@@ -336,6 +349,11 @@ test("keeps Send and Stop clear across submission, cancellation, theme, and scal
       "stop-ready",
     );
     expect(stopFrames).toHaveLength(1);
+    const stopCommand = clientCommandSchema.parse(JSON.parse(stopFrames[0]!));
+    if (stopCommand.type !== "agent.stop") {
+      throw new Error("The captured command is not an agent stop request.");
+    }
+    expect(stopCommand.payload.conversationId).toBe(stopConversationId);
   } finally {
     collectStopFrames = false;
     const cleanup = new RuntimeStore(databasePath, workspaceDirectory, {
@@ -345,6 +363,8 @@ test("keeps Send and Stop clear across submission, cancellation, theme, and scal
       theme: originalSettings.theme,
       interfaceScale: originalSettings.interfaceScale,
     });
+    cleanup.selectConversation(conversationId);
+    if (stopConversationId) cleanup.deleteConversation(stopConversationId);
     cleanup.updateConversation(conversationId, { status: originalStatus });
     cleanup.close();
     await resizeWindow(1440, 920);
@@ -527,6 +547,8 @@ test("keeps every ordinary New chat entry point isolated from the viewed chat", 
   expect(rendererErrors).toEqual([]);
 });
 
-test("keeps the window alive and reconnects with a rotated capability after a runtime crash", async () => {
+test("keeps the window alive and reconnects with a rotated capability after a runtime crash", {
+  tag: "@runtime-recovery",
+}, async () => {
   await expectRuntimeCrashRecovery(app, test.info());
 });

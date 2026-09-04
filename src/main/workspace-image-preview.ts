@@ -2,6 +2,8 @@ import { constants, type Stats } from "node:fs";
 import { open, realpath, stat, type FileHandle } from "node:fs/promises";
 import { resolve } from "node:path";
 
+import { FILE_OPEN_NO_FOLLOW } from
+  "../node/platform-file-open-flags.js";
 import type { OpenProjectPathRequest } from "../shared/desktop.js";
 import {
   MAX_WORKSPACE_IMAGE_PREVIEW_BYTES,
@@ -139,7 +141,7 @@ async function prepareWorkspaceImage(
   signal?: AbortSignal,
 ): Promise<PreparedWorkspaceImage> {
   assertWorkspaceImageRequestActive(signal);
-  const noFollow = "O_NOFOLLOW" in constants ? constants.O_NOFOLLOW : 0;
+  const noFollow = "O_NOFOLLOW" in constants ? FILE_OPEN_NO_FOLLOW : 0;
   const handle = await open(path, constants.O_RDONLY | noFollow);
   let releaseBudget: (() => void) | null = null;
   try {

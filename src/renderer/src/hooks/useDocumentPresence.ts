@@ -22,6 +22,15 @@ function subscribeDocumentPresence(onChange: () => void): () => void {
   };
 }
 
+function documentVisibilitySnapshot(): boolean {
+  return document.visibilityState === "visible";
+}
+
+function subscribeDocumentVisibility(onChange: () => void): () => void {
+  document.addEventListener("visibilitychange", onChange);
+  return () => document.removeEventListener("visibilitychange", onChange);
+}
+
 /**
  * Keeps attention semantics (visible and focused) distinct from rendering
  * visibility. The primitive snapshot lets React ignore redundant browser
@@ -32,5 +41,14 @@ export function useDocumentPresence(): number {
     subscribeDocumentPresence,
     documentPresenceSnapshot,
     documentPresenceSnapshot,
+  );
+}
+
+/** Subscribes portal-only rendering work to the visibility boolean it needs. */
+export function useDocumentVisibility(): boolean {
+  return useSyncExternalStore(
+    subscribeDocumentVisibility,
+    documentVisibilitySnapshot,
+    documentVisibilitySnapshot,
   );
 }

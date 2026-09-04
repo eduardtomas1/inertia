@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import type { UtilityProcess } from "electron";
 
 import type {
@@ -98,6 +100,7 @@ export function createConversationAttachmentStoreUtilityRunner(
     operation: StoreOperation,
     signal?: AbortSignal,
   ): StoreExecution {
+    const operationId = randomUUID();
     let resolveStopped!: () => void;
     let rejectStopped!: (error: Error) => void;
     let resolveReady!: (observed: boolean) => void;
@@ -133,6 +136,8 @@ export function createConversationAttachmentStoreUtilityRunner(
       let readReady = false;
       let stoppingError: Error | null = null;
       let killGraceTimer: NodeJS.Timeout | null = null;
+      let killAccepted = false;
+      let exitObserved = false;
       let settled = false;
       let spawned = false;
       const cleanup = (): void => {
@@ -168,16 +173,21 @@ export function createConversationAttachmentStoreUtilityRunner(
         }
         resolveOperation(receipt);
       };
+      const requestKill = (): void => {
+        if (killAccepted || exitObserved) return;
+        killAccepted = child.kill();
+      };
       const stop = (error: Error): void => {
-        if (stoppingError || settled) return;
-        stoppingError = error;
-        child.kill();
+        if (settled) return;
+        stoppingError ??= error;
+        requestKill();
+        if (killGraceTimer) return;
         killGraceTimer = setTimeout(() => {
           const unconfirmed = new Error(
             "Conversation attachment utility shutdown is unconfirmed.",
           );
           rejectStopped(unconfirmed);
-          settle(error);
+          settle(stoppingError ?? error);
         }, killGraceMs);
         killGraceTimer.unref();
       };
@@ -189,13 +199,18 @@ export function createConversationAttachmentStoreUtilityRunner(
       signal?.addEventListener("abort", onAbort, { once: true });
       child.once("spawn", () => {
         spawned = true;
-        if (stoppingError || signal?.aborted) {
+        if (stoppingError) {
+          requestKill();
+          return;
+        }
+        if (signal?.aborted) {
           onAbort();
           return;
         }
         try {
           child.postMessage({
             type: "conversation-attachment-store.perform",
+            operationId,
             encodedOperation: encodeConversationAttachmentStoreOperation(
               operation,
             ),
@@ -210,7 +225,7 @@ export function createConversationAttachmentStoreUtilityRunner(
           return;
         }
         const event = parseConversationAttachmentStoreWorkerEvent(value);
-        if (!event || reported) {
+        if (!event || event.operationId !== operationId || reported) {
           stop(new Error("Conversation attachment operation returned an invalid result."));
           return;
         }
@@ -224,6 +239,16 @@ export function createConversationAttachmentStoreUtilityRunner(
           return;
         }
         reported = event;
+        try {
+          child.postMessage({
+            type: "conversation-attachment-store.result-ack",
+            operationId,
+          } satisfies ConversationAttachmentStoreWorkerRequest);
+        } catch {
+          stop(new Error(
+            "Conversation attachment operation acknowledgement could not be delivered.",
+          ));
+        }
       });
       child.once("error", () => {
         stop(new Error("Conversation attachment operation stopped unexpectedly."));
@@ -234,10 +259,12 @@ export function createConversationAttachmentStoreUtilityRunner(
           listener: (code: number, signal?: string) => void,
         ): void;
       }).once("exit", (code, signal) => {
+        exitObserved = true;
         if (killGraceTimer) clearTimeout(killGraceTimer);
         resolveStopped();
+        const expectedExit = reported?.ok === true ? code === 0 : code === 1;
         settle(stoppingError ?? (
-          code === 0 && !signal
+          expectedExit && !signal
             ? undefined
             : new Error("Conversation attachment operation stopped unexpectedly.")
         ));

@@ -13,6 +13,12 @@ import {
   type SDKTaskStartedMessage,
   type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
+import type {
+  MessageCreateParamsNonStreaming,
+  MessageParam,
+} from "@anthropic-ai/sdk/resources/messages/messages.js";
+import { Client as McpClient } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import {
   createOpencodeClient,
   type Agent,
@@ -67,6 +73,53 @@ export type KimiSessionUpdateSurface = acp.SessionNotification["update"];
 export type KimiPromptTerminalSurface = Pick<
   acp.PromptResponse,
   "stopReason" | "usage"
+>;
+
+// Gemini CLI uses ACP v1 directly. Inertia intentionally does not use
+// authenticate or session/load: session/new preserves the CLI-selected auth
+// method, while native load is unsafe in the currently supported CLI.
+export const geminiClient: acp.ClientApp = acp.client({
+  name: "Inertia Gemini provider drift",
+});
+export const geminiPermissionMethod: "session/request_permission" =
+  acp.methods.client.session.requestPermission;
+export const geminiCriticalMethods = {
+  initialize: acp.methods.agent.initialize,
+  sessionNew: acp.methods.agent.session.new,
+  sessionPrompt: acp.methods.agent.session.prompt,
+  sessionCancel: acp.methods.agent.session.cancel,
+  sessionSetMode: acp.methods.agent.session.setMode,
+  sessionSetModel: "session/set_model",
+  sessionUpdate: acp.methods.client.session.update,
+} as const;
+export type GeminiSessionUpdateSurface = acp.SessionNotification["update"];
+type GeminiUpdateVariantPresent<T> = [T] extends [never] ? false : true;
+export const geminiHandledPlanAndUsageVariants = {
+  plan: true,
+  planUpdate: true,
+  planRemoved: true,
+  usageUpdate: true,
+} as const satisfies {
+  plan: GeminiUpdateVariantPresent<Extract<
+    GeminiSessionUpdateSurface,
+    { sessionUpdate: "plan" }
+  >>;
+  planUpdate: GeminiUpdateVariantPresent<Extract<
+    GeminiSessionUpdateSurface,
+    { sessionUpdate: "plan_update" }
+  >>;
+  planRemoved: GeminiUpdateVariantPresent<Extract<
+    GeminiSessionUpdateSurface,
+    { sessionUpdate: "plan_removed" }
+  >>;
+  usageUpdate: GeminiUpdateVariantPresent<Extract<
+    GeminiSessionUpdateSurface,
+    { sessionUpdate: "usage_update" }
+  >>;
+};
+export type GeminiPromptTerminalSurface = Pick<
+  acp.PromptResponse,
+  "stopReason" | "usage" | "_meta"
 >;
 
 export type ClaudeQueryFactory = (params: {
@@ -127,6 +180,26 @@ export type ClaudeLifecycleMessageSurface =
   | SDKResultMessage
   | SDKTaskStartedMessage
   | SDKTaskNotificationMessage;
+
+export type AnthropicMessagesSurface = {
+  message: MessageParam;
+  request: MessageCreateParamsNonStreaming;
+};
+
+export const mcpClient = new McpClient({
+  name: "Inertia provider drift",
+  version: "1.0.0",
+});
+export const mcpLinkedTransports: [InMemoryTransport, InMemoryTransport] =
+  InMemoryTransport.createLinkedPair();
+export const mcpCriticalMethods = {
+  connect: mcpClient.connect,
+  close: mcpClient.close,
+  listTools: mcpClient.listTools,
+  callTool: mcpClient.callTool,
+  listResources: mcpClient.listResources,
+  readResource: mcpClient.readResource,
+} as const;
 
 /**
  * Compile-time drift fence for the message discriminants intentionally
@@ -192,6 +265,21 @@ export type ClaudeAssistantRecoverySurface = Pick<
   | "supersedes"
   | "resumed_from_incomplete_thinking"
   | "context_usage"
+>;
+export type ClaudeAssistantCorrelationSurface = Pick<
+  SDKAssistantMessage,
+  | "user_message_uuid"
+  | "user_message_uuids"
+>;
+export type ClaudePartialAssistantCorrelationSurface = Pick<
+  SDKPartialAssistantMessage,
+  | "user_message_uuid"
+  | "user_message_uuids"
+>;
+export type ClaudeResultCorrelationSurface = Pick<
+  SDKResultMessage,
+  | "user_message_uuid"
+  | "user_message_uuids"
 >;
 
 export const openCodeClient: OpencodeClient = createOpencodeClient({

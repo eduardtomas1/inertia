@@ -1,14 +1,12 @@
 import {
+  useCallback,
   useEffect,
   useLayoutEffect,
   useRef,
   useState,
 } from "react";
 import { useDismissibleMenu } from "../../hooks/useDismissibleMenu";
-import {
-  chooseHorizontalSubmenuSide,
-  type HorizontalSubmenuSide,
-} from "../../utils/dismissibleMenu";
+import type { HorizontalSubmenuSide } from "../../utils/dismissibleMenu";
 import { menuId, RESPONSE_SPEED_LABEL } from "./config";
 import type { ComposerMenu, MoreSection } from "./types";
 import { navigateMenuItems } from "../../utils/menuKeyboard";
@@ -21,7 +19,6 @@ export interface ComposerMenuController {
   setMenuPopover: (menu: ComposerMenu, node: HTMLDivElement | null) => void;
   moreSection: MoreSection | null;
   moreSubmenuSide: HorizontalSubmenuSide | null;
-  morePopoverMaxHeight: number | null;
   morePopoverRef: React.RefObject<HTMLDivElement | null>;
   moreSectionTriggerRefs: React.RefObject<Map<MoreSection, HTMLButtonElement>>;
   clearMoreHoverTimer: () => void;
@@ -52,18 +49,38 @@ export function useComposerMenus(): ComposerMenuController {
     menu,
     toggleMenu,
     dismissMenu,
-    setMenuTrigger,
-    setMenuPopover,
+    setMenuTrigger: setDismissibleMenuTrigger,
+    setMenuPopover: setDismissibleMenuPopover,
   } = useDismissibleMenu<ComposerMenu>();
   const [moreSection, setMoreSection] = useState<MoreSection | null>(null);
   const [moreSubmenuSide, setMoreSubmenuSide] =
     useState<HorizontalSubmenuSide | null>(null);
-  const [morePopoverMaxHeight, setMorePopoverMaxHeight] =
-    useState<number | null>(null);
   const morePopoverRef = useRef<HTMLDivElement>(null);
   const moreSectionTriggerRefs =
     useRef(new Map<MoreSection, HTMLButtonElement>());
   const moreHoverTimerRef = useRef<number | null>(null);
+  const moreSectionExplicitRef = useRef(false);
+  const menuTriggerRefs = useRef(new Map<ComposerMenu, HTMLButtonElement>());
+  const menuPopoverRef = useRef<HTMLDivElement | null>(null);
+
+  const setMenuTrigger = useCallback((
+    name: ComposerMenu,
+    node: HTMLButtonElement | null,
+  ): void => {
+    setDismissibleMenuTrigger(name, node);
+    if (node) menuTriggerRefs.current.set(name, node);
+    else menuTriggerRefs.current.delete(name);
+  }, [setDismissibleMenuTrigger]);
+
+  const setMenuPopover = (
+    name: ComposerMenu,
+    node: HTMLDivElement | null,
+  ): void => {
+    setDismissibleMenuPopover(name, node);
+    if (node) {
+      menuPopoverRef.current = node;
+    } else menuPopoverRef.current = null;
+  };
 
   useEffect(() => {
     if (menu === "more") return;
@@ -71,33 +88,35 @@ export function useComposerMenus(): ComposerMenuController {
       window.clearTimeout(moreHoverTimerRef.current);
     }
     moreHoverTimerRef.current = null;
+    moreSectionExplicitRef.current = false;
     setMoreSection(null);
     setMoreSubmenuSide(null);
   }, [menu]);
 
   useLayoutEffect(() => {
-    if (menu !== "more") {
-      setMorePopoverMaxHeight(null);
-      return;
-    }
-    const updateAvailableHeight = () => {
-      const popover = morePopoverRef.current;
-      if (!popover) return;
-      const header = popover.closest(".workspace-frame")
-        ?.querySelector<HTMLElement>(".workspace-header");
-      const safeTop = Math.max(
-        8,
-        (header?.getBoundingClientRect().bottom ?? 0) + 8,
+    if (!menu) return;
+    const popover = menuPopoverRef.current;
+    const trigger = menuTriggerRefs.current.get(menu);
+    if (!trigger || !popover) return;
+    let active = true;
+    let stopObserving: (() => void) | null = null;
+    void import("../../utils/composerPopoverPlacement").then((module) => {
+      if (!active) return;
+      stopObserving = module.observeComposerPopover(
+        trigger,
+        popover,
+        (nextSide) => {
+          if (menu === "more" && moreSection) {
+            setMoreSubmenuSide(nextSide);
+          }
+        },
       );
-      setMorePopoverMaxHeight(Math.max(
-        80,
-        Math.floor(popover.getBoundingClientRect().bottom - safeTop),
-      ));
+    });
+    return () => {
+      active = false;
+      stopObserving?.();
     };
-    updateAvailableHeight();
-    window.addEventListener("resize", updateAvailableHeight);
-    return () => window.removeEventListener("resize", updateAvailableHeight);
-  }, [menu]);
+  }, [menu, moreSection]);
 
   useEffect(() => () => {
     if (moreHoverTimerRef.current !== null) {
@@ -106,19 +125,16 @@ export function useComposerMenus(): ComposerMenuController {
   }, []);
 
   const clearMoreHoverTimer = () => {
-    if (moreHoverTimerRef.current === null) return;
-    window.clearTimeout(moreHoverTimerRef.current);
+    const timer = moreHoverTimerRef.current;
+    if (timer === null) return;
+    clearTimeout(timer);
     moreHoverTimerRef.current = null;
   };
 
   const availableMoreSubmenuSide = (): HorizontalSubmenuSide | null => {
-    const popover = morePopoverRef.current;
-    if (!popover) return null;
-    return chooseHorizontalSubmenuSide(
-      popover.getBoundingClientRect(),
-      window.innerWidth,
-      288,
-    );
+    const side = morePopoverRef.current?.parentElement
+      ?.dataset.composerSubmenuSide;
+    return side === "left" || side === "right" ? side : null;
   };
 
   const focusFirstMoreSubmenuItem = () => {
@@ -136,6 +152,7 @@ export function useComposerMenus(): ComposerMenuController {
     focusSubmenu = false,
   ) => {
     clearMoreHoverTimer();
+    moreSectionExplicitRef.current = true;
     const side = availableMoreSubmenuSide();
     setMoreSection(section);
     setMoreSubmenuSide(side);
@@ -144,19 +161,23 @@ export function useComposerMenus(): ComposerMenuController {
 
   const previewMoreSection = (section: MoreSection) => {
     clearMoreHoverTimer();
-    moreHoverTimerRef.current = window.setTimeout(() => {
-      moreHoverTimerRef.current = null;
-      const side = availableMoreSubmenuSide();
-      if (!side) return;
-      setMoreSection(section);
-      setMoreSubmenuSide(side);
-    }, 140);
+    if (!moreSectionExplicitRef.current) {
+      moreHoverTimerRef.current = window.setTimeout(() => {
+        moreHoverTimerRef.current = null;
+        const side = availableMoreSubmenuSide();
+        if (!side) return;
+        setMoreSection(section);
+        setMoreSubmenuSide(side);
+      }, 140);
+    }
   };
 
   const closeMorePreview = () => {
     clearMoreHoverTimer();
+    if (moreSectionExplicitRef.current) return;
     moreHoverTimerRef.current = window.setTimeout(() => {
       moreHoverTimerRef.current = null;
+      if (moreSectionExplicitRef.current) return;
       setMoreSection(null);
       setMoreSubmenuSide(null);
     }, 180);
@@ -165,6 +186,7 @@ export function useComposerMenus(): ComposerMenuController {
   const returnToMoreRoot = (focusTrigger = false) => {
     const previousSection = moreSection;
     clearMoreHoverTimer();
+    moreSectionExplicitRef.current = false;
     setMoreSection(null);
     setMoreSubmenuSide(null);
     if (focusTrigger && previousSection) {
@@ -181,11 +203,8 @@ export function useComposerMenus(): ComposerMenuController {
     menuName: ComposerMenu,
     edge: "first" | "last" = "first",
   ): void => {
-    window.requestAnimationFrame(() => {
-      const items = [...(document.getElementById(menuId(menuName))
-        ?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") ?? [])];
-      (edge === "first" ? items[0] : items.at(-1))?.focus();
-    });
+    void import("../../utils/composerPopoverPlacement").then((module) =>
+      module.focusComposerPopoverEdge(menuId(menuName), edge));
   };
 
   const handleComposerMenuNavigation = (
@@ -213,7 +232,6 @@ export function useComposerMenus(): ComposerMenuController {
     setMenuPopover,
     moreSection,
     moreSubmenuSide,
-    morePopoverMaxHeight,
     morePopoverRef,
     moreSectionTriggerRefs,
     clearMoreHoverTimer,

@@ -19,7 +19,6 @@
   box-shadow:
     0 30px 84px color-mix(in srgb, var(--shadow) 96%, transparent),
     0 0 0 1px color-mix(in srgb, var(--text) 3%, transparent);
-  animation: quiet-ledger-document-reveal var(--motion-base) var(--motion-ease) both;
 }
 
 .multi-spawn-dialog-body {
@@ -41,14 +40,13 @@
 
 .multi-spawn-dialog-mark {
   display: grid;
-  width: 36px;
-  height: 36px;
+  width: 34px;
+  height: 34px;
   place-items: center;
-  border: 1px solid color-mix(in srgb, var(--accent) 76%, var(--border));
+  border: 1px solid var(--border-strong);
   border-radius: 10px;
-  color: var(--accent-text);
-  background: var(--accent);
-  box-shadow: 0 5px 14px color-mix(in srgb, var(--accent) 20%, transparent);
+  color: var(--text-soft);
+  background: var(--surface-muted);
 }
 
 .multi-spawn-dialog-header h2 {

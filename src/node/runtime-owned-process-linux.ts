@@ -10,6 +10,11 @@ export const LINUX_RUNTIME_OWNED_GUARDIAN_IMMEDIATE_STOP_ADMISSION_TIMEOUT_MS =
   5 * LINUX_RUNTIME_OWNED_GUARDIAN_HELPER_TIMEOUT_MS;
 const LINUX_GUARDIAN_HELPER_OUTPUT_BYTES = 4 * 1024;
 
+export interface LinuxGuardianExecutableIdentity {
+  readonly guardianExecutableDevice: string;
+  readonly guardianExecutableInode: string;
+}
+
 interface LinuxProcessIdentity {
   readonly pid: number;
   readonly parentPid: number;
@@ -29,11 +34,33 @@ interface LinuxGuardianHelperResult {
 
 type LinuxGuardianTerminalName = "inertia-done" | "inertia-exdone";
 
+export function linuxGuardianExecutableMatches(
+  guardianPath: string,
+  expected: LinuxGuardianExecutableIdentity,
+): boolean {
+  if (!isAbsolute(guardianPath)) return false;
+  try {
+    const executable = statSync(guardianPath, { bigint: true });
+    return executable.isFile()
+      && String(executable.dev) === expected.guardianExecutableDevice
+      && String(executable.ino) === expected.guardianExecutableInode;
+  } catch {
+    return false;
+  }
+}
+
 function runLinuxGuardianHelper(
   guardianPath: string,
   args: readonly string[],
   abortSignal?: AbortSignal,
+  expectedExecutable?: LinuxGuardianExecutableIdentity,
 ): Promise<LinuxGuardianHelperResult> {
+  if (expectedExecutable
+    && !linuxGuardianExecutableMatches(guardianPath, expectedExecutable)) {
+    return Promise.resolve({
+      stdout: "", stderr: "", status: null, signal: null, failed: true,
+    });
+  }
   return new Promise((resolve) => {
     let settled = false;
     let stdout = "";
@@ -89,12 +116,38 @@ function runLinuxGuardianHelper(
   });
 }
 
+export function verifyLinuxRuntimeOwnedGuardianSandbox(
+  guardianPath: string,
+): LinuxGuardianExecutableIdentity | null {
+  if (!isAbsolute(guardianPath)) return null;
+  const result = spawnSync(guardianPath, ["seccomp-selftest-identity"], {
+    encoding: "utf8", env: { PATH: "/usr/bin:/bin" }, shell: false,
+    timeout: LINUX_RUNTIME_OWNED_GUARDIAN_HELPER_TIMEOUT_MS,
+    killSignal: "SIGKILL",
+    maxBuffer: LINUX_GUARDIAN_HELPER_OUTPUT_BYTES,
+  });
+  if (result.error || result.status !== 0 || result.signal
+    || result.stderr !== "") return null;
+  const match = result.stdout.trim().match(
+    /^[1-9][0-9]*\|[1-9][0-9]*\|[1-9][0-9]*\|[1-9][0-9]*\|([1-9][0-9]*)\|([1-9][0-9]*)$/u,
+  );
+  if (!match) return null;
+  const identity: LinuxGuardianExecutableIdentity = {
+    guardianExecutableDevice: match[1]!,
+    guardianExecutableInode: match[2]!,
+  };
+  return linuxGuardianExecutableMatches(guardianPath, identity)
+    ? identity
+    : null;
+}
+
 function parsedLinuxGuardianIdentity(
   stdout: string,
   pid: number,
   guardianPath: string,
   expectedParentPid: number,
   verifySession: boolean,
+  expectedExecutable?: LinuxGuardianExecutableIdentity,
 ): LinuxProcessIdentity | null {
   const match = stdout.trim().match(/^([1-9][0-9]*)\|([1-9][0-9]*)\|([1-9][0-9]*)\|([1-9][0-9]*)\|([1-9][0-9]*)\|([1-9][0-9]*)$/u);
   if (!match || Number(match[1]) !== pid || Number(match[2]) !== expectedParentPid
@@ -102,6 +155,9 @@ function parsedLinuxGuardianIdentity(
   try {
     const trusted = statSync(guardianPath, { bigint: true });
     if (match[5] !== String(trusted.dev) || match[6] !== String(trusted.ino)) return null;
+    if (expectedExecutable
+      && (match[5] !== expectedExecutable.guardianExecutableDevice
+        || match[6] !== expectedExecutable.guardianExecutableInode)) return null;
     if (verifySession) {
       const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
       const tail = stat.lastIndexOf(")");
@@ -125,8 +181,11 @@ export function readLinuxGuardianReady(
   pid: number,
   guardianPath: string,
   expectedParentPid: number,
+  expectedExecutable?: LinuxGuardianExecutableIdentity,
 ): LinuxProcessIdentity | null {
-  if (!Number.isSafeInteger(pid) || pid <= 1 || !isAbsolute(guardianPath)) return null;
+  if (!Number.isSafeInteger(pid) || pid <= 1 || !isAbsolute(guardianPath)
+    || (expectedExecutable
+      && !linuxGuardianExecutableMatches(guardianPath, expectedExecutable))) return null;
   const result = spawnSync(guardianPath, ["ready", String(pid)], {
     encoding: "utf8", env: { PATH: "/usr/bin:/bin" }, shell: false,
     timeout: LINUX_RUNTIME_OWNED_GUARDIAN_HELPER_TIMEOUT_MS,
@@ -139,6 +198,7 @@ export function readLinuxGuardianReady(
     guardianPath,
     expectedParentPid,
     true,
+    expectedExecutable,
   );
 }
 
@@ -147,12 +207,14 @@ export async function readLinuxGuardianReadyAsync(
   guardianPath: string,
   expectedParentPid: number,
   abortSignal?: AbortSignal,
+  expectedExecutable?: LinuxGuardianExecutableIdentity,
 ): Promise<LinuxProcessIdentity | null> {
   if (!Number.isSafeInteger(pid) || pid <= 1 || !isAbsolute(guardianPath)) return null;
   const result = await runLinuxGuardianHelper(
     guardianPath,
     ["ready", String(pid)],
     abortSignal,
+    expectedExecutable,
   );
   if (result.failed || result.status !== 0 || result.signal || result.stderr !== "") return null;
   return parsedLinuxGuardianIdentity(
@@ -161,6 +223,7 @@ export async function readLinuxGuardianReadyAsync(
     guardianPath,
     expectedParentPid,
     true,
+    expectedExecutable,
   );
 }
 
@@ -169,6 +232,7 @@ export async function readLinuxGuardianReadyWithRetriesAsync(
   guardianPath: string,
   expectedParentPid: number,
   abortSignal?: AbortSignal,
+  expectedExecutable?: LinuxGuardianExecutableIdentity,
 ): Promise<LinuxProcessIdentity | null> {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const identity = await readLinuxGuardianReadyAsync(
@@ -176,6 +240,7 @@ export async function readLinuxGuardianReadyWithRetriesAsync(
       guardianPath,
       expectedParentPid,
       abortSignal,
+      expectedExecutable,
     );
     if (identity) return identity;
   }
@@ -193,19 +258,23 @@ export async function stopPendingLinuxGuardianAsync(
   guardianPath: string,
   expectedParentPid: number,
   abortSignal?: AbortSignal,
+  expectedExecutable?: LinuxGuardianExecutableIdentity,
 ): Promise<boolean> {
   if (!Number.isSafeInteger(pid) || pid <= 1
     || !Number.isSafeInteger(expectedParentPid) || expectedParentPid <= 1
     || !isAbsolute(guardianPath)) return false;
   let helper;
   try { helper = statSync(guardianPath, { bigint: true }); } catch { return false; }
+  if (expectedExecutable
+    && (String(helper.dev) !== expectedExecutable.guardianExecutableDevice
+      || String(helper.ino) !== expectedExecutable.guardianExecutableInode)) return false;
   const result = await runLinuxGuardianHelper(guardianPath, [
     "stop-pending",
     String(pid),
     String(expectedParentPid),
     String(helper.dev),
     String(helper.ino),
-  ], abortSignal);
+  ], abortSignal, expectedExecutable);
   return !result.failed && result.status === 0 && !result.signal
     && result.stdout === "" && result.stderr === "";
 }
@@ -214,8 +283,11 @@ export function readLinuxGuardianClaimed(
   pid: number,
   guardianPath: string,
   expectedParentPid: number,
+  expectedExecutable?: LinuxGuardianExecutableIdentity,
 ): LinuxProcessIdentity | null {
-  if (!Number.isSafeInteger(pid) || pid <= 1 || !isAbsolute(guardianPath)) return null;
+  if (!Number.isSafeInteger(pid) || pid <= 1 || !isAbsolute(guardianPath)
+    || (expectedExecutable
+      && !linuxGuardianExecutableMatches(guardianPath, expectedExecutable))) return null;
   const result = spawnSync(guardianPath, ["claimed", String(pid)], {
     encoding: "utf8", env: { PATH: "/usr/bin:/bin" }, shell: false,
     timeout: LINUX_RUNTIME_OWNED_GUARDIAN_HELPER_TIMEOUT_MS,
@@ -228,6 +300,7 @@ export function readLinuxGuardianClaimed(
     guardianPath,
     expectedParentPid,
     false,
+    expectedExecutable,
   );
 }
 
@@ -237,12 +310,14 @@ async function readLinuxGuardianStateAsync(
   guardianPath: string,
   expectedParentPid: number,
   abortSignal?: AbortSignal,
+  expectedExecutable?: LinuxGuardianExecutableIdentity,
 ): Promise<LinuxProcessIdentity | null> {
   if (!Number.isSafeInteger(pid) || pid <= 1 || !isAbsolute(guardianPath)) return null;
   const result = await runLinuxGuardianHelper(
     guardianPath,
     [state, String(pid)],
     abortSignal,
+    expectedExecutable,
   );
   if (result.failed || result.status !== 0 || result.signal || result.stderr !== "") return null;
   return parsedLinuxGuardianIdentity(
@@ -251,6 +326,7 @@ async function readLinuxGuardianStateAsync(
     guardianPath,
     expectedParentPid,
     false,
+    expectedExecutable,
   );
 }
 
@@ -259,6 +335,7 @@ export function readLinuxGuardianClaimedAsync(
   guardianPath: string,
   expectedParentPid: number,
   abortSignal?: AbortSignal,
+  expectedExecutable?: LinuxGuardianExecutableIdentity,
 ): Promise<LinuxProcessIdentity | null> {
   return readLinuxGuardianStateAsync(
     "claimed",
@@ -266,6 +343,7 @@ export function readLinuxGuardianClaimedAsync(
     guardianPath,
     expectedParentPid,
     abortSignal,
+    expectedExecutable,
   );
 }
 
@@ -274,6 +352,7 @@ export function readLinuxGuardianOwnedAsync(
   guardianPath: string,
   expectedParentPid: number,
   abortSignal?: AbortSignal,
+  expectedExecutable?: LinuxGuardianExecutableIdentity,
 ): Promise<LinuxProcessIdentity | null> {
   return readLinuxGuardianStateAsync(
     "owned",
@@ -281,6 +360,7 @@ export function readLinuxGuardianOwnedAsync(
     guardianPath,
     expectedParentPid,
     abortSignal,
+    expectedExecutable,
   );
 }
 
@@ -330,16 +410,51 @@ export function signalLinuxGuardianExact(
     || !expected.guardianExecutableInode) return false;
   let helper;
   try { helper = statSync(guardianPath, { bigint: true }); } catch { return false; }
+  if (String(helper.dev) !== expected.guardianExecutableDevice
+    || String(helper.ino) !== expected.guardianExecutableInode) return false;
   const result = spawnSync(guardianPath, [
     "signal",
     String(expected.pid),
     expected.startTimeTicks,
-    String(helper.dev),
-    String(helper.ino),
+    expected.guardianExecutableDevice,
+    expected.guardianExecutableInode,
     action,
   ], {
     encoding: "utf8", env: { PATH: "/usr/bin:/bin" }, shell: false,
     timeout: 1_500, maxBuffer: 4 * 1024,
+  });
+  return !result.error && result.status === 0 && !result.signal
+    && result.stdout === "" && result.stderr === "";
+}
+
+/**
+ * Terminates a previously admitted guardian after it has reached its hardened
+ * child-free terminal state. The currently installed helper authenticates its
+ * own executable separately from the prior helper identity in the durable
+ * claim, so an application update cannot strand an otherwise recoverable
+ * runtime generation.
+ */
+export function recoverLinuxGuardianTerminalExact(
+  expected: LinuxProcessIdentity,
+  guardianPath: string,
+): boolean {
+  if (!isAbsolute(guardianPath)
+    || !expected.guardianExecutableDevice
+    || !expected.guardianExecutableInode) return false;
+  let helper;
+  try { helper = statSync(guardianPath, { bigint: true }); } catch { return false; }
+  const result = spawnSync(guardianPath, [
+    "recover-terminal",
+    String(expected.pid),
+    expected.startTimeTicks,
+    expected.guardianExecutableDevice,
+    expected.guardianExecutableInode,
+    String(helper.dev),
+    String(helper.ino),
+  ], {
+    encoding: "utf8", env: { PATH: "/usr/bin:/bin" }, shell: false,
+    timeout: LINUX_RUNTIME_OWNED_GUARDIAN_HELPER_TIMEOUT_MS,
+    maxBuffer: LINUX_GUARDIAN_HELPER_OUTPUT_BYTES,
   });
   return !result.error && result.status === 0 && !result.signal
     && result.stdout === "" && result.stderr === "";
@@ -354,16 +469,22 @@ export async function signalLinuxGuardianExactAsync(
   if (!isAbsolute(guardianPath)
     || !expected.guardianExecutableDevice
     || !expected.guardianExecutableInode) return false;
+  const expectedExecutable: LinuxGuardianExecutableIdentity = {
+    guardianExecutableDevice: expected.guardianExecutableDevice,
+    guardianExecutableInode: expected.guardianExecutableInode,
+  };
   let helper;
   try { helper = statSync(guardianPath, { bigint: true }); } catch { return false; }
+  if (String(helper.dev) !== expected.guardianExecutableDevice
+    || String(helper.ino) !== expected.guardianExecutableInode) return false;
   const result = await runLinuxGuardianHelper(guardianPath, [
     "signal",
     String(expected.pid),
     expected.startTimeTicks,
-    String(helper.dev),
-    String(helper.ino),
+    expected.guardianExecutableDevice,
+    expected.guardianExecutableInode,
     action,
-  ], abortSignal);
+  ], abortSignal, expectedExecutable);
   return !result.failed && result.status === 0 && !result.signal
     && result.stdout === "" && result.stderr === "";
 }

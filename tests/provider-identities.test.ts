@@ -7,7 +7,12 @@ describe("provider identity labels", () => {
     expect(parseProviderIdentityLabels({
       codex: "  Work account  ",
       claude: "Personal",
-    })).toEqual({ codex: "Work account", claude: "Personal" });
+      gemini: "Google account",
+    })).toEqual({
+      codex: "Work account",
+      claude: "Personal",
+      gemini: "Google account",
+    });
     expect(() => parseProviderIdentityLabels({ github: "token owner" }))
       .toThrow(/invalid provider/u);
     expect(() => parseProviderIdentityLabels({ codex: "one\ntwo" }))

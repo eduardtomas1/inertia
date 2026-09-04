@@ -8,11 +8,18 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
+import type { ChildProcess } from "node:child_process";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { spawnRuntimeOwnedProcess } from "../../src/node/runtime-owned-processes";
 import { providerEnvironment } from "../../src/server/environment";
 import { AgentHarnessRegistry, detectProvider, ProviderManager } from "../../src/server/providers";
 import { providerFailureMessage } from "../../src/server/provider/adapters";
+import {
+  providerAuthLaunchEnvironment,
+  providerAuthLoginArgs,
+  providerAuthStatusArgs,
+} from "../../src/server/provider/auth";
 import { createCliAgentHarness } from "../../src/server/provider/cli-agent-harness";
 import { terminateProcessTreeAndWait } from "../../src/server/process-lifecycle";
 import {
@@ -23,11 +30,14 @@ import {
   writeNodeSubcommand,
 } from "../helpers/portable-provider-fixture";
 import { nativeProviderRunInput } from "./model-route-fixture";
+import { activatePreparedRuntimeOwnedProcessRegistry as activateRuntimeOwnedProcessRegistry } from
+  "../helpers/prepared-runtime-owned-process-registry";
 
 const MUTATED_ENVIRONMENT_KEYS = [
   "CODEX_HOME",
   "CODEX_INSTALL_DIR",
   "HOME",
+  "HTTPS_PROXY",
   "OPENAI_API_KEY",
   "PATH",
   "SHELL",
@@ -37,9 +47,11 @@ const MUTATED_ENVIRONMENT_KEYS = [
 describe.sequential("provider runtime", () => {
   const roots: string[] = [];
   const descendantPids: number[] = [];
+  const ownershipDeactivators: Array<() => void> = [];
   const originalEnvironment = Object.fromEntries(MUTATED_ENVIRONMENT_KEYS.map((key) => [key, process.env[key]]));
 
   afterEach(async () => {
+    while (ownershipDeactivators.length > 0) ownershipDeactivators.pop()?.();
     for (const pid of descendantPids.splice(0)) {
       try {
         process.kill(pid, "SIGKILL");
@@ -243,6 +255,85 @@ process.exit(2);
     });
   });
 
+  it("requests recovery once when provider discovery asynchronously taints ownership", async () => {
+    const root = temporaryRoot();
+    const executable = join(root, "codex");
+    const identity = {
+      platform: "darwin" as const,
+      pid: 4_242,
+      parentPid: process.pid,
+      processGroupId: 4_242,
+      sessionId: 4_242,
+      startTimeSeconds: "1756100000",
+      startTimeMicroseconds: 123_456,
+    };
+    const requestRecovery = vi.fn();
+    const deactivate = activateRuntimeOwnedProcessRegistry(
+      root,
+      "40000000-0000-4000-8000-000000000004:1",
+      "test:30000000-0000-4000-8000-000000000003",
+      {
+        platform: "darwin",
+        darwinGuardianPath: "/trusted/runtime-process-guardian",
+        readDarwinGuardianReadyAsync: async () => identity,
+        readDarwinIdentity: () => identity,
+        onTainted: requestRecovery,
+      },
+    );
+    if (deactivate) ownershipDeactivators.push(deactivate);
+    const processKill = vi.spyOn(process, "kill").mockReturnValue(true);
+    let closeHandler = (
+      _code: number | null,
+      _signal: NodeJS.Signals | null,
+    ): void => { throw new Error("The close handler was not registered."); };
+    const child = {
+      pid: identity.pid,
+      spawnfile: "/trusted/runtime-process-guardian",
+      kill: vi.fn(() => true),
+      once: vi.fn((event: string, listener: typeof closeHandler) => {
+        if (event === "close") closeHandler = listener;
+        return child;
+      }),
+    } as unknown as ChildProcess;
+    let spawnedProbe = false;
+    try {
+      const detection = await detectProvider("codex", {
+        command: executable,
+        cwd: root,
+      }, {
+        executableCandidates: async () => [executable],
+        probeProcess: async (_candidate, args) => {
+          if (!spawnedProbe) {
+            spawnedProbe = true;
+            spawnRuntimeOwnedProcess(() => child);
+            await vi.waitFor(() => {
+              expect(processKill).toHaveBeenCalledWith(identity.pid, "SIGUSR1");
+            });
+            await new Promise<void>((resolve) => setImmediate(resolve));
+            closeHandler(null, "SIGUSR2");
+            closeHandler(null, "SIGUSR2");
+          }
+          return {
+            started: true,
+            timedOut: false,
+            exitCode: 0,
+            output: args[0] === "--version"
+              ? "codex 2.3.1"
+              : args[0] === "login"
+                ? "Logged in using ChatGPT"
+                : "codex app-server - Run the app server",
+            cleanupConfirmed: true,
+          };
+        },
+      });
+
+      expect(detection).toMatchObject({ available: true, canRun: true });
+      expect(requestRecovery).toHaveBeenCalledOnce();
+    } finally {
+      processKill.mockRestore();
+    }
+  });
+
   it("checks installation readiness without probing or forwarding authentication", async () => {
     const root = temporaryRoot();
     const executable = join(root, "codex");
@@ -296,6 +387,83 @@ process.exit(2);
       canRun: false,
       statusMessage: "Codex is installed; authentication was not checked",
     });
+  });
+
+  it("isolates every candidate probe and authenticates only the verified selection", async () => {
+    const root = temporaryRoot();
+    const older = join(root, "adversarial-codex");
+    const selected = join(root, "verified-codex");
+    process.env.HOME = join(root, "private-home");
+    process.env.HTTPS_PROXY = "https://user:password@proxy.example";
+    process.env.OPENAI_API_KEY = "selected-auth-only";
+    process.env.CODEX_HOME = join(root, "candidate-codex-home");
+    process.env.CODEX_INSTALL_DIR = join(root, "candidate-codex-install");
+    const calls: Array<{
+      executable: string;
+      args: readonly string[];
+      environment: NodeJS.ProcessEnv;
+    }> = [];
+
+    const detection = await detectProvider("codex", {
+      command: "codex",
+      cwd: root,
+      refreshEnvironment: true,
+    }, {
+      executableCandidates: async (_command, environment) => {
+        expect(environment.env).toMatchObject({
+          CODEX_HOME: process.env.CODEX_HOME,
+          CODEX_INSTALL_DIR: process.env.CODEX_INSTALL_DIR,
+        });
+        expect(environment.env).not.toHaveProperty("HOME");
+        expect(environment.env).not.toHaveProperty("HTTPS_PROXY");
+        expect(environment.env).not.toHaveProperty("OPENAI_API_KEY");
+        return [older, selected];
+      },
+      probeProcess: async (executable, args, environment) => {
+        calls.push({ executable, args: [...args], environment: { ...environment.env } });
+        if (args[0] === "login") {
+          expect(executable).toBe(selected);
+          expect(environment.env).toMatchObject({
+            CODEX_HOME: process.env.CODEX_HOME,
+            CODEX_INSTALL_DIR: process.env.CODEX_INSTALL_DIR,
+            HOME: process.env.HOME,
+            HTTPS_PROXY: process.env.HTTPS_PROXY,
+            OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+          });
+          return {
+            started: true,
+            timedOut: false,
+            exitCode: 0,
+            output: "Logged in using ChatGPT",
+            cleanupConfirmed: true,
+          };
+        }
+        expect(environment.env).not.toHaveProperty("HOME");
+        expect(environment.env).not.toHaveProperty("HTTPS_PROXY");
+        expect(environment.env).not.toHaveProperty("OPENAI_API_KEY");
+        expect(environment.env).not.toHaveProperty("CODEX_HOME");
+        expect(environment.env).not.toHaveProperty("CODEX_INSTALL_DIR");
+        return {
+          started: true,
+          timedOut: false,
+          exitCode: 0,
+          output: args[0] === "--version"
+            ? `codex ${executable === selected ? "2.0.0" : "1.0.0"}`
+            : "codex app-server - Run the app server",
+          cleanupConfirmed: true,
+        };
+      },
+    });
+
+    expect(detection).toMatchObject({
+      executable: selected,
+      authState: "authenticated",
+      canRun: true,
+    });
+    expect(calls.filter(({ args }) => args[0] === "login")).toHaveLength(1);
+    expect(calls.filter(({ executable }) => executable === older).every(
+      ({ environment }) => environment.OPENAI_API_KEY === undefined,
+    )).toBe(true);
   });
 
   it("uses the newest App Server-capable Codex candidate and prefers a native executable at the same version", async () => {
@@ -398,11 +566,6 @@ process.exit(2);
   it("removes descendants from a timed-out provider discovery probe", async () => {
     const root = temporaryRoot();
     const childPidPath = join(root, "discovery-child.pid");
-    // Starting a copied Node executable can exceed the production discovery
-    // deadline on a contended Windows runner. This test proves descendant
-    // cleanup, not startup latency, so leave enough time for the fixture to
-    // establish the descendant whose ownership is being asserted.
-    const probeTimeoutMs = process.platform === "win32" ? 5_000 : 250;
     const descendantExecutable = portableNodeExecutable(
       root,
       "discovery-descendant",
@@ -419,32 +582,60 @@ fs.writeFileSync(${JSON.stringify(childPidPath)}, String(descendant.pid));
 setInterval(() => {}, 1000);
 `);
 
-    await expect(detectProvider("codex", {
+    const deadlineControl: { fire: (() => void) | null } = { fire: null };
+    let notifyDeadlineScheduled!: () => void;
+    const deadlineScheduled = new Promise<void>((resolve) => {
+      notifyDeadlineScheduled = resolve;
+    });
+
+    const detection = detectProvider("codex", {
       command,
       cwd: root,
       refreshEnvironment: true,
-      timeoutMs: probeTimeoutMs,
-    })).resolves.toMatchObject({
+      timeoutMs: 250,
+    }, {
+      scheduleProbeDeadline: (onDeadline) => {
+        deadlineControl.fire = onDeadline;
+        notifyDeadlineScheduled();
+        return {
+          cancel: () => {
+            deadlineControl.fire = null;
+          },
+        };
+      },
+    });
+
+    await deadlineScheduled;
+    let descendantPid = 0;
+    let readinessError: unknown;
+    try {
+      await waitFor("the discovery descendant PID to be recorded", () => {
+        try {
+          descendantPid = Number(readFileSync(childPidPath, "utf8"));
+          return Number.isSafeInteger(descendantPid) && descendantPid > 0;
+        } catch {
+          return false;
+        }
+      });
+    } catch (error) {
+      readinessError = error;
+    }
+    if (descendantPid > 0) descendantPids.push(descendantPid);
+    const fireDeadline = deadlineControl.fire;
+    expect(fireDeadline).not.toBeNull();
+    fireDeadline?.();
+    await expect(detection).resolves.toMatchObject({
       available: false,
       installState: "error",
       canRun: false,
     });
+    if (readinessError) throw readinessError;
 
-    let descendantPid = 0;
-    await waitFor("the discovery descendant PID to be recorded", () => {
-      try {
-        descendantPid = Number(readFileSync(childPidPath, "utf8"));
-        return Number.isSafeInteger(descendantPid) && descendantPid > 0;
-      } catch {
-        return false;
-      }
-    });
     expect(Number.isSafeInteger(descendantPid) && descendantPid > 0).toBe(true);
     if (process.platform === "win32") {
       // A stopped Windows PID can be recycled by another Vitest worker before
       // this assertion runs. The owned executable remains a stable identity:
       // Windows cannot delete it until the original descendant releases it.
-      descendantPids.push(descendantPid);
       await waitFor("the discovery descendant executable to be released", () => {
         try {
           rmSync(descendantExecutable);
@@ -458,12 +649,66 @@ setInterval(() => {}, 1000);
       // the PID remains registered for best-effort failure-path cleanup.
       descendantPids.pop();
     } else {
-      descendantPids.push(descendantPid);
       await waitFor(
         "the discovery descendant to stop",
         () => !processExists(descendantPid),
       );
     }
+  });
+
+  it("drains every concurrent discovery probe before aborted detection settles", async () => {
+    const root = temporaryRoot();
+    const candidates = [join(root, "codex-one"), join(root, "codex-two")];
+    const cleanupResolvers = new Map<string, () => void>();
+    const probeStarted = new Set<string>();
+    const cleanupStarted = new Set<string>();
+    const controller = new AbortController();
+    const detection = detectProvider("codex", {
+      cwd: root,
+      signal: controller.signal,
+    }, {
+      executableCandidates: async () => candidates,
+      probeProcess: async (executable, _args, _environment, _cwd, _timeoutMs, signal) => {
+        probeStarted.add(executable);
+        await new Promise<void>((resolve) => {
+          if (signal?.aborted) resolve();
+          else signal?.addEventListener("abort", () => resolve(), { once: true });
+        });
+        cleanupStarted.add(executable);
+        await new Promise<void>((resolve) => {
+          cleanupResolvers.set(executable, resolve);
+        });
+        return {
+          started: true,
+          timedOut: false,
+          exitCode: null,
+          output: "",
+          cleanupConfirmed: executable === candidates[0],
+          aborted: true,
+        };
+      },
+    });
+    let settled = false;
+    const observed = detection.then(
+      () => { settled = true; },
+      (error: unknown) => {
+        settled = true;
+        throw error;
+      },
+    );
+
+    await vi.waitFor(() => expect(probeStarted).toEqual(new Set(candidates)));
+    controller.abort();
+    await vi.waitFor(() => expect(cleanupStarted).toEqual(new Set(candidates)));
+    cleanupResolvers.get(candidates[0]!)?.();
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    cleanupResolvers.get(candidates[1]!)?.();
+
+    await expect(observed).rejects.toThrow(
+      "Provider discovery process tree could not be confirmed stopped",
+    );
+    expect(settled).toBe(true);
   });
 
   it("reports an unconfirmed timed-out discovery cleanup instead of readiness", async () => {
@@ -527,10 +772,12 @@ setInterval(() => {}, 1000);
     const root = temporaryRoot();
     const unconfirmed = join(root, "old-codex");
     const selected = join(root, "new-codex");
+    let authenticationProbes = 0;
 
     await expect(detectProvider("codex", { cwd: root }, {
       executableCandidates: async () => [unconfirmed, selected],
       probeProcess: async (executable, args) => {
+        if (args[0] === "login") authenticationProbes += 1;
         if (executable === unconfirmed) {
           return {
             started: true,
@@ -554,10 +801,12 @@ setInterval(() => {}, 1000);
       },
     })).resolves.toMatchObject({
       available: true,
+      authState: "unknown",
       canRun: false,
       cleanupConfirmed: false,
       statusMessage: "Codex probe cleanup could not be confirmed stopped",
     });
+    expect(authenticationProbes).toBe(0);
   });
 
   it("reports a candidate with a failing version probe as an installation error", async () => {
@@ -605,7 +854,7 @@ setInterval(() => {}, 1000);
 
     await expect(detectProvider("codex", { command, cwd: root })).resolves.toMatchObject({
       installState: "installed",
-      authState: "authenticated",
+      authState: "unknown",
       canRun: false,
       statusMessage: "Codex App Server is unsupported; update the selected CLI",
     });
@@ -627,9 +876,17 @@ setInterval(() => {}, 1000);
     const executable = join(temporaryRoot(), "opencode");
     await expect(detectProvider("opencode", { command: executable }, {
       executableCandidates: async () => [executable],
+      probeOpenCodePureIsolation: async () => ({
+        cleanupConfirmed: true,
+        verified: true,
+      }),
       probeProcess: async (_candidate, args) => ({
         exitCode: 0,
-        output: args[0] === "--version" ? "opencode 1.18.10" : "Credentials\n0 credentials",
+        output: args[0] === "--version"
+          ? "opencode 1.18.10"
+          : args[0] === "serve"
+            ? "--pure run without external plugins"
+            : "Credentials\n0 credentials",
         started: true,
         timedOut: false,
         cleanupConfirmed: true,
@@ -647,16 +904,99 @@ setInterval(() => {}, 1000);
     const executable = join(temporaryRoot(), "opencode");
     await expect(detectProvider("opencode", { command: executable }, {
       executableCandidates: async () => [executable],
+      probeOpenCodePureIsolation: async () => ({
+        cleanupConfirmed: true,
+        verified: true,
+      }),
       probeProcess: async (_candidate, args) => ({
         exitCode: 0,
         output: args[0] === "--version"
           ? "opencode 1.18.10"
+          : args[0] === "serve"
+            ? "--pure run without external plugins"
           : "Credentials\n0 credentials\nEnvironment\n1 environment variable",
         started: true,
         timedOut: false,
         cleanupConfirmed: true,
       }),
     })).resolves.toMatchObject({ authState: "configured", canRun: true, statusMessage: "Configured" });
+  });
+
+  it("rejects OpenCode CLIs without secure plugin-free serve mode", async () => {
+    const executable = join(temporaryRoot(), "opencode");
+    const probes: string[][] = [];
+    await expect(detectProvider("opencode", { command: executable }, {
+      executableCandidates: async () => [executable],
+      probeProcess: async (_candidate, args) => {
+        probes.push([...args]);
+        return {
+          exitCode: 0,
+          output: args[0] === "--version"
+            ? "opencode 1.17.0"
+            : "serve --hostname --port",
+          started: true,
+          timedOut: false,
+          cleanupConfirmed: true,
+        };
+      },
+    })).resolves.toMatchObject({
+      available: true,
+      installState: "installed",
+      authState: "unknown",
+      canRun: false,
+      cleanupConfirmed: true,
+      statusMessage: "OpenCode CLI found, but secure plugin-free serve mode is unavailable; update the selected CLI",
+    });
+    expect(probes).toEqual([
+      ["--version"],
+      ["serve", "--help"],
+    ]);
+  });
+
+  it.each([
+    {
+      cleanupConfirmed: true,
+      statusMessage: "OpenCode failed secure plugin-free runtime verification; update the selected CLI",
+    },
+    {
+      cleanupConfirmed: false,
+      statusMessage: "OpenCode discovery or plugin-free verification cleanup could not be confirmed stopped",
+    },
+  ])("fails closed when selected OpenCode semantic isolation is rejected", async ({
+    cleanupConfirmed,
+    statusMessage,
+  }) => {
+    const executable = join(temporaryRoot(), "opencode");
+    const isolationProbe = vi.fn(async () => ({
+      cleanupConfirmed,
+      verified: false,
+    }));
+    await expect(detectProvider("opencode", { command: executable }, {
+      executableCandidates: async () => [executable],
+      probeOpenCodePureIsolation: isolationProbe,
+      probeProcess: async (_candidate, args) => ({
+        exitCode: 0,
+        output: args[0] === "--version"
+          ? "opencode 1.18.26"
+          : "serve --pure",
+        started: true,
+        timedOut: false,
+        cleanupConfirmed: true,
+      }),
+    })).resolves.toMatchObject({
+      available: true,
+      installState: "installed",
+      authState: "unknown",
+      canRun: false,
+      cleanupConfirmed,
+      statusMessage,
+    });
+    expect(isolationProbe).toHaveBeenCalledWith(
+      executable,
+      "1.18.26",
+      expect.objectContaining({ env: expect.any(Object) }),
+      expect.any(Function),
+    );
   });
 
   it("admits an OAuth-only Kimi install for authoritative ACP authentication", async () => {
@@ -713,6 +1053,154 @@ setInterval(() => {}, 1000);
       authState: "unauthenticated",
       canRun: false,
       statusMessage: "Sign in required",
+    });
+  });
+
+  it("accepts Gemini only at the stable ACP version boundary without an auth-status probe", async () => {
+    const executable = join(temporaryRoot(), "gemini");
+    const probes: string[][] = [];
+    await expect(
+      detectProvider(
+        "gemini",
+        { command: executable },
+        {
+          executableCandidates: async () => [executable],
+          probeProcess: async (_candidate, args) => {
+            probes.push([...args]);
+            return {
+              exitCode: 0,
+              output:
+                args[0] === "--version"
+                  ? "Gemini CLI 0.58.0"
+                  : "Gemini CLI\n  --acp  Start the Agent Client Protocol server\n  --session-id <id>  Start a new session with this ID",
+              started: true,
+              timedOut: false,
+              cleanupConfirmed: true,
+            };
+          },
+        },
+      ),
+    ).resolves.toMatchObject({
+      available: true,
+      executable,
+      version: "0.58.0",
+      installState: "installed",
+      authState: "unknown",
+      canRun: true,
+      cleanupConfirmed: true,
+      statusMessage:
+        "Installed; Gemini ACP will verify authentication when a session starts",
+    });
+    expect(probes).toEqual([["--version"], ["--help"]]);
+    expect(providerAuthStatusArgs("gemini")).toBeNull();
+    expect(providerAuthLoginArgs("gemini")).toEqual([]);
+    expect(providerAuthLaunchEnvironment("gemini", { TERM: "xterm" }))
+      .toEqual({ TERM: "xterm", NO_BROWSER: "true" });
+    expect(providerAuthLaunchEnvironment("codex", { TERM: "xterm" }))
+      .toEqual({ TERM: "xterm" });
+  });
+
+  it("reports an old Gemini install as installed but requiring a stable ACP update", async () => {
+    const executable = join(temporaryRoot(), "gemini");
+    const probes: string[][] = [];
+    await expect(
+      detectProvider(
+        "gemini",
+        { command: executable },
+        {
+          executableCandidates: async () => [executable],
+          probeProcess: async (_candidate, args) => {
+            probes.push([...args]);
+            return {
+              exitCode: 0,
+              output:
+                args[0] === "--version"
+                  ? "Gemini CLI 0.29.5"
+                  : "Gemini CLI\n  --experimental-acp  Start experimental ACP",
+              started: true,
+              timedOut: false,
+              cleanupConfirmed: true,
+            };
+          },
+        },
+      ),
+    ).resolves.toMatchObject({
+      available: true,
+      executable,
+      version: "0.29.5",
+      installState: "installed",
+      authState: "unknown",
+      canRun: false,
+      cleanupConfirmed: true,
+      statusMessage:
+        "Gemini 0.29.5 is installed, but stable ACP requires 0.58.0 or newer; update Gemini",
+    });
+    expect(probes).toEqual([["--version"], ["--help"]]);
+  });
+
+  it("rejects a current Gemini candidate that does not advertise the exact ACP flag", async () => {
+    const executable = join(temporaryRoot(), "gemini");
+    await expect(
+      detectProvider(
+        "gemini",
+        { command: executable },
+        {
+          executableCandidates: async () => [executable],
+          probeProcess: async (_candidate, args) => ({
+            exitCode: 0,
+            output:
+              args[0] === "--version"
+                ? "Gemini CLI 0.58.0"
+                : "Gemini CLI\n  --experimental-acp  Start experimental ACP",
+            started: true,
+            timedOut: false,
+            cleanupConfirmed: true,
+          }),
+        },
+      ),
+    ).resolves.toMatchObject({
+      available: true,
+      executable,
+      version: "0.58.0",
+      installState: "installed",
+      authState: "unknown",
+      canRun: false,
+      cleanupConfirmed: true,
+      statusMessage:
+        "Gemini CLI found, but stable ACP is unavailable; update the selected CLI",
+    });
+  });
+
+  it("rejects a current Gemini candidate without an owned session-id flag", async () => {
+    const executable = join(temporaryRoot(), "gemini");
+    await expect(
+      detectProvider(
+        "gemini",
+        { command: executable },
+        {
+          executableCandidates: async () => [executable],
+          probeProcess: async (_candidate, args) => ({
+            exitCode: 0,
+            output:
+              args[0] === "--version"
+                ? "Gemini CLI 0.58.0"
+                : "Gemini CLI\n  --acp  Start the Agent Client Protocol server",
+            started: true,
+            timedOut: false,
+            cleanupConfirmed: true,
+          }),
+        },
+      ),
+    ).resolves.toMatchObject({
+      available: true,
+      executable,
+      version: "0.58.0",
+      installState: "installed",
+      authState: "unknown",
+      canRun: false,
+      cleanupConfirmed: true,
+      statusMessage:
+        "Gemini CLI found, but stable ACP is unavailable; update the selected CLI",
     });
   });
 

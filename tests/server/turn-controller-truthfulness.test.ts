@@ -1,14 +1,17 @@
+import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AgentApprovalRequest, AgentInputRequest, AgentPlan, ProviderInfo, ServerEvent } from "../../src/shared/contracts";
 import { RuntimeStore } from "../../src/server/database";
 import { createAgentHarnessEmitter } from "../../src/server/provider/agent-harness";
 import { AcpCompactionProjection } from "../../src/server/provider/acp-compaction-projection";
+import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import { TurnController } from "../../src/server/runtime/turns/turn-controller";
+import type { TurnControllerHooks } from "../../src/server/runtime/turns/turn-controller-types";
 import { FakeTurnProvider, FakeTurnScheduler } from "../support/fake-turn-provider";
 
 const directories: string[] = [];
@@ -46,7 +49,10 @@ const providerInfo = (providerId: "codex" | "claude" = "codex"): ProviderInfo =>
   };
 };
 
-async function runtime(providerId: "codex" | "claude" = "codex") {
+async function runtime(
+  providerId: "codex" | "claude" = "codex",
+  hookOverrides: Partial<TurnControllerHooks> = {},
+) {
   const directory = await mkdtemp(join(tmpdir(), "inertia-turn-truth-"));
   const workspace = join(directory, "workspace");
   await mkdir(workspace);
@@ -82,6 +88,7 @@ async function runtime(providerId: "codex" | "claude" = "codex") {
       onTurnSettled: (turn) => {
         settled.push(`${turn.status}:${turn.id}`);
       },
+      ...hookOverrides,
     },
     {
       scheduler: new FakeTurnScheduler(),
@@ -90,7 +97,15 @@ async function runtime(providerId: "codex" | "claude" = "codex") {
       turnTimeoutMs: 1_000,
     },
   );
-  return { store, provider, controller, conversationId: conversation.id, events, settled };
+  return {
+    store,
+    provider,
+    controller,
+    projectId: project.id,
+    conversationId: conversation.id,
+    events,
+    settled,
+  };
 }
 
 function identity(value: Awaited<ReturnType<typeof runtime>>) {
@@ -115,6 +130,269 @@ afterEach(async () => {
 });
 
 describe("TurnController terminal truthfulness", () => {
+  it("settles a durable turn and releases admission when live adoption throws", async () => {
+    const onStructuredContextCaptured = vi.fn()
+      .mockImplementationOnce(() => {
+        throw new Error("injected structured-context publication failure");
+      });
+    const value = await runtime("codex", { onStructuredContextCaptured });
+    const checkpoint = value.store.addCheckpoint({
+      conversationId: value.conversationId,
+      ref: "refs/inertia/checkpoints/adoption-failure",
+      label: "Before adoption failure",
+      turnIndex: 1,
+      filesChanged: 1,
+      insertions: 1,
+      deletions: 0,
+    });
+    const firstAdmission = await value.controller.acquireTurnAdmission(
+      value.conversationId,
+      100,
+    );
+    expect(firstAdmission).not.toBeNull();
+
+    expect(() => value.controller.queue({
+      conversationId: value.conversationId,
+      content: "Fail while adopting the durable turn.",
+      checkpointId: checkpoint.id,
+    }, undefined, firstAdmission!)).toThrow(
+      "injected structured-context publication failure",
+    );
+    firstAdmission?.release();
+
+    const failed = value.store.latestAgentTurnForConversation(value.conversationId);
+    expect(failed).toMatchObject({
+      status: "failed",
+      terminalReason: "turn-adoption-failed",
+      checkpointId: checkpoint.id,
+    });
+    expect(value.store.checkpoint(checkpoint.id).turnId).toBe(failed?.id);
+    expect(value.store.unfinishedAgentTurns()).toEqual([]);
+    expect(value.controller.isActive(value.conversationId)).toBe(false);
+
+    const retryAdmission = await value.controller.acquireTurnAdmission(
+      value.conversationId,
+      100,
+    );
+    expect(retryAdmission).not.toBeNull();
+    const retry = value.controller.queue({
+      conversationId: value.conversationId,
+      content: "Retry immediately after adoption cleanup.",
+    }, undefined, retryAdmission!);
+    expect(value.controller.failBeforeStart(
+      value.conversationId,
+      "End the retry fixture.",
+    )).toBe(true);
+    expect(value.store.agentTurn(retry.turn.id).status).toBe("failed");
+    expect(value.controller.isActive(value.conversationId)).toBe(false);
+    value.store.close();
+  });
+
+  it("settles a durable turn when the persistence handoff callback throws", async () => {
+    const value = await runtime();
+    const checkpoint = value.store.addCheckpoint({
+      conversationId: value.conversationId,
+      ref: "refs/inertia/checkpoints/persistence-handoff-failure",
+      label: "Before persistence handoff failure",
+      turnIndex: 1,
+      filesChanged: 1,
+      insertions: 1,
+      deletions: 0,
+    });
+    const admission = await value.controller.acquireTurnAdmission(
+      value.conversationId,
+      100,
+    );
+    expect(admission).not.toBeNull();
+    expect(() => value.controller.queue({
+      conversationId: value.conversationId,
+      content: "Fail the persistence ownership callback.",
+      checkpointId: checkpoint.id,
+    }, () => {
+      throw new Error("injected persistence handoff failure");
+    }, admission!)).toThrow("injected persistence handoff failure");
+    admission?.release();
+
+    const failed = value.store.latestAgentTurnForConversation(
+      value.conversationId,
+    );
+    expect(failed).toMatchObject({
+      status: "failed",
+      terminalReason: "turn-adoption-failed",
+      checkpointId: checkpoint.id,
+    });
+    expect(value.store.checkpoint(checkpoint.id).turnId).toBe(failed?.id);
+    expect(value.store.unfinishedAgentTurns()).toEqual([]);
+    expect(value.controller.isActive(value.conversationId)).toBe(false);
+    await expect(value.controller.acquireTurnAdmission(
+      value.conversationId,
+      100,
+    )).resolves.not.toBeNull();
+    value.store.close();
+  });
+
+  it("retains a recoverable checkpoint when live association itself fails", async () => {
+    const value = await runtime();
+    const checkpoint = value.store.addCheckpoint({
+      conversationId: value.conversationId,
+      ref: "refs/inertia/checkpoints/association-failure",
+      label: "Before association failure",
+      turnIndex: 1,
+      filesChanged: 1,
+      insertions: 1,
+      deletions: 0,
+    });
+    vi.spyOn(value.store, "associateCheckpointWithTurn")
+      .mockImplementationOnce(() => {
+        throw new Error("injected checkpoint association failure");
+      });
+
+    expect(() => value.controller.queue({
+      conversationId: value.conversationId,
+      content: "Fail while linking the checkpoint.",
+      checkpointId: checkpoint.id,
+    })).toThrow("injected checkpoint association failure");
+
+    expect(value.store.latestAgentTurnForConversation(value.conversationId))
+      .toMatchObject({
+        status: "failed",
+        terminalReason: "turn-adoption-failed",
+        checkpointId: checkpoint.id,
+      });
+    expect(value.store.checkpoint(checkpoint.id).turnId).toBeNull();
+    expect(value.store.unfinishedAgentTurns()).toEqual([]);
+    expect(value.controller.isActive(value.conversationId)).toBe(false);
+    value.store.close();
+  });
+
+  it("admits the next turn after a settled provider cleanup barrier drains", async () => {
+    const value = await runtime();
+    const firstAdmission = await value.controller.acquireTurnAdmission(
+      value.conversationId,
+      100,
+    );
+    expect(firstAdmission).not.toBeNull();
+    const first = value.controller.queue({
+      conversationId: value.conversationId,
+      content: "Settle while exact provider cleanup is still pending.",
+    }, undefined, firstAdmission!);
+    expect(value.controller.start(first.turn.id)).toBe(true);
+    value.provider.deferOwnedStop();
+    expect(value.controller.cancel(value.conversationId)).toBe(true);
+
+    value.provider.resolve({ status: "cancelled" });
+    await flushPromises();
+    expect(value.store.agentTurn(first.turn.id).status).toBe("cancelled");
+    expect(value.controller.isActive(value.conversationId)).toBe(false);
+
+    let admitted = false;
+    const pendingAdmission = value.controller.acquireTurnAdmission(
+      value.conversationId,
+      1_000,
+    ).then((lease) => {
+      admitted = true;
+      return lease;
+    });
+    await flushPromises();
+    expect(admitted).toBe(false);
+
+    value.provider.resolveOwnedStop();
+    const retryAdmission = await pendingAdmission;
+    expect(retryAdmission).not.toBeNull();
+    const retry = value.controller.queue({
+      conversationId: value.conversationId,
+      content: "Retry from the next real admission.",
+    }, undefined, retryAdmission!);
+    expect(value.controller.start(retry.turn.id)).toBe(true);
+    value.provider.resolve({ text: "Retry completed." });
+    await flushPromises();
+    expect(value.store.agentTurn(retry.turn.id).status).toBe("completed");
+    expect(value.store.unfinishedAgentTurns()).toEqual([]);
+    value.store.close();
+  });
+
+  it("settles both durable sides when the second paired adoption throws", async () => {
+    const onStructuredContextCaptured = vi.fn()
+      .mockImplementationOnce(() => undefined)
+      .mockImplementationOnce(() => {
+        throw new Error("injected second-side adoption failure");
+      });
+    const value = await runtime("codex", { onStructuredContextCaptured });
+    const launchId = randomUUID();
+    const conversationIds = [randomUUID(), randomUUID()] as const;
+    value.store.createPairedLaunch(launchId, [
+      {
+        ordinal: 0,
+        projectId: value.projectId,
+        plannedConversationId: conversationIds[0],
+        plannedWorktreePath: null,
+        plannedBranch: null,
+        ownsWorktree: false,
+      },
+      {
+        ordinal: 1,
+        projectId: value.projectId,
+        plannedConversationId: conversationIds[1],
+        plannedWorktreePath: null,
+        plannedBranch: null,
+        ownsWorktree: false,
+      },
+    ]);
+    const selection = providerNativeModelSelection({
+      providerId: "codex",
+      modelId: "gpt-test",
+      alias: "GPT Test",
+      reasoningEffort: "high",
+    });
+    const pairedPlans: Parameters<
+      RuntimeStore["createPairedConversations"]
+    >[1] = [
+      {
+        projectId: value.projectId,
+        title: "Pair 0",
+        options: {
+          id: conversationIds[0],
+          providerId: "codex",
+          modelSelection: selection,
+          interactionMode: "build",
+          accessMode: "supervised",
+          activate: false,
+        },
+      },
+      {
+        projectId: value.projectId,
+        title: "Pair 1",
+        options: {
+          id: conversationIds[1],
+          providerId: "codex",
+          modelSelection: selection,
+          interactionMode: "build",
+          accessMode: "supervised",
+          activate: false,
+        },
+      },
+    ];
+    const conversations = value.store.createPairedConversations(
+      launchId,
+      pairedPlans,
+    );
+
+    expect(() => value.controller.queuePair(launchId, [
+      { conversationId: conversations[0].id, content: "First paired side." },
+      { conversationId: conversations[1].id, content: "Second paired side." },
+    ])).toThrow("injected second-side adoption failure");
+    for (const conversation of conversations) {
+      expect(value.store.latestAgentTurnForConversation(conversation.id))
+        .toMatchObject({
+          status: "failed",
+          terminalReason: "turn-adoption-failed",
+        });
+      expect(value.controller.isActive(conversation.id)).toBe(false);
+    }
+    expect(value.store.unfinishedAgentTurns()).toEqual([]);
+    value.store.close();
+  });
+
   it("keeps Claude starting until its provider emits running", async () => {
     const value = await runtime("claude");
     const queued = value.controller.queue({
@@ -129,6 +407,64 @@ describe("TurnController terminal truthfulness", () => {
     expect(value.store.agentTurn(queued.turn.id).status).toBe("running");
     value.provider.resolve();
     await flushPromises();
+    value.store.close();
+  });
+
+  it("fails closed when a provider reports completion with live delegated work", async () => {
+    const value = await runtime();
+    const queued = value.controller.queue({
+      conversationId: value.conversationId,
+      content: "Do not complete before delegated work settles.",
+    });
+    expect(value.controller.start(queued.turn.id)).toBe(true);
+    const base = identity(value);
+    value.provider.emit({
+      ...base,
+      type: "subagent",
+      sequence: 1,
+      providerTaskId: "child-still-running",
+      providerAgentId: "agent-still-running",
+      parentProviderAgentId: null,
+      parentProviderToolUseId: null,
+      providerToolUseId: "tool-still-running",
+      providerRole: "worker",
+      providerName: null,
+      providerStatus: "running",
+      status: "running",
+      isLive: true,
+      description: "Finish delegated verification",
+      progress: "Still verifying",
+      result: null,
+    });
+    expect(value.store.agentTurn(queued.turn.id)?.runState?.state).toBe("delegated");
+
+    value.provider.resolve({
+      status: "completed",
+      text: "I will notify you when the delegate finishes.",
+    });
+    await flushPromises();
+
+    expect(value.store.agentTurn(queued.turn.id)).toMatchObject({
+      status: "failed",
+      terminalReason: "provider-error",
+      runState: { state: "failed" },
+    });
+    expect(value.store.conversationDetail(value.conversationId)?.subagents)
+      .toContainEqual(expect.objectContaining({
+        providerTaskId: "child-still-running",
+        status: "lost",
+        isLive: false,
+      }));
+    expect(value.events).toContainEqual(expect.objectContaining({
+      type: "agent.failed",
+      turnId: queued.turn.id,
+      message: "The provider ended while delegated work was still running.",
+    }));
+    expect(value.events).not.toContainEqual(expect.objectContaining({
+      type: "agent.completed",
+      turnId: queued.turn.id,
+      status: "completed",
+    }));
     value.store.close();
   });
 

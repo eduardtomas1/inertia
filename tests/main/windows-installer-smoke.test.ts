@@ -21,6 +21,9 @@ async function installerSmokeModule() {
       applicationName: string,
       architecture: "arm64" | "x64",
     ) => string[];
+    installedWindowsApplicationName: (
+      releaseChannel: "canary" | "stable",
+    ) => string;
     nsisApplicationArchiveName: (
       sanitizedName: string,
       version: string,
@@ -91,7 +94,10 @@ async function writeFixture(path: string, contents: string | Buffer) {
 }
 
 test("selects the exact stable and Canary Windows installer identities", async () => {
-  const { windowsInstallerAssetName } = await installerSmokeModule();
+  const {
+    installedWindowsApplicationName,
+    windowsInstallerAssetName,
+  } = await installerSmokeModule();
 
   expect(windowsInstallerAssetName("0.0.44", "stable", "x64"))
     .toBe("Inertia.Setup.0.0.44.exe");
@@ -103,6 +109,8 @@ test("selects the exact stable and Canary Windows installer identities", async (
     .toBe("Inertia.Canary.Setup.0.0.44.arm64.exe");
   expect(() => windowsInstallerAssetName("v0.0.44", "stable", "x64"))
     .toThrow("version is invalid");
+  expect(installedWindowsApplicationName("stable")).toBe("Inertia.exe");
+  expect(installedWindowsApplicationName("canary")).toBe("Inertia Canary.exe");
 });
 
 test("selects the exact generated NSIS application archive", async () => {
@@ -129,8 +137,8 @@ test("gates the exact runtime-selected and fallback node-pty binaries per Window
     const releaseRoot = join(nodePtyRoot, "build", "Release");
     const prebuildRoot = join(nodePtyRoot, "prebuilds", `win32-${architecture}`);
 
-    expect(paths).toHaveLength(26);
-    expect(new Set(paths).size).toBe(26);
+    expect(paths).toHaveLength(24);
+    expect(new Set(paths).size).toBe(24);
     expect(paths.filter((path) => path.includes(releaseRoot))).toEqual(
       expect.arrayContaining([
         expect.stringContaining(join(releaseRoot, "pty.node")),
@@ -596,6 +604,7 @@ test("pins the minimal fixed builder and gates installed Windows binaries", asyn
     join(repositoryRoot, "scripts", "windows-installer-smoke.mjs"),
     "utf8",
   );
+  const normalizedSource = source.replaceAll(/\r\n?/gu, "\n");
   const boundedRunnerSource = await readFile(
     join(repositoryRoot, "scripts", "bounded-process-tree.mjs"),
     "utf8",
@@ -605,9 +614,9 @@ test("pins the minimal fixed builder and gates installed Windows binaries", asyn
     "utf8",
   );
 
-  expect(manifest.devDependencies["electron-builder"]).toBe("26.15.6");
-  expect(lock.packages["node_modules/electron-builder"]?.version).toBe("26.15.6");
-  expect(lock.packages["node_modules/app-builder-lib"]?.version).toBe("26.15.6");
+  expect(manifest.devDependencies["electron-builder"]).toBe("26.15.7");
+  expect(lock.packages["node_modules/electron-builder"]?.version).toBe("26.15.7");
+  expect(lock.packages["node_modules/app-builder-lib"]?.version).toBe("26.15.7");
   expect(manifest.scripts["test:windows-installer-smoke"])
     .toBe("node scripts/windows-installer-smoke.mjs");
   expect(source).toContain("NSIS application archive verified");
@@ -621,6 +630,8 @@ test("pins the minimal fixed builder and gates installed Windows binaries", asyn
   expect(source).toContain("changed required file");
   expect(source).toContain("requireExactNodePtyNativeInventory(unpackedDirectory, architecture)");
   expect(source).toContain('"d3dcompiler_47.dll"');
+  expect(source).not.toContain('"libEGL.dll"');
+  expect(source).not.toContain('"libGLESv2.dll"');
   expect(source).toContain('"prebuilds", `win32-${architecture}`');
   expect(source).toContain('["conpty.dll", "OpenConsole.exe"]');
   expect(source).not.toContain('"build", "Release", "conpty", name');
@@ -630,10 +641,21 @@ test("pins the minimal fixed builder and gates installed Windows binaries", asyn
   );
   expect(source).toContain("INERTIA_PACKAGE_SMOKE_EXECUTABLE: installedExecutable");
   expect(source).toContain('["/S", `/D=${installDirectory}`]');
-  expect(source).toContain('runBounded(uninstaller, ["/S"]');
-  expect(boundedRunnerSource).toContain('["/PID", String(child.pid), "/T", "/F"]');
+  expect(source).toContain('`_?=${installDirectory}`');
+  expect(source).toContain("windowsVerbatimArguments: true");
+  expect(source).toContain("await copyFile(");
+  expect(normalizedSource).toContain("uninstaller,\n      stagedUninstaller,");
+  expect(source).toContain('join(temporaryRoot, "staged-uninstaller.exe")');
+  expect(source).toContain('join(temporaryRoot, "installed with spaces")');
+  expect(source).toContain("constants.COPYFILE_EXCL");
+  expect(boundedRunnerSource).toContain('"guard-owned"');
+  expect(boundedRunnerSource).toContain("authority.sha256");
+  expect(boundedRunnerSource).toContain("its Windows Job authority");
+  expect(boundedRunnerSource).not.toContain(
+    '["/PID", String(child.pid), "/T", "/F"]',
+  );
   expect(boundedRunnerSource).toContain("its process tree could not be confirmed stopped");
-  expect(source).toContain("return waitForRemoval(installDirectory)");
+  expect(source).toContain("return await waitForRemoval(installDirectory)");
   expect(source).toContain("completed without a reboot");
 });
 
@@ -646,9 +668,9 @@ test("runs the real installer gate on Windows x64 and ARM64 CI and releases", as
 
   expect(ci).toContain("release_platform: windows-x64");
   expect(ci).toContain("release_platform: windows-arm64");
-  expect(ci).toContain("release_dist_script: dist:release:win");
-  expect(ci).toContain("release_dist_script: dist:release:win:arm64");
-  expect(ci).toContain("Build native Windows installer and unpacked app");
+  expect(ci).toContain("release_package_script: package:release:win");
+  expect(ci).toContain("release_package_script: package:release:win:arm64");
+  expect(ci).toContain("Package native Windows installer and unpacked app");
   expect(ci).toContain("Install, smoke, and uninstall Windows package");
   expect(ci).toContain("run: npm run test:windows-installer-smoke");
   expect(release).toContain("Install, smoke, and uninstall Windows package");

@@ -13,9 +13,9 @@ import {
 import {
   continuationIdentityForSelection,
   MODEL_CAPABILITY_IDS,
-  nativeModelSelection,
+  providerNativeModelSelection,
 } from "../../src/shared/model-routing";
-import type { ProviderInfo } from "../../src/shared/contracts";
+import type { ProviderId, ProviderInfo } from "../../src/shared/contracts";
 import { RuntimeStore } from "../../src/server/database";
 import {
   BackendProfileController,
@@ -192,12 +192,72 @@ afterEach(async () => {
 });
 
 describe("model backend profile controller", () => {
+  it("publishes and validates the built-in Gemini ACP backend", async () => {
+    const runtimeStore = await store();
+    const controller = await BackendProfileController.create({ store: runtimeStore });
+    const gemini: ProviderInfo = {
+      ...nativeProvider(),
+      id: "gemini",
+      label: "Gemini",
+      command: "gemini",
+      executable: "/opt/bin/gemini",
+      models: [{
+        id: "gemini-2.5-pro",
+        label: "Gemini 2.5 Pro",
+        description: "Gemini CLI model",
+        isDefault: true,
+        inputModalities: ["text", "image"],
+        reasoningOptions: [],
+        defaultReasoningEffort: "",
+      }],
+    };
+
+    expect(controller.profiles([gemini])).toContainEqual(expect.objectContaining({
+      id: "builtin:gemini",
+      displayName: "Google Gemini",
+      harnessId: "gemini-acp",
+      protocol: "gemini-managed",
+    }));
+    expect(controller.validateSelection(providerNativeModelSelection({
+      providerId: "gemini",
+      modelId: "gemini-2.5-pro",
+    }))).toMatchObject({
+      harnessId: "gemini-acp",
+      backendProfileId: "builtin:gemini",
+      alias: "Gemini 2.5 Pro",
+    });
+    runtimeStore.close();
+  });
+
+  it("classifies every canonical provider backend as native", async () => {
+    const runtimeStore = await store();
+    const controller = await BackendProfileController.create({ store: runtimeStore });
+    const providers: readonly ProviderId[] = [
+      "codex",
+      "claude",
+      "cursor",
+      "gemini",
+      "kimi",
+      "opencode",
+    ];
+
+    for (const providerId of providers) {
+      expect(controller.isExternalSelection(providerNativeModelSelection({ providerId })))
+        .toBe(false);
+    }
+    expect(controller.isExternalSelection(modelSelectionForBackendProfile(
+      persistedCredentialProfile(),
+      "credential-model",
+    ))).toBe(true);
+    runtimeStore.close();
+  });
+
   it("canonicalizes native model metadata and rejects unsupported reasoning", async () => {
     const runtimeStore = await store();
     const controller = await BackendProfileController.create({ store: runtimeStore });
     controller.profiles([nativeProvider()]);
     const submitted = {
-      ...nativeModelSelection({
+      ...providerNativeModelSelection({
         providerId: "codex",
         modelId: "gpt-authoritative",
         reasoningEffort: "high",
@@ -213,7 +273,7 @@ describe("model backend profile controller", () => {
     };
 
     expect(controller.validateSelection(submitted)).toEqual({
-      ...nativeModelSelection({
+      ...providerNativeModelSelection({
         providerId: "codex",
         modelId: "gpt-authoritative",
         alias: "GPT Authoritative",
@@ -231,7 +291,7 @@ describe("model backend profile controller", () => {
   it("uses a known stale native route but requires refresh before trusting an unknown one", async () => {
     const runtimeStore = await store();
     const controller = await BackendProfileController.create({ store: runtimeStore });
-    const concrete = nativeModelSelection({
+    const concrete = providerNativeModelSelection({
       providerId: "codex",
       modelId: "gpt-authoritative",
       reasoningEffort: "high",
@@ -252,7 +312,7 @@ describe("model backend profile controller", () => {
       alias: "GPT Authoritative",
       reasoningEffort: "high",
     });
-    expect(controller.validateSelection(nativeModelSelection({
+    expect(controller.validateSelection(providerNativeModelSelection({
       providerId: "codex",
       modelId: "provider-default",
     })).modelId).toBe("provider-default");
@@ -276,7 +336,7 @@ describe("model backend profile controller", () => {
     const runtimeStore = await store();
     const controller = await BackendProfileController.create({ store: runtimeStore });
     controller.profiles([nativeProvider()]);
-    const fast = nativeModelSelection({
+    const fast = providerNativeModelSelection({
       providerId: "codex",
       modelId: "gpt-authoritative",
       reasoningEffort: "high",

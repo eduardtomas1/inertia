@@ -1,5 +1,8 @@
 import * as acp from "@agentclientprotocol/sdk";
 import { query as claudeQuery } from "@anthropic-ai/claude-agent-sdk";
+import Anthropic from "@anthropic-ai/sdk";
+import { Client as McpClient } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createOpencodeClient } from "@opencode-ai/sdk/v2";
 
 if (typeof acp.client !== "function"
@@ -23,6 +26,31 @@ if (typeof cursorClient?.onRequest !== "function"
 
 if (typeof claudeQuery !== "function") {
   throw new Error("Claude Agent SDK query factory is unavailable.");
+}
+
+const anthropicClient = new Anthropic({
+  apiKey: "provider-drift-placeholder",
+  baseURL: "http://127.0.0.1:9",
+});
+if (typeof anthropicClient?.messages?.create !== "function"
+  || typeof anthropicClient?.messages?.countTokens !== "function") {
+  throw new Error("Anthropic Messages SDK runtime surface is incompatible.");
+}
+
+const mcpClient = new McpClient({
+  name: "Inertia provider drift",
+  version: "1.0.0",
+});
+const mcpTransports = InMemoryTransport.createLinkedPair();
+if (typeof mcpClient?.connect !== "function"
+  || typeof mcpClient?.close !== "function"
+  || typeof mcpClient?.listTools !== "function"
+  || typeof mcpClient?.callTool !== "function"
+  || typeof mcpClient?.listResources !== "function"
+  || typeof mcpClient?.readResource !== "function"
+  || mcpTransports.length !== 2
+  || mcpTransports.some((transport) => typeof transport?.start !== "function")) {
+  throw new Error("MCP client or in-memory transport runtime surface is incompatible.");
 }
 
 const openCodeClient = createOpencodeClient({

@@ -9,6 +9,7 @@ import {
 } from "react";
 import {
   Activity,
+  ArrowLeft,
   BarChart3,
   CheckCircle2,
   ChevronDown,
@@ -26,11 +27,11 @@ import {
   Pencil,
   Search,
   Settings,
+  Share2,
   ShieldAlert,
   SquarePen,
   Trash2,
   X,
-  Zap,
 } from "lucide-react";
 import clsx from "clsx";
 import type { Conversation, Project, ProjectGroupingMode } from "@shared/contracts";
@@ -70,7 +71,6 @@ import {
   EMPTY_DETACHED_CONVERSATION_IDS,
   SidebarConversationMarks,
 } from "./sidebar/SidebarConversationMarks";
-
 const WORK_DONE_PAGE_SIZE = 10;
 const WORK_SECTIONS_STORAGE_KEY = "inertia:sidebar:work-sections:v1";
 const EMPTY_CONVERSATIONS: readonly Conversation[] = [];
@@ -134,7 +134,7 @@ function SidebarView({
   busy,
   layoutWidth,
   onClose,
-  onViewChange,
+  onViewChange, onOpenHome,
   onImportProject,
   onSelectConversation,
   detachedConversationIds = EMPTY_DETACHED_CONVERSATION_IDS,
@@ -854,7 +854,7 @@ function SidebarView({
         }}
       >
         <div className="sidebar-brand drag-region">
-          <button type="button" className="brand-lockup no-drag" aria-label="Go to workspace" onClick={() => navigate("workspace")}>
+          <button type="button" className="brand-lockup no-drag" aria-label="Start a new chat" onClick={onOpenHome}>
             <img src="./inertia-logo.png" alt="" className="brand-logo" />
             <span className="brand-name">Inertia</span>
           </button>
@@ -871,7 +871,7 @@ function SidebarView({
             const target = snapshot?.projects.find((project) => project.id === (scopedProjectId ?? snapshot.activeProjectId)) ?? snapshot?.projects[0];
             if (target) onCreateConversation(target);
           }}><SquarePen size={17} /></IconButton>
-          <IconButton label="Launch two chats" className="multi-spawn-button" disabled={connectionStatus !== "online" || !snapshot?.projects.length} onFocus={() => void loadMultiSpawnDialog()} onPointerEnter={() => void loadMultiSpawnDialog()} onClick={onOpenMultiSpawn}><Zap size={15} /></IconButton>
+          <IconButton label="Launch two chats" className="multi-spawn-button" disabled={connectionStatus !== "online" || !snapshot?.projects.length} onFocus={() => void loadMultiSpawnDialog()} onPointerDown={() => void loadMultiSpawnDialog()} onPointerEnter={() => void loadMultiSpawnDialog()} onClick={onOpenMultiSpawn}><Share2 size={15} /></IconButton>
         </div>
         <div className="sidebar-project-navigation">
         <ProjectScopePicker projects={snapshot?.projects ?? []} selectedId={scopedProjectId} onSelect={setProjectScopeId} onAdd={onImportProject} disabled={busy || connectionStatus !== "online"} onManage={(project, trigger) => {
@@ -947,6 +947,7 @@ function SidebarView({
         </div>
 
         <div className="sidebar-footer sidebar-utility-footer">
+          {view !== "workspace" && view !== "home" && <button type="button" className="sidebar-destination" aria-label="Workspace" title="Back to workspace" onClick={() => navigate("workspace")}><ArrowLeft size={16} /><span>Workspace</span></button>}
           <button type="button" className={clsx("sidebar-destination", dailyWorkOpen && "is-open")} aria-label="Daily work" title="Daily work" aria-haspopup="dialog" aria-expanded={dailyWorkOpen} onFocus={() => void loadDailyWorkDialog()} onPointerDown={() => void loadDailyWorkDialog()} onPointerEnter={() => void loadDailyWorkDialog()} onClick={() => { onOpenDailyWork(); onClose(); }}>
             <DailyWorkMark size={16} /><span>Daily work</span>
           </button>

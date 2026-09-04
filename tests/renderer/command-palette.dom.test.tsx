@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { CommandPalette } from "../../src/renderer/src/components/CommandPalette";
 import type { Conversation, Project } from "../../src/shared/contracts";
-import { nativeModelSelection } from "../../src/shared/model-routing";
+import { providerNativeModelSelection } from "../../src/shared/model-routing";
 
 const project: Project = {
   id: "project-1",
@@ -28,7 +28,7 @@ const conversation: Conversation = {
   projectId: project.id,
   title: "Feedback loop",
   providerId: "codex",
-  modelSelection: nativeModelSelection({ providerId: "codex" }),
+  modelSelection: providerNativeModelSelection({ providerId: "codex" }),
   continuationIdentity: null,
   model: "",
   reasoningEffort: "",

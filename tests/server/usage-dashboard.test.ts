@@ -9,7 +9,7 @@ import type {
   AgentTurnUsageSnapshot,
   ProviderId,
 } from "../../src/shared/contracts";
-import { nativeModelSelection } from "../../src/shared/model-routing";
+import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import { usageDashboardSchema } from "../../src/shared/contracts/usage-dashboard-schema";
 import { RuntimeStore } from "../../src/server/database";
 import {
@@ -68,7 +68,7 @@ function turn(input: {
   const completedAt = input.completedAt;
   const runtimeMs = input.runtimeMs === undefined ? 5_000 : input.runtimeMs;
   const selection = {
-    ...nativeModelSelection({
+    ...providerNativeModelSelection({
       providerId: input.providerId,
       modelId: input.model,
     }),
@@ -359,6 +359,18 @@ describe("usage dashboard projection", () => {
         outputTokens: 70,
       }),
     });
+    const gemini = turn({
+      id: "gemini-run-fields",
+      providerId: "gemini",
+      model: "gemini-run-fields",
+      completedAt: "2026-06-20T12:30:00.000Z",
+      completionUsage: usage("2026-06-20T12:30:00.000Z", {
+        totalProcessedTokens: 45,
+        totalProcessedScope: "run",
+        inputTokens: 30,
+        outputTokens: 15,
+      }),
+    });
     const resetCursor = turn({
       id: "cursor-reset-fields",
       providerId: "cursor",
@@ -413,6 +425,7 @@ describe("usage dashboard projection", () => {
       codex,
       claude,
       cursor,
+      gemini,
       resetCursor,
       opencode,
       claudeContextOnly,
@@ -420,15 +433,15 @@ describe("usage dashboard projection", () => {
     ], range);
 
     expect(dashboard.tokens.input).toEqual({
-      value: 160,
-      measuredRequests: 3,
-      totalRequests: 7,
+      value: 190,
+      measuredRequests: 4,
+      totalRequests: 8,
       coverage: "partial",
     });
     expect(dashboard.tokens.output).toEqual({
-      value: 60,
-      measuredRequests: 3,
-      totalRequests: 7,
+      value: 75,
+      measuredRequests: 4,
+      totalRequests: 8,
       coverage: "partial",
     });
   });
@@ -789,7 +802,7 @@ describe("usage dashboard repository", () => {
       runId: crypto.randomUUID(),
       userMessageId: message.id,
       providerId: "claude",
-      modelSelection: nativeModelSelection({
+      modelSelection: providerNativeModelSelection({
         providerId: "claude",
         modelId: "claude-sonnet",
       }),

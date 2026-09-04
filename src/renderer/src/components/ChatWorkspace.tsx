@@ -54,6 +54,7 @@ import type {
   WorkspaceEntry,
 } from "@shared/contracts";
 import type { WorkspaceFileLocation } from "../utils/workspaceFileReference";
+import { isAgentTurnTerminalStatus } from "@shared/turn-lifecycle";
 import type { ComposerAttachmentImportLease } from "../utils/composerAttachments";
 import type { ProviderIdentityLabels } from "@shared/provider-identities";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
@@ -78,7 +79,10 @@ import {
 } from "../utils/testStreamingTrace";
 import { Composer } from "./Composer";
 import type { ChatGoalControlProps } from "./ChatGoalControl";
-import type { PromptPresetCommandRunner } from "./composer/types";
+import type {
+  NewChatProjectPicker,
+  PromptPresetCommandRunner,
+} from "./composer/types";
 import type { ProviderTerminalResumeOption } from "./providerResumeOptions";
 import type {
   ConversationContextCommandRunner,
@@ -87,6 +91,8 @@ import type {
 import type { FinalAnswerAutoScrollEvent } from "./response-timeline/types";
 import { LoadingMark } from "./ui";
 import { ProviderMaintenanceNotice } from "./ProviderMaintenanceNotice";
+import { notifyComposerStopRestore } from "../utils/composerStopRestore";
+import "./ChatWorkspace.css";
 
 const ResponseTimeline = lazy(async () => ({
   default: (await import("./ResponseTimeline")).ResponseTimeline,
@@ -110,6 +116,7 @@ type ChatWorkspaceProps = {
   embedded?: boolean;
   project: Project | null;
   conversation: Conversation | null;
+  newChatProjectPicker?: NewChatProjectPicker;
   checkoutBranch?: string | null;
   showCheckoutContext?: boolean;
   latestTurnSummary: ConversationLatestTurnSummary | null;
@@ -222,6 +229,7 @@ export function ChatWorkspace({
   embedded = false,
   project,
   conversation,
+  newChatProjectPicker,
   checkoutBranch = null,
   showCheckoutContext = true,
   latestTurnSummary,
@@ -317,9 +325,8 @@ export function ChatWorkspace({
   const selectedReasoningEffort = conversation?.modelSelection.reasoningEffort
     ?.trim().toLowerCase() ?? "";
   const keyboardHelpId = useId();
-  const stopTimeline = useCallback(() => {
-    void onStop().catch(() => undefined);
-  }, [onStop]);
+  const stopRestoreSequenceRef = useRef(0);
+  const stopsInFlightRef = useRef(new Map<string, Promise<void>>());
   const scrollRef = useRef<HTMLDivElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
   const composerRegionRef = useRef<HTMLDivElement>(null);
@@ -392,6 +399,70 @@ export function ChatWorkspace({
       turnId: queueTurnOwner.id,
     })];
   const ownedMessages = recordsOwnedByConversation(messages, conversationId);
+  const stopTurn = latestTurnSummary
+    ? ownedTurns.find(({ id }) => id === latestTurnSummary.id) ?? null
+    : ownedTurns.at(-1) ?? null;
+  const stopTurnStatus = latestTurnSummary
+    && latestTurnSummary.id === stopTurn?.id
+    ? latestTurnSummary.status
+    : stopTurn?.status ?? null;
+  const stopOwner = `${conversationId ?? "none"}:${stopTurn?.id ?? "unknown"}`;
+  useEffect(() => {
+    if (!stopTurnStatus || isAgentTurnTerminalStatus(stopTurnStatus)) {
+      stopsInFlightRef.current.clear();
+      return;
+    }
+    for (const owner of stopsInFlightRef.current.keys()) {
+      if (owner !== stopOwner) stopsInFlightRef.current.delete(owner);
+    }
+  }, [stopOwner, stopTurnStatus]);
+  const promptHistory = useMemo(() => ownedMessages
+    .filter(({ role, content }) => role === "user" && Boolean(content.trim()))
+    .map(({ id, content }) => ({ id, content })), [ownedMessages]);
+  const stopWithPromptRestore = useCallback(async (): Promise<void> => {
+    const stoppedConversationId = conversation?.id ?? null;
+    const activeTurn = stopTurn;
+    const activePrompt = activeTurn
+      ? ownedMessages.find(({ id }) => id === activeTurn.userMessageId) ?? null
+      : null;
+    const inFlight = stopsInFlightRef.current.get(stopOwner);
+    if (inFlight) {
+      await inFlight;
+      return;
+    }
+    const detail = stoppedConversationId
+      && activeTurn
+      && activePrompt?.content.trim()
+      ? {
+          requestId: `${stoppedConversationId}:${++stopRestoreSequenceRef.current}`,
+          conversationId: stoppedConversationId,
+          turnId: activeTurn.id,
+          messageId: activePrompt.id,
+          text: activePrompt.content,
+        }
+      : null;
+    const operation = (async (): Promise<void> => {
+      if (detail) notifyComposerStopRestore({ ...detail, phase: "start" });
+      try {
+        await onStop();
+      } catch (error) {
+        if (detail) notifyComposerStopRestore({ ...detail, phase: "failed" });
+        throw error;
+      }
+    })();
+    stopsInFlightRef.current.set(stopOwner, operation);
+    try {
+      await operation;
+    } catch (error) {
+      if (stopsInFlightRef.current.get(stopOwner) === operation) {
+        stopsInFlightRef.current.delete(stopOwner);
+      }
+      throw error;
+    }
+  }, [conversation?.id, onStop, ownedMessages, stopOwner, stopTurn]);
+  const stopTimeline = useCallback(() => {
+    void stopWithPromptRestore().catch(() => undefined);
+  }, [stopWithPromptRestore]);
   const ownedActivities = recordsOwnedByConversation(activities, conversationId);
   const ownedSubagents = recordsOwnedByConversation(subagents, conversationId);
   const ownedReasonings = recordsOwnedByConversation(reasonings, conversationId);
@@ -636,6 +707,26 @@ export function ChatWorkspace({
     }, READER_INTENT_GUARD_MS);
   }, [clearPendingFinalAnswerNavigation]);
 
+  const noteResponseTimelineNavigationIntent = useCallback((): void => {
+    noteReaderIntent();
+    if (!conversationId) return;
+    navigationRef.current = {
+      mode: "reading-history",
+      conversationId,
+    };
+    dispatchNavigation({
+      type: "reader.scrolled",
+      conversationId,
+      followsLatest: false,
+      intentional: true,
+    });
+    onLatestContentVisibilityChange?.(false);
+  }, [
+    conversationId,
+    noteReaderIntent,
+    onLatestContentVisibilityChange,
+  ]);
+
   const noteReaderKeyboardIntent = (
     event: React.KeyboardEvent<HTMLDivElement>,
   ): void => {
@@ -793,10 +884,14 @@ export function ChatWorkspace({
           {detailLoading && <LoadingMark label="Loading conversation" />}
           {isEmptyThread && (
             <div className="empty-thread">
-              <h3 aria-label={emptyThreadTitle}>
-                What should we build in{" "}
-                <span className="empty-thread-project">{emptyThreadProject}</span>?
-              </h3>
+              {newChatProjectPicker ? (
+                <h3>What should we build today?</h3>
+              ) : (
+                <h3 aria-label={emptyThreadTitle}>
+                  What should we build in{" "}
+                  <span className="empty-thread-project">{emptyThreadProject}</span>?
+                </h3>
+              )}
             </div>
           )}
           <Suspense fallback={<LoadingMark label="Loading conversation" />}>
@@ -838,7 +933,7 @@ export function ChatWorkspace({
               onTurnAnchorSettled={onTurnAnchorSettled}
               onTurnAnchorCancelled={onTurnAnchorCancelled}
               onFinalAnswerAutoScroll={onFinalAnswerAutoScroll}
-              onReaderNavigationIntent={noteReaderIntent}
+              onReaderNavigationIntent={noteResponseTimelineNavigationIntent}
               scrollElementRef={scrollRef}
               timelineElementRef={timelineRef}
               checkpointRestoreDisabled={conversation.status === "running"
@@ -898,6 +993,7 @@ export function ChatWorkspace({
           conversation={conversation}
           checkoutBranch={checkoutBranch}
           showCheckoutContext={showCheckoutContext}
+          newChatProjectPicker={newChatProjectPicker}
           providers={providers}
           actions={actions}
           mentionResults={mentionResults}
@@ -921,6 +1017,7 @@ export function ChatWorkspace({
           running={conversation.status === "running" || conversation.status === "needs-input"}
           backendProfiles={backendProfiles}
           latestTurn={ownedTurns.at(-1) ?? null}
+          promptHistory={promptHistory}
           latestTurnSummary={latestTurnSummary}
           queuedTurnAuthoritative={queuedTurnAuthoritative}
           onSend={sendMessage}
@@ -946,7 +1043,7 @@ export function ChatWorkspace({
           resumeOptions={resumeOptions}
           onResumeConversation={onResumeConversation}
           onUsageDisplayModeChange={onUsageDisplayModeChange}
-          onStop={onStop}
+          onStop={stopWithPromptRestore}
           onClearPromptContext={onClearPromptContext}
         />
       </div>

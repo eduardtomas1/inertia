@@ -18,6 +18,7 @@ import type {
 } from "../shared/contracts";
 import {
   TURN_GIT_ARTIFACT_FINALIZATION_TIMEOUT_MS,
+  TURN_GIT_ARTIFACT_PRE_CAPTURE_TIMEOUT_MS,
 } from "../shared/runtime-command-timeouts";
 import {
   RuntimeStore,
@@ -29,6 +30,7 @@ import {
   compareGitSnapshots,
   GitError,
 } from "./git";
+import { isGitProcessTreeTerminationFailure } from "./git/runner";
 
 const MAX_PATCH_BYTES = 2 * 1024 * 1024;
 const MAX_COMPRESSED_BYTES = 4 * 1024 * 1024;
@@ -43,7 +45,14 @@ export interface CaptureTurnGitArtifactInput {
 }
 
 export interface TurnGitArtifactManagerOptions {
+  clockMs?: () => number;
+  preCaptureTimeoutMs?: number;
   finalizationTimeoutMs?: number;
+}
+
+export interface TurnGitArtifactOperationOptions {
+  deadlineAt?: number;
+  signal?: AbortSignal;
 }
 
 export class TurnGitArtifactError extends Error {
@@ -53,9 +62,19 @@ export class TurnGitArtifactError extends Error {
   }
 }
 
-function safeFailure(error: unknown): string {
-  if (error instanceof GitError) return error.message;
+function safeFailure(error: unknown, phase: "pre-turn" | "post-turn"): string {
+  const timeoutMessage = phase === "pre-turn"
+    ? "Capturing the pre-turn repository state timed out."
+    : "Capturing turn changes timed out.";
+  if (error instanceof GitError) {
+    return error.code === "timeout"
+      ? timeoutMessage
+      : error.message;
+  }
   if (error instanceof CheckpointError) {
+    if (error.message === "Checkpoint operation timed out.") {
+      return timeoutMessage;
+    }
     return error.message === "not-repository"
       ? "This workspace is not a Git repository."
       : "The repository snapshot could not be captured.";
@@ -101,8 +120,13 @@ function truncatedCaptureReason(input: {
 export class TurnGitArtifactManager {
   readonly #patchDirectory: string;
   readonly #checkpointDirectory: string;
+  readonly #clockMs: () => number;
+  readonly #preCaptureTimeoutMs: number;
   readonly #finalizationTimeoutMs: number;
   readonly #finalizations = new Map<string, Promise<void>>();
+  readonly #lifetime = new AbortController();
+  #shutdownDeadlineAt: number | null = null;
+  #cleanupFailure: GitError | null = null;
 
   constructor(
     private readonly store: RuntimeStore,
@@ -112,6 +136,12 @@ export class TurnGitArtifactManager {
   ) {
     this.#patchDirectory = resolve(dataDirectory, "turn-git-artifacts");
     this.#checkpointDirectory = resolve(dataDirectory, "checkpoint-indexes");
+    this.#clockMs = options.clockMs ?? Date.now;
+    this.#preCaptureTimeoutMs = Math.max(
+      1,
+      options.preCaptureTimeoutMs
+        ?? TURN_GIT_ARTIFACT_PRE_CAPTURE_TIMEOUT_MS,
+    );
     this.#finalizationTimeoutMs = Math.max(
       1,
       options.finalizationTimeoutMs
@@ -119,8 +149,39 @@ export class TurnGitArtifactManager {
     );
   }
 
+  beginShutdown(deadlineAt: number): void {
+    this.#shutdownDeadlineAt = this.#shutdownDeadlineAt === null
+      ? deadlineAt
+      : Math.min(this.#shutdownDeadlineAt, deadlineAt);
+    if (!this.#lifetime.signal.aborted) {
+      this.#lifetime.abort(new TurnGitArtifactError(
+        "Repository artifact capture stopped because the local runtime is shutting down.",
+      ));
+    }
+  }
+
+  #operationOptions(
+    timeoutMs: number,
+    overrides: TurnGitArtifactOperationOptions = {},
+  ): {
+    deadlineAt: number;
+    signal: AbortSignal;
+  } {
+    return {
+      deadlineAt: Math.min(
+        this.#clockMs() + timeoutMs,
+        this.#shutdownDeadlineAt ?? Number.POSITIVE_INFINITY,
+        overrides.deadlineAt ?? Number.POSITIVE_INFINITY,
+      ),
+      signal: overrides.signal
+        ? AbortSignal.any([this.#lifetime.signal, overrides.signal])
+        : this.#lifetime.signal,
+    };
+  }
+
   async captureBefore(input: CaptureTurnGitArtifactInput): Promise<void> {
     if (this.store.turnGitArtifact(input.turn.id)) return;
+    const operation = this.#operationOptions(this.#preCaptureTimeoutMs);
     const repositoryPath = this.store.conversationPath(input.turn.conversationId);
     let checkpointId = input.checkpointId;
     let beforeRef: string | null = null;
@@ -137,11 +198,14 @@ export class TurnGitArtifactManager {
           repositoryPath,
           this.#checkpointDirectory,
           input.turn.conversationId,
+          operation,
         );
         beforeRef = privateCheckpoint.ref;
         checkpointId = null;
       }
-      const state = await captureGitArtifactState(repositoryPath, beforeRef);
+      const state = await captureGitArtifactState(repositoryPath, beforeRef, {
+        ...operation,
+      });
       this.store.createTurnGitArtifact({
         turnId: input.turn.id,
         repositoryIdentity: state.repositoryIdentity,
@@ -155,6 +219,7 @@ export class TurnGitArtifactManager {
         createdAt: this.now().toISOString(),
       });
     } catch (error) {
+      this.#recordCleanupFailure(error);
       if (!this.store.turnGitArtifact(input.turn.id)) {
         this.store.createTurnGitArtifact({
           turnId: input.turn.id,
@@ -162,7 +227,7 @@ export class TurnGitArtifactManager {
           beforeRef,
           status: "unavailable",
           completeness: "unavailable",
-          failureReason: safeFailure(error),
+          failureReason: safeFailure(error, "pre-turn"),
           absenceReason: preCaptureAbsenceReason(error),
           createdAt: this.now().toISOString(),
         });
@@ -170,7 +235,14 @@ export class TurnGitArtifactManager {
     }
   }
 
-  async captureAfter(input: CaptureTurnGitArtifactInput): Promise<void> {
+  async captureAfter(
+    input: CaptureTurnGitArtifactInput,
+    options: TurnGitArtifactOperationOptions = {},
+  ): Promise<void> {
+    const operation = this.#operationOptions(
+      this.#finalizationTimeoutMs,
+      options,
+    );
     let artifact = this.store.turnGitArtifact(input.turn.id);
     if (!artifact) {
       // A crash before the pre-capture hook cannot be reconstructed honestly.
@@ -226,9 +298,14 @@ export class TurnGitArtifactManager {
         repositoryPath,
         this.#checkpointDirectory,
         input.turn.conversationId,
+        operation,
       );
       afterRef = postSnapshot.ref;
-      const after = await captureGitArtifactState(repositoryPath, afterRef);
+      const after = await captureGitArtifactState(
+        repositoryPath,
+        afterRef,
+        operation,
+      );
       if (
         after.repositoryIdentity !== stored.repositoryIdentity
         || after.worktreeIdentity !== stored.worktreeIdentity
@@ -249,7 +326,7 @@ export class TurnGitArtifactManager {
         repositoryPath,
         stored.beforeRef,
         afterRef,
-        { maxBytes: MAX_PATCH_BYTES },
+        { ...operation, maxBytes: MAX_PATCH_BYTES },
       );
       const digest = await this.#writePatch(comparison.patch);
       this.#completeIfPending(input.turn.id, {
@@ -268,6 +345,7 @@ export class TurnGitArtifactManager {
       });
       await this.prune();
     } catch (error) {
+      this.#recordCleanupFailure(error);
       this.#completeIfPending(input.turn.id, {
         afterRef,
         status: stored.beforeRef ? "partial" : "failed",
@@ -275,7 +353,7 @@ export class TurnGitArtifactManager {
         patchState: "failed",
         capturedAt: this.now().toISOString(),
         terminalAssistantMessageId: input.terminalAssistantMessageId ?? null,
-        failureReason: safeFailure(error),
+        failureReason: safeFailure(error, "post-turn"),
       });
     }
   }
@@ -300,6 +378,7 @@ export class TurnGitArtifactManager {
   async reconcile(): Promise<boolean> {
     const before = this.store.turnGitArtifactRevision();
     for (const artifact of this.store.pendingTurnGitArtifacts()) {
+      if (this.#lifetime.signal.aborted) break;
       const turn = this.store.agentTurn(artifact.turnId);
       if (
         turn.status !== "completed"
@@ -314,7 +393,9 @@ export class TurnGitArtifactManager {
       });
     }
 
-    for (const turn of this.store.terminalAuthoritativeAgentTurnsMissingGitArtifacts()) {
+    for (const turn of this.#lifetime.signal.aborted
+      ? []
+      : this.store.terminalAuthoritativeAgentTurnsMissingGitArtifacts()) {
       this.store.createTurnGitArtifact({
         turnId: turn.id,
         beforeCheckpointId: turn.checkpointId,
@@ -324,25 +405,50 @@ export class TurnGitArtifactManager {
         createdAt: turn.completedAt ?? turn.updatedAt,
       });
     }
-    await this.prune();
+    if (!this.#lifetime.signal.aborted) await this.prune();
     return this.store.turnGitArtifactRevision() !== before;
+  }
+
+  async settleShutdown(): Promise<void> {
+    while (this.#finalizations.size > 0) {
+      await Promise.allSettled(this.#finalizations.values());
+    }
+    if (this.#cleanupFailure) throw this.#cleanupFailure;
   }
 
   async #finalizeBounded(input: CaptureTurnGitArtifactInput): Promise<void> {
     let timeout: ReturnType<typeof setTimeout> | undefined;
-    const work = Promise.resolve().then(() => this.captureAfter(input));
+    const controller = new AbortController();
+    const deadlineAt = Math.min(
+      this.#clockMs() + this.#finalizationTimeoutMs,
+      this.#shutdownDeadlineAt ?? Number.POSITIVE_INFINITY,
+    );
+    const work = Promise.resolve().then(() => this.captureAfter(input, {
+      deadlineAt,
+      signal: controller.signal,
+    }));
     const outcome = await Promise.race([
       work.then(() => "captured" as const, () => "failed" as const),
       new Promise<"timed-out">((resolveTimeout) => {
         timeout = setTimeout(
-          () => resolveTimeout("timed-out"),
-          this.#finalizationTimeoutMs,
+          () => {
+            controller.abort(new TurnGitArtifactError(
+              "Capturing turn changes timed out.",
+            ));
+            resolveTimeout("timed-out");
+          },
+          Math.max(1, deadlineAt - this.#clockMs()),
         );
         timeout.unref?.();
       }),
     ]);
     if (timeout) clearTimeout(timeout);
     if (outcome === "captured") return;
+
+    // Git owns exact process-tree termination when its aggregate deadline or
+    // the runtime lifetime signal fires. Do not let a timed-out finalizer race
+    // the SQLite close that follows runtime artifact settlement.
+    await work.catch(() => undefined);
 
     // The underlying Git commands have their own process timeouts. This state
     // transition bounds renderer/restart reconciliation and prevents any late
@@ -357,7 +463,6 @@ export class TurnGitArtifactManager {
         ? "Capturing turn changes timed out."
         : "The repository artifact could not be finalized.",
     });
-    void work.catch(() => undefined);
   }
 
   #completeIfPending(
@@ -409,17 +514,26 @@ export class TurnGitArtifactManager {
     ) {
       throw new TurnGitArtifactError("These turns do not have comparable repository snapshots.");
     }
-    const comparison = await compareGitSnapshots(
-      this.store.conversationPath(later.conversationId),
-      earlier.afterRef,
-      later.afterRef,
-      {
-        deadlineAt,
-        signal,
-        maxBytes: MAX_PATCH_BYTES,
-        ...(path ? { paths: [path] } : {}),
-      },
-    );
+    const operation = this.#operationOptions(this.#finalizationTimeoutMs, {
+      deadlineAt,
+      signal,
+    });
+    let comparison: Awaited<ReturnType<typeof compareGitSnapshots>>;
+    try {
+      comparison = await compareGitSnapshots(
+        this.store.conversationPath(later.conversationId),
+        earlier.afterRef,
+        later.afterRef,
+        {
+          ...operation,
+          maxBytes: MAX_PATCH_BYTES,
+          ...(path ? { paths: [path] } : {}),
+        },
+      );
+    } catch (error) {
+      this.#recordCleanupFailure(error);
+      throw error;
+    }
     return {
       artifactId: `${earlier.id}:${later.id}`,
       turnId: later.turnId,
@@ -518,5 +632,11 @@ export class TurnGitArtifactManager {
   #patchPath(digest: string): string {
     if (!DIGEST.test(digest)) throw new TurnGitArtifactError("The artifact digest is invalid.");
     return join(this.#patchDirectory, `${digest}.gz`);
+  }
+
+  #recordCleanupFailure(error: unknown): void {
+    if (isGitProcessTreeTerminationFailure(error)) {
+      this.#cleanupFailure ??= error;
+    }
   }
 }

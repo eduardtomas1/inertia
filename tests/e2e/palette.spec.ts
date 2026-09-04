@@ -64,6 +64,6 @@ test("opens the command palette and manages a thread", async () => {
   else await search.press("Enter");
   await expect(page.getByRole("button", { name: "General", exact: true }))
     .toHaveAttribute("aria-current", "page");
-  await page.getByRole("button", { name: "Go to workspace" }).click();
+  await page.getByRole("button", { name: "Workspace", exact: true }).click();
   expect(rendererErrors).toEqual([]);
 });

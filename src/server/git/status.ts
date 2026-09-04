@@ -2,6 +2,10 @@ import { DEFAULT_OUTPUT_BYTES } from "./constants";
 import { repositoryRoot } from "./paths";
 import { inspectGitRemoteRouting } from "./remote-routing";
 import {
+  gitScanCoordinator,
+  type GitScanRequest,
+} from "./scan-coordinator";
+import {
   gitInspectionSettlementValues,
   isGitProcessTreeTerminationFailure,
   runGitInspection,
@@ -154,6 +158,7 @@ export function parseNumstat(
 export interface GitStatusOptions {
   deadlineAt?: number;
   signal?: AbortSignal;
+  scan?: Omit<GitScanRequest, "deadlineAt" | "optionsKey" | "signal">;
 }
 
 export async function hasHead(
@@ -185,7 +190,26 @@ export async function getRepositoryStatus(
   repositoryPath: string,
   options: GitStatusOptions = {},
 ): Promise<GitRepositoryStatus> {
-  const root = await repositoryRoot(repositoryPath, options);
+  const root = options.scan?.identity.repositoryRoot
+    ?? await repositoryRoot(repositoryPath, options);
+  if (options.scan) {
+    return await gitScanCoordinator.request({
+      ...options.scan,
+      deadlineAt: options.deadlineAt,
+      optionsKey: "repository-status:v1",
+      signal: options.signal,
+    }, async (execution) => await inspectRepositoryStatus(root, {
+      deadlineAt: execution.deadlineAt,
+      signal: execution.signal,
+    }));
+  }
+  return await inspectRepositoryStatus(root, options);
+}
+
+async function inspectRepositoryStatus(
+  root: string,
+  options: GitStatusOptions,
+): Promise<GitRepositoryStatus> {
   const statusResult = await runGitInspection(
     root,
     ["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=all"],

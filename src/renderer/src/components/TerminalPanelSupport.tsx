@@ -103,15 +103,16 @@ export function terminalStorageKey(projectId: string, conversationId?: string): 
   return `inertia:terminal-sessions:v1:${projectId}:${conversationId ?? "project"}`;
 }
 
-export function claimTerminalPanelOwner(storageKey: string): string {
-  const owner = crypto.randomUUID();
+export function claimTerminalPanelOwner(
+  storageKey: string,
+  owner: string,
+): void {
   terminalPanelOwners.set(storageKey, owner);
   try {
     window.sessionStorage.setItem(`${storageKey}:owner`, owner);
   } catch {
     // The in-memory token still prevents a stale panel from winning locally.
   }
-  return owner;
 }
 
 export function isCurrentTerminalPanelOwner(

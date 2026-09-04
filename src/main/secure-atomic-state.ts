@@ -22,6 +22,11 @@ import {
   resolve,
 } from "node:path";
 
+import {
+  FILE_OPEN_DIRECTORY,
+  FILE_OPEN_NO_FOLLOW,
+} from "../node/platform-file-open-flags.js";
+
 const FILE_MODE = 0o600;
 
 export interface SecureAtomicStatePaths {
@@ -132,7 +137,7 @@ export function writeSecureAtomicState(
   );
   let descriptor: number | null = null;
   try {
-    const noFollow = "O_NOFOLLOW" in constants ? constants.O_NOFOLLOW : 0;
+    const noFollow = "O_NOFOLLOW" in constants ? FILE_OPEN_NO_FOLLOW : 0;
     descriptor = openSync(
       temporaryPath,
       constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | noFollow,
@@ -154,7 +159,7 @@ export function writeSecureAtomicState(
     temporaryPath = "";
     try {
       const directoryOnly = "O_DIRECTORY" in constants
-        ? constants.O_DIRECTORY
+        ? FILE_OPEN_DIRECTORY
         : 0;
       const directoryDescriptor = openSync(
         directory,
@@ -226,7 +231,7 @@ export function readSecureAtomicStateStrict(
         "Secure state exceeds its size limit",
       );
     }
-    const noFollow = "O_NOFOLLOW" in constants ? constants.O_NOFOLLOW : 0;
+    const noFollow = "O_NOFOLLOW" in constants ? FILE_OPEN_NO_FOLLOW : 0;
     descriptor = openSync(target, constants.O_RDONLY | noFollow);
     const opened = fstatSync(descriptor);
     if (

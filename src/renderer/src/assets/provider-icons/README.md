@@ -17,6 +17,15 @@ property of their respective owners.
   Cursor's official brand kit downloaded from <https://cursor.com/brand> on
   2026-08-11. The downloaded archive SHA-256 is
   `97488a7751914e60f9ff532bc33810cdeaebdddc017548abe6ca2bc29bbc3928`.
+- `gemini.svg`: the multicolor Gemini CLI header glyph from
+  `google-gemini/gemini-cli` at commit
+  `87a9c71d57a4ec56c00f3ff628970fea8291d812`, file
+  `packages/cli/src/ui/components/__snapshots__/AppHeaderIcon-AppHeader-Icon-Rendering-renders-the-default-icon-in-standard-terminals.snap.svg`
+  (Apache-2.0 repository license; local SHA-256
+  `9e015cb9e3718f5245ef8ac3359a858ba94cd239817c70c3a99b6b3146948731`).
+  The glyph geometry, colors, and text rendering properties are unchanged;
+  unrelated terminal-snapshot content was omitted and the view box was cropped
+  to the glyph. The local SVG carries the corresponding modification notice.
 - `opencode-light.svg` and `opencode-dark.svg`: OpenCode identity marks from
   `anomalyco/opencode` at commit
   `9fdd4824d3c1e1c533a72359dd6c5f285ae9fc63`, files

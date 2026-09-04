@@ -61,6 +61,89 @@ describe("provider adapter seams", () => {
     expect(activities).toEqual([["turn", "completed", "Turn completed"]]);
   });
 
+  it("settles legacy initialization facts and reuses duration identities", () => {
+    for (const providerId of ["claude", "cursor", "kimi"] as const) {
+      const state: ProviderParserState = {
+        sawText: false,
+        sawStreamingDelta: false,
+        hadErrorEvent: false,
+      };
+      const activities: Array<{
+        phase: string;
+        label: string;
+        activityId?: string;
+      }> = [];
+      normalizeProviderLine(
+        providerId,
+        JSON.stringify({
+          type: "system",
+          subtype: "init",
+          session_id: providerId + "-session",
+        }),
+        state,
+        () => undefined,
+        (_kind, phase, label, detail) => {
+          activities.push({ phase, label, ...detail });
+        },
+        () => undefined,
+      );
+      expect(activities).toEqual([{
+        phase: "completed",
+        label: "Session initialized",
+      }]);
+    }
+
+    const fixtures = [
+      {
+        providerId: "codex" as const,
+        lines: [
+          { type: "turn.started", thread_id: "codex-session" },
+          { type: "turn.started", thread_id: "codex-session" },
+          { type: "turn.completed", thread_id: "codex-session" },
+        ],
+      },
+      {
+        providerId: "opencode" as const,
+        lines: [
+          { type: "step_start", part: { sessionID: "opencode-session" } },
+          { type: "step_start", part: { sessionID: "opencode-session" } },
+          {
+            type: "step_finish",
+            part: { sessionID: "opencode-session", reason: "stop" },
+          },
+        ],
+      },
+    ];
+    for (const fixture of fixtures) {
+      const state: ProviderParserState = {
+        sawText: false,
+        sawStreamingDelta: false,
+        hadErrorEvent: false,
+      };
+      const activities: Array<{ phase: string; activityId?: string }> = [];
+      for (const line of fixture.lines) {
+        normalizeProviderLine(
+          fixture.providerId,
+          JSON.stringify(line),
+          state,
+          () => undefined,
+          (_kind, phase, _label, detail) => {
+            activities.push({ phase, activityId: detail?.activityId });
+          },
+          () => undefined,
+        );
+      }
+      expect(activities.map(({ phase }) => phase)).toEqual([
+        "started",
+        "started",
+        "completed",
+      ]);
+      expect(new Set(activities.map(({ activityId }) => activityId)).size)
+        .toBe(1);
+      expect(activities[0]?.activityId).toBeTruthy();
+    }
+  });
+
   it("keeps every CLI provider's structured tool output in activity detail", () => {
     const fixtures: Array<{
       providerId: ProviderId;

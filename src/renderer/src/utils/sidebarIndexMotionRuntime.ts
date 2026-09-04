@@ -10,6 +10,12 @@ interface MotionState {
 
 const POSITION_EPSILON = 0.75;
 const stateByContainer = new WeakMap<HTMLElement, MotionState>();
+const ignoreAnimationCancellation = (): void => undefined;
+
+function cancelAnimation(animation: Animation): void {
+  void animation.finished.catch(ignoreAnimationCancellation);
+  animation.cancel();
+}
 
 function motionState(container: HTMLElement): MotionState {
   const current = stateByContainer.get(container);
@@ -56,7 +62,8 @@ export function updateSidebarIndexMotion(container: HTMLElement): void {
         Math.abs(deltaX) < POSITION_EPSILON
         && Math.abs(deltaY) < POSITION_EPSILON
       ) continue;
-      state.animations.get(identity)?.cancel();
+      const previousAnimation = state.animations.get(identity);
+      if (previousAnimation) cancelAnimation(previousAnimation);
       const distance = Math.hypot(deltaX, deltaY);
       const animation = row.animate([
         { opacity: 0.86, transform: `translate(${deltaX}px, ${deltaY}px)` },
@@ -81,6 +88,6 @@ export function updateSidebarIndexMotion(container: HTMLElement): void {
 export function cancelSidebarIndexMotion(container: HTMLElement): void {
   const state = stateByContainer.get(container);
   if (!state) return;
-  for (const animation of state.animations.values()) animation.cancel();
+  for (const animation of state.animations.values()) cancelAnimation(animation);
   stateByContainer.delete(container);
 }

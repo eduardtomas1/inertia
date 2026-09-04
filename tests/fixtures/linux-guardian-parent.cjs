@@ -8,7 +8,10 @@ const child = spawn(
   guardian,
   [
     "watch", String(process.pid), String(guardianIdentity.dev), String(guardianIdentity.ino),
-    "--", payload, descendantPidPath,
+    // Keep the direct owned payload alive until this runtime-parent harness
+    // exits. Otherwise the guardian can correctly drain a fast-exiting root
+    // before the double-forked descendant records the identity this test needs.
+    "--", payload, descendantPidPath, "keep-root",
   ],
   { detached: true, stdio: "ignore" },
 );
@@ -28,7 +31,11 @@ const timer = setInterval(() => {
   if (spawnSync(guardian, [...common, "claim"], { stdio: "ignore" }).status !== 0) process.exit(2);
   if (spawnSync(guardian, [...common, "exec"], { stdio: "ignore" }).status !== 0) process.exit(3);
   clearInterval(timer);
-  const readinessDeadline = Date.now() + 5_000;
+  // The ARM64 coverage lane can spend several seconds scheduling this
+  // detached native payload while the instrumented suite is saturated.
+  // This deadline protects only the test harness; the guardian's production
+  // lifecycle bounds remain unchanged.
+  const readinessDeadline = Date.now() + 15_000;
   const readiness = setInterval(() => {
     if (existsSync(descendantPidPath)) {
       clearInterval(readiness);

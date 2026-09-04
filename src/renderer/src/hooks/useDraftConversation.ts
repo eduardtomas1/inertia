@@ -17,7 +17,7 @@ import type {
   ServerEvent,
   TurnRequestContext,
 } from "@shared/contracts";
-import { legacyProviderIdForHarness } from "../../../shared/model-routing";
+import { providerIdForHarness } from "../../../shared/model-routing";
 import {
   buildDraftConversation,
   buildNewConversationPayload,
@@ -360,7 +360,7 @@ export function useDraftConversation({
             }
           : current.conversation.modelSelection;
       const providerId = change.providerId
-        ?? legacyProviderIdForHarness(selection.harnessId)
+        ?? providerIdForHarness(selection.harnessId)
         ?? current.conversation.providerId;
       const conversation = {
         ...current.conversation,

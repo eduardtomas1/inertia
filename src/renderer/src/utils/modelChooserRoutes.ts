@@ -11,12 +11,12 @@ import type { ProviderIdentityLabels } from "@shared/provider-identities";
 import {
   continuationIdentityForSelection,
   fastModeProviderValue,
-  legacyProviderIdForHarness,
+  providerIdForHarness,
   modelSelectionUsesFastMode,
   modelSelectionSchema,
-  nativeBackendProfile,
-  nativeHarnessId,
-  nativeModelSelection,
+  providerNativeBackendProfile,
+  providerNativeHarnessId,
+  providerNativeModelSelection,
   resolveHarnessBackendCompatibility,
 } from "../../../shared/model-routing";
 import { officiallyAllowsModelSwitchWithinSession } from "../../../shared/continuation-policy";
@@ -44,6 +44,7 @@ const harnessLabels: Readonly<Record<ProviderId, string>> = {
   codex: "Codex harness",
   claude: "Claude harness",
   cursor: "Cursor",
+  gemini: "Gemini CLI",
   kimi: "Kimi Code",
   opencode: "OpenCode",
 };
@@ -51,7 +52,7 @@ const harnessLabels: Readonly<Record<ProviderId, string>> = {
 const refreshModelsReason = "Refresh models to select this route.";
 
 export function modelChooserHarnessLabel(harnessId: string): string {
-  const providerId = legacyProviderIdForHarness(harnessId);
+  const providerId = providerIdForHarness(harnessId);
   if (providerId) return harnessLabels[providerId];
   return harnessId;
 }
@@ -163,8 +164,8 @@ function compatibleNativeFastModeOptions(
 ): ModelSelection["providerOptions"] {
   if (
     !provider
-    || legacyProviderIdForHarness(currentSelection.harnessId) !== provider.id
-    || currentSelection.backendProfileId !== nativeBackendProfile(provider.id).id
+    || providerIdForHarness(currentSelection.harnessId) !== provider.id
+    || currentSelection.backendProfileId !== providerNativeBackendProfile(provider.id).id
   ) return {};
   const fastMode = fastModeProviderValue(currentSelection);
   return fastMode
@@ -181,7 +182,7 @@ function profileRoute(
 ): ComposerModelRoute {
   const model = profile.models.find((candidate) => candidate.id === modelId);
   if (!model) throw new Error("The selected backend model is unavailable.");
-  const providerId = legacyProviderIdForHarness(profile.harnessId);
+  const providerId = providerIdForHarness(profile.harnessId);
   const provider = providers.find(({ id }) => id === providerId);
   const baseSelection = selectionForProfileModel(profile, model.id);
   const generatedSelection = profile.preset === "native"
@@ -270,14 +271,14 @@ function fallbackNativeRoutes(
       defaultReasoningEffort: "",
       reasoningOptions: defaultModel?.reasoningOptions ?? [],
     }, ...provider.models.filter(({ id }) => id !== "provider-default")];
-    const backend = nativeBackendProfile(provider.id);
-    const harnessId = nativeHarnessId(provider.id);
+    const backend = providerNativeBackendProfile(provider.id);
+    const harnessId = providerNativeHarnessId(provider.id);
     const compatibility = resolveHarnessBackendCompatibility(
       harnessId,
       backend,
     );
     return models.map((model) => {
-      const generatedSelection = nativeModelSelection({
+      const generatedSelection = providerNativeModelSelection({
         providerId: provider.id,
         modelId: model.id,
         alias: model.id === "provider-default" ? null : model.label,
@@ -365,7 +366,7 @@ function profileWithProviderDefault(
     profile.preset !== "native"
     || profile.models.some(({ id }) => id === "provider-default")
   ) return profile;
-  const providerId = legacyProviderIdForHarness(profile.harnessId);
+  const providerId = providerIdForHarness(profile.harnessId);
   return {
     ...profile,
     models: [
@@ -420,7 +421,7 @@ export function selectedModelSearchRoute(
 ): ModelSearchRoute {
   const selected = routes.find((route) => sameRoute(route.selection, selection));
   if (selected) return selected;
-  const providerId = legacyProviderIdForHarness(selection.harnessId);
+  const providerId = providerIdForHarness(selection.harnessId);
   return {
     key: modelRouteIdentityKey(selection),
     displayName: selection.alias ?? selection.modelId,

@@ -57,17 +57,15 @@ export class TurnActivityProjection {
       return activity;
     }
     if (event.phase !== "started" && event.phase !== "info") {
-      let matchIndex = candidates.findIndex(
-        (activity) => activity.title === event.label,
+      const identifiedActivityIds = new Set(
+        [...active.providerActivitiesById.values()].map(({ id }) => id),
       );
-      if (
-        matchIndex < 0
-        && (candidates.length === 1 || event.label === "Tool")
-      ) {
-        matchIndex = 0;
-      }
-      if (matchIndex >= 0) {
-        const [match] = candidates.splice(matchIndex, 1);
+      const legacyCandidateIndexes = candidates.flatMap((candidate, index) =>
+        identifiedActivityIds.has(candidate.id)
+          ? []
+          : [index]);
+      if (legacyCandidateIndexes.length === 1) {
+        const [match] = candidates.splice(legacyCandidateIndexes[0]!, 1);
         if (candidates.length === 0) {
           active.runningActivities.delete(event.kind);
         } else {

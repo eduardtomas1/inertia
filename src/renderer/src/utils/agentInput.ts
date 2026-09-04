@@ -6,6 +6,7 @@ export function agentRequestProviderName(providerId: AgentInputRequest["provider
   switch (providerId) {
     case "claude": return "Claude";
     case "cursor": return "Cursor";
+    case "gemini": return "Gemini";
     case "kimi": return "Kimi Code";
     case "opencode": return "OpenCode";
     case "codex": return "Codex";

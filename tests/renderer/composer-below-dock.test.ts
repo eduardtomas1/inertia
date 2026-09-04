@@ -20,6 +20,10 @@ const sendActionsSource = readFileSync(
   new URL("../../src/renderer/src/components/composer/ComposerSendActions.tsx", import.meta.url),
   "utf8",
 ).replace(/\r\n/gu, "\n");
+const queuedActionsSource = readFileSync(
+  new URL("../../src/renderer/src/components/composer/ComposerQueuedActions.tsx", import.meta.url),
+  "utf8",
+).replace(/\r\n/gu, "\n");
 const chatWorkspaceSource = readFileSync(
   new URL("../../src/renderer/src/components/ChatWorkspace.tsx", import.meta.url),
   "utf8",
@@ -70,7 +74,8 @@ describe("composer below-dock cleanup", () => {
     expect(inputSource).not.toContain("composer-attachment-boundary");
     expect(inputSource).toContain('? "Enter sends · Tab queues"');
     expect(inputSource).toContain('event.key === "Tab"');
-    expect(sendActionsSource).toContain('className="composer-queue"');
+    expect(sendActionsSource).toContain("<ComposerQueuedActions");
+    expect(queuedActionsSource).toContain('className="composer-queue"');
     expect(toolbarSource).toContain("<UsageIndicator");
   });
 

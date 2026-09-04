@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { RuntimeStore } from "../../src/server/database";
 import {
   continuationIdentityForSelection,
-  nativeModelSelection,
+  providerNativeModelSelection,
 } from "../../src/shared/model-routing";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import { selectWorkspaceTool } from "./support/workspace-tools";
@@ -85,7 +85,7 @@ test.beforeAll(async () => {
         workspaceDirectory,
         { recoverInterruptedRuns: false },
       );
-      const selection = nativeModelSelection({ providerId: "codex" });
+      const selection = providerNativeModelSelection({ providerId: "codex" });
       const identity = continuationIdentityForSelection(
         selection,
         null,

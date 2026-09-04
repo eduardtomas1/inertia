@@ -22,7 +22,14 @@ const recoveryMessageSchema = legacyRecoveryMessageSchema.extend({
 
 const recoveryConversationFields = {
   title: z.string().max(4_000),
-  providerId: z.enum(["codex", "claude", "cursor", "kimi", "opencode"]),
+  providerId: z.enum([
+    "codex",
+    "claude",
+    "cursor",
+    "gemini",
+    "kimi",
+    "opencode",
+  ]),
   model: z.string().max(300),
   reasoningEffort: z.string().max(80),
   interactionMode: z.enum(["build", "plan"]),

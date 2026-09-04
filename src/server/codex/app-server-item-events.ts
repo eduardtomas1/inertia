@@ -4,6 +4,7 @@ import { codexHookActivityPhase, codexItemActivityPhase } from "./app-server-sta
 import { boundedText, objectValue, stringValue, type JsonObject } from "./protocol";
 import { completedReasoningSummary } from "./reasoning";
 import { providerActivityDetailSections } from "../provider/activity-detail";
+import { stableProviderActivityId } from "../provider/activity-lifecycle";
 import type { CodexAppServerOptions } from "./types";
 
 export type CodexItemActivity = {
@@ -15,6 +16,7 @@ export interface CodexItemProjectionState {
   deltaItems: Set<string>;
   reasoningDeltaItems: Set<string>;
   itemActivities: Map<string, CodexItemActivity>;
+  completedPlanItemIds: Set<string>;
   maxTrackedActivities: number;
 }
 
@@ -70,7 +72,12 @@ export function handleCodexItem(
   if (!item) return;
   const phase = codexItemActivityPhase(method, item.status);
   if (itemType === "reasoning") {
-    host.options.onActivity?.("reasoning", phase, "Thinking");
+    host.options.onActivity?.(
+      "reasoning",
+      phase,
+      "Thinking",
+      activityId ? { activityId } : undefined,
+    );
     if (method === "item/completed") {
       let summary = completedReasoningSummary(item, state.reasoningDeltaItems);
       const itemId = boundedText(item.id, 512);
@@ -129,6 +136,20 @@ export function handleCodexItem(
   } else if (itemType === "plan" && method === "item/completed") {
     const text = boundedText(item.text, 128_000);
     if (text) host.options.onPlan?.(text, []);
+    if (
+      activityId
+      && state.completedPlanItemIds.size < state.maxTrackedActivities
+    ) {
+      state.completedPlanItemIds.add(activityId);
+    }
+    host.options.onActivity?.(
+      "turn",
+      phase,
+      "Plan completed",
+      activityId
+        ? { activityId: stableProviderActivityId("codex-plan", activityId) }
+        : undefined,
+    );
   } else if (itemType === "mcpToolCall") {
     const server = boundedText(item.server, 120);
     const tool = boundedText(item.tool, 160);

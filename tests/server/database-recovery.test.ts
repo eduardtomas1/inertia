@@ -2087,14 +2087,31 @@ describe("database backup and startup recovery", () => {
     const paths = databaseRecoveryPaths(databasePath);
     const partial = join(paths.backupsDirectory, "inertia-20260101T000000000Z.sqlite.partial");
     writeFileSync(partial, "interrupted");
+    writeFileSync(`${partial}-wal`, "interrupted wal");
+    writeFileSync(`${partial}-shm`, "interrupted shm");
     const countBounded = new DatabaseBackupManager(database, databasePath, {
       maxBackups: 2,
       maxTotalBytes: Number.MAX_SAFE_INTEGER,
+      validateBackup: async (path) => {
+        writeFileSync(`${path}-wal`, "validation wal");
+        writeFileSync(`${path}-shm`, "validation shm");
+        return "valid-current";
+      },
     });
-    await countBounded.createBackup();
+    const first = await countBounded.createBackup();
+    const firstPath = join(paths.backupsDirectory, first.filename);
+    writeFileSync(`${firstPath}-wal`, "complete wal");
+    writeFileSync(`${firstPath}-shm`, "complete shm");
     await countBounded.createBackup();
     await countBounded.createBackup();
     expect(existsSync(partial)).toBe(false);
+    expect(existsSync(`${partial}-wal`)).toBe(false);
+    expect(existsSync(`${partial}-shm`)).toBe(false);
+    expect(existsSync(firstPath)).toBe(false);
+    expect(existsSync(`${firstPath}-wal`)).toBe(false);
+    expect(existsSync(`${firstPath}-shm`)).toBe(false);
+    expect(readdirSync(paths.backupsDirectory).some((name) =>
+      name.includes(".sqlite.partial-"))).toBe(false);
     expect(backupNames(databasePath)).toHaveLength(2);
 
     const byteBounded = new DatabaseBackupManager(database, databasePath, {
@@ -2106,6 +2123,84 @@ describe("database backup and startup recovery", () => {
     const retained = join(paths.backupsDirectory, backupNames(databasePath)[0]!);
     expect(statSync(retained).size).toBeGreaterThan(1);
     database.close();
+  });
+
+  it("sweeps historical automatic-backup sidecars without touching retained, hostile, or symlink entries", () => {
+    const directory = temporaryDirectory();
+    const databasePath = join(directory, "inertia.sqlite");
+    const { store } = seed(databasePath);
+    store.close();
+    const { backupsDirectory } = databaseRecoveryPaths(databasePath);
+
+    for (let index = 0; index < 283; index += 1) {
+      const partial = join(
+        backupsDirectory,
+        `inertia-20260101T000000000Z-${index}.sqlite.partial`,
+      );
+      writeFileSync(`${partial}-wal`, "");
+      writeFileSync(`${partial}-shm`, "partial shm");
+    }
+    for (let index = 0; index < 282; index += 1) {
+      const complete = join(
+        backupsDirectory,
+        `inertia-20260102T000000000Z-${index}.sqlite`,
+      );
+      writeFileSync(`${complete}-wal`, "");
+      writeFileSync(`${complete}-shm`, "complete shm");
+    }
+    expect(readdirSync(backupsDirectory)).toHaveLength(1_130);
+
+    const retained = join(
+      backupsDirectory,
+      "inertia-20260103T000000000Z.sqlite",
+    );
+    writeFileSync(retained, "retained");
+    writeFileSync(`${retained}-wal`, "retained wal");
+    writeFileSync(`${retained}-shm`, "retained shm");
+    const hostile = join(
+      backupsDirectory,
+      "inertia-20260104T000000000Z.sqlite.partial-shm.extra",
+    );
+    writeFileSync(hostile, "hostile");
+    const outside = join(directory, "outside");
+    writeFileSync(outside, "outside");
+    const partialSymlink = join(
+      backupsDirectory,
+      "inertia-20260105T000000000Z.sqlite.partial-shm",
+    );
+    const orphanSymlink = join(
+      backupsDirectory,
+      "inertia-20260106T000000000Z.sqlite-shm",
+    );
+    symlinkSync(outside, partialSymlink);
+    symlinkSync(outside, orphanSymlink);
+    const partialDirectory = join(
+      backupsDirectory,
+      "inertia-20260107T000000000Z.sqlite.partial-wal",
+    );
+    const orphanDirectory = join(
+      backupsDirectory,
+      "inertia-20260108T000000000Z.sqlite-wal",
+    );
+    mkdirSync(partialDirectory);
+    mkdirSync(orphanDirectory);
+
+    expect(recoverDatabaseOnStartup(databasePath).outcome).toBe("healthy");
+    expect(readdirSync(backupsDirectory).sort()).toEqual([
+      "inertia-20260103T000000000Z.sqlite",
+      "inertia-20260103T000000000Z.sqlite-shm",
+      "inertia-20260103T000000000Z.sqlite-wal",
+      "inertia-20260104T000000000Z.sqlite.partial-shm.extra",
+      "inertia-20260105T000000000Z.sqlite.partial-shm",
+      "inertia-20260106T000000000Z.sqlite-shm",
+      "inertia-20260107T000000000Z.sqlite.partial-wal",
+      "inertia-20260108T000000000Z.sqlite-wal",
+    ]);
+    expect(lstatSync(partialSymlink).isSymbolicLink()).toBe(true);
+    expect(lstatSync(orphanSymlink).isSymbolicLink()).toBe(true);
+    expect(lstatSync(partialDirectory).isDirectory()).toBe(true);
+    expect(lstatSync(orphanDirectory).isDirectory()).toBe(true);
+    expect(readFileSync(outside, "utf8")).toBe("outside");
   });
 
   it("does not publish or retain a backup that fails validation", async () => {

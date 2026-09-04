@@ -222,7 +222,7 @@ describe("Settings composite updates", () => {
       message: "Inertia Canary is up to date.",
     }} />);
 
-    expect(screen.getByText("Inertia Canary · v0.0.45")).toBeInTheDocument();
+    expect(screen.getByText("Inertia Canary · v0.0.48")).toBeInTheDocument();
     expect(await screen.findByText("Canary channel · isolated profile")).toBeInTheDocument();
     expect(await screen.findByText("Verified Canary 0.0.40 is retained for rollback."))
       .toBeInTheDocument();
@@ -320,6 +320,7 @@ describe("Settings composite updates", () => {
     };
     const view = render(<SettingsView {...props} />);
     fireEvent.click(screen.getByRole("button", { name: "Providers" }));
+    fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
 
     const model = screen.getByLabelText("Model");
     const reasoning = screen.getByLabelText("Reasoning");
@@ -348,6 +349,64 @@ describe("Settings composite updates", () => {
     expect(model).toHaveDisplayValue("GPT-5.6-Sol — Default");
     expect(reasoning).toHaveValue("xhigh");
     expect(reasoning).toHaveDisplayValue("Xhigh");
+  });
+
+  it("opens providers in a selected master-detail editor with model metadata", () => {
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: { getPlatform: () => "darwin" },
+    });
+    render(<SettingsView
+      {...settingsProps(vi.fn(async () => undefined))}
+      providers={[codexWithModels(), provider("claude", "Claude")]}
+    />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Providers" }));
+    expect(screen.getByRole("button", { name: "Configure Codex" }))
+      .toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("tab", { name: /Models/u }));
+    expect(screen.getByText("GPT-5.6-Sol", { exact: true })).toBeVisible();
+    expect(screen.getByText("gpt-5.6-terra", { exact: true })).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "Configure Claude" }));
+    expect(screen.getByRole("tab", { name: "Configuration" }))
+      .toHaveAttribute("aria-selected", "true");
+    expect(screen.getByLabelText("Name in Inertia"))
+      .toHaveAttribute("placeholder", "Claude account");
+  });
+
+  it("moves provider detail tabs with the composite keyboard pattern", () => {
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: { getPlatform: () => "darwin" },
+    });
+    render(<SettingsView
+      {...settingsProps(vi.fn(async () => undefined))}
+      providers={[codexWithModels()]}
+    />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Providers" }));
+    const configuration = screen.getByRole("tab", {
+      name: "Configuration",
+    });
+    configuration.focus();
+    fireEvent.keyDown(configuration, { key: "ArrowRight" });
+
+    const models = screen.getByRole("tab", { name: /Models/u });
+    expect(document.activeElement).toBe(models);
+    expect(models).toHaveAttribute("aria-selected", "true");
+    expect(models).toHaveAttribute("tabindex", "0");
+    expect(configuration).toHaveAttribute("tabindex", "-1");
+    expect(screen.getByRole("tabpanel"))
+      .toHaveAttribute("aria-labelledby", "provider-settings-models-tab");
+
+    fireEvent.keyDown(models, { key: "Home" });
+    expect(document.activeElement).toBe(configuration);
+    expect(configuration).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tabpanel")).toHaveAttribute(
+      "aria-labelledby",
+      "provider-settings-configuration-tab",
+    );
   });
 
   it("keeps the Discord webhook in privileged credential storage", async () => {
@@ -498,11 +557,13 @@ describe("Settings composite updates", () => {
     render(<SettingsView {...settingsProps(onUpdate)} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Providers" }));
-    const aliases = screen.getAllByLabelText("Name in Inertia");
-    fireEvent.change(aliases[0]!, { target: { value: "Team Codex" } });
-    fireEvent.blur(aliases[0]!);
-    fireEvent.change(aliases[1]!, { target: { value: "Team Claude" } });
-    fireEvent.blur(aliases[1]!);
+    const codexAlias = screen.getByLabelText("Name in Inertia");
+    fireEvent.change(codexAlias, { target: { value: "Team Codex" } });
+    fireEvent.blur(codexAlias);
+    fireEvent.click(screen.getByRole("button", { name: "Configure Claude" }));
+    const claudeAlias = screen.getByLabelText("Name in Inertia");
+    fireEvent.change(claudeAlias, { target: { value: "Team Claude" } });
+    fireEvent.blur(claudeAlias);
 
     expect(onUpdate).toHaveBeenLastCalledWith({
       providerIdentityLabels: {
@@ -566,20 +627,26 @@ describe("Settings composite updates", () => {
     }));
     render(<SettingsView {...settingsProps(onUpdate)} />);
     fireEvent.click(screen.getByRole("button", { name: "Providers" }));
-    const aliases = screen.getAllByLabelText("Name in Inertia");
+    const alias = screen.getByLabelText("Name in Inertia");
 
-    fireEvent.change(aliases[0]!, { target: { value: "Saving Codex" } });
-    fireEvent.blur(aliases[0]!);
+    fireEvent.change(alias, { target: { value: "Saving Codex" } });
+    fireEvent.blur(alias);
     expect(onUpdate).toHaveBeenCalledOnce();
 
-    fireEvent.change(aliases[0]!, { target: { value: "New Codex draft" } });
-    fireEvent.change(aliases[1]!, { target: { value: "New Claude draft" } });
+    fireEvent.change(alias, { target: { value: "New Codex draft" } });
     await act(async () => {
       rejectSave(new Error("offline"));
     });
 
-    expect(aliases[0]).toHaveValue("New Codex draft");
-    expect(aliases[1]).toHaveValue("New Claude draft");
+    expect(alias).toHaveValue("New Codex draft");
+    fireEvent.click(screen.getByRole("button", { name: "Configure Claude" }));
+    fireEvent.change(screen.getByLabelText("Name in Inertia"), {
+      target: { value: "New Claude draft" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Configure Codex" }));
+    expect(screen.getByLabelText("Name in Inertia")).toHaveValue("New Codex draft");
+    fireEvent.click(screen.getByRole("button", { name: "Configure Claude" }));
+    expect(screen.getByLabelText("Name in Inertia")).toHaveValue("New Claude draft");
     expect(onUpdate).toHaveBeenCalledOnce();
   });
 });

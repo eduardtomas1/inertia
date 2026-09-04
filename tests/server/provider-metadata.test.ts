@@ -9,7 +9,8 @@ import { parseCodexModels } from "../../src/server/codex-metadata";
 import { ProcessTreeTerminationError } from "../../src/server/process-lifecycle";
 import {
   ProviderMetadataCache,
-  providerMetadataScopeKey,
+  currentProviderMetadataScopeKey,
+  providerNativeMetadataScope,
   type PersistedProviderMetadata,
   validateProviderModels,
   validateProviderRateLimits,
@@ -49,6 +50,28 @@ function rateLimit(id: string, usedPercent = 25): ProviderRateLimit {
 }
 
 describe("provider metadata cache", () => {
+  it("constructs Gemini catalog scopes through the current provider maps", () => {
+    const scope = providerNativeMetadataScope("gemini", {
+      executable: "/opt/bin/gemini",
+      version: "0.4.0",
+      authState: "authenticated",
+    });
+    expect(scope).toMatchObject({
+      providerId: "gemini",
+      harnessId: "gemini-acp",
+      backendProfileId: "builtin:gemini",
+      modelId: "provider-catalog",
+    });
+
+    const cache = new ProviderMetadataCache();
+    cache.correlate("gemini", {
+      executable: scope.executable,
+      version: scope.version,
+      authState: scope.authState,
+    });
+    expect(cache.nativeScope("gemini")).toEqual(scope);
+  });
+
   it("accepts only structured provider-native Fast mode metadata", () => {
     expect(parseCodexModels({
       data: [{
@@ -193,6 +216,40 @@ describe("provider metadata cache", () => {
     expect(restarted.current("codex").metadataState).toMatchObject({
       models: { freshness: "stale", provenance: "persistent-cache" },
       rateLimits: { freshness: "stale", provenance: "persistent-cache" },
+    });
+  });
+
+  it("forwards cancellation without recording an aborted metadata attempt", async () => {
+    const controller = new AbortController();
+    let notifyReadStarted!: () => void;
+    const readStarted = new Promise<void>((resolve) => {
+      notifyReadStarted = resolve;
+    });
+    const cache = new ProviderMetadataCache({
+      read: async (_providerId, _executable, _environment, _cwd, _fields, signal) => {
+        notifyReadStarted();
+        await new Promise<void>((resolve) => {
+          if (signal?.aborted) resolve();
+          else signal?.addEventListener("abort", () => resolve(), { once: true });
+        });
+        throw new Error("Provider metadata discovery was cancelled.");
+      },
+    });
+
+    const refresh = cache.metadata(
+      "codex",
+      codexExecutable,
+      {},
+      workspacePath,
+      { force: true, signal: controller.signal },
+    );
+    await readStarted;
+    controller.abort();
+    await expect(refresh).resolves.toMatchObject({ models: [], rateLimits: [] });
+
+    expect(cache.current("codex").metadataState).toMatchObject({
+      models: { lastAttemptedAt: null, refreshing: false },
+      rateLimits: { lastAttemptedAt: null, refreshing: false },
     });
   });
 
@@ -420,10 +477,10 @@ describe("provider metadata cache", () => {
     expect(cache.currentScoped(revisedScope).models).toEqual([]);
     expect(cache.currentScoped(unauthenticatedScope).models).toEqual([]);
     expect(new Set([
-      providerMetadataScopeKey(kimiScope),
-      providerMetadataScopeKey(otherModelScope),
-      providerMetadataScopeKey(revisedScope),
-      providerMetadataScopeKey(unauthenticatedScope),
+      currentProviderMetadataScopeKey(kimiScope),
+      currentProviderMetadataScopeKey(otherModelScope),
+      currentProviderMetadataScopeKey(revisedScope),
+      currentProviderMetadataScopeKey(unauthenticatedScope),
     ]).size).toBe(4);
 
     await cache.metadataScoped(

@@ -32,7 +32,7 @@ import {
   MULTI_SPAWN_PENDING_LAUNCH_STORAGE_KEY,
   type MultiSpawnDraft,
 } from "../../src/renderer/src/utils/multiSpawn";
-import { nativeModelSelection } from "../../src/shared/model-routing";
+import { providerNativeModelSelection } from "../../src/shared/model-routing";
 
 const firstProjectId = "11111111-1111-4111-8111-111111111111";
 const secondProjectId = "22222222-2222-4222-8222-222222222222";
@@ -237,7 +237,7 @@ function localStorageStub(): Storage {
 }
 
 function multiSpawnDraft(): MultiSpawnDraft {
-  const selection = nativeModelSelection({
+  const selection = providerNativeModelSelection({
     providerId: "codex",
     modelId: "gpt-5.6-sol",
     reasoningEffort: "high",

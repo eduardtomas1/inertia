@@ -88,7 +88,7 @@ import { RuntimeLiveDarwinRecoveryCoordinator } from "./runtime-live-darwin-reco
 import { resolveDesktopRuntimeProcessSafetyAssets } from "./runtime-windows-job-bootstrap.js";
 import { disposeWindowsRuntimeJobExecutableLock, prepareWindowsRuntimeJobExecutableLock } from "./windows-runtime-job.js";
 import {
-  cleanupPrivilegedOwners,
+  cleanupPrivilegedOwners, finishNormalShutdownAfterCleanup,
   finishPrivilegedExit,
 } from "./privileged-shutdown.js";
 import { registerClipboardIpc } from "./clipboard-ipc.js";
@@ -113,11 +113,10 @@ import {
   type WindowThemePreference,
   writeWindowThemePreference,
 } from "./window-appearance.js";
-import {
-  MAIN_WINDOW_DEFAULT_STATE,
-  restoreMainWindowState,
-  type MainWindowState,
-} from "./main-window-state.js";
+import { MAIN_WINDOW_DEFAULT_STATE, restoreMainWindowState,
+  type MainWindowState } from "./main-window-state.js";
+import { handleStartupFailure } from "./startup-failure.js";
+import { createTestPrivilegedCleanupController } from "./test-privileged-cleanup-controller.js";
 const { configuration: releaseChannel, packageSmokeRoot } = initializeInertiaReleaseChannel(app, process.env);
 const IPC = {
   getRuntimeConnection: "inertia:runtime-connection",
@@ -502,7 +501,7 @@ function registerIpcHandlers(): void {
     return await shell.openPath(directory);
   });
 
-  ipcMain.handle(IPC.copyRuntimeDiagnosticReport, (event, ...args) => {
+  ipcMain.handle(IPC.copyRuntimeDiagnosticReport, async (event, ...args) => {
     assertTrustedIpc(event, args.length);
     const diagnostics = runtimeDiagnostics
       ?? new RuntimeDiagnostics(runtimeDiagnosticsDirectory(app.getPath("userData")));
@@ -514,7 +513,7 @@ function registerIpcHandlers(): void {
       architecture: process.arch,
       runtime: runtimeSupervisor?.snapshot() ?? null,
     });
-    clipboard.writeText(report.text);
+    await clipboard.writeText(report.text);
     diagnostics.record("report.copy");
     return { copied: true, eventCount: report.eventCount };
   });
@@ -696,7 +695,7 @@ function registerIpcHandlers(): void {
   });
   ipcMain.handle(IPC.previewSetBounds, (event, ...args) => {
     assertTrustedIpc(event, args.length, 1);
-    previewBroker.setBounds(args[0]);
+    return previewBroker.setBounds(args[0]);
   });
   ipcMain.handle(IPC.previewClose, (event, ...args) => {
     assertTrustedIpc(event, args.length, 1);
@@ -960,6 +959,7 @@ async function bootstrap(): Promise<void> {
     service: appUpdateService, runtime: () => runtimeSupervisor,
     privateConnect: () => privateConnectHost, cleanup: runPrivilegedCleanup,
     finishNormalShutdown: finishQuitAfterCleanup,
+    onUnconfirmedShutdown: () => console.error("Refusing to exit because privileged shutdown could not be confirmed."),
     reportError: (error) => console.error("Failed to prepare the application update", error),
   });
   nativeTheme.on("updated", () => {
@@ -1185,6 +1185,8 @@ async function bootstrap(): Promise<void> {
         recycle: () => runtimeSupervisor?.testOnlyRecycle()
           ?? Promise.reject(new Error("The test runtime is not running")),
         agentBrowser: (id: string, command: Parameters<PreviewBroker["perform"]>[1]) => previewBroker.perform(id, command),
+        ...createTestPrivilegedCleanupController({ runtimePid: () => runtimeSupervisor?.snapshot().pid ?? null,
+          cleanup: runPrivilegedCleanup, unconfirmedMessage: () => runtimeSupervisor?.snapshot().lastError ?? null, exit: finishQuitAfterCleanup }),
         quit: () => {
           const snapshot = runtimeSupervisor?.snapshot() ?? null;
           setTimeout(() => app.quit(), 100);
@@ -1201,19 +1203,18 @@ if (!hasSingleInstanceLock) {
 } else {
   app.on("second-instance", focusMainWindow);
   app.on("activate", focusMainWindow);
-  app.on("window-all-closed", () => {
-    if (process.platform !== "darwin") {
-      app.quit();
-    }
-  });
+  app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
   app.on("before-quit", (event) => {
     if (appUpdateInstallCoordinator?.allowBeforeQuit()) return;
     event.preventDefault();
     recordPackageSmokeStage("before-quit");
     if (!appUpdateInstallCoordinator) {
-      void runPrivilegedCleanup().then(finishQuitAfterCleanup, (error: unknown) => {
-        console.error("Failed to finish privileged shutdown", error);
-      });
+      void runPrivilegedCleanup().then((cleanupConfirmed) => {
+        finishNormalShutdownAfterCleanup({ cleanupConfirmed,
+          finish: finishQuitAfterCleanup, onUnconfirmed: () => console.error(
+            "Refusing to exit because privileged shutdown could not be confirmed."),
+        });
+      }, (error: unknown) => console.error("Failed to finish privileged shutdown", error));
     }
   });
 
@@ -1221,19 +1222,18 @@ if (!hasSingleInstanceLock) {
     .whenReady()
     .then(bootstrap)
     .catch((error: unknown) => {
-      runtimeDiagnostics?.record("runtime.failure", {
-        phase: "starting",
-        message: error instanceof Error ? error.message : "Inertia could not start.",
+      handleStartupFailure(error, {
+        environment: process.env,
+        recordDiagnostic: (message) => runtimeDiagnostics?.record("runtime.failure", {
+          phase: "starting",
+          message,
+        }),
+        logFailure: (failure) => console.error("Failed to start Inertia", failure),
+        showErrorBox: (title, content) => dialog.showErrorBox(title, content),
+        quit: () => app.quit(),
       });
-      console.error("Failed to start Inertia", error);
-      dialog.showErrorBox(
-        "Inertia could not start",
-        "The local workspace runtime failed to start. Please reopen Inertia and try again.",
-      );
-      app.quit();
     });
 }
-
 function recordPackageSmokeStage(stage: string): void {
   if (!packageSmokeFilePath) return;
   try {

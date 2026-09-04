@@ -10,6 +10,7 @@ import type {
   MessageSendAcceptance,
   ModelBackendProfileView,
   ModelSelection,
+  Project,
   ProjectAction,
   ProviderId,
   ProviderInfo,
@@ -34,6 +35,7 @@ export interface ComposerProps {
   conversation: Conversation;
   checkoutBranch?: string | null;
   showCheckoutContext?: boolean;
+  newChatProjectPicker?: NewChatProjectPicker;
   providers: ProviderInfo[];
   actions: ProjectAction[];
   disabled: boolean;
@@ -41,6 +43,7 @@ export interface ComposerProps {
   running: boolean;
   backendProfiles?: ModelBackendProfileView[];
   latestTurn?: AgentTurn | null;
+  promptHistory?: readonly ComposerPromptHistoryEntry[];
   latestTurnSummary?: ConversationLatestTurnSummary | null;
   queuedTurnAuthoritative?: boolean;
   mentionResults: WorkspaceEntry[];
@@ -110,10 +113,23 @@ export interface ComposerProps {
   onClearPromptContext?: () => void;
 }
 
+export interface ComposerPromptHistoryEntry {
+  id: string;
+  content: string;
+}
+
+export interface NewChatProjectPicker {
+  projects: readonly Project[];
+  selectedProject: Project;
+  disabled: boolean;
+  onChange: (project: Project) => void;
+}
+
 export interface ComposerQueuedPrompt {
   id: string;
   content: string;
   createdAt: string;
+  attachments: ChatAttachment[];
 }
 
 export type PromptPresetCommand = Extract<

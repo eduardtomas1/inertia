@@ -745,7 +745,7 @@ process.exit(child.status ?? 1);
     const selected = await client.events.next(
       (event): event is Extract<ServerEvent, { type: "snapshot.updated" }> =>
         event.type === "snapshot.updated"
-        && event.snapshot.activeConversationId === firstId,
+        && event.snapshot.activeConversationId === firstId && event.snapshot.conversations.some(({ id, settledAt }) => id === firstId && settledAt !== null),
     );
     expect(selected.snapshot.activeProjectId).toBe(firstProjectId);
     expect(selected.snapshot.conversations.find(({ id }) => id === firstId)?.settledAt).not.toBeNull();
@@ -1133,8 +1133,8 @@ process.exit(child.status ?? 1);
     const { root, data, workspace } = temporaryWorkspace();
     initializeChangedRepository(workspace);
     const { authFile, executable } = fakeCodex(root, [
-      { type: "item.started", item: { type: "command_execution", command: "npm test" } },
-      { type: "item.completed", item: { type: "command_execution", command: "npm test" } },
+      { type: "item.started", item: { id: "command-activity", type: "command_execution", command: "npm test" } },
+      { type: "item.completed", item: { id: "command-activity", type: "command_execution", command: "npm test" } },
       { type: "item.completed", item: { type: "agent_message", text: "Activity lifecycle complete." } },
       { type: "turn.completed" },
     ]);

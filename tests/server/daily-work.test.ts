@@ -10,7 +10,7 @@ import type {
   ProviderId,
 } from "../../src/shared/contracts";
 import { dailyWorkDashboardSchema } from "../../src/shared/contracts/daily-work-schema";
-import { nativeModelSelection } from "../../src/shared/model-routing";
+import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import {
   projectDailyWork,
   type DailyWorkConversationSource,
@@ -75,7 +75,7 @@ function turn(input: {
   completionUsage?: AgentTurnUsageSnapshot | null;
   association?: AgentTurn["association"];
 }): DailyWorkTurn {
-  const selection = nativeModelSelection({
+  const selection = providerNativeModelSelection({
     providerId: input.providerId,
     modelId: `${input.providerId}-model`,
   });
@@ -246,7 +246,7 @@ describe("daily work repository", () => {
       runId: crypto.randomUUID(),
       userMessageId: privatePrompt.id,
       providerId: "codex",
-      modelSelection: nativeModelSelection({ providerId: "codex" }),
+      modelSelection: providerNativeModelSelection({ providerId: "codex" }),
       reasoningEffort: "",
       interactionMode: "build",
       accessMode: "supervised",

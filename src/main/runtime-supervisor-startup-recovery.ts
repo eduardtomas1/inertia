@@ -2,6 +2,8 @@ import { RuntimeGenerationLeaseJournal } from "../node/runtime-generation-leases
 import { RuntimeCleanupReceiptJournal } from "./runtime-cleanup-receipts.js";
 import { recoverPriorRuntimeGenerations } from "./runtime-owned-process-recovery.js";
 import type { WindowsRuntimeJobAssembly } from "./windows-runtime-job.js";
+import { runtimeSupervisorRecoveryWaitMs } from
+  "../node/runtime-shutdown-deadline.js";
 
 export class RuntimeSupervisorStartupRecovery {
   private active: Promise<boolean> | null = null;
@@ -20,7 +22,10 @@ export class RuntimeSupervisorStartupRecovery {
     if (this.active) return this.active;
     const recovery = recoverPriorRuntimeGenerations({
       ...this.options,
-      deadlineAt: Date.now() + this.options.forceKillWaitMs * 2,
+      deadlineAt: Date.now() + runtimeSupervisorRecoveryWaitMs(
+        process.platform,
+        this.options.forceKillWaitMs,
+      ),
     });
     if (!recovery) return null;
     const active = recovery.catch(() => false);

@@ -107,6 +107,10 @@ export function providerTerminalResumeArguments(
     case "claude":
     case "cursor":
       return ["--resume", sessionId];
+    case "gemini":
+      throw new Error(
+        "Gemini ACP sessions are intentionally not exposed for terminal resume.",
+      );
     case "kimi":
     case "opencode":
       return ["--session", sessionId];

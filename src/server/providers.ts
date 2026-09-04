@@ -11,11 +11,11 @@ import {
 } from "../shared/backend-probe";
 import {
   continuationIdentityForSelection,
-  legacyProviderIdForHarness,
+  providerIdForHarness,
   modelSelectionSchema,
   modelBackendProfileSchema,
-  knownHarnessIdSchema,
-  nativeBackendProfile,
+  currentKnownHarnessIdSchema,
+  providerNativeBackendProfile,
   resolveHarnessBackendCompatibility,
   type ContinuationIdentity,
   type HarnessBackendCompatibility,
@@ -37,7 +37,10 @@ import type {
   AgentHarnessId,
   AgentHarnessRun,
 } from "./provider/agent-harness";
-import { providerAuthLoginArgs } from "./provider/auth";
+import {
+  providerAuthLaunchEnvironment,
+  providerAuthLoginArgs,
+} from "./provider/auth";
 import { PROVIDERS, PROVIDER_INFO } from "./provider/catalog";
 import {
   PROVIDER_IDS,
@@ -68,6 +71,7 @@ import {
 } from "./provider/metadata";
 import { readClaudeAgentSdkSkills } from "./provider/claude-agent-sdk-harness";
 import { providerProcessInvocation, providerPtyArguments } from "./provider/process";
+import { isProcessTreeTerminationUnconfirmed } from "./process-lifecycle";
 import {
   providerTerminalResumeLaunch,
   type ProviderTerminalResumeLaunch,
@@ -135,6 +139,9 @@ export class ProviderManager {
   private readonly cancelGraceMs: number;
   private readonly harnessRegistry: AgentHarnessRegistry;
   private readonly metadataCache: ProviderMetadataCache;
+  private readonly lifetimeSignal: AbortSignal;
+  private readonly ownedLifetimeAbort?: AbortController;
+  private readonly auxiliaryOperations = new Set<Promise<unknown>>();
   private readonly backendProfiles = new Map<string, ModelBackendProfile>();
   private readonly backendCompatibilities = new Map<string, HarnessBackendCompatibility>();
   private readonly backendProbeResults = new Map<string, BackendCompatibilityProbeResult>();
@@ -152,9 +159,14 @@ export class ProviderManager {
     this.cancelGraceMs = Math.max(100, Math.min(options.cancelGraceMs ?? DEFAULT_CANCEL_GRACE_MS, 30_000));
     this.harnessRegistry = harnessRegistry;
     this.metadataCache = options.metadataCache ?? new ProviderMetadataCache();
+    this.ownedLifetimeAbort = options.lifetimeSignal
+      ? undefined
+      : new AbortController();
+    this.lifetimeSignal = options.lifetimeSignal
+      ?? this.ownedLifetimeAbort!.signal;
     this.resolveBackendLaunchOptions = options.resolveBackendLaunchOptions;
     for (const providerId of PROVIDER_IDS) {
-      const profile = nativeBackendProfile(providerId);
+      const profile = providerNativeBackendProfile(providerId);
       this.backendProfiles.set(profile.id, profile);
       this.protectedBackendProfileIds.add(profile.id);
     }
@@ -264,8 +276,8 @@ export class ProviderManager {
 
   resolveModelRoute(selectionInput: ModelSelection): ResolvedModelRoute {
     const selection = modelSelectionSchema.parse(selectionInput);
-    const harnessId = knownHarnessIdSchema.safeParse(selection.harnessId);
-    const providerId = legacyProviderIdForHarness(selection.harnessId);
+    const harnessId = currentKnownHarnessIdSchema.safeParse(selection.harnessId);
+    const providerId = providerIdForHarness(selection.harnessId);
     if (!harnessId.success || !providerId) {
       throw new ProviderRuntimeError("invalid_input", `Unknown agent harness '${selection.harnessId}'.`);
     }
@@ -313,11 +325,56 @@ export class ProviderManager {
     };
   }
 
-  async detect(providerId: ProviderId, options: Omit<ProviderDetectionOptions, "command"> = {}): Promise<ProviderDetection> {
+  private trackAuxiliary<T>(operation: () => Promise<T>): Promise<T> {
+    let tracked!: Promise<T>;
+    tracked = operation().finally(() => {
+      this.auxiliaryOperations.delete(tracked);
+    });
+    this.auxiliaryOperations.add(tracked);
+    return tracked;
+  }
+
+  detect(
+    providerId: ProviderId,
+    options: Omit<ProviderDetectionOptions, "command"> = {},
+  ): Promise<ProviderDetection> {
+    return this.trackAuxiliary(async () =>
+      await this.detectProviderInfo(providerId, options));
+  }
+
+  private async detectProviderInfo(
+    providerId: ProviderId,
+    options: Omit<ProviderDetectionOptions, "command">,
+  ): Promise<ProviderDetection> {
+    if (this.lifetimeSignal.aborted) {
+      throw new Error("Provider discovery was cancelled.");
+    }
     if (options.refreshEnvironment) await providerEnvironment(true);
-    this.processEnvironment = (await providerEnvironment()).env;
+    if (this.lifetimeSignal.aborted) {
+      throw new Error("Provider discovery was cancelled.");
+    }
+    const environment = await providerEnvironment();
+    if (this.lifetimeSignal.aborted) {
+      throw new Error("Provider discovery was cancelled.");
+    }
+    this.processEnvironment = environment.env;
     const configured = this.commands[providerId]?.trim() || PROVIDER_INFO[providerId].command;
-    const detection = await detectProvider(providerId, { ...options, refreshEnvironment: false, command: configured });
+    let detection: ProviderDetection;
+    try {
+      detection = await detectProvider(providerId, {
+        ...options,
+        refreshEnvironment: false,
+        command: configured,
+        signal: this.lifetimeSignal,
+      });
+    } catch (error) {
+      this.auxiliaryCleanupUnconfirmed ||=
+        isProcessTreeTerminationUnconfirmed(error);
+      throw error;
+    }
+    if (this.lifetimeSignal.aborted) {
+      throw new Error("Provider discovery was cancelled.");
+    }
     this.auxiliaryCleanupUnconfirmed ||= !detection.cleanupConfirmed;
     if (detection.executable) {
       this.resolvedCommands.set(providerId, detection.executable);
@@ -332,12 +389,38 @@ export class ProviderManager {
     return detection;
   }
 
-  async validateCommand(
+  validateCommand(
     providerId: ProviderId,
     command: string,
     options: Omit<ProviderDetectionOptions, "command"> = {},
   ): Promise<ProviderDetection> {
-    const detection = await detectProvider(providerId, { ...options, command });
+    return this.trackAuxiliary(async () =>
+      await this.validateProviderCommand(providerId, command, options));
+  }
+
+  private async validateProviderCommand(
+    providerId: ProviderId,
+    command: string,
+    options: Omit<ProviderDetectionOptions, "command">,
+  ): Promise<ProviderDetection> {
+    if (this.lifetimeSignal.aborted) {
+      throw new Error("Provider discovery was cancelled.");
+    }
+    let detection: ProviderDetection;
+    try {
+      detection = await detectProvider(providerId, {
+        ...options,
+        command,
+        signal: this.lifetimeSignal,
+      });
+    } catch (error) {
+      this.auxiliaryCleanupUnconfirmed ||=
+        isProcessTreeTerminationUnconfirmed(error);
+      throw error;
+    }
+    if (this.lifetimeSignal.aborted) {
+      throw new Error("Provider discovery was cancelled.");
+    }
     this.auxiliaryCleanupUnconfirmed ||= !detection.cleanupConfirmed;
     return detection;
   }
@@ -350,9 +433,26 @@ export class ProviderManager {
     this.metadataCache.invalidate(providerId);
   }
 
-  async detectAll(options: Omit<ProviderDetectionOptions, "command"> = {}): Promise<ProviderDetection[]> {
+  detectAll(
+    options: Omit<ProviderDetectionOptions, "command"> = {},
+  ): Promise<ProviderDetection[]> {
+    return this.trackAuxiliary(async () => await this.detectAllProviders(options));
+  }
+
+  private async detectAllProviders(
+    options: Omit<ProviderDetectionOptions, "command">,
+  ): Promise<ProviderDetection[]> {
     if (options.refreshEnvironment) await providerEnvironment(true);
-    return await Promise.all(PROVIDER_IDS.map((id) => this.detect(id, { ...options, refreshEnvironment: false })));
+    if (this.lifetimeSignal.aborted) {
+      throw new Error("Provider discovery was cancelled.");
+    }
+    const settled = await Promise.allSettled(PROVIDER_IDS.map((id) =>
+      this.detect(id, { ...options, refreshEnvironment: false })));
+    const failed = settled.find(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    );
+    if (failed) throw failed.reason;
+    return settled.map((result) => (result as PromiseFulfilledResult<ProviderDetection>).value);
   }
 
   async authLaunch(providerId: ProviderId): Promise<ProviderAuthLaunch> {
@@ -361,9 +461,9 @@ export class ProviderManager {
     if (!executable) throw new ProviderRuntimeError("invalid_input", `${PROVIDER_INFO[providerId].name} CLI is not installed.`);
     const environment = await providerEnvironment();
     this.processEnvironment = environment.env;
-    const childEnvironment = providerChildEnvironment(
+    const childEnvironment = providerAuthLaunchEnvironment(
       providerId,
-      environment.env,
+      providerChildEnvironment(providerId, environment.env),
     );
     const invocation = providerProcessInvocation(
       executable,
@@ -448,22 +548,36 @@ export class ProviderManager {
     return this.metadataCache.currentScoped(scope);
   }
 
-  async metadata(
+  metadata(
     providerId: ProviderId,
     cwd = process.cwd(),
     options: ProviderMetadataRequestOptions = {},
   ): Promise<ProviderMetadata> {
+    return this.trackAuxiliary(async () =>
+      await this.readMetadata(providerId, cwd, options));
+  }
+
+  private async readMetadata(
+    providerId: ProviderId,
+    cwd: string,
+    options: ProviderMetadataRequestOptions,
+  ): Promise<ProviderMetadata> {
+    const signal = this.lifetimeSignal;
+    if (signal.aborted) return this.metadataCache.current(providerId);
     let executable = this.resolvedCommands.get(providerId);
-    if (!executable) executable = (await this.detect(providerId)).executable;
+    if (!executable) executable = (await this.detect(providerId, {
+      signal,
+    })).executable;
     if (!executable) return this.metadataCache.current(providerId);
     const environment = await providerEnvironment();
+    if (signal.aborted) return this.metadataCache.current(providerId);
     this.processEnvironment = environment.env;
     return await this.metadataCache.metadata(
       providerId,
       executable,
       providerChildEnvironment(providerId, environment.env),
       cwd,
-      options,
+      { ...options, signal },
     );
   }
 
@@ -518,7 +632,7 @@ export class ProviderManager {
     const turnId = input.turnId ?? null;
     const executable = this.commandFor(providerId);
     if (!this.resolvedCommands.has(providerId)) this.resolvedCommands.set(providerId, executable);
-    const nativeProfile = nativeBackendProfile(providerId);
+    const nativeProfile = providerNativeBackendProfile(providerId);
     const ownsLegacyProviderMetadata = input.backendProfile.id === nativeProfile.id
       && input.backendProfile.configurationRevision === nativeProfile.configurationRevision;
     const runMetadataScope = this.metadataCache.scopeForSelection(
@@ -975,6 +1089,12 @@ export class ProviderManager {
   }
 
   async disposeAll(): Promise<void> {
+    this.ownedLifetimeAbort?.abort(
+      new Error("The provider manager is shutting down."),
+    );
+    while (this.auxiliaryOperations.size > 0) {
+      await Promise.allSettled(this.auxiliaryOperations);
+    }
     const active = [...this.activeRuns.entries()];
     const results = await Promise.allSettled(active.map(([conversationId, run]) =>
       this.stopOwned(

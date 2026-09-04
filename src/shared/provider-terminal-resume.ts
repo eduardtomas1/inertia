@@ -1,8 +1,8 @@
 import type { Conversation, ProviderInfo } from "./contracts/app";
 import type { ProviderId } from "./provider";
 import {
-  nativeBackendProfile,
-  nativeHarnessId,
+  providerNativeBackendProfile,
+  providerNativeHarnessId,
 } from "./model-routing";
 
 // This exact Cursor artifact is the version whose ACP and standalone CLI
@@ -32,6 +32,7 @@ const PROVIDER_LABELS: Readonly<Record<ProviderId, string>> = {
   codex: "Codex",
   claude: "Claude",
   cursor: "Cursor",
+  gemini: "Gemini",
   kimi: "Kimi Code",
   opencode: "OpenCode",
 };
@@ -56,8 +57,8 @@ export function hasNativeProviderTerminalSession(
 ): boolean {
   const identity = conversation.continuationIdentity;
   const selection = conversation.modelSelection;
-  const backend = nativeBackendProfile(conversation.providerId);
-  const harnessId = nativeHarnessId(conversation.providerId);
+  const backend = providerNativeBackendProfile(conversation.providerId);
+  const harnessId = providerNativeHarnessId(conversation.providerId);
   return Boolean(
     conversation.providerSessionId
     && identity
@@ -90,6 +91,13 @@ export function providerTerminalResumeAvailability(
       }
     : null;
 
+  if (conversation.providerId === "gemini") {
+    return {
+      kind: "unavailable",
+      resume,
+      reason: "Gemini conversations use bounded application-reconstructed context; Inertia does not expose Gemini ACP session IDs as provider-native terminal sessions.",
+    };
+  }
   if (!conversation.providerSessionId) {
     return {
       kind: "unavailable",

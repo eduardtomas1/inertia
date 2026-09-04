@@ -11,7 +11,6 @@ import {
   renameDirectRuntimeJournalLeaf,
   unlinkDirectRuntimeJournalLeaf,
   writeDirectRuntimeJournalLeafFromRoot,
-  type DirectRuntimeJournalIdentity,
   type DirectRuntimeJournalRoot,
 } from "./direct-runtime-journal.js";
 import { validRuntimeGenerationId, validSystemBootId } from "./runtime-process-protocol.js";
@@ -412,10 +411,6 @@ function settleSessionWriter(entry: StoredRuntimeOwnedProcessSessionLeaf): boole
     ".runtime-owned-",
     MAX_CLAIMS * 3 + 1,
   );
-  const leaves: Array<{
-    readonly name: string;
-    readonly identity: DirectRuntimeJournalIdentity;
-  }> = [];
   for (const name of names) {
     const claim = name.match(
       /^\.runtime-owned-child-([0-9a-f-]{36})\.(?:begin|claim|retire)\.tmp$/iu,
@@ -424,6 +419,15 @@ function settleSessionWriter(entry: StoredRuntimeOwnedProcessSessionLeaf): boole
       entry.session.runtimeGenerationId,
     )}.publish.tmp`;
     if ((!claim || !UUID_PATTERN.test(claim[1]!)) && !containment) return false;
+    if (entry.state === "retiring" && claim) {
+      // Renaming the writer directory fences every delayed publisher before
+      // recovery enters here. An exact child-claim temporary was never
+      // committed to the canonical journal, so even a crash-partial payload is
+      // safe to discard by pinned identity. A containment temporary must still
+      // authenticate its complete payload before it can be removed.
+      if (!discardDirectRuntimeJournalLeaf(entry.writerRoot, name)) return false;
+      continue;
+    }
     const leaf = readDirectRuntimeJournalLeaf(
       entry.writerRoot,
       name,
@@ -443,18 +447,19 @@ function settleSessionWriter(entry: StoredRuntimeOwnedProcessSessionLeaf): boole
       entry.session.runtimeGenerationId,
       entry.session.systemBootId,
     )) return false;
-    leaves.push({ name, identity: leaf.identity });
+    if (entry.state === "retiring") {
+      if (!unlinkDirectRuntimeJournalLeaf(
+        entry.writerRoot,
+        name,
+        leaf.identity,
+      )) return false;
+      continue;
+    }
   }
   // The canonical record remains authoritative until the cross-directory
   // rename commits. A validated active temporary is therefore observable but
-  // never repaired in place; retirement first renames the whole writer root,
-  // after which the same uncommitted leaf is safe to discard.
-  if (entry.state === "active") return true;
-  return leaves.every(({ name, identity }) => unlinkDirectRuntimeJournalLeaf(
-    entry.writerRoot!,
-    name,
-    identity,
-  ));
+  // never repaired in place. A retiring writer was settled in the loop above.
+  return true;
 }
 
 export class RuntimeOwnedProcessJournal {

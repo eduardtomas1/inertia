@@ -3,6 +3,7 @@ import {
   objectValue,
   type JsonObject,
 } from "./protocol";
+import { stableProviderActivityId } from "../provider/activity-lifecycle";
 import type { CodexAppServerOptions } from "./types";
 
 type EmitActivity = NonNullable<CodexAppServerOptions["onActivity"]>;
@@ -30,6 +31,12 @@ function notificationThreadId(params: JsonObject): string | undefined {
 
 function notificationTurnId(params: JsonObject): string | undefined {
   return boundedText(params.turnId, 512);
+}
+
+function numericIdentity(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value)
+    ? value
+    : undefined;
 }
 
 function ownsThread(
@@ -135,7 +142,14 @@ function projectMcpStartup(
     "system",
     projection.phase,
     projection.label,
-    detail ? { detail } : undefined,
+    {
+      activityId: stableProviderActivityId(
+        "codex-mcp-startup",
+        appScoped ? "app" : notificationThreadId(params),
+        name,
+      ),
+      ...(detail ? { detail } : {}),
+    },
   );
   return "handled";
 }
@@ -196,6 +210,16 @@ function projectAutoApprovalReview(
   const rationale = boundedText(review?.rationale, 4_000);
   const action = autoReviewActionDetail(params.action);
   const targetItemId = boundedText(params.targetItemId, 1_000);
+  const actionType = boundedText(objectValue(params.action)?.type, 100);
+  const activityId = stableProviderActivityId(
+    "codex-auto-approval",
+    notificationThreadId(params),
+    notificationTurnId(params),
+    reviewId ? "review" : targetItemId ? "target" : "fallback",
+    reviewId ?? targetItemId,
+    reviewId || targetItemId ? undefined : numericIdentity(params.startedAtMs),
+    reviewId || targetItemId ? undefined : actionType,
+  );
   const detail = [
     action ? `Action: ${action}` : null,
     targetItemId ? `Target item: ${targetItemId}` : null,
@@ -208,9 +232,7 @@ function projectAutoApprovalReview(
       "system",
       "started",
       "Approval auto-review started",
-      reviewId || detail
-        ? { ...(reviewId ? { activityId: reviewId } : {}), ...(detail ? { detail } : {}) }
-        : undefined,
+      { activityId, ...(detail ? { detail } : {}) },
     );
     return "handled";
   }
@@ -233,9 +255,7 @@ function projectAutoApprovalReview(
     "system",
     phase,
     label,
-    reviewId || detail
-      ? { ...(reviewId ? { activityId: reviewId } : {}), ...(detail ? { detail } : {}) }
-      : undefined,
+    { activityId, ...(detail ? { detail } : {}) },
   );
   return "handled";
 }
@@ -272,13 +292,54 @@ function projectModelSafety(
     fasterModel ? `Faster alternative: ${fasterModel}` : null,
   ].filter((part): part is string => Boolean(part)).join("\n\n");
   const buffering = params.showBufferingUi === true;
+  const activityId = stableProviderActivityId(
+    "codex-safety-review",
+    notificationThreadId(params),
+    notificationTurnId(params),
+    model,
+  );
   host.emitActivity(
     "system",
     buffering ? "started" : "completed",
     buffering
       ? "Codex is applying a safety review"
       : "Codex safety review completed",
-    detail ? { detail } : undefined,
+    { activityId, ...(detail ? { detail } : {}) },
+  );
+  return "handled";
+}
+
+function projectModelProviderAuthRecovery(
+  host: CodexRuntimeNotificationHost,
+  method: string,
+  params: JsonObject,
+): CodexRuntimeNotificationOutcome {
+  if (
+    method !== "modelProvider/authRecoveryStarted"
+    && method !== "modelProvider/authRecoveryCompleted"
+  ) return "not-handled";
+  if (!ownsTurn(host, params)) return "handled";
+
+  const provider = boundedText(params.provider, 160);
+  const message = boundedText(params.message, 4_000);
+  const detail = [
+    provider ? `Provider: ${provider}` : null,
+    message ? `Message:\n${message}` : null,
+  ].filter((part): part is string => Boolean(part)).join("\n\n");
+  const started = method === "modelProvider/authRecoveryStarted";
+  const activityId = stableProviderActivityId(
+    "codex-auth-recovery",
+    notificationThreadId(params),
+    notificationTurnId(params),
+    provider,
+  );
+  host.emitActivity(
+    "system",
+    started ? "started" : "completed",
+    started
+      ? "Codex is recovering model-provider authentication"
+      : "Codex model-provider authentication recovered",
+    { activityId, ...(detail ? { detail } : {}) },
   );
   return "handled";
 }
@@ -363,6 +424,7 @@ export function projectCodexRuntimeNotification(
     projectMcpStartup(host, method, params),
     projectAutoApprovalReview(host, method, params),
     projectModelSafety(host, method, params),
+    projectModelProviderAuthRecovery(host, method, params),
     projectThreadRuntime(host, method, params),
   ];
   return projections.find((outcome) => outcome !== "not-handled")

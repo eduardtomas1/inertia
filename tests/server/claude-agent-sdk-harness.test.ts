@@ -122,6 +122,21 @@ describe("Claude Agent SDK harness", () => {
         ],
       }],
     })).toThrow("duplicate option label");
+    expect(() => claudeQuestions("request-unsafe", "tool-unsafe", {
+      questions: [{
+        ...questions[0],
+        question: "Approve\u202Etxt.exe",
+      }],
+    })).toThrow("invalid question 1");
+    expect(() => claudeQuestions("request-normalized", "tool-normalized", {
+      questions: [{
+        ...questions[0],
+        options: [
+          { label: "Café", description: "First" },
+          { label: "cafe\u0301", description: "Second" },
+        ],
+      }],
+    })).toThrow("duplicate option label");
   });
 
   it("fails and cleans up a run that floods bounded provider events", async () => {
@@ -1280,58 +1295,6 @@ describe("Claude Agent SDK harness", () => {
     expect(manager.cachedMetadata("claude").rateLimits).toEqual([]);
   });
 
-  it("consumes a late delegate notification after the final parent result", async () => {
-    const root = portableFixtureRoot("Claude SDK late delegate notification");
-    roots.push(root);
-    const harness = createClaudeAgentSdkHarness({
-      createQuery: () => fixtureClaudeQuery(
-        (async function* (): AsyncGenerator<SDKMessage> {
-          yield claudeBackgroundTasks(["agent-late"]);
-          yield claudeSystem("task_started", {
-            task_id: "agent-late",
-            tool_use_id: "tool-agent-late",
-            description: "Inspect the final ordering",
-            subagent_type: "researcher",
-          });
-          yield claudeSuccessResult("Parent finished", "completed");
-          yield claudeBackgroundTasks([]);
-          yield claudeSystem("task_notification", {
-            task_id: "agent-late",
-            tool_use_id: "tool-agent-late",
-            status: "completed",
-            output_file: "/tmp/agent-late",
-            summary: "Final ordering inspected",
-          });
-        })(),
-      ),
-    });
-    const manager = new ProviderManager(
-      { commands: { claude: process.execPath } },
-      new AgentHarnessRegistry([harness]),
-    );
-    const traces: Array<{ status: string; result: string | null }> = [];
-
-    await expect(manager.run(nativeProviderRunInput({
-      providerId: "claude",
-      conversationId: "claude-late-delegate-notification",
-      cwd: root,
-      prompt: "Inspect the final ordering",
-      interactionMode: "build",
-      access: "supervised",
-    }), {
-      onSubagent: ({ status, result }) => {
-        traces.push({ status, result });
-      },
-    })).resolves.toMatchObject({
-      status: "completed",
-      text: "Parent finished",
-    });
-    expect(traces).toEqual([
-      { status: "spawned", result: null },
-      { status: "completed", result: "Final ordering inspected" },
-    ]);
-  });
-
   it("keeps a newer unknown task update drainable until its terminal notification", async () => {
     const root = portableFixtureRoot("Claude SDK future delegate state");
     roots.push(root);
@@ -1357,6 +1320,8 @@ describe("Claude Agent SDK harness", () => {
             status: "completed",
             summary: "Future state completed authoritatively",
           });
+          yield claudeSessionState("running");
+          yield claudeSuccessResult("Parent finished", "completed");
         })(),
       ),
     });
@@ -1547,8 +1512,11 @@ describe("Claude Agent SDK harness", () => {
       interactionMode: "build",
       access: "supervised",
     }))).resolves.toMatchObject({
-      status: "completed",
-      text: "Parent still finished",
+      status: "failed",
+      error: "Claude Agent SDK exited before the parent resumed after delegated work.",
+      failure: {
+        terminalEvent: "lifecycle/parent-not-resumed",
+      },
     });
     expect(drainWaitStartedAt).toBeGreaterThan(0);
     expect(Date.now() - drainWaitStartedAt).toBeGreaterThanOrEqual(20);

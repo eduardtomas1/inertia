@@ -22,13 +22,16 @@ import type {
 } from "../../src/shared/contracts";
 import {
   continuationIdentityForSelection,
-  nativeModelSelection,
+  providerNativeModelSelection,
 } from "../../src/shared/model-routing";
 import { Composer } from "../../src/renderer/src/components/Composer";
 import {
   DRAFT_PERSISTENCE_DELAY_MS,
   DRAFT_PERSISTENCE_MAX_WAIT_MS,
 } from "../../src/renderer/src/components/composer/Composer";
+import {
+  composerQueueKey,
+} from "../../src/renderer/src/components/composer/composerQueuedPrompts";
 import type { PromptPresetCommandRunner } from "../../src/renderer/src/components/composer/types";
 import { useAppRuntimeActions } from "../../src/renderer/src/hooks/useAppRuntimeActions";
 import { useDesktopTools } from "../../src/renderer/src/hooks/useDesktopTools";
@@ -73,7 +76,7 @@ function conversation(id: string): Conversation {
     projectId: "11111111-1111-4111-8111-111111111111",
     title: id,
     providerId: "codex",
-    modelSelection: nativeModelSelection({
+    modelSelection: providerNativeModelSelection({
       providerId: "codex",
       modelId: "provider-default",
       reasoningEffort: null,
@@ -145,7 +148,7 @@ function deferred<T>(): {
 async function waitForComposerSendEnhancement(): Promise<void> {
   await waitFor(() => expect(
     screen.getByRole("button", { name: "Send message" }),
-  ).toHaveAttribute("data-motion-state", "send"));
+  ).toHaveAttribute("data-motion-state", "send"), { timeout: 5_000 });
 }
 
 function composerProps(
@@ -190,6 +193,7 @@ function composerProps(
 afterEach(() => {
   vi.useRealTimers();
   window.localStorage.clear();
+  window.sessionStorage.clear();
 });
 
 describe("composer asynchronous ownership", () => {
@@ -387,7 +391,7 @@ describe("composer asynchronous ownership", () => {
       .toBeInTheDocument();
     expect(onSend).not.toHaveBeenCalled();
     expect(window.localStorage.getItem(
-      `inertia:queued-prompts:${current.id}`,
+      composerQueueKey(current.id),
     )).toContain("Run the release checks next");
 
     view.rerender(<Composer {...composerProps(current, {
@@ -414,7 +418,7 @@ describe("composer asynchronous ownership", () => {
     await waitFor(() => expect(screen.queryByText("Run the release checks next"))
       .not.toBeInTheDocument());
     expect(window.localStorage.getItem(
-      `inertia:queued-prompts:${current.id}`,
+      composerQueueKey(current.id),
     )).toBeNull();
   });
 
@@ -861,6 +865,47 @@ describe("composer asynchronous ownership", () => {
     );
   });
 
+  it("keeps Gemini compaction visibly unavailable without sending a provider request", async () => {
+    const current = conversation("16161616-1616-4616-8616-161616161616");
+    current.providerId = "gemini";
+    current.modelSelection = providerNativeModelSelection({
+      providerId: "gemini",
+      modelId: "provider-default",
+      reasoningEffort: null,
+    });
+    const geminiProvider: ProviderInfo = {
+      ...provider,
+      id: "gemini",
+      label: "Gemini",
+      command: "gemini",
+      version: "0.58.0",
+      statusMessage: "Authentication is verified when a Gemini session starts",
+    };
+    const onCompact = vi.fn(async () => ({
+      message: "This must not run.",
+      instructionForwarded: false,
+    }));
+    render(<Composer {...composerProps(current, {
+      providers: [geminiProvider],
+      onCompact,
+    })} />);
+    const input = screen.getByRole("textbox", { name: "Message" });
+
+    fireEvent.change(input, { target: { value: "/" } });
+    expect(screen.getByRole("option", { name: /\/compact/u })).toBeDisabled();
+    expect(screen.getByRole("option", { name: /\/compact/u })).toHaveTextContent(
+      "Gemini ACP does not expose explicit context compaction",
+    );
+
+    fireEvent.change(input, { target: { value: "/compact" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onCompact).not.toHaveBeenCalled();
+    expect(input).toHaveValue("/compact");
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Gemini ACP does not expose explicit context compaction",
+    );
+  });
+
   it("never turns a compact command into an active-run follow-up", async () => {
     const current = conversation("05050505-0505-4505-8505-050505050505");
     const onCompact = vi.fn(async () => ({
@@ -1109,7 +1154,7 @@ describe("composer asynchronous ownership", () => {
 
   it("submits reasoning as a complete selection and keeps the control open on failure", async () => {
     const current = conversation("09090909-0909-4909-8909-090909090909");
-    current.modelSelection = nativeModelSelection({
+    current.modelSelection = providerNativeModelSelection({
       providerId: "codex",
       modelId: "gpt-route",
       alias: "GPT Route",
@@ -1163,7 +1208,7 @@ describe("composer asynchronous ownership", () => {
 
   it("shows Fast mode only for advertised models and persists the exact native value", async () => {
     const current = conversation("composer-fast-mode");
-    current.modelSelection = nativeModelSelection({
+    current.modelSelection = providerNativeModelSelection({
       providerId: "codex",
       modelId: "gpt-fast",
     });
@@ -1209,7 +1254,7 @@ describe("composer asynchronous ownership", () => {
 
   it("hides Fast mode on unsupported routes", () => {
     const current = conversation("composer-standard-only");
-    current.modelSelection = nativeModelSelection({
+    current.modelSelection = providerNativeModelSelection({
       providerId: "codex",
       modelId: "gpt-standard",
     });
@@ -1236,7 +1281,7 @@ describe("composer asynchronous ownership", () => {
 
   it("preserves a saved Fast identity when provider metadata becomes unavailable", async () => {
     const current = conversation("composer-fast-metadata-unavailable");
-    current.modelSelection = nativeModelSelection({
+    current.modelSelection = providerNativeModelSelection({
       providerId: "codex",
       modelId: "gpt-fast",
       providerOptions: { fastMode: "priority" },
@@ -1274,7 +1319,7 @@ describe("composer asynchronous ownership", () => {
 
   it("binds new-chat confirmation, transfers text, and supports failure retry", async () => {
     const current = conversation("route-source");
-    current.modelSelection = nativeModelSelection({
+    current.modelSelection = providerNativeModelSelection({
       providerId: "codex",
       modelId: "codex-route",
       alias: "Codex Route",

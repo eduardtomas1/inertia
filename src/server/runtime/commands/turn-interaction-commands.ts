@@ -22,7 +22,10 @@ import {
 } from "../../checkpoints";
 import type { RuntimeStore } from "../../database";
 import { getRepositoryStatus, GitError } from "../../git";
-import { RuntimeRequestError } from "../../runtime-errors";
+import {
+  publicRuntimeError,
+  RuntimeRequestError,
+} from "../../runtime-errors";
 import {
   prepareDocumentAttachments,
   type PreparedDocumentAttachments,
@@ -47,6 +50,61 @@ import {
 } from "./message-send-preparation";
 import { ConversationContextService } from "../conversation-context-service";
 
+type MessageSendStage =
+  | "conversation-state"
+  | "active-route"
+  | "follow-up-preparation"
+  | "follow-up-publication"
+  | "turn-admission"
+  | "attachments"
+  | "documents"
+  | "backend-readiness"
+  | "skills"
+  | "provider-transition"
+  | "checkpoint"
+  | "retention"
+  | "turn-persistence"
+  | "turn-publication";
+
+const MESSAGE_SEND_STAGE_LABELS: Record<MessageSendStage, string> = {
+  "conversation-state": "conversation state preparation",
+  "active-route": "active turn routing",
+  "follow-up-preparation": "follow-up preparation",
+  "follow-up-publication": "follow-up publication",
+  "turn-admission": "turn admission",
+  attachments: "attachment preparation",
+  documents: "document preparation",
+  "backend-readiness": "provider readiness",
+  skills: "skill preparation",
+  "provider-transition": "provider transition",
+  checkpoint: "checkpoint preparation",
+  retention: "attachment retention",
+  "turn-persistence": "turn persistence",
+  "turn-publication": "turn publication",
+};
+
+function classifiedMessageSendError(
+  error: unknown,
+  stage: MessageSendStage,
+): RuntimeRequestError {
+  if (error instanceof RuntimeRequestError) return error;
+  const publicMessage = publicRuntimeError(error);
+  if (publicMessage !== "The request could not be completed.") {
+    return new RuntimeRequestError(publicMessage);
+  }
+  const code = `message-send/${stage}/unexpected`;
+  return new RuntimeRequestError(
+    stage === "turn-publication"
+      ? `The turn was admitted but could not start cleanly. Refresh this chat before retrying. [${code}]`
+      : stage === "follow-up-publication"
+        ? `The follow-up was accepted but its acknowledgement could not finish cleanly. Refresh this chat before retrying. [${code}]`
+        : stage === "follow-up-preparation"
+          ? `The follow-up could not complete ${MESSAGE_SEND_STAGE_LABELS[stage]}. No follow-up was submitted; try again. [${code}]`
+      : `The message could not complete ${MESSAGE_SEND_STAGE_LABELS[stage]}. No turn was started; try again. [${code}]`,
+    code,
+  );
+}
+
 export interface TurnInteractionCommandDependencies {
   store: RuntimeStore;
   conversationAttachments: ConversationAttachmentStore;
@@ -60,6 +118,7 @@ export interface TurnInteractionCommandDependencies {
   enableProviders: boolean;
   attachmentResolver: TrustedAttachmentResolver | null;
   generatedAttachments: PrivateGeneratedAttachmentStore;
+  prepareDocumentAttachments?: typeof prepareDocumentAttachments;
   workflows: AgentWorkflowController;
   providerTerminalResumes: ProviderTerminalResumeRegistry;
   providerInfo(): readonly ProviderInfo[];
@@ -84,13 +143,17 @@ export function createTurnInteractionCommandHandler(
   ], async (socket, command) => {
     switch (command.type) {
       case "message.send": {
-        const conversation = dependencies.store.conversation(
-          command.payload.conversationId,
-        );
-        const contextPacketIds =
-          command.payload.context?.conversationContextPacketIds ?? [];
-        let resolvedTurnContext: TurnRequestContext | undefined =
-          command.payload.context;
+        let messageSendStage: MessageSendStage = "conversation-state";
+        let conversation: ReturnType<RuntimeStore["conversation"]>;
+        let contextPacketIds: readonly string[] = [];
+        let resolvedTurnContext: TurnRequestContext | undefined;
+        try {
+          conversation = dependencies.store.conversation(
+            command.payload.conversationId,
+          );
+          contextPacketIds =
+            command.payload.context?.conversationContextPacketIds ?? [];
+          resolvedTurnContext = command.payload.context;
         if (contextPacketIds.length > 0) {
           const contextService = new ConversationContextService(
             dependencies.store,
@@ -121,12 +184,14 @@ export function createTurnInteractionCommandHandler(
             ),
           };
         }
+        messageSendStage = "active-route";
         if (dependencies.providerTerminalResumes.isActive(conversation.id)) {
           throw new RuntimeRequestError(
             "End the resumed provider terminal for this chat before sending another message.",
           );
         }
         if (dependencies.turns.isActive(conversation.id)) {
+          messageSendStage = "follow-up-preparation";
           if (command.payload.context !== undefined) {
             throw new RuntimeRequestError(
               "Follow-ups while the agent is working cannot add workspace context.",
@@ -227,6 +292,7 @@ export function createTurnInteractionCommandHandler(
               );
             }
             followUpPersisted = true;
+            messageSendStage = "follow-up-publication";
             await dependencies.attachmentResolver?.releaseAll(
               sourceAttachmentIds,
             );
@@ -291,7 +357,42 @@ export function createTurnInteractionCommandHandler(
             "Wait for the current run or read-only review to finish first.",
           );
         }
+        } catch (error) {
+          throw classifiedMessageSendError(error, messageSendStage);
+        }
         const preparationDeadlineAt = messageSendPreparationDeadline();
+        messageSendStage = "turn-admission";
+        let turnAdmission: Awaited<
+          ReturnType<TurnController["acquireTurnAdmission"]>
+        >;
+        const admissionAcquisition = dependencies.turns.acquireTurnAdmission(
+          conversation.id,
+          Math.max(0, preparationDeadlineAt - Date.now()),
+        );
+        try {
+          turnAdmission = await awaitMessageSendPreparation(
+            admissionAcquisition,
+            preparationDeadlineAt,
+          );
+        } catch (error) {
+          void admissionAcquisition.then((lateAdmission) => {
+            lateAdmission?.release();
+          }, () => undefined);
+          throw classifiedMessageSendError(
+            error,
+            messageSendStage,
+          );
+        }
+        if (!turnAdmission) {
+          throw classifiedMessageSendError(
+            new RuntimeRequestError(
+              "Message admission did not become available. Try again in a moment.",
+            ),
+            messageSendStage,
+          );
+        }
+        try {
+        messageSendStage = "attachments";
         let resolvedAttachments: Awaited<
           ReturnType<TrustedAttachmentResolver["resolvePayloads"]>
         > = [];
@@ -347,11 +448,15 @@ export function createTurnInteractionCommandHandler(
               : undefined,
           ]);
         };
+        messageSendStage = "documents";
         let documentPreparation: PreparedDocumentAttachments;
         let extraction: Promise<PreparedDocumentAttachments> | null = null;
         try {
           const extractionAbort = new AbortController();
-          extraction = prepareDocumentAttachments(resolvedAttachments, {
+          extraction = (
+            dependencies.prepareDocumentAttachments
+            ?? prepareDocumentAttachments
+          )(resolvedAttachments, {
             deadlineAt: preparationDeadlineAt,
             generatedAttachmentStore: dependencies.generatedAttachments,
             signal: extractionAbort.signal,
@@ -376,6 +481,7 @@ export function createTurnInteractionCommandHandler(
               : "The selected document could not be read.",
           );
         }
+        messageSendStage = "backend-readiness";
         if (dependencies.enableProviders) {
           const selectedProvider = dependencies.providerInfo().find(
             ({ id }) => id === conversation.providerId,
@@ -433,6 +539,7 @@ export function createTurnInteractionCommandHandler(
             throw error;
           }
         }
+        messageSendStage = "skills";
         let resolvedSkills: Awaited<
           ReturnType<AgentWorkflowController["resolveTurnSkills"]>
         >;
@@ -448,6 +555,7 @@ export function createTurnInteractionCommandHandler(
           await relinquishAttachments();
           throw error;
         }
+        messageSendStage = "provider-transition";
         let providerTransitionReserved = false;
         try {
           assertMessageSendPreparationPending(preparationDeadlineAt);
@@ -494,6 +602,7 @@ export function createTurnInteractionCommandHandler(
           await relinquishAttachments();
           throw error;
         }
+        messageSendStage = "checkpoint";
         let checkpointId: string | null = null;
         let capturedCheckpoint: {
           repositoryPath: string;
@@ -567,6 +676,7 @@ export function createTurnInteractionCommandHandler(
             }
           }
         }
+        messageSendStage = "retention";
         const retentionAbort = new AbortController();
         attachmentRetentionStarted = true;
         const retention = dependencies.conversationAttachments.retain(
@@ -616,7 +726,9 @@ export function createTurnInteractionCommandHandler(
           await relinquishAttachments();
           throw error;
         }
+        messageSendStage = "turn-persistence";
         let queued: ReturnType<typeof dependencies.turns.queue> | null;
+        let durableTurnPersisted = false;
         try {
           if (pendingCheckpoint) {
             checkpointId = dependencies.store.addCheckpoint({
@@ -642,25 +754,46 @@ export function createTurnInteractionCommandHandler(
                 contextRequestId: command.requestId,
                 checkpointId,
                 skills: resolvedSkills.inputs,
-              }, () => acceptRetainedAttachments())
+              }, () => {
+                durableTurnPersisted = true;
+                acceptRetainedAttachments();
+              }, turnAdmission)
             : null;
           if (queued !== null) {
             acceptRetainedAttachments();
           }
         } catch (error) {
+          if (durableTurnPersisted) {
+            messageSendStage = "turn-publication";
+          }
           if (providerTransitionReserved) {
             dependencies.providerTerminalResumes.release(conversation.id);
           }
-          if (pendingCheckpoint && checkpointId === null) {
-            await deleteCheckpoint(
-              pendingCheckpoint.repositoryPath,
-              pendingCheckpoint.ref,
-              conversation.id,
-            ).catch(() => undefined);
+          if (pendingCheckpoint && !durableTurnPersisted) {
+            let removeGitCheckpoint = checkpointId === null;
+            if (checkpointId !== null) {
+              try {
+                removeGitCheckpoint =
+                  dependencies.store.removeUnassociatedCheckpoint(
+                    checkpointId,
+                    conversation.id,
+                  );
+              } catch {
+                removeGitCheckpoint = false;
+              }
+            }
+            if (removeGitCheckpoint) {
+              await deleteCheckpoint(
+                pendingCheckpoint.repositoryPath,
+                pendingCheckpoint.ref,
+                conversation.id,
+              ).catch(() => undefined);
+            }
           }
           await relinquishAttachments();
           throw error;
         }
+        messageSendStage = "turn-publication";
         let attachmentOwnershipAccepted = queued !== null;
         try {
           if (!dependencies.enableProviders) {
@@ -747,6 +880,14 @@ export function createTurnInteractionCommandHandler(
             await relinquishAttachments();
           }
           throw error;
+        }
+        } catch (error) {
+          throw classifiedMessageSendError(
+            error,
+            messageSendStage,
+          );
+        } finally {
+          turnAdmission.release();
         }
       }
       case "agent.stop": {

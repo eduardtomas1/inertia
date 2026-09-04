@@ -22,6 +22,7 @@ export interface CodexMetadata {
 
 export interface CodexMetadataDependencies {
   terminateProcessTree?: ProcessTreeTerminator;
+  signal?: AbortSignal;
 }
 
 function objectValue(value: unknown): JsonObject | undefined {
@@ -143,6 +144,7 @@ export async function readCodexMetadata(
     cwd,
     timeoutMs,
     processLabel: "Codex metadata process tree",
+    signal: dependencies.signal,
     ...(dependencies.terminateProcessTree
       ? { terminateProcessTree: dependencies.terminateProcessTree }
       : {}),

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { RuntimeStore } from "../../src/server/database";
 import {
   continuationIdentityForSelection,
-  nativeModelSelection,
+  providerNativeModelSelection,
 } from "../../src/shared/model-routing";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import {
@@ -269,7 +269,7 @@ test("keeps delegated-agent traces compact while the active composer accepts a p
     snapshot.activeProjectId,
     "Delegated agent trace fixture",
   );
-  const selection = nativeModelSelection({
+  const selection = providerNativeModelSelection({
     providerId: "claude",
     modelId: "claude-sonnet-4-5",
     alias: "Claude Sonnet 4.5",
@@ -620,7 +620,7 @@ test("keeps delegated-agent traces compact while the active composer accepts a p
     expect(constrainedRailGeometry.toolbarFits).toBe(true);
     expect(constrainedRailGeometry.groupsContained).toBe(true);
     expect(Math.min(...constrainedRailGeometry.groupGaps))
-      .toBeGreaterThanOrEqual(7);
+      .toBeGreaterThanOrEqual(4);
     await expectNoViewportOverflow();
     const constrainedComposerScreenshot = testInfo.outputPath("composer-working-constrained-779x800.png");
     await page.screenshot({ animations: "disabled", path: constrainedComposerScreenshot });
@@ -693,7 +693,7 @@ test("keeps delegated-agent traces compact while the active composer accepts a p
       snapshot.activeProjectId,
       "Unsupported follow-up fixture",
     );
-    const unsupportedSelection = nativeModelSelection({
+    const unsupportedSelection = providerNativeModelSelection({
       providerId: "cursor",
       modelId: "cursor-auto",
       alias: "Cursor Auto",

@@ -131,6 +131,9 @@ describe("cross-platform packaged behavior contract", () => {
       expect(normalizedReadme).toContain(expected);
     }
     expect(normalizedReadme).toContain("Do not disable SmartScreen.");
+    expect(normalizedReadme).toContain(
+      "Building the current source for macOS requires macOS 13 or later.",
+    );
     expect(readme).not.toContain("xattr");
     expect(readme).not.toContain("spctl --master-disable");
 
@@ -155,12 +158,17 @@ describe("cross-platform packaged behavior contract", () => {
       "runner: windows-11-arm",
       "runner: macos-15",
       "runner: macos-15-intel",
-      "run: npm run check",
+      "run: npm run check:quality",
+      "run: npm run build:packaged",
       "run: npm run test:native-architecture",
-      "run: npm exec -- playwright test",
-      "run: xvfb-run --auto-servernum npm exec -- playwright test",
-      'run: npm run "${{ matrix.release_dist_script }}"',
-      'run: npm run "${{ matrix.dist_script }}"',
+      "run: npm exec -- playwright test --project=display-sensitive",
+      "run: npm exec -- playwright test --project=isolated",
+      "run: npm exec -- playwright test --project=runtime-recovery",
+      "run: xvfb-run --auto-servernum npm exec -- playwright test --project=display-sensitive",
+      "run: xvfb-run --auto-servernum npm exec -- playwright test --project=isolated",
+      "run: xvfb-run --auto-servernum npm exec -- playwright test --project=runtime-recovery",
+      'run: npm run "${{ matrix.release_package_script }}"',
+      'run: npm run "${{ matrix.package_script }}"',
       "npm run verify:fuses -- \"$app\"",
       "run: npm run test:package-smoke",
       "run: xvfb-run --auto-servernum npm run test:package-smoke",
@@ -180,7 +188,7 @@ describe("cross-platform packaged behavior contract", () => {
       ["Windows x64", "windows-2025", "windows-x64", "x64", 55],
       ["Windows ARM64", "windows-11-arm", "windows-arm64", "arm64", 70],
       ["macOS arm64", "macos-15", "macos-arm64", "arm64", 40],
-      ["macOS x64", "macos-15-intel", "macos-x64", "x64", 45],
+      ["macOS x64", "macos-15-intel", "macos-x64", "x64", 55],
     ] as const) {
       const entry = workflowMatrixEntry(workflow, label);
       expect(entry).toContain(`runner: ${runner}`);
@@ -190,41 +198,78 @@ describe("cross-platform packaged behavior contract", () => {
     }
   });
 
-  it("shards ordinary Windows units and runs the complete gate for release candidates", async () => {
+  it("proves quality once and keeps every platform's unit signal sharded or explicit", async () => {
     const workflow = await source(".github/workflows/ci.yml");
-    const ordinaryCheck = workflowStep(
-      workflow,
-      "Typecheck, unit test, and build",
-    );
-    expect(ordinaryCheck).toContain("if: runner.os != 'Windows'");
-    expect(ordinaryCheck).toContain("run: npm run check");
 
-    const windowsPlatformCheck = workflowStep(
+    // Migrations, architecture, lint, and types are platform independent, so
+    // one gate job owns them and every expensive job waits on it.
+    const qualityGate = workflowStep(
       workflow,
-      "Typecheck and build the Windows platform gate",
+      "Verify migrations, architecture, lint, and types",
     );
-    expect(windowsPlatformCheck).toContain("runner.os == 'Windows'");
-    expect(windowsPlatformCheck).toContain(
-      "!startsWith(github.head_ref, 'codex/release-')",
-    );
-    expect(windowsPlatformCheck).toContain("run: npm run check:platform");
+    expect(qualityGate).toContain("run: npm run check:quality");
+    expect(workflow.match(/^ {4}needs: gate$/gmu)).toHaveLength(3);
 
-    const windowsReleaseCheck = workflowStep(
+    // macOS is the only platform whose unit signal is a plain suite run: Linux
+    // gets the same suite through coverage, and Windows gets it sharded.
+    const macosUnits = workflowStep(workflow, "Run the unit suite");
+    expect(macosUnits).toContain("if: runner.os == 'macOS'");
+    expect(macosUnits).toContain("run: npm test");
+
+    const linuxUnits = workflowStep(
       workflow,
-      "Run the complete Windows release-candidate gate",
+      "Run the unit suite and enforce all-source coverage baselines",
     );
-    expect(windowsReleaseCheck).toContain("runner.os == 'Windows'");
-    expect(windowsReleaseCheck).toContain(
-      "startsWith(github.head_ref, 'codex/release-')",
-    );
-    expect(windowsReleaseCheck).toContain("run: npm run check");
+    expect(linuxUnits).toContain("if: runner.os == 'Linux'");
+    expect(linuxUnits).toContain("run: npm run test:coverage");
 
-    expect(workflow).toContain("name: Windows unit tests (${{ matrix.shard }}/2)");
+    // The sharded windows-2025 job already runs the whole suite, so the x64
+    // matrix entry must not repeat the portable subset. ARM64 has no sharded
+    // job and therefore keeps it as its only Windows unit signal.
+    const portable = workflowStep(
+      workflow,
+      "Run portable runtime and provider protocol suite",
+    );
+    expect(portable).toContain(
+      "if: runner.os != 'Windows' || matrix.arch != 'x64'",
+    );
+    expect(portable).toContain("run: npm run test:portable");
+
+    // Exactly one build per job, carrying notices and the guardian but not the
+    // typecheck the gate already ran, and consumed by packaging unchanged.
+    const build = workflowStep(workflow, "Build the application bundle");
+    expect(build).toContain("id: application_bundle");
+    expect(build).toContain("run: npm run build:packaged");
+    const electronPreparation = workflowStep(
+      workflow,
+      "Prepare Electron end-to-end binary",
+    );
+    expect(electronPreparation).toContain("id: electron_test_binary");
+    expect(electronPreparation).toContain(
+      `run: node -e "console.log(require('electron'))"`,
+    );
+    expect(workflow.indexOf("Prepare Electron end-to-end binary"))
+      .toBeGreaterThan(workflow.indexOf("Build the application bundle"));
+    expect(workflow.indexOf("Prepare Electron end-to-end binary"))
+      .toBeLessThan(workflow.indexOf(
+        "Run display-sensitive Electron end-to-end tests",
+      ));
+    expect(workflow).not.toContain('run: npm run "${{ matrix.dist_script }}"');
+    expect(workflow).not.toContain("run: npm run check:platform");
+
+    expect(workflow).toContain("name: Windows unit tests (${{ matrix.shard }}/4)");
     expect(workflow).toContain("timeout-minutes: 30");
-    expect(workflow).toContain("shard: [1, 2]");
+    expect(workflow).toContain("shard: [1, 2, 3, 4]");
     expect(workflow).toContain(
-      "run: npm test -- --shard=${{ matrix.shard }}/2",
+      "run: npm test -- --shard=${{ matrix.shard }}/4",
     );
+
+    // Real-time scanning dominates hosted Windows install and fixture cost, so
+    // both Windows jobs exclude the throwaway workspace without being able to
+    // fail the run if the cmdlet is unavailable.
+    expect(workflow.match(/Exclude the workspace from Microsoft Defender/gu))
+      .toHaveLength(2);
+    expect(workflow.match(/Add-MpPreference -ExclusionPath/gu)).toHaveLength(4);
 
     const packageJson = JSON.parse(await source("package.json")) as {
       build: { files: string[] };
@@ -243,8 +288,137 @@ describe("cross-platform packaged behavior contract", () => {
       "resources/generated/windows-runtime-job-integrity.json",
     );
 
+    // Packaging consumes the build instead of repeating it, so every dist
+    // script must stay a build followed by its own packaging script and no
+    // packaging script may rebuild from source.
+    for (const [target, packaged] of [
+      ["dist:release:win", "package:release:win"],
+      ["dist:release:win:arm64", "package:release:win:arm64"],
+      ["dist:release:mac", "package:release:mac"],
+      ["dist:release:mac:x64", "package:release:mac:x64"],
+      ["dist:linux", "package:linux"],
+      ["dist:linux:arm64", "package:linux:arm64"],
+    ] as const) {
+      expect(packageJson.scripts[target]).toBe(
+        `npm run build && npm run ${packaged}`,
+      );
+      expect(packageJson.scripts[packaged]).toContain("electron-builder");
+      expect(packageJson.scripts[packaged]).not.toContain("npm run build");
+    }
+    expect(packageJson.scripts["build:packaged"]).toBe(
+      "npm run notices:generate && npm run build:bundle",
+    );
+
+    // Keep the provider regressions that arrived on main while this CI work
+    // was in flight. A conflict resolution must not silently narrow the
+    // portable protocol surface.
+    for (const portableTest of [
+      "tests/server/codex-app-server-subagent-continuation.test.ts",
+      "tests/server/opencode-descendant-completion.test.ts",
+      "tests/server/opencode-descendant-interactions.test.ts",
+      "tests/server/opencode-interactions.test.ts",
+      "tests/server/opencode-sdk-harness.test.ts",
+    ]) {
+      expect(packageJson.scripts["test:portable"]).toContain(portableTest);
+    }
+
+    // These suites read the generated guardian, so each one builds it through
+    // its own npm pre-hook rather than depending on an earlier CI step having
+    // happened to build it first.
+    for (const hook of ["pretest", "pretest:coverage", "pretest:portable"]) {
+      expect(packageJson.scripts[hook]).toBe(
+        "node scripts/build-runtime-process-guardian.mjs",
+      );
+    }
+
+    // A partially restored dependency tree is worse than none, so the shared
+    // install action pins the whole lockfile, runner, and Node identity into
+    // one exact key and offers no restore-keys fallback.
+    const install = await source(
+      ".github/actions/install-dependencies/action.yml",
+    );
+    expect(install).toContain(
+      "key: node-modules-${{ runner.os }}-${{ runner.arch }}-node${{ steps.node.outputs.node-version }}-${{ hashFiles('package-lock.json', 'package.json', '.github/actions/install-dependencies/action.yml', 'scripts/ensure-node-pty-helper.mjs') }}",
+    );
+    expect(install).not.toContain("restore-keys");
+    expect(install).toContain("if: steps.dependencies.outputs.cache-hit != 'true'");
+    expect(install).toContain("run: node scripts/ensure-node-pty-helper.mjs");
+
+    // The minimum-runtime job deliberately keeps an uncached engine-strict
+    // install: proving npm ci itself succeeds on Node 22.13 is its purpose.
+    const minimumRuntime = workflowStep(
+      workflow,
+      "Install locked dependencies without a cache",
+    );
+    expect(minimumRuntime).toContain("run: npm ci --engine-strict");
+    expect(workflow.match(/uses: \.\/\.github\/actions\/install-dependencies/gu))
+      .toHaveLength(3);
+
     const vitest = await source("vitest.config.ts");
     expect(vitest).toContain("maxWorkers: isWindowsCi ? 1 : undefined");
+    expect(vitest).not.toContain("INERTIA_VITEST_MAX_WORKERS");
+    expect(vitest).toContain("testTimeout: isWindowsCi ? 30_000 : 15_000");
+
+    // Specs that pin a window to the primary display share one machine
+    // resource, so they are discovered rather than listed. Separate workflow
+    // steps ensure a display assertion cannot suppress the isolated coverage.
+    const playwright = await source("playwright.config.ts");
+    expect(playwright).toContain('windowDisplay: "primary"');
+    expect(playwright).toContain('name: "display-sensitive"');
+    expect(playwright).toContain('name: "runtime-recovery"');
+    expect(playwright.match(/workers: 1,/gu)).toHaveLength(2);
+    expect(playwright).not.toContain("dependencies:");
+    expect(playwright).toContain("INERTIA_E2E_WORKERS");
+    expect(playwright).toContain("const runtimeRecoveryTag = /@runtime-recovery/u;");
+    expect(playwright).toContain("grepInvert: runtimeRecoveryTag,");
+    expect(playwright).toContain("grep: runtimeRecoveryTag,");
+    expect(playwright).toContain("const testTimeout = 45_000;");
+    expect(playwright).toContain("const assertionTimeout = 15_000;");
+    expect(playwright).toContain("timeout: testTimeout,");
+    expect(playwright).toContain("expect: { timeout: assertionTimeout },");
+    // Only the phase with concurrent Electron instances receives proportional
+    // headroom; the one-worker geometry phase retains its original deadlines.
+    expect(playwright).toContain("timeout: testTimeout * workers");
+    expect(playwright).toContain(
+      "expect: { timeout: assertionTimeout * workers }",
+    );
+    expect(playwright).toContain("timeout: testTimeout * 2,");
+    expect(playwright).toContain(
+      "expect: { timeout: assertionTimeout * 2 }",
+    );
+    expect(playwright).not.toContain("retries:");
+
+    for (const name of [
+      "Run isolated Electron end-to-end tests",
+      "Run isolated Electron end-to-end tests under Xvfb",
+    ]) {
+      const isolatedPhase = workflowStep(workflow, name);
+      expect(isolatedPhase).toContain("if: ${{ !cancelled()");
+      expect(isolatedPhase).toContain(
+        "steps.application_bundle.outcome == 'success'",
+      );
+      expect(isolatedPhase).toContain(
+        "steps.electron_test_binary.outcome == 'success'",
+      );
+      expect(isolatedPhase).toContain("--project=isolated");
+      expect(isolatedPhase).toContain("--output=test-results/isolated");
+    }
+
+    for (const name of [
+      "Run destructive runtime-recovery tests sequentially",
+      "Run destructive runtime-recovery tests sequentially under Xvfb",
+    ]) {
+      const recoveryPhase = workflowStep(workflow, name);
+      expect(recoveryPhase).toContain("if: ${{ !cancelled()");
+      expect(recoveryPhase).toContain(
+        "steps.application_bundle.outcome == 'success'",
+      );
+      expect(recoveryPhase).toContain(
+        "steps.electron_test_binary.outcome == 'success'",
+      );
+      expect(recoveryPhase).toContain("--project=runtime-recovery");
+      expect(recoveryPhase).toContain("--output=test-results/runtime-recovery");
+    }
   });
 
   it("keeps one native smoke implementation for macOS, Windows, and Linux runtime supervision", async () => {
@@ -420,7 +594,8 @@ describe("cross-platform packaged behavior contract", () => {
     expect(releaseUpdates).toContain('channel === "canary"');
     expect(releaseUpdates).toContain("{ version:");
     expect(releaseUpdates).toContain("{ tag_name:");
-    expect(releaseUpdates).toContain("loadElectronAppUpdater(channel)");
+    expect(releaseUpdates).toContain("loadElectronAppUpdater(channel, {");
+    expect(releaseUpdates).toContain("activeAppImagePath: options.activeAppImagePath");
   });
 
   it("registers runtime socket handlers before sending the first hydration frame", async () => {
@@ -486,7 +661,9 @@ describe("cross-platform packaged behavior contract", () => {
     const quitEnd = main.indexOf("\n  });", quitStart);
     const quitHandler = main.slice(quitStart, quitEnd);
     expect(quitHandler).toContain("appUpdateInstallCoordinator?.allowBeforeQuit()");
-    expect(quitHandler).toContain("runPrivilegedCleanup().then(finishQuitAfterCleanup");
+    expect(quitHandler).toContain("runPrivilegedCleanup().then(");
+    expect(quitHandler).toContain("finishNormalShutdownAfterCleanup({");
+    expect(quitHandler).toContain("cleanupConfirmed,");
     expect(main.indexOf("conversationAttachments = null")).toBeLessThan(
       main.indexOf("closeConversationAttachmentAccess(retainedAttachments)"),
     );
@@ -578,6 +755,24 @@ describe("cross-platform packaged behavior contract", () => {
     expect(windowsBuild).toContain('unset "$name"');
     expect(windowsBuild).not.toContain("MACOS_CSC_LINK");
 
+    const portableCoverage = workflow.indexOf(
+      "Run portable runtime and provider protocol suite",
+    );
+    const windowsBundleRefresh = workflowStep(
+      workflow,
+      "Refresh Windows app bundle after portable helper rebuild",
+    );
+    expect(windowsBundleRefresh).toContain("if: runner.os == 'Windows'");
+    expect(windowsBundleRefresh).toContain("run: npm run build:bundle");
+    expect(workflow.indexOf(
+      "Refresh Windows app bundle after portable helper rebuild",
+    ))
+      .toBeGreaterThan(portableCoverage);
+    expect(workflow.indexOf("Run Electron end-to-end tests"))
+      .toBeGreaterThan(
+        workflow.indexOf("Refresh Windows app bundle after portable helper rebuild"),
+      );
+
     const linuxBuild = workflowStep(workflow, "Build Linux release package");
     expect(linuxBuild).toContain("if: runner.os == 'Linux'");
     expect(linuxBuild).not.toContain("_CSC_");
@@ -643,6 +838,13 @@ describe("cross-platform packaged behavior contract", () => {
     expect(workflow).toContain(
       '["Canary job", process.env.PROVIDER_DRIFT_RESULT]',
     );
+    expect(workflow).toContain(
+      '["Linux guardian toolchain", process.env.GUARDIAN_TOOLCHAIN_OUTCOME]',
+    );
+    expect(workflow).toContain(
+      "sudo apt-get install --no-install-recommends --yes binutils linux-libc-dev musl-tools=1.2.4-2",
+    );
+    expect(workflow).toContain("npm run pretest");
     expect(workflow.match(/--connect-timeout 20 --max-time 120/gu)).toHaveLength(2);
   });
 });

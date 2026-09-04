@@ -1,5 +1,6 @@
 import type { RuntimeUpdatePreparationBlocker, RuntimeUpdatePreparationResult } from "../node/runtime-process-protocol.js";
 import type { AppUpdateInstallBlocker, AppUpdateStatus } from "../shared/desktop.js";
+import { finishNormalShutdownAfterCleanup } from "./privileged-shutdown.js";
 
 interface UpdateService {
   current(): AppUpdateStatus;
@@ -25,6 +26,7 @@ export interface AppUpdateInstallCoordinatorOptions {
   privateConnect(): PrivateConnectUpdateGate | null;
   cleanup(): Promise<boolean>;
   finishNormalShutdown(): void;
+  onUnconfirmedShutdown?(): void;
   reportError(error: unknown): void;
 }
 
@@ -73,14 +75,23 @@ export class AppUpdateInstallCoordinator {
     this.mode = "normal-cleanup";
     const stopping = this.releasePreparation()
       .then(() => this.options.cleanup())
-      .then(() => undefined)
-      .catch((error: unknown) => this.options.reportError(error))
-      .finally(() => this.options.finishNormalShutdown());
+      .then((cleanupConfirmed) => {
+        finishNormalShutdownAfterCleanup({
+          cleanupConfirmed,
+          finish: this.options.finishNormalShutdown,
+          onUnconfirmed: () => this.reportUnconfirmedShutdown(),
+        });
+      })
+      .catch((error: unknown) => {
+        this.options.reportError(error);
+        this.reportUnconfirmedShutdown();
+      });
     this.normalShutdown = stopping;
   }
 
   private async prepareAndInstall(): Promise<AppUpdateStatus> {
     const { service } = this.options;
+    let cleanupConfirmed = false;
     try {
       const runtime = this.options.runtime();
       if (!runtime) return this.block("runtime-transition");
@@ -103,23 +114,28 @@ export class AppUpdateInstallCoordinator {
       }
 
       this.cleanupStarted = true;
-      const cleanupConfirmed = await this.options.cleanup();
+      cleanupConfirmed = await this.options.cleanup();
+      if (!cleanupConfirmed && this.mode !== "update-preparing") {
+        return service.failInstall();
+      }
       if (this.mode !== "update-preparing") return service.current();
-      if (!cleanupConfirmed) return this.failClosed();
+      if (!cleanupConfirmed) return this.failClosed(false);
 
       const handedOff = await service.quitAndInstall(() => {
         if (this.mode === "update-preparing") this.mode = "update-handoff";
       });
       if (this.currentMode() === "normal-cleanup") return service.current();
-      if (!handedOff) return this.failClosed();
-      if (this.currentMode() !== "update-handoff") return this.failClosed();
+      if (!handedOff) return this.failClosed(true);
+      if (this.currentMode() !== "update-handoff") return this.failClosed(true);
       return service.current();
     } catch (error) {
       this.options.reportError(error);
-      if (this.mode === "normal-cleanup") return service.current();
+      if (this.mode === "normal-cleanup") {
+        return this.cleanupStarted ? service.failInstall() : service.current();
+      }
       // cleanup() is idempotent. Calling it again here distinguishes a held
       // preparation failure from an irreversible, partially stopped runtime.
-      if (this.cleanupStarted) return this.failClosed();
+      if (this.cleanupStarted) return this.failClosed(cleanupConfirmed);
       await this.releasePreparation();
       return this.block("runtime-transition");
     }
@@ -134,11 +150,25 @@ export class AppUpdateInstallCoordinator {
     return this.mode;
   }
 
-  private failClosed(): AppUpdateStatus {
+  private failClosed(cleanupConfirmed: boolean): AppUpdateStatus {
     const status = this.options.service.failInstall();
     this.mode = "normal-cleanup";
-    this.options.finishNormalShutdown();
+    finishNormalShutdownAfterCleanup({
+      cleanupConfirmed,
+      finish: this.options.finishNormalShutdown,
+      onUnconfirmed: () => this.reportUnconfirmedShutdown(),
+    });
     return status;
+  }
+
+  private reportUnconfirmedShutdown(): void {
+    if (this.options.onUnconfirmedShutdown) {
+      this.options.onUnconfirmedShutdown();
+      return;
+    }
+    this.options.reportError(new Error(
+      "Refusing to exit because privileged shutdown could not be confirmed.",
+    ));
   }
 
   private async releasePreparation(): Promise<void> {

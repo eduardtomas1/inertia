@@ -5,7 +5,7 @@ import {
   type ConversationShell,
   type RuntimeMutationEvent,
 } from "../../src/shared/contracts";
-import { nativeModelSelection } from "../../src/shared/model-routing";
+import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import {
   parseRuntimeResumeRequest,
   projectRuntimeFrame,
@@ -48,7 +48,7 @@ function conversationShell(
     projectId: `${id}-project`,
     title: "Bounded shell",
     providerId: "codex",
-    modelSelection: nativeModelSelection({
+    modelSelection: providerNativeModelSelection({
       providerId: "codex",
       modelId: "default",
       reasoningEffort: "medium",

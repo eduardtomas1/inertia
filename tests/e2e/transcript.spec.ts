@@ -459,8 +459,11 @@ test("keeps a long transcript bounded, anchored, and keyboard navigable", async 
           }
         : null;
     }, rowId);
-    const readerAnchor = await captureReaderAnchor();
-    expect(readerAnchor).not.toBeNull();
+    let readerAnchor = await captureReaderAnchor();
+    await expect.poll(async () => {
+      readerAnchor = await captureReaderAnchor();
+      return readerAnchor;
+    }).not.toBeNull();
     await resizeWindow(1180, 820);
     await expect.poll(async () => {
       const current = readerAnchor

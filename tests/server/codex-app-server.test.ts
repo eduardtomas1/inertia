@@ -314,11 +314,13 @@ describe.sequential("Codex App Server runtime", () => {
       expect.objectContaining({ phase: "info", label: "Guardian is reviewing a sensitive action." }),
       expect.objectContaining({ phase: "started", label: "MCP server starting · workspace-tools" }),
       expect.objectContaining({ phase: "failed", label: "MCP server failed to start · workspace-tools", detail: expect.stringContaining("Authentication must be renewed") }),
-      expect.objectContaining({ phase: "started", label: "Approval auto-review started", activityId: "review-rich", detail: expect.stringContaining("npm run check") }),
-      expect.objectContaining({ phase: "completed", label: "Approval auto-review approved", activityId: "review-rich", detail: expect.stringContaining("Risk: low") }),
+      expect.objectContaining({ phase: "started", label: "Approval auto-review started", activityId: expect.stringMatching(/^inertia:codex-auto-approval:/u), detail: expect.stringContaining("npm run check") }),
+      expect.objectContaining({ phase: "completed", label: "Approval auto-review approved", activityId: expect.stringMatching(/^inertia:codex-auto-approval:/u), detail: expect.stringContaining("Risk: low") }),
       expect.objectContaining({ phase: "info", label: "Approval auto-review escalated to strict review" }),
       expect.objectContaining({ phase: "started", label: "Codex is applying a safety review", detail: expect.stringContaining("Verifying trusted access") }),
       expect.objectContaining({ phase: "info", label: "Additional model verification required", detail: expect.stringContaining("trustedAccessForCyber") }),
+      expect.objectContaining({ phase: "started", label: "Codex is recovering model-provider authentication", detail: expect.stringContaining("Provider: workspace-model") }),
+      expect.objectContaining({ phase: "completed", label: "Codex model-provider authentication recovered", detail: expect.stringContaining("Provider authentication refreshed.") }),
       expect.objectContaining({ phase: "completed", label: "Codex safety review completed" }),
       expect.objectContaining({ phase: "info", label: "Codex thread history was reverted" }),
       expect.objectContaining({ phase: "completed", label: "Codex environment connected", detail: "Environment: workspace-environment" }),
@@ -345,10 +347,25 @@ describe.sequential("Codex App Server runtime", () => {
       expect.objectContaining({ phase: "info", label: "Entered review mode" }),
       expect.objectContaining({ phase: "info", label: "Exited review mode" }),
       expect.objectContaining({ phase: "completed", label: "Context compacted" }),
-      expect.objectContaining({ phase: "started", label: "Plan updated", activityId: "plan-rich", detail: "Progress:\nVerifying implementation" }),
-      expect.objectContaining({ phase: "started", label: "Patch updated", detail: expect.stringContaining("diff --git") }),
+      expect.objectContaining({ phase: "started", label: "Plan updated", detail: "Progress:\nVerifying implementation" }),
+      expect.objectContaining({ phase: "completed", label: "Plan completed" }),
+      expect.objectContaining({ phase: "completed", label: "Patch updated", detail: expect.stringContaining("diff --git") }),
     ]));
     expect(JSON.stringify(activities)).not.toContain("UNRELATED_");
+    expect(JSON.stringify(activities)).not.toContain("STALE_PLAN_DELTA");
+    for (const lifecycleLabels of [
+      ["Turn started", "Turn completed"],
+      ["MCP server starting · workspace-tools", "MCP server failed to start · workspace-tools"],
+      ["Codex is applying a safety review", "Codex safety review completed"],
+      ["Codex is recovering model-provider authentication", "Codex model-provider authentication recovered"],
+      ["Plan updated", "Plan completed"],
+    ]) {
+      const lifecycle = activities.filter(({ label }) =>
+        lifecycleLabels.includes(label));
+      expect(lifecycle).toHaveLength(2);
+      expect(lifecycle[0]?.activityId).toBeTruthy();
+      expect(lifecycle[1]?.activityId).toBe(lifecycle[0]?.activityId);
+    }
   });
 
   it("treats an owned thread closure as a terminal provider failure", async () => {
@@ -1360,12 +1377,13 @@ describe.sequential("Codex App Server runtime", () => {
     });
   });
 
-  it("drains a direct child outcome when the completed parent arrives first", async () => {
+  it("requires a fresh parent continuation after a live child settles", async () => {
     const fake = fakeAppServer();
     process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
     process.env.INERTIA_APP_SERVER_SCENARIO = "parent-before-child";
     const manager = trackedManager(fake.command);
     const subagents: ProviderSubagentEvent[] = [];
+    const statuses: Array<{ status: string; providerState?: string }> = [];
 
     const result = manager.run(nativeProviderRunInput({
       providerId: "codex",
@@ -1378,15 +1396,74 @@ describe.sequential("Codex App Server runtime", () => {
       access: "full",
     }), {
       onSubagent: (event) => subagents.push(event),
+      onStatus: (event) => statuses.push(event),
     });
 
-    await expect(result).resolves.toMatchObject({ status: "completed" });
+    await expect(result).resolves.toMatchObject({
+      status: "completed",
+      text: "Integrated the delegated result.",
+    });
+    expect(statuses).toContainEqual(expect.objectContaining({
+      status: "delegated",
+      providerState: "awaiting delegated work and a fresh parent turn",
+    }));
+    expect(statuses.map(({ status }) => status)).toEqual([
+      "starting",
+      "running",
+      "delegated",
+      "running",
+      "completed",
+    ]);
     expect(subagents.at(-1)).toMatchObject({
       providerAgentId: "child-late",
       providerStatus: "completed",
       status: "completed",
       result: "Verified after the parent.",
     });
+  });
+
+  it("cancels bounded child work while awaiting a parent continuation", async () => {
+    const fake = fakeAppServer();
+    process.env.INERTIA_APP_SERVER_CAPTURE = fake.capturePath;
+    process.env.INERTIA_APP_SERVER_SCENARIO = "parent-before-child-cancel";
+    const manager = trackedManager(fake.command, 500);
+    let cancelled = false;
+
+    const result = manager.run(nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "conversation-parent-first-cancel",
+      runId: "run-parent-first-cancel",
+      turnId: "local-turn-parent-first-cancel",
+      cwd: fake.root,
+      prompt: "Stop while the delegated verifier is still active.",
+      interactionMode: "build",
+      access: "full",
+    }), {
+      onStatus: (event) => {
+        if (
+          cancelled
+          || event.providerState
+            !== "awaiting delegated work and a fresh parent turn"
+        ) return;
+        cancelled = manager.cancel(event.conversationId);
+      },
+    });
+
+    await expect(result).resolves.toMatchObject({
+      status: "cancelled",
+      cleanupConfirmed: true,
+    });
+    expect(cancelled).toBe(true);
+    expect(captured(fake.capturePath).filter(({ method }) =>
+      method === "turn/interrupt")).toEqual([
+      expect.objectContaining({
+        method: "turn/interrupt",
+        params: {
+          threadId: "child-late",
+          turnId: "child-late-turn",
+        },
+      }),
+    ]);
   });
 
   it("keeps a direct completed outcome over a later stale failed collab summary", async () => {

@@ -5,10 +5,8 @@ import { pathToFileURL } from "node:url";
 import {
   type Event,
   type OpencodeClient,
-  type Provider,
 } from "@opencode-ai/sdk/v2";
 
-import type { ProviderModel } from "../../shared/contracts";
 import {
   terminateProcessTreeAndWait,
   type OwnedProcessTreeTermination,
@@ -22,9 +20,7 @@ import {
   type OpenCodeSdkHarnessCapabilities,
 } from "./agent-harness";
 import type { ProviderRunFailure, ProviderRunResult } from "./contracts";
-import type {
-  AgentApprovalDecision,
-} from "./interactions";
+import type { AgentApprovalDecision } from "./interactions";
 import {
   sanitizeProviderActivityDetail,
   sanitizeProviderFailureSummary,
@@ -60,11 +56,13 @@ import {
 } from "./opencode-host-tools";
 import { OpenCodeRunOwnership } from "./opencode-run-ownership";
 import { OpenCodeSessionOwnership } from "./opencode-session-ownership";
+import { openCodeModels } from "./opencode-sdk-metadata";
 import {
   createOpenCodeInteractionState,
   handleOpenCodeInteractionEvent,
   handleOpenCodeEvent,
   openCodeEventRequiresPromptAdmission,
+  openCodeWorkingActivityId,
   replyOpenCodePermission,
   type OpenCodeFailureState,
   type OpenCodePendingApproval,
@@ -88,6 +86,10 @@ export {
   openCodeApprovalDisplay,
   resolveOpenCodeModel,
 } from "./opencode-sdk-support";
+export {
+  readOpenCodeSdkModels,
+  type OpenCodeSdkMetadataOptions,
+} from "./opencode-sdk-metadata";
 const MAX_EVENT_BYTES = 1024 * 1024;
 const MAX_RUN_EVENT_BYTES = 32 * 1024 * 1024;
 const MAX_RUN_EVENTS = 8_192;
@@ -95,7 +97,6 @@ const MAX_RESULT_TEXT_CHARS = 4 * 1024 * 1024;
 const MAX_SERVER_OUTPUT_CHARS = 32 * 1024;
 const START_TIMEOUT_MS = 10_000;
 const INITIALIZATION_TIMEOUT_MS = 30_000;
-const METADATA_PROVIDER_TIMEOUT_MS = 10_000;
 const CANCEL_FORCE_MS = 2_000;
 const RUN_DEADLINE_MS = 24 * 60 * 60 * 1_000;
 const EVENT_INACTIVITY_DEADLINE_MS = 30 * 60 * 1_000;
@@ -147,20 +148,6 @@ export interface OpenCodeSdkHarnessOptions {
   compactionTimestampNow?: () => number;
 }
 
-export interface OpenCodeSdkMetadataOptions {
-  /**
-   * May shorten, but never extend, the production health-check deadline.
-   * Primarily useful for deterministic lifecycle verification.
-   */
-  healthTimeoutMs?: number;
-  /**
-   * May shorten, but never extend, the production provider-catalog deadline.
-   * Primarily useful for deterministic lifecycle verification.
-   */
-  providerTimeoutMs?: number;
-  terminateProcessTree?: ProcessTreeTerminator;
-}
-
 interface OpenCodeRunDeadlines {
   runDeadlineMs: number;
   eventInactivityDeadlineMs: number;
@@ -185,72 +172,6 @@ export function createOpenCodeSdkHarness(
       compactionTimestampNow,
     ),
   };
-}
-
-function openCodeModels(
-  providers: Provider[],
-  defaults: Record<string, string>,
-  connectedProviderIds: readonly string[],
-): ProviderModel[] {
-  const connected = new Set(connectedProviderIds);
-  return providers.filter((provider) => connected.has(provider.id)).flatMap((provider) => Object.values(provider.models).map((model) => {
-    const variants = Object.keys(model.variants ?? {});
-    return {
-      id: `${provider.id}/${model.id}`,
-      label: model.name || model.id,
-      description: [provider.name, model.family, model.status !== "active" ? model.status : undefined].filter(Boolean).join(" · ") || "OpenCode model",
-      isDefault: defaults[provider.id] === model.id,
-      inputModalities: model.capabilities.input.image ? ["text", "image"] : ["text"],
-      reasoningOptions: variants.map((variant) => ({ value: variant, label: variant, description: `${variant} model variant` })),
-      // Catalog variants are explicit overlays; their record order does not
-      // identify the base model's effective default.
-      defaultReasoningEffort: "",
-    } satisfies ProviderModel;
-  })).slice(0, 128);
-}
-
-export async function readOpenCodeSdkModels(
-  executable: string,
-  environment: NodeJS.ProcessEnv,
-  cwd: string,
-  options: OpenCodeSdkMetadataOptions = {},
-): Promise<ProviderModel[]> {
-  const healthTimeoutMs = shortenedTimeout(
-    options.healthTimeoutMs,
-    START_TIMEOUT_MS,
-    "metadata healthTimeoutMs",
-  );
-  const providerTimeoutMs = shortenedTimeout(
-    options.providerTimeoutMs,
-    METADATA_PROVIDER_TIMEOUT_MS,
-    "metadata providerTimeoutMs",
-  );
-  const terminateOwnedProcessTree = options.terminateProcessTree ?? terminateProcessTreeAndWait;
-  const output = new CappedProviderBuffer(MAX_SERVER_OUTPUT_CHARS);
-  const credentials = ownedOpenCodeCredentials(environment);
-  const started = await startOwnedOpenCodeServer(
-    executable,
-    cwd,
-    ownedOpenCodeEnvironment(environment, credentials),
-    output,
-    terminateOwnedProcessTree,
-    "OpenCode metadata server process tree",
-  );
-  const client = createOwnedOpenCodeClient(started.url, cwd, credentials);
-  try {
-    await waitForOpenCodeHealth(client, started.child, healthTimeoutMs);
-    const response = await withOpenCodeRequestDeadline(
-      providerTimeoutMs,
-      "Timed out waiting for the OpenCode provider catalog.",
-      async (signal) => await client.provider.list(
-        { directory: cwd },
-        { signal, throwOnError: true },
-      ),
-    );
-    return openCodeModels(response.data.all, response.data.default, response.data.connected);
-  } finally {
-    await started.terminate(true);
-  }
 }
 
 function startOpenCodeRun(
@@ -290,6 +211,7 @@ function startOpenCodeRun(
     messageId: `msg_${randomUUID().replaceAll("-", "")}`,
     observed: false,
     activityObserved: false,
+    workingActivityStarted: false,
   };
   const hostTools = createOpenCodeHostTools({
     bridge: options.hostTools,
@@ -599,7 +521,11 @@ function startOpenCodeRun(
         startedAt: null,
       };
       let sessionIdleObserved = false;
+      let awaitingParentContinuation = false;
       const pump = pumpOpenCodeEvents(subscribed.stream, sessionId, {
+        onDescendantLive: () => {
+          awaitingParentContinuation = true;
+        },
         onDescendantActivity: () => {
           armEventInactivityDeadline();
           emitter.status(
@@ -624,7 +550,11 @@ function startOpenCodeRun(
             failInteraction,
           );
         },
-        onEvent: async (event) => {
+        onEvent: async (
+          event,
+          hasLiveDescendants,
+          novelRootActivity,
+        ) => {
           if (openCodeEventRequiresPromptAdmission(event)) {
             const admission = ownership.pendingPromptAdmission();
             if (admission && !(await admission)) return;
@@ -649,12 +579,25 @@ function startOpenCodeRun(
             failInteraction,
           );
           if (
-            ownership.eventSequence() !== ownershipSequence
+            awaitingParentContinuation
+            && !hasLiveDescendants
+            && novelRootActivity
+            && ownership.eventSequence() !== ownershipSequence
+            && event.type !== "session.next.prompt.admitted"
+            && event.type !== "session.next.prompted"
+          ) {
+            awaitingParentContinuation = false;
+          }
+          if (
+            (
+              ownership.eventSequence() !== ownershipSequence
+              && (!awaitingParentContinuation || novelRootActivity)
+            )
             || event.type === "session.error"
             || event.type === "session.deleted"
           ) armEventInactivityDeadline();
         },
-        isDone: async (event) => {
+        isDone: async (event, hasLiveDescendants) => {
           if (compacting) {
             return event.type === "session.error"
               || completesRequestedOpenCodeCompaction(event, manualCompaction);
@@ -667,6 +610,11 @@ function startOpenCodeRun(
             failureState.terminal = failureState.pending;
             return true;
           }
+          if (hasLiveDescendants) {
+            awaitingParentContinuation = true;
+            return false;
+          }
+          if (awaitingParentContinuation) return false;
           acceptingFollowUps = false;
           const admissions = [...pendingFollowUps];
           if (admissions.length > 0) {
@@ -847,6 +795,19 @@ function startOpenCodeRun(
     cleanupConfirmed = true,
   ): ProviderRunResult {
     const canonical = openCodeCanonicalResult(emittedParts, eventState);
+    if (promptLifecycle.workingActivityStarted) {
+      emitter.activity(
+        "turn",
+        status === "failed" ? "failed" : "completed",
+        status === "completed"
+          ? "OpenCode completed work"
+          : status === "cancelled"
+            ? "OpenCode stopped work"
+            : "OpenCode work failed",
+        { activityId: openCodeWorkingActivityId(promptLifecycle.messageId) },
+      );
+      promptLifecycle.workingActivityStarted = false;
+    }
     emitter.status(status, error);
     return {
       providerId: "opencode",
@@ -1110,10 +1071,18 @@ async function pumpOpenCodeEvents(
   stream: AsyncGenerator<Event>,
   sessionId: string,
   handlers: {
+    onDescendantLive: () => void;
     onDescendantActivity: () => void;
     onDescendantInteraction: (event: Event) => void | Promise<void>;
-    onEvent: (event: Event) => void | Promise<void>;
-    isDone: (event: Event) => boolean | Promise<boolean>;
+    onEvent: (
+      event: Event,
+      hasLiveDescendants: boolean,
+      novelRootActivity: boolean,
+    ) => void | Promise<void>;
+    isDone: (
+      event: Event,
+      hasLiveDescendants: boolean,
+    ) => boolean | Promise<boolean>;
   },
 ): Promise<void> {
   const maxRunEvents = MAX_RUN_EVENTS * PROVIDER_RUN_BUDGET_BURSTS;
@@ -1130,17 +1099,30 @@ async function pumpOpenCodeEvents(
   );
   for await (const event of stream) {
     eventBudget.observe(event);
-    const { scope, active } = sessionOwnership.observe(event);
+    const {
+      scope,
+      active,
+      lifecycleProgress,
+      novelRootActivity,
+    } = sessionOwnership.observe(event);
     if (scope === "unrelated") continue;
     if (scope === "descendant") {
-      if (active) handlers.onDescendantActivity();
+      if (sessionOwnership.hasLiveDescendants()) handlers.onDescendantLive();
+      if (active || lifecycleProgress) handlers.onDescendantActivity();
       if (active && openCodeEventRequiresPromptAdmission(event)) {
         await handlers.onDescendantInteraction(event);
       }
       continue;
     }
-    await handlers.onEvent(event);
-    if (await handlers.isDone(event)) return;
+    await handlers.onEvent(
+      event,
+      sessionOwnership.hasLiveDescendants(),
+      novelRootActivity === true,
+    );
+    if (await handlers.isDone(
+      event,
+      sessionOwnership.hasLiveDescendants(),
+    )) return;
   }
   throw new Error("OpenCode closed its event stream before the session completed.");
 }

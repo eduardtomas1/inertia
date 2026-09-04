@@ -36,6 +36,7 @@ type DailyWorkCommand = Extract<
 >;
 
 export interface DailyWorkDialogProps {
+  open?: boolean;
   status: ConnectionStatus;
   request(command: CommandWithoutId): Promise<ServerEvent>;
   onClose(): void;
@@ -142,6 +143,7 @@ function ProviderSummary({
 }
 
 export function DailyWorkDialog({
+  open = true,
   status,
   request,
   onClose,
@@ -169,6 +171,7 @@ export function DailyWorkDialog({
   useNativePreviewSuspension(true);
 
   useEffect(() => {
+    if (!open) return;
     const restoreFocus = focusModalOnAnimationFrame(
       () => closeRef.current?.focus(),
     );
@@ -183,11 +186,11 @@ export function DailyWorkDialog({
       document.removeEventListener("keydown", closeOnEscape, true);
       restoreFocus();
     };
-  }, []);
+  }, [open]);
 
   useEffect(() => {
     const generation = ++loadGeneration.current;
-    if (status !== "online") return;
+    if (!open || status !== "online") return;
     setRequestLoading(true);
     setRequestError(null);
     void request(dailyWorkCommand(new Date(`${selectedDateKey}T12:00:00`))).then((event) => {
@@ -203,7 +206,7 @@ export function DailyWorkDialog({
     }).finally(() => {
       if (loadGeneration.current === generation) setRequestLoading(false);
     });
-  }, [refreshVersion, request, selectedDateKey, status]);
+  }, [open, refreshVersion, request, selectedDateKey, status]);
 
   return (
     <div

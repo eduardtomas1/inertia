@@ -9,7 +9,7 @@ import type {
   WorkspaceRun,
 } from "../../src/shared/contracts";
 import { defaultSettings } from "../../src/shared/contracts";
-import { nativeModelSelection } from "../../src/shared/model-routing";
+import { providerNativeModelSelection } from "../../src/shared/model-routing";
 
 const SIDEBAR_WORK_SECTIONS_STORAGE_KEY = "inertia:sidebar:work-sections:v1";
 
@@ -41,7 +41,7 @@ function conversation(
     projectId: project.id,
     title,
     providerId,
-    modelSelection: nativeModelSelection({ providerId }),
+    modelSelection: providerNativeModelSelection({ providerId }),
     continuationIdentity: null,
     model: "",
     reasoningEffort: "",
@@ -117,19 +117,23 @@ function renderSidebar(
     sidebarMode?: AppSnapshot["settings"]["sidebarMode"];
     splitConversationId?: string | null;
     dailyWorkOpen?: boolean;
+    view?: "workspace" | "settings" | "usage";
   } = {},
 ) {
   const onSnoozeConversation = vi.fn();
   const onOpenDailyWork = vi.fn();
   const onClose = vi.fn();
+  const onViewChange = vi.fn();
+  const onOpenHome = vi.fn();
   const sidebarProps = {
     connectionStatus: "online" as const,
-    view: "workspace" as const,
+    view: options.view ?? "workspace" as const,
     open: true,
     busy: false,
     layoutWidth: 276,
     onClose,
-    onViewChange: vi.fn(),
+    onViewChange,
+    onOpenHome,
     onImportProject: vi.fn(),
     onSelectConversation,
     splitConversationId: options.splitConversationId ?? null,
@@ -173,6 +177,8 @@ function renderSidebar(
     onSnoozeConversation,
     onOpenDailyWork,
     onClose,
+    onViewChange,
+    onOpenHome,
     rerenderSnapshot(nextSnapshot: AppSnapshot) {
       view.rerender(<Sidebar snapshot={nextSnapshot} {...sidebarProps} />);
     },
@@ -187,6 +193,14 @@ afterEach(() => {
 });
 
 describe("compact Work sidebar", () => {
+  it("opens the global project launcher from the Inertia logo", () => {
+    const view = renderSidebar([]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Start a new chat" }));
+
+    expect(view.onOpenHome).toHaveBeenCalledOnce();
+  });
+
   it("does not reshuffle working rows when providers publish activity updates", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 7, 11, 12));
@@ -299,6 +313,13 @@ describe("compact Work sidebar", () => {
     expect(view.onClose).toHaveBeenCalledTimes(1);
   });
 
+  it("returns from Settings to the current workspace", () => {
+    const view = renderSidebar([], vi.fn(), [], { view: "settings" });
+    fireEvent.click(screen.getByRole("button", { name: "Workspace" }));
+    expect(view.onViewChange).toHaveBeenCalledWith("workspace");
+    expect(view.onClose).toHaveBeenCalledOnce();
+  });
+
   it("marks the Daily work destination while its dialog is open", () => {
     renderSidebar([], vi.fn(), [], { dailyWorkOpen: true });
 
@@ -325,7 +346,7 @@ describe("compact Work sidebar", () => {
       new Date(2026, 7, 10, 17),
       {
         providerId: "claude",
-        modelSelection: nativeModelSelection({ providerId: "claude" }),
+        modelSelection: providerNativeModelSelection({ providerId: "claude" }),
         branch: "main",
         status: "completed",
         completedAt: new Date(2026, 7, 10, 18).toISOString(),
@@ -455,7 +476,7 @@ describe("compact Work sidebar", () => {
       }),
       conversation("claude", "Review metadata", new Date(2026, 7, 10, 17), {
         providerId: "claude",
-        modelSelection: nativeModelSelection({ providerId: "claude" }),
+        modelSelection: providerNativeModelSelection({ providerId: "claude" }),
         branch: "main",
       }),
       conversation("earlier", "Audit legacy focus", new Date(2026, 7, 6, 9), {

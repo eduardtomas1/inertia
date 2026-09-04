@@ -1,5 +1,6 @@
 import {
   parseRuntimeWorkerCommand,
+  type RuntimeRestartReason,
   type RuntimeWorkerEvent,
 } from "../node/runtime-process-protocol.js";
 import { startRuntime, type RunningRuntime } from "./index.js";
@@ -23,6 +24,10 @@ import {
   activateRuntimeOwnedProcessRegistry,
   awaitRuntimeOwnedProcessCleanupConfirmed,
 } from "../node/runtime-owned-processes.js";
+import {
+  activateAfterRuntimeWorkerStartupPreflight,
+  RuntimeWorkerStartupPreflightError,
+} from "./runtime-worker-startup-preflight.js";
 
 let runtime: RunningRuntime | null = null;
 const databaseRecoveryOperations = new DatabaseRecoveryOperationQueue();
@@ -44,6 +49,7 @@ let updatePreparation: {
 } | null = null;
 let lastReleasedUpdatePreparation: { operationId: string; generation: number } | null = null;
 let shutdownExitCode = 0;
+let restartReason: RuntimeRestartReason | null = null;
 let packageSmokePdfController: AbortController | null = null;
 let packageSmokePdfOperation: Promise<void> | null = null;
 let packageSmokeImageController: AbortController | null = null;
@@ -85,6 +91,7 @@ const agentBrowser = new RuntimeAgentBrowserBrokerClient(post);
 async function finishShutdown(
   activeRuntime: RunningRuntime | null,
   exitCode: number,
+  preRegistryNoRuntime = false,
 ): Promise<void> {
   await completeRuntimeWorkerShutdown({
     runtime: activeRuntime,
@@ -98,6 +105,9 @@ async function finishShutdown(
       agentBrowser.close();
     },
     ownedProcessCleanupConfirmed: awaitRuntimeOwnedProcessCleanupConfirmed,
+    ...(preRegistryNoRuntime
+      ? { noRuntimeCleanupProof: { kind: "pre-registry-no-runtime" as const } }
+      : {}),
     post,
     awaitStoppedAcknowledgement: () => stoppedAcknowledged,
     exit: (code) => process.exit(code),
@@ -120,6 +130,17 @@ async function shutdown(exitCode = 0): Promise<void> {
   // startRuntime owns completion if a shutdown request races its startup.
   if (starting && !activeRuntime) return;
   await finishShutdown(activeRuntime, shutdownExitCode);
+}
+
+function requestRuntimeRestart(reason: RuntimeRestartReason): void {
+  try {
+    if (!restartReason) {
+      restartReason = reason;
+      post({ type: "runtime.restart-requested", reason });
+    }
+  } finally {
+    void shutdown(1);
+  }
 }
 
 parentPort.on("message", (messageEvent) => {
@@ -579,13 +600,19 @@ parentPort.on("message", (messageEvent) => {
   updatePreparation = null;
   lastReleasedUpdatePreparation = null;
   try {
-    activateRuntimeOwnedProcessRegistry(
-      command.options.dataDirectory,
-      command.options.runtimeGenerationId,
-      command.options.systemBootId,
-      command.options.runtimeProcessGuardianPath
-        ? { darwinGuardianPath: command.options.runtimeProcessGuardianPath }
-        : {},
+    const guardianPath = command.options.runtimeProcessGuardianPath;
+    activateAfterRuntimeWorkerStartupPreflight(
+      { platform: process.platform, ...(guardianPath ? { guardianPath } : {}) },
+      (linuxGuardianExecutable) => activateRuntimeOwnedProcessRegistry(
+        command.options.dataDirectory,
+        command.options.runtimeGenerationId,
+        command.options.systemBootId,
+        {
+          ...(guardianPath ? { darwinGuardianPath: guardianPath } : {}),
+          ...(linuxGuardianExecutable ? { linuxGuardianExecutable } : {}),
+          onTainted: () => requestRuntimeRestart("owned-process-tainted"),
+        },
+      ),
     );
   } catch (error) {
     starting = false;
@@ -595,6 +622,11 @@ parentPort.on("message", (messageEvent) => {
         ? error.message
         : "Runtime process ownership could not be initialized.",
     });
+    if (error instanceof RuntimeWorkerStartupPreflightError) {
+      stopping = true;
+      void finishShutdown(null, 1, true);
+      return;
+    }
     void shutdown(1);
     return;
   }
@@ -625,7 +657,9 @@ parentPort.on("message", (messageEvent) => {
       snapshotDigest: authority.snapshotDigest,
       currentRuntimeGenerationId,
     }),
-    onOwnedProcessCleanupUnconfirmed: () => { void shutdown(1); },
+    onOwnedProcessCleanupUnconfirmed: () => requestRuntimeRestart(
+      "owned-process-cleanup-unconfirmed",
+    ),
     backendCredentials: credentials,
     attachments,
     conversationAttachmentStoreOperations: conversationAttachmentStore.runner,
@@ -643,6 +677,7 @@ parentPort.on("message", (messageEvent) => {
       websocketUrl: startedRuntime.websocketUrl,
       databaseRecovery: startedRuntime.databaseRecovery,
     });
+    void startedRuntime.startPostReadyWork();
     if (command.options.packageSmokePdf) {
       packageSmokePdfController = new AbortController();
       packageSmokePdfOperation = runPackagedPdfSmoke(

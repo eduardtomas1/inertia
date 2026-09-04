@@ -179,9 +179,17 @@ test("keeps hostile native previews beneath trusted workspace overlays", async (
   await page.getByRole("textbox", { name: "Preview address" })
     .fill(hostilePreviewUrl);
   await page.getByRole("button", { name: "Go", exact: true }).click();
-  await expect.poll(
-    () => app.nativePreviewIsVisible(hostilePreviewUrl),
-  ).toBe(true);
+  await expect.poll(async () => ({
+    alerts: await page.getByRole("alert").allTextContents(),
+    native: await app.nativePreviewSnapshot(hostilePreviewUrl),
+    stage: await page.locator(".preview-safe-stage").boundingBox(),
+  })).toMatchObject({
+    alerts: [],
+    native: {
+      exactUrlAttached: true,
+      visible: true,
+    },
+  });
 
   await selectWorkspaceTool(page.locator(".workspace-panel"), "Environment");
   await expect.poll(
@@ -224,12 +232,13 @@ test("keeps hostile native previews beneath trusted workspace overlays", async (
   await expect(commitButton).toBeEnabled();
   await commitButton.click();
   expect(await app.nativePreviewIsVisible(hostilePreviewUrl)).toBe(false);
-  await expect(page.getByRole("dialog", { name: "Commit changes" }))
-    .toBeVisible();
+  const commitDialog = page.getByRole("dialog", { name: "Commit changes" });
+  await expect(commitDialog).toBeVisible();
   await expect.poll(
     () => app.nativePreviewIsVisible(hostilePreviewUrl),
   ).toBe(false);
-  await page.getByRole("button", { name: "Close commit dialog" }).click();
+  await page.keyboard.press("Escape");
+  await expect(commitDialog).toHaveCount(0);
   await expect.poll(
     () => app.nativePreviewIsVisible(hostilePreviewUrl),
   ).toBe(true);

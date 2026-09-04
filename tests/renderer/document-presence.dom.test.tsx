@@ -63,36 +63,29 @@ describe("document presence", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it("keeps visible elapsed work live across blur and catches up once visibility resumes", async () => {
+  it("updates visible elapsed work at most once per second and stops while hidden", async () => {
     vi.useFakeTimers();
     const startedAt = "2026-08-19T08:00:00.000Z";
     vi.setSystemTime(new Date(startedAt));
     let visibility: DocumentVisibilityState = "visible";
-    let focused = true;
     vi.spyOn(document, "visibilityState", "get")
       .mockImplementation(() => visibility);
-    vi.spyOn(document, "hasFocus").mockImplementation(() => focused);
     const view = render(<LiveElapsed startedAt={startedAt} />);
 
     expect(view.getByText("0.0s")).toBeInTheDocument();
-    await act(async () => vi.advanceTimersByTime(100));
-    expect(view.getByText("0.1s")).toBeInTheDocument();
-
-    focused = false;
-    await act(async () => window.dispatchEvent(new Event("blur")));
     await act(async () => vi.advanceTimersByTime(999));
-    expect(view.getByText("0.1s")).toBeInTheDocument();
+    expect(view.getByText("0.0s")).toBeInTheDocument();
     await act(async () => vi.advanceTimersByTime(1));
-    expect(view.getByText("1.1s")).toBeInTheDocument();
+    expect(view.getByText("1.0s")).toBeInTheDocument();
 
     visibility = "hidden";
     await act(async () => document.dispatchEvent(new Event("visibilitychange")));
     await act(async () => vi.advanceTimersByTime(2_000));
-    expect(view.getByText("1.1s")).toBeInTheDocument();
+    expect(view.getByText("1.0s")).toBeInTheDocument();
 
     visibility = "visible";
     await act(async () => document.dispatchEvent(new Event("visibilitychange")));
-    expect(view.getByText("3.1s")).toBeInTheDocument();
+    expect(view.getByText("3.0s")).toBeInTheDocument();
   });
 
   it("keeps persisted suspend time out of the live work clock", async () => {
@@ -100,16 +93,17 @@ describe("document presence", () => {
     const startedAt = "2026-08-19T08:00:00.000Z";
     vi.setSystemTime(new Date("2026-08-19T08:00:10.000Z"));
     vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
-    vi.spyOn(document, "hasFocus").mockReturnValue(true);
     const view = render(
       <LiveElapsed startedAt={startedAt} excludedMs={7_000} />,
     );
 
     expect(view.getByText("3.0s")).toBeInTheDocument();
-    await act(async () => vi.advanceTimersByTime(100));
-    expect(view.getByText("3.1s")).toBeInTheDocument();
+    await act(async () => vi.advanceTimersByTime(999));
+    expect(view.getByText("3.0s")).toBeInTheDocument();
+    await act(async () => vi.advanceTimersByTime(1));
+    expect(view.getByText("4.0s")).toBeInTheDocument();
 
     view.rerender(<LiveElapsed startedAt={startedAt} excludedMs={9_000} />);
-    expect(view.getByText("1.1s")).toBeInTheDocument();
+    expect(view.getByText("2.0s")).toBeInTheDocument();
   });
 });

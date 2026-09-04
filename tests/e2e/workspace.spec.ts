@@ -134,13 +134,13 @@ test("collapses composer settings without displacing send and right-aligns user 
   await expect(compactOptions.getByRole("menuitem", { name: /^Access\b/ })).toBeVisible();
   await modeItem.hover();
   const modeOptions = page.getByRole("menu", { name: "Mode options" });
-  await expect(modeOptions).toBeVisible();
-  await expect(modeOptions.getByRole("menuitemradio").first()).toBeVisible();
+  await expect(modeOptions).toHaveCount(0);
   await modeItem.click();
   await expect(modeOptions).toBeVisible();
-  await page.mouse.move(20, 20);
-  await expect(modeOptions).toBeHidden();
+  await expect(modeOptions.getByRole("menuitemradio").first()).toBeFocused();
+  await modeOptions.getByRole("button", { name: "Back to composer options" }).click();
   await expect(compactOptions).toBeVisible();
+  await expect(modeItem).toBeFocused();
   await page.keyboard.press("Escape");
 
   const userAlignmentGap = await page.evaluate(() => {
@@ -181,10 +181,10 @@ test("contains commit dialog focus and restores its trigger", async () => {
   expect(rendererErrors).toEqual([]);
 });
 
-test("keeps the macOS brand in the native titlebar row and navigates it home", async ({ browserName: _browserName }, testInfo) => {
+test("keeps the macOS brand in the native titlebar row and starts a new chat", async ({ browserName: _browserName }, testInfo) => {
   await resizeWindow(1440, 920);
   const shell = page.locator(".app-shell");
-  const brand = page.getByRole("button", { name: "Go to workspace" });
+  const brand = page.getByRole("button", { name: "Start a new chat" });
   await expect(shell).toHaveClass(new RegExp(`platform-${process.platform}`));
 
   if (process.platform === "darwin") {
@@ -243,6 +243,11 @@ test("keeps the macOS brand in the native titlebar row and navigates it home", a
   await expect(page.getByRole("button", { name: "General", exact: true }))
     .toHaveAttribute("aria-current", "page");
   await brand.click();
-  await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
+  await expect(page.getByRole("heading", {
+    name: "What should we build today?",
+  })).toBeVisible();
+  const composer = page.getByLabel("Message composer");
+  await expect(composer.getByRole("combobox", { name: "Project" })).toBeVisible();
+  await expect(composer.getByRole("textbox", { name: "Message" })).toBeVisible();
   expect(rendererErrors).toEqual([]);
 });

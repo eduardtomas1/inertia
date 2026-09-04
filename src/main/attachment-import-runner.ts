@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import type { UtilityProcess } from "electron";
 
 import {
@@ -95,6 +97,7 @@ export function createAttachmentImportUtilityRunner(
     operation: AttachmentImportFileOperation,
     signal?: AbortSignal,
   ): AttachmentImportValidationExecution => {
+    const operationId = randomUUID();
     let resolveStopped!: () => void;
     let rejectStopped!: (error: Error) => void;
     const stopped = new Promise<void>((resolve, reject) => {
@@ -183,6 +186,7 @@ export function createAttachmentImportUtilityRunner(
         try {
           child.postMessage({
             type: "attachment-import.validate",
+            operationId,
             operation,
           } satisfies AttachmentImportWorkerRequest);
         } catch {
@@ -199,13 +203,23 @@ export function createAttachmentImportUtilityRunner(
           return;
         }
         const event = parseAttachmentImportWorkerEvent(value);
-        if (!event || reported) {
+        if (!event || event.operationId !== operationId || reported) {
           stop(unavailable(
             "Attachment validation returned an invalid result.",
           ));
           return;
         }
         reported = event;
+        try {
+          child.postMessage({
+            type: "attachment-import.result-ack",
+            operationId,
+          } satisfies AttachmentImportWorkerRequest);
+        } catch {
+          stop(unavailable(
+            "Attachment validation acknowledgement could not be delivered.",
+          ));
+        }
       });
       child.once("error", () => {
         if (!spawned) {

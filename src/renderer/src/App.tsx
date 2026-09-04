@@ -14,8 +14,8 @@ import {
 import { defaultSettings } from "@shared/contracts/app";
 import { selectConversationWorkspaceRun } from "../../shared/attention";
 import "./detached-chat-workbench.css";
-import type { ProjectImportInput } from "../../shared/project-import";
 import { AppLayout } from "./components/AppLayout";
+import { DialogPresence } from "./components/DialogPresence";
 import { LoadingMark } from "./components/ui";
 import type { WorkspaceSceneProps } from "./components/WorkspaceScene";
 import { useInertiaConnection } from "./hooks/useInertiaConnection";
@@ -24,35 +24,26 @@ import { useProviderMaintenance } from "./hooks/useProviderMaintenance";
 import { useProviderQuotaNotices } from "./hooks/useProviderQuotaNotices";
 import { useConversationProjection } from "./hooks/useConversationProjection";
 import { useAsyncOperationQueue, useAuthoritativeConversationCreateQueue, useWorkspaceAuthorityCommandQueue } from "./hooks/useConversationSelectionQueue";
-import {
-  agentWorkflowRouteIdentity,
-  agentWorkflowTargetConversation,
-  useAgentWorkflows,
-} from "./hooks/useAgentWorkflows";
+import { agentWorkflowRouteIdentity, agentWorkflowTargetConversation, useAgentWorkflows } from "./hooks/useAgentWorkflows";
 import { useBackendProfiles } from "./hooks/useBackendProfiles";
 import { useDesktopTools } from "./hooks/useDesktopTools";
 import { useDetachedChatWindows } from "./hooks/useDetachedChatWindows";
 import { useDraftConversation } from "./hooks/useDraftConversation";
-import {
-  useActivityActions,
-  type PreviewWorkspaceRun,
-} from "./hooks/useActivityActions";
+import { useActivityActions, type PreviewWorkspaceRun } from "./hooks/useActivityActions";
 import { useStableActions, useStableController } from "./hooks/useStableController";
 import { useAppUpdate } from "./app-update";
 import { useWorkspaceTools } from "./hooks/useWorkspaceTools";
 import { useConversationPaneLayout } from "./hooks/useConversationPaneLayout";
 import { useSplitWorkspaceScene } from "./hooks/useSplitWorkspaceScene";
 import { useMultiSpawn } from "./hooks/useMultiSpawn";
+import { useProjectChatNavigation } from "./hooks/useProjectChatNavigation";
 import { useAppRuntimeActions } from "./hooks/useAppRuntimeActions";
 import { useTheme } from "./hooks/useTheme";
 import { useWorkspaceLayout } from "./hooks/useWorkspaceLayout";
 import { useDocumentPresence } from "./hooks/useDocumentPresence";
 import { shouldMarkWorkspaceRunSeen, workspaceAttentionObstructed } from "./utils/attentionVisibility";
 import { buildNewConversationPayload, type NewConversationLocation, withNewConversationModelSelection } from "./lib/newConversation";
-import {
-  focusWorkspacePreviewAddress,
-  routeWorkspaceRunPreview,
-} from "./utils/workspacePreviewFocus";
+import { focusWorkspacePreviewAddress, routeWorkspaceRunPreview } from "./utils/workspacePreviewFocus";
 import { defaultConversationPayloadForProject } from "./utils/defaultConversationSelection";
 import {
   cacheColorTheme,
@@ -78,9 +69,8 @@ import { requestComposerPrefill } from "./utils/composerPrefill";
 import { canFollowUpSubagentTrace } from "./utils/subagentDisclosure";
 import { prepareComposerDetachment } from "./utils/composerOwnership";
 import type { AppView } from "./appView";
-const focusPrimaryPreview = (): void => {
-  focusWorkspacePreviewAddress("primary");
-};
+const focusPrimaryPreview = (): void => focusWorkspacePreviewAddress("primary");
+
 export function commandMayChangeWorkspaceAuthority(
   command: CommandWithoutId,
 ): boolean {
@@ -310,15 +300,6 @@ export default function App(): React.JSX.Element {
     () => connection.snapshot?.providers.find(({ id }) => id === authProviderId) ?? null,
     [authProviderId, connection.snapshot?.providers],
   );
-  const selectedMaintenanceProviderId = conversation?.providerId as
-    | ProviderMaintenanceProviderId
-    | undefined;
-  const selectedMaintenanceStatus = selectedMaintenanceProviderId
-    ? providerMaintenance.statuses.get(selectedMaintenanceProviderId) ?? null
-    : null;
-  const selectedMaintenanceOperation = selectedMaintenanceProviderId
-    ? providerMaintenance.operations.get(selectedMaintenanceProviderId) ?? null
-    : null;
   const visibleConversationRun = useMemo(
     () => conversation
       ? selectConversationWorkspaceRun(conversation.id, connection.snapshot?.runs ?? [])
@@ -397,12 +378,6 @@ export default function App(): React.JSX.Element {
     type: "conversation.select",
     payload: { conversationId },
   }), [selectionCommandQueue]);
-  const navigateToView = useCallback((nextView: AppView) => {
-    if (nextView !== "workspace") {
-      conversationSelectionGenerationRef.current += 1;
-    }
-    setView(nextView);
-  }, []);
   const draftConversation = useDraftConversation({
     snapshot: connection.snapshot,
     settings,
@@ -412,9 +387,43 @@ export default function App(): React.JSX.Element {
     persistedConversationId: conversation?.id ?? null,
     updatePersistedConversation: updateConversationById,
   });
-  const sendMessage = draftConversation.sendFromComposer;
+  const {
+    globalChatActive,
+    globalProjectChangeId,
+    deactivateGlobalChat,
+    exitGlobalChat,
+    importProject: confirmProjectImport,
+    navigateToView,
+    openGlobalChat,
+    selectGlobalChatProject,
+    selectProject,
+    sendMessage,
+  } = useProjectChatNavigation({
+    project,
+    projects: connection.snapshot?.projects ?? [],
+    busyAction,
+    draftConversation,
+    selectionCommandQueue,
+    conversationSelectionGenerationRef,
+    startupSurface: effectiveWorkspaceStartupSurface,
+    showStartupSurface,
+    updateSplitConversationId,
+    setActionError,
+    setSidebarOpen,
+    setView,
+  });
+  const importProject = async (): Promise<void> => { if (!busyAction) setAddProjectOpen(true); };
   const updateConversation = draftConversation.updateConversation;
   const discardDraftConversation = draftConversation.discard;
+  const selectedMaintenanceProviderId = (
+    draftConversation.conversation ?? conversation
+  )?.providerId as ProviderMaintenanceProviderId | undefined;
+  const selectedMaintenanceStatus = selectedMaintenanceProviderId
+    ? providerMaintenance.statuses.get(selectedMaintenanceProviderId) ?? null
+    : null;
+  const selectedMaintenanceOperation = selectedMaintenanceProviderId
+    ? providerMaintenance.operations.get(selectedMaintenanceProviderId) ?? null
+    : null;
   const workflowConversation = agentWorkflowTargetConversation(
     conversation,
     draftConversation.conversation,
@@ -551,26 +560,10 @@ export default function App(): React.JSX.Element {
     visibleConversationRun,
   ]);
 
-  const importProject = async () => {
-    if (!busyAction) setAddProjectOpen(true);
-  };
-  const confirmProjectImport = async (input: ProjectImportInput): Promise<void> => {
-    if (!await draftConversation.importProject(input)) return;
-    setView("workspace");
-    setSidebarOpen(false);
-    showStartupSurface(effectiveWorkspaceStartupSurface);
-  };
-  const selectProject = (nextProject: Project) => {
-    if (nextProject.id === project?.id) return;
-    conversationSelectionGenerationRef.current += 1;
-    void selectionCommandQueue("project.select", {
-      type: "project.select",
-      payload: { projectId: nextProject.id },
-    }).then(() => updateSplitConversationId(null)).catch(() => undefined);
-  };
   const selectConversationInMain = useCallback((
     nextConversation: Conversation,
   ) => {
+    exitGlobalChat();
     setSuppressedMainConversationIds((current) => {
       if (!current.has(nextConversation.id)) return current;
       const next = new Set(current);
@@ -617,6 +610,7 @@ export default function App(): React.JSX.Element {
     });
   }, [
     conversation,
+    exitGlobalChat,
     selectConversationCommand,
     splitConversation,
     updateSplitConversationId,
@@ -699,6 +693,7 @@ export default function App(): React.JSX.Element {
       void detachedChats.focus(nextConversation.id).catch(() => undefined);
       return;
     }
+    exitGlobalChat();
     setSuppressedMainConversationIds((current) => {
       if (!current.has(nextConversation.id)) return current;
       const next = new Set(current);
@@ -757,6 +752,7 @@ export default function App(): React.JSX.Element {
   ) => {
     if (!targetProject) return;
     if (!connection.snapshot) return;
+    deactivateGlobalChat();
     const payload = defaultConversationPayloadForProject(
       connection.snapshot,
       settings,
@@ -930,6 +926,7 @@ export default function App(): React.JSX.Element {
   });
   const workspaceSceneActions = useStableActions({
       importProject,
+      selectGlobalChatProject,
       createConversation,
       createConversationForSelection,
       sendMessage,
@@ -985,6 +982,8 @@ export default function App(): React.JSX.Element {
     project,
     draftConversation: draftConversation.conversation,
     workspaceToolsUnavailable,
+    globalChatActive,
+    globalProjectChangeId,
     connection,
     providerMaintenance,
     projection: conversationProjection,
@@ -1012,6 +1011,8 @@ export default function App(): React.JSX.Element {
     desktopTools,
     detailLoading,
     draftConversation.conversation,
+    globalChatActive,
+    globalProjectChangeId,
     planSteps,
     agentWorkflows,
     project,
@@ -1165,7 +1166,7 @@ export default function App(): React.JSX.Element {
 
   return (
     <>
-    {addProjectOpen && <Suspense fallback={null}><AddProjectDialog onClose={() => setAddProjectOpen(false)} onImport={confirmProjectImport} /></Suspense>}
+    <Suspense fallback={null}><DialogPresence open={addProjectOpen}><AddProjectDialog onClose={() => setAddProjectOpen(false)} onImport={confirmProjectImport} /></DialogPresence></Suspense>
     <AppLayout
       platform={platform}
       documentActive={documentActive}
@@ -1188,6 +1189,7 @@ export default function App(): React.JSX.Element {
       setPaletteOpen={setPaletteOpen}
       project={project}
       conversation={conversation}
+      headerConversation={draftConversation.conversation ?? conversation}
       splitConversationId={splitConversation?.id ?? null}
       detachedConversationIds={detachedChats.conversationIds}
       detachedChatLimitReached={detachedChats.atLimit}
@@ -1217,6 +1219,7 @@ export default function App(): React.JSX.Element {
       actions={{
         run: runUserCommand,
         importProject,
+        openGlobalChat,
         selectProject,
         selectConversation,
         openConversationInSplit,

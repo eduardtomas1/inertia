@@ -123,6 +123,14 @@ export function initializeInertiaReleaseChannel(
     && !marker.includes("\0")
     ? dirname(marker)
     : null;
+  const testTemporaryDirectory = environment.INERTIA_TEST_TEMP_DIR;
+  if (
+    environment.NODE_ENV === "test"
+    && typeof testTemporaryDirectory === "string"
+    && isAbsolute(testTemporaryDirectory)
+    && testTemporaryDirectory.length <= 4_096
+    && !testTemporaryDirectory.includes("\0")
+  ) app.setPath("temp", testTemporaryDirectory);
   if (configuration.channel === "canary") {
     app.setName(configuration.productName);
     app.setPath("userData", packageSmokeRoot
@@ -179,6 +187,15 @@ export function releaseArtifactName(
   return architecture === "arm64"
     ? `Inertia-Canary-${version}-arm64.AppImage`
     : `Inertia-Canary-${version}.AppImage`;
+}
+
+/** Durable installed identity; public release artifact names may remain versioned. */
+export function installedApplicationName(
+  channel: InertiaReleaseChannel,
+  platform: "darwin" | "win32" | "linux",
+): string {
+  const productName = CHANNELS[channel].productName;
+  return platform === "linux" ? `${productName}.AppImage` : productName;
 }
 
 export function releasePageUrl(

@@ -1,4 +1,4 @@
-import { KNOWN_HARNESS_IDS, type HarnessId } from "../model-routing";
+import { CURRENT_KNOWN_HARNESS_IDS, type HarnessId } from "../model-routing";
 
 export type PrivateConnectNetworkPolicy =
   | "disabled"
@@ -88,6 +88,14 @@ const PRIVATE_CONNECT_PROMPT_SAFETY: Readonly<Record<string, PrivateConnectPromp
         + "write or command. Cursor controls project reads, and the Private Connect answer "
         + "can include project-derived text, so this is not a sandbox.",
     },
+    "gemini-acp": {
+      ...UNSUPPORTED_PRIVATE_CONNECT_PROMPT_SAFETY,
+      explanation:
+        "Gemini CLI policy, trusted MCP configuration, or allowlists can authorize "
+        + "actions without emitting an ACP permission request. Because Inertia cannot "
+        + "guarantee local approval for every write or command, Private Connect prompts "
+        + "are refused for Gemini conversations.",
+    },
     "kimi-acp": {
       ...APPROVAL_ROUTED,
       headline: "Provider-controlled reads · Local approval required for reported actions",
@@ -163,4 +171,4 @@ export function privateConnectPromptSafetyLabel(
 }
 
 export const PRIVATE_CONNECT_PROMPT_SAFETY_HARNESS_IDS: readonly string[] =
-  KNOWN_HARNESS_IDS;
+  CURRENT_KNOWN_HARNESS_IDS;

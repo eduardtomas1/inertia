@@ -142,6 +142,60 @@ describe("RuntimeStore repository compatibility", () => {
     store.close();
   });
 
+  it("persists a native Gemini route built from current provider fields", async () => {
+    const { databasePath, store, workspacePath } = await createStore();
+    const project = store.createProject("Gemini", workspacePath);
+    const conversation = store.createConversation(project.id, "Gemini chat", {
+      providerId: "gemini",
+      model: "gemini-2.5-pro",
+    });
+
+    expect(conversation).toMatchObject({
+      providerId: "gemini",
+      modelSelection: {
+        harnessId: "gemini-acp",
+        backendProfileId: "builtin:gemini",
+        backendProfileDisplayName: "Google Gemini",
+        modelId: "gemini-2.5-pro",
+      },
+    });
+    const turn = store.beginAgentTurn({
+      id: "gemini-turn",
+      conversationId: conversation.id,
+      runId: "gemini-run",
+      content: "Use the current Gemini route.",
+      providerId: "gemini",
+      harnessId: "gemini-acp",
+      backendProfileId: "builtin:gemini",
+      model: "gemini-2.5-pro",
+      modelAlias: null,
+      reasoningEffort: "",
+      interactionMode: "build",
+      accessMode: "supervised",
+      providerSessionBefore: null,
+      usageAtStart: null,
+      configurationRevision: 0,
+      association: "authoritative",
+    }).turn;
+    expect(turn.modelSelection).toMatchObject({
+      harnessId: "gemini-acp",
+      backendProfileId: "builtin:gemini",
+      backendProfileDisplayName: "Google Gemini",
+    });
+    store.close();
+
+    const reopened = new RuntimeStore(databasePath, workspacePath, {
+      recoverInterruptedRuns: false,
+    });
+    expect(reopened.conversation(conversation.id).modelSelection).toEqual(
+      conversation.modelSelection,
+    );
+    expect(reopened.agentTurn(turn.id).modelSelection).toEqual(
+      turn.modelSelection,
+    );
+    reopened.close();
+  });
+
   it("persists streamed message content without reordering the conversation", async () => {
     const { databasePath, store, workspacePath } = await createStore();
     const project = store.createProject("Streaming", workspacePath);

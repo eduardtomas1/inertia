@@ -24,6 +24,36 @@ export function drainRuntimeRecordRequests<
 
 export type RuntimeCleanupRecoveryOutcome = "recovered" | "blocked";
 
+export function claimStartupRecoveryDeadlineExtension(
+  record: RuntimeProcessRecord,
+): boolean {
+  // Recovery work owns one bounded window; the exact final receipt owns one
+  // fresh readiness window. Replays cannot claim another extension.
+  if (
+    record.ready || !record.acceptingReady
+    || record.startupRecoveryDeadlineExtended
+    || record.cleanupReceiptIds.size > 0
+    || record.legacyRecoveryAuthorityIds.size > 0
+    || record.modernDarwinRecoveryAuthority !== null
+  ) return false;
+  record.startupRecoveryDeadlineExtended = true;
+  return true;
+}
+
+export function shouldRecoverUnconfirmedWindowsTree(
+  record: RuntimeProcessRecord,
+  confirmed: boolean,
+  attempted: boolean,
+  platform = process.platform,
+): boolean {
+  // A persisted named Job is the only Windows authority that proves the
+  // runtime root and every descendant are covered when taskkill loses a race.
+  return !confirmed
+    && !attempted
+    && platform === "win32"
+    && record.durableProcessContainment?.kind === "windows-job-v1";
+}
+
 export function recoverUnconfirmedRuntimeCleanup(options: {
   record: RuntimeProcessRecord;
   recoverOwnedProcesses: NonNullable<RuntimeSupervisorOptions["recoverOwnedProcesses"]>;
@@ -83,10 +113,12 @@ export function createRuntimeProcessRecord(options: {
     manualModernRecoveryGeneration:
       options.modernDarwinRecoveryAuthority !== undefined
       && options.modernDarwinRecoveryAuthority !== null,
+    startupRecoveryDeadlineExtended: false,
     ready: false,
     acceptingReady: true,
     cleanupConfirmed: false,
     cleanupRecoveryRequired: false,
+    durableProcessContainment: null,
     generationCleanupConfirmed: false,
     processTreeTerminationConfirmed: true,
     processTreeTermination: null,

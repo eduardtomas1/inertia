@@ -15,7 +15,7 @@ describe("terminal shutdown deadline", () => {
   it("includes bounded process admission in ordinary close headroom", () => {
     expect(terminalCloseTimeoutMs("linux")).toBe(9_500);
     expect(terminalCloseTimeoutMs("darwin")).toBe(12_750);
-    expect(terminalCloseTimeoutMs("win32")).toBe(5_500);
+    expect(terminalCloseTimeoutMs("win32")).toBe(8_000);
   });
 
   it("keeps the Linux terminal close inside the authoritative runtime deadline", () => {

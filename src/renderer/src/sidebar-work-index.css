@@ -15,7 +15,6 @@
   left: 0;
   width: 100%;
   padding-bottom: 2px;
-  will-change: transform;
 }
 
 .work-thread-section-toggle:focus-visible {
@@ -46,10 +45,9 @@
 
 /* The previous animation drove this element's own box-shadow, which replaced
    the 1.5px sidebar-bg separator above and let the badge merge into the
-   provider icon while working. The waves now ride on pseudo-elements, so the
+   provider icon while working. The wave now rides on a pseudo-element, so the
    separator survives. */
-.activity-thread.status-working .activity-thread-state-mark::before,
-.activity-thread.status-working .activity-thread-state-mark::after {
+.activity-thread.status-working .activity-thread-state-mark::before {
   /* This badge overlaps the provider icon inside a 42px row, so its wave
      travels less far than the standalone status dots. */
   --thread-ripple-reach: 1.9;
@@ -60,10 +58,6 @@
   content: "";
   animation: thread-working-ripple var(--thread-ripple-duration)
     var(--thread-ripple-ease) infinite;
-}
-
-.activity-thread.status-working .activity-thread-state-mark::after {
-  animation-delay: calc(var(--thread-ripple-duration) / -2);
 }
 
 .activity-thread-trailing {
@@ -122,6 +116,20 @@
   max-width: 34px;
 }
 
+.work-thread-meta > .activity-thread-repository-meta,
+.work-thread-meta > .activity-thread-branch-meta {
+  display: none;
+}
+
+.sidebar.is-wide .work-thread-meta > .activity-thread-repository-meta,
+.sidebar.is-wide .work-thread-meta > .activity-thread-branch-meta {
+  display: inline-flex;
+}
+
+.work-thread-meta > .activity-thread-project-meta {
+  flex: 1 1 auto;
+}
+
 .sidebar.is-wide .activity-thread-select {
   padding-right: 9px;
   padding-left: 9px;
@@ -148,7 +156,8 @@
   }
 }
 
-.app-shell[data-document-visible="false"] .activity-thread.status-working .activity-thread-state-mark {
+.app-shell[data-document-visible="false"]
+  .activity-thread.status-working .activity-thread-state-mark::before {
   animation-play-state: paused;
 }
 

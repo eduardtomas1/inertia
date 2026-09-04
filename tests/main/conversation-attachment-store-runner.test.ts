@@ -24,6 +24,22 @@ function utility(child: FakeUtilityProcess): UtilityProcess {
   return child as unknown as UtilityProcess;
 }
 
+function operationId(child: FakeUtilityProcess): string {
+  const request = child.postMessage.mock.calls
+    .map(([value]) => value as Record<string, unknown>)
+    .find(({ type }) => type === "conversation-attachment-store.perform");
+  expect(request?.operationId).toEqual(expect.any(String));
+  return request!.operationId as string;
+}
+
+function reportResult(child: FakeUtilityProcess, ok = true): void {
+  child.emit("message", {
+    type: "conversation-attachment-store.result",
+    operationId: operationId(child),
+    ok,
+  });
+}
+
 describe("conversation attachment store utility runner", () => {
   it("waits for exit after a valid result", async () => {
     const child = new FakeUtilityProcess();
@@ -32,9 +48,10 @@ describe("conversation attachment store utility runner", () => {
     });
     const running = runner(operation);
     child.emit("spawn");
-    child.emit("message", {
-      type: "conversation-attachment-store.result",
-      ok: true,
+    reportResult(child);
+    expect(child.postMessage).toHaveBeenLastCalledWith({
+      type: "conversation-attachment-store.result-ack",
+      operationId: operationId(child),
     });
     const settled = vi.fn();
     void running.result.then(settled);
@@ -65,14 +82,8 @@ describe("conversation attachment store utility runner", () => {
     });
     const duplicateRunning = duplicateRunner(operation);
     duplicate.emit("spawn");
-    duplicate.emit("message", {
-      type: "conversation-attachment-store.result",
-      ok: true,
-    });
-    duplicate.emit("message", {
-      type: "conversation-attachment-store.result",
-      ok: true,
-    });
+    reportResult(duplicate);
+    reportResult(duplicate);
     expect(duplicate.kill).toHaveBeenCalledOnce();
     duplicate.emit("exit", 1);
     await expect(duplicateRunning.result).rejects.toThrow("invalid result");
@@ -101,13 +112,60 @@ describe("conversation attachment store utility runner", () => {
     });
     const running = runner(operation);
     child.emit("spawn");
-    child.emit("message", {
-      type: "conversation-attachment-store.result",
-      ok: true,
-    });
+    reportResult(child);
     child.emit("exit", code, signal);
     await expect(running.result).rejects.toThrow("stopped unexpectedly");
     await expect(running.stopped).resolves.toBeUndefined();
+  });
+
+  it("rejects exit before a terminal result without sending an acknowledgement", async () => {
+    const child = new FakeUtilityProcess();
+    const runner = createConversationAttachmentStoreUtilityRunner({
+      spawn: () => utility(child),
+    });
+    const running = runner(operation);
+    child.emit("spawn");
+    child.emit("exit", 0);
+
+    await expect(running.result).rejects.toThrow("stopped unexpectedly");
+    expect(child.postMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("kills a worker when the exact result acknowledgement cannot be delivered", async () => {
+    const child = new FakeUtilityProcess();
+    const runner = createConversationAttachmentStoreUtilityRunner({
+      spawn: () => utility(child),
+    });
+    const running = runner(operation);
+    child.emit("spawn");
+    child.postMessage.mockImplementationOnce(() => {
+      throw new Error("ack channel closed");
+    });
+    reportResult(child);
+
+    expect(child.kill).toHaveBeenCalledOnce();
+    child.emit("exit", 1);
+    await expect(running.result).rejects.toThrow("acknowledgement");
+    await expect(running.stopped).resolves.toBeUndefined();
+  });
+
+  it("rejects a terminal result for a different operation", async () => {
+    const child = new FakeUtilityProcess();
+    const runner = createConversationAttachmentStoreUtilityRunner({
+      spawn: () => utility(child),
+    });
+    const running = runner(operation);
+    child.emit("spawn");
+    child.emit("message", {
+      type: "conversation-attachment-store.result",
+      operationId: crypto.randomUUID(),
+      ok: true,
+    });
+
+    expect(child.kill).toHaveBeenCalledOnce();
+    expect(child.postMessage).toHaveBeenCalledTimes(1);
+    child.emit("exit", 1);
+    await expect(running.result).rejects.toThrow("invalid result");
   });
 
   it("rejects a result received before utility startup", async () => {
@@ -118,6 +176,7 @@ describe("conversation attachment store utility runner", () => {
     const running = runner(operation);
     child.emit("message", {
       type: "conversation-attachment-store.result",
+      operationId: crypto.randomUUID(),
       ok: true,
     });
     expect(child.kill).toHaveBeenCalledOnce();
@@ -176,6 +235,55 @@ describe("conversation attachment store utility runner", () => {
     await expect(running.stopped).resolves.toBeUndefined();
   });
 
+  it("retries a pre-spawn cancellation kill after startup", async () => {
+    const child = new FakeUtilityProcess();
+    child.kill.mockReturnValueOnce(false);
+    const controller = new AbortController();
+    const runner = createConversationAttachmentStoreUtilityRunner({
+      spawn: () => utility(child),
+    });
+    const running = runner(operation, controller.signal);
+
+    controller.abort(new Error("cancelled before spawn"));
+    expect(child.kill).toHaveBeenCalledOnce();
+    child.emit("spawn");
+    expect(child.kill).toHaveBeenCalledTimes(2);
+    expect(child.postMessage).not.toHaveBeenCalled();
+    child.emit("exit", 1);
+
+    await expect(running.result).rejects.toThrow("cancelled before spawn");
+    await expect(running.stopped).resolves.toBeUndefined();
+  });
+
+  it("retries a pre-spawn kill even when startup follows the grace deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      const child = new FakeUtilityProcess();
+      child.kill.mockReturnValue(false);
+      const controller = new AbortController();
+      const runner = createConversationAttachmentStoreUtilityRunner({
+        spawn: () => utility(child),
+        killGraceMs: 10,
+      });
+      const running = runner(operation, controller.signal);
+      const result = expect(running.result).rejects.toThrow("cancelled before spawn");
+      const stopped = expect(running.stopped).rejects.toThrow("unconfirmed");
+
+      controller.abort(new Error("cancelled before spawn"));
+      expect(child.kill).toHaveBeenCalledOnce();
+      await vi.advanceTimersByTimeAsync(10);
+      await result;
+      await stopped;
+
+      child.emit("spawn");
+      expect(child.kill).toHaveBeenCalledTimes(2);
+      expect(child.postMessage).not.toHaveBeenCalled();
+      child.emit("exit", 1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("bounds active utilities and queued operations", async () => {
     const children: FakeUtilityProcess[] = [];
     const runner = createConversationAttachmentStoreUtilityRunner({
@@ -199,20 +307,14 @@ describe("conversation attachment store utility runner", () => {
     await expect(overflow.stopped).resolves.toBeUndefined();
 
     children[0].emit("spawn");
-    children[0].emit("message", {
-      type: "conversation-attachment-store.result",
-      ok: true,
-    });
+    reportResult(children[0]);
     children[0].emit("exit", 0);
     await expect(first.result).resolves.toBeUndefined();
     await vi.waitFor(() => expect(children).toHaveLength(3));
 
     for (const child of children.slice(1)) {
       child.emit("spawn");
-      child.emit("message", {
-        type: "conversation-attachment-store.result",
-        ok: true,
-      });
+      reportResult(child);
       child.emit("exit", 0);
     }
     await expect(second.result).resolves.toBeUndefined();
@@ -244,10 +346,7 @@ describe("conversation attachment store utility runner", () => {
     expect(children).toHaveLength(1);
 
     children[0].emit("spawn");
-    children[0].emit("message", {
-      type: "conversation-attachment-store.result",
-      ok: true,
-    });
+    reportResult(children[0]);
     children[0].emit("exit", 0);
     await expect(active.result).resolves.toBeUndefined();
     expect(children).toHaveLength(1);
@@ -313,10 +412,7 @@ describe("conversation attachment store utility runner", () => {
       const failedStopped = expect(failed.stopped).rejects.toThrow("unconfirmed");
       const siblingResult = expect(sibling.result).rejects.toThrow("unconfirmed");
       children.forEach((child) => child.emit("spawn"));
-      children[1].emit("message", {
-        type: "conversation-attachment-store.result",
-        ok: true,
-      });
+      reportResult(children[1]);
       controller.abort(new Error("cancelled active helper"));
       await vi.advanceTimersByTimeAsync(10);
 

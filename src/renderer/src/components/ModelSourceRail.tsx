@@ -5,6 +5,7 @@ import {
   Code2,
   Command,
   MousePointer2,
+  Sparkles,
   Star,
   type LucideIcon,
 } from "lucide-react";
@@ -37,6 +38,7 @@ const providerIcons: Readonly<Record<string, LucideIcon>> = {
   codex: Command,
   claude: Bot,
   cursor: MousePointer2,
+  gemini: Sparkles,
   opencode: Code2,
 };
 

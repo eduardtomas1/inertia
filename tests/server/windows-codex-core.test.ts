@@ -97,7 +97,7 @@ describe("Windows Codex discovery primitives", () => {
         "/s",
         "/v:off",
         "/c",
-        "\"C:\\Users\\Calm^ Dev\\AppData\\Roaming\\npm\\opencode.cmd ^\"serve^\" ^\"--hostname=127.0.0.1^\" ^\"--port=0^\"\"",
+        "\"C:\\Users\\Calm^ Dev\\AppData\\Roaming\\npm\\opencode.cmd ^\"serve^\" ^\"--pure^\" ^\"--hostname=127.0.0.1^\" ^\"--port=0^\"\"",
       ],
       windowsVerbatimArguments: true,
     });

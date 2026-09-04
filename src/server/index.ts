@@ -106,6 +106,8 @@ import { runRecoveryImportWorker } from "./persistence/database-recovery-import-
 import { runPackagedImageRetentionSmoke } from "./runtime/attachments/package-smoke-image";
 import type { RunningRuntime, RuntimeOptions } from "./runtime-types";
 import { RuntimeUpdatePreparationGate } from "./runtime-update-preparation";
+import { gitScanCoordinator } from "./git/scan-coordinator";
+import { gitInspectionLifecycle } from "./git/inspection-lifecycle";
 import { recordSystemSuspendInterval } from "./runtime/system-suspend-coordinator";
 import {
   initializeRuntimePersistence,
@@ -142,6 +144,9 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   let agentThreads: AgentThreadRuntime | undefined;
   let duoLaunches: DuoLaunchCoordinator | null = null;
   let closed = false;
+  const runtimeLifetimeAbort = new AbortController();
+  let postReadyWorkStarted = false;
+  let postReadyWork: Promise<void> = Promise.resolve();
   let databaseRecoveryImportActive = false;
   let activeRuntimeCommands = 0;
   const updatePreparation = new RuntimeUpdatePreparationGate({
@@ -259,12 +264,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const projectIdentityCandidates = store.shellSnapshot().projects.map(
     ({ id, path }) => ({ id, path }),
   );
-  const projectIdentityRefresh: Promise<void> = runtimeSafetyLock
-    ? Promise.resolve()
-    : trackRuntimeOperation(() => projectIdentities
-        .refreshAll(projectIdentityCandidates)
-        .catch(() => undefined)
-        .then(() => testOnlyProjectIdentityRefresh));
+  let projectIdentityRefresh: Promise<void> = Promise.resolve();
   const projectIdentityAuthority = {
     revalidate: async (projectId: string, projectPath: string) => {
       if (projectIdentityIsUsable(projectIdentities.state(projectId))) {
@@ -297,6 +297,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   });
   const providers = new ProviderManager({
     metadataCache,
+    lifetimeSignal: runtimeLifetimeAbort.signal,
     commands: options.codexBinaryPath
       ? { codex: options.codexBinaryPath }
       : savedSettings.codexBinaryPath
@@ -449,7 +450,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       const metadata = await providers.metadata(
         detection.provider.id,
         options.defaultWorkspacePath,
-        { force: forceMetadata },
+        { force: forceMetadata, signal: runtimeLifetimeAbort.signal },
       ).catch(() => providers.cachedMetadata(detection.provider.id));
       return providerSnapshot(detection, metadata);
     };
@@ -458,6 +459,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         cwd: options.defaultWorkspacePath,
         timeoutMs: 4_000,
         refreshEnvironment,
+        signal: runtimeLifetimeAbort.signal,
       });
       const detected = providerSnapshot(
         detection,
@@ -477,6 +479,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         cwd: options.defaultWorkspacePath,
         timeoutMs: 4_000,
         refreshEnvironment,
+        signal: runtimeLifetimeAbort.signal,
       });
       const previous = new Map(providerInfo.map((provider) => [provider.id, provider]));
       providerInfo = detections.map((detection) => {
@@ -504,7 +507,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     await trackRuntimeOperation(async () => {
       activeProviderRefreshes += 1;
       try {
-        await testOnlyProviderRefresh?.();
+        await testOnlyProviderRefresh?.(runtimeLifetimeAbort.signal);
         if (closed) return;
         await refreshProviderInfoCore(
           providerId,
@@ -613,7 +616,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         const metadata = await providers.metadata(
           providerId,
           options.defaultWorkspacePath,
-          { fields, force: true },
+          { fields, force: true, signal: runtimeLifetimeAbort.signal },
         );
         applyProviderMetadata(providerId, metadata);
       },
@@ -648,12 +651,9 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     turns,
     dataDirectory,
     () => providerInfo,
-    { workspaceRuns },
+    { workspaceRuns, runtimeClosed: () => closed },
   );
   duoLaunches = duoLaunchCoordinator;
-  if (!runtimeSafetyLock) {
-    await duoLaunchCoordinator.resumeComparisons();
-  }
 
   const executeCommand = createRuntimeCommandExecutor({
     handlers: [
@@ -870,37 +870,64 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   if (!address || typeof address === "string") { store.close(); throw new Error("Runtime did not receive a local port."); }
   const websocketUrl = `ws://127.0.0.1:${address.port}${websocketPath}`; detachedChatRuntimeSecurity.activate(websocketUrl);
 
-  // Reconcile durable pending artifacts only after the runtime can serve the
-  // already-terminal turn snapshot. Restart recovery must not hold the app
-  // startup screen behind Git work.
-  if (!runtimeSafetyLock) {
-    artifactReconciliationActive = true;
-    artifactReconciliation = turnGitArtifacts.reconcile()
-      .then((changed) => {
-        if (changed && !closed) broadcastSnapshot();
+  const startPostReadyWork = (): Promise<void> => {
+    if (postReadyWorkStarted) return postReadyWork;
+    if (closed || runtimeSafetyLock) return Promise.resolve();
+    postReadyWorkStarted = true;
+
+    // These best-effort tasks can own Git or provider child processes. They
+    // begin only after the worker has published runtime.ready so a slow scan
+    // cannot consume the bounded startup/recovery window or taint a generation
+    // that never became usable.
+    try {
+      store.startBackups();
+    } catch {
+      // Backup scheduling is maintenance; startup remains authoritative.
+    }
+    projectIdentityRefresh = trackRuntimeOperation(() => projectIdentities
+      .refreshAll(projectIdentityCandidates)
+      .catch(() => undefined)
+      .then(() => {
+        if (!closed) broadcastSnapshot();
       })
+      .then(() => testOnlyProjectIdentityRefresh))
+      .catch(() => undefined);
+    postReadyWork = trackRuntimeOperation(() =>
+      duoLaunchCoordinator.resumeComparisons()
+        .then(() => {
+          if (!closed) broadcastSnapshot();
+        }))
+      .catch(() => undefined);
+    artifactReconciliationActive = true;
+    artifactReconciliation = trackRuntimeOperation(() =>
+      turnGitArtifacts.reconcile()
+        .then((changed) => {
+          if (changed && !closed) broadcastSnapshot();
+        }))
       .catch(() => undefined)
       .finally(() => {
         artifactReconciliationActive = false;
       });
-  }
 
-  if (enableProviders) {
-    void refreshProviderInfo(undefined, true).then(async () => {
-      // Remote version advisories are best-effort UI data and own no shutdown resources.
-      if (!closed) await providerMaintenance.refresh(PROVIDER_IDS, false);
-    }).catch(() => {
-      if (closed) return;
-      providerInfo = providerInfo.map((provider) => ({
-        ...provider,
-        installState: "error",
-        authState: "error",
-        canRun: false,
-        statusMessage: "Agent discovery failed",
-      }));
-      broadcastSnapshot();
-    });
-  }
+    if (enableProviders) {
+      void refreshProviderInfo(undefined, true).then(async () => {
+        // Remote version advisories are best-effort UI data and own no
+        // shutdown resources.
+        if (!closed) await providerMaintenance.refresh(PROVIDER_IDS, false);
+      }).catch(() => {
+        if (closed) return;
+        providerInfo = providerInfo.map((provider) => ({
+          ...provider,
+          installState: "error",
+          authState: "error",
+          canRun: false,
+          statusMessage: "Agent discovery failed",
+        }));
+        broadcastSnapshot();
+      });
+    }
+    return postReadyWork;
+  };
 
   const privateConnectGateway = new PrivateConnectRuntimeGateway({
     shell: currentSnapshot,
@@ -977,6 +1004,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         initializedConversationAttachments,
         signal,
       ),
+    startPostReadyWork,
     websocketUrl,
     databaseRecovery: store.databaseRecoveryReport(),
     recordSystemSuspendInterval: (interval) => recordSystemSuspendInterval(store, interval, broadcast, broadcastSnapshot),
@@ -1156,14 +1184,19 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     close: async (cause = "runtime-shutdown") => {
       if (closed) return;
       closed = true;
+      runtimeLifetimeAbort.abort(new Error("The runtime is shutting down."));
       projectIdentities.dispose();
-      await projectIdentityRefresh;
       snapshotBroadcasts.close();
       secureFileAuthorities.clear();
       await runRuntimeShutdownPhases({
-        quiesceRuntimeWork: async () => {
-          await updatePreparation.drainTracked();
-          await projectIdentities.drain();
+        quiesceRuntimeWork: async ({ deadlineAt }) => {
+          turnGitArtifacts.beginShutdown(deadlineAt);
+          await gitInspectionLifecycle.cancelAndDrainWhile(async () => {
+            await gitScanCoordinator.cancelAndDrainWhile(async () => {
+              await updatePreparation.drainTracked();
+              await projectIdentities.drain();
+            });
+          });
         },
         independentDrains: [
           () => initializedConversationAttachments.close(),
@@ -1174,6 +1207,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         disposeTurnsAndProviders: () => turns.dispose(cause),
         settleArtifacts: async () => {
           await artifactReconciliation;
+          await turnGitArtifacts.settleShutdown();
         },
         terminateClients: () => {
           runtimeSync.terminateAll((client) => client.terminate());

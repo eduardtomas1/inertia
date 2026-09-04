@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { useState } from "react";
+import { StrictMode, useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TerminalPanel } from "../../src/renderer/src/components/TerminalPanel";
@@ -59,6 +59,74 @@ beforeEach(() => {
 });
 
 describe("TerminalPanel retained ownership", () => {
+  it("persists the live capability when Strict Mode replays initialization", async () => {
+    let sequence = 0;
+    const createdIds = [
+      "45444444-4444-4444-8444-444444444441",
+      "45444444-4444-4444-8444-444444444442",
+    ];
+    const sendCommand = vi.fn(async (sent: ClientCommand): Promise<ServerEvent> => {
+      if (sent.type === "terminal.create") {
+        return {
+          type: "terminal.created",
+          requestId: sent.requestId,
+          terminalId: createdIds[Math.min(sequence++, createdIds.length - 1)]!,
+        };
+      }
+      if (sent.type === "terminal.attach") {
+        return {
+          type: "terminal.created",
+          requestId: sent.requestId,
+          terminalId: sent.payload.terminalId,
+        };
+      }
+      return { type: "request.ok", requestId: sent.requestId };
+    });
+    const storageKey = `inertia:terminal-sessions:v1:${projectId}:${firstConversationId}`;
+
+    const panel = (
+      <StrictMode>
+        <TerminalPanel
+          projectId={projectId}
+          conversationId={firstConversationId}
+          projectName="Inertia"
+          status="online"
+          fontSize={13}
+          theme="dark"
+          visible
+          sendCommand={sendCommand}
+          subscribe={() => () => undefined}
+          onClose={() => undefined}
+        />
+      </StrictMode>
+    );
+    const firstView = render(panel);
+
+    await waitFor(() => expect(document.querySelector(".terminal-panel"))
+      .toHaveAttribute("data-terminal-state", "ready"));
+    const terminalId = document.querySelector(".terminal-panel")
+      ?.getAttribute("data-terminal-id");
+    expect(terminalId).toBeTruthy();
+    expect(window.sessionStorage.getItem(storageKey))
+      .toBe(JSON.stringify([terminalId]));
+
+    firstView.unmount();
+    sendCommand.mockClear();
+    render(panel);
+
+    await waitFor(() => expect(sendCommand.mock.calls.some(
+      ([sent]) => sent.type === "terminal.attach",
+    )).toBe(true));
+    expect(sendCommand.mock.calls.filter(
+      ([sent]) => sent.type === "terminal.attach",
+    ).every(([sent]) => (
+      sent.type === "terminal.attach" && sent.payload.terminalId === terminalId
+    ))).toBe(true);
+    expect(sendCommand.mock.calls.some(
+      ([sent]) => sent.type === "terminal.create",
+    )).toBe(false);
+  });
+
   it("closes a delayed creation when the user explicitly removed its tab", async () => {
     let resolveCreate!: (event: ServerEvent) => void;
     const create = new Promise<ServerEvent>((resolve) => {

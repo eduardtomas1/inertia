@@ -34,6 +34,11 @@ test("keeps three-line Work sidebar geometry", async ({
       );
       store.createConversation(
         project.id,
+        "Exercise Gemini ACP",
+        { providerId: "gemini", branch: "gemini/acp-provider", activate: false },
+      );
+      store.createConversation(
+        project.id,
         "Inspect Kimi ACP bridge",
         { providerId: "kimi", branch: "kimi/acp-bridge", activate: false },
       );
@@ -59,6 +64,7 @@ test("keeps three-line Work sidebar geometry", async ({
           codex: "OpenAI",
           claude: "Anthropic",
           cursor: "Cursor",
+          gemini: "Google",
           kimi: "Kimi Code",
           opencode: "OpenCode",
         },
@@ -96,16 +102,18 @@ test("keeps three-line Work sidebar geometry", async ({
     const statusCue = row.locator('[data-work-status="idle"]');
     await expect(statusCue.locator("svg.lucide-minus")).toBeVisible();
     const statusBox = await statusCue.boundingBox();
-    expect(statusBox?.width).toBe(10);
-    expect(statusBox?.height).toBe(10);
-    for (const providerId of ["codex", "claude", "cursor", "kimi", "opencode"]) {
+    expect(statusBox).not.toBeNull();
+    expect(statusBox!.width).toBeCloseTo(10, 3);
+    expect(statusBox!.height).toBeCloseTo(10, 3);
+    for (const providerId of ["codex", "claude", "cursor", "gemini", "kimi", "opencode"]) {
       const icon = sidebar.locator(
         `.provider-brand-icon[data-provider-id="${providerId}"][data-provider-icon-kind="official"]`,
       ).first();
       await expect(icon).toBeVisible();
       const box = await icon.boundingBox();
-      expect(box?.width).toBe(15);
-      expect(box?.height).toBe(15);
+      expect(box).not.toBeNull();
+      expect(box!.width).toBeCloseTo(15, 3);
+      expect(box!.height).toBeCloseTo(15, 3);
       const imageSize = await icon.locator("img").first().evaluate((image) => ({
         naturalWidth: (image as HTMLImageElement).naturalWidth,
         naturalHeight: (image as HTMLImageElement).naturalHeight,

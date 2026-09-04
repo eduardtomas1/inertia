@@ -83,11 +83,11 @@ test("navigates settings, changes theme, and returns to chat", async () => {
   const providers = page.getByRole("button", { name: "Providers", exact: true });
   await providers.click();
   await expect(providers).toHaveAttribute("aria-current", "page");
-  await expect(page.getByRole("heading", { name: "Agent accounts" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 3, name: "Providers" })).toBeVisible();
   await page.getByRole("button", { name: "Keybindings", exact: true }).click();
   await expect(page.getByText("Toggle project navigation", { exact: true })).toBeVisible();
 
-  await page.getByRole("button", { name: "Go to workspace" }).click();
+  await page.getByRole("button", { name: "Workspace", exact: true }).click();
   await expect(page.locator("aside.terminal-panel").first()).toHaveAttribute("data-terminal-font-size", terminalFontSize ?? "13");
   await expect(page.locator(".chat-workspace")).toHaveClass(/response-density-comfortable/u);
   await expect(page.locator(".response-code-block pre").first()).toHaveClass(/wraps/u);
@@ -322,7 +322,7 @@ test("manages backend profiles across the responsive theme and scale matrix", as
   )).toHaveCount(0);
   await expectBackendLayoutContained();
   await resizeWindow(1440, 920);
-  await page.getByRole("button", { name: "Go to workspace" }).click();
+  await page.getByRole("button", { name: "Workspace", exact: true }).click();
   expect(rendererErrors).toEqual([]);
 });
 
@@ -407,7 +407,7 @@ test("keeps runtime support and application update checks explicit in settings",
   await page.getByRole("button", { name: "Check now" }).click();
   await expect(page.getByText("Inertia is up to date.", { exact: true })).toBeVisible();
   await expect(page.getByText("Install", { exact: true })).toHaveCount(0);
-  await page.getByRole("button", { name: "Go to workspace" }).click();
+  await page.getByRole("button", { name: "Workspace", exact: true }).click();
   expect(rendererErrors).toEqual([]);
 });
 
@@ -452,12 +452,14 @@ test("persists composer usage modes without losing the followed transcript", asy
   const toolbarIntegration = await compact.evaluate((control) => {
     const toolbar = control.closest(".composer-toolbar");
     const options = control.parentElement;
-    const next = control.nextElementSibling;
+    const send = control.closest(".composer")?.querySelector(
+      '.composer-input-actions [aria-label="Send message"]',
+    );
     return {
       inComposer: Boolean(control.closest(".composer")),
       inToolbar: Boolean(toolbar),
       parentClass: options?.className ?? "",
-      nextLabel: next?.getAttribute("aria-label"),
+      inputSendLabel: send?.getAttribute("aria-label"),
       detachedUsageRows: document.querySelectorAll(".composer-shell > .composer-usage").length,
       toolbarUsageControls: toolbar?.querySelectorAll('[data-composer-control="usage"]').length ?? 0,
     };
@@ -466,7 +468,7 @@ test("persists composer usage modes without losing the followed transcript", asy
     inComposer: true,
     inToolbar: true,
     parentClass: "composer-actions",
-    nextLabel: "Send message",
+    inputSendLabel: "Send message",
     detachedUsageRows: 0,
     toolbarUsageControls: 1,
   });
@@ -585,7 +587,7 @@ test("persists composer usage modes without losing the followed transcript", asy
   const usageModes = page.getByRole("radiogroup", { name: "Usage and context display" });
   await expect(usageModes.getByRole("radio", { name: "Hidden" })).toHaveAttribute("aria-checked", "true");
   await usageModes.getByRole("radio", { name: "Expanded" }).click();
-  await page.getByRole("button", { name: "Go to workspace" }).click();
+  await page.getByRole("button", { name: "Workspace", exact: true }).click();
   const expanded = page.getByRole("region", { name: "Usage and context" });
   await expect(expanded).toHaveAttribute("data-mode", "expanded");
   await expectComposerEndsAtDock(page.getByRole("region", {
@@ -689,9 +691,9 @@ test("applies every interface scale live and remains usable at common Linux disp
   });
   await resizeWindow(900, 720);
   await expectNoViewportOverflow();
-  await expect(page.getByRole("button", { name: "Go to workspace" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Workspace", exact: true })).toBeVisible();
   await scaleGroup.getByRole("radio", { name: "Comfortable", exact: true }).click();
-  await page.getByRole("button", { name: "Go to workspace" }).click();
+  await page.getByRole("button", { name: "Workspace", exact: true }).click();
   await expect(page.locator("aside.terminal-panel").first()).toHaveAttribute("data-terminal-font-size", terminalFontSize ?? "13");
   await expectNoViewportOverflow();
   const scaledDock = page.getByRole("region", { name: "Message composer" });
@@ -718,7 +720,8 @@ test("applies every interface scale live and remains usable at common Linux disp
       const send = element.querySelector<HTMLElement>(
         '[aria-label="Send message"]',
       );
-      const toolbarBounds = toolbar?.getBoundingClientRect();
+      const inputBounds = element.querySelector(".composer-input-zone")
+        ?.getBoundingClientRect();
       const modelBounds = model?.getBoundingClientRect();
       const labelBounds = label?.getBoundingClientRect();
       const sendBounds = send?.getBoundingClientRect();
@@ -738,10 +741,12 @@ test("applies every interface scale live and remains usable at common Linux disp
           ? getComputedStyle(label).overflow
           : "",
         sendContained: Boolean(
-          toolbarBounds
+          inputBounds
           && sendBounds
-          && sendBounds.left >= toolbarBounds.left - 1
-          && sendBounds.right <= toolbarBounds.right + 1,
+          && sendBounds.left >= inputBounds.left - 1
+          && sendBounds.right <= inputBounds.right + 1
+          && sendBounds.top >= inputBounds.top - 1
+          && sendBounds.bottom <= inputBounds.bottom + 1,
         ),
       };
     });

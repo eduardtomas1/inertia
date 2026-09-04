@@ -26,6 +26,12 @@ updates:
       - dependency-name: "@babel/parser"
         update-types:
           - version-update:semver-major
+      # Keep declarations on the minimum supported Node 22.13 runtime line;
+      # patch updates within 22.13 remain allowed.
+      - dependency-name: "@types/node"
+        update-types:
+          - version-update:semver-major
+          - version-update:semver-minor
     groups:
       production-patch-and-minor:
         dependency-type: production
@@ -35,6 +41,8 @@ updates:
         exclude-patterns:
           - "@agentclientprotocol/sdk"
           - "@anthropic-ai/claude-agent-sdk"
+          - "@anthropic-ai/sdk"
+          - "@modelcontextprotocol/sdk"
           - "@opencode-ai/sdk"
       development-patch-and-minor:
         dependency-type: development

@@ -19,9 +19,11 @@ import { MAX_CHAT_MESSAGE_CHARS } from "../../../../shared/diff-review";
 import type { composerRouteReadiness } from "../../utils/composerReadiness";
 import { promptContextDetail } from "../../utils/requestContext";
 import {
+  composerPromptHistoryDirection,
   handleComposerSuggestionKey,
   shouldSubmitComposerKey,
 } from "../../utils/composerKeyboard";
+import type { ComposerPromptHistoryDirection } from "./useComposerPromptHistory";
 import {
   nextSidebarNavigationIndex,
   type SidebarNavigationKey,
@@ -74,6 +76,9 @@ export interface ComposerInputZoneProps {
   textareaRef: RefObject<HTMLTextAreaElement | null>;
   message: string;
   onMessageChange: (message: string) => void;
+  onNavigatePromptHistory: (
+    direction: ComposerPromptHistoryDirection,
+  ) => boolean;
   onImportAttachments: (files: File[]) => Promise<void>;
   onSubmit: () => Promise<void>;
   canQueue: boolean;
@@ -94,6 +99,7 @@ export interface ComposerInputZoneProps {
   dismissSkills: () => void;
   slashMatch: RegExpExecArray | null;
   onCompactCommand: () => void;
+  compactUnavailableReason: string | null;
   compactNotice: {
     kind: "working" | "success" | "error";
     message: string;
@@ -130,6 +136,7 @@ export function ComposerInputZone({
   textareaRef,
   message,
   onMessageChange,
+  onNavigatePromptHistory,
   onImportAttachments,
   onSubmit,
   canQueue,
@@ -150,6 +157,7 @@ export function ComposerInputZone({
   dismissSkills,
   slashMatch,
   onCompactCommand,
+  compactUnavailableReason,
   compactNotice,
   goalAvailable,
   onOpenGoal,
@@ -161,7 +169,16 @@ export function ComposerInputZone({
     { id: "plan", label: "Switch this chat into plan mode", section: "built-in", mode: "plan", disabled: false, disabledWhileRunning: true },
     { id: "build", label: "Switch this chat back to build mode", section: "built-in", mode: "build", disabled: false, disabledWhileRunning: true },
     { id: "resume", label: "Resume a provider chat from this folder", section: "provider", action: onOpenResume, disabled: false, disabledWhileRunning: false },
-    { id: "compact", label: "Compact this chat's provider context", section: "provider", action: onCompactCommand, disabled: false, disabledWhileRunning: true },
+    {
+      id: "compact",
+      label: compactUnavailableReason
+        ? `Unavailable: ${compactUnavailableReason}`
+        : "Compact this chat's provider context",
+      section: "provider",
+      action: onCompactCommand,
+      disabled: compactUnavailableReason !== null,
+      disabledWhileRunning: true,
+    },
   ];
   const matchingSlashCommands = slashMatch
     ? slashCommands.filter(({ id }) =>
@@ -425,7 +442,25 @@ export function ComposerInputZone({
               event.preventDefault();
               if (activeSlashCommand) {
                 activateSlashCommand(activeSlashCommand);
+              } else if (
+                slashMatch?.[1].toLowerCase() === "compact"
+                && compactUnavailableReason
+              ) {
+                void onSubmit();
               }
+              return;
+            }
+            const historyDirection = composerPromptHistoryDirection(
+              event,
+              event.currentTarget,
+            );
+            if (
+              !submissionPending
+              && !followUpPending
+              && historyDirection
+              && onNavigatePromptHistory(historyDirection)
+            ) {
+              event.preventDefault();
               return;
             }
             if (

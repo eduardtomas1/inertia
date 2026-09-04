@@ -68,7 +68,9 @@ test.afterAll(async () => {
   await app.close();
 });
 
-test("previews, validates, removes, and cleans up secure composer attachments", async ({ browserName: _browserName }, testInfo) => {
+test("previews, validates, removes, and cleans up secure composer attachments", {
+  tag: "@runtime-recovery",
+}, async ({ browserName: _browserName }, testInfo) => {
   // The deliberate macOS crash can consume the complete bounded 20-second
   // recovery path before this long attachment journey performs its final
   // restart assertions. Keep the inner recovery bound authoritative while
@@ -353,7 +355,7 @@ test("previews, validates, removes, and cleans up secure composer attachments", 
   await expect.poll(async () => stat(unsentTempPath).then(() => true, () => false)).toBe(true);
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await expect.poll(async () => stat(unsentTempPath).then(() => true, () => false)).toBe(false);
-  await page.getByRole("button", { name: "Go to workspace" }).click();
+  await page.getByRole("button", { name: "Workspace", exact: true }).click();
 
   const shell = page.locator(".app-shell");
   const beforeRuntimeGeneration = await shell.getAttribute(
@@ -364,6 +366,7 @@ test("previews, validates, removes, and cleans up secure composer attachments", 
     electronApp,
   );
   let recoveryOperationError: unknown = null;
+  let recoveryOperationFailed = false;
   try {
     await electronApp.evaluate(() => {
       const runtime = Reflect.get(
@@ -387,10 +390,21 @@ test("previews, validates, removes, and cleans up secure composer attachments", 
         && runtimeGeneration !== beforeRuntimeGeneration;
     }, { timeout: 20_000 }).toBe(true);
   } catch (error) {
+    recoveryOperationFailed = true;
     recoveryOperationError = error;
   }
-  await restoreRuntimeRecoveryConsent();
-  if (recoveryOperationError) throw recoveryOperationError;
+  try {
+    await restoreRuntimeRecoveryConsent();
+  } catch (recoveryConsentError) {
+    if (recoveryOperationFailed) {
+      throw new AggregateError(
+        [recoveryOperationError, recoveryConsentError],
+        "Runtime recovery and recovery-consent restoration both failed.",
+      );
+    }
+    throw recoveryConsentError;
+  }
+  if (recoveryOperationFailed) throw recoveryOperationError;
   await expect(sentAttachments).toBeVisible();
   await expect.poll(() => sentPreview.evaluate((element) => {
     const image = element as HTMLImageElement;

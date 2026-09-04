@@ -104,6 +104,47 @@ export function visibleWorkspaceConversation(
   return draft ?? persisted;
 }
 
+export function visibleChatConversation(
+  draft: Conversation | null,
+  detail: Conversation | null,
+  fallback: Conversation | null,
+): Conversation | null {
+  return draft ?? detail ?? fallback;
+}
+
+export function visibleChatProjection(
+  conversation: Pick<Conversation, "id"> | null,
+  projection: Pick<
+    ConversationProjection,
+    | "conversation"
+    | "detail"
+    | "streamingText"
+    | "streamingReasoning"
+    | "streamingChannel"
+    | "terminalProjections"
+    | "usage"
+  >,
+  detailLoading: boolean,
+) {
+  const projectionOwned = Boolean(
+    conversation && projection.conversation?.id === conversation.id,
+  );
+  const detailOwned = Boolean(
+    conversation && projection.detail?.conversation.id === conversation.id,
+  );
+  return {
+    detailLoading: projectionOwned && detailLoading,
+    streamingText: projectionOwned ? projection.streamingText : "",
+    streamingReasoning: projectionOwned ? projection.streamingReasoning : "",
+    streamingChannel: projectionOwned ? projection.streamingChannel : null,
+    terminalProjections: projectionOwned ? projection.terminalProjections : {},
+    usage: projection.usage?.conversationId === conversation?.id
+      ? projection.usage
+      : null,
+    contextPackets: detailOwned ? projection.detail?.contextPackets ?? [] : [],
+  };
+}
+
 export function visibleConversationLatestTurnSummary(
   persisted: Pick<Conversation, "id"> | null,
   visible: Pick<Conversation, "id"> | null,
@@ -114,6 +155,7 @@ export function visibleConversationLatestTurnSummary(
 
 export interface WorkspaceSceneActions {
   importProject: () => Promise<void>;
+  selectGlobalChatProject?: (project: Project) => void;
   createConversation: (
     targetProject?: Project | null,
     location?: NewConversationLocation,
@@ -187,6 +229,8 @@ export interface WorkspaceSceneModelInput {
   busyAction: string | null;
   project: Project | null;
   draftConversation: Conversation | null;
+  globalChatActive: boolean;
+  globalProjectChangeId: string | null;
   workspaceToolsUnavailable: boolean;
   connection: Connection;
   providerMaintenance: ProviderMaintenance;
@@ -226,6 +270,8 @@ export function createWorkspaceSceneModel({
   busyAction,
   project,
   draftConversation,
+  globalChatActive,
+  globalProjectChangeId,
   workspaceToolsUnavailable,
   connection,
   providerMaintenance,
@@ -254,6 +300,11 @@ export function createWorkspaceSceneModel({
   const conversation = visibleWorkspaceConversation(
     persistedConversation,
     draftConversation,
+  );
+  const chatProjection = visibleChatProjection(
+    conversation,
+    projection,
+    detailLoading,
   );
   const currentWorkflow = workflow.state?.conversationId
     === persistedConversation?.id
@@ -509,7 +560,23 @@ export function createWorkspaceSceneModel({
     } : null,
     chat: {
       project,
-      conversation: detail?.conversation ?? conversation,
+      conversation: visibleChatConversation(
+        draftConversation,
+        detail?.conversation ?? null,
+        conversation,
+      ),
+      ...(globalChatActive
+        && draftConversation
+        && project
+        && actions.selectGlobalChatProject ? {
+        newChatProjectPicker: {
+          projects: snapshotProjects,
+          selectedProject: project,
+          disabled: connection.status !== "online"
+            || globalProjectChangeId !== null,
+          onChange: actions.selectGlobalChatProject,
+        },
+      } : {}),
       checkoutBranch: workspaceTools.gitStatus?.branch ?? null,
       latestTurnSummary: visibleConversationLatestTurnSummary(
         persistedConversation,
@@ -524,17 +591,17 @@ export function createWorkspaceSceneModel({
       plans: projection.plans,
       checkpoints: projection.checkpoints,
       turnGitArtifacts: projection.turnGitArtifacts,
-      streamingText: projection.streamingText,
-      streamingReasoning: projection.streamingReasoning,
-      streamingChannel: projection.streamingChannel,
-      terminalProjections: projection.terminalProjections,
-      usage: projection.usage,
+      streamingText: chatProjection.streamingText,
+      streamingReasoning: chatProjection.streamingReasoning,
+      streamingChannel: chatProjection.streamingChannel,
+      terminalProjections: chatProjection.terminalProjections,
+      usage: chatProjection.usage,
       skills: currentWorkflow?.skills ?? [],
       skillsCapability: currentWorkflow?.skillsCapability ?? null,
       skillsLoading: workflow.loading,
       skillsError: workflow.error,
       promptPresets: connection.snapshot?.promptPresets ?? [],
-      goal: persistedConversation ? {
+      goal: persistedConversation && !globalChatActive ? {
         workflow: currentWorkflow,
         executionStatus: currentGoalExecution,
         loading: workflow.loading,
@@ -562,13 +629,13 @@ export function createWorkspaceSceneModel({
       autoScrollToFinalAnswer: settings.autoScrollToFinalAnswer,
       promptContext: workspaceTools.pendingDiffContext,
       contextSources,
-      contextPackets: detail?.contextPackets ?? [],
+      contextPackets: chatProjection.contextPackets,
       onConversationContextCommand: actions.run,
       previewContextUrl: desktopTools.previewUrl || null,
       providerIdentityLabels: settings.providerIdentityLabels,
       loading: (!connection.snapshot && connection.status !== "offline")
-        || detailLoading,
-      detailLoading,
+        || chatProjection.detailLoading,
+      detailLoading: chatProjection.detailLoading,
       sending: busyAction === "message.send",
       onAddProject: () => void actions.importProject(),
       onCreateConversation: () => actions.createConversation(),
@@ -629,7 +696,7 @@ export function createWorkspaceSceneModel({
       onStopSubagent: actions.stopSubagent,
       onStop: actions.stopAgent,
     },
-    resizeHandle: project && toolsVisible ? {
+    resizeHandle: project && toolsVisible && !globalChatActive ? {
       label: "Resize workspace tools",
       controls: "workspace-content",
       containerRef: workspaceBodyRef,
@@ -652,7 +719,7 @@ export function createWorkspaceSceneModel({
       valueText: (value) => `${value} pixels for workspace tools`,
       className: "workspace-tools-resize-handle",
     } : null,
-    tools: project ? {
+    tools: project ? (globalChatActive ? null : {
       activeTool: effectiveActiveTool,
       panel: {
         activeTab: effectiveActiveTool ?? "environment",
@@ -931,6 +998,6 @@ export function createWorkspaceSceneModel({
           });
         },
       },
-    } : null,
+    }) : null,
   };
 }

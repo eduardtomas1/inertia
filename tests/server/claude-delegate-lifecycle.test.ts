@@ -23,7 +23,7 @@ describe("Claude delegated lifecycle", () => {
 
     expect(lifecycle.complete()).toEqual({
       kind: "incomplete",
-      reason: "parent-not-resumed",
+      reason: "delegates-abandoned",
     });
 
     // The level may precede the terminal edge. It is REPLACE state, not one
@@ -82,7 +82,7 @@ describe("Claude delegated lifecycle", () => {
     });
   });
 
-  it("distinguishes clean process exit from abandoned delegated work", () => {
+  it("distinguishes clean process exit from a provisional delegated result", () => {
     const completed = new ClaudeDelegateLifecycle();
     expect(completed.observe(claudeSuccessResult("Done", "completed"))).toEqual({
       turnEnded: true,
@@ -106,19 +106,65 @@ describe("Claude delegated lifecycle", () => {
     });
   });
 
-  it("settles a final parent result when the background level clears without idle", () => {
+  it("requires a fresh parent result after the background level clears", () => {
     const lifecycle = new ClaudeDelegateLifecycle();
     lifecycle.observe(claudeBackgroundTasks(["agent-1"]));
     expect(lifecycle.observe(
-      claudeSuccessResult("Parent resumed", "completed"),
+      claudeSuccessResult("Waiting for the delegate", "completed"),
     )).toEqual({ turnEnded: false });
+    expect(lifecycle.hasProvisionalResult()).toBe(true);
 
     expect(lifecycle.observe(claudeBackgroundTasks([]))).toEqual({
+      turnEnded: false,
+    });
+    expect(lifecycle.complete()).toEqual({
+      kind: "incomplete",
+      reason: "parent-not-resumed",
+    });
+
+    expect(lifecycle.observe(
+      claudeSuccessResult("Parent resumed", "completed"),
+    )).toEqual({
       turnEnded: true,
     });
     expect(lifecycle.complete()).toMatchObject({
       kind: "result",
       result: { result: "Parent resumed" },
+    });
+  });
+
+  it("treats a result during an exact live task trace as provisional", () => {
+    const lifecycle = new ClaudeDelegateLifecycle();
+
+    expect(lifecycle.observe(
+      claudeSuccessResult("Waiting for typed work", "completed"),
+      true,
+    )).toEqual({ turnEnded: false });
+    expect(lifecycle.hasProvisionalResult()).toBe(true);
+    expect(lifecycle.complete()).toEqual({
+      kind: "incomplete",
+      reason: "parent-not-resumed",
+    });
+
+    expect(lifecycle.observe(
+      claudeSuccessResult("Typed work incorporated", "completed"),
+      false,
+    )).toEqual({ turnEnded: true });
+    expect(lifecycle.hasProvisionalResult()).toBe(false);
+  });
+
+  it("lets a newer authoritative empty roster override stale trace liveness", () => {
+    const lifecycle = new ClaudeDelegateLifecycle();
+    lifecycle.observe(claudeBackgroundTasks([]));
+
+    expect(lifecycle.observe(
+      claudeSuccessResult("Parent resumed after the roster cleared", "completed"),
+      true,
+    )).toEqual({ turnEnded: true });
+    expect(lifecycle.hasProvisionalResult()).toBe(false);
+    expect(lifecycle.complete()).toMatchObject({
+      kind: "result",
+      result: { result: "Parent resumed after the roster cleared" },
     });
   });
 

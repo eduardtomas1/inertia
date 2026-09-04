@@ -8,7 +8,7 @@ import {
 import { threadNotificationKind } from "../../src/renderer/src/hooks/useThreadNotifications";
 import type { Conversation } from "../../src/shared/contracts";
 import { parseDesktopNotificationRequest } from "../../src/shared/desktop";
-import { nativeModelSelection } from "../../src/shared/model-routing";
+import { providerNativeModelSelection } from "../../src/shared/model-routing";
 
 function conversation(
   status: Conversation["status"],
@@ -19,7 +19,7 @@ function conversation(
     projectId: "22222222-2222-4222-8222-222222222222",
     title: "Thread",
     providerId: "codex",
-    modelSelection: nativeModelSelection({ providerId: "codex" }),
+    modelSelection: providerNativeModelSelection({ providerId: "codex" }),
     continuationIdentity: null,
     model: "",
     reasoningEffort: "",

@@ -1,6 +1,13 @@
 import type { AgentInputRequest, AgentPlanStep } from "./interactions";
+import {
+  interactionDisplayIdentity,
+  isSafeInteractionDisplayText,
+} from "./approval-display";
 
 const MAX_EVENT_TEXT_CHARS = 1024 * 1024;
+const MAX_QUESTION_CHARS = 16_384;
+const MAX_QUESTION_TITLE_CHARS = 256;
+const MAX_OPTION_LABEL_CHARS = 512;
 const MAX_INPUT_QUESTIONS = 3;
 const MAX_INPUT_OPTIONS = 20;
 
@@ -63,10 +70,17 @@ export function parseCursorQuestionRequest(
     throw new Error(`Cursor sent more than ${MAX_INPUT_QUESTIONS} questions.`);
   }
   const questionIds = new Set<string>();
+  const questionPrompts = new Set<string>();
   return {
     toolCallId: requireString(record.toolCallId, "toolCallId"),
     ...(typeof record.title === "string"
-      ? { title: bounded(record.title) }
+      ? {
+          title: requireInteractionText(
+            record.title,
+            "title",
+            MAX_QUESTION_TITLE_CHARS,
+          ),
+        }
       : {}),
     questions: rawQuestions.map((raw, questionIndex) => {
       const question = requireObject(raw, "question");
@@ -75,6 +89,17 @@ export function parseCursorQuestionRequest(
         throw new Error(`Cursor sent duplicate question ID '${questionId}'.`);
       }
       questionIds.add(questionId);
+      const prompt = requireInteractionText(
+        question.prompt,
+        "question.prompt",
+        MAX_QUESTION_CHARS,
+        true,
+      );
+      const promptIdentity = interactionDisplayIdentity(prompt);
+      if (questionPrompts.has(promptIdentity)) {
+        throw new Error("Cursor sent duplicate question prompts.");
+      }
+      questionPrompts.add(promptIdentity);
       const rawOptions = requireArray(question.options, "question.options");
       if (rawOptions.length > MAX_INPUT_OPTIONS) {
         throw new Error(
@@ -82,9 +107,10 @@ export function parseCursorQuestionRequest(
         );
       }
       const optionIds = new Set<string>();
+      const optionLabels = new Set<string>();
       return {
         id: questionId,
-        prompt: requireString(question.prompt, "question.prompt"),
+        prompt,
         options: rawOptions.map((rawOption) => {
           const option = requireObject(rawOption, "question option");
           const optionId = requireNativeId(option.id, "option.id", 160);
@@ -94,9 +120,21 @@ export function parseCursorQuestionRequest(
             );
           }
           optionIds.add(optionId);
+          const label = requireInteractionText(
+            option.label,
+            "option.label",
+            MAX_OPTION_LABEL_CHARS,
+          );
+          const labelIdentity = interactionDisplayIdentity(label);
+          if (optionLabels.has(labelIdentity)) {
+            throw new Error(
+              `Cursor sent duplicate option labels for question ${questionIndex + 1}.`,
+            );
+          }
+          optionLabels.add(labelIdentity);
           return {
             id: optionId,
-            label: requireString(option.label, "option.label"),
+            label,
           };
         }),
         ...(typeof question.allowMultiple === "boolean"
@@ -272,6 +310,18 @@ function requireString(value: unknown, label: string): string {
     || value.length > MAX_EVENT_TEXT_CHARS
   ) {
     throw new Error(`${label} must be a bounded non-empty string.`);
+  }
+  return value;
+}
+
+function requireInteractionText(
+  value: unknown,
+  label: string,
+  maxChars: number,
+  allowLineBreaks = false,
+): string {
+  if (!isSafeInteractionDisplayText(value, { allowLineBreaks, maxChars })) {
+    throw new Error(`${label} must be safe bounded display text.`);
   }
   return value;
 }

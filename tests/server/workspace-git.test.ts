@@ -21,9 +21,14 @@ import {
 } from "../../src/server/workspace-git";
 import { getRepositoryStatus, getUnifiedDiff } from "../../src/server/git";
 import { repositoryMetadataMarkerIdentity } from "../../src/server/git/paths";
+import {
+  gitScanCoordinator,
+  validatedGitScanIdentity,
+} from "../../src/server/git/scan-coordinator";
 import type { RuntimeSecureFileBroker } from "../../src/server/secure-files";
 import { issueAuthorityForLiveOwner } from "../../src/server/runtime/live-authority";
 import { discoverFreshWorkspaceGitRepositories } from "../../src/server/runtime/commands/source-control-commands";
+import { SecureFileTestBroker } from "../support/secure-file-test-broker";
 
 const roots: string[] = [];
 
@@ -129,6 +134,86 @@ describe("workspace Git repository discovery", () => {
     await expect(getUnifiedDiff(root, {
       deadlineAt: Date.now() - 1,
     })).rejects.toThrow("Git took too long to complete the operation.");
+  });
+
+  it("shares the raw status scan used concurrently by diff and status", async () => {
+    const root = temporaryRoot("git-diff-status-coalescing");
+    initializeRepository(root, "tracked.txt");
+    writeFileSync(join(root, "tracked.txt"), "after\n");
+    const identity = validatedGitScanIdentity(
+      realpathSync.native(root),
+      await repositoryMetadataMarkerIdentity(root),
+    );
+    const scan = {
+      authorityGeneration: "project:conversation:generation-1",
+      identity,
+      invalidation: gitScanCoordinator.currentInvalidation(identity),
+      scope: "workspace" as const,
+    };
+    const originalRequest = gitScanCoordinator.request.bind(gitScanCoordinator);
+    let rawExecutions = 0;
+    const requestSpy = vi.spyOn(gitScanCoordinator, "request")
+      .mockImplementation((request, execute) => originalRequest(
+        request,
+        async (execution) => {
+          rawExecutions += 1;
+          return await execute(execution);
+        },
+      ));
+
+    try {
+      const diffPromise = getUnifiedDiff(root, { statusScan: scan });
+      // A supplied scan identity already owns the validated repository root,
+      // so diff must join the coordinator before yielding to path discovery.
+      expect(requestSpy).toHaveBeenCalledOnce();
+      const statusPromise = getRepositoryStatus(root, { scan });
+      const [diff, status] = await Promise.all([diffPromise, statusPromise]);
+      expect(diff.text).toContain("+after");
+      expect(status.files).toContainEqual(expect.objectContaining({
+        path: "tracked.txt",
+        status: "modified",
+      }));
+      expect(requestSpy).toHaveBeenCalledTimes(2);
+      expect(rawExecutions).toBe(1);
+    } finally {
+      requestSpy.mockRestore();
+    }
+  });
+
+  it("rejects a status scan for a different authorized repository before scanning", async () => {
+    const parent = temporaryRoot("git-diff-status-authority");
+    const authorized = join(parent, "authorized");
+    const mismatched = join(parent, "mismatched");
+    initializeRepository(authorized, "authorized.txt");
+    initializeRepository(mismatched, "mismatched.txt");
+    writeFileSync(join(mismatched, "mismatched.txt"), "changed\n");
+    const secureFiles = new SecureFileTestBroker();
+    const secureRoot = await secureFiles.authorizeRoot(authorized);
+    const identity = validatedGitScanIdentity(
+      realpathSync.native(mismatched),
+      await repositoryMetadataMarkerIdentity(mismatched),
+    );
+    const requestSpy = vi.spyOn(gitScanCoordinator, "request");
+
+    try {
+      await expect(getUnifiedDiff(
+        authorized,
+        {
+          statusScan: {
+            authorityGeneration: "project:conversation:generation-mismatch",
+            identity,
+            invalidation: gitScanCoordinator.currentInvalidation(identity),
+            scope: "workspace",
+          },
+        },
+        undefined,
+        secureFiles,
+        secureRoot,
+      )).rejects.toMatchObject({ code: "invalid-input" });
+      expect(requestSpy).not.toHaveBeenCalled();
+    } finally {
+      requestSpy.mockRestore();
+    }
   });
 
   it("discovers fresh workspace state again across a mutation boundary", async () => {

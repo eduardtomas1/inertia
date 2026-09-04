@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 
-import type { ElectronApplication } from "@playwright/test";
+import type { ElectronApplication, Page } from "@playwright/test";
 import { describe, expect, it, vi } from "vitest";
 
 import { runtimeSupervisorShutdownEnvelopeMs } from "../../src/node/runtime-shutdown-deadline";
@@ -11,6 +11,8 @@ import {
   closeElectronFixtureBounded,
   fixtureElectronGracefulTimeoutMs,
   fixtureRuntimeExitTimeoutMs,
+  formatElectronConsoleError,
+  observeElectronPage,
   quitElectronAppBounded,
   settleOperationBounded,
 } from "../e2e/support/electron-app-lifecycle";
@@ -63,12 +65,105 @@ function controlledElectronApp(options: {
 }
 
 describe("Electron E2E application lifecycle", () => {
+  it("retains exact renderer resource failures and ignores successful traffic", () => {
+    const events = new EventEmitter();
+    const rendererErrors: string[] = [];
+    observeElectronPage(events as unknown as Page, rendererErrors);
+
+    events.emit("console", {
+      type: () => "warning",
+      location: () => ({
+        url: "inertia://bundle/warning.js",
+        line: 0,
+        column: 0,
+        lineNumber: 0,
+        columnNumber: 0,
+      }),
+      text: () => "Expected warning",
+    });
+    events.emit("response", {
+      status: () => 399,
+      request: () => ({ method: () => "GET", resourceType: () => "script" }),
+      url: () => "inertia://bundle/healthy.js",
+    });
+    events.emit("response", {
+      status: () => 404,
+      request: () => ({ method: () => "GET", resourceType: () => "image" }),
+      url: () => "https://user:password@example.test/missing.png?token=secret#fragment",
+    });
+    events.emit("requestfailed", {
+      failure: () => ({ errorText: "net::ERR_ABORTED" }),
+      method: () => "GET",
+      resourceType: () => "script",
+      url: () => "inertia://bundle/cancelled.js",
+    });
+    events.emit("requestfailed", {
+      failure: () => ({ errorText: "net::ERR_CONNECTION_RESET" }),
+      method: () => "POST",
+      resourceType: () => "fetch",
+      url: () => "http://127.0.0.1:31337/messages?credential=secret",
+    });
+    events.emit("pageerror", new Error("Renderer exception"));
+
+    expect(rendererErrors).toEqual([
+      "HTTP 404 GET image https://example.test/missing.png",
+      "Request failed POST fetch http://127.0.0.1:31337/messages: net::ERR_CONNECTION_RESET",
+      "Renderer exception",
+    ]);
+  });
+
+  it("bounds renderer error storms while retaining recent diagnostics", () => {
+    const events = new EventEmitter();
+    const rendererErrors: string[] = [];
+    observeElectronPage(events as unknown as Page, rendererErrors);
+
+    for (let index = 1; index <= 45; index += 1) {
+      events.emit("pageerror", new Error(
+        `Renderer exception ${index}: ${"x".repeat(3_000)}`,
+      ));
+    }
+
+    expect(rendererErrors).toHaveLength(40);
+    expect(rendererErrors[0]).toBe(
+      "[6 earlier renderer diagnostics omitted]",
+    );
+    expect(rendererErrors[1]).toContain("Renderer exception 7:");
+    expect(rendererErrors.at(-1)).toContain("Renderer exception 45:");
+    expect(rendererErrors.at(-1)?.length).toBeLessThanOrEqual(2_048);
+    expect(rendererErrors.at(-1)).toMatch(/…$/u);
+  });
+
+  it("retains renderer console source locations for hosted diagnostics", () => {
+    expect(formatElectronConsoleError({
+      location: () => ({
+        url: "inertia://bundle/attachment-preview/11111111-1111-4111-8111-111111111111?token=secret#fragment",
+        line: 0,
+        column: 0,
+        lineNumber: 0,
+        columnNumber: 0,
+      }),
+      text: () => "Failed to load resource: 404",
+    })).toBe(
+      "Failed to load resource: 404 (inertia://bundle/attachment-preview/redacted:1:1)",
+    );
+    expect(formatElectronConsoleError({
+      location: () => ({
+        url: "",
+        line: 0,
+        column: 0,
+        lineNumber: 0,
+        columnNumber: 0,
+      }),
+      text: () => "Renderer failure",
+    })).toBe("Renderer failure (unknown renderer resource)");
+  });
+
   it("covers the complete Windows runtime and Job-broker shutdown envelopes", () => {
     expect(fixtureRuntimeExitTimeoutMs("win32")).toBe(
       runtimeSupervisorShutdownEnvelopeMs("win32") + 500,
     );
     expect(fixtureElectronGracefulTimeoutMs("win32")).toBe(
-      privilegedShutdownEnvelopeMs("win32") + 500,
+      privilegedShutdownEnvelopeMs("win32") + 2_000,
     );
     expect(fixtureElectronGracefulTimeoutMs("win32")).toBeGreaterThan(
       fixtureRuntimeExitTimeoutMs("win32"),
@@ -313,6 +408,144 @@ describe("Electron E2E application lifecycle", () => {
     expect(close).toHaveBeenCalledOnce();
     expect(closeServer).toHaveBeenCalledOnce();
     expect(removeDirectory).toHaveBeenCalledOnce();
+  });
+
+  it("receives privileged-cleanup proof before requesting Electron exit", async () => {
+    const process = Object.assign(new EventEmitter(), {
+      exitCode: null as number | null,
+      signalCode: null as NodeJS.Signals | null,
+      kill: vi.fn(() => true),
+    });
+    let releaseCleanup!: () => void;
+    const cleanupReady = new Promise<void>((resolve) => {
+      releaseCleanup = resolve;
+    });
+    const prepareRuntimeQuit = vi.fn(async () => {
+      await cleanupReady;
+      return {
+        phase: "privileged-cleanup-complete",
+        runtimePid: 777,
+        cleanupConfirmed: true,
+        errorMessage: null,
+      };
+    });
+    const requestRuntimeQuit = vi.fn(async () => {
+      process.exitCode = 0;
+      process.emit("exit", 0, null);
+      return 777;
+    });
+    const waitForRuntimeExit = vi.fn(async () => undefined);
+    const closing = closeElectronFixtureBounded({
+      current: {
+        process: () => process,
+        close: async () => undefined,
+      } as unknown as ElectronApplication,
+      prepareRuntimeQuit,
+      readRuntimeQuitPhase: async () => "privileged-cleanup",
+      requestRuntimeQuit,
+      waitForRuntimeExit,
+      closeServer: vi.fn(async () => undefined),
+      removeDirectory: vi.fn(async () => undefined),
+      rpcTimeoutMs: 50,
+      cleanupReceiptTimeoutMs: 1_000,
+      serverTimeoutMs: 50,
+      removeTimeoutMs: 50,
+    });
+
+    await vi.waitFor(() => expect(prepareRuntimeQuit).toHaveBeenCalledOnce());
+    expect(requestRuntimeQuit).not.toHaveBeenCalled();
+    expect(process.kill).not.toHaveBeenCalled();
+    releaseCleanup();
+
+    await expect(closing).resolves.toBeUndefined();
+    expect(requestRuntimeQuit).toHaveBeenCalledOnce();
+    expect(waitForRuntimeExit).toHaveBeenCalledWith(777);
+    expect(process.kill).not.toHaveBeenCalled();
+  });
+
+  it("force-cleans when privileged cleanup cannot confirm every owner stopped", async () => {
+    const process = Object.assign(new EventEmitter(), {
+      exitCode: null as number | null,
+      signalCode: null as NodeJS.Signals | null,
+      kill: vi.fn((signal: NodeJS.Signals) => {
+        process.signalCode = signal;
+        process.emit("exit", null, signal);
+        return true;
+      }),
+    });
+    const requestRuntimeQuit = vi.fn(async () => 777);
+    const failure = await closeElectronFixtureBounded({
+      current: {
+        process: () => process,
+        close: async () => undefined,
+      } as unknown as ElectronApplication,
+      prepareRuntimeQuit: async () => ({
+        phase: "privileged-cleanup-complete",
+        runtimePid: 777,
+        cleanupConfirmed: false,
+        errorMessage: null,
+      }),
+      readRuntimeQuitPhase: async () => "privileged-cleanup-complete",
+      requestRuntimeQuit,
+      waitForRuntimeExit: vi.fn(async () => undefined),
+      closeServer: vi.fn(async () => undefined),
+      removeDirectory: vi.fn(async () => undefined),
+      rpcTimeoutMs: 50,
+      cleanupReceiptTimeoutMs: 50,
+      serverTimeoutMs: 50,
+      removeTimeoutMs: 50,
+    }).then(() => null, (error: unknown) => error);
+
+    expect(requestRuntimeQuit).not.toHaveBeenCalled();
+    expect(process.kill).toHaveBeenCalledWith("SIGKILL");
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect((failure as AggregateError).errors).toEqual([
+      expect.objectContaining({
+        message: "The Electron fixture privileged cleanup completed without confirming every owner stopped.",
+      }),
+      expect.objectContaining({
+        message: "The Electron fixture process required forced termination during close (phase=privileged-cleanup-complete).",
+      }),
+    ]);
+  });
+
+  it("force-cleans a missing privileged-cleanup receipt with phase diagnostics", async () => {
+    const process = Object.assign(new EventEmitter(), {
+      exitCode: null as number | null,
+      signalCode: null as NodeJS.Signals | null,
+      kill: vi.fn((signal: NodeJS.Signals) => {
+        process.signalCode = signal;
+        process.emit("exit", null, signal);
+        return true;
+      }),
+    });
+    const failure = await closeElectronFixtureBounded({
+      current: {
+        process: () => process,
+        close: async () => undefined,
+      } as unknown as ElectronApplication,
+      prepareRuntimeQuit: () => new Promise(() => undefined),
+      readRuntimeQuitPhase: async () => "privileged-cleanup",
+      requestRuntimeQuit: vi.fn(async () => null),
+      waitForRuntimeExit: vi.fn(async () => undefined),
+      closeServer: vi.fn(async () => undefined),
+      removeDirectory: vi.fn(async () => undefined),
+      rpcTimeoutMs: 50,
+      cleanupReceiptTimeoutMs: 5,
+      serverTimeoutMs: 50,
+      removeTimeoutMs: 50,
+    }).then(() => null, (error: unknown) => error);
+
+    expect(process.kill).toHaveBeenCalledWith("SIGKILL");
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect((failure as AggregateError).errors).toEqual([
+      expect.objectContaining({
+        message: "The Electron fixture privileged cleanup receipt did not settle in time (phase=privileged-cleanup).",
+      }),
+      expect.objectContaining({
+        message: "The Electron fixture process required forced termination during close (phase=privileged-cleanup).",
+      }),
+    ]);
   });
 
   it.runIf(process.platform === "darwin")(

@@ -4,7 +4,7 @@ import clsx from "clsx";
 import type { ChatAttachment, PromptPreset } from "@shared/contracts";
 import { chatAttachmentKind } from "@shared/attachments";
 import { MAX_CHAT_MESSAGE_CHARS } from "../../../../shared/diff-review";
-import { fastModeProviderValue, legacyProviderIdForHarness, routeSupportsNativeFastModeIdentity, withModelSelectionFastMode } from "../../../../shared/model-routing";
+import { fastModeProviderValue, providerIdForHarness, routeSupportsNativeFastModeIdentity, withModelSelectionFastMode } from "../../../../shared/model-routing";
 import { useNativePreviewSuspension } from "../../hooks/useNativePreviewSuspension";
 import { resolveComposerRouteState } from "../../utils/composerRouteState";
 import {
@@ -44,9 +44,9 @@ import { ComposerConversationContextDialog, ComposerConversationContextStrip, co
 import { useComposerDetachmentOwnership } from "./useComposerDetachmentOwnership";
 import { useComposerPrefill } from "./useComposerPrefill";
 import { useComposerPromptStash } from "./useComposerPromptStash";
+import { useComposerPromptHistory } from "./useComposerPromptHistory";
 import { useComposerSkillCompletion } from "./useComposerSkillCompletion";
 import { clearPersistedComposerDraft, persistComposerDraft } from "../../utils/composerDraftPersistence";
-
 /*
  * The resume surface only matters once /resume runs, and the composer sits in
  * the entry chunk. Loading it on demand keeps the picker and its list rendering
@@ -68,6 +68,7 @@ export const Composer = memo(function Composer({
   conversation,
   checkoutBranch,
   showCheckoutContext = true,
+  newChatProjectPicker,
   providers,
   actions,
   disabled,
@@ -75,6 +76,7 @@ export const Composer = memo(function Composer({
   running,
   backendProfiles = [],
   latestTurn = null,
+  promptHistory = [],
   latestTurnSummary = null,
   queuedTurnAuthoritative = true,
   mentionResults,
@@ -461,34 +463,31 @@ export const Composer = memo(function Composer({
   }, []);
 
   const mentionQuery = mentionMatch?.[1] ?? null;
-  useEffect(() => {
-    if (mentionQuery) onMentionQuery(mentionQuery);
-  }, [mentionQuery, onMentionQuery]);
+  useEffect(() => { if (mentionQuery) onMentionQuery(mentionQuery); }, [mentionQuery, onMentionQuery]);
 
   useTextareaAutosize(textareaRef, message);
 
-  const updateMessage = (next: string): void => {
+  const applyMessage = (next: string): void => {
     const previous = draftValueRef.current;
     if (next === previous) return;
-    markEditorChanged();
-    draftValueRef.current = next;
+    markEditorChanged(); draftValueRef.current = next;
     persistDraftChange(conversation.id, previous, next);
-    if (compactNotice) clearCompactNotice();
-    setMessage(next);
+    if (compactNotice) clearCompactNotice(); setMessage(next);
   };
+
+  const promptHistoryController = useComposerPromptHistory({
+    conversationId: conversation.id, entries: promptHistory, latestTurn: latestTurnSummary ?? latestTurn, message,
+    onApplyMessage: applyMessage, readEditorRevision: () => editorRevisionsRef.current.get(conversation.id) ?? 0,
+    canRestoreStoppedPrompt: () => draftValueRef.current.length === 0 && attachmentsRef.current.length === 0 && pendingAttachmentIdsRef.current.size === 0 && !attachmentImportingRef.current && !submittingRef.current && !promptContext && selectedPreviewUrlRef.current === null && fileReferences.length === 0 && contextPacketIds.length === 0 && pendingRoute === null, textareaRef,
+  });
+  const updateMessage = promptHistoryController.replaceMessage;
 
   const addFileReference = (path: string): void => {
     if (fileReferences.includes(path)) return;
-    markEditorChanged();
-    setFileReferences([...fileReferences, path]);
+    markEditorChanged(); setFileReferences([...fileReferences, path]);
   };
 
-  const clearPromptContext = (): void => {
-    if (!promptContext) return;
-    markEditorChanged();
-    promptContextsRef.current.set(conversation.id, null);
-    onClearPromptContext?.();
-  };
+  const clearPromptContext = (): void => { if (promptContext) { markEditorChanged(); promptContextsRef.current.set(conversation.id, null); onClearPromptContext?.(); } };
 
   const togglePreviewContext = (): void => {
     markEditorChanged();
@@ -560,7 +559,7 @@ export const Composer = memo(function Composer({
       }
       if (!mountedRef.current || conversationIdRef.current !== submittedConversationId) return;
       if (editorUnchanged) {
-        draftValueRef.current = "";
+        promptHistoryController.reset(""); draftValueRef.current = "";
         setMessage("");
         setAttachments([]);
         setFileReferences([]);
@@ -664,7 +663,6 @@ export const Composer = memo(function Composer({
       attachmentsRef, pendingAttachmentIdsRef,
       blocked: disabled || sending,
       conversationId: conversation.id,
-      harnessId: latestTurn?.harnessId ?? null,
       markEditorChanged,
       mountedRef,
       onChooseAttachments,
@@ -720,8 +718,9 @@ export const Composer = memo(function Composer({
     stopping,
   });
   const canSend = primaryAction === "send-ready";
-  const { compactNotice, clearCompactNotice, compact } = useComposerCompaction({
-    conversationId: conversation.id, message, canSend, running,
+  const attachmentsAreImages = attachments.every(({ mimeType }) => chatAttachmentKind(mimeType) === "image");
+  const { compactNotice, clearCompactNotice, compact, compactUnavailableReason } = useComposerCompaction({
+    conversationId: conversation.id, providerId: conversation.providerId, message, canSend, running,
     blocked: attachments.length > 0
       || Boolean(promptContext)
       || previewContextSelected
@@ -729,14 +728,14 @@ export const Composer = memo(function Composer({
       || contextPacketIds.length > 0,
     flushDraftPersistence, conversationIdRef, mountedRef, submittingRef,
     editorRevisions: editorRevisionsRef,
-    draftValueRef, textareaRef, setMessage, setSubmitting, onCompact,
+    draftValueRef, textareaRef, clearMessage: () => { promptHistoryController.reset(""); setMessage(""); }, setSubmitting, onCompact,
   });
   const followUpState = composerFollowUpState({
     running,
     harnessId: latestTurn?.harnessId ?? null,
     hasDraft: Boolean(message.trim()) || attachments.length > 0,
     textOnly:
-      attachments.every(({ mimeType }) => chatAttachmentKind(mimeType) === "image")
+      attachmentsAreImages
       && !promptContext
       && !previewContextSelected
       && fileReferences.length === 0
@@ -745,24 +744,22 @@ export const Composer = memo(function Composer({
     submitting,
     sending,
   });
-  const canQueue = running && sendEligible
-    && attachments.length === 0 && !promptContext && !previewContextSelected
-    && fileReferences.length === 0 && contextPacketIds.length === 0
-    && !submitting && !sending;
+  const canQueue = running && sendEligible && attachmentsAreImages && !promptContext
+    && !previewContextSelected && fileReferences.length === 0 && contextPacketIds.length === 0 && !submitting && !sending;
   const queueCurrentMessage = async (): Promise<void> => {
     if (!canQueue) return;
-    const content = message.trim();
-    if (!(await import("./ComposerSendActions")).enqueueComposerPrompt(
-      conversation.id, content,
-    )) return;
-    if (conversationIdRef.current !== conversation.id
-      || draftValueRef.current !== message) return;
-    flushDraftPersistence();
-    clearPersistedComposerDraft(conversation.id, message);
-    markEditorChanged();
-    draftValueRef.current = "";
-    setMessage("");
-    window.requestAnimationFrame(() => textareaRef.current?.focus());
+    const queuedConversationId = conversation.id;
+    const queuedMessage = message;
+    const queuedAttachments = attachmentsRef.current;
+    const { enqueueComposerPrompt } = await import("./ComposerQueuedActions");
+    if (conversationIdRef.current !== queuedConversationId || draftValueRef.current !== queuedMessage
+      || attachmentsRef.current !== queuedAttachments || !enqueueComposerPrompt(
+        queuedConversationId, queuedMessage.trim() || attachmentFallback, queuedAttachments,
+      )) return;
+    attachmentsRef.current = []; setAttachments([]);
+    pendingAttachmentIdsRef.current = new Set(); setPendingAttachmentIds(new Set());
+    flushDraftPersistence(); clearPersistedComposerDraft(queuedConversationId, queuedMessage);
+    markEditorChanged(); promptHistoryController.reset(""); draftValueRef.current = ""; setMessage(""); window.requestAnimationFrame(() => textareaRef.current?.focus());
   };
   const runRouteRepair = async (): Promise<void> => {
     if (routeReadiness.ready || !routeReadiness.action || routeRepairing) return;
@@ -910,7 +907,7 @@ export const Composer = memo(function Composer({
       return;
     }
     const providerId = route.providerId
-      ?? legacyProviderIdForHarness(route.selection.harnessId);
+      ?? providerIdForHarness(route.selection.harnessId);
     await updateConversation({
       ...(providerId ? { providerId } : {}),
       modelSelection: transition.selection,
@@ -1125,7 +1122,8 @@ export const Composer = memo(function Composer({
           }}
           textareaRef={textareaRef}
           message={message}
-          onMessageChange={updateMessage}
+          onMessageChange={promptHistoryController.onMessageChange}
+          onNavigatePromptHistory={promptHistoryController.navigate}
           onImportAttachments={importAttachments}
           onSubmit={submit}
           canQueue={canQueue}
@@ -1143,6 +1141,7 @@ export const Composer = memo(function Composer({
           dismissSkills={() => dismissMenu("context-change")}
           slashMatch={slashMatch}
           onCompactCommand={() => void compact({ kind: "compact" })}
+          compactUnavailableReason={compactUnavailableReason}
           compactNotice={compactNotice}
           goalAvailable={Boolean(goal)}
           onOpenGoal={() => {
@@ -1221,6 +1220,7 @@ export const Composer = memo(function Composer({
           conversation={conversation}
           checkoutBranch={checkoutBranch}
           showCheckoutContext={showCheckoutContext}
+          newChatProjectPicker={newChatProjectPicker}
           onUpdateConversation={updateConversation}
           conversationUpdatePending={conversationUpdatePending}
           conversationUpdateError={conversationUpdateError}
@@ -1237,7 +1237,8 @@ export const Composer = memo(function Composer({
           queuedTurnId={(latestTurnSummary ?? latestTurn)?.id ?? null}
           queuedTurnStatus={(latestTurnSummary ?? latestTurn)?.status ?? null}
           queuedTurnAuthoritative={queuedTurnAuthoritative}
-          onSendQueued={(content) => onSend(content, [], undefined)}
+          onSendQueued={(content, queuedAttachments) => onSend(content, queuedAttachments, undefined)}
+          onReleaseAttachment={onReleaseAttachment}
           onSubmit={submit}
           onStop={stop}
         />

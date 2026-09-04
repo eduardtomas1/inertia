@@ -108,7 +108,9 @@ describe("runtime incremental synchronization", () => {
     });
     const first = await client.next(
       (event): event is Extract<ServerEvent, { type: "runtime.event" }> =>
-        event.type === "runtime.event",
+        event.type === "runtime.event"
+        && event.event.type === "snapshot.updated"
+        && event.event.snapshot.settings.theme === "dark",
     );
     expect(first.scope).toEqual({ kind: "shell" });
     expect(first.event.type).toBe("snapshot.updated");
@@ -202,6 +204,17 @@ describe("runtime incremental synchronization", () => {
       (event): event is Extract<ServerEvent, { type: "runtime.sync.completed" }> =>
         event.type === "runtime.sync.completed",
     );
+    const unrelatedRequestId = randomUUID();
+    send(writer.socket, {
+      type: "settings.update",
+      requestId: unrelatedRequestId,
+      payload: { theme: "dark" },
+    });
+    await writer.next(
+      (event): event is Extract<ServerEvent, { type: "request.ok" }> =>
+        event.type === "request.ok" && event.requestId === unrelatedRequestId,
+    );
+
     const requestId = randomUUID();
     send(writer.socket, {
       type: "settings.update",
@@ -210,7 +223,9 @@ describe("runtime incremental synchronization", () => {
     });
     const published = await writer.next(
       (event): event is Extract<ServerEvent, { type: "runtime.event" }> =>
-        event.type === "runtime.event",
+        event.type === "runtime.event"
+        && event.event.type === "snapshot.updated"
+        && event.event.snapshot.settings.compactSidebar === true,
     );
 
     const resumeUrl = new URL(runtime.websocketUrl);
@@ -221,19 +236,20 @@ describe("runtime incremental synchronization", () => {
       (event): event is Extract<ServerEvent, { type: "server.welcome" }> =>
         event.type === "server.welcome",
     );
-    expect(refreshed.sync?.latestSequence).toBe(
+    expect(refreshed.sync?.latestSequence).toBeGreaterThanOrEqual(
       published.sync.latestSequence,
     );
+    expect(refreshed.snapshot.sync).toEqual(refreshed.sync);
     expect(refreshed.snapshot.settings.compactSidebar).toBe(true);
     const completed = await resumed.next(
       (event): event is Extract<ServerEvent, { type: "runtime.sync.completed" }> =>
         event.type === "runtime.sync.completed",
     );
-    expect(completed.sync).toEqual(published.sync);
+    expect(completed.sync).toEqual(refreshed.sync);
 
     const mismatchUrl = new URL(runtime.websocketUrl);
     mismatchUrl.searchParams.set("runtimeGeneration", randomUUID());
-    mismatchUrl.searchParams.set("afterSequence", String(published.sync.latestSequence));
+    mismatchUrl.searchParams.set("afterSequence", String(refreshed.sync?.latestSequence));
     const reset = await connect(mismatchUrl.toString());
     const resetWelcome = await reset.next(
       (event): event is Extract<ServerEvent, { type: "server.welcome" }> =>

@@ -6,7 +6,7 @@ import type {
   Project,
   ServerEvent,
 } from "../../src/shared/contracts";
-import { nativeModelSelection } from "../../src/shared/model-routing";
+import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import { useWorkspaceTools } from "../../src/renderer/src/hooks/useWorkspaceTools";
 import { useWorkspaceFiles } from "../../src/renderer/src/hooks/workspace-tools/useWorkspaceFiles";
 import type { CommandWithoutId } from "../../src/renderer/src/lib/runtimeCommands";
@@ -57,7 +57,7 @@ function owner(name: string): {
       projectId,
       title: `${name} chat`,
       providerId: "codex",
-      modelSelection: nativeModelSelection({
+      modelSelection: providerNativeModelSelection({
         providerId: "codex",
         modelId: "default",
         reasoningEffort: "medium",

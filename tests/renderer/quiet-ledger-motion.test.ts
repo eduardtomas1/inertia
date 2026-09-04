@@ -210,9 +210,10 @@ describe("Quiet Ledger active-to-settled motion", () => {
 
   it("pauses live timers and active motion only while the document is hidden", () => {
     expect(activitySource).toContain('document.visibilityState !== "visible"');
-    expect(activitySource).toContain("document.hasFocus() ? 100 : 1_000");
+    expect(activitySource).toContain("1_000");
+    expect(activitySource).not.toContain("document.hasFocus() ? 100 : 1_000");
     expect(activitySource).toContain('document.addEventListener("visibilitychange", synchronize)');
-    expect(activitySource).toContain('window.addEventListener("blur", synchronize)');
+    expect(activitySource).not.toContain('window.addEventListener("blur", synchronize)');
     expect(appSource).toContain("useDocumentPresence()");
     expect(documentPresenceSource).toContain("useSyncExternalStore(");
     expect(documentPresenceSource).toContain("document.hasFocus()");

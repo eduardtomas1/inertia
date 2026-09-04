@@ -1,9 +1,8 @@
 import { _electron as electron, type ElectronApplication,
   type Page } from "@playwright/test";
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
-import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { promisify } from "node:util";
 
@@ -15,7 +14,17 @@ import { closeElectronAppBounded, closeElectronFixtureBounded,
   closePreviewServerBounded, observeElectronPage, observeElectronProcess,
   quitElectronAppBounded, removeFixtureDirectory,
   waitForRuntimeProcessExit } from "./electron-app-lifecycle";
+import { finishElectronPreparedQuit, prepareElectronPrivilegedCleanup,
+  readElectronPrivilegedCleanupPhase } from "./electron-runtime-shutdown";
+import {
+  createFixtureTemporaryDirectories,
+  fixtureTemporaryEnvironment,
+} from "./fixture-temporary-directory";
 import { expectNoViewportOverflow as expectPageNoViewportOverflow } from "./layout-assertions";
+import {
+  readNativePreviewSnapshot,
+  type NativePreviewTestSnapshot,
+} from "./native-preview-diagnostics";
 
 const execFileAsync = promisify(execFile);
 const FIXTURE_RPC_TEARDOWN_TIMEOUT_MS = 5_000;
@@ -25,6 +34,9 @@ export interface RuntimeTestSnapshot {
   generation: number;
   pid: number | null;
   websocketUrl: string | null;
+  restartAttempt: number;
+  restartScheduled: boolean;
+  lastError: string | null;
 }
 
 export interface AppFixture {
@@ -38,6 +50,7 @@ export interface AppFixture {
   malformedAttachmentPath: string;
   rendererErrors: string[];
   previewUrl: string;
+  nativePreviewSnapshot: (url: string) => Promise<NativePreviewTestSnapshot>;
   nativePreviewIsVisible: (url: string) => Promise<boolean>;
   runtimeSnapshot: () => Promise<RuntimeTestSnapshot>;
   recycleRuntime: () => Promise<void>;
@@ -53,6 +66,7 @@ export interface AppFixture {
 interface AppFixtureOptions {
   name: string;
   initialState: "empty" | "conversation"; windowDisplay?: "primary"; additionalEnvironment?: Record<string, string>;
+  workspaceGit?: boolean;
   initialNewThreadMode?: "local" | "worktree";
   seedAssistantCodeBlock?: boolean;
   seedSecondProject?: boolean;
@@ -498,7 +512,7 @@ function readableAttachmentPdf(): Buffer {
   return Buffer.from(source, "ascii");
 }
 
-async function createWorkspace(testDirectory: string): Promise<{
+async function createWorkspace(testDirectory: string, initializeGit: boolean): Promise<{
   workspaceDirectory: string;
   attachmentImagePath: string;
   attachmentDocumentPath: string;
@@ -569,21 +583,23 @@ async function createWorkspace(testDirectory: string): Promise<{
       "utf8",
     ),
   ]);
-  await execFileAsync("git", ["init", "-q"], { cwd: workspaceDirectory });
-  await execFileAsync("git", ["add", "."], { cwd: workspaceDirectory });
-  await execFileAsync(
-    "git",
-    [
-      "-c",
-      "user.name=Inertia",
-      "-c",
-      "user.email=test@inertia.local",
-      "commit",
-      "-qm",
-      "fixture",
-    ],
-    { cwd: workspaceDirectory },
-  );
+  if (initializeGit) {
+    await execFileAsync("git", ["init", "-q"], { cwd: workspaceDirectory });
+    await execFileAsync("git", ["add", "."], { cwd: workspaceDirectory });
+    await execFileAsync(
+      "git",
+      [
+        "-c",
+        "user.name=Inertia",
+        "-c",
+        "user.email=test@inertia.local",
+        "commit",
+        "-qm",
+        "fixture",
+      ],
+      { cwd: workspaceDirectory },
+    );
+  }
   await writeFile(
     join(workspaceDirectory, "sample.ts"),
     "export const version = '0.0.1';\nexport const ready = true;\n",
@@ -643,10 +659,12 @@ export async function createAppFixture(
   options: AppFixtureOptions,
 ): Promise<AppFixture> {
   const preview = await createPreviewServer();
-  const testDirectory = await mkdtemp(
-    join(tmpdir(), `inertia-${options.name}-`),
+  const { processTemporaryDirectory, testDirectory } =
+    await createFixtureTemporaryDirectories();
+  const workspace = await createWorkspace(
+    testDirectory,
+    options.workspaceGit !== false,
   );
-  const workspace = await createWorkspace(testDirectory);
   let providerBinDirectory: string | null = null;
   const secondWorkspaceDirectory = options.seedSecondProject
     ? await createSecondWorkspace(testDirectory)
@@ -680,11 +698,13 @@ export async function createAppFixture(
                 "utf8",
               )]
             : []),
-          writeFile(
-            join(directory, ".git", "info", "exclude"),
-            `app-server\nlogin\n${options.codexResumeSource ? "resume\n" : ""}`,
-            { encoding: "utf8", flag: "a" },
-          ),
+          ...(options.workspaceGit === false
+            ? []
+            : [writeFile(
+                join(directory, ".git", "info", "exclude"),
+                `app-server\nlogin\n${options.codexResumeSource ? "resume\n" : ""}`,
+                { encoding: "utf8", flag: "a" },
+              )]),
         ]),
     );
   }
@@ -781,6 +801,7 @@ export async function createAppFixture(
         ? { INERTIA_PACKAGE_SMOKE_CODEX_EXPECTED: process.execPath }
         : {}),
       ...options.additionalEnvironment,
+      ...fixtureTemporaryEnvironment(processTemporaryDirectory),
     },
   };
   const appendDiagnostic = (source: string, chunk: Buffer | string): void => {
@@ -867,23 +888,12 @@ export async function createAppFixture(
     );
     await page.waitForTimeout(250);
   };
+  const nativePreviewSnapshot = async (
+    url: string,
+  ): Promise<NativePreviewTestSnapshot> =>
+    await readNativePreviewSnapshot(currentApp(), url);
   const nativePreviewIsVisible = async (url: string): Promise<boolean> =>
-    await currentApp().evaluate(
-      ({ BrowserWindow }, previewUrl) => {
-        const window = BrowserWindow.getAllWindows()[0];
-        if (!window) return false;
-        const preview = window.contentView.children.find((view) => {
-          const contents = Reflect.get(view, "webContents") as
-            | { getURL: () => string }
-            | undefined;
-          return contents?.getURL() === previewUrl;
-        });
-        if (!preview) return false;
-        const bounds = preview.getBounds();
-        return bounds.width > 0 && bounds.height > 0;
-      },
-      url,
-    );
+    (await nativePreviewSnapshot(url)).visible;
 
   return {
     get electronApp() {
@@ -897,6 +907,7 @@ export async function createAppFixture(
     secondWorkspaceDirectory,
     rendererErrors,
     previewUrl: preview.url,
+    nativePreviewSnapshot,
     nativePreviewIsVisible,
     runtimeSnapshot,
     recycleRuntime,
@@ -974,17 +985,9 @@ export async function createAppFixture(
         current: activeApp,
         priorRuntimePid,
         rpcTimeoutMs: FIXTURE_RPC_TEARDOWN_TIMEOUT_MS,
-        requestRuntimeQuit: async () => {
-          if (!activeApp) return null;
-          const snapshot = await activeApp.evaluate(() => {
-            const runtime = Reflect.get(
-              globalThis,
-              "__inertiaTestRuntime",
-            ) as { quit?: () => RuntimeTestSnapshot | null } | undefined;
-            return runtime?.quit?.() ?? null;
-          });
-          return snapshot?.pid ?? null;
-        },
+        prepareRuntimeQuit: async () => await prepareElectronPrivilegedCleanup(activeApp),
+        readRuntimeQuitPhase: async () => await readElectronPrivilegedCleanupPhase(activeApp),
+        requestRuntimeQuit: async () => await finishElectronPreparedQuit(activeApp),
         waitForRuntimeExit: waitForRuntimeProcessExit,
         closeServer: async () => closePreviewServerBounded(preview.server),
         removeDirectory: async () => removeFixtureDirectory(testDirectory),

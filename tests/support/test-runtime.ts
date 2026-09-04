@@ -22,5 +22,7 @@ export async function startTestRuntime(options: RuntimeOptions): Promise<Running
   ) {
     throw new Error("The test runtime generation lease could not be published.");
   }
-  return await startRuntime(options);
+  const runtime = await startRuntime(options);
+  await runtime.startPostReadyWork();
+  return runtime;
 }

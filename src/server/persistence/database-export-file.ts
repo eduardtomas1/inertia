@@ -11,6 +11,8 @@ import {
 import { constants } from "node:fs";
 import { dirname, join } from "node:path";
 
+import { FILE_OPEN_NO_FOLLOW } from
+  "../../node/platform-file-open-flags";
 import { DATABASE_RECOVERY_EXPORT_MAX_BYTES } from "./database-export";
 
 const FILE_MODE = 0o600;
@@ -127,7 +129,7 @@ export async function readDatabaseRecoveryExportFile(
   ) {
     throw new Error("The recovery export file is unavailable or too large.");
   }
-  const noFollow = "O_NOFOLLOW" in constants ? constants.O_NOFOLLOW : 0;
+  const noFollow = "O_NOFOLLOW" in constants ? FILE_OPEN_NO_FOLLOW : 0;
   const file = await open(path, constants.O_RDONLY | noFollow);
   try {
     const before = await file.stat();

@@ -113,18 +113,14 @@ export function LiveElapsed({
       if (document.visibilityState !== "visible") return;
       timer = window.setInterval(
         () => setNow(Date.now()),
-        document.hasFocus() ? 100 : 1_000,
+        1_000,
       );
     };
     synchronize();
     document.addEventListener("visibilitychange", synchronize);
-    window.addEventListener("focus", synchronize);
-    window.addEventListener("blur", synchronize);
     return () => {
       stopTimer();
       document.removeEventListener("visibilitychange", synchronize);
-      window.removeEventListener("focus", synchronize);
-      window.removeEventListener("blur", synchronize);
     };
   }, []);
   return (

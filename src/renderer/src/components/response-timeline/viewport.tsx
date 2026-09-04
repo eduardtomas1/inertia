@@ -49,6 +49,7 @@ import {
   TimelineMinimap,
   type TimelineMarker,
 } from "./minimap";
+import { startTimelineItemFocus } from "./timeline-item-focus";
 import { TurnTimeline } from "./turn";
 import type { ResponseTimelineProps } from "./types";
 
@@ -798,8 +799,7 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
       removeIntentListeners();
     };
   }, [
-    props.scrollElementRef,
-    props.timelineElementRef,
+    props.scrollElementRef, props.timelineElementRef,
     props.turnAnchorId,
     turnAnchorIndex,
     virtualized,
@@ -1068,6 +1068,12 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     return grouped;
   }, [props.subagents]);
 
+  const cancelTimelineItemFocus = useRef<(() => void) | null>(null);
+  useLayoutEffect(() => () => {
+    cancelTimelineItemFocus.current?.();
+    cancelTimelineItemFocus.current = null;
+  }, [props.conversationId]);
+
   const focusTimelineItem = useCallback((
     index: number,
     target: TimelineJumpTarget,
@@ -1076,40 +1082,48 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     const boundedIndex = Math.max(0, Math.min(index, timeline.length - 1));
     const item = timeline[boundedIndex];
     if (!item) return;
-    if (virtualized) {
-      virtualizer.scrollToIndex(boundedIndex, {
-        align: target === "turn" ? "center" : "start",
-        behavior: "auto",
-      });
-    }
-
-    let attempts = 0;
-    const focus = (): void => {
-      const root = props.timelineElementRef?.current;
-      const row = item.kind === "turn"
-        ? findTurnElement(root, item.turn.id)
-        : root?.querySelector<HTMLElement>('[data-response-row-id="legacy-orphan-history"]') ?? null;
-      if (!row && attempts < 8) {
-        attempts += 1;
-        window.requestAnimationFrame(focus);
-        return;
-      }
-      if (!row) return;
-      if (!virtualized) row.scrollIntoView({ block: target === "turn" ? "center" : "start" });
-      const destination = target === "turn"
-        ? row
-        : row.querySelector<HTMLElement>(`[data-turn-jump-target="${target}"]`) ?? row;
-      destination.focus({ preventScroll: true });
-    };
-    window.requestAnimationFrame(focus);
-  }, [props.timelineElementRef, timeline, virtualized, virtualizer]);
+    const align = target === "turn" ? "center" : "start";
+    cancelTimelineItemFocus.current?.();
+    cancelTimelineItemFocus.current = startTimelineItemFocus({
+      root: props.timelineElementRef?.current ?? null,
+      scrollElement: props.scrollElementRef?.current ?? null,
+      index: boundedIndex,
+      align,
+      virtualized,
+      resolveTarget: (root) => {
+        const row = item.kind === "turn"
+          ? findTurnElement(root, item.turn.id)
+          : root.querySelector<HTMLElement>(
+              '[data-response-row-id="legacy-orphan-history"]',
+            );
+        if (!row) return null;
+        const destination = target === "turn"
+          ? row
+          : row.querySelector<HTMLElement>(
+              `[data-turn-jump-target="${target}"]`,
+            ) ?? row;
+        return { row, destination };
+      },
+      scrollToIndex: (targetIndex, targetAlign) =>
+        virtualizer.scrollToIndex(targetIndex, {
+          align: targetAlign,
+          behavior: "auto",
+        }),
+    });
+  }, [
+    props.scrollElementRef,
+    props.timelineElementRef,
+    timeline,
+    virtualized,
+    virtualizer,
+  ]);
 
   const beginReaderTimelineNavigation = useCallback((): void => {
     cancelFinalAnswerAnchor();
     onReaderNavigationIntent?.();
   }, [cancelFinalAnswerAnchor, onReaderNavigationIntent]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const focusRequestedTurn = (event: Event): void => {
       const detail = (event as CustomEvent<unknown>).detail;
       if (

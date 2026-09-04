@@ -14,9 +14,11 @@ import {
   resolveContinuationDecision,
 } from "../../../shared/continuation-policy";
 import {
-  nativeBackendProfile,
+  providerNativeBackendProfile,
   routeSupportsNativeFastModeIdentity,
 } from "../../../shared/model-routing";
+import { GEMINI_EXPLICIT_COMPACTION_UNAVAILABLE_REASON } from
+  "../../../shared/provider";
 import type { RuntimeStore } from "../../database";
 import type { ProviderTerminalResumeRegistry } from "../../provider/terminal-resume";
 import type { ProviderManager } from "../../providers";
@@ -125,6 +127,11 @@ export function createConversationCompactionCommandHandler(
     const conversation = dependencies.store.conversation(
       command.payload.conversationId,
     );
+    if (conversation.providerId === "gemini") {
+      throw new RuntimeRequestError(
+        GEMINI_EXPLICIT_COMPACTION_UNAVAILABLE_REASON,
+      );
+    }
     if (!conversation.providerSessionId) {
       throw new RuntimeRequestError(
         "This chat does not have a provider session to compact yet.",
@@ -167,7 +174,7 @@ export function createConversationCompactionCommandHandler(
         ? "fast"
         : null;
     const supportedFastMode = exactProvider?.id === route.providerId
-      && route.backendProfile.id === nativeBackendProfile(route.providerId).id
+      && route.backendProfile.id === providerNativeBackendProfile(route.providerId).id
       && routeSupportsNativeFastModeIdentity(selection)
       && exactModel?.fastMode?.providerValue === expectedFastMode
       ? expectedFastMode

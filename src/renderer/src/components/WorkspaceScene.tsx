@@ -4,8 +4,10 @@ import {
   Suspense,
   useRef,
   type ComponentProps,
+  type ComponentType,
   type CSSProperties,
   type JSX,
+  type LazyExoticComponent,
   type RefObject,
 } from "react";
 
@@ -35,30 +37,38 @@ import {
   loadWorkspaceChangesPanel,
 } from "./lazySurfaceLoaders";
 
-const EnvironmentPanel = lazy(async () => ({
-  default: (await loadEnvironmentPanel()).EnvironmentPanel,
-}));
-const FilesPanel = lazy(async () => ({
-  default: (await loadFilesPanel()).FilesPanel,
-}));
-const HistoricalDiffPanel = lazy(async () => ({
-  default: (await loadHistoricalDiffPanel()).HistoricalDiffPanel,
-}));
-const GoalPanel = lazy(async () => ({
-  default: (await loadGoalPanel()).GoalPanel,
-}));
-const PlanPanel = lazy(async () => ({
-  default: (await loadPlanPanel()).PlanPanel,
-}));
-const PreviewPanel = lazy(async () => ({
-  default: (await loadPreviewPanel()).PreviewPanel,
-}));
-const TerminalPanel = lazy(async () => ({
-  default: (await loadTerminalPanel()).TerminalPanel,
-}));
-const WorkspaceChangesPanel = lazy(async () => ({
-  default: (await loadWorkspaceChangesPanel()).WorkspaceChangesPanel,
-}));
+function lazySurface<TModule, TProps>(
+  loader: () => Promise<TModule>,
+  select: (module: TModule) => ComponentType<TProps>,
+): LazyExoticComponent<ComponentType<TProps>> {
+  return lazy(() => loader().then((module) => ({
+    default: select(module),
+  })));
+}
+
+const EnvironmentPanel = lazySurface(
+  loadEnvironmentPanel,
+  (module) => module.EnvironmentPanel,
+);
+const FilesPanel = lazySurface(loadFilesPanel, (module) => module.FilesPanel);
+const HistoricalDiffPanel = lazySurface(
+  loadHistoricalDiffPanel,
+  (module) => module.HistoricalDiffPanel,
+);
+const GoalPanel = lazySurface(loadGoalPanel, (module) => module.GoalPanel);
+const PlanPanel = lazySurface(loadPlanPanel, (module) => module.PlanPanel);
+const PreviewPanel = lazySurface(
+  loadPreviewPanel,
+  (module) => module.PreviewPanel,
+);
+const TerminalPanel = lazySurface(
+  loadTerminalPanel,
+  (module) => module.TerminalPanel,
+);
+const WorkspaceChangesPanel = lazySurface(
+  loadWorkspaceChangesPanel,
+  (module) => module.WorkspaceChangesPanel,
+);
 
 function WorkspaceToolFallback(): JSX.Element {
   return (

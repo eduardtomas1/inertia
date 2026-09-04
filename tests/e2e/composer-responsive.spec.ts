@@ -134,8 +134,8 @@ test("keeps the composer as one cohesive dock across themes and responsive split
       contained: true,
       fits: true,
       wraps: true,
-      projectDecoration: "underline",
-      projectDecorationStyle: "dotted",
+      projectDecoration: "none",
+      projectDecorationStyle: "solid",
     });
     expect(longHeadingGeometry.fontSize).toBeGreaterThanOrEqual(26);
     expect(longHeadingGeometry.fontSize).toBeLessThanOrEqual(34);
@@ -295,14 +295,14 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     }
     await expect(send).toBeDisabled();
     await page.mouse.move(0, 0);
-    const modelIdleBackground = await model.evaluate(
-      (button) => getComputedStyle(button).backgroundColor,
-    );
-    await model.hover();
-    const modelHoverBackground = await model.evaluate(
-      (button) => getComputedStyle(button).backgroundColor,
-    );
-    expect(modelHoverBackground).not.toBe(modelIdleBackground);
+    const modelIdleBackground = await model.evaluate((button) => getComputedStyle(button).backgroundColor);
+    await expect.poll(async () => {
+      await page.mouse.move(0, 0);
+      await model.hover();
+      return model.evaluate((button, idleBackground) =>
+        button.matches(":hover") && getComputedStyle(button).backgroundColor !== idleBackground,
+      modelIdleBackground);
+    }).toBe(true);
     await model.focus();
     await expect(model).toBeFocused();
     expect(await model.evaluate(
@@ -360,9 +360,9 @@ test("keeps the composer as one cohesive dock across themes and responsive split
       (button) => getComputedStyle(button).backgroundColor,
     );
     await accessTrigger.hover();
-    expect(await accessTrigger.evaluate(
-      (button) => getComputedStyle(button).backgroundColor,
-    )).not.toBe(accessIdleBackground);
+    await expect.poll(() => accessTrigger.evaluate((button, idleBackground) =>
+      button.matches(":hover") && getComputedStyle(button).backgroundColor !== idleBackground,
+    accessIdleBackground)).toBe(true);
     await accessTrigger.focus();
     expect(await accessTrigger.evaluate(
       (button) => Number.parseFloat(getComputedStyle(button).outlineWidth),
@@ -468,7 +468,18 @@ test("keeps the composer as one cohesive dock across themes and responsive split
       name: "Attach images, documents, or spreadsheets",
     }).click();
     const attachmentList = dock.getByRole("list", { name: "Attachments" });
-    await expect(attachmentList.locator("img")).toHaveCount(1);
+    const attachmentImage = attachmentList.locator("img");
+    await expect(attachmentImage).toHaveCount(1);
+    await expect.poll(async () => await attachmentImage.evaluate((element) => {
+      const image = element as HTMLImageElement;
+      return {
+        complete: image.complete,
+        decoded: image.naturalHeight > 0 && image.naturalWidth > 0,
+      };
+    })).toEqual({
+      complete: true,
+      decoded: true,
+    });
     await expect(attachmentList.getByText("PNG image · 68 B", {
       exact: true,
     })).toBeVisible();
@@ -599,33 +610,24 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     await expect(splitAccessMenu).toBeVisible();
     await expect(splitAccessMenu.getByRole("menuitemradio").first())
       .toBeFocused();
+    await expect(splitDock.locator(".composer-more-submenu")).toHaveCount(0);
     const splitPopoverGeometry = await splitDock.evaluate((element) => {
       const workspace = element.closest<HTMLElement>(".workspace-body");
       const rootMenu = element.querySelector<HTMLElement>(
         "#composer-more-menu",
       );
-      const submenu = element.querySelector<HTMLElement>(
-        ".composer-more-submenu",
-      );
       const workspaceBounds = workspace?.getBoundingClientRect();
       const rootBounds = rootMenu?.getBoundingClientRect();
-      const submenuBounds = submenu?.getBoundingClientRect();
       return {
         workspaceLeft: workspaceBounds?.left ?? Number.POSITIVE_INFINITY,
         workspaceRight: workspaceBounds?.right ?? Number.NEGATIVE_INFINITY,
         rootLeft: rootBounds?.left ?? Number.NEGATIVE_INFINITY,
         rootRight: rootBounds?.right ?? Number.POSITIVE_INFINITY,
-        submenuLeft: submenuBounds?.left ?? Number.NEGATIVE_INFINITY,
-        submenuRight: submenuBounds?.right ?? Number.POSITIVE_INFINITY,
       };
     });
     expect(splitPopoverGeometry.rootLeft)
       .toBeGreaterThanOrEqual(splitPopoverGeometry.workspaceLeft);
     expect(splitPopoverGeometry.rootRight)
-      .toBeLessThanOrEqual(splitPopoverGeometry.workspaceRight);
-    expect(splitPopoverGeometry.submenuLeft)
-      .toBeGreaterThanOrEqual(splitPopoverGeometry.workspaceLeft);
-    expect(splitPopoverGeometry.submenuRight)
       .toBeLessThanOrEqual(splitPopoverGeometry.workspaceRight);
     await capture("composer-controls-more-access-dark-split-1180x720");
     await page.keyboard.press("Escape");
@@ -751,10 +753,9 @@ test("keeps the composer as one cohesive dock across themes and responsive split
 
     await setWorkspaceTools(false);
     await resizeWindow(760, 680);
-    if (await navigation.isVisible()) {
-      await page.getByRole("button", { name: "Toggle project navigation" }).click();
-      await expect(navigation).toBeHidden();
-    }
+    const closeNavigation = navigation.getByRole("button", { name: "Close navigation" });
+    if (await closeNavigation.isVisible()) await closeNavigation.click();
+    await expect(navigation).toBeHidden();
     const narrowDock = page.getByRole("region", { name: "Message composer" });
     await expectComposerEndsAtDock(narrowDock);
     await expectComposerReadinessContained(narrowDock);

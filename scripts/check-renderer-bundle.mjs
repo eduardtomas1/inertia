@@ -9,9 +9,20 @@ const kibibyte = 1024;
 // visible even when Rollup moves shared modules between chunks.
 const budgets = {
   entryJavaScript: 205 * kibibyte,
-  mainWorkbenchFirstLoadJavaScript: 700 * kibibyte,
-  detachedChatFirstLoadJavaScript: 535 * kibibyte,
-  entryCss: 340 * kibibyte,
+  // The keyboard-complete themed project selector, draft ownership guards,
+  // media queue admission, deletion cleanup, native-provider route state, and
+  // detachment ownership live here while their larger UI stays deferred.
+  // Prompt-history recall, cancellation recovery, and the Gemini-aware route
+  // measure 714.2 KiB on Linux x64; the detached route measures 542.3 KiB.
+  // Keep less than 1 KiB of headroom on each surface.
+  mainWorkbenchFirstLoadJavaScript: 715 * kibibyte,
+  detachedChatFirstLoadJavaScript: 543 * kibibyte,
+  // The surface and reduced-motion-safe transition system measure 344.7 KiB
+  // on Linux x64; keep only narrow cross-platform headroom.
+  entryCss: 346 * kibibyte,
+  // The eagerly preloaded five-theme syntax and status palette is kept
+  // separate from the generated entry stylesheet. It measures 11.4 KiB.
+  colorThemesCss: 12 * kibibyte,
   detachedChatCss: 8 * kibibyte,
   settingsJavaScript: 50 * kibibyte,
   filesFirstLoadJavaScript: 115 * kibibyte,
@@ -25,6 +36,9 @@ const budgets = {
   deferredDiscordSettingsJavaScript: 6 * kibibyte,
   deferredCanaryRollbackJavaScript: 4 * kibibyte,
   deferredAppUpdateNoticeJavaScript: 6 * kibibyte,
+  // Provider OAuth validation and its terminal UI remain off the initial route.
+  deferredProviderAuthJavaScript: 12 * kibibyte,
+  deferredComposerQueueJavaScript: 8 * kibibyte,
   // The terminal owns reload recovery, bounded replay, and provider-resume UI.
   // Keep that optional surface isolated from the workbench and capped here.
   deferredTerminalJavaScript: 25 * kibibyte,
@@ -32,9 +46,10 @@ const budgets = {
   preMergeConfidenceJavaScript: 28 * kibibyte,
   morphiconsJavaScript: 20 * kibibyte,
   morphingIconFeedbackJavaScript: 8 * kibibyte,
-  // Rare deferred surfaces have strict ceilings below, while their shared
-  // dependencies remain inside the existing core ceiling.
-  coreJavaScript: 1_940 * kibibyte,
+  // Linux x64 measures the provider-queue, project-picker, draft-ownership,
+  // prompt history, and exact-focus core at 1,951.9 KiB. Keep narrow headroom
+  // while every deferred surface retains its strict independent ceiling.
+  coreJavaScript: 1_953 * kibibyte,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };
@@ -132,6 +147,12 @@ const deferredCanaryRollbackJavaScript = assetNames.find(
 const deferredAppUpdateNoticeJavaScript = assetNames.find(
   (name) => /^AppUpdateNotice-.*\.js$/u.test(name),
 );
+const deferredProviderAuthJavaScript = assetNames.find(
+  (name) => /^ProviderAuthDialog-.*\.js$/u.test(name),
+);
+const deferredComposerQueueJavaScript = assetNames.find(
+  (name) => /^ComposerQueuedActions-.*\.js$/u.test(name),
+);
 const deferredTerminalJavaScript = assetNames.find(
   (name) => /^TerminalPanel-.*\.js$/u.test(name),
 );
@@ -211,6 +232,16 @@ if (!deferredAppUpdateNoticeJavaScript) {
     "Renderer bundle check could not find the deferred update notice chunk.",
   );
 }
+if (!deferredProviderAuthJavaScript) {
+  throw new Error(
+    "Renderer bundle check could not find the deferred provider auth chunk.",
+  );
+}
+if (!deferredComposerQueueJavaScript) {
+  throw new Error(
+    "Renderer bundle check could not find the deferred composer queue chunk.",
+  );
+}
 if (!deferredTerminalJavaScript) {
   throw new Error(
     "Renderer bundle check could not find the deferred Terminal chunk.",
@@ -248,6 +279,7 @@ if (!morphingIconFeedbackJavaScript) {
 }
 
 const entryCssBytes = await assetBytes(entryCss);
+const colorThemesCssBytes = await assetBytes("color-themes.css");
 const detachedChatCssBytes = await assetBytes(`assets/${detachedChatCss}`);
 const entryJavaScriptName = entryJavaScript.replace(/^assets\//u, "");
 const entryJavaScriptClosure = await javaScriptClosure(entryJavaScriptName);
@@ -334,6 +366,12 @@ const deferredCanaryRollbackJavaScriptBytes = await assetBytes(
 const deferredAppUpdateNoticeJavaScriptBytes = await assetBytes(
   `assets/${deferredAppUpdateNoticeJavaScript}`,
 );
+const deferredProviderAuthJavaScriptBytes = await assetBytes(
+  `assets/${deferredProviderAuthJavaScript}`,
+);
+const deferredComposerQueueJavaScriptBytes = await assetBytes(
+  `assets/${deferredComposerQueueJavaScript}`,
+);
 const deferredTerminalJavaScriptBytes = await assetBytes(
   `assets/${deferredTerminalJavaScript}`,
 );
@@ -380,6 +418,8 @@ const coreJavaScriptBytes =
   - deferredDiscordSettingsJavaScriptBytes
   - deferredCanaryRollbackJavaScriptBytes
   - deferredAppUpdateNoticeJavaScriptBytes
+  - deferredProviderAuthJavaScriptBytes
+  - deferredComposerQueueJavaScriptBytes
   - deferredTerminalJavaScriptBytes
   - detachedChatJavaScriptBytes
   - preMergeConfidenceJavaScriptBytes
@@ -392,6 +432,7 @@ const measurements = {
   mainWorkbenchFirstLoadJavaScript: mainWorkbenchFirstLoadJavaScriptBytes,
   detachedChatFirstLoadJavaScript: detachedChatFirstLoadJavaScriptBytes,
   entryCss: entryCssBytes,
+  colorThemesCss: colorThemesCssBytes,
   detachedChatCss: detachedChatCssBytes,
   settingsJavaScript: settingsJavaScriptBytes,
   filesFirstLoadJavaScript: filesFirstLoadJavaScriptBytes,
@@ -407,6 +448,8 @@ const measurements = {
   deferredDiscordSettingsJavaScript: deferredDiscordSettingsJavaScriptBytes,
   deferredCanaryRollbackJavaScript: deferredCanaryRollbackJavaScriptBytes,
   deferredAppUpdateNoticeJavaScript: deferredAppUpdateNoticeJavaScriptBytes,
+  deferredProviderAuthJavaScript: deferredProviderAuthJavaScriptBytes,
+  deferredComposerQueueJavaScript: deferredComposerQueueJavaScriptBytes,
   deferredTerminalJavaScript: deferredTerminalJavaScriptBytes,
   detachedChatJavaScript: detachedChatJavaScriptBytes,
   preMergeConfidenceJavaScript: preMergeConfidenceJavaScriptBytes,

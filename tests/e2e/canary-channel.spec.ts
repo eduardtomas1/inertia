@@ -1,5 +1,5 @@
-import { copyFile, mkdir } from "node:fs/promises";
-import { dirname, isAbsolute } from "node:path";
+import { copyFile, mkdir, realpath, stat } from "node:fs/promises";
+import { dirname, isAbsolute, join } from "node:path";
 
 import { expect, test } from "@playwright/test";
 
@@ -22,8 +22,20 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
-  await canary.close();
-  await stable.close();
+  const stableTemporaryDirectory = join(stable.testDirectory, "t");
+  const canaryTemporaryDirectory = join(canary.testDirectory, "t");
+  try {
+    await canary.close();
+    await expect(stat(canaryTemporaryDirectory)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    expect((await stat(stableTemporaryDirectory)).isDirectory()).toBe(true);
+  } finally {
+    await stable.close();
+  }
+  await expect(stat(stableTemporaryDirectory)).rejects.toMatchObject({
+    code: "ENOENT",
+  });
 });
 
 test("runs stable and Canary concurrently with distinct desktop boundaries", async () => {
@@ -31,6 +43,7 @@ test("runs stable and Canary concurrently with distinct desktop boundaries", asy
     stable.electronApp.evaluate(({ app, BrowserWindow, session }) => ({
       name: app.getName(),
       userData: app.getPath("userData"),
+      temporaryDirectory: app.getPath("temp"),
       renderer: BrowserWindow.getAllWindows()[0]?.webContents.getURL(),
       title: BrowserWindow.getAllWindows()[0]?.getTitle(),
       canaryPartition: BrowserWindow.getAllWindows()[0]?.webContents.session
@@ -39,6 +52,7 @@ test("runs stable and Canary concurrently with distinct desktop boundaries", asy
     canary.electronApp.evaluate(({ app, BrowserWindow, session }) => ({
       name: app.getName(),
       userData: app.getPath("userData"),
+      temporaryDirectory: app.getPath("temp"),
       renderer: BrowserWindow.getAllWindows()[0]?.webContents.getURL(),
       title: BrowserWindow.getAllWindows()[0]?.getTitle(),
       canaryPartition: BrowserWindow.getAllWindows()[0]?.webContents.session
@@ -58,6 +72,15 @@ test("runs stable and Canary concurrently with distinct desktop boundaries", asy
   expect(stableIdentity.renderer).toMatch(/^inertia:\/\/bundle\//u);
   expect(canaryIdentity.renderer).toMatch(/^inertia-canary:\/\/bundle\//u);
   expect(canaryIdentity.userData).not.toBe(stableIdentity.userData);
+  expect(await realpath(stableIdentity.temporaryDirectory)).toBe(
+    await realpath(join(stable.testDirectory, "t")),
+  );
+  expect(await realpath(canaryIdentity.temporaryDirectory)).toBe(
+    await realpath(join(canary.testDirectory, "t")),
+  );
+  expect(canaryIdentity.temporaryDirectory).not.toBe(
+    stableIdentity.temporaryDirectory,
+  );
   await expect(stable.page.getByRole("button", { name: "Add your first project" }))
     .toBeVisible();
   await expect(canary.page.getByRole("button", { name: "Add your first project" }))

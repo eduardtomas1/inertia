@@ -6,14 +6,13 @@ import {
   type TestInfo,
 } from "@playwright/test";
 
-const TARGET_REVEAL_TIMEOUT_MS = 5_000;
-const MINIMAP_REVEAL_TIMEOUT_MS = 750;
 const TARGET_REVEAL_RETRY_INTERVAL_MS = 50;
 
 type TargetRevealEvidence = {
   mounted: boolean;
   visible: boolean;
   intersectsTranscript: boolean;
+  focused: boolean;
 };
 
 function targetIsRevealed(evidence: TargetRevealEvidence): boolean {
@@ -22,26 +21,27 @@ function targetIsRevealed(evidence: TargetRevealEvidence): boolean {
     && evidence.intersectsTranscript;
 }
 
-function waitForRetry(): Promise<void> {
-  return new Promise<void>((resolve) =>
-    setTimeout(resolve, TARGET_REVEAL_RETRY_INTERVAL_MS));
-}
-
-async function scrollFreshTargetIntoView(
+async function inspectFreshTarget(
   target: Locator,
 ): Promise<TargetRevealEvidence> {
   return target.evaluateAll((elements) => {
     const element = elements.length === 1 ? elements[0] : undefined;
     if (!(element instanceof HTMLElement) || !element.isConnected) {
-      return { mounted: false, visible: false, intersectsTranscript: false };
-    }
-    element.scrollIntoView({ block: "center", inline: "nearest" });
-    if (!element.isConnected) {
-      return { mounted: false, visible: false, intersectsTranscript: false };
+      return {
+        mounted: false,
+        visible: false,
+        intersectsTranscript: false,
+        focused: false,
+      };
     }
     const transcript = element.closest<HTMLElement>(".message-scroll");
     if (!transcript?.isConnected) {
-      return { mounted: true, visible: false, intersectsTranscript: false };
+      return {
+        mounted: true,
+        visible: false,
+        intersectsTranscript: false,
+        focused: document.activeElement === element,
+      };
     }
     const bounds = element.getBoundingClientRect();
     const transcriptBounds = transcript.getBoundingClientRect();
@@ -57,110 +57,80 @@ async function scrollFreshTargetIntoView(
           > Math.max(bounds.left, transcriptBounds.left)
         && Math.min(bounds.bottom, transcriptBounds.bottom)
           > Math.max(bounds.top, transcriptBounds.top),
+      focused: document.activeElement === element,
     };
   });
 }
 
-async function tryMinimapReveal(input: {
-  minimap: Locator;
-  index: number;
-  expectedMarkerCount: number;
-  timeoutMs: number;
-}): Promise<boolean> {
-  const { minimap, index, expectedMarkerCount, timeoutMs } = input;
-  const markers = minimap.getByRole("button");
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const clicked = await markers.evaluateAll((buttons, request) => {
-      if (buttons.length !== request.expectedMarkerCount) return false;
-      const marker = buttons[request.index];
-      if (!(marker instanceof HTMLButtonElement) || !marker.isConnected) {
-        return false;
-      }
-      const bounds = marker.getBoundingClientRect();
-      const styles = getComputedStyle(marker);
-      if (bounds.width <= 0 || bounds.height <= 0
-        || styles.display === "none" || styles.visibility === "hidden") {
-        return false;
-      }
-      marker.click();
-      return true;
-    }, { expectedMarkerCount, index });
-    if (clicked) return true;
-    await waitForRetry();
-  }
-  return false;
+async function collectTimelineRevealDiagnostics(input: {
+  page: Page;
+  target: Locator;
+}): Promise<Record<string, unknown>> {
+  const { page, target } = input;
+  const virtualRows = page.locator(".response-virtual-item");
+  const transcript = page.locator(".message-scroll");
+  const minimap = page.getByRole("navigation", {
+    name: "Conversation minimap",
+  });
+  return {
+    target: await inspectFreshTarget(target),
+    mountedIndices: await virtualRows.evaluateAll((items) => items.map((item) =>
+      Number((item as HTMLElement).dataset.index)).filter(Number.isFinite)),
+    transcript: await transcript.evaluate((element) => ({
+      scrollTop: element.scrollTop,
+      scrollHeight: element.scrollHeight,
+      clientHeight: element.clientHeight,
+    })),
+    minimapMarkers: await minimap.getByRole("button").count(),
+  };
 }
 
 export async function revealVirtualizedTimelineTurn(input: {
   page: Page;
   target: Locator;
-  index: number;
-  lastIndex: number;
+  conversationId: string;
+  turnId: string;
+  testInfo: TestInfo;
 }): Promise<void> {
-  const { page, target, index, lastIndex } = input;
+  const { page, target, conversationId, turnId, testInfo } = input;
   const virtualRows = page.locator(".response-virtual-item");
   await expect.poll(() => virtualRows.count()).toBeGreaterThan(0);
-  const revealDeadline = Date.now() + TARGET_REVEAL_TIMEOUT_MS;
-  const initiallyRevealed = targetIsRevealed(
-    await scrollFreshTargetIntoView(target),
-  );
-
-  if (!initiallyRevealed) {
-    const minimap = page.getByRole("navigation", {
-      name: "Conversation minimap",
-    });
-    await tryMinimapReveal({
-      minimap,
-      index,
-      expectedMarkerCount: lastIndex + 1,
-      timeoutMs: Math.min(
-        MINIMAP_REVEAL_TIMEOUT_MS,
-        Math.max(0, revealDeadline - Date.now()),
-      ),
-    });
-  }
-
-  const transcript = page.locator(".message-scroll");
+  await page.evaluate((detail) => {
+    // This helper dispatches navigation without a real activating control.
+    // Clear fixture auto-focus so the production focus guard sees the same
+    // neutral document state that follows an intentional navigation action.
+    const activeElement = document.activeElement;
+    if (activeElement instanceof HTMLElement) activeElement.blur();
+    window.dispatchEvent(new CustomEvent("inertia:timeline-focus", {
+      detail,
+    }));
+  }, { conversationId, turnId });
   let consecutiveRevealedSamples = 0;
-  let positionedByRatio = false;
-  await expect.poll(async () => {
-    const revealed = targetIsRevealed(
-      await scrollFreshTargetIntoView(target),
-    );
-    consecutiveRevealedSamples = revealed
-      ? consecutiveRevealedSamples + 1
-      : 0;
-    if (consecutiveRevealedSamples >= 2) return true;
-    if (revealed) return false;
-
-    const mounted = await virtualRows
-      .evaluateAll((items) => items.map((item) =>
-        Number((item as HTMLElement).dataset.index))
-        .filter(Number.isFinite));
-    await transcript.evaluate((element, request) => {
-      if (!request.positionedByRatio) {
-        const maximum = element.scrollHeight - element.clientHeight;
-        element.scrollTop = maximum * request.position;
-        return;
-      }
-      if (request.mounted.length === 0) return;
-      const step = Math.max(100, element.clientHeight * 0.75);
-      element.scrollTop += request.index < Math.min(...request.mounted)
-        ? -step
-        : step;
+  try {
+    await expect.poll(async () => {
+      const evidence = await inspectFreshTarget(target);
+      const revealed = targetIsRevealed(evidence);
+      consecutiveRevealedSamples = revealed
+        ? consecutiveRevealedSamples + 1
+        : 0;
+      if (consecutiveRevealedSamples >= 2) return true;
+      return false;
     }, {
-      index,
-      mounted,
-      positionedByRatio,
-      position: index / Math.max(1, lastIndex),
+      intervals: [TARGET_REVEAL_RETRY_INTERVAL_MS],
+    }).toBe(true);
+  } catch (error) {
+    const diagnostics = await collectTimelineRevealDiagnostics({ page, target })
+      .catch((diagnosticError: unknown) => ({
+        collectionError: diagnosticError instanceof Error
+          ? diagnosticError.message
+          : String(diagnosticError),
+      }));
+    await testInfo.attach("timeline-reveal-diagnostics", {
+      body: Buffer.from(JSON.stringify(diagnostics, null, 2)),
+      contentType: "application/json",
     });
-    positionedByRatio = true;
-    return false;
-  }, {
-    intervals: [TARGET_REVEAL_RETRY_INTERVAL_MS],
-    timeout: Math.max(1, revealDeadline - Date.now()),
-  }).toBe(true);
+    throw error;
+  }
 }
 
 export async function verifyDesktopMarkdownControls(input: {

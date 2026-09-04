@@ -3,10 +3,10 @@ import { isAbsolute } from "node:path";
 import { PROVIDER_INFO } from "./catalog";
 import {
   continuationIdentitySchema,
-  knownHarnessIdSchema,
+  currentKnownHarnessIdSchema,
   modelBackendProfileSchema,
   modelSelectionSchema,
-  nativeBackendProfile,
+  providerNativeBackendProfile,
   type ModelBackendProfile,
 } from "../../shared/model-routing";
 import {
@@ -18,6 +18,7 @@ import {
   type ProviderRunInput,
 } from "./contracts";
 import { providerActivityDetailSections } from "./activity-detail";
+import { stableProviderActivityId } from "./activity-lifecycle";
 
 export interface ProviderInvocation {
   command: string;
@@ -27,6 +28,9 @@ export interface ProviderInvocation {
 
 export interface ProviderParserState {
   sessionId?: string;
+  turnActivityId?: string;
+  stepActivityId?: string;
+  stepActivitySequence?: number;
   sawText: boolean;
   sawStreamingDelta: boolean;
   hadErrorEvent: boolean;
@@ -169,10 +173,29 @@ export function normalizeProviderLine(
 
   switch (providerId) {
     case "codex": {
-      if (type === "turn.started") emitActivity("turn", "started", "Turn started");
+      if (type === "turn.started") {
+        const turn = objectValue(event.turn);
+        state.turnActivityId ??= stableProviderActivityId(
+          "legacy-codex-turn",
+          boundedIdentifier(event.turn_id) ?? boundedIdentifier(turn?.id),
+          state.sessionId,
+        );
+        emitActivity("turn", "started", "Turn started", {
+          activityId: state.turnActivityId,
+        });
+      }
       if (type === "turn.completed") {
         state.sawTerminalEvent = true;
-        emitActivity("turn", "completed", "Turn completed");
+        const turn = objectValue(event.turn);
+        state.turnActivityId ??= stableProviderActivityId(
+          "legacy-codex-turn",
+          boundedIdentifier(event.turn_id) ?? boundedIdentifier(turn?.id),
+          state.sessionId,
+        );
+        emitActivity("turn", "completed", "Turn completed", {
+          activityId: state.turnActivityId,
+        });
+        state.turnActivityId = undefined;
       }
 
       const item = objectValue(event.item);
@@ -229,7 +252,7 @@ export function normalizeProviderLine(
 
     case "claude": {
       if (type === "system" && event.subtype === "init") {
-        emitActivity("system", "started", "Session initialized");
+        emitActivity("system", "completed", "Session initialized");
       }
       if (type === "assistant") {
         const message = objectValue(event.message);
@@ -309,7 +332,7 @@ export function normalizeProviderLine(
     case "cursor":
     case "kimi": {
       if (type === "system" && event.subtype === "init") {
-        emitActivity("system", "started", "Session initialized");
+        emitActivity("system", "completed", "Session initialized");
       }
       if (type === "assistant") {
         const message = objectValue(event.message);
@@ -347,7 +370,20 @@ export function normalizeProviderLine(
     case "opencode": {
       const part = objectValue(event.part);
       if (type === "step_start") {
-        emitActivity("turn", "started", "Step started");
+        const nativeStepId = boundedIdentifier(part?.id)
+          ?? boundedIdentifier(part?.messageID);
+        if (!state.stepActivityId) {
+          state.stepActivitySequence = (state.stepActivitySequence ?? 0) + 1;
+          state.stepActivityId = stableProviderActivityId(
+            "legacy-opencode-step",
+            state.sessionId,
+            nativeStepId,
+            state.stepActivitySequence,
+          );
+        }
+        emitActivity("turn", "started", "Step started", {
+          activityId: state.stepActivityId,
+        });
         return;
       }
       if (type === "text") {
@@ -385,7 +421,19 @@ export function normalizeProviderLine(
       if (type === "step_finish") {
         const reason = stringValue(part?.reason);
         if (reason === "stop") state.sawTerminalEvent = true;
-        emitActivity("turn", "completed", reason === "stop" ? "Run completed" : "Step completed");
+        const activityId = state.stepActivityId ?? stableProviderActivityId(
+          "legacy-opencode-step",
+          state.sessionId,
+          boundedIdentifier(part?.id) ?? boundedIdentifier(part?.messageID),
+          state.stepActivitySequence ?? 1,
+        );
+        emitActivity(
+          "turn",
+          "completed",
+          reason === "stop" ? "Run completed" : "Step completed",
+          { activityId },
+        );
+        state.stepActivityId = undefined;
       }
     }
   }
@@ -437,6 +485,12 @@ export function buildProviderInvocation(input: ProviderRunInput, command: string
       return { command, args };
     }
 
+    case "gemini": {
+      throw new Error(
+        "Gemini requires its native ACP harness; legacy CLI invocation is unsupported.",
+      );
+    }
+
     case "kimi": {
       throw new Error(
         "Kimi Code requires its native ACP harness; legacy CLI invocation is unsupported.",
@@ -458,7 +512,7 @@ export function buildProviderInvocation(input: ProviderRunInput, command: string
 
 export function validateProviderRunInput(input: ProviderRunInput): string {
   if (!isProviderId(input.providerId)) throw new ProviderRuntimeError("invalid_input", "Unknown provider.");
-  if (!knownHarnessIdSchema.safeParse(input.harnessId).success) {
+  if (!currentKnownHarnessIdSchema.safeParse(input.harnessId).success) {
     throw new ProviderRuntimeError("invalid_input", "Unknown agent harness.");
   }
   if (!modelBackendProfileSchema.safeParse(input.backendProfile).success) {
@@ -478,7 +532,7 @@ export function validateProviderRunInput(input: ProviderRunInput): string {
       ? "fast"
       : null;
   const nativeFastModeRoute = expectedFastMode !== null
-    && input.backendProfile.id === nativeBackendProfile(input.providerId).id
+    && input.backendProfile.id === providerNativeBackendProfile(input.providerId).id
     && input.harnessId === (input.providerId === "codex"
       ? "codex-app-server"
       : "claude-agent-sdk");
@@ -681,7 +735,7 @@ export function providerFailureMessage(
 ): string {
   const providerName = PROVIDER_INFO[providerId].name;
   const customBackend = backendProfile !== undefined
-    && backendProfile.id !== nativeBackendProfile(providerId).id;
+    && backendProfile.id !== providerNativeBackendProfile(providerId).id;
   const backendName = customBackend
     ? safeProviderBackendLabel(backendProfile.displayName)
     : providerName;

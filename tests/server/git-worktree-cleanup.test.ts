@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
@@ -14,8 +15,10 @@ import {
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { RuntimeOwnedProcessJournal } from
+  "../../src/node/runtime-owned-processes";
 import {
   createWorktree,
   createWorktreeWithOwnershipReceipt,
@@ -31,6 +34,8 @@ import {
   type WorktreeFilesystemIdentityDependencies,
   worktreeFilesystemIdentitiesEqual,
 } from "../../src/server/git";
+import { activatePreparedRuntimeOwnedProcessRegistry } from
+  "../helpers/prepared-runtime-owned-process-registry";
 
 const roots: string[] = [];
 
@@ -100,6 +105,7 @@ function linuxBirthtimeProbe(
     | "trailing"
     | "nonzero-exit"
     | "overflow"
+    | "overflow-hang"
     | "timeout"
     | "missing",
 ): WorktreeFilesystemIdentityDependencies {
@@ -120,6 +126,8 @@ function linuxBirthtimeProbe(
                 ? "process.exit(7)"
         : mode === "overflow"
           ? "process.stdout.write('x'.repeat(1024))"
+          : mode === "overflow-hang"
+            ? "process.stdout.write('x'.repeat(1024));setInterval(() => undefined, 1000)"
           : "setInterval(() => undefined, 1000)";
   return {
     platform: "linux",
@@ -209,6 +217,63 @@ describe("launch-owned Git cleanup", () => {
       expect(git(root, "worktree", "list", "--porcelain").match(
         /^worktree /gmu,
       )).toHaveLength(1);
+    },
+  );
+
+  it.runIf(process.platform === "linux").each([
+    "overflow",
+    "overflow-hang",
+    "timeout",
+  ] as const)(
+    "retires a runtime-owned Linux %s birth-time probe without tainting the runtime",
+    async (mode) => {
+      const root = repository();
+      const runtimeDirectory = mkdtempSync(join(tmpdir(), "inertia worktree probe runtime "));
+      roots.push(runtimeDirectory);
+      const runtimeGenerationId = `${randomUUID()}:1`;
+      const systemBootId = `test:${randomUUID()}`;
+      const onTainted = vi.fn();
+      const deactivate = activatePreparedRuntimeOwnedProcessRegistry(
+        runtimeDirectory,
+        runtimeGenerationId,
+        systemBootId,
+        {
+          platform: "linux",
+          darwinGuardianPath: join(
+            process.cwd(),
+            "resources/generated/runtime-process-guardian/runtime-process-guardian",
+          ),
+          onTainted,
+        },
+      );
+      const journal = new RuntimeOwnedProcessJournal(runtimeDirectory, {
+        platform: "linux",
+      });
+      try {
+        await expect(createWorktreeWithOwnershipReceipt(
+          root,
+          ownedPath(root, `owned ${mode} birthtime`),
+          {
+            branch: `inertia/owned-birthtime-${mode}`,
+            createBranch: true,
+            startPoint: "main",
+          },
+          {
+            beforeAdd: () => undefined,
+            notAdded: () => undefined,
+            added: () => undefined,
+          },
+          { filesystemIdentity: linuxBirthtimeProbe(mode) },
+        )).rejects.toThrow(/birth time.*isolated Duo worktrees are unsupported/iu);
+
+        await vi.waitFor(() => {
+          expect(journal.records(runtimeGenerationId)).toEqual([]);
+        }, { timeout: 5_000, interval: 10 });
+        expect(onTainted).not.toHaveBeenCalled();
+        expect(journal.finishSession(runtimeGenerationId)).toBe(true);
+      } finally {
+        deactivate?.();
+      }
     },
   );
 
@@ -1127,7 +1192,9 @@ describe("launch-owned Git cleanup", () => {
     )).resolves.toBeDefined();
   });
 
-  it("bounds the aggregate Linux administrative identity scan", async () => {
+  it.runIf(process.platform === "linux")(
+    "bounds the aggregate Linux administrative identity scan",
+    async () => {
     const root = repository();
     const path = ownedPath(root, "aggregate scan owned path");
     const branch = "inertia/aggregate-scan";
@@ -1145,7 +1212,7 @@ describe("launch-owned Git cleanup", () => {
     }
     let slowProbeCount = 0;
     const validScript = "const {fstatSync}=require('node:fs');const s=fstatSync(3,{bigint:true});const b=s.birthtimeNs;const z=String.fromCharCode(0);process.stdout.write([s.dev,s.ino,`${b/1000000000n}.${String(b%1000000000n).padStart(9,'0')}`].join(z)+z);";
-    const slowScript = "const {fstatSync}=require('node:fs');setTimeout(()=>{const s=fstatSync(3,{bigint:true});const b=s.birthtimeNs;const z=String.fromCharCode(0);process.stdout.write([s.dev,s.ino,`${b/1000000000n}.${String(b%1000000000n).padStart(9,'0')}`].join(z)+z);},75);";
+    const slowScript = "const {fstatSync}=require('node:fs');setTimeout(()=>{const s=fstatSync(3,{bigint:true});const z=String.fromCharCode(0);process.stdout.write([s.dev,s.ino,'1.000000000'].join(z)+z);},75);";
     const startedAt = Date.now();
 
     await expect(inspectOwnedWorktreeCleanupState(
@@ -1179,7 +1246,8 @@ describe("launch-owned Git cleanup", () => {
     expect(slowProbeCount).toBeGreaterThan(0);
     expect(slowProbeCount).toBeLessThan(6);
     expect(git(root, "rev-parse", branch)).toBe(ownership.head);
-  });
+    },
+  );
 
   it("bounds the final Linux parent revalidation by the aggregate deadline", async () => {
     const root = repository();

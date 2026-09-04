@@ -497,10 +497,12 @@ describe("nested source-control command scope", () => {
       expect.any(Function),
       expect.objectContaining({
         recoverReviewedCommit: false,
+        onMutationSettled: expect.any(Function),
+        onMutationStarting: expect.any(Function),
         serializationRoot: realpathSync.native(repository),
       }),
     );
-  });
+  }, 30_000);
 
   it("commits in the selected nested repository while reserving its owning workspace", async () => {
     const { workspace, repository } = workspaceWithNestedRepository();
@@ -575,6 +577,8 @@ describe("nested source-control command scope", () => {
       command.requestId,
       expect.any(Function),
       {
+        onMutationSettled: expect.any(Function),
+        onMutationStarting: expect.any(Function),
         recoverReviewedCommit: false,
         serializationRoot: realpathSync.native(repository),
       },

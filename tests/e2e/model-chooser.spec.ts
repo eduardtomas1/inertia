@@ -7,19 +7,17 @@ import { promisify } from "node:util";
 import Database from "better-sqlite3";
 
 import { RuntimeStore } from "../../src/server/database";
-import { nativeProviderMetadataScope } from "../../src/server/provider/metadata";
-import { backendCompatibilityProbeResultSchema } from "../../src/shared/backend-probe";
-import { persistedModelBackendProfileSchema } from "../../src/shared/backend-profile-settings";
+import { providerNativeMetadataScope } from "../../src/server/provider/metadata";
 import {
   continuationIdentityForSelection,
-  MODEL_CAPABILITY_IDS,
-  nativeModelSelection,
+  providerNativeModelSelection,
 } from "../../src/shared/model-routing";
 import { MODEL_FAVORITES_STORAGE_KEY } from "../../src/renderer/src/utils/modelFavorites";
 import {
   createAppFixture,
   type AppFixture,
 } from "./support/app-fixture";
+import { seedLargeModelCatalog } from "./support/model-catalog-fixture";
 
 const execFileAsync = promisify(execFile);
 
@@ -37,6 +35,9 @@ test.beforeAll(async () => {
     name: "model-chooser",
     initialState: "conversation",
     windowDisplay: "primary",
+    beforeLaunch: ({ testDirectory, workspaceDirectory }) => {
+      seedLargeModelCatalog(testDirectory, workspaceDirectory);
+    },
   });
   electronApp = app.electronApp;
   page = app.page;
@@ -275,9 +276,11 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   ).get() as { count: number }).count;
   stateDatabase.close();
 
-  const runtimeStore = new RuntimeStore(databasePath, workspaceDirectory);
+  const runtimeStore = new RuntimeStore(databasePath, workspaceDirectory, {
+    recoverInterruptedRuns: false,
+  });
   const currentConversation = runtimeStore.conversation(state.active_conversation_id);
-  const alpha = nativeModelSelection({
+  const alpha = providerNativeModelSelection({
     providerId: "codex",
     modelId: "codex-alpha",
     alias: "Codex Alpha",
@@ -286,7 +289,7 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   const alphaIdentity = continuationIdentityForSelection(alpha, null, false);
   const cachedAt = new Date().toISOString();
   runtimeStore.saveProviderMetadata({
-    scope: nativeProviderMetadataScope("codex"),
+    scope: providerNativeMetadataScope("codex"),
     models: [
       {
         id: "codex-alpha",
@@ -638,79 +641,6 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
     /Current selection: Claude .* Kimi .* Model K3 \(k3\)/u,
   );
 
-  const catalogStore = new RuntimeStore(databasePath, workspaceDirectory);
-  for (let profileIndex = 0; profileIndex < 5; profileIndex += 1) {
-    const models = Array.from({ length: 120 }, (_, modelIndex) => {
-      const index = (profileIndex * 120) + modelIndex;
-      const suffix = String(index).padStart(4, "0");
-      return {
-        id: `catalog-${suffix}`,
-        displayName: `Catalog Model ${suffix}`,
-        contextWindowTokens: null,
-        reasoningOptions: [],
-        capabilities: [],
-      };
-    });
-    const profile = persistedModelBackendProfileSchema.parse({
-      id: `custom:catalog-${profileIndex}`,
-      displayName: `Catalog gateway ${profileIndex + 1}`,
-      harnessId: "codex-app-server",
-      protocol: "openai-responses",
-      authenticationMode: "none",
-      source: "custom",
-      enabled: true,
-      configurationRevision: 1,
-      endpointIdentity: `endpoint:catalog-${profileIndex}`,
-      preset: "custom",
-      baseUrl: `https://catalog-${profileIndex}.example.test/v1`,
-      allowInsecureLocalhost: false,
-      credentialGeneration: null,
-      models,
-      routing: { mode: "simple", primaryModelId: models[0]!.id },
-      capabilityHints: [],
-      createdAt: cachedAt,
-      updatedAt: cachedAt,
-    });
-    catalogStore.saveModelBackendProfile(profile);
-    catalogStore.recordModelBackendProbe(
-      profile.id,
-      backendCompatibilityProbeResultSchema.parse({
-        profileId: profile.id,
-        backendConfigurationRevision: profile.configurationRevision,
-        endpointIdentity: profile.endpointIdentity,
-        protocol: profile.protocol,
-        modelId: models[0]!.id,
-        compatibility: "protocol-compatible",
-        protocolVerified: true,
-        modelVerified: true,
-        capabilities: MODEL_CAPABILITY_IDS.map((id) => ({
-          id,
-          state: id === "streaming" ? "verified" : "unknown",
-          provenance: id === "streaming" ? "probe" : "unknown",
-          detail: null,
-          checkedAt: cachedAt,
-        })),
-        contextWindow: {
-          tokens: null,
-          state: "unknown",
-          provenance: "unknown",
-          detail: null,
-          checkedAt: cachedAt,
-        },
-        failure: null,
-        checkedAt: cachedAt,
-      }),
-    );
-  }
-  catalogStore.close();
-
-  const beforeCatalogRestart = await runtimeSnapshot();
-  await app.recycleRuntime();
-  await expect.poll(async () => {
-    const current = await runtimeSnapshot();
-    return current.phase === "ready"
-      && current.generation > beforeCatalogRestart.generation;
-  }, { timeout: 10_000 }).toBe(true);
   await page.reload();
   await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
   await resizeWindow(720, 640);

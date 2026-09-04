@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { RuntimeStore } from "../../src/server/database";
 import {
   continuationIdentityForSelection,
-  nativeModelSelection,
+  providerNativeModelSelection,
 } from "../../src/shared/model-routing";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 
@@ -37,7 +37,7 @@ test.beforeAll(async () => {
       const project = snapshot.projects[0]!;
       const primary = snapshot.conversations[0]!;
       const handoff = store.createConversation(project.id, "Release notes handoff");
-      const selection = nativeModelSelection({ providerId: "codex" });
+      const selection = providerNativeModelSelection({ providerId: "codex" });
       const identity = continuationIdentityForSelection(selection, null, false);
       store.updateConversation(primary.id, {
         title: "Composer command polish",

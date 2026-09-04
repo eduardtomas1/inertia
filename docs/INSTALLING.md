@@ -1,6 +1,6 @@
 # Install Inertia
 
-Download [Inertia v0.0.45](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.45):
+Download [Inertia v0.0.48](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.48):
 
 | Platform | Architecture | Package | Update delivery after the first manual install |
 | --- | --- | --- | --- |
@@ -38,6 +38,8 @@ Unsigned Windows installers may show **Windows protected your PC**. After verify
 
 See the [changelog](../CHANGELOG.md) for the complete release story and [release guide](RELEASING.md) for Stable, Canary, signing, and update-delivery details.
 
+
+Building the current source for macOS requires macOS 13 or later.
 
 ## Canary release channel
 

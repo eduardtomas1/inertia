@@ -516,6 +516,18 @@ export class ExecutionLedgerRepository {
     return checkpoint;
   }
 
+  removeUnassociatedCheckpoint(
+    checkpointId: string,
+    conversationId: string,
+  ): boolean {
+    this.context.requireConversation(conversationId);
+    const result = this.context.database.prepare(`
+      DELETE FROM checkpoints
+      WHERE id = ? AND conversation_id = ? AND turn_id IS NULL
+    `).run(checkpointId, conversationId);
+    return result.changes === 1;
+  }
+
   associateCheckpointWithTurn(checkpointId: string, conversationId: string, runId: string, turnId: string): CheckpointSummary {
     this.context.assertAgentTurnIdentity(conversationId, runId, turnId);
     const row = this.context.database.prepare("SELECT * FROM checkpoints WHERE id = ?").get(checkpointId) as CheckpointRow | undefined;

@@ -28,6 +28,7 @@ import type { CommandWithoutId } from "../lib/runtimeCommands";
 import { rootGitMutationScope } from "../utils/workspaceGit";
 import { AppNavigationOverlays } from "./AppNavigationOverlays";
 import { AppStatusOverlays } from "./AppStatusOverlays";
+import { DialogPresence } from "./DialogPresence";
 import type { CommitDialogProps } from "./CommitDialog";
 import { PaneResizeHandle } from "./PaneResizeHandle";
 import { LoadingMark } from "./ui";
@@ -79,6 +80,7 @@ interface AppLayoutActions {
     command: CommandWithoutId,
   ) => Promise<ServerEvent>;
   importProject: () => Promise<void>;
+  openGlobalChat: () => void;
   selectProject: (project: Project) => void;
   selectConversation: (conversation: Conversation) => void;
   openConversationInSplit: (conversation: Conversation) => void;
@@ -141,6 +143,7 @@ interface AppLayoutProps {
   setPaletteOpen: Dispatch<SetStateAction<boolean>>;
   project: Project | null;
   conversation: Conversation | null;
+  headerConversation: Conversation | null;
   splitConversationId: string | null;
   detachedConversationIds: ReadonlySet<string>;
   detachedChatLimitReached: boolean;
@@ -231,6 +234,7 @@ export function AppLayout({
   setPaletteOpen,
   project,
   conversation,
+  headerConversation,
   splitConversationId,
   detachedConversationIds,
   detachedChatLimitReached,
@@ -285,6 +289,7 @@ export function AppLayout({
   const sidebarActions = useStableActions({
     close: () => setSidebarOpen(false),
     viewChange: setView,
+    openHome: actions.openGlobalChat,
     importProject: () => void actions.importProject(),
     selectProject: actions.selectProject,
     selectConversation: actions.selectConversation,
@@ -337,6 +342,14 @@ export function AppLayout({
         void actions.run("conversation.delete", {
           type: "conversation.delete",
           payload: { conversationId: thread.id },
+        }).then(async () => {
+          const { releaseDeletedComposerQueue } = await import(
+            "./composer/ComposerQueuedActions"
+          );
+          await releaseDeletedComposerQueue(
+            thread.id,
+            (attachmentId) => window.inertia.releaseAttachment(attachmentId),
+          );
         }).catch(() => undefined);
       }
     },
@@ -370,9 +383,6 @@ export function AppLayout({
         type: "project.update",
         payload: { projectId: item.id, gitRepositoryLimit },
       }).catch(() => undefined);
-    },
-    sidebarModeChange: (sidebarMode: AppSettings["sidebarMode"]) => {
-      void actions.updateSettings({ sidebarMode }).catch(() => undefined);
     },
     removeProject: (item: Project) => {
       const confirmed = !settings.confirmDestructiveActions
@@ -417,12 +427,19 @@ export function AppLayout({
     mobileSidebarOpen: mobileNavigation && sidebarOpen,
     });
 
+  const [appBooted, setAppBooted] = useState(false);
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => setAppBooted(true));
+    return () => cancelAnimationFrame(frame);
+  }, []);
+
   return (
     <div
       ref={appShellRef}
       className={`app-shell platform-${platform}${
         sidebarCollapsed && !mobileNavigation ? " is-sidebar-collapsed" : ""
       }`}
+      data-app-boot={appBooted ? "ready" : "initial"}
       data-interface-scale={settings.interfaceScale}
       data-runtime-generation={connection.runtimeGeneration ?? undefined}
       data-connection-status={connection.status}
@@ -461,6 +478,7 @@ export function AppLayout({
             layoutWidth={sidebarLayout.value}
             onClose={sidebarActions.close}
             onViewChange={sidebarActions.viewChange}
+            onOpenHome={sidebarActions.openHome}
             onImportProject={sidebarActions.importProject}
             onSelectConversation={sidebarActions.selectConversation}
             splitConversationId={splitConversationId}
@@ -519,7 +537,7 @@ export function AppLayout({
         <div className="workspace-frame">
           <WorkspaceHeader
             project={project}
-            conversation={conversation}
+            conversation={headerConversation}
             view={view}
             activeTool={sceneActiveTool}
             sidebarCollapsed={sidebarCollapsed}
@@ -622,9 +640,12 @@ export function AppLayout({
           <div
             ref={workspaceBodyRef}
             id="workspace-content"
+            data-view={view}
             className={`workspace-body${
-              !splitConversationId && toolsVisible ? " has-tools" : ""
-            }${!splitConversationId && stackedTools
+              view === "workspace" && !splitConversationId && toolsVisible
+                ? " has-tools"
+                : ""
+            }${view === "workspace" && !splitConversationId && stackedTools
               ? " is-tools-stacked"
               : ""}`}
             style={workspaceBodyStyle}
@@ -660,9 +681,10 @@ export function AppLayout({
           />
         </Suspense>
       )}
-      {dailyWorkOpen && (
+      <DialogPresence open={dailyWorkOpen}>
         <Suspense fallback={null}>
           <DailyWorkDialog
+            open={dailyWorkOpen}
             status={usage.status}
             request={usage.request}
             onClose={() => setDailyWorkOpen(false)}
@@ -678,7 +700,7 @@ export function AppLayout({
             }}
           />
         </Suspense>
-      )}
+      </DialogPresence>
       {pullRequestDialogOpen && project && rootRepository && (
         <Suspense fallback={null}>
           <PullRequestDialog
@@ -695,10 +717,10 @@ export function AppLayout({
           />
         </Suspense>
       )}
-      {multiSpawn.open && (
+      <DialogPresence open={multiSpawn.open}>
         <Suspense fallback={null}>
           <MultiSpawnDialog
-            open
+            open={multiSpawn.open}
             snapshot={connection.snapshot}
             settings={settings}
             submitting={multiSpawn.submitting}
@@ -721,7 +743,7 @@ export function AppLayout({
             onOpenBackendSetup={actions.openBackendSetup}
           />
         </Suspense>
-      )}
+      </DialogPresence>
       <AppNavigationOverlays
         snapshot={connection.snapshot}
         paletteOpen={paletteOpen}

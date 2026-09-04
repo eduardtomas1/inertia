@@ -3,16 +3,28 @@ import { useRef } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { useSidebarIndexMotion } from "../../src/renderer/src/hooks/useSidebarIndexMotion";
+import { sidebarWorkLayoutKey } from "../../src/renderer/src/hooks/useSidebarWorkIndex";
+import {
+  cancelSidebarIndexMotion,
+  updateSidebarIndexMotion,
+} from "../../src/renderer/src/utils/sidebarIndexMotionRuntime";
+
+const happyDomAnimateDescriptor = Object.getOwnPropertyDescriptor(
+  HTMLElement.prototype,
+  "animate",
+);
 
 function MotionHarness({
   active = true,
   enabled,
   order,
+  metadata = "initial",
   visible = true,
 }: {
   active?: boolean;
   enabled: boolean;
   order: string[];
+  metadata?: string;
   visible?: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -29,7 +41,9 @@ function MotionHarness({
     >
       <div ref={containerRef}>
         {order.map((identity) => (
-          <div data-sidebar-motion-id={identity} key={identity}>{identity}</div>
+          <div data-sidebar-motion-id={identity} key={identity}>
+            {identity}<span>{metadata}</span>
+          </div>
         ))}
       </div>
     </div>
@@ -40,6 +54,7 @@ function animationStub(): Animation {
   return {
     addEventListener: vi.fn(),
     cancel: vi.fn(),
+    finished: new Promise<Animation>(() => undefined),
   } as unknown as Animation;
 }
 
@@ -54,10 +69,38 @@ function installAnimateStub() {
 
 afterEach(() => {
   vi.restoreAllMocks();
-  Reflect.deleteProperty(HTMLElement.prototype, "animate");
+  if (happyDomAnimateDescriptor) {
+    Object.defineProperty(
+      HTMLElement.prototype,
+      "animate",
+      happyDomAnimateDescriptor,
+    );
+  } else {
+    Reflect.deleteProperty(HTMLElement.prototype, "animate");
+  }
 });
 
 describe("sidebar index position motion", () => {
+  it("keys layout only to density and ordered row identity", () => {
+    const initial = sidebarWorkLayoutKey(false, [
+      { id: "thread:alpha" },
+      { id: "thread:beta" },
+    ]);
+    const metadataOnlyUpdate = [
+      { id: "thread:alpha", metadata: "updated" },
+      { id: "thread:beta", status: "working" },
+    ];
+    expect(sidebarWorkLayoutKey(false, metadataOnlyUpdate)).toBe(initial);
+    expect(sidebarWorkLayoutKey(true, [
+      { id: "thread:alpha" },
+      { id: "thread:beta" },
+    ])).not.toBe(initial);
+    expect(sidebarWorkLayoutKey(false, [
+      { id: "thread:beta" },
+      { id: "thread:alpha" },
+    ])).not.toBe(initial);
+  });
+
   it("animates only retained rows that actually move", async () => {
     let viewportShift = 0;
     const getBounds = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect")
@@ -102,6 +145,37 @@ describe("sidebar index position motion", () => {
       duration: expect.any(Number),
       easing: "cubic-bezier(0.2, 0.8, 0.2, 1)",
     });
+  });
+
+  it("does not read rectangles again for metadata-only row updates", async () => {
+    const getBounds = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockReturnValue({
+        bottom: 48,
+        height: 48,
+        left: 0,
+        right: 240,
+        top: 0,
+        width: 240,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      });
+    installAnimateStub();
+    const view = render(
+      <MotionHarness enabled order={["thread:alpha", "thread:beta"]} />,
+    );
+    await vi.dynamicImportSettled();
+    expect(getBounds).toHaveBeenCalledTimes(3);
+
+    view.rerender(
+      <MotionHarness
+        enabled
+        metadata="new elapsed/status metadata"
+        order={["thread:alpha", "thread:beta"]}
+      />,
+    );
+    await vi.dynamicImportSettled();
+    expect(getBounds).toHaveBeenCalledTimes(3);
   });
 
   it.each([
@@ -239,5 +313,82 @@ describe("sidebar index position motion", () => {
 
     await vi.dynamicImportSettled();
     expect(animation.cancel).toHaveBeenCalledTimes(2);
+  });
+
+  it("handles real animation replacement and cancel-all without an unhandled rejection", async () => {
+    const shell = document.createElement("div");
+    shell.className = "app-shell";
+    shell.dataset.documentVisible = "true";
+    const container = document.createElement("div");
+    const rows = ["a", "b"].map((identity) => {
+      const row = document.createElement("div");
+      row.dataset.sidebarMotionId = identity;
+      container.append(row);
+      return row;
+    });
+    shell.append(container);
+    document.body.append(shell);
+
+    const topByIdentity = new Map([
+      ["a", 0],
+      ["b", 48],
+    ]);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(function getBounds(this: HTMLElement) {
+        const top = this === container
+          ? 0
+          : topByIdentity.get(this.dataset.sidebarMotionId ?? "") ?? 0;
+        return {
+          bottom: top + 48,
+          height: 48,
+          left: 0,
+          right: 240,
+          top,
+          width: 240,
+          x: 0,
+          y: top,
+          toJSON: () => ({}),
+        };
+      });
+
+    const unhandledRejections: unknown[] = [];
+    const onUnhandledRejection = (reason: unknown) => {
+      unhandledRejections.push(reason);
+    };
+    process.prependListener("unhandledRejection", onUnhandledRejection);
+    try {
+      updateSidebarIndexMotion(container);
+      topByIdentity.set("a", 48);
+      topByIdentity.set("b", 0);
+      updateSidebarIndexMotion(container);
+
+      const replacedAnimations = rows.flatMap((row) => row.getAnimations());
+      expect(replacedAnimations).toHaveLength(2);
+      expect(replacedAnimations.every(
+        (animation) => animation.playState === "running",
+      )).toBe(true);
+
+      topByIdentity.set("a", 0);
+      topByIdentity.set("b", 48);
+      updateSidebarIndexMotion(container);
+      expect(replacedAnimations.every(
+        (animation) => animation.playState === "idle",
+      )).toBe(true);
+
+      const activeAnimations = rows.flatMap((row) => row.getAnimations());
+      expect(activeAnimations).toHaveLength(2);
+      cancelSidebarIndexMotion(container);
+      expect(activeAnimations.every(
+        (animation) => animation.playState === "idle",
+      )).toBe(true);
+
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      expect(unhandledRejections).toEqual([]);
+    } finally {
+      cancelSidebarIndexMotion(container);
+      shell.remove();
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      process.removeListener("unhandledRejection", onUnhandledRejection);
+    }
   });
 });

@@ -210,21 +210,29 @@ const parentPort = process.parentPort;
 if (parentPort) {
   parentPort.once("message", (event) => {
     const envelope = parseSecureFileWorkerRequest(event.data);
-    if (!envelope) {
-      parentPort.postMessage({
-        type: "secure-file.recovery-result",
-        ok: false,
-      } satisfies SecureFileWorkerEvent);
-      setImmediate(() => process.exit(1));
+    if (!envelope || envelope.type === "secure-file.result-ack") {
+      process.exit(1);
       return;
     }
+    const finish = (result: SecureFileWorkerEvent, exitCode: number): void => {
+      parentPort.once("message", (acknowledgement) => {
+        const ack = parseSecureFileWorkerRequest(acknowledgement.data);
+        process.exit(
+          ack?.type === "secure-file.result-ack"
+              && ack.operationId === envelope.operationId
+            ? exitCode
+            : 1,
+        );
+      });
+      parentPort.postMessage(result);
+    };
     if (envelope.type === "secure-file.recover") {
       void recoverSecureFileOperation(envelope.request).then((ok) => {
-        parentPort.postMessage({
+        finish({
           type: "secure-file.recovery-result",
+          operationId: envelope.operationId,
           ok,
-        } satisfies SecureFileWorkerEvent);
-        setImmediate(() => process.exit(ok ? 0 : 1));
+        } satisfies SecureFileWorkerEvent, ok ? 0 : 1);
       });
       return;
     }
@@ -232,15 +240,16 @@ if (parentPort) {
       onCommitPhase: (phase) => {
         parentPort.postMessage({
           type: "secure-file.commit",
+          operationId: envelope.operationId,
           phase,
         } satisfies SecureFileWorkerEvent);
       },
     }).then((result) => {
-      parentPort.postMessage({
+      finish({
         type: "secure-file.result",
+        operationId: envelope.operationId,
         result,
-      } satisfies SecureFileWorkerEvent);
-      setImmediate(() => process.exit(result.ok ? 0 : 1));
+      } satisfies SecureFileWorkerEvent, result.ok ? 0 : 1);
     });
   });
 }

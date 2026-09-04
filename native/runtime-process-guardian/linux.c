@@ -962,7 +962,14 @@ static int watch_mode(int argc, char **argv, int handoff) {
   if (write(gate[1], "A", 1) != 1) { close(gate[1]); return terminal_state(0, 127); }
   close(gate[1]); int status = 0;
   for (;;) {
-    pid_t waited = waitpid(payload, &status, WNOHANG);
+    // A subreaper also owns orphaned descendants. Collect their exit status
+    // while the payload stays live, but never lose the payload's own result.
+    // Bound each pass so continuous churn cannot starve stop/parent checks.
+    pid_t waited = 0;
+    for (int reaped = 0; reaped < MAX_CHILDREN; reaped++) {
+      waited = waitpid(-1, &status, WNOHANG);
+      if (waited <= 0 || waited == payload) break;
+    }
     if (waited == payload) {
       int result = WIFEXITED(status) ? WEXITSTATUS(status) : (WIFSIGNALED(status) ? 128 + WTERMSIG(status) : 127);
       return terminal_state(drain(), result);

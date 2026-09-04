@@ -93,6 +93,7 @@ describe("secure file protocol", () => {
   });
 
   it("keeps the private worker transaction envelope strict", () => {
+    const operationId = "11111111-1111-4111-8111-111111111111";
     const request = {
       operation: "read",
       root: resolve("/tmp", "workspace"),
@@ -104,25 +105,46 @@ describe("secure file protocol", () => {
     } as const;
     expect(parseSecureFileWorkerRequest({
       type: "secure-file.perform",
+      operationId,
       request,
-    })).toEqual({ type: "secure-file.perform", request });
+    })).toEqual({ type: "secure-file.perform", operationId, request });
+    expect(parseSecureFileWorkerRequest({
+      type: "secure-file.result-ack",
+      operationId,
+    })).toEqual({ type: "secure-file.result-ack", operationId });
     expect(parseSecureFileWorkerRequest({
       type: "secure-file.recover",
+      operationId,
       request,
       extra: true,
     })).toBeNull();
     expect(parseSecureFileWorkerEvent({
       type: "secure-file.commit",
+      operationId,
       phase: "started",
-    })).toEqual({ type: "secure-file.commit", phase: "started" });
+    })).toEqual({ type: "secure-file.commit", operationId, phase: "started" });
     expect(parseSecureFileWorkerEvent({
       type: "secure-file.recovery-result",
+      operationId,
       ok: true,
-    })).toEqual({ type: "secure-file.recovery-result", ok: true });
+    })).toEqual({
+      type: "secure-file.recovery-result",
+      operationId,
+      ok: true,
+    });
+    expect(parseSecureFileWorkerEvent({
+      type: "secure-file.commit",
+      operationId,
+      phase: "started",
+      extra: true,
+    })).toBeNull();
+    expect(parseSecureFileWorkerRequest({
+      type: "secure-file.result-ack",
+      operationId: "not-a-uuid",
+    })).toBeNull();
     expect(parseSecureFileWorkerEvent({
       type: "secure-file.commit",
       phase: "started",
-      extra: true,
     })).toBeNull();
   });
 

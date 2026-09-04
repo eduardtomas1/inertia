@@ -68,6 +68,26 @@ function resultEvent(result: SecureFileResult): unknown {
 class FakeUtilityProcess extends EventEmitter {
   readonly kill = vi.fn(() => true);
   readonly postMessage = vi.fn();
+
+  override emit(eventName: string | symbol, ...args: unknown[]): boolean {
+    if (
+      eventName === "message"
+      && typeof args[0] === "object"
+      && args[0] !== null
+      && !("operationId" in args[0])
+    ) {
+      const request = [...this.postMessage.mock.calls]
+        .reverse()
+        .map(([value]) => value as Record<string, unknown>)
+        .find(({ type }) => (
+          type === "secure-file.perform" || type === "secure-file.recover"
+        ));
+      if (typeof request?.operationId === "string") {
+        args[0] = { ...args[0], operationId: request.operationId };
+      }
+    }
+    return super.emit(eventName, ...args);
+  }
 }
 
 function utility(fake: FakeUtilityProcess): UtilityProcess {
@@ -85,18 +105,156 @@ describe("secure file broker", () => {
         return utility(child);
       },
     });
-    child.postMessage.mockImplementation(() => {
-      queueMicrotask(() => {
-        child.emit("message", resultEvent(success));
-        child.emit("exit", 0);
-      });
+    const pending = broker.perform(request);
+    await vi.waitFor(() => expect(child.postMessage).toHaveBeenCalledOnce());
+    const perform = child.postMessage.mock.calls[0]![0] as Record<string, unknown>;
+    child.emit("message", {
+      ...resultEvent(success) as Record<string, unknown>,
+      operationId: perform.operationId,
     });
-
-    await expect(broker.perform(request)).resolves.toEqual(success);
     expect(spawnedParent).toBe(resolve(request.root, "src"));
     expect(child.postMessage).toHaveBeenCalledWith({
       type: "secure-file.perform",
+      operationId: expect.any(String),
       request,
+    });
+    expect(child.postMessage).toHaveBeenCalledWith({
+      type: "secure-file.result-ack",
+      operationId: perform.operationId,
+    });
+    let settled = false;
+    void pending.then(() => { settled = true; });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    child.emit("exit", 0);
+    await expect(pending).resolves.toEqual(success);
+    broker.close();
+  });
+
+  it("rejects a terminal result for another operation without acknowledging it", async () => {
+    const child = new FakeUtilityProcess();
+    const broker = new SecureFileBroker({
+      spawn: () => {
+        queueMicrotask(() => child.emit("spawn"));
+        return utility(child);
+      },
+    });
+    const pending = broker.perform(request);
+    await vi.waitFor(() => expect(child.postMessage).toHaveBeenCalledOnce());
+    child.emit("message", {
+      ...resultEvent(success) as Record<string, unknown>,
+      operationId: crypto.randomUUID(),
+    });
+
+    expect(child.kill).toHaveBeenCalledOnce();
+    expect(child.postMessage).toHaveBeenCalledTimes(1);
+    child.emit("exit", 1);
+    await expect(pending).resolves.toMatchObject({
+      ok: false,
+      code: "unavailable",
+    });
+    broker.close();
+  });
+
+  it("fails closed when the result acknowledgement cannot be delivered", async () => {
+    const child = new FakeUtilityProcess();
+    const broker = new SecureFileBroker({
+      spawn: () => {
+        queueMicrotask(() => child.emit("spawn"));
+        return utility(child);
+      },
+    });
+    const pending = broker.perform(request);
+    await vi.waitFor(() => expect(child.postMessage).toHaveBeenCalledOnce());
+    child.postMessage.mockImplementationOnce(() => {
+      throw new Error("ack channel closed");
+    });
+    child.emit("message", resultEvent(success));
+
+    expect(child.kill).toHaveBeenCalledOnce();
+    child.emit("exit", 1);
+    await expect(pending).resolves.toMatchObject({
+      ok: false,
+      code: "unavailable",
+    });
+    broker.close();
+  });
+
+  it("recovers a completed replacement when its result acknowledgement cannot be delivered", async () => {
+    const children: FakeUtilityProcess[] = [];
+    const broker = new SecureFileBroker({
+      spawn: () => {
+        const child = new FakeUtilityProcess();
+        children.push(child);
+        queueMicrotask(() => child.emit("spawn"));
+        return utility(child);
+      },
+    });
+    const pending = broker.perform(replacement);
+    await vi.waitFor(() => expect(children).toHaveLength(1));
+    await vi.waitFor(() => expect(children[0]!.postMessage).toHaveBeenCalledOnce());
+    children[0]!.emit("message", {
+      type: "secure-file.commit",
+      phase: "started",
+    });
+    children[0]!.emit("message", {
+      type: "secure-file.commit",
+      phase: "finished",
+    });
+    children[0]!.postMessage.mockImplementationOnce(() => {
+      throw new Error("ack channel closed");
+    });
+    children[0]!.emit("message", resultEvent(replacementSuccess));
+
+    expect(children[0]!.kill).toHaveBeenCalledOnce();
+    children[0]!.emit("exit", 1);
+    await vi.waitFor(() => expect(children).toHaveLength(2));
+    const recover = children[1]!.postMessage.mock.calls[0]![0] as Record<string, unknown>;
+    expect(recover).toMatchObject({
+      type: "secure-file.recover",
+      operationId: expect.any(String),
+      request: replacement,
+    });
+    children[1]!.emit("message", {
+      type: "secure-file.recovery-result",
+      ok: true,
+    });
+    expect(children[1]!.postMessage).toHaveBeenCalledWith({
+      type: "secure-file.result-ack",
+      operationId: recover.operationId,
+    });
+    children[1]!.emit("exit", 0);
+
+    await expect(pending).resolves.toMatchObject({
+      ok: false,
+      code: "unavailable",
+      message: "The secure file result acknowledgement could not be delivered.",
+    });
+
+    const retried = broker.perform(request);
+    await vi.waitFor(() => expect(children).toHaveLength(3));
+    children[2]!.emit("message", resultEvent(success));
+    children[2]!.emit("exit", 0);
+    await expect(retried).resolves.toEqual(success);
+    broker.close();
+  });
+
+  it("rejects a success result followed by a mismatched exit code", async () => {
+    const child = new FakeUtilityProcess();
+    const broker = new SecureFileBroker({
+      spawn: () => {
+        queueMicrotask(() => child.emit("spawn"));
+        return utility(child);
+      },
+    });
+    const pending = broker.perform(request);
+    await vi.waitFor(() => expect(child.postMessage).toHaveBeenCalledOnce());
+    child.emit("message", resultEvent(success));
+    child.emit("exit", 1);
+
+    await expect(pending).resolves.toMatchObject({
+      ok: false,
+      code: "unavailable",
     });
     broker.close();
   });
@@ -111,7 +269,8 @@ describe("secure file broker", () => {
         return utility(child);
       },
     });
-    child.postMessage.mockImplementation(() => {
+    child.postMessage.mockImplementation((message) => {
+      if (message.type !== "secure-file.perform") return;
       queueMicrotask(() => {
         child.emit("message", resultEvent(success));
         child.emit("exit", 0);
@@ -210,6 +369,7 @@ describe("secure file broker", () => {
       expect(children).toHaveLength(2);
       expect(children[1]!.postMessage).toHaveBeenCalledWith({
         type: "secure-file.recover",
+        operationId: expect.any(String),
         request: replacement,
       });
       children[1]!.emit("message", {
@@ -428,6 +588,7 @@ describe("secure file broker", () => {
       expect(children).toHaveLength(2);
       expect(children[1]!.postMessage).toHaveBeenCalledWith({
         type: "secure-file.recover",
+        operationId: expect.any(String),
         request: replacement,
       });
 
@@ -640,12 +801,108 @@ describe("secure file broker", () => {
     await expect(pending).resolves.toEqual(conflict);
     expect(children[1]!.postMessage).toHaveBeenCalledWith({
       type: "secure-file.recover",
+      operationId: expect.any(String),
       request: replacement,
     });
     broker.close();
   });
 
-  it("does not deliver a cancelled replacement that spawns late", async () => {
+  it("retries a pre-spawn cancellation kill after startup", async () => {
+    const child = new FakeUtilityProcess();
+    child.kill.mockReturnValueOnce(false);
+    const spawn = vi.fn(() => utility(child));
+    const broker = new SecureFileBroker({
+      spawn,
+    });
+    const controller = new AbortController();
+    const pending = broker.perform(replacement, controller.signal);
+    await vi.waitFor(() => expect(spawn).toHaveBeenCalledOnce());
+
+    controller.abort();
+    expect(child.kill).toHaveBeenCalledOnce();
+    child.emit("spawn");
+    expect(child.kill).toHaveBeenCalledTimes(2);
+    expect(child.postMessage).not.toHaveBeenCalled();
+    child.emit("exit", 1);
+
+    await expect(pending).resolves.toMatchObject({
+      ok: false,
+      code: "unavailable",
+    });
+    await expect(broker.shutdown()).resolves.toBe(true);
+  });
+
+  it("retries a pre-spawn cancellation kill after the grace deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      const child = new FakeUtilityProcess();
+      child.kill.mockReturnValue(false);
+      const broker = new SecureFileBroker({
+        spawn: () => utility(child),
+        killGraceMs: 10,
+      });
+      const controller = new AbortController();
+      const pending = broker.perform(request, controller.signal);
+      await vi.advanceTimersByTimeAsync(0);
+
+      controller.abort();
+      expect(child.kill).toHaveBeenCalledOnce();
+      await vi.advanceTimersByTimeAsync(10);
+      await expect(pending).resolves.toMatchObject({
+        ok: false,
+        code: "unavailable",
+      });
+
+      child.emit("spawn");
+      expect(child.kill).toHaveBeenCalledTimes(2);
+      expect(child.postMessage).not.toHaveBeenCalled();
+      child.emit("exit", 1);
+      await expect(broker.shutdown()).resolves.toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("retries a pre-spawn recovery kill without delivering after timeout", async () => {
+    vi.useFakeTimers();
+    try {
+      const children: FakeUtilityProcess[] = [];
+      const broker = new SecureFileBroker({
+        spawn: () => {
+          const child = new FakeUtilityProcess();
+          children.push(child);
+          return utility(child);
+        },
+        timeoutMs: 25,
+        killGraceMs: 10,
+      });
+      const pending = broker.perform(replacement);
+      await vi.advanceTimersByTimeAsync(0);
+      children[0]!.emit("spawn");
+      children[0]!.emit("exit", 1);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(children).toHaveLength(2);
+      children[1]!.kill.mockReturnValue(false);
+
+      await vi.advanceTimersByTimeAsync(35);
+      await expect(pending).resolves.toMatchObject({
+        ok: false,
+        code: "unavailable",
+        message: "The secure file service could not verify save recovery.",
+      });
+      expect(children[1]!.kill).toHaveBeenCalledOnce();
+
+      children[1]!.emit("spawn");
+      expect(children[1]!.kill).toHaveBeenCalledTimes(2);
+      expect(children[1]!.postMessage).not.toHaveBeenCalled();
+      children[1]!.emit("exit", 1);
+      await expect(broker.shutdown()).resolves.toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("quarantines a cancelled replacement when every kill is rejected", async () => {
     vi.useFakeTimers();
     try {
       const children: FakeUtilityProcess[] = [];
@@ -661,12 +918,13 @@ describe("secure file broker", () => {
       const controller = new AbortController();
       const first = broker.perform(replacement, controller.signal);
       await vi.waitFor(() => expect(children).toHaveLength(1));
+      children[0]!.kill.mockReturnValue(false);
 
       controller.abort();
       expect(children[0]!.kill).toHaveBeenCalledOnce();
       children[0]!.emit("spawn");
       expect(children[0]!.postMessage).not.toHaveBeenCalled();
-      expect(children[0]!.kill).toHaveBeenCalledOnce();
+      expect(children[0]!.kill).toHaveBeenCalledTimes(2);
 
       let firstSettled = false;
       void first.then(() => {
@@ -730,7 +988,8 @@ describe("secure file broker", () => {
         return utility(child);
       },
     });
-    child.postMessage.mockImplementation(() => {
+    child.postMessage.mockImplementation((message) => {
+      if (message.type !== "secure-file.perform") return;
       queueMicrotask(() => {
         child.emit("message", resultEvent({
           ...success,

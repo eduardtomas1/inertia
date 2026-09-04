@@ -356,13 +356,18 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     expect(settingGeometry.iconSizes).toEqual(
       settingGeometry.iconSizes.map(() => ({ width: 13, height: 13 })),
     );
+    await page.mouse.move(0, 0);
+    await expect.poll(() => accessTrigger.evaluate((button) => button.matches(":hover"))).toBe(false);
     const accessIdleBackground = await accessTrigger.evaluate(
       (button) => getComputedStyle(button).backgroundColor,
     );
-    await accessTrigger.hover();
-    await expect.poll(() => accessTrigger.evaluate((button, idleBackground) =>
-      button.matches(":hover") && getComputedStyle(button).backgroundColor !== idleBackground,
-    accessIdleBackground)).toBe(true);
+    await expect.poll(async () => {
+      await page.mouse.move(0, 0);
+      await accessTrigger.hover();
+      return accessTrigger.evaluate((button, idleBackground) =>
+        button.matches(":hover") && getComputedStyle(button).backgroundColor !== idleBackground,
+      accessIdleBackground);
+    }).toBe(true);
     await accessTrigger.focus();
     expect(await accessTrigger.evaluate(
       (button) => Number.parseFloat(getComputedStyle(button).outlineWidth),

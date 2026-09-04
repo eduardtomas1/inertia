@@ -180,12 +180,20 @@ test(`bounds background motion for ${turns} turns and resumes on focus`, async (
     })).toBe(true);
     const pauseObservedMs = performance.now() - backgroundRequestedAt;
     const background = await sample(page, electronApp, "mapped-unfocused", testInfo);
-    await mainWindow.evaluate((window) => {
-      window.minimize();
+    await mainWindow.evaluate((window) => window.minimize());
+    try {
+      // Native minimization completes asynchronously, including its macOS
+      // animation. Hiding during that transition can cancel the request.
+      await expect.poll(() => mainWindow.evaluate((window) => window.isMinimized()), {
+        timeout: 5_000,
+      }).toBe(true);
+    } catch (error) {
+      if (process.platform !== "linux") throw error;
       // Bare Xvfb has no window manager to honor minimization. Native hiding
       // still exercises an unmapped window there without faking DOM state.
-      if (!window.isMinimized()) window.hide();
-    });
+      await mainWindow.evaluate((window) => window.hide());
+      await expect.poll(() => mainWindow.evaluate((window) => window.isVisible())).toBe(false);
+    }
     const nativeWindowState = await mainWindow.evaluate((window) => ({
       minimized: window.isMinimized(), visible: window.isVisible(),
     }));

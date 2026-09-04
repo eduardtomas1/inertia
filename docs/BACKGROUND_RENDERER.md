@@ -82,6 +82,12 @@ zero idle React commits/RAF callbacks, fewer than 24 mounted rows, advancing
 foreground animation, and the Ultra reduced-motion rule. CPU and memory are
 evidence rather than machine-dependent pass/fail thresholds.
 
+Before each sample, the regression fixture requires two seconds without a React
+commit or RAF callback, bounded by a 15-second deadline. This lets initial
+runtime replies and native focus effects settle before the full five-second
+idle assertion begins. Reports retain up to 100 runtime event types and receipt
+times, without payloads, to distinguish incoming data from recurring idle work.
+
 The existing timeline mounts only seven rows for the large fixture. Its weight
 and estimate caches use weak keys, with at most 12 layout estimates per item.
 Conversation projections reset on conversation changes and discard hydrated

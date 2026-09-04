@@ -6,7 +6,7 @@ import { createAppFixture } from "./support/app-fixture";
 
 declare global {
   interface Window {
-    __backgroundCounters: { reactCommits: number; rafCallbacks: number; rendererInjected: boolean };
+    __backgroundCounters: { reactCommits: number; rafCallbacks: number; rendererInjected: boolean; lastActivityAt: number };
   }
 }
 
@@ -69,6 +69,13 @@ async function processMetrics(page: Page, electronApp: ElectronApplication) {
 }
 
 async function sample(page: Page, electronApp: ElectronApplication, name: string, testInfo: TestInfo) {
+  // Initial runtime replies can arrive after the shell becomes visible. Start
+  // the idle measurement only after those commits and focus effects settle;
+  // retain the full five-second zero-work assertion after this bounded wait.
+  const settlingStartedAt = await page.evaluate(() => performance.now());
+  await expect.poll(() => page.evaluate((startedAt) =>
+    performance.now() - Math.max(startedAt, window.__backgroundCounters.lastActivityAt),
+  settlingStartedAt), { timeout: 15_000 }).toBeGreaterThan(2_000);
   const session = await page.context().newCDPSession(page);
   const trace: { name: string; dur?: number; ph: string }[] = [];
   session.on("Tracing.dataCollected", ({ value }) => {
@@ -117,7 +124,7 @@ async function sample(page: Page, electronApp: ElectronApplication, name: string
     total.count++;
     total.durationMs += (event.dur ?? 0) / 1_000;
   }
-  return { name, durationMs: elapsedMs, start, end, processes: processes.map((metric) => {
+  return { name, startedAtMs: sampledAt, durationMs: elapsedMs, start, end, processes: processes.map((metric) => {
     const before = processesBefore.find((candidate) => candidate.pid === metric.pid);
     return { ...metric, oneCoreCpuPercent: metric.cpuSeconds !== null && before?.cpuSeconds != null
       ? (metric.cpuSeconds - before.cpuSeconds) / (elapsedMs / 1_000) * 100 : null };
@@ -134,19 +141,27 @@ test(`bounds background motion for ${turns} turns and resumes on focus`, async (
   const { page, electronApp } = fixture;
   const mainWindow = await electronApp.browserWindow(page);
   const mainWindowId = await mainWindow.evaluate((window) => window.id);
+  const runtimeEvents: { type: string; receivedAtMs: number }[] = [];
+  page.on("websocket", (socket) => socket.on("framereceived", ({ payload }) => {
+    const message = JSON.parse(String(payload)) as { type?: string; event?: { type?: string } };
+    if (runtimeEvents.length < 100) runtimeEvents.push({
+      type: message.event?.type ?? message.type ?? "unknown", receivedAtMs: performance.now(),
+    });
+  }));
   try {
     await page.addInitScript(() => {
-      const counters = { reactCommits: 0, rafCallbacks: 0, rendererInjected: false };
+      const counters = { reactCommits: 0, rafCallbacks: 0, rendererInjected: false, lastActivityAt: performance.now() };
       window.__backgroundCounters = counters;
       Object.assign(window, { __REACT_DEVTOOLS_GLOBAL_HOOK__: {
         supportsFiber: true,
         inject() { counters.rendererInjected = true; return 1; },
-        onCommitFiberRoot() { counters.reactCommits++; },
+        onCommitFiberRoot() { counters.reactCommits++; counters.lastActivityAt = performance.now(); },
         onCommitFiberUnmount() {},
       } });
       const requestFrame = window.requestAnimationFrame.bind(window);
       window.requestAnimationFrame = (callback) => requestFrame((time) => {
         counters.rafCallbacks++;
+        counters.lastActivityAt = performance.now();
         callback(time);
       });
     });
@@ -215,7 +230,7 @@ test(`bounds background motion for ${turns} turns and resumes on focus`, async (
     await expect.poll(() => page.evaluate(() => document.getAnimations().some(
       (animation) => animation instanceof CSSAnimation && animation.animationName === "ultra-reasoning-frame-flow",
     ))).toBe(false);
-    const report = JSON.stringify({ turns, activities: turns * 74, messages: turns * 8, pauseObservedMs, foreground, background, resumed, minimized }, null, 2);
+    const report = JSON.stringify({ turns, activities: turns * 74, messages: turns * 8, pauseObservedMs, runtimeEvents, foreground, background, resumed, minimized }, null, 2);
     await mkdir("performance-results", { recursive: true });
     await writeFile(`performance-results/renderer-background-${process.platform}-${process.arch}-${turns}.json`, report);
     await testInfo.attach("renderer-background-profile", {

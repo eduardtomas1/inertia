@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import type { UtilityProcess } from "electron";
 
 import type {
@@ -98,6 +100,7 @@ export function createConversationAttachmentStoreUtilityRunner(
     operation: StoreOperation,
     signal?: AbortSignal,
   ): StoreExecution {
+    const operationId = randomUUID();
     let resolveStopped!: () => void;
     let rejectStopped!: (error: Error) => void;
     let resolveReady!: (observed: boolean) => void;
@@ -196,6 +199,7 @@ export function createConversationAttachmentStoreUtilityRunner(
         try {
           child.postMessage({
             type: "conversation-attachment-store.perform",
+            operationId,
             encodedOperation: encodeConversationAttachmentStoreOperation(
               operation,
             ),
@@ -210,7 +214,7 @@ export function createConversationAttachmentStoreUtilityRunner(
           return;
         }
         const event = parseConversationAttachmentStoreWorkerEvent(value);
-        if (!event || reported) {
+        if (!event || event.operationId !== operationId || reported) {
           stop(new Error("Conversation attachment operation returned an invalid result."));
           return;
         }
@@ -224,6 +228,16 @@ export function createConversationAttachmentStoreUtilityRunner(
           return;
         }
         reported = event;
+        try {
+          child.postMessage({
+            type: "conversation-attachment-store.result-ack",
+            operationId,
+          } satisfies ConversationAttachmentStoreWorkerRequest);
+        } catch {
+          stop(new Error(
+            "Conversation attachment operation acknowledgement could not be delivered.",
+          ));
+        }
       });
       child.once("error", () => {
         stop(new Error("Conversation attachment operation stopped unexpectedly."));
@@ -236,8 +250,9 @@ export function createConversationAttachmentStoreUtilityRunner(
       }).once("exit", (code, signal) => {
         if (killGraceTimer) clearTimeout(killGraceTimer);
         resolveStopped();
+        const expectedExit = reported?.ok === true ? code === 0 : code === 1;
         settle(stoppingError ?? (
-          code === 0 && !signal
+          expectedExit && !signal
             ? undefined
             : new Error("Conversation attachment operation stopped unexpectedly.")
         ));

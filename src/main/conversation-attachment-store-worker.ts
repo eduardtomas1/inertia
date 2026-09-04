@@ -27,14 +27,27 @@ const parentPort = process.parentPort;
 if (parentPort) {
   parentPort.once("message", (event) => {
     const request = parseConversationAttachmentStoreWorkerRequest(event.data);
-    if (!request) {
-      parentPort.postMessage({
-        type: "conversation-attachment-store.result",
-        ok: false,
-      } satisfies ConversationAttachmentStoreWorkerEvent);
-      setImmediate(() => process.exit(1));
+    if (!request || request.type !== "conversation-attachment-store.perform") {
+      process.exit(1);
       return;
     }
+    const finish = (
+      result: ConversationAttachmentStoreWorkerEvent,
+      exitCode: number,
+    ): void => {
+      parentPort.once("message", (acknowledgement) => {
+        const ack = parseConversationAttachmentStoreWorkerRequest(
+          acknowledgement.data,
+        );
+        process.exit(
+          ack?.type === "conversation-attachment-store.result-ack"
+              && ack.operationId === request.operationId
+            ? exitCode
+            : 1,
+        );
+      });
+      parentPort.postMessage(result);
+    };
     let operation: unknown;
     try {
       operation = JSON.parse(request.encodedOperation);
@@ -44,22 +57,23 @@ if (parentPort) {
     void performStoreOperation(operation, () => {
       parentPort.postMessage({
         type: "conversation-attachment-store.ready",
+        operationId: request.operationId,
       } satisfies ConversationAttachmentStoreWorkerEvent);
     }).then(
       (receipt) => {
-        parentPort.postMessage({
+        finish({
           type: "conversation-attachment-store.result",
+          operationId: request.operationId,
           ok: true,
           ...(receipt === undefined ? {} : { receipt }),
-        } satisfies ConversationAttachmentStoreWorkerEvent);
-        setImmediate(() => process.exit(0));
+        } satisfies ConversationAttachmentStoreWorkerEvent, 0);
       },
       () => {
-        parentPort.postMessage({
+        finish({
           type: "conversation-attachment-store.result",
+          operationId: request.operationId,
           ok: false,
-        } satisfies ConversationAttachmentStoreWorkerEvent);
-        setImmediate(() => process.exit(1));
+        } satisfies ConversationAttachmentStoreWorkerEvent, 1);
       },
     );
   });

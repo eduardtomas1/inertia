@@ -41,10 +41,19 @@ function utility(child: FakeUtilityProcess): UtilityProcess {
   return child as unknown as UtilityProcess;
 }
 
+function operationId(child: FakeUtilityProcess): string {
+  const request = child.postMessage.mock.calls
+    .map(([value]) => value as Record<string, unknown>)
+    .find(({ type }) => type === "attachment-import.validate");
+  expect(request?.operationId).toEqual(expect.any(String));
+  return request!.operationId as string;
+}
+
 function reportSuccess(child: FakeUtilityProcess): void {
   child.emit("spawn");
   child.emit("message", {
     type: "attachment-import.result",
+    operationId: operationId(child),
     ok: true,
     receipt,
   });
@@ -61,8 +70,13 @@ describe("supervised attachment import utility", () => {
     child.emit("spawn");
     child.emit("message", {
       type: "attachment-import.result",
+      operationId: operationId(child),
       ok: true,
       receipt,
+    });
+    expect(child.postMessage).toHaveBeenLastCalledWith({
+      type: "attachment-import.result-ack",
+      operationId: operationId(child),
     });
     const settled = vi.fn();
     void running.result.then(settled);
@@ -83,6 +97,7 @@ describe("supervised attachment import utility", () => {
     child.emit("spawn");
     child.emit("message", {
       type: "attachment-import.result",
+      operationId: operationId(child),
       ok: false,
       code: "content",
     });
@@ -108,12 +123,72 @@ describe("supervised attachment import utility", () => {
       });
       const running = runner(operation);
       child.emit("spawn");
-      for (const event of events) child.emit("message", event);
+      for (const event of events) {
+        child.emit("message", "type" in event
+          ? { ...event, operationId: operationId(child) }
+          : event);
+      }
       expect(child.kill).toHaveBeenCalledOnce();
       child.emit("exit", 1);
       await expect(running.result).rejects.toThrow(/invalid result/u);
       await expect(running.stopped).resolves.toBeUndefined();
     }
+  });
+
+  it("rejects exit before a receipt without acknowledging it", async () => {
+    const child = new FakeUtilityProcess();
+    const runner = createAttachmentImportUtilityRunner({
+      spawn: () => utility(child),
+    });
+    const running = runner(operation);
+    child.emit("spawn");
+    child.emit("exit", 0);
+
+    await expect(running.result).rejects.toThrow(/stopped unexpectedly/u);
+    expect(child.postMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("kills validation when its exact acknowledgement cannot be delivered", async () => {
+    const child = new FakeUtilityProcess();
+    const runner = createAttachmentImportUtilityRunner({
+      spawn: () => utility(child),
+    });
+    const running = runner(operation);
+    child.emit("spawn");
+    child.postMessage.mockImplementationOnce(() => {
+      throw new Error("ack channel closed");
+    });
+    child.emit("message", {
+      type: "attachment-import.result",
+      operationId: operationId(child),
+      ok: true,
+      receipt,
+    });
+
+    expect(child.kill).toHaveBeenCalledOnce();
+    child.emit("exit", 1);
+    await expect(running.result).rejects.toThrow(/acknowledgement/u);
+    await expect(running.stopped).resolves.toBeUndefined();
+  });
+
+  it("rejects a receipt for a different operation", async () => {
+    const child = new FakeUtilityProcess();
+    const runner = createAttachmentImportUtilityRunner({
+      spawn: () => utility(child),
+    });
+    const running = runner(operation);
+    child.emit("spawn");
+    child.emit("message", {
+      type: "attachment-import.result",
+      operationId: crypto.randomUUID(),
+      ok: true,
+      receipt,
+    });
+
+    expect(child.kill).toHaveBeenCalledOnce();
+    expect(child.postMessage).toHaveBeenCalledTimes(1);
+    child.emit("exit", 1);
+    await expect(running.result).rejects.toThrow(/invalid result/u);
   });
 
   it("cancels an active worker and confirms its exact exit", async () => {

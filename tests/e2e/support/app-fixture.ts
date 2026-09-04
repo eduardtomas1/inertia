@@ -66,6 +66,7 @@ export interface AppFixture {
 interface AppFixtureOptions {
   name: string;
   initialState: "empty" | "conversation"; windowDisplay?: "primary"; additionalEnvironment?: Record<string, string>;
+  workspaceGit?: boolean;
   initialNewThreadMode?: "local" | "worktree";
   seedAssistantCodeBlock?: boolean;
   seedSecondProject?: boolean;
@@ -511,7 +512,7 @@ function readableAttachmentPdf(): Buffer {
   return Buffer.from(source, "ascii");
 }
 
-async function createWorkspace(testDirectory: string): Promise<{
+async function createWorkspace(testDirectory: string, initializeGit: boolean): Promise<{
   workspaceDirectory: string;
   attachmentImagePath: string;
   attachmentDocumentPath: string;
@@ -582,21 +583,23 @@ async function createWorkspace(testDirectory: string): Promise<{
       "utf8",
     ),
   ]);
-  await execFileAsync("git", ["init", "-q"], { cwd: workspaceDirectory });
-  await execFileAsync("git", ["add", "."], { cwd: workspaceDirectory });
-  await execFileAsync(
-    "git",
-    [
-      "-c",
-      "user.name=Inertia",
-      "-c",
-      "user.email=test@inertia.local",
-      "commit",
-      "-qm",
-      "fixture",
-    ],
-    { cwd: workspaceDirectory },
-  );
+  if (initializeGit) {
+    await execFileAsync("git", ["init", "-q"], { cwd: workspaceDirectory });
+    await execFileAsync("git", ["add", "."], { cwd: workspaceDirectory });
+    await execFileAsync(
+      "git",
+      [
+        "-c",
+        "user.name=Inertia",
+        "-c",
+        "user.email=test@inertia.local",
+        "commit",
+        "-qm",
+        "fixture",
+      ],
+      { cwd: workspaceDirectory },
+    );
+  }
   await writeFile(
     join(workspaceDirectory, "sample.ts"),
     "export const version = '0.0.1';\nexport const ready = true;\n",
@@ -658,7 +661,10 @@ export async function createAppFixture(
   const preview = await createPreviewServer();
   const { processTemporaryDirectory, testDirectory } =
     await createFixtureTemporaryDirectories();
-  const workspace = await createWorkspace(testDirectory);
+  const workspace = await createWorkspace(
+    testDirectory,
+    options.workspaceGit !== false,
+  );
   let providerBinDirectory: string | null = null;
   const secondWorkspaceDirectory = options.seedSecondProject
     ? await createSecondWorkspace(testDirectory)
@@ -692,11 +698,13 @@ export async function createAppFixture(
                 "utf8",
               )]
             : []),
-          writeFile(
-            join(directory, ".git", "info", "exclude"),
-            `app-server\nlogin\n${options.codexResumeSource ? "resume\n" : ""}`,
-            { encoding: "utf8", flag: "a" },
-          ),
+          ...(options.workspaceGit === false
+            ? []
+            : [writeFile(
+                join(directory, ".git", "info", "exclude"),
+                `app-server\nlogin\n${options.codexResumeSource ? "resume\n" : ""}`,
+                { encoding: "utf8", flag: "a" },
+              )]),
         ]),
     );
   }

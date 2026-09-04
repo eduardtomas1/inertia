@@ -15,7 +15,7 @@ if (args[0] === "--help") {
   process.exit(0);
 }
 let threadId = "image-send-thread";
-const turnId = "image-send-turn";
+let turnIndex = 0;
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
   const message = JSON.parse(line);
   if (message.method === "initialize") {
@@ -37,6 +37,8 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     return;
   }
   if (message.method !== "turn/start") return;
+  turnIndex += 1;
+  const turnId = "image-send-turn-" + turnIndex;
   const image = message.params.input.find((item) => item.type === "localImage");
   const digest = image && fs.statSync(image.path).isFile()
     ? crypto.createHash("sha256").update(fs.readFileSync(image.path)).digest("hex")
@@ -48,11 +50,12 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
 });
 `;
 
-test("sends a pasted image through the real desktop and Codex path", async () => {
+test("repeatedly sends a pasted image after startup reconciliation in a non-Git project", async () => {
   const app = await createAppFixture({
     name: "image-send-regression",
     initialState: "conversation",
     codexAppServerSource: imageAwareCodexAppServer,
+    workspaceGit: false,
   });
   try {
     const imageBytes = [...await readFile(app.attachmentImagePath)];
@@ -60,23 +63,31 @@ test("sends a pasted image through the real desktop and Codex path", async () =>
       .update(Buffer.from(imageBytes))
       .digest("hex");
     const composer = app.page.getByRole("textbox", { name: "Message" });
-    await composer.evaluate((textarea, bytes) => {
-      const transfer = new DataTransfer();
-      transfer.items.add(new File(
-        [new Uint8Array(bytes)],
-        "pasted.png",
-        { type: "image/png" },
-      ));
-      const event = new Event("paste", { bubbles: true, cancelable: true });
-      Object.defineProperty(event, "clipboardData", { value: transfer });
-      textarea.dispatchEvent(event);
-    }, imageBytes);
-    await expect(app.page.getByText("pasted.png", { exact: true })).toBeVisible();
-    await composer.fill("Inspect this image.");
-    await app.page.getByRole("button", { name: "Send message" }).click();
-
-    await expect(app.page.getByText(`image-sha256:${expectedDigest}`, { exact: true }))
-      .toBeVisible({ timeout: 15_000 });
+    const send = app.page.getByRole("button", { name: "Send message" });
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      await expect(send).toBeVisible();
+      await composer.evaluate((textarea, bytes) => {
+        const transfer = new DataTransfer();
+        transfer.items.add(new File(
+          [new Uint8Array(bytes)],
+          "pasted.png",
+          { type: "image/png" },
+        ));
+        const event = new Event("paste", { bubbles: true, cancelable: true });
+        Object.defineProperty(event, "clipboardData", { value: transfer });
+        textarea.dispatchEvent(event);
+      }, imageBytes);
+      await expect(app.page.getByRole("button", {
+        name: "Remove attachment pasted.png",
+      })).toBeVisible();
+      const prompt = `Inspect this image, attempt ${attempt}.`;
+      await composer.fill(prompt);
+      await send.click();
+      await expect(app.page.getByText(prompt, { exact: true })).toBeVisible();
+      await expect(app.page.getByText(`image-sha256:${expectedDigest}`, { exact: true }))
+        .toHaveCount(attempt, { timeout: 15_000 });
+      await expect(send).toBeVisible();
+    }
     await expect(app.page.getByRole("alert")).toHaveCount(0);
     expect(app.rendererErrors).toEqual([]);
   } finally {

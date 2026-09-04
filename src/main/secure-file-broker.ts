@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { UtilityProcess } from "electron";
 import { resolve } from "node:path";
 
@@ -170,6 +171,7 @@ export class SecureFileBroker {
     signal?: AbortSignal,
     onLateExit?: () => void,
   ): Promise<{ result: SecureFileResult; exitConfirmed: boolean }> {
+    const operationId = randomUUID();
     let child: UtilityProcess;
     try {
       const segments = secureFilePathSegments(request.path);
@@ -264,6 +266,7 @@ export class SecureFileBroker {
         try {
           child.postMessage({
             type: "secure-file.perform",
+            operationId,
             request,
           } satisfies SecureFileWorkerRequest);
           delivered = true;
@@ -273,7 +276,7 @@ export class SecureFileBroker {
       });
       child.on("message", (value) => {
         const event = parseSecureFileWorkerEvent(value);
-        if (!event) {
+        if (!delivered || !event || event.operationId !== operationId) {
           stop("The secure file service returned an invalid result.");
           return;
         }
@@ -309,11 +312,19 @@ export class SecureFileBroker {
           return;
         }
         reported = event.result;
+        try {
+          child.postMessage({
+            type: "secure-file.result-ack",
+            operationId,
+          } satisfies SecureFileWorkerRequest);
+        } catch {
+          stop("The secure file result acknowledgement could not be delivered.");
+        }
       });
       child.once("error", () => {
         stop("The secure file service stopped unexpectedly.");
       });
-      child.once("exit", () => {
+      child.once("exit", (code) => {
         exitConfirmed = true;
         if (killGraceTimer) clearTimeout(killGraceTimer);
         if (commitGraceTimer) clearTimeout(commitGraceTimer);
@@ -332,6 +343,15 @@ export class SecureFileBroker {
         if (settled) {
           this.untrackChild(child);
           return;
+        }
+        if (
+          !stoppingResult
+          && reported
+          && code !== (reported.ok ? 0 : 1)
+        ) {
+          stoppingResult = unavailable(
+            "The secure file service stopped unexpectedly.",
+          );
         }
         const result = stoppingResult
           ?? reported
@@ -370,6 +390,7 @@ export class SecureFileBroker {
     key: string,
     onLateExit?: () => void,
   ): Promise<boolean> {
+    const operationId = randomUUID();
     const segments = secureFilePathSegments(request.path);
     if (!segments) return Promise.resolve(false);
     const parent = resolve(request.root, ...segments.slice(0, -1));
@@ -413,6 +434,7 @@ export class SecureFileBroker {
         try {
           child.postMessage({
             type: "secure-file.recover",
+            operationId,
             request,
           } satisfies SecureFileWorkerRequest);
           delivered = true;
@@ -426,12 +448,21 @@ export class SecureFileBroker {
           failed
           || !delivered
           || event?.type !== "secure-file.recovery-result"
+          || event.operationId !== operationId
           || reported !== null
         ) {
           stop();
           return;
         }
         reported = event.ok;
+        try {
+          child.postMessage({
+            type: "secure-file.result-ack",
+            operationId,
+          } satisfies SecureFileWorkerRequest);
+        } catch {
+          stop();
+        }
       });
       child.once("error", stop);
       child.once("exit", (code) => {

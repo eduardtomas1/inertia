@@ -133,6 +133,18 @@ function nearby(text, anchor, distance, predicate) {
   return false;
 }
 
+function orderedEvidence(text, anchor, distance, evidence) {
+  return nearby(text, anchor, distance, (window) => {
+    let offset = 0;
+    for (const pattern of evidence) {
+      const match = pattern.exec(window.slice(offset));
+      if (!match) return false;
+      offset += match.index + match[0].length;
+    }
+    return true;
+  });
+}
+
 function sessionNewState(text) {
   return nearby(text, "buildAvailableModels", 8_000, (window) => (
     /\bsessionId\b/u.test(window)
@@ -142,6 +154,86 @@ function sessionNewState(text) {
     && /\bmodels\s*:/u.test(window)
     && /\bavailableModels\b/u.test(window)
     && /\bcurrentModelId\b/u.test(window)
+  ));
+}
+
+function sessionNewAuthPersistenceOrdering(text) {
+  return orderedEvidence(text, "newSession", 12_000, [
+    /\bsessionId\s*=\s*[A-Za-z_$][\w$]*\s*\(\s*\)/u,
+    /\bif\s*\(\s*!isAuthenticated\s*\)/u,
+    /\bnew\s+[\w$]*RequestError\s*\(\s*-(?:32_?000|32e3)\b/u,
+    /\bawait\s+[A-Za-z_$][\w$]*\.initialize\s*\(/u,
+    /\bawait\s+[A-Za-z_$][\w$]*\.startChat\s*\(/u,
+    /\bsessions\.set\s*\(\s*sessionId\b/u,
+  ]);
+}
+
+function projectOwnershipMarkerLayout(text) {
+  return nearby(text, '".project_root"', 18_000, (window) => (
+    /\bjoin\s*\(\s*baseDir\s*,\s*slug\s*,\s*PROJECT_ROOT_FILE\s*\)/u.test(window)
+    && /\bwriteFile\s*\(\s*markerPath\s*,\s*normalizedProject\b/u.test(window)
+    && /\bflag\s*:\s*["']wx["']/u.test(window)
+  ));
+}
+
+function chatRecordingOwnershipLayout(text) {
+  return /\bSESSION_FILE_PREFIX\s*=\s*["']session-["']/u.test(text)
+    && nearby(text, "ChatRecordingService = class", 16_000, (window) => {
+    const promptIdentity = "this.sessionId = this.context.promptId";
+    const freshSession = window.indexOf(promptIdentity);
+    const initialMetadata = window.indexOf("const initialMetadata", freshSession);
+    const initialAppend = window.indexOf(
+      "this.appendRecord(initialMetadata)",
+      initialMetadata,
+    );
+    const firstFreshAppend = window.indexOf("this.appendRecord(", freshSession);
+    return freshSession >= 0
+      && initialMetadata > freshSession
+      && initialAppend > initialMetadata
+      && firstFreshAppend === initialAppend
+      && /\bprojectHash\s*=\s*getProjectHash\s*\([^)]*getProjectRoot\s*\(/u
+      .test(window)
+      && /\bgetProjectTempDir\s*\(\s*\)\s*,\s*["']chats["']/u.test(window)
+      && /\bkind\s*===\s*["']subagent["']\s*&&\s*this\.context\.parentSessionId\b/u
+      .test(window)
+      && /\bjoin\s*\(\s*chatsDir\s*,\s*safeParentId\s*\)/u.test(window)
+      && /\bfilename\s*=\s*`\$\{safeSessionId\}\.jsonl`/u.test(window)
+      && /\bSESSION_FILE_PREFIX\b[\s\S]{0,300}\bsafeSessionId\.slice\s*\(\s*0\s*,\s*8\s*\)/u
+        .test(window)
+      && /\binitialMetadata\s*=\s*\{[\s\S]{0,500}\bsessionId\s*:\s*this\.sessionId\b[\s\S]{0,500}\bprojectHash\s*:\s*this\.projectHash\b[\s\S]{0,500}\bkind\s*:\s*this\.kind\b/u
+      .test(window)
+      && /\bline\s*=\s*JSON\.stringify\s*\(\s*record[\w$]*\s*\)\s*\+\s*["']\\n["']/u
+        .test(window)
+      && /\bappendFileSync\s*\(\s*this\.conversationFile\s*,\s*line\s*\)/u
+        .test(window);
+    });
+}
+
+function sessionArtifactCleanupLayout(text) {
+  return /\bLOGS_DIR[\w$]*\s*=\s*["']logs["']/u.test(text)
+    && /\bTOOL_OUTPUTS_DIR[\w$]*\s*=\s*["']tool-outputs["']/u.test(text)
+    && nearby(text, "async function deleteSessionArtifactsAsync", 10_000, (window) => (
+    /\bjoin\s*\(\s*tempDir\s*,\s*LOGS_DIR[\w$]*\s*\)/u.test(window)
+    && /`session-\$\{safeSessionId\}\.jsonl`/u.test(window)
+    && /\bjoin\s*\(\s*tempDir\s*,\s*TOOL_OUTPUTS_DIR[\w$]*\s*\)/u.test(window)
+    && /`session-\$\{safeSessionId\}`/u.test(window)
+    && /\bjoin\s*\(\s*tempDir\s*,\s*safeSessionId\s*\)/u.test(window)
+    && /\bjoin\s*\(\s*chatsDir\s*,\s*safeParentSessionId\s*\)/u.test(window)
+    && /\breaddir\s*\(\s*subagentDir\b/u.test(window)
+    && /\bbasename\s*\(\s*[A-Za-z_$][\w$]*\.name\s*,\s*[A-Za-z_$][\w$]*\.extname\s*\(/u
+      .test(window)
+    && /\bdeleteSessionArtifactsAsync\s*\(\s*agentId\s*,\s*tempDir\s*\)/u
+      .test(window)
+    ));
+}
+
+function localSubagentIdentityAndDepth(text) {
+  return nearby(text, "LocalAgentExecutor = class", 12_000, (window) => (
+    /\bparentSessionId\s*:\s*this\.context\.parentSessionId\s*\|\|\s*this\.context\.promptId\b/u
+      .test(window)
+    && /\bif\s*\(\s*tool\.kind\s*===\s*(?:Kind\.Agent|["']agent["'][^)]*)\)\s*\{\s*return\s*;/u
+      .test(window)
+    && /\bthis\.agentId\s*=\s*randomUUID[\w$]*\s*\(\s*\)/u.test(window)
   ));
 }
 
@@ -241,6 +333,31 @@ function contractState() {
       label: "session/new modes and models response",
       matched: false,
       match: sessionNewState,
+    },
+    {
+      label: "session/new auth-before-persistence ordering",
+      matched: false,
+      match: sessionNewAuthPersistenceOrdering,
+    },
+    {
+      label: "workspace ownership-marker layout",
+      matched: false,
+      match: projectOwnershipMarkerLayout,
+    },
+    {
+      label: "chat recording ownership and subagent layout",
+      matched: false,
+      match: chatRecordingOwnershipLayout,
+    },
+    {
+      label: "session and subagent artifact cleanup layout",
+      matched: false,
+      match: sessionArtifactCleanupLayout,
+    },
+    {
+      label: "single-level UUID subagent ownership",
+      matched: false,
+      match: localSubagentIdentityAndDepth,
     },
     {
       label: "Default and Plan mode descriptors",

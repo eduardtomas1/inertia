@@ -26,8 +26,16 @@ function buildAvailableModels() {
   return { availableModels: [], currentModelId: "auto" };
 }
 
-function newSession() {
-  const sessionId = "fixture-session";
+async function newSession() {
+  const sessionId = randomUUID();
+  let isAuthenticated = true;
+  if (!isAuthenticated) {
+    throw new RequestError(-32000, "Authentication required.");
+  }
+  await config.initialize();
+  const geminiClient = config.getGeminiClient();
+  const chat = await geminiClient.startChat();
+  sessions.set(sessionId, chat);
   const { availableModels, currentModelId } = buildAvailableModels();
   return {
     sessionId,
@@ -38,6 +46,89 @@ function newSession() {
     models: { availableModels, currentModelId },
   };
 }
+
+const PROJECT_ROOT_FILE = ".project_root";
+async function ensureOwnershipMarkers(baseDir, slug, normalizedProject) {
+  const markerPath = path.join(baseDir, slug, PROJECT_ROOT_FILE);
+  await fs.promises.writeFile(markerPath, normalizedProject, {
+    encoding: "utf8",
+    flag: "wx",
+  });
+}
+
+const SESSION_FILE_PREFIX = "session-";
+var ChatRecordingService = class {
+  constructor(context) {
+    this.context = context;
+    this.sessionId = context.promptId;
+    this.projectHash = getProjectHash(context.config.getProjectRoot());
+  }
+  initialize() {
+    this.sessionId = this.context.promptId;
+    let chatsDir = path.join(this.context.config.storage.getProjectTempDir(), "chats");
+    if (this.kind === "subagent" && this.context.parentSessionId) {
+      const safeParentId = sanitizeFilenamePart(this.context.parentSessionId);
+      chatsDir = path.join(chatsDir, safeParentId);
+    }
+    const safeSessionId = sanitizeFilenamePart(this.sessionId);
+    let filename;
+    if (this.kind === "subagent") {
+      filename = ${"`"}${"${"}safeSessionId}.jsonl${"`"};
+    } else {
+      filename = ${"`"}${"${"}SESSION_FILE_PREFIX}${"${"}safeSessionId.slice(0, 8)}.jsonl${"`"};
+    }
+    this.conversationFile = path.join(chatsDir, filename);
+    const initialMetadata = {
+      sessionId: this.sessionId,
+      projectHash: this.projectHash,
+      kind: this.kind,
+    };
+    this.appendRecord(initialMetadata);
+  }
+  appendRecord(record) {
+    const line = JSON.stringify(record) + "\n";
+    fs.appendFileSync(this.conversationFile, line);
+  }
+};
+
+const LOGS_DIR = "logs";
+const TOOL_OUTPUTS_DIR2 = "tool-outputs";
+async function deleteSessionArtifactsAsync(sessionId, tempDir) {
+  const safeSessionId = validateAndSanitizeSessionId(sessionId);
+  const logsDir = path.join(tempDir, LOGS_DIR);
+  const logPath = path.join(logsDir, ${"`"}session-${"${"}safeSessionId}.jsonl${"`"});
+  const toolOutputsBase = path.join(tempDir, TOOL_OUTPUTS_DIR2);
+  const toolOutputDir = path.join(toolOutputsBase, ${"`"}session-${"${"}safeSessionId}${"`"});
+  const sessionDir = path.join(tempDir, safeSessionId);
+  void logPath; void toolOutputDir; void sessionDir;
+}
+async function deleteSubagentSessionDirAndArtifactsAsync(parentSessionId, chatsDir, tempDir) {
+  const safeParentSessionId = validateAndSanitizeSessionId(parentSessionId);
+  const subagentDir = path.join(chatsDir, safeParentSessionId);
+  const files = await fs.promises.readdir(subagentDir, { withFileTypes: true });
+  for (const file of files) {
+    const agentId = path.basename(file.name, path.extname(file.name));
+    await deleteSessionArtifactsAsync(agentId, tempDir);
+  }
+}
+
+var LocalAgentExecutor = class {
+  get executionContext() {
+    return {
+      parentSessionId: this.context.parentSessionId || this.context.promptId,
+    };
+  }
+  registerToolInstance(tool) {
+    if (tool.kind === Kind.Agent) {
+      return;
+    }
+    this.toolRegistry.registerTool(tool);
+  }
+  constructor(context) {
+    this.context = context;
+    this.agentId = randomUUID();
+  }
+};
 
 class Agent {
   async unstable_setSessionModel(params) {
@@ -109,6 +200,10 @@ void AGENT_METHODS;
 void legacyPlan;
 void contextUsage;
 void newSession;
+void ensureOwnershipMarkers;
+void ChatRecordingService;
+void deleteSubagentSessionDirAndArtifactsAsync;
+void LocalAgentExecutor;
 void Agent;
 void promptResponse;
 void GOOGLE_OAUTH_ENDPOINT;
@@ -188,6 +283,20 @@ describe("Gemini provider drift artifact inspection", () => {
 
   it.each([
     ["buildAvailableModels", "buildModelChoices", "session/new modes and models response"],
+    ["throw new RequestError(-32000", "throw new RequestError(-32603", "session/new auth-before-persistence ordering"],
+    ["await config.initialize()", "await config.initializeLater()", "session/new auth-before-persistence ordering"],
+    ['const PROJECT_ROOT_FILE = ".project_root"', 'const PROJECT_ROOT_FILE = ".owner"', "workspace ownership-marker layout"],
+    ['getProjectTempDir(), "chats"', 'getProjectTempDir(), "conversations"', "chat recording ownership and subagent layout"],
+    ['const SESSION_FILE_PREFIX = "session-"', 'const SESSION_FILE_PREFIX = "chat-"', "chat recording ownership and subagent layout"],
+    ["safeSessionId.slice(0, 8)", "safeSessionId.slice(0, 6)", "chat recording ownership and subagent layout"],
+    ['this.kind === "subagent"', 'this.kind === "delegate"', "chat recording ownership and subagent layout"],
+    ["const initialMetadata = {", "this.appendRecord({ header: true });\n    const initialMetadata = {", "chat recording ownership and subagent layout"],
+    ['const LOGS_DIR = "logs"', 'const LOGS_DIR = "session-logs"', "session and subagent artifact cleanup layout"],
+    ['const TOOL_OUTPUTS_DIR2 = "tool-outputs"', 'const TOOL_OUTPUTS_DIR2 = "outputs"', "session and subagent artifact cleanup layout"],
+    ["deleteSessionArtifactsAsync(agentId, tempDir)", "deleteSessionArtifactsAsync(parentSessionId, tempDir)", "session and subagent artifact cleanup layout"],
+    ["this.agentId = randomUUID()", 'this.agentId = "sequential-child"', "single-level UUID subagent ownership"],
+    ["tool.kind === Kind.Agent", "tool.kind === Kind.Plan", "single-level UUID subagent ownership"],
+    ["this.context.parentSessionId || this.context.promptId", "this.context.promptId", "single-level UUID subagent ownership"],
     ['name: "Plan"', 'name: "Review"', "Default and Plan mode descriptors"],
     ['"session/set_model"', '"session/select_model"', "session/set_model protocol route"],
     ["unstable_setSessionModel", "unstable_selectSessionModel", "Gemini session model setter"],
@@ -302,7 +411,7 @@ describe("Gemini provider drift artifact inspection", () => {
     const root = await createFixture();
     try {
       await expect(inspectGeminiCliAcpSurface(root, {
-        maxArtifactBytes: 4_096,
+        maxArtifactBytes: 16_384,
         maxTotalBytes: 32,
       })).rejects.toThrow("32-byte aggregate inspection limit");
       await expect(inspectGeminiCliAcpSurface(root, {

@@ -1,5 +1,9 @@
 import type { ChildProcess } from "node:child_process";
 import { isAbsolute } from "node:path";
+import type {
+  ActiveRuntimeOwnedProcessClaim,
+  ActiveRuntimeOwnedProcessRegistry,
+} from "./runtime-owned-process-active.js";
 import {
   darwinProcessGuardianReady,
   darwinProcessGuardianReadyAsync,
@@ -9,7 +13,7 @@ import {
   type DarwinProcessIdentity,
 } from "./runtime-owned-process-darwin.js";
 import {
-  exactProcessGroupAbsent,
+  exactProcessGroupTerminal,
   failedClaimProcessCanExecute,
 } from "./runtime-owned-process-posix.js";
 import {
@@ -20,7 +24,6 @@ import {
   signalLinuxGuardianExact,
   signalLinuxGuardianExactAsync,
   stopPendingLinuxGuardianAsync,
-  type LinuxGuardianExecutableIdentity,
 } from "./runtime-owned-process-linux.js";
 import {
   RuntimeOwnedProcessJournal,
@@ -29,7 +32,6 @@ import {
   type LinuxProcessIdentity,
   type RuntimeOwnedProcessClaim,
   type RuntimeOwnedProcessPlatform,
-  type RuntimeOwnedProcessSessionCapability,
 } from "./runtime-owned-process-journal.js";
 import {
   runtimeOwnedProcessInvocationFor,
@@ -76,61 +78,6 @@ export type { DarwinProcessIdentity } from "./runtime-owned-process-darwin.js";
 export type { RuntimeOwnedProcessInvocation } from "./runtime-owned-process-invocation.js";
 const PROCESS_GROUP_EXIT_WAIT_MS = 1_000;
 const PROCESS_GROUP_EXIT_POLL_MS = 10;
-interface ActiveRuntimeOwnedProcessRegistry {
-  readonly journal: RuntimeOwnedProcessJournal;
-  readonly platform: RuntimeOwnedProcessPlatform;
-  readonly runtimeGenerationId: string;
-  readonly systemBootId: string;
-  readonly sessionCapability: RuntimeOwnedProcessSessionCapability;
-  readonly darwinGuardianPath: string | null;
-  readonly linuxGuardianExecutable: LinuxGuardianExecutableIdentity | null;
-  readonly readDarwinIdentity: (
-    pid: number,
-  ) => DarwinProcessIdentity | null;
-  readonly readDarwinGuardianReady: (
-    pid: number,
-  ) => DarwinProcessIdentity | null;
-  readonly readDarwinIdentityAsync: (
-    pid: number,
-    abortSignal?: AbortSignal,
-  ) => Promise<DarwinProcessIdentity | null>;
-  readonly readDarwinGuardianReadyAsync: (
-    pid: number,
-    abortSignal?: AbortSignal,
-  ) => Promise<DarwinProcessIdentity | null>;
-  readonly readDarwinSessionEmptyAsync: (
-    sessionId: number,
-    abortSignal?: AbortSignal,
-  ) => Promise<boolean | null>;
-  readonly claims: WeakMap<ChildProcess, ActiveRuntimeOwnedProcessClaim>;
-  readonly activeLinuxMonitors: Set<() => void>;
-  readonly admissionController: AbortController;
-  readonly pendingAdmissions: Set<Promise<boolean>>;
-  readonly pendingReleaseConfirmations: Set<Promise<boolean>>;
-  readonly onTainted: () => void;
-  tainted: boolean;
-}
-
-interface ActiveRuntimeOwnedProcessClaim {
-  readonly ownershipId: string;
-  released: boolean;
-  stopRequested: boolean;
-  readonly waitForStopRequest: Promise<void>;
-  readonly settleStopRequest: () => void;
-  authorizationObserved: boolean;
-  admissionSucceeded: boolean;
-  groupExitReleaseAttempts: number;
-  admission: Promise<boolean> | null;
-  releaseConfirmation: Promise<boolean> | null;
-  settleReleaseConfirmation: ((confirmed: boolean) => void) | null;
-  linuxIdentity?: LinuxProcessIdentity;
-  darwinIdentity?: DarwinProcessIdentity;
-  darwinStopSignalSent?: boolean;
-  darwinStopBarrier?: Promise<boolean>;
-  settleLinuxMonitorConfirmation?: (confirmed: boolean) => void;
-  stopLinuxMonitor?: () => void;
-}
-
 let activeRegistry: ActiveRuntimeOwnedProcessRegistry | null = null;
 
 export function activateRuntimeOwnedProcessRegistry(
@@ -347,7 +294,10 @@ function releaseFailedPidClaimIfStopped(
       return;
     }
     const executable = processCanExecute(pid);
-    if (executable === false && exactProcessGroupAbsent(pid) === true) {
+    if (
+      executable === false
+      && exactProcessGroupTerminal(pid, registry.platform) === true
+    ) {
       try {
         if (!registry.journal.release(claim.ownershipId)) {
           settleConfirmation(false);
@@ -427,7 +377,7 @@ function releaseIfGroupExited(
             pid,
             registry.admissionController.signal,
           ) === true
-        : exactProcessGroupAbsent(pid) === true;
+        : exactProcessGroupTerminal(pid, registry.platform) === true;
       if (containmentAbsent) {
         try {
           if (!releaseActiveClaim(registry, claim)) settleConfirmation(false);
@@ -520,11 +470,11 @@ function monitorLinuxGuardian(
           "release",
           abortSignal,
         )) return true;
-        if (exactProcessGroupAbsent(durableClaim.process.pid) !== true) return false;
+        if (exactProcessGroupTerminal(durableClaim.process.pid, "linux") !== true) return false;
         try { return releaseActiveClaim(registry, claim); } catch { return false; }
       },
       missing: () => {
-        if (exactProcessGroupAbsent(durableClaim.process.pid) !== true) return false;
+        if (exactProcessGroupTerminal(durableClaim.process.pid, "linux") !== true) return false;
         if (!registry.journal.retire(claim.ownershipId, registry.sessionCapability)) return false;
         try { return releaseActiveClaim(registry, claim); } catch { return false; }
       },
@@ -1215,6 +1165,18 @@ export function confirmRuntimeOwnedProcessStopped(child: ChildProcess): boolean 
           ? claim.released
           : releaseActiveClaim(registry, claim))
     : true;
+}
+
+/**
+ * Returns the exact durable cleanup state only when this runtime registry
+ * owns the supplied child. `null` deliberately distinguishes an untracked
+ * child from an owned child whose cleanup is still unconfirmed.
+ */
+export function runtimeOwnedProcessStopConfirmation(
+  child: ChildProcess,
+): boolean | null {
+  const claim = activeRegistry?.claims.get(child);
+  return claim ? claim.released : null;
 }
 
 export function runtimeOwnedProcessCleanupConfirmed(): boolean {

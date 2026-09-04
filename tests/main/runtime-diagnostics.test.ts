@@ -284,6 +284,116 @@ describe("runtime diagnostics", () => {
     expect(Buffer.byteLength(report.text)).toBeLessThanOrEqual(64 * 1_024);
   });
 
+  it("includes only the strict lifecycle and handoff projection in support reports", () => {
+    const root = fixture();
+    const diagnostics = new RuntimeDiagnostics(runtimeDiagnosticsDirectory(root));
+    const report = diagnostics.supportReport({
+      version: "0.0.10",
+      platform: "linux",
+      architecture: "x64",
+      runtime: null,
+      lifecycle: {
+        schemaVersion: 1,
+        capturedAt: "2030-01-01T00:00:05.000Z",
+        runtimeStartedAt: "2030-01-01T00:00:00.000Z",
+        runtimeUptimeMs: 5_000,
+        runtimeGenerationHash: "123456789abc",
+        buildMetadata: null,
+        systemBootRelationship: "current",
+        startupBlockerCodes: ["provider-cleanup-pending"],
+        quarantineReason: null,
+        cleanupProofMethod: "current-generation-lease",
+        ownedResources: {
+          providerRuns: 1,
+          turns: 1,
+          terminals: 0,
+          workspaceRuns: 0,
+          interactions: 1,
+          maintenanceOperations: 0,
+        },
+        activeProviders: [{
+          providerId: "codex",
+          harnessId: "codex-app-server",
+          version: "1.2.3",
+          capabilityManifestDigest: "a".repeat(64),
+          installationVerified: true,
+          maintenanceState: "idle",
+        }],
+        providerMaintenance: [],
+        updateHandoffPhase: null,
+        unresolvedTurnCount: 1,
+        unresolvedInteractionCount: 1,
+        actionableState: "waiting-for-provider-cleanup",
+      },
+      updateHandoff: {
+        state: "active",
+        phase: "candidate-bootstrap-validated",
+        platform: "linux",
+        channel: "stable",
+        oldVersion: "0.0.9",
+        newVersion: "0.0.10",
+        operationTag: "operation-safe-tag",
+        oldRuntimeGenerationTag: "generation-safe-tag",
+        revision: 3,
+        createdAt: "2030-01-01T00:00:00.000Z",
+        deadlineAt: "2030-01-01T01:00:00.000Z",
+        transitionedAt: "2030-01-01T00:00:04.000Z",
+        expired: false,
+      },
+      updatePreparation: {
+        phase: "blocked",
+        blocker: "active-work",
+      },
+      buildMetadata: {
+        source: "github-actions",
+        sourceRevision: "b".repeat(40),
+        runId: "1234567890",
+        runAttempt: 2,
+        releaseTag: "v0.0.10",
+      },
+    });
+
+    expect(report.text).toContain("Lifecycle state: waiting-for-provider-cleanup");
+    expect(report.text).toContain("Runtime generation hash: 123456789abc");
+    expect(report.text).toContain("codex/codex-app-server@1.2.3");
+    expect(report.text).toContain(
+      `Build metadata: github-actions revision=${"b".repeat(40)} run=1234567890 attempt=2 release=v0.0.10`,
+    );
+    expect(report.text).toContain(
+      "Update preparation: blocked blocker=active-work",
+    );
+    expect(report.text).toContain("Update handoff: candidate-bootstrap-validated");
+    expect(report.text).not.toContain("operation-safe-tag");
+    expect(report.text).not.toContain("generation-safe-tag");
+  });
+
+  it("drops malformed update and build diagnostic objects", () => {
+    const root = fixture();
+    const diagnostics = new RuntimeDiagnostics(runtimeDiagnosticsDirectory(root));
+    const report = diagnostics.supportReport({
+      version: "0.0.10",
+      platform: "linux",
+      architecture: "x64",
+      runtime: null,
+      updatePreparation: {
+        phase: "blocked",
+        blocker: "prompt=/home/person/private",
+      } as never,
+      buildMetadata: {
+        source: "github-actions",
+        sourceRevision: "secret=/home/person/private",
+        runId: "private-run",
+        runAttempt: 1,
+        releaseTag: null,
+      } as never,
+    });
+
+    expect(report.text).toContain("Build metadata: unavailable");
+    expect(report.text).toContain("Update preparation: unavailable");
+    expect(report.text).not.toContain("person");
+    expect(report.text).not.toContain("private-run");
+  });
+
   it("applies the support-summary limit in UTF-8 bytes without splitting characters", () => {
     const root = fixture();
     const diagnostics = new RuntimeDiagnostics(runtimeDiagnosticsDirectory(root), {

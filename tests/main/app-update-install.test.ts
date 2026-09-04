@@ -110,6 +110,103 @@ describe("application update install coordination", () => {
     expect(coordinator.allowBeforeQuit()).toBe(true);
   });
 
+  it("validates the exact update candidate before privileged cleanup", async () => {
+    const events: string[] = [];
+    const update = {
+      ...service(events),
+      prepareInstall: vi.fn(async () => {
+        events.push("candidate-validated");
+        return true;
+      }),
+      abortInstall: vi.fn(async () => {
+        events.push("candidate-aborted");
+      }),
+    };
+    const coordinator = new AppUpdateInstallCoordinator({
+      service: update,
+      runtime: () => ({
+        prepareForUpdate: vi.fn(async () => ({ ready: true as const })),
+        releaseUpdatePreparation: vi.fn(async () => true),
+      }),
+      privateConnect: () => ({
+        prepareForUpdate: vi.fn(async () => true),
+        releaseUpdatePreparation: vi.fn(async () => undefined),
+      }),
+      handoffContext: () => ({
+        handoffDirectory: "/data",
+        profileDirectory: "/profile",
+        dataDirectory: "/data",
+        oldRuntimeGenerationId:
+          "22222222-2222-4222-8222-222222222222:7",
+        systemBootId: "test:boot",
+      }),
+      cleanup: vi.fn(async () => { events.push("cleanup"); return true; }),
+      finishNormalShutdown: vi.fn(),
+      reportError: vi.fn(),
+    });
+
+    await expect(coordinator.install()).resolves.toMatchObject({
+      state: "installing",
+    });
+    expect(events).toEqual([
+      "begin",
+      "candidate-validated",
+      "cleanup",
+      "install",
+    ]);
+    expect(update.abortInstall).not.toHaveBeenCalled();
+  });
+
+  it("releases admission holds without cleanup when candidate validation fails", async () => {
+    const events: string[] = [];
+    const releaseRuntime = vi.fn(async () => true);
+    const releasePrivateConnect = vi.fn(async () => undefined);
+    const update = {
+      ...service(events),
+      prepareInstall: vi.fn(async () => {
+        events.push("candidate-rejected");
+        return false;
+      }),
+      abortInstall: vi.fn(async () => {
+        events.push("candidate-aborted");
+      }),
+    };
+    const cleanup = vi.fn(async () => true);
+    const coordinator = new AppUpdateInstallCoordinator({
+      service: update,
+      runtime: () => ({
+        prepareForUpdate: vi.fn(async () => ({ ready: true as const })),
+        releaseUpdatePreparation: releaseRuntime,
+      }),
+      privateConnect: () => ({
+        prepareForUpdate: vi.fn(async () => true),
+        releaseUpdatePreparation: releasePrivateConnect,
+      }),
+      handoffContext: () => ({
+        handoffDirectory: "/data",
+        profileDirectory: "/profile",
+        dataDirectory: "/data",
+        oldRuntimeGenerationId:
+          "22222222-2222-4222-8222-222222222222:7",
+        systemBootId: "test:boot",
+      }),
+      cleanup,
+      finishNormalShutdown: vi.fn(),
+      reportError: vi.fn(),
+    });
+
+    await expect(coordinator.install()).resolves.toMatchObject({ state: "failed" });
+    expect(events).toEqual([
+      "begin",
+      "candidate-rejected",
+      "candidate-aborted",
+      "failed",
+    ]);
+    expect(cleanup).not.toHaveBeenCalled();
+    expect(releaseRuntime).toHaveBeenCalled();
+    expect(releasePrivateConnect).toHaveBeenCalled();
+  });
+
   it("rolls back the runtime gate when Private Connect is active", async () => {
     const events: string[] = [];
     const update = service(events);

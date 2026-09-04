@@ -346,6 +346,66 @@
   white-space: nowrap;
 }
 
+.provider-settings-capability-contract {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 3px 9px;
+  padding: 10px 11px;
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.provider-settings-capability-contract.is-verified {
+  border-left-color: color-mix(in srgb, var(--accent) 68%, var(--border));
+}
+
+.provider-settings-capability-contract > svg {
+  margin-top: 1px;
+  color: var(--text-muted);
+}
+
+.provider-settings-capability-contract.is-verified > svg {
+  color: var(--accent-strong);
+}
+
+.provider-settings-capability-contract > span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.provider-settings-capability-contract strong,
+.provider-settings-capability-contract code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.provider-settings-capability-contract strong {
+  color: var(--text-soft);
+  font-size: var(--ui-font-secondary);
+  font-weight: 640;
+}
+
+.provider-settings-capability-contract code,
+.provider-settings-capability-contract > small {
+  color: var(--text-muted);
+  font-size: var(--ui-font-micro);
+}
+
+.provider-settings-capability-contract code {
+  font-family: var(--font-mono);
+}
+
+.provider-settings-capability-contract > small {
+  grid-column: 2;
+  line-height: 1.45;
+}
+
 .provider-settings-maintenance:empty { display: none; }
 
 .provider-settings-maintenance .provider-maintenance-notice {

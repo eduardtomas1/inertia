@@ -1,3 +1,4 @@
+import { writeFileSync } from "node:fs";
 import { isAbsolute } from "node:path";
 
 function absoluteTestPath(name: string): string | null {
@@ -37,4 +38,27 @@ export function packageSmokeEnvironment(): {
     imageInput: absoluteTestPath("INERTIA_PACKAGE_SMOKE_IMAGE_INPUT"),
     imageResult: absoluteTestPath("INERTIA_PACKAGE_SMOKE_IMAGE_RESULT"),
   };
+}
+
+export function writePackageSmokeStage(options: {
+  readonly marker: string | null;
+  readonly ownerToken: string | null;
+  readonly stage: string;
+  readonly pid?: number;
+}): void {
+  if (!options.marker) return;
+  try {
+    writeFileSync(
+      `${options.marker}.${options.stage}.json`,
+      JSON.stringify({
+        stage: options.stage,
+        pid: options.pid ?? process.pid,
+        timestampMs: Date.now(),
+        ownerToken: options.ownerToken,
+      }),
+      { encoding: "utf8", mode: 0o600, flag: "wx" },
+    );
+  } catch {
+    // Packaged smoke diagnostics are best effort and test-only.
+  }
 }

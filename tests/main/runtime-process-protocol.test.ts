@@ -1,3 +1,4 @@
+// @inertia-test-suite portable
 import { describe, expect, it } from "vitest";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";

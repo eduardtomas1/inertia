@@ -4,7 +4,11 @@ import type {
   AppUpdateProgress,
   AppUpdateStatus,
 } from "../shared/desktop.js";
-import type { AppUpdaterAdapter, AppUpdaterDownload } from "./electron-app-updater.js";
+import type {
+  AppUpdateInstallRuntimeContext,
+  AppUpdaterAdapter,
+  AppUpdaterDownload,
+} from "./electron-app-updater.js";
 import {
   channelConfiguration,
   releasePageUrl,
@@ -335,6 +339,26 @@ export class AppUpdateService {
       installBlocker: "shutdown",
       message: "Inertia could not confirm a safe shutdown. Reopen the app before retrying.",
     });
+  }
+
+  async prepareInstall(
+    context: AppUpdateInstallRuntimeContext,
+  ): Promise<boolean> {
+    if (this.status.state !== "installing" || !this.status.latestVersion) {
+      throw new Error("The update installation is not prepared.");
+    }
+    const updater = await this.updater();
+    return await updater.prepareInstall?.({
+      ...context,
+      currentVersion: this.currentVersion,
+      newVersion: this.status.latestVersion,
+    }) ?? true;
+  }
+
+  async abortInstall(): Promise<void> {
+    if (!this.updaterPromise) return;
+    const updater = await this.updaterPromise;
+    await updater.abortInstall?.();
   }
 
   async quitAndInstall(onHandoff?: () => void): Promise<boolean> {

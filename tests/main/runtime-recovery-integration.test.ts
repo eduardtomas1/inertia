@@ -324,33 +324,57 @@ describe("runtime recovery supervisor integration", () => {
       );
       expect(authority).not.toBeNull();
       expect(supervisor.resumeWithModernDarwinRecovery(authority!)).toBe(true);
-    }
-    await waitFor(
-      () => supervisor.snapshot().phase === "ready"
-        && supervisor.snapshot().generation === 2,
-      "replacement runtime generation readiness",
-      diagnostics,
-    );
-    expect(readFileSync(markerPath, "utf8")).toBe("staging-published\n");
-    expect(readFileSync(recoveryPath, "utf8")).toContain("Recovered one");
-    expect(existsSync(targetDirectory)).toBe(true);
-    await expect(readdir(targetDirectory)).resolves.toEqual([]);
-
-    if (process.platform === "darwin") {
+      await waitFor(
+        () => supervisor.snapshot().phase === "ready"
+          && supervisor.snapshot().generation === 2,
+        "replacement runtime generation readiness",
+        diagnostics,
+      );
       await supervisor.databaseRecovery("export", exportPath);
       expect(existsSync(exportPath)).toBe(true);
+      expect(supervisor.snapshot()).toMatchObject({
+        phase: "ready",
+        generation: 2,
+      });
     } else {
+      await waitFor(
+        () => supervisor.snapshot().generation >= 2
+          && supervisor.snapshot().pid === null
+          && supervisor.snapshot().lastError
+            ?.includes("Runtime startup is blocked.") === true,
+        "replacement runtime safety rejection",
+        diagnostics,
+      );
+      expect(states.some((state) => /^ready:[2-9][0-9]*:/u.test(state)))
+        .toBe(false);
       await expect(supervisor.databaseRecovery(
         "import",
         recoveryPath,
         targetDirectory,
-      )).rejects.toThrow(/recovery safety mode.*prior runtime-owned process/iu);
+      )).rejects.toThrow(/runtime startup is blocked.*prior runtime-owned process/iu);
       await expect(supervisor.stop()).resolves.toBe(false);
+      expect(supervisor.snapshot().phase).toBe("stopped");
+
+      const database = new Database(join(dataDirectory, "inertia.sqlite"), {
+        readonly: true,
+        fileMustExist: true,
+      });
+      try {
+        expect(database.pragma("integrity_check", { simple: true })).toBe("ok");
+        expect(database.prepare("SELECT COUNT(*) AS count FROM projects").get())
+          .toEqual({ count: 0 });
+      } finally {
+        database.close();
+      }
     }
-    expect(supervisor.snapshot()).toMatchObject({
-      phase: process.platform === "darwin" ? "ready" : "stopped",
-      generation: 2,
-    });
+    expect(readFileSync(markerPath, "utf8")).toBe("staging-published\n");
+    expect(readFileSync(recoveryPath, "utf8")).toContain("Recovered one");
+    expect(existsSync(targetDirectory)).toBe(true);
+    const retainedEntries = await readdir(targetDirectory);
+    if (process.platform === "darwin") expect(retainedEntries).toEqual([]);
+    else expect(retainedEntries).toEqual([
+      expect.stringMatching(/^recovered-[0-9a-f-]{36}$/u),
+    ]);
   }, 45_000);
 
   it("cancels a near-limit import while its isolated transaction is busy", async () => {

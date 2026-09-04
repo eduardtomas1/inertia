@@ -33,6 +33,9 @@ import {
   renewGuardianBuildLock,
   startGuardianBuildLockHeartbeat,
 } from "../../scripts/runtime-process-guardian-publication.mjs";
+import {
+  executableProcessExists as processExists,
+} from "../helpers/executable-process";
 
 const repositoryRoot = resolve(import.meta.dirname, "..", "..");
 const script = join(
@@ -198,15 +201,6 @@ function packageProcess(
     },
     stdio: "ignore",
   });
-}
-
-function processExists(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 function readFixturePid(path: string): number | null {

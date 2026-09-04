@@ -315,6 +315,48 @@ function parseRecord(bytes: Buffer): RuntimeOwnedProcessRecord | null {
   }
 }
 
+export function parseRuntimeOwnedProcessRecordLeaf(
+  bytes: Buffer,
+  expectedOwnershipId: string,
+): RuntimeOwnedProcessRecord | null {
+  const record = parseRecord(bytes);
+  return record
+    && UUID_PATTERN.test(expectedOwnershipId)
+    && record.ownershipId.toLowerCase() === expectedOwnershipId.toLowerCase()
+    ? record
+    : null;
+}
+
+export function parseRuntimeOwnedProcessContainmentLeaf(
+  bytes: Buffer,
+  expectedGenerationHash: string,
+): {
+  readonly runtimeGenerationId: string;
+  readonly systemBootId: string;
+} | null {
+  try {
+    const value = JSON.parse(bytes.toString("utf8")) as unknown;
+    if (!value || typeof value !== "object") return null;
+    const stored = value as Partial<StoredRuntimeOwnedProcessContainment>;
+    if (
+      !validRuntimeGenerationId(stored.runtimeGenerationId)
+      || !validSystemBootId(stored.systemBootId)
+      || generationHash(stored.runtimeGenerationId) !== expectedGenerationHash
+      || !parseContainment(
+        bytes,
+        stored.runtimeGenerationId,
+        stored.systemBootId,
+      )
+    ) return null;
+    return {
+      runtimeGenerationId: stored.runtimeGenerationId,
+      systemBootId: stored.systemBootId,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export function readLinuxProcessIdentity(
   pid: number,
   readFile: (path: string, encoding: "utf8") => string = (path, encoding) =>

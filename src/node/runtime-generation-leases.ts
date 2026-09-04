@@ -85,6 +85,15 @@ function parseLease(
   }
 }
 
+export function parseRuntimeGenerationLeaseLeaf(
+  bytes: Buffer,
+  expectedHash: string,
+): RuntimeGenerationLease | null {
+  return /^[0-9a-f]{64}$/u.test(expectedHash)
+    ? parseLease(bytes, expectedHash)
+    : null;
+}
+
 function storedLease(lease: RuntimeGenerationLease): Buffer {
   return Buffer.from(JSON.stringify({
     version: LEASE_SCHEMA_VERSION,

@@ -5,6 +5,8 @@ import { pathToFileURL } from "node:url";
 
 import { expect, test } from "vitest";
 
+import { executableProcessExists } from "../helpers/executable-process";
+
 const repositoryRoot = join(import.meta.dirname, "..", "..");
 const moduleUrl = pathToFileURL(
   join(repositoryRoot, "scripts", "windows-installer-smoke.mjs"),
@@ -65,15 +67,6 @@ async function boundedRunnerModule() {
       groupStillExists: boolean,
     ) => boolean;
   };
-}
-
-function processExists(pid: number) {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 function peBinary(architecture: "arm64" | "x64", salt = 0) {
@@ -396,10 +389,10 @@ test("terminates the complete owned process tree on a gate timeout", async () =>
     descendantPid = pids.descendant;
     expect(Number.isSafeInteger(rootPid)).toBe(true);
     expect(Number.isSafeInteger(descendantPid)).toBe(true);
-    expect(processExists(rootPid)).toBe(false);
-    expect(processExists(descendantPid)).toBe(false);
+    expect(executableProcessExists(rootPid)).toBe(false);
+    expect(executableProcessExists(descendantPid)).toBe(false);
   } finally {
-    if (descendantPid > 0 && processExists(descendantPid)) {
+    if (descendantPid > 0 && executableProcessExists(descendantPid)) {
       try {
         process.kill(descendantPid, "SIGKILL");
       } catch {
@@ -448,11 +441,11 @@ test("rejects and terminates an owned grandchild left after the root exits", asy
     };
     middlePid = pids.middle;
     grandchildPid = pids.grandchild;
-    expect(processExists(middlePid)).toBe(false);
-    expect(processExists(grandchildPid)).toBe(false);
+    expect(executableProcessExists(middlePid)).toBe(false);
+    expect(executableProcessExists(grandchildPid)).toBe(false);
   } finally {
     for (const pid of [middlePid, grandchildPid]) {
-      if (pid <= 0 || !processExists(pid)) continue;
+      if (pid <= 0 || !executableProcessExists(pid)) continue;
       try {
         process.kill(pid, "SIGKILL");
       } catch {
@@ -507,8 +500,8 @@ test("terminates a token-bound detached process group handed off by the root", a
     };
     detachedPid = pids.detached;
     grandchildPid = pids.grandchild;
-    expect(processExists(detachedPid)).toBe(false);
-    expect(processExists(grandchildPid)).toBe(false);
+    expect(executableProcessExists(detachedPid)).toBe(false);
+    expect(executableProcessExists(grandchildPid)).toBe(false);
   } finally {
     if (detachedPid > 0) {
       try {
@@ -552,7 +545,7 @@ test("never kills a live process group after its token-bound release", async () 
     )).rejects.toThrow("released process-group id is live and no longer safe to terminate");
     const pids = JSON.parse(await readFile(pidFile, "utf8")) as { released: number };
     releasedPid = pids.released;
-    expect(processExists(releasedPid)).toBe(true);
+    expect(executableProcessExists(releasedPid)).toBe(true);
   } finally {
     if (releasedPid > 0) {
       try {

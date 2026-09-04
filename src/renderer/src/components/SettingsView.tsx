@@ -37,8 +37,10 @@ import {
   type ProviderInfo,
   type ProviderMaintenanceOperation,
   type ProviderMaintenanceProviderId,
+  type RuntimeLifecycleDiagnosticSnapshot,
 } from "@shared/contracts";
 import { defaultSettings } from "@shared/contracts/app";
+import { appUpdatePreparationDiagnostic, lifecycleActionableStateWithUpdate } from "@shared/app-update-preparation-diagnostic";
 import type {
   AppHealthSnapshot,
   AppUpdateStatus,
@@ -79,6 +81,7 @@ export type SettingsViewProps = {
   conversations: Conversation[];
   archived: Conversation[];
   databaseBackup?: DatabaseBackupStatus;
+  lifecycleDiagnostics?: RuntimeLifecycleDiagnosticSnapshot;
   onUpdate: (settings: Partial<AppSettings>) => Promise<void>;
   onConnectProvider: (providerId: ProviderId) => void;
   onRefreshProvider: (providerId?: ProviderId) => void;
@@ -204,6 +207,7 @@ export function SettingsView({
   conversations: _conversations,
   archived,
   databaseBackup,
+  lifecycleDiagnostics,
   onUpdate: updateSettingsRequest,
   onConnectProvider,
   onRefreshProvider,
@@ -871,6 +875,40 @@ export function SettingsView({
                           <small>Authentication remains in the provider&apos;s official flow.</small>
                         </div>
 
+                        {selectedProvider.capabilityContract && (
+                          <div className="provider-settings-field">
+                            <span>Capability contract</span>
+                            <div
+                              className={clsx(
+                                "provider-settings-capability-contract",
+                                selectedProvider.capabilityContract.installationVerified
+                                  ? "is-verified"
+                                  : "is-unverified",
+                              )}
+                              aria-label={`${selectedProvider.label} capability contract`}
+                            >
+                              <ShieldCheck size={15} aria-hidden="true" />
+                              <span>
+                                <strong>
+                                  {selectedProvider.capabilityContract.installationVerified
+                                    ? `Verified for ${selectedProvider.capabilityContract.installedVersion ?? "this installation"}`
+                                    : "Waiting for exact installation verification"}
+                                </strong>
+                                <code title={selectedProvider.capabilityContract.manifestDigest}>
+                                  {selectedProvider.capabilityContract.harnessId}
+                                  {" · "}
+                                  {selectedProvider.capabilityContract.manifestDigest.slice(0, 12)}
+                                </code>
+                              </span>
+                              <small>
+                                {selectedProvider.capabilityContract.installationVerified
+                                  ? `${selectedProvider.capabilityContract.currentlyAvailableCount} of ${selectedProvider.capabilityContract.declaredCapabilityCount} declared capabilities are available now.`
+                                  : "Optional provider features remain unavailable until version and protocol evidence match this manifest."}
+                              </small>
+                            </div>
+                          </div>
+                        )}
+
                         <div className="provider-settings-field">
                           <span>Binary path</span>
                           <div className="provider-settings-binary-row">
@@ -1159,6 +1197,14 @@ export function SettingsView({
                 <span>
                   <strong>Runtime diagnostics</strong>
                   <small>Local-only lifecycle and failure metadata. Excludes prompts, source, tokens, and credentials. Logs rotate at 256 KB and expire after seven days.</small>
+                  {lifecycleDiagnostics && (
+                    <small className="runtime-lifecycle-summary">
+                      <strong>{lifecycleActionLabel(lifecycleActionableStateWithUpdate(lifecycleDiagnostics.actionableState, appUpdatePreparationDiagnostic(appUpdateStatus)))}</strong>
+                      {` · ${lifecycleDiagnostics.ownedResources.turns} active ${lifecycleDiagnostics.ownedResources.turns === 1 ? "turn" : "turns"}`}
+                      {` · ${lifecycleDiagnostics.ownedResources.interactions} open ${lifecycleDiagnostics.ownedResources.interactions === 1 ? "interaction" : "interactions"}`}
+                      {` · generation ${lifecycleDiagnostics.runtimeGenerationHash}`}
+                    </small>
+                  )}
                 </span>
                 <div>
                   <button type="button" className="secondary-button" disabled={copyingSupportReport} onClick={() => { void copyRuntimeSupportReport(); }}><Copy size={14} />{copyingSupportReport ? "Copying…" : "Copy support summary"}</button>
@@ -1173,6 +1219,22 @@ export function SettingsView({
       </div>
     </main>
   );
+}
+
+function lifecycleActionLabel(
+  state: RuntimeLifecycleDiagnosticSnapshot["actionableState"],
+): string {
+  return {
+    "safe-and-ready": "Safe and ready",
+    "finishing-previous-work": "Finishing previous work",
+    "waiting-for-provider-cleanup": "Waiting for provider cleanup",
+    "update-blocked-by-active-work": "Update blocked by active work",
+    "previous-runtime-cleanup-unconfirmed": "Previous runtime cleanup unconfirmed",
+    "provider-installation-changed": "Provider installation changed",
+    "session-resume-rejected-for-compatibility": "Session resume rejected for compatibility",
+    "provider-capability-unavailable": "Provider capability unavailable",
+    "recovery-requires-manual-attention": "Recovery requires manual attention",
+  }[state];
 }
 
 function SettingSwitch({ title, detail, checked, disabled, onChange }: { title: string; detail: string; checked: boolean; disabled: boolean; onChange: (checked: boolean) => void }): React.JSX.Element {

@@ -37,3 +37,11 @@ export function posixProcessGroupKillIsConfirmed(
   error: NodeJS.ErrnoException | null,
   groupStillExists: boolean,
 ): boolean;
+
+export function linuxProcessGroupCanExecute(
+  processGroupId: number,
+  dependencies?: {
+    readonly processIds?: () => string[];
+    readonly readStat?: (pid: string) => string;
+  },
+): boolean | null;

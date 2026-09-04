@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 
 import { readDarwinProcessIdentity } from "./runtime-owned-process-darwin.js";
 
@@ -25,6 +25,62 @@ export function linuxProcessCanExecute(pid: number): boolean | null {
   const state = stat.slice(closingName + 1).trimStart()[0];
   if (!state || !/^[A-Za-z]$/u.test(state)) return null;
   return state !== "Z" && state !== "X" && state !== "x";
+}
+
+/**
+ * Reports whether an exact Linux process group still contains executable
+ * work. Zombie/dead tasks remain signal-visible until their external parent
+ * reaps them, but cannot retain resources or create descendants.
+ */
+export function linuxProcessGroupCanExecute(
+  processGroupId: number,
+  dependencies: {
+    readonly processIds?: () => string[];
+    readonly readStat?: (pid: string) => string;
+  } = {},
+): boolean | null {
+  if (!validPid(processGroupId)) return null;
+  let processIds: string[];
+  try {
+    processIds = dependencies.processIds?.() ?? readdirSync("/proc");
+  } catch {
+    return null;
+  }
+  for (const value of processIds) {
+    if (!/^[1-9][0-9]*$/u.test(value)) continue;
+    let stat: string;
+    try {
+      stat = dependencies.readStat?.(value)
+        ?? readFileSync(`/proc/${value}/stat`, "utf8");
+    } catch (error) {
+      if (
+        error
+        && typeof error === "object"
+        && "code" in error
+        && (error.code === "ENOENT" || error.code === "ESRCH")
+      ) continue;
+      return null;
+    }
+    const closingName = stat.lastIndexOf(")");
+    if (closingName < 2) return null;
+    const fields = stat.slice(closingName + 1).trimStart().split(/\s+/u);
+    const state = fields[0];
+    const group = fields[2];
+    const groupId = Number(group);
+    if (
+      !state
+      || !/^[A-Za-z]$/u.test(state)
+      || !group
+      || !/^[0-9]+$/u.test(group)
+      || !Number.isSafeInteger(groupId)
+    ) return null;
+    // Linux kernel threads can legitimately report process group 0. They are
+    // unrelated to any admissible owned group, but must not make the whole
+    // exact /proc observation indeterminate.
+    if (groupId !== processGroupId) continue;
+    if (state !== "Z" && state !== "X" && state !== "x") return true;
+  }
+  return false;
 }
 
 export function darwinProcessCanExecute(
@@ -63,4 +119,15 @@ export function exactProcessGroupAbsent(pid: number): boolean | null {
       ? true
       : null;
   }
+}
+
+export function exactProcessGroupTerminal(
+  pid: number,
+  platform: NodeJS.Platform = process.platform,
+): boolean | null {
+  if (platform === "linux") {
+    const executable = linuxProcessGroupCanExecute(pid);
+    if (executable !== null) return !executable;
+  }
+  return exactProcessGroupAbsent(pid);
 }

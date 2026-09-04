@@ -21,7 +21,8 @@ import { RuntimeSupervisorRecycle } from "./runtime-supervisor-recycle.js";
 import { RuntimeSecureFileCoordinator } from "./runtime-secure-file-coordinator.js";
 import { RuntimeCredentialCoordinator } from "./runtime-credential-coordinator.js";
 import { RuntimeGenerationLeaseJournal } from "../node/runtime-generation-leases.js";
-import { RuntimeUpdatePreparationCoordinator } from "./runtime-update-preparation-coordinator.js";
+import { RuntimeUpdatePreparationCoordinator,
+  type RuntimeUpdateHandoffIdentity } from "./runtime-update-preparation-coordinator.js";
 import { RuntimeDatabaseRecoveryCoordinator } from "./runtime-database-recovery-coordinator.js";
 import { RuntimeSupervisorStartupRecovery } from "./runtime-supervisor-startup-recovery.js";
 import { RuntimeOwnedProcessJournal } from "../node/runtime-owned-processes.js";
@@ -220,7 +221,7 @@ export class RuntimeSupervisor {
       timeoutMs: runtimeSupervisorDefaults.requestTimeoutMs,
       setTimer: this.setTimer,
       clearTimer: this.clearTimer,
-      current: () => this.current,
+      current: () => this.phase === "ready" ? this.current : null,
       post: (record, command) => this.post(record.child, command),
       forceTerminate: (record) => this.forceTerminate(record.child),
     });
@@ -314,11 +315,7 @@ export class RuntimeSupervisor {
     });
   }
   prepareForUpdate(): Promise<RuntimeUpdatePreparationResult> {
-    const record = this.current;
-    if (this.phase !== "ready" || !record?.ready) {
-      return Promise.reject(new Error("The local service is not ready for update preparation."));
-    }
-    return this.updatePreparation.prepare(record);
+    return this.updatePreparation.prepareCurrent();
   }
   /**
    * Reopens admission for the supervisor-owned preparation token. This is
@@ -436,6 +433,9 @@ export class RuntimeSupervisor {
       restartScheduled: this.restartTimer !== null, lastError: this.lastError,
       databaseRecovery: this.databaseRecoveryReport,
     };
+  }
+  updateHandoffIdentity(): RuntimeUpdateHandoffIdentity | null {
+    return this.updatePreparation.handoffIdentity(this.systemBootId);
   }
   ownsAttachment(attachmentId: string): boolean {
     const records = [this.current, ...this.quarantined];

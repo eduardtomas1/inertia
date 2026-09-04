@@ -18,6 +18,21 @@ import { join, resolve } from "node:path";
 import { FILE_OPEN_NO_FOLLOW } from
   "../node/platform-file-open-flags.js";
 import type { RuntimeSupervisorSnapshot } from "./runtime-supervisor.js";
+import type { RuntimeLifecycleDiagnosticSnapshot } from
+  "../shared/lifecycle-diagnostics.js";
+import type { AppUpdateHandoffDiagnostic } from "./app-update-handoff.js";
+import {
+  appUpdatePreparationDiagnosticSchema,
+  type AppUpdatePreparationDiagnostic,
+} from
+  "../shared/app-update-preparation-diagnostic.js";
+import { lifecycleActionableStateWithUpdate } from
+  "../shared/app-update-preparation-diagnostic.js";
+import {
+  lifecycleBuildMetadataSchema,
+  type LifecycleBuildMetadata,
+} from
+  "../shared/lifecycle-build-metadata.js";
 
 const DEFAULT_MAX_FILE_BYTES = 256 * 1024;
 const DEFAULT_MAX_FILES = 4;
@@ -48,6 +63,10 @@ export interface RuntimeSupportReportInput {
   platform: string;
   architecture: string;
   runtime: RuntimeSupervisorSnapshot | null;
+  lifecycle?: RuntimeLifecycleDiagnosticSnapshot | null;
+  updateHandoff?: AppUpdateHandoffDiagnostic | null;
+  updatePreparation?: AppUpdatePreparationDiagnostic | null;
+  buildMetadata?: LifecycleBuildMetadata | null;
 }
 
 export interface RuntimeSupportReport {
@@ -234,6 +253,59 @@ export class RuntimeDiagnostics {
     this.ensureDirectory();
     const events = this.readEvents().slice(-120);
     const runtime = input.runtime;
+    const lifecycle = input.lifecycle ?? null;
+    const parsedUpdatePreparation = appUpdatePreparationDiagnosticSchema.safeParse(
+      input.updatePreparation,
+    );
+    const updatePreparation = parsedUpdatePreparation.success
+      ? parsedUpdatePreparation.data
+      : null;
+    const lifecycleState = lifecycle
+      ? lifecycleActionableStateWithUpdate(
+          lifecycle.actionableState,
+          updatePreparation,
+        )
+      : null;
+    const buildMetadataCandidate = input.buildMetadata === undefined
+      ? lifecycle?.buildMetadata ?? null
+      : input.buildMetadata;
+    const parsedBuildMetadata = lifecycleBuildMetadataSchema.safeParse(
+      buildMetadataCandidate,
+    );
+    const buildMetadata = parsedBuildMetadata.success
+      ? parsedBuildMetadata.data
+      : null;
+    const updateHandoffPhase = input.updateHandoff?.state === "none"
+      ? lifecycle?.updateHandoffPhase ?? "none"
+      : input.updateHandoff?.phase ?? lifecycle?.updateHandoffPhase ?? "unavailable";
+    const lifecycleLines = lifecycle
+      ? [
+          `Lifecycle state: ${lifecycleState}`,
+          `Runtime generation hash: ${lifecycle.runtimeGenerationHash}`,
+          `System boot relationship: ${lifecycle.systemBootRelationship}`,
+          `Startup blockers: ${lifecycle.startupBlockerCodes.join(", ") || "none"}`,
+          `Quarantine reason: ${lifecycle.quarantineReason ?? "none"}`,
+          `Cleanup proof: ${lifecycle.cleanupProofMethod}`,
+          `Owned resources: provider-runs=${lifecycle.ownedResources.providerRuns}, turns=${lifecycle.ownedResources.turns}, terminals=${lifecycle.ownedResources.terminals}, workspace-runs=${lifecycle.ownedResources.workspaceRuns}, interactions=${lifecycle.ownedResources.interactions}, maintenance=${lifecycle.ownedResources.maintenanceOperations}`,
+          `Unresolved: turns=${lifecycle.unresolvedTurnCount}, interactions=${lifecycle.unresolvedInteractionCount}`,
+          `Active providers: ${lifecycle.activeProviders.length > 0
+            ? lifecycle.activeProviders.map((provider) => (
+                `${provider.providerId}/${provider.harnessId}@${provider.version ?? "unknown"}`
+                + ` manifest=${provider.capabilityManifestDigest ?? "unverified"}`
+                + ` verified=${provider.installationVerified ? "yes" : "no"}`
+                + ` maintenance=${provider.maintenanceState}`
+              )).join(", ")
+            : "none"}`,
+          `Provider maintenance: ${lifecycle.providerMaintenance.length > 0
+            ? lifecycle.providerMaintenance.map(
+                ({ providerId, state }) => `${providerId}=${state}`,
+              ).join(", ")
+            : "none"}`,
+          `Runtime lifecycle started: ${lifecycle.runtimeStartedAt ?? "unavailable"}`,
+          `Runtime lifecycle captured: ${lifecycle.capturedAt}`,
+          `Runtime lifecycle uptime: ${lifecycle.runtimeUptimeMs}ms`,
+        ]
+      : ["Lifecycle state: unavailable"];
     const preface = [
       "Inertia support summary",
       `Generated: ${new Date(this.now()).toISOString()}`,
@@ -245,6 +317,16 @@ export class RuntimeDiagnostics {
       `Runtime generation: ${runtime?.generation ?? 0}`,
       `Restart attempt: ${runtime?.restartAttempt ?? 0}`,
       `Restart scheduled: ${runtime?.restartScheduled === true ? "yes" : "no"}`,
+      `Build metadata: ${buildMetadata
+        ? `${buildMetadata.source} revision=${buildMetadata.sourceRevision} run=${buildMetadata.runId} attempt=${buildMetadata.runAttempt} release=${buildMetadata.releaseTag ?? "none"}`
+        : "unavailable"}`,
+      ...lifecycleLines,
+      `Update preparation: ${updatePreparation?.phase ?? "unavailable"}${
+        updatePreparation?.blocker
+          ? ` blocker=${updatePreparation.blocker}`
+          : ""
+      }`,
+      `Update handoff: ${updateHandoffPhase}`,
       "",
     ];
     const footer = [

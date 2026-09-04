@@ -4,6 +4,10 @@ import { lstatSync, readFileSync } from "node:fs";
 import { lstat, readFile, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
+import { linuxProcessGroupCanExecute } from "./linux-process-group.mjs";
+
+export { linuxProcessGroupCanExecute };
+
 const MAX_COMMAND_OUTPUT_BYTES = 4 * 1024 * 1024;
 const DIAGNOSTIC_TAIL_BYTES = 16 * 1024;
 const PROCESS_TREE_DRAIN_TIMEOUT_MS = 1_000;
@@ -186,6 +190,10 @@ async function waitForPosixProcessGroupExit(
 ) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
+    if (
+      process.platform === "linux"
+      && linuxProcessGroupCanExecute(processGroupId) === false
+    ) return true;
     try {
       process.kill(-processGroupId, 0);
     } catch (error) {
@@ -208,6 +216,10 @@ function posixProcessGroupExists(processGroupId) {
     processGroupId <= 0
   )
     return false;
+  if (process.platform === "linux") {
+    const executable = linuxProcessGroupCanExecute(processGroupId);
+    if (executable !== null) return executable;
+  }
   try {
     process.kill(-processGroupId, 0);
     return true;

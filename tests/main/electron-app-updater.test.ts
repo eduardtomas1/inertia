@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { chmod, mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdtemp,
+  mkdir,
+  readFile,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -71,8 +79,23 @@ vi.mock("electron", () => ({
 }));
 
 import { loadElectronAppUpdater } from "../../src/main/electron-app-updater";
+import {
+  AppUpdateHandoffJournal,
+  appUpdateHandoffOwner,
+} from "../../src/main/app-update-handoff";
 
 const roots: string[] = [];
+
+function windowsInstallerBytes(candidateDigest = "b".repeat(64)): Buffer {
+  return Buffer.concat([
+    Buffer.from("signed-nsis"),
+    Buffer.from(
+      `inertia.windows-candidate-executable-sha256.v1:${candidateDigest}`,
+      "utf16le",
+    ),
+    Buffer.alloc(2),
+  ]);
+}
 
 beforeEach(() => {
   updaterFixture.listeners.clear();
@@ -90,6 +113,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  vi.useRealTimers();
   await Promise.all(roots.splice(0).map(async (root) =>
     await rm(root, { recursive: true, force: true })));
 });
@@ -202,38 +226,388 @@ describe("electron updater adapter", () => {
     await expect(handoff).resolves.toBe(false);
   });
 
-  it.skipIf(process.platform === "win32")("uses the repository-owned stable AppImage handoff on Linux", async () => {
-    const root = await mkdtemp(join(tmpdir(), "inertia-electron-updater-"));
+  it("refuses Windows native install without a durable preparation receipt", async () => {
+    const adapter = await loadElectronAppUpdater("stable", { platform: "win32" });
+    const onHandoff = vi.fn();
+    await expect(adapter.quitAndInstall(onHandoff)).resolves.toBe(false);
+
+    expect(onHandoff).not.toHaveBeenCalled();
+    expect(updaterFixture.updater.quitAndInstall).not.toHaveBeenCalled();
+    expect(updaterFixture.nativeListeners.get("before-quit-for-update")?.size ?? 0)
+      .toBe(0);
+    expect(updaterFixture.listeners.get("error")?.size ?? 0).toBe(0);
+  });
+
+  it("persists Windows cleanup and ownership transfer before native handoff", async () => {
+    const root = await mkdtemp(join(tmpdir(), "inertia-electron-updater-win-"));
     roots.push(root);
-    const cache = join(root, "cache");
-    await mkdir(cache);
-    const active = join(root, "Inertia-0.0.46.AppImage");
-    const downloaded = join(cache, "Inertia-0.0.47.AppImage");
+    const data = join(root, "data");
+    const profile = join(root, "profile");
     await Promise.all([
-      writeFile(active, "old", { mode: 0o755 }),
-      writeFile(downloaded, "new", { mode: 0o755 }),
+      mkdir(data, { mode: 0o700 }),
+      mkdir(profile, { mode: 0o700 }),
     ]);
-    await Promise.all([chmod(active, 0o755), chmod(downloaded, 0o755)]);
-    updaterFixture.updater.downloadUpdate.mockResolvedValueOnce([downloaded]);
-    const environment = { APPIMAGE: active };
-    const launch = vi.fn(async () => undefined);
+    const installer = join(root, "Inertia-1.3.0.exe");
+    const executable = join(root, "Inertia.exe");
+    await Promise.all([
+      writeFile(installer, windowsInstallerBytes(), { mode: 0o700 }),
+      writeFile(executable, "installed", { mode: 0o700 }),
+    ]);
+    updaterFixture.updater.downloadUpdate.mockResolvedValueOnce([installer]);
     const adapter = await loadElectronAppUpdater("stable", {
-      platform: "linux",
-      activeAppImagePath: active,
-      environment,
-      launchAppImage: launch,
+      platform: "win32",
+      executablePath: executable,
     });
     await adapter.download({ onProgress: vi.fn(), onCancelled: vi.fn() }).promise;
+    await expect(adapter.prepareInstall?.({
+      currentVersion: "1.2.3",
+      newVersion: "1.3.0",
+      handoffDirectory: data,
+      profileDirectory: profile,
+      dataDirectory: data,
+      oldRuntimeGenerationId:
+        "22222222-2222-4222-8222-222222222222:7",
+      systemBootId: "win32:deadbeef",
+    })).resolves.toBe(true);
+    const prepared = new AppUpdateHandoffJournal(data).current();
+    expect(prepared?.phase).toBe("prepared");
+    expect(
+      Date.parse(prepared!.deadlineAt) - Date.parse(prepared!.createdAt),
+    ).toBe(24 * 60 * 60 * 1_000);
+
     const onHandoff = vi.fn();
+    const handoff = adapter.quitAndInstall(onHandoff);
+    await vi.waitFor(() => expect(updaterFixture.updater.quitAndInstall)
+      .toHaveBeenCalledWith(false, true));
+    expect(new AppUpdateHandoffJournal(data).current()?.phase)
+      .toBe("old-generation-cleanup-confirmed");
+    updaterFixture.emitNative("before-quit-for-update");
 
-    await expect(adapter.quitAndInstall(onHandoff)).resolves.toBe(true);
-
-    const stable = join(await realpath(root), "Inertia.AppImage");
-    expect(await readFile(stable, "utf8")).toBe("new");
-    expect(environment.APPIMAGE).toBe(stable);
-    expect(launch).toHaveBeenCalledWith(stable, environment);
+    await expect(handoff).resolves.toBe(true);
     expect(onHandoff).toHaveBeenCalledOnce();
-    expect(updaterFixture.app.quit).toHaveBeenCalledOnce();
+    expect(new AppUpdateHandoffJournal(data).current()?.phase)
+      .toBe("ownership-transfer-committed");
+    await expect(readFile(join(data, ".app-update-secret.json"), "utf8"))
+      .resolves.toContain("handoffToken");
+  });
+
+  it("rejects an installer without one signed candidate identity marker", async () => {
+    const root = await mkdtemp(join(tmpdir(), "inertia-electron-updater-win-"));
+    roots.push(root);
+    const data = join(root, "data");
+    const profile = join(root, "profile");
+    await Promise.all([
+      mkdir(data, { mode: 0o700 }),
+      mkdir(profile, { mode: 0o700 }),
+    ]);
+    const installer = join(root, "Inertia-1.3.0.exe");
+    const executable = join(root, "Inertia.exe");
+    await Promise.all([
+      writeFile(installer, "installer", { mode: 0o700 }),
+      writeFile(executable, "old-build", { mode: 0o700 }),
+    ]);
+    updaterFixture.updater.downloadUpdate.mockResolvedValueOnce([installer]);
+    const adapter = await loadElectronAppUpdater("stable", {
+      platform: "win32",
+      executablePath: executable,
+    });
+    await adapter.download({ onProgress: vi.fn(), onCancelled: vi.fn() }).promise;
+
+    await expect(adapter.prepareInstall?.({
+      currentVersion: "1.2.3",
+      newVersion: "1.3.0",
+      handoffDirectory: data,
+      profileDirectory: profile,
+      dataDirectory: data,
+      oldRuntimeGenerationId:
+        "22222222-2222-4222-8222-222222222222:7",
+      systemBootId: "win32:deadbeef",
+    })).resolves.toBe(false);
+    expect(new AppUpdateHandoffJournal(data).current()).toBeNull();
     expect(updaterFixture.updater.quitAndInstall).not.toHaveBeenCalled();
   });
+
+  it("retains Windows rollback authority when native handoff never arrives", async () => {
+    vi.useFakeTimers();
+    const root = await mkdtemp(join(tmpdir(), "inertia-electron-updater-win-"));
+    roots.push(root);
+    const data = join(root, "data");
+    const profile = join(root, "profile");
+    await Promise.all([
+      mkdir(data, { mode: 0o700 }),
+      mkdir(profile, { mode: 0o700 }),
+    ]);
+    const installer = join(root, "Inertia-1.3.0.exe");
+    const executable = join(root, "Inertia.exe");
+    await Promise.all([
+      writeFile(installer, windowsInstallerBytes(), { mode: 0o700 }),
+      writeFile(executable, "installed", { mode: 0o700 }),
+    ]);
+    updaterFixture.updater.downloadUpdate.mockResolvedValueOnce([installer]);
+    const adapter = await loadElectronAppUpdater("stable", {
+      platform: "win32",
+      executablePath: executable,
+    });
+    await adapter.download({ onProgress: vi.fn(), onCancelled: vi.fn() }).promise;
+    await expect(adapter.prepareInstall?.({
+      currentVersion: "1.2.3",
+      newVersion: "1.3.0",
+      handoffDirectory: data,
+      profileDirectory: profile,
+      dataDirectory: data,
+      oldRuntimeGenerationId:
+        "22222222-2222-4222-8222-222222222222:7",
+      systemBootId: "win32:deadbeef",
+    })).resolves.toBe(true);
+
+    const handoff = adapter.quitAndInstall();
+    await vi.waitFor(() => expect(updaterFixture.updater.quitAndInstall)
+      .toHaveBeenCalledWith(false, true));
+    await vi.advanceTimersByTimeAsync(5_000);
+    await expect(handoff).resolves.toBe(false);
+
+    expect(new AppUpdateHandoffJournal(data).current()?.phase)
+      .toBe("rollback-required");
+    await expect(readFile(join(data, ".app-update-secret.json"), "utf8"))
+      .resolves.toContain("handoffToken");
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "refuses the legacy spawn-only AppImage handoff on Linux",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "inertia-electron-updater-"));
+      roots.push(root);
+      const cache = join(root, "cache");
+      await mkdir(cache);
+      const active = join(root, "Inertia-0.0.46.AppImage");
+      const downloaded = join(cache, "Inertia-0.0.47.AppImage");
+      await Promise.all([
+        writeFile(active, "old", { mode: 0o755 }),
+        writeFile(downloaded, "new", { mode: 0o755 }),
+      ]);
+      await Promise.all([chmod(active, 0o755), chmod(downloaded, 0o755)]);
+      updaterFixture.updater.downloadUpdate.mockResolvedValueOnce([downloaded]);
+      const environment = { APPIMAGE: active };
+      const adapter = await loadElectronAppUpdater("stable", {
+        platform: "linux",
+        activeAppImagePath: active,
+        environment,
+      });
+      await adapter.download({
+        onProgress: vi.fn(),
+        onCancelled: vi.fn(),
+      }).promise;
+      const onHandoff = vi.fn();
+
+      await expect(adapter.quitAndInstall(onHandoff)).resolves.toBe(false);
+
+      const stable = join(await realpath(root), "Inertia.AppImage");
+      await expect(readFile(stable, "utf8"))
+        .rejects.toMatchObject({ code: "ENOENT" });
+      expect(environment.APPIMAGE).toBe(active);
+      expect(onHandoff).not.toHaveBeenCalled();
+      expect(updaterFixture.app.quit).not.toHaveBeenCalled();
+      expect(updaterFixture.updater.quitAndInstall).not.toHaveBeenCalled();
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "fails the production Linux handoff closed without a candidate bootstrap ACK",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "inertia-electron-updater-"));
+      roots.push(root);
+      const cache = join(root, "cache");
+      await mkdir(cache);
+      const active = join(root, "Inertia-0.0.46.AppImage");
+      const downloaded = join(cache, "Inertia-0.0.47.AppImage");
+      await Promise.all([
+        writeFile(active, "old", { mode: 0o755 }),
+        writeFile(downloaded, "new", { mode: 0o755 }),
+      ]);
+      await Promise.all([chmod(active, 0o755), chmod(downloaded, 0o755)]);
+      updaterFixture.updater.downloadUpdate.mockResolvedValueOnce([downloaded]);
+      const environment = { APPIMAGE: active };
+      const adapter = await loadElectronAppUpdater("stable", {
+        platform: "linux",
+        activeAppImagePath: active,
+        environment,
+      });
+      await adapter.download({
+        onProgress: vi.fn(),
+        onCancelled: vi.fn(),
+      }).promise;
+      const onHandoff = vi.fn();
+
+      await expect(adapter.quitAndInstall(onHandoff)).resolves.toBe(false);
+
+      expect(await readFile(active, "utf8")).toBe("old");
+      await expect(readFile(join(root, "Inertia.AppImage"), "utf8"))
+        .rejects.toMatchObject({ code: "ENOENT" });
+      expect(environment.APPIMAGE).toBe(active);
+      expect(onHandoff).not.toHaveBeenCalled();
+      expect(updaterFixture.app.quit).not.toHaveBeenCalled();
+      expect(updaterFixture.updater.quitAndInstall).not.toHaveBeenCalled();
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "commits Linux ownership only after the exact restricted candidate ACK",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "inertia-electron-updater-"));
+      roots.push(root);
+      const cache = join(root, "cache");
+      const data = join(root, "data");
+      const profile = join(root, "profile");
+      await Promise.all([
+        mkdir(cache, { mode: 0o700 }),
+        mkdir(data, { mode: 0o700 }),
+        mkdir(profile, { mode: 0o700 }),
+      ]);
+      const active = join(root, "Inertia-1.2.3.AppImage");
+      const downloaded = join(cache, "Inertia-1.3.0.AppImage");
+      await Promise.all([
+        writeFile(active, "old", { mode: 0o755 }),
+        writeFile(downloaded, "new", { mode: 0o755 }),
+      ]);
+      await Promise.all([chmod(active, 0o755), chmod(downloaded, 0o755)]);
+      updaterFixture.updater.downloadUpdate.mockResolvedValueOnce([downloaded]);
+      let alive = true;
+      const abort = vi.fn(async () => { alive = false; });
+      const launchRestrictedCandidate = vi.fn(async (options) => {
+        const launched = options.journal.current()!;
+        const acknowledged = options.journal.acknowledgeCandidateBootstrap(
+          appUpdateHandoffOwner(launched),
+          {
+            operationId: launched.operationId,
+            platform: launched.platform,
+            channel: launched.channel,
+            oldVersion: launched.oldVersion,
+            newVersion: launched.newVersion,
+            oldRuntimeGenerationId: launched.oldRuntimeGenerationId,
+            candidateArtifactDigest: launched.candidateArtifactDigest,
+            candidateExecutableIdentityDigest:
+              launched.candidateExecutableIdentityDigest,
+            profileIdentityDigest: launched.profileIdentityDigest,
+            dataIdentityDigest: launched.dataIdentityDigest,
+            handoffToken: options.handoffToken,
+          },
+        )!;
+        return {
+          pid: 42,
+          acknowledgement: acknowledged,
+          alive: () => alive,
+          abort,
+        };
+      });
+      const environment = { APPIMAGE: active };
+      const adapter = await loadElectronAppUpdater("stable", {
+        platform: "linux",
+        activeAppImagePath: active,
+        environment,
+        launchRestrictedCandidate,
+      });
+      await adapter.download({
+        onProgress: vi.fn(),
+        onCancelled: vi.fn(),
+      }).promise;
+
+      await expect(adapter.prepareInstall?.({
+        currentVersion: "1.2.3",
+        newVersion: "1.3.0",
+        handoffDirectory: data,
+        profileDirectory: profile,
+        dataDirectory: data,
+        oldRuntimeGenerationId:
+          "22222222-2222-4222-8222-222222222222:7",
+        systemBootId: "linux:33333333-3333-4333-8333-333333333333",
+      })).resolves.toBe(true);
+      expect(new AppUpdateHandoffJournal(data).current()?.phase)
+        .toBe("candidate-bootstrap-validated");
+      await expect(readFile(join(root, "Inertia.AppImage"), "utf8"))
+        .rejects.toMatchObject({ code: "ENOENT" });
+
+      const onHandoff = vi.fn();
+      await expect(adapter.quitAndInstall(onHandoff)).resolves.toBe(true);
+
+      expect(await readFile(join(root, "Inertia.AppImage"), "utf8")).toBe("new");
+      expect(new AppUpdateHandoffJournal(data).current()?.phase)
+        .toBe("ownership-transfer-committed");
+      expect(onHandoff).toHaveBeenCalledOnce();
+      expect(updaterFixture.app.quit).toHaveBeenCalledOnce();
+      expect(abort).not.toHaveBeenCalled();
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "rolls Linux back when an acknowledged candidate exits before transfer",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "inertia-electron-updater-"));
+      roots.push(root);
+      const cache = join(root, "cache");
+      const data = join(root, "data");
+      const profile = join(root, "profile");
+      await Promise.all([
+        mkdir(cache, { mode: 0o700 }),
+        mkdir(data, { mode: 0o700 }),
+        mkdir(profile, { mode: 0o700 }),
+      ]);
+      const active = join(root, "Inertia-1.2.3.AppImage");
+      const downloaded = join(cache, "Inertia-1.3.0.AppImage");
+      await Promise.all([
+        writeFile(active, "old", { mode: 0o755 }),
+        writeFile(downloaded, "new", { mode: 0o755 }),
+      ]);
+      updaterFixture.updater.downloadUpdate.mockResolvedValueOnce([downloaded]);
+      const launchRestrictedCandidate = vi.fn(async (options) => {
+        const launched = options.journal.current()!;
+        const acknowledged = options.journal.acknowledgeCandidateBootstrap(
+          appUpdateHandoffOwner(launched),
+          {
+            operationId: launched.operationId,
+            platform: launched.platform,
+            channel: launched.channel,
+            oldVersion: launched.oldVersion,
+            newVersion: launched.newVersion,
+            oldRuntimeGenerationId: launched.oldRuntimeGenerationId,
+            candidateArtifactDigest: launched.candidateArtifactDigest,
+            candidateExecutableIdentityDigest:
+              launched.candidateExecutableIdentityDigest,
+            profileIdentityDigest: launched.profileIdentityDigest,
+            dataIdentityDigest: launched.dataIdentityDigest,
+            handoffToken: options.handoffToken,
+          },
+        )!;
+        return {
+          pid: 42,
+          acknowledgement: acknowledged,
+          alive: () => false,
+          abort: vi.fn(async () => undefined),
+        };
+      });
+      const adapter = await loadElectronAppUpdater("stable", {
+        platform: "linux",
+        activeAppImagePath: active,
+        environment: { APPIMAGE: active },
+        launchRestrictedCandidate,
+      });
+      await adapter.download({ onProgress: vi.fn(), onCancelled: vi.fn() }).promise;
+      await expect(adapter.prepareInstall?.({
+        currentVersion: "1.2.3",
+        newVersion: "1.3.0",
+        handoffDirectory: data,
+        profileDirectory: profile,
+        dataDirectory: data,
+        oldRuntimeGenerationId:
+          "22222222-2222-4222-8222-222222222222:7",
+        systemBootId: "linux:33333333-3333-4333-8333-333333333333",
+      })).resolves.toBe(true);
+
+      await expect(adapter.quitAndInstall()).resolves.toBe(false);
+
+      expect(await readFile(active, "utf8")).toBe("old");
+      expect(new AppUpdateHandoffJournal(data).current()).toBeNull();
+      await expect(readFile(join(root, "Inertia.AppImage"), "utf8"))
+        .rejects.toMatchObject({ code: "ENOENT" });
+    },
+  );
 });

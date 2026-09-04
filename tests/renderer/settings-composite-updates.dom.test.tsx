@@ -9,7 +9,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ComponentProps } from "react";
 
 import { SettingsView } from "../../src/renderer/src/components/SettingsView";
-import { defaultSettings, type ProviderInfo } from "../../src/shared/contracts";
+import {
+  defaultSettings,
+  type ProviderInfo,
+  type RuntimeLifecycleDiagnosticSnapshot,
+} from "../../src/shared/contracts";
+import type { AppUpdateStatus } from "../../src/shared/desktop";
 
 afterEach(() => {
   Reflect.deleteProperty(window, "inertia");
@@ -141,6 +146,81 @@ function settingsProps(
 }
 
 describe("Settings composite updates", () => {
+  it("shows a finite actionable lifecycle state without exposing owner identities", async () => {
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: {
+        getPlatform: () => "linux",
+        getAppHealth: vi.fn(async () => null),
+      },
+    });
+    const lifecycleDiagnostics: RuntimeLifecycleDiagnosticSnapshot = {
+      schemaVersion: 1,
+      capturedAt: "2030-01-01T00:00:05.000Z",
+      runtimeStartedAt: "2030-01-01T00:00:00.000Z",
+      runtimeUptimeMs: 5_000,
+      runtimeGenerationHash: "123456789abc",
+      buildMetadata: null,
+      systemBootRelationship: "current",
+      startupBlockerCodes: ["provider-cleanup-pending"],
+      quarantineReason: null,
+      cleanupProofMethod: "current-generation-lease",
+      ownedResources: {
+        providerRuns: 1,
+        turns: 1,
+        terminals: 0,
+        workspaceRuns: 0,
+        interactions: 1,
+        maintenanceOperations: 0,
+      },
+      activeProviders: [],
+      providerMaintenance: [],
+      updateHandoffPhase: null,
+      unresolvedTurnCount: 1,
+      unresolvedInteractionCount: 1,
+      actionableState: "waiting-for-provider-cleanup",
+    };
+    const properties = settingsProps(vi.fn(async () => undefined));
+    const view = render(<SettingsView
+      {...properties}
+      lifecycleDiagnostics={lifecycleDiagnostics}
+    />);
+    fireEvent.click(screen.getByRole("button", { name: "Archive & data" }));
+    fireEvent.click(screen.getByRole("button", { name: "Archive & data" }));
+
+    expect(await screen.findByText("Waiting for provider cleanup")).toBeVisible();
+    expect(screen.getByText(/1 active turn · 1 open interaction/u))
+      .toHaveTextContent("generation 123456789abc");
+    expect(document.body).not.toHaveTextContent("conversation-secret-id");
+
+    const blockedUpdate: AppUpdateStatus = {
+      revision: 2,
+      channel: "stable",
+      state: "downloaded",
+      freshness: "fresh",
+      delivery: "in-app",
+      deliveryReason: null,
+      installBlocker: "active-work",
+      progress: null,
+      currentVersion: "1.2.3",
+      latestVersion: "1.2.4",
+      releaseUrl: null,
+      checkedAt: "2030-01-01T00:00:00.000Z",
+      lastAttemptedAt: "2030-01-01T00:00:00.000Z",
+      message: "Finish active agent work before restarting to update.",
+    };
+    view.rerender(<SettingsView
+      {...properties}
+      lifecycleDiagnostics={{
+        ...lifecycleDiagnostics,
+        startupBlockerCodes: [],
+        actionableState: "safe-and-ready",
+      }}
+      appUpdateStatus={blockedUpdate}
+    />);
+    expect(await screen.findByText("Update blocked by active work")).toBeVisible();
+  });
+
   it("keeps healthy local metrics visible beside bounded partial warnings", async () => {
     Object.defineProperty(window, "inertia", {
       configurable: true,
@@ -373,6 +453,44 @@ describe("Settings composite updates", () => {
       .toHaveAttribute("aria-selected", "true");
     expect(screen.getByLabelText("Name in Inertia"))
       .toHaveAttribute("placeholder", "Claude account");
+  });
+
+  it("shows bounded capability evidence for the exact provider installation", () => {
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: { getPlatform: () => "linux" },
+    });
+    const manifestDigest = "a".repeat(64);
+    render(<SettingsView
+      {...settingsProps(vi.fn(async () => undefined))}
+      providers={[{
+        ...codexWithModels(),
+        capabilityContract: {
+          schemaVersion: 1,
+          harnessId: "codex-app-server",
+          manifestDigest,
+          installationVerified: true,
+          installedVersion: "1.0.0",
+          currentlyAvailableCount: 23,
+          declaredCapabilityCount: 28,
+          hostToolBridgeAvailable: true,
+        },
+      }]}
+    />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Providers" }));
+    const contract = screen.getByLabelText("Codex capability contract");
+    expect(contract).toHaveClass("is-verified");
+    expect(contract).toHaveTextContent("Verified for 1.0.0");
+    expect(contract).toHaveTextContent("codex-app-server · aaaaaaaaaaaa");
+    expect(contract).toHaveTextContent(
+      "23 of 28 declared capabilities are available now.",
+    );
+    expect(contract.querySelector("code")).toHaveAttribute(
+      "title",
+      manifestDigest,
+    );
+    expect(contract).not.toHaveTextContent(manifestDigest);
   });
 
   it("moves provider detail tabs with the composite keyboard pattern", () => {

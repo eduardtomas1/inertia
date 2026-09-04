@@ -1,8 +1,11 @@
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { defineConfig, externalizeDepsPlugin } from "electron-vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import { lifecycleBuildMetadataFromEnvironment } from
+  "./src/shared/lifecycle-build-metadata";
 
 const windowsRuntimeJobIntegrityPath = resolve(
   "resources/generated/windows-runtime-job-integrity.json",
@@ -29,9 +32,42 @@ function readWindowsRuntimeJobIntegrity(): { readonly sha256: string | null } {
 // therefore guaranteed to describe the same source manifest.
 const bundledWindowsRuntimeJobIntegrity = readWindowsRuntimeJobIntegrity();
 
+function checkedOutBuildRevision(): string | undefined {
+  if (process.env.GITHUB_ACTIONS !== "true") return undefined;
+  try {
+    const revision = execFileSync(
+      "git",
+      ["rev-parse", "--verify", "HEAD"],
+      {
+        encoding: "utf8",
+        maxBuffer: 1_024,
+        stdio: ["ignore", "pipe", "ignore"],
+        timeout: 5_000,
+      },
+    ).trim().toLowerCase();
+    return /^[0-9a-f]{40}$/u.test(revision) ? revision : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+const bundledLifecycleBuildMetadata = lifecycleBuildMetadataFromEnvironment(
+  {
+    GITHUB_ACTIONS: process.env.GITHUB_ACTIONS,
+    GITHUB_SHA: checkedOutBuildRevision() ?? process.env.GITHUB_SHA,
+    GITHUB_RUN_ID: process.env.GITHUB_RUN_ID,
+    GITHUB_RUN_ATTEMPT: process.env.GITHUB_RUN_ATTEMPT,
+    GITHUB_REF_TYPE: process.env.GITHUB_REF_TYPE,
+    GITHUB_REF_NAME: process.env.GITHUB_REF_NAME,
+  },
+);
+
 export default defineConfig({
   main: {
     define: {
+      __INERTIA_BUILD_METADATA__: JSON.stringify(
+        bundledLifecycleBuildMetadata,
+      ),
       __INERTIA_WINDOWS_RUNTIME_JOB_SHA256__: JSON.stringify(
         bundledWindowsRuntimeJobIntegrity.sha256,
       ),
@@ -56,6 +92,9 @@ export default defineConfig({
         input: {
           index: resolve("src/main/index.ts"),
           "runtime-worker": resolve("src/server/runtime-worker.ts"),
+          "app-update-candidate-viability-worker": resolve(
+            "src/server/app-update-candidate-viability-worker.ts",
+          ),
           "runtime-status-cli": resolve("src/server/runtime-status-cli.ts"),
           "database-recovery-import-worker": resolve(
             "src/server/persistence/database-recovery-import-worker.ts",

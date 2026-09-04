@@ -2046,9 +2046,10 @@ describe.skipIf(process.platform === "win32")(
         builder,
         [
           'import { spawn } from "node:child_process";',
-          'import { writeFileSync } from "node:fs";',
+          'import { renameSync, writeFileSync } from "node:fs";',
           'const descendant = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });',
-          `writeFileSync(${JSON.stringify(pidFile)}, JSON.stringify({ root: process.pid, descendant: descendant.pid }));`,
+          `writeFileSync(${JSON.stringify(`${pidFile}.tmp`)}, JSON.stringify({ root: process.pid, descendant: descendant.pid }));`,
+          `renameSync(${JSON.stringify(`${pidFile}.tmp`)}, ${JSON.stringify(pidFile)});`,
           "setInterval(() => {}, 1000);",
         ].join("\n"),
       );

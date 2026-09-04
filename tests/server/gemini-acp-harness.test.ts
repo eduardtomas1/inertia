@@ -912,6 +912,29 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     expect(exposed).not.toContain(token.slice(0, Math.floor(token.length / 2)));
   });
 
+  it("keeps cancellation authoritative when dotenv preflight rejects", async () => {
+    const root = portableFixtureRoot("gemini cancelled dotenv preflight");
+    roots.push(root);
+    mkdirSync(join(root, ".env"));
+    const manager = managerFor(join(root, "must-not-spawn"));
+    const statuses: string[] = [];
+
+    const run = manager.run(geminiInput(root, {
+      conversationId: "gemini-cancelled-dotenv-preflight",
+    }), {
+      onStatus: ({ status }) => statuses.push(status),
+    });
+    expect(manager.cancel("gemini-cancelled-dotenv-preflight")).toBe(true);
+
+    await expect(run).resolves.toMatchObject({
+      status: "cancelled",
+      text: "",
+      cleanupConfirmed: true,
+    });
+    expect(statuses).toEqual(["starting", "cancelling", "cancelled"]);
+    expect(manager.activeConversationIds()).toEqual([]);
+  });
+
   it("fails the public result when Gemini host-tool cleanup is not confirmed", async () => {
     const root = portableFixtureRoot("gemini host MCP cleanup failure");
     roots.push(root);

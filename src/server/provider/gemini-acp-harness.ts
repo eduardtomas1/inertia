@@ -221,6 +221,19 @@ function startGeminiRun(
   let activeRun: AgentHarnessRun | undefined;
   let cancelBeforeStart = false;
   emitter.status("starting");
+  const cancelledBeforeStart = (): ProviderRunResult => {
+    emitter.status("cancelled");
+    return {
+      providerId: "gemini",
+      conversationId,
+      status: "cancelled",
+      text: "",
+      textTruncated: false,
+      exitCode: null,
+      signal: null,
+      cleanupConfirmed: true,
+    };
+  };
 
   const result = geminiDotenvSecretValues(
     options.input.cwd,
@@ -228,17 +241,7 @@ function startGeminiRun(
   ).then(
     (dotenvSecrets): Promise<ProviderRunResult> | ProviderRunResult => {
       if (cancelBeforeStart) {
-        emitter.status("cancelled");
-        return {
-          providerId: "gemini",
-          conversationId,
-          status: "cancelled",
-          text: "",
-          textTruncated: false,
-          exitCode: null,
-          signal: null,
-          cleanupConfirmed: true,
-        };
+        return cancelledBeforeStart();
       }
       activeRun = startPreparedGeminiRun(
         options,
@@ -251,7 +254,10 @@ function startGeminiRun(
       );
       return activeRun.result;
     },
-    (): Promise<ProviderRunResult> => {
+    (): Promise<ProviderRunResult> | ProviderRunResult => {
+      if (cancelBeforeStart) {
+        return cancelledBeforeStart();
+      }
       const failure: ProviderRunFailure = {
         reason: "provider-error",
         message: "Gemini environment files could not be inspected safely.",

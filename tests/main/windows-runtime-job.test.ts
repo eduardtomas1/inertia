@@ -620,6 +620,11 @@ describe("Windows runtime Job Object containment", () => {
       nativeSource.indexOf("public static int LaunchUpdateSupervisor("),
       nativeSource.indexOf("private static string TrustedPowerShellPath("),
     );
+    for (const stream of ["Input", "Output", "Error"]) {
+      expect(boundSupervisorLaunch).toContain(
+        `start.RedirectStandard${stream} = true;`,
+      );
+    }
     expect(boundSupervisorLaunch.indexOf("OpenUpdateArtifact(supervisorPath"))
       .toBeLessThan(boundSupervisorLaunch.indexOf("Process.Start(start)"));
     expect(boundSupervisorLaunch).toContain(

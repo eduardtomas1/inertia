@@ -325,6 +325,7 @@ describe("Windows update supervisor launcher", () => {
         helperDirectory,
         windowsUpdateTerminalReceiptTemporaryName(nativeOperationId),
       );
+      let parent: ReturnType<typeof spawn> | undefined;
       try {
         await copyFile(generatedHelperPath, helperPath);
         await writeFile(
@@ -351,14 +352,14 @@ describe("Windows update supervisor launcher", () => {
           .update(parentBytes)
           .digest("hex");
         const deadlineAt = new Date(Date.now() + 6_000).toISOString();
-        const parent = spawn(
+        parent = spawn(
           process.execPath,
           ["-e", "process.stdin.resume()"],
           { stdio: ["pipe", "ignore", "ignore"], windowsHide: true },
         );
         await new Promise<void>((resolveSpawn, rejectSpawn) => {
-          parent.once("spawn", resolveSpawn);
-          parent.once("error", rejectSpawn);
+          parent!.once("spawn", resolveSpawn);
+          parent!.once("error", rejectSpawn);
         });
         const requestOptions = {
           operationId: nativeOperationId,
@@ -409,7 +410,7 @@ describe("Windows update supervisor launcher", () => {
         expect(existsSync(installerDonePath)).toBe(false);
         parent.stdin!.end();
         await new Promise<void>((resolveExit) => {
-          parent.once("close", () => resolveExit());
+          parent!.once("close", () => resolveExit());
         });
 
         await waitForLeaf(helperDirectory, receiptPath, 10_000);
@@ -434,6 +435,9 @@ describe("Windows update supervisor launcher", () => {
         );
         await waitForLeaf(installerDirectory, installerDonePath, 15_000);
       } finally {
+        if (parent && parent.exitCode === null && parent.signalCode === null) {
+          parent.kill();
+        }
         await rm(root, {
           force: true,
           maxRetries: 20,

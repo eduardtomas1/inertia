@@ -1789,6 +1789,10 @@ try {
       start.CreateNoWindow = true;
       start.RedirectStandardInput = true;
       start.RedirectStandardOutput = true;
+      // The supervisor outlives this broker after READY. Its bounded loader
+      // diagnostic must not inherit the broker's stderr pipe and keep the
+      // broker's parent waiting for stdio closure after the broker exits.
+      start.RedirectStandardError = true;
       child = Process.Start(start);
       if (child == null) {
         diagnostic = ErrorLine("update-launch-start", 0);

@@ -10,6 +10,7 @@ import {
   awaitRuntimeOwnedProcessCleanupConfirmed,
   runtimeOwnedProcessCleanupConfirmed,
   runtimeOwnedProcessInvocation,
+  runtimeOwnedProcessOwnershipIsTainted,
   RuntimeOwnedProcessJournal,
   spawnRuntimeOwnedPidProcess,
   spawnRuntimeOwnedProcess,
@@ -91,6 +92,23 @@ function readRecordedPid(marker: string): number | null {
   return pid;
 }
 
+function guardianChildCounts(pid: number): { live: number; zombies: number; stopped: number } {
+  const children = readFileSync(`/proc/${pid}/task/${pid}/children`, "utf8").trim();
+  const counts = { live: 0, zombies: 0, stopped: 0 };
+  for (const child of children ? children.split(/\s+/u) : []) {
+    try {
+      const stat = readFileSync(`/proc/${child}/stat`, "utf8");
+      const state = stat.slice(stat.lastIndexOf(")") + 2, stat.lastIndexOf(")") + 3);
+      if (state === "Z") counts.zombies++;
+      else {
+        counts.live++;
+        if (state === "T" || state === "t") counts.stopped++;
+      }
+    } catch { /* The guardian reaped this exact child during the census. */ }
+  }
+  return counts;
+}
+
 function compileGuardian(root: string, extraFlags: readonly string[] = []): string {
   const guardian = join(root, "guardian");
   execFileSync("cc", [
@@ -136,6 +154,89 @@ function waitForPtyExit<T>(exited: Promise<T>, timeout = 5_000): Promise<T> {
 }
 
 describe("Linux runtime process guardian", () => {
+  for (const ending of ["0", "37", "signal", "stop"] as const) {
+    linuxIt(`reaps sequential adopted children while live, then settles ${ending}`, async () => {
+      const root = mkdtempSync(join(tmpdir(), "inertia-linux-orphan-churn-")); roots.push(root);
+      const guardian = compileGuardian(root);
+      const payload = join(root, "payload");
+      execFileSync("cc", ["-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
+        join(process.cwd(), "tests/fixtures/linux-orphan-churn.c"), "-o", payload]);
+      const marker = join(root, "ready"), release = join(root, "release");
+      const generation = "31000000-0000-4000-8000-000000000031:1";
+      const boot = "test:32000000-0000-4000-8000-000000000032";
+      const options = { platform: "linux" as const, darwinGuardianPath: guardian };
+      const deactivate = activateRuntimeOwnedProcessRegistry(root, generation, boot, options);
+      const invocation = runtimeOwnedProcessInvocation(payload, [marker, release, "320", "1", ending]);
+      const child = spawnRuntimeOwnedProcess(() => spawn(invocation.command, invocation.args, {
+        detached: true, stdio: "ignore",
+      }));
+      let recorded: RecordedLinuxProcess[] = [];
+      try {
+        await waitFor(() => readRecordedPid(marker) !== null, 15_000);
+        recorded = recordLinuxProcessTree(child.pid!).slice(1);
+        await expect.poll(() => guardianChildCounts(child.pid!), { timeout: 5_000 })
+          .toEqual({ live: 2, zombies: 0, stopped: 0 });
+        expect(readFileSync(`/proc/${child.pid}/comm`, "utf8").trim()).toBe("inertia-owned");
+        expect(new RuntimeOwnedProcessJournal(root, options).records(generation)).toMatchObject([
+          { state: "owned" },
+        ]);
+        if (ending === "stop") {
+          await expect(terminateProcessTreeAndWait(child, true, {
+            platform: "linux", waitMs: 3_000,
+          })).resolves.toBe(true);
+        } else writeFileSync(release, "exit");
+        await waitFor(() => child.exitCode !== null || child.signalCode !== null);
+        expect(child.exitCode).toBe(ending === "signal" ? 138 : ending === "stop" ? 143 : Number(ending));
+        expect(child.signalCode).toBeNull();
+        await expect(awaitRuntimeOwnedProcessCleanupConfirmed()).resolves.toBe(true);
+        expect(new RuntimeOwnedProcessJournal(root, options).records(generation)).toEqual([]);
+        for (const identity of recorded) expect(recordLinuxProcess(identity.pid)).toBeNull();
+      } finally {
+        for (const identity of recorded) killRecordedLinuxProcess(identity);
+        await stopChild(child);
+        deactivate?.();
+      }
+    }, 30_000);
+  }
+
+  linuxIt("retains failed cleanup authority above the live-child census bound", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-linux-live-overflow-")); roots.push(root);
+    const guardian = compileGuardian(root);
+    const payload = join(root, "payload");
+    execFileSync("cc", ["-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
+      join(process.cwd(), "tests/fixtures/linux-orphan-churn.c"), "-o", payload]);
+    const marker = join(root, "ready"), release = join(root, "release");
+    const generation = "33000000-0000-4000-8000-000000000033:1";
+    const boot = "test:34000000-0000-4000-8000-000000000034";
+    const options = { platform: "linux" as const, darwinGuardianPath: guardian };
+    const deactivate = activateRuntimeOwnedProcessRegistry(root, generation, boot, options);
+    const invocation = runtimeOwnedProcessInvocation(payload, [marker, release, "0", "300", "0"]);
+    const child = spawnRuntimeOwnedProcess(() => spawn(invocation.command, invocation.args, {
+      detached: true, stdio: "ignore",
+    }));
+    let recorded: RecordedLinuxProcess[] = [];
+    try {
+      await waitFor(() => readRecordedPid(marker) !== null, 15_000);
+      recorded = recordLinuxProcessTree(child.pid!).slice(1);
+      expect(guardianChildCounts(child.pid!)).toEqual({ live: 301, zombies: 0, stopped: 0 });
+      writeFileSync(release, "exit");
+      await waitFor(() => readFileSync(`/proc/${child.pid}/comm`, "utf8").trim() === "inertia-bad");
+      expect(guardianChildCounts(child.pid!)).toEqual({ live: 300, zombies: 0, stopped: 0 });
+      expect(runtimeOwnedProcessCleanupConfirmed()).toBe(false);
+      await expect(awaitRuntimeOwnedProcessCleanupConfirmed()).resolves.toBe(false);
+      expect(new RuntimeOwnedProcessJournal(root, options).records(generation)).toMatchObject([
+        { state: "owned" },
+      ]);
+      await waitFor(runtimeOwnedProcessOwnershipIsTainted);
+      expect(() => spawnRuntimeOwnedProcess(() => spawn("/bin/true"))).toThrow("tainted until restart");
+    } finally {
+      if (recorded.length === 0) recorded = recordLinuxProcessTree(child.pid!).slice(1);
+      for (const identity of recorded) killRecordedLinuxProcess(identity);
+      await stopChild(child);
+      deactivate?.();
+    }
+  }, 30_000);
+
   linuxIt("admits watch mode without invoking the seccomp self-test", async () => {
     const root = mkdtempSync(join(tmpdir(), "inertia-linux-watch-no-selftest-"));
     roots.push(root);

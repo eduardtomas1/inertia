@@ -17,8 +17,10 @@ The useful changes in each Inertia release, in plain language.
   return from `session/load` before asynchronous history replay is complete and
   exposes no replay-end marker, Inertia reconstructs only a bounded visible
   user/assistant transcript as application context instead of claiming native
-  resume. Hidden reasoning, tool payloads, credentials, provider session
-  identity, and historical attachment bytes remain outside that reconstruction.
+  resume. Hidden reasoning, tool payloads, provider-managed credential state,
+  provider session identity, and historical attachment bytes remain outside
+  that reconstruction. Text explicitly entered into visible messages remains
+  part of the context and should be reviewed like any provider prompt.
 - Gemini's outer CLI and inner ACP chat records now have exact per-run ownership,
   with filename-prefix entropy that avoids deterministic concurrent collisions,
   and are removed only after verified process-tree shutdown and workspace-marker

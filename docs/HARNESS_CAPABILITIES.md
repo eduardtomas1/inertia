@@ -88,7 +88,9 @@ new prompt. Inertia therefore does not call `session/load` or claim native
 Gemini resume. It supplies only bounded visible user and assistant messages as
 application-reconstructed context. The reconstruction is labeled in the prompt,
 may report truncation, and excludes reasoning, activities, tool payloads,
-credentials, provider session identity, and historical attachment bytes.
+provider-managed credential state, provider session identity, and historical
+attachment bytes. Text explicitly entered into visible messages remains part of
+the reconstruction and should be reviewed like any prompt sent to a provider.
 
 The same CLI version initializes one provider-side chat before ACP
 `session/new`, then creates a second chat for the ACP session. Both are recorded

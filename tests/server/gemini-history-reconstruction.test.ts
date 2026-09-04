@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import type { ChatMessage } from "../../src/shared/contracts";
 import { reconstructedVisibleHistory } from "../../src/server/runtime/turns/turn-request-preparation";
+import { geminiPromptWithReconstructedHistory } from
+  "../../src/server/provider/gemini-acp-session";
 
 function message(
   index: number,
@@ -75,5 +77,19 @@ describe("Gemini visible-history reconstruction", () => {
       message(0, "system", "hidden", null),
       message(1, "user", "draft", null),
     ])).toBeUndefined();
+  });
+
+  it("discloses that explicitly entered sensitive text remains visible context", () => {
+    const prompt = geminiPromptWithReconstructedHistory("Continue", {
+      source: "visible-transcript",
+      truncated: false,
+      messages: [{ role: "user", content: "user-entered-secret" }],
+    });
+
+    expect(prompt).toContain("user-entered-secret");
+    expect(prompt).toContain(
+      "Text explicitly entered into visible messages is included",
+    );
+    expect(prompt).toContain("provider-managed credential state");
   });
 });

@@ -13,7 +13,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { cleanupGeminiSessionArtifacts } from
+import {
+  cleanupGeminiSessionArtifacts,
+  GeminiSessionCleanupScanBudget,
+} from
   "../../src/server/provider/gemini-session-cleanup";
 import { removePortableFixture } from "../helpers/portable-provider-fixture";
 
@@ -78,6 +81,28 @@ afterEach(async () => {
 });
 
 describe("Gemini ACP provider-owned session cleanup", () => {
+  it("enforces aggregate cleanup scan budgets across repeated observations", () => {
+    const entries = new GeminiSessionCleanupScanBudget();
+    entries.observeDirectoryEntries(12_288);
+    entries.observeDirectoryEntries(12_288);
+    expect(() => entries.observeDirectoryEntries(1)).toThrow(
+      /aggregate directory-entry safety limit/iu,
+    );
+
+    const files = new GeminiSessionCleanupScanBudget();
+    for (let index = 0; index < 16_384; index += 1) files.beginFile();
+    expect(() => files.beginFile()).toThrow(
+      /aggregate file-inspection safety limit/iu,
+    );
+
+    const bytes = new GeminiSessionCleanupScanBudget();
+    bytes.observeBytes(16 * 1024 * 1024);
+    bytes.observeBytes(16 * 1024 * 1024);
+    expect(() => bytes.observeBytes(1)).toThrow(
+      /aggregate byte-inspection safety limit/iu,
+    );
+  });
+
   it("removes only exact run and descendant identities from the attested project", async () => {
     const { home, cwd, project } = fixture();
     const parentId = "inertia-11111111-1111-4111-8111-111111111111";
@@ -169,6 +194,28 @@ describe("Gemini ACP provider-owned session cleanup", () => {
     })).rejects.toThrow(/ambiguous owned chat records/iu);
     expect(existsSync(first)).toBe(true);
     expect(existsSync(duplicate)).toBe(true);
+  });
+
+  it("fails closed when a descendant identity collides with a top-level chat", async () => {
+    const { home, cwd, project } = fixture();
+    const parentId = "57575757-5757-4757-8757-575757575757";
+    const childId = "58585858-5858-4858-8858-585858585858";
+    const chats = join(project, "chats");
+    const parent = sessionFile(chats, parentId);
+    const descendants = join(chats, parentId);
+    mkdirSync(descendants, { recursive: true });
+    const child = subagentFile(descendants, childId);
+    const collision = sessionFile(chats, childId);
+
+    await expect(cleanupGeminiSessionArtifacts({
+      cwd,
+      environment: { GEMINI_CLI_HOME: home },
+      sessionIds: [parentId],
+      requiredSessionIds: [parentId],
+    })).rejects.toThrow(/ambiguous descendant chat record/iu);
+    expect(existsSync(parent)).toBe(true);
+    expect(existsSync(child)).toBe(true);
+    expect(existsSync(collision)).toBe(true);
   });
 
   it("does not follow a chat-file symlink or accept crafted session identities", async () => {

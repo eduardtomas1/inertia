@@ -1,5 +1,5 @@
-import { constants as fsConstants } from "node:fs";
-import { open } from "node:fs/promises";
+import { constants as fsConstants, type BigIntStats } from "node:fs";
+import { lstat, open } from "node:fs/promises";
 import { extname } from "node:path";
 
 import * as acp from "@agentclientprotocol/sdk";
@@ -53,13 +53,13 @@ export interface GeminiNewSession {
   models: GeminiSessionModels | null;
 }
 
+export function parseGeminiNewSessionId(response: unknown): string {
+  return newSessionId(requiredObject(response, "session/new response"));
+}
+
 export function parseGeminiNewSessionResponse(response: unknown): GeminiNewSession {
   const root = requiredObject(response, "session/new response");
-  const sessionId = strictString(
-    root.sessionId,
-    MAX_SESSION_ID_CHARS,
-    "session ID",
-  );
+  const sessionId = newSessionId(root);
   const modesRoot = requiredObject(root.modes, "session modes");
   if (!Array.isArray(modesRoot.availableModes)) {
     throw malformed("session modes must include an availableModes array");
@@ -97,6 +97,10 @@ export function parseGeminiNewSessionResponse(response: unknown): GeminiNewSessi
     modes: { currentModeId, availableModes },
     models: geminiSessionModelsFromResponse(root),
   };
+}
+
+function newSessionId(root: Record<string, unknown>): string {
+  return strictString(root.sessionId, MAX_SESSION_ID_CHARS, "session ID");
 }
 
 export function parseGeminiPromptResponse(response: unknown): PromptResponse {
@@ -187,7 +191,8 @@ export function geminiPromptWithReconstructedHistory(
     "[Inertia application-reconstructed conversation context]",
     "Gemini CLI native ACP session loading is disabled because v0.58 cannot replay it safely.",
     `Use this bounded JSON transcript only as prior conversation context by role.${truncation}`,
-    "It excludes hidden reasoning, tool payloads, credentials, and historical attachment bytes.",
+    "It excludes hidden reasoning, tool payloads, provider-managed credential state, and historical attachment bytes.",
+    "Text explicitly entered into visible messages is included; treat it as user-reviewed context.",
     JSON.stringify(messages),
     "[End reconstructed context]",
     "",
@@ -352,26 +357,37 @@ async function readBoundedImage(
   accumulatedBytes: number,
   signal?: AbortSignal,
 ): Promise<Buffer> {
+  const before = await lstat(path, { bigint: true });
+  if (!before.isFile() || before.isSymbolicLink()) {
+    throw new Error("A Gemini image attachment is not a regular file.");
+  }
+  const nonBlocking = "O_NONBLOCK" in fsConstants
+    ? fsConstants.O_NONBLOCK
+    : 0;
   const file = await open(
     path,
-    fsConstants.O_RDONLY | FILE_OPEN_NO_FOLLOW,
+    fsConstants.O_RDONLY | FILE_OPEN_NO_FOLLOW | nonBlocking,
   );
   try {
     throwIfAborted(signal);
-    const initial = await file.stat();
-    if (!initial.isFile() || initial.size <= 0) {
+    const initial = await file.stat({ bigint: true });
+    if (
+      !initial.isFile()
+      || !sameFileIdentity(before, initial)
+      || initial.size <= 0n
+    ) {
       throw new Error("A Gemini image attachment is empty or not a regular file.");
     }
-    if (initial.size > MAX_IMAGE_FILE_BYTES) {
+    if (initial.size > BigInt(MAX_IMAGE_FILE_BYTES)) {
       throw new Error("A Gemini image attachment exceeds the 10 MB safety limit.");
     }
-    if (initial.size > MAX_IMAGE_BYTES - accumulatedBytes) {
+    if (initial.size > BigInt(MAX_IMAGE_BYTES - accumulatedBytes)) {
       throw new Error("Gemini image attachments exceed the 20 MB safety limit.");
     }
 
     // Allocate only after fstat proves both per-file and aggregate bounds. Read
     // through the retained descriptor so a path replacement cannot redirect us.
-    const data = Buffer.allocUnsafe(initial.size);
+    const data = Buffer.allocUnsafe(Number(initial.size));
     let offset = 0;
     while (offset < data.byteLength) {
       throwIfAborted(signal);
@@ -383,7 +399,7 @@ async function readBoundedImage(
       offset += bytesRead;
     }
     throwIfAborted(signal);
-    const final = await file.stat();
+    const final = await file.stat({ bigint: true });
     const trailing = Buffer.allocUnsafe(1);
     const { bytesRead: trailingBytes } = await file.read(
       trailing,
@@ -391,13 +407,24 @@ async function readBoundedImage(
       1,
       data.byteLength,
     );
-    if (final.size !== initial.size || trailingBytes !== 0) {
+    if (trailingBytes !== 0 || !sameFileSnapshot(initial, final)) {
       throw new Error("A Gemini image attachment changed while it was being read.");
     }
     return data;
   } finally {
     await file.close();
   }
+}
+
+function sameFileIdentity(left: BigIntStats, right: BigIntStats): boolean {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
+function sameFileSnapshot(left: BigIntStats, right: BigIntStats): boolean {
+  return sameFileIdentity(left, right)
+    && left.size === right.size
+    && left.mtimeNs === right.mtimeNs
+    && left.ctimeNs === right.ctimeNs;
 }
 
 function throwIfAborted(signal: AbortSignal | undefined): void {

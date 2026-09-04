@@ -73,6 +73,7 @@ export class BoundedGeminiJsonLineTransform extends Transform {
     this.decoder = new TextDecoder("utf-8", { fatal: true });
     this.decodedParts = [];
     this.pendingBytes = 0;
+    this.eventBudget.observeBytes(lineBytes);
     if (lineBytes === 0) return;
     const parsed: unknown = JSON.parse(line);
     if (!validAcpJsonRpcEnvelope(parsed)) {
@@ -81,7 +82,6 @@ export class BoundedGeminiJsonLineTransform extends Transform {
     if ((parsed as { method?: unknown }).method === "session/update") {
       parseAcpSessionNotification((parsed as { params?: unknown }).params);
     }
-    this.eventBudget.observeBytes(lineBytes);
     this.push(`${line}\n`);
   }
 }

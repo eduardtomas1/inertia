@@ -60,6 +60,7 @@ import {
   configureGeminiSession,
   geminiPrompt,
   geminiPromptWithReconstructedHistory,
+  parseGeminiNewSessionId,
   parseGeminiNewSessionResponse,
   parseGeminiPromptResponse,
   type GeminiSessionModels,
@@ -352,6 +353,7 @@ function startPreparedGeminiRun(
   let sessionReady = false;
   let outerSessionRecordExpected = false;
   let innerSessionRecordExpected = false;
+  let sessionCreationDispatched = false;
   let promptInFlight = false;
   let supportsImages = false;
   let activeContext: acp.ClientContext | undefined;
@@ -558,15 +560,17 @@ function startPreparedGeminiRun(
 
       activeFailurePhase = "session";
       activeTerminalEvent = "session/new";
-      const created = parseGeminiNewSessionResponse(await requestControl(
+      sessionCreationDispatched = true;
+      const newSessionResponse = await requestControl(
         context.request(acp.methods.agent.session.new, {
           cwd: options.input.cwd,
           mcpServers: hostMcpServers,
         }),
         "session/new",
-      ));
-      sessionId = created.sessionId;
+      );
+      sessionId = parseGeminiNewSessionId(newSessionResponse);
       innerSessionRecordExpected = true;
+      const created = parseGeminiNewSessionResponse(newSessionResponse);
       let models: GeminiSessionModels | null = created.models;
 
       activeFailurePhase = "configuration";
@@ -720,6 +724,13 @@ function startPreparedGeminiRun(
       } catch {
         sessionCleanupFailed = true;
       }
+      if (
+        sessionCreationDispatched
+        && !innerSessionRecordExpected
+        && sessionCreationIdentityIsAmbiguous(outcome)
+      ) {
+        sessionCleanupFailed = true;
+      }
     }
     const cleanupFailure = processCleanupFailed
       ? {
@@ -832,6 +843,18 @@ function startPreparedGeminiRun(
       respondToInput: () => false,
     },
   };
+}
+
+function sessionCreationIdentityIsAmbiguous(
+  outcome: ProviderRunResult,
+): boolean {
+  if (outcome.status === "cancelled") return true;
+  return outcome.failure?.reason === "rpc-timeout"
+    || outcome.failure?.reason === "transport-closed"
+    || outcome.failure?.reason === "process-signal"
+    || outcome.failure?.reason === "process-exit"
+    || outcome.failure?.reason === "malformed-protocol"
+    || outcome.failure?.reason === "protocol-overflow";
 }
 
 async function geminiPermission(

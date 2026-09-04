@@ -48,9 +48,11 @@ protocol-level end marker for its asynchronous `session/load` history replay,
 so every turn starts a fresh ACP process and session. The local supervised
 runtime supplies a bounded application-visible user/assistant transcript. It
 carries no provider session identifier, hidden reasoning, tool payload,
-credential, or historical attachment bytes, and its truncation state is
-explicit. Private Connect cannot submit Gemini prompts, turn that reconstruction
-into native resume, or request Gemini compaction.
+provider-managed credential state, or historical attachment bytes, and its
+truncation state is explicit. Text explicitly entered into visible messages
+remains part of the reconstruction. Private Connect cannot submit Gemini
+prompts, turn that reconstruction into native resume, or request Gemini
+compaction.
 
 ## Packaging verification
 

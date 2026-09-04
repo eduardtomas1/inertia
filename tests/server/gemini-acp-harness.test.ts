@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -29,6 +30,8 @@ import {
 import { geminiEnvironmentSecretValues } from
   "../../src/server/provider/gemini-acp-redaction";
 import { BoundedGeminiJsonLineTransform } from "../../src/server/provider/gemini-acp-support";
+import type { GeminiSessionCleanupRequest } from
+  "../../src/server/provider/gemini-session-cleanup";
 import { terminateProcessTreeAndWait } from "../../src/server/process-lifecycle";
 import type { ProviderHostToolBridge } from "../../src/server/provider/contracts";
 import { ProviderRunEventBudget } from "../../src/server/provider/io";
@@ -166,6 +169,12 @@ describe("bounded Gemini ACP framing", () => {
       Buffer.from(`{"jsonrpc":"2.0","id":1,"result":"${"x".repeat(4_096)}"}\n`),
     ])).rejects.toThrow(/oversized/iu);
   });
+
+  it("charges empty frames to the bounded wire-event budget", async () => {
+    await expect(collectGeminiFrames([
+      Buffer.from("\n".repeat(17)),
+    ])).rejects.toThrow(/bounded event rate/iu);
+  });
 });
 
 describe("Gemini ACP data negotiation", () => {
@@ -283,6 +292,23 @@ describe("Gemini ACP data negotiation", () => {
       await removePortableFixture(root);
     }
   });
+
+  it.skipIf(process.platform === "win32")(
+    "rejects a FIFO image without blocking for a writer",
+    async () => {
+      const root = portableFixtureRoot("gemini fifo image");
+      const fifo = join(root, "blocked.png");
+      expect(spawnSync("mkfifo", [fifo], { stdio: "ignore" }).status).toBe(0);
+      try {
+        await expect(geminiPrompt("Describe", [fifo], {
+          protocolVersion: 1,
+          agentCapabilities: { promptCapabilities: { image: true } },
+        })).rejects.toThrow(/not a regular file/iu);
+      } finally {
+        await removePortableFixture(root);
+      }
+    },
+  );
 
   it("aborts attachment preparation before attempting the next image read", async () => {
     const controller = new AbortController();
@@ -612,6 +638,76 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     for (const sessionId of cleanedSessionIds) {
       expect(JSON.stringify(result)).not.toContain(sessionId);
     }
+  });
+
+  it("retains a created session identity before validating the rest of its response", async () => {
+    const root = portableFixtureRoot("gemini partial session response cleanup");
+    roots.push(root);
+    const innerSessionId = "89898989-8989-4989-8989-898989898989";
+    const command = writeNodeFlagExecutable(root, "gemini", `
+const readline = require("node:readline");
+const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: ${INITIALIZE_RESULT} });
+  if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: {
+    sessionId: ${JSON.stringify(innerSessionId)},
+    modes: { currentModeId: "default", availableModes: [] },
+  } });
+});
+`);
+    let cleanupRequest: GeminiSessionCleanupRequest | undefined;
+    const manager = managerFor(command, testGeminiHarness({
+      cleanupSessionArtifacts: async (request) => {
+        cleanupRequest = request;
+        throw new Error("fixture could not attest the inner session");
+      },
+    }));
+
+    await expect(manager.run(geminiInput(root, {
+      conversationId: "gemini-partial-session-response",
+    }))).resolves.toMatchObject({
+      status: "failed",
+      cleanupConfirmed: false,
+      failure: {
+        phase: "cleanup",
+        terminalEvent: "gemini-session/cleanup",
+      },
+    });
+    expect(cleanupRequest?.sessionIds).toEqual([
+      expect.stringMatching(/^[A-Za-z0-9_-]{24}-inertia$/u),
+      innerSessionId,
+    ]);
+    expect(cleanupRequest?.requiredSessionIds).toEqual(
+      cleanupRequest?.sessionIds,
+    );
+  });
+
+  it("fails cleanup closed when session creation times out with no returned identity", async () => {
+    const root = portableFixtureRoot("gemini ambiguous session creation");
+    roots.push(root);
+    const command = writeNodeFlagExecutable(root, "gemini", `
+const readline = require("node:readline");
+const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: ${INITIALIZE_RESULT} });
+});
+`);
+    const manager = managerFor(command, testGeminiHarness({
+      controlRpcTimeoutMs: 500,
+    }));
+
+    await expect(manager.run(geminiInput(root, {
+      conversationId: "gemini-ambiguous-session-creation",
+    }))).resolves.toMatchObject({
+      status: "failed",
+      cleanupConfirmed: false,
+      failure: {
+        phase: "cleanup",
+        terminalEvent: "gemini-session/cleanup",
+      },
+    });
   });
 
   it("redacts split host and environment credentials from every Gemini output surface", async () => {

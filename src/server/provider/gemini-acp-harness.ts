@@ -354,6 +354,7 @@ function startPreparedGeminiRun(
   let outerSessionRecordExpected = false;
   let innerSessionRecordExpected = false;
   let sessionCreationDispatched = false;
+  let sessionCreationRejectedBeforePersistence = false;
   let promptInFlight = false;
   let supportsImages = false;
   let activeContext: acp.ClientContext | undefined;
@@ -561,13 +562,20 @@ function startPreparedGeminiRun(
       activeFailurePhase = "session";
       activeTerminalEvent = "session/new";
       sessionCreationDispatched = true;
-      const newSessionResponse = await requestControl(
-        context.request(acp.methods.agent.session.new, {
-          cwd: options.input.cwd,
-          mcpServers: hostMcpServers,
-        }),
-        "session/new",
-      );
+      let newSessionResponse: unknown;
+      try {
+        newSessionResponse = await requestControl(
+          context.request(acp.methods.agent.session.new, {
+            cwd: options.input.cwd,
+            mcpServers: hostMcpServers,
+          }),
+          "session/new",
+        );
+      } catch (error) {
+        sessionCreationRejectedBeforePersistence =
+          isGeminiPreSessionAuthRejection(error);
+        throw error;
+      }
       sessionId = parseGeminiNewSessionId(newSessionResponse);
       innerSessionRecordExpected = true;
       const created = parseGeminiNewSessionResponse(newSessionResponse);
@@ -727,7 +735,7 @@ function startPreparedGeminiRun(
       if (
         sessionCreationDispatched
         && !innerSessionRecordExpected
-        && sessionCreationIdentityIsAmbiguous(outcome)
+        && !sessionCreationRejectedBeforePersistence
       ) {
         sessionCleanupFailed = true;
       }
@@ -845,14 +853,12 @@ function startPreparedGeminiRun(
   };
 }
 
-function sessionCreationIdentityIsAmbiguous(
-  outcome: ProviderRunResult,
-): boolean {
-  return !(
-    outcome.status === "failed"
-    && outcome.failure?.reason === "provider-error"
-    && outcome.failure.terminalEvent === "session/new:auth"
-  );
+function isGeminiPreSessionAuthRejection(error: unknown): boolean {
+  return error instanceof acp.RequestError
+    && error.code === -32_000
+    && error.message.length <= 1_024
+    && /auth_required|not authenticated|authentication required|login required|unauthorized|gemini api key is missing or not configured/iu
+      .test(error.message);
 }
 
 async function geminiPermission(

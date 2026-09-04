@@ -1470,11 +1470,14 @@ const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
   const message = JSON.parse(line);
   if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: ${INITIALIZE_RESULT} });
-  if (message.method === "session/new") return send({
-    jsonrpc: "2.0",
-    id: message.id,
-    error: { code: -32603, message: "Session registration failed unexpectedly." },
-  });
+  if (message.method === "session/new") {
+    process.stderr.write("An unrelated MCP helper said unauthorized.\\n");
+    return send({
+      jsonrpc: "2.0",
+      id: message.id,
+      error: { code: -32603, message: "Session registration failed unexpectedly." },
+    });
+  }
 });
 `);
 

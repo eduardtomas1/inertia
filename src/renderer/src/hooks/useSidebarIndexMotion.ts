@@ -1,4 +1,5 @@
 import { useLayoutEffect, type RefObject } from "react";
+import { useDocumentActivity } from "./useDocumentPresence";
 
 interface SidebarIndexMotionOptions {
   containerRef: RefObject<HTMLElement | null>;
@@ -14,10 +15,11 @@ export function useSidebarIndexMotion({
   enabled,
   layoutKey,
 }: SidebarIndexMotionOptions): void {
+  const documentActive = useDocumentActivity();
   useLayoutEffect(() => {
     const container = containerRef.current;
     if (!container) return;
-    if (!enabled) {
+    if (!enabled || !documentActive) {
       void runtimePromise?.then(
         (runtime) => runtime.cancelSidebarIndexMotion(container),
         () => undefined,
@@ -28,5 +30,5 @@ export function useSidebarIndexMotion({
     void runtimePromise.then((runtime) => {
       if (container.isConnected) runtime.updateSidebarIndexMotion(container);
     }, () => undefined);
-  }, [containerRef, enabled, layoutKey]);
+  }, [containerRef, documentActive, enabled, layoutKey]);
 }

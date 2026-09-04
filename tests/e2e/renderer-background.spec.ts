@@ -1,10 +1,16 @@
-import { expect, test, type ElectronApplication, type Page } from "@playwright/test";
-import { mkdir, writeFile } from "node:fs/promises";
+import { expect, test, type ElectronApplication, type Page, type TestInfo } from "@playwright/test";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture } from "./support/app-fixture";
 
-function seedLargeHistory(testDirectory: string, workspaceDirectory: string): void {
+declare global {
+  interface Window {
+    __backgroundCounters: { reactCommits: number; rafCallbacks: number; rendererInjected: boolean };
+  }
+}
+
+function seedHistory(testDirectory: string, workspaceDirectory: string, turns: number): void {
   const store = new RuntimeStore(join(testDirectory, "data", "inertia.sqlite"), workspaceDirectory, {
     recoverInterruptedRuns: false,
   });
@@ -15,7 +21,7 @@ function seedLargeHistory(testDirectory: string, workspaceDirectory: string): vo
       reasoningEffort: "ultra",
       modelSelection: { ...conversation.modelSelection, reasoningEffort: "ultra" },
     });
-    for (let index = 0; index < 128; index++) {
+    for (let index = 0; index < turns; index++) {
       const requestedAt = new Date(Date.now() - 200_000 + index * 1_000).toISOString();
       const { turn } = store.beginAgentTurn({
         id: `background-turn-${index}`, runId: `background-run-${index}`,
@@ -41,20 +47,28 @@ function seedLargeHistory(testDirectory: string, workspaceDirectory: string): vo
   } finally { store.close(); }
 }
 
-async function processMetrics(electronApp: ElectronApplication) {
-  return electronApp.evaluate(({ app, BrowserWindow }) => {
-    const rendererPid = BrowserWindow.getAllWindows()
-      .find((window) => window.webContents.getURL().startsWith("file:"))?.webContents.getOSProcessId();
-    return app.getAppMetrics().filter((metric) => metric.pid === rendererPid || metric.type === "GPU")
+async function processMetrics(page: Page, electronApp: ElectronApplication) {
+  const window = await electronApp.browserWindow(page);
+  const rendererPid = await window.evaluate((browserWindow) => browserWindow.webContents.getOSProcessId());
+  const metrics = await electronApp.evaluate(({ app }, pid) =>
+    app.getAppMetrics().filter((metric) => metric.pid === pid || metric.type === "GPU")
       .map((metric) => ({
-        role: metric.pid === rendererPid ? "renderer" : "gpu", pid: metric.pid,
-        cpuPercent: metric.cpu.percentCPUUsage, workingSetKb: metric.memory.workingSetSize,
-        privateKb: metric.memory.privateBytes,
-      }));
-  });
+        role: metric.pid === pid ? "renderer" : "gpu", pid: metric.pid,
+        cpuPercent: metric.cpu.percentCPUUsage, cpuSeconds: metric.cpu.cumulativeCPUUsage ?? null,
+        workingSetKb: metric.memory.workingSetSize, privateKb: metric.memory.privateBytes ?? null,
+      })), rendererPid);
+  return Promise.all(metrics.map(async (metric) => {
+    let rssKb: number | null = null, pssKb: number | null = null;
+    if (process.platform === "linux") {
+      const memory = await readFile(`/proc/${metric.pid}/smaps_rollup`, "utf8");
+      rssKb = Number(/^Rss:\s+(\d+)/mu.exec(memory)?.[1] ?? 0);
+      pssKb = Number(/^Pss:\s+(\d+)/mu.exec(memory)?.[1] ?? 0);
+    }
+    return { ...metric, rssKb, pssKb };
+  }));
 }
 
-async function sample(page: Page, electronApp: ElectronApplication, name: string) {
+async function sample(page: Page, electronApp: ElectronApplication, name: string, testInfo: TestInfo) {
   const session = await page.context().newCDPSession(page);
   const trace: { name: string; dur?: number; ph: string }[] = [];
   session.on("Tracing.dataCollected", ({ value }) => {
@@ -65,57 +79,90 @@ async function sample(page: Page, electronApp: ElectronApplication, name: string
     categories: "devtools.timeline,v8,disabled-by-default-devtools.timeline",
     transferMode: "ReportEvents",
   });
-  await processMetrics(electronApp);
+  const processesBefore = await processMetrics(page, electronApp);
+  const sampledAt = performance.now();
   const start = await page.evaluate(() => ({
-    focus: document.hasFocus(), visibility: document.visibilityState,
+    focus: document.hasFocus(), visibility: document.visibilityState, counters: { ...window.__backgroundCounters },
     animations: document.getAnimations().map((animation) => ({
       state: animation.playState, time: animation.currentTime,
       name: animation instanceof CSSAnimation ? animation.animationName : "web-animation",
     })),
   }));
   await page.waitForTimeout(5_000);
-  const processes = await processMetrics(electronApp);
+  const processes = await processMetrics(page, electronApp);
+  const elapsedMs = performance.now() - sampledAt;
   const heap = await session.send("Runtime.getHeapUsage");
   const end = await page.evaluate(() => ({
-    focus: document.hasFocus(), visibility: document.visibilityState,
+    focus: document.hasFocus(), visibility: document.visibilityState, counters: { ...window.__backgroundCounters },
     animations: document.getAnimations().map((animation) => ({
       state: animation.playState, time: animation.currentTime,
       name: animation instanceof CSSAnimation ? animation.animationName : "web-animation",
     })),
-    mountedRows: document.querySelectorAll(".response-virtual-item").length,
+    mountedRows: document.querySelectorAll(".response-virtual-item, .response-static-item").length,
     domNodes: document.querySelectorAll("*").length,
   }));
   const completed = new Promise<void>((resolve) => session.once("Tracing.tracingComplete", () => resolve()));
   await session.send("Tracing.end");
   await completed;
   await session.detach();
+  const tracePath = testInfo.outputPath(`${name}-renderer-trace.json`);
+  await writeFile(tracePath, JSON.stringify({ traceEvents: trace }));
+  await testInfo.attach(`${name}-renderer-trace`, { path: tracePath, contentType: "application/json" });
   const eventTotals: Record<string, { count: number; durationMs: number }> = {};
   for (const event of trace) {
-    if (!/^(FireAnimationFrame|FunctionCall|TimerFire|Layout|UpdateLayoutTree|Paint|CompositeLayers|.*GC.*)$/u.test(event.name)) continue;
+    if (!/^(FireAnimationFrame|FunctionCall|TimerFire|Layout|UpdateLayoutTree|Paint|PrePaint|RasterTask|CompositeLayers|Commit|Layerize|DrawFrame|MinorGC|MajorGC)$/u.test(event.name)) continue;
     const total = eventTotals[event.name] ??= { count: 0, durationMs: 0 };
     total.count++;
     total.durationMs += (event.dur ?? 0) / 1_000;
   }
-  return { name, durationMs: 5_000, start, end, processes, heap, eventTotals, traceEvents: trace.length };
+  return { name, durationMs: elapsedMs, start, end, processes: processes.map((metric) => {
+    const before = processesBefore.find((candidate) => candidate.pid === metric.pid);
+    return { ...metric, oneCoreCpuPercent: metric.cpuSeconds !== null && before?.cpuSeconds != null
+      ? (metric.cpuSeconds - before.cpuSeconds) / (elapsedMs / 1_000) * 100 : null };
+  }), heap, eventTotals, traceEvents: trace.length };
 }
 
-test("bounds background motion for a large virtualized conversation and resumes on focus", async ({}, testInfo) => {
+for (const turns of [2, 128]) {
+test(`bounds background motion for ${turns} turns and resumes on focus`, async ({ browserName: _browserName }, testInfo) => {
   test.setTimeout(180_000);
   const fixture = await createAppFixture({
-    name: "renderer-background", initialState: "conversation", windowDisplay: "primary",
-    beforeLaunch: ({ testDirectory, workspaceDirectory }) => seedLargeHistory(testDirectory, workspaceDirectory),
+    name: `renderer-background-${turns}`, initialState: "conversation", windowDisplay: "primary",
+    beforeLaunch: ({ testDirectory, workspaceDirectory }) => seedHistory(testDirectory, workspaceDirectory, turns),
   });
   const { page, electronApp } = fixture;
+  const mainWindow = await electronApp.browserWindow(page);
+  const mainWindowId = await mainWindow.evaluate((window) => window.id);
   try {
+    await page.addInitScript(() => {
+      const counters = { reactCommits: 0, rafCallbacks: 0, rendererInjected: false };
+      window.__backgroundCounters = counters;
+      Object.assign(window, { __REACT_DEVTOOLS_GLOBAL_HOOK__: {
+        supportsFiber: true,
+        inject() { counters.rendererInjected = true; return 1; },
+        onCommitFiberRoot() { counters.reactCommits++; },
+        onCommitFiberUnmount() {},
+      } });
+      const requestFrame = window.requestAnimationFrame.bind(window);
+      window.requestAnimationFrame = (callback) => requestFrame((time) => {
+        counters.rafCallbacks++;
+        callback(time);
+      });
+    });
+    await page.reload();
     const focusSession = await page.context().newCDPSession(page);
     await focusSession.send("Emulation.setFocusEmulationEnabled", { enabled: false });
     await expect(page.getByRole("heading", { name: "Background history fixture", level: 1 })).toBeVisible();
-    await expect(page.getByRole("feed", { name: "128 conversation turns" })).toBeVisible();
-    await expect.poll(() => page.locator(".response-virtual-item").count()).toBeLessThan(24);
+    if (turns === 128) {
+      await expect(page.getByRole("feed", { name: `${turns} conversation turns` })).toBeVisible();
+      await expect.poll(() => page.locator(".response-virtual-item").count()).toBeLessThan(24);
+    } else {
+      await expect(page.locator(".response-static-item")).toHaveCount(turns);
+    }
     await page.emulateMedia({ reducedMotion: "no-preference" });
-    await electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.focus());
+    await mainWindow.evaluate((window) => { window.focus(); window.webContents.focus(); });
     await expect.poll(() => page.evaluate(() => document.hasFocus())).toBe(true);
-    const foreground = await sample(page, electronApp, "foreground");
+    const foreground = await sample(page, electronApp, "foreground", testInfo);
+    const backgroundRequestedAt = performance.now();
     await electronApp.evaluate(async ({ BrowserWindow }) => {
       const other = new BrowserWindow({ width: 180, height: 120, x: 0, y: 0, show: true });
       await other.loadURL("data:text/html,<title>Focus fixture</title>");
@@ -125,22 +172,56 @@ test("bounds background motion for a large virtualized conversation and resumes 
     });
     await expect.poll(() => page.evaluate(() => document.hasFocus())).toBe(false);
     expect(await page.evaluate(() => document.visibilityState)).toBe("visible");
-    const background = await sample(page, electronApp, "mapped-unfocused");
-    await electronApp.evaluate(({ BrowserWindow }) => {
+    await expect.poll(() => page.evaluate(() => {
+      const animations = document.getAnimations();
+      return animations.length > 0 && animations.every((animation) => animation.playState === "paused");
+    })).toBe(true);
+    const pauseObservedMs = performance.now() - backgroundRequestedAt;
+    const background = await sample(page, electronApp, "mapped-unfocused", testInfo);
+    await mainWindow.evaluate((window) => window.minimize());
+    await expect.poll(() => mainWindow.evaluate((window) => window.isMinimized())).toBe(true);
+    await expect.poll(() => page.evaluate(() => document.hasFocus())).toBe(false);
+    // Playwright disables Chromium occlusion/background throttling, so record
+    // the actual visibility state instead of assuming minimization hides it.
+    const minimized = await sample(page, electronApp, "minimized", testInfo);
+    await mainWindow.evaluate((window) => window.restore());
+    await electronApp.evaluate(({ BrowserWindow }, id) => {
       for (const window of BrowserWindow.getAllWindows()) {
-        if (window.webContents.getURL().startsWith("data:")) window.destroy();
-        else window.focus();
+        if (window.id !== id) window.destroy();
+        else { window.focus(); window.webContents.focus(); }
       }
-    });
+    }, mainWindowId);
     await expect.poll(() => page.evaluate(() => document.hasFocus())).toBe(true);
-    const resumed = await sample(page, electronApp, "resumed");
-    const report = JSON.stringify({ turns: 128, activities: 9472, messages: 1024, foreground, background, resumed }, null, 2);
+    const resumed = await sample(page, electronApp, "resumed", testInfo);
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await expect.poll(() => page.evaluate(() => document.getAnimations().some(
+      (animation) => animation instanceof CSSAnimation && animation.animationName === "ultra-reasoning-frame-flow",
+    ))).toBe(false);
+    const report = JSON.stringify({ turns, activities: turns * 74, messages: turns * 8, pauseObservedMs, foreground, background, resumed, minimized }, null, 2);
     await mkdir("performance-results", { recursive: true });
-    await writeFile(`performance-results/renderer-background-${process.platform}-${process.arch}.json`, report);
+    await writeFile(`performance-results/renderer-background-${process.platform}-${process.arch}-${turns}.json`, report);
     await testInfo.attach("renderer-background-profile", {
       body: Buffer.from(report),
       contentType: "application/json",
     });
+    expect(background.start.counters.rendererInjected).toBe(true);
+    for (const measurement of [background, minimized]) {
+      expect(measurement.start.focus).toBe(false);
+      expect(measurement.end.focus).toBe(false);
+      expect(measurement.end.animations).toEqual(measurement.start.animations);
+      expect(measurement.end.animations.every((animation) => animation.state === "paused")).toBe(true);
+      expect(measurement.end.counters.reactCommits).toBe(measurement.start.counters.reactCommits);
+      expect(measurement.end.counters.rafCallbacks).toBe(measurement.start.counters.rafCallbacks);
+      expect(measurement.end.mountedRows).toBeLessThan(24);
+    }
+    for (const measurement of [foreground, resumed]) {
+      const start = measurement.start.animations.find((animation) => animation.name === "ultra-reasoning-frame-flow");
+      const end = measurement.end.animations.find((animation) => animation.name === "ultra-reasoning-frame-flow");
+      expect(start?.state).toBe("running");
+      expect(end?.state).toBe("running");
+      expect(Number(end?.time) - Number(start?.time)).toBeGreaterThan(4_000);
+    }
     expect(fixture.rendererErrors).toEqual([]);
   } finally { await fixture.close(); }
 });
+}

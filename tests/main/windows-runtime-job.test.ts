@@ -643,6 +643,16 @@ describe("Windows runtime Job Object containment", () => {
     expect(supervisorProcessSource).not.toContain("Process.GetProcessById(");
     expect(boundSupervisorLaunch).toContain("UpdateSupervisorProcess.Start(");
     expect(boundSupervisorLaunch).not.toMatch(/\bProcess\.Start\(/u);
+    const bootstrap = boundSupervisorLaunch.match(/string bootstrapScript = @"([\s\S]*?)";/u);
+    expect(bootstrap).not.toBeNull();
+    expect(Buffer.from(bootstrap![1]!, "utf16le").toString("base64").length)
+      .toBeLessThan(2_048);
+    expect(boundSupervisorLaunch).toContain("loaderBytes.Length > 16384");
+    expect(boundSupervisorLaunch).toContain("$line.Length -gt 21848");
+    expect(boundSupervisorLaunch).toContain("$bytes.Length -gt 16384");
+    expect(boundSupervisorLaunch).toContain("-EncodedCommand \" + encodedBootstrap");
+    expect(boundSupervisorLaunch.indexOf("Convert.ToBase64String(loaderBytes)"))
+      .toBeLessThan(boundSupervisorLaunch.indexOf("Convert.ToBase64String(supervisorBytes)"));
     expect(boundSupervisorLaunch.indexOf("OpenUpdateArtifact(supervisorPath"))
       .toBeLessThan(boundSupervisorLaunch.indexOf("UpdateSupervisorProcess.Start("));
     expect(boundSupervisorLaunch).toContain(

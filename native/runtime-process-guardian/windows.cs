@@ -1955,8 +1955,28 @@ try {
 } finally {
   if ($null -ne $stream) { $stream.Dispose() }
 }";
-      string encodedLoader = Convert.ToBase64String(
-        Encoding.Unicode.GetBytes(loaderScript)
+      byte[] loaderBytes = new UTF8Encoding(false, true).GetBytes(loaderScript);
+      if (loaderBytes.Length == 0 || loaderBytes.Length > 16384) {
+        diagnostic = ErrorLine("update-launch-loader-size", 0);
+        return 46;
+      }
+      // The broker uses the same two-stage transport to keep the trusted
+      // PowerShell command line small on Windows ARM64.
+      string bootstrapScript = @"$ErrorActionPreference = 'Stop'
+try {
+  $line = [Console]::In.ReadLine()
+  if ($null -eq $line -or $line.Length -lt 1 -or $line.Length -gt 21848) { throw 'size' }
+  $bytes = [Convert]::FromBase64String($line)
+  if ($bytes.Length -lt 1 -or $bytes.Length -gt 16384 -or
+    [Convert]::ToBase64String($bytes) -cne $line) { throw 'encoding' }
+  $utf8 = [Text.UTF8Encoding]::new($false, $true)
+  & ([ScriptBlock]::Create($utf8.GetString($bytes)))
+} catch {
+  [Console]::Error.WriteLine('INERTIA_JOB_ERROR stage=update-bootstrap')
+  exit 46
+}";
+      string encodedBootstrap = Convert.ToBase64String(
+        Encoding.Unicode.GetBytes(bootstrapScript)
       );
       string powershellPath = TrustedPowerShellPath();
       if (powershellPath == null) {
@@ -1966,10 +1986,11 @@ try {
       child = UpdateSupervisorProcess.Start(
         powershellPath,
         "-NoLogo -NoProfile -NonInteractive "
-          + "-ExecutionPolicy Bypass -EncodedCommand " + encodedLoader,
+          + "-ExecutionPolicy Bypass -EncodedCommand " + encodedBootstrap,
         out launchStage
       );
       launchStage = "update-launch-input";
+      child.StandardInput.WriteLine(Convert.ToBase64String(loaderBytes));
       child.StandardInput.WriteLine(Convert.ToBase64String(supervisorBytes));
       child.StandardInput.WriteLine(expectedSupervisorDigest);
       child.StandardInput.WriteLine(Convert.ToBase64String(

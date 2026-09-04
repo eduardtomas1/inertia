@@ -445,6 +445,7 @@ describe("release asset staging", () => {
       await readFile(join(stageRoot, "final", releaseSbomName), "utf8"),
     ) as {
       bomFormat: string;
+      components: Array<{ name: string }>;
       serialNumber: string;
       metadata: {
         component: { name: string; version: string };
@@ -470,7 +471,24 @@ describe("release asset staging", () => {
       },
       { name: "inertia:node-version", value: process.version },
       { name: "inertia:electron-version", value: electronVersion },
+      {
+        name: "inertia:sbom-scope",
+        value: "cross-platform-package-lock-production-union",
+      },
     ]));
+    expect(sbom.components.map(({ name }) => name)).toEqual(expect.arrayContaining([
+      "@anthropic-ai/claude-agent-sdk-darwin-arm64",
+      "@anthropic-ai/claude-agent-sdk-linux-arm64",
+      "@anthropic-ai/claude-agent-sdk-win32-x64",
+    ]));
+    const boundWindowsAsset = policies["windows-x64"].packages[0];
+    const boundWindowsDigest = createHash("sha256")
+      .update(await readFile(join(stageRoot, "final", boundWindowsAsset)))
+      .digest("hex");
+    expect(sbom.metadata.properties).toContainEqual({
+      name: "inertia:release-asset-sha256",
+      value: `${boundWindowsAsset}:${boundWindowsDigest}`,
+    });
 
     const macMetadata = parse(
       await readFile(join(stageRoot, "final", "latest-mac.yml"), "utf8"),

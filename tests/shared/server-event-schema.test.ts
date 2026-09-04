@@ -1143,6 +1143,13 @@ describe("server event conversation discriminant boundary", () => {
   });
 });
 describe("server event provider identity boundary", () => {
+  const harnessIds = {
+    codex: "codex-app-server",
+    claude: "claude-agent-sdk",
+    cursor: "cursor-acp",
+    kimi: "kimi-acp",
+    opencode: "opencode-sdk",
+  } as const;
   const provider = {
     id: "codex",
     label: "Codex",
@@ -1172,6 +1179,16 @@ describe("server event provider identity boundary", () => {
         refreshing: false,
       },
     },
+    capabilityContract: {
+      schemaVersion: 1,
+      harnessId: harnessIds.codex,
+      manifestDigest: "a".repeat(64),
+      installationVerified: true,
+      installedVersion: "1.0.0",
+      currentlyAvailableCount: 3,
+      declaredCapabilityCount: 4,
+      hostToolBridgeAvailable: true,
+    },
   };
   const snapshotEvent = (providerInfo: unknown): unknown => ({
     type: "snapshot.updated",
@@ -1197,6 +1214,10 @@ describe("server event provider identity boundary", () => {
         ...provider,
         id,
         models: [{ ...provider.models[0], fastMode: expectedFastMode }],
+        capabilityContract: {
+          ...provider.capabilityContract,
+          harnessId: harnessIds[id as keyof typeof harnessIds],
+        },
         agentThreadManagement: {
           state: "supported",
           detail: "Audited runtime capability.",
@@ -1216,6 +1237,13 @@ describe("server event provider identity boundary", () => {
     ["undeclared Fast metadata", { ...provider, models: [{ ...provider.models[0], fastMode: { ...provider.models[0].fastMode, apiKey: "never-cross-ipc" } }] }],
     ["rate-limit IDs", { ...provider, rateLimits: [provider.rateLimits[0], { ...provider.rateLimits[0] }] }],
     ["chat-tool capability", { ...provider, agentThreadManagement: { state: "invented", detail: "Unsafe" } }],
+    ["capability schema", { ...provider, capabilityContract: { ...provider.capabilityContract, schemaVersion: 99 } }],
+    ["capability provider relationship", { ...provider, capabilityContract: { ...provider.capabilityContract, harnessId: harnessIds.claude } }],
+    ["capability digest", { ...provider, capabilityContract: { ...provider.capabilityContract, manifestDigest: "unsafe" } }],
+    ["capability version", { ...provider, capabilityContract: { ...provider.capabilityContract, installedVersion: "/mnt/customer/private.txt" } }],
+    ["capability counts", { ...provider, capabilityContract: { ...provider.capabilityContract, currentlyAvailableCount: 5 } }],
+    ["unverified capability evidence", { ...provider, capabilityContract: { ...provider.capabilityContract, installationVerified: false } }],
+    ["undeclared capability payload", { ...provider, capabilityContract: { ...provider.capabilityContract, prompt: "never-cross-ipc" } }],
   ])("rejects duplicate or malformed %s", (_label, malformed) => {
     expect(() => parseServerEvent(snapshotEvent(malformed))).toThrow("Malformed server event");
   });
@@ -1327,6 +1355,32 @@ describe("server event remaining discriminant and identity boundary", () => {
     createdAt: checkedAt,
     updatedAt: checkedAt,
   };
+  const lifecycleDiagnostics = {
+    schemaVersion: 1,
+    capturedAt: checkedAt,
+    runtimeStartedAt: checkedAt,
+    runtimeUptimeMs: 1_000,
+    runtimeGenerationHash: "a".repeat(12),
+    buildMetadata: null,
+    systemBootRelationship: "current",
+    startupBlockerCodes: [],
+    quarantineReason: null,
+    cleanupProofMethod: "current-generation-lease",
+    ownedResources: {
+      providerRuns: 0,
+      turns: 0,
+      terminals: 0,
+      workspaceRuns: 0,
+      interactions: 0,
+      maintenanceOperations: 0,
+    },
+    activeProviders: [],
+    providerMaintenance: [],
+    updateHandoffPhase: null,
+    unresolvedTurnCount: 0,
+    unresolvedInteractionCount: 0,
+    actionableState: "safe-and-ready",
+  };
   const snapshot = (overrides: Record<string, unknown> = {}): unknown => ({
     projects: [project],
     conversations: [],
@@ -1334,6 +1388,7 @@ describe("server event remaining discriminant and identity boundary", () => {
     providers: [provider],
     maintenanceOperations: [operation],
     backendDefaults: [backendDefault],
+    lifecycleDiagnostics,
     settings: defaultSettings,
     activeProjectId: project.id,
     activeConversationId: null,
@@ -1454,6 +1509,14 @@ describe("server event remaining discriminant and identity boundary", () => {
     ["backend default relationship", { backendDefaults: [{
       ...backendDefault, scope: "global", projectId: "11111111-1111-4111-8111-111111111111",
     }] }],
+    ["lifecycle schema", { lifecycleDiagnostics: { ...lifecycleDiagnostics, schemaVersion: 99 } }],
+    ["lifecycle reason", { lifecycleDiagnostics: { ...lifecycleDiagnostics, quarantineReason: "raw-provider-failure" } }],
+    ["lifecycle undeclared payload", { lifecycleDiagnostics: {
+      ...lifecycleDiagnostics,
+      prompt: "never-cross-ipc",
+      providerPayload: { token: "secret" },
+      path: "/mnt/customer/private.txt",
+    } }],
   ])("rejects malformed snapshot %s", (_label, overrides) => {
     expect(() => parseServerEvent({
       type: "snapshot.updated",

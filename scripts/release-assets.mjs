@@ -120,10 +120,33 @@ const sharedMetadataByName = new Map(
 
 const releaseSourceRoot = resolve(process.env.INERTIA_RELEASE_SOURCE_DIR ?? "release");
 
-async function generateReleaseSbom() {
+async function generateReleaseSbom(releaseAssets) {
+  if (
+    !Array.isArray(releaseAssets)
+    || releaseAssets.length === 0
+    || releaseAssets.length > 128
+    || releaseAssets.some((asset) => (
+      !isPlainRecord(asset)
+      || typeof asset.name !== "string"
+      || !/^[A-Za-z0-9._-]+$/u.test(asset.name)
+      || !Number.isSafeInteger(asset.size)
+      || asset.size <= 0
+      || typeof asset.sha256 !== "string"
+      || !/^[0-9a-f]{64}$/u.test(asset.sha256)
+    ))
+  ) throw new Error("The release SBOM asset identity set is invalid.");
+  const assetIdentity = releaseAssets
+    .map(({ name, sha256, size }) => ({ name, sha256, size }))
+    .sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0);
   const result = spawnSync(
     "npm",
-    ["sbom", "--omit=dev", "--sbom-format", "cyclonedx"],
+    [
+      "sbom",
+      "--omit=dev",
+      "--package-lock-only",
+      "--sbom-format",
+      "cyclonedx",
+    ],
     {
       cwd: process.cwd(),
       encoding: "utf8",
@@ -176,7 +199,12 @@ async function generateReleaseSbom() {
   ) throw new Error("The release Electron build identity is invalid.");
   const serialSeed = createHash("sha256")
     .update("inertia.release-sbom-identity.v1\0", "utf8")
-    .update(JSON.stringify([releaseSourceSha, releaseTag, lockfileDigest]), "utf8")
+    .update(JSON.stringify([
+      releaseSourceSha,
+      releaseTag,
+      lockfileDigest,
+      assetIdentity,
+    ]), "utf8")
     .digest("hex");
   const serial = serialSeed.slice(0, 32).split("");
   serial[12] = "5";
@@ -192,6 +220,14 @@ async function generateReleaseSbom() {
       { name: "inertia:package-lock-sha256", value: lockfileDigest },
       { name: "inertia:node-version", value: process.version },
       { name: "inertia:electron-version", value: electronManifest.version },
+      {
+        name: "inertia:sbom-scope",
+        value: "cross-platform-package-lock-production-union",
+      },
+      ...assetIdentity.map((asset) => ({
+        name: "inertia:release-asset-sha256",
+        value: `${asset.name}:${asset.sha256}`,
+      })),
     ],
   };
   const bytes = Buffer.from(`${JSON.stringify(document, null, 2)}\n`, "utf8");
@@ -719,7 +755,11 @@ if (command === "stage") {
   const sbomName = `Inertia-${version}.sbom.cdx.json`;
   assertSafeAssetName(sbomName, "Release SBOM");
   const sbomPath = join(finalDirectory, sbomName);
-  await writeFile(sbomPath, await generateReleaseSbom(), { flag: "wx" });
+  await writeFile(
+    sbomPath,
+    await generateReleaseSbom(combined),
+    { flag: "wx" },
+  );
   const sbomMetadata = await fileMetadata(sbomPath);
   combined.push(sbomMetadata);
   combinedNames.add(sbomMetadata.name);

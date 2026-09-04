@@ -33,6 +33,7 @@ const budgets = {
   deferredSpreadsheetJavaScript: 510 * kibibyte,
   deferredDiscordSettingsJavaScript: 6 * kibibyte,
   deferredCanaryRollbackJavaScript: 4 * kibibyte,
+  deferredLifecycleIntegritySettingsJavaScript: 5 * kibibyte,
   deferredAppUpdateNoticeJavaScript: 6 * kibibyte,
   deferredComposerQueueJavaScript: 8 * kibibyte,
   // The terminal owns reload recovery, bounded replay, and provider-resume UI.
@@ -140,6 +141,9 @@ const deferredDiscordSettingsJavaScript = assetNames.find(
 const deferredCanaryRollbackJavaScript = assetNames.find(
   (name) => /^CanaryRollbackSetting-.*\.js$/u.test(name),
 );
+const deferredLifecycleIntegritySettingsJavaScript = assetNames.find(
+  (name) => /^LifecycleIntegritySettings-.*\.js$/u.test(name),
+);
 const deferredAppUpdateNoticeJavaScript = assetNames.find(
   (name) => /^AppUpdateNotice-.*\.js$/u.test(name),
 );
@@ -218,6 +222,11 @@ if (!deferredDiscordSettingsJavaScript) {
 if (!deferredCanaryRollbackJavaScript) {
   throw new Error(
     "Renderer bundle check could not find the deferred Canary rollback chunk.",
+  );
+}
+if (!deferredLifecycleIntegritySettingsJavaScript) {
+  throw new Error(
+    "Renderer bundle check could not find the deferred lifecycle integrity settings chunk.",
   );
 }
 if (!deferredAppUpdateNoticeJavaScript) {
@@ -351,6 +360,9 @@ const deferredDiscordSettingsJavaScriptBytes = await assetBytes(
 const deferredCanaryRollbackJavaScriptBytes = await assetBytes(
   `assets/${deferredCanaryRollbackJavaScript}`,
 );
+const deferredLifecycleIntegritySettingsJavaScriptBytes = await assetBytes(
+  `assets/${deferredLifecycleIntegritySettingsJavaScript}`,
+);
 const deferredAppUpdateNoticeJavaScriptBytes = await assetBytes(
   `assets/${deferredAppUpdateNoticeJavaScript}`,
 );
@@ -402,6 +414,7 @@ const coreJavaScriptBytes =
   - deferredSpreadsheetJavaScriptBytes
   - deferredDiscordSettingsJavaScriptBytes
   - deferredCanaryRollbackJavaScriptBytes
+  - deferredLifecycleIntegritySettingsJavaScriptBytes
   - deferredAppUpdateNoticeJavaScriptBytes
   - deferredComposerQueueJavaScriptBytes
   - deferredTerminalJavaScriptBytes
@@ -431,6 +444,8 @@ const measurements = {
   deferredSpreadsheetJavaScript: deferredSpreadsheetJavaScriptBytes,
   deferredDiscordSettingsJavaScript: deferredDiscordSettingsJavaScriptBytes,
   deferredCanaryRollbackJavaScript: deferredCanaryRollbackJavaScriptBytes,
+  deferredLifecycleIntegritySettingsJavaScript:
+    deferredLifecycleIntegritySettingsJavaScriptBytes,
   deferredAppUpdateNoticeJavaScript: deferredAppUpdateNoticeJavaScriptBytes,
   deferredComposerQueueJavaScript: deferredComposerQueueJavaScriptBytes,
   deferredTerminalJavaScript: deferredTerminalJavaScriptBytes,

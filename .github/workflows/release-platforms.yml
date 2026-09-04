@@ -16,7 +16,10 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-${{ inputs.release_tag || github.ref }}
+  # Push and manual-dispatch events for the same tag must share one publisher
+  # owner. github.ref uses refs/tags/<tag> on push while the dispatch input is
+  # only <tag>, so normalize both paths to the exact tag name.
+  group: release-${{ inputs.release_tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -168,6 +171,9 @@ jobs:
       - name: Run release-candidate platform performance guard
         run: npm run benchmark:platform:smoke
 
+      - name: Enforce the isolated browser-evidence CPU budget
+        run: npm run test:browser-evidence-cpu-budget
+
       - name: Verify quality and run the complete unit suite
         run: npm run check:quality && npm test
 
@@ -309,12 +315,36 @@ jobs:
             cp -- "${generated[0]}" "$expected"
           fi
 
+      - name: Download checksummed packaged Windows N-1 installer
+        if: runner.os == 'Windows' && matrix.arch == 'x64' && !startsWith(inputs.release_tag || github.ref_name, 'canary-v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          current_version="$(node -p "require('./package.json').version")"
+          node scripts/ci/download-windows-n-minus-one.mjs \
+            --current-version "$current_version" \
+            --channel "$INERTIA_RELEASE_CHANNEL" \
+            --architecture x64 \
+            --output-directory release/n-minus-one
+
       - name: Smoke native packaged app
         if: runner.os != 'Linux'
         run: npm run test:package-smoke
 
-      - name: Install, smoke, and uninstall Windows package
-        if: runner.os == 'Windows'
+      - name: Install N-1, upgrade in place, smoke, and uninstall Windows x64 package
+        if: runner.os == 'Windows' && matrix.arch == 'x64' && !startsWith(inputs.release_tag || github.ref_name, 'canary-v')
+        env:
+          INERTIA_WINDOWS_N_MINUS_ONE_METADATA: release/n-minus-one/metadata.json
+        run: npm run test:windows-installer-smoke
+
+      - name: Install, smoke, and uninstall Windows x64 Canary package
+        if: runner.os == 'Windows' && matrix.arch == 'x64' && startsWith(inputs.release_tag || github.ref_name, 'canary-v')
+        run: npm run test:windows-installer-smoke
+
+      - name: Install, smoke, and uninstall Windows ARM64 package
+        if: runner.os == 'Windows' && matrix.arch == 'arm64'
         run: npm run test:windows-installer-smoke
 
       - name: Prove AppImage and guardian runtime on pristine Ubuntu 22.04
@@ -464,6 +494,7 @@ jobs:
           RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
           PUSH_EVENT_SHA: ${{ github.event_name == 'push' && github.sha || '' }}
           RELEASE_EXPECTED_COMMIT: ${{ needs.release_identity.outputs.release_sha }}
+          RELEASE_VERIFY_REMOTE: "1"
         run: |
           set -euo pipefail
           release_ref="refs/tags/$RELEASE_TAG"
@@ -548,6 +579,7 @@ jobs:
         env:
           ASSET_DIRECTORY: ${{ runner.temp }}/inertia-release-assets/final
           GH_TOKEN: ${{ github.token }}
+          PUSH_EVENT_SHA: ${{ github.event_name == 'push' && github.sha || '' }}
           RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         run: |
           set -euo pipefail
@@ -602,7 +634,19 @@ jobs:
             return 1
           }
 
+          revalidate_frozen_tag() {
+            local event_sha release_ref
+            release_ref="refs/tags/$RELEASE_TAG"
+            event_sha="${PUSH_EVENT_SHA:-$RELEASE_SOURCE_SHA}"
+            RELEASE_REF="$release_ref" \
+              RELEASE_EVENT_SHA="$event_sha" \
+              RELEASE_EXPECTED_COMMIT="$RELEASE_SOURCE_SHA" \
+              RELEASE_VERIFY_REMOTE=1 \
+              node scripts/validate-release.mjs
+          }
+
           if ! load_release_by_tag; then
+            revalidate_frozen_tag
             gh release create "$RELEASE_TAG" \
               --repo "$GITHUB_REPOSITORY" \
               --verify-tag \
@@ -675,6 +719,7 @@ jobs:
           for path in "${assets[@]}"; do
             name="$(basename "$path")"
             if [[ -z "${remote_assets[$name]+present}" ]]; then
+              revalidate_frozen_tag
               gh release upload "$RELEASE_TAG" "$path" --repo "$GITHUB_REPOSITORY"
             fi
           done
@@ -710,6 +755,7 @@ jobs:
             fi
           done
 
+          revalidate_frozen_tag
           if [[ "$INERTIA_RELEASE_CHANNEL" == canary ]]; then
             gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease --latest=false
           else
@@ -740,6 +786,7 @@ jobs:
           RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
           PUSH_EVENT_SHA: ${{ github.event_name == 'push' && github.sha || '' }}
           RELEASE_EXPECTED_COMMIT: ${{ needs.release_identity.outputs.release_sha }}
+          RELEASE_VERIFY_REMOTE: "1"
         run: |
           set -euo pipefail
           release_ref="refs/tags/$RELEASE_TAG"
@@ -756,8 +803,21 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           FEED_DIRECTORY: ${{ runner.temp }}/inertia-canary-feed
+          PUSH_EVENT_SHA: ${{ github.event_name == 'push' && github.sha || '' }}
+          RELEASE_SOURCE_SHA: ${{ needs.release_identity.outputs.release_sha }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         run: |
           set -euo pipefail
+          revalidate_frozen_tag() {
+            local event_sha release_ref
+            release_ref="refs/tags/$RELEASE_TAG"
+            event_sha="${PUSH_EVENT_SHA:-$RELEASE_SOURCE_SHA}"
+            RELEASE_REF="$release_ref" \
+              RELEASE_EVENT_SHA="$event_sha" \
+              RELEASE_EXPECTED_COMMIT="$RELEASE_SOURCE_SHA" \
+              RELEASE_VERIFY_REMOTE=1 \
+              node scripts/validate-release.mjs
+          }
           for attempt in 1 2 3 4 5; do
             feed_worktree="$(mktemp -d "$RUNNER_TEMP/inertia-canary-feed.XXXXXX")"
             git -C "$feed_worktree" init
@@ -797,6 +857,7 @@ jobs:
             cp -- "$FEED_DIRECTORY"/* "$feed_worktree"/
             git -C "$feed_worktree" add --all
             git -C "$feed_worktree" -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -m "Publish Canary feed ${{ inputs.release_tag || github.ref_name }}"
+            revalidate_frozen_tag
             if git -C "$feed_worktree" push origin HEAD:canary-feed; then
               exit 0
             fi

@@ -13,8 +13,9 @@ then runs four explicit critical jobs in parallel:
 - Linux x64: the complete all-source coverage suite, including every generated
   portable provider/runtime test, and production dependency audit;
 - Linux x64 lifecycle: focused updater, containment, recovery, and shutdown unit
-  tests; one packaged build; destructive runtime-recovery Electron tests; and an
-  AppImage package, identity, fuse, native-guardian, and launch smoke;
+  tests; a compact synthetic-turn Electron/core bridge; one packaged build;
+  destructive runtime-recovery Electron tests; and an AppImage package,
+  identity, fuse, native-guardian, and launch smoke;
 - Windows x64: focused Job Object, containment, updater-handoff, recovery, and
   shutdown tests followed by one build and destructive Electron recovery;
 - macOS arm64: focused guardian, containment, terminal shutdown, updater-handoff,
@@ -38,11 +39,59 @@ Full benchmarks run for performance/all-evidence pull requests and for every
 retain all correctness evidence but skip benchmark-only steps. Concurrency groups
 are separate by event and ref, and only superseded pull-request runs are cancelled.
 
+Scheduled certification repeats a focused common and platform-specific lifecycle
+set three times in fresh Vitest processes on all six targets. Every attempt log and
+a structured pass/failure/flake summary are retained for 30 days; one failed
+attempt fails the target after artifact publication. A failed scheduled
+certification opens or updates one tracked issue with the exact SHA, failed job
+and step names, platform, locked provider-version link, run/artifact link, and an
+occurrence count derived only from marked automation reports. Failure of that
+issue reporter is itself visible rather than being converted to success.
+
+The hostile browser-evidence batch keeps its 1.5-second thread-CPU ceiling in
+`npm run test:browser-evidence-cpu-budget`, which starts one fresh,
+uninstrumented
+Vitest worker. The ordinary and coverage suites still execute every exact
+sanitization, publication, redaction, ordering, and bound assertion, but do not
+charge concurrent V8 coverage bookkeeping to the production CPU budget. Every
+CI event runs the isolated guard in the Linux quality gate, and the release
+matrix repeats it on each target platform.
+
 Release tags continue through the independent full six-target release workflow.
 Each target checks out and validates the exact tag, builds and smokes its native
 package, stages checksummed assets, and uploads those exact bytes. The publish job
 downloads and verifies the staged set before provenance attestation and upload.
+It also re-reads the direct and peeled remote tag under a bounded noninteractive
+Git operation immediately before draft creation, every missing-asset upload, and
+the final publish transition, so a remotely moved tag cannot inherit frozen
+artifacts from the earlier validation window.
 The CI tiering change does not weaken or reuse unverified release bytes.
+
+Stable Windows x64 full and release certification also select the greatest
+published version below the candidate, require its architecture-specific installer
+and `SHA256SUMS.txt`, stream both under byte ceilings, and verify the exact digest.
+The released N-1 installer is installed and smoked first; the N installer then
+replaces it in the same directory and reopens the same bounded profile, workspace,
+and database state. The installed N files are compared byte-for-byte with the
+candidate unpacked tree before another smoke and uninstall. This is real packaged
+NSIS replacement and existing-profile evidence; it does not claim to drive the
+old app's `electron-updater` UI/handoff or fault-inject the privileged installer.
+The PR Windows x64 lifecycle sentinel nevertheless compiles the native helper
+and runs the deterministic updater startup, authenticated terminal-receipt, and
+supervisor namespace-pinning suites. On Windows that supervisor suite retargets
+a parent junction after request serialization and proves that the launch request
+continues to name the previously canonicalized paths. Its Windows-only native
+case also runs a delayed installer, observes an authenticated quarantine receipt
+at the deadline before that installer completes, and then observes the installer
+finish without having been killed. That configured Windows-only case also
+exercises the integrity-locked broker path and rejects a second launch while the
+first exact operation claim is live; portable contract tests prove that no
+direct staged-exe update entry remains and that every native wait shares one
+monotonic budget. This describes the enforced flow, not a hosted result for the
+current change before CI has run.
+Concurrent replacement of an
+already-canonical native ancestor still requires packaged Windows evidence; a
+Linux source/contract run is not counted as proof of that platform boundary.
 
 For an ordinary pull request, the expected critical-path shape is the classifier
 and quality gate followed by the slowest of the four parallel critical jobs; it
@@ -135,12 +184,14 @@ now packages and smokes the one bundle built by that target rather than invoking
 a rebuilding `dist:*` path. Cross-job fan-out still needs a portable artifact
 identity containing the commit, lockfile, Node, Electron ABI, native-helper,
 OS/architecture, and build-configuration inputs. Release finalization publishes
-a checksummed CycloneDX dependency SBOM bound to the frozen source SHA, release
-tag, and package-lock digest. Each target also runs and retains release-candidate
-platform, desktop, and package-smoke performance evidence. The release tier
-still needs a packaged N-1-to-N update/rollback scenario. The critical tier also lacks a
-dedicated synthetic-turn Electron bridge distinct from the broader lifecycle
-and package jobs. Scheduled certification has no repeated lifecycle flake run,
-tracked-issue updater, or packaged N-1 fixture. Finally, CI retains first-attempt
-logs but does not yet aggregate pass-on-rerun flake metrics or an owner-visible
-quarantine policy. No blind retry was introduced to conceal those gaps.
+a checksummed CycloneDX dependency SBOM from the complete production lockfile
+union, including platform-optional packages, and binds it to the frozen source
+SHA, release tag, lockfile digest, and every exact staged asset digest. Each
+target also runs and retains release-candidate
+platform, desktop, and package-smoke performance evidence. Packaged stable Windows
+x64 now covers a successful N-1-to-N same-profile NSIS transition, but native
+`electron-updater` initiation and deterministic interrupted-installer rollback
+remain unproved with packaged artifacts. Cross-night trend aggregation and an
+owner-visible quarantine policy also remain future work; a pass after any failed
+nightly attempt is already classified and failed as a flake. No blind retry was
+introduced to conceal those boundaries.

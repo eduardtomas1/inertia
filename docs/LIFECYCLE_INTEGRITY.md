@@ -62,10 +62,10 @@ lease; it does not mean an in-memory absence proves cleanup.
 | Runtime generation | Electron `RuntimeSupervisor`; `runtimeGenerationId` + `systemBootId` | `RuntimeProcessRecord` / runtime lease, owned-process journal, cleanup receipts | Supervisor accepting the exact worker event for its current record | Windows Job Object or exact POSIX guardian/process evidence plus generation receipt. Unconfirmed cleanup blocks bootstrap and all replacement generations. |
 | Runtime worker | Supervisor; generation identity + native process creation identity | `RuntimeProcessRecord.child` / containment and owned-process records | Supervisor after exact `runtime.stopped`, child close, and generation cleanup | Supervisor joins one bounded shutdown/force path. Late worker messages are ignored. Startup recovery reconciles the prior record before spawn. |
 | Runtime HTTP/WebSocket server | Worker runtime; runtime generation + loopback server instance | Runtime server/socket registries / covered by runtime lease | Runtime shutdown coordinator | Listener close and all socket/operation drains must finish before the worker can report stopped. The supervisor remains the outer cleanup authority. |
-| Provider run | Turn controller and `ProviderManager`; exact provider, conversation, run, turn, harness, and backend tuple | controller/manager active maps / `provider_run_ownership` row | Server run-state engine selects the root outcome | Exact terminal-result tuple plus `cleanupConfirmed`. Mismatch or false cleanup retains ownership and closes admission; startup recovery reconciles the durable row. |
+| Provider run | Turn controller and `ProviderManager`; exact provider, conversation, run, turn, harness, and backend tuple | controller/manager active maps / `provider_run_ownership` row | Server run-state engine selects the root outcome | The manager first validates the exact terminal-result tuple and `cleanupConfirmed: true`; the turn owner clears durable ownership and releases attachments only after exact `stopOwned(...) === "settled"` proof. Missing, mismatched, detached, thrown, or false cleanup evidence retains ownership, quarantines admission, and leaves startup recovery to reconcile the durable row. |
 | Provider session/thread | Exact provider adapter; native ID bound to continuation identity | adapter session / conversation and turn session snapshots | Server decides whether the native ID is eligible for reuse | Adapter closes protocol resources; continuation requires an exact compatibility token. Unknown or changed compatibility preserves history but starts a fresh provider session. |
 | Provider-owned server | OpenCode SDK harness; provider run tuple + server process identity | harness-owned server/client / owned-process evidence under the runtime generation | Harness only after protocol terminal and server cleanup | SSE/client settlement alone is insufficient. Process-tree/server shutdown failure poisons cleanup and keeps replacement admission closed. |
-| Provider metadata/model/auth probe | Provider manager metadata scope; provider + installation/configuration identity + probe operation | discovery/metadata operations / none, cache is identity-scoped | Probe owner | Exact child-tree cleanup and bounded parser completion. Maintenance and shutdown wait for probes; installation/capability changes invalidate cached evidence. |
+| Provider metadata/model/auth probe | Provider manager metadata scope; provider + installation/configuration + exact model identity + probe operation | discovery/metadata operations / a bounded versioned per-model evidence envelope | Probe owner | Exact child-tree cleanup and bounded parser completion. An immediate database transaction rejects older same-model completions and configuration drift while preserving independent models. Maintenance and shutdown wait for probes; installation/capability changes invalidate cached evidence. |
 | Provider maintenance/update | Runtime preparation gate and maintenance controller; operation ID + installation identity | reservations/active operation / integrity-checked maintenance journal while replacement may survive a crash | Maintenance controller after post-action re-resolution and verification | Admission requires an active, exact-installation capability attestation. Owned action cleanup is followed by provider detect/auth/metadata/capability verification, version re-read, and cache invalidation. Active runs, probes, recovery, shutdown, or another lease block admission. This does not claim a real production turn is run as a post-update probe. |
 | Terminal/PTY | `TerminalManager`; runtime generation + terminal ID + project/conversation authority | terminal registry / terminal ownership and runtime process journal | Terminal manager | Direct PTY close plus descendant/guardian proof. Concurrent closes join; uncertainty poisons runtime shutdown and blocks replacement ownership. |
 | Git subprocess | Git operation owner; scoped project/repository + operation + child identity | tracked Git operation / checkpoint or repository receipt where applicable | Calling Git workflow | Original bounded deadline and exact process-tree proof. Cleanup failure is an operation failure, never converted back to timeout/success; the working tree is not discarded. |
@@ -141,12 +141,33 @@ protocol/harness revision, and manifest digest. Manifest entries distinguish
 declared/native support, version compatibility, required configuration, and
 deterministic unavailable behavior. Runtime evidence can narrow availability,
 including explicitly negotiated custom backend/endpoint features; it may never
-widen the manifest. A changed executable withdraws its prior attestation, and
-maintenance is available only when the exact verified installation negotiates
-that operation. Conformance registration proves each production harness as a
-whole. It does not yet claim independent observed/exercised telemetry for every
-feature, and the UI currently summarizes capability counts rather than showing
-a per-feature evidence ledger.
+widen the manifest. A custom HTTP backend receives only lifecycle-safe harness
+capabilities plus features positively exercised by its exact stored probe. The
+bounded HTTP check first attests streaming text and, when present, usage. A
+Responses backend then receives a separate bounded request containing one
+randomized inert function whose call is inspected but never executed; only the
+exact synthetic function name and nonce attest `tools`. An unsupported or
+inexact second response preserves the text result without granting tool
+authority. Model hints cannot authorize images, reasoning, goals, plans,
+approvals, compaction, session resume, or host tools. Plan-mode admission
+therefore requires a positive `plans` attestation. A text-only custom Claude
+route starts the SDK with an empty built-in tool set and a deny-before-execution
+permission fallback. Codex App Server exposes no audited per-thread switch that
+removes all provider-native tools, so a custom Codex route is rejected before
+harness start unless its exact model probe positively attests tools. Probe
+evidence is durable and monotonic independently per profile/model, bounded to
+128 configured models, and every retained model result is hydrated after
+restart. Custom host-tool injection remains disabled until a dedicated bridge
+probe exists, even when the provider's native summary advertises that bridge;
+the immutable built-in Kimi-through-Claude profile retains Claude's trusted
+exact-turn host bridge. Custom runs also bind the persisted selection,
+deprecated model projection, privileged launch spelling, and exact probe to one
+model identity. A changed executable or backend probe withdraws its prior
+attestation, and maintenance is available only when the exact verified installation
+negotiates that operation. Conformance registration proves each
+production harness as a whole. It does not yet claim independent
+observed/exercised telemetry for every feature, and the UI currently summarizes
+capability counts rather than showing a per-feature evidence ledger.
 
 The former direct CLI harness is retained only as the explicitly named
 `createLegacyCliAgentHarnessForTests` fixture for lifecycle tests and
@@ -162,11 +183,15 @@ checked compatibility token covering:
   version;
 - protocol and harness implementation revisions;
 - capability-manifest digest;
+- the currently observed custom-backend capability boundary;
 - backend configuration revision and opaque endpoint identity;
 - model identity where the transport cannot switch safely; and
 - relevant performance mode.
 
 Historical identities without the token are incompatible by construction.
+Custom routes without positive session-continuation evidence do not receive a
+compatibility token, even when their text probe succeeds. They therefore start
+a fresh provider session instead of attempting a resume that would fail later.
 The safe migration is to retain the conversation, transcript, attachments,
 and native ID for audit, record a bounded reason code, clear it from admission
 authority, and start a fresh provider session. Missing compatibility must not
@@ -193,6 +218,36 @@ application executable, places that digest in the subsequently signed NSIS
 metadata, and verifies the marker in the completed artifact. Preparation pins
 and hashes that installer; candidate startup pins and hashes the actual launched
 executable, so a same-path replacement cannot inherit the handoff authority.
+The native supervisor waits only until the handoff deadline. If its exact
+installer handle has not signalled, it does not kill NSIS, inspect a namespace
+that NSIS may still be mutating, or relaunch either generation. Instead it
+atomically publishes an authenticated `quarantined` receipt with no claimed
+installer exit or executable digest and exits. Startup authenticates that
+receipt after a reboot, preserves the journal, token, helper, and receipt as
+recovery evidence, reports the safety lock, and refuses normal bootstrap.
+
+The staged Windows supervisor is not executed by its pathname. The already
+integrity-locked native broker opens and hashes the staged leaf, passes those
+exact bounded bytes to a fresh trusted system PowerShell host, and that host
+loads the verified assembly bytes in memory while retaining the staged leaf.
+Direct `update-supervisor` executable entry is fail-closed. Before `READY`, the
+loaded supervisor creates and flushes one HMAC-authenticated operation/launch
+claim with an exclusive native handle. A competing launch therefore cannot
+start NSIS or publish a second terminal result. The terminal receipt replaces
+that same owned handle and is renamed by handle; an interrupted claim remains
+a startup blocker and is never interpreted as cleanup. Parent wait, exact
+installer wait, terminal classification, and relaunch consume one Stopwatch
+budget derived once from the claim-authenticated handoff deadline, so wall-clock
+changes cannot refresh native authority.
+
+The JavaScript launch boundary canonicalizes data, installer, and executable
+paths once before hashing and serializing them, so retargeting a caller-supplied
+parent junction cannot redirect the admitted helper request. A live Windows
+test repeats that namespace substitution. Holding every canonical ancestor by
+native directory handle against a concurrent rename is not currently an
+available primitive in this helper; the affected Windows lifecycle/package
+lane remains the explicit validation boundary for that narrower race, and no
+local Linux result is reported as proof of it.
 
 On Linux, existing direct-file, ownership, no-symlink, dev/inode, fsync,
 hard-link backup, no-clobber, and rollback protections remain. A staged
@@ -218,24 +273,34 @@ tools, and the classifier itself select broad evidence.
 
 - Pull requests run quality, the complete platform-neutral coverage suite,
   every generated portable production-provider contract, and dedicated
-  Linux/Windows/macOS lifecycle jobs. The Linux job currently also performs a
-  packaged AppImage/container smoke; there is not yet a separate synthetic-turn
-  Electron bridge job.
+  Linux/Windows/macOS lifecycle jobs. The Linux job includes a compact
+  synthetic-provider Electron/core bridge and a packaged AppImage/container
+  smoke.
 - The classifier emits invariant domains and fails open. In this workflow those
   domains choose between the critical tier and the full six-target tier; they
   do not yet create a separate targeted job for each individual domain.
 - Pushes to main, merge-queue groups, schedules, and full-certification changes
   retain the six OS/architecture matrix, destructive recovery, package and
   installer/container evidence, dependency audit, and conditional benchmarks.
-  Repeated flake accounting, tracked-issue automation, and packaged N-1 update
-  fixtures remain follow-up work.
+  Scheduled runs repeat selected lifecycle invariants three times per target,
+  retain every attempt, fail on mixed results, and update a bounded tracked issue
+  on certification failure. Stable Windows x64 installs a checksummed published
+  N-1 artifact, smokes it, installs N over the same directory, reopens the same
+  profile/database state, verifies N against the unpacked candidate, and
+  uninstalls it.
 - The independent release workflow builds the application bundle once per
   target, packages and smokes that same bundle, then checksums, stages,
   re-verifies, and publishes the exact certified bytes plus a CycloneDX
-  dependency SBOM bound to the frozen source SHA, tag, and lockfile digest.
+  dependency SBOM covering the cross-platform production lockfile union and
+  bound to the frozen source SHA, tag, lockfile, and exact staged asset digests.
   Each target retains release-candidate platform, desktop, and package-smoke
   performance evidence. Cross-job fan-out is not claimed; each native target
   remains one ownership boundary.
+
+The packaged Windows transition proves successful NSIS replacement and
+same-profile startup. It does not claim a packaged native-`electron-updater`
+initiation or deterministic privileged-installer interruption/rollback; those
+remain explicit release-evidence boundaries.
 
 Portable-provider discovery is generated or convention/project based and an
 architecture test compares it with the default production harness registry.
@@ -260,6 +325,10 @@ observed after measurement.
 - Existing provider continuation records without the full compatibility token
   are readable but cannot authorize resume. They fall back to a fresh session
   without deleting conversation data.
+- Existing single-result backend probe JSON remains readable. The next
+  successful probe writes a versioned, bounded collection with at most one
+  monotonic result per configured model; incompatible profile revisions still
+  invalidate the entire collection.
 - Existing runtime lease, owned-process, cleanup-receipt, AppImage transaction,
   and recovery journals are not rewritten or optimistically cleared.
 - Unsupported, partial, duplicate, stale-generation, wrong-boot,

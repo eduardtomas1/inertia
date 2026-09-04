@@ -103,6 +103,9 @@ jobs:
       - name: Verify migrations, architecture, lint, and types
         run: npm run check:quality
 
+      - name: Enforce the isolated browser-evidence CPU budget
+        run: npm run test:browser-evidence-cpu-budget
+
   node-22-minimum:
     name: Node 22.13 minimum runtime
     runs-on: ubuntu-24.04
@@ -214,6 +217,7 @@ jobs:
       - name: Run Linux lifecycle and AppImage update sentinels
         run: >-
           npm exec -- vitest run --maxWorkers=1
+          tests/main/app-update-bootstrap.test.ts
           tests/main/app-update-handoff.test.ts
           tests/main/app-update-install.test.ts
           tests/main/app-update.test.ts
@@ -231,6 +235,13 @@ jobs:
       - name: Prepare Electron end-to-end binary
         id: electron_test_binary
         run: node -e "console.log(require('electron'))"
+
+      - name: Run compact Electron/core bridge smoke under Xvfb
+        run: >-
+          xvfb-run --auto-servernum npm exec -- playwright test
+          tests/e2e/core-bridge-smoke.spec.ts
+          --project=isolated --workers=1
+          --output=test-results/core-bridge-smoke
 
       - name: Run destructive runtime-recovery Electron sentinels under Xvfb
         run: xvfb-run --auto-servernum npm exec -- playwright test --project=runtime-recovery --output=test-results/runtime-recovery
@@ -322,11 +333,14 @@ jobs:
         run: >-
           npm exec -- vitest run --maxWorkers=1
           tests/main/app-update-handoff.test.ts
+          tests/main/app-update-startup.test.ts
           tests/main/runtime-owned-process-recovery.test.ts
           tests/main/runtime-process-containment-admission.test.ts
           tests/main/runtime-supervisor-lifecycle.test.ts
           tests/main/runtime-supervisor-windows-tree-recovery.test.ts
           tests/main/windows-runtime-job.test.ts
+          tests/main/windows-update-supervisor.test.ts
+          tests/main/windows-update-terminal-receipt.test.ts
           tests/server/runtime-shutdown-authority.test.ts
 
       - name: Build the application bundle
@@ -532,6 +546,17 @@ jobs:
         if: runner.os == 'Windows' && matrix.arch == 'arm64'
         run: npm run test:portable
 
+      # Every attempt is retained and any failed attempt fails the job at the
+      # end. A pass after a failure is classified as a flake, never as success.
+      - name: Repeat selected lifecycle invariants for nightly flake evidence
+        id: lifecycle_repeat
+        if: github.event_name == 'schedule'
+        continue-on-error: true
+        run: >-
+          npm run test:lifecycle-repeat --
+          --iterations 3
+          --output-directory test-results/nightly-lifecycle
+
       - name: Run opt-in Kimi through Claude integration
         if: runner.os == 'Linux'
         shell: bash
@@ -549,6 +574,14 @@ jobs:
       - name: Verify native Windows Codex discovery and shim launching
         if: runner.os == 'Windows'
         run: npm run test:windows-codex
+
+      # The x64 unit signal runs in separate shard jobs, so unlike ARM64 this
+      # matrix job has not executed an npm pretest hook before bundling. Build
+      # the exact Job Object helper in this workspace before its integrity
+      # snapshot and executable are consumed by the bundle and package.
+      - name: Build Windows x64 runtime helper for the application bundle
+        if: runner.os == 'Windows' && matrix.arch == 'x64'
+        run: npm run pretest
 
       - name: Audit production dependencies
         if: runner.os == 'Linux'
@@ -639,6 +672,20 @@ jobs:
         if: runner.os == 'Linux'
         run: npm run "${{ matrix.package_script }}"
 
+      - name: Download checksummed packaged Windows N-1 installer
+        if: runner.os == 'Windows' && matrix.arch == 'x64'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          current_version="$(node -p "require('./package.json').version")"
+          node scripts/ci/download-windows-n-minus-one.mjs \
+            --current-version "$current_version" \
+            --channel stable \
+            --architecture x64 \
+            --output-directory release/n-minus-one
+
       - name: Validate Linux AppImage identity, icons, and runtime resource
         if: runner.os == 'Linux'
         run: npm run validate:linux-package
@@ -671,8 +718,15 @@ jobs:
         if: runner.os != 'Linux'
         run: npm run test:package-smoke
 
-      - name: Install, smoke, and uninstall Windows package
-        if: runner.os == 'Windows'
+      - name: Install N-1, upgrade in place, smoke, and uninstall Windows x64 package
+        if: runner.os == 'Windows' && matrix.arch == 'x64'
+        env:
+          INERTIA_RELEASE_CHANNEL: stable
+          INERTIA_WINDOWS_N_MINUS_ONE_METADATA: release/n-minus-one/metadata.json
+        run: npm run test:windows-installer-smoke
+
+      - name: Install, smoke, and uninstall Windows ARM64 package
+        if: runner.os == 'Windows' && matrix.arch == 'arm64'
         env:
           INERTIA_RELEASE_CHANNEL: stable
         run: npm run test:windows-installer-smoke
@@ -764,6 +818,22 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+      - name: Keep nightly lifecycle repetition and flake evidence
+        if: always() && github.event_name == 'schedule'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: nightly-lifecycle-${{ matrix.artifact }}
+          path: test-results/nightly-lifecycle
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Fail certification when any lifecycle repetition failed
+        if: always() && github.event_name == 'schedule' && steps.lifecycle_repeat.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "At least one retained lifecycle attempt failed or flaked." >&2
+          exit 1
+
   windows-unit:
     name: Windows unit tests (${{ matrix.shard }}/4)
     if: github.event_name != 'pull_request' || needs.classify.outputs.full_certification == 'true'
@@ -809,3 +879,95 @@ jobs:
           path: test-results
           if-no-files-found: ignore
           retention-days: 7
+
+  report-nightly-failure:
+    name: Report nightly lifecycle certification failure
+    if: >-
+      always() && github.event_name == 'schedule' &&
+      (needs.classify.result != 'success' ||
+      needs.gate.result != 'success' ||
+      needs.node-22-minimum.result != 'success' ||
+      needs.test.result != 'success' ||
+      needs.windows-unit.result != 'success')
+    needs: [classify, gate, node-22-minimum, test, windows-unit]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+      issues: write
+    steps:
+      - name: Open or update the tracked nightly failure
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const title = "Nightly lifecycle certification failed";
+            const marker = "<!-- inertia-nightly-lifecycle-certification -->";
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const jobs = await github.paginate(
+              github.rest.actions.listJobsForWorkflowRun,
+              { ...context.repo, run_id: context.runId, filter: "latest", per_page: 100 },
+            );
+            const failed = jobs.filter((job) =>
+              ["failure", "cancelled", "timed_out", "action_required"].includes(job.conclusion)
+            );
+            const failureEvidence = failed.flatMap((job) => {
+              const steps = (job.steps || [])
+                .filter((step) => ["failure", "cancelled", "timed_out"].includes(step.conclusion))
+                .map((step) => `${job.name}: ${step.name}`);
+              return steps.length > 0 ? steps : [`${job.name}: ${job.conclusion}`];
+            });
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
+              ...context.repo,
+              state: "all",
+              per_page: 100,
+            });
+            const existing = issues.find((issue) =>
+              !issue.pull_request && (issue.title === title || issue.body?.includes(marker))
+            );
+            const priorComments = existing
+              ? await github.paginate(github.rest.issues.listComments, {
+                  ...context.repo,
+                  issue_number: existing.number,
+                  per_page: 100,
+                })
+              : [];
+            const priorOccurrences = existing
+              ? 1 + priorComments.filter((comment) => comment.body?.includes(marker)).length
+              : 0;
+            const manifestUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/blob/${context.sha}/package.json`;
+            const body = [
+              marker,
+              "The scheduled six-target lifecycle certification did not complete cleanly.",
+              "Mixed repeat results are treated as failures and retained as flake evidence.",
+              "",
+              `- Exact SHA: \`${context.sha}\``,
+              `- Prior occurrences tracked here: ${priorOccurrences}`,
+              `- [Runner logs and retained artifacts](${runUrl})`,
+              `- [Provider dependency versions bound to this SHA](${manifestUrl})`,
+              "",
+              "### Failing invariant / platform evidence",
+              ...(failureEvidence.length > 0
+                ? failureEvidence.map((value) => `- ${value}`)
+                : ["- The workflow stopped before bounded job evidence was available."]),
+              "",
+              "Provider/version is only applicable when named by a failed provider step; exact",
+              "locked versions remain bound to the linked SHA. This issue contains no runner",
+              "output, prompts, paths, provider payloads, environment values, or credentials.",
+            ].join("\n");
+            if (!existing) {
+              await github.rest.issues.create({ ...context.repo, title, body });
+              return;
+            }
+            if (existing.state !== "open") {
+              await github.rest.issues.update({
+                ...context.repo,
+                issue_number: existing.number,
+                state: "open",
+              });
+            }
+            await github.rest.issues.createComment({
+              ...context.repo,
+              issue_number: existing.number,
+              body,
+            });

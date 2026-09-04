@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   APP_UPDATE_PREPARATION_BLOCKERS,
   appUpdatePreparationDiagnostic,
+  isAppUpdatePreparationDiagnostic,
   lifecycleActionableStateWithUpdate,
 } from "../../src/shared/app-update-preparation-diagnostic";
 
@@ -60,5 +61,21 @@ describe("application update preparation diagnostics", () => {
       state: "downloaded",
       installBlocker: "prompt=/home/person/private",
     } as never)).toEqual({ phase: "inactive", blocker: null });
+  });
+
+  it("accepts only the exact bounded diagnostic shape", () => {
+    expect(isAppUpdatePreparationDiagnostic({
+      phase: "blocked",
+      blocker: "active-work",
+    })).toBe(true);
+    expect(isAppUpdatePreparationDiagnostic({
+      phase: "inactive",
+      blocker: null,
+      detail: "prompt=/home/person/private",
+    })).toBe(false);
+    expect(isAppUpdatePreparationDiagnostic({
+      phase: "blocked",
+      blocker: "prompt=/home/person/private",
+    })).toBe(false);
   });
 });

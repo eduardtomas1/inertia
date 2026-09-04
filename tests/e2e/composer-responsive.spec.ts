@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator } from "@playwright/test";
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import { expectComposerEndsAtDock, expectComposerReadinessContained } from "./support/layout-assertions";
@@ -21,6 +21,20 @@ let rendererErrors!: AppFixture["rendererErrors"];
 let runtimeSnapshot!: AppFixture["runtimeSnapshot"];
 let resizeWindow!: AppFixture["resizeWindow"];
 let expectNoViewportOverflow!: AppFixture["expectNoViewportOverflow"];
+
+async function expectHoverBackground(button: Locator): Promise<string> {
+  await page.mouse.move(0, 0);
+  await expect.poll(() => button.evaluate((element) => element.matches(":hover"))).toBe(false);
+  const idleBackground = await button.evaluate((element) => getComputedStyle(element).backgroundColor);
+  await expect.poll(async () => {
+    await page.mouse.move(0, 0);
+    await button.hover();
+    return button.evaluate((element, idle) =>
+      element.matches(":hover") && getComputedStyle(element).backgroundColor !== idle,
+    idleBackground);
+  }).toBe(true);
+  return idleBackground;
+}
 
 test.beforeAll(async () => {
   app = await createAppFixture({ name: "composer-responsive", initialState: "conversation" });
@@ -294,15 +308,7 @@ test("keeps the composer as one cohesive dock across themes and responsive split
       expect(wideGeometry.optionMarkers.indexOf("reasoning")).toBe(1);
     }
     await expect(send).toBeDisabled();
-    await page.mouse.move(0, 0);
-    const modelIdleBackground = await model.evaluate((button) => getComputedStyle(button).backgroundColor);
-    await expect.poll(async () => {
-      await page.mouse.move(0, 0);
-      await model.hover();
-      return model.evaluate((button, idleBackground) =>
-        button.matches(":hover") && getComputedStyle(button).backgroundColor !== idleBackground,
-      modelIdleBackground);
-    }).toBe(true);
+    await expectHoverBackground(model);
     await model.focus();
     await expect(model).toBeFocused();
     expect(await model.evaluate(
@@ -356,18 +362,7 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     expect(settingGeometry.iconSizes).toEqual(
       settingGeometry.iconSizes.map(() => ({ width: 13, height: 13 })),
     );
-    await page.mouse.move(0, 0);
-    await expect.poll(() => accessTrigger.evaluate((button) => button.matches(":hover"))).toBe(false);
-    const accessIdleBackground = await accessTrigger.evaluate(
-      (button) => getComputedStyle(button).backgroundColor,
-    );
-    await expect.poll(async () => {
-      await page.mouse.move(0, 0);
-      await accessTrigger.hover();
-      return accessTrigger.evaluate((button, idleBackground) =>
-        button.matches(":hover") && getComputedStyle(button).backgroundColor !== idleBackground,
-      accessIdleBackground);
-    }).toBe(true);
+    const accessIdleBackground = await expectHoverBackground(accessTrigger);
     await accessTrigger.focus();
     expect(await accessTrigger.evaluate(
       (button) => Number.parseFloat(getComputedStyle(button).outlineWidth),

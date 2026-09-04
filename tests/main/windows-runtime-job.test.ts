@@ -625,6 +625,11 @@ describe("Windows runtime Job Object containment", () => {
         `start.RedirectStandard${stream} = true;`,
       );
     }
+    expect(nativeSource).toContain(
+      "SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0)",
+    );
+    expect(boundSupervisorLaunch.indexOf("if (!IsolateBrokerStandardHandles())"))
+      .toBeLessThan(boundSupervisorLaunch.indexOf("Process.Start(start)"));
     expect(boundSupervisorLaunch.indexOf("OpenUpdateArtifact(supervisorPath"))
       .toBeLessThan(boundSupervisorLaunch.indexOf("Process.Start(start)"));
     expect(boundSupervisorLaunch).toContain(

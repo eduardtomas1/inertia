@@ -846,7 +846,11 @@ async function acquireWindowsRuntimeJobExecutableLock(
             clearTimeout(terminate);
             if (!didClose) {
               throw new Error(
-                "The Windows runtime executable broker did not close during shutdown.",
+                "The Windows runtime executable broker did not close during shutdown. "
+                  + `exit=${child.exitCode}, signal=${child.signalCode}, `
+                  + `stdoutEnded=${child.stdout.readableEnded}, `
+                  + `stderrEnded=${child.stderr.readableEnded}, `
+                  + `acknowledged=${stdoutLines.includes(EXECUTABLE_LOCK_BYE_MARKER)}.`,
               );
             }
           }

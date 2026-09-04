@@ -120,6 +120,14 @@ public static class InertiaRuntimeJob {
   [DllImport("kernel32.dll", SetLastError = true)]
   private static extern bool CloseHandle(IntPtr handle);
   [DllImport("kernel32.dll", SetLastError = true)]
+  private static extern IntPtr GetStdHandle(Int32 standardHandle);
+  [DllImport("kernel32.dll", SetLastError = true)]
+  private static extern bool SetHandleInformation(
+    IntPtr handle,
+    UInt32 mask,
+    UInt32 flags
+  );
+  [DllImport("kernel32.dll", SetLastError = true)]
   private static extern IntPtr CreateToolhelp32Snapshot(UInt32 flags, UInt32 processId);
   [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
   private static extern bool Process32First(IntPtr snapshot, ref PROCESSENTRY32 entry);
@@ -170,6 +178,7 @@ public static class InertiaRuntimeJob {
   private const UInt32 CREATE_NEW_FILE = 1;
   private const UInt32 FILE_ATTRIBUTE_NORMAL = 0x00000080;
   private const UInt32 FILE_FLAG_WRITE_THROUGH = 0x80000000;
+  private const UInt32 HANDLE_FLAG_INHERIT = 0x00000001;
   private const Int32 FileRenameInfo = 3;
   private const Int64 MAX_EXECUTABLE_BYTES = 1024 * 1024;
   private const Int64 MAX_UPDATE_ARTIFACT_BYTES = 1024L * 1024L * 1024L;
@@ -1649,6 +1658,21 @@ public static class InertiaRuntimeJob {
     }
   }
 
+  private static bool IsolateBrokerStandardHandles() {
+    // .NET Framework Process.Start copies every inheritable handle, including
+    // the original broker pipes even when the child uses redirected streams.
+    // These handles belong only to the broker and must close with it.
+    foreach (Int32 standardHandle in new Int32[] { -10, -11, -12 }) {
+      IntPtr handle = GetStdHandle(standardHandle);
+      if (
+        handle == IntPtr.Zero
+        || handle == new IntPtr(-1)
+        || !SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0)
+      ) return false;
+    }
+    return true;
+  }
+
   public static int LaunchUpdateSupervisor(
     string supervisorPath,
     string expectedSupervisorDigest,
@@ -1793,6 +1817,10 @@ try {
       // diagnostic must not inherit the broker's stderr pipe and keep the
       // broker's parent waiting for stdio closure after the broker exits.
       start.RedirectStandardError = true;
+      if (!IsolateBrokerStandardHandles()) {
+        diagnostic = ErrorLine("update-launch-stdio", Marshal.GetLastWin32Error());
+        return 46;
+      }
       child = Process.Start(start);
       if (child == null) {
         diagnostic = ErrorLine("update-launch-start", 0);

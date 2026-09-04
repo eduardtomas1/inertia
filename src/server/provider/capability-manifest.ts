@@ -77,6 +77,13 @@ export interface ProviderCapabilityManifest {
 export interface ProviderCapabilityObservation {
   readonly negotiated?: Partial<Record<ProviderCapabilityId, boolean>>;
   readonly configured?: readonly ProviderCapabilityId[];
+  /**
+   * Optional positive observation ceiling. When present, declarations remain
+   * unavailable unless their exact capability id was observed as well. This
+   * keeps a narrowly exercised custom backend from inheriting every native
+   * capability of the local harness.
+   */
+  readonly observed?: readonly ProviderCapabilityId[];
 }
 
 export interface ProviderCapabilityAttestationInput {
@@ -164,7 +171,7 @@ const ATTESTATION_INPUT_KEYS = [
   "protocolVerifiedInstallationVersion",
 ] as const;
 
-const OBSERVATION_KEYS = ["configured", "negotiated"] as const;
+const OBSERVATION_KEYS = ["configured", "negotiated", "observed"] as const;
 const ATTESTATION_KEYS = [
   "attestationDigest",
   "backendConfigurationRevision",
@@ -553,6 +560,7 @@ function trustedManifest(value: unknown): ProviderCapabilityManifest | null {
 interface ValidatedObservation {
   readonly configured: ReadonlySet<ProviderCapabilityId>;
   readonly negotiated: Readonly<Partial<Record<ProviderCapabilityId, boolean>>>;
+  readonly observed: ReadonlySet<ProviderCapabilityId> | null;
 }
 
 interface ValidatedAttestationInput {
@@ -569,7 +577,11 @@ function validatedObservation(
   manifest: ProviderCapabilityManifest,
 ): ValidatedObservation | null {
   if (value === undefined) {
-    return { configured: new Set(), negotiated: Object.freeze({}) };
+    return {
+      configured: new Set(),
+      negotiated: Object.freeze({}),
+      observed: null,
+    };
   }
   if (!plainRecord(value)) return null;
   const keys = Object.keys(value);
@@ -615,7 +627,30 @@ function validatedObservation(
     ) return null;
     negotiated[id as ProviderCapabilityId] = available;
   }
-  return { configured, negotiated: Object.freeze(negotiated) };
+
+  const observedValue = value.observed;
+  if (
+    observedValue !== undefined
+    && (
+      !Array.isArray(observedValue)
+      || observedValue.length > PROVIDER_CAPABILITY_IDS.length
+      || observedValue.some((id) =>
+        typeof id !== "string" || !CAPABILITY_IDS.has(id as ProviderCapabilityId))
+      || new Set(observedValue).size !== observedValue.length
+    )
+  ) return null;
+  const observed = observedValue === undefined
+    ? null
+    : new Set(observedValue as readonly ProviderCapabilityId[]);
+  if ([...(observed ?? [])].some((id) =>
+    manifest.capabilities.find((entry) => entry.id === id)?.support
+      === "unavailable")) return null;
+
+  return {
+    configured,
+    negotiated: Object.freeze(negotiated),
+    observed,
+  };
 }
 
 function validatedAttestationInput(
@@ -738,9 +773,14 @@ export function attestProviderCapabilities(
   const capabilities = Object.freeze(trusted.capabilities.map((declaration) => {
     const configurationAvailable = !declaration.requiresConfiguration
       || validated.observation.configured.has(declaration.id);
-    const observedAvailable = declaration.support === "negotiated"
+    const declaredObservationAvailable = declaration.support === "negotiated"
       ? validated.observation.negotiated[declaration.id] === true
       : declaration.support !== "unavailable";
+    const observedAvailable = declaredObservationAvailable
+      && (
+        validated.observation.observed === null
+        || validated.observation.observed.has(declaration.id)
+      );
     return Object.freeze({
       ...declaration,
       installedVersionCompatible: versionCompatible,
@@ -817,9 +857,6 @@ function attestationCapabilityMatches(
     )
     || (declaration.support === "unavailable"
       && (value.observedAvailable || value.currentlyAvailable))
-    || (declaration.support !== "unavailable"
-      && declaration.support !== "negotiated"
-      && !value.observedAvailable)
   ) return false;
   return value.unavailableReasonCode === unavailableReason(
     declaration,
@@ -904,9 +941,10 @@ export function attestedProviderCapability(
 }
 
 /**
- * Opaque continuation identity for an exact verified installation. Capability
- * availability is intentionally separate: a valid installation may still
- * require configuration or per-session negotiation for optional operations.
+ * Opaque continuation identity for one exact verified installation and
+ * capability boundary. Per-session negotiations are not supplied when this
+ * token is minted, while custom-backend probe observations are, so losing a
+ * probed capability forces a fresh provider session.
  */
 export function providerContinuationCompatibilityToken(
   attestation: ProviderCapabilityAttestation,
@@ -921,6 +959,6 @@ export function providerContinuationCompatibilityToken(
     && trusted.installationVersion !== null
     && trusted.capabilities.every(({ installedVersionCompatible }) =>
       installedVersionCompatible)
-    ? trusted.installationDigest
+    ? trusted.attestationDigest
     : null;
 }

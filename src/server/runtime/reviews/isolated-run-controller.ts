@@ -121,6 +121,10 @@ export interface IsolatedRunProviderRuntime {
   harnessIdFor(input: ProviderRunInput): string;
   run(input: ProviderRunInput, callbacks: ProviderRunCallbacks): Promise<ProviderRunResult>;
   isRunning(conversationId: string): boolean;
+  ownsRun(
+    conversationId: string,
+    identity: { runId: string; turnId: string },
+  ): boolean;
   stopOwned(
     conversationId: string,
     identity: { runId: string; turnId: string },
@@ -471,6 +475,25 @@ export class IsolatedRunController<Owner extends object> {
         active.providerPromise = providerPromise;
         active.providerStarted = true;
       } catch {
+        // Provider admission and harness startup can happen synchronously
+        // before run() returns its terminal promise. If that boundary throws,
+        // consult the exact provider owner tuple rather than assuming that no
+        // process was started. A different conversation-level owner or an
+        // uncertain query fails closed: stopOwned must prove exact cleanup or
+        // this isolated owner remains retained.
+        try {
+          active.providerStarted = this.providers.ownsRun(
+            active.providerConversationId,
+            { runId: active.runId, turnId: active.turnId },
+          );
+          if (!active.providerStarted) {
+            active.providerStarted = this.providers.isRunning(
+              active.providerConversationId,
+            );
+          }
+        } catch {
+          active.providerStarted = true;
+        }
         throw new IsolatedRunError("provider-failed");
       }
       if (active.stopOutcome) void this.stopProvider(active);

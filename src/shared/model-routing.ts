@@ -115,6 +115,7 @@ export const HARNESS_BACKEND_COMPATIBILITY_REASON_CODES = [
   "probe-stale",
   "probe-failed",
   "probe-unverified",
+  "responses-tools-unverified",
   "responses-probe-verified",
   "anthropic-probe-verified",
   "claude-provider-documented",
@@ -132,6 +133,20 @@ export const harnessBackendCompatibilityReasonCodeSchema = z.enum(
 export interface HarnessBackendCompatibilityEvidence {
   modelId?: string | null;
   probe?: HarnessBackendProbeEvidence | null;
+  /** Deterministic evaluation seam; production callers use the current time. */
+  evaluatedAt?: Date;
+}
+
+export const BACKEND_PROBE_AUTHORITY_SCHEMA_VERSION = 1;
+export const BACKEND_PROBE_FRESHNESS_MS = 24 * 60 * 60 * 1_000;
+
+export interface HarnessBackendProbeAuthority {
+  schemaVersion: typeof BACKEND_PROBE_AUTHORITY_SCHEMA_VERSION;
+  operationId: string;
+  admissionSequence: number;
+  /** Exact verified harness installation; null evidence cannot authorize a run. */
+  installationFingerprint: string | null;
+  expiresAt: string;
 }
 
 export interface HarnessBackendProbeEvidence {
@@ -143,19 +158,45 @@ export interface HarnessBackendProbeEvidence {
   compatibility: "protocol-compatible" | "partially-compatible" | "unavailable";
   protocolVerified: boolean;
   modelVerified: boolean;
+  capabilities: readonly ModelCapability[];
   failure: unknown | null;
+  checkedAt?: string;
+  authority?: HarnessBackendProbeAuthority;
+}
+
+export function backendProbeAuthorityIsCurrent(
+  probe: Pick<HarnessBackendProbeEvidence, "checkedAt" | "authority">,
+  evaluatedAt: Date = new Date(),
+): boolean {
+  const checkedAt = Date.parse(probe.checkedAt ?? "");
+  const expiresAt = Date.parse(probe.authority?.expiresAt ?? "");
+  const now = evaluatedAt.getTime();
+  return probe.authority?.schemaVersion === BACKEND_PROBE_AUTHORITY_SCHEMA_VERSION
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu
+      .test(probe.authority.operationId)
+    && Number.isSafeInteger(probe.authority.admissionSequence)
+    && probe.authority.admissionSequence > 0
+    && Number.isFinite(checkedAt)
+    && Number.isFinite(expiresAt)
+    && expiresAt > checkedAt
+    && expiresAt - checkedAt <= BACKEND_PROBE_FRESHNESS_MS
+    // A backward wall-clock jump fails closed instead of extending evidence.
+    && now >= checkedAt
+    && now < expiresAt;
 }
 
 function probeMatchesBackendRoute(
   probe: HarnessBackendProbeEvidence,
   profile: ModelBackendProfile,
   modelId: string,
+  evaluatedAt?: Date,
 ): boolean {
   return probe.profileId === profile.id
     && probe.backendConfigurationRevision === profile.configurationRevision
     && probe.endpointIdentity === profile.endpointIdentity
     && probe.protocol === profile.protocol
-    && probe.modelId === modelId;
+    && probe.modelId === modelId
+    && backendProbeAuthorityIsCurrent(probe, evaluatedAt);
 }
 
 export type JsonPrimitive = string | number | boolean | null;
@@ -463,6 +504,21 @@ export function nativeModelSelection(input: {
 }
 
 /**
+ * Returns only capability evidence produced by the privileged compatibility
+ * probe. User hints and partially compatible declarations are informative,
+ * but cannot authorize an optional provider operation.
+ */
+export function modelSelectionHasVerifiedProbeCapability(
+  selection: Pick<ModelSelection, "capabilities">,
+  capabilityId: ModelCapabilityId,
+): boolean {
+  return selection.capabilities.some((capability) =>
+    capability.id === capabilityId
+    && capability.state === "verified"
+    && capability.provenance === "probe");
+}
+
+/**
  * Built-in pairs are verified. A matching protocol on a custom profile is
  * unknown until Task 23 probes it. Every other pair is unavailable.
  */
@@ -586,7 +642,12 @@ export function resolveHarnessBackendCompatibility(
         : "Verify this backend's Anthropic Messages API and selected model before using it with Claude.",
     };
   }
-  if (!probeMatchesBackendRoute(evidence.probe, profile, modelId)) {
+  if (!probeMatchesBackendRoute(
+    evidence.probe,
+    profile,
+    modelId,
+    evidence.evaluatedAt,
+  )) {
     return {
       harnessId,
       backendProfileId: profile.id,
@@ -624,6 +685,23 @@ export function resolveHarnessBackendCompatibility(
       allowsModelSwitchWithinSession: false,
       reasonCode: "probe-unverified",
       reason: "The selected protocol and model were not both verified.",
+    };
+  }
+  const toolsVerified = evidence.probe.capabilities.some((capability) => (
+    capability.id === "tools"
+    && capability.state === "verified"
+    && capability.provenance === "probe"
+  ));
+  if (harnessId === "codex-app-server" && !toolsVerified) {
+    return {
+      harnessId,
+      backendProfileId: profile.id,
+      backendProtocol: profile.protocol,
+      state: "unavailable",
+      provenance: "probe",
+      allowsModelSwitchWithinSession: false,
+      reasonCode: "responses-tools-unverified",
+      reason: "Codex requires this Responses backend to pass the inert tool-call compatibility check.",
     };
   }
   return {

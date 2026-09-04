@@ -165,7 +165,15 @@ function startCodexRun(
       access: options.input.access,
       onText: emitter.text,
       onActivity: emitter.activity,
-      onSession: emitter.session,
+      onSession: (sessionId) => {
+        // The App Server has returned the exact opened/resumed thread and has
+        // already echoed the requested tier at this point. Only then can this
+        // run attest the negotiated response-speed capability.
+        if (serviceTier !== undefined) {
+          emitter.capability("performance-modes", true);
+        }
+        emitter.session(sessionId);
+      },
       onStatus: (status, providerState) => {
         if (status === "running") emitRunning();
         else {

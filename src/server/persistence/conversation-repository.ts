@@ -210,7 +210,9 @@ export class ConversationRepository {
       modelSelection,
       providerSessionId: continuationBoundaryChanged
         ? null
-        : (update.providerSessionId ?? current.providerSessionId),
+        : update.providerSessionId === undefined
+          ? current.providerSessionId
+          : update.providerSessionId,
       continuationIdentity: continuationBoundaryChanged
         ? null
         : update.providerSessionId === null

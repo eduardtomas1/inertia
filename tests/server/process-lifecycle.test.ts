@@ -39,6 +39,12 @@ function fakeTaskkill() {
   return taskkill;
 }
 
+function noSuchProcess(message: string): NodeJS.ErrnoException {
+  const error = new Error(message) as NodeJS.ErrnoException;
+  error.code = "ESRCH";
+  return error;
+}
+
 describe("provider process-tree termination", () => {
   it("shares one graceful-to-force termination sequence without overlapping attempts", async () => {
     const child = fakeChild();
@@ -450,7 +456,9 @@ describe("provider process-tree termination", () => {
     let running = true;
     const killProcess = vi.fn((_pid: number, signal?: NodeJS.Signals | number) => {
       if (signal === 0 && _pid < 0) {
-        if (!running) throw new Error("group gone");
+        if (!running) {
+          throw noSuchProcess("group gone");
+        }
         return true as const;
       }
       if (signal === "SIGKILL") {
@@ -493,6 +501,7 @@ describe("provider process-tree termination", () => {
       return true as const;
     });
     const processCanExecute = vi.fn(() => false);
+    const processGroupCanExecute = vi.fn(() => false);
 
     await expect(terminateProcessTreeAndWait(
       child as never,
@@ -501,6 +510,7 @@ describe("provider process-tree termination", () => {
         platform: "linux",
         killProcess,
         processCanExecute,
+        processGroupCanExecute,
         spawnProcessSync: vi.fn(() => ({
           status: 0,
           stdout: "4242 1 T\n4243 4242 T\n",
@@ -510,8 +520,119 @@ describe("provider process-tree termination", () => {
     )).resolves.toBe(true);
 
     expect(killProcess).toHaveBeenCalledWith(-4_242, 0);
-    expect(processCanExecute).toHaveBeenCalledWith(4_242);
     expect(processCanExecute).toHaveBeenCalledWith(4_243);
+    expect(processGroupCanExecute).toHaveBeenCalledWith(4_242);
+  });
+
+  it.each([
+    { label: "reports unseen executable work", observation: true },
+    { label: "is indeterminate", observation: null },
+  ] as const)(
+    "does not let a dead known-member snapshot override a group observer that $label",
+    async ({ observation }) => {
+      const child = fakeChild();
+      const killProcess = vi.fn((pid: number, signal?: NodeJS.Signals | number) => {
+        if (pid === -4_242 && signal === "SIGKILL") {
+          child.exitCode = 1;
+          queueMicrotask(() => child.emit("close", 1));
+        }
+        // The PGID remains signal-visible because an unseen descendant either
+        // still executes or cannot be classified exactly.
+        return true as const;
+      });
+      const processCanExecute = vi.fn(() => false);
+      const processGroupCanExecute = vi.fn(() => observation);
+
+      await expect(terminateProcessTreeAndWait(
+        child as never,
+        true,
+        {
+          platform: "linux",
+          killProcess,
+          processCanExecute,
+          processGroupCanExecute,
+          spawnProcessSync: vi.fn(() => ({
+            status: 0,
+            stdout: "4242 1 T\n4243 4242 T\n",
+          })) as never,
+          waitMs: 10,
+        },
+      )).resolves.toBe(false);
+
+      expect(processCanExecute).toHaveBeenCalledWith(4_243);
+      expect(processGroupCanExecute).toHaveBeenCalledWith(4_242);
+    },
+  );
+
+  it.each([
+    { label: "is denied", code: "EPERM", observation: true },
+    { label: "fails unexpectedly", code: "EIO", observation: null },
+  ] as const)(
+    "does not mistake a process-group probe that $label for group absence",
+    async ({ code, observation }) => {
+      const child = fakeChild();
+      const killProcess = vi.fn((pid: number, signal?: NodeJS.Signals | number) => {
+        if (pid === -4_242 && signal === "SIGKILL") {
+          child.exitCode = 1;
+          queueMicrotask(() => child.emit("close", 1));
+          return true as const;
+        }
+        if (pid === -4_242 && signal === 0) {
+          const error = new Error("group probe failed") as NodeJS.ErrnoException;
+          error.code = code;
+          throw error;
+        }
+        return true as const;
+      });
+
+      await expect(terminateProcessTreeAndWait(
+        child as never,
+        true,
+        {
+          platform: "linux",
+          killProcess,
+          processCanExecute: vi.fn(() => false),
+          processGroupCanExecute: vi.fn(() => observation),
+          spawnProcessSync: vi.fn(() => ({
+            status: 0,
+            stdout: "4242 1 T\n4243 4242 T\n",
+          })) as never,
+          waitMs: 10,
+        },
+      )).resolves.toBe(false);
+    },
+  );
+
+  it("does not mistake a denied detached-descendant probe for process absence", async () => {
+    const child = fakeChild();
+    const killProcess = vi.fn((pid: number, signal?: NodeJS.Signals | number) => {
+      if (pid === -4_242 && signal === "SIGKILL") {
+        child.exitCode = 1;
+        queueMicrotask(() => child.emit("close", 1));
+      }
+      if (pid === 4_243 && signal === 0) {
+        const error = new Error("process probe denied") as NodeJS.ErrnoException;
+        error.code = "EPERM";
+        throw error;
+      }
+      return true as const;
+    });
+
+    await expect(terminateProcessTreeAndWait(
+      child as never,
+      true,
+      {
+        platform: "linux",
+        killProcess,
+        processCanExecute: vi.fn(() => null),
+        processGroupCanExecute: vi.fn(() => false),
+        spawnProcessSync: vi.fn(() => ({
+          status: 0,
+          stdout: "4242 1 T\n4243 4242 T\n",
+        })) as never,
+        waitMs: 10,
+      },
+    )).resolves.toBe(false);
   });
 
   it("preserves the native macOS guardian termination window by default", async () => {
@@ -521,7 +642,7 @@ describe("provider process-tree termination", () => {
       let running = true;
       const killProcess = vi.fn((pid: number, signal?: NodeJS.Signals | number) => {
         if (signal === 0 && pid < 0) {
-          if (!running) throw new Error("group gone");
+          if (!running) throw noSuchProcess("group gone");
           return true as const;
         }
         return true as const;
@@ -575,7 +696,7 @@ describe("provider process-tree termination", () => {
     let running = true;
     const killProcess = vi.fn((_pid: number, signal?: NodeJS.Signals | number) => {
       if (signal === 0 && _pid < 0) {
-        if (!running) throw new Error("group gone");
+        if (!running) throw noSuchProcess("group gone");
         return true as const;
       }
       if (signal === "SIGKILL") running = false;
@@ -603,6 +724,75 @@ describe("provider process-tree termination", () => {
     child.emit("close", 1);
     await expect(termination).resolves.toBe(true);
   });
+
+  it.each([
+    { label: "is denied", code: "EPERM", observation: true },
+    { label: "fails unexpectedly", code: "EIO", observation: null },
+  ] as const)(
+    "does not mistake graceful group signaling that $label for tree termination",
+    async ({ code, observation }) => {
+      const child = fakeChild();
+      const killProcess = vi.fn((pid: number, signal?: NodeJS.Signals | number) => {
+        if (pid === -4_242 && signal === "SIGTERM") {
+          const error = new Error("group signal failed") as NodeJS.ErrnoException;
+          error.code = code;
+          throw error;
+        }
+        return true as const;
+      });
+      const termination = terminateProcessTreeAndWait(
+        child as never,
+        false,
+        {
+          platform: "linux",
+          killProcess,
+          processGroupCanExecute: vi.fn(() => observation),
+          waitMs: 25,
+        },
+      );
+
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+      child.exitCode = 1;
+      child.emit("close", 1);
+
+      await expect(termination).resolves.toBe(false);
+    },
+  );
+
+  it.each([
+    { label: "is absent", code: "ESRCH", observation: null },
+    { label: "is non-executable", code: "EPERM", observation: false },
+  ] as const)(
+    "accepts direct-child closure after the graceful process group $label exactly",
+    async ({ code, observation }) => {
+      const child = fakeChild();
+      const killProcess = vi.fn((pid: number, signal?: NodeJS.Signals | number) => {
+        if (pid === -4_242 && signal === "SIGTERM") {
+          const error = new Error("group signal failed") as NodeJS.ErrnoException;
+          error.code = code;
+          throw error;
+        }
+        return true as const;
+      });
+      const termination = terminateProcessTreeAndWait(
+        child as never,
+        false,
+        {
+          platform: "linux",
+          killProcess,
+          processGroupCanExecute: vi.fn(() => observation),
+          waitMs: 25,
+        },
+      );
+
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      child.exitCode = 1;
+      child.emit("close", 1);
+
+      await expect(termination).resolves.toBe(true);
+    },
+  );
 
   it("only probes a POSIX PGID after the owned root and stdio fully closed", async () => {
     const child = fakeChild();
@@ -710,7 +900,7 @@ describe("provider process-tree termination", () => {
     const killProcess = vi.fn((pid: number, signal?: NodeJS.Signals | number) => {
       const target = Math.abs(pid);
       if (signal === 0) {
-        if (!running.has(target)) throw new Error("process gone");
+        if (!running.has(target)) throw noSuchProcess("process gone");
         return true as const;
       }
       if (signal === "SIGKILL") running.delete(target);
@@ -773,7 +963,7 @@ describe("provider process-tree termination", () => {
     const killProcess = vi.fn((pid: number, signal?: NodeJS.Signals | number) => {
       const target = Math.abs(pid);
       if (signal === 0) {
-        if (!running.has(target)) throw new Error("process gone");
+        if (!running.has(target)) throw noSuchProcess("process gone");
         return true as const;
       }
       if (signal === "SIGKILL") running.delete(target);
@@ -812,7 +1002,9 @@ describe("provider process-tree termination", () => {
         signal?: NodeJS.Signals | number,
       ) => {
         if (signal === 0) {
-          if (!running.has(Math.abs(pid))) throw new Error("process gone");
+          if (!running.has(Math.abs(pid))) {
+            throw noSuchProcess("process gone");
+          }
         }
         return true as const;
       });
@@ -859,7 +1051,9 @@ describe("provider process-tree termination", () => {
         signal?: NodeJS.Signals | number,
       ) => {
         if (signal === 0) {
-          if (!running.has(Math.abs(pid))) throw new Error("process gone");
+          if (!running.has(Math.abs(pid))) {
+            throw noSuchProcess("process gone");
+          }
         }
         return true as const;
       });

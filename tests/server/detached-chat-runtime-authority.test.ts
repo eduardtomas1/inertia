@@ -120,10 +120,12 @@ function resources(): DetachedChatRuntimePolicyResources {
       : null,
     checkpointConversationId: (checkpointId) =>
       checkpointId === CHECKPOINT ? CONVERSATION : OTHER_CONVERSATION,
-    pendingApproval: (requestId) => requestId === REQUEST
+    pendingApproval: (conversationId, requestId) =>
+      conversationId === CONVERSATION && requestId === REQUEST
       ? ({ conversationId: CONVERSATION } as AgentApprovalRequest)
       : null,
-    pendingInput: (requestId) => requestId === REQUEST
+    pendingInput: (conversationId, requestId) =>
+      conversationId === CONVERSATION && requestId === REQUEST
       ? ({ conversationId: CONVERSATION } as AgentInputRequest)
       : null,
   };

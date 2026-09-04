@@ -485,6 +485,7 @@ export function hasConsistentProviderTerminalOutcome(
 ): boolean {
   if (typeof result !== "object" || result === null) return false;
   const candidate = result as Record<string, unknown>;
+  if (typeof candidate.cleanupConfirmed !== "boolean") return false;
   const terminalReason = candidate.terminalReason;
   if (typeof terminalReason !== "object" || terminalReason === null) return false;
   const terminal = terminalReason as Record<string, unknown>;
@@ -549,6 +550,8 @@ export interface ProviderManagerOptions {
   backendCompatibilities?: readonly HarnessBackendCompatibility[];
   /** Latest safe compatibility evidence, keyed to an exact profile revision and model. */
   backendProbeResults?: readonly BackendCompatibilityProbeResult[];
+  /** Deterministic freshness clock for exact custom-backend probe admission. */
+  backendProbeNow?: () => Date;
   /**
    * Privileged, process-local launch boundary for backend-specific routing.
    * Implementations may materialize a secret into the owned child environment,
@@ -570,6 +573,13 @@ export interface ProviderBackendLaunchOptions {
   environment: NodeJS.ProcessEnv;
   /** Optional harness-specific spelling of the already selected model. */
   modelArgument?: string | null;
+  /**
+   * Exact selected/probed model represented by `modelArgument` when a
+   * provider-specific spelling (for example a context-window suffix) differs
+   * from the persisted model id. Custom routes are rejected unless this
+   * identity, or the argument itself, matches the selected model exactly.
+   */
+  modelArgumentIdentity?: string;
   /** Safe provider configuration consumed only by the matching owned harness. */
   harnessConfiguration?: ProviderHarnessLaunchConfiguration;
   /**

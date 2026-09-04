@@ -506,6 +506,12 @@ function startOpenCodeRun(
         ),
       );
       const effectiveModel = selectedModel ?? (session.data.model ? findOpenCodeModel(session.data.model.providerID, session.data.model.id, providerData.data.all) : undefined);
+      // OpenCode image support is model-negotiated. Publish the exact-run
+      // observation before any attachment can cross the provider boundary.
+      emitter.capability(
+        "images",
+        effectiveModel?.capabilities.input.image === true,
+      );
       if (options.input.reasoningEffort && (!effectiveModel || !effectiveModel.variants?.[options.input.reasoningEffort])) {
         throw new Error(`The active OpenCode model does not advertise reasoning variant '${options.input.reasoningEffort}'.`);
       }

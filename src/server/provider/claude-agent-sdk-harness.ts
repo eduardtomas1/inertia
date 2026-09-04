@@ -339,6 +339,11 @@ function startClaudeRun(
     if (claudeHostTools?.providerToolNames.has(toolName)) {
       return { behavior: "allow", updatedInput: toolInput };
     }
+    if (!options.providerNativeToolsAvailable) {
+      return deny(
+        "Provider-native tools are unavailable for this exact backend and model.",
+      );
+    }
     if (toolName === "AskUserQuestion") {
       if (inputs.size >= MAX_PENDING_INTERACTIONS) {
         return deny("Claude exceeded the bounded question budget.", true);
@@ -538,6 +543,7 @@ function startClaudeRun(
                 : "default",
           allowDangerouslySkipPermissions: options.input.access === "full",
           canUseTool,
+          ...(!options.providerNativeToolsAvailable ? { tools: [] } : {}),
           ...(claudeHostTools
             ? {
                 mcpServers: { [INERTIA_HOST_MCP_NAME]: claudeHostTools.config },
@@ -612,7 +618,12 @@ function startClaudeRun(
             && record.fast_mode_state !== requestedFastModeState) {
             throw new Error("Claude did not confirm Standard speed for this session. Start a new chat or update Claude Code.");
           }
-          if (requestedFastModeState !== null) fastModeVerified = true;
+          if (requestedFastModeState !== null) {
+            fastModeVerified = true;
+            // `fast_mode_state` belongs to this exact attested session/init;
+            // never infer negotiated support from the requested setting.
+            emitter.capability("performance-modes", true);
+          }
         }
         if (
           stagedSkillPlugin

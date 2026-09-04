@@ -146,10 +146,11 @@ describe("generated turn attachment lifecycle", () => {
     controller.start(cancelled.turn.id);
     expect(controller.cancel(conversation.id)).toBe(true);
     settleProvider("cancelled");
-    await firstGeneratedRelease;
-    await expect(access(cancelledPage)).rejects.toThrow();
+    await flush();
+    await expect(access(cancelledPage)).resolves.toBeUndefined();
     resolveStop();
     await controller.waitForProviderCleanup([conversation.id]);
+    await firstGeneratedRelease;
     await expect(access(cancelledPage)).rejects.toThrow();
 
     const prestartPage = await generated.writeJpeg(new Uint8Array([2]));

@@ -25,6 +25,7 @@ import { providerRunTerminal } from "../../src/server/provider/contracts";
 import { ProviderMetadataCache } from "../../src/server/provider/metadata";
 import { resolveOpenCodeModel } from "../../src/server/provider/opencode-sdk-harness";
 import { findCursorAdvertisedConfigValue } from "../../src/server/provider/cursor-acp-harness";
+import { backendProbeTestAuthority } from "../helpers/backend-probe-authority";
 
 const checkedAt = "2026-07-25T08:00:00.000Z";
 
@@ -58,8 +59,12 @@ function probe(
     modelVerified: true,
     capabilities: MODEL_CAPABILITY_IDS.map((id) => ({
       id,
-      state: id === "streaming" ? "verified" : "unknown",
-      provenance: id === "streaming" ? "probe" : "unknown",
+      state: id === "streaming" || (
+        id === "tools" && backend.protocol === "openai-responses"
+      ) ? "verified" : "unknown",
+      provenance: id === "streaming" || (
+        id === "tools" && backend.protocol === "openai-responses"
+      ) ? "probe" : "unknown",
       detail: null,
       checkedAt,
     })),
@@ -72,6 +77,7 @@ function probe(
     },
     failure: null,
     checkedAt,
+    authority: backendProbeTestAuthority(checkedAt),
   });
 }
 
@@ -115,6 +121,7 @@ describe("ProviderManager harness backend routing", () => {
       };
     };
     const manager = ProviderManager.createForTests({
+      backendProbeNow: () => new Date(checkedAt),
       commands: { claude: "/opt/provider/claude" },
       backendProfiles: [backend],
       backendProbeResults: [probe(backend, selected.modelId)],
@@ -132,7 +139,7 @@ describe("ProviderManager harness backend routing", () => {
     });
     await manager.detect("claude");
     expect(manager.resolveModelRoute(selected).continuationIdentity
-      .providerCompatibilityToken).toMatch(/^[0-9a-f]{64}$/u);
+      .providerCompatibilityToken).toBeUndefined();
     const verifiedContract = manager.providerCapabilityContract("claude");
     expect(verifiedContract).toMatchObject({
       schemaVersion: 1,
@@ -160,7 +167,7 @@ describe("ProviderManager harness backend routing", () => {
     rejectDetection = false;
     await manager.detect("claude");
     expect(manager.resolveModelRoute(selected).continuationIdentity
-      .providerCompatibilityToken).toMatch(/^[0-9a-f]{64}$/u);
+      .providerCompatibilityToken).toBeUndefined();
 
     cleanupConfirmed = false;
     await manager.detect("claude");
@@ -186,6 +193,7 @@ describe("ProviderManager harness backend routing", () => {
       const backend = profile(protocol);
       const modelId = `${protocol}-model`;
       const manager = ProviderManager.createForTests({
+        backendProbeNow: () => new Date(checkedAt),
         backendProfiles: [backend],
         backendProbeResults: [probe(backend, modelId)],
       });
@@ -205,6 +213,7 @@ describe("ProviderManager harness backend routing", () => {
   it("never lets an optimistic custom registration bypass exact probe evidence", () => {
     const backend = profile("openai-responses");
     const manager = ProviderManager.createForTests({
+      backendProbeNow: () => new Date(checkedAt),
       backendProfiles: [backend],
       backendCompatibilities: [{
         harnessId: "codex-app-server",
@@ -232,6 +241,7 @@ describe("ProviderManager harness backend routing", () => {
     const result = probe(backend, "model");
     const revised = { ...backend, configurationRevision: 3 };
     const manager = ProviderManager.createForTests({
+      backendProbeNow: () => new Date(checkedAt),
       backendProfiles: [revised],
       backendProbeResults: [result],
     });
@@ -247,7 +257,10 @@ describe("ProviderManager harness backend routing", () => {
 
   it("refreshes one exact model without enabling a different model", () => {
     const backend = profile("openai-responses");
-    const manager = ProviderManager.createForTests({ backendProfiles: [backend] });
+    const manager = ProviderManager.createForTests({
+      backendProfiles: [backend],
+      backendProbeNow: () => new Date(checkedAt),
+    });
     manager.recordBackendProbeResult(probe(backend, "verified-model"));
 
     expect(manager.resolveModelRoute(selection(
@@ -265,6 +278,7 @@ describe("ProviderManager harness backend routing", () => {
   it("supports safe profile CRUD while protecting built-ins and clearing stale evidence", () => {
     const backend = profile("openai-responses");
     const manager = ProviderManager.createForTests({
+      backendProbeNow: () => new Date(checkedAt),
       backendProfiles: [backend],
       backendProbeResults: [probe(backend, "model")],
     });
@@ -398,6 +412,7 @@ describe("ProviderManager harness backend routing", () => {
       },
     };
     const manager = ProviderManager.createForTests({
+      backendProbeNow: () => new Date(checkedAt),
       commands: { claude: "claude" },
       backendProfiles: [backend],
       backendProbeResults: [probe(backend, selected.modelId)],
@@ -418,10 +433,20 @@ describe("ProviderManager harness backend routing", () => {
       .providerCompatibilityToken ?? null)
       .toBeNull();
     await manager.detect("claude");
+    const detectedFingerprint = manager.providerInstallationFingerprint("claude");
+    expect(detectedFingerprint).not.toBeNull();
+    const exactProbe = probe(backend, selected.modelId);
+    manager.removeBackendProbeResults(backend.id);
+    manager.recordBackendProbeResult({
+      ...exactProbe,
+      authority: {
+        ...exactProbe.authority!,
+        installationFingerprint: detectedFingerprint,
+      },
+    });
     const route = manager.resolveModelRoute(selected);
-    const verifiedToken = route.continuationIdentity
-      .providerCompatibilityToken;
-    expect(verifiedToken).toMatch(/^[0-9a-f]{64}$/u);
+    expect(route.continuationIdentity.providerCompatibilityToken)
+      .toBeUndefined();
     const observedMetadata: string[] = [];
     await manager.run({
       providerId: route.providerId,
@@ -456,7 +481,7 @@ describe("ProviderManager harness backend routing", () => {
     expect(observedMetadata).toEqual(["kimi-model"]);
 
     expect(manager.resolveModelRoute(selected).continuationIdentity
-      .providerCompatibilityToken).toBe(verifiedToken);
+      .providerCompatibilityToken).toBeUndefined();
 
     metadataCache.correlate("claude", {
       executable: "claude",
@@ -473,6 +498,65 @@ describe("ProviderManager harness backend routing", () => {
     });
     expect(manager.resolveModelRoute(selected).continuationIdentity
       .providerCompatibilityToken).toBeUndefined();
+  });
+
+  it("does not combine a remote probe with a replaced harness installation", async () => {
+    const backend = profile("anthropic-messages");
+    const selected = selection(backend, "claude-agent-sdk", "bound-model");
+    const result = probe(backend, selected.modelId);
+    let executable = "/opt/provider/claude-a";
+    const manager = ProviderManager.createForTests({
+      backendProbeNow: () => new Date(checkedAt),
+      backendProfiles: [backend],
+      backendProbeResults: [result],
+      detectProvider: async () => ({
+        provider: { id: "claude", name: "Claude", command: "claude" },
+        available: true,
+        executable,
+        version: "2.1.0",
+        installState: "installed",
+        authState: "authenticated",
+        canRun: true,
+        cleanupConfirmed: true,
+        statusMessage: "Connected",
+      }),
+    });
+
+    await manager.detect("claude");
+    const firstFingerprint = manager.providerInstallationFingerprint("claude");
+    expect(firstFingerprint).not.toBeNull();
+    manager.removeBackendProbeResults(backend.id);
+    manager.recordBackendProbeResult({
+      ...result,
+      authority: {
+        ...result.authority!,
+        installationFingerprint: firstFingerprint,
+      },
+    });
+    const route = manager.resolveModelRoute(selected);
+    const input = {
+      providerId: "claude" as const,
+      harnessId: "claude-agent-sdk" as const,
+      backendProfile: route.backendProfile,
+      backendCompatibility: route.compatibility,
+      modelSelection: selected,
+      continuationIdentity: route.continuationIdentity,
+      conversationId: "installation-bound-probe",
+      runId: "run-installation-bound-probe",
+      turnId: "turn-installation-bound-probe",
+      cwd: "/workspace",
+      prompt: "Inspect",
+      model: selected.modelId,
+      interactionMode: "build" as const,
+      access: "supervised" as const,
+    };
+    expect(manager.providerCapabilityAvailable(input, "text-streaming")).toBe(true);
+
+    executable = "/opt/provider/claude-b";
+    await manager.detect("claude");
+    expect(manager.providerInstallationFingerprint("claude"))
+      .not.toBe(firstFingerprint);
+    expect(manager.providerCapabilityAvailable(input, "text-streaming")).toBe(false);
   });
 });
 

@@ -141,6 +141,55 @@ describe("Claude Agent SDK harness", () => {
     })).toThrow("duplicate option label");
   });
 
+  it("removes and denies native tools when exact-run capability authority is absent", async () => {
+    const root = portableFixtureRoot("Claude native tools disabled");
+    roots.push(root);
+    let capturedOptions: ClaudeOptions | undefined;
+    let permission: PermissionResult | undefined;
+    const harness = createClaudeAgentSdkHarness({
+      createQuery: ({ options }) => {
+        capturedOptions = options;
+        return fixtureClaudeQuery(
+          (async function* (): AsyncGenerator<SDKMessage> {
+            permission = (await options?.canUseTool?.(
+              "Bash",
+              { command: "touch must-not-run" },
+              {
+                signal: new AbortController().signal,
+                toolUseID: "native-tool-without-authority",
+                requestId: "native-tool-without-authority",
+              },
+            )) ?? undefined;
+            yield claudeSuccessResult("Text only", "completed");
+          })(),
+        );
+      },
+    });
+    const run = harness.start({
+      input: nativeProviderRunInput({
+        providerId: "claude",
+        conversationId: "claude-native-tools-disabled",
+        cwd: root,
+        prompt: "Answer without tools.",
+        interactionMode: "build",
+        access: "full",
+      }),
+      executable: process.execPath,
+      environment: {},
+      providerNativeToolsAvailable: false,
+    });
+
+    await expect(run.result).resolves.toMatchObject({
+      status: "completed",
+      text: "Text only",
+    });
+    expect(capturedOptions?.tools).toEqual([]);
+    expect(permission).toEqual({
+      behavior: "deny",
+      message: "Provider-native tools are unavailable for this exact backend and model.",
+    });
+  });
+
   it("fails and cleans up a run that floods bounded provider events", async () => {
     const root = portableFixtureRoot("Claude SDK event flood");
     roots.push(root);

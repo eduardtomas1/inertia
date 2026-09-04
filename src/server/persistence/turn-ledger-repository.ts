@@ -232,6 +232,28 @@ export class TurnLedgerRepository {
    */
   begin(input: BeginAgentTurnInput): { message: ChatMessage; turn: AgentTurn } {
     return this.context.database.transaction(() => {
+      if (input.providerSessionInvalidation) {
+        if ((input.providerSessionBefore ?? null) !== null) {
+          throw new Error(
+            "A fresh turn cannot invalidate and resume a provider session together.",
+          );
+        }
+        const expectedSessionId = requiredTurnString(
+          input.providerSessionInvalidation.expectedSessionId,
+          "Provider session invalidation identity",
+          1_000,
+        );
+        const cleared = this.context.database.prepare(`
+          UPDATE conversations
+          SET provider_session_id = NULL, continuation_identity_json = NULL
+          WHERE id = ? AND provider_session_id = ?
+        `).run(input.conversationId, expectedSessionId);
+        if (cleared.changes !== 1) {
+          throw new Error(
+            "The provider session changed before the fresh turn could be persisted.",
+          );
+        }
+      }
       const message = this.context.createMessage(
         input.conversationId,
         input.content,

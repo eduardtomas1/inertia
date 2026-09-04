@@ -1,7 +1,10 @@
 import { z } from "zod";
 
 import {
+  BACKEND_PROBE_AUTHORITY_SCHEMA_VERSION,
+  BACKEND_PROBE_FRESHNESS_MS,
   MODEL_CAPABILITY_IDS,
+  backendProbeAuthorityIsCurrent,
   modelBackendProfileSchema,
   modelCapabilitySchema,
   modelCapabilityStateSchema,
@@ -11,6 +14,7 @@ import {
   type ModelCapabilityId,
   type ModelCapabilityProvenance,
   type ModelCapabilityState,
+  type HarnessBackendProbeAuthority,
 } from "./model-routing";
 
 export const BACKEND_PROBE_FAILURE_CODES = [
@@ -84,9 +88,25 @@ export interface BackendCompatibilityProbeResult {
   contextWindow: BackendProbeContextEvidence;
   failure: BackendProbeFailure | null;
   checkedAt: string;
+  /** Missing only on legacy persisted evidence, which is never authoritative. */
+  authority?: HarnessBackendProbeAuthority;
+}
+
+export const MAX_BACKEND_PROBE_RESULTS_PER_PROFILE = 128;
+
+export interface BackendProbeAdmissionHighWater {
+  modelId: string;
+  admissionSequence: number;
 }
 
 const timestampSchema = z.string().datetime({ offset: true });
+const probeAuthoritySchema = z.object({
+  schemaVersion: z.literal(BACKEND_PROBE_AUTHORITY_SCHEMA_VERSION),
+  operationId: z.string().uuid(),
+  admissionSequence: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  installationFingerprint: z.string().regex(/^[a-f0-9]{64}$/u).nullable(),
+  expiresAt: timestampSchema,
+}).strict();
 const modelIdSchema = z.string().trim().min(1).max(500)
   .refine((value) => !/[\0\r\n]/u.test(value), "Model IDs cannot contain control characters.");
 const secretReferenceSchema = z.string()
@@ -191,7 +211,90 @@ export const backendCompatibilityProbeResultSchema = z.object({
     retryAfterSeconds: z.number().int().nonnegative().max(86_400).nullable(),
   }).strict().nullable(),
   checkedAt: timestampSchema,
+  authority: probeAuthoritySchema.optional(),
+}).strict().superRefine((result, context) => {
+  if (!result.authority) return;
+  const checkedAt = Date.parse(result.checkedAt);
+  const expiresAt = Date.parse(result.authority.expiresAt);
+  if (
+    expiresAt <= checkedAt
+    || expiresAt - checkedAt > BACKEND_PROBE_FRESHNESS_MS
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["authority", "expiresAt"],
+      message: "Probe authority must have a bounded validity window.",
+    });
+  }
+});
+
+export const backendProbeAdmissionHighWaterSchema = z.object({
+  modelId: modelIdSchema,
+  admissionSequence: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
 }).strict();
+
+/**
+ * Durable probe evidence is cached independently for each configured model.
+ * The versioned envelope keeps the existing single-result JSON readable while
+ * making future persistence migrations explicit and fail-closed.
+ */
+export const backendCompatibilityProbeResultCollectionSchema = z.object({
+  schemaVersion: z.literal(1),
+  results: z.array(backendCompatibilityProbeResultSchema)
+    .max(MAX_BACKEND_PROBE_RESULTS_PER_PROFILE),
+  /**
+   * Optional only for the first per-model envelope shape. Every new write
+   * includes this compact high-water state so payload eviction cannot make a
+   * completed admission sequence reusable after restart.
+   */
+  admissionHighWater: z.array(backendProbeAdmissionHighWaterSchema)
+    .max(MAX_BACKEND_PROBE_RESULTS_PER_PROFILE)
+    .optional(),
+}).strict().superRefine((collection, context) => {
+  const modelIds = new Set<string>();
+  for (const [index, result] of collection.results.entries()) {
+    if (modelIds.has(result.modelId)) {
+      context.addIssue({
+        code: "custom",
+        path: ["results", index, "modelId"],
+        message: "Persisted backend probe results must be unique per model.",
+      });
+    }
+    modelIds.add(result.modelId);
+  }
+  const highWaterByModel = new Map<string, number>();
+  for (const [index, entry] of (collection.admissionHighWater ?? []).entries()) {
+    if (highWaterByModel.has(entry.modelId)) {
+      context.addIssue({
+        code: "custom",
+        path: ["admissionHighWater", index, "modelId"],
+        message: "Probe admission high-water entries must be unique per model.",
+      });
+    }
+    highWaterByModel.set(entry.modelId, entry.admissionSequence);
+  }
+  if (collection.admissionHighWater) {
+    for (const [index, result] of collection.results.entries()) {
+      const sequence = result.authority?.admissionSequence;
+      if (
+        sequence !== undefined
+        && (highWaterByModel.get(result.modelId) ?? 0) < sequence
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: ["results", index, "authority", "admissionSequence"],
+          message: "Probe evidence cannot exceed its durable admission high-water mark.",
+        });
+      }
+    }
+  }
+});
+
+export interface BackendCompatibilityProbeResultCollection {
+  schemaVersion: 1;
+  results: readonly BackendCompatibilityProbeResult[];
+  admissionHighWater?: readonly BackendProbeAdmissionHighWater[];
+}
 
 /**
  * Task 24 consumes probe evidence only while this complete binding still
@@ -202,6 +305,7 @@ export function backendProbeMatchesProfile(
   result: BackendCompatibilityProbeResult,
   profile: ModelBackendProfile,
   modelId: string,
+  evaluatedAt: Date = new Date(),
 ): boolean {
   const parsedResult = backendCompatibilityProbeResultSchema.safeParse(result);
   const parsedProfile = modelBackendProfileSchema.safeParse(profile);
@@ -212,5 +316,6 @@ export function backendProbeMatchesProfile(
       === parsedProfile.data.configurationRevision
     && parsedResult.data.endpointIdentity === parsedProfile.data.endpointIdentity
     && parsedResult.data.protocol === parsedProfile.data.protocol
-    && parsedResult.data.modelId === modelId;
+    && parsedResult.data.modelId === modelId
+    && backendProbeAuthorityIsCurrent(parsedResult.data, evaluatedAt);
 }

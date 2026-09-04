@@ -10,6 +10,7 @@ import {
   detachedChatCommandRejection,
   type DetachedChatRuntimePolicyResources,
 } from "./detached-chat-runtime-policy";
+import { pendingInteractionForConversation } from "./pending-interaction-registry";
 import type { RuntimeClientAuthority } from "./runtime-client-authority";
 
 interface DetachedChatRuntimeSecurityStore {
@@ -73,9 +74,18 @@ export function createDetachedChatRuntimeSecurity(
         return null;
       }
     },
-    pendingApproval: (requestId) =>
-      options.pendingApprovals.get(requestId) ?? null,
-    pendingInput: (requestId) => options.pendingInputs.get(requestId) ?? null,
+    pendingApproval: (conversationId, requestId) =>
+      pendingInteractionForConversation(
+        options.pendingApprovals,
+        conversationId,
+        requestId,
+      ) ?? null,
+    pendingInput: (conversationId, requestId) =>
+      pendingInteractionForConversation(
+        options.pendingInputs,
+        conversationId,
+        requestId,
+      ) ?? null,
   };
 
   return {

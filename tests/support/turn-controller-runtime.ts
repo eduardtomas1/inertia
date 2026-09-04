@@ -102,6 +102,17 @@ export interface TurnControllerTestRuntime {
   attachmentReleases: string[][];
 }
 
+export function turnControllerTestContinuationState(
+  store: RuntimeStore,
+  conversationId: string,
+) {
+  const conversation = store.conversation(conversationId);
+  return {
+    providerSessionId: conversation.providerSessionId,
+    continuationIdentity: conversation.continuationIdentity,
+  };
+}
+
 interface TurnControllerTestRuntimeOptions {
   interactionMode?: "build" | "plan";
   modelSelection?: ModelSelection;
@@ -255,8 +266,10 @@ export function emitTurnControllerTestSubagent(
 }
 
 export async function flushTurnControllerTestPromises(): Promise<void> {
-  await Promise.resolve();
-  await Promise.resolve();
+  // Provider cleanup now joins the exact stopOwned receipt, terminal
+  // persistence, follow-up drain, and attachment release before its barrier
+  // settles. Drain the complete bounded microtask chain for test assertions.
+  for (let step = 0; step < 8; step += 1) await Promise.resolve();
 }
 
 export async function cleanupTurnControllerTestDirectories(): Promise<void> {

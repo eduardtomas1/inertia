@@ -127,11 +127,22 @@ class FakeProvider implements IsolatedRunProviderRuntime {
       input.conversationId === conversationId && this.pending[index] !== undefined);
   }
 
+  ownsRun(
+    conversationId: string,
+    identity: { runId: string; turnId: string },
+  ): boolean {
+    return this.inputs.some((input, index) =>
+      input.conversationId === conversationId
+      && input.runId === identity.runId
+      && input.turnId === identity.turnId
+      && this.pending[index] !== undefined);
+  }
+
   async stopOwned(
     conversationId: string,
     identity: { runId: string; turnId: string },
     graceMs?: number,
-  ): Promise<"settled" | "force-detached"> {
+  ): Promise<"settled" | "identity-mismatch" | "force-detached"> {
     this.stops.push({ conversationId, identity, graceMs });
     const index = this.inputs.findIndex((input) => input.conversationId === conversationId);
     if (this.settleStop && index >= 0) {
@@ -139,6 +150,64 @@ class FakeProvider implements IsolatedRunProviderRuntime {
       return "settled";
     }
     return "force-detached";
+  }
+}
+
+class SynchronouslyFailingProvider extends FakeProvider {
+  ownershipAfterFailure: "exact" | "different" | "missing" | "unknown" =
+    "missing";
+  readonly stopOutcomes: Array<
+    "settled" | "identity-mismatch" | "force-detached"
+  > = [];
+
+  override run(
+    input: ProviderRunInput,
+    callbacks: ProviderRunCallbacks,
+  ): Promise<ProviderRunResult> {
+    this.inputs.push(input);
+    this.callbacks.push(callbacks);
+    throw new Error("Provider startup failed synchronously.");
+  }
+
+  override isRunning(conversationId: string): boolean {
+    return (
+      this.ownershipAfterFailure === "exact"
+      || this.ownershipAfterFailure === "different"
+    )
+      && this.inputs.some((input) => input.conversationId === conversationId);
+  }
+
+  override ownsRun(
+    conversationId: string,
+    identity: { runId: string; turnId: string },
+  ): boolean {
+    if (this.ownershipAfterFailure === "unknown") {
+      throw new Error("Provider ownership lookup failed.");
+    }
+    if (this.ownershipAfterFailure !== "exact") return false;
+    return this.inputs.some((input) =>
+      input.conversationId === conversationId
+      && input.runId === identity.runId
+      && input.turnId === identity.turnId);
+  }
+
+  override async stopOwned(
+    conversationId: string,
+    identity: { runId: string; turnId: string },
+    graceMs?: number,
+  ): Promise<"settled" | "identity-mismatch" | "force-detached"> {
+    this.stops.push({ conversationId, identity, graceMs });
+    if (this.ownershipAfterFailure === "different") {
+      this.stopOutcomes.push("identity-mismatch");
+      return "identity-mismatch";
+    }
+    if (!this.settleStop) {
+      this.stopOutcomes.push("force-detached");
+      return "force-detached";
+    }
+    this.ownershipAfterFailure = "missing";
+    this.stopOutcomes.push("settled");
+    return "settled";
   }
 }
 
@@ -481,6 +550,122 @@ describe("IsolatedRunController", () => {
     await expect(controller.dispose()).rejects.toThrow(
       "Isolated provider cleanup remains unconfirmed.",
     );
+  });
+
+  it("proves cleanup when provider startup throws after synchronous admission", async () => {
+    const store = new FakeStore();
+    const provider = new SynchronouslyFailingProvider();
+    provider.ownershipAfterFailure = "exact";
+    const fileSystem = fakeFileSystem();
+    const controller = new IsolatedRunController(
+      store,
+      provider,
+      "/private/inertia-data",
+      vi.fn(),
+      { id: ids(), fileSystem },
+    );
+
+    await expect(controller.run(request({}))).rejects.toMatchObject({
+      reason: "provider-failed",
+    });
+
+    expect(provider.stops).toEqual([{
+      conversationId:
+        "conversation-1:isolated:00000000-0000-4000-8000-000000000001",
+      identity: {
+        runId: "00000000-0000-4000-8000-000000000002",
+        turnId: "00000000-0000-4000-8000-000000000003",
+      },
+      graceMs: 2_500,
+    }]);
+    expect(controller.has("conversation-1")).toBe(false);
+    expect(fileSystem.remove).toHaveBeenCalledOnce();
+    expect(store.updates[0]?.update).toMatchObject({ status: "failed" });
+  });
+
+  it("retains synchronous provider admission when cleanup stays unconfirmed", async () => {
+    const store = new FakeStore();
+    const provider = new SynchronouslyFailingProvider();
+    provider.ownershipAfterFailure = "exact";
+    provider.settleStop = false;
+    const fileSystem = fakeFileSystem();
+    const controller = new IsolatedRunController(
+      store,
+      provider,
+      "/private/inertia-data",
+      vi.fn(),
+      { id: ids(), fileSystem },
+    );
+
+    await expect(controller.run(request({}))).rejects.toMatchObject({
+      reason: "provider-failed",
+    });
+
+    expect(provider.stops).toHaveLength(1);
+    expect(controller.has("conversation-1")).toBe(true);
+    expect(fileSystem.remove).not.toHaveBeenCalled();
+    expect(store.updates).toEqual([]);
+    await expect(controller.run(request({}))).rejects.toThrow(
+      "already running for this thread",
+    );
+    await expect(controller.dispose()).rejects.toThrow(
+      "Isolated provider cleanup remains unconfirmed.",
+    );
+  });
+
+  it.each([
+    ["different", "identity-mismatch"],
+    ["unknown", "force-detached"],
+  ] as const)(
+    "quarantines %s synchronous provider ownership without exact cleanup proof",
+    async (ownership, expectedStop) => {
+      const store = new FakeStore();
+      const provider = new SynchronouslyFailingProvider();
+      provider.ownershipAfterFailure = ownership;
+      provider.settleStop = ownership !== "unknown";
+      const fileSystem = fakeFileSystem();
+      const controller = new IsolatedRunController(
+        store,
+        provider,
+        "/private/inertia-data",
+        vi.fn(),
+        { id: ids(), fileSystem },
+      );
+
+      await expect(controller.run(request({}))).rejects.toMatchObject({
+        reason: "provider-failed",
+      });
+
+      expect(provider.stops).toHaveLength(1);
+      expect(provider.stopOutcomes).toEqual([expectedStop]);
+      expect(controller.has("conversation-1")).toBe(true);
+      expect(fileSystem.remove).not.toHaveBeenCalled();
+      expect(store.updates).toEqual([]);
+      await expect(controller.dispose()).rejects.toThrow(
+        "Isolated provider cleanup remains unconfirmed.",
+      );
+    },
+  );
+
+  it("releases an isolated run after a pre-admission synchronous failure", async () => {
+    const store = new FakeStore();
+    const provider = new SynchronouslyFailingProvider();
+    const fileSystem = fakeFileSystem();
+    const controller = new IsolatedRunController(
+      store,
+      provider,
+      "/private/inertia-data",
+      vi.fn(),
+      { id: ids(), fileSystem },
+    );
+
+    await expect(controller.run(request({}))).rejects.toMatchObject({
+      reason: "provider-failed",
+    });
+
+    expect(provider.stops).toEqual([]);
+    expect(controller.has("conversation-1")).toBe(false);
+    expect(fileSystem.remove).toHaveBeenCalledOnce();
   });
 
   it("preserves an explicit custom backend route instead of falling back to the native harness backend", async () => {

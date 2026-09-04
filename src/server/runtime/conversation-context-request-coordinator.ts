@@ -2,6 +2,10 @@ import type {
   AgentInputRequest,
   RuntimeMutationEvent,
 } from "../../shared/contracts";
+import {
+  deletePendingInteraction,
+  registerPendingInteraction,
+} from "./pending-interaction-registry";
 
 const CONTEXT_SELECTION_TIMEOUT_MS = 5 * 60_000;
 const MAX_PENDING_CONTEXT_SELECTIONS = 4;
@@ -128,15 +132,21 @@ export class ConversationContextRequestCoordinator {
         });
       }, timeoutMs);
       timeout.unref();
-      this.pending.set(input.scope.contextRequestId, {
+      const pending: PendingSelection = {
         request,
         scope: input.scope,
         signal: input.signal,
         detachSignal: () => input.signal.removeEventListener("abort", abort),
         resolve,
         timeout,
-      });
-      this.options.pendingInputs.set(request.id, request);
+      };
+      if (!registerPendingInteraction(this.options.pendingInputs, request)) {
+        clearTimeout(timeout);
+        pending.detachSignal();
+        resolve({ kind: "cancelled", reason: "interrupted" });
+        return;
+      }
+      this.pending.set(input.scope.contextRequestId, pending);
       this.options.broadcast({ type: "agent.input.requested", request });
       this.options.broadcastConversationShell(request.conversationId);
     });
@@ -253,7 +263,11 @@ export class ConversationContextRequestCoordinator {
     this.pending.delete(requestId);
     clearTimeout(pending.timeout);
     pending.detachSignal();
-    this.options.pendingInputs.delete(requestId);
+    deletePendingInteraction(
+      this.options.pendingInputs,
+      pending.request,
+      requestId,
+    );
     pending.resolve(outcome);
     this.options.broadcast({
       type: "agent.input.resolved",

@@ -21,6 +21,7 @@ import { resolveNativeModelRoute } from "./model-route-fixture";
 import {
   cleanupTurnControllerTestDirectories,
   createTurnControllerTestRuntime as testRuntime,
+  turnControllerTestContinuationState as continuationState,
   emitTurnControllerTestSubagent as emitSubagent,
   flushTurnControllerTestPromises as flushPromises,
   turnControllerTestAttachment as testAttachment,
@@ -1145,6 +1146,9 @@ describe("TurnController authoritative lifecycle", () => {
 
   it("releases an attachment when the provider throws before returning a run", async () => {
     const runtime = await testRuntime();
+    runtime.store.updateConversation(runtime.conversationId, {
+      providerSessionId: "stale-session-before-launch",
+    });
     const attachment = await testAttachment(
       runtime,
       "99999999-9999-4999-8999-999999999999",
@@ -1158,6 +1162,8 @@ describe("TurnController authoritative lifecycle", () => {
       content: "Fail while launching the provider.",
       attachments: [attachment],
     });
+    expect(continuationState(runtime.store, runtime.conversationId))
+      .toEqual({ providerSessionId: null, continuationIdentity: null });
 
     expect(runtime.controller.start(queued.turn.id)).toBe(false);
     await flushPromises();
@@ -1168,7 +1174,14 @@ describe("TurnController authoritative lifecycle", () => {
       terminalReason: "turn-start-failed",
     });
     expect(runtime.attachmentReleases).toEqual([[attachment.id]]);
+    const databasePath = join(runtime.directory, "inertia.sqlite");
     runtime.store.close();
+    const reopened = new RuntimeStore(databasePath, runtime.workspace, {
+      recoverInterruptedRuns: false,
+    });
+    expect(continuationState(reopened, runtime.conversationId))
+      .toEqual({ providerSessionId: null, continuationIdentity: null });
+    reopened.close();
   });
 
   it("retains attachments and gates retries when a synchronous provider event settles during start", async () => {
@@ -1375,6 +1388,74 @@ describe("TurnController authoritative lifecycle", () => {
     expect(runtime.controller.start(queued.turn.id)).toBe(true);
     expect(runtime.provider.input?.prompt)
       .not.toContain("UNVERIFIED_HOST_TOOLS_MUST_NOT_BE_ADVERTISED");
+    expect(hostToolsForTurn).not.toHaveBeenCalled();
+    expect(runtime.provider.callbacks?.hostTools).toBeUndefined();
+
+    runtime.provider.resolve();
+    await flushPromises();
+    runtime.store.close();
+  });
+
+  it("does not lend a verified native host bridge to a custom backend route", async () => {
+    const hostTools: ProviderHostToolBridge = {
+      definitions: [],
+      invoke: vi.fn(async () => ({ success: true, text: "unused" })),
+    };
+    const hostToolsForTurn = vi.fn(() => hostTools);
+    const harnessInstructionsForTurn = vi.fn(() => [{
+      label: "native-host-tools",
+      text: "NATIVE_HOST_TOOLS_MUST_NOT_CROSS_CUSTOM_ROUTE",
+    }]);
+    const customProfile = {
+      ...nativeBackendProfile("codex"),
+      id: "custom:no-native-host-bridge",
+      displayName: "Custom Responses",
+      source: "custom" as const,
+      authenticationMode: "api-key" as const,
+      configurationRevision: 12,
+      endpointIdentity: "endpoint:no-native-host-bridge:12",
+    };
+    const customSelection = modelSelectionSchema.parse({
+      ...nativeModelSelection({
+        providerId: "codex",
+        modelId: "custom-model",
+      }),
+      backendProfileId: customProfile.id,
+      backendProfileDisplayName: customProfile.displayName,
+      backendConfigurationRevision: customProfile.configurationRevision,
+    });
+    const customCompatibility = resolveHarnessBackendCompatibility(
+      "codex-app-server",
+      customProfile,
+    );
+    const runtime = await testRuntime({
+      // The default provider view deliberately claims a fully verified native
+      // host bridge. Route identity, not that provider-wide summary, decides.
+      harnessInstructionsForTurn,
+      hostToolsForTurn,
+    }, {
+      modelSelection: customSelection,
+      resolveModelRoute: () => ({
+        providerId: "codex",
+        harnessId: "codex-app-server",
+        backendProfile: customProfile,
+        compatibility: customCompatibility,
+        continuationIdentity: continuationIdentityForSelection(
+          customSelection,
+          customProfile.endpointIdentity,
+          !customCompatibility.allowsModelSwitchWithinSession,
+        ),
+      }),
+    });
+    const queued = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Use only the custom backend's verified surface.",
+    });
+
+    expect(runtime.controller.start(queued.turn.id)).toBe(true);
+    expect(runtime.provider.input?.prompt)
+      .not.toContain("NATIVE_HOST_TOOLS_MUST_NOT_CROSS_CUSTOM_ROUTE");
+    expect(harnessInstructionsForTurn).not.toHaveBeenCalled();
     expect(hostToolsForTurn).not.toHaveBeenCalled();
     expect(runtime.provider.callbacks?.hostTools).toBeUndefined();
 
@@ -1893,6 +1974,44 @@ describe("TurnController authoritative lifecycle", () => {
     runtime.store.close();
   });
 
+  it("does not pair a stale conversation session with another turn's identity", async () => {
+    const runtime = await testRuntime();
+    const first = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Establish an exact provider session.",
+    });
+    runtime.controller.start(first.turn.id);
+    const firstIdentity = identity(runtime);
+    runtime.provider.emit({
+      ...firstIdentity,
+      type: "session",
+      sessionId: "authoritative-session",
+    });
+    runtime.provider.resolve({
+      status: "completed",
+      sessionId: "authoritative-session",
+      text: "Established.",
+    });
+    await flushPromises();
+
+    runtime.store.updateConversation(runtime.conversationId, {
+      providerSessionId: "stale-shell-session",
+    });
+    const next = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Do not reuse unrelated hidden state.",
+    });
+
+    expect(next.turn.providerSessionBefore).toBeNull();
+    expect(next.turn.continuationReasonCode)
+      .toBe("missing-continuation-identity");
+    runtime.controller.start(next.turn.id);
+    expect(runtime.provider.input?.sessionId).toBeUndefined();
+    runtime.provider.resolve({ status: "completed", text: "Fresh session." });
+    await flushPromises();
+    runtime.store.close();
+  });
+
   it("projects approval/input waiting states and resumes only after every request resolves", async () => {
     const runtime = await testRuntime();
     const queued = runtime.controller.queue({
@@ -2008,75 +2127,6 @@ describe("TurnController authoritative lifecycle", () => {
     ]);
     runtime.provider.resolve();
     await flushPromises();
-    runtime.store.close();
-  });
-
-  it("applies an exact cleanup receipt after a concurrent root terminal selection", async () => {
-    const runtime = await testRuntime();
-    const queued = runtime.controller.queue({
-      conversationId: runtime.conversationId,
-      content: "Complete provider cleanup while cancellation selects the outcome.",
-    });
-    runtime.controller.start(queued.turn.id);
-
-    // FakeTurnProvider drops its live map before resolving, matching the
-    // production ProviderManager ordering. Cancellation can therefore select
-    // the root outcome before the result callback applies cleanup evidence.
-    runtime.provider.resolve({ status: "completed", text: "too late" });
-    expect(runtime.controller.cancel(runtime.conversationId)).toBe(true);
-    expect(runtime.store.agentTurn(queued.turn.id)).toMatchObject({
-      status: "cancelled",
-      terminalReason: "user-cancelled",
-    });
-    expect(runtime.store.providerRunOwnership.forConversation(
-      runtime.conversationId,
-    )).toHaveLength(1);
-
-    await flushPromises();
-
-    expect(runtime.store.agentTurn(queued.turn.id)).toMatchObject({
-      status: "cancelled",
-      terminalReason: "user-cancelled",
-    });
-    expect(runtime.store.providerRunOwnership.forConversation(
-      runtime.conversationId,
-    )).toEqual([]);
-    expect(runtime.controller.isActive(runtime.conversationId)).toBe(false);
-    const replacement = runtime.controller.queue({
-      conversationId: runtime.conversationId,
-      content: "Start only after the exact cleanup receipt was applied.",
-    });
-    expect(replacement.turn.status).toBe("queued");
-    runtime.store.close();
-  });
-
-  it("retains durable cleanup authority for a mismatched result after terminal selection", async () => {
-    const runtime = await testRuntime();
-    const queued = runtime.controller.queue({
-      conversationId: runtime.conversationId,
-      content: "Reject a stale cleanup claim.",
-    });
-    runtime.controller.start(queued.turn.id);
-
-    runtime.provider.resolve({
-      status: "completed",
-      runId: `${queued.turn.runId}-stale`,
-    });
-    expect(runtime.controller.cancel(runtime.conversationId)).toBe(true);
-    await flushPromises();
-
-    expect(runtime.store.agentTurn(queued.turn.id)).toMatchObject({
-      status: "cancelled",
-      terminalReason: "user-cancelled",
-    });
-    expect(runtime.store.providerRunOwnership.forConversation(
-      runtime.conversationId,
-    )).toHaveLength(1);
-    expect(runtime.controller.isActive(runtime.conversationId)).toBe(true);
-    expect(() => runtime.controller.queue({
-      conversationId: runtime.conversationId,
-      content: "Replacement must remain blocked.",
-    })).toThrow("already has an active turn");
     runtime.store.close();
   });
 

@@ -1,7 +1,10 @@
 import type { AgentApprovalDecision } from "./interactions";
 import type { AgentHarnessRun } from "./agent-harness";
 import type { AgentHarnessRegistry } from "./agent-harness-registry";
-import type { ProviderCapabilityId } from "./capability-manifest";
+import {
+  providerCapabilityManifest,
+  type ProviderCapabilityId,
+} from "./capability-manifest";
 import { validateProviderRunInput } from "./adapters";
 import { PROVIDER_INFO } from "./catalog";
 import {
@@ -100,6 +103,15 @@ function capabilitiesForEvent(
   event: ProviderEvent,
 ): readonly ProviderCapabilityId[] {
   switch (event.type) {
+    case "text":
+    case "text-snapshot":
+      return ["text-streaming"];
+    case "activity":
+      return event.kind === "tool" || event.kind === "command"
+        ? ["tool-activity"]
+        : event.kind === "reasoning"
+          ? ["reasoning"]
+          : [];
     case "approval":
     case "approval-resolved":
       return ["approvals"];
@@ -184,17 +196,43 @@ export class ProviderRunCoordinator {
         "This conversation already has an active provider run.",
       );
     }
+    if (
+      input.backendProfile.source === "custom"
+      && (
+        input.modelSelection.modelId === "provider-default"
+        || input.model !== input.modelSelection.modelId
+      )
+    ) {
+      throw new ProviderRuntimeError(
+        "invalid_input",
+        "The custom backend run does not match the exact probed model identity.",
+      );
+    }
     const providerId = input.providerId;
     const runId = input.runId;
     const turnId = input.turnId;
     const requiredCapabilities: ProviderCapabilityId[] = [
+      ...(
+        input.backendProfile.source === "custom"
+        && input.harnessId === "codex-app-server"
+          ? ["provider-native-tools" as const]
+          : []
+      ),
+      ...(providerCapabilityManifest(input.harnessId)
+        ? ["text-streaming" as const]
+        : []),
+      ...(input.interactionMode === "plan" ? ["plans" as const] : []),
+      ...(input.reasoningEffort || input.modelSelection.reasoningEffort
+        ? ["reasoning" as const]
+        : []),
       ...(input.sessionId ? ["session-resume" as const] : []),
       ...(input.imagePaths?.length ? ["images" as const] : []),
       ...(input.goalStart ? ["goals" as const] : []),
-      ...(input.performanceModeTransition
+      ...(input.supportedFastMode !== undefined
         ? ["performance-modes" as const]
         : []),
       ...(input.operation?.kind === "compact" ? ["compaction" as const] : []),
+      ...(input.skills?.length ? ["provider-native-tools" as const] : []),
       ...(callbacks.hostTools ? ["host-tool-bridge" as const] : []),
     ];
     const unavailable = requiredCapabilities.find((capabilityId) =>
@@ -361,6 +399,20 @@ export class ProviderRunCoordinator {
       }
       let harnessRun: AgentHarnessRun;
       try {
+        if (input.backendProfile.source === "custom") {
+          const selectedModelId = input.modelSelection.modelId;
+          const launchedModelId = launchOptions.modelArgument === undefined
+            ? input.model
+            : launchOptions.modelArgument ?? undefined;
+          const launchIdentity = launchOptions.modelArgumentIdentity
+            ?? launchedModelId;
+          if (launchIdentity !== selectedModelId) {
+            throw new ProviderRuntimeError(
+              "invalid_input",
+              "The custom backend run does not match the exact probed model identity.",
+            );
+          }
+        }
         if (
           launchOptions.harnessConfiguration?.kind === "codex-responses"
           && harness.id !== "codex-app-server"
@@ -383,6 +435,10 @@ export class ProviderRunCoordinator {
           // The harness owns this copy for the lifetime of its child process.
           // The resolver-owned source is scrubbed immediately below.
           environment: { ...launchOptions.environment },
+          providerNativeToolsAvailable: this.options.capabilityAvailable(
+            input,
+            "provider-native-tools",
+          ),
           ...(launchOptions.harnessConfiguration
             ? { harnessConfiguration: launchOptions.harnessConfiguration }
             : {}),
@@ -516,10 +572,7 @@ export class ProviderRunCoordinator {
             "The provider returned a terminal result for a different run owner.",
           );
         }
-        if (
-          value.status === "completed"
-          && (providerId === "cursor" || providerId === "kimi")
-        ) {
+        if (value.status === "completed") {
           const negotiated = [...active.negotiatedCapabilities];
           const missingRequiredObservation = requiredCapabilities.find(
             (capabilityId) => !this.options.capabilityAvailable(

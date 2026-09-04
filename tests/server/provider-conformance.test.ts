@@ -14,10 +14,19 @@ import {
 } from "../../src/server/providers";
 import { createAgentHarnessEmitter } from "../../src/server/provider/agent-harness";
 import { providerRunTerminal } from "../../src/server/provider/contracts";
+import {
+  MODEL_CAPABILITY_IDS,
+  modelSelectionSchema,
+  withModelSelectionFastMode,
+  type ModelBackendProfile,
+} from "../../src/shared/model-routing";
+import { backendCompatibilityProbeResultSchema } from
+  "../../src/shared/backend-probe";
 import { ProviderInstallationLeaseCoordinator } from
   "../../src/server/provider/installation-lease";
 import type { TurnProviderRuntime } from "../../src/server/runtime/turns/turn-controller-types";
 import { nativeProviderRunInput } from "./model-route-fixture";
+import { backendProbeTestAuthority } from "../helpers/backend-probe-authority";
 
 const PRODUCTION_HARNESSES = createDefaultAgentHarnessRegistry()
   .list()
@@ -26,6 +35,23 @@ const PRODUCTION_HARNESSES = createDefaultAgentHarnessRegistry()
     harnessId: harness.id,
     capabilities: harness.capabilities,
   }));
+
+function bindProbeToDetectedInstallation(
+  manager: ProviderManager,
+  providerId: ProviderRunInput["providerId"],
+  probe: ReturnType<typeof backendCompatibilityProbeResultSchema.parse>,
+): void {
+  const installationFingerprint = manager.providerInstallationFingerprint(providerId);
+  expect(installationFingerprint).not.toBeNull();
+  manager.removeBackendProbeResults(probe.profileId);
+  manager.recordBackendProbeResult({
+    ...probe,
+    authority: {
+      ...probe.authority!,
+      installationFingerprint,
+    },
+  });
+}
 
 function inputFor(
   route: (typeof PRODUCTION_HARNESSES)[number],
@@ -113,11 +139,13 @@ function controlledManager(
   returnedProviderId: ProviderRunInput["providerId"] = route.providerId,
   attestInstallation = false,
   resolveBackendLaunchOptions?: ProviderManagerOptions["resolveBackendLaunchOptions"],
+  additionalOptions: ProviderManagerOptions = {},
 ) {
   let emit!: NonNullable<Parameters<AgentHarness["start"]>[0]["callbacks"]>["onEvent"];
   let resolve!: (result: ProviderRunResult) => void;
   let reject!: (error: Error) => void;
   const cancellations: boolean[] = [];
+  const starts: Parameters<AgentHarness["start"]>[0][] = [];
   const observations = {
     approvals: [] as string[],
     inputs: [] as string[],
@@ -128,24 +156,29 @@ function controlledManager(
     providerId: route.providerId,
     capabilities: route.capabilities,
     supports: () => true,
-    start: (options) => ({
-      harnessId: route.harnessId,
-      providerId: returnedProviderId,
-      result: new Promise<ProviderRunResult>((accept, fail) => {
-        emit = options.callbacks?.onEvent;
-        resolve = accept;
-        reject = fail;
-      }),
-      cancel: (force) => cancellations.push(force),
-      extension: inactiveExtension(route.harnessId, observations),
-    }),
+    start: (options) => {
+      starts.push(options);
+      return {
+        harnessId: route.harnessId,
+        providerId: returnedProviderId,
+        result: new Promise<ProviderRunResult>((accept, fail) => {
+          emit = options.callbacks?.onEvent;
+          resolve = accept;
+          reject = fail;
+        }),
+        cancel: (force) => cancellations.push(force),
+        extension: inactiveExtension(route.harnessId, observations),
+      };
+    },
   };
   return {
     cancellations,
+    starts,
     observations,
     emit: (event: Parameters<NonNullable<typeof emit>>[0]) => emit?.(event),
     manager: ProviderManager.createForTests(
       {
+        ...additionalOptions,
         cancelGraceMs: 30_000,
         resolveBackendLaunchOptions,
         ...(attestInstallation
@@ -253,6 +286,8 @@ describe("production provider lifecycle conformance", () => {
         runId: `${input.runId}-wrong`,
         turnId: input.turnId,
       })).toBe(false);
+      expect(controlled.starts).toHaveLength(1);
+      expect(controlled.starts[0]?.providerNativeToolsAvailable).toBe(true);
       controlled.emit({ ...base, type: "text", text: "accepted" });
       controlled.emit({ ...base, type: "text", text: "" });
       controlled.emit({ ...base, type: "text", text: "accepted" });
@@ -279,6 +314,356 @@ describe("production provider lifecycle conformance", () => {
       expect(text).toEqual(["accepted", "", "accepted"]);
     },
   );
+
+  it("keeps a text-only custom Claude backend inside its exact probe ceiling with native tools disabled", async () => {
+    const route = PRODUCTION_HARNESSES.find(
+      ({ harnessId }) => harnessId === "claude-agent-sdk",
+    )!;
+    const profile: ModelBackendProfile = {
+      id: "custom:text-only",
+      displayName: "Text-only Messages",
+      protocol: "anthropic-messages",
+      authenticationMode: "api-key",
+      source: "custom",
+      enabled: true,
+      configurationRevision: 4,
+      endpointIdentity: "endpoint:text-only:4",
+    };
+    const modelSelection = modelSelectionSchema.parse({
+      ...inputFor(route).modelSelection,
+      backendProfileId: profile.id,
+      backendProfileDisplayName: profile.displayName,
+      modelId: "text-model",
+      backendConfigurationRevision: profile.configurationRevision,
+      // The run payload is not capability authority. Deliberately forge rich
+      // claims here to prove the manager consults its exact stored probe.
+      capabilities: MODEL_CAPABILITY_IDS.map((id) => ({
+        id,
+        state: "verified" as const,
+        provenance: "probe" as const,
+        detail: null,
+      })),
+    });
+    const checkedAt = "2031-03-02T01:02:03.000Z";
+    const probe = backendCompatibilityProbeResultSchema.parse({
+      profileId: profile.id,
+      backendConfigurationRevision: profile.configurationRevision,
+      endpointIdentity: profile.endpointIdentity,
+      protocol: profile.protocol,
+      modelId: modelSelection.modelId,
+      compatibility: "partially-compatible",
+      protocolVerified: true,
+      modelVerified: true,
+      capabilities: MODEL_CAPABILITY_IDS.map((id) => ({
+        id,
+        state: id === "streaming" ? "verified" : "unknown",
+        provenance: id === "streaming" ? "probe" : "unknown",
+        detail: null,
+        checkedAt,
+      })),
+      contextWindow: {
+        tokens: null,
+        state: "unknown",
+        provenance: "unknown",
+        detail: null,
+        checkedAt,
+      },
+      failure: null,
+      checkedAt,
+      authority: backendProbeTestAuthority(checkedAt),
+    });
+    const controlled = controlledManager(
+      route,
+      route.providerId,
+      true,
+      undefined,
+      {
+        backendProfiles: [profile],
+        backendProbeResults: [probe],
+        backendProbeNow: () => new Date(checkedAt),
+      },
+    );
+    await controlled.manager.detect(route.providerId);
+    bindProbeToDetectedInstallation(controlled.manager, route.providerId, probe);
+    const resolved = controlled.manager.resolveModelRoute(modelSelection);
+    const input: ProviderRunInput = {
+      ...inputFor(route),
+      backendProfile: resolved.backendProfile,
+      backendCompatibility: resolved.compatibility,
+      modelSelection,
+      continuationIdentity: resolved.continuationIdentity,
+      model: modelSelection.modelId,
+    };
+
+    expect(resolved.compatibility).toMatchObject({
+      state: "partially-compatible",
+      provenance: "probe",
+    });
+    expect(resolved.continuationIdentity.providerCompatibilityToken ?? null)
+      .toBeNull();
+    expect(controlled.manager.providerCapabilityAvailable(
+      input,
+      "text-streaming",
+    )).toBe(true);
+    for (const capabilityId of [
+      "images",
+      "goals",
+      "plans",
+      "approvals",
+      "compaction",
+      "host-tool-bridge",
+    ] as const) {
+      expect(controlled.manager.providerCapabilityAvailable(
+        input,
+        capabilityId,
+        capabilityId === "host-tool-bridge" ? [capabilityId] : [],
+      )).toBe(false);
+      expect(controlled.manager.providerCapabilityAdmissible(
+        input,
+        capabilityId,
+        capabilityId === "host-tool-bridge" ? [capabilityId] : [],
+      )).toBe(false);
+    }
+
+    expect(() => controlled.manager.run({
+      ...input,
+      imagePaths: ["/workspace/image.png"],
+    })).toThrow(/does not attest 'images'/u);
+    expect(() => controlled.manager.run({
+      ...input,
+      goalStart: { objective: "Unprobed goal" },
+    })).toThrow(/native goal start request is invalid/u);
+    expect(() => controlled.manager.run({
+      ...input,
+      reasoningEffort: "high",
+      modelSelection: {
+        ...input.modelSelection,
+        reasoningEffort: "high",
+      },
+    })).toThrow(/does not attest 'reasoning'/u);
+    expect(() => controlled.manager.run({
+      ...input,
+      sessionId: "session-for-unprobed-compaction",
+      operation: { kind: "compact" },
+    })).toThrow(/does not attest 'session-resume'/u);
+    expect(() => controlled.manager.run(input, {
+      hostTools: {} as never,
+    })).toThrow(/does not attest 'host-tool-bridge'/u);
+    expect(() => controlled.manager.run({
+      ...input,
+      interactionMode: "plan",
+    })).toThrow(/does not attest 'plans'/u);
+    expect(() => controlled.manager.run({
+      ...input,
+      model: "different-model",
+    })).toThrow(/exact probed model identity/u);
+    expect(controlled.starts).toHaveLength(0);
+
+    const text: string[] = [];
+    const running = controlled.manager.run(input, {
+      onText: (event) => text.push(event.text),
+    });
+    expect(controlled.starts).toHaveLength(1);
+    expect(controlled.starts[0]?.providerNativeToolsAvailable).toBe(false);
+    expect(controlled.starts[0]?.hostTools).toBeUndefined();
+    const exact = {
+      providerId: "claude" as const,
+      conversationId: input.conversationId,
+      runId: input.runId,
+      turnId: input.turnId,
+    };
+    controlled.emit({ ...exact, type: "text", text: "verified text" });
+    controlled.emit({
+      ...exact,
+      type: "extension",
+      extension: "claude-agent-sdk",
+      event: {
+        type: "plan",
+        explanation: null,
+        steps: [],
+      },
+    });
+    controlled.resolve({
+      ...providerRunTerminal(input, "completed"),
+      text: "verified text",
+      textTruncated: false,
+      exitCode: 0,
+      signal: null,
+      cleanupConfirmed: true,
+    });
+    await expect(running).rejects.toThrow(
+      "Provider protocol violation: 'plans' is not attested",
+    );
+    expect(text).toEqual(["verified text"]);
+    expect(controlled.cancellations).toEqual([false]);
+  });
+
+  it("rejects a text-only custom Codex route before native tools can start, even in the test factory", () => {
+    const route = PRODUCTION_HARNESSES.find(
+      ({ harnessId }) => harnessId === "codex-app-server",
+    )!;
+    const profile: ModelBackendProfile = {
+      id: "custom:codex-text-only",
+      displayName: "Text-only Responses",
+      protocol: "openai-responses",
+      authenticationMode: "api-key",
+      source: "custom",
+      enabled: true,
+      configurationRevision: 7,
+      endpointIdentity: "endpoint:codex-text-only:7",
+    };
+    const modelSelection = modelSelectionSchema.parse({
+      ...inputFor(route).modelSelection,
+      backendProfileId: profile.id,
+      backendProfileDisplayName: profile.displayName,
+      modelId: "text-model",
+      backendConfigurationRevision: profile.configurationRevision,
+    });
+    const checkedAt = "2031-03-02T02:03:04.000Z";
+    const probe = backendCompatibilityProbeResultSchema.parse({
+      profileId: profile.id,
+      backendConfigurationRevision: profile.configurationRevision,
+      endpointIdentity: profile.endpointIdentity,
+      protocol: profile.protocol,
+      modelId: modelSelection.modelId,
+      compatibility: "partially-compatible",
+      protocolVerified: true,
+      modelVerified: true,
+      capabilities: MODEL_CAPABILITY_IDS.map((id) => ({
+        id,
+        state: id === "streaming" ? "verified" : "unknown",
+        provenance: id === "streaming" ? "probe" : "unknown",
+        detail: null,
+        checkedAt,
+      })),
+      contextWindow: {
+        tokens: null,
+        state: "unknown",
+        provenance: "unknown",
+        detail: null,
+        checkedAt,
+      },
+      failure: null,
+      checkedAt,
+      authority: backendProbeTestAuthority(checkedAt),
+    });
+    const controlled = controlledManager(
+      route,
+      route.providerId,
+      false,
+      undefined,
+      {
+        backendProfiles: [profile],
+        backendProbeResults: [probe],
+        backendProbeNow: () => new Date(checkedAt),
+      },
+    );
+    const resolved = controlled.manager.resolveModelRoute(modelSelection);
+    const input: ProviderRunInput = {
+      ...inputFor(route),
+      backendProfile: resolved.backendProfile,
+      backendCompatibility: resolved.compatibility,
+      modelSelection,
+      continuationIdentity: resolved.continuationIdentity,
+      model: modelSelection.modelId,
+    };
+
+    expect(resolved.compatibility).toMatchObject({
+      state: "unavailable",
+      reasonCode: "responses-tools-unverified",
+    });
+
+    expect(controlled.manager.providerCapabilityAvailable(
+      input,
+      "text-streaming",
+    )).toBe(false);
+    expect(controlled.manager.providerCapabilityAvailable(
+      input,
+      "provider-native-tools",
+    )).toBe(false);
+    expect(() => controlled.manager.run(input)).toThrow(
+      /does not attest 'provider-native-tools'/u,
+    );
+    expect(controlled.starts).toHaveLength(0);
+  });
+
+  it("rejects a custom launch resolver that switches away from the probed model", async () => {
+    const route = PRODUCTION_HARNESSES.find(
+      ({ harnessId }) => harnessId === "claude-agent-sdk",
+    )!;
+    const profile: ModelBackendProfile = {
+      id: "custom:model-boundary",
+      displayName: "Model-bound Messages",
+      protocol: "anthropic-messages",
+      authenticationMode: "api-key",
+      source: "custom",
+      enabled: true,
+      configurationRevision: 8,
+      endpointIdentity: "endpoint:model-boundary:8",
+    };
+    const modelSelection = modelSelectionSchema.parse({
+      ...inputFor(route).modelSelection,
+      backendProfileId: profile.id,
+      backendProfileDisplayName: profile.displayName,
+      modelId: "model-b",
+      backendConfigurationRevision: profile.configurationRevision,
+    });
+    const checkedAt = "2031-03-02T03:04:05.000Z";
+    const probe = backendCompatibilityProbeResultSchema.parse({
+      profileId: profile.id,
+      backendConfigurationRevision: profile.configurationRevision,
+      endpointIdentity: profile.endpointIdentity,
+      protocol: profile.protocol,
+      modelId: modelSelection.modelId,
+      compatibility: "partially-compatible",
+      protocolVerified: true,
+      modelVerified: true,
+      capabilities: MODEL_CAPABILITY_IDS.map((id) => ({
+        id,
+        state: id === "streaming" ? "verified" : "unknown",
+        provenance: id === "streaming" ? "probe" : "unknown",
+        detail: null,
+        checkedAt,
+      })),
+      contextWindow: {
+        tokens: null,
+        state: "unknown",
+        provenance: "unknown",
+        detail: null,
+        checkedAt,
+      },
+      failure: null,
+      checkedAt,
+      authority: backendProbeTestAuthority(checkedAt),
+    });
+    const controlled = controlledManager(
+      route,
+      route.providerId,
+      true,
+      () => ({ environment: {}, modelArgument: "model-a" }),
+      {
+        backendProfiles: [profile],
+        backendProbeResults: [probe],
+        backendProbeNow: () => new Date(checkedAt),
+      },
+    );
+    await controlled.manager.detect(route.providerId);
+    bindProbeToDetectedInstallation(controlled.manager, route.providerId, probe);
+    const resolved = controlled.manager.resolveModelRoute(modelSelection);
+    const input: ProviderRunInput = {
+      ...inputFor(route),
+      backendProfile: resolved.backendProfile,
+      backendCompatibility: resolved.compatibility,
+      modelSelection,
+      continuationIdentity: resolved.continuationIdentity,
+      model: modelSelection.modelId,
+    };
+
+    expect(() => controlled.manager.run(input)).toThrow(
+      /exact probed model identity/u,
+    );
+    expect(controlled.starts).toHaveLength(0);
+  });
 
   it.each(PRODUCTION_HARNESSES)(
     "$harnessId serializes repeated cancellation and exact cleanup",
@@ -498,7 +883,7 @@ describe("production provider lifecycle conformance", () => {
       expect(() => controlled.manager.run({
         ...input,
         sessionId: "session-from-stale-installation",
-      })).toThrow(/does not attest 'session-resume'/u);
+      })).toThrow(/does not attest 'text-streaming'/u);
     },
   );
 
@@ -521,6 +906,50 @@ describe("production provider lifecycle conformance", () => {
         input,
         "compaction",
       )).toBe(true);
+    },
+  );
+
+  it.each(PRODUCTION_HARNESSES.filter(({ harnessId }) =>
+    harnessId === "codex-app-server" || harnessId === "claude-agent-sdk"))(
+    "$harnessId rejects first-session speed selection without exact-run evidence",
+    async (route) => {
+      for (const fast of [false, true]) {
+        const controlled = controlledManager(route, route.providerId, true);
+        const base = inputFor(route);
+        const providerValue = route.providerId === "codex"
+          ? "priority" as const
+          : "fast" as const;
+        const modelSelection = withModelSelectionFastMode(
+          base.modelSelection,
+          fast ? providerValue : null,
+        );
+        const input = {
+          ...base,
+          modelSelection,
+          continuationIdentity: {
+            ...base.continuationIdentity,
+            performanceModeIdentity: fast
+              ? `fast:${providerValue}`
+              : null,
+          },
+          supportedFastMode: providerValue,
+        };
+        await controlled.manager.detect(route.providerId);
+        const running = controlled.manager.run(input);
+        controlled.resolve({
+          ...providerRunTerminal(input, "completed"),
+          text: "",
+          textTruncated: false,
+          exitCode: 0,
+          signal: null,
+          cleanupConfirmed: true,
+        });
+
+        await expect(running).rejects.toMatchObject({
+          code: "invalid_input",
+          message: expect.stringContaining("performance-modes"),
+        });
+      }
     },
   );
 
@@ -652,6 +1081,66 @@ describe("production provider lifecycle conformance", () => {
     });
     expect(controlled.manager.isRunning(input.conversationId)).toBe(false);
   });
+
+  it("rejects a completed OpenCode image run without model evidence", async () => {
+    const route = PRODUCTION_HARNESSES.find(
+      ({ harnessId }) => harnessId === "opencode-sdk",
+    )!;
+    const controlled = controlledManager(route, route.providerId, true);
+    const input = {
+      ...inputFor(route),
+      imagePaths: ["/workspace/reference.png"],
+    };
+    await controlled.manager.detect(route.providerId);
+    const running = controlled.manager.run(input);
+    controlled.resolve({
+      ...providerRunTerminal(input, "completed"),
+      text: "",
+      textTruncated: false,
+      exitCode: 0,
+      signal: null,
+      cleanupConfirmed: true,
+    });
+
+    await expect(running).rejects.toMatchObject({
+      code: "invalid_input",
+      message: expect.stringContaining("images"),
+    });
+    expect(controlled.manager.isRunning(input.conversationId)).toBe(false);
+  });
+
+  it.each(PRODUCTION_HARNESSES.filter(({ harnessId }) =>
+    harnessId === "codex-app-server" || harnessId === "claude-agent-sdk"))(
+    "$harnessId rejects a completed speed transition without exact-run evidence",
+    async (route) => {
+      const controlled = controlledManager(route, route.providerId, true);
+      const base = inputFor(route);
+      const input = {
+        ...base,
+        sessionId: `${route.providerId}-standard-session`,
+        supportedFastMode: route.providerId === "codex"
+          ? "priority" as const
+          : "fast" as const,
+        performanceModeTransition: "to-standard" as const,
+      };
+      await controlled.manager.detect(route.providerId);
+      const running = controlled.manager.run(input);
+      controlled.resolve({
+        ...providerRunTerminal(input, "completed"),
+        text: "",
+        textTruncated: false,
+        exitCode: 0,
+        signal: null,
+        cleanupConfirmed: true,
+      });
+
+      await expect(running).rejects.toMatchObject({
+        code: "invalid_input",
+        message: expect.stringContaining("performance-modes"),
+      });
+      expect(controlled.manager.isRunning(input.conversationId)).toBe(false);
+    },
+  );
 
   it.each(PRODUCTION_HARNESSES)(
     "$harnessId keeps admission quarantined when terminal cleanup is unconfirmed",
@@ -814,6 +1303,29 @@ describe("production provider lifecycle conformance", () => {
         exitCode: 0,
         signal: null,
         cleanupConfirmed: true,
+      });
+
+      await expect(running).rejects.toMatchObject({
+        code: "lifecycle_corruption",
+      });
+      expect(controlled.cancellations).toEqual([false]);
+      expect(controlled.manager.isRunning(input.conversationId)).toBe(true);
+    },
+  );
+
+  it.each(PRODUCTION_HARNESSES)(
+    "$harnessId rejects non-boolean cleanup evidence",
+    async (route) => {
+      const controlled = controlledManager(route);
+      const input = inputFor(route);
+      const running = controlled.manager.run(input);
+      controlled.resolve({
+        ...providerRunTerminal(input, "completed"),
+        text: "untrusted",
+        textTruncated: false,
+        exitCode: 0,
+        signal: null,
+        cleanupConfirmed: "true" as unknown as true,
       });
 
       await expect(running).rejects.toMatchObject({

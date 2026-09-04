@@ -6,6 +6,7 @@ import {
   type HarnessBackendCompatibility,
   type KnownHarnessId,
   type ModelBackendProfile,
+  type ModelCapability,
 } from "../../shared/model-routing";
 import {
   attestProviderCapabilities,
@@ -36,6 +37,44 @@ export interface RuntimeProviderCapabilityInput {
   evidenceTrusted: boolean;
   additionalConfigured?: readonly ProviderCapabilityId[];
   additionalNegotiated?: Readonly<Partial<Record<ProviderCapabilityId, boolean>>>;
+  customProbeCapabilities?: readonly ModelCapability[];
+}
+
+const CUSTOM_BACKEND_BASELINE_CAPABILITIES = new Set<ProviderCapabilityId>([
+  "cancellation",
+  "process-cleanup",
+  "native-session-id",
+  "custom-backend",
+  "endpoint-selection",
+]);
+
+const CUSTOM_MODEL_CAPABILITY_MAP: Readonly<
+  Partial<Record<ModelCapability["id"], readonly ProviderCapabilityId[]>>
+> = {
+  streaming: ["text-streaming"],
+  tools: ["tool-activity", "provider-native-tools"],
+  images: ["images"],
+  reasoning: ["reasoning"],
+  usage: ["usage-tokens"],
+  subagents: ["subagent-create", "subagent-stop"],
+  compaction: ["compaction"],
+  "session-continuation": ["session-resume"],
+};
+
+export function customBackendObservedCapabilities(
+  capabilities: readonly ModelCapability[],
+): readonly ProviderCapabilityId[] {
+  const observed = new Set(CUSTOM_BACKEND_BASELINE_CAPABILITIES);
+  for (const capability of capabilities) {
+    if (
+      capability.state !== "verified"
+      || capability.provenance !== "probe"
+    ) continue;
+    for (const id of CUSTOM_MODEL_CAPABILITY_MAP[capability.id] ?? []) {
+      observed.add(id);
+    }
+  }
+  return Object.freeze([...observed]);
 }
 
 export function runtimeProviderCapabilityAttestation(
@@ -73,7 +112,11 @@ export function runtimeProviderCapabilityAttestation(
   const negotiated: Partial<Record<ProviderCapabilityId, boolean>> = {
     ...input.additionalNegotiated,
   };
+  let observed: readonly ProviderCapabilityId[] | undefined;
   if (input.backendProfile.source === "custom") {
+    observed = customBackendObservedCapabilities(
+      input.customProbeCapabilities ?? [],
+    );
     configured.add("custom-backend");
     negotiated["custom-backend"] = true;
     if (input.backendProfile.endpointIdentity !== null) {
@@ -89,7 +132,11 @@ export function runtimeProviderCapabilityAttestation(
       backendConfigurationRevision:
         input.backendProfile.configurationRevision,
       protocolVerified,
-      observation: { configured: [...configured], negotiated },
+      observation: {
+        configured: [...configured],
+        negotiated,
+        ...(observed ? { observed } : {}),
+      },
     });
   } catch {
     return null;

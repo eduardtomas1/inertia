@@ -100,6 +100,7 @@ import {
 import { SecureFileAuthorityRegistry } from "./runtime/secure-file-authorities";
 import { PrivateConnectRuntimeGateway } from "./private-connect/runtime-gateway";
 import { queuePrivateConnectPrompt } from "./private-connect/prompt-admission";
+import { createPrivateConnectInputResponder } from "./private-connect/input-response-admission";
 import { PrivateConnectTranscriptCache } from "./private-connect/transcript-cache";
 import {
   privateConnectPromptSafetyForHarness,
@@ -120,6 +121,8 @@ import {
   runtimeSafetyError,
 } from "./runtime-startup-recovery";
 import { runtimeLifecycleDiagnosticSnapshot } from "./lifecycle-diagnostics";
+import { RuntimeStartupBlockerError } from
+  "../shared/runtime-startup-diagnostics";
 export type {
   RunningRuntime,
   RuntimeBackendCredentialBroker,
@@ -138,7 +141,12 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     authorizedModernGenerationIds,
     runtimeSafetyLock,
   } = startupRecovery;
-  if (runtimeSafetyLock) throw new Error(runtimeSafetyError("Runtime startup is blocked."));
+  if (runtimeSafetyLock) {
+    throw new RuntimeStartupBlockerError(
+      "prior-runtime-cleanup-unconfirmed",
+      runtimeSafetyError("Runtime startup is blocked."),
+    );
+  }
   const generatedAttachments = await PrivateGeneratedAttachmentStore.create(
     dataDirectory,
     {
@@ -339,6 +347,11 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     priorBootCleanupConfirmed: !runtimeSafetyLock
       && options.enableProviders !== false
       && startupRecovery.priorBootLeasesCleared,
+  }).catch(() => {
+    throw new RuntimeStartupBlockerError(
+      "provider-installation-quarantined",
+      "Provider installation recovery requires manual attention.",
+    );
   });
   const enableProviders = !runtimeSafetyLock
     && providerMaintenanceRecovery.length === 0
@@ -989,19 +1002,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         broadcastSnapshot();
       },
     }, conversationId, content),
-    respondToInput: (conversationId, inputRequestId, answers) => {
-      const pending = pendingInputs.get(inputRequestId);
-      if (!pending || pending.conversationContextRequest || pending.conversationId !== conversationId || pending.questions.some((question) => question.isSecret)) return false;
-      const expected = new Map(pending.questions.map((question) => [question.id, question]));
-      for (const [questionId, values] of Object.entries(answers)) {
-        const question = expected.get(questionId);
-        if (!question || values.length === 0 || (!question.allowMultiple && values.length !== 1)) return false;
-        const optionIds = new Set(question.options.map((option) => option.id));
-        if (question.options.length > 0 && values.some((value) => !optionIds.has(value) && !question.isOther)) return false;
-      }
-      if ([...expected.keys()].some((questionId) => !answers[questionId]?.length)) return false;
-      return turns.respondToInput(conversationId, inputRequestId, answers);
-    },
+    respondToInput: createPrivateConnectInputResponder(pendingInputs, turns),
     stopRun: (conversationId, runId) => {
       const run = currentSnapshot().runs.find((candidate) => candidate.id === runId);
       if (!run || run.conversationId !== conversationId) return { stopped: false, alreadyStopped: false };

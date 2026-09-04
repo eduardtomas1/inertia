@@ -303,8 +303,6 @@ function waitForPosixProcessGroupExit(
   pid: number,
   killProcess: typeof process.kill,
   waitMs: number,
-  knownMembers: readonly number[] = [],
-  processCanExecute: ((pid: number) => boolean | null) | null = null,
   processGroupCanExecute:
     ((processGroupId: number) => boolean | null) | null = null,
 ): Promise<boolean> {
@@ -313,19 +311,13 @@ function waitForPosixProcessGroupExit(
     const inspect = (): void => {
       try {
         killProcess(-pid, 0);
-      } catch {
-        resolve(true);
-        return;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ESRCH") {
+          resolve(true);
+          return;
+        }
       }
       if (processGroupCanExecute?.(pid) === false) {
-        resolve(true);
-        return;
-      }
-      if (
-        processCanExecute
-        && knownMembers.length > 0
-        && knownMembers.every((member) => processCanExecute(member) === false)
-      ) {
         resolve(true);
         return;
       }
@@ -359,7 +351,8 @@ function waitForPosixProcessesExit(
         }
         try {
           killProcess(pid, 0);
-        } catch {
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ESRCH") continue;
           remaining.delete(pid);
         }
       }
@@ -557,8 +550,6 @@ export function createOwnedPidProcessTreeTermination(
         pid,
         killProcess,
         exitWaitMs,
-        [pid, ...descendants],
-        processCanExecute,
         processGroupCanExecute,
       ),
       waitForPosixProcessesExit(
@@ -693,8 +684,6 @@ export async function terminateProcessTreeAndWait(
         pid,
         killProcess,
         waitMs,
-        [pid, ...descendants],
-        processCanExecute,
         processGroupCanExecute,
       ),
       waitForPosixProcessesExit(
@@ -714,15 +703,16 @@ export async function terminateProcessTreeAndWait(
         pid,
         killProcess,
         waitMs,
-        [],
-        processCanExecute,
         processGroupCanExecute,
       ),
       waitForObservedDirectChildClose(waitMs),
     ]);
     return groupExited && childClosed;
-  } catch {
+  } catch (error) {
     killDirectChild(child, false);
-    return await waitForObservedDirectChildClose(waitMs);
+    const groupAbsent = (error as NodeJS.ErrnoException).code === "ESRCH"
+      || processGroupCanExecute?.(pid) === false;
+    const childClosed = await waitForObservedDirectChildClose(waitMs);
+    return groupAbsent && childClosed;
   }
 }

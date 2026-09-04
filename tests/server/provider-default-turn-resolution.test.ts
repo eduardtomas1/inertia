@@ -291,16 +291,110 @@ describe("provider-default turn resolution", () => {
     });
     expect(resolved.input).toMatchObject({
       providerSessionBefore: null,
+      providerSessionInvalidation: { expectedSessionId: "fast-session" },
       continuationReasonCode: "incompatible-performance-mode-changed",
     });
     const queued = store.beginAgentTurn(resolved.input);
     const adopted = resolved.adopt(queued);
+    expect(store.conversation(conversation.id)).toMatchObject({
+      providerSessionId: null,
+      continuationIdentity: null,
+    });
+    expect(adopted.active.conversation).toMatchObject({
+      providerSessionId: null,
+      continuationIdentity: null,
+    });
     expect(adopted.active.providerInput).toMatchObject({
       sessionId: undefined,
     });
     expect(adopted.active.providerInput)
       .not.toHaveProperty("performanceModeTransition");
     store.close();
+  });
+
+  it("does not resurrect an incompatible provider session after a fresh launch fails and restarts", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "inertia-provider-session-boundary-"));
+    directories.push(directory);
+    const workspace = join(directory, "workspace");
+    await mkdir(workspace);
+    const databasePath = join(directory, "runtime.sqlite");
+    const createStore = () => new RuntimeStore(databasePath, workspace, {
+      recoverInterruptedRuns: false,
+    });
+    const selection = nativeModelSelection({
+      providerId: "codex",
+      modelId: "gpt-current",
+    });
+    const currentRoute = resolveNativeModelRoute(selection);
+    const initial = createStore();
+    const project = initial.createProject("Provider boundary", workspace);
+    const conversation = initial.createConversation(project.id, "Changed installation", {
+      modelSelection: selection,
+    });
+    initial.updateConversation(conversation.id, {
+      providerSessionId: "session-from-previous-installation",
+      continuationIdentity: {
+        ...currentRoute.continuationIdentity,
+        providerCompatibilityToken: "b".repeat(64),
+      },
+    });
+    let sequence = 0;
+    const providers = {
+      resolveModelRoute: () => currentRoute,
+      harnessIdFor: (input: ProviderRunInput) => input.harnessId,
+    } as unknown as TurnProviderRuntime;
+    const dependencies = (store: RuntimeStore) => ({
+      store,
+      providers,
+      hooks: {
+        broadcast: () => undefined,
+        broadcastSnapshot: () => undefined,
+        providerInfo: () => [provider("gpt-current", "GPT Current")],
+      } satisfies TurnControllerHooks,
+      id: () => `provider-boundary-${++sequence}`,
+      now: () => "2030-01-01T00:00:00.000Z",
+      clock: () => new Date("2030-01-01T00:00:00.000Z"),
+    });
+
+    const first = resolveTurnRequest(dependencies(initial), {
+      conversationId: conversation.id,
+      content: "Start against the replacement installation.",
+    });
+    expect(first.input).toMatchObject({
+      providerSessionBefore: null,
+      providerSessionInvalidation: {
+        expectedSessionId: "session-from-previous-installation",
+      },
+      continuationReasonCode: "provider-installation-changed",
+    });
+    const firstQueued = initial.beginAgentTurn(first.input);
+    expect(first.adopt(firstQueued).active.providerInput.sessionId).toBeUndefined();
+    initial.settleAgentTurn(firstQueued.turn.id, {
+      status: "failed",
+      terminalReason: "turn-start-failed",
+      startedAt: "2030-01-01T00:00:00.000Z",
+      completedAt: "2030-01-01T00:00:00.000Z",
+      updatedAt: "2030-01-01T00:00:00.000Z",
+    });
+    initial.close();
+
+    const restarted = createStore();
+    expect(restarted.conversation(conversation.id)).toMatchObject({
+      providerSessionId: null,
+      continuationIdentity: null,
+    });
+    const next = resolveTurnRequest(dependencies(restarted), {
+      conversationId: conversation.id,
+      content: "Retry without the stale hidden context.",
+    });
+    expect(next.input).toMatchObject({
+      providerSessionBefore: null,
+      continuationReasonCode: "missing-continuation-identity",
+    });
+    expect(next.input).not.toHaveProperty("providerSessionInvalidation");
+    const nextQueued = restarted.beginAgentTurn(next.input);
+    expect(next.adopt(nextQueued).active.providerInput.sessionId).toBeUndefined();
+    restarted.close();
   });
 
   it("rejects scanned pages when the exact provider-default catalog loses image support", async () => {

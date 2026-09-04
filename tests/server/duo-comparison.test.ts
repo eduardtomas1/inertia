@@ -77,6 +77,10 @@ class PairProvider implements TurnProviderRuntime {
   readonly cancellations: string[] = [];
   readonly callbacks: ProviderRunCallbacks[] = [];
   readonly ownedStopResolvers = new Map<string, () => void>();
+  readonly cleanupReceipts = new Map<
+    string,
+    { runId: string; turnId: string }
+  >();
   readonly activeConversations = new Set<string>();
   readonly completions: Array<{
     input: ProviderRunInput;
@@ -102,6 +106,13 @@ class PairProvider implements TurnProviderRuntime {
     this.callbacks.push(callbacks);
     const conversationId = input.conversationId;
     if (this.inputs.length === this.throwOnRun) {
+      // Production ProviderRunCoordinator records an exact receipt when a
+      // synchronous pre-harness failure proves that no owned process escaped.
+      // Keep this integration fixture on the same stopOwned contract.
+      this.cleanupReceipts.set(conversationId, {
+        runId: input.runId,
+        turnId: input.turnId,
+      });
       throw new Error("provider invocation rejected");
     }
     if (this.inputs.length === this.rejectOnRun) {
@@ -113,6 +124,10 @@ class PairProvider implements TurnProviderRuntime {
     const synchronousResult = this.synchronousResults.shift();
     if (synchronousResult !== undefined) {
       this.activeConversations.delete(conversationId);
+      this.cleanupReceipts.set(conversationId, {
+        runId: input.runId,
+        turnId: input.turnId,
+      });
       return Promise.resolve({
         ...providerRunTerminal(input, "completed"),
         text: synchronousResult,
@@ -127,6 +142,17 @@ class PairProvider implements TurnProviderRuntime {
         input,
         resolve: (result) => {
           this.activeConversations.delete(conversationId);
+          if (
+            result.cleanupConfirmed
+            && result.conversationId === input.conversationId
+            && result.runId === input.runId
+            && result.turnId === input.turnId
+          ) {
+            this.cleanupReceipts.set(conversationId, {
+              runId: input.runId,
+              turnId: input.turnId,
+            });
+          }
           resolve(result);
         },
       });
@@ -151,19 +177,35 @@ class PairProvider implements TurnProviderRuntime {
     return true;
   }
 
-  stopOwned(conversationId: string): Promise<OwnedProviderStopResult> {
+  stopOwned(
+    conversationId: string,
+    identity: { runId: string; turnId: string },
+  ): Promise<OwnedProviderStopResult> {
     this.cancellations.push(conversationId);
+    if (!this.activeConversations.has(conversationId)) {
+      const receipt = this.cleanupReceipts.get(conversationId);
+      return Promise.resolve(
+        receipt?.runId === identity.runId && receipt.turnId === identity.turnId
+          ? "settled"
+          : "missing",
+      );
+    }
+    if (!this.ownsRun(conversationId, identity)) {
+      return Promise.resolve("identity-mismatch");
+    }
     if (this.ownedStopResult !== "settled") {
       return Promise.resolve(this.ownedStopResult);
     }
     if (!this.deferOwnedStops) {
       this.activeConversations.delete(conversationId);
+      this.cleanupReceipts.set(conversationId, identity);
       return Promise.resolve("settled");
     }
     return new Promise((resolve) => {
       this.ownedStopResolvers.set(conversationId, () => {
         this.ownedStopResolvers.delete(conversationId);
         this.activeConversations.delete(conversationId);
+        this.cleanupReceipts.set(conversationId, identity);
         resolve("settled");
       });
     });

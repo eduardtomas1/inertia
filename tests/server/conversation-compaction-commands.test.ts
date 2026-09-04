@@ -100,6 +100,7 @@ function fixture(options: {
   sessionId?: string | null;
   compactStatus?: "completed" | "failed";
   cleanupConfirmed?: boolean;
+  latestSessionId?: string | null;
   acquire?: boolean;
   duoReserved?: boolean;
   reconfigured?: boolean;
@@ -185,6 +186,9 @@ function fixture(options: {
       latestAgentTurnForConversation: vi.fn(() => ({
         modelSelection: selection,
         continuationIdentity: route.continuationIdentity,
+        providerSessionAfter: options.latestSessionId === undefined
+          ? conversation.providerSessionId
+          : options.latestSessionId,
       })),
       usageForConversation: vi.fn(() => existingUsage),
       upsertUsage,
@@ -242,6 +246,21 @@ describe("conversation compaction command", () => {
   afterEach(async () => await Promise.all(
     roots.splice(0).map(removePortableFixture),
   ));
+
+  it("rejects continuation evidence owned by a different provider session", async () => {
+    const { dependencies, compact } = fixture({
+      sessionId: "current-session",
+      latestSessionId: "different-session",
+    });
+    const handler = createConversationCompactionCommandHandler(dependencies);
+
+    await expect(handler({} as WebSocket, {
+      type: "conversation.compact",
+      requestId,
+      payload: { conversationId },
+    })).rejects.toThrow("saved agent-session identity is unavailable");
+    expect(compact).not.toHaveBeenCalled();
+  });
 
   it("launches the real provider compaction boundary without inventing a durable turn", async () => {
     const { dependencies, send } = fixture();

@@ -9,6 +9,7 @@ import {
 } from "../../../shared/contracts";
 import type { RuntimeStore } from "../../database";
 import type { ProviderRunFailure } from "../../provider/contracts";
+import { deletePendingInteraction } from "../pending-interaction-registry";
 import type { TurnSettlementCoordinator } from "./turn-settlement-coordinator";
 import { broadcastTurnConversationShell } from "./turn-controller-support";
 import type {
@@ -109,13 +110,7 @@ export class TurnRunStateCoordinator {
       ...(message === undefined ? {} : { message }),
       ...(failure === undefined ? {} : { failure }),
     };
-    const requiresOwnedStop = active.providerRunStarted
-      && this.options.providers.isRunning(active.conversation.id)
-      && this.options.providers.ownsRun(active.conversation.id, {
-        runId: active.turn.runId,
-        turnId: active.turn.id,
-      });
-    if (requiresOwnedStop) {
+    if (active.providerRunStarted) {
       active.runState.requestTerminal(active.deferredSettlement.status);
       this.suspendForProviderStop(active);
       this.persist(active);
@@ -161,9 +156,16 @@ export class TurnRunStateCoordinator {
     });
   }
 
-  private finalizeDeferredSettlement(active: ActiveTurn): boolean {
+  private finalizeDeferredSettlement(
+    active: ActiveTurn,
+    releaseMode: "tracked" | "joined" = "tracked",
+  ): boolean {
     const pending = active.deferredSettlement;
-    if (!pending || active.runState.isTerminal()) return false;
+    if (
+      !pending
+      || active.runState.isTerminal()
+      || active.providerRunStarted
+    ) return false;
     const settled = this.options.settlement.settle(
       active,
       pending.status,
@@ -172,8 +174,7 @@ export class TurnRunStateCoordinator {
       pending.failure,
     );
     if (settled) active.deferredSettlement = null;
-    if (!active.providerRunStarted
-      || !this.options.providers.isRunning(active.conversation.id)) {
+    if (releaseMode === "tracked") {
       this.options.track(this.options.release(active));
     }
     return settled;
@@ -188,8 +189,18 @@ export class TurnRunStateCoordinator {
       this.options.scheduler.clearTimeout(active.lifetimeTimer);
       active.lifetimeTimer = null;
     }
+    const interactionOwner = {
+      providerId: active.turn.providerId,
+      conversationId: active.conversation.id,
+      runId: active.turn.runId,
+      turnId: active.turn.id,
+    };
     for (const requestId of active.approvalIds) {
-      if (!this.options.pendingApprovals.delete(requestId)) continue;
+      if (!deletePendingInteraction(
+        this.options.pendingApprovals,
+        interactionOwner,
+        requestId,
+      )) continue;
       this.options.hooks.broadcast({
         type: "agent.approval.resolved",
         conversationId: active.conversation.id,
@@ -201,7 +212,11 @@ export class TurnRunStateCoordinator {
     }
     active.approvalIds.clear();
     for (const requestId of active.inputIds) {
-      if (!this.options.pendingInputs.delete(requestId)) continue;
+      if (!deletePendingInteraction(
+        this.options.pendingInputs,
+        interactionOwner,
+        requestId,
+      )) continue;
       this.options.hooks.broadcast({
         type: "agent.input.resolved",
         conversationId: active.conversation.id,
@@ -229,8 +244,9 @@ export class TurnRunStateCoordinator {
         // The durable pre-stop marker intentionally remains fail-closed.
       }
       if (cleanupConfirmed) {
+        active.providerRunStarted = false;
         this.options.store.providerRunOwnership.clear(active.turn.id, active.turn.runId);
-        this.finalizeDeferredSettlement(active);
+        this.finalizeDeferredSettlement(active, "joined");
         await this.options.release(active);
       }
     })();

@@ -189,17 +189,26 @@ export function createConversationCompactionCommandHandler(
     const latestTurn = dependencies.store.latestAgentTurnForConversation(
       conversation.id,
     );
-    const continuation = resolveContinuationDecision({
-      previousIdentity: latestTurn?.continuationIdentity
-        ?? conversation.continuationIdentity
-        ?? null,
-      nextIdentity: route.continuationIdentity,
-      previousModelId: selection.modelId === "provider-default"
+    const latestTurnOwnsProviderSession = latestTurn !== null
+      && latestTurn.providerSessionAfter === conversation.providerSessionId;
+    // Compaction mutates provider-owned hidden context. Never pair the shell's
+    // session ID with compatibility evidence from a different terminal turn.
+    const previousContinuationIdentity = latestTurn
+      ? latestTurnOwnsProviderSession
+        ? latestTurn.continuationIdentity
+        : null
+      : conversation.continuationIdentity ?? null;
+    const previousContinuationModelId = previousContinuationIdentity
+      ? selection.modelId === "provider-default"
         ? "provider-default"
-        : latestTurn?.modelSelection.modelId
-          ?? (conversation.continuationIdentity
-            ? selection.modelId
-            : null),
+        : latestTurn
+          ? latestTurn.modelSelection.modelId
+          : selection.modelId
+      : null;
+    const continuation = resolveContinuationDecision({
+      previousIdentity: previousContinuationIdentity,
+      nextIdentity: route.continuationIdentity,
+      previousModelId: previousContinuationModelId,
       nextModelId: selection.modelId,
       hasProviderSession: true,
       hasTurns: latestTurn !== null,

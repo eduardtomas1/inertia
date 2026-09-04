@@ -5,6 +5,7 @@ import {
   type HarnessBackendCompatibility,
   type KnownHarnessId,
   type ModelBackendProfile,
+  type ModelCapability,
 } from "../../shared/model-routing";
 import { validateProviderRunInput } from "./adapters";
 import {
@@ -34,6 +35,11 @@ export interface ProviderCapabilityAuthorityOptions {
     executable: string,
     version: string,
   ): string;
+  customProbeCapabilities(
+    providerId: ProviderId,
+    backendProfile: ModelBackendProfile,
+    modelId: string,
+  ): readonly ModelCapability[];
   evidenceTrusted(): boolean;
 }
 
@@ -123,20 +129,33 @@ export class ProviderCapabilityAuthority {
     harnessId: KnownHarnessId,
     backendProfile: ModelBackendProfile,
     compatibility: HarnessBackendCompatibility,
+    modelId: string,
   ): string | null {
     const attestation = this.attestation(
       providerId,
       harnessId,
       backendProfile,
       compatibility,
+      [],
+      {},
+      modelId,
     );
-    return attestation
-      ? providerContinuationCompatibilityToken(attestation)
-      : null;
+    if (!attestation) return null;
+    if (
+      backendProfile.source === "custom"
+      && !attestedProviderCapability(attestation, "session-resume")
+        .currentlyAvailable
+    ) return null;
+    return providerContinuationCompatibilityToken(attestation);
   }
 
   invalidate(providerId: ProviderId): void {
     this.protocolVerifiedInstallations.delete(providerId);
+  }
+
+  installationFingerprint(providerId: ProviderId): string | null {
+    return this.protocolVerifiedInstallations.get(providerId)
+      ?.installationFingerprint ?? null;
   }
 
   rememberDetection(detection: ProviderDetection): void {
@@ -184,6 +203,7 @@ export class ProviderCapabilityAuthority {
         Object.fromEntries(
           negotiated.map((id) => [id, true]),
         ) as Partial<Record<ProviderCapabilityId, boolean>>,
+        input.modelSelection.modelId,
       );
       return attestation
         ? attestedProviderCapability(attestation, capabilityId)
@@ -202,6 +222,7 @@ export class ProviderCapabilityAuthority {
     additionalNegotiated: Readonly<Partial<
       Record<ProviderCapabilityId, boolean>
     >> = {},
+    modelId: string | null = null,
   ) {
     const executable = this.options.resolvedExecutable(providerId);
     const installation = this.options.metadataCache.nativeScope(providerId);
@@ -224,6 +245,9 @@ export class ProviderCapabilityAuthority {
       evidenceTrusted: this.options.evidenceTrusted(),
       additionalConfigured,
       additionalNegotiated,
+      customProbeCapabilities: backendProfile.source === "custom" && modelId
+        ? this.options.customProbeCapabilities(providerId, backendProfile, modelId)
+        : [],
     });
   }
 }

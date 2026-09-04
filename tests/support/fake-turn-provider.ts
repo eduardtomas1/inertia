@@ -62,7 +62,7 @@ export class FakeTurnProvider implements TurnProviderRuntime {
   }> = [];
   runCount = 0;
   private runningConversationId: string | null = null;
-  private stopOwnedGate: Promise<"force-detached"> | null = null;
+  private stopOwnedGate: Promise<"settled" | "force-detached"> | null = null;
   private resolveStopOwnedGate: (() => void) | null = null;
   private resolveResult: ((result: ProviderRunResult) => void) | null = null;
   private rejectResult: ((error: unknown) => void) | null = null;
@@ -119,16 +119,20 @@ export class FakeTurnProvider implements TurnProviderRuntime {
   stopOwned(
     conversationId: string,
     identity: { runId: string; turnId: string },
-  ): Promise<"settled" | "force-detached"> {
+  ): Promise<
+    "missing" | "identity-mismatch" | "settled" | "force-detached"
+  > {
     this.stopOwnedCalls.push({ conversationId, identity });
     if (this.stopOwnedGate) return this.stopOwnedGate;
     this.runningConversationId = null;
     return Promise.resolve("settled");
   }
 
-  deferOwnedStop(): void {
-    this.stopOwnedGate = new Promise<"force-detached">((resolve) => {
-      this.resolveStopOwnedGate = () => resolve("force-detached");
+  deferOwnedStop(
+    result: "settled" | "force-detached" = "force-detached",
+  ): void {
+    this.stopOwnedGate = new Promise((resolve) => {
+      this.resolveStopOwnedGate = () => resolve(result);
     });
   }
 

@@ -124,6 +124,7 @@ describe("Claude Agent SDK message projection", () => {
       }),
       executable: process.execPath,
       environment: {},
+      providerNativeToolsAvailable: true,
       callbacks: { onEvent: (event) => events.push(event) },
     });
     return { events, result: await providerRun.result };
@@ -635,6 +636,7 @@ describe("Claude Agent SDK message projection", () => {
       }),
       executable: process.execPath,
       environment: {},
+      providerNativeToolsAvailable: true,
       callbacks: { onEvent: (event) => events.push(event) },
     });
 

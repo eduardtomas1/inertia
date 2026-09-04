@@ -11,7 +11,8 @@ import {
   safeLifecycleProviderVersion,
   type RuntimeLifecycleDiagnosticSnapshot,
 } from "../shared/lifecycle-diagnostics";
-import { continuationRejectedForCompatibility } from "../shared/continuation-policy";
+import { continuationRejectedForCompatibility } from
+  "../shared/continuation-reason-codes";
 import {
   embeddedLifecycleBuildMetadata,
   lifecycleBuildMetadataSchema,
@@ -20,7 +21,6 @@ import {
 import { knownHarnessIdSchema } from "../shared/model-routing";
 
 const MAX_REPORTED_RUNTIME_UPTIME_MS = 30 * 24 * 60 * 60 * 1_000;
-
 export interface RuntimeLifecycleDiagnosticInput {
   runtimeGenerationId: string;
   systemBootId: string;

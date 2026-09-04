@@ -14,7 +14,10 @@ import {
 import {
   validateKimiClaudeModelSelection,
 } from "../../../shared/claude-backend-profiles";
+import { backendCompatibilityProbeResultSchema } from "../../../shared/backend-probe";
 import {
+  BACKEND_PROBE_AUTHORITY_SCHEMA_VERSION,
+  BACKEND_PROBE_FRESHNESS_MS,
   nativeBackendProfile,
   nativeHarnessId,
   nativeModelSelection,
@@ -34,6 +37,7 @@ import { probeBackendCompatibility } from "./backend-compatibility-probe";
 
 import {
   PROVIDER_IDS,
+  backendProbeForModel,
   endpointIdentity,
   isUsableCompatibility,
   nativeProfile,
@@ -81,12 +85,18 @@ function backendPersistedState(
 export class BackendProfileController {
   private readonly store: RuntimeStore;
   private readonly runtime: BackendProfileRuntime;
+  private readonly now: () => Date;
+  private readonly probeOperationId: () => string;
+  private readonly probeAdmissionSequences = new Map<string, number>();
 
   private constructor(options: BackendProfileControllerOptions) {
     this.store = options.store;
+    this.now = options.now ?? (() => new Date());
+    this.probeOperationId = options.probeOperationId ?? randomUUID;
     this.runtime = new BackendProfileRuntime(
       options.credentials,
       options.builtInClaudeProfiles ?? [],
+      this.now,
     );
   }
 
@@ -109,6 +119,7 @@ export class BackendProfileController {
     | "backendProfiles"
     | "backendCompatibilities"
     | "backendProbeResults"
+    | "backendProbeNow"
     | "resolveBackendLaunchOptions"
   > {
     return this.runtime.providerManagerOptions(
@@ -135,7 +146,7 @@ export class BackendProfileController {
         { profile: nativeProfile(
           providerId,
           providerInfo.find(({ id }) => id === providerId),
-        ), latestProbe: null },
+        ), probeResults: [], probeAdmissionHighWater: [], latestProbe: null },
       ));
     return [
       ...native,
@@ -157,6 +168,8 @@ export class BackendProfileController {
           nativeProvider,
           this.runtime.provider(nativeProvider),
         ),
+        probeResults: [],
+        probeAdmissionHighWater: [],
         latestProbe: null,
       });
     }
@@ -258,7 +271,7 @@ export class BackendProfileController {
       const compatibility = this.runtime.compatibility(
         candidate,
         candidate.routing.primaryModelId,
-        stored.latestProbe,
+        backendProbeForModel(stored, candidate.routing.primaryModelId),
       );
       if (!isUsableCompatibility(compatibility)) {
         throw new BackendProfileControllerError(
@@ -322,7 +335,8 @@ export class BackendProfileController {
     }
     const current = stored.profile;
     const model = current.models.find((candidate) => candidate.id === modelId)!;
-    const result = await probeBackendCompatibility({
+    const admission = this.nextProbeAdmission(stored, modelId);
+    const probed = await probeBackendCompatibility({
       profile: safeBackendProfile(current),
       endpointUrl: current.baseUrl,
       modelId,
@@ -341,11 +355,75 @@ export class BackendProfileController {
     }, {
       resolveCredential: (reference, signal) =>
         this.runtime.resolveCredential(reference, signal),
+      now: this.now,
+      admission,
     });
+    const result = backendCompatibilityProbeResultSchema.parse({
+      ...probed,
+      authority: {
+        schemaVersion: BACKEND_PROBE_AUTHORITY_SCHEMA_VERSION,
+        operationId: admission.operationId,
+        admissionSequence: admission.admissionSequence,
+        installationFingerprint: admission.installationFingerprint,
+        expiresAt: new Date(
+          Date.parse(probed.checkedAt) + BACKEND_PROBE_FRESHNESS_MS,
+        ).toISOString(),
+      },
+    });
+    if (!this.probeAdmissionIsCurrent(current, modelId, admission.admissionSequence)) {
+      return this.runtime.detailView(this.store.modelBackendProfile(profileId));
+    }
     this.runtime.assertConfigurationMutable(current.harnessId);
     const next = this.store.recordModelBackendProbe(profileId, result);
-    this.runtime.recordProbeResult(result);
+    const persisted = backendProbeForModel(next, result.modelId);
+    if (persisted) this.runtime.recordProbeResult(persisted);
     return this.runtime.detailView(next);
+  }
+
+  private nextProbeAdmission(
+    stored: StoredModelBackendProfile,
+    modelId: string,
+  ): {
+    operationId: string;
+    admissionSequence: number;
+    installationFingerprint: string | null;
+  } {
+    const key = this.probeAdmissionKey(stored.profile, modelId);
+    const persisted = stored.probeAdmissionHighWater.find(
+      (entry) => entry.modelId === modelId,
+    )?.admissionSequence ?? 0;
+    const current = Math.max(this.probeAdmissionSequences.get(key) ?? 0, persisted);
+    if (current >= Number.MAX_SAFE_INTEGER) {
+      throw new BackendProfileControllerError(
+        "The backend probe admission sequence is exhausted.",
+      );
+    }
+    const admissionSequence = current + 1;
+    this.probeAdmissionSequences.set(key, admissionSequence);
+    return {
+      operationId: this.probeOperationId(),
+      admissionSequence,
+      installationFingerprint: this.runtime.installationFingerprint(
+        stored.profile.harnessId,
+      ),
+    };
+  }
+
+  private probeAdmissionIsCurrent(
+    profile: StoredModelBackendProfile["profile"],
+    modelId: string,
+    admissionSequence: number,
+  ): boolean {
+    return this.probeAdmissionSequences.get(
+      this.probeAdmissionKey(profile, modelId),
+    ) === admissionSequence;
+  }
+
+  private probeAdmissionKey(
+    profile: StoredModelBackendProfile["profile"],
+    modelId: string,
+  ): string {
+    return `${profile.id}\0${profile.configurationRevision}\0${modelId}`;
   }
 
   setDefault(
@@ -358,7 +436,7 @@ export class BackendProfileController {
     const compatibility = this.runtime.compatibility(
       record.profile,
       selection.modelId,
-      record.latestProbe,
+      backendProbeForModel(record, selection.modelId),
     );
     if (!record.profile.enabled || !isUsableCompatibility(compatibility)) {
       throw new BackendProfileControllerError(
@@ -653,7 +731,7 @@ export class BackendProfileController {
     const compatibility = this.runtime.compatibility(
       record.profile,
       selectionInput.modelId,
-      record.latestProbe,
+      backendProbeForModel(record, selectionInput.modelId),
     );
     if (!isUsableCompatibility(compatibility)) {
       return { ready: false, message: compatibility.reason };
@@ -720,6 +798,8 @@ export class BackendProfileController {
     if (nativeProvider) {
       return {
         profile: nativeProfile(nativeProvider, undefined),
+        probeResults: [],
+        probeAdmissionHighWater: [],
         latestProbe: null,
       };
     }

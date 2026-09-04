@@ -7,8 +7,6 @@ import {
   cursorVersionHasVerifiedAcpTerminalResume,
 } from "../shared/provider-terminal-resume";
 import {
-  backendProbeMatchesProfile,
-  backendCompatibilityProbeResultSchema,
   type BackendCompatibilityProbeResult,
 } from "../shared/backend-probe";
 import {
@@ -80,6 +78,12 @@ import {
 } from "./provider/provider-manager-installation";
 import { ProviderCapabilityAuthority } from
   "./provider/provider-capability-authority";
+import {
+  admittedCustomBackendCapabilities,
+  admittedCustomBackendProbeEvidence,
+  recordBackendProbeEvidence,
+} from
+  "./provider/custom-backend-probe-admission";
 import { providerProcessInvocation, providerPtyArguments } from "./provider/process";
 import { isProcessTreeTerminationUnconfirmed } from "./process-lifecycle";
 import {
@@ -96,7 +100,6 @@ export { AgentHarnessRegistry, createDefaultAgentHarnessRegistry };
 export type { OwnedProviderStopResult } from "./provider/run-coordinator";
 export type * from "./provider/agent-harness";
 export type * from "./provider/contracts";
-
 const DEFAULT_CANCEL_GRACE_MS = 2_000;
 const PRODUCTION_MANAGER_CONSTRUCTION = Symbol("production-provider-manager");
 const TEST_MANAGER_CONSTRUCTION = Symbol("test-provider-manager");
@@ -157,9 +160,9 @@ export class ProviderManager {
   private readonly backendProfiles = new Map<string, ModelBackendProfile>();
   private readonly backendCompatibilities = new Map<string, HarnessBackendCompatibility>();
   private readonly backendProbeResults = new Map<string, BackendCompatibilityProbeResult>();
+  private readonly backendProbeNow: () => Date;
   private readonly protectedBackendProfileIds = new Set<string>();
-  private readonly resolveBackendLaunchOptions:
-    | ProviderManagerOptions["resolveBackendLaunchOptions"];
+  private readonly resolveBackendLaunchOptions: ProviderManagerOptions["resolveBackendLaunchOptions"];
   private readonly installationLeases?: ProviderInstallationLeaseCoordinator;
   private readonly installationAuthority: ProviderManagerInstallationAuthority;
   private readonly capabilityAuthority: ProviderCapabilityAuthority;
@@ -227,6 +230,7 @@ export class ProviderManager {
     this.harnessRegistry = harnessRegistry;
     this.metadataCache = options.metadataCache ?? new ProviderMetadataCache();
     this.detectProviderImplementation = options.detectProvider ?? detectProvider;
+    this.backendProbeNow = options.backendProbeNow ?? (() => new Date());
     this.installationLeases = options.installationLeases;
     this.installationAuthority = new ProviderManagerInstallationAuthority({
       leases: this.installationLeases,
@@ -248,6 +252,18 @@ export class ProviderManager {
           nativeBackendProfile(providerId),
           version,
         ).fingerprint,
+      customProbeCapabilities: (providerId, backendProfile, modelId) => {
+        const probe = this.backendProbeResults.get(
+          `${backendProfile.id}\0${modelId}`,
+        );
+        return admittedCustomBackendProbeEvidence(
+          probe,
+          backendProfile,
+          modelId,
+          this.backendProbeNow(),
+          this.capabilityAuthority.installationFingerprint(providerId),
+        );
+      },
       evidenceTrusted: () => !this.installationAuthority.uncertain
         && !this.auxiliaryCleanupUnconfirmed
         && this.metadataCache.processCleanupConfirmed(),
@@ -277,7 +293,7 @@ export class ProviderManager {
               configured,
               negotiated ?? [],
             )
-          : true,
+          : this.testManagerCapabilityAvailable(input, capabilityId),
       capabilityAdmissible: (input, capabilityId, configured) =>
         this.installationLeases
           ? this.capabilityAuthority.admissible(
@@ -285,7 +301,7 @@ export class ProviderManager {
               capabilityId,
               configured,
             )
-          : true,
+          : this.testManagerCapabilityAvailable(input, capabilityId),
       acquireInstallationUse: (input, executable) => {
         const admission = this.installationAuthority.acquire(
           input.providerId,
@@ -354,6 +370,10 @@ export class ProviderManager {
     return this.capabilityAuthority.contract(providerId);
   }
 
+  providerInstallationFingerprint(providerId: ProviderId): string | null {
+    return this.capabilityAuthority.installationFingerprint(providerId);
+  }
+
   providerMaintenanceCapabilityAvailable(
     providerId: ProviderId,
     executable: string | null,
@@ -396,16 +416,45 @@ export class ProviderManager {
   }
 
   recordBackendProbeResult(resultInput: BackendCompatibilityProbeResult): void {
-    const result = backendCompatibilityProbeResultSchema.parse(resultInput);
-    const profile = this.backendProfiles.get(result.profileId);
-    if (!profile || !backendProbeMatchesProfile(result, profile, result.modelId)) return;
-    const key = `${result.profileId}\0${result.modelId}`;
-    const current = this.backendProbeResults.get(key);
+    recordBackendProbeEvidence(
+      this.backendProbeResults,
+      this.backendProfiles,
+      resultInput,
+      this.backendProbeNow(),
+    );
+  }
+
+  /**
+   * Test construction bypasses executable attestation, never custom-route
+   * capability evidence. This keeps focused harness tests convenient without
+   * creating a tool-authority path that exists only under test.
+   */
+  private testManagerCapabilityAvailable(
+    input: ProviderRunInput,
+    capabilityId: ProviderCapabilityId,
+  ): boolean {
+    if (input.backendProfile.source !== "custom") return true;
+    // Preserve the test factory's general executable-attestation bypass, but
+    // never bypass the pre-execution custom-route gates under audit.
+    if (capabilityId === "host-tool-bridge" || capabilityId === "plans") {
+      return false;
+    }
     if (
-      current
-      && Date.parse(current.checkedAt) >= Date.parse(result.checkedAt)
-    ) return;
-    this.backendProbeResults.set(key, result);
+      capabilityId !== "text-streaming"
+      && capabilityId !== "provider-native-tools"
+      && capabilityId !== "tool-activity"
+    ) return true;
+    const probe = this.backendProbeResults.get(
+      `${input.backendProfile.id}\0${input.modelSelection.modelId}`,
+    );
+    return admittedCustomBackendCapabilities(
+      probe,
+      input.backendProfile,
+      input.modelSelection.modelId,
+      this.backendProbeNow(),
+      this.capabilityAuthority.installationFingerprint(input.providerId),
+    )
+      .includes(capabilityId);
   }
 
   upsertBackendProfile(
@@ -492,19 +541,25 @@ export class ProviderManager {
     // optimistic registration must never bypass a stale or failed probe.
     const compatibility = backendProfile.source === "custom"
       ? resolveHarnessBackendCompatibility(harnessId.data, backendProfile, {
+          evaluatedAt: this.backendProbeNow(),
           modelId: selection.modelId,
           probe,
         })
       : explicit ?? resolveHarnessBackendCompatibility(
           harnessId.data,
           backendProfile,
-          { modelId: selection.modelId, probe },
+          {
+            evaluatedAt: this.backendProbeNow(),
+            modelId: selection.modelId,
+            probe,
+          },
         );
     const providerCompatibilityToken = this.capabilityAuthority.continuationToken(
       providerId,
       harnessId.data,
       backendProfile,
       compatibility,
+      selection.modelId,
     );
     return {
       providerId,

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { backendEndpointIdentity } from "../../src/shared/backend-endpoint-identity";
 import {
   continuationIdentityForSelection,
   modelSelectionSchema,
@@ -25,7 +26,7 @@ function customProfile(
     source: "custom",
     enabled: true,
     configurationRevision: 7,
-    endpointIdentity: "endpoint:responses:7",
+    endpointIdentity: backendEndpointIdentity("https://gateway.example/v1"),
     ...overrides,
   };
 }
@@ -88,6 +89,7 @@ describe("Codex Responses backend launch adapter", () => {
         secretReference: "secret:responses-gateway",
       }],
       resolveSecret: async () => "owned-secret",
+      validateEndpointNetworkPolicy: async () => undefined,
     });
 
     const launch = await resolver(
@@ -155,11 +157,14 @@ describe("Codex Responses backend launch adapter", () => {
   });
 
   it("allows only explicitly enabled literal loopback HTTP after probe routing", async () => {
-    const profile = customProfile();
+    const loopbackUrl = "http://127.42.0.1:4312/v1";
+    const profile = customProfile({
+      endpointIdentity: backendEndpointIdentity(loopbackUrl),
+    });
     const loopbackResolver = createCodexResponsesBackendLaunchResolver({
       profiles: [{
         profile,
-        baseUrl: "http://127.42.0.1:4312/v1",
+        baseUrl: loopbackUrl,
         secretReference: "secret:gateway",
         allowInsecureLocalhost: true,
       }],
@@ -213,6 +218,7 @@ describe("Codex Responses backend launch adapter", () => {
         secretReference: "secret:gateway",
       }],
       resolveSecret: async () => null,
+      validateEndpointNetworkPolicy: async () => undefined,
     });
 
     await expect(resolver(
@@ -234,6 +240,7 @@ describe("Codex Responses backend launch adapter", () => {
     const resolver = createCodexResponsesBackendLaunchResolver({
       profiles: () => profiles,
       resolveSecret: async () => "owned-secret",
+      validateEndpointNetworkPolicy: async () => undefined,
     });
     expect(() => resolver(
       customRun(profile),
@@ -253,5 +260,43 @@ describe("Codex Responses backend launch adapter", () => {
     )).resolves.toMatchObject({
       harnessConfiguration: { kind: "codex-responses" },
     });
+  });
+
+  it("revalidates endpoint network policy before reading launch credentials", async () => {
+    const profile = customProfile();
+    let secretRead = false;
+    const resolver = createCodexResponsesBackendLaunchResolver({
+      profiles: [{
+        profile,
+        baseUrl: "https://gateway.example/v1",
+        secretReference: "secret:gateway",
+      }],
+      validateEndpointNetworkPolicy: async () => {
+        throw new Error("rebound-private-address");
+      },
+      resolveSecret: async () => {
+        secretRead = true;
+        return "owned-secret";
+      },
+    });
+
+    await expect(resolver(
+      customRun(profile),
+      {},
+      { signal: new AbortController().signal },
+    )).rejects.toMatchObject({ code: "invalid-profile" });
+    expect(secretRead).toBe(false);
+  });
+
+  it("rejects a custom profile whose identity names a different endpoint", () => {
+    expect(() => createCodexResponsesBackendLaunchResolver({
+      profiles: [{
+        profile: customProfile({
+          endpointIdentity: backendEndpointIdentity("https://other.example/v1"),
+        }),
+        baseUrl: "https://gateway.example/v1",
+        secretReference: "secret:gateway",
+      }],
+    })).toThrow("identity does not match");
   });
 });

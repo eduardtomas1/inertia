@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { backendEndpointIdentity } from "../../src/shared/backend-endpoint-identity";
 import {
   modelSelectionForBackendProfile,
   persistedModelBackendProfileSchema,
@@ -21,6 +22,7 @@ import {
   BackendProfileController,
   type BackendCredentialBroker,
 } from "../../src/server/runtime/backends/backend-profile-controller";
+import { backendProbeTestAuthority } from "../helpers/backend-probe-authority";
 
 const temporaryDirectories: string[] = [];
 
@@ -82,7 +84,7 @@ function persistedCredentialProfile(): PersistedModelBackendProfile {
     source: "custom",
     enabled: true,
     configurationRevision: 7,
-    endpointIdentity: "endpoint:credential-test",
+    endpointIdentity: backendEndpointIdentity("https://credential.example.test/v1"),
     preset: "custom",
     baseUrl: "https://credential.example.test/v1",
     allowInsecureLocalhost: false,
@@ -181,6 +183,7 @@ function compatibleProbe(
     },
     failure: null,
     checkedAt,
+    authority: backendProbeTestAuthority(checkedAt),
   };
 }
 

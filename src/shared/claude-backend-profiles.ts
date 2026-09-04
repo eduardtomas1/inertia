@@ -1,6 +1,11 @@
 import { z } from "zod";
 
 import {
+  backendEndpointIdentity,
+  backendEndpointIdentityMatches,
+} from "./backend-endpoint-identity";
+
+import {
   type BackendAuthenticationMode,
   type HarnessBackendCompatibility,
   type HarnessBackendCompatibilityEvidence,
@@ -21,6 +26,7 @@ export const CLAUDE_BACKEND_PROFILE_SCHEMA_VERSION = 1 as const;
 export const NATIVE_ANTHROPIC_PROFILE_ID = "builtin:anthropic";
 export const KIMI_CLAUDE_BUILTIN_PROFILE_ID = "builtin:kimi-code";
 export const KIMI_CODING_BASE_URL = "https://api.kimi.com/coding/";
+export const KIMI_CLAUDE_ENDPOINT_IDENTITY = "kimi-code:anthropic-messages-v1";
 
 export const CLAUDE_INTERNAL_TIER_IDS = [
   "fable",
@@ -94,6 +100,8 @@ export interface ClaudeCompatibleBackendProfile extends ModelBackendProfile {
   schemaVersion: typeof CLAUDE_BACKEND_PROFILE_SCHEMA_VERSION;
   preset: ClaudeBackendPreset;
   baseUrl: string | null;
+  /** Explicit local-development exception retained through launch admission. */
+  allowInsecureLocalhost: boolean;
   /**
    * Opaque privileged-store lookup only. Secret values never belong here.
    * Task 21 owns materializing this reference.
@@ -224,6 +232,7 @@ const claudeProfileShape = modelBackendProfileSchema.extend({
   schemaVersion: z.literal(CLAUDE_BACKEND_PROFILE_SCHEMA_VERSION),
   preset: z.enum(["anthropic", "kimi-code", "custom"]),
   baseUrl: z.string().url().max(2_048).nullable(),
+  allowInsecureLocalhost: z.boolean().default(false),
   secretReference: backendSecretReferenceSchema.nullable(),
   primaryModelId: modelIdSchema,
   routing: z.discriminatedUnion("mode", [
@@ -333,6 +342,16 @@ export const claudeCompatibleBackendProfileSchema = claudeProfileShape.superRefi
       message: "A non-native Claude-compatible profile requires a base URL.",
     });
   }
+  if (
+    profile.source === "custom"
+    && !backendEndpointIdentityMatches(profile.baseUrl, profile.endpointIdentity)
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["endpointIdentity"],
+      message: "Custom Claude endpoint identity must match its canonical URL.",
+    });
+  }
   if (profile.authenticationMode === "harness-managed") {
     context.addIssue({
       code: "custom",
@@ -357,6 +376,8 @@ export const claudeCompatibleBackendProfileSchema = claudeProfileShape.superRefi
       profile.source !== "built-in"
       || profile.authenticationMode !== "api-key"
       || profile.baseUrl !== KIMI_CODING_BASE_URL
+      || profile.endpointIdentity !== KIMI_CLAUDE_ENDPOINT_IDENTITY
+      || profile.allowInsecureLocalhost
     ) {
       context.addIssue({
         code: "custom",
@@ -490,6 +511,7 @@ export function nativeAnthropicBackendProfile(): ClaudeCompatibleBackendProfile 
     schemaVersion: CLAUDE_BACKEND_PROFILE_SCHEMA_VERSION,
     preset: "anthropic",
     baseUrl: null,
+    allowInsecureLocalhost: false,
     secretReference: null,
     primaryModelId: "provider-default",
     routing: { mode: "simple" },
@@ -570,10 +592,11 @@ export function createKimiClaudeBackendProfile(
     source: "built-in",
     enabled: input.enabled ?? true,
     configurationRevision: input.configurationRevision ?? 1,
-    endpointIdentity: "kimi-code:anthropic-messages-v1",
+    endpointIdentity: KIMI_CLAUDE_ENDPOINT_IDENTITY,
     schemaVersion: CLAUDE_BACKEND_PROFILE_SCHEMA_VERSION,
     preset: "kimi-code",
     baseUrl: KIMI_CODING_BASE_URL,
+    allowInsecureLocalhost: false,
     secretReference: input.secretReference,
     primaryModelId: input.primaryModelId,
     routing: input.routing ?? { mode: "simple" },
@@ -718,10 +741,11 @@ export function createCustomClaudeBackendProfile(
     source: "custom",
     enabled: input.enabled ?? true,
     configurationRevision,
-    endpointIdentity: `profile:${input.id}:revision:${configurationRevision}`,
+    endpointIdentity: backendEndpointIdentity(baseUrl),
     schemaVersion: CLAUDE_BACKEND_PROFILE_SCHEMA_VERSION,
     preset: "custom",
     baseUrl,
+    allowInsecureLocalhost: input.allowInsecureLocalhost ?? false,
     secretReference: input.secretReference,
     primaryModelId: input.primaryModelId,
     routing: input.routing ?? { mode: "simple" },
@@ -825,6 +849,7 @@ interface LegacyClaudeBackendProfileV0 extends ModelBackendProfile {
   schemaVersion?: 0;
   preset: ClaudeBackendPreset;
   baseUrl: string | null;
+  allowInsecureLocalhost?: boolean;
   secretReference: string | null;
   primaryModelId: string;
   routingMode?: "simple" | "advanced";
@@ -844,6 +869,7 @@ function legacyProfileSchema(): z.ZodType<LegacyClaudeBackendProfileV0> {
     schemaVersion: z.literal(0).optional(),
     preset: z.enum(["anthropic", "kimi-code", "custom"]),
     baseUrl: z.string().url().max(2_048).nullable(),
+    allowInsecureLocalhost: z.boolean().optional(),
     secretReference: backendSecretReferenceSchema.nullable(),
     primaryModelId: modelIdSchema,
     routingMode: z.enum(["simple", "advanced"]).optional(),
@@ -907,11 +933,10 @@ export function migrateClaudeCompatibleBackendProfile(
       : legacy.configurationRevision + 1,
     endpointIdentity: legacy.preset === "anthropic"
       ? null
-      : legacy.endpointIdentity ?? (
-          legacy.preset === "kimi-code"
-            ? "kimi-code:anthropic-messages-v1"
-            : `profile:${legacy.id}:revision:${legacy.configurationRevision + 1}`
-        ),
+      : legacy.preset === "kimi-code"
+        ? KIMI_CLAUDE_ENDPOINT_IDENTITY
+        : backendEndpointIdentity(legacy.baseUrl!),
+    allowInsecureLocalhost: legacy.allowInsecureLocalhost ?? false,
     routing,
     compactionModel: COMPACTION_MODEL_UNAVAILABLE,
     contextWindowTokens: legacy.contextWindowTokens ?? null,

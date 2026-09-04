@@ -14,6 +14,7 @@ import {
 } from "../../../shared/contracts";
 import { RuntimeStore } from "../../database";
 import { RuntimeRequestError } from "../../runtime-errors";
+import { clearPendingInteractionsForTurn } from "../pending-interaction-registry";
 import type {
   ProviderEvent,
   ProviderRunFailure,
@@ -76,6 +77,8 @@ import {
   adoptLiveTurn,
   settleQueuedAdoptionFailure,
 } from "./turn-live-adoption";
+import { requestProviderCancellation } from "./turn-provider-cancellation";
+import { resolveTurnHostTools } from "./turn-provider-host-tools";
 
 export type {
   QueuedTurn,
@@ -172,7 +175,9 @@ export class TurnController {
       inactivityMs: turnTimeoutMs,
       maxLifetimeMs: turnMaxLifetimeMs,
       status: (active) => this.store.agentTurn(active.turn.id).status,
-      cancel: (active) => { this.providers.cancel(active.conversation.id); },
+      cancel: (active) => {
+        requestProviderCancellation(this.providers, active.conversation.id);
+      },
       fail: (active, message) => {
         this.settle(active, "failed", "turn-timeout", message);
       },
@@ -193,7 +198,7 @@ export class TurnController {
       scheduler: this.scheduler,
       now: () => this.now(),
       onPersistenceFailure: (active, error) => {
-        this.providers.cancel(active.conversation.id);
+        requestProviderCancellation(this.providers, active.conversation.id);
         this.settle(
           active,
           "failed",
@@ -396,19 +401,31 @@ export class TurnController {
         hooks: this.hooks,
       });
     }
-    if (this.providerRunOwnershipBarriers.has(conversationId) && !exactActive) {
+    let cleanup: "confirmed" | "unconfirmed" | "rejected";
+    if (exactActive?.providerRunStarted) {
+      if (!exactActive.runState.isTerminal()) {
+        this.settle(exactActive, "cancelled", "user-cancelled", "Stopped");
+      }
       await this.waitForProviderCleanup([conversationId]);
+      cleanup = !exactActive.providerRunStarted
+        && exactActive.runState.isTerminal()
+        ? "confirmed"
+        : "unconfirmed";
+    } else {
+      if (this.providerRunOwnershipBarriers.has(conversationId)) {
+        await this.waitForProviderCleanup([conversationId]);
+      }
+      cleanup = await confirmDuoProviderCleanup(
+        this.providers,
+        conversationId,
+        { runId: turn.runId, turnId },
+        {
+          cleanupAlreadyConfirmed:
+            providerRunOwnershipConfirmed || turn.status === "queued",
+          allowStop: allowProviderStop,
+        },
+      );
     }
-    const cleanup = await confirmDuoProviderCleanup(
-      this.providers,
-      conversationId,
-      { runId: turn.runId, turnId },
-      {
-        cleanupAlreadyConfirmed:
-          providerRunOwnershipConfirmed || turn.status === "queued",
-        allowStop: allowProviderStop,
-      },
-    );
     if (cleanup !== "confirmed") return false;
     if (exactActive && !exactActive.runState.isTerminal()) {
       this.settle(exactActive, "cancelled", "user-cancelled", "Stopped");
@@ -508,7 +525,7 @@ export class TurnController {
         active.assistantStream.flush();
         active.reasoningStream.flush();
       } catch (error) {
-        this.providers.cancel(active.conversation.id);
+        requestProviderCancellation(this.providers, active.conversation.id);
         this.settle(
           active,
           "failed",
@@ -667,7 +684,7 @@ export class TurnController {
     const second = this.startProvider(secondActive);
     if (!second.accepted) {
       if (!firstActive.runState.isTerminal()) {
-        this.providers.cancel(firstActive.conversation.id);
+        requestProviderCancellation(this.providers, firstActive.conversation.id);
         this.settle(
           firstActive,
           "cancelled",
@@ -680,7 +697,9 @@ export class TurnController {
     if (!started.every(Boolean)) {
       [firstActive, secondActive].forEach((sibling, ordinal) => {
         if (sibling.runState.isTerminal()) return;
-        if (started[ordinal]) this.providers.cancel(sibling.conversation.id);
+        if (started[ordinal]) {
+          requestProviderCancellation(this.providers, sibling.conversation.id);
+        }
         this.settle(
           sibling,
           "cancelled",
@@ -784,6 +803,7 @@ export class TurnController {
     };
     active.providerStartAcknowledgement = acknowledge;
     try {
+      const hostTools = resolveTurnHostTools(active, this.hooks);
       // Persist exact process ownership before run()/harness.start() can create
       // a child or synchronously invoke a callback. Abrupt worker exits therefore
       // leave a generation-bound deletion/recovery fence behind.
@@ -796,23 +816,11 @@ export class TurnController {
         this.now(),
       );
       active.providerRunStarted = true;
-      const capabilityContract = this.hooks.providerInfo().find(
-        ({ id }) => id === active.providerInput.providerId,
-      )?.capabilityContract;
-      const hostToolsAttested = capabilityContract !== undefined
-        && capabilityContract.installationVerified
-        && capabilityContract.hostToolBridgeAvailable
-        && capabilityContract.harnessId === active.providerInput.harnessId;
       const result = this.providers.run(active.providerInput, {
-        hostTools: hostToolsAttested
-          ? this.hooks.hostToolsForTurn?.({
-              conversation: active.conversation,
-              turn: active.turn,
-            })
-          : undefined,
+        hostTools,
         onStarted: () => {
           if (active.runState.isTerminal() || this.closing) {
-            this.providers.cancel(active.conversation.id);
+            requestProviderCancellation(this.providers, active.conversation.id);
             acknowledge(false);
             return;
           }
@@ -870,12 +878,7 @@ export class TurnController {
         .catch(() => undefined);
     } catch (error) {
       acknowledge(false);
-      if (this.providers.isRunning(active.conversation.id)) {
-        this.providers.cancel(active.conversation.id);
-      } else {
-        this.store.providerRunOwnership.clear(active.turn.id, active.turn.runId);
-        active.providerRunStarted = false;
-      }
+      requestProviderCancellation(this.providers, active.conversation.id);
       this.settle(active, "failed", "turn-start-failed", publicTurnError(error));
       return { accepted: false, started };
     }
@@ -885,14 +888,14 @@ export class TurnController {
   cancel(conversationId: string, cause: TurnTerminalCause = "user-cancelled"): boolean {
     const active = this.activeByConversation.get(conversationId);
     if (!active || active.runState.isTerminal()) return false;
-    this.providers.cancel(conversationId);
+    requestProviderCancellation(this.providers, conversationId);
     return this.settle(active, "cancelled", cause, "Stopped");
   }
 
   failBeforeStart(conversationId: string, message: string): boolean {
     const active = this.activeByConversation.get(conversationId);
     if (!active || active.runState.isTerminal()) return false;
-    this.providers.cancel(conversationId);
+    requestProviderCancellation(this.providers, conversationId);
     return this.settle(active, "failed", "turn-start-failed", message);
   }
 
@@ -1015,7 +1018,7 @@ export class TurnController {
     let settled = 0;
     for (const active of this.activeByConversation.values()) {
       if (active.rendererOwnerId !== ownerId) continue;
-      this.providers.cancel(active.conversation.id);
+      requestProviderCancellation(this.providers, active.conversation.id);
       if (this.settle(
         active,
         "cancelled",
@@ -1029,7 +1032,7 @@ export class TurnController {
   unsupportedInteraction(conversationId: string, message: string): boolean {
     const active = this.activeByConversation.get(conversationId);
     if (!active || active.runState.isTerminal()) return false;
-    this.providers.cancel(conversationId);
+    requestProviderCancellation(this.providers, conversationId);
     return this.settle(active, "failed", "unsupported-interaction", message);
   }
 
@@ -1039,7 +1042,7 @@ export class TurnController {
     this.closing = true;
     this.admissions.dispose();
     for (const active of this.activeByConversation.values()) {
-      this.providers.cancel(active.conversation.id);
+      requestProviderCancellation(this.providers, active.conversation.id);
       this.settle(
         active,
         "interrupted",
@@ -1087,7 +1090,7 @@ export class TurnController {
       this.nativeGoals.handleEvent(active, event);
       return true;
     } catch (error) {
-      this.providers.cancel(active.conversation.id);
+      requestProviderCancellation(this.providers, active.conversation.id);
       this.settle(active, "failed", "stream-persistence-failed", publicTurnError(error));
       return false;
     }
@@ -1106,13 +1109,9 @@ export class TurnController {
       });
       return;
     }
-    if (result.cleanupConfirmed) {
-      // A result carrying cleanup confirmation is the provider manager's
-      // exact-process exit receipt. It is stronger than a potentially stale
-      // lookup projection and permits immediate root settlement.
-      active.providerRunStarted = false;
-      this.store.providerRunOwnership.clear(active.turn.id, active.turn.runId);
-    }
+    // ProviderManager records exact cleanup receipts behind stopOwned(). Join
+    // that owner-scoped barrier even after a clean terminal result; neither a
+    // terminal promise nor negative live-map lookup releases host authority.
     // Exact cleanup stays authoritative; the result cannot replace the root outcome.
     if (rootAlreadyTerminal) return;
     if (result.status === "completed") {
@@ -1224,10 +1223,7 @@ export class TurnController {
     this.nativeGoals.cleanup(active);
     active.assistantStream.dispose();
     active.reasoningStream.dispose();
-    for (const requestId of active.approvalIds) this.pendingApprovals.delete(requestId);
-    for (const requestId of active.inputIds) this.pendingInputs.delete(requestId);
-    active.approvalIds.clear();
-    active.inputIds.clear();
+    clearPendingInteractionsForTurn(active, this.pendingApprovals, this.pendingInputs);
     this.activeByConversation.delete(active.conversation.id);
     this.activeByTurn.delete(active.turn.id);
   }

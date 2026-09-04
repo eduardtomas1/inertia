@@ -39,6 +39,7 @@ import {
   type CodexResponsesBackendProfile,
 } from "./codex-responses-adapter";
 import {
+  backendProbeForModel,
   connectionState,
   routingForClaude,
   safeBackendProfile,
@@ -65,12 +66,15 @@ export class BackendProfileRuntime {
   private providerMaintenanceBlocked: ((providerId: ProviderId) => boolean) | null = null;
   private readonly resolveClaudeLaunch;
   private readonly resolveCodexLaunch;
+  private readonly now: () => Date;
 
   constructor(
     credentials: BackendCredentialBroker | undefined,
     builtInProfiles: readonly ClaudeCompatibleBackendProfile[],
+    now: () => Date = () => new Date(),
   ) {
     this.credentials = credentials;
+    this.now = now;
     for (const input of builtInProfiles) {
       const profile = claudeCompatibleBackendProfileSchema.parse(input);
       this.builtInClaudeProfiles.set(profile.id, profile);
@@ -115,6 +119,13 @@ export class BackendProfileRuntime {
     this.providers = providers;
   }
 
+  installationFingerprint(harnessId: string): string | null {
+    const providerId = legacyProviderIdForHarness(harnessId);
+    return providerId
+      ? this.providers?.providerInstallationFingerprint(providerId) ?? null
+      : null;
+  }
+
   attachProviderMutationGuard(
     providerMaintenanceBlocked: (providerId: ProviderId) => boolean,
   ): void {
@@ -147,6 +158,7 @@ export class BackendProfileRuntime {
     | "backendProfiles"
     | "backendCompatibilities"
     | "backendProbeResults"
+    | "backendProbeNow"
     | "resolveBackendLaunchOptions"
   > {
     // Startup maintenance recovery must run before credential reconciliation
@@ -157,12 +169,13 @@ export class BackendProfileRuntime {
     for (const { profile } of records) this.registerProfile(profile);
     const backendProfiles = records.map(({ profile }) =>
       safeBackendProfile(profile));
-    const backendCompatibilities = records.flatMap(({ profile, latestProbe }) => {
+    const backendCompatibilities = records.flatMap((record) => {
+      const { profile } = record;
       if (profile.source === "custom") return [];
       return [this.compatibility(
         profile,
         profile.routing.primaryModelId,
-        latestProbe,
+        backendProbeForModel(record, profile.routing.primaryModelId),
       )];
     });
     const registeredProfileIds = new Set(
@@ -176,8 +189,8 @@ export class BackendProfileRuntime {
     return {
       backendProfiles,
       backendCompatibilities,
-      backendProbeResults: records.flatMap(({ latestProbe }) =>
-        latestProbe ? [latestProbe] : []),
+      backendProbeResults: records.flatMap(({ probeResults }) => probeResults),
+      backendProbeNow: this.now,
       resolveBackendLaunchOptions: (input, environment, context) =>
         this.resolveLaunch(input, environment, context),
     };
@@ -260,10 +273,14 @@ export class BackendProfileRuntime {
     const profile = record.profile;
     const { baseUrl: _baseUrl, ...profileWithoutBaseUrl } = profile;
     const status = this.credentialStatuses.get(profile.id);
+    const primaryProbe = backendProbeForModel(
+      record,
+      profile.routing.primaryModelId,
+    );
     const compatibility = this.compatibility(
       profile,
       profile.routing.primaryModelId,
-      record.latestProbe,
+      primaryProbe,
     );
     const authState = profile.authenticationMode === "harness-managed"
       ? "harness-managed"
@@ -283,9 +300,9 @@ export class BackendProfileRuntime {
       authState,
       connectionState: profile.preset === "native"
         ? "connected"
-        : connectionState(record.latestProbe),
+        : connectionState(primaryProbe),
       compatibility,
-      latestProbe: record.latestProbe,
+      latestProbe: primaryProbe,
       canDelete: profile.source === "custom",
       canDisable: profile.preset !== "native",
     });
@@ -309,14 +326,14 @@ export class BackendProfileRuntime {
         return claudeHarnessBackendCompatibility(
           full,
           profile.harnessId as "claude-agent-sdk" | "claude-cli",
-          { modelId, probe },
+          { evaluatedAt: this.now(), modelId, probe },
         );
       }
     }
     return resolveHarnessBackendCompatibility(
       profile.harnessId,
       safeBackendProfile(profile),
-      { modelId, probe },
+      { evaluatedAt: this.now(), modelId, probe },
     );
   }
 
@@ -377,6 +394,7 @@ export class BackendProfileRuntime {
         secretReference: backendProfileUsesCredential(profile)
           ? this.secretReference(profile.id)
           : null,
+        allowInsecureLocalhost: profile.allowInsecureLocalhost,
       });
       this.claudeProfiles.delete(profile.id);
     }

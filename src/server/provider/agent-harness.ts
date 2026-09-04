@@ -272,6 +272,12 @@ export interface AgentHarnessStartOptions {
   input: ProviderRunInput;
   executable: string;
   environment: NodeJS.ProcessEnv;
+  /**
+   * Exact-run authority for provider-owned tools. ProviderManager derives this
+   * from the installation/configuration/model attestation before the harness
+   * can expose or execute a native tool.
+   */
+  providerNativeToolsAvailable: boolean;
   harnessConfiguration?: ProviderHarnessLaunchConfiguration;
   callbacks?: AgentHarnessCallbacks;
   hostTools?: ProviderHostToolBridge;

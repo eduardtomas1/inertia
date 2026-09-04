@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import {
   backendCompatibilityProbeRequestSchema,
   backendCompatibilityProbeResultSchema,
@@ -7,7 +9,12 @@ import {
   type BackendProbeContextEvidence,
   type BackendProbeFailure,
 } from "../../../shared/backend-probe";
-import { MODEL_CAPABILITY_IDS } from "../../../shared/model-routing";
+import {
+  BACKEND_PROBE_AUTHORITY_SCHEMA_VERSION,
+  BACKEND_PROBE_FRESHNESS_MS,
+  MODEL_CAPABILITY_IDS,
+} from "../../../shared/model-routing";
+import { backendEndpointIdentityMatches } from "../../../shared/backend-endpoint-identity";
 import {
   BackendProbeError,
   clampInteger,
@@ -17,6 +24,7 @@ import {
   MAX_RESPONSE_BYTES,
   MAX_TIMEOUT_MS,
   normalizeProbeError,
+  throwIfAborted,
   unknownCapability,
   type BackendCompatibilityProbeDependencies,
   type ProbeObservation,
@@ -41,7 +49,12 @@ export async function probeBackendCompatibility(
   externalSignal?: AbortSignal,
 ): Promise<BackendCompatibilityProbeResult> {
   const request = backendCompatibilityProbeRequestSchema.parse(requestInput);
-  const checkedAt = (dependencies.now ?? (() => new Date()))().toISOString();
+  const now = dependencies.now ?? (() => new Date());
+  const admission = dependencies.admission ?? {
+    operationId: randomUUID(),
+    admissionSequence: 1,
+    installationFingerprint: null,
+  };
   const timeoutMs = clampInteger(dependencies.timeoutMs ?? DEFAULT_TIMEOUT_MS, 1, MAX_TIMEOUT_MS);
   const maxResponseBytes = clampInteger(
     dependencies.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES,
@@ -56,9 +69,28 @@ export async function probeBackendCompatibility(
   }, timeoutMs);
   timer.unref();
   const onExternalAbort = (): void => controller.abort();
-  externalSignal?.addEventListener("abort", onExternalAbort, { once: true });
+  if (externalSignal?.aborted) {
+    controller.abort();
+  } else {
+    externalSignal?.addEventListener("abort", onExternalAbort, { once: true });
+  }
 
+  let result: BackendCompatibilityProbeResult;
   try {
+    throwIfAborted(controller.signal);
+    if (
+      request.profile.source === "custom"
+      && request.endpointUrl !== null
+      && !backendEndpointIdentityMatches(
+        request.endpointUrl,
+        request.profile.endpointIdentity,
+      )
+    ) {
+      throw new BackendProbeError(
+        "invalid-url",
+        FIXED_FAILURE_MESSAGES["invalid-url"],
+      );
+    }
     let observation: ProbeObservation;
     if (
       request.profile.protocol === "anthropic-messages"
@@ -69,18 +101,32 @@ export async function probeBackendCompatibility(
         dependencies,
         controller.signal,
         maxResponseBytes,
+        externalSignal,
       );
     } else {
       observation = await probeNativeBackend(request, dependencies, controller.signal);
     }
-    return resultForObservation(request, observation, checkedAt);
+    const checkedAt = now().toISOString();
+    result = resultForObservation(request, observation, checkedAt);
   } catch (error) {
     const normalized = normalizeProbeError(error, timedOut, externalSignal?.aborted === true);
-    return resultForFailure(request, normalized, checkedAt);
+    const checkedAt = now().toISOString();
+    result = resultForFailure(request, normalized, checkedAt);
   } finally {
     clearTimeout(timer);
     externalSignal?.removeEventListener("abort", onExternalAbort);
   }
+  const checkedAtMs = Date.parse(result.checkedAt);
+  return backendCompatibilityProbeResultSchema.parse({
+    ...result,
+    authority: {
+      schemaVersion: BACKEND_PROBE_AUTHORITY_SCHEMA_VERSION,
+      operationId: admission.operationId,
+      admissionSequence: admission.admissionSequence,
+      installationFingerprint: admission.installationFingerprint,
+      expiresAt: new Date(checkedAtMs + BACKEND_PROBE_FRESHNESS_MS).toISOString(),
+    },
+  });
 }
 
 function resultForObservation(

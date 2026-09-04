@@ -277,6 +277,58 @@ describe("provider capability manifests", () => {
       .currentlyAvailable).toBe(false);
   });
 
+  it("uses an explicit observation ceiling for partially exercised routes", () => {
+    const codex = manifest("codex-app-server");
+    const observed = attestProviderCapabilities(codex, input({
+      observation: {
+        configured: [
+          "host-tool-bridge",
+          "custom-backend",
+          "endpoint-selection",
+        ],
+        negotiated: {
+          "custom-backend": true,
+          "endpoint-selection": true,
+        },
+        observed: [
+          "text-streaming",
+          "usage-tokens",
+          "custom-backend",
+          "endpoint-selection",
+          "cancellation",
+          "process-cleanup",
+          "native-session-id",
+        ],
+      },
+    }));
+
+    for (const id of [
+      "text-streaming",
+      "usage-tokens",
+      "custom-backend",
+      "endpoint-selection",
+      "cancellation",
+      "process-cleanup",
+      "native-session-id",
+    ] as const) {
+      expect(attestedProviderCapability(observed, id).currentlyAvailable)
+        .toBe(true);
+    }
+    for (const id of [
+      "images",
+      "goals",
+      "plans",
+      "approvals",
+      "compaction",
+      "host-tool-bridge",
+    ] as const) {
+      expect(attestedProviderCapability(observed, id)).toMatchObject({
+        observedAvailable: false,
+        currentlyAvailable: false,
+      });
+    }
+  });
+
   it("closes every capability when protocol or installation version is unverified", () => {
     const codex = manifest("codex-app-server");
     for (const unavailableInput of [
@@ -320,6 +372,10 @@ describe("provider capability manifests", () => {
       { observation: { negotiated: { "text-streaming": true } } },
       { observation: { negotiated: { "rate-limits": "yes" } } },
       { observation: { configured: "custom-backend" } },
+      { observation: { observed: "text-streaming" } },
+      { observation: { observed: ["unknown-capability"] } },
+      { observation: { observed: ["text-streaming", "text-streaming"] } },
+      { observation: { observed: ["subagent-stop"] } },
       { observation: { extra: true } },
     ];
     for (const overrides of invalidInputs) {
@@ -439,9 +495,19 @@ describe("provider capability manifests", () => {
     const codex = manifest("codex-app-server");
     const verified = attestProviderCapabilities(codex, input());
     expect(providerContinuationCompatibilityToken(verified))
-      .toBe(verified.installationDigest);
+      .toBe(verified.attestationDigest);
     expect(providerContinuationCompatibilityToken(structuredClone(verified)))
-      .toBe(verified.installationDigest);
+      .toBe(verified.attestationDigest);
+
+    const textOnly = attestProviderCapabilities(codex, input({
+      observation: { observed: ["text-streaming"] },
+    }));
+    const textAndUsage = attestProviderCapabilities(codex, input({
+      observation: { observed: ["text-streaming", "usage-tokens"] },
+    }));
+    expect(textOnly.installationDigest).toBe(textAndUsage.installationDigest);
+    expect(providerContinuationCompatibilityToken(textOnly))
+      .not.toBe(providerContinuationCompatibilityToken(textAndUsage));
 
     expect(providerContinuationCompatibilityToken(
       attestProviderCapabilities(codex, input({ protocolVerified: false })),

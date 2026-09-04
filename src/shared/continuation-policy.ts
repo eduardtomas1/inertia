@@ -2,6 +2,13 @@ import type {
   ContinuationIdentity,
   HarnessBackendCompatibility,
 } from "./model-routing";
+import type { ContinuationReasonCode } from "./continuation-reason-codes";
+
+export {
+  CONTINUATION_REASON_CODES,
+  isContinuationReasonCode,
+  type ContinuationReasonCode,
+} from "./continuation-reason-codes";
 
 type ModelSwitchCompatibility = Pick<
   HarnessBackendCompatibility,
@@ -57,59 +64,6 @@ export const CONTINUATION_ACTIONS = [
 
 export type ContinuationAction = (typeof CONTINUATION_ACTIONS)[number];
 
-export const CONTINUATION_REASON_CODES = [
-  "first-turn",
-  "same-continuation",
-  "same-route-without-session",
-  "supported-model-switch",
-  "supported-performance-mode-switch",
-  "missing-continuation-identity",
-  "harness-changed",
-  "backend-profile-changed",
-  "backend-configuration-changed",
-  "backend-endpoint-changed",
-  "provider-installation-changed",
-  "provider-installation-unverified",
-  "incompatible-model-changed",
-  "incompatible-performance-mode-changed",
-  "stale-provider-session",
-] as const;
-
-export type ContinuationReasonCode = (typeof CONTINUATION_REASON_CODES)[number];
-
-export const CONTINUATION_COMPATIBILITY_REJECTION_REASON_CODES = [
-  "missing-continuation-identity",
-  "harness-changed",
-  "backend-profile-changed",
-  "backend-configuration-changed",
-  "backend-endpoint-changed",
-  "provider-installation-changed",
-  "provider-installation-unverified",
-  "incompatible-model-changed",
-  "incompatible-performance-mode-changed",
-  "stale-provider-session",
-] as const satisfies readonly ContinuationReasonCode[];
-
-const CONTINUATION_REASON_CODE_SET = new Set<string>(
-  CONTINUATION_REASON_CODES,
-);
-const CONTINUATION_REJECTION_REASON_CODE_SET = new Set<string>(
-  CONTINUATION_COMPATIBILITY_REJECTION_REASON_CODES,
-);
-
-export function isContinuationReasonCode(
-  value: unknown,
-): value is ContinuationReasonCode {
-  return typeof value === "string" && CONTINUATION_REASON_CODE_SET.has(value);
-}
-
-export function continuationRejectedForCompatibility(
-  value: unknown,
-): value is (typeof CONTINUATION_COMPATIBILITY_REJECTION_REASON_CODES)[number] {
-  return typeof value === "string"
-    && CONTINUATION_REJECTION_REASON_CODE_SET.has(value);
-}
-
 export interface ContinuationDecision {
   action: ContinuationAction;
   changeKind: ContinuationChangeKind;
@@ -128,12 +82,21 @@ export interface ContinuationDecisionInput {
   allowsPerformanceModeSwitchWithinSession?: boolean;
 }
 
+const FRESH_PROVIDER_SESSION_OUTCOME =
+  "The next turn will start a fresh provider session and preserve this chat's history.";
+
+function freshProviderSessionReason(context: string): string {
+  return `${context} ${FRESH_PROVIDER_SESSION_OUTCOME}`;
+}
+
 export function staleProviderSessionDecision(): ContinuationDecision {
   return {
     action: "start-session",
     changeKind: "missing-identity",
     reasonCode: "stale-provider-session",
-    reason: "The saved provider session is no longer available. This chat will keep its history and start a fresh provider session.",
+    reason: freshProviderSessionReason(
+      "The saved provider session is no longer available.",
+    ),
   };
 }
 
@@ -168,27 +131,33 @@ function freshSessionReason(
     case "missing-identity":
       return {
         reasonCode: "missing-continuation-identity",
-        reason: "This chat's saved agent-session identity is unavailable. Its history is preserved, and the next turn will start a fresh provider session.",
+        reason: freshProviderSessionReason(
+          "This chat's saved agent-session identity is unavailable.",
+        ),
       };
     case "harness":
       return {
         reasonCode: "harness-changed",
-        reason: "The agent harness changed. This chat will keep its history and start a fresh provider session.",
+        reason: freshProviderSessionReason("The agent harness changed."),
       };
     case "backend-profile":
       return {
         reasonCode: "backend-profile-changed",
-        reason: "The model backend changed. This chat will keep its history and start a fresh provider session.",
+        reason: freshProviderSessionReason("The model backend changed."),
       };
     case "backend-configuration":
       return {
         reasonCode: "backend-configuration-changed",
-        reason: "This model backend was reconfigured. The next turn will start a fresh provider session so credentials and hidden provider context cannot cross the boundary.",
+        reason: freshProviderSessionReason(
+          "This model backend was reconfigured; hidden provider context cannot cross that boundary.",
+        ),
       };
     case "endpoint":
       return {
         reasonCode: "backend-endpoint-changed",
-        reason: "This model backend now points to a different endpoint. The next turn will start a fresh provider session.",
+        reason: freshProviderSessionReason(
+          "This model backend now points to a different endpoint.",
+        ),
       };
     case "provider-installation": {
       const previousToken = previousIdentity?.providerCompatibilityToken;
@@ -197,22 +166,30 @@ function freshSessionReason(
       return unverified
         ? {
             reasonCode: "provider-installation-unverified",
-            reason: "The exact provider installation or capability contract could not be verified. This chat will keep its history and start a fresh provider session.",
+            reason: freshProviderSessionReason(
+              "The exact provider installation or capability contract could not be verified.",
+            ),
           }
         : {
             reasonCode: "provider-installation-changed",
-            reason: "The provider installation or capability contract changed. This chat will keep its history and start a fresh provider session.",
+            reason: freshProviderSessionReason(
+              "The provider installation or capability contract changed.",
+            ),
       };
     }
     case "model":
       return {
         reasonCode: "incompatible-model-changed",
-        reason: "This agent cannot change models inside the existing provider session. The next turn will start a fresh session and keep this chat's history.",
+        reason: freshProviderSessionReason(
+          "This agent cannot change models inside the existing provider session.",
+        ),
       };
     case "performance-mode":
       return {
         reasonCode: "incompatible-performance-mode-changed",
-        reason: "Response speed cannot change inside the existing provider session. The next turn will start a fresh session.",
+        reason: freshProviderSessionReason(
+          "Response speed cannot change inside the existing provider session.",
+        ),
       };
   }
 }

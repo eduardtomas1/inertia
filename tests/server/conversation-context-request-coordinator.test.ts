@@ -5,6 +5,10 @@ import {
   ConversationContextRequestCoordinator,
   type ConversationContextAuthorizationScope,
 } from "../../src/server/runtime/conversation-context-request-coordinator";
+import {
+  pendingInteractionForOwner,
+  registerPendingInteraction,
+} from "../../src/server/runtime/pending-interaction-registry";
 
 const scope: ConversationContextAuthorizationScope = {
   contextRequestId: "ce11f2e6-f879-474d-9eb6-d8c5a78dc79a",
@@ -44,7 +48,12 @@ describe("ConversationContextRequestCoordinator", () => {
       signal: controller.signal,
     });
 
-    expect(pendingInputs.get(scope.contextRequestId)).toMatchObject({
+    expect(pendingInteractionForOwner(pendingInputs, {
+      providerId: "codex",
+      conversationId: scope.targetConversationId,
+      runId: scope.targetRunId,
+      turnId: scope.targetTurnId,
+    }, scope.contextRequestId)).toMatchObject({
       questions: [],
       conversationContextRequest: {
         requestedSourceConversationId: sourceConversationId,
@@ -157,5 +166,44 @@ describe("ConversationContextRequestCoordinator", () => {
       kind: "cancelled",
       reason: "interrupted",
     });
+  });
+
+  it("does not overwrite or clean up another turn with the same request id", async () => {
+    const { coordinator, pendingInputs } = fixture();
+    const otherTurn = {
+      id: scope.contextRequestId,
+      providerId: "claude" as const,
+      conversationId: "conversation-other",
+      runId: "run-other",
+      turnId: "turn-other",
+      questions: [],
+      autoResolutionMs: null,
+    };
+    expect(registerPendingInteraction(pendingInputs, otherTurn)).toBe(true);
+
+    const outcomePromise = coordinator.request({
+      scope,
+      providerId: "codex",
+      requestedSourceConversationId: null,
+      createdAt: "2026-08-20T10:00:00.000Z",
+      signal: new AbortController().signal,
+    });
+    expect(pendingInputs.size).toBe(2);
+    expect(coordinator.respond({
+      requestId: scope.contextRequestId,
+      targetConversationId: scope.targetConversationId,
+      selection: null,
+    })).toBe(true);
+
+    await expect(outcomePromise).resolves.toEqual({
+      kind: "cancelled",
+      reason: "cancelled",
+    });
+    expect(pendingInputs.size).toBe(1);
+    expect(pendingInteractionForOwner(
+      pendingInputs,
+      otherTurn,
+      otherTurn.id,
+    )).toBe(otherTurn);
   });
 });

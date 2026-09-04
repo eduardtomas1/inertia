@@ -177,6 +177,11 @@ async function expectContained(popover: Locator): Promise<{
       insideViewport: true,
     });
   }
+  await popover.evaluate(async (element) => {
+    await Promise.all(element.getAnimations()
+      .filter((animation) => animation.effect?.getTiming().iterations !== Infinity)
+      .map((animation) => animation.finished.catch(() => undefined)));
+  });
   const geometry = await inspect();
   expect(geometry, JSON.stringify(geometry)).toMatchObject({
     insideWorkspace: true,

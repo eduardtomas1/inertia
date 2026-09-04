@@ -183,12 +183,15 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
     .getByRole("menuitem", { name: /^Draft owned by Inertia/u })
     .click();
   await expect(secondaryMessage).toHaveValue("Draft owned by Inertia");
+  await expect(secondaryMessage).toBeFocused();
   await expect(primary.getByRole("button", {
     name: "Scratch prompts, 1 saved",
   })).toBeVisible();
   await primaryMessage.fill("Draft owned by Inertia");
   await secondaryMessage.fill("Draft owned by Companion");
 
+  await expect(primaryMessage).toHaveValue("Draft owned by Inertia");
+  await expect(secondaryMessage).toHaveValue("Draft owned by Companion");
   await secondary.getByRole("button", { name: "Send message" }).click();
   await expect(split).toBeVisible();
   await expect(primary).toBeVisible();

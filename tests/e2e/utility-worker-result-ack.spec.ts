@@ -12,7 +12,7 @@ interface WorkerProbe {
   workerPath: string;
 }
 
-function identity(value: Awaited<ReturnType<typeof lstat>>): {
+function identity(value: { dev: bigint; ino: bigint }): {
   dev: string;
   ino: string;
 } {
@@ -57,11 +57,11 @@ test("one-shot utility workers await an exact terminal-result acknowledgement", 
       ]);
     const [attachmentRootStat, importRootStat, stagedStat, secureRootStat,
       secureStat] = await Promise.all([
-      lstat(attachmentRoot),
-      lstat(importRoot),
-      lstat(stagedPath),
-      lstat(secureRoot),
-      lstat(securePath),
+      lstat(attachmentRoot, { bigint: true }),
+      lstat(importRoot, { bigint: true }),
+      lstat(stagedPath, { bigint: true }),
+      lstat(secureRoot, { bigint: true }),
+      lstat(securePath, { bigint: true }),
     ]);
     const uid = process.platform === "win32" ? null : String(process.getuid?.());
     const probes: WorkerProbe[] = [
@@ -179,6 +179,7 @@ test("one-shot utility workers await an exact terminal-result acknowledgement", 
             const outcome = await timeout(exit, "worker kill");
             return {
               acknowledgement,
+              terminalType: probe.terminalType,
               eventOperationId: event.operationId,
               exitedBeforeAcknowledgement,
               stayedAliveWithoutAcknowledgement,
@@ -199,6 +200,7 @@ test("one-shot utility workers await an exact terminal-result acknowledgement", 
           const outcome = await timeout(exit, "acknowledged worker exit");
           return {
             acknowledgement,
+            terminalType: probe.terminalType,
             eventOperationId: event.operationId,
             exitedBeforeAcknowledgement,
             exitCode: outcome.code,
@@ -229,7 +231,7 @@ test("one-shot utility workers await an exact terminal-result acknowledgement", 
       );
       expect(result.exitedBeforeAcknowledgement).toBe(false);
       if (result.acknowledgement === "exact") {
-        expect(result.exitCode).toBe(0);
+        expect(result.exitCode, String(result.terminalType)).toBe(0);
       } else if (result.acknowledgement === "mismatched") {
         expect(result.exitCode).toBe(1);
       } else {

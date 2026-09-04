@@ -367,7 +367,8 @@ function credentialEnvironmentValues(
     return customHeaderSecretValues(value);
   }
   if (
-    normalizedKey === "GOOGLE_APPLICATION_CREDENTIALS"
+    normalizedKey === "GEMINI_API_KEY_AUTH_MECHANISM"
+    || normalizedKey === "GOOGLE_APPLICATION_CREDENTIALS"
     || normalizedKey === "OLDPWD"
     || normalizedKey === "PWD"
     || !CREDENTIAL_ENVIRONMENT_KEY.test(key)

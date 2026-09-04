@@ -199,6 +199,7 @@ describe("Gemini ACP data negotiation", () => {
       PWD: "/workspace",
     })).toEqual([]);
     expect(geminiEnvironmentSecretValues({
+      GEMINI_API_KEY_AUTH_MECHANISM: "x-goog-api-key",
       GOOGLE_APPLICATION_CREDENTIALS: "/credential/path.json",
       GOOGLE_CLOUD_PROJECT: "public-project",
     })).toEqual([]);

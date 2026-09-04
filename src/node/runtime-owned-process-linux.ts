@@ -427,6 +427,39 @@ export function signalLinuxGuardianExact(
     && result.stdout === "" && result.stderr === "";
 }
 
+/**
+ * Terminates a previously admitted guardian after it has reached its hardened
+ * child-free terminal state. The currently installed helper authenticates its
+ * own executable separately from the prior helper identity in the durable
+ * claim, so an application update cannot strand an otherwise recoverable
+ * runtime generation.
+ */
+export function recoverLinuxGuardianTerminalExact(
+  expected: LinuxProcessIdentity,
+  guardianPath: string,
+): boolean {
+  if (!isAbsolute(guardianPath)
+    || !expected.guardianExecutableDevice
+    || !expected.guardianExecutableInode) return false;
+  let helper;
+  try { helper = statSync(guardianPath, { bigint: true }); } catch { return false; }
+  const result = spawnSync(guardianPath, [
+    "recover-terminal",
+    String(expected.pid),
+    expected.startTimeTicks,
+    expected.guardianExecutableDevice,
+    expected.guardianExecutableInode,
+    String(helper.dev),
+    String(helper.ino),
+  ], {
+    encoding: "utf8", env: { PATH: "/usr/bin:/bin" }, shell: false,
+    timeout: LINUX_RUNTIME_OWNED_GUARDIAN_HELPER_TIMEOUT_MS,
+    maxBuffer: LINUX_GUARDIAN_HELPER_OUTPUT_BYTES,
+  });
+  return !result.error && result.status === 0 && !result.signal
+    && result.stdout === "" && result.stderr === "";
+}
+
 export async function signalLinuxGuardianExactAsync(
   expected: LinuxProcessIdentity,
   guardianPath: string,

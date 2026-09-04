@@ -21,6 +21,7 @@ import {
   linuxGuardianTerminalAuthority,
   monitorLinuxGuardianTerminal,
   readLinuxGuardianReadyAsync,
+  recoverLinuxGuardianTerminalExact,
   stopPendingLinuxGuardianAsync,
   verifyLinuxRuntimeOwnedGuardianSandbox,
 } from "../../src/node/runtime-owned-process-linux";
@@ -403,6 +404,31 @@ describe("Linux runtime process guardian", () => {
       pid, parentPid: 999, processGroupId: pid, startTimeTicks: "456",
       guardianExecutableDevice: "", guardianExecutableInode: "",
     }, join(root, "deleted-current-helper"), procRoot)).toBe(false);
+  });
+
+  linuxIt("refuses update recovery for a non-terminal process", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-linux-update-recovery-"));
+    roots.push(root);
+    const guardian = compileGuardian(root);
+    const child = spawn("/bin/sleep", ["60"], {
+      detached: true,
+      stdio: "ignore",
+    });
+    try {
+      const identity = recordLinuxProcess(child.pid ?? 0);
+      expect(identity).not.toBeNull();
+      expect(recoverLinuxGuardianTerminalExact({
+        pid: identity!.pid,
+        parentPid: process.pid,
+        processGroupId: identity!.pid,
+        startTimeTicks: identity!.startTimeTicks,
+        guardianExecutableDevice: "1",
+        guardianExecutableInode: "1",
+      }, guardian)).toBe(false);
+      expect(exists(identity!.pid)).toBe(true);
+    } finally {
+      await stopChild(child);
+    }
   });
 
   linuxIt("drains a double-fork setsid descendant after its runtime parent crashes", async () => {

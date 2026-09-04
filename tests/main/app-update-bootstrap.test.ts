@@ -1278,7 +1278,7 @@ describe.skipIf(process.platform === "win32")(
         const guardian = compiledGuardian(root, [
           "-DINERTIA_RUNTIME_GUARDIAN_TEST_SLOW_CANDIDATE_COPY=1",
         ]);
-        const fixture = await linuxCandidateFixture(root, downloaded, 700);
+        const fixture = await linuxCandidateFixture(root, downloaded, 8_000);
         let guardianPid = 0;
         await expect(startLinuxAppUpdateCandidate({
           executablePath: fixture.staged.candidatePath,
@@ -1289,6 +1289,9 @@ describe.skipIf(process.platform === "win32")(
           launchId,
           testHooks: {
             afterGuardianSpawned: (pid) => { guardianPid = pid; },
+            // Verification uses real time and must complete first. Only the
+            // readiness phase observes the same journal deadline as expired.
+            readinessNow: () => Date.parse(fixture.launched.deadlineAt),
           },
         })).rejects.toThrow("readiness deadline expired");
         expect(guardianPid).toBeGreaterThan(1);

@@ -50,6 +50,12 @@ async function dataRoot(): Promise<string> {
   return data;
 }
 
+function tableSql(database: Database.Database, table: string): string {
+  return database.prepare(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+  ).pluck().get(table) as string;
+}
+
 afterEach(async () => {
   await Promise.all(roots.splice(0).map(async (root) =>
     await rm(root, { recursive: true, force: true })));
@@ -113,7 +119,9 @@ describe("app update candidate viability worker", () => {
     ).pluck().get()).toBe("live-n-minus-one");
     expect(database.prepare(
       "SELECT 1 FROM pragma_table_info('agent_turns') WHERE name = 'continuation_reason_code'",
-    ).get()).toBeUndefined();
+    ).get()).toEqual({ 1: 1 });
+    expect(tableSql(database, "model_backend_profiles"))
+      .not.toContain("'gemini-acp'");
     database.close();
   });
 
@@ -151,7 +159,9 @@ describe("app update candidate viability worker", () => {
       "PRAGMA table_info(agent_turns)",
     ).all() as Array<{ name: string }>).some(
       ({ name }) => name === "continuation_reason_code",
-    )).toBe(false);
+    )).toBe(true);
+    expect(tableSql(unchanged, "model_backend_profiles"))
+      .not.toContain("'gemini-acp'");
     unchanged.close();
   });
 

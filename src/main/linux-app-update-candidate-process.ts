@@ -162,8 +162,9 @@ async function boundedBoolean(
 function waitForGuardianReady(
   stream: NodeJS.ReadableStream,
   deadlineAt: string,
+  now: () => number = Date.now,
 ): Promise<void> {
-  const remaining = Date.parse(deadlineAt) - Date.now();
+  const remaining = Date.parse(deadlineAt) - now();
   if (!Number.isFinite(remaining) || remaining <= 0) {
     return Promise.reject(new Error(
       "The app update candidate readiness deadline expired.",
@@ -501,6 +502,8 @@ export async function startLinuxAppUpdateCandidate(options: {
       identity: HeldAppImageIdentity,
     ) => void | Promise<void>;
     readonly afterGuardianSpawned?: (pid: number) => void | Promise<void>;
+    /** Test-only clock seam for the readiness phase after the guardian exists. */
+    readonly readinessNow?: () => number;
   };
 }): Promise<LinuxAppUpdateCandidateProcess> {
   const guardianExecutable = verifyLinuxRuntimeOwnedGuardianSandbox(
@@ -558,7 +561,11 @@ export async function startLinuxAppUpdateCandidate(options: {
     if (!readyChannel) {
       throw new Error("The app update candidate readiness channel is unavailable.");
     }
-    await waitForGuardianReady(readyChannel, options.snapshot.deadlineAt);
+    await waitForGuardianReady(
+      readyChannel,
+      options.snapshot.deadlineAt,
+      options.testHooks?.readinessNow,
+    );
     (readyChannel as { destroy?: () => void }).destroy?.();
     const readyGuardian = await readLinuxGuardianReadyWithRetriesAsync(
       guardianPid,

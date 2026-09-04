@@ -117,6 +117,13 @@ export async function runLifecycleAttempt({
       env: { ...process.env, FORCE_COLOR: "0" },
       label,
       maxOutputBytes: MAX_ATTEMPT_OUTPUT_BYTES,
+      onSpawn: ({ pid, processGroupId }) => {
+        output.write(`${JSON.stringify({
+          schemaVersion: 1,
+          event: "attempt-started",
+          owner: { pid, processGroupId },
+        })}\n`);
+      },
       onOutput: (_stream, chunk) => {
         output.write(chunk);
       },

@@ -6,6 +6,9 @@ import { pathToFileURL } from "node:url";
 
 import { expect, test } from "vitest";
 
+import { linuxProcessGroupCanExecute } from
+  "../../scripts/linux-process-group.mjs";
+
 const moduleUrl = pathToFileURL(join(
   import.meta.dirname,
   "..",
@@ -101,25 +104,16 @@ test("records mixed attempts as flakes without converting them to success", asyn
   ])).toBe("flake-observed");
 });
 
-test("bounds a hung attempt, retains its log, and confirms descendant cleanup", async () => {
+test("bounds a hung attempt, retains typed start evidence, and confirms owned-tree cleanup", async () => {
   const { runLifecycleAttempt } = await repeatedLifecycleModule();
   const root = await mkdtemp(join(tmpdir(), "inertia-lifecycle-deadline-"));
   const outputPath = join(root, "attempt.log");
-  const descendantPath = join(root, "descendant.pid");
   const source = `
-    const { spawn } = require("node:child_process");
-    const { writeFileSync } = require("node:fs");
-    const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
-      stdio: "ignore",
-      windowsHide: true,
-    });
-    writeFileSync(process.argv[1], String(child.pid));
-    process.stdout.write("attempt-started\\n");
     setInterval(() => {}, 1000);
   `;
   try {
     const result = await runLifecycleAttempt({
-      args: ["-e", source, descendantPath],
+      args: ["-e", source],
       command: process.execPath,
       label: "Injected lifecycle deadline",
       outputPath,
@@ -130,11 +124,28 @@ test("bounds a hung attempt, retains its log, and confirms descendant cleanup", 
       passed: false,
     });
     expect(result.durationMs).toBeLessThan(10_000);
-    expect(await readFile(outputPath, "utf8")).toContain("attempt-started");
-    const descendantPid = Number(await readFile(descendantPath, "utf8"));
-    expect(descendantPid).toBeGreaterThan(0);
+    const log = await readFile(outputPath, "utf8");
+    const started = JSON.parse(log.split("\n")[0]!) as {
+      event: string;
+      owner: { pid: number; processGroupId: number | null };
+      schemaVersion: number;
+    };
+    expect(started).toEqual({
+      schemaVersion: 1,
+      event: "attempt-started",
+      owner: {
+        pid: expect.any(Number),
+        processGroupId: process.platform === "win32"
+          ? null
+          : expect.any(Number),
+      },
+    });
+    expect(log).toContain("Lifecycle attempt terminal outcome: timed-out");
+    expect(started.owner.pid).toBeGreaterThan(1);
     await expect.poll(
-      () => processCanExecute(descendantPid),
+      () => process.platform === "linux" && started.owner.processGroupId !== null
+        ? linuxProcessGroupCanExecute(started.owner.processGroupId)
+        : processCanExecute(started.owner.pid),
       { timeout: 5_000 },
     ).toBe(false);
   } finally {

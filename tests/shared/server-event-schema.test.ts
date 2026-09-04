@@ -1153,6 +1153,7 @@ describe("server event provider identity boundary", () => {
     codex: "codex-app-server",
     claude: "claude-agent-sdk",
     cursor: "cursor-acp",
+    gemini: "gemini-acp",
     kimi: "kimi-acp",
     opencode: "opencode-sdk",
   } as const;

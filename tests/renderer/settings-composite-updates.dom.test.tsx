@@ -455,7 +455,7 @@ describe("Settings composite updates", () => {
       .toHaveAttribute("placeholder", "Claude account");
   });
 
-  it("shows bounded capability evidence for the exact provider installation", () => {
+  it("shows bounded capability evidence for the exact provider installation", async () => {
     Object.defineProperty(window, "inertia", {
       configurable: true,
       value: { getPlatform: () => "linux" },
@@ -479,7 +479,7 @@ describe("Settings composite updates", () => {
     />);
 
     fireEvent.click(screen.getByRole("button", { name: "Providers" }));
-    const contract = screen.getByLabelText("Codex capability contract");
+    const contract = await screen.findByLabelText("Codex capability contract");
     expect(contract).toHaveClass("is-verified");
     expect(contract).toHaveTextContent("Verified for 1.0.0");
     expect(contract).toHaveTextContent("codex-app-server · aaaaaaaaaaaa");

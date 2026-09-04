@@ -511,7 +511,9 @@ export function createWorkspaceSceneModel({
         ({ archivedAt }) => archivedAt !== null,
       ) ?? [],
       databaseBackup: connection.snapshot?.databaseBackup,
-      lifecycleDiagnostics: connection.snapshot?.lifecycleDiagnostics,
+      lifecycleDiagnostics: connection.status === "online"
+        ? connection.snapshot?.lifecycleDiagnostics
+        : undefined,
       onUpdate: actions.updateSettings,
       onConnectProvider: actions.connectProvider,
       onRefreshProvider: (providerId) => {
@@ -529,7 +531,9 @@ export function createWorkspaceSceneModel({
       },
       onRevealRuntimeLogs: () => window.inertia.revealRuntimeLogs(),
       onCopyRuntimeDiagnosticReport: () => window.inertia.copyRuntimeDiagnosticReport(
-        connection.snapshot?.lifecycleDiagnostics ?? null,
+        connection.status === "online"
+          ? connection.snapshot?.lifecycleDiagnostics ?? null
+          : null,
       ),
       appUpdateStatus: appUpdate.status,
       checkingAppUpdate: appUpdate.checking,

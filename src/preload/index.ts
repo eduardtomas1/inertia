@@ -9,8 +9,6 @@ import type {
   RuntimeConnectionResult,
 } from "../shared/desktop.js";
 import { PRIVATE_CONNECT_IPC } from "../shared/private-connect/ipc.js";
-import { parseRuntimeLifecycleDiagnosticSnapshot } from
-  "../shared/lifecycle-diagnostics.js";
 import { ThreadNotificationActivationBuffer } from "./thread-notification-activation.js";
 
 const IPC = {
@@ -270,17 +268,12 @@ const bridge: DesktopBridge = Object.freeze({
   revealRuntimeLogs: () => ipcRenderer.invoke(IPC.revealRuntimeLogs) as Promise<string>,
   copyRuntimeDiagnosticReport: (
     lifecycle: Parameters<DesktopBridge["copyRuntimeDiagnosticReport"]>[0],
-  ) => {
-    const parsed = lifecycle === null
-      ? null
-      : parseRuntimeLifecycleDiagnosticSnapshot(lifecycle);
-    if (lifecycle !== null && !parsed) {
-      return Promise.reject(new Error("The lifecycle diagnostic snapshot is invalid."));
-    }
-    return ipcRenderer.invoke(IPC.copyRuntimeDiagnosticReport, parsed) as ReturnType<
+  ) =>
+    // Keep the sandboxed preload dependency-free. The trusted main-process IPC
+    // boundary performs the strict schema projection before copying anything.
+    ipcRenderer.invoke(IPC.copyRuntimeDiagnosticReport, lifecycle) as ReturnType<
       DesktopBridge["copyRuntimeDiagnosticReport"]
-    >;
-  },
+    >,
   copyText: (text: string) =>
     ipcRenderer.invoke(IPC.copyText, typeof text === "string" ? text : "") as ReturnType<
       DesktopBridge["copyText"]

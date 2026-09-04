@@ -4,7 +4,6 @@ import {
   Activity,
   Bot,
   ChevronDown,
-  Copy,
   Database,
   Download,
   FileCode2,
@@ -40,7 +39,6 @@ import {
   type RuntimeLifecycleDiagnosticSnapshot,
 } from "@shared/contracts";
 import { defaultSettings } from "@shared/contracts/app";
-import { appUpdatePreparationDiagnostic, lifecycleActionableStateWithUpdate } from "@shared/app-update-preparation-diagnostic";
 import type {
   AppHealthSnapshot,
   AppUpdateStatus,
@@ -60,6 +58,7 @@ import {
   loadConnectionsAndDevicesSettings,
   loadCanaryRollbackSetting,
   loadDiscordSettings,
+  loadLifecycleIntegritySettings,
   loadModelBackendsSettings,
   prefetchSettingsSection,
 } from "./settingsSectionLoaders";
@@ -265,16 +264,16 @@ export function SettingsView({
     loadCanaryRollbackSetting,
     isCanary,
   );
+  const LifecycleIntegritySettings = useLoadedSurface(
+    loadLifecycleIntegritySettings,
+    section === "providers" || section === "archive",
+  );
   const previousTarget = useRef(target);
   useEffect(() => {
     if (target && target !== previousTarget.current) setSection(target.section);
     previousTarget.current = target;
   }, [target]);
-  const [revealingLogs, setRevealingLogs] = useState(false);
-  const [copyingSupportReport, setCopyingSupportReport] = useState(false);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
-  const [logRevealStatus, setLogRevealStatus] = useState<string | null>(null);
-  const [supportReportStatus, setSupportReportStatus] = useState<string | null>(null);
   const [updateCheckStatus, setUpdateCheckStatus] = useState<string | null>(null);
   const [recoveryOperation, setRecoveryOperation] = useState<
     "export" | "import" | null
@@ -467,34 +466,6 @@ export function SettingsView({
       setHealthStatus("The browser cache could not be cleared.");
     } finally {
       setClearingCache(false);
-    }
-  };
-  const revealRuntimeLogs = async (): Promise<void> => {
-    if (revealingLogs) return;
-    setRevealingLogs(true);
-    setLogRevealStatus(null);
-    try {
-      const error = await onRevealRuntimeLogs();
-      setLogRevealStatus(error ? "The runtime log folder could not be opened." : "Runtime log folder opened.");
-    } catch {
-      setLogRevealStatus("The runtime log folder could not be opened.");
-    } finally {
-      setRevealingLogs(false);
-    }
-  };
-  const copyRuntimeSupportReport = async (): Promise<void> => {
-    if (copyingSupportReport) return;
-    setCopyingSupportReport(true);
-    setSupportReportStatus(null);
-    try {
-      const result = await onCopyRuntimeDiagnosticReport();
-      setSupportReportStatus(result.copied
-        ? `Private support summary copied · ${result.eventCount} lifecycle ${result.eventCount === 1 ? "event" : "events"}.`
-        : "The support summary could not be copied.");
-    } catch {
-      setSupportReportStatus("The support summary could not be copied.");
-    } finally {
-      setCopyingSupportReport(false);
     }
   };
   const checkAppUpdate = async (): Promise<void> => {
@@ -875,38 +846,11 @@ export function SettingsView({
                           <small>Authentication remains in the provider&apos;s official flow.</small>
                         </div>
 
-                        {selectedProvider.capabilityContract && (
-                          <div className="provider-settings-field">
-                            <span>Capability contract</span>
-                            <div
-                              className={clsx(
-                                "provider-settings-capability-contract",
-                                selectedProvider.capabilityContract.installationVerified
-                                  ? "is-verified"
-                                  : "is-unverified",
-                              )}
-                              aria-label={`${selectedProvider.label} capability contract`}
-                            >
-                              <ShieldCheck size={15} aria-hidden="true" />
-                              <span>
-                                <strong>
-                                  {selectedProvider.capabilityContract.installationVerified
-                                    ? `Verified for ${selectedProvider.capabilityContract.installedVersion ?? "this installation"}`
-                                    : "Waiting for exact installation verification"}
-                                </strong>
-                                <code title={selectedProvider.capabilityContract.manifestDigest}>
-                                  {selectedProvider.capabilityContract.harnessId}
-                                  {" · "}
-                                  {selectedProvider.capabilityContract.manifestDigest.slice(0, 12)}
-                                </code>
-                              </span>
-                              <small>
-                                {selectedProvider.capabilityContract.installationVerified
-                                  ? `${selectedProvider.capabilityContract.currentlyAvailableCount} of ${selectedProvider.capabilityContract.declaredCapabilityCount} declared capabilities are available now.`
-                                  : "Optional provider features remain unavailable until version and protocol evidence match this manifest."}
-                              </small>
-                            </div>
-                          </div>
+                        {LifecycleIntegritySettings && (
+                          <LifecycleIntegritySettings
+                            surface="provider-capability"
+                            provider={selectedProvider}
+                          />
                         )}
 
                         <div className="provider-settings-field">
@@ -1193,48 +1137,21 @@ export function SettingsView({
                 </div>
               </div>
               {recoveryStatus && <p className="settings-card-note" role="status">{recoveryStatus}</p>}
-              <div className="codex-binary-path runtime-log-setting">
-                <span>
-                  <strong>Runtime diagnostics</strong>
-                  <small>Local-only lifecycle and failure metadata. Excludes prompts, source, tokens, and credentials. Logs rotate at 256 KB and expire after seven days.</small>
-                  {lifecycleDiagnostics && (
-                    <small className="runtime-lifecycle-summary">
-                      <strong>{lifecycleActionLabel(lifecycleActionableStateWithUpdate(lifecycleDiagnostics.actionableState, appUpdatePreparationDiagnostic(appUpdateStatus)))}</strong>
-                      {` · ${lifecycleDiagnostics.ownedResources.turns} active ${lifecycleDiagnostics.ownedResources.turns === 1 ? "turn" : "turns"}`}
-                      {` · ${lifecycleDiagnostics.ownedResources.interactions} open ${lifecycleDiagnostics.ownedResources.interactions === 1 ? "interaction" : "interactions"}`}
-                      {` · generation ${lifecycleDiagnostics.runtimeGenerationHash}`}
-                    </small>
-                  )}
-                </span>
-                <div>
-                  <button type="button" className="secondary-button" disabled={copyingSupportReport} onClick={() => { void copyRuntimeSupportReport(); }}><Copy size={14} />{copyingSupportReport ? "Copying…" : "Copy support summary"}</button>
-                  <button type="button" className="secondary-button" disabled={revealingLogs} onClick={() => { void revealRuntimeLogs(); }}><FolderOpen size={14} />{revealingLogs ? "Opening…" : "Reveal log folder"}</button>
-                </div>
-              </div>
-              {logRevealStatus && <p className="settings-card-note" role="status">{logRevealStatus}</p>}
-              {supportReportStatus && <p className="settings-card-note" role="status">{supportReportStatus}</p>}
+              {LifecycleIntegritySettings && (
+                <LifecycleIntegritySettings
+                  surface="runtime-diagnostics"
+                  diagnostics={lifecycleDiagnostics}
+                  appUpdateStatus={appUpdateStatus}
+                  onRevealRuntimeLogs={onRevealRuntimeLogs}
+                  onCopyRuntimeDiagnosticReport={onCopyRuntimeDiagnosticReport}
+                />
+              )}
             </section>
           </>
         )}
       </div>
     </main>
   );
-}
-
-function lifecycleActionLabel(
-  state: RuntimeLifecycleDiagnosticSnapshot["actionableState"],
-): string {
-  return {
-    "safe-and-ready": "Safe and ready",
-    "finishing-previous-work": "Finishing previous work",
-    "waiting-for-provider-cleanup": "Waiting for provider cleanup",
-    "update-blocked-by-active-work": "Update blocked by active work",
-    "previous-runtime-cleanup-unconfirmed": "Previous runtime cleanup unconfirmed",
-    "provider-installation-changed": "Provider installation changed",
-    "session-resume-rejected-for-compatibility": "Session resume rejected for compatibility",
-    "provider-capability-unavailable": "Provider capability unavailable",
-    "recovery-requires-manual-attention": "Recovery requires manual attention",
-  }[state];
 }
 
 function SettingSwitch({ title, detail, checked, disabled, onChange }: { title: string; detail: string; checked: boolean; disabled: boolean; onChange: (checked: boolean) => void }): React.JSX.Element {

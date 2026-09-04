@@ -51,6 +51,8 @@ describe("useInertiaConnection", () => {
     const getRuntimeConnection = vi.fn()
       .mockResolvedValueOnce({
         unavailable: true,
+        code: "runtime-starting",
+        retryable: true,
         message: "The local service is starting.",
       })
       .mockResolvedValue({
@@ -76,6 +78,36 @@ describe("useInertiaConnection", () => {
 
     await waitFor(() => expect(getRuntimeConnection).toHaveBeenCalledTimes(2));
     expect(FakeWebSocket.instances).toHaveLength(1);
+  });
+
+  it("does not poll a non-retryable startup blocker", async () => {
+    const getRuntimeConnection = vi.fn().mockResolvedValue({
+      unavailable: true,
+      code: "prior-runtime-cleanup-unconfirmed",
+      retryable: false,
+      message:
+        "Runtime startup is blocked because prior process cleanup remains unconfirmed. Review Lifecycle Integrity in Settings.",
+    });
+    Object.defineProperty(window, "inertia", {
+      configurable: true,
+      value: {
+        getRuntimeConnection,
+        onRuntimeReady: vi.fn(() => vi.fn()),
+      },
+    });
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+
+    const { result } = renderHook(() => useInertiaConnection());
+    await waitFor(() => expect(result.current.status).toBe("offline"));
+    expect(result.current.error).toContain(
+      "prior process cleanup remains unconfirmed",
+    );
+    expect(getRuntimeConnection).toHaveBeenCalledTimes(1);
+
+    vi.useFakeTimers();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(getRuntimeConnection).toHaveBeenCalledTimes(1);
+    expect(FakeWebSocket.instances).toHaveLength(0);
   });
 
   it("does not lose runtime readiness announced during an in-flight connection attempt", async () => {

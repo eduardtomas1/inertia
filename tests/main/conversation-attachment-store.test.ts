@@ -973,21 +973,25 @@ describe("durable conversation attachment storage", () => {
 
   it("removes interrupted records instead of blocking restart reconciliation", async () => {
     const dataDirectory = await root();
-    const store = await openTestStore(dataDirectory);
+    const store = await openTestStore(dataDirectory, {
+      reconciliationBatchEntries: 1,
+    });
     const payload = image("55555555-5555-4555-8555-555555555555");
-    const interruptedDirectory = join(
-      store.directory,
-      payload.attachment.id,
-    );
-    await mkdir(interruptedDirectory);
-    await writeFile(
-      join(interruptedDirectory, `${payload.attachment.id}.png`),
-      png,
-    );
+    const other = image("66666666-6666-4666-8666-666666666666");
+    for (const { attachment } of [payload, other]) {
+      const interruptedDirectory = join(store.directory, attachment.id);
+      await mkdir(interruptedDirectory);
+      await writeFile(join(interruptedDirectory, `${attachment.id}.png`), png);
+    }
 
-    await expect(store.reconcile([payload.attachment]))
+    await expect(store.reconcile([payload.attachment, other.attachment]))
       .resolves.toBeUndefined();
-    await expect(store.preview(payload.attachment.id)).resolves.toBeNull();
+    // Reconciliation deliberately yields between bounded batches. An unsafe
+    // interrupted record remains unreadable until its cleanup batch finishes.
+    await vi.waitFor(async () => {
+      await expect(store.preview(payload.attachment.id)).resolves.toBeNull();
+      await expect(store.preview(other.attachment.id)).resolves.toBeNull();
+    }, { timeout: 5_000 });
     await expect(store.retain([payload])).resolves.toHaveLength(1);
   });
 

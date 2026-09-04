@@ -201,7 +201,9 @@ export async function runAcpInitializeHandshake(
           method: "initialize",
           params: {
             protocolVersion: 1,
-            clientCapabilities: { plan: {}, session: { compaction: {} } },
+            clientCapabilities: validation.advertiseCompaction === false
+              ? { plan: {} }
+              : { plan: {}, session: { compaction: {} } },
             clientInfo: { name: "Inertia provider drift", version: "1.0.0" },
           },
         })}\n`, (error) => {

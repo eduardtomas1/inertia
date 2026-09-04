@@ -6,7 +6,7 @@ import {
   type GitStatusSnapshot,
   type Project,
 } from "../../src/shared/contracts";
-import { nativeModelSelection } from "../../src/shared/model-routing";
+import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import {
   buildDraftConversation,
   buildNewConversationPayload,
@@ -34,7 +34,7 @@ const viewedConversation: Conversation = {
   id: "22222222-2222-4222-8222-222222222222",
   projectId: project.id,
   title: "Viewed chat",
-  modelSelection: nativeModelSelection({
+  modelSelection: providerNativeModelSelection({
     providerId: "claude",
     modelId: "viewed-model",
     reasoningEffort: "viewed-effort",
@@ -181,6 +181,30 @@ describe("new conversation isolation", () => {
       createdAt: "2026-07-29T10:00:00.000Z",
     });
     expect(draft.modelSelection).toEqual(viewedConversation.modelSelection);
+  });
+
+  it("projects Gemini defaults through the current native route", () => {
+    const draft = buildDraftConversation(
+      buildNewConversationPayload(project.id, {
+        ...defaultSettings,
+        defaultProvider: "gemini",
+        defaultModel: "gemini-2.5-pro",
+      }),
+      {
+        id: "44444444-4444-4444-8444-444444444444",
+        now: "2026-07-29T10:02:00.000Z",
+      },
+    );
+
+    expect(draft).toMatchObject({
+      providerId: "gemini",
+      modelSelection: {
+        harnessId: "gemini-acp",
+        backendProfileId: "builtin:gemini",
+        backendProfileDisplayName: "Google Gemini",
+        modelId: "gemini-2.5-pro",
+      },
+    });
   });
 });
 

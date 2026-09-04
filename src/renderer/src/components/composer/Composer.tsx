@@ -3,7 +3,7 @@ import clsx from "clsx";
 import type { ChatAttachment, PromptPreset } from "@shared/contracts";
 import { chatAttachmentKind } from "@shared/attachments";
 import { MAX_CHAT_MESSAGE_CHARS } from "../../../../shared/diff-review";
-import { fastModeProviderValue, legacyProviderIdForHarness, routeSupportsNativeFastModeIdentity, withModelSelectionFastMode } from "../../../../shared/model-routing";
+import { fastModeProviderValue, providerIdForHarness, routeSupportsNativeFastModeIdentity, withModelSelectionFastMode } from "../../../../shared/model-routing";
 import { useNativePreviewSuspension } from "../../hooks/useNativePreviewSuspension";
 import { resolveComposerRouteState } from "../../utils/composerRouteState";
 import {
@@ -908,7 +908,7 @@ export const Composer = memo(function Composer({
       return;
     }
     const providerId = route.providerId
-      ?? legacyProviderIdForHarness(route.selection.harnessId);
+      ?? providerIdForHarness(route.selection.harnessId);
     await updateConversation({
       ...(providerId ? { providerId } : {}),
       modelSelection: transition.selection,

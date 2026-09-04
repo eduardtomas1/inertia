@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   continuationIdentityForSelection,
-  nativeModelSelection,
+  providerNativeModelSelection,
 } from "../../src/shared/model-routing";
 import {
   cursorVersionHasVerifiedAcpTerminalResume,
@@ -25,12 +25,13 @@ const sessionIds: Readonly<Record<ProviderId, string>> = {
   codex: "019fe0c1-c6fc-79a1-bff4-92311f314da8",
   claude: "11111111-1111-4111-8111-111111111111",
   cursor: "22222222-2222-4222-8222-222222222222",
+  gemini: "gemini-session-44444444",
   kimi: "kimi-session-33333333",
   opencode: "ses_01K4Z9-safe.session",
 };
 
 function nativeConversation(providerId: ProviderId): Conversation {
-  const modelSelection = nativeModelSelection({ providerId });
+  const modelSelection = providerNativeModelSelection({ providerId });
   return {
     id: "33333333-3333-4333-8333-333333333333",
     projectId: "44444444-4444-4444-8444-444444444444",
@@ -174,6 +175,10 @@ describe("provider terminal resume mapping", () => {
       "--resume",
       sessionIds.cursor,
     ]);
+    expect(() => providerTerminalResumeArguments(
+      "gemini",
+      sessionIds.gemini,
+    )).toThrow("intentionally not exposed");
     expect(providerTerminalResumeArguments("kimi", sessionIds.kimi)).toEqual([
       "--session",
       sessionIds.kimi,
@@ -247,6 +252,14 @@ describe("provider terminal resume availability", () => {
         reason: null,
       });
     }
+
+    expect(providerTerminalResumeAvailability(
+      nativeConversation("gemini"),
+      readyProvider("gemini"),
+    )).toMatchObject({
+      kind: "unavailable",
+      reason: expect.stringContaining("application-reconstructed context"),
+    });
   });
 
   it("explains missing, non-native, unavailable, and unverified Cursor sessions", () => {

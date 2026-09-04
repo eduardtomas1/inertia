@@ -13,7 +13,7 @@ import {
   sortSidebarThreadViews,
 } from "../../src/renderer/src/utils/sidebarModel";
 import type { Conversation, Project, WorkspaceRun } from "../../src/shared/contracts";
-import { nativeModelSelection } from "../../src/shared/model-routing";
+import { providerNativeModelSelection } from "../../src/shared/model-routing";
 
 function project(overrides: Partial<Project> & Pick<Project, "id" | "name" | "path">): Project {
   return {
@@ -52,7 +52,7 @@ function conversation(overrides: Partial<Conversation> & Pick<Conversation, "id"
     updatedAt: "2026-07-20T10:00:00.000Z",
     ...overrides,
     modelSelection: overrides.modelSelection
-      ?? nativeModelSelection({ providerId: overrides.providerId ?? "codex" }),
+      ?? providerNativeModelSelection({ providerId: overrides.providerId ?? "codex" }),
     continuationIdentity: overrides.continuationIdentity ?? null,
   };
 }

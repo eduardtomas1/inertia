@@ -5,7 +5,7 @@ import {
   composerRouteReadiness,
 } from "../../src/renderer/src/utils/composerReadiness";
 import {
-  nativeModelSelection,
+  providerNativeModelSelection,
   type ModelSelection,
 } from "../../src/shared/model-routing";
 import type {
@@ -110,7 +110,7 @@ function customSelection(
 
 describe("composer route readiness", () => {
   it("keeps a healthy native route quiet and uses native canRun as its gate", () => {
-    const selection = nativeModelSelection({
+    const selection = providerNativeModelSelection({
       providerId: "codex",
       modelId: "gpt-5.6",
     });
@@ -209,6 +209,57 @@ describe("composer route readiness", () => {
     });
   });
 
+  it("names Gemini readiness without claiming unavailable capabilities", () => {
+    const selection = customSelection({
+      harnessId: "gemini-acp",
+      backendProfileId: "builtin:gemini",
+      backendProfileDisplayName: "Google Gemini",
+      modelId: "provider-default",
+      backendConfigurationRevision: 0,
+    });
+    expect(composerRouteReadiness({
+      provider: provider({
+        id: "gemini",
+        label: "Gemini",
+        command: "gemini",
+        available: false,
+        executable: null,
+        installState: "not-installed",
+        authState: "unknown",
+        canRun: false,
+        statusMessage: "Gemini CLI not found",
+      }),
+      profile: undefined,
+      selection,
+    })).toMatchObject({
+      ready: false,
+      title: "Gemini CLI not found",
+      action: "install",
+    });
+
+    expect(composerRouteReadiness({
+      provider: provider({
+        id: "gemini",
+        label: "Gemini",
+        command: "gemini",
+        version: "0.29.5",
+        executable: "/opt/bin/gemini",
+        installState: "installed",
+        authState: "unknown",
+        canRun: false,
+        statusMessage:
+          "Gemini 0.29.5 is installed, but stable ACP requires 0.58.0 or newer; update Gemini",
+      }),
+      profile: undefined,
+      selection,
+    })).toMatchObject({
+      ready: false,
+      badge: "Update needed",
+      title: "Gemini cannot run this route",
+      action: "refresh",
+    });
+  });
+
   it("offers Probe for missing, stale, or failed compatibility evidence", () => {
     for (const [reasonCode, state] of [
       ["probe-required", "unknown"],
@@ -251,7 +302,7 @@ describe("composer route readiness", () => {
         executable: null,
       }),
       profile: undefined,
-      selection: nativeModelSelection({ providerId: "codex" }),
+      selection: providerNativeModelSelection({ providerId: "codex" }),
     })).toMatchObject({
       ready: false,
       transient: true,

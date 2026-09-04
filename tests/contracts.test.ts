@@ -10,7 +10,7 @@ import {
   type ServerEvent,
 } from "../src/shared/contracts";
 import { serverEventSchema } from "../src/shared/contracts/server-event-schema";
-import { nativeModelSelection } from "../src/shared/model-routing";
+import { providerNativeModelSelection } from "../src/shared/model-routing";
 
 describe("agent turn contract", () => {
   it("defines the complete persisted lifecycle and terminal states", () => {
@@ -811,7 +811,7 @@ describe("isolated review result contract", () => {
           question: "Why?",
           answer: "Because the selected behavior changed.",
           providerId: "codex",
-          modelSelection: nativeModelSelection({
+          modelSelection: providerNativeModelSelection({
             providerId: "codex",
             modelId: "gpt-5.4",
             reasoningEffort: "high",

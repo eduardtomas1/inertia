@@ -25,7 +25,7 @@ export const MAX_REVIEW_RESULT_CHARS = 512_000;
 export const MAX_PERSISTED_REVIEW_SUMMARY_CHARS = 524_288;
 export const DEFAULT_REVIEW_SUMMARY_TIMEOUT_MS = 120_000;
 const MAX_PERSISTED_REVIEW_FILES_CHARS = 250_000;
-const PROVIDER_IDS = ["codex", "claude", "cursor", "kimi", "opencode"] as const;
+const PROVIDER_IDS = ["codex", "claude", "cursor", "gemini", "kimi", "opencode"] as const;
 
 const classificationSchema = z.object({
   classification: z.enum(DIFF_REVIEW_CLASSIFICATIONS),

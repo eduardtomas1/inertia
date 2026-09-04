@@ -388,6 +388,7 @@ describe("new-turn admission recovery", () => {
     "codex",
     "claude",
     "cursor",
+    "gemini",
     "kimi",
     "opencode",
   ] as const)("uses the same admission handoff for the %s provider", async (providerId) => {

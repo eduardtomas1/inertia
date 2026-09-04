@@ -82,6 +82,7 @@ export const PROVIDER_LABELS: Readonly<Record<ProviderId, string>> = {
   codex: "Codex",
   claude: "Claude",
   cursor: "Cursor",
+  gemini: "Gemini",
   kimi: "Kimi Code",
   opencode: "OpenCode",
 };
@@ -311,6 +312,16 @@ function measuredTokenField(
   ) {
     // Claude result usage is an aggregate for this run. Context-only control
     // usage has no run scope and must not be promoted to a turn total.
+    return completionValue;
+  }
+  if (
+    turn.providerId === "gemini"
+    && harnessId === "gemini-acp"
+    && completion.totalProcessedScope === "run"
+  ) {
+    // Gemini ACP prompt metadata describes this completed run rather than a
+    // cumulative session counter, so its reported categories are already the
+    // exact per-turn values.
     return completionValue;
   }
   if (

@@ -10,6 +10,8 @@
   --daily-work-series-codex: #202124;
   --daily-work-series-claude: #d97757;
   --daily-work-series-cursor: #575650;
+  --daily-work-series-gemini: #4285f4;
+  --daily-work-series-kimi: #2563eb;
   --daily-work-series-opencode: #8a8583;
   display: grid;
   width: min(920px, 100%);
@@ -27,6 +29,8 @@
 :root[data-theme="dark"] .daily-work-dialog {
   --daily-work-series-codex: #ececea;
   --daily-work-series-cursor: #c9c7c4;
+  --daily-work-series-gemini: #8ab4f8;
+  --daily-work-series-kimi: #7aa2ff;
   --daily-work-series-opencode: #9f9a98;
 }
 
@@ -401,6 +405,8 @@
 .daily-work-provider-summary[data-provider="codex"] { --daily-work-provider-series: var(--daily-work-series-codex); }
 .daily-work-provider-summary[data-provider="claude"] { --daily-work-provider-series: var(--daily-work-series-claude); }
 .daily-work-provider-summary[data-provider="cursor"] { --daily-work-provider-series: var(--daily-work-series-cursor); }
+.daily-work-provider-summary[data-provider="gemini"] { --daily-work-provider-series: var(--daily-work-series-gemini); }
+.daily-work-provider-summary[data-provider="kimi"] { --daily-work-provider-series: var(--daily-work-series-kimi); }
 .daily-work-provider-summary[data-provider="opencode"] { --daily-work-provider-series: var(--daily-work-series-opencode); }
 
 .daily-work-conversations > header {

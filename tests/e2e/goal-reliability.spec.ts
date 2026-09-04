@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { RuntimeStore } from "../../src/server/database";
 import {
   continuationIdentityForSelection,
-  nativeModelSelection,
+  providerNativeModelSelection,
 } from "../../src/shared/model-routing";
 import { createAppFixture } from "./support/app-fixture";
 import {
@@ -138,7 +138,7 @@ test("starts a sessionless goal and recovers it after Stop and runtime crash", {
         workspaceDirectory,
         { recoverInterruptedRuns: false },
       );
-      const selection = nativeModelSelection({ providerId: "codex" });
+      const selection = providerNativeModelSelection({ providerId: "codex" });
       const continuationIdentity = continuationIdentityForSelection(
         selection,
         null,

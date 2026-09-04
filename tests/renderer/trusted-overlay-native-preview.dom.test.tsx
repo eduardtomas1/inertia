@@ -13,7 +13,7 @@ import {
 import type {
   ProviderInfo,
 } from "../../src/shared/contracts";
-import { nativeModelSelection } from "../../src/shared/model-routing";
+import { providerNativeModelSelection } from "../../src/shared/model-routing";
 
 vi.mock("@xterm/addon-fit", () => ({
   FitAddon: class {
@@ -372,7 +372,7 @@ describe("trusted overlay native preview suspension", () => {
     const view = render(
       <RouteChangeConfirmation
         pendingRoute={{
-          selection: nativeModelSelection({
+          selection: providerNativeModelSelection({
             providerId: "codex",
             modelId: "gpt-5.6",
           }),

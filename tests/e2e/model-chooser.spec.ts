@@ -6,10 +6,10 @@ import { promisify } from "node:util";
 import Database from "better-sqlite3";
 
 import { RuntimeStore } from "../../src/server/database";
-import { nativeProviderMetadataScope } from "../../src/server/provider/metadata";
+import { providerNativeMetadataScope } from "../../src/server/provider/metadata";
 import {
   continuationIdentityForSelection,
-  nativeModelSelection,
+  providerNativeModelSelection,
 } from "../../src/shared/model-routing";
 import { MODEL_FAVORITES_STORAGE_KEY } from "../../src/renderer/src/utils/modelFavorites";
 import {
@@ -279,7 +279,7 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
     recoverInterruptedRuns: false,
   });
   const currentConversation = runtimeStore.conversation(state.active_conversation_id);
-  const alpha = nativeModelSelection({
+  const alpha = providerNativeModelSelection({
     providerId: "codex",
     modelId: "codex-alpha",
     alias: "Codex Alpha",
@@ -288,7 +288,7 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
   const alphaIdentity = continuationIdentityForSelection(alpha, null, false);
   const cachedAt = new Date().toISOString();
   runtimeStore.saveProviderMetadata({
-    scope: nativeProviderMetadataScope("codex"),
+    scope: providerNativeMetadataScope("codex"),
     models: [
       {
         id: "codex-alpha",

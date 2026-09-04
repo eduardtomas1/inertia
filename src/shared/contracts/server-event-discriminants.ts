@@ -22,8 +22,8 @@ import type {
   ProviderMaintenanceVersionStatus,
 } from "../provider-maintenance";
 import {
-  legacyProviderIdForHarness,
-  nativeBackendProfile,
+  providerIdForHarness,
+  providerNativeBackendProfile,
   type ModelSelection,
 } from "../model-routing";
 import {
@@ -259,7 +259,7 @@ export function modelRouteIdentityCoherent(
   allowPendingPerformanceMode = false,
 ): boolean {
   const selection = value.modelSelection as ModelSelection;
-  const projectedProvider = legacyProviderIdForHarness(selection.harnessId);
+  const projectedProvider = providerIdForHarness(selection.harnessId);
   if (projectedProvider !== null && projectedProvider !== value.providerId) return false;
   if (value.harnessId !== undefined && value.harnessId !== selection.harnessId) return false;
   if (value.backendProfileId !== undefined
@@ -268,11 +268,11 @@ export function modelRouteIdentityCoherent(
   const fastMode = selection.providerOptions.fastMode;
   const expectedFastMode = projectedProvider === "codex"
     && selection.harnessId === "codex-app-server"
-    && selection.backendProfileId === nativeBackendProfile("codex").id
+    && selection.backendProfileId === providerNativeBackendProfile("codex").id
     ? "priority"
     : projectedProvider === "claude"
       && selection.harnessId === "claude-agent-sdk"
-      && selection.backendProfileId === nativeBackendProfile("claude").id
+      && selection.backendProfileId === providerNativeBackendProfile("claude").id
       ? "fast"
       : null;
   if (fastMode !== undefined && fastMode !== expectedFastMode) return false;

@@ -1,10 +1,11 @@
-import { legacyProviderIdForHarness } from "../../../shared/model-routing";
+import { providerIdForHarness } from "../../../shared/model-routing";
 import type { ModelSearchRoute } from "./modelSearch";
 
 export type SelectedModelChipGlyph =
   | "codex"
   | "claude"
   | "cursor"
+  | "gemini"
   | "kimi"
   | "opencode"
   | "custom"
@@ -53,7 +54,7 @@ export function selectedModelChipGlyph(
   route: Pick<SelectedModelChipRoute, "harnessId" | "source">,
 ): SelectedModelChipGlyph {
   if (route.source === "custom") return "custom";
-  return legacyProviderIdForHarness(route.harnessId) ?? "unknown";
+  return providerIdForHarness(route.harnessId) ?? "unknown";
 }
 
 function labeledIdentity(label: string, id: string): string {

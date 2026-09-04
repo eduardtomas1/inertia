@@ -15,7 +15,7 @@ import type {
   ThreadUsageSnapshot,
 } from "../../src/shared/contracts";
 import {
-  nativeModelSelection,
+  providerNativeModelSelection,
   withModelSelectionFastMode,
 } from "../../src/shared/model-routing";
 import {
@@ -63,7 +63,7 @@ function fixture(options: {
   fastMode?: "standard" | "fast";
 } = {}) {
   const providerId = options.providerId ?? "claude";
-  const baseSelection = nativeModelSelection({
+  const baseSelection = providerNativeModelSelection({
     providerId,
     modelId: options.providerDefault ? "provider-default" : "claude-test",
     reasoningEffort: null,

@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { RuntimeStore } from "../../src/server/database";
 import {
   continuationIdentityForSelection,
-  nativeModelSelection,
+  providerNativeModelSelection,
 } from "../../src/shared/model-routing";
 
 const directories: string[] = [];
@@ -40,7 +40,7 @@ describe("Fast mode persistence", () => {
     const project = store.createProject("Fast provenance", workspacePath);
     const conversation = store.createConversation(project.id, "Fast turn");
     const userMessage = store.createMessage(conversation.id, "Run in Fast mode.");
-    const fastSelection = nativeModelSelection({
+    const fastSelection = providerNativeModelSelection({
       providerId: "claude",
       modelId: "claude-opus",
       providerOptions: { fastMode: "fast" },
@@ -53,7 +53,7 @@ describe("Fast mode persistence", () => {
       providerId: "claude",
       modelSelection: fastSelection,
       continuationIdentity: continuationIdentityForSelection(
-        nativeModelSelection({ providerId: "claude", modelId: "claude-opus" }),
+        providerNativeModelSelection({ providerId: "claude", modelId: "claude-opus" }),
       ),
       reasoningEffort: "",
       interactionMode: "build",
@@ -67,7 +67,7 @@ describe("Fast mode persistence", () => {
   it("preserves Fast selection and continuation identity across restart", async () => {
     const { databasePath, workspacePath, store } = await createStore();
     const project = store.createProject("Fast restart", workspacePath);
-    const selection = nativeModelSelection({
+    const selection = providerNativeModelSelection({
       providerId: "codex",
       modelId: "gpt-fast",
       reasoningEffort: "high",
@@ -98,11 +98,11 @@ describe("Fast mode persistence", () => {
   it("preserves both pending speed transitions across restart", async () => {
     const { databasePath, workspacePath, store } = await createStore();
     const project = store.createProject("Pending speeds", workspacePath);
-    const standardSelection = nativeModelSelection({
+    const standardSelection = providerNativeModelSelection({
       providerId: "codex",
       modelId: "gpt-speed",
     });
-    const fastSelection = nativeModelSelection({
+    const fastSelection = providerNativeModelSelection({
       providerId: "codex",
       modelId: "gpt-speed",
       providerOptions: { fastMode: "priority" },

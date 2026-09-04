@@ -5,8 +5,8 @@ import type {
   ModelSelection,
 } from "@shared/contracts";
 import {
-  legacyProviderIdForHarness,
-  nativeModelSelection,
+  providerIdForHarness,
+  providerNativeModelSelection,
 } from "../../../shared/model-routing";
 import {
   buildNewConversationPayload,
@@ -31,7 +31,7 @@ function validBackendDefault(
 ): ModelSelection | null {
   if (!candidate) return null;
   const selection = candidate.selection;
-  const nativeProviderId = legacyProviderIdForHarness(selection.harnessId);
+  const nativeProviderId = providerIdForHarness(selection.harnessId);
   if (selection.backendProfileId.startsWith("builtin:") && nativeProviderId) {
     const provider = snapshot.providers.find(({ id }) =>
       id === nativeProviderId);
@@ -80,7 +80,7 @@ export function defaultSelectionForProject(
   const modelId = configuredModelWasRemoved
     ? "provider-default"
     : configuredModel;
-  return nativeModelSelection({
+  return providerNativeModelSelection({
     providerId: settings.defaultProvider,
     modelId,
     alias: modelId === "provider-default" ? null : modelId,

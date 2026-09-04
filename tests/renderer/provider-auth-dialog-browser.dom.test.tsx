@@ -9,6 +9,21 @@ import type {
 } from "../../src/shared/contracts";
 
 const AUTH_URL = "https://claude.com/cai/oauth/authorize?client_id=fixture&response_type=code&state=fixture-state&code_challenge=fixture-challenge";
+const GEMINI_AUTH_URL = `https://accounts.google.com/o/oauth2/v2/auth?${new URLSearchParams({
+  access_type: "offline",
+  client_id:
+    "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com",
+  redirect_uri: "https://codeassist.google.com/authcode",
+  response_type: "code",
+  scope: [
+    "https://www.googleapis.com/auth/cloud-platform",
+    "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/userinfo.profile",
+  ].join(" "),
+  state: "a".repeat(64),
+  code_challenge: "b".repeat(43),
+  code_challenge_method: "S256",
+}).toString()}`;
 const TERMINAL_ID = "11111111-1111-4111-8111-111111111111";
 
 vi.mock("@xterm/addon-fit", () => ({
@@ -78,6 +93,16 @@ const provider: ProviderInfo = {
     },
   },
 };
+const geminiProvider: ProviderInfo = {
+  ...provider,
+  id: "gemini",
+  label: "Gemini",
+  command: "gemini",
+  version: "0.58.0",
+  authState: "unknown",
+  canRun: true,
+  statusMessage: "Authentication is verified when a Gemini session starts",
+};
 
 function created(command: ClientCommand): ServerEvent {
   return {
@@ -91,6 +116,7 @@ function renderDialog(options: {
   openExternal?: (url: string) => Promise<void>;
   copyText?: (text: string) => Promise<boolean>;
   sendCommand?: (command: ClientCommand) => Promise<ServerEvent>;
+  provider?: ProviderInfo;
 } = {}) {
   let subscriber: ((event: ServerEvent) => void) | null = null;
   const openExternal = vi.fn(options.openExternal ?? (async () => undefined));
@@ -100,7 +126,11 @@ function renderDialog(options: {
     value: { copyText, openExternal },
   });
   const sendCommand = vi.fn(options.sendCommand ?? (async (sent: ClientCommand) => created(sent)));
-  const renderProvider = (status: "online" | "offline", nextProvider: ProviderInfo | null = provider) => (
+  const initialProvider = options.provider ?? provider;
+  const renderProvider = (
+    status: "online" | "offline",
+    nextProvider: ProviderInfo | null = initialProvider,
+  ) => (
     <ProviderAuthDialog
       provider={nextProvider}
       status={status}
@@ -119,7 +149,10 @@ function renderDialog(options: {
     emit: (event: ServerEvent) => subscriber?.(event),
     openExternal,
     copyText,
-    rerender: (status: "online" | "offline", nextProvider: ProviderInfo | null = provider) => {
+    rerender: (
+      status: "online" | "offline",
+      nextProvider: ProviderInfo | null = initialProvider,
+    ) => {
       view.rerender(renderProvider(status, nextProvider));
     },
     view,
@@ -178,6 +211,37 @@ describe("ProviderAuthDialog browser handoff", () => {
       data: "Different official link: https://platform.claude.com/oauth/authorize?state=second-attempt\r\n",
     }));
     expect(dialog.openExternal).toHaveBeenCalledTimes(1);
+  });
+
+  it("explains Gemini's manual OAuth handoff without claiming its persistent TUI will finish", async () => {
+    const dialog = renderDialog({ provider: geminiProvider });
+    await waitFor(() => expect(
+      screen.getByText("Complete setup in Gemini, then close"),
+    ).toBeInTheDocument());
+    expect(screen.getByText(/paste the browser code here/iu)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Close & refresh" })).toBeEnabled();
+
+    act(() => dialog.emit({
+      type: "terminal.output",
+      terminalId: TERMINAL_ID,
+      data: `Open this URL: ${GEMINI_AUTH_URL}\r\n`,
+    }));
+
+    await waitFor(() => expect(dialog.openExternal).toHaveBeenCalledWith(
+      GEMINI_AUTH_URL,
+    ));
+    expect(dialog.openExternal).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(/paste the authorization code into Gemini/iu))
+      .toBeInTheDocument();
+
+    act(() => dialog.emit({
+      type: "terminal.exit",
+      terminalId: TERMINAL_ID,
+      exitCode: 0,
+    }));
+    expect(screen.getByText("Gemini closed — refresh will verify setup"))
+      .toBeInTheDocument();
+    expect(screen.queryByText("Connection flow complete")).toBeNull();
   });
 
   it("keeps retry and copy actions available when no default browser answers", async () => {

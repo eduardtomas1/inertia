@@ -4,8 +4,8 @@ import { defaultSettings } from "../../src/shared/contracts";
 import {
   continuationIdentityForSelection,
   modelSelectionSchema,
-  nativeBackendProfile,
-  nativeModelSelection,
+  providerNativeBackendProfile,
+  providerNativeModelSelection,
   resolveHarnessBackendCompatibility,
   withModelSelectionFastMode,
   type HarnessBackendCompatibility,
@@ -33,7 +33,7 @@ function nativeCandidate(
         : "opencode";
   const compatibility = resolveHarnessBackendCompatibility(
     selection.harnessId as Parameters<typeof resolveHarnessBackendCompatibility>[0],
-    nativeBackendProfile(providerId),
+    providerNativeBackendProfile(providerId),
   );
   return {
     selection,
@@ -121,7 +121,7 @@ function customRoute(
 
 describe("model route transition policy", () => {
   it("keeps an officially supported native model switch in the current conversation", () => {
-    const currentSelection = nativeModelSelection({
+    const currentSelection = providerNativeModelSelection({
       providerId: "codex",
       modelId: "gpt-a",
     });
@@ -146,7 +146,7 @@ describe("model route transition policy", () => {
   });
 
   it("requires current speed-control evidence to leave a Fast session", () => {
-    const standard = nativeModelSelection({
+    const standard = providerNativeModelSelection({
       providerId: "codex",
       modelId: "gpt-a",
     });
@@ -216,7 +216,7 @@ describe("model route transition policy", () => {
   });
 
   it("does not trust an unverified model-switch capability flag", () => {
-    const currentSelection = nativeModelSelection({
+    const currentSelection = providerNativeModelSelection({
       providerId: "codex",
       modelId: "gpt-a",
     });
@@ -311,7 +311,7 @@ describe("model route transition policy", () => {
   });
 
   it("uses the authoritative latest turn instead of a mutable conversation selection", () => {
-    const first = nativeModelSelection({ providerId: "codex", modelId: "gpt-a" });
+    const first = providerNativeModelSelection({ providerId: "codex", modelId: "gpt-a" });
     const firstCandidate = nativeCandidate(first);
     const mutableConversationSelection = {
       ...first,
@@ -364,12 +364,12 @@ describe("model route transition policy", () => {
   });
 
   it("does not lock an unstarted draft conversation to its placeholder route", () => {
-    const currentSelection = nativeModelSelection({
+    const currentSelection = providerNativeModelSelection({
       providerId: "codex",
       modelId: "provider-default",
     });
     const currentCandidate = nativeCandidate(currentSelection);
-    const nextCandidate = nativeCandidate(nativeModelSelection({
+    const nextCandidate = nativeCandidate(providerNativeModelSelection({
       providerId: "claude",
       modelId: "claude-sonnet",
     }));

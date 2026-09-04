@@ -14,7 +14,7 @@ import {
   type PromptStashEntry,
   writePromptStash,
 } from "../../src/renderer/src/utils/promptStash";
-import { nativeModelSelection } from "../../src/shared/model-routing";
+import { providerNativeModelSelection } from "../../src/shared/model-routing";
 
 const route = {
   harnessId: "codex-app-server",
@@ -58,7 +58,7 @@ describe("bounded prompt stash", () => {
   });
 
   it("preserves Fast mode across stash storage and treats older entries as Standard", () => {
-    const fastSelection = nativeModelSelection({
+    const fastSelection = providerNativeModelSelection({
       providerId: "codex",
       modelId: route.modelId,
       reasoningEffort: route.reasoningEffort,
@@ -99,7 +99,7 @@ describe("bounded prompt stash", () => {
   });
 
   it("omits invented speed identity on unsupported routes", () => {
-    const cursorSelection = nativeModelSelection({
+    const cursorSelection = providerNativeModelSelection({
       providerId: "cursor",
       modelId: "cursor-auto",
       providerOptions: { fastMode: "priority" },

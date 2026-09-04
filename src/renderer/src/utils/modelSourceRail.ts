@@ -1,5 +1,5 @@
 import type { ProviderId } from "../../../shared/contracts";
-import { legacyProviderIdForHarness } from "../../../shared/model-routing";
+import { providerIdForHarness } from "../../../shared/model-routing";
 import type { ModelSearchRoute } from "./modelSearch";
 import {
   nextSidebarNavigationIndex,
@@ -10,6 +10,7 @@ export const MODEL_SOURCE_PROVIDER_ORDER = [
   "codex",
   "claude",
   "cursor",
+  "gemini",
   "kimi",
   "opencode",
 ] as const satisfies readonly ProviderId[];
@@ -18,6 +19,7 @@ const providerLabels: Readonly<Record<ProviderId, string>> = {
   codex: "Codex",
   claude: "Claude",
   cursor: "Cursor",
+  gemini: "Gemini",
   kimi: "Kimi Code",
   opencode: "OpenCode",
 };
@@ -138,7 +140,7 @@ export function deriveModelSourceRailItems<Route extends ModelSearchRoute>(
       continue;
     }
 
-    const providerId = legacyProviderIdForHarness(route.harnessId);
+    const providerId = providerIdForHarness(route.harnessId);
     if (providerId) {
       providerRoutes.get(providerId)?.push(route);
       continue;
@@ -229,7 +231,7 @@ export function filterModelRoutesBySource<Route extends ModelSearchRoute>(
   }
   return routes.filter((route) =>
     route.source === "built-in"
-    && legacyProviderIdForHarness(route.harnessId) === filter.providerId);
+    && providerIdForHarness(route.harnessId) === filter.providerId);
 }
 
 export type ModelSourceRailNavigationKey = SidebarNavigationKey;

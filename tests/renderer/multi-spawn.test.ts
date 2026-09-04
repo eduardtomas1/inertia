@@ -19,7 +19,7 @@ import {
 } from "../../src/renderer/src/utils/multiSpawn";
 import { defaultSelectionForProject } from "../../src/renderer/src/utils/defaultConversationSelection";
 import {
-  nativeModelSelection,
+  providerNativeModelSelection,
 } from "../../src/shared/model-routing";
 import type { ComposerModelRoute } from "../../src/renderer/src/utils/modelChooserRoutes";
 import {
@@ -28,7 +28,7 @@ import {
   type Project,
 } from "../../src/shared/contracts";
 
-const codexSelection = nativeModelSelection({
+const codexSelection = providerNativeModelSelection({
   providerId: "codex",
   modelId: "gpt-5.6-sol",
   alias: "GPT-5.6-Sol",
@@ -82,11 +82,11 @@ function storage(): Storage {
 
 describe("multi-spawn preset", () => {
   it("uses project defaults before global defaults and preserves provider default", () => {
-    const globalSelection = nativeModelSelection({
+    const globalSelection = providerNativeModelSelection({
       providerId: "codex",
       modelId: "global-model",
     });
-    const projectSelection = nativeModelSelection({
+    const projectSelection = providerNativeModelSelection({
       providerId: "claude",
       modelId: "project-model",
     });

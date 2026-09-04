@@ -10,7 +10,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { ProviderInfo } from "../../src/shared/contracts";
 import {
   modelSelectionSchema,
-  nativeModelSelection,
+  providerNativeModelSelection,
 } from "../../src/shared/model-routing";
 import { RuntimeStore } from "../../src/server/database";
 import { inspectProjectIdentity } from "../../src/server/project-identity";
@@ -107,7 +107,7 @@ describe("Duo worktree ownership adoption", () => {
       dataDirectory,
       () => [providerInfo()],
     );
-    const modelSelection = modelSelectionSchema.parse(nativeModelSelection({
+    const modelSelection = modelSelectionSchema.parse(providerNativeModelSelection({
       providerId: "codex",
       modelId: "gpt-test",
       alias: "GPT Test",

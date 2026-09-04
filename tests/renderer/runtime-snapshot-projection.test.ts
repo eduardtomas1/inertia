@@ -6,7 +6,7 @@ import {
   type ConversationShell,
   type WorkspaceRun,
 } from "../../src/shared/contracts";
-import { nativeModelSelection } from "../../src/shared/model-routing";
+import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import { applyConversationShellEvent } from "../../src/renderer/src/utils/runtimeSnapshotProjection";
 
 function conversation(id: string, updatedAt: string): ConversationShell {
@@ -15,7 +15,7 @@ function conversation(id: string, updatedAt: string): ConversationShell {
     projectId: `${id}-project`,
     title: `Conversation ${id}`,
     providerId: "codex",
-    modelSelection: nativeModelSelection({
+    modelSelection: providerNativeModelSelection({
       providerId: "codex",
       modelId: "default",
       reasoningEffort: "medium",

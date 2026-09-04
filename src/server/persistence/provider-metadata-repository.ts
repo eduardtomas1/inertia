@@ -1,7 +1,7 @@
 import type Database from "better-sqlite3";
 
 import {
-  providerMetadataScopeKey,
+  currentProviderMetadataScopeKey,
   type PersistedProviderMetadata,
 } from "../provider/metadata";
 import { parseJsonArray } from "./codecs";
@@ -44,7 +44,7 @@ export class ProviderMetadataRepository {
     const modelsJson = JSON.stringify(metadata.models);
     const rateLimitsJson = JSON.stringify(metadata.rateLimits);
     if (modelsJson.length > 262_144 || rateLimitsJson.length > 65_536) return;
-    const scopeKey = providerMetadataScopeKey(metadata.scope);
+    const scopeKey = currentProviderMetadataScopeKey(metadata.scope);
     this.database.prepare(`
       INSERT INTO provider_metadata_scoped_cache (
         scope_key, provider_id, harness_id, backend_profile_id, model_id,

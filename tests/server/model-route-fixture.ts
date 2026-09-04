@@ -1,13 +1,13 @@
 import {
   continuationIdentityForSelection,
-  legacyProviderIdForHarness,
+  providerIdForHarness,
   type HarnessBackendCompatibility,
   type KnownHarnessId,
   type ModelBackendProfile,
   type ModelSelection,
-  nativeBackendProfile,
-  nativeHarnessId,
-  nativeModelSelection,
+  providerNativeBackendProfile,
+  providerNativeHarnessId,
+  providerNativeModelSelection,
   resolveHarnessBackendCompatibility,
 } from "../../src/shared/model-routing";
 import type {
@@ -31,6 +31,7 @@ interface NativeProviderRunInput {
   interactionMode: ProviderInteractionMode;
   access: ProviderAccessMode;
   sessionId?: string;
+  reconstructedHistory?: ProviderRunInput["reconstructedHistory"];
   imagePaths?: readonly string[];
   skills?: readonly ProviderSkillInput[];
   goalStart?: ProviderRunInput["goalStart"];
@@ -53,10 +54,10 @@ export function nativeProviderRunFields(
   | "model"
   | "reasoningEffort"
 > {
-  const harnessId = harnessOverride ?? nativeHarnessId(providerId);
-  const backendProfile = nativeBackendProfile(providerId);
+  const harnessId = harnessOverride ?? providerNativeHarnessId(providerId);
+  const backendProfile = providerNativeBackendProfile(providerId);
   const modelSelection = {
-    ...nativeModelSelection({
+    ...providerNativeModelSelection({
       providerId,
       modelId,
       reasoningEffort,
@@ -90,10 +91,10 @@ export function resolveNativeModelRoute(selection: ModelSelection): {
   compatibility: HarnessBackendCompatibility;
   continuationIdentity: ReturnType<typeof continuationIdentityForSelection>;
 } {
-  const providerId = legacyProviderIdForHarness(selection.harnessId);
+  const providerId = providerIdForHarness(selection.harnessId);
   if (!providerId) throw new Error(`Unknown test harness '${selection.harnessId}'.`);
   const harnessId = selection.harnessId as KnownHarnessId;
-  const backendProfile = nativeBackendProfile(providerId);
+  const backendProfile = providerNativeBackendProfile(providerId);
   const compatibility = resolveHarnessBackendCompatibility(harnessId, backendProfile);
   return {
     providerId,

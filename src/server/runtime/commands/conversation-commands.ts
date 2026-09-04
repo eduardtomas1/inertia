@@ -13,7 +13,7 @@ import {
   resolveContinuationDecision,
 } from "../../../shared/continuation-policy";
 import {
-  nativeModelSelection,
+  providerNativeModelSelection,
   type ModelSelection,
 } from "../../../shared/model-routing";
 import { deleteCheckpoints } from "../../checkpoints";
@@ -59,7 +59,7 @@ function requestedConversationModelSelection(
 
   const providerId = update.providerId ?? current.providerId;
   const providerChanged = providerId !== current.providerId;
-  return nativeModelSelection({
+  return providerNativeModelSelection({
     providerId,
     modelId: update.model ?? (
       providerChanged ? "provider-default" : current.modelSelection.modelId

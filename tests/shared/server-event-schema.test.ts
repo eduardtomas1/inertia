@@ -2,18 +2,18 @@ import { describe, expect, it } from "vitest";
 import {
   continuationIdentityForSelection,
   MODEL_CAPABILITY_IDS,
-  nativeBackendProfile,
-  nativeModelSelection,
+  providerNativeBackendProfile,
+  providerNativeModelSelection,
 } from "../../src/shared/model-routing";
 import { defaultSettings } from "../../src/shared/contracts/app";
 import { parseServerEvent } from "../../src/shared/contracts/server-event-schema";
-const selection = nativeModelSelection({
+const selection = providerNativeModelSelection({
   providerId: "codex",
   modelId: "gpt-test",
   reasoningEffort: "high",
 });
-const claudeSelection = nativeModelSelection({ providerId: "claude", modelId: "claude-test" });
-const nativeBackend = nativeBackendProfile("codex");
+const claudeSelection = providerNativeModelSelection({ providerId: "claude", modelId: "claude-test" });
+const nativeBackend = providerNativeBackendProfile("codex");
 const capability = {
   id: "streaming",
   state: "verified",
@@ -904,9 +904,15 @@ describe("server event settings trust boundary", () => {
       type: "snapshot.updated",
     });
   });
+  it("accepts Gemini as the default provider", () => {
+    expect(parseServerEvent(snapshotEvent({
+      ...defaultSettings,
+      defaultProvider: "gemini",
+    }))).toMatchObject({ type: "snapshot.updated" });
+  });
   it.each([
     ["theme", "sepia"],
-    ["defaultProvider", "gemini"],
+    ["defaultProvider", "unknown-provider"],
     ["defaultAccessMode", "unrestricted"],
     ["newThreadMode", "remote"],
     ["usageDisplayMode", "verbose"],
@@ -960,7 +966,7 @@ describe("server event conversation discriminant boundary", () => {
       },
     }))).toThrow("Malformed server event");
 
-    const fastSelection = nativeModelSelection({
+    const fastSelection = providerNativeModelSelection({
       providerId: "codex",
       modelId: "gpt-test",
       reasoningEffort: "high",
@@ -984,7 +990,7 @@ describe("server event conversation discriminant boundary", () => {
       },
     }))).toThrow("Malformed server event");
 
-    const cursorSelection = nativeModelSelection({
+    const cursorSelection = providerNativeModelSelection({
       providerId: "cursor",
       modelId: "cursor-test",
     });
@@ -1026,7 +1032,7 @@ describe("server event conversation discriminant boundary", () => {
     }))).toThrow("Malformed server event");
   });
   it.each([
-    ["providerId", "gemini"],
+    ["providerId", "unknown-provider"],
     ["modelSelection", claudeSelection],
     ["continuationIdentity", { ...continuationIdentityForSelection(selection), harnessId: "claude-agent-sdk" }],
     ["continuationIdentity", { ...continuationIdentityForSelection(selection), backendProfileId: "native:claude" }],
@@ -1044,7 +1050,7 @@ describe("server event conversation discriminant boundary", () => {
     }))).toThrow("Malformed server event");
   });
   it.each([
-    ["providerId", "gemini"],
+    ["providerId", "unknown-provider"],
     ["interactionMode", "chat"],
     ["accessMode", "unrestricted"],
     ["status", "sleeping"],
@@ -1056,7 +1062,7 @@ describe("server event conversation discriminant boundary", () => {
     }))).toThrow("Malformed server event");
   });
   it.each([
-    ["providerId", "gemini"],
+    ["providerId", "unknown-provider"],
     ["status", "sleeping"],
     ["runState", { state: "completed", providerState: null, revision: 3 }],
     ["runState", { state: "retrying", providerState: "", revision: 3 }],
@@ -1153,7 +1159,7 @@ describe("server event provider identity boundary", () => {
       activeConversationId: null,
     },
   });
-  it.each(["codex", "claude", "cursor", "kimi", "opencode"])(
+  it.each(["codex", "claude", "cursor", "gemini", "kimi", "opencode"])(
     "accepts the canonical %s provider identity",
     (id) => {
       const expectedFastMode = id === "codex"
@@ -1175,7 +1181,7 @@ describe("server event provider identity boundary", () => {
     },
   );
   it.each([
-    ["provider identity", { ...provider, id: "gemini" }], ["model IDs", { ...provider, models: [provider.models[0], { ...provider.models[0] }] }],
+    ["provider identity", { ...provider, id: "unknown-provider" }], ["model IDs", { ...provider, models: [provider.models[0], { ...provider.models[0] }] }],
     ["Fast mode metadata", { ...provider, models: [{ ...provider.models[0], fastMode: { providerValue: 1, label: "Fast", description: "Broken", isDefault: false } }] }],
     ["cross-provider Fast mode", { ...provider, id: "cursor" }],
     ["wrong native Fast value", { ...provider, models: [{ ...provider.models[0], fastMode: { ...provider.models[0].fastMode, providerValue: "fast" } }] }],
@@ -1416,7 +1422,7 @@ describe("server event remaining discriminant and identity boundary", () => {
     ["maintenance availability", { providers: [{ ...provider, maintenance: {
       ...maintenance, updateAvailability: "maybe",
     } }] }],
-    ["operation provider", { maintenanceOperations: [{ ...operation, providerId: "gemini" }] }],
+    ["operation provider", { maintenanceOperations: [{ ...operation, providerId: "unknown-provider" }] }],
     ["operation status", { maintenanceOperations: [{ ...operation, status: "paused" }] }],
     ["backend default scope", { backendDefaults: [{ ...backendDefault, scope: "workspace" }] }],
     ["backend default relationship", { backendDefaults: [{
@@ -1431,7 +1437,7 @@ describe("server event remaining discriminant and identity boundary", () => {
   it.each([
     ["activity kind", "activities", { ...conversationDetail.activities[0], kind: "network" }],
     ["activity status", "activities", { ...conversationDetail.activities[0], status: "paused" }],
-    ["subagent provider", "subagents", { ...conversationDetail.subagents[0], providerId: "gemini" }],
+    ["subagent provider", "subagents", { ...conversationDetail.subagents[0], providerId: "unknown-provider" }],
     ["subagent status", "subagents", { ...conversationDetail.subagents[0], status: "paused" }],
     ["turn interaction", "agentTurns", { ...conversationDetail.agentTurns[0], interactionMode: "chat" }],
     ["turn access", "agentTurns", { ...conversationDetail.agentTurns[0], accessMode: "unrestricted" }],
@@ -1489,7 +1495,7 @@ describe("server event remaining discriminant and identity boundary", () => {
     }))).toThrow("Malformed server event");
   });
   it.each([
-    ["approval provider", { ...approval, providerId: "gemini" }],
+    ["approval provider", { ...approval, providerId: "unknown-provider" }],
     ["approval kind", { ...approval, kind: "network" }],
     ["approval protocol", { ...approval, networkScope: { host: "x", protocol: "ftp" } }],
     ["approval access", { ...approval, permissionRoots: [{ path: "/tmp", access: "execute" }] }],
@@ -1505,7 +1511,7 @@ describe("server event remaining discriminant and identity boundary", () => {
       conversationId: conversation.id,
       source: "codex-native",
     })).toBeTruthy();
-    expect(() => parseServerEvent({ type: "agent.input.requested", request: { ...input, providerId: "gemini" } })).toThrow("Malformed server event");
+    expect(() => parseServerEvent({ type: "agent.input.requested", request: { ...input, providerId: "unknown-provider" } })).toThrow("Malformed server event");
     expect(() => parseServerEvent({ type: "agent.input.requested", request: { ...input, questions: [input.questions[0], { ...input.questions[0] }] } })).toThrow("Malformed server event");
     expect(() => parseServerEvent({ type: "agent.input.requested", request: { ...input, questions: [{ ...input.questions[0], options: [input.questions[0].options[0], { ...input.questions[0].options[0] }] }] } })).toThrow("Malformed server event");
     expect(() => parseServerEvent({ type: "agent.goal.cleared", conversationId: conversation.id, source: "provider-native" })).toThrow("Malformed server event");

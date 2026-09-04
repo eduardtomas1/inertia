@@ -11,7 +11,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ProviderInfo } from "../../src/shared/contracts";
 import {
   modelSelectionSchema,
-  nativeModelSelection,
+  providerNativeModelSelection,
 } from "../../src/shared/model-routing";
 import { RuntimeStore } from "../../src/server/database";
 import type {
@@ -201,7 +201,7 @@ async function replaceableLinkedWorkspace(workspace: string): Promise<{
 function payload(
   context: Awaited<ReturnType<typeof runtime>>,
 ): Parameters<DuoLaunchCoordinator["prepare"]>[0] {
-  const selection = modelSelectionSchema.parse(nativeModelSelection({
+  const selection = modelSelectionSchema.parse(providerNativeModelSelection({
     providerId: "codex",
     modelId: "gpt-test",
     alias: "GPT Test",

@@ -23,7 +23,7 @@ import type {
   ModelSelection,
   ProviderId,
 } from "@shared/contracts";
-import { legacyProviderIdForHarness } from "../../../shared/model-routing";
+import { providerIdForHarness } from "../../../shared/model-routing";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
 import {
   composerRouteReadiness,
@@ -438,7 +438,7 @@ export function MultiSpawnDialog({
   if (!snapshot || !draft) return null;
 
   const routeStateFor = (side: MultiSpawnSideDraft): RouteState => {
-    const providerId = legacyProviderIdForHarness(side.selection.harnessId);
+    const providerId = providerIdForHarness(side.selection.harnessId);
     const provider = snapshot.providers.find(({ id }) => id === providerId);
     const profile = snapshot.backendProfiles?.find(
       ({ id }) => id === side.selection.backendProfileId,

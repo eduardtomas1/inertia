@@ -8,7 +8,7 @@ import {
   type ServerEvent,
 } from "../../src/shared/contracts";
 import { useDraftConversation } from "../../src/renderer/src/hooks/useDraftConversation";
-import { nativeModelSelection } from "../../src/shared/model-routing";
+import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import type { CommandWithoutId } from "../../src/renderer/src/lib/runtimeCommands";
 import {
   buildDraftConversation,
@@ -117,11 +117,11 @@ describe("useDraftConversation", () => {
   });
 
   it("starts from the project backend default before the global default", () => {
-    const globalSelection = nativeModelSelection({
+    const globalSelection = providerNativeModelSelection({
       providerId: "codex",
       modelId: "global-model",
     });
-    const projectSelection = nativeModelSelection({
+    const projectSelection = providerNativeModelSelection({
       providerId: "claude",
       modelId: "project-model",
     });

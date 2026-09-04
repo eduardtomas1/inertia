@@ -11,11 +11,11 @@ import {
 } from "../shared/backend-probe";
 import {
   continuationIdentityForSelection,
-  legacyProviderIdForHarness,
+  providerIdForHarness,
   modelSelectionSchema,
   modelBackendProfileSchema,
-  knownHarnessIdSchema,
-  nativeBackendProfile,
+  currentKnownHarnessIdSchema,
+  providerNativeBackendProfile,
   resolveHarnessBackendCompatibility,
   type ContinuationIdentity,
   type HarnessBackendCompatibility,
@@ -37,7 +37,10 @@ import type {
   AgentHarnessId,
   AgentHarnessRun,
 } from "./provider/agent-harness";
-import { providerAuthLoginArgs } from "./provider/auth";
+import {
+  providerAuthLaunchEnvironment,
+  providerAuthLoginArgs,
+} from "./provider/auth";
 import { PROVIDERS, PROVIDER_INFO } from "./provider/catalog";
 import {
   PROVIDER_IDS,
@@ -163,7 +166,7 @@ export class ProviderManager {
       ?? this.ownedLifetimeAbort!.signal;
     this.resolveBackendLaunchOptions = options.resolveBackendLaunchOptions;
     for (const providerId of PROVIDER_IDS) {
-      const profile = nativeBackendProfile(providerId);
+      const profile = providerNativeBackendProfile(providerId);
       this.backendProfiles.set(profile.id, profile);
       this.protectedBackendProfileIds.add(profile.id);
     }
@@ -273,8 +276,8 @@ export class ProviderManager {
 
   resolveModelRoute(selectionInput: ModelSelection): ResolvedModelRoute {
     const selection = modelSelectionSchema.parse(selectionInput);
-    const harnessId = knownHarnessIdSchema.safeParse(selection.harnessId);
-    const providerId = legacyProviderIdForHarness(selection.harnessId);
+    const harnessId = currentKnownHarnessIdSchema.safeParse(selection.harnessId);
+    const providerId = providerIdForHarness(selection.harnessId);
     if (!harnessId.success || !providerId) {
       throw new ProviderRuntimeError("invalid_input", `Unknown agent harness '${selection.harnessId}'.`);
     }
@@ -458,9 +461,9 @@ export class ProviderManager {
     if (!executable) throw new ProviderRuntimeError("invalid_input", `${PROVIDER_INFO[providerId].name} CLI is not installed.`);
     const environment = await providerEnvironment();
     this.processEnvironment = environment.env;
-    const childEnvironment = providerChildEnvironment(
+    const childEnvironment = providerAuthLaunchEnvironment(
       providerId,
-      environment.env,
+      providerChildEnvironment(providerId, environment.env),
     );
     const invocation = providerProcessInvocation(
       executable,
@@ -629,7 +632,7 @@ export class ProviderManager {
     const turnId = input.turnId ?? null;
     const executable = this.commandFor(providerId);
     if (!this.resolvedCommands.has(providerId)) this.resolvedCommands.set(providerId, executable);
-    const nativeProfile = nativeBackendProfile(providerId);
+    const nativeProfile = providerNativeBackendProfile(providerId);
     const ownsLegacyProviderMetadata = input.backendProfile.id === nativeProfile.id
       && input.backendProfile.configurationRevision === nativeProfile.configurationRevision;
     const runMetadataScope = this.metadataCache.scopeForSelection(

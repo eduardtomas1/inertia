@@ -10,7 +10,7 @@ import type {
 } from "../../src/shared/contracts";
 import {
   continuationIdentityForSelection,
-  nativeModelSelection,
+  providerNativeModelSelection,
 } from "../../src/shared/model-routing";
 import {
   mergeConversationShell,
@@ -21,7 +21,7 @@ const conversation: Conversation = {
   id: "conversation-1",
   projectId: "project-1",
   title: "Stored title",
-  modelSelection: nativeModelSelection({
+  modelSelection: providerNativeModelSelection({
     providerId: "codex",
     modelId: "gpt",
     reasoningEffort: "high",
@@ -130,13 +130,13 @@ function result(
 
 describe("conversation detail projection", () => {
   it("replaces the complete conversation route from the authoritative shell", () => {
-    const loadedSelection = nativeModelSelection({
+    const loadedSelection = providerNativeModelSelection({
       providerId: "codex",
       modelId: "gpt-5",
       reasoningEffort: "high",
     });
     const shellSelection = {
-      ...nativeModelSelection({
+      ...providerNativeModelSelection({
         providerId: "claude",
         modelId: "claude-sonnet-4-5",
         reasoningEffort: "medium",

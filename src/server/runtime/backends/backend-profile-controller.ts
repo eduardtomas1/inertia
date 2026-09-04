@@ -15,10 +15,11 @@ import {
   validateKimiClaudeModelSelection,
 } from "../../../shared/claude-backend-profiles";
 import {
-  nativeBackendProfile,
-  nativeHarnessId,
-  nativeModelSelection,
   modelSelectionSchema,
+  providerIdForHarness,
+  providerNativeBackendProfile,
+  providerNativeHarnessId,
+  providerNativeModelSelection,
   routeSupportsNativeFastModeIdentity,
   type ModelSelection,
 } from "../../../shared/model-routing";
@@ -136,7 +137,7 @@ export class BackendProfileController {
 
   detail(profileId: string): ModelBackendProfileDetail {
     const nativeProvider = PROVIDER_IDS.find((providerId) =>
-      nativeBackendProfile(providerId).id === profileId);
+      providerNativeBackendProfile(providerId).id === profileId);
     if (nativeProvider) {
       return this.runtime.detailView({
         profile: nativeProfile(
@@ -363,10 +364,9 @@ export class BackendProfileController {
   }
 
   isExternalSelection(selection: ModelSelection): boolean {
-    return selection.backendProfileId !== "builtin:openai"
-      && selection.backendProfileId !== "builtin:anthropic"
-      && selection.backendProfileId !== "builtin:cursor"
-      && selection.backendProfileId !== "builtin:opencode";
+    const providerId = providerIdForHarness(selection.harnessId);
+    return providerId === null
+      || selection.backendProfileId !== providerNativeBackendProfile(providerId).id;
   }
 
   supportsNativeFastModeControl(selectionInput: ModelSelection): boolean {
@@ -456,10 +456,10 @@ export class BackendProfileController {
   ): ModelSelection {
     const submitted = modelSelectionSchema.parse(selectionInput);
     const nativeProvider = PROVIDER_IDS.find((providerId) =>
-      nativeBackendProfile(providerId).id === submitted.backendProfileId);
+      providerNativeBackendProfile(providerId).id === submitted.backendProfileId);
     if (nativeProvider) {
-      const backend = nativeBackendProfile(nativeProvider);
-      const harnessId = nativeHarnessId(nativeProvider);
+      const backend = providerNativeBackendProfile(nativeProvider);
+      const harnessId = providerNativeHarnessId(nativeProvider);
       if (
         submitted.harnessId !== harnessId
         || submitted.backendConfigurationRevision
@@ -515,7 +515,7 @@ export class BackendProfileController {
             selectedModel?.reasoningOptions ?? [],
             submitted.reasoningEffort,
           );
-      return nativeModelSelection({
+      return providerNativeModelSelection({
         providerId: nativeProvider,
         modelId: submitted.modelId,
         alias: submitted.modelId === "provider-default"
@@ -680,7 +680,7 @@ export class BackendProfileController {
     selection: Pick<ModelSelection, "backendProfileId">,
   ): StoredModelBackendProfile {
     const nativeProvider = PROVIDER_IDS.find((providerId) =>
-      nativeBackendProfile(providerId).id === selection.backendProfileId);
+      providerNativeBackendProfile(providerId).id === selection.backendProfileId);
     if (nativeProvider) {
       return {
         profile: nativeProfile(nativeProvider, undefined),

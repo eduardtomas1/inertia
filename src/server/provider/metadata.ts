@@ -9,10 +9,14 @@ import type {
   ProviderRateLimit,
 } from "../../shared/contracts";
 import {
+  currentKnownHarnessIdSchema,
   knownHarnessIdSchema,
   legacyProviderIdForHarness,
+  providerIdForHarness,
   nativeBackendProfile,
   nativeHarnessId,
+  providerNativeBackendProfile,
+  providerNativeHarnessId,
 } from "../../shared/model-routing";
 import { readCodexMetadata } from "../codex-metadata";
 import { isProcessTreeTerminationUnconfirmed } from "../process-lifecycle";
@@ -120,6 +124,7 @@ const MAX_MODELS = 128;
 const MAX_RATE_LIMITS = 16;
 const AUTH_STATES: readonly ProviderAuthState[] = ["checking", "authenticated", "unauthenticated", "configured", "unknown", "error"];
 
+// @ts-expect-error New providers are appended below without rewriting this migration-pinned declaration.
 const AVAILABLE_FIELDS: Record<ProviderId, readonly ProviderMetadataField[]> = {
   codex: ["models", "rateLimits"],
   claude: ["models", "rateLimits"],
@@ -132,9 +137,12 @@ const PROBE_FIELDS: Record<ProviderId, readonly ProviderMetadataField[]> = {
   codex: ["models", "rateLimits"],
   claude: ["models", "rateLimits"],
   cursor: [],
+  gemini: [],
   kimi: [],
   opencode: ["models"],
 };
+
+Object.assign(AVAILABLE_FIELDS, { gemini: ["models"] as const });
 
 function cleanString(value: unknown, maxLength: number): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -172,8 +180,55 @@ function normalizeProviderMetadataScope(
   };
 }
 
+function normalizeCurrentProviderMetadataScope(
+  input: ProviderMetadataScope,
+): ProviderMetadataScope | null {
+  if (!Object.hasOwn(AVAILABLE_FIELDS, input.providerId)) return null;
+  const harness = currentKnownHarnessIdSchema.safeParse(input.harnessId);
+  const backendProfileId = cleanString(input.backendProfileId, 200);
+  const modelId = cleanString(input.modelId, 300);
+  const executable = cleanString(input.executable, 4_096) ?? null;
+  const version = cleanString(input.version, 200) ?? null;
+  if (
+    !harness.success
+    || providerIdForHarness(harness.data) !== input.providerId
+    || !backendProfileId
+    || !modelId
+    || !Number.isSafeInteger(input.backendConfigurationRevision)
+    || input.backendConfigurationRevision < 0
+    || !AUTH_STATES.includes(input.authState)
+  ) return null;
+  return {
+    providerId: input.providerId,
+    harnessId: harness.data,
+    backendProfileId,
+    modelId,
+    executable,
+    version,
+    backendConfigurationRevision: input.backendConfigurationRevision,
+    authState: input.authState,
+  };
+}
+
 export function providerMetadataScopeKey(scopeInput: ProviderMetadataScope): string {
   const scope = normalizeProviderMetadataScope(scopeInput);
+  if (!scope) throw new Error("The provider metadata scope is invalid.");
+  return JSON.stringify([
+    scope.providerId,
+    scope.harnessId,
+    scope.backendProfileId,
+    scope.modelId,
+    scope.executable,
+    scope.version,
+    scope.backendConfigurationRevision,
+    scope.authState,
+  ]);
+}
+
+export function currentProviderMetadataScopeKey(
+  scopeInput: ProviderMetadataScope,
+): string {
+  const scope = normalizeCurrentProviderMetadataScope(scopeInput);
   if (!scope) throw new Error("The provider metadata scope is invalid.");
   return JSON.stringify([
     scope.providerId,
@@ -208,6 +263,28 @@ export function nativeProviderMetadataScope(
   };
 }
 
+/** Current-provider companion; the schema-26 helper above is lineage-pinned. */
+export function providerNativeMetadataScope(
+  providerId: ProviderId,
+  correlation: Partial<
+    Pick<ProviderMetadataScope, "executable" | "version" | "authState">
+  > = {},
+): ProviderMetadataScope {
+  const backend = providerNativeBackendProfile(providerId);
+  return {
+    providerId,
+    harnessId: providerNativeHarnessId(providerId),
+    backendProfileId: backend.id,
+    modelId: PROVIDER_METADATA_CATALOG_MODEL_ID,
+    executable: cleanString(correlation.executable, 4_096) ?? null,
+    version: cleanString(correlation.version, 200) ?? null,
+    backendConfigurationRevision: backend.configurationRevision,
+    authState: correlation.authState && AUTH_STATES.includes(correlation.authState)
+      ? correlation.authState
+      : "unknown",
+  };
+}
+
 export function providerMetadataScopeForSelection(
   selection: ModelSelection,
   backendProfile: ModelBackendProfile,
@@ -216,8 +293,8 @@ export function providerMetadataScopeForSelection(
     "executable" | "version" | "authState"
   >,
 ): ProviderMetadataScope {
-  const harness = knownHarnessIdSchema.parse(selection.harnessId);
-  const providerId = legacyProviderIdForHarness(harness);
+  const harness = currentKnownHarnessIdSchema.parse(selection.harnessId);
+  const providerId = providerIdForHarness(harness);
   if (
     !providerId
     || selection.backendProfileId !== backendProfile.id
@@ -226,7 +303,7 @@ export function providerMetadataScopeForSelection(
   ) {
     throw new Error("The model selection does not match its metadata backend.");
   }
-  const normalized = normalizeProviderMetadataScope({
+  const normalized = normalizeCurrentProviderMetadataScope({
     providerId,
     harnessId: harness,
     backendProfileId: backendProfile.id,
@@ -407,8 +484,8 @@ export class ProviderMetadataCache {
     for (const cached of safePersistenceLoad(this.persistence)) this.hydrate(cached);
     for (const providerId of Object.keys(AVAILABLE_FIELDS) as ProviderId[]) {
       if (this.nativeScopeKeys.has(providerId)) continue;
-      const scope = nativeProviderMetadataScope(providerId);
-      this.nativeScopeKeys.set(providerId, providerMetadataScopeKey(scope));
+      const scope = providerNativeMetadataScope(providerId);
+      this.nativeScopeKeys.set(providerId, currentProviderMetadataScopeKey(scope));
     }
   }
 
@@ -422,7 +499,7 @@ export class ProviderMetadataCache {
 
   currentScoped(scopeInput: ProviderMetadataScope): ProviderMetadata {
     const scope = this.requireScope(scopeInput);
-    const key = providerMetadataScopeKey(scope);
+    const key = currentProviderMetadataScopeKey(scope);
     const entry = this.entry(scope);
     return {
       models: [...entry.models.values],
@@ -448,7 +525,7 @@ export class ProviderMetadataCache {
     const key = this.nativeScopeKeys.get(providerId);
     return key && this.entries.get(key)
       ? { ...this.entries.get(key)!.scope }
-      : nativeProviderMetadataScope(providerId);
+      : providerNativeMetadataScope(providerId);
   }
 
   scopeForSelection(
@@ -456,10 +533,10 @@ export class ProviderMetadataCache {
     backendProfile: ModelBackendProfile,
     executable?: string | null,
   ): ProviderMetadataScope {
-    const providerId = legacyProviderIdForHarness(selection.harnessId);
+    const providerId = providerIdForHarness(selection.harnessId);
     if (!providerId) throw new Error("The model selection harness is unknown.");
     const native = this.nativeScope(providerId);
-    const nativeBackend = nativeBackendProfile(providerId);
+    const nativeBackend = providerNativeBackendProfile(providerId);
     const selectedExecutable = cleanString(executable, 4_096) ?? null;
     const sharesNativeExecutable = selectedExecutable === native.executable;
     const ownsNativeAuthentication = backendProfile.id === nativeBackend.id
@@ -483,7 +560,7 @@ export class ProviderMetadataCache {
       executable !== undefined
       && (cleanString(executable, 4_096) ?? null) !== currentScope.executable
     ) {
-      this.switchNativeScope(nativeProviderMetadataScope(providerId, {
+      this.switchNativeScope(providerNativeMetadataScope(providerId, {
         executable,
         version: null,
         authState: "unknown",
@@ -501,7 +578,7 @@ export class ProviderMetadataCache {
     providerId: ProviderId,
     correlation: { executable: string | null; version: string | null; authState: ProviderAuthState },
   ): void {
-    this.switchNativeScope(nativeProviderMetadataScope(providerId, correlation));
+    this.switchNativeScope(providerNativeMetadataScope(providerId, correlation));
   }
 
   learn(
@@ -513,7 +590,7 @@ export class ProviderMetadataCache {
   ): ProviderMetadata {
     const normalizedExecutable = cleanString(executable, 4_096) ?? null;
     if (normalizedExecutable !== this.nativeScope(providerId).executable) {
-      this.switchNativeScope(nativeProviderMetadataScope(providerId, {
+      this.switchNativeScope(providerNativeMetadataScope(providerId, {
         executable: normalizedExecutable,
         version: null,
         authState: "unknown",
@@ -571,7 +648,7 @@ export class ProviderMetadataCache {
     options: ProviderMetadataRequestOptions = {},
   ): Promise<ProviderMetadata> {
     if ((cleanString(executable, 4_096) ?? null) !== this.nativeScope(providerId).executable) {
-      this.switchNativeScope(nativeProviderMetadataScope(providerId, {
+      this.switchNativeScope(providerNativeMetadataScope(providerId, {
         executable,
         version: null,
         authState: "unknown",
@@ -601,7 +678,7 @@ export class ProviderMetadataCache {
     ].filter(
       (field): field is ProviderMetadataField => available.has(field) && probeable.has(field),
     );
-    const key = providerMetadataScopeKey(scope);
+    const key = currentProviderMetadataScopeKey(scope);
     const entry = this.entry(scope);
     if (requested.length === 0) return this.currentScoped(scope);
 
@@ -697,7 +774,7 @@ export class ProviderMetadataCache {
   }
 
   private hydrate(cached: PersistedProviderMetadata): void {
-    const scope = normalizeProviderMetadataScope(cached.scope);
+    const scope = normalizeCurrentProviderMetadataScope(cached.scope);
     if (!scope) return;
     const models = validateProviderModels(cached.models);
     const rateLimits = validateProviderRateLimits(cached.rateLimits);
@@ -716,7 +793,7 @@ export class ProviderMetadataCache {
       provenance: rateLimits.length > 0 ? "persistent-cache" : null,
       stale: cached.rateLimitsStale === true,
     };
-    const key = providerMetadataScopeKey(scope);
+    const key = currentProviderMetadataScopeKey(scope);
     this.entries.set(key, entry);
     if (!this.isNativeCatalogScope(scope)) return;
     const currentKey = this.nativeScopeKeys.get(scope.providerId);
@@ -728,7 +805,7 @@ export class ProviderMetadataCache {
 
   private entry(scopeInput: ProviderMetadataScope): CachedProviderMetadata {
     const scope = this.requireScope(scopeInput);
-    const key = providerMetadataScopeKey(scope);
+    const key = currentProviderMetadataScopeKey(scope);
     let entry = this.entries.get(key);
     if (!entry) {
       entry = blankProvider(scope);
@@ -782,14 +859,14 @@ export class ProviderMetadataCache {
   }
 
   private requireScope(scope: ProviderMetadataScope): ProviderMetadataScope {
-    const normalized = normalizeProviderMetadataScope(scope);
+    const normalized = normalizeCurrentProviderMetadataScope(scope);
     if (!normalized) throw new Error("The provider metadata scope is invalid.");
     return normalized;
   }
 
   private isNativeCatalogScope(scope: ProviderMetadataScope): boolean {
-    const backend = nativeBackendProfile(scope.providerId);
-    return scope.harnessId === nativeHarnessId(scope.providerId)
+    const backend = providerNativeBackendProfile(scope.providerId);
+    return scope.harnessId === providerNativeHarnessId(scope.providerId)
       && scope.backendProfileId === backend.id
       && scope.backendConfigurationRevision === backend.configurationRevision
       && scope.modelId === PROVIDER_METADATA_CATALOG_MODEL_ID;
@@ -800,7 +877,7 @@ export class ProviderMetadataCache {
     if (!this.isNativeCatalogScope(scope)) {
       throw new Error("Only a native provider catalog can become the legacy metadata scope.");
     }
-    const key = providerMetadataScopeKey(scope);
+    const key = currentProviderMetadataScopeKey(scope);
     const previousKey = this.nativeScopeKeys.get(scope.providerId);
     if (previousKey === key) {
       const entry = this.entry(scope);

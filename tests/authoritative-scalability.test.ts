@@ -7,7 +7,7 @@ import type {
 } from "../src/shared/contracts";
 import {
   continuationIdentityForSelection,
-  nativeModelSelection,
+  providerNativeModelSelection,
 } from "../src/shared/model-routing";
 import {
   buildResponseTimeline,
@@ -18,7 +18,7 @@ const TURN_COUNT = 500;
 const MESSAGES_PER_TURN = 20;
 const ACTIVITIES_PER_TURN = 10;
 
-const selection = nativeModelSelection({
+const selection = providerNativeModelSelection({
   providerId: "codex",
   modelId: "gpt-scalability",
   reasoningEffort: "high",

@@ -1,4 +1,11 @@
-import { copyFileSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  copyFileSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { connect } from "node:net";
@@ -27,6 +34,36 @@ export function writeNodeSubcommand(root: string, name: string, source: string):
   const path = join(root, name);
   writeFileSync(path, `${source.trimStart()}\n`, "utf8");
   return path;
+}
+
+/**
+ * Create a portable executable for CLIs whose protocol is selected by a flag
+ * (for example `gemini --acp`) instead of a Node-compatible subcommand.
+ */
+export function writeNodeFlagExecutable(
+  root: string,
+  name: string,
+  source: string,
+): string {
+  const script = join(root, `${name}-fixture.cjs`);
+  writeFileSync(script, `${source.trimStart()}\n`, "utf8");
+  if (process.platform === "win32") {
+    const executable = join(root, `${name}.cmd`);
+    writeFileSync(
+      executable,
+      `@echo off\r\n"${process.execPath}" "%~dp0${name}-fixture.cjs" %*\r\n`,
+      "utf8",
+    );
+    return executable;
+  }
+  const executable = join(root, name);
+  writeFileSync(
+    executable,
+    `#!${process.execPath}\nrequire(${JSON.stringify(script)});\n`,
+    "utf8",
+  );
+  chmodSync(executable, 0o755);
+  return executable;
 }
 
 export async function waitFor(

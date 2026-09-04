@@ -75,6 +75,53 @@ export type KimiPromptTerminalSurface = Pick<
   "stopReason" | "usage"
 >;
 
+// Gemini CLI uses ACP v1 directly. Inertia intentionally does not use
+// authenticate or session/load: session/new preserves the CLI-selected auth
+// method, while native load is unsafe in the currently supported CLI.
+export const geminiClient: acp.ClientApp = acp.client({
+  name: "Inertia Gemini provider drift",
+});
+export const geminiPermissionMethod: "session/request_permission" =
+  acp.methods.client.session.requestPermission;
+export const geminiCriticalMethods = {
+  initialize: acp.methods.agent.initialize,
+  sessionNew: acp.methods.agent.session.new,
+  sessionPrompt: acp.methods.agent.session.prompt,
+  sessionCancel: acp.methods.agent.session.cancel,
+  sessionSetMode: acp.methods.agent.session.setMode,
+  sessionSetModel: "session/set_model",
+  sessionUpdate: acp.methods.client.session.update,
+} as const;
+export type GeminiSessionUpdateSurface = acp.SessionNotification["update"];
+type GeminiUpdateVariantPresent<T> = [T] extends [never] ? false : true;
+export const geminiHandledPlanAndUsageVariants = {
+  plan: true,
+  planUpdate: true,
+  planRemoved: true,
+  usageUpdate: true,
+} as const satisfies {
+  plan: GeminiUpdateVariantPresent<Extract<
+    GeminiSessionUpdateSurface,
+    { sessionUpdate: "plan" }
+  >>;
+  planUpdate: GeminiUpdateVariantPresent<Extract<
+    GeminiSessionUpdateSurface,
+    { sessionUpdate: "plan_update" }
+  >>;
+  planRemoved: GeminiUpdateVariantPresent<Extract<
+    GeminiSessionUpdateSurface,
+    { sessionUpdate: "plan_removed" }
+  >>;
+  usageUpdate: GeminiUpdateVariantPresent<Extract<
+    GeminiSessionUpdateSurface,
+    { sessionUpdate: "usage_update" }
+  >>;
+};
+export type GeminiPromptTerminalSurface = Pick<
+  acp.PromptResponse,
+  "stopReason" | "usage" | "_meta"
+>;
+
 export type ClaudeQueryFactory = (params: {
   prompt: string | AsyncIterable<SDKUserMessage>;
   options?: ClaudeOptions;

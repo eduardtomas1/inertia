@@ -109,6 +109,29 @@ describe("AI diff review summaries", () => {
     });
   });
 
+  it("accepts Gemini as a persisted review-summary provider", () => {
+    const summary = parseReviewSummaryResult(
+      "conversation",
+      {
+        providerId: "gemini",
+        harnessId: "gemini-acp",
+        backendProfileId: "builtin:gemini",
+        model: "provider-default",
+      },
+      structured.fingerprint,
+      structured.files,
+      JSON.stringify(validResult()),
+      "2026-07-23T10:00:00.000Z",
+    );
+
+    expect(parsePersistedReviewSummaryJson(JSON.stringify(summary))).toMatchObject({
+      providerId: "gemini",
+      harnessId: "gemini-acp",
+      backendProfileId: "builtin:gemini",
+      model: "provider-default",
+    });
+  });
+
   it("rejects unknown, duplicated, and missing file IDs", () => {
     const unknown = validResult();
     unknown.files[0]!.path = "src/unknown.ts";

@@ -13,7 +13,7 @@ import {
 import type { ComposerModelRoute } from "../../src/renderer/src/utils/modelChooserRoutes";
 import {
   continuationIdentityForSelection,
-  nativeModelSelection,
+  providerNativeModelSelection,
 } from "../../src/shared/model-routing";
 
 function route(
@@ -21,7 +21,7 @@ function route(
   selectable = true,
   reasoningEffort: string | null = null,
 ): ComposerModelRoute {
-  const selection = nativeModelSelection({
+  const selection = providerNativeModelSelection({
     providerId: "codex",
     modelId,
     alias: modelId.toUpperCase(),

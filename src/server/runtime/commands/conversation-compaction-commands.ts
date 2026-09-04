@@ -14,7 +14,7 @@ import {
   resolveContinuationDecision,
 } from "../../../shared/continuation-policy";
 import {
-  nativeBackendProfile,
+  providerNativeBackendProfile,
   routeSupportsNativeFastModeIdentity,
 } from "../../../shared/model-routing";
 import type { RuntimeStore } from "../../database";
@@ -167,7 +167,7 @@ export function createConversationCompactionCommandHandler(
         ? "fast"
         : null;
     const supportedFastMode = exactProvider?.id === route.providerId
-      && route.backendProfile.id === nativeBackendProfile(route.providerId).id
+      && route.backendProfile.id === providerNativeBackendProfile(route.providerId).id
       && routeSupportsNativeFastModeIdentity(selection)
       && exactModel?.fastMode?.providerValue === expectedFastMode
       ? expectedFastMode

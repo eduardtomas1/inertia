@@ -63,17 +63,20 @@ const PROVIDER_LABELS: Partial<Record<SubagentTrace["providerId"], string>> = {
   codex: "Codex",
   claude: "Claude",
   cursor: "Cursor",
+  gemini: "Gemini",
   kimi: "Kimi Code",
+  opencode: "OpenCode",
 };
 
 export function subagentProviderLabel(trace: SubagentTrace): string {
-  return PROVIDER_LABELS[trace.providerId] ?? "OpenCode";
+  return PROVIDER_LABELS[trace.providerId] ?? trace.providerId;
 }
 
 const HARNESS_LABELS: Readonly<Record<string, string>> = {
   "codex-app-server": "App Server",
   "claude-agent-sdk": "Agent SDK",
   "cursor-acp": "ACP",
+  "gemini-acp": "ACP",
   "kimi-acp": "ACP",
   "opencode-sdk": "SDK",
 };

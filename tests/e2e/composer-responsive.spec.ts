@@ -754,9 +754,7 @@ test("keeps the composer as one cohesive dock across themes and responsive split
     await setWorkspaceTools(false);
     await resizeWindow(760, 680);
     const closeNavigation = navigation.getByRole("button", { name: "Close navigation" });
-    if (await closeNavigation.isVisible()) {
-      await closeNavigation.click();
-    }
+    if (await closeNavigation.isVisible()) await closeNavigation.click();
     await expect(navigation).toBeHidden();
     const narrowDock = page.getByRole("region", { name: "Message composer" });
     await expectComposerEndsAtDock(narrowDock);

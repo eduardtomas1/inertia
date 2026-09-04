@@ -25,6 +25,8 @@ const GEMINI_AUTH_URL = `https://accounts.google.com/o/oauth2/v2/auth?${new URLS
   code_challenge_method: "S256",
 }).toString()}`;
 const TERMINAL_ID = "11111111-1111-4111-8111-111111111111";
+const terminalConstructorOptions = vi.hoisted(() =>
+  [] as Array<Record<string, unknown>>);
 
 vi.mock("@xterm/addon-fit", () => ({
   FitAddon: class {
@@ -37,6 +39,10 @@ vi.mock("@xterm/xterm", () => ({
     readonly cols = 90;
     readonly rows = 24;
     readonly options: Record<string, unknown> = {};
+
+    constructor(options: Record<string, unknown>) {
+      terminalConstructorOptions.push(options);
+    }
 
     loadAddon(): void {}
     open(): void {}
@@ -126,6 +132,7 @@ function renderDialog(options: {
     value: { copyText, openExternal },
   });
   const sendCommand = vi.fn(options.sendCommand ?? (async (sent: ClientCommand) => created(sent)));
+  const onClose = vi.fn();
   const initialProvider = options.provider ?? provider;
   const renderProvider = (
     status: "online" | "offline",
@@ -141,7 +148,7 @@ function renderDialog(options: {
         subscriber = listener;
         return () => { subscriber = null; };
       }}
-      onClose={vi.fn()}
+      onClose={onClose}
     />
   );
   const view = render(renderProvider("online"));
@@ -149,6 +156,7 @@ function renderDialog(options: {
     emit: (event: ServerEvent) => subscriber?.(event),
     openExternal,
     copyText,
+    onClose,
     rerender: (
       status: "online" | "offline",
       nextProvider: ProviderInfo | null = initialProvider,
@@ -161,6 +169,7 @@ function renderDialog(options: {
 
 describe("ProviderAuthDialog browser handoff", () => {
   beforeEach(() => {
+    terminalConstructorOptions.length = 0;
     vi.stubGlobal("ResizeObserver", TestResizeObserver);
     vi.stubGlobal("matchMedia", () => ({
       matches: false,
@@ -219,6 +228,16 @@ describe("ProviderAuthDialog browser handoff", () => {
       screen.getByText("Complete setup in Gemini, then close"),
     ).toBeInTheDocument());
     expect(screen.getByText(/paste the browser code here/iu)).toBeInTheDocument();
+    expect(screen.getByRole("dialog")).toHaveAttribute(
+      "aria-describedby",
+      "provider-auth-description",
+    );
+    expect(terminalConstructorOptions.at(-1)).toMatchObject({
+      screenReaderMode: true,
+    });
+    expect(document.querySelector('[aria-live="polite"]')).toHaveTextContent(
+      "Complete setup in Gemini, then close",
+    );
     expect(screen.getByRole("button", { name: "Close" })).toBeEnabled();
 
     act(() => dialog.emit({
@@ -311,6 +330,20 @@ describe("ProviderAuthDialog browser handoff", () => {
     expect(dialog.openExternal).not.toHaveBeenCalled();
   });
 
+  it("owns Escape before underlying document shortcuts", async () => {
+    const dialog = renderDialog();
+    await waitFor(() => expect(screen.getByText("Waiting for sign-in")).toBeInTheDocument());
+    const underlying = vi.fn();
+    document.addEventListener("keydown", underlying, true);
+    try {
+      fireEvent.keyDown(document, { key: "Escape" });
+      expect(dialog.onClose).toHaveBeenCalledOnce();
+      expect(underlying).not.toHaveBeenCalled();
+    } finally {
+      document.removeEventListener("keydown", underlying, true);
+    }
+  });
+
   it("rejects output from a stale provider-auth terminal", async () => {
     const staleTerminalId = "22222222-2222-4222-8222-222222222222";
     const activeTerminalId = "33333333-3333-4333-8333-333333333333";
@@ -331,6 +364,11 @@ describe("ProviderAuthDialog browser handoff", () => {
     await waitFor(() => expect(starts).toBe(1));
 
     dialog.rerender("offline");
+    expect(screen.getByText("Inertia is offline. Reconnect to start provider setup."))
+      .toBeInTheDocument();
+    expect(document.querySelector('[aria-live="assertive"]')).toHaveTextContent(
+      "Inertia is offline. Reconnect to start provider setup.",
+    );
     act(() => dialog.emit({
       type: "terminal.output",
       terminalId: staleTerminalId,

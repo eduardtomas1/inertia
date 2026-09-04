@@ -900,7 +900,7 @@ describe("composer asynchronous ownership", () => {
     fireEvent.keyDown(input, { key: "Enter" });
     expect(onCompact).not.toHaveBeenCalled();
     expect(input).toHaveValue("/compact");
-    expect(screen.getByRole("option", { name: /\/compact/u })).toHaveTextContent(
+    expect(screen.getByRole("alert")).toHaveTextContent(
       "Gemini ACP does not expose explicit context compaction",
     );
   });

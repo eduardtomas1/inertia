@@ -442,6 +442,11 @@ export function ComposerInputZone({
               event.preventDefault();
               if (activeSlashCommand) {
                 activateSlashCommand(activeSlashCommand);
+              } else if (
+                slashMatch?.[1].toLowerCase() === "compact"
+                && compactUnavailableReason
+              ) {
+                void onSubmit();
               }
               return;
             }

@@ -162,6 +162,7 @@ export function ProviderAuthDialog({
       fontFamily: '"SFMono-Regular", Consolas, "Liberation Mono", monospace',
       fontSize: latestFontSizeRef.current,
       lineHeight: 1.35,
+      screenReaderMode: true,
       scrollback: 2_000,
       theme: terminalTheme(),
     });
@@ -254,25 +255,42 @@ export function ProviderAuthDialog({
     requestAnimationFrame(() => dialog?.querySelector<HTMLElement>("button")?.focus());
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key === "Escape") {
+        event.stopImmediatePropagation();
         event.preventDefault();
         closeDialog();
         return;
       }
       if (dialog) trapModalFocus(event, dialog);
     };
-    document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("keydown", onKeyDown, true);
     return () => {
-      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("keydown", onKeyDown, true);
       pendingOutput.clear();
       restoreFocus();
     };
   }, [closeDialog, providerId]);
 
   useEffect(() => {
-    if (!providerId || !instanceReady || status !== "online") return;
+    if (!providerId || !instanceReady) return;
     let cancelled = false;
     const terminal = terminalRef.current;
     const pendingOutput = pendingOutputRef.current;
+    if (status !== "online") {
+      browserAttemptRef.current += 1;
+      browserUrlDetectorRef.current?.clear();
+      browserUrlRef.current = null;
+      setBrowserUrl(null);
+      setBrowserState("idle");
+      setCopyState("idle");
+      pendingOutput.clear();
+      terminal?.clear();
+      terminal?.writeln(
+        "\x1b[2mInertia is offline. Reconnect to start provider setup.\x1b[0m",
+      );
+      setError("Inertia is offline. Reconnect to start provider setup.");
+      setSessionState("error");
+      return;
+    }
     try { fitRef.current?.fit(); } catch { /* Safe defaults below. */ }
     const size = { cols: Math.max(40, terminal?.cols ?? 90), rows: Math.max(10, terminal?.rows ?? 24) };
     setSessionState("starting");
@@ -332,12 +350,28 @@ export function ProviderAuthDialog({
   ]);
 
   if (!provider) return null;
+  const sessionStatusText = sessionState === "starting"
+    ? "Starting…"
+    : sessionState === "ready"
+      ? isGemini ? "Complete setup in Gemini, then close" : "Waiting for sign-in"
+      : sessionState === "finished"
+        ? isGemini
+          ? "Gemini closed — your next run will verify setup"
+          : "Connection flow complete"
+        : error ?? "Connection needs attention";
   return (
     <div className="dialog-backdrop provider-auth-backdrop" role="presentation">
-      <section ref={dialogRef} className="provider-auth-dialog" role="dialog" aria-modal="true" aria-labelledby="provider-auth-title">
+      <section
+        ref={dialogRef}
+        className="provider-auth-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="provider-auth-title"
+        aria-describedby="provider-auth-description"
+      >
         <header className="provider-auth-header">
           <span className="provider-auth-mark"><PlugZap size={17} /></span>
-          <span><h2 id="provider-auth-title">Connect {provider.label}</h2><p>{isGemini
+          <span><h2 id="provider-auth-title">Connect {provider.label}</h2><p id="provider-auth-description">{isGemini
             ? "Choose an authentication method in Gemini. For Google sign-in, paste the browser code here, then close after the Gemini prompt appears."
             : "Finish the official provider sign-in below or in the browser it opens."}</p></span>
           <IconButton label="Close connection window" onClick={closeDialog}><X size={16} /></IconButton>
@@ -380,13 +414,12 @@ export function ProviderAuthDialog({
         <footer className="provider-auth-footer">
           <span className={`provider-auth-state is-${sessionState}`}>
             {sessionState === "starting" ? <LoadingMark label="Starting connection" /> : sessionState === "finished" && !isGemini ? <CheckCircle2 size={15} /> : <PlugZap size={15} />}
-            {sessionState === "starting"
-              ? "Starting…"
-              : sessionState === "ready"
-                ? isGemini ? "Complete setup in Gemini, then close" : "Waiting for sign-in"
-                : sessionState === "finished"
-                  ? isGemini ? "Gemini closed — your next run will verify setup" : "Connection flow complete"
-                  : error ?? "Connection needs attention"}
+            <span
+              aria-live={sessionState === "error" ? "assertive" : "polite"}
+              aria-atomic="true"
+            >
+              {sessionStatusText}
+            </span>
           </span>
           <button type="button" className="secondary-button" onClick={closeDialog}>{isGemini ? "Close" : sessionState === "finished" ? "Done" : "Close"}</button>
         </footer>

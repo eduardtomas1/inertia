@@ -26,6 +26,7 @@ type FakeProcessState = EventEmitter & {
 };
 
 interface AcpFixtureOptions {
+  allowMissingAgentInfo?: boolean;
   allowSessionCapabilitiesResume?: boolean;
   timeoutMs?: number;
   cleanupTimeoutMs?: number;
@@ -64,6 +65,7 @@ function acpFixture(
   options: AcpFixtureOptions = {},
 ): Promise<void> {
   const {
+    allowMissingAgentInfo,
     allowSessionCapabilitiesResume,
     requireLoadSession = false,
     ...dependencies
@@ -73,6 +75,7 @@ function acpFixture(
     ["--input-type=commonjs", "-e", source],
     { cwd: process.cwd(), environment: process.env },
     {
+      ...(allowMissingAgentInfo === undefined ? {} : { allowMissingAgentInfo }),
       ...(allowSessionCapabilitiesResume === undefined
         ? {}
         : { allowSessionCapabilitiesResume }),
@@ -364,6 +367,28 @@ describe("provider drift ACP initialize", () => {
       });
       setInterval(() => {}, 1_000);
     `)).rejects.toThrow("initialize response is incompatible");
+  });
+
+  it.each(["", "agentInfo: null,"])("allows optional ACP metadata only when configured: %s", async (agentInfo) => {
+    const source = validResponse("agentCapabilities: { loadSession: true },", agentInfo);
+    await expect(acpFixture(source, { requireLoadSession: true }))
+      .rejects.toThrow("initialize response is incompatible");
+    await expect(acpFixture(source, {
+      allowMissingAgentInfo: true, requireLoadSession: true,
+    })).resolves.toBeUndefined();
+    await expect(acpFixture(validResponse("agentCapabilities: {},", agentInfo), {
+      allowMissingAgentInfo: true, requireLoadSession: true,
+    })).rejects.toThrow("does not advertise session resume support");
+  });
+
+  it.each([
+    '"Cursor"', '[]', '{}', '{ name: "Other Agent", version: "1" }',
+    '{ name: "Fixture Agent" }', '{ name: "Fixture Agent", version: 1 }',
+  ])("rejects incompatible present metadata even when omission is allowed: %s", async (agentInfo) => {
+    await expect(acpFixture(validResponse(
+      "agentCapabilities: { loadSession: true },", `agentInfo: ${agentInfo},`,
+    ), { allowMissingAgentInfo: true, requireLoadSession: true }))
+      .rejects.toThrow("initialize response is incompatible");
   });
 
   it("fails closed when exact-child cleanup is unconfirmed", async () => {

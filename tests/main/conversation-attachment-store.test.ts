@@ -986,9 +986,10 @@ describe("durable conversation attachment storage", () => {
 
     await expect(store.reconcile([payload.attachment, other.attachment]))
       .resolves.toBeUndefined();
-    // Reconciliation deliberately yields between bounded batches. An unsafe
-    // interrupted record remains unreadable until its cleanup batch finishes.
+    // Removal and the final directory scan can finish in separate batches.
+    // Wait for settled capacity before reading records or admitting a new write.
     await vi.waitFor(async () => {
+      await expect(store.usage()).resolves.toEqual({ bytes: 0, records: 0 });
       await expect(store.preview(payload.attachment.id)).resolves.toBeNull();
       await expect(store.preview(other.attachment.id)).resolves.toBeNull();
     }, { timeout: 5_000 });

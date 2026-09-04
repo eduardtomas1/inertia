@@ -133,8 +133,8 @@ test("keeps the composer as one cohesive dock across themes and responsive split
       contained: true,
       fits: true,
       wraps: true,
-      projectDecoration: "underline",
-      projectDecorationStyle: "dotted",
+      projectDecoration: "none",
+      projectDecorationStyle: "solid",
     });
     expect(longHeadingGeometry.fontSize).toBeGreaterThanOrEqual(26);
     expect(longHeadingGeometry.fontSize).toBeLessThanOrEqual(34);

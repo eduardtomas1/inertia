@@ -11,9 +11,10 @@ const budgets = {
   entryJavaScript: 205 * kibibyte,
   // The keyboard-complete themed project selector, draft ownership guards,
   // media queue admission, deletion cleanup, and detachment ownership live
-  // here while their larger UI stays deferred. Linux x64 measures 707.5 KiB.
-  mainWorkbenchFirstLoadJavaScript: 709 * kibibyte,
-  detachedChatFirstLoadJavaScript: 537 * kibibyte,
+  // here while their larger UI stays deferred. Prompt-history recall and
+  // cancellation recovery bring Linux x64 to 712.6 KiB.
+  mainWorkbenchFirstLoadJavaScript: 714 * kibibyte,
+  detachedChatFirstLoadJavaScript: 542 * kibibyte,
   // The surface and reduced-motion-safe transition system measure 344.7 KiB
   // on Linux x64; keep only narrow cross-platform headroom.
   entryCss: 346 * kibibyte,
@@ -42,9 +43,9 @@ const budgets = {
   morphiconsJavaScript: 20 * kibibyte,
   morphingIconFeedbackJavaScript: 8 * kibibyte,
   // Linux x64 measures the provider-queue, project-picker, draft-ownership,
-  // and exact-focus core at 1,947.3 KiB. Keep narrow headroom here while every
-  // deferred surface retains its strict independent ceiling below.
-  coreJavaScript: 1_948 * kibibyte,
+  // prompt history, and exact-focus core at 1,951.9 KiB. Keep narrow headroom
+  // while every deferred surface retains its strict independent ceiling.
+  coreJavaScript: 1_953 * kibibyte,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

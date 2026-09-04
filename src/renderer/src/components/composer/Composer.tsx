@@ -43,6 +43,7 @@ import { ComposerConversationContextDialog, ComposerConversationContextStrip, co
 import { useComposerDetachmentOwnership } from "./useComposerDetachmentOwnership";
 import { useComposerPrefill } from "./useComposerPrefill";
 import { useComposerPromptStash } from "./useComposerPromptStash";
+import { useComposerPromptHistory } from "./useComposerPromptHistory";
 import { useComposerSkillCompletion } from "./useComposerSkillCompletion";
 import { clearPersistedComposerDraft, persistComposerDraft } from "../../utils/composerDraftPersistence";
 
@@ -75,6 +76,7 @@ export const Composer = memo(function Composer({
   running,
   backendProfiles = [],
   latestTurn = null,
+  promptHistory = [],
   latestTurnSummary = null,
   queuedTurnAuthoritative = true,
   mentionResults,
@@ -461,34 +463,31 @@ export const Composer = memo(function Composer({
   }, []);
 
   const mentionQuery = mentionMatch?.[1] ?? null;
-  useEffect(() => {
-    if (mentionQuery) onMentionQuery(mentionQuery);
-  }, [mentionQuery, onMentionQuery]);
+  useEffect(() => { if (mentionQuery) onMentionQuery(mentionQuery); }, [mentionQuery, onMentionQuery]);
 
   useTextareaAutosize(textareaRef, message);
 
-  const updateMessage = (next: string): void => {
+  const applyMessage = (next: string): void => {
     const previous = draftValueRef.current;
     if (next === previous) return;
-    markEditorChanged();
-    draftValueRef.current = next;
+    markEditorChanged(); draftValueRef.current = next;
     persistDraftChange(conversation.id, previous, next);
-    if (compactNotice) clearCompactNotice();
-    setMessage(next);
+    if (compactNotice) clearCompactNotice(); setMessage(next);
   };
+
+  const promptHistoryController = useComposerPromptHistory({
+    conversationId: conversation.id, entries: promptHistory, latestTurn: latestTurnSummary ?? latestTurn, message,
+    onApplyMessage: applyMessage, readEditorRevision: () => editorRevisionsRef.current.get(conversation.id) ?? 0,
+    canRestoreStoppedPrompt: () => draftValueRef.current.length === 0 && attachmentsRef.current.length === 0 && pendingAttachmentIdsRef.current.size === 0 && !attachmentImportingRef.current && !submittingRef.current && !promptContext && selectedPreviewUrlRef.current === null && fileReferences.length === 0 && contextPacketIds.length === 0 && pendingRoute === null, textareaRef,
+  });
+  const updateMessage = promptHistoryController.replaceMessage;
 
   const addFileReference = (path: string): void => {
     if (fileReferences.includes(path)) return;
-    markEditorChanged();
-    setFileReferences([...fileReferences, path]);
+    markEditorChanged(); setFileReferences([...fileReferences, path]);
   };
 
-  const clearPromptContext = (): void => {
-    if (!promptContext) return;
-    markEditorChanged();
-    promptContextsRef.current.set(conversation.id, null);
-    onClearPromptContext?.();
-  };
+  const clearPromptContext = (): void => { if (promptContext) { markEditorChanged(); promptContextsRef.current.set(conversation.id, null); onClearPromptContext?.(); } };
 
   const togglePreviewContext = (): void => {
     markEditorChanged();
@@ -560,7 +559,7 @@ export const Composer = memo(function Composer({
       }
       if (!mountedRef.current || conversationIdRef.current !== submittedConversationId) return;
       if (editorUnchanged) {
-        draftValueRef.current = "";
+        promptHistoryController.reset(""); draftValueRef.current = "";
         setMessage("");
         setAttachments([]);
         setFileReferences([]);
@@ -730,7 +729,7 @@ export const Composer = memo(function Composer({
       || contextPacketIds.length > 0,
     flushDraftPersistence, conversationIdRef, mountedRef, submittingRef,
     editorRevisions: editorRevisionsRef,
-    draftValueRef, textareaRef, setMessage, setSubmitting, onCompact,
+    draftValueRef, textareaRef, clearMessage: () => { promptHistoryController.reset(""); setMessage(""); }, setSubmitting, onCompact,
   });
   const followUpState = composerFollowUpState({
     running,
@@ -761,7 +760,7 @@ export const Composer = memo(function Composer({
     attachmentsRef.current = []; setAttachments([]);
     pendingAttachmentIdsRef.current = new Set(); setPendingAttachmentIds(new Set());
     flushDraftPersistence(); clearPersistedComposerDraft(queuedConversationId, queuedMessage);
-    markEditorChanged(); draftValueRef.current = ""; setMessage(""); window.requestAnimationFrame(() => textareaRef.current?.focus());
+    markEditorChanged(); promptHistoryController.reset(""); draftValueRef.current = ""; setMessage(""); window.requestAnimationFrame(() => textareaRef.current?.focus());
   };
   const runRouteRepair = async (): Promise<void> => {
     if (routeReadiness.ready || !routeReadiness.action || routeRepairing) return;
@@ -1124,7 +1123,8 @@ export const Composer = memo(function Composer({
           }}
           textareaRef={textareaRef}
           message={message}
-          onMessageChange={updateMessage}
+          onMessageChange={promptHistoryController.onMessageChange}
+          onNavigatePromptHistory={promptHistoryController.navigate}
           onImportAttachments={importAttachments}
           onSubmit={submit}
           canQueue={canQueue}

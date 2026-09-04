@@ -54,6 +54,7 @@ import type {
   WorkspaceEntry,
 } from "@shared/contracts";
 import type { WorkspaceFileLocation } from "../utils/workspaceFileReference";
+import { isAgentTurnTerminalStatus } from "@shared/turn-lifecycle";
 import type { ComposerAttachmentImportLease } from "../utils/composerAttachments";
 import type { ProviderIdentityLabels } from "@shared/provider-identities";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
@@ -90,6 +91,7 @@ import type {
 import type { FinalAnswerAutoScrollEvent } from "./response-timeline/types";
 import { LoadingMark } from "./ui";
 import { ProviderMaintenanceNotice } from "./ProviderMaintenanceNotice";
+import { notifyComposerStopRestore } from "../utils/composerStopRestore";
 import "./ChatWorkspace.css";
 
 const ResponseTimeline = lazy(async () => ({
@@ -323,9 +325,8 @@ export function ChatWorkspace({
   const selectedReasoningEffort = conversation?.modelSelection.reasoningEffort
     ?.trim().toLowerCase() ?? "";
   const keyboardHelpId = useId();
-  const stopTimeline = useCallback(() => {
-    void onStop().catch(() => undefined);
-  }, [onStop]);
+  const stopRestoreSequenceRef = useRef(0);
+  const stopsInFlightRef = useRef(new Map<string, Promise<void>>());
   const scrollRef = useRef<HTMLDivElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
   const composerRegionRef = useRef<HTMLDivElement>(null);
@@ -398,6 +399,70 @@ export function ChatWorkspace({
       turnId: queueTurnOwner.id,
     })];
   const ownedMessages = recordsOwnedByConversation(messages, conversationId);
+  const stopTurn = latestTurnSummary
+    ? ownedTurns.find(({ id }) => id === latestTurnSummary.id) ?? null
+    : ownedTurns.at(-1) ?? null;
+  const stopTurnStatus = latestTurnSummary
+    && latestTurnSummary.id === stopTurn?.id
+    ? latestTurnSummary.status
+    : stopTurn?.status ?? null;
+  const stopOwner = `${conversationId ?? "none"}:${stopTurn?.id ?? "unknown"}`;
+  useEffect(() => {
+    if (!stopTurnStatus || isAgentTurnTerminalStatus(stopTurnStatus)) {
+      stopsInFlightRef.current.clear();
+      return;
+    }
+    for (const owner of stopsInFlightRef.current.keys()) {
+      if (owner !== stopOwner) stopsInFlightRef.current.delete(owner);
+    }
+  }, [stopOwner, stopTurnStatus]);
+  const promptHistory = useMemo(() => ownedMessages
+    .filter(({ role, content }) => role === "user" && Boolean(content.trim()))
+    .map(({ id, content }) => ({ id, content })), [ownedMessages]);
+  const stopWithPromptRestore = useCallback(async (): Promise<void> => {
+    const stoppedConversationId = conversation?.id ?? null;
+    const activeTurn = stopTurn;
+    const activePrompt = activeTurn
+      ? ownedMessages.find(({ id }) => id === activeTurn.userMessageId) ?? null
+      : null;
+    const inFlight = stopsInFlightRef.current.get(stopOwner);
+    if (inFlight) {
+      await inFlight;
+      return;
+    }
+    const detail = stoppedConversationId
+      && activeTurn
+      && activePrompt?.content.trim()
+      ? {
+          requestId: `${stoppedConversationId}:${++stopRestoreSequenceRef.current}`,
+          conversationId: stoppedConversationId,
+          turnId: activeTurn.id,
+          messageId: activePrompt.id,
+          text: activePrompt.content,
+        }
+      : null;
+    const operation = (async (): Promise<void> => {
+      if (detail) notifyComposerStopRestore({ ...detail, phase: "start" });
+      try {
+        await onStop();
+      } catch (error) {
+        if (detail) notifyComposerStopRestore({ ...detail, phase: "failed" });
+        throw error;
+      }
+    })();
+    stopsInFlightRef.current.set(stopOwner, operation);
+    try {
+      await operation;
+    } catch (error) {
+      if (stopsInFlightRef.current.get(stopOwner) === operation) {
+        stopsInFlightRef.current.delete(stopOwner);
+      }
+      throw error;
+    }
+  }, [conversation?.id, onStop, ownedMessages, stopOwner, stopTurn]);
+  const stopTimeline = useCallback(() => {
+    void stopWithPromptRestore().catch(() => undefined);
+  }, [stopWithPromptRestore]);
   const ownedActivities = recordsOwnedByConversation(activities, conversationId);
   const ownedSubagents = recordsOwnedByConversation(subagents, conversationId);
   const ownedReasonings = recordsOwnedByConversation(reasonings, conversationId);
@@ -952,6 +1017,7 @@ export function ChatWorkspace({
           running={conversation.status === "running" || conversation.status === "needs-input"}
           backendProfiles={backendProfiles}
           latestTurn={ownedTurns.at(-1) ?? null}
+          promptHistory={promptHistory}
           latestTurnSummary={latestTurnSummary}
           queuedTurnAuthoritative={queuedTurnAuthoritative}
           onSend={sendMessage}
@@ -977,7 +1043,7 @@ export function ChatWorkspace({
           resumeOptions={resumeOptions}
           onResumeConversation={onResumeConversation}
           onUsageDisplayModeChange={onUsageDisplayModeChange}
-          onStop={onStop}
+          onStop={stopWithPromptRestore}
           onClearPromptContext={onClearPromptContext}
         />
       </div>

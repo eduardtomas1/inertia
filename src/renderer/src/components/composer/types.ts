@@ -43,6 +43,7 @@ export interface ComposerProps {
   running: boolean;
   backendProfiles?: ModelBackendProfileView[];
   latestTurn?: AgentTurn | null;
+  promptHistory?: readonly ComposerPromptHistoryEntry[];
   latestTurnSummary?: ConversationLatestTurnSummary | null;
   queuedTurnAuthoritative?: boolean;
   mentionResults: WorkspaceEntry[];
@@ -110,6 +111,11 @@ export interface ComposerProps {
   onResumeConversation?: (conversationId: string) => void;
   onStop: () => Promise<void>;
   onClearPromptContext?: () => void;
+}
+
+export interface ComposerPromptHistoryEntry {
+  id: string;
+  content: string;
 }
 
 export interface NewChatProjectPicker {

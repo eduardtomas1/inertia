@@ -17,6 +17,10 @@ import type {
   TranscriptMessageSendAcceptance,
 } from "../../src/renderer/src/utils/transcriptNavigation";
 import type { FinalAnswerAutoScrollEvent } from "../../src/renderer/src/components/response-timeline/types";
+import {
+  COMPOSER_STOP_RESTORE_EVENT,
+  type ComposerStopRestoreDetail,
+} from "../../src/renderer/src/utils/composerStopRestore";
 
 vi.mock("../../src/renderer/src/hooks/useNativePreviewSuspension", () => ({
   useNativePreviewSuspension: () => undefined,
@@ -24,6 +28,9 @@ vi.mock("../../src/renderer/src/hooks/useNativePreviewSuspension", () => ({
 
 const composerRenderCount = vi.hoisted(() => ({ value: 0 }));
 const composerSendResult = vi.hoisted(() => ({ value: undefined as unknown }));
+const composerHistoryProjection = vi.hoisted(() => ({
+  value: [] as Array<{ id: string; content: string }>,
+}));
 const timelineCallbacks = new Map<
   string,
   (event: FinalAnswerAutoScrollEvent) => void
@@ -39,6 +46,8 @@ vi.mock("../../src/renderer/src/components/Composer", async () => {
     Composer: memo(function MockComposer({
       onSend,
       running,
+      promptHistory,
+      onStop,
       newChatProjectPicker,
     }: {
       onSend(
@@ -46,6 +55,8 @@ vi.mock("../../src/renderer/src/components/Composer", async () => {
         attachments: [],
       ): Promise<TranscriptMessageSendAcceptance | null | void>;
       running: boolean;
+      promptHistory?: readonly { id: string; content: string }[];
+      onStop: () => Promise<void>;
       newChatProjectPicker?: {
         projects: readonly Project[];
         selectedProject: Project;
@@ -54,6 +65,7 @@ vi.mock("../../src/renderer/src/components/Composer", async () => {
       };
     }): React.JSX.Element {
       composerRenderCount.value += 1;
+      composerHistoryProjection.value = [...(promptHistory ?? [])];
       return (
         <>
           <span data-testid="composer-running-state">
@@ -85,6 +97,9 @@ vi.mock("../../src/renderer/src/components/Composer", async () => {
           >
             Send materialized draft
           </button>
+          <button type="button" onClick={() => void onStop()}>
+            Stop from composer mock
+          </button>
         </>
       );
     }),
@@ -103,6 +118,7 @@ vi.mock("../../src/renderer/src/components/ResponseTimeline", async () => {
       onFinalAnswerAutoScroll,
       onReaderNavigationIntent,
       onTurnAnchorSettled,
+      onStop,
     }: {
       conversationId: string;
       turns: AgentTurn[];
@@ -112,6 +128,7 @@ vi.mock("../../src/renderer/src/components/ResponseTimeline", async () => {
       onFinalAnswerAutoScroll?: (event: FinalAnswerAutoScrollEvent) => void;
       onReaderNavigationIntent?: () => void;
       onTurnAnchorSettled?: (turnId: string) => void;
+      onStop: () => void;
     }) => {
       useEffect(() => {
         timelineLifecycle.mounts += 1;
@@ -128,6 +145,7 @@ vi.mock("../../src/renderer/src/components/ResponseTimeline", async () => {
           <button type="button" onClick={onReaderNavigationIntent}>
             Navigate response timeline
           </button>
+          <button type="button" onClick={onStop}>Stop from timeline mock</button>
           {turnAnchorId && (
             <button
               type="button"
@@ -332,6 +350,7 @@ beforeEach(() => {
   timelineLifecycle.mounts = 0;
   timelineLifecycle.unmounts = 0;
   composerSendResult.value = undefined;
+  composerHistoryProjection.value = [];
 });
 
 afterEach(() => {
@@ -340,6 +359,111 @@ afterEach(() => {
 });
 
 describe("draft turn anchoring", () => {
+  it("projects owned prompts and arms exact-turn restoration from both Stop surfaces", async () => {
+    const activeConversation = {
+      ...conversation("conversation-stop-restore"),
+      status: "running" as const,
+    };
+    const activeTurn = agentTurn(activeConversation, "running");
+    const messages: ChatMessage[] = [
+      {
+        id: activeTurn.userMessageId,
+        conversationId: activeConversation.id,
+        turnId: activeTurn.id,
+        role: "user",
+        content: "Restore this exact request",
+        attachments: [],
+        createdAt: "2026-08-02T10:00:00.000Z",
+      },
+      {
+        id: "assistant-answer",
+        conversationId: activeConversation.id,
+        turnId: activeTurn.id,
+        role: "assistant",
+        content: "Not prompt history",
+        attachments: [],
+        createdAt: "2026-08-02T10:00:01.000Z",
+      },
+      {
+        id: "foreign-user-message",
+        conversationId: "another-conversation",
+        turnId: "foreign-turn",
+        role: "user",
+        content: "Never leak this prompt",
+        attachments: [],
+        createdAt: "2026-08-02T10:00:02.000Z",
+      },
+    ];
+    const onStop = vi.fn(async () => undefined);
+    const restoreEvents: ComposerStopRestoreDetail[] = [];
+    const captureRestore = (event: Event): void => {
+      restoreEvents.push(
+        (event as CustomEvent<ComposerStopRestoreDetail>).detail,
+      );
+    };
+    window.addEventListener(COMPOSER_STOP_RESTORE_EVENT, captureRestore);
+    const view = render(<ChatWorkspace
+      {...workspaceProps(activeConversation, async () => null)}
+      turns={[activeTurn]}
+      messages={messages}
+      onStop={onStop}
+    />);
+
+    expect(composerHistoryProjection.value).toEqual([{
+      id: activeTurn.userMessageId,
+      content: "Restore this exact request",
+    }]);
+    fireEvent.click(screen.getByRole("button", {
+      name: "Stop from composer mock",
+    }));
+    fireEvent.click(await screen.findByRole("button", {
+      name: "Stop from timeline mock",
+    }));
+    await waitFor(() => expect(onStop).toHaveBeenCalledOnce());
+    expect(restoreEvents).toHaveLength(1);
+    expect(restoreEvents.map(({ phase, conversationId, turnId, messageId, text }) => ({
+      phase, conversationId, turnId, messageId, text,
+    }))).toEqual([{
+      phase: "start",
+      conversationId: activeConversation.id,
+      turnId: activeTurn.id,
+      messageId: activeTurn.userMessageId,
+      text: "Restore this exact request",
+    }]);
+
+    restoreEvents.length = 0;
+    onStop.mockClear();
+    view.rerender(<ChatWorkspace
+      {...workspaceProps(activeConversation, async () => null)}
+      latestTurnSummary={{
+        id: "turn-detail-not-loaded",
+        runId: "run-detail-not-loaded",
+        status: "running",
+        providerId: activeTurn.providerId,
+        harnessId: activeTurn.harnessId,
+        backendProfileId: activeTurn.backendProfileId,
+        modelSelection: activeTurn.modelSelection,
+        continuationIdentity: activeTurn.continuationIdentity,
+        model: activeTurn.model,
+        reasoningEffort: activeTurn.reasoningEffort,
+        requestedAt: activeTurn.requestedAt,
+        startedAt: activeTurn.startedAt,
+        completedAt: null,
+        terminalReason: null,
+        updatedAt: activeTurn.updatedAt,
+      }}
+      turns={[activeTurn]}
+      messages={messages}
+      onStop={onStop}
+    />);
+    fireEvent.click(screen.getByRole("button", {
+      name: "Stop from composer mock",
+    }));
+    await waitFor(() => expect(onStop).toHaveBeenCalledOnce());
+    expect(restoreEvents).toEqual([]);
+    window.removeEventListener(COMPOSER_STOP_RESTORE_EVENT, captureRestore);
+  });
+
   it("uses a restrained project-aware prompt for an empty chat", () => {
     const view = render(
       <ChatWorkspace

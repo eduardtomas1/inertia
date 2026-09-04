@@ -19,9 +19,11 @@ import { MAX_CHAT_MESSAGE_CHARS } from "../../../../shared/diff-review";
 import type { composerRouteReadiness } from "../../utils/composerReadiness";
 import { promptContextDetail } from "../../utils/requestContext";
 import {
+  composerPromptHistoryDirection,
   handleComposerSuggestionKey,
   shouldSubmitComposerKey,
 } from "../../utils/composerKeyboard";
+import type { ComposerPromptHistoryDirection } from "./useComposerPromptHistory";
 import {
   nextSidebarNavigationIndex,
   type SidebarNavigationKey,
@@ -74,6 +76,9 @@ export interface ComposerInputZoneProps {
   textareaRef: RefObject<HTMLTextAreaElement | null>;
   message: string;
   onMessageChange: (message: string) => void;
+  onNavigatePromptHistory: (
+    direction: ComposerPromptHistoryDirection,
+  ) => boolean;
   onImportAttachments: (files: File[]) => Promise<void>;
   onSubmit: () => Promise<void>;
   canQueue: boolean;
@@ -130,6 +135,7 @@ export function ComposerInputZone({
   textareaRef,
   message,
   onMessageChange,
+  onNavigatePromptHistory,
   onImportAttachments,
   onSubmit,
   canQueue,
@@ -426,6 +432,19 @@ export function ComposerInputZone({
               if (activeSlashCommand) {
                 activateSlashCommand(activeSlashCommand);
               }
+              return;
+            }
+            const historyDirection = composerPromptHistoryDirection(
+              event,
+              event.currentTarget,
+            );
+            if (
+              !submissionPending
+              && !followUpPending
+              && historyDirection
+              && onNavigatePromptHistory(historyDirection)
+            ) {
+              event.preventDefault();
               return;
             }
             if (

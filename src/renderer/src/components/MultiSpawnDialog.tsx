@@ -3,12 +3,11 @@ import {
   Check,
   Folder,
   KeyRound,
-  MessagesSquare,
   Scale,
+  Share2,
   ShieldCheck,
   TriangleAlert,
   X,
-  Zap,
 } from "lucide-react";
 import {
   useEffect,
@@ -314,7 +313,7 @@ export function MultiSpawnDialog({
   const [copiedRecoveryCommand, setCopiedRecoveryCommand] = useState<
     string | null
   >(null);
-  useNativePreviewSuspension(open);
+  useNativePreviewSuspension(true);
   const busy = submitting
     || cancelling
     || acknowledgingRecovery
@@ -436,7 +435,7 @@ export function MultiSpawnDialog({
     return () => document.removeEventListener("keydown", handleKeyDown, true);
   }, [cancelling, onClose, open]);
 
-  if (!open || !snapshot || !draft) return null;
+  if (!snapshot || !draft) return null;
 
   const routeStateFor = (side: MultiSpawnSideDraft): RouteState => {
     const providerId = legacyProviderIdForHarness(side.selection.harnessId);
@@ -574,7 +573,7 @@ export function MultiSpawnDialog({
       >
         <header className="multi-spawn-dialog-header">
           <span className="multi-spawn-dialog-mark">
-            <MessagesSquare size={18} strokeWidth={1.9} />
+            <Share2 size={17} strokeWidth={1.75} />
           </span>
           <span>
             <h2 id="multi-spawn-title">Launch a duo</h2>
@@ -959,7 +958,7 @@ export function MultiSpawnDialog({
                 : undefined)}
               onClick={submitDraft}
             >
-              {submitting ? <LoadingMark label="Launching duo" /> : <Zap size={14} />}
+              {submitting ? <LoadingMark label="Launching duo" /> : null}
               {submitting ? "Launching duo…" : "Launch duo"}
             </button>
           </div>

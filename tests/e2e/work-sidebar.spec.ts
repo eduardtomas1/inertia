@@ -96,16 +96,18 @@ test("keeps compact Work sidebar geometry", async ({
     const statusCue = row.locator('[data-work-status="idle"]');
     await expect(statusCue.locator("svg.lucide-minus")).toBeVisible();
     const statusBox = await statusCue.boundingBox();
-    expect(statusBox?.width).toBe(11);
-    expect(statusBox?.height).toBe(11);
+    expect(statusBox).not.toBeNull();
+    expect(statusBox!.width).toBeCloseTo(11, 3);
+    expect(statusBox!.height).toBeCloseTo(11, 3);
     for (const providerId of ["codex", "claude", "cursor", "kimi", "opencode"]) {
       const icon = sidebar.locator(
         `.provider-brand-icon[data-provider-id="${providerId}"][data-provider-icon-kind="official"]`,
       ).first();
       await expect(icon).toBeVisible();
       const box = await icon.boundingBox();
-      expect(box?.width).toBe(15);
-      expect(box?.height).toBe(15);
+      expect(box).not.toBeNull();
+      expect(box!.width).toBeCloseTo(15, 3);
+      expect(box!.height).toBeCloseTo(15, 3);
       const imageSize = await icon.locator("img").first().evaluate((image) => ({
         naturalWidth: (image as HTMLImageElement).naturalWidth,
         naturalHeight: (image as HTMLImageElement).naturalHeight,

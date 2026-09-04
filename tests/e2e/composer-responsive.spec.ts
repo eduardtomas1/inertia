@@ -133,8 +133,8 @@ test("keeps the composer as one cohesive dock across themes and responsive split
       contained: true,
       fits: true,
       wraps: true,
-      projectDecoration: "underline",
-      projectDecorationStyle: "dotted",
+      projectDecoration: "none",
+      projectDecorationStyle: "solid",
     });
     expect(longHeadingGeometry.fontSize).toBeGreaterThanOrEqual(26);
     expect(longHeadingGeometry.fontSize).toBeLessThanOrEqual(34);
@@ -753,10 +753,9 @@ test("keeps the composer as one cohesive dock across themes and responsive split
 
     await setWorkspaceTools(false);
     await resizeWindow(760, 680);
-    if (await navigation.isVisible()) {
-      await page.getByRole("button", { name: "Toggle project navigation" }).click();
-      await expect(navigation).toBeHidden();
-    }
+    const closeNavigation = navigation.getByRole("button", { name: "Close navigation" });
+    if (await closeNavigation.isVisible()) await closeNavigation.click();
+    await expect(navigation).toBeHidden();
     const narrowDock = page.getByRole("region", { name: "Message composer" });
     await expectComposerEndsAtDock(narrowDock);
     await expectComposerReadinessContained(narrowDock);

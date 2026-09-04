@@ -6,6 +6,13 @@ const sidebarSource = readFileSync(
   new URL("../../src/renderer/src/components/Sidebar.tsx", import.meta.url),
   "utf8",
 );
+const projectStateSource = readFileSync(
+  new URL(
+    "../../src/renderer/src/components/sidebar/SidebarProjectState.tsx",
+    import.meta.url,
+  ),
+  "utf8",
+);
 const styles = readFileSync(
   new URL("../../src/renderer/src/styles.css", import.meta.url),
   "utf8",
@@ -20,9 +27,9 @@ describe("classic sidebar current-state presentation", () => {
       "aria-current={snapshot?.activeConversationId === conversation.id",
     );
     expect(sidebarSource).toContain('aria-current={isActive ? "page" : undefined}');
-    expect(sidebarSource).toContain(
-      "aria-label={`Project status: ${project.status}`}",
-    );
+    expect(sidebarSource).toContain("<SidebarProjectState");
+    expect(projectStateSource).toContain("{PROJECT_STATUS_LABELS[status]}");
+    expect(projectStateSource).toContain('aria-hidden="true"');
     expect(sidebarSource).toContain(
       "aria-label={`Chat status: ${statusLabels[thread.status]}`}",
     );

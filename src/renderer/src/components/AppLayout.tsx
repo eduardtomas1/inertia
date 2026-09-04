@@ -28,6 +28,7 @@ import type { CommandWithoutId } from "../lib/runtimeCommands";
 import { rootGitMutationScope } from "../utils/workspaceGit";
 import { AppNavigationOverlays } from "./AppNavigationOverlays";
 import { AppStatusOverlays } from "./AppStatusOverlays";
+import { DialogPresence } from "./DialogPresence";
 import type { CommitDialogProps } from "./CommitDialog";
 import { PaneResizeHandle } from "./PaneResizeHandle";
 import { LoadingMark } from "./ui";
@@ -429,12 +430,19 @@ export function AppLayout({
     mobileSidebarOpen: mobileNavigation && sidebarOpen,
     });
 
+  const [appBooted, setAppBooted] = useState(false);
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => setAppBooted(true));
+    return () => cancelAnimationFrame(frame);
+  }, []);
+
   return (
     <div
       ref={appShellRef}
       className={`app-shell platform-${platform}${
         sidebarCollapsed && !mobileNavigation ? " is-sidebar-collapsed" : ""
       }`}
+      data-app-boot={appBooted ? "ready" : "initial"}
       data-interface-scale={settings.interfaceScale}
       data-runtime-generation={connection.runtimeGeneration ?? undefined}
       data-connection-status={connection.status}
@@ -636,6 +644,7 @@ export function AppLayout({
           <div
             ref={workspaceBodyRef}
             id="workspace-content"
+            data-view={view}
             className={`workspace-body${
               view === "workspace" && !splitConversationId && toolsVisible
                 ? " has-tools"
@@ -676,9 +685,10 @@ export function AppLayout({
           />
         </Suspense>
       )}
-      {dailyWorkOpen && (
+      <DialogPresence open={dailyWorkOpen}>
         <Suspense fallback={null}>
           <DailyWorkDialog
+            open={dailyWorkOpen}
             status={usage.status}
             request={usage.request}
             onClose={() => setDailyWorkOpen(false)}
@@ -694,7 +704,7 @@ export function AppLayout({
             }}
           />
         </Suspense>
-      )}
+      </DialogPresence>
       {pullRequestDialogOpen && project && rootRepository && (
         <Suspense fallback={null}>
           <PullRequestDialog
@@ -711,10 +721,10 @@ export function AppLayout({
           />
         </Suspense>
       )}
-      {multiSpawn.open && (
+      <DialogPresence open={multiSpawn.open}>
         <Suspense fallback={null}>
           <MultiSpawnDialog
-            open
+            open={multiSpawn.open}
             snapshot={connection.snapshot}
             settings={settings}
             submitting={multiSpawn.submitting}
@@ -737,7 +747,7 @@ export function AppLayout({
             onOpenBackendSetup={actions.openBackendSetup}
           />
         </Suspense>
-      )}
+      </DialogPresence>
       <AppNavigationOverlays
         snapshot={connection.snapshot}
         paletteOpen={paletteOpen}

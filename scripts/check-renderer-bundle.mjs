@@ -9,11 +9,18 @@ const kibibyte = 1024;
 // visible even when Rollup moves shared modules between chunks.
 const budgets = {
   entryJavaScript: 205 * kibibyte,
-  // The in-chat project selector plus media queue admission, deletion cleanup,
-  // and detachment ownership live here while their larger UI stays deferred.
-  mainWorkbenchFirstLoadJavaScript: 704 * kibibyte,
-  detachedChatFirstLoadJavaScript: 535 * kibibyte,
-  entryCss: 340 * kibibyte,
+  // The keyboard-complete themed project selector, draft ownership guards,
+  // media queue admission, deletion cleanup, and detachment ownership live
+  // here while their larger UI stays deferred. Prompt-history recall and
+  // cancellation recovery bring Linux x64 to 712.6 KiB.
+  mainWorkbenchFirstLoadJavaScript: 714 * kibibyte,
+  detachedChatFirstLoadJavaScript: 542 * kibibyte,
+  // The surface and reduced-motion-safe transition system measure 344.7 KiB
+  // on Linux x64; keep only narrow cross-platform headroom.
+  entryCss: 346 * kibibyte,
+  // The eagerly preloaded five-theme syntax and status palette is kept
+  // separate from the generated entry stylesheet. It measures 11.4 KiB.
+  colorThemesCss: 12 * kibibyte,
   detachedChatCss: 8 * kibibyte,
   settingsJavaScript: 50 * kibibyte,
   filesFirstLoadJavaScript: 115 * kibibyte,
@@ -35,10 +42,10 @@ const budgets = {
   preMergeConfidenceJavaScript: 28 * kibibyte,
   morphiconsJavaScript: 20 * kibibyte,
   morphingIconFeedbackJavaScript: 8 * kibibyte,
-  // Linux x64 measures the provider-queue and exact-focus core at 1,942.6 KiB.
-  // Keep narrow cross-platform headroom here while every deferred surface
-  // retains its strict independent ceiling below.
-  coreJavaScript: 1_943 * kibibyte,
+  // Linux x64 measures the provider-queue, project-picker, draft-ownership,
+  // prompt history, and exact-focus core at 1,951.9 KiB. Keep narrow headroom
+  // while every deferred surface retains its strict independent ceiling.
+  coreJavaScript: 1_953 * kibibyte,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };
@@ -260,6 +267,7 @@ if (!morphingIconFeedbackJavaScript) {
 }
 
 const entryCssBytes = await assetBytes(entryCss);
+const colorThemesCssBytes = await assetBytes("color-themes.css");
 const detachedChatCssBytes = await assetBytes(`assets/${detachedChatCss}`);
 const entryJavaScriptName = entryJavaScript.replace(/^assets\//u, "");
 const entryJavaScriptClosure = await javaScriptClosure(entryJavaScriptName);
@@ -408,6 +416,7 @@ const measurements = {
   mainWorkbenchFirstLoadJavaScript: mainWorkbenchFirstLoadJavaScriptBytes,
   detachedChatFirstLoadJavaScript: detachedChatFirstLoadJavaScriptBytes,
   entryCss: entryCssBytes,
+  colorThemesCss: colorThemesCssBytes,
   detachedChatCss: detachedChatCssBytes,
   settingsJavaScript: settingsJavaScriptBytes,
   filesFirstLoadJavaScript: filesFirstLoadJavaScriptBytes,

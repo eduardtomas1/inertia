@@ -29,7 +29,7 @@ export function useComposerCompaction(options: {
   submittingRef: MutableRefObject<boolean>;
   draftValueRef: MutableRefObject<string>;
   textareaRef: RefObject<HTMLTextAreaElement | null>;
-  setMessage: Dispatch<SetStateAction<string>>;
+  clearMessage: () => void;
   setSubmitting: Dispatch<SetStateAction<boolean>>;
   onCompact: (instruction?: string) => Promise<{ message: string }>;
 }): {
@@ -50,7 +50,7 @@ export function useComposerCompaction(options: {
     submittingRef,
     draftValueRef,
     textareaRef,
-    setMessage,
+    clearMessage,
     setSubmitting,
     onCompact,
   } = options;
@@ -126,7 +126,7 @@ export function useComposerCompaction(options: {
         clearPersistedComposerDraft(ownerId, submittedDraft);
         if (ownsVisibleComposer) {
           draftValueRef.current = "";
-          setMessage("");
+          clearMessage();
         }
       }
       setCompactNotice(ownerId, { kind: "success", message: result.message });

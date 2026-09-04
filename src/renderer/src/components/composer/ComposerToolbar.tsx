@@ -47,6 +47,7 @@ import {
   type ComposerSettingsModel,
 } from "./ComposerSettings";
 import { ComposerSendActionsFallback } from "./ComposerSendActionsFallback";
+import { ProjectPicker } from "./ProjectPicker";
 import type { ComposerMenuController } from "./useComposerMenus";
 import type { NewChatProjectPicker, PromptPresetCommandRunner } from "./types";
 import type { AgentTurnStatus } from "../../../../shared/turn-lifecycle";
@@ -533,32 +534,7 @@ export function ComposerToolbar({
           aria-label="Chat checkout context"
         >
           {newChatProjectPicker ? (
-            <label className="composer-project-picker">
-              <span
-                className="composer-project-picker-dot"
-                style={{
-                  "--project-color": newChatProjectPicker.selectedProject.color
-                    ?? "var(--accent)",
-                } as React.CSSProperties}
-                aria-hidden="true"
-              />
-              <span className="composer-project-picker-label">Project</span>
-              <select
-                aria-label="Project"
-                value={newChatProjectPicker.selectedProject.id}
-                disabled={newChatProjectPicker.disabled}
-                onChange={(event) => newChatProjectPicker.onChange(
-                  newChatProjectPicker.projects[event.currentTarget.selectedIndex]!,
-                )}
-              >
-                {newChatProjectPicker.projects.map((project) => (
-                  <option value={project.id} key={project.id}>
-                    {project.name}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown size={11} aria-hidden="true" />
-            </label>
+            <ProjectPicker picker={newChatProjectPicker} />
           ) : (
             <span className="composer-checkout-location">
               <FolderGit2 size={12} aria-hidden="true" />

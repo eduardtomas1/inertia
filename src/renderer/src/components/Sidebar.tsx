@@ -28,11 +28,11 @@ import {
   Pencil,
   Search,
   Settings,
+  Share2,
   ShieldAlert,
   SquarePen,
   Trash2,
   X,
-  Zap,
 } from "lucide-react";
 import clsx from "clsx";
 import type { Conversation, Project, ProjectGroupingMode } from "@shared/contracts";
@@ -72,7 +72,7 @@ import {
   EMPTY_DETACHED_CONVERSATION_IDS,
   SidebarConversationMarks,
 } from "./sidebar/SidebarConversationMarks";
-
+import { sidebarChatEntranceStyle, SidebarProjectDisclosure, SidebarProjectState } from "./sidebar/SidebarProjectState";
 const WORK_DONE_PAGE_SIZE = 10;
 const WORK_SECTIONS_STORAGE_KEY = "inertia:sidebar:work-sections:v1";
 const EMPTY_CONVERSATIONS: readonly Conversation[] = [];
@@ -986,14 +986,10 @@ function SidebarView({
               onPointerEnter={() => void loadMultiSpawnDialog()}
               onClick={onOpenMultiSpawn}
             >
-              <Zap size={15} fill="currentColor" />
+              <Share2 size={15} strokeWidth={1.75} />
             </IconButton>
           </div>
         )}
-
-        <button type="button" className={clsx("sidebar-destination", view === "workspace" && "is-active")} aria-current={view === "workspace" ? "page" : undefined} onClick={() => navigate("workspace")}>
-          <MessageSquare size={16} /><span>Workspace</span>
-        </button>
 
         <div className="sidebar-mode-switch" role="group" aria-label="Sidebar mode">
           <button type="button" aria-pressed={sidebarMode === "classic"} disabled={connectionStatus !== "online"} onClick={() => onSidebarModeChange("classic")}><ListTree size={13} />Projects</button>
@@ -1036,7 +1032,7 @@ function SidebarView({
           </div>
         )}
 
-        <div className="project-list" ref={navigationRef} onKeyDown={handleNavigationKeyDown} onScroll={updateWorkViewport} role="list" aria-label={sidebarMode === "activity" ? "Work" : "Projects"}>
+        <div className="project-list" data-sidebar-mode={sidebarMode} ref={navigationRef} onKeyDown={handleNavigationKeyDown} onScroll={updateWorkViewport} role="list" aria-label={sidebarMode === "activity" ? "Work" : "Projects"}>
           {!snapshot && <div className="sidebar-loading"><LoadingMark label="Loading projects" /><span>Opening your workspace…</span></div>}
           {snapshot && sidebarMode === "classic" && visibleProjects.length === 0 && (
             <div className="sidebar-empty"><Folder size={19} /><span>{query ? "No matching projects" : "No projects yet"}</span></div>
@@ -1053,9 +1049,11 @@ function SidebarView({
                 return (
                   <div className="project-group" role="listitem" key={project.id}>
                     <div className={clsx("project-row", isActive && view === "workspace" && "is-active")}>
-                      <IconButton label={`${isExpanded ? "Collapse" : "Expand"} ${project.name}`} className="project-expand" onClick={() => toggleExpanded(project.id)}>
-                        {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                      </IconButton>
+                      <SidebarProjectDisclosure
+                        expanded={isExpanded}
+                        projectName={project.name}
+                        onToggle={() => toggleExpanded(project.id)}
+                      />
                       <button
                         type="button"
                         className="project-select"
@@ -1065,15 +1063,13 @@ function SidebarView({
                           : undefined}
                         onClick={() => { onSelectProject(project); onViewChange("workspace"); onClose(); }}
                       >
-                        <Folder className="project-icon" size={15} />
                         <span className="project-copy">
                           <span className="project-name">{project.name}</span>
                           {group.projects.length > 1 && <span className="project-scope">{project.repositoryRelativePath === "." ? "Repository root" : project.repositoryRelativePath}</span>}
                         </span>
-                        <span
-                          className={clsx("project-status", `status-${project.status}`)}
-                          aria-label={`Project status: ${project.status}`}
-                          title={project.status}
+                        <SidebarProjectState
+                          status={project.status}
+                          conversationCount={conversations.length}
                         />
                       </button>
                       <span className="project-row-actions">
@@ -1106,7 +1102,7 @@ function SidebarView({
 
                     {isExpanded && (
                       <div className="conversation-list" aria-label={`${project.name} threads`}>
-                        {conversations.map((conversation) => {
+                        {conversations.map((conversation, conversationIndex) => {
                           const thread = threadViewsById.get(conversation.id)
                             ?? sidebarThreadView(
                               conversation,
@@ -1121,6 +1117,7 @@ function SidebarView({
                                 "conversation-item",
                                 thread.unread && "is-unread",
                               )}
+                              style={sidebarChatEntranceStyle(conversationIndex)}
                               key={conversation.id}
                             >
                               {renaming === conversation.id ? renameForm(conversation) : (
@@ -1230,13 +1227,16 @@ function SidebarView({
         </div>
 
         <div className="sidebar-footer">
-          <button type="button" className={clsx("sidebar-destination", dailyWorkOpen && "is-open")} aria-haspopup="dialog" aria-expanded={dailyWorkOpen} onFocus={() => void loadDailyWorkDialog()} onPointerDown={() => void loadDailyWorkDialog()} onPointerEnter={() => void loadDailyWorkDialog()} onClick={() => { onOpenDailyWork(); onClose(); }}>
+          <button type="button" title="Workspace" className={clsx("sidebar-destination", view === "workspace" && "is-active")} aria-current={view === "workspace" ? "page" : undefined} onClick={() => navigate("workspace")}>
+            <MessageSquare size={16} /><span>Workspace</span>
+          </button>
+          <button type="button" className={clsx("sidebar-destination", dailyWorkOpen && "is-open")} title="Daily work" aria-haspopup="dialog" aria-expanded={dailyWorkOpen} onFocus={() => void loadDailyWorkDialog()} onPointerDown={() => void loadDailyWorkDialog()} onPointerEnter={() => void loadDailyWorkDialog()} onClick={() => { onOpenDailyWork(); onClose(); }}>
             <DailyWorkMark size={16} /><span>Daily work</span>
           </button>
-          <button type="button" className={clsx("sidebar-destination", view === "usage" && "is-active")} aria-current={view === "usage" ? "page" : undefined} onFocus={() => void loadUsageView()} onPointerDown={() => void loadUsageView()} onPointerEnter={() => void loadUsageView()} onClick={() => navigate("usage")}>
+          <button type="button" className={clsx("sidebar-destination", view === "usage" && "is-active")} title="Usage" aria-current={view === "usage" ? "page" : undefined} onFocus={() => void loadUsageView()} onPointerDown={() => void loadUsageView()} onPointerEnter={() => void loadUsageView()} onClick={() => navigate("usage")}>
             <BarChart3 size={16} /><span>Usage</span>
           </button>
-          <button type="button" className={clsx("sidebar-destination", view === "settings" && "is-active")} aria-current={view === "settings" ? "page" : undefined} onFocus={() => void loadSettingsView()} onPointerDown={() => void loadSettingsView()} onPointerEnter={() => void loadSettingsView()} onClick={() => navigate("settings")}>
+          <button type="button" className={clsx("sidebar-destination", view === "settings" && "is-active")} title="Settings" aria-current={view === "settings" ? "page" : undefined} onFocus={() => void loadSettingsView()} onPointerDown={() => void loadSettingsView()} onPointerEnter={() => void loadSettingsView()} onClick={() => navigate("settings")}>
             <Settings size={16} /><span>Settings</span>
           </button>
         </div>

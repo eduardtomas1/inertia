@@ -15,6 +15,11 @@ import { spawnRuntimeOwnedProcess } from "../../src/node/runtime-owned-processes
 import { providerEnvironment } from "../../src/server/environment";
 import { AgentHarnessRegistry, detectProvider, ProviderManager } from "../../src/server/providers";
 import { providerFailureMessage } from "../../src/server/provider/adapters";
+import {
+  providerAuthLaunchEnvironment,
+  providerAuthLoginArgs,
+  providerAuthStatusArgs,
+} from "../../src/server/provider/auth";
 import { createCliAgentHarness } from "../../src/server/provider/cli-agent-harness";
 import { terminateProcessTreeAndWait } from "../../src/server/process-lifecycle";
 import {
@@ -1048,6 +1053,154 @@ setInterval(() => {}, 1000);
       authState: "unauthenticated",
       canRun: false,
       statusMessage: "Sign in required",
+    });
+  });
+
+  it("accepts Gemini only at the stable ACP version boundary without an auth-status probe", async () => {
+    const executable = join(temporaryRoot(), "gemini");
+    const probes: string[][] = [];
+    await expect(
+      detectProvider(
+        "gemini",
+        { command: executable },
+        {
+          executableCandidates: async () => [executable],
+          probeProcess: async (_candidate, args) => {
+            probes.push([...args]);
+            return {
+              exitCode: 0,
+              output:
+                args[0] === "--version"
+                  ? "Gemini CLI 0.58.0"
+                  : "Gemini CLI\n  --acp  Start the Agent Client Protocol server\n  --session-id <id>  Start a new session with this ID",
+              started: true,
+              timedOut: false,
+              cleanupConfirmed: true,
+            };
+          },
+        },
+      ),
+    ).resolves.toMatchObject({
+      available: true,
+      executable,
+      version: "0.58.0",
+      installState: "installed",
+      authState: "unknown",
+      canRun: true,
+      cleanupConfirmed: true,
+      statusMessage:
+        "Installed; Gemini ACP will verify authentication when a session starts",
+    });
+    expect(probes).toEqual([["--version"], ["--help"]]);
+    expect(providerAuthStatusArgs("gemini")).toBeNull();
+    expect(providerAuthLoginArgs("gemini")).toEqual([]);
+    expect(providerAuthLaunchEnvironment("gemini", { TERM: "xterm" }))
+      .toEqual({ TERM: "xterm", NO_BROWSER: "true" });
+    expect(providerAuthLaunchEnvironment("codex", { TERM: "xterm" }))
+      .toEqual({ TERM: "xterm" });
+  });
+
+  it("reports an old Gemini install as installed but requiring a stable ACP update", async () => {
+    const executable = join(temporaryRoot(), "gemini");
+    const probes: string[][] = [];
+    await expect(
+      detectProvider(
+        "gemini",
+        { command: executable },
+        {
+          executableCandidates: async () => [executable],
+          probeProcess: async (_candidate, args) => {
+            probes.push([...args]);
+            return {
+              exitCode: 0,
+              output:
+                args[0] === "--version"
+                  ? "Gemini CLI 0.29.5"
+                  : "Gemini CLI\n  --experimental-acp  Start experimental ACP",
+              started: true,
+              timedOut: false,
+              cleanupConfirmed: true,
+            };
+          },
+        },
+      ),
+    ).resolves.toMatchObject({
+      available: true,
+      executable,
+      version: "0.29.5",
+      installState: "installed",
+      authState: "unknown",
+      canRun: false,
+      cleanupConfirmed: true,
+      statusMessage:
+        "Gemini 0.29.5 is installed, but stable ACP requires 0.58.0 or newer; update Gemini",
+    });
+    expect(probes).toEqual([["--version"], ["--help"]]);
+  });
+
+  it("rejects a current Gemini candidate that does not advertise the exact ACP flag", async () => {
+    const executable = join(temporaryRoot(), "gemini");
+    await expect(
+      detectProvider(
+        "gemini",
+        { command: executable },
+        {
+          executableCandidates: async () => [executable],
+          probeProcess: async (_candidate, args) => ({
+            exitCode: 0,
+            output:
+              args[0] === "--version"
+                ? "Gemini CLI 0.58.0"
+                : "Gemini CLI\n  --experimental-acp  Start experimental ACP",
+            started: true,
+            timedOut: false,
+            cleanupConfirmed: true,
+          }),
+        },
+      ),
+    ).resolves.toMatchObject({
+      available: true,
+      executable,
+      version: "0.58.0",
+      installState: "installed",
+      authState: "unknown",
+      canRun: false,
+      cleanupConfirmed: true,
+      statusMessage:
+        "Gemini CLI found, but stable ACP is unavailable; update the selected CLI",
+    });
+  });
+
+  it("rejects a current Gemini candidate without an owned session-id flag", async () => {
+    const executable = join(temporaryRoot(), "gemini");
+    await expect(
+      detectProvider(
+        "gemini",
+        { command: executable },
+        {
+          executableCandidates: async () => [executable],
+          probeProcess: async (_candidate, args) => ({
+            exitCode: 0,
+            output:
+              args[0] === "--version"
+                ? "Gemini CLI 0.58.0"
+                : "Gemini CLI\n  --acp  Start the Agent Client Protocol server",
+            started: true,
+            timedOut: false,
+            cleanupConfirmed: true,
+          }),
+        },
+      ),
+    ).resolves.toMatchObject({
+      available: true,
+      executable,
+      version: "0.58.0",
+      installState: "installed",
+      authState: "unknown",
+      canRun: false,
+      cleanupConfirmed: true,
+      statusMessage:
+        "Gemini CLI found, but stable ACP is unavailable; update the selected CLI",
     });
   });
 

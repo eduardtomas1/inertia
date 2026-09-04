@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { RuntimeStore } from "../../src/server/database";
 import type { AgentRunState } from "../../src/shared/contracts";
-import { nativeModelSelection } from "../../src/shared/model-routing";
+import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import { createAppFixture } from "./support/app-fixture";
 
 test("projects exact live run states in the real Electron shell", async ({
@@ -61,7 +61,7 @@ test("projects exact live run states in the real Electron shell", async ({
       });
       const requestedAt = new Date(Date.now() - (3 - index) * 30_000).toISOString();
       const startedAt = new Date(Date.parse(requestedAt) + 1_000).toISOString();
-      const modelSelection = nativeModelSelection({
+      const modelSelection = providerNativeModelSelection({
         providerId: fixture.providerId,
         modelId: fixture.providerId === "claude"
           ? "claude-sonnet-4-5"

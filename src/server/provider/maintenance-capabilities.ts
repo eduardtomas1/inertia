@@ -47,6 +47,7 @@ const PACKAGE_NAMES: Readonly<
 > = {
   codex: "@openai/codex",
   claude: "@anthropic-ai/claude-code",
+  gemini: "@google/gemini-cli",
   kimi: "@moonshot-ai/kimi-code",
   opencode: "opencode-ai",
 };
@@ -57,6 +58,7 @@ const INSTRUCTIONS_URLS: Readonly<
   codex: "https://github.com/openai/codex#installing-and-running-codex-cli",
   claude: "https://docs.anthropic.com/en/docs/claude-code/getting-started#update-claude-code",
   cursor: "https://docs.cursor.com/en/cli/installation#updates",
+  gemini: "https://geminicli.com/docs/get-started/installation/",
   kimi: "https://moonshotai.github.io/kimi-code/en/guides/getting-started.html",
   opencode: "https://opencode.ai/docs/cli/#upgrade",
 };
@@ -94,6 +96,30 @@ export function codexInstallMethodFromPath(
   return "manual";
 }
 
+/**
+ * Gemini has no bounded non-interactive self-updater. Only canonical npm or
+ * Homebrew installation paths prove which package manager owns the selected
+ * executable; aliases and arbitrary wrapper paths stay instructions-only.
+ */
+export function geminiInstallMethodFromPath(
+  executable: string,
+): ProviderMaintenanceInstallMethod {
+  const normalized = normalizedPath(executable);
+  if (normalized.includes("/cellar/gemini-cli/")) {
+    return "homebrew";
+  }
+  if (
+    normalized.includes("/node_modules/@google/gemini-cli/") ||
+    normalized.includes("/lib/node_modules/@google/gemini-cli/") ||
+    normalized.includes("/node_modules/.bin/gemini") ||
+    (normalized.includes("/appdata/roaming/npm/") &&
+      /\/gemini\.(?:bat|cmd|exe)$/u.test(normalized))
+  ) {
+    return "npm-global";
+  }
+  return "manual";
+}
+
 async function resolvedManager(
   command: string,
   environment: ProviderEnvironment,
@@ -105,30 +131,32 @@ async function resolvedManager(
   return candidates[0] ?? null;
 }
 
-interface CodexNpmManagerLocation {
+interface NpmManagerLocation {
   command: string;
   pathPrefix: string;
 }
 
 /**
- * Bind npm maintenance to the installation root that owns Codex. Selecting an
- * unrelated npm from PATH can update a different global prefix or require
- * privileges that the detected per-user installation does not need.
+ * Bind npm maintenance to the installation root that owns the selected CLI.
+ * Selecting an unrelated npm from PATH can update a different global prefix
+ * or require privileges that the detected per-user installation does not need.
  */
-function codexNpmManagerLocation(
+function npmManagerLocation(
   executable: string,
+  packagePath: string,
+  commandName: string,
   platform: NodeJS.Platform,
-): CodexNpmManagerLocation | null {
+): NpmManagerLocation | null {
   const path = platform === "win32" ? win32 : posix;
   const normalized = path.normalize(executable);
   if (!path.isAbsolute(normalized)) return null;
   const comparable = normalized.replaceAll("\\", "/");
-  const searched = platform === "win32"
-    ? comparable.toLocaleLowerCase("en-US")
-    : comparable;
-  const marker = platform === "win32"
-    ? "/node_modules/@openai/codex/"
-    : "/lib/node_modules/@openai/codex/";
+  const searched =
+    platform === "win32" ? comparable.toLocaleLowerCase("en-US") : comparable;
+  const marker =
+    platform === "win32"
+      ? `/node_modules/${packagePath}/`
+      : `/lib/node_modules/${packagePath}/`;
   const markerIndex = searched.indexOf(marker);
   if (markerIndex >= 0) {
     const prefix = normalized.slice(0, markerIndex);
@@ -139,13 +167,44 @@ function codexNpmManagerLocation(
     };
   }
   if (
-    platform === "win32"
-    && /^codex\.(?:bat|cmd|exe)$/iu.test(path.basename(normalized))
+    platform === "win32" &&
+    [`${commandName}.bat`, `${commandName}.cmd`, `${commandName}.exe`].includes(
+      path.basename(normalized).toLocaleLowerCase("en-US"),
+    )
   ) {
     const pathPrefix = path.dirname(normalized);
     return { command: path.join(pathPrefix, "npm.cmd"), pathPrefix };
   }
   return null;
+}
+
+function codexNpmManagerLocation(
+  executable: string,
+  platform: NodeJS.Platform,
+): NpmManagerLocation | null {
+  return npmManagerLocation(executable, "@openai/codex", "codex", platform);
+}
+
+function geminiNpmManagerLocation(
+  executable: string,
+  platform: NodeJS.Platform,
+): NpmManagerLocation | null {
+  return npmManagerLocation(
+    executable,
+    "@google/gemini-cli",
+    "gemini",
+    platform,
+  );
+}
+
+function geminiHomebrewManagerLocation(executable: string): string | null {
+  const normalized = posix.normalize(executable.replaceAll("\\", "/"));
+  if (!posix.isAbsolute(normalized)) return null;
+  const searched = normalized.toLocaleLowerCase("en-US");
+  const marker = "/cellar/gemini-cli/";
+  if (!searched.includes(marker)) return null;
+  const prefix = normalized.slice(0, searched.indexOf(marker)) || "/";
+  return posix.join(prefix, "bin", "brew");
 }
 
 function manualCapabilities(
@@ -203,6 +262,59 @@ export async function resolveProviderMaintenanceCapabilities(
   }
   if (target.providerId === "opencode") {
     return providerManagedCapabilities(target, ["upgrade"]);
+  }
+  if (target.providerId === "gemini") {
+    if (!target.installed || !target.executable) {
+      return manualCapabilities(target, "unknown");
+    }
+    const installMethod = geminiInstallMethodFromPath(target.executable);
+    if (installMethod !== "npm-global" && installMethod !== "homebrew") {
+      return manualCapabilities(target, installMethod);
+    }
+    const platform = dependencies.platform ?? process.platform;
+    const npmManager =
+      installMethod === "npm-global"
+        ? geminiNpmManagerLocation(target.executable, platform)
+        : null;
+    const managerCommand = npmManager?.command
+      ?? geminiHomebrewManagerLocation(target.executable);
+    if (!managerCommand) {
+      return manualCapabilities(target, installMethod);
+    }
+    const environment = await (
+      dependencies.environment ?? (() => providerEnvironment())
+    )();
+    const manager = await resolvedManager(
+      managerCommand,
+      environment,
+      dependencies,
+    );
+    if (!manager) return manualCapabilities(target, installMethod);
+
+    return {
+      providerId: "gemini",
+      packageName: "@google/gemini-cli",
+      installMethod,
+      updateAvailability: "available",
+      update:
+        installMethod === "npm-global"
+          ? {
+              executable: manager,
+              args: ["install", "-g", "@google/gemini-cli@latest"],
+              environmentPathPrefix: npmManager?.pathPrefix,
+              lockKey: "package-manager:npm-global",
+              installMethod,
+              label: "Update Gemini CLI with npm",
+            }
+          : {
+              executable: manager,
+              args: ["upgrade", "gemini-cli"],
+              lockKey: "package-manager:homebrew",
+              installMethod,
+              label: "Update Gemini CLI with Homebrew",
+            },
+      instructionsUrl: INSTRUCTIONS_URLS.gemini,
+    };
   }
   if (!target.installed || !target.executable) {
     return manualCapabilities(target, "unknown");

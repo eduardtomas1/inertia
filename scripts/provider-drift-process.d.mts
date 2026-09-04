@@ -35,6 +35,7 @@ export interface ProviderAcpHandshakeDependencies extends ProviderAcpProbeDepend
 }
 
 export interface ProviderAcpInitializeValidation {
+  advertiseCompaction?: boolean;
   allowSessionCapabilitiesResume?: boolean;
   expectedAgent: string;
   requireLoadSession: boolean;

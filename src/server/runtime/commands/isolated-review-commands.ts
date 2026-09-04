@@ -42,9 +42,11 @@ function providerLabel(providerId: ProviderInfo["id"]): string {
       ? "Claude"
       : providerId === "cursor"
         ? "Cursor"
-        : providerId === "kimi"
-          ? "Kimi Code"
-          : "OpenCode";
+        : providerId === "gemini"
+          ? "Gemini"
+          : providerId === "kimi"
+            ? "Kimi Code"
+            : "OpenCode";
 }
 
 export interface IsolatedReviewCommandDependencies {

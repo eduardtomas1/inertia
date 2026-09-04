@@ -3,10 +3,10 @@ import { isAbsolute } from "node:path";
 import { PROVIDER_INFO } from "./catalog";
 import {
   continuationIdentitySchema,
-  knownHarnessIdSchema,
+  currentKnownHarnessIdSchema,
   modelBackendProfileSchema,
   modelSelectionSchema,
-  nativeBackendProfile,
+  providerNativeBackendProfile,
   type ModelBackendProfile,
 } from "../../shared/model-routing";
 import {
@@ -485,6 +485,12 @@ export function buildProviderInvocation(input: ProviderRunInput, command: string
       return { command, args };
     }
 
+    case "gemini": {
+      throw new Error(
+        "Gemini requires its native ACP harness; legacy CLI invocation is unsupported.",
+      );
+    }
+
     case "kimi": {
       throw new Error(
         "Kimi Code requires its native ACP harness; legacy CLI invocation is unsupported.",
@@ -506,7 +512,7 @@ export function buildProviderInvocation(input: ProviderRunInput, command: string
 
 export function validateProviderRunInput(input: ProviderRunInput): string {
   if (!isProviderId(input.providerId)) throw new ProviderRuntimeError("invalid_input", "Unknown provider.");
-  if (!knownHarnessIdSchema.safeParse(input.harnessId).success) {
+  if (!currentKnownHarnessIdSchema.safeParse(input.harnessId).success) {
     throw new ProviderRuntimeError("invalid_input", "Unknown agent harness.");
   }
   if (!modelBackendProfileSchema.safeParse(input.backendProfile).success) {
@@ -526,7 +532,7 @@ export function validateProviderRunInput(input: ProviderRunInput): string {
       ? "fast"
       : null;
   const nativeFastModeRoute = expectedFastMode !== null
-    && input.backendProfile.id === nativeBackendProfile(input.providerId).id
+    && input.backendProfile.id === providerNativeBackendProfile(input.providerId).id
     && input.harnessId === (input.providerId === "codex"
       ? "codex-app-server"
       : "claude-agent-sdk");
@@ -729,7 +735,7 @@ export function providerFailureMessage(
 ): string {
   const providerName = PROVIDER_INFO[providerId].name;
   const customBackend = backendProfile !== undefined
-    && backendProfile.id !== nativeBackendProfile(providerId).id;
+    && backendProfile.id !== providerNativeBackendProfile(providerId).id;
   const backendName = customBackend
     ? safeProviderBackendLabel(backendProfile.displayName)
     : providerName;

@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { RuntimeStore } from "../../src/server/database";
 import {
   WorkspaceRunController,
+  providerDisplayName,
   workspaceActionKind,
   workspaceServicePort,
   type ReviewedCommitRecovery,
@@ -147,6 +148,7 @@ afterEach(async () => {
 
 describe("workspace run controller", () => {
   it("classifies checks and services and extracts safe local service ports", () => {
+    expect(providerDisplayName("gemini")).toBe("Gemini");
     expect(workspaceActionKind("test", "vitest run", false)).toBe("check");
     expect(workspaceActionKind("web", "vite dev", false)).toBe("service");
     expect(workspaceActionKind("custom", "node app.js", true)).toBe("service");

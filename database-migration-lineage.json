@@ -562,6 +562,27 @@
       "version": 66,
       "name": "PersistSuspendAwareTurnTiming",
       "digest": "8ba0779bf58baa8c3d7ed8661756815986b37f14a2d597bd8b65eaefaf136ae5"
+    },
+    {
+      "version": 67,
+      "name": "SupportNativeGeminiProvider",
+      "digest": "805acdf79d314bef1f172c277d3ca145132c9e0af9e0f25dd9cf9425a2349e7a",
+      "sources": [
+        {
+          "path": "src/server/persistence/migrations/duo-deletion-trigger.ts",
+          "symbols": [
+            "protectCancellingDuoDeletion"
+          ],
+          "digest": "6a78e59cb995847c2c51cb11cbc7116e1b8eef324e9f95f7d5cea542c5625565"
+        },
+        {
+          "path": "src/server/persistence/migrations/native-gemini-provider.ts",
+          "symbols": [
+            "nativeGeminiProviderMigration"
+          ],
+          "digest": "5afd1847c33161a4ebdd277189fa9f8fa302659191d45813f540d0d8de2dd04a"
+        }
+      ]
     }
   ]
 }

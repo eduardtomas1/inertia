@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { RuntimeSystemSuspendTracker } from "../../src/main/runtime-system-suspend-tracker";
 import { RuntimeStore } from "../../src/server/database";
-import { nativeModelSelection } from "../../src/shared/model-routing";
+import { providerNativeModelSelection } from "../../src/shared/model-routing";
 
 const directories: string[] = [];
 
@@ -51,7 +51,7 @@ describe("system suspend repository", () => {
       runId: randomUUID(),
       userMessageId: message.id,
       providerId: "codex",
-      modelSelection: nativeModelSelection({ providerId: "codex" }),
+      modelSelection: providerNativeModelSelection({ providerId: "codex" }),
       reasoningEffort: "",
       interactionMode: "build",
       accessMode: "supervised",
@@ -102,7 +102,7 @@ describe("system suspend repository", () => {
       runId: randomUUID(),
       userMessageId: message.id,
       providerId: "codex",
-      modelSelection: nativeModelSelection({ providerId: "codex" }),
+      modelSelection: providerNativeModelSelection({ providerId: "codex" }),
       reasoningEffort: "",
       interactionMode: "build",
       accessMode: "supervised",
@@ -176,7 +176,7 @@ describe("system suspend repository", () => {
       runId: randomUUID(),
       userMessageId: message.id,
       providerId: "codex",
-      modelSelection: nativeModelSelection({ providerId: "codex" }),
+      modelSelection: providerNativeModelSelection({ providerId: "codex" }),
       reasoningEffort: "",
       interactionMode: "build",
       accessMode: "supervised",

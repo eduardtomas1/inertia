@@ -15,7 +15,7 @@ import type {
   ThreadUsageSnapshot,
 } from "../../src/shared/contracts";
 import {
-  nativeModelSelection,
+  providerNativeModelSelection,
   withModelSelectionFastMode,
 } from "../../src/shared/model-routing";
 import {
@@ -63,7 +63,7 @@ function fixture(options: {
   fastMode?: "standard" | "fast";
 } = {}) {
   const providerId = options.providerId ?? "claude";
-  const baseSelection = nativeModelSelection({
+  const baseSelection = providerNativeModelSelection({
     providerId,
     modelId: options.providerDefault ? "provider-default" : "claude-test",
     reasoningEffort: null,
@@ -515,6 +515,24 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       requestId,
       payload: { conversationId },
     })).rejects.toThrow("does not have a provider session");
+    expect(compact).not.toHaveBeenCalled();
+    expect(release).not.toHaveBeenCalled();
+  });
+
+  it("explains Gemini's unsupported compaction before its intentional sessionless state", async () => {
+    const { compact, dependencies, release } = fixture({
+      providerId: "gemini",
+      sessionId: null,
+    });
+    const handler = createConversationCompactionCommandHandler(dependencies);
+
+    await expect(handler({} as WebSocket, {
+      type: "conversation.compact",
+      requestId,
+      payload: { conversationId },
+    })).rejects.toThrow(
+      "Gemini ACP does not expose explicit context compaction",
+    );
     expect(compact).not.toHaveBeenCalled();
     expect(release).not.toHaveBeenCalled();
   });

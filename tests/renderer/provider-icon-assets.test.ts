@@ -16,6 +16,7 @@ const assetDigests = {
   "anthropic.svg": "7e78883e38ac9a21881a900bcfad4ac91d04dd0db27ceed7ed8d8590dc174674",
   "cursor-dark.svg": "c4be4f61e5fcc666e8c62f20d7b894e7c235f867b9724b982be660a2d24b6916",
   "cursor-light.svg": "68ade1cd692678d00087a72058992ab7d29ff5e4efe565dbef2cf973fd24df1d",
+  "gemini.svg": "9e015cb9e3718f5245ef8ac3359a858ba94cd239817c70c3a99b6b3146948731",
   "openai.svg": "0dd4dd71846aeb7a484acdc59eb08eac2b3c1264a143d11bca9b73e4a8cacfbf",
   "opencode-dark.svg": "8837185c28ba4a9ed1374af574eea6f9da7bcc81dd1a5dca848400e10cf8fef8",
   "opencode-light.svg": "c7d5808526b9a9dcfd9e49cf3baffa115f567b005f8fc186062851acc1ac1437",

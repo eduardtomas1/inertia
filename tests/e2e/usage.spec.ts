@@ -7,7 +7,7 @@ import type {
   ModelSelection,
   ProviderId,
 } from "../../src/shared/contracts";
-import { nativeModelSelection } from "../../src/shared/model-routing";
+import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 
@@ -68,6 +68,8 @@ function addTurn(
   const requestedAt = localTime(input.daysAgo, 10);
   const startedAt = localTime(input.daysAgo, 10, 1);
   const completedAt = localTime(input.daysAgo, 10, input.daysAgo + 3);
+  const providerSessionBound = input.startTotal !== undefined
+    && input.scope !== "run";
   const message = store.createMessage(
     conversation.id,
     `Private fixture prompt ${input.daysAgo}`,
@@ -81,6 +83,7 @@ function addTurn(
     : usage(requestedAt, {
         totalProcessedTokens: input.startTotal,
         totalProcessedScope: input.scope ?? "thread",
+        providerSessionBound,
       });
   const turn = store.createAgentTurn({
     conversationId: conversation.id,
@@ -91,8 +94,7 @@ function addTurn(
     reasoningEffort: "",
     interactionMode: "build",
     accessMode: "supervised",
-    providerSessionBefore: input.startTotal !== undefined
-      && input.scope !== "run"
+    providerSessionBefore: providerSessionBound
       ? `usage-${input.providerId}-session`
       : null,
     requestedAt,
@@ -102,8 +104,7 @@ function addTurn(
   });
   store.updateAgentTurnLifecycle(turn.id, {
     status: input.status ?? "completed",
-    providerSessionAfter: input.startTotal !== undefined
-      && input.scope !== "run"
+    providerSessionAfter: providerSessionBound
       ? `usage-${input.providerId}-session`
       : null,
     startedAt,
@@ -117,6 +118,7 @@ function addTurn(
           inputTokens: input.inputTokens ?? null,
           cachedInputTokens: input.cachedInputTokens ?? null,
           outputTokens: input.outputTokens ?? null,
+          providerSessionBound,
         }),
   });
 }
@@ -133,19 +135,35 @@ test.beforeAll(async () => {
       );
       const project = store.shellSnapshot().projects[0]!;
       const codex = store.shellSnapshot().conversations[0]!;
-      const kimiSelection = {
-        ...nativeModelSelection({ providerId: "claude", modelId: "k3-256k" }),
+      const kimiBackendSelection = {
+        ...providerNativeModelSelection({ providerId: "claude", modelId: "k3-256k" }),
         backendProfileId: "preset:kimi",
         backendProfileDisplayName: "Kimi",
       };
-      const kimi = store.createConversation(project.id, "Kimi usage", {
+      const kimiBackend = store.createConversation(project.id, "Kimi backend usage", {
         providerId: "claude",
-        modelSelection: kimiSelection,
+        modelSelection: kimiBackendSelection,
         activate: false,
       });
       const cursor = store.createConversation(project.id, "Cursor usage", {
         providerId: "cursor",
         model: "cursor-managed",
+        activate: false,
+      });
+      const gemini = store.createConversation(project.id, "Gemini usage", {
+        providerId: "gemini",
+        modelSelection: providerNativeModelSelection({
+          providerId: "gemini",
+          modelId: "gemini-2.5-pro",
+        }),
+        activate: false,
+      });
+      const kimi = store.createConversation(project.id, "Kimi usage", {
+        providerId: "kimi",
+        modelSelection: providerNativeModelSelection({
+          providerId: "kimi",
+          modelId: "kimi-code",
+        }),
         activate: false,
       });
       const synthetic = store.createConversation(project.id, "Synthetic usage", {
@@ -155,7 +173,7 @@ test.beforeAll(async () => {
       });
       addTurn(store, codex, {
         providerId: "codex",
-        modelSelection: nativeModelSelection({
+        modelSelection: providerNativeModelSelection({
           providerId: "codex",
           modelId: "gpt-unknown-preview",
         }),
@@ -167,9 +185,9 @@ test.beforeAll(async () => {
         cachedInputTokens: 250,
         outputTokens: 150,
       });
-      addTurn(store, kimi, {
+      addTurn(store, kimiBackend, {
         providerId: "claude",
-        modelSelection: kimiSelection,
+        modelSelection: kimiBackendSelection,
         daysAgo: 5,
         total: 1_200,
         scope: "run",
@@ -179,7 +197,7 @@ test.beforeAll(async () => {
       });
       addTurn(store, cursor, {
         providerId: "cursor",
-        modelSelection: nativeModelSelection({
+        modelSelection: providerNativeModelSelection({
           providerId: "cursor",
           modelId: "cursor-managed",
         }),
@@ -187,9 +205,27 @@ test.beforeAll(async () => {
         inputTokens: 80,
         outputTokens: 20,
       });
+      addTurn(store, gemini, {
+        providerId: "gemini",
+        modelSelection: gemini.modelSelection,
+        daysAgo: 3,
+        total: 900,
+        scope: "run",
+        inputTokens: 700,
+        outputTokens: 200,
+      });
+      addTurn(store, kimi, {
+        providerId: "kimi",
+        modelSelection: kimi.modelSelection,
+        daysAgo: 7,
+        total: 700,
+        scope: "run",
+        inputTokens: 550,
+        outputTokens: 150,
+      });
       addTurn(store, synthetic, {
         providerId: "opencode",
-        modelSelection: nativeModelSelection({
+        modelSelection: providerNativeModelSelection({
           providerId: "opencode",
           modelId: "<synthetic>",
         }),
@@ -285,7 +321,7 @@ test("navigates to Usage and preserves the editorial dashboard geometry", async 
   await expect(projectNavigation).toHaveAttribute("aria-pressed", "true");
   await projectNavigation.click();
   await expect(projectNavigation).toHaveAttribute("aria-pressed", "false");
-  await expect(page.getByRole("region", { name: "Usage totals" })).toContainText("4");
+  await expect(page.getByRole("region", { name: "Usage totals" })).toContainText("6");
   await expect(page.getByText(/Claude · Kimi/u)).toBeVisible();
   await expect(page.getByText("<synthetic>", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Cost", exact: true }))
@@ -296,6 +332,8 @@ test("navigates to Usage and preserves the editorial dashboard geometry", async 
   await expect(page.getByRole("img", {
     name: /^Daily measured tokens by provider/u,
   })).toBeVisible();
+  await expect(page.locator('.usage-provider-summary article[data-provider="codex"]'))
+    .toContainText("800");
   expect(await page.locator(".usage-provider-summary .usage-provider-mark")
     .evaluateAll((marks) => marks.map((mark) => ({
       kind: mark.getAttribute("data-provider-icon-kind"),
@@ -303,7 +341,9 @@ test("navigates to Usage and preserves the editorial dashboard geometry", async 
     }))))
     .toEqual([
       { kind: "official", providerId: "claude" },
+      { kind: "official", providerId: "gemini" },
       { kind: "official", providerId: "codex" },
+      { kind: "official", providerId: "kimi" },
       { kind: "official", providerId: "cursor" },
       { kind: "official", providerId: "opencode" },
     ]);

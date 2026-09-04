@@ -203,6 +203,35 @@ describe("DailyWorkDialog", () => {
       .toHaveStyle({ width: "75%" });
   });
 
+  it("renders Gemini with its official provider card and measured share", async () => {
+    const withGemini = dashboard();
+    withGemini.totals.processedTokens = metric(3_000, 2, 3);
+    withGemini.providers = [...withGemini.providers, {
+      providerId: "gemini",
+      providerLabel: "Gemini",
+      turnCount: 1,
+      activeTurnCount: 0,
+      runtime: metric(5_000, 1, 1),
+      processedTokens: metric(600, 1, 1),
+    }];
+    const view = renderDialog({ request: vi.fn(async () => result(withGemini)) });
+    await screen.findByRole("dialog", { name: "Daily work" });
+
+    const card = await waitFor(() => {
+      const element = view.container.querySelector(
+        '.daily-work-provider-summary[data-provider="gemini"]',
+      );
+      if (!element) throw new Error("Gemini summary is not rendered yet");
+      return element;
+    });
+    expect(card).toHaveTextContent("Gemini");
+    expect(card).toHaveTextContent("20%");
+    expect(card.querySelector('.usage-provider-mark[data-provider-id="gemini"]'))
+      .toHaveAttribute("data-provider-icon-kind", "official");
+    expect(card.querySelector(".daily-work-provider-meter > i"))
+      .toHaveStyle({ width: "20%" });
+  });
+
   it("marks provider shares unavailable when the day total is unmeasured", async () => {
     const unmeasured = dashboard();
     unmeasured.totals.processedTokens = metric(null, 0, 2);

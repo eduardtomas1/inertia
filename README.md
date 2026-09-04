@@ -17,7 +17,7 @@ Inertia keeps the coding loop in one clear place: agent conversations, project f
 
 ### The whole coding loop, without the noise
 
-- Connect locally installed Codex, Claude, Cursor, Kimi Code, or OpenCode accounts without leaving the app.
+- Connect locally installed Codex, Claude, Cursor, Gemini CLI, Kimi Code, or OpenCode accounts without leaving the app.
 - Find models quickly through a searchable provider-aware palette, then save complete harness, backend, model, and reasoning routes as Favorites.
 - See provider-supplied thinking summaries, remaining context, and account usage through one compact context control.
 - Work with streaming conversations, resumable sessions, native plans, agent questions, image, PDF, text, CSV, and Excel inputs, cancellation, and supervised approvals whenever the selected provider supports them; open goals and verified native sessions directly with `/goal` and `/resume`.
@@ -30,9 +30,9 @@ Inertia keeps the coding loop in one clear place: agent conversations, project f
 - Save up to 30 reusable prompt presets, search and organize them, and insert one into the selected composer without sending it. Optional route binding stores only harness, backend, model, and reasoning identity—never attachments, chat context, endpoints, continuation state, or credentials.
 - Start from a compact Environment summary with Changes, worktree, branch, Git actions, validated local servers, provider context, repository, editor, sent attachments, and delegated work, while keeping the full workspace tools one click away.
 - Keep terminal tabs alive while moving through Changes, Files, Plan, and Browser.
-- Open up to eight ephemeral pages in the chat-owned Inertia Browser, then let Codex, Claude, Cursor, Kimi Code, or OpenCode inspect the local app, navigate, click, type, scroll, switch pages, and capture bounded local screenshots through the same visible surface.
+- Open up to eight ephemeral pages in the chat-owned Inertia Browser, then let Codex, Claude, Cursor, Gemini CLI, Kimi Code, or OpenCode inspect the local app, navigate, click, type, scroll, switch pages, and capture bounded local screenshots through the same visible surface.
 - Compose reviewed Inertia capability packs above every supported native harness, with deterministic manifests, bounded hidden guidance, fail-closed host tools, and a semantic front-end audit that never pretends local screenshots are model-visible.
-- Continue an eligible native Codex, Claude, Cursor, Kimi Code, or OpenCode session in its owning integrated terminal only when Inertia can verify the exact saved identity, route, checkout, and process lifecycle.
+- Continue an eligible native Codex, Claude, Cursor, Kimi Code, or OpenCode session in its owning integrated terminal only when Inertia can verify the exact saved identity, route, checkout, and process lifecycle. Gemini conversations deliberately use application-reconstructed context instead of a loadable native session.
 - Receive quiet provider-scoped warnings when an authoritative five-hour or weekly quota reaches 25%, 15%, or 5% remaining.
 - Generate a Discord release summary from the latest GitHub or GitLab release diff, grouped into improvements, implementations, bugs, and other changes.
 - Recover local history from validated rotating SQLite backups, or use explicit native-dialog export and import flows when manual recovery is required.
@@ -53,7 +53,7 @@ Open a chat in a native window when it needs a separate screen or desktop space.
 
 ### Share only the context you choose
 
-**Add context from another chat** opens a source-and-preview flow for selecting exact visible user or assistant messages. Inertia stores an immutable bounded packet with source provenance—not the source session, tools, reasoning, credentials, or an open-ended transcript—and shows it beside the request after sending. Different workspaces require an explicit acknowledgement because referenced files may not exist in the destination. Codex, Claude, Cursor, Kimi Code, and OpenCode can request this same chooser through a provider-neutral host action, but the agent cannot browse chats or select the messages itself.
+**Add context from another chat** opens a source-and-preview flow for selecting exact visible user or assistant messages. Inertia stores an immutable bounded packet with source provenance—not the source session, tools, reasoning, credentials, or an open-ended transcript—and shows it beside the request after sending. Different workspaces require an explicit acknowledgement because referenced files may not exist in the destination. Codex, Claude, Cursor, Gemini CLI, Kimi Code, and OpenCode can request this same chooser through a provider-neutral host action, but the agent cannot browse chats or select the messages itself.
 
 ![Choose exact messages to bring into another Inertia chat](docs/screenshots/inertia-context-handoff.png)
 
@@ -115,7 +115,7 @@ The local pre-merge confidence view brings the exact checkout and head together 
 - Codex-native goals and Inertia-local objectives are labeled separately, persisted across reconnects, and never substituted for one another.
 - Skills are discovered from the selected Codex or Claude route and attached only to the next turn after privileged revalidation; typing `$` autocompletes only the enabled names reported for that route, and the renderer never receives their filesystem path or content.
 - Delegated agent trees preserve provider-reported parentage, status, ownership, route identity, and elapsed time. Compact views keep separate live or failed branches represented; Guide parent prepares an ordinary supported follow-up, and direct Stop appears only for an exact live Claude Agent SDK task.
-- Codex, Claude, Cursor, Kimi Code, and OpenCode chats can use host-owned tools to list, inspect, create, dispatch, follow up, observe, stop, and archive independent top-level Inertia chats after exact user approval. Inertia injects a scoped bridge through each provider's audited native tool or MCP surface, derives project authority locally, bounds recursion and per-turn work, revokes authority at turn settlement, and persists provenance without transcripts, credentials, or provider sessions.
+- Codex, Claude, Cursor, Gemini CLI, Kimi Code, and OpenCode chats can use host-owned tools to list, inspect, create, dispatch, follow up, observe, stop, and archive independent top-level Inertia chats after exact user approval. Inertia injects a scoped bridge through each provider's audited native tool or MCP surface, derives project authority locally, bounds recursion and per-turn work, revokes authority at turn settlement, and persists provenance without transcripts, credentials, or provider sessions.
 - Reviewed [harness capability packs](docs/HARNESS_CAPABILITIES.md) compose the same bounded behavior above each native provider transport. Pack identity, tools, instructions, and evaluation metadata produce a deterministic definition digest; project repositories cannot register runtime packs dynamically.
 
 ![Goals and delegated agent work in Inertia](docs/screenshots/inertia-agent-workflows.png)
@@ -161,6 +161,7 @@ Inertia does not estimate price from a model name or send usage to a hosted anal
 
 - Create, test, enable, and choose model backend profiles without mixing them into the agent harness that runs the conversation.
 - See when a supported provider CLI has an update and run the official update flow without leaving Inertia.
+- Use Gemini CLI 0.58.0 or newer through its native ACP transport. Inertia uses the authentication method and credentials selected by the CLI, negotiates only advertised models and images, and leaves account connection to the official interactive `gemini` flow. Google OAuth uses Gemini's manual-code mode so the reviewed sign-in URL opens exactly once and the code is pasted back into the provider terminal.
 - Use native Kimi Code, the built-in Kimi coding profile through the Claude harness, or a compatible custom endpoint with explicit models and routing.
 - Existing conversations keep their original execution route. Supported same-backend model changes can continue in place; changing the harness or backend opens a clearly separated new chat.
 - Choose whether Inertia opens on the compact Environment summary or the full workspace tools; fresh installs use Environment, and no decorative Ready label competes with its actionable rows.
@@ -197,11 +198,19 @@ See the [Private Connect guide](docs/PRIVATE_CONNECT.md), [security model](docs/
 
 ### Provider-native, local by default
 
-Inertia uses the coding tools and accounts already installed on your computer. Codex, Claude, Cursor, Kimi Code, and OpenCode keep their own sessions, authentication, models, approvals, plans, reasoning, usage, and cancellation behavior; when a provider does not expose something, Inertia says so instead of imitating it.
+Inertia uses the coding tools and accounts already installed on your computer. Each Codex, Claude, Cursor, Gemini CLI, Kimi Code, or OpenCode integration keeps its provider-native transport, authentication, models, approvals, plans, reasoning, usage, and cancellation behavior; when a provider does not expose something, Inertia says so instead of imitating it.
+
+Gemini runs through the CLI's ACP JSON-RPC process boundary, not a separately embedded Google SDK or API-key client. Inertia never calls ACP `authenticate`: that method can change the CLI's persisted account choice and clear cached credentials, so the CLI-selected method remains authoritative and each `session/new` validates it. Gemini CLI 0.58 returns `session/load` before its asynchronous history replay has a protocol-level end marker. To prevent historical output from being mistaken for the current answer, Inertia starts a fresh ACP session for every turn and supplies only a bounded application-visible user/assistant transcript as contextual input. That reconstruction is not native resume and excludes hidden reasoning, tool payloads, provider-managed credential state, and historical attachment bytes. Text explicitly entered into visible messages remains part of the reconstructed context and should be reviewed like any prompt sent to a provider.
+
+The in-app setup action runs the bare Gemini CLI with `NO_BROWSER=true`. When Google OAuth is selected, Gemini prints its official one-time URL and waits for the returned code in the terminal; Inertia validates that URL, opens it once, and tells the user to paste the code back into Gemini. Other CLI-owned authentication methods are not translated into Inertia credentials, and a zero exit alone never claims that setup succeeded—the next ACP session remains the authority.
+
+Gemini CLI also writes provider-side local chat records for both its outer CLI session and the ACP session it creates. Inertia gives the outer session a random owned identity with entropy in Gemini's filename-visible prefix to avoid deterministic collisions between concurrent runs, tracks the separate identity returned by `session/new`, and removes only those exact records and their session-scoped artifacts after the complete provider process tree is confirmed stopped. The workspace marker must attest the exact project; unrelated Gemini sessions and account configuration are left untouched. If shutdown or this exact cleanup cannot be confirmed, the turn fails closed instead of reporting a clean completion.
+
+Plan requests select Gemini's advertised plan mode, and Inertia projects bounded ACP plan, plan-update, and plan-removal notifications when the CLI emits them. Gemini ACP does not expose structured agent questions or explicit compaction. Usage comes only from validated fields in the ACP prompt response—standard usage or Gemini quota metadata—and ACP usage updates; Inertia does not infer missing token or context values.
 
 Provider account credentials remain in each provider's own storage. Credentials added for custom model backends are encrypted through the operating system's secure credential storage; only non-secret profile settings live in Inertia's local database. Inertia stores workspace history and preferences locally, and its optional runtime diagnostics exclude prompts, source, token values, credentials, and connection capabilities.
 
-Access mode is a real safety boundary. Supervised keeps the selected provider's approval flow active. Auto-edit pre-approves supported file edits while leaving other provider permissions in place. Full Access is an explicit opt-in that asks the provider for its unrestricted mode—for example, Codex uses its danger-full-access sandbox/approval configuration and Claude uses its `--dangerously-skip-permissions` mode. Use it only in a workspace where you trust the request, repository, and commands the agent may run.
+Access mode is a real safety boundary. Supervised keeps the selected provider's approval flow active. Auto-edit pre-approves supported file edits while leaving other provider permissions in place. Full Access is an explicit opt-in that grants the broadest authority supported by the selected integration—for example, Codex uses its danger-full-access sandbox/approval configuration and Claude uses its `--dangerously-skip-permissions` mode. Gemini deliberately remains in its permission-reporting ACP mode; for permission requests the CLI reports, Inertia enforces the selected access policy with one-shot decisions and never selects persistent permission options. Gemini's own policies, trusted MCP configuration, or allowlists can authorize actions without sending an ACP permission request, so Inertia cannot supervise actions the provider does not report. Use Full Access only in a workspace where you trust the request, repository, provider configuration, and commands the agent may run.
 
 ### Get started
 
@@ -209,7 +218,7 @@ Building the current source for macOS requires macOS 13 or later. The release
 table below describes the immutable version it links rather than retroactively
 changing older package requirements.
 
-Download the build for your platform, add a project, then open **Settings → Providers**. Inertia checks Codex, Claude, Cursor, Kimi Code, and OpenCode locally and shows the exact Install, Connect, or Refresh action each route needs. Authentication stays in the provider's own official flow.
+Download the build for your platform, add a project, then open **Settings → Providers**. Inertia checks Codex, Claude, Cursor, Gemini CLI, Kimi Code, and OpenCode locally and shows the exact Install, Connect, or Refresh action each route needs. Authentication stays in the provider's own official flow.
 
 You only need one ready provider to begin. If none is available yet, projects, files, Git review, and terminals still work; agent runs remain disabled with a route-specific explanation instead of failing after you send a message.
 
@@ -246,7 +255,7 @@ Inertia 0.0.48 restores dependable work immediately after a Linux AppImage updat
 
 Inertia now gives each chat a visible local Browser with bounded agent actions and an inspectable, fail-closed evidence timeline for screenshots, console failures, failed requests, navigation, and actions. The pre-merge confidence view collects exact-head CI, review freshness, affected areas, focused evidence, portability, bundle deltas, and release readiness without letting stale status look green.
 
-One authoritative run-state engine keeps Codex, Claude, Cursor, Kimi Code, and OpenCode truthful through delegation, retry, waiting, cancellation, failure, restart, and completion. OpenCode descendant sessions can keep legitimate work alive without leaking child-private output, reviewed SDK updates retain their native protocols, and supervised runtimes preserve only bounded non-secret launch state.
+One authoritative run-state engine keeps Codex, Claude, Cursor, Gemini CLI, Kimi Code, and OpenCode truthful through delegation, retry, waiting, cancellation, failure, restart, and completion. OpenCode descendant sessions can keep legitimate work alive without leaking child-private output, reviewed SDK updates retain their native protocols, and supervised runtimes preserve only bounded non-secret launch state.
 
 Files navigation keeps exact repository, path, disclosure, search, language, keyboard, and responsive state. Picker, paste, and drop attachments stay inside a privileged per-document lease until the exact accepted subset is committed, while recovery, window placement, updater ownership, health reporting, theme contrast, and measured first paint all remain explicit about partial or failed state.
 

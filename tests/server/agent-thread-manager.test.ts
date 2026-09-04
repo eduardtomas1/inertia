@@ -220,6 +220,7 @@ describe("AgentThreadManager", () => {
         "codex-app-server",
         "claude-agent-sdk",
         "cursor-acp",
+        "gemini-acp",
         "kimi-acp",
         "opencode-sdk",
       ] as const) {

@@ -7,7 +7,7 @@ import type {
 } from "../../src/shared/contracts";
 import {
   modelSelectionSchema,
-  nativeModelSelection,
+  providerNativeModelSelection,
   withModelSelectionFastMode,
 } from "../../src/shared/model-routing";
 
@@ -110,7 +110,7 @@ describe("exact composer route state", () => {
   it("keeps Provider default ready beside a fresh concrete catalog", () => {
     const state = resolveComposerRouteState({
       conversationProviderId: "codex",
-      selection: nativeModelSelection({
+      selection: providerNativeModelSelection({
         providerId: "codex",
         modelId: "provider-default",
         reasoningEffort: "high",
@@ -130,7 +130,7 @@ describe("exact composer route state", () => {
 
   it("never falls through from a missing custom backend to a native model", () => {
     const selection = modelSelectionSchema.parse({
-      ...nativeModelSelection({ providerId: "codex", modelId: "gpt-current" }),
+      ...providerNativeModelSelection({ providerId: "codex", modelId: "gpt-current" }),
       backendProfileId: "custom:removed",
       backendProfileDisplayName: "Removed gateway",
       backendConfigurationRevision: 7,
@@ -152,7 +152,7 @@ describe("exact composer route state", () => {
   });
 
   it("keeps a concrete native route ready while its known catalog entry is stale", () => {
-    const selection = nativeModelSelection({
+    const selection = providerNativeModelSelection({
       providerId: "codex",
       modelId: "gpt-current",
       reasoningEffort: "high",
@@ -174,7 +174,7 @@ describe("exact composer route state", () => {
     stale.models = [];
     const state = resolveComposerRouteState({
       conversationProviderId: "codex",
-      selection: nativeModelSelection({
+      selection: providerNativeModelSelection({
         providerId: "codex",
         modelId: "gpt-unknown",
         alias: "GPT Unknown",
@@ -194,7 +194,7 @@ describe("exact composer route state", () => {
   it("blocks a removed model only when a fresh catalog proves removal", () => {
     const state = resolveComposerRouteState({
       conversationProviderId: "codex",
-      selection: nativeModelSelection({
+      selection: providerNativeModelSelection({
         providerId: "codex",
         modelId: "gpt-removed",
         alias: "GPT Removed",
@@ -211,7 +211,7 @@ describe("exact composer route state", () => {
   });
 
   it("blocks stale Fast routes until the exact model advertises the native value", () => {
-    const standard = nativeModelSelection({
+    const standard = providerNativeModelSelection({
       providerId: "codex",
       modelId: "gpt-current",
       reasoningEffort: "high",
@@ -278,7 +278,7 @@ describe("exact composer route state", () => {
     };
     const unsupported = resolveComposerRouteState({
       conversationProviderId: "cursor",
-      selection: nativeModelSelection({
+      selection: providerNativeModelSelection({
         providerId: "cursor",
         modelId: "gpt-current",
         reasoningEffort: "high",
@@ -320,7 +320,7 @@ describe("exact composer route state", () => {
     expect(resolveComposerRouteState({
       conversationProviderId: "codex",
       selection: {
-        ...nativeModelSelection({ providerId: "codex", modelId: "gpt-current" }),
+        ...providerNativeModelSelection({ providerId: "codex", modelId: "gpt-current" }),
         backendConfigurationRevision: 99,
       },
       providers: [provider()],

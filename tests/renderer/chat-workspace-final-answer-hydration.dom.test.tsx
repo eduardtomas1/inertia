@@ -13,7 +13,7 @@ import type {
   ConversationLatestTurnSummary,
   Project,
 } from "../../src/shared/contracts";
-import { nativeModelSelection } from "../../src/shared/model-routing";
+import { providerNativeModelSelection } from "../../src/shared/model-routing";
 
 vi.mock("../../src/renderer/src/hooks/useNativePreviewSuspension", () => ({
   useNativePreviewSuspension: () => undefined,
@@ -65,7 +65,7 @@ function conversation(id: string): Conversation {
     projectId: project.id,
     title: id,
     providerId: "codex",
-    modelSelection: nativeModelSelection({
+    modelSelection: providerNativeModelSelection({
       providerId: "codex",
       modelId: "provider-default",
       reasoningEffort: "high",

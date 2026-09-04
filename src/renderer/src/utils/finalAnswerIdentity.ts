@@ -3,7 +3,7 @@ import {
   kimiCodingModelDisplayName,
 } from "../../../shared/claude-backend-profiles";
 import {
-  legacyProviderIdForHarness,
+  providerIdForHarness,
   type ModelSelection,
 } from "../../../shared/model-routing";
 import type { ProviderIdentityLabels } from "../../../shared/provider-identities";
@@ -15,6 +15,7 @@ const HARNESS_LABELS: Readonly<Record<string, string>> = {
   "claude-cli": "Claude",
   "cursor-acp": "Cursor",
   "cursor-cli": "Cursor",
+  "gemini-acp": "Gemini",
   "kimi-acp": "Kimi Code",
   "opencode-sdk": "OpenCode",
   "opencode-cli": "OpenCode",
@@ -26,6 +27,7 @@ const STRUCTURAL_BACKEND_LABELS: Readonly<Record<string, string>> = {
   "builtin:anthropic": "Anthropic",
   "builtin:kimi-code": "Kimi",
   "builtin:cursor": "Cursor",
+  "builtin:gemini": "Google Gemini",
   "builtin:kimi": "Kimi Code",
   "builtin:opencode": "OpenCode",
 };
@@ -53,7 +55,7 @@ export function activeWorkIdentityLabel(
   selection: ModelSelection,
   providerIdentityLabels: ProviderIdentityLabels = {},
 ): string {
-  const providerId = legacyProviderIdForHarness(selection.harnessId);
+  const providerId = providerIdForHarness(selection.harnessId);
   const harness = (providerId && providerIdentityLabels[providerId])
     ?? HARNESS_LABELS[selection.harnessId]
     ?? selection.harnessId;

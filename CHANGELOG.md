@@ -4,6 +4,34 @@ The useful changes in each Inertia release, in plain language.
 
 ## Next
 
+### Gemini CLI joins the native provider routes without hiding ACP gaps
+
+- Gemini CLI 0.58.0 or newer now runs through its official `--acp` JSON-RPC
+  transport with negotiated models, images, MCP host tools, cancellation, and
+  bounded process cleanup. Inertia leaves authentication selection to the
+  official interactive CLI and never calls ACP `authenticate`, which can change
+  the saved method or clear cached credentials. Google OAuth setup uses the
+  CLI's manual-code mode so one validated URL opens once, and ACP—not terminal
+  exit status—remains the authentication authority.
+- Each turn starts a fresh Gemini ACP session. Because the current CLI can
+  return from `session/load` before asynchronous history replay is complete and
+  exposes no replay-end marker, Inertia reconstructs only a bounded visible
+  user/assistant transcript as application context instead of claiming native
+  resume. Hidden reasoning, tool payloads, provider-managed credential state,
+  provider session identity, and historical attachment bytes remain outside
+  that reconstruction. Text explicitly entered into visible messages remains
+  part of the context and should be reviewed like any provider prompt.
+- Gemini's outer CLI and inner ACP chat records now have exact per-run ownership,
+  with filename-prefix entropy that avoids deterministic concurrent collisions,
+  and are removed only after verified process-tree shutdown and workspace-marker
+  attestation. Ambiguous or incomplete provider-side cleanup fails the turn
+  closed without deleting unrelated Gemini history or account configuration.
+- Gemini plan mode and bounded ACP plan updates are projected when available.
+  Structured questions and explicit compaction remain unavailable, usage comes
+  only from validated prompt-response and ACP usage-update fields, and access
+  policy applies one-shot decisions only to permission requests the provider
+  reports. Gemini's own policy and allowlists can authorize unreported actions.
+
 ## 0.0.48 — 2026-09-04
 
 ### Updates and attachment-backed messages settle reliably

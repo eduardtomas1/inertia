@@ -12,7 +12,7 @@ import type {
   Project,
   TurnGitArtifact,
 } from "../../src/shared/contracts";
-import { nativeModelSelection } from "../../src/shared/model-routing";
+import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import type {
   TranscriptMessageSendAcceptance,
 } from "../../src/renderer/src/utils/transcriptNavigation";
@@ -199,7 +199,7 @@ function conversation(
     projectId: project.id,
     title: id,
     providerId,
-    modelSelection: nativeModelSelection({
+    modelSelection: providerNativeModelSelection({
       providerId,
       modelId: "provider-default",
       reasoningEffort,
@@ -1011,7 +1011,7 @@ describe("draft turn anchoring", () => {
     }));
   });
 
-  it.each(["codex", "claude", "cursor", "kimi", "opencode"] as const)(
+  it.each(["codex", "claude", "cursor", "gemini", "kimi", "opencode"] as const)(
     "marks %s ultra reasoning for the animated frame",
     (providerId) => {
       const ultra = conversation(

@@ -10,7 +10,7 @@ import type {
   RuntimeMutationEvent,
 } from "../../shared/contracts";
 import {
-  legacyProviderIdForHarness,
+  providerIdForHarness,
   type ModelSelection,
 } from "../../shared/model-routing";
 import {
@@ -74,7 +74,7 @@ const safeMultilineSchema = (maximum: number) => z.string()
   .max(maximum)
   .refine((value) => !value.includes("\0"));
 const routeSchema = z.object({
-  providerId: z.enum(["codex", "claude", "cursor", "kimi", "opencode"])
+  providerId: z.enum(["codex", "claude", "cursor", "gemini", "kimi", "opencode"])
     .optional(),
   backendProfileId: safeSingleLineSchema(200).optional(),
   modelId: safeSingleLineSchema(300).optional(),
@@ -173,7 +173,7 @@ const TOOL_DEFINITIONS: readonly ProviderHostToolDefinition[] = [
           additionalProperties: false,
           properties: {
             providerId: {
-              enum: ["codex", "claude", "cursor", "kimi", "opencode"],
+              enum: ["codex", "claude", "cursor", "gemini", "kimi", "opencode"],
             },
             backendProfileId: { type: "string", minLength: 1, maxLength: 200 },
             modelId: { type: "string", minLength: 1, maxLength: 300 },
@@ -897,7 +897,7 @@ export class AgentThreadManager {
         : this.dependencies.store.projectPath(current.projectId);
       return {
         title: `Create and start “${input.title}”`,
-        detail: `${legacyProviderIdForHarness(selection.harnessId) ?? selection.harnessId} · ${selection.modelId} · ${input.interactionMode ?? current.interactionMode} · ${input.accessMode ?? current.accessMode} · ${workspace.kind}`,
+        detail: `${providerIdForHarness(selection.harnessId) ?? selection.harnessId} · ${selection.modelId} · ${input.interactionMode ?? current.interactionMode} · ${input.accessMode ?? current.accessMode} · ${workspace.kind}`,
         permissionRoots: [{ path: sourcePath, access: "write" }],
       };
     }
@@ -954,7 +954,7 @@ export class AgentThreadManager {
     const selection = this.dependencies.backendProfileController.validateSelection(
       modelSelectionForBackendProfile(profile, modelId, reasoningEffort),
     );
-    const providerId = legacyProviderIdForHarness(selection.harnessId);
+    const providerId = providerIdForHarness(selection.harnessId);
     if (!providerId || (input.providerId && input.providerId !== providerId)) {
       throw new Error("The requested provider does not match the verified backend route.");
     }

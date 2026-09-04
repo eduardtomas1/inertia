@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import { SelectionReviewAnswerCard } from "../../src/renderer/src/components/SelectionReviewAnswerCard";
 import type { DiffSelectionReviewAnswer } from "../../src/shared/contracts";
-import { nativeModelSelection } from "../../src/shared/model-routing";
+import { providerNativeModelSelection } from "../../src/shared/model-routing";
 
 function answer(): DiffSelectionReviewAnswer {
   return {
@@ -16,7 +16,7 @@ function answer(): DiffSelectionReviewAnswer {
     question: "Why does this change matter?",
     answer: "It preserves the exact selection. <script>unsafe()</script>",
     providerId: "codex",
-    modelSelection: nativeModelSelection({
+    modelSelection: providerNativeModelSelection({
       providerId: "codex",
       modelId: "gpt-5.4",
       alias: "GPT 5.4",

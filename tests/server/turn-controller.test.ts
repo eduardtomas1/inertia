@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -10,21 +10,17 @@ import type {
   AgentInputRequest,
   AgentPlan,
   ModelSelection,
-  ProviderInfo,
   ServerEvent,
 } from "../../src/shared/contracts";
 import { RuntimeStore } from "../../src/server/database";
 import {
   continuationIdentityForSelection,
   modelSelectionSchema,
-  nativeBackendProfile,
-  nativeModelSelection,
+  providerNativeBackendProfile,
+  providerNativeModelSelection,
   resolveHarnessBackendCompatibility,
 } from "../../src/shared/model-routing";
-import type {
-  ProviderEvent,
-  ProviderGoalSnapshot,
-} from "../../src/server/provider/contracts";
+import type { ProviderGoalSnapshot } from "../../src/server/provider/contracts";
 import {
   TurnController,
   type TurnControllerHooks,
@@ -34,64 +30,17 @@ import { recoverInterruptedTurns } from "../../src/server/runtime/turns/turn-rec
 import { BUILD_MODE_INSTRUCTION } from "../../src/server/runtime/turns/request-context";
 import { resolveNativeModelRoute } from "./model-route-fixture";
 import {
+  emitSubagent,
+  identity,
+  providerInfo,
+  testAttachment,
+} from "./turn-controller-fixtures";
+import {
   FakeTurnProvider,
   FakeTurnScheduler,
 } from "../support/fake-turn-provider";
 
 const directories: string[] = [];
-
-function providerInfo(): ProviderInfo {
-  const field = {
-    freshness: "fresh" as const,
-    provenance: "provider" as const,
-    updatedAt: "2030-01-01T00:00:00.000Z",
-    lastAttemptedAt: "2030-01-01T00:00:00.000Z",
-    refreshing: false,
-  };
-  return {
-    id: "codex",
-    label: "Codex",
-    command: "fake-codex",
-    available: true,
-    version: "test",
-    executable: "fake-codex",
-    installState: "installed",
-    authState: "authenticated",
-    canRun: true,
-    statusMessage: null,
-    models: [{
-      id: "gpt-test",
-      label: "GPT Test",
-      description: "Fake model",
-      isDefault: true,
-      inputModalities: ["text", "image"],
-      reasoningOptions: [{ value: "high", label: "High", description: "" }],
-      defaultReasoningEffort: "high",
-      fastMode: {
-        providerValue: "priority",
-        label: "Fast",
-        description: "Faster responses",
-        isDefault: false,
-      },
-    }, {
-      id: "gpt-next",
-      label: "GPT Next",
-      description: "Second fake model",
-      isDefault: false,
-      inputModalities: ["text", "image"],
-      reasoningOptions: [{ value: "high", label: "High", description: "" }],
-      defaultReasoningEffort: "high",
-      fastMode: {
-        providerValue: "priority",
-        label: "Fast",
-        description: "Faster responses",
-        isDefault: false,
-      },
-    }],
-    rateLimits: [],
-    metadataState: { models: field, rateLimits: field },
-  };
-}
 
 interface TestRuntime {
   directory: string;
@@ -201,46 +150,6 @@ async function testRuntime(
     metadataRefreshes,
     attachmentReleases,
   };
-}
-async function testAttachment(
-  runtime: Pick<TestRuntime, "workspace">,
-  id: string,
-  name = `${id}.png`,
-) {
-  const path = join(runtime.workspace, name);
-  const bytes = Buffer.from("89504e470d0a1a0a", "hex");
-  await writeFile(path, bytes);
-  return {
-    id,
-    name,
-    path,
-    mimeType: "image/png" as const,
-    size: bytes.byteLength,
-  };
-}
-function identity(runtime: TestRuntime) {
-  const input = runtime.provider.input;
-  if (!input?.runId || !input.turnId) throw new Error("Turn is not started.");
-  return {
-    providerId: input.providerId,
-    conversationId: runtime.conversationId,
-    runId: input.runId,
-    turnId: input.turnId,
-  } as const;
-}
-type TestSubagentEvent = Extract<ProviderEvent, { type: "subagent" }>;
-type TestSubagentUpdate = Partial<TestSubagentEvent> & Pick<
-  TestSubagentEvent, "sequence" | "providerTaskId" | "status" | "isLive">;
-function emitSubagent(runtime: TestRuntime, event: TestSubagentUpdate): void {
-  runtime.provider.emit({
-    ...identity(runtime),
-    type: "subagent",
-    providerAgentId: null, parentProviderAgentId: null,
-    parentProviderToolUseId: null, providerToolUseId: null,
-    providerRole: null, providerName: null, providerStatus: null,
-    description: null, progress: null, result: null,
-    ...event,
-  });
 }
 async function flushPromises(): Promise<void> { await Promise.resolve(); await Promise.resolve(); }
 afterEach(async () => {
@@ -428,7 +337,7 @@ describe("TurnController authoritative lifecycle", () => {
 
   it("keeps provider sequence authoritative across stop acknowledgement and terminal enrichment", async () => {
     const runtime = await testRuntime({}, {
-      modelSelection: nativeModelSelection({
+      modelSelection: providerNativeModelSelection({
         providerId: "claude",
         modelId: "provider-default",
       }),
@@ -524,7 +433,7 @@ describe("TurnController authoritative lifecycle", () => {
 
   it("marks a delegated trace cancelled only after the provider acknowledges stop", async () => {
     const runtime = await testRuntime({}, {
-      modelSelection: nativeModelSelection({
+      modelSelection: providerNativeModelSelection({
         providerId: "claude",
         modelId: "provider-default",
       }),
@@ -618,7 +527,7 @@ describe("TurnController authoritative lifecycle", () => {
     "preserves %s subagent state when it settles before stop acknowledgement",
     async (terminalStatus) => {
     const runtime = await testRuntime({}, {
-      modelSelection: nativeModelSelection({
+      modelSelection: providerNativeModelSelection({
         providerId: "claude",
         modelId: "provider-default",
       }),
@@ -683,7 +592,7 @@ describe("TurnController authoritative lifecycle", () => {
 
   it("preserves settlement-owned subagent state when the parent settles before stop acknowledgement", async () => {
     const runtime = await testRuntime({}, {
-      modelSelection: nativeModelSelection({
+      modelSelection: providerNativeModelSelection({
         providerId: "claude",
         modelId: "provider-default",
       }),
@@ -777,10 +686,10 @@ describe("TurnController authoritative lifecycle", () => {
   });
 
   it("injects one Build instruction before every native or custom adapter and never in Plan mode", async () => {
-    const nativeProviders = ["codex", "claude", "cursor", "kimi", "opencode"] as const;
+    const nativeProviders = ["codex", "claude", "cursor", "gemini", "kimi", "opencode"] as const;
     for (const providerId of nativeProviders) {
       const runtime = await testRuntime({}, {
-        modelSelection: nativeModelSelection({
+        modelSelection: providerNativeModelSelection({
           providerId,
           modelId: "provider-default",
         }),
@@ -805,7 +714,7 @@ describe("TurnController authoritative lifecycle", () => {
     }
 
     const customProfile = {
-      ...nativeBackendProfile("codex"),
+      ...providerNativeBackendProfile("codex"),
       id: "custom:responses-task-51",
       displayName: "Task 51 custom Responses",
       protocol: "openai-responses" as const,
@@ -816,7 +725,7 @@ describe("TurnController authoritative lifecycle", () => {
     };
     const customHarnessId = "codex-app-server" as const;
     const customSelection = modelSelectionSchema.parse({
-      ...nativeModelSelection({
+      ...providerNativeModelSelection({
         providerId: "codex",
         modelId: "custom-model",
       }),
@@ -907,6 +816,82 @@ describe("TurnController authoritative lifecycle", () => {
       .toHaveLength(2);
     runtime.provider.resolve();
     await flushPromises();
+    runtime.store.close();
+  });
+
+  it("continues Gemini with bounded visible context without persisting a native session", async () => {
+    const staleGeminiCatalog = {
+      ...providerInfo(),
+      id: "gemini" as const,
+      label: "Gemini",
+      command: "gemini",
+      models: [{
+        ...providerInfo().models[0]!,
+        id: "gemini-stale-default",
+        label: "Stale cached default",
+      }],
+    };
+    const runtime = await testRuntime({
+      providerInfo: () => [staleGeminiCatalog],
+    }, {
+      modelSelection: providerNativeModelSelection({
+        providerId: "gemini",
+        modelId: "provider-default",
+      }),
+    });
+    const first = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Implement the first Gemini change.",
+    });
+    expect(first.turn.providerSessionBefore).toBeNull();
+    expect(first.turn.model).toBe("provider-default");
+    expect(runtime.controller.start(first.turn.id)).toBe(true);
+    expect(runtime.provider.input).toMatchObject({
+      providerId: "gemini",
+      model: undefined,
+      modelSelection: { modelId: "provider-default" },
+      sessionId: undefined,
+      reconstructedHistory: undefined,
+    });
+    runtime.provider.emit({
+      ...identity(runtime),
+      type: "text",
+      text: "The first Gemini answer.",
+    });
+    runtime.provider.resolve({
+      status: "completed",
+      text: "The first Gemini answer.",
+    });
+    await flushPromises();
+    expect(runtime.store.conversation(runtime.conversationId).providerSessionId)
+      .toBeNull();
+
+    const second = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Validate the follow-up.",
+    });
+    expect(second.turn.providerSessionBefore).toBeNull();
+    expect(runtime.controller.start(second.turn.id)).toBe(true);
+    expect(runtime.provider.input).toMatchObject({
+      providerId: "gemini",
+      sessionId: undefined,
+      reconstructedHistory: {
+        source: "visible-transcript",
+        truncated: false,
+        messages: [
+          { role: "user", content: "Implement the first Gemini change." },
+          { role: "assistant", content: "The first Gemini answer." },
+        ],
+      },
+    });
+    expect(runtime.provider.input?.reconstructedHistory?.messages)
+      .not.toContainEqual(expect.objectContaining({
+        content: expect.stringContaining(BUILD_MODE_INSTRUCTION),
+      }));
+    runtime.provider.resolve({ status: "completed", text: "Validated." });
+    await flushPromises();
+    expect(runtime.store.conversation(runtime.conversationId).providerSessionId)
+      .toBeNull();
     runtime.store.close();
   });
 
@@ -1796,7 +1781,7 @@ describe("TurnController authoritative lifecycle", () => {
   });
 
   it("resumes the same native session across explicit Fast and Standard transitions", async () => {
-    const standardSelection = nativeModelSelection({
+    const standardSelection = providerNativeModelSelection({
       providerId: "codex",
       modelId: "gpt-test",
       reasoningEffort: "high",
@@ -1821,7 +1806,7 @@ describe("TurnController authoritative lifecycle", () => {
     await flushPromises();
 
     runtime.store.updateConversation(runtime.conversationId, {
-      modelSelection: nativeModelSelection({
+      modelSelection: providerNativeModelSelection({
         providerId: "codex",
         modelId: "gpt-test",
         reasoningEffort: "high",
@@ -1843,7 +1828,7 @@ describe("TurnController authoritative lifecycle", () => {
     runtime.provider.resolve({ status: "completed", text: "Fast." });
     await flushPromises();
 
-    const nextStandardSelection = nativeModelSelection({
+    const nextStandardSelection = providerNativeModelSelection({
       providerId: "codex",
       modelId: "gpt-next",
       reasoningEffort: "high",

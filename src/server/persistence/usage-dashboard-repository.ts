@@ -8,10 +8,10 @@ import {
   validateUsageDashboardRange,
 } from "../usage-dashboard";
 import {
-  legacyModelSelection,
   parseAgentTurnContinuationIdentity,
   parseAgentTurnUsage,
   parseModelSelection,
+  providerModelSelectionFromLegacyFields,
 } from "./codecs";
 import type { AgentTurnRow } from "./rows";
 
@@ -44,7 +44,7 @@ function usageDashboardTurnFromRow(
 ): UsageDashboardTurn {
   const modelSelection = parseModelSelection(
     row.model_selection_json,
-    () => legacyModelSelection({
+    () => providerModelSelectionFromLegacyFields({
       providerId: row.provider_id,
       harnessId: row.harness_id,
       backendProfileId: row.backend_profile_id,

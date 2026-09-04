@@ -15,7 +15,7 @@ import type {
   ServerEvent,
   WorkspaceRun,
 } from "../../src/shared/contracts";
-import { nativeModelSelection } from "../../src/shared/model-routing";
+import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import { useActivityActions } from "../../src/renderer/src/hooks/useActivityActions";
 import { useDesktopTools } from "../../src/renderer/src/hooks/useDesktopTools";
 import { useWorkspaceTools } from "../../src/renderer/src/hooks/useWorkspaceTools";
@@ -60,7 +60,7 @@ function conversation(id: string, owner: Project): Conversation {
     projectId: owner.id,
     title: `${owner.name} chat`,
     providerId: "codex",
-    modelSelection: nativeModelSelection({
+    modelSelection: providerNativeModelSelection({
       providerId: "codex",
       modelId: "default",
       reasoningEffort: "medium",

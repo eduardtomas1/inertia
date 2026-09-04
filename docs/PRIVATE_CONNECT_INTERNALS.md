@@ -28,11 +28,31 @@ single contract used by both the browser-facing protocol and the worker-facing
 runtime schema, so the two boundaries cannot disagree about identifier shape,
 answer bounds, or the custom-answer capability.
 
+Gemini ACP does not expose a structured agent-question channel. More
+importantly, Gemini CLI policy, trusted MCP configuration, or allowlists can
+authorize actions without emitting an ACP permission request. Inertia therefore
+cannot truthfully guarantee that every write or command from a remote prompt
+would receive a local decision. Private Connect refuses prompts and does not
+project prose questions for Gemini conversations; use the local provider flow.
+
 A pending input is projected only when every question is non-secret and the
 complete set fits the projected bounds. The runtime requires an answer for
 every pending question, so a partial projection would render a form that can
 never be submitted; an input that does not fit is withheld entirely and
 reported as requiring local action.
+
+## Gemini continuation contract
+
+Local Gemini follow-ups never load a provider session. Gemini CLI 0.58 has no
+protocol-level end marker for its asynchronous `session/load` history replay,
+so every turn starts a fresh ACP process and session. The local supervised
+runtime supplies a bounded application-visible user/assistant transcript. It
+carries no provider session identifier, hidden reasoning, tool payload,
+provider-managed credential state, or historical attachment bytes, and its
+truncation state is explicit. Text explicitly entered into visible messages
+remains part of the reconstruction. Private Connect cannot submit Gemini
+prompts, turn that reconstruction into native resume, or request Gemini
+compaction.
 
 ## Packaging verification
 

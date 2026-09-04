@@ -22,12 +22,16 @@ local runtime receives only a narrow command broker.
   and fixed agent-action labels. Click and type actions also render a pointer
   with a fixed bounded label inside the visible page.
 - Browser tools are injected automatically into the existing exact-turn host
-  bridge for Codex, Claude, Cursor, Kimi Code, and OpenCode. No skill install is
-  required. Claude, Cursor, Kimi Code, and OpenCode advertise the bridge again
-  on resumed turns. Codex App Server cannot inject dynamic tools into an
-  already-live native thread, so the database capability epoch clears only its
-  opaque native continuation once and starts the next turn with current tools;
-  the Inertia conversation and visible transcript are preserved.
+  bridge for Codex, Claude, Cursor, Gemini CLI, Kimi Code, and OpenCode. No skill
+  install is required. Claude, Cursor, Kimi Code, and OpenCode advertise the
+  bridge again on native resumed turns. Gemini starts a fresh ACP session for
+  every turn and advertises the bridge there; bounded application-visible
+  transcript reconstruction carries conversational context without calling
+  Gemini's currently unsafe asynchronous `session/load`. Codex App Server cannot
+  inject dynamic tools into an already-live native thread, so the database
+  capability epoch clears only its opaque native continuation once and starts
+  the next turn with current tools; the Inertia conversation and visible
+  transcript are preserved.
 
 ## Agent tools
 
@@ -128,6 +132,12 @@ deadline. Every request carries a fresh UUID plus the server-owned conversation,
 run, and turn UUIDs. Cancellation must match all three identities. The main
 process rejects reused request identities, aborts duplicate in-flight work, and
 suppresses late results after cancellation, runtime replacement, or shutdown.
+
+Gemini's separate ACP permission channel covers only tool actions the CLI
+reports through `session/request_permission`; provider-side policy and allowlists
+may authorize other Gemini tools without that notification. This limitation
+does not bypass the Browser bridge's own exact-turn validation or its Inertia
+approval for navigation and interaction.
 
 ## Security boundary
 

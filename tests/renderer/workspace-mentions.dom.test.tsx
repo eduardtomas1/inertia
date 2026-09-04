@@ -13,7 +13,7 @@ import type {
   Project,
   ServerEvent,
 } from "../../src/shared/contracts";
-import { nativeModelSelection } from "../../src/shared/model-routing";
+import { providerNativeModelSelection } from "../../src/shared/model-routing";
 import {
   useWorkspaceMentions,
 } from "../../src/renderer/src/hooks/workspace-tools/useWorkspaceMentions";
@@ -45,7 +45,7 @@ function conversation(
     projectId: owner.id,
     title: id,
     providerId: "codex",
-    modelSelection: nativeModelSelection({
+    modelSelection: providerNativeModelSelection({
       providerId: "codex",
       modelId: "default",
       reasoningEffort: "medium",

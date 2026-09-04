@@ -199,6 +199,20 @@ export function officialToolResultText(value: unknown): string | null {
   if (type === "text" || type === "output_text") {
     return typeof record.text === "string" ? record.text : null;
   }
+  if (type === "content") {
+    return officialToolResultText(record.content);
+  }
+  if (type === "diff") {
+    const path = typeof record.path === "string" ? record.path : null;
+    const oldText = typeof record.oldText === "string" ? record.oldText : null;
+    const newText = typeof record.newText === "string" ? record.newText : null;
+    const sections = [
+      path ? `File: ${path}` : null,
+      oldText !== null ? `Before:\n${oldText}` : null,
+      newText !== null ? `After:\n${newText}` : null,
+    ].filter((entry): entry is string => entry !== null);
+    return sections.length > 0 ? sections.join("\n\n") : null;
+  }
   if (type === "tool_result") {
     return officialToolResultText(record.content)
       ?? officialToolResultText(record.output)

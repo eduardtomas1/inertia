@@ -9,7 +9,7 @@ import type {
   WorkspaceRun,
 } from "../../src/shared/contracts";
 import { defaultSettings } from "../../src/shared/contracts";
-import { nativeModelSelection } from "../../src/shared/model-routing";
+import { providerNativeModelSelection } from "../../src/shared/model-routing";
 
 const SIDEBAR_WORK_SECTIONS_STORAGE_KEY = "inertia:sidebar:work-sections:v1";
 
@@ -41,7 +41,7 @@ function conversation(
     projectId: project.id,
     title,
     providerId,
-    modelSelection: nativeModelSelection({ providerId }),
+    modelSelection: providerNativeModelSelection({ providerId }),
     continuationIdentity: null,
     model: "",
     reasoningEffort: "",
@@ -342,7 +342,7 @@ describe("compact Work sidebar", () => {
       new Date(2026, 7, 10, 17),
       {
         providerId: "claude",
-        modelSelection: nativeModelSelection({ providerId: "claude" }),
+        modelSelection: providerNativeModelSelection({ providerId: "claude" }),
         branch: "main",
         status: "completed",
         completedAt: new Date(2026, 7, 10, 18).toISOString(),
@@ -472,7 +472,7 @@ describe("compact Work sidebar", () => {
       }),
       conversation("claude", "Review metadata", new Date(2026, 7, 10, 17), {
         providerId: "claude",
-        modelSelection: nativeModelSelection({ providerId: "claude" }),
+        modelSelection: providerNativeModelSelection({ providerId: "claude" }),
         branch: "main",
       }),
       conversation("earlier", "Audit legacy focus", new Date(2026, 7, 6, 9), {

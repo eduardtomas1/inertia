@@ -38,6 +38,7 @@ const PROVIDERS: ProviderId[] = [
   "codex",
   "claude",
   "cursor",
+  "gemini",
   "kimi",
   "opencode",
 ];

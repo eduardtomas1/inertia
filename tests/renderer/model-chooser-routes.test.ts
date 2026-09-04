@@ -2,13 +2,14 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildComposerModelRoutes,
+  modelChooserHarnessLabel,
   selectedModelSearchRoute,
 } from "../../src/renderer/src/utils/modelChooserRoutes";
 import type {
   ModelBackendProfileView,
   ProviderInfo,
 } from "../../src/shared/contracts";
-import { nativeModelSelection } from "../../src/shared/model-routing";
+import { providerNativeModelSelection } from "../../src/shared/model-routing";
 
 function provider(): ProviderInfo {
   return {
@@ -158,8 +159,12 @@ function nativeProfile(): ModelBackendProfileView {
 }
 
 describe("composer model chooser route projection", () => {
+  it("uses the native Gemini CLI identity without leaking a raw harness ID", () => {
+    expect(modelChooserHarnessLabel("gemini-acp")).toBe("Gemini CLI");
+  });
+
   it("builds exact native routes and preserves the active selection settings", () => {
-    const current = nativeModelSelection({
+    const current = providerNativeModelSelection({
       providerId: "codex",
       modelId: "alpha",
       alias: "Active Alpha",
@@ -203,7 +208,7 @@ describe("composer model chooser route projection", () => {
         isDefault: false,
       };
     }
-    const current = nativeModelSelection({
+    const current = providerNativeModelSelection({
       providerId: "codex",
       modelId: "alpha",
       providerOptions: { fastMode: "priority" },
@@ -259,7 +264,7 @@ describe("composer model chooser route projection", () => {
     const routes = buildComposerModelRoutes(
       [codex],
       [],
-      nativeModelSelection({ providerId: "codex", modelId: "alpha" }),
+      providerNativeModelSelection({ providerId: "codex", modelId: "alpha" }),
     );
     expect(routes.find(({ modelId }) => modelId === "alpha"))
       .toMatchObject({
@@ -288,7 +293,7 @@ describe("composer model chooser route projection", () => {
       expect(buildComposerModelRoutes(
         [unsupported],
         [],
-        nativeModelSelection({ providerId, modelId: "alpha" }),
+        providerNativeModelSelection({ providerId, modelId: "alpha" }),
       ).find(({ modelId }) => modelId === "alpha")?.responseSpeed)
         .toBeUndefined();
     }
@@ -310,7 +315,7 @@ describe("composer model chooser route projection", () => {
       expect(buildComposerModelRoutes(
         [malformed],
         [],
-        nativeModelSelection({ providerId, modelId: "alpha" }),
+        providerNativeModelSelection({ providerId, modelId: "alpha" }),
       ).find(({ modelId }) => modelId === "alpha")?.responseSpeed)
         .toBeUndefined();
     }
@@ -322,7 +327,7 @@ describe("composer model chooser route projection", () => {
     const routes = buildComposerModelRoutes(
       [staleProvider],
       [nativeProfile()],
-      nativeModelSelection({ providerId: "codex", modelId: "alpha" }),
+      providerNativeModelSelection({ providerId: "codex", modelId: "alpha" }),
     );
 
     expect(routes.find(({ modelId }) => modelId === "provider-default"))
@@ -336,7 +341,7 @@ describe("composer model chooser route projection", () => {
 
   it("projects custom compatibility without leaking endpoint or credential metadata", () => {
     const profile = customProfile();
-    const current = nativeModelSelection({ providerId: "codex" });
+    const current = providerNativeModelSelection({ providerId: "codex" });
     const [route] = buildComposerModelRoutes([provider()], [profile], current);
 
     expect(route).toMatchObject({
@@ -358,7 +363,7 @@ describe("composer model chooser route projection", () => {
   });
 
   it("keeps an empty native Claude catalog selectable when other profiles exist", () => {
-    const current = nativeModelSelection({ providerId: "codex" });
+    const current = providerNativeModelSelection({ providerId: "codex" });
     const routes = buildComposerModelRoutes(
       [provider(), claudeWithoutCatalog()],
       [customProfile()],
@@ -379,7 +384,7 @@ describe("composer model chooser route projection", () => {
   it("does not preserve a selection from an older backend revision", () => {
     const profile = customProfile();
     const staleSelection = {
-      ...nativeModelSelection({
+      ...providerNativeModelSelection({
         providerId: "codex",
         modelId: "team-alpha",
       }),
@@ -406,7 +411,7 @@ describe("composer model chooser route projection", () => {
     const [route] = buildComposerModelRoutes(
       [provider()],
       [customProfile("unknown")],
-      nativeModelSelection({ providerId: "codex" }),
+      providerNativeModelSelection({ providerId: "codex" }),
     );
 
     expect(route).toMatchObject({
@@ -418,7 +423,7 @@ describe("composer model chooser route projection", () => {
 
   it("uses a non-selectable exact chip identity for a removed route", () => {
     const removed = {
-      ...nativeModelSelection({
+      ...providerNativeModelSelection({
         providerId: "codex",
         modelId: "removed-model",
         alias: "Removed",

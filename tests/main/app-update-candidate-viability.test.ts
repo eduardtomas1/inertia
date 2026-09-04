@@ -21,6 +21,10 @@ import {
 } from "../../src/main/app-update-candidate-viability";
 
 const operationId = "11111111-1111-4111-8111-111111111111";
+const expectedActiveRuntimeOwner = {
+  runtimeGenerationId: "22222222-2222-4222-8222-222222222222:7",
+  systemBootId: "linux:33333333-3333-4333-8333-333333333333",
+} as const;
 
 class FakeUtilityProcess extends EventEmitter {
   pid: number | undefined = 123;
@@ -79,6 +83,7 @@ describe("desktop app update candidate viability", () => {
     const result = validateDesktopAppUpdateCandidate({
       operationId,
       dataDirectory: "/safe/data",
+      expectedActiveRuntimeOwner,
       platform: "darwin",
       dependencies: dependencies(child),
     });
@@ -87,6 +92,8 @@ describe("desktop app update candidate viability", () => {
 
     await expect(result).resolves.toBeUndefined();
     expect(child.messages).toHaveLength(2);
+    expect(parseAppUpdateCandidateViabilityRequest(child.messages[0]))
+      .toMatchObject({ expectedActiveRuntimeOwner });
     expect(parseAppUpdateCandidateViabilityResultAck(
       child.messages[1],
     )?.operationId).toBe(operationId);
@@ -112,6 +119,7 @@ describe("desktop app update candidate viability", () => {
     const result = validateDesktopAppUpdateCandidate({
       operationId,
       dataDirectory: "/safe/data",
+      expectedActiveRuntimeOwner: null,
       platform: "darwin",
       dependencies: dependencies(child),
     });
@@ -134,6 +142,7 @@ describe("desktop app update candidate viability", () => {
     const result = validateDesktopAppUpdateCandidate({
       operationId,
       dataDirectory: "/safe/data",
+      expectedActiveRuntimeOwner: null,
       platform: "darwin",
       dependencies: dependencies(child),
     });
@@ -157,6 +166,7 @@ describe("desktop app update candidate viability", () => {
     await expect(validateDesktopAppUpdateCandidate({
       operationId,
       dataDirectory: "/safe/data",
+      expectedActiveRuntimeOwner: null,
       platform: "linux",
       dependencies: injected,
     })).rejects.toThrow("runtime guardian is invalid");

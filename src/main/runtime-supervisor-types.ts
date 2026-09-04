@@ -27,6 +27,8 @@ import type {
   ConversationAttachmentStoreAuthority,
 } from "../node/conversation-attachment-store-child.js";
 import type { WindowsRuntimeJobAssembly } from "./windows-runtime-job.js";
+import type { RuntimeStartupBlockerCode } from
+  "../shared/runtime-startup-diagnostics.js";
 
 export type RuntimeSupervisorTimer = ReturnType<typeof setTimeout>;
 
@@ -130,9 +132,12 @@ export interface RuntimeSupervisorSnapshot {
   generation: number;
   pid: number | null;
   websocketUrl: string | null;
+  /** Renderer-safe proof binding a server lifecycle snapshot to this owner. */
+  runtimeGenerationHash: string | null;
   restartAttempt: number;
   restartScheduled: boolean;
   lastError: string | null;
+  startupBlockerCode: RuntimeStartupBlockerCode | null;
   databaseRecovery?: RuntimeDatabaseStartupRecoveryReport | null;
 }
 

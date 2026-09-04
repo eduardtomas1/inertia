@@ -13,16 +13,32 @@ import {
   windowsAppUpdateInstallerIdentity,
   type AppUpdateArtifactIdentity,
   type AppUpdateCandidateProcess,
+  type WindowsAppUpdateInstallerIdentity,
 } from "./app-update-bootstrap.js";
 import {
   AppUpdateHandoffJournal,
+  appUpdateHandoffIdentityMatches,
   appUpdateHandoffOwner,
   appUpdateHandoffTokenDigest,
   createAppUpdateHandoffToken,
+  type AppUpdateHandoffPreparation,
+  type AppUpdateHandoffSnapshot,
 } from "./app-update-handoff.js";
 import { AppUpdateHandoffTokenVault } from
   "./app-update-handoff-token-vault.js";
 import type { InertiaReleaseChannel } from "./release-channel.js";
+import { resolveDesktopRuntimeProcessSafetyAssets } from
+  "./runtime-windows-job-bootstrap.js";
+import {
+  LinuxAppUpdateCandidateClaimConflictError,
+  linuxAppUpdateCandidateClaimOwnerIsLive,
+} from "./linux-app-update-candidate-process.js";
+import {
+  launchWindowsUpdateSupervisor,
+  WindowsUpdateSupervisorCleanupError,
+  type WindowsUpdateSupervisorAdmission,
+  type WindowsUpdateSupervisorLaunchOptions,
+} from "./windows-update-supervisor.js";
 
 export interface AppUpdaterDownloadProgress {
   percent: number;
@@ -36,6 +52,11 @@ export interface AppUpdaterDownload {
   cancel(): void;
 }
 
+export type AppUpdaterInstallResult =
+  | "handoff-confirmed"
+  | "not-invoked"
+  | "native-outcome-uncertain";
+
 export interface AppUpdaterAdapter {
   check(): Promise<{ available: boolean; version: string } | null>;
   download(callbacks: {
@@ -44,7 +65,7 @@ export interface AppUpdaterAdapter {
   }): AppUpdaterDownload;
   prepareInstall?(context: AppUpdateInstallContext): Promise<boolean>;
   abortInstall?(): Promise<void>;
-  quitAndInstall(onHandoff?: () => void): Promise<boolean>;
+  quitAndInstall(onHandoff?: () => void): Promise<AppUpdaterInstallResult>;
 }
 
 export interface AppUpdateInstallContext {
@@ -71,8 +92,23 @@ interface ElectronAppUpdaterRuntimeOptions {
   activeAppImagePath?: string;
   environment?: NodeJS.ProcessEnv;
   executablePath?: string;
-  launchRestrictedCandidate?: typeof launchRestrictedAppUpdateCandidate;
+  launchRestrictedCandidate?: LinuxAppUpdateCandidateLauncher;
+  launchWindowsSupervisor?: WindowsUpdateSupervisorLauncher;
 }
+
+export type LinuxAppUpdateCandidateLauncher = (
+  options: Omit<
+    Parameters<typeof launchRestrictedAppUpdateCandidate>[0],
+    "runtimeProcessGuardianPath"
+  >,
+) => ReturnType<typeof launchRestrictedAppUpdateCandidate>;
+
+export type WindowsUpdateSupervisorLauncher = (
+  options: Omit<
+    WindowsUpdateSupervisorLaunchOptions,
+    "assembly" | "launchThroughExecutableLock" | "readyTimeoutMs"
+  >,
+) => Promise<WindowsUpdateSupervisorAdmission>;
 
 const ANONYMOUS_STAGING_ID = "inertia-anonymous";
 const INSTALL_HANDOFF_TIMEOUT_MS = 5_000;
@@ -87,6 +123,16 @@ function resolvedModule(namespace: ElectronUpdaterModule): ElectronUpdaterModule
     default?: ElectronUpdaterModule;
   };
   return candidate.autoUpdater ? candidate : candidate.default ?? candidate;
+}
+
+function exactHandoffSnapshotMatches(
+  current: AppUpdateHandoffSnapshot,
+  expected: AppUpdateHandoffSnapshot,
+): boolean {
+  return current.checksum === expected.checksum
+    && current.revision === expected.revision
+    && current.phase === expected.phase
+    && appUpdateHandoffIdentityMatches(current, expected);
 }
 
 /**
@@ -140,6 +186,7 @@ export async function loadElectronAppUpdater(
     options.executablePath ?? process.execPath,
     activeAppImagePath,
     options.launchRestrictedCandidate,
+    options.launchWindowsSupervisor,
   );
 }
 
@@ -149,14 +196,20 @@ class ElectronAppUpdaterAdapter implements AppUpdaterAdapter {
     readonly transaction: PreparedAppImageUpdate;
     readonly candidate: AppUpdateCandidateProcess;
     readonly journal: AppUpdateHandoffJournal;
+    snapshot: AppUpdateHandoffSnapshot;
   } | null = null;
   private preparedWindows: {
     readonly journal: AppUpdateHandoffJournal;
     readonly vault: AppUpdateHandoffTokenVault;
     readonly installerPath: string;
-    readonly installerIdentity: AppUpdateArtifactIdentity;
+    readonly installerIdentity: WindowsAppUpdateInstallerIdentity;
+    readonly oldExecutableIdentity: AppUpdateArtifactIdentity;
+    readonly dataDirectory: string;
+    readonly handoffToken: string;
+    snapshot: AppUpdateHandoffSnapshot;
     nativeInvocationStarted: boolean;
   } | null = null;
+  private windowsInstallPromise: Promise<AppUpdaterInstallResult> | null = null;
 
   constructor(
     private readonly updater: AppUpdater,
@@ -168,8 +221,27 @@ class ElectronAppUpdaterAdapter implements AppUpdaterAdapter {
     private readonly environment: NodeJS.ProcessEnv,
     private readonly executablePath: string,
     private activeAppImagePath: string | undefined,
-    private readonly launchRestrictedCandidate =
-      launchRestrictedAppUpdateCandidate,
+    private readonly launchRestrictedCandidate: LinuxAppUpdateCandidateLauncher =
+      async (options) => {
+        const guardianPath = resolveDesktopRuntimeProcessSafetyAssets()
+          .runtimeProcessGuardianPath;
+        if (!guardianPath) {
+          throw new Error("The Linux app update guardian is unavailable.");
+        }
+        return await launchRestrictedAppUpdateCandidate({
+          ...options,
+          runtimeProcessGuardianPath: guardianPath,
+        });
+      },
+    private readonly launchWindowsSupervisor: WindowsUpdateSupervisorLauncher =
+      async (options) => {
+        const assembly = resolveDesktopRuntimeProcessSafetyAssets()
+          .windowsRuntimeJobAssembly;
+        if (!assembly) {
+          throw new Error("The Windows update supervisor is unavailable.");
+        }
+        return await launchWindowsUpdateSupervisor({ ...options, assembly });
+      },
   ) {}
 
   async check(): Promise<{ available: boolean; version: string } | null> {
@@ -226,6 +298,8 @@ class ElectronAppUpdaterAdapter implements AppUpdaterAdapter {
     let transaction: PreparedAppImageUpdate | null = null;
     let candidate: AppUpdateCandidateProcess | null = null;
     let journal: AppUpdateHandoffJournal | null = null;
+    let expectedPreparation: AppUpdateHandoffPreparation | null = null;
+    let snapshot: AppUpdateHandoffSnapshot | null = null;
     try {
       transaction = await prepareAppImageUpdate({
         channel: this.channel,
@@ -235,7 +309,7 @@ class ElectronAppUpdaterAdapter implements AppUpdaterAdapter {
       });
       journal = new AppUpdateHandoffJournal(context.handoffDirectory);
       const now = Date.now();
-      const prepared = journal.prepare({
+      expectedPreparation = {
         operationId,
         platform: "linux",
         channel: this.channel,
@@ -258,13 +332,16 @@ class ElectronAppUpdaterAdapter implements AppUpdaterAdapter {
         deadlineAt: new Date(
           now + LINUX_CANDIDATE_HANDOFF_LIFETIME_MS,
         ).toISOString(),
-      });
+      };
+      const prepared = journal.prepare(expectedPreparation);
       if (!prepared) throw new Error("The app update handoff could not be prepared.");
+      snapshot = prepared;
       const launched = journal.transition(
         appUpdateHandoffOwner(prepared),
         "candidate-launched",
       );
       if (!launched) throw new Error("The app update candidate launch was not admitted.");
+      snapshot = launched;
       candidate = await this.launchRestrictedCandidate({
         executablePath: transaction.candidatePath,
         environment: this.environment,
@@ -275,23 +352,62 @@ class ElectronAppUpdaterAdapter implements AppUpdaterAdapter {
         dataDirectory: context.dataDirectory,
         journal,
       });
+      const acknowledged = journal.current();
       if (
-        candidate.acknowledgement.operationId !== operationId
+        !acknowledged
+        || candidate.acknowledgement.operationId !== operationId
         || candidate.acknowledgement.phase
           !== "candidate-bootstrap-validated"
+        || acknowledged.checksum !== candidate.acknowledgement.checksum
+        || !appUpdateHandoffIdentityMatches(
+          acknowledged,
+          launched,
+        )
       ) throw new Error("The app update candidate acknowledgement was invalid.");
-      this.preparedLinux = { transaction, candidate, journal };
+      snapshot = acknowledged;
+      this.preparedLinux = { transaction, candidate, journal, snapshot };
       return true;
-    } catch {
+    } catch (error) {
+      if (
+        error instanceof LinuxAppUpdateCandidateClaimConflictError
+        && snapshot
+        && linuxAppUpdateCandidateClaimOwnerIsLive({
+          handoffDirectory: context.handoffDirectory,
+          snapshot,
+        })
+      ) return false;
+      if (journal && expectedPreparation && !snapshot) {
+        try {
+          const recovered = journal.current();
+          if (
+            recovered
+            && appUpdateHandoffIdentityMatches(
+              recovered,
+              expectedPreparation,
+            )
+          ) snapshot = recovered;
+        } catch {
+          // Startup recovery retains any publication that cannot be read exactly.
+        }
+      }
+      const rollingBack = journal && snapshot
+        ? this.markLinuxRollbackRequired(journal, snapshot)
+        : null;
+      if (rollingBack) snapshot = rollingBack;
+      const mayMutateTransaction = !snapshot
+        || rollingBack?.phase === "rollback-required";
       const cleanup = await Promise.allSettled([
         candidate?.abort() ?? Promise.resolve(),
-        transaction?.rollback() ?? Promise.resolve(),
+        mayMutateTransaction
+          ? transaction?.rollback() ?? Promise.resolve()
+          : Promise.resolve(),
       ]);
-      if (journal) {
-        this.markLinuxRollbackRequired(journal);
-        if (cleanup.every((result) => result.status === "fulfilled")) {
-          this.completeLinuxRollback(journal);
-        }
+      if (
+        journal
+        && rollingBack
+        && cleanup.every((result) => result.status === "fulfilled")
+      ) {
+        this.completeLinuxRollback(journal, rollingBack);
       }
       return false;
     }
@@ -303,56 +419,106 @@ class ElectronAppUpdaterAdapter implements AppUpdaterAdapter {
     if (preparedWindows) {
       if (preparedWindows.nativeInvocationStarted) {
         this.markWindowsInstallUncertain(preparedWindows);
-      } else {
-        this.retireWindowsRollback(preparedWindows);
+        this.preparedWindows = preparedWindows;
+        throw new Error(
+          "The native Windows installer retained unconfirmed authority.",
+        );
+      } else if (!this.retireWindowsRollback(preparedWindows)) {
+        this.preparedWindows = preparedWindows;
+        throw new Error("The Windows app update rollback could not be confirmed.");
       }
     }
     const prepared = this.preparedLinux;
     this.preparedLinux = null;
     if (!prepared) return;
-    this.markLinuxRollbackRequired(prepared.journal);
+    const rollingBack = this.markLinuxRollbackRequired(
+      prepared.journal,
+      prepared.snapshot,
+    );
+    if (rollingBack) prepared.snapshot = rollingBack;
     const cleanup = await Promise.allSettled([
       prepared.candidate.abort(),
-      prepared.transaction.rollback(),
+      rollingBack?.phase === "rollback-required"
+        ? prepared.transaction.rollback()
+        : Promise.resolve(),
     ]);
-    if (cleanup.every((result) => result.status === "fulfilled")) {
-      this.completeLinuxRollback(prepared.journal);
+    const rollbackCompleted = !!rollingBack
+      && cleanup.every((result) => result.status === "fulfilled")
+      && this.completeLinuxRollback(
+        prepared.journal,
+        rollingBack,
+        (completed) => {
+          prepared.snapshot = completed;
+        },
+      );
+    if (rollbackCompleted) {
       return;
     }
+    this.preparedLinux = prepared;
     throw new AggregateError(
-      cleanup
+      [
+        ...cleanup
         .filter((result): result is PromiseRejectedResult =>
           result.status === "rejected")
         .map((result) => result.reason),
+        ...(!rollingBack
+          ? [new Error("The app update rollback authority changed.")]
+          : [new Error("The app update rollback authority was not retired.")]),
+      ],
       "The app update candidate rollback could not be confirmed.",
     );
   }
 
-  private markLinuxRollbackRequired(journal: AppUpdateHandoffJournal): void {
+  private markLinuxRollbackRequired(
+    journal: AppUpdateHandoffJournal,
+    expected: AppUpdateHandoffSnapshot,
+  ): AppUpdateHandoffSnapshot | null {
     try {
       const current = journal.current();
-      if (!current) return;
+      if (!current || !exactHandoffSnapshotMatches(current, expected)) {
+        return null;
+      }
       if (
-        current.phase !== "rollback-required"
-        && current.phase !== "rollback-completed"
-        && current.phase !== "completed"
-      ) journal.transition(appUpdateHandoffOwner(current), "rollback-required");
+        current.phase === "rollback-required"
+        || current.phase === "rollback-completed"
+      ) return current;
+      if (current.phase === "completed") return null;
+      return journal.transition(
+        appUpdateHandoffOwner(current),
+        "rollback-required",
+      );
     } catch {
       // Durable recovery retains any phase that could not advance exactly.
+      return null;
     }
   }
 
-  private completeLinuxRollback(journal: AppUpdateHandoffJournal): void {
+  private completeLinuxRollback(
+    journal: AppUpdateHandoffJournal,
+    expected: AppUpdateHandoffSnapshot,
+    remember: (snapshot: AppUpdateHandoffSnapshot) => void = () => undefined,
+  ): boolean {
     try {
       const rollingBack = journal.current();
-      if (rollingBack?.phase !== "rollback-required") return;
-      const completed = journal.transition(
-        appUpdateHandoffOwner(rollingBack),
-        "rollback-completed",
-      );
-      if (completed) journal.retire(appUpdateHandoffOwner(completed));
+      if (!rollingBack && expected.phase === "rollback-completed") return true;
+      if (
+        !rollingBack
+        || !exactHandoffSnapshotMatches(rollingBack, expected)
+      ) return false;
+      const completed = rollingBack.phase === "rollback-completed"
+        ? rollingBack
+        : rollingBack.phase === "rollback-required"
+          ? journal.transition(
+              appUpdateHandoffOwner(rollingBack),
+              "rollback-completed",
+            )
+          : null;
+      if (!completed) return false;
+      remember(completed);
+      return journal.retire(appUpdateHandoffOwner(completed));
     } catch {
       // Durable recovery retains any phase that could not be retired exactly.
+      return false;
     }
   }
 
@@ -363,16 +529,24 @@ class ElectronAppUpdaterAdapter implements AppUpdaterAdapter {
     if (!installerPath) return false;
     const operationId = randomUUID();
     const handoffToken = createAppUpdateHandoffToken();
+    let installerIdentity: WindowsAppUpdateInstallerIdentity | null = null;
+    let oldExecutableIdentity: AppUpdateArtifactIdentity | null = null;
     let journal: AppUpdateHandoffJournal | null = null;
     let vault: AppUpdateHandoffTokenVault | null = null;
+    let expectedPreparation: AppUpdateHandoffPreparation | null = null;
+    let snapshot: AppUpdateHandoffSnapshot | null = null;
+    let preparedState: NonNullable<
+      ElectronAppUpdaterAdapter["preparedWindows"]
+    > | null = null;
     try {
-      const installerIdentity = await windowsAppUpdateInstallerIdentity(
-        installerPath,
-      );
+      [installerIdentity, oldExecutableIdentity] = await Promise.all([
+        windowsAppUpdateInstallerIdentity(installerPath),
+        appUpdateArtifactIdentity(this.executablePath),
+      ]);
       journal = new AppUpdateHandoffJournal(context.handoffDirectory);
       vault = new AppUpdateHandoffTokenVault(context.handoffDirectory);
       const now = Date.now();
-      const prepared = journal.prepare({
+      expectedPreparation = {
         operationId,
         platform: "win32",
         channel: this.channel,
@@ -402,26 +576,72 @@ class ElectronAppUpdaterAdapter implements AppUpdaterAdapter {
         deadlineAt: new Date(
           now + WINDOWS_INSTALL_HANDOFF_LIFETIME_MS,
         ).toISOString(),
-      });
-      if (!prepared || !vault.publish(prepared, handoffToken)) {
+      };
+      const prepared = journal.prepare(expectedPreparation);
+      if (!prepared) {
         throw new Error("The Windows app update receipt could not be prepared.");
       }
-      this.preparedWindows = {
+      snapshot = prepared;
+      preparedState = {
         journal,
         vault,
         installerPath,
         installerIdentity,
+        oldExecutableIdentity,
+        dataDirectory: context.dataDirectory,
+        handoffToken,
+        snapshot: prepared,
         nativeInvocationStarted: false,
       };
+      if (!vault.publish(prepared, handoffToken)) {
+        throw new Error("The Windows app update receipt could not be prepared.");
+      }
+      this.preparedWindows = preparedState;
       return true;
     } catch {
-      if (journal && vault) {
-        this.retireWindowsRollback({
-          journal,
-          vault,
-        });
-      } else if (journal) {
-        this.markLinuxRollbackRequired(journal);
+      if (
+        installerIdentity
+        && oldExecutableIdentity
+        && journal
+        && vault
+        && expectedPreparation
+        && !snapshot
+      ) {
+        try {
+          const recovered = journal.current();
+          if (
+            recovered
+            && appUpdateHandoffIdentityMatches(
+              recovered,
+              expectedPreparation,
+            )
+          ) {
+            snapshot = recovered;
+            preparedState = {
+              journal,
+              vault,
+              installerPath,
+              installerIdentity,
+              oldExecutableIdentity,
+              dataDirectory: context.handoffDirectory,
+              handoffToken,
+              snapshot: recovered,
+              nativeInvocationStarted: false,
+            };
+          }
+        } catch {
+          // Startup recovery retains any publication that cannot be read exactly.
+        }
+      }
+      if (preparedState) {
+        if (!this.retireWindowsRollback(preparedState)) {
+          this.preparedWindows = preparedState;
+        }
+      } else if (journal && vault && snapshot) {
+        const incomplete = { journal, vault, snapshot };
+        if (!this.retireWindowsRollback(incomplete)) {
+          // The exact durable operation remains startup recovery authority.
+        }
       }
       return false;
     }
@@ -431,58 +651,97 @@ class ElectronAppUpdaterAdapter implements AppUpdaterAdapter {
     prepared: {
       readonly journal: AppUpdateHandoffJournal;
       readonly vault: AppUpdateHandoffTokenVault;
+      snapshot: AppUpdateHandoffSnapshot;
     },
-  ): void {
+  ): boolean {
     try {
       const current = prepared.journal.current();
-      if (!current) return;
-      const rollingBack = current.phase === "rollback-required"
-        ? current
-        : prepared.journal.transition(
-            appUpdateHandoffOwner(current),
-            "rollback-required",
-          );
-      if (!rollingBack) return;
-      if (!prepared.vault.discard(rollingBack)) return;
+      if (!current || !exactHandoffSnapshotMatches(
+        current,
+        prepared.snapshot,
+      )) return false;
+      if (current.phase === "rollback-completed") {
+        return prepared.vault.discard(current)
+          && prepared.journal.retire(appUpdateHandoffOwner(current));
+      }
+      if (
+        current.phase !== "prepared"
+        && current.phase !== "old-generation-cleanup-confirmed"
+      ) return false;
       const completed = prepared.journal.transition(
-        appUpdateHandoffOwner(rollingBack),
+        appUpdateHandoffOwner(current),
         "rollback-completed",
       );
-      if (completed) prepared.journal.retire(appUpdateHandoffOwner(completed));
+      if (!completed) return false;
+      prepared.snapshot = completed;
+      return prepared.vault.discard(completed)
+        && prepared.journal.retire(appUpdateHandoffOwner(completed));
     } catch {
       // Startup recovery retains any ambiguous native-installer authority.
+      return false;
     }
   }
 
   private markWindowsInstallUncertain(
     prepared: NonNullable<ElectronAppUpdaterAdapter["preparedWindows"]>,
-  ): void {
+  ): AppUpdateHandoffSnapshot | null {
     try {
       const current = prepared.journal.current();
-      if (
-        current
-        && current.phase !== "rollback-required"
-        && current.phase !== "rollback-completed"
-        && current.phase !== "completed"
-      ) {
-        prepared.journal.transition(
-          appUpdateHandoffOwner(current),
-          "rollback-required",
-        );
+      if (!current || !exactHandoffSnapshotMatches(
+        current,
+        prepared.snapshot,
+      )) return null;
+      if (current.phase === "rollback-required") {
+        prepared.snapshot = current;
+        return current;
       }
+      if (current.phase === "rollback-completed" || current.phase === "completed") {
+        return null;
+      }
+      const uncertain = prepared.journal.transition(
+        appUpdateHandoffOwner(current),
+        "rollback-required",
+      );
+      if (uncertain) prepared.snapshot = uncertain;
+      return uncertain;
     } catch {
       // Never erase a receipt when native installer outcome is uncertain.
+      return null;
     }
   }
 
-  async quitAndInstall(onHandoff: () => void = () => undefined): Promise<boolean> {
+  quitAndInstall(
+    onHandoff: () => void = () => undefined,
+  ): Promise<AppUpdaterInstallResult> {
+    if (this.platform !== "win32") return this.quitAndInstallOwned(onHandoff);
+    if (this.windowsInstallPromise) return this.windowsInstallPromise;
+    const operation = this.quitAndInstallOwned(onHandoff).finally(() => {
+      if (this.windowsInstallPromise === operation) {
+        this.windowsInstallPromise = null;
+      }
+    });
+    this.windowsInstallPromise = operation;
+    return operation;
+  }
+
+  private async quitAndInstallOwned(
+    onHandoff: () => void,
+  ): Promise<AppUpdaterInstallResult> {
     if (this.platform === "linux") {
       if (this.preparedLinux) {
         const prepared = this.preparedLinux;
         try {
           if (!prepared.candidate.alive()) throw new Error("The update candidate exited.");
           const acknowledged = prepared.journal.current();
-          if (!acknowledged || acknowledged.phase !== "candidate-bootstrap-validated") {
+          if (
+            !acknowledged
+            || acknowledged.phase !== "candidate-bootstrap-validated"
+            || acknowledged.checksum !== prepared.snapshot.checksum
+            || !appUpdateHandoffIdentityMatches(
+              acknowledged,
+              prepared.snapshot,
+            )
+          ) {
             throw new Error("The update candidate acknowledgement was lost.");
           }
           const cleaned = prepared.journal.transition(
@@ -490,36 +749,40 @@ class ElectronAppUpdaterAdapter implements AppUpdaterAdapter {
             "old-generation-cleanup-confirmed",
           );
           if (!cleaned) throw new Error("Update cleanup could not be recorded.");
+          prepared.snapshot = cleaned;
           const installedPath = await prepared.transaction.commit();
           const committed = prepared.journal.transition(
             appUpdateHandoffOwner(cleaned),
             "ownership-transfer-committed",
           );
-          if (!committed || !prepared.candidate.alive()) {
+          if (!committed) {
+            throw new Error("Update ownership could not be transferred.");
+          }
+          prepared.snapshot = committed;
+          if (!prepared.candidate.alive()) {
             throw new Error("Update ownership could not be transferred.");
           }
           this.activeAppImagePath = installedPath;
           this.environment.APPIMAGE = installedPath;
+          await prepared.candidate.transferContainment();
           this.preparedLinux = null;
           onHandoff();
           this.application.quit();
-          return true;
+          return "handoff-confirmed";
         } catch {
           await this.abortPreparedLinux(prepared);
-          return false;
+          return "not-invoked";
         }
       }
       // Linux adoption is valid only after prepareInstall has launched the
       // restricted candidate and received its exact bootstrap acknowledgement.
       // Retaining the former direct-launch fallback here would let callers
       // treat process spawn as readiness and bypass the durable handoff phases.
-      return false;
+      return "not-invoked";
     }
-    const preparedWindows = this.platform === "win32"
-      ? this.preparedWindows
-      : null;
-    if (this.platform === "win32" && !preparedWindows) return false;
-    if (preparedWindows) {
+    if (this.platform === "win32") {
+      const preparedWindows = this.preparedWindows;
+      if (!preparedWindows) return "not-invoked";
       try {
         const current = preparedWindows.journal.current();
         const installerIdentity = await appUpdateArtifactIdentity(
@@ -528,7 +791,12 @@ class ElectronAppUpdaterAdapter implements AppUpdaterAdapter {
         if (
           !current
           || current.phase !== "prepared"
-          || !preparedWindows.vault.matches(current)
+          || current.checksum !== preparedWindows.snapshot.checksum
+          || !appUpdateHandoffIdentityMatches(
+            current,
+            preparedWindows.snapshot,
+          )
+          || !preparedWindows.vault.matches(preparedWindows.snapshot)
           || installerIdentity.artifactDigest
             !== preparedWindows.installerIdentity.artifactDigest
           || installerIdentity.directFileIdentityDigest
@@ -539,56 +807,129 @@ class ElectronAppUpdaterAdapter implements AppUpdaterAdapter {
           "old-generation-cleanup-confirmed",
         );
         if (!cleaned) throw new Error("The Windows cleanup receipt was not durable.");
+        preparedWindows.snapshot = cleaned;
       } catch {
-        this.preparedWindows = null;
-        this.retireWindowsRollback(preparedWindows);
-        return false;
+        const retired = this.retireWindowsRollback(preparedWindows);
+        if (retired && this.preparedWindows === preparedWindows) {
+          this.preparedWindows = null;
+        }
+        return retired ? "not-invoked" : "native-outcome-uncertain";
       }
+      try {
+        preparedWindows.nativeInvocationStarted = true;
+        await this.launchWindowsSupervisor({
+          dataDirectory: preparedWindows.dataDirectory,
+          installerPath: preparedWindows.installerPath,
+          installerIdentity: preparedWindows.installerIdentity,
+          oldExecutablePath: this.executablePath,
+          oldExecutableIdentity: preparedWindows.oldExecutableIdentity,
+          newExecutableDigest:
+            preparedWindows.installerIdentity.candidateExecutableDigest,
+          snapshot: preparedWindows.snapshot,
+          handoffToken: preparedWindows.handoffToken,
+        });
+      } catch (error) {
+        if (error instanceof WindowsUpdateSupervisorCleanupError) {
+          // The shared native operation may belong to another adapter/process,
+          // or may already have published its terminal receipt. Preserve the
+          // exact cleanup-confirmed snapshot and token without advancing it to
+          // rollback-required; startup receipt recovery owns reconciliation.
+          return "native-outcome-uncertain";
+        }
+        preparedWindows.nativeInvocationStarted = false;
+        const retired = this.retireWindowsRollback(preparedWindows);
+        if (retired && this.preparedWindows === preparedWindows) {
+          this.preparedWindows = null;
+        }
+        return retired ? "not-invoked" : "native-outcome-uncertain";
+      }
+      let admittedCurrent: AppUpdateHandoffSnapshot | null = null;
+      try {
+        admittedCurrent = preparedWindows.journal.current();
+      } catch {
+        // Any concurrent journal mutation after READY retains native authority.
+      }
+      if (
+        this.preparedWindows !== preparedWindows
+        || !admittedCurrent
+        || admittedCurrent.phase !== "old-generation-cleanup-confirmed"
+        || !exactHandoffSnapshotMatches(
+          admittedCurrent,
+          preparedWindows.snapshot,
+        )
+      ) {
+        this.markWindowsInstallUncertain(preparedWindows);
+        return "native-outcome-uncertain";
+      }
+      if (this.preparedWindows === preparedWindows) {
+        this.preparedWindows = null;
+      }
+      onHandoff();
+      this.application.quit();
+      return "handoff-confirmed";
     }
     return new Promise((resolve) => {
       let settled = false;
-      const finish = (handedOff: boolean): void => {
+      let invocationStarted = false;
+      let nativeListenerInstalled = false;
+      let errorListenerInstalled = false;
+      let timeout: ReturnType<typeof setTimeout> | null = null;
+      const finish = (result: AppUpdaterInstallResult): void => {
         if (settled) return;
         settled = true;
-        clearTimeout(timeout);
-        this.installSignals.removeListener("before-quit-for-update", onNativeHandoff);
-        this.updater.removeListener("error", onError);
-        resolve(handedOff);
+        if (timeout) clearTimeout(timeout);
+        if (nativeListenerInstalled) {
+          try {
+            this.installSignals.removeListener(
+              "before-quit-for-update",
+              onNativeHandoff,
+            );
+          } catch {
+            // A retained listener is inert because settlement is checked first.
+          }
+        }
+        if (errorListenerInstalled) {
+          try {
+            this.updater.removeListener("error", onError);
+          } catch {
+            // A retained listener is inert because settlement is checked first.
+          }
+        }
+        resolve(result);
+      };
+      const failBeforeInvocation = (): void => finish("not-invoked");
+      const failUncertain = (): void => {
+        if (settled) return;
+        finish("native-outcome-uncertain");
       };
       const onNativeHandoff = (): void => {
-        if (preparedWindows) {
-          const current = preparedWindows.journal.current();
-          const committed = current?.phase === "old-generation-cleanup-confirmed"
-            ? preparedWindows.journal.transition(
-                appUpdateHandoffOwner(current),
-                "ownership-transfer-committed",
-              )
-            : null;
-          if (!committed) {
-            this.markWindowsInstallUncertain(preparedWindows);
-            finish(false);
-            return;
-          }
-          if (this.preparedWindows === preparedWindows) {
-            this.preparedWindows = null;
-          }
+        if (settled || !invocationStarted) return;
+        try {
+          onHandoff();
+          finish("handoff-confirmed");
+        } catch {
+          finish("native-outcome-uncertain");
         }
-        onHandoff();
-        finish(true);
       };
-      const failUncertain = (): void => {
-        if (preparedWindows) {
-          this.markWindowsInstallUncertain(preparedWindows);
-        }
-        finish(false);
+      const onError = (): void => {
+        if (settled) return;
+        if (invocationStarted) failUncertain();
+        else failBeforeInvocation();
       };
-      const onError = (): void => failUncertain();
-      const timeout = setTimeout(failUncertain, INSTALL_HANDOFF_TIMEOUT_MS);
-      timeout.unref?.();
-      this.installSignals.on("before-quit-for-update", onNativeHandoff);
-      this.updater.on("error", onError);
       try {
-        if (preparedWindows) preparedWindows.nativeInvocationStarted = true;
+        nativeListenerInstalled = true;
+        this.installSignals.on("before-quit-for-update", onNativeHandoff);
+        errorListenerInstalled = true;
+        this.updater.on("error", onError);
+      } catch {
+        failBeforeInvocation();
+        return;
+      }
+      if (settled) return;
+      timeout = setTimeout(failUncertain, INSTALL_HANDOFF_TIMEOUT_MS);
+      timeout.unref?.();
+      try {
+        invocationStarted = true;
         this.updater.quitAndInstall(false, true);
       } catch {
         failUncertain();
@@ -600,20 +941,42 @@ class ElectronAppUpdaterAdapter implements AppUpdaterAdapter {
     ElectronAppUpdaterAdapter["preparedLinux"]
   >): Promise<void> {
     if (this.preparedLinux === prepared) this.preparedLinux = null;
-    this.markLinuxRollbackRequired(prepared.journal);
+    const rollingBack = this.markLinuxRollbackRequired(
+      prepared.journal,
+      prepared.snapshot,
+    );
+    if (rollingBack) prepared.snapshot = rollingBack;
     const cleanup = await Promise.allSettled([
       prepared.candidate.abort(),
-      prepared.transaction.rollback(),
+      rollingBack?.phase === "rollback-required"
+        ? prepared.transaction.rollback()
+        : Promise.resolve(),
     ]);
-    if (cleanup.every((result) => result.status === "fulfilled")) {
-      this.completeLinuxRollback(prepared.journal);
+    const rollbackCompleted = !!rollingBack
+      && cleanup.every((result) => result.status === "fulfilled")
+      && this.completeLinuxRollback(
+        prepared.journal,
+        rollingBack,
+        (completed) => {
+          prepared.snapshot = completed;
+        },
+      );
+    if (rollbackCompleted) {
       return;
     }
+    this.preparedLinux = prepared;
     throw new AggregateError(
-      cleanup
-        .filter((result): result is PromiseRejectedResult =>
-          result.status === "rejected")
-        .map((result) => result.reason),
+      [
+        ...cleanup
+          .filter((result): result is PromiseRejectedResult =>
+            result.status === "rejected")
+          .map((result) => result.reason),
+        ...(!rollingBack
+          ? [new Error("The app update rollback authority changed.")]
+          : rollbackCompleted
+            ? []
+            : [new Error("The app update rollback authority was not retired.")]),
+      ],
       "The app update candidate rollback could not be confirmed.",
     );
   }

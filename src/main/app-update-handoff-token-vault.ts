@@ -177,13 +177,19 @@ export class AppUpdateHandoffTokenVault {
 
   claim(
     snapshot: AppUpdateHandoffSnapshot,
-    options: { readonly recoverAbandonedClaim?: boolean } = {},
+    options: {
+      readonly allowExpired?: boolean;
+      readonly recoverAbandonedClaim?: boolean;
+    } = {},
   ): AppUpdateHandoffTokenClaim | null {
     let current = this.current();
     if (
       !current
       || !appUpdateHandoffTokenReceiptMatches(current.receipt, snapshot)
-      || this.clock().getTime() > Date.parse(current.receipt.deadlineAt)
+      || (
+        options.allowExpired !== true
+        && this.clock().getTime() > Date.parse(current.receipt.deadlineAt)
+      )
       || (
         current.name === TOKEN_RECEIPT_CLAIMED
         && options.recoverAbandonedClaim !== true

@@ -1,6 +1,9 @@
 import type { RuntimeUpdatePreparationBlocker, RuntimeUpdatePreparationResult } from "../node/runtime-process-protocol.js";
 import type { AppUpdateInstallBlocker, AppUpdateStatus } from "../shared/desktop.js";
-import type { AppUpdateInstallRuntimeContext } from "./electron-app-updater.js";
+import type {
+  AppUpdateInstallRuntimeContext,
+  AppUpdaterInstallResult,
+} from "./electron-app-updater.js";
 import { finishNormalShutdownAfterCleanup } from "./privileged-shutdown.js";
 
 interface UpdateService {
@@ -10,7 +13,7 @@ interface UpdateService {
   failInstall(): AppUpdateStatus;
   prepareInstall?(context: AppUpdateInstallRuntimeContext): Promise<boolean>;
   abortInstall?(): Promise<void>;
-  quitAndInstall(onHandoff: () => void): Promise<boolean>;
+  quitAndInstall(onHandoff: () => void): Promise<AppUpdaterInstallResult>;
 }
 
 interface RuntimeUpdateGate {
@@ -34,7 +37,12 @@ export interface AppUpdateInstallCoordinatorOptions {
   reportError(error: unknown): void;
 }
 
-type InstallMode = "running" | "update-preparing" | "normal-cleanup" | "update-handoff";
+type InstallMode =
+  | "running"
+  | "update-preparing"
+  | "update-outcome-uncertain"
+  | "normal-cleanup"
+  | "update-handoff";
 
 export function appUpdateInstallBlocker(
   blocker: RuntimeUpdatePreparationBlocker,
@@ -89,6 +97,10 @@ export class AppUpdateInstallCoordinator {
   /** Returns true only for the updater-generated quit after complete cleanup. */
   allowBeforeQuit(): boolean {
     if (this.mode === "update-handoff") return true;
+    if (this.mode === "update-outcome-uncertain") {
+      this.reportUnconfirmedShutdown();
+      return false;
+    }
     this.beginNormalShutdown();
     return false;
   }
@@ -120,6 +132,7 @@ export class AppUpdateInstallCoordinator {
     const { service } = this.options;
     let cleanupConfirmed = false;
     let candidatePreparationStarted = false;
+    let installInvocationStarted = false;
     try {
       const runtime = this.options.runtime();
       if (!runtime) return this.block("runtime-transition");
@@ -173,12 +186,21 @@ export class AppUpdateInstallCoordinator {
         return this.failClosed(false);
       }
 
-      const handedOff = await service.quitAndInstall(() => {
+      installInvocationStarted = true;
+      const installResult = await service.quitAndInstall(() => {
         if (this.mode === "update-preparing") this.mode = "update-handoff";
       });
       if (this.currentMode() === "normal-cleanup") return service.current();
-      if (!handedOff) {
-        await service.abortInstall?.().catch(() => undefined);
+      if (installResult === "native-outcome-uncertain") {
+        return this.failUncertainInstall();
+      }
+      if (installResult === "not-invoked") {
+        try {
+          await service.abortInstall?.();
+        } catch (error) {
+          this.options.reportError(error);
+          return this.failUncertainInstall();
+        }
         return this.failClosed(true);
       }
       if (this.currentMode() !== "update-handoff") {
@@ -188,6 +210,7 @@ export class AppUpdateInstallCoordinator {
       return service.current();
     } catch (error) {
       this.options.reportError(error);
+      if (installInvocationStarted) return this.failUncertainInstall();
       if (this.mode === "normal-cleanup") {
         if (candidatePreparationStarted) {
           await service.abortInstall?.().catch(() => undefined);
@@ -225,6 +248,13 @@ export class AppUpdateInstallCoordinator {
       finish: this.options.finishNormalShutdown,
       onUnconfirmed: () => this.reportUnconfirmedShutdown(),
     });
+    return status;
+  }
+
+  private failUncertainInstall(): AppUpdateStatus {
+    const status = this.options.service.failInstall();
+    this.mode = "update-outcome-uncertain";
+    this.reportUnconfirmedShutdown();
     return status;
   }
 

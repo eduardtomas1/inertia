@@ -6,6 +6,8 @@ import {
 import {
   detachedRuntimeConnection,
   runtimeConnection,
+  RuntimeConnectionUnavailableError,
+  unavailableRuntimeConnection,
 } from "../../src/main/runtime-supervisor-connection";
 
 const websocketUrl = `ws://127.0.0.1:41001/runtime/${"a".repeat(43)}`;
@@ -28,7 +30,7 @@ describe("runtime supervisor connection", () => {
         unsupportedBackupsSkipped: 0,
       },
       databaseRecoveryNoticePending: true,
-      lastError: null,
+      startupBlockerCode: null,
     }).connection;
     const detached = detachedRuntimeConnection(
       mainConnection,
@@ -49,4 +51,62 @@ describe("runtime supervisor connection", () => {
       authority: { conversationId, clientId: "web-contents:7" },
     });
   });
+
+  it("never projects arbitrary child errors or locations", () => {
+    const privateDetail =
+      "spawn failed at /mnt/customer/roadmap.txt prompt=TOP_SECRET";
+    let caught: unknown;
+    try {
+      runtimeConnection({
+        phase: "restarting",
+        generation: 2,
+        websocketUrl: null,
+        databaseRecoveryReport: null,
+        databaseRecoveryNoticePending: false,
+        startupBlockerCode: null,
+        // Model the supervisor's private lastError without adding it back to
+        // the renderer-facing connection contract.
+        lastError: privateDetail,
+      } as Parameters<typeof runtimeConnection>[0] & { lastError: string });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(RuntimeConnectionUnavailableError);
+    const connection = (caught as RuntimeConnectionUnavailableError)
+      .connection;
+    expect(connection).toEqual({
+      unavailable: true,
+      code: "runtime-restarting",
+      retryable: true,
+      message: "The local service is restarting. Try again in a moment.",
+    });
+    expect(JSON.stringify(connection)).not.toContain(privateDetail);
+    expect(JSON.stringify(connection)).not.toContain("roadmap.txt");
+    expect(JSON.stringify(connection)).not.toContain("TOP_SECRET");
+  });
+
+  it.each([
+    [
+      "prior-runtime-cleanup-unconfirmed",
+      "Runtime startup is blocked because prior process cleanup remains unconfirmed. Review Lifecycle Integrity in Settings.",
+    ],
+    [
+      "provider-installation-quarantined",
+      "Runtime startup is blocked because provider installation recovery requires manual attention. Review Lifecycle Integrity in Settings.",
+    ],
+  ] as const)(
+    "classifies %s as a finite non-retryable blocker",
+    (startupBlockerCode, message) => {
+      expect(unavailableRuntimeConnection({
+        phase: "stopped",
+        startupBlockerCode,
+      })).toEqual({
+        unavailable: true,
+        code: startupBlockerCode,
+        retryable: false,
+        message,
+      });
+    },
+  );
 });

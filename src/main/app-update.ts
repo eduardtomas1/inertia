@@ -8,6 +8,7 @@ import type {
   AppUpdateInstallRuntimeContext,
   AppUpdaterAdapter,
   AppUpdaterDownload,
+  AppUpdaterInstallResult,
 } from "./electron-app-updater.js";
 import {
   channelConfiguration,
@@ -361,7 +362,9 @@ export class AppUpdateService {
     await updater.abortInstall?.();
   }
 
-  async quitAndInstall(onHandoff?: () => void): Promise<boolean> {
+  async quitAndInstall(
+    onHandoff?: () => void,
+  ): Promise<AppUpdaterInstallResult> {
     if (this.status.state !== "installing") {
       throw new Error("The update installation is not prepared.");
     }

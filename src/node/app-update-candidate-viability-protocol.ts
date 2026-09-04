@@ -2,6 +2,9 @@ const SCHEMA_VERSION = 1;
 const MAX_PATH_BYTES = 4 * 1_024;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+const RUNTIME_GENERATION_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}:[1-9][0-9]{0,9}$/iu;
+const SYSTEM_BOOT_PATTERN = /^(?:(?:linux|darwin):[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|win32:[0-9a-f]{8}|test:[0-9a-f-]{36}|unavailable)$/u;
 
 export const APP_UPDATE_CANDIDATE_VIABILITY_CODES = Object.freeze([
   "database-incompatible",
@@ -17,6 +20,13 @@ export interface AppUpdateCandidateViabilityRequest {
   readonly schemaVersion: typeof SCHEMA_VERSION;
   readonly operationId: string;
   readonly dataDirectory: string;
+  readonly expectedActiveRuntimeOwner:
+    AppUpdateCandidateExpectedRuntimeOwner | null;
+}
+
+export interface AppUpdateCandidateExpectedRuntimeOwner {
+  readonly runtimeGenerationId: string;
+  readonly systemBootId: string;
 }
 
 export interface AppUpdateCandidateViabilityResult {
@@ -64,11 +74,14 @@ function validCode(value: unknown): value is AppUpdateCandidateViabilityCode {
 export function appUpdateCandidateViabilityRequest(options: {
   readonly operationId: string;
   readonly dataDirectory: string;
+  readonly expectedActiveRuntimeOwner?:
+    AppUpdateCandidateExpectedRuntimeOwner | null;
 }): AppUpdateCandidateViabilityRequest {
   const request: AppUpdateCandidateViabilityRequest = {
     schemaVersion: SCHEMA_VERSION,
     operationId: options.operationId,
     dataDirectory: options.dataDirectory,
+    expectedActiveRuntimeOwner: options.expectedActiveRuntimeOwner ?? null,
   };
   const parsed = parseAppUpdateCandidateViabilityRequest(request);
   if (!parsed) throw new Error("The app update viability request is invalid.");
@@ -82,12 +95,27 @@ export function parseAppUpdateCandidateViabilityRequest(
     !value
     || typeof value !== "object"
     || Array.isArray(value)
-    || !exactKeys(value, ["dataDirectory", "operationId", "schemaVersion"])
+    || !exactKeys(value, [
+      "dataDirectory",
+      "expectedActiveRuntimeOwner",
+      "operationId",
+      "schemaVersion",
+    ])
   ) return null;
   const request = value as Partial<AppUpdateCandidateViabilityRequest>;
+  const owner = request.expectedActiveRuntimeOwner;
+  const validOwner = owner === null || (
+    !!owner
+    && typeof owner === "object"
+    && !Array.isArray(owner)
+    && exactKeys(owner, ["runtimeGenerationId", "systemBootId"])
+    && RUNTIME_GENERATION_PATTERN.test(owner.runtimeGenerationId)
+    && SYSTEM_BOOT_PATTERN.test(owner.systemBootId)
+  );
   return request.schemaVersion === SCHEMA_VERSION
     && validOperationId(request.operationId)
     && boundedAbsolutePath(request.dataDirectory)
+    && validOwner
     ? request as AppUpdateCandidateViabilityRequest
     : null;
 }

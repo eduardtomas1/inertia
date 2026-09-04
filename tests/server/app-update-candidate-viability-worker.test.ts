@@ -22,6 +22,10 @@ import { appUpdateCandidateViabilityRequest } from
   "../../src/node/app-update-candidate-viability-protocol";
 import { RuntimeGenerationLeaseJournal } from
   "../../src/node/runtime-generation-leases";
+import { RuntimeOwnedProcessJournal } from
+  "../../src/node/runtime-owned-process-journal";
+import { runtimeOwnedProcessWriterName } from
+  "../../src/node/runtime-owned-process-session-journal";
 import { validateAppUpdateCandidateViability } from
   "../../src/server/app-update-candidate-viability-worker";
 import { migrateRuntimeDatabase, runtimeMigrationCatalog } from
@@ -234,6 +238,169 @@ describe("app update candidate viability worker", () => {
       JSON.stringify(damaged),
       { mode: 0o600 },
     );
+    expect(() => validateAppUpdateCandidateViability(
+      appUpdateCandidateViabilityRequest({ operationId, dataDirectory }),
+    )).toThrow("recovery-storage-invalid");
+  });
+
+  it("accepts the exact quiescent live runtime ownership topology without mutating it", async () => {
+    const dataDirectory = await dataRoot();
+    const leases = new RuntimeGenerationLeaseJournal(dataDirectory);
+    const processes = new RuntimeOwnedProcessJournal(dataDirectory, {
+      platform: "linux",
+    });
+    expect(processes.startSession(runtimeGenerationId, systemBootId)).toBe(true);
+    expect(leases.publish(runtimeGenerationId, systemBootId)).toBe(true);
+    const names = (await readdir(dataDirectory)).sort();
+    const before = await Promise.all(names
+      .filter((name) => name.endsWith(".json"))
+      .map(async (name) => ({
+        name,
+        bytes: await readFile(join(dataDirectory, name)),
+      })));
+
+    expect(() => validateAppUpdateCandidateViability(
+      appUpdateCandidateViabilityRequest({
+        operationId,
+        dataDirectory,
+        expectedActiveRuntimeOwner: { runtimeGenerationId, systemBootId },
+      }),
+    )).not.toThrow();
+
+    await expect(readdir(dataDirectory).then((entries) => entries.sort()))
+      .resolves.toEqual(names);
+    await expect(Promise.all(before.map(async ({ name, bytes }) =>
+      (await readFile(join(dataDirectory, name))).equals(bytes),
+    ))).resolves.toEqual(before.map(() => true));
+  });
+
+  it("rejects a non-quiescent live runtime writer without repairing it", async () => {
+    const dataDirectory = await dataRoot();
+    const leases = new RuntimeGenerationLeaseJournal(dataDirectory);
+    const processes = new RuntimeOwnedProcessJournal(dataDirectory, {
+      platform: "linux",
+    });
+    expect(processes.startSession(runtimeGenerationId, systemBootId)).toBe(true);
+    expect(leases.publish(runtimeGenerationId, systemBootId)).toBe(true);
+    const transient = join(
+      dataDirectory,
+      runtimeOwnedProcessWriterName(runtimeGenerationId),
+      ".runtime-owned-child-44444444-4444-4444-8444-444444444444.begin.tmp",
+    );
+    await writeFile(transient, "{}", { mode: 0o600 });
+
+    expect(() => validateAppUpdateCandidateViability(
+      appUpdateCandidateViabilityRequest({ operationId, dataDirectory }),
+    )).toThrow("recovery-storage-invalid");
+    await expect(readFile(transient, "utf8")).resolves.toBe("{}");
+  });
+
+  it("rejects an active runtime owner when the caller requires quiescence", async () => {
+    const dataDirectory = await dataRoot();
+    const leases = new RuntimeGenerationLeaseJournal(dataDirectory);
+    const processes = new RuntimeOwnedProcessJournal(dataDirectory, {
+      platform: "linux",
+    });
+    expect(processes.startSession(runtimeGenerationId, systemBootId)).toBe(true);
+    expect(leases.publish(runtimeGenerationId, systemBootId)).toBe(true);
+
+    expect(() => validateAppUpdateCandidateViability(
+      appUpdateCandidateViabilityRequest({
+        operationId,
+        dataDirectory,
+        expectedActiveRuntimeOwner: null,
+      }),
+    )).toThrow("recovery-storage-invalid");
+  });
+
+  it("rejects a live runtime owner that does not match the handoff identity", async () => {
+    const dataDirectory = await dataRoot();
+    const leases = new RuntimeGenerationLeaseJournal(dataDirectory);
+    const processes = new RuntimeOwnedProcessJournal(dataDirectory, {
+      platform: "linux",
+    });
+    expect(processes.startSession(runtimeGenerationId, systemBootId)).toBe(true);
+    expect(leases.publish(runtimeGenerationId, systemBootId)).toBe(true);
+
+    expect(() => validateAppUpdateCandidateViability(
+      appUpdateCandidateViabilityRequest({
+        operationId,
+        dataDirectory,
+        expectedActiveRuntimeOwner: {
+          runtimeGenerationId: "66666666-6666-4666-8666-666666666666:2",
+          systemBootId,
+        },
+      }),
+    )).toThrow("recovery-storage-invalid");
+  });
+
+  it("rejects an active runtime session whose exact boot identity is not leased", async () => {
+    const dataDirectory = await dataRoot();
+    const otherBootId = "test:55555555-5555-4555-8555-555555555555";
+    const processes = new RuntimeOwnedProcessJournal(dataDirectory, {
+      platform: "linux",
+    });
+    expect(processes.startSession(runtimeGenerationId, systemBootId)).toBe(true);
+    expect(new RuntimeGenerationLeaseJournal(dataDirectory).publish(
+      runtimeGenerationId,
+      otherBootId,
+    )).toBe(true);
+
+    expect(() => validateAppUpdateCandidateViability(
+      appUpdateCandidateViabilityRequest({ operationId, dataDirectory }),
+    )).toThrow("recovery-storage-invalid");
+  });
+
+  it("rejects an unbound runtime ownership writer directory", async () => {
+    const dataDirectory = await dataRoot();
+    await mkdir(
+      join(dataDirectory, runtimeOwnedProcessWriterName(runtimeGenerationId)),
+      { mode: 0o700 },
+    );
+
+    expect(() => validateAppUpdateCandidateViability(
+      appUpdateCandidateViabilityRequest({ operationId, dataDirectory }),
+    )).toThrow("recovery-storage-invalid");
+  });
+
+  it("rejects a redirected writer for an otherwise exact live session", async () => {
+    const dataDirectory = await dataRoot();
+    const writer = join(
+      dataDirectory,
+      runtimeOwnedProcessWriterName(runtimeGenerationId),
+    );
+    const processes = new RuntimeOwnedProcessJournal(dataDirectory, {
+      platform: "linux",
+    });
+    expect(processes.startSession(runtimeGenerationId, systemBootId)).toBe(true);
+    expect(new RuntimeGenerationLeaseJournal(dataDirectory).publish(
+      runtimeGenerationId,
+      systemBootId,
+    )).toBe(true);
+    await rm(writer, { recursive: true });
+    const redirected = join(dataDirectory, "redirected-writer");
+    await mkdir(redirected, { mode: 0o700 });
+    await symlink(redirected, writer, "dir");
+
+    expect(() => validateAppUpdateCandidateViability(
+      appUpdateCandidateViabilityRequest({ operationId, dataDirectory }),
+    )).toThrow("recovery-storage-invalid");
+    await expect(stat(redirected).then((metadata) => metadata.isDirectory()))
+      .resolves.toBe(true);
+  });
+
+  it("rejects multiple simultaneously active runtime ownership sessions", async () => {
+    const dataDirectory = await dataRoot();
+    const otherGenerationId = "66666666-6666-4666-8666-666666666666:2";
+    const leases = new RuntimeGenerationLeaseJournal(dataDirectory);
+    const processes = new RuntimeOwnedProcessJournal(dataDirectory, {
+      platform: "linux",
+    });
+    expect(processes.startSession(runtimeGenerationId, systemBootId)).toBe(true);
+    expect(processes.startSession(otherGenerationId, systemBootId)).toBe(true);
+    expect(leases.publish(runtimeGenerationId, systemBootId)).toBe(true);
+    expect(leases.publish(otherGenerationId, systemBootId)).toBe(true);
+
     expect(() => validateAppUpdateCandidateViability(
       appUpdateCandidateViabilityRequest({ operationId, dataDirectory }),
     )).toThrow("recovery-storage-invalid");

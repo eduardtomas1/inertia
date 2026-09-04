@@ -28,7 +28,6 @@ import {
   type AppHealthSnapshot,
   parseAttachmentPickerMode, parseDesktopNotificationRequest,
   parseOpenProjectPathRequest,
-  type RuntimeConnectionUnavailable,
 } from "../shared/desktop.js";
 import { PREVIEW_AGENT_INPUT_REFUSAL_CHANNEL } from "../shared/preview-agent-privacy-guard.js";
 import { safeHttpUrl } from "../shared/preview-url.js";
@@ -85,6 +84,8 @@ import { RuntimeDiagnostics, runtimeDiagnosticsDirectory } from "./runtime-diagn
 import { PreviewBroker, hardenDesktopSession } from "./preview-broker.js";
 import { showBrowserEvidenceImageWindow } from "./browser-evidence-image-inspector.js";
 import { RuntimeSupervisor } from "./runtime-supervisor.js";
+import { RuntimeConnectionUnavailableError } from
+  "./runtime-supervisor-connection.js";
 import { RuntimeSystemSuspendDelivery } from "./runtime-system-suspend-delivery.js";
 import { RuntimeSystemSuspendTracker } from "./runtime-system-suspend-tracker.js";
 import * as runtimeBootstrap from "./runtime-bootstrap-safety.js";
@@ -101,7 +102,7 @@ import { createDetachedChatMain, type DetachedChatMain } from "./detached-chat-b
 import * as detachedChatClose from "./detached-chat-close-coordinator.js";
 import { PrivateConnectHost } from "./private-connect/host.js";
 import { SecureFileBroker } from "./secure-file-broker.js";
-import { packageSmokeEnvironment, writePackageSmokeStage } from "./package-smoke-environment.js";
+import { initialPackageSmokeEnvironment, writePackageSmokeStage } from "./package-smoke-environment.js";
 import { waitForRequestedPackageSmokeResults } from "./package-smoke-results.js";
 import { APP_HOST, createAppProtocolRegistrar } from "./app-protocol.js";
 import { initializeInertiaReleaseChannel, releaseRuntimeOverride } from "./release-channel.js";
@@ -384,23 +385,18 @@ function assertTrustedChatIpc(event: IpcMainInvokeEvent, argumentCount: number, 
   return detachedChatMain.assertTrustedChatIpc(event, argumentCount, expectedArguments);
 }
 
-function runtimeConnectionUnavailable(message: string): RuntimeConnectionUnavailable {
-  return { unavailable: true, message };
-}
-function isTransientRuntimeConnectionError(error: unknown): error is Error {
-  return error instanceof Error && (
-    error.message.startsWith("The local service is starting.")
-    || error.message.startsWith("The local service is restarting.")
-  );
-}
-
 function registerIpcHandlers(): void {
   ipcMain.on(PREVIEW_AGENT_INPUT_REFUSAL_CHANNEL, (event, value) => { event.returnValue = previewBroker.reportInputRefusal(event.sender, value); });
   ipcMain.handle(IPC.getRuntimeConnection, (event, ...args) => {
     const context = assertTrustedChatIpc(event, args.length);
 
     if (!runtimeSupervisor) {
-      return runtimeConnectionUnavailable("The local runtime is not available.");
+      return {
+        unavailable: true,
+        code: "runtime-unavailable",
+        retryable: false,
+        message: "The local runtime is not available.",
+      };
     }
 
     try {
@@ -411,8 +407,8 @@ function registerIpcHandlers(): void {
             `web-contents:${event.sender.id}`,
           );
     } catch (error) {
-      if (isTransientRuntimeConnectionError(error)) {
-        return runtimeConnectionUnavailable(error.message);
+      if (error instanceof RuntimeConnectionUnavailableError) {
+        return error.connection;
       }
       throw error;
     }
@@ -1036,7 +1032,7 @@ async function bootstrap(): Promise<void> {
   const orphanReservation = attachmentStorage.reservation;
   attachmentReservation = orphanReservation;
 
-  const packageSmoke = packageSmokeEnvironment();
+  const packageSmoke = initialPackageSmokeEnvironment;
   packageSmokeFilePath = packageSmoke.marker;
   packageSmokeOwnerToken = packageSmoke.ownerToken;
   const {
@@ -1156,6 +1152,7 @@ async function bootstrap(): Promise<void> {
             websocketUrl: snapshot.websocketUrl,
             timestampMs: Date.now(),
             ownerToken: packageSmokeOwnerToken,
+            appImageFileDescriptorIdentity: packageSmoke.appImageFileDescriptorIdentity,
           }),
           { encoding: "utf8", mode: 0o600, flag: "wx" },
         ).then(async () => {
@@ -1219,6 +1216,8 @@ void startApplicationWithUpdateHandoff({
   channel: releaseChannel.channel, version: app.getVersion(),
   executablePath: process.execPath, dataDirectory: configuredRuntimeDataDirectory(),
   profileDirectory: app.getPath("userData"), focusMainWindow,
+  runtimeProcessGuardianPath: resolveDesktopRuntimeProcessSafetyAssets()
+    .runtimeProcessGuardianPath,
   updateInstallCoordinator: () => appUpdateInstallCoordinator,
   recordBeforeQuit: () => recordPackageSmokeStage("before-quit"),
   cleanupBeforeQuit: runPrivilegedCleanup,
@@ -1227,7 +1226,7 @@ void startApplicationWithUpdateHandoff({
     "Refusing to exit because privileged shutdown could not be confirmed."),
   reportCleanupFailure: (error) => console.error(
     "Failed to finish privileged shutdown", error),
-  validateCandidateBootstrap: async (operationId) => await validateDesktopAppUpdateCandidate({ operationId, dataDirectory: configuredRuntimeDataDirectory() }),
+  validateCandidateBootstrap: async (operationId, expectedActiveRuntimeOwner) => await validateDesktopAppUpdateCandidate({ operationId, dataDirectory: configuredRuntimeDataDirectory(), expectedActiveRuntimeOwner }),
   bootstrap,
   awaitCandidateReadiness: async () => await appUpdateRuntimeReadiness.wait(),
   cleanupFailedCandidate: runPrivilegedCleanup,

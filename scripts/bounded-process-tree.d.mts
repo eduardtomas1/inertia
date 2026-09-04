@@ -2,6 +2,16 @@ export class ProcessTreeCleanupError extends Error {
   readonly preserveTemporaryRoot: true;
 }
 
+export class BoundedProcessTimeoutError extends Error {
+  readonly cleanupConfirmed: true;
+}
+
+export class BoundedProcessExitError extends Error {
+  readonly cleanupConfirmed: true;
+  readonly exitCode: number | null;
+  readonly signal: NodeJS.Signals | null;
+}
+
 export function runBounded(
   command: string,
   args: readonly string[],
@@ -14,6 +24,10 @@ export function runBounded(
     readonly input?: Buffer | string;
     readonly label: string;
     readonly maxOutputBytes?: number;
+    readonly onOutput?: (
+      stream: "stderr" | "stdout",
+      chunk: Buffer,
+    ) => void;
     readonly onSpawn?: (child: {
       readonly pid: number;
       readonly processGroupId: number | null;

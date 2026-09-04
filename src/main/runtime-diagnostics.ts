@@ -1,13 +1,16 @@
+import { createHash } from "node:crypto";
 import {
   chmodSync,
   closeSync,
   constants,
   existsSync,
   fchmodSync,
+  fstatSync,
+  fsyncSync,
   lstatSync,
   mkdirSync,
   openSync,
-  readFileSync,
+  readSync,
   readdirSync,
   renameSync,
   unlinkSync,
@@ -22,7 +25,7 @@ import type { RuntimeLifecycleDiagnosticSnapshot } from
   "../shared/lifecycle-diagnostics.js";
 import type { AppUpdateHandoffDiagnostic } from "./app-update-handoff.js";
 import {
-  appUpdatePreparationDiagnosticSchema,
+  isAppUpdatePreparationDiagnostic,
   type AppUpdatePreparationDiagnostic,
 } from
   "../shared/app-update-preparation-diagnostic.js";
@@ -33,6 +36,8 @@ import {
   type LifecycleBuildMetadata,
 } from
   "../shared/lifecycle-build-metadata.js";
+import { isRuntimeStartupBlockerCode } from
+  "../shared/runtime-startup-diagnostics.js";
 
 const DEFAULT_MAX_FILE_BYTES = 256 * 1024;
 const DEFAULT_MAX_FILES = 4;
@@ -40,6 +45,25 @@ const DEFAULT_RETENTION_MS = 7 * 24 * 60 * 60 * 1_000;
 const DIRECTORY_MODE = 0o700;
 const FILE_MODE = 0o600;
 const LOG_FILE_PATTERN = /^runtime(?:\.\d+)?\.log$/u;
+const DIAGNOSTIC_SCHEMA_VERSION = 1;
+const DIAGNOSTIC_DIGEST_PATTERN = /^[0-9a-f]{64}$/u;
+const DIAGNOSTIC_PHASE_PATTERN =
+  /^(?:idle|starting|ready|restarting|stopping|stopped)$/u;
+const DETACHED_DRAFT_REASONS = [
+  "changed",
+  "invalid-json",
+  "invalid-schema",
+  "missing",
+  "permission",
+  "too-large",
+  "transient-io",
+  "unsafe",
+] as const;
+const DETACHED_DRAFT_OUTCOMES = [
+  "blocked",
+  "quarantined",
+  "recovered",
+] as const;
 
 export type RuntimeDiagnosticEvent =
   | "app.start"
@@ -55,6 +79,12 @@ export interface RuntimeDiagnosticsOptions {
   maxFiles?: number;
   retentionMs?: number;
   now?: () => number;
+  write?: (
+    descriptor: number,
+    buffer: Buffer,
+    offset: number,
+    length: number,
+  ) => number;
 }
 
 export interface RuntimeSupportReportInput {
@@ -105,29 +135,35 @@ export function sanitizeRuntimeDiagnosticText(value: unknown): string | undefine
     .replace(/\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b/gu, "<redacted-email>")
     .replace(/\b(api[_ -]?key|authorization|cookie|credential|password|prompt|secret|source|tokens?)\s*[:=]\s*(?:"[^"]*"|'[^']*'|[^\s,;]+)/giu, "$1=<redacted>")
     .replace(/\b[A-Za-z]:\\(?:[^\\\s]+\\)*[^\\\s]*/gu, "<path>")
-    .replace(/\/(?:Users|home|private|tmp|var|opt|run)(?:\/[^\s,;:]+)+/gu, "<path>");
+    .replace(/(?<![:/])\/(?:[^/\s,;:]+\/)+[^/\s,;:]+/gu, "<path>");
   return text.slice(0, 400);
 }
 
 function runtimeFailureSummary(value: unknown): string | undefined {
   const text = sanitizeRuntimeDiagnosticText(value);
   if (!text) return undefined;
-  if ([
-    /^The runtime generation ownership lease could not be persisted\.$/u,
-    /^The unstarted runtime generation lease could not be retired\.$/u,
-    /^The confirmed runtime cleanup receipt could not be persisted\.$/u,
-    /^The runtime cleanup receipt could not be consumed safely\.$/u,
-    /^The runtime could not confirm complete process cleanup\.$/u,
-    /^Runtime shutdown failed while closing local resources\.$/u,
-    /^Runtime shutdown exceeded its deadline while closing local resources\.$/u,
-    /^Runtime shutdown could not confirm owned-process cleanup\.$/u,
-    /^Runtime shutdown could not confirm cleanup after incomplete startup\.$/u,
-    /^The runtime process tree could not be confirmed stopped\..*$/u,
-    /^The runtime exited before complete process-tree cleanup was confirmed\..*$/u,
-    /^The runtime process tree was stopped, but prior detached work could not be confirmed cleaned up\..*$/u,
-    /^A prior runtime generation still has unconfirmed process cleanup\..*$/u,
-    /^Conversation attachment storage shutdown could not be confirmed\.$/u,
-  ].some((pattern) => pattern.test(text))) return text;
+  const exactSummaries = [
+    "The runtime generation ownership lease could not be persisted.",
+    "The unstarted runtime generation lease could not be retired.",
+    "The confirmed runtime cleanup receipt could not be persisted.",
+    "The runtime cleanup receipt could not be consumed safely.",
+    "The runtime could not confirm complete process cleanup.",
+    "Runtime shutdown failed while closing local resources.",
+    "Runtime shutdown exceeded its deadline while closing local resources.",
+    "Runtime shutdown could not confirm owned-process cleanup.",
+    "Runtime shutdown could not confirm cleanup after incomplete startup.",
+    "Conversation attachment storage shutdown could not be confirmed.",
+  ];
+  if (exactSummaries.includes(text)) return text;
+  const fixedPrefixSummaries = [
+    "The runtime process tree could not be confirmed stopped.",
+    "The runtime exited before complete process-tree cleanup was confirmed.",
+    "The runtime process tree was stopped, but prior detached work could not be confirmed cleaned up.",
+    "A prior runtime generation still has unconfirmed process cleanup.",
+  ];
+  const fixedPrefix = fixedPrefixSummaries.find((summary) =>
+    text.startsWith(summary));
+  if (fixedPrefix) return fixedPrefix;
   if (/did not become ready|startup.*timed out|start.*timed out/iu.test(text)) return "Runtime startup timed out.";
   if (/invalid lifecycle (?:command|message)/iu.test(text)) return "Runtime lifecycle validation failed.";
   if (/could not be created|spawn/iu.test(text)) return "Runtime process could not be created.";
@@ -138,6 +174,127 @@ function runtimeFailureSummary(value: unknown): string | undefined {
   return "Runtime lifecycle failure detail omitted.";
 }
 
+function diagnosticRecordPayload(value: Record<string, unknown>): string {
+  return JSON.stringify(Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => key !== "recordDigest")
+      // Persisted digests must not depend on the host locale or ICU build.
+      .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0),
+  ));
+}
+
+function diagnosticRecordDigest(value: Record<string, unknown>): string {
+  return createHash("sha256")
+    .update(diagnosticRecordPayload(value))
+    .digest("hex");
+}
+
+function serializeDiagnosticRecord(
+  value: Record<string, string | number | boolean>,
+): string {
+  const recordDigest = diagnosticRecordDigest(value);
+  return `${JSON.stringify({ ...value, recordDigest })}\n`;
+}
+
+function parseDiagnosticRecord(
+  value: unknown,
+): Record<string, unknown> | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    record.schemaVersion !== DIAGNOSTIC_SCHEMA_VERSION
+    || typeof record.at !== "string"
+    || record.at.length > 40
+    || !Number.isFinite(Date.parse(record.at))
+    || new Date(record.at).toISOString() !== record.at
+    || typeof record.event !== "string"
+    || ![
+      "app.start",
+      "app.stop",
+      "detached-draft.recovery",
+      "logs.reveal",
+      "report.copy",
+      "runtime.failure",
+      "runtime.state",
+    ].includes(record.event)
+    || typeof record.recordDigest !== "string"
+    || !DIAGNOSTIC_DIGEST_PATTERN.test(record.recordDigest)
+    || diagnosticRecordDigest(record) !== record.recordDigest
+  ) return null;
+
+  const baseKeys = ["schemaVersion", "at", "event", "recordDigest"];
+  const runtimeKeys = [
+    ...baseKeys,
+    "phase",
+    "generation",
+    "processId",
+    "restartAttempt",
+    "restartScheduled",
+    "startupBlockerCode",
+    ...(record.event === "runtime.failure" ? ["message"] : []),
+  ];
+  const detachedDraftKeys = [
+    ...baseKeys,
+    "reason",
+    "outcome",
+    "evidencePreserved",
+  ];
+  const allowedKeys = record.event === "detached-draft.recovery"
+    ? detachedDraftKeys
+    : record.event === "runtime.failure" || record.event === "runtime.state"
+      ? runtimeKeys
+      : baseKeys;
+  if (Object.keys(record).some((key) => !allowedKeys.includes(key))) {
+    return null;
+  }
+
+  if (record.event === "detached-draft.recovery") {
+    if (
+      (record.reason !== undefined
+        && (typeof record.reason !== "string"
+          || !DETACHED_DRAFT_REASONS.includes(
+            record.reason as (typeof DETACHED_DRAFT_REASONS)[number],
+          )))
+      || (record.outcome !== undefined
+        && (typeof record.outcome !== "string"
+          || !DETACHED_DRAFT_OUTCOMES.includes(
+            record.outcome as (typeof DETACHED_DRAFT_OUTCOMES)[number],
+          )))
+      || (record.evidencePreserved !== undefined
+        && typeof record.evidencePreserved !== "boolean")
+    ) return null;
+    return record;
+  }
+
+  if (record.event === "runtime.failure" || record.event === "runtime.state") {
+    if (
+      (record.phase !== undefined
+        && (typeof record.phase !== "string"
+          || !DIAGNOSTIC_PHASE_PATTERN.test(record.phase)))
+      || (record.generation !== undefined
+        && boundedInteger(
+          record.generation,
+          0,
+          Number.MAX_SAFE_INTEGER,
+        ) === undefined)
+      || (record.processId !== undefined
+        && boundedInteger(record.processId, 1, 2_147_483_647) === undefined)
+      || (record.restartAttempt !== undefined
+        && boundedInteger(record.restartAttempt, 0, 1_000_000) === undefined)
+      || (record.restartScheduled !== undefined
+        && typeof record.restartScheduled !== "boolean")
+      || (record.startupBlockerCode !== undefined
+        && !isRuntimeStartupBlockerCode(record.startupBlockerCode))
+      || (record.event === "runtime.failure"
+        && record.message !== undefined
+        && runtimeFailureSummary(record.message) !== record.message)
+    ) return null;
+  }
+  return record;
+}
+
 export class RuntimeDiagnostics {
   readonly directory: string;
   private readonly activePath: string;
@@ -145,6 +302,7 @@ export class RuntimeDiagnostics {
   private readonly maxFiles: number;
   private readonly retentionMs: number;
   private readonly now: () => number;
+  private readonly write: NonNullable<RuntimeDiagnosticsOptions["write"]>;
 
   constructor(directory: string, options: RuntimeDiagnosticsOptions = {}) {
     this.directory = resolve(directory);
@@ -153,6 +311,8 @@ export class RuntimeDiagnostics {
     this.maxFiles = Math.max(2, Math.min(Math.trunc(options.maxFiles ?? DEFAULT_MAX_FILES), 10));
     this.retentionMs = Math.max(1_000, Math.min(options.retentionMs ?? DEFAULT_RETENTION_MS, 30 * 24 * 60 * 60 * 1_000));
     this.now = options.now ?? Date.now;
+    this.write = options.write ?? ((descriptor, buffer, offset, length) =>
+      writeSync(descriptor, buffer, offset, length));
   }
 
   ensureDirectory(): string {
@@ -170,45 +330,42 @@ export class RuntimeDiagnostics {
     try {
       this.ensureDirectory();
       const entry: Record<string, string | number | boolean> = {
+        schemaVersion: DIAGNOSTIC_SCHEMA_VERSION,
         at: new Date(this.now()).toISOString(),
         event,
       };
-      const phase = typeof fields.phase === "string" && /^(?:idle|starting|ready|restarting|stopping|stopped)$/u.test(fields.phase)
+      const phase = typeof fields.phase === "string" && DIAGNOSTIC_PHASE_PATTERN.test(fields.phase)
         ? fields.phase
         : undefined;
       const generation = boundedInteger(fields.generation, 0, Number.MAX_SAFE_INTEGER);
       const processId = boundedInteger(fields.processId, 1, 2_147_483_647);
       const restartAttempt = boundedInteger(fields.restartAttempt, 0, 1_000_000);
-      const message = event === "detached-draft.recovery"
-        ? undefined
-        : event === "runtime.failure"
-          ? runtimeFailureSummary(fields.message)
-          : sanitizeRuntimeDiagnosticText(fields.message);
-      if (event !== "detached-draft.recovery") {
+      const message = event === "runtime.failure"
+        ? runtimeFailureSummary(fields.message)
+        : undefined;
+      if (event === "runtime.failure" || event === "runtime.state") {
         if (phase) entry.phase = phase;
         if (generation !== undefined) entry.generation = generation;
         if (processId !== undefined) entry.processId = processId;
         if (restartAttempt !== undefined) entry.restartAttempt = restartAttempt;
         if (typeof fields.restartScheduled === "boolean") entry.restartScheduled = fields.restartScheduled;
+        if (isRuntimeStartupBlockerCode(fields.startupBlockerCode)) {
+          entry.startupBlockerCode = fields.startupBlockerCode;
+        }
       }
       if (
         event === "detached-draft.recovery"
         && typeof fields.reason === "string"
-        && [
-          "changed",
-          "invalid-json",
-          "invalid-schema",
-          "missing",
-          "permission",
-          "too-large",
-          "transient-io",
-          "unsafe",
-        ].includes(fields.reason)
+        && DETACHED_DRAFT_REASONS.includes(
+          fields.reason as (typeof DETACHED_DRAFT_REASONS)[number],
+        )
       ) entry.reason = fields.reason;
       if (
         event === "detached-draft.recovery"
         && typeof fields.outcome === "string"
-        && ["blocked", "quarantined", "recovered"].includes(fields.outcome)
+        && DETACHED_DRAFT_OUTCOMES.includes(
+          fields.outcome as (typeof DETACHED_DRAFT_OUTCOMES)[number],
+        )
       ) entry.outcome = fields.outcome;
       if (
         event === "detached-draft.recovery"
@@ -216,13 +373,17 @@ export class RuntimeDiagnostics {
       ) entry.evidencePreserved = fields.evidencePreserved;
       if (message) entry.message = message;
 
-      let line = `${JSON.stringify(entry)}\n`;
+      let line = serializeDiagnosticRecord(entry);
       if (Buffer.byteLength(line) > this.maxFileBytes) {
         delete entry.message;
-        line = `${JSON.stringify(entry)}\n`;
+        line = serializeDiagnosticRecord(entry);
       }
       if (Buffer.byteLength(line) > this.maxFileBytes) {
-        line = `${JSON.stringify({ at: entry.at, event })}\n`;
+        line = serializeDiagnosticRecord({
+          schemaVersion: DIAGNOSTIC_SCHEMA_VERSION,
+          at: entry.at,
+          event,
+        });
       }
       this.rotateIfNeeded(Buffer.byteLength(line));
       this.append(line);
@@ -245,6 +406,7 @@ export class RuntimeDiagnostics {
       restartAttempt: snapshot.restartAttempt,
       restartScheduled: snapshot.restartScheduled,
       message: snapshot.lastError ?? recoveryMessage,
+      startupBlockerCode: snapshot.startupBlockerCode,
       // websocketUrl is deliberately excluded because it contains a capability.
     });
   }
@@ -253,12 +415,19 @@ export class RuntimeDiagnostics {
     this.ensureDirectory();
     const events = this.readEvents().slice(-120);
     const runtime = input.runtime;
-    const lifecycle = input.lifecycle ?? null;
-    const parsedUpdatePreparation = appUpdatePreparationDiagnosticSchema.safeParse(
+    const submittedLifecycle = input.lifecycle ?? null;
+    // Renderer state can outlive a disconnected worker. Main accepts it only
+    // while the exact current generation is ready and the hashes agree.
+    const lifecycle = runtime?.phase === "ready"
+      && runtime.runtimeGenerationHash !== null
+      && submittedLifecycle?.runtimeGenerationHash
+        === runtime.runtimeGenerationHash
+      ? submittedLifecycle
+      : null;
+    const updatePreparation = isAppUpdatePreparationDiagnostic(
       input.updatePreparation,
-    );
-    const updatePreparation = parsedUpdatePreparation.success
-      ? parsedUpdatePreparation.data
+    )
+      ? input.updatePreparation
       : null;
     const lifecycleState = lifecycle
       ? lifecycleActionableStateWithUpdate(
@@ -278,6 +447,7 @@ export class RuntimeDiagnostics {
     const updateHandoffPhase = input.updateHandoff?.state === "none"
       ? lifecycle?.updateHandoffPhase ?? "none"
       : input.updateHandoff?.phase ?? lifecycle?.updateHandoffPhase ?? "unavailable";
+    const startupBlockerCode = runtime?.startupBlockerCode ?? null;
     const lifecycleLines = lifecycle
       ? [
           `Lifecycle state: ${lifecycleState}`,
@@ -305,7 +475,20 @@ export class RuntimeDiagnostics {
           `Runtime lifecycle captured: ${lifecycle.capturedAt}`,
           `Runtime lifecycle uptime: ${lifecycle.runtimeUptimeMs}ms`,
         ]
-      : ["Lifecycle state: unavailable"];
+      : startupBlockerCode
+        ? [
+            `Lifecycle state: ${startupBlockerCode === "prior-runtime-cleanup-unconfirmed"
+              ? "previous-runtime-cleanup-unconfirmed"
+              : "recovery-requires-manual-attention"}`,
+            `Startup blockers: ${startupBlockerCode}`,
+            `Quarantine reason: ${startupBlockerCode === "prior-runtime-cleanup-unconfirmed"
+              ? "prior-runtime-cleanup-unconfirmed"
+              : "provider-maintenance-recovery-required"}`,
+            `Cleanup proof: ${startupBlockerCode === "prior-runtime-cleanup-unconfirmed"
+              ? "unconfirmed"
+              : "unavailable"}`,
+          ]
+        : ["Lifecycle state: unavailable"];
     const preface = [
       "Inertia support summary",
       `Generated: ${new Date(this.now()).toISOString()}`,
@@ -370,7 +553,25 @@ export class RuntimeDiagnostics {
         const path = join(this.directory, name);
         const metadata = lstatSync(path);
         if (!metadata.isFile() || metadata.isSymbolicLink()) continue;
-        content = readFileSync(path, "utf8").slice(0, this.maxFileBytes);
+        const noFollow = "O_NOFOLLOW" in constants ? FILE_OPEN_NO_FOLLOW : 0;
+        const descriptor = openSync(path, constants.O_RDONLY | noFollow);
+        try {
+          const opened = fstatSync(descriptor);
+          if (
+            !opened.isFile()
+            || opened.dev !== metadata.dev
+            || opened.ino !== metadata.ino
+          ) continue;
+          const bytes = Buffer.allocUnsafe(
+            Math.min(this.maxFileBytes, Math.max(0, opened.size)),
+          );
+          const read = bytes.length > 0
+            ? readSync(descriptor, bytes, 0, bytes.length, 0)
+            : 0;
+          content = bytes.subarray(0, read).toString("utf8");
+        } finally {
+          closeSync(descriptor);
+        }
       } catch {
         // Rotation can race a support-summary read. Skip the disappeared file.
         continue;
@@ -378,24 +579,10 @@ export class RuntimeDiagnostics {
       for (const line of content.split(/\r?\n/u)) {
         if (!line) continue;
         try {
-          const value = JSON.parse(line) as Record<string, unknown>;
-          const event = typeof value.event === "string"
-            && [
-              "app.start",
-              "app.stop",
-              "detached-draft.recovery",
-              "logs.reveal",
-              "report.copy",
-              "runtime.failure",
-              "runtime.state",
-            ].includes(value.event)
-              ? value.event
-              : null;
-          const at = typeof value.at === "string"
-            && Number.isFinite(Date.parse(value.at))
-              ? new Date(value.at).toISOString()
-              : null;
-          if (!event || !at) continue;
+          const value = parseDiagnosticRecord(JSON.parse(line));
+          if (!value) continue;
+          const event = value.event as RuntimeDiagnosticEvent;
+          const at = value.at as string;
           const lifecycleEvent = event !== "detached-draft.recovery";
           const fields = [
             lifecycleEvent && typeof value.phase === "string"
@@ -435,7 +622,12 @@ export class RuntimeDiagnostics {
               && typeof value.evidencePreserved === "boolean"
               ? `evidence=${value.evidencePreserved ? "preserved" : "unavailable"}`
               : null,
-            lifecycleEvent ? sanitizeRuntimeDiagnosticText(value.message) : null,
+            event === "runtime.failure"
+              ? runtimeFailureSummary(value.message)
+              : null,
+            isRuntimeStartupBlockerCode(value.startupBlockerCode)
+              ? `startup-blocker=${value.startupBlockerCode}`
+              : null,
           ].filter((field): field is string => Boolean(field));
           events.push(`${at} · ${event}${fields.length > 0 ? ` · ${fields.join(" · ")}` : ""}`);
         } catch {
@@ -455,7 +647,21 @@ export class RuntimeDiagnostics {
     );
     try {
       fchmodSync(descriptor, FILE_MODE);
-      writeSync(descriptor, line, undefined, "utf8");
+      const bytes = Buffer.from(line, "utf8");
+      let offset = 0;
+      while (offset < bytes.length) {
+        const written = this.write(
+          descriptor,
+          bytes,
+          offset,
+          bytes.length - offset,
+        );
+        if (!Number.isInteger(written) || written <= 0) {
+          throw new Error("The runtime diagnostic record could not be written.");
+        }
+        offset += Math.min(written, bytes.length - offset);
+      }
+      fsyncSync(descriptor);
     } finally {
       closeSync(descriptor);
     }

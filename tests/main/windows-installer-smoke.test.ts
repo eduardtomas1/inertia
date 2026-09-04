@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -43,6 +44,17 @@ async function installerSmokeModule() {
       uninstallerName: string,
       architecture: "arm64" | "x64",
     ) => Promise<void>;
+    readWindowsNMinusOneMetadata: (options: {
+      repositoryRoot: string;
+      configuredPath?: string;
+      currentVersion: string;
+      releaseChannel: "canary" | "stable";
+      architecture: "arm64" | "x64";
+    }) => Promise<{
+      installerPath: string;
+      version: string;
+      sha256: string;
+    } | null>;
     runBounded: (
       command: string,
       args: string[],
@@ -104,6 +116,75 @@ test("selects the exact stable and Canary Windows installer identities", async (
     .toThrow("version is invalid");
   expect(installedWindowsApplicationName("stable")).toBe("Inertia.exe");
   expect(installedWindowsApplicationName("canary")).toBe("Inertia Canary.exe");
+});
+
+test("binds a released N-1 installer to exact checksummed transition metadata", async () => {
+  const { readWindowsNMinusOneMetadata } = await installerSmokeModule();
+  const temporaryRoot = await mkdtemp(join(tmpdir(), "inertia-n-minus-one-"));
+  try {
+    const directory = join(temporaryRoot, "release", "n-minus-one");
+    const assetName = "Inertia.Setup.0.0.47.exe";
+    const installerPath = join(directory, assetName);
+    const installer = Buffer.from("released N-1 installer", "utf8");
+    const sha256 = createHash("sha256").update(installer).digest("hex");
+    await writeFixture(installerPath, installer);
+    const metadataPath = join(directory, "metadata.json");
+    const metadata = {
+      schemaVersion: 1,
+      repository: "eduardtomas1/inertia",
+      tag: "v0.0.47",
+      version: "0.0.47",
+      currentVersion: "0.0.48",
+      channel: "stable",
+      architecture: "x64",
+      assetName,
+      byteLength: installer.byteLength,
+      sha256,
+    };
+    await writeFile(metadataPath, `${JSON.stringify(metadata)}\n`);
+
+    await expect(readWindowsNMinusOneMetadata({
+      repositoryRoot: temporaryRoot,
+      configuredPath: join("release", "n-minus-one", "metadata.json"),
+      currentVersion: "0.0.48",
+      releaseChannel: "stable",
+      architecture: "x64",
+    })).resolves.toEqual({ installerPath, version: "0.0.47", sha256 });
+
+    await writeFile(metadataPath, `${JSON.stringify({
+      ...metadata,
+      currentVersion: "0.0.49",
+    })}\n`);
+    await expect(readWindowsNMinusOneMetadata({
+      repositoryRoot: temporaryRoot,
+      configuredPath: join("release", "n-minus-one", "metadata.json"),
+      currentVersion: "0.0.48",
+      releaseChannel: "stable",
+      architecture: "x64",
+    })).rejects.toThrow("does not match this candidate");
+
+    await writeFile(metadataPath, `${JSON.stringify({
+      ...metadata,
+      version: [metadata.version],
+    })}\n`);
+    await expect(readWindowsNMinusOneMetadata({
+      repositoryRoot: temporaryRoot,
+      configuredPath: join("release", "n-minus-one", "metadata.json"),
+      currentVersion: "0.0.48",
+      releaseChannel: "stable",
+      architecture: "x64",
+    })).rejects.toThrow("does not match this candidate");
+
+    await expect(readWindowsNMinusOneMetadata({
+      repositoryRoot: join(temporaryRoot, "repository"),
+      configuredPath: join("..", "release", "n-minus-one", "metadata.json"),
+      currentVersion: "0.0.48",
+      releaseChannel: "stable",
+      architecture: "x64",
+    })).rejects.toThrow("metadata path escapes the repository");
+  } finally {
+    await rm(temporaryRoot, { force: true, recursive: true });
+  }
 });
 
 test("selects the exact generated NSIS application archive", async () => {
@@ -606,6 +687,10 @@ test("pins the minimal fixed builder and gates installed Windows binaries", asyn
     join(repositoryRoot, "scripts", "electron-builder.release.cjs"),
     "utf8",
   );
+  const packageSmokeSource = await readFile(
+    join(repositoryRoot, "scripts", "package-smoke.mjs"),
+    "utf8",
+  );
 
   expect(manifest.devDependencies["electron-builder"]).toBe("26.15.7");
   expect(lock.packages["node_modules/electron-builder"]?.version).toBe("26.15.7");
@@ -618,6 +703,9 @@ test("pins the minimal fixed builder and gates installed Windows binaries", asyn
   expect(releaseConfig).toContain("artifactBuildCompleted: verifyWindowsNsisPayload");
   expect(releaseConfig).toContain("verifyBuiltNsisApplicationArchive");
   expect(source).toContain("Installed Windows native binaries verified");
+  expect(source).toContain("readWindowsNMinusOneMetadata");
+  expect(source).toContain("Silent Windows in-place N-1 to N installer");
+  expect(source).toContain("Windows packaged N-1 to N smoke passed");
   expect(source).toContain("sha256File(unpackedPath)");
   expect(source).toContain("installedDigest !== unpackedDigest");
   expect(source).toContain("changed required file");
@@ -633,6 +721,16 @@ test("pins the minimal fixed builder and gates installed Windows binaries", asyn
     'join("resources", "runtime", "windows-runtime-job.exe")',
   );
   expect(source).toContain("INERTIA_PACKAGE_SMOKE_EXECUTABLE: installedExecutable");
+  expect(source).toContain("INERTIA_PACKAGE_SMOKE_EXPECTED_VERSION: expectedVersion");
+  expect(source).toContain("INERTIA_PACKAGE_SMOKE_STATE_ROOT: stateRoot");
+  expect(source).toContain('join(temporaryRoot, "existing profile and data")');
+  expect(source).toContain('"data",\n        "inertia.sqlite"');
+  expect(packageSmokeSource).toContain(
+    'boundedExactPathEnvironment(\n  "INERTIA_PACKAGE_SMOKE_STATE_ROOT"',
+  );
+  expect(packageSmokeSource).toContain(
+    "The packaged application version does not match the smoke target.",
+  );
   expect(source).toContain('["/S", `/D=${installDirectory}`]');
   expect(source).toContain('`_?=${installDirectory}`');
   expect(source).toContain("windowsVerbatimArguments: true");
@@ -652,7 +750,7 @@ test("pins the minimal fixed builder and gates installed Windows binaries", asyn
   expect(source).toContain("completed without a reboot");
 });
 
-test("runs the real installer gate on Windows x64 and ARM64 CI and releases", async () => {
+test("runs packaged N-1 to N on Windows x64 and preserves native ARM64 evidence", async () => {
   const ci = await readFile(join(repositoryRoot, ".github", "workflows", "ci.yml"), "utf8");
   const release = await readFile(
     join(repositoryRoot, ".github", "workflows", "release-platforms.yml"),
@@ -664,8 +762,13 @@ test("runs the real installer gate on Windows x64 and ARM64 CI and releases", as
   expect(ci).toContain("release_package_script: package:release:win");
   expect(ci).toContain("release_package_script: package:release:win:arm64");
   expect(ci).toContain("Package native Windows installer and unpacked app");
-  expect(ci).toContain("Install, smoke, and uninstall Windows package");
+  expect(ci).toContain("Download checksummed packaged Windows N-1 installer");
+  expect(ci).toContain("Install N-1, upgrade in place, smoke, and uninstall Windows x64 package");
+  expect(ci).toContain("INERTIA_WINDOWS_N_MINUS_ONE_METADATA: release/n-minus-one/metadata.json");
+  expect(ci).toContain("Install, smoke, and uninstall Windows ARM64 package");
   expect(ci).toContain("run: npm run test:windows-installer-smoke");
-  expect(release).toContain("Install, smoke, and uninstall Windows package");
+  expect(release).toContain("Download checksummed packaged Windows N-1 installer");
+  expect(release).toContain("Install N-1, upgrade in place, smoke, and uninstall Windows x64 package");
+  expect(release).toContain("Install, smoke, and uninstall Windows ARM64 package");
   expect(release).toContain("run: npm run test:windows-installer-smoke");
 });

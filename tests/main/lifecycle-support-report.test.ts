@@ -57,7 +57,17 @@ function input(lifecycleInput: unknown, writeClipboard = vi.fn()) {
     channel: "stable" as const,
     platform: "linux",
     architecture: "x64",
-    runtime: null,
+    runtime: {
+      phase: "ready" as const,
+      generation: 1,
+      pid: 1234,
+      websocketUrl: "ws://127.0.0.1:1234/runtime-capability",
+      runtimeGenerationHash: "123456789abc",
+      restartAttempt: 0,
+      restartScheduled: false,
+      lastError: null,
+      startupBlockerCode: null,
+    },
     dataDirectory: root,
     writeClipboard,
   };
@@ -171,4 +181,39 @@ describe("lifecycle support report boundary", () => {
       "Runtime generation hash: 123456789abc",
     );
   });
+
+  it.each([
+    [
+      "prior-runtime-cleanup-unconfirmed",
+      "previous-runtime-cleanup-unconfirmed",
+    ],
+    [
+      "provider-installation-quarantined",
+      "recovery-requires-manual-attention",
+    ],
+  ] as const)(
+    "prefers the main-owned %s blocker over a stale renderer snapshot",
+    async (startupBlockerCode, expectedState) => {
+      const writeClipboard = vi.fn();
+      await copyLifecycleSupportReport({
+        ...input(lifecycle(), writeClipboard),
+        runtime: {
+          phase: "stopped",
+          generation: 2,
+          pid: null,
+          websocketUrl: null,
+          runtimeGenerationHash: null,
+          restartAttempt: 1,
+          restartScheduled: false,
+          lastError: "A fixed startup failure.",
+          startupBlockerCode,
+        },
+      });
+
+      const report = writeClipboard.mock.calls[0]?.[0] as string;
+      expect(report).toContain(`Lifecycle state: ${expectedState}`);
+      expect(report).toContain(`Startup blockers: ${startupBlockerCode}`);
+      expect(report).not.toContain("Lifecycle state: safe-and-ready");
+    },
+  );
 });

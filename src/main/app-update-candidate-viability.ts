@@ -7,6 +7,7 @@ import {
   appUpdateCandidateViabilityResultAck,
   parseAppUpdateCandidateViabilityResult,
   type AppUpdateCandidateViabilityResult,
+  type AppUpdateCandidateExpectedRuntimeOwner,
 } from "../node/app-update-candidate-viability-protocol.js";
 import { verifyLinuxRuntimeOwnedGuardianSandbox } from
   "../node/runtime-owned-process-linux.js";
@@ -28,6 +29,8 @@ export interface CandidateViabilityDependencies {
 function runCandidateViabilityWorker(options: {
   readonly operationId: string;
   readonly dataDirectory: string;
+  readonly expectedActiveRuntimeOwner:
+    AppUpdateCandidateExpectedRuntimeOwner | null;
   readonly spawn: () => UtilityProcess;
   readonly timeoutMs: number;
   readonly exitProofMs: number;
@@ -77,6 +80,7 @@ function runCandidateViabilityWorker(options: {
         child.postMessage(appUpdateCandidateViabilityRequest({
           operationId: options.operationId,
           dataDirectory: options.dataDirectory,
+          expectedActiveRuntimeOwner: options.expectedActiveRuntimeOwner,
         }));
       } catch {
         stop(new Error("The app update viability request could not be delivered."));
@@ -138,6 +142,8 @@ function runCandidateViabilityWorker(options: {
 export async function validateDesktopAppUpdateCandidate(options: {
   readonly operationId: string;
   readonly dataDirectory: string;
+  readonly expectedActiveRuntimeOwner:
+    AppUpdateCandidateExpectedRuntimeOwner | null;
   readonly platform?: NodeJS.Platform;
   readonly dependencies?: CandidateViabilityDependencies;
 }): Promise<void> {
@@ -174,6 +180,7 @@ export async function validateDesktopAppUpdateCandidate(options: {
   await runCandidateViabilityWorker({
     operationId: options.operationId,
     dataDirectory: options.dataDirectory,
+    expectedActiveRuntimeOwner: options.expectedActiveRuntimeOwner,
     spawn: dependencies.spawn,
     timeoutMs: Math.max(1, Math.min(
       VALIDATION_TIMEOUT_MS,

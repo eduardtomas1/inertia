@@ -39,6 +39,7 @@ const EXECUTABLE_LOCK_SHUTDOWN = "SHUTDOWN\n";
 const EXECUTABLE_LOCK_BYE_MARKER = "BYE";
 const MAX_OUTPUT_BYTES = 8_192;
 const MAX_BROKER_FIELD_CHARS = 2_048;
+const MAX_BROKER_COMMAND_CHARS = 128 * 1_024;
 const MAX_BROKER_BOOTSTRAP_SCRIPT_BYTES = 64 * 1024;
 const MAX_BROKER_BOOTSTRAP_LINE_CHARS =
   Math.ceil(MAX_BROKER_BOOTSTRAP_SCRIPT_BYTES / 3) * 4;
@@ -67,12 +68,21 @@ type WindowsRuntimeJobStage = "native-guard-start";
 interface WindowsRuntimeJobExecutableLock {
   isHeld(): boolean;
   request(
-    mode: "guard" | "recover",
+    mode: "guard" | "recover" | "update",
     arguments_: readonly string[],
     deadlineAt: number,
   ): Promise<WindowsRuntimeJobBrokerResult>;
   release(): Promise<void>;
   abort(): Promise<void>;
+}
+
+export class WindowsUpdateSupervisorBrokerError extends Error {
+  constructor(
+    message: string,
+    readonly cleanupConfirmed: boolean,
+  ) {
+    super(message);
+  }
 }
 
 interface WindowsRuntimeJobBrokerResult {
@@ -491,9 +501,11 @@ try {
   $jobType = $loadedAssembly.GetType('InertiaRuntimeJob', $true, $false)
   $beginGuardMethod = $jobType.GetMethod('BeginGuard')
   $recoverMethod = $jobType.GetMethod('RecoverManaged')
+  $launchUpdateMethod = $jobType.GetMethod('LaunchUpdateSupervisor')
   $shutdownMethod = $jobType.GetMethod('ShutdownAll')
   if ($null -eq $beginGuardMethod -or
     $null -eq $recoverMethod -or
+    $null -eq $launchUpdateMethod -or
     $null -eq $shutdownMethod) { throw 'assembly-contract' }
   $stdout = [Console]::OpenStandardOutput()
   $locked = [Convert]::FromBase64String('${encodedLockedMarker}')
@@ -512,7 +524,7 @@ try {
       Write-Frame '${EXECUTABLE_LOCK_BYE_MARKER}'
       break
     }
-    if ($line.Length -gt 2048) { throw 'command-oversized' }
+    if ($line.Length -gt ${MAX_BROKER_COMMAND_CHARS}) { throw 'command-oversized' }
     $parts = $line.Split(' ')
     $mode = $parts[0]
     if ($mode -ceq 'GUARD' -and $parts.Length -eq 6) {
@@ -556,6 +568,44 @@ try {
       $recoverCode = [Int32]$recoverMethod.Invoke($null, $recoverArguments)
       $recoverDiagnostic = [string]$recoverArguments[2]
       Write-Result $id ('EXIT:' + $recoverCode) '' $recoverDiagnostic
+      continue
+    }
+    if ($mode -ceq 'UPDATE' -and $parts.Length -eq 6) {
+      $id = $parts[1]
+      $helperBytes = [Convert]::FromBase64String($parts[2])
+      $requestBytes = [Convert]::FromBase64String($parts[4])
+      if ([Convert]::ToBase64String($helperBytes) -cne $parts[2] -or
+        [Convert]::ToBase64String($requestBytes) -cne $parts[4]) {
+        throw 'update-encoding'
+      }
+      $utf8 = [Text.UTF8Encoding]::new($false, $true)
+      $helperPath = $utf8.GetString($helperBytes)
+      $digest = $parts[3]
+      $request = $utf8.GetString($requestBytes)
+      $timeout = [Int32]::Parse($parts[5], [Globalization.CultureInfo]::InvariantCulture)
+      if ($id -notmatch '^[1-9][0-9]{0,9}$' -or
+        $helperPath.Length -lt 1 -or $helperPath.Length -gt 4096 -or
+        $digest -notmatch '^[0-9a-f]{64}$' -or
+        $requestBytes.Length -lt 1 -or $requestBytes.Length -gt 65536 -or
+        $timeout -lt 1 -or $timeout -gt ${NATIVE_READY_TIMEOUT_MS}) {
+        throw 'update-command'
+      }
+      $updateArguments = [Object[]]@(
+        $helperPath,
+        $digest,
+        $request,
+        $timeout,
+        $null,
+        $null
+      )
+      $updateCode = [Int32]$launchUpdateMethod.Invoke($null, $updateArguments)
+      $updateOutput = [string]$updateArguments[4]
+      $updateDiagnostic = [string]$updateArguments[5]
+      if ($updateCode -eq 0) {
+        Write-Result $id 'READY' $updateOutput $updateDiagnostic
+      } else {
+        Write-Result $id ('EXIT:' + $updateCode) $updateOutput $updateDiagnostic
+      }
       continue
     }
     throw 'command-invalid'
@@ -687,7 +737,7 @@ async function acquireWindowsRuntimeJobExecutableLock(
         }
       };
       const requestNow = async (
-        mode: "guard" | "recover",
+        mode: "guard" | "recover" | "update",
         arguments_: readonly string[],
         operationDeadlineAt: number,
       ): Promise<WindowsRuntimeJobBrokerResult> => {
@@ -706,7 +756,15 @@ async function acquireWindowsRuntimeJobExecutableLock(
         const encodedName = Buffer.from(arguments_[0] ?? "", "utf8").toString("base64");
         const command = mode === "guard"
           ? `GUARD ${requestId} ${encodedName} ${arguments_[1]} ${arguments_[2]} ${remainingMs}\n`
-          : `RECOVER ${requestId} ${encodedName} ${remainingMs}\n`;
+          : mode === "recover"
+            ? `RECOVER ${requestId} ${encodedName} ${remainingMs}\n`
+            : `UPDATE ${requestId} ${encodedName} ${arguments_[1]} ${Buffer.from(
+                arguments_[2] ?? "",
+                "utf8",
+              ).toString("base64")} ${remainingMs}\n`;
+        if (command.length > MAX_BROKER_COMMAND_CHARS) {
+          throw new Error("The Windows runtime broker command is oversized.");
+        }
         child.stdin.write(command);
         const prefix = `RESULT ${requestId} `;
         while (Date.now() < operationDeadlineAt) {
@@ -912,6 +970,93 @@ function requireWindowsRuntimeJobExecutableLock(
     throw new Error("The verified Windows runtime executable lock is unavailable.");
   }
   return state.lock;
+}
+
+/**
+ * Starts the staged updater only through the already integrity-locked native
+ * broker. The native launch method holds the verified staged leaf across
+ * Process.Start and READY, so a path substitution can never select the bytes
+ * that execute.
+ */
+export async function launchWindowsUpdateSupervisorThroughExecutableLock(
+  options: {
+    readonly assembly: WindowsRuntimeJobAssembly;
+    readonly helperPath: string;
+    readonly helperDigest: string;
+    readonly request: string;
+    readonly timeoutMs?: number;
+  },
+): Promise<void> {
+  const assembly = validateWindowsRuntimeJobAssembly(options.assembly);
+  let executableLock: WindowsRuntimeJobExecutableLock;
+  let preparedForUpdate = false;
+  try {
+    executableLock = requireWindowsRuntimeJobExecutableLock(assembly);
+  } catch (error) {
+    try {
+      await prepareWindowsRuntimeJobExecutableLock(assembly, {
+        timeoutMs: options.timeoutMs,
+      });
+      executableLock = requireWindowsRuntimeJobExecutableLock(assembly);
+      preparedForUpdate = true;
+    } catch (preparationError) {
+      throw new WindowsUpdateSupervisorBrokerError(
+        preparationError instanceof Error
+          ? preparationError.message
+          : String(preparationError ?? error),
+        true,
+      );
+    }
+  }
+  const timeoutMs = Math.max(1, Math.min(
+    options.timeoutMs ?? NATIVE_READY_TIMEOUT_MS,
+    NATIVE_READY_TIMEOUT_MS,
+  ));
+  let result: WindowsRuntimeJobBrokerResult;
+  try {
+    result = await executableLock.request(
+      "update",
+      [options.helperPath, options.helperDigest, options.request],
+      Date.now() + timeoutMs,
+    );
+  } catch (error) {
+    if (preparedForUpdate) {
+      await disposeWindowsRuntimeJobExecutableLock().catch(() => undefined);
+    }
+    throw new WindowsUpdateSupervisorBrokerError(
+      error instanceof Error ? error.message : String(error),
+      false,
+    );
+  }
+  const authorityHeldAtResult = executableLock.isHeld();
+  if (preparedForUpdate) {
+    try {
+      await disposeWindowsRuntimeJobExecutableLock();
+    } catch (error) {
+      throw new WindowsUpdateSupervisorBrokerError(
+        error instanceof Error ? error.message : String(error),
+        false,
+      );
+    }
+  }
+  if (
+    result.status === "READY"
+    && result.stdout === "READY"
+    && result.stderr === ""
+    && authorityHeldAtResult
+  ) return;
+  const cleanupConfirmed = result.status.startsWith("EXIT:")
+    && result.status !== "EXIT:47"
+    && authorityHeldAtResult;
+  const detail = result.stderr.trim().replace(/\s+/gu, " ").slice(0, 500);
+  throw new WindowsUpdateSupervisorBrokerError(
+    [
+      "The verified Windows update supervisor launch was rejected.",
+      result.status,
+      detail,
+    ].filter(Boolean).join(" "),
+    cleanupConfirmed,
+  );
 }
 
 export async function armWindowsRuntimeJob(

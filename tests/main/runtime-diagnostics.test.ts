@@ -7,9 +7,11 @@ import {
   statSync,
   utimesSync,
   writeFileSync,
+  writeSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -64,7 +66,7 @@ describe("runtime diagnostics", () => {
 
   it("redacts credentials, content-shaped fields, paths, and control characters", () => {
     const sanitized = sanitizeRuntimeDiagnosticText(
-      "Bearer abc.def prompt:hello source='private code' tokens=987 credential=my-secret at C:\\Users\\Alice\\project and /tmp/inertia/source.ts\u0000",
+      "Bearer abc.def prompt:hello source='private code' tokens=987 credential=my-secret at C:\\Users\\Alice\\project, /tmp/inertia/source.ts, and /mnt/customer/private.txt\u0000",
     );
     expect(sanitized).not.toContain("abc.def");
     expect(sanitized).not.toContain("hello");
@@ -73,6 +75,8 @@ describe("runtime diagnostics", () => {
     expect(sanitized).not.toContain("my-secret");
     expect(sanitized).not.toContain("Alice");
     expect(sanitized).not.toContain("source.ts");
+    expect(sanitized).not.toContain("customer");
+    expect(sanitized).not.toContain("private.txt");
     expect(sanitized).not.toContain("\u0000");
   });
 
@@ -88,12 +92,21 @@ describe("runtime diagnostics", () => {
       phase: "stopped",
       message: "arbitrary provider failure detail",
     });
+    diagnostics.record("runtime.failure", {
+      phase: "stopping",
+      message: "The runtime process tree could not be confirmed stopped. prompt=private source=/mnt/customer/private.txt",
+    });
 
     const content = readFileSync(join(directory, "runtime.log"), "utf8");
     expect(content).toContain(
       "Runtime shutdown could not confirm owned-process cleanup.",
     );
     expect(content).not.toContain("arbitrary provider failure detail");
+    expect(content).not.toContain("customer");
+    expect(content).not.toContain("private.txt");
+    expect(content).toContain(
+      "The runtime process tree could not be confirmed stopped.",
+    );
     expect(content).toContain("Runtime lifecycle failure detail omitted.");
   });
 
@@ -180,6 +193,81 @@ describe("runtime diagnostics", () => {
     expect(statSync(directory).mode & 0o777).toBe(0o700);
   });
 
+  it("uses one locale-independent canonical digest across platforms", () => {
+    const root = fixture();
+    const directory = runtimeDiagnosticsDirectory(root);
+    const diagnostics = new RuntimeDiagnostics(directory, {
+      now: () => Date.parse("2030-01-01T00:00:00.000Z"),
+    });
+
+    diagnostics.record("app.start");
+
+    expect(JSON.parse(
+      readFileSync(join(directory, "runtime.log"), "utf8"),
+    )).toEqual({
+      schemaVersion: 1,
+      at: "2030-01-01T00:00:00.000Z",
+      event: "app.start",
+      recordDigest:
+        "6d8cf0b874fc99e4b4134bd60092572f3459f58f7afd7d2bd5de92843b327c65",
+    });
+  });
+
+  it("finishes bounded short writes before publishing a diagnostic record", () => {
+    const root = fixture();
+    const directory = runtimeDiagnosticsDirectory(root);
+    const writes: number[] = [];
+    const diagnostics = new RuntimeDiagnostics(directory, {
+      write: (descriptor, buffer, offset, length) => {
+        const boundedLength = Math.min(7, length);
+        writes.push(boundedLength);
+        return writeSync(
+          descriptor,
+          buffer,
+          offset,
+          boundedLength,
+        );
+      },
+    });
+
+    diagnostics.record("app.start");
+
+    const content = readFileSync(join(directory, "runtime.log"), "utf8");
+    expect(writes.length).toBeGreaterThan(1);
+    expect(content.endsWith("\n")).toBe(true);
+    expect(diagnostics.supportReport({
+      version: "0.0.10",
+      platform: "linux",
+      architecture: "x64",
+      runtime: null,
+    })).toMatchObject({ eventCount: 1 });
+  });
+
+  it("rejects a crash-truncated tail and resumes at the next record boundary", () => {
+    const root = fixture();
+    const directory = runtimeDiagnosticsDirectory(root);
+    const diagnostics = new RuntimeDiagnostics(directory);
+    diagnostics.ensureDirectory();
+    writeFileSync(
+      join(directory, "runtime.log"),
+      '{"schemaVersion":1,"at":"2030-01-01T00:00:00.000Z"',
+      { mode: 0o600 },
+    );
+
+    diagnostics.record("app.start");
+    diagnostics.record("app.stop");
+
+    const report = diagnostics.supportReport({
+      version: "0.0.10",
+      platform: "linux",
+      architecture: "x64",
+      runtime: null,
+    });
+    expect(report.eventCount).toBe(1);
+    expect(report.text).not.toContain("app.start");
+    expect(report.text).toContain("app.stop");
+  });
+
   it("builds a bounded support summary from allowlisted lifecycle fields only", () => {
     const root = fixture();
     const directory = runtimeDiagnosticsDirectory(root);
@@ -206,7 +294,9 @@ describe("runtime diagnostics", () => {
         generation: 7,
         pid: 1234,
         websocketUrl: "ws://127.0.0.1/private-capability",
+        runtimeGenerationHash: null,
         lastError: "private runtime error",
+        startupBlockerCode: null,
         restartAttempt: 2,
         restartScheduled: true,
       },
@@ -229,11 +319,29 @@ describe("runtime diagnostics", () => {
     expect(Buffer.byteLength(report.text)).toBeLessThanOrEqual(64 * 1_024);
   });
 
-  it("ignores malformed and unrecognized diagnostic records in support summaries", () => {
+  it("rejects legacy, tampered, and non-strict diagnostic records", () => {
     const root = fixture();
     const directory = runtimeDiagnosticsDirectory(root);
     const diagnostics = new RuntimeDiagnostics(directory);
     diagnostics.ensureDirectory();
+    diagnostics.record("app.start");
+    const valid = readFileSync(join(directory, "runtime.log"), "utf8").trim();
+    const signedRecord = (record: Record<string, unknown>): string => {
+      const payload = JSON.stringify(Object.fromEntries(
+        Object.entries(record).sort(([left], [right]) =>
+          left < right ? -1 : left > right ? 1 : 0),
+      ));
+      return JSON.stringify({
+        ...record,
+        recordDigest: createHash("sha256").update(payload).digest("hex"),
+      });
+    };
+    const strictButUnsafe = signedRecord({
+      schemaVersion: 1,
+      at: new Date().toISOString(),
+      event: "runtime.state",
+      phase: "prompt=TOP_SECRET /mnt/customer/roadmap.txt",
+    });
     writeFileSync(
       join(directory, "runtime.log"),
       [
@@ -241,6 +349,18 @@ describe("runtime diagnostics", () => {
         JSON.stringify({ at: new Date().toISOString(), event: "provider.output", message: "secret output" }),
         JSON.stringify({ at: "invalid", event: "app.start" }),
         JSON.stringify({ at: new Date().toISOString(), event: "app.start" }),
+        strictButUnsafe,
+        JSON.stringify({
+          ...JSON.parse(valid),
+          event: "runtime.state",
+        }),
+        signedRecord({
+          schemaVersion: 1,
+          at: new Date().toISOString(),
+          event: "app.start",
+          prompt: "TOP_SECRET",
+        }),
+        valid,
       ].join("\n"),
       { mode: 0o600 },
     );
@@ -255,6 +375,8 @@ describe("runtime diagnostics", () => {
     expect(report.text).toContain("app.start");
     expect(report.text).not.toContain("provider.output");
     expect(report.text).not.toContain("secret output");
+    expect(report.text).not.toContain("TOP_SECRET");
+    expect(report.text).not.toContain("roadmap.txt");
   });
 
   it("keeps long-session support summaries to the newest bounded lifecycle window", () => {
@@ -291,7 +413,6 @@ describe("runtime diagnostics", () => {
       version: "0.0.10",
       platform: "linux",
       architecture: "x64",
-      runtime: null,
       lifecycle: {
         schemaVersion: 1,
         capturedAt: "2030-01-01T00:00:05.000Z",
@@ -351,6 +472,17 @@ describe("runtime diagnostics", () => {
         runAttempt: 2,
         releaseTag: "v0.0.10",
       },
+      runtime: {
+        phase: "ready",
+        generation: 1,
+        pid: 1234,
+        websocketUrl: "ws://127.0.0.1:1234/runtime-capability",
+        runtimeGenerationHash: "123456789abc",
+        restartAttempt: 0,
+        restartScheduled: false,
+        lastError: null,
+        startupBlockerCode: null,
+      },
     });
 
     expect(report.text).toContain("Lifecycle state: waiting-for-provider-cleanup");
@@ -394,7 +526,7 @@ describe("runtime diagnostics", () => {
     expect(report.text).not.toContain("private-run");
   });
 
-  it("applies the support-summary limit in UTF-8 bytes without splitting characters", () => {
+  it("omits arbitrary state messages from both new logs and support summaries", () => {
     const root = fixture();
     const diagnostics = new RuntimeDiagnostics(runtimeDiagnosticsDirectory(root), {
       maxFileBytes: 4 * 1_024 * 1_024,
@@ -415,12 +547,13 @@ describe("runtime diagnostics", () => {
     });
 
     expect(report.eventCount).toBeGreaterThan(0);
-    expect(report.eventCount).toBeLessThan(120);
+    expect(report.eventCount).toBe(120);
     expect(Buffer.byteLength(report.text, "utf8")).toBeLessThanOrEqual(64 * 1_024);
     expect(report.text).not.toContain("\uFFFD");
+    expect(report.text).not.toContain("🌟");
     expect(report.text).toContain("generation=120");
     expect(report.text).not.toContain("generation=1 ·");
-    expect(report.text).toContain(`(${report.eventCount} of 120 copied)`);
+    expect(report.text).toContain("Recent lifecycle events (120):");
     expect(report.text).toContain("Privacy: prompts, source, project paths");
   });
 });

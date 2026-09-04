@@ -222,13 +222,38 @@ describe("cross-platform packaged behavior contract", () => {
     expect(linuxLifecycle).toContain("runs-on: ubuntu-24.04");
     expect(linuxLifecycle).toContain("tests/main/app-update-handoff.test.ts");
     expect(linuxLifecycle).toContain("tests/main/appimage-installed-identity.test.ts");
+    expect(linuxLifecycle).toContain(
+      "Run compact Electron/core bridge smoke under Xvfb",
+    );
+    expect(linuxLifecycle).toContain("tests/e2e/core-bridge-smoke.spec.ts");
+    expect(linuxLifecycle).toContain("--output=test-results/core-bridge-smoke");
     expect(linuxLifecycle).toContain("--project=runtime-recovery");
     expect(linuxLifecycle).toContain("run: npm run package:linux");
     expect(linuxLifecycle).toContain("run: npm run validate:linux-package");
+    const coreBridgeSmoke = workflowStep(
+      workflow,
+      "Run compact Electron/core bridge smoke under Xvfb",
+    );
+    expect(coreBridgeSmoke).toContain("--project=isolated --workers=1");
+    expect(linuxLifecycle.indexOf("Run compact Electron/core bridge smoke"))
+      .toBeGreaterThan(linuxLifecycle.indexOf("Prepare Electron end-to-end binary"));
+    expect(linuxLifecycle.indexOf("Run compact Electron/core bridge smoke"))
+      .toBeLessThan(linuxLifecycle.indexOf(
+        "Run destructive runtime-recovery Electron sentinels",
+      ));
+    expect(workflow.match(/Run compact Electron\/core bridge smoke/gu))
+      .toHaveLength(1);
 
     const windowsLifecycle = workflowJob(workflow, "pr-windows-lifecycle");
     expect(windowsLifecycle).toContain("runs-on: windows-2025");
     expect(windowsLifecycle).toContain("tests/main/windows-runtime-job.test.ts");
+    expect(windowsLifecycle).toContain("tests/main/app-update-startup.test.ts");
+    expect(windowsLifecycle).toContain(
+      "tests/main/windows-update-supervisor.test.ts",
+    );
+    expect(windowsLifecycle).toContain(
+      "tests/main/windows-update-terminal-receipt.test.ts",
+    );
     expect(windowsLifecycle).toContain(
       "tests/main/runtime-supervisor-windows-tree-recovery.test.ts",
     );
@@ -286,6 +311,15 @@ describe("cross-platform packaged behavior contract", () => {
       "if: runner.os == 'Windows' && matrix.arch == 'arm64'",
     );
     expect(portable).toContain("run: npm run test:portable");
+
+    const windowsX64Helper = workflowStep(
+      workflow,
+      "Build Windows x64 runtime helper for the application bundle",
+    );
+    expect(windowsX64Helper).toContain(
+      "if: runner.os == 'Windows' && matrix.arch == 'x64'",
+    );
+    expect(windowsX64Helper).toContain("run: npm run pretest");
 
     // Exactly one build per job, carrying notices and the guardian but not the
     // typecheck the gate already ran, and consumed by packaging unchanged.
@@ -366,6 +400,9 @@ describe("cross-platform packaged behavior contract", () => {
     // portable protocol surface.
     expect(packageJson.scripts["test:portable"]).toBe(
       "node scripts/ci/run-portable-tests.mjs",
+    );
+    expect(packageJson.scripts["test:browser-evidence-cpu-budget"]).toBe(
+      "node scripts/ci/run-browser-evidence-cpu-budget.mjs",
     );
     const portableRunner = await source("scripts/ci/run-portable-tests.mjs");
     expect(portableRunner).toContain("discoverPortableTests");
@@ -486,6 +523,39 @@ describe("cross-platform packaged behavior contract", () => {
     }
   });
 
+  it("keeps the browser-evidence CPU budget isolated from coverage", async () => {
+    const workflow = await source(".github/workflows/ci.yml");
+    const releaseWorkflow = await source(".github/workflows/release-platforms.yml");
+    const runner = await source(
+      "scripts/ci/run-browser-evidence-cpu-budget.mjs",
+    );
+    const captureTest = await source(
+      "tests/main/browser-evidence-capture.test.ts",
+    );
+
+    expect(workflowJob(workflow, "gate")).toContain(
+      "run: npm run test:browser-evidence-cpu-budget",
+    );
+    expect(workflow.match(
+      /run: npm run test:browser-evidence-cpu-budget/gu,
+    )).toHaveLength(1);
+    expect(workflowJob(releaseWorkflow, "build")).toContain(
+      "run: npm run test:browser-evidence-cpu-budget",
+    );
+    expect(runner).toContain(
+      'INERTIA_ENFORCE_BROWSER_EVIDENCE_CPU_BUDGET: "1"',
+    );
+    expect(runner).toContain('"--project=node"');
+    expect(runner).toContain('"--maxWorkers=1"');
+    expect(runner).toContain('"--coverage=false"');
+    expect(runner).toContain('typeof process.threadCpuUsage !== "function"');
+    expect(runner).toContain("if (result.signal)");
+    expect(runner).toContain("if (result.status === null)");
+    expect(captureTest).toContain(
+      'process.env.INERTIA_ENFORCE_BROWSER_EVIDENCE_CPU_BUDGET === "1"',
+    );
+  });
+
   it("keeps one native smoke implementation for macOS, Windows, and Linux runtime supervision", async () => {
     const smoke = await source("scripts/package-smoke.mjs");
     const launchContract = await source("scripts/package-smoke-launch.mjs");
@@ -510,7 +580,9 @@ describe("cross-platform packaged behavior contract", () => {
     expect(smoke).toContain('"runtime-process-guardian"');
     expect(smoke).toContain('"windows-runtime-job.exe"');
     expect(smoke).toContain("MAX_RUNTIME_GUARDIAN_BYTES");
-    expect(smoke).toContain('spawnSync(guardian, ["seccomp-selftest"]');
+    expect(smoke).toContain(
+      'spawnSync(runtimeGuardian, ["seccomp-selftest"]',
+    );
     expect(smoke).toContain(
       "The packaged Linux runtime process guardian self-test failed.",
     );
@@ -587,6 +659,9 @@ describe("cross-platform packaged behavior contract", () => {
     expect(smoke).toContain('type: "provider.refresh"');
     expect(smoke).toContain('frame?.type === "runtime.event" ? frame.event : frame');
     expect(smoke).toContain("INERTIA_PACKAGE_SMOKE_PDF_INPUT");
+    expect(smoke).toContain('"/proc/self/fd/4"');
+    expect(smoke).toContain("expectedAppImageFileDescriptorIdentity");
+    expect(main).toContain("packageSmoke.appImageFileDescriptorIdentity");
     expect(smoke).toContain("packaged PDF extraction result");
     expect(smoke).toContain("const PACKAGED_PDF_TIMEOUT_MS = 47_000;");
     expect(smoke).toContain("PACKAGED_PDF_TIMEOUT_MS,");
@@ -786,6 +861,7 @@ describe("cross-platform packaged behavior contract", () => {
       "name: release-linux-x64",
       "name: release-linux-arm64",
       "node scripts/validate-release.mjs",
+      "run: npm run test:browser-evidence-cpu-budget",
       "run: npm run test:package-smoke",
       "run: xvfb-run --auto-servernum npm run test:package-smoke",
       "codesign --verify --deep --strict",
@@ -823,6 +899,15 @@ describe("cross-platform packaged behavior contract", () => {
     expect(workflowJob(workflow, "upload")).toContain(
       "RELEASE_SOURCE_SHA: ${{ needs.release_identity.outputs.release_sha }}",
     );
+    const canaryFeedJob = workflowJob(workflow, "publish-canary-feed");
+    expect(canaryFeedJob).toContain('RELEASE_VERIFY_REMOTE: "1"');
+    expect(canaryFeedJob).toContain(
+      "RELEASE_SOURCE_SHA: ${{ needs.release_identity.outputs.release_sha }}",
+    );
+    expect(canaryFeedJob.match(/^\s+revalidate_frozen_tag\s*$/gmu)).toHaveLength(1);
+    expect(canaryFeedJob.lastIndexOf("revalidate_frozen_tag")).toBeLessThan(
+      canaryFeedJob.indexOf("git -C \"$feed_worktree\" push origin HEAD:canary-feed"),
+    );
     expect(releaseValidator).toContain('const commitPattern = /^[0-9a-f]{40}$/u;');
     expect(releaseValidator).toContain(
       'if (headCommit !== expectedCommit) fail("checked-out HEAD does not equal the frozen release commit")',
@@ -830,9 +915,8 @@ describe("cross-platform packaged behavior contract", () => {
     expect(releaseValidator).toContain(
       'if (tagCommit !== expectedCommit) fail("the release tag no longer points to the frozen release commit")',
     );
-    expect(releaseAssets).toContain(
-      '["sbom", "--omit=dev", "--sbom-format", "cyclonedx"]',
-    );
+    expect(releaseAssets).toContain('"--package-lock-only"');
+    expect(releaseAssets).toContain('"inertia:release-asset-sha256"');
     expect(releaseAssets).toContain(
       'const sbomName = `Inertia-${version}.sbom.cdx.json`',
     );
@@ -840,6 +924,12 @@ describe("cross-platform packaged behavior contract", () => {
     expect(releaseAssets).toContain("inertia:package-lock-sha256");
     expect(releaseAssets).toContain("inertia:electron-version");
     expect(workflow.match(/node-version: 22\.23\.2/gu)).toHaveLength(2);
+    expect(workflow).toContain(
+      "group: release-${{ inputs.release_tag || github.ref_name }}",
+    );
+    expect(workflow).not.toContain(
+      "group: release-${{ inputs.release_tag || github.ref }}",
+    );
 
     for (const [label, runner, platform, architecture, packageScript] of [
       ["macOS x64", "macos-15-intel", "macos-x64", "x64", "package:release:mac:x64"],
@@ -922,11 +1012,27 @@ describe("cross-platform packaged behavior contract", () => {
     expect(releaseUpload).toContain("load_release_by_tag_with_retry");
     expect(releaseUpload).toContain("for attempt in {1..7}; do");
     expect(releaseUpload).toContain('sleep "$delay"');
+    expect(releaseUpload).toContain("RELEASE_VERIFY_REMOTE=1");
+    expect(releaseUpload).toContain(
+      'RELEASE_EXPECTED_COMMIT="$RELEASE_SOURCE_SHA"',
+    );
+    expect(releaseUpload.match(/^\s+revalidate_frozen_tag\s*$/gmu)).toHaveLength(3);
+    const createRelease = releaseUpload.indexOf('gh release create "$RELEASE_TAG"');
+    const uploadRelease = releaseUpload.indexOf('gh release upload "$RELEASE_TAG"');
+    const editRelease = releaseUpload.indexOf('gh release edit "$RELEASE_TAG"');
+    const revalidations = [...releaseUpload.matchAll(/^\s+revalidate_frozen_tag\s*$/gmu)]
+      .map((match) => match.index);
+    expect(revalidations[0]).toBeLessThan(createRelease);
+    expect(revalidations[1]).toBeGreaterThan(createRelease);
+    expect(revalidations[1]).toBeLessThan(uploadRelease);
+    expect(revalidations[2]).toBeLessThan(editRelease);
+    expect(revalidations[2]).toBeGreaterThan(uploadRelease);
     expect(releaseUpload).not.toContain("releases/tags/$RELEASE_TAG");
   });
 
   it("rejects a release tag moved after its commit identity was frozen", async () => {
     const fixture = await mkdtemp(join(tmpdir(), "inertia-release-identity-"));
+    const remote = await mkdtemp(join(tmpdir(), "inertia-release-remote-"));
     const tag = "v1.2.3";
     const gitEnvironment = {
       ...process.env,
@@ -951,7 +1057,10 @@ describe("cross-platform packaged behavior contract", () => {
       git("init", "--quiet");
       git("add", "package.json", "package-lock.json");
       git("commit", "--quiet", "-m", "release source");
-      git("tag", tag);
+      git("tag", "--annotate", "--message", "release", tag);
+      git("init", "--quiet", "--bare", remote);
+      git("remote", "add", "origin", remote);
+      git("push", "--quiet", "origin", `refs/tags/${tag}:refs/tags/${tag}`);
       const frozenCommit = git("rev-parse", "HEAD^{commit}");
       const validator = join(repositoryRoot, "scripts/validate-release.mjs");
       const validatorEnvironment = {
@@ -960,6 +1069,7 @@ describe("cross-platform packaged behavior contract", () => {
         RELEASE_EXPECTED_COMMIT: frozenCommit,
         RELEASE_REF: `refs/tags/${tag}`,
         RELEASE_TAG: tag,
+        RELEASE_VERIFY_REMOTE: "1",
       };
       const valid = spawnSync(process.execPath, [validator], {
         cwd: fixture,
@@ -971,20 +1081,34 @@ describe("cross-platform packaged behavior contract", () => {
       await writeFile(join(fixture, "moved-tag.txt"), "different commit\n");
       git("add", "moved-tag.txt");
       git("commit", "--quiet", "-m", "move release tag");
-      git("tag", "--force", tag);
+      const movedCommit = git("rev-parse", "HEAD^{commit}");
+      git("push", "--quiet", "--force", "origin", `HEAD:refs/tags/${tag}`);
       git("checkout", "--quiet", "--detach", frozenCommit);
 
-      const moved = spawnSync(process.execPath, [validator], {
+      const remotelyMoved = spawnSync(process.execPath, [validator], {
         cwd: fixture,
         encoding: "utf8",
         env: validatorEnvironment,
       });
-      expect(moved.status).not.toBe(0);
-      expect(moved.stderr).toContain(
+      expect(remotelyMoved.status).not.toBe(0);
+      expect(remotelyMoved.stderr).toContain(
+        "the remote release tag no longer points to the frozen release commit",
+      );
+
+      git("push", "--quiet", "--force", "origin", `refs/tags/${tag}:refs/tags/${tag}`);
+      git("tag", "--force", tag, movedCommit);
+      const locallyMoved = spawnSync(process.execPath, [validator], {
+        cwd: fixture,
+        encoding: "utf8",
+        env: validatorEnvironment,
+      });
+      expect(locallyMoved.status).not.toBe(0);
+      expect(locallyMoved.stderr).toContain(
         "the release tag no longer points to the frozen release commit",
       );
     } finally {
       await rm(fixture, { recursive: true, force: true });
+      await rm(remote, { recursive: true, force: true });
     }
   });
 

@@ -12,6 +12,8 @@ import type {
   BrowserEvidenceSnapshot,
 } from "./browser-evidence";
 import type { RuntimeLifecycleDiagnosticSnapshot } from "./lifecycle-diagnostics";
+import type { RuntimeStartupBlockerCode } from
+  "./runtime-startup-diagnostics";
 export { PRIVATE_CONNECT_IPC } from "./private-connect/ipc";
 
 export interface RuntimeConnection {
@@ -21,6 +23,14 @@ export interface RuntimeConnection {
 
 export interface RuntimeConnectionUnavailable {
   unavailable: true;
+  code:
+    | RuntimeStartupBlockerCode
+    | "runtime-starting"
+    | "runtime-restarting"
+    | "runtime-stopping"
+    | "runtime-stopped"
+    | "runtime-unavailable";
+  retryable: boolean;
   message: string;
 }
 

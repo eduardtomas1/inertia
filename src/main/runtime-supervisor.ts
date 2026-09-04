@@ -16,13 +16,14 @@ import { persistRuntimeGenerationCleanup } from "./runtime-generation-cleanup.js
 import { readSystemBootId } from "./system-boot-id.js";
 import { boundedDuration, publicProcessError, runtimeRestartDelayMs,
   runtimeSupervisorDefaults, unconfirmedRuntimeCleanupMessage } from "./runtime-supervisor-values.js";
-import { detachedRuntimeConnection, runtimeConnection } from "./runtime-supervisor-connection.js";
+import { detachedRuntimeConnection, runtimeConnection,
+  runtimeConnectionUnavailableError } from "./runtime-supervisor-connection.js";
+import { createRuntimeSupervisorSnapshot } from "./runtime-supervisor-snapshot.js";
 import { RuntimeSupervisorRecycle } from "./runtime-supervisor-recycle.js";
 import { RuntimeSecureFileCoordinator } from "./runtime-secure-file-coordinator.js";
 import { RuntimeCredentialCoordinator } from "./runtime-credential-coordinator.js";
 import { RuntimeGenerationLeaseJournal } from "../node/runtime-generation-leases.js";
-import { RuntimeUpdatePreparationCoordinator,
-  type RuntimeUpdateHandoffIdentity } from "./runtime-update-preparation-coordinator.js";
+import { RuntimeUpdatePreparationCoordinator, type RuntimeUpdateHandoffIdentity } from "./runtime-update-preparation-coordinator.js";
 import { RuntimeDatabaseRecoveryCoordinator } from "./runtime-database-recovery-coordinator.js";
 import { RuntimeSupervisorStartupRecovery } from "./runtime-supervisor-startup-recovery.js";
 import { RuntimeOwnedProcessJournal } from "../node/runtime-owned-processes.js";
@@ -31,10 +32,8 @@ import {
   claimStartupRecoveryDeadlineExtension, createRuntimeProcessRecord,
   drainRuntimeRecordRequests, recoverUnconfirmedRuntimeCleanup, shouldRecoverUnconfirmedWindowsTree,
 } from "./runtime-supervisor-process-record.js";
-import { runtimeSupervisorRecoveryWaitMs } from
-  "../node/runtime-shutdown-deadline.js";
-import type { RuntimeProcessContainmentAdmission } from "./runtime-process-containment-admission.js";
-import { RuntimeSupervisorRecoveryAdmission } from "./runtime-supervisor-recovery-admission.js";
+import { runtimeSupervisorRecoveryWaitMs } from "../node/runtime-shutdown-deadline.js";
+import type { RuntimeProcessContainmentAdmission } from "./runtime-process-containment-admission.js"; import { RuntimeSupervisorRecoveryAdmission } from "./runtime-supervisor-recovery-admission.js";
 import { createRuntimeProcessContainmentAdmission,
   createRuntimeSupervisorProcessSafety } from "./runtime-supervisor-process-safety.js";
 import type {
@@ -75,6 +74,7 @@ export class RuntimeSupervisor {
   private websocketUrl: string | null = null;
   private restartAttempt = 0;
   private lastError: string | null = null;
+  private startupBlockerCode: RuntimeSupervisorSnapshot["startupBlockerCode"] = null;
   private databaseRecoveryReport: RuntimeDatabaseStartupRecoveryReport | null = null;
   private databaseRecoveryNoticePending = false;
   private desiredRunning = false; private lifecycle: "unused" | "started" | "closed" = "unused";
@@ -118,6 +118,7 @@ export class RuntimeSupervisor {
       this.phase = "stopped";
       this.lastError =
         "Runtime recovery remains safety locked until explicit confirmation.";
+      this.startupBlockerCode = "prior-runtime-cleanup-unconfirmed";
     }
     this.cleanupReceipts = new RuntimeCleanupReceiptJournal(
       options.workerOptions.dataDirectory);
@@ -271,6 +272,7 @@ export class RuntimeSupervisor {
     this.unconfirmedRestarts = 0;
     this.restartAttempt = 0;
     this.lastError = null;
+    this.startupBlockerCode = null;
     this.desiredRunning = true;
     this.clearShutdownTimers();
     this.spawnNext();
@@ -283,7 +285,7 @@ export class RuntimeSupervisor {
       websocketUrl: this.websocketUrl,
       databaseRecoveryReport: this.databaseRecoveryReport,
       databaseRecoveryNoticePending: consumeRecoveryNotice && this.databaseRecoveryNoticePending,
-      lastError: this.lastError,
+      startupBlockerCode: this.startupBlockerCode,
     });
     if (consumeRecoveryNotice && result.consumedRecoveryNotice) {
       this.databaseRecoveryNoticePending = false;
@@ -300,9 +302,7 @@ export class RuntimeSupervisor {
   resolveProjectPath(request: OpenProjectPathRequest): Promise<string> {
     const record = this.current;
     if (this.phase !== "ready" || !record?.ready) {
-      return Promise.reject(new Error(this.lastError
-        ? `The local service is restarting. ${this.lastError}`
-        : "The local service is starting. Try again in a moment."));
+      return Promise.reject(runtimeConnectionUnavailableError(this.phase, this.startupBlockerCode));
     }
     const requestId = randomUUID();
     return new Promise<string>((resolve, reject) => {
@@ -336,9 +336,7 @@ export class RuntimeSupervisor {
     }
     const record = this.current;
     if (this.phase !== "ready" || !record?.ready) {
-      return Promise.reject(new Error(this.lastError
-        ? `The local service is restarting. ${this.lastError}`
-        : "The local service is starting. Try again in a moment."));
+      return Promise.reject(runtimeConnectionUnavailableError(this.phase, this.startupBlockerCode));
     }
     return this.databaseRecoveryRequests.request(
       record,
@@ -353,11 +351,7 @@ export class RuntimeSupervisor {
   ): Promise<PrivateConnectRuntimeResponse> {
     const record = this.current;
     if (this.phase !== "ready" || !record?.ready) {
-      return Promise.reject(new Error(
-        this.lastError
-          ? `The local service is restarting. ${this.lastError}`
-          : "The local service is starting. Try again in a moment.",
-      ));
+      return Promise.reject(runtimeConnectionUnavailableError(this.phase, this.startupBlockerCode));
     }
     if (this.pendingPrivateConnectRuntimeRequests.has(request.requestId)) {
       return Promise.reject(new Error(
@@ -417,22 +411,15 @@ export class RuntimeSupervisor {
   private privateConnectPromptRecord(): RuntimeProcessRecord | Error {
     const record = this.current;
     if (this.phase !== "ready" || !record?.ready) {
-      return new Error(
-        this.lastError
-          ? `The local service is restarting. ${this.lastError}`
-          : "The local service is starting. Try again in a moment.",
-      );
+      return runtimeConnectionUnavailableError(this.phase, this.startupBlockerCode);
     }
     return record;
   }
   snapshot(): RuntimeSupervisorSnapshot {
-    return {
-      phase: this.phase, generation: this.generation,
-      pid: this.current?.child.pid ?? null, websocketUrl: this.websocketUrl,
-      restartAttempt: this.restartAttempt,
-      restartScheduled: this.restartTimer !== null, lastError: this.lastError,
-      databaseRecovery: this.databaseRecoveryReport,
-    };
+    return createRuntimeSupervisorSnapshot({ phase: this.phase, generation: this.generation,
+      pid: this.current?.child.pid ?? null, websocketUrl: this.websocketUrl, restartAttempt: this.restartAttempt,
+      restartScheduled: this.restartTimer !== null, lastError: this.lastError, startupBlockerCode: this.startupBlockerCode, databaseRecovery: this.databaseRecoveryReport,
+    }, this.current?.runtimeGenerationId ?? null);
   }
   updateHandoffIdentity(): RuntimeUpdateHandoffIdentity | null {
     return this.updatePreparation.handoffIdentity(this.systemBootId);
@@ -727,6 +714,17 @@ export class RuntimeSupervisor {
       record.reportedFailure = event.message;
       record.acceptingReady = false;
       this.lastError = event.message;
+      this.startupBlockerCode = event.blockerCode ?? null;
+      if (event.blockerCode) {
+        // A reason-coded startup blocker is an authoritative safety decision,
+        // not a transient crash. Let this generation finish its own bounded
+        // cleanup, but close replacement admission before its exit can enter
+        // the ordinary restart path and repeatedly probe the same quarantine.
+        this.desiredRunning = false;
+        this.restartBlocked = true;
+        this.clearTimerValue("restartTimer");
+        this.phase = "stopping";
+      }
       this.rejectTestRecycle(record, event.message, true);
       this.clearTimerValue("startupTimer");
       // The worker normally exits after reporting startup failure, but its
@@ -828,6 +826,7 @@ export class RuntimeSupervisor {
       event.databaseRecovery?.outcome === "restored"
       || event.databaseRecovery?.outcome === "created-empty";
     this.lastError = null;
+    this.startupBlockerCode = null;
     this.phase = "ready";
     this.clearTimerValue("startupTimer");
     this.clearTimerValue("stableTimer");

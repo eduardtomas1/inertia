@@ -894,10 +894,23 @@ describe("runtime process protocol", () => {
   });
 
   it("rejects malformed and oversized worker diagnostics", () => {
-    expect(parseRuntimeWorkerEvent({ type: "runtime.startup-failed", message: "SQLite unavailable" })).toEqual({
+    expect(parseRuntimeWorkerEvent({ type: "runtime.startup-failed", message: "The local runtime could not start." })).toEqual({
       type: "runtime.startup-failed",
-      message: "SQLite unavailable",
+      message: "The local runtime could not start.",
     });
+    expect(parseRuntimeWorkerEvent({
+      type: "runtime.startup-failed",
+      message: "Runtime startup is blocked because prior process cleanup remains unconfirmed.",
+      blockerCode: "prior-runtime-cleanup-unconfirmed",
+    })).toEqual({
+      type: "runtime.startup-failed",
+      message: "Runtime startup is blocked because prior process cleanup remains unconfirmed.",
+      blockerCode: "prior-runtime-cleanup-unconfirmed",
+    });
+    expect(parseRuntimeWorkerEvent({
+      type: "runtime.startup-failed",
+      message: "prompt=TOP_SECRET /mnt/customer/roadmap.txt",
+    })).toBeNull();
     expect(parseRuntimeWorkerEvent({ type: "runtime.startup-failed", message: "x".repeat(1001) })).toBeNull();
     expect(parseRuntimeWorkerEvent({
       type: "runtime.restart-requested",

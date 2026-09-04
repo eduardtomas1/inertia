@@ -1,5 +1,3 @@
-import { z } from "zod";
-
 import type {
   RuntimeLifecycleDiagnosticSnapshot,
 } from "./lifecycle-diagnostics";
@@ -18,21 +16,30 @@ export const APP_UPDATE_PREPARATION_BLOCKERS = [
 export type AppUpdatePreparationBlocker =
   (typeof APP_UPDATE_PREPARATION_BLOCKERS)[number];
 
-export const appUpdatePreparationDiagnosticSchema = z.discriminatedUnion(
-  "phase",
-  [
-    z.object({ phase: z.literal("inactive"), blocker: z.null() }).strict(),
-    z.object({ phase: z.literal("preparing"), blocker: z.null() }).strict(),
-    z.object({
-      phase: z.literal("blocked"),
-      blocker: z.enum(APP_UPDATE_PREPARATION_BLOCKERS),
-    }).strict(),
-  ],
-);
+export type AppUpdatePreparationDiagnostic = Readonly<
+  | { phase: "inactive" | "preparing"; blocker: null }
+  | { phase: "blocked"; blocker: AppUpdatePreparationBlocker }
+>;
 
-export type AppUpdatePreparationDiagnostic = Readonly<z.infer<
-  typeof appUpdatePreparationDiagnosticSchema
->>;
+export function isAppUpdatePreparationDiagnostic(
+  value: unknown,
+): value is AppUpdatePreparationDiagnostic {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  if (
+    Object.keys(record).length !== 2
+    || !Object.hasOwn(record, "phase")
+    || !Object.hasOwn(record, "blocker")
+  ) return false;
+  if (record.phase === "inactive" || record.phase === "preparing") {
+    return record.blocker === null;
+  }
+  return record.phase === "blocked"
+    && typeof record.blocker === "string"
+    && APP_UPDATE_PREPARATION_BLOCKERS.includes(
+      record.blocker as AppUpdatePreparationBlocker,
+    );
+}
 
 /**
  * Main- and renderer-safe projection of update preparation. It deliberately

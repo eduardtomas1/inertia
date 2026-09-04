@@ -7,6 +7,7 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
+using Microsoft.Win32.SafeHandles;
 
 public static class InertiaRuntimeJob {
   [StructLayout(LayoutKind.Sequential)]
@@ -75,6 +76,25 @@ public static class InertiaRuntimeJob {
     public string szExeFile;
   }
 
+  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+  private struct SHELLEXECUTEINFO {
+    public Int32 cbSize;
+    public UInt32 fMask;
+    public IntPtr hwnd;
+    [MarshalAs(UnmanagedType.LPWStr)] public string lpVerb;
+    [MarshalAs(UnmanagedType.LPWStr)] public string lpFile;
+    [MarshalAs(UnmanagedType.LPWStr)] public string lpParameters;
+    [MarshalAs(UnmanagedType.LPWStr)] public string lpDirectory;
+    public Int32 nShow;
+    public IntPtr hInstApp;
+    public IntPtr lpIDList;
+    [MarshalAs(UnmanagedType.LPWStr)] public string lpClass;
+    public IntPtr hkeyClass;
+    public UInt32 dwHotKey;
+    public IntPtr hIconOrMonitor;
+    public IntPtr hProcess;
+  }
+
   [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
   private static extern IntPtr CreateJobObject(IntPtr attributes, string name);
   [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
@@ -105,13 +125,58 @@ public static class InertiaRuntimeJob {
   private static extern bool Process32First(IntPtr snapshot, ref PROCESSENTRY32 entry);
   [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
   private static extern bool Process32Next(IntPtr snapshot, ref PROCESSENTRY32 entry);
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+  private static extern bool QueryFullProcessImageName(
+    IntPtr process,
+    UInt32 flags,
+    StringBuilder executableName,
+    ref UInt32 size
+  );
+  [DllImport("kernel32.dll", SetLastError = true)]
+  private static extern bool GetExitCodeProcess(IntPtr process, out UInt32 exitCode);
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+  private static extern IntPtr CreateFile(
+    string fileName,
+    UInt32 desiredAccess,
+    UInt32 shareMode,
+    IntPtr securityAttributes,
+    UInt32 creationDisposition,
+    UInt32 flagsAndAttributes,
+    IntPtr templateFile
+  );
+  [DllImport("kernel32.dll", SetLastError = true)]
+  private static extern bool SetFileInformationByHandle(
+    IntPtr file,
+    Int32 fileInformationClass,
+    IntPtr fileInformation,
+    UInt32 bufferSize
+  );
+  [DllImport("shell32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+  private static extern bool ShellExecuteEx(ref SHELLEXECUTEINFO execute);
 
   private const UInt32 JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000;
   private const UInt32 JOB_OBJECT_QUERY = 0x0004;
   private const UInt32 JOB_OBJECT_TERMINATE = 0x0008;
   private const UInt32 INFINITE = 0xffffffff;
   private const UInt32 TH32CS_SNAPPROCESS = 0x00000002;
+  private const UInt32 SEE_MASK_NOCLOSEPROCESS = 0x00000040;
+  private const UInt32 SEE_MASK_NOASYNC = 0x00000100;
+  private const UInt32 WAIT_OBJECT_0 = 0x00000000;
+  private const UInt32 WAIT_TIMEOUT = 0x00000102;
+  private const UInt32 STILL_ACTIVE = 259;
+  private const UInt32 GENERIC_READ = 0x80000000;
+  private const UInt32 GENERIC_WRITE = 0x40000000;
+  private const UInt32 DELETE_ACCESS = 0x00010000;
+  private const UInt32 CREATE_NEW_FILE = 1;
+  private const UInt32 FILE_ATTRIBUTE_NORMAL = 0x00000080;
+  private const UInt32 FILE_FLAG_WRITE_THROUGH = 0x80000000;
+  private const Int32 FileRenameInfo = 3;
   private const Int64 MAX_EXECUTABLE_BYTES = 1024 * 1024;
+  private const Int64 MAX_UPDATE_ARTIFACT_BYTES = 1024L * 1024L * 1024L;
+  private const Int32 MAX_UPDATE_REQUEST_BYTES = 64 * 1024;
+  private const Int32 MAX_UPDATE_PATH_BYTES = 4 * 1024;
+  private const Int32 MAX_UPDATE_READY_BYTES = 32;
+  private const Int32 UPDATE_LAUNCH_CLEANUP_UNCONFIRMED = 47;
   private const UInt64 WINDOWS_TO_UNIX_EPOCH_TICKS = 116444736000000000;
   private const Int32 ERROR_FILE_NOT_FOUND = 2;
   private const int JobObjectBasicAccountingInformation = 1;
@@ -889,10 +954,1176 @@ public static class InertiaRuntimeJob {
     }
   }
 
+  private sealed class UpdateSupervisorRequest {
+    public string OperationId;
+    public string HandoffChecksum;
+    public string LaunchId;
+    public UInt32 ParentProcessId;
+    public string InstallerPath;
+    public string InstallerDigest;
+    public string OldExecutablePath;
+    public string OldExecutableDigest;
+    public string NewExecutablePath;
+    public string NewExecutableDigest;
+    public string ReceiptPath;
+    public string ReceiptTemporaryPath;
+    public string SupervisorDigest;
+    public string HandoffToken;
+    public string DeadlineAtText;
+    public DateTimeOffset DeadlineAt;
+  }
+
+  private sealed class UpdateDeadline {
+    private readonly DateTimeOffset startedAt;
+    private readonly double budgetMilliseconds;
+    private readonly Stopwatch elapsed;
+
+    private UpdateDeadline(
+      DateTimeOffset initialTime,
+      double initialBudgetMilliseconds
+    ) {
+      startedAt = initialTime;
+      budgetMilliseconds = initialBudgetMilliseconds;
+      elapsed = Stopwatch.StartNew();
+    }
+
+    public static UpdateDeadline Start(DateTimeOffset deadlineAt) {
+      DateTimeOffset initialTime = DateTimeOffset.UtcNow;
+      double budget = (deadlineAt - initialTime).TotalMilliseconds;
+      if (budget <= 0 || budget > TimeSpan.FromHours(24).TotalMilliseconds) {
+        return null;
+      }
+      return new UpdateDeadline(initialTime, budget);
+    }
+
+    public UInt32 RemainingMilliseconds() {
+      double remaining = budgetMilliseconds - elapsed.Elapsed.TotalMilliseconds;
+      if (remaining <= 0) return 0;
+      return (UInt32)Math.Min(
+        Math.Ceiling(remaining),
+        (double)Int32.MaxValue
+      );
+    }
+
+    public bool Expired {
+      get { return elapsed.Elapsed.TotalMilliseconds >= budgetMilliseconds; }
+    }
+
+    public DateTimeOffset CurrentTime {
+      get { return startedAt.Add(elapsed.Elapsed); }
+    }
+  }
+
+  private static string BytesToHex(byte[] bytes) {
+    var value = new StringBuilder(bytes.Length * 2);
+    for (int index = 0; index < bytes.Length; index += 1) {
+      value.Append(bytes[index].ToString("x2", CultureInfo.InvariantCulture));
+    }
+    return value.ToString();
+  }
+
+  private static bool ValidDigest(string value) {
+    if (value == null || value.Length != 64) return false;
+    for (int index = 0; index < value.Length; index += 1) {
+      char current = value[index];
+      if (!((current >= '0' && current <= '9')
+        || (current >= 'a' && current <= 'f'))) return false;
+    }
+    return true;
+  }
+
+  private static bool ValidToken(string value) {
+    if (value == null || value.Length != 43) return false;
+    for (int index = 0; index < value.Length; index += 1) {
+      char current = value[index];
+      if (!((current >= '0' && current <= '9')
+        || (current >= 'A' && current <= 'Z')
+        || (current >= 'a' && current <= 'z')
+        || current == '_'
+        || current == '-')) return false;
+    }
+    return true;
+  }
+
+  private static bool ValidOperationId(string value) {
+    Guid parsed;
+    return value != null
+      && value.Length == 36
+      && Guid.TryParseExact(value, "D", out parsed)
+      && String.Equals(
+        parsed.ToString("D"),
+        value,
+        StringComparison.Ordinal
+      );
+  }
+
+  private static string DecodeUpdateField(string line, string name) {
+    string prefix = name + "=";
+    if (line == null || !line.StartsWith(prefix, StringComparison.Ordinal)) {
+      return null;
+    }
+    string encoded = line.Substring(prefix.Length);
+    if (encoded.Length == 0 || encoded.Length > MAX_UPDATE_PATH_BYTES * 2) {
+      return null;
+    }
+    try {
+      byte[] bytes = Convert.FromBase64String(encoded);
+      if (!String.Equals(
+        Convert.ToBase64String(bytes),
+        encoded,
+        StringComparison.Ordinal
+      )) return null;
+      string value = new UTF8Encoding(false, true).GetString(bytes);
+      return value.IndexOf('\0') < 0 ? value : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private static string ReadBoundedUpdateRequest() {
+    Stream input = Console.OpenStandardInput();
+    var bytes = new byte[MAX_UPDATE_REQUEST_BYTES + 1];
+    int offset = 0;
+    while (offset < bytes.Length) {
+      int count = input.Read(bytes, offset, bytes.Length - offset);
+      if (count == 0) break;
+      offset += count;
+    }
+    if (offset == 0 || offset > MAX_UPDATE_REQUEST_BYTES) return null;
+    try {
+      return new UTF8Encoding(false, true).GetString(bytes, 0, offset);
+    } catch {
+      return null;
+    }
+  }
+
+  private static string ExactFullPath(string value) {
+    if (
+      value == null
+      || value.Length == 0
+      || Encoding.UTF8.GetByteCount(value) > MAX_UPDATE_PATH_BYTES
+      || !Path.IsPathRooted(value)
+    ) return null;
+    try {
+      string normalized = Path.GetFullPath(value);
+      return String.Equals(normalized, value, StringComparison.OrdinalIgnoreCase)
+        ? normalized
+        : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private static string OperationHash(string operationId) {
+    using (var sha256 = SHA256.Create()) {
+      return BytesToHex(sha256.ComputeHash(Encoding.UTF8.GetBytes(operationId)));
+    }
+  }
+
+  private static bool DirectDirectory(string path) {
+    try {
+      var directory = new DirectoryInfo(path);
+      return directory.Exists
+        && (directory.Attributes & FileAttributes.ReparsePoint) == 0;
+    } catch {
+      return false;
+    }
+  }
+
+  private static bool OutsideInstallTree(
+    string helperPath,
+    string executablePath
+  ) {
+    try {
+      string helperDirectory = Path.GetDirectoryName(helperPath);
+      string installDirectory = Path.GetDirectoryName(executablePath);
+      if (helperDirectory == null || installDirectory == null) return false;
+      string installPrefix = installDirectory.TrimEnd(
+        Path.DirectorySeparatorChar,
+        Path.AltDirectorySeparatorChar
+      ) + Path.DirectorySeparatorChar;
+      return !String.Equals(
+          helperDirectory,
+          installDirectory,
+          StringComparison.OrdinalIgnoreCase
+        )
+        && !helperDirectory.StartsWith(
+          installPrefix,
+          StringComparison.OrdinalIgnoreCase
+        );
+    } catch {
+      return false;
+    }
+  }
+
+  private static UpdateSupervisorRequest ParseUpdateSupervisorRequest(
+    string input,
+    string supervisorPath
+  ) {
+    if (
+      input == null
+      || Encoding.UTF8.GetByteCount(input) > MAX_UPDATE_REQUEST_BYTES
+      || !String.Equals(
+        ExactFullPath(supervisorPath),
+        supervisorPath,
+        StringComparison.OrdinalIgnoreCase
+      )
+    ) return null;
+    string[] lines = input.Split(new char[] { '\n' }, StringSplitOptions.None);
+    if (
+      lines.Length != 17
+      || !String.Equals(
+        lines[0],
+        "INERTIA_UPDATE_SUPERVISOR_V1",
+        StringComparison.Ordinal
+      )
+      || lines[16].Length != 0
+    ) return null;
+    string operationId = DecodeUpdateField(lines[1], "operationId");
+    string handoffChecksum = DecodeUpdateField(lines[2], "handoffChecksum");
+    string launchId = DecodeUpdateField(lines[3], "launchId");
+    string parentProcessIdValue = DecodeUpdateField(lines[4], "parentProcessId");
+    string installerPath = ExactFullPath(
+      DecodeUpdateField(lines[5], "installerPath")
+    );
+    string installerDigest = DecodeUpdateField(lines[6], "installerDigest");
+    string oldExecutablePath = ExactFullPath(
+      DecodeUpdateField(lines[7], "oldExecutablePath")
+    );
+    string oldExecutableDigest = DecodeUpdateField(
+      lines[8],
+      "oldExecutableDigest"
+    );
+    string newExecutablePath = ExactFullPath(
+      DecodeUpdateField(lines[9], "newExecutablePath")
+    );
+    string newExecutableDigest = DecodeUpdateField(
+      lines[10],
+      "newExecutableDigest"
+    );
+    string receiptPath = ExactFullPath(
+      DecodeUpdateField(lines[11], "receiptPath")
+    );
+    string receiptTemporaryPath = ExactFullPath(
+      DecodeUpdateField(lines[12], "receiptTemporaryPath")
+    );
+    string supervisorDigest = DecodeUpdateField(lines[13], "supervisorDigest");
+    string handoffToken = DecodeUpdateField(lines[14], "handoffToken");
+    string deadlineAtValue = DecodeUpdateField(lines[15], "deadlineAt");
+    UInt32 parentProcessId;
+    DateTimeOffset deadlineAt;
+    if (
+      !ValidOperationId(operationId)
+      || !ValidDigest(handoffChecksum)
+      || !ValidOperationId(launchId)
+      || !UInt32.TryParse(
+        parentProcessIdValue,
+        NumberStyles.None,
+        CultureInfo.InvariantCulture,
+        out parentProcessId
+      )
+      || parentProcessId <= 1
+      || parentProcessId > Int32.MaxValue
+      || installerPath == null
+      || !ValidDigest(installerDigest)
+      || oldExecutablePath == null
+      || !ValidDigest(oldExecutableDigest)
+      || newExecutablePath == null
+      || !String.Equals(
+        newExecutablePath,
+        oldExecutablePath,
+        StringComparison.OrdinalIgnoreCase
+      )
+      || !ValidDigest(newExecutableDigest)
+      || receiptPath == null
+      || receiptTemporaryPath == null
+      || !ValidDigest(supervisorDigest)
+      || !ValidToken(handoffToken)
+      || !DateTimeOffset.TryParse(
+        deadlineAtValue,
+        CultureInfo.InvariantCulture,
+        DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+        out deadlineAt
+      )
+      || !String.Equals(
+        deadlineAt.UtcDateTime.ToString(
+          "yyyy-MM-dd'T'HH:mm:ss.fff'Z'",
+          CultureInfo.InvariantCulture
+        ),
+        deadlineAtValue,
+        StringComparison.Ordinal
+      )
+    ) return null;
+    string hash = OperationHash(operationId);
+    string receiptDirectory = Path.GetDirectoryName(receiptPath);
+    string helperDirectory = Path.GetDirectoryName(supervisorPath);
+    if (
+      receiptDirectory == null
+      || helperDirectory == null
+      || !String.Equals(
+        receiptDirectory,
+        helperDirectory,
+        StringComparison.OrdinalIgnoreCase
+      )
+      || !DirectDirectory(receiptDirectory)
+      || !String.Equals(
+        Path.GetFileName(supervisorPath),
+        ".app-update-supervisor-" + hash + ".exe",
+        StringComparison.Ordinal
+      )
+      || !String.Equals(
+        Path.GetFileName(receiptPath),
+        ".app-update-terminal-receipt-" + hash + ".json",
+        StringComparison.Ordinal
+      )
+      || !String.Equals(
+        receiptTemporaryPath,
+        receiptPath.Substring(0, receiptPath.Length - 5) + ".publish.tmp",
+        StringComparison.OrdinalIgnoreCase
+      )
+      || File.Exists(receiptPath)
+      || File.Exists(receiptTemporaryPath)
+      || !OutsideInstallTree(
+        supervisorPath,
+        oldExecutablePath
+      )
+    ) return null;
+    return new UpdateSupervisorRequest {
+      OperationId = operationId,
+      HandoffChecksum = handoffChecksum,
+      LaunchId = launchId,
+      ParentProcessId = parentProcessId,
+      InstallerPath = installerPath,
+      InstallerDigest = installerDigest,
+      OldExecutablePath = oldExecutablePath,
+      OldExecutableDigest = oldExecutableDigest,
+      NewExecutablePath = newExecutablePath,
+      NewExecutableDigest = newExecutableDigest,
+      ReceiptPath = receiptPath,
+      ReceiptTemporaryPath = receiptTemporaryPath,
+      SupervisorDigest = supervisorDigest,
+      HandoffToken = handoffToken,
+      DeadlineAtText = deadlineAtValue,
+      DeadlineAt = deadlineAt,
+    };
+  }
+
+  private static FileStream OpenUpdateArtifact(
+    string path,
+    out string digest
+  ) {
+    digest = null;
+    FileStream stream = null;
+    try {
+      var metadata = new FileInfo(path);
+      if (
+        !metadata.Exists
+        || (metadata.Attributes & FileAttributes.ReparsePoint) != 0
+        || metadata.Length <= 0
+        || metadata.Length > MAX_UPDATE_ARTIFACT_BYTES
+      ) return null;
+      stream = new FileStream(
+        path,
+        FileMode.Open,
+        FileAccess.Read,
+        FileShare.Read
+      );
+      if (stream.Length != metadata.Length) {
+        stream.Dispose();
+        return null;
+      }
+      using (var sha256 = SHA256.Create()) {
+        digest = BytesToHex(sha256.ComputeHash(stream));
+      }
+      if (stream.Position != stream.Length) {
+        stream.Dispose();
+        return null;
+      }
+      var confirmed = new FileInfo(path);
+      if (
+        !confirmed.Exists
+        || (confirmed.Attributes & FileAttributes.ReparsePoint) != 0
+        || confirmed.Length != stream.Length
+      ) {
+        stream.Dispose();
+        return null;
+      }
+      return stream;
+    } catch {
+      if (stream != null) stream.Dispose();
+      digest = null;
+      return null;
+    }
+  }
+
+  private static string ProcessExecutablePath(IntPtr process) {
+    var path = new StringBuilder(32768);
+    UInt32 length = (UInt32)path.Capacity;
+    return QueryFullProcessImageName(process, 0, path, ref length)
+      ? ExactFullPath(path.ToString())
+      : null;
+  }
+
+  private static bool LaunchInstaller(
+    UpdateSupervisorRequest request,
+    UpdateDeadline deadline,
+    out bool started,
+    out bool deadlineExceeded,
+    out UInt32? exitCode,
+    out int win32Error
+  ) {
+    started = false;
+    deadlineExceeded = false;
+    exitCode = null;
+    win32Error = 0;
+    var execute = new SHELLEXECUTEINFO();
+    execute.cbSize = Marshal.SizeOf(typeof(SHELLEXECUTEINFO));
+    execute.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC;
+    execute.lpFile = request.InstallerPath;
+    // This repository ships the complete default per-user NSIS target: there
+    // is no web package or custom installDirectory argument to preserve.
+    // --updated /S matches NsisUpdater's silent update flags, while omitting
+    // --force-run ensures only this supervisor starts the rehashed result.
+    // ShellExecuteEx honors any execution-level manifest embedded by NSIS and
+    // gives us the exact waitable installer handle across UAC elevation.
+    execute.lpParameters = "--updated /S";
+    execute.lpDirectory = Path.GetDirectoryName(request.InstallerPath);
+    execute.nShow = 0;
+    if (!ShellExecuteEx(ref execute) || execute.hProcess == IntPtr.Zero) {
+      win32Error = Marshal.GetLastWin32Error();
+      return false;
+    }
+    started = true;
+    try {
+      UInt32 remaining = deadline.RemainingMilliseconds();
+      UInt32 waitResult = remaining == 0
+        ? WAIT_TIMEOUT
+        : WaitForSingleObject(execute.hProcess, remaining);
+      if (waitResult == WAIT_TIMEOUT) {
+        // Once the exact installer starts, its result is ambiguous until that
+        // same process handle signals. Do not kill it or pretend that it was
+        // cleaned up: publish a durable quarantine and stop supervising at the
+        // authority deadline. Startup then remains fail-closed across reboot
+        // while the native installer is free to finish its own transaction.
+        deadlineExceeded = true;
+        return false;
+      }
+      if (waitResult != WAIT_OBJECT_0) {
+        win32Error = Marshal.GetLastWin32Error();
+        return false;
+      }
+      UInt32 result;
+      if (!GetExitCodeProcess(execute.hProcess, out result)) {
+        win32Error = Marshal.GetLastWin32Error();
+        return false;
+      }
+      if (result == STILL_ACTIVE) return false;
+      exitCode = result;
+      return true;
+    } finally {
+      CloseHandle(execute.hProcess);
+    }
+  }
+
+  private static string TerminalAuthenticationPayload(
+    UpdateSupervisorRequest request,
+    string outcome,
+    UInt32? installerExitCode,
+    string executableDigest,
+    string parentCreationTimeBits,
+    string completedAt
+  ) {
+    string exitCode = installerExitCode.HasValue
+      ? installerExitCode.Value.ToString(CultureInfo.InvariantCulture)
+      : "null";
+    string executable = executableDigest == null
+      ? "null"
+      : "\"" + executableDigest + "\"";
+    return "[1,\"" + request.OperationId
+      + "\",\"" + request.HandoffChecksum
+      + "\",\"" + outcome
+      + "\"," + exitCode
+      + ",\"" + request.InstallerDigest
+      + "\",\"" + request.SupervisorDigest
+      + "\"," + executable
+      + ",\"" + parentCreationTimeBits
+      + "\",\"" + completedAt + "\"]";
+  }
+
+  private static string OperationClaimAuthenticationPayload(
+    UpdateSupervisorRequest request
+  ) {
+    return "[1,\"" + request.OperationId
+      + "\",\"" + request.HandoffChecksum
+      + "\",\"" + request.LaunchId
+      + "\",\"" + request.SupervisorDigest
+      + "\",\"" + request.DeadlineAtText + "\"]";
+  }
+
+  private static string OperationClaimAuthenticationTag(
+    UpdateSupervisorRequest request
+  ) {
+    using (var hmac = new HMACSHA256(
+      Encoding.UTF8.GetBytes(request.HandoffToken)
+    )) {
+      return BytesToHex(hmac.ComputeHash(Encoding.UTF8.GetBytes(
+        "inertia.windows-update-operation-claim.v1\0"
+          + OperationClaimAuthenticationPayload(request)
+      )));
+    }
+  }
+
+  private static FileStream CreateOwnedOperationClaimFile(string path) {
+    IntPtr handle = CreateFile(
+      path,
+      GENERIC_READ | GENERIC_WRITE | DELETE_ACCESS,
+      0,
+      IntPtr.Zero,
+      CREATE_NEW_FILE,
+      FILE_ATTRIBUTE_NORMAL | FILE_FLAG_WRITE_THROUGH,
+      IntPtr.Zero
+    );
+    var safeHandle = new SafeFileHandle(handle, true);
+    if (safeHandle.IsInvalid) {
+      safeHandle.Dispose();
+      return null;
+    }
+    try {
+      return new FileStream(
+        safeHandle,
+        FileAccess.ReadWrite,
+        4096,
+        false
+      );
+    } catch {
+      safeHandle.Dispose();
+      return null;
+    }
+  }
+
+  private static bool RenameOwnedOperationClaim(
+    FileStream claim,
+    string receiptPath
+  ) {
+    byte[] name = Encoding.Unicode.GetBytes(receiptPath);
+    int rootOffset = IntPtr.Size == 8 ? 8 : 4;
+    int lengthOffset = rootOffset + IntPtr.Size;
+    int nameOffset = lengthOffset + 4;
+    IntPtr information = Marshal.AllocHGlobal(nameOffset + name.Length);
+    try {
+      for (int index = 0; index < nameOffset; index += 1) {
+        Marshal.WriteByte(information, index, 0);
+      }
+      Marshal.WriteIntPtr(information, rootOffset, IntPtr.Zero);
+      Marshal.WriteInt32(information, lengthOffset, name.Length);
+      Marshal.Copy(name, 0, IntPtr.Add(information, nameOffset), name.Length);
+      return SetFileInformationByHandle(
+        claim.SafeFileHandle.DangerousGetHandle(),
+        FileRenameInfo,
+        information,
+        (UInt32)(nameOffset + name.Length)
+      );
+    } finally {
+      Marshal.FreeHGlobal(information);
+    }
+  }
+
+  private static FileStream AcquireOperationClaim(
+    UpdateSupervisorRequest request
+  ) {
+    FileStream claim = null;
+    try {
+      string json = "{\"schemaVersion\":1"
+        + ",\"operationId\":\"" + request.OperationId + "\""
+        + ",\"handoffChecksum\":\"" + request.HandoffChecksum + "\""
+        + ",\"launchId\":\"" + request.LaunchId + "\""
+        + ",\"supervisorDigest\":\"" + request.SupervisorDigest + "\""
+        + ",\"deadlineAt\":\"" + request.DeadlineAtText + "\""
+        + ",\"authenticationTag\":\""
+        + OperationClaimAuthenticationTag(request) + "\"}";
+      byte[] bytes = new UTF8Encoding(false).GetBytes(json);
+      claim = CreateOwnedOperationClaimFile(request.ReceiptTemporaryPath);
+      if (claim == null) return null;
+      claim.Write(bytes, 0, bytes.Length);
+      claim.Flush(true);
+      return claim;
+    } catch {
+      if (claim != null) claim.Dispose();
+      return null;
+    }
+  }
+
+  private static string TerminalAuthenticationTag(
+    UpdateSupervisorRequest request,
+    string payload
+  ) {
+    using (var hmac = new HMACSHA256(
+      Encoding.UTF8.GetBytes(request.HandoffToken)
+    )) {
+      return BytesToHex(hmac.ComputeHash(Encoding.UTF8.GetBytes(
+        "inertia.windows-update-terminal.v1\0" + payload
+      )));
+    }
+  }
+
+  private static bool PublishTerminalReceipt(
+    UpdateSupervisorRequest request,
+    ref FileStream operationClaim,
+    string outcome,
+    UInt32? installerExitCode,
+    string executableDigest,
+    string parentCreationTimeBits,
+    DateTimeOffset completedAtValue
+  ) {
+    string completedAt = completedAtValue.UtcDateTime.ToString(
+      "yyyy-MM-dd'T'HH:mm:ss.fff'Z'",
+      CultureInfo.InvariantCulture
+    );
+    string payload = TerminalAuthenticationPayload(
+      request,
+      outcome,
+      installerExitCode,
+      executableDigest,
+      parentCreationTimeBits,
+      completedAt
+    );
+    string authenticationTag = TerminalAuthenticationTag(request, payload);
+    string exitCode = installerExitCode.HasValue
+      ? installerExitCode.Value.ToString(CultureInfo.InvariantCulture)
+      : "null";
+    string executable = executableDigest == null
+      ? "null"
+      : "\"" + executableDigest + "\"";
+    string json = "{\"schemaVersion\":1"
+      + ",\"operationId\":\"" + request.OperationId + "\""
+      + ",\"handoffChecksum\":\"" + request.HandoffChecksum + "\""
+      + ",\"outcome\":\"" + outcome + "\""
+      + ",\"installerExitCode\":" + exitCode
+      + ",\"installerDigest\":\"" + request.InstallerDigest + "\""
+      + ",\"supervisorDigest\":\"" + request.SupervisorDigest + "\""
+      + ",\"executableDigest\":" + executable
+      + ",\"parentCreationTimeBits\":\"" + parentCreationTimeBits + "\""
+      + ",\"completedAt\":\"" + completedAt + "\""
+      + ",\"authenticationTag\":\"" + authenticationTag + "\"}";
+    byte[] bytes = new UTF8Encoding(false).GetBytes(json);
+    try {
+      if (operationClaim == null) return false;
+      operationClaim.Position = 0;
+      operationClaim.SetLength(0);
+      operationClaim.Write(bytes, 0, bytes.Length);
+      operationClaim.Flush(true);
+      if (!RenameOwnedOperationClaim(operationClaim, request.ReceiptPath)) {
+        return false;
+      }
+      operationClaim.Flush(true);
+      operationClaim.Dispose();
+      operationClaim = null;
+      return File.Exists(request.ReceiptPath)
+        && !File.Exists(request.ReceiptTemporaryPath);
+    } catch {
+      return false;
+    }
+  }
+
+  private static void LaunchVerifiedApplication(
+    string executablePath,
+    string expectedDigest,
+    UpdateDeadline deadline
+  ) {
+    string digest;
+    using (FileStream executable = OpenUpdateArtifact(
+      executablePath,
+      out digest
+    )) {
+      if (
+        executable == null
+        || !String.Equals(digest, expectedDigest, StringComparison.Ordinal)
+        || deadline.Expired
+      ) return;
+      var start = new ProcessStartInfo();
+      start.FileName = executablePath;
+      start.WorkingDirectory = Path.GetDirectoryName(executablePath);
+      start.UseShellExecute = false;
+      Process launched = Process.Start(start);
+      if (launched != null) launched.Dispose();
+    }
+  }
+
+  public static int LaunchUpdateSupervisor(
+    string supervisorPath,
+    string expectedSupervisorDigest,
+    string requestText,
+    int timeoutMilliseconds,
+    out string output,
+    out string diagnostic
+  ) {
+    output = "";
+    diagnostic = "";
+    Process child = null;
+    FileStream supervisor = null;
+    try {
+      if (
+        !String.Equals(
+          ExactFullPath(supervisorPath),
+          supervisorPath,
+          StringComparison.OrdinalIgnoreCase
+        )
+        || !ValidDigest(expectedSupervisorDigest)
+        || requestText == null
+        || Encoding.UTF8.GetByteCount(requestText) < 1
+        || Encoding.UTF8.GetByteCount(requestText) > MAX_UPDATE_REQUEST_BYTES
+        || timeoutMilliseconds < 1
+        || timeoutMilliseconds > 15000
+      ) {
+        diagnostic = ErrorLine("update-launch-request", 0);
+        return 46;
+      }
+      string supervisorDigest;
+      supervisor = OpenUpdateArtifact(supervisorPath, out supervisorDigest);
+      if (
+        supervisor == null
+        || supervisor.Length > MAX_EXECUTABLE_BYTES
+        || !String.Equals(
+          supervisorDigest,
+          expectedSupervisorDigest,
+          StringComparison.Ordinal
+        )
+      ) {
+        diagnostic = ErrorLine("update-launch-integrity", 0);
+        return 46;
+      }
+      supervisor.Position = 0;
+      byte[] supervisorBytes = new byte[(Int32)supervisor.Length];
+      int offset = 0;
+      while (offset < supervisorBytes.Length) {
+        int read = supervisor.Read(
+          supervisorBytes,
+          offset,
+          supervisorBytes.Length - offset
+        );
+        if (read <= 0) {
+          diagnostic = ErrorLine("update-launch-read", 0);
+          return 46;
+        }
+        offset += read;
+      }
+      if (supervisor.ReadByte() != -1) {
+        diagnostic = ErrorLine("update-launch-read", 0);
+        return 46;
+      }
+
+      string loaderScript = @"$ErrorActionPreference = 'Stop'
+$stream = $null
+try {
+  $assemblyLine = [Console]::In.ReadLine()
+  $digest = [Console]::In.ReadLine()
+  $pathLine = [Console]::In.ReadLine()
+  $launcherPid = [Console]::In.ReadLine()
+  $requestLine = [Console]::In.ReadLine()
+  if ($null -eq $assemblyLine -or $assemblyLine.Length -lt 1 -or $assemblyLine.Length -gt 1400000 -or
+    $digest -notmatch '^[0-9a-f]{64}$' -or
+    $null -eq $pathLine -or $pathLine.Length -lt 1 -or $pathLine.Length -gt 11000 -or
+    $launcherPid -notmatch '^[1-9][0-9]{0,9}$' -or
+    $null -eq $requestLine -or $requestLine.Length -lt 1 -or $requestLine.Length -gt 88000) {
+    throw 'input'
+  }
+  $assemblyBytes = [Convert]::FromBase64String($assemblyLine)
+  $pathBytes = [Convert]::FromBase64String($pathLine)
+  $requestBytes = [Convert]::FromBase64String($requestLine)
+  if ([Convert]::ToBase64String($assemblyBytes) -cne $assemblyLine -or
+    [Convert]::ToBase64String($pathBytes) -cne $pathLine -or
+    [Convert]::ToBase64String($requestBytes) -cne $requestLine -or
+    $assemblyBytes.Length -lt 1 -or $assemblyBytes.Length -gt 1048576 -or
+    $requestBytes.Length -lt 1 -or $requestBytes.Length -gt 65536) {
+    throw 'encoding'
+  }
+  $utf8 = [Text.UTF8Encoding]::new($false, $true)
+  $supervisorPath = $utf8.GetString($pathBytes)
+  $request = $utf8.GetString($requestBytes)
+  $stream = [IO.File]::Open(
+    $supervisorPath,
+    [IO.FileMode]::Open,
+    [IO.FileAccess]::Read,
+    [IO.FileShare]::Read
+  )
+  if ($stream.Length -ne $assemblyBytes.Length) { throw 'path-size' }
+  $sha256 = [Security.Cryptography.SHA256]::Create()
+  try {
+    $pathDigest = [BitConverter]::ToString(
+      $sha256.ComputeHash($stream)
+    ).Replace('-', '').ToLowerInvariant()
+    $byteDigest = [BitConverter]::ToString(
+      $sha256.ComputeHash($assemblyBytes)
+    ).Replace('-', '').ToLowerInvariant()
+  } finally {
+    $sha256.Dispose()
+  }
+  if ($pathDigest -cne $digest -or $byteDigest -cne $digest) {
+    throw 'integrity'
+  }
+  $loaded = [Reflection.Assembly]::Load($assemblyBytes)
+  $type = $loaded.GetType('InertiaRuntimeJob', $true, $false)
+  $method = $type.GetMethod('UpdateSupervisorFromBroker')
+  if ($null -eq $method) { throw 'contract' }
+  $arguments = [Object[]]@($digest, $launcherPid, $request, $supervisorPath)
+  exit ([Int32]$method.Invoke($null, $arguments))
+} catch {
+  [Console]::Error.WriteLine('INERTIA_JOB_ERROR stage=update-loader')
+  exit 46
+} finally {
+  if ($null -ne $stream) { $stream.Dispose() }
+}";
+      string encodedLoader = Convert.ToBase64String(
+        Encoding.Unicode.GetBytes(loaderScript)
+      );
+      string powershellPath = TrustedPowerShellPath();
+      if (powershellPath == null) {
+        diagnostic = ErrorLine("update-launch-powershell", 0);
+        return 46;
+      }
+      var start = new ProcessStartInfo();
+      start.FileName = powershellPath;
+      start.Arguments = "-NoLogo -NoProfile -NonInteractive "
+        + "-ExecutionPolicy Bypass -EncodedCommand " + encodedLoader;
+      start.UseShellExecute = false;
+      start.CreateNoWindow = true;
+      start.RedirectStandardInput = true;
+      start.RedirectStandardOutput = true;
+      child = Process.Start(start);
+      if (child == null) {
+        diagnostic = ErrorLine("update-launch-start", 0);
+        return 46;
+      }
+      child.StandardInput.WriteLine(Convert.ToBase64String(supervisorBytes));
+      child.StandardInput.WriteLine(expectedSupervisorDigest);
+      child.StandardInput.WriteLine(Convert.ToBase64String(
+        Encoding.UTF8.GetBytes(supervisorPath)
+      ));
+      using (Process launcher = Process.GetCurrentProcess()) {
+        child.StandardInput.WriteLine(
+          launcher.Id.ToString(CultureInfo.InvariantCulture)
+        );
+      }
+      child.StandardInput.WriteLine(Convert.ToBase64String(
+        Encoding.UTF8.GetBytes(requestText)
+      ));
+      child.StandardInput.Close();
+
+      string readyLine = null;
+      Exception readFailure = null;
+      using (var ready = new ManualResetEvent(false)) {
+        var reader = new Thread(delegate() {
+          try {
+            readyLine = child.StandardOutput.ReadLine();
+          } catch (Exception error) {
+            readFailure = error;
+          } finally {
+            ready.Set();
+          }
+        });
+        reader.IsBackground = true;
+        reader.Start();
+        var admission = Stopwatch.StartNew();
+        while (
+          !ready.WaitOne(10)
+          && !child.HasExited
+          && admission.ElapsedMilliseconds < timeoutMilliseconds
+        ) { }
+      }
+      if (
+        readFailure == null
+        && String.Equals(readyLine, "READY", StringComparison.Ordinal)
+        && readyLine.Length <= MAX_UPDATE_READY_BYTES
+      ) {
+        // READY is the authority-transfer boundary. A supervisor may publish
+        // its terminal receipt and exit before this launcher gets scheduled
+        // again; requiring it to remain alive would misclassify that admitted
+        // operation as a pre-admission failure.
+        output = "READY";
+        return 0;
+      }
+      diagnostic = ErrorLine("update-launch-ready", 0);
+      if (!child.HasExited) {
+        try { child.Kill(); } catch { }
+      }
+      if (!child.WaitForExit(2000)) {
+        diagnostic = ErrorLine("update-helper-exit-unconfirmed", 0);
+        return UPDATE_LAUNCH_CLEANUP_UNCONFIRMED;
+      }
+      return 46;
+    } catch {
+      diagnostic = ErrorLine("update-launch", Marshal.GetLastWin32Error());
+      if (child != null && !child.HasExited) {
+        try { child.Kill(); } catch { }
+        try {
+          if (!child.WaitForExit(2000)) {
+            diagnostic = ErrorLine("update-helper-exit-unconfirmed", 0);
+            return UPDATE_LAUNCH_CLEANUP_UNCONFIRMED;
+          }
+        } catch {
+          diagnostic = ErrorLine("update-helper-exit-unconfirmed", 0);
+          return UPDATE_LAUNCH_CLEANUP_UNCONFIRMED;
+        }
+      }
+      return 46;
+    } finally {
+      if (supervisor != null) supervisor.Dispose();
+      if (child != null) child.Dispose();
+    }
+  }
+
+  private static string TrustedPowerShellPath() {
+    try {
+      string windows = Environment.GetFolderPath(
+        Environment.SpecialFolder.Windows
+      );
+      return ExactFullPath(Path.Combine(
+        windows,
+        "System32",
+        "WindowsPowerShell",
+        "v1.0",
+        "powershell.exe"
+      ));
+    } catch {
+      return null;
+    }
+  }
+
+  public static int UpdateSupervisorFromBroker(
+    string expectedSupervisorDigest,
+    string launcherProcessIdValue,
+    string requestText,
+    string supervisorPath
+  ) {
+    UpdateSupervisorRequest request = ParseUpdateSupervisorRequest(
+      requestText,
+      supervisorPath
+    );
+    UpdateDeadline deadline = request == null
+      ? null
+      : UpdateDeadline.Start(request.DeadlineAt);
+    UInt32 launcherProcessId;
+    if (
+      request == null
+      || deadline == null
+      || !UInt32.TryParse(
+        launcherProcessIdValue,
+        NumberStyles.None,
+        CultureInfo.InvariantCulture,
+        out launcherProcessId
+      )
+      || launcherProcessId <= 1
+      || launcherProcessId > Int32.MaxValue
+      || launcherProcessId == request.ParentProcessId
+      || !String.Equals(
+        request.SupervisorDigest,
+        expectedSupervisorDigest,
+        StringComparison.Ordinal
+      )
+    ) return Failure("update-request", 31, 0);
+    Process parent = null;
+    Process launcher = null;
+    FileStream installer = null;
+    FileStream oldExecutable = null;
+    FileStream operationClaim = null;
+    try {
+      try {
+        double supervisorCreationTimeMs;
+        using (Process supervisor = Process.GetCurrentProcess()) {
+          UInt64 supervisorCreationBits;
+          int supervisorIdentityError = 0;
+          if (
+            !ExpectedParent(
+              (UInt32)supervisor.Id,
+              launcherProcessId
+            )
+            || !ProcessIdentity(
+              supervisor.Handle,
+              out supervisorCreationBits,
+              out supervisorCreationTimeMs,
+              out supervisorIdentityError
+            )
+          ) return Failure("update-parent", 32, supervisorIdentityError);
+        }
+        launcher = Process.GetProcessById((Int32)launcherProcessId);
+        UInt64 launcherCreationBits;
+        double launcherCreationTimeMs;
+        int launcherIdentityError;
+        if (!ProcessIdentity(
+          launcher.Handle,
+          out launcherCreationBits,
+          out launcherCreationTimeMs,
+          out launcherIdentityError
+        ) || launcherCreationTimeMs > supervisorCreationTimeMs) {
+          return Failure("update-launcher", 32, launcherIdentityError);
+        }
+        string launcherPath = ProcessExecutablePath(launcher.Handle);
+        if (!String.Equals(
+          launcherPath,
+          TrustedPowerShellPath(),
+          StringComparison.OrdinalIgnoreCase
+        )) return Failure("update-launcher", 32, 0);
+        launcher.Dispose();
+        launcher = null;
+        parent = Process.GetProcessById((Int32)request.ParentProcessId);
+        UInt64 parentCreationBits;
+        double parentCreationTimeMs;
+        int identityError;
+        if (!ProcessIdentity(
+          parent.Handle,
+          out parentCreationBits,
+          out parentCreationTimeMs,
+          out identityError
+        ) || parentCreationTimeMs > supervisorCreationTimeMs) {
+          return Failure("update-parent", 32, identityError);
+        }
+        string parentPath = ProcessExecutablePath(parent.Handle);
+        if (!String.Equals(
+          parentPath,
+          request.OldExecutablePath,
+          StringComparison.OrdinalIgnoreCase
+        )) return Failure("update-parent", 32, 0);
+        string installerDigest;
+        installer = OpenUpdateArtifact(
+          request.InstallerPath,
+          out installerDigest
+        );
+        string oldDigest;
+        oldExecutable = OpenUpdateArtifact(
+          request.OldExecutablePath,
+          out oldDigest
+        );
+        if (
+          installer == null
+          || oldExecutable == null
+          || !String.Equals(
+            installerDigest,
+            request.InstallerDigest,
+            StringComparison.Ordinal
+          )
+          || !String.Equals(
+            oldDigest,
+            request.OldExecutableDigest,
+            StringComparison.Ordinal
+          )
+        ) return Failure("update-artifact", 33, 0);
+
+        operationClaim = AcquireOperationClaim(request);
+        if (operationClaim == null) {
+          return Failure("update-operation-claim", 37, 0);
+        }
+        WriteProtocolLine(Console.OpenStandardOutput(), "READY");
+        UInt32 remaining = deadline.RemainingMilliseconds();
+        if (remaining == 0 || WaitForSingleObject(parent.Handle, remaining) != 0) {
+          return Failure("update-parent-wait", 34, Marshal.GetLastWin32Error());
+        }
+        parent.Dispose();
+        parent = null;
+        oldExecutable.Dispose();
+        oldExecutable = null;
+
+        UInt32? installerExitCode;
+        bool installerStarted;
+        bool installerDeadlineExceeded;
+        int installError;
+        bool installerCompleted = LaunchInstaller(
+          request,
+          deadline,
+          out installerStarted,
+          out installerDeadlineExceeded,
+          out installerExitCode,
+          out installError
+        );
+        installer.Dispose();
+        installer = null;
+
+        // Reading or launching through the installation namespace while an
+        // unconfirmed NSIS process may still mutate it would manufacture false
+        // terminal evidence. The authenticated nulls instead mean that exact
+        // installer completion was not observed.
+        bool installerCompletionUnconfirmed =
+          installerStarted && !installerCompleted;
+        string executableDigest = null;
+        if (!installerCompletionUnconfirmed) {
+          FileStream resultingExecutable = OpenUpdateArtifact(
+            request.NewExecutablePath,
+            out executableDigest
+          );
+          if (resultingExecutable != null) resultingExecutable.Dispose();
+        }
+        string outcome;
+        string launchDigest = null;
+        if (installerDeadlineExceeded || installerCompletionUnconfirmed) {
+          outcome = "quarantined";
+        } else if (
+          installerCompleted
+          && installerExitCode.HasValue
+          && installerExitCode.Value == 0
+          && String.Equals(
+            executableDigest,
+            request.NewExecutableDigest,
+            StringComparison.Ordinal
+          )
+        ) {
+          outcome = "success";
+          launchDigest = request.NewExecutableDigest;
+        } else if (
+          !installerStarted
+          && String.Equals(
+            executableDigest,
+            request.OldExecutableDigest,
+            StringComparison.Ordinal
+          )
+        ) {
+          outcome = "clean-failure";
+          launchDigest = request.OldExecutableDigest;
+        } else {
+          outcome = "quarantined";
+        }
+        DateTimeOffset terminalAt = deadline.CurrentTime;
+        if (deadline.Expired) {
+          outcome = "quarantined";
+          launchDigest = null;
+        }
+        string parentCreationTimeBits = parentCreationBits.ToString(
+          CultureInfo.InvariantCulture
+        );
+        if (!PublishTerminalReceipt(
+          request,
+          ref operationClaim,
+          outcome,
+          installerCompleted ? installerExitCode : null,
+          executableDigest,
+          parentCreationTimeBits,
+          terminalAt
+        )) return Failure("update-receipt", 35, installError);
+        if (
+          launchDigest != null
+          && !deadline.Expired
+        ) {
+          LaunchVerifiedApplication(
+            request.NewExecutablePath,
+            launchDigest,
+            deadline
+          );
+        }
+        return 0;
+      } catch {
+        return Failure("update-supervisor", 36, Marshal.GetLastWin32Error());
+      }
+    } finally {
+      if (oldExecutable != null) oldExecutable.Dispose();
+      if (installer != null) installer.Dispose();
+      if (operationClaim != null) operationClaim.Dispose();
+      if (launcher != null) launcher.Dispose();
+      if (parent != null) parent.Dispose();
+    }
+  }
+
   public static int Main(string[] arguments) {
     if (
       arguments == null
-      || arguments.Length < 3
+      || arguments.Length < 2
     ) return Failure("self-integrity", 23, 0);
     using (var executable = OpenVerifiedExecutable(arguments[arguments.Length - 1])) {
       if (executable == null) return Failure("self-integrity", 23, 0);

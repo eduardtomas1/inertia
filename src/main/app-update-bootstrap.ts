@@ -1,4 +1,3 @@
-import { spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   constants,
@@ -24,9 +23,28 @@ import {
   validateCommittedAppImageUpdate,
   validateStagedAppImageUpdate,
 } from "./appimage-installed-identity.js";
-import { forceKillRuntimeProcessTree } from "./runtime-process-tree.js";
-import { exactProcessGroupTerminal } from
-  "../node/runtime-owned-process-posix.js";
+import { validateExecutingAppImageCandidate } from
+  "./appimage-executing-identity.js";
+import {
+  linuxAppUpdateCandidateProcessBelongsToClaim,
+  startLinuxAppUpdateCandidate,
+  type LinuxAppUpdateCandidateProcess,
+} from "./linux-app-update-candidate-process.js";
+import {
+  createLinuxAppUpdateCandidateLaunchId,
+  LinuxAppUpdateCandidateClaimJournal,
+} from "./linux-app-update-candidate-claim.js";
+import type { AppUpdateCandidateExpectedRuntimeOwner } from
+  "../node/app-update-candidate-viability-protocol.js";
+import {
+  retireWindowsUpdateSupervisorArtifacts,
+  WindowsUpdateTerminalReceiptJournal,
+  windowsUpdateSupervisorArtifactPresent,
+  windowsUpdateTerminalReceiptMatches,
+  windowsUpdateTerminalReceiptMatchesQuarantine,
+  windowsUpdateTerminalReceiptMatchesTransferredAuthority,
+  type WindowsUpdateTerminalReceipt,
+} from "./windows-update-terminal-receipt.js";
 
 const CANDIDATE_MODE = "bootstrap-v1";
 const MAX_PATH_BYTES = 4 * 1_024;
@@ -55,12 +73,16 @@ export const APP_UPDATE_CANDIDATE_ENV = Object.freeze({
   handoffDirectory: "INERTIA_APP_UPDATE_HANDOFF_DIRECTORY",
   profileDirectory: "INERTIA_APP_UPDATE_PROFILE_DIRECTORY",
   dataDirectory: "INERTIA_APP_UPDATE_DATA_DIRECTORY",
+  candidatePath: "INERTIA_APP_UPDATE_NAMED_CANDIDATE_PATH",
+  imageFileDescriptor: "INERTIA_APP_UPDATE_IMAGE_FILE_DESCRIPTOR",
+  launchId: "INERTIA_APP_UPDATE_CANDIDATE_LAUNCH_ID",
 } as const);
 
 interface CandidateSecretPacket {
   readonly schemaVersion: 1;
   readonly operationId: string;
   readonly handoffToken: string;
+  readonly launchId: string;
 }
 
 interface CandidateAckPacket {
@@ -68,6 +90,8 @@ interface CandidateAckPacket {
   readonly operationId: string;
   readonly revision: number;
   readonly checksum: string;
+  readonly launchId: string;
+  readonly instanceChecksum: string;
 }
 
 export interface AppUpdateCandidateBootstrapRequest {
@@ -75,6 +99,9 @@ export interface AppUpdateCandidateBootstrapRequest {
   readonly handoffDirectory: string;
   readonly profileDirectory: string;
   readonly dataDirectory: string;
+  readonly candidatePath: string;
+  readonly imageFileDescriptor: 4;
+  readonly launchId: string;
 }
 
 export interface AppUpdateLinuxCandidateAdmission {
@@ -82,6 +109,7 @@ export interface AppUpdateLinuxCandidateAdmission {
   readonly snapshot: AppUpdateHandoffSnapshot;
   readonly handoffToken: string;
   readonly stableAppImagePath: string;
+  readonly candidateInstanceChecksum: string;
 }
 
 export interface AppUpdateWindowsCandidateAdmission {
@@ -101,6 +129,7 @@ export interface AppUpdateWindowsCandidateBootstrapRequest {
   readonly profileDirectory: string;
   readonly dataDirectory: string;
   readonly executablePath: string;
+  readonly candidateExecutableDigest: string;
 }
 
 export interface AppUpdateCandidateProcess {
@@ -108,6 +137,7 @@ export interface AppUpdateCandidateProcess {
   readonly acknowledgement: AppUpdateHandoffSnapshot;
   alive(): boolean;
   abort(): Promise<void>;
+  transferContainment(): Promise<void>;
 }
 
 export interface AppUpdateArtifactIdentity {
@@ -408,6 +438,7 @@ export function windowsAppUpdateExecutableLineageDigest(options: {
 }
 
 const WINDOWS_RESUMABLE_CANDIDATE_PHASES = new Set([
+  "old-generation-cleanup-confirmed",
   "ownership-transfer-committed",
   "candidate-launched",
   "candidate-bootstrap-validated",
@@ -435,9 +466,12 @@ export async function windowsAppUpdateCandidateBootstrapRequest(options: {
     throw new Error("The pending app update belongs to another platform.");
   }
   if (!WINDOWS_RESUMABLE_CANDIDATE_PHASES.has(snapshot.phase)) return null;
+  if (snapshot.newVersion !== options.version) {
+    if (snapshot.oldVersion === options.version) return null;
+    throw new Error("The Windows app update candidate lineage is invalid.");
+  }
   if (
     snapshot.channel !== options.channel
-    || snapshot.newVersion !== options.version
     || snapshot.profileIdentityDigest !== appUpdateDirectoryIdentityDigest(
       options.profileDirectory,
       "profile",
@@ -466,7 +500,79 @@ export async function windowsAppUpdateCandidateBootstrapRequest(options: {
     profileDirectory: options.profileDirectory,
     dataDirectory: options.dataDirectory,
     executablePath: options.executablePath,
+    candidateExecutableDigest: candidateExecutable.artifactDigest,
   });
+}
+
+async function confirmWindowsTerminalSuccess(options: {
+  readonly request: AppUpdateWindowsCandidateBootstrapRequest;
+  readonly current: AppUpdateHandoffSnapshot;
+  readonly handoffToken: string;
+}): Promise<{
+  readonly snapshot: AppUpdateHandoffSnapshot;
+  readonly receipt: WindowsUpdateTerminalReceipt | null;
+}> {
+  const receiptJournal = new WindowsUpdateTerminalReceiptJournal(
+    options.request.dataDirectory,
+  );
+  const receipt = receiptJournal.current(options.current.operationId);
+  if (options.current.phase === "old-generation-cleanup-confirmed") {
+    if (
+      receipt
+      && windowsUpdateTerminalReceiptMatchesQuarantine({
+        receipt,
+        snapshot: options.current,
+        handoffToken: options.handoffToken,
+      })
+    ) {
+      throw new Error(
+        "The native Windows installer remains quarantined because its terminal outcome was not safely confirmed.",
+      );
+    }
+    if (
+      !receipt
+      || !windowsUpdateTerminalReceiptMatches({
+        receipt,
+        snapshot: options.current,
+        handoffToken: options.handoffToken,
+        outcome: "success",
+        executableDigest: options.request.candidateExecutableDigest,
+      })
+    ) throw new Error("The Windows installer success receipt is invalid.");
+    const transferred = new AppUpdateHandoffJournal(
+      options.request.handoffDirectory,
+    ).transition(
+      appUpdateHandoffOwner(options.current),
+      "ownership-transfer-committed",
+    );
+    if (!transferred) {
+      throw new Error("The Windows candidate ownership transfer was not recorded.");
+    }
+    return { snapshot: transferred, receipt };
+  }
+  if (options.current.phase !== "ownership-transfer-committed") {
+    throw new Error("The Windows terminal receipt phase is invalid.");
+  }
+  if (!receipt) {
+    if (windowsUpdateSupervisorArtifactPresent({
+      dataDirectory: options.request.dataDirectory,
+      operationId: options.current.operationId,
+    })) {
+      throw new Error("The Windows update supervisor retirement is ambiguous.");
+    }
+    // The ownership-transfer phase is written only after the authenticated
+    // success receipt. Helper-first retirement makes absence of both artifacts
+    // an idempotent completed cleanup after a crash.
+    return { snapshot: options.current, receipt: null };
+  }
+  if (!windowsUpdateTerminalReceiptMatchesTransferredAuthority({
+    receipt,
+    snapshot: options.current,
+    handoffToken: options.handoffToken,
+    outcome: "success",
+    executableDigest: options.request.candidateExecutableDigest,
+  })) throw new Error("The Windows installer success receipt is invalid.");
+  return { snapshot: options.current, receipt };
 }
 
 /**
@@ -475,7 +581,10 @@ export async function windowsAppUpdateCandidateBootstrapRequest(options: {
  */
 export async function runRestrictedWindowsAppUpdateCandidate(
   request: AppUpdateWindowsCandidateBootstrapRequest,
-  validateBootstrap: (operationId: string) => Promise<void>,
+  validateBootstrap: (
+    operationId: string,
+    expectedActiveRuntimeOwner: AppUpdateCandidateExpectedRuntimeOwner | null,
+  ) => Promise<void>,
 ): Promise<AppUpdateWindowsCandidateAdmission> {
   const journal = new AppUpdateHandoffJournal(request.handoffDirectory);
   let current = journal.current();
@@ -489,6 +598,24 @@ export async function runRestrictedWindowsAppUpdateCandidate(
   const claim = vault.claim(current, { recoverAbandonedClaim: true });
   if (!claim) throw new Error("The Windows app update token could not be claimed.");
   try {
+    if (
+      current.phase === "old-generation-cleanup-confirmed"
+      || current.phase === "ownership-transfer-committed"
+    ) {
+      const terminal = await confirmWindowsTerminalSuccess({
+        request,
+        current,
+        handoffToken: claim.token,
+      });
+      current = terminal.snapshot;
+      if (
+        terminal.receipt
+        && !await retireWindowsUpdateSupervisorArtifacts({
+          dataDirectory: request.dataDirectory,
+          receipt: terminal.receipt,
+        })
+      ) throw new Error("The Windows update supervisor could not be retired.");
+    }
     if (current.phase === "ownership-transfer-committed") {
       const launched = journal.transition(
         appUpdateHandoffOwner(current),
@@ -497,7 +624,7 @@ export async function runRestrictedWindowsAppUpdateCandidate(
       if (!launched) throw new Error("The Windows candidate launch was not recorded.");
       current = launched;
     }
-    await validateBootstrap(current.operationId);
+    await validateBootstrap(current.operationId, null);
     if (current.phase === "candidate-launched") {
       const acknowledged = journal.acknowledgeCandidateBootstrap(
         appUpdateHandoffOwner(current),
@@ -547,7 +674,12 @@ function parseCandidateSecret(value: unknown): CandidateSecretPacket | null {
     !value
     || typeof value !== "object"
     || Array.isArray(value)
-    || !exactKeys(value, ["handoffToken", "operationId", "schemaVersion"])
+    || !exactKeys(value, [
+      "handoffToken",
+      "launchId",
+      "operationId",
+      "schemaVersion",
+    ])
   ) return null;
   const candidate = value as Partial<CandidateSecretPacket>;
   return candidate.schemaVersion === 1
@@ -555,6 +687,8 @@ function parseCandidateSecret(value: unknown): CandidateSecretPacket | null {
     && UUID_PATTERN.test(candidate.operationId)
     && typeof candidate.handoffToken === "string"
     && TOKEN_PATTERN.test(candidate.handoffToken)
+    && typeof candidate.launchId === "string"
+    && UUID_PATTERN.test(candidate.launchId)
     ? candidate as CandidateSecretPacket
     : null;
 }
@@ -564,7 +698,14 @@ function parseCandidateAck(value: unknown): CandidateAckPacket | null {
     !value
     || typeof value !== "object"
     || Array.isArray(value)
-    || !exactKeys(value, ["checksum", "operationId", "revision", "schemaVersion"])
+    || !exactKeys(value, [
+      "checksum",
+      "instanceChecksum",
+      "launchId",
+      "operationId",
+      "revision",
+      "schemaVersion",
+    ])
   ) return null;
   const candidate = value as Partial<CandidateAckPacket>;
   return candidate.schemaVersion === 1
@@ -575,6 +716,10 @@ function parseCandidateAck(value: unknown): CandidateAckPacket | null {
     && candidate.revision > 0
     && typeof candidate.checksum === "string"
     && DIGEST_PATTERN.test(candidate.checksum)
+    && typeof candidate.launchId === "string"
+    && UUID_PATTERN.test(candidate.launchId)
+    && typeof candidate.instanceChecksum === "string"
+    && DIGEST_PATTERN.test(candidate.instanceChecksum)
     ? candidate as CandidateAckPacket
     : null;
 }
@@ -634,18 +779,30 @@ function candidateRequest(
   const handoffDirectory = environment[APP_UPDATE_CANDIDATE_ENV.handoffDirectory];
   const profileDirectory = environment[APP_UPDATE_CANDIDATE_ENV.profileDirectory];
   const dataDirectory = environment[APP_UPDATE_CANDIDATE_ENV.dataDirectory];
+  const namedCandidatePath = environment[APP_UPDATE_CANDIDATE_ENV.candidatePath];
+  const imageFileDescriptor = environment[
+    APP_UPDATE_CANDIDATE_ENV.imageFileDescriptor
+  ];
+  const launchId = environment[APP_UPDATE_CANDIDATE_ENV.launchId];
   if (
     typeof operationId !== "string"
     || !UUID_PATTERN.test(operationId)
     || !boundedAbsolutePath(handoffDirectory)
     || !boundedAbsolutePath(profileDirectory)
     || !boundedAbsolutePath(dataDirectory)
+    || !boundedAbsolutePath(namedCandidatePath)
+    || imageFileDescriptor !== "4"
+    || typeof launchId !== "string"
+    || !UUID_PATTERN.test(launchId)
   ) throw new Error("The app update candidate environment is invalid.");
   return Object.freeze({
     operationId,
     handoffDirectory,
     profileDirectory,
     dataDirectory,
+    candidatePath: namedCandidatePath,
+    imageFileDescriptor: 4,
+    launchId,
   });
 }
 
@@ -692,14 +849,24 @@ export async function runRestrictedAppUpdateCandidate(options: {
   readonly stdin?: NodeJS.ReadableStream;
   readonly writeAcknowledgement?: (packet: string) => Promise<void>;
   readonly waitForTransfer?: (deadlineAt: string) => Promise<void>;
-  readonly validateBootstrap: (operationId: string) => Promise<void>;
+  readonly testHooks?: {
+    readonly validateExecutingCandidate?: () => Promise<string>;
+  };
+  readonly validateBootstrap: (
+    operationId: string,
+    expectedActiveRuntimeOwner: AppUpdateCandidateExpectedRuntimeOwner | null,
+  ) => Promise<void>;
 }): Promise<AppUpdateLinuxCandidateAdmission> {
   const secretValue = await boundedJsonFromStream(
     options.stdin ?? process.stdin,
     10_000,
   );
   const secret = parseCandidateSecret(secretValue);
-  if (!secret || secret.operationId !== options.request.operationId) {
+  if (
+    !secret
+    || secret.operationId !== options.request.operationId
+    || secret.launchId !== options.request.launchId
+  ) {
     throw new Error("The app update candidate secret is invalid.");
   }
   const journal = new AppUpdateHandoffJournal(options.request.handoffDirectory);
@@ -720,21 +887,52 @@ export async function runRestrictedAppUpdateCandidate(options: {
       "data",
     )
   ) throw new Error("The app update candidate lineage is invalid.");
-  const candidatePath = options.environment.APPIMAGE;
-  if (!candidatePath) {
-    throw new Error("The staged AppImage candidate path is unavailable.");
-  }
+  const candidatePath = options.request.candidatePath;
   const staged = await validateStagedAppImageUpdate({
     channel: options.channel,
     operationId: launched.operationId,
     candidatePath,
     artifactDigest: launched.candidateArtifactDigest,
     executableIdentityDigest: launched.candidateExecutableIdentityDigest,
+    deadlineAt: launched.deadlineAt,
   });
+  let candidateClaim = null as ReturnType<
+    LinuxAppUpdateCandidateClaimJournal["current"]
+  >;
+  const instanceChecksum = options.testHooks?.validateExecutingCandidate
+    ? await options.testHooks.validateExecutingCandidate()
+    : await (async () => {
+        await validateExecutingAppImageCandidate({
+          candidatePath,
+          fileDescriptor: options.request.imageFileDescriptor,
+          expected: {
+            artifactDigest: launched.candidateArtifactDigest,
+            executableIdentityDigest:
+              launched.candidateExecutableIdentityDigest,
+          },
+          deadlineAt: launched.deadlineAt,
+        });
+        const claimJournal = new LinuxAppUpdateCandidateClaimJournal(
+          options.request.handoffDirectory,
+        );
+        candidateClaim = claimJournal.current(launched);
+        if (
+          !candidateClaim
+          || candidateClaim.launchId !== options.request.launchId
+          || !linuxAppUpdateCandidateProcessBelongsToClaim(candidateClaim)
+        ) throw new Error("The app update candidate instance claim is invalid.");
+        return candidateClaim.checksum;
+      })();
+  if (!DIGEST_PATTERN.test(instanceChecksum)) {
+    throw new Error("The app update candidate instance claim is invalid.");
+  }
   if (!appUpdateHandoffTokenMatches(launched, secret.handoffToken)) {
     throw new Error("The app update candidate acknowledgement was rejected.");
   }
-  await options.validateBootstrap(launched.operationId);
+  await options.validateBootstrap(launched.operationId, {
+    runtimeGenerationId: launched.oldRuntimeGenerationId,
+    systemBootId: launched.systemBootId,
+  });
   const acknowledged = journal.acknowledgeCandidateBootstrap(
     appUpdateHandoffOwner(launched),
     {
@@ -760,6 +958,8 @@ export async function runRestrictedAppUpdateCandidate(options: {
     operationId: acknowledged.operationId,
     revision: acknowledged.revision,
     checksum: acknowledged.checksum,
+    launchId: options.request.launchId,
+    instanceChecksum,
   } satisfies CandidateAckPacket);
   await (options.writeAcknowledgement
     ? options.writeAcknowledgement(packet)
@@ -788,39 +988,20 @@ export async function runRestrictedAppUpdateCandidate(options: {
     stablePath: staged.stablePath,
     artifactDigest: committed.candidateArtifactDigest,
     executableIdentityDigest: committed.candidateExecutableIdentityDigest,
+    deadlineAt: committed.deadlineAt,
   });
   return Object.freeze({
     platform: "linux",
     snapshot: committed,
     handoffToken: secret.handoffToken,
     stableAppImagePath: staged.stablePath,
+    candidateInstanceChecksum: instanceChecksum,
   });
-}
-
-async function stopCandidate(child: ChildProcess): Promise<void> {
-  const pid = child.pid;
-  if (!pid || pid <= 1) {
-    throw new Error("The app update candidate process identity is unavailable.");
-  }
-  // The candidate is created as a detached session/process-group leader.
-  // Its direct exit is not sufficient: a restricted bootstrap can fail after
-  // forking a descendant that inherited the candidate's authority.
-  if (exactProcessGroupTerminal(pid, "linux") === true) return;
-  const terminated = await forceKillRuntimeProcessTree(pid, {
-    rootProcessGroup: true,
-  });
-  if (
-    !terminated
-    && exactProcessGroupTerminal(pid, "linux") !== true
-  ) {
-    throw new Error(
-      "The app update candidate process-tree cleanup could not be confirmed.",
-    );
-  }
 }
 
 export async function launchRestrictedAppUpdateCandidate(options: {
   readonly executablePath: string;
+  readonly runtimeProcessGuardianPath: string;
   readonly environment: NodeJS.ProcessEnv;
   readonly operationId: string;
   readonly handoffToken: string;
@@ -829,45 +1010,66 @@ export async function launchRestrictedAppUpdateCandidate(options: {
   readonly dataDirectory: string;
   readonly journal: AppUpdateHandoffJournal;
   readonly timeoutMs?: number;
+  readonly testHooks?: Parameters<
+    typeof startLinuxAppUpdateCandidate
+  >[0]["testHooks"];
 }): Promise<AppUpdateCandidateProcess> {
-  const child = spawn(options.executablePath, [], {
-    detached: true,
-    shell: false,
-    env: {
-      ...options.environment,
-      APPIMAGE: options.executablePath,
-      APPIMAGE_SILENT_INSTALL: "true",
-      APPIMAGE_EXIT_AFTER_INSTALL: undefined,
-      [APP_UPDATE_CANDIDATE_ENV.mode]: CANDIDATE_MODE,
-      [APP_UPDATE_CANDIDATE_ENV.operationId]: options.operationId,
-      [APP_UPDATE_CANDIDATE_ENV.handoffDirectory]: options.handoffDirectory,
-      [APP_UPDATE_CANDIDATE_ENV.profileDirectory]: options.profileDirectory,
-      [APP_UPDATE_CANDIDATE_ENV.dataDirectory]: options.dataDirectory,
-    },
-    stdio: ["pipe", "pipe", "ignore", "pipe"],
-  });
-  let cleanup: Promise<void> | null = null;
-  const abort = (): Promise<void> => {
-    cleanup ??= stopCandidate(child);
-    return cleanup;
-  };
-  const input = child.stdin;
-  const output = child.stdout;
-  const lifetime = child.stdio[3];
-  if (!input || !output || !lifetime || child.pid === undefined) {
-    await abort();
-    throw new Error("The app update candidate channels are unavailable.");
+  const launched = options.journal.current();
+  if (
+    !launched
+    || launched.operationId !== options.operationId
+    || launched.platform !== "linux"
+    || launched.phase !== "candidate-launched"
+    || !appUpdateHandoffTokenMatches(launched, options.handoffToken)
+  ) throw new Error("The app update candidate launch authority is invalid.");
+  const deadlineAt = Date.parse(launched.deadlineAt);
+  if (!Number.isFinite(deadlineAt) || deadlineAt <= Date.now()) {
+    throw new Error("The app update candidate launch authority expired.");
   }
+  const launchId = createLinuxAppUpdateCandidateLaunchId();
+  const candidate: LinuxAppUpdateCandidateProcess =
+    await startLinuxAppUpdateCandidate({
+      executablePath: options.executablePath,
+      guardianPath: options.runtimeProcessGuardianPath,
+      snapshot: launched,
+      handoffDirectory: options.handoffDirectory,
+      launchId,
+      testHooks: options.testHooks,
+      environment: {
+        ...options.environment,
+        APPIMAGE: options.executablePath,
+        APPIMAGE_EXTRACT_AND_RUN: "1",
+        APPIMAGE_SILENT_INSTALL: "true",
+        APPIMAGE_EXIT_AFTER_INSTALL: undefined,
+        [APP_UPDATE_CANDIDATE_ENV.mode]: CANDIDATE_MODE,
+        [APP_UPDATE_CANDIDATE_ENV.operationId]: options.operationId,
+        [APP_UPDATE_CANDIDATE_ENV.handoffDirectory]: options.handoffDirectory,
+        [APP_UPDATE_CANDIDATE_ENV.profileDirectory]: options.profileDirectory,
+        [APP_UPDATE_CANDIDATE_ENV.dataDirectory]: options.dataDirectory,
+        [APP_UPDATE_CANDIDATE_ENV.candidatePath]: options.executablePath,
+        [APP_UPDATE_CANDIDATE_ENV.imageFileDescriptor]: "4",
+        [APP_UPDATE_CANDIDATE_ENV.launchId]: launchId,
+      },
+    });
   const secret = JSON.stringify({
     schemaVersion: 1,
     operationId: options.operationId,
     handoffToken: options.handoffToken,
+    launchId,
   } satisfies CandidateSecretPacket);
-  input.end(secret);
+  candidate.input.end(secret);
   try {
+    // Candidate materialization, guardian readiness, and bootstrap ACK all
+    // consume one journal authority deadline. A large sealed copy cannot
+    // silently extend the update handoff by starting a fresh ACK timeout.
+    const acknowledgementBudgetMs = Math.min(
+      MAX_BOOTSTRAP_WAIT_MS,
+      Math.max(1, options.timeoutMs ?? 15_000),
+      Math.max(1, deadlineAt - Date.now()),
+    );
     const ackValue = await boundedJsonFromStream(
-      output,
-      Math.min(MAX_BOOTSTRAP_WAIT_MS, Math.max(1, options.timeoutMs ?? 15_000)),
+      candidate.output,
+      acknowledgementBudgetMs,
     );
     const ack = parseCandidateAck(ackValue);
     const snapshot = options.journal.current();
@@ -875,25 +1077,34 @@ export async function launchRestrictedAppUpdateCandidate(options: {
       !ack
       || !snapshot
       || ack.operationId !== options.operationId
+      || ack.launchId !== launchId
+      || ack.instanceChecksum !== candidate.claim.checksum
       || snapshot.operationId !== options.operationId
       || snapshot.phase !== "candidate-bootstrap-validated"
       || ack.revision !== snapshot.revision
       || ack.checksum !== snapshot.checksum
-      || child.exitCode !== null
-      || child.signalCode !== null
+      || !candidate.alive()
     ) throw new Error("The app update candidate acknowledgement is invalid.");
-    input.destroy();
-    output.destroy();
-    child.unref();
-    (lifetime as { unref?: () => void }).unref?.();
+    candidate.input.destroy();
+    candidate.output.destroy();
+    candidate.child.unref();
+    (candidate.lifetime as { unref?: () => void }).unref?.();
     return Object.freeze({
-      pid: child.pid,
+      pid: candidate.pid,
       acknowledgement: snapshot,
-      alive: () => child.exitCode === null && child.signalCode === null,
-      abort,
+      alive: candidate.alive,
+      abort: candidate.abort,
+      transferContainment: candidate.transferContainment,
     });
   } catch (error) {
-    await abort();
+    try {
+      await candidate.abort();
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [error, cleanupError],
+        "The app update candidate launch cleanup is unconfirmed.",
+      );
+    }
     throw error;
   }
 }

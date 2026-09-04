@@ -340,8 +340,8 @@ describe("runtime recovery supervisor integration", () => {
       await waitFor(
         () => supervisor.snapshot().generation >= 2
           && supervisor.snapshot().pid === null
-          && supervisor.snapshot().lastError
-            ?.includes("Runtime startup is blocked.") === true,
+          && supervisor.snapshot().startupBlockerCode
+            === "prior-runtime-cleanup-unconfirmed",
         "replacement runtime safety rejection",
         diagnostics,
       );
@@ -351,7 +351,7 @@ describe("runtime recovery supervisor integration", () => {
         "import",
         recoveryPath,
         targetDirectory,
-      )).rejects.toThrow(/runtime startup is blocked.*prior runtime-owned process/iu);
+      )).rejects.toThrow(/runtime startup is blocked.*prior process cleanup/iu);
       await expect(supervisor.stop()).resolves.toBe(false);
       expect(supervisor.snapshot().phase).toBe("stopped");
 

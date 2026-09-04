@@ -16,9 +16,11 @@ function snapshot(
     generation: 1,
     pid: phase === "ready" ? 123 : null,
     websocketUrl: phase === "ready" ? "ws://127.0.0.1:1234" : null,
+    runtimeGenerationHash: phase === "ready" ? "123456789abc" : null,
     restartAttempt: 0,
     restartScheduled: false,
     lastError: null,
+    startupBlockerCode: null,
     ...options,
   };
 }

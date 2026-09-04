@@ -5,7 +5,6 @@ import {
   lstat,
   link,
   open,
-  readFile,
   realpath,
   rename,
   unlink,
@@ -16,47 +15,26 @@ import {
   installedApplicationName,
   type InertiaReleaseChannel,
 } from "./release-channel.js";
+import {
+  APPIMAGE_UPDATE_JOURNAL_SCHEMA as JOURNAL_SCHEMA,
+  createAppImageHandoffJournal as createHandoffJournal,
+  parseAppImageUpdateJournal as parseJournal,
+  type AppImageFileIdentity as FileIdentity,
+  type AppImageHandoffJournal as HandoffJournal,
+  type AppImageUpdateJournal as UpdateJournal,
+  type PreparedAppImageJournal as PreparedJournal,
+  type PreparingAppImageJournal as PreparingJournal,
+} from "./appimage-update-journal.js";
 
 const MAX_PATH_BYTES = 4 * 1_024;
 const MAX_JOURNAL_BYTES = 16 * 1_024;
 const MAX_APPIMAGE_BYTES = 4 * 1_024 * 1_024 * 1_024;
 const COPY_BUFFER_BYTES = 1024 * 1_024;
-const JOURNAL_SCHEMA = 1;
 
-interface FileIdentity {
-  dev: string;
-  ino: string;
+interface UpdateJournalRecord {
+  readonly journal: UpdateJournal;
+  readonly identity: FileIdentity;
 }
-
-interface PreparingJournal {
-  schema: typeof JOURNAL_SCHEMA;
-  channel: InertiaReleaseChannel;
-  phase: "preparing";
-  originalName: string;
-  stableName: string;
-  original: FileIdentity;
-}
-
-interface PreparedJournal extends Omit<PreparingJournal, "phase"> {
-  phase: "prepared";
-  candidate: FileIdentity;
-}
-
-interface HandoffJournal {
-  schema: 2;
-  channel: InertiaReleaseChannel;
-  phase: "staged" | "ownership-committed";
-  operationId: string;
-  originalName: string;
-  stableName: string;
-  original: FileIdentity;
-  candidate: FileIdentity;
-  candidateArtifactDigest: string;
-  candidateExecutableIdentityDigest: string;
-  checksum: string;
-}
-
-type UpdateJournal = PreparingJournal | PreparedJournal | HandoffJournal;
 
 interface TransactionPaths {
   directory: string;
@@ -116,6 +94,14 @@ export interface PreparedAppImageUpdate extends AppImageCandidateIdentity {
   commit(): Promise<string>;
   rollback(): Promise<void>;
 }
+
+type AppImageFinalizationCleanupStep =
+  | "backup-unlinked"
+  | "original-unlinked"
+  | "next-journal-unlinked"
+  | "rollback-residue-synced"
+  | "journal-unlinked"
+  | "directory-synced";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -239,6 +225,11 @@ async function unlinkOwnedIdentity(path: string, expected: FileIdentity): Promis
   if (!sameIdentity(metadata, expected)) {
     throw new Error(`The update transaction file ${basename(path)} changed unexpectedly.`);
   }
+  const confirmed = await lstat(path);
+  requireOwnedRegularFile(confirmed, `The update transaction file ${basename(path)}`);
+  if (!sameFile(metadata, confirmed) || !sameIdentity(confirmed, expected)) {
+    throw new Error(`The update transaction file ${basename(path)} changed unexpectedly.`);
+  }
   await unlink(path);
 }
 
@@ -246,157 +237,78 @@ async function unlinkOwnedRegular(path: string): Promise<void> {
   const metadata = await metadataIfPresent(path);
   if (!metadata) return;
   requireOwnedRegularFile(metadata, `The update transaction file ${basename(path)}`);
-  await unlink(path);
+  await unlinkOwnedIdentity(path, identity(metadata));
 }
 
-function validIdentity(value: unknown): value is FileIdentity {
-  return typeof value === "object"
-    && value !== null
-    && !Array.isArray(value)
-    && Object.keys(value).sort().join("\0") === "dev\0ino"
-    && typeof (value as FileIdentity).dev === "string"
-    && /^(?:0|[1-9]\d*)$/u.test((value as FileIdentity).dev)
-    && typeof (value as FileIdentity).ino === "string"
-    && /^(?:0|[1-9]\d*)$/u.test((value as FileIdentity).ino);
-}
-
-function handoffJournalPayload(
-  value: Omit<HandoffJournal, "checksum">,
-): Omit<HandoffJournal, "checksum"> {
-  return {
-    schema: 2,
-    channel: value.channel,
-    phase: value.phase,
-    operationId: value.operationId,
-    originalName: value.originalName,
-    stableName: value.stableName,
-    original: { ...value.original },
-    candidate: { ...value.candidate },
-    candidateArtifactDigest: value.candidateArtifactDigest,
-    candidateExecutableIdentityDigest: value.candidateExecutableIdentityDigest,
-  };
-}
-
-function handoffJournalChecksum(
-  value: Omit<HandoffJournal, "checksum">,
-): string {
-  return createHash("sha256")
-    .update("inertia.appimage-update-handoff.v2\0", "utf8")
-    .update(JSON.stringify(handoffJournalPayload(value)), "utf8")
-    .digest("hex");
-}
-
-function createHandoffJournal(
-  value: Omit<HandoffJournal, "schema" | "checksum">,
-): HandoffJournal {
-  const payload = handoffJournalPayload({ schema: 2, ...value });
-  return { ...payload, checksum: handoffJournalChecksum(payload) };
-}
-
-function validHandoffJournal(value: unknown): value is HandoffJournal {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const candidate = value as Partial<HandoffJournal>;
-  if (
-    Object.keys(value).sort().join("\0") !== [
-      "candidate",
-      "candidateArtifactDigest",
-      "candidateExecutableIdentityDigest",
-      "channel",
-      "checksum",
-      "operationId",
-      "original",
-      "originalName",
-      "phase",
-      "schema",
-      "stableName",
-    ].join("\0")
-    || candidate.schema !== 2
-    || (candidate.channel !== "stable" && candidate.channel !== "canary")
-    || (candidate.phase !== "staged"
-      && candidate.phase !== "ownership-committed")
-    || typeof candidate.operationId !== "string"
-    || !UUID_PATTERN.test(candidate.operationId)
-    || typeof candidate.originalName !== "string"
-    || basename(candidate.originalName) !== candidate.originalName
-    || candidate.originalName.length === 0
-    || candidate.originalName === "."
-    || candidate.originalName === ".."
-    || typeof candidate.stableName !== "string"
-    || !validIdentity(candidate.original)
-    || !validIdentity(candidate.candidate)
-    || typeof candidate.candidateArtifactDigest !== "string"
-    || !DIGEST_PATTERN.test(candidate.candidateArtifactDigest)
-    || typeof candidate.candidateExecutableIdentityDigest !== "string"
-    || !DIGEST_PATTERN.test(candidate.candidateExecutableIdentityDigest)
-    || typeof candidate.checksum !== "string"
-    || !DIGEST_PATTERN.test(candidate.checksum)
-  ) return false;
-  const journal = candidate as HandoffJournal;
-  return handoffJournalChecksum(journal) === journal.checksum;
-}
-
-function parseJournal(
-  value: unknown,
+async function readJournalRecord(
+  paths: TransactionPaths,
   channel: InertiaReleaseChannel,
-  stableName: string,
-): UpdateJournal {
-  if (validHandoffJournal(value)) {
-    if (value.channel !== channel || value.stableName !== stableName) {
-      throw new Error("The AppImage update recovery journal is invalid.");
+): Promise<UpdateJournalRecord | null> {
+  const named = await metadataIfPresent(paths.journal);
+  if (!named) return null;
+  requireOwnedRegularFile(named, "The AppImage update recovery journal");
+  if (named.size <= 0 || named.size > MAX_JOURNAL_BYTES) {
+    throw new Error("The AppImage update recovery journal is oversized.");
+  }
+  const handle = await open(
+    paths.journal,
+    constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0),
+  );
+  try {
+    const opened = await handle.stat();
+    requireOwnedRegularFile(opened, "The AppImage update recovery journal");
+    if (
+      !sameFile(named, opened)
+      || opened.size !== named.size
+      || opened.size <= 0
+      || opened.size > MAX_JOURNAL_BYTES
+    ) throw new Error("The AppImage update recovery journal changed while opening.");
+    const bytes = Buffer.alloc(MAX_JOURNAL_BYTES + 1);
+    let length = 0;
+    while (length < bytes.byteLength) {
+      const { bytesRead } = await handle.read(
+        bytes,
+        length,
+        bytes.byteLength - length,
+        length,
+      );
+      if (bytesRead === 0) break;
+      length += bytesRead;
     }
-    return value;
+    const [afterRead, afterNamed] = await Promise.all([
+      handle.stat(),
+      lstat(paths.journal),
+    ]);
+    requireOwnedRegularFile(afterRead, "The AppImage update recovery journal");
+    requireOwnedRegularFile(afterNamed, "The AppImage update recovery journal");
+    if (
+      length !== opened.size
+      || length > MAX_JOURNAL_BYTES
+      || afterRead.size !== opened.size
+      || afterNamed.size !== opened.size
+      || afterRead.mode !== opened.mode
+      || afterNamed.mode !== opened.mode
+      || !sameFile(opened, afterRead)
+      || !sameFile(opened, afterNamed)
+    ) throw new Error("The AppImage update recovery journal changed while reading.");
+    return {
+      journal: parseJournal(
+        JSON.parse(bytes.subarray(0, length).toString("utf8")) as unknown,
+        channel,
+        basename(paths.stable),
+      ),
+      identity: identity(opened),
+    };
+  } finally {
+    await handle.close();
   }
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error("The AppImage update recovery journal is invalid.");
-  }
-  const candidate = value as {
-    schema?: unknown;
-    channel?: unknown;
-    phase?: unknown;
-    originalName?: unknown;
-    stableName?: unknown;
-    original?: unknown;
-    candidate?: unknown;
-  };
-  const keys = Object.keys(value).sort().join("\0");
-  const expectedKeys = candidate.phase === "prepared"
-    ? "candidate\0channel\0original\0originalName\0phase\0schema\0stableName"
-    : "channel\0original\0originalName\0phase\0schema\0stableName";
-  if (
-    keys !== expectedKeys
-    || candidate.schema !== JOURNAL_SCHEMA
-    || candidate.channel !== channel
-    || (candidate.phase !== "preparing" && candidate.phase !== "prepared")
-    || typeof candidate.originalName !== "string"
-    || basename(candidate.originalName) !== candidate.originalName
-    || candidate.originalName.length === 0
-    || candidate.originalName === "."
-    || candidate.originalName === ".."
-    || candidate.stableName !== stableName
-    || !validIdentity(candidate.original)
-    || (candidate.phase === "prepared" && !validIdentity(candidate.candidate))
-  ) {
-    throw new Error("The AppImage update recovery journal is invalid.");
-  }
-  return candidate as UpdateJournal;
 }
 
 async function readJournal(
   paths: TransactionPaths,
   channel: InertiaReleaseChannel,
 ): Promise<UpdateJournal | null> {
-  const metadata = await metadataIfPresent(paths.journal);
-  if (!metadata) return null;
-  requireOwnedRegularFile(metadata, "The AppImage update recovery journal");
-  if (metadata.size <= 0 || metadata.size > MAX_JOURNAL_BYTES) {
-    throw new Error("The AppImage update recovery journal is oversized.");
-  }
-  const source = await readFile(paths.journal, "utf8");
-  return parseJournal(
-    JSON.parse(source) as unknown,
-    channel,
-    basename(paths.stable),
-  );
+  return (await readJournalRecord(paths, channel))?.journal ?? null;
 }
 
 async function writeExclusiveJson(path: string, value: unknown): Promise<void> {
@@ -507,10 +419,18 @@ async function copyVerifiedAppImage(
 async function inspectAppImageFile(
   path: string,
   label: string,
+  deadlineAt?: string,
 ): Promise<{
   readonly metadata: Awaited<ReturnType<typeof lstat>>;
   readonly identity: AppImageCandidateIdentity;
 }> {
+  const deadline = deadlineAt === undefined ? Number.MAX_SAFE_INTEGER : Date.parse(deadlineAt);
+  const requireDeadline = (): void => {
+    if (!Number.isFinite(deadline) || Date.now() >= deadline) {
+      throw new Error(`${label} validation deadline expired.`);
+    }
+  };
+  requireDeadline();
   exactPath(path, label);
   const named = await lstat(path);
   requireOwnedRegularFile(named, label);
@@ -524,6 +444,7 @@ async function inspectAppImageFile(
   );
   try {
     const opened = await handle.stat();
+    requireDeadline();
     requireOwnedRegularFile(opened, label);
     if (!sameFile(named, opened) || named.size !== opened.size) {
       throw new Error(`${label} changed during identity validation.`);
@@ -532,6 +453,7 @@ async function inspectAppImageFile(
     const buffer = Buffer.allocUnsafe(COPY_BUFFER_BYTES);
     let position = 0;
     while (position < opened.size) {
+      requireDeadline();
       const requested = Math.min(buffer.length, opened.size - position);
       const { bytesRead } = await handle.read(
         buffer,
@@ -543,8 +465,10 @@ async function inspectAppImageFile(
       artifact.update(buffer.subarray(0, bytesRead));
       position += bytesRead;
     }
+    requireDeadline();
     const afterRead = await handle.stat();
     const afterNamed = await lstat(path);
+    requireDeadline();
     if (
       position !== opened.size
       || afterRead.size !== opened.size
@@ -589,13 +513,21 @@ async function cleanTransactionFiles(
   original: FileIdentity,
   candidate?: FileIdentity,
   retainJournal = false,
+  journalIdentity?: FileIdentity,
 ): Promise<void> {
   if (candidate) await unlinkOwnedIdentity(paths.candidate, candidate);
   else await unlinkOwnedRegular(paths.candidate);
   await unlinkOwnedIdentity(paths.backup, original);
   await unlinkOwnedRegular(paths.nextJournal);
-  if (!retainJournal) await unlinkOwnedRegular(paths.journal);
   await syncDirectory(paths.directory);
+  if (!retainJournal) {
+    if (journalIdentity) {
+      await unlinkOwnedIdentity(paths.journal, journalIdentity);
+    } else {
+      await unlinkOwnedRegular(paths.journal);
+    }
+    await syncDirectory(paths.directory);
+  }
 }
 
 interface AppImageRecoveryOutcome {
@@ -621,7 +553,8 @@ async function recoverAppImageUpdateOutcome(
   expected?: AppImageHandoffRecoveryExpectation,
 ): Promise<AppImageRecoveryOutcome> {
   const active = await directActivePath(options.activePath, options.channel);
-  const journal = await readJournal(active.paths, options.channel);
+  const journalRecord = await readJournalRecord(active.paths, options.channel);
+  const journal = journalRecord?.journal ?? null;
   if (expected && !handoffRecoveryMatches(journal, expected)) {
     throw new Error(
       "The AppImage update recovery journal does not match its handoff authority.",
@@ -642,7 +575,13 @@ async function recoverAppImageUpdateOutcome(
     if (!activeIsOriginal && !activeIsStable) {
       throw new Error("The AppImage update recovery journal does not own the active application.");
     }
-    await cleanTransactionFiles(journalPaths, journal.original);
+    await cleanTransactionFiles(
+      journalPaths,
+      journal.original,
+      undefined,
+      false,
+      journalRecord?.identity,
+    );
     return {
       activePath: active.paths.original,
       journal: null,
@@ -651,10 +590,13 @@ async function recoverAppImageUpdateOutcome(
   }
 
   const stableMetadata = await metadataIfPresent(journalPaths.stable);
+  if (stableMetadata) {
+    requireOwnedRegularFile(stableMetadata, "The stable AppImage");
+  }
   const stableIsCandidate = stableMetadata !== null
-    && !stableMetadata.isSymbolicLink()
-    && stableMetadata.isFile()
     && sameIdentity(stableMetadata, journal.candidate);
+  const stableIsOriginal = stableMetadata !== null
+    && sameIdentity(stableMetadata, journal.original);
 
   if (activeIsStable && stableIsCandidate) {
     // Reaching the candidate executable proves only that the kernel started a
@@ -665,6 +607,7 @@ async function recoverAppImageUpdateOutcome(
       journal.original,
       journal.candidate,
       expected !== undefined,
+      journalRecord?.identity,
     );
     return {
       activePath: originalPath,
@@ -675,12 +618,18 @@ async function recoverAppImageUpdateOutcome(
   if (!activeIsOriginal) {
     throw new Error("The active AppImage does not match its recovery journal.");
   }
-  if (stableIsCandidate) await unlink(journalPaths.stable);
+  if (stableMetadata && !stableIsCandidate && !stableIsOriginal) {
+    throw new Error("The stable AppImage changed before recovery.");
+  }
+  if (stableIsCandidate) {
+    await unlinkOwnedIdentity(journalPaths.stable, journal.candidate);
+  }
   await cleanTransactionFiles(
     journalPaths,
     journal.original,
     journal.candidate,
     expected !== undefined,
+    journalRecord?.identity,
   );
   return {
     activePath: originalPath,
@@ -732,40 +681,96 @@ async function rollbackTransaction(
   original: FileIdentity,
   candidate: FileIdentity | null,
   retainJournal = false,
+  journalIdentity?: FileIdentity,
 ): Promise<void> {
   const backupMetadata = await metadataIfPresent(paths.backup);
   const originalMetadata = await metadataIfPresent(paths.original);
   const stableMetadata = await metadataIfPresent(paths.stable);
+  if (backupMetadata) {
+    requireOwnedRegularFile(backupMetadata, "The AppImage update rollback copy");
+    if (!sameIdentity(backupMetadata, original)) {
+      throw new Error("The AppImage update rollback copy changed before rollback.");
+    }
+  }
+  if (originalMetadata) {
+    requireOwnedRegularFile(originalMetadata, "The original AppImage");
+  }
+  if (stableMetadata) {
+    requireOwnedRegularFile(stableMetadata, "The stable AppImage");
+  }
+  const backupIsOriginal = backupMetadata !== null
+    && sameIdentity(backupMetadata, original);
+  const originalIsOriginal = originalMetadata !== null
+    && sameIdentity(originalMetadata, original);
+  const stableIsOriginal = stableMetadata !== null
+    && sameIdentity(stableMetadata, original);
   const stableIsCandidate = candidate !== null
     && stableMetadata !== null
-    && !stableMetadata.isSymbolicLink()
-    && stableMetadata.isFile()
     && sameIdentity(stableMetadata, candidate);
 
   if (paths.original === paths.stable) {
-    if (backupMetadata && sameIdentity(backupMetadata, original)) {
-      if (
-        stableMetadata
-        && !sameIdentity(stableMetadata, original)
-        && (candidate === null || !sameIdentity(stableMetadata, candidate))
-      ) {
-        throw new Error("The stable AppImage changed before rollback.");
+    if (!stableMetadata) {
+      if (!backupIsOriginal) {
+        throw new Error("The known-good AppImage is unavailable for rollback.");
       }
       await rename(paths.backup, paths.stable);
+    } else if (stableIsCandidate) {
+      if (!backupIsOriginal) {
+        throw new Error("The known-good AppImage is unavailable for rollback.");
+      }
+      await rename(paths.backup, paths.stable);
+    } else if (stableIsOriginal) {
+      if (backupIsOriginal) {
+        await unlinkOwnedIdentity(paths.backup, original);
+      }
+    } else {
+      throw new Error("The stable AppImage changed before rollback.");
+    }
+    const restored = await lstat(paths.stable);
+    requireOwnedRegularFile(restored, "The restored AppImage");
+    if (!sameIdentity(restored, original)) {
+      throw new Error("The known-good AppImage could not be restored exactly.");
     }
   } else {
-    if (!originalMetadata && backupMetadata && sameIdentity(backupMetadata, original)) {
-      await rename(paths.backup, paths.original);
-    } else if (backupMetadata && sameIdentity(backupMetadata, original)) {
-      await unlink(paths.backup);
+    if (originalMetadata && !originalIsOriginal) {
+      throw new Error("The original AppImage changed before rollback.");
     }
-    if (stableIsCandidate) await unlink(paths.stable);
+    if (stableMetadata && !stableIsCandidate && !stableIsOriginal) {
+      throw new Error("The stable AppImage changed before rollback.");
+    }
+    if (!originalMetadata) {
+      if (!backupIsOriginal) {
+        throw new Error("The known-good AppImage is unavailable for rollback.");
+      }
+      // link(2) retains no-clobber semantics if the original name is recreated
+      // concurrently. A retry removes the still-exact backup after the link is
+      // durably visible.
+      await link(paths.backup, paths.original);
+      const restored = await lstat(paths.original);
+      requireOwnedRegularFile(restored, "The restored AppImage");
+      if (!sameIdentity(restored, original)) {
+        throw new Error("The known-good AppImage could not be restored exactly.");
+      }
+    }
+    if (backupIsOriginal) {
+      await unlinkOwnedIdentity(paths.backup, original);
+    }
+    if (stableIsCandidate) {
+      await unlinkOwnedIdentity(paths.stable, candidate!);
+    }
   }
   if (candidate) await unlinkOwnedIdentity(paths.candidate, candidate);
   else await unlinkOwnedRegular(paths.candidate);
   await unlinkOwnedRegular(paths.nextJournal);
-  if (!retainJournal) await unlinkOwnedRegular(paths.journal);
   await syncDirectory(paths.directory);
+  if (!retainJournal) {
+    if (journalIdentity) {
+      await unlinkOwnedIdentity(paths.journal, journalIdentity);
+    } else {
+      await unlinkOwnedRegular(paths.journal);
+    }
+    await syncDirectory(paths.directory);
+  }
 }
 
 function handoffJournalMatches(
@@ -936,13 +941,13 @@ export async function prepareAppImageUpdate(
     throw error;
   }
 }
-
 export async function validateStagedAppImageUpdate(options: {
   channel: InertiaReleaseChannel;
   operationId: string;
   candidatePath: string;
   artifactDigest: string;
   executableIdentityDigest: string;
+  deadlineAt: string;
 }): Promise<{ readonly stablePath: string }> {
   if (
     !UUID_PATTERN.test(options.operationId)
@@ -966,6 +971,7 @@ export async function validateStagedAppImageUpdate(options: {
   const inspected = await inspectAppImageFile(
     candidate.paths.candidate,
     "The AppImage update candidate",
+    options.deadlineAt,
   );
   if (
     inspected.identity.artifactDigest !== options.artifactDigest
@@ -974,14 +980,19 @@ export async function validateStagedAppImageUpdate(options: {
   ) throw new Error("The staged AppImage update candidate does not match.");
   return Object.freeze({ stablePath: candidate.paths.stable });
 }
-
 export async function validateCommittedAppImageUpdate(options: {
   channel: InertiaReleaseChannel;
   operationId: string;
   stablePath: string;
   artifactDigest: string;
   executableIdentityDigest: string;
+  deadlineAt: string;
 }): Promise<void> {
+  if (
+    !UUID_PATTERN.test(options.operationId)
+    || !DIGEST_PATTERN.test(options.artifactDigest)
+    || !DIGEST_PATTERN.test(options.executableIdentityDigest)
+  ) throw new Error("The committed AppImage update identity is invalid.");
   const active = await directActivePath(options.stablePath, options.channel);
   if (active.paths.original !== active.paths.stable) {
     throw new Error("The committed AppImage path is not stable.");
@@ -999,6 +1010,7 @@ export async function validateCommittedAppImageUpdate(options: {
   const inspected = await inspectAppImageFile(
     active.paths.stable,
     "The committed AppImage update candidate",
+    options.deadlineAt,
   );
   if (
     inspected.identity.artifactDigest !== options.artifactDigest
@@ -1006,7 +1018,6 @@ export async function validateCommittedAppImageUpdate(options: {
       !== options.executableIdentityDigest
   ) throw new Error("The committed AppImage update candidate does not match.");
 }
-
 /** Retires rollback authority only after the admitted candidate completes startup. */
 export async function finalizeAppImageUpdate(options: {
   channel: InertiaReleaseChannel;
@@ -1014,11 +1025,55 @@ export async function finalizeAppImageUpdate(options: {
   stablePath: string;
   artifactDigest: string;
   executableIdentityDigest: string;
+  testHooks?: {
+    afterCleanupStep?: (
+      step: AppImageFinalizationCleanupStep,
+    ) => void | Promise<void>;
+  };
 }): Promise<void> {
-  await validateCommittedAppImageUpdate(options);
   const active = await directActivePath(options.stablePath, options.channel);
-  const journal = await readJournal(active.paths, options.channel);
-  if (journal?.schema !== 2) {
+  if (active.paths.original !== active.paths.stable) {
+    throw new Error("The committed AppImage path is not stable.");
+  }
+  const inspected = await inspectAppImageFile(
+    active.paths.stable,
+    "The committed AppImage update candidate",
+  );
+  if (
+    !sameFile(active.metadata, inspected.metadata)
+    || inspected.identity.artifactDigest !== options.artifactDigest
+    || inspected.identity.executableIdentityDigest
+      !== options.executableIdentityDigest
+  ) throw new Error("The committed AppImage update candidate does not match.");
+  const journalRecord = await readJournalRecord(active.paths, options.channel);
+  const journal = journalRecord?.journal ?? null;
+  if (!journalRecord || !journal) {
+    // Finalization removes the companion journal only after every identity-bound
+    // rollback artifact. An exact outer `completed` handoff can therefore
+    // resume after that unlink by re-proving the stable candidate identity and
+    // the absence of all fixed transaction residue. This is the only safe
+    // missing-journal crash prefix; any remaining residue stays fail-closed.
+    const residue = await Promise.all([
+      metadataIfPresent(active.paths.backup),
+      metadataIfPresent(active.paths.candidate),
+      metadataIfPresent(active.paths.nextJournal),
+    ]);
+    if (residue.some((entry) => entry !== null)) {
+      throw new Error("The AppImage update finalization authority is unavailable.");
+    }
+    await syncDirectory(active.paths.directory);
+    await options.testHooks?.afterCleanupStep?.("directory-synced");
+    return;
+  }
+  if (
+    journal.schema !== 2
+    || journal.phase !== "ownership-committed"
+    || journal.operationId !== options.operationId
+    || !sameIdentity(active.metadata, journal.candidate)
+    || journal.candidateArtifactDigest !== options.artifactDigest
+    || journal.candidateExecutableIdentityDigest
+      !== options.executableIdentityDigest
+  ) {
     throw new Error("The AppImage update finalization authority is unavailable.");
   }
   const originalPath = join(active.paths.directory, journal.originalName);
@@ -1027,13 +1082,57 @@ export async function finalizeAppImageUpdate(options: {
     originalPath,
     options.channel,
   );
+  const unexpectedResidue = await Promise.all([
+    metadataIfPresent(paths.candidate),
+    metadataIfPresent(paths.nextJournal),
+  ]);
+  if (unexpectedResidue.some((entry) => entry !== null)) {
+    throw new Error("The AppImage update finalization residue is ambiguous.");
+  }
+  const stableBeforeCleanup = await lstat(paths.stable);
+  requireOwnedRegularFile(
+    stableBeforeCleanup,
+    "The committed AppImage update candidate",
+  );
+  if (!sameIdentity(stableBeforeCleanup, journal.candidate)) {
+    throw new Error("The committed AppImage update candidate changed before cleanup.");
+  }
   await unlinkOwnedIdentity(paths.backup, journal.original);
+  await options.testHooks?.afterCleanupStep?.("backup-unlinked");
   if (paths.original !== paths.stable) {
     await unlinkOwnedIdentity(paths.original, journal.original);
   }
-  await unlinkOwnedRegular(paths.nextJournal);
-  await unlinkOwnedRegular(paths.journal);
+  await options.testHooks?.afterCleanupStep?.("original-unlinked");
+  const residueBeforeRetirement = await Promise.all([
+    metadataIfPresent(paths.backup),
+    paths.original === paths.stable
+      ? Promise.resolve(null)
+      : metadataIfPresent(paths.original),
+    metadataIfPresent(paths.candidate),
+    metadataIfPresent(paths.nextJournal),
+  ]);
+  if (residueBeforeRetirement.some((entry) => entry !== null)) {
+    throw new Error("The AppImage update finalization residue is ambiguous.");
+  }
+  const stableBeforeRetirement = await lstat(paths.stable);
+  requireOwnedRegularFile(
+    stableBeforeRetirement,
+    "The committed AppImage update candidate",
+  );
+  if (!sameIdentity(stableBeforeRetirement, journal.candidate)) {
+    throw new Error("The committed AppImage update candidate changed before retirement.");
+  }
+  await options.testHooks?.afterCleanupStep?.("next-journal-unlinked");
+  // Make every rollback-artifact deletion durable before removing the only
+  // companion record that carries the versioned original pathname. If a power
+  // loss makes the journal unlink observable, the earlier cleanup is already
+  // durable and the missing-journal retry is unambiguous.
   await syncDirectory(paths.directory);
+  await options.testHooks?.afterCleanupStep?.("rollback-residue-synced");
+  await unlinkOwnedIdentity(paths.journal, journalRecord.identity);
+  await options.testHooks?.afterCleanupStep?.("journal-unlinked");
+  await syncDirectory(paths.directory);
+  await options.testHooks?.afterCleanupStep?.("directory-synced");
 }
 
 /** Refuses launch until a restricted bootstrap can return an exact ACK. */

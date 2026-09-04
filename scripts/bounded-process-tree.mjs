@@ -27,6 +27,24 @@ export class ProcessTreeCleanupError extends Error {
   }
 }
 
+export class BoundedProcessTimeoutError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "BoundedProcessTimeoutError";
+    this.cleanupConfirmed = true;
+  }
+}
+
+export class BoundedProcessExitError extends Error {
+  constructor(message, exitCode, signal) {
+    super(message);
+    this.name = "BoundedProcessExitError";
+    this.cleanupConfirmed = true;
+    this.exitCode = exitCode;
+    this.signal = signal;
+  }
+}
+
 function sleep(milliseconds) {
   return new Promise((settle) => setTimeout(settle, milliseconds));
 }
@@ -489,6 +507,10 @@ export async function runBounded(command, args, options) {
     if (options.echoOutputLive) {
       (chunks === stdoutChunks ? process.stdout : process.stderr).write(buffer);
     }
+    options.onOutput?.(
+      chunks === stdoutChunks ? "stdout" : "stderr",
+      buffer,
+    );
     if (outputBytes > maxOutputBytes) signalOverflow();
   };
   const appendGuardianDiagnostic = (chunk) => {
@@ -617,9 +639,12 @@ export async function runBounded(command, args, options) {
         `${options.label} ${reason}, and its process tree or handed-off process group could not be confirmed stopped.\n${cleanupDiagnosticTail()}`,
       );
     }
-    throw new Error(
-      `${options.label} ${reason}; its complete process tree was terminated.\n${outputTail}`,
-    );
+    const message =
+      `${options.label} ${reason}; its complete process tree was terminated.\n${outputTail}`;
+    if (outcome.kind === "timeout") {
+      throw new BoundedProcessTimeoutError(message);
+    }
+    throw new Error(message);
   }
   let removedResidualProcessTree = false;
   if (windowsGuardian) {
@@ -723,7 +748,11 @@ export async function runBounded(command, args, options) {
       outcome.result.code === null
         ? `signal ${String(outcome.result.signal)}`
         : `status ${String(outcome.result.code)}`;
-    throw new Error(`${options.label} exited with ${exit}.\n${outputTail}`);
+    throw new BoundedProcessExitError(
+      `${options.label} exited with ${exit}.\n${outputTail}`,
+      outcome.result.code,
+      outcome.result.signal,
+    );
   }
   if (
     options.posixProcessGroupHandoff !== undefined &&

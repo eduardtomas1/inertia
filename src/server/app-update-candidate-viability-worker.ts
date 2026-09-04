@@ -11,11 +11,16 @@ import { join, normalize } from "node:path";
 import Database from "better-sqlite3";
 
 import {
+  directRuntimeJournalRootIsEmpty,
   listDirectRuntimeJournalLeaves,
   pinDirectRuntimeJournalRoot,
   readDirectRuntimeJournalLeaf,
+  type DirectRuntimeJournalRoot,
 } from "../node/direct-runtime-journal.js";
-import { parseRuntimeGenerationLeaseLeaf } from
+import {
+  parseRuntimeGenerationLeaseLeaf,
+  type RuntimeGenerationLease,
+} from
   "../node/runtime-generation-leases.js";
 import {
   validRuntimeGenerationId,
@@ -26,8 +31,16 @@ import { parseModernDarwinRecoveryAuthorityLeaf } from
 import {
   parseRuntimeOwnedProcessContainmentLeaf,
   parseRuntimeOwnedProcessRecordLeaf,
+  type RuntimeOwnedProcessRecord,
 } from "../node/runtime-owned-process-journal.js";
-import { parseRuntimeOwnedProcessSessionLeaf } from
+import {
+  parseRuntimeOwnedProcessSessionLeaf,
+  RuntimeOwnedProcessSessionJournal,
+  runtimeOwnedProcessRetiringWriterName,
+  runtimeOwnedProcessWriterName,
+  type RuntimeOwnedProcessSession,
+  type StoredRuntimeOwnedProcessSessionLeaf,
+} from
   "../node/runtime-owned-process-session-journal.js";
 import {
   appUpdateCandidateViabilityResult,
@@ -171,22 +184,39 @@ function validLegacyRecoveryAuthority(
   })).digest("hex") === authority.snapshotDigest;
 }
 
-function validateRuntimeRecoveryJournal(name: string, bytes: Buffer): void {
+type ValidatedRuntimeRecoveryJournal =
+  | { readonly kind: "lease"; readonly value: RuntimeGenerationLease }
+  | { readonly kind: "session"; readonly value: RuntimeOwnedProcessSession }
+  | { readonly kind: "record"; readonly value: RuntimeOwnedProcessRecord }
+  | {
+    readonly kind: "containment";
+    readonly value: {
+      readonly runtimeGenerationId: string;
+      readonly systemBootId: string;
+    };
+  }
+  | { readonly kind: "other" };
+
+function validateRuntimeRecoveryJournal(
+  name: string,
+  bytes: Buffer,
+): ValidatedRuntimeRecoveryJournal {
   let match = name.match(
     /^\.runtime-generation-lease-([0-9a-f]{64})\.json$/u,
   );
   if (match) {
-    if (!parseRuntimeGenerationLeaseLeaf(bytes, match[1]!)) {
+    const lease = parseRuntimeGenerationLeaseLeaf(bytes, match[1]!);
+    if (!lease) {
       throw new Error("A runtime generation lease is invalid.");
     }
-    return;
+    return { kind: "lease", value: lease };
   }
   match = name.match(/^\.runtime-cleanup-receipt-([0-9a-f]{64})\.json$/u);
   if (match) {
     if (!validCleanupReceipt(bytes, match[1]!)) {
       throw new Error("A runtime cleanup receipt is invalid.");
     }
-    return;
+    return { kind: "other" };
   }
   match = name.match(
     /^\.runtime-legacy-recovery-authority-([0-9a-f]{64})\.json$/u,
@@ -195,60 +225,194 @@ function validateRuntimeRecoveryJournal(name: string, bytes: Buffer): void {
     if (!validLegacyRecoveryAuthority(bytes, match[1]!)) {
       throw new Error("A legacy runtime recovery authority is invalid.");
     }
-    return;
+    return { kind: "other" };
   }
   if (name === ".runtime-modern-darwin-recovery-authority.json") {
     if (!parseModernDarwinRecoveryAuthorityLeaf(bytes)) {
       throw new Error("A modern runtime recovery authority is invalid.");
     }
-    return;
+    return { kind: "other" };
   }
   match = name.match(
     /^\.runtime-owned-process-session-([0-9a-f]{64})\.json$/u,
   );
   if (match) {
-    if (!parseRuntimeOwnedProcessSessionLeaf(bytes, match[1]!)) {
+    const session = parseRuntimeOwnedProcessSessionLeaf(bytes, match[1]!);
+    if (!session) {
       throw new Error("A runtime process ownership session is invalid.");
     }
-    return;
+    return { kind: "session", value: session };
   }
   match = name.match(
     /^\.runtime-owned-child-([0-9a-f-]{36})\.json$/iu,
   );
   if (match) {
-    if (!parseRuntimeOwnedProcessRecordLeaf(bytes, match[1]!)) {
+    const record = parseRuntimeOwnedProcessRecordLeaf(bytes, match[1]!);
+    if (!record) {
       throw new Error("A runtime owned-process record is invalid.");
     }
-    return;
+    return { kind: "record", value: record };
   }
   match = name.match(
     /^\.runtime-owned-process-containment-([0-9a-f]{64})\.json$/u,
   );
   if (match) {
-    if (!parseRuntimeOwnedProcessContainmentLeaf(bytes, match[1]!)) {
+    const containment = parseRuntimeOwnedProcessContainmentLeaf(
+      bytes,
+      match[1]!,
+    );
+    if (!containment) {
       throw new Error("A runtime process containment record is invalid.");
     }
-    return;
+    return { kind: "containment", value: containment };
   }
   throw new Error("Runtime recovery storage contains an incomplete or foreign entry.");
 }
 
-function inspectRecoveryStorage(dataDirectory: string): void {
+interface RuntimeProcessSessionTopology {
+  readonly sessions: readonly StoredRuntimeOwnedProcessSessionLeaf[];
+  readonly writerNames: ReadonlySet<string>;
+  readonly identity: string;
+}
+
+function runtimeProcessSessionTopology(
+  root: DirectRuntimeJournalRoot,
+): RuntimeProcessSessionTopology {
+  const sessions = new RuntimeOwnedProcessSessionJournal(root).all();
+  const writerNames = new Set<string>();
+  const identities = sessions.map((entry) => {
+    const writerName = entry.writerRoot
+      ? entry.state === "active"
+        ? runtimeOwnedProcessWriterName(entry.session.runtimeGenerationId)
+        : runtimeOwnedProcessRetiringWriterName(
+            entry.session.runtimeGenerationId,
+          )
+      : null;
+    if (entry.writerRoot) {
+      if (!directRuntimeJournalRootIsEmpty(entry.writerRoot)) {
+        throw new Error("A runtime process ownership writer is not quiescent.");
+      }
+      writerNames.add(writerName!);
+    }
+    return [
+      entry.session.runtimeGenerationId,
+      entry.session.systemBootId,
+      entry.state,
+      String(entry.identity.device),
+      String(entry.identity.inode),
+      writerName,
+      entry.writerRoot ? String(entry.writerRoot.device) : null,
+      entry.writerRoot ? String(entry.writerRoot.inode) : null,
+    ];
+  }).sort((left, right) => String(left[0]).localeCompare(String(right[0])));
+  return {
+    sessions,
+    writerNames,
+    identity: JSON.stringify(identities),
+  };
+}
+
+function validateRuntimeProcessRelationships(
+  topology: RuntimeProcessSessionTopology,
+  journals: readonly ValidatedRuntimeRecoveryJournal[],
+  expectedActiveRuntimeOwner:
+    AppUpdateCandidateViabilityRequest["expectedActiveRuntimeOwner"],
+): void {
+  const sessions = new Map(topology.sessions.map(({ session }) => [
+    session.runtimeGenerationId,
+    session,
+  ]));
+  const leases = new Map<string, RuntimeGenerationLease>();
+  const parsedSessions = new Set<string>();
+  for (const journal of journals) {
+    if (journal.kind === "lease") {
+      if (leases.has(journal.value.runtimeGenerationId)) {
+        throw new Error("A runtime generation lease is duplicated.");
+      }
+      leases.set(journal.value.runtimeGenerationId, journal.value);
+      continue;
+    }
+    if (journal.kind === "session") {
+      const session = sessions.get(journal.value.runtimeGenerationId);
+      if (
+        !session
+        || session.systemBootId !== journal.value.systemBootId
+      ) throw new Error("A runtime process ownership session changed.");
+      if (parsedSessions.has(journal.value.runtimeGenerationId)) {
+        throw new Error("A runtime process ownership session is duplicated.");
+      }
+      parsedSessions.add(journal.value.runtimeGenerationId);
+      continue;
+    }
+    if (journal.kind === "record" || journal.kind === "containment") {
+      const session = sessions.get(journal.value.runtimeGenerationId);
+      if (
+        !session
+        || session.systemBootId !== journal.value.systemBootId
+      ) throw new Error("Runtime process ownership is not session-bound.");
+    }
+  }
+  if (
+    parsedSessions.size !== sessions.size
+    || [...sessions.keys()].some((runtimeGenerationId) => (
+      !parsedSessions.has(runtimeGenerationId)
+    ))
+  ) throw new Error("A runtime process ownership session disappeared.");
+  const activeSessions = topology.sessions.filter(({ state }) => (
+    state === "active"
+  ));
+  if (activeSessions.length > 1) {
+    throw new Error("More than one runtime process ownership session is active.");
+  }
+  if (
+    expectedActiveRuntimeOwner === null
+      ? activeSessions.length !== 0
+      : activeSessions.length !== 1
+        || activeSessions[0]!.session.runtimeGenerationId
+          !== expectedActiveRuntimeOwner.runtimeGenerationId
+        || activeSessions[0]!.session.systemBootId
+          !== expectedActiveRuntimeOwner.systemBootId
+  ) throw new Error("The active runtime ownership session is unexpected.");
+  for (const { session } of activeSessions) {
+    const lease = leases.get(session.runtimeGenerationId);
+    if (!lease || lease.systemBootId !== session.systemBootId) {
+      throw new Error("The active runtime ownership session is not leased.");
+    }
+  }
+}
+
+function inspectRecoveryStorage(
+  dataDirectory: string,
+  expectedActiveRuntimeOwner:
+    AppUpdateCandidateViabilityRequest["expectedActiveRuntimeOwner"],
+): void {
   try {
     const root = pinDirectRuntimeJournalRoot(dataDirectory);
+    const topology = runtimeProcessSessionTopology(root);
     const names = listDirectRuntimeJournalLeaves(
       root,
       ".runtime-",
       MAX_RECOVERY_JOURNALS,
     );
+    const journals: ValidatedRuntimeRecoveryJournal[] = [];
     for (const name of names) {
+      if (topology.writerNames.has(name)) continue;
       const leaf = readDirectRuntimeJournalLeaf(
         root,
         name,
         MAX_RECOVERY_JOURNAL_BYTES,
       );
       if (!leaf) throw new Error("A recovery journal disappeared.");
-      validateRuntimeRecoveryJournal(name, leaf.bytes);
+      journals.push(validateRuntimeRecoveryJournal(name, leaf.bytes));
+    }
+    validateRuntimeProcessRelationships(
+      topology,
+      journals,
+      expectedActiveRuntimeOwner,
+    );
+    const confirmedTopology = runtimeProcessSessionTopology(root);
+    if (confirmedTopology.identity !== topology.identity) {
+      throw new Error("Runtime process ownership changed during validation.");
     }
     validateProviderMaintenanceJournalStorage(dataDirectory);
   } catch {
@@ -441,7 +605,10 @@ function validateDatabase(dataDirectory: string): void {
 export function validateAppUpdateCandidateViability(
   request: AppUpdateCandidateViabilityRequest,
 ): void {
-  inspectRecoveryStorage(request.dataDirectory);
+  inspectRecoveryStorage(
+    request.dataDirectory,
+    request.expectedActiveRuntimeOwner,
+  );
   validateDatabase(request.dataDirectory);
 }
 

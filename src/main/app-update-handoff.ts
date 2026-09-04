@@ -328,7 +328,7 @@ function validPhaseRevision(
     return revision >= 2 && revision <= MAX_HANDOFF_REVISIONS - 1;
   }
   return phase === "rollback-completed"
-    && revision >= 3
+    && revision >= (platform === "win32" ? 2 : 3)
     && revision <= MAX_HANDOFF_REVISIONS;
 }
 
@@ -338,8 +338,16 @@ export function appUpdateHandoffCanTransition(
   next: AppUpdateHandoffPhase,
 ): boolean {
   if (terminalPhase(current) || current === next) return false;
+  if (next === "rollback-completed") {
+    return current === "rollback-required"
+      || (platform === "win32"
+      && (
+        current === "prepared"
+        || current === "old-generation-cleanup-confirmed"
+      ));
+  }
   if (next === "rollback-required") return current !== "rollback-required";
-  if (current === "rollback-required") return next === "rollback-completed";
+  if (current === "rollback-required") return false;
   if (rollbackPhase(next)) return false;
   const path = happyPath(platform);
   const currentIndex = path.indexOf(current);
@@ -533,7 +541,7 @@ function parseSnapshot(bytes: Buffer): AppUpdateHandoffSnapshot | null {
   }
 }
 
-function immutableIdentityMatches(
+export function appUpdateHandoffIdentityMatches(
   left: AppUpdateHandoffPreparation,
   right: AppUpdateHandoffPreparation,
 ): boolean {
@@ -552,7 +560,7 @@ function immediateSuccessor(
   current: AppUpdateHandoffSnapshot,
   proposal: AppUpdateHandoffSnapshot,
 ): boolean {
-  return immutableIdentityMatches(current, proposal)
+  return appUpdateHandoffIdentityMatches(current, proposal)
     && proposal.revision === current.revision + 1
     && proposal.previousChecksum === current.checksum
     && Date.parse(proposal.transitionedAt) >= Date.parse(current.transitionedAt)
@@ -982,7 +990,10 @@ export class AppUpdateHandoffJournal {
           retiredStaleProposal = true;
           continue;
         }
-        if (!immutableIdentityMatches(canonical.snapshot, proposal.snapshot)) {
+        if (!appUpdateHandoffIdentityMatches(
+          canonical.snapshot,
+          proposal.snapshot,
+        )) {
           throw new Error("An app update handoff proposal has a stale identity.");
         }
         if (proposal.snapshot.revision <= canonical.snapshot.revision) {

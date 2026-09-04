@@ -233,6 +233,24 @@ describe("app update handoff journal", () => {
     }
   });
 
+  it("records a proven pre-invocation Windows rollback as one terminal commit", () => {
+    const journal = new AppUpdateHandoffJournal(directory());
+    const prepared = journal.prepare(preparation("win32"))!;
+
+    const completed = journal.transition(
+      appUpdateHandoffOwner(prepared),
+      "rollback-completed",
+      timestamp(prepared.revision),
+    );
+
+    expect(completed).toMatchObject({
+      phase: "rollback-completed",
+      revision: 2,
+      previousChecksum: prepared.checksum,
+    });
+    expect(journal.retire(appUpdateHandoffOwner(completed!))).toBe(true);
+  });
+
   it.each([
     ["linux", linuxPath],
     ["win32", windowsPath],
@@ -249,6 +267,14 @@ describe("app update handoff journal", () => {
           candidate === current.phase
           || candidate === allowed
           || (candidate === "rollback-required" && index < path.length - 1)
+          || (
+            _platform === "win32"
+            && candidate === "rollback-completed"
+            && (
+              current.phase === "prepared"
+              || current.phase === "old-generation-cleanup-confirmed"
+            )
+          )
         ) continue;
         expect(journal.transition(
           appUpdateHandoffOwner(current),
@@ -770,6 +796,16 @@ describe("app update handoff journal", () => {
       "win32",
       "prepared",
       "candidate-launched",
+    )).toBe(false);
+    expect(appUpdateHandoffCanTransition(
+      "win32",
+      "prepared",
+      "rollback-completed",
+    )).toBe(true);
+    expect(appUpdateHandoffCanTransition(
+      "linux",
+      "prepared",
+      "rollback-completed",
     )).toBe(false);
     expect(appUpdateHandoffCanTransition(
       "linux",

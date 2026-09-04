@@ -731,6 +731,9 @@ test("pins the minimal fixed builder and gates installed Windows binaries", asyn
   expect(packageSmokeSource).toContain(
     "The packaged application version does not match the smoke target.",
   );
+  expect(packageSmokeSource).toContain(
+    "createWindowsCodexFixture(stateRoot, workspaceDirectory)",
+  );
   expect(source).toContain('["/S", `/D=${installDirectory}`]');
   expect(source).toContain('`_?=${installDirectory}`');
   expect(source).toContain("windowsVerbatimArguments: true");

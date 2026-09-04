@@ -1065,7 +1065,10 @@ try {
       || (dataRoot.mode & 0o077) !== 0
     ) throw new Error("The package-smoke runtime data root is not owner-private.");
   }
-  const packagedCodex = await createWindowsCodexFixture(temporaryRoot, workspaceDirectory);
+  // N-1 and N reopen the same provider cache. Keep its synthetic installation
+  // at the same path while the application is replaced so this upgrade smoke
+  // does not also introduce an unrelated provider installation change.
+  const packagedCodex = await createWindowsCodexFixture(stateRoot, workspaceDirectory);
   const packagedPdf = await createPdfFixture(temporaryRoot);
   const packagedImage = await createImageFixture(temporaryRoot);
   if (proveAppImageFileDescriptorChain) {

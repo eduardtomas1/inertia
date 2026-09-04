@@ -8,10 +8,13 @@ import {
 import type { ContinuationReasonCode } from "../../src/shared/continuation-policy";
 import {
   nativeModelSelection,
+  providerNativeModelSelection,
   versionedContinuationIdentityForSelection,
 } from "../../src/shared/model-routing";
 import { lifecycleBuildMetadataFromEnvironment } from
   "../../src/shared/lifecycle-build-metadata";
+import { PROVIDER_MAINTENANCE_PROVIDER_IDS } from
+  "../../src/shared/provider-maintenance";
 
 function diagnosticInput(): RuntimeLifecycleDiagnosticInput {
   return {
@@ -147,6 +150,27 @@ function recordContinuationReason(
 }
 
 describe("runtime lifecycle diagnostics", () => {
+  it("retains valid diagnostics for all six supported providers", () => {
+    const input = diagnosticInput();
+    input.conversations = PROVIDER_MAINTENANCE_PROVIDER_IDS.map((providerId) => ({
+      ...input.conversations[0]!,
+      id: providerId,
+      providerId,
+      modelSelection: providerNativeModelSelection({ providerId, modelId: "test" }),
+    }));
+    input.activeConversationIds = input.conversations.map(({ id }) => id);
+    input.providerMaintenanceStates = PROVIDER_MAINTENANCE_PROVIDER_IDS.map(
+      (providerId) => ({ providerId, state: "idle" }),
+    );
+
+    const snapshot = runtimeLifecycleDiagnosticSnapshot(input);
+
+    expect(snapshot.activeProviders.map(({ providerId }) => providerId).sort())
+      .toEqual([...PROVIDER_MAINTENANCE_PROVIDER_IDS].sort());
+    expect(snapshot.providerMaintenance).toEqual(input.providerMaintenanceStates);
+    expect(parseRuntimeLifecycleDiagnosticSnapshot(snapshot)).toEqual(snapshot);
+  });
+
   it("projects bounded lifecycle evidence without raw identities or content", () => {
     const snapshot = runtimeLifecycleDiagnosticSnapshot(diagnosticInput());
     const serialized = JSON.stringify(snapshot);

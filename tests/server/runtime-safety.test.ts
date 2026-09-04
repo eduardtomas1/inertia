@@ -167,11 +167,11 @@ describe("runtime recovery safety command boundary", () => {
         "PRAGMA table_info(agent_turns)",
       ).all() as Array<{ name: string }>).some(
         ({ name }) => name === "continuation_reason_code",
-      )).toBe(true);
+      )).toBe(false);
       expect((unchanged.prepare(`
         SELECT sql FROM sqlite_master
         WHERE type = 'table' AND name = 'model_backend_profiles'
-      `).pluck().get() as string)).not.toContain("'gemini-acp'");
+      `).pluck().get() as string)).toContain("'gemini-acp'");
       unchanged.close();
     } finally {
       rmSync(root, { recursive: true, force: true });

@@ -155,6 +155,8 @@ export default defineConfig({
           chunkFileNames({ name }) {
             const compactNames: Record<string, string> = {
               attentionVisibility: "chat",
+              BrowserEvidenceTimeline: "evidence",
+              "external-link": "link",
               "terminal-turn-projection": "turn",
               timelineFocus: "focus",
               "archive-restore": "restore",

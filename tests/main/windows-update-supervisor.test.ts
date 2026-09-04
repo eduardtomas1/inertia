@@ -14,6 +14,7 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  realpath,
   rm,
   writeFile,
 } from "node:fs/promises";
@@ -55,7 +56,7 @@ const operationId = "11111111-1111-4111-8111-111111111111";
 const token = "A".repeat(43);
 
 async function fixture() {
-  const root = await mkdtemp(join(tmpdir(), "inertia-win-supervisor-"));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "inertia-win-supervisor-")));
   roots.push(root);
   const dataDirectory = join(root, "data");
   const installDirectory = join(root, "install");
@@ -302,20 +303,20 @@ describe("Windows update supervisor launcher", () => {
   it.runIf(process.platform === "win32")(
     "publishes bounded quarantine without killing a still-running installer",
     async () => {
-      const root = await mkdtemp(join(tmpdir(), "inertia-native-win-update-"));
+      const root = await realpath(await mkdtemp(join(tmpdir(), "inertia-native-win-update-")));
       const helperDirectory = join(root, "helper");
       const installerDirectory = join(root, "installer");
       await Promise.all([
         mkdir(helperDirectory, { mode: 0o700 }),
         mkdir(installerDirectory, { mode: 0o700 }),
       ]);
-      const helperPath = join(helperDirectory, "windows-runtime-job.exe");
+      const nativeOperationId = "99999999-9999-4999-8999-999999999999";
+      const helperPath = join(helperDirectory, windowsUpdateSupervisorExecutableName(nativeOperationId));
       const generatedHelperPath = resolve(
         "resources/generated/runtime-process-guardian/windows-runtime-job.exe",
       );
       const installerPath = join(installerDirectory, "delayed-installer.cmd");
       const installerDonePath = join(installerDirectory, "installer.done");
-      const nativeOperationId = "99999999-9999-4999-8999-999999999999";
       const receiptPath = join(
         helperDirectory,
         windowsUpdateTerminalReceiptName(nativeOperationId),

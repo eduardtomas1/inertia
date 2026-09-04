@@ -1,7 +1,10 @@
 import { z } from "zod";
 
 import { currentKnownHarnessIdSchema } from "./model-routing";
-import { providerMaintenanceProviderIdSchema } from "./provider-maintenance";
+import {
+  PROVIDER_MAINTENANCE_PROVIDER_IDS,
+  providerMaintenanceProviderIdSchema,
+} from "./provider-maintenance";
 import { lifecycleBuildMetadataSchema } from "./lifecycle-build-metadata";
 
 export const LIFECYCLE_ACTIONABLE_STATES = [
@@ -123,10 +126,11 @@ export const runtimeLifecycleDiagnosticSnapshotSchema = z
       "unconfirmed",
     ]),
     ownedResources: lifecycleOwnedResourceCountsSchema,
-    activeProviders: z.array(lifecycleActiveProviderSchema).max(5),
+    activeProviders: z.array(lifecycleActiveProviderSchema)
+      .max(PROVIDER_MAINTENANCE_PROVIDER_IDS.length),
     providerMaintenance: z
       .array(providerMaintenanceDiagnosticStateSchema)
-      .max(5),
+      .max(PROVIDER_MAINTENANCE_PROVIDER_IDS.length),
     updateHandoffPhase: z.enum(APP_UPDATE_HANDOFF_PHASES).nullable(),
     unresolvedTurnCount: boundedCount,
     unresolvedInteractionCount: boundedCount,

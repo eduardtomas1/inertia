@@ -545,8 +545,8 @@ describe("Windows runtime Job Object containment", () => {
     expect(nativeSource).toContain("while (Console.In.Read() != -1)");
     expect(nativeSource.indexOf("CreationIdentityStatus("))
       .toBeLessThan(nativeSource.indexOf("IntPtr job = CreateJobObject("));
-    const updateSupervisorSource = nativeSource.slice(
-      nativeSource.indexOf("public static int UpdateSupervisorFromBroker("),
+    const updateSupervisorSource = normalizedNativeSource.slice(
+      normalizedNativeSource.indexOf("public static int UpdateSupervisorFromBroker("),
     );
     expect(nativeSource).toContain("ShellExecuteEx(ref execute)");
     expect(nativeSource).toContain(
@@ -556,9 +556,9 @@ describe("Windows runtime Job Object containment", () => {
     expect(nativeSource).toContain("SEE_MASK_NOCLOSEPROCESS");
     expect(nativeSource).toContain("GetExitCodeProcess(");
     expect(nativeSource).toContain("result == STILL_ACTIVE");
-    const installerLaunchSource = nativeSource.slice(
-      nativeSource.indexOf("private static bool LaunchInstaller("),
-      nativeSource.indexOf("private static string TerminalAuthenticationPayload("),
+    const installerLaunchSource = normalizedNativeSource.slice(
+      normalizedNativeSource.indexOf("private static bool LaunchInstaller("),
+      normalizedNativeSource.indexOf("private static string TerminalAuthenticationPayload("),
     );
     expect(nativeSource).toContain("Math.Ceiling(remaining)");
     const updateDeadlineSource = nativeSource.slice(

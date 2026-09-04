@@ -896,7 +896,7 @@ describe("electron updater adapter", () => {
       const stable = join(await realpath(root), "Inertia.AppImage");
       await expect(readFile(stable, "utf8"))
         .rejects.toMatchObject({ code: "ENOENT" });
-      expect(environment.APPIMAGE).toBe(active);
+      expect(environment.APPIMAGE).toBe(await realpath(active));
       expect(onHandoff).not.toHaveBeenCalled();
       expect(updaterFixture.app.quit).not.toHaveBeenCalled();
       expect(updaterFixture.updater.quitAndInstall).not.toHaveBeenCalled();
@@ -935,7 +935,7 @@ describe("electron updater adapter", () => {
       expect(await readFile(active, "utf8")).toBe("old");
       await expect(readFile(join(root, "Inertia.AppImage"), "utf8"))
         .rejects.toMatchObject({ code: "ENOENT" });
-      expect(environment.APPIMAGE).toBe(active);
+      expect(environment.APPIMAGE).toBe(await realpath(active));
       expect(onHandoff).not.toHaveBeenCalled();
       expect(updaterFixture.app.quit).not.toHaveBeenCalled();
       expect(updaterFixture.updater.quitAndInstall).not.toHaveBeenCalled();

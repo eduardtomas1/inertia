@@ -359,6 +359,30 @@ afterEach(() => {
 });
 
 describe("draft turn anchoring", () => {
+  it("loads an available maintenance notice and keeps its dismissal working", async () => {
+    const props = workspaceProps(conversation("maintenance-notice"), async () => null);
+    const view = render(<ChatWorkspace {...props} />);
+    expect(screen.queryByText("codex update available")).not.toBeInTheDocument();
+
+    view.rerender(<ChatWorkspace {...props} maintenanceStatus={{
+      providerId: "codex",
+      installedVersion: "1.0.0",
+      latestVersion: "2.0.0",
+      versionStatus: "update-available",
+      freshness: "fresh",
+      checkedAt: "2030-01-01T00:00:00.000Z",
+      installMethod: "npm-global",
+      updateAvailability: "available",
+      updateLabel: null,
+      instructionsUrl: "https://example.test/update",
+      message: null,
+    }} />);
+
+    expect(await screen.findByText("codex update available")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss codex update notice" }));
+    expect(screen.queryByText("codex update available")).not.toBeInTheDocument();
+  });
+
   it("projects owned prompts and arms exact-turn restoration from both Stop surfaces", async () => {
     const activeConversation = {
       ...conversation("conversation-stop-restore"),

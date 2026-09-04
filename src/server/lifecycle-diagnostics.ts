@@ -5,8 +5,10 @@ import type {
   ProviderInfo,
   WorkspaceRun,
 } from "../shared/contracts";
-import type { ProviderMaintenanceDiagnosticState } from
-  "../shared/provider-maintenance";
+import {
+  PROVIDER_MAINTENANCE_PROVIDER_IDS,
+  type ProviderMaintenanceDiagnosticState,
+} from "../shared/provider-maintenance";
 import {
   safeLifecycleProviderVersion,
   type RuntimeLifecycleDiagnosticSnapshot,
@@ -234,7 +236,8 @@ export function runtimeLifecycleDiagnosticSnapshot(
       ),
     },
     activeProviders,
-    providerMaintenance: input.providerMaintenanceStates.slice(0, 5).map(
+    providerMaintenance: input.providerMaintenanceStates
+      .slice(0, PROVIDER_MAINTENANCE_PROVIDER_IDS.length).map(
       ({ providerId, state }) => ({ providerId, state }),
     ),
     updateHandoffPhase: null,

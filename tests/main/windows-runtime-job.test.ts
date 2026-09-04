@@ -590,6 +590,9 @@ describe("Windows runtime Job Object containment", () => {
     expect(nativeSource).toContain("operationClaim.Flush(true)");
     expect(nativeSource).toContain("SetFileInformationByHandle(");
     expect(nativeSource).toContain("RenameOwnedOperationClaim(");
+    expect(nativeSource).toContain(
+      "Marshal.WriteInt16(information, nameOffset + name.Length, (Int16)0)",
+    );
     expect(nativeSource.indexOf("operationClaim.Flush(true)"))
       .toBeLessThan(nativeSource.lastIndexOf("RenameOwnedOperationClaim("));
     expect(updateSupervisorSource).toContain(

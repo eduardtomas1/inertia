@@ -6,7 +6,6 @@ import {
   existsSync,
   rmSync,
   symlinkSync,
-  watch,
 } from "node:fs";
 import {
   chmod,
@@ -20,6 +19,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -141,32 +141,14 @@ function decodedRequestFields(request: string): Map<string, string> {
 }
 
 async function waitForLeaf(
-  directory: string,
   path: string,
   timeoutMs: number,
 ): Promise<void> {
-  if (existsSync(path)) return;
-  await new Promise<void>((resolveLeaf, rejectLeaf) => {
-    let settled = false;
-    let timeout: ReturnType<typeof setTimeout> | null = null;
-    let watcher: ReturnType<typeof watch> | null = null;
-    const finish = (error?: Error): void => {
-      if (settled) return;
-      settled = true;
-      if (timeout) clearTimeout(timeout);
-      watcher?.close();
-      if (error) rejectLeaf(error);
-      else resolveLeaf();
-    };
-    watcher = watch(directory, () => {
-      if (existsSync(path)) finish();
-    });
-    watcher.once("error", (error) => finish(error));
-    timeout = setTimeout(() => finish(new Error(
-      `Timed out waiting for ${path}.`,
-    )), timeoutMs);
-    if (existsSync(path)) finish();
-  });
+  const deadline = Date.now() + timeoutMs;
+  // A Windows rename notification can arrive before the exclusive writer
+  // releases its handle, and closing that handle need not emit another event.
+  while (!existsSync(path) && Date.now() < deadline) await delay(10);
+  if (!existsSync(path)) throw new Error(`Timed out waiting for ${path}.`);
 }
 
 afterEach(async () => {
@@ -413,7 +395,20 @@ describe("Windows update supervisor launcher", () => {
           parent!.once("close", () => resolveExit());
         });
 
-        await waitForLeaf(helperDirectory, receiptPath, 10_000);
+        try {
+          await waitForLeaf(receiptPath, 10_000);
+        } catch (error) {
+          const temporary = await readFile(receiptTemporaryPath).catch(() => null);
+          const terminal = temporary && parseWindowsUpdateTerminalReceipt(temporary);
+          const claim = temporary && parseWindowsUpdateOperationClaim(temporary);
+          throw new Error(
+            `${error instanceof Error ? error.message : String(error)} `
+              + `receiptExists=${existsSync(receiptPath)}, `
+              + `temporary=${terminal?.outcome ?? (claim ? "claim" : "missing-or-invalid")}, `
+              + `installerDone=${existsSync(installerDonePath)}.`,
+            { cause: error },
+          );
+        }
         expect(existsSync(installerDonePath)).toBe(false);
         const receipt = parseWindowsUpdateTerminalReceipt(
           await readFile(receiptPath),
@@ -433,7 +428,7 @@ describe("Windows update supervisor launcher", () => {
         expect(Date.parse(receipt!.completedAt)).toBeGreaterThanOrEqual(
           Date.parse(deadlineAt),
         );
-        await waitForLeaf(installerDirectory, installerDonePath, 15_000);
+        await waitForLeaf(installerDonePath, 15_000);
       } finally {
         if (parent && parent.exitCode === null && parent.signalCode === null) {
           parent.kill();

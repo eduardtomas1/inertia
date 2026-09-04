@@ -1556,7 +1556,8 @@ public static class InertiaRuntimeJob {
     int rootOffset = IntPtr.Size == 8 ? 8 : 4;
     int lengthOffset = rootOffset + IntPtr.Size;
     int nameOffset = lengthOffset + 4;
-    IntPtr information = Marshal.AllocHGlobal(nameOffset + name.Length);
+    int bufferLength = nameOffset + name.Length + 2;
+    IntPtr information = Marshal.AllocHGlobal(bufferLength);
     try {
       for (int index = 0; index < nameOffset; index += 1) {
         Marshal.WriteByte(information, index, 0);
@@ -1564,11 +1565,14 @@ public static class InertiaRuntimeJob {
       Marshal.WriteIntPtr(information, rootOffset, IntPtr.Zero);
       Marshal.WriteInt32(information, lengthOffset, name.Length);
       Marshal.Copy(name, 0, IntPtr.Add(information, nameOffset), name.Length);
+      // FileNameLength excludes the terminator; the Win32 path conversion can
+      // still consume FileName as a NUL-terminated string.
+      Marshal.WriteInt16(information, nameOffset + name.Length, (Int16)0);
       return SetFileInformationByHandle(
         claim.SafeFileHandle.DangerousGetHandle(),
         FileRenameInfo,
         information,
-        (UInt32)(nameOffset + name.Length)
+        (UInt32)bufferLength
       );
     } finally {
       Marshal.FreeHGlobal(information);

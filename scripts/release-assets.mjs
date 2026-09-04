@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { constants, createReadStream } from "node:fs";
 import { copyFile, lstat, mkdir, open, readFile, readdir, writeFile } from "node:fs/promises";
-import { basename, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
 import { parseDocument, stringify } from "yaml";
 
@@ -138,9 +138,18 @@ async function generateReleaseSbom(releaseAssets) {
   const assetIdentity = releaseAssets
     .map(({ name, sha256, size }) => ({ name, sha256, size }))
     .sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0);
+  // Windows npm launchers are command files. Invoke their JavaScript entry
+  // point with Node so release staging does not need a shell.
+  const npmEntryPoint = process.platform === "win32"
+    ? (isAbsolute(process.env.npm_execpath ?? "")
+      && basename(process.env.npm_execpath).toLowerCase() === "npm-cli.js"
+      ? process.env.npm_execpath
+      : join(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js"))
+    : null;
   const result = spawnSync(
-    "npm",
+    npmEntryPoint ? process.execPath : "npm",
     [
+      ...(npmEntryPoint ? [npmEntryPoint] : []),
       "sbom",
       "--omit=dev",
       "--package-lock-only",
@@ -151,6 +160,8 @@ async function generateReleaseSbom(releaseAssets) {
       cwd: process.cwd(),
       encoding: "utf8",
       maxBuffer: MAX_SBOM_BYTES,
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 60_000,
     },
   );
   if (result.error || result.status !== 0) {

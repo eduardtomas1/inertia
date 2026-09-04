@@ -1447,6 +1447,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       conversationId: "gemini-auth",
     }))).resolves.toMatchObject({
       status: "failed",
+      cleanupConfirmed: true,
       error: "Gemini CLI is not authenticated. Run 'gemini' to connect an account and try again.",
       failure: {
         reason: "provider-error",
@@ -1458,6 +1459,35 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       "initialize",
       "session/new",
     ]);
+  });
+
+  it("fails cleanup closed for an identity-less non-auth session error", async () => {
+    const root = portableFixtureRoot("gemini ambiguous session error");
+    roots.push(root);
+    const command = writeNodeFlagExecutable(root, "gemini", `
+const readline = require("node:readline");
+const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: ${INITIALIZE_RESULT} });
+  if (message.method === "session/new") return send({
+    jsonrpc: "2.0",
+    id: message.id,
+    error: { code: -32603, message: "Session registration failed unexpectedly." },
+  });
+});
+`);
+
+    await expect(managerFor(command).run(geminiInput(root, {
+      conversationId: "gemini-ambiguous-session-error",
+    }))).resolves.toMatchObject({
+      status: "failed",
+      cleanupConfirmed: false,
+      failure: {
+        phase: "cleanup",
+        terminalEvent: "gemini-session/cleanup",
+      },
+    });
   });
 
   it("requires the exact Gemini CLI ACP identity and well-formed capabilities", async () => {

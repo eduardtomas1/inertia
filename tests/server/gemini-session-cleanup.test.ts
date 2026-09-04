@@ -101,6 +101,21 @@ describe("Gemini ACP provider-owned session cleanup", () => {
     expect(() => bytes.observeBytes(1)).toThrow(
       /aggregate byte-inspection safety limit/iu,
     );
+
+    const probes = new GeminiSessionCleanupScanBudget();
+    probes.observeFilesystemProbes(32_768);
+    probes.observeFilesystemProbes(32_768);
+    expect(() => probes.observeFilesystemProbes(1)).toThrow(
+      /aggregate filesystem-probe safety limit/iu,
+    );
+  });
+
+  it("rejects more session identities than one Gemini run can own", async () => {
+    await expect(cleanupGeminiSessionArtifacts({
+      cwd: "/workspace",
+      environment: {},
+      sessionIds: ["session-one", "session-two", "session-three"],
+    })).rejects.toThrow(/request-identity safety limit/iu);
   });
 
   it("removes only exact run and descendant identities from the attested project", async () => {

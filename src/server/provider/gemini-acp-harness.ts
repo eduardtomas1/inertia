@@ -848,13 +848,11 @@ function startPreparedGeminiRun(
 function sessionCreationIdentityIsAmbiguous(
   outcome: ProviderRunResult,
 ): boolean {
-  if (outcome.status === "cancelled") return true;
-  return outcome.failure?.reason === "rpc-timeout"
-    || outcome.failure?.reason === "transport-closed"
-    || outcome.failure?.reason === "process-signal"
-    || outcome.failure?.reason === "process-exit"
-    || outcome.failure?.reason === "malformed-protocol"
-    || outcome.failure?.reason === "protocol-overflow";
+  return !(
+    outcome.status === "failed"
+    && outcome.failure?.reason === "provider-error"
+    && outcome.failure.terminalEvent === "session/new:auth"
+  );
 }
 
 async function geminiPermission(

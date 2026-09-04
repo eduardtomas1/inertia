@@ -399,7 +399,6 @@ async function readBoundedImage(
       offset += bytesRead;
     }
     throwIfAborted(signal);
-    const final = await file.stat({ bigint: true });
     const trailing = Buffer.allocUnsafe(1);
     const { bytesRead: trailingBytes } = await file.read(
       trailing,
@@ -407,6 +406,7 @@ async function readBoundedImage(
       1,
       data.byteLength,
     );
+    const final = await file.stat({ bigint: true });
     if (trailingBytes !== 0 || !sameFileSnapshot(initial, final)) {
       throw new Error("A Gemini image attachment changed while it was being read.");
     }

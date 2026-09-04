@@ -24,6 +24,7 @@ import { FILE_OPEN_NO_FOLLOW } from
 const GEMINI_DIRECTORY = ".gemini";
 const MAX_PROJECT_DIRECTORIES = 4_096;
 const MAX_CHAT_FILES = 16_384;
+const MAX_REQUEST_SESSION_IDENTITIES = 2;
 const MAX_SESSION_IDENTITIES = 1_024;
 const MAX_SESSION_ID_CHARS = 200;
 const MAX_MARKER_BYTES = 16 * 1024;
@@ -31,6 +32,7 @@ const MAX_METADATA_LINE_BYTES = 64 * 1024;
 const MAX_CLEANUP_DIRECTORY_ENTRIES = 24_576;
 const MAX_CLEANUP_FILES_INSPECTED = 16_384;
 const MAX_CLEANUP_BYTES_INSPECTED = 32 * 1024 * 1024;
+const MAX_CLEANUP_FILESYSTEM_PROBES = 65_536;
 const SESSION_FILE_PATTERN = /^session-[^-].*\.jsonl?$/u;
 const SUBAGENT_SESSION_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -69,6 +71,7 @@ export class GeminiSessionCleanupScanBudget {
   private directoryEntries = 0;
   private files = 0;
   private bytes = 0;
+  private filesystemProbes = 0;
 
   observeDirectoryEntries(count: number): void {
     if (
@@ -104,6 +107,19 @@ export class GeminiSessionCleanupScanBudget {
     }
     this.bytes += count;
   }
+
+  observeFilesystemProbes(count: number): void {
+    if (
+      !Number.isSafeInteger(count)
+      || count < 0
+      || count > MAX_CLEANUP_FILESYSTEM_PROBES - this.filesystemProbes
+    ) {
+      throw new Error(
+        "Gemini session cleanup exceeded its aggregate filesystem-probe safety limit.",
+      );
+    }
+    this.filesystemProbes += count;
+  }
 }
 
 export interface GeminiSessionCleanupRequest {
@@ -126,6 +142,14 @@ export async function cleanupGeminiSessionArtifacts(
   request: GeminiSessionCleanupRequest,
 ): Promise<void> {
   const platform = request.platform ?? process.platform;
+  if (
+    request.sessionIds.length > MAX_REQUEST_SESSION_IDENTITIES
+    || (request.requiredSessionIds?.length ?? 0) > MAX_REQUEST_SESSION_IDENTITIES
+  ) {
+    throw new Error(
+      "Gemini session cleanup exceeded its request-identity safety limit.",
+    );
+  }
   const sessionIds = [...new Set(request.sessionIds.map(validateSessionId))];
   const requiredSessionIds = new Set(
     (request.requiredSessionIds ?? []).map(validateSessionId),
@@ -865,7 +889,11 @@ async function removeExactArtifact(
   await rm(path, { recursive: true, force: false });
 }
 
-async function pathExists(path: string): Promise<boolean> {
+async function pathExists(
+  path: string,
+  budget: GeminiSessionCleanupScanBudget,
+): Promise<boolean> {
+  budget.observeFilesystemProbes(1);
   return await lstat(path).then(() => true, (error: NodeJS.ErrnoException) => {
     if (error.code === "ENOENT") return false;
     throw error;
@@ -911,7 +939,7 @@ async function unattestedArtifactsExist(
           ? [join(chats.authority.path, sessionId)]
           : []),
       ]) {
-        if (await pathExists(artifact)) return true;
+        if (await pathExists(artifact, budget)) return true;
       }
     }
     await assertDirectoryChain(geminiHome, tempRoot, project);

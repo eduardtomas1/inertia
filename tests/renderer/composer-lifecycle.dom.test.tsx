@@ -735,7 +735,7 @@ describe("composer asynchronous ownership", () => {
       "remember exactly how retrieval works",
     );
     expect(onSend).not.toHaveBeenCalled();
-    expect(screen.getByText("Compacting…")).toBeVisible();
+    expect(screen.getByText("Compacting context…")).toBeVisible();
     expect(input).toHaveAttribute("readonly");
 
     operation.resolve({
@@ -759,7 +759,7 @@ describe("composer asynchronous ownership", () => {
     const firstInput = screen.getByRole("textbox", { name: "Message" });
     fireEvent.change(firstInput, { target: { value: "/compact" } });
     fireEvent.keyDown(firstInput, { key: "Enter" });
-    expect(screen.getByText("Compacting…")).toBeVisible();
+    expect(screen.getByText("Compacting context…")).toBeVisible();
 
     window.localStorage.setItem(
       `inertia:draft:${second.id}`,
@@ -781,7 +781,7 @@ describe("composer asynchronous ownership", () => {
     view.rerender(<Composer {...composerProps(first, { onCompact })} />);
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Message" }))
       .toHaveValue(""));
-    expect(screen.queryByText("Compacting…"))
+    expect(screen.queryByText("Compacting context…"))
       .not.toBeInTheDocument();
     expect(screen.getByText("First chat context compacted.")).toBeVisible();
   });
@@ -851,7 +851,7 @@ describe("composer asynchronous ownership", () => {
     expect(setActionError).not.toHaveBeenCalled();
 
     view.rerender(<RuntimeComposer owner={first} />);
-    expect(screen.queryByText("Compacting…"))
+    expect(screen.queryByText("Compacting context…"))
       .not.toBeInTheDocument();
     expect(screen.getByText("First chat failed")).toBeVisible();
   });

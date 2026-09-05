@@ -19,6 +19,7 @@ import {
 } from "../../utils/responseTimeline";
 import { ApprovalCard, InputRequestCard } from "../AgentRequestCard";
 import { ResponseMarkdown } from "../ResponseMarkdown";
+import { ContextCompactionIcon } from "../ContextCompactionIcon";
 import { SubagentDisclosure } from "../SubagentDisclosure";
 import { SentMessageAttachmentList } from "../SentMessageAttachmentList";
 import {
@@ -43,6 +44,7 @@ function AgentPixelLoader({
   animated: boolean;
   phase: ActiveAgentPhase;
 }): React.JSX.Element {
+  if (phase === "compacting") return <ContextCompactionIcon />;
   return (
     <span
       className="agent-pixel-loader"

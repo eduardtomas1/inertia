@@ -34,7 +34,7 @@ test("filters Work by project and manages chat history", async () => {
 
   const sidebar = page.getByRole("complementary", { name: "Project navigation", exact: true });
   await sidebar.getByRole("button", { name: "Filter work by project" }).click();
-  await sidebar.getByRole("button", { name: "Project actions for Inertia" }).first().click();
+  await page.getByRole("dialog", { name: "Choose project filter" }).getByRole("button", { name: "Project actions for Inertia" }).first().click();
   const projectMenu = sidebar.getByRole("menu", { name: "Project actions for Inertia" });
   await expect(projectMenu.getByRole("menuitem", { name: "Open folder" })).toBeVisible();
   await expect(projectMenu.getByRole("menuitem", { name: "New chat in Inertia" })).toBeVisible();
@@ -45,7 +45,7 @@ test("filters Work by project and manages chat history", async () => {
   }).click();
   await expect(projectMenu).toHaveCount(0);
   await sidebar.getByRole("button", { name: "Filter work by project" }).click();
-  await sidebar.getByRole("button", { name: "Project actions for Inertia" }).first().click();
+  await page.getByRole("dialog", { name: "Choose project filter" }).getByRole("button", { name: "Project actions for Inertia" }).first().click();
   await projectMenu.getByRole("menuitemradio", { name: "Keep separate", exact: true }).click();
 
   const branchName = (await page
@@ -247,7 +247,12 @@ test("keeps the macOS brand in the native titlebar row and starts a new chat", a
     name: "What should we build today?",
   })).toBeVisible();
   const composer = page.getByLabel("Message composer");
-  await expect(composer.getByRole("combobox", { name: "Project" })).toBeVisible();
+  const projectPicker = composer.getByRole("button", { name: "Project", exact: true });
+  await projectPicker.click();
+  const projectSearch = page.getByRole("dialog", { name: "Choose project" });
+  await expect(projectSearch.getByRole("combobox", { name: "Search projects" })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(projectPicker).toBeFocused();
   await expect(composer.getByRole("textbox", { name: "Message" })).toBeVisible();
   expect(rendererErrors).toEqual([]);
 });

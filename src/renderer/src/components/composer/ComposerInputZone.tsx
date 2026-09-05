@@ -29,6 +29,7 @@ import {
   type SidebarNavigationKey,
 } from "../../utils/sidebarModel";
 import { ComposerAttachmentList } from "../ComposerAttachmentList";
+import { ContextCompactionIcon } from "../ContextCompactionIcon";
 import {
   RouteRepairIcon,
   routeRepairLabel,
@@ -378,17 +379,11 @@ export function ComposerInputZone({
             aria-live={compactNotice.kind === "error" ? "assertive" : "polite"}
           >
             <span className="composer-compact-notice-icon" aria-hidden="true">
-              <Box size={14} />
+              {compactNotice.kind === "working" ? <ContextCompactionIcon /> : <Box size={14} />}
             </span>
             <span>{compactNotice.message}</span>
             <span className="composer-compact-notice-state" aria-hidden="true">
-              {compactNotice.kind === "working" ? (
-                <span className="composer-status-dots">
-                  <i />
-                  <i />
-                  <i />
-                </span>
-              ) : compactNotice.kind === "success" ? (
+              {compactNotice.kind === "working" ? null : compactNotice.kind === "success" ? (
                 <Check size={13} />
               ) : (
                 <CircleAlert size={13} />

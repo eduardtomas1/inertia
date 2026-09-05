@@ -66,83 +66,6 @@
   outline: 2px solid var(--focus-ring);
   outline-offset: -2px;
 }
-.project-scope-popover {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  right: 0;
-  z-index: 40;
-  padding: 5px;
-  border: 1px solid var(--border-strong);
-  border-radius: 11px;
-  background: var(--surface-strong);
-  box-shadow: var(--shadow);
-}
-.project-scope-search {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 5px 6px 9px;
-  margin-bottom: 4px;
-  border-bottom: 1px solid var(--border);
-  color: var(--text-muted);
-}
-.project-scope-search input {
-  width: 100%;
-  min-width: 0;
-  border: 0;
-  outline: 0;
-  color: var(--text);
-  background: transparent;
-  font-size: 12px;
-}
-.project-scope-results {
-  max-height: min(320px, 50vh);
-  overflow-y: auto;
-}
-.project-scope-item > button[role="option"] {
-  display: flex;
-  width: 100%;
-  min-height: 39px;
-  align-items: center;
-  gap: 8px;
-  padding: 7px;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-soft);
-  text-align: left;
-}
-.project-scope-item > button[role="option"].is-highlighted,
-.project-scope-item > button[role="option"]:focus-visible {
-  background: var(--surface-hover);
-  color: var(--text);
-}
-.project-scope-item > button[role="option"] > span {
-  display: grid;
-  min-width: 0;
-  flex: 1;
-  gap: 2px;
-}
-.project-scope-results strong {
-  font-size: 12px;
-  font-weight: 550;
-}
-.project-scope-results small {
-  color: var(--text-muted);
-  font-size: 10px;
-}
-.project-scope-results strong,
-.project-scope-results small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.project-scope-empty {
-  margin: 14px 7px;
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
 .sidebar .activity-thread {
   min-height: 82px;
   border-radius: 6px;
@@ -324,17 +247,6 @@
   opacity: 0.5;
 }
 
-.project-scope-item {
-  display: flex;
-  align-items: center;
-}
-.project-scope-item > button[role="option"] {
-  flex: 1;
-  min-width: 0;
-}
-.project-scope-item > .icon-button {
-  flex: 0 0 26px;
-}
 .sidebar-scope-actions {
   position: absolute;
   top: calc(100% + 4px);
@@ -348,13 +260,11 @@
 }
 
 /* Animate transient surfaces, never recycled virtual rows. */
-.project-scope-popover,
 .sidebar-scope-actions .project-menu {
   transform-origin: top center;
   animation: workspace-popover-in 150ms cubic-bezier(0.22, 1, 0.36, 1);
 }
-.project-scope-trigger,
-.project-scope-item > button {
+.project-scope-trigger {
   transition:
     background-color 120ms var(--motion-ease),
     color 120ms var(--motion-ease);
@@ -376,8 +286,7 @@
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .project-scope-popover,
-  .sidebar-scope-actions .project-menu {
+    .sidebar-scope-actions .project-menu {
     animation: none;
   }
 }

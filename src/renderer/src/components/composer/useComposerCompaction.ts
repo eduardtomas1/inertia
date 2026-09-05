@@ -130,7 +130,7 @@ export function useComposerCompaction(options: {
     setSubmitting(true);
     setCompactNotice(ownerId, {
       kind: "working",
-      message: "Compacting…",
+      message: "Compacting context…",
     });
     try {
       const result = await onCompact(command.instruction);

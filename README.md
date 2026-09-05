@@ -17,7 +17,7 @@ Inertia brings agent conversations, project files, Git review, and terminals int
 2. Add a local folder or clone a repository from its HTTPS or SSH Git URL.
 3. Open **Settings → Providers**, connect a provider, and start a chat.
 
-Search chats across projects, or narrow the list through **All projects**. Open project actions from the picker. Running, waiting, completed, and snoozed chats stay in the same sidebar.
+Search chats across projects, or narrow the list through **All projects**. Project selection uses the same searchable dialog as **Ctrl/Cmd+K**, with names, folder paths, and keyboard navigation. Open project actions from the picker. Running, waiting, completed, and snoozed chats stay in the same sidebar.
 
 ![Find a project from the sidebar](docs/screenshots/inertia-project-picker.png)
 

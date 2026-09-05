@@ -1,5 +1,6 @@
 import { createRequire } from "node:module";
 import { createHash } from "node:crypto";
+import { spawn } from "node:child_process";
 import { constants, createReadStream } from "node:fs";
 import {
   copyFile,
@@ -14,7 +15,11 @@ import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { runBounded } from "./bounded-process-tree.mjs";
+import {
+  BoundedProcessExitError,
+  ProcessTreeCleanupError,
+  runBounded,
+} from "./bounded-process-tree.mjs";
 import { inspectNativeBinaryArchitecture } from "./native-binary-architecture.mjs";
 
 export { runBounded } from "./bounded-process-tree.mjs";
@@ -267,6 +272,30 @@ export function installedWindowsApplicationName(releaseChannel) {
   return releaseChannel === "canary" ? "Inertia Canary.exe" : "Inertia.exe";
 }
 
+export async function requireDisposableWindowsInstallerHost(
+  localAppData,
+  releaseChannel,
+) {
+  installedWindowsApplicationName(releaseChannel);
+  if (
+    typeof localAppData !== "string"
+    || localAppData.length === 0
+    || localAppData.length > 4_096
+    || localAppData.includes("\0")
+    || !isAbsolute(localAppData)
+  ) throw new Error("The Windows installer smoke host identity is invalid.");
+  const existingInstall = join(
+    resolve(localAppData),
+    "Programs",
+    releaseChannel === "canary" ? "inertia-canary" : "inertia",
+  );
+  if (await pathExists(existingInstall)) {
+    throw new Error(
+      "The Windows installer smoke requires a disposable host without an existing Inertia installation.",
+    );
+  }
+}
+
 function archiveHeader(listing) {
   const normalized = listing.replaceAll("\r\n", "\n").replaceAll("\r", "\n");
   const boundary = normalized.indexOf("\n----------");
@@ -516,6 +545,129 @@ async function smokeInstalledApplication(
   );
 }
 
+async function waitForChildEvent(child, timeoutMs, label) {
+  await new Promise((resolvePromise, rejectPromise) => {
+    const cleanup = () => {
+      clearTimeout(timeout);
+      child.off("spawn", onSpawn);
+      child.off("error", onError);
+    };
+    const onSpawn = () => {
+      cleanup();
+      resolvePromise();
+    };
+    const onError = (error) => {
+      cleanup();
+      rejectPromise(error);
+    };
+    const timeout = setTimeout(() => {
+      cleanup();
+      rejectPromise(new Error(`${label} timed out.`));
+    }, timeoutMs);
+    child.once("spawn", onSpawn);
+    child.once("error", onError);
+  });
+}
+
+async function stopInstallRootBlocker(child) {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  const closed = new Promise((resolvePromise) => child.once("close", resolvePromise));
+  child.stdin?.end("exit\r\n");
+  const graceful = await Promise.race([
+    closed.then(() => true),
+    sleep(2_000).then(() => false),
+  ]);
+  if (graceful) return;
+  child.kill();
+  const terminated = await Promise.race([
+    closed.then(() => true),
+    sleep(2_000).then(() => false),
+  ]);
+  if (!terminated) {
+    throw new ProcessTreeCleanupError(
+      "The exact install-root blocker process did not close.",
+    );
+  }
+}
+
+async function proveInstallerPreservesLiveInstallRootProcess(options) {
+  const blockerPath = join(options.installDirectory, "inertia-update-blocker.exe");
+  await copyFile(process.execPath, blockerPath, constants.COPYFILE_EXCL);
+  const installedDigest = await sha256File(options.installedExecutable);
+  const blocker = spawn(blockerPath, ["-e", "process.stdin.resume()"], {
+    stdio: ["pipe", "ignore", "ignore"],
+    windowsHide: true,
+  });
+  try {
+    await waitForChildEvent(blocker, 5_000, "Install-root blocker startup");
+    await sleep(100);
+    if (blocker.exitCode !== null || blocker.signalCode !== null) {
+      throw new Error("The install-root blocker exited before the installer ran.");
+    }
+    let rejected = false;
+    try {
+      await runBounded(
+        options.installer,
+        ["/S", `/D=${options.installDirectory}`],
+        {
+          label: "Windows installer live-process refusal",
+          timeoutMs: INSTALL_TIMEOUT_MS,
+          windowsVerbatimArguments: true,
+        },
+      );
+    } catch (error) {
+      if (
+        !(error instanceof BoundedProcessExitError)
+        || error.exitCode !== 1
+      ) throw error;
+      rejected = true;
+    }
+    if (!rejected) {
+      throw new Error("The Windows installer replaced a live installation.");
+    }
+    if (blocker.exitCode !== null || blocker.signalCode !== null) {
+      throw new Error("The Windows installer terminated an install-root process.");
+    }
+    if (await sha256File(options.installedExecutable) !== installedDigest) {
+      throw new Error("The refused Windows installer changed the installed executable.");
+    }
+    console.log("Windows installer preserved the live install-root process and old executable.");
+  } finally {
+    await stopInstallRootBlocker(blocker);
+    await rm(blockerPath, { force: true });
+  }
+}
+
+async function installWhileSiblingProcessLives(options) {
+  const siblingDirectory = `${options.installDirectory}-sibling`;
+  const blockerPath = join(siblingDirectory, "inertia-update-blocker.exe");
+  await mkdir(siblingDirectory, { mode: 0o700 });
+  await copyFile(process.execPath, blockerPath, constants.COPYFILE_EXCL);
+  const blocker = spawn(blockerPath, ["-e", "process.stdin.resume()"], {
+    stdio: ["pipe", "ignore", "ignore"],
+    windowsHide: true,
+  });
+  try {
+    await waitForChildEvent(blocker, 5_000, "Sibling install-root blocker startup");
+    await runBounded(
+      options.installer,
+      ["/S", `/D=${options.installDirectory}`],
+      {
+        label: options.label,
+        timeoutMs: INSTALL_TIMEOUT_MS,
+        windowsVerbatimArguments: true,
+      },
+    );
+    if (blocker.exitCode !== null || blocker.signalCode !== null) {
+      throw new Error("The Windows installer terminated a sibling process.");
+    }
+    console.log("Windows installer accepted the sibling-path boundary without terminating it.");
+  } finally {
+    await stopInstallRootBlocker(blocker);
+    await rm(siblingDirectory, { force: true, recursive: true });
+  }
+}
+
 export async function main() {
   if (process.platform !== "win32") {
     throw new Error("The Windows installer smoke must run on Windows.");
@@ -526,6 +678,10 @@ export async function main() {
   const repositoryRoot = resolve(import.meta.dirname, "..");
   const manifest = require(join(repositoryRoot, "package.json"));
   const releaseChannel = process.env.INERTIA_RELEASE_CHANNEL ?? "stable";
+  await requireDisposableWindowsInstallerHost(
+    process.env.LOCALAPPDATA,
+    releaseChannel,
+  );
   const installer = join(
     repositoryRoot,
     "release",
@@ -591,14 +747,28 @@ export async function main() {
       ))) {
         throw new Error("The packaged Windows N-1 smoke did not create durable profile state.");
       }
+      await proveInstallerPreservesLiveInstallRootProcess({
+        installDirectory,
+        installedExecutable,
+        installer,
+      });
     }
-    await runBounded(installer, ["/S", `/D=${installDirectory}`], {
-      label: nMinusOne
-        ? `Silent Windows in-place N-1 to N installer (${nMinusOne.version} -> ${manifest.version})`
-        : "Silent Windows installer",
-      timeoutMs: INSTALL_TIMEOUT_MS,
-      windowsVerbatimArguments: true,
-    });
+    const installLabel = nMinusOne
+      ? `Silent Windows in-place N-1 to N installer (${nMinusOne.version} -> ${manifest.version})`
+      : "Silent Windows installer";
+    if (nMinusOne) {
+      await installWhileSiblingProcessLives({
+        installDirectory,
+        installer,
+        label: installLabel,
+      });
+    } else {
+      await runBounded(installer, ["/S", `/D=${installDirectory}`], {
+        label: installLabel,
+        timeoutMs: INSTALL_TIMEOUT_MS,
+        windowsVerbatimArguments: true,
+      });
+    }
     await requireInstalledFiles(
       installDirectory,
       unpackedDirectory,

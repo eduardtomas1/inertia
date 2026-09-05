@@ -82,6 +82,10 @@ not strip quarantine attributes or disable Gatekeeper. On Windows, an unsigned
 installer may show **Windows protected your PC**; after verifying the checksum
 and exact release source, use **More info**, confirm the filename and **Unknown
 publisher** status, then **Run anyway**. Do not disable SmartScreen.
+For a manual Windows update, quit Inertia and wait for its processes to close
+safely before launching the verified installer. Setup must refuse rather than
+terminate any process running from the installation directory; close Inertia
+cleanly and retry if that safety check blocks installation.
 GitHub/browser downloads do not retain an AppImage's executable permission.
 Linux instructions must name the exact architecture-qualified file, verify that
 exact line from `SHA256SUMS.txt`, then use `chmod 0755 ./<exact filename>` before

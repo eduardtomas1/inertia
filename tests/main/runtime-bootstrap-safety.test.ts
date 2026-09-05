@@ -29,6 +29,7 @@ import {
   MODERN_DARWIN_RECOVERY_DIALOG_DETAIL,
   prepareModernDarwinBootstrapRecovery,
   prepareRuntimeBootstrapSafety,
+  runtimeBootstrapAdmissionBlocked,
 } from "../../src/main/runtime-bootstrap-safety";
 import { RuntimeCleanupReceiptJournal } from
   "../../src/main/runtime-cleanup-receipts";
@@ -525,6 +526,57 @@ describe("runtime bootstrap safety", () => {
     expect(new RuntimeGenerationLeaseJournal(dataDirectory).all()).toEqual([]);
     expect(new RuntimeCleanupReceiptJournal(dataDirectory).pending())
       .toEqual([generationId]);
+  });
+
+  it("settles a receipt-backed retiring session in one bootstrap pass", () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-bootstrap-safety-"));
+    const dataDirectory = join(root, "runtime");
+    const generationId = "30000000-0000-4000-8000-000000000003:41";
+    const bootId = "test:00000000-0000-4000-8000-000000000001";
+    directories.push(root);
+    mkdirSync(dataDirectory, { recursive: true, mode: 0o700 });
+    const leases = new RuntimeGenerationLeaseJournal(dataDirectory);
+    const owned = new RuntimeOwnedProcessJournal(dataDirectory, {
+      platform: "darwin",
+    });
+    const receipts = new RuntimeCleanupReceiptJournal(dataDirectory);
+    expect(leases.publish(generationId, bootId)).toBe(true);
+    expect(owned.startSession(generationId, bootId)).toBe(true);
+    expect(owned.finishSession(generationId, () => {
+      expect(receipts.publish(generationId)).toBe(true);
+      return false;
+    })).toBe(false);
+
+    expect(prepareRuntimeBootstrapSafety(dataDirectory, "darwin"))
+      .toMatchObject({ preserveAttachments: false });
+    expect(new RuntimeGenerationLeaseJournal(dataDirectory).all()).toEqual([]);
+    expect(new RuntimeOwnedProcessJournal(dataDirectory, {
+      platform: "darwin",
+    }).sessionExact(generationId)).toBeNull();
+    expect(new RuntimeCleanupReceiptJournal(dataDirectory).pending())
+      .toEqual([generationId]);
+  });
+
+  it("blocks admission for a bare same-boot lease without amplifying state", () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-bootstrap-safety-"));
+    const dataDirectory = join(root, "runtime");
+    const generationId = "30000000-0000-4000-8000-000000000003:42";
+    const bootId = "test:00000000-0000-4000-8000-000000000001";
+    directories.push(root);
+    mkdirSync(dataDirectory, { recursive: true, mode: 0o700 });
+    expect(new RuntimeGenerationLeaseJournal(dataDirectory).publish(
+      generationId,
+      bootId,
+    )).toBe(true);
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      expect(prepareRuntimeBootstrapSafety(dataDirectory, "win32"))
+        .toMatchObject({ preserveAttachments: true });
+      expect(runtimeBootstrapAdmissionBlocked(dataDirectory)).toBe(true);
+      expect(new RuntimeGenerationLeaseJournal(dataDirectory).all())
+        .toEqual([expect.objectContaining({ runtimeGenerationId: generationId })]);
+      expect(new RuntimeCleanupReceiptJournal(dataDirectory).pending()).toEqual([]);
+    }
   });
 
   it("keeps entry-state partial Darwin retirement safety locked", async () => {

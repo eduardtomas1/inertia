@@ -590,8 +590,8 @@ export class RuntimeSupervisor {
     try {
       child = this.spawnProcess();
     } catch (error) {
-      if (!this.runtimeOwnedProcesses.finishSession(runtimeGenerationId)
-        || !this.runtimeGenerationLeases.consume(runtimeGenerationId)) {
+      if (!this.runtimeGenerationLeases.consume(runtimeGenerationId)
+        || !this.runtimeOwnedProcesses.finishSession(runtimeGenerationId)) {
         this.restartBlocked = true;
         this.desiredRunning = false;
         this.phase = "stopped";

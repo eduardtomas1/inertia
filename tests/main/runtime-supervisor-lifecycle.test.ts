@@ -53,6 +53,7 @@ function createHarness(options: {
     RuntimeOwnedProcessContainment
     | Promise<RuntimeOwnedProcessContainment | null>
     | null;
+  spawn?: () => never;
 } = {}): {
   children: FakeUtilityProcess[];
   forceKill: ReturnType<typeof vi.fn<(pid: number, deadlineAt: number) => boolean>>;
@@ -67,11 +68,11 @@ function createHarness(options: {
       defaultWorkspacePath: resolve(tmpdir(), "inertia workspace"),
       enableProviders: false,
     },
-    spawn: () => {
+    spawn: options.spawn ?? (() => {
       const child = new FakeUtilityProcess(10_000 + children.length);
       children.push(child);
       return child as never;
-    },
+    }),
     startupTimeoutMs: options.startupTimeoutMs ?? 2_000,
     stableUptimeMs: 5_000,
     shutdownGraceMs: 1_000,
@@ -101,6 +102,54 @@ afterEach(() => {
 });
 
 describe("RuntimeSupervisor lifecycle", () => {
+  it("keeps session proof when a spawn failure cannot retire its lease", () => {
+    const consume = vi.spyOn(
+      RuntimeGenerationLeaseJournal.prototype,
+      "consume",
+    ).mockReturnValueOnce(false);
+    const { supervisor } = createHarness({
+      spawn: () => { throw new Error("simulated spawn failure"); },
+    });
+    try {
+      supervisor.start();
+      const leases = new RuntimeGenerationLeaseJournal(dataDirectory).all();
+      expect(leases).toHaveLength(1);
+      const generationId = leases[0]!.runtimeGenerationId;
+      expect(new RuntimeOwnedProcessJournal(dataDirectory)
+        .sessionExact(generationId)).not.toBeNull();
+      expect(supervisor.snapshot()).toMatchObject({
+        phase: "stopped",
+        restartScheduled: false,
+      });
+    } finally {
+      consume.mockRestore();
+    }
+  });
+
+  it("leaves a repairable unleased session when spawn rollback cannot finish it", () => {
+    const finish = vi.spyOn(
+      RuntimeOwnedProcessJournal.prototype,
+      "finishSession",
+    ).mockReturnValueOnce(false);
+    const { supervisor } = createHarness({
+      spawn: () => { throw new Error("simulated spawn failure"); },
+    });
+    try {
+      supervisor.start();
+      expect(new RuntimeGenerationLeaseJournal(dataDirectory).all()).toEqual([]);
+      const generationId = finish.mock.calls[0]?.[0];
+      expect(generationId).toEqual(expect.any(String));
+      expect(new RuntimeOwnedProcessJournal(dataDirectory)
+        .sessionExact(generationId!)).not.toBeNull();
+      expect(supervisor.snapshot()).toMatchObject({
+        phase: "stopped",
+        restartScheduled: false,
+      });
+    } finally {
+      finish.mockRestore();
+    }
+  });
+
   it("keeps arbitrary child errors private across every unavailable operation", async () => {
     const { children, supervisor } = createHarness();
     supervisor.start();

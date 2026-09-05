@@ -55,6 +55,10 @@ async function installerSmokeModule() {
       version: string;
       sha256: string;
     } | null>;
+    requireDisposableWindowsInstallerHost: (
+      localAppData: string | undefined,
+      releaseChannel: "canary" | "stable",
+    ) => Promise<void>;
     runBounded: (
       command: string,
       args: string[],
@@ -116,6 +120,46 @@ test("selects the exact stable and Canary Windows installer identities", async (
     .toThrow("version is invalid");
   expect(installedWindowsApplicationName("stable")).toBe("Inertia.exe");
   expect(installedWindowsApplicationName("canary")).toBe("Inertia Canary.exe");
+});
+
+test("the NSIS installer never terminates install-root processes", async () => {
+  const packageConfiguration = JSON.parse(await readFile(
+    join(repositoryRoot, "package.json"),
+    "utf8",
+  )) as { build?: { nsis?: { include?: unknown } } };
+  expect(packageConfiguration.build?.nsis?.include)
+    .toBe("resources/installer.nsh");
+  const include = await readFile(
+    join(repositoryRoot, "resources", "installer.nsh"),
+    "utf8",
+  );
+  expect(include).toContain("!macro customCheckAppRunning");
+  expect(include).toContain("INERTIA_NSIS_INSTALL_ROOT");
+  expect(include).toContain("[IO.Path]::DirectorySeparatorChar");
+  expect(include).toContain("[StringComparison]::OrdinalIgnoreCase");
+  expect(include).toContain("MB_RETRYCANCEL");
+  expect(include).toContain("SetErrorLevel 1");
+  expect(include).toContain("StrCpy $R0 2");
+  expect(include).toContain("Setup will not force-close it.");
+  expect(include).not.toContain("$(appRunning)");
+  expect(include).not.toMatch(/\b(?:Stop-Process|taskkill|KILL_PROCESS)\b/u);
+});
+
+test("the installer smoke refuses an existing per-user installation", async () => {
+  const root = await mkdtemp(join(tmpdir(), "inertia-installer-host-"));
+  try {
+    const { requireDisposableWindowsInstallerHost } =
+      await installerSmokeModule();
+    await expect(requireDisposableWindowsInstallerHost(root, "stable"))
+      .resolves.toBeUndefined();
+    await mkdir(join(root, "Programs", "inertia"), { recursive: true });
+    await expect(requireDisposableWindowsInstallerHost(root, "stable"))
+      .rejects.toThrow(/disposable host/u);
+    await expect(requireDisposableWindowsInstallerHost("relative", "stable"))
+      .rejects.toThrow(/identity/u);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("binds a released N-1 installer to exact checksummed transition metadata", async () => {

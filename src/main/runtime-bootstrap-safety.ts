@@ -188,6 +188,16 @@ export function runtimeWorkspacePath(
   return configuredPath ? resolve(configuredPath) : join(homePath, directoryName);
 }
 
+export function runtimeBootstrapAdmissionBlocked(
+  dataDirectory: string,
+): boolean {
+  const leases = new RuntimeGenerationLeaseJournal(dataDirectory);
+  if (!leases.isValid()) return true;
+  const ownedProcesses = new RuntimeOwnedProcessJournal(dataDirectory);
+  return leases.all().some(({ runtimeGenerationId }) =>
+    ownedProcesses.records(runtimeGenerationId) === null);
+}
+
 export function prepareRuntimeBootstrapSafety(
   dataDirectory: string,
   platform: NodeJS.Platform = process.platform,
@@ -216,7 +226,23 @@ export function prepareRuntimeBootstrapSafety(
       systemBootId,
     );
   const receiptsRetired = runtimeCleanupReceiptIds(dataDirectory).every(
-    (generationId) => generationLeases.clearRuntimeGeneration(generationId),
+    (generationId) => {
+      const session = ownedProcesses.sessionExact(generationId);
+      if (session === undefined) return false;
+      if (session) {
+        const inspection = ownedProcesses.inspectGeneration(generationId);
+        if (
+          !inspection
+          || inspection.sessionState !== "retiring"
+          || inspection.sessionWriterPresent
+          || inspection.records.length > 0
+          || inspection.consumingRecords.length > 0
+          || inspection.containment !== null
+          || !ownedProcesses.finishSessionExact(session)
+        ) return false;
+      }
+      return generationLeases.clearRuntimeGeneration(generationId);
+    },
   );
   const priorBootRetired = ownedProcesses.clearPriorBootSessions(systemBootId)
     && generationLeases.clearPriorBootSessions(systemBootId);
@@ -394,8 +420,8 @@ export async function prepareModernDarwinBootstrapRecovery(
       };
     }
     // A normal supervisor shutdown can complete while the recovery loop is
-    // yielding. Its durable mutation is deliberately ordered as session
-    // removal, cleanup-receipt publication, then lease retirement. Sample the
+    // yielding. Its exact session is fenced first, then removed only after the
+    // cleanup receipt is durable, and finally its lease is retired. Sample the
     // exact journals through that short transaction instead of mistaking a
     // legitimate prefix for corrupt state. No state is inferred from absence:
     // every omitted baseline generation still requires its exact receipt.

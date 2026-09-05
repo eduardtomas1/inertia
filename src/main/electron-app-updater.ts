@@ -623,7 +623,7 @@ class ElectronAppUpdaterAdapter implements AppUpdaterAdapter {
               installerPath,
               installerIdentity,
               oldExecutableIdentity,
-              dataDirectory: context.handoffDirectory,
+              dataDirectory: context.dataDirectory,
               handoffToken,
               snapshot: recovered,
               nativeInvocationStarted: false,

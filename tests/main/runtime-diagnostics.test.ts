@@ -176,6 +176,31 @@ describe("runtime diagnostics", () => {
     expect(files.map((name) => readFileSync(join(directory, name), "utf8")).join("")).not.toContain("expired");
   });
 
+  it("expires sparse records from the active log after the retention window", () => {
+    const root = fixture();
+    const directory = runtimeDiagnosticsDirectory(root);
+    let now = Date.parse("2030-01-01T00:00:00.000Z");
+    const diagnostics = new RuntimeDiagnostics(directory, {
+      retentionMs: 1_000,
+      now: () => now,
+    });
+    diagnostics.record("app.start");
+    now += 1_001;
+    diagnostics.record("app.stop");
+
+    const content = readFileSync(join(directory, "runtime.log"), "utf8");
+    expect(content).not.toContain('"event":"app.start"');
+    expect(content).toContain('"event":"app.stop"');
+    const current = new Date(now);
+    utimesSync(join(directory, "runtime.log"), current, current);
+    expect(diagnostics.supportReport({
+      version: "0.0.50",
+      platform: "win32",
+      architecture: "x64",
+      runtime: null,
+    })).toMatchObject({ eventCount: 1 });
+  });
+
   it("uses a dedicated directory with private directory and file permissions", () => {
     if (process.platform === "win32") return;
     const root = fixture();

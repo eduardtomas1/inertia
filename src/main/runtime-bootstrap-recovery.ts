@@ -171,6 +171,6 @@ export async function prepareRuntimeBootstrapRecovery(
     modernDarwinRecoveryAuthority,
     runtimeRecoveryBlocked: !modernRecoveryReady
       || bootstrapSafety.legacyRecoveryCandidates.length > 0
-      || runtimeBootstrapAdmissionBlocked(dataDirectory),
+      || runtimeBootstrapAdmissionBlocked(dataDirectory, bootstrapSafety.systemBootId),
   };
 }

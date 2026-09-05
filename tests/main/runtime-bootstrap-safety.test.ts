@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readdirSync,
   rmSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -389,6 +390,7 @@ describe("runtime bootstrap safety", () => {
       .toMatchObject({ snapshotDigest: modernDescriptor?.snapshotDigest });
     expect(new LegacyRuntimeRecoveryAuthorityJournal(dataDirectory)
       .pending("darwin", bootId)).toEqual([legacyGenerationId]);
+    expect(runtimeBootstrapAdmissionBlocked(dataDirectory, bootId, "darwin")).toBe(false);
   });
 
   it("offers and binds only unchanged concrete-boot Darwin state", async () => {
@@ -572,7 +574,7 @@ describe("runtime bootstrap safety", () => {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       expect(prepareRuntimeBootstrapSafety(dataDirectory, "win32"))
         .toMatchObject({ preserveAttachments: true });
-      expect(runtimeBootstrapAdmissionBlocked(dataDirectory)).toBe(true);
+      expect(runtimeBootstrapAdmissionBlocked(dataDirectory, bootId, "win32")).toBe(true);
       expect(new RuntimeGenerationLeaseJournal(dataDirectory).all())
         .toEqual([expect.objectContaining({ runtimeGenerationId: generationId })]);
       expect(new RuntimeCleanupReceiptJournal(dataDirectory).pending()).toEqual([]);
@@ -1164,7 +1166,7 @@ describe("runtime bootstrap safety", () => {
     ]);
   });
 
-  it("publishes an exact replayable authority without clearing the lease", () => {
+  it.each(["darwin", "linux", "win32"] as const)("admits exact replayable %s authority without clearing the lease", (platform) => {
     const root = mkdtempSync(join(tmpdir(), "inertia-bootstrap-safety-"));
     const dataDirectory = join(root, "runtime");
     const generationId = "30000000-0000-4000-8000-000000000003:12";
@@ -1178,19 +1180,55 @@ describe("runtime bootstrap safety", () => {
       dataDirectory,
       [generationId],
       bootId,
-      "darwin",
+      platform,
     )).toBe(true);
     expect(new LegacyRuntimeRecoveryAuthorityJournal(dataDirectory)
-      .pending("darwin", bootId)).toEqual([generationId]);
+      .pending(platform, bootId)).toEqual([generationId]);
     leases.refresh();
     expect(leases.all()).toMatchObject([
       { runtimeGenerationId: generationId, systemBootId: "unavailable" },
     ]);
-    expect(prepareRuntimeBootstrapSafety(dataDirectory, "darwin")).toEqual({
+    expect(prepareRuntimeBootstrapSafety(dataDirectory, platform)).toEqual({
       systemBootId: bootId,
       preserveAttachments: true,
       legacyRecoveryCandidates: [],
     });
+    expect(runtimeBootstrapAdmissionBlocked(dataDirectory, bootId, platform)).toBe(false);
+    expect(runtimeBootstrapAdmissionBlocked(dataDirectory, "unavailable", platform)).toBe(true);
+    expect(runtimeBootstrapAdmissionBlocked(dataDirectory, bootId,
+      platform === "darwin" ? "win32" : "darwin")).toBe(true);
+
+    const unknownGenerationId = "30000000-0000-4000-8000-000000000003:43";
+    expect(leases.publish(unknownGenerationId, bootId)).toBe(true);
+    expect(runtimeBootstrapAdmissionBlocked(dataDirectory, bootId, platform)).toBe(true);
+  });
+
+  it.each(["partial", "malformed", "new owned state"] as const)("blocks legacy admission with %s evidence after consent", (invalidState) => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-bootstrap-safety-"));
+    const dataDirectory = join(root, "runtime");
+    const generationIds = [
+      "30000000-0000-4000-8000-000000000003:44",
+      "30000000-0000-4000-8000-000000000003:45",
+    ];
+    const bootId = "test:00000000-0000-4000-8000-000000000001";
+    directories.push(root);
+    mkdirSync(dataDirectory, { recursive: true, mode: 0o700 });
+    const leases = new RuntimeGenerationLeaseJournal(dataDirectory);
+    for (const id of generationIds) expect(leases.publish(id, "unavailable")).toBe(true);
+    expect(authorizeLegacyRuntimeRecovery(dataDirectory, generationIds, bootId, "darwin")).toBe(true);
+    expect(runtimeBootstrapAdmissionBlocked(dataDirectory, bootId, "darwin")).toBe(false);
+
+    const hash = createHash("sha256").update(generationIds[0]).digest("hex");
+    const authorityPath = join(dataDirectory, `.runtime-legacy-recovery-authority-${hash}.json`);
+    if (invalidState === "partial") {
+      unlinkSync(authorityPath);
+    } else if (invalidState === "malformed") {
+      writeFileSync(authorityPath, "{", { mode: 0o600 });
+    } else {
+      writeFileSync(join(dataDirectory, ".runtime-owned-unknown.json"), "{}", { mode: 0o600 });
+    }
+    expect(runtimeBootstrapAdmissionBlocked(dataDirectory, bootId, "darwin")).toBe(true);
+    expect(new RuntimeGenerationLeaseJournal(dataDirectory).all()).toHaveLength(2);
   });
 
   it("keeps an acknowledged current-boot authority for supervisor replay", () => {

@@ -164,6 +164,8 @@ test("the NSIS installer never terminates install-root processes", async () => {
   expect(include).toContain("Setup will not force-close it.");
   expect(include).not.toContain("$(appRunning)");
   expect(include).not.toMatch(/\b(?:Stop-Process|taskkill|KILL_PROCESS)\b/u);
+  expect(include).toContain("nsExec::Exec /TIMEOUT=15000");
+  expect(include).not.toMatch(/IS_POWERSHELL_AVAILABLE|Set-ExecutionPolicy|Get-ExecutionPolicy/u);
 });
 
 test.runIf(process.platform === "win32")(

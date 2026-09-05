@@ -82,6 +82,7 @@ function unavailableLegacyRecoveryCandidates(
   authorities: LegacyRuntimeRecoveryAuthorityJournal,
   platform: NodeJS.Platform,
   systemBootId: string,
+  includeAuthorized = false,
 ): string[] {
   const supportedPlatform = legacyRecoveryPlatform(platform);
   if (
@@ -171,7 +172,7 @@ function unavailableLegacyRecoveryCandidates(
     .filter((lease) => (
       lease.systemBootId === "unavailable"
       && !separatelyAuthorizedModernIds.has(lease.runtimeGenerationId)
-      && !alreadyAuthorized.has(lease.runtimeGenerationId)
+      && (includeAuthorized || !alreadyAuthorized.has(lease.runtimeGenerationId))
     ))
     .map(({ runtimeGenerationId }) => runtimeGenerationId);
 }
@@ -190,12 +191,30 @@ export function runtimeWorkspacePath(
 
 export function runtimeBootstrapAdmissionBlocked(
   dataDirectory: string,
+  systemBootId: string,
+  platform: NodeJS.Platform = process.platform,
 ): boolean {
-  const leases = new RuntimeGenerationLeaseJournal(dataDirectory);
-  if (!leases.isValid()) return true;
-  const ownedProcesses = new RuntimeOwnedProcessJournal(dataDirectory);
-  return leases.all().some(({ runtimeGenerationId }) =>
-    ownedProcesses.records(runtimeGenerationId) === null);
+  try {
+    const leases = new RuntimeGenerationLeaseJournal(dataDirectory);
+    if (!leases.isValid()) return true;
+    const ownedProcesses = new RuntimeOwnedProcessJournal(dataDirectory, { platform });
+    const supportedPlatform = legacyRecoveryPlatform(platform);
+    const authorities = new LegacyRuntimeRecoveryAuthorityJournal(dataDirectory);
+    const authorized = new Set(supportedPlatform
+      ? authorities.pending(supportedPlatform, systemBootId)
+      : []);
+    // A consent-bound legacy lease must survive until the runtime acknowledges
+    // recovery. Revalidate the same exact legacy/modern journal boundary used
+    // for consent; a matching authority alone cannot excuse new owned state.
+    const eligible = new Set(unavailableLegacyRecoveryCandidates(
+      dataDirectory, leases, authorities, platform, systemBootId, true,
+    ));
+    return leases.all().some(({ runtimeGenerationId }) =>
+      ownedProcesses.records(runtimeGenerationId) === null
+      && !(eligible.has(runtimeGenerationId) && authorized.has(runtimeGenerationId)));
+  } catch {
+    return true;
+  }
 }
 
 export function prepareRuntimeBootstrapSafety(

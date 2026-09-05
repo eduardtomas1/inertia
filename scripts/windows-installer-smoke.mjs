@@ -730,6 +730,7 @@ async function proveInstallerPreservesLiveInstallRootProcess(options) {
         ["/S", `/D=${options.installDirectory}`],
         {
           label: "Windows installer live-process refusal",
+          env: { ...process.env, PSExecutionPolicyPreference: "Restricted" },
           timeoutMs: INSTALL_TIMEOUT_MS,
           windowsVerbatimArguments: true,
         },
@@ -773,6 +774,7 @@ async function installWhileSiblingProcessLives(options) {
       ["/S", `/D=${options.installDirectory}`],
       {
         label: options.label,
+        env: { ...process.env, PSExecutionPolicyPreference: "Restricted" },
         timeoutMs: INSTALL_TIMEOUT_MS,
         windowsVerbatimArguments: true,
       },
@@ -780,7 +782,7 @@ async function installWhileSiblingProcessLives(options) {
     if (blocker.exitCode !== null || blocker.signalCode !== null) {
       throw new Error("The Windows installer terminated a sibling process.");
     }
-    console.log("Windows installer accepted the sibling-path boundary without terminating it.");
+    console.log("Windows installer accepted the sibling-path boundary under process-scoped Restricted policy without terminating it.");
   } finally {
     await stopInstallRootBlocker(blocker);
     await rm(siblingDirectory, { force: true, recursive: true });
@@ -886,6 +888,7 @@ export async function main() {
     } else {
       await runBounded(installer, ["/S", `/D=${installDirectory}`], {
         label: installLabel,
+        env: { ...process.env, PSExecutionPolicyPreference: "Restricted" },
         timeoutMs: INSTALL_TIMEOUT_MS,
         windowsVerbatimArguments: true,
       });

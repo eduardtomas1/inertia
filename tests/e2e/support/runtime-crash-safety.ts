@@ -1,9 +1,9 @@
+import { openLocalProjectFromDialog } from "./add-project";
 import { expect, type TestInfo } from "@playwright/test";
 import { createHash, randomUUID } from "node:crypto";
 import { copyFileSync, readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import Database from "better-sqlite3";
-
 import { readSystemBootId } from "../../../src/main/system-boot-id";
 import { RuntimeCleanupReceiptJournal } from
   "../../../src/main/runtime-cleanup-receipts";
@@ -29,7 +29,6 @@ import {
   ensureWorkspaceTools,
   selectWorkspaceTool,
 } from "./workspace-tools";
-
 interface RuntimeObservation {
   readonly observedAt: string;
   readonly generation: number;
@@ -500,6 +499,7 @@ export async function expectRuntimeCrashRecovery(
       }));
     }, workspaceDirectory);
     await addFirstProject.click();
+    await openLocalProjectFromDialog(page);
     await expect(page.getByRole("heading", {
       name: /^What should we build in .+\?$/u,
       level: 3,
@@ -526,7 +526,7 @@ export async function expectRuntimeCrashRecovery(
   };
   const previousConversationId = activeConversationId();
   const activeConversationRow = projectNavigation.locator(
-    '.conversation-row[aria-current="page"]',
+    '.activity-thread-select[aria-current="page"]',
   );
   const previousActiveConversationRow = await activeConversationRow.count() > 0
     ? await activeConversationRow.elementHandle()

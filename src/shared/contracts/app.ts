@@ -331,7 +331,7 @@ export const defaultSettings: AppSettings = {
   autoCollapseWorkLog: true,
   showChangedFileSummaries: true,
   autoScrollToFinalAnswer: true,
-  sidebarMode: "classic",
+  sidebarMode: "activity",
   projectGrouping: "separate",
   autoOpenPlan: false,
   confirmDestructiveActions: true,

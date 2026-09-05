@@ -18,6 +18,7 @@ import {
 } from "./runtime-owned-process-posix.js";
 import {
   monitorLinuxGuardianTerminal, linuxGuardianExecutableMatches,
+  linuxGuardianTerminalAuthority,
   readLinuxGuardianClaimedAsync,
   readLinuxGuardianOwnedAsync,
   readLinuxGuardianReadyWithRetriesAsync,
@@ -577,11 +578,9 @@ async function admitLinuxGuardian(
         && RuntimeOwnedProcessJournal.identityMatches(owned, observedOwned),
       );
     }
-    // A very short payload can advance beyond the transient `owned` marker
-    // before the asynchronous exec helper observes it. Only the monitor's
-    // exact hardened post-authorization terminal marker is equivalent proof;
-    // ordinary cancellation and parent-loss terminals remain unaccepted.
-    authorized ||= claim.authorizationObserved;
+    // Fast payloads can finish before the monitor observes the exact post-exec terminal.
+    authorized ||= claim.authorizationObserved
+      || linuxGuardianTerminalAuthority(owned.process as LinuxProcessIdentity, guardianPath, "/proc", "inertia-exdone");
     if (!authorized) {
       throw new Error("The Linux owned process guardian could not be authorized.");
     }

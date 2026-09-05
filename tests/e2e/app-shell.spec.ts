@@ -1,3 +1,4 @@
+import { openLocalProjectFromDialog } from "./support/add-project";
 import { expect, test } from "@playwright/test";
 import { execFile } from "node:child_process";
 import { join } from "node:path";
@@ -50,11 +51,9 @@ test("starts without a demo and adds the first real project", async () => {
   await expect(page.getByRole("heading", { name: "Bring a project into focus." })).toBeVisible();
   await expect(page.getByText("Getting Started", { exact: true })).toHaveCount(0);
   const sidebar = page.getByRole("complementary", { name: "Project navigation", exact: true });
-  await expect(sidebar.getByRole("button", { name: "New chat", exact: true })).toHaveCount(0);
-  await sidebar.locator(".sidebar-mode-switch").getByRole("button", { name: "Work", exact: true }).click();
+  await expect(sidebar.getByRole("button", { name: "New chat", exact: true })).toBeDisabled();
   await expect(sidebar.getByText("No projects yet", { exact: true })).toHaveCount(1);
   await expect(sidebar.getByText("No work yet", { exact: true })).toHaveCount(0);
-  await sidebar.locator(".sidebar-mode-switch").getByRole("button", { name: "Projects", exact: true }).click();
 
   await electronApp.evaluate(({ dialog }, directory) => {
     Reflect.set(dialog, "showOpenDialog", async () => ({
@@ -64,6 +63,7 @@ test("starts without a demo and adds the first real project", async () => {
     }));
   }, workspaceDirectory);
   await page.getByRole("button", { name: "Add your first project" }).click();
+  await openLocalProjectFromDialog(page);
   await expect(page.getByRole("heading", {
     name: /^What should we build in .+\?$/u,
     level: 3,
@@ -211,7 +211,7 @@ test("keeps Send and Stop clear across submission, cancellation, theme, and scal
         filter: style.filter,
       };
     });
-    expect(readyGeometry.width).toBe(readyGeometry.height);
+    expect(readyGeometry.width).toBeCloseTo(readyGeometry.height, 3);
     expect(readyGeometry.width).toBeGreaterThanOrEqual(28);
     expect(readyGeometry.borderRadius).toBe("50%");
     await expect.poll(() => readySend.evaluate((button) =>
@@ -314,14 +314,10 @@ test("keeps Send and Stop clear across submission, cancellation, theme, and scal
         boxShadow: style.boxShadow,
       };
     });
-    expect({
-      width: stopGeometry.width,
-      height: stopGeometry.height,
-    }).toEqual({
-      width: darkSendGeometry.width,
-      height: darkSendGeometry.height,
-    });
-    expect(stopGeometry.width).toBe(stopGeometry.height);
+    // Fractional layout coordinates can differ by floating-point roundoff.
+    expect(stopGeometry.width).toBeCloseTo(darkSendGeometry.width, 3);
+    expect(stopGeometry.height).toBeCloseTo(darkSendGeometry.height, 3);
+    expect(stopGeometry.width).toBeCloseTo(stopGeometry.height, 3);
     expect(stopGeometry.width).toBeGreaterThanOrEqual(36);
     expect(stopGeometry.borderRadius).toBe("50%");
     expect(stopGeometry.boxShadow).toBe("none");
@@ -396,10 +392,7 @@ test("opens a settled chat directly and does not redirect when Work filters hide
   await expect(page.getByText("Start with a clear chat.")).toHaveCount(0);
 
   const sidebar = page.getByRole("complementary", { name: "Project navigation", exact: true });
-  await sidebar.locator(".sidebar-mode-switch").getByRole("button", { name: "Work", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Settled direct-open", level: 1 })).toBeVisible();
-  await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
-  await sidebar.locator(".sidebar-mode-switch").getByRole("button", { name: "Projects", exact: true }).click();
+  await expect(sidebar.getByRole("list", { name: "Work" })).toBeVisible();
 
   const restored = new Database(databasePath);
   restored.prepare(`
@@ -519,26 +512,15 @@ test("keeps every ordinary New chat entry point isolated from the viewed chat", 
     testDirectory,
     workspaceDirectory,
   );
-  const projectsMode = sidebar.getByRole("group", { name: "Sidebar mode" })
-    .getByRole("button", { name: "Projects", exact: true });
-  await projectsMode.click();
-  await expect(projectsMode).toHaveAttribute("aria-pressed", "true");
-  const projectQuickChat = sidebar.getByRole("button", { name: "New chat in Inertia", exact: true });
-  const projectRow = projectQuickChat.locator("xpath=../..");
-  await expect(projectRow).toHaveClass(/(?:^|\s)project-row(?:\s|$)/u);
-  await page.mouse.move(800, 400);
-  await expect(projectQuickChat).toHaveCSS("opacity", "0");
-  await projectRow.hover();
-  await expect(projectQuickChat).toHaveCSS("opacity", "1");
-  await page.screenshot({ path: testInfo.outputPath("project-row-quick-chat.png") });
-  await page.mouse.move(800, 400);
-  await expect(projectQuickChat).toHaveCSS("opacity", "0");
+  await sidebar.getByRole("button", { name: "Filter work by project" }).click();
+  await sidebar.getByRole("button", { name: "Project actions for Inertia", exact: true }).click();
+  const projectQuickChat = sidebar.getByRole("menuitem", { name: "New chat in Inertia", exact: true });
   await projectQuickChat.focus();
   await expect(projectQuickChat).toBeFocused();
-  await expect(projectQuickChat).toHaveCSS("opacity", "1");
+  await page.screenshot({ path: testInfo.outputPath("project-quick-chat.png") });
   await projectQuickChat.click();
   await expectIsolatedConversation(count);
-  await expect(sidebar.getByLabel("Inertia threads")).toBeVisible();
+  await expect(sidebar.getByRole("list", { name: "Work" })).toBeVisible();
   await expect(sidebar.getByRole("menu", { name: "Project actions for Inertia" })).toHaveCount(0);
 
   count = await seedViewedConversationContext(

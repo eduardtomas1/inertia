@@ -80,11 +80,11 @@ describe("cohesive composer dock", () => {
     );
     const toolbar = toolbarSource.slice(toolbarStart);
     const controlOrder = [
+      "<ComposerSendActions",
       "<ModelChooser",
       "<ComposerSettings",
       "<ComposerMoreMenu",
       "<UsageIndicator",
-      "<ComposerSendActions",
     ].map((marker) => toolbar.indexOf(marker));
 
     expect(toolbarStart).toBeGreaterThan(-1);

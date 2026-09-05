@@ -140,6 +140,10 @@ export const appCommandSchemas = [
       payload: z.object({
         name: z.string().trim().min(1).max(80),
         path: z.string().min(1).max(4096),
+        clone: z.object({
+          url: z.string().min(1).max(2048),
+          directoryName: z.string().min(1).max(80),
+        }).strict().optional(),
       }).strict(),
     })
     .strict(),

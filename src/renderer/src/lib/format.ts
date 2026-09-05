@@ -15,6 +15,16 @@ export function formatRelativeTime(value: string): string {
   return new Intl.DateTimeFormat(INTERFACE_LOCALE, { month: "short", day: "numeric" }).format(timestamp);
 }
 
+/** Compact elapsed labels keep Work cards readable at narrow sidebar widths. */
+export function formatWorkAge(value: string): string {
+  const seconds = Math.max(0, (Date.now() - Date.parse(value)) / 1_000);
+  if (seconds < 60) return "now";
+  if (seconds < 3_600) return `${Math.floor(seconds / 60)}m`;
+  if (seconds < 86_400) return `${Math.floor(seconds / 3_600)}h`;
+  if (seconds < 2_592_000) return `${Math.floor(seconds / 86_400)}d`;
+  return formatRelativeTime(value);
+}
+
 export function formatClockTime(value: string): string {
   return new Intl.DateTimeFormat(INTERFACE_LOCALE, {
     hour: "numeric",

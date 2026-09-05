@@ -1671,12 +1671,10 @@ async function prefetchedOverlayMeasurements(page: Page): Promise<{
   settingsFirstOpenMs: number;
 }> {
   const settingsFirstOpenMs = await rendererInteractionMeasurement(page, {
-    triggerSelector: ".sidebar-footer .sidebar-destination:last-child",
+    triggerSelector: '.sidebar-footer button[aria-label="Settings"]',
     targetSelector: ".settings-view",
   });
-  await page.locator("button.sidebar-destination")
-    .filter({ hasText: "Workspace" })
-    .click();
+  await page.getByRole("button", { name: "Workspace", exact: true }).click();
   await page.locator(".chat-workspace").waitFor();
 
   const commandPaletteFirstOpenMs = await rendererInteractionMeasurement(page, {

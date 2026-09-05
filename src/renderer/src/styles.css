@@ -1288,48 +1288,7 @@ textarea {
   display: none;
 }
 
-.sidebar-mode-switch {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 4px;
-  margin-top: 8px;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-}
 
-.sidebar-mode-switch button {
-  display: flex;
-  min-width: 0;
-  min-height: 33px;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  border: 1px solid transparent;
-  border-radius: 9px;
-  color: var(--text-muted);
-  background: transparent;
-  font-size: 11.5px;
-  font-weight: 600;
-  transition: color var(--motion-base) var(--motion-ease), background var(--motion-base) var(--motion-ease), border-color var(--motion-base) var(--motion-ease);
-}
-
-.sidebar-mode-switch button:not([aria-pressed="true"]):hover {
-  color: var(--text-soft);
-  background: color-mix(in srgb, var(--surface-hover) 52%, transparent);
-}
-
-.sidebar-mode-switch button[aria-pressed="true"] {
-  border: 1px solid color-mix(in srgb, var(--panel-border) 80%, transparent);
-  color: var(--text);
-  background: var(--surface-hover);
-  box-shadow: var(--glass-inset);
-}
-
-.sidebar-mode-switch button[aria-pressed="true"] svg {
-  color: var(--accent);
-}
 
 .sidebar-project-rename {
   display: grid;
@@ -1711,7 +1670,6 @@ textarea {
 @media (prefers-reduced-motion: reduce) {
   .activity-thread,
   .activity-thread-menu-button,
-  .sidebar-mode-switch button,
   .thread-status-dot.is-working {
     animation: none;
     transition: none;
@@ -1753,11 +1711,11 @@ textarea {
   flex-direction: column;
   overflow: hidden;
   border: 1px solid var(--panel-border);
-  border-radius: var(--radius-lg);
+  border-radius: 10px;
   background: var(--surface);
   background-image: var(--surface-grain);
   background-size: var(--surface-grain-size);
-  box-shadow: var(--shadow), var(--glass-inset);
+  box-shadow: none;
 }
 
 .workspace-header {

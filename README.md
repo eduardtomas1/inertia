@@ -1,309 +1,60 @@
 <p align="center">
-  <img src="resources/icon.png" width="92" alt="Inertia logo" />
+  <img src="resources/icon.png" width="72" alt="Inertia logo" />
 </p>
 
 <h1 align="center">Inertia</h1>
+<p align="center">A calm desktop workspace for coding with agents.</p>
 
-<p align="center">
-  Unstoppable execution.<br />
-  A calm desktop workspace for building with coding agents.
-</p>
+![Inertia — project sidebar and floating composer in dark mode](docs/screenshots/inertia-dark.png)
 
-![Inertia in dark mode](docs/screenshots/inertia-dark.png)
+Inertia brings agent conversations, project files, Git review, and terminals into one local workspace. Use the coding accounts you already have with **Codex, Claude, Cursor, Gemini CLI, Kimi Code, or OpenCode**.
 
-Inertia keeps the coding loop in one clear place: agent conversations, project files, live changes, plans, previews, Git actions, and a real terminal. It stays spacious and quiet when you need focus, then puts the right controls close by when it is time to move.
+[Download the latest release](https://github.com/eduardtomas1/inertia/releases/latest) · [Installation guide](docs/INSTALLING.md) · [Changelog](CHANGELOG.md)
 
-![Start a new project in Inertia](docs/screenshots/inertia-new-project.png)
+## Start working
 
-### The whole coding loop, without the noise
+1. Install the build for your platform: macOS, Windows, or Linux, on Intel/AMD or ARM64.
+2. Add a local folder or clone a repository from its HTTPS or SSH Git URL.
+3. Open **Settings → Providers**, connect a provider, and start a chat.
 
-- Connect locally installed Codex, Claude, Cursor, Gemini CLI, Kimi Code, or OpenCode accounts without leaving the app.
-- Find models quickly through a searchable provider-aware palette, then save complete harness, backend, model, and reasoning routes as Favorites.
-- See provider-supplied thinking summaries, remaining context, and account usage through one compact context control.
-- Work with streaming conversations, resumable sessions, native plans, agent questions, image, PDF, text, CSV, and Excel inputs, cancellation, and supervised approvals whenever the selected provider supports them; open goals and verified native sessions directly with `/goal` and `/resume`.
-- Launch a saved Duo from one shared prompt into two independently named chats, each with its own project, model route, reasoning, and access mode, with an optional independent third-model judgment.
-- Open any second chat beside the current one—even from another project—with its own transcript, draft, files, Git changes, terminal sessions, plan, and preview.
-- Move up to eight chats into independent native windows with remembered bounds, optional always-on-top, and an explicit return to the main workspace while their agent work continues.
-- Bring exact visible messages from another chat into the next request with a reviewable, bounded context packet whose source remains visible after reload.
-- While an agent is running, press Enter to send an immediate text follow-up or Tab to queue it for the next completed turn. Each chat keeps its own visible FIFO queue across reloads and detached windows, with explicit send-now and remove controls; failed or cancelled work never consumes the queued draft.
-- Keep up to 12 unfinished text prompts in a local stash with their exact harness, backend, model, and reasoning route, then restore one into either side of a split workspace without moving attachments or credentials.
-- Save up to 30 reusable prompt presets, search and organize them, and insert one into the selected composer without sending it. Optional route binding stores only harness, backend, model, and reasoning identity—never attachments, chat context, endpoints, continuation state, or credentials.
-- Start from a compact Environment summary with Changes, worktree, branch, Git actions, validated local servers, provider context, repository, editor, sent attachments, and delegated work, while keeping the full workspace tools one click away.
-- Keep terminal tabs alive while moving through Changes, Files, Plan, and Browser.
-- Open up to eight ephemeral pages in the chat-owned Inertia Browser, then let Codex, Claude, Cursor, Gemini CLI, Kimi Code, or OpenCode inspect the local app, navigate, click, type, scroll, switch pages, and capture bounded local screenshots through the same visible surface.
-- Compose reviewed Inertia capability packs above every supported native harness, with deterministic manifests, bounded hidden guidance, fail-closed host tools, and a semantic front-end audit that never pretends local screenshots are model-visible.
-- Continue an eligible native Codex, Claude, Cursor, Kimi Code, or OpenCode session in its owning integrated terminal only when Inertia can verify the exact saved identity, route, checkout, and process lifecycle. Gemini conversations deliberately use application-reconstructed context instead of a loadable native session.
-- Receive quiet provider-scoped warnings when an authoritative five-hour or weekly quota reaches 25%, 15%, or 5% remaining.
-- Generate a Discord release summary from the latest GitHub or GitLab release diff, grouped into improvements, implementations, bugs, and other changes.
-- Recover local history from validated rotating SQLite backups, or use explicit native-dialog export and import flows when manual recovery is required.
-- Open the optional Inertia Private Connect PWA through your private Tailscale network without exposing files, terminals, approvals, Git, provider settings, or Full Access to the browser.
-- Search commands, projects, and threads from one keyboard-friendly palette.
-- Resize or collapse either side of the workspace whenever the conversation needs more room.
-- Pair System, Light, or Dark appearance with Inertia, Grove, Ocean, Ember, or Iris color themes, each tuned for clear semantic contrast.
+Search chats across projects, or narrow the list through **All projects**. Open project actions from the picker. Running, waiting, completed, and snoozed chats stay in the same sidebar.
 
-![Choose an appearance and color theme in Inertia](docs/screenshots/inertia-theme-library.png)
+![Find a project from the sidebar](docs/screenshots/inertia-project-picker.png)
 
-![Two independent projects sharing a split Inertia workspace](docs/screenshots/inertia-split-workspace.png)
+## One workspace for the coding loop
 
-### One focused chat, its own window
+- **Chat with context.** Attach images, documents, and spreadsheets; mention files; choose a model, reasoning level, and access mode. Send follow-ups immediately or queue them for the next turn.
+- **Work side by side.** Open two chats in a split workspace, launch a saved Duo, or move a chat into its own window. Each keeps its own project, files, terminal, and draft.
+- **Review and ship.** Inspect diffs, ask about selected code, commit chosen files, manage branches and worktrees, and check PR readiness.
+- **Keep useful work close.** Pin or snooze tasks, save prompts, follow plans and goals, and inspect locally recorded usage.
 
-Open a chat in a native window when it needs a separate screen or desktop space. The window keeps only that conversation, its transcript, and its one authoritative composer—no project sidebar or cross-chat controls. Text drafts move with the composer, while attachments, references, selected context, skills, route changes, and other transient state must be sent or removed before ownership can move. Closing the window leaves the chat and any active work alive; **Return chat to main window** docks it explicitly.
+![Two conversations with independent composers in a split workspace](docs/screenshots/inertia-split-workspace.png)
 
-![A focused Inertia chat in its own native window](docs/screenshots/inertia-detached-chat.png)
+## Local by default
 
-### Share only the context you choose
+History and preferences stay on your computer. Providers retain their own authentication; custom backend credentials use the operating system credential vault. Provider capabilities remain explicit, including approvals, cancellation, context, and usage.
 
-**Add context from another chat** opens a source-and-preview flow for selecting exact visible user or assistant messages. Inertia stores an immutable bounded packet with source provenance—not the source session, tools, reasoning, credentials, or an open-ended transcript—and shows it beside the request after sending. Different workspaces require an explicit acknowledgement because referenced files may not exist in the destination. Codex, Claude, Cursor, Gemini CLI, Kimi Code, and OpenCode can request this same chooser through a provider-neutral host action, but the agent cannot browse chats or select the messages itself.
+**Supervised** keeps provider approvals active. **Auto-edit** allows supported file edits. **Full Access** is an explicit choice for a workspace and task you trust.
 
-![Choose exact messages to bring into another Inertia chat](docs/screenshots/inertia-context-handoff.png)
-
-### Two perspectives, one prompt
-
-The lightning action beside **New chat** opens a focused Duo setup. Give both chats a name, choose their projects and complete provider routes, then send one shared prompt to both. Inertia creates the conversations safely, starts the acknowledged pair together, and opens the results in the split workspace without pretending that their sessions, permissions, tools, or working directories are shared.
-
-Save one bounded default Duo for the combinations you use often. The preset stores only safe route identity and chat names—not prompts, projects, credentials, or provider-specific secrets—and Inertia warns when both agents will edit the same checkout.
-
-When you explicitly enable third-model comparison, Inertia locks the two source chats and their first Duo turns against deletion, waits for both turns to reach authoritative terminal states, then starts a separately configured judge chat. The compact judge disclosure stays out of the way during setup. If you remain on that Duo, the completed judge becomes the primary chat automatically; newer navigation, split changes, Settings, or source follow-ups cancel the handoff. The judge receives only the bounded shared brief, each source status, and attributed visible assistant output—not source sessions, tools, permissions, credentials, attachments, reasoning, or hidden context. Failed or interrupted judgments are never retried silently; you can retry explicitly or cancel the lock.
-
-![Configure two agent perspectives from one shared prompt](docs/screenshots/inertia-duo.png)
-
-### Review changes without losing context
-
-- Read every file and hunk in a focused diff view, then mark progress as you review.
-- Review modified files across a project-root repository and nested module repositories without flattening their Git identity.
-- Use the branch-aware header action or complete Git menu for Commit, Pull, Push or Publish, and Pull request, with ahead/behind state and exact explanations when an action is unavailable.
-- Select a line range to ask a read-only question beside the matching hunk, request a focused revision, save a note, or carry the exact context into the next prompt.
-- Generate a concise agent summary for every current file and hunk, including evidence-backed hints for areas worth extra attention.
-- Revert only selected changed lines across staged, unstaged, and mixed files with current-state validation, a recovery backup, and Undo.
-- Commit only the exact prospective content you reviewed and the paths you chose, while leaving unrelated staged work alone and seeing which selected hunks remain unreviewed.
-
-Nested module repositories keep their own review marks, notes, questions, and selective reverts. Agent revision requests and generated whole-repository summaries remain limited to the project-root repository because their recovery checkpoint must cover the same Git worktree; Inertia explains that boundary instead of presenting nested repositories as temporarily unavailable.
-
-![Responsive Files navigation with a selected file and code range](docs/screenshots/pr-162-exact-files-resized-panel-light.png)
-
-Picker, paste, and drop attachments remain provisional until the privileged host acknowledges a per-document import lease. Only the exact committed subset becomes visible to the provider; navigation, renderer loss, cancellation, timeout, partial failure, and stale chat or turn authority reclaim every uncommitted intermediate.
-
-![The responsive composer stays usable while attachments are validated](docs/screenshots/pr-attachment-import-responsive-light-wide.png)
-
-### Know whether a change is actually ready
-
-The local pre-merge confidence view brings the exact checkout and head together with hosted CI, Codex review freshness, unresolved conversations, affected areas, focused and portability evidence, bundle deltas, and release readiness. Stale or missing evidence stays visibly incomplete instead of being decorated as green.
-
-![Exact-head checks, review, and release readiness in the pre-merge confidence view](docs/screenshots/pre-merge-confidence-exact-dark-wide.png)
-
-### Conversations that explain the work
-
-- The transcript reads like one calm engineering document: a light request, an understandable workstream, a clean final answer, and a quiet supporting ledger.
-- Responses render polished Markdown with safe project links, highlighted code, copy and wrap controls, and tables that can be copied as Markdown or CSV.
-- Provider updates and compact tool activity appear in the order they happened. Only adjacent calls fold together, so a new update naturally starts the next stretch of work.
-- The search-first Work sidebar groups recent, earlier, done, and snoozed tasks into compact rows with their genuine provider mark, repository, branch, status, and time.
-- Sent images, documents, CSV files, and Excel workbooks stay visible beside the message that owns them after sending, reload, and restart; every accepted type has a private preview, with bounded worksheet tables for `.xlsx` and `.xls`.
-- Open project-file references from prose or fenced-code labels directly in Files, then edit supported text files in a focused dialog that refuses to overwrite content changed since it was opened.
-- Reasoning summaries, approvals, questions, warnings, final answers, and turn checkpoints stay together in the same chronological turn.
-- Codex-native goals and Inertia-local objectives keep their source visible. Native goals can start before the first ordinary message, continue across automatic turns, and resume truthfully after Stop or restart, while next-turn skills stay route-bound and never expose provider paths or contents.
-- Each completed request keeps its original agent, model backend, and model attribution together with a turn-specific before-and-after Git record, when available, that remains useful after the workspace moves on.
-- Completed work logs can collapse quietly; failures and important warnings never disappear inside a successful summary.
-- Long transcripts keep stable rows, use a responsive longer minimap with richer previews of distant requests, and load heavier detail only when opened, while bounded runtime updates resume safely after a restart.
-- The transcript follows live work only while you are near the bottom, so reading earlier context is not interrupted.
-- New final answers can settle at the beginning of the viewport for immediate reading without reclaiming the transcript after deliberate navigation; **Jump to completed answers** controls the behavior in Settings.
-- Provider-reported delegated work remains attached to its parent turn with provider and harness identity, live elapsed time, hierarchy, progress, and terminal outcome. **Guide parent** prepares an ordinary parent follow-up, while direct Stop appears only for an exact live Claude Agent SDK task.
-
-![An active Inertia workstream with interleaved commentary and compact tool activity](docs/screenshots/inertia-workstream.png)
-
-### Truthful goals, skills, and delegated work
-
-- Codex-native goals and Inertia-local objectives are labeled separately, persisted across reconnects, and never substituted for one another.
-- Skills are discovered from the selected Codex or Claude route and attached only to the next turn after privileged revalidation; typing `$` autocompletes only the enabled names reported for that route, and the renderer never receives their filesystem path or content.
-- Delegated agent trees preserve provider-reported parentage, status, ownership, route identity, and elapsed time. Compact views keep separate live or failed branches represented; Guide parent prepares an ordinary supported follow-up, and direct Stop appears only for an exact live Claude Agent SDK task.
-- Codex, Claude, Cursor, Gemini CLI, Kimi Code, and OpenCode chats can use host-owned tools to list, inspect, create, dispatch, follow up, observe, stop, and archive independent top-level Inertia chats after exact user approval. Inertia injects a scoped bridge through each provider's audited native tool or MCP surface, derives project authority locally, bounds recursion and per-turn work, revokes authority at turn settlement, and persists provenance without transcripts, credentials, or provider sessions.
-- Reviewed [harness capability packs](docs/HARNESS_CAPABILITIES.md) compose the same bounded behavior above each native provider transport. Pack identity, tools, instructions, and evaluation metadata produce a deterministic definition digest; project repositories cannot register runtime packs dynamically.
-
-![Goals and delegated agent work in Inertia](docs/screenshots/inertia-agent-workflows.png)
-
-### Keep the workspace moving
-
-- The Work sidebar and transcript keep active, blocked, completed, and failed agent work close to the conversation that owns it, while Environment retains the exact Stop, preview, acknowledge, and dismiss controls for work that still needs action.
-- Native previews, terminals, files, and Git reviews stay scoped to their owning chat when two different projects share the split workspace.
-- App turns, native provider terminals, project actions, reviews, and Git operations share canonical checkout authority, so independent entry points cannot silently edit the same worktree at once.
-- Work-first navigation surfaces chats that are running, waiting for approval or input, completed in the background, unread, failed, or settled.
-- Related checkouts and worktrees can group by their real Git identity, while repository folders remain clearly labeled and independently controllable.
-- Move between branches, use isolated worktrees for parallel threads, and open detected service previews from their owning workspace.
-
-### Let the agent use the browser you can see
-
-Select a chat and open **Browser** directly from the workspace header, or ask the agent to use a Browser tool first and let Inertia lazily create the same page. No prior manual open is required. The chat owns that ephemeral multi-page Inertia Browser: the selected agent can inspect a bounded semantic snapshot, navigate local pages, interact through stable element references, and capture a bounded PNG into local Evidence without launching a separate Playwright browser. Each successful snapshot also includes deterministic current-viewport checks for controls without stable semantic names, clipped or overlapping controls, and small interaction targets. Cursor movement stays visible on the page, while **Evidence** keeps a strictly local, bounded timeline of screenshots, navigation, failed requests, console errors, and fixed agent-action labels for the exact owning chat.
-
-Semantic inspection does not prompt again. Screenshot bitmap bytes are never returned to a provider because arbitrary CSS, canvas, and media pixels cannot be proven secret-free from source inspection. Opening one exact local capture requires a native post-capture confirmation tied to its immutable bytes; Auto-edit and Full Access do not bypass that confirmation. In **Supervised** mode, navigation, typing, clicks, scrolling, and page changes require Inertia's ordinary approval; Auto-edit and Full Access follow their existing provider permission modes. Remote sites continue to open in the system browser and never become agent-controlled embedded content. Browser pages use a non-persistent hardened Electron session with permissions, downloads, popups, and file access denied, and all authority is cancelled when the owning turn or runtime ends. If a page observes a password value, agent snapshots and screenshots stay unavailable until that document navigates away. See the [agent browser design and security boundary](docs/AGENT_BROWSER.md).
-
-![A bounded local Browser evidence timeline beside the visible page](docs/screenshots/pr-166-browser-evidence-light-wide.png)
-
-![Search-first Work rows with provider, repository, branch, status, and time](docs/screenshots/inertia-work.png)
+Optional [Private Connect](docs/PRIVATE_CONNECT.md) provides scoped access from another device over Tailscale while the desktop stays online. Read the [security model](docs/PRIVATE_CONNECT_SECURITY.md) for its boundaries.
 
 ![Inertia in light mode](docs/screenshots/inertia-light.png)
 
-### Find anything without leaving the flow
+## Run from source
 
-![Search commands, projects, and threads in Inertia](docs/screenshots/inertia-search.png)
+Use Node.js **22.13 or newer in the Node 22 line**.
 
-### Understand local agent usage without invented numbers
-
-Usage turns locally recorded terminal-turn token snapshots into a clear 7-, 30-, or 90-day view. Compare measured provider totals, explore daily activity, move between every retained Daily Work date, and switch the breakdown between models and days while coverage labels explain which turns expose enough data to count. Dates before Daily Work existed remain unavailable because Inertia does not invent historical records retroactively.
-
-Inertia does not estimate price from a model name or send usage to a hosted analytics service. When providers do not expose cost, the Cost control stays unavailable and says why. Provider account windows remain separate in Environment because context usage, account quota, and historical processed tokens are different measurements.
-
-![Review retained Daily Work dates](docs/screenshots/inertia-daily-work.png)
-
-![Locally measured provider and model usage in Inertia](docs/screenshots/inertia-usage.png)
-
-### Settings that stay understandable
-
-![Inertia settings in dark mode](docs/screenshots/inertia-settings.png)
-
-- Create, test, enable, and choose model backend profiles without mixing them into the agent harness that runs the conversation.
-- See when a supported provider CLI has an update and run the official update flow without leaving Inertia.
-- Use Gemini CLI 0.58.0 or newer through its native ACP transport. Inertia uses the authentication method and credentials selected by the CLI, negotiates only advertised models and images, and leaves account connection to the official interactive `gemini` flow. Google OAuth uses Gemini's manual-code mode so the reviewed sign-in URL opens exactly once and the code is pasted back into the provider terminal.
-- Use native Kimi Code, the built-in Kimi coding profile through the Claude harness, or a compatible custom endpoint with explicit models and routing.
-- Existing conversations keep their original execution route. Supported same-backend model changes can continue in place; changing the harness or backend opens a clearly separated new chat.
-- Choose whether Inertia opens on the compact Environment summary or the full workspace tools; fresh installs use Environment, and no decorative Ready label competes with its actionable rows.
-
-### Discord release summaries
-
-Open **Settings → Discord** to configure release posts. Add the public GitHub or GitLab repository URL, then paste a Discord incoming webhook URL from the target channel's **Edit Channel → Integrations → Webhooks** settings. Inertia stores that webhook only in the operating system credential vault; the renderer and SQLite database receive configured/unconfigured state, never the saved URL. Press **Generate** to compare the latest release tag with the previous one and post a bounded local diff summary with **Millores**, **Implementacions**, **Bugs**, and **Altres**. Empty Discord settings stay blank and do not block startup.
-
-![Configure credential-safe Discord release summaries](docs/screenshots/inertia-discord-settings.png)
-
-### Canary release channel
-
-Canary installs coexist with stable Inertia as a separate application and local
-profile. **Settings → General → Application updates** identifies the active
-channel, reports whether the current immutable Canary package is retained as
-last-known-good, and opens or reveals a reverified rollback package after an
-update. Canary
-never shares stable's protocol, database, Chromium profile, updater cache, feed,
-or package names.
-
-![Inertia Canary channel status and rollback controls](docs/screenshots/inertia-canary-channel.png)
-
-### Private Connect, without surrendering the desktop
-
-Inertia Private Connect is an opt-in, Tailscale-only companion for a running desktop. Inertia keeps the authority, binds its gateway to loopback, and asks the local Tailscale CLI to expose only that gateway through Tailscale Serve. There is no VPS, relay, Cloudflare, Clerk, custom domain, public fallback, or separate companion artifact.
-
-Open **Settings → Connections & devices** to enable it, create a five-minute fragment-only pairing link or QR code, and approve the browser from the desktop. Each paired device receives an explicit Monitor or Collaborate grant for selected projects. Monitor is read-only; Collaborate can send a prompt to an existing supervised conversation, answer non-secret agent questions, and stop an active run.
-
-The desktop must remain online and unlocked. Locking it pauses live access but preserves a non-expired encrypted browser grant for reconnect after unlock; disabling Private Connect revokes active sessions. Project scope, access level, expiry, and revocation remain editable from the desktop.
-
-The packaged React PWA never receives credentials, files, terminals, approvals, provider settings, Git operations, secrets, Full Access, or arbitrary command execution. Pairing is single-use and device approval is explicit. App cookies are `Secure`, `HttpOnly`, and `SameSite=Strict`; state-changing requests require a same-origin check and CSRF token, while WebSocket access uses a short-lived single-use ticket. Transcript output is sanitized and bounded before it leaves the supervised runtime.
-
-See the [Private Connect guide](docs/PRIVATE_CONNECT.md), [security model](docs/PRIVATE_CONNECT_SECURITY.md), and [internals](docs/PRIVATE_CONNECT_INTERNALS.md). The implemented [database recovery model](docs/DATABASE_RECOVERY.md), [data-throughput design](docs/DATA_THROUGHPUT.md), [renderer isolation](docs/RENDERER_ISOLATION.md), and [security boundary coverage expectations](docs/SECURITY_BOUNDARY_COVERAGE.md) are documented separately.
-
-### Provider-native, local by default
-
-Inertia uses the coding tools and accounts already installed on your computer. Each Codex, Claude, Cursor, Gemini CLI, Kimi Code, or OpenCode integration keeps its provider-native transport, authentication, models, approvals, plans, reasoning, usage, and cancellation behavior; when a provider does not expose something, Inertia says so instead of imitating it.
-
-Gemini runs through the CLI's ACP JSON-RPC process boundary, not a separately embedded Google SDK or API-key client. Inertia never calls ACP `authenticate`: that method can change the CLI's persisted account choice and clear cached credentials, so the CLI-selected method remains authoritative and each `session/new` validates it. Gemini CLI 0.58 returns `session/load` before its asynchronous history replay has a protocol-level end marker. To prevent historical output from being mistaken for the current answer, Inertia starts a fresh ACP session for every turn and supplies only a bounded application-visible user/assistant transcript as contextual input. That reconstruction is not native resume and excludes hidden reasoning, tool payloads, provider-managed credential state, and historical attachment bytes. Text explicitly entered into visible messages remains part of the reconstructed context and should be reviewed like any prompt sent to a provider.
-
-The in-app setup action runs the bare Gemini CLI with `NO_BROWSER=true`. When Google OAuth is selected, Gemini prints its official one-time URL and waits for the returned code in the terminal; Inertia validates that URL, opens it once, and tells the user to paste the code back into Gemini. Other CLI-owned authentication methods are not translated into Inertia credentials, and a zero exit alone never claims that setup succeeded—the next ACP session remains the authority.
-
-Gemini CLI also writes provider-side local chat records for both its outer CLI session and the ACP session it creates. Inertia gives the outer session a random owned identity with entropy in Gemini's filename-visible prefix to avoid deterministic collisions between concurrent runs, tracks the separate identity returned by `session/new`, and removes only those exact records and their session-scoped artifacts after the complete provider process tree is confirmed stopped. The workspace marker must attest the exact project; unrelated Gemini sessions and account configuration are left untouched. If shutdown or this exact cleanup cannot be confirmed, the turn fails closed instead of reporting a clean completion.
-
-Plan requests select Gemini's advertised plan mode, and Inertia projects bounded ACP plan, plan-update, and plan-removal notifications when the CLI emits them. Gemini ACP does not expose structured agent questions or explicit compaction. Usage comes only from validated fields in the ACP prompt response—standard usage or Gemini quota metadata—and ACP usage updates; Inertia does not infer missing token or context values.
-
-Provider account credentials remain in each provider's own storage. Credentials added for custom model backends are encrypted through the operating system's secure credential storage; only non-secret profile settings live in Inertia's local database. Inertia stores workspace history and preferences locally, and its optional runtime diagnostics exclude prompts, source, token values, credentials, and connection capabilities.
-
-Access mode is a real safety boundary. Supervised keeps the selected provider's approval flow active. Auto-edit pre-approves supported file edits while leaving other provider permissions in place. Full Access is an explicit opt-in that grants the broadest authority supported by the selected integration—for example, Codex uses its danger-full-access sandbox/approval configuration and Claude uses its `--dangerously-skip-permissions` mode. Gemini deliberately remains in its permission-reporting ACP mode; for permission requests the CLI reports, Inertia enforces the selected access policy with one-shot decisions and never selects persistent permission options. Gemini's own policies, trusted MCP configuration, or allowlists can authorize actions without sending an ACP permission request, so Inertia cannot supervise actions the provider does not report. Use Full Access only in a workspace where you trust the request, repository, provider configuration, and commands the agent may run.
-
-### Get started
-
-Building the current source for macOS requires macOS 13 or later. The release
-table below describes the immutable version it links rather than retroactively
-changing older package requirements.
-
-Download the build for your platform, add a project, then open **Settings → Providers**. Inertia checks Codex, Claude, Cursor, Gemini CLI, Kimi Code, and OpenCode locally and shows the exact Install, Connect, or Refresh action each route needs. Authentication stays in the provider's own official flow.
-
-You only need one ready provider to begin. If none is available yet, projects, files, Git review, and terminals still work; agent runs remain disabled with a route-specific explanation instead of failing after you send a message.
-
-To run Inertia from source, use Node.js 22.13 or newer in the Node 22 line:
-
-```bash
+```sh
 npm ci
 npm run dev
 ```
 
-Contributors can run the complete local gate with `npm run check`. It covers architecture, lint, type safety, unit and integration tests, and the production bundle.
+Run `npm run check` for architecture, lint, type checking, unit/integration tests, and the production build. Desktop interaction tests run with `npm run test:e2e`.
 
-After a production build, a credential-free headless readiness report is also
-available without starting Electron or opening a listener:
+See [AGENTS.md](AGENTS.md) for repository conventions and [RELEASING.md](docs/RELEASING.md) for packaging, Stable/Canary channels, signing, and updates.
 
-```bash
-npm run --silent status:runtime -- --cwd /path/to/project --pretty
-```
+## Help
 
-The JSON reports platform and workspace access, installation/protocol checks
-for supported provider CLIs, and detected source-control kinds. It never checks
-provider authentication, exposes executable paths, or claims mutation support
-for detected non-Git systems.
+Refresh a provider in **Settings → Providers** if it stops responding. For app problems, use **Settings → Runtime diagnostics → Copy diagnostic report**, review it, and attach it to a [bug report](https://github.com/eduardtomas1/inertia/issues/new?template=bug_report.yml). Avoid sharing raw logs, databases, or credentials.
 
-### Troubleshooting
-
-If something goes wrong, first refresh the affected provider in **Settings → Providers**. For a reproducible app or runtime problem, open **Settings → Runtime diagnostics**, choose **Copy diagnostic report**, review the report once more, and attach it to the [public bug form](https://github.com/eduardtomas1/inertia/issues/new?template=bug_report.yml). The built-in report excludes prompts, source content, token values, credentials, and provider capabilities; do not substitute raw logs, databases, or unredacted diagnostic archives.
-
-Report suspected vulnerabilities privately through the [security policy](SECURITY.md), never through a public issue.
-
-### Version 0.0.48
-
-Inertia 0.0.48 restores dependable work immediately after a Linux AppImage update and across repeated attachment-backed prompts. Startup can safely retire the exact prior runtime generation after an update changes the packaged guardian inode. Attachment retention, import, and secure-file helpers now correlate each result with an operation UUID, wait for the parent's exact acknowledgement, and retry a cancellation that arrived before a cold helper spawned. Valid results no longer disappear in an IPC/exit race, late workers cannot poison later prompts, and uncertain ownership still fails closed.
-
-Inertia now gives each chat a visible local Browser with bounded agent actions and an inspectable, fail-closed evidence timeline for screenshots, console failures, failed requests, navigation, and actions. The pre-merge confidence view collects exact-head CI, review freshness, affected areas, focused evidence, portability, bundle deltas, and release readiness without letting stale status look green.
-
-One authoritative run-state engine keeps Codex, Claude, Cursor, Gemini CLI, Kimi Code, and OpenCode truthful through delegation, retry, waiting, cancellation, failure, restart, and completion. OpenCode descendant sessions can keep legitimate work alive without leaking child-private output, reviewed SDK updates retain their native protocols, and supervised runtimes preserve only bounded non-secret launch state.
-
-Files navigation keeps exact repository, path, disclosure, search, language, keyboard, and responsive state. Picker, paste, and drop attachments stay inside a privileged per-document lease until the exact accepted subset is committed, while recovery, window placement, updater ownership, health reporting, theme contrast, and measured first paint all remain explicit about partial or failed state.
-
-Newly completed answers also retain their intended reading position across ordinary terminal and detail rerenders. Explicit reader navigation, replacement work, conversation changes, and lifecycle shutdown still cancel the bounded anchor immediately.
-
-Stable builds now cover six native architectures. Unsigned Windows and ad-hoc macOS packages remain manual downloads until signing credentials exist; Linux AppImages keep verified in-app delivery. The separately identified Canary prerelease channel can test and roll back Canary packages without changing Stable's feed or local state.
-
-Download [Inertia v0.0.48](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.48):
-
-| Platform | Architecture | Package | Update delivery after the first manual install |
-| --- | --- | --- | --- |
-| macOS | Apple silicon (arm64) | DMG or ZIP | Manual while Developer ID signing and notarization are unavailable |
-| macOS | Intel (x64) | DMG or ZIP | Manual while Developer ID signing and notarization are unavailable |
-| Windows | x64 | Installer | Manual while Authenticode signing is unavailable |
-| Windows | ARM64 | Installer | Manual while Authenticode signing is unavailable |
-| Linux | x64 | AppImage | Verified in-app updates |
-| Linux | ARM64 | AppImage | Verified in-app updates |
-
-The credential-free public release is exactly 11 assets: four macOS packages (DMG and ZIP for both architectures), two Windows installers, two Linux AppImages, the two architecture-qualified Linux update manifests, and `SHA256SUMS.txt`. Manual macOS and Windows builds do not publish updater metadata or blockmaps.
-
-Linux browser downloads do not preserve the AppImage executable bit. After
-verifying the exact selected filename against `SHA256SUMS.txt`, replace
-`VERSION` below with that release's exact version, make only that file
-executable, and launch it:
-
-```sh
-# Linux x64
-chmod 0755 ./Inertia-VERSION.AppImage
-./Inertia-VERSION.AppImage
-
-# Linux ARM64
-chmod 0755 ./Inertia-VERSION-arm64.AppImage
-./Inertia-VERSION-arm64.AppImage
-```
-
-Do not apply executable permissions to a wildcard or to an unverified download.
-The first verified in-app update moves a versioned Stable download to the
-durable installed name `Inertia.AppImage`; later updates keep that exact path.
-Canary uses the separate `Inertia Canary.AppImage` identity. The migration
-stops on indirect or occupied paths and restores the previous executable when
-the replacement cannot be launched.
-
-Every platform requires a manual first install. Every stable release and Canary prerelease includes `SHA256SUMS.txt`; download it from the same exact tagged release and compare the selected package's SHA-256 before opening it.
-
-Credential-free macOS packages are ad-hoc signed rather than notarized, so Gatekeeper may retain the download's quarantine warning. After verifying the checksum, open the package from Finder; if macOS blocks it, use **System Settings → Privacy & Security → Open Anyway**, confirm the exact file, then choose **Open**. Do not remove quarantine attributes or disable Gatekeeper.
-
-Unsigned Windows installers may show **Windows protected your PC**. After verifying the checksum and exact GitHub release source, choose **More info**, confirm the filename and **Unknown publisher** status, then **Run anyway**. Do not disable SmartScreen.
-
-See the [changelog](CHANGELOG.md) for the complete release story and [release guide](docs/RELEASING.md) for Stable, Canary, signing, and update-delivery details.
-
-Inertia is available under the [Apache 2.0 License](LICENSE). Packaged builds also include the generated notices and original license texts supplied by their production dependencies and Electron.
+[Apache 2.0](LICENSE). Packaged builds include third-party notices and dependency licenses.

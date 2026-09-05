@@ -1,3 +1,4 @@
+import { openLocalProjectFromDialog } from "./support/add-project";
 import { expect, test } from "@playwright/test";
 import { readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -302,6 +303,7 @@ test("navigates the project file hierarchy lazily with an accessible keyboard tr
       }));
     }, workspaceDirectory);
     await addProject.click();
+    await openLocalProjectFromDialog(page);
     await expect(page.getByRole("heading", {
       name: /^What should we build in .+\?$/u,
       level: 3,

@@ -12,6 +12,7 @@ import type {
   ServerEvent,
   TurnRequestContext,
 } from "@shared/contracts";
+import type { ProjectImportInput } from "../../../shared/project-import";
 import type { AppView } from "../appView";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
 import type { TranscriptMessageSendAcceptance } from "../utils/transcriptNavigation";
@@ -19,7 +20,7 @@ import type { WorkspaceStartupSurface } from "../utils/workspaceStartup";
 
 type DraftConversationNavigation = {
   discard: () => void;
-  importProject: () => Promise<boolean>;
+  importProject: (input?: ProjectImportInput) => Promise<boolean>;
   sendFromComposer: (
     content: string,
     attachments: ChatAttachment[],
@@ -162,15 +163,18 @@ export function useProjectChatNavigation({
     setView,
   ]);
 
-  const importProject = useCallback(async () => {
-    if (busyAction) return;
+  const importProject = useCallback(async (input?: ProjectImportInput) => {
+    if (busyAction) {
+      if (input) throw new Error("Wait for the current action to finish before adding a project.");
+      return;
+    }
     deactivateGlobalChat();
     try {
-      if (!await draftConversation.importProject()) return;
+      if (!await draftConversation.importProject(input)) return;
       setView("workspace");
       setSidebarOpen(false);
       showStartupSurface(startupSurface);
-    } catch { /* The toast carries the error. */ }
+    } catch (error) { if (input) throw error; /* Native callers receive the existing error toast. */ }
   }, [
     busyAction,
     deactivateGlobalChat,

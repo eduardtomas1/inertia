@@ -1,0 +1,15 @@
+.context-compaction-icon { flex: 0 0 auto; color: var(--text-soft); }
+.context-compaction-icon > g {
+  animation: context-compaction-pulse 2.4s ease-in-out infinite;
+}
+@keyframes context-compaction-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .context-compaction-icon > g { animation: none; }
+}
+[data-active-agent-phase="compacting"] .turn-working-copy > strong {
+  color: var(--text-muted);
+  font-weight: 450;
+}

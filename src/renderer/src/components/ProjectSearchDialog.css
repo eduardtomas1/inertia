@@ -1,0 +1,21 @@
+.project-search-row {
+  display: flex;
+  align-items: center;
+}
+.project-search-row > button[role="option"] {
+  min-width: 0;
+  flex: 1;
+}
+.project-search-row > .icon-button {
+  flex: 0 0 28px;
+  width: 28px;
+  min-height: 28px;
+  padding: 0;
+  justify-content: center;
+}
+.project-search-row > .icon-button:not(:focus-visible) {
+  opacity: 0.45;
+}
+.project-search-row:hover > .icon-button {
+  opacity: 1;
+}

@@ -32,170 +32,94 @@ const projects = [
 afterEach(() => vi.restoreAllMocks());
 
 describe("ProjectPicker", () => {
-  it("exposes active option state and selects projects from the keyboard", () => {
+  function mount(selectedProject = projects[0]!, choices = projects) {
     const onChange = vi.fn();
-    render(<ProjectPicker picker={{
-      projects,
-      selectedProject: projects[0]!,
-      disabled: false,
-      onChange,
-    }} />);
-    const picker = screen.getByRole("combobox", { name: "Project" });
-    expect(picker).toHaveTextContent("Alpha");
-    expect(picker).toHaveAttribute("aria-expanded", "false");
+    const props = { projects: choices, selectedProject, disabled: false, onChange };
+    const view = render(<ProjectPicker picker={props} />);
+    const trigger = screen.getByRole("button", { name: "Project" });
+    trigger.focus();
+    fireEvent.click(trigger);
+    const search = screen.getByRole("combobox", { name: "Search projects" });
+    return { ...view, props, trigger, search, onChange };
+  }
 
-    fireEvent.keyDown(picker, { key: "ArrowDown" });
-    expect(picker).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getAllByRole("option")).toHaveLength(3);
-    expect(picker).toHaveAttribute(
-      "aria-activedescendant",
-      screen.getByRole("option", { name: "Alpha" }).id,
-    );
-
-    fireEvent.keyDown(picker, { key: "ArrowDown" });
-    expect(picker).toHaveAttribute(
-      "aria-activedescendant",
-      screen.getByRole("option", { name: "Beta" }).id,
-    );
-    fireEvent.keyDown(picker, { key: "Enter" });
-
+  it("focuses search, selects with the keyboard, and restores trigger focus", () => {
+    const { trigger, search, onChange } = mount();
+    expect(search).toHaveFocus();
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+    expect(search).toHaveAttribute("aria-activedescendant", screen.getByRole("option", { name: "Alpha" }).id);
+    fireEvent.keyDown(search, { key: "ArrowDown" });
+    expect(search).toHaveAttribute("aria-activedescendant", screen.getByRole("option", { name: "Beta" }).id);
+    fireEvent.keyDown(search, { key: "Enter" });
     expect(onChange).toHaveBeenCalledWith(projects[1]);
-    expect(picker).toHaveAttribute("aria-expanded", "false");
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(trigger).toHaveFocus();
   });
 
-  it("supports boundary keys and typeahead while retaining trigger focus", () => {
-    const onChange = vi.fn();
-    render(<ProjectPicker picker={{
-      projects,
-      selectedProject: projects[0]!,
-      disabled: false,
-      onChange,
-    }} />);
-    const picker = screen.getByRole("combobox", { name: "Project" });
-    picker.focus();
-
-    fireEvent.keyDown(picker, { key: "End" });
-    expect(picker).toHaveAttribute(
-      "aria-activedescendant",
-      screen.getByRole("option", { name: "Gamma" }).id,
-    );
-    fireEvent.keyDown(picker, { key: "Home" });
-    expect(picker).toHaveAttribute(
-      "aria-activedescendant",
-      screen.getByRole("option", { name: "Alpha" }).id,
-    );
-    fireEvent.keyDown(picker, { key: "g" });
-    expect(picker).toHaveAttribute(
-      "aria-activedescendant",
-      screen.getByRole("option", { name: "Gamma" }).id,
-    );
-    expect(picker).toHaveFocus();
-
-    fireEvent.keyDown(picker, { key: " " });
-    expect(onChange).toHaveBeenCalledWith(projects[2]);
+  it("searches names and paths, clears an empty result, and selects the first match", () => {
+    const { search, onChange } = mount(projects[2]!);
+    fireEvent.change(search, { target: { value: "missing" } });
+    expect(screen.getByText("No matching projects")).toBeVisible();
+    expect(search).not.toHaveAttribute("aria-activedescendant");
+    fireEvent.keyDown(search, { key: "ArrowDown" });
+    fireEvent.keyDown(search, { key: "Enter" });
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.change(search, { target: { value: "/workspace/beta" } });
+    expect(screen.getAllByRole("option")).toHaveLength(1);
+    fireEvent.keyDown(search, { key: "Enter" });
+    expect(onChange).toHaveBeenCalledWith(projects[1]);
   });
 
-  it("scrolls a keyboard-active option into view in long project lists", () => {
-    const scrollIntoView = vi.spyOn(HTMLElement.prototype, "scrollIntoView")
-      .mockImplementation(() => undefined);
-    const manyProjects = Array.from({ length: 12 }, (_, index) => (
-      project(`project-${index}`, `Project ${index}`)
-    ));
-    render(<ProjectPicker picker={{
-      projects: manyProjects,
-      selectedProject: manyProjects[0]!,
-      disabled: false,
-      onChange: vi.fn(),
-    }} />);
-    const picker = screen.getByRole("combobox", { name: "Project" });
-
-    fireEvent.keyDown(picker, { key: "End" });
-
-    expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
-    expect(scrollIntoView.mock.instances.at(-1))
-      .toBe(screen.getByRole("option", { name: "Project 11" }));
+  it("scrolls boundary-key selection into view in long lists", () => {
+    const scroll = vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(() => undefined);
+    const many = Array.from({ length: 20 }, (_, index) => project(`p${index}`, `Project ${index}`));
+    const { search } = mount(many[0]!, many);
+    fireEvent.keyDown(search, { key: "End" });
+    expect(scroll.mock.instances.at(-1)).toBe(screen.getByRole("option", { name: "Project 19" }));
+    fireEvent.keyDown(search, { key: "Home" });
+    expect(search).toHaveAttribute("aria-activedescendant", screen.getByRole("option", { name: "Project 0" }).id);
   });
 
-  it("keeps active-option identity valid when projects reorder or disappear", () => {
-    const onChange = vi.fn();
-    const view = render(<ProjectPicker picker={{
-      projects,
-      selectedProject: projects[0]!,
-      disabled: false,
-      onChange,
-    }} />);
-    const picker = screen.getByRole("combobox", { name: "Project" });
-    fireEvent.keyDown(picker, { key: "End" });
+  it("preserves text editing and does not select while an IME composition is committing", () => {
+    const { search, onChange } = mount();
+    fireEvent.change(search, { target: { value: "a" } });
+    const active = search.getAttribute("aria-activedescendant");
+    expect(fireEvent.keyDown(search, { key: "End" })).toBe(true);
+    expect(search).toHaveAttribute("aria-activedescendant", active);
+    fireEvent.keyDown(search, { key: "Enter", isComposing: true });
+    fireEvent.keyDown(search, { key: "Escape", isComposing: true });
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toBeVisible();
+  });
 
-    view.rerender(<ProjectPicker picker={{
-      projects: [projects[1]!, projects[0]!, projects[2]!],
-      selectedProject: projects[0]!,
-      disabled: false,
-      onChange,
-    }} />);
-    expect(picker).toHaveAttribute(
-      "aria-activedescendant",
-      screen.getByRole("option", { name: "Gamma" }).id,
-    );
-
-    view.rerender(<ProjectPicker picker={{
-      projects: [projects[1]!, projects[0]!],
-      selectedProject: projects[0]!,
-      disabled: false,
-      onChange,
-    }} />);
-    expect(picker).toHaveAttribute(
-      "aria-activedescendant",
-      screen.getByRole("option", { name: "Alpha" }).id,
-    );
-    fireEvent.keyDown(picker, { key: "Enter" });
+  it("preserves option identity through reorder and falls back when it disappears", () => {
+    const { search, rerender, props, onChange } = mount();
+    fireEvent.keyDown(search, { key: "End" });
+    rerender(<ProjectPicker picker={{ ...props, projects: [projects[2]!, projects[1]!, projects[0]!] }} />);
+    expect(search).toHaveAttribute("aria-activedescendant", screen.getByRole("option", { name: "Gamma" }).id);
+    rerender(<ProjectPicker picker={{ ...props, projects: [projects[1]!, projects[0]!] }} />);
+    expect(search).toHaveAttribute("aria-activedescendant", screen.getByRole("option", { name: "Alpha" }).id);
+    fireEvent.keyDown(search, { key: "Enter" });
     expect(onChange).not.toHaveBeenCalled();
   });
 
-  it("cycles matching projects on repeated typeahead letters", () => {
-    const google = project("google", "Google");
-    const gamma = project("gamma-second", "Gamma");
-    render(<ProjectPicker picker={{
-      projects: [projects[0]!, google, gamma],
-      selectedProject: projects[0]!,
-      disabled: false,
-      onChange: vi.fn(),
-    }} />);
-    const picker = screen.getByRole("combobox", { name: "Project" });
-
-    fireEvent.keyDown(picker, { key: "g" });
-    expect(picker).toHaveAttribute(
-      "aria-activedescendant",
-      screen.getByRole("option", { name: "Google" }).id,
-    );
-    fireEvent.keyDown(picker, { key: "g" });
-    expect(picker).toHaveAttribute(
-      "aria-activedescendant",
-      screen.getByRole("option", { name: "Gamma" }).id,
-    );
+  it("dismisses with Escape or the backdrop without changing projects", () => {
+    const { search, trigger, onChange } = mount();
+    fireEvent.keyDown(search, { key: "Escape" });
+    expect(trigger).toHaveFocus();
+    fireEvent.click(trigger);
+    fireEvent.mouseDown(screen.getByRole("dialog").parentElement!);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+    expect(onChange).not.toHaveBeenCalled();
   });
 
-  it("closes and prevents selection when switching becomes disabled", () => {
-    const onChange = vi.fn();
-    const view = render(<ProjectPicker picker={{
-      projects,
-      selectedProject: projects[0]!,
-      disabled: false,
-      onChange,
-    }} />);
-    const picker = screen.getByRole("combobox", { name: "Project" });
-    fireEvent.click(picker);
-    expect(picker).toHaveAttribute("aria-expanded", "true");
-
-    view.rerender(<ProjectPicker picker={{
-      projects,
-      selectedProject: projects[0]!,
-      disabled: true,
-      onChange,
-    }} />);
-
-    expect(picker).toBeDisabled();
-    expect(picker).toHaveAttribute("aria-expanded", "false");
+  it("closes without changing ownership when switching becomes disabled", () => {
+    const { trigger, rerender, props, onChange } = mount();
+    rerender(<ProjectPicker picker={{ ...props, disabled: true }} />);
+    expect(trigger).toBeDisabled();
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(onChange).not.toHaveBeenCalled();
   });
 });

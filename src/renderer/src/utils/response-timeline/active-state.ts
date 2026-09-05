@@ -14,6 +14,7 @@ export type ActivityExecutionCategory =
   | "attention";
 
 export type ActiveAgentPhase =
+  | "compacting"
   | "queued"
   | "starting"
   | "thinking"
@@ -130,6 +131,14 @@ export function activeAgentPresentation(input: {
       label: `${input.providerLabel} ${lifecycle}`,
       animated: status[0] !== "w",
     };
+  }
+
+  // These are canonical adapter labels, not matches against arbitrary tool
+  // output or context occupancy. A completed event is history, not live work.
+  if (input.turn.activities.some((activity) => activity.kind === "status"
+    && activity.status === "running"
+    && /^(?:Context compaction|Claude is compacting context|(?:Cursor|Kimi Code) is compacting session context)$/u.test(activity.title))) {
+    return { phase: "compacting", label: "Compacting context…", animated: true };
   }
 
   const activity = latestRunningActivity(input.turn.activities);

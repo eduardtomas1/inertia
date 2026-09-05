@@ -513,7 +513,7 @@ test("keeps every ordinary New chat entry point isolated from the viewed chat", 
     workspaceDirectory,
   );
   await sidebar.getByRole("button", { name: "Filter work by project" }).click();
-  await sidebar.getByRole("button", { name: "Project actions for Inertia", exact: true }).click();
+  await page.getByRole("dialog", { name: "Choose project filter" }).getByRole("button", { name: "Project actions for Inertia", exact: true }).click();
   const projectQuickChat = sidebar.getByRole("menuitem", { name: "New chat in Inertia", exact: true });
   await projectQuickChat.focus();
   await expect(projectQuickChat).toBeFocused();

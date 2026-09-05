@@ -64,6 +64,17 @@ function turn(
 }
 
 describe("truthful active agent presentation", () => {
+  it.each(["Context compaction", "Claude is compacting context", "Cursor is compacting session context", "Kimi Code is compacting session context"])("shows live compaction for %s and clears it on completion", (title) => {
+    const current = activity("compact", title, { kind: "status" });
+    const present = (activities: AgentActivity[]) => activeAgentPresentation({ turn: turn("running", activities), providerLabel: "Provider", streamingChannel: null });
+    expect(present([activity("tool", "Read file"), current])).toEqual({ phase: "compacting", label: "Compacting context…", animated: true });
+    expect(present([{ ...current, status: "completed" }]).phase).toBe("working");
+    expect(present([{ ...current, status: "failed" }]).phase).toBe("working");
+    expect(present([{ ...current, kind: "tool" }]).phase).not.toBe("compacting");
+    expect(present([{ ...current, title: "Tool output mentions context compaction" }]).phase).toBe("working");
+    expect(activeAgentPresentation({ turn: turn("cancelled", [current], null, { state: "cancelling", revision: 2, providerState: null }), providerLabel: "Provider", streamingChannel: null }).phase).toBe("cancelling");
+  });
+
   it("uses authoritative lifecycle states before activity inference", () => {
     const cases: Array<[
       AgentTurnStatus,

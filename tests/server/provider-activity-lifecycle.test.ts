@@ -183,65 +183,63 @@ afterEach(async () => {
 });
 
 describe("durable provider activity lifecycle contract", () => {
-  it("keeps command and tool progress exact for every provider under concurrent same-kind work", async () => {
-    for (const providerId of PROVIDERS) {
-      const value = await runtime(providerId);
-      value.emitter.activity("tool", "started", "Tool", {
-        activityId: providerId + ":tool-a",
-        detail: "Progress: started A",
-      });
-      value.emitter.activity("tool", "started", "Tool", {
-        activityId: providerId + ":tool-b",
-        detail: "Progress: started B",
-      });
-      value.emitter.activity("command", "started", "Command", {
-        activityId: providerId + ":command",
-        detail: "Command: npm test",
-      });
-      value.emitter.activity("tool", "started", "Tool A progressing", {
-        activityId: providerId + ":tool-a",
-        detail: "Progress: continued A",
-      });
-      value.emitter.activity("command", "started", "Command", {
-        activityId: providerId + ":command",
-        detail: "Output: checking",
-      });
-      value.emitter.activity("tool", "failed", "Tool B failed", {
-        activityId: providerId + ":tool-b",
-        detail: "Error: B",
-      });
-      value.emitter.activity("tool", "completed", "Tool A completed", {
-        activityId: providerId + ":tool-a",
-        detail: "Output: A",
-      });
-      value.emitter.activity("command", "completed", "Command completed", {
-        activityId: providerId + ":command",
-        detail: "Output: passed",
-      });
+  it.each(PROVIDERS)("keeps %s command and tool progress exact under concurrent same-kind work", async (providerId) => {
+    const value = await runtime(providerId);
+    value.emitter.activity("tool", "started", "Tool", {
+      activityId: providerId + ":tool-a",
+      detail: "Progress: started A",
+    });
+    value.emitter.activity("tool", "started", "Tool", {
+      activityId: providerId + ":tool-b",
+      detail: "Progress: started B",
+    });
+    value.emitter.activity("command", "started", "Command", {
+      activityId: providerId + ":command",
+      detail: "Command: npm test",
+    });
+    value.emitter.activity("tool", "started", "Tool A progressing", {
+      activityId: providerId + ":tool-a",
+      detail: "Progress: continued A",
+    });
+    value.emitter.activity("command", "started", "Command", {
+      activityId: providerId + ":command",
+      detail: "Output: checking",
+    });
+    value.emitter.activity("tool", "failed", "Tool B failed", {
+      activityId: providerId + ":tool-b",
+      detail: "Error: B",
+    });
+    value.emitter.activity("tool", "completed", "Tool A completed", {
+      activityId: providerId + ":tool-a",
+      detail: "Output: A",
+    });
+    value.emitter.activity("command", "completed", "Command completed", {
+      activityId: providerId + ":command",
+      detail: "Output: passed",
+    });
 
-      expect(turnActivities(value)).toHaveLength(3);
-      expect(turnActivities(value)).toEqual(expect.arrayContaining([
-        expect.objectContaining({
-          title: "Tool A completed",
-          detail: expect.stringContaining("Output: A"),
-          status: "completed",
-        }),
-        expect.objectContaining({
-          title: "Tool B failed",
-          detail: expect.stringContaining("Error: B"),
-          status: "failed",
-        }),
-        expect.objectContaining({
-          title: "Command completed",
-          detail: expect.stringContaining("Output: passed"),
-          status: "completed",
-        }),
-      ]));
-      expect(turnActivities(value)).not.toEqual(expect.arrayContaining([
-        expect.objectContaining({ status: "running" }),
-      ]));
-      await finish(value);
-    }
+    expect(turnActivities(value)).toHaveLength(3);
+    expect(turnActivities(value)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        title: "Tool A completed",
+        detail: expect.stringContaining("Output: A"),
+        status: "completed",
+      }),
+      expect.objectContaining({
+        title: "Tool B failed",
+        detail: expect.stringContaining("Error: B"),
+        status: "failed",
+      }),
+      expect.objectContaining({
+        title: "Command completed",
+        detail: expect.stringContaining("Output: passed"),
+        status: "completed",
+      }),
+    ]));
+    expect(turnActivities(value)).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ status: "running" }),
+    ]));
+    await finish(value);
   });
 
   it("settles long diff sequences and coalesces one plan lifecycle", async () => {

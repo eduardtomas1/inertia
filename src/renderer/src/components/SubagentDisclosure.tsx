@@ -273,7 +273,7 @@ export function SubagentDisclosure({
                     ? `Exact provider state: ${trace.providerStatus}`
                     : undefined}
                 >
-                  {route} · <SubagentElapsed trace={trace} now={fixedNow} />
+                  {route} · <SubagentElapsed trace={trace} now={fixedNow} visible={open} />
                 </small>
                 {subagentHasNestedParent(trace) && (
                   <small className="subagent-relationship">

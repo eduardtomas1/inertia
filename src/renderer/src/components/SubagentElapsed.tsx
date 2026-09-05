@@ -6,10 +6,12 @@ import {
   subagentElapsedMs,
 } from "../utils/subagentDisclosure";
 import { formatElapsed } from "../utils/responseTimeline";
+import { useDocumentActivity } from "../hooks/useDocumentPresence";
 
 interface SubagentElapsedProps {
   trace: SubagentTrace;
   now?: number;
+  visible?: boolean;
 }
 
 const liveElapsedSubscribers = new Set<() => void>();
@@ -36,12 +38,14 @@ function subscribeLiveElapsed(update: () => void): () => void {
 export function SubagentElapsed({
   trace,
   now: fixedNow,
+  visible = true,
 }: SubagentElapsedProps): React.JSX.Element {
   const textRef = useRef<HTMLSpanElement>(null);
   const live = isLiveSubagentTrace(trace);
+  const documentActive = useDocumentActivity();
 
   useEffect(() => {
-    if (!live || fixedNow !== undefined) return;
+    if (!live || fixedNow !== undefined || !visible || !documentActive) return;
     const update = (): void => {
       if (textRef.current) {
         textRef.current.textContent = formatElapsed(
@@ -50,7 +54,7 @@ export function SubagentElapsed({
       }
     };
     return subscribeLiveElapsed(update);
-  }, [fixedNow, live, trace]);
+  }, [documentActive, fixedNow, live, trace, visible]);
 
   return (
     <span ref={textRef} className="subagent-elapsed">

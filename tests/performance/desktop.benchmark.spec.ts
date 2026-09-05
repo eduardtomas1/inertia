@@ -28,6 +28,7 @@ import { selectWorkspaceTool } from "../e2e/support/workspace-tools";
 import { driveBoundedWheelNavigation } from "../helpers/bounded-wheel-navigation";
 import { captureBoundedFailureDiagnostic } from "../helpers/bounded-failure-diagnostic";
 import { attachRuntimeLifecycleFailureDiagnostic } from "../e2e/support/runtime-lifecycle-diagnostics";
+import { collectGuardianFailureCodes, type GuardianFailureCode } from "../helpers/guardian-failure-codes";
 import {
   AsyncCleanupCoordinator,
   type AsyncCleanupOwnership,
@@ -491,6 +492,11 @@ async function launchApp(
     const cleanup = acquisition.adopt(resource);
     try {
       const page = await electronApp.firstWindow();
+      page.on("websocket", (socket) => socket.on("framereceived", ({ payload }) => {
+        guardianFailureCodes.set(electronApp, collectGuardianFailureCodes(
+          guardianFailureCodes.get(electronApp) ?? [], payload,
+        ));
+      }));
       const firstWindowMs = performance.now() - startedAt;
       await page.locator('.app-shell[data-connection-status="online"]').waitFor();
       await page.getByRole("textbox", { name: "Message" }).first().waitFor();
@@ -518,6 +524,12 @@ async function launchApp(
   }
 }
 
+// Retain only the last observed endpoint in test memory. Asking main for it
+// after a native hang prevented the original failure diagnostic from reaching
+// the independent runtime. Neither the URL nor terminal output is attached.
+const diagnosticRuntimeUrls = new WeakMap<ElectronApplication, string>();
+const guardianFailureCodes = new WeakMap<ElectronApplication, readonly GuardianFailureCode[]>();
+
 async function runtimeSnapshot(electronApp: ElectronApplication): Promise<RuntimeSnapshot> {
   const snapshot = await electronApp.evaluate(() => {
     const runtime = Reflect.get(globalThis, "__inertiaTestRuntime") as {
@@ -526,6 +538,7 @@ async function runtimeSnapshot(electronApp: ElectronApplication): Promise<Runtim
     return runtime?.snapshot?.() ?? null;
   });
   if (!snapshot) throw new Error("The benchmark runtime snapshot is unavailable.");
+  if (snapshot.websocketUrl) diagnosticRuntimeUrls.set(electronApp, snapshot.websocketUrl);
   return snapshot;
 }
 
@@ -1573,7 +1586,7 @@ async function openAndCloseToolCycle(page: Page, electronApp: ElectronApplicatio
     );
   } catch (cause) {
     await attachRuntimeLifecycleFailureDiagnostic(test.info(), async () =>
-      (await runtimeSnapshot(electronApp)).websocketUrl).catch(() => undefined);
+      diagnosticRuntimeUrls.get(electronApp) ?? null).catch(() => undefined);
     const diagnostics = await captureBoundedFailureDiagnostic(
       () => page.evaluate(() => {
         const workspaceTools = document.querySelector<HTMLElement>(
@@ -1796,6 +1809,7 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
   const dataDirectory = join(fixtureRoot, "data");
   const workspace = join(fixtureRoot, "workspace");
   const profile = join(fixtureRoot, "profile");
+  const launchedApps: ElectronApplication[] = [];
   try {
     await Promise.all([
       mkdir(dataDirectory, { recursive: true }),
@@ -1811,6 +1825,7 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
       workspace,
       profile,
     );
+    launchedApps.push(cold.electronApp);
     const coldIntentDialogMs = await coldIntentDialogMeasurement(cold.page);
     const idleStart = await processSample(cold.electronApp);
     cold.cleanup.resource.runtimePid = idleStart.runtimePid;
@@ -1978,6 +1993,7 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
       workspace,
       profile,
     );
+    launchedApps.push(warm.electronApp);
     const warmSample = await processSample(warm.electronApp);
     warm.cleanup.resource.runtimePid = warmSample.runtimePid;
     const warmStartup = {
@@ -2252,6 +2268,19 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
       .toBeLessThan(APP_SHUTDOWN_ASSERTION_TIMEOUT_MS);
     expect(report.scenarios.shutdown.warmMs)
       .toBeLessThan(APP_SHUTDOWN_ASSERTION_TIMEOUT_MS);
+  } catch (cause) {
+    // Streaming and final shutdown can fail before/after a terminal cycle.
+    // Preserve only allowlisted hints before fixture cleanup removes evidence.
+    await test.info().attach("terminal-guardian-failure-codes", {
+      body: JSON.stringify(launchedApps.map((app) =>
+        guardianFailureCodes.get(app) ?? [])),
+      contentType: "application/json",
+    }).catch(() => undefined);
+    for (const app of launchedApps) {
+      await attachRuntimeLifecycleFailureDiagnostic(test.info(), async () =>
+        diagnosticRuntimeUrls.get(app) ?? null).catch(() => undefined);
+    }
+    throw cause;
   } finally {
     cleanupContext.finishBody();
     // afterEach owns the final retry and failure report from its fresh timeout

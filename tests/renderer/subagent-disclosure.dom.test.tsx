@@ -1,4 +1,5 @@
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -6,7 +7,7 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SubagentDisclosure } from "../../src/renderer/src/components/SubagentDisclosure";
 import type {
@@ -20,8 +21,11 @@ const DISCLOSURE_OWNER = {
   turnId: "turn-1",
 } as const;
 
+beforeEach(() => { vi.spyOn(document, "hasFocus").mockReturnValue(true); });
+
 afterEach(() => {
   window.localStorage.clear();
+  vi.restoreAllMocks();
 });
 
 function trace(update: Partial<SubagentTrace> = {}): SubagentTrace {
@@ -530,6 +534,7 @@ describe("delegated-agent timeline disclosure", () => {
         />,
       );
       expect(screen.getByText("10s")).toBeInTheDocument();
+      fireEvent.click(screen.getByText("1 delegated task · 1 working").closest("summary")!);
       vi.advanceTimersByTime(1_000);
       expect(screen.getByText("11s")).toBeInTheDocument();
     } finally {
@@ -558,6 +563,8 @@ describe("delegated-agent timeline disclosure", () => {
         />,
       );
       expect(screen.getAllByText("10s")).toHaveLength(2);
+      expect(setIntervalSpy).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByText("2 delegated tasks · 2 working").closest("summary")!);
       expect(setIntervalSpy).toHaveBeenCalledTimes(1);
       vi.advanceTimersByTime(1_000);
       expect(screen.getAllByText("11s")).toHaveLength(2);
@@ -565,6 +572,49 @@ describe("delegated-agent timeline disclosure", () => {
       expect(vi.getTimerCount()).toBe(0);
     } finally {
       setIntervalSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("suspends folded and background clocks, catches up on return, and preserves live work", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    const traces = [trace(), trace({ id: "trace-second", providerAgentId: "second" })];
+    const view = render(<SubagentDisclosure {...DISCLOSURE_OWNER} subagents={traces} turns={[turn()]} />);
+    const summary = view.container.querySelector("summary")!;
+    const labels = () => [...view.container.querySelectorAll(".subagent-elapsed")].map((node) => node.textContent);
+    try {
+      expect(vi.getTimerCount()).toBe(0);
+      await act(() => vi.advanceTimersByTime(4_000));
+      expect(labels()).toEqual(["10s", "10s"]);
+      fireEvent.click(summary);
+      expect(labels()).toEqual(["14s", "14s"]);
+      expect(vi.getTimerCount()).toBe(1);
+      vi.mocked(document.hasFocus).mockReturnValue(false);
+      fireEvent(window, new Event("blur"));
+      expect(vi.getTimerCount()).toBe(0);
+      const blurred = labels();
+      await act(() => vi.advanceTimersByTime(4_000));
+      expect(labels()).toEqual(blurred);
+      visibility.mockReturnValue("hidden");
+      fireEvent(document, new Event("visibilitychange"));
+      vi.mocked(document.hasFocus).mockReturnValue(true);
+      fireEvent(window, new Event("focus"));
+      expect(vi.getTimerCount()).toBe(0);
+      await act(() => vi.advanceTimersByTime(4_000));
+      visibility.mockReturnValue("visible");
+      fireEvent(document, new Event("visibilitychange"));
+      expect(labels()).toEqual(["22s", "22s"]);
+      expect(vi.getTimerCount()).toBe(1);
+      fireEvent(window, new Event("focus"));
+      expect(vi.getTimerCount()).toBe(1);
+      fireEvent.click(summary);
+      expect(vi.getTimerCount()).toBe(0);
+      expect(traces.every(({ isLive, status }) => isLive && status === "running")).toBe(true);
+    } finally {
+      view.unmount();
+      expect(vi.getTimerCount()).toBe(0);
       vi.useRealTimers();
     }
   });

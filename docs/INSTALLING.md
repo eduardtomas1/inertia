@@ -1,6 +1,6 @@
 # Install Inertia
 
-Download [Inertia v0.0.49](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.49):
+Download [Inertia v0.0.50](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.50):
 
 | Platform | Architecture | Package | Update delivery after the first manual install |
 | --- | --- | --- | --- |

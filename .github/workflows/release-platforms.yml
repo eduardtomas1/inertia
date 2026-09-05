@@ -180,6 +180,7 @@ jobs:
       # Package and every subsequent smoke consume this exact bundle. The
       # package commands below deliberately do not rebuild it.
       - name: Build the release application bundle once
+        id: application_bundle
         run: npm run build:packaged
 
       - name: Measure release-candidate desktop workloads
@@ -199,16 +200,42 @@ jobs:
         continue-on-error: true
         run: npm audit --audit-level=high
 
-      - name: Run Electron end-to-end tests
-        if: runner.os != 'Linux'
-        env:
-          # Keep the same Windows concurrency bound as PR certification.
-          INERTIA_E2E_WORKERS: ${{ runner.os == 'Windows' && '1' || '2' }}
-        run: npm exec -- playwright test
+      # These phases share the native desktop and must never overlap. Keep
+      # release certification aligned with PR/main CI: foreground first, then
+      # isolated apps, then destructive recovery, with distinct diagnostics.
+      - name: Prepare Electron end-to-end binary
+        id: electron_test_binary
+        run: node -e "console.log(require('electron'))"
 
-      - name: Run Electron end-to-end tests under Xvfb
+      - name: Run display-sensitive Electron end-to-end tests
+        if: runner.os != 'Linux'
+        run: npm exec -- playwright test --project=display-sensitive --output=test-results/display-sensitive
+
+      # Keep this as a separate step with an explicit status condition: an
+      # assertion in the display-sensitive phase must fail the job without
+      # preventing the independent coverage from running.
+      - name: Run isolated Electron end-to-end tests
+        if: ${{ !cancelled() && steps.application_bundle.outcome == 'success' && steps.electron_test_binary.outcome == 'success' && runner.os != 'Linux' }}
+        env:
+          # Bound Windows load after hosted socket-buffer exhaustion.
+          INERTIA_E2E_WORKERS: ${{ runner.os == 'Windows' && '1' || '2' }}
+        run: npm exec -- playwright test --project=isolated --output=test-results/isolated
+
+      - name: Run destructive runtime-recovery tests sequentially
+        if: ${{ !cancelled() && steps.application_bundle.outcome == 'success' && steps.electron_test_binary.outcome == 'success' && runner.os != 'Linux' }}
+        run: npm exec -- playwright test --project=runtime-recovery --output=test-results/runtime-recovery
+
+      - name: Run display-sensitive Electron end-to-end tests under Xvfb
         if: runner.os == 'Linux'
-        run: xvfb-run --auto-servernum npm exec -- playwright test
+        run: xvfb-run --auto-servernum npm exec -- playwright test --project=display-sensitive --output=test-results/display-sensitive
+
+      - name: Run isolated Electron end-to-end tests under Xvfb
+        if: ${{ !cancelled() && steps.application_bundle.outcome == 'success' && steps.electron_test_binary.outcome == 'success' && runner.os == 'Linux' }}
+        run: xvfb-run --auto-servernum npm exec -- playwright test --project=isolated --output=test-results/isolated
+
+      - name: Run destructive runtime-recovery tests sequentially under Xvfb
+        if: ${{ !cancelled() && steps.application_bundle.outcome == 'success' && steps.electron_test_binary.outcome == 'success' && runner.os == 'Linux' }}
+        run: xvfb-run --auto-servernum npm exec -- playwright test --project=runtime-recovery --output=test-results/runtime-recovery
 
       - name: Prepare temporary macOS notarization key
         if: runner.os == 'macOS'

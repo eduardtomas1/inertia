@@ -2,7 +2,9 @@
 
 The useful changes in each Inertia release, in plain language.
 
-## 0.0.49 — 2026-09-05
+## 0.0.50 — 2026-09-05
+
+Version 0.0.49 was not published; this release includes its changes.
 
 ### A simpler workspace with faster project navigation
 

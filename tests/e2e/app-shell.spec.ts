@@ -211,7 +211,7 @@ test("keeps Send and Stop clear across submission, cancellation, theme, and scal
         filter: style.filter,
       };
     });
-    expect(readyGeometry.width).toBe(readyGeometry.height);
+    expect(readyGeometry.width).toBeCloseTo(readyGeometry.height, 3);
     expect(readyGeometry.width).toBeGreaterThanOrEqual(28);
     expect(readyGeometry.borderRadius).toBe("50%");
     await expect.poll(() => readySend.evaluate((button) =>
@@ -314,14 +314,10 @@ test("keeps Send and Stop clear across submission, cancellation, theme, and scal
         boxShadow: style.boxShadow,
       };
     });
-    expect({
-      width: stopGeometry.width,
-      height: stopGeometry.height,
-    }).toEqual({
-      width: darkSendGeometry.width,
-      height: darkSendGeometry.height,
-    });
-    expect(stopGeometry.width).toBe(stopGeometry.height);
+    // Fractional layout coordinates can differ by floating-point roundoff.
+    expect(stopGeometry.width).toBeCloseTo(darkSendGeometry.width, 3);
+    expect(stopGeometry.height).toBeCloseTo(darkSendGeometry.height, 3);
+    expect(stopGeometry.width).toBeCloseTo(stopGeometry.height, 3);
     expect(stopGeometry.width).toBeGreaterThanOrEqual(36);
     expect(stopGeometry.borderRadius).toBe("50%");
     expect(stopGeometry.boxShadow).toBe("none");

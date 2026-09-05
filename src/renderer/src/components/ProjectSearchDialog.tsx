@@ -64,12 +64,13 @@ export function ProjectSearchDialog({ projects, selectedId, includeAll = false, 
               setActiveId(undefined);
             }}
             onKeyDown={(event) => {
+              if (event.nativeEvent.isComposing) { event.stopPropagation(); return; }
               if (event.key === "ArrowDown" || event.key === "ArrowUp") {
                 event.preventDefault();
                 const index = (activeIndex + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
                 setActiveId(items[index]?.id ?? null);
               }
-              if (event.key === "Home" || event.key === "End") {
+              if (!query && (event.key === "Home" || event.key === "End")) {
                 event.preventDefault();
                 setActiveId((event.key === "Home" ? items[0] : items.at(-1))?.id ?? null);
               }

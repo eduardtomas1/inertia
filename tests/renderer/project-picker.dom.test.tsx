@@ -80,6 +80,18 @@ describe("ProjectPicker", () => {
     expect(search).toHaveAttribute("aria-activedescendant", screen.getByRole("option", { name: "Project 0" }).id);
   });
 
+  it("preserves text editing and does not select while an IME composition is committing", () => {
+    const { search, onChange } = mount();
+    fireEvent.change(search, { target: { value: "a" } });
+    const active = search.getAttribute("aria-activedescendant");
+    expect(fireEvent.keyDown(search, { key: "End" })).toBe(true);
+    expect(search).toHaveAttribute("aria-activedescendant", active);
+    fireEvent.keyDown(search, { key: "Enter", isComposing: true });
+    fireEvent.keyDown(search, { key: "Escape", isComposing: true });
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toBeVisible();
+  });
+
   it("preserves option identity through reorder and falls back when it disappears", () => {
     const { search, rerender, props, onChange } = mount();
     fireEvent.keyDown(search, { key: "End" });

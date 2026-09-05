@@ -32,6 +32,18 @@ export const APP_UPDATE_HANDOFF_PHASES = [
 ] as const;
 
 const boundedCount = z.number().int().min(0).max(1_000_000);
+export const windowsCleanupFailureSchema = z.object({
+  phase: z.enum([
+    "taskkill-spawn", "taskkill-error", "taskkill-exit", "taskkill-timeout",
+    "root-close", "resource-settle", "ownership-retirement",
+    "provider-exited-before-stop",
+  ]),
+  scope: z.enum(["child", "pid"]),
+  force: z.boolean(),
+  elapsedMs: z.number().int().min(0).max(300_000),
+  exitCode: z.number().int().min(-2_147_483_648).max(4_294_967_295).nullable(),
+}).strict();
+export type WindowsCleanupFailure = z.infer<typeof windowsCleanupFailureSchema>;
 const safeVersion = z
   .string()
   .min(1)
@@ -135,6 +147,7 @@ export const runtimeLifecycleDiagnosticSnapshotSchema = z
     unresolvedTurnCount: boundedCount,
     unresolvedInteractionCount: boundedCount,
     actionableState: z.enum(LIFECYCLE_ACTIONABLE_STATES),
+    windowsCleanupFailures: z.array(windowsCleanupFailureSchema).max(8).optional(),
   })
   .strict();
 

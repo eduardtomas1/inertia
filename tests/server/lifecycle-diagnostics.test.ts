@@ -150,6 +150,21 @@ function recordContinuationReason(
 }
 
 describe("runtime lifecycle diagnostics", () => {
+  it("bounds Windows cleanup evidence and rejects arbitrary failure content", () => {
+    const input = diagnosticInput();
+    input.windowsCleanupFailures = Array.from({ length: 12 }, (_, exitCode) => ({
+      phase: "taskkill-exit", scope: "child", force: true, elapsedMs: 12, exitCode,
+    }));
+    const snapshot = runtimeLifecycleDiagnosticSnapshot(input);
+    expect(snapshot.windowsCleanupFailures?.map(({ exitCode }) => exitCode))
+      .toEqual([4, 5, 6, 7, 8, 9, 10, 11]);
+    expect(parseRuntimeLifecycleDiagnosticSnapshot(snapshot)).toEqual(snapshot);
+    expect(parseRuntimeLifecycleDiagnosticSnapshot({ ...snapshot,
+      windowsCleanupFailures: [{ ...input.windowsCleanupFailures[0], message: "private provider output" }],
+    })).toBeNull();
+    expect(runtimeLifecycleDiagnosticSnapshot(diagnosticInput()))
+      .not.toHaveProperty("windowsCleanupFailures");
+  });
   it("retains valid diagnostics for all six supported providers", () => {
     const input = diagnosticInput();
     input.conversations = PROVIDER_MAINTENANCE_PROVIDER_IDS.map((providerId) => ({

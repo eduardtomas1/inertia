@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture } from "./support/app-fixture";
+import { attachRuntimeLifecycleFailureDiagnostic } from "./support/runtime-lifecycle-diagnostics";
 
 const providerOutput = "Electron/core bridge provider output is live.";
 const interruptMarker = "core-bridge-interrupt-accepted";
@@ -216,6 +217,10 @@ test("keeps one cancelled provider turn authoritative across the Electron/core b
   } finally {
     // The fixture rejects unless Electron, the runtime, provider ownership,
     // transport, preview server, and private temporary directory all close.
+    if (process.platform === "win32") {
+      await attachRuntimeLifecycleFailureDiagnostic(test.info(), async () =>
+        (await app.runtimeSnapshot()).websocketUrl).catch(() => undefined);
+    }
     await app.close();
   }
 });

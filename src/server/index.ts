@@ -31,6 +31,7 @@ import { recoverProviderMaintenanceJournal } from
 import { createProviderInfoRefresh } from "./provider/provider-info-refresh";
 import { ProviderTerminalResumeRegistry } from "./provider/terminal-resume";
 import { TerminalManager } from "./terminal";
+import { windowsCleanupFailures } from "./windows-cleanup-diagnostics";
 import { runRuntimeShutdownPhases } from "./runtime-shutdown";
 import { requireRuntimeDirectory as ensureDirectory } from "./runtime-commands";
 import { publicRuntimeError as publicError, RuntimeRequestError as RequestError } from "./runtime-errors";
@@ -445,8 +446,8 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         activeConversationIds,
         runningProviderConversationIds: new Set(providers.activeConversationIds()),
         providerRunOwnershipConversationIds: providerRunOwnership.map(({ conversationId }) => conversationId),
-        terminalOwnershipCount: terminals.ownedResourceCount(),
-        interactionCount: pendingApprovals.size + pendingInputs.size,
+        terminalOwnershipCount: terminals.ownedResourceCount(), interactionCount: pendingApprovals.size + pendingInputs.size,
+        windowsCleanupFailures: windowsCleanupFailures(),
       }),
       sync,
     };

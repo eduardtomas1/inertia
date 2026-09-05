@@ -1,10 +1,7 @@
 import { expect, test, type Locator } from "@playwright/test";
 
 import { RuntimeStore } from "../../src/server/database";
-import {
-  createAppFixture,
-  type AppFixture,
-} from "./support/app-fixture";
+import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import {
   capturePageWebSockets,
   publishCapturedWebSocketEvent,
@@ -18,6 +15,7 @@ import {
   verifyNarrowDesktopMarkdownControls,
 } from "./support/markdown-controls";
 import { selectWorkspaceTool } from "./support/workspace-tools";
+import { attachRuntimeLifecycleFailureDiagnostic } from "./support/runtime-lifecycle-diagnostics";
 
 let app!: AppFixture;
 let electronApp!: AppFixture["electronApp"];
@@ -778,6 +776,10 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     await expect(reconnectedRecentTurn.locator(".turn-settled-summary")).toHaveCount(0);
     await expect(reconnectedRecentTurn.getByText("Worked 52s", { exact: true })).toHaveCount(1);
     expect(rendererErrors).toEqual([]);
+  } catch (error) {
+    await attachRuntimeLifecycleFailureDiagnostic(testInfo, async () =>
+      (await runtimeSnapshot()).websocketUrl).catch(() => undefined);
+    throw error;
   } finally {
     await page.emulateMedia({ reducedMotion: "no-preference" });
     const cleanup = new RuntimeStore(databasePath, workspaceDirectory, { recoverInterruptedRuns: false });

@@ -11,7 +11,9 @@ import {
 } from "../shared/provider-maintenance";
 import {
   safeLifecycleProviderVersion,
+  windowsCleanupFailureSchema,
   type RuntimeLifecycleDiagnosticSnapshot,
+  type WindowsCleanupFailure,
 } from "../shared/lifecycle-diagnostics";
 import { continuationRejectedForCompatibility } from
   "../shared/continuation-reason-codes";
@@ -42,6 +44,7 @@ export interface RuntimeLifecycleDiagnosticInput {
   interactionCount: number;
   buildMetadata?: LifecycleBuildMetadata | null;
   capturedAt?: Date;
+  windowsCleanupFailures?: readonly WindowsCleanupFailure[];
 }
 
 function boundedCount(value: number): number {
@@ -244,5 +247,11 @@ export function runtimeLifecycleDiagnosticSnapshot(
     unresolvedTurnCount: boundedCount(activeConversationIds.size),
     unresolvedInteractionCount: boundedCount(input.interactionCount),
     actionableState,
+    ...(input.windowsCleanupFailures?.length ? {
+      windowsCleanupFailures: input.windowsCleanupFailures.slice(-8).flatMap((failure) => {
+        const parsed = windowsCleanupFailureSchema.safeParse(failure);
+        return parsed.success ? [parsed.data] : [];
+      }),
+    } : {}),
   };
 }

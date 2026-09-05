@@ -4,6 +4,8 @@ import {
   type ChildProcess,
 } from "node:child_process";
 import { win32 } from "node:path";
+import { recordWindowsCleanupFailure, windowsCleanupElapsedMs } from "./windows-cleanup-diagnostics";
+import type { WindowsCleanupFailure } from "../shared/lifecycle-diagnostics";
 
 import {
   forceKillPosixProcessTree,
@@ -131,10 +133,27 @@ export function createOwnedProcessTreeTermination(
   return (force) => {
     forceRequested ||= force;
     termination ??= (async () => {
+      const startedAt = performance.now();
+      const confirmOwnership = (): boolean => {
+        try {
+          if (confirmRuntimeOwnedProcessStopped(child)) return true;
+        } catch (error) {
+          if (process.platform === "win32") recordWindowsCleanupFailure({
+            phase: "ownership-retirement", scope: "child", force: forceRequested,
+            elapsedMs: windowsCleanupElapsedMs(startedAt), exitCode: null,
+          });
+          throw error;
+        }
+        if (process.platform === "win32") recordWindowsCleanupFailure({
+          phase: "ownership-retirement", scope: "child", force: forceRequested,
+          elapsedMs: windowsCleanupElapsedMs(startedAt), exitCode: null,
+        });
+        return false;
+      };
       if (!forceRequested) {
         try {
           if (await terminate(child, false)) {
-            if (!confirmRuntimeOwnedProcessStopped(child)) {
+            if (!confirmOwnership()) {
               throw new ProcessTreeTerminationError(subject);
             }
             return;
@@ -144,7 +163,7 @@ export function createOwnedProcessTreeTermination(
         }
       }
       await requireProcessTreeTermination(terminate, child, true, subject);
-      if (!confirmRuntimeOwnedProcessStopped(child)) {
+      if (!confirmOwnership()) {
         throw new ProcessTreeTerminationError(subject);
       }
     })();
@@ -405,7 +424,13 @@ function terminateWindowsProcessTree(
   spawnProcess: typeof spawn,
   taskkillExecutable: string,
   waitMs: number,
+  scope: WindowsCleanupFailure["scope"],
 ): Promise<boolean> {
+  const startedAt = performance.now();
+  const record = (phase: WindowsCleanupFailure["phase"], exitCode: number | null = null): void => {
+    recordWindowsCleanupFailure({ phase, scope, force, exitCode,
+      elapsedMs: windowsCleanupElapsedMs(startedAt) });
+  };
   return new Promise<boolean>((resolve) => {
     let taskkill: ReturnType<typeof spawn>;
     try {
@@ -419,6 +444,7 @@ function terminateWindowsProcessTree(
         },
       );
     } catch {
+      record("taskkill-spawn");
       resolve(false);
       return;
     }
@@ -431,9 +457,13 @@ function terminateWindowsProcessTree(
       taskkill.off("close", onClose);
       resolve(terminated);
     };
-    const onError = (): void => finish(false);
-    const onClose = (code: number | null): void => finish(code === 0);
+    const onError = (): void => { record("taskkill-error"); finish(false); };
+    const onClose = (code: number | null): void => {
+      if (code !== 0) record("taskkill-exit", code);
+      finish(code === 0);
+    };
     const timer = setTimeout(() => {
+      record("taskkill-timeout");
       try {
         taskkill.kill("SIGKILL");
       } catch {
@@ -498,6 +528,7 @@ export function createOwnedPidProcessTreeTermination(
   return async () => {
     if (!Number.isSafeInteger(pid) || pid <= 1) return false;
     const deadlineAt = Date.now() + waitMs;
+    const startedAt = performance.now();
 
     if (platform === "win32") {
       if (!started) {
@@ -508,6 +539,7 @@ export function createOwnedPidProcessTreeTermination(
           spawnProcess,
           windowsSystemExecutable(windowsSystemRoot, "taskkill.exe"),
           waitMs,
+          "pid",
         );
       }
       if (!treeTerminationConfirmed) return false;
@@ -515,13 +547,19 @@ export function createOwnedPidProcessTreeTermination(
         deadlineAt - Date.now() - WINDOWS_RESOURCE_SETTLE_MS,
       );
       if (rootExitWaitMs <= 0 || !await waitForRootExit(rootExitWaitMs)) {
+        recordWindowsCleanupFailure({ phase: "root-close", scope: "pid", force: true,
+          elapsedMs: windowsCleanupElapsedMs(startedAt), exitCode: null });
         return false;
       }
       const settleMs = Math.min(
         WINDOWS_RESOURCE_SETTLE_MS,
         Math.max(0, deadlineAt - Date.now()),
       );
-      if (settleMs <= 0) return false;
+      if (settleMs <= 0) {
+        recordWindowsCleanupFailure({ phase: "resource-settle", scope: "pid", force: true,
+          elapsedMs: windowsCleanupElapsedMs(startedAt), exitCode: null });
+        return false;
+      }
       await new Promise<void>((resolve) => {
         setTimeout(resolve, settleMs);
       });
@@ -597,22 +635,27 @@ export async function terminateProcessTreeAndWait(
     // complete owned child close.
     if (directChildResourcesAreClosed(child)) return true;
     const waitForObservedDirectChildClose = observeDirectChildClose(child);
+    const startedAt = performance.now();
     const treeTerminated = await terminateWindowsProcessTree(
       pid,
       force,
       spawnProcess,
       windowsSystemExecutable(windowsSystemRoot, "taskkill.exe"),
       waitMs,
+      "child",
     );
     if (treeTerminated) {
       // taskkill confirms that it issued termination for the owned tree, but
       // Windows can keep the direct child's executable image locked until the
       // ChildProcess has emitted close. Do not let callers release temporary
       // executables or other owned resources before that handle is closed.
-      return await confirmWindowsChildResourcesClosed(
+      const closed = await confirmWindowsChildResourcesClosed(
         waitForObservedDirectChildClose,
         waitMs,
       );
+      if (!closed) recordWindowsCleanupFailure({ phase: "root-close", scope: "child", force,
+        elapsedMs: windowsCleanupElapsedMs(startedAt), exitCode: null });
+      return closed;
     }
     killDirectChild(child, force);
     // Direct-child fallback cannot prove that taskkill's unobserved

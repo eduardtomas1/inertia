@@ -38,7 +38,7 @@ async function expectHoverBackground(button: Locator): Promise<string> {
 }
 
 test.beforeAll(async () => {
-  app = await createAppFixture({ name: "composer-responsive", initialState: "conversation" });
+  app = await createAppFixture({ name: "composer-responsive", initialState: "conversation", windowDisplay: "primary" });
   electronApp = app.electronApp;
   page = app.page;
   testDirectory = app.testDirectory;

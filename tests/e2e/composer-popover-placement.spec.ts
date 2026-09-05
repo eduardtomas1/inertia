@@ -65,6 +65,7 @@ let page!: AppFixture["page"];
 test.beforeAll(async () => {
   app = await createAppFixture({
     name: "composer-popover-placement",
+    windowDisplay: "primary",
     initialState: "conversation",
     seedSecondProject: true,
     codexAppServerSource,

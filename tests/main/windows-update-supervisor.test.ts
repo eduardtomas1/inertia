@@ -145,8 +145,6 @@ async function waitForLeaf(
   timeoutMs: number,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
-  // A Windows rename notification can arrive before the exclusive writer
-  // releases its handle, and closing that handle need not emit another event.
   while (!existsSync(path) && Date.now() < deadline) await delay(10);
   if (!existsSync(path)) throw new Error(`Timed out waiting for ${path}.`);
 }
@@ -395,8 +393,17 @@ describe("Windows update supervisor launcher", () => {
           parent!.once("close", () => resolveExit());
         });
 
+        let receipt: ReturnType<typeof parseWindowsUpdateTerminalReceipt> = null;
         try {
-          await waitForLeaf(receiptPath, 10_000);
+          // The native writer renames the receipt before releasing its
+          // exclusive handle. Wait for readable, valid bytes, not existence.
+          receipt = await vi.waitFor(async () => {
+            const candidate = parseWindowsUpdateTerminalReceipt(
+              await readFile(receiptPath),
+            );
+            expect(candidate).not.toBeNull();
+            return candidate;
+          }, { timeout: 10_000, interval: 10 });
         } catch (error) {
           const temporary = await readFile(receiptTemporaryPath).catch(() => null);
           const terminal = temporary && parseWindowsUpdateTerminalReceipt(temporary);
@@ -410,9 +417,6 @@ describe("Windows update supervisor launcher", () => {
           );
         }
         expect(existsSync(installerDonePath)).toBe(false);
-        const receipt = parseWindowsUpdateTerminalReceipt(
-          await readFile(receiptPath),
-        );
         expect(receipt).toMatchObject({
           executableDigest: null,
           installerDigest,

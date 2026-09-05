@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 import { parse } from "yaml";
+import { INERTIA_VERSION } from "../../src/shared/version";
 
 import {
   compareCanaryVersions,
@@ -13,7 +14,7 @@ import {
 } from "../../scripts/validate-canary-feed-advance.mjs";
 
 const roots: string[] = [];
-const version = "0.0.48";
+const version = INERTIA_VERSION;
 const metadata = [
   `version: ${version}`,
   "files:",

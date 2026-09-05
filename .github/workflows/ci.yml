@@ -618,6 +618,9 @@ jobs:
       # preventing the independent coverage from running.
       - name: Run isolated Electron end-to-end tests
         if: ${{ !cancelled() && steps.application_bundle.outcome == 'success' && steps.electron_test_binary.outcome == 'success' && runner.os != 'Linux' }}
+        env:
+          # Bound Windows load after hosted socket-buffer exhaustion.
+          INERTIA_E2E_WORKERS: ${{ runner.os == 'Windows' && '1' || '2' }}
         run: npm exec -- playwright test --project=isolated --output=test-results/isolated
 
       - name: Run destructive runtime-recovery tests sequentially

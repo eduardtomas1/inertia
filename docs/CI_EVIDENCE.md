@@ -34,6 +34,14 @@ request itself runs both the critical and complete tiers. Isolated provider,
 turn/session, agent-management, database, and documentation changes retain the
 critical tier without paying for all six native packages.
 
+Windows Electron scenarios use one worker in CI and release certification;
+Linux and macOS isolated scenarios retain two. Hosted x64 and ARM64 runs each
+reported Winsock buffer exhaustion while two Electron instances were running.
+The Windows scheduling bound reduces concurrent resource demand. Every
+scenario, renderer-error assertion, and native recovery/package gate remains
+required; a passing run does not establish that the underlying resource issue
+has been eliminated.
+
 Full benchmarks run for performance/all-evidence pull requests and for every
 `main`, merge-queue, and scheduled run. Other full-tier affected pull requests
 retain all correctness evidence but skip benchmark-only steps. Concurrency groups

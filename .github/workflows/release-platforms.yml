@@ -201,6 +201,9 @@ jobs:
 
       - name: Run Electron end-to-end tests
         if: runner.os != 'Linux'
+        env:
+          # Keep the same Windows concurrency bound as PR certification.
+          INERTIA_E2E_WORKERS: ${{ runner.os == 'Windows' && '1' || '2' }}
         run: npm exec -- playwright test
 
       - name: Run Electron end-to-end tests under Xvfb

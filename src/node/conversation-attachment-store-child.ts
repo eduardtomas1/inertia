@@ -69,6 +69,8 @@ export interface ConversationAttachmentStoreOperationRunner {
   ): {
     readonly result: Promise<void>;
     readonly stopped: Promise<void>;
+    /** Resolves only after the exact spawned helper has exited. */
+    readonly termination?: Promise<void>;
     readonly ready?: Promise<boolean>;
   };
 }
@@ -80,6 +82,8 @@ export interface ConversationAttachmentStoreReadOperationRunner {
   ): {
     readonly result: Promise<ConversationAttachmentStoreReadReceipt>;
     readonly stopped: Promise<void>;
+    /** Resolves only after the exact spawned helper has exited. */
+    readonly termination?: Promise<void>;
     readonly ready?: Promise<boolean>;
   };
 }

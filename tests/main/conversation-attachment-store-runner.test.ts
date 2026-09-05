@@ -211,10 +211,16 @@ describe("conversation attachment store utility runner", () => {
       const stuckRunning = stuckRunner(operation);
       void stuckRunning.result.catch(() => undefined);
       void stuckRunning.stopped.catch(() => undefined);
+      const terminated = vi.fn();
+      void stuckRunning.termination?.then(terminated);
       stuck.emit("spawn");
       await vi.advanceTimersByTimeAsync(35);
       await expect(stuckRunning.result).rejects.toThrow("timed out");
       await expect(stuckRunning.stopped).rejects.toThrow("unconfirmed");
+      expect(terminated).not.toHaveBeenCalled();
+      stuck.emit("exit", 1);
+      await expect(stuckRunning.termination).resolves.toBeUndefined();
+      expect(terminated).toHaveBeenCalledOnce();
     } finally {
       vi.useRealTimers();
     }
@@ -278,7 +284,12 @@ describe("conversation attachment store utility runner", () => {
       child.emit("spawn");
       expect(child.kill).toHaveBeenCalledTimes(2);
       expect(child.postMessage).not.toHaveBeenCalled();
+      const terminated = vi.fn();
+      void running.termination?.then(terminated);
+      await Promise.resolve();
+      expect(terminated).not.toHaveBeenCalled();
       child.emit("exit", 1);
+      await expect(running.termination).resolves.toBeUndefined();
     } finally {
       vi.useRealTimers();
     }

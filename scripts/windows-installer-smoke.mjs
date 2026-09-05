@@ -582,7 +582,14 @@ $processes = @(Get-CimInstance -ClassName Win32_Process -ErrorAction Stop | ForE
 })))
 `.trim();
 
-export async function windowsInstallRootProcesses(installDirectory) {
+export async function windowsInstallRootProcesses(
+  installDirectory,
+  timeoutMs = 15_000,
+) {
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1
+    || timeoutMs > INSTALL_ROOT_DRAIN_TIMEOUT_MS) {
+    throw new Error("The Windows process-discovery deadline is invalid.");
+  }
   if (process.platform !== "win32") {
     throw new Error("Windows install-root process discovery requires Windows.");
   }
@@ -618,7 +625,7 @@ export async function windowsInstallRootProcesses(installDirectory) {
         INERTIA_INSTALLER_SMOKE_ROOT: root,
       },
       label: "Windows install-root process discovery",
-      timeoutMs: 15_000,
+      timeoutMs,
     },
   );
   const value = JSON.parse(output);
@@ -648,14 +655,22 @@ export async function windowsInstallRootProcesses(installDirectory) {
   return value.processes;
 }
 
-async function waitForInstallRootProcessDrain(installDirectory) {
-  const deadline = Date.now() + INSTALL_ROOT_DRAIN_TIMEOUT_MS;
+export async function waitForInstallRootProcessDrain(installDirectory, options = {}) {
+  const snapshot = options.snapshot ?? windowsInstallRootProcesses;
+  const now = options.now ?? (() => performance.now());
+  const wait = options.wait ?? sleep;
+  const deadline = now() + INSTALL_ROOT_DRAIN_TIMEOUT_MS;
   let processes = [];
-  do {
-    processes = await windowsInstallRootProcesses(installDirectory);
+  while (now() < deadline) {
+    // Cold Windows PowerShell/CIM startup belongs to the existing drain
+    // budget. A separate 15-second probe deadline rejected clean N-1 exits;
+    // restarting that deadline on each poll could also overrun the total.
+    processes = await snapshot(installDirectory, Math.ceil(deadline - now()));
     if (processes.length === 0) return;
-    await sleep(SETTLE_INTERVAL_MS);
-  } while (Date.now() < deadline);
+    const remaining = deadline - now();
+    if (remaining <= 0) break;
+    await wait(Math.min(SETTLE_INTERVAL_MS, remaining));
+  }
   const summary = processes
     .map(({ name, processId }) => `${name} (${processId})`)
     .join(", ");

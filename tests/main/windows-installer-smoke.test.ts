@@ -39,11 +39,20 @@ async function installerSmokeModule() {
     ) => string;
     windowsInstallRootProcesses: (
       installDirectory: string,
+      timeoutMs?: number,
     ) => Promise<Array<{
       executablePath: string;
       name: string;
       processId: number;
     }>>;
+    waitForInstallRootProcessDrain: (
+      installDirectory: string,
+      options: {
+        snapshot: (root: string, timeoutMs: number) => Promise<Array<{ name: string; processId: number }>>;
+        now: () => number;
+        wait: (milliseconds: number) => Promise<void>;
+      },
+    ) => Promise<void>;
     nsisApplicationArchiveName: (
       sanitizedName: string,
       version: string,
@@ -166,6 +175,47 @@ test("the NSIS installer never terminates install-root processes", async () => {
   expect(include).not.toMatch(/\b(?:Stop-Process|taskkill|KILL_PROCESS)\b/u);
   expect(include).toContain("nsExec::Exec /TIMEOUT=15000");
   expect(include).not.toMatch(/IS_POWERSHELL_AVAILABLE|Set-ExecutionPolicy|Get-ExecutionPolicy/u);
+});
+
+test("keeps cold process discovery inside the existing total drain deadline", async () => {
+  const { waitForInstallRootProcessDrain } = await installerSmokeModule();
+  let elapsed = 0;
+  const snapshot = vi.fn(async (_root: string, timeoutMs: number) => {
+    expect(timeoutMs).toBe(30_000);
+    elapsed += 17_000;
+    return [];
+  });
+  await expect(waitForInstallRootProcessDrain("fixture-root", {
+    snapshot, now: () => elapsed, wait: async (ms) => { elapsed += ms; },
+  })).resolves.toBeUndefined();
+  expect(snapshot).toHaveBeenCalledOnce();
+});
+
+test("gives later drain probes only the remaining budget and never probes past it", async () => {
+  const { waitForInstallRootProcessDrain } = await installerSmokeModule();
+  let elapsed = 0;
+  const budgets: number[] = [];
+  const snapshot = vi.fn(async (_root: string, timeoutMs: number) => {
+    budgets.push(timeoutMs);
+    elapsed += budgets.length === 1 ? 6_000 : timeoutMs;
+    return [{ name: "still-running.exe", processId: 42 }];
+  });
+  await expect(waitForInstallRootProcessDrain("fixture-root", {
+    snapshot, now: () => elapsed, wait: async (ms) => { elapsed += ms; },
+  })).rejects.toThrow("still-running.exe (42)");
+  expect(budgets).toEqual([30_000, 23_900]);
+  expect(elapsed).toBe(30_000);
+});
+
+test("does not retry or accept a failed process-discovery query", async () => {
+  const { waitForInstallRootProcessDrain } = await installerSmokeModule();
+  const snapshot = vi.fn(async () => { throw new Error("identity query unavailable"); });
+  const wait = vi.fn(async () => undefined);
+  await expect(waitForInstallRootProcessDrain("fixture-root", {
+    snapshot, now: () => 0, wait,
+  })).rejects.toThrow("identity query unavailable");
+  expect(snapshot).toHaveBeenCalledOnce();
+  expect(wait).not.toHaveBeenCalled();
 });
 
 test.runIf(process.platform === "win32")(

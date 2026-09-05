@@ -237,6 +237,10 @@ test("keeps hostile native previews beneath trusted workspace overlays", async (
   await expect.poll(
     () => app.nativePreviewIsVisible(hostilePreviewUrl),
   ).toBe(false);
+  // Visibility precedes the dialog's deferred focus handoff from the native
+  // preview. Verify keyboard readiness before sending a one-shot Escape.
+  await expect(commitDialog.getByRole("textbox", { name: "Commit message" }))
+    .toBeFocused();
   await page.keyboard.press("Escape");
   await expect(commitDialog).toHaveCount(0);
   await expect.poll(

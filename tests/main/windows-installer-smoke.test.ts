@@ -153,6 +153,7 @@ test("the NSIS installer never terminates install-root processes", async () => {
   expect(include).toContain("!macro customCheckAppRunning");
   expect(include).toContain("INERTIA_NSIS_INSTALL_ROOT");
   expect(include).toContain("Get-Item -LiteralPath $$rootPath");
+  expect(include).toContain("Get-Item -LiteralPath $$rawPath");
   expect(include).toContain("[IO.FileAttributes]::ReparsePoint");
   expect(include).toContain("[IO.Path]::DirectorySeparatorChar");
   expect(include).toContain("[StringComparison]::OrdinalIgnoreCase");

@@ -557,8 +557,18 @@ $root = [IO.Path]::GetFullPath($rootItem.FullName).TrimEnd([char[]]'\\/')
 $prefix = $root + [IO.Path]::DirectorySeparatorChar
 $processes = @(Get-CimInstance -ClassName Win32_Process -ErrorAction Stop | ForEach-Object {
   $rawPath = [string]$_.ExecutablePath
-  if ([String]::IsNullOrEmpty($rawPath) -or -not $rawPath.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) { return }
-  $path = [IO.Path]::GetFullPath($rawPath)
+  if ([String]::IsNullOrEmpty($rawPath)) { return }
+  try {
+    $pathItem = Get-Item -LiteralPath $rawPath -Force -ErrorAction Stop
+    if ($pathItem -isnot [IO.FileInfo]) { throw "unsafe process path" }
+    $path = [IO.Path]::GetFullPath($pathItem.FullName)
+  } catch {
+    if (
+      $rawPath.StartsWith($rootPath, [StringComparison]::OrdinalIgnoreCase) -or
+      $rawPath.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)
+    ) { throw }
+    return
+  }
   if ($path.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
     [ordered]@{
       processId = [int]$_.ProcessId

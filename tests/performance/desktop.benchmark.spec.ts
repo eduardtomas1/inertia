@@ -9,6 +9,7 @@ import {
   expect,
   test,
   _electron as electron,
+  type CDPSession,
   type ElectronApplication,
   type Page,
 } from "@playwright/test";
@@ -91,6 +92,7 @@ const TERMINAL_CLOSE_ASSERTION_TIMEOUT_MS = terminalCloseTimeoutMs(
 // evidence consume the benchmark timeout or prevent Electron cleanup.
 const FAILURE_DIAGNOSTIC_TIMEOUT_MS = 1_000;
 const BENCHMARK_BODY_SETTLE_TIMEOUT_MS = 5_000;
+const MEMORY_SAMPLE_TIMEOUT_MS = 10_000;
 // The cleanup coordinator deliberately awaits every acquisition that started
 // before teardown. Give Playwright's launcher its own deadline so that wait is
 // bounded without allowing a late ElectronApplication to escape afterEach.
@@ -134,6 +136,10 @@ interface BenchmarkCleanupContext {
 }
 
 let activeBenchmarkCleanup: BenchmarkCleanupContext | null = null;
+// The owned Electron app closes its page sessions during teardown. Reuse one
+// memory probe across reloads and samples instead of repeatedly attaching to
+// an idle renderer; weak keys do not retain a closed benchmark app.
+const rendererMemorySessions = new WeakMap<Page, Promise<CDPSession>>();
 
 interface StreamingTraceMarker {
   stage: string;
@@ -1473,49 +1479,51 @@ async function rendererMemorySample(
   page: Page,
   phase: string,
 ) {
-  const session = await page.context().newCDPSession(page);
-  let heap: { usedSize: number; totalSize: number };
-  try {
+  return await test.step(`Sample renderer memory: ${phase}`, async () => {
+    let sessionPromise = rendererMemorySessions.get(page);
+    if (!sessionPromise) {
+      sessionPromise = page.context().newCDPSession(page);
+      rendererMemorySessions.set(page, sessionPromise);
+    }
+    const session = await sessionPromise;
     await session.send("HeapProfiler.collectGarbage");
     await page.evaluate(async () => {
       await new Promise<void>((resolveFrame) => requestAnimationFrame(() => {
         requestAnimationFrame(() => resolveFrame());
       }));
     });
-    heap = await session.send("Runtime.getHeapUsage");
-  } finally {
-    await session.detach();
-  }
-  const rendererCounters = await page.evaluate(() => ({
-    totalDomNodes: document.querySelectorAll("*").length,
-    mountedVirtualTimelineRows:
-      document.querySelectorAll(".response-virtual-item").length,
-    activeTerminalPanels:
-      document.querySelectorAll('.terminal-panel[data-terminal-id]').length,
-    activeXtermContainers: document.querySelectorAll(".xterm").length,
-    loadedWorkspaceSurfaces:
-      document.querySelectorAll('.workspace-panel:not([hidden]) [role="tabpanel"]').length,
-    splitPaneCount: document.querySelectorAll(".conversation-split-pane").length,
-  }));
-  const processMemory = await electronApp.evaluate(({ app, BrowserWindow }) => {
-    const rendererPid = BrowserWindow.getAllWindows()[0]
-      ?.webContents.getOSProcessId() ?? null;
-    const metric = app.getAppMetrics().find(({ pid }) => pid === rendererPid);
+    const heap = await session.send("Runtime.getHeapUsage");
+    const rendererCounters = await page.evaluate(() => ({
+      totalDomNodes: document.querySelectorAll("*").length,
+      mountedVirtualTimelineRows:
+        document.querySelectorAll(".response-virtual-item").length,
+      activeTerminalPanels:
+        document.querySelectorAll('.terminal-panel[data-terminal-id]').length,
+      activeXtermContainers: document.querySelectorAll(".xterm").length,
+      loadedWorkspaceSurfaces:
+        document.querySelectorAll('.workspace-panel:not([hidden]) [role="tabpanel"]').length,
+      splitPaneCount: document.querySelectorAll(".conversation-split-pane").length,
+    }));
+    const processMemory = await electronApp.evaluate(({ app, BrowserWindow }) => {
+      const rendererPid = BrowserWindow.getAllWindows()[0]
+        ?.webContents.getOSProcessId() ?? null;
+      const metric = app.getAppMetrics().find(({ pid }) => pid === rendererPid);
+      return {
+        rendererPid,
+        workingSetKb: metric?.memory.workingSetSize ?? null,
+        peakWorkingSetKb: metric?.memory.peakWorkingSetSize ?? null,
+        privateKb: metric?.memory.privateBytes ?? null,
+      };
+    });
     return {
-      rendererPid,
-      workingSetKb: metric?.memory.workingSetSize ?? null,
-      peakWorkingSetKb: metric?.memory.peakWorkingSetSize ?? null,
-      privateKb: metric?.memory.privateBytes ?? null,
+      phase,
+      collectedAt: new Date().toISOString(),
+      usedJsHeapBytes: heap.usedSize,
+      totalJsHeapBytes: heap.totalSize,
+      ...rendererCounters,
+      ...processMemory,
     };
-  });
-  return {
-    phase,
-    collectedAt: new Date().toISOString(),
-    usedJsHeapBytes: heap.usedSize,
-    totalJsHeapBytes: heap.totalSize,
-    ...rendererCounters,
-    ...processMemory,
-  };
+  }, { timeout: MEMORY_SAMPLE_TIMEOUT_MS });
 }
 
 async function openWorkspaceTools(page: Page): Promise<void> {

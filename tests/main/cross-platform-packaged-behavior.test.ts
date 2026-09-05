@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
+import { parse } from "yaml";
 
 const repositoryRoot = process.cwd();
 
@@ -186,6 +187,42 @@ describe("cross-platform packaged behavior contract", () => {
       "run: xvfb-run --auto-servernum npm run test:package-smoke",
     ]) {
       expect(workflow).toContain(expected);
+    }
+  });
+
+  it.each([
+    ["ci.yml", "test"],
+    ["release-platforms.yml", "build"],
+  ])("keeps native desktop phases independent and sequential in %s", async (filename, job) => {
+    const workflow = parse(await source(`.github/workflows/${filename}`)) as {
+      jobs: Record<string, { steps: Array<{
+        run?: string;
+        if?: string;
+        "continue-on-error"?: boolean;
+      }> }>;
+    };
+    const desktopSteps = workflow.jobs[job]!.steps.filter(
+      (step) => step.run?.includes("playwright test"),
+    );
+    expect(desktopSteps).toHaveLength(6);
+    for (const linux of [false, true]) {
+      const phases = desktopSteps.filter(
+        (step) => step.run!.startsWith("xvfb-run") === linux,
+      );
+      expect(phases.map((step) => step.run!.match(/--project=([\w-]+)/u)?.[1]))
+        .toEqual(["display-sensitive", "isolated", "runtime-recovery"]);
+      for (const [index, phase] of phases.entries()) {
+        expect(phase["continue-on-error"]).not.toBe(true);
+        expect(phase.if).toContain(`runner.os ${linux ? "==" : "!="} 'Linux'`);
+        const project = ["display-sensitive", "isolated", "runtime-recovery"][index];
+        expect(phase.run).toContain(`--output=test-results/${project}`);
+        if (index === 0) continue;
+        // A foreground assertion must fail certification without suppressing
+        // the other phases. Neither may run before a valid app and binary exist.
+        expect(phase.if).toContain("!cancelled()");
+        expect(phase.if).toContain("steps.application_bundle.outcome == 'success'");
+        expect(phase.if).toContain("steps.electron_test_binary.outcome == 'success'");
+      }
     }
   });
 
@@ -1001,7 +1038,7 @@ describe("cross-platform packaged behavior contract", () => {
     expect(workflow).not.toContain(
       "Refresh Windows app bundle after portable helper rebuild",
     );
-    expect(workflow.indexOf("Run Electron end-to-end tests"))
+    expect(workflow.indexOf("Run display-sensitive Electron end-to-end tests"))
       .toBeGreaterThan(workflow.indexOf("Build the release application bundle once"));
 
     const linuxBuild = workflowStep(workflow, "Build Linux release package");

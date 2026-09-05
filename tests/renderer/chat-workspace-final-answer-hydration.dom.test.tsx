@@ -1,6 +1,6 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import type { ComponentProps } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { ChatWorkspace } from "../../src/renderer/src/components/ChatWorkspace";
 import {
@@ -341,6 +341,11 @@ async function expectVirtualWindow(container: HTMLElement): Promise<void> {
     expect(container.querySelector(".response-virtual-window")).not.toBeNull();
   }, { timeout: 5_000 });
 }
+
+beforeAll(async () => {
+  // Load the real timeline before measuring owner-scoped hydration.
+  await import("../../src/renderer/src/components/ResponseTimeline");
+});
 
 afterEach(() => {
   finalAnswerAnchorStarts.mockReset();

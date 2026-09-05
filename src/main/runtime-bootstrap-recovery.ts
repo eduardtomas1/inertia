@@ -9,6 +9,7 @@ import {
   LEGACY_RUNTIME_RECOVERY_DIALOG_DETAIL,
   MODERN_DARWIN_RECOVERY_DIALOG_DETAIL,
   prepareModernDarwinBootstrapRecovery,
+  runtimeBootstrapAdmissionBlocked,
   prepareRuntimeBootstrapSafety,
   type RuntimeBootstrapSafety,
 } from "./runtime-bootstrap-safety.js";
@@ -169,6 +170,7 @@ export async function prepareRuntimeBootstrapRecovery(
     bootstrapSafety,
     modernDarwinRecoveryAuthority,
     runtimeRecoveryBlocked: !modernRecoveryReady
-      || bootstrapSafety.legacyRecoveryCandidates.length > 0,
+      || bootstrapSafety.legacyRecoveryCandidates.length > 0
+      || runtimeBootstrapAdmissionBlocked(dataDirectory),
   };
 }

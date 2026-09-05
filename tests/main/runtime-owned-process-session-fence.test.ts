@@ -5,6 +5,12 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { persistRuntimeGenerationCleanup } from
+  "../../src/main/runtime-generation-cleanup";
+import { RuntimeCleanupReceiptJournal } from
+  "../../src/main/runtime-cleanup-receipts";
+import type { RuntimeProcessRecord } from
+  "../../src/main/runtime-supervisor-types";
 import {
   activateRuntimeOwnedProcessRegistry,
   RuntimeOwnedProcessJournal,
@@ -17,6 +23,8 @@ import {
   removeDirectRuntimeJournalChildRoot,
   writeDirectRuntimeJournalLeaf,
 } from "../../src/node/direct-runtime-journal";
+import { RuntimeGenerationLeaseJournal } from
+  "../../src/node/runtime-generation-leases";
 import {
   runtimeOwnedProcessSessionName,
   runtimeOwnedProcessWriterName,
@@ -134,6 +142,91 @@ describe("runtime owned-process session fence", () => {
     expect(journal.sessionCapabilityCurrent(staleCapability!)).toBe(false);
     expect(journal.sessionCapability(generation, boot)).toBeNull();
     expect(journal.finishSession(generation)).toBe(true);
+  });
+
+  it("keeps the retiring session until a durable cleanup commit succeeds", () => {
+    const directory = mkdtempSync(join(tmpdir(), "inertia-session-fence-"));
+    directories.push(directory);
+    const journal = new RuntimeOwnedProcessJournal(directory, {
+      platform: "win32",
+    });
+    expect(journal.startSession(generation, boot)).toBe(true);
+    const staleCapability = journal.sessionCapability(generation, boot);
+    expect(staleCapability).not.toBeNull();
+    const rejectedCommit = vi.fn(() => {
+      expect(journal.inspectGeneration(generation)).toMatchObject({
+        sessionState: "retiring",
+        sessionWriterPresent: false,
+        records: [],
+        consumingRecords: [],
+        containment: null,
+      });
+      return false;
+    });
+
+    expect(journal.finishSession(generation, rejectedCommit)).toBe(false);
+    expect(rejectedCommit).toHaveBeenCalledOnce();
+    expect(journal.sessionCapabilityCurrent(staleCapability!)).toBe(false);
+    expect(journal.inspectGeneration(generation)).toMatchObject({
+      sessionState: "retiring",
+      sessionWriterPresent: false,
+    });
+    expect(journal.finishSession(generation, () => {
+      throw new Error("simulated cleanup receipt failure");
+    })).toBe(false);
+    expect(journal.inspectGeneration(generation)).toMatchObject({
+      sessionState: "retiring",
+    });
+    expect(journal.finishSession(generation, () => true)).toBe(true);
+    expect(journal.inspectGeneration(generation)).toMatchObject({
+      session: null,
+      sessionState: null,
+      records: [],
+      consumingRecords: [],
+      containment: null,
+    });
+  });
+
+  it("retries lease retirement after cleanup proof is already durable", () => {
+    const directory = mkdtempSync(join(tmpdir(), "inertia-session-fence-"));
+    directories.push(directory);
+    const ownedProcesses = new RuntimeOwnedProcessJournal(directory, {
+      platform: "win32",
+    });
+    const receipts = new RuntimeCleanupReceiptJournal(directory);
+    const leases = new RuntimeGenerationLeaseJournal(directory);
+    const record = {
+      runtimeGenerationId: generation,
+      generationCleanupConfirmed: false,
+    } as RuntimeProcessRecord;
+    expect(ownedProcesses.startSession(generation, boot)).toBe(true);
+    expect(leases.publish(generation, boot)).toBe(true);
+    const clearRuntimeGeneration = leases.clearRuntimeGeneration.bind(leases);
+    const clear = vi.spyOn(leases, "clearRuntimeGeneration")
+      .mockImplementationOnce(() => false)
+      .mockImplementation(clearRuntimeGeneration);
+
+    expect(persistRuntimeGenerationCleanup(
+      record,
+      receipts,
+      leases,
+      ownedProcesses,
+    )).toBe(false);
+    expect(receipts.has(generation)).toBe(true);
+    expect(ownedProcesses.sessionExact(generation)).toBeNull();
+    expect(new RuntimeGenerationLeaseJournal(directory).all()).toEqual([
+      expect.objectContaining({ runtimeGenerationId: generation }),
+    ]);
+
+    expect(persistRuntimeGenerationCleanup(
+      record,
+      receipts,
+      leases,
+      ownedProcesses,
+    )).toBe(true);
+    expect(clear).toHaveBeenCalledTimes(2);
+    expect(record.generationCleanupConfirmed).toBe(true);
+    expect(new RuntimeGenerationLeaseJournal(directory).all()).toEqual([]);
   });
 
   it("never spawns from a surviving registry after its session is fenced", () => {

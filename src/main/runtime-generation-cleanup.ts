@@ -10,12 +10,24 @@ export function persistRuntimeGenerationCleanup(
   ownedProcesses?: RuntimeOwnedProcessJournal,
 ): boolean {
   if (record.generationCleanupConfirmed) return true;
-  if (ownedProcesses && !ownedProcesses.finishSession(
-    record.runtimeGenerationId,
-  )) return false;
-  if (!receipts.publish(record.runtimeGenerationId)) return false;
+  const runtimeGenerationId = record.runtimeGenerationId;
+  if (ownedProcesses) {
+    if (receipts.has(runtimeGenerationId)) {
+      const session = ownedProcesses.sessionExact(runtimeGenerationId);
+      if (
+        session === undefined
+        || (session && !ownedProcesses.finishSessionExact(session))
+      ) return false;
+    } else if (!ownedProcesses.finishSession(
+      runtimeGenerationId,
+      () => receipts.publish(runtimeGenerationId),
+    )) return false;
+  } else if (
+    !receipts.has(runtimeGenerationId)
+    && !receipts.publish(runtimeGenerationId)
+  ) return false;
   leases.refresh();
-  if (!leases.clearRuntimeGeneration(record.runtimeGenerationId)) return false;
+  if (!leases.clearRuntimeGeneration(runtimeGenerationId)) return false;
   record.generationCleanupConfirmed = true;
   return true;
 }

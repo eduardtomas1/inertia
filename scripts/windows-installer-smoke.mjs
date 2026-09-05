@@ -1,5 +1,6 @@
 import { createRequire } from "node:module";
 import { createHash } from "node:crypto";
+import { spawn } from "node:child_process";
 import { constants, createReadStream } from "node:fs";
 import {
   copyFile,
@@ -14,7 +15,11 @@ import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { runBounded } from "./bounded-process-tree.mjs";
+import {
+  BoundedProcessExitError,
+  ProcessTreeCleanupError,
+  runBounded,
+} from "./bounded-process-tree.mjs";
 import { inspectNativeBinaryArchitecture } from "./native-binary-architecture.mjs";
 
 export { runBounded } from "./bounded-process-tree.mjs";
@@ -30,6 +35,7 @@ const INSTALL_TIMEOUT_MS = 3 * 60_000;
 const PACKAGE_SMOKE_TIMEOUT_MS = 3 * 60_000;
 const UNINSTALL_TIMEOUT_MS = 2 * 60_000;
 const UNINSTALL_SETTLE_TIMEOUT_MS = 30_000;
+const INSTALL_ROOT_DRAIN_TIMEOUT_MS = 30_000;
 const SETTLE_INTERVAL_MS = 100;
 const NODE_PTY_CONPTY_VERSION = "1.23.251008001";
 const NODE_PTY_RELEASE_FILES = [
@@ -265,6 +271,30 @@ export function installedWindowsApplicationName(releaseChannel) {
     throw new Error("The installed Windows application channel is invalid.");
   }
   return releaseChannel === "canary" ? "Inertia Canary.exe" : "Inertia.exe";
+}
+
+export async function requireDisposableWindowsInstallerHost(
+  localAppData,
+  releaseChannel,
+) {
+  installedWindowsApplicationName(releaseChannel);
+  if (
+    typeof localAppData !== "string"
+    || localAppData.length === 0
+    || localAppData.length > 4_096
+    || localAppData.includes("\0")
+    || !isAbsolute(localAppData)
+  ) throw new Error("The Windows installer smoke host identity is invalid.");
+  const existingInstall = join(
+    resolve(localAppData),
+    "Programs",
+    releaseChannel === "canary" ? "inertia-canary" : "inertia",
+  );
+  if (await pathExists(existingInstall)) {
+    throw new Error(
+      "The Windows installer smoke requires a disposable host without an existing Inertia installation.",
+    );
+  }
 }
 
 function archiveHeader(listing) {
@@ -516,6 +546,247 @@ async function smokeInstalledApplication(
   );
 }
 
+const INSTALL_ROOT_PROCESS_SNAPSHOT_SCRIPT = `
+$ErrorActionPreference = "Stop"
+$rootPath = [IO.Path]::GetFullPath($env:INERTIA_INSTALLER_SMOKE_ROOT).TrimEnd([char[]]'\\/')
+$rootItem = Get-Item -LiteralPath $rootPath -Force -ErrorAction Stop
+if ($rootItem -isnot [IO.DirectoryInfo] -or ($rootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+  throw "unsafe install root"
+}
+$root = [IO.Path]::GetFullPath($rootItem.FullName).TrimEnd([char[]]'\\/')
+$prefix = $root + [IO.Path]::DirectorySeparatorChar
+$processes = @(Get-CimInstance -ClassName Win32_Process -ErrorAction Stop | ForEach-Object {
+  $rawPath = [string]$_.ExecutablePath
+  if ([String]::IsNullOrEmpty($rawPath)) { return }
+  try {
+    $pathItem = Get-Item -LiteralPath $rawPath -Force -ErrorAction Stop
+    if ($pathItem -isnot [IO.FileInfo]) { throw "unsafe process path" }
+    $path = [IO.Path]::GetFullPath($pathItem.FullName)
+  } catch {
+    if (
+      $rawPath.StartsWith($rootPath, [StringComparison]::OrdinalIgnoreCase) -or
+      $rawPath.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)
+    ) { throw }
+    return
+  }
+  if ($path.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
+    [ordered]@{
+      processId = [int]$_.ProcessId
+      name = [string]$_.Name
+      executablePath = $path
+    }
+  }
+})
+[Console]::Out.Write((ConvertTo-Json -Compress -Depth 3 -InputObject ([ordered]@{
+  processes = $processes
+})))
+`.trim();
+
+export async function windowsInstallRootProcesses(installDirectory) {
+  if (process.platform !== "win32") {
+    throw new Error("Windows install-root process discovery requires Windows.");
+  }
+  const systemRoot = process.env.SystemRoot;
+  if (
+    typeof systemRoot !== "string"
+    || systemRoot.length === 0
+    || systemRoot.length > 32_767
+    || systemRoot.includes("\0")
+    || !isAbsolute(systemRoot)
+  ) throw new Error("The Windows system root is invalid.");
+  const powershell = join(
+    resolve(systemRoot),
+    "System32",
+    "WindowsPowerShell",
+    "v1.0",
+    "powershell.exe",
+  );
+  if (!await existsAsRegularFile(powershell)) {
+    throw new Error("The trusted Windows PowerShell executable is unavailable.");
+  }
+  const root = resolve(installDirectory);
+  const command = Buffer.from(
+    INSTALL_ROOT_PROCESS_SNAPSHOT_SCRIPT,
+    "utf16le",
+  ).toString("base64");
+  const output = await runBounded(
+    powershell,
+    ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", command],
+    {
+      env: {
+        ...process.env,
+        INERTIA_INSTALLER_SMOKE_ROOT: root,
+      },
+      label: "Windows install-root process discovery",
+      timeoutMs: 15_000,
+    },
+  );
+  const value = JSON.parse(output);
+  if (
+    value === null
+    || typeof value !== "object"
+    || Object.keys(value).length !== 1
+    || !Array.isArray(value.processes)
+    || value.processes.length > 4_096
+  ) throw new Error("Windows install-root process discovery returned invalid data.");
+  for (const entry of value.processes) {
+    if (
+      entry === null
+      || typeof entry !== "object"
+      || Object.keys(entry).sort().join("\0")
+        !== ["executablePath", "name", "processId"].join("\0")
+      || !Number.isSafeInteger(entry.processId)
+      || entry.processId <= 0
+      || typeof entry.name !== "string"
+      || entry.name.length === 0
+      || entry.name.length > 260
+      || typeof entry.executablePath !== "string"
+      || entry.executablePath.length === 0
+      || entry.executablePath.length > 32_767
+    ) throw new Error("Windows install-root process discovery returned invalid data.");
+  }
+  return value.processes;
+}
+
+async function waitForInstallRootProcessDrain(installDirectory) {
+  const deadline = Date.now() + INSTALL_ROOT_DRAIN_TIMEOUT_MS;
+  let processes = [];
+  do {
+    processes = await windowsInstallRootProcesses(installDirectory);
+    if (processes.length === 0) return;
+    await sleep(SETTLE_INTERVAL_MS);
+  } while (Date.now() < deadline);
+  const summary = processes
+    .map(({ name, processId }) => `${name} (${processId})`)
+    .join(", ");
+  throw new Error(
+    `Windows install-root processes did not finish safe shutdown: ${summary}.`,
+  );
+}
+
+async function waitForChildEvent(child, timeoutMs, label) {
+  await new Promise((resolvePromise, rejectPromise) => {
+    const cleanup = () => {
+      clearTimeout(timeout);
+      child.off("spawn", onSpawn);
+      child.off("error", onError);
+    };
+    const onSpawn = () => {
+      cleanup();
+      resolvePromise();
+    };
+    const onError = (error) => {
+      cleanup();
+      rejectPromise(error);
+    };
+    const timeout = setTimeout(() => {
+      cleanup();
+      rejectPromise(new Error(`${label} timed out.`));
+    }, timeoutMs);
+    child.once("spawn", onSpawn);
+    child.once("error", onError);
+  });
+}
+
+async function stopInstallRootBlocker(child) {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  const closed = new Promise((resolvePromise) => child.once("close", resolvePromise));
+  child.stdin?.end("exit\r\n");
+  const graceful = await Promise.race([
+    closed.then(() => true),
+    sleep(2_000).then(() => false),
+  ]);
+  if (graceful) return;
+  child.kill();
+  const terminated = await Promise.race([
+    closed.then(() => true),
+    sleep(2_000).then(() => false),
+  ]);
+  if (!terminated) {
+    throw new ProcessTreeCleanupError(
+      "The exact install-root blocker process did not close.",
+    );
+  }
+}
+
+async function proveInstallerPreservesLiveInstallRootProcess(options) {
+  const blockerPath = join(options.installDirectory, "inertia-update-blocker.exe");
+  await copyFile(process.execPath, blockerPath, constants.COPYFILE_EXCL);
+  const installedDigest = await sha256File(options.installedExecutable);
+  const blocker = spawn(blockerPath, ["-e", "process.stdin.resume()"], {
+    stdio: ["pipe", "ignore", "ignore"],
+    windowsHide: true,
+  });
+  try {
+    await waitForChildEvent(blocker, 5_000, "Install-root blocker startup");
+    await sleep(100);
+    if (blocker.exitCode !== null || blocker.signalCode !== null) {
+      throw new Error("The install-root blocker exited before the installer ran.");
+    }
+    let rejected = false;
+    try {
+      await runBounded(
+        options.installer,
+        ["/S", `/D=${options.installDirectory}`],
+        {
+          label: "Windows installer live-process refusal",
+          timeoutMs: INSTALL_TIMEOUT_MS,
+          windowsVerbatimArguments: true,
+        },
+      );
+    } catch (error) {
+      if (
+        !(error instanceof BoundedProcessExitError)
+        || error.exitCode !== 1
+      ) throw error;
+      rejected = true;
+    }
+    if (!rejected) {
+      throw new Error("The Windows installer replaced a live installation.");
+    }
+    if (blocker.exitCode !== null || blocker.signalCode !== null) {
+      throw new Error("The Windows installer terminated an install-root process.");
+    }
+    if (await sha256File(options.installedExecutable) !== installedDigest) {
+      throw new Error("The refused Windows installer changed the installed executable.");
+    }
+    console.log("Windows installer preserved the live install-root process and old executable.");
+  } finally {
+    await stopInstallRootBlocker(blocker);
+    await rm(blockerPath, { force: true });
+  }
+}
+
+async function installWhileSiblingProcessLives(options) {
+  const siblingDirectory = `${options.installDirectory}-sibling`;
+  const blockerPath = join(siblingDirectory, "inertia-update-blocker.exe");
+  await mkdir(siblingDirectory, { mode: 0o700 });
+  await copyFile(process.execPath, blockerPath, constants.COPYFILE_EXCL);
+  const blocker = spawn(blockerPath, ["-e", "process.stdin.resume()"], {
+    stdio: ["pipe", "ignore", "ignore"],
+    windowsHide: true,
+  });
+  try {
+    await waitForChildEvent(blocker, 5_000, "Sibling install-root blocker startup");
+    await runBounded(
+      options.installer,
+      ["/S", `/D=${options.installDirectory}`],
+      {
+        label: options.label,
+        timeoutMs: INSTALL_TIMEOUT_MS,
+        windowsVerbatimArguments: true,
+      },
+    );
+    if (blocker.exitCode !== null || blocker.signalCode !== null) {
+      throw new Error("The Windows installer terminated a sibling process.");
+    }
+    console.log("Windows installer accepted the sibling-path boundary without terminating it.");
+  } finally {
+    await stopInstallRootBlocker(blocker);
+    await rm(siblingDirectory, { force: true, recursive: true });
+  }
+}
+
 export async function main() {
   if (process.platform !== "win32") {
     throw new Error("The Windows installer smoke must run on Windows.");
@@ -526,6 +797,10 @@ export async function main() {
   const repositoryRoot = resolve(import.meta.dirname, "..");
   const manifest = require(join(repositoryRoot, "package.json"));
   const releaseChannel = process.env.INERTIA_RELEASE_CHANNEL ?? "stable";
+  await requireDisposableWindowsInstallerHost(
+    process.env.LOCALAPPDATA,
+    releaseChannel,
+  );
   const installer = join(
     repositoryRoot,
     "release",
@@ -584,6 +859,7 @@ export async function main() {
         persistentStateRoot,
         nMinusOne.version,
       );
+      await waitForInstallRootProcessDrain(installDirectory);
       if (!await existsAsRegularFile(join(
         persistentStateRoot,
         "data",
@@ -591,14 +867,29 @@ export async function main() {
       ))) {
         throw new Error("The packaged Windows N-1 smoke did not create durable profile state.");
       }
+      await proveInstallerPreservesLiveInstallRootProcess({
+        installDirectory,
+        installedExecutable,
+        installer,
+      });
+      await waitForInstallRootProcessDrain(installDirectory);
     }
-    await runBounded(installer, ["/S", `/D=${installDirectory}`], {
-      label: nMinusOne
-        ? `Silent Windows in-place N-1 to N installer (${nMinusOne.version} -> ${manifest.version})`
-        : "Silent Windows installer",
-      timeoutMs: INSTALL_TIMEOUT_MS,
-      windowsVerbatimArguments: true,
-    });
+    const installLabel = nMinusOne
+      ? `Silent Windows in-place N-1 to N installer (${nMinusOne.version} -> ${manifest.version})`
+      : "Silent Windows installer";
+    if (nMinusOne) {
+      await installWhileSiblingProcessLives({
+        installDirectory,
+        installer,
+        label: installLabel,
+      });
+    } else {
+      await runBounded(installer, ["/S", `/D=${installDirectory}`], {
+        label: installLabel,
+        timeoutMs: INSTALL_TIMEOUT_MS,
+        windowsVerbatimArguments: true,
+      });
+    }
     await requireInstalledFiles(
       installDirectory,
       unpackedDirectory,

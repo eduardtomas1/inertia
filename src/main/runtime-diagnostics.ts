@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   chmodSync,
   closeSync,
@@ -16,6 +16,7 @@ import {
   unlinkSync,
   writeSync,
 } from "node:fs";
+import type { Stats } from "node:fs";
 import { join, resolve } from "node:path";
 
 import { FILE_OPEN_NO_FOLLOW } from
@@ -705,7 +706,126 @@ export class RuntimeDiagnostics {
       if (!LOG_FILE_PATTERN.test(name)) continue;
       const path = join(this.directory, name);
       const metadata = lstatSync(path);
-      if (metadata.isSymbolicLink() || !metadata.isFile() || metadata.mtimeMs < cutoff) unlinkSync(path);
+      if (
+        metadata.isSymbolicLink()
+        || !metadata.isFile()
+        || metadata.mtimeMs < cutoff
+        || metadata.size > this.maxFileBytes
+      ) {
+        unlinkSync(path);
+        continue;
+      }
+      this.pruneExpiredRecords(path, metadata, cutoff);
+    }
+  }
+
+  private pruneExpiredRecords(
+    path: string,
+    metadata: Stats,
+    cutoff: number,
+  ): void {
+    if (metadata.size === 0) return;
+    const noFollow = "O_NOFOLLOW" in constants ? FILE_OPEN_NO_FOLLOW : 0;
+    const descriptor = openSync(path, constants.O_RDONLY | noFollow);
+    let content: string;
+    try {
+      const opened = fstatSync(descriptor);
+      if (
+        !opened.isFile()
+        || opened.dev !== metadata.dev
+        || opened.ino !== metadata.ino
+        || opened.size !== metadata.size
+      ) return;
+      const bytes = Buffer.allocUnsafe(opened.size);
+      let offset = 0;
+      while (offset < bytes.length) {
+        const read = readSync(
+          descriptor,
+          bytes,
+          offset,
+          bytes.length - offset,
+          offset,
+        );
+        if (read <= 0) return;
+        offset += read;
+      }
+      content = bytes.toString("utf8");
+    } finally {
+      closeSync(descriptor);
+    }
+    let expired = false;
+    const retained = content.split(/\r?\n/u).filter((line) => {
+      if (!line) return false;
+      try {
+        const value = JSON.parse(line) as { at?: unknown };
+        if (typeof value.at !== "string") return false;
+        const timestamp = Date.parse(value.at);
+        if (!Number.isFinite(timestamp)) return false;
+        if (timestamp < cutoff) {
+          expired = true;
+          return false;
+        }
+        return true;
+      } catch {
+        return false;
+      }
+    });
+    if (!expired) return;
+    const current = lstatSync(path);
+    if (
+      !current.isFile()
+      || current.isSymbolicLink()
+      || current.dev !== metadata.dev
+      || current.ino !== metadata.ino
+      || current.size !== metadata.size
+      || current.mtimeMs !== metadata.mtimeMs
+    ) return;
+    if (retained.length === 0) {
+      unlinkSync(path);
+      return;
+    }
+    const temporary = join(
+      this.directory,
+      `.runtime-diagnostics-${randomUUID()}.prune.tmp`,
+    );
+    const output = Buffer.from(`${retained.join("\n")}\n`, "utf8");
+    let temporaryDescriptor: number | null = null;
+    try {
+      temporaryDescriptor = openSync(
+        temporary,
+        constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | noFollow,
+        FILE_MODE,
+      );
+      fchmodSync(temporaryDescriptor, FILE_MODE);
+      let offset = 0;
+      while (offset < output.length) {
+        const written = writeSync(
+          temporaryDescriptor,
+          output,
+          offset,
+          output.length - offset,
+        );
+        if (written <= 0) return;
+        offset += written;
+      }
+      fsyncSync(temporaryDescriptor);
+      closeSync(temporaryDescriptor);
+      temporaryDescriptor = null;
+      const unchanged = lstatSync(path);
+      if (
+        unchanged.isFile()
+        && !unchanged.isSymbolicLink()
+        && unchanged.dev === metadata.dev
+        && unchanged.ino === metadata.ino
+        && unchanged.size === metadata.size
+        && unchanged.mtimeMs === metadata.mtimeMs
+      ) {
+        renameSync(temporary, path);
+        chmodSync(path, FILE_MODE);
+      }
+    } finally {
+      if (temporaryDescriptor !== null) closeSync(temporaryDescriptor);
+      if (existsSync(temporary)) unlinkSync(temporary);
     }
   }
 }

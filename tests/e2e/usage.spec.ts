@@ -127,6 +127,7 @@ test.beforeAll(async () => {
   app = await createAppFixture({
     name: "usage",
     initialState: "conversation",
+    windowDisplay: "primary",
     beforeLaunch: ({ testDirectory, workspaceDirectory }) => {
       const store = new RuntimeStore(
         join(testDirectory, "data", "inertia.sqlite"),

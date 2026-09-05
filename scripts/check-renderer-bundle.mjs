@@ -49,10 +49,10 @@ const budgets = {
   morphiconsJavaScript: 20 * kibibyte,
   morphingIconFeedbackJavaScript: 8 * kibibyte,
   // The provider-queue, project-picker, draft-ownership, prompt-history,
-  // exact-focus, Gemini routing, and Zod 4.5 validator core measures 1,963.2
-  // KiB on Linux x64. Keep narrow headroom while every deferred surface retains
+  // exact-focus, Gemini routing, and Zod 4.5 validator core measures 1,969.9
+  // KiB on macOS ARM64 after the lifecycle merge. Every deferred surface retains
   // its strict independent ceiling.
-  coreJavaScript: 1_965 * kibibyte,
+  coreJavaScript: 1_971 * kibibyte,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

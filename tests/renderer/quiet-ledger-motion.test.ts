@@ -208,11 +208,12 @@ describe("Quiet Ledger active-to-settled motion", () => {
     expect(quietLedgerReducedMotion).toContain("transform: none");
   });
 
-  it("pauses live timers and active motion only while the document is hidden", () => {
-    expect(activitySource).toContain('document.visibilityState !== "visible"');
+  it("pauses optional visual work when the document is not active", () => {
+    expect(activitySource).toContain("useDocumentActivity()");
+    expect(activitySource).toContain("if (!documentActive) return;");
     expect(activitySource).toContain("1_000");
     expect(activitySource).not.toContain("document.hasFocus() ? 100 : 1_000");
-    expect(activitySource).toContain('document.addEventListener("visibilitychange", synchronize)');
+    expect(documentPresenceSource).toContain('[window, "blur"]');
     expect(activitySource).not.toContain('window.addEventListener("blur", synchronize)');
     expect(appSource).toContain("useDocumentPresence()");
     expect(documentPresenceSource).toContain("useSyncExternalStore(");
@@ -226,7 +227,11 @@ describe("Quiet Ledger active-to-settled motion", () => {
     expect(activitySource).toContain("const durableStream = useMemo(");
     expect(activitySource).toContain("instead of sorting the complete workstream");
     expect(css).toContain('data-document-visible="false"');
-    expect(css).not.toContain('data-document-active="false"');
+    const backgroundCss = readFileSync(new URL(
+      "../../src/renderer/src/background-motion.css", import.meta.url,
+    ), "utf8");
+    expect(backgroundCss).toContain('data-document-active="false"');
+    expect(backgroundCss).toContain("animation-play-state: paused !important");
     expect(css).toContain("animation-play-state: paused");
     expect(css).toContain("agent-pixel-shimmer");
     expect(css).not.toContain("active-work-tonal-wash");

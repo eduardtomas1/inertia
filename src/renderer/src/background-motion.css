@@ -1,0 +1,7 @@
+/* Keep animation progress intact while a mapped window is behind another app.
+ * Applying this at the document root includes portals and detached chats. */
+:root[data-document-active="false"] *,
+:root[data-document-active="false"] *::before,
+:root[data-document-active="false"] *::after {
+  animation-play-state: paused !important;
+}

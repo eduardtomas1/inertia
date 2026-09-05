@@ -1,17 +1,18 @@
-import { useSyncExternalStore } from "react";
-
-const PRESENCE_EVENTS = [
-  [document, "visibilitychange"],
-  [window, "focus"],
-  [window, "blur"],
-] as const;
+import { useLayoutEffect, useSyncExternalStore } from "react";
+import "../background-motion.css";
 
 function documentPresenceSnapshot(): number {
+  if (typeof document === "undefined") return 0;
   if (document.visibilityState !== "visible") return 0;
   return document.hasFocus() ? 2 : 1;
 }
 
 function subscribeDocumentPresence(onChange: () => void): () => void {
+  const PRESENCE_EVENTS = [
+    [document, "visibilitychange"],
+    [window, "focus"],
+    [window, "blur"],
+  ] as const;
   for (const [target, event] of PRESENCE_EVENTS) {
     target.addEventListener(event, onChange);
   }
@@ -37,10 +38,30 @@ function subscribeDocumentVisibility(onChange: () => void): () => void {
  * events without timers or an extra derived-state effect.
  */
 export function useDocumentPresence(): number {
-  return useSyncExternalStore(
+  const presence = useSyncExternalStore(
     subscribeDocumentPresence,
     documentPresenceSnapshot,
     documentPresenceSnapshot,
+  );
+  // The document root also covers portals and detached windows. Visible X11
+  // windows can be unfocused, so visibility alone cannot suspend their motion.
+  useLayoutEffect(() => {
+    document.documentElement.dataset.documentActive = String(presence > 1);
+    return () => { delete document.documentElement.dataset.documentActive; };
+  }, [presence]);
+  return presence;
+}
+
+function documentActivitySnapshot(): boolean {
+  return documentPresenceSnapshot() > 1;
+}
+
+/** Schedules optional visual work only while the document is foregrounded. */
+export function useDocumentActivity(): boolean {
+  return useSyncExternalStore(
+    subscribeDocumentPresence,
+    documentActivitySnapshot,
+    documentActivitySnapshot,
   );
 }
 

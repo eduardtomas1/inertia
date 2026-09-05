@@ -2652,14 +2652,15 @@ button.environment-row:focus-visible,
   text-align: center;
 }
 
-.chat-workspace[data-reasoning-effort="ultra"] .composer::after {
+/* Follow the raised input's own border, above the inset controls drawer. */
+.chat-workspace[data-reasoning-effort="ultra"] .composer-input-zone::after {
   position: absolute;
   z-index: 1;
   inset: -1px;
   padding: 1px;
   pointer-events: none;
   content: "";
-  border-radius: calc(var(--radius-composer) + 1px);
+  border-radius: inherit;
   background: linear-gradient(
     105deg,
     color-mix(in srgb, var(--accent) 10%, transparent) 0%,
@@ -2684,7 +2685,7 @@ button.environment-row:focus-visible,
 }
 
 .app-shell[data-document-visible="false"]
-  .chat-workspace[data-reasoning-effort="ultra"] .composer::after {
+  .chat-workspace[data-reasoning-effort="ultra"] .composer-input-zone::after {
   animation-play-state: paused;
 }
 
@@ -2694,7 +2695,7 @@ button.environment-row:focus-visible,
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .chat-workspace[data-reasoning-effort="ultra"] .composer::after {
+  .chat-workspace[data-reasoning-effort="ultra"] .composer-input-zone::after {
     animation: none;
     background-position: 50% 50%;
   }

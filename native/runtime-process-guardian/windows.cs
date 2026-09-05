@@ -1442,10 +1442,15 @@ public static class InertiaRuntimeJob {
     }
     started = true;
     try {
-      UInt32 remaining = deadline.RemainingMilliseconds();
-      UInt32 waitResult = remaining == 0
-        ? WAIT_TIMEOUT
-        : WaitForSingleObject(execute.hProcess, remaining);
+      UInt32 waitResult;
+      do {
+        UInt32 remaining = deadline.RemainingMilliseconds();
+        waitResult = remaining == 0
+          ? WAIT_TIMEOUT
+          : WaitForSingleObject(execute.hProcess, remaining);
+        // A Windows wait can expire before a high-resolution monotonic
+        // deadline. Recheck that same budget before publishing quarantine.
+      } while (waitResult == WAIT_TIMEOUT && !deadline.Expired);
       if (waitResult == WAIT_TIMEOUT) {
         // Once the exact installer starts, its result is ambiguous until that
         // same process handle signals. Do not kill it or pretend that it was

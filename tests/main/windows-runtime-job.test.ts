@@ -571,6 +571,9 @@ describe("Windows runtime Job Object containment", () => {
     expect(installerLaunchSource).not.toContain("INFINITE");
     expect(installerLaunchSource).not.toContain("TerminateProcess(");
     expect(installerLaunchSource).toContain(
+      "while (waitResult == WAIT_TIMEOUT && !deadline.Expired)",
+    );
+    expect(installerLaunchSource).toContain(
       "deadlineExceeded = true;\n        return false;",
     );
     expect(updateSupervisorSource).toContain(

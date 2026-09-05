@@ -38,13 +38,16 @@ export function runtimeConnectionUnavailableError(
 
 export function unavailableRuntimeConnection(
   state: Pick<RuntimeConnectionState, "phase" | "startupBlockerCode">,
+  platform: NodeJS.Platform = process.platform,
 ): RuntimeConnectionUnavailable {
   if (state.startupBlockerCode === "prior-runtime-cleanup-unconfirmed") {
     return {
       unavailable: true,
       code: state.startupBlockerCode,
       retryable: false,
-      message: "Runtime startup is blocked because prior process cleanup remains unconfirmed. Review Lifecycle Integrity in Settings.",
+      message: platform === "win32"
+        ? "Runtime startup is blocked because prior process cleanup remains unconfirmed. Close Inertia, choose Restart from the Windows power menu, then reopen Inertia. Your saved work is preserved. If it is still blocked, copy the support summary in Settings → Lifecycle Integrity."
+        : "Runtime startup is blocked because prior process cleanup remains unconfirmed. Review Lifecycle Integrity in Settings.",
     };
   }
   if (state.startupBlockerCode === "provider-installation-quarantined") {

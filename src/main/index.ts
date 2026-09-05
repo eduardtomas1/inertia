@@ -1042,7 +1042,7 @@ async function bootstrap(): Promise<void> {
     imageResult: packageSmokeImageResult,
   } = packageSmoke;
   let packageSmokeScheduled = false;
-  const liveDarwinRecovery = new RuntimeLiveDarwinRecoveryCoordinator({ dataDirectory, systemBootId: bootstrapSafety.systemBootId, guardianPath: runtimeProcessGuardianPath });
+  const liveDarwinRecovery = new RuntimeLiveDarwinRecoveryCoordinator({ dataDirectory, systemBootId: bootstrapSafety.systemBootId, guardianPath: runtimeProcessGuardianPath, getWindow: () => mainWindow });
   runtimeSupervisor = new RuntimeSupervisor({
     platform: process.platform,
     ...(windowsRuntimeJobAssembly ? { windowsRuntimeJobAssembly } : {}),

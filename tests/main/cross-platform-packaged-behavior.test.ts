@@ -150,7 +150,8 @@ describe("cross-platform packaged behavior contract", () => {
 
     const releasing = await source("docs/RELEASING.md");
     const normalizedReleasing = releasing.replace(/\s+/gu, " ");
-    expect(normalizedReleasing).toContain("credential-free public union is exactly 11");
+    expect(normalizedReleasing).toContain("credential-free public union is exactly 12");
+    expect(normalizedReleasing).toContain("CycloneDX dependency inventory");
     expect(normalizedReleasing).toContain("Manual macOS and Windows releases do not publish");
     expect(normalizedReleasing).toContain(
       "Do not strip quarantine attributes or disable Gatekeeper.",

@@ -17,7 +17,11 @@ let rendererErrors!: AppFixture["rendererErrors"];
 let resizeWindow!: AppFixture["resizeWindow"];
 
 test.beforeAll(async () => {
-  app = await createAppFixture({ name: "workspace-shell", initialState: "conversation" });
+  app = await createAppFixture({
+    name: "workspace-shell",
+    initialState: "conversation",
+    windowDisplay: "primary",
+  });
   page = app.page;
   rendererErrors = app.rendererErrors;
   resizeWindow = app.resizeWindow;

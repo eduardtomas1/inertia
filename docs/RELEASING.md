@@ -64,10 +64,11 @@ certificates. A credential-free build remains explicit: macOS uses the tested
 ad-hoc signature and Windows remains unsigned. Supplying any part of a signing
 set without the rest stops the build.
 
-For either stable or Canary, the credential-free public union is exactly 11
+For either stable or Canary, the credential-free public union is exactly 12
 files: four macOS packages (DMG and ZIP for x64 and arm64), two Windows
 installers, two Linux AppImages, the two architecture-qualified Linux update
-manifests, and `SHA256SUMS.txt`. Manual macOS and Windows releases do not publish
+manifests, a CycloneDX dependency inventory (`Inertia-VERSION.sbom.cdx.json`),
+and `SHA256SUMS.txt`. Manual macOS and Windows releases do not publish
 their update metadata or desktop blockmaps. Linux remains in-app capable and
 retains both metadata manifests.
 

@@ -37,6 +37,8 @@ import {
   executableProcessExists as processExists,
 } from "../helpers/executable-process";
 
+import { writeLongRunningBuilder } from "../helpers/builder-process-fixture";
+
 const repositoryRoot = resolve(import.meta.dirname, "..", "..");
 const script = join(
   repositoryRoot,
@@ -2042,17 +2044,7 @@ describe.skipIf(process.platform === "win32")(
       writeFileSync(subject.bundledIntegrity, JSON.stringify({ sha256 }));
       const pidFile = join(subject.root, "builder-pids.json");
       const builder = join(subject.root, "fake-electron-builder.mjs");
-      writeFileSync(
-        builder,
-        [
-          'import { spawn } from "node:child_process";',
-          'import { renameSync, writeFileSync } from "node:fs";',
-          'const descendant = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });',
-          `writeFileSync(${JSON.stringify(`${pidFile}.tmp`)}, JSON.stringify({ root: process.pid, descendant: descendant.pid }));`,
-          `renameSync(${JSON.stringify(`${pidFile}.tmp`)}, ${JSON.stringify(pidFile)});`,
-          "setInterval(() => {}, 1000);",
-        ].join("\n"),
-      );
+      writeLongRunningBuilder(builder, pidFile);
       const wrapper = packageProcess(subject, builder, "win32");
       let rootPid = 0;
       let descendantPid = 0;
@@ -2299,16 +2291,7 @@ describe.skipIf(process.platform === "win32")(
       writeFileSync(subject.bundledIntegrity, JSON.stringify({ sha256 }));
       const pidFile = join(subject.root, "orphaned-builder-pids.json");
       const builder = join(subject.root, "fake-electron-builder.mjs");
-      writeFileSync(
-        builder,
-        [
-          'import { spawn } from "node:child_process";',
-          'import { writeFileSync } from "node:fs";',
-          'const descendant = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });',
-          `writeFileSync(${JSON.stringify(pidFile)}, JSON.stringify({ root: process.pid, descendant: descendant.pid }));`,
-          "setInterval(() => {}, 1000);",
-        ].join("\n"),
-      );
+      writeLongRunningBuilder(builder, pidFile);
       const wrapper = packageProcess(subject, builder, "win32");
       await waitForFile(pidFile);
       const pids = JSON.parse(readFileSync(pidFile, "utf8")) as {
@@ -2339,6 +2322,14 @@ describe.skipIf(process.platform === "win32")(
         await waitForProcessExit(pids.root);
         await waitForProcessExit(pids.descendant);
       }
+      // Payload PID exit does not prove that the admission trampoline and its
+      // complete process group have settled. Wait for the production reclaimer
+      // to prove that boundary, including transient /proc census uncertainty,
+      // before checking that the now-uncontended lock can be acquired.
+      await expect.poll(() => reclaimStaleGuardianBuildLock(
+        subject.stateDirectory,
+        join(subject.stateDirectory, "build.lock"),
+      ), { timeout: 5_000 }).toBe(true);
       const lock = acquireGuardianBuildLock(subject.stateDirectory, {
         timeoutMs: 200,
       });

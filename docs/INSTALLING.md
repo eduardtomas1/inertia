@@ -1,6 +1,6 @@
 # Install Inertia
 
-Download [Inertia v0.0.48](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.48):
+Download [Inertia v0.0.49](https://github.com/eduardtomas1/inertia/releases/tag/v0.0.49):
 
 | Platform | Architecture | Package | Update delivery after the first manual install |
 | --- | --- | --- | --- |
@@ -11,7 +11,7 @@ Download [Inertia v0.0.48](https://github.com/eduardtomas1/inertia/releases/tag/
 | Linux | x64 | AppImage | Verified in-app updates |
 | Linux | ARM64 | AppImage | Verified in-app updates |
 
-The credential-free public release is exactly 11 assets: four macOS packages (DMG and ZIP for both architectures), two Windows installers, two Linux AppImages, the two architecture-qualified Linux update manifests, and `SHA256SUMS.txt`. Manual macOS and Windows builds do not publish updater metadata or blockmaps.
+The credential-free public release is exactly 12 assets: four macOS packages (DMG and ZIP for both architectures), two Windows installers, two Linux AppImages, the two architecture-qualified Linux update manifests, a CycloneDX dependency inventory, and `SHA256SUMS.txt`. Manual macOS and Windows builds do not publish updater metadata or blockmaps.
 
 Linux browser downloads do not preserve the AppImage executable bit. After
 verifying the exact selected filename against `SHA256SUMS.txt`, replace

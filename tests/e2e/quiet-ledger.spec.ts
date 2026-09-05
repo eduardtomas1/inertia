@@ -16,6 +16,7 @@ import {
 } from "./support/markdown-controls";
 import { selectWorkspaceTool } from "./support/workspace-tools";
 import { attachRuntimeLifecycleFailureDiagnostic } from "./support/runtime-lifecycle-diagnostics";
+import { verifyMobileNavigationControls } from "./support/layout-assertions";
 
 let app!: AppFixture;
 let electronApp!: AppFixture["electronApp"];
@@ -559,11 +560,7 @@ test("presents the Quiet Ledger states as one calm, responsive conversation", as
     await expect(page.locator(`[data-turn-id="${completed.turn.id}"] .turn-settled-summary`))
       .toHaveCount(0);
     await resizeWindow(760, 680);
-    const closeNavigation = navigation.getByRole("button", { name: "Close navigation" });
-    if (await closeNavigation.isVisible()) {
-      await closeNavigation.click();
-    }
-    await expect(navigation).toBeHidden();
+    await verifyMobileNavigationControls(page);
     await revealTurn(kimiTurn, kimi.turn.id);
     await captureScenario("settled-history-narrow-760x680");
     await revealTurn(activeTurn, active.turn.id);

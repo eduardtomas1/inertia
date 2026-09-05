@@ -2,7 +2,7 @@ import { openLocalProjectFromDialog } from "./support/add-project";
 import { expect, test, type Locator } from "@playwright/test";
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
-import { expectComposerEndsAtDock, expectComposerReadinessContained } from "./support/layout-assertions";
+import { expectComposerEndsAtDock, expectComposerReadinessContained, verifyMobileNavigationControls } from "./support/layout-assertions";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import {
   createComposerResponsiveHelpers,
@@ -753,9 +753,7 @@ test("keeps the composer as one cohesive dock across themes and responsive split
 
     await setWorkspaceTools(false);
     await resizeWindow(760, 680);
-    const closeNavigation = navigation.getByRole("button", { name: "Close navigation" });
-    if (await closeNavigation.isVisible()) await closeNavigation.click();
-    await expect(navigation).toBeHidden();
+    await verifyMobileNavigationControls(page);
     const narrowDock = page.getByRole("region", { name: "Message composer" });
     await expectComposerEndsAtDock(narrowDock);
     await expectComposerReadinessContained(narrowDock);

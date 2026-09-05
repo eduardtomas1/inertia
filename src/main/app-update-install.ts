@@ -27,6 +27,7 @@ interface PrivateConnectUpdateGate {
 }
 
 export interface AppUpdateInstallCoordinatorOptions {
+  platform?: NodeJS.Platform;
   service: UpdateService;
   runtime(): RuntimeUpdateGate | null;
   privateConnect(): PrivateConnectUpdateGate | null;
@@ -77,7 +78,11 @@ export function appUpdateInstallRuntimeContext(
 export class AppUpdateInstallCoordinator {
   private mode: InstallMode = "running";
   private installPromise: Promise<AppUpdateStatus> | null = null;
-  private normalShutdown: Promise<void> | null = null;
+  private normalShutdown: Promise<boolean> | null = null;
+  private normalShutdownUnconfirmed = false;
+  private normalShutdownRetryRequested = false;
+  private normalShutdownIsRetry = false;
+  private normalShutdownPending = false;
   private cleanupStarted = false;
 
   constructor(private readonly options: AppUpdateInstallCoordinatorOptions) {}
@@ -105,9 +110,34 @@ export class AppUpdateInstallCoordinator {
     return false;
   }
 
-  private beginNormalShutdown(): void {
+  /** Linux second-instance recovery may retry only a failed normal cleanup. */
+  retryUnconfirmedNormalShutdown(): boolean {
+    if (
+      (this.options.platform ?? process.platform) !== "linux"
+      ||
+      this.mode !== "normal-cleanup"
+      || (
+        !this.normalShutdownUnconfirmed
+        && !this.normalShutdownPending
+      )
+    ) return false;
+    if (this.normalShutdown) {
+      if (!this.normalShutdownPending) return false;
+      if (this.normalShutdownIsRetry || this.normalShutdownRetryRequested) {
+        return false;
+      }
+      this.normalShutdownRetryRequested = true;
+      return true;
+    }
+    this.beginNormalShutdown(true);
+    return true;
+  }
+
+  private beginNormalShutdown(retryAttempt = false): void {
     if (this.normalShutdown) return;
     this.mode = "normal-cleanup";
+    this.normalShutdownIsRetry = retryAttempt;
+    this.normalShutdownPending = true;
     const pendingInstall = this.installPromise;
     const stopping = Promise.resolve()
       .then(async () => await this.options.service.abortInstall?.())
@@ -115,17 +145,39 @@ export class AppUpdateInstallCoordinator {
       .then(() => this.releasePreparation())
       .then(() => this.options.cleanup())
       .then((cleanupConfirmed) => {
-        finishNormalShutdownAfterCleanup({
+        const finished = finishNormalShutdownAfterCleanup({
           cleanupConfirmed,
           finish: this.options.finishNormalShutdown,
           onUnconfirmed: () => this.reportUnconfirmedShutdown(),
         });
+        this.normalShutdownUnconfirmed = !finished;
+        return finished;
       })
       .catch((error: unknown) => {
         this.options.reportError(error);
+        this.normalShutdownUnconfirmed = true;
         this.reportUnconfirmedShutdown();
+        return false;
       });
-    this.normalShutdown = stopping;
+    const tracked = stopping.then((confirmed) => {
+      if (this.normalShutdown === tracked) this.normalShutdownPending = false;
+      if (confirmed) {
+        this.normalShutdownRetryRequested = false;
+      } else if (
+        !confirmed
+        && (this.options.platform ?? process.platform) === "linux"
+        && this.normalShutdown === tracked
+      ) {
+        const retryRequested = this.normalShutdownRetryRequested
+          && !this.normalShutdownIsRetry;
+        this.normalShutdownRetryRequested = false;
+        this.normalShutdownIsRetry = false;
+        this.normalShutdown = null;
+        if (retryRequested) this.beginNormalShutdown(true);
+      }
+      return confirmed;
+    });
+    this.normalShutdown = tracked;
   }
 
   private async prepareAndInstall(): Promise<AppUpdateStatus> {
@@ -243,11 +295,12 @@ export class AppUpdateInstallCoordinator {
   private failClosed(cleanupConfirmed: boolean): AppUpdateStatus {
     const status = this.options.service.failInstall();
     this.mode = "normal-cleanup";
-    finishNormalShutdownAfterCleanup({
+    const finished = finishNormalShutdownAfterCleanup({
       cleanupConfirmed,
       finish: this.options.finishNormalShutdown,
       onUnconfirmed: () => this.reportUnconfirmedShutdown(),
     });
+    this.normalShutdownUnconfirmed = !finished;
     return status;
   }
 

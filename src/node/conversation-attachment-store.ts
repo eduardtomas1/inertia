@@ -37,6 +37,8 @@ import {
   type ConversationAttachmentStoreReadOperationRunner,
   type ConversationAttachmentStoreOperationRunner,
 } from "./conversation-attachment-store-child.js";
+import { ConversationAttachmentStoreTerminationTracker } from
+  "./conversation-attachment-store-termination.js";
 
 export type {
   ConversationAttachmentStoreOperation,
@@ -89,6 +91,7 @@ export type ConversationAttachmentValidator = (value: {
 }) => ConversationAttachmentValidationResult;
 
 export interface ConversationAttachmentStoreOptions {
+  readonly platform?: NodeJS.Platform;
   readonly maxBytes?: number;
   readonly maxRecords?: number;
   readonly validate?: ConversationAttachmentValidator;
@@ -301,6 +304,8 @@ export class ConversationAttachmentStore {
   private readonly reconciliationBatchTimeoutMs: number;
   private readonly operationRunner: ConversationAttachmentStoreOperationRunner;
   private readonly readOperationRunner: ConversationAttachmentStoreReadOperationRunner;
+  private readonly retryUnconfirmedShutdown: boolean;
+  private readonly operationTerminations: ConversationAttachmentStoreTerminationTracker;
   private readonly authoritativeRecords = new Set<string>();
   private readonly retentionRecords = new Map<string, Set<string>>();
   private readonly recordRetentions = new Map<string, Set<string>>();
@@ -314,7 +319,6 @@ export class ConversationAttachmentStore {
   private mutationTail: Promise<void> = Promise.resolve();
   private readonly lifecycle = new AbortController();
   private readonly activeOperationStops = new Set<Promise<void>>();
-  private operationStopFailure: Error | null = null;
   private operationStopUnconfirmed = false;
   private closing = false;
   private closePromise: Promise<void> | null = null;
@@ -330,6 +334,11 @@ export class ConversationAttachmentStore {
     this.validate = options.validate;
     this.persistenceFault = options.persistenceFault;
     this.readFault = options.readFault;
+    this.retryUnconfirmedShutdown =
+      (options.platform ?? process.platform) === "linux";
+    this.operationTerminations = new ConversationAttachmentStoreTerminationTracker(
+      this.retryUnconfirmedShutdown,
+    );
     this.reconciliationBatchEntries = process.env.NODE_ENV === "test"
       ? boundedLimit(
           options.reconciliationBatchEntries,
@@ -664,7 +673,7 @@ export class ConversationAttachmentStore {
       clearTimeout(this.reconciliationTimer);
       this.reconciliationTimer = null;
     }
-    this.closePromise = (async () => {
+    const attempt = (async () => {
       while (true) {
         const tail = this.mutationTail;
         await tail;
@@ -679,9 +688,18 @@ export class ConversationAttachmentStore {
       if (this.reconciliation) {
         await this.closeReconciliation(this.reconciliation);
       }
-      if (this.operationStopFailure) throw this.operationStopFailure;
+      const closeFailure = this.operationTerminations.closeFailure();
+      if (closeFailure) throw closeFailure;
     })();
-    return await this.closePromise;
+    const tracked = attempt.catch((error: unknown) => {
+      if (
+        this.retryUnconfirmedShutdown
+        && this.closePromise === tracked
+      ) this.closePromise = null;
+      throw error;
+    });
+    this.closePromise = tracked;
+    return await tracked;
   }
 
   private async assertStoreRootAuthority(): Promise<void> {
@@ -1174,7 +1192,8 @@ export class ConversationAttachmentStore {
     if (this.operationStopUnconfirmed && this.activeOperationStops.size > 0) {
       throw new Error("A prior conversation attachment operation is still stopping.");
     }
-    if (this.operationStopFailure) throw this.operationStopFailure;
+    const operationFailure = this.operationTerminations.operationFailure();
+    if (operationFailure) throw operationFailure;
   }
 
   private operationSignal(signal?: AbortSignal): AbortSignal {
@@ -1186,13 +1205,9 @@ export class ConversationAttachmentStore {
   private trackOperation<T extends {
     readonly result: Promise<unknown>;
     readonly stopped: Promise<void>;
+    readonly termination?: Promise<void>;
   }>(operation: T): T {
-    const stopped = operation.stopped.catch((error: unknown) => {
-      this.operationStopFailure ??= error instanceof Error
-        ? error
-        : new Error(String(error));
-      throw error;
-    });
+    const stopped = this.operationTerminations.track(operation);
     this.activeOperationStops.add(stopped);
     void stopped.then(
       () => {

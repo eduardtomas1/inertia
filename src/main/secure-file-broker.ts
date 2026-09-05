@@ -25,6 +25,7 @@ interface SlotWaiter {
 
 export interface SecureFileBrokerOptions {
   spawn(parent: string): UtilityProcess;
+  retryUnconfirmedShutdown?: boolean;
   timeoutMs?: number;
   killGraceMs?: number;
 }
@@ -507,8 +508,23 @@ export class SecureFileBroker {
       30_000,
       this.timeoutMs + this.killGraceMs * 2,
     );
-    this.shutdownPromise = this.finishShutdown(timeoutMs);
-    return this.shutdownPromise;
+    const resetRetryableShutdown = (): void => {
+      if (
+        this.options.retryUnconfirmedShutdown === true
+        && this.shutdownPromise === shutdown
+      ) this.shutdownPromise = null;
+    };
+    const shutdown = this.finishShutdown(timeoutMs).then((confirmed) => {
+      if (
+        !confirmed
+      ) resetRetryableShutdown();
+      return confirmed;
+    }, (error: unknown) => {
+      resetRetryableShutdown();
+      throw error;
+    });
+    this.shutdownPromise = shutdown;
+    return shutdown;
   }
 
   private async finishShutdown(timeoutMs: number): Promise<boolean> {

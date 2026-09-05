@@ -444,6 +444,7 @@ describe("secure file broker", () => {
     try {
       const child = new FakeUtilityProcess();
       const broker = new SecureFileBroker({
+        retryUnconfirmedShutdown: true,
         spawn: () => {
           queueMicrotask(() => child.emit("spawn"));
           return utility(child);
@@ -463,6 +464,65 @@ describe("secure file broker", () => {
       await vi.advanceTimersByTimeAsync(25);
       await expect(shutdown).resolves.toBe(false);
       expect(child.kill).toHaveBeenCalled();
+      child.emit("exit", 1);
+      await expect(broker.shutdown()).resolves.toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not retry an unconfirmed shutdown without Linux recovery", async () => {
+    vi.useFakeTimers();
+    try {
+      const child = new FakeUtilityProcess();
+      const broker = new SecureFileBroker({
+        spawn: () => {
+          queueMicrotask(() => child.emit("spawn"));
+          return utility(child);
+        },
+        timeoutMs: 20,
+        killGraceMs: 5,
+      });
+      const pending = broker.perform(request);
+      await vi.advanceTimersByTimeAsync(0);
+      const shutdown = broker.shutdown();
+      await vi.advanceTimersByTimeAsync(30);
+      await expect(pending).resolves.toMatchObject({ ok: false });
+      await expect(shutdown).resolves.toBe(false);
+      child.emit("exit", 1);
+      await expect(broker.shutdown()).resolves.toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("retries a rejected Linux shutdown after the exact helper exits", async () => {
+    vi.useFakeTimers();
+    try {
+      const child = new FakeUtilityProcess();
+      child.kill.mockReset();
+      child.kill.mockReturnValueOnce(false);
+      child.kill.mockImplementationOnce(() => {
+        throw new Error("kill rejected");
+      });
+      const broker = new SecureFileBroker({
+        retryUnconfirmedShutdown: true,
+        spawn: () => {
+          queueMicrotask(() => child.emit("spawn"));
+          return utility(child);
+        },
+        timeoutMs: 20,
+        killGraceMs: 5,
+      });
+      const pending = broker.perform(request);
+      await vi.advanceTimersByTimeAsync(0);
+      const shutdown = broker.shutdown();
+      const rejectedShutdown = expect(shutdown).rejects.toThrow("kill rejected");
+      await vi.advanceTimersByTimeAsync(5);
+      await expect(pending).resolves.toMatchObject({ ok: false });
+      await rejectedShutdown;
+      child.emit("exit", 1);
+      await expect(broker.shutdown()).resolves.toBe(true);
     } finally {
       vi.useRealTimers();
     }

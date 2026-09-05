@@ -829,7 +829,7 @@ describe("cross-platform packaged behavior contract", () => {
     const cleanupEnd = main.indexOf("\nasync function bootstrap()", cleanupStart);
     const cleanupHandler = main.slice(cleanupStart, cleanupEnd);
     expect(cleanupStart).toBeGreaterThanOrEqual(0);
-    expect(cleanupHandler).toContain("cleanupPrivilegedOwners({");
+    expect(cleanupHandler).toContain("new RetryablePrivilegedCleanup({");
     expect(cleanupHandler).toContain("runtime: supervisorToStop");
     expect(cleanupHandler).toContain(
       "disposeTemporaryAttachments: disposeImportedAttachments",
@@ -838,7 +838,7 @@ describe("cross-platform packaged behavior contract", () => {
       "Retaining temporary attachments because runtime process exit was not confirmed",
     );
     expect(cleanupHandler.indexOf("conversationAttachments = null"))
-      .toBeLessThan(cleanupHandler.indexOf("closeConversationAttachmentAccess"));
+      .toBeGreaterThan(cleanupHandler.indexOf("closeConversationAttachmentAccess"));
 
     const privilegedShutdown = await source("src/main/privileged-shutdown.ts");
     const sequenceStart = privilegedShutdown.indexOf(
@@ -861,7 +861,7 @@ describe("cross-platform packaged behavior contract", () => {
     expect(quitHandler).toContain("options.cleanupBeforeQuit().then(");
     expect(quitHandler).toContain("finishNormalShutdownAfterCleanup({");
     expect(quitHandler).toContain("cleanupConfirmed,");
-    expect(main.indexOf("conversationAttachments = null")).toBeLessThan(
+    expect(main.indexOf("conversationAttachments = null")).toBeGreaterThan(
       main.indexOf("closeConversationAttachmentAccess(retainedAttachments)"),
     );
     expect(main).not.toContain("finally(finishQuitAfterCleanup)");

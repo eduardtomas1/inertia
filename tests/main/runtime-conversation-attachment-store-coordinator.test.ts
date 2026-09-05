@@ -268,6 +268,94 @@ describe("runtime conversation attachment store coordinator", () => {
     await expect(coordinator.drain(record)).resolves.toBe(false);
   });
 
+  it("accepts only the exact late helper exit as fresh shutdown evidence", async () => {
+    const result = deferred<void>();
+    const stopped = deferred<void>();
+    const termination = deferred<void>();
+    const record = peer();
+    const coordinator = new RuntimeConversationAttachmentStoreCoordinator({
+      retryUnconfirmedShutdown: true,
+      runner: (() => ({
+        result: result.promise,
+        stopped: stopped.promise,
+        termination: termination.promise,
+        ready: Promise.resolve(false),
+      })) as never,
+      authority,
+      accepts: () => true,
+      post: vi.fn(),
+    });
+    coordinator.handle(record, request());
+    result.reject(new Error("failed"));
+    stopped.reject(new Error("unconfirmed"));
+
+    await expect(coordinator.shutdown()).resolves.toBe(false);
+    termination.resolve();
+    await Promise.resolve();
+    await expect(coordinator.shutdown()).resolves.toBe(true);
+  });
+
+  it("keeps the same late helper exit unconfirmed outside Linux recovery", async () => {
+    const result = deferred<void>();
+    const stopped = deferred<void>();
+    const termination = deferred<void>();
+    const coordinator = new RuntimeConversationAttachmentStoreCoordinator({
+      retryUnconfirmedShutdown: false,
+      runner: (() => ({ result: result.promise, stopped: stopped.promise,
+        termination: termination.promise, ready: Promise.resolve(false) })) as never,
+      authority,
+      accepts: () => true,
+      post: vi.fn(),
+    });
+    coordinator.handle(peer(), request());
+    result.reject(new Error("failed")); stopped.reject(new Error("unconfirmed"));
+    await expect(coordinator.shutdown()).resolves.toBe(false);
+    termination.resolve(); await Promise.resolve();
+    await expect(coordinator.shutdown()).resolves.toBe(false);
+  });
+
+  it("retains each unconfirmed helper until every exact termination", async () => {
+    const executions = [0, 1].map(() => ({
+      result: deferred<void>(),
+      stopped: deferred<void>(),
+      termination: deferred<void>(),
+    }));
+    let nextExecution = 0;
+    const record = peer();
+    const coordinator = new RuntimeConversationAttachmentStoreCoordinator({
+      retryUnconfirmedShutdown: true,
+      runner: vi.fn(() => {
+        const execution = executions[nextExecution++]!;
+        return {
+          result: execution.result.promise,
+          stopped: execution.stopped.promise,
+          termination: execution.termination.promise,
+          ready: Promise.resolve(false),
+        };
+      }) as never,
+      authority,
+      accepts: () => true,
+      post: vi.fn(),
+    });
+    const first = request();
+    const second = request();
+    coordinator.handle(record, first);
+    coordinator.handle(record, second);
+    const [firstExecution, secondExecution] = executions;
+    firstExecution.result.reject(new Error("failed"));
+    firstExecution.stopped.reject(new Error("unconfirmed"));
+    secondExecution.result.reject(new Error("failed"));
+    secondExecution.stopped.reject(new Error("unconfirmed"));
+
+    await expect(coordinator.shutdown()).resolves.toBe(false);
+    firstExecution.termination.resolve();
+    await Promise.resolve();
+    await expect(coordinator.shutdown()).resolves.toBe(false);
+    secondExecution.termination.resolve();
+    await Promise.resolve();
+    await expect(coordinator.shutdown()).resolves.toBe(true);
+  });
+
   it("rejects subsequent generation work with retained unconfirmed truth", async () => {
     const record = peer();
     const post = vi.fn();

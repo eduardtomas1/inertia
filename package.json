@@ -207,7 +207,7 @@
     "clsx": "^2.1.1",
     "electron-updater": "6.8.9",
     "highlight.js": "^11.12.0",
-    "lucide-react": "^1.38.0",
+    "lucide-react": "^1.39.0",
     "morphicons": "1.7.1",
     "node-pty": "^1.1.0",
     "pdfjs-dist": "6.3.289",
@@ -221,7 +221,7 @@
     "tailwind-merge": "^3.6.0",
     "ws": "^8.21.3",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
-    "zod": "^4.4.3"
+    "zod": "^4.5.4"
   },
   "devDependencies": {
     "@babel/parser": "7.29.8",

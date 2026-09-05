@@ -83,6 +83,8 @@ interface StreamingCadenceMeasurement extends Measurement {
   firstProjectionSamplesMs: number[];
   medianVisibleGapMs: number;
   p95VisibleGapMs: number;
+  maxVisibleGapMs: number;
+  visibleGapSamplesMs: number[];
   visibleUpdatesPerSecond: number;
   visibleUpdates: number;
   sqliteWrites: number;
@@ -193,7 +195,11 @@ async function streamingCadenceMeasurement(
     firstFlushMs,
   );
   const message = store.createMessage(conversation.id, "", "assistant");
-  const sourceChunks = Array.from({ length: 128 }, (_, index) => (
+  // A one-second stream produces fewer than 20 gaps, making its reported
+  // p95 the single maximum. Keep every candidate on the same longer source
+  // so the shipped percentile has enough observations without dropping any
+  // slow gap or changing either latency ceiling.
+  const sourceChunks = Array.from({ length: 512 }, (_, index) => (
     index % 9 === 0
       ? `🙂 unicode-${index}\n`
       : index % 13 === 0
@@ -263,6 +269,8 @@ async function streamingCadenceMeasurement(
       firstProjectionSamplesMs,
       medianVisibleGapMs: Number(percentile(visibleGaps, 0.5).toFixed(3)),
       p95VisibleGapMs: Number(percentile(visibleGaps, 0.95).toFixed(3)),
+      maxVisibleGapMs: Number(Math.max(0, ...visibleGaps).toFixed(3)),
+      visibleGapSamplesMs: visibleGaps.map((gap) => Number(gap.toFixed(3))),
       visibleUpdatesPerSecond: Number(
         (projectionTimes.length / (elapsedMs / 1_000)).toFixed(3),
       ),
@@ -1100,6 +1108,7 @@ describe("cross-platform performance benchmark", () => {
         expect(candidate.firstProjectionSamplesMs.every((sample) => sample > 0))
           .toBe(true);
         expect(candidate.p95VisibleGapMs).toBeGreaterThan(0);
+        expect(candidate.visibleGapSamplesMs).toHaveLength(candidate.visibleUpdates - 1);
         expect(candidate.sqliteWrites).toBe(candidate.visibleUpdates);
       }
       const selectedStreamingCadence = streamingCadenceCandidates.find(
@@ -1110,6 +1119,8 @@ describe("cross-platform performance benchmark", () => {
       expect(selectedStreamingCadence).toBeDefined();
       expect(selectedStreamingCadence!.firstFlushMs)
         .toBe(STREAM_PROJECTION_FIRST_FLUSH_MS);
+      expect(selectedStreamingCadence!.visibleGapSamplesMs.length)
+        .toBeGreaterThanOrEqual(40);
 
       if (enforce) {
         expect(workspaceList.medianMs).toBeLessThan(8_000);
@@ -1131,6 +1142,8 @@ describe("cross-platform performance benchmark", () => {
               .toBeLessThan(HOSTED_STREAM_FIRST_PROJECTION_CATASTROPHIC_MS);
           }
           expect(candidate.p95VisibleGapMs)
+            .toBeLessThan(HOSTED_STREAM_VISIBLE_GAP_CATASTROPHIC_MS);
+          expect(candidate.maxVisibleGapMs)
             .toBeLessThan(HOSTED_STREAM_VISIBLE_GAP_CATASTROPHIC_MS);
           expect(candidate.runtimeCpuMs).toBeLessThan(5_000);
           expect(candidate.runtimeRssDeltaBytes).toBeLessThan(128 * 1024 * 1024);

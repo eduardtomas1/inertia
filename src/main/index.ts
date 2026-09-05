@@ -94,7 +94,7 @@ import { RuntimeLiveDarwinRecoveryCoordinator } from "./runtime-live-darwin-reco
 import { resolveDesktopRuntimeProcessSafetyAssets } from "./runtime-windows-job-bootstrap.js";
 import { disposeWindowsRuntimeJobExecutableLock, prepareWindowsRuntimeJobExecutableLock } from "./windows-runtime-job.js";
 import {
-  cleanupPrivilegedOwners, finishPrivilegedExit,
+  finishPrivilegedExit, RetryablePrivilegedCleanup,
 } from "./privileged-shutdown.js";
 import { registerClipboardIpc } from "./clipboard-ipc.js";
 import { registerCredentialVaultIpc } from "./credential-vault-ipc.js";
@@ -184,6 +184,7 @@ let credentialVault: CredentialVault | null = null;
 let detachedChatMain: DetachedChatMain | null = null;
 let trustedRendererUrl = "";
 let privilegedCleanup: Promise<boolean> | null = null;
+let privilegedCleanupOwners: RetryablePrivilegedCleanup | null = null;
 let packageSmokeFilePath: string | null = null;
 let packageSmokeOwnerToken: string | null = null;
 const appHealthRegistry = new InertiaHealthRegistry();
@@ -891,45 +892,42 @@ function focusMainWindow(): void {
     console.error("Failed to focus the Inertia window", error);
   });
 }
-
-function finishQuitAfterCleanup(): void {
-  finishPrivilegedExit({
+function finishQuitAfterCleanup(): void { finishPrivilegedExit({
     takeWindow: () => { const window = mainWindow; mainWindow = null; return window; },
     recordExit: () => recordPackageSmokeStage("app-exit"), exit: () => process.exit(0),
-  });
-}
+  }); }
 function runPrivilegedCleanup(): Promise<boolean> {
   if (privilegedCleanup) return privilegedCleanup;
-  systemSuspendDelivery?.close(); systemSuspendDelivery = null;
-  if (mainWindow) saveWindowState(mainWindow);
-  const supervisorToStop = runtimeSupervisor, privateConnectHostToStop = privateConnectHost; privateConnectHost = null;
-  const cleanup = (async () => { try {
-      await detachedChatClose.closeDetachedChatsForShutdown(detachedChatMain);
-      previewBroker.close(); runtimeDiagnostics?.record("app.stop");
-      return await cleanupPrivilegedOwners({
-        runtime: supervisorToStop, privateConnect: privateConnectHostToStop,
-        onRuntimeStopped: () => { if (runtimeSupervisor === supervisorToStop) runtimeSupervisor = null; },
-        onRuntimeError: (error) => {
-          runtimeDiagnostics?.record("runtime.failure", {
-            phase: "stopping", message: error instanceof Error
-              ? error.message : "The local runtime could not stop cleanly.",
-          });
-          console.error("Failed to stop the local runtime", error);
-        },
-        onPrivateConnectError: (error) => console.error("Failed to stop Private Connect cleanly", error),
-        disposeTemporaryAttachments: disposeImportedAttachments,
-        onTemporaryAttachmentError: (error) => console.error("Failed to remove temporary attachments", error),
-        onUnconfirmedRuntimeExit: () => console.warn(
-          "Retaining temporary attachments because runtime process exit was not confirmed; startup cleanup will remove them.",
-        ),
-        closeDurableAttachments: async () => {
-          const retainedAttachments = conversationAttachments; conversationAttachments = null;
-          await closeConversationAttachmentAccess(retainedAttachments);
-        },
-      });
-    } finally { await disposeWindowsRuntimeJobExecutableLock(); }
-  })();
-  privilegedCleanup = cleanup; return cleanup;
+  if (!privilegedCleanupOwners) {
+    systemSuspendDelivery?.close(); systemSuspendDelivery = null; if (mainWindow) saveWindowState(mainWindow);
+    const supervisorToStop = runtimeSupervisor, privateConnectHostToStop = privateConnectHost;
+    const retainedAttachments = conversationAttachments; privilegedCleanupOwners = new RetryablePrivilegedCleanup({
+      retryUnconfirmed: process.platform === "linux", runtime: supervisorToStop,
+      privateConnect: privateConnectHostToStop,
+      onRuntimeStopped: () => { if (runtimeSupervisor === supervisorToStop) runtimeSupervisor = null; },
+      onRuntimeError: (error) => {
+        runtimeDiagnostics?.record("runtime.failure", { phase: "stopping",
+          message: error instanceof Error ? error.message : "The local runtime could not stop cleanly." });
+        console.error("Failed to stop the local runtime", error);
+      },
+      onPrivateConnectStopped: () => { if (privateConnectHost === privateConnectHostToStop) privateConnectHost = null; },
+      onPrivateConnectError: (error) => console.error("Failed to stop Private Connect cleanly", error),
+      disposeTemporaryAttachments: disposeImportedAttachments,
+      onTemporaryAttachmentError: (error) => console.error("Failed to remove temporary attachments", error),
+      onUnconfirmedRuntimeExit: () => console.warn("Retaining temporary attachments because runtime process exit was not confirmed; startup cleanup will remove them."),
+      closeDurableAttachments: async () => await closeConversationAttachmentAccess(retainedAttachments),
+      onDurableAttachmentsClosed: () => { if (conversationAttachments === retainedAttachments) conversationAttachments = null; },
+    });
+  }
+  const owners = privilegedCleanupOwners; const cleanup = (async () => { try {
+    await detachedChatClose.closeDetachedChatsForShutdown(detachedChatMain);
+    previewBroker.close(); runtimeDiagnostics?.record("app.stop"); return await owners.cleanup();
+  } finally { await disposeWindowsRuntimeJobExecutableLock(); } })();
+  const tracked = cleanup.then((confirmed) => { if (!confirmed && process.platform === "linux"
+      && privilegedCleanup === tracked) privilegedCleanup = null; return confirmed;
+  }, (error: unknown) => { if (process.platform === "linux" && privilegedCleanup === tracked) privilegedCleanup = null;
+    throw error; });
+  privilegedCleanup = tracked; return tracked;
 }
 async function bootstrap(): Promise<void> {
   runtimeDiagnostics = new RuntimeDiagnostics(runtimeDiagnosticsDirectory(app.getPath("userData")));
@@ -969,6 +967,7 @@ async function bootstrap(): Promise<void> {
     if (window && !window.isDestroyed()) window.webContents.send(IPC.appUpdateStatus, status);
   });
   appUpdateInstallCoordinator = new AppUpdateInstallCoordinator({
+    platform: process.platform,
     service: appUpdateService, runtime: () => runtimeSupervisor,
     privateConnect: () => privateConnectHost, cleanup: runPrivilegedCleanup,
     handoffContext: () => appUpdateInstallRuntimeContext(
@@ -1045,6 +1044,7 @@ async function bootstrap(): Promise<void> {
   let packageSmokeScheduled = false;
   const liveDarwinRecovery = new RuntimeLiveDarwinRecoveryCoordinator({ dataDirectory, systemBootId: bootstrapSafety.systemBootId, guardianPath: runtimeProcessGuardianPath });
   runtimeSupervisor = new RuntimeSupervisor({
+    platform: process.platform,
     ...(windowsRuntimeJobAssembly ? { windowsRuntimeJobAssembly } : {}),
     agentBrowserBroker: previewBroker,
     getProcessMetrics: () => app.getAppMetrics(),
@@ -1072,6 +1072,7 @@ async function bootstrap(): Promise<void> {
       forget: (secretReference) => credentialVault!.forget(secretReference),
     },
     secureFileBroker: new SecureFileBroker({
+      retryUnconfirmedShutdown: process.platform === "linux",
       spawn: (parent) => utilityProcess.fork(
         fileURLToPath(new URL("./secure-file-worker.js", import.meta.url)),
         [],

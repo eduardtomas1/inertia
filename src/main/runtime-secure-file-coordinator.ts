@@ -38,6 +38,7 @@ interface PendingSecureFileRequest {
 }
 
 interface RuntimeSecureFileCoordinatorOptions {
+  readonly retryUnconfirmedShutdown?: boolean;
   readonly broker?: RuntimeSecureFileBroker;
   readonly conversationAttachmentStoreRunner?: ConversationAttachmentStoreAnyOperationRunner;
   readonly conversationAttachmentStoreAuthority?: ConversationAttachmentStoreAuthority;
@@ -64,6 +65,7 @@ export class RuntimeSecureFileCoordinator {
     this.post = options.post;
     this.conversationAttachmentStore =
       new RuntimeConversationAttachmentStoreCoordinator({
+        retryUnconfirmedShutdown: options.retryUnconfirmedShutdown,
         runner: options.conversationAttachmentStoreRunner,
         authority: options.conversationAttachmentStoreAuthority,
         accepts: options.accepts,

@@ -57,7 +57,10 @@ export interface AppUpdateStartupOptions {
     "exit" | "on" | "quit" | "requestSingleInstanceLock" | "whenReady"
   >;
   focusMainWindow(): void;
-  updateInstallCoordinator(): { allowBeforeQuit(): boolean } | null;
+  updateInstallCoordinator(): {
+    allowBeforeQuit(): boolean;
+    retryUnconfirmedNormalShutdown?(): boolean;
+  } | null;
   recordBeforeQuit(): void;
   cleanupBeforeQuit(): Promise<boolean>;
   finishNormalShutdown(): void;
@@ -73,9 +76,15 @@ export interface AppUpdateStartupOptions {
   reportCandidateFailure(message: string, error: unknown): void;
 }
 
-function registerApplicationLifecycle(options: AppUpdateStartupOptions): void {
+export function registerApplicationLifecycle(options: AppUpdateStartupOptions): void {
   const application = options.application;
-  application.on("second-instance", options.focusMainWindow);
+  application.on("second-instance", () => {
+    options.focusMainWindow();
+    if (options.platform === "linux") {
+      options.updateInstallCoordinator()
+        ?.retryUnconfirmedNormalShutdown?.();
+    }
+  });
   application.on("activate", options.focusMainWindow);
   application.on("window-all-closed", () => {
     if (options.platform !== "darwin") application.quit();

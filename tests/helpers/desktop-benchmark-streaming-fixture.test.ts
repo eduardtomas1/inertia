@@ -195,7 +195,9 @@ describe("desktop benchmark streaming completion gate", () => {
       await releaseStreamingCadence(workspace, 9);
     }
 
-    await waitForStreamingCompletionReady(workspace, 9);
+    // Timeout cleanup can remove the short-lived ready file before the test
+    // observes it. The retained deltas prove the stream reached the final gate.
+    await waitFor(() => providerDeltaMessages(run).length === 128);
     expect(await exitCode(run.child)).toBe(2);
     children.delete(run.child);
     await waitForStreamingCompletionCleanup(workspace, 9);

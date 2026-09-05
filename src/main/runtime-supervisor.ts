@@ -20,6 +20,7 @@ import { detachedRuntimeConnection, runtimeConnection,
   runtimeConnectionUnavailableError } from "./runtime-supervisor-connection.js";
 import { createRuntimeSupervisorSnapshot } from "./runtime-supervisor-snapshot.js";
 import { RuntimeSupervisorRecycle } from "./runtime-supervisor-recycle.js";
+import { reconcileStoppedRuntimeQuarantine, runtimeStopAttemptState, trackRuntimeStopAttempt } from "./runtime-supervisor-stop-recovery.js";
 import { RuntimeSecureFileCoordinator } from "./runtime-secure-file-coordinator.js";
 import { RuntimeCredentialCoordinator } from "./runtime-credential-coordinator.js";
 import { RuntimeGenerationLeaseJournal } from "../node/runtime-generation-leases.js";
@@ -99,10 +100,11 @@ export class RuntimeSupervisor {
     RuntimeProcessRecord>;
   private readonly credentials: RuntimeCredentialCoordinator;
   private readonly secureFiles: RuntimeSecureFileCoordinator;
-  private stopPromise: Promise<boolean> | null = null;
+  private readonly stopAttempt;
   private resolveStop: ((confirmed: boolean) => void) | null = null;
   private readonly testRecycle = new RuntimeSupervisorRecycle();
   constructor(options: RuntimeSupervisorOptions) {
+    this.stopAttempt = runtimeStopAttemptState((options.platform ?? process.platform) === "linux");
     this.spawnProcess = options.spawn;
     const { manualModernDarwinRecovery, ...workerOptions } =
       options.workerOptions;
@@ -180,7 +182,7 @@ export class RuntimeSupervisor {
       post: (record, command) => this.post(record.child, command),
     });
     this.secureFiles = new RuntimeSecureFileCoordinator({
-      broker: options.secureFileBroker,
+      retryUnconfirmedShutdown: this.stopAttempt.retryEnabled, broker: options.secureFileBroker,
       conversationAttachmentStoreRunner:
         options.conversationAttachmentStoreRunner,
       conversationAttachmentStoreAuthority:
@@ -441,7 +443,7 @@ export class RuntimeSupervisor {
       !record?.ready
       || this.phase !== "ready"
       || !this.desiredRunning
-      || this.stopPromise
+      || this.stopAttempt.promise
     ) return Promise.reject(new Error("The runtime is not ready to recycle."));
     const recycle = this.testRecycle.begin(record);
     record.acceptingReady = false;
@@ -466,23 +468,17 @@ export class RuntimeSupervisor {
   }
   stop(): Promise<boolean> {
     this.lifecycle = "closed"; this.testRecycle.cancelForStop();
-    if (this.stopPromise) return this.stopPromise;
+    if (this.stopAttempt.promise) return this.stopAttempt.promise;
+    const retrying = this.stopAttempt.retryEligible;
     this.desiredRunning = false;
     this.clearTimerValue("restartTimer");
     this.clearTimerValue("startupTimer");
     this.clearTimerValue("stableTimer");
     this.websocketUrl = null;
     this.databaseRecoveryReport = null;
-    this.updatePreparation.clear(
-      this.current,
-      "The local service is stopping.",
-      true,
-    );
+    this.updatePreparation.clear(this.current, "The local service is stopping.", true);
     this.rejectProjectPaths(this.current, "The local service is stopping.");
-    this.databaseRecoveryRequests.reject(
-      this.current,
-      "The local service is stopping.",
-    );
+    this.databaseRecoveryRequests.reject(this.current, "The local service is stopping.");
     this.rejectPrivateConnectRuntimeRequests(this.current, "The local service is stopping.");
     this.credentials.clear(this.current);
     this.secureFiles.clear(this.current);
@@ -491,41 +487,46 @@ export class RuntimeSupervisor {
       this.phase = this.startupRecovery.activePromise() ? "stopping" : "stopped";
       if (this.quarantined.size > 0) {
         this.restartBlocked = true;
-        this.lastError = unconfirmedRuntimeCleanupMessage(
-          this.systemBootId,
-          "A prior runtime generation still has unconfirmed process cleanup.",
-        );
+        this.lastError = unconfirmedRuntimeCleanupMessage(this.systemBootId,
+          "A prior runtime generation still has unconfirmed process cleanup.");
       }
       this.emitState();
       const startupRecovery = this.startupRecovery.activePromise()
         ?? Promise.resolve(true);
-      this.stopPromise = Promise.all([secureFilesStopped, startupRecovery])
-        .then(([confirmed, recovered]) => {
+      return trackRuntimeStopAttempt(this.stopAttempt,
+        Promise.all([secureFilesStopped, startupRecovery])
+        .then(async ([confirmed, recovered]) => {
           this.phase = "stopped";
+          const reconciled = confirmed && recovered && retrying
+            ? await reconcileStoppedRuntimeQuarantine({ enabled: this.stopAttempt.retryEnabled,
+              records: this.quarantined, drain: async (record) => await this.secureFiles.drain(record, true),
+              recoverOwnedProcesses: this.recoverOwnedProcesses, systemBootId: this.systemBootId,
+              recoveryWaitMs: this.recoveryWaitMs, cleanupReceipts: this.cleanupReceipts,
+              runtimeGenerationLeases: this.runtimeGenerationLeases, runtimeOwnedProcesses: this.runtimeOwnedProcesses,
+              onPersistenceFailure: () => { this.lastError =
+                "The confirmed runtime cleanup receipt could not be persisted."; },
+              clear: (record) => this.attachmentRequests.clear(record) })
+            : this.quarantined.size === 0;
+          this.restartBlocked = this.quarantined.size > 0;
+          if (!this.restartBlocked) { this.lastError = null; this.startupBlockerCode = null; }
           this.emitState();
-          return confirmed && recovered && this.quarantined.size === 0;
-        });
-      return this.stopPromise;
+          return confirmed && recovered && reconciled;
+        }),
+      );
     }
     this.phase = "stopping";
     this.current.acceptingReady = false;
     this.emitState();
-    const runtimeStopped = new Promise<boolean>((resolve) => {
-      this.resolveStop = resolve;
-    });
-    this.stopPromise = Promise.all([
-      runtimeStopped,
-      secureFilesStopped,
-    ]).then(([runtimeConfirmed, secureFilesConfirmed]) => (
-      runtimeConfirmed
-      && secureFilesConfirmed
-      && this.quarantined.size === 0
-    ));
+    const runtimeStopped = new Promise<boolean>((resolve) => { this.resolveStop = resolve; });
+    const attempt = Promise.all([runtimeStopped, secureFilesStopped])
+      .then(([runtimeConfirmed, secureFilesConfirmed]) => runtimeConfirmed
+        && secureFilesConfirmed && this.quarantined.size === 0);
+    const tracked = trackRuntimeStopAttempt(this.stopAttempt, attempt);
     this.beginRuntimeShutdown(this.current, () => {
       this.resolveStop?.(false);
       this.resolveStop = null;
     });
-    return this.stopPromise;
+    return tracked;
   }
   private beginRuntimeShutdown(
     record: RuntimeProcessRecord,

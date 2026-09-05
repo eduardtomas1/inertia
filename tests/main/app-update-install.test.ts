@@ -6,6 +6,7 @@ import type { AppUpdaterInstallResult } from
 import {
   cleanupPrivilegedOwners,
   finishNormalShutdownAfterCleanup,
+  RetryablePrivilegedCleanup,
 } from "../../src/main/privileged-shutdown";
 import type { AppUpdateInstallBlocker, AppUpdateStatus } from "../../src/shared/desktop";
 
@@ -347,6 +348,96 @@ describe("application update install coordination", () => {
     expect(finishNormalShutdown).not.toHaveBeenCalled();
   });
 
+  it("coalesces a retry after failed normal cleanup and exits once confirmed", async () => {
+    const cleanup = vi.fn()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    const finishNormalShutdown = vi.fn();
+    const onUnconfirmedShutdown = vi.fn();
+    const coordinator = new AppUpdateInstallCoordinator({
+      platform: "linux",
+      service: service([]),
+      runtime: () => null,
+      privateConnect: () => null,
+      cleanup,
+      finishNormalShutdown,
+      onUnconfirmedShutdown,
+      reportError: vi.fn(),
+    });
+
+    expect(coordinator.allowBeforeQuit()).toBe(false);
+    await vi.waitFor(() => expect(onUnconfirmedShutdown).toHaveBeenCalledOnce());
+    expect(coordinator.retryUnconfirmedNormalShutdown()).toBe(true);
+    expect(coordinator.retryUnconfirmedNormalShutdown()).toBe(false);
+    await vi.waitFor(() => expect(finishNormalShutdown).toHaveBeenCalledOnce());
+    expect(cleanup).toHaveBeenCalledTimes(2);
+  });
+
+  it("retains one Linux retry requested while normal cleanup is in flight", async () => {
+    let resolveFirstCleanup!: (confirmed: boolean) => void;
+    const cleanup = vi.fn()
+      .mockImplementationOnce(() => new Promise<boolean>((resolve) => {
+        resolveFirstCleanup = resolve;
+      }))
+      .mockResolvedValueOnce(true);
+    const finishNormalShutdown = vi.fn();
+    const coordinator = new AppUpdateInstallCoordinator({
+      platform: "linux", service: service([]), runtime: () => null,
+      privateConnect: () => null, cleanup, finishNormalShutdown,
+      onUnconfirmedShutdown: vi.fn(), reportError: vi.fn(),
+    });
+
+    expect(coordinator.allowBeforeQuit()).toBe(false);
+    await vi.waitFor(() => expect(cleanup).toHaveBeenCalledOnce());
+    expect(coordinator.retryUnconfirmedNormalShutdown()).toBe(true);
+    expect(coordinator.retryUnconfirmedNormalShutdown()).toBe(false);
+    resolveFirstCleanup(false);
+    await vi.waitFor(() => expect(finishNormalShutdown).toHaveBeenCalledOnce());
+    expect(cleanup).toHaveBeenCalledTimes(2);
+  });
+
+  it("drops an in-flight Linux retry request after successful cleanup", async () => {
+    let resolveCleanup!: (confirmed: boolean) => void;
+    const cleanup = vi.fn(() => new Promise<boolean>((resolve) => {
+      resolveCleanup = resolve;
+    }));
+    const finishNormalShutdown = vi.fn();
+    const coordinator = new AppUpdateInstallCoordinator({
+      platform: "linux", service: service([]), runtime: () => null,
+      privateConnect: () => null, cleanup, finishNormalShutdown,
+      onUnconfirmedShutdown: vi.fn(), reportError: vi.fn(),
+    });
+
+    expect(coordinator.allowBeforeQuit()).toBe(false);
+    await vi.waitFor(() => expect(cleanup).toHaveBeenCalledOnce());
+    expect(coordinator.retryUnconfirmedNormalShutdown()).toBe(true);
+    resolveCleanup(true);
+    await vi.waitFor(() => expect(finishNormalShutdown).toHaveBeenCalledOnce());
+    expect(cleanup).toHaveBeenCalledOnce();
+    expect(coordinator.retryUnconfirmedNormalShutdown()).toBe(false);
+  });
+
+  it("does not retry a failed normal cleanup outside Linux", async () => {
+    const cleanup = vi.fn(async () => false);
+    const coordinator = new AppUpdateInstallCoordinator({
+      platform: "darwin",
+      service: service([]),
+      runtime: () => null,
+      privateConnect: () => null,
+      cleanup,
+      finishNormalShutdown: vi.fn(),
+      onUnconfirmedShutdown: vi.fn(),
+      reportError: vi.fn(),
+    });
+
+    expect(coordinator.allowBeforeQuit()).toBe(false);
+    await vi.waitFor(() => expect(cleanup).toHaveBeenCalledOnce());
+    expect(coordinator.retryUnconfirmedNormalShutdown()).toBe(false);
+    expect(coordinator.allowBeforeQuit()).toBe(false);
+    await Promise.resolve();
+    expect(cleanup).toHaveBeenCalledOnce();
+  });
+
   it("keeps a normal quit fail-closed when privileged cleanup rejects", async () => {
     const cleanupError = new Error("cleanup rejected");
     const finishNormalShutdown = vi.fn();
@@ -583,5 +674,103 @@ describe("privileged updater cleanup", () => {
     })).resolves.toBe(false);
     expect(onPrivateConnectError).toHaveBeenCalledTimes(1);
     expect(disposeTemporaryAttachments).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries the same unresolved owners without repeating confirmed cleanup", async () => {
+    const stopRuntime = vi.fn()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    const shutdownPrivateConnect = vi.fn()
+      .mockRejectedValueOnce(new Error("busy"))
+      .mockResolvedValueOnce(undefined);
+    const closeDurableAttachments = vi.fn(async () => undefined);
+    const cleanup = new RetryablePrivilegedCleanup({
+      retryUnconfirmed: true,
+      runtime: { stop: stopRuntime },
+      privateConnect: { shutdown: shutdownPrivateConnect },
+      onRuntimeStopped: vi.fn(),
+      onRuntimeError: vi.fn(),
+      onPrivateConnectStopped: vi.fn(),
+      onPrivateConnectError: vi.fn(),
+      disposeTemporaryAttachments: vi.fn(async () => undefined),
+      closeDurableAttachments,
+      onDurableAttachmentsClosed: vi.fn(),
+      onTemporaryAttachmentError: vi.fn(),
+      onUnconfirmedRuntimeExit: vi.fn(),
+    });
+
+    await expect(cleanup.cleanup()).resolves.toBe(false);
+    await expect(cleanup.cleanup()).resolves.toBe(true);
+    await expect(cleanup.cleanup()).resolves.toBe(true);
+    expect(stopRuntime).toHaveBeenCalledTimes(2);
+    expect(shutdownPrivateConnect).toHaveBeenCalledTimes(2);
+    expect(closeDurableAttachments).toHaveBeenCalledOnce();
+  });
+
+  it("does not repeat a confirmed runtime while Private Connect retries", async () => {
+    const stopRuntime = vi.fn(async () => true);
+    const shutdownPrivateConnect = vi.fn()
+      .mockRejectedValueOnce(new Error("busy"))
+      .mockResolvedValueOnce(undefined);
+    const cleanup = new RetryablePrivilegedCleanup({
+      retryUnconfirmed: true,
+      runtime: { stop: stopRuntime },
+      privateConnect: { shutdown: shutdownPrivateConnect },
+      onRuntimeStopped: vi.fn(), onRuntimeError: vi.fn(),
+      onPrivateConnectStopped: vi.fn(), onPrivateConnectError: vi.fn(),
+      disposeTemporaryAttachments: vi.fn(async () => undefined),
+      closeDurableAttachments: vi.fn(async () => undefined),
+      onDurableAttachmentsClosed: vi.fn(), onTemporaryAttachmentError: vi.fn(),
+      onUnconfirmedRuntimeExit: vi.fn(),
+    });
+
+    await expect(cleanup.cleanup()).resolves.toBe(false);
+    await expect(cleanup.cleanup()).resolves.toBe(true);
+    expect(stopRuntime).toHaveBeenCalledOnce();
+    expect(shutdownPrivateConnect).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries durable close without repeating confirmed process owners", async () => {
+    const stopRuntime = vi.fn(async () => true);
+    const shutdownPrivateConnect = vi.fn(async () => undefined);
+    const closeDurableAttachments = vi.fn()
+      .mockRejectedValueOnce(new Error("attachment helper pending"))
+      .mockResolvedValueOnce(undefined);
+    const cleanup = new RetryablePrivilegedCleanup({
+      retryUnconfirmed: true,
+      runtime: { stop: stopRuntime },
+      privateConnect: { shutdown: shutdownPrivateConnect },
+      onRuntimeStopped: vi.fn(), onRuntimeError: vi.fn(),
+      onPrivateConnectStopped: vi.fn(), onPrivateConnectError: vi.fn(),
+      disposeTemporaryAttachments: vi.fn(async () => undefined),
+      closeDurableAttachments, onDurableAttachmentsClosed: vi.fn(),
+      onTemporaryAttachmentError: vi.fn(), onUnconfirmedRuntimeExit: vi.fn(),
+    });
+
+    await expect(cleanup.cleanup()).rejects.toThrow("attachment helper pending");
+    await expect(cleanup.cleanup()).resolves.toBe(true);
+    expect(stopRuntime).toHaveBeenCalledOnce();
+    expect(shutdownPrivateConnect).toHaveBeenCalledOnce();
+    expect(closeDurableAttachments).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not enable owner retries when the platform did not opt in", async () => {
+    const stopRuntime = vi.fn()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    const cleanup = new RetryablePrivilegedCleanup({
+      retryUnconfirmed: false,
+      runtime: { stop: stopRuntime }, privateConnect: null,
+      onRuntimeStopped: vi.fn(), onRuntimeError: vi.fn(),
+      onPrivateConnectStopped: vi.fn(), onPrivateConnectError: vi.fn(),
+      disposeTemporaryAttachments: vi.fn(async () => undefined),
+      closeDurableAttachments: vi.fn(async () => undefined),
+      onDurableAttachmentsClosed: vi.fn(), onTemporaryAttachmentError: vi.fn(),
+      onUnconfirmedRuntimeExit: vi.fn(),
+    });
+
+    await expect(cleanup.cleanup()).resolves.toBe(false);
+    await expect(cleanup.cleanup()).resolves.toBe(false);
+    expect(stopRuntime).toHaveBeenCalledOnce();
   });
 });

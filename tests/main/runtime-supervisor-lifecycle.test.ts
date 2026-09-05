@@ -13,6 +13,11 @@ import { runtimeSupervisorDefaults } from
   "../../src/main/runtime-supervisor-values";
 import { RuntimeGenerationLeaseJournal } from "../../src/node/runtime-generation-leases";
 import { RuntimeOwnedProcessJournal } from "../../src/node/runtime-owned-processes";
+import {
+  encodeConversationAttachmentStoreOperation,
+  type ConversationAttachmentStoreAnyOperationRunner,
+  type ConversationAttachmentStoreAuthority,
+} from "../../src/node/conversation-attachment-store-child";
 import type { RuntimeOwnedProcessContainment } from
   "../../src/node/runtime-owned-processes";
 import type { RuntimeWorkerCommand } from "../../src/node/runtime-process-protocol";
@@ -43,6 +48,7 @@ class FakeUtilityProcess extends EventEmitter {
 }
 
 function createHarness(options: {
+  platform?: NodeJS.Platform;
   startupTimeoutMs?: number;
   recoverOwnedProcesses?: (
     runtimeGenerationId: string,
@@ -54,6 +60,8 @@ function createHarness(options: {
     | Promise<RuntimeOwnedProcessContainment | null>
     | null;
   spawn?: () => never;
+  conversationAttachmentStoreRunner?: ConversationAttachmentStoreAnyOperationRunner;
+  conversationAttachmentStoreAuthority?: ConversationAttachmentStoreAuthority;
 } = {}): {
   children: FakeUtilityProcess[];
   forceKill: ReturnType<typeof vi.fn<(pid: number, deadlineAt: number) => boolean>>;
@@ -62,6 +70,7 @@ function createHarness(options: {
   const children: FakeUtilityProcess[] = [];
   const forceKill = vi.fn((_pid: number, _deadlineAt: number) => true);
   const supervisor = new RuntimeSupervisor({
+    platform: options.platform,
     systemBootId: "test:00000000-0000-4000-8000-000000000001",
     workerOptions: {
       dataDirectory,
@@ -86,6 +95,9 @@ function createHarness(options: {
             name: `Global\\InertiaRuntime-${"a".repeat(64)}`,
           }
         : null),
+    conversationAttachmentStoreRunner: options.conversationAttachmentStoreRunner,
+    conversationAttachmentStoreAuthority:
+      options.conversationAttachmentStoreAuthority,
   });
   return { children, forceKill, supervisor };
 }
@@ -148,6 +160,52 @@ describe("RuntimeSupervisor lifecycle", () => {
     } finally {
       finish.mockRestore();
     }
+  });
+
+  it("retries closed Linux cleanup after the exact attachment helper exits", async () => {
+    let rejectResult!: (error: Error) => void;
+    let rejectStopped!: (error: Error) => void;
+    let resolveTermination!: () => void;
+    const authority = {
+      root: resolve(tmpdir(), "conversation-attachments"),
+      dev: "1", ino: "2", uid: "501",
+    };
+    const runner = vi.fn((_operation: unknown, signal?: AbortSignal) => {
+      const result = new Promise<void>((_resolve, reject) => { rejectResult = reject; });
+      signal?.addEventListener("abort", () => rejectResult(new Error("cancelled")), { once: true });
+      const stopped = new Promise<void>((_resolve, reject) => { rejectStopped = reject; });
+      const termination = new Promise<void>((resolveTerminationPromise) => {
+        resolveTermination = resolveTerminationPromise;
+      });
+      return { result, stopped, termination, ready: Promise.resolve(false) };
+    });
+    const recoverOwnedProcesses = vi.fn(() => true);
+    const { children, supervisor } = createHarness({
+      platform: "linux", conversationAttachmentStoreRunner: runner as never,
+      conversationAttachmentStoreAuthority: authority, recoverOwnedProcesses,
+    });
+    supervisor.start(); children[0].spawn();
+    children[0].message({ type: "runtime.ready", websocketUrl: runtimeUrl });
+    children[0].message({
+      type: "runtime.conversation-attachment-store-request",
+      requestId: crypto.randomUUID(),
+      encodedOperation: encodeConversationAttachmentStoreOperation({
+        operation: "remove", root: authority.root, rootDev: authority.dev,
+        rootIno: authority.ino, rootUid: authority.uid, name: crypto.randomUUID(),
+      }),
+    });
+
+    const firstStop = supervisor.stop();
+    children[0].message({ type: "runtime.stopped" }); children[0].exit(0);
+    rejectStopped(new Error("utility exit unconfirmed"));
+    await expect(firstStop).resolves.toBe(false);
+    expect(supervisor.snapshot()).toMatchObject({ phase: "stopped",
+      lastError: "Conversation attachment storage shutdown could not be confirmed." });
+    resolveTermination(); await Promise.resolve();
+    await expect(supervisor.stop()).resolves.toBe(true);
+    expect(children).toHaveLength(1);
+    expect(supervisor.snapshot()).toMatchObject({ phase: "stopped", lastError: null });
+    expect(recoverOwnedProcesses).toHaveBeenCalledOnce();
   });
 
   it("keeps arbitrary child errors private across every unavailable operation", async () => {

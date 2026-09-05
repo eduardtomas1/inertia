@@ -1,10 +1,20 @@
+import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, symlink, unlink, writeFile } from "node:fs/promises";
+import {
+  copyFile,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  symlink,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 
 import { executableProcessExists } from "../helpers/executable-process";
 
@@ -27,6 +37,13 @@ async function installerSmokeModule() {
     installedWindowsApplicationName: (
       releaseChannel: "canary" | "stable",
     ) => string;
+    windowsInstallRootProcesses: (
+      installDirectory: string,
+    ) => Promise<Array<{
+      executablePath: string;
+      name: string;
+      processId: number;
+    }>>;
     nsisApplicationArchiveName: (
       sanitizedName: string,
       version: string,
@@ -137,6 +154,7 @@ test("the NSIS installer never terminates install-root processes", async () => {
   expect(include).toContain("INERTIA_NSIS_INSTALL_ROOT");
   expect(include).toContain("[IO.Path]::DirectorySeparatorChar");
   expect(include).toContain("[StringComparison]::OrdinalIgnoreCase");
+  expect(include).toContain("$$rawPath.StartsWith($$root");
   expect(include).toContain("MB_RETRYCANCEL");
   expect(include).toContain("SetErrorLevel 1");
   expect(include).toContain("StrCpy $R0 2");
@@ -144,6 +162,63 @@ test("the NSIS installer never terminates install-root processes", async () => {
   expect(include).not.toContain("$(appRunning)");
   expect(include).not.toMatch(/\b(?:Stop-Process|taskkill|KILL_PROCESS)\b/u);
 });
+
+test.runIf(process.platform === "win32")(
+  "observes the exact install-root process boundary and its drain",
+  async () => {
+    const root = await mkdtemp(join(tmpdir(), "inertia-installer-process-root-"));
+    const installDirectory = join(root, "installed with spaces");
+    const siblingDirectory = `${installDirectory}-sibling`;
+    await Promise.all([
+      mkdir(installDirectory, { recursive: true }),
+      mkdir(siblingDirectory, { recursive: true }),
+    ]);
+    const installedBlocker = join(installDirectory, "installed-blocker.exe");
+    const siblingBlocker = join(siblingDirectory, "sibling-blocker.exe");
+    await Promise.all([
+      copyFile(process.execPath, installedBlocker),
+      copyFile(process.execPath, siblingBlocker),
+    ]);
+    const blockers = [installedBlocker, siblingBlocker].map((path) => spawn(
+      path,
+      ["-e", "process.stdin.resume()"],
+      { stdio: ["pipe", "ignore", "ignore"], windowsHide: true },
+    ));
+    try {
+      await vi.waitFor(() => {
+        expect(blockers.every((child) => child.pid !== undefined)).toBe(true);
+      });
+      const { windowsInstallRootProcesses } = await installerSmokeModule();
+      await expect(windowsInstallRootProcesses(installDirectory)).resolves.toEqual([
+        expect.objectContaining({
+          executablePath: installedBlocker,
+          processId: blockers[0].pid,
+        }),
+      ]);
+      blockers[0].stdin?.end();
+      await vi.waitFor(async () => {
+        await expect(windowsInstallRootProcesses(installDirectory)).resolves.toEqual([]);
+      }, { timeout: 10_000 });
+      expect(executableProcessExists(blockers[1].pid!)).toBe(true);
+    } finally {
+      for (const blocker of blockers) {
+        blocker.stdin?.end();
+        if (blocker.pid && executableProcessExists(blocker.pid)) blocker.kill();
+      }
+      await vi.waitFor(() => {
+        expect(blockers.every((child) => (
+          child.pid === undefined || !executableProcessExists(child.pid)
+        ))).toBe(true);
+      }, { timeout: 5_000 });
+      await rm(root, {
+        force: true,
+        maxRetries: 5,
+        recursive: true,
+        retryDelay: 100,
+      });
+    }
+  },
+);
 
 test("the installer smoke refuses an existing per-user installation", async () => {
   const root = await mkdtemp(join(tmpdir(), "inertia-installer-host-"));
@@ -749,6 +824,9 @@ test("pins the minimal fixed builder and gates installed Windows binaries", asyn
   expect(source).toContain("Installed Windows native binaries verified");
   expect(source).toContain("readWindowsNMinusOneMetadata");
   expect(source).toContain("Silent Windows in-place N-1 to N installer");
+  expect(source).toContain("process.env.SystemRoot");
+  expect(source).toContain('"WindowsPowerShell"');
+  expect(source).toContain("waitForInstallRootProcessDrain(installDirectory)");
   expect(source).toContain("Windows packaged N-1 to N smoke passed");
   expect(source).toContain("sha256File(unpackedPath)");
   expect(source).toContain("installedDigest !== unpackedDigest");

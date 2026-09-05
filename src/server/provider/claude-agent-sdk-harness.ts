@@ -29,7 +29,11 @@ import {
   type AgentHarnessStartOptions,
   type ClaudeAgentSdkHarnessCapabilities,
 } from "./agent-harness";
-import type { ProviderRunFailure, ProviderRunResult } from "./contracts";
+import {
+  providerRunTerminal,
+  type ProviderRunFailure,
+  type ProviderRunResult,
+} from "./contracts";
 import type { AgentApprovalDecision, AgentPlanStep } from "./interactions";
 import { providerFailureMessage } from "./adapters";
 import { ClaudeDelegateLifecycle } from "./claude-delegate-lifecycle";
@@ -222,13 +226,13 @@ function startClaudeRun(
   terminalSubagentDrainTimeoutMs: number,
   skillFilesystem: ClaudeSkillFilesystemTestSeam | undefined,
 ): AgentHarnessRun {
-  const conversationId = options.input.conversationId ?? options.input.threadId ?? "";
+  const conversationId = options.input.conversationId;
   const emitter = createAgentHarnessEmitter(
     "claude",
     conversationId,
     options.callbacks,
-    options.input.runId ?? conversationId,
-    options.input.turnId ?? null,
+    options.input.runId,
+    options.input.turnId,
     options.input.cwd,
   );
   const text = new CappedProviderBuffer(MAX_RESULT_TEXT_CHARS);
@@ -334,6 +338,11 @@ function startClaudeRun(
     if (callbackOptions.signal.aborted || cancelRequested) return deny("User cancelled the request.", true);
     if (claudeHostTools?.providerToolNames.has(toolName)) {
       return { behavior: "allow", updatedInput: toolInput };
+    }
+    if (!options.providerNativeToolsAvailable) {
+      return deny(
+        "Provider-native tools are unavailable for this exact backend and model.",
+      );
     }
     if (toolName === "AskUserQuestion") {
       if (inputs.size >= MAX_PENDING_INTERACTIONS) {
@@ -534,6 +543,7 @@ function startClaudeRun(
                 : "default",
           allowDangerouslySkipPermissions: options.input.access === "full",
           canUseTool,
+          ...(!options.providerNativeToolsAvailable ? { tools: [] } : {}),
           ...(claudeHostTools
             ? {
                 mcpServers: { [INERTIA_HOST_MCP_NAME]: claudeHostTools.config },
@@ -608,7 +618,12 @@ function startClaudeRun(
             && record.fast_mode_state !== requestedFastModeState) {
             throw new Error("Claude did not confirm Standard speed for this session. Start a new chat or update Claude Code.");
           }
-          if (requestedFastModeState !== null) fastModeVerified = true;
+          if (requestedFastModeState !== null) {
+            fastModeVerified = true;
+            // `fast_mode_state` belongs to this exact attested session/init;
+            // never infer negotiated support from the requested setting.
+            emitter.capability("performance-modes", true);
+          }
         }
         if (
           stagedSkillPlugin
@@ -861,7 +876,10 @@ function startClaudeRun(
       signal: child?.signalCode ?? null,
     };
     emitter.status(terminal.status, terminal.error);
-    return terminal;
+    return {
+      ...terminal,
+      ...providerRunTerminal(options.input, terminal.status, terminal.failure),
+    };
   });
 
   function finishResult(
@@ -874,9 +892,7 @@ function startClaudeRun(
       ? text.toString()
       : textOverride.slice(0, MAX_RESULT_TEXT_CHARS);
     return {
-      providerId: "claude",
-      conversationId,
-      status,
+      ...providerRunTerminal(options.input, status, failure),
       ...(sessionId ? { sessionId } : {}),
       text: resultText,
       textTruncated: textOverride === undefined

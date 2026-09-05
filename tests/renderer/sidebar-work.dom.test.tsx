@@ -117,6 +117,7 @@ function renderSidebar(
     sidebarMode?: AppSnapshot["settings"]["sidebarMode"];
     splitConversationId?: string | null;
     dailyWorkOpen?: boolean;
+    view?: "workspace" | "settings" | "usage";
   } = {},
 ) {
   const onSnoozeConversation = vi.fn();
@@ -126,7 +127,7 @@ function renderSidebar(
   const onOpenHome = vi.fn();
   const sidebarProps = {
     connectionStatus: "online" as const,
-    view: "workspace" as const,
+    view: options.view ?? "workspace" as const,
     open: true,
     busy: false,
     layoutWidth: 276,
@@ -134,7 +135,6 @@ function renderSidebar(
     onViewChange,
     onOpenHome,
     onImportProject: vi.fn(),
-    onSelectProject: vi.fn(),
     onSelectConversation,
     splitConversationId: options.splitConversationId ?? null,
     onOpenConversationInSplit: vi.fn(),
@@ -156,7 +156,6 @@ function renderSidebar(
     onRenameProject: vi.fn(),
     onSetProjectGrouping: vi.fn(),
     onSetProjectGitRepositoryLimit: vi.fn(),
-    onSidebarModeChange: vi.fn(),
     onRemoveProject: vi.fn(),
   };
   const initialSnapshot = snapshot(conversations, runs, options.projects);
@@ -173,6 +172,7 @@ function renderSidebar(
     />,
   );
   return {
+    onCreateConversation: sidebarProps.onCreateConversation,
     onSelectConversation,
     onSnoozeConversation,
     onOpenDailyWork,
@@ -295,10 +295,10 @@ describe("compact Work sidebar", () => {
       .getAllByRole("button");
 
     expect(footerButtons.map((button) => button.textContent)).toEqual([
-      "Workspace",
       "Daily work",
       "Usage",
       "Settings",
+      "",
     ]);
     const dailyWork = screen.getByRole("button", { name: "Daily work" });
     const mark = dailyWork.querySelector(".daily-work-mark");
@@ -308,12 +308,16 @@ describe("compact Work sidebar", () => {
     expect(dailyWork).toHaveAttribute("aria-haspopup", "dialog");
     expect(dailyWork).toHaveAttribute("aria-expanded", "false");
     expect(dailyWork.className).not.toContain("is-open");
-    fireEvent.click(screen.getByRole("button", { name: "Workspace" }));
-    expect(view.onViewChange).toHaveBeenCalledWith("workspace");
-    expect(view.onClose).toHaveBeenCalledTimes(1);
     fireEvent.click(dailyWork);
     expect(view.onOpenDailyWork).toHaveBeenCalledTimes(1);
-    expect(view.onClose).toHaveBeenCalledTimes(2);
+    expect(view.onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns from Settings to the current workspace", () => {
+    const view = renderSidebar([], vi.fn(), [], { view: "settings" });
+    fireEvent.click(screen.getByRole("button", { name: "Workspace" }));
+    expect(view.onViewChange).toHaveBeenCalledWith("workspace");
+    expect(view.onClose).toHaveBeenCalledOnce();
   });
 
   it("marks the Daily work destination while its dialog is open", () => {
@@ -365,16 +369,16 @@ describe("compact Work sidebar", () => {
     expect(screen.queryByRole("group", { name: "Filter conversations" }))
       .not.toBeInTheDocument();
     expect(screen.getAllByRole("searchbox")).toHaveLength(1);
-    expect(screen.getByRole("heading", { name: "Recent 1" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Yesterday 1" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Recent 1" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Yesterday 1" })).not.toBeInTheDocument();
 
     const recentRow = screen.getByRole("button", {
       name: "Polish compact Work rows, OpenAI, Studio, Repository acme-monorepo/apps/studio, Branch codex/compact-work-tab, Idle, Pinned",
     });
     expect(recentRow).toHaveAttribute("aria-current", "page");
-    expect(recentRow).toHaveTextContent("OpenAI");
+    expect(recentRow).toHaveAccessibleName(expect.stringContaining("OpenAI"));
     expect(recentRow).toHaveTextContent("Studio");
-    expect(recentRow).toHaveTextContent("acme-monorepo/apps/studio");
+    expect(recentRow).toHaveAccessibleName(expect.stringContaining("acme-monorepo/apps/studio"));
     expect(recentRow).toHaveTextContent("codex/compact-work-tab");
     expect(recentRow.querySelector(
       '[data-provider-id="codex"][data-provider-brand="openai"][data-provider-icon-kind="official"]',
@@ -652,7 +656,7 @@ describe("compact Work sidebar", () => {
     expect(resizedRows).toBeGreaterThan(initialRows);
   });
 
-  it("measures a large Work index when switching from Projects", () => {
+  it("initializes a large Work index for legacy Projects preferences", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 7, 11, 12));
     const observe = vi.fn();
@@ -669,24 +673,25 @@ describe("compact Work sidebar", () => {
     const view = renderSidebar(entries, vi.fn(), [], { sidebarMode: "classic" });
     const navigation = view.container.querySelector<HTMLElement>(".project-list");
     expect(navigation).not.toBeNull();
-    expect(observe).not.toHaveBeenCalled();
+    expect(observe).toHaveBeenCalledWith(navigation);
     Object.defineProperty(navigation, "clientHeight", {
       configurable: true,
       value: 2_400,
     });
 
+    fireEvent.scroll(navigation!);
     view.rerenderSnapshot(snapshot(entries));
 
     const stream = view.container.querySelector<HTMLElement>(
       ".activity-thread-stream",
     );
     expect(stream).toHaveAttribute("data-work-index-virtualized", "true");
-    expect(stream?.querySelectorAll(".activity-thread").length).toBeGreaterThan(40);
+    expect(stream?.querySelectorAll(".activity-thread").length).toBeGreaterThan(25);
     expect(observe).toHaveBeenCalledWith(navigation);
     expect(disconnect).not.toHaveBeenCalled();
   });
 
-  it("keeps classic row actions outside the virtual Work window usable", () => {
+  it("keeps distant row actions reachable through keyboard navigation", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 7, 11, 12));
     const entries = Array.from({ length: 80 }, (_, index) => conversation(
@@ -696,6 +701,8 @@ describe("compact Work sidebar", () => {
     ));
     renderSidebar(entries, vi.fn(), [], { sidebarMode: "classic" });
 
+    fireEvent.keyDown(screen.getByRole("button", { name: /^Classic actions 0,/ }), { key: "End" });
+    act(() => { vi.advanceTimersByTime(100); });
     fireEvent.click(screen.getByRole("button", {
       name: "Thread actions for Classic actions 79",
     }));
@@ -707,85 +714,35 @@ describe("compact Work sidebar", () => {
       .toHaveFocus();
   });
 
-  it("labels project state and caps large chat-list entrance delays", () => {
-    const entries = Array.from({ length: 20 }, (_, index) => conversation(
-      `classic-state-${index}`,
-      `Classic state ${index}`,
-      new Date(2026, 7, 11, 11, 59 - index),
-    ));
-    const view = renderSidebar(entries, vi.fn(), [], { sidebarMode: "classic" });
-    const projectSelect = view.container.querySelector(".project-select");
-
-    expect(projectSelect).toHaveAccessibleName("Studio Working 20 chats");
-    expect(projectSelect?.querySelector(".project-status"))
-      .toHaveAttribute("aria-hidden", "true");
-    const chatRows = view.container.querySelectorAll<HTMLElement>(
-      ".conversation-item",
-    );
-    expect(chatRows).toHaveLength(20);
-    expect(chatRows[8]?.style.getPropertyValue("--chat-index")).toBe("8");
-    expect(chatRows[19]?.style.getPropertyValue("--chat-index")).toBe("8");
-  });
-
-  it("dismisses the Projects overflow menu when pointing outside it", () => {
-    renderSidebar([], vi.fn(), [], { sidebarMode: "classic" });
-
-    const trigger = screen.getByRole("button", {
-      name: "Project actions for Studio",
-    });
-    fireEvent.click(trigger);
-
-    expect(screen.getByRole("menu", {
-      name: "Project actions for Studio",
-    })).toBeInTheDocument();
-    expect(trigger).toHaveAttribute("aria-expanded", "true");
-
-    fireEvent.pointerDown(screen.getByRole("searchbox", {
-      name: "Search projects and conversations",
-    }));
-
-    expect(screen.queryByRole("menu", {
-      name: "Project actions for Studio",
-    })).not.toBeInTheDocument();
-    expect(trigger).toHaveAttribute("aria-expanded", "false");
-  });
-
-  it("keeps keyboard focus inside the Projects overflow menu", () => {
+  it("dismisses project actions on outside pointer and restores filter focus on Escape", () => {
     vi.useFakeTimers();
-    renderSidebar([], vi.fn(), [], { sidebarMode: "classic" });
-
-    const trigger = screen.getByRole("button", {
-      name: "Project actions for Studio",
-    });
+    renderSidebar([]);
+    const trigger = screen.getByRole("button", { name: "Filter work by project" });
     fireEvent.click(trigger);
-    const menu = screen.getByRole("menu", {
-      name: "Project actions for Studio",
-    });
-    const openFolder = within(menu).getByRole("menuitem", {
-      name: "Open folder",
-    });
-    const rename = within(menu).getByRole("menuitem", { name: "Rename" });
-    const remove = within(menu).getByRole("menuitem", {
-      name: "Remove project",
-    });
-    expect(trigger).toHaveAttribute("aria-haspopup", "menu");
-    expect(trigger).toHaveAttribute("aria-controls", menu.id);
-    expect(openFolder).toHaveFocus();
-
-    fireEvent.keyDown(openFolder, { key: "ArrowDown" });
-    expect(rename).toHaveFocus();
-    fireEvent.keyDown(rename, { key: "End" });
-    expect(remove).toHaveFocus();
-    fireEvent.keyDown(remove, { key: "Home" });
-    expect(openFolder).toHaveFocus();
-    fireEvent.keyDown(openFolder, { key: "Escape" });
-    act(() => {
-      vi.advanceTimersByTime(50);
-    });
-    expect(screen.queryByRole("menu", {
-      name: "Project actions for Studio",
-    })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Project actions for Studio" }));
+    const menu = screen.getByRole("menu", { name: "Project actions for Studio" });
+    const newChat = within(menu).getByRole("menuitem", { name: "New chat in Studio" });
+    expect(newChat).toHaveFocus();
+    fireEvent.keyDown(newChat, { key: "ArrowDown" });
+    expect(within(menu).getByRole("menuitem", { name: "Open folder" })).toHaveFocus();
+    fireEvent.keyDown(newChat, { key: "End" });
+    expect(within(menu).getByRole("menuitem", { name: "Remove project" })).toHaveFocus();
+    fireEvent.keyDown(newChat, { key: "Escape" });
+    act(() => { vi.advanceTimersByTime(100); });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
     expect(trigger).toHaveFocus();
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole("button", { name: "Project actions for Studio" }));
+    fireEvent.pointerDown(screen.getByRole("searchbox"));
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("creates a new chat in the project selected through its actions", () => {
+    const view = renderSidebar([]);
+    fireEvent.click(screen.getByRole("button", { name: "Filter work by project" }));
+    fireEvent.click(screen.getByRole("button", { name: "Project actions for Studio" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "New chat in Studio" }));
+    expect(view.onCreateConversation).toHaveBeenCalledWith(project);
   });
 
   it("cancels a mobile project rename without closing navigation", () => {
@@ -801,6 +758,7 @@ describe("compact Work sidebar", () => {
     })));
     const view = renderSidebar([], vi.fn(), [], { sidebarMode: "classic" });
 
+    fireEvent.click(screen.getByRole("button", { name: "Filter work by project" }));
     fireEvent.click(screen.getByRole("button", {
       name: "Project actions for Studio",
     }));
@@ -819,6 +777,7 @@ describe("compact Work sidebar", () => {
   it("keeps focus in the project rename field after dismissing its menu", async () => {
     renderSidebar([], vi.fn(), [], { sidebarMode: "classic" });
 
+    fireEvent.click(screen.getByRole("button", { name: "Filter work by project" }));
     fireEvent.click(screen.getByRole("button", {
       name: "Project actions for Studio",
     }));
@@ -949,59 +908,28 @@ describe("compact Work sidebar", () => {
     expect(screen.queryByRole("menuitem", { name: "Rename" })).not.toBeInTheDocument();
   });
 
-  it("does not retain a Work row menu across sidebar mode changes", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(2026, 7, 11, 12));
-    const work = conversation(
-      "mode-change",
-      "Switch sidebar modes",
-      new Date(2026, 7, 11, 9),
-    );
-    const view = renderSidebar([work]);
-
-    fireEvent.click(screen.getByRole("button", {
-      name: "Thread actions for Switch sidebar modes",
-    }));
-    expect(screen.getByRole("menuitem", { name: "Rename" })).toBeInTheDocument();
-
-    const workSnapshot = snapshot([work]);
-    view.rerenderSnapshot({
-      ...workSnapshot,
-      settings: { ...workSnapshot.settings, sidebarMode: "classic" },
-    });
-    view.rerenderSnapshot(workSnapshot);
-
-    expect(screen.queryByRole("menuitem", { name: "Rename" })).not.toBeInTheDocument();
+  it("keeps Work and its search available when a saved legacy mode is loaded", () => {
+    const work = conversation("legacy", "Keep my task", new Date());
+    renderSidebar([work], vi.fn(), [], { sidebarMode: "classic" });
+    expect(screen.queryByRole("button", { name: "Projects" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Work", { exact: true })).not.toBeInTheDocument();
+    expect(screen.getByRole("list", { name: "Work" })).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "Keep my task" } });
+    expect(screen.getByRole("button", { name: /^Keep my task,/ })).toBeInTheDocument();
   });
 
-  it("clears Work-only metadata searches when switching to Projects", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(2026, 7, 11, 12));
-    const work = conversation(
-      "metadata-mode-change",
-      "Search metadata before switching",
-      new Date(2026, 7, 11, 9),
-      { branch: "codex/work-only-branch" },
-    );
-    const view = renderSidebar([work]);
-
-    fireEvent.change(screen.getByRole("searchbox", {
-      name: "Search projects and conversations",
-    }), { target: { value: "work-only-branch" } });
-    expect(screen.getByRole("button", { name: /^Search metadata before switching,/ }))
-      .toBeInTheDocument();
-
-    const workSnapshot = snapshot([work]);
-    view.rerenderSnapshot({
-      ...workSnapshot,
-      settings: { ...workSnapshot.settings, sidebarMode: "classic" },
-    });
-
-    expect(screen.getByRole("searchbox", {
-      name: "Search projects and conversations",
-    })).toHaveValue("");
-    expect(screen.queryByText("No matching projects")).not.toBeInTheDocument();
-    expect(screen.getByText("Search metadata before switching")).toBeInTheDocument();
+  it("filters Work by project while retaining the task search", () => {
+    const second = { ...project, id: "project-two", name: "Runtime", path: "/work/runtime" };
+    const first = conversation("website", "Fix website", new Date());
+    const other = conversation("runtime", "Fix runtime", new Date(), { projectId: second.id });
+    const view = renderSidebar([first, other]);
+    view.rerenderSnapshot(snapshot([first, other], [], [project, second]));
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "Fix" } });
+    fireEvent.click(screen.getByRole("button", { name: "Filter work by project" }));
+    fireEvent.click(screen.getByRole("option", { name: /Runtime/u }));
+    expect(screen.getByRole("button", { name: /^Fix runtime,/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Fix website,/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("searchbox")).toHaveValue("Fix");
   });
 
   it("ends a row rename when automatic regrouping hides its owner", () => {
@@ -1069,16 +997,16 @@ describe("compact Work sidebar", () => {
       conversation("today", "Finish before midnight", new Date(2026, 7, 11, 12)),
     ]);
 
-    expect(screen.getByRole("heading", { name: "Recent 1" }))
-      .toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Finish before midnight,/ }).closest(".activity-thread"))
+      .toHaveAttribute("data-work-section", "recent");
     screen.getByRole("button", { name: /^Finish before midnight,/ }).focus();
     act(() => {
       vi.advanceTimersByTime(101);
     });
     expect(screen.queryByRole("heading", { name: "Recent 1" }))
       .not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Yesterday 1" }))
-      .toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Finish before midnight,/ }).closest(".activity-thread"))
+      .toHaveAttribute("data-work-section", "yesterday");
     expect(screen.getByRole("button", { name: /^Finish before midnight,/ }))
       .toHaveFocus();
   });

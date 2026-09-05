@@ -6,10 +6,12 @@ import type {
   ContinuationIdentity,
   ModelSelection,
 } from "../model-routing";
+import type { ContinuationReasonCode } from "../continuation-policy";
 import type {
   ProviderMaintenanceOperation,
   ProviderMaintenanceStatus,
 } from "../provider-maintenance";
+import type { RuntimeLifecycleDiagnosticSnapshot } from "../lifecycle-diagnostics";
 import type { ProviderId } from "../provider";
 import type { ProviderIdentityLabels } from "../provider-identities";
 import {
@@ -53,6 +55,8 @@ export interface ConversationLatestTurnSummary {
   backendProfileId: ModelSelection["backendProfileId"];
   modelSelection: ModelSelection;
   continuationIdentity: ContinuationIdentity;
+  /** Optional only for turns persisted before continuation evidence existed. */
+  continuationReasonCode?: ContinuationReasonCode | null;
   model: string;
   reasoningEffort: string;
   requestedAt: string;
@@ -113,6 +117,22 @@ export interface ProviderMetadataState {
   rateLimits: ProviderMetadataFieldState;
 }
 
+/**
+ * Sanitized capability evidence for the exact provider installation currently
+ * selected by the runtime. Digests are safe contract identities; executable
+ * paths, installation digests, tokens, and probe payloads stay server-only.
+ */
+export interface ProviderCapabilityContractView {
+  schemaVersion: 1;
+  harnessId: ContinuationIdentity["harnessId"];
+  manifestDigest: string;
+  installationVerified: boolean;
+  installedVersion: string | null;
+  currentlyAvailableCount: number;
+  declaredCapabilityCount: number;
+  hostToolBridgeAvailable: boolean;
+}
+
 export interface ProviderInfo {
   id: ProviderId;
   label: string;
@@ -128,6 +148,8 @@ export interface ProviderInfo {
   models: ProviderModel[];
   rateLimits: ProviderRateLimit[];
   metadataState: ProviderMetadataState;
+  /** Capability truth bound to the current executable/version when verified. */
+  capabilityContract?: ProviderCapabilityContractView;
   /** Present after the runtime has checked this exact installed CLI. */
   maintenance?: ProviderMaintenanceStatus;
   /** Truthful runtime support for host-owned top-level chat lifecycle tools. */
@@ -280,6 +302,8 @@ export interface AppSnapshot {
   activeConversationId: string | null;
   /** Present on authoritative runtime snapshots; optional for legacy fixtures. */
   sync?: RuntimeSyncCursor;
+  /** Sanitized, bounded lifecycle evidence for UI status and support reports. */
+  lifecycleDiagnostics?: RuntimeLifecycleDiagnosticSnapshot;
 }
 
 export interface DatabaseBackupStatus {
@@ -307,7 +331,7 @@ export const defaultSettings: AppSettings = {
   autoCollapseWorkLog: true,
   showChangedFileSummaries: true,
   autoScrollToFinalAnswer: true,
-  sidebarMode: "classic",
+  sidebarMode: "activity",
   projectGrouping: "separate",
   autoOpenPlan: false,
   confirmDestructiveActions: true,

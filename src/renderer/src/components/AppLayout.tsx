@@ -384,9 +384,6 @@ export function AppLayout({
         payload: { projectId: item.id, gitRepositoryLimit },
       }).catch(() => undefined);
     },
-    sidebarModeChange: (sidebarMode: AppSettings["sidebarMode"]) => {
-      void actions.updateSettings({ sidebarMode }).catch(() => undefined);
-    },
     removeProject: (item: Project) => {
       const confirmed = !settings.confirmDestructiveActions
         || window.confirm(
@@ -477,12 +474,12 @@ export function AppLayout({
             view={view}
             open={sidebarOpen}
             busy={busyAction === "project.create"}
+            updateAvailable={appUpdate.visible}
             layoutWidth={sidebarLayout.value}
             onClose={sidebarActions.close}
             onViewChange={sidebarActions.viewChange}
             onOpenHome={sidebarActions.openHome}
             onImportProject={sidebarActions.importProject}
-            onSelectProject={sidebarActions.selectProject}
             onSelectConversation={sidebarActions.selectConversation}
             splitConversationId={splitConversationId}
             detachedConversationIds={detachedConversationIds}
@@ -509,7 +506,6 @@ export function AppLayout({
             onSetProjectGitRepositoryLimit={
               sidebarActions.setProjectGitRepositoryLimit
             }
-            onSidebarModeChange={sidebarActions.sidebarModeChange}
             onRemoveProject={sidebarActions.removeProject}
           />
         </Suspense>
@@ -781,7 +777,9 @@ export function AppLayout({
           }
         }}
         onCopyRecoveryReport={async () => {
-          const result = await window.inertia.copyRuntimeDiagnosticReport();
+          const result = await window.inertia.copyRuntimeDiagnosticReport(
+            connection.snapshot?.lifecycleDiagnostics ?? null,
+          );
           if (!result.copied) throw new Error("The recovery report could not be copied.");
         }}
       />

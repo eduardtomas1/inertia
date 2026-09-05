@@ -72,7 +72,6 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
   const primaryTitle = "conversation-split fixture";
   const secondaryTitle = "conversation-split companion";
 
-  await sidebar.getByRole("button", { name: "Expand Companion" }).click();
   await sidebar.getByRole("button", {
     name: `Thread actions for ${secondaryTitle}`,
   }).click();
@@ -184,12 +183,15 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
     .getByRole("menuitem", { name: /^Draft owned by Inertia/u })
     .click();
   await expect(secondaryMessage).toHaveValue("Draft owned by Inertia");
+  await expect(secondaryMessage).toBeFocused();
   await expect(primary.getByRole("button", {
     name: "Scratch prompts, 1 saved",
   })).toBeVisible();
   await primaryMessage.fill("Draft owned by Inertia");
   await secondaryMessage.fill("Draft owned by Companion");
 
+  await expect(primaryMessage).toHaveValue("Draft owned by Inertia");
+  await expect(secondaryMessage).toHaveValue("Draft owned by Companion");
   await secondary.getByRole("button", { name: "Send message" }).click();
   await expect(split).toBeVisible();
   await expect(primary).toBeVisible();
@@ -652,7 +654,7 @@ test("keeps cross-project chats, tools, and terminals independently scoped", asy
     exact: true,
   }).click();
 
-  await sidebar.locator("button.conversation-row")
+  await sidebar.locator("button.activity-thread-select")
     .filter({ hasText: secondaryTitle })
     .click();
   primary = page.getByRole("region", {

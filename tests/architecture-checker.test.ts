@@ -113,6 +113,34 @@ describe("architecture checker", () => {
     expect(error).not.toContain("src/renderer/types.ts");
   });
 
+  it("keeps the sunset CLI harness fixture outside production source", () => {
+    const root = fixture({
+      "src/server/provider/cli-agent-harness.ts": [
+        "export interface LegacyFixture { id: string }",
+        "export const legacyFixture: LegacyFixture = { id: \"legacy\" };",
+        "",
+      ].join("\n"),
+      "src/server/runtime-consumer.ts": [
+        'import { legacyFixture } from "./provider/cli-agent-harness";',
+        "export const fixtureId = legacyFixture.id;",
+        "",
+      ].join("\n"),
+      "src/server/type-consumer.ts": [
+        'import type { LegacyFixture } from "./provider/cli-agent-harness";',
+        "export type ConsumerFixture = LegacyFixture;",
+        "",
+      ].join("\n"),
+    });
+
+    const error = rejectedCheck(root);
+    expect(error).toContain(
+      "src/server/runtime-consumer.ts:1 imports the sunset CLI harness fixture from production source",
+    );
+    expect(error).toContain(
+      "src/server/type-consumer.ts:1 imports the sunset CLI harness fixture from production source",
+    );
+  });
+
   it("finds cycles that cross aliases and runtime JavaScript suffixes", () => {
     const root = fixture({
       "src/shared/alpha.ts": [

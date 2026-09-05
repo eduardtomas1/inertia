@@ -1,0 +1,394 @@
+.sidebar .sidebar-search-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.sidebar .sidebar-search-wrap {
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+  margin: 0;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+}
+.sidebar .sidebar-search-wrap input {
+  font-size: 13px;
+}
+.sidebar .sidebar-search-row > .icon-button {
+  width: 28px;
+  height: 30px;
+  flex: 0 0 28px;
+}
+.sidebar .sidebar-search-row .multi-spawn-button {
+  margin: 0;
+  min-width: 28px;
+  min-height: 30px;
+  border: 0;
+  border-radius: 6px;
+  box-shadow: none;
+  background: transparent;
+  color: var(--text-muted);
+}
+.sidebar-project-scope {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.project-scope-trigger {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 8px;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  text-align: left;
+}
+.project-scope-trigger > span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.project-scope-trigger:hover,
+.project-scope-trigger[aria-expanded="true"] {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+.project-scope-trigger:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+.project-scope-popover {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 40;
+  padding: 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: 11px;
+  background: var(--surface-strong);
+  box-shadow: var(--shadow);
+}
+.project-scope-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 6px 9px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+}
+.project-scope-search input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  color: var(--text);
+  background: transparent;
+  font-size: 12px;
+}
+.project-scope-results {
+  max-height: min(320px, 50vh);
+  overflow-y: auto;
+}
+.project-scope-item > button[role="option"] {
+  display: flex;
+  width: 100%;
+  min-height: 39px;
+  align-items: center;
+  gap: 8px;
+  padding: 7px;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-soft);
+  text-align: left;
+}
+.project-scope-item > button[role="option"].is-highlighted,
+.project-scope-item > button[role="option"]:focus-visible {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+.project-scope-item > button[role="option"] > span {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 2px;
+}
+.project-scope-results strong {
+  font-size: 12px;
+  font-weight: 550;
+}
+.project-scope-results small {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+.project-scope-results strong,
+.project-scope-results small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.project-scope-empty {
+  margin: 14px 7px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.sidebar .activity-thread {
+  min-height: 82px;
+  border-radius: 6px;
+}
+.sidebar .activity-thread.is-active {
+  border-color: transparent;
+  box-shadow: none;
+  background: color-mix(in srgb, var(--selected-surface) 65%, transparent);
+}
+.sidebar .activity-thread-select {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 5px;
+  padding: 9px 9px;
+}
+.sidebar .activity-thread-projectline {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  min-height: 16px;
+  color: var(--text-muted);
+}
+.sidebar .activity-project-icon {
+  flex: 0 0 15px;
+}
+.sidebar .activity-thread-project-meta {
+  display: block;
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+}
+.sidebar .activity-thread-title {
+  font-size: 13px;
+  font-weight: 520;
+  letter-spacing: -0.015em;
+}
+.sidebar .activity-thread.is-unread .activity-thread-title {
+  font-weight: 650;
+}
+.sidebar .work-thread-meta {
+  overflow: visible;
+  gap: 8px;
+  font-size: 10.5px;
+  min-height: 16px;
+}
+.sidebar .activity-thread-branch-meta {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+.sidebar .activity-thread-provider {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 17px;
+  height: 16px;
+  flex: 0 0 17px;
+  opacity: 0.72;
+}
+.sidebar .activity-thread-trailing {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  flex: 0 0 auto;
+  font-size: 10px;
+}
+.sidebar .activity-thread-trailing time {
+  font-size: 10px;
+}
+.sidebar .activity-thread-status-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: none;
+  font-size: 10px;
+  font-weight: 550;
+}
+.sidebar .activity-thread-menu-button {
+  top: 3px;
+  bottom: auto;
+  margin: 0;
+  height: 27px;
+}
+.sidebar .activity-thread .conversation-menu {
+  top: 31px;
+}
+.sidebar .work-thread-section > h2 {
+  font-size: 10px;
+  font-weight: 500;
+  opacity: 0.8;
+}
+.sidebar.is-compact .activity-thread {
+  min-height: 68px;
+}
+.sidebar.is-compact .activity-thread-select {
+  gap: 3px;
+  padding-block: 5px;
+}
+.sidebar.is-narrow .activity-thread-branch-meta {
+  display: flex;
+}
+.sidebar.is-wide .activity-thread-title {
+  font-size: 13px;
+}
+.sidebar.is-wide .work-thread-meta {
+  font-size: 10.5px;
+}
+.sidebar .sidebar-utility-footer {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding-top: 8px;
+  border-top-color: color-mix(in srgb, var(--border) 50%, transparent);
+}
+.sidebar-utility-footer .sidebar-destination {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0;
+  place-items: center;
+  border-radius: 8px;
+}
+.sidebar-utility-footer .sidebar-destination > span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+.sidebar-utility-footer .sidebar-destination:has(.lucide-settings) {
+  order: -1;
+}
+.sidebar .sidebar-update-button {
+  position: relative;
+  margin-left: auto;
+  border-radius: 50%;
+  width: 32px;
+  height: 32px;
+}
+.sidebar-update-button.has-update {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+.sidebar-update-button.has-update::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+@media (forced-colors: active) {
+  .sidebar .activity-thread.is-active {
+    border-color: Highlight;
+    background: Highlight;
+    color: HighlightText;
+  }
+  .sidebar .activity-thread.is-active .activity-thread-projectline {
+    color: HighlightText;
+  }
+}
+
+.sidebar .activity-thread-trailing time {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.sidebar .activity-idle-icon {
+  display: inline-flex;
+  opacity: 0.5;
+}
+
+.project-scope-item {
+  display: flex;
+  align-items: center;
+}
+.project-scope-item > button[role="option"] {
+  flex: 1;
+  min-width: 0;
+}
+.project-scope-item > .icon-button {
+  flex: 0 0 26px;
+}
+.sidebar-scope-actions {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 45;
+}
+.sidebar-scope-actions .project-menu {
+  position: static;
+  width: 100%;
+}
+
+/* Animate transient surfaces, never recycled virtual rows. */
+.project-scope-popover,
+.sidebar-scope-actions .project-menu {
+  transform-origin: top center;
+  animation: workspace-popover-in 150ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.project-scope-trigger,
+.project-scope-item > button {
+  transition:
+    background-color 120ms var(--motion-ease),
+    color 120ms var(--motion-ease);
+}
+.project-scope-trigger > .lucide-chevron-down {
+  transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.project-scope-trigger[aria-expanded="true"] > .lucide-chevron-down {
+  transform: rotate(180deg);
+}
+@keyframes workspace-popover-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .project-scope-popover,
+  .sidebar-scope-actions .project-menu {
+    animation: none;
+  }
+}
+
+.sidebar-project-navigation {
+  position: relative;
+  margin-top: 4px;
+  margin-bottom: 12px;
+}
+
+.sidebar .sidebar-search-row .multi-spawn-button:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}

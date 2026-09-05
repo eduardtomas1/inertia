@@ -10,6 +10,8 @@ const threadCpuUsage = (
     threadCpuUsage?(previousValue?: NodeJS.CpuUsage): NodeJS.CpuUsage;
   }
 ).threadCpuUsage?.bind(process);
+const enforceThreadCpuBudget =
+  process.env.INERTIA_ENFORCE_BROWSER_EVIDENCE_CPU_BUDGET === "1";
 
 function deferred<Value>() {
   let resolve!: (value: Value) => void;
@@ -113,7 +115,7 @@ describe("Browser evidence capture", () => {
     ]);
   });
 
-  it("sanitizes and bounds the complete hostile console batch within its thread CPU budget", async () => {
+  it("sanitizes and bounds the complete hostile console batch", async () => {
     const page: BrowserEvidencePage = {
       tabId: "11111111-1111-4111-8111-111111111111",
       pageNumber: 1,
@@ -137,7 +139,12 @@ describe("Browser evidence capture", () => {
       "a/".repeat(2_340),
     ];
 
-    const cpuStartedAt = threadCpuUsage?.();
+    if (enforceThreadCpuBudget && !threadCpuUsage) {
+      throw new Error(
+        "The browser-evidence CPU budget requires process.threadCpuUsage.",
+      );
+    }
+    const cpuStartedAt = enforceThreadCpuBudget ? threadCpuUsage!() : null;
     for (let index = 0; index < 160; index += 1) {
       capture.recordConsoleError(page, hostile[index % hostile.length]);
     }
@@ -146,8 +153,9 @@ describe("Browser evidence capture", () => {
     const cpu = cpuStartedAt && threadCpuUsage
       ? threadCpuUsage(cpuStartedAt)
       : null;
-    // Current Node 22 CI enforces per-thread work. Node 22.13 predates this
-    // API, but still runs every exact sanitization and ledger assertion below.
+    // Keep this production-speed assertion in a fresh, uninstrumented worker.
+    // Concurrent V8 coverage collection adds unrelated per-thread CPU work;
+    // test:coverage still runs every exact assertion below.
     if (cpu) expect(cpu.user + cpu.system).toBeLessThan(1_500_000);
     expect(publish).toHaveBeenCalledTimes(160);
     const snapshot = capture.snapshot();

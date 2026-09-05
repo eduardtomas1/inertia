@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { AppUpdateInstallCoordinator } from "../../src/main/app-update-install";
+import type { AppUpdaterInstallResult } from
+  "../../src/main/electron-app-updater";
 import {
   cleanupPrivilegedOwners,
   finishNormalShutdownAfterCleanup,
@@ -45,10 +47,12 @@ function service(events: string[]) {
       current = { ...current, state: "failed", installBlocker: "shutdown" };
       return current;
     }),
-    quitAndInstall: vi.fn(async (onHandoff: () => void) => {
+    quitAndInstall: vi.fn(async (
+      onHandoff: () => void,
+    ): Promise<AppUpdaterInstallResult> => {
       events.push("install");
       onHandoff();
-      return true;
+      return "handoff-confirmed" as const;
     }),
   };
 }
@@ -108,6 +112,103 @@ describe("application update install coordination", () => {
     expect(events).toEqual(["begin", "cleanup", "install"]);
     expect(update.quitAndInstall).toHaveBeenCalledTimes(1);
     expect(coordinator.allowBeforeQuit()).toBe(true);
+  });
+
+  it("validates the exact update candidate before privileged cleanup", async () => {
+    const events: string[] = [];
+    const update = {
+      ...service(events),
+      prepareInstall: vi.fn(async () => {
+        events.push("candidate-validated");
+        return true;
+      }),
+      abortInstall: vi.fn(async () => {
+        events.push("candidate-aborted");
+      }),
+    };
+    const coordinator = new AppUpdateInstallCoordinator({
+      service: update,
+      runtime: () => ({
+        prepareForUpdate: vi.fn(async () => ({ ready: true as const })),
+        releaseUpdatePreparation: vi.fn(async () => true),
+      }),
+      privateConnect: () => ({
+        prepareForUpdate: vi.fn(async () => true),
+        releaseUpdatePreparation: vi.fn(async () => undefined),
+      }),
+      handoffContext: () => ({
+        handoffDirectory: "/data",
+        profileDirectory: "/profile",
+        dataDirectory: "/data",
+        oldRuntimeGenerationId:
+          "22222222-2222-4222-8222-222222222222:7",
+        systemBootId: "test:boot",
+      }),
+      cleanup: vi.fn(async () => { events.push("cleanup"); return true; }),
+      finishNormalShutdown: vi.fn(),
+      reportError: vi.fn(),
+    });
+
+    await expect(coordinator.install()).resolves.toMatchObject({
+      state: "installing",
+    });
+    expect(events).toEqual([
+      "begin",
+      "candidate-validated",
+      "cleanup",
+      "install",
+    ]);
+    expect(update.abortInstall).not.toHaveBeenCalled();
+  });
+
+  it("releases admission holds without cleanup when candidate validation fails", async () => {
+    const events: string[] = [];
+    const releaseRuntime = vi.fn(async () => true);
+    const releasePrivateConnect = vi.fn(async () => undefined);
+    const update = {
+      ...service(events),
+      prepareInstall: vi.fn(async () => {
+        events.push("candidate-rejected");
+        return false;
+      }),
+      abortInstall: vi.fn(async () => {
+        events.push("candidate-aborted");
+      }),
+    };
+    const cleanup = vi.fn(async () => true);
+    const coordinator = new AppUpdateInstallCoordinator({
+      service: update,
+      runtime: () => ({
+        prepareForUpdate: vi.fn(async () => ({ ready: true as const })),
+        releaseUpdatePreparation: releaseRuntime,
+      }),
+      privateConnect: () => ({
+        prepareForUpdate: vi.fn(async () => true),
+        releaseUpdatePreparation: releasePrivateConnect,
+      }),
+      handoffContext: () => ({
+        handoffDirectory: "/data",
+        profileDirectory: "/profile",
+        dataDirectory: "/data",
+        oldRuntimeGenerationId:
+          "22222222-2222-4222-8222-222222222222:7",
+        systemBootId: "test:boot",
+      }),
+      cleanup,
+      finishNormalShutdown: vi.fn(),
+      reportError: vi.fn(),
+    });
+
+    await expect(coordinator.install()).resolves.toMatchObject({ state: "failed" });
+    expect(events).toEqual([
+      "begin",
+      "candidate-rejected",
+      "candidate-aborted",
+      "failed",
+    ]);
+    expect(cleanup).not.toHaveBeenCalled();
+    expect(releaseRuntime).toHaveBeenCalled();
+    expect(releasePrivateConnect).toHaveBeenCalled();
   });
 
   it("rolls back the runtime gate when Private Connect is active", async () => {
@@ -267,12 +368,12 @@ describe("application update install coordination", () => {
     expect(finishNormalShutdown).not.toHaveBeenCalled();
   });
 
-  it("fails closed when the updater never confirms its native handoff", async () => {
+  it("exits only after the updater proves native installation was not invoked", async () => {
     const events: string[] = [];
     const update = service(events);
     update.quitAndInstall.mockImplementationOnce(async () => {
       events.push("install");
-      return false;
+      return "not-invoked" as const;
     });
     const finishNormalShutdown = vi.fn(() => events.push("normal-exit"));
     const coordinator = new AppUpdateInstallCoordinator({
@@ -290,6 +391,158 @@ describe("application update install coordination", () => {
     await expect(coordinator.install()).resolves.toMatchObject({ state: "failed" });
     expect(events).toEqual(["begin", "cleanup", "install", "failed", "normal-exit"]);
     expect(coordinator.allowBeforeQuit()).toBe(false);
+  });
+
+  it("keeps the old generation resident when native installer outcome is uncertain", async () => {
+    const events: string[] = [];
+    const update = service(events);
+    update.quitAndInstall.mockImplementationOnce(async () => {
+      events.push("install");
+      return "native-outcome-uncertain";
+    });
+    const finishNormalShutdown = vi.fn();
+    const onUnconfirmedShutdown = vi.fn(() => events.push("outcome-unconfirmed"));
+    const coordinator = new AppUpdateInstallCoordinator({
+      service: update,
+      runtime: () => ({
+        prepareForUpdate: vi.fn(async () => ({ ready: true as const })),
+        releaseUpdatePreparation: vi.fn(async () => true),
+      }),
+      privateConnect: () => null,
+      cleanup: vi.fn(async () => { events.push("cleanup"); return true; }),
+      finishNormalShutdown,
+      onUnconfirmedShutdown,
+      reportError: vi.fn(),
+    });
+
+    await expect(coordinator.install()).resolves.toMatchObject({ state: "failed" });
+    expect(events).toEqual([
+      "begin",
+      "cleanup",
+      "install",
+      "failed",
+      "outcome-unconfirmed",
+    ]);
+    expect(finishNormalShutdown).not.toHaveBeenCalled();
+    expect(coordinator.allowBeforeQuit()).toBe(false);
+    expect(finishNormalShutdown).not.toHaveBeenCalled();
+    expect(onUnconfirmedShutdown).toHaveBeenCalledTimes(2);
+  });
+
+  it("treats a thrown native install request as ambiguous after cleanup", async () => {
+    const events: string[] = [];
+    const update = service(events);
+    update.quitAndInstall.mockImplementationOnce(async (onHandoff) => {
+      events.push("install");
+      onHandoff();
+      throw new Error("native invocation threw");
+    });
+    const finishNormalShutdown = vi.fn();
+    const onUnconfirmedShutdown = vi.fn();
+    const reportError = vi.fn();
+    const coordinator = new AppUpdateInstallCoordinator({
+      service: update,
+      runtime: () => ({
+        prepareForUpdate: vi.fn(async () => ({ ready: true as const })),
+        releaseUpdatePreparation: vi.fn(async () => true),
+      }),
+      privateConnect: () => null,
+      cleanup: vi.fn(async () => true),
+      finishNormalShutdown,
+      onUnconfirmedShutdown,
+      reportError,
+    });
+
+    await expect(coordinator.install()).resolves.toMatchObject({ state: "failed" });
+    expect(reportError).toHaveBeenCalledWith(expect.objectContaining({
+      message: "native invocation threw",
+    }));
+    expect(onUnconfirmedShutdown).toHaveBeenCalledOnce();
+    expect(finishNormalShutdown).not.toHaveBeenCalled();
+    expect(coordinator.allowBeforeQuit()).toBe(false);
+    expect(finishNormalShutdown).not.toHaveBeenCalled();
+  });
+
+  it("does not exit when exact pre-invocation rollback cannot be confirmed", async () => {
+    const events: string[] = [];
+    const update = {
+      ...service(events),
+      abortInstall: vi.fn(async () => {
+        throw new Error("rollback authority changed");
+      }),
+    };
+    update.quitAndInstall.mockImplementationOnce(async () => {
+      events.push("install");
+      return "not-invoked";
+    });
+    const finishNormalShutdown = vi.fn();
+    const onUnconfirmedShutdown = vi.fn();
+    const reportError = vi.fn();
+    const coordinator = new AppUpdateInstallCoordinator({
+      service: update,
+      runtime: () => ({
+        prepareForUpdate: vi.fn(async () => ({ ready: true as const })),
+        releaseUpdatePreparation: vi.fn(async () => true),
+      }),
+      privateConnect: () => null,
+      cleanup: vi.fn(async () => true),
+      finishNormalShutdown,
+      onUnconfirmedShutdown,
+      reportError,
+    });
+
+    await expect(coordinator.install()).resolves.toMatchObject({ state: "failed" });
+    expect(reportError).toHaveBeenCalledWith(expect.objectContaining({
+      message: "rollback authority changed",
+    }));
+    expect(onUnconfirmedShutdown).toHaveBeenCalledOnce();
+    expect(finishNormalShutdown).not.toHaveBeenCalled();
+  });
+
+  it("blocks a normal quit racing an unresolved native installer invocation", async () => {
+    const events: string[] = [];
+    const update = {
+      ...service(events),
+      abortInstall: vi.fn(async () => {
+        throw new Error("native installer outcome remains unresolved");
+      }),
+    };
+    let settleInstall!: (result: AppUpdaterInstallResult) => void;
+    update.quitAndInstall.mockImplementationOnce(() => {
+      events.push("install");
+      return new Promise<AppUpdaterInstallResult>((resolve) => {
+        settleInstall = resolve;
+      });
+    });
+    const finishNormalShutdown = vi.fn();
+    const onUnconfirmedShutdown = vi.fn();
+    const reportError = vi.fn();
+    const coordinator = new AppUpdateInstallCoordinator({
+      service: update,
+      runtime: () => ({
+        prepareForUpdate: vi.fn(async () => ({ ready: true as const })),
+        releaseUpdatePreparation: vi.fn(async () => true),
+      }),
+      privateConnect: () => null,
+      cleanup: vi.fn(async () => true),
+      finishNormalShutdown,
+      onUnconfirmedShutdown,
+      reportError,
+    });
+
+    const installing = coordinator.install();
+    await vi.waitFor(() => expect(update.quitAndInstall).toHaveBeenCalledOnce());
+    expect(coordinator.allowBeforeQuit()).toBe(false);
+    await vi.waitFor(() => expect(reportError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: "native installer outcome remains unresolved",
+      }),
+    ));
+    settleInstall("native-outcome-uncertain");
+    await installing;
+
+    expect(onUnconfirmedShutdown).toHaveBeenCalledOnce();
+    expect(finishNormalShutdown).not.toHaveBeenCalled();
   });
 });
 

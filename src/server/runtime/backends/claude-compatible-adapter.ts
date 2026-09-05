@@ -22,6 +22,7 @@ import type {
   ProviderRunInput,
 } from "../../provider/contracts";
 import { safeProviderBackendLabel } from "../../provider/adapters";
+import { validateBackendEndpointNetworkPolicy } from "./backend-compatibility-probe/http";
 
 const CLAUDE_TIER_ENVIRONMENT_VARIABLES = {
   fable: "ANTHROPIC_DEFAULT_FABLE_MODEL",
@@ -124,6 +125,11 @@ export interface ClaudeBackendLaunchResolverOptions {
     secretReference: string,
     signal?: AbortSignal,
   ) => string | null | Promise<string | null>;
+  validateEndpointNetworkPolicy?: (
+    endpointUrl: string,
+    allowInsecureLocalhost: boolean,
+    signal: AbortSignal,
+  ) => Promise<unknown>;
 }
 
 export interface ClaudeBackendProfileRegistrations {
@@ -384,6 +390,8 @@ export function createClaudeBackendLaunchResolver(
   const staticProfiles = typeof options.profiles === "function"
     ? null
     : normalizedProfileMap(options.profiles ?? []);
+  const validateEndpointNetworkPolicy = options.validateEndpointNetworkPolicy
+    ?? validateBackendEndpointNetworkPolicy;
   return (
     input: ProviderRunInput,
     baseEnvironment: NodeJS.ProcessEnv,
@@ -417,38 +425,59 @@ export function createClaudeBackendLaunchResolver(
       return {
         environment: launch.environment,
         modelArgument: launch.modelArgument,
+        ...(profile.source === "custom"
+          ? { modelArgumentIdentity: input.modelSelection.modelId }
+          : {}),
         releaseAfterStart: launch.releaseSecrets,
       };
     };
 
-    if (profile.secretReference === null) return buildLaunchOptions(null);
+    const resolveAfterAdmission = (): ProviderBackendLaunchOptions
+      | Promise<ProviderBackendLaunchOptions> => {
+      if (profile.secretReference === null) return buildLaunchOptions(null);
 
-    let resolvedSecret: string | null | Promise<string | null>;
-    try {
-      resolvedSecret = options.resolveSecret?.(
-        profile.secretReference,
-        context.signal,
-      ) ?? null;
-    } catch {
-      const backendName = safeProviderBackendLabel(profile.displayName);
-      throw new ClaudeBackendLaunchConfigurationError(
-        "credential-unavailable",
-        `The ${backendName} credential could not be read from secure storage.`,
-      );
-    }
-    if (isPromiseLike(resolvedSecret)) {
-      return Promise.resolve(resolvedSecret).then(
-        buildLaunchOptions,
-        () => {
-          const backendName = safeProviderBackendLabel(profile.displayName);
-          throw new ClaudeBackendLaunchConfigurationError(
-            "credential-unavailable",
-            `The ${backendName} credential could not be read from secure storage.`,
-          );
-        },
-      );
-    }
-    return buildLaunchOptions(resolvedSecret);
+      let resolvedSecret: string | null | Promise<string | null>;
+      try {
+        resolvedSecret = options.resolveSecret?.(
+          profile.secretReference,
+          context.signal,
+        ) ?? null;
+      } catch {
+        const backendName = safeProviderBackendLabel(profile.displayName);
+        throw new ClaudeBackendLaunchConfigurationError(
+          "credential-unavailable",
+          `The ${backendName} credential could not be read from secure storage.`,
+        );
+      }
+      if (isPromiseLike(resolvedSecret)) {
+        return Promise.resolve(resolvedSecret).then(
+          buildLaunchOptions,
+          () => {
+            const backendName = safeProviderBackendLabel(profile.displayName);
+            throw new ClaudeBackendLaunchConfigurationError(
+              "credential-unavailable",
+              `The ${backendName} credential could not be read from secure storage.`,
+            );
+          },
+        );
+      }
+      return buildLaunchOptions(resolvedSecret);
+    };
+
+    if (profile.source !== "custom") return resolveAfterAdmission();
+    return Promise.resolve(validateEndpointNetworkPolicy(
+      profile.baseUrl!,
+      profile.allowInsecureLocalhost,
+      context.signal,
+    )).then(
+      resolveAfterAdmission,
+      () => {
+        throw new ClaudeBackendLaunchConfigurationError(
+          "invalid-profile",
+          "The Claude backend endpoint failed launch-time network policy revalidation.",
+        );
+      },
+    );
   };
 }
 

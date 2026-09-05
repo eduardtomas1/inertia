@@ -1246,13 +1246,18 @@ describe("RuntimeStore conversation lifecycle", () => {
     reopened.close();
   });
 
-  it("clears a provider session when a conversation switches providers", async () => {
+  it("clears a provider session explicitly or when a conversation switches providers", async () => {
     const { store } = await createStore();
     const project = store.snapshot().projects[0];
     const conversation = store.createConversation(project.id, "Provider switch", { providerId: "codex" });
 
     store.updateConversation(conversation.id, { providerSessionId: "codex-session" });
     expect(store.updateConversation(conversation.id, { model: "gpt-test" }).providerSessionId).toBe("codex-session");
+    expect(store.updateConversation(conversation.id, { providerSessionId: null })).toMatchObject({
+      providerSessionId: null,
+      continuationIdentity: null,
+    });
+    store.updateConversation(conversation.id, { providerSessionId: "replacement-session" });
     expect(store.updateConversation(conversation.id, { providerId: "claude" }).providerSessionId).toBeNull();
     store.close();
   });

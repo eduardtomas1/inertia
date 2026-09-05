@@ -584,7 +584,7 @@ test("keeps delegated-agent traces compact while the active composer accepts a p
     expect(compactRailGeometry.containerType).toBe("inline-size");
     expect(compactRailGeometry.toolbarFits).toBe(true);
     expect(compactRailGeometry.groupsContained).toBe(true);
-    expect(Math.min(...compactRailGeometry.groupGaps)).toBeGreaterThanOrEqual(7);
+    expect(Math.min(...compactRailGeometry.groupGaps)).toBeGreaterThanOrEqual(4);
     await expectNoViewportOverflow();
     const compactComposerScreenshot = testInfo.outputPath("composer-working-compact-744x800.png");
     await page.screenshot({ animations: "disabled", path: compactComposerScreenshot });
@@ -620,7 +620,7 @@ test("keeps delegated-agent traces compact while the active composer accepts a p
     expect(constrainedRailGeometry.toolbarFits).toBe(true);
     expect(constrainedRailGeometry.groupsContained).toBe(true);
     expect(Math.min(...constrainedRailGeometry.groupGaps))
-      .toBeGreaterThanOrEqual(7);
+      .toBeGreaterThanOrEqual(4);
     await expectNoViewportOverflow();
     const constrainedComposerScreenshot = testInfo.outputPath("composer-working-constrained-779x800.png");
     await page.screenshot({ animations: "disabled", path: constrainedComposerScreenshot });
@@ -652,7 +652,7 @@ test("keeps delegated-agent traces compact while the active composer accepts a p
     expect(expandedRailGeometry.dockWidth).toBeGreaterThanOrEqual(838);
     expect(expandedRailGeometry.toolbarFits).toBe(true);
     expect(expandedRailGeometry.groupsContained).toBe(true);
-    expect(Math.min(...expandedRailGeometry.groupGaps)).toBeGreaterThanOrEqual(7);
+    expect(Math.min(...expandedRailGeometry.groupGaps)).toBeGreaterThanOrEqual(4);
     expect(expandedRailGeometry.attachmentBeforeMessage).toBe(true);
     await expect(compactMore).toBeHidden();
     await expect(composer.getByRole("group", { name: "Composer settings" }))

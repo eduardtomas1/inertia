@@ -1,3 +1,5 @@
+// @inertia-test-suite portable
+// @inertia-harness kimi-acp
 import { spawn } from "node:child_process";
 import { chmodSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -25,6 +27,8 @@ import {
 import { BoundedKimiJsonLineTransform } from "../../src/server/provider/kimi-acp-support";
 import type { ProviderHostToolBridge } from "../../src/server/provider/contracts";
 import { ProviderRunEventBudget } from "../../src/server/provider/io";
+import { ProviderInstallationLeaseCoordinator } from
+  "../../src/server/provider/installation-lease";
 import { AgentHarnessRegistry, ProviderManager } from "../../src/server/providers";
 import {
   loopbackPortIsOpen,
@@ -398,8 +402,21 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   }
 });
 `);
-    const manager = new ProviderManager(
-      { commands: { kimi: command } },
+    const manager = ProviderManager.createProduction(
+      {
+        commands: { kimi: command },
+        installationLeases: new ProviderInstallationLeaseCoordinator(),
+        detectProvider: async () => ({
+          provider: { id: "kimi", name: "Kimi Code", command: "kimi" },
+          available: true,
+          version: "1.0.0",
+          executable: command,
+          installState: "installed",
+          authState: "authenticated",
+          canRun: true,
+          cleanupConfirmed: true,
+        }),
+      },
       new AgentHarnessRegistry([createKimiAcpHarness()]),
     );
     const questions: string[] = [];
@@ -414,6 +431,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     }>> = [];
     const activities: Array<{ activityId?: string; phase: string; detail?: string }> = [];
 
+    await manager.detect("kimi");
     const result = await manager.run(nativeProviderRunInput({
       providerId: "kimi",
       conversationId: "kimi-rich",
@@ -433,6 +451,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
           event.conversationId,
           event.request.requestId,
           { selection: ["q0_opt_0"] },
+          { runId: event.runId, turnId: event.turnId },
         )).toBe(true);
       },
       onPlan: ({ steps }) => plans.push(...steps.map(({ step }) => step)),
@@ -531,7 +550,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   }
 });
 `);
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { kimi: resumeCommand } },
       new AgentHarnessRegistry([createKimiAcpHarness()]),
     );
@@ -574,7 +593,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   }
 });
 `);
-    const loadManager = new ProviderManager(
+    const loadManager = ProviderManager.createForTests(
       { commands: { kimi: loadCommand } },
       new AgentHarnessRegistry([createKimiAcpHarness()]),
     );
@@ -599,7 +618,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       "acp",
       `process.stdout.write("not-json\\n"); setInterval(() => {}, 1000);`,
     );
-    const invalidManager = new ProviderManager(
+    const invalidManager = ProviderManager.createForTests(
       { commands: { kimi: invalidCommand } },
       new AgentHarnessRegistry([createKimiAcpHarness()]),
     );
@@ -700,7 +719,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   }
 });
 `);
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { kimi: command } },
       new AgentHarnessRegistry([createKimiAcpHarness()]),
     );
@@ -721,6 +740,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
           event.conversationId,
           event.request.requestId,
           "approve",
+          { runId: event.runId, turnId: event.turnId },
         )).toBe(true);
       },
     })).resolves.toMatchObject({
@@ -770,7 +790,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   }
 });
 `);
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { kimi: command } },
       new AgentHarnessRegistry([createKimiAcpHarness()]),
     );
@@ -879,7 +899,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   }
 });
 `);
-      const manager = new ProviderManager(
+      const manager = ProviderManager.createForTests(
         { commands: { kimi: command } },
         new AgentHarnessRegistry([createKimiAcpHarness()]),
       );
@@ -921,7 +941,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   });
 });
 `);
-    const authManager = new ProviderManager(
+    const authManager = ProviderManager.createForTests(
       { commands: { kimi: authCommand } },
       new AgentHarnessRegistry([createKimiAcpHarness()]),
     );
@@ -968,7 +988,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   });
 });
 `);
-    const stopManager = new ProviderManager(
+    const stopManager = ProviderManager.createForTests(
       { commands: { kimi: stopCommand } },
       new AgentHarnessRegistry([createKimiAcpHarness()]),
     );
@@ -1014,7 +1034,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
 });
 setInterval(() => {}, 1000);
 `);
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { kimi: command } },
       new AgentHarnessRegistry([createKimiAcpHarness()]),
     );
@@ -1048,7 +1068,7 @@ setInterval(() => {}, 1000);
       roots.push(root);
       const command = portableNodeExecutable(root, "kimi");
       writeNodeSubcommand(root, "acp", source);
-      const manager = new ProviderManager(
+      const manager = ProviderManager.createForTests(
         { commands: { kimi: command } },
         new AgentHarnessRegistry([harness]),
       );
@@ -1213,7 +1233,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: { sessionId: "config-timeout", modes: { currentModeId: "build", availableModes: [{ id: "build", name: "Build" }] }, configOptions: [{ id: "model", name: "Model", category: "model", type: "select", currentValue: "model-a", options: [{ value: "model-a", name: "A" }, { value: "model-b", name: "B" }] }] } });
 });
 `);
-    const configManager = new ProviderManager(
+    const configManager = ProviderManager.createForTests(
       { commands: { kimi: configCommand } },
       new AgentHarnessRegistry([
         createKimiAcpHarness({ controlRpcTimeoutMs: 5_000 }),
@@ -1464,7 +1484,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   }
 });
 `);
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { kimi: command }, cancelGraceMs: 500 },
       new AgentHarnessRegistry([createKimiAcpHarness()]),
     );
@@ -1582,7 +1602,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
 });
 setInterval(() => {}, 1000);
 `);
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { kimi: command }, cancelGraceMs: 500 },
       new AgentHarnessRegistry([createKimiAcpHarness()]),
     );

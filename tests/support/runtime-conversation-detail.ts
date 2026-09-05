@@ -29,7 +29,10 @@ export async function loadConversationDetailResult(
     && candidate.requestId === requestId
     && candidate.result.kind === "conversation.detail";
   const event = deadlineAt === undefined
-    ? await events.next(isConversationDetail)
+    ? await events.next(
+        isConversationDetail,
+        `conversation detail ${conversationId} for request ${requestId}`,
+      )
     : await events.nextForRequest(requestId, isConversationDetail, deadlineAt);
   if (event.result.kind !== "conversation.detail") {
     throw new Error(`Expected a conversation detail result for ${conversationId}.`);

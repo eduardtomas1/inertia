@@ -88,6 +88,7 @@ test("keeps provider commands in a full-width floating command surface", async (
   const composer = page.locator(".composer");
   const input = page.getByRole("textbox", { name: "Message" });
 
+  await page.mouse.move(1, 1);
   await input.fill("/");
   await expect(composer.getByRole("button", { name: "Send message" }))
     .toBeEnabled();
@@ -111,6 +112,10 @@ test("keeps provider commands in a full-width floating command surface", async (
   expect(await commandMenu.evaluate((element) =>
     getComputedStyle(element).borderRadius)).toBe("20px");
 
+  const goalCommand = commandList.getByRole("option", { name: /\/goal/u });
+  await expect(goalCommand).toBeEnabled();
+  await input.press("Home");
+  await expect(goalCommand).toHaveAttribute("aria-selected", "true");
   await input.press("ArrowDown");
   await expect(commandList.getByRole("option", { name: /\/plan/u }))
     .toHaveAttribute("aria-selected", "true");

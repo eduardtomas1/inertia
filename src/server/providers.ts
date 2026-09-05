@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import type { AgentApprovalDecision } from "./provider/interactions";
 import { officiallyAllowsModelSwitchWithinSession } from "../shared/continuation-policy";
 import {
@@ -5,12 +7,10 @@ import {
   cursorVersionHasVerifiedAcpTerminalResume,
 } from "../shared/provider-terminal-resume";
 import {
-  backendProbeMatchesProfile,
-  backendCompatibilityProbeResultSchema,
   type BackendCompatibilityProbeResult,
 } from "../shared/backend-probe";
 import {
-  continuationIdentityForSelection,
+  versionedContinuationIdentityForSelection,
   providerIdForHarness,
   modelSelectionSchema,
   modelBackendProfileSchema,
@@ -33,9 +33,12 @@ import {
   createDefaultAgentHarnessRegistry,
 } from "./provider/agent-harness-registry";
 import type {
+  ProviderCapabilityId,
+  ProviderCapabilityManifest,
+} from "./provider/capability-manifest";
+import type {
   AgentHarnessCapabilities,
   AgentHarnessId,
-  AgentHarnessRun,
 } from "./provider/agent-harness";
 import {
   providerAuthLaunchEnvironment,
@@ -48,8 +51,8 @@ import {
   type ProviderAuthLaunch,
   type ProviderDetection,
   type ProviderDetectionOptions,
-  type ProviderBackendLaunchOptions,
   type ProviderId,
+  type ProviderInstallationUseTransfer,
   type ProviderGoalMutation,
   type ProviderGoalSnapshot,
   type ProviderCompactionResult,
@@ -61,62 +64,51 @@ import {
 } from "./provider/contracts";
 import { detectProvider, detectProviders } from "./provider/discovery";
 import {
-  createProviderEmitter,
-  providerCallbacksFromHarness,
-} from "./provider/emitter";
-import {
   ProviderMetadataCache,
   type ProviderMetadata,
   type ProviderMetadataRequestOptions,
 } from "./provider/metadata";
 import { readClaudeAgentSdkSkills } from "./provider/claude-agent-sdk-harness";
+import {
+  canonicalProviderExecutable,
+  ProviderInstallationAdmissionError,
+  ProviderInstallationLeaseCoordinator,
+  type ProviderInstallationIdentity,
+  type ProviderInstallationVerificationAuthority,
+} from "./provider/installation-lease";
+import {
+  ProviderManagerInstallationAuthority,
+} from "./provider/provider-manager-installation";
+import { ProviderCapabilityAuthority } from
+  "./provider/provider-capability-authority";
+import {
+  admittedCustomBackendCapabilities,
+  admittedCustomBackendProbeEvidence,
+  recordBackendProbeEvidence,
+} from
+  "./provider/custom-backend-probe-admission";
 import { providerProcessInvocation, providerPtyArguments } from "./provider/process";
 import { isProcessTreeTerminationUnconfirmed } from "./process-lifecycle";
+import {
+  ProviderRunCoordinator,
+  type OwnedProviderStopResult,
+} from "./provider/run-coordinator";
 import {
   providerTerminalResumeLaunch,
   type ProviderTerminalResumeLaunch,
 } from "./provider/terminal-resume";
-import { PROVIDER_COMPACTION_OPERATION_TIMEOUT_MS } from "../shared/runtime-command-timeouts";
 
 export { PROVIDERS, PROVIDER_INFO, PROVIDER_IDS, ProviderRuntimeError, detectProvider, detectProviders };
 export { AgentHarnessRegistry, createDefaultAgentHarnessRegistry };
+export type { OwnedProviderStopResult } from "./provider/run-coordinator";
 export type * from "./provider/agent-harness";
 export type * from "./provider/contracts";
-
-interface ActiveRun {
-  result: Promise<ProviderRunResult>;
-  lifecycleSettlement: Promise<void>;
-  resolveLifecycleSettlement: () => void;
-  harnessRun: AgentHarnessRun | null;
-  harnessStartInvoked: boolean;
-  launchAbort: AbortController;
-  markPendingCancellation: () => void;
-  runId: string;
-  turnId: string | null;
-  processCleanupConfirmed: boolean;
-  cancelRequested: boolean;
-  settled: boolean;
-  detach: () => void;
-  quarantine: () => void;
-  hardKillTimer?: NodeJS.Timeout;
-}
-
 const DEFAULT_CANCEL_GRACE_MS = 2_000;
-const MAX_OWNED_STOP_GRACE_MS = 30_000;
-const FORCE_DETACH_GRACE_MS = 250;
-
-function isPromiseLike<T>(value: T | Promise<T>): value is Promise<T> {
-  return typeof value === "object"
-    && value !== null
-    && "then" in value
-    && typeof (value as { then?: unknown }).then === "function";
-}
-
-export type OwnedProviderStopResult =
-  | "missing"
-  | "identity-mismatch"
-  | "settled"
-  | "force-detached";
+const PRODUCTION_MANAGER_CONSTRUCTION = Symbol("production-provider-manager");
+const TEST_MANAGER_CONSTRUCTION = Symbol("test-provider-manager");
+type ProviderManagerConstructionAuthority =
+  | typeof PRODUCTION_MANAGER_CONSTRUCTION
+  | typeof TEST_MANAGER_CONSTRUCTION;
 
 export interface ResolvedModelRoute {
   providerId: ProviderId;
@@ -130,41 +122,205 @@ export interface CodexControlContext {
   executable: string;
   environment: NodeJS.ProcessEnv;
   cwd: string;
+  installationUse: ProviderInstallationUseTransfer;
 }
 
+export interface ProviderInstallationReadContext {
+  /** Exact process-local authority issued only after a maintenance command. */
+  installationVerificationAuthority?: ProviderInstallationVerificationAuthority;
+}
+
+export type ProviderManagerDetectionOptions = Omit<
+  ProviderDetectionOptions,
+  "command"
+> & ProviderInstallationReadContext;
+
+export type ProviderManagerMetadataRequestOptions =
+  ProviderMetadataRequestOptions & ProviderInstallationReadContext;
+
+type ProviderManagerConstructionOptions = ProviderManagerOptions & {
+  metadataCache?: ProviderMetadataCache;
+  detectProvider?: typeof detectProvider;
+  installationLeases?: ProviderInstallationLeaseCoordinator;
+  installationOperationId?: () => string;
+};
+
+export type ProductionProviderManagerOptions =
+  ProviderManagerConstructionOptions & {
+    installationLeases: ProviderInstallationLeaseCoordinator;
+  };
+
 export class ProviderManager {
-  private readonly activeRuns = new Map<string, ActiveRun>();
   private readonly commands: Partial<Record<ProviderId, string>>;
   private readonly resolvedCommands = new Map<ProviderId, string>();
   private readonly cancelGraceMs: number;
   private readonly harnessRegistry: AgentHarnessRegistry;
   private readonly metadataCache: ProviderMetadataCache;
+  private readonly detectProviderImplementation: typeof detectProvider;
   private readonly lifetimeSignal: AbortSignal;
   private readonly ownedLifetimeAbort?: AbortController;
   private readonly auxiliaryOperations = new Set<Promise<unknown>>();
   private readonly backendProfiles = new Map<string, ModelBackendProfile>();
   private readonly backendCompatibilities = new Map<string, HarnessBackendCompatibility>();
   private readonly backendProbeResults = new Map<string, BackendCompatibilityProbeResult>();
+  private readonly backendProbeNow: () => Date;
   private readonly protectedBackendProfileIds = new Set<string>();
-  private readonly resolveBackendLaunchOptions:
-    | ProviderManagerOptions["resolveBackendLaunchOptions"];
+  private readonly resolveBackendLaunchOptions: ProviderManagerOptions["resolveBackendLaunchOptions"];
+  private readonly installationLeases?: ProviderInstallationLeaseCoordinator;
+  private readonly installationAuthority: ProviderManagerInstallationAuthority;
+  private readonly capabilityAuthority: ProviderCapabilityAuthority;
+  private readonly runCoordinator: ProviderRunCoordinator;
   private processEnvironment: NodeJS.ProcessEnv | undefined;
   private auxiliaryCleanupUnconfirmed = false;
 
-  constructor(
-    options: ProviderManagerOptions & { metadataCache?: ProviderMetadataCache } = {},
+  static createProduction(
+    options: ProductionProviderManagerOptions,
     harnessRegistry: AgentHarnessRegistry = createDefaultAgentHarnessRegistry(),
+  ): ProviderManager {
+    if (!options.installationLeases) {
+      throw new Error(
+        "Production ProviderManager construction requires installation authority.",
+      );
+    }
+    return new ProviderManager(
+      options,
+      harnessRegistry,
+      PRODUCTION_MANAGER_CONSTRUCTION,
+    );
+  }
+
+  /**
+   * Explicit compatibility seam for isolated tests that do not model provider
+   * installation ownership. It cannot be used by a non-test runtime.
+   */
+  static createForTests(
+    options: ProviderManagerConstructionOptions = {},
+    harnessRegistry: AgentHarnessRegistry = createDefaultAgentHarnessRegistry(),
+  ): ProviderManager {
+    if (process.env.NODE_ENV !== "test") {
+      throw new Error(
+        "ProviderManager.createForTests is available only in a test runtime.",
+      );
+    }
+    return new ProviderManager(
+      options,
+      harnessRegistry,
+      TEST_MANAGER_CONSTRUCTION,
+    );
+  }
+
+  private constructor(
+    options: ProviderManagerConstructionOptions,
+    harnessRegistry: AgentHarnessRegistry,
+    constructionAuthority: ProviderManagerConstructionAuthority,
   ) {
+    if (
+      constructionAuthority !== PRODUCTION_MANAGER_CONSTRUCTION
+      && constructionAuthority !== TEST_MANAGER_CONSTRUCTION
+    ) {
+      throw new Error("ProviderManager construction authority is invalid.");
+    }
+    if (
+      constructionAuthority === PRODUCTION_MANAGER_CONSTRUCTION
+      && !options.installationLeases
+    ) {
+      throw new Error(
+        "Production ProviderManager construction requires installation authority.",
+      );
+    }
     this.commands = { ...options.commands };
     this.cancelGraceMs = Math.max(100, Math.min(options.cancelGraceMs ?? DEFAULT_CANCEL_GRACE_MS, 30_000));
     this.harnessRegistry = harnessRegistry;
     this.metadataCache = options.metadataCache ?? new ProviderMetadataCache();
+    this.detectProviderImplementation = options.detectProvider ?? detectProvider;
+    this.backendProbeNow = options.backendProbeNow ?? (() => new Date());
+    this.installationLeases = options.installationLeases;
+    this.installationAuthority = new ProviderManagerInstallationAuthority({
+      leases: this.installationLeases,
+      metadataCache: this.metadataCache,
+      operationId: options.installationOperationId ?? randomUUID,
+      configuredBoundary: (providerId) =>
+        this.configuredInstallationBoundary(providerId),
+      invalidateEvidence: (providerId) =>
+        this.invalidateInstallationEvidence(providerId),
+    });
+    this.capabilityAuthority = new ProviderCapabilityAuthority({
+      metadataCache: this.metadataCache,
+      resolvedExecutable: (providerId) =>
+        this.resolvedCommands.get(providerId),
+      installationFingerprint: (providerId, executable, version) =>
+        this.installationAuthority.identity(
+          providerId,
+          executable,
+          providerNativeBackendProfile(providerId),
+          version,
+        ).fingerprint,
+      customProbeCapabilities: (providerId, backendProfile, modelId) => {
+        const probe = this.backendProbeResults.get(
+          `${backendProfile.id}\0${modelId}`,
+        );
+        return admittedCustomBackendProbeEvidence(
+          probe,
+          backendProfile,
+          modelId,
+          this.backendProbeNow(),
+          this.capabilityAuthority.installationFingerprint(providerId),
+        );
+      },
+      evidenceTrusted: () => !this.installationAuthority.uncertain
+        && !this.auxiliaryCleanupUnconfirmed
+        && this.metadataCache.processCleanupConfirmed(),
+    });
     this.ownedLifetimeAbort = options.lifetimeSignal
       ? undefined
       : new AbortController();
     this.lifetimeSignal = options.lifetimeSignal
       ?? this.ownedLifetimeAbort!.signal;
     this.resolveBackendLaunchOptions = options.resolveBackendLaunchOptions;
+    this.runCoordinator = new ProviderRunCoordinator({
+      cancelGraceMs: this.cancelGraceMs,
+      harnessRegistry: this.harnessRegistry,
+      metadataCache: this.metadataCache,
+      resolveBackendLaunchOptions: this.resolveBackendLaunchOptions,
+      commandFor: (providerId) => this.commandFor(providerId),
+      resolvedCommandFor: (providerId) => this.resolvedCommands.get(providerId),
+      rememberResolvedCommand: (providerId, executable) => {
+        this.resolvedCommands.set(providerId, executable);
+      },
+      processEnvironment: () => this.processEnvironment,
+      capabilityAvailable: (input, capabilityId, configured, negotiated) =>
+        this.installationLeases
+          ? this.capabilityAuthority.available(
+              input,
+              capabilityId,
+              configured,
+              negotiated ?? [],
+            )
+          : this.testManagerCapabilityAvailable(input, capabilityId),
+      capabilityAdmissible: (input, capabilityId, configured) =>
+        this.installationLeases
+          ? this.capabilityAuthority.admissible(
+              input,
+              capabilityId,
+              configured,
+            )
+          : this.testManagerCapabilityAvailable(input, capabilityId),
+      acquireInstallationUse: (input, executable) => {
+        const admission = this.installationAuthority.acquire(
+          input.providerId,
+          executable,
+          input.backendProfile,
+          "provider-run",
+          input.runId,
+        );
+        return {
+          release: () => this.installationAuthority.release(admission),
+          quarantine: (reason) => {
+            this.installationAuthority.quarantine(admission, reason);
+          },
+        };
+      },
+    });
     for (const providerId of PROVIDER_IDS) {
       const profile = providerNativeBackendProfile(providerId);
       this.backendProfiles.set(profile.id, profile);
@@ -187,28 +343,50 @@ export class ProviderManager {
   }
 
   isRunning(conversationId: string): boolean {
-    return this.activeRuns.has(conversationId);
+    return this.runCoordinator.isRunning(conversationId);
   }
 
   ownsRun(
     conversationId: string,
-    identity: { runId: string; turnId: string | null },
+    identity: { runId: string; turnId: string },
   ): boolean {
-    const active = this.activeRuns.get(conversationId);
-    return Boolean(
-      active
-      && !active.settled
-      && active.runId === identity.runId
-      && active.turnId === identity.turnId,
-    );
+    return this.runCoordinator.ownsRun(conversationId, identity);
   }
 
   activeConversationIds(): string[] {
-    return [...this.activeRuns.keys()];
+    return this.runCoordinator.activeConversationIds();
   }
 
   harnessCapabilities(providerId?: ProviderId): readonly AgentHarnessCapabilities[] {
     return this.harnessRegistry.capabilities(providerId);
+  }
+
+  providerCapabilityManifests(
+    providerId?: ProviderId,
+  ): readonly ProviderCapabilityManifest[] {
+    return this.harnessRegistry.capabilityManifests(providerId);
+  }
+
+  providerCapabilityContract(
+    providerId: ProviderId,
+  ) {
+    return this.capabilityAuthority.contract(providerId);
+  }
+
+  providerInstallationFingerprint(providerId: ProviderId): string | null {
+    return this.capabilityAuthority.installationFingerprint(providerId);
+  }
+
+  providerMaintenanceCapabilityAvailable(
+    providerId: ProviderId,
+    executable: string | null,
+    updateActionVerified: boolean,
+  ): boolean {
+    return this.capabilityAuthority.maintenanceAvailable(
+      providerId,
+      executable,
+      updateActionVerified,
+    );
   }
 
   harnessIdFor(input: ProviderRunInput): AgentHarnessId {
@@ -216,21 +394,80 @@ export class ProviderManager {
     return this.harnessRegistry.resolve(input).id;
   }
 
-  recordBackendProbeResult(resultInput: BackendCompatibilityProbeResult): void {
-    const result = backendCompatibilityProbeResultSchema.parse(resultInput);
-    const profile = this.backendProfiles.get(result.profileId);
-    if (!profile || !backendProbeMatchesProfile(result, profile, result.modelId)) return;
-    const key = `${result.profileId}\0${result.modelId}`;
-    const current = this.backendProbeResults.get(key);
-    if (
-      current
-      && Date.parse(current.checkedAt) >= Date.parse(result.checkedAt)
-    ) return;
-    this.backendProbeResults.set(key, result);
+  providerCapabilityAvailable(
+    input: ProviderRunInput,
+    capabilityId: ProviderCapabilityId,
+    configured: readonly ProviderCapabilityId[] = [],
+  ): boolean {
+    return this.capabilityAuthority.available(
+      input,
+      capabilityId,
+      configured,
+    );
   }
 
-  upsertBackendProfile(profileInput: ModelBackendProfile): void {
+  providerCapabilityAdmissible(
+    input: ProviderRunInput,
+    capabilityId: ProviderCapabilityId,
+    configured: readonly ProviderCapabilityId[] = [],
+  ): boolean {
+    return this.capabilityAuthority.admissible(
+      input,
+      capabilityId,
+      configured,
+    );
+  }
+
+  recordBackendProbeResult(resultInput: BackendCompatibilityProbeResult): void {
+    recordBackendProbeEvidence(
+      this.backendProbeResults,
+      this.backendProfiles,
+      resultInput,
+      this.backendProbeNow(),
+    );
+  }
+
+  /**
+   * Test construction bypasses executable attestation, never custom-route
+   * capability evidence. This keeps focused harness tests convenient without
+   * creating a tool-authority path that exists only under test.
+   */
+  private testManagerCapabilityAvailable(
+    input: ProviderRunInput,
+    capabilityId: ProviderCapabilityId,
+  ): boolean {
+    if (input.backendProfile.source !== "custom") return true;
+    // Preserve the test factory's general executable-attestation bypass, but
+    // never bypass the pre-execution custom-route gates under audit.
+    if (capabilityId === "host-tool-bridge" || capabilityId === "plans") {
+      return false;
+    }
+    if (
+      capabilityId !== "text-streaming"
+      && capabilityId !== "provider-native-tools"
+      && capabilityId !== "tool-activity"
+    ) return true;
+    const probe = this.backendProbeResults.get(
+      `${input.backendProfile.id}\0${input.modelSelection.modelId}`,
+    );
+    return admittedCustomBackendCapabilities(
+      probe,
+      input.backendProfile,
+      input.modelSelection.modelId,
+      this.backendProbeNow(),
+      this.capabilityAuthority.installationFingerprint(input.providerId),
+    )
+      .includes(capabilityId);
+  }
+
+  upsertBackendProfile(
+    profileInput: ModelBackendProfile,
+    ownerProviderId?: ProviderId,
+  ): void {
     const profile = modelBackendProfileSchema.parse(profileInput);
+    if (ownerProviderId) {
+      this.assertProviderConfigurationMutable(ownerProviderId);
+    }
     const current = this.backendProfiles.get(profile.id);
     if (current?.source === "built-in" && profile.source !== "built-in") {
       throw new ProviderRuntimeError(
@@ -252,9 +489,12 @@ export class ProviderManager {
     if (profile.source === "built-in") this.protectedBackendProfileIds.add(profile.id);
   }
 
-  removeBackendProfile(profileId: string): void {
+  removeBackendProfile(profileId: string, ownerProviderId?: ProviderId): void {
     const current = this.backendProfiles.get(profileId);
     if (!current) return;
+    if (ownerProviderId) {
+      this.assertProviderConfigurationMutable(ownerProviderId);
+    }
     if (this.protectedBackendProfileIds.has(profileId) || current.source === "built-in") {
       throw new ProviderRuntimeError(
         "invalid_input",
@@ -304,25 +544,61 @@ export class ProviderManager {
     // optimistic registration must never bypass a stale or failed probe.
     const compatibility = backendProfile.source === "custom"
       ? resolveHarnessBackendCompatibility(harnessId.data, backendProfile, {
+          evaluatedAt: this.backendProbeNow(),
           modelId: selection.modelId,
           probe,
         })
       : explicit ?? resolveHarnessBackendCompatibility(
           harnessId.data,
           backendProfile,
-          { modelId: selection.modelId, probe },
+          {
+            evaluatedAt: this.backendProbeNow(),
+            modelId: selection.modelId,
+            probe,
+          },
         );
+    const providerCompatibilityToken = this.capabilityAuthority.continuationToken(
+      providerId,
+      harnessId.data,
+      backendProfile,
+      compatibility,
+      selection.modelId,
+    );
     return {
       providerId,
       harnessId: harnessId.data,
       backendProfile,
       compatibility,
-      continuationIdentity: continuationIdentityForSelection(
+      continuationIdentity: versionedContinuationIdentityForSelection(
         selection,
         backendProfile.endpointIdentity,
         !officiallyAllowsModelSwitchWithinSession(compatibility),
+        providerCompatibilityToken,
       ),
     };
+  }
+
+  providerInstallationIdentityForMaintenance(
+    providerId: ProviderId,
+    executable: string | null,
+    version: string | null,
+  ): ProviderInstallationIdentity {
+    return this.installationAuthority.identity(
+      providerId,
+      executable ?? this.commandFor(providerId),
+      providerNativeBackendProfile(providerId),
+      version,
+    );
+  }
+
+  invalidateInstallationEvidence(providerId: ProviderId): void {
+    this.capabilityAuthority.invalidate(providerId);
+    this.resolvedCommands.delete(providerId);
+    this.metadataCache.correlate(providerId, {
+      executable: null,
+      version: null,
+      authState: "unknown",
+    });
   }
 
   private trackAuxiliary<T>(operation: () => Promise<T>): Promise<T> {
@@ -336,7 +612,7 @@ export class ProviderManager {
 
   detect(
     providerId: ProviderId,
-    options: Omit<ProviderDetectionOptions, "command"> = {},
+    options: ProviderManagerDetectionOptions = {},
   ): Promise<ProviderDetection> {
     return this.trackAuxiliary(async () =>
       await this.detectProviderInfo(providerId, options));
@@ -344,12 +620,16 @@ export class ProviderManager {
 
   private async detectProviderInfo(
     providerId: ProviderId,
-    options: Omit<ProviderDetectionOptions, "command">,
+    options: ProviderManagerDetectionOptions,
   ): Promise<ProviderDetection> {
+    const {
+      installationVerificationAuthority,
+      ...detectionOptions
+    } = options;
     if (this.lifetimeSignal.aborted) {
       throw new Error("Provider discovery was cancelled.");
     }
-    if (options.refreshEnvironment) await providerEnvironment(true);
+    if (detectionOptions.refreshEnvironment) await providerEnvironment(true);
     if (this.lifetimeSignal.aborted) {
       throw new Error("Provider discovery was cancelled.");
     }
@@ -359,40 +639,82 @@ export class ProviderManager {
     }
     this.processEnvironment = environment.env;
     const configured = this.commands[providerId]?.trim() || PROVIDER_INFO[providerId].command;
+    const resolvedExecutable = this.resolvedCommands.get(providerId);
+    const cachedExecutable = this.metadataCache.nativeScope(providerId).executable;
+    const admissionExecutable = resolvedExecutable ?? cachedExecutable ?? configured;
+    const allowUnboundInitialResolution = !resolvedExecutable
+      && !cachedExecutable
+      && canonicalProviderExecutable(configured) === null;
+    const backendProfile = providerNativeBackendProfile(providerId);
+    const admission = this.installationAuthority.acquire(
+      providerId,
+      admissionExecutable,
+      backendProfile,
+      "compatibility-probe",
+      this.installationAuthority.operationIdentity(
+        "compatibility-probe",
+        installationVerificationAuthority,
+      ),
+      installationVerificationAuthority,
+    );
     let detection: ProviderDetection;
     try {
-      detection = await detectProvider(providerId, {
-        ...options,
+      detection = await this.detectProviderImplementation(providerId, {
+        ...detectionOptions,
         refreshEnvironment: false,
         command: configured,
         signal: this.lifetimeSignal,
       });
     } catch (error) {
-      this.auxiliaryCleanupUnconfirmed ||=
-        isProcessTreeTerminationUnconfirmed(error);
+      const cleanupUnconfirmed = isProcessTreeTerminationUnconfirmed(error);
+      if (cleanupUnconfirmed) {
+        this.installationAuthority.quarantine(
+          admission,
+          "provider-discovery-cleanup-unconfirmed",
+        );
+      } else {
+        this.installationAuthority.release(admission);
+      }
+      this.auxiliaryCleanupUnconfirmed ||= cleanupUnconfirmed;
+      this.invalidateInstallationEvidence(providerId);
+      throw error;
+    }
+    try {
+      this.installationAuthority.settleDetection(
+        admission,
+        detection,
+        backendProfile,
+        installationVerificationAuthority,
+        allowUnboundInitialResolution,
+      );
+    } catch (error) {
+      this.invalidateInstallationEvidence(providerId);
       throw error;
     }
     if (this.lifetimeSignal.aborted) {
       throw new Error("Provider discovery was cancelled.");
     }
     this.auxiliaryCleanupUnconfirmed ||= !detection.cleanupConfirmed;
-    if (detection.executable) {
+    if (detection.executable && detection.cleanupConfirmed) {
       this.resolvedCommands.set(providerId, detection.executable);
     } else {
       this.resolvedCommands.delete(providerId);
     }
     this.metadataCache.correlate(providerId, {
       executable: detection.executable ?? null,
-      version: detection.version ?? null,
+      version: detection.cleanupConfirmed
+        ? detection.version ?? null
+        : null,
       authState: detection.authState,
     });
+    this.capabilityAuthority.rememberDetection(detection);
     return detection;
   }
 
   validateCommand(
     providerId: ProviderId,
     command: string,
-    options: Omit<ProviderDetectionOptions, "command"> = {},
+    options: ProviderManagerDetectionOptions = {},
   ): Promise<ProviderDetection> {
     return this.trackAuxiliary(async () =>
       await this.validateProviderCommand(providerId, command, options));
@@ -401,23 +723,53 @@ export class ProviderManager {
   private async validateProviderCommand(
     providerId: ProviderId,
     command: string,
-    options: Omit<ProviderDetectionOptions, "command">,
+    options: ProviderManagerDetectionOptions,
   ): Promise<ProviderDetection> {
+    const {
+      installationVerificationAuthority,
+      ...detectionOptions
+    } = options;
     if (this.lifetimeSignal.aborted) {
       throw new Error("Provider discovery was cancelled.");
     }
+    const backendProfile = providerNativeBackendProfile(providerId);
+    const admission = this.installationAuthority.acquire(
+      providerId,
+      command,
+      backendProfile,
+      "compatibility-probe",
+      this.installationAuthority.operationIdentity(
+        "compatibility-probe",
+        installationVerificationAuthority,
+      ),
+      installationVerificationAuthority,
+    );
     let detection: ProviderDetection;
     try {
-      detection = await detectProvider(providerId, {
-        ...options,
+      detection = await this.detectProviderImplementation(providerId, {
+        ...detectionOptions,
         command,
         signal: this.lifetimeSignal,
       });
     } catch (error) {
-      this.auxiliaryCleanupUnconfirmed ||=
-        isProcessTreeTerminationUnconfirmed(error);
+      const cleanupUnconfirmed = isProcessTreeTerminationUnconfirmed(error);
+      if (cleanupUnconfirmed) {
+        this.installationAuthority.quarantine(
+          admission,
+          "provider-validation-cleanup-unconfirmed",
+        );
+      } else {
+        this.installationAuthority.release(admission);
+      }
+      this.auxiliaryCleanupUnconfirmed ||= cleanupUnconfirmed;
       throw error;
     }
+    this.installationAuthority.settleDetection(
+      admission,
+      detection,
+      backendProfile,
+      installationVerificationAuthority,
+    );
     if (this.lifetimeSignal.aborted) {
       throw new Error("Provider discovery was cancelled.");
     }
@@ -426,11 +778,21 @@ export class ProviderManager {
   }
 
   setCommand(providerId: ProviderId, command?: string): void {
+    this.assertProviderConfigurationMutable(providerId);
     const value = command?.trim();
     if (value) this.commands[providerId] = value;
     else delete this.commands[providerId];
     this.resolvedCommands.delete(providerId);
+    this.capabilityAuthority.invalidate(providerId);
     this.metadataCache.invalidate(providerId);
+  }
+
+  assertProviderConfigurationMutable(providerId: ProviderId): void {
+    if (!this.installationLeases?.hasProviderAuthority(providerId)) return;
+    throw new ProviderInstallationAdmissionError(
+      "Provider configuration cannot change while its installation is owned.",
+      [],
+    );
   }
 
   detectAll(
@@ -470,10 +832,18 @@ export class ProviderManager {
       providerAuthLoginArgs(providerId),
       childEnvironment,
     );
+    const installationUse = this.installationAuthority.acquire(
+      providerId,
+      executable,
+      providerNativeBackendProfile(providerId),
+      "auth-discovery",
+      this.installationAuthority.operationIdentity("auth-discovery"),
+    );
     return {
       executable: invocation.command,
       args: providerPtyArguments(invocation),
       env: childEnvironment,
+      installationUse: this.installationAuthority.transfer(installationUse),
     };
   }
 
@@ -516,12 +886,23 @@ export class ProviderManager {
       environment.env,
     );
     try {
-      return providerTerminalResumeLaunch(
+      const launch = providerTerminalResumeLaunch(
         detection.executable,
         providerId,
         sessionId,
         childEnvironment,
       );
+      const installationUse = this.installationAuthority.acquire(
+        providerId,
+        detection.executable,
+        providerNativeBackendProfile(providerId),
+        "provider-server",
+        this.installationAuthority.operationIdentity("provider-server"),
+      );
+      return {
+        ...launch,
+        installationUse: this.installationAuthority.transfer(installationUse),
+      };
     } catch (error) {
       throw new ProviderRuntimeError(
         "invalid_input",
@@ -551,7 +932,7 @@ export class ProviderManager {
   metadata(
     providerId: ProviderId,
     cwd = process.cwd(),
-    options: ProviderMetadataRequestOptions = {},
+    options: ProviderManagerMetadataRequestOptions = {},
   ): Promise<ProviderMetadata> {
     return this.trackAuxiliary(async () =>
       await this.readMetadata(providerId, cwd, options));
@@ -560,24 +941,110 @@ export class ProviderManager {
   private async readMetadata(
     providerId: ProviderId,
     cwd: string,
-    options: ProviderMetadataRequestOptions,
+    options: ProviderManagerMetadataRequestOptions,
   ): Promise<ProviderMetadata> {
+    const {
+      installationVerificationAuthority,
+      ...metadataOptions
+    } = options;
     const signal = this.lifetimeSignal;
     if (signal.aborted) return this.metadataCache.current(providerId);
     let executable = this.resolvedCommands.get(providerId);
     if (!executable) executable = (await this.detect(providerId, {
       signal,
+      ...(installationVerificationAuthority
+        ? { installationVerificationAuthority }
+        : {}),
     })).executable;
     if (!executable) return this.metadataCache.current(providerId);
     const environment = await providerEnvironment();
     if (signal.aborted) return this.metadataCache.current(providerId);
     this.processEnvironment = environment.env;
-    return await this.metadataCache.metadata(
+    const admission = this.installationAuthority.acquire(
       providerId,
       executable,
-      providerChildEnvironment(providerId, environment.env),
+      providerNativeBackendProfile(providerId),
+      "metadata-discovery",
+      this.installationAuthority.operationIdentity(
+        "metadata-discovery",
+        installationVerificationAuthority,
+      ),
+      installationVerificationAuthority,
+    );
+    let metadata: ProviderMetadata;
+    try {
+      metadata = await this.metadataCache.metadata(
+        providerId,
+        executable,
+        providerChildEnvironment(providerId, environment.env),
+        cwd,
+        { ...metadataOptions, signal },
+      );
+    } catch (error) {
+      this.installationAuthority.quarantine(
+        admission,
+        "provider-metadata-terminal-outcome-unavailable",
+      );
+      throw error;
+    }
+    if (!this.metadataCache.processCleanupConfirmed()) {
+      this.installationAuthority.quarantine(
+        admission,
+        "provider-metadata-cleanup-unconfirmed",
+      );
+      return metadata;
+    }
+    if (!this.installationAuthority.release(admission)) {
+      throw new ProviderRuntimeError(
+        "lifecycle_corruption",
+        "Provider metadata could not release exact installation authority.",
+      );
+    }
+    return metadata;
+  }
+
+  async verifyInstallationConformance(
+    providerId: ProviderId,
+    cwd: string,
+    authority: ProviderInstallationVerificationAuthority,
+  ): Promise<ProviderInstallationIdentity> {
+    if (authority.providerId !== providerId) {
+      throw new ProviderRuntimeError(
+        "lifecycle_corruption",
+        "Provider installation verification authority has the wrong owner.",
+      );
+    }
+    const context = { installationVerificationAuthority: authority };
+    const detection = await this.detect(providerId, {
+      ...context,
       cwd,
-      { ...options, signal },
+      refreshEnvironment: true,
+      probeAuthentication: true,
+    });
+    if (
+      !detection.available
+      || !detection.canRun
+      || !detection.executable
+      || !detection.version
+      || !detection.cleanupConfirmed
+    ) {
+      throw new ProviderRuntimeError(
+        "invalid_input",
+        "The provider installation failed its native protocol conformance probe.",
+      );
+    }
+    await this.metadata(providerId, cwd, { ...context, force: true });
+    if (!this.providerCapabilityContract(providerId).installationVerified) {
+      throw new ProviderRuntimeError(
+        "invalid_input",
+        "The provider installation could not produce a verified capability contract.",
+      );
+    }
+    return this.installationAuthority.identity(
+      providerId,
+      detection.executable,
+      providerNativeBackendProfile(providerId),
+      detection.version,
     );
   }
 
@@ -596,15 +1063,25 @@ export class ProviderManager {
       executable,
       environment: providerChildEnvironment("codex", environment.env),
       cwd,
+      installationUse: this.installationAuthority.transfer(
+        this.installationAuthority.acquire(
+          "codex",
+          executable,
+          providerNativeBackendProfile("codex"),
+          "provider-server",
+          this.installationAuthority.operationIdentity("provider-server"),
+        ),
+      ),
     };
   }
 
   async claudeSkills(
     cwd: string,
     forceReload: boolean,
+    context: ProviderInstallationReadContext = {},
   ): Promise<Awaited<ReturnType<typeof readClaudeAgentSdkSkills>>> {
     let executable = this.resolvedCommands.get("claude");
-    if (!executable) executable = (await this.detect("claude")).executable;
+    if (!executable) executable = (await this.detect("claude", context)).executable;
     if (!executable) {
       throw new ProviderRuntimeError(
         "invalid_input",
@@ -613,253 +1090,43 @@ export class ProviderManager {
     }
     const environment = await providerEnvironment();
     this.processEnvironment = environment.env;
-    return await readClaudeAgentSdkSkills(
+    const authority = context.installationVerificationAuthority;
+    const admission = this.installationAuthority.acquire(
+      "claude",
       executable,
-      providerChildEnvironment("claude", environment.env),
-      cwd,
-      forceReload,
+      providerNativeBackendProfile("claude"),
+      "metadata-discovery",
+      this.installationAuthority.operationIdentity("metadata-discovery", authority),
+      authority,
     );
-  }
-
-  run(input: ProviderRunInput, callbacks: ProviderRunCallbacks = {}): Promise<ProviderRunResult> {
-    const conversationId = validateProviderRunInput(input);
-    if (this.activeRuns.has(conversationId)) {
-      throw new ProviderRuntimeError("already_running", "This conversation already has an active provider run.");
-    }
-
-    const providerId = input.providerId;
-    const runId = input.runId ?? conversationId;
-    const turnId = input.turnId ?? null;
-    const executable = this.commandFor(providerId);
-    if (!this.resolvedCommands.has(providerId)) this.resolvedCommands.set(providerId, executable);
-    const nativeProfile = providerNativeBackendProfile(providerId);
-    const ownsLegacyProviderMetadata = input.backendProfile.id === nativeProfile.id
-      && input.backendProfile.configurationRevision === nativeProfile.configurationRevision;
-    const runMetadataScope = this.metadataCache.scopeForSelection(
-      input.modelSelection,
-      input.backendProfile,
-      executable,
-    );
-    const managerCallbacks: ProviderRunCallbacks = {
-      ...callbacks,
-      onMetadata: (event) => {
-        this.metadataCache.learnScoped(
-          runMetadataScope,
-          event.metadata,
-          event.source,
-          { merge: !event.complete },
-        );
-        if (ownsLegacyProviderMetadata) {
-          this.metadataCache.learn(
-            event.providerId,
-            this.resolvedCommands.get(event.providerId)
-              ?? this.commandFor(event.providerId),
-            event.metadata,
-            event.source,
-            { merge: !event.complete },
-          );
-        }
-        callbacks.onMetadata?.(event);
-      },
-    };
-    const compatibilityEmitter = createProviderEmitter(
-      providerId,
-      conversationId,
-      managerCallbacks,
-      runId,
-      turnId,
-    );
-    const harness = this.harnessRegistry.resolve(input);
-    const baseEnvironment = providerChildEnvironment(
-      providerId,
-      this.processEnvironment ?? process.env,
-    );
-    let launchOptions: ProviderBackendLaunchOptions = {
-      environment: baseEnvironment,
-    };
-    let launchDisposed = false;
-    let launchReleased = false;
-    const releaseLaunch = (): void => {
-      if (launchReleased) return;
-      launchReleased = true;
-      try {
-        launchOptions.releaseAfterStart?.();
-      } catch {
-        // Clearing the resolver-owned copy is best effort and idempotent.
-      }
-    };
-    const disposeLaunch = (): void => {
-      if (launchDisposed) return;
-      launchDisposed = true;
-      try {
-        launchOptions.dispose?.();
-      } catch {
-        // Cleanup is best effort and must never mask the provider result.
-      }
-    };
-    let active!: ActiveRun;
-    const settle = (): void => {
-      if (active.settled) return;
-      active.settled = true;
-      active.launchAbort.abort();
-      compatibilityEmitter.close();
-      disposeLaunch();
-      if (active.hardKillTimer) clearTimeout(active.hardKillTimer);
-      if (this.activeRuns.get(conversationId) === active) {
-        this.activeRuns.delete(conversationId);
-      }
-      active.resolveLifecycleSettlement();
-    };
-    const cancelledBeforeStart = (): ProviderRunResult => {
-      compatibilityEmitter.status("cancelled");
-      return {
-        providerId,
-        conversationId,
-        status: "cancelled",
-        text: "",
-        textTruncated: false,
-        exitCode: null,
-        signal: null,
-        cleanupConfirmed: true,
-      };
-    };
-    const startHarness = (
-      resolvedLaunchOptions: ProviderBackendLaunchOptions,
-    ): Promise<ProviderRunResult> => {
-      launchOptions = resolvedLaunchOptions;
-      if (active.cancelRequested || active.settled) {
-        releaseLaunch();
-        disposeLaunch();
-        return Promise.resolve(cancelledBeforeStart());
-      }
-      let harnessRun: AgentHarnessRun;
-      try {
-        if (
-          launchOptions.harnessConfiguration?.kind === "codex-responses"
-          && harness.id !== "codex-app-server"
-        ) {
-          throw new ProviderRuntimeError(
-            "invalid_input",
-            "Codex backend configuration was supplied to a different harness.",
-          );
-        }
-        const launchInput = launchOptions.modelArgument === undefined
-          ? input
-          : {
-              ...input,
-              model: launchOptions.modelArgument ?? undefined,
-            };
-        active.harnessStartInvoked = true;
-        harnessRun = harness.start({
-          input: launchInput,
-          executable,
-          // The harness owns this copy for the lifetime of its child process.
-          // The resolver-owned source is scrubbed immediately below.
-          environment: { ...launchOptions.environment },
-          ...(launchOptions.harnessConfiguration
-            ? { harnessConfiguration: launchOptions.harnessConfiguration }
-            : {}),
-          callbacks: providerCallbacksFromHarness(compatibilityEmitter),
-          ...(callbacks.hostTools ? { hostTools: callbacks.hostTools } : {}),
-        });
-      } finally {
-        releaseLaunch();
-      }
-      active.harnessRun = harnessRun;
-      if (harnessRun.harnessId !== harness.id || harnessRun.providerId !== providerId) {
-        try {
-          harnessRun.cancel(true);
-        } catch {
-          // A malformed harness may already have stopped while returning its run.
-        }
-        disposeLaunch();
-        throw new ProviderRuntimeError("invalid_input", `Agent harness '${harness.id}' returned a mismatched run.`);
-      }
-      if (active.cancelRequested) {
-        this.cancelStartedHarness(active);
-      } else {
-        try {
-          callbacks.onStarted?.();
-        } catch {
-          // Start acknowledgement observers cannot invalidate an owned run.
-        }
-      }
-      return harnessRun.result;
-    };
-
-    const launchAbort = new AbortController();
-    let resolveLifecycleSettlement!: () => void;
-    const lifecycleSettlement = new Promise<void>((resolve) => {
-      resolveLifecycleSettlement = resolve;
-    });
-    active = {
-      result: Promise.resolve(null as never),
-      lifecycleSettlement,
-      resolveLifecycleSettlement,
-      harnessRun: null,
-      harnessStartInvoked: false,
-      launchAbort,
-      markPendingCancellation: () => compatibilityEmitter.status("cancelling"),
-      runId,
-      turnId,
-      processCleanupConfirmed: false,
-      cancelRequested: false,
-      settled: false,
-      detach: settle,
-      quarantine: () => {
-        active.cancelRequested = true;
-        compatibilityEmitter.close();
-      },
-    };
-    this.activeRuns.set(conversationId, active);
-
-    let launched: Promise<ProviderRunResult>;
     try {
-      const resolved = this.resolveBackendLaunchOptions?.(
-        input,
-        baseEnvironment,
-        { signal: launchAbort.signal },
-      ) ?? launchOptions;
-      launched = isPromiseLike(resolved)
-        ? Promise.resolve(resolved).then(
-            startHarness,
-            (error: unknown) => {
-              if (active.cancelRequested) return cancelledBeforeStart();
-              throw error;
-            },
-          )
-        : startHarness(resolved);
-    } catch (error) {
-      if (!active.harnessStartInvoked) {
-        active.processCleanupConfirmed = true;
-        settle();
+      const skills = await readClaudeAgentSdkSkills(
+        executable,
+        providerChildEnvironment("claude", environment.env),
+        cwd,
+        forceReload,
+      );
+      if (!this.installationAuthority.release(admission)) {
+        throw new ProviderRuntimeError(
+          "lifecycle_corruption",
+          "Claude skill discovery could not release exact installation authority.",
+        );
       }
-      else active.cancelRequested = true;
+      return skills;
+    } catch (error) {
+      this.installationAuthority.quarantine(
+        admission,
+        "claude-skill-discovery-cleanup-unconfirmed",
+      );
       throw error;
     }
-    const result = launched.then(
-      (value) => {
-        if (!value.cleanupConfirmed) {
-          active.cancelRequested = true;
-          compatibilityEmitter.close();
-          if (active.hardKillTimer) clearTimeout(active.hardKillTimer);
-        } else {
-          active.processCleanupConfirmed = true;
-          settle();
-        }
-        return value;
-      },
-      (error: unknown) => {
-        if (!active.harnessStartInvoked) {
-          active.processCleanupConfirmed = true;
-          settle();
-        }
-        else active.cancelRequested = true;
-        throw error;
-      },
-    );
-    active.result = result;
-    return result;
+  }
+
+  run(
+    input: ProviderRunInput,
+    callbacks: ProviderRunCallbacks = {},
+  ): Promise<ProviderRunResult> {
+    return this.runCoordinator.run(input, callbacks);
   }
 
   compact(
@@ -867,225 +1134,54 @@ export class ProviderManager {
     instruction?: string,
     callbacks: ProviderRunCallbacks = {},
   ): Promise<ProviderCompactionResult> {
-    const operationInput: ProviderRunInput = {
-      ...input,
-      prompt: "/compact",
-      // Context compaction is a turnless control operation, never a user turn
-      // with authority to execute tools. Force interactive policy even when
-      // the conversation normally runs with elevated access so every provider
-      // approval/input reaches the fail-closed callbacks below.
-      access: "supervised",
-      operation: {
-        kind: "compact",
-        ...(instruction ? { instruction } : {}),
-      },
-    };
-    const instructionForwarded = (
-      operationInput.providerId === "claude"
-      || operationInput.providerId === "kimi"
-    )
-      && instruction !== undefined;
-    let interactionError: string | undefined;
-    const rejectInteractiveCompaction = (
-      interaction: "approval" | "input",
-    ): void => {
-      if (interactionError) return;
-      interactionError = `Provider compaction requested interactive ${interaction} that a turnless operation cannot answer.`;
-      this.cancel(input.conversationId ?? input.threadId ?? "");
-    };
-    const providerResult = this.run(operationInput, {
-      ...callbacks,
-      onApproval: () => rejectInteractiveCompaction("approval"),
-      onInput: () => rejectInteractiveCompaction("input"),
-    });
-    const timer = setTimeout(() => {
-      this.cancel(input.conversationId ?? input.threadId ?? "");
-    }, PROVIDER_COMPACTION_OPERATION_TIMEOUT_MS);
-    timer.unref();
-    return providerResult.then((result) => {
-      const requestedSessionId = operationInput.sessionId!;
-      const sessionError = result.sessionId === requestedSessionId
-        ? undefined
-        : "The provider did not confirm compaction of the exact selected session.";
-      const operationError = interactionError ?? sessionError;
-      const status = operationError ? "failed" as const : result.status;
-      const error = operationError ?? result.error;
-      const message = status !== "completed"
-        ? error ?? "The provider could not compact this chat."
-        : instruction && !instructionForwarded
-          ? `${PROVIDER_INFO[result.providerId].name} compacted the context, but does not accept a focus instruction through this integration, so the instruction was not forwarded.`
-          : instructionForwarded
-            ? "Context compacted with the focus instruction."
-            : "Context compacted.";
-      return {
-        providerId: result.providerId,
-        conversationId: result.conversationId,
-        status,
-        instructionForwarded,
-        message,
-        ...(error ? { error } : {}),
-        cleanupConfirmed: result.cleanupConfirmed,
-      };
-    }).finally(() => clearTimeout(timer));
+    return this.runCoordinator.compact(input, instruction, callbacks);
   }
 
   cancel(conversationId: string): boolean {
-    const active = this.activeRuns.get(conversationId);
-    if (!active || active.settled || active.cancelRequested) return false;
-    active.cancelRequested = true;
-    if (!active.harnessRun) {
-      active.markPendingCancellation();
-      active.launchAbort.abort();
-      return true;
-    }
-    this.cancelStartedHarness(active);
-    return true;
+    return this.runCoordinator.cancel(conversationId);
   }
 
-  async steer(
+  steer(
     conversationId: string,
     input: ProviderSteerInput,
     identity: { runId: string; turnId: string },
   ): Promise<boolean> {
-    const active = this.activeRuns.get(conversationId);
-    if (
-      !active
-      || active.settled
-      || active.cancelRequested
-      || active.runId !== identity.runId
-      || active.turnId !== identity.turnId
-    ) return false;
-    const extension = active.harnessRun?.extension;
-    const steer = extension && "steer" in extension
-      ? extension.steer
-      : undefined;
-    if (!steer) return false;
-    try {
-      return await steer(input);
-    } catch {
-      return false;
-    }
+    return this.runCoordinator.steer(conversationId, input, identity);
   }
 
-  async setGoal(
+  setGoal(
     conversationId: string,
     input: ProviderGoalMutation,
     identity: { runId: string; turnId: string },
   ): Promise<ProviderGoalSnapshot | null> {
-    const active = this.activeRuns.get(conversationId);
-    if (
-      !active
-      || active.settled
-      || active.cancelRequested
-      || active.runId !== identity.runId
-      || active.turnId !== identity.turnId
-    ) return null;
-    const extension = active.harnessRun?.extension;
-    if (!extension || extension.kind !== "codex-app-server") return null;
-    return await extension.setGoal(input);
+    return this.runCoordinator.setGoal(conversationId, input, identity);
   }
 
-  async clearGoal(
+  clearGoal(
     conversationId: string,
     identity: { runId: string; turnId: string },
   ): Promise<boolean | "superseded"> {
-    const active = this.activeRuns.get(conversationId);
-    if (
-      !active
-      || active.settled
-      || active.cancelRequested
-      || active.runId !== identity.runId
-      || active.turnId !== identity.turnId
-    ) return false;
-    const extension = active.harnessRun?.extension;
-    if (!extension || extension.kind !== "codex-app-server") return false;
-    return await extension.clearGoal() ? true : "superseded";
+    return this.runCoordinator.clearGoal(conversationId, identity);
   }
 
-  async stopSubagent(
+  stopSubagent(
     conversationId: string,
     providerTaskId: string,
     identity: { runId: string; turnId: string },
   ): Promise<boolean> {
-    const active = this.activeRuns.get(conversationId);
-    if (
-      !active
-      || active.settled
-      || active.cancelRequested
-      || active.runId !== identity.runId
-      || active.turnId !== identity.turnId
-    ) return false;
-    const extension = active.harnessRun?.extension;
-    const stopSubagent = extension && "stopSubagent" in extension
-      ? extension.stopSubagent
-      : undefined;
-    if (!stopSubagent) return false;
-    try {
-      return await stopSubagent(providerTaskId);
-    } catch {
-      return false;
-    }
+    return this.runCoordinator.stopSubagent(
+      conversationId,
+      providerTaskId,
+      identity,
+    );
   }
 
-  private cancelStartedHarness(active: ActiveRun): void {
-    const harnessRun = active.harnessRun;
-    if (!harnessRun) return;
-    try {
-      harnessRun.cancel(false);
-    } catch {
-      // The provider may already have queued its terminal event.
-    }
-    active.hardKillTimer = setTimeout(() => {
-      if (active.settled) return;
-      try {
-        harnessRun.cancel(true);
-      } catch {
-        // The process may have exited between the check and kill.
-      }
-    }, this.cancelGraceMs);
-    active.hardKillTimer.unref();
-  }
-
-  /**
-   * Stops one caller-owned provider run without allowing a malformed harness
-   * result promise to wedge its owner forever. The full identity is required
-   * so an auxiliary controller cannot accidentally detach an ordinary
-   * resumable conversation that happens to reuse a lookup key.
-   */
-  async stopOwned(
+  stopOwned(
     conversationId: string,
-    identity: { runId: string; turnId: string | null },
+    identity: { runId: string; turnId: string },
     graceMs = this.cancelGraceMs,
   ): Promise<OwnedProviderStopResult> {
-    const active = this.activeRuns.get(conversationId);
-    if (!active || active.settled) return "missing";
-    if (active.runId !== identity.runId || active.turnId !== identity.turnId) {
-      return "identity-mismatch";
-    }
-    if (active.processCleanupConfirmed) {
-      active.detach();
-      return active.settled ? "settled" : "force-detached";
-    }
-
-    this.cancel(conversationId);
-    if (await this.waitForSettlement(active, graceMs)) return "settled";
-
-    if (active.hardKillTimer) {
-      clearTimeout(active.hardKillTimer);
-      active.hardKillTimer = undefined;
-    }
-    try {
-      active.harnessRun?.cancel(true);
-    } catch {
-      // A malformed harness can throw while its owned process is already gone.
-    }
-    if (await this.waitForSettlement(active, FORCE_DETACH_GRACE_MS)) return "settled";
-
-    // Exact lifecycle owners can retain this run as a durable in-process
-    // exclusion until the harness settles or the runtime supervisor confirms
-    // termination of the complete utility-process tree.
-    active.quarantine();
-    return "force-detached";
+    return this.runCoordinator.stopOwned(conversationId, identity, graceMs);
   }
 
   async disposeAll(): Promise<void> {
@@ -1095,20 +1191,11 @@ export class ProviderManager {
     while (this.auxiliaryOperations.size > 0) {
       await Promise.allSettled(this.auxiliaryOperations);
     }
-    const active = [...this.activeRuns.entries()];
-    const results = await Promise.allSettled(active.map(([conversationId, run]) =>
-      this.stopOwned(
-        conversationId,
-        { runId: run.runId, turnId: run.turnId },
-        undefined,
-      )));
+    const runCleanupConfirmed = await this.runCoordinator.disposeAll();
     if (
-      results.some((result) => (
-        result.status === "rejected"
-        || (result.value !== "settled" && result.value !== "missing")
-      ))
-      || this.activeRuns.size > 0
+      !runCleanupConfirmed
       || this.auxiliaryCleanupUnconfirmed
+      || this.installationAuthority.uncertain
       || !this.metadataCache.processCleanupConfirmed()
     ) {
       throw new Error("Provider process cleanup could not be confirmed.");
@@ -1119,28 +1206,28 @@ export class ProviderManager {
     conversationId: string,
     requestId: string,
     decision: AgentApprovalDecision,
-    identity?: { runId: string; turnId: string },
+    identity: { runId: string; turnId: string },
   ): boolean {
-    const active = this.activeRuns.get(conversationId);
-    if (!active || !active.harnessRun || active.settled || active.cancelRequested) return false;
-    if (identity && (active.runId !== identity.runId || active.turnId !== identity.turnId)) return false;
-    const extension = active.harnessRun.extension;
-    if (!("respondToApproval" in extension)) return false;
-    return extension.respondToApproval(requestId, decision);
+    return this.runCoordinator.respondToApproval(
+      conversationId,
+      requestId,
+      decision,
+      identity,
+    );
   }
 
   respondToInput(
     conversationId: string,
     requestId: string,
     answers: Record<string, string[]>,
-    identity?: { runId: string; turnId: string },
+    identity: { runId: string; turnId: string },
   ): boolean {
-    const active = this.activeRuns.get(conversationId);
-    if (!active || !active.harnessRun || active.settled || active.cancelRequested) return false;
-    if (identity && (active.runId !== identity.runId || active.turnId !== identity.turnId)) return false;
-    const extension = active.harnessRun.extension;
-    if (!("respondToInput" in extension)) return false;
-    return extension.respondToInput(requestId, answers);
+    return this.runCoordinator.respondToInput(
+      conversationId,
+      requestId,
+      answers,
+      identity,
+    );
   }
 
   private commandFor(providerId: ProviderId): string {
@@ -1151,19 +1238,10 @@ export class ProviderManager {
     return PROVIDER_INFO[providerId].command;
   }
 
-  private async waitForSettlement(active: ActiveRun, graceMs: number): Promise<boolean> {
-    if (active.settled) return true;
-    const boundedGraceMs = Math.max(0, Math.min(graceMs, MAX_OWNED_STOP_GRACE_MS));
-    if (boundedGraceMs === 0) return active.settled;
-    let timer: NodeJS.Timeout | undefined;
-    const settled = await Promise.race([
-      active.lifecycleSettlement.then(() => true),
-      new Promise<false>((resolve) => {
-        timer = setTimeout(() => resolve(false), boundedGraceMs);
-        timer.unref();
-      }),
-    ]);
-    if (timer) clearTimeout(timer);
-    return settled;
+  private configuredInstallationBoundary(providerId: ProviderId): string {
+    const configured = this.commands[providerId]?.trim();
+    return configured && !configured.includes("\0")
+      ? configured
+      : PROVIDER_INFO[providerId].command;
   }
 }

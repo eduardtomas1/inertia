@@ -8,18 +8,15 @@ import * as acp from "@agentclientprotocol/sdk";
 import type {
   ContentBlock,
   InitializeResponse,
-  PermissionOption,
   RequestPermissionRequest,
   RequestPermissionResponse,
   SessionConfigOption,
   SessionModeState,
   SessionNotification,
   ToolCallStatus,
-  ToolKind,
   Usage,
 } from "@agentclientprotocol/sdk";
 
-import type { ProviderModel } from "../../shared/contracts";
 import { INERTIA_VERSION } from "../../shared/version";
 import { runtimeOwnedProcessInvocation, spawnRuntimeOwnedProcess } from "../../node/runtime-owned-processes";
 import {
@@ -33,13 +30,17 @@ import {
   type AgentHarnessStartOptions,
   type CursorAcpHarnessCapabilities,
 } from "./agent-harness";
-import type { ProviderRunFailure, ProviderRunResult } from "./contracts";
+import {
+  providerRunTerminal,
+  type ProviderRunFailure,
+  type ProviderRunInput,
+  type ProviderRunResult,
+} from "./contracts";
 import type {
   AgentApprovalDecision,
   AgentPlanStep,
 } from "./interactions";
 import { providerActivityDetailSections } from "./activity-detail";
-import { isSafeApprovalDisplayText } from "./approval-display";
 import { CappedProviderBuffer, ProviderRunEventBudget } from "./io";
 import { providerProcessInvocation } from "./process";
 import { cursorAgentCommandArgs } from "./cursor-command";
@@ -70,8 +71,17 @@ import {
   parseCursorTaskNotification,
   parseCursorTodosRequest,
 } from "./cursor-acp-extensions";
+import {
+  cursorOneShotPermissionOption,
+  cursorPermissionDisplayIsSafe,
+  isCursorFileMutationKind,
+} from "./cursor-acp-permissions";
+import { emitCursorMetadata } from "./cursor-acp-metadata";
 
 export {
+  cursorOneShotPermissionOption,
+  cursorPermissionDisplayIsSafe,
+  isCursorFileMutationKind,
   parseCursorGenerateImageNotification,
   parseCursorQuestionRequest,
   parseCursorTaskNotification,
@@ -160,13 +170,13 @@ function startCursorRun(
   commandAdvertisementTimeoutMs = COMMAND_ADVERTISEMENT_TIMEOUT_MS,
   controlRpcTimeoutMs = CONTROL_RPC_TIMEOUT_MS,
 ): AgentHarnessRun {
-  const conversationId = options.input.conversationId ?? options.input.threadId ?? "";
+  const conversationId = options.input.conversationId;
   const emitter = createAgentHarnessEmitter(
     "cursor",
     conversationId,
     options.callbacks,
-    options.input.runId ?? conversationId,
-    options.input.turnId ?? null,
+    options.input.runId,
+    options.input.turnId,
     options.input.cwd,
   );
   const resultText = new CappedProviderBuffer(MAX_RESULT_TEXT_CHARS);
@@ -308,7 +318,7 @@ function startCursorRun(
         emitCursorMetadata(
           safeParams.update.configOptions,
           supportsImages,
-          emitter.rich,
+          emitter,
         );
         return;
       }
@@ -331,6 +341,7 @@ function startCursorRun(
         }
         inputs.set(requestId, { resolve, settled: false });
         signal.addEventListener("abort", () => settleInput(requestId, {}), { once: true });
+        emitter.capability("structured-input", true);
         emitter.rich({ type: "input", request });
       });
       if (signal.aborted || !ownsActivePrompt()) return { outcome: "cancelled" };
@@ -373,6 +384,7 @@ function startCursorRun(
           redactHostMcpPayload(rawParams),
         );
         subagentSequence += 1;
+        emitter.capability("subagent-create", true);
         emitter.subagent({
           sequence: subagentSequence,
           providerTaskId: params.toolCallId,
@@ -437,7 +449,7 @@ function startCursorRun(
       },
     ));
   } catch (error) {
-    return failedCursorRun(conversationId, safeError(error, "Cursor ACP could not be started."), emitter);
+    return failedCursorRun(options.input, safeError(error, "Cursor ACP could not be started."), emitter);
   }
   child.once("error", (error) => stderr.append(safeError(error, "Cursor ACP could not be started.")));
   child.stderr.on("data", (chunk: Buffer) => stderr.append(chunk.toString("utf8")));
@@ -478,6 +490,7 @@ function startCursorRun(
     }), "initialize");
     validateCursorInitialize(initialized);
     supportsImages = initialized.agentCapabilities?.promptCapabilities?.image === true;
+    emitter.capability("images", supportsImages);
     hostMcpConnection = await hostMcpSession?.start();
     const hostMcpServers = hostMcpConnection
       ? acpHostMcpServers(
@@ -497,7 +510,9 @@ function startCursorRun(
     let configOptions: SessionConfigOption[] | null | undefined;
     if (options.input.sessionId) {
       activeFailurePhase = "session"; activeTerminalEvent = "session/load";
-      if (initialized.agentCapabilities?.loadSession !== true) throw new Error("This Cursor ACP server does not advertise session resume support.");
+      const supportsSessionResume = initialized.agentCapabilities?.loadSession === true;
+      emitter.capability("session-resume", supportsSessionResume);
+      if (!supportsSessionResume) throw new Error("This Cursor ACP server does not advertise session resume support.");
       const loadRequest = requestControl(context.request(acp.methods.agent.session.load, {
         sessionId: options.input.sessionId,
         cwd: options.input.cwd,
@@ -535,7 +550,7 @@ function startCursorRun(
       redactHostMcpPayload,
       requestControl,
     );
-    emitCursorMetadata(configuredOptions, supportsImages, emitter.rich);
+    emitCursorMetadata(configuredOptions, supportsImages, emitter);
     if (options.input.operation?.kind === "compact") {
       await waitForCursorCommandAdvertisement(
         commandAdvertisement,
@@ -549,9 +564,13 @@ function startCursorRun(
     }
     if (options.input.operation?.kind === "compact"
       && !availableCommandNames?.has("summarize")) {
+      emitter.capability("compaction", false);
       throw new Error(
         "This Cursor ACP session does not advertise its summarize command.",
       );
+    }
+    if (options.input.operation?.kind === "compact") {
+      emitter.capability("compaction", true);
     }
     const providerPrompt = options.input.operation?.kind === "compact"
       ? "/summarize"
@@ -570,7 +589,7 @@ function startCursorRun(
       promptInFlight = false;
     }));
     if (providerEventError) throw providerEventError;
-    if (response.usage) emitCursorPromptUsage(response.usage, contextUsage, emitter.rich);
+    if (response.usage) emitCursorPromptUsage(response.usage, contextUsage, emitter);
     const compactionFailure = options.input.operation?.kind === "compact"
       && compactions.completionEvidence() !== "completed"
       ? unconfirmedAcpCompactionFailure("Cursor")
@@ -608,7 +627,10 @@ function startCursorRun(
       message,
       cursorRuntimeFailure(message, child, activeFailurePhase, activeTerminalEvent),
     );
-  });
+  }).then((outcome) => ({
+    ...outcome,
+    ...providerRunTerminal(options.input, outcome.status, outcome.failure),
+  }));
   const result = providerResult.then(async (outcome): Promise<ProviderRunResult> => {
     cancelPending();
     hostToolRuntime?.settle();
@@ -651,7 +673,10 @@ function startCursorRun(
       exitCode: child.exitCode,
       signal: child.signalCode,
     };
-  });
+  }).then((outcome) => ({
+    ...outcome,
+    ...providerRunTerminal(options.input, outcome.status, outcome.failure),
+  }));
 
   function finish(
     status: ProviderRunResult["status"],
@@ -659,9 +684,7 @@ function startCursorRun(
     failure?: ProviderRunFailure,
   ): ProviderRunResult {
     return {
-      providerId: "cursor",
-      conversationId,
-      status,
+      ...providerRunTerminal(options.input, status, failure),
       ...(sessionId ? { sessionId } : {}),
       text: resultText.toString(),
       textTruncated: resultText.truncated,
@@ -781,31 +804,6 @@ async function cursorPermission(
     decision === "approve",
   );
   return selected ? { outcome: { outcome: "selected", optionId: selected.optionId } } : { outcome: { outcome: "cancelled" } };
-}
-
-export function cursorPermissionDisplayIsSafe(
-  params: Pick<RequestPermissionRequest, "toolCall">,
-): boolean {
-  return isSafeApprovalDisplayText(
-    params.toolCall.title || "Cursor requested permission",
-  ) && isSafeApprovalDisplayText(jsonSummary(params.toolCall.rawInput), true);
-}
-
-export function isCursorFileMutationKind(
-  kind: ToolKind | null | undefined,
-): boolean {
-  return kind === "edit" || kind === "delete" || kind === "move";
-}
-
-export function cursorOneShotPermissionOption(
-  options: PermissionOption[],
-  allow: boolean,
-): PermissionOption | undefined {
-  // Inertia's provider-neutral approval only represents this request. Never
-  // turn it into a provider-persisted grant or denial without an explicit UI
-  // choice for that stronger scope.
-  const kind = allow ? "allow_once" : "reject_once";
-  return options.find((option) => option.kind === kind);
 }
 
 function handleCursorUpdate(
@@ -965,7 +963,7 @@ function handleCursorUpdate(
       );
       return;
     case "config_option_update":
-      emitCursorMetadata(update.configOptions, supportsImages, emitter.rich);
+      emitCursorMetadata(update.configOptions, supportsImages, emitter);
       return;
     case "session_info_update":
       if (update.title) {
@@ -979,6 +977,7 @@ function handleCursorUpdate(
     case "usage_update":
       contextUsage.usedTokens = tokenCount(update.used);
       contextUsage.maxTokens = tokenCount(update.size);
+      emitter.capability("usage-tokens", true);
       emitter.rich({
         type: "usage",
         usage: {
@@ -1032,40 +1031,6 @@ function cursorPlanSteps(
         ? "completed"
         : "pending",
   }));
-}
-
-function cursorSelectChoices(option: SessionConfigOption | undefined): Array<{ value: string; name: string; description?: string | null }> {
-  if (!option || option.type !== "select") return [];
-  return option.options.flatMap((entry) => "options" in entry ? entry.options : [entry]).slice(0, 64);
-}
-
-function emitCursorMetadata(
-  configOptions: SessionConfigOption[],
-  supportsImages: boolean,
-  emit: ReturnType<typeof createAgentHarnessEmitter>["rich"],
-): void {
-  const modelOption = configOptions.find((option) => option.type === "select" && option.category === "model");
-  const models = cursorSelectChoices(modelOption);
-  if (!modelOption || modelOption.type !== "select" || models.length === 0) return;
-  const effortOption = configOptions.find((option) => option.type === "select" && option.category === "thought_level");
-  const efforts = cursorSelectChoices(effortOption).slice(0, 12);
-  const defaultEffort = effortOption?.type === "select" && typeof effortOption.currentValue === "string"
-    ? effortOption.currentValue
-    : "";
-  const metadata: ProviderModel[] = models.map((model) => ({
-    id: bounded(model.value),
-    label: bounded(model.name || model.value),
-    description: bounded(model.description || "Cursor session model"),
-    isDefault: modelOption.currentValue === model.value,
-    inputModalities: supportsImages ? ["text", "image"] : ["text"],
-    reasoningOptions: efforts.map((effort) => ({
-      value: bounded(effort.value),
-      label: bounded(effort.name || effort.value),
-      description: bounded(effort.description || `${effort.name || effort.value} reasoning`),
-    })),
-    defaultReasoningEffort: defaultEffort,
-  }));
-  emit({ type: "metadata", metadata: { models: metadata }, source: "session", complete: true });
 }
 
 async function configureCursorSession(
@@ -1171,9 +1136,10 @@ function validateCursorInitialize(initialized: InitializeResponse): void {
 function emitCursorPromptUsage(
   usage: Usage,
   contextUsage: CursorContextUsage,
-  emit: ReturnType<typeof createAgentHarnessEmitter>["rich"],
+  emitter: ReturnType<typeof createAgentHarnessEmitter>,
 ): void {
-  emit({
+  emitter.capability("usage-tokens", true);
+  emitter.rich({
     type: "usage",
     usage: {
       usedTokens: contextUsage.usedTokens,
@@ -1196,26 +1162,29 @@ function tokenCount(value: unknown): number | null {
     : null;
 }
 
-function failedCursorRun(conversationId: string, message: string, emitter: ReturnType<typeof createAgentHarnessEmitter>): AgentHarnessRun {
+function failedCursorRun(
+  input: ProviderRunInput,
+  message: string,
+  emitter: ReturnType<typeof createAgentHarnessEmitter>,
+): AgentHarnessRun {
   emitter.status("failed", message);
+  const failure = {
+    reason: "provider-error" as const,
+    message,
+    phase: "startup",
+    terminalEvent: "process/spawn",
+  };
   return {
     harnessId: "cursor-acp",
     providerId: "cursor",
     result: Promise.resolve({
-      providerId: "cursor",
-      conversationId,
-      status: "failed",
+      ...providerRunTerminal(input, "failed", failure),
       text: "",
       textTruncated: false,
       exitCode: null,
       signal: null,
       error: message,
-      failure: {
-        reason: "provider-error",
-        message,
-        phase: "startup",
-        terminalEvent: "process/spawn",
-      },
+      failure,
       cleanupConfirmed: true,
     }),
     cancel: () => {},

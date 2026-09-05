@@ -9,19 +9,17 @@ export async function confirmDuoProviderCleanup(
     allowStop: boolean;
   },
 ): Promise<"confirmed" | "unconfirmed" | "rejected"> {
-  if (options.cleanupAlreadyConfirmed || !options.allowStop) {
+  if (options.cleanupAlreadyConfirmed) {
     return providers.isRunning(conversationId) ? "rejected" : "confirmed";
   }
+  if (!options.allowStop) return "unconfirmed";
   try {
     const result = await providers.stopOwned(
       conversationId,
       identity,
       undefined,
     );
-    if (
-      result === "settled"
-      || (result === "missing" && !providers.isRunning(conversationId))
-    ) return "confirmed";
+    if (result === "settled") return "confirmed";
     return result === "force-detached" ? "unconfirmed" : "rejected";
   } catch {
     return "unconfirmed";

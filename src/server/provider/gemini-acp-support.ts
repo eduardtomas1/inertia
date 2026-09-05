@@ -169,7 +169,7 @@ export function geminiRuntimeFailure(
     .test(detail);
   const unsupportedTerminalAuth = /advertised terminal authentication without client terminal support/iu
     .test(detail);
-  const rejectedLocalConfiguration = /does not advertise (?:the selected reasoning effort|the selected model|a plan mode|its permission-reporting default mode)|did not advertise image prompt support|does not support the attached image type/iu
+  const rejectedLocalConfiguration = /does not advertise (?:the selected reasoning effort|the selected model|a plan mode|its permission-reporting default mode|the required http mcp transport)|did not advertise image prompt support|does not support the attached image type/iu
     .test(detail);
   const reason: ProviderRunFailure["reason"] = unsupportedTerminalAuth
     ? "provider-error"

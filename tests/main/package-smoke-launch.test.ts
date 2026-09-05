@@ -98,13 +98,17 @@ describe("package smoke launcher handoff", () => {
       extractAndRun: "1",
       packageKind: "linux-appimage",
     })).toBe("retained-wrapper");
+    expect(resolvePackageSmokeLaunchMode({
+      configuredMode: "handoff-wrapper",
+      extractAndRun: "1",
+      packageKind: "linux-appimage",
+    })).toBe("handoff-wrapper");
     expect(() => resolvePackageSmokeLaunchMode({
       configuredMode: "retained-wrapper",
       packageKind: "linux-appimage",
     })).toThrow("does not match its exact runtime entry path");
     expect(() => resolvePackageSmokeLaunchMode({
       configuredMode: "handoff-wrapper",
-      extractAndRun: "1",
       packageKind: "linux-appimage",
     })).toThrow("does not match its exact runtime entry path");
     expect(() => resolvePackageSmokeLaunchMode({
@@ -476,11 +480,21 @@ describe("package smoke launcher handoff", () => {
     vi.stubEnv("NODE_ENV", "test");
     vi.stubEnv("INERTIA_PACKAGE_SMOKE_FILE", resolve("ready.json"));
     vi.stubEnv("INERTIA_PACKAGE_SMOKE_OWNER_TOKEN", ownerToken);
-    expect(packageSmokeEnvironment()).toMatchObject({ ownerToken });
+    vi.stubEnv("INERTIA_PACKAGE_SMOKE_EXPECT_APPIMAGE_FD", "4");
+    expect(packageSmokeEnvironment()).toMatchObject({
+      appImageFileDescriptor: 4,
+      ownerToken,
+    });
     vi.stubEnv("INERTIA_PACKAGE_SMOKE_OWNER_TOKEN", `${ownerToken}suffix`);
-    expect(packageSmokeEnvironment()).toMatchObject({ ownerToken: null });
+    expect(packageSmokeEnvironment()).toMatchObject({
+      appImageFileDescriptor: null,
+      ownerToken: null,
+    });
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("INERTIA_PACKAGE_SMOKE_OWNER_TOKEN", ownerToken);
-    expect(packageSmokeEnvironment()).toMatchObject({ ownerToken: null });
+    expect(packageSmokeEnvironment()).toMatchObject({
+      appImageFileDescriptor: null,
+      ownerToken: null,
+    });
   });
 });

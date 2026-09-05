@@ -5,13 +5,17 @@ import { join } from "node:path";
 import { PassThrough, Writable } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 
-import { runBounded } from "../../scripts/bounded-process-tree.mjs";
+import {
+  linuxProcessGroupCanExecute,
+  runBounded,
+} from "../../scripts/bounded-process-tree.mjs";
 import {
   confirmProviderProcessTermination,
   processIsTerminal,
   requireAcpInitializeHandshake,
   runAcpInitializeHandshake,
 } from "../../scripts/provider-drift-process.mjs";
+import { executableProcessExists } from "../helpers/executable-process";
 
 interface ProcessStateInput {
   exitCode?: number | null;
@@ -26,25 +30,12 @@ type FakeProcessState = EventEmitter & {
 };
 
 interface AcpFixtureOptions {
+  allowMissingAgentInfo?: boolean;
   allowSessionCapabilitiesResume?: boolean;
   timeoutMs?: number;
   cleanupTimeoutMs?: number;
   maxOutputChars?: number;
   requireLoadSession?: boolean;
-}
-
-function processExists(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    if (process.platform === "linux") {
-      const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
-      const tail = stat.lastIndexOf(")");
-      if (tail >= 0 && stat.slice(tail + 2, tail + 3) === "Z") return false;
-    }
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 function processState({
@@ -64,6 +55,7 @@ function acpFixture(
   options: AcpFixtureOptions = {},
 ): Promise<void> {
   const {
+    allowMissingAgentInfo,
     allowSessionCapabilitiesResume,
     requireLoadSession = false,
     ...dependencies
@@ -73,6 +65,7 @@ function acpFixture(
     ["--input-type=commonjs", "-e", source],
     { cwd: process.cwd(), environment: process.env },
     {
+      ...(allowMissingAgentInfo === undefined ? {} : { allowMissingAgentInfo }),
       ...(allowSessionCapabilitiesResume === undefined
         ? {}
         : { allowSessionCapabilitiesResume }),
@@ -106,6 +99,31 @@ function validResponse(
 }
 
 describe("provider drift process cleanup", () => {
+  it("recognizes a Linux process group containing only terminal states", () => {
+    const processIds = () => ["100", "101", "900"];
+    const states = new Map([
+      ["100", "100 (root) Z 1 100 100"],
+      ["101", "101 (child) X 1 100 100"],
+      ["900", "900 (unrelated) S 1 900 900"],
+    ]);
+    const readStat = (pid: string) => states.get(pid)!;
+
+    expect(linuxProcessGroupCanExecute(100, {
+      processIds,
+      readStat,
+    })).toBe(false);
+    states.set("101", "101 (child) S 1 100 100");
+    expect(linuxProcessGroupCanExecute(100, {
+      processIds,
+      readStat,
+    })).toBe(true);
+    states.set("101", "malformed");
+    expect(linuxProcessGroupCanExecute(100, {
+      processIds,
+      readStat,
+    })).toBeNull();
+  });
+
   it("enforces the output ceiling and proves ordinary tree cleanup", async () => {
     let childPid = 0;
     try {
@@ -132,9 +150,9 @@ describe("provider drift process cleanup", () => {
       const reportedPid = /PID:(\d+)/u.exec((failure as Error).message)?.[1];
       expect(reportedPid).toBeDefined();
       childPid = Number.parseInt(reportedPid!, 10);
-      expect(processExists(childPid)).toBe(false);
+      expect(executableProcessExists(childPid)).toBe(false);
     } finally {
-      if (childPid > 0 && processExists(childPid)) {
+      if (childPid > 0 && executableProcessExists(childPid)) {
         try { process.kill(childPid, "SIGKILL"); } catch { /* already gone */ }
       }
     }
@@ -217,9 +235,9 @@ describe("provider drift process cleanup", () => {
         { timeoutMs: 1_000, cleanupTimeoutMs: 500 },
       )).rejects.toThrow("left descendant processes running");
       descendantPid = Number.parseInt(readFileSync(marker, "utf8"), 10);
-      expect(processExists(descendantPid)).toBe(false);
+      expect(executableProcessExists(descendantPid)).toBe(false);
     } finally {
-      if (descendantPid > 0 && processExists(descendantPid)) {
+      if (descendantPid > 0 && executableProcessExists(descendantPid)) {
         try { process.kill(descendantPid, "SIGKILL"); } catch { /* already gone */ }
       }
       rmSync(root, { recursive: true, force: true });
@@ -364,6 +382,28 @@ describe("provider drift ACP initialize", () => {
       });
       setInterval(() => {}, 1_000);
     `)).rejects.toThrow("initialize response is incompatible");
+  });
+
+  it.each(["", "agentInfo: null,"])("allows optional ACP metadata only when configured: %s", async (agentInfo) => {
+    const source = validResponse("agentCapabilities: { loadSession: true },", agentInfo);
+    await expect(acpFixture(source, { requireLoadSession: true }))
+      .rejects.toThrow("initialize response is incompatible");
+    await expect(acpFixture(source, {
+      allowMissingAgentInfo: true, requireLoadSession: true,
+    })).resolves.toBeUndefined();
+    await expect(acpFixture(validResponse("agentCapabilities: {},", agentInfo), {
+      allowMissingAgentInfo: true, requireLoadSession: true,
+    })).rejects.toThrow("does not advertise session resume support");
+  });
+
+  it.each([
+    '"Cursor"', '[]', '{}', '{ name: "Other Agent", version: "1" }',
+    '{ name: "Fixture Agent" }', '{ name: "Fixture Agent", version: 1 }',
+  ])("rejects incompatible present metadata even when omission is allowed: %s", async (agentInfo) => {
+    await expect(acpFixture(validResponse(
+      "agentCapabilities: { loadSession: true },", `agentInfo: ${agentInfo},`,
+    ), { allowMissingAgentInfo: true, requireLoadSession: true }))
+      .rejects.toThrow("initialize response is incompatible");
   });
 
   it("fails closed when exact-child cleanup is unconfirmed", async () => {

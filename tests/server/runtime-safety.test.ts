@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import Database from "better-sqlite3";
 import { describe, expect, it, vi } from "vitest";
 
 import { ConversationAttachmentStore } from "../../src/node/conversation-attachment-store";
@@ -16,6 +17,8 @@ import {
   type DarwinProcessIdentity,
 } from "../../src/node/runtime-owned-processes";
 import { RuntimeStore } from "../../src/server/database";
+import { migrateRuntimeDatabase, runtimeMigrationCatalog } from
+  "../../src/server/persistence/migrations/runtime-catalog";
 import { RUNTIME_COMMAND_TYPES } from "../../src/server/runtime/commands/command-router";
 import {
   RUNTIME_SAFETY_READ_COMMAND_TYPES,
@@ -109,28 +112,68 @@ describe("runtime recovery safety command boundary", () => {
       "reconcile",
     );
     try {
-      const runtime = await startTestRuntime({
+      await expect(startTestRuntime({
         dataDirectory,
         defaultWorkspacePath: workspaceDirectory,
         enableProviders: false,
         priorRuntimeCleanupUnconfirmed: true,
         runtimeGenerationId: "00000000-0000-4000-8000-000000000001:1",
         systemBootId: "test:00000000-0000-4000-8000-000000000001",
-      });
-      try {
-        expect(reconcile).not.toHaveBeenCalled();
-        await expect(attachmentStore.preview(attachmentId)).resolves
-          .toMatchObject({
-            attachment: { id: attachmentId },
-            bytes: Buffer.from([
-              0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
-            ]),
-          });
-      } finally {
-        await runtime.close();
-      }
+      })).rejects.toThrow("Runtime startup is blocked");
+      expect(reconcile).not.toHaveBeenCalled();
+      await expect(attachmentStore.preview(attachmentId)).resolves
+        .toMatchObject({
+          attachment: { id: attachmentId },
+          bytes: Buffer.from([
+            0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+          ]),
+        });
     } finally {
+      await attachmentStore.close();
       reconcile.mockRestore();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("does not migrate the database while prior cleanup is safety locked", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-runtime-safety-"));
+    const dataDirectory = join(root, "data");
+    const workspaceDirectory = join(root, "workspace");
+    const databasePath = join(dataDirectory, "inertia.sqlite");
+    mkdirSync(dataDirectory, { recursive: true, mode: 0o700 });
+    mkdirSync(workspaceDirectory);
+    const database = new Database(databasePath);
+    const priorVersion = runtimeMigrationCatalog().length - 1;
+    migrateRuntimeDatabase(database, priorVersion);
+    database.close();
+
+    try {
+      await expect(startTestRuntime({
+        dataDirectory,
+        defaultWorkspacePath: workspaceDirectory,
+        enableProviders: false,
+        priorRuntimeCleanupUnconfirmed: true,
+        runtimeGenerationId: "00000000-0000-4000-8000-000000000002:1",
+        systemBootId: "test:00000000-0000-4000-8000-000000000002",
+      })).rejects.toThrow("Runtime startup is blocked");
+      const unchanged = new Database(databasePath, {
+        fileMustExist: true,
+        readonly: true,
+      });
+      expect(unchanged.prepare(
+        "SELECT MAX(version) FROM schema_migrations",
+      ).pluck().get()).toBe(priorVersion);
+      expect((unchanged.prepare(
+        "PRAGMA table_info(agent_turns)",
+      ).all() as Array<{ name: string }>).some(
+        ({ name }) => name === "continuation_reason_code",
+      )).toBe(false);
+      expect((unchanged.prepare(`
+        SELECT sql FROM sqlite_master
+        WHERE type = 'table' AND name = 'model_backend_profiles'
+      `).pluck().get() as string)).toContain("'gemini-acp'");
+      unchanged.close();
+    } finally {
       rmSync(root, { recursive: true, force: true });
     }
   });

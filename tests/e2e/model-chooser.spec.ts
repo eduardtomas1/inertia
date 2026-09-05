@@ -1,3 +1,4 @@
+import { openLocalProjectFromDialog } from "./support/add-project";
 import { expect, test } from "@playwright/test";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -60,8 +61,7 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
     ).toBe("ready");
     await expect(
       page.getByRole("complementary", { name: "Project navigation", exact: true })
-        .locator(".sidebar-mode-switch")
-        .getByRole("button", { name: "Projects", exact: true }),
+        .getByRole("button", { name: "Add project", exact: true }),
     ).toBeEnabled({ timeout: 10_000 });
     await electronApp.evaluate(({ dialog }, directory) => {
       Reflect.set(dialog, "showOpenDialog", async () => ({
@@ -73,6 +73,7 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
     const addProject = page.getByRole("button", { name: "Add your first project" });
     await expect(addProject).toBeEnabled();
     await addProject.click();
+    await openLocalProjectFromDialog(page);
     await expect(page.getByRole("heading", {
       name: /^What should we build in .+\?$/u,
       level: 3,
@@ -542,100 +543,74 @@ test("uses the anchored model chooser and enforces authoritative route boundarie
     /Current selection: Codex .* Model Codex Beta \(codex-beta\)/u,
   );
 
-  const chooseKimi = async (): Promise<void> => {
-    await modelTrigger.click();
-    await modelChooser.getByRole("searchbox", { name: "Search models" })
-      .fill("Kimi K3");
-    const kimi = modelOptions
-      .filter({ hasText: /K3/u })
-      .filter({ hasText: /Kimi/u, hasNotText: /256K/u });
-    await expect(kimi).toBeEnabled();
-    await kimi.click();
-  };
-  await chooseKimi();
-  const routeConfirmation = page.getByRole("alertdialog");
-  await expect(routeConfirmation).toContainText(
-    "Open a new chat for Kimi · K3?",
-  );
-  await expect(routeConfirmation).toContainText(
-    "Start a new chat to use a different agent harness.",
-  );
-  const routeConfirmationAx = await routeConfirmation.ariaSnapshot();
-  expect(routeConfirmationAx).toContain(
-    '- alertdialog "Open a new chat for Kimi · K3?"',
-  );
-  expect(routeConfirmationAx).toContain('- button "Cancel"');
-  expect(routeConfirmationAx).toContain('- button "New chat"');
-  const cancelRouteChange = routeConfirmation.getByRole("button", {
-    name: "Cancel",
-  });
-  await expect(routeConfirmation).toHaveAttribute("aria-busy", "false");
-  await expect(cancelRouteChange).toBeFocused();
-  const routeFocusScreenshot = testInfo.outputPath(
-    "route-change-confirmation-focus-1440x720.png",
-  );
-  await page.locator(".composer").screenshot({
-    animations: "disabled",
-    path: routeFocusScreenshot,
-  });
-  await testInfo.attach("route-change-confirmation-focus-1440x720", {
-    path: routeFocusScreenshot,
-    contentType: "image/png",
-  });
-  await page.keyboard.press("Tab");
-  await expect(routeConfirmation.getByRole("button", {
-    name: "New chat",
-  })).toBeFocused();
-  await page.keyboard.press("Tab");
-  await expect(page.getByRole("textbox", { name: "Message" })).toBeFocused();
-  await page.keyboard.press("Shift+Tab");
-  await page.keyboard.press("Shift+Tab");
-  await expect(cancelRouteChange).toBeFocused();
-  await page.keyboard.press("Escape");
-  await expect(routeConfirmation).toHaveCount(0);
-  await expect(modelTrigger).toBeFocused();
-
-  await chooseKimi();
-  await expect(cancelRouteChange).toBeFocused();
-  await cancelRouteChange.click();
-  await expect(routeConfirmation).toHaveCount(0);
-  await expect(modelTrigger).toBeFocused();
-
-  await chooseKimi();
-  await expect(cancelRouteChange).toBeFocused();
-  await routeConfirmation.getByRole("button", { name: "New chat" }).click();
+  await modelTrigger.click();
+  await searchModels.fill("Kimi K3");
+  const kimi = modelOptions
+    .filter({ hasText: /K3/u })
+    .filter({ hasText: /Kimi/u, hasNotText: /256K/u });
+  await expect(kimi).toBeEnabled();
+  await kimi.click();
+  await expect(modelChooser).toBeHidden();
+  await expect(page.getByRole("alertdialog")).toHaveCount(0);
   await expect.poll(() => {
     const database = new Database(databasePath, { readonly: true });
-    const row = database.prepare(`
-      SELECT active_conversation_id,
-             (SELECT model_selection_json FROM conversations
-              WHERE id = app_state.active_conversation_id) AS selection,
-             (SELECT COUNT(*) FROM conversations) AS conversation_count
-      FROM app_state
-      WHERE id = 1
-    `).get() as {
-      active_conversation_id: string;
-      selection: string;
-      conversation_count: number;
-    };
-    database.close();
-    const selection = JSON.parse(row.selection) as {
-      backendProfileId: string;
-      modelId: string;
-    };
-    return {
-      activeChanged: row.active_conversation_id !== currentConversation.id,
-      backendProfileId: selection.backendProfileId,
-      modelId: selection.modelId,
-      conversationCount: row.conversation_count,
-    };
+    try {
+      const row = database.prepare(`
+        SELECT active_conversation_id,
+               (SELECT model_selection_json FROM conversations
+                WHERE id = app_state.active_conversation_id) AS selection,
+               (SELECT provider_session_id FROM conversations
+                WHERE id = app_state.active_conversation_id) AS provider_session_id,
+               (SELECT continuation_identity_json FROM conversations
+                WHERE id = app_state.active_conversation_id) AS continuation_identity,
+               (SELECT COUNT(*) FROM conversations) AS conversation_count
+        FROM app_state
+        WHERE id = 1
+      `).get() as {
+        active_conversation_id: string;
+        selection: string;
+        provider_session_id: string | null;
+        continuation_identity: string | null;
+        conversation_count: number;
+      };
+      const selection = JSON.parse(row.selection) as {
+        backendProfileId: string;
+        modelId: string;
+      };
+      return {
+        activeId: row.active_conversation_id,
+        backendProfileId: selection.backendProfileId,
+        modelId: selection.modelId,
+        providerSessionId: row.provider_session_id,
+        continuationIdentity: row.continuation_identity,
+        conversationCount: row.conversation_count,
+      };
+    } finally {
+      database.close();
+    }
   }).toEqual({
-    activeChanged: true,
+    activeId: currentConversation.id,
     backendProfileId: "builtin:kimi-code",
     modelId: "k3",
-    conversationCount: conversationCountBefore + 1,
+    providerSessionId: null,
+    continuationIdentity: null,
+    conversationCount: conversationCountBefore,
   });
-  await expect(routeConfirmation).toHaveCount(0);
+  const preservedStore = new RuntimeStore(databasePath, workspaceDirectory, {
+    recoverInterruptedRuns: false,
+  });
+  try {
+    expect(preservedStore.agentTurn(turn.id)).toMatchObject({
+      conversationId: currentConversation.id,
+      providerSessionAfter: "composer-e2e-session",
+      modelSelection: alpha,
+      status: "completed",
+    });
+  } finally {
+    preservedStore.close();
+  }
+  await expect(page.getByText("Keep the authoritative Codex route.", { exact: true }))
+    .toBeVisible();
   await expect(modelTrigger).toHaveAccessibleName(
     /Current selection: Claude .* Kimi .* Model K3 \(k3\)/u,
   );

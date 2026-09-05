@@ -22,6 +22,11 @@ import {
 } from "node:fs";
 import { basename, dirname, isAbsolute, join, win32 } from "node:path";
 
+import {
+  linuxProcessCanExecute,
+  linuxProcessGroupCanExecute,
+} from "./linux-process-group.mjs";
+
 const waitBuffer = new Int32Array(new SharedArrayBuffer(4));
 const maximumExecutableSize = 1024 * 1024;
 // PID reuse is bounded without allowing normal hosted packaging (including a
@@ -130,6 +135,10 @@ function validLockRecord(record) {
 }
 
 function processIsAlive(pid) {
+  if (process.platform === "linux") {
+    const executable = linuxProcessCanExecute(pid);
+    if (executable !== null) return executable;
+  }
   try {
     process.kill(pid, 0);
     return true;
@@ -228,6 +237,10 @@ function processIdentity(pid) {
 function processGroupIsAlive(processGroupId) {
   if (process.platform === "win32" || !Number.isSafeInteger(processGroupId)) {
     return false;
+  }
+  if (process.platform === "linux") {
+    const executable = linuxProcessGroupCanExecute(processGroupId);
+    if (executable !== null) return executable;
   }
   try {
     process.kill(-processGroupId, 0);

@@ -1,3 +1,4 @@
+// @inertia-test-suite portable
 import { afterEach, describe, expect, it } from "vitest";
 
 import type {
@@ -82,6 +83,8 @@ function unitProjector(events?: AgentHarnessEvent[]): ClaudeMessageProjector {
       "claude",
       "unit-projector",
       events ? { onEvent: (event) => events.push(event) } : undefined,
+      "unit-projector-run",
+      "unit-projector-turn",
     ),
     text: new CappedProviderBuffer(8 * 1024 * 1024),
     usesNativeAnthropic: false,
@@ -121,6 +124,7 @@ describe("Claude Agent SDK message projection", () => {
       }),
       executable: process.execPath,
       environment: {},
+      providerNativeToolsAvailable: true,
       callbacks: { onEvent: (event) => events.push(event) },
     });
     return { events, result: await providerRun.result };
@@ -632,6 +636,7 @@ describe("Claude Agent SDK message projection", () => {
       }),
       executable: process.execPath,
       environment: {},
+      providerNativeToolsAvailable: true,
       callbacks: { onEvent: (event) => events.push(event) },
     });
 

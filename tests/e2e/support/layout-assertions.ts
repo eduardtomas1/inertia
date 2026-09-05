@@ -1,5 +1,19 @@
 import { expect, type Locator, type Page } from "@playwright/test";
 
+export async function verifyMobileNavigationControls(page: Page): Promise<void> {
+  const navigation = page.getByRole("complementary", {
+    name: "Project navigation",
+    exact: true,
+  });
+  // CSS can expose the close control before the media-query state settles.
+  // Establish the closed drawer before exercising its open/close controls.
+  await expect(page.locator(".sidebar")).toHaveAttribute("aria-hidden", "true");
+  await page.getByRole("button", { name: "Toggle project navigation" }).click();
+  await expect(navigation).toBeVisible();
+  await navigation.getByRole("button", { name: "Close navigation" }).click();
+  await expect(navigation).toBeHidden();
+}
+
 export async function expectNoViewportOverflow(page: Page): Promise<void> {
   const measurements = await page.evaluate(() => ({
     innerWidth: window.innerWidth,

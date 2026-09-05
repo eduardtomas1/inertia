@@ -371,6 +371,7 @@ export async function closeElectronAppBounded(
 export async function closeElectronFixtureBounded(options: {
   readonly current: ElectronApplication | null;
   readonly priorRuntimePid?: number | null;
+  readonly readRuntimePid?: () => Promise<number | null>;
   readonly prepareRuntimeQuit?: () => Promise<ElectronPrivilegedCleanupReceipt>;
   readonly readRuntimeQuitPhase?: () => Promise<string>;
   readonly requestRuntimeQuit: () => Promise<number | null>;
@@ -393,6 +394,18 @@ export async function closeElectronFixtureBounded(options: {
         childProcess = options.current.process();
       } catch (error) {
         cleanupErrors.push(error);
+      }
+      if (options.readRuntimePid) {
+        // This advisory snapshot must not prevent bounded cleanup when the
+        // main-process inspector stops responding. Retain the child first;
+        // the privileged cleanup receipt still supplies authoritative proof.
+        const snapshot = await settleOperationBounded(
+          Promise.resolve().then(options.readRuntimePid),
+          options.rpcTimeoutMs ?? 1_000,
+        );
+        if (snapshot.status === "fulfilled" && snapshot.value !== null) {
+          runtimePid = snapshot.value;
+        }
       }
       let quitFailure: unknown;
       let quitResult: BoundedOperationResult<number | null>;

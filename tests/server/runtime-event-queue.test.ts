@@ -59,9 +59,10 @@ describe("runtime event test queue", () => {
     vi.useFakeTimers();
     const socket = new EventEmitter();
     const events = new RuntimeEventQueue(socket as unknown as WebSocket);
+    const requestId = randomUUID();
     const pending = request
       ? events.nextForRequest(
-          randomUUID(),
+          requestId,
           (event): event is Extract<ServerEvent, { type: "request.ok" }> =>
             event.type === "request.ok",
           Date.now() + timeoutMs,
@@ -71,16 +72,26 @@ describe("runtime event test queue", () => {
             event.type === "request.ok",
         );
     let settled = false;
-    void pending.catch(() => {
-      settled = true;
-    });
+    const rejection = pending.then(
+      () => {
+        settled = true;
+        return null;
+      },
+      (error: unknown) => {
+        settled = true;
+        return error;
+      },
+    );
 
     await vi.advanceTimersByTimeAsync(timeoutMs - 1);
     expect(settled).toBe(false);
-    const rejected = expect(pending).rejects.toThrow(
-      "Timed out waiting for a server event.",
-    );
     await vi.advanceTimersByTimeAsync(1);
-    await rejected;
+    const error = await rejection;
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain(
+      request
+        ? `Timed out waiting for request ${requestId}.`
+        : "Timed out waiting for a server event.",
+    );
   });
 });

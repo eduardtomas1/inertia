@@ -48,7 +48,21 @@ export default defineConfig({
           exclude: [
             "tests/performance/**/*.benchmark.test.ts",
             "tests/renderer/**/*.dom.test.tsx",
+            "tests/server/runtime.test.ts",
           ],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: "runtime-integration",
+          environment: "node",
+          include: ["tests/server/runtime.test.ts"],
+          maxWorkers: 1,
+          fileParallelism: false,
+          sequence: {
+            groupOrder: 1,
+          },
         },
       },
       {

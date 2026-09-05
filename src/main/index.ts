@@ -28,7 +28,6 @@ import {
   type AppHealthSnapshot,
   parseAttachmentPickerMode, parseDesktopNotificationRequest,
   parseOpenProjectPathRequest,
-  type RuntimeConnectionUnavailable,
 } from "../shared/desktop.js";
 import { PREVIEW_AGENT_INPUT_REFUSAL_CHANNEL } from "../shared/preview-agent-privacy-guard.js";
 import { safeHttpUrl } from "../shared/preview-url.js";
@@ -62,10 +61,15 @@ import {
   openConversationAttachments,
 } from "./conversation-attachment-access.js";
 import { AppUpdateService } from "./app-update.js";
+import { validateDesktopAppUpdateCandidate } from "./app-update-candidate-viability.js";
+import { AppUpdateRuntimeReadiness } from "./app-update-runtime-readiness.js";
+import { startApplicationWithUpdateHandoff } from "./app-update-startup.js";
 import { AppHealthCollector, InertiaHealthRegistry } from "./app-health.js";
 import { registerInertiaReleaseIpc } from "./inertia-release-ipc.js";
+import { registerLifecycleSupportReportIpc } from "./lifecycle-support-report.js";
 import { resolveAppUpdateCapability } from "./app-update-capability.js";
-import { AppUpdateInstallCoordinator } from "./app-update-install.js";
+import { AppUpdateInstallCoordinator, appUpdateInstallRuntimeContext } from
+  "./app-update-install.js";
 import { CanaryRollbackManager } from "./canary-rollback.js";
 import { APP_UPDATE_IPC, registerAppUpdateIpc } from "./app-update-ipc.js";
 import { initializeReleaseUpdates } from "./release-updates.js";
@@ -80,6 +84,8 @@ import { RuntimeDiagnostics, runtimeDiagnosticsDirectory } from "./runtime-diagn
 import { PreviewBroker, hardenDesktopSession } from "./preview-broker.js";
 import { showBrowserEvidenceImageWindow } from "./browser-evidence-image-inspector.js";
 import { RuntimeSupervisor } from "./runtime-supervisor.js";
+import { RuntimeConnectionUnavailableError } from
+  "./runtime-supervisor-connection.js";
 import { RuntimeSystemSuspendDelivery } from "./runtime-system-suspend-delivery.js";
 import { RuntimeSystemSuspendTracker } from "./runtime-system-suspend-tracker.js";
 import * as runtimeBootstrap from "./runtime-bootstrap-safety.js";
@@ -88,8 +94,7 @@ import { RuntimeLiveDarwinRecoveryCoordinator } from "./runtime-live-darwin-reco
 import { resolveDesktopRuntimeProcessSafetyAssets } from "./runtime-windows-job-bootstrap.js";
 import { disposeWindowsRuntimeJobExecutableLock, prepareWindowsRuntimeJobExecutableLock } from "./windows-runtime-job.js";
 import {
-  cleanupPrivilegedOwners, finishNormalShutdownAfterCleanup,
-  finishPrivilegedExit,
+  cleanupPrivilegedOwners, finishPrivilegedExit,
 } from "./privileged-shutdown.js";
 import { registerClipboardIpc } from "./clipboard-ipc.js";
 import { registerCredentialVaultIpc } from "./credential-vault-ipc.js";
@@ -97,7 +102,7 @@ import { createDetachedChatMain, type DetachedChatMain } from "./detached-chat-b
 import * as detachedChatClose from "./detached-chat-close-coordinator.js";
 import { PrivateConnectHost } from "./private-connect/host.js";
 import { SecureFileBroker } from "./secure-file-broker.js";
-import { packageSmokeEnvironment } from "./package-smoke-environment.js";
+import { initialPackageSmokeEnvironment, writePackageSmokeStage } from "./package-smoke-environment.js";
 import { waitForRequestedPackageSmokeResults } from "./package-smoke-results.js";
 import { APP_HOST, createAppProtocolRegistrar } from "./app-protocol.js";
 import { initializeInertiaReleaseChannel, releaseRuntimeOverride } from "./release-channel.js";
@@ -182,6 +187,7 @@ let privilegedCleanup: Promise<boolean> | null = null;
 let packageSmokeFilePath: string | null = null;
 let packageSmokeOwnerToken: string | null = null;
 const appHealthRegistry = new InertiaHealthRegistry();
+const appUpdateRuntimeReadiness = new AppUpdateRuntimeReadiness();
 appHealthRegistry.registerProcess("main", () => process.pid);
 appHealthRegistry.registerProcess(
   "runtime",
@@ -219,6 +225,17 @@ function windowAppearancePath(): string { return join(app.getPath("userData"), W
 
 function attachmentStorageRoot(): string {
   return join(app.getPath("temp"), releaseChannel.temporaryAttachmentDirectoryName);
+}
+
+function configuredRuntimeDataDirectory(): string {
+  const configured = releaseRuntimeOverride({
+    configuration: releaseChannel,
+    isPackaged: app.isPackaged,
+    packageSmokeRoot,
+    configuredPath: process.env.INERTIA_DATA_DIR,
+    smokeDirectoryName: "data",
+  });
+  return runtimeBootstrap.runtimeDataPath(configured, app.getPath("userData"));
 }
 
 function attachmentDirectory(): string {
@@ -368,23 +385,18 @@ function assertTrustedChatIpc(event: IpcMainInvokeEvent, argumentCount: number, 
   return detachedChatMain.assertTrustedChatIpc(event, argumentCount, expectedArguments);
 }
 
-function runtimeConnectionUnavailable(message: string): RuntimeConnectionUnavailable {
-  return { unavailable: true, message };
-}
-function isTransientRuntimeConnectionError(error: unknown): error is Error {
-  return error instanceof Error && (
-    error.message.startsWith("The local service is starting.")
-    || error.message.startsWith("The local service is restarting.")
-  );
-}
-
 function registerIpcHandlers(): void {
   ipcMain.on(PREVIEW_AGENT_INPUT_REFUSAL_CHANNEL, (event, value) => { event.returnValue = previewBroker.reportInputRefusal(event.sender, value); });
   ipcMain.handle(IPC.getRuntimeConnection, (event, ...args) => {
     const context = assertTrustedChatIpc(event, args.length);
 
     if (!runtimeSupervisor) {
-      return runtimeConnectionUnavailable("The local runtime is not available.");
+      return {
+        unavailable: true,
+        code: "runtime-unavailable",
+        retryable: false,
+        message: "The local runtime is not available.",
+      };
     }
 
     try {
@@ -395,8 +407,8 @@ function registerIpcHandlers(): void {
             `web-contents:${event.sender.id}`,
           );
     } catch (error) {
-      if (isTransientRuntimeConnectionError(error)) {
-        return runtimeConnectionUnavailable(error.message);
+      if (error instanceof RuntimeConnectionUnavailableError) {
+        return error.connection;
       }
       throw error;
     }
@@ -501,21 +513,22 @@ function registerIpcHandlers(): void {
     return await shell.openPath(directory);
   });
 
-  ipcMain.handle(IPC.copyRuntimeDiagnosticReport, async (event, ...args) => {
-    assertTrustedIpc(event, args.length);
-    const diagnostics = runtimeDiagnostics
-      ?? new RuntimeDiagnostics(runtimeDiagnosticsDirectory(app.getPath("userData")));
-    runtimeDiagnostics = diagnostics;
-    const report = diagnostics.supportReport({
-      version: app.getVersion(),
-      channel: releaseChannel.channel,
-      platform: process.platform,
-      architecture: process.arch,
-      runtime: runtimeSupervisor?.snapshot() ?? null,
-    });
-    await clipboard.writeText(report.text);
-    diagnostics.record("report.copy");
-    return { copied: true, eventCount: report.eventCount };
+  registerLifecycleSupportReportIpc({
+    ipcMain, channel: IPC.copyRuntimeDiagnosticReport, assertTrustedIpc,
+    createInput: () => {
+      const diagnostics = runtimeDiagnostics
+        ?? new RuntimeDiagnostics(runtimeDiagnosticsDirectory(app.getPath("userData")));
+      runtimeDiagnostics = diagnostics;
+      return {
+        diagnostics,
+        version: app.getVersion(), channel: releaseChannel.channel,
+        platform: process.platform, architecture: process.arch,
+        runtime: runtimeSupervisor?.snapshot() ?? null,
+        appUpdateStatus: appUpdateService?.current() ?? null,
+        dataDirectory: configuredRuntimeDataDirectory(),
+        writeClipboard: (text) => clipboard.writeText(text),
+      };
+    },
   });
 
   registerInertiaReleaseIpc(
@@ -958,6 +971,9 @@ async function bootstrap(): Promise<void> {
   appUpdateInstallCoordinator = new AppUpdateInstallCoordinator({
     service: appUpdateService, runtime: () => runtimeSupervisor,
     privateConnect: () => privateConnectHost, cleanup: runPrivilegedCleanup,
+    handoffContext: () => appUpdateInstallRuntimeContext(
+      runtimeSupervisor?.updateHandoffIdentity(), runtimeDataDirectory,
+      app.getPath("userData")),
     finishNormalShutdown: finishQuitAfterCleanup,
     onUnconfirmedShutdown: () => console.error("Refusing to exit because privileged shutdown could not be confirmed."),
     reportError: (error) => console.error("Failed to prepare the application update", error),
@@ -968,11 +984,7 @@ async function bootstrap(): Promise<void> {
     mainWindow?.setBackgroundColor(backgroundColor);
     detachedChatMain?.setBackgroundColor(backgroundColor);
   });
-  const configuredDataDirectory = releaseRuntimeOverride({ configuration: releaseChannel,
-    isPackaged: app.isPackaged, packageSmokeRoot,
-    configuredPath: process.env.INERTIA_DATA_DIR, smokeDirectoryName: "data" });
-  const dataDirectory = runtimeBootstrap.runtimeDataPath(configuredDataDirectory,
-    app.getPath("userData"));
+  const dataDirectory = configuredRuntimeDataDirectory();
   runtimeDataDirectory = dataDirectory;
   const { runtimeProcessGuardianPath, windowsRuntimeJobAssembly } = resolveDesktopRuntimeProcessSafetyAssets();
   // Prime the verified launch broker before the short recovery deadline.
@@ -1020,7 +1032,7 @@ async function bootstrap(): Promise<void> {
   const orphanReservation = attachmentStorage.reservation;
   attachmentReservation = orphanReservation;
 
-  const packageSmoke = packageSmokeEnvironment();
+  const packageSmoke = initialPackageSmokeEnvironment;
   packageSmokeFilePath = packageSmoke.marker;
   packageSmokeOwnerToken = packageSmoke.ownerToken;
   const {
@@ -1113,6 +1125,7 @@ async function bootstrap(): Promise<void> {
       },
     ),
     onStateChange: (snapshot) => {
+      appUpdateRuntimeReadiness.observe(snapshot);
       suspendDelivery.runtimeState(snapshot.phase, snapshot.generation);
       runtimeDiagnostics?.recordState(snapshot);
       if (
@@ -1139,6 +1152,7 @@ async function bootstrap(): Promise<void> {
             websocketUrl: snapshot.websocketUrl,
             timestampMs: Date.now(),
             ownerToken: packageSmokeOwnerToken,
+            appImageFileDescriptorIdentity: packageSmoke.appImageFileDescriptorIdentity,
           }),
           { encoding: "utf8", mode: 0o600, flag: "wx" },
         ).then(async () => {
@@ -1197,53 +1211,38 @@ async function bootstrap(): Promise<void> {
   }
 }
 
-const hasSingleInstanceLock = app.requestSingleInstanceLock();
-if (!hasSingleInstanceLock) {
-  app.quit();
-} else {
-  app.on("second-instance", focusMainWindow);
-  app.on("activate", focusMainWindow);
-  app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
-  app.on("before-quit", (event) => {
-    if (appUpdateInstallCoordinator?.allowBeforeQuit()) return;
-    event.preventDefault();
-    recordPackageSmokeStage("before-quit");
-    if (!appUpdateInstallCoordinator) {
-      void runPrivilegedCleanup().then((cleanupConfirmed) => {
-        finishNormalShutdownAfterCleanup({ cleanupConfirmed,
-          finish: finishQuitAfterCleanup, onUnconfirmed: () => console.error(
-            "Refusing to exit because privileged shutdown could not be confirmed."),
-        });
-      }, (error: unknown) => console.error("Failed to finish privileged shutdown", error));
-    }
-  });
+void startApplicationWithUpdateHandoff({
+  application: app, platform: process.platform, environment: process.env,
+  channel: releaseChannel.channel, version: app.getVersion(),
+  executablePath: process.execPath, dataDirectory: configuredRuntimeDataDirectory(),
+  profileDirectory: app.getPath("userData"), focusMainWindow,
+  runtimeProcessGuardianPath: resolveDesktopRuntimeProcessSafetyAssets()
+    .runtimeProcessGuardianPath,
+  updateInstallCoordinator: () => appUpdateInstallCoordinator,
+  recordBeforeQuit: () => recordPackageSmokeStage("before-quit"),
+  cleanupBeforeQuit: runPrivilegedCleanup,
+  finishNormalShutdown: finishQuitAfterCleanup,
+  onUnconfirmedShutdown: () => console.error(
+    "Refusing to exit because privileged shutdown could not be confirmed."),
+  reportCleanupFailure: (error) => console.error(
+    "Failed to finish privileged shutdown", error),
+  validateCandidateBootstrap: async (operationId, expectedActiveRuntimeOwner) => await validateDesktopAppUpdateCandidate({ operationId, dataDirectory: configuredRuntimeDataDirectory(), expectedActiveRuntimeOwner }),
+  bootstrap,
+  awaitCandidateReadiness: async () => await appUpdateRuntimeReadiness.wait(),
+  cleanupFailedCandidate: runPrivilegedCleanup,
+  reportCandidateFailure: (message, error) => console.error(message, error),
+}).catch((error: unknown) => handleStartupFailure(error, {
+  environment: process.env,
+  recordDiagnostic: (message) => runtimeDiagnostics?.record("runtime.failure", {
+    phase: "starting", message,
+  }),
+  logFailure: (failure) => console.error("Failed to start Inertia", failure),
+  showErrorBox: (title, content) => dialog.showErrorBox(title, content),
+  quit: () => app.quit(),
+}));
 
-  void app
-    .whenReady()
-    .then(bootstrap)
-    .catch((error: unknown) => {
-      handleStartupFailure(error, {
-        environment: process.env,
-        recordDiagnostic: (message) => runtimeDiagnostics?.record("runtime.failure", {
-          phase: "starting",
-          message,
-        }),
-        logFailure: (failure) => console.error("Failed to start Inertia", failure),
-        showErrorBox: (title, content) => dialog.showErrorBox(title, content),
-        quit: () => app.quit(),
-      });
-    });
-}
 function recordPackageSmokeStage(stage: string): void {
-  if (!packageSmokeFilePath) return;
-  try {
-    writeFileSync(`${packageSmokeFilePath}.${stage}.json`, JSON.stringify({
-      stage,
-      pid: process.pid,
-      timestampMs: Date.now(),
-      ownerToken: packageSmokeOwnerToken,
-    }), { encoding: "utf8", mode: 0o600, flag: "wx" });
-  } catch {
-    // Packaged smoke diagnostics are best effort and test-only.
-  }
+  writePackageSmokeStage({
+    marker: packageSmokeFilePath, ownerToken: packageSmokeOwnerToken, stage,
+  });
 }

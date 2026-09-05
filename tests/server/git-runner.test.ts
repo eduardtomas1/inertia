@@ -20,6 +20,7 @@ import {
   waitFor,
   writeNodeSubcommand,
 } from "../helpers/portable-provider-fixture";
+import { executableProcessExists } from "../helpers/executable-process";
 
 const temporaryDirectories: string[] = [];
 const descendantPids: number[] = [];
@@ -38,15 +39,6 @@ afterEach(async () => {
     temporaryDirectories.splice(0).map(removePortableFixture),
   );
 });
-
-function processExists(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 function deferred(): { promise: Promise<void>; resolve(): void } {
   let resolve!: () => void;
@@ -716,7 +708,7 @@ setInterval(() => {}, 1000);
       } satisfies Partial<GitError>);
       await waitFor(
         "the aborted Git descendant to stop",
-        () => !processExists(descendantPid),
+        () => !executableProcessExists(descendantPid),
       );
       await rm(directory, { force: true, recursive: true });
       temporaryDirectories.splice(temporaryDirectories.indexOf(directory), 1);
@@ -836,7 +828,7 @@ setInterval(() => {}, 1000);
       await rejection;
       await waitFor(
         "the Git descendant to stop",
-        () => !processExists(descendantPid),
+        () => !executableProcessExists(descendantPid),
       );
       // The runner promise is also the ownership boundary for the executable
       // itself. Windows must be able to remove the copied git.exe immediately,
@@ -1062,7 +1054,7 @@ setInterval(() => {}, 1000);
         descendantPids.push(descendantPid);
 
         await rejection;
-        expect(processExists(descendantPid)).toBe(false);
+        expect(executableProcessExists(descendantPid)).toBe(false);
       } finally {
         if (previousPath === undefined) delete process.env.PATH;
         else process.env.PATH = previousPath;

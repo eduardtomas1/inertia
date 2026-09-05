@@ -475,7 +475,7 @@ async function main() {
         options.cursorAgent,
         ["acp"],
         { cwd: options.workspace, environment },
-        { expectedAgent: "Cursor", requireLoadSession: true },
+        { expectedAgent: "Cursor", requireLoadSession: true, allowMissingAgentInfo: true },
       );
     });
   }

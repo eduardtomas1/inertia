@@ -855,8 +855,8 @@ export async function createAppFixture(
     if (!electronApp) throw new Error("The Electron fixture is unavailable");
     return electronApp;
   };
-  const runtimeSnapshot = async (): Promise<RuntimeTestSnapshot> => {
-    const snapshot = await currentApp().evaluate(() => {
+  const runtimeSnapshot = async (current = currentApp()): Promise<RuntimeTestSnapshot> => {
+    const snapshot = await current.evaluate(() => {
       const runtime = Reflect.get(
         globalThis,
         "__inertiaTestRuntime",
@@ -977,13 +977,10 @@ export async function createAppFixture(
     },
     close: async () => {
       const activeApp = electronApp;
-      const priorRuntimePid = activeApp
-        ? (await runtimeSnapshot().catch(() => null))?.pid ?? null
-        : null;
       electronApp = null;
       await closeElectronFixtureBounded({
         current: activeApp,
-        priorRuntimePid,
+        readRuntimePid: async () => activeApp ? (await runtimeSnapshot(activeApp)).pid : null,
         rpcTimeoutMs: FIXTURE_RPC_TEARDOWN_TIMEOUT_MS,
         prepareRuntimeQuit: async () => await prepareElectronPrivilegedCleanup(activeApp),
         readRuntimeQuitPhase: async () => await readElectronPrivilegedCleanupPhase(activeApp),

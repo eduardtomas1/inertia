@@ -86,6 +86,80 @@ async function withTimeout(promise, timeoutMs, message) {
   }
 }
 
+async function waitForLinuxGuardianReady(stream) {
+  let bytes = Buffer.alloc(0);
+  await withTimeout(new Promise((resolveReady, rejectReady) => {
+    const fail = (message) => rejectReady(new Error(message));
+    stream.on("data", (chunk) => {
+      bytes = Buffer.concat([bytes, Buffer.from(chunk)]);
+      if (bytes.length > 1 || bytes[0] !== 0x52) {
+        fail("The packaged AppImage guardian readiness event is invalid.");
+      }
+    });
+    stream.once("error", () => fail(
+      "The packaged AppImage guardian readiness channel failed.",
+    ));
+    stream.once("end", () => {
+      if (bytes.length !== 1 || bytes[0] !== 0x52) {
+        fail("The packaged AppImage guardian readiness event is incomplete.");
+      } else resolveReady();
+    });
+  }), STARTUP_TIMEOUT_MS, "The packaged AppImage guardian readiness timed out.");
+}
+
+function runPackagedLinuxGuardianHelper(guardian, arguments_, label) {
+  const result = spawnSync(guardian, arguments_, {
+    encoding: "utf8",
+    env: { PATH: "/usr/bin:/bin" },
+    maxBuffer: 4 * 1024,
+    shell: false,
+    timeout: 5_000,
+  });
+  if (
+    result.error
+    || result.status !== 0
+    || result.signal
+    || result.stderr !== ""
+  ) throw new Error(`The packaged AppImage guardian ${label} failed.`);
+  return result.stdout;
+}
+
+function admitPackagedAppImageGuardian(options) {
+  const raw = runPackagedLinuxGuardianHelper(
+    options.guardian,
+    ["ready", String(options.pid)],
+    "identity proof",
+  ).trim();
+  const fields = raw.split("|");
+  if (
+    fields.length !== 6
+    || fields.some((field) => !/^[1-9][0-9]*$/u.test(field))
+    || Number(fields[0]) !== options.pid
+    || Number(fields[1]) !== process.pid
+    || Number(fields[2]) !== options.pid
+    || fields[4] !== options.guardianDevice
+    || fields[5] !== options.guardianInode
+  ) throw new Error("The packaged AppImage guardian identity is invalid.");
+  const signalArguments = (action) => [
+    "signal",
+    fields[0],
+    fields[3],
+    fields[4],
+    fields[5],
+    action,
+  ];
+  for (const action of ["claim", "exec", "detach"]) {
+    const output = runPackagedLinuxGuardianHelper(
+      options.guardian,
+      signalArguments(action),
+      `${action} transition`,
+    );
+    if (output !== "") {
+      throw new Error(`The packaged AppImage guardian ${action} emitted output.`);
+    }
+  }
+}
+
 async function isExecutableFile(path) {
   try {
     const value = await stat(path);
@@ -278,7 +352,7 @@ function validateUpdateConfiguration(source, capability) {
   }
 }
 
-async function requirePackagedAssets(executable) {
+async function requirePackagedAssets(executable, expectedVersion) {
   const executableDirectory = dirname(executable);
   const explicitResources = boundedExactPathEnvironment("INERTIA_PACKAGE_SMOKE_RESOURCES");
   if (explicitResources) {
@@ -307,27 +381,28 @@ async function requirePackagedAssets(executable) {
     throw new Error(`Expected exactly one packaged app.asar next to ${executable}; found ${resources.length}.`);
   }
   const [{ directory: resourcesDirectory, archive }] = resources;
+  let runtimeGuardian = null;
   if (process.platform === "darwin" || process.platform === "linux") {
-    const guardian = join(
+    runtimeGuardian = join(
       resourcesDirectory,
       "runtime",
       "runtime-process-guardian",
     );
-    const metadata = await lstat(guardian).catch(() => null);
+    const metadata = await lstat(runtimeGuardian).catch(() => null);
     if (
       !metadata
       || metadata.isSymbolicLink()
       || !metadata.isFile()
       || metadata.size <= 0
       || metadata.size > MAX_RUNTIME_GUARDIAN_BYTES
-      || !await isExecutableFile(guardian)
+      || !await isExecutableFile(runtimeGuardian)
     ) {
       throw new Error(
         `The packaged ${process.platform} runtime process guardian is missing or invalid.`,
       );
     }
     if (process.platform === "linux") {
-      const guardianSelftest = spawnSync(guardian, ["seccomp-selftest"], {
+      const guardianSelftest = spawnSync(runtimeGuardian, ["seccomp-selftest"], {
         encoding: "utf8",
         env: { PATH: "/usr/bin:/bin" },
         maxBuffer: 4 * 1024,
@@ -433,6 +508,9 @@ async function requirePackagedAssets(executable) {
   if (!plainObject(manifest) || !plainObject(manifest.dependencies)) {
     throw new Error("The packaged package.json has no production dependency map.");
   }
+  if (expectedVersion !== undefined && manifest.version !== expectedVersion) {
+    throw new Error("The packaged application version does not match the smoke target.");
+  }
   const declaredUpdaterVersion = manifest.dependencies["electron-updater"];
   if (
     typeof declaredUpdaterVersion !== "string"
@@ -487,6 +565,7 @@ async function requirePackagedAssets(executable) {
       ? `Packaged in-app updater verified (${declaredUpdaterVersion}, ${capability.platform}).`
       : `Packaged manual updater fallback verified (${declaredUpdaterVersion}, ${capability.reason}).`,
   );
+  return { resourcesDirectory, runtimeGuardian };
 }
 
 async function createUpdateNetworkTrap() {
@@ -844,8 +923,23 @@ const requestedPackageKind = process.env.INERTIA_PACKAGE_SMOKE_KIND;
 if (requestedPackageKind !== undefined && !PACKAGE_KINDS.has(requestedPackageKind)) {
   throw new Error("INERTIA_PACKAGE_SMOKE_KIND must identify a reviewed package path.");
 }
-await requirePackagedAssets(executable);
+const expectedPackageVersion = process.env.INERTIA_PACKAGE_SMOKE_EXPECTED_VERSION;
+if (
+  expectedPackageVersion !== undefined
+  && !STABLE_VERSION_PATTERN.test(expectedPackageVersion)
+) {
+  throw new Error(
+    "INERTIA_PACKAGE_SMOKE_EXPECTED_VERSION must be an exact stable version.",
+  );
+}
+const packagedAssets = await requirePackagedAssets(
+  executable,
+  expectedPackageVersion,
+);
 const supervisorRoot = boundedExactPathEnvironment("INERTIA_PACKAGE_SMOKE_SUPERVISOR_ROOT");
+const persistentStateRoot = boundedExactPathEnvironment(
+  "INERTIA_PACKAGE_SMOKE_STATE_ROOT",
+);
 const supervisorProcessGroupFile = boundedExactPathEnvironment(
   "INERTIA_PACKAGE_SMOKE_PROCESS_GROUP_FILE",
 );
@@ -882,17 +976,40 @@ if (supervisorRoot !== undefined) {
     || handoffRequest?.ownerToken !== supervisorProcessGroupToken
   ) throw new Error("The package-smoke process-group handoff request is invalid.");
 }
+if (persistentStateRoot !== undefined) {
+  const stateMetadata = await lstat(persistentStateRoot).catch(() => null);
+  if (
+    stateMetadata === null
+    || stateMetadata.isSymbolicLink()
+    || !stateMetadata.isDirectory()
+    || (
+      process.platform !== "win32"
+      && (
+        stateMetadata.uid !== process.geteuid()
+        || (stateMetadata.mode & 0o077) !== 0
+      )
+    )
+  ) {
+    throw new Error(
+      "INERTIA_PACKAGE_SMOKE_STATE_ROOT must be an owner-private direct directory.",
+    );
+  }
+}
 const temporaryRoot = await mkdtemp(join(supervisorRoot ?? tmpdir(), "inertia-package-smoke-"));
 const markerPath = join(temporaryRoot, "ready.json");
-const dataDirectory = join(temporaryRoot, "data");
-const workspaceDirectory = join(temporaryRoot, "workspace");
-const profileDirectory = join(temporaryRoot, "profile");
+const stateRoot = persistentStateRoot ?? temporaryRoot;
+const dataDirectory = join(stateRoot, "data");
+const workspaceDirectory = join(stateRoot, "workspace");
+const profileDirectory = join(stateRoot, "profile");
 let child = null;
 let readiness = null;
 let cleanupOwnedPids = null;
 let stdout = "";
 let stderr = "";
 let launchedAt = 0;
+let appImageFileHandle = null;
+let expectedAppImageFileDescriptorIdentity = null;
+let appImageGuardianIdentity = null;
 const ownerToken = randomUUID();
 const launchMode = resolvePackageSmokeLaunchMode({
   configuredMode: process.env.INERTIA_PACKAGE_SMOKE_LAUNCH_MODE,
@@ -900,6 +1017,29 @@ const launchMode = resolvePackageSmokeLaunchMode({
   packageKind: requestedPackageKind,
 });
 const updateNetworkTrap = await createUpdateNetworkTrap();
+const proveAppImageFileDescriptorChain =
+  process.env.INERTIA_PACKAGE_SMOKE_PROVE_APPIMAGE_FD_CHAIN === "1";
+if (
+  process.env.INERTIA_PACKAGE_SMOKE_PROVE_APPIMAGE_FD_CHAIN !== undefined
+  && !proveAppImageFileDescriptorChain
+) {
+  throw new Error(
+    "INERTIA_PACKAGE_SMOKE_PROVE_APPIMAGE_FD_CHAIN must be exactly 1.",
+  );
+}
+if (
+  proveAppImageFileDescriptorChain
+  && (
+    process.platform !== "linux"
+    || requestedPackageKind !== "linux-appimage"
+    || launchMode !== "handoff-wrapper"
+    || packagedAssets.runtimeGuardian === null
+  )
+) {
+  throw new Error(
+    "The AppImage fd-chain proof requires the packaged Linux guardian handoff.",
+  );
+}
 
 try {
   await Promise.all([
@@ -907,6 +1047,16 @@ try {
     mkdir(workspaceDirectory, { recursive: true }),
     mkdir(profileDirectory, { recursive: true }),
   ]);
+  for (const [label, path] of [
+    ["data", dataDirectory],
+    ["workspace", workspaceDirectory],
+    ["profile", profileDirectory],
+  ]) {
+    const metadata = await lstat(path);
+    if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
+      throw new Error(`The package-smoke ${label} path is not a direct directory.`);
+    }
+  }
   if (process.platform !== "win32") {
     const dataRoot = await stat(dataDirectory);
     if (
@@ -915,9 +1065,59 @@ try {
       || (dataRoot.mode & 0o077) !== 0
     ) throw new Error("The package-smoke runtime data root is not owner-private.");
   }
-  const packagedCodex = await createWindowsCodexFixture(temporaryRoot, workspaceDirectory);
+  // N-1 and N reopen the same provider cache. Keep its synthetic installation
+  // at the same path while the application is replaced so this upgrade smoke
+  // does not also introduce an unrelated provider installation change.
+  const packagedCodex = await createWindowsCodexFixture(stateRoot, workspaceDirectory);
   const packagedPdf = await createPdfFixture(temporaryRoot);
   const packagedImage = await createImageFixture(temporaryRoot);
+  if (proveAppImageFileDescriptorChain) {
+    appImageFileHandle = await open(executable, constants.O_RDONLY);
+    const before = await appImageFileHandle.stat({ bigint: true });
+    if (!before.isFile() || before.size <= 0n || before.size > 4n * 1_024n ** 3n) {
+      throw new Error("The AppImage fd-chain source is not a regular file.");
+    }
+    const digest = createHash("sha256");
+    const buffer = Buffer.allocUnsafe(1_024 * 1_024);
+    let position = 0;
+    while (position < Number(before.size)) {
+      const { bytesRead } = await appImageFileHandle.read(
+        buffer,
+        0,
+        Math.min(buffer.byteLength, Number(before.size) - position),
+        position,
+      );
+      if (bytesRead <= 0) {
+        throw new Error("The AppImage fd-chain source was truncated.");
+      }
+      digest.update(buffer.subarray(0, bytesRead));
+      position += bytesRead;
+    }
+    const confirmed = await appImageFileHandle.stat({ bigint: true });
+    if (
+      confirmed.dev !== before.dev
+      || confirmed.ino !== before.ino
+      || confirmed.size !== before.size
+      || confirmed.mode !== before.mode
+      || confirmed.mtimeNs !== before.mtimeNs
+      || confirmed.ctimeNs !== before.ctimeNs
+    ) throw new Error("The AppImage fd-chain source changed while hashing.");
+    expectedAppImageFileDescriptorIdentity = {
+      device: before.dev.toString(10),
+      inode: before.ino.toString(10),
+      size: before.size.toString(10),
+      sha256: digest.digest("hex"),
+    };
+    const guardianMetadata = await stat(
+      packagedAssets.runtimeGuardian,
+      { bigint: true },
+    );
+    appImageGuardianIdentity = {
+      path: packagedAssets.runtimeGuardian,
+      device: guardianMetadata.dev.toString(10),
+      inode: guardianMetadata.ino.toString(10),
+    };
+  }
   // This smoke does not exercise credential persistence. Keep macOS package
   // and shutdown checks independent from the automation host's Keychain.
   const launchArguments = [
@@ -933,35 +1133,63 @@ try {
     supervisorPid: process.pid,
     timestampMs: launchedAt,
   })}\n`, { encoding: "utf8", mode: 0o600 });
-  child = spawn(executable, launchArguments, {
-    detached: packagedAppUsesDetachedProcessGroup(process.platform),
-    env: {
-      ...packageSmokeChildEnvironment(process.env),
-      NODE_ENV: "test",
-      INERTIA_DATA_DIR: dataDirectory,
-      INERTIA_WORKSPACE_DIR: workspaceDirectory,
-      INERTIA_PACKAGE_SMOKE_FILE: markerPath,
-      INERTIA_PACKAGE_SMOKE_OWNER_TOKEN: ownerToken,
-      INERTIA_PACKAGE_SMOKE_PDF_INPUT: packagedPdf.inputPath,
-      INERTIA_PACKAGE_SMOKE_PDF_RESULT: packagedPdf.resultPath,
-      INERTIA_PACKAGE_SMOKE_IMAGE_INPUT: packagedImage.inputPath,
-      INERTIA_PACKAGE_SMOKE_IMAGE_RESULT: packagedImage.resultPath,
-      ...(packagedCodex ? {
-        INERTIA_PACKAGE_SMOKE_CODEX_EXPECTED: packagedCodex.command,
-        APPDATA: packagedCodex.profile,
-        LOCALAPPDATA: join(packagedCodex.profile, "Local"),
-        USERPROFILE: packagedCodex.profile,
-        CODEX_HOME: "",
-        CODEX_INSTALL_DIR: "",
-        PNPM_HOME: "",
-        BUN_INSTALL: "",
-        VOLTA_HOME: "",
-        PATH: packagedCodex.directory,
-        PATHEXT: ".EXE;.CMD;.BAT",
-      } : {}),
+  child = spawn(
+    proveAppImageFileDescriptorChain
+      ? appImageGuardianIdentity.path
+      : executable,
+    proveAppImageFileDescriptorChain
+      ? [
+          "handoff",
+          String(process.pid),
+          appImageGuardianIdentity.device,
+          appImageGuardianIdentity.inode,
+          expectedAppImageFileDescriptorIdentity.device,
+          expectedAppImageFileDescriptorIdentity.inode,
+          expectedAppImageFileDescriptorIdentity.sha256,
+          "--",
+          "/proc/self/fd/4",
+          ...launchArguments,
+        ]
+      : launchArguments,
+    {
+      detached: packagedAppUsesDetachedProcessGroup(process.platform),
+      env: {
+        ...packageSmokeChildEnvironment(process.env),
+        NODE_ENV: "test",
+        INERTIA_DATA_DIR: dataDirectory,
+        INERTIA_WORKSPACE_DIR: workspaceDirectory,
+        INERTIA_PACKAGE_SMOKE_FILE: markerPath,
+        INERTIA_PACKAGE_SMOKE_OWNER_TOKEN: ownerToken,
+        INERTIA_PACKAGE_SMOKE_PDF_INPUT: packagedPdf.inputPath,
+        INERTIA_PACKAGE_SMOKE_PDF_RESULT: packagedPdf.resultPath,
+        INERTIA_PACKAGE_SMOKE_IMAGE_INPUT: packagedImage.inputPath,
+        INERTIA_PACKAGE_SMOKE_IMAGE_RESULT: packagedImage.resultPath,
+        ...(proveAppImageFileDescriptorChain ? {
+          APPIMAGE: executable,
+          INERTIA_PACKAGE_SMOKE_EXPECT_APPIMAGE_FD: "4",
+          INERTIA_PACKAGE_SMOKE_NAMED_APPIMAGE: executable,
+        } : {}),
+        ...(packagedCodex ? {
+          INERTIA_PACKAGE_SMOKE_CODEX_EXPECTED: packagedCodex.command,
+          APPDATA: packagedCodex.profile,
+          LOCALAPPDATA: join(packagedCodex.profile, "Local"),
+          USERPROFILE: packagedCodex.profile,
+          CODEX_HOME: "",
+          CODEX_INSTALL_DIR: "",
+          PNPM_HOME: "",
+          BUN_INSTALL: "",
+          VOLTA_HOME: "",
+          PATH: packagedCodex.directory,
+          PATHEXT: ".EXE;.CMD;.BAT",
+        } : {}),
+      },
+      stdio: proveAppImageFileDescriptorChain
+        ? ["ignore", "pipe", "pipe", "ignore", appImageFileHandle.fd, "pipe"]
+        : ["ignore", "pipe", "pipe"],
     },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  );
+  await appImageFileHandle?.close();
+  appImageFileHandle = null;
   if (supervisedProcessGroup) {
     if (!Number.isSafeInteger(child.pid) || child.pid <= 0) {
       throw new Error("The detached package-smoke process group was not created.");
@@ -991,6 +1219,15 @@ try {
       endedAt: Date.now(),
     }));
   });
+  if (proveAppImageFileDescriptorChain) {
+    await waitForLinuxGuardianReady(child.stdio[5]);
+    admitPackagedAppImageGuardian({
+      guardian: appImageGuardianIdentity.path,
+      guardianDevice: appImageGuardianIdentity.device,
+      guardianInode: appImageGuardianIdentity.inode,
+      pid: child.pid,
+    });
+  }
   readiness = await waitForPackageSmokeReadiness({
     launchMode,
     launcherExit: exitResult,
@@ -1011,6 +1248,23 @@ try {
       return candidate ?? null;
     }, STARTUP_TIMEOUT_MS, "packaged app and utility runtime readiness"),
   });
+  if (expectedAppImageFileDescriptorIdentity !== null) {
+    const marker = await readJsonIfPresent(markerPath);
+    const identity = marker?.appImageFileDescriptorIdentity;
+    if (
+      !identity
+      || identity.size !== expectedAppImageFileDescriptorIdentity.size
+      || identity.sha256 !== expectedAppImageFileDescriptorIdentity.sha256
+      || (
+        identity.device === expectedAppImageFileDescriptorIdentity.device
+        && identity.inode === expectedAppImageFileDescriptorIdentity.inode
+      )
+    ) {
+      throw new Error(
+        "The guardian-sealed AppImage fd did not survive AppRun and Electron bootstrap.",
+      );
+    }
+  }
   const mainExitResult = launchMode === "direct-app"
     ? exitResult
     : waitForObservedProcessExit(readiness.mainPid);
@@ -1157,6 +1411,7 @@ try {
   }
   throw new Error(`Packaged smoke failed: ${detail}`, { cause: error });
 } finally {
+  await appImageFileHandle?.close().catch(() => undefined);
   const mainPid = readiness?.mainPid ?? cleanupOwnedPids?.mainPid ?? child?.pid ?? null;
   const runtimePid = readiness?.runtimePid ?? cleanupOwnedPids?.runtimePid ?? null;
   const launchedPid = child?.pid ?? null;

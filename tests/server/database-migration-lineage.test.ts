@@ -214,6 +214,10 @@ const IMPLEMENTATION_SOURCES = new Map<
       "nativeGeminiProviderMigration",
     ),
   ]],
+  [68, [implementation(
+    "src/server/persistence/migrations/turn-continuation-evidence.ts",
+    "persistTurnContinuationEvidence",
+  )]],
 ]);
 
 function sha256(source: string): string {

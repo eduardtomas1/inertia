@@ -17,6 +17,8 @@ function input(providerId: ProviderId, overrides: Partial<ProviderRunInput> = {}
   return {
     ...nativeProviderRunFields(providerId),
     conversationId: "conversation-1",
+    runId: "run-1",
+    turnId: "turn-1",
     cwd: "/workspace",
     prompt: "Inspect this project",
     interactionMode: "build",
@@ -262,21 +264,17 @@ describe("provider adapter seams", () => {
     expect(() => validateProviderRunInput(input("claude", { imagePaths: ["bad\0path"] }))).toThrow("An image path is invalid.");
   });
 
-  it("owns a provider control operation without inventing a durable turn", () => {
+  it("owns a provider control operation with an explicit correlation identity", () => {
     expect(validateProviderRunInput(input("claude", {
       runId: "compact-operation-1",
+      turnId: "compact-correlation-1",
       sessionId: "session-1",
       operation: { kind: "compact" },
     }))).toBe("conversation-1");
-    expect(() => validateProviderRunInput(input("claude", {
-      runId: "ordinary-run-1",
-    }))).toThrow("Run and turn identities must be provided together.");
-    expect(() => validateProviderRunInput(input("claude", {
-      runId: "compact-operation-1",
-      turnId: "invented-turn-1",
-      sessionId: "session-1",
-      operation: { kind: "compact" },
-    }))).toThrow("provider compaction request is invalid");
+    expect(() => validateProviderRunInput({
+      ...input("claude"),
+      turnId: undefined,
+    } as unknown as ProviderRunInput)).toThrow("Exact run and turn identities are required.");
     expect(() => validateProviderRunInput(input("claude", {
       runId: "compact-operation-1",
       sessionId: "session-1",

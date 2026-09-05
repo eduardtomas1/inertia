@@ -1,3 +1,4 @@
+// @inertia-test-suite portable
 import { describe, expect, it, vi } from "vitest";
 
 import {

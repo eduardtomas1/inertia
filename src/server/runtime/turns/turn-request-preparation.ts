@@ -5,6 +5,7 @@ import {
   resolveContinuationDecision,
 } from "../../../shared/continuation-policy";
 import {
+  modelSelectionHasVerifiedProbeCapability,
   modelSelectionSchema,
   providerNativeBackendProfile,
   providerNativeModelSelection,
@@ -19,6 +20,7 @@ import type {
 import { AuthoritativeRunStateEngine } from "../run-state-engine";
 import { assembleTurnRequest } from "./request-context";
 import { previousTurnBoundaryUsage } from "./turn-controller-support";
+import { routeUsesTrustedHostBridge } from "./turn-provider-host-tools";
 import type {
   ActiveTurn,
   QueuedTurn,
@@ -133,27 +135,12 @@ export function resolveTurnRequest(
 ): ResolvedTurnRequest {
   const conversation = dependencies.store.conversation(request.conversationId);
   const attachments = [...(request.attachments ?? [])];
-  const capabilityInstructions = dependencies.hooks
-    .harnessInstructionsForTurn?.({ conversation }) ?? [];
-  const assembled = assembleTurnRequest({
-    cwd: dependencies.store.conversationPath(conversation.id),
-    visibleContent: request.content,
-    interactionMode: conversation.interactionMode,
-    attachments,
-    imagePaths: request.imagePaths,
-    documentContexts: request.documentContexts,
-    context: request.context,
-    internalInstructions: [
-      ...capabilityInstructions,
-      ...(request.internalInstructions ?? []),
-    ],
-  });
-  const runId = dependencies.id();
-  const turnId = dependencies.id();
   const providerInfo = dependencies.hooks.providerInfo();
   const selectedProvider = providerInfo.find(
     ({ id }) => id === conversation.providerId,
   );
+  const runId = dependencies.id();
+  const turnId = dependencies.id();
   const requestedModelId = conversation.modelSelection.modelId;
   const selectedModel = requestedModelId !== "provider-default"
     ? selectedProvider?.models.find(({ id }) => id === requestedModelId)
@@ -185,20 +172,41 @@ export function resolveTurnRequest(
     : routeSelection;
   const route = dependencies.providers.resolveModelRoute(routeSelection);
   const exactProvider = providerInfo.find(({ id }) => id === route.providerId);
+  const capabilityContract = exactProvider?.capabilityContract;
+  const hostToolBridgeAttested = capabilityContract !== undefined
+    && capabilityContract.installationVerified
+    && capabilityContract.hostToolBridgeAvailable
+    && capabilityContract.harnessId === route.harnessId
+    && routeUsesTrustedHostBridge({
+      providerId: route.providerId,
+      harnessId: route.harnessId,
+      backendProfile: route.backendProfile,
+    });
+  const capabilityInstructions = hostToolBridgeAttested
+    ? dependencies.hooks.harnessInstructionsForTurn?.({ conversation }) ?? []
+    : [];
+  const assembled = assembleTurnRequest({
+    cwd: dependencies.store.conversationPath(conversation.id),
+    visibleContent: request.content,
+    interactionMode: conversation.interactionMode,
+    attachments,
+    imagePaths: request.imagePaths,
+    documentContexts: request.documentContexts,
+    context: request.context,
+    internalInstructions: [
+      ...capabilityInstructions,
+      ...(request.internalInstructions ?? []),
+    ],
+  });
   const exactModel = routeSelection.modelId === "provider-default"
     ? exactProvider?.models.find(({ isDefault }) => isDefault)
       ?? exactProvider?.models[0]
     : exactProvider?.models.find(({ id }) => id === routeSelection.modelId);
   const usesNativeCatalog = route.backendProfile.source === "built-in"
     && route.backendProfile.id === providerNativeBackendProfile(route.providerId).id;
-  const externalImageCapability = routeSelection.capabilities.find(
-    ({ id }) => id === "images",
-  );
   const supportsImages = usesNativeCatalog
     ? exactModel?.inputModalities.includes("image") === true
-    : externalImageCapability !== undefined
-      && externalImageCapability.state !== "unknown"
-      && externalImageCapability.state !== "unavailable";
+    : modelSelectionHasVerifiedProbeCapability(routeSelection, "images");
   const expectedFastMode = route.providerId === "codex"
     ? "priority"
     : route.providerId === "claude"
@@ -220,18 +228,28 @@ export function resolveTurnRequest(
   const latestTurn = dependencies.store.latestAgentTurnForConversation(
     conversation.id,
   );
-  const previousContinuationIdentity = latestTurn?.continuationIdentity
-    ?? conversation.continuationIdentity
-    ?? null;
+  const latestTurnOwnsProviderSession = latestTurn !== null
+    && conversation.providerSessionId !== null
+    && latestTurn.providerSessionAfter === conversation.providerSessionId;
+  // A turn-level compatibility token is authoritative only for the exact
+  // provider session it produced. If a latest turn and the conversation shell
+  // disagree, neither projection may lend authority to the other's session.
+  const previousContinuationIdentity = latestTurn
+    ? latestTurnOwnsProviderSession
+      ? latestTurn.continuationIdentity
+      : null
+    : conversation.continuationIdentity ?? null;
+  const previousContinuationModelId = previousContinuationIdentity
+    ? routeSelection.modelId === "provider-default"
+      ? "provider-default"
+      : latestTurn
+        ? latestTurn.modelSelection.modelId
+        : routeSelection.modelId
+    : null;
   const continuation = resolveContinuationDecision({
     previousIdentity: previousContinuationIdentity,
     nextIdentity: route.continuationIdentity,
-    previousModelId: routeSelection.modelId === "provider-default"
-      ? "provider-default"
-      : latestTurn?.modelSelection.modelId
-      ?? (conversation.continuationIdentity
-        ? routeSelection.modelId
-        : null),
+    previousModelId: previousContinuationModelId,
     nextModelId: routeSelection.modelId,
     hasProviderSession: conversation.providerSessionId !== null,
     hasTurns: latestTurn !== null,
@@ -248,11 +266,14 @@ export function resolveTurnRequest(
   // bounded visible transcript below and always create a fresh ACP session.
   const canResume = continuation.action === "resume-session"
     && route.providerId !== "gemini";
+  const providerSessionInvalidation = !canResume && conversation.providerSessionId
+    ? { expectedSessionId: conversation.providerSessionId }
+    : undefined;
   const goalContinuationExpected = request.goalStart !== undefined
-    || dependencies.store.agentGoals(conversation.id).some((goal) =>
+    || (canResume && dependencies.store.agentGoals(conversation.id).some((goal) =>
       goal.source === "codex-native"
       && goal.providerSessionId === conversation.providerSessionId
-      && goal.status === "active");
+      && goal.status === "active"));
   const providerInput = {
     providerId: route.providerId,
     harnessId: route.harnessId,
@@ -326,6 +347,7 @@ export function resolveTurnRequest(
     providerId: route.providerId,
     modelSelection,
     continuationIdentity: route.continuationIdentity,
+    continuationReasonCode: continuation.reasonCode,
     harnessId,
     backendProfileId: modelSelection.backendProfileId,
     model: modelSelection.modelId,
@@ -334,6 +356,7 @@ export function resolveTurnRequest(
     interactionMode: conversation.interactionMode,
     accessMode: conversation.accessMode,
     providerSessionBefore: canResume ? conversation.providerSessionId : null,
+    ...(providerSessionInvalidation ? { providerSessionInvalidation } : {}),
     requestedAt,
     usageAtStart: canResume
       ? previousTurnBoundaryUsage(latestTurn, conversation.providerSessionId!)
@@ -346,11 +369,18 @@ export function resolveTurnRequest(
     adopt: (queued) => {
       const runningActivities =
         new Map<ProviderActivityEvent["kind"], AgentActivity[]>();
+      const activeConversation = providerSessionInvalidation
+        ? {
+            ...conversation,
+            providerSessionId: null,
+            continuationIdentity: null,
+          }
+        : conversation;
       return {
         queued,
         active: {
           turn: queued.turn,
-          conversation,
+          conversation: activeConversation,
           providerInput,
           attachmentIds: attachments.map(({ id }) => id),
           generatedAttachmentPaths: [...(request.generatedAttachmentPaths ?? [])],

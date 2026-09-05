@@ -106,7 +106,7 @@ describe("app update checks", () => {
   it("downloads explicitly, publishes bounded progress, and blocks installation safely", async () => {
     let finishDownload!: () => void;
     let progress!: (value: AppUpdaterDownloadProgress) => void;
-    const quitAndInstall = vi.fn(async () => true);
+    const quitAndInstall = vi.fn(async () => "handoff-confirmed" as const);
     const updater: AppUpdaterAdapter = {
       check: vi.fn(async () => ({ available: true, version: "0.0.11" })),
       download: vi.fn((callbacks): AppUpdaterDownload => {
@@ -184,7 +184,7 @@ describe("app update checks", () => {
           cancel,
         };
       }),
-      quitAndInstall: vi.fn(async () => true),
+      quitAndInstall: vi.fn(async () => "handoff-confirmed" as const),
     };
     const service = new AppUpdateService({
       currentVersion: "0.0.10",
@@ -214,7 +214,7 @@ describe("app update checks", () => {
         promise: new Promise<void>((resolve) => { settleRetry = resolve; }),
         cancel: vi.fn(),
       })),
-      quitAndInstall: vi.fn(async () => true),
+      quitAndInstall: vi.fn(async () => "handoff-confirmed" as const),
     };
     const service = new AppUpdateService({
       currentVersion: "0.0.10",
@@ -237,7 +237,7 @@ describe("app update checks", () => {
     const updater: AppUpdaterAdapter = {
       check: vi.fn(async () => ({ available: false, version: "0.0.11" })),
       download: vi.fn(),
-      quitAndInstall: vi.fn(async () => true),
+      quitAndInstall: vi.fn(async () => "handoff-confirmed" as const),
     };
     const service = new AppUpdateService({
       currentVersion: "0.0.10",
@@ -257,7 +257,7 @@ describe("app update checks", () => {
     const updater: AppUpdaterAdapter = {
       check: vi.fn(async () => ({ available: true, version: "0.0.11" })),
       download: vi.fn(),
-      quitAndInstall: vi.fn(async () => true),
+      quitAndInstall: vi.fn(async () => "handoff-confirmed" as const),
     };
     const loadUpdater = vi.fn<() => Promise<AppUpdaterAdapter>>()
       .mockRejectedValueOnce(new Error("dynamic import failed once"))

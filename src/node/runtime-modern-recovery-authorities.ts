@@ -295,6 +295,12 @@ function parseAuthority(bytes: Buffer): ModernDarwinRecoveryAuthority | null {
   }
 }
 
+export function parseModernDarwinRecoveryAuthorityLeaf(
+  bytes: Buffer,
+): ModernDarwinRecoveryAuthority | null {
+  return parseAuthority(bytes);
+}
+
 function storedAuthority(authority: ModernDarwinRecoveryAuthority): Buffer {
   return Buffer.from(JSON.stringify({
     version: AUTHORITY_SCHEMA_VERSION,

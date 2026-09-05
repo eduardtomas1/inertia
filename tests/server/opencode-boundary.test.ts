@@ -1,3 +1,4 @@
+// @inertia-test-suite portable
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -159,7 +160,7 @@ describe.sequential("OpenCode owned-server boundary", () => {
     await expect(readOpenCodeSdkModels(command, environment, root))
       .resolves.toEqual([expect.objectContaining({ id: "fake/model-a" })]);
 
-    const manager = new ProviderManager({
+    const manager = ProviderManager.createForTests({
       commands: { opencode: command },
       resolveBackendLaunchOptions: (_input, baseEnvironment) => ({
         environment: {
@@ -202,7 +203,7 @@ describe.sequential("OpenCode owned-server boundary", () => {
       "serve",
       boundaryServerSource(root, capturePath, "default-authenticated"),
     );
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { opencode: command } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
     );
@@ -278,7 +279,7 @@ describe.sequential("OpenCode owned-server boundary", () => {
     const capturePath = join(root, "capture.json");
     const command = portableNodeExecutable(root, "opencode");
     writeNodeSubcommand(root, "serve", boundaryServerSource(root, capturePath, scenario));
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { opencode: command } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
     );

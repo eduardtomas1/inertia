@@ -35,9 +35,11 @@ const budgets = {
   deferredSpreadsheetJavaScript: 510 * kibibyte,
   deferredDiscordSettingsJavaScript: 6 * kibibyte,
   deferredCanaryRollbackJavaScript: 4 * kibibyte,
+  deferredLifecycleIntegritySettingsJavaScript: 5 * kibibyte,
   deferredAppUpdateNoticeJavaScript: 6 * kibibyte,
   // Provider OAuth validation and its terminal UI remain off the initial route.
   deferredProviderAuthJavaScript: 12 * kibibyte,
+  deferredProviderMaintenanceJavaScript: 5 * kibibyte,
   deferredComposerQueueJavaScript: 8 * kibibyte,
   // The terminal owns reload recovery, bounded replay, and provider-resume UI.
   // Keep that optional surface isolated from the workbench and capped here.
@@ -134,7 +136,7 @@ const deferredPreviewJavaScript = assetNames.find(
   (name) => /^PreviewPanel-.*\.js$/u.test(name),
 );
 const deferredBrowserEvidenceJavaScript = assetNames.find(
-  (name) => /^BrowserEvidenceTimeline-.*\.js$/u.test(name),
+  (name) => /^evidence-.*\.js$/u.test(name),
 );
 const deferredSpreadsheetJavaScript = assetNames.find(
   (name) => /^xlsx-.*\.js$/u.test(name),
@@ -145,11 +147,17 @@ const deferredDiscordSettingsJavaScript = assetNames.find(
 const deferredCanaryRollbackJavaScript = assetNames.find(
   (name) => /^CanaryRollbackSetting-.*\.js$/u.test(name),
 );
+const deferredLifecycleIntegritySettingsJavaScript = assetNames.find(
+  (name) => /^LifecycleIntegritySettings-.*\.js$/u.test(name),
+);
 const deferredAppUpdateNoticeJavaScript = assetNames.find(
   (name) => /^AppUpdateNotice-.*\.js$/u.test(name),
 );
 const deferredProviderAuthJavaScript = assetNames.find(
   (name) => /^ProviderAuthDialog-.*\.js$/u.test(name),
+);
+const deferredProviderMaintenanceJavaScript = assetNames.find(
+  (name) => /^ProviderMaintenanceNotice-.*\.js$/u.test(name),
 );
 const deferredComposerQueueJavaScript = assetNames.find(
   (name) => /^ComposerQueuedActions-.*\.js$/u.test(name),
@@ -228,6 +236,11 @@ if (!deferredCanaryRollbackJavaScript) {
     "Renderer bundle check could not find the deferred Canary rollback chunk.",
   );
 }
+if (!deferredLifecycleIntegritySettingsJavaScript) {
+  throw new Error(
+    "Renderer bundle check could not find the deferred lifecycle integrity settings chunk.",
+  );
+}
 if (!deferredAppUpdateNoticeJavaScript) {
   throw new Error(
     "Renderer bundle check could not find the deferred update notice chunk.",
@@ -276,6 +289,12 @@ if (!morphiconsJavaScript) {
 if (!morphingIconFeedbackJavaScript) {
   throw new Error(
     "Renderer bundle check could not find the isolated morphing icon feedback chunk.",
+  );
+}
+
+if (!deferredProviderMaintenanceJavaScript) {
+  throw new Error(
+    "Renderer bundle check could not find the deferred provider maintenance notice chunk.",
   );
 }
 
@@ -364,11 +383,17 @@ const deferredDiscordSettingsJavaScriptBytes = await assetBytes(
 const deferredCanaryRollbackJavaScriptBytes = await assetBytes(
   `assets/${deferredCanaryRollbackJavaScript}`,
 );
+const deferredLifecycleIntegritySettingsJavaScriptBytes = await assetBytes(
+  `assets/${deferredLifecycleIntegritySettingsJavaScript}`,
+);
 const deferredAppUpdateNoticeJavaScriptBytes = await assetBytes(
   `assets/${deferredAppUpdateNoticeJavaScript}`,
 );
 const deferredProviderAuthJavaScriptBytes = await assetBytes(
   `assets/${deferredProviderAuthJavaScript}`,
+);
+const deferredProviderMaintenanceJavaScriptBytes = await assetBytes(
+  `assets/${deferredProviderMaintenanceJavaScript}`,
 );
 const deferredComposerQueueJavaScriptBytes = await assetBytes(
   `assets/${deferredComposerQueueJavaScript}`,
@@ -418,8 +443,10 @@ const coreJavaScriptBytes =
   - deferredSpreadsheetJavaScriptBytes
   - deferredDiscordSettingsJavaScriptBytes
   - deferredCanaryRollbackJavaScriptBytes
+  - deferredLifecycleIntegritySettingsJavaScriptBytes
   - deferredAppUpdateNoticeJavaScriptBytes
   - deferredProviderAuthJavaScriptBytes
+  - deferredProviderMaintenanceJavaScriptBytes
   - deferredComposerQueueJavaScriptBytes
   - deferredTerminalJavaScriptBytes
   - detachedChatJavaScriptBytes
@@ -448,8 +475,11 @@ const measurements = {
   deferredSpreadsheetJavaScript: deferredSpreadsheetJavaScriptBytes,
   deferredDiscordSettingsJavaScript: deferredDiscordSettingsJavaScriptBytes,
   deferredCanaryRollbackJavaScript: deferredCanaryRollbackJavaScriptBytes,
+  deferredLifecycleIntegritySettingsJavaScript:
+    deferredLifecycleIntegritySettingsJavaScriptBytes,
   deferredAppUpdateNoticeJavaScript: deferredAppUpdateNoticeJavaScriptBytes,
   deferredProviderAuthJavaScript: deferredProviderAuthJavaScriptBytes,
+  deferredProviderMaintenanceJavaScript: deferredProviderMaintenanceJavaScriptBytes,
   deferredComposerQueueJavaScript: deferredComposerQueueJavaScriptBytes,
   deferredTerminalJavaScript: deferredTerminalJavaScriptBytes,
   detachedChatJavaScript: detachedChatJavaScriptBytes,

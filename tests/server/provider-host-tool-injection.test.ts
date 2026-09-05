@@ -1,3 +1,4 @@
+// @inertia-test-suite portable
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -241,7 +242,7 @@ describe.sequential("provider host-tool injection", () => {
     let mcpConfigKeys: string[] = [];
     let strictMcpConfig: boolean | undefined;
     const richEvents: unknown[] = [];
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { claude: process.execPath } },
       new AgentHarnessRegistry([createClaudeAgentSdkHarness({
         createQuery: ({ options }) => {
@@ -308,7 +309,7 @@ describe.sequential("provider host-tool injection", () => {
       const root = portableFixtureRoot(`Cursor host ${expectedType} ${resume ? "resume" : "new"}`);
       roots.push(root);
       const capturePath = join(root, "capture.json");
-      const manager = new ProviderManager(
+      const manager = ProviderManager.createForTests(
         { commands: { cursor: cursorAgent(root, capturePath, supportsHttp) } },
         new AgentHarnessRegistry([createCursorAcpHarness()]),
       );
@@ -355,7 +356,7 @@ describe.sequential("provider host-tool injection", () => {
       );
       roots.push(root);
       const capturePath = join(root, "capture.json");
-      const manager = new ProviderManager(
+      const manager = ProviderManager.createForTests(
         {
           commands: {
             kimi: kimiAgent(root, capturePath, {
@@ -432,7 +433,7 @@ describe.sequential("provider host-tool injection", () => {
           : { success: false, text: decision };
       },
     };
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       {
         commands: {
           kimi: kimiAgent(root, capturePath, {
@@ -461,6 +462,7 @@ describe.sequential("provider host-tool injection", () => {
           event.conversationId,
           event.request.requestId,
           "approve",
+          { runId: event.runId, turnId: event.turnId },
         )).toBe(true);
       },
     });
@@ -484,7 +486,7 @@ describe.sequential("provider host-tool injection", () => {
     roots.push(root);
     const capturePath = join(root, "capture.json");
     let closeAttempted = false;
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       {
         commands: {
           kimi: kimiAgent(root, capturePath, { supportsHttp: true }),
@@ -529,7 +531,7 @@ describe.sequential("provider host-tool injection", () => {
     const root = portableFixtureRoot(`OpenCode host ${failAfterMcp ? "failure" : "success"}`);
     roots.push(root);
     const capturePath = join(root, "capture.json");
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { opencode: openCodeServer(root, capturePath, failAfterMcp) } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
     );
@@ -596,7 +598,7 @@ describe.sequential("provider host-tool injection", () => {
     const openCodeRoot = portableFixtureRoot("OpenCode without host tools");
     roots.push(claudeRoot, cursorRoot, kimiRoot, openCodeRoot);
     let claudeOptions: { mcpServers?: unknown; strictMcpConfig?: boolean } | undefined;
-    const claude = new ProviderManager(
+    const claude = ProviderManager.createForTests(
       { commands: { claude: process.execPath } },
       new AgentHarnessRegistry([createClaudeAgentSdkHarness({
         createQuery: ({ options }) => {
@@ -623,7 +625,7 @@ describe.sequential("provider host-tool injection", () => {
 
     const cursorCapture = join(cursorRoot, "capture.json");
     const openCodeCapture = join(openCodeRoot, "capture.json");
-    const cursor = new ProviderManager(
+    const cursor = ProviderManager.createForTests(
       { commands: { cursor: cursorAgent(cursorRoot, cursorCapture, true) } },
       new AgentHarnessRegistry([createCursorAcpHarness()]),
     );
@@ -644,7 +646,7 @@ describe.sequential("provider host-tool injection", () => {
     });
 
     const kimiCapture = join(kimiRoot, "capture.json");
-    const kimi = new ProviderManager(
+    const kimi = ProviderManager.createForTests(
       {
         commands: {
           kimi: kimiAgent(kimiRoot, kimiCapture, { supportsHttp: true }),
@@ -668,7 +670,7 @@ describe.sequential("provider host-tool injection", () => {
       count: 0,
     });
 
-    const openCode = new ProviderManager(
+    const openCode = ProviderManager.createForTests(
       { commands: { opencode: openCodeServer(openCodeRoot, openCodeCapture) } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
     );
@@ -694,7 +696,7 @@ describe.sequential("provider host-tool injection", () => {
     roots.push(root);
     const capturePath = join(root, "capture.json");
     const secretPath = join(root, "fixture-secret.json");
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       {
         commands: {
           cursor: cursorAgent(
@@ -730,6 +732,7 @@ describe.sequential("provider host-tool injection", () => {
           event.conversationId,
           event.request.requestId,
           "approve",
+          { runId: event.runId, turnId: event.turnId },
         )).toBe(true);
       },
       onInput: (event) => {
@@ -738,6 +741,7 @@ describe.sequential("provider host-tool injection", () => {
           event.conversationId,
           event.request.requestId,
           { scope: ["focused"] },
+          { runId: event.runId, turnId: event.turnId },
         )).toBe(true);
       },
       onSubagent: (event) => visible.push(JSON.stringify(event)),
@@ -759,7 +763,7 @@ describe.sequential("provider host-tool injection", () => {
     roots.push(root);
     const capturePath = join(root, "capture.json");
     const secretPath = join(root, "fixture-secret.json");
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       {
         commands: {
           kimi: kimiAgent(root, capturePath, {
@@ -789,6 +793,7 @@ describe.sequential("provider host-tool injection", () => {
           event.conversationId,
           event.request.requestId,
           "approve",
+          { runId: event.runId, turnId: event.turnId },
         )).toBe(true);
       },
     });
@@ -808,7 +813,7 @@ describe.sequential("provider host-tool injection", () => {
     roots.push(root);
     const capturePath = join(root, "capture.json");
     const secretPath = join(root, "fixture-secret.json");
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       {
         commands: {
           opencode: openCodeServer(
@@ -854,12 +859,12 @@ describe.sequential("provider host-tool injection", () => {
     const capturePath = join(root, "capture.json");
     const leakPath = join(root, "fixture-secret.json");
     const manager = provider === "cursor"
-      ? new ProviderManager(
+      ? ProviderManager.createForTests(
           { commands: { cursor: cursorAgent(root, capturePath, true, leakPath) } },
           new AgentHarnessRegistry([createCursorAcpHarness()]),
         )
       : provider === "kimi"
-        ? new ProviderManager(
+        ? ProviderManager.createForTests(
             {
               commands: {
                 kimi: kimiAgent(root, capturePath, {
@@ -870,7 +875,7 @@ describe.sequential("provider host-tool injection", () => {
             },
             new AgentHarnessRegistry([createKimiAcpHarness()]),
           )
-        : new ProviderManager(
+        : ProviderManager.createForTests(
             { commands: { opencode: openCodeServer(root, capturePath, true, leakPath) } },
             new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
           );
@@ -905,12 +910,12 @@ describe.sequential("provider host-tool injection", () => {
     const capturePath = join(root, "capture.json");
     const secretPath = join(root, "fixture-secret.json");
     const manager = provider === "cursor"
-      ? new ProviderManager(
+      ? ProviderManager.createForTests(
           { commands: { cursor: cursorAgent(root, capturePath, supportsHttp, undefined, secretPath) } },
           new AgentHarnessRegistry([createCursorAcpHarness()]),
         )
       : provider === "kimi"
-        ? new ProviderManager(
+        ? ProviderManager.createForTests(
             {
               commands: {
                 kimi: kimiAgent(root, capturePath, {
@@ -921,7 +926,7 @@ describe.sequential("provider host-tool injection", () => {
             },
             new AgentHarnessRegistry([createKimiAcpHarness()]),
           )
-        : new ProviderManager(
+        : ProviderManager.createForTests(
             { commands: { opencode: openCodeServer(root, capturePath, false, undefined, secretPath) } },
             new AgentHarnessRegistry([createOpenCodeSdkHarness()]),
           );
@@ -969,7 +974,7 @@ describe.sequential("provider host-tool injection", () => {
     const capturePath = join(root, "capture.json");
     const secretPath = join(root, "fixture-secret.json");
     const manager = provider === "cursor"
-      ? new ProviderManager(
+      ? ProviderManager.createForTests(
           {
             commands: {
               cursor: cursorAgent(
@@ -985,7 +990,7 @@ describe.sequential("provider host-tool injection", () => {
           new AgentHarnessRegistry([createCursorAcpHarness()]),
         )
       : provider === "kimi"
-        ? new ProviderManager(
+        ? ProviderManager.createForTests(
             {
               commands: {
                 kimi: kimiAgent(root, capturePath, {
@@ -997,7 +1002,7 @@ describe.sequential("provider host-tool injection", () => {
             },
             new AgentHarnessRegistry([createKimiAcpHarness()]),
           )
-        : new ProviderManager(
+        : ProviderManager.createForTests(
             {
               commands: {
                 opencode: openCodeServer(

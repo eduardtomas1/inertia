@@ -16,6 +16,12 @@ export const providerMaintenanceProviderIdSchema = z.enum(
 export type ProviderMaintenanceProviderId =
   (typeof PROVIDER_MAINTENANCE_PROVIDER_IDS)[number];
 
+/** Fixed, renderer-safe controller state; installation identity stays private. */
+export interface ProviderMaintenanceDiagnosticState {
+  readonly providerId: ProviderMaintenanceProviderId;
+  readonly state: "idle" | "queued" | "running" | "verifying" | "quarantined";
+}
+
 export type ProviderMaintenanceInstallMethod =
   | "provider-managed"
   | "npm-global"

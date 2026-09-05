@@ -249,6 +249,47 @@ export function ComposerToolbar({
       role="group"
       aria-label="Composer controls"
     >
+      <div className="composer-input-actions" role="group" aria-label="Message actions">
+        <IconButton
+          label={running
+            ? canSendAttachmentWhileRunning
+              ? "Attach follow-up images"
+              : "Attach queued images"
+            : "Attach images, documents, or spreadsheets"}
+          onClick={() => void onChooseAttachments()}
+          disabled={
+            disabled
+            || attachmentImporting
+            || primaryAction === "submitting"
+            || attachmentCount >= MAX_CHAT_ATTACHMENTS
+          }
+        >
+          <Paperclip size={16} />
+        </IconButton>
+        <Suspense
+          fallback={(
+            <ComposerSendActionsFallback
+              primaryAction={primaryAction}
+              onSubmit={onSubmit}
+              onStop={onStop}
+            />
+          )}
+        >
+          <ComposerSendActions
+            conversationId={conversation.id}
+            primaryAction={primaryAction}
+            canSendQueuedNow={canSendQueuedNow}
+            running={running}
+            latestTurnId={queuedTurnId}
+            latestTurnStatus={queuedTurnStatus}
+            latestTurnAuthoritative={queuedTurnAuthoritative}
+            onSendQueued={onSendQueued}
+            onReleaseAttachment={onReleaseAttachment}
+            onSubmit={onSubmit}
+            onStop={onStop}
+          />
+        </Suspense>
+      </div>
       <div className="composer-primary-rail">
         <div
           className="composer-options"
@@ -327,22 +368,6 @@ export function ComposerToolbar({
           role="group"
           aria-label="Add context"
         >
-        <IconButton
-          label={running
-            ? canSendAttachmentWhileRunning
-              ? "Attach follow-up images"
-              : "Attach queued images"
-            : "Attach images, documents, or spreadsheets"}
-          onClick={() => void onChooseAttachments()}
-          disabled={
-            disabled
-            || attachmentImporting
-            || primaryAction === "submitting"
-            || attachmentCount >= MAX_CHAT_ATTACHMENTS
-          }
-        >
-          <Paperclip size={16} />
-        </IconButton>
         {attachmentImporting && (
           <span className="provider-status is-ready" role="status">
             <LoaderCircle
@@ -482,7 +507,7 @@ export function ComposerToolbar({
         <div
           className="composer-actions"
           role="group"
-          aria-label="Usage and message actions"
+          aria-label="Usage"
         >
         {selectedProvider ? (
           <UsageIndicator
@@ -502,29 +527,7 @@ export function ComposerToolbar({
             onModeChange={onUsageDisplayModeChange}
           />
         ) : null}
-        <Suspense
-          fallback={(
-            <ComposerSendActionsFallback
-              primaryAction={primaryAction}
-              onSubmit={onSubmit}
-              onStop={onStop}
-            />
-          )}
-        >
-          <ComposerSendActions
-            conversationId={conversation.id}
-            primaryAction={primaryAction}
-            canSendQueuedNow={canSendQueuedNow}
-            running={running}
-            latestTurnId={queuedTurnId}
-            latestTurnStatus={queuedTurnStatus}
-            latestTurnAuthoritative={queuedTurnAuthoritative}
-            onSendQueued={onSendQueued}
-            onReleaseAttachment={onReleaseAttachment}
-            onSubmit={onSubmit}
-            onStop={onStop}
-          />
-        </Suspense>
+
         </div>
       </div>
       {showCheckoutContext && (

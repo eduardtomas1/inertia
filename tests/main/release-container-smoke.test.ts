@@ -274,10 +274,16 @@ describe("final release container smoke", () => {
     expect(source).toContain("INERTIA_PACKAGE_SMOKE_PROCESS_GROUP_TOKEN");
     expect(source).toContain('"direct-app"');
     expect(source).toContain('"retained-wrapper"');
-    expect(source).not.toContain('"handoff-wrapper"');
+    expect(source).toContain('"handoff-wrapper"');
     expect(source).toContain('}, ["APPIMAGE_EXTRACT_AND_RUN"]);');
     expect(source).toContain('APPIMAGE_EXTRACT_AND_RUN: "1"');
     expect(source).toContain("AppImage default mount/AppRun smoke passed");
+    expect(source).toContain(
+      "guardian-sealed AppImage fd-chain smoke passed",
+    );
+    expect(source).toContain(
+      'INERTIA_PACKAGE_SMOKE_PROVE_APPIMAGE_FD_CHAIN: "1"',
+    );
     expect(source).toContain("AppImage extract-and-run fallback smoke passed");
     expect(source).toContain("INERTIA_PACKAGE_SMOKE_KIND: packageKind");
     expect(source).toContain('"macos-zip"');

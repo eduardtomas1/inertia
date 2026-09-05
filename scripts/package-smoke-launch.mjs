@@ -26,6 +26,9 @@ export function resolvePackageSmokeLaunchMode(options) {
     if ((configuredMode === undefined || configuredMode === "direct-app") && extractAndRun === undefined) {
       return "direct-app";
     }
+    if (configuredMode === "handoff-wrapper" && extractAndRun === "1") {
+      return configuredMode;
+    }
     if (configuredMode === "retained-wrapper" && extractAndRun === "1") {
       return configuredMode;
     }

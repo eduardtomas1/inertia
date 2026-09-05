@@ -14,7 +14,10 @@ import {
 import {
   validateKimiClaudeModelSelection,
 } from "../../../shared/claude-backend-profiles";
+import { backendCompatibilityProbeResultSchema } from "../../../shared/backend-probe";
 import {
+  BACKEND_PROBE_AUTHORITY_SCHEMA_VERSION,
+  BACKEND_PROBE_FRESHNESS_MS,
   modelSelectionSchema,
   providerIdForHarness,
   providerNativeBackendProfile,
@@ -35,6 +38,7 @@ import { probeBackendCompatibility } from "./backend-compatibility-probe";
 
 import {
   PROVIDER_IDS,
+  backendProbeForModel,
   endpointIdentity,
   isUsableCompatibility,
   nativeProfile,
@@ -82,21 +86,33 @@ function backendPersistedState(
 export class BackendProfileController {
   private readonly store: RuntimeStore;
   private readonly runtime: BackendProfileRuntime;
+  private readonly now: () => Date;
+  private readonly probeOperationId: () => string;
+  private readonly probeAdmissionSequences = new Map<string, number>();
 
   private constructor(options: BackendProfileControllerOptions) {
     this.store = options.store;
+    this.now = options.now ?? (() => new Date());
+    this.probeOperationId = options.probeOperationId ?? randomUUID;
     this.runtime = new BackendProfileRuntime(
       options.credentials,
       options.builtInClaudeProfiles ?? [],
+      this.now,
     );
   }
 
   static async create(
     options: BackendProfileControllerOptions,
   ): Promise<BackendProfileController> {
-    const controller = new BackendProfileController(options);
+    const controller = BackendProfileController.open(options);
     await controller.initialize();
     return controller;
+  }
+
+  static open(
+    options: BackendProfileControllerOptions,
+  ): BackendProfileController {
+    return new BackendProfileController(options);
   }
 
   providerManagerOptions(): Pick<
@@ -104,6 +120,7 @@ export class BackendProfileController {
     | "backendProfiles"
     | "backendCompatibilities"
     | "backendProbeResults"
+    | "backendProbeNow"
     | "resolveBackendLaunchOptions"
   > {
     return this.runtime.providerManagerOptions(
@@ -115,6 +132,14 @@ export class BackendProfileController {
     this.runtime.attachProviderManager(providers);
   }
 
+  attachProviderMutationGuard(
+    providerMaintenanceBlocked: Parameters<
+      BackendProfileRuntime["attachProviderMutationGuard"]
+    >[0],
+  ): void {
+    this.runtime.attachProviderMutationGuard(providerMaintenanceBlocked);
+  }
+
   profiles(providerInfo: readonly ProviderInfo[]): ModelBackendProfileView[] {
     this.runtime.rememberProviders(providerInfo);
     const native = PROVIDER_IDS.map((providerId) =>
@@ -122,7 +147,7 @@ export class BackendProfileController {
         { profile: nativeProfile(
           providerId,
           providerInfo.find(({ id }) => id === providerId),
-        ), latestProbe: null },
+        ), probeResults: [], probeAdmissionHighWater: [], latestProbe: null },
       ));
     return [
       ...native,
@@ -144,6 +169,8 @@ export class BackendProfileController {
           nativeProvider,
           this.runtime.provider(nativeProvider),
         ),
+        probeResults: [],
+        probeAdmissionHighWater: [],
         latestProbe: null,
       });
     }
@@ -184,6 +211,7 @@ export class BackendProfileController {
       createdAt: now,
       updatedAt: now,
     });
+    this.runtime.assertConfigurationMutable(profile.harnessId);
     const stored = this.store.saveModelBackendProfile(profile);
     this.runtime.publishProfile(stored.profile);
     return this.runtime.detailView(stored);
@@ -244,7 +272,7 @@ export class BackendProfileController {
       const compatibility = this.runtime.compatibility(
         candidate,
         candidate.routing.primaryModelId,
-        stored.latestProbe,
+        backendProbeForModel(stored, candidate.routing.primaryModelId),
       );
       if (!isUsableCompatibility(compatibility)) {
         throw new BackendProfileControllerError(
@@ -252,6 +280,7 @@ export class BackendProfileController {
         );
       }
     }
+    this.runtime.assertConfigurationMutable(candidate.harnessId);
     const next = this.store.saveModelBackendProfile(candidate);
     this.runtime.publishProfile(next.profile);
     return this.runtime.detailView(next);
@@ -267,6 +296,8 @@ export class BackendProfileController {
         "The secure credential changed again before the runtime could reconcile it.",
       );
     }
+    const current = this.store.modelBackendProfile(profileId);
+    this.runtime.assertConfigurationMutable(current.profile.harnessId);
     const next = this.store.reconcileModelBackendCredentialGeneration(
       profileId,
       status.credentialGeneration,
@@ -290,6 +321,7 @@ export class BackendProfileController {
     if (backendProfileUsesCredential(profile)) {
       const status = await this.runtime.credentialStatus(profile.id, true);
       if (status?.credentialGeneration !== profile.credentialGeneration) {
+        this.runtime.assertConfigurationMutable(profile.harnessId);
         stored = this.store.reconcileModelBackendCredentialGeneration(
           profile.id,
           status?.credentialGeneration ?? null,
@@ -304,7 +336,8 @@ export class BackendProfileController {
     }
     const current = stored.profile;
     const model = current.models.find((candidate) => candidate.id === modelId)!;
-    const result = await probeBackendCompatibility({
+    const admission = this.nextProbeAdmission(stored, modelId);
+    const probed = await probeBackendCompatibility({
       profile: safeBackendProfile(current),
       endpointUrl: current.baseUrl,
       modelId,
@@ -323,10 +356,75 @@ export class BackendProfileController {
     }, {
       resolveCredential: (reference, signal) =>
         this.runtime.resolveCredential(reference, signal),
+      now: this.now,
+      admission,
     });
+    const result = backendCompatibilityProbeResultSchema.parse({
+      ...probed,
+      authority: {
+        schemaVersion: BACKEND_PROBE_AUTHORITY_SCHEMA_VERSION,
+        operationId: admission.operationId,
+        admissionSequence: admission.admissionSequence,
+        installationFingerprint: admission.installationFingerprint,
+        expiresAt: new Date(
+          Date.parse(probed.checkedAt) + BACKEND_PROBE_FRESHNESS_MS,
+        ).toISOString(),
+      },
+    });
+    if (!this.probeAdmissionIsCurrent(current, modelId, admission.admissionSequence)) {
+      return this.runtime.detailView(this.store.modelBackendProfile(profileId));
+    }
+    this.runtime.assertConfigurationMutable(current.harnessId);
     const next = this.store.recordModelBackendProbe(profileId, result);
-    this.runtime.recordProbeResult(result);
+    const persisted = backendProbeForModel(next, result.modelId);
+    if (persisted) this.runtime.recordProbeResult(persisted);
     return this.runtime.detailView(next);
+  }
+
+  private nextProbeAdmission(
+    stored: StoredModelBackendProfile,
+    modelId: string,
+  ): {
+    operationId: string;
+    admissionSequence: number;
+    installationFingerprint: string | null;
+  } {
+    const key = this.probeAdmissionKey(stored.profile, modelId);
+    const persisted = stored.probeAdmissionHighWater.find(
+      (entry) => entry.modelId === modelId,
+    )?.admissionSequence ?? 0;
+    const current = Math.max(this.probeAdmissionSequences.get(key) ?? 0, persisted);
+    if (current >= Number.MAX_SAFE_INTEGER) {
+      throw new BackendProfileControllerError(
+        "The backend probe admission sequence is exhausted.",
+      );
+    }
+    const admissionSequence = current + 1;
+    this.probeAdmissionSequences.set(key, admissionSequence);
+    return {
+      operationId: this.probeOperationId(),
+      admissionSequence,
+      installationFingerprint: this.runtime.installationFingerprint(
+        stored.profile.harnessId,
+      ),
+    };
+  }
+
+  private probeAdmissionIsCurrent(
+    profile: StoredModelBackendProfile["profile"],
+    modelId: string,
+    admissionSequence: number,
+  ): boolean {
+    return this.probeAdmissionSequences.get(
+      this.probeAdmissionKey(profile, modelId),
+    ) === admissionSequence;
+  }
+
+  private probeAdmissionKey(
+    profile: StoredModelBackendProfile["profile"],
+    modelId: string,
+  ): string {
+    return `${profile.id}\0${profile.configurationRevision}\0${modelId}`;
   }
 
   setDefault(
@@ -334,11 +432,12 @@ export class BackendProfileController {
     selectionInput: ModelSelection,
   ): ModelBackendDefault {
     const selection = this.validateSelection(selectionInput);
+    this.runtime.assertConfigurationMutable(selection.harnessId);
     const record = this.recordForSelection(selection);
     const compatibility = this.runtime.compatibility(
       record.profile,
       selection.modelId,
-      record.latestProbe,
+      backendProbeForModel(record, selection.modelId),
     );
     if (!record.profile.enabled || !isUsableCompatibility(compatibility)) {
       throw new BackendProfileControllerError(
@@ -349,10 +448,22 @@ export class BackendProfileController {
   }
 
   clearDefault(projectId: string | null): void {
+    const current = this.store.listModelBackendDefaults().find(
+      (candidate) => candidate.projectId === projectId,
+    );
+    if (current) {
+      this.runtime.assertConfigurationMutable(current.selection.harnessId);
+    }
     this.store.clearModelBackendDefault(projectId);
   }
 
   async deleteProfile(profileId: string): Promise<void> {
+    try {
+      const existing = this.store.modelBackendProfile(profileId);
+      this.runtime.assertConfigurationMutable(existing.profile.harnessId);
+    } catch (error) {
+      if (!(error instanceof RecordNotFoundError)) throw error;
+    }
     try {
       this.store.deleteModelBackendProfile(profileId);
     } catch (error) {
@@ -599,6 +710,7 @@ export class BackendProfileController {
         true,
       );
       if (status?.credentialGeneration !== record.profile.credentialGeneration) {
+        this.runtime.assertConfigurationMutable(record.profile.harnessId);
         record = this.store.reconcileModelBackendCredentialGeneration(
           record.profile.id,
           status?.credentialGeneration ?? null,
@@ -619,7 +731,7 @@ export class BackendProfileController {
     const compatibility = this.runtime.compatibility(
       record.profile,
       selectionInput.modelId,
-      record.latestProbe,
+      backendProbeForModel(record, selectionInput.modelId),
     );
     if (!isUsableCompatibility(compatibility)) {
       return { ready: false, message: compatibility.reason };
@@ -627,9 +739,10 @@ export class BackendProfileController {
     return { ready: true, message: null };
   }
 
-  private async initialize(): Promise<void> {
+  async initialize(): Promise<void> {
     for (const builtIn of this.runtime.builtInProfiles()) {
       if (builtIn.preset !== "kimi-code") continue;
+      this.runtime.assertConfigurationMutable("claude-agent-sdk");
       const status = await this.runtime.credentialStatus(builtIn.id, true);
       let existing: StoredModelBackendProfile | undefined;
       try {
@@ -657,6 +770,7 @@ export class BackendProfileController {
     }
 
     for (let stored of this.store.listModelBackendProfiles()) {
+      this.runtime.assertConfigurationMutable(stored.profile.harnessId);
       if (backendProfileUsesCredential(stored.profile)) {
         const status = await this.runtime.credentialStatus(
           stored.profile.id,
@@ -684,6 +798,8 @@ export class BackendProfileController {
     if (nativeProvider) {
       return {
         profile: nativeProfile(nativeProvider, undefined),
+        probeResults: [],
+        probeAdmissionHighWater: [],
         latestProbe: null,
       };
     }

@@ -7,7 +7,7 @@ import {
   staleProviderSessionDecision,
 } from "../src/shared/continuation-policy";
 import {
-  continuationIdentityForSelection,
+  versionedContinuationIdentityForSelection,
   providerNativeModelSelection,
 } from "../src/shared/model-routing";
 
@@ -15,7 +15,13 @@ const codex = providerNativeModelSelection({
   providerId: "codex",
   modelId: "gpt-5.4",
 });
-const codexIdentity = continuationIdentityForSelection(codex, null, false);
+const compatibilityToken = "a".repeat(64);
+const codexIdentity = versionedContinuationIdentityForSelection(
+  codex,
+  null,
+  false,
+  compatibilityToken,
+);
 
 describe("provider continuation policy", () => {
   it.each([
@@ -88,7 +94,7 @@ describe("provider continuation policy", () => {
     });
   });
 
-  it("requires a new conversation for an unverified Fast mode switch", () => {
+  it("starts a fresh provider session for an unverified Fast mode switch", () => {
     expect(resolveContinuationDecision({
       previousIdentity: codexIdentity,
       nextIdentity: {
@@ -102,7 +108,7 @@ describe("provider continuation policy", () => {
       allowsModelSwitchWithinSession: true,
       allowsPerformanceModeSwitchWithinSession: false,
     })).toMatchObject({
-      action: "new-conversation-required",
+      action: "start-session",
       changeKind: "performance-mode",
       reasonCode: "incompatible-performance-mode-changed",
     });
@@ -160,12 +166,17 @@ describe("provider continuation policy", () => {
     });
   });
 
-  it("requires a new conversation for unsupported model changes", () => {
+  it("starts a fresh session for unsupported model changes", () => {
     const cursor = providerNativeModelSelection({
       providerId: "cursor",
       modelId: "cursor-model-a",
     });
-    const previous = continuationIdentityForSelection(cursor);
+    const previous = versionedContinuationIdentityForSelection(
+      cursor,
+      null,
+      true,
+      compatibilityToken,
+    );
     expect(resolveContinuationDecision({
       previousIdentity: previous,
       nextIdentity: { ...previous, modelIdentity: "cursor-model-b" },
@@ -175,7 +186,7 @@ describe("provider continuation policy", () => {
       hasTurns: true,
       allowsModelSwitchWithinSession: false,
     })).toMatchObject({
-      action: "new-conversation-required",
+      action: "start-session",
       changeKind: "model",
       reasonCode: "incompatible-model-changed",
     });
@@ -186,7 +197,12 @@ describe("provider continuation policy", () => {
       providerId: "cursor",
       modelId: "cursor-model-a",
     });
-    const previous = continuationIdentityForSelection(cursor);
+    const previous = versionedContinuationIdentityForSelection(
+      cursor,
+      null,
+      true,
+      compatibilityToken,
+    );
     expect(resolveContinuationDecision({
       previousIdentity: previous,
       nextIdentity: { ...previous, modelIdentity: "cursor-model-b" },
@@ -196,7 +212,7 @@ describe("provider continuation policy", () => {
       hasTurns: true,
       allowsModelSwitchWithinSession: true,
     })).toMatchObject({
-      action: "new-conversation-required",
+      action: "start-session",
       changeKind: "model",
       reasonCode: "incompatible-model-changed",
     });
@@ -212,7 +228,7 @@ describe("provider continuation policy", () => {
     ],
     ["endpoint", { endpointIdentity: "endpoint:other" }, "backend-endpoint-changed"],
   ] as const)(
-    "requires a new conversation after a %s boundary change",
+    "starts a fresh session after a %s boundary change",
     (_label, change, reasonCode) => {
       expect(resolveContinuationDecision({
         previousIdentity: codexIdentity,
@@ -223,7 +239,7 @@ describe("provider continuation policy", () => {
         hasTurns: true,
         allowsModelSwitchWithinSession: true,
       })).toMatchObject({
-        action: "new-conversation-required",
+        action: "start-session",
         reasonCode,
       });
     },
@@ -242,7 +258,7 @@ describe("provider continuation policy", () => {
       hasTurns: true,
       allowsModelSwitchWithinSession: true,
     })).toMatchObject({
-      action: "new-conversation-required",
+      action: "start-session",
       changeKind: "backend-profile",
       reasonCode: "backend-profile-changed",
     });
@@ -274,7 +290,7 @@ describe("provider continuation policy", () => {
       hasTurns: false,
       allowsModelSwitchWithinSession: true,
     })).toMatchObject({
-      action: "new-conversation-required",
+      action: "start-session",
       changeKind: "missing-identity",
       reasonCode: "missing-continuation-identity",
     });
@@ -293,7 +309,7 @@ describe("provider continuation policy", () => {
       hasTurns: true,
       allowsModelSwitchWithinSession: true,
     })).toMatchObject({
-      action: "new-conversation-required",
+      action: "start-session",
       changeKind: "missing-identity",
       reasonCode: "missing-continuation-identity",
     });
@@ -301,8 +317,45 @@ describe("provider continuation policy", () => {
 
   it("provides a stable action when the provider no longer has the saved session", () => {
     expect(staleProviderSessionDecision()).toMatchObject({
-      action: "new-conversation-required",
+      action: "start-session",
       reasonCode: "stale-provider-session",
+    });
+  });
+
+  it("resumes only across the same verified installation and capability token", () => {
+    expect(resolveContinuationDecision({
+      previousIdentity: codexIdentity,
+      nextIdentity: {
+        ...codexIdentity,
+        providerCompatibilityToken: "b".repeat(64),
+      },
+      previousModelId: codex.modelId,
+      nextModelId: codex.modelId,
+      hasProviderSession: true,
+      hasTurns: true,
+      allowsModelSwitchWithinSession: true,
+    })).toMatchObject({
+      action: "start-session",
+      changeKind: "provider-installation",
+      reasonCode: "provider-installation-changed",
+    });
+  });
+
+  it("fails closed to a fresh session for a legacy unverified installation identity", () => {
+    const { providerCompatibilityToken: _omitted, ...legacyIdentity } =
+      codexIdentity;
+    expect(resolveContinuationDecision({
+      previousIdentity: legacyIdentity,
+      nextIdentity: codexIdentity,
+      previousModelId: codex.modelId,
+      nextModelId: codex.modelId,
+      hasProviderSession: true,
+      hasTurns: true,
+      allowsModelSwitchWithinSession: true,
+    })).toMatchObject({
+      action: "start-session",
+      changeKind: "provider-installation",
+      reasonCode: "provider-installation-unverified",
     });
   });
 });

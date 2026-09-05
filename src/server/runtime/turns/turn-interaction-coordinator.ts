@@ -8,12 +8,28 @@ import type {
 import type { RuntimeStore } from "../../database";
 import type { ProviderEvent } from "../../provider/contracts";
 import type { TurnStreamProjection } from "./turn-stream-projection";
+import {
+  deletePendingInteraction,
+  pendingInteractionForOwner,
+  registerPendingInteraction,
+  type PendingInteractionOwner,
+} from "../pending-interaction-registry";
 import type {
   ActiveTurn,
   TurnControllerHooks,
   TurnProviderRuntime,
   TurnTerminalCause,
 } from "./turn-controller-types";
+import { requestProviderCancellation } from "./turn-provider-cancellation";
+
+function interactionOwner(active: ActiveTurn): PendingInteractionOwner {
+  return {
+    providerId: active.turn.providerId,
+    conversationId: active.conversation.id,
+    runId: active.turn.runId,
+    turnId: active.turn.id,
+  };
+}
 
 export interface TurnInteractionCoordinatorOptions {
   store: RuntimeStore;
@@ -72,7 +88,13 @@ export class TurnInteractionCoordinator {
     requestId: string,
     decision: AgentApprovalDecision,
   ): boolean {
-    const pending = this.options.pendingApprovals.get(requestId);
+    const pending = active
+      ? pendingInteractionForOwner(
+          this.options.pendingApprovals,
+          interactionOwner(active),
+          requestId,
+        )
+      : undefined;
     if (
       !pending
       || !active
@@ -101,7 +123,7 @@ export class TurnInteractionCoordinator {
       );
     } else if (decision === "cancel") {
       accepted.delete(requestId);
-      this.options.providers.cancel(conversationId);
+      requestProviderCancellation(this.options.providers, conversationId);
       this.options.settle(
         active,
         "cancelled",
@@ -118,7 +140,13 @@ export class TurnInteractionCoordinator {
     requestId: string,
     answers: Record<string, string[]>,
   ): boolean {
-    const pending = this.options.pendingInputs.get(requestId);
+    const pending = active
+      ? pendingInteractionForOwner(
+          this.options.pendingInputs,
+          interactionOwner(active),
+          requestId,
+        )
+      : undefined;
     if (
       !pending
       || !active
@@ -170,8 +198,12 @@ export class TurnInteractionCoordinator {
       permissionRoots: request.permissionRoots,
       availableDecisions: request.availableDecisions,
     };
+    if (!registerPendingInteraction(this.options.pendingApprovals, pending)) {
+      throw new Error(
+        "The provider reused an outstanding approval request identity.",
+      );
+    }
     active.approvalIds.add(pending.id);
-    this.options.pendingApprovals.set(pending.id, pending);
     this.options.transition(active, "waiting-for-approval");
     this.projectWaiting(active, "approval", pending.title);
     this.options.hooks.broadcast({
@@ -187,13 +219,18 @@ export class TurnInteractionCoordinator {
     decision: AgentApprovalDecision | "cancelled",
   ): void {
     this.responses(active).approvals.delete(requestId);
-    const pending = this.options.pendingApprovals.get(requestId);
+    const owner = interactionOwner(active);
+    const pending = pendingInteractionForOwner(
+      this.options.pendingApprovals,
+      owner,
+      requestId,
+    );
     if (
       !pending
       || pending.turnId !== active.turn.id
       || pending.runId !== active.turn.runId
     ) return;
-    this.options.pendingApprovals.delete(requestId);
+    deletePendingInteraction(this.options.pendingApprovals, owner, requestId);
     active.approvalIds.delete(requestId);
     this.options.hooks.broadcast({
       type: "agent.approval.resolved",
@@ -204,7 +241,7 @@ export class TurnInteractionCoordinator {
       decision,
     });
     if (decision === "cancel" || decision === "cancelled") {
-      this.options.providers.cancel(active.conversation.id);
+      requestProviderCancellation(this.options.providers, active.conversation.id);
       this.options.settle(
         active,
         "cancelled",
@@ -231,8 +268,12 @@ export class TurnInteractionCoordinator {
       questions: request.questions,
       autoResolutionMs: request.autoResolutionMs,
     };
+    if (!registerPendingInteraction(this.options.pendingInputs, pending)) {
+      throw new Error(
+        "The provider reused an outstanding input request identity.",
+      );
+    }
     active.inputIds.add(pending.id);
-    this.options.pendingInputs.set(pending.id, pending);
     this.options.transition(active, "waiting-for-input");
     this.projectWaiting(
       active,
@@ -248,13 +289,18 @@ export class TurnInteractionCoordinator {
 
   resolveInput(active: ActiveTurn, requestId: string): void {
     this.responses(active).inputs.delete(requestId);
-    const pending = this.options.pendingInputs.get(requestId);
+    const owner = interactionOwner(active);
+    const pending = pendingInteractionForOwner(
+      this.options.pendingInputs,
+      owner,
+      requestId,
+    );
     if (
       !pending
       || pending.turnId !== active.turn.id
       || pending.runId !== active.turn.runId
     ) return;
-    this.options.pendingInputs.delete(requestId);
+    deletePendingInteraction(this.options.pendingInputs, owner, requestId);
     active.inputIds.delete(requestId);
     this.options.hooks.broadcast({
       type: "agent.input.resolved",
@@ -287,15 +333,24 @@ export class TurnInteractionCoordinator {
 
   private refreshWaitingState(active: ActiveTurn): void {
     if (!active.runState.acceptsProviderEvents()) return;
+    const owner = interactionOwner(active);
     const approval = [...active.approvalIds]
-      .map((id) => this.options.pendingApprovals.get(id))
+      .map((id) => pendingInteractionForOwner(
+        this.options.pendingApprovals,
+        owner,
+        id,
+      ))
       .find(Boolean);
     if (approval) {
       this.options.transition(active, "waiting-for-approval");
       this.projectWaiting(active, "approval", approval.title);
     } else {
       const input = [...active.inputIds]
-        .map((id) => this.options.pendingInputs.get(id))
+        .map((id) => pendingInteractionForOwner(
+          this.options.pendingInputs,
+          owner,
+          id,
+        ))
         .find(Boolean);
       if (input) {
         this.options.transition(active, "waiting-for-input");

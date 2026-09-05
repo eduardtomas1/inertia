@@ -11,9 +11,11 @@ const stoppedSnapshot: RuntimeSupervisorSnapshot = {
   generation: 4,
   pid: null,
   websocketUrl: null,
+  runtimeGenerationHash: null,
   restartAttempt: 2,
   restartScheduled: false,
   lastError: "cleanup unconfirmed",
+  startupBlockerCode: "prior-runtime-cleanup-unconfirmed",
 };
 const descriptor = {
   operationId: "00000000-0000-4000-8000-000000000001",

@@ -30,7 +30,12 @@ import {
   type GeminiAcpHarnessCapabilities,
 } from "./agent-harness";
 import { isSafeApprovalDisplayText } from "./approval-display";
-import type { ProviderRunFailure, ProviderRunResult } from "./contracts";
+import {
+  providerRunTerminal,
+  type ProviderRunFailure,
+  type ProviderRunInput,
+  type ProviderRunResult,
+} from "./contracts";
 import type { AgentApprovalDecision } from "./interactions";
 import { CappedProviderBuffer, ProviderRunEventBudget } from "./io";
 import { ProviderHostToolRuntime } from "./host-tool-runtime";
@@ -87,7 +92,6 @@ const MAX_TOOL_STATE_TEXT_CHARS = 4 * 1024;
 const MAX_RUN_EVENTS = 8_192;
 const MAX_RUN_EVENT_BYTES = 32 * 1024 * 1024;
 const CONTROL_RPC_TIMEOUT_MS = 30_000;
-
 export const GEMINI_ACP_CAPABILITIES = {
   lifecycle: { events: "push", terminalStatuses: ["completed", "failed", "cancelled"] },
   session: { resume: "application-context", identity: "conversation" },
@@ -193,17 +197,17 @@ function startGeminiRun(
   createHostMcpSession = createProviderHostToolMcpSession,
   cleanupSessionArtifacts = cleanupGeminiSessionArtifacts,
 ): AgentHarnessRun {
-  const conversationId = options.input.conversationId ?? options.input.threadId ?? "";
+  const conversationId = options.input.conversationId;
   const emitter = createAgentHarnessEmitter(
     "gemini",
     conversationId,
     options.callbacks,
-    options.input.runId ?? conversationId,
-    options.input.turnId ?? null,
+    options.input.runId,
+    options.input.turnId,
     options.input.cwd,
   );
   if (options.input.operation?.kind === "compact") {
-    return failedGeminiRun(conversationId, {
+    return failedGeminiRun(options.input, {
       reason: "provider-error",
       message: "Gemini ACP does not expose a context-compaction command.",
       phase: "configuration",
@@ -211,12 +215,21 @@ function startGeminiRun(
     }, emitter, options.input.sessionId);
   }
   if (options.input.sessionId) {
-    return failedGeminiRun(conversationId, {
+    return failedGeminiRun(options.input, {
       reason: "provider-error",
       message:
         "Gemini ACP native session loading is disabled because the current CLI cannot replay it safely.",
       phase: "configuration",
       terminalEvent: "session/load:unsupported",
+    }, emitter);
+  }
+  if (!options.providerNativeToolsAvailable) {
+    return failedGeminiRun(options.input, {
+      reason: "provider-error",
+      message:
+        "Gemini provider-native tools are unavailable for this exact installation and model.",
+      phase: "configuration",
+      terminalEvent: "provider-native-tools:unavailable",
     }, emitter);
   }
   let activeRun: AgentHarnessRun | undefined;
@@ -225,9 +238,7 @@ function startGeminiRun(
   const cancelledBeforeStart = (): ProviderRunResult => {
     emitter.status("cancelled");
     return {
-      providerId: "gemini",
-      conversationId,
-      status: "cancelled",
+      ...providerRunTerminal(options.input, "cancelled"),
       text: "",
       textTruncated: false,
       exitCode: null,
@@ -265,11 +276,7 @@ function startGeminiRun(
         phase: "configuration",
         terminalEvent: "environment/dotenv",
       };
-      return failedGeminiRun(
-        conversationId,
-        failure,
-        emitter,
-      ).result;
+      return failedGeminiRun(options.input, failure, emitter).result;
     },
   );
 
@@ -314,7 +321,7 @@ function startPreparedGeminiRun(
   dotenvSecrets: readonly string[],
   emitter: ReturnType<typeof createAgentHarnessEmitter>,
 ): AgentHarnessRun {
-  const conversationId = options.input.conversationId ?? options.input.threadId ?? "";
+  const conversationId = options.input.conversationId;
   const resultText = new CappedProviderBuffer(MAX_RESULT_TEXT_CHARS);
   const stderr = new CappedProviderBuffer(MAX_STDERR_CHARS);
   const secretRedactor = new GeminiAcpSecretRedactor(options.environment);
@@ -461,11 +468,7 @@ function startPreparedGeminiRun(
       options.input.cwd,
       (value) => redactGeminiPayload(value),
     );
-    return failedGeminiRun(
-      conversationId,
-      failure,
-      emitter,
-    );
+    return failedGeminiRun(options.input, failure, emitter);
   }
   child.once("error", (error) => {
     processError = error;
@@ -542,9 +545,20 @@ function startPreparedGeminiRun(
       outerSessionRecordExpected = true;
       const initialized = validateGeminiInitialize(initializeResponse);
       supportsImages = initialized.agentCapabilities?.promptCapabilities?.image === true;
+      emitter.capability("images", supportsImages);
       // Gemini always advertises every auth mechanism. Calling authenticate
       // here would mutate the user's selected CLI auth method and can clear
       // cached credentials. session/new is the auth authority.
+      if (
+        hostMcpSession
+        && initialized.agentCapabilities?.mcpCapabilities?.http !== true
+      ) {
+        activeFailurePhase = "configuration";
+        activeTerminalEvent = "host-tools/http-transport";
+        throw new Error(
+          "This Gemini ACP server does not advertise the required HTTP MCP transport for Inertia chat tools.",
+        );
+      }
       hostMcpConnection = await hostMcpSession?.start();
       if (hostMcpConnection) {
         secretRedactor.addSecrets([
@@ -580,6 +594,10 @@ function startPreparedGeminiRun(
       innerSessionRecordExpected = true;
       const created = parseGeminiNewSessionResponse(newSessionResponse);
       let models: GeminiSessionModels | null = created.models;
+      emitter.capability(
+        "plans",
+        created.modes.availableModes.some(({ id }) => id === "plan"),
+      );
 
       activeFailurePhase = "configuration";
       activeTerminalEvent = "session/configuration";
@@ -593,7 +611,7 @@ function startPreparedGeminiRun(
         options.input.reasoningEffort,
         requestControl,
       );
-      emitGeminiMetadata(models, supportsImages, emitter.rich);
+      emitGeminiMetadata(models, supportsImages, emitter);
 
       const prompt = await geminiPrompt(
         geminiPromptWithReconstructedHistory(
@@ -621,7 +639,7 @@ function startPreparedGeminiRun(
       })));
       if (wireError) throw wireError;
       finishOutputStreams();
-      emitGeminiPromptUsage(response, contextUsage, emitter.rich);
+      emitGeminiPromptUsage(response, contextUsage, emitter);
       const outcome = cancelRequested || response.stopReason === "cancelled"
         ? finish("cancelled")
         : response.stopReason === "end_turn"
@@ -761,19 +779,20 @@ function startPreparedGeminiRun(
           : null;
     if (cleanupFailure) {
       const error = cleanupFailure.message;
+      const failure: ProviderRunFailure = {
+        reason: cleanupFailure.reason,
+        message: error,
+        phase: "cleanup",
+        terminalEvent: cleanupFailure.terminalEvent,
+      };
       emitter.status("failed", error);
       return {
         ...outcome,
-        status: "failed",
+        ...providerRunTerminal(options.input, "failed", failure),
         exitCode: child.exitCode,
         signal: child.signalCode,
         error,
-        failure: {
-          reason: cleanupFailure.reason,
-          message: error,
-          phase: "cleanup",
-          terminalEvent: cleanupFailure.terminalEvent,
-        },
+        failure,
         cleanupConfirmed: false,
       };
     }
@@ -791,9 +810,7 @@ function startPreparedGeminiRun(
     failure?: ProviderRunFailure,
   ): ProviderRunResult {
     return {
-      providerId: "gemini",
-      conversationId,
-      status,
+      ...providerRunTerminal(options.input, status, failure),
       text: resultText.toString(),
       textTruncated: resultText.truncated,
       exitCode: child.exitCode,
@@ -1126,6 +1143,7 @@ function handleGeminiUpdate(
       ) {
         throw new Error("Gemini ACP sent a malformed usage update.");
       }
+      emitter.capability("usage-tokens", true);
       emitter.rich({
         type: "usage",
         usage: {
@@ -1156,7 +1174,7 @@ function handleGeminiUpdate(
 }
 
 function failedGeminiRun(
-  conversationId: string,
+  input: ProviderRunInput,
   failure: ProviderRunFailure,
   emitter: ReturnType<typeof createAgentHarnessEmitter>,
   sessionId?: string,
@@ -1166,9 +1184,7 @@ function failedGeminiRun(
     harnessId: "gemini-acp",
     providerId: "gemini",
     result: Promise.resolve({
-      providerId: "gemini",
-      conversationId,
-      status: "failed",
+      ...providerRunTerminal(input, "failed", failure),
       ...(sessionId ? { sessionId } : {}),
       text: "",
       textTruncated: false,

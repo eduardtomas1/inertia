@@ -8,8 +8,10 @@ import {
   type KnownHarnessId,
   type ModelBackendProfile,
 } from "../src/shared/model-routing";
+import { backendProbeTestAuthority } from "./helpers/backend-probe-authority";
 
 const checkedAt = "2026-07-25T08:00:00.000Z";
+const evaluatedAt = new Date(checkedAt);
 
 function customProfile(
   protocol: ModelBackendProfile["protocol"],
@@ -43,8 +45,12 @@ function successfulProbe(
     modelVerified: true,
     capabilities: MODEL_CAPABILITY_IDS.map((id) => ({
       id,
-      state: id === "streaming" ? "verified" : "unknown",
-      provenance: id === "streaming" ? "probe" : "unknown",
+      state: id === "streaming" || (
+        id === "tools" && profile.protocol === "openai-responses"
+      ) ? "verified" : "unknown",
+      provenance: id === "streaming" || (
+        id === "tools" && profile.protocol === "openai-responses"
+      ) ? "probe" : "unknown",
       detail: null,
       checkedAt,
     })),
@@ -57,6 +63,7 @@ function successfulProbe(
     },
     failure: null,
     checkedAt,
+    authority: backendProbeTestAuthority(checkedAt),
     ...overrides,
   };
 }
@@ -91,6 +98,7 @@ describe("harness-specific backend compatibility", () => {
     const profile = customProfile("openai-responses");
     const modelId = "gpt-compatible";
     expect(resolveHarnessBackendCompatibility("codex-app-server", profile, {
+      evaluatedAt,
       modelId,
     })).toMatchObject({
       state: "unknown",
@@ -99,6 +107,7 @@ describe("harness-specific backend compatibility", () => {
 
     const probe = successfulProbe(profile, modelId);
     expect(resolveHarnessBackendCompatibility("codex-app-server", profile, {
+      evaluatedAt,
       modelId,
       probe,
     })).toMatchObject({
@@ -106,10 +115,27 @@ describe("harness-specific backend compatibility", () => {
       provenance: "probe",
       reasonCode: "responses-probe-verified",
     });
+    const textOnlyProbe = successfulProbe(profile, modelId, {
+      capabilities: successfulProbe(profile, modelId).capabilities.map(
+        (capability) => capability.id === "tools"
+          ? { ...capability, state: "unknown", provenance: "unknown" }
+          : capability,
+      ),
+    });
+    expect(resolveHarnessBackendCompatibility("codex-app-server", profile, {
+      evaluatedAt,
+      modelId,
+      probe: textOnlyProbe,
+    })).toMatchObject({
+      state: "unavailable",
+      provenance: "probe",
+      reasonCode: "responses-tools-unverified",
+    });
     expect(resolveHarnessBackendCompatibility("codex-app-server", {
       ...profile,
       configurationRevision: 4,
     }, {
+      evaluatedAt,
       modelId,
       probe,
     })).toMatchObject({
@@ -117,6 +143,7 @@ describe("harness-specific backend compatibility", () => {
       reasonCode: "probe-stale",
     });
     expect(resolveHarnessBackendCompatibility("codex-app-server", profile, {
+      evaluatedAt,
       modelId: "another-model",
       probe,
     }).reasonCode).toBe("probe-stale");
@@ -127,6 +154,7 @@ describe("harness-specific backend compatibility", () => {
     const modelId = "claude-compatible";
     const probe = successfulProbe(profile, modelId);
     expect(resolveHarnessBackendCompatibility("claude-agent-sdk", profile, {
+      evaluatedAt,
       modelId,
       probe,
     })).toMatchObject({
@@ -135,6 +163,7 @@ describe("harness-specific backend compatibility", () => {
       reasonCode: "anthropic-probe-verified",
     });
     expect(resolveHarnessBackendCompatibility("claude-agent-sdk", profile, {
+      evaluatedAt,
       modelId,
       probe: successfulProbe(profile, modelId, {
         protocolVerified: false,
@@ -155,6 +184,7 @@ describe("harness-specific backend compatibility", () => {
       "codex-app-server",
       ordinaryChatProfile,
       {
+        evaluatedAt,
         modelId: "chat-model",
         probe: successfulProbe(ordinaryChatProfile, "chat-model"),
       },
@@ -168,6 +198,7 @@ describe("harness-specific backend compatibility", () => {
     const cursor = customProfile("cursor-managed", "custom:cursor");
     const openCode = customProfile("opencode-native", "custom:opencode");
     expect(resolveHarnessBackendCompatibility("cursor-acp", cursor, {
+      evaluatedAt,
       modelId: "cursor-model",
       probe: successfulProbe(cursor, "cursor-model"),
     })).toMatchObject({
@@ -175,6 +206,7 @@ describe("harness-specific backend compatibility", () => {
       reasonCode: "cursor-managed",
     });
     expect(resolveHarnessBackendCompatibility("opencode-sdk", openCode, {
+      evaluatedAt,
       modelId: "provider/model",
       probe: successfulProbe(openCode, "provider/model"),
     })).toMatchObject({
@@ -186,6 +218,7 @@ describe("harness-specific backend compatibility", () => {
   it("uses sanitized fixed failure reasons instead of provider diagnostics", () => {
     const profile = customProfile("openai-responses");
     const result = resolveHarnessBackendCompatibility("codex-app-server", profile, {
+      evaluatedAt,
       modelId: "model",
       probe: successfulProbe(profile, "model", {
         compatibility: "unavailable",

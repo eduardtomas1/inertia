@@ -33,6 +33,9 @@ import {
   renewGuardianBuildLock,
   startGuardianBuildLockHeartbeat,
 } from "../../scripts/runtime-process-guardian-publication.mjs";
+import {
+  executableProcessExists as processExists,
+} from "../helpers/executable-process";
 
 const repositoryRoot = resolve(import.meta.dirname, "..", "..");
 const script = join(
@@ -198,15 +201,6 @@ function packageProcess(
     },
     stdio: "ignore",
   });
-}
-
-function processExists(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 function readFixturePid(path: string): number | null {
@@ -2052,9 +2046,10 @@ describe.skipIf(process.platform === "win32")(
         builder,
         [
           'import { spawn } from "node:child_process";',
-          'import { writeFileSync } from "node:fs";',
+          'import { renameSync, writeFileSync } from "node:fs";',
           'const descendant = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });',
-          `writeFileSync(${JSON.stringify(pidFile)}, JSON.stringify({ root: process.pid, descendant: descendant.pid }));`,
+          `writeFileSync(${JSON.stringify(`${pidFile}.tmp`)}, JSON.stringify({ root: process.pid, descendant: descendant.pid }));`,
+          `renameSync(${JSON.stringify(`${pidFile}.tmp`)}, ${JSON.stringify(pidFile)});`,
           "setInterval(() => {}, 1000);",
         ].join("\n"),
       );
@@ -2402,7 +2397,7 @@ describe("runtime guardian package contract", () => {
     expect(JSON.parse(String(emitted?.source))).toEqual(generated);
   });
 
-  it("keeps the emitted Vite sidecar identical to the compiled main value", async () => {
+  it("keeps the emitted Vite sidecar identical to the compiled guardian value", async () => {
     const root = mkdtempSync(join(tmpdir(), "inertia-integrity-bundle-"));
     roots.push(root);
     const config = electronViteConfig as unknown as {
@@ -2417,6 +2412,11 @@ describe("runtime guardian package contract", () => {
         emptyOutDir: true,
         outDir: root,
         ssr: true,
+        // Compile the production guardian without rebuilding unrelated workers.
+        rollupOptions: {
+          ...config.main.build?.rollupOptions,
+          input: { index: resolve("src/main/windows-runtime-job.ts") },
+        },
       },
       configFile: false,
     });

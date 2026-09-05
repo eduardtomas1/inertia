@@ -1,3 +1,4 @@
+import "./ComposerSurface.css";
 import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import type { ChatAttachment, PromptPreset } from "@shared/contracts";
@@ -46,7 +47,6 @@ import { useComposerPromptStash } from "./useComposerPromptStash";
 import { useComposerPromptHistory } from "./useComposerPromptHistory";
 import { useComposerSkillCompletion } from "./useComposerSkillCompletion";
 import { clearPersistedComposerDraft, persistComposerDraft } from "../../utils/composerDraftPersistence";
-
 /*
  * The resume surface only matters once /resume runs, and the composer sits in
  * the entry chunk. Loading it on demand keeps the picker and its list rendering
@@ -968,7 +968,7 @@ export const Composer = memo(function Composer({
     });
     if (!persisted) return;
     updateMessage(entry.content);
-    window.requestAnimationFrame(() => textareaRef.current?.focus());
+    textareaRef.current?.focus();
   };
   const applyPromptPreset = async (preset: PromptPreset): Promise<boolean> => {
     const textarea = textareaRef.current;

@@ -292,6 +292,36 @@ describe("composer route readiness", () => {
     }
   });
 
+  it("keeps text-compatible Codex unavailable until its inert tool check passes", () => {
+    const codexProfile = profile({
+      harnessId: "codex-app-server",
+      protocol: "openai-responses",
+      connectionState: "limited",
+      compatibility: {
+        harnessId: "codex-app-server",
+        backendProfileId: "custom:team",
+        backendProtocol: "openai-responses",
+        state: "unavailable",
+        provenance: "probe",
+        allowsModelSwitchWithinSession: false,
+        reasonCode: "responses-tools-unverified",
+        reason: "Codex requires this Responses backend to pass the inert tool-call compatibility check.",
+      },
+    });
+    const readiness = composerRouteReadiness({
+      provider: provider(),
+      profile: codexProfile,
+      selection: customSelection({ harnessId: "codex-app-server" }),
+    });
+    expect(readiness).toMatchObject({
+      ready: false,
+      badge: "Probe needed",
+      action: "probe",
+      detail: "Codex requires this Responses backend to pass the inert tool-call compatibility check.",
+    });
+    expect(composerProviderReady(provider(), codexProfile)).toBe(false);
+  });
+
   it("keeps checking states transient and action-free", () => {
     expect(composerRouteReadiness({
       provider: provider({

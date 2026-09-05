@@ -7,6 +7,7 @@ import {
   portableNodeExecutable,
   writeNodeSubcommand,
 } from "./portable-provider-fixture";
+import { executableProcessExists } from "./executable-process";
 
 export function fakeAppServer(roots: string[]): { root: string; command: string; capturePath: string } {
   const root = portableFixtureRoot("app server");
@@ -609,10 +610,5 @@ export function captured(path: string): Array<Record<string, unknown>> {
 }
 
 export function processExists(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
+  return executableProcessExists(pid);
 }

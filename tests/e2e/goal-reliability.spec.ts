@@ -7,6 +7,7 @@ import {
   providerNativeModelSelection,
 } from "../../src/shared/model-routing";
 import { createAppFixture } from "./support/app-fixture";
+import { attachRuntimeLifecycleFailureDiagnostic } from "./support/runtime-lifecycle-diagnostics";
 import {
   attachDarwinRecoverySafetyLockDiagnostic,
   installRuntimeRecoveryConsent,
@@ -324,6 +325,8 @@ test("starts a sessionless goal and recovers it after Stop and runtime crash", {
   } catch (error) {
     scenarioFailed = true;
     scenarioError = error;
+    await attachRuntimeLifecycleFailureDiagnostic(test.info(), async () =>
+      (await app.runtimeSnapshot()).websocketUrl).catch(() => undefined);
   }
   // Fail-closed cleanup is independently authoritative. Retain both failures
   // when recovery fails first, rather than replacing its evidence with the

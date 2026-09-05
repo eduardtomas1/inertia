@@ -36,7 +36,11 @@ import type {
   ModelBackendDefault,
   PersistedModelBackendProfile,
 } from "../../shared/backend-profile-settings";
-import type { BackendCompatibilityProbeResult } from "../../shared/backend-probe";
+import type {
+  BackendCompatibilityProbeResult,
+  BackendProbeAdmissionHighWater,
+} from "../../shared/backend-probe";
+import type { ContinuationReasonCode } from "../../shared/continuation-policy";
 import type { PersistedTurnExecutionContext } from "../runtime/turns/request-context";
 import type { WorktreeFilesystemReceipt } from "../worktree-filesystem-identity";
 
@@ -99,6 +103,7 @@ export interface CreateAgentTurnInput {
   providerId: ProviderId;
   modelSelection?: ModelSelection;
   continuationIdentity?: ContinuationIdentity;
+  continuationReasonCode?: ContinuationReasonCode | null;
   /** Legacy database-boundary fields accepted for V0.0.6 compatibility. */
   harnessId?: string;
   backendProfileId?: string;
@@ -133,6 +138,13 @@ export interface BeginAgentTurnInput
   content: string;
   attachments?: ChatAttachment[];
   activateConversation?: boolean;
+  /**
+   * Exact stale provider session that must be cleared atomically with this
+   * fresh turn. A mismatched persisted session aborts the whole transaction.
+   */
+  providerSessionInvalidation?: {
+    expectedSessionId: string;
+  };
   executionContext?: PersistedTurnExecutionContext;
   /** Opaque user-authorized chat context claimed atomically with this message. */
   conversationContextPacketIds?: readonly string[];
@@ -240,6 +252,8 @@ export interface UpsertSubagentTraceResult {
 
 export interface StoredModelBackendProfile {
   profile: PersistedModelBackendProfile;
+  probeResults: readonly BackendCompatibilityProbeResult[];
+  probeAdmissionHighWater: readonly BackendProbeAdmissionHighWater[];
   latestProbe: BackendCompatibilityProbeResult | null;
 }
 

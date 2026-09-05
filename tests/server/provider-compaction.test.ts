@@ -1,3 +1,4 @@
+// @inertia-test-suite portable
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -292,7 +293,7 @@ describe.sequential("provider compaction adapters", () => {
       },
     });
     const manager = trackManager(
-      new ProviderManager(
+      ProviderManager.createForTests(
         { commands: { codex: process.execPath } },
         new AgentHarnessRegistry([
           createCodexAppServerHarness({ withControlClient }),
@@ -345,7 +346,7 @@ describe.sequential("provider compaction adapters", () => {
         throw new Error(`Unexpected control request: ${method}`);
       },
     });
-    const manager = trackManager(new ProviderManager(
+    const manager = trackManager(ProviderManager.createForTests(
       { commands: { codex: process.execPath } },
       new AgentHarnessRegistry([
         createCodexAppServerHarness({ withControlClient }),
@@ -381,7 +382,7 @@ describe.sequential("provider compaction adapters", () => {
       },
     });
     const manager = trackManager(
-      new ProviderManager(
+      ProviderManager.createForTests(
         { commands: { codex: process.execPath } },
         new AgentHarnessRegistry([
           createCodexAppServerHarness({ withControlClient }),
@@ -435,7 +436,7 @@ describe.sequential("provider compaction adapters", () => {
         throw new Error(`Unexpected control request: ${method}`);
       },
     });
-    const manager = trackManager(new ProviderManager(
+    const manager = trackManager(ProviderManager.createForTests(
       { commands: { codex: process.execPath } },
       new AgentHarnessRegistry([
         createCodexAppServerHarness({ withControlClient }),
@@ -479,7 +480,7 @@ describe.sequential("provider compaction adapters", () => {
         throw new Error(`Unexpected control request: ${method}`);
       },
     });
-    const manager = trackManager(new ProviderManager(
+    const manager = trackManager(ProviderManager.createForTests(
       { commands: { codex: process.execPath } },
       new AgentHarnessRegistry([
         createCodexAppServerHarness({
@@ -548,7 +549,7 @@ describe.sequential("provider compaction adapters", () => {
         throw new Error(`Unexpected control request: ${method}`);
       },
     });
-    const manager = trackManager(new ProviderManager(
+    const manager = trackManager(ProviderManager.createForTests(
       { commands: { codex: process.execPath } },
       new AgentHarnessRegistry([
         createCodexAppServerHarness({ withControlClient }),
@@ -601,7 +602,7 @@ describe.sequential("provider compaction adapters", () => {
         throw new Error(`Unexpected control request: ${method}`);
       },
     });
-    const manager = trackManager(new ProviderManager(
+    const manager = trackManager(ProviderManager.createForTests(
       { commands: { codex: process.execPath } },
       new AgentHarnessRegistry([
         createCodexAppServerHarness({
@@ -661,7 +662,7 @@ describe.sequential("provider compaction adapters", () => {
           throw new Error(`Unexpected control request: ${method}`);
         },
       });
-      const manager = trackManager(new ProviderManager(
+      const manager = trackManager(ProviderManager.createForTests(
         { commands: { codex: process.execPath } },
         new AgentHarnessRegistry([
           createCodexAppServerHarness({ withControlClient }),
@@ -717,7 +718,7 @@ describe.sequential("provider compaction adapters", () => {
         throw new Error(`Unexpected control request: ${method}`);
       },
     });
-    const manager = trackManager(new ProviderManager(
+    const manager = trackManager(ProviderManager.createForTests(
       { commands: { codex: process.execPath } },
       new AgentHarnessRegistry([
         createCodexAppServerHarness({ withControlClient }),
@@ -756,7 +757,7 @@ describe.sequential("provider compaction adapters", () => {
     );
     const phaseTrace = createCodexCompactionPhaseTrace();
     const manager = trackManager(
-      new ProviderManager(
+      ProviderManager.createForTests(
         { commands: { codex: command } },
         new AgentHarnessRegistry([
           createCodexAppServerHarness({
@@ -837,7 +838,7 @@ describe.sequential("provider compaction adapters", () => {
       null,
     );
     const manager = trackManager(
-      new ProviderManager({ commands: { codex: command } }),
+      ProviderManager.createForTests({ commands: { codex: command } }),
     );
     const base = nativeProviderRunInput({
       providerId: "codex",
@@ -897,7 +898,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
 });
 `);
     const manager = trackManager(
-      new ProviderManager({ commands: { codex: command } }),
+      ProviderManager.createForTests({ commands: { codex: command } }),
     );
 
     await expect(manager.compact(nativeProviderRunInput({
@@ -967,7 +968,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
 });
 `);
     const manager = trackManager(
-      new ProviderManager({ commands: { codex: command } }),
+      ProviderManager.createForTests({ commands: { codex: command } }),
     );
 
     await expect(manager.compact(nativeProviderRunInput({
@@ -1055,7 +1056,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
         },
       });
     };
-    const manager = trackManager(new ProviderManager(
+    const manager = trackManager(ProviderManager.createForTests(
       { commands: { codex: process.execPath } },
       new AgentHarnessRegistry([
         createCodexAppServerHarness({
@@ -1146,7 +1147,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
         },
       });
     };
-    const manager = trackManager(new ProviderManager(
+    const manager = trackManager(ProviderManager.createForTests(
       { commands: { codex: process.execPath } },
       new AgentHarnessRegistry([
         createCodexAppServerHarness({ withControlClient }),
@@ -1256,7 +1257,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
         },
       });
     };
-    const manager = trackManager(new ProviderManager(
+    const manager = trackManager(ProviderManager.createForTests(
       { commands: { codex: process.execPath } },
       new AgentHarnessRegistry([
         createCodexAppServerHarness({
@@ -1309,7 +1310,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
         throw new Error(`Unexpected control request: ${method}`);
       },
     });
-    const manager = trackManager(new ProviderManager(
+    const manager = trackManager(ProviderManager.createForTests(
       { commands: { codex: process.execPath } },
       new AgentHarnessRegistry([
         createCodexAppServerHarness({
@@ -1384,7 +1385,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
         throw new Error(`Unexpected control request: ${method}`);
       },
     });
-    const manager = trackManager(new ProviderManager(
+    const manager = trackManager(ProviderManager.createForTests(
       { commands: { codex: process.execPath } },
       new AgentHarnessRegistry([
         createCodexAppServerHarness({ withControlClient }),
@@ -1449,7 +1450,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
         },
       });
     };
-    const manager = trackManager(new ProviderManager(
+    const manager = trackManager(ProviderManager.createForTests(
       { commands: { codex: process.execPath } },
       new AgentHarnessRegistry([
         createCodexAppServerHarness({
@@ -1525,7 +1526,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
         throw new Error(`Unexpected control request: ${method}`);
       },
     });
-    const manager = trackManager(new ProviderManager(
+    const manager = trackManager(ProviderManager.createForTests(
       { commands: { codex: process.execPath } },
       new AgentHarnessRegistry([
         createCodexAppServerHarness({
@@ -1587,7 +1588,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       });
       return await Promise.race([operation, cancelled]);
     };
-    manager = trackManager(new ProviderManager(
+    manager = trackManager(ProviderManager.createForTests(
       { commands: { codex: process.execPath } },
       new AgentHarnessRegistry([
         createCodexAppServerHarness({ withControlClient }),
@@ -1642,7 +1643,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
 });
 `);
     const manager = trackManager(
-      new ProviderManager({ commands: { codex: command } }),
+      ProviderManager.createForTests({ commands: { codex: command } }),
     );
 
     await expect(manager.compact(nativeProviderRunInput({
@@ -1680,7 +1681,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
 });
 `);
     const manager = trackManager(
-      new ProviderManager({ commands: { codex: command } }),
+      ProviderManager.createForTests({ commands: { codex: command } }),
     );
 
     await expect(manager.compact(nativeProviderRunInput({
@@ -1728,7 +1729,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
 });
 `);
     const manager = trackManager(
-      new ProviderManager({ commands: { codex: command } }),
+      ProviderManager.createForTests({ commands: { codex: command } }),
     );
 
     await expect(manager.compact(nativeProviderRunInput({
@@ -1767,7 +1768,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
 });
 `);
     const manager = trackManager(
-      new ProviderManager({ commands: { codex: command } }),
+      ProviderManager.createForTests({ commands: { codex: command } }),
     );
 
     await expect(manager.compact(nativeProviderRunInput({
@@ -1798,7 +1799,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
         })(),
       ),
     });
-    const manager = trackManager(new ProviderManager(
+    const manager = trackManager(ProviderManager.createForTests(
       { commands: { claude: "/fake/claude" } },
       new AgentHarnessRegistry([harness]),
     ));
@@ -1819,7 +1820,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       "/compact remember retrieval exactly",
     );
 
-    const unprovenManager = trackManager(new ProviderManager(
+    const unprovenManager = trackManager(ProviderManager.createForTests(
       { commands: { claude: "/fake/claude" } },
       new AgentHarnessRegistry([createClaudeAgentSdkHarness({
         createQuery: () => fixtureClaudeQuery(
@@ -1842,7 +1843,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       message: expect.stringContaining("did not confirm"),
     });
 
-    const contradictoryManager = trackManager(new ProviderManager(
+    const contradictoryManager = trackManager(ProviderManager.createForTests(
       { commands: { claude: "/fake/claude" } },
       new AgentHarnessRegistry([createClaudeAgentSdkHarness({
         createQuery: () => fixtureClaudeQuery(
@@ -1880,7 +1881,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   it("rejects a successful provider result for a different session", async () => {
     const root = portableFixtureRoot("Claude compact wrong session");
     roots.push(root);
-    const manager = trackManager(new ProviderManager(
+    const manager = trackManager(ProviderManager.createForTests(
       { commands: { claude: "/fake/claude" } },
       new AgentHarnessRegistry([createClaudeAgentSdkHarness({
         createQuery: () => fixtureClaudeQuery(
@@ -1913,7 +1914,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   it("does not accept a foreign Claude proof followed by a selected-session result", async () => {
     const root = portableFixtureRoot("Claude compact foreign proof");
     roots.push(root);
-    const manager = trackManager(new ProviderManager(
+    const manager = trackManager(ProviderManager.createForTests(
       { commands: { claude: "/fake/claude" } },
       new AgentHarnessRegistry([createClaudeAgentSdkHarness({
         createQuery: () => fixtureClaudeQuery(
@@ -1949,7 +1950,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   it("does not accept Fast attestation from a foreign Claude session", async () => {
     const root = portableFixtureRoot("Claude compact foreign Fast init");
     roots.push(root);
-    const manager = trackManager(new ProviderManager(
+    const manager = trackManager(ProviderManager.createForTests(
       { commands: { claude: "/fake/claude" } },
       new AgentHarnessRegistry([createClaudeAgentSdkHarness({
         createQuery: () => fixtureClaudeQuery(

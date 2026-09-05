@@ -5,15 +5,65 @@ on:
   push:
     branches:
       - main
+  merge_group:
+    types: [checks_requested]
+  schedule:
+    - cron: "17 3 * * *"
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  classify:
+    name: Classify change evidence
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      all_evidence: ${{ steps.changes.outputs.all_evidence }}
+      full_certification: ${{ steps.changes.outputs.full_certification }}
+      documentation_only: ${{ steps.changes.outputs.documentation_only }}
+      quality_shared: ${{ steps.changes.outputs.quality_shared }}
+      runtime_supervisor: ${{ steps.changes.outputs.runtime_supervisor }}
+      process_containment: ${{ steps.changes.outputs.process_containment }}
+      startup_recovery: ${{ steps.changes.outputs.startup_recovery }}
+      provider_common: ${{ steps.changes.outputs.provider_common }}
+      provider_codex: ${{ steps.changes.outputs.provider_codex }}
+      provider_claude: ${{ steps.changes.outputs.provider_claude }}
+      provider_cursor: ${{ steps.changes.outputs.provider_cursor }}
+      provider_gemini: ${{ steps.changes.outputs.provider_gemini }}
+      provider_kimi: ${{ steps.changes.outputs.provider_kimi }}
+      provider_opencode: ${{ steps.changes.outputs.provider_opencode }}
+      turn_session: ${{ steps.changes.outputs.turn_session }}
+      agent_management: ${{ steps.changes.outputs.agent_management }}
+      database_migrations: ${{ steps.changes.outputs.database_migrations }}
+      terminal_native: ${{ steps.changes.outputs.terminal_native }}
+      updater: ${{ steps.changes.outputs.updater }}
+      windows_packaging: ${{ steps.changes.outputs.windows_packaging }}
+      linux_appimage: ${{ steps.changes.outputs.linux_appimage }}
+      macos_packaging: ${{ steps.changes.outputs.macos_packaging }}
+      renderer_ui: ${{ steps.changes.outputs.renderer_ui }}
+      performance: ${{ steps.changes.outputs.performance }}
+      ci_test_infrastructure: ${{ steps.changes.outputs.ci_test_infrastructure }}
+      domains_json: ${{ steps.changes.outputs.domains_json }}
+
+    steps:
+      - name: Check out complete comparison history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Classify changed evidence domains
+        id: changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: node scripts/ci/change-classifier.mjs --base "$BASE_SHA" --head "$HEAD_SHA"
+
   # Migrations, architecture, lint, and types are platform independent, so they
   # are proven once here instead of six times across the matrix. Every
   # expensive job depends on this, which keeps a typo from occupying the
@@ -32,11 +82,30 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
+      - name: Validate workflow syntax and expressions
+        shell: bash
+        env:
+          ACTIONLINT_SHA256: 023070a287cd8cccd71515fedc843f1985bf96c436b7effaecce67290e7e0757
+          ACTIONLINT_VERSION: 1.7.7
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/actionlint.tar.gz"
+          binary="$RUNNER_TEMP/actionlint"
+          curl --fail --location --silent --show-error \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" \
+            --output "$archive"
+          printf '%s  %s\n' "$ACTIONLINT_SHA256" "$archive" | sha256sum --check --strict
+          tar --extract --gzip --file "$archive" --directory "$RUNNER_TEMP" actionlint
+          "$binary" -color
+
       - name: Install locked dependencies
         uses: ./.github/actions/install-dependencies
 
       - name: Verify migrations, architecture, lint, and types
         run: npm run check:quality
+
+      - name: Enforce the isolated browser-evidence CPU budget
+        run: npm run test:browser-evidence-cpu-budget
 
   node-22-minimum:
     name: Node 22.13 minimum runtime
@@ -69,10 +138,296 @@ jobs:
       - name: Compile and execute Node runtime entry points
         run: npm run check:node-runtime
 
+  pr-linux-core:
+    name: PR Linux core and portable conformance
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    needs: [classify, gate]
+    timeout-minutes: 25
+    env:
+      CI: "true"
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install Linux guardian toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes binutils linux-libc-dev musl-tools=1.2.4-2
+
+      - name: Install locked dependencies
+        uses: ./.github/actions/install-dependencies
+
+      - name: Run core suite with all-source coverage baselines
+        run: npm run test:coverage
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Report complete dependency audit
+        continue-on-error: true
+        run: npm audit --audit-level=high
+
+      - name: Keep core failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pr-linux-core-results
+          path: |
+            test-results
+            coverage/coverage-summary.json
+          if-no-files-found: ignore
+          retention-days: 7
+
+  pr-linux-lifecycle:
+    name: PR Linux x64 AppImage and lifecycle sentinel
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    needs: [classify, gate]
+    timeout-minutes: 25
+    env:
+      CI: "true"
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install Linux guardian toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes binutils linux-libc-dev musl-tools=1.2.4-2
+
+      - name: Install locked dependencies
+        uses: ./.github/actions/install-dependencies
+
+      - name: Verify native dependency architecture
+        env:
+          INERTIA_EXPECTED_ARCH: x64
+        run: npm run test:native-architecture
+
+      - name: Build native runtime helpers
+        run: npm run pretest
+
+      - name: Run Linux lifecycle and AppImage update sentinels
+        run: >-
+          npm exec -- vitest run --maxWorkers=1
+          tests/main/app-update-bootstrap.test.ts
+          tests/main/app-update-handoff.test.ts
+          tests/main/app-update-install.test.ts
+          tests/main/app-update.test.ts
+          tests/main/appimage-installed-identity.test.ts
+          tests/main/runtime-owned-process-update-recovery.test.ts
+          tests/main/runtime-process-containment-admission.test.ts
+          tests/main/runtime-recovery-integration.test.ts
+          tests/main/runtime-supervisor-lifecycle.test.ts
+          tests/server/runtime-shutdown-authority.test.ts
+
+      - name: Build the application bundle
+        id: application_bundle
+        run: npm run build:packaged
+
+      - name: Prepare Electron end-to-end binary
+        id: electron_test_binary
+        run: node -e "console.log(require('electron'))"
+
+      - name: Run compact Electron/core bridge smoke under Xvfb
+        run: >-
+          xvfb-run --auto-servernum npm exec -- playwright test
+          tests/e2e/core-bridge-smoke.spec.ts
+          --project=isolated --workers=1
+          --output=test-results/core-bridge-smoke
+
+      - name: Run destructive runtime-recovery Electron sentinels under Xvfb
+        run: xvfb-run --auto-servernum npm exec -- playwright test --project=runtime-recovery --output=test-results/runtime-recovery
+
+      - name: Package Linux x64 AppImage and unpacked app
+        run: npm run package:linux
+
+      - name: Validate Linux AppImage identity, icons, and runtime resource
+        run: npm run validate:linux-package
+
+      - name: Verify the packaged Linux guardian is static
+        shell: bash
+        run: |
+          set -euo pipefail
+          guardian="release/linux-unpacked/resources/runtime/runtime-process-guardian"
+          test -x "$guardian"
+          if readelf --program-headers "$guardian" | grep -Fq 'INTERP'; then
+            echo "The packaged Linux guardian unexpectedly has a program interpreter." >&2
+            exit 1
+          fi
+          if readelf --dynamic "$guardian" 2>/dev/null | grep -Fq '(NEEDED)'; then
+            echo "The packaged Linux guardian unexpectedly has a dynamic dependency." >&2
+            exit 1
+          fi
+
+      - name: Verify packaged Electron fuses
+        run: npm run verify:fuses -- release/linux-unpacked/inertia
+
+      - name: Configure Linux sandbox helper for smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          sandbox="release/linux-unpacked/chrome-sandbox"
+          sudo chown root:root "$sandbox"
+          sudo chmod 4755 "$sandbox"
+          test "$(stat -c '%u:%g:%a' "$sandbox")" = "0:0:4755"
+
+      - name: Smoke packaged Linux app and final AppImage under Xvfb
+        env:
+          INERTIA_RELEASE_CHANNEL: stable
+        run: |
+          xvfb-run --auto-servernum npm run test:package-smoke
+          xvfb-run --auto-servernum npm run test:release-container-smoke
+
+      - name: Keep Linux sentinel failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pr-linux-lifecycle-results
+          path: test-results
+          if-no-files-found: ignore
+          retention-days: 7
+
+  pr-windows-lifecycle:
+    name: PR Windows x64 lifecycle sentinel
+    if: github.event_name == 'pull_request'
+    runs-on: windows-2025
+    needs: [classify, gate]
+    timeout-minutes: 25
+    env:
+      CI: "true"
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Exclude the workspace from Microsoft Defender
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          Add-MpPreference -ExclusionPath "$env:GITHUB_WORKSPACE"
+          Add-MpPreference -ExclusionPath "$env:RUNNER_TEMP"
+
+      - name: Install locked dependencies
+        uses: ./.github/actions/install-dependencies
+
+      - name: Verify native dependency architecture
+        env:
+          INERTIA_EXPECTED_ARCH: x64
+        run: npm run test:native-architecture
+
+      - name: Build native runtime helpers
+        run: npm run pretest
+
+      - name: Run Windows lifecycle sentinels
+        run: >-
+          npm exec -- vitest run --maxWorkers=1
+          tests/main/app-update-handoff.test.ts
+          tests/main/app-update-startup.test.ts
+          tests/main/runtime-owned-process-recovery.test.ts
+          tests/main/runtime-process-containment-admission.test.ts
+          tests/main/runtime-supervisor-lifecycle.test.ts
+          tests/main/runtime-supervisor-windows-tree-recovery.test.ts
+          tests/main/windows-runtime-job.test.ts
+          tests/main/windows-update-supervisor.test.ts
+          tests/main/windows-update-terminal-receipt.test.ts
+          tests/server/runtime-shutdown-authority.test.ts
+
+      - name: Build the application bundle
+        id: application_bundle
+        run: npm run build:packaged
+
+      - name: Prepare Electron end-to-end binary
+        id: electron_test_binary
+        run: node -e "console.log(require('electron'))"
+
+      - name: Run destructive runtime-recovery Electron sentinels
+        run: npm exec -- playwright test --project=runtime-recovery --output=test-results/runtime-recovery
+
+      - name: Keep Windows sentinel failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pr-windows-lifecycle-results
+          path: test-results
+          if-no-files-found: ignore
+          retention-days: 7
+
+  pr-macos-lifecycle:
+    name: PR macOS arm64 lifecycle sentinel
+    if: github.event_name == 'pull_request'
+    runs-on: macos-15
+    needs: [classify, gate]
+    timeout-minutes: 25
+    env:
+      CI: "true"
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install locked dependencies
+        uses: ./.github/actions/install-dependencies
+
+      - name: Verify native dependency architecture
+        env:
+          INERTIA_EXPECTED_ARCH: arm64
+        run: npm run test:native-architecture
+
+      - name: Build native runtime helpers
+        run: npm run pretest
+
+      - name: Run macOS lifecycle sentinels
+        run: >-
+          npm exec -- vitest run --maxWorkers=1
+          tests/main/app-update-handoff.test.ts
+          tests/main/runtime-live-darwin-recovery.test.ts
+          tests/main/runtime-owned-process-darwin-helper.test.ts
+          tests/main/runtime-process-guardian-darwin.test.ts
+          tests/main/runtime-supervisor-lifecycle.test.ts
+          tests/main/terminal-darwin-ownership-boundary.test.ts
+          tests/main/terminal-darwin-shutdown.test.ts
+          tests/server/runtime-shutdown-authority.test.ts
+
+      - name: Build the application bundle
+        id: application_bundle
+        run: npm run build:packaged
+
+      - name: Prepare Electron end-to-end binary
+        id: electron_test_binary
+        run: node -e "console.log(require('electron'))"
+
+      - name: Run destructive runtime-recovery Electron sentinels
+        run: npm exec -- playwright test --project=runtime-recovery --output=test-results/runtime-recovery
+
+      - name: Keep macOS sentinel failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pr-macos-lifecycle-results
+          path: test-results
+          if-no-files-found: ignore
+          retention-days: 7
+
   test:
     name: ${{ matrix.label }}
+    if: github.event_name != 'pull_request' || needs.classify.outputs.full_certification == 'true'
     runs-on: ${{ matrix.runner }}
-    needs: gate
+    needs: [classify, gate]
     timeout-minutes: ${{ matrix.timeout_minutes }}
     strategy:
       fail-fast: false
@@ -169,6 +524,7 @@ jobs:
         run: npm run test:native-architecture
 
       - name: Run cross-platform performance smoke
+        if: github.event_name != 'pull_request' || needs.classify.outputs.performance == 'true'
         run: npm run benchmark:platform:smoke
 
       # Migrations, architecture, lint, and types are already proven by the
@@ -176,7 +532,8 @@ jobs:
       # dependent: the unit suite and the build.
       - name: Run the unit suite
         if: runner.os == 'macOS'
-        run: npm test
+        # Bound process-heavy fixture contention while retaining every deadline.
+        run: npm test -- --maxWorkers=2
 
       # Coverage runs the same suite as npm test, so Linux runs it once here
       # instead of running the suite twice.
@@ -184,13 +541,23 @@ jobs:
         if: runner.os == 'Linux'
         run: npm run test:coverage
 
-      # The sharded Windows unit job already runs this whole suite on the same
-      # windows-2025 image, so repeating it here would only duplicate it. The
-      # ARM64 image has no sharded job, which makes it the only Windows unit
-      # signal for that architecture.
-      - name: Run portable runtime and provider protocol suite
-        if: runner.os != 'Windows' || matrix.arch != 'x64'
+      # Linux coverage, macOS units, and the sharded Windows x64 job already
+      # execute every marked portable test. Windows ARM64 has no complete unit
+      # signal, so it alone needs the generated portable subset here.
+      - name: Run Windows ARM64 portable runtime and provider protocol suite
+        if: runner.os == 'Windows' && matrix.arch == 'arm64'
         run: npm run test:portable
+
+      # Every attempt is retained and any failed attempt fails the job at the
+      # end. A pass after a failure is classified as a flake, never as success.
+      - name: Repeat selected lifecycle invariants for nightly flake evidence
+        id: lifecycle_repeat
+        if: github.event_name == 'schedule'
+        continue-on-error: true
+        run: >-
+          npm run test:lifecycle-repeat --
+          --iterations 3
+          --output-directory test-results/nightly-lifecycle
 
       - name: Run opt-in Kimi through Claude integration
         if: runner.os == 'Linux'
@@ -209,6 +576,14 @@ jobs:
       - name: Verify native Windows Codex discovery and shim launching
         if: runner.os == 'Windows'
         run: npm run test:windows-codex
+
+      # The x64 unit signal runs in separate shard jobs, so unlike ARM64 this
+      # matrix job has not executed an npm pretest hook before bundling. Build
+      # the exact Job Object helper in this workspace before its integrity
+      # snapshot and executable are consumed by the bundle and package.
+      - name: Build Windows x64 runtime helper for the application bundle
+        if: runner.os == 'Windows' && matrix.arch == 'x64'
+        run: npm run pretest
 
       - name: Audit production dependencies
         if: runner.os == 'Linux'
@@ -243,6 +618,9 @@ jobs:
       # preventing the independent coverage from running.
       - name: Run isolated Electron end-to-end tests
         if: ${{ !cancelled() && steps.application_bundle.outcome == 'success' && steps.electron_test_binary.outcome == 'success' && runner.os != 'Linux' }}
+        env:
+          # Bound Windows load after hosted socket-buffer exhaustion.
+          INERTIA_E2E_WORKERS: ${{ runner.os == 'Windows' && '1' || '2' }}
         run: npm exec -- playwright test --project=isolated --output=test-results/isolated
 
       - name: Run destructive runtime-recovery tests sequentially
@@ -271,11 +649,11 @@ jobs:
           retention-days: 14
 
       - name: Measure desktop workloads
-        if: runner.os != 'Linux'
+        if: (github.event_name != 'pull_request' || needs.classify.outputs.performance == 'true') && runner.os != 'Linux'
         run: npm run benchmark:desktop:built
 
       - name: Measure desktop workloads under Xvfb
-        if: runner.os == 'Linux'
+        if: (github.event_name != 'pull_request' || needs.classify.outputs.performance == 'true') && runner.os == 'Linux'
         run: xvfb-run --auto-servernum npm run benchmark:desktop:built
 
       - name: Package native Windows installer and unpacked app
@@ -298,6 +676,20 @@ jobs:
       - name: Package Linux AppImage and unpacked app
         if: runner.os == 'Linux'
         run: npm run "${{ matrix.package_script }}"
+
+      - name: Download checksummed packaged Windows N-1 installer
+        if: runner.os == 'Windows' && matrix.arch == 'x64'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          current_version="$(node -p "require('./package.json').version")"
+          node scripts/ci/download-windows-n-minus-one.mjs \
+            --current-version "$current_version" \
+            --channel stable \
+            --architecture x64 \
+            --output-directory release/n-minus-one
 
       - name: Validate Linux AppImage identity, icons, and runtime resource
         if: runner.os == 'Linux'
@@ -331,8 +723,15 @@ jobs:
         if: runner.os != 'Linux'
         run: npm run test:package-smoke
 
-      - name: Install, smoke, and uninstall Windows package
-        if: runner.os == 'Windows'
+      - name: Install N-1, upgrade in place, smoke, and uninstall Windows x64 package
+        if: runner.os == 'Windows' && matrix.arch == 'x64'
+        env:
+          INERTIA_RELEASE_CHANNEL: stable
+          INERTIA_WINDOWS_N_MINUS_ONE_METADATA: release/n-minus-one/metadata.json
+        run: npm run test:windows-installer-smoke
+
+      - name: Install, smoke, and uninstall Windows ARM64 package
+        if: runner.os == 'Windows' && matrix.arch == 'arm64'
         env:
           INERTIA_RELEASE_CHANNEL: stable
         run: npm run test:windows-installer-smoke
@@ -416,7 +815,7 @@ jobs:
           retention-days: 7
 
       - name: Keep cross-platform performance evidence
-        if: always()
+        if: always() && (github.event_name != 'pull_request' || needs.classify.outputs.performance == 'true')
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: performance-${{ matrix.artifact }}
@@ -424,21 +823,37 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+      - name: Keep nightly lifecycle repetition and flake evidence
+        if: always() && github.event_name == 'schedule'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: nightly-lifecycle-${{ matrix.artifact }}
+          path: test-results/nightly-lifecycle
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Fail certification when any lifecycle repetition failed
+        if: always() && github.event_name == 'schedule' && steps.lifecycle_repeat.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "At least one retained lifecycle attempt failed or flaked." >&2
+          exit 1
+
   windows-unit:
     name: Windows unit tests (${{ matrix.shard }}/4)
+    if: github.event_name != 'pull_request' || needs.classify.outputs.full_certification == 'true'
     runs-on: windows-2025
-    needs: gate
+    needs: [classify, gate]
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         shard: [1, 2, 3, 4]
     env:
-      # Vitest shards by path hash rather than by measured duration, so two
-      # shards drifted apart by roughly a third. Four shards narrow that spread
-      # and shorten the longest shard, which is what the pull-request loop
-      # actually waits on. Each shard remains single-worker because #74 proved
-      # that concurrent hosted-Windows fixtures contend for native resources.
+      # Longest-processing-time sharding uses only the bounded manifest from a
+      # successful Windows run. New files get the recorded p90 duration rather
+      # than an optimistic zero. Each shard remains single-worker because #74
+      # proved that concurrent hosted-Windows fixtures contend for resources.
       CI: "true"
 
     steps:
@@ -459,13 +874,105 @@ jobs:
         uses: ./.github/actions/install-dependencies
 
       - name: Run Windows unit-test shard
-        run: npm test -- --shard=${{ matrix.shard }}/4
+        run: npm run test:windows:shard -- --shard=${{ matrix.shard }}/4
 
-      - name: Keep failure diagnostics
-        if: failure()
+      - name: Keep Windows shard evidence
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ci-test-results-windows-unit-${{ matrix.shard }}
           path: test-results
           if-no-files-found: ignore
           retention-days: 7
+
+  report-nightly-failure:
+    name: Report nightly lifecycle certification failure
+    if: >-
+      always() && github.event_name == 'schedule' &&
+      (needs.classify.result != 'success' ||
+      needs.gate.result != 'success' ||
+      needs.node-22-minimum.result != 'success' ||
+      needs.test.result != 'success' ||
+      needs.windows-unit.result != 'success')
+    needs: [classify, gate, node-22-minimum, test, windows-unit]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+      issues: write
+    steps:
+      - name: Open or update the tracked nightly failure
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const title = "Nightly lifecycle certification failed";
+            const marker = "<!-- inertia-nightly-lifecycle-certification -->";
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const jobs = await github.paginate(
+              github.rest.actions.listJobsForWorkflowRun,
+              { ...context.repo, run_id: context.runId, filter: "latest", per_page: 100 },
+            );
+            const failed = jobs.filter((job) =>
+              ["failure", "cancelled", "timed_out", "action_required"].includes(job.conclusion)
+            );
+            const failureEvidence = failed.flatMap((job) => {
+              const steps = (job.steps || [])
+                .filter((step) => ["failure", "cancelled", "timed_out"].includes(step.conclusion))
+                .map((step) => `${job.name}: ${step.name}`);
+              return steps.length > 0 ? steps : [`${job.name}: ${job.conclusion}`];
+            });
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
+              ...context.repo,
+              state: "all",
+              per_page: 100,
+            });
+            const existing = issues.find((issue) =>
+              !issue.pull_request && (issue.title === title || issue.body?.includes(marker))
+            );
+            const priorComments = existing
+              ? await github.paginate(github.rest.issues.listComments, {
+                  ...context.repo,
+                  issue_number: existing.number,
+                  per_page: 100,
+                })
+              : [];
+            const priorOccurrences = existing
+              ? 1 + priorComments.filter((comment) => comment.body?.includes(marker)).length
+              : 0;
+            const manifestUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/blob/${context.sha}/package.json`;
+            const body = [
+              marker,
+              "The scheduled six-target lifecycle certification did not complete cleanly.",
+              "Mixed repeat results are treated as failures and retained as flake evidence.",
+              "",
+              `- Exact SHA: \`${context.sha}\``,
+              `- Prior occurrences tracked here: ${priorOccurrences}`,
+              `- [Runner logs and retained artifacts](${runUrl})`,
+              `- [Provider dependency versions bound to this SHA](${manifestUrl})`,
+              "",
+              "### Failing invariant / platform evidence",
+              ...(failureEvidence.length > 0
+                ? failureEvidence.map((value) => `- ${value}`)
+                : ["- The workflow stopped before bounded job evidence was available."]),
+              "",
+              "Provider/version is only applicable when named by a failed provider step; exact",
+              "locked versions remain bound to the linked SHA. This issue contains no runner",
+              "output, prompts, paths, provider payloads, environment values, or credentials.",
+            ].join("\n");
+            if (!existing) {
+              await github.rest.issues.create({ ...context.repo, title, body });
+              return;
+            }
+            if (existing.state !== "open") {
+              await github.rest.issues.update({
+                ...context.repo,
+                issue_number: existing.number,
+                state: "open",
+              });
+            }
+            await github.rest.issues.createComment({
+              ...context.repo,
+              issue_number: existing.number,
+              body,
+            });

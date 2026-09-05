@@ -7,6 +7,7 @@ import {
   useComposerMenus,
 } from "../../src/renderer/src/components/composer/useComposerMenus";
 import {
+  focusComposerPopoverEdge,
   positionComposerPopover,
 } from "../../src/renderer/src/utils/composerPopoverPlacement";
 
@@ -55,6 +56,66 @@ afterEach(() => {
 });
 
 describe("composer popover DOM placement", () => {
+  it("preserves an item focused while initial menu placement is pending", () => {
+    document.body.innerHTML = `<div class="composer">
+      <button id="trigger">More options</button>
+      <div id="menu"><button>Reasoning</button><button>Response speed</button></div>
+    </div>`;
+    const frames: FrameRequestCallback[] = [];
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    const menu = document.getElementById("menu")!;
+    const speed = menu.querySelectorAll("button")[1]!;
+    document.getElementById("trigger")!.focus();
+    focusComposerPopoverEdge("menu", "first");
+    frames.shift()!(0);
+    menu.dataset.composerPopoverPositioned = "true";
+    speed.focus();
+    frames.shift()!(16);
+    expect(document.activeElement).toBe(speed);
+  });
+
+  it.each(["first", "last"] as const)("still focuses the %s edge from its trigger", (edge) => {
+    document.body.innerHTML = `<div class="composer">
+      <button id="trigger">More options</button>
+      <div id="menu" data-composer-popover-positioned="true">
+        <button>Reasoning</button><button>Response speed</button>
+      </div>
+    </div>`;
+    const frames: FrameRequestCallback[] = [];
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    document.getElementById("trigger")!.focus();
+    focusComposerPopoverEdge("menu", edge);
+    frames.shift()!(0);
+    expect(document.activeElement).toBe(document.querySelectorAll("#menu button")[edge === "first" ? 0 : 1]);
+  });
+
+  it("preserves focus already moved into a sibling submenu", () => {
+    document.body.innerHTML = `<div class="composer">
+      <button id="trigger">More options</button>
+      <div class="composer-more-layer" data-composer-popover-positioned="true">
+        <div id="menu"><button>Reasoning</button><button>Response speed</button></div>
+        <div data-more-submenu><button id="fast">Fast</button></div>
+      </div>
+    </div>`;
+    const frames: FrameRequestCallback[] = [];
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    document.getElementById("trigger")!.focus();
+    focusComposerPopoverEdge("menu", "first");
+    const fast = document.getElementById("fast")!;
+    fast.focus();
+    frames.shift()!(0);
+    expect(document.activeElement).toBe(fast);
+  });
+
   it("keeps only outer composer surfaces hidden until placement completes", () => {
     expect(visibilityRulesStart).toBeGreaterThanOrEqual(0);
     expect(visibilityRulesEnd).toBeGreaterThan(visibilityRulesStart);

@@ -1,3 +1,4 @@
+import { openLocalProjectFromDialog } from "./support/add-project";
 import { expect, test } from "@playwright/test";
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
@@ -46,6 +47,7 @@ test("keeps Environment available while an isolated draft worktree materializes"
     await app.page.getByRole("button", {
       name: "Add your first project",
     }).click();
+    await openLocalProjectFromDialog(app.page);
     await expect(app.page.getByRole("heading", {
       name: /^What should we build in .+\?$/u,
       level: 3,

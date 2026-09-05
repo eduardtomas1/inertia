@@ -1,3 +1,5 @@
+// @inertia-test-suite portable
+// @inertia-harness cursor-acp
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -14,6 +16,8 @@ import {
   parseCursorQuestionRequest,
   parseCursorTaskNotification,
 } from "../../src/server/provider/cursor-acp-harness";
+import { ProviderInstallationLeaseCoordinator } from
+  "../../src/server/provider/installation-lease";
 import { terminateProcessTreeAndWait } from "../../src/server/process-lifecycle";
 import {
   portableFixtureRoot,
@@ -201,7 +205,7 @@ describe.sequential("Cursor ACP harness", () => {
     const root = portableFixtureRoot(`cursor stalled ${expectedPhase}`);
     roots.push(root);
     const command = stalledCursorControlAgent(root, `cursor-stalled-${expectedPhase}`, stalledMethod);
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { cursor: command } },
       new AgentHarnessRegistry([createCursorAcpHarness({
         controlRpcTimeoutMs: stalledMethod === "initialize" ? 25 : 5_000,
@@ -335,11 +339,25 @@ describe.sequential("Cursor ACP harness", () => {
       capturePath,
       ["summarize"],
     );
-    const manager = new ProviderManager(
-      { commands: { cursor: command } },
+    const manager = ProviderManager.createProduction(
+      {
+        commands: { cursor: command },
+        installationLeases: new ProviderInstallationLeaseCoordinator(),
+        detectProvider: async () => ({
+          provider: { id: "cursor", name: "Cursor", command: "cursor-agent" },
+          available: true,
+          version: "1.0.0",
+          executable: command,
+          installState: "installed",
+          authState: "authenticated",
+          canRun: true,
+          cleanupConfirmed: true,
+        }),
+      },
       new AgentHarnessRegistry([createCursorAcpHarness()]),
     );
 
+    await manager.detect("cursor");
     await expect(manager.compact(nativeProviderRunInput({
       providerId: "cursor",
       conversationId: "cursor-compact",
@@ -434,7 +452,7 @@ describe.sequential("Cursor ACP harness", () => {
         false,
         fixture.updates,
       );
-      const manager = new ProviderManager(
+      const manager = ProviderManager.createForTests(
         { commands: { cursor: command } },
         new AgentHarnessRegistry([createCursorAcpHarness()]),
       );
@@ -465,11 +483,25 @@ describe.sequential("Cursor ACP harness", () => {
       ["summarize"],
       true,
     );
-    const manager = new ProviderManager(
-      { commands: { cursor: command } },
+    const manager = ProviderManager.createProduction(
+      {
+        commands: { cursor: command },
+        installationLeases: new ProviderInstallationLeaseCoordinator(),
+        detectProvider: async () => ({
+          provider: { id: "cursor", name: "Cursor", command: "cursor-agent" },
+          available: true,
+          version: "1.0.0",
+          executable: command,
+          installState: "installed",
+          authState: "authenticated",
+          canRun: true,
+          cleanupConfirmed: true,
+        }),
+      },
       new AgentHarnessRegistry([createCursorAcpHarness()]),
     );
 
+    await manager.detect("cursor");
     await expect(manager.compact(nativeProviderRunInput({
       providerId: "cursor",
       conversationId: "cursor-compact-delayed-capability",
@@ -494,7 +526,7 @@ describe.sequential("Cursor ACP harness", () => {
       false,
       true,
     );
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { cursor: command } },
       new AgentHarnessRegistry([createCursorAcpHarness({
         commandAdvertisementTimeoutMs: 25,
@@ -526,7 +558,7 @@ describe.sequential("Cursor ACP harness", () => {
       capturePath,
       ["agent_help"],
     );
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { cursor: command } },
       new AgentHarnessRegistry([createCursorAcpHarness()]),
     );
@@ -555,7 +587,7 @@ describe.sequential("Cursor ACP harness", () => {
       "cursor-compact-unproven",
       capturePath,
     );
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { cursor: command } },
       new AgentHarnessRegistry([createCursorAcpHarness({
         commandAdvertisementTimeoutMs: 25,
@@ -666,7 +698,7 @@ describe.sequential("Cursor ACP harness", () => {
       root,
       `cursor-${access}-permissions`,
     );
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { cursor: command } },
       new AgentHarnessRegistry([createCursorAcpHarness()]),
     );
@@ -686,6 +718,7 @@ describe.sequential("Cursor ACP harness", () => {
           event.conversationId,
           event.request.requestId,
           "approve",
+          { runId: event.runId, turnId: event.turnId },
         )).toBe(true);
       },
     })).resolves.toMatchObject({ status: "completed" });
@@ -711,7 +744,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   }
 });
 `);
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { cursor: command } },
       new AgentHarnessRegistry([createCursorAcpHarness()]),
     );
@@ -807,8 +840,21 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   }
 });
 `);
-    const manager = new ProviderManager(
-      { commands: { cursor: command } },
+    const manager = ProviderManager.createProduction(
+      {
+        commands: { cursor: command },
+        installationLeases: new ProviderInstallationLeaseCoordinator(),
+        detectProvider: async () => ({
+          provider: { id: "cursor", name: "Cursor", command: "cursor-agent" },
+          available: true,
+          version: "1.0.0",
+          executable: command,
+          installState: "installed",
+          authState: "authenticated",
+          canRun: true,
+          cleanupConfirmed: true,
+        }),
+      },
       new AgentHarnessRegistry([createCursorAcpHarness()]),
     );
     const approvals: string[] = [];
@@ -828,6 +874,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       progress: string | null;
     }> = [];
 
+    await manager.detect("cursor");
     const result = await manager.run(nativeProviderRunInput({
       providerId: "cursor",
       conversationId: "cursor-rich",
@@ -841,7 +888,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     }), {
       onApproval: (event) => {
         approvals.push(event.request.title);
-        expect(manager.respondToApproval(event.conversationId, event.request.requestId, "approve")).toBe(true);
+        expect(manager.respondToApproval(event.conversationId, event.request.requestId, "approve", { runId: event.runId, turnId: event.turnId })).toBe(true);
       },
       onInput: (event) => {
         questions.push(event.request.questions[0]!.question);
@@ -852,7 +899,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
         expect(manager.respondToInput(event.conversationId, event.request.requestId, {
           scope: ["focused", "broad"],
           notes: ["Use the exact free-text answer"],
-        })).toBe(true);
+        }, { runId: event.runId, turnId: event.turnId })).toBe(true);
       },
       onPlan: (event) => {
         planExplanations.push(event.explanation);
@@ -1034,7 +1081,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   } });
 });
 `);
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { cursor: command } },
       new AgentHarnessRegistry([createCursorAcpHarness()]),
     );
@@ -1062,7 +1109,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     roots.push(root);
     const command = portableNodeExecutable(root, "cursor-agent");
     writeNodeSubcommand(root, "acp", `process.stdout.write("not-json\\n"); setTimeout(() => {}, 1000);`);
-    const manager = new ProviderManager({ commands: { cursor: command } }, new AgentHarnessRegistry([createCursorAcpHarness()]));
+    const manager = ProviderManager.createForTests({ commands: { cursor: command } }, new AgentHarnessRegistry([createCursorAcpHarness()]));
     await expect(manager.run(nativeProviderRunInput({ providerId: "cursor", conversationId: "cursor-invalid", cwd: root, prompt: "Hi", interactionMode: "build", access: "supervised" }))).resolves.toMatchObject({
       status: "failed",
       failure: { reason: "malformed-protocol", phase: "initialize" },
@@ -1084,7 +1131,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   if (message.method === "session/prompt") return send({ jsonrpc: "2.0", id: message.id, result: { stopReason: "end_turn" } });
 });
 `);
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { cursor: command } },
       new AgentHarnessRegistry([createCursorAcpHarness()]),
     );
@@ -1118,7 +1165,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   }
 });
 `);
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { cursor: command } },
       new AgentHarnessRegistry([createCursorAcpHarness()]),
     );
@@ -1152,7 +1199,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   }
 });
 `);
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { cursor: command } },
       new AgentHarnessRegistry([createCursorAcpHarness()]),
     );
@@ -1186,7 +1233,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   }
 });
 `);
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { cursor: command } },
       new AgentHarnessRegistry([createCursorAcpHarness()]),
     );
@@ -1227,7 +1274,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   }
 });
 `);
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { cursor: command } },
       new AgentHarnessRegistry([createCursorAcpHarness()]),
     );
@@ -1282,7 +1329,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   }
 });
 `);
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { cursor: command } },
       new AgentHarnessRegistry([createCursorAcpHarness()]),
     );
@@ -1311,7 +1358,7 @@ setTimeout(() => {
 }, 10);
 setTimeout(() => {}, 1000);
 `);
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { cursor: command } },
       new AgentHarnessRegistry([createCursorAcpHarness()]),
     );
@@ -1351,7 +1398,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   }
 });
 `);
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { cursor: command } },
       new AgentHarnessRegistry([createCursorAcpHarness()]),
     );
@@ -1405,7 +1452,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   }
 });
 `);
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { cursor: command } },
       new AgentHarnessRegistry([createCursorAcpHarness()]),
     );
@@ -1455,7 +1502,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const cleanupGate = new Promise<void>((resolve) => {
       releaseCleanup = resolve;
     });
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { cursor: command } },
       new AgentHarnessRegistry([
         createCursorAcpHarness({
@@ -1505,7 +1552,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       await terminateProcessTreeAndWait(child, true);
       return false;
     });
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { cursor: command } },
       new AgentHarnessRegistry([
         createCursorAcpHarness({ terminateProcessTree }),
@@ -1558,7 +1605,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       await terminateProcessTreeAndWait(child, true);
       return false;
     });
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { cursor: command } },
       new AgentHarnessRegistry([
         createCursorAcpHarness({ terminateProcessTree }),
@@ -1612,7 +1659,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   if (message.method === "session/cancel") return send({ jsonrpc: "2.0", id: promptId, result: { stopReason: "cancelled" } });
 });
 `);
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { cursor: command }, cancelGraceMs: 500 },
       new AgentHarnessRegistry([createCursorAcpHarness()]),
     );
@@ -1664,7 +1711,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   if (message.method === "session/prompt") return send({ jsonrpc: "2.0", id: message.id, result: { stopReason: "end_turn" } });
 });
 `);
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { cursor: command }, cancelGraceMs: 500 },
       new AgentHarnessRegistry([createCursorAcpHarness()]),
     );
@@ -1702,7 +1749,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     roots.push(oversizedRoot);
     const oversizedCommand = portableNodeExecutable(oversizedRoot, "cursor-agent");
     writeNodeSubcommand(oversizedRoot, "acp", `process.stdout.write("x".repeat(1024 * 1024 + 1)); setInterval(() => {}, 1000);`);
-    const oversizedManager = new ProviderManager(
+    const oversizedManager = ProviderManager.createForTests(
       { commands: { cursor: oversizedCommand } },
       new AgentHarnessRegistry([createCursorAcpHarness()]),
     );
@@ -1733,7 +1780,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   if (message.method === "session/new") return send({ jsonrpc: "2.0", id: message.id, result: { sessionId: "cursor-no-images", modes: { currentModeId: "build", availableModes: [{ id: "build", name: "Build" }] }, configOptions: [] } });
 });
 `);
-    const capabilityManager = new ProviderManager(
+    const capabilityManager = ProviderManager.createForTests(
       { commands: { cursor: capabilityCommand } },
       new AgentHarnessRegistry([createCursorAcpHarness()]),
     );
@@ -1761,7 +1808,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     const root = portableFixtureRoot("cursor ACP missing");
     roots.push(root);
     const missing = join(root, process.platform === "win32" ? "missing.exe" : "missing");
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { cursor: missing } },
       new AgentHarnessRegistry([createCursorAcpHarness()]),
     );

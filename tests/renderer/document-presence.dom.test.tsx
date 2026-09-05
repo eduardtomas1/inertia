@@ -1,5 +1,5 @@
 import { act, render } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useDocumentPresence } from "../../src/renderer/src/hooks/useDocumentPresence";
 import { LiveElapsed } from "../../src/renderer/src/components/response-timeline/activity";
@@ -14,6 +14,8 @@ function PresenceHarness({ onRender }: { onRender: () => void }) {
     />
   );
 }
+
+beforeEach(() => { vi.spyOn(document, "hasFocus").mockReturnValue(true); });
 
 afterEach(() => {
   vi.useRealTimers();
@@ -32,12 +34,14 @@ describe("document presence", () => {
     const view = render(<PresenceHarness onRender={onRender} />);
     const output = view.getByRole("status");
 
+    expect(document.documentElement).toHaveAttribute("data-document-active", "true");
     expect(output).toHaveAttribute("data-active", "true");
     expect(output).toHaveAttribute("data-visible", "true");
     expect(onRender).toHaveBeenCalledTimes(1);
 
     focused = false;
     await act(async () => window.dispatchEvent(new Event("blur")));
+    expect(document.documentElement).toHaveAttribute("data-document-active", "false");
     expect(output).toHaveAttribute("data-active", "false");
     expect(output).toHaveAttribute("data-visible", "true");
     expect(onRender).toHaveBeenCalledTimes(2);
@@ -61,6 +65,8 @@ describe("document presence", () => {
     expect(output).toHaveAttribute("data-visible", "true");
     expect(onRender).toHaveBeenCalledTimes(4);
     expect(vi.getTimerCount()).toBe(0);
+    view.unmount();
+    expect(document.documentElement).not.toHaveAttribute("data-document-active");
   });
 
   it("updates visible elapsed work at most once per second and stops while hidden", async () => {
@@ -86,6 +92,29 @@ describe("document presence", () => {
     visibility = "visible";
     await act(async () => document.dispatchEvent(new Event("visibilitychange")));
     expect(view.getByText("3.0s")).toBeInTheDocument();
+  });
+
+  it("stops every elapsed timer on visible blur and catches up once on focus", async () => {
+    vi.useFakeTimers();
+    const startedAt = "2026-08-19T08:00:00.000Z";
+    vi.setSystemTime(new Date(startedAt));
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    const view = render(<><LiveElapsed startedAt={startedAt} /><LiveElapsed startedAt={startedAt} /></>);
+    await act(async () => vi.advanceTimersByTime(1_000));
+    expect(view.getAllByText("1.0s")).toHaveLength(2);
+    vi.mocked(document.hasFocus).mockReturnValue(false);
+    await act(async () => window.dispatchEvent(new Event("blur")));
+    expect(vi.getTimerCount()).toBe(0);
+    await act(async () => vi.advanceTimersByTime(4_000));
+    expect(view.getAllByText("1.0s")).toHaveLength(2);
+    vi.mocked(document.hasFocus).mockReturnValue(true);
+    await act(async () => window.dispatchEvent(new Event("focus")));
+    expect(view.getAllByText("5.0s")).toHaveLength(2);
+    expect(vi.getTimerCount()).toBe(2);
+    await act(async () => window.dispatchEvent(new Event("focus")));
+    expect(vi.getTimerCount()).toBe(2);
+    view.unmount();
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("keeps persisted suspend time out of the live work clock", async () => {

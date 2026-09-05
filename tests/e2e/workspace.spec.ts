@@ -27,22 +27,24 @@ test.afterAll(async () => {
   await app.close();
 });
 
-test("switches between Projects and Work and manages chat history", async () => {
+test("filters Work by project and manages chat history", async () => {
   await resizeWindow(1440, 920);
   await page.getByRole("button", { name: "New chat", exact: true }).first().click();
   await expect(page.getByRole("heading", { name: "New chat", level: 1 })).toBeVisible();
 
   const sidebar = page.getByRole("complementary", { name: "Project navigation", exact: true });
+  await sidebar.getByRole("button", { name: "Filter work by project" }).click();
   await sidebar.getByRole("button", { name: "Project actions for Inertia" }).first().click();
   const projectMenu = sidebar.getByRole("menu", { name: "Project actions for Inertia" });
   await expect(projectMenu.getByRole("menuitem", { name: "Open folder" })).toBeVisible();
-  await expect(projectMenu.getByRole("menuitem", { name: "New chat" })).toHaveCount(0);
+  await expect(projectMenu.getByRole("menuitem", { name: "New chat in Inertia" })).toBeVisible();
   await expect(projectMenu.getByRole("menuitem", { name: "Rename" })).toBeVisible();
   await expect(projectMenu.getByText("Grouping behavior", { exact: true })).toBeVisible();
   await sidebar.getByRole("searchbox", {
     name: "Search projects and conversations",
   }).click();
   await expect(projectMenu).toHaveCount(0);
+  await sidebar.getByRole("button", { name: "Filter work by project" }).click();
   await sidebar.getByRole("button", { name: "Project actions for Inertia" }).first().click();
   await projectMenu.getByRole("menuitemradio", { name: "Keep separate", exact: true }).click();
 
@@ -55,9 +57,8 @@ test("switches between Projects and Work and manages chat history", async () => 
   }
   const newChatAccessibleName = `New chat, Codex, Inertia, Branch ${branchName}, Idle`;
 
-  await sidebar.locator(".sidebar-mode-switch").getByRole("button", { name: "Work", exact: true }).click();
   await expect(sidebar).toHaveClass(/sidebar-mode-activity/u);
-  await expect(sidebar.getByRole("heading", { name: "Recent" })).toBeVisible();
+  await expect(sidebar.getByRole("list", { name: "Work" })).toBeVisible();
   const activityCard = sidebar.locator(".activity-thread.is-active");
   const threadCard = activityCard.getByRole("button", {
     name: newChatAccessibleName,
@@ -94,8 +95,7 @@ test("switches between Projects and Work and manages chat history", async () => 
     name: newChatAccessibleName,
   })).toBeVisible();
 
-  await sidebar.locator(".sidebar-mode-switch").getByRole("button", { name: "Projects", exact: true }).click();
-  await expect(sidebar).toHaveClass(/sidebar-mode-classic/u);
+  await expect(sidebar.getByRole("button", { name: "Projects", exact: true })).toHaveCount(0);
   expect(rendererErrors).toEqual([]);
 });
 

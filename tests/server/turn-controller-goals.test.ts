@@ -9,14 +9,15 @@ import type {
   ProviderInfo,
 } from "../../src/shared/contracts";
 import { RuntimeStore } from "../../src/server/database";
-import type {
-  ProviderEvent,
-  ProviderGoalMutation,
-  ProviderGoalSnapshot,
-  ProviderRunCallbacks,
-  ProviderRunFailure,
-  ProviderRunInput,
-  ProviderRunResult,
+import {
+  providerRunTerminal,
+  type ProviderEvent,
+  type ProviderGoalMutation,
+  type ProviderGoalSnapshot,
+  type ProviderRunCallbacks,
+  type ProviderRunFailure,
+  type ProviderRunInput,
+  type ProviderRunResult,
 } from "../../src/server/provider/contracts";
 import {
   TurnController,
@@ -25,6 +26,9 @@ import {
 import { resolveNativeModelRoute } from "./model-route-fixture";
 
 class GoalProvider implements TurnProviderRuntime {
+  providerCapabilityAvailable(): boolean {
+    return true;
+  }
   callbacks: ProviderRunCallbacks | null = null;
   input: ProviderRunInput | null = null;
   runCount = 0;
@@ -71,9 +75,7 @@ class GoalProvider implements TurnProviderRuntime {
     if (!this.input) throw new Error("Provider has not started.");
     this.running = false;
     this.resolveResult?.({
-      providerId: this.input.providerId,
-      conversationId: this.input.conversationId ?? this.input.threadId,
-      status,
+      ...providerRunTerminal(this.input, status, failure),
       text: "",
       textTruncated: false,
       exitCode: status === "completed" ? 0 : 1,
@@ -94,6 +96,16 @@ class GoalProvider implements TurnProviderRuntime {
 
   isRunning(): boolean {
     return this.running;
+  }
+
+  ownsRun(
+    conversationId: string,
+    identity: { runId: string; turnId: string },
+  ): boolean {
+    return this.running
+      && this.input?.conversationId === conversationId
+      && this.input.runId === identity.runId
+      && this.input.turnId === identity.turnId;
   }
 
   respondToApproval(

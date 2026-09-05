@@ -1,4 +1,5 @@
 import type { ChatAttachmentMimeType } from "../attachments";
+import type { ContinuationReasonCode } from "../continuation-policy";
 import type {
   ContinuationIdentity,
   HarnessId,
@@ -154,6 +155,8 @@ export interface AgentTurn {
   /** Canonical immutable execution selection captured when this turn queued. */
   modelSelection: ModelSelection;
   continuationIdentity: ContinuationIdentity;
+  /** Safe immutable reason for starting or resuming this provider session. */
+  continuationReasonCode?: ContinuationReasonCode | null;
   /** @deprecated Read-only compatibility projections of modelSelection. */
   harnessId: HarnessId;
   backendProfileId: ModelBackendProfileId;

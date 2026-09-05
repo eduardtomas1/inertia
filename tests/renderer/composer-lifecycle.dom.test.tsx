@@ -21,7 +21,7 @@ import type {
   ServerEvent,
 } from "../../src/shared/contracts";
 import {
-  continuationIdentityForSelection,
+  versionedContinuationIdentityForSelection,
   providerNativeModelSelection,
 } from "../../src/shared/model-routing";
 import { Composer } from "../../src/renderer/src/components/Composer";
@@ -197,6 +197,36 @@ afterEach(() => {
 });
 
 describe("composer asynchronous ownership", () => {
+  it("returns scratch actions to the editor without stealing a later focus choice", async () => {
+    render(<>
+      <Composer {...composerProps(conversation("scratch-focus"))} />
+      <textarea aria-label="Other chat draft" defaultValue="Neighbour draft" />
+    </>);
+    const input = screen.getByRole("textbox", { name: "Message" });
+    const neighbour = screen.getByRole("textbox", { name: "Other chat draft" });
+    const nextFrame = async (): Promise<void> => {
+      await act(async () => {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      });
+    };
+    fireEvent.change(input, { target: { value: "Owned scratch prompt" } });
+    fireEvent.click(await screen.findByRole("button", { name: "Scratch prompts" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Save current prompt/u }));
+    expect(input).toHaveFocus();
+    neighbour.focus();
+    await nextFrame();
+    expect(neighbour).toHaveFocus();
+
+    fireEvent.click(screen.getByRole("button", { name: "Scratch prompts, 1 saved" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /^Owned scratch prompt/u }));
+    expect(input).toHaveValue("Owned scratch prompt");
+    expect(input).toHaveFocus();
+    neighbour.focus();
+    await nextFrame();
+    expect(neighbour).toHaveFocus();
+    expect(neighbour).toHaveValue("Neighbour draft");
+  });
+
   it("omits scratch-prompt storage controls when the window disables them", () => {
     render(<Composer {...composerProps(conversation("detached-stash"), {
       promptStashEnabled: false,
@@ -666,7 +696,7 @@ describe("composer asynchronous ownership", () => {
       name: "Model and run settings",
     })).toBeInTheDocument();
     expect(within(toolbar).getByRole("group", {
-      name: "Usage and message actions",
+      name: "Usage",
     })).toBeInTheDocument();
 
     fireEvent.change(input, { target: { value: "Keep every control reachable" } });
@@ -679,7 +709,8 @@ describe("composer asynchronous ownership", () => {
     const send = within(toolbar).getByRole("button", { name: "Send message" });
     attach.focus();
     await userEvent.setup().tab();
-    expect(presets).toHaveFocus();
+    expect(send).toHaveFocus();
+    expect(presets).not.toHaveAttribute("tabindex", "-1");
     expect(attach).not.toHaveAttribute("tabindex", "-1");
     expect(send).not.toHaveAttribute("tabindex", "-1");
   });
@@ -1316,7 +1347,7 @@ describe("composer asynchronous ownership", () => {
     });
   });
 
-  it("binds new-chat confirmation, transfers text, and supports failure retry", async () => {
+  it("keeps history and draft while a fresh-session route change retries safely", async () => {
     const current = conversation("route-source");
     current.modelSelection = providerNativeModelSelection({
       providerId: "codex",
@@ -1326,8 +1357,11 @@ describe("composer asynchronous ownership", () => {
     });
     current.model = "codex-route";
     current.reasoningEffort = "high";
-    current.continuationIdentity = continuationIdentityForSelection(
+    current.continuationIdentity = versionedContinuationIdentityForSelection(
       current.modelSelection,
+      null,
+      false,
+      "a".repeat(64),
     );
     current.providerSessionId = "codex-session";
     const catalogState = {
@@ -1361,8 +1395,8 @@ describe("composer asynchronous ownership", () => {
         description: "Destination route",
       }],
     };
-    const onCreateConversationForSelection = vi.fn()
-      .mockRejectedValueOnce(new Error("Creation failed safely."))
+    const onUpdateConversation = vi.fn()
+      .mockRejectedValueOnce(new Error("Route update failed safely."))
       .mockResolvedValueOnce(undefined);
     render(<Composer {...composerProps(current, {
       providers: [codexProvider, claudeProvider],
@@ -1383,7 +1417,7 @@ describe("composer asynchronous ownership", () => {
         terminalReason: null,
         updatedAt: current.updatedAt,
       },
-      onCreateConversationForSelection,
+      onUpdateConversation,
     })} />);
     fireEvent.change(screen.getByRole("textbox", { name: "Message" }), {
       target: { value: "Carry this exact text." },
@@ -1394,27 +1428,29 @@ describe("composer asynchronous ownership", () => {
     if (!claudeRoute) throw new Error("Expected the Claude route action.");
     fireEvent.click(claudeRoute);
 
-    const confirmation = screen.getByRole("alertdialog");
-    await waitFor(() => expect(screen.getByRole("button", { name: "Cancel" }))
-      .toHaveFocus());
-    fireEvent.click(screen.getByRole("button", { name: "New chat" }));
-    await waitFor(() => expect(confirmation).toHaveTextContent(
-      "Creation failed safely.",
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(
+      "Route update failed safely.",
     ));
+    expect(onUpdateConversation).toHaveBeenCalledTimes(1);
+    expect(onUpdateConversation.mock.calls[0]?.[0]).toMatchObject({
+      providerId: "claude",
+      modelSelection: { modelId: "claude-route" },
+    });
     expect(screen.getByRole("textbox", { name: "Message" }))
       .toHaveValue("Carry this exact text.");
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "New chat" }));
-    await waitFor(() => expect(onCreateConversationForSelection)
+    fireEvent.click(claudeRoute);
+    await waitFor(() => expect(onUpdateConversation)
       .toHaveBeenCalledTimes(2));
-    expect(onCreateConversationForSelection.mock.calls[1]?.[0]).toMatchObject({
-      modelId: "claude-route",
+    expect(onUpdateConversation.mock.calls[1]?.[0]).toMatchObject({
+      providerId: "claude",
+      modelSelection: { modelId: "claude-route" },
     });
-    expect(onCreateConversationForSelection.mock.calls[1]?.[1]).toEqual({
-      prefillText: "Carry this exact text.",
-    });
-    await waitFor(() => expect(screen.queryByRole("alertdialog"))
+    await waitFor(() => expect(screen.queryByRole("alert"))
       .not.toBeInTheDocument());
+    expect(screen.getByRole("textbox", { name: "Message" }))
+      .toHaveValue("Carry this exact text.");
   });
 
   it("makes the leading draft durable, bounds trailing loss, and flushes ownership boundaries", async () => {

@@ -1,3 +1,4 @@
+// @inertia-test-suite portable
 import type {
   CompactionSummaryChunk,
   CompactionUpdate,
@@ -39,7 +40,7 @@ function projection() {
     onEvent: (event) => {
       if (event.type === "activity") activities.push(event);
     },
-  });
+  }, "run", "turn");
   return {
     activities,
     value: new AcpCompactionProjection("Cursor", "cursor", emitter),

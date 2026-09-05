@@ -17,9 +17,10 @@ import type {
 } from "../../src/server/provider/agent-harness";
 import { AgentHarnessRegistry } from "../../src/server/provider/agent-harness-registry";
 import { CLAUDE_AGENT_SDK_CAPABILITIES } from "../../src/server/provider/claude-agent-sdk-harness";
-import type {
-  ProviderRunInput,
-  ProviderRunResult,
+import {
+  providerRunTerminal,
+  type ProviderRunInput,
+  type ProviderRunResult,
 } from "../../src/server/provider/contracts";
 import {
   claudeBackendProfileRegistrations,
@@ -79,9 +80,7 @@ function runInput(
 
 function completedResult(input: ProviderRunInput): ProviderRunResult {
   return {
-    providerId: "claude",
-    conversationId: input.conversationId!,
-    status: "completed",
+    ...providerRunTerminal(input, "completed"),
     text: "Done",
     textTruncated: false,
     exitCode: 0,
@@ -142,7 +141,7 @@ describe("Claude backend launch integration", () => {
       },
       async (input) => completedResult(input),
     );
-    const manager = new ProviderManager({
+    const manager = ProviderManager.createForTests({
       ...registrations,
       resolveBackendLaunchOptions: async (input, environment, context) => {
         const resolved = await privilegedResolver(input, environment, context);
@@ -168,7 +167,7 @@ describe("Claude backend launch integration", () => {
       },
       async (input) => completedResult(input),
     );
-    const manager = new ProviderManager({
+    const manager = ProviderManager.createForTests({
       resolveBackendLaunchOptions: createClaudeBackendLaunchResolver(),
     }, new AgentHarnessRegistry([harness]));
 
@@ -207,7 +206,7 @@ describe("Claude backend launch integration", () => {
         completions.set(input.conversationId!, resolve);
       }),
     );
-    const manager = new ProviderManager({
+    const manager = ProviderManager.createForTests({
       ...registrations,
       resolveBackendLaunchOptions: createClaudeBackendLaunchResolver({
         profiles: [kimi],
@@ -265,7 +264,7 @@ describe("Claude backend launch integration", () => {
       (options) => starts.push(options.input.backendProfile.id),
       async (input) => completedResult(input),
     );
-    const manager = new ProviderManager({
+    const manager = ProviderManager.createForTests({
       ...registrations,
       resolveBackendLaunchOptions: createClaudeBackendLaunchResolver({
         profiles: [kimi],
@@ -302,7 +301,7 @@ describe("Claude backend launch integration", () => {
       ...capturingHarness(() => undefined, async (input) => completedResult(input)),
       start,
     };
-    const manager = new ProviderManager({
+    const manager = ProviderManager.createForTests({
       ...registrations,
       resolveBackendLaunchOptions: createClaudeBackendLaunchResolver({
         profiles: [profile],
@@ -334,7 +333,7 @@ describe("Claude backend launch integration", () => {
       () => undefined,
       async (input) => completedResult(input),
     );
-    const manager = new ProviderManager({
+    const manager = ProviderManager.createForTests({
       ...registrations,
       resolveBackendLaunchOptions: async (_input, environment) => ({
         environment: {

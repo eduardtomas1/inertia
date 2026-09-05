@@ -41,6 +41,11 @@ interface RuntimeUpdatePreparationCoordinatorOptions {
   forceTerminate: (record: RuntimeProcessRecord) => void;
 }
 
+export interface RuntimeUpdateHandoffIdentity {
+  readonly runtimeGenerationId: string;
+  readonly systemBootId: string;
+}
+
 export class RuntimeUpdatePreparationCoordinator {
   private pendingPreparation: PendingPreparation | null = null;
   private pendingRelease: PendingRelease | null = null;
@@ -49,6 +54,25 @@ export class RuntimeUpdatePreparationCoordinator {
   constructor(
     private readonly options: RuntimeUpdatePreparationCoordinatorOptions,
   ) {}
+
+  prepareCurrent(): Promise<RuntimeUpdatePreparationResult> {
+    const record = this.options.current();
+    return record?.ready
+      ? this.prepare(record)
+      : Promise.reject(new Error(
+          "The local service is not ready for update preparation.",
+        ));
+  }
+
+  handoffIdentity(systemBootId: string): RuntimeUpdateHandoffIdentity | null {
+    const record = this.prepared?.record;
+    return record
+      ? Object.freeze({
+          runtimeGenerationId: record.runtimeGenerationId,
+          systemBootId,
+        })
+      : null;
+  }
 
   prepare(record: RuntimeProcessRecord): Promise<RuntimeUpdatePreparationResult> {
     if (this.prepared?.record === record) return Promise.resolve({ ready: true });

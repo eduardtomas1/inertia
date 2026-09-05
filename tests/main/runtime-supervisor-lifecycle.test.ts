@@ -1,3 +1,4 @@
+// @inertia-test-suite portable
 import { EventEmitter } from "node:events";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -6,6 +7,8 @@ import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { RuntimeSupervisor } from "../../src/main/runtime-supervisor";
+import { RuntimeConnectionUnavailableError } from
+  "../../src/main/runtime-supervisor-connection";
 import { runtimeSupervisorDefaults } from
   "../../src/main/runtime-supervisor-values";
 import { RuntimeGenerationLeaseJournal } from "../../src/node/runtime-generation-leases";
@@ -98,6 +101,54 @@ afterEach(() => {
 });
 
 describe("RuntimeSupervisor lifecycle", () => {
+  it("keeps arbitrary child errors private across every unavailable operation", async () => {
+    const { children, supervisor } = createHarness();
+    supervisor.start();
+    const privateLocation =
+      "/mnt/customer/roadmap.txt?prompt=TOP_SECRET&token=ghp_private";
+    children[0].emit("error", "spawn", privateLocation);
+    expect(supervisor.snapshot().lastError).toContain(privateLocation);
+
+    const failures: unknown[] = [];
+    for (const operation of [
+      () => supervisor.connection(),
+      () => supervisor.detachedConnection(crypto.randomUUID(), "renderer:1"),
+    ]) {
+      try {
+        operation();
+      } catch (error) {
+        failures.push(error);
+      }
+    }
+    const pending = await Promise.allSettled([
+      supervisor.resolveProjectPath({} as never),
+      supervisor.databaseRecovery("export", privateLocation),
+      supervisor.privateConnectRequest({} as never, {} as never),
+      supervisor.preparePrivateConnectPrompt({} as never, {} as never),
+      supervisor.commitPrivateConnectPrompt(
+        {} as never,
+        {} as never,
+        crypto.randomUUID(),
+      ),
+    ]);
+    failures.push(...pending.map((result) =>
+      result.status === "rejected" ? result.reason : null));
+
+    expect(failures).toHaveLength(7);
+    for (const failure of failures) {
+      expect(failure).toBeInstanceOf(RuntimeConnectionUnavailableError);
+      const projection = (failure as RuntimeConnectionUnavailableError)
+        .connection;
+      expect(projection).toMatchObject({
+        code: "runtime-starting",
+        retryable: true,
+      });
+      expect(JSON.stringify(projection)).not.toContain("customer");
+      expect(JSON.stringify(projection)).not.toContain("TOP_SECRET");
+      expect(JSON.stringify(projection)).not.toContain("ghp_private");
+    }
+  });
+
   it("keeps recovery startup alive through the bounded Intel headroom", async () => {
     expect(runtimeSupervisorDefaults.startupTimeoutMs).toBe(30_000);
     const { children, forceKill, supervisor } = createHarness({
@@ -128,7 +179,7 @@ describe("RuntimeSupervisor lifecycle", () => {
       websocketUrl: null,
     });
     expect(() => supervisor.connection()).toThrow(
-      "could not confirm owned-process cleanup",
+      "The local service is restarting. Try again in a moment.",
     );
     children[0].exit(137);
     await vi.advanceTimersByTimeAsync(0);
@@ -296,7 +347,9 @@ describe("RuntimeSupervisor lifecycle", () => {
     expect(forceKill).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
     expect(forceKill).toHaveBeenCalledWith(10_000, expect.any(Number));
-    expect(() => supervisor.connection()).toThrow("did not become ready");
+    expect(() => supervisor.connection()).toThrow(
+      "The local service is starting. Try again in a moment.",
+    );
   });
 
   it("is single-use after a complete owned-generation shutdown", async () => {

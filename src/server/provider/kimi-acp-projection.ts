@@ -40,7 +40,7 @@ export function planSteps(
 export function emitKimiMetadata(
   configOptions: SessionConfigOption[],
   supportsImages: boolean,
-  emit: ReturnType<typeof createAgentHarnessEmitter>["rich"],
+  emitter: ReturnType<typeof createAgentHarnessEmitter>,
 ): void {
   const modelOption = configOptions.find((option) =>
     option.type === "select" && option.category === "model",
@@ -80,7 +80,8 @@ export function emitKimiMetadata(
       defaultReasoningEffort: isCurrentModel ? defaultEffort : "",
     };
   });
-  emit({
+  emitter.capability("model-discovery", true);
+  emitter.rich({
     type: "metadata",
     metadata: { models: metadata },
     source: "session",
@@ -107,9 +108,10 @@ export function validateKimiInitialize(
 export function emitKimiPromptUsage(
   usage: Usage,
   contextUsage: KimiContextUsage,
-  emit: ReturnType<typeof createAgentHarnessEmitter>["rich"],
+  emitter: ReturnType<typeof createAgentHarnessEmitter>,
 ): void {
-  emit({
+  emitter.capability("usage-tokens", true);
+  emitter.rich({
     type: "usage",
     usage: {
       usedTokens: contextUsage.usedTokens,

@@ -35,9 +35,12 @@ export function planSteps(
 export function emitGeminiMetadata(
   models: GeminiSessionModels | null,
   supportsImages: boolean,
-  emit: ReturnType<typeof createAgentHarnessEmitter>["rich"],
+  emitter: ReturnType<typeof createAgentHarnessEmitter>,
 ): void {
-  if (!models || models.availableModels.length === 0) return;
+  if (!models || models.availableModels.length === 0) {
+    emitter.capability("model-discovery", false);
+    return;
+  }
   const metadata: ProviderModel[] = models.availableModels.map((model) => ({
     id: model.modelId,
     label: model.name,
@@ -48,7 +51,8 @@ export function emitGeminiMetadata(
     reasoningOptions: [],
     defaultReasoningEffort: "",
   }));
-  emit({
+  emitter.capability("model-discovery", true);
+  emitter.rich({
     type: "metadata",
     metadata: { models: metadata },
     source: "session",
@@ -107,7 +111,7 @@ export function emitGeminiPromptUsage(
     usedTokens: number | null;
     maxTokens: number | null;
   },
-  emit: ReturnType<typeof createAgentHarnessEmitter>["rich"],
+  emitter: ReturnType<typeof createAgentHarnessEmitter>,
 ): void {
   const root = objectValue(response);
   const standard = objectValue(root?.usage) as Partial<Usage> | undefined;
@@ -134,7 +138,8 @@ export function emitGeminiPromptUsage(
     && reasoningOutputTokens === null
   ) return;
 
-  emit({
+  emitter.capability("usage-tokens", true);
+  emitter.rich({
     type: "usage",
     usage: {
       usedTokens: contextUsage.usedTokens,

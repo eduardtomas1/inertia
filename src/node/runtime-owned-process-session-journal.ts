@@ -90,6 +90,18 @@ function parseSession(bytes: Buffer): RuntimeOwnedProcessSession | null {
   }
 }
 
+export function parseRuntimeOwnedProcessSessionLeaf(
+  bytes: Buffer,
+  expectedGenerationHash: string,
+): RuntimeOwnedProcessSession | null {
+  const session = parseSession(bytes);
+  return session
+    && /^[0-9a-f]{64}$/u.test(expectedGenerationHash)
+    && generationHash(session.runtimeGenerationId) === expectedGenerationHash
+    ? session
+    : null;
+}
+
 function sameSession(
   left: RuntimeOwnedProcessSession,
   right: RuntimeOwnedProcessSession,

@@ -210,6 +210,20 @@ attachment now distinguish this phase in CI. The complete mature dataset,
 300-second deadline, native focus checks, backup wait, sample durations, and
 zero-work/foreground-motion assertions remain in place.
 
+Both Windows x64 and ARM64 native E2E jobs passed on `7dd1e604` in
+[CI run 33991653852](https://github.com/eduardtomas1/inertia/actions/runs/33991653852).
+Their mature seeding times were 47.351 and 28.548 seconds respectively, with
+all 1,008 turns, 8,064 messages, and 67,552 activities retained. The new unit
+fixture exceeded the generic test budgets on hosted macOS x64 (24.773 seconds)
+and Windows (34.700 seconds). A local phase profile attributed 2.439 seconds
+to seeding and only 0.071 seconds to activity validation. Replacing repeated
+per-turn full-array scans and individual payload matchers with one grouping
+and payload pass reduced that validation phase to 0.007 seconds, retaining
+every exact title, payload, count, and identity assertion. The mature unit
+fixture has a separate 90-second budget, less than twice the observed native
+Windows setup time. Generic unit defaults and the renderer E2E deadline are
+unchanged. These setup timings are independent of renderer performance.
+
 macOS ARM64's small and large cases passed locally. The mature macOS baseline
 also reproduced five timer callbacks and 35 paints, with 0.83% renderer CPU
 and 1.00% GPU CPU while unfocused. The patched mature macOS attempt recorded
@@ -231,18 +245,55 @@ The retained-data audit still finds one subscribed detail per mounted pane,
 reset live overlays on conversation changes, weak-key activity/estimate
 caches, and seven mounted rows in this workload. No additional virtualization
 or long-session retention defect has been established. The fixture's short
-heap samples do not replace a 13-hour same-profile heap comparison.
+heap samples do not establish long-session retention behavior.
 
-## Remaining field validation
+## Issue #248 acceptance audit
+
+The combined changes in merged #254 and this follow-up address the reported
+background renderer work. The issue asks for matched profiling and a
+representative large workload; it does not require a 13-hour soak or access
+to the original private profile as a prerequisite. The following maps its
+actual criteria to the measurements and regression coverage above.
+
+| Criterion | Evidence and coverage |
+| --- | --- |
+| Matched before/after traces | Each comparison above holds the generated profile, selected history, native window state, five-second duration, instrumentation, and graphics environment constant within its pair. Baseline and patched raw traces are retained. |
+| Separate attribution | Animation inventory/time, RAF callbacks, layout/paint/raster events, React commits, and GC are recorded independently. The first fix attributes continuous paint to the Ultra CSS animation; the follow-up attributes one-second layout/paint to elapsed-label DOM writes. GC-variable samples are explicitly separated. |
+| Focus/occlusion-aware scheduling | `useDocumentActivity` combines focus and visibility; root background-motion CSS also covers portals and detached chats. X11 native tests leave the main window mapped and visible while another Electron window owns focus. DOM tests separately exercise hidden documents. |
+| Pause unobservable work; preserve motion | Root CSS pauses infinite animations with their progress retained. Sidebar FLIP cancels and resets its baseline. Elapsed timers unsubscribe while inactive, with delegated clocks also gated by disclosure state. Native tests require frozen background animation/labels and advancing foreground/refocused motion, including reduced-motion checks. |
+| Validate virtualization and bound projections/idle work | `response-timeline/viewport.tsx` uses viewport virtualization with overscan 4, weak-key weight/estimate caches, and at most 12 layout estimates per item; layout-anchor restoration is bounded to 30 frames/600 ms. `useConversationProjection.ts` replaces detail on conversation changes, clears live overlays, and removes hydrated duplicates. `runtimeSnapshotProjection.ts` caps shell runs at 200. Tests cover 600 timeline rows/3,000 events, stable settled rows under updates, heavy short histories, and native mounting of seven rows in the mature workload. Idle samples require zero React, RAF, and interval callbacks. |
+| Reconcile stale running state without hiding live work | `recovery-repository.ts` excludes durable provider-owned turns/runs before transactional interruption of unowned current turns and their running activities. `runtime-safety.test.ts` verifies exact receipt-bound retirement, failed recovery, crash/replay, and retained ownership. `turn-controller-cleanup-proof.test.ts` requires matching run/turn identity and settled cleanup before clearing authority; missing/mismatched proof retains active controls. `database.test.ts` verifies scoped recovery and rollback. No age heuristic or renderer status rewriting was introduced. |
+| Deterministic large-history regression | DOM presence/clock/sidebar tests and the native 41-history profile cover background scheduling, cleanup, catch-up, and the complete activity dataset. The baseline fails the new zero-interval assertion. Persisted fixture tests independently verify counts, payloads, ownership, and integrity. |
+| Preserve composer and navigation UX | The unit/DOM gate includes prompt cancel/edit and ArrowUp/ArrowDown history, sidebar/work-index motion, hydration, turn anchors, and virtualization. Linux Electron checks cover responsive composer geometry, delegated parent follow-up, both turn-anchor cases, long-transcript keyboard navigation, and Work sidebar geometry. |
+| Report independent resource and settle measurements | Both result tables report renderer/GPU CPU and renderer RSS/PSS/heap independently. The initial pause was observed within 60 ms; the follow-up records the required two-second quiet dwell at 2.92 seconds on both sides. These observation times include polling and are not precise CPU-idle timestamps; baseline recurring work continues throughout its sample. |
+
+The retained-data bounds apply to pane subscriptions, caches, mounted rows,
+and recurring idle work. The selected conversation's data still scales with
+that conversation's history; this is not a claim of constant total heap for
+arbitrarily large conversations. The source/test audit found no additional
+virtualization or ownership-recovery defect requiring a production change.
+
+With current main `bd629858` (#263) integrated, the final local Node 22 gate
+passed with two unit workers: 647 files and 6,783 tests passed, 102 tests
+skipped, with quality, type, build, and bundle checks green. The Linux native
+rerun passed all seven cases in two minutes: the six geometry/navigation/
+parent-follow-up cases above plus the complete mature background scenario.
+These reruns verify behavior on the integrated branch; the matched resource
+measurements remain the controlled comparisons reported earlier. Final logs,
+unit phase profiles, and native reports are retained under
+`performance-results/issue248-validation-final`.
+
+## Evidence limits
 
 The original Ubuntu 24.04 x64 AppImage profile, its 13-hour session, and its
 suspected stale running records were unavailable. The container's graphics
 path also differs from that hardware. These measurements establish the
 background-motion fix and bounded idle work for representative seeded
 histories; they do not establish the cause of the original RSS growth or prove
-that all of the original session's CPU load came from this animation.
-
-Keep #248 open for a same-profile AppImage follow-up: foreground, mapped behind
-another application, minimized, and refocused samples; independent renderer/GPU
-CPU and RSS/PSS/heap; and ownership-based inspection of any remaining running
-records. A long-session heap comparison is still needed if RSS growth persists.
+that all of the original session's CPU load came from these recurring sources.
+If RSS growth persists after the scheduling fixes, a sustained heap comparison
+would investigate that separately. The original profile's four running
+activities and one running turn were not individually classified; the
+ownership-based recovery behavior is verified with deterministic fixtures.
+These are limits of the evidence, rather than additional issue acceptance
+requirements. Merge still requires the normal review and green CI gates.

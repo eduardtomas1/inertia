@@ -8,10 +8,15 @@ import { RuntimeStore } from "../../src/server/database";
 import { seedBackgroundHistoryProfile } from "./renderer-background-history";
 
 describe("background renderer history fixture", () => {
-  it.each([
+  for (const fixture of [
     { turns: 2, mature: false, conversations: 1, totalTurns: 2, activities: 148, messages: 16 },
     { turns: 128, mature: true, conversations: 41, totalTurns: 1_008, activities: 67_552, messages: 8_064 },
-  ])("preserves the complete $conversations-history dataset and record ownership", (fixture) => {
+  ]) it(`preserves the complete ${fixture.conversations}-history dataset and record ownership`,
+    // Full-profile creation dominated the local phase profile; hosted unit runs
+    // took 24.8s (macOS x64) / 34.7s (Windows), and native Windows seeding took
+    // 47.4s. Bound this disk-heavy fixture at <2x that observed setup time.
+    // The renderer's separate 300s E2E deadline and idle assertions are unchanged.
+    fixture.mature ? { timeout: 90_000 } : {}, () => {
     const directory = mkdtempSync(join(tmpdir(), "inertia-background-history-"));
     const workspace = join(directory, "workspace");
     const databasePath = join(directory, "inertia.sqlite");
@@ -57,18 +62,23 @@ describe("background renderer history fixture", () => {
         expect(detail.agentTurns).toHaveLength(fixture.turns);
         expect(detail.messages).toHaveLength(fixture.turns * 8);
         expect(detail.activities).toHaveLength(fixture.turns * 74);
+        const titlesByTurn = new Map<string, string[]>();
+        const invalidPayloadIds: string[] = [];
+        const expectedPayload = "Synthetic bounded-history fixture. ".repeat(20);
+        for (const activity of detail.activities) {
+          const titles = titlesByTurn.get(activity.turnId!) ?? [];
+          titles.push(activity.title);
+          titlesByTurn.set(activity.turnId!, titles);
+          if (activity.kind !== "command" || activity.status !== "completed" || activity.detail !== expectedPayload) {
+            invalidPayloadIds.push(activity.id);
+          }
+        }
+        expect(invalidPayloadIds).toEqual([]);
+        expect(titlesByTurn.size).toBe(fixture.turns);
         for (const turn of detail.agentTurns) {
           const index = Number(turn.id.split("-turn-").at(-1));
-          expect(detail.activities.filter(({ turnId }) => turnId === turn.id).map(({ title }) => title).sort())
+          expect(titlesByTurn.get(turn.id)?.sort())
             .toEqual(Array.from({ length: 74 }, (_, activity) => `Command ${index}.${activity}`).sort());
-        }
-        for (const activity of detail.activities) {
-          const index = Number(activity.turnId!.split("-turn-").at(-1));
-          expect(activity).toMatchObject({
-            kind: "command", status: "completed",
-            title: expect.stringMatching(new RegExp(`^Command ${index}\\.\\d+$`, "u")),
-            detail: "Synthetic bounded-history fixture. ".repeat(20),
-          });
         }
       } finally { reopened.close(); }
     } finally { rmSync(directory, { recursive: true, force: true }); }

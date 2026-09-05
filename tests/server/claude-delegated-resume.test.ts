@@ -1,3 +1,4 @@
+// @inertia-test-suite portable
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
@@ -72,7 +73,7 @@ describe("Claude delegated parent resume", () => {
         })(),
       ),
     });
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { claude: process.execPath } },
       new AgentHarnessRegistry([harness]),
     );
@@ -171,7 +172,7 @@ describe("Claude delegated parent resume", () => {
         })(),
       ),
     });
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { claude: process.execPath } },
       new AgentHarnessRegistry([harness]),
     );
@@ -228,7 +229,7 @@ describe("Claude delegated parent resume", () => {
         })(),
       ),
     });
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { claude: process.execPath } },
       new AgentHarnessRegistry([harness]),
     );

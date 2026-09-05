@@ -38,6 +38,7 @@ import type { TurnController } from "../turns/turn-controller";
 import type { WorkspaceRunController } from "../workspace-run-controller";
 import type { AgentWorkflowController } from "../agent-workflow-controller";
 import type { ProviderTerminalResumeRegistry } from "../../provider/terminal-resume";
+import { pendingInteractionForConversation } from "../pending-interaction-registry";
 import {
   defineRuntimeCommandHandler,
   type RuntimeCommandHandler,
@@ -979,7 +980,9 @@ export function createTurnInteractionCommandHandler(
         dependencies.store.acknowledgeWorkspaceRun(command.payload.runId);
         return "mutation";
       case "agent.approval.respond": {
-        const pending = dependencies.pendingApprovals.get(
+        const pending = pendingInteractionForConversation(
+          dependencies.pendingApprovals,
+          command.payload.conversationId,
           command.payload.requestId,
         );
         if (
@@ -1011,7 +1014,9 @@ export function createTurnInteractionCommandHandler(
         return "mutation";
       }
       case "agent.input.respond": {
-        const pending = dependencies.pendingInputs.get(
+        const pending = pendingInteractionForConversation(
+          dependencies.pendingInputs,
+          command.payload.conversationId,
           command.payload.requestId,
         );
         if (

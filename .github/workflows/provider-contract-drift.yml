@@ -170,7 +170,7 @@ jobs:
                   typeof version === "string" &&
                   /^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$/.test(version)
                 )
-                .map(([name, version]) => `${name}@${version}`);
+                .map(([name, version]) => name + "@" + version);
               process.stdout.write(values.join(", "));
             ' "$report"
           )"

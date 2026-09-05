@@ -395,6 +395,12 @@ async function smokeLinux(repositoryRoot, releaseDirectory, names, productName) 
       INERTIA_PACKAGE_SMOKE_NO_SANDBOX: "1",
     }, ["APPIMAGE_EXTRACT_AND_RUN"]);
     console.log(`Linux ${process.arch} AppImage default mount/AppRun smoke passed.`);
+    await runPackageSmoke(repositoryRoot, installedAppImage, resources, "linux-appimage", temporaryRoot, "handoff-wrapper", {
+      APPIMAGE_EXTRACT_AND_RUN: "1",
+      INERTIA_PACKAGE_SMOKE_NO_SANDBOX: "1",
+      INERTIA_PACKAGE_SMOKE_PROVE_APPIMAGE_FD_CHAIN: "1",
+    });
+    console.log(`Linux ${process.arch} guardian-sealed AppImage fd-chain smoke passed.`);
     await runPackageSmoke(repositoryRoot, appImage, resources, "linux-appimage", temporaryRoot, "retained-wrapper", {
       APPIMAGE_EXTRACT_AND_RUN: "1",
       INERTIA_PACKAGE_SMOKE_NO_SANDBOX: "1",

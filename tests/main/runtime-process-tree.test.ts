@@ -7,6 +7,9 @@ import {
   forceKillRuntimeProcessTree,
   runtimeDescendantPids,
 } from "../../src/main/runtime-process-tree";
+import { linuxProcessGroupCanExecute } from
+  "../../src/node/runtime-owned-process-posix";
+import { executableProcessExists } from "../helpers/executable-process";
 
 function processError(code: string): Error & { code: string } {
   return Object.assign(new Error(code), { code });
@@ -19,17 +22,39 @@ function processStat(pid: number, state = "S"): string {
 async function waitForProcessExit(pid: number): Promise<void> {
   const deadline = Date.now() + 5_000;
   while (Date.now() < deadline) {
-    try {
-      process.kill(pid, 0);
-    } catch {
-      return;
-    }
+    if (!executableProcessExists(pid)) return;
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
   throw new Error(`Process ${pid} did not exit.`);
 }
 
 describe("runtime process-tree termination", () => {
+  it("classifies zombie-only Linux groups without accepting unknown state", () => {
+    const processIds = () => ["2", "100", "101", "900"];
+    const states = new Map([
+      ["2", "2 (kthreadd) S 0 0 0"],
+      ["100", "100 (root) Z 1 100 100"],
+      ["101", "101 (child) x 1 100 100"],
+      ["900", "900 (unrelated) S 1 900 900"],
+    ]);
+    const readStat = (pid: string) => states.get(pid)!;
+
+    expect(linuxProcessGroupCanExecute(100, {
+      processIds,
+      readStat,
+    })).toBe(false);
+    states.set("101", "101 (child) R 1 100 100");
+    expect(linuxProcessGroupCanExecute(100, {
+      processIds,
+      readStat,
+    })).toBe(true);
+    states.set("101", "malformed");
+    expect(linuxProcessGroupCanExecute(100, {
+      processIds,
+      readStat,
+    })).toBeNull();
+  });
+
   it("orders nested descendants before their parents", () => {
     expect(runtimeDescendantPids(100, [
       "100 1",

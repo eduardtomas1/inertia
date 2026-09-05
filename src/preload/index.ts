@@ -266,8 +266,12 @@ const bridge: DesktopBridge = Object.freeze({
       DesktopBridge["importRecoveryData"]
     >,
   revealRuntimeLogs: () => ipcRenderer.invoke(IPC.revealRuntimeLogs) as Promise<string>,
-  copyRuntimeDiagnosticReport: () =>
-    ipcRenderer.invoke(IPC.copyRuntimeDiagnosticReport) as ReturnType<
+  copyRuntimeDiagnosticReport: (
+    lifecycle: Parameters<DesktopBridge["copyRuntimeDiagnosticReport"]>[0],
+  ) =>
+    // Keep the sandboxed preload dependency-free. The trusted main-process IPC
+    // boundary performs the strict schema projection before copying anything.
+    ipcRenderer.invoke(IPC.copyRuntimeDiagnosticReport, lifecycle) as ReturnType<
       DesktopBridge["copyRuntimeDiagnosticReport"]
     >,
   copyText: (text: string) =>

@@ -1,3 +1,4 @@
+// @inertia-test-suite portable
 import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -120,8 +121,7 @@ function identity(value: Awaited<ReturnType<typeof runtime>>) {
 }
 
 async function flushPromises(): Promise<void> {
-  await Promise.resolve();
-  await Promise.resolve();
+  for (let step = 0; step < 8; step += 1) await Promise.resolve();
 }
 
 afterEach(async () => {
@@ -277,13 +277,17 @@ describe("TurnController terminal truthfulness", () => {
       content: "Settle while exact provider cleanup is still pending.",
     }, undefined, firstAdmission!);
     expect(value.controller.start(first.turn.id)).toBe(true);
-    value.provider.deferOwnedStop();
+    value.provider.deferOwnedStop("settled");
     expect(value.controller.cancel(value.conversationId)).toBe(true);
 
     value.provider.resolve({ status: "cancelled" });
     await flushPromises();
-    expect(value.store.agentTurn(first.turn.id).status).toBe("cancelled");
-    expect(value.controller.isActive(value.conversationId)).toBe(false);
+    expect(value.store.agentTurn(first.turn.id)).toMatchObject({
+      status: "running",
+      runState: { state: "cancelling" },
+      terminalReason: null,
+    });
+    expect(value.controller.isActive(value.conversationId)).toBe(true);
 
     let admitted = false;
     const pendingAdmission = value.controller.acquireTurnAdmission(

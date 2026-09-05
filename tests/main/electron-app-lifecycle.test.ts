@@ -509,7 +509,7 @@ describe("Electron E2E application lifecycle", () => {
     ]);
   });
 
-  it("force-cleans a missing privileged-cleanup receipt with phase diagnostics", async () => {
+  it.each([false, true])("force-cleans a missing receipt despite a hung snapshot (%s)", async (hungSnapshot) => {
     const process = Object.assign(new EventEmitter(), {
       exitCode: null as number | null,
       signalCode: null as NodeJS.Signals | null,
@@ -519,24 +519,36 @@ describe("Electron E2E application lifecycle", () => {
         return true;
       }),
     });
+    const readRuntimePid = vi.fn(() => hungSnapshot
+      ? new Promise<number | null>(() => undefined)
+      : Promise.resolve(777));
+    const waitForRuntimeExit = vi.fn(async () => undefined);
+    const closeServer = vi.fn(async () => undefined);
+    const removeDirectory = vi.fn(async () => undefined);
     const failure = await closeElectronFixtureBounded({
       current: {
         process: () => process,
         close: async () => undefined,
       } as unknown as ElectronApplication,
+      readRuntimePid,
       prepareRuntimeQuit: () => new Promise(() => undefined),
       readRuntimeQuitPhase: async () => "privileged-cleanup",
       requestRuntimeQuit: vi.fn(async () => null),
-      waitForRuntimeExit: vi.fn(async () => undefined),
-      closeServer: vi.fn(async () => undefined),
-      removeDirectory: vi.fn(async () => undefined),
-      rpcTimeoutMs: 50,
+      waitForRuntimeExit,
+      closeServer,
+      removeDirectory,
+      rpcTimeoutMs: 5,
       cleanupReceiptTimeoutMs: 5,
       serverTimeoutMs: 50,
       removeTimeoutMs: 50,
     }).then(() => null, (error: unknown) => error);
 
     expect(process.kill).toHaveBeenCalledWith("SIGKILL");
+    expect(readRuntimePid).toHaveBeenCalledOnce();
+    if (hungSnapshot) expect(waitForRuntimeExit).not.toHaveBeenCalled();
+    else expect(waitForRuntimeExit).toHaveBeenCalledWith(777);
+    expect(closeServer).toHaveBeenCalledOnce();
+    expect(removeDirectory).toHaveBeenCalledOnce();
     expect(failure).toBeInstanceOf(AggregateError);
     expect((failure as AggregateError).errors).toEqual([
       expect.objectContaining({
@@ -546,6 +558,46 @@ describe("Electron E2E application lifecycle", () => {
         message: "The Electron fixture process required forced termination during close (phase=privileged-cleanup).",
       }),
     ]);
+  });
+
+  it("retains the child before a snapshot disconnects and ignores its late PID", async () => {
+    const process = Object.assign(new EventEmitter(), {
+      exitCode: null as number | null,
+      signalCode: null as NodeJS.Signals | null,
+      kill: vi.fn(() => true),
+    });
+    const captureProcess = vi.fn(() => process);
+    let releaseSnapshot!: (pid: number) => void;
+    const readRuntimePid = vi.fn(() => {
+      captureProcess.mockImplementation(() => { throw new Error("disconnected"); });
+      return new Promise<number>((resolve) => { releaseSnapshot = resolve; });
+    });
+    const waitForRuntimeExit = vi.fn(async () => undefined);
+    await expect(closeElectronFixtureBounded({
+      current: {
+        process: captureProcess,
+        close: async () => undefined,
+      } as unknown as ElectronApplication,
+      readRuntimePid,
+      prepareRuntimeQuit: async () => {
+        releaseSnapshot(123);
+        return { phase: "privileged-cleanup-complete", runtimePid: 777,
+          cleanupConfirmed: true, errorMessage: null };
+      },
+      requestRuntimeQuit: async () => {
+        process.exitCode = 0;
+        process.emit("exit", 0, null);
+        return 777;
+      },
+      waitForRuntimeExit,
+      closeServer: async () => undefined,
+      removeDirectory: async () => undefined,
+      rpcTimeoutMs: 5,
+    })).resolves.toBeUndefined();
+    expect(captureProcess).toHaveBeenCalledOnce();
+    expect(readRuntimePid).toHaveBeenCalledOnce();
+    expect(waitForRuntimeExit).toHaveBeenCalledExactlyOnceWith(777);
+    expect(process.kill).not.toHaveBeenCalled();
   });
 
   it.runIf(process.platform === "darwin")(

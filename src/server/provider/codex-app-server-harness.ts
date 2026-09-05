@@ -21,7 +21,11 @@ import {
   type CodexAppServerHarnessCapabilities,
 } from "./agent-harness";
 import { providerFailureMessage } from "./adapters";
-import type { ProviderRunResult } from "./contracts";
+import {
+  providerRunTerminal,
+  type ProviderRunInput,
+  type ProviderRunResult,
+} from "./contracts";
 
 export const CODEX_APP_SERVER_HARNESS_CAPABILITIES = {
   lifecycle: {
@@ -103,13 +107,13 @@ function startCodexRun(
     return startCodexCompaction(options, dependencies);
   }
   const providerId = "codex" as const;
-  const conversationId = options.input.conversationId ?? options.input.threadId ?? "";
+  const conversationId = options.input.conversationId;
   const emitter = createAgentHarnessEmitter(
     providerId,
     conversationId,
     options.callbacks,
-    options.input.runId ?? conversationId,
-    options.input.turnId ?? null,
+    options.input.runId,
+    options.input.turnId,
     options.input.cwd,
   );
   emitter.status("starting");
@@ -161,7 +165,15 @@ function startCodexRun(
       access: options.input.access,
       onText: emitter.text,
       onActivity: emitter.activity,
-      onSession: emitter.session,
+      onSession: (sessionId) => {
+        // The App Server has returned the exact opened/resumed thread and has
+        // already echoed the requested tier at this point. Only then can this
+        // run attest the negotiated response-speed capability.
+        if (serviceTier !== undefined) {
+          emitter.capability("performance-modes", true);
+        }
+        emitter.session(sessionId);
+      },
       onStatus: (status, providerState) => {
         if (status === "running") emitRunning();
         else {
@@ -178,7 +190,10 @@ function startCodexRun(
       onGoalCleared: emitter.goalCleared,
       onReasoning: (text) => emitter.codex({ type: "reasoning-summary", text }),
       onUsage: (usage) => emitter.codex({ type: "usage", usage }),
-      onRateLimits: (rateLimits, complete) => emitter.codex({ type: "metadata", metadata: { rateLimits }, source: "provider", complete }),
+      onRateLimits: (rateLimits, complete) => {
+        emitter.capability("rate-limits", true);
+        emitter.codex({ type: "metadata", metadata: { rateLimits }, source: "provider", complete });
+      },
       onSubagent: emitter.subagent,
     });
   } catch (error) {
@@ -191,7 +206,7 @@ function startCodexRun(
       options.input.backendProfile,
     );
     emitter.status("failed", message);
-    return failedCodexRun(conversationId, options.input.sessionId, message);
+    return failedCodexRun(options.input, message);
   }
 
   let settled = false;
@@ -207,7 +222,10 @@ function startCodexRun(
     } = runtimeResult;
     if (runtimeResult.status === "cancelled" || cancelRequested) {
       emitter.status("cancelled");
-      return { providerId, conversationId, ...publicRuntimeResult, status: "cancelled" };
+      return {
+        ...publicRuntimeResult,
+        ...providerRunTerminal(options.input, "cancelled"),
+      };
     }
     if (runtimeResult.status === "failed") {
       const providerMessage = providerFailureMessage(
@@ -241,16 +259,17 @@ function startCodexRun(
         : { reason: "codex-error" as const, message };
       emitter.status("failed", message);
       return {
-        providerId,
-        conversationId,
         ...publicRuntimeResult,
-        status: "failed",
+        ...providerRunTerminal(options.input, "failed", failure),
         error: message,
         failure,
       };
     }
     emitter.status("completed");
-    return { providerId, conversationId, ...publicRuntimeResult, status: "completed" };
+    return {
+      ...publicRuntimeResult,
+      ...providerRunTerminal(options.input, "completed"),
+    };
   });
 
   const cancel = (force: boolean): void => {
@@ -295,16 +314,14 @@ function startCodexCompaction(
   options: AgentHarnessStartOptions,
   dependencies: CodexAppServerHarnessDependencies,
 ): AgentHarnessRun {
-  const conversationId = options.input.conversationId
-    ?? options.input.threadId
-    ?? "";
+  const conversationId = options.input.conversationId;
   const sessionId = options.input.sessionId!;
   const emitter = createAgentHarnessEmitter(
     "codex",
     conversationId,
     options.callbacks,
-    options.input.runId ?? conversationId,
-    null,
+    options.input.runId,
+    options.input.turnId,
     options.input.cwd,
   );
   const abortController = new AbortController();
@@ -557,9 +574,7 @@ function startCodexCompaction(
       });
       emitter.status("completed");
       return {
-        providerId: "codex",
-        conversationId,
-        status: "completed",
+        ...providerRunTerminal(options.input, "completed"),
         sessionId,
         text: "",
         textTruncated: false,
@@ -577,9 +592,7 @@ function startCodexCompaction(
         : "Codex could not compact the context.";
       emitter.status(status, status === "failed" ? message : undefined);
       return {
-        providerId: "codex",
-        conversationId,
-        status,
+        ...providerRunTerminal(options.input, status),
         sessionId,
         text: "",
         textTruncated: false,
@@ -671,27 +684,25 @@ function inactiveCodexExtension(): AgentHarnessRun["extension"] {
 }
 
 function failedCodexRun(
-  conversationId: string,
-  sessionId: string | undefined,
+  input: ProviderRunInput,
   error: string,
 ): AgentHarnessRun {
+  const failure = {
+    reason: "codex-error" as const,
+    message: error,
+  };
   return {
     harnessId: "codex-app-server",
     providerId: "codex",
     result: Promise.resolve({
-      providerId: "codex",
-      conversationId,
-      status: "failed",
-      sessionId,
+      ...providerRunTerminal(input, "failed", failure),
+      sessionId: input.sessionId,
       text: "",
       textTruncated: false,
       exitCode: null,
       signal: null,
       error,
-      failure: {
-        reason: "codex-error",
-        message: error,
-      },
+      failure,
       cleanupConfirmed: true,
     }),
     cancel: () => undefined,

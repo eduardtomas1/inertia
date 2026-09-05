@@ -32,7 +32,12 @@ import {
   type KimiAcpHarnessCapabilities,
 } from "./agent-harness";
 import { isSafeApprovalDisplayText } from "./approval-display";
-import type { ProviderRunFailure, ProviderRunResult } from "./contracts";
+import {
+  providerRunTerminal,
+  type ProviderRunFailure,
+  type ProviderRunInput,
+  type ProviderRunResult,
+} from "./contracts";
 import type {
   AgentApprovalDecision,
   AgentInputRequest,
@@ -182,13 +187,13 @@ function startKimiRun(
   controlRpcTimeoutMs = CONTROL_RPC_TIMEOUT_MS,
   createHostMcpSession = createProviderHostToolMcpSession,
 ): AgentHarnessRun {
-  const conversationId = options.input.conversationId ?? options.input.threadId ?? "";
+  const conversationId = options.input.conversationId;
   const emitter = createAgentHarnessEmitter(
     "kimi",
     conversationId,
     options.callbacks,
-    options.input.runId ?? conversationId,
-    options.input.turnId ?? null,
+    options.input.runId,
+    options.input.turnId,
     options.input.cwd,
   );
   const resultText = new CappedProviderBuffer(MAX_RESULT_TEXT_CHARS);
@@ -378,7 +383,7 @@ function startKimiRun(
   } catch (error) {
     const failure = kimiSpawnFailure(error, options.input.cwd);
     return failedKimiRun(
-      conversationId,
+      options.input,
       failure,
       emitter,
     );
@@ -439,6 +444,7 @@ function startKimiRun(
       );
       validateKimiInitialize(initialized);
       supportsImages = initialized.agentCapabilities?.promptCapabilities?.image === true;
+      emitter.capability("images", supportsImages);
       const login = selectAcpAgentAuthMethod(
         "Kimi Code",
         initialized.authMethods,
@@ -464,6 +470,11 @@ function startKimiRun(
       let configOptions: SessionConfigOption[] | null | undefined;
       if (options.input.sessionId) {
         acceptsCommandAdvertisement = true;
+        const supportsSessionResume = Boolean(
+          initialized.agentCapabilities?.sessionCapabilities?.resume
+          || initialized.agentCapabilities?.loadSession === true,
+        );
+        emitter.capability("session-resume", supportsSessionResume);
         if (initialized.agentCapabilities?.sessionCapabilities?.resume) {
           activeFailurePhase = "session";
           activeTerminalEvent = "session/resume";
@@ -529,7 +540,7 @@ function startKimiRun(
         options.input.reasoningEffort,
         requestControl,
       );
-      emitKimiMetadata(configuredOptions, supportsImages, emitter.rich);
+      emitKimiMetadata(configuredOptions, supportsImages, emitter);
 
       if (options.input.operation?.kind === "compact") {
         await waitForKimiCommandAdvertisement(
@@ -542,10 +553,12 @@ function startKimiRun(
           );
         }
         if (!availableCommandNames.has("compact")) {
+          emitter.capability("compaction", false);
           throw new Error(
             "This Kimi ACP session does not advertise its compact command.",
           );
         }
+        emitter.capability("compaction", true);
       }
 
       const providerPrompt = options.input.operation?.kind === "compact"
@@ -573,7 +586,7 @@ function startKimiRun(
       }));
       if (wireError) throw wireError;
       if (response.usage) {
-        emitKimiPromptUsage(response.usage, contextUsage, emitter.rich);
+        emitKimiPromptUsage(response.usage, contextUsage, emitter);
       }
       const compactionFailure = options.input.operation?.kind === "compact"
         && compactions.completionEvidence() !== "completed"
@@ -697,7 +710,10 @@ function startKimiRun(
       exitCode: child.exitCode,
       signal: child.signalCode,
     };
-  });
+  }).then((outcome) => ({
+    ...outcome,
+    ...providerRunTerminal(options.input, outcome.status, outcome.failure),
+  }));
 
   function finish(
     status: ProviderRunResult["status"],
@@ -705,9 +721,7 @@ function startKimiRun(
     failure?: ProviderRunFailure,
   ): ProviderRunResult {
     return {
-      providerId: "kimi",
-      conversationId,
-      status,
+      ...providerRunTerminal(options.input, status, failure),
       ...(sessionId ? { sessionId } : {}),
       text: resultText.toString(),
       textTruncated: resultText.truncated,
@@ -1050,7 +1064,7 @@ function handleKimiUpdate(
       );
       return;
     case "config_option_update":
-      emitKimiMetadata(update.configOptions, supportsImages, emitter.rich);
+      emitKimiMetadata(update.configOptions, supportsImages, emitter);
       return;
     case "session_info_update":
       if (update.title) {
@@ -1064,6 +1078,7 @@ function handleKimiUpdate(
     case "usage_update":
       contextUsage.usedTokens = tokenCount(update.used);
       contextUsage.maxTokens = tokenCount(update.size);
+      emitter.capability("usage-tokens", true);
       emitter.rich({
         type: "usage",
         usage: {
@@ -1099,7 +1114,7 @@ function handleKimiUpdate(
 }
 
 function failedKimiRun(
-  conversationId: string,
+  input: ProviderRunInput,
   failure: ProviderRunFailure,
   emitter: ReturnType<typeof createAgentHarnessEmitter>,
 ): AgentHarnessRun {
@@ -1108,9 +1123,7 @@ function failedKimiRun(
     harnessId: "kimi-acp",
     providerId: "kimi",
     result: Promise.resolve({
-      providerId: "kimi",
-      conversationId,
-      status: "failed",
+      ...providerRunTerminal(input, "failed", failure),
       text: "",
       textTruncated: false,
       exitCode: null,

@@ -1,9 +1,17 @@
 import { createRequire } from "node:module";
 import { createHash } from "node:crypto";
 import { constants, createReadStream } from "node:fs";
-import { copyFile, lstat, mkdtemp, readdir, rm } from "node:fs/promises";
+import {
+  copyFile,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { runBounded } from "./bounded-process-tree.mjs";
@@ -33,6 +41,9 @@ const NODE_PTY_RELEASE_FILES = [
 ];
 const NODE_PTY_CONPTY_FILES = ["conpty.dll", "OpenConsole.exe"];
 const WINDOWS_NATIVE_FILE_PATTERN = /\.(?:dll|exe|node)$/iu;
+const DIGEST_PATTERN = /^[0-9a-f]{64}$/u;
+const MAX_N_MINUS_ONE_METADATA_BYTES = 8 * 1_024;
+const MAX_WINDOWS_INSTALLER_BYTES = 512 * 1_024 * 1_024;
 
 function sleep(milliseconds) {
   return new Promise((settle) => setTimeout(settle, milliseconds));
@@ -67,6 +78,102 @@ async function sha256File(path) {
     stream.once("end", resolvePromise);
   });
   return hash.digest("hex");
+}
+
+function compareVersions(left, right) {
+  if (!VERSION_PATTERN.test(left) || !VERSION_PATTERN.test(right)) {
+    throw new Error("The Windows package transition version is invalid.");
+  }
+  const leftParts = left.split(".").map(Number);
+  const rightParts = right.split(".").map(Number);
+  for (let index = 0; index < leftParts.length; index += 1) {
+    if (leftParts[index] !== rightParts[index]) {
+      return leftParts[index] < rightParts[index] ? -1 : 1;
+    }
+  }
+  return 0;
+}
+
+function exactObjectKeys(value, keys) {
+  return value !== null
+    && typeof value === "object"
+    && !Array.isArray(value)
+    && Object.keys(value).sort().join("\0") === [...keys].sort().join("\0");
+}
+
+export async function readWindowsNMinusOneMetadata(options) {
+  if (options.configuredPath === undefined) return null;
+  if (
+    typeof options.configuredPath !== "string"
+    || options.configuredPath.length === 0
+    || options.configuredPath.length > 4_096
+    || options.configuredPath.includes("\0")
+  ) throw new Error("The Windows N-1 metadata path is invalid.");
+  const repositoryRoot = resolve(options.repositoryRoot);
+  const metadataPath = resolve(repositoryRoot, options.configuredPath);
+  const relativeMetadataPath = relative(repositoryRoot, metadataPath);
+  if (
+    relativeMetadataPath === ""
+    || relativeMetadataPath === ".."
+    || relativeMetadataPath.startsWith(`..${sep}`)
+    || isAbsolute(relativeMetadataPath)
+  ) throw new Error("The Windows N-1 metadata path escapes the repository.");
+  const metadataInfo = await lstat(metadataPath);
+  if (
+    metadataInfo.isSymbolicLink()
+    || !metadataInfo.isFile()
+    || metadataInfo.size <= 0
+    || metadataInfo.size > MAX_N_MINUS_ONE_METADATA_BYTES
+  ) throw new Error("The Windows N-1 metadata file is invalid.");
+  const value = JSON.parse(await readFile(metadataPath, "utf8"));
+  const keys = [
+    "architecture",
+    "assetName",
+    "byteLength",
+    "channel",
+    "currentVersion",
+    "repository",
+    "schemaVersion",
+    "sha256",
+    "tag",
+    "version",
+  ];
+  if (
+    !exactObjectKeys(value, keys)
+    || value.schemaVersion !== 1
+    || value.repository !== "eduardtomas1/inertia"
+    || value.currentVersion !== options.currentVersion
+    || value.channel !== options.releaseChannel
+    || value.architecture !== options.architecture
+    || typeof value.version !== "string"
+    || compareVersions(value.version, options.currentVersion) >= 0
+    || value.tag !== `${value.channel === "canary" ? "canary-v" : "v"}${value.version}`
+    || value.assetName !== windowsInstallerAssetName(
+      value.version,
+      value.channel,
+      value.architecture,
+    )
+    || !Number.isSafeInteger(value.byteLength)
+    || value.byteLength <= 0
+    || value.byteLength > MAX_WINDOWS_INSTALLER_BYTES
+    || typeof value.sha256 !== "string"
+    || !DIGEST_PATTERN.test(value.sha256)
+  ) throw new Error("The Windows N-1 metadata does not match this candidate.");
+  const installerPath = join(dirname(metadataPath), value.assetName);
+  const installerInfo = await lstat(installerPath);
+  if (
+    installerInfo.isSymbolicLink()
+    || !installerInfo.isFile()
+    || installerInfo.size !== value.byteLength
+  ) throw new Error("The Windows N-1 installer does not match its metadata.");
+  if (await sha256File(installerPath) !== value.sha256) {
+    throw new Error("The Windows N-1 installer checksum is invalid.");
+  }
+  return Object.freeze({
+    installerPath,
+    version: value.version,
+    sha256: value.sha256,
+  });
 }
 
 async function nativeFilesBelow(root, relativeRoot = "") {
@@ -383,6 +490,32 @@ async function runUninstaller(
   return await waitForRemoval(installDirectory);
 }
 
+async function smokeInstalledApplication(
+  repositoryRoot,
+  installedExecutable,
+  label,
+  stateRoot,
+  expectedVersion,
+) {
+  await runBounded(
+    process.execPath,
+    [join(repositoryRoot, "scripts", "package-smoke.mjs")],
+    {
+      cwd: repositoryRoot,
+      echoOutput: true,
+      env: {
+        ...process.env,
+        INERTIA_PACKAGE_SMOKE_EXECUTABLE: installedExecutable,
+        INERTIA_PACKAGE_SMOKE_EXPECTED_VERSION: expectedVersion,
+        INERTIA_PACKAGE_SMOKE_KIND: "windows-installed",
+        INERTIA_PACKAGE_SMOKE_STATE_ROOT: stateRoot,
+      },
+      label,
+      timeoutMs: PACKAGE_SMOKE_TIMEOUT_MS,
+    },
+  );
+}
+
 export async function main() {
   if (process.platform !== "win32") {
     throw new Error("The Windows installer smoke must run on Windows.");
@@ -401,9 +534,18 @@ export async function main() {
   if (!await existsAsRegularFile(installer)) {
     throw new Error(`The exact Windows installer is missing: ${installer}.`);
   }
+  const nMinusOne = await readWindowsNMinusOneMetadata({
+    repositoryRoot,
+    configuredPath: process.env.INERTIA_WINDOWS_N_MINUS_ONE_METADATA,
+    currentVersion: manifest.version,
+    releaseChannel,
+    architecture: process.arch,
+  });
 
   const temporaryRoot = await mkdtemp(join(tmpdir(), "inertia-installer-smoke-"));
   const installDirectory = join(temporaryRoot, "installed with spaces");
+  const persistentStateRoot = join(temporaryRoot, "existing profile and data");
+  await mkdir(persistentStateRoot, { mode: 0o700 });
   const stagedUninstaller = join(temporaryRoot, "staged-uninstaller.exe");
   const applicationName = installedWindowsApplicationName(releaseChannel);
   const productName = applicationName.slice(0, -".exe".length);
@@ -418,8 +560,42 @@ export async function main() {
   let operationError;
   let uninstalled = false;
   try {
+    if (nMinusOne) {
+      await runBounded(
+        nMinusOne.installerPath,
+        ["/S", `/D=${installDirectory}`],
+        {
+          label: `Silent Windows N-1 installer (${nMinusOne.version})`,
+          timeoutMs: INSTALL_TIMEOUT_MS,
+          windowsVerbatimArguments: true,
+        },
+      );
+      if (!await existsAsRegularFile(installedExecutable)) {
+        throw new Error("The packaged Windows N-1 application was not installed.");
+      }
+      await inspectNativeBinaryArchitecture(installedExecutable, {
+        expectedArchitecture: process.arch,
+        platform: "win32",
+      });
+      await smokeInstalledApplication(
+        repositoryRoot,
+        installedExecutable,
+        `Installed Windows N-1 application smoke (${nMinusOne.version})`,
+        persistentStateRoot,
+        nMinusOne.version,
+      );
+      if (!await existsAsRegularFile(join(
+        persistentStateRoot,
+        "data",
+        "inertia.sqlite",
+      ))) {
+        throw new Error("The packaged Windows N-1 smoke did not create durable profile state.");
+      }
+    }
     await runBounded(installer, ["/S", `/D=${installDirectory}`], {
-      label: "Silent Windows installer",
+      label: nMinusOne
+        ? `Silent Windows in-place N-1 to N installer (${nMinusOne.version} -> ${manifest.version})`
+        : "Silent Windows installer",
       timeoutMs: INSTALL_TIMEOUT_MS,
       windowsVerbatimArguments: true,
     });
@@ -430,21 +606,21 @@ export async function main() {
       uninstallerName,
       process.arch,
     );
-    await runBounded(process.execPath, [join(repositoryRoot, "scripts", "package-smoke.mjs")], {
-      cwd: repositoryRoot,
-      echoOutput: true,
-      env: {
-        ...process.env,
-        INERTIA_PACKAGE_SMOKE_EXECUTABLE: installedExecutable,
-        INERTIA_PACKAGE_SMOKE_KIND: "windows-installed",
-      },
-      label: "Installed Windows application smoke",
-      timeoutMs: PACKAGE_SMOKE_TIMEOUT_MS,
-    });
+    await smokeInstalledApplication(
+      repositoryRoot,
+      installedExecutable,
+      nMinusOne
+        ? `Installed Windows N candidate smoke (${manifest.version})`
+        : "Installed Windows application smoke",
+      persistentStateRoot,
+      manifest.version,
+    );
     await runUninstaller(uninstaller, stagedUninstaller, installDirectory);
     uninstalled = true;
     console.log(
-      `Windows installer smoke passed for ${process.arch}: install, native runtime, and uninstall completed without a reboot.`,
+      nMinusOne
+        ? `Windows packaged N-1 to N smoke passed for ${process.arch}: ${nMinusOne.version} -> ${manifest.version}, existing profile, native runtime, and uninstall completed without a reboot.`
+        : `Windows installer smoke passed for ${process.arch}: install, native runtime, and uninstall completed without a reboot.`,
     );
   } catch (error) {
     operationError = error;

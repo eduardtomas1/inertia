@@ -1193,7 +1193,12 @@ process.exit(child.status ?? 1);
       (event): event is Extract<ServerEvent, { type: "agent.activity" }> =>
         event.type === "agent.activity" && event.activity.kind === "command" && event.activity.status === "running",
     );
-    const runningCheck = await client.events.next(
+    const completed = await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "agent.activity" }> =>
+        event.type === "agent.activity" && event.activity.id === started.activity.id && event.activity.status === "completed",
+    );
+    expect(completed.activity).toMatchObject({ id: started.activity.id, runId: started.activity.runId, title: "npm test" });
+    const completedCheck = await client.events.next(
       (event): event is Extract<
         ServerEvent,
         { type: "conversation.shell.updated" }
@@ -1204,34 +1209,20 @@ process.exit(child.status ?? 1);
           run.conversationId === conversationId
           && run.kind === "check"
           && run.label === "npm test"
-          && run.status === "running"),
-    );
-    const commandRun = runningCheck.runs.find((run) =>
-      run.conversationId === conversationId
-      && run.kind === "check"
-      && run.label === "npm test");
-    expect(commandRun).toMatchObject({
-      actionId: null,
-      canStop: false,
-      status: "running",
-    });
-    const completed = await client.events.next(
-      (event): event is Extract<ServerEvent, { type: "agent.activity" }> =>
-        event.type === "agent.activity" && event.activity.id === started.activity.id && event.activity.status === "completed",
-    );
-    expect(completed.activity).toMatchObject({ id: started.activity.id, runId: started.activity.runId, title: "npm test" });
-    await client.events.next(
-      (event): event is Extract<
-        ServerEvent,
-        { type: "conversation.shell.updated" }
-      > =>
-        event.type === "conversation.shell.updated"
-        && event.conversation.id === conversationId
-        && event.runs.some((run) =>
-          run.id === commandRun?.id
           && run.status === "succeeded"
           && run.finishedAt !== null),
     );
+    const commandRuns = completedCheck.runs.filter((run) =>
+      run.conversationId === conversationId
+      && run.kind === "check"
+      && run.label === "npm test");
+    expect(commandRuns).toHaveLength(1);
+    const commandRun = commandRuns[0];
+    expect(commandRun).toMatchObject({
+      actionId: null,
+      canStop: false,
+      status: "succeeded",
+    });
     await client.events.next(
       (event): event is Extract<ServerEvent, { type: "agent.completed" }> =>
         event.type === "agent.completed" && event.conversationId === conversationId,
@@ -1316,19 +1307,25 @@ process.exit(child.status ?? 1);
       requestId: crossHarnessRequestId,
       payload: { conversationId, providerId: "claude" },
     });
-    const rejectedSwitch = await client.events.next(
-      (event): event is Extract<ServerEvent, { type: "request.error" }> =>
-        event.type === "request.error"
+    await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "request.ok" }> =>
+        event.type === "request.ok"
         && event.requestId === crossHarnessRequestId,
     );
-    expect(rejectedSwitch.message).toBe(
-      "Start a new chat to use a different agent harness. Existing chats keep their original agent context.",
-    );
-    expect((await loadConversationDetail(
+    const switched = await loadConversationDetail(
       client.socket,
       client.events,
       conversationId!,
-    )).conversation.providerId).toBe("codex");
+    );
+    expect(switched.conversation).toMatchObject({
+      id: conversationId,
+      providerId: "claude",
+      providerSessionId: null,
+    });
+    expect(switched.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: "user", content: "Exercise one command activity." }),
+      expect.objectContaining({ role: "assistant", content: "Activity lifecycle complete." }),
+    ]));
   });
 
   it("invalidates reviewed targets and notes immediately after committing their change", async () => {

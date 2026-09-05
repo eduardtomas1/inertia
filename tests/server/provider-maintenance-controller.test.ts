@@ -16,6 +16,10 @@ import { ProviderLatestVersionCache } from "../../src/server/provider/maintenanc
 import type {
   ProviderMaintenanceRunResult,
 } from "../../src/server/provider/maintenance-runner";
+import { providerInstallationIdentity } from
+  "../../src/server/provider/installation-lease";
+import { providerMaintenanceJournalTestDouble } from
+  "../support/provider-maintenance-journal";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -28,10 +32,11 @@ function deferred<T>() {
 function target(
   providerId: ProviderMaintenanceProviderId,
   version = "1.0.0",
+  executable = `/tools/${providerId}`,
 ): ProviderMaintenanceTarget {
   return {
     providerId,
-    executable: `/tools/${providerId}`,
+    executable,
     installedVersion: version,
     installed: true,
   };
@@ -103,6 +108,74 @@ function waitForTerminal(
 }
 
 describe("ProviderMaintenanceController", () => {
+  it("rejects an update outside the active capability attestation", async () => {
+    const runAction = vi.fn(async () => success());
+    const controller = new ProviderMaintenanceController({
+      maintenanceJournal: providerMaintenanceJournalTestDouble(),
+      target: (providerId) => target(providerId),
+      refreshTarget: async (providerId) => target(providerId),
+      resolveCapabilities: async ({ providerId }) => capabilities(providerId),
+      capabilityAvailable: () => false,
+      runAction,
+    });
+
+    await expect(controller.startUpdate("claude")).rejects.toThrow(
+      "capability contract does not authorize",
+    );
+    expect(runAction).not.toHaveBeenCalled();
+    expect(controller.hasBlockingAuthority("claude")).toBe(false);
+  });
+
+  it("accepts a re-resolved executable only within its stable replacement boundary", async () => {
+    let current = target("claude", "1.0.0", "/tools/claude-v1");
+    const operations: ProviderMaintenanceOperation[] = [];
+    const controller = new ProviderMaintenanceController({
+      maintenanceJournal: providerMaintenanceJournalTestDouble(),
+      target: () => current,
+      refreshTarget: async () => current,
+      resolveCapabilities: async () => capabilities("claude"),
+      installationIdentity: (subject) => providerInstallationIdentity({
+        providerId: subject.providerId,
+        executable: subject.executable,
+        installationRootIdentity: null,
+        packageIdentity: "provider-managed:claude",
+        version: subject.installedVersion,
+        replacementBoundaryIdentity: "/configured/claude",
+      }),
+      runAction: async () => {
+        current = target("claude", "2.0.0", "/tools/claude-v2");
+        return success();
+      },
+      onOperation: (operation) => operations.push(operation),
+    });
+
+    const operation = await controller.startUpdate("claude");
+    await expect(waitForTerminal(operations, operation.id)).resolves
+      .toMatchObject({ status: "succeeded", afterVersion: "2.0.0" });
+    expect(controller.hasBlockingAuthority("claude")).toBe(false);
+  });
+
+  it("closes only the reserved provider configuration before async capability resolution", async () => {
+    const capabilityGate = deferred<ProviderMaintenanceCapabilities>();
+    const operations: ProviderMaintenanceOperation[] = [];
+    const controller = new ProviderMaintenanceController({
+      maintenanceJournal: providerMaintenanceJournalTestDouble(),
+      target: (providerId) => target(providerId),
+      refreshTarget: async (providerId) => target(providerId, "2.0.0"),
+      resolveCapabilities: async () => await capabilityGate.promise,
+      runAction: async () => success(),
+      operationId: () => "provider-reservation",
+      onOperation: (operation) => operations.push(operation),
+    });
+
+    const started = controller.startUpdate("claude");
+    expect(controller.hasBlockingAuthority("claude")).toBe(true);
+    expect(controller.hasBlockingAuthority("opencode")).toBe(false);
+    capabilityGate.resolve(capabilities("claude"));
+    const operation = await started;
+    await waitForTerminal(operations, operation.id);
+  });
+
   it("emits queued, running and verified success without hiding progress", async () => {
     let current = target("claude");
     const operations: ProviderMaintenanceOperation[] = [];
@@ -114,6 +187,7 @@ describe("ProviderMaintenanceController", () => {
       )) as typeof fetch,
     });
     const controller = new ProviderMaintenanceController({
+      maintenanceJournal: providerMaintenanceJournalTestDouble(),
       target: () => current,
       refreshTarget: async () => {
         current = target("claude", "2.0.0");
@@ -160,6 +234,7 @@ describe("ProviderMaintenanceController", () => {
     const pending = deferred<ProviderMaintenanceRunResult>();
     const operations: ProviderMaintenanceOperation[] = [];
     const controller = new ProviderMaintenanceController({
+      maintenanceJournal: providerMaintenanceJournalTestDouble(),
       target: (providerId) => target(providerId),
       refreshTarget: async (providerId) => target(providerId),
       resolveCapabilities: async ({ providerId }) => capabilities(providerId),
@@ -205,6 +280,7 @@ describe("ProviderMaintenanceController", () => {
     const calls: ProviderMaintenanceProviderId[] = [];
     const operations: ProviderMaintenanceOperation[] = [];
     const controller = new ProviderMaintenanceController({
+      maintenanceJournal: providerMaintenanceJournalTestDouble(),
       target: (providerId) => target(providerId),
       refreshTarget: async (providerId) => target(providerId, "2.0.0"),
       resolveCapabilities: async ({ providerId }) => capabilities(providerId),
@@ -236,6 +312,7 @@ describe("ProviderMaintenanceController", () => {
     const calls: ProviderMaintenanceProviderId[] = [];
     const operations: ProviderMaintenanceOperation[] = [];
     const controller = new ProviderMaintenanceController({
+      maintenanceJournal: providerMaintenanceJournalTestDouble(),
       target: (providerId) => target(providerId),
       refreshTarget: async (providerId) => target(providerId),
       resolveCapabilities: async ({ providerId }) => capabilities(providerId),
@@ -266,6 +343,7 @@ describe("ProviderMaintenanceController", () => {
   it("rejects duplicate provider updates and instructions-only installations", async () => {
     const pending = deferred<ProviderMaintenanceRunResult>();
     const controller = new ProviderMaintenanceController({
+      maintenanceJournal: providerMaintenanceJournalTestDouble(),
       target: (providerId) => target(providerId),
       refreshTarget: async (providerId) => target(providerId),
       resolveCapabilities: async ({ providerId }) => (
@@ -300,6 +378,7 @@ describe("ProviderMaintenanceController", () => {
   it("reserves a provider while its update capability is being resolved", async () => {
     const capability = deferred<ProviderMaintenanceCapabilities>();
     const controller = new ProviderMaintenanceController({
+      maintenanceJournal: providerMaintenanceJournalTestDouble(),
       target: (providerId) => target(providerId),
       refreshTarget: async (providerId) => target(providerId),
       resolveCapabilities: async () => await capability.promise,
@@ -330,6 +409,7 @@ describe("ProviderMaintenanceController", () => {
       }), { once: true });
     }));
     const controller = new ProviderMaintenanceController({
+      maintenanceJournal: providerMaintenanceJournalTestDouble(),
       target: (providerId) => target(providerId),
       refreshTarget: async (providerId) => target(providerId),
       resolveCapabilities: async ({ providerId }) => capabilities(providerId),
@@ -351,6 +431,7 @@ describe("ProviderMaintenanceController", () => {
   it("keeps an unconfirmed updater cleanup latched through disposal", async () => {
     const operations: ProviderMaintenanceOperation[] = [];
     const controller = new ProviderMaintenanceController({
+      maintenanceJournal: providerMaintenanceJournalTestDouble(),
       target: (providerId) => target(providerId),
       refreshTarget: async (providerId) => target(providerId),
       resolveCapabilities: async ({ providerId }) => capabilities(providerId),
@@ -366,6 +447,20 @@ describe("ProviderMaintenanceController", () => {
     const started = await controller.startUpdate("claude");
 
     await waitForTerminal(operations, started.id);
+    const diagnosticStates = controller.diagnosticStates();
+    expect(diagnosticStates).toHaveLength(6);
+    expect(diagnosticStates).toContainEqual({
+      providerId: "claude",
+      state: "quarantined",
+    });
+    expect(diagnosticStates).toContainEqual({
+      providerId: "gemini",
+      state: "idle",
+    });
+    expect(diagnosticStates.every(
+      (state) => Object.keys(state).sort().join(",") === "providerId,state",
+    )).toBe(true);
+    expect(JSON.stringify(diagnosticStates)).not.toContain("/tools/");
     await expect(controller.dispose()).rejects.toThrow(
       "Provider maintenance process cleanup could not be confirmed.",
     );

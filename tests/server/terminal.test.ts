@@ -13,6 +13,7 @@ import type WebSocket from "ws";
 
 import { describe, expect, it, vi } from "vitest";
 
+import { linuxProcessCanExecute } from "../../src/node/runtime-owned-process-posix";
 import { TerminalManager } from "../../src/server/terminal";
 
 async function waitFor(
@@ -32,6 +33,10 @@ async function waitFor(
 }
 
 function processExists(pid: number): boolean {
+  if (process.platform === "linux") {
+    const executable = linuxProcessCanExecute(pid);
+    if (executable !== null) return executable;
+  }
   try {
     process.kill(pid, 0);
     return true;

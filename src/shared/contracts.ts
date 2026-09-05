@@ -9,6 +9,7 @@ export * from "./attachments";
 export * from "./provider-maintenance";
 export * from "./provider-terminal-resume";
 export * from "./run-state";
+export * from "./lifecycle-diagnostics";
 export * from "./conversation-context";
 export type {
   PromptPreset,

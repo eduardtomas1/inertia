@@ -1,3 +1,4 @@
+// @inertia-test-suite portable
 import {
   existsSync,
   mkdirSync,

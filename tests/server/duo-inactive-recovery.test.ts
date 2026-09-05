@@ -73,12 +73,15 @@ function providerInfo(): ProviderInfo {
 }
 
 class RecoveryProvider implements TurnProviderRuntime {
-  readonly active = new Map<string, { runId: string; turnId: string | null }>();
+  providerCapabilityAvailable(): boolean {
+    return true;
+  }
+  readonly active = new Map<string, { runId: string; turnId: string }>();
   readonly pendingStops = new Map<
     string,
     () => void
   >();
-  ambiguousIdentity: { runId: string; turnId: string | null } | null = null;
+  ambiguousIdentity: { runId: string; turnId: string } | null = null;
   deferStops = false;
   forceDetachStops = false;
 
@@ -92,10 +95,10 @@ class RecoveryProvider implements TurnProviderRuntime {
     input: ProviderRunInput,
     callbacks: ProviderRunCallbacks,
   ): Promise<ProviderRunResult> {
-    const conversationId = input.conversationId ?? input.threadId;
+    const conversationId = input.conversationId;
     this.active.set(conversationId, {
-      runId: input.runId ?? conversationId,
-      turnId: input.turnId ?? null,
+      runId: input.runId,
+      turnId: input.turnId,
     });
     callbacks.onStarted?.();
     return new Promise(() => undefined);
@@ -107,7 +110,7 @@ class RecoveryProvider implements TurnProviderRuntime {
 
   stopOwned(
     conversationId: string,
-    identity: { runId: string; turnId: string | null },
+    identity: { runId: string; turnId: string },
     _graceMs?: number,
   ): Promise<
     "missing" | "identity-mismatch" | "settled" | "force-detached"
@@ -146,7 +149,7 @@ class RecoveryProvider implements TurnProviderRuntime {
 
   ownsRun(
     conversationId: string,
-    identity: { runId: string; turnId: string | null },
+    identity: { runId: string; turnId: string },
   ): boolean {
     const active = this.ambiguousIdentity ?? this.active.get(conversationId);
     return active?.runId === identity.runId && active.turnId === identity.turnId;
@@ -555,6 +558,10 @@ describe("inactive Duo turn recovery", () => {
       judge.turn.id,
     );
     runtime = reopen(runtime);
+    runtime.provider.active.set(judgeId, {
+      runId: judge.turn.runId,
+      turnId: judge.turn.id,
+    });
 
     const status = await coordinator(runtime).cancelComparison(
       prepared.launchId,

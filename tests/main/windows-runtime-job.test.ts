@@ -21,6 +21,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   armWindowsRuntimeJob,
   disposeWindowsRuntimeJobExecutableLock,
+  launchWindowsUpdateSupervisorThroughExecutableLock,
   prepareWindowsRuntimeJobExecutableLock,
   recoverWindowsRuntimeJob,
   resolveRequiredWindowsRuntimeJobAssembly,
@@ -62,6 +63,9 @@ interface BrokerChildOptions {
   readonly recoverStatus?: `EXIT:${number}` | "TIMEOUT";
   readonly recoverStdout?: string;
   readonly recoverStderr?: string;
+  readonly updateStatus?: "READY" | `EXIT:${number}` | "TIMEOUT";
+  readonly updateStdout?: string;
+  readonly updateStderr?: string;
   readonly responseDelayMs?: number;
   readonly commandLogPath?: string;
   readonly malformedResult?: string;
@@ -93,10 +97,22 @@ const respond = (line) => {
     process.stdout.write(options.malformedResult + "\\n");
     return;
   }
-  const guard = parts[0] === "GUARD";
-  const status = guard ? (options.guardStatus ?? "READY") : (options.recoverStatus ?? "EXIT:0");
-  const stdout = guard ? (options.guardStdout ?? (status === "READY" ? "READY" : "")) : (options.recoverStdout ?? "");
-  const stderr = guard ? (options.guardStderr ?? "") : (options.recoverStderr ?? "");
+  const mode = parts[0];
+  const status = mode === "GUARD"
+    ? (options.guardStatus ?? "READY")
+    : mode === "UPDATE"
+      ? (options.updateStatus ?? "READY")
+      : (options.recoverStatus ?? "EXIT:0");
+  const stdout = mode === "GUARD"
+    ? (options.guardStdout ?? (status === "READY" ? "READY" : ""))
+    : mode === "UPDATE"
+      ? (options.updateStdout ?? (status === "READY" ? "READY" : ""))
+      : (options.recoverStdout ?? "");
+  const stderr = mode === "GUARD"
+    ? (options.guardStderr ?? "")
+    : mode === "UPDATE"
+      ? (options.updateStderr ?? "")
+      : (options.recoverStderr ?? "");
   const result = "RESULT " + id + " " + status + " " + encode(stdout) + " " + encode(stderr) + "\\n";
   setTimeout(() => process.stdout.write(result), options.responseDelayMs ?? 0);
 };
@@ -529,6 +545,132 @@ describe("Windows runtime Job Object containment", () => {
     expect(nativeSource).toContain("while (Console.In.Read() != -1)");
     expect(nativeSource.indexOf("CreationIdentityStatus("))
       .toBeLessThan(nativeSource.indexOf("IntPtr job = CreateJobObject("));
+    const updateSupervisorSource = normalizedNativeSource.slice(
+      normalizedNativeSource.indexOf("public static int UpdateSupervisorFromBroker("),
+    );
+    expect(nativeSource).toContain("ShellExecuteEx(ref execute)");
+    expect(nativeSource).toContain(
+      'execute.lpParameters = "--updated /S"',
+    );
+    expect(updateSupervisorSource).not.toContain("--force-run");
+    expect(nativeSource).toContain("SEE_MASK_NOCLOSEPROCESS");
+    expect(nativeSource).toContain("GetExitCodeProcess(");
+    expect(nativeSource).toContain("result == STILL_ACTIVE");
+    const installerLaunchSource = normalizedNativeSource.slice(
+      normalizedNativeSource.indexOf("private static bool LaunchInstaller("),
+      normalizedNativeSource.indexOf("private static string TerminalAuthenticationPayload("),
+    );
+    expect(nativeSource).toContain("Math.Ceiling(remaining)");
+    const updateDeadlineSource = nativeSource.slice(
+      nativeSource.indexOf("private sealed class UpdateDeadline"),
+      nativeSource.indexOf("private static string BytesToHex("),
+    );
+    expect(updateDeadlineSource.match(/DateTimeOffset\.UtcNow/gu)).toHaveLength(1);
+    expect(updateSupervisorSource).not.toContain("DateTimeOffset.UtcNow");
+    expect(updateSupervisorSource).toContain("deadline.RemainingMilliseconds()");
+    expect(installerLaunchSource).not.toContain("INFINITE");
+    expect(installerLaunchSource).not.toContain("TerminateProcess(");
+    expect(installerLaunchSource).toContain(
+      "while (waitResult == WAIT_TIMEOUT && !deadline.Expired)",
+    );
+    expect(installerLaunchSource).toContain(
+      "deadlineExceeded = true;\n        return false;",
+    );
+    expect(updateSupervisorSource).toContain(
+      "installerStarted && !installerCompleted;",
+    );
+    expect(updateSupervisorSource).toContain(
+      "if (!installerCompletionUnconfirmed) {\n          FileStream resultingExecutable",
+    );
+    expect(updateSupervisorSource.indexOf(
+      "if (installerDeadlineExceeded || installerCompletionUnconfirmed)",
+    ))
+      .toBeLessThan(updateSupervisorSource.indexOf('outcome = "success"'));
+    expect(updateSupervisorSource).toContain(
+      "} else if (\n          !installerStarted",
+    );
+    expect(nativeSource).toContain("new HMACSHA256(");
+    expect(nativeSource).toContain("operationClaim.Flush(true)");
+    expect(nativeSource).toContain("SetFileInformationByHandle(");
+    expect(nativeSource).toContain("RenameOwnedOperationClaim(");
+    expect(nativeSource).toContain(
+      "Marshal.WriteInt16(information, nameOffset + name.Length, (Int16)0)",
+    );
+    expect(nativeSource.indexOf("operationClaim.Flush(true)"))
+      .toBeLessThan(nativeSource.lastIndexOf("RenameOwnedOperationClaim("));
+    expect(updateSupervisorSource).toContain(
+      "request.SupervisorDigest,\n        expectedSupervisorDigest",
+    );
+    expect(updateSupervisorSource.indexOf("parent.Handle"))
+      .toBeLessThan(updateSupervisorSource.indexOf('"READY"'));
+    expect(updateSupervisorSource).toContain(
+      "parentCreationTimeMs > supervisorCreationTimeMs",
+    );
+    expect(updateSupervisorSource.indexOf("WaitForSingleObject(parent.Handle"))
+      .toBeLessThan(updateSupervisorSource.indexOf("LaunchInstaller("));
+    expect(updateSupervisorSource.indexOf("if (deadline.Expired)"))
+      .toBeLessThan(updateSupervisorSource.indexOf("PublishTerminalReceipt("));
+    expect(updateSupervisorSource.indexOf("AcquireOperationClaim(request)"))
+      .toBeLessThan(updateSupervisorSource.indexOf('"READY"'));
+    expect(updateSupervisorSource).toContain("ref operationClaim");
+    expect(updateSupervisorSource.indexOf("PublishTerminalReceipt("))
+      .toBeLessThan(updateSupervisorSource.indexOf("LaunchVerifiedApplication("));
+    const verifiedLaunchSource = nativeSource.slice(
+      nativeSource.indexOf("private static void LaunchVerifiedApplication("),
+      nativeSource.indexOf("public static int LaunchUpdateSupervisor("),
+    );
+    expect(verifiedLaunchSource).toContain("deadline.Expired");
+    expect(verifiedLaunchSource.indexOf("deadline.Expired"))
+      .toBeLessThan(verifiedLaunchSource.indexOf("Process.Start(start)"));
+    const boundSupervisorLaunch = nativeSource.slice(
+      nativeSource.indexOf("public static int LaunchUpdateSupervisor("),
+      nativeSource.indexOf("private static string TrustedPowerShellPath("),
+    );
+    const supervisorProcessSource = nativeSource.slice(
+      nativeSource.indexOf("private sealed class UpdateSupervisorProcess"),
+      nativeSource.indexOf("public static int LaunchUpdateSupervisor("),
+    );
+    expect(supervisorProcessSource).toContain("PROC_THREAD_ATTRIBUTE_HANDLE_LIST");
+    expect(supervisorProcessSource).toContain(
+      "EXTENDED_STARTUPINFO_PRESENT | CREATE_NO_WINDOW",
+    );
+    for (const [index, stream] of ["Input", "Output", "Error"].entries()) {
+      expect(supervisorProcessSource).toContain(
+        `startup.StartupInfo.hStd${stream} = handles[${index}];`,
+      );
+    }
+    expect(supervisorProcessSource).toContain("DisposeLocalCopyOfClientHandle()");
+    expect(supervisorProcessSource).toContain(
+      "child.processHandle = information.hProcess;",
+    );
+    expect(supervisorProcessSource).not.toContain("Process.GetProcessById(");
+    expect(boundSupervisorLaunch).toContain("UpdateSupervisorProcess.Start(");
+    expect(boundSupervisorLaunch).not.toMatch(/\bProcess\.Start\(/u);
+    const bootstrap = boundSupervisorLaunch.match(/string bootstrapScript = @"([\s\S]*?)";/u);
+    expect(bootstrap).not.toBeNull();
+    expect(Buffer.from(bootstrap![1]!, "utf16le").toString("base64").length)
+      .toBeLessThan(2_048);
+    expect(boundSupervisorLaunch).toContain("loaderBytes.Length > 16384");
+    expect(boundSupervisorLaunch).toContain("$line.Length -gt 21848");
+    expect(boundSupervisorLaunch).toContain("$bytes.Length -gt 16384");
+    expect(boundSupervisorLaunch).toContain("-EncodedCommand \" + encodedBootstrap");
+    expect(boundSupervisorLaunch.indexOf("Convert.ToBase64String(loaderBytes)"))
+      .toBeLessThan(boundSupervisorLaunch.indexOf("Convert.ToBase64String(supervisorBytes)"));
+    expect(boundSupervisorLaunch.indexOf("OpenUpdateArtifact(supervisorPath"))
+      .toBeLessThan(boundSupervisorLaunch.indexOf("UpdateSupervisorProcess.Start("));
+    expect(boundSupervisorLaunch).toContain(
+      "$loaded = [Reflection.Assembly]::Load($assemblyBytes)",
+    );
+    expect(boundSupervisorLaunch).toContain("UpdateSupervisorFromBroker");
+    expect(nativeSource.slice(nativeSource.indexOf("public static int Main(")))
+      .not.toContain('"update-supervisor"');
+
+    const packageConfiguration = JSON.parse(readFileSync(
+      resolve(process.cwd(), "package.json"),
+      "utf8",
+    )) as { build?: { nsis?: { perMachine?: boolean; webInstaller?: boolean } } };
+    expect(packageConfiguration.build?.nsis?.perMachine ?? false).toBe(false);
+    expect(packageConfiguration.build?.nsis?.webInstaller ?? false).toBe(false);
 
     const launchSource = readFileSync(
       resolve(process.cwd(), "src/main/windows-runtime-job.ts"),
@@ -885,6 +1027,53 @@ describe("Windows runtime Job Object containment", () => {
     })).resolves.toBe(true);
     expect(brokerSpawns).toBe(1);
   });
+
+  it("routes staged updater bytes only through the verified broker command", async () => {
+    await disposeWindowsRuntimeJobExecutableLock();
+    const commandLogPath = join(stubDirectory, "update-broker-command.txt");
+    await prepareWindowsRuntimeJobExecutableLock(stubAssembly, {
+      spawnLockBroker: () => verifiedExecutableBrokerChild({ commandLogPath }),
+    });
+    await expect(launchWindowsUpdateSupervisorThroughExecutableLock({
+      assembly: stubAssembly,
+      helperPath: stubAssembly.path,
+      helperDigest: stubAssembly.sha256,
+      request: "bounded request",
+      timeoutMs: 1_000,
+    })).resolves.toBeUndefined();
+
+    const parts = readFileSync(commandLogPath, "utf8").trim().split(" ");
+    expect(parts[0]).toBe("UPDATE");
+    expect(Buffer.from(parts[2]!, "base64").toString("utf8"))
+      .toBe(stubAssembly.path);
+    expect(parts[3]).toBe(stubAssembly.sha256);
+    expect(Buffer.from(parts[4]!, "base64").toString("utf8"))
+      .toBe("bounded request");
+    expect(Number(parts[5])).toBeGreaterThan(0);
+    expect(Number(parts[5])).toBeLessThanOrEqual(1_000);
+  });
+
+  it.runIf(process.platform === "win32")(
+    "rejects a staged updater substituted before the broker execution boundary",
+    async () => {
+      await disposeWindowsRuntimeJobExecutableLock();
+      const assembly = realWindowsRuntimeJobAssembly();
+      const helperPath = join(stubDirectory, "substituted-update-supervisor.exe");
+      const expectedBytes = readFileSync(assembly.path);
+      const expectedDigest = createHash("sha256").update(expectedBytes).digest("hex");
+      writeFileSync(helperPath, expectedBytes);
+      writeFileSync(helperPath, "substituted executable");
+
+      await expect(launchWindowsUpdateSupervisorThroughExecutableLock({
+        assembly,
+        helperPath,
+        helperDigest: expectedDigest,
+        request: "bounded request",
+        timeoutMs: 5_000,
+      })).rejects.toMatchObject({ cleanupConfirmed: true });
+    },
+    15_000,
+  );
 
   it("fails closed on malformed broker output", async () => {
     await disposeWindowsRuntimeJobExecutableLock();

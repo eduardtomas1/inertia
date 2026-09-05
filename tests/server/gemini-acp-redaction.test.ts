@@ -1,3 +1,4 @@
+// @inertia-test-suite portable
 import { spawnSync } from "node:child_process";
 import {
   mkdirSync,

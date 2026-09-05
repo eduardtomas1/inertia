@@ -1,5 +1,4 @@
 import {
-  continuationIdentityForSelection,
   providerIdForHarness,
   type HarnessBackendCompatibility,
   type KnownHarnessId,
@@ -9,6 +8,7 @@ import {
   providerNativeHarnessId,
   providerNativeModelSelection,
   resolveHarnessBackendCompatibility,
+  versionedContinuationIdentityForSelection,
 } from "../../src/shared/model-routing";
 import type {
   ProviderAccessMode,
@@ -17,6 +17,8 @@ import type {
   ProviderRunInput,
 } from "../../src/server/provider/contracts";
 import type { ProviderSkillInput } from "../../src/shared/contracts";
+
+const TEST_PROVIDER_COMPATIBILITY_TOKEN = "a".repeat(64);
 
 interface NativeProviderRunInput {
   providerId: ProviderId;
@@ -74,10 +76,11 @@ export function nativeProviderRunFields(
     backendProfile,
     backendCompatibility,
     modelSelection,
-    continuationIdentity: continuationIdentityForSelection(
+    continuationIdentity: versionedContinuationIdentityForSelection(
       modelSelection,
       backendProfile.endpointIdentity,
       !backendCompatibility.allowsModelSwitchWithinSession,
+      TEST_PROVIDER_COMPATIBILITY_TOKEN,
     ),
     model: modelId === "provider-default" ? undefined : modelId,
     reasoningEffort: reasoningEffort || undefined,
@@ -89,7 +92,7 @@ export function resolveNativeModelRoute(selection: ModelSelection): {
   harnessId: KnownHarnessId;
   backendProfile: ModelBackendProfile;
   compatibility: HarnessBackendCompatibility;
-  continuationIdentity: ReturnType<typeof continuationIdentityForSelection>;
+  continuationIdentity: ReturnType<typeof versionedContinuationIdentityForSelection>;
 } {
   const providerId = providerIdForHarness(selection.harnessId);
   if (!providerId) throw new Error(`Unknown test harness '${selection.harnessId}'.`);
@@ -101,10 +104,11 @@ export function resolveNativeModelRoute(selection: ModelSelection): {
     harnessId,
     backendProfile,
     compatibility,
-    continuationIdentity: continuationIdentityForSelection(
+    continuationIdentity: versionedContinuationIdentityForSelection(
       selection,
       backendProfile.endpointIdentity,
       !compatibility.allowsModelSwitchWithinSession,
+      TEST_PROVIDER_COMPATIBILITY_TOKEN,
     ),
   };
 }
@@ -120,5 +124,9 @@ export function nativeProviderRunInput(
       input.harnessId,
     ),
     ...input,
+    // Explicit test-only allocation for direct harness consumers. Production
+    // callers must allocate and persist their own authoritative identities.
+    runId: input.runId ?? `run-${input.conversationId}`,
+    turnId: input.turnId ?? `turn-${input.conversationId}`,
   };
 }

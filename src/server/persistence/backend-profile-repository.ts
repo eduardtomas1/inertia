@@ -7,8 +7,11 @@ import {
   type PersistedModelBackendProfile,
 } from "../../shared/backend-profile-settings";
 import {
+  MAX_BACKEND_PROBE_RESULTS_PER_PROFILE,
+  backendCompatibilityProbeResultCollectionSchema,
   backendCompatibilityProbeResultSchema,
   type BackendCompatibilityProbeResult,
+  type BackendProbeAdmissionHighWater,
 } from "../../shared/backend-probe";
 import { modelSelectionSchema } from "../../shared/model-routing";
 import { modelBackendProfileFromRow } from "./backend-profile-codecs";
@@ -19,8 +22,11 @@ import type {
   ModelBackendProfileRow,
 } from "./rows";
 import type { StoredModelBackendProfile } from "./types";
+import { backendEndpointIdentityMatches } from "../../shared/backend-endpoint-identity";
 
 type BackendProfilePersistenceContext = Pick<PersistenceContext, "database" | "requireProject">;
+
+const MAX_PROBE_RESULT_JSON_BYTES = 262_144;
 
 export class BackendProfileRepository {
   constructor(private readonly context: BackendProfilePersistenceContext) {}
@@ -42,6 +48,14 @@ export class BackendProfileRepository {
 
   saveProfile(profileInput: PersistedModelBackendProfile): StoredModelBackendProfile {
     const parsed = persistedModelBackendProfileSchema.parse(profileInput);
+    if (
+      parsed.source === "custom"
+      && !backendEndpointIdentityMatches(parsed.baseUrl, parsed.endpointIdentity)
+    ) {
+      throw new Error(
+        "The custom backend endpoint does not match its immutable identity.",
+      );
+    }
     const existing = this.context.database.prepare(`
       SELECT * FROM model_backend_profiles WHERE profile_id = ?
     `).get(parsed.id) as ModelBackendProfileRow | undefined;
@@ -137,27 +151,78 @@ export class BackendProfileRepository {
     profileId: string,
     resultInput: BackendCompatibilityProbeResult,
   ): StoredModelBackendProfile {
-    const stored = this.profile(profileId);
     const result = backendCompatibilityProbeResultSchema.parse(resultInput);
-    if (
-      result.profileId !== stored.profile.id
-      || result.backendConfigurationRevision
-        !== stored.profile.configurationRevision
-      || result.endpointIdentity !== stored.profile.endpointIdentity
-      || result.protocol !== stored.profile.protocol
-    ) {
-      throw new Error("The backend probe result does not match this profile revision.");
+    const authority = result.authority;
+    if (!authority) {
+      throw new Error("Backend probe evidence lacks exact admission authority.");
     }
-    const resultJson = JSON.stringify(result);
-    if (Buffer.byteLength(resultJson, "utf8") > 262_144) {
-      throw new Error("The backend probe result is too large.");
-    }
-    this.context.database.prepare(`
-      UPDATE model_backend_profiles
-      SET latest_probe_json = ?
-      WHERE profile_id = ?
-    `).run(resultJson, profileId);
-    return this.profile(profileId);
+    const persistIfNewest = this.context.database.transaction(() => {
+      const stored = this.profile(profileId);
+      if (
+        result.profileId !== stored.profile.id
+        || result.backendConfigurationRevision
+          !== stored.profile.configurationRevision
+        || result.endpointIdentity !== stored.profile.endpointIdentity
+        || result.protocol !== stored.profile.protocol
+      ) {
+        throw new Error("The backend probe result does not match this profile revision.");
+      }
+      if (!stored.profile.models.some(({ id }) => id === result.modelId)) {
+        throw new Error("The backend probe result model is not configured on this profile.");
+      }
+
+      // The controller allocates this sequence synchronously at admission,
+      // before probe I/O. BEGIN IMMEDIATE makes the exact-model compare/write
+      // one serialized durable transition without trusting wall-clock order.
+      const previousAdmissionSequence = stored.probeAdmissionHighWater.find(
+        (entry) => entry.modelId === result.modelId,
+      )?.admissionSequence ?? 0;
+      if (previousAdmissionSequence >= authority.admissionSequence) {
+        return stored;
+      }
+
+      const admissionHighWater = [
+        { modelId: result.modelId, admissionSequence: authority.admissionSequence },
+        ...stored.probeAdmissionHighWater.filter(
+          ({ modelId }) => modelId !== result.modelId,
+        ),
+      ].sort((left, right) => left.modelId.localeCompare(right.modelId));
+      const results = [
+        result,
+        ...stored.probeResults.filter(({ modelId }) => modelId !== result.modelId),
+      ].sort(compareProbeRecency);
+      trimProbeResults(results, result.modelId);
+      let resultJson = serializeProbeResults(results, admissionHighWater);
+      while (
+        Buffer.byteLength(resultJson, "utf8") > MAX_PROBE_RESULT_JSON_BYTES
+        && removeOldestOtherModel(results, result.modelId)
+      ) {
+        resultJson = serializeProbeResults(results, admissionHighWater);
+      }
+      if (Buffer.byteLength(resultJson, "utf8") > MAX_PROBE_RESULT_JSON_BYTES) {
+        throw new Error("The backend probe result is too large.");
+      }
+
+      const update = this.context.database.prepare(`
+        UPDATE model_backend_profiles
+        SET latest_probe_json = ?
+        WHERE profile_id = ?
+          AND configuration_revision = ?
+          AND endpoint_identity IS ?
+          AND protocol = ?
+      `).run(
+        resultJson,
+        profileId,
+        result.backendConfigurationRevision,
+        result.endpointIdentity,
+        result.protocol,
+      );
+      if (update.changes !== 1) {
+        throw new Error("The backend profile changed while recording probe evidence.");
+      }
+      return this.profile(profileId);
+    });
+    return persistIfNewest.immediate();
   }
 
   deleteProfile(profileId: string): void {
@@ -256,4 +321,44 @@ export class BackendProfileRepository {
       }
     }
   }
+}
+
+function compareProbeRecency(
+  left: BackendCompatibilityProbeResult,
+  right: BackendCompatibilityProbeResult,
+): number {
+  const timeDifference = Date.parse(right.checkedAt) - Date.parse(left.checkedAt);
+  return timeDifference || left.modelId.localeCompare(right.modelId);
+}
+
+function trimProbeResults(
+  results: BackendCompatibilityProbeResult[],
+  preservedModelId: string,
+): void {
+  while (results.length > MAX_BACKEND_PROBE_RESULTS_PER_PROFILE) {
+    if (!removeOldestOtherModel(results, preservedModelId)) break;
+  }
+}
+
+function removeOldestOtherModel(
+  results: BackendCompatibilityProbeResult[],
+  preservedModelId: string,
+): boolean {
+  for (let index = results.length - 1; index >= 0; index -= 1) {
+    if (results[index]!.modelId === preservedModelId) continue;
+    results.splice(index, 1);
+    return true;
+  }
+  return false;
+}
+
+function serializeProbeResults(
+  results: readonly BackendCompatibilityProbeResult[],
+  admissionHighWater: readonly BackendProbeAdmissionHighWater[],
+): string {
+  return JSON.stringify(backendCompatibilityProbeResultCollectionSchema.parse({
+    schemaVersion: 1,
+    results,
+    admissionHighWater,
+  }));
 }

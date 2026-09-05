@@ -13,8 +13,14 @@ export interface DetachedChatRuntimePolicyResources {
   snapshot(): AppSnapshot;
   detail(conversationId: string): ConversationDetail | null;
   checkpointConversationId(checkpointId: string): string | null;
-  pendingApproval(requestId: string): AgentApprovalRequest | null;
-  pendingInput(requestId: string): AgentInputRequest | null;
+  pendingApproval(
+    conversationId: string,
+    requestId: string,
+  ): AgentApprovalRequest | null;
+  pendingInput(
+    conversationId: string,
+    requestId: string,
+  ): AgentInputRequest | null;
 }
 
 function exactConversation(
@@ -99,14 +105,20 @@ export function detachedChatCommandRejection(
         : REJECTION;
     }
     case "agent.approval.respond": {
-      const pending = resources.pendingApproval(command.payload.requestId);
+      const pending = resources.pendingApproval(
+        command.payload.conversationId,
+        command.payload.requestId,
+      );
       return ownsExistingConversation(command.payload.conversationId)
         && pending?.conversationId === authority.conversationId
         ? null
         : REJECTION;
     }
     case "agent.input.respond": {
-      const pending = resources.pendingInput(command.payload.requestId);
+      const pending = resources.pendingInput(
+        command.payload.conversationId,
+        command.payload.requestId,
+      );
       return ownsExistingConversation(command.payload.conversationId)
         && pending?.conversationId === authority.conversationId
         && !pending.conversationContextRequest

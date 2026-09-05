@@ -26,6 +26,11 @@ import type {
   ProviderRunInput,
   ProviderRunResult,
 } from "../../providers";
+import {
+  hasConsistentProviderTerminalOutcome,
+  hasExactProviderRunIdentity,
+  providerRunIdentity,
+} from "../../provider/contracts";
 import { assembleTurnRequest } from "../turns/request-context";
 
 export const DEFAULT_ISOLATED_RUN_TIMEOUT_MS = 120_000;
@@ -116,6 +121,10 @@ export interface IsolatedRunProviderRuntime {
   harnessIdFor(input: ProviderRunInput): string;
   run(input: ProviderRunInput, callbacks: ProviderRunCallbacks): Promise<ProviderRunResult>;
   isRunning(conversationId: string): boolean;
+  ownsRun(
+    conversationId: string,
+    identity: { runId: string; turnId: string },
+  ): boolean;
   stopOwned(
     conversationId: string,
     identity: { runId: string; turnId: string },
@@ -466,6 +475,25 @@ export class IsolatedRunController<Owner extends object> {
         active.providerPromise = providerPromise;
         active.providerStarted = true;
       } catch {
+        // Provider admission and harness startup can happen synchronously
+        // before run() returns its terminal promise. If that boundary throws,
+        // consult the exact provider owner tuple rather than assuming that no
+        // process was started. A different conversation-level owner or an
+        // uncertain query fails closed: stopOwned must prove exact cleanup or
+        // this isolated owner remains retained.
+        try {
+          active.providerStarted = this.providers.ownsRun(
+            active.providerConversationId,
+            { runId: active.runId, turnId: active.turnId },
+          );
+          if (!active.providerStarted) {
+            active.providerStarted = this.providers.isRunning(
+              active.providerConversationId,
+            );
+          }
+        } catch {
+          active.providerStarted = true;
+        }
         throw new IsolatedRunError("provider-failed");
       }
       if (active.stopOutcome) void this.stopProvider(active);
@@ -480,6 +508,26 @@ export class IsolatedRunController<Owner extends object> {
       ]);
       if (first.kind === "stopped") throw new IsolatedRunError(first.outcome.reason, first.outcome.message);
       if (first.kind === "provider-error") throw new IsolatedRunError("provider-failed");
+      if (
+        !hasExactProviderRunIdentity(
+          first.result,
+          providerRunIdentity(providerInput),
+        )
+        || !hasConsistentProviderTerminalOutcome(first.result)
+      ) {
+        throw new IsolatedRunError(
+          "provider-failed",
+          "The provider returned a terminal result for a different run owner.",
+        );
+      }
+      if (first.result.cleanupConfirmed) {
+        // An exact terminal result carrying cleanup confirmation is the
+        // provider manager's receipt for this isolated owner. Remember it
+        // before applying status/output/result policy: those later checks may
+        // reject otherwise-valid output, but must not try to stop a process
+        // whose cleanup has already been confirmed.
+        active.providerStarted = false;
+      }
       if (first.result.status === "cancelled") throw new IsolatedRunError("provider-cancelled");
       if (first.result.status !== "completed") throw new IsolatedRunError("provider-failed");
       if (first.result.cleanupConfirmed !== true) {
@@ -666,12 +714,7 @@ export class IsolatedRunController<Owner extends object> {
       if (reason !== "completed" && active.providerStarted) {
         const providerStop = await this.stopProvider(active)
           .catch(() => "force-detached" as const);
-        if (
-          providerStop !== "settled"
-          && !(providerStop === "missing" && !this.providers.isRunning(
-            active.providerConversationId,
-          ))
-        ) {
+        if (providerStop !== "settled") {
           active.providerStopPromise = null;
           return;
         }

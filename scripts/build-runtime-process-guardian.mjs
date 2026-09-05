@@ -125,6 +125,7 @@ async function buildWindowsGuardian(runCompiler, runBootstrapLeaf) {
     "/main:InertiaRuntimeJob",
     `/out:${output}`,
     "/reference:System.dll",
+    "/reference:System.Core.dll",
     sourcePath,
   ];
   const environment = {

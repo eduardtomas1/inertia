@@ -403,7 +403,7 @@ export function linuxGuardianTerminalAuthority(
 export function signalLinuxGuardianExact(
   expected: LinuxProcessIdentity,
   guardianPath: string,
-  action: "claim" | "exec" | "release" | "kill" | "stop",
+  action: "claim" | "detach" | "exec" | "release" | "kill" | "stop",
 ): boolean {
   if (!isAbsolute(guardianPath)
     || !expected.guardianExecutableDevice
@@ -463,7 +463,7 @@ export function recoverLinuxGuardianTerminalExact(
 export async function signalLinuxGuardianExactAsync(
   expected: LinuxProcessIdentity,
   guardianPath: string,
-  action: "claim" | "exec" | "release" | "kill" | "stop",
+  action: "claim" | "detach" | "exec" | "release" | "kill" | "stop",
   abortSignal?: AbortSignal,
 ): Promise<boolean> {
   if (!isAbsolute(guardianPath)

@@ -1,9 +1,10 @@
 import type { AgentApprovalDecision } from "../../src/shared/contracts";
-import type {
-  ProviderEvent,
-  ProviderRunCallbacks,
-  ProviderRunInput,
-  ProviderRunResult,
+import {
+  providerRunTerminal,
+  type ProviderEvent,
+  type ProviderRunCallbacks,
+  type ProviderRunInput,
+  type ProviderRunResult,
 } from "../../src/server/provider/contracts";
 import type {
   TurnProviderRuntime,
@@ -42,6 +43,9 @@ export class FakeTurnScheduler implements TurnTimerScheduler {
 }
 
 export class FakeTurnProvider implements TurnProviderRuntime {
+  providerCapabilityAvailable(): boolean {
+    return true;
+  }
   callbacks: ProviderRunCallbacks | null = null;
   input: ProviderRunInput | null = null;
   cancelCount = 0;
@@ -54,11 +58,11 @@ export class FakeTurnProvider implements TurnProviderRuntime {
   readonly stoppedSubagentIds: string[] = [];
   readonly stopOwnedCalls: Array<{
     conversationId: string;
-    identity: { runId: string; turnId: string | null };
+    identity: { runId: string; turnId: string };
   }> = [];
   runCount = 0;
   private runningConversationId: string | null = null;
-  private stopOwnedGate: Promise<"force-detached"> | null = null;
+  private stopOwnedGate: Promise<"settled" | "force-detached"> | null = null;
   private resolveStopOwnedGate: (() => void) | null = null;
   private resolveResult: ((result: ProviderRunResult) => void) | null = null;
   private rejectResult: ((error: unknown) => void) | null = null;
@@ -71,7 +75,7 @@ export class FakeTurnProvider implements TurnProviderRuntime {
 
   run(input: ProviderRunInput, callbacks: ProviderRunCallbacks): Promise<ProviderRunResult> {
     this.runCount += 1;
-    this.runningConversationId = input.conversationId ?? input.threadId;
+    this.runningConversationId = input.conversationId;
     this.input = input;
     this.callbacks = callbacks;
     callbacks.onStarted?.();
@@ -88,10 +92,9 @@ export class FakeTurnProvider implements TurnProviderRuntime {
   resolve(result: Partial<ProviderRunResult> = {}): void {
     if (!this.input) throw new Error("Provider has not started.");
     this.runningConversationId = null;
+    const status = result.status ?? "completed";
     this.resolveResult?.({
-      providerId: this.input.providerId,
-      conversationId: this.input.conversationId ?? this.input.threadId,
-      status: "completed",
+      ...providerRunTerminal(this.input, status, result.failure),
       text: "",
       textTruncated: false,
       exitCode: 0,
@@ -102,7 +105,9 @@ export class FakeTurnProvider implements TurnProviderRuntime {
   }
 
   reject(error: unknown): void {
-    this.runningConversationId = null;
+    // A rejected provider promise is not process cleanup proof. Keep the
+    // exact owner live until TurnController joins stopOwned() and receives its
+    // explicit cleanup result, matching production ProviderManager semantics.
     this.rejectResult?.(error);
   }
 
@@ -113,17 +118,21 @@ export class FakeTurnProvider implements TurnProviderRuntime {
 
   stopOwned(
     conversationId: string,
-    identity: { runId: string; turnId: string | null },
-  ): Promise<"settled" | "force-detached"> {
+    identity: { runId: string; turnId: string },
+  ): Promise<
+    "missing" | "identity-mismatch" | "settled" | "force-detached"
+  > {
     this.stopOwnedCalls.push({ conversationId, identity });
     if (this.stopOwnedGate) return this.stopOwnedGate;
     this.runningConversationId = null;
     return Promise.resolve("settled");
   }
 
-  deferOwnedStop(): void {
-    this.stopOwnedGate = new Promise<"force-detached">((resolve) => {
-      this.resolveStopOwnedGate = () => resolve("force-detached");
+  deferOwnedStop(
+    result: "settled" | "force-detached" = "force-detached",
+  ): void {
+    this.stopOwnedGate = new Promise((resolve) => {
+      this.resolveStopOwnedGate = () => resolve(result);
     });
   }
 
@@ -137,15 +146,30 @@ export class FakeTurnProvider implements TurnProviderRuntime {
     return this.runningConversationId === conversationId;
   }
 
+  ownsRun(
+    conversationId: string,
+    identity: { runId: string; turnId: string },
+  ): boolean {
+    return this.runningConversationId === conversationId
+      && this.input?.runId === identity.runId
+      && this.input.turnId === identity.turnId;
+  }
+
   respondToApproval(
     _conversationId: string,
     _requestId: string,
     _decision: AgentApprovalDecision,
+    _identity: { runId: string; turnId: string },
   ): boolean {
     return this.approvalSupported;
   }
 
-  respondToInput(): boolean {
+  respondToInput(
+    _conversationId: string,
+    _requestId: string,
+    _answers: Record<string, string[]>,
+    _identity: { runId: string; turnId: string },
+  ): boolean {
     return this.inputSupported;
   }
 

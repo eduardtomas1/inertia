@@ -14,6 +14,8 @@ import {
   type ProcessTreeTerminator,
 } from "../process-lifecycle";
 import { providerProcessInvocation } from "../provider/process";
+import type { ProviderInstallationUseTransfer } from
+  "../provider/contracts";
 import {
   JsonLineDecoder,
   objectValue,
@@ -53,6 +55,7 @@ export interface CodexControlClientOptions {
   spawnProcess?: typeof spawn;
   signal?: AbortSignal;
   onNotification?: (method: string, params: JsonObject) => void;
+  installationUse?: ProviderInstallationUseTransfer;
 }
 
 function boundedErrorMessage(value: unknown): string | undefined {
@@ -87,19 +90,29 @@ export async function withCodexControlClient<T>(
     invocation.command,
     invocation.args,
   );
-  const child: ChildProcessWithoutNullStreams = spawnRuntimeOwnedProcess(() => spawnProcess(
-    ownedInvocation.command,
-    ownedInvocation.args,
-    {
-      cwd: options.cwd,
-      env: options.environment,
-      detached: process.platform !== "win32",
-      shell: false,
-      windowsVerbatimArguments: invocation.windowsVerbatimArguments,
-      windowsHide: true,
-      stdio: ["pipe", "pipe", "pipe"],
-    },
-  ));
+  const installationUse = options.installationUse?.accept();
+  if (options.installationUse && !installationUse) {
+    throw new Error("Codex control installation authority was already consumed.");
+  }
+  let child: ChildProcessWithoutNullStreams;
+  try {
+    child = spawnRuntimeOwnedProcess(() => spawnProcess(
+      ownedInvocation.command,
+      ownedInvocation.args,
+      {
+        cwd: options.cwd,
+        env: options.environment,
+        detached: process.platform !== "win32",
+        shell: false,
+        windowsVerbatimArguments: invocation.windowsVerbatimArguments,
+        windowsHide: true,
+        stdio: ["pipe", "pipe", "pipe"],
+      },
+    ));
+  } catch (error) {
+    installationUse?.quarantine("codex-control-spawn-outcome-uncertain");
+    throw error;
+  }
   const pending = new Map<number, PendingRequest>();
   let nextId = 1;
   let closed = false;
@@ -329,6 +342,7 @@ export async function withCodexControlClient<T>(
   try {
     await close();
   } catch (cleanupError) {
+    installationUse?.quarantine("codex-control-cleanup-unconfirmed");
     if (
       !operationFailed
       || !isProcessTreeTerminationUnconfirmed(cleanupError)
@@ -344,6 +358,12 @@ export async function withCodexControlClient<T>(
           "Codex control operation and cleanup both failed.",
         ),
       },
+    );
+  }
+  if (!installationUse?.release({ cleanupConfirmed: true })
+    && options.installationUse) {
+    throw new ProcessTreeTerminationError(
+      options.processLabel ?? "Codex control process tree",
     );
   }
   if (operationFailed) throw operationError;

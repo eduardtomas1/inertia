@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { backendEndpointIdentity } from "../../src/shared/backend-endpoint-identity";
 import {
   modelSelectionForBackendProfile,
   persistedModelBackendProfileSchema,
@@ -21,6 +22,7 @@ import {
   BackendProfileController,
   type BackendCredentialBroker,
 } from "../../src/server/runtime/backends/backend-profile-controller";
+import { backendProbeTestAuthority } from "../helpers/backend-probe-authority";
 
 const temporaryDirectories: string[] = [];
 
@@ -82,7 +84,7 @@ function persistedCredentialProfile(): PersistedModelBackendProfile {
     source: "custom",
     enabled: true,
     configurationRevision: 7,
-    endpointIdentity: "endpoint:credential-test",
+    endpointIdentity: backendEndpointIdentity("https://credential.example.test/v1"),
     preset: "custom",
     baseUrl: "https://credential.example.test/v1",
     allowInsecureLocalhost: false,
@@ -181,6 +183,7 @@ function compatibleProbe(
     },
     failure: null,
     checkedAt,
+    authority: backendProbeTestAuthority(checkedAt),
   };
 }
 
@@ -192,6 +195,80 @@ afterEach(async () => {
 });
 
 describe("model backend profile controller", () => {
+  it("defers startup credential reconciliation until maintenance is recovered", async () => {
+    const runtimeStore = await store();
+    const profile = runtimeStore.saveModelBackendProfile(
+      persistedCredentialProfile(),
+    ).profile;
+    const status = vi.fn(async () => ({
+      hasSecret: true,
+      credentialGeneration: "generation:new",
+    }));
+    const controller = BackendProfileController.open({
+      store: runtimeStore,
+      credentials: {
+        resolve: async () => "credential-value",
+        status,
+        forget: async () => true,
+      },
+    });
+
+    expect(status).not.toHaveBeenCalled();
+    controller.attachProviderMutationGuard(() => true);
+    await expect(controller.initialize()).rejects.toThrow(
+      "cannot change while maintenance owns it",
+    );
+    expect(status).not.toHaveBeenCalled();
+    expect(runtimeStore.modelBackendProfile(profile.id).profile).toMatchObject({
+      credentialGeneration: "generation:old",
+      configurationRevision: 7,
+      enabled: true,
+    });
+    runtimeStore.close();
+  });
+
+  it("revalidates the provider maintenance guard after credential I/O", async () => {
+    const runtimeStore = await store();
+    let releaseStatus!: (status: {
+      hasSecret: boolean;
+      credentialGeneration: string;
+    }) => void;
+    const credentials: BackendCredentialBroker = {
+      resolve: async () => "credential-value",
+      status: async () => await new Promise((resolve) => {
+        releaseStatus = resolve;
+      }),
+      forget: async () => true,
+    };
+    const controller = await BackendProfileController.create({
+      store: runtimeStore,
+      credentials,
+    });
+    let maintenanceBlocked = false;
+    controller.attachProviderMutationGuard((providerId) =>
+      providerId === "claude" && maintenanceBlocked);
+    const profile = await controller.createProfile(draft({
+      authenticationMode: "api-key",
+    }));
+
+    const reconciliation = controller.reconcileCredentialRevision(
+      profile.id,
+      "generation:new",
+    );
+    maintenanceBlocked = true;
+    releaseStatus({
+      hasSecret: true,
+      credentialGeneration: "generation:new",
+    });
+
+    await expect(reconciliation).rejects.toThrow(
+      "cannot change while maintenance owns it",
+    );
+    expect(runtimeStore.modelBackendProfile(profile.id).profile)
+      .toMatchObject({ credentialGeneration: null, configurationRevision: 1 });
+    runtimeStore.close();
+  });
+
   it("publishes and validates the built-in Gemini ACP backend", async () => {
     const runtimeStore = await store();
     const controller = await BackendProfileController.create({ store: runtimeStore });

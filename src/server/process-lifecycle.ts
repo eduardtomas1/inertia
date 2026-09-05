@@ -4,14 +4,21 @@ import {
   type ChildProcess,
 } from "node:child_process";
 import { win32 } from "node:path";
+import { recordWindowsCleanupFailure, windowsCleanupElapsedMs } from "./windows-cleanup-diagnostics";
+import type { WindowsCleanupFailure } from "../shared/lifecycle-diagnostics";
 
 import {
   forceKillPosixProcessTree,
   forceKillPosixProcessTreeWithStatus,
 } from "../node/posix-process-tree";
 import {
+  linuxProcessCanExecute,
+  linuxProcessGroupCanExecute,
+} from "../node/runtime-owned-process-posix";
+import {
   confirmRuntimeOwnedProcessStopped,
   requestRuntimeOwnedGuardianStop,
+  runtimeOwnedProcessStopConfirmation,
 } from "../node/runtime-owned-processes";
 
 const DEFAULT_TERMINATION_WAIT_MS = 2_000;
@@ -32,6 +39,8 @@ export interface AwaitableProcessLifecycleDependencies
   extends Partial<ProcessLifecycleDependencies> {
   spawnProcessSync?: typeof spawnSync;
   waitMs?: number;
+  processCanExecute?: (pid: number) => boolean | null;
+  processGroupCanExecute?: (processGroupId: number) => boolean | null;
 }
 
 export type WaitForProcessExit = (waitMs: number) => Promise<boolean>;
@@ -124,10 +133,27 @@ export function createOwnedProcessTreeTermination(
   return (force) => {
     forceRequested ||= force;
     termination ??= (async () => {
+      const startedAt = performance.now();
+      const confirmOwnership = (): boolean => {
+        try {
+          if (confirmRuntimeOwnedProcessStopped(child)) return true;
+        } catch (error) {
+          if (process.platform === "win32") recordWindowsCleanupFailure({
+            phase: "ownership-retirement", scope: "child", force: forceRequested,
+            elapsedMs: windowsCleanupElapsedMs(startedAt), exitCode: null,
+          });
+          throw error;
+        }
+        if (process.platform === "win32") recordWindowsCleanupFailure({
+          phase: "ownership-retirement", scope: "child", force: forceRequested,
+          elapsedMs: windowsCleanupElapsedMs(startedAt), exitCode: null,
+        });
+        return false;
+      };
       if (!forceRequested) {
         try {
           if (await terminate(child, false)) {
-            if (!confirmRuntimeOwnedProcessStopped(child)) {
+            if (!confirmOwnership()) {
               throw new ProcessTreeTerminationError(subject);
             }
             return;
@@ -137,7 +163,7 @@ export function createOwnedProcessTreeTermination(
         }
       }
       await requireProcessTreeTermination(terminate, child, true, subject);
-      if (!confirmRuntimeOwnedProcessStopped(child)) {
+      if (!confirmOwnership()) {
         throw new ProcessTreeTerminationError(subject);
       }
     })();
@@ -296,13 +322,21 @@ function waitForPosixProcessGroupExit(
   pid: number,
   killProcess: typeof process.kill,
   waitMs: number,
+  processGroupCanExecute:
+    ((processGroupId: number) => boolean | null) | null = null,
 ): Promise<boolean> {
   const deadline = Date.now() + waitMs;
   return new Promise<boolean>((resolve) => {
     const inspect = (): void => {
       try {
         killProcess(-pid, 0);
-      } catch {
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ESRCH") {
+          resolve(true);
+          return;
+        }
+      }
+      if (processGroupCanExecute?.(pid) === false) {
         resolve(true);
         return;
       }
@@ -323,15 +357,21 @@ function waitForPosixProcessesExit(
   pids: readonly number[],
   killProcess: typeof process.kill,
   waitMs: number,
+  processCanExecute: ((pid: number) => boolean | null) | null = null,
 ): Promise<boolean> {
   const remaining = new Set(pids);
   const deadline = Date.now() + waitMs;
   return new Promise<boolean>((resolve) => {
     const inspect = (): void => {
       for (const pid of remaining) {
+        if (processCanExecute?.(pid) === false) {
+          remaining.delete(pid);
+          continue;
+        }
         try {
           killProcess(pid, 0);
-        } catch {
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ESRCH") continue;
           remaining.delete(pid);
         }
       }
@@ -352,13 +392,45 @@ function waitForPosixProcessesExit(
   });
 }
 
+function nativePosixProcessObserver(
+  platform: NodeJS.Platform,
+  dependencies: AwaitableProcessLifecycleDependencies,
+): ((pid: number) => boolean | null) | null {
+  if (dependencies.processCanExecute) return dependencies.processCanExecute;
+  return platform === "linux"
+    && dependencies.platform === undefined
+    && dependencies.killProcess === undefined
+    ? linuxProcessCanExecute
+    : null;
+}
+
+function nativePosixProcessGroupObserver(
+  platform: NodeJS.Platform,
+  dependencies: AwaitableProcessLifecycleDependencies,
+): ((processGroupId: number) => boolean | null) | null {
+  if (dependencies.processGroupCanExecute) {
+    return dependencies.processGroupCanExecute;
+  }
+  return platform === "linux"
+    && dependencies.platform === undefined
+    && dependencies.killProcess === undefined
+    ? linuxProcessGroupCanExecute
+    : null;
+}
+
 function terminateWindowsProcessTree(
   pid: number,
   force: boolean,
   spawnProcess: typeof spawn,
   taskkillExecutable: string,
   waitMs: number,
+  scope: WindowsCleanupFailure["scope"],
 ): Promise<boolean> {
+  const startedAt = performance.now();
+  const record = (phase: WindowsCleanupFailure["phase"], exitCode: number | null = null): void => {
+    recordWindowsCleanupFailure({ phase, scope, force, exitCode,
+      elapsedMs: windowsCleanupElapsedMs(startedAt) });
+  };
   return new Promise<boolean>((resolve) => {
     let taskkill: ReturnType<typeof spawn>;
     try {
@@ -372,6 +444,7 @@ function terminateWindowsProcessTree(
         },
       );
     } catch {
+      record("taskkill-spawn");
       resolve(false);
       return;
     }
@@ -384,9 +457,13 @@ function terminateWindowsProcessTree(
       taskkill.off("close", onClose);
       resolve(terminated);
     };
-    const onError = (): void => finish(false);
-    const onClose = (code: number | null): void => finish(code === 0);
+    const onError = (): void => { record("taskkill-error"); finish(false); };
+    const onClose = (code: number | null): void => {
+      if (code !== 0) record("taskkill-exit", code);
+      finish(code === 0);
+    };
     const timer = setTimeout(() => {
+      record("taskkill-timeout");
       try {
         taskkill.kill("SIGKILL");
       } catch {
@@ -438,6 +515,11 @@ export function createOwnedPidProcessTreeTermination(
     ? inheritedWindowsSystemRoot()
     : dependencies.windowsSystemRoot;
   const waitMs = boundedWaitMs(dependencies.waitMs, platform);
+  const processCanExecute = nativePosixProcessObserver(platform, dependencies);
+  const processGroupCanExecute = nativePosixProcessGroupObserver(
+    platform,
+    dependencies,
+  );
   let started = false;
   let treeTerminationConfirmed = false;
   let snapshotConfirmed = false;
@@ -446,6 +528,7 @@ export function createOwnedPidProcessTreeTermination(
   return async () => {
     if (!Number.isSafeInteger(pid) || pid <= 1) return false;
     const deadlineAt = Date.now() + waitMs;
+    const startedAt = performance.now();
 
     if (platform === "win32") {
       if (!started) {
@@ -456,6 +539,7 @@ export function createOwnedPidProcessTreeTermination(
           spawnProcess,
           windowsSystemExecutable(windowsSystemRoot, "taskkill.exe"),
           waitMs,
+          "pid",
         );
       }
       if (!treeTerminationConfirmed) return false;
@@ -463,13 +547,19 @@ export function createOwnedPidProcessTreeTermination(
         deadlineAt - Date.now() - WINDOWS_RESOURCE_SETTLE_MS,
       );
       if (rootExitWaitMs <= 0 || !await waitForRootExit(rootExitWaitMs)) {
+        recordWindowsCleanupFailure({ phase: "root-close", scope: "pid", force: true,
+          elapsedMs: windowsCleanupElapsedMs(startedAt), exitCode: null });
         return false;
       }
       const settleMs = Math.min(
         WINDOWS_RESOURCE_SETTLE_MS,
         Math.max(0, deadlineAt - Date.now()),
       );
-      if (settleMs <= 0) return false;
+      if (settleMs <= 0) {
+        recordWindowsCleanupFailure({ phase: "resource-settle", scope: "pid", force: true,
+          elapsedMs: windowsCleanupElapsedMs(startedAt), exitCode: null });
+        return false;
+      }
       await new Promise<void>((resolve) => {
         setTimeout(resolve, settleMs);
       });
@@ -494,8 +584,18 @@ export function createOwnedPidProcessTreeTermination(
     const exitWaitMs = Math.trunc(deadlineAt - Date.now());
     if (exitWaitMs <= 0) return false;
     const [groupExited, descendantsExited, rootExited] = await Promise.all([
-      waitForPosixProcessGroupExit(pid, killProcess, exitWaitMs),
-      waitForPosixProcessesExit(descendants, killProcess, exitWaitMs),
+      waitForPosixProcessGroupExit(
+        pid,
+        killProcess,
+        exitWaitMs,
+        processGroupCanExecute,
+      ),
+      waitForPosixProcessesExit(
+        descendants,
+        killProcess,
+        exitWaitMs,
+        processCanExecute,
+      ),
       waitForRootExit(exitWaitMs),
     ]);
     return groupExited && descendantsExited && rootExited;
@@ -524,28 +624,38 @@ export async function terminateProcessTreeAndWait(
     ? inheritedWindowsSystemRoot()
     : dependencies.windowsSystemRoot;
   const waitMs = boundedWaitMs(dependencies.waitMs, platform);
+  const processCanExecute = nativePosixProcessObserver(platform, dependencies);
+  const processGroupCanExecute = nativePosixProcessGroupObserver(
+    platform,
+    dependencies,
+  );
 
   if (platform === "win32") {
     // Never target a reused Windows PID after Node has already observed the
     // complete owned child close.
     if (directChildResourcesAreClosed(child)) return true;
     const waitForObservedDirectChildClose = observeDirectChildClose(child);
+    const startedAt = performance.now();
     const treeTerminated = await terminateWindowsProcessTree(
       pid,
       force,
       spawnProcess,
       windowsSystemExecutable(windowsSystemRoot, "taskkill.exe"),
       waitMs,
+      "child",
     );
     if (treeTerminated) {
       // taskkill confirms that it issued termination for the owned tree, but
       // Windows can keep the direct child's executable image locked until the
       // ChildProcess has emitted close. Do not let callers release temporary
       // executables or other owned resources before that handle is closed.
-      return await confirmWindowsChildResourcesClosed(
+      const closed = await confirmWindowsChildResourcesClosed(
         waitForObservedDirectChildClose,
         waitMs,
       );
+      if (!closed) recordWindowsCleanupFailure({ phase: "root-close", scope: "child", force,
+        elapsedMs: windowsCleanupElapsedMs(startedAt), exitCode: null });
+      return closed;
     }
     killDirectChild(child, force);
     // Direct-child fallback cannot prove that taskkill's unobserved
@@ -563,12 +673,20 @@ export async function terminateProcessTreeAndWait(
   // descendants therefore start their memoized owned termination before
   // closing/reaping the provider and await that original attempt afterward.
   if (directChildResourcesAreClosed(child)) {
+    const ownedStopConfirmation = runtimeOwnedProcessStopConfirmation(child);
+    if (ownedStopConfirmation !== null) {
+      // A released runtime-owned claim is an exact, durable cleanup receipt.
+      // Conversely, map presence without release must stay fail-closed; never
+      // reinterpret the now-reapable numeric PGID as ownership evidence.
+      return ownedStopConfirmation;
+    }
     // A no-signal existence probe can still prove that the owned group is
-    // already gone. Never signal a group after this point: an extant numeric
-    // PGID may have been recycled and therefore remains unconfirmed.
+    // already gone for an untracked child. Never signal a group after this
+    // point: an extant numeric PGID may have been recycled.
     try {
       killProcess(-pid, 0);
-      return false;
+      const canExecute = processGroupCanExecute?.(pid);
+      return canExecute === false;
     } catch (error) {
       // `ESRCH` is the only proof that the group no longer exists. `EPERM`
       // still means an extant group, and unexpected probe failures must remain
@@ -605,8 +723,18 @@ export async function terminateProcessTreeAndWait(
       rootProcessGroup: true,
     });
     const [groupExited, descendantsExited, childClosed] = await Promise.all([
-      waitForPosixProcessGroupExit(pid, killProcess, waitMs),
-      waitForPosixProcessesExit(descendants, killProcess, waitMs),
+      waitForPosixProcessGroupExit(
+        pid,
+        killProcess,
+        waitMs,
+        processGroupCanExecute,
+      ),
+      waitForPosixProcessesExit(
+        descendants,
+        killProcess,
+        waitMs,
+        processCanExecute,
+      ),
       waitForObservedDirectChildClose(waitMs),
     ]);
     return groupExited && descendantsExited && childClosed;
@@ -614,12 +742,20 @@ export async function terminateProcessTreeAndWait(
   try {
     killProcess(-pid, "SIGTERM");
     const [groupExited, childClosed] = await Promise.all([
-      waitForPosixProcessGroupExit(pid, killProcess, waitMs),
+      waitForPosixProcessGroupExit(
+        pid,
+        killProcess,
+        waitMs,
+        processGroupCanExecute,
+      ),
       waitForObservedDirectChildClose(waitMs),
     ]);
     return groupExited && childClosed;
-  } catch {
+  } catch (error) {
     killDirectChild(child, false);
-    return await waitForObservedDirectChildClose(waitMs);
+    const groupAbsent = (error as NodeJS.ErrnoException).code === "ESRCH"
+      || processGroupCanExecute?.(pid) === false;
+    const childClosed = await waitForObservedDirectChildClose(waitMs);
+    return groupAbsent && childClosed;
   }
 }

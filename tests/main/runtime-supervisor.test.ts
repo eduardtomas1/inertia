@@ -1,3 +1,4 @@
+// @inertia-test-suite portable
 import { EventEmitter } from "node:events";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -1259,7 +1260,7 @@ describe("RuntimeSupervisor", () => {
 
     children[0].message({
       type: "runtime.startup-failed",
-      message: "The database is locked.",
+      message: "The local runtime could not start.",
     });
     await vi.advanceTimersByTimeAsync(0);
 
@@ -1570,7 +1571,7 @@ describe("RuntimeSupervisor", () => {
       request,
       crypto.randomUUID(),
       commitPosted,
-    )).rejects.toThrow("local service is starting");
+    )).rejects.toThrow("local service is stopping");
     expect(commitPosted).not.toHaveBeenCalled();
     expect(children[0].messages).toHaveLength(messagesBeforeCommit);
 
@@ -1615,9 +1616,9 @@ describe("RuntimeSupervisor", () => {
     const { children, supervisor } = createHarness();
     supervisor.start();
     children[0].spawn();
-    children[0].message({ type: "runtime.startup-failed", message: "The database is locked." });
+    children[0].message({ type: "runtime.startup-failed", message: "The local runtime could not start." });
 
-    expect(() => supervisor.connection()).toThrow("The database is locked");
+    expect(() => supervisor.connection()).toThrow("The local service is starting. Try again in a moment.");
     await vi.advanceTimersByTimeAsync(10_000);
     expect(children).toHaveLength(1);
 
@@ -1638,7 +1639,7 @@ describe("RuntimeSupervisor", () => {
     children[0].spawn();
     children[0].message({
       type: "runtime.startup-failed",
-      message: "Startup cleanup is stalled.",
+      message: "The local runtime could not start.",
     });
 
     await vi.advanceTimersByTimeAsync(99);
@@ -1758,7 +1759,7 @@ describe("RuntimeSupervisor", () => {
     expect(runner).toHaveBeenCalledOnce();
 
     children[0].exit(9);
-    expect(() => supervisor.connection()).toThrow("local service is starting");
+    expect(() => supervisor.connection()).toThrow("local service is restarting");
     expect(supervisor.snapshot()).toMatchObject({
       phase: "restarting",
       websocketUrl: null,
@@ -1954,13 +1955,13 @@ describe("RuntimeSupervisor", () => {
     children[0].message({ type: "runtime.ready", websocketUrl: firstUrl });
 
     const recycled = supervisor.testOnlyRecycle();
-    const rejected = expect(recycled).rejects.toThrow("Replacement failed");
+    const rejected = expect(recycled).rejects.toThrow("The local runtime could not start");
     children[0].message({ type: "runtime.stopped" });
     children[0].exit(0);
     children[1].spawn();
     children[1].message({
       type: "runtime.startup-failed",
-      message: "Replacement failed",
+      message: "The local runtime could not start.",
     });
     await rejected;
     children[1].exit(1);
@@ -2296,7 +2297,7 @@ describe("RuntimeSupervisor", () => {
     expect(children[0].killCalls).toBe(0);
     expect(forceKill).toHaveBeenCalledWith(10_000, expect.any(Number));
     expect(children).toHaveLength(1);
-    expect(() => supervisor.connection()).toThrow("did not become ready");
+    expect(() => supervisor.connection()).toThrow("The local service is starting. Try again in a moment.");
     children[0].exit(1);
     vi.advanceTimersByTime(500);
     expect(children).toHaveLength(2);

@@ -71,7 +71,7 @@ describe("Claude media follow-up queue", () => {
         );
       },
     });
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { claude: process.execPath } },
       new AgentHarnessRegistry([harness]),
     );

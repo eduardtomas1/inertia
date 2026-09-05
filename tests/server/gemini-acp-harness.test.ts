@@ -1,3 +1,5 @@
+// @inertia-test-suite portable
+// @inertia-harness gemini-acp
 import { spawnSync } from "node:child_process";
 import {
   existsSync,
@@ -76,7 +78,7 @@ function managerFor(
   command: string,
   harness = testGeminiHarness(),
 ): ProviderManager {
-  return new ProviderManager(
+  return ProviderManager.createForTests(
     { commands: { gemini: command } },
     new AgentHarnessRegistry([harness]),
   );
@@ -402,6 +404,39 @@ describe.sequential("Gemini ACP harness", () => {
       .toBe(sessionIds.length);
   });
 
+  it("fails before spawn when exact-route native-tool authority is unavailable", async () => {
+    const root = portableFixtureRoot("gemini native tools unavailable");
+    roots.push(root);
+    const input = geminiInput(root, {
+      conversationId: "gemini-no-native-tools",
+      runId: "run-gemini-no-native-tools",
+      turnId: "turn-gemini-no-native-tools",
+    });
+    const events: Array<{ type: string }> = [];
+    const run = testGeminiHarness().start({
+      input,
+      executable: join(root, "must-not-spawn"),
+      environment: {},
+      providerNativeToolsAvailable: false,
+      callbacks: { onEvent: (event) => events.push(event) },
+    });
+
+    await expect(run.result).resolves.toMatchObject({
+      providerId: "gemini",
+      conversationId: "gemini-no-native-tools",
+      runId: "run-gemini-no-native-tools",
+      turnId: "turn-gemini-no-native-tools",
+      status: "failed",
+      terminalReason: { outcome: "failed", reason: "provider-error" },
+      failure: {
+        phase: "configuration",
+        terminalEvent: "provider-native-tools:unavailable",
+      },
+      cleanupConfirmed: true,
+    });
+    expect(events).toEqual([expect.objectContaining({ type: "status" })]);
+  });
+
   it("maps the official ACP surface without mutating auth or bypassing permissions", async () => {
     const root = portableFixtureRoot("gemini ACP rich mapping");
     roots.push(root);
@@ -497,7 +532,15 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     });
 
     expect(result).toMatchObject({
+      providerId: "gemini",
+      conversationId: "gemini-rich",
+      runId: "run-rich",
+      turnId: "turn-rich",
       status: "completed",
+      terminalReason: {
+        outcome: "completed",
+        reason: "provider-completed",
+      },
       text: "Gemini response",
       cleanupConfirmed: true,
     });
@@ -788,7 +831,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
 `);
     const apiKey = "gemini-api-key-for-redaction-test";
     const customCredential = "custom-header-token-for-redaction-test";
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       {
         commands: { gemini: command },
         resolveBackendLaunchOptions: (_input, environment) => ({
@@ -822,6 +865,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
           event.conversationId,
           event.request.requestId,
           "deny",
+          { runId: event.runId, turnId: event.turnId },
         );
       },
     });
@@ -872,7 +916,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   }
 });
 `);
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       {
         commands: { gemini: command },
         resolveBackendLaunchOptions: (_input, environment) => ({
@@ -927,7 +971,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
 });
 `);
     const token = "google-cloud-access-token-for-redaction-test";
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       {
         commands: { gemini: command },
         resolveBackendLaunchOptions: (_input, environment) => ({
@@ -1030,6 +1074,64 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     });
     expect(statuses).toEqual(["starting", "cancelling", "cancelled"]);
     expect(manager.activeConversationIds()).toEqual([]);
+  });
+
+  it("never exposes host tools when Gemini lacks the exact HTTP MCP transport", async () => {
+    const root = portableFixtureRoot("gemini host MCP transport unavailable");
+    roots.push(root);
+    const capturePath = join(root, "methods.json");
+    const command = writeNodeFlagExecutable(root, "gemini", `
+const fs = require("node:fs");
+const readline = require("node:readline");
+const methods = [];
+const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
+readline.createInterface({ input: process.stdin }).on("line", (line) => {
+  const message = JSON.parse(line);
+  methods.push(message.method);
+  fs.writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify(methods));
+  if (message.method === "initialize") return send({ jsonrpc: "2.0", id: message.id, result: {
+    protocolVersion: 1,
+    agentCapabilities: { promptCapabilities: { image: true }, mcpCapabilities: {} },
+    agentInfo: { name: "gemini-cli", version: "0.58.0" },
+  } });
+});
+`);
+    let startAttempts = 0;
+    let closeAttempts = 0;
+    const manager = managerFor(command, testGeminiHarness({
+      createHostMcpSession: () => ({
+        start: async () => {
+          startAttempts += 1;
+          return {
+            url: "http://127.0.0.1:9/mcp",
+            bearerToken: "must-not-be-exposed",
+          };
+        },
+        close: async () => {
+          closeAttempts += 1;
+        },
+      }),
+    }));
+
+    await expect(manager.run(geminiInput(root, {
+      conversationId: "gemini-host-http-unavailable",
+      runId: "run-gemini-host-http-unavailable",
+      turnId: "turn-gemini-host-http-unavailable",
+    }), { hostTools })).resolves.toMatchObject({
+      status: "failed",
+      terminalReason: { outcome: "failed", reason: "provider-error" },
+      failure: {
+        reason: "provider-error",
+        phase: "configuration",
+        terminalEvent: "host-tools/http-transport",
+      },
+      cleanupConfirmed: true,
+    });
+    expect(startAttempts).toBe(0);
+    expect(closeAttempts).toBe(1);
+    expect(JSON.parse(readFileSync(capturePath, "utf8"))).toEqual([
+      "initialize",
+    ]);
   });
 
   it("fails the public result when Gemini host-tool cleanup is not confirmed", async () => {
@@ -1250,6 +1352,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
               event.conversationId,
               event.request.requestId,
               fixture.decision,
+              { runId: event.runId, turnId: event.turnId },
             )).toBe(true);
           }
         },
@@ -1814,7 +1917,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   }
 });
 `);
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { gemini: command }, cancelGraceMs: 500 },
       new AgentHarnessRegistry([testGeminiHarness()]),
     );

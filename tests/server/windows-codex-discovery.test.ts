@@ -132,7 +132,7 @@ process.stdin.resume();
     process.env.PATH = npm;
     process.env.PATHEXT = ".EXE;.CMD;.BAT";
 
-    const manager = new ProviderManager();
+    const manager = ProviderManager.createForTests();
     const detection = await manager.detect("codex", { cwd: home, refreshEnvironment: true });
     expect(detection).toMatchObject({ executable, version: "9.4.1", canRun: true });
     await expect(manager.run(nativeProviderRunInput({
@@ -177,7 +177,7 @@ process.stdin.resume();
     process.env.PATH = automatic;
     process.env.PATHEXT = ".EXE;.CMD;.BAT";
 
-    const manager = new ProviderManager({ commands: { codex: expected } });
+    const manager = ProviderManager.createForTests({ commands: { codex: expected } });
     await expect(manager.detect("codex", { cwd: home, refreshEnvironment: true })).resolves.toMatchObject({
       executable: expected,
       version: "2.5.0",

@@ -1,3 +1,5 @@
+// @inertia-test-suite portable
+// @inertia-harness codex-app-server
 import { readFileSync, realpathSync } from "node:fs";
 import { join, normalize } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -54,7 +56,7 @@ describe.sequential("Codex App Server runtime", () => {
   });
 
   function trackedManager(command: string, cancelGraceMs?: number): ProviderManager {
-    const manager = new ProviderManager({
+    const manager = ProviderManager.createForTests({
       commands: { codex: command },
       ...(cancelGraceMs === undefined ? {} : { cancelGraceMs }),
       resolveBackendLaunchOptions: (_input, environment) => ({
@@ -184,11 +186,17 @@ describe.sequential("Codex App Server runtime", () => {
       onApproval: (event) => {
         approvals.push(event.request.command ?? "");
         approvalRequests.push(event.request);
-        expect(manager.respondToApproval(event.conversationId, event.request.requestId, "approve")).toBe(true);
+        expect(manager.respondToApproval(event.conversationId, event.request.requestId, "approve", {
+          runId: event.runId,
+          turnId: event.turnId,
+        })).toBe(true);
       },
       onInput: (event) => {
         inputs.push(event.request.questions[0]?.question ?? "");
-        expect(manager.respondToInput(event.conversationId, event.request.requestId, { choice: ["  Safe  "] })).toBe(true);
+        expect(manager.respondToInput(event.conversationId, event.request.requestId, { choice: ["  Safe  "] }, {
+          runId: event.runId,
+          turnId: event.turnId,
+        })).toBe(true);
       },
       onPlan: (event) => plans.push(event.explanation ?? ""),
       onReasoning: (event) => reasoning.push(event.text),
@@ -461,6 +469,7 @@ describe.sequential("Codex App Server runtime", () => {
           event.conversationId,
           event.request.requestId,
           "approve",
+          { runId: event.runId, turnId: event.turnId },
         )).toBe(true);
       },
       onInput: (event) => {
@@ -468,6 +477,7 @@ describe.sequential("Codex App Server runtime", () => {
           event.conversationId,
           event.request.requestId,
           { choice: ["Safe"] },
+          { runId: event.runId, turnId: event.turnId },
         )).toBe(true);
       },
     });
@@ -536,6 +546,7 @@ describe.sequential("Codex App Server runtime", () => {
             event.conversationId,
             event.request.requestId,
             "approve",
+            { runId: event.runId, turnId: event.turnId },
           )).toBe(true);
         },
         onInput: (event) => {
@@ -543,6 +554,7 @@ describe.sequential("Codex App Server runtime", () => {
             event.conversationId,
             event.request.requestId,
             { choice: ["Safe"] },
+            { runId: event.runId, turnId: event.turnId },
           )).toBe(true);
         },
       });
@@ -624,8 +636,8 @@ describe.sequential("Codex App Server runtime", () => {
       interactionMode: "build",
       access: "auto-edit",
     }), {
-      onApproval: (event) => expect(manager.respondToApproval(event.conversationId, event.request.requestId, "deny")).toBe(true),
-      onInput: (event) => expect(manager.respondToInput(event.conversationId, event.request.requestId, { choice: ["Safe"] })).toBe(true),
+      onApproval: (event) => expect(manager.respondToApproval(event.conversationId, event.request.requestId, "deny", { runId: event.runId, turnId: event.turnId })).toBe(true),
+      onInput: (event) => expect(manager.respondToInput(event.conversationId, event.request.requestId, { choice: ["Safe"] }, { runId: event.runId, turnId: event.turnId })).toBe(true),
     });
 
     await expect(result).resolves.toMatchObject({ status: "completed" });
@@ -1227,7 +1239,7 @@ describe.sequential("Codex App Server runtime", () => {
       onApproval: (event) => approvals.push(event.request.requestId),
       onInput: (event) => {
         inputs.push(event.request.questions[0]?.question ?? "");
-        expect(manager.respondToInput(event.conversationId, event.request.requestId, { choice: ["Direct"] })).toBe(true);
+        expect(manager.respondToInput(event.conversationId, event.request.requestId, { choice: ["Direct"] }, { runId: event.runId, turnId: event.turnId })).toBe(true);
       },
       onPlan: (event) => plans.push(event.explanation ?? ""),
       onReasoning: (event) => reasoning.push(event.text),
@@ -1656,9 +1668,9 @@ describe.sequential("Codex App Server runtime", () => {
     }), {
       onApproval: (event) => {
         approvalRequests.push(event.request);
-        approvalResponses.push(manager.respondToApproval(event.conversationId, event.request.requestId, "approve"));
+        approvalResponses.push(manager.respondToApproval(event.conversationId, event.request.requestId, "approve", { runId: event.runId, turnId: event.turnId }));
       },
-      onInput: (event) => inputResponses.push(manager.respondToInput(event.conversationId, event.request.requestId, { choice: ["Safe"] })),
+      onInput: (event) => inputResponses.push(manager.respondToInput(event.conversationId, event.request.requestId, { choice: ["Safe"] }, { runId: event.runId, turnId: event.turnId })),
     });
 
     await expect(result).resolves.toMatchObject({ status: "completed" });
@@ -1727,7 +1739,7 @@ describe.sequential("Codex App Server runtime", () => {
       interactionMode: "plan",
       access: "auto-edit" as ProviderAccessMode,
     }), {
-      onApproval: (event) => expect(manager.respondToApproval(event.conversationId, event.request.requestId, "cancel")).toBe(true),
+      onApproval: (event) => expect(manager.respondToApproval(event.conversationId, event.request.requestId, "cancel", { runId: event.runId, turnId: event.turnId })).toBe(true),
     });
 
     await expect(result).resolves.toMatchObject({ status: "cancelled" });
@@ -2090,8 +2102,8 @@ describe.sequential("Codex App Server runtime", () => {
       interactionMode: "build",
       access: "supervised",
     }), {
-      onApproval: (event) => expect(manager.respondToApproval(event.conversationId, event.request.requestId, "approve")).toBe(true),
-      onInput: (event) => expect(manager.respondToInput(event.conversationId, event.request.requestId, { choice: ["Safe"] })).toBe(true),
+      onApproval: (event) => expect(manager.respondToApproval(event.conversationId, event.request.requestId, "approve", { runId: event.runId, turnId: event.turnId })).toBe(true),
+      onInput: (event) => expect(manager.respondToInput(event.conversationId, event.request.requestId, { choice: ["Safe"] }, { runId: event.runId, turnId: event.turnId })).toBe(true),
     });
 
     await expect(result).resolves.toMatchObject({ status: "completed", text: "Hello from Codex" });
@@ -2143,12 +2155,14 @@ describe.sequential("Codex App Server runtime", () => {
           event.conversationId,
           event.request.requestId,
           "approve",
+          { runId: event.runId, turnId: event.turnId },
         )).toBe(true);
       },
       onInput: (event) => expect(manager.respondToInput(
         event.conversationId,
         event.request.requestId,
         { choice: ["Safe"] },
+        { runId: event.runId, turnId: event.turnId },
       )).toBe(true),
     });
 
@@ -2184,12 +2198,14 @@ describe.sequential("Codex App Server runtime", () => {
           event.conversationId,
           event.request.requestId,
           "approve",
+          { runId: event.runId, turnId: event.turnId },
         )).toBe(true);
       },
       onInput: (event) => expect(manager.respondToInput(
         event.conversationId,
         event.request.requestId,
         { choice: ["Safe"] },
+        { runId: event.runId, turnId: event.turnId },
       )).toBe(true),
     });
 

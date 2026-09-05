@@ -15,6 +15,8 @@ import { requireRuntimeDirectory } from "../../runtime-commands";
 import { RuntimeRequestError } from "../../runtime-errors";
 import type { TerminalManager } from "../../terminal";
 import { PROVIDER_INFO, type ProviderManager } from "../../providers";
+import type { ProviderInstallationUseTransfer } from
+  "../../provider/contracts";
 import type { ProviderTerminalResumeRegistry } from "../../provider/terminal-resume";
 import type { RuntimeSecureFileBroker } from "../../secure-files";
 import type { SecureFileAuthorityRegistry } from "../secure-file-authorities";
@@ -598,12 +600,14 @@ export function createProjectWorkspaceCommandHandler(
         )) {
           rejectResume("authority", "resume-authority-unavailable");
         }
+        let installationUse: ProviderInstallationUseTransfer | undefined;
         try {
           const launch = await dependencies.providers.terminalResumeLaunch(
             conversation.providerId,
             conversation.providerSessionId,
             cwd,
           );
+          installationUse = launch.installationUse;
           if (socket.readyState !== WebSocket.OPEN) {
             rejectResume(
               "post-launch",
@@ -647,6 +651,7 @@ export function createProjectWorkspaceCommandHandler(
             },
             false,
             command.requestId,
+            launch.installationUse,
           );
           dependencies.send(socket, {
             type: "terminal.created",
@@ -656,6 +661,7 @@ export function createProjectWorkspaceCommandHandler(
             providerResumeConversationId: conversation.id,
           });
         } catch (error) {
+          installationUse?.abandonBeforeSpawn();
           dependencies.providerTerminalResumes.release(conversation.id);
           throw error;
         }

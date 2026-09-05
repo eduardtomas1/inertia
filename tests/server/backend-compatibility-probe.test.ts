@@ -3,6 +3,7 @@ import type { AddressInfo } from "node:net";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { backendEndpointIdentity } from "../../src/shared/backend-endpoint-identity";
 import {
   backendProbeMatchesProfile,
   type BackendCompatibilityProbeRequest,
@@ -52,7 +53,9 @@ function requestFor(
       source: "custom",
       enabled: true,
       configurationRevision: 1,
-      endpointIdentity: `probe:${protocol}:1`,
+      endpointIdentity: endpointUrl === null
+        ? `probe:${protocol}:1`
+        : backendEndpointIdentity(endpointUrl),
     },
     endpointUrl,
     modelId: "expected-model",
@@ -77,9 +80,16 @@ function dependencies(
 }
 
 async function localServer(
-  handler: (request: IncomingMessage, response: ServerResponse) => void,
+  handler: (
+    request: IncomingMessage,
+    response: ServerResponse,
+  ) => void | Promise<void>,
 ): Promise<string> {
-  const server = createServer(handler);
+  const server = createServer((request, response) => {
+    void Promise.resolve(handler(request, response)).catch((error: unknown) => {
+      response.destroy(error instanceof Error ? error : new Error("Probe fixture failed."));
+    });
+  });
   servers.push(server);
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
@@ -87,6 +97,14 @@ async function localServer(
   });
   const address = server.address() as AddressInfo;
   return `http://127.0.0.1:${address.port}/`;
+}
+
+async function requestJson(request: IncomingMessage): Promise<Record<string, unknown>> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of request) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>;
 }
 
 function anthropicStream(
@@ -148,6 +166,82 @@ function openAiStream(model = "expected-model"): string {
   ].join("\n");
 }
 
+function openAiToolStream(
+  name: string,
+  nonce: string,
+  model = "expected-model",
+): string {
+  const item = {
+    id: "fc_probe",
+    call_id: "call_probe",
+    type: "function_call",
+    name,
+    arguments: JSON.stringify({ nonce }),
+  };
+  return [
+    "event: response.created",
+    `data: ${JSON.stringify({
+      type: "response.created",
+      response: { id: "resp_tool_probe", model },
+    })}`,
+    "",
+    "event: response.output_item.done",
+    `data: ${JSON.stringify({ type: "response.output_item.done", item })}`,
+    "",
+    "event: response.completed",
+    `data: ${JSON.stringify({
+      type: "response.completed",
+      response: {
+        id: "resp_tool_probe",
+        model,
+        output: [item],
+        usage: { input_tokens: 8, output_tokens: 4, total_tokens: 12 },
+      },
+    })}`,
+    "",
+    "data: [DONE]",
+    "",
+    "",
+  ].join("\n");
+}
+
+function openAiContinuationStream(
+  resultNonce: string,
+  model = "expected-model",
+): string {
+  const item = {
+    id: "msg_probe_continuation",
+    type: "message",
+    role: "assistant",
+    content: [{ type: "output_text", text: resultNonce, annotations: [] }],
+  };
+  return [
+    "event: response.created",
+    `data: ${JSON.stringify({
+      type: "response.created",
+      response: { id: "resp_probe_continuation", model },
+    })}`,
+    "",
+    "event: response.output_text.delta",
+    `data: ${JSON.stringify({ type: "response.output_text.delta", delta: resultNonce })}`,
+    "",
+    "event: response.completed",
+    `data: ${JSON.stringify({
+      type: "response.completed",
+      response: {
+        id: "resp_probe_continuation",
+        model,
+        output: [item],
+        usage: { input_tokens: 12, output_tokens: 1, total_tokens: 13 },
+      },
+    })}`,
+    "",
+    "data: [DONE]",
+    "",
+    "",
+  ].join("\n");
+}
+
 describe("backend compatibility probe", () => {
   it("verifies only observed Anthropic capabilities and preserves the Kimi base path", async () => {
     let receivedPath = "";
@@ -181,7 +275,7 @@ describe("backend compatibility probe", () => {
     expect(result).toMatchObject({
       profileId: "custom:anthropic-messages",
       backendConfigurationRevision: 1,
-      endpointIdentity: "probe:anthropic-messages:1",
+      endpointIdentity: backendEndpointIdentity(`${endpoint}coding/`),
       compatibility: "partially-compatible",
       protocolVerified: true,
       modelVerified: true,
@@ -261,6 +355,7 @@ describe("backend compatibility probe", () => {
         profile: {
           ...requestFor("openai-responses", endpoint).profile,
           authenticationMode: "bearer-token",
+          endpointIdentity: backendEndpointIdentity(`${endpoint}v1/`),
         },
       }),
       dependencies(),
@@ -273,6 +368,176 @@ describe("backend compatibility probe", () => {
       modelVerified: true,
       failure: null,
     });
+  });
+
+  it("attests Responses tools only after an exact inert call/result continuation", async () => {
+    const bodies: Record<string, unknown>[] = [];
+    const authorizations: string[] = [];
+    const endpoint = await localServer(async (request, response) => {
+      const body = await requestJson(request);
+      bodies.push(body);
+      authorizations.push(String(request.headers.authorization ?? ""));
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      if (bodies.length === 1) {
+        response.end(openAiStream());
+        return;
+      }
+      if (bodies.length === 3) {
+        const input = body.input as Array<{ type?: string; output?: string }>;
+        const output = input.find(({ type }) => type === "function_call_output")?.output;
+        response.end(openAiContinuationStream(output!));
+        return;
+      }
+      const tools = body.tools as Array<{
+        name: string;
+        parameters: { properties: { nonce: { enum: string[] } } };
+      }>;
+      response.end(openAiToolStream(
+        tools[0]!.name,
+        tools[0]!.parameters.properties.nonce.enum[0]!,
+      ));
+    });
+
+    const result = await probeBackendCompatibility(
+      requestFor("openai-responses", endpoint),
+      dependencies(),
+    );
+
+    expect(bodies).toHaveLength(3);
+    expect(bodies[0]).not.toHaveProperty("tools");
+    expect(bodies[1]).toMatchObject({
+      model: "expected-model",
+      stream: true,
+      store: false,
+      parallel_tool_calls: false,
+      tools: [{
+        type: "function",
+        strict: true,
+        parameters: {
+          required: ["nonce"],
+          additionalProperties: false,
+        },
+      }],
+    });
+    const tool = (bodies[1]!.tools as Array<{ name: string }>)[0]!;
+    expect(bodies[1]!.tool_choice).toEqual({ type: "function", name: tool.name });
+    const continuation = bodies[2]!.input as Array<Record<string, unknown>>;
+    const call = continuation.find(({ type }) => type === "function_call")!;
+    const output = continuation.find(({ type }) => type === "function_call_output")!;
+    expect(call).toMatchObject({
+      call_id: "call_probe",
+      name: tool.name,
+    });
+    expect(output).toMatchObject({
+      call_id: "call_probe",
+      output: expect.stringMatching(/^[a-f0-9]{32}$/u),
+    });
+    expect(continuation.find(({ role }) => role === "user")?.content)
+      .not.toContain(output.output);
+    expect(JSON.stringify(bodies[2]).split(String(output.output))).toHaveLength(2);
+    expect(bodies[2]).toMatchObject({
+      model: "expected-model",
+      stream: true,
+      store: false,
+      tools: [{ name: tool.name, type: "function" }],
+      tool_choice: "none",
+    });
+    expect(authorizations).toEqual([
+      `Bearer ${SECRET}`,
+      `Bearer ${SECRET}`,
+      `Bearer ${SECRET}`,
+    ]);
+    expect(result.failure).toBeNull();
+    expect(result.capabilities.find(({ id }) => id === "tools")).toMatchObject({
+      state: "verified",
+      provenance: "probe",
+    });
+    expect(JSON.stringify(result)).not.toContain(SECRET);
+  });
+
+  it("keeps Responses text compatibility when the inert tool check is unsupported or inexact", async () => {
+    let unsupportedRequests = 0;
+    const unsupportedEndpoint = await localServer(async (request, response) => {
+      await requestJson(request);
+      unsupportedRequests += 1;
+      if (unsupportedRequests === 1) {
+        response.writeHead(200, { "content-type": "text/event-stream" });
+        response.end(openAiStream());
+        return;
+      }
+      response.writeHead(400, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: { type: "unsupported_tool_choice" } }));
+    });
+    const unsupported = await probeBackendCompatibility(
+      requestFor("openai-responses", unsupportedEndpoint),
+      dependencies(),
+    );
+    expect(unsupportedRequests).toBe(2);
+    expect(unsupported.failure).toBeNull();
+    expect(unsupported.capabilities.find(({ id }) => id === "streaming")?.state)
+      .toBe("verified");
+    expect(unsupported.capabilities.find(({ id }) => id === "tools")?.state)
+      .toBe("unknown");
+
+    let inexactRequests = 0;
+    const inexactEndpoint = await localServer(async (request, response) => {
+      const body = await requestJson(request);
+      inexactRequests += 1;
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      if (inexactRequests === 1) {
+        response.end(openAiStream());
+        return;
+      }
+      const tools = body.tools as Array<{
+        name: string;
+        parameters: { properties: { nonce: { enum: string[] } } };
+      }>;
+      response.end(openAiToolStream(
+        tools[0]!.name,
+        `${tools[0]!.parameters.properties.nonce.enum[0]!}-wrong`,
+      ));
+    });
+    const inexact = await probeBackendCompatibility(
+      requestFor("openai-responses", inexactEndpoint),
+      dependencies(),
+    );
+    expect(inexactRequests).toBe(2);
+    expect(inexact.failure).toBeNull();
+    expect(inexact.capabilities.find(({ id }) => id === "tools")?.state)
+      .toBe("unknown");
+
+    let continuationRequests = 0;
+    const continuationEndpoint = await localServer(async (request, response) => {
+      const body = await requestJson(request);
+      continuationRequests += 1;
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      if (continuationRequests === 1) {
+        response.end(openAiStream());
+        return;
+      }
+      if (continuationRequests === 2) {
+        const tools = body.tools as Array<{
+          name: string;
+          parameters: { properties: { nonce: { enum: string[] } } };
+        }>;
+        response.end(openAiToolStream(
+          tools[0]!.name,
+          tools[0]!.parameters.properties.nonce.enum[0]!,
+        ));
+        return;
+      }
+      response.end(openAiContinuationStream("wrong-result"));
+    });
+    const invalidContinuation = await probeBackendCompatibility(
+      requestFor("openai-responses", continuationEndpoint),
+      dependencies(),
+    );
+    expect(continuationRequests).toBe(3);
+    expect(invalidContinuation.failure).toBeNull();
+    expect(invalidContinuation.capabilities.find(({ id }) => id === "streaming")?.state)
+      .toBe("verified");
+    expect(invalidContinuation.capabilities.find(({ id }) => id === "tools")?.state)
+      .toBe("unknown");
   });
 
   it.each([
@@ -315,6 +580,45 @@ describe("backend compatibility probe", () => {
     expect(resolved).toBe(false);
   });
 
+  it("sanitizes a malformed endpoint before network or raw-input disclosure", async () => {
+    const rawEndpoint = "not a URL Authorization: Bearer raw-input-secret";
+    let resolved = false;
+    const result = await probeBackendCompatibility({
+      ...requestFor("anthropic-messages", "https://backend.example/"),
+      endpointUrl: rawEndpoint,
+    }, dependencies({
+      resolveAddresses: async () => {
+        resolved = true;
+        return [{ address: "93.184.216.34", family: 4 }];
+      },
+    }));
+
+    expect(result.failure).toMatchObject({ code: "invalid-url" });
+    expect(JSON.stringify(result)).not.toContain(rawEndpoint);
+    expect(JSON.stringify(result)).not.toContain("raw-input-secret");
+    expect(resolved).toBe(false);
+  });
+
+  it("rejects endpoint substitution against the persisted custom identity", async () => {
+    let resolved = false;
+    const request = requestFor(
+      "anthropic-messages",
+      "https://original-backend.example/v1",
+    );
+    const result = await probeBackendCompatibility({
+      ...request,
+      endpointUrl: "https://replacement-backend.example/v1",
+    }, dependencies({
+      resolveAddresses: async () => {
+        resolved = true;
+        return [{ address: "93.184.216.34", family: 4 }];
+      },
+    }));
+
+    expect(result.failure).toMatchObject({ code: "invalid-url" });
+    expect(resolved).toBe(false);
+  });
+
   it("rejects every private or mixed DNS result before opening a request", async () => {
     const result = await probeBackendCompatibility(
       requestFor("anthropic-messages", "https://backend.example/"),
@@ -323,6 +627,23 @@ describe("backend compatibility probe", () => {
           { address: "93.184.216.34", family: 4 },
           { address: "169.254.169.254", family: 4 },
         ],
+      }),
+    );
+    expect(result.failure?.code).toBe("private-network");
+  });
+
+  it.each([
+    "::ffff:127.0.0.1",
+    "64:ff9b::7f00:1",
+    "64:ff9b:1::7f00:1",
+    "2001:0000:4136:e378:8000:63bf:3fff:fdd2",
+    "2002:7f00:0001::",
+    "fec0::1",
+  ])("rejects IPv6 transition or retired-private address %s", async (address) => {
+    const result = await probeBackendCompatibility(
+      requestFor("anthropic-messages", "https://backend.example/"),
+      dependencies({
+        resolveAddresses: async () => [{ address, family: 6 }],
       }),
     );
     expect(result.failure?.code).toBe("private-network");
@@ -351,7 +672,7 @@ describe("backend compatibility probe", () => {
       }),
     );
     expect(result.failure).toBeNull();
-    expect(order).toEqual(["credential", "dns"]);
+    expect(order).toEqual(["dns", "credential"]);
     expect(hostHeader.startsWith("localhost:")).toBe(true);
   });
 
@@ -564,6 +885,36 @@ describe("backend compatibility probe", () => {
     });
   });
 
+  it("honors a signal already aborted before DNS or credential access", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    let resolved = false;
+    let credentialRead = false;
+
+    const result = await probeBackendCompatibility(
+      requestFor("anthropic-messages", "https://cancelled.example/v1"),
+      dependencies({
+        resolveAddresses: async () => {
+          resolved = true;
+          return [{ address: "93.184.216.34", family: 4 }];
+        },
+        resolveCredential: async () => {
+          credentialRead = true;
+          return SECRET;
+        },
+      }),
+      controller.signal,
+    );
+
+    expect(result).toMatchObject({
+      protocolVerified: false,
+      modelVerified: false,
+      failure: { code: "cancelled" },
+    });
+    expect(resolved).toBe(false);
+    expect(credentialRead).toBe(false);
+  });
+
   it("binds evidence to the exact profile revision and endpoint identity", async () => {
     const endpoint = await localServer((_request, response) => {
       response.writeHead(200, { "content-type": "text/event-stream" });
@@ -576,19 +927,21 @@ describe("backend compatibility probe", () => {
       result,
       request.profile,
       request.modelId,
+      FIXED_NOW,
     )).toBe(true);
     expect(backendProbeMatchesProfile(result, {
       ...request.profile,
       configurationRevision: request.profile.configurationRevision + 1,
-    }, request.modelId)).toBe(false);
+    }, request.modelId, FIXED_NOW)).toBe(false);
     expect(backendProbeMatchesProfile(result, {
       ...request.profile,
       endpointIdentity: "probe:anthropic-messages:replacement",
-    }, request.modelId)).toBe(false);
+    }, request.modelId, FIXED_NOW)).toBe(false);
     expect(backendProbeMatchesProfile(
       result,
       request.profile,
       "replacement-model",
+      FIXED_NOW,
     )).toBe(false);
   });
 });

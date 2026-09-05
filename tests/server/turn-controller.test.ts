@@ -1,17 +1,8 @@
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type {
-  AgentApprovalRequest,
-  AgentInputRequest,
-  AgentPlan,
-  ModelSelection,
-  ServerEvent,
-} from "../../src/shared/contracts";
 import { RuntimeStore } from "../../src/server/database";
 import {
   continuationIdentityForSelection,
@@ -20,142 +11,26 @@ import {
   providerNativeModelSelection,
   resolveHarnessBackendCompatibility,
 } from "../../src/shared/model-routing";
-import type { ProviderGoalSnapshot } from "../../src/server/provider/contracts";
-import {
-  TurnController,
-  type TurnControllerHooks,
-  type TurnProviderRuntime,
-} from "../../src/server/runtime/turns/turn-controller";
+import type {
+  ProviderGoalSnapshot,
+  ProviderHostToolBridge,
+} from "../../src/server/provider/contracts";
 import { recoverInterruptedTurns } from "../../src/server/runtime/turns/turn-recovery";
 import { BUILD_MODE_INSTRUCTION } from "../../src/server/runtime/turns/request-context";
 import { resolveNativeModelRoute } from "./model-route-fixture";
 import {
-  emitSubagent,
-  identity,
-  providerInfo,
-  testAttachment,
-} from "./turn-controller-fixtures";
-import {
-  FakeTurnProvider,
-  FakeTurnScheduler,
-} from "../support/fake-turn-provider";
+  cleanupTurnControllerTestDirectories,
+  createTurnControllerTestRuntime as testRuntime,
+  turnControllerTestContinuationState as continuationState,
+  emitTurnControllerTestSubagent as emitSubagent,
+  flushTurnControllerTestPromises as flushPromises,
+  turnControllerTestAttachment as testAttachment,
+  turnControllerTestIdentity as identity,
+  turnControllerTestProviderInfo as providerInfo,
+  type TurnControllerTestRuntime as TestRuntime,
+} from "../support/turn-controller-runtime";
 
-const directories: string[] = [];
-
-interface TestRuntime {
-  directory: string;
-  workspace: string;
-  store: RuntimeStore;
-  provider: FakeTurnProvider;
-  scheduler: FakeTurnScheduler;
-  controller: TurnController;
-  conversationId: string;
-  events: ServerEvent[];
-  settled: string[];
-  gitArtifacts: string[];
-  metadataRefreshes: string[];
-  attachmentReleases: string[][];
-}
-interface TestRuntimeOptions {
-  interactionMode?: "build" | "plan";
-  modelSelection?: ModelSelection;
-  resolveModelRoute?: TurnProviderRuntime["resolveModelRoute"];
-}
-async function testRuntime(
-  hookOverrides: Partial<TurnControllerHooks> = {},
-  options: TestRuntimeOptions = {},
-): Promise<TestRuntime> {
-  const directory = await mkdtemp(join(tmpdir(), "inertia-turn-controller-"));
-  const workspace = join(directory, "workspace");
-  await mkdir(workspace);
-  directories.push(directory);
-  const store = new RuntimeStore(
-    join(directory, "inertia.sqlite"),
-    workspace,
-    { recoverInterruptedRuns: false },
-  );
-  const project = store.createProject("Turn project", workspace);
-  const conversation = store.createConversation(project.id, "Turn conversation", {
-    ...(options.modelSelection
-      ? { modelSelection: options.modelSelection }
-      : {
-          providerId: "codex" as const,
-          model: "gpt-test",
-          reasoningEffort: "high",
-        }),
-    interactionMode: options.interactionMode ?? "build",
-    accessMode: "supervised",
-  });
-  const provider = new FakeTurnProvider();
-  if (options.resolveModelRoute) {
-    provider.resolveModelRoute = options.resolveModelRoute;
-  }
-  const scheduler = new FakeTurnScheduler();
-  const events: ServerEvent[] = [];
-  const settled: string[] = [];
-  const gitArtifacts: string[] = [];
-  const metadataRefreshes: string[] = [];
-  const attachmentReleases: string[][] = [];
-  const pendingApprovals = new Map<string, AgentApprovalRequest>();
-  const pendingInputs = new Map<string, AgentInputRequest>();
-  const plans = new Map<string, AgentPlan>();
-  let sequence = 0;
-  let clockMs = Date.parse("2030-01-01T00:00:00.000Z");
-  const controller = new TurnController(
-    store,
-    provider,
-    pendingApprovals,
-    pendingInputs,
-    plans,
-    {
-      broadcast: (event) => events.push(event),
-      broadcastSnapshot: () => undefined,
-      providerInfo: () => [providerInfo()],
-      captureStructuredContext: ({ content }) => ({ visibleRequest: content }),
-      onStructuredContextCaptured: ({ turn }) => {
-        settled.push(`context:${turn.id}`);
-      },
-      captureGitArtifacts: ({ turn }) => {
-        gitArtifacts.push(turn.id);
-      },
-      refreshProviderMetadata: ({ turnId }) => {
-        metadataRefreshes.push(turnId);
-      },
-      releaseTurnAttachments: ({ attachmentIds }) => {
-        attachmentReleases.push([...attachmentIds]);
-      },
-      onTurnSettled: (turn) => {
-        settled.push(`${turn.status}:${turn.id}`);
-      },
-      ...hookOverrides,
-    },
-    {
-      scheduler,
-      clock: () => new Date(clockMs++),
-      id: () => `controller-id-${++sequence}`,
-      turnTimeoutMs: 1_000,
-    },
-  );
-  return {
-    directory,
-    workspace,
-    store,
-    provider,
-    scheduler,
-    controller,
-    conversationId: conversation.id,
-    events,
-    settled,
-    gitArtifacts,
-    metadataRefreshes,
-    attachmentReleases,
-  };
-}
-async function flushPromises(): Promise<void> { await Promise.resolve(); await Promise.resolve(); }
-afterEach(async () => {
-  await Promise.all(directories.splice(0).map((directory) =>
-    rm(directory, { recursive: true, force: true })));
-});
+afterEach(cleanupTurnControllerTestDirectories);
 describe("TurnController authoritative lifecycle", () => {
   it("persists parent follow-ups only after the active harness acknowledges them", async () => {
     const runtime = await testRuntime();
@@ -819,82 +694,6 @@ describe("TurnController authoritative lifecycle", () => {
     runtime.store.close();
   });
 
-  it("continues Gemini with bounded visible context without persisting a native session", async () => {
-    const staleGeminiCatalog = {
-      ...providerInfo(),
-      id: "gemini" as const,
-      label: "Gemini",
-      command: "gemini",
-      models: [{
-        ...providerInfo().models[0]!,
-        id: "gemini-stale-default",
-        label: "Stale cached default",
-      }],
-    };
-    const runtime = await testRuntime({
-      providerInfo: () => [staleGeminiCatalog],
-    }, {
-      modelSelection: providerNativeModelSelection({
-        providerId: "gemini",
-        modelId: "provider-default",
-      }),
-    });
-    const first = runtime.controller.queue({
-      conversationId: runtime.conversationId,
-      content: "Implement the first Gemini change.",
-    });
-    expect(first.turn.providerSessionBefore).toBeNull();
-    expect(first.turn.model).toBe("provider-default");
-    expect(runtime.controller.start(first.turn.id)).toBe(true);
-    expect(runtime.provider.input).toMatchObject({
-      providerId: "gemini",
-      model: undefined,
-      modelSelection: { modelId: "provider-default" },
-      sessionId: undefined,
-      reconstructedHistory: undefined,
-    });
-    runtime.provider.emit({
-      ...identity(runtime),
-      type: "text",
-      text: "The first Gemini answer.",
-    });
-    runtime.provider.resolve({
-      status: "completed",
-      text: "The first Gemini answer.",
-    });
-    await flushPromises();
-    expect(runtime.store.conversation(runtime.conversationId).providerSessionId)
-      .toBeNull();
-
-    const second = runtime.controller.queue({
-      conversationId: runtime.conversationId,
-      content: "Validate the follow-up.",
-    });
-    expect(second.turn.providerSessionBefore).toBeNull();
-    expect(runtime.controller.start(second.turn.id)).toBe(true);
-    expect(runtime.provider.input).toMatchObject({
-      providerId: "gemini",
-      sessionId: undefined,
-      reconstructedHistory: {
-        source: "visible-transcript",
-        truncated: false,
-        messages: [
-          { role: "user", content: "Implement the first Gemini change." },
-          { role: "assistant", content: "The first Gemini answer." },
-        ],
-      },
-    });
-    expect(runtime.provider.input?.reconstructedHistory?.messages)
-      .not.toContainEqual(expect.objectContaining({
-        content: expect.stringContaining(BUILD_MODE_INSTRUCTION),
-      }));
-    runtime.provider.resolve({ status: "completed", text: "Validated." });
-    await flushPromises();
-    expect(runtime.store.conversation(runtime.conversationId).providerSessionId)
-      .toBeNull();
-    runtime.store.close();
-  });
-
   it("settles and broadcasts the provider terminal state before slow Git finalization", async () => {
     let resolveBefore!: () => void;
     let resolveAfter!: () => void;
@@ -1347,6 +1146,9 @@ describe("TurnController authoritative lifecycle", () => {
 
   it("releases an attachment when the provider throws before returning a run", async () => {
     const runtime = await testRuntime();
+    runtime.store.updateConversation(runtime.conversationId, {
+      providerSessionId: "stale-session-before-launch",
+    });
     const attachment = await testAttachment(
       runtime,
       "99999999-9999-4999-8999-999999999999",
@@ -1360,6 +1162,8 @@ describe("TurnController authoritative lifecycle", () => {
       content: "Fail while launching the provider.",
       attachments: [attachment],
     });
+    expect(continuationState(runtime.store, runtime.conversationId))
+      .toEqual({ providerSessionId: null, continuationIdentity: null });
 
     expect(runtime.controller.start(queued.turn.id)).toBe(false);
     await flushPromises();
@@ -1370,7 +1174,14 @@ describe("TurnController authoritative lifecycle", () => {
       terminalReason: "turn-start-failed",
     });
     expect(runtime.attachmentReleases).toEqual([[attachment.id]]);
+    const databasePath = join(runtime.directory, "inertia.sqlite");
     runtime.store.close();
+    const reopened = new RuntimeStore(databasePath, runtime.workspace, {
+      recoverInterruptedRuns: false,
+    });
+    expect(continuationState(reopened, runtime.conversationId))
+      .toEqual({ providerSessionId: null, continuationIdentity: null });
+    reopened.close();
   });
 
   it("retains attachments and gates retries when a synchronous provider event settles during start", async () => {
@@ -1541,6 +1352,152 @@ describe("TurnController authoritative lifecycle", () => {
     runtime.store.close();
   });
 
+  it("does not advertise or grant host tools before exact capability verification", async () => {
+    const hostTools: ProviderHostToolBridge = {
+      definitions: [],
+      invoke: vi.fn(async () => ({ success: true, text: "unused" })),
+    };
+    const hostToolsForTurn = vi.fn(() => hostTools);
+    const runtime = await testRuntime({
+      providerInfo: () => [{
+        ...providerInfo(),
+        capabilityContract: {
+          schemaVersion: 1,
+          harnessId: "codex-app-server",
+          manifestDigest: "a".repeat(64),
+          installationVerified: false,
+          installedVersion: null,
+          currentlyAvailableCount: 0,
+          declaredCapabilityCount: 28,
+          hostToolBridgeAvailable: false,
+        },
+      }],
+      harnessInstructionsForTurn: () => [{
+        label: "unverified-host-tools",
+        text: "UNVERIFIED_HOST_TOOLS_MUST_NOT_BE_ADVERTISED",
+      }],
+      hostToolsForTurn,
+    });
+    const queued = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Inspect safely.",
+    });
+
+    expect(runtime.store.turnExecutionManifest(queued.turn.id))
+      .toMatchObject({ internalInstructionCount: 1 });
+    expect(runtime.controller.start(queued.turn.id)).toBe(true);
+    expect(runtime.provider.input?.prompt)
+      .not.toContain("UNVERIFIED_HOST_TOOLS_MUST_NOT_BE_ADVERTISED");
+    expect(hostToolsForTurn).not.toHaveBeenCalled();
+    expect(runtime.provider.callbacks?.hostTools).toBeUndefined();
+
+    runtime.provider.resolve();
+    await flushPromises();
+    runtime.store.close();
+  });
+
+  it("does not lend a verified native host bridge to a custom backend route", async () => {
+    const hostTools: ProviderHostToolBridge = {
+      definitions: [],
+      invoke: vi.fn(async () => ({ success: true, text: "unused" })),
+    };
+    const hostToolsForTurn = vi.fn(() => hostTools);
+    const harnessInstructionsForTurn = vi.fn(() => [{
+      label: "native-host-tools",
+      text: "NATIVE_HOST_TOOLS_MUST_NOT_CROSS_CUSTOM_ROUTE",
+    }]);
+    const customProfile = {
+      ...providerNativeBackendProfile("codex"),
+      id: "custom:no-native-host-bridge",
+      displayName: "Custom Responses",
+      source: "custom" as const,
+      authenticationMode: "api-key" as const,
+      configurationRevision: 12,
+      endpointIdentity: "endpoint:no-native-host-bridge:12",
+    };
+    const customSelection = modelSelectionSchema.parse({
+      ...providerNativeModelSelection({
+        providerId: "codex",
+        modelId: "custom-model",
+      }),
+      backendProfileId: customProfile.id,
+      backendProfileDisplayName: customProfile.displayName,
+      backendConfigurationRevision: customProfile.configurationRevision,
+    });
+    const customCompatibility = resolveHarnessBackendCompatibility(
+      "codex-app-server",
+      customProfile,
+    );
+    const runtime = await testRuntime({
+      // The default provider view deliberately claims a fully verified native
+      // host bridge. Route identity, not that provider-wide summary, decides.
+      harnessInstructionsForTurn,
+      hostToolsForTurn,
+    }, {
+      modelSelection: customSelection,
+      resolveModelRoute: () => ({
+        providerId: "codex",
+        harnessId: "codex-app-server",
+        backendProfile: customProfile,
+        compatibility: customCompatibility,
+        continuationIdentity: continuationIdentityForSelection(
+          customSelection,
+          customProfile.endpointIdentity,
+          !customCompatibility.allowsModelSwitchWithinSession,
+        ),
+      }),
+    });
+    const queued = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Use only the custom backend's verified surface.",
+    });
+
+    expect(runtime.controller.start(queued.turn.id)).toBe(true);
+    expect(runtime.provider.input?.prompt)
+      .not.toContain("NATIVE_HOST_TOOLS_MUST_NOT_CROSS_CUSTOM_ROUTE");
+    expect(harnessInstructionsForTurn).not.toHaveBeenCalled();
+    expect(hostToolsForTurn).not.toHaveBeenCalled();
+    expect(runtime.provider.callbacks?.hostTools).toBeUndefined();
+
+    runtime.provider.resolve();
+    await flushPromises();
+    runtime.store.close();
+  });
+
+  it("does not advertise or grant host tools when capability attestation is absent", async () => {
+    const hostTools: ProviderHostToolBridge = {
+      definitions: [],
+      invoke: vi.fn(async () => ({ success: true, text: "unused" })),
+    };
+    const hostToolsForTurn = vi.fn(() => hostTools);
+    const providerWithoutAttestation = providerInfo();
+    delete providerWithoutAttestation.capabilityContract;
+    const runtime = await testRuntime({
+      providerInfo: () => [providerWithoutAttestation],
+      harnessInstructionsForTurn: () => [{
+        label: "missing-host-tools",
+        text: "MISSING_HOST_TOOLS_MUST_NOT_BE_ADVERTISED",
+      }],
+      hostToolsForTurn,
+    });
+    const queued = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Inspect safely.",
+    });
+
+    expect(runtime.store.turnExecutionManifest(queued.turn.id))
+      .toMatchObject({ internalInstructionCount: 1 });
+    expect(runtime.controller.start(queued.turn.id)).toBe(true);
+    expect(runtime.provider.input?.prompt)
+      .not.toContain("MISSING_HOST_TOOLS_MUST_NOT_BE_ADVERTISED");
+    expect(hostToolsForTurn).not.toHaveBeenCalled();
+    expect(runtime.provider.callbacks?.hostTools).toBeUndefined();
+
+    runtime.provider.resolve();
+    await flushPromises();
+    runtime.store.close();
+  });
+
   it("rejects a post-assembly oversize request before a message, turn, or provider spawn", async () => {
     const runtime = await testRuntime();
     const before = runtime.store.snapshot();
@@ -1652,7 +1609,10 @@ describe("TurnController authoritative lifecycle", () => {
     expect(queued.turn).toMatchObject({
       status: "queued",
       userMessageId: queued.message.id,
-      providerSessionBefore: "session-before",
+      // A legacy session without an exact installation/capability identity is
+      // preserved as history but never resumed across an unverified boundary.
+      providerSessionBefore: null,
+      continuationReasonCode: "provider-installation-unverified",
       harnessId: "codex-app-server",
       model: "gpt-test",
       reasoningEffort: "high",
@@ -1710,7 +1670,7 @@ describe("TurnController authoritative lifecycle", () => {
     expect(turn).toMatchObject({
       status: "completed",
       terminalReason: "provider-completed",
-      providerSessionBefore: "session-before",
+      providerSessionBefore: null,
       providerSessionAfter: "session-after",
       checkpointId: checkpoint.id,
       model: "gpt-test",
@@ -1854,7 +1814,7 @@ describe("TurnController authoritative lifecycle", () => {
     runtime.store.close();
   });
 
-  it("rejects an incompatible model switch before persisting a new message or turn", async () => {
+  it("keeps conversation history but starts fresh across an incompatible model switch", async () => {
     const runtime = await testRuntime();
     runtime.provider.resolveModelRoute = (selection) => {
       const route = resolveNativeModelRoute(selection);
@@ -1892,18 +1852,25 @@ describe("TurnController authoritative lifecycle", () => {
       model: "gpt-other",
     });
     const before = runtime.store.snapshot();
-    expect(() => runtime.controller.queue({
+    const next = runtime.controller.queue({
       conversationId: runtime.conversationId,
-      content: "Do not cross the model boundary.",
-    })).toThrow("cannot change models inside an existing session");
+      content: "Cross the model boundary without reusing hidden state.",
+    });
     const after = runtime.store.snapshot();
-    expect(after.messages).toEqual(before.messages);
-    expect(after.agentTurns).toEqual(before.agentTurns);
-    expect(runtime.provider.input?.model).toBe("gpt-test");
+    expect(after.messages).toHaveLength(before.messages.length + 1);
+    expect(after.agentTurns).toHaveLength(before.agentTurns.length + 1);
+    expect(next.turn.providerSessionBefore).toBeNull();
+    expect(next.turn.continuationReasonCode)
+      .toBe("incompatible-model-changed");
+    runtime.controller.start(next.turn.id);
+    expect(runtime.provider.input).toMatchObject({ model: "gpt-other" });
+    expect(runtime.provider.input?.sessionId).toBeUndefined();
+    runtime.provider.resolve({ status: "completed", text: "Fresh model." });
+    await flushPromises();
     runtime.store.close();
   });
 
-  it("rejects a replaced backend endpoint before persisting a new turn", async () => {
+  it("keeps conversation history but starts fresh after backend endpoint replacement", async () => {
     const runtime = await testRuntime();
     let endpointIdentity = "endpoint:first";
     runtime.provider.resolveModelRoute = (selection) => {
@@ -1936,13 +1903,21 @@ describe("TurnController authoritative lifecycle", () => {
 
     endpointIdentity = "endpoint:replacement";
     const before = runtime.store.snapshot();
-    expect(() => runtime.controller.queue({
+    const next = runtime.controller.queue({
       conversationId: runtime.conversationId,
-      content: "Do not cross the endpoint boundary.",
-    })).toThrow("different endpoint");
+      content: "Use the replacement endpoint without stale provider state.",
+    });
     const after = runtime.store.snapshot();
-    expect(after.messages).toEqual(before.messages);
-    expect(after.agentTurns).toEqual(before.agentTurns);
+    expect(after.messages).toHaveLength(before.messages.length + 1);
+    expect(after.agentTurns).toHaveLength(before.agentTurns.length + 1);
+    expect(next.turn.providerSessionBefore).toBeNull();
+    expect(next.turn.continuationReasonCode).toBe("backend-endpoint-changed");
+    expect(next.turn.continuationIdentity.endpointIdentity)
+      .toBe("endpoint:replacement");
+    runtime.controller.start(next.turn.id);
+    expect(runtime.provider.input?.sessionId).toBeUndefined();
+    runtime.provider.resolve({ status: "completed", text: "Fresh endpoint." });
+    await flushPromises();
     runtime.store.close();
   });
 
@@ -1995,6 +1970,44 @@ describe("TurnController authoritative lifecycle", () => {
       },
     });
     runtime.provider.resolve({ status: "completed", text: "Continued." });
+    await flushPromises();
+    runtime.store.close();
+  });
+
+  it("does not pair a stale conversation session with another turn's identity", async () => {
+    const runtime = await testRuntime();
+    const first = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Establish an exact provider session.",
+    });
+    runtime.controller.start(first.turn.id);
+    const firstIdentity = identity(runtime);
+    runtime.provider.emit({
+      ...firstIdentity,
+      type: "session",
+      sessionId: "authoritative-session",
+    });
+    runtime.provider.resolve({
+      status: "completed",
+      sessionId: "authoritative-session",
+      text: "Established.",
+    });
+    await flushPromises();
+
+    runtime.store.updateConversation(runtime.conversationId, {
+      providerSessionId: "stale-shell-session",
+    });
+    const next = runtime.controller.queue({
+      conversationId: runtime.conversationId,
+      content: "Do not reuse unrelated hidden state.",
+    });
+
+    expect(next.turn.providerSessionBefore).toBeNull();
+    expect(next.turn.continuationReasonCode)
+      .toBe("missing-continuation-identity");
+    runtime.controller.start(next.turn.id);
+    expect(runtime.provider.input?.sessionId).toBeUndefined();
+    runtime.provider.resolve({ status: "completed", text: "Fresh session." });
     await flushPromises();
     runtime.store.close();
   });

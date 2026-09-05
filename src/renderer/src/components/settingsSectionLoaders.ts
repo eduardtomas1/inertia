@@ -15,8 +15,15 @@ export const loadDiscordSettings = createSurfaceLoader(async () => ({
 export const loadCanaryRollbackSetting = createSurfaceLoader(
   () => import("./CanaryRollbackSetting"),
 );
+export const loadLifecycleIntegritySettings = createSurfaceLoader(async () => ({
+  default: (await import("./LifecycleIntegritySettings"))
+    .LifecycleIntegritySettings,
+}));
 
 export function prefetchSettingsSection(section: string): void {
+  if (section === "providers" || section === "archive") {
+    void loadLifecycleIntegritySettings();
+  }
   if (section === "backends") {
     void loadModelBackendsSettings();
   } else if (section === "connections") {

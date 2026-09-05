@@ -4,6 +4,10 @@ import { lstatSync, readFileSync } from "node:fs";
 import { lstat, readFile, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
+import { linuxProcessGroupCanExecute } from "./linux-process-group.mjs";
+
+export { linuxProcessGroupCanExecute };
+
 const MAX_COMMAND_OUTPUT_BYTES = 4 * 1024 * 1024;
 const DIAGNOSTIC_TAIL_BYTES = 16 * 1024;
 const PROCESS_TREE_DRAIN_TIMEOUT_MS = 1_000;
@@ -20,6 +24,24 @@ export class ProcessTreeCleanupError extends Error {
     super(message);
     this.name = "ProcessTreeCleanupError";
     this.preserveTemporaryRoot = true;
+  }
+}
+
+export class BoundedProcessTimeoutError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "BoundedProcessTimeoutError";
+    this.cleanupConfirmed = true;
+  }
+}
+
+export class BoundedProcessExitError extends Error {
+  constructor(message, exitCode, signal) {
+    super(message);
+    this.name = "BoundedProcessExitError";
+    this.cleanupConfirmed = true;
+    this.exitCode = exitCode;
+    this.signal = signal;
   }
 }
 
@@ -186,6 +208,10 @@ async function waitForPosixProcessGroupExit(
 ) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
+    if (
+      process.platform === "linux"
+      && linuxProcessGroupCanExecute(processGroupId) === false
+    ) return true;
     try {
       process.kill(-processGroupId, 0);
     } catch (error) {
@@ -208,6 +234,10 @@ function posixProcessGroupExists(processGroupId) {
     processGroupId <= 0
   )
     return false;
+  if (process.platform === "linux") {
+    const executable = linuxProcessGroupCanExecute(processGroupId);
+    if (executable !== null) return executable;
+  }
   try {
     process.kill(-processGroupId, 0);
     return true;
@@ -477,6 +507,10 @@ export async function runBounded(command, args, options) {
     if (options.echoOutputLive) {
       (chunks === stdoutChunks ? process.stdout : process.stderr).write(buffer);
     }
+    options.onOutput?.(
+      chunks === stdoutChunks ? "stdout" : "stderr",
+      buffer,
+    );
     if (outputBytes > maxOutputBytes) signalOverflow();
   };
   const appendGuardianDiagnostic = (chunk) => {
@@ -605,9 +639,12 @@ export async function runBounded(command, args, options) {
         `${options.label} ${reason}, and its process tree or handed-off process group could not be confirmed stopped.\n${cleanupDiagnosticTail()}`,
       );
     }
-    throw new Error(
-      `${options.label} ${reason}; its complete process tree was terminated.\n${outputTail}`,
-    );
+    const message =
+      `${options.label} ${reason}; its complete process tree was terminated.\n${outputTail}`;
+    if (outcome.kind === "timeout") {
+      throw new BoundedProcessTimeoutError(message);
+    }
+    throw new Error(message);
   }
   let removedResidualProcessTree = false;
   if (windowsGuardian) {
@@ -711,7 +748,11 @@ export async function runBounded(command, args, options) {
       outcome.result.code === null
         ? `signal ${String(outcome.result.signal)}`
         : `status ${String(outcome.result.code)}`;
-    throw new Error(`${options.label} exited with ${exit}.\n${outputTail}`);
+    throw new BoundedProcessExitError(
+      `${options.label} exited with ${exit}.\n${outputTail}`,
+      outcome.result.code,
+      outcome.result.signal,
+    );
   }
   if (
     options.posixProcessGroupHandoff !== undefined &&

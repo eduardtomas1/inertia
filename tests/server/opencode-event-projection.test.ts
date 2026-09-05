@@ -33,6 +33,8 @@ describe("OpenCode event projection", () => {
       "opencode",
       "conversation",
       { onEvent: (event) => events.push(event) },
+      "run",
+      "turn",
     );
     const state = createOpenCodeEventState();
     const emittedParts = new Map<string, string>();
@@ -91,7 +93,13 @@ describe("OpenCode event projection", () => {
   });
 
   it("reclaims finalized correlations across arbitrarily long sequential output", () => {
-    const emitter = createAgentHarnessEmitter("opencode", "conversation");
+    const emitter = createAgentHarnessEmitter(
+      "opencode",
+      "conversation",
+      undefined,
+      "run",
+      "turn",
+    );
     const state = createOpenCodeEventState();
     const usage = usageState();
     const emittedParts = new Map<string, string>();
@@ -146,6 +154,8 @@ describe("OpenCode event projection", () => {
       "opencode",
       "conversation",
       { onEvent: (event) => events.push(event) },
+      "run",
+      "turn",
     );
     const state = createOpenCodeEventState();
 

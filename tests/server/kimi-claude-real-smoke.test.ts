@@ -31,7 +31,7 @@ realDescribe("real Kimi through Claude integration", () => {
       reasoningEffort: "low",
     });
     const registrations = claudeBackendProfileRegistrations([profile]);
-    const manager = new ProviderManager({
+    const manager = ProviderManager.createForTests({
       commands: {
         claude: process.env.INERTIA_CLAUDE_CODE_EXECUTABLE ?? "claude",
       },

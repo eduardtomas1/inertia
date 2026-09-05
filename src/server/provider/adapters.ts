@@ -2,7 +2,7 @@ import { isAbsolute } from "node:path";
 
 import { PROVIDER_INFO } from "./catalog";
 import {
-  continuationIdentitySchema,
+  versionedContinuationIdentitySchema,
   currentKnownHarnessIdSchema,
   modelBackendProfileSchema,
   modelSelectionSchema,
@@ -521,7 +521,7 @@ export function validateProviderRunInput(input: ProviderRunInput): string {
   if (!modelSelectionSchema.safeParse(input.modelSelection).success) {
     throw new ProviderRuntimeError("invalid_input", "The model selection is invalid.");
   }
-  if (!continuationIdentitySchema.safeParse(input.continuationIdentity).success) {
+  if (!versionedContinuationIdentitySchema.safeParse(input.continuationIdentity).success) {
     throw new ProviderRuntimeError("invalid_input", "The continuation identity is invalid.");
   }
   const providerOptionKeys = Object.keys(input.modelSelection.providerOptions);
@@ -581,7 +581,7 @@ export function validateProviderRunInput(input: ProviderRunInput): string {
       "The response speed continuation transition is invalid.",
     );
   }
-  const conversationId = (input.conversationId ?? input.threadId)?.trim();
+  const conversationId = input.conversationId?.trim();
   if (!conversationId || conversationId.length > 512 || conversationId.includes("\0")) {
     throw new ProviderRuntimeError("invalid_input", "A valid conversation identifier is required.");
   }
@@ -646,7 +646,6 @@ export function validateProviderRunInput(input: ProviderRunInput): string {
     if (
       input.operation.kind !== "compact"
       || !input.sessionId
-      || input.turnId !== undefined
       || input.performanceModeTransition !== undefined
       || input.goalStart !== undefined
       || input.goalContinuationExpected !== undefined
@@ -664,19 +663,15 @@ export function validateProviderRunInput(input: ProviderRunInput): string {
       );
     }
   }
-  for (const value of [input.runId, input.turnId, input.model, input.sessionId]) {
+  for (const value of [input.runId, input.turnId]) {
+    if (typeof value !== "string" || !value.trim() || value.length > 512 || value.includes("\0")) {
+      throw new ProviderRuntimeError("invalid_input", "Exact run and turn identities are required.");
+    }
+  }
+  for (const value of [input.model, input.sessionId]) {
     if (value !== undefined && (!value.trim() || value.length > 512 || value.includes("\0"))) {
       throw new ProviderRuntimeError("invalid_input", "A provider option is invalid.");
     }
-  }
-  const ownsTurnlessControlOperation = input.operation !== undefined
-    && input.runId !== undefined
-    && input.turnId === undefined;
-  if (
-    (input.runId === undefined) !== (input.turnId === undefined)
-    && !ownsTurnlessControlOperation
-  ) {
-    throw new ProviderRuntimeError("invalid_input", "Run and turn identities must be provided together.");
   }
   const imagePaths = input.imagePaths ?? [];
   if (imagePaths.length > MAX_IMAGE_COUNT) {

@@ -7,6 +7,7 @@ import {
   mkdtemp,
   readFile,
   realpath,
+  rename,
   rm,
   symlink,
   unlink,
@@ -19,7 +20,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   installAppImageUpdate,
+  launchAppImage,
+  finalizeAppImageUpdate,
+  prepareAppImageUpdate,
   recoverAppImageUpdate,
+  recoverAppImageUpdateForHandoff,
+  validateCommittedAppImageUpdate,
+  validateStagedAppImageUpdate,
 } from "../../src/main/appimage-installed-identity";
 
 const roots: string[] = [];
@@ -55,6 +62,326 @@ afterEach(async () => {
 });
 
 describe.skipIf(process.platform === "win32")("stable AppImage installed identity", () => {
+  it("keeps staging, ownership commit, and rollback retirement distinct", async () => {
+    const root = await temporaryRoot();
+    const active = await appImage(
+      join(root, "Inertia-0.0.46.AppImage"),
+      "known-good",
+    );
+    const downloaded = await appImage(
+      join(root, "downloaded.AppImage"),
+      "validated-candidate",
+    );
+    const operationId = "11111111-1111-4111-8111-111111111111";
+    const staged = await prepareAppImageUpdate({
+      channel: "stable",
+      activePath: active,
+      downloadedPath: downloaded,
+      operationId,
+    });
+
+    expect(await readFile(active, "utf8")).toBe("known-good");
+    expect(await missing(staged.stablePath)).toBe(true);
+    await expect(validateStagedAppImageUpdate({
+      channel: "stable",
+      operationId,
+      candidatePath: staged.candidatePath,
+      artifactDigest: staged.artifactDigest,
+      executableIdentityDigest: staged.executableIdentityDigest,
+      deadlineAt: new Date(Date.now() - 1).toISOString(),
+    })).rejects.toThrow("validation deadline expired");
+    await expect(validateStagedAppImageUpdate({
+      channel: "stable",
+      operationId,
+      candidatePath: staged.candidatePath,
+      artifactDigest: staged.artifactDigest,
+      executableIdentityDigest: staged.executableIdentityDigest,
+      deadlineAt: new Date(Date.now() + 30_000).toISOString(),
+    })).resolves.toEqual({ stablePath: staged.stablePath });
+
+    await expect(staged.commit()).resolves.toBe(staged.stablePath);
+    expect(await readFile(staged.stablePath, "utf8")).toBe("validated-candidate");
+    expect(await readFile(active, "utf8")).toBe("known-good");
+    await expect(validateCommittedAppImageUpdate({
+      channel: "stable",
+      operationId,
+      stablePath: staged.stablePath,
+      artifactDigest: staged.artifactDigest,
+      executableIdentityDigest: staged.executableIdentityDigest,
+      deadlineAt: new Date(Date.now() - 1).toISOString(),
+    })).rejects.toThrow("validation deadline expired");
+    await expect(validateCommittedAppImageUpdate({
+      channel: "stable",
+      operationId,
+      stablePath: staged.stablePath,
+      artifactDigest: staged.artifactDigest,
+      executableIdentityDigest: staged.executableIdentityDigest,
+      deadlineAt: new Date(Date.now() + 30_000).toISOString(),
+    })).resolves.toBeUndefined();
+
+    await finalizeAppImageUpdate({
+      channel: "stable",
+      operationId,
+      stablePath: staged.stablePath,
+      artifactDigest: staged.artifactDigest,
+      executableIdentityDigest: staged.executableIdentityDigest,
+    });
+    expect(await missing(active)).toBe(true);
+    expect(await readFile(staged.stablePath, "utf8")).toBe("validated-candidate");
+    expect(await missing(join(root, ".Inertia.AppImage.inertia-update-backup")))
+      .toBe(true);
+    expect(await missing(join(root, ".Inertia.AppImage.inertia-update.json")))
+      .toBe(true);
+  });
+
+  it.each([
+    "backup-unlinked",
+    "original-unlinked",
+    "next-journal-unlinked",
+    "rollback-residue-synced",
+    "journal-unlinked",
+    "directory-synced",
+  ] as const)(
+    "converges when finalization is interrupted after %s",
+    async (interruptedStep) => {
+      const root = await temporaryRoot();
+      const active = await appImage(
+        join(root, "Inertia-0.0.46.AppImage"),
+        "known-good",
+      );
+      const downloaded = await appImage(
+        join(root, "downloaded.AppImage"),
+        "validated-candidate",
+      );
+      const operationId = "33333333-3333-4333-8333-333333333333";
+      const staged = await prepareAppImageUpdate({
+        channel: "stable",
+        activePath: active,
+        downloadedPath: downloaded,
+        operationId,
+      });
+      await staged.commit();
+      let interrupt = true;
+
+      await expect(finalizeAppImageUpdate({
+        channel: "stable",
+        operationId,
+        stablePath: staged.stablePath,
+        artifactDigest: staged.artifactDigest,
+        executableIdentityDigest: staged.executableIdentityDigest,
+        testHooks: {
+          afterCleanupStep: (step) => {
+            if (interrupt && step === interruptedStep) {
+              interrupt = false;
+              throw new Error("simulated finalization interruption");
+            }
+          },
+        },
+      })).rejects.toThrow("simulated finalization interruption");
+
+      await expect(finalizeAppImageUpdate({
+        channel: "stable",
+        operationId,
+        stablePath: staged.stablePath,
+        artifactDigest: staged.artifactDigest,
+        executableIdentityDigest: staged.executableIdentityDigest,
+      })).resolves.toBeUndefined();
+      await expect(readFile(staged.stablePath, "utf8"))
+        .resolves.toBe("validated-candidate");
+      expect(await missing(active)).toBe(true);
+      expect(await missing(join(root, ".Inertia.AppImage.inertia-update-backup")))
+        .toBe(true);
+      expect(await missing(join(root, ".Inertia.AppImage.inertia-update.json")))
+        .toBe(true);
+    },
+  );
+
+  it.each(["candidate", "next-journal"] as const)(
+    "retains finalization authority for unexpected %s residue",
+    async (kind) => {
+      const root = await temporaryRoot();
+      const active = await appImage(
+        join(root, "Inertia-0.0.46.AppImage"),
+        "known-good",
+      );
+      const downloaded = await appImage(
+        join(root, "downloaded.AppImage"),
+        "validated-candidate",
+      );
+      const operationId = "33333333-3333-4333-8333-333333333333";
+      const staged = await prepareAppImageUpdate({
+        channel: "stable",
+        activePath: active,
+        downloadedPath: downloaded,
+        operationId,
+      });
+      await staged.commit();
+      const residuePath = kind === "candidate"
+        ? staged.candidatePath
+        : join(root, ".Inertia.AppImage.inertia-update-next.json");
+      await writeFile(residuePath, "unexpected", { mode: 0o600 });
+
+      await expect(finalizeAppImageUpdate({
+        channel: "stable",
+        operationId,
+        stablePath: staged.stablePath,
+        artifactDigest: staged.artifactDigest,
+        executableIdentityDigest: staged.executableIdentityDigest,
+      })).rejects.toThrow("finalization residue is ambiguous");
+
+      await expect(readFile(active, "utf8")).resolves.toBe("known-good");
+      expect(await missing(join(root, ".Inertia.AppImage.inertia-update-backup")))
+        .toBe(false);
+      expect(await missing(join(root, ".Inertia.AppImage.inertia-update.json")))
+        .toBe(false);
+    },
+  );
+
+  it("retains both authorities when an unversioned rollback backup is missing", async () => {
+    const root = await temporaryRoot();
+    const active = await appImage(join(root, "Inertia.AppImage"), "known-good");
+    const downloaded = await appImage(
+      join(root, "downloaded.AppImage"),
+      "unadmitted-candidate",
+    );
+    const operationId = "33333333-3333-4333-8333-333333333333";
+    const staged = await prepareAppImageUpdate({
+      channel: "stable",
+      activePath: active,
+      downloadedPath: downloaded,
+      operationId,
+    });
+    await staged.commit();
+    await unlink(join(root, ".Inertia.AppImage.inertia-update-backup"));
+
+    await expect(recoverAppImageUpdateForHandoff({
+      channel: "stable",
+      activePath: staged.stablePath,
+      expected: {
+        operationId,
+        artifactDigest: staged.artifactDigest,
+        executableIdentityDigest: staged.executableIdentityDigest,
+        phases: ["ownership-committed"],
+      },
+    })).rejects.toThrow("known-good AppImage is unavailable");
+
+    await expect(readFile(staged.stablePath, "utf8"))
+      .resolves.toBe("unadmitted-candidate");
+    expect(await missing(join(root, ".Inertia.AppImage.inertia-update.json")))
+      .toBe(false);
+  });
+
+  it("never replaces a versioned rollback owner with a foreign original", async () => {
+    const root = await temporaryRoot();
+    const active = await appImage(
+      join(root, "Inertia-0.0.46.AppImage"),
+      "known-good",
+    );
+    const downloaded = await appImage(
+      join(root, "downloaded.AppImage"),
+      "unadmitted-candidate",
+    );
+    const operationId = "33333333-3333-4333-8333-333333333333";
+    const staged = await prepareAppImageUpdate({
+      channel: "stable",
+      activePath: active,
+      downloadedPath: downloaded,
+      operationId,
+    });
+    await staged.commit();
+    await unlink(active);
+    await appImage(active, "foreign-replacement");
+
+    await expect(recoverAppImageUpdateForHandoff({
+      channel: "stable",
+      activePath: staged.stablePath,
+      expected: {
+        operationId,
+        artifactDigest: staged.artifactDigest,
+        executableIdentityDigest: staged.executableIdentityDigest,
+        phases: ["ownership-committed"],
+      },
+    })).rejects.toThrow("original AppImage changed before rollback");
+
+    await expect(readFile(active, "utf8")).resolves.toBe("foreign-replacement");
+    await expect(readFile(staged.stablePath, "utf8"))
+      .resolves.toBe("unadmitted-candidate");
+    expect(await missing(join(root, ".Inertia.AppImage.inertia-update-backup")))
+      .toBe(false);
+    expect(await missing(join(root, ".Inertia.AppImage.inertia-update.json")))
+      .toBe(false);
+  });
+
+  it("can roll a committed but unadmitted candidate back exactly", async () => {
+    const root = await temporaryRoot();
+    const active = await appImage(join(root, "Inertia.AppImage"), "known-good");
+    const downloaded = await appImage(
+      join(root, "downloaded.AppImage"),
+      "candidate",
+    );
+    const staged = await prepareAppImageUpdate({
+      channel: "stable",
+      activePath: active,
+      downloadedPath: downloaded,
+      operationId: "22222222-2222-4222-8222-222222222222",
+    });
+
+    await staged.commit();
+    expect(await readFile(active, "utf8")).toBe("candidate");
+    await staged.rollback();
+
+    expect(await readFile(active, "utf8")).toBe("known-good");
+    expect(await missing(join(root, ".Inertia.AppImage.inertia-update-backup")))
+      .toBe(true);
+    expect(await missing(join(root, ".Inertia.AppImage.inertia-update.json")))
+      .toBe(true);
+  });
+
+  it("never treats candidate process creation as bootstrap readiness", async () => {
+    const root = await temporaryRoot();
+    const marker = join(root, "candidate-ran");
+    const candidate = await appImage(
+      join(root, "candidate.AppImage"),
+      "#!/bin/sh\nprintf launched > \"$INERTIA_TEST_APPIMAGE_MARKER\"\n",
+    );
+
+    await expect(launchAppImage(candidate, {
+      INERTIA_TEST_APPIMAGE_MARKER: marker,
+    })).rejects.toThrow(
+      "cannot be admitted without a verified bootstrap acknowledgement",
+    );
+    expect(await missing(marker)).toBe(true);
+  });
+
+  it("rolls the production transaction back when no bootstrap ACK channel exists", async () => {
+    const root = await temporaryRoot();
+    const active = await appImage(
+      join(root, "Inertia-0.0.46.AppImage"),
+      "known-good",
+    );
+    const downloaded = await appImage(
+      join(root, "downloaded.AppImage"),
+      "unacknowledged-candidate",
+    );
+
+    await expect(installAppImageUpdate({
+      channel: "stable",
+      activePath: active,
+      downloadedPath: downloaded,
+    })).rejects.toThrow(
+      "cannot be admitted without a verified bootstrap acknowledgement",
+    );
+
+    expect(await readFile(active, "utf8")).toBe("known-good");
+    for (const leaf of [
+      "Inertia.AppImage",
+      ".Inertia.AppImage.inertia-update-candidate",
+      ".Inertia.AppImage.inertia-update-backup",
+      ".Inertia.AppImage.inertia-update.json",
+      ".Inertia.AppImage.inertia-update-next.json",
+    ]) expect(await missing(join(root, leaf)), leaf).toBe(true);
+  });
+
   it("migrates a versioned first download to Inertia.AppImage through spaces and a realpath-contained directory alias", async () => {
     const root = await temporaryRoot();
     const downloads = join(root, "Downloaded Applications");
@@ -200,7 +527,7 @@ describe.skipIf(process.platform === "win32")("stable AppImage installed identit
     expect(await readFile(active, "utf8")).toBe("known-good");
   });
 
-  it("finalizes stable-path recovery after the candidate starts while the versioned original still exists", async () => {
+  it("rolls back stable-path recovery instead of treating candidate startup as readiness", async () => {
     const root = await temporaryRoot();
     const original = await appImage(join(root, "Inertia-0.0.46.AppImage"), "known-good");
     const stable = await appImage(join(root, "Inertia.AppImage"), "replacement");
@@ -220,11 +547,48 @@ describe.skipIf(process.platform === "win32")("stable AppImage installed identit
     await expect(recoverAppImageUpdate({
       channel: "stable",
       activePath: stable,
-    })).resolves.toBe(join(await realpath(root), "Inertia.AppImage"));
-    expect(await readFile(stable, "utf8")).toBe("replacement");
-    expect(await missing(original)).toBe(true);
+    })).rejects.toThrow(
+      "rolled back because candidate bootstrap was not acknowledged",
+    );
+    expect(await readFile(original, "utf8")).toBe("known-good");
+    expect(await missing(stable)).toBe(true);
     expect(await missing(backup)).toBe(true);
     expect(await missing(join(root, ".Inertia.AppImage.inertia-update.json"))).toBe(true);
+  });
+
+  it("restores an unversioned known-good AppImage after an unacknowledged crash prefix", async () => {
+    const root = await temporaryRoot();
+    const stable = await appImage(join(root, "Inertia.AppImage"), "known-good");
+    const backup = join(root, ".Inertia.AppImage.inertia-update-backup");
+    const candidatePath = await appImage(
+      join(root, ".Inertia.AppImage.inertia-update-candidate"),
+      "unacknowledged",
+    );
+    const originalIdentity = fileIdentity(await lstat(stable));
+    const candidateIdentity = fileIdentity(await lstat(candidatePath));
+    await link(stable, backup);
+    await rename(candidatePath, stable);
+    await writeFile(join(root, ".Inertia.AppImage.inertia-update.json"), `${JSON.stringify({
+      schema: 1,
+      channel: "stable",
+      phase: "prepared",
+      originalName: "Inertia.AppImage",
+      stableName: "Inertia.AppImage",
+      original: originalIdentity,
+      candidate: candidateIdentity,
+    })}\n`, { mode: 0o600 });
+
+    await expect(recoverAppImageUpdate({
+      channel: "stable",
+      activePath: stable,
+    })).rejects.toThrow(
+      "rolled back because candidate bootstrap was not acknowledged",
+    );
+
+    expect(await readFile(stable, "utf8")).toBe("known-good");
+    expect(await missing(backup)).toBe(true);
+    expect(await missing(join(root, ".Inertia.AppImage.inertia-update.json")))
+      .toBe(true);
   });
 
   it("rolls back a crash after the stable rename and before launch when the versioned original relaunches", async () => {

@@ -583,6 +583,20 @@
           "digest": "5afd1847c33161a4ebdd277189fa9f8fa302659191d45813f540d0d8de2dd04a"
         }
       ]
+    },
+    {
+      "version": 68,
+      "name": "PersistTurnContinuationEvidence",
+      "digest": "4e4012320a91320ea959d48dbf9b5c8a4c38e973b638981ac314ee2d7f02d894",
+      "sources": [
+        {
+          "path": "src/server/persistence/migrations/turn-continuation-evidence.ts",
+          "symbols": [
+            "persistTurnContinuationEvidence"
+          ],
+          "digest": "63dea00e64daee5e9f8c2baa150ad20b239fe095cccb41e19fc6e1c62cc6d48a"
+        }
+      ]
     }
   ]
 }

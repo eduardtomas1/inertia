@@ -21,6 +21,10 @@ export interface BackendProfileControllerOptions {
   store: RuntimeStore;
   credentials?: BackendCredentialBroker;
   builtInClaudeProfiles?: readonly ClaudeCompatibleBackendProfile[];
+  /** Deterministic compatibility-evidence clock used by focused tests. */
+  now?: () => Date;
+  /** Deterministic exact-operation identity used by focused tests. */
+  probeOperationId?: () => string;
 }
 
 export class BackendProfileControllerError extends Error {

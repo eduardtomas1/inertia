@@ -1,7 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type {
   DesktopBridge,
-  RuntimeConnection,
 } from "../shared/desktop.js";
 import {
   type DetachedChatBridge,
@@ -72,7 +71,9 @@ const bridge = Object.freeze({
     ) === true;
   },
   getRuntimeConnection: () =>
-    ipcRenderer.invoke(IPC.getRuntimeConnection) as Promise<RuntimeConnection>,
+    ipcRenderer.invoke(IPC.getRuntimeConnection) as ReturnType<
+      DesktopBridge["getRuntimeConnection"]
+    >,
   onRuntimeReady: (listener: () => void) => {
     const handler = () => listener();
     ipcRenderer.on(IPC.runtimeReady, handler);

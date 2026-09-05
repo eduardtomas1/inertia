@@ -1,3 +1,4 @@
+// @inertia-test-suite portable
 import { randomUUID } from "node:crypto";
 import { copyFile, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";

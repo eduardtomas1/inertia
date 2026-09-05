@@ -48,6 +48,7 @@ import {
   type RuntimeRecoveryWorkerOptions,
 } from "./runtime-recovery-process-protocol.js";
 import { validRuntimeGenerationId, validSystemBootId } from "./runtime-identity-protocol";
+import { parseRuntimeStartupFailureEvent, type RuntimeStartupFailureEvent } from "../shared/runtime-startup-diagnostics";
 import {
   parseRuntimeDatabaseStartupRecovery,
   type RuntimeDatabaseStartupRecoveryReport,
@@ -262,7 +263,7 @@ export type RuntimeWorkerEvent =
       databaseRecovery?: RuntimeDatabaseStartupRecoveryReport;
     }
   | { type: "runtime.system-suspend-result"; id: string; recorded: boolean }
-  | { type: "runtime.startup-failed"; message: string }
+  | RuntimeStartupFailureEvent
   | { type: "runtime.restart-requested"; reason: RuntimeRestartReason }
   | RuntimeShutdownUnconfirmedEvent
   | { type: "runtime.stopped" }
@@ -940,10 +941,8 @@ export function parseRuntimeWorkerEvent(value: unknown): RuntimeWorkerEvent | nu
       },
     };
   }
-  if (value.type === "runtime.startup-failed" && Object.keys(value).length === 2 && typeof value.message === "string") {
-    const message = value.message.trim();
-    return message && message.length <= 1000 ? { type: "runtime.startup-failed", message } : null;
-  }
+  const startupFailure = parseRuntimeStartupFailureEvent(value);
+  if (startupFailure) return startupFailure;
   if (
     value.type === "runtime.restart-requested"
     && Object.keys(value).length === 2

@@ -3,6 +3,7 @@ import type {
   AgentInputRequest,
   AgentTurn,
 } from "../../../shared/contracts";
+import { deletePendingInteraction } from "../pending-interaction-registry";
 import type {
   ActiveTurn,
   TurnControllerHooks,
@@ -27,8 +28,18 @@ export function quarantineActiveDuoTurn(
     dependencies.scheduler.clearTimeout(active.lifetimeTimer);
     active.lifetimeTimer = null;
   }
+  const interactionOwner = {
+    providerId: active.turn.providerId,
+    conversationId: active.conversation.id,
+    runId: active.turn.runId,
+    turnId: active.turn.id,
+  };
   for (const requestId of active.approvalIds) {
-    if (!dependencies.pendingApprovals.delete(requestId)) continue;
+    if (!deletePendingInteraction(
+      dependencies.pendingApprovals,
+      interactionOwner,
+      requestId,
+    )) continue;
     dependencies.hooks.broadcast({
       type: "agent.approval.resolved",
       conversationId: active.conversation.id,
@@ -40,7 +51,11 @@ export function quarantineActiveDuoTurn(
   }
   active.approvalIds.clear();
   for (const requestId of active.inputIds) {
-    if (!dependencies.pendingInputs.delete(requestId)) continue;
+    if (!deletePendingInteraction(
+      dependencies.pendingInputs,
+      interactionOwner,
+      requestId,
+    )) continue;
     dependencies.hooks.broadcast({
       type: "agent.input.resolved",
       conversationId: active.conversation.id,
@@ -60,27 +75,45 @@ export function resolvePersistedDuoInteractions(
     hooks: TurnControllerHooks;
   },
 ): void {
-  for (const [requestId, request] of dependencies.pendingApprovals) {
-    if (request.turnId !== turn.id) continue;
-    dependencies.pendingApprovals.delete(requestId);
+  for (const request of dependencies.pendingApprovals.values()) {
+    if (
+      request.providerId !== turn.providerId
+      || request.conversationId !== turn.conversationId
+      || request.runId !== turn.runId
+      || request.turnId !== turn.id
+    ) continue;
+    if (!deletePendingInteraction(
+      dependencies.pendingApprovals,
+      request,
+      request.id,
+    )) continue;
     dependencies.hooks.broadcast({
       type: "agent.approval.resolved",
       conversationId: turn.conversationId,
       runId: turn.runId,
       turnId: turn.id,
-      requestId,
+      requestId: request.id,
       decision: "cancelled",
     });
   }
-  for (const [requestId, request] of dependencies.pendingInputs) {
-    if (request.turnId !== turn.id) continue;
-    dependencies.pendingInputs.delete(requestId);
+  for (const request of dependencies.pendingInputs.values()) {
+    if (
+      request.providerId !== turn.providerId
+      || request.conversationId !== turn.conversationId
+      || request.runId !== turn.runId
+      || request.turnId !== turn.id
+    ) continue;
+    if (!deletePendingInteraction(
+      dependencies.pendingInputs,
+      request,
+      request.id,
+    )) continue;
     dependencies.hooks.broadcast({
       type: "agent.input.resolved",
       conversationId: turn.conversationId,
       runId: turn.runId,
       turnId: turn.id,
-      requestId,
+      requestId: request.id,
     });
   }
 }

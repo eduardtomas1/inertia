@@ -19,7 +19,7 @@ describe("real Codex App Server smoke", () => {
     async () => {
       const root = mkdtempSync(join(tmpdir(), "inertia-real-codex-"));
       roots.push(root);
-      const manager = new ProviderManager({ commands: { codex: executable }, cancelGraceMs: 2_000 });
+      const manager = ProviderManager.createForTests({ commands: { codex: executable }, cancelGraceMs: 2_000 });
       const approvals: string[] = [];
       const lifecycle: string[] = [];
       const reasoningSummaries: string[] = [];
@@ -64,13 +64,13 @@ describe("real Codex App Server smoke", () => {
             const decision = event.request.availableDecisions.includes("deny") ? "deny" : "cancel";
             usedCancel ||= decision === "cancel";
             breadcrumb(`approval:${event.request.kind}:decision:${decision}`);
-            responseAccepted &&= manager.respondToApproval(event.conversationId, event.request.requestId, decision);
+            responseAccepted &&= manager.respondToApproval(event.conversationId, event.request.requestId, decision, { runId: event.runId, turnId: event.turnId });
             if (!responseAccepted) manager.cancel(event.conversationId);
           },
           onInput: (event) => {
             breadcrumb(`input:${event.request.questions.length}`);
             const answers = Object.fromEntries(event.request.questions.map((question) => [question.id, ["Stop without making changes."]]));
-            responseAccepted &&= manager.respondToInput(event.conversationId, event.request.requestId, answers);
+            responseAccepted &&= manager.respondToInput(event.conversationId, event.request.requestId, answers, { runId: event.runId, turnId: event.turnId });
             if (!responseAccepted) manager.cancel(event.conversationId);
           },
         });

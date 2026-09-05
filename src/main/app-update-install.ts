@@ -1,5 +1,9 @@
 import type { RuntimeUpdatePreparationBlocker, RuntimeUpdatePreparationResult } from "../node/runtime-process-protocol.js";
 import type { AppUpdateInstallBlocker, AppUpdateStatus } from "../shared/desktop.js";
+import type {
+  AppUpdateInstallRuntimeContext,
+  AppUpdaterInstallResult,
+} from "./electron-app-updater.js";
 import { finishNormalShutdownAfterCleanup } from "./privileged-shutdown.js";
 
 interface UpdateService {
@@ -7,7 +11,9 @@ interface UpdateService {
   beginInstall(): AppUpdateStatus;
   blockInstall(blocker: AppUpdateInstallBlocker): AppUpdateStatus;
   failInstall(): AppUpdateStatus;
-  quitAndInstall(onHandoff: () => void): Promise<boolean>;
+  prepareInstall?(context: AppUpdateInstallRuntimeContext): Promise<boolean>;
+  abortInstall?(): Promise<void>;
+  quitAndInstall(onHandoff: () => void): Promise<AppUpdaterInstallResult>;
 }
 
 interface RuntimeUpdateGate {
@@ -25,12 +31,18 @@ export interface AppUpdateInstallCoordinatorOptions {
   runtime(): RuntimeUpdateGate | null;
   privateConnect(): PrivateConnectUpdateGate | null;
   cleanup(): Promise<boolean>;
+  handoffContext?(): AppUpdateInstallRuntimeContext | null;
   finishNormalShutdown(): void;
   onUnconfirmedShutdown?(): void;
   reportError(error: unknown): void;
 }
 
-type InstallMode = "running" | "update-preparing" | "normal-cleanup" | "update-handoff";
+type InstallMode =
+  | "running"
+  | "update-preparing"
+  | "update-outcome-uncertain"
+  | "normal-cleanup"
+  | "update-handoff";
 
 export function appUpdateInstallBlocker(
   blocker: RuntimeUpdatePreparationBlocker,
@@ -40,6 +52,25 @@ export function appUpdateInstallBlocker(
   if (blocker === "database-recovery") return "database-recovery";
   if (blocker === "provider-maintenance") return "maintenance";
   return "local-operation";
+}
+
+export function appUpdateInstallRuntimeContext(
+  identity: {
+    readonly runtimeGenerationId: string;
+    readonly systemBootId: string;
+  } | null | undefined,
+  dataDirectory: string | null,
+  profileDirectory: string,
+): AppUpdateInstallRuntimeContext | null {
+  return identity && dataDirectory
+    ? Object.freeze({
+        handoffDirectory: dataDirectory,
+        profileDirectory,
+        dataDirectory,
+        oldRuntimeGenerationId: identity.runtimeGenerationId,
+        systemBootId: identity.systemBootId,
+      })
+    : null;
 }
 
 /** Serializes normal quit and updater handoff around one privileged cleanup. */
@@ -66,6 +97,10 @@ export class AppUpdateInstallCoordinator {
   /** Returns true only for the updater-generated quit after complete cleanup. */
   allowBeforeQuit(): boolean {
     if (this.mode === "update-handoff") return true;
+    if (this.mode === "update-outcome-uncertain") {
+      this.reportUnconfirmedShutdown();
+      return false;
+    }
     this.beginNormalShutdown();
     return false;
   }
@@ -73,7 +108,11 @@ export class AppUpdateInstallCoordinator {
   private beginNormalShutdown(): void {
     if (this.normalShutdown) return;
     this.mode = "normal-cleanup";
-    const stopping = this.releasePreparation()
+    const pendingInstall = this.installPromise;
+    const stopping = Promise.resolve()
+      .then(async () => await this.options.service.abortInstall?.())
+      .then(async () => await pendingInstall?.catch(() => undefined))
+      .then(() => this.releasePreparation())
       .then(() => this.options.cleanup())
       .then((cleanupConfirmed) => {
         finishNormalShutdownAfterCleanup({
@@ -92,6 +131,8 @@ export class AppUpdateInstallCoordinator {
   private async prepareAndInstall(): Promise<AppUpdateStatus> {
     const { service } = this.options;
     let cleanupConfirmed = false;
+    let candidatePreparationStarted = false;
+    let installInvocationStarted = false;
     try {
       const runtime = this.options.runtime();
       if (!runtime) return this.block("runtime-transition");
@@ -113,29 +154,78 @@ export class AppUpdateInstallCoordinator {
         return this.block("private-connect");
       }
 
+      if (service.prepareInstall) {
+        const context = this.options.handoffContext?.() ?? null;
+        if (!context) {
+          await this.releasePreparation();
+          return this.block("runtime-transition");
+        }
+        candidatePreparationStarted = true;
+        const candidateReady = await service.prepareInstall(context);
+        if (this.mode !== "update-preparing") {
+          await service.abortInstall?.().catch(() => undefined);
+          await this.releasePreparation();
+          return service.current();
+        }
+        if (!candidateReady) {
+          await service.abortInstall?.().catch(() => undefined);
+          await this.releasePreparation();
+          this.mode = "running";
+          return service.failInstall();
+        }
+      }
+
       this.cleanupStarted = true;
       cleanupConfirmed = await this.options.cleanup();
       if (!cleanupConfirmed && this.mode !== "update-preparing") {
         return service.failInstall();
       }
       if (this.mode !== "update-preparing") return service.current();
-      if (!cleanupConfirmed) return this.failClosed(false);
+      if (!cleanupConfirmed) {
+        await service.abortInstall?.().catch(() => undefined);
+        return this.failClosed(false);
+      }
 
-      const handedOff = await service.quitAndInstall(() => {
+      installInvocationStarted = true;
+      const installResult = await service.quitAndInstall(() => {
         if (this.mode === "update-preparing") this.mode = "update-handoff";
       });
       if (this.currentMode() === "normal-cleanup") return service.current();
-      if (!handedOff) return this.failClosed(true);
-      if (this.currentMode() !== "update-handoff") return this.failClosed(true);
+      if (installResult === "native-outcome-uncertain") {
+        return this.failUncertainInstall();
+      }
+      if (installResult === "not-invoked") {
+        try {
+          await service.abortInstall?.();
+        } catch (error) {
+          this.options.reportError(error);
+          return this.failUncertainInstall();
+        }
+        return this.failClosed(true);
+      }
+      if (this.currentMode() !== "update-handoff") {
+        await service.abortInstall?.().catch(() => undefined);
+        return this.failClosed(true);
+      }
       return service.current();
     } catch (error) {
       this.options.reportError(error);
+      if (installInvocationStarted) return this.failUncertainInstall();
       if (this.mode === "normal-cleanup") {
+        if (candidatePreparationStarted) {
+          await service.abortInstall?.().catch(() => undefined);
+        }
         return this.cleanupStarted ? service.failInstall() : service.current();
       }
       // cleanup() is idempotent. Calling it again here distinguishes a held
       // preparation failure from an irreversible, partially stopped runtime.
       if (this.cleanupStarted) return this.failClosed(cleanupConfirmed);
+      if (candidatePreparationStarted) {
+        await service.abortInstall?.().catch(() => undefined);
+        await this.releasePreparation();
+        this.mode = "running";
+        return service.failInstall();
+      }
       await this.releasePreparation();
       return this.block("runtime-transition");
     }
@@ -158,6 +248,13 @@ export class AppUpdateInstallCoordinator {
       finish: this.options.finishNormalShutdown,
       onUnconfirmed: () => this.reportUnconfirmedShutdown(),
     });
+    return status;
+  }
+
+  private failUncertainInstall(): AppUpdateStatus {
+    const status = this.options.service.failInstall();
+    this.mode = "update-outcome-uncertain";
+    this.reportUnconfirmedShutdown();
     return status;
   }
 

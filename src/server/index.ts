@@ -17,12 +17,21 @@ import { RuntimeStore } from "./database";
 import { TurnController } from "./runtime/turns/turn-controller";
 import { DuoLaunchCoordinator } from "./runtime/duo/duo-launch-coordinator";
 import { resolveAuthoritativeProjectPath } from "./project-path";
-import { PROVIDER_IDS, ProviderManager, type ProviderDetection } from "./providers";
+import { PROVIDER_IDS, ProviderManager } from "./providers";
 import { ProviderMetadataCache, type ProviderMetadata } from "./provider/metadata";
 import { ProviderMaintenanceController } from "./provider/maintenance-controller";
 import type { ProviderMaintenanceTarget } from "./provider/maintenance-capabilities";
+import {
+  ProviderInstallationLeaseCoordinator,
+} from "./provider/installation-lease";
+import { ProviderMaintenanceJournal } from
+  "./provider/maintenance-journal";
+import { recoverProviderMaintenanceJournal } from
+  "./provider/maintenance-recovery";
+import { createProviderInfoRefresh } from "./provider/provider-info-refresh";
 import { ProviderTerminalResumeRegistry } from "./provider/terminal-resume";
 import { TerminalManager } from "./terminal";
+import { windowsCleanupFailures } from "./windows-cleanup-diagnostics";
 import { runRuntimeShutdownPhases } from "./runtime-shutdown";
 import { requireRuntimeDirectory as ensureDirectory } from "./runtime-commands";
 import { publicRuntimeError as publicError, RuntimeRequestError as RequestError } from "./runtime-errors";
@@ -33,10 +42,7 @@ import {
 import { TurnGitArtifactManager } from "./turn-git-artifacts";
 import { sendRuntimeEvent } from "./runtime-protocol";
 import { createTestStreamingTrace } from "./runtime/test-streaming-trace";
-import {
-  initialProviderSnapshots,
-  providerSnapshot,
-} from "./runtime-snapshots";
+import { initialProviderSnapshots } from "./runtime-snapshots";
 import { DEFAULT_REVIEW_SUMMARY_TIMEOUT_MS } from "./review-summary";
 import { IsolatedRunController } from "./runtime/reviews/isolated-run-controller";
 import {
@@ -95,6 +101,7 @@ import {
 import { SecureFileAuthorityRegistry } from "./runtime/secure-file-authorities";
 import { PrivateConnectRuntimeGateway } from "./private-connect/runtime-gateway";
 import { queuePrivateConnectPrompt } from "./private-connect/prompt-admission";
+import { createPrivateConnectInputResponder } from "./private-connect/input-response-admission";
 import { PrivateConnectTranscriptCache } from "./private-connect/transcript-cache";
 import {
   privateConnectPromptSafetyForHarness,
@@ -114,6 +121,9 @@ import {
   prepareRuntimeStartupRecovery,
   runtimeSafetyError,
 } from "./runtime-startup-recovery";
+import { runtimeLifecycleDiagnosticSnapshot } from "./lifecycle-diagnostics";
+import { RuntimeStartupBlockerError } from
+  "../shared/runtime-startup-diagnostics";
 export type {
   RunningRuntime,
   RuntimeBackendCredentialBroker,
@@ -124,6 +134,7 @@ export {
 } from "./runtime/commands/review-support";
 
 export async function startRuntime(options: RuntimeOptions): Promise<RunningRuntime> {
+  const runtimeStartedAt = new Date().toISOString();
   const startupRecovery = prepareRuntimeStartupRecovery(options);
   const {
     dataDirectory,
@@ -131,6 +142,12 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     authorizedModernGenerationIds,
     runtimeSafetyLock,
   } = startupRecovery;
+  if (runtimeSafetyLock) {
+    throw new RuntimeStartupBlockerError(
+      "prior-runtime-cleanup-unconfirmed",
+      runtimeSafetyError("Runtime startup is blocked."),
+    );
+  }
   const generatedAttachments = await PrivateGeneratedAttachmentStore.create(
     dataDirectory,
     {
@@ -162,8 +179,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         );
     },
     terminalActivity: () => terminals.hasUpdateBlockingActivity(),
-    providerMaintenanceActive: () =>
-      providerMaintenance.activeOperations().length > 0,
+    providerMaintenanceActive: () => providerMaintenance.hasBlockingAuthority(),
     providerRefreshActive: () => activeProviderRefreshes > 0,
     artifactReconciliationActive: () => artifactReconciliationActive,
     holdTerminalAdmission: () => terminals.holdForUpdatePreparation(),
@@ -277,7 +293,14 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   };
   const privateConnectTranscriptCache = new PrivateConnectTranscriptCache();
   const turnGitArtifacts = new TurnGitArtifactManager(store, dataDirectory);
-  const enableProviders = !runtimeSafetyLock && (options.enableProviders ?? true);
+  const providerInstallationLeases = new ProviderInstallationLeaseCoordinator();
+  const providerMaintenanceJournal = new ProviderMaintenanceJournal(
+    dataDirectory,
+    {
+      runtimeGenerationId: options.runtimeGenerationId,
+      systemBootId: options.systemBootId,
+    },
+  );
   const terminals = new TerminalManager({
     onOwnedProcessCleanupUnconfirmed:
       options.onOwnedProcessCleanupUnconfirmed,
@@ -290,13 +313,14 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     },
   });
   const savedSettings = store.shellSnapshot().settings;
-  const backendProfileController = await BackendProfileController.create({
+  const backendProfileController = BackendProfileController.open({
     store,
     credentials: options.backendCredentials,
     builtInClaudeProfiles: options.kimiClaudeProfiles ?? [],
   });
-  const providers = new ProviderManager({
+  const providers = ProviderManager.createProduction({
     metadataCache,
+    installationLeases: providerInstallationLeases,
     lifetimeSignal: runtimeLifetimeAbort.signal,
     commands: options.codexBinaryPath
       ? { codex: options.codexBinaryPath }
@@ -306,6 +330,33 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     ...backendProfileController.providerManagerOptions(),
   }, options.agentHarnessRegistry);
   backendProfileController.attachProviderManager(providers);
+  const maintenanceCleanupAuthorities = !runtimeSafetyLock
+    && options.enableProviders !== false
+    ? new Set([
+        ...startupRecovery.confirmedGenerations,
+        ...startupRecovery.manuallyRetiredGenerations,
+        ...startupRecovery.authorizedModernGenerationIds,
+      ])
+    : new Set<string>();
+  const providerMaintenanceRecovery = await recoverProviderMaintenanceJournal({
+    journal: providerMaintenanceJournal,
+    installationLeases: providerInstallationLeases,
+    runtime: providers,
+    cwd: options.defaultWorkspacePath,
+    confirmedRuntimeGenerationIds: maintenanceCleanupAuthorities,
+    currentSystemBootId: options.systemBootId,
+    priorBootCleanupConfirmed: !runtimeSafetyLock
+      && options.enableProviders !== false
+      && startupRecovery.priorBootLeasesCleared,
+  }).catch(() => {
+    throw new RuntimeStartupBlockerError(
+      "provider-installation-quarantined",
+      "Provider installation recovery requires manual attention.",
+    );
+  });
+  const enableProviders = !runtimeSafetyLock
+    && providerMaintenanceRecovery.length === 0
+    && (options.enableProviders ?? true);
   const agentWorkflows = new AgentWorkflowController(store, providers);
   const attachmentResolver = options.attachmentRoot && options.attachments
     ? new TrustedAttachmentResolver(
@@ -363,17 +414,41 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     const snapshot = store.shellSnapshot(providerInfo);
     const approvalConversationIds = new Set([...pendingApprovals.values()].map(({ conversationId }) => conversationId));
     const inputConversationIds = new Set([...pendingInputs.values()].map(({ conversationId }) => conversationId));
+    const maintenanceOperations = providerMaintenance.activeOperations();
+    const providerMaintenanceStates = providerMaintenance.diagnosticStates();
+    const providerRunOwnership = store.providerRunOwnership.all();
+    const conversations = snapshot.conversations.map((conversation) => ({
+      ...conversation,
+      pendingApproval: approvalConversationIds.has(conversation.id),
+      pendingInput: inputConversationIds.has(conversation.id),
+    }));
+    const runs = snapshot.runs.map((run) => ({
+      ...run,
+      canStop: canStopWorkspaceRun(run),
+    }));
+    const activeConversationIds = turns?.activeConversationIds()
+      ?? providerRunOwnership.map(({ conversationId }) => conversationId);
     return {
       ...snapshot,
       backendProfiles: backendProfileController.profiles(providerInfo),
       backendDefaults: backendProfileController.defaults(),
-      maintenanceOperations: providerMaintenance.activeOperations(),
-      conversations: snapshot.conversations.map((conversation) => ({
-        ...conversation,
-        pendingApproval: approvalConversationIds.has(conversation.id),
-        pendingInput: inputConversationIds.has(conversation.id),
-      })),
-      runs: snapshot.runs.map((run) => ({ ...run, canStop: canStopWorkspaceRun(run) })),
+      maintenanceOperations,
+      conversations,
+      runs,
+      lifecycleDiagnostics: runtimeLifecycleDiagnosticSnapshot({
+        runtimeGenerationId: options.runtimeGenerationId, systemBootId: options.systemBootId,
+        runtimeStartedAt, runtimeSafetyLock,
+        confirmedCleanupReceiptConsumed:
+          startupRecovery.confirmedGenerations.length > 0,
+        providerInfo, conversations, runs, providerMaintenanceStates,
+        providerMaintenanceRecoveryCount: providerMaintenanceRecovery.length,
+        selectedConversationId: snapshot.activeConversationId,
+        activeConversationIds,
+        runningProviderConversationIds: new Set(providers.activeConversationIds()),
+        providerRunOwnershipConversationIds: providerRunOwnership.map(({ conversationId }) => conversationId),
+        terminalOwnershipCount: terminals.ownedResourceCount(), interactionCount: pendingApprovals.size + pendingInputs.size,
+        windowsCleanupFailures: windowsCleanupFailures(),
+      }),
       sync,
     };
   };
@@ -439,86 +514,19 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     } : current);
   };
   let activeProviderRefreshes = 0;
-  const refreshProviderInfoCore = async (
-    providerId?: ProviderInfo["id"],
-    refreshEnvironment = false,
-    forceMetadata = false,
-  ): Promise<void> => {
-    if (!enableProviders) return;
-    const enrichedSnapshot = async (detection: ProviderDetection): Promise<ProviderInfo> => {
-      if (!detection.canRun) return providerSnapshot(detection, providers.cachedMetadata(detection.provider.id));
-      const metadata = await providers.metadata(
-        detection.provider.id,
-        options.defaultWorkspacePath,
-        { force: forceMetadata, signal: runtimeLifetimeAbort.signal },
-      ).catch(() => providers.cachedMetadata(detection.provider.id));
-      return providerSnapshot(detection, metadata);
-    };
-    if (providerId) {
-      const detection = await providers.detect(providerId, {
-        cwd: options.defaultWorkspacePath,
-        timeoutMs: 4_000,
-        refreshEnvironment,
-        signal: runtimeLifetimeAbort.signal,
-      });
-      const detected = providerSnapshot(
-        detection,
-        providers.cachedMetadata(detection.provider.id),
-      );
-      providerInfo = providerInfo.map((current) => current.id === providerId
-        ? { ...detected, ...(current.maintenance ? { maintenance: current.maintenance } : {}) }
-        : current);
-      if (!closed) broadcastSnapshot();
-      if (!detection.canRun) return;
-      const next = await enrichedSnapshot(detection);
-      providerInfo = providerInfo.map((current) => current.id === providerId
-        ? { ...next, ...(current.maintenance ? { maintenance: current.maintenance } : {}) }
-        : current);
-    } else {
-      const detections = await providers.detectAll({
-        cwd: options.defaultWorkspacePath,
-        timeoutMs: 4_000,
-        refreshEnvironment,
-        signal: runtimeLifetimeAbort.signal,
-      });
-      const previous = new Map(providerInfo.map((provider) => [provider.id, provider]));
-      providerInfo = detections.map((detection) => {
-        const next = providerSnapshot(
-          detection,
-          providers.cachedMetadata(detection.provider.id),
-        );
-        const maintenance = previous.get(detection.provider.id)?.maintenance;
-        return maintenance ? { ...next, maintenance } : next;
-      });
-      if (!closed) broadcastSnapshot();
-      providerInfo = await Promise.all(detections.map(async (detection) => {
-        const next = await enrichedSnapshot(detection);
-        const maintenance = previous.get(detection.provider.id)?.maintenance;
-        return maintenance ? { ...next, maintenance } : next;
-      }));
-    }
-    if (!closed) broadcastSnapshot();
-  };
-  const refreshProviderInfo = async (
-    providerId?: ProviderInfo["id"],
-    refreshEnvironment = false,
-    forceMetadata = false,
-  ): Promise<void> => {
-    await trackRuntimeOperation(async () => {
-      activeProviderRefreshes += 1;
-      try {
-        await testOnlyProviderRefresh?.(runtimeLifetimeAbort.signal);
-        if (closed) return;
-        await refreshProviderInfoCore(
-          providerId,
-          refreshEnvironment,
-          forceMetadata,
-        );
-      } finally {
-        activeProviderRefreshes -= 1;
-      }
-    });
-  };
+  const refreshProviderInfo = createProviderInfoRefresh({
+    enabled: enableProviders,
+    providers,
+    defaultWorkspacePath: options.defaultWorkspacePath,
+    lifetimeSignal: runtimeLifetimeAbort.signal,
+    providerInfo: () => providerInfo,
+    replaceProviderInfo: (value) => { providerInfo = value; },
+    broadcastSnapshot,
+    isClosed: () => closed,
+    track: trackRuntimeOperation,
+    beforeRefresh: testOnlyProviderRefresh,
+    onActivityChange: (delta) => { activeProviderRefreshes += delta; },
+  });
   const maintenanceTarget = (
     providerId: ProviderMaintenanceProviderId,
   ): ProviderMaintenanceTarget => {
@@ -531,11 +539,29 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     };
   };
   providerMaintenance = new ProviderMaintenanceController({
+    installationLeases: providerInstallationLeases,
+    maintenanceJournal: providerMaintenanceJournal,
+    installationIdentity: (target) =>
+      providers.providerInstallationIdentityForMaintenance(
+        target.providerId,
+        target.executable,
+        target.installedVersion,
+      ),
     target: maintenanceTarget,
-    refreshTarget: async (providerId) => {
-      await refreshProviderInfo(providerId, true, true);
+    capabilityAvailable: ({ providerId, executable }, capabilities) => providers.providerMaintenanceCapabilityAvailable(providerId, executable, capabilities.update !== null),
+    refreshTarget: async (providerId, verificationAuthority) => {
+      if (!verificationAuthority) throw new Error("Provider maintenance verification requires exact installation authority.");
+      await providers.verifyInstallationConformance(providerId, options.defaultWorkspacePath, verificationAuthority);
+      await refreshProviderInfo(
+        providerId,
+        true,
+        true,
+        verificationAuthority,
+      );
       return maintenanceTarget(providerId);
     },
+    invalidateInstallationEvidence: (providerId) =>
+      providers.invalidateInstallationEvidence(providerId),
     onStatus: (status) => {
       providerInfo = providerInfo.map((provider) => provider.id === status.providerId
         ? { ...provider, maintenance: status }
@@ -553,6 +579,8 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       }
     },
   });
+  backendProfileController.attachProviderMutationGuard((providerId) => providerMaintenance.hasBlockingAuthority(providerId));
+  if (!runtimeSafetyLock && providerMaintenanceRecovery.length === 0) await backendProfileController.initialize();
   const workspacePath = (projectId: string, conversationId?: string): string => {
     if (!conversationId) return ensureDirectory(store.projectPath(projectId));
     const conversation = store.conversation(conversationId);
@@ -754,6 +782,8 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         providers,
         backendProfileController,
         defaultWorkspacePath: options.defaultWorkspacePath,
+        providerMaintenanceBlocked: (providerId) =>
+          providerMaintenance.hasBlockingAuthority(providerId),
         refreshProviderInfo,
         broadcastSnapshot,
         send,
@@ -973,19 +1003,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         broadcastSnapshot();
       },
     }, conversationId, content),
-    respondToInput: (conversationId, inputRequestId, answers) => {
-      const pending = pendingInputs.get(inputRequestId);
-      if (!pending || pending.conversationContextRequest || pending.conversationId !== conversationId || pending.questions.some((question) => question.isSecret)) return false;
-      const expected = new Map(pending.questions.map((question) => [question.id, question]));
-      for (const [questionId, values] of Object.entries(answers)) {
-        const question = expected.get(questionId);
-        if (!question || values.length === 0 || (!question.allowMultiple && values.length !== 1)) return false;
-        const optionIds = new Set(question.options.map((option) => option.id));
-        if (question.options.length > 0 && values.some((value) => !optionIds.has(value) && !question.isOther)) return false;
-      }
-      if ([...expected.keys()].some((questionId) => !answers[questionId]?.length)) return false;
-      return turns.respondToInput(conversationId, inputRequestId, answers);
-    },
+    respondToInput: createPrivateConnectInputResponder(pendingInputs, turns),
     stopRun: (conversationId, runId) => {
       const run = currentSnapshot().runs.find((candidate) => candidate.id === runId);
       if (!run || run.conversationId !== conversationId) return { stopped: false, alreadyStopped: false };

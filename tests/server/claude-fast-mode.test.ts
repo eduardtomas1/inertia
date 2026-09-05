@@ -1,3 +1,4 @@
+// @inertia-test-suite portable
 import { afterEach, describe, expect, it } from "vitest";
 
 import type {
@@ -53,7 +54,7 @@ describe.sequential("Claude provider-native Fast mode", () => {
         );
       },
     });
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { claude: process.execPath } },
       new AgentHarnessRegistry([harness]),
     );

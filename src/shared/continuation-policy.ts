@@ -2,6 +2,13 @@ import type {
   ContinuationIdentity,
   HarnessBackendCompatibility,
 } from "./model-routing";
+import type { ContinuationReasonCode } from "./continuation-reason-codes";
+
+export {
+  CONTINUATION_REASON_CODES,
+  isContinuationReasonCode,
+  type ContinuationReasonCode,
+} from "./continuation-reason-codes";
 
 type ModelSwitchCompatibility = Pick<
   HarnessBackendCompatibility,
@@ -42,6 +49,7 @@ export const CONTINUATION_CHANGE_KINDS = [
   "backend-profile",
   "backend-configuration",
   "endpoint",
+  "provider-installation",
   "model",
   "performance-mode",
 ] as const;
@@ -55,24 +63,6 @@ export const CONTINUATION_ACTIONS = [
 ] as const;
 
 export type ContinuationAction = (typeof CONTINUATION_ACTIONS)[number];
-
-export const CONTINUATION_REASON_CODES = [
-  "first-turn",
-  "same-continuation",
-  "same-route-without-session",
-  "supported-model-switch",
-  "supported-performance-mode-switch",
-  "missing-continuation-identity",
-  "harness-changed",
-  "backend-profile-changed",
-  "backend-configuration-changed",
-  "backend-endpoint-changed",
-  "incompatible-model-changed",
-  "incompatible-performance-mode-changed",
-  "stale-provider-session",
-] as const;
-
-export type ContinuationReasonCode = (typeof CONTINUATION_REASON_CODES)[number];
 
 export interface ContinuationDecision {
   action: ContinuationAction;
@@ -92,12 +82,21 @@ export interface ContinuationDecisionInput {
   allowsPerformanceModeSwitchWithinSession?: boolean;
 }
 
+const FRESH_PROVIDER_SESSION_OUTCOME =
+  "The next turn will start a fresh provider session and preserve this chat's history.";
+
+function freshProviderSessionReason(context: string): string {
+  return `${context} ${FRESH_PROVIDER_SESSION_OUTCOME}`;
+}
+
 export function staleProviderSessionDecision(): ContinuationDecision {
   return {
-    action: "new-conversation-required",
+    action: "start-session",
     changeKind: "missing-identity",
     reasonCode: "stale-provider-session",
-    reason: "The saved provider session is no longer available. Start a new chat to continue with a fresh agent context.",
+    reason: freshProviderSessionReason(
+      "The saved provider session is no longer available.",
+    ),
   };
 }
 
@@ -112,47 +111,85 @@ function identityChangeKind(
     !== next.backendConfigurationRevision
   ) return "backend-configuration";
   if (previous.endpointIdentity !== next.endpointIdentity) return "endpoint";
+  if (
+    previous.providerCompatibilityToken === undefined
+    || previous.providerCompatibilityToken === null
+    || next.providerCompatibilityToken === undefined
+    || next.providerCompatibilityToken === null
+    || previous.providerCompatibilityToken
+      !== next.providerCompatibilityToken
+  ) return "provider-installation";
   return "none";
 }
 
-function newConversationReason(
+function freshSessionReason(
   changeKind: Exclude<ContinuationChangeKind, "none">,
+  previousIdentity?: ContinuationIdentity,
+  nextIdentity?: ContinuationIdentity,
 ): Pick<ContinuationDecision, "reasonCode" | "reason"> {
   switch (changeKind) {
     case "missing-identity":
       return {
         reasonCode: "missing-continuation-identity",
-        reason: "This chat's agent session identity is unavailable. Start a new chat to continue safely.",
+        reason: freshProviderSessionReason(
+          "This chat's saved agent-session identity is unavailable.",
+        ),
       };
     case "harness":
       return {
         reasonCode: "harness-changed",
-        reason: "Start a new chat to use a different agent harness. Existing chats keep their original agent context.",
+        reason: freshProviderSessionReason("The agent harness changed."),
       };
     case "backend-profile":
       return {
         reasonCode: "backend-profile-changed",
-        reason: "Start a new chat to use a different model backend. Existing chats keep their original agent context.",
+        reason: freshProviderSessionReason("The model backend changed."),
       };
     case "backend-configuration":
       return {
         reasonCode: "backend-configuration-changed",
-        reason: "This model backend was reconfigured. Start a new chat so credentials and provider context cannot cross sessions.",
+        reason: freshProviderSessionReason(
+          "This model backend was reconfigured; hidden provider context cannot cross that boundary.",
+        ),
       };
     case "endpoint":
       return {
         reasonCode: "backend-endpoint-changed",
-        reason: "This model backend now points to a different endpoint. Start a new chat to continue safely.",
+        reason: freshProviderSessionReason(
+          "This model backend now points to a different endpoint.",
+        ),
       };
+    case "provider-installation": {
+      const previousToken = previousIdentity?.providerCompatibilityToken;
+      const nextToken = nextIdentity?.providerCompatibilityToken;
+      const unverified = !previousToken || !nextToken;
+      return unverified
+        ? {
+            reasonCode: "provider-installation-unverified",
+            reason: freshProviderSessionReason(
+              "The exact provider installation or capability contract could not be verified.",
+            ),
+          }
+        : {
+            reasonCode: "provider-installation-changed",
+            reason: freshProviderSessionReason(
+              "The provider installation or capability contract changed.",
+            ),
+      };
+    }
     case "model":
       return {
         reasonCode: "incompatible-model-changed",
-        reason: "This agent cannot change models inside an existing session. Start a new chat to use the selected model.",
+        reason: freshProviderSessionReason(
+          "This agent cannot change models inside the existing provider session.",
+        ),
       };
     case "performance-mode":
       return {
         reasonCode: "incompatible-performance-mode-changed",
-        reason: "Start a new chat to change response speed.",
+        reason: freshProviderSessionReason(
+          "Response speed cannot change inside the existing provider session.",
+        ),
       };
   }
 }
@@ -175,9 +212,9 @@ export function resolveContinuationDecision(
         reason: "The first turn starts a new provider session.",
       };
     }
-    const unavailable = newConversationReason("missing-identity");
+    const unavailable = freshSessionReason("missing-identity");
     return {
-      action: "new-conversation-required",
+      action: "start-session",
       changeKind: "missing-identity",
       ...unavailable,
     };
@@ -196,9 +233,9 @@ export function resolveContinuationDecision(
       )
     )
   ) {
-    const unavailable = newConversationReason("missing-identity");
+    const unavailable = freshSessionReason("missing-identity");
     return {
-      action: "new-conversation-required",
+      action: "start-session",
       changeKind: "missing-identity",
       ...unavailable,
     };
@@ -217,9 +254,13 @@ export function resolveContinuationDecision(
         reason: "The first turn starts a new provider session.",
       };
     }
-    const changed = newConversationReason(boundaryChange);
+    const changed = freshSessionReason(
+      boundaryChange,
+      input.previousIdentity,
+      input.nextIdentity,
+    );
     return {
-      action: "new-conversation-required",
+      action: "start-session",
       changeKind: boundaryChange,
       ...changed,
     };
@@ -246,9 +287,9 @@ export function resolveContinuationDecision(
         reason: "The first turn starts a new provider session.",
       };
     }
-    const changed = newConversationReason("model");
+    const changed = freshSessionReason("model");
     return {
-      action: "new-conversation-required",
+      action: "start-session",
       changeKind: "model",
       ...changed,
     };
@@ -266,9 +307,9 @@ export function resolveContinuationDecision(
         reason: "The first turn starts a new provider session.",
       };
     }
-    const changed = newConversationReason("performance-mode");
+    const changed = freshSessionReason("performance-mode");
     return {
-      action: "new-conversation-required",
+      action: "start-session",
       changeKind: "performance-mode",
       ...changed,
     };

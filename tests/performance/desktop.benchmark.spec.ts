@@ -26,6 +26,7 @@ import {
 import { selectWorkspaceTool } from "../e2e/support/workspace-tools";
 import { driveBoundedWheelNavigation } from "../helpers/bounded-wheel-navigation";
 import { captureBoundedFailureDiagnostic } from "../helpers/bounded-failure-diagnostic";
+import { attachRuntimeLifecycleFailureDiagnostic } from "../e2e/support/runtime-lifecycle-diagnostics";
 import {
   AsyncCleanupCoordinator,
   type AsyncCleanupOwnership,
@@ -105,6 +106,7 @@ const FOLLOW_LATEST_LIVE_EDGE_THRESHOLD = 120;
 interface RuntimeSnapshot {
   phase: string;
   pid: number | null;
+  websocketUrl: string | null;
   lastError?: string | null;
   restartScheduled?: boolean;
 }
@@ -1545,7 +1547,7 @@ async function closeSplitChat(page: Page): Promise<void> {
   })).toHaveCount(0);
 }
 
-async function openAndCloseToolCycle(page: Page): Promise<void> {
+async function openAndCloseToolCycle(page: Page, electronApp: ElectronApplication): Promise<void> {
   await openWorkspaceTools(page);
   const tools = page.getByRole("complementary", { name: "Workspace tools" });
   await selectWorkspaceTool(tools, "Files");
@@ -1562,6 +1564,8 @@ async function openAndCloseToolCycle(page: Page): Promise<void> {
       { timeout: TERMINAL_CLOSE_ASSERTION_TIMEOUT_MS },
     );
   } catch (cause) {
+    await attachRuntimeLifecycleFailureDiagnostic(test.info(), async () =>
+      (await runtimeSnapshot(electronApp)).websocketUrl).catch(() => undefined);
     const diagnostics = await captureBoundedFailureDiagnostic(
       () => page.evaluate(() => {
         const workspaceTools = document.querySelector<HTMLElement>(
@@ -1924,7 +1928,7 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
 
     const repeatedOpenClose: Awaited<ReturnType<typeof rendererMemorySample>>[] = [];
     for (let iteration = 0; iteration < 8; iteration += 1) {
-      await openAndCloseToolCycle(cold.page);
+      await openAndCloseToolCycle(cold.page, cold.electronApp);
       await openSplitChat(cold.page);
       await closeSplitChat(cold.page);
       repeatedOpenClose.push(await rendererMemorySample(
@@ -1945,7 +1949,7 @@ test("records desktop startup, process, scroll, split, terminal, and shutdown co
         cold.page,
         300 + streamingSampleCount,
       ));
-      await openAndCloseToolCycle(cold.page);
+      await openAndCloseToolCycle(cold.page, cold.electronApp);
     }
     const soakAfter = await rendererMemorySample(
       cold.electronApp,

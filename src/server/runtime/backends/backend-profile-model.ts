@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-
 import {
   backendProfilePrimaryModel,
   persistedModelBackendProfileSchema,
@@ -23,6 +21,7 @@ import {
   type HarnessBackendCompatibility,
   type ModelBackendProfile,
 } from "../../../shared/model-routing";
+import { backendEndpointIdentity } from "../../../shared/backend-endpoint-identity";
 import type { ProviderId, ProviderInfo } from "../../../shared/contracts";
 import type { StoredModelBackendProfile } from "../../database";
 import { BackendProfileControllerError } from "./backend-profile-types";
@@ -72,7 +71,7 @@ export function normalizedBaseUrl(
 }
 
 export function endpointIdentity(baseUrl: string): string {
-  return `endpoint:${createHash("sha256").update(baseUrl).digest("hex")}`;
+  return backendEndpointIdentity(baseUrl);
 }
 
 function nativeModelDefinitions(
@@ -226,6 +225,13 @@ export function connectionState(
     : result.compatibility === "partially-compatible"
       ? "limited"
       : "failed";
+}
+
+export function backendProbeForModel(
+  record: Pick<StoredModelBackendProfile, "probeResults">,
+  modelId: string,
+): BackendCompatibilityProbeResult | null {
+  return record.probeResults.find((result) => result.modelId === modelId) ?? null;
 }
 
 export function primaryContextWindow(

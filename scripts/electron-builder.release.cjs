@@ -89,13 +89,32 @@ async function verifyWindowsNsisPayload(event) {
     return;
   }
   const architecture = platform === "windows-arm64" ? "arm64" : "x64";
-  const { verifyBuiltNsisApplicationArchive } = await import("./windows-installer-smoke.mjs");
-  await verifyBuiltNsisApplicationArchive({
-    architecture,
-    outputDirectory: path.dirname(event.file),
-    sanitizedName: event.packager.appInfo.sanitizedName,
-    version: event.packager.appInfo.version,
-  });
+  const [
+    { verifyBuiltNsisApplicationArchive },
+    { verifyWindowsInstallerCandidateMarker },
+  ] = await Promise.all([
+    import("./windows-installer-smoke.mjs"),
+    import("./windows-update-lineage-build.mjs"),
+  ]);
+  await Promise.all([
+    verifyBuiltNsisApplicationArchive({
+      architecture,
+      outputDirectory: path.dirname(event.file),
+      sanitizedName: event.packager.appInfo.sanitizedName,
+      version: event.packager.appInfo.version,
+    }),
+    verifyWindowsInstallerCandidateMarker(
+      event.file,
+      event.packager.platformSpecificBuildOptions.legalTrademarks,
+    ),
+  ]);
+}
+
+async function bindWindowsCandidateLineage(context) {
+  const { bindWindowsInstallerToCandidateExecutable } = await import(
+    "./windows-update-lineage-build.mjs"
+  );
+  await bindWindowsInstallerToCandidateExecutable(context);
 }
 
 module.exports = {
@@ -120,6 +139,10 @@ module.exports = {
     inertiaReleaseChannel: releaseChannel,
     inertiaUpdateCapability: updateCapability,
   },
+  // The hook observes the final resource-edited/signed application executable;
+  // NSIS is built and signed only after the digest is placed in its version
+  // resource by the hook.
+  ...(isWindows ? { afterSign: bindWindowsCandidateLineage } : {}),
   // electron-builder deletes the generated application archive after the
   // artifact hook returns. Inspect it here with the bundled 7z-capable tool;
   // the much smaller Windows 7za cannot parse an outer NSIS executable.

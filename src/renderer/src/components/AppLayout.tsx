@@ -777,7 +777,9 @@ export function AppLayout({
           }
         }}
         onCopyRecoveryReport={async () => {
-          const result = await window.inertia.copyRuntimeDiagnosticReport();
+          const result = await window.inertia.copyRuntimeDiagnosticReport(
+            connection.snapshot?.lifecycleDiagnostics ?? null,
+          );
           if (!result.copied) throw new Error("The recovery report could not be copied.");
         }}
       />

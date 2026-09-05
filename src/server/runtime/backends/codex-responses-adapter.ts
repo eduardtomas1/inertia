@@ -2,12 +2,14 @@ import {
   modelBackendProfileSchema,
   type ModelBackendProfile,
 } from "../../../shared/model-routing";
+import { backendEndpointIdentityMatches } from "../../../shared/backend-endpoint-identity";
 import type {
   ProviderBackendLaunchOptions,
   ProviderManagerOptions,
   ProviderRunInput,
 } from "../../provider/contracts";
 import { safeProviderBackendLabel } from "../../provider/adapters";
+import { validateBackendEndpointNetworkPolicy } from "./backend-compatibility-probe/http";
 
 const CODEX_CREDENTIAL_ENVIRONMENT_KEY = "INERTIA_CODEX_BACKEND_TOKEN";
 
@@ -30,6 +32,11 @@ export interface CodexResponsesBackendLaunchResolverOptions {
     secretReference: string,
     signal?: AbortSignal,
   ) => string | null | Promise<string | null>;
+  validateEndpointNetworkPolicy?: (
+    endpointUrl: string,
+    allowInsecureLocalhost: boolean,
+    signal: AbortSignal,
+  ) => Promise<unknown>;
 }
 
 export class CodexResponsesBackendConfigurationError extends Error {
@@ -46,13 +53,6 @@ export class CodexResponsesBackendConfigurationError extends Error {
     this.name = "CodexResponsesBackendConfigurationError";
     this.code = code;
   }
-}
-
-function isPromiseLike<T>(value: T | Promise<T>): value is Promise<T> {
-  return typeof value === "object"
-    && value !== null
-    && "then" in value
-    && typeof (value as { then?: unknown }).then === "function";
 }
 
 function isLiteralLoopbackHostname(hostname: string): boolean {
@@ -134,12 +134,19 @@ function normalizedProfiles(
         "Codex backend profile identifiers must be unique.",
       );
     }
+    const baseUrl = normalizedBaseUrl(
+      input.baseUrl,
+      input.allowInsecureLocalhost === true,
+    );
+    if (!backendEndpointIdentityMatches(baseUrl, profile.endpointIdentity)) {
+      throw new CodexResponsesBackendConfigurationError(
+        "invalid-profile",
+        "The Codex backend endpoint identity does not match its canonical URL.",
+      );
+    }
     result.set(profile.id, {
       profile,
-      baseUrl: normalizedBaseUrl(
-        input.baseUrl,
-        input.allowInsecureLocalhost === true,
-      ),
+      baseUrl,
       secretReference,
       allowInsecureLocalhost: input.allowInsecureLocalhost === true,
     });
@@ -191,6 +198,8 @@ export function createCodexResponsesBackendLaunchResolver(
   const staticProfiles = typeof options.profiles === "function"
     ? null
     : normalizedProfiles(options.profiles ?? []);
+  const validateEndpointNetworkPolicy = options.validateEndpointNetworkPolicy
+    ?? validateBackendEndpointNetworkPolicy;
   return (
     input: ProviderRunInput,
     baseEnvironment: NodeJS.ProcessEnv,
@@ -262,28 +271,41 @@ export function createCodexResponsesBackendLaunchResolver(
       };
     };
 
-    if (!configured.secretReference) return build(null);
-    let resolved: string | null | Promise<string | null>;
-    try {
-      resolved = options.resolveSecret?.(
-        configured.secretReference,
-        context.signal,
-      ) ?? null;
-    } catch {
-      throw new CodexResponsesBackendConfigurationError(
-        "credential-unavailable",
-        `The ${safeProviderBackendLabel(configured.profile.displayName)} credential could not be read from secure storage.`,
-      );
-    }
-    if (!isPromiseLike(resolved)) return build(resolved);
-    return Promise.resolve(resolved).then(
-      build,
-      () => {
+    return (async (): Promise<ProviderBackendLaunchOptions> => {
+      try {
+        await validateEndpointNetworkPolicy(
+          configured.baseUrl,
+          configured.allowInsecureLocalhost === true,
+          context.signal,
+        );
+      } catch {
+        throw new CodexResponsesBackendConfigurationError(
+          "invalid-profile",
+          "The Codex backend endpoint failed launch-time network policy revalidation.",
+        );
+      }
+      if (!configured.secretReference) return build(null);
+      let resolved: string | null | Promise<string | null>;
+      try {
+        resolved = options.resolveSecret?.(
+          configured.secretReference,
+          context.signal,
+        ) ?? null;
+      } catch {
         throw new CodexResponsesBackendConfigurationError(
           "credential-unavailable",
           `The ${safeProviderBackendLabel(configured.profile.displayName)} credential could not be read from secure storage.`,
         );
-      },
-    );
+      }
+      try {
+        return build(await resolved);
+      } catch (error) {
+        if (error instanceof CodexResponsesBackendConfigurationError) throw error;
+        throw new CodexResponsesBackendConfigurationError(
+          "credential-unavailable",
+          `The ${safeProviderBackendLabel(configured.profile.displayName)} credential could not be read from secure storage.`,
+        );
+      }
+    })();
   };
 }

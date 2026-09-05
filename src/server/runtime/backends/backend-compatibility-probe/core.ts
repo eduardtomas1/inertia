@@ -14,6 +14,12 @@ export const MAX_TIMEOUT_MS = 30_000;
 export const DEFAULT_MAX_RESPONSE_BYTES = 256 * 1024;
 export const MAX_RESPONSE_BYTES = 1024 * 1024;
 
+export interface BackendProbeAdmission {
+  operationId: string;
+  admissionSequence: number;
+  installationFingerprint: string | null;
+}
+
 export interface BackendProbeResolvedAddress {
   address: string;
   family: 4 | 6;
@@ -55,6 +61,8 @@ export interface BackendCompatibilityProbeDependencies {
   timeoutMs?: number;
   maxResponseBytes?: number;
   now?: () => Date;
+  /** Exact controller-owned admission. Direct diagnostic probes use sequence 1. */
+  admission?: BackendProbeAdmission;
 }
 
 export interface ProbeObservation {

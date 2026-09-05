@@ -1973,7 +1973,7 @@ describe("runtime migration catalog", () => {
       id: "existing-suspend-aware-turn",
       conversationId: conversation.id,
       runId: "existing-suspend-aware-run",
-      content: "Preserve this completed turn through schema 66.",
+      content: "Preserve this completed turn through schema 67.",
       providerId: "codex",
       harnessId: "codex-app-server",
       backendProfileId: "builtin:openai",
@@ -2007,7 +2007,8 @@ describe("runtime migration catalog", () => {
       DROP INDEX system_suspend_intervals_range_idx;
       DROP TABLE system_suspend_intervals;
       ALTER TABLE agent_turns DROP COLUMN suspended_duration_ms;
-      DELETE FROM schema_migrations WHERE version = 66;
+      ALTER TABLE agent_turns DROP COLUMN continuation_reason_code;
+      DELETE FROM schema_migrations WHERE version >= 66;
     `);
     schema65.close();
 
@@ -2074,6 +2075,7 @@ describe("runtime migration catalog", () => {
       { version: 65 },
       { version: 66 },
       { version: 67 },
+      { version: 68 },
     ]);
     expect((migrated.prepare(
       "SELECT auto_scroll_to_final_answer AS enabled FROM app_state WHERE id = 1",

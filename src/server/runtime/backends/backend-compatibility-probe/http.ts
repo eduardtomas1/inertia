@@ -1,4 +1,5 @@
 import { lookup as dnsLookup } from "node:dns/promises";
+import { randomBytes } from "node:crypto";
 import { request as httpRequest, type RequestOptions } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { BlockList, isIP } from "node:net";
@@ -51,10 +52,15 @@ for (const [network, prefix] of [
   BLOCKED_ADDRESSES.addSubnet(network, prefix, "ipv4");
 }
 for (const [network, prefix] of [
-  ["::", 128],
+  ["::", 96],
   ["::1", 128],
+  ["64:ff9b::", 96],
+  ["64:ff9b:1::", 48],
   ["100::", 64],
+  ["2001::", 32],
+  ["2002::", 16],
   ["2001:db8::", 32],
+  ["fec0::", 10],
   ["fc00::", 7],
   ["fe80::", 10],
   ["ff00::", 8],
@@ -67,29 +73,46 @@ export async function probeHttpBackend(
   dependencies: BackendCompatibilityProbeDependencies,
   signal: AbortSignal,
   maxResponseBytes: number,
+  externalSignal?: AbortSignal,
 ): Promise<ProbeObservation> {
   if (request.endpointUrl === null) {
     throw new BackendProbeError("invalid-url", FIXED_FAILURE_MESSAGES["invalid-url"]);
   }
 
   let secret: string | null = null;
+  let headers: Record<string, string> | null = null;
+  let toolHeaders: Record<string, string> | null = null;
+  let continuationHeaders: Record<string, string> | null = null;
   try {
-    const baseUrl = validateEndpointUrl(request.endpointUrl, request.allowInsecureLocalhost);
+    const { baseUrl, resolved } = await validateBackendEndpointNetworkPolicy(
+      request.endpointUrl,
+      request.allowInsecureLocalhost,
+      signal,
+      dependencies.resolveAddresses ?? resolveAddresses,
+    );
     const endpoint = apiEndpoint(baseUrl, request.profile.protocol);
     secret = await resolveProbeCredential(request, dependencies, signal);
     throwIfAborted(signal);
-    const resolved = await resolveAndValidateAddress(
-      baseUrl,
-      request.allowInsecureLocalhost,
-      dependencies.resolveAddresses ?? resolveAddresses,
-      signal,
-    );
     const body = probeBody(request.profile.protocol, request.modelId);
-    const headers = probeHeaders(
+    headers = probeHeaders(
       request.profile.protocol,
       request.profile.authenticationMode,
       secret,
     );
+    toolHeaders = request.profile.protocol === "openai-responses"
+      ? probeHeaders(
+          request.profile.protocol,
+          request.profile.authenticationMode,
+          secret,
+        )
+      : null;
+    continuationHeaders = request.profile.protocol === "openai-responses"
+      ? probeHeaders(
+          request.profile.protocol,
+          request.profile.authenticationMode,
+          secret,
+        )
+      : null;
     secret = null;
     const response = await boundedRequest(
       endpoint,
@@ -99,21 +122,80 @@ export async function probeHttpBackend(
       signal,
       maxResponseBytes,
     );
-    scrubHeaders(headers);
-    if (response.statusCode >= 300 && response.statusCode < 400) {
-      throw new BackendProbeError("unsafe-redirect", FIXED_FAILURE_MESSAGES["unsafe-redirect"]);
-    }
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw statusError(response.statusCode, response.headers, response.body);
-    }
-    return parseStreamingResponse(
+    assertSuccessfulResponse(response);
+    const observation = parseStreamingResponse(
       request.profile.protocol as HttpBackendProtocol,
       request.modelId,
       response.headers,
       response.body,
     );
+    if (
+      request.profile.protocol !== "openai-responses"
+      || toolHeaders === null
+      || continuationHeaders === null
+    ) {
+      return observation;
+    }
+
+    // Responses text compatibility remains independently useful. Tool
+    // authority requires both an exact inert call and acceptance of its inert
+    // result in a bounded follow-up. Nothing on the host is ever executed.
+    try {
+      const challenge = toolProbeChallenge();
+      const toolResponse = await boundedRequest(
+        endpoint,
+        resolved,
+        toolProbeBody(request.modelId, challenge),
+        toolHeaders,
+        signal,
+        maxResponseBytes,
+      );
+      assertSuccessfulResponse(toolResponse);
+      const call = parseInertToolResponse(
+        request.modelId,
+        challenge,
+        toolResponse.headers,
+        toolResponse.body,
+      );
+      const continuationResponse = await boundedRequest(
+        endpoint,
+        resolved,
+        toolContinuationProbeBody(request.modelId, challenge, call),
+        continuationHeaders,
+        signal,
+        maxResponseBytes,
+      );
+      assertSuccessfulResponse(continuationResponse);
+      parseToolContinuationResponse(
+        request.modelId,
+        challenge,
+        continuationResponse.headers,
+        continuationResponse.body,
+      );
+      return {
+        ...observation,
+        observedCapabilities: [
+          ...observation.observedCapabilities,
+          {
+            id: "tools",
+            state: "verified",
+            provenance: "probe",
+            detail: "A bounded Responses call/result continuation completed the exact inert challenge.",
+          },
+        ],
+      };
+    } catch {
+      // User cancellation still cancels the full probe. A tool-incompatible
+      // backend, including a bounded tool-check timeout, remains an honest
+      // text-only result and cannot unlock custom Codex admission.
+      if (externalSignal?.aborted) throwIfAborted(signal);
+      return observation;
+    }
   } finally {
     secret = null;
+    if (headers) scrubHeaders(headers);
+    if (toolHeaders) scrubHeaders(toolHeaders);
+    if (continuationHeaders) scrubHeaders(continuationHeaders);
   }
 }
 
@@ -172,6 +254,28 @@ function validateEndpointUrl(value: string, allowInsecureLocalhost: boolean): UR
     throw new BackendProbeError("private-network", FIXED_FAILURE_MESSAGES["private-network"]);
   }
   return url;
+}
+
+/**
+ * Revalidate a custom endpoint immediately before privileged probe or launch
+ * work. Probe sockets additionally pin `resolved`; external provider CLIs may
+ * resolve the hostname again, so this is an admission check rather than a DNS
+ * pinning claim. Their TLS stack remains responsible for hostname binding.
+ */
+export async function validateBackendEndpointNetworkPolicy(
+  endpointUrl: string,
+  allowInsecureLocalhost: boolean,
+  signal: AbortSignal,
+  resolver: NonNullable<BackendCompatibilityProbeDependencies["resolveAddresses"]> = resolveAddresses,
+): Promise<{ baseUrl: URL; resolved: BackendProbeResolvedAddress }> {
+  const baseUrl = validateEndpointUrl(endpointUrl, allowInsecureLocalhost);
+  const resolved = await resolveAndValidateAddress(
+    baseUrl,
+    allowInsecureLocalhost,
+    resolver,
+    signal,
+  );
+  return { baseUrl, resolved };
 }
 
 async function resolveAndValidateAddress(
@@ -270,6 +374,100 @@ function probeBody(protocol: ModelBackendProtocol, modelId: string): Buffer {
         store: false,
         stream: true,
       };
+  const body = Buffer.from(JSON.stringify(value), "utf8");
+  if (body.byteLength > MAX_REQUEST_BYTES) {
+    throw new BackendProbeError("malformed-response", FIXED_FAILURE_MESSAGES["malformed-response"]);
+  }
+  return body;
+}
+
+interface ToolProbeChallenge {
+  name: string;
+  nonce: string;
+  resultNonce: string;
+}
+
+interface InertToolCall {
+  callId: string;
+  name: string;
+  arguments: string;
+}
+
+function toolProbeChallenge(): ToolProbeChallenge {
+  const suffix = randomBytes(12).toString("hex");
+  return {
+    name: `inertia_capability_probe_${suffix}`,
+    nonce: randomBytes(16).toString("hex"),
+    resultNonce: randomBytes(16).toString("hex"),
+  };
+}
+
+function toolProbeBody(modelId: string, challenge: ToolProbeChallenge): Buffer {
+  const value = {
+    model: modelId,
+    input: `Call ${challenge.name} exactly once with the required nonce. Do not answer with text.`,
+    max_output_tokens: 64,
+    store: false,
+    stream: true,
+    parallel_tool_calls: false,
+    tools: [toolProbeDefinition(challenge)],
+    tool_choice: { type: "function", name: challenge.name },
+  };
+  const body = Buffer.from(JSON.stringify(value), "utf8");
+  if (body.byteLength > MAX_REQUEST_BYTES) {
+    throw new BackendProbeError("malformed-response", FIXED_FAILURE_MESSAGES["malformed-response"]);
+  }
+  return body;
+}
+
+function toolProbeDefinition(challenge: ToolProbeChallenge) {
+  return {
+    type: "function",
+    name: challenge.name,
+    description: "Inert compatibility check. The call is inspected but never executed.",
+    parameters: {
+      type: "object",
+      properties: {
+        nonce: { type: "string", enum: [challenge.nonce] },
+      },
+      required: ["nonce"],
+      additionalProperties: false,
+    },
+    strict: true,
+  } as const;
+}
+
+function toolContinuationProbeBody(
+  modelId: string,
+  challenge: ToolProbeChallenge,
+  call: InertToolCall,
+): Buffer {
+  const value = {
+    model: modelId,
+    input: [
+      {
+        role: "user",
+        content: "Repeat the inert function result exactly, with no other text.",
+      },
+      {
+        type: "function_call",
+        call_id: call.callId,
+        name: call.name,
+        arguments: call.arguments,
+      },
+      {
+        type: "function_call_output",
+        call_id: call.callId,
+        output: challenge.resultNonce,
+      },
+    ],
+    max_output_tokens: 64,
+    store: false,
+    stream: true,
+    parallel_tool_calls: false,
+    tools: [toolProbeDefinition(challenge)],
+    tool_choice: "none",
+  };
   const body = Buffer.from(JSON.stringify(value), "utf8");
   if (body.byteLength > MAX_REQUEST_BYTES) {
     throw new BackendProbeError("malformed-response", FIXED_FAILURE_MESSAGES["malformed-response"]);
@@ -485,6 +683,171 @@ function parseStreamingResponse(
     contextWindowProvenance: null,
     contextWindowDetail: null,
   };
+}
+
+function parseInertToolResponse(
+  requestedModelId: string,
+  challenge: ToolProbeChallenge,
+  headers: HttpResponse["headers"],
+  body: Buffer,
+): InertToolCall {
+  // This also proves an exact terminal Responses stream and model identity.
+  parseStreamingResponse("openai-responses", requestedModelId, headers, body);
+  const calls = new Map<string, { name: string; arguments: string }>();
+  for (const event of parseSseEvents(body)) {
+    if (event.data === "[DONE]") continue;
+    let payload: unknown;
+    try {
+      payload = JSON.parse(event.data);
+    } catch {
+      throw new BackendProbeError("malformed-response", FIXED_FAILURE_MESSAGES["malformed-response"]);
+    }
+    if (!plainObject(payload)) {
+      throw new BackendProbeError("malformed-response", FIXED_FAILURE_MESSAGES["malformed-response"]);
+    }
+    const type = stringField(payload, "type") ?? event.event;
+    if (type === "response.output_item.added") {
+      assertExpectedFunctionName(payload.item, challenge.name);
+    } else if (type === "response.output_item.done") {
+      collectFinalFunctionCall(calls, payload.item, challenge.name);
+    } else if (type === "response.completed") {
+      const response = plainObject(payload.response) ? payload.response : null;
+      if (!response || !Array.isArray(response.output)) {
+        throw new BackendProbeError("malformed-response", FIXED_FAILURE_MESSAGES["malformed-response"]);
+      }
+      for (const item of response.output) {
+        if (plainObject(item) && item.type === "function_call") {
+          collectFinalFunctionCall(calls, item, challenge.name);
+        }
+      }
+    }
+  }
+  if (calls.size !== 1) {
+    throw new BackendProbeError("malformed-response", FIXED_FAILURE_MESSAGES["malformed-response"]);
+  }
+  const [callId, call] = [...calls.entries()][0]!;
+  let argumentsValue: unknown;
+  try {
+    argumentsValue = JSON.parse(call.arguments);
+  } catch {
+    throw new BackendProbeError("malformed-response", FIXED_FAILURE_MESSAGES["malformed-response"]);
+  }
+  if (
+    !plainObject(argumentsValue)
+    || Object.keys(argumentsValue).length !== 1
+    || argumentsValue.nonce !== challenge.nonce
+  ) {
+    throw new BackendProbeError("malformed-response", FIXED_FAILURE_MESSAGES["malformed-response"]);
+  }
+  return { callId, ...call };
+}
+
+function parseToolContinuationResponse(
+  requestedModelId: string,
+  challenge: ToolProbeChallenge,
+  headers: HttpResponse["headers"],
+  body: Buffer,
+): void {
+  parseStreamingResponse("openai-responses", requestedModelId, headers, body);
+  let deltaText = "";
+  let completedText: string | null = null;
+  for (const event of parseSseEvents(body)) {
+    if (event.data === "[DONE]") continue;
+    let payload: unknown;
+    try {
+      payload = JSON.parse(event.data);
+    } catch {
+      throw new BackendProbeError("malformed-response", FIXED_FAILURE_MESSAGES["malformed-response"]);
+    }
+    if (!plainObject(payload)) {
+      throw new BackendProbeError("malformed-response", FIXED_FAILURE_MESSAGES["malformed-response"]);
+    }
+    const type = stringField(payload, "type") ?? event.event;
+    if (type === "response.output_item.added" || type === "response.output_item.done") {
+      const item = plainObject(payload.item) ? payload.item : null;
+      if (item?.type === "function_call") {
+        throw new BackendProbeError("malformed-response", FIXED_FAILURE_MESSAGES["malformed-response"]);
+      }
+    }
+    if (type === "response.output_text.delta") {
+      const delta = stringField(payload, "delta");
+      if (delta === null || deltaText.length + delta.length > MAX_REQUEST_BYTES) {
+        throw new BackendProbeError("malformed-response", FIXED_FAILURE_MESSAGES["malformed-response"]);
+      }
+      deltaText += delta;
+    } else if (type === "response.completed") {
+      const response = plainObject(payload.response) ? payload.response : null;
+      if (!response || !Array.isArray(response.output)) {
+        throw new BackendProbeError("malformed-response", FIXED_FAILURE_MESSAGES["malformed-response"]);
+      }
+      const parts: string[] = [];
+      for (const item of response.output) {
+        if (plainObject(item) && item.type === "function_call") {
+          throw new BackendProbeError("malformed-response", FIXED_FAILURE_MESSAGES["malformed-response"]);
+        }
+        if (!plainObject(item) || item.type !== "message" || !Array.isArray(item.content)) continue;
+        for (const content of item.content) {
+          if (!plainObject(content) || content.type !== "output_text") continue;
+          const text = stringField(content, "text");
+          if (text === null) {
+            throw new BackendProbeError("malformed-response", FIXED_FAILURE_MESSAGES["malformed-response"]);
+          }
+          parts.push(text);
+        }
+      }
+      completedText = parts.join("");
+    }
+  }
+  const exactText = completedText && completedText.length > 0
+    ? completedText
+    : deltaText;
+  if (
+    exactText !== challenge.resultNonce
+    || (deltaText.length > 0 && deltaText !== challenge.resultNonce)
+  ) {
+    throw new BackendProbeError("malformed-response", FIXED_FAILURE_MESSAGES["malformed-response"]);
+  }
+}
+
+function assertExpectedFunctionName(item: unknown, expectedName: string): void {
+  if (!plainObject(item) || item.type !== "function_call") return;
+  if (stringField(item, "name") !== expectedName) {
+    throw new BackendProbeError("malformed-response", FIXED_FAILURE_MESSAGES["malformed-response"]);
+  }
+}
+
+function collectFinalFunctionCall(
+  calls: Map<string, { name: string; arguments: string }>,
+  item: unknown,
+  expectedName: string,
+): void {
+  if (!plainObject(item) || item.type !== "function_call") return;
+  const name = stringField(item, "name");
+  const callId = stringField(item, "call_id") ?? stringField(item, "id");
+  const argumentsValue = stringField(item, "arguments");
+  if (
+    name !== expectedName
+    || !callId
+    || callId.length > 500
+    || argumentsValue === null
+    || argumentsValue.length > MAX_REQUEST_BYTES
+  ) {
+    throw new BackendProbeError("malformed-response", FIXED_FAILURE_MESSAGES["malformed-response"]);
+  }
+  const previous = calls.get(callId);
+  if (previous && (previous.name !== name || previous.arguments !== argumentsValue)) {
+    throw new BackendProbeError("malformed-response", FIXED_FAILURE_MESSAGES["malformed-response"]);
+  }
+  calls.set(callId, { name, arguments: argumentsValue });
+}
+
+function assertSuccessfulResponse(response: HttpResponse): void {
+  if (response.statusCode >= 300 && response.statusCode < 400) {
+    throw new BackendProbeError("unsafe-redirect", FIXED_FAILURE_MESSAGES["unsafe-redirect"]);
+  }
+  if (response.statusCode < 200 || response.statusCode >= 300) {
+    throw statusError(response.statusCode, response.headers, response.body);
+  }
 }
 
 function parseSseEvents(body: Buffer): Array<{ event: string | null; data: string }> {

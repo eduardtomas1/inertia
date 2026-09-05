@@ -102,7 +102,14 @@ export function useInertiaConnection(): InertiaConnection {
 
         const runtimeConnection = await window.inertia.getRuntimeConnection();
         if ("unavailable" in runtimeConnection) {
-          throw new Error(runtimeConnection.message);
+          setStatus("offline");
+          setError(runtimeConnection.message);
+          if (runtimeConnection.retryable) {
+            const delay = Math.min(8_000, 600 * 2 ** attempt);
+            attempt += 1;
+            scheduleConnect(delay);
+          }
+          return;
         }
         const { websocketUrl, databaseRecoveryNotice: startupNotice } =
           runtimeConnection;

@@ -19,7 +19,11 @@ import {
   type AgentHarnessStartOptions,
   type OpenCodeSdkHarnessCapabilities,
 } from "./agent-harness";
-import type { ProviderRunFailure, ProviderRunResult } from "./contracts";
+import {
+  providerRunTerminal,
+  type ProviderRunFailure,
+  type ProviderRunResult,
+} from "./contracts";
 import type { AgentApprovalDecision } from "./interactions";
 import {
   sanitizeProviderActivityDetail,
@@ -180,13 +184,13 @@ function startOpenCodeRun(
   terminateOwnedProcessTree: ProcessTreeTerminator,
   compactionTimestampNow: () => number,
 ): AgentHarnessRun {
-  const conversationId = options.input.conversationId ?? options.input.threadId ?? "";
+  const conversationId = options.input.conversationId;
   const emitter = createAgentHarnessEmitter(
     "opencode",
     conversationId,
     options.callbacks,
-    options.input.runId ?? conversationId,
-    options.input.turnId ?? null,
+    options.input.runId,
+    options.input.turnId,
     options.input.cwd,
   );
   const text = new CappedProviderBuffer(MAX_RESULT_TEXT_CHARS);
@@ -502,6 +506,12 @@ function startOpenCodeRun(
         ),
       );
       const effectiveModel = selectedModel ?? (session.data.model ? findOpenCodeModel(session.data.model.providerID, session.data.model.id, providerData.data.all) : undefined);
+      // OpenCode image support is model-negotiated. Publish the exact-run
+      // observation before any attachment can cross the provider boundary.
+      emitter.capability(
+        "images",
+        effectiveModel?.capabilities.input.image === true,
+      );
       if (options.input.reasoningEffort && (!effectiveModel || !effectiveModel.variants?.[options.input.reasoningEffort])) {
         throw new Error(`The active OpenCode model does not advertise reasoning variant '${options.input.reasoningEffort}'.`);
       }
@@ -810,9 +820,7 @@ function startOpenCodeRun(
     }
     emitter.status(status, error);
     return {
-      providerId: "opencode",
-      conversationId,
-      status,
+      ...providerRunTerminal(options.input, status, failure),
       ...(sessionId ? { sessionId } : {}),
       text: canonical.text,
       textTruncated: canonical.truncated || text.truncated,

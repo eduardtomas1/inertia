@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { CLAUDE_CLOUD_ROUTING_ENVIRONMENT_KEYS } from "../../src/node/provider-routing-environment";
 import {
   claudeHarnessBackendCompatibility,
+  claudeCompatibleBackendProfileSchema,
   createCustomClaudeBackendProfile,
   createKimiClaudeBackendProfile,
   modelBackendProfileForClaudeProfile,
@@ -66,6 +67,23 @@ function providerInput(
 }
 
 describe("Claude-compatible process adapter", () => {
+  it("pins the built-in Kimi bridge identity and local-network policy", () => {
+    const profile = createKimiClaudeBackendProfile({
+      id: "kimi:pinned-bridge",
+      secretReference: SECRET_REFERENCE,
+      primaryModelId: "k3-256k",
+    });
+
+    expect(claudeCompatibleBackendProfileSchema.safeParse({
+      ...profile,
+      endpointIdentity: "kimi-code:replacement",
+    }).success).toBe(false);
+    expect(claudeCompatibleBackendProfileSchema.safeParse({
+      ...profile,
+      allowInsecureLocalhost: true,
+    }).success).toBe(false);
+  });
+
   it("preserves native Claude behavior in an isolated environment clone", () => {
     const baseEnvironment = {
       PATH: "/usr/bin",
@@ -457,5 +475,62 @@ describe("Claude-compatible process adapter", () => {
         ANTHROPIC_API_KEY: SECRET_VALUE,
       },
     });
+  });
+
+  it("revalidates custom endpoints before credentials while retaining local mode", async () => {
+    const profile = createCustomClaudeBackendProfile({
+      id: "custom:local-revalidation",
+      displayName: "Local Claude bridge",
+      baseUrl: "http://127.0.0.1:4312/v1",
+      allowInsecureLocalhost: true,
+      authenticationMode: "api-key",
+      secretReference: "secret:local-claude",
+      primaryModelId: "local-model",
+    });
+    let secretRead = false;
+    const validations: Array<[string, boolean]> = [];
+    const resolver = createPrivilegedClaudeBackendLaunchResolver({
+      profiles: [profile],
+      validateEndpointNetworkPolicy: async (endpointUrl, allowLocal) => {
+        validations.push([endpointUrl, allowLocal]);
+        throw new Error("private-rebind");
+      },
+      resolveSecret: async () => {
+        secretRead = true;
+        return SECRET_VALUE;
+      },
+    });
+
+    await expect(resolver(
+      providerInput(profile),
+      {},
+      { signal: new AbortController().signal },
+    )).rejects.toMatchObject({ code: "invalid-profile" });
+    expect(validations).toEqual([["http://127.0.0.1:4312/v1/", true]]);
+    expect(secretRead).toBe(false);
+  });
+
+  it("preserves the built-in Kimi bridge outside custom endpoint validation", async () => {
+    const profile = createKimiClaudeBackendProfile({
+      id: "kimi:validation-boundary",
+      secretReference: SECRET_REFERENCE,
+      primaryModelId: "k3-256k",
+    });
+    let validations = 0;
+    const resolver = createPrivilegedClaudeBackendLaunchResolver({
+      profiles: [profile],
+      validateEndpointNetworkPolicy: async () => {
+        validations += 1;
+        throw new Error("must not validate built-in bridge here");
+      },
+      resolveSecret: async () => SECRET_VALUE,
+    });
+
+    await expect(resolver(
+      providerInput(profile),
+      {},
+      { signal: new AbortController().signal },
+    )).resolves.toMatchObject({ modelArgument: "k3-256k" });
+    expect(validations).toBe(0);
   });
 });

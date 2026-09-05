@@ -4,7 +4,6 @@ import {
   Activity,
   Bot,
   ChevronDown,
-  Copy,
   Database,
   Download,
   FileCode2,
@@ -37,6 +36,7 @@ import {
   type ProviderInfo,
   type ProviderMaintenanceOperation,
   type ProviderMaintenanceProviderId,
+  type RuntimeLifecycleDiagnosticSnapshot,
 } from "@shared/contracts";
 import { defaultSettings } from "@shared/contracts/app";
 import type {
@@ -58,6 +58,7 @@ import {
   loadConnectionsAndDevicesSettings,
   loadCanaryRollbackSetting,
   loadDiscordSettings,
+  loadLifecycleIntegritySettings,
   loadModelBackendsSettings,
   prefetchSettingsSection,
 } from "./settingsSectionLoaders";
@@ -79,6 +80,7 @@ export type SettingsViewProps = {
   conversations: Conversation[];
   archived: Conversation[];
   databaseBackup?: DatabaseBackupStatus;
+  lifecycleDiagnostics?: RuntimeLifecycleDiagnosticSnapshot;
   onUpdate: (settings: Partial<AppSettings>) => Promise<void>;
   onConnectProvider: (providerId: ProviderId) => void;
   onRefreshProvider: (providerId?: ProviderId) => void;
@@ -204,6 +206,7 @@ export function SettingsView({
   conversations: _conversations,
   archived,
   databaseBackup,
+  lifecycleDiagnostics,
   onUpdate: updateSettingsRequest,
   onConnectProvider,
   onRefreshProvider,
@@ -261,16 +264,16 @@ export function SettingsView({
     loadCanaryRollbackSetting,
     isCanary,
   );
+  const LifecycleIntegritySettings = useLoadedSurface(
+    loadLifecycleIntegritySettings,
+    section === "providers" || section === "archive",
+  );
   const previousTarget = useRef(target);
   useEffect(() => {
     if (target && target !== previousTarget.current) setSection(target.section);
     previousTarget.current = target;
   }, [target]);
-  const [revealingLogs, setRevealingLogs] = useState(false);
-  const [copyingSupportReport, setCopyingSupportReport] = useState(false);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
-  const [logRevealStatus, setLogRevealStatus] = useState<string | null>(null);
-  const [supportReportStatus, setSupportReportStatus] = useState<string | null>(null);
   const [updateCheckStatus, setUpdateCheckStatus] = useState<string | null>(null);
   const [recoveryOperation, setRecoveryOperation] = useState<
     "export" | "import" | null
@@ -463,34 +466,6 @@ export function SettingsView({
       setHealthStatus("The browser cache could not be cleared.");
     } finally {
       setClearingCache(false);
-    }
-  };
-  const revealRuntimeLogs = async (): Promise<void> => {
-    if (revealingLogs) return;
-    setRevealingLogs(true);
-    setLogRevealStatus(null);
-    try {
-      const error = await onRevealRuntimeLogs();
-      setLogRevealStatus(error ? "The runtime log folder could not be opened." : "Runtime log folder opened.");
-    } catch {
-      setLogRevealStatus("The runtime log folder could not be opened.");
-    } finally {
-      setRevealingLogs(false);
-    }
-  };
-  const copyRuntimeSupportReport = async (): Promise<void> => {
-    if (copyingSupportReport) return;
-    setCopyingSupportReport(true);
-    setSupportReportStatus(null);
-    try {
-      const result = await onCopyRuntimeDiagnosticReport();
-      setSupportReportStatus(result.copied
-        ? `Private support summary copied · ${result.eventCount} lifecycle ${result.eventCount === 1 ? "event" : "events"}.`
-        : "The support summary could not be copied.");
-    } catch {
-      setSupportReportStatus("The support summary could not be copied.");
-    } finally {
-      setCopyingSupportReport(false);
     }
   };
   const checkAppUpdate = async (): Promise<void> => {
@@ -865,6 +840,13 @@ export function SettingsView({
                           <small>Authentication remains in the provider&apos;s official flow.</small>
                         </div>
 
+                        {LifecycleIntegritySettings && (
+                          <LifecycleIntegritySettings
+                            surface="provider-capability"
+                            provider={selectedProvider}
+                          />
+                        )}
+
                         <div className="provider-settings-field">
                           <span>Binary path</span>
                           <div className="provider-settings-binary-row">
@@ -1149,18 +1131,15 @@ export function SettingsView({
                 </div>
               </div>
               {recoveryStatus && <p className="settings-card-note" role="status">{recoveryStatus}</p>}
-              <div className="codex-binary-path runtime-log-setting">
-                <span>
-                  <strong>Runtime diagnostics</strong>
-                  <small>Local-only lifecycle and failure metadata. Excludes prompts, source, tokens, and credentials. Logs rotate at 256 KB and expire after seven days.</small>
-                </span>
-                <div>
-                  <button type="button" className="secondary-button" disabled={copyingSupportReport} onClick={() => { void copyRuntimeSupportReport(); }}><Copy size={14} />{copyingSupportReport ? "Copying…" : "Copy support summary"}</button>
-                  <button type="button" className="secondary-button" disabled={revealingLogs} onClick={() => { void revealRuntimeLogs(); }}><FolderOpen size={14} />{revealingLogs ? "Opening…" : "Reveal log folder"}</button>
-                </div>
-              </div>
-              {logRevealStatus && <p className="settings-card-note" role="status">{logRevealStatus}</p>}
-              {supportReportStatus && <p className="settings-card-note" role="status">{supportReportStatus}</p>}
+              {LifecycleIntegritySettings && (
+                <LifecycleIntegritySettings
+                  surface="runtime-diagnostics"
+                  diagnostics={lifecycleDiagnostics}
+                  appUpdateStatus={appUpdateStatus}
+                  onRevealRuntimeLogs={onRevealRuntimeLogs}
+                  onCopyRuntimeDiagnosticReport={onCopyRuntimeDiagnosticReport}
+                />
+              )}
             </section>
           </>
         )}

@@ -1,3 +1,5 @@
+// @inertia-test-suite portable
+// @inertia-harness claude-agent-sdk
 import {
   existsSync,
   mkdirSync,
@@ -139,6 +141,55 @@ describe("Claude Agent SDK harness", () => {
     })).toThrow("duplicate option label");
   });
 
+  it("removes and denies native tools when exact-run capability authority is absent", async () => {
+    const root = portableFixtureRoot("Claude native tools disabled");
+    roots.push(root);
+    let capturedOptions: ClaudeOptions | undefined;
+    let permission: PermissionResult | undefined;
+    const harness = createClaudeAgentSdkHarness({
+      createQuery: ({ options }) => {
+        capturedOptions = options;
+        return fixtureClaudeQuery(
+          (async function* (): AsyncGenerator<SDKMessage> {
+            permission = (await options?.canUseTool?.(
+              "Bash",
+              { command: "touch must-not-run" },
+              {
+                signal: new AbortController().signal,
+                toolUseID: "native-tool-without-authority",
+                requestId: "native-tool-without-authority",
+              },
+            )) ?? undefined;
+            yield claudeSuccessResult("Text only", "completed");
+          })(),
+        );
+      },
+    });
+    const run = harness.start({
+      input: nativeProviderRunInput({
+        providerId: "claude",
+        conversationId: "claude-native-tools-disabled",
+        cwd: root,
+        prompt: "Answer without tools.",
+        interactionMode: "build",
+        access: "full",
+      }),
+      executable: process.execPath,
+      environment: {},
+      providerNativeToolsAvailable: false,
+    });
+
+    await expect(run.result).resolves.toMatchObject({
+      status: "completed",
+      text: "Text only",
+    });
+    expect(capturedOptions?.tools).toEqual([]);
+    expect(permission).toEqual({
+      behavior: "deny",
+      message: "Provider-native tools are unavailable for this exact backend and model.",
+    });
+  });
+
   it("fails and cleans up a run that floods bounded provider events", async () => {
     const root = portableFixtureRoot("Claude SDK event flood");
     roots.push(root);
@@ -151,7 +202,7 @@ describe("Claude Agent SDK harness", () => {
         })(),
       ),
     });
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { claude: process.execPath } },
       new AgentHarnessRegistry([harness]),
     );
@@ -304,7 +355,7 @@ describe("Claude Agent SDK harness", () => {
         }) as unknown as Query;
       },
     });
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { claude: "/fake/claude" } },
       new AgentHarnessRegistry([harness]),
     );
@@ -338,7 +389,12 @@ describe("Claude Agent SDK harness", () => {
     }, {
       onApproval: (event) => {
         approvals.push(event.request.title);
-        expect(manager.respondToApproval(event.conversationId, event.request.requestId, "approve")).toBe(true);
+        expect(manager.respondToApproval(
+          event.conversationId,
+          event.request.requestId,
+          "approve",
+          { runId: event.runId, turnId: event.turnId },
+        )).toBe(true);
       },
       onInput: (event) => {
         const question = event.request.questions[0]!;
@@ -347,7 +403,7 @@ describe("Claude Agent SDK harness", () => {
         expect(question.id).not.toBe(question.question);
         expect(manager.respondToInput(event.conversationId, event.request.requestId, {
           [question.id]: [question.options[0]!.id],
-        })).toBe(true);
+        }, { runId: event.runId, turnId: event.turnId })).toBe(true);
       },
       onPlan: (event) => plans.push(...event.steps.map((step) => step.step)),
       onReasoning: (event) => reasoning.push(event.text),
@@ -482,7 +538,7 @@ describe("Claude Agent SDK harness", () => {
           return fixtureClaudeQuery(stream);
         },
       });
-      const manager = new ProviderManager(
+      const manager = ProviderManager.createForTests(
         { commands: { claude: process.execPath } },
         new AgentHarnessRegistry([harness]),
       );
@@ -502,6 +558,7 @@ describe("Claude Agent SDK harness", () => {
             event.conversationId,
             event.request.requestId,
             "deny",
+            { runId: event.runId, turnId: event.turnId },
           );
         },
       })).resolves.toMatchObject({ status: "completed" });
@@ -976,7 +1033,7 @@ describe("Claude Agent SDK harness", () => {
         },
       },
     });
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { claude: process.execPath } },
       new AgentHarnessRegistry([harness]),
     );
@@ -1211,7 +1268,7 @@ describe("Claude Agent SDK harness", () => {
       },
     });
     const registrations = claudeBackendProfileRegistrations([profile]);
-    const manager = new ProviderManager({
+    const manager = ProviderManager.createForTests({
       commands: { claude: "/fake/claude" },
       ...registrations,
       resolveBackendLaunchOptions: createClaudeBackendLaunchResolver({
@@ -1251,6 +1308,7 @@ describe("Claude Agent SDK harness", () => {
           event.conversationId,
           event.request.requestId,
           "approve",
+          { runId: event.runId, turnId: event.turnId },
         );
       },
       onInput: (event) => {
@@ -1258,7 +1316,7 @@ describe("Claude Agent SDK harness", () => {
         questions.push(question.question);
         manager.respondToInput(event.conversationId, event.request.requestId, {
           [question.id]: [question.options[0]!.id],
-        });
+        }, { runId: event.runId, turnId: event.turnId });
       },
       onUsage: (event) => usages.push(event.usage.usedTokens),
       onMetadata: (event) => metadata.push(event),
@@ -1325,7 +1383,7 @@ describe("Claude Agent SDK harness", () => {
         })(),
       ),
     });
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { claude: process.execPath } },
       new AgentHarnessRegistry([harness]),
     );
@@ -1426,7 +1484,7 @@ describe("Claude Agent SDK harness", () => {
         },
       ),
     });
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { claude: process.execPath } },
       new AgentHarnessRegistry([harness]),
     );
@@ -1499,7 +1557,7 @@ describe("Claude Agent SDK harness", () => {
         },
       ),
     });
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { claude: process.execPath } },
       new AgentHarnessRegistry([harness]),
     );
@@ -1591,7 +1649,7 @@ describe("Claude Agent SDK harness", () => {
         });
       },
     });
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { claude: process.execPath } },
       new AgentHarnessRegistry([harness]),
     );
@@ -1696,7 +1754,7 @@ describe("Claude Agent SDK harness", () => {
         });
       },
     });
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { claude: process.execPath } },
       new AgentHarnessRegistry([harness]),
     );
@@ -1806,7 +1864,7 @@ describe("Claude Agent SDK harness", () => {
         });
       },
     });
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { claude: process.execPath }, cancelGraceMs: 30_000 },
       new AgentHarnessRegistry([harness]),
     );
@@ -1887,7 +1945,7 @@ describe("Claude Agent SDK harness", () => {
         },
       ),
     });
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { claude: process.execPath } },
       new AgentHarnessRegistry([harness]),
     );
@@ -1968,7 +2026,7 @@ describe("Claude Agent SDK harness", () => {
         });
       },
     });
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { claude: process.execPath }, cancelGraceMs: 500 },
       new AgentHarnessRegistry([harness]),
     );
@@ -2003,7 +2061,7 @@ describe("Claude Agent SDK harness", () => {
         { close: () => { closeCalls += 1; } },
       ),
     });
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { claude: process.execPath } },
       new AgentHarnessRegistry([harness]),
     );
@@ -2059,7 +2117,7 @@ describe("Claude Agent SDK harness", () => {
         );
       },
     });
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { claude: "/configured/claude" } },
       new AgentHarnessRegistry([harness]),
     );
@@ -2149,7 +2207,7 @@ describe("Claude Agent SDK harness", () => {
         );
       },
     });
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { claude: process.execPath }, cancelGraceMs: 30_000 },
       new AgentHarnessRegistry([harness]),
     );
@@ -2218,7 +2276,7 @@ describe("Claude Agent SDK harness", () => {
         );
       },
     });
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { claude: process.execPath } },
       new AgentHarnessRegistry([harness]),
     );
@@ -2285,7 +2343,7 @@ describe("Claude Agent SDK harness", () => {
         }) as unknown as Query;
       },
     });
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { claude: process.execPath }, cancelGraceMs: 500 },
       new AgentHarnessRegistry([harness]),
     );
@@ -2343,7 +2401,7 @@ describe("Claude Agent SDK harness", () => {
         }) as unknown as Query;
       },
     });
-    const manager = new ProviderManager(
+    const manager = ProviderManager.createForTests(
       { commands: { claude: process.execPath } },
       new AgentHarnessRegistry([harness]),
     );
@@ -2396,7 +2454,7 @@ describe("Claude Agent SDK harness", () => {
       },
     });
     const registrations = claudeBackendProfileRegistrations([profile]);
-    const manager = new ProviderManager({
+    const manager = ProviderManager.createForTests({
       commands: { claude: process.execPath },
       ...registrations,
       resolveBackendLaunchOptions: createClaudeBackendLaunchResolver({

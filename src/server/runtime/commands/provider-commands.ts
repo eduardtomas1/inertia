@@ -87,6 +87,8 @@ export function createProviderCommandHandler(
               true,
             ).catch(() => undefined);
           },
+          undefined,
+          launch.installationUse,
         );
         dependencies.send(socket, {
           type: "terminal.created",

@@ -1,7 +1,7 @@
 import type { RuntimeMutationEvent, ServerEvent } from "./events";
 import { conversationDetailCollectionsCoherent, modelRouteIdentityCoherent, pullRequestCapabilityStateCoherent, runtimeEventScopeMatches, SERVER_EVENT_OPTIONS, snapshotIdentityCollectionsCoherent } from "./server-event-discriminants";
-import { APP_SHORTCUT_KEYS, DEFAULT_APP_KEYBINDINGS } from "../keybindings";
-import { continuationIdentitySchema, modelSelectionSchema } from "../model-routing";
+import { modelSelectionSchema, versionedContinuationIdentitySchema } from "../model-routing";
+import { isContinuationReasonCode } from "../continuation-policy";
 import { modelBackendDefaultSchema, modelBackendProfileDetailSchema, modelBackendProfileViewSchema } from "../backend-profile-settings";
 import { AGENT_TURN_STATUSES, type AgentTurnStatus } from "../turn-lifecycle";
 import { AGENT_GOAL_STATUSES } from "./agent-workflows";
@@ -14,6 +14,8 @@ import { validatePreMergeConfidence } from "./pre-merge-confidence-schema";
 import { COLOR_THEME_IDS } from "./app";
 import { chatMessageSchema as chatMessage, optionalTerminalAssistantMessageSchema as optionalTerminalAssistantMessage } from "./chat-message-schema";
 import { MAX_CONVERSATION_CONTEXT_EXCERPT_BYTES, MAX_CONVERSATION_CONTEXT_MESSAGES, MAX_CONVERSATION_CONTEXT_NOTE_BYTES, MAX_CONVERSATION_CONTEXT_SOURCE_MESSAGES, MAX_CONVERSATION_CONTEXT_TOTAL_BYTES } from "../conversation-context";
+import { appKeybindings } from "./app-keybindings-schema";
+import { optionalProviderCapabilityContract, optionalRuntimeLifecycleDiagnostics } from "./runtime-evidence-schema";
 type UnknownRecord = Record<string, unknown>; const UTF8_ENCODER = new TextEncoder(); const PROVIDER_IDS = ["codex", "claude", "cursor", "gemini", "kimi", "opencode"] as const; const USAGE_SCOPES = ["thread", "session", "run"] as const; const ACCESS_MODES = ["supervised", "auto-edit", "full"] as const; const WORKSPACE_RELATIONS = ["same-workspace", "different-workspace"] as const; const PROJECT_GROUPING = ["repository", "repository-path", "separate"] as const; const PATCH_STATES = ["none", "available", "truncated", "expired", "failed"] as const; const COMPLETENESS = ["complete", "truncated", "partial", "unavailable"] as const; const INTERACTION_MODES = ["build", "plan"] as const;
 const utf8Length = (value: string): number => UTF8_ENCODER.encode(value).byteLength;
 function record(value: unknown): value is UnknownRecord {
@@ -73,9 +75,11 @@ function uniqueRecordField(values: unknown[], key: string): boolean {
 function modelSelection(value: unknown): boolean {
   return modelSelectionSchema.safeParse(value).success;
 }
-
 function continuationIdentity(value: unknown): boolean {
-  return continuationIdentitySchema.safeParse(value).success;
+  return versionedContinuationIdentitySchema.safeParse(value).success;
+}
+function optionalContinuationReasonCode(value: UnknownRecord): boolean {
+  const reason = value.continuationReasonCode; return reason === undefined || reason === null || isContinuationReasonCode(reason);
 }
 function backendProfile(value: unknown, detail = false): boolean {
   return (detail ? modelBackendProfileDetailSchema : modelBackendProfileViewSchema)
@@ -171,6 +175,7 @@ function latestTurn(value: unknown): boolean {
     && nullableStringField(value, "startedAt")
     && nullableStringField(value, "completedAt")
     && nullableStringField(value, "terminalReason")
+    && optionalContinuationReasonCode(value)
     && modelSelection(value.modelSelection) && continuationIdentity(value.continuationIdentity)
     && modelRouteIdentityCoherent(value);
 }
@@ -299,6 +304,7 @@ function providerInfo(value: unknown): boolean {
     && record(value.metadataState)
     && providerMetadataField(value.metadataState.models)
     && providerMetadataField(value.metadataState.rateLimits)
+    && optionalProviderCapabilityContract(value.capabilityContract, value.id)
     && (value.agentThreadManagement === undefined || (record(value.agentThreadManagement) && oneOf(value.agentThreadManagement, "state", ["supported", "unavailable"] as const) && stringField(value.agentThreadManagement, "detail")))
     && (value.maintenance === undefined
       || (providerMaintenanceStatus(value.maintenance)
@@ -347,16 +353,6 @@ function appSettings(value: unknown): boolean {
     && appKeybindings(value.keybindings);
 }
 
-function appKeybindings(value: unknown): boolean {
-  if (!record(value) || Object.keys(value).length !== 4) return false;
-  const bindings = Object.keys(DEFAULT_APP_KEYBINDINGS)
-    .map((action) => value[action]);
-  return bindings.every((key) => (
-    typeof key === "string"
-    && APP_SHORTCUT_KEYS.includes(key as typeof APP_SHORTCUT_KEYS[number])
-  )) && new Set(bindings).size === 4;
-}
-
 function appSnapshot(value: unknown): boolean {
   if (!(record(value)
     && arrayOf(value.projects, project)
@@ -372,6 +368,7 @@ function appSnapshot(value: unknown): boolean {
     && (value.databaseBackup === undefined
       || (record(value.databaseBackup)
         && nullableStringField(value.databaseBackup, "lastValidatedAt")))
+    && optionalRuntimeLifecycleDiagnostics(value.lifecycleDiagnostics)
     && appSettings(value.settings)
     && nullableStringField(value, "activeProjectId")
     && nullableStringField(value, "activeConversationId")
@@ -908,6 +905,7 @@ function agentTurn(value: unknown): boolean {
     && oneOf(value, "interactionMode", SERVER_EVENT_OPTIONS.interactionModes)
     && oneOf(value, "accessMode", SERVER_EVENT_OPTIONS.accessModes)
     && nullableStringField(value, "terminalAssistantMessageId")
+    && optionalContinuationReasonCode(value)
     && modelSelection(value.modelSelection) && continuationIdentity(value.continuationIdentity)
     && modelRouteIdentityCoherent(value)
     && nullableStringField(value, "modelAlias")

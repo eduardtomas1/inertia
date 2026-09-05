@@ -28,6 +28,11 @@ import {
   activateAfterRuntimeWorkerStartupPreflight,
   RuntimeWorkerStartupPreflightError,
 } from "./runtime-worker-startup-preflight.js";
+import {
+  runtimeStartupBlockerCode,
+  runtimeStartupFailureMessage,
+} from
+  "../shared/runtime-startup-diagnostics.js";
 
 let runtime: RunningRuntime | null = null;
 const databaseRecoveryOperations = new DatabaseRecoveryOperationQueue();
@@ -618,9 +623,7 @@ parentPort.on("message", (messageEvent) => {
     starting = false;
     post({
       type: "runtime.startup-failed",
-      message: error instanceof Error
-        ? error.message
-        : "Runtime process ownership could not be initialized.",
+      message: "Runtime process ownership could not be initialized.",
     });
     if (error instanceof RuntimeWorkerStartupPreflightError) {
       stopping = true;
@@ -704,8 +707,12 @@ parentPort.on("message", (messageEvent) => {
     }
   }).catch(async (error: unknown) => {
     starting = false;
-    const detail = error instanceof Error ? error.message.trim().replace(/\s+/gu, " ").slice(0, 800) : "";
-    post({ type: "runtime.startup-failed", message: detail || "The local runtime could not start." });
+    const blockerCode = runtimeStartupBlockerCode(error);
+    post({
+      type: "runtime.startup-failed",
+      message: runtimeStartupFailureMessage(blockerCode),
+      ...(blockerCode ? { blockerCode } : {}),
+    });
     if (stopping) {
       await finishShutdown(null, 1);
       return;

@@ -28,6 +28,7 @@ import type {
   DuoLaunchState,
 } from "../../shared/contracts";
 import type { ModelBackendDefault } from "../../shared/backend-profile-settings";
+import type { ContinuationReasonCode } from "../../shared/continuation-policy";
 import type { PersistedProviderMetadata } from "../provider/metadata";
 
 export interface ProjectRow {
@@ -94,6 +95,7 @@ export interface AgentTurnRow {
   provider_id: ProviderId;
   model_selection_json: string | null;
   continuation_identity_json: string | null;
+  continuation_reason_code: ContinuationReasonCode | null;
   harness_id: string;
   backend_profile_id: string;
   model: string;

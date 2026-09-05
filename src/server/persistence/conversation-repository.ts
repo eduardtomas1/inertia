@@ -4,13 +4,13 @@ import type { Conversation } from "../../shared/contracts";
 import { officiallyAllowsModelSwitchWithinSession } from "../../shared/continuation-policy";
 import {
   continuationIdentityForSelection,
-  continuationIdentitySchema,
   currentKnownHarnessIdSchema,
   providerIdForHarness,
   modelSelectionSchema,
   providerNativeBackendProfile,
   providerNativeModelSelection,
   resolveHarnessBackendCompatibility,
+  versionedContinuationIdentitySchema,
 } from "../../shared/model-routing";
 import { conversationFromRow } from "./codecs";
 import type { PersistenceContext } from "./context";
@@ -210,7 +210,9 @@ export class ConversationRepository {
       modelSelection,
       providerSessionId: continuationBoundaryChanged
         ? null
-        : (update.providerSessionId ?? current.providerSessionId),
+        : update.providerSessionId === undefined
+          ? current.providerSessionId
+          : update.providerSessionId,
       continuationIdentity: continuationBoundaryChanged
         ? null
         : update.providerSessionId === null
@@ -246,7 +248,7 @@ export class ConversationRepository {
     }
     const modelSelectionJson = JSON.stringify(modelSelection);
     const continuationIdentityJson = next.continuationIdentity
-      ? JSON.stringify(continuationIdentitySchema.parse(next.continuationIdentity))
+      ? JSON.stringify(versionedContinuationIdentitySchema.parse(next.continuationIdentity))
       : null;
     this.context.database.prepare(`
       UPDATE conversations SET

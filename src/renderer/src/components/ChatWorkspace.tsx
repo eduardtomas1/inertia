@@ -90,12 +90,14 @@ import type {
 } from "./conversation-context/types";
 import type { FinalAnswerAutoScrollEvent } from "./response-timeline/types";
 import { LoadingMark } from "./ui";
-import { ProviderMaintenanceNotice } from "./ProviderMaintenanceNotice";
 import { notifyComposerStopRestore } from "../utils/composerStopRestore";
 import "./ChatWorkspace.css";
 
 const ResponseTimeline = lazy(async () => ({
   default: (await import("./ResponseTimeline")).ResponseTimeline,
+}));
+const ProviderMaintenanceNotice = lazy(async () => ({
+  default: (await import("./ProviderMaintenanceNotice")).ProviderMaintenanceNotice,
 }));
 const READER_INTENT_GUARD_MS = 750;
 const EMPTY_PROMPT_PRESETS: readonly PromptPreset[] = [];
@@ -977,18 +979,23 @@ export function ChatWorkspace({
             </button>
           </div>
         )}
-        <ProviderMaintenanceNotice
-          providerLabel={providerIdentityLabels?.[conversation.providerId]
-            ?? providers.find(({ id }) =>
-              id === conversation.providerId)?.label
-            ?? conversation.providerId}
-          status={maintenanceStatus}
-          operation={maintenanceOperation}
-          onRefresh={onRefreshProviderMaintenance}
-          onUpdate={onUpdateProvider}
-          onCancel={onCancelProviderUpdate}
-          onOpenInstructions={onOpenProviderUpdateInstructions}
-        />
+        {maintenanceStatus && (maintenanceOperation
+          || maintenanceStatus.versionStatus === "update-available") && (
+          <Suspense fallback={null}>
+            <ProviderMaintenanceNotice
+              providerLabel={providerIdentityLabels?.[conversation.providerId]
+                ?? providers.find(({ id }) =>
+                  id === conversation.providerId)?.label
+                ?? conversation.providerId}
+              status={maintenanceStatus}
+              operation={maintenanceOperation}
+              onRefresh={onRefreshProviderMaintenance}
+              onUpdate={onUpdateProvider}
+              onCancel={onCancelProviderUpdate}
+              onOpenInstructions={onOpenProviderUpdateInstructions}
+            />
+          </Suspense>
+        )}
         <Composer
           conversation={conversation}
           checkoutBranch={checkoutBranch}

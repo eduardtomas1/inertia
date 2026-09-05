@@ -34,6 +34,7 @@ function runCandidateViabilityWorker(options: {
   readonly spawn: () => UtilityProcess;
   readonly timeoutMs: number;
   readonly exitProofMs: number;
+  readonly retainLateTerminationAuthority: boolean;
 }): Promise<void> {
   let child: UtilityProcess;
   try {
@@ -48,33 +49,46 @@ function runCandidateViabilityWorker(options: {
     let result: AppUpdateCandidateViabilityResult | null = null;
     let stoppingError: Error | null = null;
     let exitProofTimer: NodeJS.Timeout | null = null;
+    let killAccepted = false;
+    let exitObserved = false;
     let settled = false;
-    const cleanup = (): void => {
+    const cleanup = (terminationObserved = false): void => {
       clearTimeout(timeout);
       if (exitProofTimer) clearTimeout(exitProofTimer);
-      child.removeListener("spawn", onSpawn);
       child.removeListener("message", onMessage);
-      child.removeListener("error", onError);
-      child.removeListener("exit", onExit);
+      if (terminationObserved || !options.retainLateTerminationAuthority) {
+        child.removeListener("spawn", onSpawn);
+        child.removeListener("error", onError);
+        child.removeListener("exit", onExit);
+      }
     };
     const settle = (error?: Error): void => {
       if (settled) return;
       settled = true;
-      cleanup();
+      cleanup(exitObserved);
       if (error) reject(error);
       else resolve();
     };
     const stop = (error: Error): void => {
       if (settled || stoppingError) return;
       stoppingError = error;
-      try { child.kill(); } catch { /* Exit proof remains authoritative. */ }
+      requestKill();
       exitProofTimer = setTimeout(() => settle(new Error(
         "The app update viability process exit is unconfirmed.",
       )), options.exitProofMs);
       exitProofTimer.unref();
     };
+    const requestKill = (): void => {
+      if (killAccepted || exitObserved) return;
+      try {
+        killAccepted = child.kill();
+      } catch { /* Exit proof remains authoritative. */ }
+    };
     const onSpawn = (): void => {
-      if (stoppingError) return;
+      if (stoppingError) {
+        if (options.retainLateTerminationAuthority) requestKill();
+        return;
+      }
       spawned = true;
       try {
         child.postMessage(appUpdateCandidateViabilityRequest({
@@ -112,6 +126,11 @@ function runCandidateViabilityWorker(options: {
       "The app update viability process stopped unexpectedly.",
     ));
     const onExit = (code: number): void => {
+      exitObserved = true;
+      if (settled) {
+        cleanup(true);
+        return;
+      }
       if (stoppingError) {
         settle(stoppingError);
         return;
@@ -134,7 +153,7 @@ function runCandidateViabilityWorker(options: {
     timeout.unref();
     child.once("spawn", onSpawn);
     child.on("message", onMessage);
-    child.once("error", onError);
+    child.on("error", onError);
     child.once("exit", onExit);
   });
 }
@@ -190,5 +209,6 @@ export async function validateDesktopAppUpdateCandidate(options: {
       VALIDATION_EXIT_PROOF_MS,
       dependencies.exitProofMs ?? VALIDATION_EXIT_PROOF_MS,
     )),
+    retainLateTerminationAuthority: platform === "linux",
   });
 }

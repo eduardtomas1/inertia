@@ -35,12 +35,15 @@ interface PendingStoreOperation {
 
 interface StoreRecordState {
   readonly completions: Set<Promise<boolean>>;
+  readonly unconfirmedTerminations: Set<Promise<void>>;
   shutdownConfirmed: boolean;
+  permanentlyUnconfirmed: boolean;
   draining: boolean;
   suppressReplies: boolean;
 }
 
 interface RuntimeConversationAttachmentStoreCoordinatorOptions {
+  readonly retryUnconfirmedShutdown?: boolean;
   readonly runner?: ConversationAttachmentStoreAnyOperationRunner;
   readonly authority?: ConversationAttachmentStoreAuthority;
   readonly accepts: (record: RuntimeProcessRecord) => boolean;
@@ -147,13 +150,16 @@ export class RuntimeConversationAttachmentStoreCoordinator {
     const controller = new AbortController();
     const state = existingState ?? {
       completions: new Set<Promise<boolean>>(),
+      unconfirmedTerminations: new Set<Promise<void>>(),
       shutdownConfirmed: true,
+      permanentlyUnconfirmed: false,
       draining: false,
       suppressReplies: false,
     };
     let execution: {
       readonly result: Promise<void | ConversationAttachmentStoreReadReceipt>;
       readonly stopped: Promise<void>;
+      readonly termination?: Promise<void>;
     };
     try {
       const runner = this.options.runner as (
@@ -171,7 +177,33 @@ export class RuntimeConversationAttachmentStoreCoordinator {
     }
     // Observe shutdown immediately so a fast helper failure cannot become an
     // unhandled rejection while its operation result is still settling.
-    const stopped = execution.stopped.then(() => true, () => false);
+    const stopped = execution.stopped.then(
+      () => true,
+      () => {
+        state.shutdownConfirmed = false;
+        const termination = this.options.retryUnconfirmedShutdown === true
+          ? execution.termination
+          : undefined;
+        if (!termination) {
+          state.permanentlyUnconfirmed = true;
+          return false;
+        }
+        state.unconfirmedTerminations.add(termination);
+        void termination.then(
+          () => {
+            state.unconfirmedTerminations.delete(termination);
+            if (
+              !state.permanentlyUnconfirmed
+              && state.unconfirmedTerminations.size === 0
+            ) state.shutdownConfirmed = true;
+          },
+          () => {
+            state.permanentlyUnconfirmed = true;
+          },
+        );
+        return false;
+      },
+    );
     let pending!: PendingStoreOperation;
     const operationCompletion = (async (): Promise<boolean> => {
       let receipt: void | ConversationAttachmentStoreReadReceipt;
@@ -211,11 +243,9 @@ export class RuntimeConversationAttachmentStoreCoordinator {
     })();
     let completion!: Promise<boolean>;
     completion = operationCompletion.then(
-      (confirmed) => {
-        if (!confirmed) state.shutdownConfirmed = false;
-        return confirmed;
-      },
+      (confirmed) => confirmed,
       () => {
+        state.permanentlyUnconfirmed = true;
         state.shutdownConfirmed = false;
         return false;
       },
@@ -264,7 +294,10 @@ export class RuntimeConversationAttachmentStoreCoordinator {
     state.suppressReplies ||= suppressReplies;
     while (state.completions.size > 0) {
       const results = await Promise.all(state.completions);
-      if (!results.every(Boolean)) state.shutdownConfirmed = false;
+      if (!results.every(Boolean)) {
+        state.shutdownConfirmed = !state.permanentlyUnconfirmed
+          && state.unconfirmedTerminations.size === 0;
+      }
     }
     if (!state.shutdownConfirmed) return false;
     this.recordStates.delete(record);

@@ -153,6 +153,70 @@ describe("desktop app update candidate viability", () => {
     expect(child.kill).toHaveBeenCalledOnce();
   });
 
+  it("retains cleanup authority and retries a rejected pre-spawn kill", async () => {
+    vi.useFakeTimers();
+    const child = new FakeUtilityProcess();
+    child.kill.mockReset();
+    child.kill.mockReturnValue(false);
+    const injected = {
+      ...dependencies(child),
+      resolveRuntimeAssets: vi.fn(() => ({
+        runtimeProcessGuardianPath: "/runtime/guardian",
+        windowsRuntimeJobAssembly: null,
+      })),
+      verifyLinuxGuardian: vi.fn(() => true) as unknown as
+        CandidateViabilityDependencies["verifyLinuxGuardian"],
+      validationTimeoutMs: 10,
+      exitProofMs: 5,
+    };
+    const validation = validateDesktopAppUpdateCandidate({
+      operationId,
+      dataDirectory: "/safe/data",
+      expectedActiveRuntimeOwner: null,
+      platform: "linux",
+      dependencies: injected,
+    });
+    const rejected = expect(validation).rejects.toThrow("exit is unconfirmed");
+
+    await vi.advanceTimersByTimeAsync(15);
+    await rejected;
+    expect(child.kill).toHaveBeenCalledOnce();
+    expect(() => child.emit("error", new Error("late fork failure"))).not.toThrow();
+    child.emit("spawn");
+    expect(child.kill).toHaveBeenCalledTimes(2);
+    expect(child.messages).toEqual([]);
+    expect(() => child.emit("error", new Error("late process failure"))).not.toThrow();
+    child.emit("exit", 1);
+    expect(child.listenerCount("error")).toBe(0);
+  });
+
+  it("does not enable late utility recovery outside Linux", async () => {
+    vi.useFakeTimers();
+    const child = new FakeUtilityProcess();
+    child.kill.mockReset();
+    child.kill.mockReturnValue(false);
+    const validation = validateDesktopAppUpdateCandidate({
+      operationId,
+      dataDirectory: "/safe/data",
+      expectedActiveRuntimeOwner: null,
+      platform: "darwin",
+      dependencies: {
+        ...dependencies(child),
+        validationTimeoutMs: 10,
+        exitProofMs: 5,
+      },
+    });
+    const rejected = expect(validation).rejects.toThrow("exit is unconfirmed");
+
+    await vi.advanceTimersByTimeAsync(15);
+    await rejected;
+    expect(child.listenerCount("spawn")).toBe(0);
+    expect(child.listenerCount("error")).toBe(0);
+    expect(child.listenerCount("exit")).toBe(0);
+    child.emit("spawn");
+    expect(child.kill).toHaveBeenCalledOnce();
+  });
+
   it("fails before spawning when the Linux guardian is not viable", async () => {
     const child = new FakeUtilityProcess();
     const injected: CandidateViabilityDependencies = {

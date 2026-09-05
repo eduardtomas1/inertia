@@ -142,6 +142,7 @@ export interface RuntimeSupervisorSnapshot {
 }
 
 export interface RuntimeSupervisorOptions {
+  platform?: NodeJS.Platform;
   spawn: () => UtilityProcess;
   windowsRuntimeJobAssembly?: WindowsRuntimeJobAssembly;
   workerOptions: Omit<

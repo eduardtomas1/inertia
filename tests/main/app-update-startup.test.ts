@@ -43,6 +43,7 @@ import {
 import {
   beginAppUpdateRollback,
   completeWindowsUpdateRollback,
+  registerApplicationLifecycle,
   retireAppUpdateRollback,
   startApplicationWithUpdateHandoff,
   type AppUpdateStartupOptions,
@@ -416,6 +417,62 @@ describe("app update startup coordinator", () => {
     expect(fixture.vault.matches(fixture.prepared)).toBe(false);
     expect(application.listeners.has("before-quit")).toBe(true);
     expect(application.exit).not.toHaveBeenCalled();
+  });
+
+  it("lets a Linux second instance retry only a retained normal shutdown", async () => {
+    const order: string[] = [];
+    const application = applicationFixture(true, order);
+    const focusMainWindow = vi.fn();
+    const retryUnconfirmedNormalShutdown = vi.fn(() => true);
+
+    const fixture = await windowsFixture();
+    registerApplicationLifecycle(startupOptions(
+      fixture,
+      application.application,
+      {
+        platform: "linux",
+        focusMainWindow,
+        updateInstallCoordinator: () => ({
+          allowBeforeQuit: () => false,
+          retryUnconfirmedNormalShutdown,
+        }),
+      },
+    ));
+    const secondInstance = (
+      application.listeners.get("second-instance")?.[0]
+    ) as (() => void) | undefined;
+    expect(secondInstance).toBeTypeOf("function");
+    secondInstance?.();
+
+    expect(focusMainWindow).toHaveBeenCalledOnce();
+    expect(retryUnconfirmedNormalShutdown).toHaveBeenCalledOnce();
+  });
+
+  it("only focuses a second instance outside Linux", async () => {
+    const application = applicationFixture(true, []);
+    const focusMainWindow = vi.fn();
+    const retryUnconfirmedNormalShutdown = vi.fn(() => true);
+    const fixture = await windowsFixture();
+    registerApplicationLifecycle(startupOptions(
+      fixture,
+      application.application,
+      {
+        platform: "darwin",
+        focusMainWindow,
+        updateInstallCoordinator: () => ({
+          allowBeforeQuit: () => false,
+          retryUnconfirmedNormalShutdown,
+        }),
+      },
+    ));
+
+    const secondInstance = (
+      application.listeners.get("second-instance")?.[0]
+    ) as (() => void) | undefined;
+    expect(secondInstance).toBeTypeOf("function");
+    secondInstance?.();
+    expect(focusMainWindow).toHaveBeenCalledOnce();
+    expect(retryUnconfirmedNormalShutdown).not.toHaveBeenCalled();
   });
 
   it("lets only the exact installed Windows candidate commit ownership transfer", async () => {

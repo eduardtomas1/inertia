@@ -646,6 +646,97 @@ describe("durable conversation attachment storage", () => {
     await expect(store.preview(payload.attachment.id)).rejects.toThrow(/closing/u);
   });
 
+  it("lets a later Linux close use exact late helper termination proof", async () => {
+    const dataDirectory = await root();
+    const payload = image("30303030-3030-4030-8030-303030303030");
+    let started!: () => void;
+    let rejectStopped!: (error: Error) => void;
+    let resolveTermination!: () => void;
+    const operationRunner: ConversationAttachmentStoreOperationRunner = (
+      operation,
+      signal,
+    ) => {
+      if (operation.operation !== "persist") {
+        return testOperationRunner(operation, signal);
+      }
+      const result = new Promise<void>((_resolve, reject) => {
+        signal?.addEventListener("abort", () => reject(signal.reason), {
+          once: true,
+        });
+        started();
+      });
+      const stopped = new Promise<void>((_resolve, reject) => {
+        rejectStopped = reject;
+      });
+      const termination = new Promise<void>((resolve) => {
+        resolveTermination = resolve;
+      });
+      return { result, stopped, termination };
+    };
+    const ready = new Promise<void>((resolve) => { started = resolve; });
+    const store = await ConversationAttachmentStore.open(dataDirectory, {
+      platform: "linux",
+      operationRunner,
+    });
+    const retaining = store.retain([payload]);
+    await ready;
+    const firstClose = store.close();
+    rejectStopped(new Error("exact helper exit remains unconfirmed"));
+
+    await expect(retaining).rejects.toThrow(/closing/u);
+    await expect(firstClose).rejects.toThrow(/exit remains unconfirmed/u);
+    resolveTermination();
+    await Promise.resolve();
+    await expect(store.close()).resolves.toBeUndefined();
+    await expect(store.retain([payload])).rejects.toThrow(/closing/u);
+  });
+
+  it("does not activate exact late-exit close recovery outside Linux", async () => {
+    const dataDirectory = await root();
+    const payload = image("40404040-4040-4040-8040-404040404040");
+    let started!: () => void;
+    let rejectStopped!: (error: Error) => void;
+    let resolveTermination!: () => void;
+    const ready = new Promise<void>((resolve) => { started = resolve; });
+    const operationRunner: ConversationAttachmentStoreOperationRunner = (
+      operation,
+      signal,
+    ) => {
+      if (operation.operation !== "persist") {
+        return testOperationRunner(operation, signal);
+      }
+      const result = new Promise<void>((_resolve, reject) => {
+        signal?.addEventListener("abort", () => reject(signal.reason), {
+          once: true,
+        });
+        started();
+      });
+      return {
+        result,
+        stopped: new Promise<void>((_resolve, reject) => {
+          rejectStopped = reject;
+        }),
+        termination: new Promise<void>((resolve) => {
+          resolveTermination = resolve;
+        }),
+      };
+    };
+    const store = await ConversationAttachmentStore.open(dataDirectory, {
+      platform: "darwin",
+      operationRunner,
+    });
+    const retaining = store.retain([payload]);
+    await ready;
+    const firstClose = store.close();
+    rejectStopped(new Error("exact helper exit remains unconfirmed"));
+
+    await expect(retaining).rejects.toThrow(/closing/u);
+    await expect(firstClose).rejects.toThrow(/exit remains unconfirmed/u);
+    resolveTermination();
+    await Promise.resolve();
+    await expect(store.close()).rejects.toThrow(/exit remains unconfirmed/u);
+  });
+
   it("cancels and drains an active durable preview read during close", async () => {
     const dataDirectory = await root();
     const payload = image("20202020-2020-4020-8020-202020202020");

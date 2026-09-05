@@ -109,7 +109,6 @@ test("never replaces mounted chats during a supervised runtime restart", async (
   const sidebar = page.getByRole("complementary", {
     name: "Project navigation",
   });
-  await sidebar.getByRole("button", { name: "Expand Companion" }).click();
   await sidebar.getByRole("button", {
     name: `Thread actions for ${secondaryTitle}`,
   }).click();

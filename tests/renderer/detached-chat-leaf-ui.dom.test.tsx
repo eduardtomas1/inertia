@@ -284,7 +284,6 @@ describe("detached chat leaf controls", () => {
         onViewChange={noOp}
         onOpenHome={noOp}
         onImportProject={noOp}
-        onSelectProject={noOp}
         onSelectConversation={onSelectConversation}
         onOpenConversationInSplit={noOp}
         onOpenConversationInWindow={noOp}
@@ -305,13 +304,14 @@ describe("detached chat leaf controls", () => {
         onRenameProject={noOp}
         onSetProjectGrouping={noOp}
         onSetProjectGitRepositoryLimit={noOp}
-        onSidebarModeChange={noOp}
         onRemoveProject={noOp}
       />,
     );
 
+    fireEvent.click(screen.getByRole("button", { name: "Earlier 1" }));
     const marker = screen.getByLabelText("Open in a separate chat window");
-    expect(marker.closest(".conversation-row")).toHaveClass("is-detached");
+    expect(marker.closest(".activity-thread")).toHaveClass("is-detached");
+    fireEvent.click(screen.getByRole("button", { name: "Filter work by project" }));
     fireEvent.click(screen.getByRole("button", {
       name: "Project actions for Inertia",
     }));

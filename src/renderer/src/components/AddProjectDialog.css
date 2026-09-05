@@ -1,0 +1,163 @@
+.add-project-dialog {
+  width: min(540px, calc(100vw - 32px));
+  max-height: calc(100dvh - 40px);
+  overflow-y: auto;
+  border: 1px solid var(--border-strong);
+  border-radius: 15px;
+  background: var(--surface-strong);
+  box-shadow: var(--shadow);
+  color: var(--text);
+}
+.add-project-dialog header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.add-project-dialog h2 {
+  flex: 1;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.add-project-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 20px;
+  color: var(--text-muted);
+}
+.add-project-dialog input {
+  min-width: 0;
+  width: 100%;
+  height: 37px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--input-bg, var(--surface));
+  color: var(--text);
+  font-size: 13px;
+}
+.add-project-dialog input:focus {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+.add-project-search input {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.add-project-sources {
+  display: grid;
+  gap: 5px;
+  padding: 0 10px 12px;
+}
+.add-project-sources > button {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  min-height: 65px;
+  padding: 12px;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text-soft);
+  text-align: left;
+}
+.add-project-sources > button:hover,
+.add-project-sources > button:focus-visible {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+.add-project-sources span {
+  display: grid;
+  gap: 5px;
+}
+.add-project-sources strong {
+  font-size: 13px;
+  font-weight: 550;
+}
+.add-project-sources small {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.add-project-dialog form {
+  display: grid;
+  gap: 16px;
+  padding: 20px;
+}
+.add-project-dialog label {
+  display: grid;
+  gap: 7px;
+  color: var(--text-soft);
+  font-size: 12px;
+}
+.add-project-path {
+  display: flex;
+  gap: 7px;
+}
+.add-project-path button {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-hover);
+  color: var(--text);
+  font-size: 12px;
+}
+.add-project-dialog footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.add-project-dialog footer > span,
+.add-project-hint {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.5;
+  margin: 0;
+}
+.add-project-error {
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.add-project-dialog {
+  animation: palette-panel-in 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.add-project-dialog form,
+.add-project-sources {
+  animation: add-project-content-in 140ms var(--motion-ease);
+}
+.add-project-sources > button {
+  transition:
+    background-color 120ms var(--motion-ease),
+    color 120ms var(--motion-ease);
+}
+@keyframes add-project-content-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .add-project-dialog,
+  .add-project-dialog form,
+  .add-project-sources {
+    animation: none;
+  }
+}
+
+.add-project-field {
+  display: grid;
+  gap: 7px;
+}

@@ -197,6 +197,36 @@ afterEach(() => {
 });
 
 describe("composer asynchronous ownership", () => {
+  it("returns scratch actions to the editor without stealing a later focus choice", async () => {
+    render(<>
+      <Composer {...composerProps(conversation("scratch-focus"))} />
+      <textarea aria-label="Other chat draft" defaultValue="Neighbour draft" />
+    </>);
+    const input = screen.getByRole("textbox", { name: "Message" });
+    const neighbour = screen.getByRole("textbox", { name: "Other chat draft" });
+    const nextFrame = async (): Promise<void> => {
+      await act(async () => {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      });
+    };
+    fireEvent.change(input, { target: { value: "Owned scratch prompt" } });
+    fireEvent.click(await screen.findByRole("button", { name: "Scratch prompts" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Save current prompt/u }));
+    expect(input).toHaveFocus();
+    neighbour.focus();
+    await nextFrame();
+    expect(neighbour).toHaveFocus();
+
+    fireEvent.click(screen.getByRole("button", { name: "Scratch prompts, 1 saved" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /^Owned scratch prompt/u }));
+    expect(input).toHaveValue("Owned scratch prompt");
+    expect(input).toHaveFocus();
+    neighbour.focus();
+    await nextFrame();
+    expect(neighbour).toHaveFocus();
+    expect(neighbour).toHaveValue("Neighbour draft");
+  });
+
   it("omits scratch-prompt storage controls when the window disables them", () => {
     render(<Composer {...composerProps(conversation("detached-stash"), {
       promptStashEnabled: false,
@@ -666,7 +696,7 @@ describe("composer asynchronous ownership", () => {
       name: "Model and run settings",
     })).toBeInTheDocument();
     expect(within(toolbar).getByRole("group", {
-      name: "Usage and message actions",
+      name: "Usage",
     })).toBeInTheDocument();
 
     fireEvent.change(input, { target: { value: "Keep every control reachable" } });
@@ -679,7 +709,8 @@ describe("composer asynchronous ownership", () => {
     const send = within(toolbar).getByRole("button", { name: "Send message" });
     attach.focus();
     await userEvent.setup().tab();
-    expect(presets).toHaveFocus();
+    expect(send).toHaveFocus();
+    expect(presets).not.toHaveAttribute("tabindex", "-1");
     expect(attach).not.toHaveAttribute("tabindex", "-1");
     expect(send).not.toHaveAttribute("tabindex", "-1");
   });

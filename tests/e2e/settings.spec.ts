@@ -452,12 +452,14 @@ test("persists composer usage modes without losing the followed transcript", asy
   const toolbarIntegration = await compact.evaluate((control) => {
     const toolbar = control.closest(".composer-toolbar");
     const options = control.parentElement;
-    const next = control.nextElementSibling;
+    const send = control.closest(".composer")?.querySelector(
+      '.composer-input-actions [aria-label="Send message"]',
+    );
     return {
       inComposer: Boolean(control.closest(".composer")),
       inToolbar: Boolean(toolbar),
       parentClass: options?.className ?? "",
-      nextLabel: next?.getAttribute("aria-label"),
+      inputSendLabel: send?.getAttribute("aria-label"),
       detachedUsageRows: document.querySelectorAll(".composer-shell > .composer-usage").length,
       toolbarUsageControls: toolbar?.querySelectorAll('[data-composer-control="usage"]').length ?? 0,
     };
@@ -466,7 +468,7 @@ test("persists composer usage modes without losing the followed transcript", asy
     inComposer: true,
     inToolbar: true,
     parentClass: "composer-actions",
-    nextLabel: "Send message",
+    inputSendLabel: "Send message",
     detachedUsageRows: 0,
     toolbarUsageControls: 1,
   });
@@ -626,16 +628,15 @@ test("persists composer usage modes without losing the followed transcript", asy
     const controlBounds = control.getBoundingClientRect();
     const toolbar = control.closest<HTMLElement>(".composer-toolbar");
     const toolbarBounds = toolbar?.getBoundingClientRect();
-    const send = toolbar?.querySelector<HTMLElement>('[aria-label="Send message"]');
-    const sendBounds = send?.getBoundingClientRect();
+    const railBounds = control.closest(".composer-primary-rail")?.getBoundingClientRect();
     return {
       inToolbar: Boolean(toolbar),
       controlRight: controlBounds.right,
       toolbarRight: toolbarBounds?.right ?? 0,
-      centerDelta: sendBounds
+      centerDelta: railBounds
         ? Math.abs(
             (controlBounds.top + controlBounds.height / 2)
-            - (sendBounds.top + sendBounds.height / 2),
+            - (railBounds.top + railBounds.height / 2),
           )
         : Number.POSITIVE_INFINITY,
     };
@@ -718,7 +719,8 @@ test("applies every interface scale live and remains usable at common Linux disp
       const send = element.querySelector<HTMLElement>(
         '[aria-label="Send message"]',
       );
-      const toolbarBounds = toolbar?.getBoundingClientRect();
+      const inputBounds = element.querySelector(".composer-input-zone")
+        ?.getBoundingClientRect();
       const modelBounds = model?.getBoundingClientRect();
       const labelBounds = label?.getBoundingClientRect();
       const sendBounds = send?.getBoundingClientRect();
@@ -738,10 +740,12 @@ test("applies every interface scale live and remains usable at common Linux disp
           ? getComputedStyle(label).overflow
           : "",
         sendContained: Boolean(
-          toolbarBounds
+          inputBounds
           && sendBounds
-          && sendBounds.left >= toolbarBounds.left - 1
-          && sendBounds.right <= toolbarBounds.right + 1,
+          && sendBounds.left >= inputBounds.left - 1
+          && sendBounds.right <= inputBounds.right + 1
+          && sendBounds.top >= inputBounds.top - 1
+          && sendBounds.bottom <= inputBounds.bottom + 1,
         ),
       };
     });

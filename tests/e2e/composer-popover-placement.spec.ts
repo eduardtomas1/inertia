@@ -65,6 +65,7 @@ let page!: AppFixture["page"];
 test.beforeAll(async () => {
   app = await createAppFixture({
     name: "composer-popover-placement",
+    windowDisplay: "primary",
     initialState: "conversation",
     seedSecondProject: true,
     codexAppServerSource,
@@ -177,6 +178,11 @@ async function expectContained(popover: Locator): Promise<{
       insideViewport: true,
     });
   }
+  await popover.evaluate(async (element) => {
+    await Promise.all(element.getAnimations()
+      .filter((animation) => animation.effect?.getTiming().iterations !== Infinity)
+      .map((animation) => animation.finished.catch(() => undefined)));
+  });
   const geometry = await inspect();
   expect(geometry, JSON.stringify(geometry)).toMatchObject({
     insideWorkspace: true,
@@ -238,7 +244,6 @@ test("keeps every composer utility popover inside both split panes", async (
   const sidebar = page.getByRole("complementary", {
     name: "Project navigation",
   });
-  await sidebar.getByRole("button", { name: "Expand Companion" }).click();
   await sidebar.getByRole("button", {
     name: `Thread actions for ${secondaryTitle}`,
   }).click();

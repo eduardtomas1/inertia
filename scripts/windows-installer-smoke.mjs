@@ -548,7 +548,12 @@ async function smokeInstalledApplication(
 
 const INSTALL_ROOT_PROCESS_SNAPSHOT_SCRIPT = `
 $ErrorActionPreference = "Stop"
-$root = [IO.Path]::GetFullPath($env:INERTIA_INSTALLER_SMOKE_ROOT).TrimEnd([char[]]'\\/')
+$rootPath = [IO.Path]::GetFullPath($env:INERTIA_INSTALLER_SMOKE_ROOT).TrimEnd([char[]]'\\/')
+$rootItem = Get-Item -LiteralPath $rootPath -Force -ErrorAction Stop
+if ($rootItem -isnot [IO.DirectoryInfo] -or ($rootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+  throw "unsafe install root"
+}
+$root = [IO.Path]::GetFullPath($rootItem.FullName).TrimEnd([char[]]'\\/')
 $prefix = $root + [IO.Path]::DirectorySeparatorChar
 $processes = @(Get-CimInstance -ClassName Win32_Process -ErrorAction Stop | ForEach-Object {
   $rawPath = [string]$_.ExecutablePath

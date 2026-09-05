@@ -6,7 +6,7 @@ SilentInstall silent
 !include "LogicLib.nsh"
 !define PRODUCT_NAME "Inertia"
 Var PowerShellPath
-!include "../../resources/installer.nsh"
+!include "$%INERTIA_GUARD_FIXTURE_INCLUDE%"
 
 ; Execute the actual shipped guard, including preparing an empty destination,
 ; without installing files, touching the registry, or stopping any process.

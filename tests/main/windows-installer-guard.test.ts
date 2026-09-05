@@ -32,6 +32,7 @@ test.runIf(process.platform === "win32")(
           ...process.env,
           ...compiler.env,
           INERTIA_GUARD_FIXTURE_OUTPUT: fixture,
+          INERTIA_GUARD_FIXTURE_INCLUDE: join(repositoryRoot, "resources/installer.nsh"),
         },
         timeoutMs: 30_000,
       });

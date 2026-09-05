@@ -186,6 +186,30 @@ artifact retention. Reproduce with Node 22: `npm run build`, then
 isolated desktop. For a baseline, build `0fe93246` with the new test fixture
 but without the two component changes; the interval assertion must fail.
 
+The first PR #262 Windows x64 CI run exposed a fixture-construction cost:
+the trace spent 328.803 seconds between the end of before-hooks and the first
+Electron launch call, exceeding the unchanged 300-second test deadline before
+startup or sampling began. Windows ARM64 spent 253.760 seconds in the same
+prelaunch phase, then passed startup, the 29.122-second backup wait, foreground
+sampling, and blur/pause checks. Its first background settle poll began about
+297.546 seconds into the test and exhausted the overall deadline after 1.896
+seconds; the observed quiet interval increased to 1,896.2 ms. Neither trace
+establishes an idle-renderer regression. The original generator reopened `RuntimeStore` for
+each of 41 histories and inserted 67,552 activities individually. The fixture
+now keeps one store lifetime for conversation/turn/message creation and batches
+the same activity payloads in one prepared-statement transaction, with foreign
+keys enabled. Production startup, recovery, and backup behavior are unchanged.
+
+A local Node 22 seeding-only comparison measured 11.165 seconds before and
+2.158 seconds after. These are fixture setup times, not renderer performance
+or native Windows timings. Persisted-data regression coverage verifies exact
+counts, unique command titles, payloads, run/turn/conversation ownership, user
+and terminal message ownership, preserved initial chat, selected detail, and
+database integrity. A named Playwright seed step and a persisted-count/timing
+attachment now distinguish this phase in CI. The complete mature dataset,
+300-second deadline, native focus checks, backup wait, sample durations, and
+zero-work/foreground-motion assertions remain in place.
+
 macOS ARM64's small and large cases passed locally. The mature macOS baseline
 also reproduced five timer callbacks and 35 paints, with 0.83% renderer CPU
 and 1.00% GPU CPU while unfocused. The patched mature macOS attempt recorded

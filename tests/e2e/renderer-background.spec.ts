@@ -4,49 +4,12 @@ import { join } from "node:path";
 import { RuntimeStore } from "../../src/server/database";
 import type { ServerEvent } from "../../src/shared/contracts";
 import { createAppFixture } from "./support/app-fixture";
+import { seedBackgroundHistoryProfile } from "../helpers/renderer-background-history";
 
 declare global {
   interface Window {
     __backgroundCounters: { reactCommits: number; rafCallbacks: number; intervalCallbacks: number; rendererInjected: boolean; lastActivityAt: number };
   }
-}
-
-function seedHistory(testDirectory: string, workspaceDirectory: string, turns: number, name = "Background history fixture", activitiesPerTurn = 74): string {
-  const store = new RuntimeStore(join(testDirectory, "data", "inertia.sqlite"), workspaceDirectory, {
-    recoverInterruptedRuns: false,
-  });
-  try {
-    const projectId = store.shellSnapshot().activeProjectId!;
-    const conversation = store.createConversation(projectId, name);
-    store.updateConversation(conversation.id, {
-      reasoningEffort: "ultra",
-      modelSelection: { ...conversation.modelSelection, reasoningEffort: "ultra" },
-    });
-    for (let index = 0; index < turns; index++) {
-      const requestedAt = new Date(Date.now() - 200_000 + index * 1_000).toISOString();
-      const { turn } = store.beginAgentTurn({
-        id: `${conversation.id}-turn-${index}`, runId: `${conversation.id}-run-${index}`,
-        conversationId: conversation.id, content: `History request ${index}`,
-        providerId: "codex", harnessId: "codex-app-server", backendProfileId: "native:codex:app-server",
-        model: "gpt-5.6", reasoningEffort: "ultra", interactionMode: "build", accessMode: "supervised",
-        configurationRevision: 1, association: "authoritative", requestedAt,
-      });
-      for (let activity = 0; activity < activitiesPerTurn; activity++) store.addActivity({
-        conversationId: conversation.id, turnId: turn.id, runId: turn.runId,
-        kind: "command", title: `Command ${index}.${activity}`,
-        detail: "Synthetic bounded-history fixture. ".repeat(20), status: "completed",
-      });
-      for (let message = 0; message < 6; message++) store.createMessage(
-        conversation.id, `Commentary ${index}.${message}`, "assistant", [], turn.id, requestedAt,
-      );
-      const answer = store.createMessage(conversation.id, `Final answer ${index}`, "assistant", [], turn.id, requestedAt);
-      store.updateAgentTurnLifecycle(turn.id, {
-        status: "completed", startedAt: requestedAt, completedAt: requestedAt, updatedAt: requestedAt,
-        terminalAssistantMessageId: answer.id, terminalReason: "provider-completed",
-      });
-    }
-    return conversation.id;
-  } finally { store.close(); }
 }
 
 // These are synthetic renderer projections, installed after runtime recovery.
@@ -163,13 +126,24 @@ for (const { turns, mature } of [{ turns: 2, mature: false }, { turns: 128, matu
 test(`bounds background motion for ${turns} turns${mature ? " in a mature profile with live subagents" : ""} and resumes on focus`, async ({ browserName: _browserName }, testInfo) => {
   test.setTimeout(mature ? 300_000 : 180_000);
   let conversationId = "";
+  let seedDurationMs = 0;
   const fixture = await createAppFixture({
     name: `renderer-background-${turns}`, initialState: "conversation", windowDisplay: "primary",
-    beforeLaunch: ({ testDirectory, workspaceDirectory }) => {
-      if (mature) for (let index = 0; index < 40; index++) {
-        seedHistory(testDirectory, workspaceDirectory, 22, `Other synthetic history ${index}`, 66);
-      }
-      conversationId = seedHistory(testDirectory, workspaceDirectory, turns);
+    beforeLaunch: async ({ testDirectory, workspaceDirectory }) => {
+      const startedAt = performance.now();
+      const seeded = await test.step("Seed the complete background history profile", () =>
+        seedBackgroundHistoryProfile(join(testDirectory, "data", "inertia.sqlite"), workspaceDirectory, turns, mature));
+      seedDurationMs = performance.now() - startedAt;
+      conversationId = seeded.conversationId;
+      expect(seeded).toMatchObject({
+        conversations: mature ? 41 : 1,
+        turns: turns + (mature ? 40 * 22 : 0),
+        activities: turns * 74 + (mature ? 40 * 22 * 66 : 0),
+        messages: (turns + (mature ? 40 * 22 : 0)) * 8,
+      });
+      await testInfo.attach("background-history-seed", {
+        body: Buffer.from(JSON.stringify({ ...seeded, seedDurationMs })), contentType: "application/json",
+      });
     },
   });
   const { page, electronApp } = fixture;
@@ -289,7 +263,7 @@ test(`bounds background motion for ${turns} turns${mature ? " in a mature profil
       (animation) => animation instanceof CSSAnimation && animation.animationName === "ultra-reasoning-frame-flow",
     ))).toBe(false);
     const profileTurns = turns + (mature ? 40 * 22 : 0);
-    const report = JSON.stringify({ turns, mature, generatedProfileTurns: profileTurns, generatedProfileConversations: mature ? 41 : 1,
+    const report = JSON.stringify({ turns, mature, seedDurationMs, generatedProfileTurns: profileTurns, generatedProfileConversations: mature ? 41 : 1,
       generatedActivities: turns * 74 + (mature ? 40 * 22 * 66 : 0), generatedMessages: profileTurns * 8,
       syntheticLiveSubagents: mature ? 6 : 0,
       pauseObservedMs, runtimeEvents, foreground, background, backgroundContinuation, resumed, minimized }, null, 2);

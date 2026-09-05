@@ -2303,9 +2303,10 @@ describe.skipIf(process.platform === "win32")(
         builder,
         [
           'import { spawn } from "node:child_process";',
-          'import { writeFileSync } from "node:fs";',
+          'import { renameSync, writeFileSync } from "node:fs";',
           'const descendant = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });',
-          `writeFileSync(${JSON.stringify(pidFile)}, JSON.stringify({ root: process.pid, descendant: descendant.pid }));`,
+          `writeFileSync(${JSON.stringify(`${pidFile}.tmp`)}, JSON.stringify({ root: process.pid, descendant: descendant.pid }));`,
+          `renameSync(${JSON.stringify(`${pidFile}.tmp`)}, ${JSON.stringify(pidFile)});`,
           "setInterval(() => {}, 1000);",
         ].join("\n"),
       );
@@ -2339,6 +2340,14 @@ describe.skipIf(process.platform === "win32")(
         await waitForProcessExit(pids.root);
         await waitForProcessExit(pids.descendant);
       }
+      // Payload PID exit does not prove that the admission trampoline and its
+      // complete process group have settled. Wait for the production reclaimer
+      // to prove that boundary, including transient /proc census uncertainty,
+      // before checking that the now-uncontended lock can be acquired.
+      await expect.poll(() => reclaimStaleGuardianBuildLock(
+        subject.stateDirectory,
+        join(subject.stateDirectory, "build.lock"),
+      ), { timeout: 5_000 }).toBe(true);
       const lock = acquireGuardianBuildLock(subject.stateDirectory, {
         timeoutMs: 200,
       });

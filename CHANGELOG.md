@@ -2,7 +2,32 @@
 
 The useful changes in each Inertia release, in plain language.
 
-## Next
+## 0.0.49 — 2026-09-05
+
+### A simpler workspace with faster project navigation
+
+- Chats, project filters, and project actions now share one compact sidebar.
+  Add a local folder or clone a repository, and use the same keyboard-friendly
+  search surface from the sidebar or a new chat to choose a project.
+- The floating composer and sharper chat panels keep controls close to the
+  work. Prompt recall supports editing earlier messages, and menus preserve
+  focus and stay inside their split pane.
+- Provider-reported context compaction shows an animated “Compacting context…”
+  indicator. Its subtle motion respects reduced-motion preferences and pauses
+  when the window is in the background.
+- Background windows pause decorative motion and recurring UI work, then
+  resume when focused. The README and screenshots reflect the new workspace.
+
+### Agent work and application updates retain their owners
+
+- Provider runs, delegated work, and recovered turns retain exact conversation
+  and run identities. Interrupted work settles against verified process
+  cleanup instead of leaving unrelated chats blocked or spinning.
+- Linux reaps adopted children while work is running. Update handoffs retain
+  their exact process and package identities, and Windows release checks now
+  exercise an installed previous version upgrading to the new package.
+- The reviewed dependency graph includes Electron 44.1, updated UI libraries,
+  and Node declarations aligned with the supported Node 22 runtime.
 
 ### Gemini CLI joins the native provider routes without hiding ACP gaps
 

@@ -15,6 +15,7 @@ import {
   type RuntimeLifecycleDiagnosticSnapshot,
 } from "../../src/shared/contracts";
 import type { AppUpdateStatus } from "../../src/shared/desktop";
+import { INERTIA_VERSION } from "../../src/shared/version";
 
 afterEach(() => {
   Reflect.deleteProperty(window, "inertia");
@@ -302,7 +303,7 @@ describe("Settings composite updates", () => {
       message: "Inertia Canary is up to date.",
     }} />);
 
-    expect(screen.getByText("Inertia Canary · v0.0.48")).toBeInTheDocument();
+    expect(screen.getByText(`Inertia Canary · v${INERTIA_VERSION}`)).toBeInTheDocument();
     expect(await screen.findByText("Canary channel · isolated profile")).toBeInTheDocument();
     expect(await screen.findByText("Verified Canary 0.0.40 is retained for rollback."))
       .toBeInTheDocument();

@@ -303,6 +303,10 @@ export function focusComposerPopoverEdge(
       }
       return;
     }
+    // Placement can finish after keyboard navigation or submenu focus has
+    // already advanced. Initial edge focus must not overwrite that choice.
+    const surface = menu.closest(".composer-more-layer") ?? menu;
+    if (surface.contains(document.activeElement)) return;
     const items = [...menu.querySelectorAll<HTMLButtonElement>(
       "button:not(:disabled)",
     )];

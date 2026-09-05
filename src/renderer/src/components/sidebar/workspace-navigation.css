@@ -286,7 +286,7 @@
   }
 }
 @media (prefers-reduced-motion: reduce) {
-    .sidebar-scope-actions .project-menu {
+  .sidebar-scope-actions .project-menu {
     animation: none;
   }
 }

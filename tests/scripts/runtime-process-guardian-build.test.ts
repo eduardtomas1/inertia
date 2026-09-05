@@ -37,6 +37,8 @@ import {
   executableProcessExists as processExists,
 } from "../helpers/executable-process";
 
+import { writeLongRunningBuilder } from "../helpers/builder-process-fixture";
+
 const repositoryRoot = resolve(import.meta.dirname, "..", "..");
 const script = join(
   repositoryRoot,
@@ -2042,17 +2044,7 @@ describe.skipIf(process.platform === "win32")(
       writeFileSync(subject.bundledIntegrity, JSON.stringify({ sha256 }));
       const pidFile = join(subject.root, "builder-pids.json");
       const builder = join(subject.root, "fake-electron-builder.mjs");
-      writeFileSync(
-        builder,
-        [
-          'import { spawn } from "node:child_process";',
-          'import { renameSync, writeFileSync } from "node:fs";',
-          'const descendant = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });',
-          `writeFileSync(${JSON.stringify(`${pidFile}.tmp`)}, JSON.stringify({ root: process.pid, descendant: descendant.pid }));`,
-          `renameSync(${JSON.stringify(`${pidFile}.tmp`)}, ${JSON.stringify(pidFile)});`,
-          "setInterval(() => {}, 1000);",
-        ].join("\n"),
-      );
+      writeLongRunningBuilder(builder, pidFile);
       const wrapper = packageProcess(subject, builder, "win32");
       let rootPid = 0;
       let descendantPid = 0;
@@ -2299,17 +2291,7 @@ describe.skipIf(process.platform === "win32")(
       writeFileSync(subject.bundledIntegrity, JSON.stringify({ sha256 }));
       const pidFile = join(subject.root, "orphaned-builder-pids.json");
       const builder = join(subject.root, "fake-electron-builder.mjs");
-      writeFileSync(
-        builder,
-        [
-          'import { spawn } from "node:child_process";',
-          'import { renameSync, writeFileSync } from "node:fs";',
-          'const descendant = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });',
-          `writeFileSync(${JSON.stringify(`${pidFile}.tmp`)}, JSON.stringify({ root: process.pid, descendant: descendant.pid }));`,
-          `renameSync(${JSON.stringify(`${pidFile}.tmp`)}, ${JSON.stringify(pidFile)});`,
-          "setInterval(() => {}, 1000);",
-        ].join("\n"),
-      );
+      writeLongRunningBuilder(builder, pidFile);
       const wrapper = packageProcess(subject, builder, "win32");
       await waitForFile(pidFile);
       const pids = JSON.parse(readFileSync(pidFile, "utf8")) as {

@@ -217,10 +217,16 @@ test("keeps one cancelled provider turn authoritative across the Electron/core b
   } finally {
     // The fixture rejects unless Electron, the runtime, provider ownership,
     // transport, preview server, and private temporary directory all close.
-    if (process.platform === "win32") {
-      await attachRuntimeLifecycleFailureDiagnostic(test.info(), async () =>
-        (await app.runtimeSnapshot()).websocketUrl).catch(() => undefined);
+    // Observe concurrently: awaiting a diagnostic first could let an active
+    // Git refresh finish and hide the immediate-shutdown race under test.
+    const diagnostic = process.platform === "win32"
+      ? attachRuntimeLifecycleFailureDiagnostic(test.info(), async () =>
+        (await app.runtimeSnapshot()).websocketUrl).catch(() => undefined)
+      : Promise.resolve();
+    try {
+      await app.close();
+    } finally {
+      await diagnostic;
     }
-    await app.close();
   }
 });

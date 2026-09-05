@@ -32,6 +32,7 @@ import {
 } from "./terminal-invocation";
 import { createTerminalOutputBuffer } from "./terminal-output-buffer";
 import { sendTerminalSocketEvent as send } from "./terminal-socket";
+import { windowsCleanupFailures } from "./windows-cleanup-diagnostics";
 
 const MAX_TERMINALS = 8;
 const MAX_TERMINALS_PER_CLIENT = 4;
@@ -1123,6 +1124,9 @@ export class TerminalManager {
             );
             finish(new TerminalError(
               "A terminal process tree could not be confirmed stopped during runtime shutdown.",
+              process.platform === "win32"
+                ? { cause: { windowsCleanupFailures: windowsCleanupFailures() } }
+                : undefined,
             ));
             return;
           }
@@ -1162,6 +1166,9 @@ export class TerminalManager {
           );
           finish(new TerminalError(
             "A terminal process tree could not be confirmed stopped during runtime shutdown.",
+            process.platform === "win32"
+              ? { cause: { windowsCleanupFailures: windowsCleanupFailures() } }
+              : undefined,
           ));
         },
       );

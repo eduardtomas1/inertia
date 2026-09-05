@@ -1,6 +1,7 @@
 import WebSocket from "ws";
 
 import type { ServerEvent } from "../../src/shared/contracts";
+import { windowsCleanupFailures } from "../../src/server/windows-cleanup-diagnostics";
 
 export class RuntimeEventQueue {
   private readonly events: ServerEvent[] = [];
@@ -93,7 +94,7 @@ export class RuntimeEventQueue {
         const shellRuns = latestShell?.type === "conversation.shell.updated"
           ? latestShell.runs.map(({ id, kind, label, status, finishedAt }) => ({ id, kind, label, status, finishedAt }))
           : [];
-        reject(new Error(`Timed out waiting for ${description}. Pending event types: ${pending}. Providers: ${JSON.stringify(providers)}. Turns: ${JSON.stringify(turns)}. Snapshot runs: ${JSON.stringify(snapshotRuns)}. Shell runs: ${JSON.stringify(shellRuns)}.`));
+        reject(new Error(`Timed out waiting for ${description}. Pending event types: ${pending}. Providers: ${JSON.stringify(providers)}. Turns: ${JSON.stringify(turns)}. Snapshot runs: ${JSON.stringify(snapshotRuns)}. Shell runs: ${JSON.stringify(shellRuns)}. Windows cleanup failures: ${JSON.stringify(windowsCleanupFailures())}.`));
       }, timeoutMs);
       const check = (): void => {
         const event = take();

@@ -1,6 +1,6 @@
 import { act, render } from "@testing-library/react";
 import { useRef } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useSidebarIndexMotion } from "../../src/renderer/src/hooks/useSidebarIndexMotion";
 import { sidebarWorkLayoutKey } from "../../src/renderer/src/hooks/useSidebarWorkIndex";
@@ -66,6 +66,8 @@ function installAnimateStub() {
   });
   return animate;
 }
+
+beforeEach(() => { vi.spyOn(document, "hasFocus").mockReturnValue(true); });
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -219,7 +221,8 @@ describe("sidebar index position motion", () => {
     expect(animate).not.toHaveBeenCalled();
   });
 
-  it("continues position motion while the visible document is unfocused", async () => {
+  it("skips unfocused layout work and establishes a fresh baseline on focus", async () => {
+    vi.mocked(document.hasFocus).mockReturnValue(false);
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect")
       .mockImplementation(function getBounds(this: HTMLElement) {
         const top = [...(this.parentElement?.children ?? [])].indexOf(this) * 48;
@@ -245,6 +248,14 @@ describe("sidebar index position motion", () => {
     view.rerender(
       <MotionHarness active={false} enabled order={["b", "a"]} visible />,
     );
+    await vi.dynamicImportSettled();
+    expect(animate).not.toHaveBeenCalled();
+    expect(HTMLElement.prototype.getBoundingClientRect).not.toHaveBeenCalled();
+    vi.mocked(document.hasFocus).mockReturnValue(true);
+    await act(async () => window.dispatchEvent(new Event("focus")));
+    await vi.dynamicImportSettled();
+    expect(animate).not.toHaveBeenCalled();
+    view.rerender(<MotionHarness enabled order={["a", "b"]} visible />);
     await vi.dynamicImportSettled();
     expect(animate).toHaveBeenCalledTimes(2);
   });
@@ -283,7 +294,7 @@ describe("sidebar index position motion", () => {
     expect(animate).toHaveBeenCalledTimes(2);
   });
 
-  it("cancels active position motion when reduced motion becomes active", async () => {
+  it.each(["reduced motion", "blur", "hidden"] as const)("cancels active position motion on %s", async (reason) => {
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect")
       .mockImplementation(function getBounds(this: HTMLElement) {
         const top = [...(this.parentElement?.children ?? [])].indexOf(this) * 48;
@@ -309,7 +320,15 @@ describe("sidebar index position motion", () => {
     await vi.dynamicImportSettled();
     expect(animate).toHaveBeenCalledTimes(2);
 
-    view.rerender(<MotionHarness enabled={false} order={["b", "a"]} />);
+    if (reason === "reduced motion") {
+      view.rerender(<MotionHarness enabled={false} order={["b", "a"]} />);
+    } else if (reason === "blur") {
+      vi.mocked(document.hasFocus).mockReturnValue(false);
+      await act(async () => window.dispatchEvent(new Event("blur")));
+    } else {
+      vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+      await act(async () => document.dispatchEvent(new Event("visibilitychange")));
+    }
 
     await vi.dynamicImportSettled();
     expect(animation.cancel).toHaveBeenCalledTimes(2);

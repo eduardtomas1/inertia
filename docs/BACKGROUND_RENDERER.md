@@ -105,6 +105,110 @@ before interrupting unowned runs and their running activities. Runtime/provider
 ownership changes belong to [#250](https://github.com/eduardtomas1/inertia/pull/250).
 Age alone is not evidence that a running turn is stale.
 
+## Follow-up: delegated-work elapsed clocks
+
+An audit of `d4a19870` (including #254 and later compaction motion changes)
+found a separate recurring source: `SubagentElapsed` used one shared interval
+to write elapsed labels directly into the DOM every second. It subscribed
+even inside a folded disclosure and while the window was unfocused. The
+original completed-history fixture's React/RAF counters did not detect this
+work. This is a small residual cost after #254, not an attribution of the
+original greater-than-one-core field report.
+
+The clock now subscribes only for an open disclosure in a visible, focused
+document. Removing the last subscriber clears the shared interval. Reopening
+or refocusing refreshes from wall time immediately and resumes one shared
+clock. The change does not alter a trace's `isLive`, status, timestamps,
+ownership, stop controls, or follow-up controls. Foreground CSS motion and
+reduced-motion rules are unchanged.
+
+The added native scenario generates 41 histories with 1,008 turns, 8,064
+messages, and 67,552 activities, in addition to the ordinary app fixture's
+initial conversation. The selected history has 128 turns and 9,472 activities.
+Six synthetic live trace projections are installed after runtime recovery;
+their parent remains a completed fixture turn to isolate the elapsed-label
+clock from the parent's own live timer. No provider is launched: this is a
+renderer scheduling test, not evidence that a running provider was recovered
+or that a live provider is owned. Native runtime ownership is tested separately
+in `runtime-safety.test.ts` and `turn-controller-cleanup-proof.test.ts`.
+
+The final matched comparison uses production source from `0fe93246` (including
+the approved #259 composer outline) before and after only the elapsed-clock
+changes. Both runs use Node 22.23.2, Electron 44.1.0, Ubuntu 24.04.4 ARM64,
+Xvfb at 1600×1000, and Openbox in a separate local container. Electron's sandbox
+is disabled for this root-owned test container only. This is an unpackaged
+synthetic X11 test with container graphics, not the original x64 AppImage or
+its hardware GPU.
+
+The first unfocused trace can include startup garbage collection after
+React/RAF have settled. A second five-second trace follows in the same mapped,
+unfocused state, after the same two-second quiet dwell. In the final pair:
+
+| Second mapped/unfocused sample, five seconds | Before | After |
+| --- | ---: | ---: |
+| Renderer CPU, one core | 1.19% | 0.20% |
+| GPU CPU, one core | 0.20% | 0.00% |
+| Renderer RSS | 202.32 MiB | 199.71 MiB |
+| Renderer PSS | 126.29 MiB | 123.71 MiB |
+| JavaScript heap used | 22.74 MiB | 22.49 MiB |
+| Interval callbacks / timer fires | 5 / 5 | 0 / 0 |
+| React commits / RAF callbacks | 0 / 0 | 0 / 0 |
+| Layout events | 5 | 0 |
+| Paint / raster events | 35 / 30 | 0 / 0 |
+| Style updates | 7 | 2 |
+| Minor / major GC events | 0 / 0 | 0 / 0 |
+| Mounted transcript rows | 7 | 7 |
+
+The baseline interval writes six elapsed labels; each tick triggers layout
+and paint. CSS animations are already paused on both sides. The baseline
+fails the new zero-interval assertion; the patched scenario passes every
+background, minimized, foreground, refocus, and reduced-motion assertion.
+Foreground renderer CPU is 71.20% before and 71.01% after in this software
+graphics workload; refocused CPU is 72.35% and 71.43%. These are individual
+observations, not a throughput improvement claim. Minimized renderer CPU is
+1.19% before and 0.20% after.
+
+The first unfocused samples record 5.16% and 0.00% renderer CPU, with two and
+zero major GC events respectively. A prior matched run had GC on both sides.
+GC timing is variable, so the full first-sample CPU difference is not
+attributed to the clock. The second samples contain no GC and retain the
+recurring layout/paint difference. Their quiet-dwell observation times are
+2.92 seconds on both sides, including the required two-second dwell and poll
+latency; these are not precise CPU-settle timestamps. Small RSS/PSS/heap
+differences in this short run do not establish a memory-leak fix.
+
+The final local JSON reports and raw traces are retained under
+`performance-results/issue248-final-before` and
+`performance-results/issue248-final-after`. The normal E2E run also writes and
+attaches its reports under `performance-results/renderer-background` for CI
+artifact retention. Reproduce with Node 22: `npm run build`, then
+`npx playwright test tests/e2e/renderer-background.spec.ts --workers=1` on an
+isolated desktop. For a baseline, build `0fe93246` with the new test fixture
+but without the two component changes; the interval assertion must fail.
+
+macOS ARM64's small and large cases passed locally. The mature macOS baseline
+also reproduced five timer callbacks and 35 paints, with 0.83% renderer CPU
+and 1.00% GPU CPU while unfocused. The patched mature macOS attempt recorded
+lost document focus during its foreground sample and an empty transcript
+after restoration; a retry failed the paused-animation inventory check.
+The cause of those native window-state failures was not established. Those
+attempts do not count as a complete matched macOS validation, and their
+foreground numbers are excluded. No native assertion was relaxed.
+
+The scenario records interval callbacks and elapsed-label values alongside
+the original process, trace, animation, React, and RAF measurements. All
+background samples require zero interval callbacks and unchanged labels;
+foreground and refocused live labels must advance. DOM tests also require
+zero clocks while folded or hidden, catch-up after reopening/refocusing, a
+single clock across rows, and cleanup after unmount. Generated histories use
+fixed synthetic text and never read an installed application profile.
+
+The retained-data audit still finds one subscribed detail per mounted pane,
+reset live overlays on conversation changes, weak-key activity/estimate
+caches, and seven mounted rows in this workload. No additional virtualization
+or long-session retention defect has been established. The fixture's short
+heap samples do not replace a 13-hour same-profile heap comparison.
+
 ## Remaining field validation
 
 The original Ubuntu 24.04 x64 AppImage profile, its 13-hour session, and its

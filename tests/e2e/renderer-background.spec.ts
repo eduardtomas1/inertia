@@ -7,17 +7,17 @@ import { createAppFixture } from "./support/app-fixture";
 
 declare global {
   interface Window {
-    __backgroundCounters: { reactCommits: number; rafCallbacks: number; rendererInjected: boolean; lastActivityAt: number };
+    __backgroundCounters: { reactCommits: number; rafCallbacks: number; intervalCallbacks: number; rendererInjected: boolean; lastActivityAt: number };
   }
 }
 
-function seedHistory(testDirectory: string, workspaceDirectory: string, turns: number): void {
+function seedHistory(testDirectory: string, workspaceDirectory: string, turns: number, name = "Background history fixture", activitiesPerTurn = 74): string {
   const store = new RuntimeStore(join(testDirectory, "data", "inertia.sqlite"), workspaceDirectory, {
     recoverInterruptedRuns: false,
   });
   try {
     const projectId = store.shellSnapshot().activeProjectId!;
-    const conversation = store.createConversation(projectId, "Background history fixture");
+    const conversation = store.createConversation(projectId, name);
     store.updateConversation(conversation.id, {
       reasoningEffort: "ultra",
       modelSelection: { ...conversation.modelSelection, reasoningEffort: "ultra" },
@@ -25,13 +25,13 @@ function seedHistory(testDirectory: string, workspaceDirectory: string, turns: n
     for (let index = 0; index < turns; index++) {
       const requestedAt = new Date(Date.now() - 200_000 + index * 1_000).toISOString();
       const { turn } = store.beginAgentTurn({
-        id: `background-turn-${index}`, runId: `background-run-${index}`,
+        id: `${conversation.id}-turn-${index}`, runId: `${conversation.id}-run-${index}`,
         conversationId: conversation.id, content: `History request ${index}`,
         providerId: "codex", harnessId: "codex-app-server", backendProfileId: "native:codex:app-server",
         model: "gpt-5.6", reasoningEffort: "ultra", interactionMode: "build", accessMode: "supervised",
         configurationRevision: 1, association: "authoritative", requestedAt,
       });
-      for (let activity = 0; activity < 74; activity++) store.addActivity({
+      for (let activity = 0; activity < activitiesPerTurn; activity++) store.addActivity({
         conversationId: conversation.id, turnId: turn.id, runId: turn.runId,
         kind: "command", title: `Command ${index}.${activity}`,
         detail: "Synthetic bounded-history fixture. ".repeat(20), status: "completed",
@@ -45,6 +45,29 @@ function seedHistory(testDirectory: string, workspaceDirectory: string, turns: n
         terminalAssistantMessageId: answer.id, terminalReason: "provider-completed",
       });
     }
+    return conversation.id;
+  } finally { store.close(); }
+}
+
+// These are synthetic renderer projections, installed after runtime recovery.
+// No provider is launched or claimed to be owned by this fixture. Runtime
+// ownership/recovery has its own deterministic integration coverage.
+function seedLiveSubagents(testDirectory: string, workspaceDirectory: string, conversationId: string): void {
+  const store = new RuntimeStore(join(testDirectory, "data", "inertia.sqlite"), workspaceDirectory, {
+    recoverInterruptedRuns: false,
+  });
+  try {
+    const turn = store.conversationDetail(conversationId)!.agentTurns.at(-1)!;
+    for (let index = 0; index < 6; index++) store.upsertSubagentTrace({
+      conversationId, turnId: turn.id, runId: turn.runId, providerId: "codex",
+      providerTaskId: `task-${index}`, providerAgentId: `agent-${index}`,
+      parentProviderAgentId: null, parentProviderToolUseId: null,
+      providerToolUseId: `tool-${index}`, providerRole: "researcher",
+      providerName: `Synthetic worker ${index}`, providerStatus: "running",
+      status: "running", isLive: true, description: "Synthetic timer projection",
+      progress: null, result: null, sequence: index + 1,
+      updatedAt: new Date().toISOString(),
+    });
   } finally { store.close(); }
 }
 
@@ -77,7 +100,9 @@ async function sample(page: Page, electronApp: ElectronApplication, name: string
   await expect.poll(() => page.evaluate((startedAt) =>
     performance.now() - Math.max(startedAt, window.__backgroundCounters.lastActivityAt),
   settlingStartedAt), { timeout: 15_000 }).toBeGreaterThan(2_000);
+  const idleSettleObservedMs = await page.evaluate((startedAt) => performance.now() - startedAt, settlingStartedAt);
   const session = await page.context().newCDPSession(page);
+  const heapBefore = await session.send("Runtime.getHeapUsage");
   const trace: { name: string; dur?: number; ph: string }[] = [];
   session.on("Tracing.dataCollected", ({ value }) => {
     const events = value as unknown as typeof trace;
@@ -91,6 +116,7 @@ async function sample(page: Page, electronApp: ElectronApplication, name: string
   const sampledAt = performance.now();
   const start = await page.evaluate(() => ({
     focus: document.hasFocus(), visibility: document.visibilityState, counters: { ...window.__backgroundCounters },
+    elapsedLabels: [...document.querySelectorAll(".subagent-elapsed")].map((node) => node.textContent),
     animations: document.getAnimations().map((animation) => ({
       state: animation.playState, time: animation.currentTime,
       name: animation instanceof CSSAnimation ? animation.animationName : "web-animation",
@@ -102,6 +128,7 @@ async function sample(page: Page, electronApp: ElectronApplication, name: string
   const heap = await session.send("Runtime.getHeapUsage");
   const end = await page.evaluate(() => ({
     focus: document.hasFocus(), visibility: document.visibilityState, counters: { ...window.__backgroundCounters },
+    elapsedLabels: [...document.querySelectorAll(".subagent-elapsed")].map((node) => node.textContent),
     animations: document.getAnimations().map((animation) => ({
       state: animation.playState, time: animation.currentTime,
       name: animation instanceof CSSAnimation ? animation.animationName : "web-animation",
@@ -125,19 +152,25 @@ async function sample(page: Page, electronApp: ElectronApplication, name: string
     total.count++;
     total.durationMs += (event.dur ?? 0) / 1_000;
   }
-  return { name, startedAtMs: sampledAt, durationMs: elapsedMs, start, end, processes: processes.map((metric) => {
+  return { name, startedAtMs: sampledAt, durationMs: elapsedMs, idleSettleObservedMs, start, end, processesBefore, processes: processes.map((metric) => {
     const before = processesBefore.find((candidate) => candidate.pid === metric.pid);
     return { ...metric, oneCoreCpuPercent: metric.cpuSeconds !== null && before?.cpuSeconds != null
       ? (metric.cpuSeconds - before.cpuSeconds) / (elapsedMs / 1_000) * 100 : null };
-  }), heap, eventTotals, traceEvents: trace.length };
+  }), heapBefore, heap, eventTotals, traceEvents: trace.length };
 }
 
-for (const turns of [2, 128]) {
-test(`bounds background motion for ${turns} turns and resumes on focus`, async ({ browserName: _browserName }, testInfo) => {
-  test.setTimeout(180_000);
+for (const { turns, mature } of [{ turns: 2, mature: false }, { turns: 128, mature: false }, { turns: 128, mature: true }]) {
+test(`bounds background motion for ${turns} turns${mature ? " in a mature profile with live subagents" : ""} and resumes on focus`, async ({ browserName: _browserName }, testInfo) => {
+  test.setTimeout(mature ? 300_000 : 180_000);
+  let conversationId = "";
   const fixture = await createAppFixture({
     name: `renderer-background-${turns}`, initialState: "conversation", windowDisplay: "primary",
-    beforeLaunch: ({ testDirectory, workspaceDirectory }) => seedHistory(testDirectory, workspaceDirectory, turns),
+    beforeLaunch: ({ testDirectory, workspaceDirectory }) => {
+      if (mature) for (let index = 0; index < 40; index++) {
+        seedHistory(testDirectory, workspaceDirectory, 22, `Other synthetic history ${index}`, 66);
+      }
+      conversationId = seedHistory(testDirectory, workspaceDirectory, turns);
+    },
   });
   const { page, electronApp } = fixture;
   const mainWindow = await electronApp.browserWindow(page);
@@ -154,8 +187,9 @@ test(`bounds background motion for ${turns} turns and resumes on focus`, async (
     });
   }));
   try {
+    if (mature) seedLiveSubagents(fixture.testDirectory, fixture.workspaceDirectory, conversationId);
     await page.addInitScript(() => {
-      const counters = { reactCommits: 0, rafCallbacks: 0, rendererInjected: false, lastActivityAt: performance.now() };
+      const counters = { reactCommits: 0, rafCallbacks: 0, intervalCallbacks: 0, rendererInjected: false, lastActivityAt: performance.now() };
       window.__backgroundCounters = counters;
       Object.assign(window, { __REACT_DEVTOOLS_GLOBAL_HOOK__: {
         supportsFiber: true,
@@ -169,6 +203,12 @@ test(`bounds background motion for ${turns} turns and resumes on focus`, async (
         counters.lastActivityAt = performance.now();
         callback(time);
       });
+      const interval = window.setInterval.bind(window);
+      Object.assign(window, { setInterval: (callback: TimerHandler, delay?: number, ...args: unknown[]) => interval(() => {
+        counters.intervalCallbacks++;
+        if (typeof callback === "function") callback(...args);
+        else throw new Error("The background fixture expects function interval callbacks.");
+      }, delay) });
     });
     await page.reload();
     const focusSession = await page.context().newCDPSession(page);
@@ -183,6 +223,11 @@ test(`bounds background motion for ${turns} turns and resumes on focus`, async (
     // The scheduled initial backup publishes a real snapshot after its quiet
     // grace. Measure idle motion after that one-time startup work completes.
     await expect.poll(() => initialBackupReady, { timeout: 60_000 }).toBe(true);
+    if (mature) {
+      await expect(page.locator(".subagent-elapsed")).toHaveCount(6);
+      await page.locator(".subagent-disclosure summary").click();
+      await expect(page.locator(".subagent-disclosure")).toHaveAttribute("open", "");
+    }
     await page.emulateMedia({ reducedMotion: "no-preference" });
     await mainWindow.evaluate((window) => { window.focus(); window.webContents.focus(); });
     await expect.poll(() => page.evaluate(() => document.hasFocus())).toBe(true);
@@ -203,6 +248,11 @@ test(`bounds background motion for ${turns} turns and resumes on focus`, async (
     })).toBe(true);
     const pauseObservedMs = performance.now() - backgroundRequestedAt;
     const background = await sample(page, electronApp, "mapped-unfocused", testInfo);
+    // Startup GC can overlap the first idle trace even after React/RAF settle.
+    // Keep the native state unchanged for an independent consecutive sample.
+    const backgroundContinuation = mature
+      ? await sample(page, electronApp, "mapped-unfocused-continuation", testInfo)
+      : null;
     await mainWindow.evaluate((window) => window.minimize());
     try {
       // Native minimization completes asynchronously, including its macOS
@@ -238,21 +288,27 @@ test(`bounds background motion for ${turns} turns and resumes on focus`, async (
     await expect.poll(() => page.evaluate(() => document.getAnimations().some(
       (animation) => animation instanceof CSSAnimation && animation.animationName === "ultra-reasoning-frame-flow",
     ))).toBe(false);
-    const report = JSON.stringify({ turns, activities: turns * 74, messages: turns * 8, pauseObservedMs, runtimeEvents, foreground, background, resumed, minimized }, null, 2);
+    const profileTurns = turns + (mature ? 40 * 22 : 0);
+    const report = JSON.stringify({ turns, mature, generatedProfileTurns: profileTurns, generatedProfileConversations: mature ? 41 : 1,
+      generatedActivities: turns * 74 + (mature ? 40 * 22 * 66 : 0), generatedMessages: profileTurns * 8,
+      syntheticLiveSubagents: mature ? 6 : 0,
+      pauseObservedMs, runtimeEvents, foreground, background, backgroundContinuation, resumed, minimized }, null, 2);
     await mkdir("performance-results", { recursive: true });
-    await writeFile(`performance-results/renderer-background-${process.platform}-${process.arch}-${turns}.json`, report);
+    await writeFile(`performance-results/renderer-background-${process.platform}-${process.arch}-${turns}${mature ? "-mature" : ""}.json`, report);
     await testInfo.attach("renderer-background-profile", {
       body: Buffer.from(report),
       contentType: "application/json",
     });
     expect(background.start.counters.rendererInjected).toBe(true);
-    for (const measurement of [background, minimized]) {
+    for (const measurement of [background, ...(backgroundContinuation ? [backgroundContinuation] : []), minimized]) {
       expect(measurement.start.focus).toBe(false);
       expect(measurement.end.focus).toBe(false);
       expect(measurement.end.animations).toEqual(measurement.start.animations);
       expect(measurement.end.animations.every((animation) => animation.state === "paused")).toBe(true);
       expect(measurement.end.counters.reactCommits).toBe(measurement.start.counters.reactCommits);
       expect(measurement.end.counters.rafCallbacks).toBe(measurement.start.counters.rafCallbacks);
+      expect(measurement.end.counters.intervalCallbacks).toBe(measurement.start.counters.intervalCallbacks);
+      expect(measurement.end.elapsedLabels).toEqual(measurement.start.elapsedLabels);
       expect(measurement.end.mountedRows).toBeLessThan(24);
     }
     for (const measurement of [foreground, resumed]) {
@@ -261,6 +317,10 @@ test(`bounds background motion for ${turns} turns and resumes on focus`, async (
       expect(start?.state).toBe("running");
       expect(end?.state).toBe("running");
       expect(Number(end?.time) - Number(start?.time)).toBeGreaterThan(4_000);
+      if (mature) {
+        expect(measurement.end.counters.intervalCallbacks - measurement.start.counters.intervalCallbacks).toBeGreaterThanOrEqual(4);
+        expect(measurement.end.elapsedLabels).not.toEqual(measurement.start.elapsedLabels);
+      }
     }
     expect(fixture.rendererErrors).toEqual([]);
   } finally { await fixture.close(); }

@@ -1231,19 +1231,13 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
             await artifactReconciliation;
             await turnGitArtifacts.settleShutdown();
           },
-          terminateClients: () => {
-            runtimeSync.terminateAll((client) => client.terminate());
-          },
+          terminateClients: () => runtimeSync.terminateAll((client) => client.terminate()),
           closeServer: async () => {
             const results = await Promise.allSettled([
               webSocketBoundary.close(),
-              new Promise<void>((resolveClose) =>
-                server.close(() => resolveClose())),
+              new Promise<void>((resolveClose) => server.close(() => resolveClose())),
             ]);
-            const failed = results.find(
-              (result): result is PromiseRejectedResult =>
-                result.status === "rejected",
-            );
+            const failed = results.find((result) => result.status === "rejected");
             if (failed) throw failed.reason;
           },
           closeStore: () => store.backupAndClose(),

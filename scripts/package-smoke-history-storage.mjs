@@ -1,13 +1,157 @@
 import { deepStrictEqual, ok } from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { lstat, mkdir, open, realpath, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative, sep } from "node:path";
+import { lstat, mkdir, open, readdir, realpath, writeFile } from "node:fs/promises";
+import { dirname, isAbsolute, join, relative, sep, win32 } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 const imageSmokeId = "00000000-0000-4000-8000-000000000018";
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const windowsBootId = /^win32:[0-9a-f]{8}$/u;
+const runtimeGenerationId = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}:[1-9][0-9]*$/u;
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
+const generationHash = (generation) => hash(Buffer.from(generation, "utf8"));
+
+function environmentValue(environment, name) {
+  return Object.entries(environment).find(([key, value]) =>
+    key.toLowerCase() === name.toLowerCase() && typeof value === "string")?.[1];
+}
+
+export function readWindowsSystemBootId(options = {}) {
+  const environment = options.environment ?? process.env;
+  const spawn = options.spawn ?? spawnSync;
+  const root = environmentValue(environment, "SystemRoot");
+  ok(typeof root === "string" && root === root.trim() && root.length <= 32_767
+    && win32.isAbsolute(root) && /^[a-z]:\\/iu.test(root),
+  "The Windows package-smoke boot identity root is invalid.");
+  const result = spawn(win32.join(root, "System32", "reg.exe"), [
+    "QUERY",
+    "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management\\PrefetchParameters",
+    "/v",
+    "BootId",
+    "/reg:64",
+  ], {
+    encoding: "utf8",
+    shell: false,
+    windowsHide: true,
+    timeout: 1_000,
+    maxBuffer: 4_096,
+    env: { SystemRoot: root, SYSTEMROOT: root, WINDIR: root },
+  });
+  ok(result.status === 0 && !result.error && typeof result.stdout === "string",
+    "The Windows package-smoke boot identity is unavailable.");
+  const matches = [...result.stdout.matchAll(
+    /(?:^|\s)BootId\s+REG_DWORD\s+0x([0-9a-f]{1,8})(?=\s|$)/giu,
+  )];
+  ok(matches.length === 1, "The Windows package-smoke boot identity is ambiguous.");
+  const value = `win32:${matches[0][1].toLowerCase().padStart(8, "0")}`;
+  ok(windowsBootId.test(value), "The Windows package-smoke boot identity is invalid.");
+  return value;
+}
+
+function recoveryFixtureShape(value) {
+  ok(value && typeof value === "object" && value.version === 1
+    && windowsBootId.test(value.systemBootId)
+    && Array.isArray(value.generationIds) && value.generationIds.length === 2
+    && value.generationIds.every((generation) => runtimeGenerationId.test(generation))
+    && new Set(value.generationIds).size === 2
+    && Array.isArray(value.files) && value.files.length === 8
+    && Array.isArray(value.directories) && value.directories.length === 2,
+  "Invalid Windows zero-PID recovery fixture.");
+  const paths = [...value.files.map(({ path }) => path), ...value.directories];
+  ok(new Set(paths).size === paths.length && paths.every((path) =>
+    typeof path === "string" && path.startsWith(`data${sep}`)
+      && !isAbsolute(path) && !path.split(sep).includes("..")),
+  "Windows zero-PID recovery fixture paths are invalid.");
+  ok(value.files.every((entry) => entry && Object.keys(entry).sort().join("\0") === "path\0sha256"
+    && typeof entry.sha256 === "string" && /^[0-9a-f]{64}$/u.test(entry.sha256)),
+  "Windows zero-PID recovery fixture digests are invalid.");
+  return value;
+}
+
+async function fixtureFile(stateRoot, root, name, value, files) {
+  const path = join(root, name);
+  const bytes = Buffer.from(JSON.stringify(value), "utf8");
+  await writeFile(path, bytes, { flag: "wx", mode: 0o600 });
+  files.push({ path: relative(stateRoot, path), sha256: hash(bytes) });
+}
+
+export async function prepareWindowsLegacyZeroPidRecoveryFixture(
+  stateRoot,
+  systemBootId,
+) {
+  ok(windowsBootId.test(systemBootId), "The Windows zero-PID fixture boot identity is invalid.");
+  const root = join(stateRoot, "data");
+  const rootInfo = await lstat(root);
+  ok(rootInfo.isDirectory() && !rootInfo.isSymbolicLink()
+    && await realpath(root) === root, "The Windows zero-PID fixture root is not direct.");
+  const generations = [
+    { id: `${randomUUID()}:50`, sessionSuffix: "json", writerSuffix: "active", zeroPidClaims: 2 },
+    { id: `${randomUUID()}:51`, sessionSuffix: "retire.tmp", writerSuffix: "retire", zeroPidClaims: 0 },
+  ];
+  const files = [];
+  const directories = [];
+  for (const generation of generations) {
+    const digest = generationHash(generation.id);
+    const lease = { version: 1, runtimeGenerationId: generation.id,
+      systemBootId, createdAt: new Date().toISOString() };
+    const session = { version: 1, runtimeGenerationId: generation.id, systemBootId };
+    const containment = { version: 1, runtimeGenerationId: generation.id, systemBootId,
+      containment: { kind: "windows-job-v1", name: `Global\\InertiaRuntime-${digest}` } };
+    await fixtureFile(stateRoot, root, `.runtime-generation-lease-${digest}.json`, lease, files);
+    await fixtureFile(stateRoot, root,
+      `.runtime-owned-process-session-${digest}.${generation.sessionSuffix}`, session, files);
+    await fixtureFile(stateRoot, root,
+      `.runtime-owned-process-containment-${digest}.json`, containment, files);
+    const writer = `.runtime-owned-process-writer-${digest}.${generation.writerSuffix}`;
+    await mkdir(join(root, writer), { mode: 0o700 });
+    directories.push(relative(stateRoot, join(root, writer)));
+    for (let index = 0; index < generation.zeroPidClaims; index += 1) {
+      const ownershipId = randomUUID();
+      const startedAfterMs = Date.now();
+      const claim = { version: 1, state: "owned", ownershipId,
+        runtimeGenerationId: generation.id, systemBootId,
+        process: { platform: "win32", pid: 0, processGroupId: null,
+          startedAfterMs, startedBeforeMs: startedAfterMs + 1 } };
+      await fixtureFile(stateRoot, root, `.runtime-owned-child-${ownershipId}.json`, claim, files);
+    }
+  }
+  const fixture = recoveryFixtureShape({ version: 1, systemBootId,
+    generationIds: generations.map(({ id }) => id), files, directories });
+  await assertWindowsLegacyZeroPidRecoveryFixture(stateRoot, fixture);
+  return fixture;
+}
+
+export async function assertWindowsLegacyZeroPidRecoveryFixture(stateRoot, fixture) {
+  recoveryFixtureShape(fixture);
+  for (const entry of fixture.files) {
+    const bytes = await readFixture(stateRoot, join(stateRoot, entry.path), 4_096);
+    ok(hash(bytes) === entry.sha256, "Windows zero-PID recovery fixture changed before launch.");
+  }
+  for (const relativePath of fixture.directories) {
+    const path = join(stateRoot, relativePath);
+    const info = await lstat(path);
+    ok(info.isDirectory() && !info.isSymbolicLink() && await realpath(path) === path,
+      "Windows zero-PID recovery fixture writer is not direct.");
+    ok((await readdir(path)).length === 0,
+      "Windows zero-PID recovery fixture writer is not empty.");
+  }
+}
+
+export async function assertWindowsLegacyZeroPidRecoveryRetired(stateRoot, fixture) {
+  recoveryFixtureShape(fixture);
+  for (const relativePath of [
+    ...fixture.files.map(({ path }) => path),
+    ...fixture.directories,
+  ]) {
+    const info = await lstat(join(stateRoot, relativePath)).catch((error) => {
+      if (error?.code === "ENOENT") return null;
+      throw error;
+    });
+    ok(info === null, `Windows zero-PID recovery artifact was not retired: ${relativePath}`);
+  }
+}
 
 async function directFile(root, path, maxBytes) {
   const canonicalRoot = await realpath(root);
@@ -82,6 +226,9 @@ export async function readHistoryBaseline(path) {
   ok(baseline.version === 1 && uuid.test(baseline.conversation?.id)
     && uuid.test(baseline.attachment?.id) && baseline.messages?.length === 2
     && baseline.agentTurns?.length === 1, "Invalid installed-upgrade history baseline.");
+  if (baseline.runtimeRecovery !== undefined) {
+    recoveryFixtureShape(baseline.runtimeRecovery);
+  }
   return baseline;
 }
 
@@ -97,7 +244,7 @@ export async function assertHistoryAttachment(stateRoot, baseline) {
   "Historical attachment bytes changed or disappeared.");
 }
 
-export async function prepareHistoryBaseline(stateRoot, path, proof) {
+export async function prepareHistoryBaseline(stateRoot, path, proof, options = {}) {
   const source = join(stateRoot, "data", "conversation-attachments", imageSmokeId);
   const original = JSON.parse(await readFixture(stateRoot, join(source, "metadata.json"), 4096));
   const bytes = await readFixture(stateRoot, join(source, `${imageSmokeId}.png`), 4096);
@@ -123,10 +270,17 @@ export async function prepareHistoryBaseline(stateRoot, path, proof) {
       AND attachments_json = '[]'`).run(JSON.stringify([attachment]),
     user.id, user.conversationId, user.turnId);
     ok(changed.changes === 1, "N-1 historical attachment binding did not match its saved message.");
+    const runtimeRecovery = options.windowsRecoveryBootId
+      ? await prepareWindowsLegacyZeroPidRecoveryFixture(
+          stateRoot,
+          options.windowsRecoveryBootId,
+        )
+      : undefined;
     const baseline = { version: 1, ...proof,
       messages: proof.messages.map((message) => message.id === user.id
         ? { ...message, attachments: [attachment] } : message),
-      attachment: metadata, attachmentBytes: bytes.toString("base64") };
+      attachment: metadata, attachmentBytes: bytes.toString("base64"),
+      ...(runtimeRecovery ? { runtimeRecovery } : {}) };
     assertPersistedTurn(database, baseline);
     await assertHistoryAttachment(stateRoot, baseline);
     // Kept outside application state: deleting or recreating the profile cannot

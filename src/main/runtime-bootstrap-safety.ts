@@ -27,6 +27,8 @@ import {
 } from "./runtime-legacy-recovery-authorities.js";
 import { readSystemBootId } from "./system-boot-id.js";
 import { recoverRuntimeOwnedProcesses } from "./runtime-owned-process-recovery.js";
+import { repairLegacyWindowsUnobservedProcessClaims } from
+  "./runtime-windows-legacy-claim-recovery.js";
 export { runtimeProcessEnvironment } from "./runtime-process-environment.js";
 
 export interface RuntimeBootstrapSafety {
@@ -227,7 +229,8 @@ export function prepareRuntimeBootstrapSafety(
   const ownedProcesses = new RuntimeOwnedProcessJournal(dataDirectory);
   const ownedProcessCrashPrefixesRepaired =
     generationLeases.isValid()
-    && ownedProcesses.repairSessionCrashPrefixes();
+    && ownedProcesses.repairSessionCrashPrefixes()
+    && repairLegacyWindowsUnobservedProcessClaims(dataDirectory, { platform });
   const unleasedOwnedProcessSessionsRepaired =
     ownedProcessCrashPrefixesRepaired
     && generationLeases.isValid()

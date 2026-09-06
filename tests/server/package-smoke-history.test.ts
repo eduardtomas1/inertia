@@ -1,5 +1,5 @@
 // @inertia-test-suite portable
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -25,6 +25,7 @@ interface Proof {
 interface Baseline extends Proof {
   attachment: { id: string; size: number; digest: string };
   attachmentBytes: string;
+  runtimeRecovery?: unknown;
 }
 const runtimeUrl = pathToFileURL(resolve("scripts/package-smoke-history-runtime.mjs")).href;
 const storageUrl = pathToFileURL(resolve("scripts/package-smoke-history-storage.mjs")).href;
@@ -40,9 +41,81 @@ async function modules() {
     readHistoryBaseline: (path: string) => Promise<Baseline>;
     assertHistoryAttachment: (root: string, baseline: Baseline) => Promise<void>;
     assertHistoryAfterShutdown: (root: string, proof: Proof, baseline?: Baseline) => Promise<void>;
+    readWindowsSystemBootId: (options?: unknown) => string;
+    prepareWindowsLegacyZeroPidRecoveryFixture: (root: string, systemBootId: string) => Promise<{
+      files: { path: string; sha256: string }[];
+      directories: string[];
+      generationIds: string[];
+      systemBootId: string;
+      version: number;
+    }>;
+    assertWindowsLegacyZeroPidRecoveryFixture: (root: string, fixture: unknown) => Promise<void>;
+    assertWindowsLegacyZeroPidRecoveryRetired: (root: string, fixture: unknown) => Promise<void>;
   };
   return { ...runtime, ...storage };
 }
+
+it("seeds the exact same-boot Windows zero-PID recovery history and rejects damage", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "inertia-installed-zero-pid-")));
+  roots.push(root);
+  await mkdir(join(root, "data"));
+  const smoke = await modules();
+  const bootId = smoke.readWindowsSystemBootId({
+    environment: { SystemRoot: "C:\\Windows" },
+    spawn: vi.fn(() => ({ status: 0, error: undefined,
+      stdout: "BootId    REG_DWORD    0x191\r\n" })),
+  });
+  expect(bootId).toBe("win32:00000191");
+  const fixture = await smoke.prepareWindowsLegacyZeroPidRecoveryFixture(root, bootId);
+  expect(fixture).toMatchObject({ version: 1, systemBootId: bootId });
+  expect(fixture.generationIds).toHaveLength(2);
+  expect(fixture.files).toHaveLength(8);
+  expect(fixture.directories).toHaveLength(2);
+  expect(fixture.directories.map((path) => path.split(/[\\/]/u).at(-1)).sort())
+    .toEqual(expect.arrayContaining([
+      expect.stringMatching(/\.active$/u),
+      expect.stringMatching(/\.retire$/u),
+    ]));
+  const childRecords = await Promise.all(fixture.files
+    .filter(({ path }) => path.includes(".runtime-owned-child-"))
+    .map(async ({ path }) => JSON.parse(await readFile(join(root, path), "utf8"))));
+  expect(childRecords).toHaveLength(2);
+  for (const record of childRecords) {
+    expect(record).toMatchObject({
+      version: 1,
+      state: "owned",
+      runtimeGenerationId: fixture.generationIds[0],
+      systemBootId: bootId,
+      process: {
+        platform: "win32",
+        pid: 0,
+        processGroupId: null,
+        startedAfterMs: expect.any(Number),
+        startedBeforeMs: expect.any(Number),
+      },
+    });
+  }
+  const containmentRecords = await Promise.all(fixture.files
+    .filter(({ path }) => path.includes(".runtime-owned-process-containment-"))
+    .map(async ({ path }) => JSON.parse(await readFile(join(root, path), "utf8"))));
+  for (const record of containmentRecords) {
+    const digest = createHash("sha256").update(record.runtimeGenerationId).digest("hex");
+    expect(record).toMatchObject({ version: 1, systemBootId: bootId,
+      containment: { kind: "windows-job-v1", name: `Global\\InertiaRuntime-${digest}` } });
+  }
+  await smoke.assertWindowsLegacyZeroPidRecoveryFixture(root, fixture);
+
+  const damaged = join(root, fixture.files[0]!.path);
+  await writeFile(damaged, "{}", { flag: "w" });
+  await expect(smoke.assertWindowsLegacyZeroPidRecoveryFixture(root, fixture))
+    .rejects.toThrow("changed before launch");
+  await expect(smoke.assertWindowsLegacyZeroPidRecoveryRetired(root, fixture))
+    .rejects.toThrow("was not retired");
+  for (const entry of [...fixture.files.map(({ path }) => path), ...fixture.directories]) {
+    await rm(join(root, entry), { recursive: true, force: true });
+  }
+  await smoke.assertWindowsLegacyZeroPidRecoveryRetired(root, fixture);
+});
 const roots: string[] = [];
 const runtimes: RunningRuntime[] = [];
 afterEach(async () => {

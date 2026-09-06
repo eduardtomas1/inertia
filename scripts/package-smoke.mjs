@@ -61,6 +61,10 @@ const PACKAGE_KINDS = new Set([
   "windows-installed",
   "windows-unpacked",
 ]);
+const WINDOWS_HISTORY_PACKAGE_KINDS = new Set([
+  "windows-installed",
+  "windows-unpacked",
+]);
 function boundedExactPathEnvironment(name) {
   const value = process.env[name];
   if (value === undefined) return undefined;
@@ -933,11 +937,11 @@ const persistentStateRoot = boundedExactPathEnvironment(
 const historyMode = process.env.INERTIA_PACKAGE_SMOKE_HISTORY_MODE;
 const historyFile = boundedExactPathEnvironment("INERTIA_PACKAGE_SMOKE_HISTORY_FILE");
 if ((historyMode !== undefined || historyFile !== undefined) && (
-  process.platform !== "win32" || requestedPackageKind !== "windows-installed"
+  process.platform !== "win32" || !WINDOWS_HISTORY_PACKAGE_KINDS.has(requestedPackageKind)
   || persistentStateRoot === undefined || !["seed", "verify", "fresh"].includes(historyMode)
   || (historyMode !== "fresh" && historyFile === undefined)
   || (historyMode === "fresh" && historyFile !== undefined)
-)) throw new Error("Installed history proof requires an exact Windows smoke mode, state root, and baseline.");
+)) throw new Error("Windows package history proof requires an exact package kind, smoke mode, state root, and baseline.");
 const supervisorProcessGroupFile = boundedExactPathEnvironment(
   "INERTIA_PACKAGE_SMOKE_PROCESS_GROUP_FILE",
 );
@@ -1067,7 +1071,13 @@ try {
   const historyBaseline = historyMode === "verify"
     ? await historyStorage.readHistoryBaseline(historyFile) : null;
   // Compare historical bytes before any candidate fixture creation or launch.
-  if (historyBaseline) await historyStorage.assertHistoryAttachment(stateRoot, historyBaseline);
+  if (historyBaseline) {
+    await historyStorage.assertHistoryAttachment(stateRoot, historyBaseline);
+    await historyStorage.assertWindowsLegacyZeroPidRecoveryFixture(
+      stateRoot,
+      historyBaseline.runtimeRecovery,
+    );
+  }
   // N-1 and N reopen the same provider cache. Keep its synthetic installation
   // at the same path while the application is replaced so this upgrade smoke
   // does not also introduce an unrelated provider installation change.
@@ -1356,9 +1366,16 @@ try {
   if (historyProof) {
     await historyStorage.assertHistoryAfterShutdown(stateRoot, historyProof, historyBaseline);
     if (historyMode === "seed") {
-      await historyStorage.prepareHistoryBaseline(stateRoot, historyFile, historyProof);
+      await historyStorage.prepareHistoryBaseline(stateRoot, historyFile, historyProof, {
+        windowsRecoveryBootId: historyStorage.readWindowsSystemBootId(),
+      });
+    } else if (historyBaseline) {
+      await historyStorage.assertWindowsLegacyZeroPidRecoveryRetired(
+        stateRoot,
+        historyBaseline.runtimeRecovery,
+      );
     }
-    console.log(`Installed history proof passed: mode=${historyMode}, historicalRecords=${Boolean(historyBaseline)}, terminalTurn=${historyProof.agentTurns[0].id}, savedResponse=true, shutdownPersistence=true.`);
+    console.log(`Windows package history proof passed: packageKind=${requestedPackageKind}, mode=${historyMode}, historicalRecords=${Boolean(historyBaseline)}, terminalTurn=${historyProof.agentTurns[0].id}, savedResponse=true, shutdownPersistence=true.`);
   }
   updateNetworkTrap.assertNoUpdateRequests();
   const benchmark = {

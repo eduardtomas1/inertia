@@ -32,6 +32,12 @@ Do not apply executable permissions to a wildcard or to an unverified download.
 
 Every platform requires a manual first install. Every stable release and Canary prerelease includes `SHA256SUMS.txt`; download it from the same exact tagged release and compare the selected package's SHA-256 before opening it.
 
+Update capability belongs to the installed package. An unsigned Windows build
+cannot enable in-app installation merely because a later release is signed. The
+first Authenticode-signed, update-capable Windows build, when available, must be
+installed manually after its checksum is verified. Later compatible signed
+releases can then offer **Download** and **Restart to update** inside Inertia.
+
 Credential-free macOS packages are ad-hoc signed rather than notarized, so Gatekeeper may retain the download's quarantine warning. After verifying the checksum, open the package from Finder; if macOS blocks it, use **System Settings → Privacy & Security → Open Anyway**, confirm the exact file, then choose **Open**. Do not remove quarantine attributes or disable Gatekeeper.
 
 Unsigned Windows installers may show **Windows protected your PC**. After verifying the checksum and exact GitHub release source, choose **More info**, confirm the filename and **Unknown publisher** status, then **Run anyway**. Do not disable SmartScreen.

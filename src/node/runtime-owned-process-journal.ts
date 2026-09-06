@@ -39,84 +39,45 @@ const CONTAINMENT_PREFIX = ".runtime-owned-process-containment-";
 const MAX_CLAIMS = 256;
 const MAX_RECORD_BYTES = 768;
 const SCHEMA_VERSION = RUNTIME_OWNED_PROCESS_SESSION_VERSION;
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
-export interface LinuxProcessIdentity {
-  readonly pid: number;
-  readonly parentPid: number;
-  readonly processGroupId: number;
-  readonly startTimeTicks: string;
-  readonly guardianExecutableDevice?: string;
-  readonly guardianExecutableInode?: string;
-}
 
-export type RuntimeOwnedProcessPlatform = "linux" | "darwin" | "win32";
-
-export interface WindowsProcessIdentity {
-  readonly platform: "win32";
-  readonly pid: number;
-  readonly processGroupId: null;
-  readonly startedAfterMs: number;
-  readonly startedBeforeMs: number;
-}
-
-export interface ObservedWindowsProcessIdentity {
-  readonly platform: "win32";
-  readonly pid: number;
-  readonly processGroupId: null;
-  readonly startedAtMs: number;
-}
-
-export type RuntimeOwnedProcessIdentity =
-  | LinuxProcessIdentity
-  | DarwinProcessIdentity
-  | WindowsProcessIdentity;
-
-export type ObservedRuntimeOwnedProcessIdentity =
-  | LinuxProcessIdentity
-  | DarwinProcessIdentity
-  | ObservedWindowsProcessIdentity;
-
-export interface WindowsRuntimeJobContainment {
-  readonly kind: "windows-job-v1";
-  readonly name: string;
-}
-
-export type RuntimeOwnedProcessContainment = WindowsRuntimeJobContainment;
-
-interface StoredRuntimeOwnedProcessContainment extends RuntimeOwnedProcessSession {
-  readonly containment: RuntimeOwnedProcessContainment;
-}
-
-interface RuntimeOwnedProcessPendingBase extends RuntimeOwnedProcessSession {
-  readonly state: "pending";
-  readonly ownershipId: string;
-}
-export interface RuntimeOwnedDarwinProcessPending extends RuntimeOwnedProcessPendingBase {
-  readonly containment: "darwin-parent-watchdog-v1";
-  readonly runtimeParentPid: number;
-}
-export interface RuntimeOwnedLinuxProcessPending extends RuntimeOwnedProcessPendingBase {
-  readonly containment: "linux-parent-gated-v1";
-  readonly runtimeParentPid: number;
-  readonly runtimeParentStartTimeTicks: string;
-}
-interface RuntimeOwnedLegacyProcessPending extends RuntimeOwnedProcessPendingBase {
-  readonly containment?: never;
-  readonly runtimeParentPid?: never;
-}
-type RuntimeOwnedProcessPending = RuntimeOwnedDarwinProcessPending
-  | RuntimeOwnedLinuxProcessPending
-  | RuntimeOwnedLegacyProcessPending;
-
-export interface RuntimeOwnedProcessClaim extends RuntimeOwnedProcessSession {
-  readonly state: "preauth" | "owned" | "retiring";
-  readonly ownershipId: string;
-  readonly process: RuntimeOwnedProcessIdentity;
-}
-
-export type RuntimeOwnedProcessRecord =
-  RuntimeOwnedProcessPending | RuntimeOwnedProcessClaim;
+import {
+  RUNTIME_OWNERSHIP_UUID_PATTERN as UUID_PATTERN,
+  exactKeys,
+  validPid,
+  validParentPid,
+  validTicks,
+  parseRuntimeOwnedProcessRecord as parseRecord,
+  type LinuxProcessIdentity,
+  type RuntimeOwnedProcessPlatform,
+  type WindowsProcessIdentity,
+  type RuntimeOwnedProcessIdentity,
+  type ObservedRuntimeOwnedProcessIdentity,
+  type RuntimeOwnedProcessContainment,
+  type StoredRuntimeOwnedProcessContainment,
+  type RuntimeOwnedProcessPendingBase,
+  type RuntimeOwnedProcessPending,
+  type RuntimeOwnedProcessClaim,
+  type RuntimeOwnedProcessRecord,
+} from "./runtime-owned-process-record.js";
+export {
+  parseRuntimeOwnedProcessRecordLeaf,
+  parseLegacyWindowsUnobservedProcessRecordLeaf,
+} from "./runtime-owned-process-record.js";
+export type {
+  LinuxProcessIdentity,
+  RuntimeOwnedProcessPlatform,
+  WindowsProcessIdentity,
+  ObservedWindowsProcessIdentity,
+  RuntimeOwnedProcessIdentity,
+  ObservedRuntimeOwnedProcessIdentity,
+  WindowsRuntimeJobContainment,
+  RuntimeOwnedProcessContainment,
+  RuntimeOwnedDarwinProcessPending,
+  RuntimeOwnedLinuxProcessPending,
+  RuntimeOwnedProcessClaim,
+  RuntimeOwnedProcessRecord,
+} from "./runtime-owned-process-record.js";
 
 export interface RuntimeOwnedProcessGenerationInspection {
   readonly session: RuntimeOwnedProcessSession | null;
@@ -146,28 +107,7 @@ function temporaryClaimName(
   return `${CLAIM_PREFIX}${ownershipId}.${operation}.tmp`;
 }
 
-function exactKeys(value: object, expected: readonly string[]): boolean {
-  const actual = Object.keys(value).sort();
-  const sortedExpected = [...expected].sort();
-  return actual.length === sortedExpected.length
-    && actual.every((key, index) => key === sortedExpected[index]);
-}
 
-function validPid(value: unknown): value is number {
-  return Number.isSafeInteger(value) && Number(value) > 1;
-}
-
-function validParentPid(value: unknown): value is number {
-  return Number.isSafeInteger(value) && Number(value) >= 1;
-}
-
-function validTicks(value: unknown): value is string {
-  return typeof value === "string" && /^[1-9][0-9]{0,30}$/u.test(value);
-}
-
-function validMilliseconds(value: unknown): value is number {
-  return Number.isSafeInteger(value) && Number(value) >= 0;
-}
 
 export function supportedRuntimeOwnedProcessPlatform(
   platform: NodeJS.Platform,
@@ -206,126 +146,7 @@ function parseContainment(
   }
 }
 
-function parseRecord(bytes: Buffer): RuntimeOwnedProcessRecord | null {
-  try {
-    const value = JSON.parse(bytes.toString("utf8")) as unknown;
-    if (!value || typeof value !== "object") return null;
-    const record = value as Partial<RuntimeOwnedProcessRecord>;
-    if (
-      record.version !== SCHEMA_VERSION
-      || !validRuntimeGenerationId(record.runtimeGenerationId)
-      || !validSystemBootId(record.systemBootId)
-      || typeof record.ownershipId !== "string"
-      || !UUID_PATTERN.test(record.ownershipId)
-    ) return null;
-    if (record.state === "pending") {
-      const legacy = exactKeys(value, [
-        "ownershipId", "runtimeGenerationId", "state", "systemBootId", "version",
-      ]);
-      const guardedDarwin = exactKeys(value, [
-        "containment", "ownershipId", "runtimeGenerationId", "runtimeParentPid",
-        "state", "systemBootId", "version",
-      ])
-        && record.containment === "darwin-parent-watchdog-v1"
-        && validPid(record.runtimeParentPid);
-      const guardedLinux = exactKeys(value, [
-        "containment", "ownershipId", "runtimeGenerationId", "runtimeParentPid",
-        "runtimeParentStartTimeTicks", "state", "systemBootId", "version",
-      ])
-        && record.containment === "linux-parent-gated-v1"
-        && validPid(record.runtimeParentPid)
-        && validTicks((record as Partial<RuntimeOwnedLinuxProcessPending>).runtimeParentStartTimeTicks);
-      return legacy || guardedDarwin || guardedLinux
-        ? record as RuntimeOwnedProcessPending
-        : null;
-    }
-    if (
-      (record.state !== "preauth" && record.state !== "owned" && record.state !== "retiring")
-      || !exactKeys(value, [
-        "ownershipId",
-        "process",
-        "runtimeGenerationId",
-        "state",
-        "systemBootId",
-        "version",
-      ])
-      || !record.process
-      || typeof record.process !== "object"
-    ) return null;
-    const identity = record.process as Partial<RuntimeOwnedProcessIdentity>;
-    const linuxIdentity = (exactKeys(record.process, [
-      "parentPid", "pid", "processGroupId", "startTimeTicks",
-    ]) || exactKeys(record.process, [
-      "guardianExecutableDevice", "guardianExecutableInode",
-      "parentPid", "pid", "processGroupId", "startTimeTicks",
-    ]))
-      && validPid(identity.pid)
-      && validPid((identity as Partial<LinuxProcessIdentity>).parentPid)
-      && validPid(identity.processGroupId)
-      && validTicks((identity as Partial<LinuxProcessIdentity>).startTimeTicks)
-      && (
-        !("guardianExecutableDevice" in record.process)
-        || (
-          validTicks((identity as Partial<LinuxProcessIdentity>).guardianExecutableDevice)
-          && validTicks((identity as Partial<LinuxProcessIdentity>).guardianExecutableInode)
-        )
-      );
-    const darwinIdentity = exactKeys(record.process, [
-      "parentPid",
-      "pid",
-      "platform",
-      "processGroupId",
-      "sessionId",
-      "startTimeMicroseconds",
-      "startTimeSeconds",
-    ])
-      && (identity as Partial<DarwinProcessIdentity>).platform === "darwin"
-      && validPid(identity.pid)
-      && validParentPid((identity as Partial<DarwinProcessIdentity>).parentPid)
-      && validPid(identity.processGroupId)
-      && identity.processGroupId === identity.pid
-      && validPid((identity as Partial<DarwinProcessIdentity>).sessionId)
-      && (identity as Partial<DarwinProcessIdentity>).sessionId === identity.pid
-      && validTicks((identity as Partial<DarwinProcessIdentity>).startTimeSeconds)
-      && Number.isSafeInteger(
-        (identity as Partial<DarwinProcessIdentity>).startTimeMicroseconds,
-      )
-      && Number((identity as Partial<DarwinProcessIdentity>).startTimeMicroseconds) >= 0
-      && Number((identity as Partial<DarwinProcessIdentity>).startTimeMicroseconds) < 1_000_000;
-    const windowsIdentity = exactKeys(record.process, [
-      "pid",
-      "platform",
-      "processGroupId",
-      "startedAfterMs",
-      "startedBeforeMs",
-    ])
-      && (identity as Partial<WindowsProcessIdentity>).platform === "win32"
-      && validPid(identity.pid)
-      && identity.processGroupId === null
-      && validMilliseconds((identity as Partial<WindowsProcessIdentity>).startedAfterMs)
-      && validMilliseconds((identity as Partial<WindowsProcessIdentity>).startedBeforeMs)
-      && Number((identity as Partial<WindowsProcessIdentity>).startedAfterMs)
-        <= Number((identity as Partial<WindowsProcessIdentity>).startedBeforeMs);
-    if (!linuxIdentity && !darwinIdentity && !windowsIdentity) return null;
-    if (record.state === "preauth" && (!linuxIdentity
-      || !("guardianExecutableDevice" in record.process))) return null;
-    return record as RuntimeOwnedProcessClaim;
-  } catch {
-    return null;
-  }
-}
 
-export function parseRuntimeOwnedProcessRecordLeaf(
-  bytes: Buffer,
-  expectedOwnershipId: string,
-): RuntimeOwnedProcessRecord | null {
-  const record = parseRecord(bytes);
-  return record
-    && UUID_PATTERN.test(expectedOwnershipId)
-    && record.ownershipId.toLowerCase() === expectedOwnershipId.toLowerCase()
-    ? record
-    : null;
-}
 
 export function parseRuntimeOwnedProcessContainmentLeaf(
   bytes: Buffer,
@@ -835,6 +656,10 @@ export class RuntimeOwnedProcessJournal {
       systemBootId: pending.systemBootId,
       process: identity,
     };
+    const claimBytes = stored(claim);
+    if (!parseRecord(claimBytes)) {
+      throw new Error("The spawned process ownership could not be proven.");
+    }
     const capability = this.writerCapability(
       runtimeGenerationId,
       systemBootId,
@@ -847,7 +672,7 @@ export class RuntimeOwnedProcessJournal {
       capability,
       temporaryClaimName(ownershipId, "claim"),
       claimName(ownershipId),
-      stored(claim),
+      claimBytes,
     )) throw new Error("The spawned process ownership could not be persisted.");
     return claim;
   }

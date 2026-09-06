@@ -211,7 +211,9 @@ export class AppUpdateService {
       lastAttemptedAt: null,
       message: this.capability.delivery === "in-app"
         ? `${this.productName} will check for updates shortly.`
-        : `${this.productName} will check for releases shortly; this installation updates manually.`,
+        : this.capability.reason === "windows-signing-unavailable"
+          ? `${this.productName} will check for releases shortly. This Windows build updates manually because it was published without code signing.`
+          : `${this.productName} will check for releases shortly; this installation updates manually.`,
     };
   }
 
@@ -385,14 +387,14 @@ export class AppUpdateService {
         latestVersion,
         releaseUrl: releasePageUrl(this.channel, latestVersion),
         checkedAt,
-        message: available
-          ? `${this.productName} ${latestVersion} is available.${
-              this.capability.delivery === "manual"
-                && this.capability.reason === "windows-signing-unavailable"
-                ? ` Quit ${this.productName}, wait for it to close safely, then run the verified installer; Setup will not force-close it.`
-                : ""
-            }`
-          : `${this.productName} is up to date.`,
+        message: this.capability.delivery === "manual"
+          && this.capability.reason === "windows-signing-unavailable"
+          ? available
+            ? `${this.productName} ${latestVersion} is available. This Windows build updates manually because it was published without code signing. Open the official release, verify the installer checksum, quit ${this.productName}, and wait for it to close before running Setup.`
+            : `${this.productName} is up to date. This Windows build updates manually because it was published without code signing.`
+          : available
+            ? `${this.productName} ${latestVersion} is available.`
+            : `${this.productName} is up to date.`,
       };
       this.cached = cached;
       return this.publish({

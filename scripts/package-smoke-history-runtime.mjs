@@ -169,24 +169,33 @@ export async function runPackagedHistorySmoke({ websocketUrl, workspaceDirectory
     }
     const proofs = [];
     let value = await detail(client, conversationId);
+    const selectedConversationId = client.snapshot().activeConversationId;
     let providerSession = null;
-    const setSpeed = async (speed) => {
+    const setSpeed = async (speed, phase) => {
       const providerOptions = { ...value.conversation.modelSelection.providerOptions };
       if (speed === "fast") providerOptions.fastMode = "priority";
       else delete providerOptions.fastMode;
-      await client.request("conversation.update", {
-        conversationId,
-        modelSelection: { ...value.conversation.modelSelection, providerOptions },
-      });
+      try {
+        await client.request("conversation.update", {
+          conversationId,
+          modelSelection: { ...value.conversation.modelSelection, providerOptions },
+        });
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        throw new Error(`Packaged ${phase} mode configuration admission failed: ${detail}`,
+          { cause: error });
+      }
       value = await detail(client, conversationId);
       ok((value.conversation.modelSelection.providerOptions.fastMode ?? null)
         === (speed === "fast" ? "priority" : null),
       `Packaged conversation did not retain ${speed} mode.`);
     };
     const runTurn = async (speed, phase) => {
-      await setSpeed(speed);
+      await setSpeed(speed, phase);
       const challenge = `package-smoke-${baseline ? "candidate" : "historical"}-${speed}:${randomUUID()}`;
-      const acceptance = await client.request("message.send", { conversationId, content: challenge });
+      const acceptance = await client.request("message.send", {
+        conversationId, content: challenge, activate: false,
+      });
       let proof;
       do {
         value = await detail(client, conversationId);
@@ -204,6 +213,8 @@ export async function runPackagedHistorySmoke({ websocketUrl, workspaceDirectory
       while (!completedTurnAdmissionProof(client.snapshot(), turn)) {
         await new Promise((resolve) => setTimeout(resolve, 25));
       }
+      ok(client.snapshot().activeConversationId === selectedConversationId,
+        `Packaged ${phase} background turn changed the selected conversation.`);
       proofs.push(proof);
     };
 

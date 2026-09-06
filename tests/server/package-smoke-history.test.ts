@@ -353,6 +353,7 @@ it("bounds a terminal turn whose public runtime ownership never becomes idle", a
     capabilities: [],
   };
   let challenge = "";
+  const messageActivations: Array<boolean | undefined> = [];
   try {
     await new Promise<void>((resolveListen) => server.once("listening", resolveListen));
     server.on("connection", (socket) => {
@@ -366,6 +367,7 @@ it("bounds a terminal turn whose public runtime ownership never becomes idle", a
           requestId: string;
           payload?: {
             content?: string;
+            activate?: boolean;
             modelSelection?: typeof modelSelection;
           };
         };
@@ -393,6 +395,7 @@ it("bounds a terminal turn whose public runtime ownership never becomes idle", a
         }
         if (command.type === "message.send") {
           challenge = command.payload!.content!;
+          messageActivations.push(command.payload!.activate);
           respond({
             kind: "message.accepted",
             disposition: "new-turn",
@@ -457,6 +460,7 @@ it("bounds a terminal turn whose public runtime ownership never becomes idle", a
       workspaceDirectory: tmpdir(),
       deadlineAt: startedAt + 250,
     })).rejects.toThrow("exceeded its deadline");
+    expect(messageActivations).toEqual([false]);
     expect(Date.now() - startedAt).toBeLessThan(1_500);
   } finally {
     for (const socket of server.clients) socket.terminate();

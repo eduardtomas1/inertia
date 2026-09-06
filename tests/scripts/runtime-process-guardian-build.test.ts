@@ -213,7 +213,10 @@ function readFixturePid(path: string): number | null {
 
 async function waitForFile(
   path: string,
-  timeoutMs = 1_000,
+  // These markers synchronize child-process setup; they do not measure the
+  // production guardian or packaging deadlines. Hosted Intel startup can take
+  // more than one second before the ownership assertion can even begin.
+  timeoutMs = 5_000,
   signal?: AbortSignal,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
@@ -2196,7 +2199,10 @@ describe.skipIf(process.platform === "win32")(
       writeFileSync(subject.bundledIntegrity, JSON.stringify({ sha256 }));
       const marker = join(subject.root, "wrapper-post-builder");
       const builder = join(subject.root, "fake-electron-builder.mjs");
-      writeFileSync(builder, "// exits successfully\n");
+      // Builder startup is setup, not the lock-integrity timing contract.
+      // Make a legitimate slow builder explicit so a one-second fixture wait
+      // cannot turn this ownership assertion into a host scheduling race.
+      writeFileSync(builder, "await new Promise((resolve) => setTimeout(resolve, 1250));\n");
       const wrapper = packageProcess(subject, builder, "win32", {
         INERTIA_TEST_GUARDIAN_HEARTBEAT_INTERVAL_MS: "5",
         INERTIA_TEST_POST_BUILDER_DELAY_MS: "500",

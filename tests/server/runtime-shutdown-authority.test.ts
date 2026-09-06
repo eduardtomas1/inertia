@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { startRuntime, type RunningRuntime } from "../../src/server";
 import { RuntimeStore } from "../../src/server/database";
+import * as runtimeShutdown from "../../src/server/runtime-shutdown";
 import type { ServerEvent } from "../../src/shared/contracts";
 import { connectRuntime } from "../support/runtime-event-queue";
 import { startTestRuntime } from "../support/test-runtime";
@@ -151,12 +152,58 @@ describe("runtime shutdown authority", () => {
 
     let closed = false;
     const closing = runtime.close().then(() => { closed = true; });
-    await Promise.resolve();
-    expect(closed).toBe(false);
-    commandGate.resolve();
-    await closing;
+    let repeatedCloseSettled = false;
+    const repeatedClose = runtime.close().then(() => { repeatedCloseSettled = true; });
+    try {
+      await Promise.resolve();
+      expect(closed).toBe(false);
+      expect(repeatedCloseSettled).toBe(false);
+    } finally {
+      commandGate.resolve();
+      await Promise.all([closing, repeatedClose]);
+    }
     expect(closed).toBe(true);
+    expect(repeatedCloseSettled).toBe(true);
     runtimes.splice(runtimes.indexOf(runtime), 1);
+  });
+
+  it("preserves an unconfirmed owned drain across repeated close calls", async () => {
+    const paths = await workspace();
+    const runtime = await startTestRuntime({
+      dataDirectory: paths.data,
+      defaultWorkspacePath: paths.workspace,
+      enableProviders: false,
+      ...runtimeIdentity,
+    });
+    const failure = new Error("The fixture owned drain could not confirm cleanup.");
+    const runPhases = runtimeShutdown.runRuntimeShutdownPhases;
+    const closeStore = vi.fn<runtimeShutdown.RuntimeShutdownPhases["closeStore"]>();
+    let phasesForCleanup: runtimeShutdown.RuntimeShutdownPhases | undefined;
+    const shutdown = vi.spyOn(runtimeShutdown, "runRuntimeShutdownPhases")
+      .mockImplementationOnce(async (phases) => {
+        phasesForCleanup = phases;
+        closeStore.mockImplementation(phases.closeStore);
+        await runPhases({
+          ...phases,
+          independentDrains: [
+            ...phases.independentDrains,
+            () => { throw failure; },
+          ],
+          closeStore,
+        });
+      });
+    try {
+      await expect(runtime.close()).rejects.toBe(failure);
+      expect(closeStore).not.toHaveBeenCalled();
+      await expect(runtime.close("runtime-crash")).rejects.toBe(failure);
+      expect(shutdown).toHaveBeenCalledOnce();
+      expect(closeStore).not.toHaveBeenCalled();
+    } finally {
+      shutdown.mockRestore();
+      // Every real owned drain completed; only the injected fixture drain
+      // failed. Explicitly close its retained store after checking the contract.
+      await phasesForCleanup?.closeStore({ deadlineAt: Date.now() + 1_000 });
+    }
   });
 
   it("drains startup provider refresh and prevents maintenance from starting after close", async () => {

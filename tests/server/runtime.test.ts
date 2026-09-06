@@ -17,7 +17,6 @@ import { setTimeout as delay } from "node:timers/promises";
 import WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { RunningRuntime } from "../../src/server";
 import type {
   AppSnapshot,
   ConversationDetail,
@@ -32,7 +31,6 @@ import {
 import { RuntimeStore } from "../../src/server/database";
 import { getUnifiedDiff } from "../../src/server/git";
 import { portableNodeExecutable, writeNodeSubcommand } from "../helpers/portable-provider-fixture";
-import { removeTemporaryDirectory } from "../helpers/temporary-directory";
 import {
   connectRuntime as connect,
   RuntimeEventQueue as EventQueue,
@@ -43,6 +41,7 @@ import {
 } from "../support/runtime-conversation-detail";
 import { SecureFileTestBroker } from "../support/secure-file-test-broker";
 import { startTestRuntime as startRuntime } from "../support/test-runtime";
+import { RuntimeTestCleanup } from "../support/runtime-test-cleanup";
 
 const runtimeIdentity = {
   runtimeGenerationId: "00000000-0000-4000-8000-000000000001:1",
@@ -89,15 +88,18 @@ describe("local runtime", () => {
   // intentionally cwd-relative. These isolation tests use a cwd-independent
   // Unix wrapper; Windows provider discovery has dedicated native CI coverage.
   const summaryRuntimeIt = process.platform === "win32" ? it.skip : it;
-  const temporaryDirectories: string[] = [];
-  const runtimes: RunningRuntime[] = [];
+  const cleanup = new RuntimeTestCleanup();
+  const temporaryDirectories = cleanup.directories;
+  const runtimes = cleanup.runtimes;
   const restoreEnvironment: Array<() => void> = [];
 
   afterEach(async () => {
-    await Promise.all(runtimes.splice(0).map((runtime) => runtime.close()));
-    for (const restore of restoreEnvironment.splice(0).reverse()) restore();
-    for (const directory of temporaryDirectories.splice(0)) await removeTemporaryDirectory(directory);
-    vi.restoreAllMocks();
+    try {
+      await cleanup.close();
+    } finally {
+      for (const restore of restoreEnvironment.splice(0).reverse()) restore();
+      vi.restoreAllMocks();
+    }
   });
 
   function temporaryWorkspace(options: { withProject?: boolean } = {}): { root: string; data: string; workspace: string } {
@@ -919,9 +921,11 @@ process.exit(child.status ?? 1);
       requestId: stopRequestId,
       payload: { runId: activity.id },
     });
-    await client.events.next(
+    await client.events.nextForRequest(
+      stopRequestId,
       (event): event is Extract<ServerEvent, { type: "request.ok" }> =>
         event.type === "request.ok" && event.requestId === stopRequestId,
+      Date.now() + 6_000,
     );
     const stopped = await client.events.next(
       (event): event is Extract<ServerEvent, { type: "snapshot.updated" }> =>
@@ -958,9 +962,11 @@ process.exit(child.status ?? 1);
       requestId: stopRerunRequestId,
       payload: { runId: rerun.id },
     });
-    await client.events.next(
+    await client.events.nextForRequest(
+      stopRerunRequestId,
       (event): event is Extract<ServerEvent, { type: "request.ok" }> =>
         event.type === "request.ok" && event.requestId === stopRerunRequestId,
+      Date.now() + 6_000,
     );
 
     const dismissRequestId = randomUUID();
@@ -969,9 +975,11 @@ process.exit(child.status ?? 1);
       requestId: dismissRequestId,
       payload: { runId: activity.id },
     });
-    await client.events.next(
+    await client.events.nextForRequest(
+      dismissRequestId,
       (event): event is Extract<ServerEvent, { type: "request.ok" }> =>
         event.type === "request.ok" && event.requestId === dismissRequestId,
+      Date.now() + 6_000,
     );
     const dismissed = await client.events.next(
       (event): event is Extract<ServerEvent, { type: "snapshot.updated" }> =>

@@ -930,7 +930,7 @@ test("pins the minimal fixed builder and gates installed Windows binaries", asyn
   expect(source).toContain("completed without a reboot");
 });
 
-test("runs packaged N-1 to N on Windows x64 and preserves native ARM64 evidence", async () => {
+test("runs packaged N-1 to N on both native Windows architectures", async () => {
   const ci = await readFile(join(repositoryRoot, ".github", "workflows", "ci.yml"), "utf8");
   const release = await readFile(
     join(repositoryRoot, ".github", "workflows", "release-platforms.yml"),
@@ -943,12 +943,13 @@ test("runs packaged N-1 to N on Windows x64 and preserves native ARM64 evidence"
   expect(ci).toContain("release_package_script: package:release:win:arm64");
   expect(ci).toContain("Package native Windows installer and unpacked app");
   expect(ci).toContain("Download checksummed packaged Windows N-1 installer");
-  expect(ci).toContain("Install N-1, upgrade in place, smoke, and uninstall Windows x64 package");
+  expect(ci).toContain("Install N-1, upgrade in place, smoke, and uninstall Windows package");
+  expect(ci).toContain('--architecture "${{ matrix.arch }}"');
   expect(ci).toContain("INERTIA_WINDOWS_N_MINUS_ONE_METADATA: release/n-minus-one/metadata.json");
-  expect(ci).toContain("Install, smoke, and uninstall Windows ARM64 package");
   expect(ci).toContain("run: npm run test:windows-installer-smoke");
   expect(release).toContain("Download checksummed packaged Windows N-1 installer");
-  expect(release).toContain("Install N-1, upgrade in place, smoke, and uninstall Windows x64 package");
-  expect(release).toContain("Install, smoke, and uninstall Windows ARM64 package");
+  expect(release).toContain("Install N-1, upgrade in place, smoke, and uninstall Windows package");
+  expect(release).toContain('--architecture "${{ matrix.arch }}"');
+  expect(release).toContain("Install, smoke, and uninstall Windows Canary package");
   expect(release).toContain("run: npm run test:windows-installer-smoke");
 });

@@ -9,6 +9,7 @@ import {
   mkdtemp,
   readFile,
   readdir,
+  realpath,
   rm,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -526,6 +527,8 @@ async function smokeInstalledApplication(
   label,
   stateRoot,
   expectedVersion,
+  historyMode,
+  historyFile,
 ) {
   await runBounded(
     process.execPath,
@@ -539,6 +542,8 @@ async function smokeInstalledApplication(
         INERTIA_PACKAGE_SMOKE_EXPECTED_VERSION: expectedVersion,
         INERTIA_PACKAGE_SMOKE_KIND: "windows-installed",
         INERTIA_PACKAGE_SMOKE_STATE_ROOT: stateRoot,
+        INERTIA_PACKAGE_SMOKE_HISTORY_MODE: historyMode,
+        INERTIA_PACKAGE_SMOKE_HISTORY_FILE: historyFile,
       },
       label,
       timeoutMs: PACKAGE_SMOKE_TIMEOUT_MS,
@@ -834,9 +839,10 @@ export async function main() {
     architecture: process.arch,
   });
 
-  const temporaryRoot = await mkdtemp(join(tmpdir(), "inertia-installer-smoke-"));
+  const temporaryRoot = await realpath(await mkdtemp(join(tmpdir(), "inertia-installer-smoke-")));
   const installDirectory = join(temporaryRoot, "installed with spaces");
   const persistentStateRoot = join(temporaryRoot, "existing profile and data");
+  const historyFile = join(temporaryRoot, "upgrade-history.json");
   await mkdir(persistentStateRoot, { mode: 0o700 });
   const stagedUninstaller = join(temporaryRoot, "staged-uninstaller.exe");
   const applicationName = installedWindowsApplicationName(releaseChannel);
@@ -875,6 +881,8 @@ export async function main() {
         `Installed Windows N-1 application smoke (${nMinusOne.version})`,
         persistentStateRoot,
         nMinusOne.version,
+        "seed",
+        historyFile,
       );
       await waitForInstallRootProcessDrain(installDirectory);
       if (!await existsAsRegularFile(join(
@@ -923,6 +931,8 @@ export async function main() {
         : "Installed Windows application smoke",
       persistentStateRoot,
       manifest.version,
+      nMinusOne ? "verify" : "fresh",
+      nMinusOne ? historyFile : undefined,
     );
     await runUninstaller(uninstaller, stagedUninstaller, installDirectory);
     uninstalled = true;

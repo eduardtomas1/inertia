@@ -151,6 +151,11 @@ uninstallable release. Mixed update capability between two architectures of
 the same operating system is rejected. Build provenance covers that same exact
 union.
 
+Stable PR and release jobs download the checksummed preceding public installer
+for each native Windows architecture and upgrade its existing installation.
+Canary retains its isolated fresh-install gate. macOS tag builds run the complete
+unit suite with the same two-worker limit as PR CI.
+
 Both Windows architecture jobs also inspect the NSIS application archive for
 an install-time-decodable 7-Zip method, silently install the exact generated
 installer into a temporary directory, verify the installed executable, native

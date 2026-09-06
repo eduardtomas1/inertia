@@ -678,7 +678,7 @@ jobs:
         run: npm run "${{ matrix.package_script }}"
 
       - name: Download checksummed packaged Windows N-1 installer
-        if: runner.os == 'Windows' && matrix.arch == 'x64'
+        if: runner.os == 'Windows'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -688,7 +688,7 @@ jobs:
           node scripts/ci/download-windows-n-minus-one.mjs \
             --current-version "$current_version" \
             --channel stable \
-            --architecture x64 \
+            --architecture "${{ matrix.arch }}" \
             --output-directory release/n-minus-one
 
       - name: Validate Linux AppImage identity, icons, and runtime resource
@@ -723,17 +723,11 @@ jobs:
         if: runner.os != 'Linux'
         run: npm run test:package-smoke
 
-      - name: Install N-1, upgrade in place, smoke, and uninstall Windows x64 package
-        if: runner.os == 'Windows' && matrix.arch == 'x64'
+      - name: Install N-1, upgrade in place, smoke, and uninstall Windows package
+        if: runner.os == 'Windows'
         env:
           INERTIA_RELEASE_CHANNEL: stable
           INERTIA_WINDOWS_N_MINUS_ONE_METADATA: release/n-minus-one/metadata.json
-        run: npm run test:windows-installer-smoke
-
-      - name: Install, smoke, and uninstall Windows ARM64 package
-        if: runner.os == 'Windows' && matrix.arch == 'arm64'
-        env:
-          INERTIA_RELEASE_CHANNEL: stable
         run: npm run test:windows-installer-smoke
 
       - name: Prove AppImage and guardian runtime on pristine Ubuntu 22.04

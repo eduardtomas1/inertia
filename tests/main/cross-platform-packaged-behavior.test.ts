@@ -226,6 +226,43 @@ describe("cross-platform packaged behavior contract", () => {
     }
   });
 
+  it.each([
+    ["ci.yml", "test"],
+    ["release-platforms.yml", "build"],
+  ])("requires installed upgrades on both stable Windows architectures in %s", async (filename, job) => {
+    const workflow = parse(await source(`.github/workflows/${filename}`)) as {
+      jobs: Record<string, { steps: Array<{
+        name?: string; run?: string; if?: string; env?: Record<string, string>;
+      }> }>;
+    };
+    const steps = workflow.jobs[job]!.steps;
+    const download = steps.find(({ name }) => name === "Download checksummed packaged Windows N-1 installer")!;
+    const upgrade = steps.find(({ name }) => name === "Install N-1, upgrade in place, smoke, and uninstall Windows package")!;
+    const stableCondition = filename === "ci.yml"
+      ? "runner.os == 'Windows'"
+      : "runner.os == 'Windows' && !startsWith(inputs.release_tag || github.ref_name, 'canary-v')";
+    expect(download.if).toBe(stableCondition);
+    expect(download.run).toContain('--architecture "${{ matrix.arch }}"');
+    expect(upgrade.if).toBe(stableCondition);
+    expect(upgrade.env?.INERTIA_WINDOWS_N_MINUS_ONE_METADATA).toBe("release/n-minus-one/metadata.json");
+    expect(upgrade.run).toBe("npm run test:windows-installer-smoke");
+    if (filename === "release-platforms.yml") {
+      const canary = steps.find(({ name }) => name === "Install, smoke, and uninstall Windows Canary package")!;
+      expect(canary.if).toBe("runner.os == 'Windows' && startsWith(inputs.release_tag || github.ref_name, 'canary-v')");
+      expect(canary.run).toBe("npm run test:windows-installer-smoke");
+      expect(canary.env?.INERTIA_WINDOWS_N_MINUS_ONE_METADATA).toBeUndefined();
+    }
+  });
+
+  it("retains the full release suite with the same macOS worker bound as PR CI", async () => {
+    const workflow = await source(".github/workflows/release-platforms.yml");
+    const units = workflowStep(workflow, "Verify quality and run the complete unit suite");
+    expect(units).toContain("npm run check:quality");
+    expect(units).toContain('if [[ "$RUNNER_OS" == "macOS" ]]; then');
+    expect(units).toContain("npm test -- --maxWorkers=2");
+    expect(units).toMatch(/else\s+npm test\s+fi/u);
+  });
+
   it("keeps every native architecture CI target explicitly bounded", async () => {
     const workflow = await source(".github/workflows/ci.yml");
     expect(workflow).toContain(

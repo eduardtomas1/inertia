@@ -175,7 +175,14 @@ jobs:
         run: npm run test:browser-evidence-cpu-budget
 
       - name: Verify quality and run the complete unit suite
-        run: npm run check:quality && npm test
+        run: |
+          npm run check:quality
+          # Keep native fixture contention aligned with PR CI.
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            npm test -- --maxWorkers=2
+          else
+            npm test
+          fi
 
       # Package and every subsequent smoke consume this exact bundle. The
       # package commands below deliberately do not rebuild it.
@@ -346,7 +353,7 @@ jobs:
           fi
 
       - name: Download checksummed packaged Windows N-1 installer
-        if: runner.os == 'Windows' && matrix.arch == 'x64' && !startsWith(inputs.release_tag || github.ref_name, 'canary-v')
+        if: runner.os == 'Windows' && !startsWith(inputs.release_tag || github.ref_name, 'canary-v')
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -356,25 +363,21 @@ jobs:
           node scripts/ci/download-windows-n-minus-one.mjs \
             --current-version "$current_version" \
             --channel "$INERTIA_RELEASE_CHANNEL" \
-            --architecture x64 \
+            --architecture "${{ matrix.arch }}" \
             --output-directory release/n-minus-one
 
       - name: Smoke native packaged app
         if: runner.os != 'Linux'
         run: npm run test:package-smoke
 
-      - name: Install N-1, upgrade in place, smoke, and uninstall Windows x64 package
-        if: runner.os == 'Windows' && matrix.arch == 'x64' && !startsWith(inputs.release_tag || github.ref_name, 'canary-v')
+      - name: Install N-1, upgrade in place, smoke, and uninstall Windows package
+        if: runner.os == 'Windows' && !startsWith(inputs.release_tag || github.ref_name, 'canary-v')
         env:
           INERTIA_WINDOWS_N_MINUS_ONE_METADATA: release/n-minus-one/metadata.json
         run: npm run test:windows-installer-smoke
 
-      - name: Install, smoke, and uninstall Windows x64 Canary package
-        if: runner.os == 'Windows' && matrix.arch == 'x64' && startsWith(inputs.release_tag || github.ref_name, 'canary-v')
-        run: npm run test:windows-installer-smoke
-
-      - name: Install, smoke, and uninstall Windows ARM64 package
-        if: runner.os == 'Windows' && matrix.arch == 'arm64'
+      - name: Install, smoke, and uninstall Windows Canary package
+        if: runner.os == 'Windows' && startsWith(inputs.release_tag || github.ref_name, 'canary-v')
         run: npm run test:windows-installer-smoke
 
       - name: Prove AppImage and guardian runtime on pristine Ubuntu 22.04

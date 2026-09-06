@@ -85,6 +85,10 @@ interface StreamingCadenceMeasurement extends Measurement {
   p95VisibleGapMs: number;
   maxVisibleGapMs: number;
   visibleGapSamplesMs: number[];
+  sourceGapSamplesMs: number[];
+  sourceWaitSamplesMs: number[];
+  bufferedWaitSamplesMs: number[];
+  sqliteWriteSamplesMs: number[];
   visibleUpdatesPerSecond: number;
   visibleUpdates: number;
   sqliteWrites: number;
@@ -208,6 +212,12 @@ async function streamingCadenceMeasurement(
   ));
   const expectedText = sourceChunks.join("");
   const projectionTimes: number[] = [];
+  const sourceGapSamplesMs: number[] = [];
+  const sourceWaitSamplesMs: number[] = [];
+  const bufferedWaitSamplesMs: number[] = [];
+  const sqliteWriteSamplesMs: number[] = [];
+  let pendingSince: number | null = null;
+  let previousSourceAt: number | null = null;
   let sqliteWrites = 0;
   let serializedProjectionBytes = 0;
   const startedAt = performance.now();
@@ -222,9 +232,21 @@ async function streamingCadenceMeasurement(
     flushIntervalMs: intervalMs,
     maxBufferedChars: 16_384,
     onFlush: ({ delta }) => {
+      const writeStartedAt = performance.now();
       store.appendMessageContent(message.id, delta);
+      const projectedAt = performance.now();
+      const previousProjectionAt = projectionTimes.at(-1);
+      // Keep the original wall-time gap and its components. A failed peak
+      // alone cannot distinguish an idle source from delayed projection or
+      // persistence. These arrays share visibleGapSamplesMs' indices.
+      if (previousProjectionAt !== undefined && pendingSince !== null) {
+        sourceWaitSamplesMs.push(pendingSince - previousProjectionAt);
+        bufferedWaitSamplesMs.push(writeStartedAt - pendingSince);
+        sqliteWriteSamplesMs.push(projectedAt - writeStartedAt);
+      }
+      pendingSince = null;
       sqliteWrites += 1;
-      projectionTimes.push(performance.now());
+      projectionTimes.push(projectedAt);
       serializedProjectionBytes += Buffer.byteLength(JSON.stringify({
         type: "agent.text",
         delta,
@@ -237,6 +259,12 @@ async function streamingCadenceMeasurement(
 
   try {
     for (const chunk of sourceChunks) {
+      const sourceAt = performance.now();
+      if (previousSourceAt !== null) {
+        sourceGapSamplesMs.push(sourceAt - previousSourceAt);
+      }
+      previousSourceAt = sourceAt;
+      pendingSince ??= sourceAt;
       channel.append(chunk);
       await sleep(8);
     }
@@ -271,6 +299,10 @@ async function streamingCadenceMeasurement(
       p95VisibleGapMs: Number(percentile(visibleGaps, 0.95).toFixed(3)),
       maxVisibleGapMs: Number(Math.max(0, ...visibleGaps).toFixed(3)),
       visibleGapSamplesMs: visibleGaps.map((gap) => Number(gap.toFixed(3))),
+      sourceGapSamplesMs: sourceGapSamplesMs.map((gap) => Number(gap.toFixed(3))),
+      sourceWaitSamplesMs: sourceWaitSamplesMs.map((gap) => Number(gap.toFixed(3))),
+      bufferedWaitSamplesMs: bufferedWaitSamplesMs.map((gap) => Number(gap.toFixed(3))),
+      sqliteWriteSamplesMs: sqliteWriteSamplesMs.map((gap) => Number(gap.toFixed(3))),
       visibleUpdatesPerSecond: Number(
         (projectionTimes.length / (elapsedMs / 1_000)).toFixed(3),
       ),

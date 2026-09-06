@@ -2,6 +2,35 @@
 
 The useful changes in each Inertia release, in plain language.
 
+## 0.0.52 — 2026-09-06
+
+### Startup, shutdown, and compaction
+
+- Windows can recover the exact malformed startup record left by an older
+  failed process launch, preserving saved projects, conversations, and images.
+  Shutdown closes new process admission before confirming cleanup.
+- Linux AppImage launches briefly wait for a verified owner running a different
+  version to release the app, and explain when ownership remains blocked.
+  If shutdown cannot finish, a visible notice offers **Retry quit** and
+  **Show Inertia** instead of leaving an invisible process behind.
+- Codex context compaction works in both Standard and Fast mode, and the same
+  conversation can continue afterward. Provider thread and speed validation
+  remain enforced.
+- Windows installer checks now exercise recovery of two interrupted runtime
+  generations, retained history and images, Standard/Fast transitions,
+  compaction, and a subsequent turn after upgrading the previous release.
+  Unsigned Windows builds continue to explain their manual update delivery.
+
+### A small companion and clearer project navigation
+
+- Enable the optional desktop mascot in Settings to follow real chat activity,
+  approvals, questions, errors, and completed work. Drag it into place or move
+  it with the keyboard, open the relevant chat, and hide it when needed.
+  Its motion respects reduced-motion preferences.
+- Project discovery avoids redundant file checks and retains healthy results
+  when one repository times out. Short project names remain readable in the
+  new-chat composer, including narrow split panes.
+
 ## 0.0.51 — 2026-09-06
 
 ### Startup and updates

@@ -6,6 +6,18 @@ SilentInstall silent
 !include "LogicLib.nsh"
 !define PRODUCT_NAME "Inertia"
 Var PowerShellPath
+; Retain the actual plug-in result before the shipped guard maps every
+; unavailable query to silent exit 2. Production installers omit this macro.
+!macro INERTIA_TEST_INSTALL_ROOT_QUERY_RESULT
+  Push $R2
+  Push $R3
+  ReadEnvStr $R2 "INERTIA_GUARD_FIXTURE_QUERY_RESULT"
+  FileOpen $R3 "$R2" w
+  FileWrite $R3 "$R0$\r$\n$PowerShellPath"
+  FileClose $R3
+  Pop $R3
+  Pop $R2
+!macroend
 !include "$%INERTIA_GUARD_FIXTURE_INCLUDE%"
 
 ; Execute the actual shipped guard, including preparing an empty destination,

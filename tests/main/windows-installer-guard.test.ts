@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
-import { copyFile, mkdir, mkdtemp, rm } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -12,7 +12,7 @@ const repositoryRoot = join(import.meta.dirname, "../..");
 
 test.runIf(process.platform === "win32")(
   "the compiled NSIS guard preserves live processes and accepts a drained root under Restricted policy",
-  async () => {
+  async ({ onTestFailed }) => {
     const { runBounded, BoundedProcessExitError } = await import(pathToFileURL(
       join(repositoryRoot, "scripts/bounded-process-tree.mjs"),
     ).href);
@@ -21,6 +21,16 @@ test.runIf(process.platform === "win32")(
     const siblingDirectory = `${installDirectory}-sibling`;
     const fixture = join(root, "guard.exe");
     const children: ChildProcess[] = [];
+    const queryResults: Array<{
+      expectedCode: number;
+      exitCode: number | null;
+      elapsedMs: number;
+      queryResult: string;
+      powerShellPath: string;
+    }> = [];
+    onTestFailed(() => {
+      process.stderr.write(`Compiled NSIS guard failure: ${JSON.stringify(queryResults)}\n`);
+    });
     try {
       await Promise.all([mkdir(installDirectory), mkdir(siblingDirectory)]);
       const compiler = await getMakeNsisPath(undefined);
@@ -37,24 +47,43 @@ test.runIf(process.platform === "win32")(
         timeoutMs: 30_000,
       });
       const runGuard = async (expectedCode: number, installRoot = installDirectory) => {
-        let exitCode = 0;
+        let exitCode: number | null = null;
+        const queryResultPath = join(root, `query-result-${queryResults.length}.txt`);
+        const startedAt = performance.now();
         try {
           await runBounded(fixture, ["/S"], {
             label: `Compiled NSIS guard: expected exit ${expectedCode}`,
             env: {
               ...process.env,
               INERTIA_GUARD_FIXTURE_ROOT: installRoot,
+              INERTIA_GUARD_FIXTURE_QUERY_RESULT: queryResultPath,
               PSExecutionPolicyPreference: "Restricted",
             },
             timeoutMs: 20_000,
           });
+          exitCode = 0;
         } catch (error) {
           if (!(error instanceof BoundedProcessExitError)
             || !(error instanceof Error) || !("exitCode" in error)
             || typeof error.exitCode !== "number") throw error;
           exitCode = error.exitCode;
+        } finally {
+          const [queryResult = "result-not-recorded", powerShellPath = ""] = (
+            await readFile(queryResultPath, "utf8").catch(() => "result-not-recorded")
+          ).split(/\r?\n/u);
+          queryResults.push({
+            expectedCode,
+            exitCode,
+            elapsedMs: Math.round(performance.now() - startedAt),
+            queryResult: queryResult.slice(0, 128),
+            powerShellPath: powerShellPath.slice(0, 1024),
+          });
         }
         expect(exitCode).toBe(expectedCode);
+        if (process.arch === "x64" || process.arch === "arm64") {
+          expect(queryResults.at(-1)?.powerShellPath)
+            .toMatch(/\\Sysnative\\WindowsPowerShell\\v1\.0\\powershell\.exe$/iu);
+        }
       };
       for (const directory of [installDirectory, siblingDirectory]) {
         const executable = join(directory, "blocker.exe");

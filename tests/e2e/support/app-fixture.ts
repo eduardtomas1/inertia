@@ -1,4 +1,4 @@
-import { _electron as electron, type ElectronApplication,
+import { _electron as electron, test, type ElectronApplication,
   type Page } from "@playwright/test";
 import { execFile } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
@@ -14,6 +14,7 @@ import { closeElectronAppBounded, closeElectronFixtureBounded,
   closePreviewServerBounded, observeElectronPage, observeElectronProcess,
   quitElectronAppBounded, removeFixtureDirectory,
   waitForRuntimeProcessExit } from "./electron-app-lifecycle";
+import { attachElectronFixtureCloseFailure } from "./electron-failure-evidence";
 import { finishElectronPreparedQuit, prepareElectronPrivilegedCleanup,
   readElectronPrivilegedCleanupPhase } from "./electron-runtime-shutdown";
 import {
@@ -988,6 +989,9 @@ export async function createAppFixture(
         waitForRuntimeExit: waitForRuntimeProcessExit,
         closeServer: async () => closePreviewServerBounded(preview.server),
         removeDirectory: async () => removeFixtureDirectory(testDirectory),
+      }).catch(async (error: unknown) => {
+        await attachElectronFixtureCloseFailure(() => test.info(), error);
+        throw error;
       });
     },
   };

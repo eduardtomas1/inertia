@@ -20,6 +20,7 @@ import {
   gitScanCoordinator,
   validatedGitScanIdentity,
 } from "./git/scan-coordinator";
+import { isGitProcessTreeTerminationFailure } from "./git/types";
 import type {
   RuntimeSecureFileBroker,
   SecureFileRootCapability,
@@ -421,6 +422,14 @@ export async function discoverWorkspaceGitRepositories(
         if (entry.isDirectory() || entry.isSymbolicLink()) skippedDirectories += 1;
         continue;
       }
+      if (entry.isSymbolicLink()) {
+        skippedDirectories += 1;
+        continue;
+      }
+      // readdir already identifies ordinary files, which cannot contain a
+      // repository. Only probe directories again: their type may have changed
+      // since enumeration, so lstat and realpath must still guard traversal.
+      if (!entry.isDirectory()) continue;
       const childAbsolute = resolve(current.absolutePath, entry.name);
       let childInfo;
       try {
@@ -567,7 +576,10 @@ export async function discoverWorkspaceGitRepositories(
         metadataMarkerIdentity,
       };
     } catch (error) {
-      if (error instanceof GitError && error.code === "timeout") throw error;
+      if (isGitProcessTreeTerminationFailure(error)) throw error;
+      // A single Git command can time out before the workspace deadline.
+      // Keep that repository unavailable while other roots still have time
+      // to finish; the aggregate deadline remains fatal for the whole scan.
       requireDiscoveryTime(inputLimits.deadlineAt);
       partial = true;
       return {
@@ -581,6 +593,7 @@ export async function discoverWorkspaceGitRepositories(
   const seenRoots = new Set<string>();
   const repositories: WorkspaceGitRepositorySnapshot[] = [];
   for (const result of inspected) {
+    requireDiscoveryTime(inputLimits.deadlineAt);
     if (result.rootIdentity && seenRoots.has(result.rootIdentity)) continue;
     if (result.rootIdentity) seenRoots.add(result.rootIdentity);
     repositories.push(result.repository);

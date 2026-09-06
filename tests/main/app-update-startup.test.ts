@@ -50,6 +50,7 @@ import {
 } from "../../src/main/app-update-startup";
 import { LinuxAppUpdateCandidateClaimJournal } from
   "../../src/main/linux-app-update-candidate-claim";
+import * as appUpdateBootstrap from "../../src/main/app-update-bootstrap";
 
 const roots: string[] = [];
 const operationId = "11111111-1111-4111-8111-111111111111";
@@ -380,6 +381,31 @@ afterEach(async () => {
 });
 
 describe("app update startup coordinator", () => {
+  it("awaits ordinary Linux contention reporting and leaves update state with the owner", async () => {
+    const fixture = await windowsFixture();
+    const order: string[] = [];
+    const application = applicationFixture(false, order);
+    const bootstrap = vi.fn(async () => undefined);
+    const reportSingletonContention = vi.fn(async () => {
+      await Promise.resolve();
+      order.push("contention");
+    });
+    await startApplicationWithUpdateHandoff(startupOptions(
+      fixture, application.application, {
+        platform: "linux", environment: { APPIMAGE: fixture.executablePath },
+        bootstrap, reportSingletonContention,
+      },
+    ));
+    expect(order).toEqual(["lock", "contention", "quit"]);
+    expect(reportSingletonContention).toHaveBeenCalledExactlyOnceWith({
+      requestedVersion: "1.3.0", runningVersion: null,
+    });
+    expect(bootstrap).not.toHaveBeenCalled();
+    expect(application.listeners.size).toBe(0);
+    expect(fixture.journal.current()).toEqual(fixture.prepared);
+    expect(fixture.vault.matches(fixture.prepared)).toBe(true);
+  });
+
   it("validates, grants normal admission, bootstraps, and consumes Windows authority in order", async () => {
     const fixture = await windowsFixture();
     transferOwnership(fixture);
@@ -1061,6 +1087,37 @@ describe("app update startup coordinator", () => {
 describe.skipIf(process.platform === "win32")(
   "Linux app update startup recovery",
   () => {
+    it("keeps restricted candidate lock loss on authenticated rollback, without ordinary contention handling", async () => {
+      const fixture = await linuxFixture();
+      const order: string[] = [];
+      const application = applicationFixture(false, order);
+      const reportSingletonContention = vi.fn();
+      const request = vi.spyOn(appUpdateBootstrap, "appUpdateCandidateBootstrapRequest")
+        .mockReturnValue({
+          operationId, handoffDirectory: fixture.dataDirectory,
+          profileDirectory: fixture.profileDirectory, dataDirectory: fixture.dataDirectory,
+          candidatePath: fixture.transaction.stablePath,
+          imageFileDescriptor: 4, launchId: "55555555-5555-4555-8555-555555555555",
+        });
+      const admission = vi.spyOn(appUpdateBootstrap, "runRestrictedAppUpdateCandidate")
+        .mockResolvedValue({
+          platform: "linux", snapshot: fixture.prepared, handoffToken: token,
+          stableAppImagePath: fixture.activePath, candidateInstanceChecksum: "a".repeat(64),
+        });
+      try {
+        await startApplicationWithUpdateHandoff(linuxStartupOptions(
+          fixture, application.application, { reportSingletonContention },
+        ));
+      } finally {
+        request.mockRestore();
+        admission.mockRestore();
+      }
+      expect(order).toEqual(["lock", "quit"]);
+      expect(reportSingletonContention).not.toHaveBeenCalled();
+      expect(fixture.journal.current()).toBeNull();
+      await expect(readFile(fixture.activePath, "utf8")).resolves.toBe("old");
+    });
+
     it.each([
       "candidate-launched",
       "candidate-bootstrap-validated",

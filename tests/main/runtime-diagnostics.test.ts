@@ -33,6 +33,17 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
+function signedRecord(record: Record<string, unknown>): string {
+  const payload = JSON.stringify(Object.fromEntries(
+    Object.entries(record).sort(([left], [right]) =>
+      left < right ? -1 : left > right ? 1 : 0),
+  ));
+  return JSON.stringify({
+    ...record,
+    recordDigest: createHash("sha256").update(payload).digest("hex"),
+  });
+}
+
 describe("runtime diagnostics", () => {
   it("logs only allowlisted lifecycle fields and redacts unsafe failure values", () => {
     const root = fixture();
@@ -351,16 +362,6 @@ describe("runtime diagnostics", () => {
     diagnostics.ensureDirectory();
     diagnostics.record("app.start");
     const valid = readFileSync(join(directory, "runtime.log"), "utf8").trim();
-    const signedRecord = (record: Record<string, unknown>): string => {
-      const payload = JSON.stringify(Object.fromEntries(
-        Object.entries(record).sort(([left], [right]) =>
-          left < right ? -1 : left > right ? 1 : 0),
-      ));
-      return JSON.stringify({
-        ...record,
-        recordDigest: createHash("sha256").update(payload).digest("hex"),
-      });
-    };
     const strictButUnsafe = signedRecord({
       schemaVersion: 1,
       at: new Date().toISOString(),
@@ -409,13 +410,19 @@ describe("runtime diagnostics", () => {
     const diagnostics = new RuntimeDiagnostics(runtimeDiagnosticsDirectory(root), {
       maxFileBytes: 4 * 1_024 * 1_024,
     });
-    for (let generation = 1; generation <= 500; generation += 1) {
-      diagnostics.record("runtime.state", {
-        phase: "ready",
-        generation,
-        restartAttempt: 0,
-      });
-    }
+    // This case exercises reading a long history, not 500 durable appends.
+    // Writer, short-write, rotation and retention behavior have real-I/O cases.
+    const directory = diagnostics.ensureDirectory();
+    const at = new Date().toISOString();
+    const history = Array.from({ length: 500 }, (_, index) => signedRecord({
+      schemaVersion: 1,
+      at,
+      event: "runtime.state",
+      phase: "ready",
+      generation: index + 1,
+      restartAttempt: 0,
+    })).join("\n");
+    writeFileSync(join(directory, "runtime.log"), `${history}\n`, { mode: 0o600 });
 
     const report = diagnostics.supportReport({
       version: "0.0.10",

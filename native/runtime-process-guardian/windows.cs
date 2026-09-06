@@ -223,6 +223,8 @@ public static class InertiaRuntimeJob {
   private const Int32 MAX_UPDATE_REQUEST_BYTES = 64 * 1024;
   private const Int32 MAX_UPDATE_PATH_BYTES = 4 * 1024;
   private const Int32 MAX_UPDATE_READY_BYTES = 32;
+  private const Int32 MAX_UPDATE_DIAGNOSTIC_BYTES = 8 * 1024;
+  private const Int32 MAX_UPDATE_DIAGNOSTIC_STAGE_CHARS = 64;
   private const Int32 UPDATE_LAUNCH_CLEANUP_UNCONFIRMED = 47;
   private const UInt64 WINDOWS_TO_UNIX_EPOCH_TICKS = 116444736000000000;
   private const Int32 ERROR_FILE_NOT_FOUND = 2;
@@ -428,6 +430,72 @@ public static class InertiaRuntimeJob {
 
   private static string ErrorLine(string stage, int win32Error) {
     return "INERTIA_JOB_ERROR stage=" + stage + " win32=" + win32Error;
+  }
+
+  private static string NormalizeUpdateDiagnosticLine(string line) {
+    const string prefix = "INERTIA_JOB_ERROR stage=";
+    const string win32Separator = " win32=";
+    if (line == null || !line.StartsWith(prefix, StringComparison.Ordinal)) {
+      return null;
+    }
+    string detail = line.Substring(prefix.Length);
+    int separator = detail.IndexOf(win32Separator, StringComparison.Ordinal);
+    string stage = separator < 0 ? detail : detail.Substring(0, separator);
+    if (
+      stage.Length < 1
+      || stage.Length > MAX_UPDATE_DIAGNOSTIC_STAGE_CHARS
+    ) return null;
+    for (int index = 0; index < stage.Length; index += 1) {
+      char current = stage[index];
+      if (!((current >= 'a' && current <= 'z')
+        || (current >= '0' && current <= '9')
+        || current == '-')) return null;
+    }
+    if (separator < 0) return prefix + stage;
+    string win32Value = detail.Substring(separator + win32Separator.Length);
+    UInt32 win32Error;
+    if (
+      win32Value.Length < 1
+      || win32Value.Length > 10
+      || !UInt32.TryParse(
+        win32Value,
+        NumberStyles.None,
+        CultureInfo.InvariantCulture,
+        out win32Error
+      )
+    ) return null;
+    return prefix + stage + win32Separator + win32Error.ToString(
+      CultureInfo.InvariantCulture
+    );
+  }
+
+  private static string CapturedUpdateDiagnostic(
+    byte[] bytes,
+    int length,
+    bool oversized,
+    Exception readFailure
+  ) {
+    if (
+      bytes == null
+      || length < 1
+      || length > MAX_UPDATE_DIAGNOSTIC_BYTES
+      || oversized
+      || readFailure != null
+    ) return null;
+    string value;
+    try {
+      value = new UTF8Encoding(false, true).GetString(bytes, 0, length);
+    } catch {
+      return null;
+    }
+    if (value.EndsWith("\n", StringComparison.Ordinal)) {
+      value = value.Substring(0, value.Length - 1);
+      if (value.EndsWith("\r", StringComparison.Ordinal)) {
+        value = value.Substring(0, value.Length - 1);
+      }
+    }
+    if (value.IndexOf('\r') >= 0 || value.IndexOf('\n') >= 0) return null;
+    return NormalizeUpdateDiagnosticLine(value);
   }
 
   private static int Failure(string stage, int exitCode, int win32Error) {
@@ -1710,6 +1778,9 @@ public static class InertiaRuntimeJob {
     private AnonymousPipeServerStream inputPipe, outputPipe, errorPipe;
     public StreamWriter StandardInput;
     public StreamReader StandardOutput;
+    public Stream StandardError {
+      get { return errorPipe; }
+    }
 
     public static UpdateSupervisorProcess Start(
       string executable, string arguments, out string stage
@@ -1847,6 +1918,11 @@ public static class InertiaRuntimeJob {
     diagnostic = "";
     UpdateSupervisorProcess child = null;
     FileStream supervisor = null;
+    Thread errorReader = null;
+    byte[] capturedError = new byte[MAX_UPDATE_DIAGNOSTIC_BYTES];
+    int capturedErrorLength = 0;
+    bool capturedErrorOversized = false;
+    Exception errorReadFailure = null;
     string launchStage = "update-launch";
     try {
       if (
@@ -1994,6 +2070,32 @@ try {
           + "-ExecutionPolicy Bypass -EncodedCommand " + encodedBootstrap,
         out launchStage
       );
+      errorReader = new Thread(delegate() {
+        try {
+          var buffer = new byte[256];
+          while (true) {
+            int read = child.StandardError.Read(buffer, 0, buffer.Length);
+            if (read <= 0) break;
+            int remaining = MAX_UPDATE_DIAGNOSTIC_BYTES - capturedErrorLength;
+            int retained = Math.Min(read, Math.Max(0, remaining));
+            if (retained > 0) {
+              Buffer.BlockCopy(
+                buffer,
+                0,
+                capturedError,
+                capturedErrorLength,
+                retained
+              );
+              capturedErrorLength += retained;
+            }
+            if (retained != read) capturedErrorOversized = true;
+          }
+        } catch (Exception error) {
+          errorReadFailure = error;
+        }
+      });
+      errorReader.IsBackground = true;
+      errorReader.Start();
       launchStage = "update-launch-input";
       child.StandardInput.WriteLine(Convert.ToBase64String(loaderBytes));
       child.StandardInput.WriteLine(Convert.ToBase64String(supervisorBytes));
@@ -2050,9 +2152,23 @@ try {
       if (!child.HasExited) {
         try { child.Kill(); } catch { }
       }
+      var cleanup = Stopwatch.StartNew();
       if (!child.WaitForExit(2000)) {
         diagnostic = ErrorLine("update-helper-exit-unconfirmed", 0);
         return UPDATE_LAUNCH_CLEANUP_UNCONFIRMED;
+      }
+      int remainingCleanupMilliseconds = Math.Max(
+        0,
+        2000 - (Int32)Math.Min(Int32.MaxValue, cleanup.ElapsedMilliseconds)
+      );
+      if (errorReader.Join(remainingCleanupMilliseconds)) {
+        string childDiagnostic = CapturedUpdateDiagnostic(
+          capturedError,
+          capturedErrorLength,
+          capturedErrorOversized,
+          errorReadFailure
+        );
+        if (childDiagnostic != null) diagnostic = childDiagnostic;
       }
       return 46;
     } catch (Exception error) {

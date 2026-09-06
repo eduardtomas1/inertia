@@ -86,11 +86,32 @@ describe("app update checks", () => {
       fetch: vi.fn<typeof globalThis.fetch>(async () => release("v0.0.51")),
     });
 
+    expect(service.current()).toMatchObject({
+      state: "idle",
+      delivery: "manual",
+      deliveryReason: "windows-signing-unavailable",
+      message: "Inertia will check for releases shortly. This Windows build updates manually because it was published without code signing.",
+    });
     await expect(service.check()).resolves.toMatchObject({
       state: "available",
       delivery: "manual",
       deliveryReason: "windows-signing-unavailable",
-      message: "Inertia 0.0.51 is available. Quit Inertia, wait for it to close safely, then run the verified installer; Setup will not force-close it.",
+      message: "Inertia 0.0.51 is available. This Windows build updates manually because it was published without code signing. Open the official release, verify the installer checksum, quit Inertia, and wait for it to close before running Setup.",
+    });
+
+    const current = new AppUpdateService({
+      currentVersion: "0.0.51",
+      capability: {
+        delivery: "manual",
+        reason: "windows-signing-unavailable",
+      },
+      fetch: vi.fn<typeof globalThis.fetch>(async () => release("v0.0.51")),
+    });
+    await expect(current.check()).resolves.toMatchObject({
+      state: "current",
+      delivery: "manual",
+      deliveryReason: "windows-signing-unavailable",
+      message: "Inertia is up to date. This Windows build updates manually because it was published without code signing.",
     });
   });
 

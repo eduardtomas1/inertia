@@ -10,6 +10,7 @@ interface RuntimeWorkerShutdownOptions {
   cause: "runtime-shutdown" | "runtime-crash";
   exitCode: number;
   closeBrokers: () => void;
+  ownedProcessAdmissionFence?: () => boolean;
   ownedProcessCleanupConfirmed?: () => boolean | Promise<boolean>;
   noRuntimeCleanupProof?: {
     readonly kind: "pre-registry-no-runtime";
@@ -101,6 +102,16 @@ export async function completeRuntimeWorkerShutdown(
         && /shutdown deadline|before its shutdown deadline/iu.test(error.message)
         ? "runtime-close-deadline"
         : "runtime-close";
+  }
+  if (shutdownConfirmed && !preRegistryNoRuntime
+    && options.ownedProcessAdmissionFence) {
+    try {
+      shutdownConfirmed = options.ownedProcessAdmissionFence();
+      if (!shutdownConfirmed) unconfirmedReason = "owned-process-cleanup";
+    } catch {
+      shutdownConfirmed = false;
+      unconfirmedReason = "owned-process-cleanup";
+    }
   }
   options.closeBrokers();
   if (shutdownConfirmed && !preRegistryNoRuntime) {

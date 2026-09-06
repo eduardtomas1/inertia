@@ -13,6 +13,8 @@ import {
 import { forceKillRuntimeProcessTree } from "./runtime-process-tree.js";
 import { RuntimeCleanupReceiptJournal } from "./runtime-cleanup-receipts.js";
 import { RuntimeGenerationLeaseJournal } from "../node/runtime-generation-leases.js";
+import { repairLegacyWindowsUnobservedProcessClaims } from
+  "./runtime-windows-legacy-claim-recovery.js";
 import {
   recoverWindowsRuntimeJob,
   type WindowsRuntimeJobAssembly,
@@ -664,7 +666,8 @@ export function recoverPriorRuntimeGenerations(options: {
   });
   // Startup is the only mutation boundary allowed to repair an interrupted
   // session fence. Keep direct RuntimeOwnedProcessJournal readers fail-closed.
-  if (!journal.repairSessionCrashPrefixes()) return null;
+  if (!journal.repairSessionCrashPrefixes()
+    || !repairLegacyWindowsUnobservedProcessClaims(options.dataDirectory, { platform })) return null;
   const prior = options.leases.all().filter((lease) => (
     lease.systemBootId === options.systemBootId
     || (platform === "linux"

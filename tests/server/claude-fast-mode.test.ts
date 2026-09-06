@@ -168,6 +168,63 @@ describe.sequential("Claude provider-native Fast mode", () => {
     });
   });
 
+  it("explicitly upgrades a resumed Claude Standard session to Fast", async () => {
+    const root = portableFixtureRoot("Claude SDK Fast upgrade");
+    roots.push(root);
+    let capturedOptions: ClaudeOptions | undefined;
+    const manager = managerFor("on", (options) => {
+      capturedOptions = options;
+    }, null, "claude-standard-session");
+    const base = input(root);
+    const selection = withModelSelectionFastMode(
+      base.modelSelection,
+      "fast",
+    );
+
+    await expect(manager.run({
+      ...base,
+      supportedFastMode: "fast",
+      modelSelection: selection,
+      continuationIdentity: continuationIdentityForSelection(selection),
+      sessionId: "claude-standard-session",
+      performanceModeTransition: "to-fast",
+    })).resolves.toMatchObject({ status: "completed" });
+    expect(capturedOptions?.settings).toMatchObject({
+      fastMode: true,
+      fastModePerSessionOptIn: true,
+    });
+  });
+
+  it("rejects a resumed Claude Standard-to-Fast transition without exact attestation", async () => {
+    const root = portableFixtureRoot("Claude SDK Fast upgrade mismatch");
+    roots.push(root);
+    let capturedOptions: ClaudeOptions | undefined;
+    const manager = managerFor("off", (options) => {
+      capturedOptions = options;
+    }, null, "claude-standard-session");
+    const base = input(root);
+    const selection = withModelSelectionFastMode(
+      base.modelSelection,
+      "fast",
+    );
+
+    await expect(manager.run({
+      ...base,
+      supportedFastMode: "fast",
+      modelSelection: selection,
+      continuationIdentity: continuationIdentityForSelection(selection),
+      sessionId: "claude-standard-session",
+      performanceModeTransition: "to-fast",
+    })).resolves.toMatchObject({
+      status: "failed",
+      error: expect.stringContaining("did not activate Fast mode"),
+    });
+    expect(capturedOptions?.settings).toMatchObject({
+      fastMode: true,
+      fastModePerSessionOptIn: true,
+    });
+  });
+
   it("keeps Standard explicit when resuming without a speed transition", async () => {
     const root = portableFixtureRoot("Claude SDK resumed Standard mode");
     roots.push(root);

@@ -219,6 +219,113 @@ describe("Windows update supervisor launcher", () => {
     ).toString("utf8")).toBe(token);
   });
 
+  it.runIf(process.platform === "win32")(
+    "forwards only one bounded native protocol diagnostic",
+    async () => {
+      const helperPath = resolve(
+        "resources/generated/runtime-process-guardian/windows-runtime-job.exe",
+      );
+      const helperPathBase64 = Buffer.from(helperPath, "utf8").toString("base64");
+      const script = `
+$ErrorActionPreference = 'Stop'
+$utf8 = [Text.UTF8Encoding]::new($false)
+$helperPath = [Text.UTF8Encoding]::new($false, $true).GetString(
+  [Convert]::FromBase64String('${helperPathBase64}')
+)
+$assembly = [Reflection.Assembly]::Load([IO.File]::ReadAllBytes($helperPath))
+$type = $assembly.GetType('InertiaRuntimeJob', $true, $false)
+$flags = [Reflection.BindingFlags]::NonPublic -bor [Reflection.BindingFlags]::Static
+$method = $type.GetMethod('CapturedUpdateDiagnostic', $flags)
+if ($null -eq $method) { throw 'contract' }
+function Capture([byte[]]$bytes, [bool]$oversized) {
+  $arguments = [Object[]]@($bytes, $bytes.Length, $oversized, $null)
+  $value = $method.Invoke($null, $arguments)
+  if ($null -eq $value) {
+    [Console]::Out.WriteLine('<null>')
+  } else {
+    [Console]::Out.WriteLine(
+      [Convert]::ToBase64String($utf8.GetBytes([string]$value))
+    )
+  }
+}
+$valid = $utf8.GetBytes('INERTIA_JOB_ERROR stage=update-parent win32=0007' + [char]13 + [char]10)
+Capture $valid $false
+Capture ($utf8.GetBytes('arbitrary=private' + [char]10) + $valid) $false
+Capture ($valid + $valid) $false
+Capture ([byte[]]@(0xc3, 0x28)) $false
+Capture $valid $true
+Capture (New-Object byte[] 8193) $false
+`;
+      const systemRoot = process.env.SystemRoot;
+      expect(systemRoot).toBeTruthy();
+      const powershellPath = join(
+        systemRoot!,
+        "System32",
+        "WindowsPowerShell",
+        "v1.0",
+        "powershell.exe",
+      );
+      const result = await new Promise<{
+        code: number | null;
+        stderr: string;
+        stdout: string;
+        timedOut: boolean;
+      }>((resolveProcess, rejectProcess) => {
+        const child = spawn(powershellPath, [
+          "-NoLogo",
+          "-NoProfile",
+          "-NonInteractive",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-Command",
+          "& ([ScriptBlock]::Create($env:INERTIA_NATIVE_DIAGNOSTIC_PROBE))",
+        ], {
+          env: {
+            ...process.env,
+            INERTIA_NATIVE_DIAGNOSTIC_PROBE: script,
+          },
+          stdio: ["ignore", "pipe", "pipe"],
+          windowsHide: true,
+        });
+        let stderr = "";
+        let stdout = "";
+        let timedOut = false;
+        child.stdout.setEncoding("utf8");
+        child.stderr.setEncoding("utf8");
+        child.stdout.on("data", (chunk: string) => { stdout += chunk; });
+        child.stderr.on("data", (chunk: string) => { stderr += chunk; });
+        child.once("error", rejectProcess);
+        const timeout = setTimeout(() => {
+          timedOut = true;
+          child.kill();
+        }, 5_000);
+        child.once("close", (code) => {
+          clearTimeout(timeout);
+          resolveProcess({ code, stderr, stdout, timedOut });
+        });
+      });
+      expect(result.timedOut).toBe(false);
+      if (result.code !== 0) {
+        throw new Error(
+          `Native diagnostic contract probe exited ${result.code}: ${result.stderr}`,
+        );
+      }
+      const validDiagnostic = Buffer.from(
+        "INERTIA_JOB_ERROR stage=update-parent win32=7",
+        "utf8",
+      ).toString("base64");
+      expect(result.stdout.trim().split(/\r?\n/u)).toEqual([
+        validDiagnostic,
+        "<null>",
+        "<null>",
+        "<null>",
+        "<null>",
+        "<null>",
+      ]);
+    },
+    10_000,
+  );
+
   it("pins canonical launch paths before a parent namespace is retargeted", async () => {
     const value = await fixture();
     const aliasParent = join(
@@ -286,9 +393,11 @@ describe("Windows update supervisor launcher", () => {
       const root = await realpath(await mkdtemp(join(tmpdir(), "inertia-native-win-update-")));
       const helperDirectory = join(root, "helper");
       const installerDirectory = join(root, "installer");
+      const parentDirectory = join(root, "parent");
       await Promise.all([
         mkdir(helperDirectory, { mode: 0o700 }),
         mkdir(installerDirectory, { mode: 0o700 }),
+        mkdir(parentDirectory, { mode: 0o700 }),
       ]);
       const nativeOperationId = "99999999-9999-4999-8999-999999999999";
       const helperPath = join(helperDirectory, windowsUpdateSupervisorExecutableName(nativeOperationId));
@@ -297,6 +406,11 @@ describe("Windows update supervisor launcher", () => {
       );
       const installerPath = join(installerDirectory, "delayed-installer.cmd");
       const installerDonePath = join(installerDirectory, "installer.done");
+      const parentExecutablePath = join(parentDirectory, "node.exe");
+      const substituteParentExecutablePath = join(
+        parentDirectory,
+        "substitute-node.exe",
+      );
       const receiptPath = join(
         helperDirectory,
         windowsUpdateTerminalReceiptName(nativeOperationId),
@@ -307,7 +421,15 @@ describe("Windows update supervisor launcher", () => {
       );
       let parent: ReturnType<typeof spawn> | undefined;
       try {
-        await copyFile(generatedHelperPath, helperPath);
+        await Promise.all([
+          copyFile(generatedHelperPath, helperPath),
+          // Model the packaged app with a direct executable identity. On
+          // developer machines, process.execPath may be an NVM indirection
+          // whose requested path intentionally differs from the native image
+          // path accepted by the fail-closed supervisor.
+          copyFile(process.execPath, parentExecutablePath),
+          copyFile(process.execPath, substituteParentExecutablePath),
+        ]);
         await writeFile(
           installerPath,
           [
@@ -320,7 +442,7 @@ describe("Windows update supervisor launcher", () => {
         const [helperBytes, installerBytes, parentBytes] = await Promise.all([
           readFile(helperPath),
           readFile(installerPath),
-          readFile(process.execPath),
+          readFile(parentExecutablePath),
         ]);
         const helperDigest = createHash("sha256")
           .update(helperBytes)
@@ -331,9 +453,8 @@ describe("Windows update supervisor launcher", () => {
         const parentDigest = createHash("sha256")
           .update(parentBytes)
           .digest("hex");
-        const deadlineAt = new Date(Date.now() + 6_000).toISOString();
         parent = spawn(
-          process.execPath,
+          parentExecutablePath,
           ["-e", "process.stdin.resume()"],
           { stdio: ["pipe", "ignore", "ignore"], windowsHide: true },
         );
@@ -347,19 +468,41 @@ describe("Windows update supervisor launcher", () => {
           parentProcessId: parent.pid!,
           installerPath,
           installerDigest,
-          oldExecutablePath: process.execPath,
+          oldExecutablePath: parentExecutablePath,
           oldExecutableDigest: parentDigest,
-          newExecutablePath: process.execPath,
+          newExecutablePath: parentExecutablePath,
           newExecutableDigest: "f".repeat(64),
           receiptPath,
           receiptTemporaryPath,
           supervisorDigest: helperDigest,
           handoffToken: token,
-          deadlineAt,
         } as const;
+        const rejectedRequest = serializeWindowsUpdateSupervisorRequest({
+          ...requestOptions,
+          launchId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          oldExecutablePath: substituteParentExecutablePath,
+          newExecutablePath: substituteParentExecutablePath,
+          deadlineAt: new Date(Date.now() + 6_000).toISOString(),
+        });
+        await expect(launchWindowsUpdateSupervisorThroughExecutableLock({
+          assembly: {
+            path: generatedHelperPath,
+            root: resolve(generatedHelperPath, ".."),
+            sha256: helperDigest,
+          },
+          helperPath,
+          helperDigest,
+          request: rejectedRequest,
+          timeoutMs: 5_000,
+        })).rejects.toMatchObject({
+          cleanupConfirmed: true,
+          message: expect.stringContaining("stage=update-parent"),
+        });
+        const deadlineAt = new Date(Date.now() + 6_000).toISOString();
         const requestTemplate = serializeWindowsUpdateSupervisorRequest({
           ...requestOptions,
           launchId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          deadlineAt,
         });
         await launchWindowsUpdateSupervisorThroughExecutableLock({
           assembly: {
@@ -375,6 +518,7 @@ describe("Windows update supervisor launcher", () => {
         const duplicateRequest = serializeWindowsUpdateSupervisorRequest({
           ...requestOptions,
           launchId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          deadlineAt,
         });
         await expect(launchWindowsUpdateSupervisorThroughExecutableLock({
           assembly: {

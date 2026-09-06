@@ -13,6 +13,7 @@ import type { RuntimeProcessRecord } from
   "../../src/main/runtime-supervisor-types";
 import {
   activateRuntimeOwnedProcessRegistry,
+  fenceWindowsRuntimeOwnedProcessAdmissions,
   RuntimeOwnedProcessJournal,
   spawnRuntimeOwnedProcess,
 } from "../../src/node/runtime-owned-processes";
@@ -41,6 +42,38 @@ afterEach(() => {
 });
 
 describe("runtime owned-process session fence", () => {
+  it.runIf(process.platform === "win32")(
+    "fences Windows admissions before a late spawn callback can run",
+    () => {
+      const directory = mkdtempSync(join(tmpdir(), "inertia-session-fence-"));
+      directories.push(directory);
+      const journal = new RuntimeOwnedProcessJournal(directory, {
+        platform: "win32",
+      });
+      expect(journal.startSession(generation, boot)).toBe(true);
+      const deactivate = activateRuntimeOwnedProcessRegistry(
+        directory,
+        generation,
+        boot,
+        { platform: "win32" },
+      );
+      const spawnProcess = vi.fn();
+      try {
+        expect(fenceWindowsRuntimeOwnedProcessAdmissions()).toBe(true);
+        expect(() => spawnRuntimeOwnedProcess(spawnProcess))
+          .toThrow("session is unavailable");
+        expect(spawnProcess).not.toHaveBeenCalled();
+        expect(journal.inspectGeneration(generation)).toMatchObject({
+          sessionState: "retiring",
+          records: [],
+          consumingRecords: [],
+        });
+      } finally {
+        deactivate?.();
+      }
+    },
+  );
+
   it("repairs the exact empty writer-directory crash prefix", () => {
     const directory = mkdtempSync(join(tmpdir(), "inertia-session-fence-"));
     directories.push(directory);

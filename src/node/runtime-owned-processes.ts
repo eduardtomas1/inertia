@@ -874,6 +874,20 @@ export function spawnRuntimeOwnedProcess<T extends ChildProcess>(
     trackAdmission(registry, claim, admission);
     return child;
   }
+  if (registry.platform === "win32" && child.pid === undefined) {
+    let spawnFailed = false;
+    registry.claims.set(child, claim);
+    child.once("error", () => {
+      if (child.pid === undefined) spawnFailed = true;
+    });
+    child.once("close", () => {
+      if (!spawnFailed || child.pid !== undefined) return;
+      try { releaseActiveClaim(registry, claim); } catch {
+        // Preserve the pending intent when its durable retirement fails.
+      }
+    });
+    return child;
+  }
   try {
     const durableClaim = registry.journal.claim(
       ownershipId,
@@ -887,6 +901,7 @@ export function spawnRuntimeOwnedProcess<T extends ChildProcess>(
         sessionCapability: registry.sessionCapability,
       },
     );
+    claim.admissionSucceeded = true;
     monitorLinuxGuardian(registry, claim, durableClaim);
     registry.claims.set(child, claim);
     child.once("close", (_code, _signal) => {
@@ -1162,7 +1177,8 @@ export function confirmRuntimeOwnedProcessStopped(child: ChildProcess): boolean 
         ? claim.released
         : registry.platform === "darwin"
           ? claim.released
-          : releaseActiveClaim(registry, claim))
+          : claim.released
+            || (claim.admissionSucceeded && releaseActiveClaim(registry, claim)))
     : true;
 }
 
@@ -1192,6 +1208,12 @@ export function runtimeOwnedProcessCleanupConfirmed(): boolean {
 
 export function runtimeOwnedProcessOwnershipIsTainted(): boolean {
   return activeRegistry?.tainted ?? false;
+}
+
+export function fenceWindowsRuntimeOwnedProcessAdmissions(): boolean {
+  const registry = activeRegistry;
+  return !!registry && registry.platform === "win32"
+    && registry.journal.fenceSessionExact(registry.sessionCapability.session);
 }
 
 export async function awaitRuntimeOwnedProcessCleanupConfirmed(): Promise<boolean> {

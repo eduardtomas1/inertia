@@ -229,6 +229,62 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       .toMatchObject({ params: { serviceTier: null } });
   });
 
+  it("explicitly upgrades a resumed Standard session to Fast", async () => {
+    const fake = fixture(true);
+    const base = input(fake.root);
+    const selection = withModelSelectionFastMode(
+      base.modelSelection,
+      "priority",
+    );
+    await expect(fake.manager.run({
+      ...base,
+      supportedFastMode: "priority",
+      modelSelection: selection,
+      continuationIdentity: continuationIdentityForSelection(
+        selection,
+        null,
+        false,
+      ),
+      sessionId: "thread-standard",
+      performanceModeTransition: "to-fast",
+    })).resolves.toMatchObject({ status: "completed" });
+
+    const captured = messages(fake.capturePath);
+    expect(captured.find(({ method }) => method === "thread/resume"))
+      .toMatchObject({ params: { serviceTier: "priority" } });
+    expect(captured.find(({ method }) => method === "turn/start"))
+      .toMatchObject({ params: { serviceTier: "priority" } });
+  });
+
+  it("rejects a resumed Standard-to-Fast transition without exact attestation", async () => {
+    const fake = fixture(false);
+    const base = input(fake.root);
+    const selection = withModelSelectionFastMode(
+      base.modelSelection,
+      "priority",
+    );
+    await expect(fake.manager.run({
+      ...base,
+      supportedFastMode: "priority",
+      modelSelection: selection,
+      continuationIdentity: continuationIdentityForSelection(
+        selection,
+        null,
+        false,
+      ),
+      sessionId: "thread-standard",
+      performanceModeTransition: "to-fast",
+    })).resolves.toMatchObject({
+      status: "failed",
+      error: expect.stringContaining(
+        "did not apply the requested response speed",
+      ),
+    });
+    expect(messages(fake.capturePath).some(
+      ({ method }) => method === "turn/start",
+    )).toBe(false);
+  });
+
   it("keeps Standard explicit when resuming without a speed transition", async () => {
     const fake = fixture(true);
     await expect(fake.manager.run({

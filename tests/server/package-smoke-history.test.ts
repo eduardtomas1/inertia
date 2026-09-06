@@ -35,6 +35,7 @@ async function modules() {
     runPackagedHistorySmoke: (options: { websocketUrl: string; workspaceDirectory: string;
       baseline?: Baseline; deadlineAt?: number }) => Promise<Proof>;
     completedTurnProof: (detail: unknown, acceptance: unknown, challenge: string) => Proof | null;
+    completedTurnAdmissionProof: (snapshot: unknown, turn: AgentTurn) => boolean;
   };
   const storage = await import(storageUrl) as {
     prepareHistoryBaseline: (root: string, path: string, proof: Proof) => Promise<Baseline>;
@@ -284,6 +285,183 @@ it("rejects READY-only, failed, misowned and fabricated terminal responses", asy
     .toThrow("terminal response");
   expect(() => completedTurnProof({ agentTurns: [turn], messages }, null, "challenge"))
     .toThrow("durably accept");
+});
+
+it("waits for exact public runtime admission idle after terminal persistence", async () => {
+  const { completedTurnAdmissionProof } = await modules();
+  const turn = {
+    id: "turn",
+    conversationId: "conversation",
+    runId: "run",
+  } as AgentTurn;
+  const idle = {
+    conversations: [{
+      id: "conversation",
+      status: "completed",
+      latestTurn: { id: "turn", status: "completed" },
+    }],
+    runs: [{
+      id: "run",
+      status: "succeeded",
+      finishedAt: "2026-09-06T18:30:00.000Z",
+      canStop: false,
+    }],
+    lifecycleDiagnostics: {
+      ownedResources: {
+        providerRuns: 0,
+        turns: 0,
+        workspaceRuns: 0,
+        interactions: 0,
+      },
+    },
+  };
+  expect(completedTurnAdmissionProof(idle, turn)).toBe(true);
+  expect(completedTurnAdmissionProof({
+    ...idle,
+    runs: [{ ...idle.runs[0], status: "running", finishedAt: null, canStop: true }],
+  }, turn)).toBe(false);
+  expect(completedTurnAdmissionProof({
+    ...idle,
+    runs: [{ ...idle.runs[0], finishedAt: undefined }],
+  }, turn)).toBe(false);
+  expect(completedTurnAdmissionProof({
+    ...idle,
+    lifecycleDiagnostics: {
+      ownedResources: {
+        ...idle.lifecycleDiagnostics.ownedResources,
+        turns: 1,
+      },
+    },
+  }, turn)).toBe(false);
+});
+
+it("bounds a terminal turn whose public runtime ownership never becomes idle", async () => {
+  const { runPackagedHistorySmoke } = await modules();
+  const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+  const projectId = randomUUID();
+  const conversationId = randomUUID();
+  let modelSelection = {
+    providerId: "codex",
+    harnessId: "codex-app-server",
+    backendProfileId: "provider-native:codex",
+    backendProfileDisplayName: "Codex",
+    backendConfigurationRevision: 1,
+    modelId: "package-smoke-model",
+    alias: null,
+    reasoningEffort: "low",
+    providerOptions: {},
+    capabilities: [],
+  };
+  let challenge = "";
+  try {
+    await new Promise<void>((resolveListen) => server.once("listening", resolveListen));
+    server.on("connection", (socket) => {
+      socket.send(JSON.stringify({
+        type: "server.welcome",
+        snapshot: { projects: [], conversations: [], runs: [], settings: {} },
+      }));
+      socket.on("message", (bytes) => {
+        const command = JSON.parse(bytes.toString("utf8")) as {
+          type: string;
+          requestId: string;
+          payload?: {
+            content?: string;
+            modelSelection?: typeof modelSelection;
+          };
+        };
+        const respond = (result: unknown) => socket.send(JSON.stringify({
+          type: "request.result",
+          requestId: command.requestId,
+          result,
+        }));
+        if (command.type === "provider.refresh" || command.type === "settings.update") {
+          respond(null);
+          return;
+        }
+        if (command.type === "project.create") {
+          respond({ kind: "project.created", projectId });
+          return;
+        }
+        if (command.type === "conversation.create") {
+          respond({ kind: "conversation.created", conversationId });
+          return;
+        }
+        if (command.type === "conversation.update") {
+          modelSelection = command.payload!.modelSelection!;
+          respond(null);
+          return;
+        }
+        if (command.type === "message.send") {
+          challenge = command.payload!.content!;
+          respond({
+            kind: "message.accepted",
+            disposition: "new-turn",
+            conversationId,
+            turnId: "turn-terminal-not-idle",
+            userMessageId: "user-terminal-not-idle",
+          });
+          return;
+        }
+        if (command.type === "conversation.detail.load") {
+          const turn = challenge ? {
+            id: "turn-terminal-not-idle",
+            conversationId,
+            runId: "run-terminal-not-idle",
+            userMessageId: "user-terminal-not-idle",
+            terminalAssistantMessageId: "assistant-terminal-not-idle",
+            providerId: "codex",
+            modelSelection,
+            providerSessionBefore: null,
+            providerSessionAfter: "thread-terminal-not-idle",
+            status: "completed",
+            startedAt: "2026-09-06T18:30:00.000Z",
+            completedAt: "2026-09-06T18:30:01.000Z",
+            terminalReason: "provider-completed",
+          } : null;
+          respond({
+            kind: "conversation.detail",
+            state: "ready",
+            conversationId,
+            detail: {
+              conversation: { id: conversationId, projectId, modelSelection },
+              agentTurns: turn ? [turn] : [],
+              messages: turn ? [{
+                id: turn.userMessageId,
+                role: "user",
+                conversationId,
+                turnId: turn.id,
+                content: challenge,
+              }, {
+                id: turn.terminalAssistantMessageId,
+                role: "assistant",
+                conversationId,
+                turnId: turn.id,
+                content: `Completed ${challenge}`,
+              }] : [],
+            },
+          });
+          return;
+        }
+        socket.send(JSON.stringify({
+          type: "request.error",
+          requestId: command.requestId,
+          message: `Unexpected command: ${command.type}`,
+        }));
+      });
+    });
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("No fixture port.");
+    const startedAt = Date.now();
+    await expect(runPackagedHistorySmoke({
+      websocketUrl: `ws://127.0.0.1:${address.port}`,
+      workspaceDirectory: tmpdir(),
+      deadlineAt: startedAt + 250,
+    })).rejects.toThrow("exceeded its deadline");
+    expect(Date.now() - startedAt).toBeLessThan(1_500);
+  } finally {
+    for (const socket of server.clients) socket.terminate();
+    await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
+  }
 });
 
 it.each(["stall", "close", "malformed"] as const)("fails closed when the history transport %s prevents proof", async (mode) => {

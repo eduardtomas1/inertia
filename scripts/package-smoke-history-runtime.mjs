@@ -55,7 +55,10 @@ function runtimeClient(url, deadlineAt) {
   });
   return {
     welcome,
-    snapshot: () => snapshot,
+    snapshot: () => {
+      if (failure) throw failure;
+      return snapshot;
+    },
     request: (type, payload) => new Promise((resolve, reject) => {
       if (failure) return reject(failure);
       const requestId = randomUUID();
@@ -114,6 +117,24 @@ export function completedTurnProof(value, acceptance, challenge) {
     && assistant.content === `Completed ${challenge}`,
   "Packaged turn did not persist the provider's exact terminal response.");
   return { messages: [user, assistant], agentTurns: [turn] };
+}
+
+export function completedTurnAdmissionProof(snapshot, turn) {
+  const conversation = snapshot?.conversations?.find(({ id }) =>
+    id === turn.conversationId);
+  const run = snapshot?.runs?.find(({ id }) => id === turn.runId);
+  const owned = snapshot?.lifecycleDiagnostics?.ownedResources;
+  return conversation?.status === "completed"
+    && conversation.latestTurn?.id === turn.id
+    && conversation.latestTurn.status === "completed"
+    && run?.status === "succeeded"
+    && typeof run.finishedAt === "string"
+    && Number.isFinite(Date.parse(run.finishedAt))
+    && run.canStop === false
+    && owned?.providerRuns === 0
+    && owned.turns === 0
+    && owned.workspaceRuns === 0
+    && owned.interactions === 0;
 }
 
 export async function runPackagedHistorySmoke({ websocketUrl, workspaceDirectory, baseline = null,
@@ -180,6 +201,9 @@ export async function runPackagedHistorySmoke({ websocketUrl, workspaceDirectory
       else ok(turn.providerSessionBefore === providerSession
         && turn.providerSessionAfter === providerSession,
       `Packaged ${phase} turn did not resume the exact provider session.`);
+      while (!completedTurnAdmissionProof(client.snapshot(), turn)) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
       proofs.push(proof);
     };
 

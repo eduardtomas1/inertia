@@ -36,8 +36,8 @@ import {
 import {
   executableProcessExists as processExists,
 } from "../helpers/executable-process";
-
 import { writeLongRunningBuilder } from "../helpers/builder-process-fixture";
+import { recordGuardianHeartbeatFailure } from "../helpers/guardian-heartbeat-failure-evidence";
 
 const repositoryRoot = resolve(import.meta.dirname, "..", "..");
 const script = join(
@@ -1284,7 +1284,7 @@ describe.skipIf(process.platform === "win32")(
       expectCleanBuildState(subject);
     });
 
-    it("aborts without publication when the build lock heartbeat is compromised", async () => {
+    it("aborts without publication when the build lock heartbeat is compromised", async ({ onTestFailed }) => {
       const subject = fixture(
         [
           'printf started > "$INERTIA_TEST_GUARDIAN_COMPILER_TRACE"',
@@ -1302,16 +1302,19 @@ describe.skipIf(process.platform === "win32")(
           INERTIA_TEST_GUARDIAN_HEARTBEAT_INTERVAL_MS: "5",
           INERTIA_TEST_GUARDIAN_OUTPUT_DIRECTORY: subject.outputDirectory,
         },
-        stdio: "ignore",
+        stdio: ["ignore", "ignore", "pipe"],
       });
+      const recordPhase = recordGuardianHeartbeatFailure(child, onTestFailed);
       const completion = new Promise<number>((resolveExit, reject) => {
         child.once("error", reject);
         child.once("exit", (code) => resolveExit(code ?? -1));
       });
       await waitForFile(marker);
+      recordPhase("compiler-marker-seen");
       const lockPath = join(subject.stateDirectory, "build.lock");
       rmSync(lockPath);
       writeFileSync(lockPath, "replacement-owner");
+      recordPhase("lock-replaced");
       expect(await completion).not.toBe(0);
       expectKnownGoodArtifacts(subject);
       expect(readFileSync(lockPath, "utf8")).toBe("replacement-owner");

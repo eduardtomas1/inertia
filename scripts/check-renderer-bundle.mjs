@@ -9,6 +9,9 @@ const kibibyte = 1024;
 // visible even when Rollup moves shared modules between chunks.
 const budgets = {
   entryJavaScript: 205 * kibibyte,
+  mascotFirstLoadJavaScript: 6 * kibibyte,
+  mascotJavaScript: 6 * kibibyte,
+  mascotSettingsJavaScript: 4 * kibibyte,
   // The keyboard-complete themed project selector, draft ownership guards,
   // media queue admission, deletion cleanup, native-provider route state, and
   // detachment ownership live here while their larger UI stays deferred.
@@ -433,8 +436,22 @@ const totalJavaScriptBytes = javaScriptSizes.reduce(
   (total, bytes) => total + bytes,
   0,
 );
+// The optional mascot is a separate document with no workbench imports. Give
+// its unique bytes their own strict ceiling; shared bootstrap stays in core.
+const mascotHtml = await readFile(resolve(outputDirectory, "mascot.html"), "utf8");
+const mascotEntry = mascotHtml.match(/<script[^>]+src="\.\/assets\/([^" ]+\.js)"/u)?.[1];
+const mascotSettingsEntry = assetNames.find((name) => /^MascotSettings-.*\.js$/u.test(name));
+if (!mascotEntry || !mascotSettingsEntry) throw new Error("Missing optional mascot surface");
+const mascotClosure = await javaScriptClosure(mascotEntry);
+const mascotSettingsClosure = await javaScriptClosure(mascotSettingsEntry);
+const mascotJavaScriptBytes = await closureBytes(mascotClosure, entryJavaScriptClosure);
+const mascotSettingsJavaScriptBytes = await closureBytes(mascotSettingsClosure, new Set([
+  ...entryJavaScriptClosure, ...mainWorkbenchJavaScriptClosure, ...mascotClosure,
+]));
 const coreJavaScriptBytes =
   totalJavaScriptBytes
+  - mascotJavaScriptBytes
+  - mascotSettingsJavaScriptBytes
   - deferredPdfJavaScriptBytes
   - deferredFailureDiagnosticsJavaScriptBytes
   - deferredAttachmentPreviewJavaScriptBytes
@@ -456,6 +473,9 @@ const coreJavaScriptBytes =
   - morphiconsJavaScriptBytes
   - morphingIconFeedbackJavaScriptBytes;
 const measurements = {
+  mascotFirstLoadJavaScript: await closureBytes(mascotClosure),
+  mascotJavaScript: mascotJavaScriptBytes,
+  mascotSettingsJavaScript: mascotSettingsJavaScriptBytes,
   entryJavaScript: entryJavaScriptBytes,
   mainWorkbenchFirstLoadJavaScript: mainWorkbenchFirstLoadJavaScriptBytes,
   detachedChatFirstLoadJavaScript: detachedChatFirstLoadJavaScriptBytes,

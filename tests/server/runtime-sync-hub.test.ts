@@ -347,6 +347,36 @@ describe("runtime sync hub", () => {
     expect(hub.connectionCount).toBe(0);
   });
 
+  it("delivers background questions, approvals and resolutions live and on replay while isolating detached chats", () => {
+    const runtime = fixture();
+    const hydration = { snapshot, approvals: [], inputs: [], plans: [] };
+    runtime.hub.connect("main", { kind: "none" }, hydration);
+    runtime.hub.setConversationSubscription("main", "primary", CONVERSATION_B);
+    runtime.hub.connect("detached", { kind: "none" }, hydration, {
+      kind: "detached-chat", conversationId: CONVERSATION_B, clientId: "detached",
+    });
+    runtime.events.get("main")!.length = 0;
+    runtime.events.get("detached")!.length = 0;
+    const events = [
+      { type: "agent.input.requested" as const, request: inputRequest() },
+      { type: "agent.approval.requested" as const, request: approval() },
+      { type: "agent.input.resolved" as const, conversationId: CONVERSATION_A, runId: "run", turnId: "turn", requestId: "input" },
+      { type: "agent.approval.resolved" as const, conversationId: CONVERSATION_A, runId: "run", turnId: "turn", requestId: "approval", decision: "approve" as const },
+    ];
+    for (const event of events) runtime.hub.broadcast(event);
+    for (let index = 0; index < events.length; index++) {
+      expect(runtime.events.get("main")?.[index]).toMatchObject({ type: "runtime.event", event: events[index] });
+      expect(runtime.events.get("detached")?.[index]).toMatchObject({ type: "runtime.cursor" });
+    }
+    for (const [socket, authority] of [["replay-main", undefined], ["replay-detached", {
+      kind: "detached-chat" as const, conversationId: CONVERSATION_B, clientId: "replay-detached",
+    }]] as const) {
+      runtime.hub.connect(socket, { kind: "resume", runtimeGeneration: GENERATION, afterSequence: 0,
+        conversationIds: [CONVERSATION_B] }, hydration, authority);
+      expect(runtime.events.get(socket)?.filter(({ type }) => type === "runtime.event")).toHaveLength(authority ? 0 : 4);
+    }
+  });
+
   it("projects detail events to subscriptions while advancing every client cursor", () => {
     const runtime = fixture();
     for (const [socket, conversationId] of [

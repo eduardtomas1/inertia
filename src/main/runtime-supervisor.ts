@@ -67,7 +67,7 @@ export class RuntimeSupervisor {
   private readonly recoveryAdmission: RuntimeSupervisorRecoveryAdmission;
   private readonly attachmentRequests:
     RuntimeAttachmentBrokerCoordinator<RuntimeProcessRecord>;
-  private readonly onSystemSuspendResult?: RuntimeSupervisorOptions["onSystemSuspendResult"]; private readonly onStateChange?: RuntimeSupervisorOptions["onStateChange"];
+  private readonly onMascotStatus?: RuntimeSupervisorOptions["onMascotStatus"]; private readonly onSystemSuspendResult?: RuntimeSupervisorOptions["onSystemSuspendResult"]; private readonly onStateChange?: RuntimeSupervisorOptions["onStateChange"];
   private current: RuntimeProcessRecord | null = null;
   private readonly quarantined = new Set<RuntimeProcessRecord>();
   private phase: RuntimeSupervisorPhase = "idle";
@@ -228,7 +228,7 @@ export class RuntimeSupervisor {
       post: (record, command) => this.post(record.child, command),
       forceTerminate: (record) => this.forceTerminate(record.child),
     });
-    this.onSystemSuspendResult = options.onSystemSuspendResult; this.onStateChange = options.onStateChange;
+    this.onMascotStatus = options.onMascotStatus; this.onSystemSuspendResult = options.onSystemSuspendResult; this.onStateChange = options.onStateChange;
   }
   start(): void { if (this.lifecycle !== "unused" || this.restartBlocked) return;
     this.lifecycle = "started"; this.desiredRunning = true; this.clearShutdownTimers();
@@ -649,9 +649,9 @@ export class RuntimeSupervisor {
       this.emitState();
       return;
     }
+    if (event.type === "runtime.mascot-status") { this.onMascotStatus?.(event.status); return; }
     if (event.type === "runtime.credential-request") {
-      this.credentials.handle(record, event);
-      return;
+      this.credentials.handle(record, event); return;
     }
     if (
       event.type === "runtime.secure-file-request"

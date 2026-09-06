@@ -1,0 +1,46 @@
+{
+  "name": "Inertia pixel mascot",
+  "width": 96,
+  "height": 96,
+  "framesPerSecond": 12,
+  "palette": [
+    "#f1f2e9",
+    "#ced6d7",
+    "#a4b1bd",
+    "#748594",
+    "#465666",
+    "#293442",
+    "#151e2b",
+    "#fff1ae",
+    "#f5ce69",
+    "#b68e42",
+    "#8cb7af",
+    "#557e81"
+  ],
+  "states": {
+    "idle": {
+      "animation": "idle.webp",
+      "poster": "idle.png",
+      "durationMs": 4000,
+      "frameCount": 48
+    },
+    "thinking": {
+      "animation": "thinking.webp",
+      "poster": "thinking.png",
+      "durationMs": 4000,
+      "frameCount": 48
+    },
+    "idea": {
+      "animation": "idea.webp",
+      "poster": "idea.png",
+      "durationMs": 3000,
+      "frameCount": 36
+    },
+    "working": {
+      "animation": "working.webp",
+      "poster": "working.png",
+      "durationMs": 4000,
+      "frameCount": 48
+    }
+  }
+}

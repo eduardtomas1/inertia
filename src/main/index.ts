@@ -1,3 +1,4 @@
+import { MascotMain } from "./mascot-main.js";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { lstat, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -172,6 +173,7 @@ protocol.registerSchemesAsPrivileged([
   },
 ]);
 let mainWindow: BrowserWindow | null = null;
+let mascotMain: MascotMain | null = null;
 let mainWindowCreation: Promise<void> | null = null;
 let runtimeSupervisor: RuntimeSupervisor | null = null;
 let systemSuspendDelivery: RuntimeSystemSuspendDelivery | null = null;
@@ -219,15 +221,12 @@ const registerRendererProtocol = createAppProtocolRegistrar({
   conversationAttachments: () => conversationAttachments,
   runtimeSupervisor: () => runtimeSupervisor,
 });
-
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 function windowStatePath(): string { return join(app.getPath("userData"), "window-state.json"); }
 function windowAppearancePath(): string { return join(app.getPath("userData"), WINDOW_APPEARANCE_FILENAME); }
-
 function attachmentStorageRoot(): string {
   return join(app.getPath("temp"), releaseChannel.temporaryAttachmentDirectoryName);
 }
-
 function configuredRuntimeDataDirectory(): string {
   const configured = releaseRuntimeOverride({
     configuration: releaseChannel,
@@ -238,14 +237,12 @@ function configuredRuntimeDataDirectory(): string {
   });
   return runtimeBootstrap.runtimeDataPath(configured, app.getPath("userData"));
 }
-
 function attachmentDirectory(): string {
   if (!attachmentStorageDirectory) {
     throw new Error("Temporary attachment storage is not initialized.");
   }
   return attachmentStorageDirectory;
 }
-
 function attachmentRegistry(): AttachmentRegistry {
   importedAttachments ??= new AttachmentRegistry(attachmentDirectory(), {
     reservedRecords: attachmentReservation.records,
@@ -257,14 +254,12 @@ function attachmentRegistry(): AttachmentRegistry {
   });
   return importedAttachments;
 }
-
 const rendererAttachmentImports = new RendererAttachmentImportCoordinator(
   attachmentRegistry,
   process.env.NODE_ENV === "test"
     ? Number(process.env.INERTIA_TEST_ATTACHMENT_COMMIT_DELAY_MS ?? 0)
     : 0,
 );
-
 async function fixedRegularFileSize(path: string): Promise<number> {
   try {
     const metadata = await lstat(path);
@@ -276,7 +271,6 @@ async function fixedRegularFileSize(path: string): Promise<number> {
     throw error;
   }
 }
-
 const appHealthCollector = new AppHealthCollector({
   registry: appHealthRegistry,
   getProcessMetrics: () => app.getAppMetrics(),
@@ -293,11 +287,9 @@ const appHealthCollector = new AppHealthCollector({
     importedAttachments?.usage() ?? attachmentReservation
   ).bytes,
 });
-
 async function collectAppHealth(): Promise<AppHealthSnapshot> {
   return await appHealthCollector.collect();
 }
-
 function disposeImportedAttachments(): Promise<void> {
   const registry = importedAttachments;
   const directory = attachmentStorageDirectory;
@@ -314,7 +306,6 @@ function disposeImportedAttachments(): Promise<void> {
   }
   return attachmentCleanup;
 }
-
 function readWindowState(): MainWindowState {
   try {
     return restoreMainWindowState(
@@ -325,7 +316,6 @@ function readWindowState(): MainWindowState {
     return { ...MAIN_WINDOW_DEFAULT_STATE };
   }
 }
-
 function saveWindowState(window: BrowserWindow): void {
   try {
     const bounds = window.isMaximized() ? window.getNormalBounds() : window.getBounds();
@@ -334,10 +324,8 @@ function saveWindowState(window: BrowserWindow): void {
     // Window-state persistence is best effort and never blocks shutdown.
   }
 }
-
 function rendererLocation(): { target: string; isUrl: boolean } {
   const developmentUrl = app.isPackaged ? undefined : process.env.ELECTRON_RENDERER_URL;
-
   if (developmentUrl) {
     let parsed: URL;
     try {
@@ -351,13 +339,11 @@ function rendererLocation(): { target: string; isUrl: boolean } {
     }
     return { target: parsed.href, isUrl: true };
   }
-
   return {
     target: `${releaseChannel.protocolScheme}://${APP_HOST}/index.html`,
     isUrl: true,
   };
 }
-
 function isTrustedRendererLocation(candidate: string): boolean {
   try {
     const actual = new URL(candidate);
@@ -824,6 +810,16 @@ async function createMainWindow(): Promise<void> {
   });
 
   mainWindow = window;
+  mascotMain ??= new MascotMain({
+    mainWindow: () => mainWindow, rendererUrl: trustedRendererUrl, userDataDirectory: app.getPath("userData"),
+    registerProtocol: (session) => registerRendererProtocol(session.protocol),
+    registerHealthRenderer: (contents) => appHealthRegistry.registerRenderer(contents),
+    openChat: async (conversationId) => {
+      if (detachedChatMain?.focusForNotification(conversationId)) return;
+      await activateThreadNotification(conversationId, { channel: IPC.threadNotificationActivated, currentWindow: () => mainWindow, createWindow });
+    },
+  });
+  mascotMain.attach();
   const unregisterHealthRenderer = appHealthRegistry.registerRenderer(
     window.webContents,
   );
@@ -850,6 +846,7 @@ async function createMainWindow(): Promise<void> {
   window.once("ready-to-show", () => window.show());
   detachedChatClose.coordinateMainWindowClose(window, detachedChatMain, saveWindowState);
   window.on("closed", () => {
+    mascotMain?.suspend();
     unregisterHealthRenderer();
     previewBroker.close();
     if (mainWindow === window) {
@@ -1125,7 +1122,9 @@ async function bootstrap(): Promise<void> {
         serviceName: "Inertia Runtime",
       },
     ),
+    onMascotStatus: (status) => mascotMain?.observe(status),
     onStateChange: (snapshot) => {
+      mascotMain?.runtimePhase(snapshot.phase);
       appUpdateRuntimeReadiness.observe(snapshot);
       suspendDelivery.runtimeState(snapshot.phase, snapshot.generation);
       runtimeDiagnostics?.recordState(snapshot);

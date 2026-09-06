@@ -194,5 +194,6 @@ export interface RuntimeSupervisorOptions {
     generation: number,
     recorded: boolean,
   ) => void;
+  onMascotStatus?: (status: import("../shared/mascot.js").MascotStatus) => void;
   onStateChange?: (snapshot: RuntimeSupervisorSnapshot) => void;
 }

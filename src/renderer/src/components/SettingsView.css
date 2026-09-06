@@ -564,3 +564,6 @@
     align-self: flex-start;
   }
 }
+
+.mascot-settings-controls { padding: 0 0 14px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; }
+.mascot-settings-controls small { flex-basis: 100%; color: var(--text-muted); line-height: 1.5; }

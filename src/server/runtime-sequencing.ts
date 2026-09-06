@@ -98,8 +98,16 @@ export function projectRuntimeFrame(
   frame: Extract<RuntimeSequencedFrame, { type: "runtime.event" }>,
   subscription: RuntimeDetailSubscription,
 ): RuntimeSequencedFrame {
+  // Main windows hydrate all pending interactions on connect. Keep that same
+  // inbox live while their owning chats are unmounted (including resolutions).
+  // Preserve the detail scope so detached authority still filters foreign chats.
+  const interaction = frame.event.type === "agent.input.requested"
+    || frame.event.type === "agent.input.resolved"
+    || frame.event.type === "agent.approval.requested"
+    || frame.event.type === "agent.approval.resolved";
   if (
     frame.scope.kind === "conversation-detail"
+    && !interaction
     && !subscription.conversationIds.includes(frame.scope.conversationId)
   ) {
     return { type: "runtime.cursor", sync: frame.sync };

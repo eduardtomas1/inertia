@@ -60,6 +60,7 @@ import {
   loadDiscordSettings,
   loadLifecycleIntegritySettings,
   loadModelBackendsSettings,
+  loadMascotSettings,
   prefetchSettingsSection,
 } from "./settingsSectionLoaders";
 import { useLoadedSurface } from "../hooks/useLoadedSurface";
@@ -248,6 +249,7 @@ export function SettingsView({
   const [section, setSection] = useState<SettingsSection>(
     target?.section ?? "general",
   );
+  const MascotSettings = useLoadedSurface(loadMascotSettings, section === "general");
   const ModelBackendsSettings = useLoadedSurface(
     loadModelBackendsSettings,
     section === "backends",
@@ -590,6 +592,7 @@ export function SettingsView({
                 <SettingSwitch title="Live thinking summaries" detail="Show provider-supplied reasoning summaries as they arrive." checked={settings.showThinking} disabled={disabled} onChange={(showThinking) => onUpdate({ showThinking })} />
                 <SettingSwitch title="Open plan automatically" detail="Reveal the Plan panel when an agent publishes steps." checked={settings.autoOpenPlan} disabled={disabled} onChange={(autoOpenPlan) => onUpdate({ autoOpenPlan })} />
                 <SettingSwitch title="Desktop notifications" detail="Show privacy-safe completion and attention alerts without prompt or response text." checked={settings.desktopNotifications} disabled={disabled} onChange={(desktopNotifications) => onUpdate({ desktopNotifications })} />
+                {MascotSettings && <MascotSettings />}
                 <SettingSwitch title="Confirm destructive actions" detail="Ask before deleting threads or restoring checkpoints." checked={settings.confirmDestructiveActions} disabled={disabled} onChange={(confirmDestructiveActions) => onUpdate({ confirmDestructiveActions })} />
               </div>
               <div className="response-density-setting usage-display-setting">

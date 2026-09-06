@@ -13,6 +13,7 @@ function conversation(id: string, state: AgentRunState): ConversationShell {
       status: agentTurnStatusForRunState(state),
       runState: { state, revision: 1, providerState: "PRIVATE PROVIDER TEXT" },
       completedAt: "2026-09-06T10:00:00.000Z",
+      requestedAt: "2026-09-06T09:00:00.000Z",
       updatedAt: "2026-09-06T10:00:00.000Z",
     },
   } as ConversationShell;
@@ -63,5 +64,18 @@ describe("authoritative mascot status", () => {
     publisher.update({ ...chat, title: "Renamed" });
     publisher.replace([chat]);
     expect(publish).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not switch live chat ownership when ordinary activity updates its timestamp", () => {
+    const publish = vi.fn();
+    const publisher = new MascotStatusPublisher(publish);
+    const first = conversation("a", "running");
+    const second = conversation("b", "running");
+    publisher.replace([first, second]);
+    publisher.update({ ...second, latestTurn: { ...second.latestTurn!, updatedAt: "2026-09-06T12:00:00.000Z" } });
+    expect(publish).toHaveBeenCalledTimes(1);
+    expect(publish.mock.lastCall?.[0]).toMatchObject({ conversationId: "a", activeCount: 2 });
+    publisher.update(conversation("b", "waiting-for-input"));
+    expect(publish.mock.lastCall?.[0]).toMatchObject({ conversationId: "b", phase: "waiting-for-input" });
   });
 });

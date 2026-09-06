@@ -47,7 +47,9 @@ export class MascotStatusPublisher {
   private store(conversation: ConversationShell): void {
     const status = candidate(conversation);
     if (status) this.conversations.set(conversation.id, {
-      status, at: conversation.latestTurn!.updatedAt,
+      status,
+      // Activity and provider-state updates must not bounce between live chats.
+      at: status.activeCount ? conversation.latestTurn!.requestedAt : conversation.latestTurn!.updatedAt,
     });
     else this.conversations.delete(conversation.id);
   }

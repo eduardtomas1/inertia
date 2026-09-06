@@ -108,8 +108,10 @@ describe("OpenCode descendant interactions", () => {
     const manager = ProviderManager.createForTests(
       { commands: { opencode: command } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness({
-        runDeadlineMs: 5_000,
-        eventInactivityDeadlineMs: 500,
+        // This proves routing over a real child process and HTTP transport.
+        // A subsecond inactivity budget makes host scheduling decide whether
+        // interactions succeed. The separate test below owns inactivity.
+        runDeadlineMs: 10_000,
       })]),
     );
     let approvals = 0;
@@ -143,6 +145,7 @@ describe("OpenCode descendant interactions", () => {
       },
     });
 
+    expect(result.failure).toBeUndefined();
     expect(result).toMatchObject({
       status: "completed",
       text: "Parent resumed after child interaction",
@@ -179,8 +182,8 @@ describe("OpenCode descendant interactions", () => {
     const manager = ProviderManager.createForTests(
       { commands: { opencode: command } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness({
-        runDeadlineMs: 5_000,
-        eventInactivityDeadlineMs: 250,
+        runDeadlineMs: 10_000,
+        eventInactivityDeadlineMs: 1_000,
       })]),
     );
 
@@ -215,6 +218,19 @@ describe("OpenCode descendant interactions", () => {
         terminalEvent: "event/inactivity-deadline",
       },
     });
+    // An early transport timeout must not masquerade as proof that completed
+    // child interactions cannot satisfy the root's completion requirement.
+    const capture = JSON.parse(readFileSync(capturePath, "utf8")) as {
+      captured: Array<{ path: string; body?: unknown }>;
+    };
+    expect(capture.captured).toContainEqual(expect.objectContaining({
+      path: "/api/session/opencode-child-session/permission/child-permission/reply",
+      body: { reply: "once" },
+    }));
+    expect(capture.captured).toContainEqual(expect.objectContaining({
+      path: "/api/session/opencode-child-session/question/child-question/reply",
+      body: { answers: [["Yes"]] },
+    }));
     expect(manager.activeConversationIds()).toEqual([]);
   });
 });

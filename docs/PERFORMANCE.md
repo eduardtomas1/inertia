@@ -68,9 +68,17 @@ gaps are recorded separately. This makes a failed wall-time sample diagnosable;
 none of these components is subtracted from the enforced latency budgets.
 
 `npm run benchmark:platform:smoke` adds deliberately generous catastrophic
-budgets to every exploratory cadence. Only the shipped 12/64 cadence also has
-the tighter hosted first-projection and visible-gap ceilings. Hosted CI is too
-noisy for lab-grade latency gates, so the smoke gate also checks structural
+budgets to every exploratory cadence: first-projection samples stay below
+500 ms, and sustained visible gaps stay below 500 ms at p95. Only the shipped
+12/64 cadence also has the tighter 75 ms median first-projection and 175 ms p95
+visible-gap ceilings. Maximum visible gaps remain diagnostic evidence rather
+than an additional single-sample gate. For example, [main CI run 34040805795](https://github.com/eduardtomas1/inertia/actions/runs/34040805795/job/101507203513)
+recorded one 798.802 ms gap on Windows ARM64 while that candidate's p95 was
+95.607 ms: the source waited 215.856 ms, the buffer waited 582.493 ms, and the
+SQLite write took 0.453 ms. The source itself also stalled for 507.909 ms.
+All raw samples and their components remain in the report; the gate does not
+subtract host time, discard slow observations, or retry until a sample passes.
+Hosted CI is too noisy for lab-grade latency gates, so the smoke gate also checks structural
 properties such as bounded terminal frames. CI runs both harnesses on native
 Windows x64 and ARM64, Linux x64 and ARM64 under X11/Xvfb, and macOS x64 and
 arm64 runners and retains the JSON reports for 14 days.

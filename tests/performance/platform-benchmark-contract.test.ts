@@ -8,6 +8,20 @@ const benchmarkSource = readFileSync(
 );
 
 describe("platform benchmark threshold ownership", () => {
+  it("enforces every candidate's p95 while retaining isolated peaks as evidence", () => {
+    const enforceIndex = benchmarkSource.indexOf("if (enforce) {");
+    const ceilings = [...benchmarkSource.matchAll(
+      /expect\(candidate\.p95VisibleGapMs\)\s*\.toBeLessThan\(([^)]+)\)/gu,
+    )];
+
+    expect(ceilings).toHaveLength(1);
+    expect(ceilings[0]?.[1]).toBe("HOSTED_STREAM_VISIBLE_GAP_CATASTROPHIC_MS");
+    expect(ceilings[0]?.index).toBeGreaterThan(enforceIndex);
+    expect(benchmarkSource).toContain("Math.max(0, ...visibleGaps)");
+    expect(benchmarkSource).toContain("visibleGapSamplesMs: visibleGaps.map");
+    expect(benchmarkSource).not.toMatch(/expect\(candidate\.maxVisibleGapMs\)/u);
+  });
+
   it("owns the selected visible-gap ceiling in the hosted enforcement block", () => {
     const enforceIndex = benchmarkSource.indexOf("if (enforce) {");
     const ceilings = [...benchmarkSource.matchAll(

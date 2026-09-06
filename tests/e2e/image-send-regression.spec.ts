@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 
 import { createAppFixture } from "./support/app-fixture";
 import { closeElectronAfterTest } from "./support/electron-failure-evidence";
+import { attachImageSendFailureDiagnostics } from "./support/image-send-failure-diagnostics";
 
 const imageAwareCodexAppServer = `
 const fs = require("node:fs");
@@ -94,6 +95,7 @@ test("repeatedly sends a pasted image after startup reconciliation in a non-Git 
     expect(app.rendererErrors).toEqual([]);
   } catch (error) {
     bodyFailure = { error };
+    await attachImageSendFailureDiagnostics(test.info(), app).catch(() => undefined);
     throw error;
   } finally {
     await closeElectronAfterTest(() => app.close(), () => test.info(), bodyFailure);

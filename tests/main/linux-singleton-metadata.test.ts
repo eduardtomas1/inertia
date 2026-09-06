@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { finished } from "node:stream/promises";
 
 import { createPackage } from "@electron/asar";
 import { afterEach, describe, expect, it } from "vitest";
@@ -27,7 +28,7 @@ describe("bounded singleton archive entries", () => {
     const manifest = '{"name":"inertia","version":"1.2.3"}';
     await mkdir(source);
     await writeFile(join(source, "package.json"), manifest);
-    await createPackage(source, archive);
+    await finished(await createPackage(source, archive));
 
     expect(readLinuxSingletonManifest(archive, 65_536)).toBe(manifest);
   });

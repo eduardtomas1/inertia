@@ -1,6 +1,18 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, it, vi } from "vitest";
 
 import type { RunningRuntime } from "../../src/server";
+import {
+  activateRuntimeOwnedProcessRegistry,
+  awaitRuntimeOwnedProcessCleanupConfirmed,
+  fenceWindowsRuntimeOwnedProcessAdmissions,
+  RuntimeOwnedProcessJournal,
+  spawnRuntimeOwnedPidProcess,
+  spawnRuntimeOwnedProcess,
+} from "../../src/node/runtime-owned-processes";
 import {
   RUNTIME_SHUTDOWN_DEADLINE_MS,
   runRuntimeShutdownPhases,
@@ -50,6 +62,109 @@ function runtimeWithClose(
 }
 
 describe("runtime worker shutdown", () => {
+  it.runIf(process.platform === "win32")(
+    "closes Windows owned-process admission before reporting stopped",
+    async () => {
+      const directory = mkdtempSync(join(tmpdir(), "inertia-worker-shutdown-"));
+      const generation = "30000000-0000-4000-8000-000000000003:1";
+      const boot = "test:40000000-0000-4000-8000-000000000004";
+      const journal = new RuntimeOwnedProcessJournal(directory, {
+        platform: "win32",
+      });
+      expect(journal.startSession(generation, boot)).toBe(true);
+      const deactivate = activateRuntimeOwnedProcessRegistry(
+        directory,
+        generation,
+        boot,
+        { platform: "win32" },
+      );
+      const order: string[] = [];
+      const lateChildSpawn = vi.fn(() => {
+        throw new Error("The late child spawn callback ran.");
+      });
+      const latePidSpawn = vi.fn(() => {
+        throw new Error("The late PID spawn callback ran.");
+      });
+      const options = {
+        runtime: runtimeWithClose(vi.fn(async () => {
+          order.push("runtime-close");
+        })),
+        cause: "runtime-shutdown" as const,
+        exitCode: 0,
+        closeBrokers: vi.fn(),
+        ownedProcessAdmissionFence: vi.fn(() => {
+          order.push("admission-fence");
+          return fenceWindowsRuntimeOwnedProcessAdmissions();
+        }),
+        ownedProcessCleanupConfirmed: vi.fn(async () => {
+          order.push("cleanup-proof");
+          return await awaitRuntimeOwnedProcessCleanupConfirmed();
+        }),
+        post: vi.fn((event) => {
+          if (event.type !== "runtime.stopped") return;
+          order.push("runtime-stopped");
+          expect(() => spawnRuntimeOwnedProcess(lateChildSpawn))
+            .toThrow("session is unavailable");
+          expect(() => spawnRuntimeOwnedPidProcess(latePidSpawn))
+            .toThrow("session is unavailable");
+        }),
+        awaitStoppedAcknowledgement: async () => undefined,
+        exit: vi.fn(),
+      };
+
+      try {
+        await completeRuntimeWorkerShutdown(options);
+
+        expect(options.ownedProcessAdmissionFence).toHaveBeenCalledOnce();
+        expect(lateChildSpawn).not.toHaveBeenCalled();
+        expect(latePidSpawn).not.toHaveBeenCalled();
+        expect(order).toEqual([
+          "runtime-close",
+          "admission-fence",
+          "cleanup-proof",
+          "runtime-stopped",
+        ]);
+        expect(journal.inspectGeneration(generation)).toMatchObject({
+          sessionState: "retiring",
+          records: [],
+          consumingRecords: [],
+        });
+      } finally {
+        deactivate?.();
+        rmSync(directory, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.runIf(process.platform === "win32")(
+    "fails closed when the Windows owned-process admission fence fails",
+    async () => {
+      const post = vi.fn();
+      const exit = vi.fn();
+      const ownedProcessCleanupConfirmed = vi.fn(() => true);
+
+      await completeRuntimeWorkerShutdown({
+        runtime: runtimeWithClose(vi.fn(async () => undefined)),
+        cause: "runtime-shutdown",
+        exitCode: 0,
+        closeBrokers: vi.fn(),
+        ownedProcessAdmissionFence: () => false,
+        ownedProcessCleanupConfirmed,
+        post,
+        awaitStoppedAcknowledgement: async () => undefined,
+        exit,
+      });
+
+      expect(post).toHaveBeenCalledWith({
+        type: "runtime.shutdown-unconfirmed",
+        reason: "owned-process-cleanup",
+      });
+      expect(post).not.toHaveBeenCalledWith({ type: "runtime.stopped" });
+      expect(ownedProcessCleanupConfirmed).not.toHaveBeenCalled();
+      expect(exit).not.toHaveBeenCalled();
+    },
+  );
+
   it("settles a pre-registry startup failure without incomplete-startup cleanup", async () => {
     const post = vi.fn();
     const exit = vi.fn();

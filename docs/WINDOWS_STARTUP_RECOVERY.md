@@ -38,3 +38,9 @@ Windows installation also requires the old app to finish closing. A closed
 window is not proof that its background runtime has exited. Setup refuses to
 overwrite live installed processes; affected-profile recovery, a new turn, and
 complete process exit are exercised by the installed-upgrade smoke test.
+
+After its normal shutdown work has drained, the Windows runtime also fences its
+process writer before checking final cleanup. Late callbacks cannot admit a new
+child after the runtime reports that it has stopped. If that fence or the final
+cleanup proof fails, Inertia retains the recovery evidence instead of allowing
+the installer to overwrite an unconfirmed runtime.

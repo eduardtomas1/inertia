@@ -537,6 +537,9 @@ function startCodexCompaction(
             "Codex did not confirm the requested response service tier for compaction.",
           );
         }
+        if (serviceTier !== undefined) {
+          emitter.capability("performance-modes", true);
+        }
         const priorLatestTurnId = codexTurnIds(
           resumed.initialTurnsPage,
           "initial",

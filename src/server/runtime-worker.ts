@@ -23,6 +23,7 @@ import { completeRuntimeWorkerShutdown } from "./runtime-worker-shutdown.js";
 import {
   activateRuntimeOwnedProcessRegistry,
   awaitRuntimeOwnedProcessCleanupConfirmed,
+  fenceWindowsRuntimeOwnedProcessAdmissions,
 } from "../node/runtime-owned-processes.js";
 import {
   activateAfterRuntimeWorkerStartupPreflight,
@@ -109,6 +110,9 @@ async function finishShutdown(
       secureFiles.close();
       agentBrowser.close();
     },
+    ...(process.platform === "win32"
+      ? { ownedProcessAdmissionFence: fenceWindowsRuntimeOwnedProcessAdmissions }
+      : {}),
     ownedProcessCleanupConfirmed: awaitRuntimeOwnedProcessCleanupConfirmed,
     ...(preRegistryNoRuntime
       ? { noRuntimeCleanupProof: { kind: "pre-registry-no-runtime" as const } }

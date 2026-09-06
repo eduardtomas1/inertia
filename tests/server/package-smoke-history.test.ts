@@ -178,7 +178,7 @@ console.log("Logged in using ChatGPT");
     baselinePath: join(root, "upgrade-history.json") };
 }
 
-it("reopens real saved records and independent attachment bytes, then persists a new completed turn", async () => {
+it("reopens history, switches speed, compacts, resumes, and persists every completed turn", async () => {
   const f = await fixture();
   const smoke = await modules();
   const predecessor = await f.launch();
@@ -217,7 +217,20 @@ it("reopens real saved records and independent attachment bytes, then persists a
   await f.close(candidate);
   await smoke.assertHistoryAfterShutdown(f.root, newProof, baseline);
   expect(newProof.agentTurns[0]!.id).not.toBe(oldProof.agentTurns[0]!.id);
-  expect(newProof.messages[1]!.content).toMatch(/^Completed package-smoke-candidate:/u);
+  expect(newProof.agentTurns).toHaveLength(4);
+  expect(newProof.agentTurns.map((turn) =>
+    turn.modelSelection.providerOptions.fastMode ?? null))
+    .toEqual(["priority", null, "priority", "priority"]);
+  expect(new Set(newProof.agentTurns.flatMap((turn) => [
+    turn.providerSessionBefore,
+    turn.providerSessionAfter,
+  ]).filter(Boolean))).toEqual(new Set([
+    newProof.agentTurns[0]!.providerSessionAfter,
+  ]));
+  expect(newProof.messages[1]!.content)
+    .toMatch(/^Completed package-smoke-candidate-fast:/u);
+  expect(newProof.messages.at(-1)!.content)
+    .toMatch(/^Completed package-smoke-candidate-fast:/u);
   expect(await readFile(f.baselinePath)).toEqual(unchangedBaseline);
 
   const db = new DatabaseSync(f.databasePath);
@@ -234,7 +247,7 @@ it("reopens real saved records and independent attachment bytes, then persists a
   await f.close(damaged);
   const readDb = new DatabaseSync(f.databasePath, { readOnly: true });
   try {
-    expect(readDb.prepare("SELECT COUNT(*) AS count FROM agent_turns").get()).toEqual({ count: 2 });
+    expect(readDb.prepare("SELECT COUNT(*) AS count FROM agent_turns").get()).toEqual({ count: 5 });
   }
   finally { readDb.close(); }
 

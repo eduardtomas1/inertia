@@ -21,6 +21,8 @@ import {
   withCodexControlClient,
 } from "../../src/server/codex/control-client";
 import { createClaudeAgentSdkHarness } from "../../src/server/provider/claude-agent-sdk-harness";
+import { ProviderInstallationLeaseCoordinator } from
+  "../../src/server/provider/installation-lease";
 import {
   portableFixtureRoot,
   removePortableFixture,
@@ -827,6 +829,57 @@ describe.sequential("provider compaction adapters", () => {
           sortDirection: "desc",
         },
       });
+  });
+
+  it("publishes exact-run Fast evidence after Codex compaction tier attestation", async () => {
+    const root = portableFixtureRoot("Codex compact production Fast evidence");
+    roots.push(root);
+    const capturePath = join(root, "capture.jsonl");
+    const command = codexCompactionTierAgent(root, capturePath, "echo");
+    const manager = trackManager(ProviderManager.createForTests({
+      commands: { codex: command },
+      installationLeases: new ProviderInstallationLeaseCoordinator(),
+      detectProvider: async () => ({
+        provider: {
+          id: "codex",
+          name: "Codex",
+          command: "codex",
+        },
+        available: true,
+        version: "1.0.0",
+        executable: command,
+        installState: "installed",
+        authState: "authenticated",
+        canRun: true,
+        cleanupConfirmed: true,
+      }),
+    }));
+    const base = nativeProviderRunInput({
+      providerId: "codex",
+      conversationId: "codex-compact-production-fast-evidence",
+      cwd: root,
+      prompt: "/compact",
+      model: "model-a",
+      interactionMode: "build",
+      access: "supervised",
+      sessionId: "thread-existing",
+    });
+    const selection = withModelSelectionFastMode(
+      base.modelSelection,
+      "priority",
+    );
+
+    await manager.detect("codex");
+    await expect(manager.compact({
+      ...base,
+      supportedFastMode: "priority",
+      modelSelection: selection,
+      continuationIdentity: continuationIdentityForSelection(
+        selection,
+        null,
+        false,
+      ),
+    })).resolves.toMatchObject({ status: "completed" });
   });
 
   it("rejects Codex compaction when resume attests a different service tier", async () => {

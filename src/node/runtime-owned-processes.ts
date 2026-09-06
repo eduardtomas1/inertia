@@ -1210,6 +1210,12 @@ export function runtimeOwnedProcessOwnershipIsTainted(): boolean {
   return activeRegistry?.tainted ?? false;
 }
 
+export function fenceWindowsRuntimeOwnedProcessAdmissions(): boolean {
+  const registry = activeRegistry;
+  return !!registry && registry.platform === "win32"
+    && registry.journal.fenceSessionExact(registry.sessionCapability.session);
+}
+
 export async function awaitRuntimeOwnedProcessCleanupConfirmed(): Promise<boolean> {
   const registry = activeRegistry;
   if (!registry) return !supportedRuntimeOwnedProcessPlatform(process.platform);

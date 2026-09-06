@@ -124,8 +124,15 @@ export async function runPackagedHistorySmoke({ websocketUrl, workspaceDirectory
     await client.request("provider.refresh", { providerId: "codex" });
     let conversationId;
     if (baseline) {
-      conversationId = baseline.conversation.id;
-      assertHistoricalDetail(baseline, client.snapshot(), await detail(client, conversationId));
+      assertHistoricalDetail(baseline, client.snapshot(),
+        await detail(client, baseline.conversation.id));
+      const conversation = await client.request("conversation.create", {
+        projectId: baseline.project.id, title: "Candidate Fast compact proof",
+        providerId: "codex", model: "package-smoke-model", useWorktree: false, activate: false,
+      });
+      ok(conversation?.kind === "conversation.created",
+        "Packaged candidate conversation was not created.");
+      conversationId = conversation.conversationId;
     } else {
       await client.request("settings.update", historySettings);
       const project = await client.request("project.create", {
@@ -139,20 +146,68 @@ export async function runPackagedHistorySmoke({ websocketUrl, workspaceDirectory
       ok(conversation?.kind === "conversation.created", "Packaged history conversation was not created.");
       conversationId = conversation.conversationId;
     }
-    const challenge = `package-smoke-${baseline ? "candidate" : "historical"}:${randomUUID()}`;
-    const acceptance = await client.request("message.send", { conversationId, content: challenge });
-    let proof;
-    let value;
-    do {
+    const proofs = [];
+    let value = await detail(client, conversationId);
+    let providerSession = null;
+    const setSpeed = async (speed) => {
+      const providerOptions = { ...value.conversation.modelSelection.providerOptions };
+      if (speed === "fast") providerOptions.fastMode = "priority";
+      else delete providerOptions.fastMode;
+      await client.request("conversation.update", {
+        conversationId,
+        modelSelection: { ...value.conversation.modelSelection, providerOptions },
+      });
       value = await detail(client, conversationId);
-      proof = completedTurnProof(value, acceptance, challenge);
-      if (!proof) await new Promise((resolve) => setTimeout(resolve, 25));
-    } while (!proof);
+      ok((value.conversation.modelSelection.providerOptions.fastMode ?? null)
+        === (speed === "fast" ? "priority" : null),
+      `Packaged conversation did not retain ${speed} mode.`);
+    };
+    const runTurn = async (speed, phase) => {
+      await setSpeed(speed);
+      const challenge = `package-smoke-${baseline ? "candidate" : "historical"}-${speed}:${randomUUID()}`;
+      const acceptance = await client.request("message.send", { conversationId, content: challenge });
+      let proof;
+      do {
+        value = await detail(client, conversationId);
+        proof = completedTurnProof(value, acceptance, challenge);
+        if (!proof) await new Promise((resolve) => setTimeout(resolve, 25));
+      } while (!proof);
+      const turn = proof.agentTurns[0];
+      ok((turn.modelSelection.providerOptions.fastMode ?? null)
+        === (speed === "fast" ? "priority" : null),
+      `Packaged ${phase} turn did not retain ${speed} mode.`);
+      if (providerSession === null) providerSession = turn.providerSessionAfter;
+      else ok(turn.providerSessionBefore === providerSession
+        && turn.providerSessionAfter === providerSession,
+      `Packaged ${phase} turn did not resume the exact provider session.`);
+      proofs.push(proof);
+    };
+
     if (baseline) {
-      ok(!baseline.agentTurns.some(({ id, runId }) =>
-        id === proof.agentTurns[0].id || runId === proof.agentTurns[0].runId),
+      await runTurn("fast", "initial Fast");
+      await runTurn("standard", "Fast-to-Standard");
+      await runTurn("fast", "Standard-to-Fast");
+      const compacted = await client.request("conversation.compact", { conversationId });
+      ok(compacted?.kind === "conversation.compacted"
+        && compacted.conversationId === conversationId
+        && compacted.providerId === "codex",
+      "Packaged Fast context compaction did not complete on the exact conversation.");
+      await runTurn("fast", "post-compaction Fast resume");
+    } else {
+      await runTurn("standard", "historical Standard");
+    }
+    const proof = {
+      messages: proofs.flatMap((entry) => entry.messages),
+      agentTurns: proofs.flatMap((entry) => entry.agentTurns),
+    };
+    if (baseline) {
+      ok(proof.agentTurns.length === 4,
+        "Packaged candidate speed/compaction sequence did not produce four terminal turns.");
+      ok(proof.agentTurns.every((turn) => !baseline.agentTurns.some(({ id, runId }) =>
+        id === turn.id || runId === turn.runId)),
       "Upgraded app reused the historical turn/run identity.");
-      assertHistoricalDetail(baseline, client.snapshot(), value);
+      assertHistoricalDetail(baseline, client.snapshot(),
+        await detail(client, baseline.conversation.id));
     }
     const project = client.snapshot().projects.find(({ id }) => id === value.conversation.projectId);
     return { project: select(project, projectKeys),

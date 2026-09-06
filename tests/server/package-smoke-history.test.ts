@@ -9,6 +9,21 @@ import { pathToFileURL } from "node:url";
 import { afterEach, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
 
+const discoveryFixture = vi.hoisted(() => ({ directory: "" }));
+
+vi.mock("../../src/server/environment", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/server/environment")>();
+  return {
+    ...actual,
+    // Production discovery adds common host CLI locations to PATH. This smoke
+    // owns only its fixture provider; Git remains available in the child PATH.
+    providerEnvironment: async () => ({
+      env: { ...process.env },
+      pathEntries: [discoveryFixture.directory],
+    }),
+  };
+});
+
 import type { RunningRuntime } from "../../src/server";
 import type { AgentTurn, ChatMessage, Conversation, Project, ServerEvent } from "../../src/shared/contracts";
 import { portableNodeExecutable, writeNodeSubcommand } from "../helpers/portable-provider-fixture";
@@ -48,6 +63,7 @@ const runtimes: RunningRuntime[] = [];
 afterEach(async () => {
   await Promise.all(runtimes.splice(0).map((runtime) => runtime.close()));
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+  discoveryFixture.directory = "";
   vi.unstubAllEnvs();
 });
 
@@ -58,6 +74,7 @@ async function fixture() {
   await mkdir(workspaceDirectory);
   const bin = join(root, "provider");
   await mkdir(bin);
+  discoveryFixture.directory = bin;
   const executable = portableNodeExecutable(bin, "codex");
   const { packageSmokePath } = await import(pathUrl) as {
     packageSmokePath: (directory: string, options: { includeGit: boolean }) => Promise<string>;

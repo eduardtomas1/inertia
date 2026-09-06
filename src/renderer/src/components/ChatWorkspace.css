@@ -1,13 +1,15 @@
 .composer-project-picker {
   min-width: 0;
   max-width: min(300px, 48cqi);
+  /* Keep the hit-area offset outside the trigger's intrinsic width. */
+  margin-inline: -7px;
 }
 .composer-project-picker-trigger {
   display: flex;
   align-items: center;
   gap: 6px;
   max-width: 100%;
-  margin: -4px -7px;
+  margin: -4px 0;
   padding: 4px 7px;
   border-radius: 5px;
   color: var(--text-soft);

@@ -31,6 +31,10 @@ import {
 } from "./linux-app-update-candidate-process.js";
 import { LinuxAppUpdateCandidateClaimJournal } from
   "./linux-app-update-candidate-claim.js";
+import {
+  requestLinuxSingletonLaunch,
+  type LinuxSingletonContention,
+} from "./linux-singleton-launch.js";
 import type { InertiaReleaseChannel } from "./release-channel.js";
 import type { AppUpdateCandidateExpectedRuntimeOwner } from
   "../node/app-update-candidate-viability-protocol.js";
@@ -66,6 +70,7 @@ export interface AppUpdateStartupOptions {
   finishNormalShutdown(): void;
   onUnconfirmedShutdown(): void;
   reportCleanupFailure(error: unknown): void;
+  reportSingletonContention?(notice: LinuxSingletonContention): void | Promise<void>;
   validateCandidateBootstrap(
     operationId: string,
     expectedActiveRuntimeOwner: AppUpdateCandidateExpectedRuntimeOwner | null,
@@ -722,7 +727,17 @@ export async function startApplicationWithUpdateHandoff(
     }
   }
 
-  if (!options.application.requestSingleInstanceLock()) {
+  const ownsSingleton = options.platform === "linux"
+      && options.environment.APPIMAGE && !candidateAdmission
+    ? await requestLinuxSingletonLaunch({
+        profileDirectory: options.profileDirectory,
+        channel: options.channel,
+        version: options.version,
+        requestLock: () => options.application.requestSingleInstanceLock(),
+        reportContention: (notice) => options.reportSingletonContention?.(notice),
+      })
+    : options.application.requestSingleInstanceLock();
+  if (!ownsSingleton) {
     if (candidateAdmission?.platform === "linux") {
       const journal = new AppUpdateHandoffJournal(options.dataDirectory);
       try {

@@ -122,6 +122,7 @@ import {
 import { MAIN_WINDOW_DEFAULT_STATE, restoreMainWindowState,
   type MainWindowState } from "./main-window-state.js";
 import { handleStartupFailure } from "./startup-failure.js";
+import { createLinuxLifecycleNotices } from "./linux-shutdown-notice.js";
 import { createTestPrivilegedCleanupController } from "./test-privileged-cleanup-controller.js";
 const { configuration: releaseChannel, packageSmokeRoot } = initializeInertiaReleaseChannel(app, process.env);
 const IPC = {
@@ -187,6 +188,7 @@ let detachedChatMain: DetachedChatMain | null = null;
 let trustedRendererUrl = "";
 let privilegedCleanup: Promise<boolean> | null = null;
 let privilegedCleanupOwners: RetryablePrivilegedCleanup | null = null;
+const linuxLifecycleNotices = createLinuxLifecycleNotices(app, dialog, focusMainWindow);
 let packageSmokeFilePath: string | null = null;
 let packageSmokeOwnerToken: string | null = null;
 const appHealthRegistry = new InertiaHealthRegistry();
@@ -971,7 +973,7 @@ async function bootstrap(): Promise<void> {
       runtimeSupervisor?.updateHandoffIdentity(), runtimeDataDirectory,
       app.getPath("userData")),
     finishNormalShutdown: finishQuitAfterCleanup,
-    onUnconfirmedShutdown: () => console.error("Refusing to exit because privileged shutdown could not be confirmed."),
+    onUnconfirmedShutdown: linuxLifecycleNotices.reportUnconfirmedShutdown,
     reportError: (error) => console.error("Failed to prepare the application update", error),
   });
   nativeTheme.on("updated", () => {
@@ -1222,10 +1224,9 @@ void startApplicationWithUpdateHandoff({
   recordBeforeQuit: () => recordPackageSmokeStage("before-quit"),
   cleanupBeforeQuit: runPrivilegedCleanup,
   finishNormalShutdown: finishQuitAfterCleanup,
-  onUnconfirmedShutdown: () => console.error(
-    "Refusing to exit because privileged shutdown could not be confirmed."),
-  reportCleanupFailure: (error) => console.error(
-    "Failed to finish privileged shutdown", error),
+  onUnconfirmedShutdown: linuxLifecycleNotices.reportUnconfirmedShutdown,
+  reportSingletonContention: linuxLifecycleNotices.reportSingletonContention,
+  reportCleanupFailure: (error) => console.error("Failed to finish privileged shutdown", error),
   validateCandidateBootstrap: async (operationId, expectedActiveRuntimeOwner) => await validateDesktopAppUpdateCandidate({ operationId, dataDirectory: configuredRuntimeDataDirectory(), expectedActiveRuntimeOwner }),
   bootstrap,
   awaitCandidateReadiness: async () => await appUpdateRuntimeReadiness.wait(),

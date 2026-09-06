@@ -162,8 +162,15 @@ test("mascot previews provider progress, opens questions and approvals, and show
       await expect(app.page.getByRole("heading", { name: "Another chat", level: 1 })).toBeVisible();
     };
     const composer = app.page.getByRole("region", { name: "Message composer" });
-    await composer.getByRole("textbox", { name: "Message", exact: true }).fill("Make the mascot show useful updates and ask when it needs me.");
+    const request = "Make the mascot show useful updates and ask when it needs me.";
+    await composer.getByRole("textbox", { name: "Message", exact: true }).fill(request);
     await composer.getByRole("button", { name: "Send message" }).click();
+    // Sending includes admission and a real Git checkpoint before the provider
+    // starts. Observe the accepted turn before checking its mascot projection.
+    const turn = app.page.locator("[data-turn-id]").filter({
+      has: app.page.getByText(request, { exact: true }),
+    });
+    await expect(turn, "The submitted request must be accepted into a real turn").toBeVisible();
     await expect(overlay.locator(".mascot-message")).toHaveText("Check the question and approval flow");
     await expect(overlay.locator(".mascot-detail")).toHaveText("1 of 3 steps complete");
     await expect(overlay.locator(".mascot-chat")).toHaveText("Make the mascot more useful");

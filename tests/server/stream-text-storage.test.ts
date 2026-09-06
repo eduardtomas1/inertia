@@ -150,8 +150,12 @@ describe("append-oriented stream text persistence", () => {
       turn.id,
       "2026-01-01T00:00:02.000Z",
     );
+    // Each append commits durably. A bounded multi-page fixture proves linear
+    // chunk storage and restart ordering without making this correctness test
+    // depend on 1,000 hosted-disk flushes. Bulk write timing lives in the
+    // platform benchmark.
     const deltas = Array.from(
-      { length: 1_000 },
+      { length: 128 },
       (_, index) => `[${String(index).padStart(4, "0")}]`,
     );
     for (const delta of deltas) {
@@ -177,7 +181,7 @@ describe("append-oriented stream text persistence", () => {
       SELECT COUNT(*) AS count, SUM(length(content)) AS characters
       FROM message_content_chunks WHERE message_id = ?
     `).get(assistant.id) as { count: number; characters: number }))
-      .toEqual({ count: 1_000, characters: deltas.join("").length });
+      .toEqual({ count: deltas.length, characters: deltas.join("").length });
     rawBeforeRestart.close();
 
     const reopened = new RuntimeStore(

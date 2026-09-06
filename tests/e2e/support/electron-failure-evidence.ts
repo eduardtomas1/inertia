@@ -8,12 +8,14 @@ async function attachElectronFailureEvidence(
   name: string,
   body: string,
   contentType = "text/plain",
+  timeoutMs = 250,
 ): Promise<void> {
   // Called only after fixture cleanup. Bound reporting separately; unavailable
   // Playwright context, rejection or a hung reporter cannot replace the error.
+  if (timeoutMs <= 0) return;
   await settleOperationBounded(Promise.resolve().then(() => readTestInfo().attach(name, {
     body: Buffer.from(body), contentType,
-  })), 250);
+  })), timeoutMs);
 }
 
 async function attachElectronTestBodyFailure(
@@ -30,9 +32,16 @@ export async function attachElectronFixtureCloseFailure(
   readTestInfo: ReadTestInfo,
   error: unknown,
 ): Promise<void> {
-  if (!(error instanceof ElectronFixtureCloseError) || !error.mainProcessSamples.length) return;
-  await attachElectronFailureEvidence(readTestInfo, "electron-main-process-samples",
-    JSON.stringify(error.mainProcessSamples, null, 2), "application/json");
+  if (!(error instanceof ElectronFixtureCloseError)) return;
+  const deadlineAt = Date.now() + 250;
+  if (error.processEvidence) {
+    await attachElectronFailureEvidence(readTestInfo, "electron-process-lifecycle",
+      JSON.stringify(error.processEvidence, null, 2), "application/json", deadlineAt - Date.now());
+  }
+  if (error.mainProcessSamples.length) {
+    await attachElectronFailureEvidence(readTestInfo, "electron-main-process-samples",
+      JSON.stringify(error.mainProcessSamples, null, 2), "application/json", deadlineAt - Date.now());
+  }
 }
 
 export async function closeElectronAfterTest(

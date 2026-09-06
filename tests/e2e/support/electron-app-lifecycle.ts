@@ -9,6 +9,10 @@ import { runtimeSupervisorShutdownEnvelopeMs } from "../../../src/node/runtime-s
 import { createElectronMainProcessDiagnostic,
   type ElectronMainProcessDiagnostic, type ElectronMainProcessSample } from
   "./electron-main-process-diagnostic";
+import { electronProcessEvidence, observeElectronIdentity,
+  type ElectronProcessEvidence, type ElectronProcessEvidenceSnapshot } from "./electron-process-evidence";
+import { forceStopWindowsElectronLauncher,
+  type WindowsElectronProcessDependencies } from "./electron-windows-process";
 
 const FIXTURE_SERVER_TEARDOWN_TIMEOUT_MS = 2_000;
 const FIXTURE_SHUTDOWN_HEADROOM_MS = 500;
@@ -116,10 +120,12 @@ export function observeElectronProcess(
   current: ElectronApplication,
   appendDiagnostic: (source: "stdout" | "stderr", chunk: Buffer) => void,
 ): void {
-  current.process().stdout?.on("data", (chunk: Buffer) => {
+  const child = current.process();
+  observeElectronIdentity(current, child);
+  child.stdout?.on("data", (chunk: Buffer) => {
     appendDiagnostic("stdout", chunk);
   });
-  current.process().stderr?.on("data", (chunk: Buffer) => {
+  child.stderr?.on("data", (chunk: Buffer) => {
     appendDiagnostic("stderr", chunk);
   });
 }
@@ -127,7 +133,15 @@ export function observeElectronProcess(
 export function observeElectronPage(
   currentPage: Page,
   rendererErrors: string[],
+  mainWindowChild?: ChildProcess,
 ): void {
+  if (mainWindowChild) {
+    // This observes the owned main window's Playwright page, not completion of
+    // the synchronous BrowserWindow.destroy call inside Electron main.
+    currentPage.once("close", () => {
+      electronProcessEvidence(mainWindowChild).record("main-window-page-closed");
+    });
+  }
   currentPage.on("console", (message) => {
     if (message.type() === "error") {
       appendElectronRendererDiagnostic(
@@ -247,6 +261,8 @@ async function waitForChildExitBounded(
 }
 
 interface ElectronAppCloseOptions {
+  readonly platform?: NodeJS.Platform;
+  readonly windowsProcessDependencies?: WindowsElectronProcessDependencies;
   readonly childProcess?: ChildProcess;
   readonly gracefulTimeoutMs?: number;
   readonly forcedExitTimeoutMs?: number;
@@ -259,9 +275,24 @@ export interface ElectronAppQuitOptions extends ElectronAppCloseOptions {
 }
 
 export class ElectronFixtureCloseError extends AggregateError {
-  constructor(errors: unknown[], readonly mainProcessSamples: ElectronMainProcessSample[]) {
+  constructor(errors: unknown[], readonly mainProcessSamples: ElectronMainProcessSample[],
+    readonly processEvidence: ElectronProcessEvidenceSnapshot | null = null) {
     super(errors, "The Electron fixture did not close cleanly.");
   }
+}
+
+async function forceStopElectronChild(
+  child: ChildProcess,
+  options: ElectronAppCloseOptions,
+): Promise<boolean> {
+  const timeoutMs = options.forcedExitTimeoutMs ?? 5_000;
+  if ((options.platform ?? process.platform) === "win32") {
+    // This existing repo mechanism shares one absolute deadline across tree
+    // termination, inherited-pipe closure and Windows resource settling.
+    return await forceStopWindowsElectronLauncher(child, timeoutMs, options.windowsProcessDependencies);
+  }
+  if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+  return await waitForChildExitBounded(child, timeoutMs);
 }
 
 export interface ElectronAppQuitResult<T> {
@@ -283,8 +314,12 @@ export async function quitElectronAppBounded<T>(
   options: ElectronAppQuitOptions = {},
 ): Promise<ElectronAppQuitResult<T>> {
   const child = options.childProcess ?? current.process();
+  const evidence = electronProcessEvidence(child);
+  evidence.record("quit-requested");
   const requestResultPromise = settleOperationBounded(
-    Promise.resolve().then(requestQuit),
+    Promise.resolve().then(requestQuit).then((value) => {
+      evidence.record("quit-request-fulfilled"); return value;
+    }, (error: unknown) => { evidence.record("quit-request-rejected"); throw error; }),
     options.quitRequestTimeoutMs ?? 1_000,
   );
   const gracefulTimeoutMs = options.gracefulTimeoutMs
@@ -299,31 +334,29 @@ export async function quitElectronAppBounded<T>(
     outcome = child.exitCode === 0 && child.signalCode === null
       ? "graceful"
       : "abnormal";
+    evidence.record(outcome === "graceful" ? "graceful-exit" : "abnormal-exit");
   } else {
     options.mainProcessDiagnostic?.stop();
-    if (child.exitCode === null && child.signalCode === null) {
-      child.kill("SIGKILL");
-    }
-    const exitedAfterForce = await waitForChildExitBounded(
-      child,
-      options.forcedExitTimeoutMs ?? 5_000,
-    );
+    evidence.record("force-stop-started");
+    const exitedAfterForce = await forceStopElectronChild(child, options);
+    evidence.record(exitedAfterForce ? "force-stop-confirmed" : "force-stop-unconfirmed");
     if (!exitedAfterForce) {
       throw new Error(
-        "The Electron fixture process did not exit after forced quit.",
+        "The Electron fixture process tree did not close after forced quit.",
       );
     }
     outcome = "forced";
   }
 
-  // app.quit disconnects Playwright as the native process exits. Settle that
-  // transport only after OS process authority proves the profile is no longer
-  // owned; starting BrowserContext.close earlier races Electron's before-quit
-  // cleanup and can leave the next launch contending for the same profile.
+  // After graceful launcher exit, protocol settlement is still required for
+  // restart. Forced Windows cleanup additionally awaits its owned tree and
+  // inherited pipes; killing only Playwright's shell is not profile-exit proof.
+  evidence.record("transport-started");
   const transportResult = await settleOperationBounded(
     Promise.resolve().then(() => current.close()),
     options.protocolSettleTimeoutMs ?? 1_000,
   );
+  evidence.record(transportResult.status === "timed-out" ? "transport-timed-out" : "transport-settled");
   return {
     outcome,
     requestResult: await requestResultPromise,
@@ -355,15 +388,9 @@ async function closeElectronAppWithOutcome(
       ? "graceful"
       : "abnormal";
   }
-  if (child.exitCode === null && child.signalCode === null) {
-    child.kill("SIGKILL");
-  }
-  const exited = await waitForChildExitBounded(
-    child,
-    options.forcedExitTimeoutMs ?? 5_000,
-  );
+  const exited = await forceStopElectronChild(child, options);
   if (!exited) {
-    throw new Error("The Electron fixture process did not exit after forced close.");
+    throw new Error("The Electron fixture process tree did not close after forced close.");
   }
   // Killing Electron settles Playwright's in-flight BrowserContext close and
   // its Node/CDP transports asynchronously. Give that cleanup a short bounded
@@ -383,6 +410,8 @@ export async function closeElectronAppBounded(
 }
 
 export async function closeElectronFixtureBounded(options: {
+  readonly platform?: NodeJS.Platform;
+  readonly windowsProcessDependencies?: WindowsElectronProcessDependencies;
   readonly current: ElectronApplication | null;
   readonly priorRuntimePid?: number | null;
   readonly readRuntimePid?: () => Promise<number | null>;
@@ -400,6 +429,7 @@ export async function closeElectronFixtureBounded(options: {
 }): Promise<void> {
   const cleanupErrors: unknown[] = [];
   let diagnostic: ElectronMainProcessDiagnostic | null = null;
+  let evidence: ElectronProcessEvidence | null = null;
   let runtimePid: number | null = options.priorRuntimePid ?? null;
   try {
     if (options.current) {
@@ -409,6 +439,7 @@ export async function closeElectronFixtureBounded(options: {
       let snapshotTimedOut = false;
       try {
         childProcess = options.current.process();
+        evidence = electronProcessEvidence(childProcess);
         diagnostic = (options.createMainProcessDiagnostic
           ?? createElectronMainProcessDiagnostic)(childProcess);
       } catch (error) {
@@ -454,6 +485,7 @@ export async function closeElectronFixtureBounded(options: {
               cleanupPhase === "privileged-cleanup-complete";
             cleanupPrepared = cleanupReachedTerminalPhase
               && preparation.value.cleanupConfirmed === true;
+            if (cleanupPrepared) evidence?.record("cleanup-prepared");
             if (!cleanupReachedTerminalPhase) {
               cleanupErrors.push(new Error(
                 `The Electron fixture privileged cleanup returned an unexpected phase (${cleanupPhase}).`,
@@ -501,6 +533,8 @@ export async function closeElectronFixtureBounded(options: {
               : async () => runtimePid,
             {
               childProcess,
+              platform: options.platform,
+              windowsProcessDependencies: options.windowsProcessDependencies,
               ...(diagnostic ? { mainProcessDiagnostic: diagnostic } : {}),
               quitRequestTimeoutMs: options.rpcTimeoutMs ?? 1_000,
               ...(options.prepareRuntimeQuit
@@ -578,10 +612,13 @@ export async function closeElectronFixtureBounded(options: {
         "The Electron fixture preview server did not close in time.",
       ));
     }
+    evidence?.record("directory-remove-started");
     const removeResult = await settleOperationBounded(
       Promise.resolve().then(options.removeDirectory),
       options.removeTimeoutMs ?? 5_000,
     );
+    evidence?.record(`directory-remove-${removeResult.status}`);
+    evidence?.stop();
     if (removeResult.status === "rejected") {
       cleanupErrors.push(removeResult.reason);
     } else if (removeResult.status === "timed-out") {
@@ -591,6 +628,6 @@ export async function closeElectronFixtureBounded(options: {
     }
   }
   if (cleanupErrors.length > 0) {
-    throw new ElectronFixtureCloseError(cleanupErrors, diagnostic?.samples ?? []);
+    throw new ElectronFixtureCloseError(cleanupErrors, diagnostic?.samples ?? [], evidence?.snapshot() ?? null);
   }
 }

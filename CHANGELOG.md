@@ -2,6 +2,33 @@
 
 The useful changes in each Inertia release, in plain language.
 
+## 0.0.51 — 2026-09-06
+
+### Startup and updates
+
+- Windows updates retain the cleanup proof needed to retire the old runtime.
+  Setup verifies the existing installation, preserves its profile, and refuses
+  to replace files while installed processes remain active.
+- If an older Windows update has already left a profile blocked, Inertia
+  explains the recovery step: close the app, choose **Restart** in Windows,
+  and reopen Inertia. Saved projects and conversations remain in place.
+- Linux recovers interrupted update handoffs using the exact prior process and
+  package identities. macOS recovery dialogs remain responsive, and cleanup
+  handles an owned child exiting during its process census.
+- Concurrent shutdown callers now observe the same cleanup result. A pending
+  or failed shutdown can no longer appear successful on a second close call.
+
+### Saved work and everyday use
+
+- Attachment maintenance preserves referenced files when a read fails.
+  Background reconciliation makes progress with slower helpers while shutdown
+  still cancels and confirms their cleanup.
+- Background conversations avoid unnecessary elapsed-time updates. New-chat
+  drafts and the project picker stay open across unchanged runtime refreshes.
+- Windows package checks now verify saved conversations, settings, image bytes,
+  and a newly completed turn after an installed upgrade on both architectures.
+  Repeated lifecycle checks run correctly on Windows and retain their evidence.
+
 ## 0.0.50 — 2026-09-05
 
 Version 0.0.49 was not published; this release includes its changes.

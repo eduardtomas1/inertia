@@ -26,6 +26,7 @@ test.runIf(process.platform === "win32")(
       exitCode: number | null;
       elapsedMs: number;
       queryResult: string;
+      powerShellPath: string;
     }> = [];
     onTestFailed(() => {
       process.stderr.write(`Compiled NSIS guard failure: ${JSON.stringify(queryResults)}\n`);
@@ -67,15 +68,22 @@ test.runIf(process.platform === "win32")(
             || typeof error.exitCode !== "number") throw error;
           exitCode = error.exitCode;
         } finally {
+          const [queryResult = "result-not-recorded", powerShellPath = ""] = (
+            await readFile(queryResultPath, "utf8").catch(() => "result-not-recorded")
+          ).split(/\r?\n/u);
           queryResults.push({
             expectedCode,
             exitCode,
             elapsedMs: Math.round(performance.now() - startedAt),
-            queryResult: (await readFile(queryResultPath, "utf8")
-              .catch(() => "result-not-recorded")).slice(0, 128),
+            queryResult: queryResult.slice(0, 128),
+            powerShellPath: powerShellPath.slice(0, 1024),
           });
         }
         expect(exitCode).toBe(expectedCode);
+        if (process.arch === "x64" || process.arch === "arm64") {
+          expect(queryResults.at(-1)?.powerShellPath)
+            .toMatch(/\\Sysnative\\WindowsPowerShell\\v1\.0\\powershell\.exe$/iu);
+        }
       };
       for (const directory of [installDirectory, siblingDirectory]) {
         const executable = join(directory, "blocker.exe");

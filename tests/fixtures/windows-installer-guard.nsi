@@ -13,7 +13,7 @@ Var PowerShellPath
   Push $R3
   ReadEnvStr $R2 "INERTIA_GUARD_FIXTURE_QUERY_RESULT"
   FileOpen $R3 "$R2" w
-  FileWrite $R3 "$R0"
+  FileWrite $R3 "$R0$\r$\n$PowerShellPath"
   FileClose $R3
   Pop $R3
   Pop $R2

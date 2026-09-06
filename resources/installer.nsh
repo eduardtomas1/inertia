@@ -1,4 +1,10 @@
 !macro customCheckAppRunning
+  ; NSIS is a 32-bit process. Use the native system interpreter when WOW64
+  ; exposes it, avoiding a separate cold 32-bit PowerShell/CIM startup. Keep
+  ; the configured system path when this alias is unavailable (native NSIS).
+  ${if} ${FileExists} "$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe"
+    StrCpy $PowerShellPath "$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe"
+  ${endIf}
   ; Evaluate the bounded inline query itself. Process-scoped Restricted policy
   ; permits individual commands and is not evidence that PowerShell is unusable.
   inertia_check_install_root:

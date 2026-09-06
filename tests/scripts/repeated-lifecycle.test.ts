@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 
 import { linuxProcessGroupCanExecute } from
   "../../scripts/linux-process-group.mjs";
@@ -25,6 +25,9 @@ async function repeatedLifecycleModule() {
     ) => "flake-observed" | "stable-failure" | "stable-pass";
     repeatedLifecycleSuites: (platform: "darwin" | "linux" | "win32") =>
       readonly string[];
+    repeatedLifecycleInvocation: (suites: readonly string[]) => {
+      command: string; args: string[];
+    };
     runLifecycleAttempt: (options: {
       args: string[];
       command: string;
@@ -103,6 +106,31 @@ test("records mixed attempts as flakes without converting them to success", asyn
     { passed: true },
   ])).toBe("flake-observed");
 });
+
+test("executes a selected local Vitest suite through the bounded runner without npm on PATH", async () => {
+  const { repeatedLifecycleInvocation, runLifecycleAttempt } = await repeatedLifecycleModule();
+  const root = await mkdtemp(join(tmpdir(), "inertia lifecycle launch Ω-"));
+  const outputPath = join(root, "attempt.log");
+  try {
+    for (const name of Object.keys(process.env)) {
+      if (name.toUpperCase() === "PATH") vi.stubEnv(name, undefined);
+    }
+    vi.stubEnv("PATH", "");
+    const result = await runLifecycleAttempt({
+      ...repeatedLifecycleInvocation(["tests/shared/source-language.test.ts"]),
+      label: "Local lifecycle runner proof",
+      outputPath,
+      timeoutMs: 15_000,
+    });
+    expect(result).toMatchObject({ outcome: "passed", passed: true });
+    const output = await readFile(outputPath, "utf8");
+    expect(output).toContain("1 passed");
+    expect(output).toContain("3 passed");
+  } finally {
+    vi.unstubAllEnvs();
+    await rm(root, { force: true, recursive: true });
+  }
+}, 30_000);
 
 test("bounds a hung attempt, retains typed start evidence, and confirms owned-tree cleanup", async () => {
   const { runLifecycleAttempt } = await repeatedLifecycleModule();

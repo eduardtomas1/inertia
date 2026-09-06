@@ -10,6 +10,9 @@ const BASE_BENCHMARK_TIMEOUT_MS = 180_000;
 export default defineConfig({
   testDir: "tests/performance",
   testMatch: "desktop.benchmark.spec.ts",
+  // Playwright clears this directory before each run. Keep earlier lifecycle
+  // and E2E evidence outside the benchmark's cleanup boundary.
+  outputDir: "test-results/desktop-benchmark",
   // Each serial stream may legitimately spend the full production Git
   // artifact finalization window before its final-layout sample is valid.
   timeout: BASE_BENCHMARK_TIMEOUT_MS

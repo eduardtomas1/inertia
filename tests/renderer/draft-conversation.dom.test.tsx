@@ -146,6 +146,75 @@ describe("useDraftConversation", () => {
       .toEqual(projectSelection);
   });
 
+  it("preserves a newly opened draft across an unchanged persisted selection refresh", () => {
+    let currentSnapshot = materializedSnapshot("completed", "Existing chat");
+    const hook = renderHook(() => useDraftConversation({
+      snapshot: currentSnapshot,
+      settings: defaultSettings,
+      run: vi.fn(),
+      sendMessage: vi.fn(),
+      persistedConversationId: conversationId,
+      updatePersistedConversation: vi.fn(),
+    }));
+    act(() => hook.result.current.start(projectId));
+    const draft = hook.result.current.conversation;
+    expect(draft).not.toBeNull();
+    currentSnapshot = { ...currentSnapshot };
+    hook.rerender();
+    expect(hook.result.current.conversation?.id).toBe(draft?.id);
+  });
+
+  it("clears the draft when a different persisted chat is selected", () => {
+    const otherId = "33333333-3333-4333-8333-333333333333";
+    let currentSnapshot = materializedSnapshot("completed", "Existing chat");
+    let selectedId = conversationId;
+    const hook = renderHook(() => useDraftConversation({
+      snapshot: currentSnapshot,
+      settings: defaultSettings,
+      run: vi.fn(),
+      sendMessage: vi.fn(),
+      persistedConversationId: selectedId,
+      updatePersistedConversation: vi.fn(),
+    }));
+    act(() => hook.result.current.start(projectId));
+    expect(hook.result.current.conversation).not.toBeNull();
+    selectedId = otherId;
+    currentSnapshot = {
+      ...currentSnapshot,
+      activeConversationId: otherId,
+      conversations: [...currentSnapshot.conversations, {
+        ...currentSnapshot.conversations[0]!, id: otherId,
+      }],
+    };
+    hook.rerender();
+    expect(hook.result.current.conversation).toBeNull();
+  });
+
+  it("clears the draft when navigation selects a different project", () => {
+    const otherProject = { ...project, id: "33333333-3333-4333-8333-333333333333" };
+    let currentSnapshot = materializedSnapshot("completed", "Existing chat");
+    let selectedId: string | null = conversationId;
+    const hook = renderHook(() => useDraftConversation({
+      snapshot: currentSnapshot,
+      settings: defaultSettings,
+      run: vi.fn(),
+      sendMessage: vi.fn(),
+      persistedConversationId: selectedId,
+      updatePersistedConversation: vi.fn(),
+    }));
+    act(() => hook.result.current.start(projectId));
+    expect(hook.result.current.conversation).not.toBeNull();
+    selectedId = null;
+    currentSnapshot = {
+      ...currentSnapshot,
+      activeConversationId: null,
+      activeProjectId: otherProject.id,
+      projects: [project, otherProject],
+    };
+    hook.rerender();
+    expect(hook.result.current.conversation).toBeNull();
+  });
+
   it("keeps a new-project chat local until its first message is sent", async () => {
     const values = new Map<string, string>();
     Object.defineProperty(window, "localStorage", {

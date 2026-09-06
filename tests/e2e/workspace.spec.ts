@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { capturePageWebSockets, refreshCapturedRuntimeSnapshot } from "./support/browser-websocket-fixture";
 
 import {
   MAC_BRAND_MIN_CLEAR_GAP,
@@ -23,6 +24,10 @@ test.beforeAll(async () => {
     windowDisplay: "primary",
   });
   page = app.page;
+  await capturePageWebSockets(page);
+  await page.reload();
+  await page.locator('.app-shell[data-connection-status="online"]').waitFor();
+  await page.getByRole("textbox", { name: "Message" }).first().waitFor();
   rendererErrors = app.rendererErrors;
   resizeWindow = app.resizeWindow;
 });
@@ -250,6 +255,8 @@ test("keeps the macOS brand in the native titlebar row and starts a new chat", a
   await expect(page.getByRole("heading", {
     name: "What should we build today?",
   })).toBeVisible();
+  // A background snapshot refresh must not dismiss the newly opened draft.
+  await refreshCapturedRuntimeSnapshot(page);
   const composer = page.getByLabel("Message composer");
   const projectPicker = composer.getByRole("button", { name: "Project", exact: true });
   await projectPicker.click();

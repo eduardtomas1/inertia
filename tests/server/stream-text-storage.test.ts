@@ -150,9 +150,9 @@ describe("append-oriented stream text persistence", () => {
       turn.id,
       "2026-01-01T00:00:02.000Z",
     );
-    // Each append commits durably. A bounded multi-page fixture proves linear
+    // Each append commits a transaction. A bounded multi-page fixture proves linear
     // chunk storage and restart ordering without making this correctness test
-    // depend on 1,000 hosted-disk flushes. Bulk write timing lives in the
+    // depend on 1,000 disk-backed transactions. Bulk write timing lives in the
     // platform benchmark.
     const deltas = Array.from(
       { length: 128 },

@@ -142,6 +142,7 @@ writeFileSync(authFile, "connected");
 process.stdout.write("Sign-in complete\\n");
 `);
     writeNodeSubcommand(commandCwd, "app-server", `
+const { existsSync } = require("node:fs");
 const readline = require("node:readline");
 const args = process.argv.slice(2);
 const runEvents = ${JSON.stringify(runEvents)};
@@ -188,7 +189,15 @@ if (args.length === 0) {
           });
         } else if (event.type === "turn.completed") {
           const complete = () => send({ method: "turn/completed", params: { threadId, turn: { id: turnId, status: event.status || "completed", items: [], error: event.error || null } } });
-          if (event.delayMs) setTimeout(complete, event.delayMs);
+          if (event.waitForFile) {
+            const deadline = Date.now() + 10_000;
+            const wait = () => {
+              if (existsSync(event.waitForFile)) complete();
+              else if (Date.now() >= deadline) process.exit(1);
+              else setTimeout(wait, 10);
+            };
+            wait();
+          } else if (event.delayMs) setTimeout(complete, event.delayMs);
           else complete();
         }
       }
@@ -2253,11 +2262,12 @@ process.exit(child.status ?? 1);
       const { root, data, workspace } = temporaryWorkspace();
       initializeChangedRepository(workspace);
       const diff = await getUnifiedDiff(workspace);
+      const summaryReady = join(root, "summary-ready");
       const runEvents = scenario === "interaction"
         ? [{ type: "approval.request" }]
         : [
             { type: "item.completed", item: { type: "agent_message", text: reviewResult(diff.text) } },
-            { type: "turn.completed", delayMs: 150 },
+            { type: "turn.completed", waitForFile: summaryReady },
           ];
       const { authFile, executable } = fakeCodex(root, runEvents);
       writeFileSync(authFile, "connected");
@@ -2282,12 +2292,18 @@ process.exit(child.status ?? 1);
         requestId,
         payload: { projectId, conversationId, fingerprint: parseUnifiedDiff(diff.text).fingerprint },
       });
-      await client.events.next(
-        (event): event is Extract<ServerEvent, { type: "snapshot.updated" }> =>
-          event.type === "snapshot.updated"
-          && event.snapshot.runs.some((run) => run.conversationId === conversationId && run.label.includes("read-only diff summary") && run.status === "running"),
-      );
-      if (scenario === "stale") writeFileSync(join(workspace, "review.ts"), "export const enabled = \"changed concurrently\";\n");
+      // An immediate interaction failure may coalesce away the running
+      // snapshot. Only the stale-diff case needs to observe the active run;
+      // hold its completion until the concurrent edit has actually landed.
+      if (scenario === "stale") {
+        await client.events.next(
+          (event): event is Extract<ServerEvent, { type: "snapshot.updated" }> =>
+            event.type === "snapshot.updated"
+            && event.snapshot.runs.some((run) => run.conversationId === conversationId && run.label.includes("read-only diff summary") && run.status === "running"),
+        );
+        writeFileSync(join(workspace, "review.ts"), "export const enabled = \"changed concurrently\";\n");
+        writeFileSync(summaryReady, "ready");
+      }
       const failed = await client.events.next(
         (event): event is Extract<ServerEvent, { type: "request.error" }> =>
           event.type === "request.error" && event.requestId === requestId,

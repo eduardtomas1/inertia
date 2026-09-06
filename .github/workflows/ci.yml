@@ -316,6 +316,10 @@ jobs:
         shell: pwsh
         continue-on-error: true
         run: |
+          # Node's os.tmpdir() follows TEMP/TMP, not RUNNER_TEMP. Keep copied
+          # provider executables and SQLite fixtures in the excluded job tree.
+          Add-Content -Path $env:GITHUB_ENV -Value "TEMP=$env:RUNNER_TEMP"
+          Add-Content -Path $env:GITHUB_ENV -Value "TMP=$env:RUNNER_TEMP"
           Add-MpPreference -ExclusionPath "$env:GITHUB_WORKSPACE"
           Add-MpPreference -ExclusionPath "$env:RUNNER_TEMP"
 
@@ -506,6 +510,8 @@ jobs:
         shell: pwsh
         continue-on-error: true
         run: |
+          Add-Content -Path $env:GITHUB_ENV -Value "TEMP=$env:RUNNER_TEMP"
+          Add-Content -Path $env:GITHUB_ENV -Value "TMP=$env:RUNNER_TEMP"
           Add-MpPreference -ExclusionPath "$env:GITHUB_WORKSPACE"
           Add-MpPreference -ExclusionPath "$env:RUNNER_TEMP"
 
@@ -861,6 +867,8 @@ jobs:
         shell: pwsh
         continue-on-error: true
         run: |
+          Add-Content -Path $env:GITHUB_ENV -Value "TEMP=$env:RUNNER_TEMP"
+          Add-Content -Path $env:GITHUB_ENV -Value "TMP=$env:RUNNER_TEMP"
           Add-MpPreference -ExclusionPath "$env:GITHUB_WORKSPACE"
           Add-MpPreference -ExclusionPath "$env:RUNNER_TEMP"
 

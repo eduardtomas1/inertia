@@ -2,7 +2,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { RuntimeStore } from "../../../src/server/database";
 import { PrivateConnectRuntimeGateway } from "../../../src/server/private-connect/runtime-gateway";
@@ -72,6 +72,7 @@ async function transcript(
 }
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   for (const store of stores.splice(0)) store.close();
   for (const directory of temporaryDirectories.splice(0)) {
     await removeTemporaryDirectory(directory);
@@ -85,11 +86,25 @@ describe("Private Connect runtime transcript memory", () => {
     for (let index = 0; index < 24; index += 1) {
       store.createMessage(
         conversation.id,
-        `Answer ${index}. ${"prose ".repeat(200_000)}`,
+        `Answer ${index}.`,
         "assistant",
       );
     }
+    // Keep the full 24-message load at the gateway's read boundary. Persisting
+    // 29 MB of fixture prose through separate transactions tests storage
+    // throughput, not the cache's retained-byte budget. The other cases keep
+    // real store reads to cover the integration with persisted transcripts.
+    const detail = store.conversationDetail(conversation.id)!;
+    vi.spyOn(store, "conversationDetail").mockReturnValue({
+      ...detail,
+      messages: detail.messages.map((message) => ({
+        ...message,
+        content: `${message.content} ${"prose ".repeat(200_000)}`,
+      })),
+    });
     await transcript(gateway, subject, conversation.id);
+    expect(transcriptCache.size()).toBeGreaterThan(0);
+    expect(transcriptCache.size()).toBeLessThan(detail.messages.length);
     expect(transcriptCache.retainedBytes()).toBeLessThanOrEqual(BUDGET_BYTES);
     await transcript(gateway, subject, conversation.id);
     expect(transcriptCache.retainedBytes()).toBeLessThanOrEqual(BUDGET_BYTES);

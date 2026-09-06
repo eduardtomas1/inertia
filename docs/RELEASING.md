@@ -153,6 +153,13 @@ union.
 
 Stable PR and release jobs download the checksummed preceding public installer
 for each native Windows architecture and upgrade its existing installation.
+The predecessor saves a conversation and completes a synthetic-provider turn;
+after its verified shutdown, the fixture binds a unique retained image to that
+saved message. The candidate must preserve the captured identities, content,
+settings and image bytes, complete a distinct new turn, and retain both turns
+after shutdown. Expected history is stored outside the app profile so recreating
+the profile cannot satisfy the check. This is installed data-preservation proof,
+not attachment-upload UI coverage.
 Canary retains its isolated fresh-install gate. macOS tag builds run the complete
 unit suite with the same two-worker limit as PR CI.
 

@@ -949,12 +949,12 @@ export async function createAppFixture(
         const nextPage = await nextApp.firstWindow();
         observeElectronPage(nextPage, rendererErrors, nextApp.process());
         if (options.windowDisplay === "primary") {
-          await nextApp.evaluate(
-            ({ BrowserWindow, screen }) => {
-              const origin = screen.getPrimaryDisplay().workArea;
-              BrowserWindow.getAllWindows()[0]?.setPosition(origin.x, origin.y);
-            },
-          );
+          // A restored auxiliary window can lead getAllWindows(); move the
+          // workbench owned by this page, preserving the mascot's saved bounds.
+          const origin = await nextApp.evaluate(({ screen }) => screen.getPrimaryDisplay().workArea);
+          const nativeWindow = await nextApp.browserWindow(nextPage);
+          await nativeWindow.evaluate((window, point) => window.setPosition(point.x, point.y), origin);
+          await nativeWindow.dispose();
         }
         await nextPage.locator(
           '.app-shell[data-connection-status="online"]',

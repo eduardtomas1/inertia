@@ -634,6 +634,7 @@ parentPort.on("message", (messageEvent) => {
     return;
   }
   void startRuntime({
+    onMascotStatus: (status) => post({ type: "runtime.mascot-status", status }),
     ...command.options,
     onCleanupReceiptConsumed: (
       receiptRuntimeGenerationId,

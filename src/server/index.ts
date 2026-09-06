@@ -1,8 +1,8 @@
+import { MascotStatusPublisher } from "./runtime/mascot-status";
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:http";
 import { join, resolve } from "node:path";
 import WebSocket from "ws";
-
 import {
   type AgentApprovalRequest,
   type AgentInputRequest,
@@ -132,8 +132,8 @@ export type {
 export {
   assembleReadOnlyReviewRequest,
 } from "./runtime/commands/review-support";
-
 export async function startRuntime(options: RuntimeOptions): Promise<RunningRuntime> {
+  const mascotStatus = new MascotStatusPublisher(options.onMascotStatus);
   const runtimeStartedAt = new Date().toISOString();
   const startupRecovery = prepareRuntimeStartupRecovery(options);
   const {
@@ -387,7 +387,6 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   const runtimeCommandDrainWaiters = new Set<() => void>();
   let artifactReconciliation: Promise<void> | null = null;
   let artifactReconciliationActive = false;
-
   const server = createServer((_request, response) => {
     response.writeHead(404, {
       "Cache-Control": "no-store",
@@ -401,7 +400,6 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   server.requestTimeout = 10_000;
   server.keepAliveTimeout = 1_000;
   server.maxHeadersCount = 32;
-
   const canStopWorkspaceRun = (run: AppSnapshot["runs"][number]): boolean => {
     if (run.status !== "running" && run.status !== "waiting") return false;
     if (run.kind === "check" || run.kind === "service") {
@@ -423,6 +421,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       pendingApproval: approvalConversationIds.has(conversation.id),
       pendingInput: inputConversationIds.has(conversation.id),
     }));
+    mascotStatus.replace(conversations);
     const runs = snapshot.runs.map((run) => ({
       ...run,
       canStop: canStopWorkspaceRun(run),
@@ -455,6 +454,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   };
   const detachedChatRuntimeSecurity = createDetachedChatRuntimeSecurity({ websocketPath, store, snapshot: currentSnapshot, pendingApprovals, pendingInputs });
   const broadcast = (event: RuntimeMutationEvent): void => {
+    if (event.type === "conversation.shell.updated") mascotStatus.update(event.conversation);
     runtimeSync.broadcast(event);
   };
   const broadcastConversationShell = (conversationId: string): void => {
@@ -683,7 +683,6 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     { workspaceRuns, runtimeClosed: () => closed },
   );
   duoLaunches = duoLaunchCoordinator;
-
   const executeCommand = createRuntimeCommandExecutor({
     handlers: [
       createDuoCommandHandler({
@@ -1015,6 +1014,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     inputs: () => pendingInputs.values(),
   });
 
+  currentSnapshot();
   return {
     runPackageSmokeImage: (inputPath, resultPath, signal) =>
       runPackagedImageRetentionSmoke(

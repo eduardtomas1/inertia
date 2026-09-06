@@ -29,6 +29,7 @@ import type {
 } from "./runtime/agent-browser-broker-client.js";
 
 export interface RuntimeOptions {
+  onMascotStatus?: (status: import("../shared/mascot").MascotStatus) => void;
   dataDirectory: string;
   defaultWorkspacePath: string;
   enableProviders?: boolean;

@@ -30,6 +30,7 @@ Use **Ctrl/Cmd+K** to find commands, projects, and chats. Choose **All projects*
 - **Work side by side.** Open two chats in a split workspace, launch a saved Duo, or move a chat into its own window. Each keeps its own project, files, terminal, and draft.
 - **Review and ship.** Inspect diffs, ask about selected code, commit chosen files, manage branches and worktrees, and check PR readiness.
 - **Keep useful work close.** Pin or snooze tasks, save prompts, follow plans and goals, and inspect locally recorded usage.
+- **Optional desktop mascot.** Enable it in **Settings → General** for a movable companion with live chat status. Click its label to return to the chat; right-click to pause or hide. Reduced motion uses still artwork. Wayland manages placement through the window manager.
 
 ![Two conversations with independent composers in a split workspace](docs/screenshots/inertia-split-workspace.png)
 

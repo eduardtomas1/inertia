@@ -1,3 +1,4 @@
+import { exposeMascotSettings } from "./mascot-settings.js";
 import { contextBridge, ipcRenderer } from "electron";
 import type {
   AppUpdateStatus,
@@ -399,3 +400,5 @@ const bridge: DesktopBridge = Object.freeze({
 });
 
 contextBridge.exposeInMainWorld("inertia", bridge);
+
+exposeMascotSettings();

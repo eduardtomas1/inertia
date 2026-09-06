@@ -1,3 +1,4 @@
+import { parseMascotStatus, type MascotStatus } from "../shared/mascot.js";
 import { isAbsolute } from "node:path";
 import { parseOpenProjectPathRequest, type OpenProjectPathRequest } from "../shared/desktop";
 import { parseRuntimeAgentBrowserEvent, parseRuntimeAgentBrowserResult, type RuntimeAgentBrowserEvent, type RuntimeAgentBrowserResult } from "./runtime-agent-browser-protocol";
@@ -58,10 +59,8 @@ export { validRuntimeGenerationId, validSystemBootId } from "./runtime-identity-
 export type { RuntimeDatabaseStartupRecoveryReport } from "./runtime-database-recovery-protocol";
 export type { RuntimeShutdownUnconfirmedReason } from "./runtime-shutdown-protocol.js";
 export type { RuntimeUpdatePreparationBlocker, RuntimeUpdatePreparationResult } from "./runtime-update-process-protocol";
-
 export type { RuntimeConversationAttachmentStoreResult }
   from "./conversation-attachment-store-protocol";
-
 export interface RuntimeWorkerOptions extends RuntimeRecoveryWorkerOptions {
   dataDirectory: string;
   defaultWorkspacePath: string;
@@ -92,15 +91,12 @@ export interface RuntimeWorkerOptions extends RuntimeRecoveryWorkerOptions {
     stallMs: number;
   };
 }
-
 export interface RuntimePrivateConnectPromptPreparation {
   preparationId: string;
 }
-
 export type RuntimePrivateConnectForgetScope =
   | { kind: "all" }
   | { kind: "conversation"; conversationId: string };
-
 export type RuntimeDatabaseRecoveryOperation = "export" | "import";
 
 export interface RuntimeDatabaseRecoverySummary {
@@ -257,6 +253,7 @@ export interface RuntimeSecureFileResult {
 export type RuntimeRestartReason = "owned-process-tainted" | "owned-process-cleanup-unconfirmed";
 
 export type RuntimeWorkerEvent =
+  | { type: "runtime.mascot-status"; status: MascotStatus }
   | {
       type: "runtime.ready";
       websocketUrl: string;
@@ -705,6 +702,10 @@ export function parseRuntimeWorkerEvent(value: unknown): RuntimeWorkerEvent | nu
     && UUID_PATTERN.test(value.id)
     && typeof value.recorded === "boolean"
   ) return { type: "runtime.system-suspend-result", id: value.id, recorded: value.recorded };
+  if (value.type === "runtime.mascot-status" && Object.keys(value).length === 2) {
+    const status = parseMascotStatus(value.status);
+    return status ? { type: "runtime.mascot-status", status } : null;
+  }
   const updateEvent = parseRuntimeUpdateWorkerEvent(value);
   if (updateEvent) return updateEvent;
   const browserEvent = parseRuntimeAgentBrowserEvent(value); if (browserEvent) return browserEvent;

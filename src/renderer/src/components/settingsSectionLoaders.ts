@@ -20,6 +20,10 @@ export const loadLifecycleIntegritySettings = createSurfaceLoader(async () => ({
     .LifecycleIntegritySettings,
 }));
 
+export const loadMascotSettings = createSurfaceLoader(async () => ({
+  default: (await import("./MascotSettings")).MascotSettings,
+}));
+
 export function prefetchSettingsSection(section: string): void {
   if (section === "providers" || section === "archive") {
     void loadLifecycleIntegritySettings();

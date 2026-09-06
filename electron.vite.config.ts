@@ -119,6 +119,7 @@ export default defineConfig({
         input: {
           index: resolve("src/preload/index.ts"),
           "detached-chat": resolve("src/preload/detached-chat.ts"),
+          mascot: resolve("src/preload/mascot.ts"),
           "preview-agent-privacy": resolve("src/preload/preview-agent-privacy.ts"),
         },
         output: {
@@ -149,7 +150,7 @@ export default defineConfig({
       cssCodeSplit: true,
       chunkSizeWarningLimit: 850,
       rollupOptions: {
-        input: resolve("src/renderer/index.html"),
+        input: { index: resolve("src/renderer/index.html"), mascot: resolve("src/renderer/mascot.html") },
         output: {
           onlyExplicitManualChunks: true,
           chunkFileNames({ name }) {

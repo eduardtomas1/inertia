@@ -668,11 +668,29 @@ static int freeze_owned_tree(
       (size_t)tracker->count * sizeof(*tracker->members)
     );
     const int previous_count = tracker->count;
+    int exited_direct_child = 0;
     for (int index = 0; index < previous_count; index += 1) {
-      if (!signal_exact_owned_member(&tracker->previous[index], SIGSTOP)) {
+      const struct session_member *member = &tracker->previous[index];
+      if (!signal_exact_owned_member(member, SIGSTOP)) {
+        // A census-selected child can exit before its signal identity probe.
+        // No child has been reaped since this census, so a direct child's PID
+        // is still exclusive even when its zombie birth identity is hidden.
+        // Only a positive wait for that child closes this window; live or
+        // non-child identity failures retain the unproved cleanup result.
+        int status = 0;
+        const pid_t child_pid = (pid_t)member->identity.pbi_pid;
+        if ((pid_t)member->identity.pbi_ppid == guardian_pid
+          && waitpid(child_pid, &status, WNOHANG) == child_pid
+          && (WIFEXITED(status) || WIFSIGNALED(status))) {
+          exited_direct_child = 1;
+          break;
+        }
         return cleanup_failed("freeze-stop-signal");
       }
     }
+    // Rebuild the complete owned set and retain fork observations within the
+    // existing pass limit. Reaping one child alone never proves tree cleanup.
+    if (exited_direct_child) continue;
     const struct timespec pause = { .tv_sec = 0, .tv_nsec = POLL_NANOSECONDS };
     (void)nanosleep(&pause, NULL);
     reap_children();

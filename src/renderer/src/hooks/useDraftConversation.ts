@@ -112,6 +112,7 @@ export function useDraftConversation({
       : null;
   });
   const draftRef = useRef(draft);
+  const selectionWhenDraftOpenedRef = useRef(persistedConversationId);
 
   const replaceDraft = useCallback((
     next: DraftConversationState | null,
@@ -124,6 +125,7 @@ export function useDraftConversation({
 
   const start = (projectId: string): void => {
     discard();
+    selectionWhenDraftOpenedRef.current = persistedConversationId;
     const payload = snapshot
       ? defaultConversationPayloadForProject(snapshot, settings, projectId)
       : buildNewConversationPayload(projectId, settings);
@@ -295,6 +297,10 @@ export function useDraftConversation({
       } else if (
         (
           persistedConversationId
+          // Opening a global draft leaves the prior chat selected. Refreshing
+          // that same selection is not navigation away from the new draft.
+          && (current.materialized !== null
+            || persistedConversationId !== selectionWhenDraftOpenedRef.current)
           && current.materialized?.conversationId !== persistedConversationId
         )
         || snapshot.activeProjectId !== current.conversation.projectId

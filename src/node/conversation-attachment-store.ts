@@ -945,15 +945,11 @@ export class ConversationAttachmentStore {
     id: string,
     signal?: AbortSignal,
   ): Promise<ConversationAttachmentPreview | null> {
-    try {
-      const current = await this.inspect(id, signal);
-      if (!current) await this.removeRecord(id, signal);
-      return current;
-    } catch (error) {
-      if (signal?.aborted) throw error;
-      await this.removeRecord(id, signal);
-      return null;
-    }
+    // Failed reads do not establish invalid content: helper startup, IPC, and
+    // timeout failures can occur while a referenced record remains intact.
+    const current = await this.inspect(id, signal);
+    if (!current) await this.removeRecord(id, signal);
+    return current;
   }
 
   private async persist(

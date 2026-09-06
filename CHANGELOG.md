@@ -9,7 +9,8 @@ The useful changes in each Inertia release, in plain language.
 - Windows can recover the exact malformed startup record left by an older
   failed process launch, preserving saved projects, conversations, and images.
   Shutdown closes new process admission before confirming cleanup.
-- Linux AppImage launches wait for a verified older owner to release the app.
+- Linux AppImage launches briefly wait for a verified owner running a different
+  version to release the app, and explain when ownership remains blocked.
   If shutdown cannot finish, a visible notice offers **Retry quit** and
   **Show Inertia** instead of leaving an invisible process behind.
 - Codex context compaction works in both Standard and Fast mode, and the same

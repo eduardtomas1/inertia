@@ -144,9 +144,9 @@ describe("mascot window ownership", () => {
     const app = await fixture();
     await app.invoke(MASCOT_IPC.configure, [{ enabled: true, motion: true }]);
     const overlay = harness.windows[1] as WindowDouble;
-    overlay.setBounds({ x: 2000, y: 2000, width: 176, height: 168 });
+    overlay.setBounds({ x: 2000, y: 2000, width: 240, height: 240 });
     vi.advanceTimersByTime(400);
-    expect(overlay.getBounds()).toEqual({ x: 1264, y: 732, width: 176, height: 168 });
+    expect(overlay.getBounds()).toEqual({ x: 1200, y: 660, width: 240, height: 240 });
     expect(vi.getTimerCount()).toBe(0);
     app.mascot.runtimePhase("restarting");
     expect(app.mascot.snapshot().status).toEqual(emptyMascotStatus("unavailable"));

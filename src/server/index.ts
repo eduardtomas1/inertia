@@ -133,7 +133,7 @@ export {
   assembleReadOnlyReviewRequest,
 } from "./runtime/commands/review-support";
 export async function startRuntime(options: RuntimeOptions): Promise<RunningRuntime> {
-  const mascotStatus = new MascotStatusPublisher(options.onMascotStatus);
+  const mascotStatus = new MascotStatusPublisher(options.onMascotStatus, (id) => store.conversationShell(id));
   const runtimeStartedAt = new Date().toISOString();
   const startupRecovery = prepareRuntimeStartupRecovery(options);
   const {
@@ -454,7 +454,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   };
   const detachedChatRuntimeSecurity = createDetachedChatRuntimeSecurity({ websocketPath, store, snapshot: currentSnapshot, pendingApprovals, pendingInputs });
   const broadcast = (event: RuntimeMutationEvent): void => {
-    if (event.type === "conversation.shell.updated") mascotStatus.update(event.conversation);
+    mascotStatus.observe(event);
     runtimeSync.broadcast(event);
   };
   const broadcastConversationShell = (conversationId: string): void => {

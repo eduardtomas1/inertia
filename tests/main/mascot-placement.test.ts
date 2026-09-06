@@ -19,10 +19,10 @@ describe("mascot placement and contracts", () => {
     expect(supportsMascotPlacement("linux", { WAYLAND_DISPLAY: "wayland-0" }, "x11")).toBe(true);
   });
   it("clamps the entire overlay after drag, monitor removal, and scale changes", () => {
-    expect(mascotBounds({ x: -2000, y: -300 }, [primary, secondary])).toEqual({ x: -1920, y: -200, width: 176, height: 168 });
-    expect(mascotBounds({ x: -1800, y: -150 }, [primary])).toEqual({ x: 0, y: 24, width: 176, height: 168 });
-    expect(mascotBounds({ x: 1439, y: 899 }, [primary])).toEqual({ x: 1264, y: 732, width: 176, height: 168 });
-    expect(mascotBounds(null, [primary])).toEqual({ x: 1240, y: 708, width: 176, height: 168 });
+    expect(mascotBounds({ x: -2000, y: -300 }, [primary, secondary])).toEqual({ x: -1920, y: -200, width: 240, height: 240 });
+    expect(mascotBounds({ x: -1800, y: -150 }, [primary])).toEqual({ x: 0, y: 24, width: 240, height: 240 });
+    expect(mascotBounds({ x: 1439, y: 899 }, [primary])).toEqual({ x: 1200, y: 660, width: 240, height: 240 });
+    expect(mascotBounds(null, [primary])).toEqual({ x: 1176, y: 636, width: 240, height: 240 });
   });
 
   it("defaults off and atomically persists enablement, motion, and placement", () => {

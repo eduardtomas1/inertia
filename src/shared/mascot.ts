@@ -16,6 +16,10 @@ export interface MascotStatus {
   runId: string | null;
   turnId: string | null;
   activeCount: number;
+  chatTitle: string | null;
+  /** Bounded plain-text preview from this turn's public activity or interaction. */
+  message: string | null;
+  progress: string | null;
 }
 export interface MascotPreferences {
   enabled: boolean;
@@ -51,13 +55,14 @@ export const MASCOT_LABELS: Record<MascotPhase, string> = {
 };
 
 export function emptyMascotStatus(phase: "idle" | "unavailable" = "idle"): MascotStatus {
-  return { phase, projectId: null, conversationId: null, runId: null, turnId: null, activeCount: 0 };
+  return { phase, projectId: null, conversationId: null, runId: null, turnId: null, activeCount: 0,
+    chatTitle: null, message: null, progress: null };
 }
 
 export function parseMascotStatus(value: unknown): MascotStatus | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const candidate = value as Record<string, unknown>;
-  if (Object.keys(candidate).length !== 6
+  if (Object.keys(candidate).length !== 9
     || typeof candidate.phase !== "string"
     || !Object.hasOwn(MASCOT_LABELS, candidate.phase)
     || !Number.isSafeInteger(candidate.activeCount)
@@ -67,6 +72,11 @@ export function parseMascotStatus(value: unknown): MascotStatus | null {
   for (const key of ["projectId", "conversationId", "runId", "turnId"] as const) {
     const id = candidate[key];
     if (empty ? id !== null : typeof id !== "string" || id.length < 1 || id.length > 200 || /[\x00-\x1f\x7f]/u.test(id)) return null;
+  }
+  for (const [key, limit] of [["chatTitle", 96], ["message", 280], ["progress", 80]] as const) {
+    const text = candidate[key];
+    if (text !== null && (empty || typeof text !== "string" || !text.length || text.length > limit
+      || /[\x00-\x1f\x7f\u202a-\u202e\u2066-\u2069]/u.test(text))) return null;
   }
   return candidate as unknown as MascotStatus;
 }

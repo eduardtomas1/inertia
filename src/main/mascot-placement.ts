@@ -3,7 +3,7 @@ import type { Rectangle } from "electron";
 import { parseMascotPreferences, type MascotPreferences } from "../shared/mascot.js";
 import type { WindowBoundsDisplay } from "./window-bounds.js";
 
-export const MASCOT_SIZE = { width: 176, height: 168 };
+export const MASCOT_SIZE = { width: 240, height: 240 };
 
 export function supportsMascotPlacement(
   platform: string, environment: NodeJS.ProcessEnv, ozonePlatform: string,

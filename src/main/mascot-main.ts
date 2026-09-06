@@ -133,9 +133,9 @@ export class MascotMain {
     });
     // Cut away unused corners on platforms with native input-region support.
     if (process.platform !== "darwin" && this.canPosition) window.setShape([
-      { x: 4, y: 0, width: 168, height: 46 },
-      { x: 76, y: 44, width: 36, height: 36 },
-      { x: 40, y: 64, width: 96, height: 98 },
+      { x: 4, y: 0, width: 232, height: 118 },
+      { x: 108, y: 116, width: 36, height: 36 },
+      { x: 72, y: 136, width: 96, height: 98 },
     ]);
     try { await window.loadURL(this.rendererUrl); }
     catch {

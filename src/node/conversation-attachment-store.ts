@@ -57,6 +57,11 @@ const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/u;
 
+/** Transient admission failure: no retention bytes have been published. */
+export class ConversationAttachmentStoreReconcilingError extends Error {
+  constructor() { super("Conversation attachment storage is still reconciling."); }
+}
+
 interface PersistedAttachmentMetadata {
   readonly version: 1;
   readonly id: string;
@@ -379,7 +384,7 @@ export class ConversationAttachmentStore {
       this.assertOpen();
       signal?.throwIfAborted();
       if (this.reconciliation) {
-        throw new Error("Conversation attachment storage is still reconciling.");
+        throw new ConversationAttachmentStoreReconcilingError();
       }
       if (this.reconciliationFailure) {
         throw new Error("Conversation attachment storage reconciliation failed.");
@@ -504,9 +509,9 @@ export class ConversationAttachmentStore {
     });
   }
 
-  async preview(id: string): Promise<ConversationAttachmentPreview | null> {
+  async preview(id: string, signal?: AbortSignal): Promise<ConversationAttachmentPreview | null> {
     this.assertOpen();
-    return await this.inspect(id);
+    return await this.inspect(id, signal);
   }
 
   acceptRetention(retentionId: string): void {

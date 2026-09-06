@@ -8,6 +8,7 @@ import { dirname, join, resolve } from "node:path";
 import WebSocket from "ws";
 import { parseDocument } from "yaml";
 import { runPackagedHistorySmoke } from "./package-smoke-history-runtime.mjs";
+import { packageSmokePath } from "./package-smoke-path.mjs";
 
 import {
   packageSmokeProcessesExited,
@@ -1071,6 +1072,9 @@ try {
   // at the same path while the application is replaced so this upgrade smoke
   // does not also introduce an unrelated provider installation change.
   const packagedCodex = await createWindowsCodexFixture(stateRoot, workspaceDirectory);
+  const packagedPath = packagedCodex ? await packageSmokePath(packagedCodex.directory, {
+    includeGit: Boolean(historyMode),
+  }) : null;
   const packagedPdf = await createPdfFixture(temporaryRoot);
   const packagedImage = await createImageFixture(temporaryRoot);
   if (proveAppImageFileDescriptorChain) {
@@ -1181,7 +1185,7 @@ try {
           PNPM_HOME: "",
           BUN_INSTALL: "",
           VOLTA_HOME: "",
-          PATH: packagedCodex.directory,
+          PATH: packagedPath,
           PATHEXT: ".EXE;.CMD;.BAT",
         } : {}),
       },

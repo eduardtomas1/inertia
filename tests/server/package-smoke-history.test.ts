@@ -6,7 +6,7 @@ import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
 
 import type { RunningRuntime } from "../../src/server";
@@ -28,6 +28,7 @@ interface Baseline extends Proof {
 }
 const runtimeUrl = pathToFileURL(resolve("scripts/package-smoke-history-runtime.mjs")).href;
 const storageUrl = pathToFileURL(resolve("scripts/package-smoke-history-storage.mjs")).href;
+const pathUrl = pathToFileURL(resolve("scripts/package-smoke-path.mjs")).href;
 async function modules() {
   const runtime = await import(runtimeUrl) as {
     runPackagedHistorySmoke: (options: { websocketUrl: string; workspaceDirectory: string;
@@ -47,6 +48,7 @@ const runtimes: RunningRuntime[] = [];
 afterEach(async () => {
   await Promise.all(runtimes.splice(0).map((runtime) => runtime.close()));
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+  vi.unstubAllEnvs();
 });
 
 async function fixture() {
@@ -57,6 +59,16 @@ async function fixture() {
   const bin = join(root, "provider");
   await mkdir(bin);
   const executable = portableNodeExecutable(bin, "codex");
+  const { packageSmokePath } = await import(pathUrl) as {
+    packageSmokePath: (directory: string, options: { includeGit: boolean }) => Promise<string>;
+  };
+  // Exercise the same isolated executable search path as the installed smoke.
+  // Without its explicit Git directory, conversation.create fails before a turn.
+  const isolatedPath = await packageSmokePath(bin, { includeGit: true });
+  for (const name of Object.keys(process.env)) {
+    if (name.toUpperCase() === "PATH") vi.stubEnv(name, undefined);
+  }
+  vi.stubEnv("PATH", isolatedPath);
   writeNodeSubcommand(workspaceDirectory, "login", `
 if (process.argv[2] !== "status") process.exit(2);
 console.log("Logged in using ChatGPT");

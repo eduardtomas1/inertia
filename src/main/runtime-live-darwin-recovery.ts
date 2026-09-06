@@ -1,3 +1,5 @@
+import type { BrowserWindow } from "electron";
+
 import type { ModernDarwinRecoveryAuthorityDescriptor } from
   "../node/runtime-modern-recovery-authorities.js";
 import { promptForLiveModernDarwinRuntimeRecovery } from
@@ -10,6 +12,7 @@ export class RuntimeLiveDarwinRecoveryCoordinator {
   readonly #dataDirectory: string;
   readonly #systemBootId: string;
   readonly #guardianPath: string | null;
+  readonly #getWindow: () => BrowserWindow | null;
   readonly #platform: NodeJS.Platform;
   readonly #prompt: typeof promptForLiveModernDarwinRuntimeRecovery;
   readonly #reportError: (error: unknown) => void;
@@ -19,17 +22,20 @@ export class RuntimeLiveDarwinRecoveryCoordinator {
     readonly dataDirectory: string;
     readonly systemBootId: string;
     readonly guardianPath: string | null;
+    readonly getWindow: () => BrowserWindow | null;
     readonly platform?: NodeJS.Platform;
     readonly prompt?: (
       dataDirectory: string,
       systemBootId: string,
       guardianPath: string,
+      window: BrowserWindow,
     ) => Promise<ModernDarwinRecoveryAuthorityDescriptor | null>;
     readonly reportError?: (error: unknown) => void;
   }) {
     this.#dataDirectory = options.dataDirectory;
     this.#systemBootId = options.systemBootId;
     this.#guardianPath = options.guardianPath;
+    this.#getWindow = options.getWindow;
     this.#platform = options.platform ?? process.platform;
     this.#prompt = options.prompt ?? promptForLiveModernDarwinRuntimeRecovery;
     this.#reportError = options.reportError ?? ((error) => console.error(
@@ -49,13 +55,18 @@ export class RuntimeLiveDarwinRecoveryCoordinator {
       || !supervisor?.canResumeWithModernDarwinRecovery()
       || this.#offeredGenerations.has(snapshot.generation)
     ) return;
+    const window = this.#getWindow();
+    if (!window || window.isDestroyed()) return;
     this.#offeredGenerations.add(snapshot.generation);
     void this.#prompt(
       this.#dataDirectory,
       this.#systemBootId,
       this.#guardianPath,
+      window,
     ).then((authority) => {
-      if (authority) supervisor.resumeWithModernDarwinRecovery(authority);
+      if (authority && !window.isDestroyed()) {
+        supervisor.resumeWithModernDarwinRecovery(authority);
+      }
     }).catch(this.#reportError);
   }
 }

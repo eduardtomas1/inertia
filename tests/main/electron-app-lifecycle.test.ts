@@ -64,6 +64,8 @@ function controlledElectronApp(options: {
   };
 }
 
+// These mocks model direct POSIX children. Windows launcher/tree ownership is
+// exercised with the real repository terminator in electron-windows-process.test.ts.
 describe("Electron E2E application lifecycle", () => {
   it("retains exact renderer resource failures and ignores successful traffic", () => {
     const events = new EventEmitter();
@@ -194,6 +196,7 @@ describe("Electron E2E application lifecycle", () => {
   it("forces a hung app closed and lets Playwright transport cleanup settle", async () => {
     const fixture = controlledElectronApp({ settleCloseAfterKill: true });
     await closeElectronAppBounded(fixture.app, {
+      platform: "darwin",
       gracefulTimeoutMs: 5,
       forcedExitTimeoutMs: 50,
       protocolSettleTimeoutMs: 50,
@@ -205,6 +208,7 @@ describe("Electron E2E application lifecycle", () => {
   it("does not inherit a permanently unresolved Playwright close", async () => {
     const fixture = controlledElectronApp({ settleCloseAfterKill: false });
     await expect(closeElectronAppBounded(fixture.app, {
+      platform: "darwin",
       gracefulTimeoutMs: 5,
       forcedExitTimeoutMs: 50,
       protocolSettleTimeoutMs: 5,
@@ -279,6 +283,7 @@ describe("Electron E2E application lifecycle", () => {
         process: () => process,
         close,
       } as unknown as ElectronApplication, async () => undefined, {
+        platform: "darwin",
         gracefulTimeoutMs: 5,
         forcedExitTimeoutMs: 50,
         protocolSettleTimeoutMs: 50,
@@ -369,6 +374,7 @@ describe("Electron E2E application lifecycle", () => {
         process: () => process,
         close: async () => { throw new Error("Playwright disconnected"); },
       } as unknown as ElectronApplication, {
+        platform: "darwin",
         gracefulTimeoutMs: 13_000,
         forcedExitTimeoutMs: 100,
       });
@@ -393,6 +399,7 @@ describe("Electron E2E application lifecycle", () => {
     const closeServer = vi.fn(() => new Promise<void>(() => undefined));
     const removeDirectory = vi.fn(async () => undefined);
     await expect(closeElectronFixtureBounded({
+      platform: "darwin",
       current: {
         process: () => process,
         close,
@@ -436,6 +443,7 @@ describe("Electron E2E application lifecycle", () => {
     });
     const waitForRuntimeExit = vi.fn(async () => undefined);
     const closing = closeElectronFixtureBounded({
+      platform: "darwin",
       current: {
         process: () => process,
         close: async () => undefined,
@@ -475,6 +483,7 @@ describe("Electron E2E application lifecycle", () => {
     });
     const requestRuntimeQuit = vi.fn(async () => 777);
     const failure = await closeElectronFixtureBounded({
+      platform: "darwin",
       current: {
         process: () => process,
         close: async () => undefined,
@@ -526,6 +535,7 @@ describe("Electron E2E application lifecycle", () => {
     const closeServer = vi.fn(async () => undefined);
     const removeDirectory = vi.fn(async () => undefined);
     const failure = await closeElectronFixtureBounded({
+      platform: "darwin",
       current: {
         process: () => process,
         close: async () => undefined,
@@ -574,6 +584,7 @@ describe("Electron E2E application lifecycle", () => {
     });
     const waitForRuntimeExit = vi.fn(async () => undefined);
     await expect(closeElectronFixtureBounded({
+      platform: "darwin",
       current: {
         process: captureProcess,
         close: async () => undefined,
@@ -616,6 +627,7 @@ describe("Electron E2E application lifecycle", () => {
         const closeServer = vi.fn(async () => undefined);
         const removeDirectory = vi.fn(async () => undefined);
         const closing = closeElectronFixtureBounded({
+          platform: "darwin",
           current: {
             process: () => process,
             close,
@@ -648,6 +660,7 @@ describe("Electron E2E application lifecycle", () => {
     const closeServer = vi.fn(async () => undefined);
     const removeDirectory = vi.fn(async () => undefined);
     const result = closeElectronFixtureBounded({
+      platform: "darwin",
       current: {
         process: () => { throw new Error("child handle unavailable"); },
         close: vi.fn(async () => undefined),
@@ -679,6 +692,7 @@ describe("Electron E2E application lifecycle", () => {
       kill: vi.fn(() => true),
     });
     const failure = await closeElectronFixtureBounded({
+      platform: "darwin",
       current: {
         process: () => process,
         close: async () => { throw new Error("Playwright disconnected during crash"); },
@@ -710,6 +724,7 @@ describe("Electron E2E application lifecycle", () => {
     const waitForRuntimeExit = vi.fn(async () => undefined);
     const removeDirectory = vi.fn(async () => undefined);
     const failure = await closeElectronFixtureBounded({
+      platform: "darwin",
       current: {
         process: () => process,
         close: async () => undefined,
@@ -739,6 +754,7 @@ describe("Electron E2E application lifecycle", () => {
       kill: vi.fn(() => true),
     });
     const failure = await closeElectronFixtureBounded({
+      platform: "darwin",
       current: {
         process: () => process,
         close: async () => undefined,
@@ -778,6 +794,7 @@ describe("Electron E2E application lifecycle", () => {
           }),
         });
         const closing = closeElectronFixtureBounded({
+          platform: "darwin",
           current: {
             process: () => process,
             close: () => new Promise<void>(() => undefined),
@@ -828,6 +845,7 @@ describe("Electron E2E application lifecycle", () => {
     const closeServer = vi.fn(async () => undefined);
     const removeDirectory = vi.fn(async () => undefined);
     await expect(closeElectronFixtureBounded({
+      platform: "darwin",
       current: {
         process: processHandle,
         close,

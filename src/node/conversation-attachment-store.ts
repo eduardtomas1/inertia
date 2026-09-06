@@ -57,6 +57,11 @@ const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/u;
 
+/** Transient admission failure: no retention bytes have been published. */
+export class ConversationAttachmentStoreReconcilingError extends Error {
+  constructor() { super("Conversation attachment storage is still reconciling."); }
+}
+
 interface PersistedAttachmentMetadata {
   readonly version: 1;
   readonly id: string;
@@ -379,7 +384,7 @@ export class ConversationAttachmentStore {
       this.assertOpen();
       signal?.throwIfAborted();
       if (this.reconciliation) {
-        throw new Error("Conversation attachment storage is still reconciling.");
+        throw new ConversationAttachmentStoreReconcilingError();
       }
       if (this.reconciliationFailure) {
         throw new Error("Conversation attachment storage reconciliation failed.");
@@ -504,9 +509,9 @@ export class ConversationAttachmentStore {
     });
   }
 
-  async preview(id: string): Promise<ConversationAttachmentPreview | null> {
+  async preview(id: string, signal?: AbortSignal): Promise<ConversationAttachmentPreview | null> {
     this.assertOpen();
-    return await this.inspect(id);
+    return await this.inspect(id, signal);
   }
 
   acceptRetention(retentionId: string): void {
@@ -723,6 +728,7 @@ export class ConversationAttachmentStore {
 
   private async advanceReconciliation(
     state: AttachmentReconciliationState,
+    background = false,
   ): Promise<void> {
     if (this.reconciliation !== state) return;
     this.assertOpen();
@@ -732,6 +738,9 @@ export class ConversationAttachmentStore {
       deadline.abort(new Error("Conversation attachment reconciliation yielded."));
     }, this.reconciliationBatchTimeoutMs);
     timer.unref();
+    // Background batches stop admission at the deadline; an admitted helper
+    // keeps its own bounded timeout and remains cancelled by store shutdown.
+    const operationSignal = background ? this.lifecycle.signal : deadline.signal;
     try {
       let processed = 0;
       while (
@@ -763,10 +772,10 @@ export class ConversationAttachmentStore {
         }
         processed += 1;
         try {
-          await this.reconcileEntry(state, name, deadline.signal);
+          await this.reconcileEntry(state, name, operationSignal);
         } catch (error) {
           state.retryNames.push(name);
-          if (!deadline.signal.aborted) throw error;
+          if (background || !deadline.signal.aborted) throw error;
           break;
         }
       }
@@ -822,7 +831,7 @@ export class ConversationAttachmentStore {
       if (this.closing) return;
       void this.serialize(async () => {
         if (this.reconciliation !== state) return;
-        await this.advanceReconciliation(state);
+        await this.advanceReconciliation(state, true);
       }).then(
         () => {
           if (this.reconciliation === state) {
@@ -940,15 +949,11 @@ export class ConversationAttachmentStore {
     id: string,
     signal?: AbortSignal,
   ): Promise<ConversationAttachmentPreview | null> {
-    try {
-      const current = await this.inspect(id, signal);
-      if (!current) await this.removeRecord(id, signal);
-      return current;
-    } catch (error) {
-      if (signal?.aborted) throw error;
-      await this.removeRecord(id, signal);
-      return null;
-    }
+    // Failed reads do not establish invalid content: helper startup, IPC, and
+    // timeout failures can occur while a referenced record remains intact.
+    const current = await this.inspect(id, signal);
+    if (!current) await this.removeRecord(id, signal);
+    return current;
   }
 
   private async persist(

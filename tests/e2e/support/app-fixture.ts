@@ -815,7 +815,7 @@ export async function createAppFixture(
     electronApp = await electron.launch(launchOptions);
     observeElectronProcess(electronApp, appendDiagnostic);
     page = await electronApp.firstWindow();
-    observeElectronPage(page, rendererErrors);
+    observeElectronPage(page, rendererErrors, electronApp.process());
     if (options.windowDisplay === "primary") {
       await electronApp.evaluate(
         ({ BrowserWindow, screen }) => {
@@ -947,7 +947,7 @@ export async function createAppFixture(
       observeElectronProcess(nextApp, appendDiagnostic);
       try {
         const nextPage = await nextApp.firstWindow();
-        observeElectronPage(nextPage, rendererErrors);
+        observeElectronPage(nextPage, rendererErrors, nextApp.process());
         if (options.windowDisplay === "primary") {
           await nextApp.evaluate(
             ({ BrowserWindow, screen }) => {

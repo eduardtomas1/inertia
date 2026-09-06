@@ -101,7 +101,7 @@ describe("runtime supervisor connection", () => {
       expect(unavailableRuntimeConnection({
         phase: "stopped",
         startupBlockerCode,
-      })).toEqual({
+      }, "linux")).toEqual({
         unavailable: true,
         code: startupBlockerCode,
         retryable: false,
@@ -109,4 +109,20 @@ describe("runtime supervisor connection", () => {
       });
     },
   );
+
+  it("gives stranded Windows profiles a supported recovery step without retrying or deleting state", () => {
+    const state = {
+      phase: "stopped",
+      startupBlockerCode: "prior-runtime-cleanup-unconfirmed",
+    } as const;
+    const windows = unavailableRuntimeConnection(state, "win32");
+    expect(windows).toMatchObject({ unavailable: true, retryable: false });
+    expect(windows.message).toContain("choose Restart from the Windows power menu");
+    expect(windows.message).toContain("Your saved work is preserved");
+    expect(windows.message).toContain("copy the support summary");
+    for (const platform of ["darwin", "linux"] as const) {
+      expect(unavailableRuntimeConnection(state, platform).message)
+        .not.toContain("Windows power menu");
+    }
+  });
 });

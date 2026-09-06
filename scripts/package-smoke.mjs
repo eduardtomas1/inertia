@@ -7,6 +7,8 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import WebSocket from "ws";
 import { parseDocument } from "yaml";
+import { runPackagedHistorySmoke } from "./package-smoke-history-runtime.mjs";
+import { packageSmokePath } from "./package-smoke-path.mjs";
 
 import {
   packageSmokeProcessesExited,
@@ -767,21 +769,7 @@ const args = process.argv.slice(2);
 if (args[0] === "status") { console.log("Logged in using ChatGPT"); process.exit(0); }
 process.exit(2);
 `.trimStart(), "utf8");
-  await writeFile(appServer, `
-const readline = require("node:readline");
-const args = process.argv.slice(2);
-if (args[0] === "--help") { console.log("codex app-server - Run the app server"); process.exit(0); }
-if (args.length !== 0) process.exit(2);
-const send = (message) => process.stdout.write(JSON.stringify(message) + "\\n");
-readline.createInterface({ input: process.stdin }).on("line", (line) => {
-  const message = JSON.parse(line);
-  if (message.method === "initialize") return send({ id: message.id, result: { userAgent: "package-smoke" } });
-  if (message.method === "initialized") return;
-  if (message.method === "model/list") return send({ id: message.id, result: { data: [], nextCursor: null } });
-  if (message.method === "account/rateLimits/read") return send({ id: message.id, result: { rateLimits: null } });
-  return send({ id: message.id, error: { code: -32601, message: "Unsupported package-smoke method" } });
-});
-`.trimStart(), "utf8");
+  await copyFile(new URL("./package-smoke-codex-fixture.cjs", import.meta.url), appServer);
   return { command, directory, profile };
 }
 
@@ -819,9 +807,11 @@ async function createPdfFixture(root) {
 async function createImageFixture(root) {
   const inputPath = join(root, "package-smoke.png");
   const resultPath = join(root, "package-smoke-image-result.json");
-  const bytes = Buffer.from([
+  // Different bytes per launch prevent a candidate's ordinary image fixture
+  // from coincidentally matching the predecessor's historical attachment.
+  const bytes = Buffer.concat([Buffer.from([
     0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
-  ]);
+  ]), Buffer.from(randomUUID(), "utf8")]);
   await writeFile(inputPath, bytes);
   return { inputPath, resultPath };
 }
@@ -940,6 +930,14 @@ const supervisorRoot = boundedExactPathEnvironment("INERTIA_PACKAGE_SMOKE_SUPERV
 const persistentStateRoot = boundedExactPathEnvironment(
   "INERTIA_PACKAGE_SMOKE_STATE_ROOT",
 );
+const historyMode = process.env.INERTIA_PACKAGE_SMOKE_HISTORY_MODE;
+const historyFile = boundedExactPathEnvironment("INERTIA_PACKAGE_SMOKE_HISTORY_FILE");
+if ((historyMode !== undefined || historyFile !== undefined) && (
+  process.platform !== "win32" || requestedPackageKind !== "windows-installed"
+  || persistentStateRoot === undefined || !["seed", "verify", "fresh"].includes(historyMode)
+  || (historyMode !== "fresh" && historyFile === undefined)
+  || (historyMode === "fresh" && historyFile !== undefined)
+)) throw new Error("Installed history proof requires an exact Windows smoke mode, state root, and baseline.");
 const supervisorProcessGroupFile = boundedExactPathEnvironment(
   "INERTIA_PACKAGE_SMOKE_PROCESS_GROUP_FILE",
 );
@@ -1065,10 +1063,18 @@ try {
       || (dataRoot.mode & 0o077) !== 0
     ) throw new Error("The package-smoke runtime data root is not owner-private.");
   }
+  const historyStorage = historyMode ? await import("./package-smoke-history-storage.mjs") : null;
+  const historyBaseline = historyMode === "verify"
+    ? await historyStorage.readHistoryBaseline(historyFile) : null;
+  // Compare historical bytes before any candidate fixture creation or launch.
+  if (historyBaseline) await historyStorage.assertHistoryAttachment(stateRoot, historyBaseline);
   // N-1 and N reopen the same provider cache. Keep its synthetic installation
   // at the same path while the application is replaced so this upgrade smoke
   // does not also introduce an unrelated provider installation change.
   const packagedCodex = await createWindowsCodexFixture(stateRoot, workspaceDirectory);
+  const packagedPath = packagedCodex ? await packageSmokePath(packagedCodex.directory, {
+    includeGit: Boolean(historyMode),
+  }) : null;
   const packagedPdf = await createPdfFixture(temporaryRoot);
   const packagedImage = await createImageFixture(temporaryRoot);
   if (proveAppImageFileDescriptorChain) {
@@ -1179,7 +1185,7 @@ try {
           PNPM_HOME: "",
           BUN_INSTALL: "",
           VOLTA_HOME: "",
-          PATH: packagedCodex.directory,
+          PATH: packagedPath,
           PATHEXT: ".EXE;.CMD;.BAT",
         } : {}),
       },
@@ -1248,6 +1254,18 @@ try {
       return candidate ?? null;
     }, STARTUP_TIMEOUT_MS, "packaged app and utility runtime readiness"),
   });
+  // Run the turn proof while PDF extraction proceeds, within the existing
+  // main-process Codex dwell. Never extend startup/shutdown deadlines for it.
+  const providerProof = packagedCodex ? (async () => {
+    await requirePackagedCodex(readiness.websocketUrl, packagedCodex.command);
+    return historyMode ? await runPackagedHistorySmoke({
+      websocketUrl: readiness.websocketUrl, workspaceDirectory,
+      baseline: historyBaseline, deadlineAt: readiness.timestampMs + 9_000,
+    }) : null;
+  })() : Promise.resolve(null);
+  // The PDF wait below can outlive a provider failure; keep that rejection
+  // handled until the authoritative await without losing the failure.
+  void providerProof.catch(() => undefined);
   if (expectedAppImageFileDescriptorIdentity !== null) {
     const marker = await readJsonIfPresent(markerPath);
     const identity = marker?.appImageFileDescriptorIdentity;
@@ -1289,7 +1307,7 @@ try {
   if (imageResult.ok !== true) {
     throw new Error(`The packaged image retention path failed: ${imageResult.message || "invalid smoke result"}.`);
   }
-  if (packagedCodex) await requirePackagedCodex(readiness.websocketUrl, packagedCodex.command);
+  const historyProof = await providerProof;
 
   // Provider discovery deliberately keeps the packaged app alive before
   // shutdown. Start the exit deadline only after Electron begins quitting so
@@ -1335,6 +1353,13 @@ try {
     "packaged app process-group cleanup",
   );
   const cleanupCompletedAt = Date.now();
+  if (historyProof) {
+    await historyStorage.assertHistoryAfterShutdown(stateRoot, historyProof, historyBaseline);
+    if (historyMode === "seed") {
+      await historyStorage.prepareHistoryBaseline(stateRoot, historyFile, historyProof);
+    }
+    console.log(`Installed history proof passed: mode=${historyMode}, historicalRecords=${Boolean(historyBaseline)}, terminalTurn=${historyProof.agentTurns[0].id}, savedResponse=true, shutdownPersistence=true.`);
+  }
   updateNetworkTrap.assertNoUpdateRequests();
   const benchmark = {
     schemaVersion: 1,

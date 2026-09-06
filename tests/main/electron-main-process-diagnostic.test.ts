@@ -157,6 +157,7 @@ describe("bounded macOS Electron main-process evidence", () => {
     const f = fixture();
     if (stopError) f.killGroup.mockImplementation(() => { throw new Error("sample kill failed"); });
     const closing = closeElectronFixtureBounded({
+      platform: "darwin",
       current: { process: () => f.main, close: async () => undefined } as unknown as ElectronApplication,
       prepareRuntimeQuit: async () => ({
         phase: "privileged-cleanup-complete", runtimePid: null,
@@ -184,6 +185,7 @@ describe("bounded macOS Electron main-process evidence", () => {
     const f = fixture();
     const requestRuntimeQuit = vi.fn(async () => null);
     const closing = closeElectronFixtureBounded({
+      platform: "darwin",
       current: { process: () => f.main, close: async () => undefined } as unknown as ElectronApplication,
       readRuntimePid: () => new Promise(() => undefined),
       prepareRuntimeQuit: () => new Promise(() => undefined),
@@ -219,6 +221,7 @@ describe("bounded macOS Electron main-process evidence", () => {
     f.main.once("exit", () => events.push("main-exited"));
     f.diagnostic.capture("earlier-rpc-timeout", Date.now() + 5_000);
     const closing = closeElectronFixtureBounded({
+      platform: "darwin",
       current: { process: () => f.main, close: async () => undefined } as unknown as ElectronApplication,
       prepareRuntimeQuit: async () => ({
         phase: "privileged-cleanup-complete", runtimePid: null,

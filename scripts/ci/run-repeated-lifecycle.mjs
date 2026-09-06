@@ -167,18 +167,23 @@ export async function runLifecycleAttempt({
   });
 }
 
-async function runAttempt(suites, outputPath, index) {
-  const command = process.platform === "win32" ? "npm.cmd" : "npm";
-  return await runLifecycleAttempt({
+export function repeatedLifecycleInvocation(suites) {
+  // npm.cmd cannot be started by the shell-free Windows Job trampoline.
+  // Use the locked local runner directly on every platform.
+  return {
+    command: process.execPath,
     args: [
-      "exec",
-      "--",
-      "vitest",
+      fileURLToPath(new URL("../../node_modules/vitest/vitest.mjs", import.meta.url)),
       "run",
       "--maxWorkers=1",
       ...suites,
     ],
-    command,
+  };
+}
+
+async function runAttempt(suites, outputPath, index) {
+  return await runLifecycleAttempt({
+    ...repeatedLifecycleInvocation(suites),
     label: `Lifecycle repetition ${index}`,
     outputPath,
   });

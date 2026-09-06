@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { dialog } from "electron";
+import { dialog, type BrowserWindow } from "electron";
 
 import type { ModernDarwinRecoveryAuthorityDescriptor } from
   "../node/runtime-modern-recovery-authorities.js";
@@ -41,45 +41,70 @@ export async function promptForLiveModernDarwinRuntimeRecovery(
   dataDirectory: string,
   systemBootId: string,
   runtimeProcessGuardianPath: string,
+  window: BrowserWindow,
 ): Promise<ModernDarwinRecoveryAuthorityDescriptor | null> {
+  if (window.isDestroyed()) return null;
   const recovery = await prepareModernDarwinBootstrapRecovery(
     dataDirectory,
     systemBootId,
     runtimeProcessGuardianPath,
   );
-  if (recovery.blocked) {
-    dialog.showErrorBox(
-      "Runtime recovery remains safety locked",
-      "Inertia could not verify its exact local recovery journal. Your projects and attachments remain preserved; close Inertia and try again.",
+  if (window.isDestroyed()) return null;
+  // Unparented macOS alerts run synchronously, stopping main-process timers,
+  // diagnostics and shutdown. Live recovery must remain a cancellable sheet.
+  const controller = new AbortController();
+  const cancel = (): void => controller.abort();
+  window.once("closed", cancel);
+  try {
+    if (recovery.blocked) {
+      await dialog.showMessageBox(window, {
+        type: "error",
+        title: "Runtime recovery remains safety locked",
+        message: "Inertia could not verify its exact local recovery journal. Your projects and attachments remain preserved; close Inertia and try again.",
+        buttons: ["Keep safety lock"],
+        defaultId: 0,
+        cancelId: 0,
+        signal: controller.signal,
+      });
+      return null;
+    }
+    if (recovery.authority) return recovery.authority;
+    if (!recovery.candidate) return null;
+    const decision = await dialog.showMessageBox(window, {
+      type: "warning",
+      title: "Recover unproven macOS runtime state?",
+      message: "The Inertia local service stopped with unproven process ownership state.",
+      detail: MODERN_DARWIN_RECOVERY_DIALOG_DETAIL,
+      buttons: ["I closed them — recover", "Keep safety lock"],
+      defaultId: 1,
+      cancelId: 1,
+      noLink: true,
+      signal: controller.signal,
+    });
+    if (decision.response !== 0
+      || controller.signal.aborted
+      || window.isDestroyed()) return null;
+    const authority = authorizeModernDarwinRuntimeRecovery(
+      dataDirectory,
+      recovery.candidate,
+      systemBootId,
+      runtimeProcessGuardianPath,
     );
-    return null;
+    if (!authority) {
+      await dialog.showMessageBox(window, {
+        type: "error",
+        title: "Runtime recovery was not authorized",
+        message: "The recorded process state changed before recovery could begin. Inertia kept the safety lock and preserved your work; close every older Inertia, agent, and terminal process, then try again.",
+        buttons: ["Keep safety lock"],
+        defaultId: 0,
+        cancelId: 0,
+        signal: controller.signal,
+      });
+    }
+    return authority;
+  } finally {
+    window.removeListener("closed", cancel);
   }
-  if (recovery.authority) return recovery.authority;
-  if (!recovery.candidate) return null;
-  const decision = await dialog.showMessageBox({
-    type: "warning",
-    title: "Recover unproven macOS runtime state?",
-    message: "The Inertia local service stopped with unproven process ownership state.",
-    detail: MODERN_DARWIN_RECOVERY_DIALOG_DETAIL,
-    buttons: ["I closed them — recover", "Keep safety lock"],
-    defaultId: 1,
-    cancelId: 1,
-    noLink: true,
-  });
-  if (decision.response !== 0) return null;
-  const authority = authorizeModernDarwinRuntimeRecovery(
-    dataDirectory,
-    recovery.candidate,
-    systemBootId,
-    runtimeProcessGuardianPath,
-  );
-  if (!authority) {
-    dialog.showErrorBox(
-      "Runtime recovery was not authorized",
-      "The recorded process state changed before recovery could begin. Inertia kept the safety lock and preserved your work; close every older Inertia, agent, and terminal process, then try again.",
-    );
-  }
-  return authority;
 }
 
 export async function prepareRuntimeBootstrapRecovery(

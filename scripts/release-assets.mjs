@@ -3,8 +3,10 @@ import { spawnSync } from "node:child_process";
 import { constants, createReadStream } from "node:fs";
 import { copyFile, lstat, mkdir, open, readFile, readdir, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { performance } from "node:perf_hooks";
 
 import { parseDocument, stringify } from "yaml";
+import { releaseSbomFailureMessage } from "./release-sbom-diagnostic.mjs";
 
 const MAX_UPDATE_METADATA_BYTES = 256 * 1024;
 const MAX_MANIFEST_BYTES = 512 * 1024;
@@ -146,6 +148,7 @@ async function generateReleaseSbom(releaseAssets) {
       ? process.env.npm_execpath
       : join(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js"))
     : null;
+  const sbomStartedAt = performance.now();
   const result = spawnSync(
     npmEntryPoint ? process.execPath : "npm",
     [
@@ -165,7 +168,7 @@ async function generateReleaseSbom(releaseAssets) {
     },
   );
   if (result.error || result.status !== 0) {
-    throw new Error("The release dependency SBOM could not be generated.");
+    throw new Error(releaseSbomFailureMessage(result, performance.now() - sbomStartedAt));
   }
   if (
     typeof result.stdout !== "string"

@@ -161,6 +161,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   let agentThreads: AgentThreadRuntime | undefined;
   let duoLaunches: DuoLaunchCoordinator | null = null;
   let closed = false;
+  let closing: Promise<void> | null = null;
   const runtimeLifetimeAbort = new AbortController();
   let postReadyWorkStarted = false;
   let postReadyWork: Promise<void> = Promise.resolve();
@@ -1199,51 +1200,50 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
           databaseRecoveryImportActive = false;
         }
       }),
-    close: async (cause = "runtime-shutdown") => {
-      if (closed) return;
+    close: (cause = "runtime-shutdown") => {
+      if (closing) return closing;
       closed = true;
-      runtimeLifetimeAbort.abort(new Error("The runtime is shutting down."));
-      projectIdentities.dispose();
-      snapshotBroadcasts.close();
-      secureFileAuthorities.clear();
-      await runRuntimeShutdownPhases({
-        quiesceRuntimeWork: async ({ deadlineAt }) => {
-          turnGitArtifacts.beginShutdown(deadlineAt);
-          await gitInspectionLifecycle.cancelAndDrainWhile(async () => {
-            await gitScanCoordinator.cancelAndDrainWhile(async () => {
-              await updatePreparation.drainTracked();
-              await projectIdentities.drain();
+      // Publish the shared result before shutdown callbacks run. Admission is
+      // already closed, and every caller must observe the same cleanup proof.
+      closing = Promise.resolve().then(async () => {
+        runtimeLifetimeAbort.abort(new Error("The runtime is shutting down."));
+        projectIdentities.dispose();
+        snapshotBroadcasts.close();
+        secureFileAuthorities.clear();
+        await runRuntimeShutdownPhases({
+          quiesceRuntimeWork: async ({ deadlineAt }) => {
+            turnGitArtifacts.beginShutdown(deadlineAt);
+            await gitInspectionLifecycle.cancelAndDrainWhile(async () => {
+              await gitScanCoordinator.cancelAndDrainWhile(async () => {
+                await updatePreparation.drainTracked();
+                await projectIdentities.drain();
+              });
             });
-          });
-        },
-        independentDrains: [
-          () => initializedConversationAttachments.close(),
-          ({ deadlineAt }) => terminals.disposeAll(deadlineAt),
-          () => providerMaintenance.dispose(),
-        ],
-        stopIsolatedRuns: () => isolatedRuns.dispose(cause),
-        disposeTurnsAndProviders: () => turns.dispose(cause),
-        settleArtifacts: async () => {
-          await artifactReconciliation;
-          await turnGitArtifacts.settleShutdown();
-        },
-        terminateClients: () => {
-          runtimeSync.terminateAll((client) => client.terminate());
-        },
-        closeServer: async () => {
-          const results = await Promise.allSettled([
-            webSocketBoundary.close(),
-            new Promise<void>((resolveClose) =>
-              server.close(() => resolveClose())),
-          ]);
-          const failed = results.find(
-            (result): result is PromiseRejectedResult =>
-              result.status === "rejected",
-          );
-          if (failed) throw failed.reason;
-        },
-        closeStore: () => store.backupAndClose(),
+          },
+          independentDrains: [
+            () => initializedConversationAttachments.close(),
+            ({ deadlineAt }) => terminals.disposeAll(deadlineAt),
+            () => providerMaintenance.dispose(),
+          ],
+          stopIsolatedRuns: () => isolatedRuns.dispose(cause),
+          disposeTurnsAndProviders: () => turns.dispose(cause),
+          settleArtifacts: async () => {
+            await artifactReconciliation;
+            await turnGitArtifacts.settleShutdown();
+          },
+          terminateClients: () => runtimeSync.terminateAll((client) => client.terminate()),
+          closeServer: async () => {
+            const results = await Promise.allSettled([
+              webSocketBoundary.close(),
+              new Promise<void>((resolveClose) => server.close(() => resolveClose())),
+            ]);
+            const failed = results.find((result) => result.status === "rejected");
+            if (failed) throw failed.reason;
+          },
+          closeStore: () => store.backupAndClose(),
+        });
       });
+      return closing;
     },
   };
 }

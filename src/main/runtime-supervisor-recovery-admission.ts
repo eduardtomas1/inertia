@@ -188,7 +188,6 @@ export class RuntimeSupervisorRecoveryAdmission {
         )
       )
     ) {
-      this.#ownedProcesses.finishSession(runtimeGenerationId);
       return {
         ok: false,
         error: "The runtime generation ownership lease could not be persisted.",
@@ -302,8 +301,9 @@ export class RuntimeSupervisorRecoveryAdmission {
     runtimeGenerationId: string,
     error: string,
   ): RuntimeRecoveryAdmissionFailure {
-    this.#ownedProcesses.finishSession(runtimeGenerationId);
-    this.#leases.consume(runtimeGenerationId);
+    if (this.#leases.consume(runtimeGenerationId)) {
+      this.#ownedProcesses.finishSession(runtimeGenerationId);
+    }
     return { ok: false, error };
   }
 }

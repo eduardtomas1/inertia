@@ -386,7 +386,12 @@ export class AppUpdateService {
         releaseUrl: releasePageUrl(this.channel, latestVersion),
         checkedAt,
         message: available
-          ? `${this.productName} ${latestVersion} is available.`
+          ? `${this.productName} ${latestVersion} is available.${
+              this.capability.delivery === "manual"
+                && this.capability.reason === "windows-signing-unavailable"
+                ? ` Quit ${this.productName}, wait for it to close safely, then run the verified installer; Setup will not force-close it.`
+                : ""
+            }`
           : `${this.productName} is up to date.`,
       };
       this.cached = cached;

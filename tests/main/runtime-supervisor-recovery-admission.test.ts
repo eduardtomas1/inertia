@@ -178,6 +178,109 @@ describe("RuntimeSupervisor recovery admission", () => {
     });
   });
 
+  it("retains an unleased empty session when lease publication fails", () => {
+    const publish = vi.spyOn(
+      RuntimeGenerationLeaseJournal.prototype,
+      "publish",
+    ).mockReturnValueOnce(false);
+    const startSession = vi.spyOn(
+      RuntimeOwnedProcessJournal.prototype,
+      "startSession",
+    );
+    const { children, supervisor } = createHarness();
+    try {
+      supervisor.start();
+      const generationId = startSession.mock.calls[0]?.[0];
+      expect(generationId).toEqual(expect.any(String));
+      expect(children).toEqual([]);
+      expect(new RuntimeGenerationLeaseJournal(dataDirectory).all()).toEqual([]);
+      expect(new RuntimeOwnedProcessJournal(dataDirectory)
+        .sessionExact(generationId!)).not.toBeNull();
+    } finally {
+      publish.mockRestore();
+      startSession.mockRestore();
+    }
+  });
+
+  it("does not remove session proof when admission rollback cannot consume its lease", () => {
+    const originalAll = RuntimeGenerationLeaseJournal.prototype.all;
+    const all = vi.spyOn(RuntimeGenerationLeaseJournal.prototype, "all")
+      .mockImplementation(function (this: RuntimeGenerationLeaseJournal) {
+        const current = originalAll.call(this);
+        return current.some((lease) => lease.systemBootId !== "unavailable")
+          ? [...current, {
+              runtimeGenerationId:
+                "30000000-0000-4000-8000-000000000003:904",
+              systemBootId: "unavailable",
+              createdAt: new Date().toISOString(),
+            }]
+          : current;
+      });
+    const consume = vi.spyOn(
+      RuntimeGenerationLeaseJournal.prototype,
+      "consume",
+    ).mockReturnValueOnce(false);
+    const startSession = vi.spyOn(
+      RuntimeOwnedProcessJournal.prototype,
+      "startSession",
+    );
+    const { children, supervisor } = createHarness();
+    try {
+      supervisor.start();
+      const generationId = startSession.mock.calls[0]?.[0];
+      expect(generationId).toEqual(expect.any(String));
+      all.mockRestore();
+      expect(children).toEqual([]);
+      expect(new RuntimeGenerationLeaseJournal(dataDirectory).all())
+        .toEqual([expect.objectContaining({ runtimeGenerationId: generationId })]);
+      expect(new RuntimeOwnedProcessJournal(dataDirectory)
+        .sessionExact(generationId!)).not.toBeNull();
+    } finally {
+      all.mockRestore();
+      consume.mockRestore();
+      startSession.mockRestore();
+    }
+  });
+
+  it("leaves a repairable session when admission consumes its lease first", () => {
+    const originalAll = RuntimeGenerationLeaseJournal.prototype.all;
+    const all = vi.spyOn(RuntimeGenerationLeaseJournal.prototype, "all")
+      .mockImplementation(function (this: RuntimeGenerationLeaseJournal) {
+        const current = originalAll.call(this);
+        return current.some((lease) => lease.systemBootId !== "unavailable")
+          ? [...current, {
+              runtimeGenerationId:
+                "30000000-0000-4000-8000-000000000003:905",
+              systemBootId: "unavailable",
+              createdAt: new Date().toISOString(),
+            }]
+          : current;
+      });
+    const finish = vi.spyOn(
+      RuntimeOwnedProcessJournal.prototype,
+      "finishSession",
+    ).mockReturnValueOnce(false);
+    const startSession = vi.spyOn(
+      RuntimeOwnedProcessJournal.prototype,
+      "startSession",
+    );
+    const { children, supervisor } = createHarness();
+    try {
+      supervisor.start();
+      const generationId = startSession.mock.calls[0]?.[0];
+      expect(generationId).toEqual(expect.any(String));
+      all.mockRestore();
+      expect(children).toEqual([]);
+      expect(new RuntimeGenerationLeaseJournal(dataDirectory).all()).toEqual([]);
+      expect(new RuntimeOwnedProcessJournal(dataDirectory)
+        .sessionExact(generationId!)).not.toBeNull();
+    } finally {
+      all.mockRestore();
+      finish.mockRestore();
+      startSession.mockRestore();
+    }
+  });
+
   it("extends startup once after the final exact cleanup receipt", async () => {
     const retiredGenerationId =
       "30000000-0000-4000-8000-000000000003:901";

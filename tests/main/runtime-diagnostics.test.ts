@@ -33,6 +33,17 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
+function signedRecord(record: Record<string, unknown>): string {
+  const payload = JSON.stringify(Object.fromEntries(
+    Object.entries(record).sort(([left], [right]) =>
+      left < right ? -1 : left > right ? 1 : 0),
+  ));
+  return JSON.stringify({
+    ...record,
+    recordDigest: createHash("sha256").update(payload).digest("hex"),
+  });
+}
+
 describe("runtime diagnostics", () => {
   it("logs only allowlisted lifecycle fields and redacts unsafe failure values", () => {
     const root = fixture();
@@ -174,6 +185,31 @@ describe("runtime diagnostics", () => {
       expect(files.every((name) => (statSync(join(directory, name)).mode & 0o777) === 0o600)).toBe(true);
     }
     expect(files.map((name) => readFileSync(join(directory, name), "utf8")).join("")).not.toContain("expired");
+  });
+
+  it("expires sparse records from the active log after the retention window", () => {
+    const root = fixture();
+    const directory = runtimeDiagnosticsDirectory(root);
+    let now = Date.parse("2030-01-01T00:00:00.000Z");
+    const diagnostics = new RuntimeDiagnostics(directory, {
+      retentionMs: 1_000,
+      now: () => now,
+    });
+    diagnostics.record("app.start");
+    now += 1_001;
+    diagnostics.record("app.stop");
+
+    const content = readFileSync(join(directory, "runtime.log"), "utf8");
+    expect(content).not.toContain('"event":"app.start"');
+    expect(content).toContain('"event":"app.stop"');
+    const current = new Date(now);
+    utimesSync(join(directory, "runtime.log"), current, current);
+    expect(diagnostics.supportReport({
+      version: "0.0.50",
+      platform: "win32",
+      architecture: "x64",
+      runtime: null,
+    })).toMatchObject({ eventCount: 1 });
   });
 
   it("uses a dedicated directory with private directory and file permissions", () => {
@@ -326,16 +362,6 @@ describe("runtime diagnostics", () => {
     diagnostics.ensureDirectory();
     diagnostics.record("app.start");
     const valid = readFileSync(join(directory, "runtime.log"), "utf8").trim();
-    const signedRecord = (record: Record<string, unknown>): string => {
-      const payload = JSON.stringify(Object.fromEntries(
-        Object.entries(record).sort(([left], [right]) =>
-          left < right ? -1 : left > right ? 1 : 0),
-      ));
-      return JSON.stringify({
-        ...record,
-        recordDigest: createHash("sha256").update(payload).digest("hex"),
-      });
-    };
     const strictButUnsafe = signedRecord({
       schemaVersion: 1,
       at: new Date().toISOString(),
@@ -384,13 +410,19 @@ describe("runtime diagnostics", () => {
     const diagnostics = new RuntimeDiagnostics(runtimeDiagnosticsDirectory(root), {
       maxFileBytes: 4 * 1_024 * 1_024,
     });
-    for (let generation = 1; generation <= 500; generation += 1) {
-      diagnostics.record("runtime.state", {
-        phase: "ready",
-        generation,
-        restartAttempt: 0,
-      });
-    }
+    // This case exercises reading a long history, not 500 durable appends.
+    // Writer, short-write, rotation and retention behavior have real-I/O cases.
+    const directory = diagnostics.ensureDirectory();
+    const at = new Date().toISOString();
+    const history = Array.from({ length: 500 }, (_, index) => signedRecord({
+      schemaVersion: 1,
+      at,
+      event: "runtime.state",
+      phase: "ready",
+      generation: index + 1,
+      restartAttempt: 0,
+    })).join("\n");
+    writeFileSync(join(directory, "runtime.log"), `${history}\n`, { mode: 0o600 });
 
     const report = diagnostics.supportReport({
       version: "0.0.10",

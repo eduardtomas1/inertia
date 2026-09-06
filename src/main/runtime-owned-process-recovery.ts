@@ -671,11 +671,20 @@ export function recoverPriorRuntimeGenerations(options: {
       && journal.records(lease.runtimeGenerationId) !== null)
   ));
   if (prior.length === 0) return null;
-  if (prior.some((lease) => journal.records(lease.runtimeGenerationId) === null)) {
+  if (prior.some((lease) => {
+    const runtimeGenerationId = lease.runtimeGenerationId;
+    if (!options.receipts.has(runtimeGenerationId)) {
+      return journal.records(runtimeGenerationId) === null;
+    }
+    const session = journal.sessionExact(runtimeGenerationId);
+    return session === undefined
+      || (session !== null && journal.records(runtimeGenerationId) === null);
+  })) {
     return null;
   }
   return (async () => {
     for (const lease of prior) {
+      if (options.receipts.has(lease.runtimeGenerationId)) continue;
       const recovered = recoverRuntimeOwnedProcesses(
         options.dataDirectory,
         lease.runtimeGenerationId,
@@ -694,11 +703,18 @@ export function recoverPriorRuntimeGenerations(options: {
       if (!recovered || !await recovered) return false;
     }
     for (const lease of prior) {
-      if (
-        !journal.finishSession(lease.runtimeGenerationId)
-        || !options.receipts.publish(lease.runtimeGenerationId)
-        || !options.leases.clearRuntimeGeneration(lease.runtimeGenerationId)
-      ) return false;
+      const runtimeGenerationId = lease.runtimeGenerationId;
+      if (options.receipts.has(runtimeGenerationId)) {
+        const session = journal.sessionExact(runtimeGenerationId);
+        if (
+          session === undefined
+          || (session && !journal.finishSessionExact(session))
+        ) return false;
+      } else if (!journal.finishSession(
+        runtimeGenerationId,
+        () => options.receipts.publish(runtimeGenerationId),
+      )) return false;
+      if (!options.leases.clearRuntimeGeneration(runtimeGenerationId)) return false;
     }
     return true;
   })();

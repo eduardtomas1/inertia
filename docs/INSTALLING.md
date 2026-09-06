@@ -36,6 +36,11 @@ Credential-free macOS packages are ad-hoc signed rather than notarized, so Gatek
 
 Unsigned Windows installers may show **Windows protected your PC**. After verifying the checksum and exact GitHub release source, choose **More info**, confirm the filename and **Unknown publisher** status, then **Run anyway**. Do not disable SmartScreen.
 
+Before a manual Windows update, quit Inertia and wait for its processes to
+close safely before running the verified installer. If Setup reports that
+installed processes are still running or could not be verified, do not force
+them closed; close Inertia cleanly and retry.
+
 See the [changelog](../CHANGELOG.md) for the complete release story and [release guide](RELEASING.md) for Stable, Canary, signing, and update-delivery details.
 
 

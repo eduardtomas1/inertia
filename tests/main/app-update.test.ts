@@ -76,6 +76,24 @@ describe("app update checks", () => {
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 
+  it("explains the safe manual Windows installer handoff", async () => {
+    const service = new AppUpdateService({
+      currentVersion: "0.0.50",
+      capability: {
+        delivery: "manual",
+        reason: "windows-signing-unavailable",
+      },
+      fetch: vi.fn<typeof globalThis.fetch>(async () => release("v0.0.51")),
+    });
+
+    await expect(service.check()).resolves.toMatchObject({
+      state: "available",
+      delivery: "manual",
+      deliveryReason: "windows-signing-unavailable",
+      message: "Inertia 0.0.51 is available. Quit Inertia, wait for it to close safely, then run the verified installer; Setup will not force-close it.",
+    });
+  });
+
   it("checks only the isolated Canary feed and reports its immutable release tag", async () => {
     const fetch = vi.fn<typeof globalThis.fetch>(async (input) => {
       expect(String(input)).toBe(

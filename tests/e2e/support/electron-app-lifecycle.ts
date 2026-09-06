@@ -6,6 +6,9 @@ import type { Server } from "node:http";
 import { privilegedShutdownEnvelopeMs } from
   "../../../src/main/privileged-shutdown-deadline";
 import { runtimeSupervisorShutdownEnvelopeMs } from "../../../src/node/runtime-shutdown-deadline";
+import { createElectronMainProcessDiagnostic,
+  type ElectronMainProcessDiagnostic, type ElectronMainProcessSample } from
+  "./electron-main-process-diagnostic";
 
 const FIXTURE_SERVER_TEARDOWN_TIMEOUT_MS = 2_000;
 const FIXTURE_SHUTDOWN_HEADROOM_MS = 500;
@@ -252,6 +255,13 @@ interface ElectronAppCloseOptions {
 
 export interface ElectronAppQuitOptions extends ElectronAppCloseOptions {
   readonly quitRequestTimeoutMs?: number;
+  readonly mainProcessDiagnostic?: ElectronMainProcessDiagnostic;
+}
+
+export class ElectronFixtureCloseError extends AggregateError {
+  constructor(errors: unknown[], readonly mainProcessSamples: ElectronMainProcessSample[]) {
+    super(errors, "The Electron fixture did not close cleanly.");
+  }
 }
 
 export interface ElectronAppQuitResult<T> {
@@ -277,16 +287,20 @@ export async function quitElectronAppBounded<T>(
     Promise.resolve().then(requestQuit),
     options.quitRequestTimeoutMs ?? 1_000,
   );
-  const exitedNaturally = await waitForChildExitBounded(
-    child,
-    options.gracefulTimeoutMs ?? FIXTURE_ELECTRON_GRACEFUL_TIMEOUT_MS,
-  );
+  const gracefulTimeoutMs = options.gracefulTimeoutMs
+    ?? FIXTURE_ELECTRON_GRACEFUL_TIMEOUT_MS;
+  const gracefulDeadlineAt = Date.now() + gracefulTimeoutMs;
+  const naturalExit = waitForChildExitBounded(child, gracefulTimeoutMs);
+  const stopWatchdog = options.mainProcessDiagnostic?.watchQuit(gracefulDeadlineAt);
+  const exitedNaturally = await naturalExit;
+  stopWatchdog?.();
   let outcome: ElectronAppQuitResult<T>["outcome"];
   if (exitedNaturally) {
     outcome = child.exitCode === 0 && child.signalCode === null
       ? "graceful"
       : "abnormal";
   } else {
+    options.mainProcessDiagnostic?.stop();
     if (child.exitCode === null && child.signalCode === null) {
       child.kill("SIGKILL");
     }
@@ -382,16 +396,21 @@ export async function closeElectronFixtureBounded(options: {
   readonly cleanupReceiptTimeoutMs?: number;
   readonly serverTimeoutMs?: number;
   readonly removeTimeoutMs?: number;
+  readonly createMainProcessDiagnostic?: typeof createElectronMainProcessDiagnostic;
 }): Promise<void> {
   const cleanupErrors: unknown[] = [];
+  let diagnostic: ElectronMainProcessDiagnostic | null = null;
   let runtimePid: number | null = options.priorRuntimePid ?? null;
   try {
     if (options.current) {
       // The quit RPC can close Playwright's Electron dispatcher before the
       // next JavaScript turn. Retain the OS child authority while connected.
       let childProcess: ChildProcess | null = null;
+      let snapshotTimedOut = false;
       try {
         childProcess = options.current.process();
+        diagnostic = (options.createMainProcessDiagnostic
+          ?? createElectronMainProcessDiagnostic)(childProcess);
       } catch (error) {
         cleanupErrors.push(error);
       }
@@ -406,6 +425,7 @@ export async function closeElectronFixtureBounded(options: {
         if (snapshot.status === "fulfilled" && snapshot.value !== null) {
           runtimePid = snapshot.value;
         }
+        snapshotTimedOut = snapshot.status === "timed-out";
       }
       let quitFailure: unknown;
       let quitResult: BoundedOperationResult<number | null>;
@@ -414,11 +434,17 @@ export async function closeElectronFixtureBounded(options: {
         let cleanupPrepared = options.prepareRuntimeQuit === undefined;
         let cleanupPhase = cleanupPrepared ? "legacy-quit" : "not-requested";
         if (options.prepareRuntimeQuit) {
-          const preparation = await settleOperationBounded(
+          const receiptTimeoutMs = options.cleanupReceiptTimeoutMs
+            ?? FIXTURE_ELECTRON_GRACEFUL_TIMEOUT_MS;
+          const receiptDeadlineAt = Date.now() + receiptTimeoutMs;
+          const preparationPending = settleOperationBounded(
             Promise.resolve().then(options.prepareRuntimeQuit),
-            options.cleanupReceiptTimeoutMs
-              ?? FIXTURE_ELECTRON_GRACEFUL_TIMEOUT_MS,
+            receiptTimeoutMs,
           );
+          if (snapshotTimedOut) {
+            diagnostic?.capture("runtime-snapshot-timed-out", receiptDeadlineAt);
+          }
+          const preparation = await preparationPending;
           if (preparation.status === "fulfilled") {
             cleanupPhase = preparation.value.phase;
             if (preparation.value.runtimePid !== null) {
@@ -441,10 +467,13 @@ export async function closeElectronFixtureBounded(options: {
             }
           } else {
             if (options.readRuntimeQuitPhase) {
-              const phaseResult = await settleOperationBounded(
+              const phaseDeadlineAt = Date.now() + (options.rpcTimeoutMs ?? 1_000);
+              const phasePending = settleOperationBounded(
                 Promise.resolve().then(options.readRuntimeQuitPhase),
                 options.rpcTimeoutMs ?? 1_000,
               );
+              diagnostic?.capture("privileged-cleanup-receipt-failed", phaseDeadlineAt);
+              const phaseResult = await phasePending;
               if (phaseResult.status === "fulfilled") {
                 cleanupPhase = phaseResult.value;
               } else if (phaseResult.status === "rejected") {
@@ -472,6 +501,7 @@ export async function closeElectronFixtureBounded(options: {
               : async () => runtimePid,
             {
               childProcess,
+              ...(diagnostic ? { mainProcessDiagnostic: diagnostic } : {}),
               quitRequestTimeoutMs: options.rpcTimeoutMs ?? 1_000,
               ...(options.prepareRuntimeQuit
                 ? {
@@ -536,6 +566,7 @@ export async function closeElectronFixtureBounded(options: {
       }
     }
   } finally {
+    diagnostic?.stop();
     const serverResult = await settleOperationBounded(
       Promise.resolve().then(options.closeServer),
       options.serverTimeoutMs ?? 2_000,
@@ -560,6 +591,6 @@ export async function closeElectronFixtureBounded(options: {
     }
   }
   if (cleanupErrors.length > 0) {
-    throw new AggregateError(cleanupErrors, "The Electron fixture did not close cleanly.");
+    throw new ElectronFixtureCloseError(cleanupErrors, diagnostic?.samples ?? []);
   }
 }

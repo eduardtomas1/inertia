@@ -1107,8 +1107,12 @@ export class RuntimeOwnedProcessJournal {
     }
   }
 
-  finishSession(runtimeGenerationId: string): boolean {
-    if (!supportedRuntimeOwnedProcessPlatform(this.platform)) return true;
+  finishSession(runtimeGenerationId: string,
+    commitBeforeSessionRemoval: () => boolean = () => true,
+  ): boolean {
+    if (!supportedRuntimeOwnedProcessPlatform(this.platform)) {
+      try { return commitBeforeSessionRemoval(); } catch { return false; }
+    }
     const entry = (() => {
       try {
         return this.sessions.all().find(({ session }) =>
@@ -1122,11 +1126,15 @@ export class RuntimeOwnedProcessJournal {
     if (!records || records.length > 0) return false;
     const containment = containmentName(runtimeGenerationId);
     if (!removeLeaf(this.root, containment)) return false;
-    return this.finishSessionExact(entry.session);
+    return this.finishSessionExact(entry.session, commitBeforeSessionRemoval);
   }
 
-  finishSessionExact(expected: RuntimeOwnedProcessSession): boolean {
-    if (!supportedRuntimeOwnedProcessPlatform(this.platform)) return true;
+  finishSessionExact(expected: RuntimeOwnedProcessSession,
+    commitBeforeSessionRemoval: () => boolean = () => true,
+  ): boolean {
+    if (!supportedRuntimeOwnedProcessPlatform(this.platform)) {
+      try { return commitBeforeSessionRemoval(); } catch { return false; }
+    }
     let inspection = this.inspectGeneration(expected.runtimeGenerationId);
     if (
       !inspection
@@ -1175,10 +1183,16 @@ export class RuntimeOwnedProcessJournal {
         retiredWriter,
       )
     ) return false;
-    return !pinDirectRuntimeJournalChildRoot(
+    if (pinDirectRuntimeJournalChildRoot(
       this.root,
       runtimeOwnedProcessWriterName(expected.runtimeGenerationId),
-    ) && unlinkDirectRuntimeJournalLeaf(
+    )) return false;
+    try {
+      if (!commitBeforeSessionRemoval()) return false;
+    } catch {
+      return false;
+    }
+    return unlinkDirectRuntimeJournalLeaf(
       this.root,
       canonical,
       current.identity,

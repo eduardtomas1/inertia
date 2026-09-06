@@ -672,6 +672,68 @@ describe("electron updater adapter", () => {
     expect(updaterFixture.updater.quitAndInstall).not.toHaveBeenCalled();
   });
 
+  it("retains the exact data directory while recovering preparation publication", async () => {
+    const root = await mkdtemp(join(tmpdir(), "inertia-electron-updater-win-"));
+    roots.push(root);
+    const handoff = join(root, "handoff");
+    const data = join(root, "data");
+    const profile = join(root, "profile");
+    const install = join(root, "install");
+    await Promise.all([handoff, data, profile, install].map(async (directory) =>
+      await mkdir(directory, { mode: 0o700 })));
+    const installer = join(root, "Inertia-1.3.0.exe");
+    const executable = join(install, "Inertia.exe");
+    await Promise.all([
+      writeFile(installer, windowsInstallerBytes(), { mode: 0o700 }),
+      writeFile(executable, "installed", { mode: 0o700 }),
+    ]);
+    updaterFixture.updater.downloadUpdate.mockResolvedValueOnce([installer]);
+    const adapter = await loadElectronAppUpdater("stable", {
+      platform: "win32",
+      executablePath: executable,
+    });
+    await adapter.download({
+      onProgress: vi.fn(),
+      onCancelled: vi.fn(),
+    }).promise;
+    const originalPrepare = Object.getOwnPropertyDescriptor(
+      AppUpdateHandoffJournal.prototype,
+      "prepare",
+    )?.value as AppUpdateHandoffJournal["prepare"];
+    const prepare = vi.spyOn(AppUpdateHandoffJournal.prototype, "prepare")
+      .mockImplementationOnce(function (
+        this: AppUpdateHandoffJournal,
+        preparation,
+      ) {
+        expect(originalPrepare.call(this, preparation)).not.toBeNull();
+        return null;
+      });
+    const transition = vi.spyOn(
+      AppUpdateHandoffJournal.prototype,
+      "transition",
+    ).mockReturnValueOnce(null);
+    try {
+      await expect(adapter.prepareInstall?.({
+        currentVersion: "1.2.3",
+        newVersion: "1.3.0",
+        handoffDirectory: handoff,
+        profileDirectory: profile,
+        dataDirectory: data,
+        oldRuntimeGenerationId:
+          "22222222-2222-4222-8222-222222222222:7",
+        systemBootId: "win32:deadbeef",
+      })).resolves.toBe(false);
+      const retained = (adapter as unknown as {
+        preparedWindows: { dataDirectory: string } | null;
+      }).preparedWindows;
+      expect(retained?.dataDirectory).toBe(data);
+      expect(retained?.dataDirectory).not.toBe(handoff);
+    } finally {
+      prepare.mockRestore();
+      transition.mockRestore();
+    }
+  });
+
   it("retires a Windows preparation when the supervisor proves a pre-READY failure", async () => {
     const launchWindowsSupervisor = vi.fn(async () => {
       throw new Error("supervisor rejected before READY");

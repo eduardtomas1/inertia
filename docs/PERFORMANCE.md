@@ -62,6 +62,11 @@ paths, records seven samples of 25 repeated 540-entry sorts, and asserts that
 both produce the same directory-first, natural, case-preserving order. It is a
 profiler-friendly engineering benchmark rather than an absolute timing gate.
 
+Platform streaming reports retain every visible gap alongside its source wait,
+buffered wait and SQLite write time, with matching array indices. Source callback
+gaps are recorded separately. This makes a failed wall-time sample diagnosable;
+none of these components is subtracted from the enforced latency budgets.
+
 `npm run benchmark:platform:smoke` adds deliberately generous catastrophic
 budgets to every exploratory cadence. Only the shipped 12/64 cadence also has
 the tighter hosted first-projection and visible-gap ceilings. Hosted CI is too

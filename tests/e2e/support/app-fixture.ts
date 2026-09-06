@@ -6,6 +6,7 @@ import { createServer, type Server } from "node:http";
 import { delimiter, join } from "node:path";
 import { promisify } from "node:util";
 
+import { positionWorkbenchOnPrimary, waitForWorkbenchPage } from "./electron-workbench-page";
 import { RuntimeStore } from "../../../src/server/database";
 import { portableNodeExecutable } from "../../helpers/portable-provider-fixture";
 import { seedAppConversation } from "../../support/seed-app-conversation";
@@ -814,15 +815,10 @@ export async function createAppFixture(
   try {
     electronApp = await electron.launch(launchOptions);
     observeElectronProcess(electronApp, appendDiagnostic);
-    page = await electronApp.firstWindow();
+    page = await waitForWorkbenchPage(electronApp);
     observeElectronPage(page, rendererErrors, electronApp.process());
     if (options.windowDisplay === "primary") {
-      await electronApp.evaluate(
-        ({ BrowserWindow, screen }) => {
-          const origin = screen.getPrimaryDisplay().workArea;
-          BrowserWindow.getAllWindows()[0]?.setPosition(origin.x, origin.y);
-        },
-      );
+      await positionWorkbenchOnPrimary(electronApp, page);
     }
     await page.locator(
       '.app-shell[data-connection-status="online"]',
@@ -880,13 +876,9 @@ export async function createAppFixture(
     if (!confirmed) throw new Error("The test runtime did not recycle cleanly.");
   };
   const resizeWindow = async (width: number, height: number): Promise<void> => {
-    await currentApp().evaluate(
-      ({ BrowserWindow }, size) => {
-        const window = BrowserWindow.getAllWindows()[0];
-        window?.setContentSize(size.width, size.height);
-      },
-      { width, height },
-    );
+    const nativeWindow = await currentApp().browserWindow(page);
+    try { await nativeWindow.evaluate((window, size) => window.setContentSize(size.width, size.height), { width, height }); }
+    finally { await nativeWindow.dispose(); }
     await page.waitForTimeout(250);
   };
   const nativePreviewSnapshot = async (
@@ -946,15 +938,10 @@ export async function createAppFixture(
       const nextApp = await electron.launch(launchOptions);
       observeElectronProcess(nextApp, appendDiagnostic);
       try {
-        const nextPage = await nextApp.firstWindow();
+        const nextPage = await waitForWorkbenchPage(nextApp);
         observeElectronPage(nextPage, rendererErrors, nextApp.process());
         if (options.windowDisplay === "primary") {
-          // A restored auxiliary window can lead getAllWindows(); move the
-          // workbench owned by this page, preserving the mascot's saved bounds.
-          const origin = await nextApp.evaluate(({ screen }) => screen.getPrimaryDisplay().workArea);
-          const nativeWindow = await nextApp.browserWindow(nextPage);
-          await nativeWindow.evaluate((window, point) => window.setPosition(point.x, point.y), origin);
-          await nativeWindow.dispose();
+          await positionWorkbenchOnPrimary(nextApp, nextPage);
         }
         await nextPage.locator(
           '.app-shell[data-connection-status="online"]',

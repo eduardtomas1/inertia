@@ -5,6 +5,7 @@ import { dirname, isAbsolute, join } from "node:path";
 
 import { RuntimeStore } from "../../src/server/database";
 import { createAppFixture } from "./support/app-fixture";
+import { closeElectronAfterTest } from "./support/electron-failure-evidence";
 
 const delayedAnswerGate = "inertia-anchor-answer-ready";
 
@@ -221,7 +222,7 @@ test("positions a completed answer at the viewport start by default", async () =
     initialState: "conversation",
     codexAppServerSource: delayedAnchorAppServer,
   });
-
+  let bodyFailure: { error: unknown } | undefined;
   try {
     await app.resizeWindow(1440, 920);
     const { page } = app;
@@ -282,7 +283,10 @@ test("positions a completed answer at the viewport start by default", async () =
       await copyFile(evidence, requestedPath);
     }
     expect(app.rendererErrors).toEqual([]);
+  } catch (error) {
+    bodyFailure = { error };
+    throw error;
   } finally {
-    await app.close();
+    await closeElectronAfterTest(() => app.close(), () => test.info(), bodyFailure);
   }
 });

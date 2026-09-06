@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 
 import { createAppFixture } from "./support/app-fixture";
+import { closeElectronAfterTest } from "./support/electron-failure-evidence";
 
 const imageAwareCodexAppServer = `
 const fs = require("node:fs");
@@ -57,6 +58,7 @@ test("repeatedly sends a pasted image after startup reconciliation in a non-Git 
     codexAppServerSource: imageAwareCodexAppServer,
     workspaceGit: false,
   });
+  let bodyFailure: { error: unknown } | undefined;
   try {
     const imageBytes = [...await readFile(app.attachmentImagePath)];
     const expectedDigest = createHash("sha256")
@@ -90,7 +92,10 @@ test("repeatedly sends a pasted image after startup reconciliation in a non-Git 
     }
     await expect(app.page.getByRole("alert")).toHaveCount(0);
     expect(app.rendererErrors).toEqual([]);
+  } catch (error) {
+    bodyFailure = { error };
+    throw error;
   } finally {
-    await app.close();
+    await closeElectronAfterTest(() => app.close(), () => test.info(), bodyFailure);
   }
 });

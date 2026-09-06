@@ -1,23 +1,24 @@
 import { randomUUID } from "node:crypto";
-import { mkdtemp, mkdir, rm } from "node:fs/promises";
+import { mkdtemp, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { startRuntime, type RunningRuntime } from "../../src/server";
+import { startRuntime } from "../../src/server";
 import { RuntimeStore } from "../../src/server/database";
 import * as runtimeShutdown from "../../src/server/runtime-shutdown";
 import type { ServerEvent } from "../../src/shared/contracts";
 import { connectRuntime } from "../support/runtime-event-queue";
+import { RuntimeTestCleanup } from "../support/runtime-test-cleanup";
 import { startTestRuntime } from "../support/test-runtime";
 
 const runtimeIdentity = {
   runtimeGenerationId: "00000000-0000-4000-8000-000000000001:1",
   systemBootId: "test:00000000-0000-4000-8000-000000000001",
 } as const;
-const directories: string[] = [];
-const runtimes: RunningRuntime[] = [];
+const cleanup = new RuntimeTestCleanup();
+const { directories, runtimes } = cleanup;
 
 async function workspace(): Promise<{ data: string; workspace: string }> {
   const root = await mkdtemp(join(tmpdir(), "inertia-shutdown-authority-"));
@@ -37,9 +38,7 @@ function deferred(): { promise: Promise<void>; resolve(): void } {
 }
 
 afterEach(async () => {
-  await Promise.allSettled(runtimes.splice(0).map((runtime) => runtime.close()));
-  await Promise.allSettled(directories.splice(0).map((directory) =>
-    rm(directory, { recursive: true, force: true })));
+  await cleanup.close();
 });
 
 describe("runtime shutdown authority", () => {
@@ -103,6 +102,9 @@ describe("runtime shutdown authority", () => {
       (event): event is Extract<ServerEvent, { type: "request.ok" }> =>
         event.type === "request.ok" && event.requestId === acceptedRequestId,
     )).resolves.toMatchObject({ requestId: acceptedRequestId });
+    // Rollback must also leave the runtime able to confirm normal shutdown.
+    await expect(runtime.close()).resolves.toBeUndefined();
+    runtimes.splice(runtimes.indexOf(runtime), 1);
   });
 
   it("reports provider refresh as a sanitized update blocker and releases admission", async () => {

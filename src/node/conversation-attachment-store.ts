@@ -728,6 +728,7 @@ export class ConversationAttachmentStore {
 
   private async advanceReconciliation(
     state: AttachmentReconciliationState,
+    background = false,
   ): Promise<void> {
     if (this.reconciliation !== state) return;
     this.assertOpen();
@@ -737,6 +738,9 @@ export class ConversationAttachmentStore {
       deadline.abort(new Error("Conversation attachment reconciliation yielded."));
     }, this.reconciliationBatchTimeoutMs);
     timer.unref();
+    // Background batches stop admission at the deadline; an admitted helper
+    // keeps its own bounded timeout and remains cancelled by store shutdown.
+    const operationSignal = background ? this.lifecycle.signal : deadline.signal;
     try {
       let processed = 0;
       while (
@@ -768,10 +772,10 @@ export class ConversationAttachmentStore {
         }
         processed += 1;
         try {
-          await this.reconcileEntry(state, name, deadline.signal);
+          await this.reconcileEntry(state, name, operationSignal);
         } catch (error) {
           state.retryNames.push(name);
-          if (!deadline.signal.aborted) throw error;
+          if (background || !deadline.signal.aborted) throw error;
           break;
         }
       }
@@ -827,7 +831,7 @@ export class ConversationAttachmentStore {
       if (this.closing) return;
       void this.serialize(async () => {
         if (this.reconciliation !== state) return;
-        await this.advanceReconciliation(state);
+        await this.advanceReconciliation(state, true);
       }).then(
         () => {
           if (this.reconciliation === state) {

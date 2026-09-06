@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -190,7 +191,9 @@ describe("turn failure diagnostics", () => {
   });
 
   it("copies the bounded diagnostic dossier without request, path, or session content", async () => {
-    const copyText = vi.fn(async (_text: string) => true);
+    let completeCopy!: (copied: boolean) => void;
+    const copyResult = new Promise<boolean>((resolve) => { completeCopy = resolve; });
+    const copyText = vi.fn((_text: string) => copyResult);
     Object.defineProperty(window, "inertia", {
       configurable: true,
       value: { copyText } as unknown as typeof window.inertia,
@@ -209,7 +212,12 @@ describe("turn failure diagnostics", () => {
     expect(copied).not.toContain("PRIVATE USER REQUEST");
     expect(copied).not.toContain("/private/workspace");
     expect(copied).not.toContain("provider-session-secret");
-    expect(screen.getByRole("button", { name: "Diagnostics copied" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Diagnostics copied" })).toBeNull();
+    await act(async () => {
+      completeCopy(true);
+      await copyResult;
+    });
+    expect(await screen.findByRole("button", { name: "Diagnostics copied" })).toBeTruthy();
     expect(screen.getAllByRole("status").some(({ textContent }) =>
       textContent === "Diagnostics copied.")).toBe(true);
   });

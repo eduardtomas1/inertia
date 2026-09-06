@@ -7,6 +7,44 @@ import { describe, expect, it, vi } from "vitest";
 import { RuntimeTestCleanup } from "../support/runtime-test-cleanup";
 
 describe("runtime test cleanup", () => {
+  it("does not consume a later test's directories when an earlier close settles late", async () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-test-cleanup-pending-"));
+    const pendingDirectory = join(root, "pending");
+    const nextDirectory = join(root, "next");
+    mkdirSync(pendingDirectory);
+    mkdirSync(nextDirectory);
+    let finishClose!: () => void;
+    const pendingClose = new Promise<void>((resolve) => { finishClose = resolve; });
+    const pendingRuntime = { close: vi.fn(() => pendingClose) };
+    const nextRuntime = { close: vi.fn(async () => undefined) };
+    const cleanup = new RuntimeTestCleanup();
+    cleanup.runtimes.push(pendingRuntime);
+    cleanup.directories.push(pendingDirectory);
+    const closing = cleanup.close();
+    try {
+      // A timed-out hook can remain pending while the next fixture registers
+      // resources. Its later completion must touch only its original owners.
+      cleanup.runtimes.push(nextRuntime);
+      cleanup.directories.push(nextDirectory);
+      expect(existsSync(pendingDirectory)).toBe(true);
+      finishClose();
+      await closing;
+
+      expect(existsSync(pendingDirectory)).toBe(false);
+      expect(existsSync(nextDirectory)).toBe(true);
+      expect(nextRuntime.close).not.toHaveBeenCalled();
+      await cleanup.close();
+      expect(existsSync(nextDirectory)).toBe(false);
+      expect(pendingRuntime.close).toHaveBeenCalledOnce();
+      expect(nextRuntime.close).toHaveBeenCalledOnce();
+    } finally {
+      finishClose();
+      await closing;
+      // These owners are test doubles and cannot retain native resources.
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("retains a failed test's owners and paths without contaminating later cleanup", async () => {
     const root = mkdtempSync(join(tmpdir(), "inertia-test-cleanup-"));
     const failedDirectory = join(root, "failed");

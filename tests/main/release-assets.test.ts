@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { finished } from "node:stream/promises";
 
 import { createPackage } from "@electron/asar";
 import { afterEach, describe, expect, it } from "vitest";
@@ -179,7 +180,7 @@ async function writeFixture(
     inertiaReleaseChannel: channel,
     inertiaUpdateCapability: capability,
   }));
-  await createPackage(manifestSource, archivePath);
+  await finished(await createPackage(manifestSource, archivePath));
 
   const updateConfigPath = join(sourceRoot, policy.packagedUpdateConfig);
   await mkdir(dirname(updateConfigPath), { recursive: true });

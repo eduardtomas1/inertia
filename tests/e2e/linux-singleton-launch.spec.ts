@@ -4,6 +4,7 @@ import { copyFile, link, mkdir, mkdtemp, readdir, readFile, readlink, realpath, 
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { finished } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 
 import { createPackage } from "@electron/asar";
@@ -140,7 +141,7 @@ const { requestLinuxSingletonLaunch } = require("./launcher.cjs");
       if (role === "contender") {
         await writeFile(join(source, "out", "main", "launcher.cjs"), bundled.outputFiles[0]!.text);
       }
-      await createPackage(source, join(directory, "resources", "app.asar"));
+      await finished(await createPackage(source, join(directory, "resources", "app.asar")));
     }
     const owner = launch(join(root, "owner", "inertia"), profile);
     children.push(owner);

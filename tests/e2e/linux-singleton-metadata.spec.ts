@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promi
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { finished } from "node:stream/promises";
 
 import { createPackage } from "@electron/asar";
 import { expect, test } from "@playwright/test";
@@ -26,7 +27,7 @@ test.describe("singleton metadata in Electron ASAR files", () => {
       const source = join(root, `${name}-source`);
       await mkdir(source);
       await writeFile(join(source, "package.json"), content!);
-      await createPackage(source, join(root, `${name}.asar`));
+      await finished(await createPackage(source, join(root, `${name}.asar`)));
     }
     const invalidPrefix = Buffer.alloc(16);
     invalidPrefix.writeUInt32LE(4, 0);

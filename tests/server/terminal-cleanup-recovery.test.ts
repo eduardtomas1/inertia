@@ -6,15 +6,20 @@ import { describe, expect, it, vi } from "vitest";
 import { TerminalManager } from "../../src/server/terminal";
 
 function fakeTerminal(pid: number): {
-  emitExit: (event: { exitCode: number; signal: number }) => void;
+  emitData: (data: string) => void;
+  emitExit: (event: { exitCode: number; signal?: number }) => void;
   pty: IPty;
 } {
+  const dataListeners = new Set<(data: string) => void>();
   const exitListeners = new Set<(
     event: { exitCode: number; signal?: number },
   ) => void>();
   const pty = {
     pid,
-    onData: vi.fn((): IDisposable => ({ dispose: vi.fn() })),
+    onData: vi.fn((callback: (data: string) => void): IDisposable => {
+      dataListeners.add(callback);
+      return { dispose: () => dataListeners.delete(callback) };
+    }),
     onExit: vi.fn((callback: (
       event: { exitCode: number; signal?: number },
     ) => void): IDisposable => {
@@ -26,6 +31,9 @@ function fakeTerminal(pid: number): {
     resize: vi.fn(),
   } as unknown as IPty;
   return {
+    emitData: (data) => {
+      for (const listener of dataListeners) listener(data);
+    },
     emitExit: (event) => {
       for (const listener of exitListeners) listener(event);
     },
@@ -81,5 +89,48 @@ describe("TerminalManager cleanup recovery", () => {
     );
     expect(requestGuardianStop).not.toHaveBeenCalled();
     expect(spawnTerminal).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    { outputBeforeStop: false, rejected: false },
+    { outputBeforeStop: true, rejected: false },
+    { outputBeforeStop: false, rejected: true },
+  ])("retains only safe Windows stop observations ($outputBeforeStop, $rejected)", async ({
+    outputBeforeStop, rejected,
+  }) => {
+    const terminal = fakeTerminal(42);
+    const terminateProcessTree = vi.fn(async () => {
+      terminal.emitData("private output after stop");
+      terminal.emitExit({ exitCode: 7 });
+      if (rejected) throw new Error("private termination failure");
+      return false;
+    });
+    const manager = new TerminalManager({
+      platform: "win32",
+      spawnTerminal: vi.fn(() => terminal.pty),
+      terminateProcessTree,
+    });
+    const owner = { readyState: 1, bufferedAmount: 0, send: vi.fn() } as unknown as WebSocket;
+    const onExit = vi.fn();
+    const terminalId = manager.createProcess(
+      owner, process.cwd(), "private-shell", ["private-argument"], {}, 80, 24, onExit,
+    );
+    if (outputBeforeStop) terminal.emitData("private output before stop");
+
+    const error = await manager.closeManaged(terminalId).catch((cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe(
+      "A terminal process tree could not be confirmed stopped during runtime shutdown.",
+    );
+    expect((error as Error).cause).toMatchObject({
+      windowsTerminalCleanup: {
+        atStop: { outputObserved: outputBeforeStop, exitObserved: false, exitCode: null, naturalExitCode: null },
+        atFailure: { outputObserved: true, exitObserved: true, exitCode: 7, naturalExitCode: null },
+      },
+    });
+    expect(JSON.stringify((error as Error).cause)).not.toMatch(/private|"pid":|"cwd":|"args":/u);
+    expect(onExit).not.toHaveBeenCalled();
+    expect(() => manager.input(owner, terminalId, "unsafe input")).toThrow("Terminal not found.");
   });
 });

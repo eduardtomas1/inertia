@@ -1,3 +1,4 @@
+// @inertia-e2e-resource primary-display
 import { expect, test, type ElectronApplication, type Page, type TestInfo } from "@playwright/test";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";

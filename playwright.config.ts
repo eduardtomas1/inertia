@@ -1,20 +1,13 @@
-import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import { defineConfig } from "@playwright/test";
+import { discoverE2eResources, exactScenarioPattern } from "./tests/support/e2e-resource-policy";
 
 const testDir = "tests/e2e";
 
-// Specs that pin their window to the primary display's work-area origin share
-// a real, single machine resource: two of them at the same coordinates occlude
-// each other, and Chromium throttles rendering for an occluded window. They
-// are discovered here rather than listed so a new spec cannot silently opt
-// itself into concurrency by adding windowDisplay.
-const displaySensitiveSpecs = readdirSync(testDir)
-  .filter((entry) => entry.endsWith(".spec.ts"))
-  .filter((entry) =>
-    readFileSync(join(testDir, entry), "utf8").includes('windowDisplay: "primary"'),
-  )
-  .sort();
+// Every scenario declares its machine resource, including nested and new specs.
+// The fixture also rejects helper-selected primary windows in an isolated lane.
+const resources = discoverE2eResources(testDir);
+const displaySensitiveSpecs = exactScenarioPattern(resources["primary-display"]);
+const isolatedSpecs = exactScenarioPattern(resources.isolated);
 
 // Keyboard and mouse input reaches the isolated specs over CDP rather than
 // through the window manager, so operating-system focus is not contended.
@@ -49,7 +42,7 @@ export default defineConfig({
     },
     {
       name: "isolated",
-      testIgnore: displaySensitiveSpecs,
+      testMatch: isolatedSpecs,
       grepInvert: runtimeRecoveryTag,
       workers,
       // Only this phase launches concurrent Electron instances. The hosted
@@ -60,7 +53,7 @@ export default defineConfig({
     },
     {
       name: "runtime-recovery",
-      testIgnore: displaySensitiveSpecs,
+      testMatch: isolatedSpecs,
       grep: runtimeRecoveryTag,
       workers: 1,
       timeout: testTimeout * 2,

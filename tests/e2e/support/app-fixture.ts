@@ -10,6 +10,7 @@ import { positionWorkbenchOnPrimary, waitForWorkbenchPage } from "./electron-wor
 import { RuntimeStore } from "../../../src/server/database";
 import { portableNodeExecutable } from "../../helpers/portable-provider-fixture";
 import { seedAppConversation } from "../../support/seed-app-conversation";
+import { assertE2eWindowResource } from "../../support/e2e-resource-policy";
 import { serveAgentBrowserPrivacyFixture } from "./agent-browser-fixture-pages";
 import { closeElectronAppBounded, closeElectronFixtureBounded,
   closePreviewServerBounded, observeElectronPage, observeElectronProcess,
@@ -660,6 +661,7 @@ async function createSecondWorkspace(
 export async function createAppFixture(
   options: AppFixtureOptions,
 ): Promise<AppFixture> {
+  assertE2eWindowResource(test.info().project.name, options.windowDisplay);
   const preview = await createPreviewServer();
   const { processTemporaryDirectory, testDirectory } =
     await createFixtureTemporaryDirectories();

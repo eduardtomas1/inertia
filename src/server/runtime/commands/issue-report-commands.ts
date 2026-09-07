@@ -96,6 +96,11 @@ export function createIssueReportCommandHandler(deps: Dependencies): RuntimeComm
         const value = current(command.payload.id, command.payload.revision);
         if (value.status === "submitted") break;
         if (value.status !== "preview" || publicationBusy) throw new RuntimeRequestError("Save and review the issue preview before submitting. A pending submission cannot be retried.");
+        const scrubbed = editReport(value, value.title, value.body);
+        if (scrubbed.title !== value.title || scrubbed.body !== value.body) {
+          save(scrubbed);
+          break; // A changed public preview always requires another explicit submit.
+        }
         // Lock during auth/discovery too; no concurrent edits or double clicks.
         save({ ...value, status: "submitting", revision: value.revision + 1, notice: "Submitting to eduardtomas1/inertia…" });
         publicationBusy = true;

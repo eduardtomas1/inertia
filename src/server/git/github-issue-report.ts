@@ -39,14 +39,13 @@ export function githubIssuePublisher(cwd: string, lifetime: AbortSignal, depende
     find: async (id) => {
       if (!/^[0-9a-f-]{36}$/u.test(id)) throw new Error("Invalid report identity.");
       return await execute(async (run) => {
-        const output = await run(["issue", "list", "--repo", ISSUE_REPOSITORY, "--state", "all", "--search", `in:body "inertia-report:${id}"`, "--limit", "10", "--json", "url,body"]);
-        const data: unknown = JSON.parse(output);
-        if (!Array.isArray(data)) throw new Error("Invalid GitHub response.");
-        for (const item of data) {
-          if (typeof item?.body === "string" && item.body.includes(`<!-- inertia-report:${id} -->`) && typeof item.url === "string") {
-            const url = verifiedIssueUrl(item.url);
-            if (url) return url;
-          }
+        // Filter inside gh so even ten maximum-size bodies cannot overflow the
+        // bounded IPC output. The only interpolated value is a validated UUID.
+        const projection = `.[] | select(.body | contains("<!-- inertia-report:${id} -->")) | .url`;
+        const output = await run(["issue", "list", "--repo", ISSUE_REPOSITORY, "--state", "all", "--search", `in:body "inertia-report:${id}"`, "--limit", "10", "--json", "url,body", "--jq", projection]);
+        for (const candidate of output.split(/\r?\n/u).slice(0, 10)) {
+          const url = verifiedIssueUrl(candidate);
+          if (url) return url;
         }
         return null;
       });

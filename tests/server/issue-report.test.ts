@@ -150,3 +150,21 @@ it("upgrades schema 68 transactionally and retains saved report progress", () =>
     expect(database.prepare("SELECT MAX(version) FROM schema_migrations").pluck().get()).toBe(69);
   } finally { database.close(); }
 });
+
+
+it.each([
+  '{"api_key":"SYNTHETIC_SECRET_VALUE"}',
+  '{"password":"SYNTHETIC_PASSWORD_VALUE"}',
+  "'token': 'SYNTHETIC_TOKEN_VALUE'",
+  '{"API_KEY":"SYNTHETIC_ESCAPED_\\\"SECRET_VALUE"}',
+])("removes quoted secrets from prepare, edit and the final provider prompt: %s", async (privateText) => {
+  const { dispatch, store } = setup();
+  const description = `The chat stopped. Configuration follows:\n${privateText}`;
+  const draft = await dispatch({ type: "support.report.prepare", payload: { ...input, description } });
+  expect(JSON.stringify(store.readIssueReport())).not.toContain("SYNTHETIC_");
+  expect(reportPrompt(draft)).not.toContain("SYNTHETIC_");
+  // The final provider boundary also protects drafts created before a scrub update.
+  expect(reportPrompt({ ...draft, description })).not.toContain("SYNTHETIC_");
+  await dispatch({ type: "support.report.edit", payload: { id: draft.id, revision: draft.revision, title: "Chat failure", body: description } });
+  expect(JSON.stringify(store.readIssueReport())).not.toContain("SYNTHETIC_");
+});

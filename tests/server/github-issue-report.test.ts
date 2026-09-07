@@ -34,9 +34,22 @@ describe("fixed-repository issue publisher", () => {
     expect(beforePublish).not.toHaveBeenCalled();
   });
   it("matches the exact report marker and rejects hostile results during read-only reconciliation", async () => {
-    mocks.run.mockResolvedValueOnce({ stdout: JSON.stringify([{ body: `<!-- inertia-report:${id} -->`, url: "https://github.com/attacker/repo/issues/1" }, { body: `<!-- inertia-report:${id} -->`, url: "https://github.com/eduardtomas1/inertia/issues/123" }]), stderr: "" });
+    mocks.run.mockResolvedValueOnce({ stdout: "https://github.com/attacker/repo/issues/1\nhttps://github.com/eduardtomas1/inertia/issues/123\n", stderr: "" });
     const publisher = githubIssuePublisher("/app", new AbortController().signal, dependencies);
     await expect(publisher.find(id)).resolves.toContain("/inertia/issues/123");
-    expect(mocks.run.mock.calls[0]![1]).toEqual(["issue", "list", "--repo", "eduardtomas1/inertia", "--state", "all", "--search", `in:body "inertia-report:${id}"`, "--limit", "10", "--json", "url,body"]);
+    expect(mocks.run.mock.calls[0]![1]).toEqual(["issue", "list", "--repo", "eduardtomas1/inertia", "--state", "all", "--search", `in:body "inertia-report:${id}"`, "--limit", "10", "--json", "url,body", "--jq", `.[] | select(.body | contains("<!-- inertia-report:${id} -->")) | .url`]);
   });
+});
+
+
+it("reconciles a 19,000-character published body without overflowing the 16 KiB output boundary", async () => {
+  const record = { body: "x".repeat(19_000) + `<!-- inertia-report:${id} -->`, url: "https://github.com/eduardtomas1/inertia/issues/123" };
+  mocks.run.mockImplementation(async (_executable, args, options) => {
+    const stdout = args.includes("--jq") ? record.url : JSON.stringify([record]);
+    if (Buffer.byteLength(stdout) > options.maxOutputBytes) throw new Error("output-limit");
+    return { stdout, stderr: "" };
+  });
+  const publisher = githubIssuePublisher("/app", new AbortController().signal, dependencies);
+  await expect(publisher.find(id)).resolves.toBe(record.url);
+  expect(mocks.run).toHaveBeenCalledOnce();
 });

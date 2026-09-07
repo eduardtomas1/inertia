@@ -46,8 +46,9 @@ it("guides model/reasoning selection into a saved private chat, edits the previe
 it("offers setup and a useful manual preview without available provider authentication", async () => {
   const { props } = fixture();
   render(<IssueReportSettings {...props} providers={[]} />);
+  await waitFor(() => expect(screen.getByRole("button", { name: "Open provider setup" })).toBeEnabled());
   fireEvent.click(screen.getByRole("button", { name: "Open provider setup" }));
-  expect(props.onProviderSetup).toHaveBeenCalledOnce();
+  await waitFor(() => expect(props.onProviderSetup).toHaveBeenCalledOnce());
   fireEvent.change(screen.getByLabelText("What happened?"), { target: { value: "A report without provider authentication should still work." } });
   await waitFor(() => expect(screen.getByRole("button", { name: "Create private report chat" })).toBeEnabled());
   fireEvent.click(screen.getByRole("button", { name: "Create private report chat" }));
@@ -62,4 +63,15 @@ it("shows failure and retry while preserving description and preview", async () 
   expect(screen.getByRole("button", { name: "Retry validation" })).toBeEnabled();
   expect(screen.getByText("Problem and safe evidence remain available.")).toBeVisible();
   expect(request.mock.calls).toHaveLength(1);
+});
+
+
+it("saves a filled report before leaving for provider authentication setup", async () => {
+  const { props, saved } = fixture();
+  render(<IssueReportSettings {...props} providers={[]} />);
+  await waitFor(() => expect(screen.getByRole("button", { name: "Open provider setup" })).toBeEnabled());
+  fireEvent.change(screen.getByLabelText("What happened?"), { target: { value: "Keep these reproduction details while I connect my provider." } });
+  fireEvent.click(screen.getByRole("button", { name: "Open provider setup" }));
+  await waitFor(() => expect(props.onProviderSetup).toHaveBeenCalledOnce());
+  expect(saved()?.description).toContain("Keep these reproduction details");
 });

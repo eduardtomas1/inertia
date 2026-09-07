@@ -99,7 +99,7 @@ export function IssueReportSettings({ providers, backendProfiles, projects, disa
         <label>Diagnostic scope<select aria-label="Diagnostic scope" value={projectId} disabled={locked} onChange={(event) => setProjectId(event.target.value)}><option value="">App only</option>{projects.map((project) => <option key={project.id} value={project.id}>{project.name} · counts only</option>)}</select></label>
       </div>
       <p className="settings-card-note">Automatic validation currently supports Claude Agent SDK with tools disabled. Other providers can continue with a manual preview. Your existing model authentication is used.</p>
-      {!ready && <button type="button" className="secondary-button" onClick={onProviderSetup}>Open provider setup</button>}
+      {!ready && <button type="button" className="secondary-button" disabled={locked} onClick={() => { void perform(async () => { if (description.trim().length >= 10) await prepare(); onProviderSetup(); }); }}>Open provider setup</button>}
       <button type="button" className="primary-button" disabled={locked || description.trim().length < 10} onClick={() => { void perform(prepare); }}>Create private report chat</button>
     </div>}
     {report && <>

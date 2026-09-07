@@ -1,4 +1,5 @@
 import { parseRuntimeOwnedProcessDiagnostic } from "../../../src/node/runtime-owned-process-diagnostic";
+import { parseRuntimeFailureDiagnosticMessage } from "../../../src/node/runtime-failure-diagnostic";
 import type { TestInfo } from "@playwright/test";
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
@@ -41,6 +42,10 @@ const failurePrefixes = [
 function failureCode(value: unknown): string | null {
   if (value === null || value === undefined) return null;
   if (typeof value !== "string" || value.length > 4_096) return "detail-omitted";
+  const known = parseRuntimeFailureDiagnosticMessage(value);
+  if (known?.initiatingCode) return [known.initiatingCode,
+    ...(known.shutdownMessage ? [failureCodes.get(known.shutdownMessage)] : []),
+  ].join("+");
   return failureCodes.get(value)
     ?? failurePrefixes.find(([prefix]) => value.startsWith(prefix))?.[1]
     ?? (/^(?:The runtime|Runtime) process exited unexpectedly \(code -?\d{1,10}\)\.$/u.test(value)

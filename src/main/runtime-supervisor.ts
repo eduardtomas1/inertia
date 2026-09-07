@@ -31,7 +31,7 @@ import { RuntimeOwnedProcessJournal } from "../node/runtime-owned-processes.js";
 import type { ModernDarwinRecoveryAuthorityDescriptor } from "../node/runtime-modern-recovery-authorities.js";
 import {
   claimStartupRecoveryDeadlineExtension, createRuntimeProcessRecord,
-  drainRuntimeRecordRequests, recordRuntimeRestartRequested, recoverUnconfirmedRuntimeCleanup, shouldRecoverUnconfirmedWindowsTree,
+  drainRuntimeRecordRequests, recordRuntimeRestartRequested, recordRuntimeShutdownFailure, recoverUnconfirmedRuntimeCleanup, shouldRecoverUnconfirmedWindowsTree,
 } from "./runtime-supervisor-process-record.js";
 import { runtimeSupervisorRecoveryWaitMs } from "../node/runtime-shutdown-deadline.js";
 import type { RuntimeProcessContainmentAdmission } from "./runtime-process-containment-admission.js"; import { RuntimeSupervisorRecoveryAdmission } from "./runtime-supervisor-recovery-admission.js";
@@ -712,9 +712,10 @@ export class RuntimeSupervisor {
       return;
     }
     if (event.type === "runtime.startup-failed") {
-      record.reportedFailure = event.message;
+      record.initiatingFailure ??= event.message;
+      record.reportedFailure ??= record.initiatingFailure;
       record.acceptingReady = false;
-      this.lastError = event.message;
+      this.lastError = record.reportedFailure;
       this.startupBlockerCode = event.blockerCode ?? null;
       if (event.blockerCode) {
         // A reason-coded startup blocker is an authoritative safety decision,
@@ -746,15 +747,7 @@ export class RuntimeSupervisor {
       record.cleanupRecoveryRequired = true;
       this.websocketUrl = null;
       this.phase = this.desiredRunning ? "restarting" : "stopping";
-      this.lastError = event.reason === "runtime-close-deadline"
-        ? "Runtime shutdown exceeded its deadline while closing local resources."
-        : event.reason === "runtime-close"
-          ? "Runtime shutdown failed while closing local resources."
-          : event.reason === "owned-process-cleanup"
-            ? "Runtime shutdown could not confirm owned-process cleanup."
-            : event.reason === "incomplete-startup"
-              ? "Runtime shutdown could not confirm cleanup after incomplete startup."
-              : "The runtime could not confirm complete process cleanup.";
+      this.lastError = recordRuntimeShutdownFailure(record, event.reason);
       this.rejectTestRecycle(record, this.lastError, true);
       this.clearTimerValue("startupTimer");
       this.credentials.clear(record);

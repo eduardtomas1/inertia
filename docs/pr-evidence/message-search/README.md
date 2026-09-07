@@ -41,7 +41,9 @@ searches, and focus notifications only reach the window owning the chat.
 - Electron Playwright: all three scenarios in `tests/e2e/message-search.spec.ts`
   passed on macOS ARM64, covering unloaded historical turns, draft retention,
   split/detached focus, compact layout and a full application restart.
-- Full `npm run check`: queued behind the current release verification.
+- Full `npm run check`: passed with one low-priority Vitest worker: 685 test
+  files passed, 12 skipped; 7,125 tests passed, 122 skipped. The quality,
+  private-connect and production build gates also passed.
 - Windows, Linux and packaged installers have not been exercised locally.
   No live provider calls are needed or made by this feature.
 

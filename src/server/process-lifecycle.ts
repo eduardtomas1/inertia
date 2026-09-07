@@ -461,7 +461,7 @@ function terminateWindowsProcessTree(
       return (error as NodeJS.ErrnoException).code === "ESRCH" ? "absent" : "unknown";
     }
   };
-  const rootBefore = observeRoot();
+  const rootBefore = "unknown";
   const record = (phase: WindowsCleanupFailure["phase"], exitCode: number | null = null): void => {
     const errorPids = [...output.matchAll(/^ERROR: The process (?:with PID |")([0-9]+)/gimu)]
       .map((match) => Number(match[1]));

@@ -2,8 +2,12 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { runLinuxGuardedSmoke } from "./linux-guarded-smoke.mjs";
+import { strict as assert } from "node:assert";
 
 if (process.platform !== "linux" || process.arch !== "x64") throw new Error("This public probe requires native Linux x64.");
+assert.equal(process.argv.length, 6);
+assert.equal(process.argv[4], "0.0.54");
+assert.match(process.argv[5], /^[a-f0-9]{64}$/u);
 const root = await mkdtemp(join(tmpdir(), "inertia-public-update-"));
 const reportDirectory = resolve(process.argv[3]);
 await mkdir(reportDirectory, { recursive: true, mode: 0o700 });
@@ -12,7 +16,7 @@ try {
   const output = await runLinuxGuardedSmoke({
     guardian: resolve("resources/generated/runtime-process-guardian/runtime-process-guardian"),
     command: process.execPath,
-    args: [resolve(import.meta.dirname, "linux-public-update-probe-driver.mjs"), resolve(process.argv[2]), root],
+    args: [resolve(import.meta.dirname, "linux-public-update-probe-driver.mjs"), resolve(process.argv[2]), root, process.argv[4], process.argv[5]],
   });
   console.log(output.trim());
   succeeded = true;

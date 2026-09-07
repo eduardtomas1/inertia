@@ -1,40 +1,142 @@
-name: Public Linux v53 updater probe
+name: Linux v53 to v54 release validation
 
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: Pre-tag installed handoff or post-publication normal download
+        required: true
+        type: choice
+        options: [pretag-handoff, public-download]
+        default: pretag-handoff
+      source_sha:
+        description: Exact 40-hex frozen v54 main commit
+        required: true
+        type: string
+      expected_public_sha256:
+        description: Required only for public-download; exact published v54 x64 digest
+        required: false
+        type: string
 
 permissions:
   contents: read
 
 jobs:
-  linux-v53-public:
-    name: Exact public v53 renderer and stable feed
+  linux-v53-transition:
+    name: Published v53 / ${{ inputs.mode }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    env:
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      RELEASE_SOURCE_SHA: ${{ inputs.source_sha }}
+      VALIDATION_MODE: ${{ inputs.mode }}
+      EXPECTED_PUBLIC_SHA256: ${{ inputs.expected_public_sha256 }}
+      INERTIA_RELEASE_CHANNEL: stable
+      INERTIA_RELEASE_PLATFORM: linux-x64
     steps:
-      - name: Check out diagnostic driver
+      - name: Check out validation harness
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Validate inputs and retain only the external harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          case "$VALIDATION_MODE" in
+            pretag-handoff) test -z "$EXPECTED_PUBLIC_SHA256" ;;
+            public-download) [[ "$EXPECTED_PUBLIC_SHA256" =~ ^[0-9a-f]{64}$ ]] ;;
+            *) exit 1 ;;
+          esac
+          mkdir -p "$RUNNER_TEMP/validation-harness/ci" "$RUNNER_TEMP/validation-evidence"
+          cp scripts/linux-installed-update-{smoke,driver}.mjs "$RUNNER_TEMP/validation-harness/"
+          cp scripts/linux-public-update-{probe,probe-driver,evidence}.mjs "$RUNNER_TEMP/validation-harness/"
+          cp scripts/ci/download-public-linux-v53.mjs "$RUNNER_TEMP/validation-harness/ci/"
+      - name: Check out exact frozen candidate source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source_sha }}
+          persist-credentials: false
+      - name: Assert exact source and all root release versions
+        shell: bash
+        env:
+          DRIVER_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test -z "$(git status --porcelain)"
+          node --input-type=module <<'JS'
+          import { strict as assert } from "node:assert";
+          import { readFileSync, writeFileSync } from "node:fs";
+          import { join } from "node:path";
+          const pkg = JSON.parse(readFileSync("package.json", "utf8"));
+          const lock = JSON.parse(readFileSync("package-lock.json", "utf8"));
+          for (const version of [pkg.version, lock.version, lock.packages[""].version]) assert.equal(version, "0.0.54");
+          assert.equal(pkg.inertiaReleaseChannel, "stable");
+          writeFileSync(join(process.env.RUNNER_TEMP, "validation-evidence/source.json"), JSON.stringify({
+            sourceSha: process.env.SOURCE_SHA, driverSha: process.env.DRIVER_SHA,
+            mode: process.env.VALIDATION_MODE, version: pkg.version,
+          }) + "\n");
+          JS
       - name: Install locked dependencies
         uses: ./.github/actions/install-dependencies
       - name: Install native guardian toolchain
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends --yes binutils linux-libc-dev musl-tools=1.2.4-2 xvfb
-      - name: Build the outer process guardian only
+      - name: Build exact candidate once before restoring external harness
+        if: inputs.mode == 'pretag-handoff'
+        run: npm run build:packaged
+      - name: Package exact candidate without publication
+        if: inputs.mode == 'pretag-handoff'
+        run: npm run package:release:linux
+      - name: Validate candidate identity and hardened Electron fuses
+        if: inputs.mode == 'pretag-handoff'
+        run: |
+          npm run validate:linux-package
+          npm run verify:fuses -- release/linux-unpacked/inertia
+      - name: Verify static packaged guardian
+        if: inputs.mode == 'pretag-handoff'
+        shell: bash
+        run: |
+          set -euo pipefail
+          guardian=release/linux-unpacked/resources/runtime/runtime-process-guardian
+          test -x "$guardian"
+          if readelf --program-headers "$guardian" | grep -Fq INTERP; then exit 1; fi
+          if readelf --dynamic "$guardian" 2>/dev/null | grep -Fq '(NEEDED)'; then exit 1; fi
+      - name: Build only the outer guardian for public download proof
+        if: inputs.mode == 'public-download'
         run: node scripts/build-runtime-process-guardian.mjs
-      - name: Download and verify the exact public predecessor
+      - name: Restore external harness after candidate packaging
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp "$RUNNER_TEMP/validation-harness/"*.mjs scripts/
+          cp "$RUNNER_TEMP/validation-harness/ci/download-public-linux-v53.mjs" scripts/ci/
+          git diff --exit-code -- src package.json package-lock.json
+      - name: Download and verify the exact published predecessor
         run: node scripts/ci/download-public-linux-v53.mjs "$RUNNER_TEMP/v53-predecessor"
-      - name: Probe untouched v53 renderer and normal stable feed
-        run: xvfb-run --auto-servernum node scripts/linux-public-update-probe.mjs "$RUNNER_TEMP/v53-predecessor/Inertia-0.0.53.AppImage" "$RUNNER_TEMP/v53-public-evidence"
-      - name: Retain only public identity and fixed probe outcomes
+      - name: Certify actual v53 handoff, retained history, new turns and relaunch
+        if: inputs.mode == 'pretag-handoff'
+        env:
+          INERTIA_VALIDATION_REPORT: ${{ runner.temp }}/validation-evidence/installed-handoff.json
+        run: |
+          xvfb-run --auto-servernum node scripts/linux-installed-update-smoke.mjs \
+            "$PWD/release/Inertia-0.0.54.AppImage" \
+            "$RUNNER_TEMP/v53-predecessor/Inertia-0.0.53.AppImage" 0.0.53
+      - name: Check real public feed and download via untouched v53 updater
+        if: inputs.mode == 'public-download'
+        run: |
+          xvfb-run --auto-servernum node scripts/linux-public-update-probe.mjs \
+            "$RUNNER_TEMP/v53-predecessor/Inertia-0.0.53.AppImage" \
+            "$RUNNER_TEMP/validation-evidence" 0.0.54 "$EXPECTED_PUBLIC_SHA256"
+      - name: Retain only compact identities and bounded outcomes
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: linux-v53-public-probe
+          name: linux-v53-${{ inputs.mode }}-${{ inputs.source_sha }}
           path: |
             ${{ runner.temp }}/v53-predecessor/predecessor.json
-            ${{ runner.temp }}/v53-public-evidence/public-update-probe.json
-          retention-days: 3
+            ${{ runner.temp }}/validation-evidence/*.json
+          retention-days: 7
           if-no-files-found: warn

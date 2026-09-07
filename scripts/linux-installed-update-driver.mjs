@@ -135,7 +135,8 @@ try {
   await wait("reopened installed app shutdown", () => !alive(reopened.mainPid) && !alive(reopened.runtimePid));
   await assertHistoryAfterShutdown(root, reopenedHistory);
   console.log(JSON.stringify({ proof: "installed-handoff", predecessorVersion, predecessorDigest,
-    candidateVersion: version, candidateDigest, installedDigest: await digest(stable),
+    predecessorBytes: (await lstat(predecessor)).size,
+    candidateVersion: version, candidateDigest, candidateBytes: (await lstat(source)).size, installedDigest: await digest(stable),
     realPredecessor, fixtureAdvertisementAndDownload: true, fixtureServiceCurrentVersion: "0.0.0" }));
   console.log(`Installed Linux ${process.arch} update passed: real candidate bootstrap, old-owner shutdown, atomic replacement, same profile/history/settings/provider sessions, new turns, and fresh relaunch.`);
 } catch (error) {

@@ -5,10 +5,14 @@ import { createReadStream } from "node:fs";
 import { lstat, mkdir, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { chromium } from "@playwright/test";
+import { readPublicTarget, verifyPrivateDownloadedTarget } from "./linux-public-update-evidence.mjs";
 
 if (process.platform !== "linux" || process.arch !== "x64") throw new Error("Native Linux x64 required.");
 const image = resolve(process.argv[2]);
 const root = resolve(process.argv[3]);
+assert.equal(process.argv.length, 6);
+assert.equal(process.argv[4], "0.0.54");
+assert.match(process.argv[5], /^[a-f0-9]{64}$/u);
 const expectedDigest = "81621b079ed09b820e1dc7e33d496394223c8235ef6d209c623acd44846fe8b2";
 const report = { schemaVersion: 1, publicPredecessor: "v0.0.53", sha256: expectedDigest,
   fixtureOverrides: false, phase: "binary", passed: false, cdpConnected: false };
@@ -38,6 +42,9 @@ try {
   const hash = createHash("sha256");
   for await (const chunk of createReadStream(image)) hash.update(chunk);
   assert.equal(hash.digest("hex"), expectedDigest);
+  report.phase = "public-target";
+  const target = await readPublicTarget(process.argv[5]);
+  report.publicTarget = target;
   for (const name of ["home", "config", "cache", "data", "workspace", "temp"]) {
     await mkdir(join(root, name), { mode: 0o700 });
   }
@@ -79,14 +86,28 @@ try {
   ]);
   // Persist only fixed public status fields, never messages, endpoint URLs,
   // profile contents, arbitrary child output, or provider details.
-  report.status = Object.fromEntries(["currentVersion", "latestVersion", "channel", "delivery", "state", "installBlocker"]
-    .map(key => [key, status[key]]));
   assert.equal(status.currentVersion, "0.0.53");
-  assert.equal(status.latestVersion, "0.0.53");
+  assert.equal(status.latestVersion, "0.0.54");
   assert.equal(status.channel, "stable");
   assert.equal(status.delivery, "in-app");
-  assert.equal(status.state, "current");
+  assert.equal(status.state, "available");
   assert.equal(status.installBlocker, null);
+  assert.equal(status.freshness, "fresh");
+  report.status = { currentVersion: "0.0.53", latestVersion: "0.0.54", channel: "stable",
+    delivery: "in-app", state: "available", installBlocker: null, freshness: "fresh" };
+  report.phase = "real-public-download";
+  const downloaded = await Promise.race([
+    page.evaluate(() => window.inertia.downloadAppUpdate()),
+    new Promise((_, reject) => { const timer = setTimeout(() => reject(new Error("download-deadline")), remaining()); timer.unref(); }),
+  ]);
+  assert.equal(downloaded.currentVersion, "0.0.53");
+  assert.equal(downloaded.latestVersion, "0.0.54");
+  assert.equal(downloaded.state, "downloaded");
+  assert.equal(downloaded.installBlocker, null);
+  report.phase = "private-cache-checksum";
+  report.download = await verifyPrivateDownloadedTarget(root, target);
+  report.download.state = "downloaded";
+  report.installInvoked = false;
   report.phase = "normal-close";
   await page.close({ runBeforeUnload: true });
   await wait(() => childOutcome, 15_000);

@@ -24,7 +24,7 @@ function subscribeDocumentPresence(onChange: () => void): () => void {
 }
 
 function documentVisibilitySnapshot(): boolean {
-  return document.visibilityState === "visible";
+  return typeof document !== "undefined" && document.visibilityState === "visible";
 }
 
 function subscribeDocumentVisibility(onChange: () => void): () => void {
@@ -43,11 +43,15 @@ export function useDocumentPresence(): number {
     documentPresenceSnapshot,
     documentPresenceSnapshot,
   );
-  // The document root also covers portals and detached windows. Visible X11
-  // windows can be unfocused, so visibility alone cannot suspend their motion.
+  // The document root covers portals and detached windows. Attention needs
+  // focus, but visible unfocused windows must keep their progress motion live.
   useLayoutEffect(() => {
     document.documentElement.dataset.documentActive = String(presence > 1);
-    return () => { delete document.documentElement.dataset.documentActive; };
+    document.documentElement.dataset.documentVisible = String(presence > 0);
+    return () => {
+      delete document.documentElement.dataset.documentActive;
+      delete document.documentElement.dataset.documentVisible;
+    };
   }, [presence]);
   return presence;
 }
@@ -65,7 +69,7 @@ export function useDocumentActivity(): boolean {
   );
 }
 
-/** Subscribes portal-only rendering work to the visibility boolean it needs. */
+/** Keeps visible rendering live without subscribing it to attention changes. */
 export function useDocumentVisibility(): boolean {
   return useSyncExternalStore(
     subscribeDocumentVisibility,

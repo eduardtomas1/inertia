@@ -18,7 +18,7 @@ const inputSource = readFileSync(
   "utf8",
 );
 const stopActionSource = readFileSync(
-  new URL("../../src/renderer/src/components/composer/composerStopAction.ts", import.meta.url),
+  new URL("../../src/renderer/src/components/composer/useComposerStopAction.ts", import.meta.url),
   "utf8",
 );
 const sendActionsSource = readFileSync(
@@ -124,7 +124,7 @@ describe("composer Send and Stop", () => {
     expect(sendActionsSource).toContain("onFocus={() => setIntent(true)}");
     expect(composerSource).toContain("aria-busy={");
     expect(composerSource).toContain("|| conversationUpdatePending");
-    expect(stopActionSource).toContain("if (stoppingRef.current || agentStopping || !running) return;");
+    expect(stopActionSource).toContain("if (stopClaimRef.current || cancelling || !running) return;");
     expect(composerSource).toContain("textareaRef.current?.focus()");
     expect(chatWorkspaceSource).toContain("onStop: () => Promise<void>;");
     expect(chatWorkspaceSource).toContain(

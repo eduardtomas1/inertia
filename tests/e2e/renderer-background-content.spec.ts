@@ -1,8 +1,10 @@
 import { expect, test } from "@playwright/test";
-import { writeFile } from "node:fs/promises";
+import { realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
+import packageManifest from "../../package.json" with { type: "json" };
 import { createAppFixture } from "./support/app-fixture";
+import { checkNativeBackgroundMotion } from "./support/native-background-motion";
 
 // Real provider transport; gates release new content only after native blur.
 const provider = `
@@ -47,7 +49,13 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
 });
 `;
 
-test("renders incoming reasoning and completion while unfocused without restarting decorative motion", async () => {
+test("suspends native hidden motion and clocks and resumes on showing the window", async () => {
+  test.skip(process.platform !== "linux", "Exercises the native Linux hidden-window boundary.");
+  test.setTimeout(60_000);
+  await checkNativeBackgroundMotion();
+});
+
+test("keeps visible unfocused progress animated and renders incoming reasoning and completion", async () => {
   test.setTimeout(90_000);
   const fixture = await createAppFixture({
     name: "background-content", initialState: "conversation", windowDisplay: "primary",
@@ -55,6 +63,14 @@ test("renders incoming reasoning and completion while unfocused without restarti
   });
   const { page, electronApp } = fixture;
   try {
+    const identity = await electronApp.evaluate(({ app }) => ({
+      path: app.getAppPath(), name: app.getName(), version: app.getVersion(),
+      cwd: process.cwd(), profile: app.getPath("userData"),
+    }));
+    expect(identity).toMatchObject({ name: packageManifest.name, version: packageManifest.version });
+    expect(await realpath(identity.path)).toBe(await realpath(process.cwd()));
+    expect(await realpath(identity.cwd)).toBe(await realpath(process.cwd()));
+    expect(await realpath(identity.profile)).toBe(await realpath(join(fixture.testDirectory, "electron-profile")));
     await page.emulateMedia({ reducedMotion: "no-preference" });
     const session = await page.context().newCDPSession(page);
     await session.send("Emulation.setFocusEmulationEnabled", { enabled: false });
@@ -69,6 +85,7 @@ test("renders incoming reasoning and completion while unfocused without restarti
     await page.locator('[data-agent-trace="thinking"] > summary').click();
     const initial = page.locator(".turn-reasoning-step").filter({ hasText: "Foreground step" });
     await expect(initial).toHaveCSS("opacity", "1");
+    await expect(initial).toHaveClass(/is-active/u);
 
     await electronApp.evaluate(async ({ BrowserWindow }) => {
       const other = new BrowserWindow({ width: 160, height: 100, x: 0, y: 0, show: true });
@@ -78,16 +95,28 @@ test("renders incoming reasoning and completion while unfocused without restarti
     });
     await expect.poll(() => page.evaluate(() => document.hasFocus())).toBe(false);
     await expect(page.locator("html")).toHaveAttribute("data-document-active", "false");
+    await expect(page.locator("html")).toHaveAttribute("data-document-visible", "true");
     await writeFile(join(fixture.workspaceDirectory, ".git", "background-update"), "ready");
     const incoming = page.locator(".turn-reasoning-step").filter({ hasText: "Background step" });
     await expect(incoming).toContainText("New content arrived while unfocused.");
     // Playwright visibility ignores opacity: assert the actual painted style.
     await expect(incoming).toHaveCSS("opacity", "1");
     await expect(incoming).toHaveCSS("transform", "matrix(1, 0, 0, 1, 0, 0)");
-    const animationState = () => incoming.evaluate((element) =>
-      getComputedStyle(element, "::before").animationPlayState);
-    await expect.poll(animationState).toBe("paused");
+    const progressTime = () => incoming.evaluate((element) => {
+      const name = getComputedStyle(element, "::before").animationName;
+      const animation = element.getAnimations({ subtree: true }).find((candidate) =>
+        candidate instanceof CSSAnimation && candidate.animationName === name);
+      return animation?.playState === "running" ? Number(animation.currentTime) : null;
+    });
+    await expect.poll(progressTime).not.toBeNull();
+    const started = (await progressTime())!;
+    await expect.poll(progressTime).toBeGreaterThan(started + 150);
     await expect.poll(() => page.evaluate(() => document.hasFocus())).toBe(false);
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await expect.poll(progressTime).toBeNull();
+    await expect(incoming).toHaveCSS("opacity", "1");
+    await page.emulateMedia({ reducedMotion: "no-preference" });
+    await expect.poll(progressTime).not.toBeNull();
 
     await writeFile(join(fixture.workspaceDirectory, ".git", "background-complete"), "ready");
     const answer = page.getByRole("article", { name: "Final assistant answer" });

@@ -1,7 +1,8 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { Composer } from "../../src/renderer/src/components/Composer";
+import { useComposerStopAction } from "../../src/renderer/src/components/composer/useComposerStopAction";
 import { COMPOSER_ACTION_STALE_FALLBACK_MS } from "../../src/renderer/src/utils/composerPrimaryAction";
 import { composerProps, conversation, deferred } from "./composer-fixtures";
 
@@ -12,6 +13,34 @@ afterEach(() => {
 });
 
 describe("composer cancellation ownership", () => {
+  it("keeps another chat's Stop latch when a prior chat's request rejects", async () => {
+    const first = deferred<void>();
+    const second = deferred<void>();
+    const { result, rerender } = renderHook(useComposerStopAction, {
+      initialProps: { running: true, cancelling: false, conversationId: "first-chat", onStop: () => first.promise },
+    });
+    let firstStop!: Promise<void>;
+    act(() => { firstStop = result.current.stop(); });
+    rerender({ running: true, cancelling: false, conversationId: "second-chat", onStop: () => second.promise });
+    let secondStop!: Promise<void>;
+    act(() => { secondStop = result.current.stop(); });
+    const secondClaim = result.current.stopClaimRef.current;
+
+    await act(async () => {
+      first.reject(new Error("The old request failed."));
+      await firstStop;
+    });
+    expect(result.current.stopClaimRef.current).toBe(secondClaim);
+    expect(result.current.stopping).toBe(true);
+
+    await act(async () => {
+      second.reject(new Error("The current request failed."));
+      await secondStop;
+    });
+    expect(result.current.stopClaimRef.current).toBeNull();
+    expect(result.current.stopping).toBe(false);
+  });
+
   it.each(["detail", "summary"] as const)(
     "keeps follow-ups blocked until %s confirms cancellation has finished",
     async (projection) => {

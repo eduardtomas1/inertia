@@ -208,9 +208,9 @@ describe("Quiet Ledger active-to-settled motion", () => {
     expect(quietLedgerReducedMotion).toContain("transform: none");
   });
 
-  it("pauses optional visual work when the document is not active", () => {
-    expect(activitySource).toContain("useDocumentActivity()");
-    expect(activitySource).toContain("if (!documentActive) return;");
+  it("pauses live visual work only when the document is hidden", () => {
+    expect(activitySource).toContain("useDocumentVisibility()");
+    expect(activitySource).toContain("if (!documentVisible) return;");
     expect(activitySource).toContain("1_000");
     expect(activitySource).not.toContain("document.hasFocus() ? 100 : 1_000");
     expect(documentPresenceSource).toContain('[window, "blur"]');
@@ -230,7 +230,8 @@ describe("Quiet Ledger active-to-settled motion", () => {
     const backgroundCss = readFileSync(new URL(
       "../../src/renderer/src/background-motion.css", import.meta.url,
     ), "utf8");
-    expect(backgroundCss).toContain('data-document-active="false"');
+    expect(backgroundCss).toContain('data-document-visible="false"');
+    expect(backgroundCss).not.toContain("data-document-active");
     expect(backgroundCss).toContain("animation-play-state: paused !important");
     expect(css).toContain("animation-play-state: paused");
     expect(css).toContain("agent-pixel-shimmer");

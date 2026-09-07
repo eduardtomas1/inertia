@@ -65,6 +65,12 @@ test.beforeAll(async () => {
     initialState: "conversation",
     windowDisplay: "primary",
     codexAppServerSource,
+    claudeAuthSource: `
+if (process.argv[2] === "status") {
+  process.stdout.write(JSON.stringify({ loggedIn: false }) + "\\n");
+  process.exit(1);
+}
+`,
   });
   page = app.page;
 });

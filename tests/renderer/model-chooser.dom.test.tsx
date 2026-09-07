@@ -147,6 +147,29 @@ describe("model chooser active route", () => {
     });
   });
 
+  it("applies a starred profile shortcut from the provider source after the current configuration changes", async () => {
+    const route = currentRoute();
+    const initial = render(<ModelChooser routes={[route]} selectedRoute={route}
+      configuration={{ accessMode: "full", interactionMode: "plan" }} onSelect={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Choose model/u }));
+    fireEvent.click(screen.getByRole("button", { name: /Add Team Alpha .* to favorites/u }));
+    initial.unmount();
+
+    const onSelect = vi.fn();
+    render(<ModelChooser routes={[route]} selectedRoute={route}
+      configuration={{ accessMode: "supervised", interactionMode: "build" }} onSelect={onSelect} />);
+    fireEvent.click(screen.getByRole("button", { name: /Choose model/u }));
+    fireEvent.click(screen.getByRole("button", { name: /^Team gateway, custom backend /u }));
+    fireEvent.keyDown(screen.getByRole("searchbox"), { key: "1", code: "Digit1", ctrlKey: true });
+
+    await waitFor(() => expect(onSelect).toHaveBeenCalledOnce());
+    expect(onSelect.mock.calls[0]![0]).toMatchObject({
+      configuration: { accessMode: "full", interactionMode: "plan" },
+      selection: { reasoningEffort: "high" },
+    });
+    expect(screen.queryByRole("dialog", { name: "Choose model" })).not.toBeInTheDocument();
+  });
+
   beforeEach(() => {
     Object.defineProperty(window, "localStorage", {
       configurable: true,

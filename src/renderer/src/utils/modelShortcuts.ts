@@ -102,18 +102,22 @@ export function resolveModelShortcutBindings<Route extends ModelSearchRoute>(
 
   for (const favorite of favorites) {
     if (bindings.length === slots.length) break;
-    const route = favorite.route
-      ? visibleByRouteKey.get(favorite.route.key)
+    const route = favorite.route;
+    const visible = route
+      ? visibleByRouteKey.get(route.key)
         ?? visibleByFavoriteKey.get(favorite.key)
+        ?? visibleByFavoriteKey.get(modelFavoriteKey({
+          ...favorite.reference, configuration: undefined,
+        }))
       : undefined;
-    if (!route?.selectable || seenRoutes.has(route.key)) continue;
+    if (!route?.selectable || !visible?.selectable || seenRoutes.has(visible.key)) continue;
 
     const key = slots[bindings.length];
     if (!key) break;
-    seenRoutes.add(route.key);
+    seenRoutes.add(visible.key);
     bindings.push({
       favoriteKey: favorite.key,
-      routeKey: route.key,
+      routeKey: visible.key,
       route,
       key,
       code: `Digit${Number(key)}`,

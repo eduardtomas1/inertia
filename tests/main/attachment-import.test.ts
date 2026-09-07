@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createCanvas } from "@napi-rs/canvas";
 import * as XLSX from "xlsx";
+import { pngChunk, withEmptyPngDataChunks } from "../fixtures/attachments/png-chunks";
 
 import {
   attachmentPickerConfiguration,
@@ -420,6 +421,66 @@ describe("privileged attachment import validation", () => {
         ...candidate,
         mimeType: chatMimeForTestName(candidate.name),
       }), candidate.name).toThrow(/content does not match/u);
+    }
+  });
+
+  it("accepts valid PNG data split around empty IDAT chunks without altering bytes", () => {
+    // PNG allows zero-length IDAT records; the concatenated stream still
+    // carries exactly the original pixels and must be decoded and verified.
+    const bytes = withEmptyPngDataChunks(png);
+    expect(validateAttachmentImport({
+      name: "clipboard.png", mimeType: "image/png", data: bytes,
+    })).toMatchObject({ bytes, size: bytes.length, mimeType: "image/png" });
+  });
+
+  it("still rejects empty, non-contiguous, and excessive PNG data chunks", () => {
+    const headerEnd = 8 + 12 + png.readUInt32BE(8);
+    const header = png.subarray(0, headerEnd);
+    const end = pngChunk("IEND");
+    const empty = pngChunk("IDAT");
+    const idatOffset = png.indexOf(Buffer.from("IDAT")) - 4;
+    const idatEnd = idatOffset + 12 + png.readUInt32BE(idatOffset);
+    const validData = png.subarray(idatOffset, idatEnd);
+    const interrupted = pngChunk("tEXt", Buffer.from("Comment\0fixture"));
+    for (const data of [
+      Buffer.concat([header, empty, end]),
+      Buffer.concat([header, validData, interrupted, empty, end]),
+      Buffer.concat([header, ...Array<Buffer>(4_096).fill(empty), validData, end]),
+    ]) {
+      expect(() => validateAttachmentImport({
+        name: "unsafe.png", mimeType: "image/png", data,
+      })).toThrow(/content does not match/u);
+    }
+  });
+
+  it("allows empty APNG data chunks without relaxing animation ordering or frame payloads", () => {
+    const header = png.subarray(0, 8 + 12 + png.readUInt32BE(8));
+    const idatOffset = png.indexOf(Buffer.from("IDAT")) - 4;
+    const validData = png.subarray(idatOffset, idatOffset + 12 + png.readUInt32BE(idatOffset));
+    const animationData = Buffer.alloc(8);
+    animationData.writeUInt32BE(1, 0);
+    const frameData = Buffer.alloc(26);
+    frameData.writeUInt32BE(1, 4);
+    frameData.writeUInt32BE(1, 8);
+    const animation = pngChunk("acTL", animationData);
+    const frame = pngChunk("fcTL", frameData);
+    const empty = pngChunk("IDAT");
+    const end = pngChunk("IEND");
+    const bytes = Buffer.concat([header, animation, frame, empty, validData, empty, end]);
+
+    expect(validateAttachmentImport({
+      name: "animation.png", mimeType: "image/png", data: bytes,
+    })).toMatchObject({ bytes, size: bytes.length, mimeType: "image/png" });
+
+    for (const data of [
+      // Empty records cannot supply the first controlled frame's payload.
+      Buffer.concat([header, animation, frame, empty, end]),
+      // Even an empty IDAT must follow the animation header.
+      Buffer.concat([header, empty, animation, frame, validData, end]),
+    ]) {
+      expect(() => validateAttachmentImport({
+        name: "unsafe-animation.png", mimeType: "image/png", data,
+      })).toThrow(/content does not match/u);
     }
   });
 

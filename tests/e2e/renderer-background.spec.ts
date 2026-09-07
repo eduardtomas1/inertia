@@ -216,9 +216,11 @@ test(`bounds background motion for ${turns} turns${mature ? " in a mature profil
     });
     await expect.poll(() => page.evaluate(() => document.hasFocus())).toBe(false);
     expect(await page.evaluate(() => document.visibilityState)).toBe("visible");
+    await expect(page.locator("html")).toHaveAttribute("data-document-active", "false");
     await expect.poll(() => page.evaluate(() => {
       const animations = document.getAnimations();
-      return animations.length > 0 && animations.every((animation) => animation.playState === "paused");
+      // Zero-duration background effects can finish and leave this list.
+      return animations.every((animation) => animation.playState === "paused" || animation.playState === "finished");
     })).toBe(true);
     const pauseObservedMs = performance.now() - backgroundRequestedAt;
     const background = await sample(page, electronApp, "mapped-unfocused", testInfo);
@@ -278,7 +280,7 @@ test(`bounds background motion for ${turns} turns${mature ? " in a mature profil
       expect(measurement.start.focus).toBe(false);
       expect(measurement.end.focus).toBe(false);
       expect(measurement.end.animations).toEqual(measurement.start.animations);
-      expect(measurement.end.animations.every((animation) => animation.state === "paused")).toBe(true);
+      expect(measurement.end.animations.every((animation) => animation.state === "paused" || animation.state === "finished")).toBe(true);
       expect(measurement.end.counters.reactCommits).toBe(measurement.start.counters.reactCommits);
       expect(measurement.end.counters.rafCallbacks).toBe(measurement.start.counters.rafCallbacks);
       expect(measurement.end.counters.intervalCallbacks).toBe(measurement.start.counters.intervalCallbacks);

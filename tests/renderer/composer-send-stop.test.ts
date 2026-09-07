@@ -17,6 +17,10 @@ const inputSource = readFileSync(
   new URL("../../src/renderer/src/components/composer/ComposerInputZone.tsx", import.meta.url),
   "utf8",
 );
+const stopActionSource = readFileSync(
+  new URL("../../src/renderer/src/components/composer/composerStopAction.ts", import.meta.url),
+  "utf8",
+);
 const sendActionsSource = readFileSync(
   new URL(
     "../../src/renderer/src/components/composer/ComposerSendActions.tsx",
@@ -120,7 +124,7 @@ describe("composer Send and Stop", () => {
     expect(sendActionsSource).toContain("onFocus={() => setIntent(true)}");
     expect(composerSource).toContain("aria-busy={");
     expect(composerSource).toContain("|| conversationUpdatePending");
-    expect(composerSource).toContain("if (stoppingRef.current || !running) return;");
+    expect(stopActionSource).toContain("if (stoppingRef.current || agentStopping || !running) return;");
     expect(composerSource).toContain("textareaRef.current?.focus()");
     expect(chatWorkspaceSource).toContain("onStop: () => Promise<void>;");
     expect(chatWorkspaceSource).toContain(
@@ -140,6 +144,7 @@ describe("composer Send and Stop", () => {
     expect(supportsActiveParentFollowUp("claude-cli")).toBe(false);
     expect(composerFollowUpState({
       running: true,
+      stopping: false,
       harnessId: "codex-app-server",
       hasDraft: true,
       textOnly: true,
@@ -148,6 +153,7 @@ describe("composer Send and Stop", () => {
     })).toBe("ready");
     expect(composerFollowUpState({
       running: true,
+      stopping: false,
       harnessId: "claude-agent-sdk",
       hasDraft: true,
       textOnly: true,
@@ -156,6 +162,7 @@ describe("composer Send and Stop", () => {
     })).toBe("pending");
     expect(composerFollowUpState({
       running: true,
+      stopping: false,
       harnessId: "codex-cli",
       hasDraft: true,
       textOnly: true,
@@ -164,9 +171,19 @@ describe("composer Send and Stop", () => {
     })).toBe("unavailable");
     expect(composerFollowUpState({
       running: true,
+      stopping: false,
       harnessId: "codex-app-server",
       hasDraft: true,
       textOnly: false,
+      submitting: false,
+      sending: false,
+    })).toBe("unavailable");
+    expect(composerFollowUpState({
+      running: true,
+      stopping: true,
+      harnessId: "codex-app-server",
+      hasDraft: true,
+      textOnly: true,
       submitting: false,
       sending: false,
     })).toBe("unavailable");

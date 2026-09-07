@@ -1,5 +1,5 @@
 // @inertia-test-suite portable
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -915,6 +915,66 @@ describe("provider manager installation ownership", () => {
     })).toBe(true);
     await expect(manager.disposeAll()).resolves.toBeUndefined();
   });
+
+  it.skipIf(process.platform === "win32").each(["default", "configured"] as const)(
+    "rediscovers an updated native CLI from stale metadata using its %s command",
+    async (commandKind) => {
+      const root = mkdtempSync(join(tmpdir(), "inertia-updated-provider-"));
+      try {
+        const previousExecutable = join(root, "claude-v1");
+        const updatedExecutable = join(root, "claude-v2");
+        const command = join(root, "claude");
+        writeFileSync(previousExecutable, "previous native CLI");
+        writeFileSync(updatedExecutable, "updated native CLI");
+        symlinkSync(previousExecutable, command);
+        const metadataCache = new ProviderMetadataCache();
+        metadataCache.correlate("claude", {
+          executable: realpathSync.native(command),
+          version: "1.0.0",
+          authState: "authenticated",
+        });
+        // Native updaters repoint the stable command between app launches.
+        unlinkSync(command);
+        symlinkSync(updatedExecutable, command);
+        const leases = new ProviderInstallationLeaseCoordinator();
+        const manager = ProviderManager.createProduction({
+          ...(commandKind === "configured" ? { commands: { claude: command } } : {}),
+          metadataCache,
+          installationLeases: leases,
+          detectProvider: async (): Promise<ProviderDetection> => ({
+            provider: { id: "claude", name: "Claude", command: "claude" },
+            available: true,
+            executable: realpathSync.native(command),
+            version: "2.0.0",
+            installState: "installed",
+            authState: "authenticated",
+            canRun: true,
+            cleanupConfirmed: true,
+          }),
+        });
+
+        await expect(manager.detect("claude")).resolves.toMatchObject({
+          executable: realpathSync.native(updatedExecutable),
+          version: "2.0.0",
+          canRun: true,
+        });
+        expect(metadataCache.nativeScope("claude")).toMatchObject({
+          executable: realpathSync.native(updatedExecutable),
+          version: "2.0.0",
+        });
+        for (const executable of [previousExecutable, updatedExecutable]) {
+          const installation = manager.providerInstallationIdentityForMaintenance(
+            "claude", executable, executable === previousExecutable ? "1.0.0" : "2.0.0",
+          );
+          expect(leases.isQuarantined(installation)).toBe(false);
+          expect(leases.blockers(installation)).toEqual([]);
+        }
+        await expect(manager.disposeAll()).resolves.toBeUndefined();
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("quarantines an ordinary discovery that retargets a known installation", async () => {
     const leases = new ProviderInstallationLeaseCoordinator();

@@ -141,6 +141,7 @@ function inspectPng(bytes: Buffer): ImageMetadata {
   let expectedSequence = 0;
   let controlledFrameData: "fdAT" | "IDAT" | "none" | null = null;
   let sawImageData = false;
+  let sawImagePayload = false;
   let imageDataEnded = false;
   for (let record = 0; ; record += 1) {
     budget.consume();
@@ -204,11 +205,14 @@ function inspectPng(bytes: Buffer): ImageMetadata {
       expectedSequence += 1;
       controlledFrameData = "fdAT";
     } else if (kind === "IDAT") {
-      if (imageDataEnded || length === 0) {
-        throw new Error("The PNG image data is empty or misordered.");
+      if (imageDataEnded) {
+        throw new Error("The PNG image data is misordered.");
       }
       sawImageData = true;
-      if (controlledFrameData === "none" || controlledFrameData === "IDAT") {
+      // PNG permits empty IDAT chunks within the contiguous compressed stream.
+      // They do not, by themselves, supply the required image/frame payload.
+      sawImagePayload ||= length > 0;
+      if (length > 0 && (controlledFrameData === "none" || controlledFrameData === "IDAT")) {
         controlledFrameData = "IDAT";
       }
     }
@@ -216,7 +220,7 @@ function inspectPng(bytes: Buffer): ImageMetadata {
     if (kind !== "IEND") continue;
     if (
       length !== 0
-      || !sawImageData
+      || !sawImagePayload
       || cursor.position !== cursor.size
       || (
         declaredFrames !== null

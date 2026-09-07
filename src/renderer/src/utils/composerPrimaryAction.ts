@@ -19,6 +19,7 @@ export function supportsActiveParentFollowUp(harnessId: string | null): boolean 
 
 export function composerFollowUpState({
   running,
+  stopping,
   harnessId,
   hasDraft,
   textOnly,
@@ -26,6 +27,7 @@ export function composerFollowUpState({
   sending,
 }: {
   running: boolean;
+  stopping: boolean;
   harnessId: string | null;
   hasDraft: boolean;
   textOnly: boolean;
@@ -33,7 +35,7 @@ export function composerFollowUpState({
   sending: boolean;
 }): ComposerFollowUpState {
   if (!running || !hasDraft) return "hidden";
-  if (!supportsActiveParentFollowUp(harnessId) || !textOnly) {
+  if (stopping || !supportsActiveParentFollowUp(harnessId) || !textOnly) {
     return "unavailable";
   }
   return submitting || sending ? "pending" : "ready";

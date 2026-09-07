@@ -39,6 +39,7 @@ import { useTextareaAutosize } from "./useTextareaAutosize";
 import { parseCompactComposerCommand } from "../../utils/composerCommands";
 import { useComposerCompaction } from "./useComposerCompaction";
 import { composerAttachmentActions } from "./composerAttachmentActions";
+import { composerStopAction } from "./composerStopAction";
 import { insertComposerSkillToken } from "../../utils/composerSkillToken";
 import { ComposerConversationContextDialog, ComposerConversationContextStrip, composerConversationContextToolbarProps, useComposerConversationContext } from "./useComposerConversationContext";
 import { useComposerDetachmentOwnership } from "./useComposerDetachmentOwnership";
@@ -138,6 +139,7 @@ export const Composer = memo(function Composer({
   const submissionReleaseTimerRef = useRef<number | null>(null);
   const [stopping, setStopping] = useState(false);
   const stoppingRef = useRef(false);
+  const agentStopping = stopping || (latestTurnSummary ?? latestTurn)?.runState?.state === "cancelling";
   const stopReleaseTimerRef = useRef<number | null>(null);
   const mountedRef = useRef(true);
   const conversationIdRef = useRef(conversation.id);
@@ -516,7 +518,7 @@ export const Composer = memo(function Composer({
           selectedPreviewUrlRef.current,
           contextPacketIds,
         );
-    if ((!canSend && followUpState !== "ready") || submittingRef.current) return;
+    if ((!canSend && followUpState !== "ready") || submittingRef.current || stoppingRef.current || agentStopping) return;
     flushDraftPersistence();
     const submittedAttachments = [...attachmentsRef.current];
     const submittedConversationId = conversation.id;
@@ -611,48 +613,19 @@ export const Composer = memo(function Composer({
     }
   };
 
-  const stop = async (): Promise<void> => {
-    if (stoppingRef.current || !running) return;
-    const stoppedConversationId = conversation.id;
-    const stopSequence = stopSequenceRef.current + 1;
-    stopSequenceRef.current = stopSequence;
-    activeStopsRef.current.set(stoppedConversationId, stopSequence);
-    stoppingRef.current = true;
-    setStopping(true);
-    try {
-      await onStop();
-      if (
-        activeStopsRef.current.get(stoppedConversationId) !== stopSequence
-      ) return;
-      if (
-        !mountedRef.current
-        || conversationIdRef.current !== stoppedConversationId
-      ) {
-        activeStopsRef.current.delete(stoppedConversationId);
-        return;
-      }
-      stopReleaseTimerRef.current = window.setTimeout(() => {
-        stopReleaseTimerRef.current = null;
-        if (
-          activeStopsRef.current.get(stoppedConversationId) !== stopSequence
-        ) return;
-        activeStopsRef.current.delete(stoppedConversationId);
-        stoppingRef.current = false;
-        if (mountedRef.current && conversationIdRef.current === stoppedConversationId) {
-          setStopping(false);
-        }
-      }, COMPOSER_ACTION_STALE_FALLBACK_MS);
-    } catch {
-      if (
-        activeStopsRef.current.get(stoppedConversationId) !== stopSequence
-      ) return;
-      activeStopsRef.current.delete(stoppedConversationId);
-      stoppingRef.current = false;
-      if (mountedRef.current && conversationIdRef.current === stoppedConversationId) {
-        setStopping(false);
-      }
-    }
-  };
+  const stop = composerStopAction({
+    conversationId: conversation.id,
+    running,
+    agentStopping,
+    stoppingRef,
+    stopSequenceRef,
+    activeStopsRef,
+    mountedRef,
+    conversationIdRef,
+    stopReleaseTimerRef,
+    setStopping,
+    onStop,
+  });
 
   const { chooseAttachments, importAttachments, removeAttachment } =
     composerAttachmentActions({
@@ -715,7 +688,7 @@ export const Composer = memo(function Composer({
     submitting,
     sending,
     running,
-    stopping,
+    stopping: agentStopping,
   });
   const canSend = primaryAction === "send-ready";
   const attachmentsAreImages = attachments.every(({ mimeType }) => chatAttachmentKind(mimeType) === "image");
@@ -732,6 +705,7 @@ export const Composer = memo(function Composer({
   });
   const followUpState = composerFollowUpState({
     running,
+    stopping: agentStopping,
     harnessId: latestTurn?.harnessId ?? null,
     hasDraft: Boolean(message.trim()) || attachments.length > 0,
     textOnly:

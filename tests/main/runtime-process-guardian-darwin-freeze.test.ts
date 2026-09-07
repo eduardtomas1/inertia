@@ -37,6 +37,30 @@ describe.runIf(process.platform === "darwin")("Darwin guardian freeze exit race"
     return JSON.parse(result.stdout) as Record<string, unknown>;
   }
 
+  it("retries an interrupted fork observation without tainting an empty queue", () => {
+    expect(run("observer-empty")).toMatchObject({
+      forkTainted: 0,
+      observerCalls: 2,
+    });
+  });
+
+  it.each(["fork", "event-error", "hard-error"])(
+    "retains %s proof failure after an interrupted fork observation",
+    (outcome) => {
+      expect(run(`observer-${outcome}`)).toMatchObject({
+        forkTainted: 1,
+        observerCalls: 2,
+      });
+    },
+  );
+
+  it("taints fork observation when interruptions exhaust the existing pass budget", () => {
+    expect(run("observer-eintr-exhausted")).toMatchObject({
+      forkTainted: 1,
+      observerCalls: 16,
+    });
+  });
+
   it("rebuilds the full ownership census when its selected direct child exits before SIGSTOP", () => {
     expect(run("direct-exit")).toMatchObject({
       cleaned: 1,

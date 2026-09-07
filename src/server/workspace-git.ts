@@ -430,6 +430,14 @@ export async function discoverWorkspaceGitRepositories(
       // repository. Only probe directories again: their type may have changed
       // since enumeration, so lstat and realpath must still guard traversal.
       if (!entry.isDirectory()) continue;
+      // Reserve the remaining traversal slots before issuing metadata I/O.
+      // A wide directory otherwise probes every child (including slow mounts)
+      // before the queue's limit is checked on the next loop iteration.
+      if (scannedDirectories + queue.length >= limits.maxDirectories) {
+        skippedDirectories += 1;
+        truncated = true;
+        continue;
+      }
       const childAbsolute = resolve(current.absolutePath, entry.name);
       let childInfo;
       try {

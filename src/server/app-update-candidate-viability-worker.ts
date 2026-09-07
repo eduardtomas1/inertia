@@ -643,7 +643,8 @@ if (parentPort) {
       timeout,
     };
   };
-  parentPort.on("message", (value: unknown) => {
+  parentPort.on("message", (event) => {
+    const value: unknown = event.data;
     if (pending) {
       const acknowledgement = parseAppUpdateCandidateViabilityResultAck(value);
       if (

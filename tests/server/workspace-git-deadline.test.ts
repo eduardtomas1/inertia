@@ -43,6 +43,24 @@ afterEach(() => {
 });
 
 describe("workspace Git traversal deadline", () => {
+  it("does not spend the discovery deadline inspecting directories beyond its traversal budget", async () => {
+    const root = realpathSync.native(mkdtempSync(join(tmpdir(), "inertia-workspace-budget-")));
+    roots.push(root);
+    mkdirSync(join(root, "a-included"));
+    mkdirSync(join(root, "z-blocked"));
+    fsGate.blockedName = "z-blocked";
+
+    const snapshot = await discoverWorkspaceGitRepositories(root, {
+      maxDirectories: 2,
+      deadlineAt: Date.now() + 500,
+    });
+
+    expect(snapshot.scannedDirectories).toBe(2);
+    expect(snapshot.truncated).toBe(true);
+    expect(snapshot.skippedDirectories).toBe(1);
+    expect(fsGate.inspectedPaths).toEqual([join(root, "a-included")]);
+  });
+
   it("spends entry inspection work on directories instead of ordinary files", async () => {
     const root = realpathSync.native(mkdtempSync(join(tmpdir(), "inertia-workspace-file-probes-")));
     roots.push(root);

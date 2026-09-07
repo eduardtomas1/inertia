@@ -210,6 +210,26 @@ The first update-capable version must still be installed manually. Validate a
 packaged update from that version to the following version on each eligible
 platform before treating in-app delivery as proven.
 
+Linux v0.0.52 needs a one-time manual installation of the release containing
+the installed-update repair. Its update validator reads Electron's message
+envelope instead of its payload, and its parent updater waits for
+stdout EOF while the extract-and-run wrapper remains alive. New release metadata
+cannot change that already-installed reader. Quit the old app cleanly, verify the
+new architecture-specific AppImage against its release's `SHA256SUMS.txt`, apply
+`chmod 0755` to that exact file, and launch it with the existing profile. Do not
+delete the profile or recreate projects to update.
+
+The stable Linux final-container gate now drives the production installed update
+coordinator and candidate bootstrap through extract-and-run, checks atomic
+replacement and owner shutdown,
+resumes the saved conversation's provider session, refreshes its Git workspace,
+and reopens the durable AppImage filename. The fixture substitutes the release
+download with the locally built package and advertises a synthetic older source
+version; both executables contain the candidate source. This is an installed
+handoff regression, not proof that an unmodified published v0.0.52 can update
+itself. Existing checksum, metadata, fuse, guardian and package gates remain
+separate requirements.
+
 Every package build runs `npm run notices:generate` first. The generator reads
 the installed production dependency graph, fails when a package references
 missing license material, and places deterministic third-party notices beside

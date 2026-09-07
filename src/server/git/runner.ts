@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { recordNativePhaseStopScratch, recordNativePreparationScratch } from "../../node/runtime-owned-process-native-scratch";
 import {
   runtimeOwnedProcessInvocation,
   spawnRuntimeOwnedProcess,
@@ -30,6 +31,7 @@ const gitExecutable = new GitExecutableSelection();
 
 /** Prewarm Apple's tool selection before command-specific inspection clocks. */
 export async function prepareGitExecutable(environment: NodeJS.ProcessEnv = process.env): Promise<void> {
+  recordNativePreparationScratch("start");
   try {
     await gitExecutable.prepare(environment, async () => {
       const result = await runGitProcess("/usr/bin/xcrun", process.cwd(), ["--find", "git"], {
@@ -40,7 +42,11 @@ export async function prepareGitExecutable(environment: NodeJS.ProcessEnv = proc
       });
       return result.stdout.toString("utf8");
     });
+    recordNativePreparationScratch(gitExecutable.command(environment) === "git" ? "path" : "resolved");
   } catch (error) {
+    recordNativePreparationScratch(isGitProcessTreeTerminationFailure(error) ? "cleanup-unconfirmed"
+      : error instanceof GitError && error.code === "timeout" ? "timeout"
+      : error instanceof GitError && error.code === "git-unavailable" ? "unavailable" : "failed");
     // Git may be unavailable without preventing the rest of the workbench
     // from starting. An unproved helper cleanup remains fatal to ownership.
     if (isGitProcessTreeTerminationFailure(error)) throw error;
@@ -322,7 +328,10 @@ function runGitProcess(
       }, CANCELLED_PROCESS_DRAIN_MS);
       cancelledProcessDrainTimer.unref();
     };
-    const onAbort = (): void => drainBeforeTermination(abortError);
+    const onAbort = (): void => {
+      recordNativePhaseStopScratch(child, "abort");
+      drainBeforeTermination(abortError);
+    };
 
     const finish = (
       error?: GitError,
@@ -373,6 +382,7 @@ function runGitProcess(
     };
 
     const timer = setTimeout(() => {
+      recordNativePhaseStopScratch(child, "timeout");
       drainBeforeTermination(new GitError(
         "timeout",
         "Git took too long to complete the operation.",

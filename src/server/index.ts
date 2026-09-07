@@ -15,6 +15,7 @@ import {
 } from "../shared/contracts";
 import { RuntimeStore } from "./database";
 import { prepareGitExecutable } from "./git/runner";
+import { recordStartupScratch } from "../node/runtime-owned-process-native-scratch";
 import { TurnController } from "./runtime/turns/turn-controller";
 import { dispatchSettledTurnOwners } from "./runtime/turns/turn-settled-orchestration";
 import { DuoLaunchCoordinator } from "./runtime/duo/duo-launch-coordinator";
@@ -135,6 +136,7 @@ export {
   assembleReadOnlyReviewRequest,
 } from "./runtime/commands/review-support";
 export async function startRuntime(options: RuntimeOptions): Promise<RunningRuntime> {
+  recordStartupScratch("enter");
   const mascotStatus = new MascotStatusPublisher(options.onMascotStatus, (id) => store.conversationShell(id));
   const runtimeStartedAt = new Date().toISOString();
   const startupRecovery = prepareRuntimeStartupRecovery(options);
@@ -151,6 +153,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     );
   }
   await prepareGitExecutable();
+  recordStartupScratch("git-prewarm");
   const generatedAttachments = await PrivateGeneratedAttachmentStore.create(
     dataDirectory,
     {
@@ -160,6 +163,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     },
   );
   const databasePath = join(dataDirectory, "inertia.sqlite");
+  recordStartupScratch("generated-attachments");
   let turns: TurnController;
   let agentThreads: AgentThreadRuntime | undefined;
   let duoLaunches: DuoLaunchCoordinator | null = null;
@@ -225,6 +229,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     conversationAttachments: initializedConversationAttachments,
     recovery,
   } = await initializeRuntimePersistence(options, startupRecovery, store);
+  recordStartupScratch("persistence");
   const recoveryImportFault = process.env.NODE_ENV === "test"
     ? options.recoveryImportFault
     : undefined;
@@ -585,6 +590,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   });
   backendProfileController.attachProviderMutationGuard((providerId) => providerMaintenance.hasBlockingAuthority(providerId));
   if (!runtimeSafetyLock && providerMaintenanceRecovery.length === 0) await backendProfileController.initialize();
+  recordStartupScratch("backend");
   const workspacePath = (projectId: string, conversationId?: string): string => {
     if (!conversationId) return ensureDirectory(store.projectPath(projectId));
     const conversation = store.conversation(conversationId);
@@ -893,6 +899,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
     server.once("error", onError);
     server.listen(0, "127.0.0.1", () => { server.off("error", onError); resolveListen(); });
   }).catch((error: unknown) => { store.close(); throw error; });
+  recordStartupScratch("listen");
 
   const address = server.address();
   if (!address || typeof address === "string") { store.close(); throw new Error("Runtime did not receive a local port."); }

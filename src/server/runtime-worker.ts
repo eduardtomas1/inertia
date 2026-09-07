@@ -1,4 +1,6 @@
 import type { RuntimeOwnedProcessDiagnostic } from "../node/runtime-owned-process-diagnostic.js";
+import { recordStartupScratch } from "../node/runtime-owned-process-native-scratch.js";
+import { isGitProcessTreeTerminationFailure } from "./git/runner.js";
 import {
   parseRuntimeWorkerCommand,
   type RuntimeRestartReason,
@@ -675,6 +677,7 @@ parentPort.on("message", (messageEvent) => {
     secureFiles,
     agentBrowser,
   }).then(async (startedRuntime) => {
+    recordStartupScratch("ready");
     starting = false;
     if (stopping) {
       await finishShutdown(startedRuntime, shutdownExitCode);
@@ -712,6 +715,7 @@ parentPort.on("message", (messageEvent) => {
       });
     }
   }).catch(async (error: unknown) => {
+    recordStartupScratch("rejected", error, isGitProcessTreeTerminationFailure(error));
     starting = false;
     const blockerCode = runtimeStartupBlockerCode(error);
     post({

@@ -704,7 +704,11 @@ export class TerminalManager {
       session.exitSignal = signal ?? null;
       for (const resolveExit of session.exitWaiters) resolveExit();
       session.exitWaiters.clear();
-      releaseOwnedProcessIfExited(signal);
+      // A Windows PTY exit proves only that the root exited. During a stop,
+      // retain its claim until the full-tree termination path confirms cleanup.
+      if (this.platform !== "win32" || !session.terminationRequested) {
+        releaseOwnedProcessIfExited(signal);
+      }
       if (session.terminationRequested) return;
       const ownsProviderInstallation = session.installationUse !== null;
       const ownedProcessStopped = session.confirmOwnedProcessStopped();

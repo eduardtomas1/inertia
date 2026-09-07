@@ -42,6 +42,76 @@ function fakeTerminal(pid: number): {
 }
 
 describe("TerminalManager cleanup recovery", () => {
+  it.each([
+    { confirmed: false, exitTiming: "during stop" },
+    { confirmed: false, exitTiming: "after failed stop" },
+    { confirmed: true, exitTiming: "during stop" },
+  ])("retires a Windows claim only after full-tree proof ($confirmed, $exitTiming)", async ({
+    confirmed, exitTiming,
+  }) => {
+    const terminal = fakeTerminal(42);
+    let claimRetained = true;
+    const releaseIfGroupExited = vi.fn(() => { claimRetained = false; });
+    const confirmStopped = vi.fn(() => { claimRetained = false; return true; });
+    let settleTermination!: (confirmed: boolean) => void;
+    const terminationResult = new Promise<boolean>((resolve) => { settleTermination = resolve; });
+    let observeTerminationStarted!: () => void;
+    const terminationStarted = new Promise<void>((resolve) => { observeTerminationStarted = resolve; });
+    const terminateProcessTree = vi.fn(() => {
+      observeTerminationStarted();
+      return terminationResult;
+    });
+    const createProcessTreeTermination = vi.fn(() => terminateProcessTree);
+    const manager = new TerminalManager({
+      platform: "win32",
+      spawnTerminal: vi.fn(() => terminal.pty),
+      createProcessTreeTermination,
+      spawnOwnedTerminalProcess: (spawnProcess) => ({
+        process: spawnProcess(),
+        confirmStopped,
+        releaseIfGroupExited,
+        requestGuardianStop: () => false,
+        waitForGuardianStop: async () => false,
+      }),
+    });
+    const owner = { readyState: 1, bufferedAmount: 0, send: vi.fn() } as unknown as WebSocket;
+    const onExit = vi.fn();
+    const terminalId = manager.createProcess(
+      owner, process.cwd(), "test-shell", [], {}, 80, 24, onExit,
+    );
+
+    const closing = manager.closeManaged(terminalId).catch((error: unknown) => error);
+    await terminationStarted;
+    if (exitTiming === "during stop") terminal.emitExit({ exitCode: 0 });
+    const retainedBeforeProof = claimRetained;
+    const confirmationsBeforeProof = confirmStopped.mock.calls.length;
+    settleTermination(confirmed);
+    const outcome = await closing;
+    if (exitTiming === "after failed stop") terminal.emitExit({ exitCode: 0 });
+
+    expect(retainedBeforeProof).toBe(true);
+    expect(confirmationsBeforeProof).toBe(0);
+    expect(releaseIfGroupExited).not.toHaveBeenCalled();
+    expect(createProcessTreeTermination).toHaveBeenCalledOnce();
+    expect(terminateProcessTree).toHaveBeenCalledOnce();
+    expect(terminal.pty.kill).not.toHaveBeenCalled();
+    expect(() => manager.input(owner, terminalId, "unsafe input")).toThrow("Terminal not found.");
+    if (confirmed) {
+      expect(outcome).toBe(true);
+      expect(claimRetained).toBe(false);
+      expect(confirmStopped).toHaveBeenCalledOnce();
+      expect(onExit).toHaveBeenCalledExactlyOnceWith(130);
+    } else {
+      expect(outcome).toBeInstanceOf(Error);
+      expect((outcome as Error).message).toBe(
+        "A terminal process tree could not be confirmed stopped during runtime shutdown.",
+      );
+      expect(claimRetained).toBe(true);
+      expect(confirmStopped).not.toHaveBeenCalled();
+      expect(onExit).not.toHaveBeenCalled();
+    }
+  });
+
   it("requests runtime recovery without signaling an exited guardian PID", async () => {
     const terminal = fakeTerminal(42);
     const releaseIfGroupExited = vi.fn();

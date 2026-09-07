@@ -73,7 +73,10 @@ function acpFixture(
       requireLoadSession,
     },
     {
-      timeoutMs: 1_000,
+      // These assertions exercise protocol validation, not Node cold-start
+      // speed. The Intel CI unit job can spend over a second starting the
+      // fixture; keep the explicit 20 ms timeout case independent below.
+      timeoutMs: 5_000,
       cleanupTimeoutMs: 250,
       ...dependencies,
     },

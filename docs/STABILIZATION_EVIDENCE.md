@@ -564,9 +564,54 @@ second-maintainer approval quota or bypass was added. Main's commit is unchanged
 See `docs/CI_EVIDENCE.md` for the exact administrative policy and its distinction
 from the workflow implementation.
 
+## Native Windows correction: parsed terminal sign-in links
+
+Exact-head run `34126619218` at `018c57f5` exposed a Windows x64 Claude
+sign-in handoff failure. The first failing assertion was the missing browser
+handoff status in `provider-auth.spec.ts`, not launch or cleanup. The retained
+dialog snapshot showed the complete synthetic OAuth URL and "Waiting for
+sign-in"; privileged cleanup and quit both succeeded. The artifact did not
+retain raw PTY bytes, so the exact Windows control sequence is not claimed.
+
+The source nevertheless had a reproducible correctness gap: xterm parsed VT
+control sequences before displaying output, while a second raw-text detector
+treated those control bytes as URL delimiters. Valid cursor/style sequences
+inside a fragmented URL could hide a visible link or prematurely accept an
+incomplete query. Hidden OSC title/hyperlink data could also be mistaken for
+a printed link. Six of ten real-xterm parser regressions failed before the
+correction, as did the corresponding dialog DOM regression and a real Linux
+Electron PTY/browser-handoff test using a deterministic control-sequence split.
+
+The separate raw-stream state machine is removed. A bounded, stateless reader
+now uses the existing xterm parser's canonical text after write completion,
+joins only soft-wrapped lines and excludes unwritten cursor-row padding. The
+official URL/redirect allowlists are unchanged. Dialog callbacks are fenced
+by exact terminal instance, terminal identity and live authentication attempt;
+cancelled, exited, replaced or reconnected attempts cannot open a stale link.
+A queued standard terminal reset clears previous queued text before a new
+attempt, rather than relying on an out-of-band clear that retains old input.
+
+Tests use the installed real xterm parser rather than an invented VT mock.
+They cover control/chunk boundaries, wrapping and printed delimiters, hidden
+OSC payloads, bounded links, Gemini manual OAuth, matching early output,
+foreign terminal identities and delayed callbacks after authority retirement.
+The existing native sign-in test now injects the same standard VT split on
+every platform, preserving its exactly-once host-browser and clean-close
+assertions. No retries, skips, timeouts or security allowlists were loosened.
+
+All 35 distinct focused parser/validator/dialog tests passed. The frozen full
+`npm run check` then passed 7,501 tests, 77 existing skips and all 706 active
+files, plus lint, architecture, TypeScript, build and unchanged bundle budgets
+(126.25-second test phase). The rebuilt native Linux app passed the strengthened
+Claude browser handoff, Kimi login/three sends/restart, and both window-health
+scenarios: four tests in 29.8 seconds, with clean teardown. These were private
+synthetic fixtures; the user's running application was not stopped or changed.
+The older recorded AppImage does not contain this latest renderer correction.
+Fresh exact-head native Windows and macOS certification remains required.
+
 ## Final evidence
 
 Local Linux results above include a real isolated installed-update fixture;
 hosted exact-head certification is still separate and pending. No authenticated
-upstream provider compatibility, native Windows/macOS result, public release
+upstream provider compatibility, final-candidate native Windows/macOS result, public release
 readiness or in-place repair of the user's running installation is claimed.

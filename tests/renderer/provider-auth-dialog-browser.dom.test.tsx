@@ -27,6 +27,9 @@ const GEMINI_AUTH_URL = `https://accounts.google.com/o/oauth2/v2/auth?${new URLS
 const TERMINAL_ID = "11111111-1111-4111-8111-111111111111";
 const terminalConstructorOptions = vi.hoisted(() =>
   [] as Array<Record<string, unknown>>);
+const terminalParsing = vi.hoisted(() => ({
+  holdCallbacks: false, callbacks: [] as Array<() => void>,
+}));
 
 vi.mock("@xterm/addon-fit", () => ({
   FitAddon: class {
@@ -34,28 +37,27 @@ vi.mock("@xterm/addon-fit", () => ({
   },
 }));
 
-vi.mock("@xterm/xterm", () => ({
-  Terminal: class {
-    readonly cols = 90;
-    readonly rows = 24;
-    readonly options: Record<string, unknown> = {};
-
-    constructor(options: Record<string, unknown>) {
-      terminalConstructorOptions.push(options);
-    }
-
-    loadAddon(): void {}
-    open(): void {}
-    onData(): { dispose: () => void } {
-      return { dispose: () => undefined };
-    }
-    clear(): void {}
-    writeln(): void {}
-    write(): void {}
-    focus(): void {}
-    dispose(): void {}
-  },
-}));
+vi.mock("@xterm/xterm", async () => {
+  const actual = await vi.importActual<typeof import("@xterm/xterm")>("@xterm/xterm");
+  return {
+    Terminal: class extends actual.Terminal {
+      constructor(options: ConstructorParameters<typeof actual.Terminal>[0]) {
+        super({ ...options, cols: 90, rows: 24 });
+        terminalConstructorOptions.push({ ...options });
+      }
+      override loadAddon(): void {}
+      override open(): void {}
+      override focus(): void {}
+      override write(data: string | Uint8Array, callback?: () => void): void {
+        super.write(data, () => {
+          if (!callback) return;
+          if (terminalParsing.holdCallbacks) terminalParsing.callbacks.push(callback);
+          else callback();
+        });
+      }
+    },
+  };
+});
 
 class TestResizeObserver implements ResizeObserver {
   readonly root = null;
@@ -174,6 +176,8 @@ function renderDialog(options: {
 describe("ProviderAuthDialog browser handoff", () => {
   beforeEach(() => {
     terminalConstructorOptions.length = 0;
+    terminalParsing.holdCallbacks = false;
+    terminalParsing.callbacks.length = 0;
     vi.stubGlobal("ResizeObserver", TestResizeObserver);
     vi.stubGlobal("matchMedia", () => ({
       matches: false,
@@ -224,6 +228,69 @@ describe("ProviderAuthDialog browser handoff", () => {
       data: "Different official link: https://platform.claude.com/oauth/authorize?state=second-attempt\r\n",
     }));
     expect(dialog.openExternal).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens only the terminal-rendered URL after fragmented VT and soft wrapping", async () => {
+    const dialog = renderDialog();
+    await screen.findByText("Waiting for sign-in");
+    act(() => dialog.emit({ type: "terminal.output", terminalId: TERMINAL_ID,
+      data: "Open: https://claude.com/cai/oauth/auth\x1b[0" }));
+    act(() => dialog.emit({ type: "terminal.output", terminalId: TERMINAL_ID,
+      data: `morize${AUTH_URL.slice(AUTH_URL.indexOf("?"))}\r\n` }));
+    await waitFor(() => expect(dialog.openExternal).toHaveBeenCalledExactlyOnceWith(AUTH_URL));
+    expect(screen.getByRole("status")).toHaveTextContent("Sign-in page opened in your browser");
+  });
+
+  it("parses only the matching early output after the owned terminal create receipt", async () => {
+    let resolveCreated!: () => void;
+    const dialog = renderDialog({
+      sendCommand: (sent) => sent.type === "provider.auth.start"
+        ? new Promise((resolve) => { resolveCreated = () => resolve(created(sent)); })
+        : Promise.resolve({ type: "request.ok", requestId: sent.requestId }),
+    });
+    await waitFor(() => expect(resolveCreated).toBeTypeOf("function"));
+    act(() => {
+      dialog.emit({ type: "terminal.output", terminalId: "foreign-terminal",
+        data: "https://platform.claude.com/oauth/authorize?state=foreign\r\n" });
+      dialog.emit({ type: "terminal.output", terminalId: TERMINAL_ID, data: `${AUTH_URL}\r\n` });
+    });
+    expect(dialog.openExternal).not.toHaveBeenCalled();
+    await act(async () => { resolveCreated(); });
+    await waitFor(() => expect(dialog.openExternal).toHaveBeenCalledExactlyOnceWith(AUTH_URL));
+  });
+
+  it.each(["close", "exit", "replace"] as const)("rejects an already-parsed URL callback after %s revokes its terminal", async (action) => {
+    const dialog = renderDialog();
+    await screen.findByText("Waiting for sign-in");
+    terminalParsing.holdCallbacks = true;
+    act(() => dialog.emit({ type: "terminal.output", terminalId: TERMINAL_ID,
+      data: `${AUTH_URL}\r\n` }));
+    await waitFor(() => expect(terminalParsing.callbacks).toHaveLength(1));
+    expect(dialog.openExternal).not.toHaveBeenCalled();
+    if (action === "close") fireEvent.click(screen.getByRole("button", { name: "Close connection window" }));
+    else if (action === "exit") act(() => dialog.emit({ type: "terminal.exit", terminalId: TERMINAL_ID, exitCode: 0 }));
+    else dialog.rerender("online", geminiProvider);
+    await act(async () => { terminalParsing.callbacks.splice(0).forEach((callback) => callback()); });
+    expect(dialog.openExternal).not.toHaveBeenCalled();
+  });
+
+  it("does not resurrect queued previous-attempt output after reconnecting", async () => {
+    const dialog = renderDialog();
+    await screen.findByText("Waiting for sign-in");
+    terminalParsing.holdCallbacks = true;
+    act(() => {
+      dialog.emit({ type: "terminal.output", terminalId: TERMINAL_ID, data: `${AUTH_URL}\r\n` });
+      dialog.rerender("offline");
+    });
+    dialog.rerender("online");
+    await screen.findByText("Waiting for sign-in");
+    act(() => dialog.emit({ type: "terminal.output", terminalId: TERMINAL_ID, data: "Current login prompt > " }));
+    await waitFor(() => expect(terminalParsing.callbacks).toHaveLength(2));
+    await act(async () => { terminalParsing.callbacks.splice(0).forEach((callback) => callback()); });
+    expect(dialog.openExternal).not.toHaveBeenCalled();
+    terminalParsing.holdCallbacks = false;
+    act(() => dialog.emit({ type: "terminal.output", terminalId: TERMINAL_ID, data: `\r\n${AUTH_URL}\r\n` }));
+    await waitFor(() => expect(dialog.openExternal).toHaveBeenCalledExactlyOnceWith(AUTH_URL));
   });
 
   it("explains Gemini's manual OAuth handoff without claiming its persistent TUI will finish", async () => {

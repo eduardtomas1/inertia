@@ -19,7 +19,7 @@ import type {
 } from "@shared/contracts";
 import type { ConnectionStatus } from "../hooks/useInertiaConnection";
 import { useNativePreviewSuspension } from "../hooks/useNativePreviewSuspension";
-import { ProviderAuthBrowserUrlDetector } from "../utils/providerAuthBrowser";
+import { providerAuthBrowserUrlFromTerminal } from "../utils/providerAuthBrowser";
 import { terminalInputChunks } from "../utils/terminalInputChunks";
 import { captureModalFocus, trapModalFocus } from "../utils/modalFocus";
 import { IconButton, LoadingMark } from "./ui";
@@ -82,7 +82,6 @@ export function ProviderAuthDialog({
   const authAttemptRef = useRef<AuthAttempt | null>(null);
   const latestFontSizeRef = useRef(fontSize);
   const browserUrlRef = useRef<string | null>(null);
-  const browserUrlDetectorRef = useRef<ProviderAuthBrowserUrlDetector | null>(null);
   const browserAttemptRef = useRef(0);
   const [instanceReady, setInstanceReady] = useState(false);
   const [sessionState, setSessionState] = useState<"starting" | "ready" | "finished" | "error">("starting");
@@ -107,13 +106,20 @@ export function ProviderAuthDialog({
     }
   }, []);
 
-  const inspectAuthOutput = useCallback((output: string): void => {
-    const url = browserUrlDetectorRef.current?.push(output) ?? null;
-    if (!url || browserUrlRef.current) return;
-    browserUrlRef.current = url;
-    setBrowserUrl(url);
-    void openBrowser(url);
-  }, [openBrowser]);
+  const writeAuthOutput = useCallback((
+    terminal: Terminal, attempt: AuthAttempt, terminalId: string, output: string,
+  ): void => {
+    terminal.write(output, () => {
+      if (!providerId || attempt.cancelled || attempt.pending
+        || authAttemptRef.current !== attempt || terminalRef.current !== terminal
+        || terminalIdRef.current !== terminalId || browserUrlRef.current) return;
+      const url = providerAuthBrowserUrlFromTerminal(providerId, terminal);
+      if (!url) return;
+      browserUrlRef.current = url;
+      setBrowserUrl(url);
+      void openBrowser(url);
+    });
+  }, [openBrowser, providerId]);
 
   const copyBrowserUrl = useCallback(async (): Promise<void> => {
     const url = browserUrlRef.current;
@@ -137,8 +143,6 @@ export function ProviderAuthDialog({
       attempt.exits.clear();
     }
     browserAttemptRef.current += 1;
-    browserUrlDetectorRef.current?.clear();
-    browserUrlDetectorRef.current = null;
     browserUrlRef.current = null;
     onClose();
   }, [onClose]);
@@ -146,16 +150,11 @@ export function ProviderAuthDialog({
   useEffect(() => {
     browserAttemptRef.current += 1;
     browserUrlRef.current = null;
-    browserUrlDetectorRef.current = providerId
-      ? new ProviderAuthBrowserUrlDetector(providerId)
-      : null;
     setBrowserUrl(null);
     setBrowserState("idle");
     setCopyState("idle");
     return () => {
       browserAttemptRef.current += 1;
-      browserUrlDetectorRef.current?.clear();
-      browserUrlDetectorRef.current = null;
       browserUrlRef.current = null;
     };
   }, [providerId]);
@@ -255,8 +254,8 @@ export function ProviderAuthDialog({
       if (!attempt || attempt.cancelled) return;
       if (event.type === "terminal.output") {
         if (event.terminalId === terminalIdRef.current) {
-          terminalRef.current?.write(event.data);
-          inspectAuthOutput(event.data);
+          const terminal = terminalRef.current;
+          if (terminal) writeAuthOutput(terminal, attempt, event.terminalId, event.data);
         } else if (attempt.pending && (
           attempt.output.has(event.terminalId) || attempt.output.size < MAX_EARLY_AUTH_TERMINALS
         )) {
@@ -271,7 +270,7 @@ export function ProviderAuthDialog({
         }
       }
     });
-  }, [finishTerminal, inspectAuthOutput, providerId, subscribe]);
+  }, [finishTerminal, providerId, subscribe, writeAuthOutput]);
 
   useEffect(() => {
     if (!providerId) return;
@@ -299,12 +298,11 @@ export function ProviderAuthDialog({
     const terminal = terminalRef.current;
     if (status !== "online") {
       browserAttemptRef.current += 1;
-      browserUrlDetectorRef.current?.clear();
       browserUrlRef.current = null;
       setBrowserUrl(null);
       setBrowserState("idle");
       setCopyState("idle");
-      terminal?.clear();
+      terminal?.write("\x1bc");
       terminal?.writeln(
         "\x1b[2mInertia is offline. Reconnect to start provider setup.\x1b[0m",
       );
@@ -322,11 +320,12 @@ export function ProviderAuthDialog({
     setError(null);
     browserAttemptRef.current += 1;
     browserUrlRef.current = null;
-    browserUrlDetectorRef.current = new ProviderAuthBrowserUrlDetector(providerId);
     setBrowserUrl(null);
     setBrowserState("idle");
     setCopyState("idle");
-    terminal?.clear();
+    // Queue the standard RIS reset: clear()/reset() can leave old queued input
+    // to parse later, contaminating the next attempt's canonical buffer.
+    terminal?.write("\x1bc");
     terminal?.writeln(
       `\x1b[2mOpening ${providerLabel} ${isGemini ? "setup" : "sign-in"}…\x1b[0m`,
     );
@@ -343,9 +342,9 @@ export function ProviderAuthDialog({
         const earlyExit = attempt.exits.get(event.terminalId);
         attempt.output.clear();
         attempt.exits.clear();
-        if (buffered) {
-          terminal?.write(buffered);
-          if (earlyExit === undefined) inspectAuthOutput(buffered);
+        if (buffered && terminal) {
+          if (earlyExit === undefined) writeAuthOutput(terminal, attempt, event.terminalId, buffered);
+          else terminal.write(buffered);
         }
         if (earlyExit !== undefined) {
           finishTerminal(earlyExit);
@@ -369,7 +368,6 @@ export function ProviderAuthDialog({
       attempt.exits.clear();
       if (authAttemptRef.current === attempt) authAttemptRef.current = null;
       browserAttemptRef.current += 1;
-      browserUrlDetectorRef.current?.clear();
       browserUrlRef.current = null;
       const terminalId = terminalIdRef.current;
       terminalIdRef.current = null;
@@ -378,12 +376,12 @@ export function ProviderAuthDialog({
   }, [
     finishTerminal,
     instanceReady,
-    inspectAuthOutput,
     isGemini,
     providerId,
     providerLabel,
     sendCommand,
     status,
+    writeAuthOutput,
   ]);
 
   if (!provider) return null;

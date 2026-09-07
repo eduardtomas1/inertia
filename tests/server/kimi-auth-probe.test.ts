@@ -22,7 +22,7 @@ interface Capture {
 
 const terminal = { id: "login", name: "Kimi login", type: "terminal", args: ["--login"], env: {} };
 
-function fixture(mode = "terminal", withDescendant = false) {
+function fixture(mode = "terminal", withDescendant = false, initializationDelayMs = 0) {
   const root = realpathSync(portableFixtureRoot("Kimi initialize-only auth probe"));
   const command = portableNodeExecutable(root, "kimi");
   const capturePath = join(root, "capture.json");
@@ -40,7 +40,7 @@ const mode = ${JSON.stringify(mode)};
 if (${withDescendant}) state.descendantPid = require("node:child_process").spawn(process.execPath,
   ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore", detached: false }).pid;
 save();
-require("node:readline").createInterface({ input: process.stdin }).on("line", line => {
+const readRequests = () => require("node:readline").createInterface({ input: process.stdin }).on("line", line => {
   const message = JSON.parse(line); state.messages.push(message); save();
   if (message.method !== "initialize") throw new Error("Authentication discovery sent a forbidden operation.");
   if (mode === "timeout") return;
@@ -60,6 +60,8 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", li
     result: { protocolVersion: mode === "wrong-protocol" ? 2 : 1, agentCapabilities: {}, authMethods,
       agentInfo: { name: mode === "wrong-agent" ? "Other fixture" : "Kimi Code CLI", version: "fixture" } } });
 });
+if (${initializationDelayMs} > 0) setTimeout(readRequests, ${initializationDelayMs});
+else readRequests();
 setInterval(() => {}, 1000);
 `);
   return {
@@ -98,13 +100,16 @@ describe("Kimi initialize-only authentication discovery", () => {
     "wrong-protocol", "wrong-agent", "invalid-descriptor", "invalid-descriptor-env",
     "unknown-descriptor-type", "timeout",
   ])("rejects %s without any login or session request and cleans up", async (mode) => {
-    const app = fixture(mode);
+    const waitsForTimeout = mode === "timeout" || mode === "unmatched-id";
+    // Exercise a cold fixture that cannot consume initialize inside 300 ms.
+    const app = fixture(mode, false, waitsForTimeout ? 450 : 0);
     try {
       const failure = await probeKimiAuthentication(app.command, app.root, app.environment, undefined,
-        { timeoutMs: mode === "timeout" || mode === "unmatched-id" ? 300 : 2_000 })
+        { timeoutMs: 2_000 })
         .then(() => undefined, (error: unknown) => error);
       expect(failure).toBeInstanceOf(Error);
       expect((failure as Error).message).toMatch(/Kimi authentication discovery/u);
+      if (waitsForTimeout) expect((failure as Error).message).toContain("timed out");
       expect((failure as Error).message).not.toContain("synthetic-private-value");
       expect(failure).not.toBeInstanceOf(ProcessTreeTerminationError);
       assertStopped(app.capture());

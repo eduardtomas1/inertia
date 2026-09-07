@@ -1,7 +1,7 @@
 // @inertia-e2e-resource isolated
 import { expect, test } from "@playwright/test";
 import Database from "better-sqlite3";
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { delimiter, dirname, join } from "node:path";
 
 import { RuntimeStore } from "../../src/server/database";
@@ -119,6 +119,11 @@ test.afterEach(async () => {
   activeFixture = undefined;
   if (!fixture) return;
   try {
+    const nativePhase = await readFile(join(dirname(fixture.wirePath), ".inertia-native-phase-scratch.jsonl"))
+      .catch(() => Buffer.from(""));
+    await testInfo.attach("synthetic-native-guardian-phase", {
+      body: nativePhase.subarray(0, 16_384), contentType: "application/x-ndjson",
+    });
     if (testInfo.status !== testInfo.expectedStatus) {
       // Only the synthetic executable writes this wire: invocation metadata
       // and RPC method names, never provider credentials or prompt bodies.
@@ -146,6 +151,7 @@ test("connects Kimi through a native login-only PTY then admits fresh ACP turns 
       const bin = join(testDirectory, "provider-bin");
       const home = join(testDirectory, "provider-home");
       await Promise.all([bin, home].map(path => mkdir(path, { recursive: true })));
+      await writeFile(join(home, ".inertia-native-phase-scratch.jsonl"), "", { mode: 0o600 });
       wirePath = join(home, "kimi-wire.jsonl");
       writeNodeFlagExecutable(bin, "kimi", kimiFixtureSource(wirePath, join(home, "kimi-connected")));
       const systemPaths = process.platform === "win32"

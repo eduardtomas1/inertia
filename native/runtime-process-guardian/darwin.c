@@ -43,6 +43,8 @@ static volatile sig_atomic_t graceful_exit_requested = 0;
 static volatile sig_atomic_t authorization_runtime_pid = 0;
 static const char *cleanup_failure_reason = "unknown";
 static const char *census_failure_reason = "none";
+// Scratch diagnostic only. First fixed observer cause is evidence, never proof.
+static const char *observer_failure_reason = "none";
 static int process_status(pid_t pid);
 #if defined(INERTIA_RUNTIME_GUARDIAN_TEST_REJECT_PREEXEC_CENSUS) \
   || defined(INERTIA_RUNTIME_GUARDIAN_TEST_FORCE_LIBPROC_IDENTITY_FAILURE_DURING_STOP) \
@@ -94,6 +96,7 @@ static void terminate_with_uncertain_containment(void) {
     cleanup_failure_reason,
     census_failure_reason
   );
+  (void)dprintf(STDERR_FILENO, "[Inertia guardian observer taint: %s]\r\n", observer_failure_reason);
   // A signal is an unambiguous guardian-level marker: payload signals are
   // translated into ordinary numeric exit statuses by the guardian. Restore
   // and unblock SIGUSR2 so inherited process state cannot suppress it. If the
@@ -541,11 +544,13 @@ static void observe_root_forks(struct owned_tree_tracker *tracker) {
       // any events are returned. Consume the existing pass budget on retry;
       // repeated interruption still taints the observer at exhaustion below.
       if (errno == EINTR) continue;
+      if (!tracker->fork_tainted) observer_failure_reason = "syscall-error";
       tracker->fork_tainted = 1;
       return;
     }
     for (int index = 0; index < count; index += 1) {
       if ((events[index].flags & EV_ERROR) != 0) {
+        if (!tracker->fork_tainted) observer_failure_reason = "event-error";
         tracker->fork_tainted = 1;
       }
       if ((events[index].fflags & NOTE_FORK) != 0) {
@@ -555,11 +560,13 @@ static void observe_root_forks(struct owned_tree_tracker *tracker) {
         // known processes are still drained, but the guardian must exit with
         // the distinct uncertain-containment status so the journal claim is
         // preserved for explicit recovery rather than looking proven.
+        if (!tracker->fork_tainted) observer_failure_reason = "note-fork";
         tracker->fork_tainted = 1;
       }
     }
     if (count < 8) return;
   }
+  if (!tracker->fork_tainted) observer_failure_reason = "retry-budget";
   tracker->fork_tainted = 1;
 }
 

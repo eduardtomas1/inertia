@@ -1,7 +1,7 @@
 import { _electron as electron, test, type ElectronApplication,
   type Page } from "@playwright/test";
 import { execFile } from "node:child_process";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { delimiter, join } from "node:path";
 import { promisify } from "node:util";
@@ -831,6 +831,11 @@ export async function createAppFixture(
       await page.getByRole("textbox", { name: "Message" }).waitFor();
     }
   } catch (cause) {
+    const nativePhase = await readFile(join(testDirectory, "provider-home", ".inertia-native-phase-scratch.jsonl"))
+      .catch(() => Buffer.from(""));
+    if (nativePhase.length > 0) await test.info().attach("synthetic-startup-native-guardian-phase", {
+      body: nativePhase.subarray(0, 16_384), contentType: "application/x-ndjson",
+    });
     try {
       if (electronApp) {
         await closeElectronAppBounded(electronApp).catch(() => undefined);

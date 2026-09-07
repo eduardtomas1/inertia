@@ -56,6 +56,22 @@ describe("image-send failure evidence", () => {
     expect(await readFile(path)).toEqual(before);
   });
 
+  it("projects a persisted startup cause and cleanup failure as bounded codes", async () => {
+    const f = await fixture();
+    const message = "Runtime initialization failed (git-timeout)."
+      + " Runtime shutdown could not confirm cleanup after incomplete startup.";
+    f.diagnostics.record("runtime.failure", { phase: "restarting", generation: 1, message });
+    expect(await readImageSendRuntimeRecords(f.root, signal())).toEqual([
+      expect.objectContaining({
+        lastErrorCode: "startup-initialization-git-timeout+startup-cleanup-unconfirmed",
+      }),
+    ]);
+    expect(projectImageSendRuntimeSnapshot({ lastError: `${message} PRIVATE` }))
+      .toMatchObject({ lastErrorCode: "detail-omitted" });
+    expect(projectImageSendRuntimeSnapshot({ lastError: message.replace("git-timeout", "PRIVATE") }))
+      .toMatchObject({ lastErrorCode: "detail-omitted" });
+  });
+
   it("ignores forged, extra-field, malformed, oversized and partial records", async () => {
     const f = await fixture();
     f.diagnostics.record("runtime.failure", { message: "Runtime shutdown could not confirm owned-process cleanup." });

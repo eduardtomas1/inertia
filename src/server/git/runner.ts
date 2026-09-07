@@ -26,6 +26,10 @@ import {
 const TRUNCATED_OUTPUT_DRAIN_MS = 250;
 const CANCELLED_PROCESS_DRAIN_MS = 250;
 const PREPARED_ABORT_CLEANUP_MS = 500;
+// Admission and a cold Apple tool lookup share this startup-only clock.
+// Leave room within the supervisor's 30 seconds for owned cleanup and the
+// remaining initialization; repository inspection clocks stay independent.
+const APPLE_GIT_STARTUP_TIMEOUT_MS = 10_000;
 const gitExecutable = new GitExecutableSelection();
 
 /** Prewarm Apple's tool selection before command-specific inspection clocks. */
@@ -33,7 +37,7 @@ export async function prepareGitExecutable(environment: NodeJS.ProcessEnv = proc
   try {
     await gitExecutable.prepare(environment, async () => {
       const result = await runGitProcess("/usr/bin/xcrun", process.cwd(), ["--find", "git"], {
-        timeoutMs: 3_000,
+        timeoutMs: APPLE_GIT_STARTUP_TIMEOUT_MS,
         maxOutputBytes: 4_096,
         environment,
         failureMessage: "Git executable discovery failed.",

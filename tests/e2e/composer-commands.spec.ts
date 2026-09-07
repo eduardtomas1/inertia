@@ -1,3 +1,4 @@
+// @inertia-e2e-resource isolated
 import { expect, test, type TestInfo } from "@playwright/test";
 import { join } from "node:path";
 

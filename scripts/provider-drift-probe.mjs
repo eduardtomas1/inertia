@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import { requireAcpInitializeHandshake } from "./provider-drift-process.mjs";
 import { inspectGeminiCliAcpSurface } from "./provider-drift-gemini-surface.mjs";
+import { stageKimiTerminalAuthPolicy, stageOpenCodeRuntime } from "./provider-drift-staging.mjs";
 import { runBounded } from "./bounded-process-tree.mjs";
 import {
   providerDriftEnvironment,
@@ -372,6 +373,9 @@ async function main() {
     });
 
     await check("Kimi latest CLI completes a secret-free ACP initialize", async () => {
+      const kimiTerminalAuthPolicyPath = await stageKimiTerminalAuthPolicy(
+        import.meta.dirname, options.workspace,
+      );
       await requireAcpInitializeHandshake(
         bin("kimi"),
         ["acp"],
@@ -379,6 +383,7 @@ async function main() {
         {
           allowSessionCapabilitiesResume: true,
           expectedAgent: "Kimi Code CLI",
+          kimiTerminalAuthPolicyPath,
           requireLoadSession: true,
         },
       );
@@ -416,23 +421,7 @@ async function main() {
         ].join("\n"),
         "utf8",
       );
-      const source = join(
-        repositoryRoot,
-        "scripts",
-        "provider-drift-opencode-runtime.mjs",
-      );
-      const target = join(options.workspace, "provider-drift-opencode-runtime.mjs");
-      await Promise.all([
-        copyFile(source, target),
-        copyFile(
-          join(repositoryRoot, "scripts", "provider-drift-process.mjs"),
-          join(options.workspace, "provider-drift-process.mjs"),
-        ),
-        copyFile(
-          join(repositoryRoot, "scripts", "bounded-process-tree.mjs"),
-          join(options.workspace, "bounded-process-tree.mjs"),
-        ),
-      ]);
+      const target = await stageOpenCodeRuntime(join(repositoryRoot, "scripts"), options.workspace);
       const requireOwnedRuntime = async (mode) => await requireSuccessfulCommand(
         process.execPath,
         [target, bin("opencode"), options.workspace, sentinel, mode],

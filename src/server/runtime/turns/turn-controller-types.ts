@@ -140,7 +140,7 @@ export interface TurnAttachmentReleaseHookInput {
 
 export interface TurnControllerHooks {
   broadcast(event: RuntimeMutationEvent): void;
-  broadcastSnapshot(): void;
+  broadcastSnapshot(): void | Promise<void>;
   /**
    * Emits only the mutable shell rows owned by one conversation. Tests and
    * compatibility callers may omit this and retain the full-snapshot fallback.
@@ -170,10 +170,16 @@ export interface TurnControllerHooks {
   }): void;
   captureGitBefore?(input: TurnGitArtifactHookInput): void | Promise<void>;
   captureGitArtifacts?(input: TurnGitArtifactHookInput): void | Promise<void>;
+  /** Optional metadata; failure cannot change a committed provider outcome. */
   refreshProviderMetadata?(input: TurnMetadataRefreshHookInput): void | Promise<void>;
   validateModelSelection?(selection: ModelSelection): ModelSelection;
   releaseTurnAttachments?(input: TurnAttachmentReleaseHookInput): void | Promise<void>;
   releaseGeneratedAttachments?(paths: readonly string[]): void | Promise<void>;
+  /**
+   * Required orchestration. Durable owners provide recovery; the controller
+   * records failure independently and never blindly replays a callback against
+   * a newer active turn.
+   */
   onTurnSettled?(turn: AgentTurn): void | Promise<void>;
   /** Benchmark-only stage attribution; absent in ordinary runtime instances. */
   testOnlyStreamingTrace?: StreamingTrace;
@@ -200,6 +206,7 @@ export interface QueueTurnRequest {
   /** Privileged provider-native skill references resolved from opaque IDs. */
   skills?: readonly ProviderSkillInput[];
   rendererOwnerId?: string | null;
+  /** Optional per-turn review/audit metadata; not an execution or cleanup owner. */
   onSettled?: (
     status: AgentTurnTerminalStatus,
     turnId: string,

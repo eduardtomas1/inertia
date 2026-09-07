@@ -261,7 +261,7 @@ async function populatedV61Fixture(): Promise<{
   return { databasePath, conversationId: conversation.id, turnId: turn.id };
 }
 
-describe.sequential("native Kimi provider migration", () => {
+describe("native Kimi provider migration", { concurrent: false }, () => {
   afterEach(async () => {
     await Promise.all(temporaryDirectories.splice(0).map((directory) =>
       rm(directory, { recursive: true, force: true }),

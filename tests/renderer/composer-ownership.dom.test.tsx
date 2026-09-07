@@ -8,6 +8,7 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import userEvent from "@testing-library/user-event";
 
 import type {
   ChatAttachment,
@@ -313,6 +314,86 @@ describe("composer detachment ownership", () => {
       reason: "Remove the selected preview before moving this chat to a window.",
       draft: "",
     });
+  });
+
+  it("dismisses an unselected preview by keyboard and keeps it dismissed after rerender and send", async () => {
+    const current = conversation("dismiss-preview-suggestion");
+    const onSend = vi.fn(async () => undefined);
+    const props = composerProps(current, { previewContextUrl: "http://127.0.0.1:4173/preview", onSend });
+    const view = render(<Composer {...props} />);
+    expect(screen.getByRole("button", { name: /Attach current preview/u })).toHaveAttribute("aria-pressed", "false");
+    const dismiss = screen.getByRole("button", { name: "Dismiss preview suggestion" });
+    dismiss.focus();
+    await userEvent.setup().keyboard("{Enter}");
+    expect(screen.getByRole("textbox", { name: "Message" })).toHaveFocus();
+    expect(screen.queryByRole("button", { name: /Attach current preview/u })).toBeNull();
+    expect(prepareComposerDetachment(current.id)).toEqual({ status: "ready", draft: "" });
+    view.rerender(<Composer {...props} />);
+    fireEvent.change(screen.getByRole("textbox", { name: "Message" }), { target: { value: "Only this message." } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledExactlyOnceWith("Only this message.", [], undefined));
+    expect(screen.queryByRole("button", { name: /Attach current preview/u })).toBeNull();
+    expect(JSON.stringify(window.localStorage)).not.toContain(props.previewContextUrl);
+  });
+
+  it("removes selected preview context from the owning draft and outgoing request", async () => {
+    const current = conversation("remove-preview-context");
+    const onSend = vi.fn(async () => undefined);
+    render(<Composer {...composerProps(current, { previewContextUrl: "http://127.0.0.1:4173/preview", onSend })} />);
+    fireEvent.click(screen.getByRole("button", { name: /Attach current preview/u }));
+    expect(prepareComposerDetachment(current.id)).toMatchObject({ status: "blocked", blocker: "preview-context" });
+    const remove = screen.getByRole("button", { name: "Remove attached preview" });
+    remove.focus();
+    await userEvent.setup().keyboard(" ");
+    expect(screen.getByRole("textbox", { name: "Message" })).toHaveFocus();
+    expect(prepareComposerDetachment(current.id)).toEqual({ status: "ready", draft: "" });
+    expect(screen.queryByRole("button", { name: /Preview attached/u })).toBeNull();
+    fireEvent.change(screen.getByRole("textbox", { name: "Message" }), { target: { value: "No preview context." } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledExactlyOnceWith("No preview context.", [], undefined));
+  });
+
+  it("scopes dismissed suggestions to their conversation and URL without affecting another pane", () => {
+    const first = conversation("first-preview-owner");
+    const second = conversation("second-preview-owner");
+    const url = "http://127.0.0.1:4173/preview";
+    const firstProps = composerProps(first, { previewContextUrl: url });
+    const secondProps = composerProps(second, { previewContextUrl: url });
+    const layout = (owner = first, previewContextUrl = url) => <>
+      <section aria-label="First preview"><Composer {...firstProps} conversation={owner} previewContextUrl={previewContextUrl} /></section>
+      <section aria-label="Second preview"><Composer {...secondProps} /></section>
+    </>;
+    const view = render(layout());
+    const firstPane = within(screen.getByRole("region", { name: "First preview" }));
+    const secondPane = within(screen.getByRole("region", { name: "Second preview" }));
+    fireEvent.click(firstPane.getByRole("button", { name: "Dismiss preview suggestion" }));
+    expect(secondPane.getByRole("button", { name: /Attach current preview/u })).toBeInTheDocument();
+    view.rerender(layout(first, `${url}/new`));
+    expect(firstPane.getByRole("button", { name: /Attach current preview/u })).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(firstPane.getByRole("button", { name: "Dismiss preview suggestion" }));
+    view.rerender(layout(conversation("switched-preview-owner")));
+    expect(firstPane.getByRole("button", { name: /Attach current preview/u })).toBeInTheDocument();
+    view.rerender(layout());
+    expect(firstPane.queryByRole("button", { name: /Attach current preview/u })).toBeNull();
+    expect(secondPane.getByRole("button", { name: /Attach current preview/u })).toBeInTheDocument();
+  });
+
+  it("never silently attaches a dismissed URL when a selected preview navigates back to it", async () => {
+    const current = conversation("preview-navigation-owner");
+    const url = "http://127.0.0.1:4173/preview";
+    const onSend = vi.fn(async () => undefined);
+    const props = composerProps(current, { previewContextUrl: url, onSend });
+    const view = render(<Composer {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss preview suggestion" }));
+    view.rerender(<Composer {...props} previewContextUrl={`${url}/new`} />);
+    fireEvent.click(screen.getByRole("button", { name: /Attach current preview/u }));
+    expect(prepareComposerDetachment(current.id)).toMatchObject({ blocker: "preview-context" });
+    view.rerender(<Composer {...props} />);
+    expect(screen.queryByRole("button", { name: /Preview attached/u })).toBeNull();
+    expect(prepareComposerDetachment(current.id)).toEqual({ status: "ready", draft: "" });
+    fireEvent.change(screen.getByRole("textbox", { name: "Message" }), { target: { value: "No hidden preview." } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledExactlyOnceWith("No hidden preview.", [], undefined));
   });
 
   it("blocks unsent chat context while allowing consumed provenance to move", () => {

@@ -1,13 +1,13 @@
 name: Database migration lineage
 
 on:
-  pull_request:
-  push:
-    branches: [main]
-  merge_group:
-    types: [checks_requested]
-  schedule:
-    - cron: "29 3 * * *"
+  workflow_call:
+    inputs:
+      comparison-base:
+        description: Proven comparison ancestor; unavailable main evidence compares complete history.
+        type: string
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -21,6 +21,7 @@ jobs:
       - name: Check out complete lineage
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -28,26 +29,33 @@ jobs:
         id: base
         env:
           EVENT_NAME: ${{ github.event_name }}
+          COMPARISON_BASE: ${{ inputs.comparison-base }}
           BASE_REF: ${{ github.base_ref }}
-          BEFORE_SHA: ${{ github.event.before }}
           MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
         run: |
           set -euo pipefail
-          if [[ "$EVENT_NAME" == pull_request ]]; then
+          if [[ "$COMPARISON_BASE" =~ ^[0-9a-f]{40}$ ]]; then
+            git merge-base --is-ancestor "$COMPARISON_BASE" HEAD
+            comparison="$COMPARISON_BASE"
+          elif [[ "$EVENT_NAME" == pull_request ]]; then
             git fetch --no-tags origin "$BASE_REF"
             comparison="$(git merge-base HEAD "origin/$BASE_REF")"
           elif [[ "$EVENT_NAME" == merge_group ]] && [[ "$MERGE_GROUP_BASE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
             comparison="$MERGE_GROUP_BASE_SHA"
-          elif [[ "$BEFORE_SHA" =~ ^[0-9a-f]{40}$ ]] && [[ ! "$BEFORE_SHA" =~ ^0+$ ]]; then
-            git fetch --no-tags origin "$BEFORE_SHA"
-            comparison="$BEFORE_SHA"
           else
-            comparison="$(git rev-list --max-parents=0 HEAD | tail -n 1)"
+            comparison=""
           fi
           printf 'commit=%s\n' "$comparison" >> "$GITHUB_OUTPUT"
 
       - name: Reject edited, removed, or reordered released migrations
-        run: node scripts/verify-database-lineage.mjs --base-ref "${{ steps.base.outputs.commit }}"
+        env:
+          COMPARISON_BASE: ${{ steps.base.outputs.commit }}
+        run: |
+          if [[ -n "$COMPARISON_BASE" ]]; then
+            node scripts/verify-database-lineage.mjs --base-ref "$COMPARISON_BASE"
+          else
+            node scripts/verify-database-lineage.mjs --all-history
+          fi
 
       - name: Install locked dependencies
         uses: ./.github/actions/install-dependencies

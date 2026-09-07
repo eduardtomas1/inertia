@@ -1,7 +1,7 @@
 import { ok, equal } from "node:assert/strict";
 import { spawn, execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { chmod, copyFile, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { chmod, copyFile, lstat, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { runPackagedHistorySmoke, runPackagedWorkspaceDiscovery, resumePackagedHistorySmoke } from "./package-smoke-history-runtime.mjs";
 import { assertHistoryAfterShutdown } from "./package-smoke-history-storage.mjs";
@@ -10,15 +10,38 @@ if (process.platform !== "linux") throw new Error("Installed AppImage updates re
 const source = resolve(process.argv[2]);
 const version = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8")).version;
 const root = resolve(process.argv[3]);
+const predecessor = process.argv[4] ? resolve(process.argv[4]) : source;
+const predecessorVersion = process.argv[5] ?? version;
+const realPredecessor = predecessor !== source;
+if (process.argv[4]) {
+  ok(realPredecessor, "An explicit predecessor must be a distinct input.");
+  equal(process.argv.length, 6);
+}
+const digest = async (path) => createHash("sha256").update(await readFile(path)).digest("hex");
+for (const path of new Set([source, predecessor])) {
+  const metadata = await lstat(path);
+  ok(metadata.isFile() && !metadata.isSymbolicLink() && metadata.size > 0 && metadata.size <= 512 * 1024 * 1024);
+}
+const candidateDigest = await digest(source);
+const predecessorDigest = await digest(predecessor);
+if (realPredecessor) {
+  equal(predecessorVersion, "0.0.53");
+  equal(version, "0.0.54");
+  equal((await lstat(predecessor)).size, 360582286);
+  equal(predecessorDigest, "81621b079ed09b820e1dc7e33d496394223c8235ef6d209c623acd44846fe8b2");
+  ok(candidateDigest !== predecessorDigest);
+}
 await chmod(root, 0o700);
-const installed = join(root, `Inertia-${version}.AppImage`);
+const installed = join(root, `Inertia-${predecessorVersion}.AppImage`);
 const candidate = join(root, "downloaded.AppImage");
 const workspace = join(root, "workspace");
 for (const name of ["home", "config", "data", "workspace", "temp", "bin"]) {
   await mkdir(join(root, name), { mode: 0o700 });
 }
-await copyFile(source, installed);
+await copyFile(predecessor, installed);
 await copyFile(source, candidate);
+equal(await digest(installed), predecessorDigest);
+equal(await digest(candidate), candidateDigest);
 await chmod(installed, 0o755);
 await chmod(candidate, 0o755);
 await writeFile(join(root, "update.json"), JSON.stringify({ candidate, version }), { mode: 0o600 });
@@ -77,11 +100,11 @@ async function ready() {
   });
 }
 const command = (owner, action) => writeFile(join(root, `command-${owner.mainPid}`), action, { flag: "wx", mode: 0o600 });
-const digest = async (path) => createHash("sha256").update(await readFile(path)).digest("hex");
 try {
   launch(installed);
   const old = await ready();
   equal(old.appImage, installed);
+  equal(old.version, predecessorVersion);
   const history = await runPackagedHistorySmoke({ websocketUrl: old.websocketUrl, workspaceDirectory: workspace,
     deadlineAt: Date.now() + 30_000 });
   await writeFile(join(root, "history.json"), JSON.stringify(history), { mode: 0o600 });
@@ -106,10 +129,14 @@ try {
   launch(stable);
   const reopened = await ready();
   equal(reopened.profile, old.profile);
+  equal(reopened.version, version);
   const reopenedHistory = await resumePackagedHistorySmoke(reopened.websocketUrl, newHistory);
   await command(reopened, "quit");
   await wait("reopened installed app shutdown", () => !alive(reopened.mainPid) && !alive(reopened.runtimePid));
   await assertHistoryAfterShutdown(root, reopenedHistory);
+  console.log(JSON.stringify({ proof: "installed-handoff", predecessorVersion, predecessorDigest,
+    candidateVersion: version, candidateDigest, installedDigest: await digest(stable),
+    realPredecessor, fixtureAdvertisementAndDownload: true, fixtureServiceCurrentVersion: "0.0.0" }));
   console.log(`Installed Linux ${process.arch} update passed: real candidate bootstrap, old-owner shutdown, atomic replacement, same profile/history/settings/provider sessions, new turns, and fresh relaunch.`);
 } catch (error) {
   console.error(output);

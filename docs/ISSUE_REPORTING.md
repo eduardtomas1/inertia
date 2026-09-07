@@ -7,7 +7,7 @@ Automatic validation currently supports **Claude Agent SDK** with existing nativ
 The provider receives the scrubbed description and only these diagnostics:
 
 - Inertia version, OS family and architecture.
-- Validated lifecycle state, blocker/quarantine/cleanup codes, resource and unresolved-interaction counts, maintenance states and bounded Windows cleanup codes.
+- Validated lifecycle state, blocker/quarantine/cleanup codes, resource and unresolved-interaction counts, active maintenance states and bounded Windows cleanup codes.
 - Optional counts of chats and pending interactions for the explicitly selected project. Project identifiers and names are excluded.
 
 The collector does not read logs, source, files, paths, environment values or conversation content. It uses the existing validated lifecycle projection, discarding malformed metadata. Description/preview scrubbing removes recognized secrets, configuration assignments, authorization strings, URLs, emails and portable private paths; the user must still review their own prose before sharing it.
@@ -19,3 +19,5 @@ The dedicated report run uses the existing isolated-run controller, temporary ap
 The latest report is stored in the application database through append-only schema 69. Revision checks reject stale writes; cancellation, provider failures and auth failures preserve the report. Interrupted validation becomes retryable. An attempted publication with no confirmed result becomes **uncertain** and cannot automatically submit again; **Check submission** performs a bounded read-only search for the exact report marker. Interrupted publication retains that protection across restart. Missing GitHub CLI/auth has `gh auth login` instructions and copy/browser continuation.
 
 Tests use synthetic input and mocked publication; they never create public test issues. Related incident context is [#298](https://github.com/eduardtomas1/inertia/issues/298), which remains independently scoped.
+
+These captures show the real Electron interface with synthetic report input: [description and model selection](screenshots/issue-report-describe.png), [saved private report chat](screenshots/issue-report-chat.png), and [reviewed public preview](screenshots/issue-report-preview.png). No issue was published during capture.

@@ -126,6 +126,22 @@ describe("private issue reports", () => {
     const published = await dispatch({ type: "support.report.submit", payload: { id: draft.id, revision: failed.revision } });
     expect(published.status).toBe("submitted");
   });
+  it("requires review again when the final publication scrub changes an older saved preview", async () => {
+    const { dispatch, store, deps, publisher, send } = setup();
+    const draft = await dispatch({ type: "support.report.prepare", payload: input });
+    store.saveIssueReport({ ...draft, status: "preview", body: 'The chat stopped. {"accessToken":"SYNTHETIC_OLD_SECRET"}' });
+    const reopened = createIssueReportCommandHandler(deps);
+    const submit = async (revision: number) => reopened({} as WebSocket, { type: "support.report.submit", requestId: crypto.randomUUID(), payload: { id: draft.id, revision } });
+    await submit(draft.revision);
+    expect(publisher.create).not.toHaveBeenCalled();
+    const scrubbed = store.readIssueReport() as IssueReport;
+    expect(scrubbed).toMatchObject({ status: "preview", revision: draft.revision + 1 });
+    expect(JSON.stringify(scrubbed)).not.toContain("SYNTHETIC_");
+    expect(JSON.stringify(send.mock.calls.at(-1))).not.toContain("SYNTHETIC_");
+    await submit(scrubbed.revision);
+    expect(publisher.create).toHaveBeenCalledOnce();
+    expect(JSON.stringify(publisher.create.mock.calls)).not.toContain("SYNTHETIC_");
+  });
   it("accepts only a complete URL in the fixed repository", () => {
     expect(verifiedIssueUrl("https://github.com/eduardtomas1/inertia/issues/123\n")).toBeTruthy();
     for (const invalid of ["https://github.com/attacker/inertia/issues/123", "https://github.com/eduardtomas1/inertia/issues/123/evil", "https://github.com/eduardtomas1/inertia/issues/123?token=secret"]) expect(verifiedIssueUrl(invalid)).toBeNull();
@@ -154,7 +170,12 @@ it("upgrades schema 68 transactionally and retains saved report progress", () =>
 
 it.each([
   '{"api_key":"SYNTHETIC_SECRET_VALUE"}',
+  String.raw`{"pass\u0077ord":"SYNTHETIC_DECODED_KEY_VALUE"}`,
+  '{"apiToken":"SYNTHETIC_API_TOKEN","accessToken":"SYNTHETIC_ACCESS_TOKEN"}',
+  '{"refreshToken":"SYNTHETIC_REFRESH_TOKEN","client_secret":"SYNTHETIC_CLIENT_SECRET"}',
   '{"password":"SYNTHETIC_PASSWORD_VALUE"}',
+  '{"access_token":"SYNTHETIC_ACCESS_VALUE","refresh_token":"SYNTHETIC_REFRESH_VALUE"}',
+  '{"clientSecret":"SYNTHETIC_CLIENT_VALUE","secret_access_key":"SYNTHETIC_KEY_VALUE"}',
   "'token': 'SYNTHETIC_TOKEN_VALUE'",
   '{"API_KEY":"SYNTHETIC_ESCAPED_\\\"SECRET_VALUE"}',
 ])("removes quoted secrets from prepare, edit and the final provider prompt: %s", async (privateText) => {

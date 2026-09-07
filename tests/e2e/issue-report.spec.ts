@@ -25,7 +25,7 @@ test("preserves the private report chat and requires a reviewed preview before p
     await page.getByRole("heading", { name: "Report an issue", exact: true, level: 3 }).scrollIntoViewIfNeeded();
     await page.screenshot({ path: chat, animations: "disabled" });
     await testInfo.attach("Saved private report chat", { path: chat, contentType: "image/png" });
-    await page.getByRole("button", { name: "Submit issue to GitHub" }).scrollIntoViewIfNeeded();
+    await page.getByRole("heading", { name: "Public issue preview", exact: true }).evaluate((element) => element.scrollIntoView({ block: "start" }));
     const preview = testInfo.outputPath("issue-report-preview.png");
     await page.screenshot({ path: preview, animations: "disabled" });
     await testInfo.attach("Reviewed public issue preview", { path: preview, contentType: "image/png" });

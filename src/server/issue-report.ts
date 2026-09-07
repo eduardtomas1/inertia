@@ -25,7 +25,7 @@ export function collectIssueEvidence(snapshot: AppSnapshot, projectId: string | 
       resources: lifecycle.ownedResources,
       unresolvedTurns: lifecycle.unresolvedTurnCount,
       unresolvedInteractions: lifecycle.unresolvedInteractionCount,
-      maintenance: lifecycle.providerMaintenance,
+      maintenance: lifecycle.providerMaintenance.filter(({ state }) => state !== "idle"),
       windowsCleanup: lifecycle.windowsCleanupFailures ?? [],
     } : "unavailable",
     selectedProject: projectId ? {

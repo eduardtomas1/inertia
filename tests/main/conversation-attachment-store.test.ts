@@ -166,13 +166,46 @@ describe("durable conversation attachment storage", () => {
 
   it("cleans contained unexpected entries without blocking restart", async () => {
     const dataDirectory = await root();
-    const store = await openTestStore(dataDirectory);
-    await writeFile(join(store.directory, ".DS_Store"), "fixture", "utf8");
-    await mkdir(join(store.directory, "interrupted-maintenance"));
+    let holdFirstCleanup = true;
+    let foregroundCleanupStopped = false;
+    const operationRunner: ConversationAttachmentStoreOperationRunner = (
+      operation,
+      signal,
+    ) => {
+      if (operation.operation !== "remove" || !holdFirstCleanup) {
+        return testOperationRunner(operation, signal);
+      }
+      holdFirstCleanup = false;
+      if (!signal) throw new Error("Reconciliation did not provide its batch signal.");
+      const result = new Promise<never>((_resolve, reject) => {
+        const onAbort = (): void => reject(signal.reason);
+        signal.addEventListener("abort", onAbort, { once: true });
+        if (signal.aborted) onAbort();
+      });
+      return {
+        result,
+        stopped: result.then(undefined, () => { foregroundCleanupStopped = true; }),
+      };
+    };
+    const store = await ConversationAttachmentStore.open(dataDirectory, {
+      operationRunner,
+    });
+    try {
+      await writeFile(join(store.directory, ".DS_Store"), "fixture", "utf8");
+      await mkdir(join(store.directory, "interrupted-maintenance"));
 
-    await expect(store.reconcile([])).resolves.toBeUndefined();
+      await expect(store.reconcile([])).resolves.toBeUndefined();
+      expect(foregroundCleanupStopped).toBe(true);
 
-    await expect(readdir(store.directory)).resolves.toEqual([]);
+      // Foreground reconciliation yielded safely; completion belongs to the
+      // background retry, which must remove both unexpected entries.
+      await vi.waitFor(async () => {
+        await expect(readdir(store.directory)).resolves.toEqual([]);
+        await expect(store.usage()).resolves.toEqual({ bytes: 0, records: 0 });
+      }, { timeout: 5_000, interval: 10 });
+    } finally {
+      await store.close();
+    }
   });
 
   it("bounds startup reconciliation and defers stalled cleanup", async () => {

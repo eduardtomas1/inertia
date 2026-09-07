@@ -1,6 +1,6 @@
 import { constants } from "node:fs";
 import { access, realpath, stat } from "node:fs/promises";
-import { isAbsolute, join } from "node:path";
+import { posix } from "node:path";
 
 const FILESYSTEM_SELECTION_BUDGET_MS = 1_000;
 
@@ -9,21 +9,23 @@ async function withinFilesystemBudget(
   operation: (expired: () => boolean) => Promise<string | null>,
 ): Promise<string | null> {
   if (budget.remainingMs <= 0) return null;
-  const started = Date.now();
+  const started = performance.now();
+  const deadline = started + budget.remainingMs;
   let expired = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    return await Promise.race([
-      operation(() => expired),
+    const result = await Promise.race([
+      operation(() => expired || performance.now() >= deadline),
       new Promise<null>(resolve => {
         timer = setTimeout(() => { expired = true; resolve(null); }, budget.remainingMs);
         timer.unref();
       }),
     ]);
+    return expired || performance.now() >= deadline ? null : result;
   } finally {
     expired = true;
     if (timer) clearTimeout(timer);
-    budget.remainingMs -= Math.max(0, Date.now() - started);
+    budget.remainingMs -= Math.max(0, performance.now() - started);
   }
 }
 
@@ -60,7 +62,7 @@ export class GitExecutableSelection {
     // filesystem discovery even when the inherited PATH is unusually large.
     if (!path || path.length > 16_384) return Promise.resolve();
     const entries = path.split(":");
-    if (entries.length > 128 || entries.some(entry => !isAbsolute(entry))) return Promise.resolve();
+    if (entries.length > 128 || entries.some(entry => !posix.isAbsolute(entry))) return Promise.resolve();
     if (this.selection?.path === path) return this.selection.preparation;
     const selection = { path, command: "git", preparation: Promise.resolve() };
     this.selection = selection;
@@ -70,7 +72,7 @@ export class GitExecutableSelection {
       const budget = { remainingMs: FILESYSTEM_SELECTION_BUDGET_MS };
       const selected = await withinFilesystemBudget(budget, async expired => {
         for (const entry of entries) {
-          const executable = await this.readExecutable(join(entry, "git"));
+          const executable = await this.readExecutable(posix.join(entry, "git"));
           if (expired()) return null;
           if (executable) return executable;
         }
@@ -80,7 +82,7 @@ export class GitExecutableSelection {
       // xcrun applies the selected Xcode/toolchain policy. Its environment
       // is sanitized by the same privileged runner used for Git commands.
       const located = (await locateAppleGit()).trim();
-      if (!isAbsolute(located) || /[\0\r\n]/u.test(located)) return;
+      if (!posix.isAbsolute(located) || /[\0\r\n]/u.test(located)) return;
       const executable = await withinFilesystemBudget(budget, () => this.readExecutable(located));
       if (executable && executable !== "/usr/bin/git") selection.command = executable;
     })();

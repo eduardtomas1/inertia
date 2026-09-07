@@ -77,7 +77,7 @@ jobs:
             platform: macos-x64
             arch: x64
             package_script: package:release:mac:x64
-            timeout_minutes: 55
+            timeout_minutes: 70
             app_path: release/mac/Inertia.app
           - label: macOS arm64
             runner: macos-15

@@ -21,6 +21,7 @@ export function installedUpdateTestFixture() {
   };
   const service = new AppUpdateService({
     currentVersion: "0.0.0",
+    fetch: async () => { throw new Error("Installed update fixture must not access the release network."); },
     capability: { delivery: "in-app" },
     loadUpdater: async () => {
       const adapter = await loadElectronAppUpdater();

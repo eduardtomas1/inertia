@@ -55,6 +55,9 @@ describe("shared contracts boundary", () => {
     });
 
     expect(commandTypes).toEqual([
+      "conversation.messages.search",
+      "conversation.messages.search.cancel",
+      "conversation.message.reveal",
       "app.refresh",
       "daily.work.get",
       "usage.dashboard.get",

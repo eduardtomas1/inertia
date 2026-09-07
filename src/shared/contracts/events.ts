@@ -30,6 +30,7 @@ import type {
   WorkspaceRun,
 } from "./app";
 import type { ConversationDetailResult } from "./conversation-detail";
+import type { MessageSearchResult, MessageSearchTarget } from "../message-search";
 import type {
   DuoPendingResult,
   DuoPreparedResult,
@@ -155,6 +156,7 @@ export type RuntimeSequencedFrame =
     };
 
 export type ServerEvent =
+  | { type: "conversation.message.focus"; target: MessageSearchTarget }
   | {
       type: "server.welcome";
       protocolVersion: typeof PROTOCOL_VERSION;
@@ -217,7 +219,8 @@ export type ServerEvent =
           }
         | { kind: "git.action"; message: string }
         | { kind: "external.url"; url: string; label: string }
-        | ConversationDetailResult;
+        | ConversationDetailResult
+        | MessageSearchResult;
     }
   | RuntimeMutationEvent
   | ({

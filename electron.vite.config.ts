@@ -92,6 +92,7 @@ export default defineConfig({
         input: {
           index: resolve("src/main/index.ts"),
           "runtime-worker": resolve("src/server/runtime-worker.ts"),
+          "message-search-worker": resolve("src/server/persistence/message-search-worker.ts"),
           "app-update-candidate-viability-worker": resolve(
             "src/server/app-update-candidate-viability-worker.ts",
           ),

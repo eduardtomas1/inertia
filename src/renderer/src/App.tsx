@@ -13,6 +13,7 @@ import {
 } from "@shared/contracts";
 import { defaultSettings } from "@shared/contracts/app";
 import { selectConversationWorkspaceRun } from "../../shared/attention";
+import { useConversationNavigation } from "./hooks/useConversationNavigation";
 import "./detached-chat-workbench.css";
 import { AppLayout } from "./components/AppLayout";
 import { DialogPresence } from "./components/DialogPresence";
@@ -61,7 +62,6 @@ import {
   persistSplitConversationId,
   readSplitConversationId,
   resolvedSplitConversation,
-  splitConversationAfterPrimaryChange,
 } from "./utils/splitConversation";
 import { createWorkspaceSceneModel } from "./components/workspace-scene/createWorkspaceSceneModel";
 import { createWorkspaceTurnActions } from "./components/workspace-scene/createWorkspaceTurnActions";
@@ -561,72 +561,12 @@ export default function App(): React.JSX.Element {
     visibleConversationRun,
   ]);
 
-  const selectConversationInMain = useCallback((
-    nextConversation: Conversation,
-  ) => {
-    exitGlobalChat();
-    setSuppressedMainConversationIds((current) => {
-      if (!current.has(nextConversation.id)) return current;
-      const next = new Set(current);
-      next.delete(nextConversation.id);
-      return next;
-    });
-    if (nextConversation.id === conversation?.id) return;
-    if (nextConversation.id === splitConversation?.id) {
-      // A split-pane promotion is visual only. Retargeting the primary and
-      // secondary controllers would tear down conversation-owned terminals,
-      // previews, attachments, and tool state.
-      setSecondaryPaneFirst(true);
-      window.setTimeout(() => {
-        document.querySelector<HTMLElement>(
-          "#secondary-conversation-pane textarea",
-        )?.focus({ preventScroll: true });
-      }, 0);
-      return;
-    }
-    const nextSplitConversationId = splitConversationAfterPrimaryChange(
-      conversation,
-      nextConversation,
-      splitConversation,
-    );
-    setSecondaryPaneFirst(false);
-    const selectionGeneration =
-      conversationSelectionGenerationRef.current + 1;
-    conversationSelectionGenerationRef.current = selectionGeneration;
-    splitSelectionTransitionsRef.current += 1;
-    void selectConversationCommand(
-      "conversation.select",
-      nextConversation.id,
-    ).then(() => {
-      if (
-        selectionGeneration === conversationSelectionGenerationRef.current
-      ) {
-        updateSplitConversationId(nextSplitConversationId);
-      }
-    }).catch(() => undefined).finally(() => {
-      splitSelectionTransitionsRef.current = Math.max(
-        0,
-        splitSelectionTransitionsRef.current - 1,
-      );
-    });
-  }, [
-    conversation,
-    exitGlobalChat,
-    selectConversationCommand,
-    splitConversation,
-    updateSplitConversationId,
-  ]);
-  const selectConversation = useCallback((nextConversation: Conversation) => {
-    if (!detachedChats.conversationIds.has(nextConversation.id)) {
-      selectConversationInMain(nextConversation);
-      return;
-    }
-    void detachedChats.focus(nextConversation.id).then((focused) => {
-      // A dock event can overtake React's projection of the native registry.
-      // Falling back here makes the explicit return-to-main action race-safe.
-      if (!focused) selectConversationInMain(nextConversation);
-    }).catch(() => selectConversationInMain(nextConversation));
-  }, [detachedChats, selectConversationInMain]);
+  const { selectConversation, selectMessage } = useConversationNavigation({
+    snapshot: connection.snapshot, conversation, splitConversation, detachedChats, exitGlobalChat,
+    conversationSelectionGenerationRef, splitSelectionTransitionsRef,
+    setSuppressedMainConversationIds, setSecondaryPaneFirst,
+    selectConversationCommand, updateSplitConversationId, request, setActionError,
+  });
   const openConversationInWindow = useCallback((
     nextConversation: Conversation,
   ): void => {
@@ -1221,6 +1161,7 @@ export default function App(): React.JSX.Element {
         openGlobalChat,
         selectProject,
         selectConversation,
+        selectMessage,
         openConversationInSplit,
         openConversationInWindow,
         closeConversationSplit: () => updateSplitConversationId(null),

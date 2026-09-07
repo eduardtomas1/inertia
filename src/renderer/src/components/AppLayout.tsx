@@ -27,6 +27,7 @@ import type { NewConversationLocation } from "../lib/newConversation";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
 import { rootGitMutationScope } from "../utils/workspaceGit";
 import { AppNavigationOverlays } from "./AppNavigationOverlays";
+import type { MessageSearchHit } from "@shared/message-search";
 import { AppStatusOverlays } from "./AppStatusOverlays";
 import { DialogPresence } from "./DialogPresence";
 import type { CommitDialogProps } from "./CommitDialog";
@@ -83,6 +84,7 @@ interface AppLayoutActions {
   openGlobalChat: () => void;
   selectProject: (project: Project) => void;
   selectConversation: (conversation: Conversation) => void;
+  selectMessage: (hit: MessageSearchHit) => void;
   openConversationInSplit: (conversation: Conversation) => void;
   openConversationInWindow: (conversation: Conversation) => void;
   closeConversationSplit: () => void;
@@ -755,6 +757,8 @@ export function AppLayout({
         setWorkspaceView={() => setView("workspace")}
         selectProject={actions.selectProject}
         selectConversation={actions.selectConversation}
+        selectMessage={actions.selectMessage}
+        sendCommand={connection.sendCommand}
         createConversation={() => actions.createConversation()}
         importProject={actions.importProject}
         openSettings={() => setView("settings")}

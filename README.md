@@ -20,7 +20,7 @@ Inertia brings agent conversations, project files, Git review, and terminals int
 2. Add a local folder or clone a repository from its HTTPS or SSH Git URL.
 3. Open **Settings → Providers**, connect a provider, and start a chat.
 
-Use **Ctrl/Cmd+K** to find commands, projects, and chats. Choose **All projects** to search by name or folder path, filter the sidebar, or open project actions.
+Use **Ctrl/Cmd+K** to find commands, projects, chats, and saved messages. Type at least two characters to search your messages and final agent answers across unarchived chats, then open a snippet to jump to its turn, including in a detached chat window. Message search matches literal phrases, ignores case, and shows up to 20 newest matches. Very large histories may return partial results, which the palette labels explicitly. Choose **All projects** to search by name or folder path, filter the sidebar, or open project actions.
 
 ![Find a project from the sidebar](docs/screenshots/inertia-project-picker.png)
 

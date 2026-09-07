@@ -22,6 +22,7 @@ import {
   MAIN_RUNTIME_CLIENT_AUTHORITY,
   type RuntimeClientAuthority,
 } from "./runtime-client-authority";
+import type { MessageSearchTarget } from "../../shared/message-search";
 
 export interface RuntimeSyncHydration {
   beforeFreshSnapshot?(): void;
@@ -56,6 +57,15 @@ export class RuntimeSyncHub<Socket> {
 
   get connectionCount(): number {
     return this.clients.size;
+  }
+
+  /** Ephemeral navigation only reaches the native window owning this chat. */
+  focusDetachedMessage(target: MessageSearchTarget): void {
+    for (const [socket, { authority }] of this.clients) {
+      if (authority.kind === "detached-chat" && authority.conversationId === target.conversationId) {
+        this.send(socket, { type: "conversation.message.focus", target });
+      }
+    }
   }
 
   cursor(): RuntimeSyncCursor {

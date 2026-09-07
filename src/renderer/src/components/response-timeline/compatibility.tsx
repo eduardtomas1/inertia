@@ -65,7 +65,7 @@ function CompatibilityDisclosure({
 }): React.JSX.Element {
   const [expanded, setExpanded] = useState(initiallyExpanded);
   return (
-    <section className="orphan-run-flow" aria-label="Recovered legacy and orphaned history" data-response-row-id="legacy-orphan-history">
+    <section className="orphan-run-flow" aria-label="Recovered legacy and orphaned history" data-response-row-id="legacy-orphan-history" tabIndex={-1}>
       <details
         open={expanded}
         onToggle={(event) => setExpanded(event.currentTarget.open)}

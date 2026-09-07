@@ -700,3 +700,20 @@ describe("runtime sync hub", () => {
     ]);
   });
 });
+
+
+describe("search focus routing", () => {
+  it("sends focus only to the detached window that owns the conversation", () => {
+    const runtime = fixture();
+    const context = { snapshot, approvals: [], inputs: [], plans: [] };
+    runtime.hub.connect("main", { kind: "none" }, context, { kind: "main" });
+    runtime.hub.connect("owner", { kind: "none" }, context, { kind: "detached-chat", conversationId: CONVERSATION_A, clientId: "owner" });
+    runtime.hub.connect("other", { kind: "none" }, context, { kind: "detached-chat", conversationId: CONVERSATION_B, clientId: "other" });
+    for (const events of runtime.events.values()) events.length = 0;
+    const target = { projectId: GENERATION, conversationId: CONVERSATION_A, turnId: "legacy-turn", messageId: "message" };
+    runtime.hub.focusDetachedMessage(target);
+    expect(runtime.events.get("owner")).toEqual([{ type: "conversation.message.focus", target }]);
+    expect(runtime.events.get("main")).toEqual([]);
+    expect(runtime.events.get("other")).toEqual([]);
+  });
+});

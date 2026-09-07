@@ -18,7 +18,8 @@ const budgets = {
   // Prompt-history recall, cancellation recovery, Gemini-aware routing, and
   // Zod 4.5 validation hardening measure 731.6 KiB on Linux x64; the detached
   // route measures 559.8 KiB. Keep less than 2 KiB of headroom on each.
-  mainWorkbenchFirstLoadJavaScript: 733 * kibibyte,
+  // Message-search navigation brings the measured main route to 734.8 KiB.
+  mainWorkbenchFirstLoadJavaScript: 736 * kibibyte,
   detachedChatFirstLoadJavaScript: 561 * kibibyte,
   // The surface and reduced-motion-safe transition system measure 344.7 KiB
   // on Linux x64; keep only narrow cross-platform headroom.
@@ -55,7 +56,8 @@ const budgets = {
   // exact-focus, Gemini routing, and Zod 4.5 validator core measures 1,969.9
   // KiB on macOS ARM64 after the lifecycle merge. Every deferred surface retains
   // its strict independent ceiling.
-  coreJavaScript: 1_971 * kibibyte,
+  // Bounded search validation, snippets and turn navigation measure 1,977.1 KiB.
+  coreJavaScript: 1_979 * kibibyte,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };

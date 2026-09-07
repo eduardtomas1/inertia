@@ -9,6 +9,7 @@ import {
   type RefObject,
 } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { useMessageSearchFocus } from "./useMessageSearchFocus";
 import type {
   InterfaceScale,
   ResponseDensity,
@@ -16,10 +17,6 @@ import type {
 } from "@shared/contracts";
 import { isAgentTurnTerminalStatus } from "@shared/turn-lifecycle";
 import { INTERFACE_SCALE_WILL_CHANGE_EVENT } from "../../utils/interfaceScale";
-import {
-  isTimelineFocusDetail,
-  TIMELINE_FOCUS_EVENT,
-} from "../../utils/timelineFocus";
 import { isTranscriptReaderNavigationKey } from "../../utils/transcriptNavigation";
 import { applyTerminalTurnProjections } from "../../utils/terminalTurnProjection";
 import {
@@ -1123,31 +1120,8 @@ function ResponseTimelineView(props: ResponseTimelineProps): React.JSX.Element {
     onReaderNavigationIntent?.();
   }, [cancelFinalAnswerAnchor, onReaderNavigationIntent]);
 
-  useLayoutEffect(() => {
-    const focusRequestedTurn = (event: Event): void => {
-      const detail = (event as CustomEvent<unknown>).detail;
-      if (
-        !isTimelineFocusDetail(detail)
-        || detail.conversationId !== props.conversationId
-      ) return;
-      const index = timeline.findIndex((item) =>
-        item.kind === "turn" && item.turn.id === detail.turnId);
-      if (index >= 0) {
-        beginReaderTimelineNavigation();
-        focusTimelineItem(index, "turn");
-      }
-    };
-    window.addEventListener(TIMELINE_FOCUS_EVENT, focusRequestedTurn);
-    return () => window.removeEventListener(
-      TIMELINE_FOCUS_EVENT,
-      focusRequestedTurn,
-    );
-  }, [
-    beginReaderTimelineNavigation,
-    focusTimelineItem,
-    props.conversationId,
-    timeline,
-  ]);
+  useMessageSearchFocus(props, timeline, beginReaderTimelineNavigation, focusTimelineItem);
+
 
   useEffect(() => {
     const scrollElement = props.scrollElementRef?.current;

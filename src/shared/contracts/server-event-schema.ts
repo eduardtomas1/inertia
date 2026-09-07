@@ -1,5 +1,6 @@
 import type { RuntimeMutationEvent, ServerEvent } from "./events";
 import { conversationDetailCollectionsCoherent, modelRouteIdentityCoherent, pullRequestCapabilityStateCoherent, runtimeEventScopeMatches, SERVER_EVENT_OPTIONS, snapshotIdentityCollectionsCoherent } from "./server-event-discriminants";
+import { messageSearchResultSchema, messageSearchTargetSchema } from "../message-search";
 import { modelSelectionSchema, versionedContinuationIdentitySchema } from "../model-routing";
 import { isContinuationReasonCode } from "../continuation-policy";
 import { modelBackendDefaultSchema, modelBackendProfileDetailSchema, modelBackendProfileViewSchema } from "../backend-profile-settings";
@@ -1095,6 +1096,7 @@ function runtimeMutationEvent(value: unknown): value is RuntimeMutationEvent {
 type RequestResult = Extract<ServerEvent, { type: "request.result" }>["result"];
 type RequestResultKind = RequestResult["kind"];
 const REQUEST_RESULT_VALIDATORS = {
+  "conversation.messages.search": (value) => messageSearchResultSchema.safeParse(value).success,
   "message.accepted": (value) =>
     recordWithStrings(value, "conversationId", "turnId", "userMessageId")
     && oneOf(value, "disposition", ["new-turn", "follow-up"]),
@@ -1163,6 +1165,8 @@ function requestResult(value: unknown): value is RequestResult {
 function isServerEvent(value: unknown): value is ServerEvent {
   if (!record(value) || typeof value.type !== "string") return false;
   switch (value.type) {
+    case "conversation.message.focus":
+      return messageSearchTargetSchema.safeParse(value.target).success;
     case "server.welcome":
       return value.protocolVersion === 1
         && appSnapshot(value.snapshot)

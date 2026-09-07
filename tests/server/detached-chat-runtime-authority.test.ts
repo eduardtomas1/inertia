@@ -435,3 +435,18 @@ describe("detached chat runtime authority", () => {
     expect(mainRejection(attach)).toBeNull();
   });
 });
+
+
+describe("global message search authority", () => {
+  it("denies global search and cross-window focus commands to detached renderers", () => {
+    const commands: ClientCommand[] = [
+      { type: "conversation.messages.search", requestId: REQUEST, payload: { query: "needle" } },
+      { type: "conversation.messages.search.cancel", requestId: REQUEST, payload: { searchRequestId: REQUEST } },
+      { type: "conversation.message.reveal", requestId: REQUEST, payload: { projectId: PROJECT, conversationId: CONVERSATION, turnId: "legacy-turn", messageId: REQUEST } },
+    ];
+    for (const command of commands) {
+      expect(rejection(command)).not.toBeNull();
+      expect(mainRejection(command)).toBeNull();
+    }
+  });
+});

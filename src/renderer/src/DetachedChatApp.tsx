@@ -27,6 +27,7 @@ import { selectConversationWorkspaceRun } from "../../shared/attention";
 import { applicationProductName } from "../../shared/workspace-image-preview";
 
 import { ChatWorkspace } from "./components/ChatWorkspace";
+import { clearMessageSearchFocus, requestMessageSearchFocus } from "./utils/messageSearchFocus";
 import "./detached-chat.css";
 import { ConversationDetailState } from "./components/ConversationDetailState";
 import { IconButton, LoadingMark } from "./components/ui";
@@ -163,6 +164,14 @@ export default function DetachedChatApp({
   const documentPresence = useDocumentPresence();
   const connection = useStableController(useInertiaConnection());
   const conversationId = windowContext.conversationId;
+  useEffect(() => {
+    const unsubscribe = connection.subscribe((event) => {
+      if (event.type === "conversation.message.focus" && event.target.conversationId === conversationId) {
+        requestMessageSearchFocus(event.target);
+      }
+    });
+    return () => { unsubscribe(); clearMessageSearchFocus(); };
+  }, [connection, conversationId]);
   const sendCommand = connection.sendCommand;
   const request = useCallback(
     (command: CommandWithoutId) => sendCommand(withRequestId(command)),

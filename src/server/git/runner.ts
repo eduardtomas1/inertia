@@ -15,6 +15,7 @@ import {
   type ProcessTreeTerminator,
 } from "../process-lifecycle";
 import { gitProcessEnvironment } from "./environment";
+import { GitExecutableSelection } from "./executable";
 import { withGitScanProcessSlot } from "./scan-coordinator";
 import {
   GIT_PROCESS_TREE_TERMINATION_FAILURE,
@@ -25,6 +26,26 @@ import {
 const TRUNCATED_OUTPUT_DRAIN_MS = 250;
 const CANCELLED_PROCESS_DRAIN_MS = 250;
 const PREPARED_ABORT_CLEANUP_MS = 500;
+const gitExecutable = new GitExecutableSelection();
+
+/** Prewarm Apple's tool selection before command-specific inspection clocks. */
+export async function prepareGitExecutable(environment: NodeJS.ProcessEnv = process.env): Promise<void> {
+  try {
+    await gitExecutable.prepare(environment, async () => {
+      const result = await runGitProcess("/usr/bin/xcrun", process.cwd(), ["--find", "git"], {
+        timeoutMs: 3_000,
+        maxOutputBytes: 4_096,
+        environment,
+        failureMessage: "Git executable discovery failed.",
+      });
+      return result.stdout.toString("utf8");
+    });
+  } catch (error) {
+    // Git may be unavailable without preventing the rest of the workbench
+    // from starting. An unproved helper cleanup remains fatal to ownership.
+    if (isGitProcessTreeTerminationFailure(error)) throw error;
+  }
+}
 export interface GitProcessResult {
   stdout: Buffer;
   stderr: Buffer;
@@ -232,6 +253,17 @@ export function runGit(
   options: RunGitOptions,
   dependencies: GitRunnerDependencies = {},
 ): Promise<GitProcessResult> {
+  return runGitProcess(gitExecutable.command(gitProcessEnvironment(process.env, options.environment)),
+    cwd, args, options, dependencies);
+}
+
+function runGitProcess(
+  command: string,
+  cwd: string,
+  args: readonly string[],
+  options: RunGitOptions,
+  dependencies: GitRunnerDependencies = {},
+): Promise<GitProcessResult> {
   const maxOutputBytes = options.maxOutputBytes ?? DEFAULT_OUTPUT_BYTES;
   const configuredTimeoutMs = options.timeoutMs ?? LOCAL_TIMEOUT_MS;
   const deadlineTimeoutMs = options.deadlineAt === undefined
@@ -254,7 +286,7 @@ export function runGit(
     ?? terminateProcessTreeAndWait;
 
   return new Promise((resolveProcess, rejectProcess) => {
-    const invocation = runtimeOwnedProcessInvocation("git", args);
+    const invocation = runtimeOwnedProcessInvocation(command, args);
     const child = spawnRuntimeOwnedProcess(() => spawn(invocation.command, invocation.args, {
       cwd,
       shell: false,
@@ -483,7 +515,7 @@ function runPreparedGitRefTransaction(
   const timeoutMs = Math.min(LOCAL_TIMEOUT_MS, deadlineTimeoutMs);
   const expiresAt = Date.now() + timeoutMs;
   return new Promise((resolve, reject) => {
-    const invocation = runtimeOwnedProcessInvocation("git", ["update-ref", "--stdin"]);
+    const invocation = runtimeOwnedProcessInvocation(gitExecutable.command(gitProcessEnvironment(process.env)), ["update-ref", "--stdin"]);
     const child = spawnRuntimeOwnedProcess(() => spawn(invocation.command, invocation.args, {
       cwd,
       shell: false,

@@ -779,10 +779,15 @@ export class TerminalManager {
       if (session.terminationRequested) return;
       const exitOwner = session.owner;
       this.dispose(id, false);
+      // node-pty can report exitCode=0 for a signalled process. Preserve the
+      // numeric contract without letting an interrupted sign-in look successful.
+      const completedExitCode = exitCode === 0 && signal !== undefined && signal > 0
+        ? 128 + signal
+        : exitCode;
       if (exitOwner) {
-        send(exitOwner, { type: "terminal.exit", terminalId: id, exitCode });
+        send(exitOwner, { type: "terminal.exit", terminalId: id, exitCode: completedExitCode });
       }
-      onExit?.(exitCode);
+      onExit?.(completedExitCode);
     });
     session = {
       id,

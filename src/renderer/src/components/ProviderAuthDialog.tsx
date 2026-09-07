@@ -42,6 +42,14 @@ type CommandWithoutId = ClientCommand extends infer Command
     : never
   : never;
 
+type AuthAttempt = {
+  pending: boolean;
+  cancelled: boolean;
+  output: Map<string, string>;
+  exits: Map<string, number>;
+};
+const MAX_EARLY_AUTH_TERMINALS = 8;
+
 function command(value: CommandWithoutId): ClientCommand {
   return { ...value, requestId: crypto.randomUUID() } as ClientCommand;
 }
@@ -71,7 +79,7 @@ export function ProviderAuthDialog({
   const terminalRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const terminalIdRef = useRef<string | null>(null);
-  const pendingOutputRef = useRef(new Map<string, string>());
+  const authAttemptRef = useRef<AuthAttempt | null>(null);
   const latestFontSizeRef = useRef(fontSize);
   const browserUrlRef = useRef<string | null>(null);
   const browserUrlDetectorRef = useRef<ProviderAuthBrowserUrlDetector | null>(null);
@@ -122,6 +130,12 @@ export function ProviderAuthDialog({
   }, []);
 
   const closeDialog = useCallback((): void => {
+    const attempt = authAttemptRef.current;
+    if (attempt) {
+      attempt.cancelled = true;
+      attempt.output.clear();
+      attempt.exits.clear();
+    }
     browserAttemptRef.current += 1;
     browserUrlDetectorRef.current?.clear();
     browserUrlDetectorRef.current = null;
@@ -176,7 +190,7 @@ export function ProviderAuthDialog({
 
     const input = terminal.onData((data) => {
       const terminalId = terminalIdRef.current;
-      if (!terminalId) return;
+      if (!terminalId || authAttemptRef.current?.cancelled) return;
       for (const chunk of terminalInputChunks(data)) {
         void sendCommand(command({ type: "terminal.input", payload: { terminalId, data: chunk } })).catch(() => undefined);
       }
@@ -223,35 +237,46 @@ export function ProviderAuthDialog({
     return () => media.removeEventListener("change", update);
   }, [colorTheme, fontSize, instanceReady, providerId, theme]);
 
-  useEffect(() => {
-    if (!providerId) {
-      pendingOutputRef.current.clear();
-      return;
-    }
-    return subscribe((event) => {
-    if (event.type === "terminal.output") {
-      if (event.terminalId === terminalIdRef.current) {
-        terminalRef.current?.write(event.data);
-        inspectAuthOutput(event.data);
-      }
-      else pendingOutputRef.current.set(event.terminalId, `${pendingOutputRef.current.get(event.terminalId) ?? ""}${event.data}`.slice(-65_536));
-    }
-    if (event.type === "terminal.exit" && event.terminalId === terminalIdRef.current) {
-      terminalIdRef.current = null;
-      terminalRef.current?.writeln(isGemini
+  const finishTerminal = useCallback((exitCode: number): void => {
+    terminalIdRef.current = null;
+    terminalRef.current?.writeln(exitCode !== 0
+      ? "\r\n\x1b[2mThe provider ended the connection flow before it completed.\x1b[0m"
+      : isGemini
         ? "\r\n\x1b[2mGemini setup closed. Your next Gemini run will verify authentication.\x1b[0m"
         : "\r\n\x1b[2mConnection flow finished. You can close this window.\x1b[0m");
-      setSessionState(event.exitCode === 0 ? "finished" : "error");
-      if (event.exitCode !== 0) setError("The provider ended the connection flow before it completed.");
-    }
+    setSessionState(exitCode === 0 ? "finished" : "error");
+    setError(exitCode === 0 ? null : "The provider ended the connection flow before it completed.");
+  }, [isGemini]);
+
+  useEffect(() => {
+    if (!providerId) return;
+    return subscribe((event) => {
+      const attempt = authAttemptRef.current;
+      if (!attempt || attempt.cancelled) return;
+      if (event.type === "terminal.output") {
+        if (event.terminalId === terminalIdRef.current) {
+          terminalRef.current?.write(event.data);
+          inspectAuthOutput(event.data);
+        } else if (attempt.pending && (
+          attempt.output.has(event.terminalId) || attempt.output.size < MAX_EARLY_AUTH_TERMINALS
+        )) {
+          attempt.output.set(event.terminalId, `${attempt.output.get(event.terminalId) ?? ""}${event.data}`.slice(-65_536));
+        }
+      }
+      if (event.type === "terminal.exit") {
+        if (event.terminalId === terminalIdRef.current) finishTerminal(event.exitCode);
+        else if (attempt.pending && !attempt.exits.has(event.terminalId)
+          && attempt.exits.size < MAX_EARLY_AUTH_TERMINALS) {
+          attempt.exits.set(event.terminalId, event.exitCode);
+        }
+      }
     });
-  }, [inspectAuthOutput, isGemini, providerId, subscribe]);
+  }, [finishTerminal, inspectAuthOutput, providerId, subscribe]);
 
   useEffect(() => {
     if (!providerId) return;
     const restoreFocus = captureModalFocus(false);
     const dialog = dialogRef.current;
-    const pendingOutput = pendingOutputRef.current;
     requestAnimationFrame(() => dialog?.querySelector<HTMLElement>("button")?.focus());
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key === "Escape") {
@@ -265,16 +290,13 @@ export function ProviderAuthDialog({
     document.addEventListener("keydown", onKeyDown, true);
     return () => {
       document.removeEventListener("keydown", onKeyDown, true);
-      pendingOutput.clear();
       restoreFocus();
     };
   }, [closeDialog, providerId]);
 
   useEffect(() => {
     if (!providerId || !instanceReady) return;
-    let cancelled = false;
     const terminal = terminalRef.current;
-    const pendingOutput = pendingOutputRef.current;
     if (status !== "online") {
       browserAttemptRef.current += 1;
       browserUrlDetectorRef.current?.clear();
@@ -282,7 +304,6 @@ export function ProviderAuthDialog({
       setBrowserUrl(null);
       setBrowserState("idle");
       setCopyState("idle");
-      pendingOutput.clear();
       terminal?.clear();
       terminal?.writeln(
         "\x1b[2mInertia is offline. Reconnect to start provider setup.\x1b[0m",
@@ -291,6 +312,10 @@ export function ProviderAuthDialog({
       setSessionState("error");
       return;
     }
+    const attempt: AuthAttempt = {
+      pending: true, cancelled: false, output: new Map(), exits: new Map(),
+    };
+    authAttemptRef.current = attempt;
     try { fitRef.current?.fit(); } catch { /* Safe defaults below. */ }
     const size = { cols: Math.max(40, terminal?.cols ?? 90), rows: Math.max(10, terminal?.rows ?? 24) };
     setSessionState("starting");
@@ -301,7 +326,6 @@ export function ProviderAuthDialog({
     setBrowserUrl(null);
     setBrowserState("idle");
     setCopyState("idle");
-    pendingOutputRef.current.clear();
     terminal?.clear();
     terminal?.writeln(
       `\x1b[2mOpening ${providerLabel} ${isGemini ? "setup" : "sign-in"}…\x1b[0m`,
@@ -309,37 +333,50 @@ export function ProviderAuthDialog({
     void sendCommand(command({ type: "provider.auth.start", payload: { providerId, ...size } }))
       .then((event) => {
         if (event.type !== "terminal.created") throw new Error("The connection service returned an unexpected response.");
-        if (cancelled) {
+        if (attempt.cancelled || authAttemptRef.current !== attempt) {
           void sendCommand(command({ type: "terminal.close", payload: { terminalId: event.terminalId } })).catch(() => undefined);
           return;
         }
+        attempt.pending = false;
         terminalIdRef.current = event.terminalId;
-        const buffered = pendingOutputRef.current.get(event.terminalId);
-        pendingOutput.clear();
+        const buffered = attempt.output.get(event.terminalId);
+        const earlyExit = attempt.exits.get(event.terminalId);
+        attempt.output.clear();
+        attempt.exits.clear();
         if (buffered) {
           terminal?.write(buffered);
-          inspectAuthOutput(buffered);
+          if (earlyExit === undefined) inspectAuthOutput(buffered);
+        }
+        if (earlyExit !== undefined) {
+          finishTerminal(earlyExit);
+          return;
         }
         setSessionState("ready");
         terminal?.focus();
       })
       .catch((reason) => {
-        if (cancelled) return;
+        if (attempt.cancelled || authAttemptRef.current !== attempt) return;
+        attempt.pending = false;
+        attempt.output.clear();
+        attempt.exits.clear();
         setError(reason instanceof Error ? reason.message : "The connection flow could not start.");
         setSessionState("error");
       });
 
     return () => {
-      cancelled = true;
+      attempt.cancelled = true;
+      attempt.output.clear();
+      attempt.exits.clear();
+      if (authAttemptRef.current === attempt) authAttemptRef.current = null;
       browserAttemptRef.current += 1;
       browserUrlDetectorRef.current?.clear();
       browserUrlRef.current = null;
       const terminalId = terminalIdRef.current;
       terminalIdRef.current = null;
-      pendingOutput.clear();
       if (terminalId) void sendCommand(command({ type: "terminal.close", payload: { terminalId } })).catch(() => undefined);
     };
   }, [
+    finishTerminal,
     instanceReady,
     inspectAuthOutput,
     isGemini,

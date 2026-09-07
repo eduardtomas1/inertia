@@ -109,6 +109,9 @@ const geminiProvider: ProviderInfo = {
   canRun: true,
   statusMessage: "Authentication is verified when a Gemini session starts",
 };
+const kimiProvider: ProviderInfo = {
+  ...provider, id: "kimi", label: "Kimi Code", command: "kimi",
+};
 
 function created(command: ClientCommand): ServerEvent {
   return {
@@ -156,6 +159,7 @@ function renderDialog(options: {
     emit: (event: ServerEvent) => subscriber?.(event),
     openExternal,
     copyText,
+    sendCommand,
     onClose,
     rerender: (
       status: "online" | "offline",
@@ -260,6 +264,85 @@ describe("ProviderAuthDialog browser handoff", () => {
     }));
     expect(screen.getByText("Gemini closed — your next run will verify setup"))
       .toBeInTheDocument();
+    expect(screen.queryByText("Connection flow complete")).toBeNull();
+  });
+
+  it.each([0, 1, 130, 143])("reports explicit Kimi login exit %s without claiming authentication", async (exitCode) => {
+    const dialog = renderDialog({ provider: kimiProvider });
+    await screen.findByText("Waiting for sign-in");
+    act(() => dialog.emit({ type: "terminal.exit", terminalId: TERMINAL_ID, exitCode }));
+    expect(screen.getByText(exitCode === 0
+      ? "Connection flow complete"
+      : "The provider ended the connection flow before it completed.")).toBeInTheDocument();
+    expect(dialog.sendCommand.mock.calls.filter(([sent]) => sent.type === "provider.auth.start"))
+      .toHaveLength(1);
+    expect(dialog.sendCommand.mock.calls.some(([sent]) => sent.type === "provider.refresh")).toBe(false);
+    act(() => dialog.emit({ type: "terminal.exit", terminalId: TERMINAL_ID, exitCode: 0 }));
+    if (exitCode !== 0) expect(screen.queryByText("Connection flow complete")).toBeNull();
+  });
+
+  it.each([0, 1, 130])("retains exact login exit %s received before terminal.created resolves", async (exitCode) => {
+    let resolveCreated!: () => void;
+    const dialog = renderDialog({
+      provider: kimiProvider,
+      sendCommand: (sent) => sent.type === "provider.auth.start"
+        ? new Promise((resolve) => { resolveCreated = () => resolve(created(sent)); })
+        : Promise.resolve({ type: "request.ok", requestId: sent.requestId }),
+    });
+    await waitFor(() => expect(resolveCreated).toBeTypeOf("function"));
+    act(() => {
+      dialog.emit({ type: "terminal.exit", terminalId: "foreign-terminal", exitCode: 0 });
+      dialog.emit({ type: "terminal.exit", terminalId: TERMINAL_ID, exitCode });
+    });
+    await act(async () => { resolveCreated(); });
+    expect(screen.getByText(exitCode === 0
+      ? "Connection flow complete"
+      : "The provider ended the connection flow before it completed.")).toBeInTheDocument();
+    expect(screen.queryByText("Waiting for sign-in")).toBeNull();
+  });
+
+  it("does not consume a foreign early exit as the newly created login's result", async () => {
+    let resolveCreated!: () => void;
+    const dialog = renderDialog({
+      provider: kimiProvider,
+      sendCommand: (sent) => new Promise((resolve) => { resolveCreated = () => resolve(created(sent)); }),
+    });
+    await waitFor(() => expect(resolveCreated).toBeTypeOf("function"));
+    act(() => dialog.emit({ type: "terminal.exit", terminalId: "foreign-terminal", exitCode: 0 }));
+    await act(async () => { resolveCreated(); });
+    expect(screen.getByText("Waiting for sign-in")).toBeInTheDocument();
+    expect(screen.queryByText("Connection flow complete")).toBeNull();
+  });
+
+  it("revokes a cancelled login before its late create receipt and ignores stale exits on reconnect", async () => {
+    const creates: Array<{ terminalId: string; resolve: () => void }> = [];
+    const dialog = renderDialog({
+      provider: kimiProvider,
+      sendCommand: (sent) => {
+        if (sent.type !== "provider.auth.start") return Promise.resolve({ type: "request.ok", requestId: sent.requestId });
+        const terminalId = crypto.randomUUID();
+        return new Promise((resolve) => {
+          creates.push({ terminalId, resolve: () => resolve({
+            type: "terminal.created", requestId: sent.requestId, terminalId,
+          }) });
+        });
+      },
+    });
+    await waitFor(() => expect(creates).toHaveLength(1));
+    const first = creates[0]!;
+    fireEvent.click(screen.getByRole("button", { name: "Close connection window" }));
+    act(() => dialog.emit({ type: "terminal.exit", terminalId: first.terminalId, exitCode: 0 }));
+    await act(async () => { first.resolve(); });
+    expect(screen.queryByText("Connection flow complete")).toBeNull();
+    expect(dialog.sendCommand).toHaveBeenCalledWith(expect.objectContaining({
+      type: "terminal.close", payload: { terminalId: first.terminalId },
+    }));
+    dialog.rerender("offline");
+    dialog.rerender("online");
+    await waitFor(() => expect(creates).toHaveLength(2));
+    act(() => dialog.emit({ type: "terminal.exit", terminalId: first.terminalId, exitCode: 0 }));
+    await act(async () => { creates[1]!.resolve(); });
+    expect(screen.getByText("Waiting for sign-in")).toBeInTheDocument();
     expect(screen.queryByText("Connection flow complete")).toBeNull();
   });
 

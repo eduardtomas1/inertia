@@ -70,6 +70,8 @@ export interface ProviderDetectionOptions {
 }
 
 interface ProviderRunRequest {
+  /** Privileged report-only restriction; never accepted from ordinary chat commands. */
+  toolRestriction?: "none";
   /** Native discovery/event compatibility projection; never used for routing. */
   providerId: ProviderId;
   harnessId: KnownHarnessId;

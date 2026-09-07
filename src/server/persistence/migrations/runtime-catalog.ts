@@ -1,3 +1,4 @@
+import { issueReportsMigration } from "./issue-reports";
 import type Database from "better-sqlite3";
 import type { ProviderId } from "../../../shared/contracts";
 import { continuationIdentityForSelection, nativeModelSelection } from "../../../shared/model-routing";
@@ -1227,6 +1228,7 @@ export function runtimeMigrationCatalog(): readonly DatabaseMigration[] {
       { name: "RefreshAgentBrowserCapability", up: "DELETE FROM agent_goals WHERE source = 'codex-native' AND conversation_id IN (SELECT id FROM conversations WHERE provider_id = 'codex' AND provider_session_id IS NOT NULL); UPDATE conversations SET provider_session_id = NULL, continuation_identity_json = NULL WHERE provider_id = 'codex' AND provider_session_id IS NOT NULL;" },
       persistSuspendAwareTurnTiming, nativeGeminiProviderMigration,
       persistTurnContinuationEvidence,
+      issueReportsMigration,
     );
     return createRuntimeMigrationCatalog(legacyMigrations, migrationExtensions);
 }

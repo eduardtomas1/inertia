@@ -1,3 +1,5 @@
+import { createIssueReportCommandHandler } from "./runtime/commands/issue-report-commands";
+import { githubIssuePublisher } from "./git/github-issue-report";
 import { MascotStatusPublisher } from "./runtime/mascot-status";
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:http";
@@ -685,6 +687,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
   duoLaunches = duoLaunchCoordinator;
   const executeCommand = createRuntimeCommandExecutor({
     handlers: [
+      createIssueReportCommandHandler({ store, isolatedRuns, snapshot: currentSnapshot, providerInfo: () => providerInfo, publisher: githubIssuePublisher(dataDirectory, runtimeLifetimeAbort.signal), send }),
       createDuoCommandHandler({
         coordinator: duoLaunchCoordinator,
         broadcastSnapshot: flushSnapshot,

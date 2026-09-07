@@ -41,11 +41,23 @@ export function broadcastTurnConversationShell(
   hooks: TurnControllerHooks,
   active: ActiveTurn,
 ): void {
-  if (hooks.broadcastConversationShell) {
-    hooks.broadcastConversationShell(active.conversation.id);
-  } else {
-    hooks.broadcastSnapshot();
-  }
+  publishTurnProjection(() => hooks.broadcastConversationShell
+    ? hooks.broadcastConversationShell(active.conversation.id)
+    : hooks.broadcastSnapshot());
+}
+
+export function broadcastTurnSnapshot(hooks: TurnControllerHooks): void {
+  publishTurnProjection(() => hooks.broadcastSnapshot());
+}
+
+function publishTurnProjection(publish: () => void | Promise<void>): void {
+  const failed = (): void => {
+    console.warn("A turn update could not be published. Reconnect to load the saved state.");
+  };
+  try {
+    const publication = publish();
+    if (publication) void Promise.resolve(publication).catch(failed);
+  } catch { failed(); }
 }
 
 export function providerLabel(providerId: ProviderId): string {

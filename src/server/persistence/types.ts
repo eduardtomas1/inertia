@@ -159,6 +159,8 @@ export interface CreateMessageOptions {
 export interface AgentTurnSettlementUpdate
   extends Omit<AgentTurnLifecycleUpdate, "status"> {
   status: AgentTurnTerminalStatus;
+  /** Controller-owned stored projections belong to the same terminal commit. */
+  projection?: { workspaceRunCreated: boolean; detail: string };
 }
 
 export interface AgentTurnSettlementResult {

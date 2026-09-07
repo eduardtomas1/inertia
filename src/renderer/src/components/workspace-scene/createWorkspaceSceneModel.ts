@@ -530,6 +530,7 @@ export function createWorkspaceSceneModel({
       onChooseCodexBinary: () => {
         void actions.chooseCodexBinary().catch(() => undefined);
       },
+      onReportCommand: (command) => actions.run(command.type, command),
       onRevealRuntimeLogs: () => window.inertia.revealRuntimeLogs(),
       onCopyRuntimeDiagnosticReport: () => window.inertia.copyRuntimeDiagnosticReport(
         connection.status === "online"

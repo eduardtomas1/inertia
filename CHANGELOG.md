@@ -2,6 +2,37 @@
 
 The useful changes in each Inertia release, in plain language.
 
+## 0.0.53 — 2026-09-07
+
+### Linux startup, updates, and turns
+
+- Linux update validation reads the candidate response correctly, and AppImage
+  handoffs complete without waiting for the running wrapper to close stdout.
+  Workspace discovery avoids probing children outside its remaining budget.
+- Fresh provider discovery recognizes updated CLI installations. Explicit
+  refusals before a provider launches settle cleanly, allowing a later retry.
+  Successful Linux guardian helpers are not mistaken for failures when their
+  completion callbacks arrive late.
+- Cancelling turns disable active follow-ups while preserving the draft.
+  Visible unfocused windows keep incoming content and progress readable;
+  hidden windows suspend recurring animation and elapsed work.
+- PNG import accepts valid empty IDAT records while retaining checksum,
+  decoding, and resource-limit checks. The original reported clipboard sample
+  remains unverified.
+
+### Project navigation
+
+- Project filters reopen reliably and can return to All projects. Selecting a
+  project in a new chat preserves the draft instead of opening an existing chat.
+- The logo opens a fresh chat, and new-chat shortcuts and workspace tools use
+  the selected draft project.
+
+Linux v0.0.52 needs one manual installation of this release: its already-running
+updater cannot receive the parent-side repair through release metadata. Quit the
+old app cleanly, verify the new AppImage against this release's `SHA256SUMS.txt`,
+make that exact file executable, and open it with the existing profile. Saved
+projects and conversations do not need to be recreated.
+
 ## 0.0.52 — 2026-09-06
 
 ### Startup, shutdown, and compaction

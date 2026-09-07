@@ -93,6 +93,13 @@ test("optional mascot follows runtime states, remembers movement, and owns a res
     await state("running");
     await expect(overlay.locator(".mascot-activity")).toHaveAttribute("data-animated", "true");
     await capture(overlay, "working", info);
+    // Keyboard movement above explicitly opts into focus. Window managers
+    // differ in when they deliver its later blur; dragging must preserve the
+    // existing native mode rather than assuming that opt-in has already ended.
+    const focusBeforeDrag = await app.electronApp.evaluate(({ BrowserWindow }) => {
+      const window = BrowserWindow.getAllWindows().find((candidate) => candidate.getTitle() === "Inertia mascot")!;
+      return { focused: window.isFocused(), focusable: window.isFocusable() };
+    });
     // CDP mouse events do not move the OS cursor. Supply deterministic DIP
     // samples while exercising real pointer capture, IPC and native window bounds.
     const cursor = await app.electronApp.evaluateHandle(({ screen, BrowserWindow }) => {
@@ -128,7 +135,7 @@ test("optional mascot follows runtime states, remembers movement, and owns a res
       expect(await app.electronApp.evaluate(({ BrowserWindow }) => {
         const window = BrowserWindow.getAllWindows().find((candidate) => candidate.getTitle() === "Inertia mascot")!;
         return { focused: window.isFocused(), focusable: window.isFocusable() };
-      })).toEqual({ focused: false, focusable: false });
+      })).toEqual(focusBeforeDrag);
     } finally { await cursor.evaluate((value) => value.restore()); await cursor.dispose(); }
     await overlay.emulateMedia({ reducedMotion: "reduce" });
     await expect(overlay.locator(".mascot-activity")).toHaveAttribute("data-animated", "false");

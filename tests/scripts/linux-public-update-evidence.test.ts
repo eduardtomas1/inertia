@@ -1,14 +1,15 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 const moduleUrl = pathToFileURL(join(import.meta.dirname, "../../scripts/linux-public-update-evidence.mjs")).href;
 type Target = { version: string; name: string; size: number; sha256: string };
 const evidence = await import(moduleUrl) as {
   validatePublicTarget: (release: unknown, checksums: string, digest: string) => Target;
+  downloadPublicTarget: (directory: string, digest: string) => Promise<Target>;
   verifyPrivateDownloadedTarget: (root: string, target: Target) => Promise<unknown>;
 };
 const name = "Inertia-0.0.54.AppImage";
@@ -30,9 +31,46 @@ async function fixture() {
   await writeFile(join(pending, "update-info.json"), "{}");
   return { root, pending };
 }
-afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
+afterEach(async () => {
+  vi.unstubAllGlobals();
+  await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
+});
+
+function mockPublicFetch(download = bytes) {
+  const fetch = vi.fn(async (url: string, options: RequestInit) => {
+    expect(new Headers(options.headers).get("authorization")).toBeNull();
+    if (url === "https://api.github.com/repos/eduardtomas1/inertia/releases/tags/v0.0.54") return new Response(JSON.stringify(release()));
+    if (url === "https://github.com/eduardtomas1/inertia/releases/download/v0.0.54/SHA256SUMS.txt") return new Response(checksums);
+    expect(url).toBe(`https://github.com/eduardtomas1/inertia/releases/download/v0.0.54/${name}`);
+    return new Response(new Uint8Array(download), { headers: { "content-length": String(download.length) } });
+  });
+  vi.stubGlobal("fetch", fetch);
+  return fetch;
+}
 
 describe("scratch public Linux update identity", () => {
+  it("downloads only the fixed public target anonymously and rehashes before making it executable", async () => {
+    const fetch = mockPublicFetch();
+    const { root } = await fixture();
+    const directory = join(root, "public-target");
+    await expect(evidence.downloadPublicTarget(directory, digest)).resolves.toEqual({
+      ...target, checksumVerified: true, publicArtifact: true,
+    });
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(await readFile(join(directory, name))).toEqual(bytes);
+    if (process.platform !== "win32") expect((await stat(join(directory, name))).mode & 0o777).toBe(0o755);
+    await expect(evidence.downloadPublicTarget(directory, digest)).rejects.toThrow();
+    expect(await readFile(join(directory, name))).toEqual(bytes);
+  });
+
+  it("refuses public bytes that disagree with their metadata and manifest", async () => {
+    mockPublicFetch(Buffer.alloc(bytes.length));
+    const { root } = await fixture();
+    const directory = join(root, "public-target");
+    await expect(evidence.downloadPublicTarget(directory, digest)).rejects.toThrow();
+    if (process.platform !== "win32") expect((await stat(join(directory, name))).mode & 0o111).toBe(0);
+  });
+
   it("requires matching release metadata, manifest and externally expected digest", () => {
     expect(evidence.validatePublicTarget(release(), checksums, digest)).toEqual(target);
     expect(() => evidence.validatePublicTarget(release(), checksums, "b".repeat(64))).toThrow();

@@ -1,9 +1,9 @@
 import { strict as assert } from "node:assert";
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
-import { lstat, open, opendir, realpath } from "node:fs/promises";
-import { join } from "node:path";
-import { fetchBoundedText, releaseAssetChecksum } from "./ci/download-windows-n-minus-one.mjs";
+import { chmod, lstat, mkdir, open, opendir, realpath } from "node:fs/promises";
+import { isAbsolute, join } from "node:path";
+import { downloadBoundedFile, fetchBoundedText, releaseAssetChecksum } from "./ci/download-windows-n-minus-one.mjs";
 
 const name = "Inertia-0.0.54.AppImage";
 const url = `https://github.com/eduardtomas1/inertia/releases/download/v0.0.54/${name}`;
@@ -38,6 +38,18 @@ export async function readPublicTarget(expectedDigest) {
   return validatePublicTarget(release, checksums, expectedDigest);
 }
 
+export async function downloadPublicTarget(directory, expectedDigest) {
+  assert(isAbsolute(directory));
+  const target = await readPublicTarget(expectedDigest);
+  // This one-use directory must be fresh; never replace an existing candidate.
+  await mkdir(directory, { mode: 0o700 });
+  const path = join(directory, target.name);
+  await downloadBoundedFile(url, path, target.size, "");
+  await verifyTargetFile(path, target);
+  await chmod(path, 0o755);
+  return { ...target, checksumVerified: true, publicArtifact: true };
+}
+
 export async function verifyPrivateDownloadedTarget(root, target) {
   assert.equal(target.name, name);
   assert.match(target.sha256, /^[a-f0-9]{64}$/u);
@@ -62,7 +74,10 @@ export async function verifyPrivateDownloadedTarget(root, target) {
     }
   }
   assert.equal(matches, 1);
-  const path = join(directory, name);
+  return await verifyTargetFile(join(directory, name), target);
+}
+
+async function verifyTargetFile(path, target) {
   const before = await lstat(path);
   assert(before.isFile() && !before.isSymbolicLink() && before.size === target.size);
   const handle = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));

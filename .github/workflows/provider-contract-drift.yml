@@ -4,17 +4,17 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: Pre-tag installed handoff or post-publication normal download
+        description: Pre-tag handoff, public-artifact handoff, or normal public download
         required: true
         type: choice
-        options: [pretag-handoff, public-download]
+        options: [pretag-handoff, public-handoff, public-download]
         default: pretag-handoff
       source_sha:
         description: Exact 40-hex frozen v54 main commit
         required: true
         type: string
       expected_public_sha256:
-        description: Required only for public-download; exact published v54 x64 digest
+        description: Required for both public modes; exact published v54 x64 digest
         required: false
         type: string
 
@@ -45,7 +45,7 @@ jobs:
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
           case "$VALIDATION_MODE" in
             pretag-handoff) test -z "$EXPECTED_PUBLIC_SHA256" ;;
-            public-download) [[ "$EXPECTED_PUBLIC_SHA256" =~ ^[0-9a-f]{64}$ ]] ;;
+            public-handoff|public-download) [[ "$EXPECTED_PUBLIC_SHA256" =~ ^[0-9a-f]{64}$ ]] ;;
             *) exit 1 ;;
           esac
           mkdir -p "$RUNNER_TEMP/validation-harness/ci" "$RUNNER_TEMP/validation-evidence"
@@ -104,8 +104,8 @@ jobs:
           test -x "$guardian"
           if readelf --program-headers "$guardian" | grep -Fq INTERP; then exit 1; fi
           if readelf --dynamic "$guardian" 2>/dev/null | grep -Fq '(NEEDED)'; then exit 1; fi
-      - name: Build only the outer guardian for public download proof
-        if: inputs.mode == 'public-download'
+      - name: Build only the outer guardian for public-artifact proof
+        if: inputs.mode != 'pretag-handoff'
         run: node scripts/build-runtime-process-guardian.mjs
       - name: Restore external harness after candidate packaging
         shell: bash
@@ -116,13 +116,26 @@ jobs:
           git diff --exit-code -- src package.json package-lock.json
       - name: Download and verify the exact published predecessor
         run: node scripts/ci/download-public-linux-v53.mjs "$RUNNER_TEMP/v53-predecessor"
+      - name: Download verified public v54 without rebuilding the candidate
+        if: inputs.mode == 'public-handoff'
+        run: |
+          node --input-type=module <<'JS'
+          import { writeFile } from "node:fs/promises";
+          import { join } from "node:path";
+          import { downloadPublicTarget } from "./scripts/linux-public-update-evidence.mjs";
+          const target = await downloadPublicTarget(join(process.env.RUNNER_TEMP, "v54-public"), process.env.EXPECTED_PUBLIC_SHA256);
+          await writeFile(join(process.env.RUNNER_TEMP, "validation-evidence/public-target.json"), JSON.stringify(target) + "\n", { mode: 0o600 });
+          JS
       - name: Certify actual v53 handoff, retained history, new turns and relaunch
-        if: inputs.mode == 'pretag-handoff'
+        if: inputs.mode != 'public-download'
         env:
           INERTIA_VALIDATION_REPORT: ${{ runner.temp }}/validation-evidence/installed-handoff.json
         run: |
+          set -euo pipefail
+          candidate="$PWD/release/Inertia-0.0.54.AppImage"
+          if [[ "$VALIDATION_MODE" == public-handoff ]]; then candidate="$RUNNER_TEMP/v54-public/Inertia-0.0.54.AppImage"; fi
           xvfb-run --auto-servernum node scripts/linux-installed-update-smoke.mjs \
-            "$PWD/release/Inertia-0.0.54.AppImage" \
+            "$candidate" \
             "$RUNNER_TEMP/v53-predecessor/Inertia-0.0.53.AppImage" 0.0.53
       - name: Check real public feed and download via untouched v53 updater
         if: inputs.mode == 'public-download'

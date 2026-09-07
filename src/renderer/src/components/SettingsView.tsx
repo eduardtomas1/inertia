@@ -1,4 +1,4 @@
-import { IssueReportSettings, type IssueReportSettingsProps } from "./IssueReportSettings";
+import type { IssueReportSettingsProps } from "./IssueReportSettings";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArchiveRestore,
@@ -59,6 +59,7 @@ import {
   loadConnectionsAndDevicesSettings,
   loadCanaryRollbackSetting,
   loadDiscordSettings,
+  loadIssueReportSettings,
   loadLifecycleIntegritySettings,
   loadModelBackendsSettings,
   loadMascotSettings,
@@ -254,6 +255,7 @@ export function SettingsView({
   const [section, setSection] = useState<SettingsSection>(
     target?.section ?? "general",
   );
+  const IssueReportSettings = useLoadedSurface(loadIssueReportSettings, section === "support");
   const MascotSettings = useLoadedSurface(loadMascotSettings, section === "general");
   const ModelBackendsSettings = useLoadedSurface(
     loadModelBackendsSettings,
@@ -1083,7 +1085,7 @@ export function SettingsView({
           </section>
         )}
 
-        {section === "support" && onReportCommand && <IssueReportSettings providers={providers} backendProfiles={backendProfiles} projects={projects} disabled={disabled} request={onReportCommand} onProviderSetup={() => setSection("providers")} />}
+        {section === "support" && onReportCommand && IssueReportSettings && <IssueReportSettings providers={providers} backendProfiles={backendProfiles} projects={projects} disabled={disabled} request={onReportCommand} onProviderSetup={() => setSection("providers")} />}
 
         {section === "archive" && (
           <>

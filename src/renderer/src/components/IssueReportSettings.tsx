@@ -139,6 +139,6 @@ export function IssueReportSettings({ providers, backendProfiles, projects, disa
       <p role="status">{copyStatus}</p>
     </>}
     {error && !report && <p role="alert">{error}</p>}
-    <button type="button" className="text-button" disabled={busy || disabled} onClick={() => { void perform(() => command({ type: "support.report.get" })); }}>Reload saved progress</button>
+    <button type="button" className="secondary-button" disabled={busy || disabled} onClick={() => { void perform(() => command({ type: "support.report.get" })); }}>Reload saved progress</button>
   </section>;
 }

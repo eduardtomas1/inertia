@@ -18,7 +18,9 @@ interface Dependencies {
 }
 
 export function createIssueReportCommandHandler(deps: Dependencies): RuntimeCommandHandler {
-  const parsed = issueReportSchema.safeParse(deps.store.readIssueReport());
+  let stored: unknown = null;
+  try { stored = deps.store.readIssueReport(); } catch { /* A damaged draft must not prevent runtime startup. */ }
+  const parsed = issueReportSchema.safeParse(stored);
   let report: IssueReport | null = parsed.success ? parsed.data : null;
   const save = (next: IssueReport): void => {
     const validated = issueReportSchema.parse(next);
@@ -94,9 +96,9 @@ export function createIssueReportCommandHandler(deps: Dependencies): RuntimeComm
         const value = current(command.payload.id, command.payload.revision);
         if (value.status === "submitted") break;
         if (value.status !== "preview" || publicationBusy) throw new RuntimeRequestError("Save and review the issue preview before submitting. A pending submission cannot be retried.");
-        publicationBusy = true;
         // Lock during auth/discovery too; no concurrent edits or double clicks.
         save({ ...value, status: "submitting", revision: value.revision + 1, notice: "Submitting to eduardtomas1/inertia…" });
+        publicationBusy = true;
         let attempted = false;
         try {
           const url = await deps.publisher.create({ id: value.id, title: value.title, body: value.body, beforePublish: () => { attempted = true; } });

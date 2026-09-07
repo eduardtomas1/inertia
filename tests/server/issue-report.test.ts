@@ -1,3 +1,5 @@
+import Database from "better-sqlite3";
+import { migrateRuntimeDatabase } from "../../src/server/persistence/migrations/runtime-catalog";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type WebSocket from "ws";
 import { RuntimeStore } from "../../src/server/database";
@@ -48,7 +50,7 @@ describe("private issue reports", () => {
     const project = store.createProject("PRIVATE PROJECT", process.cwd());
     const current = snapshot();
     const evidence = collectIssueEvidence(current, project.id);
-    expect(evidence).toContain('"chats": 0');
+    expect(JSON.parse(evidence).selectedProject).toMatchObject({ chats: 0 });
     expect(evidence).not.toContain(project.id);
     expect(evidence).not.toContain("PRIVATE");
     expect(evidence).not.toContain(process.cwd());
@@ -128,4 +130,23 @@ describe("private issue reports", () => {
     expect(verifiedIssueUrl("https://github.com/eduardtomas1/inertia/issues/123\n")).toBeTruthy();
     for (const invalid of ["https://github.com/attacker/inertia/issues/123", "https://github.com/eduardtomas1/inertia/issues/123/evil", "https://github.com/eduardtomas1/inertia/issues/123?token=secret"]) expect(verifiedIssueUrl(invalid)).toBeNull();
   });
+});
+
+
+it("upgrades schema 68 transactionally and retains saved report progress", () => {
+  const database = new Database(":memory:");
+  try {
+    migrateRuntimeDatabase(database, 68);
+    database.exec("CREATE TABLE retained_marker (value TEXT); INSERT INTO retained_marker VALUES ('kept');");
+    database.exec("CREATE INDEX issue_report_draft ON agent_turns(id);");
+    expect(() => migrateRuntimeDatabase(database)).toThrow();
+    expect(database.prepare("SELECT MAX(version) FROM schema_migrations").pluck().get()).toBe(68);
+    database.exec("DROP INDEX issue_report_draft;");
+    migrateRuntimeDatabase(database);
+    database.prepare("INSERT INTO issue_report_draft VALUES (1, ?)").run(JSON.stringify({ description: "Safe saved report" }));
+    migrateRuntimeDatabase(database);
+    expect(database.prepare("SELECT value FROM retained_marker").pluck().get()).toBe("kept");
+    expect(database.prepare("SELECT report_json FROM issue_report_draft").pluck().get()).toContain("Safe saved report");
+    expect(database.prepare("SELECT MAX(version) FROM schema_migrations").pluck().get()).toBe(69);
+  } finally { database.close(); }
 });

@@ -1,4 +1,3 @@
-import { issueReportsMigration } from "./issue-reports";
 import type Database from "better-sqlite3";
 import type { ProviderId } from "../../../shared/contracts";
 import { continuationIdentityForSelection, nativeModelSelection } from "../../../shared/model-routing";
@@ -27,7 +26,7 @@ import { workspacePathAuthoritiesMigration } from "./workspace-path-authorities"
 import { conversationContextPacketsMigration } from "./conversation-context-packets";
 import { persistSuspendAwareTurnTiming } from "./system-suspend-timing";
 import { persistTurnContinuationEvidence } from "./turn-continuation-evidence";
-import { nativeGeminiProviderMigration } from "./native-gemini-provider";
+import { nativeGeminiProviderMigration } from "./native-gemini-provider"; import { issueReportsMigration } from "./issue-reports";
 const MODEL_SELECTION_TABLES = ["conversations", "agent_turns"] as const, MODEL_SELECTION_COLUMNS = ["model_selection_json", "continuation_identity_json"] as const;
 export function runtimeMigrationCatalog(): readonly DatabaseMigration[] {
     const legacyMigrations: DatabaseMigrationDefinition[] = LEGACY_SCHEMA_SQL.map(
@@ -373,6 +372,7 @@ export function runtimeMigrationCatalog(): readonly DatabaseMigration[] {
         );
         CREATE INDEX IF NOT EXISTS model_backend_profiles_harness_idx
           ON model_backend_profiles(harness_id, enabled, updated_at DESC);
+
         CREATE TABLE IF NOT EXISTS model_backend_defaults (
           scope TEXT NOT NULL CHECK (scope IN ('global', 'project')),
           project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,

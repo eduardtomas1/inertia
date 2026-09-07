@@ -29,6 +29,7 @@ const budgets = {
   colorThemesCss: 12 * kibibyte,
   detachedChatCss: 8 * kibibyte,
   settingsJavaScript: 50 * kibibyte,
+  deferredIssueReportJavaScript: 13 * kibibyte,
   filesFirstLoadJavaScript: 115 * kibibyte,
   deferredMarkdownJavaScript: 440 * kibibyte,
   transcriptJavaScript: 600 * kibibyte,
@@ -52,9 +53,9 @@ const budgets = {
   preMergeConfidenceJavaScript: 28 * kibibyte,
   morphiconsJavaScript: 20 * kibibyte,
   morphingIconFeedbackJavaScript: 8 * kibibyte,
-  // The core including complete favorite profiles measures 1,973.4 KiB on
-  // macOS ARM64. Every deferred surface retains its independent ceiling.
-  coreJavaScript: 1_974 * kibibyte,
+  // Guided report command/result validation adds 2.7 KiB to shared core.
+  // Measured 1,976.1 KiB on macOS ARM64; the report UI is separately deferred.
+  coreJavaScript: 1_977 * kibibyte,
   deferredPdfJavaScript: 500 * kibibyte,
   deferredPdfWorker: 1_350 * kibibyte,
 };
@@ -447,8 +448,13 @@ const mascotJavaScriptBytes = await closureBytes(mascotClosure, entryJavaScriptC
 const mascotSettingsJavaScriptBytes = await closureBytes(mascotSettingsClosure, new Set([
   ...entryJavaScriptClosure, ...mainWorkbenchJavaScriptClosure, ...mascotClosure,
 ]));
+const issueReportEntry = assetNames.find((name) => /^IssueReportSettings-.*\.js$/u.test(name));
+if (!issueReportEntry) throw new Error("Missing deferred issue report surface");
+if (mainWorkbenchJavaScriptClosure.has(issueReportEntry)) throw new Error("Issue reporting must remain deferred");
+const deferredIssueReportJavaScriptBytes = await assetBytes(`assets/${issueReportEntry}`);
 const coreJavaScriptBytes =
   totalJavaScriptBytes
+  - deferredIssueReportJavaScriptBytes
   - mascotJavaScriptBytes
   - mascotSettingsJavaScriptBytes
   - deferredPdfJavaScriptBytes
@@ -472,6 +478,7 @@ const coreJavaScriptBytes =
   - morphiconsJavaScriptBytes
   - morphingIconFeedbackJavaScriptBytes;
 const measurements = {
+  deferredIssueReportJavaScript: deferredIssueReportJavaScriptBytes,
   mascotFirstLoadJavaScript: await closureBytes(mascotClosure),
   mascotJavaScript: mascotJavaScriptBytes,
   mascotSettingsJavaScript: mascotSettingsJavaScriptBytes,

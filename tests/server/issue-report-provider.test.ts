@@ -1,5 +1,4 @@
 // @inertia-test-suite portable
-// @inertia-harness claude-agent-sdk
 import type { Options as ClaudeOptions, PermissionResult, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { afterEach, expect, it } from "vitest";
 import { createClaudeAgentSdkHarness } from "../../src/server/provider/claude-agent-sdk-harness";
@@ -59,3 +58,11 @@ afterEach(async () => await Promise.all(roots.splice(0).map(removePortableFixtur
       message: "Provider-native tools are unavailable for this exact backend and model.",
     });
   });
+
+it("rejects report execution on a harness without native tool denial before launching a process", async () => {
+  const { ProviderManager } = await import("../../src/server/providers");
+  const manager = ProviderManager.createForTests();
+  const input = { ...nativeProviderRunInput({ providerId: "codex", conversationId: "report-no-tools", cwd: process.cwd(), prompt: "Bounded assessment", interactionMode: "plan", access: "supervised" }), toolRestriction: "none" as const };
+  expect(() => manager.run(input)).toThrow("cannot enforce a report chat without tools");
+  expect(manager.activeConversationIds()).toEqual([]);
+});

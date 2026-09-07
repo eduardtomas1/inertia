@@ -13,7 +13,7 @@ export function collectIssueEvidence(snapshot: AppSnapshot, projectId: string | 
     throw new RuntimeRequestError("The selected project is no longer available. Choose a project again.");
   }
   const selected = projectId ? snapshot.conversations.filter((chat) => chat.projectId === projectId) : [];
-  return JSON.stringify({
+  const evidence = {
     version: INERTIA_VERSION,
     platform: ["linux", "darwin", "win32"].includes(process.platform) ? process.platform : "other",
     architecture: ["arm64", "x64", "ia32"].includes(process.arch) ? process.arch : "other",
@@ -33,7 +33,8 @@ export function collectIssueEvidence(snapshot: AppSnapshot, projectId: string | 
       pendingApprovals: Math.min(selected.filter((chat) => chat.pendingApproval).length, 1_000_000),
       pendingQuestions: Math.min(selected.filter((chat) => chat.pendingInput).length, 1_000_000),
     } : "not included",
-  }, null, 2);
+  };
+  return `{\n${Object.entries(evidence).map(([key, value]) => `  ${JSON.stringify(key)}: ${JSON.stringify(value)}`).join(",\n")}\n}`;
 }
 
 export function reportBody(report: Pick<IssueReport, "description" | "evidence" | "answer">): string {

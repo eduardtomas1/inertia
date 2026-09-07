@@ -215,6 +215,61 @@ describe("useDraftConversation", () => {
     expect(hook.result.current.conversation).toBeNull();
   });
 
+  it("retargets an independent draft in place without selecting a stored chat", async () => {
+    const otherProject = { ...project, id: "33333333-3333-4333-8333-333333333333" };
+    let currentSnapshot = { ...materializedSnapshot("completed", "Existing chat"), projects: [project, otherProject] };
+    let selectedId = conversationId;
+    const run = vi.fn(async (): Promise<ServerEvent> => ({
+      type: "request.result", requestId: "create", result: { kind: "conversation.created", conversationId: "created" },
+    }));
+    const hook = renderHook(() => useDraftConversation({
+      snapshot: currentSnapshot, settings: defaultSettings, run,
+      sendMessage: vi.fn(async () => null), persistedConversationId: selectedId,
+      updatePersistedConversation: vi.fn(),
+    }));
+    act(() => hook.result.current.start(projectId, true));
+    const draftId = hook.result.current.conversation!.id;
+    act(() => hook.result.current.changeProject(otherProject.id));
+    expect(hook.result.current.conversation).toMatchObject({ id: draftId, projectId: otherProject.id });
+    expect(run).not.toHaveBeenCalled();
+    // A previously queued selection or a background refresh cannot take over
+    // the route opened by the logo.
+    selectedId = "late-selection";
+    currentSnapshot = { ...currentSnapshot, activeConversationId: selectedId };
+    hook.rerender();
+    expect(hook.result.current.conversation).toMatchObject({ id: draftId, projectId: otherProject.id });
+    await act(async () => { await hook.result.current.sendFromComposer("Keep my prompt", []); });
+    expect(run).toHaveBeenCalledWith("conversation.create:draft", expect.objectContaining({
+      payload: expect.objectContaining({ projectId: otherProject.id, activate: false }),
+    }));
+    act(() => hook.result.current.changeProject(projectId));
+    expect(hook.result.current.conversation?.projectId).toBe(otherProject.id);
+    act(() => hook.result.current.discard());
+    expect(hook.result.current.conversation).toBeNull();
+  });
+
+  it("uses the new project's defaults until a model is explicitly selected", () => {
+    const otherId = "33333333-3333-4333-8333-333333333333";
+    const firstModel = providerNativeModelSelection({ providerId: "codex", modelId: "first-model" });
+    const secondModel = providerNativeModelSelection({ providerId: "claude", modelId: "second-model" });
+    const explicitModel = providerNativeModelSelection({ providerId: "codex", modelId: "chosen-model" });
+    const hook = renderHook(() => useDraftConversation({
+      snapshot: { ...snapshot, projects: [project, { ...project, id: otherId }], backendDefaults: [
+        { scope: "project", projectId, selection: firstModel, updatedAt: now },
+        { scope: "project", projectId: otherId, selection: secondModel, updatedAt: now },
+      ] },
+      settings: defaultSettings, run: vi.fn(), sendMessage: vi.fn(),
+      persistedConversationId: null, updatePersistedConversation: vi.fn(),
+    }));
+    act(() => hook.result.current.start(projectId, true));
+    act(() => hook.result.current.changeProject(otherId));
+    expect(hook.result.current.conversation?.modelSelection).toEqual(secondModel);
+    act(() => { hook.result.current.chooseModel(explicitModel); });
+    act(() => hook.result.current.changeProject(projectId));
+    expect(hook.result.current.conversation?.modelSelection).toEqual(explicitModel);
+    expect(hook.result.current.conversation).toMatchObject({ providerSessionId: null, branch: null, worktreePath: null });
+  });
+
   it("keeps a new-project chat local until its first message is sent", async () => {
     const values = new Map<string, string>();
     Object.defineProperty(window, "localStorage", {

@@ -19,3 +19,27 @@
 .project-search-row:hover > .icon-button {
   opacity: 1;
 }
+
+.project-search-popover {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  overflow: visible;
+}
+.project-search-popover::backdrop { background: transparent; }
+.project-search-popover .project-search-dialog {
+  width: 100%;
+  max-height: min(420px, var(--project-popup-height, 70vh));
+  border-radius: 8px;
+  animation: workspace-popover-in 150ms var(--motion-ease);
+}
+.project-search-popover .palette-search { min-height: 42px; padding-left: 11px; }
+.project-search-popover .palette-group > span { display: none; }
+.project-search-popover .palette-empty { min-height: 90px; padding: 18px 10px; }
+@media (prefers-reduced-motion: reduce) {
+  .project-search-popover .project-search-dialog { animation: none; }
+}

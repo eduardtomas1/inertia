@@ -230,7 +230,6 @@ export interface WorkspaceSceneModelInput {
   project: Project | null;
   draftConversation: Conversation | null;
   globalChatActive: boolean;
-  globalProjectChangeId: string | null;
   workspaceToolsUnavailable: boolean;
   connection: Connection;
   providerMaintenance: ProviderMaintenance;
@@ -271,7 +270,6 @@ export function createWorkspaceSceneModel({
   project,
   draftConversation,
   globalChatActive,
-  globalProjectChangeId,
   workspaceToolsUnavailable,
   connection,
   providerMaintenance,
@@ -580,7 +578,7 @@ export function createWorkspaceSceneModel({
           projects: snapshotProjects,
           selectedProject: project,
           disabled: connection.status !== "online"
-            || globalProjectChangeId !== null,
+            || busyAction === "conversation.create:draft",
           onChange: actions.selectGlobalChatProject,
         },
       } : {}),

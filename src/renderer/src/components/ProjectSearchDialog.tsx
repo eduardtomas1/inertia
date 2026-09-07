@@ -20,6 +20,7 @@ export function ProjectSearchDialog({ projects, selectedId, includeAll = false, 
   const [query, setQuery] = useState("");
   const [activeId, setActiveId] = useState<string | null | undefined>(selectedId);
   const input = useRef<HTMLInputElement>(null);
+  const surface = useRef<HTMLDivElement>(null);
   const restoreFocus = useRef(true);
   const id = useId();
   const needle = query.trim().toLocaleLowerCase();
@@ -32,8 +33,26 @@ export function ProjectSearchDialog({ projects, selectedId, includeAll = false, 
   const activeIndex = items.indexOf(active!);
   useNativePreviewSuspension(true);
   useLayoutEffect(() => {
+    const popup = surface.current;
+    const position = (): void => {
+      if (!popup || !trigger) return;
+      const bounds = trigger.getBoundingClientRect();
+      const width = Math.min(Math.max(bounds.width, 240), window.innerWidth - 16);
+      const below = window.innerHeight - bounds.bottom - 12;
+      const above = bounds.top - 12;
+      const upward = below < 220 && above > below;
+      popup.style.left = `${Math.max(8, Math.min(bounds.left, window.innerWidth - width - 8))}px`;
+      popup.style.top = upward ? "auto" : `${Math.max(8, bounds.bottom + 4)}px`;
+      popup.style.bottom = upward ? `${window.innerHeight - bounds.top + 4}px` : "auto";
+      popup.style.width = `${width}px`;
+      popup.style.setProperty("--project-popup-height", `${Math.max(80, upward ? above : below)}px`);
+    };
+    position();
+    popup?.showPopover?.();
     input.current?.focus();
+    window.addEventListener("resize", position);
     return () => {
+      window.removeEventListener("resize", position);
       if (restoreFocus.current && trigger?.isConnected) trigger.focus({ preventScroll: true });
     };
   }, [trigger]);
@@ -46,10 +65,13 @@ export function ProjectSearchDialog({ projects, selectedId, includeAll = false, 
   };
 
   return createPortal(
-    <div className="palette-backdrop" role="presentation" onMouseDown={(event) => {
-      if (event.target === event.currentTarget) onClose();
-    }}>
-      <section className="command-palette project-search-dialog" role="dialog" aria-modal="true" aria-label={label}
+    <div ref={surface} className="project-search-popover" popover="auto" role="presentation"
+      onToggle={(event) => {
+        if (event.newState !== "closed") return;
+        restoreFocus.current = false;
+        onClose();
+      }}>
+      <section className="command-palette project-search-dialog" role="dialog" aria-label={label}
         onKeyDown={(event) => {
           trapModalFocus(event, event.currentTarget);
           if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onClose(); }
@@ -103,7 +125,6 @@ export function ProjectSearchDialog({ projects, selectedId, includeAll = false, 
           </div>
           {!items.length && <div className="palette-empty"><Search size={18} /><strong>No matching projects</strong><span>Try a project name or folder path.</span></div>}
         </div>
-        <footer className="palette-footer"><span><kbd>↑</kbd><kbd>↓</kbd> Navigate</span><span><kbd>Enter</kbd> Select</span><span><kbd>Esc</kbd> Close</span></footer>
       </section>
     </div>, document.body,
   );

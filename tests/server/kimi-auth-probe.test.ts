@@ -1,9 +1,9 @@
 // @inertia-test-suite portable
-import { chmodSync, existsSync, mkdirSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { RuntimeOwnedProcessJournal } from "../../src/node/runtime-owned-processes";
+import { RuntimeOwnedProcessJournal, runtimeOwnedProcessOwnershipIsTainted } from "../../src/node/runtime-owned-processes";
 import { probeKimiAuthentication } from "../../src/server/provider/kimi-auth-probe";
 import { ProcessTreeTerminationError, terminateProcessTreeAndWait } from "../../src/server/process-lifecycle";
 import { activatePreparedRuntimeOwnedProcessRegistry } from "../helpers/prepared-runtime-owned-process-registry";
@@ -23,7 +23,7 @@ interface Capture {
 const terminal = { id: "login", name: "Kimi login", type: "terminal", args: ["--login"], env: {} };
 
 function fixture(mode = "terminal", withDescendant = false) {
-  const root = portableFixtureRoot("Kimi initialize-only auth probe");
+  const root = realpathSync(portableFixtureRoot("Kimi initialize-only auth probe"));
   const command = portableNodeExecutable(root, "kimi");
   const capturePath = join(root, "capture.json");
   const environment = {
@@ -93,7 +93,7 @@ describe("Kimi initialize-only authentication discovery", () => {
   });
 
   it.each([
-    "early-exit", "failed-exit", "malformed-json", "malformed-utf8", "oversized",
+    "malformed-json", "malformed-utf8", "oversized",
     "flood", "stderr-flood", "rpc-error", "invalid-id", "unmatched-id",
     "wrong-protocol", "wrong-agent", "invalid-descriptor", "invalid-descriptor-env",
     "unknown-descriptor-type", "timeout",
@@ -107,6 +107,29 @@ describe("Kimi initialize-only authentication discovery", () => {
       expect((failure as Error).message).toMatch(/Kimi authentication discovery/u);
       expect((failure as Error).message).not.toContain("synthetic-private-value");
       expect(failure).not.toBeInstanceOf(ProcessTreeTerminationError);
+      assertStopped(app.capture());
+    } finally { await removePortableFixture(app.root); }
+  });
+
+  it.each(["early-exit", "failed-exit"])("rejects %s without accepting authentication or concealing cleanup uncertainty", async (mode) => {
+    const app = fixture(mode);
+    try {
+      const failure = await probeKimiAuthentication(app.command, app.root, app.environment)
+        .then(() => undefined, (error: unknown) => error);
+      expect(failure).toBeInstanceOf(Error);
+      // Windows can observe ACP EOF before ChildProcess.close. If taskkill then
+      // finds the root already gone, strict cleanup must report uncertainty;
+      // the known fixture PID being dead is not proof about an untracked tree.
+      if (failure instanceof ProcessTreeTerminationError) {
+        expect(process.platform).toBe("win32");
+        expect(failure.code).toBe("process-tree-termination-unconfirmed");
+        expect(failure.message).toBe("Kimi authentication discovery process tree could not be confirmed stopped.");
+      } else {
+        expect([
+          "Kimi authentication discovery exited before initialization completed.",
+          "Kimi authentication discovery returned invalid initialization data.",
+        ]).toContain((failure as Error).message);
+      }
       assertStopped(app.capture());
     } finally { await removePortableFixture(app.root); }
   });
@@ -181,8 +204,13 @@ describe("Kimi initialize-only authentication discovery", () => {
     } finally { await removePortableFixture(root); }
   });
 
-  it("retires the real owned guardian and its descendant before returning", async () => {
-    const app = fixture("terminal", true);
+  it.each([
+    { withDescendant: false, name: "retires the real owned guardian before returning" },
+    { withDescendant: true, name: process.platform === "darwin"
+      ? "rejects fork-tainted macOS cleanup and retains its durable ownership claim"
+      : "retires the real owned guardian and its descendant before returning" },
+  ])("$name", async ({ withDescendant }) => {
+    const app = fixture("terminal", withDescendant);
     const registryRoot = join(app.root, "runtime-owned");
     mkdirSync(registryRoot); chmodSync(registryRoot, 0o700);
     const generation = "79000000-0000-4000-8000-000000000079:1";
@@ -194,11 +222,21 @@ describe("Kimi initialize-only authentication discovery", () => {
     const journal = new RuntimeOwnedProcessJournal(registryRoot);
     try {
       expect(deactivate).toBeTypeOf("function");
-      await expect(probeKimiAuthentication(app.command, app.root, app.environment)).resolves.toEqual(terminal);
+      const forkUncertainty = process.platform === "darwin" && withDescendant;
+      const pending = probeKimiAuthentication(app.command, app.root, app.environment);
+      if (forkUncertainty) {
+        // macOS NOTE_FORK cannot certify every descendant's identity. Strict
+        // cancellation must retain that claim even after known children stop.
+        await expect(pending).rejects.toBeInstanceOf(ProcessTreeTerminationError);
+      } else {
+        await expect(pending).resolves.toEqual(terminal);
+      }
       const capture = app.capture();
-      expect(capture.descendantPid).toBeGreaterThan(0);
+      if (withDescendant) expect(capture.descendantPid).toBeGreaterThan(0);
+      else expect(capture.descendantPid).toBeUndefined();
       assertStopped(capture);
-      expect(journal.records(generation)).toEqual([]);
+      expect(journal.records(generation)).toHaveLength(forkUncertainty ? 1 : 0);
+      expect(runtimeOwnedProcessOwnershipIsTainted()).toBe(forkUncertainty);
     } finally { deactivate?.(); await removePortableFixture(app.root); }
   });
 });

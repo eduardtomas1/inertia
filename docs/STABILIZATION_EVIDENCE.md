@@ -388,6 +388,42 @@ passes are **not sandbox-enabled proof**. This local artifact has manual updater
 capability, no signing credentials or provenance attestation; the native
 installed-update fixture does not certify a signed public release.
 
+## First hosted run and fixture corrections
+
+The first exact-head hosted run, [34115813008](https://github.com/eduardtomas1/inertia/actions/runs/34115813008),
+tested `97e0a7eead59ff0e80e824483013f96c864b6a8f`. It exposed platform-specific
+mistakes in the new tests; it is not green evidence:
+
+- Both macOS architectures failed six literal temporary-path comparisons.
+  macOS exposes its temporary directory through `/var`, while the installer
+  and child process correctly use canonical `/private/var` paths. Fixtures now
+  canonicalize their roots. An explicit parent-alias regression still checks
+  the exact installer invocation rather than weakening path equality.
+- Both macOS architectures also rejected the new forked Kimi discovery fixture.
+  The existing strict guardian intentionally retains uncertainty after
+  `NOTE_FORK`: stopped known children do not prove that all descendants were
+  identified. The test now requires a typed cleanup failure, stopped known
+  fixture processes, a retained generation claim and tainted ownership on
+  macOS. Linux and Windows must still confirm descendant cleanup before
+  returning a descriptor. A separate no-fork case requires real owned-guardian
+  cleanup on every platform. No guardian policy or deadline was relaxed.
+- Windows x64 unit shard 3 and Windows ARM64's portable suite rejected two
+  raw-child early-exit fixtures with the typed unconfirmed-cleanup error.
+  ACP EOF can precede the child-close event; a strict `taskkill` attempt can
+  then encounter an already exited root. Those two tests now permit that
+  fail-closed result only on Windows, assert exact sanitized errors, require
+  the captured fixture PID to be stopped, and reject any authentication result
+  or request beyond `initialize`. Active and malformed-protocol cases retain
+  their stronger cleanup expectations; the injected unconfirmed-cleanup case
+  still requires a typed failure. No production cleanup behavior changed.
+
+The two corrected files passed 55 focused tests locally. The complete local
+`npm run check` then passed 7,461 tests with 77 existing skips, all 704 active
+test files, every quality gate and unchanged bundle budgets. The test phase
+took 94.45 seconds. This Linux result does not substitute for the next hosted
+Windows/macOS run. The independent portable suite also passed: 1,210 tests,
+two existing skips, all 77 files, 147.34 seconds.
+
 ## Final evidence
 
 Local Linux results above include a real isolated installed-update fixture;

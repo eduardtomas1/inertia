@@ -1,6 +1,6 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ProcessTreeCleanupError, runBounded } from "../../scripts/bounded-process-tree.mjs";
@@ -12,8 +12,8 @@ const executablePaths = {
   linux: "electron", darwin: "Electron.app/Contents/MacOS/Electron", win32: "electron.exe",
 } as const;
 
-function fixture(platform: keyof typeof executablePaths = "linux") {
-  const root = mkdtempSync(join(tmpdir(), "inertia-electron-preparation-"));
+function fixture(platform: keyof typeof executablePaths = "linux", temporaryDirectory = tmpdir()) {
+  const root = realpathSync(mkdtempSync(join(temporaryDirectory, "inertia-electron-preparation-")));
   roots.push(root);
   const packageDirectory = join(root, "node_modules", "electron");
   mkdirSync(packageDirectory, { recursive: true });
@@ -41,6 +41,28 @@ afterEach(() => {
 });
 
 describe("Electron runtime preparation before packaging", () => {
+  it("uses the exact canonical installer through an aliased temporary parent", async () => {
+    const parent = mkdtempSync(join(tmpdir(), "inertia-electron-parent-"));
+    roots.push(parent);
+    const target = join(parent, "target");
+    const alias = join(parent, "alias");
+    mkdirSync(target);
+    symlinkSync(target, alias, "junction");
+    const subject = fixture("linux", alias);
+    const aliasedRoot = join(alias, basename(subject.root));
+    const run = vi.fn(async () => subject.populate());
+    await prepareElectronRuntime({ root: aliasedRoot, run, environment: {}, platform: "linux", arch: "x64" });
+    expect(run).toHaveBeenCalledExactlyOnceWith({
+      command: process.execPath, args: [subject.installer],
+      label: "Electron runtime preparation", timeoutMs: 600_000,
+      env: {
+        ELECTRON_INSTALL_PLATFORM: "linux", ELECTRON_INSTALL_ARCH: "x64",
+        npm_config_platform: "linux", npm_config_arch: "x64",
+      },
+    });
+    expect(aliasedRoot).not.toBe(subject.root);
+  });
+
   it.each(["linux", "darwin", "win32"] as const)("prepares a fresh %s distribution with the exact official invocation", async (platform) => {
     const subject = fixture(platform);
     const environment = {

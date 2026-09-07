@@ -99,6 +99,19 @@ function validResponse(
 }
 
 describe("provider drift process cleanup", () => {
+  it.each([false, true])("rejects unnegotiated terminal authentication even with optional identity=%s", async (allowMissingAgentInfo) => {
+    await expect(acpFixture(validResponse(
+      'agentCapabilities: {}, authMethods: [{ id: "login", name: "Login", type: "terminal", args: ["--login"], env: {} }],',
+      allowMissingAgentInfo ? "" : undefined,
+    ), { allowMissingAgentInfo })).rejects.toThrow("terminal authentication without client terminal support");
+  });
+
+  it("accepts protocol-driven agent authentication without claiming a successful login", async () => {
+    await expect(acpFixture(validResponse(
+      'agentCapabilities: {}, authMethods: [{ id: "login", name: "Login" }],',
+    ))).resolves.toBeUndefined();
+  });
+
   it("recognizes a Linux process group containing only terminal states", () => {
     const processIds = () => ["100", "101", "900"];
     const states = new Map([

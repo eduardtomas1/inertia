@@ -164,6 +164,8 @@ setInterval(() => {}, 1000);
   it("uses shell-free native ACP and rejects the incompatible legacy CLI path", () => {
     expect(kimiAcpProcessInvocation("/usr/local/bin/kimi", {}, "linux"))
       .toEqual({ command: "/usr/local/bin/kimi", args: ["acp"] });
+    expect(kimiAcpProcessInvocation("/usr/local/bin/kimi", {}, "linux", ["--login"]))
+      .toEqual({ command: "/usr/local/bin/kimi", args: ["acp", "--login"] });
 
     const input = nativeProviderRunInput({
       providerId: "kimi",
@@ -954,10 +956,10 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       access: "supervised",
     }))).resolves.toMatchObject({
       status: "failed",
-      error: "Kimi Code is not authenticated. Run 'kimi login' and try again.",
+      error: "Kimi Code is not authenticated. Connect Kimi Code in provider settings, then try again.",
       failure: {
         reason: "provider-error",
-        message: "Kimi Code is not authenticated. Run 'kimi login' and try again.",
+        message: "Kimi Code is not authenticated. Connect Kimi Code in provider settings, then try again.",
         phase: "auth",
         terminalEvent: "authenticate",
       },
@@ -1011,7 +1013,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     });
   });
 
-  it("fails closed on terminal authentication without invoking authenticate", async () => {
+  it("fails closed on unsupported terminal login arguments without invoking authenticate", async () => {
     const root = portableFixtureRoot("kimi ACP terminal auth");
     roots.push(root);
     const capturePath = join(root, "capture.json");
@@ -1049,7 +1051,7 @@ setInterval(() => {}, 1000);
     }));
     expect(terminalResult).toMatchObject({
       status: "failed",
-      error: "Kimi ACP advertised unsupported terminal authentication.",
+      error: "Kimi ACP returned an unsupported or invalid terminal authentication descriptor.",
       failure: { phase: "initialize", terminalEvent: "initialize" },
     });
     const messages = JSON.parse(readFileSync(capturePath, "utf8")) as Array<{

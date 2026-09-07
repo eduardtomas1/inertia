@@ -3,8 +3,10 @@ import { expect, test } from "@playwright/test";
 import Database from "better-sqlite3";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import WebSocket from "ws";
 
 import { RuntimeStore } from "../../src/server/database";
+import type { ServerEvent } from "../../src/shared/contracts";
 import { createAppFixture, type AppFixture } from "./support/app-fixture";
 import { attachRuntimeLifecycleFailureDiagnostic } from "./support/runtime-lifecycle-diagnostics";
 
@@ -322,7 +324,34 @@ test("keeps one cancelled provider turn authoritative across the Electron/core b
       terminalReason: "user-cancelled",
       providerOwnerCount: 0,
     });
-    await sendCompletedTurn(app, conversationId, "core:complete after cancellation and runtime recycle");
+    try {
+      await sendCompletedTurn(app, conversationId, "core:complete after cancellation and runtime recycle");
+    } catch (error) {
+      const { websocketUrl } = await app.runtimeSnapshot();
+      if (websocketUrl) {
+        const readiness = await new Promise<unknown>((resolve) => {
+          const socket = new WebSocket(websocketUrl, { origin: "inertia://bundle", maxPayload: 2 * 1024 * 1024 });
+          const finish = (value: unknown): void => { clearTimeout(timer); socket.terminate(); resolve(value); };
+          const timer = setTimeout(() => finish(null), 2_000);
+          socket.on("error", () => finish(null));
+          socket.on("message", (data) => {
+            try {
+              const message = JSON.parse(data.toString()) as ServerEvent;
+              const event = message.type === "runtime.event" ? message.event : message;
+              if (event.type !== "server.welcome") return;
+              finish(event.snapshot.providers.map((provider) => ({
+                id: provider.id, available: provider.available, installState: provider.installState,
+                authState: provider.authState, canRun: provider.canRun, capabilityContract: provider.capabilityContract,
+              })));
+            } catch { finish(null); }
+          });
+        });
+        await test.info().attach("post-recycle-provider-readiness", {
+          body: JSON.stringify(readiness, null, 2), contentType: "application/json",
+        });
+      }
+      throw error;
+    }
     expect(app.rendererErrors).toEqual([]);
   } finally {
     // The fixture rejects unless Electron, the runtime, provider ownership,

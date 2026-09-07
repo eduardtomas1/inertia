@@ -23,7 +23,7 @@ import {
 } from "./types";
 
 const TRUNCATED_OUTPUT_DRAIN_MS = 250;
-const ABORTED_PROCESS_DRAIN_MS = 250;
+const CANCELLED_PROCESS_DRAIN_MS = 250;
 const PREPARED_ABORT_CLEANUP_MS = 500;
 export interface GitProcessResult {
   stdout: Buffer;
@@ -272,24 +272,25 @@ export function runGit(
     let termination: Promise<void> | undefined;
     let terminalError: GitError | undefined;
     let truncatedOutputDrainTimer: NodeJS.Timeout | undefined;
-    let abortedProcessDrainTimer: NodeJS.Timeout | undefined;
+    let cancelledProcessDrainTimer: NodeJS.Timeout | undefined;
     const abortError = new GitError(
       "timeout",
       "Git inspection was cancelled.",
     );
-    const onAbort = (): void => {
-      terminalError ??= abortError;
-      if (termination || abortedProcessDrainTimer) return;
-      // Fast Git inspections can have exited while Node is still waiting for
-      // their stdio handles to close. Give that already-finishing child one
-      // bounded window before invoking Windows taskkill, whose PID-not-found
-      // result cannot prove that detached descendants were cleaned up.
-      abortedProcessDrainTimer = setTimeout(() => {
-        abortedProcessDrainTimer = undefined;
+    const drainBeforeTermination = (error: GitError): void => {
+      terminalError ??= error;
+      if (settled || termination || cancelledProcessDrainTimer) return;
+      // Cancellation is final at its deadline, including a timeout. Let an
+      // already-finishing process close within the existing cleanup window
+      // before signalling its guardian or a Windows PID that may have exited.
+      // A late close still rejects the operation with terminalError.
+      cancelledProcessDrainTimer = setTimeout(() => {
+        cancelledProcessDrainTimer = undefined;
         terminateAndFinish();
-      }, ABORTED_PROCESS_DRAIN_MS);
-      abortedProcessDrainTimer.unref();
+      }, CANCELLED_PROCESS_DRAIN_MS);
+      cancelledProcessDrainTimer.unref();
     };
+    const onAbort = (): void => drainBeforeTermination(abortError);
 
     const finish = (
       error?: GitError,
@@ -301,8 +302,8 @@ export function runGit(
       if (truncatedOutputDrainTimer) {
         clearTimeout(truncatedOutputDrainTimer);
       }
-      if (abortedProcessDrainTimer) {
-        clearTimeout(abortedProcessDrainTimer);
+      if (cancelledProcessDrainTimer) {
+        clearTimeout(cancelledProcessDrainTimer);
       }
       options.signal?.removeEventListener("abort", onAbort);
       if (error) rejectProcess(error);
@@ -340,7 +341,7 @@ export function runGit(
     };
 
     const timer = setTimeout(() => {
-      terminateAndFinish(new GitError(
+      drainBeforeTermination(new GitError(
         "timeout",
         "Git took too long to complete the operation.",
       ));

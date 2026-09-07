@@ -1,3 +1,5 @@
+import { constants as osConstants } from "node:os";
+import { guardianCloseDiagnostic, type RuntimeOwnedProcessDiagnostic } from "./runtime-owned-process-diagnostic.js";
 import type { ChildProcess } from "node:child_process";
 import { isAbsolute } from "node:path";
 import type {
@@ -460,7 +462,7 @@ function monitorLinuxGuardian(
     () => {
       registry.activeLinuxMonitors.delete(stopTrackedMonitor);
       claim.stopLinuxMonitor = undefined;
-      taintRuntimeOwnedProcessRegistry(registry, activeRegistry === registry);
+      taintRuntimeOwnedProcessRegistry(registry, activeRegistry === registry, { stage: "linux-guardian-monitor" });
       settleLinuxMonitorConfirmation(false);
     },
     {
@@ -597,7 +599,7 @@ async function admitLinuxGuardian(
     return true;
   } catch {
     if (activeRegistry !== registry) return false;
-    taintRuntimeOwnedProcessRegistry(registry, activeRegistry === registry);
+    taintRuntimeOwnedProcessRegistry(registry, activeRegistry === registry, { stage: "linux-admission" });
     if (guardianPath) {
       if (claim.linuxIdentity) {
         await signalLinuxGuardianExactAsync(
@@ -714,6 +716,7 @@ async function admitDarwinGuardian(
 ): Promise<boolean> {
   const guardianPath = registry.darwinGuardianPath;
   const pid = child.pid ?? 0;
+  let stage: RuntimeOwnedProcessDiagnostic["stage"] = "darwin-readiness";
   let readyIdentity: DarwinProcessIdentity | null = null;
   try {
     if (!guardianPath || activeRegistry !== registry) {
@@ -731,6 +734,7 @@ async function admitDarwinGuardian(
     // is installed. Persist that observation directly; a second helper here
     // added no security boundary and doubled the pre-claim probe cost.
     claim.darwinIdentity = readyIdentity;
+    stage = "darwin-durable-claim";
     const durableClaim = registry.journal.claim(
       claim.ownershipId,
       registry.runtimeGenerationId,
@@ -748,18 +752,21 @@ async function admitDarwinGuardian(
     if (claim.stopRequested || registry.tainted) {
       // The durable readiness claim identifies the still-gated guardian; stop
       // it without waiting for or issuing payload authorization.
+      stage = "darwin-stop";
       if (!signalExactDarwinGuardianStopWith(registry, (candidate) => activeRegistry === candidate, registry.readDarwinIdentity, claim, child)) {
         throw new Error("The macOS owned process guardian identity changed before stop.");
       }
       return true;
     }
     // Recheck identity after persistence and immediately before authorization.
+    stage = "darwin-preauthorization-identity";
     const authorization = await Promise.race([
       registry.readDarwinIdentityAsync(pid, registry.admissionController.signal)
         .then((identity) => ({ kind: "identity" as const, identity })),
       claim.waitForStopRequest.then(() => ({ kind: "stop" as const })),
     ]);
     if (authorization.kind === "stop") {
+      stage = "darwin-stop";
       if (!signalExactDarwinGuardianStopWith(registry, (candidate) => activeRegistry === candidate, registry.readDarwinIdentity, claim, child)) {
         throw new Error("The macOS owned process guardian identity changed before stop.");
       }
@@ -776,18 +783,20 @@ async function admitDarwinGuardian(
     claim.darwinIdentity = authorizationIdentity;
     if (claim.stopRequested || registry.tainted) {
       // Close the final race without authorizing the still-gated payload.
+      stage = "darwin-stop";
       if (!signalExactDarwinGuardianStopWith(registry, (candidate) => activeRegistry === candidate, registry.readDarwinIdentity, claim, child)) {
         throw new Error("The macOS owned process guardian identity changed before stop.");
       }
       return true;
     }
+    stage = "darwin-authorization";
     if (!signalExactDarwinGuardianAuthorization(registry, (candidate) => activeRegistry === candidate, registry.readDarwinIdentity, authorizationIdentity, process.kill)) {
       throw new Error("The macOS owned process guardian identity changed.");
     }
     return true;
   } catch {
     if (activeRegistry !== registry) return false;
-    taintRuntimeOwnedProcessRegistry(registry, activeRegistry === registry);
+    taintRuntimeOwnedProcessRegistry(registry, activeRegistry === registry, { stage });
     hardStopUnclaimedDarwinGuardian(registry, (candidate) => activeRegistry === candidate, registry.readDarwinIdentity, claim.darwinIdentity ?? readyIdentity, child);
     const processCanExecute = failedClaimProcessCanExecute(
       registry.platform,
@@ -844,9 +853,9 @@ export function spawnRuntimeOwnedProcess<T extends ChildProcess>(
   };
   if (registry.platform === "linux") {
     registry.claims.set(child, claim);
-    child.once("close", (_code, signal) => {
+    child.once("close", (code, signal) => {
       if (typeof signal === "string") {
-        taintRuntimeOwnedProcessRegistry(registry, activeRegistry === registry);
+        taintRuntimeOwnedProcessRegistry(registry, activeRegistry === registry, guardianCloseDiagnostic("linux-guardian-close", signal, code));
         return;
       }
       settleClosedLinuxGuardian(registry, claim, child.pid ?? 0);
@@ -865,7 +874,7 @@ export function spawnRuntimeOwnedProcess<T extends ChildProcess>(
     child.once("close", (code, signal) => {
       // Guardian-level signals are the fail-closed containment marker.
       if (typeof code !== "number" || signal !== null) {
-        taintRuntimeOwnedProcessRegistry(registry, activeRegistry === registry);
+        taintRuntimeOwnedProcessRegistry(registry, activeRegistry === registry, guardianCloseDiagnostic("darwin-guardian-close", signal, code));
         return;
       }
       settleNormallyClosedDarwinGuardian(registry, claim);
@@ -1018,7 +1027,7 @@ export function spawnRuntimeOwnedPidProcess<T extends { readonly pid: number }>(
         waitForGuardianStop: async () => await stopBarrier,
         releaseIfGroupExited: (exitSignal) => {
           if (typeof exitSignal === "number" && exitSignal > 0) {
-            taintRuntimeOwnedProcessRegistry(registry, activeRegistry === registry);
+            taintRuntimeOwnedProcessRegistry(registry, activeRegistry === registry, guardianCloseDiagnostic("linux-pid-close", guardianSignalName(exitSignal)));
             return;
           }
           settleClosedLinuxGuardian(registry, claim, confirmedOwned.pid);
@@ -1066,7 +1075,7 @@ export function spawnRuntimeOwnedPidProcess<T extends { readonly pid: number }>(
         waitForGuardianStop: async () => await stopBarrier,
         releaseIfGroupExited: (exitSignal) => {
           if (exitSignal !== 0) {
-            taintRuntimeOwnedProcessRegistry(registry, activeRegistry === registry);
+            taintRuntimeOwnedProcessRegistry(registry, activeRegistry === registry, guardianCloseDiagnostic("darwin-pid-close", guardianSignalName(exitSignal)));
             return;
           }
           settleNormallyClosedDarwinGuardian(registry, claim);
@@ -1089,7 +1098,7 @@ export function spawnRuntimeOwnedPidProcess<T extends { readonly pid: number }>(
     }
   } catch (error) {
     if (registry.platform === "linux") {
-      taintRuntimeOwnedProcessRegistry(registry, activeRegistry === registry);
+      taintRuntimeOwnedProcessRegistry(registry, activeRegistry === registry, { stage: "linux-pid-spawn" });
     }
     if (owned) {
       const failedOwned = owned;
@@ -1159,7 +1168,7 @@ export function spawnRuntimeOwnedPidProcess<T extends { readonly pid: number }>(
         // A guardian-level signal is the unproved-containment marker. Do not
         // let a now-empty private session erase evidence of a detached child.
         if (registry.platform === "linux") {
-          taintRuntimeOwnedProcessRegistry(registry, activeRegistry === registry);
+          taintRuntimeOwnedProcessRegistry(registry, activeRegistry === registry, guardianCloseDiagnostic("linux-pid-close", guardianSignalName(exitSignal)));
         }
         return;
       } else {
@@ -1229,4 +1238,9 @@ export async function awaitRuntimeOwnedProcessCleanupConfirmed(): Promise<boolea
   }
   if (activeRegistry !== registry) return false;
   return runtimeOwnedProcessCleanupConfirmed();
+}
+
+function guardianSignalName(signal: unknown): unknown {
+  if (signal === 0) return null;
+  return Object.entries(osConstants.signals).find(([, value]) => value === signal)?.[0];
 }

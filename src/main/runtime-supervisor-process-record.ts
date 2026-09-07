@@ -1,3 +1,4 @@
+import type { RuntimeRestartRequestedEvent } from "../node/runtime-owned-process-diagnostic.js";
 import type {
   RuntimeProcessRecord,
   RuntimeSupervisorOptions,
@@ -134,4 +135,18 @@ export function createRuntimeProcessRecord(options: {
     deletingAttachmentIds: new Set(),
     attachmentOperationTails: new Map(),
   };
+}
+
+export function recordRuntimeRestartRequested(
+  record: RuntimeProcessRecord,
+  event: RuntimeRestartRequestedEvent,
+  report: RuntimeSupervisorOptions["onRestartRequested"],
+): void {
+  if (!record.restartDiagnosticReported) {
+    record.restartDiagnosticReported = true;
+    try { report?.(event, record.generation); } catch { /* Diagnostics cannot affect cleanup. */ }
+  }
+  record.reportedFailure ??= event.reason === "owned-process-tainted"
+    ? "The runtime restarted because owned process containment could not be confirmed."
+    : "The runtime restarted because owned process cleanup could not be confirmed.";
 }

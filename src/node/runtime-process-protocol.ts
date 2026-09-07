@@ -1,3 +1,4 @@
+import { parseRuntimeRestartRequestedEvent, type RuntimeRestartRequestedEvent } from "./runtime-owned-process-diagnostic.js";
 import { parseMascotStatus, type MascotStatus } from "../shared/mascot.js";
 import { isAbsolute } from "node:path";
 import { parseOpenProjectPathRequest, type OpenProjectPathRequest } from "../shared/desktop";
@@ -250,7 +251,7 @@ export interface RuntimeSecureFileResult {
   result: SecureFileResult;
 }
 
-export type RuntimeRestartReason = "owned-process-tainted" | "owned-process-cleanup-unconfirmed";
+export type { RuntimeRestartReason } from "./runtime-owned-process-diagnostic.js";
 
 export type RuntimeWorkerEvent =
   | { type: "runtime.mascot-status"; status: MascotStatus }
@@ -261,7 +262,7 @@ export type RuntimeWorkerEvent =
     }
   | { type: "runtime.system-suspend-result"; id: string; recorded: boolean }
   | RuntimeStartupFailureEvent
-  | { type: "runtime.restart-requested"; reason: RuntimeRestartReason }
+  | RuntimeRestartRequestedEvent
   | RuntimeShutdownUnconfirmedEvent
   | { type: "runtime.stopped" }
   | RuntimeUpdateWorkerEvent
@@ -944,16 +945,7 @@ export function parseRuntimeWorkerEvent(value: unknown): RuntimeWorkerEvent | nu
   }
   const startupFailure = parseRuntimeStartupFailureEvent(value);
   if (startupFailure) return startupFailure;
-  if (
-    value.type === "runtime.restart-requested"
-    && Object.keys(value).length === 2
-    && (
-      value.reason === "owned-process-tainted"
-      || value.reason === "owned-process-cleanup-unconfirmed"
-    )
-  ) {
-    return { type: "runtime.restart-requested", reason: value.reason };
-  }
+  if (value.type === "runtime.restart-requested") return parseRuntimeRestartRequestedEvent(value);
   if (
     value.type === "runtime.ready"
     && (

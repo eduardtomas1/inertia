@@ -39,6 +39,7 @@ import { useTextareaAutosize } from "./useTextareaAutosize";
 import { parseCompactComposerCommand } from "../../utils/composerCommands";
 import { useComposerCompaction } from "./useComposerCompaction";
 import { composerAttachmentActions } from "./composerAttachmentActions";
+import { useComposerStopAction } from "./useComposerStopAction";
 import { insertComposerSkillToken } from "../../utils/composerSkillToken";
 import { ComposerConversationContextDialog, ComposerConversationContextStrip, composerConversationContextToolbarProps, useComposerConversationContext } from "./useComposerConversationContext";
 import { useComposerDetachmentOwnership } from "./useComposerDetachmentOwnership";
@@ -136,9 +137,10 @@ export const Composer = memo(function Composer({
   const [submitting, setSubmitting] = useState(false);
   const submittingRef = useRef(false);
   const submissionReleaseTimerRef = useRef<number | null>(null);
-  const [stopping, setStopping] = useState(false);
-  const stoppingRef = useRef(false);
-  const stopReleaseTimerRef = useRef<number | null>(null);
+  const { stopping, stopClaimRef, stop } = useComposerStopAction({
+    conversationId: conversation.id, running, onStop,
+    cancelling: (latestTurnSummary ?? latestTurn)?.runState?.state === "cancelling",
+  });
   const mountedRef = useRef(true);
   const conversationIdRef = useRef(conversation.id);
   const attachmentAuthorityKey = JSON.stringify([conversation.id, running, latestTurn?.id ?? null, latestTurn?.harnessId ?? null]); const attachmentAuthorityRef = useRef({ key: attachmentAuthorityKey, conversationId: conversation.id });
@@ -146,8 +148,6 @@ export const Composer = memo(function Composer({
   const activeSubmissionsRef = useRef(new Map<string, number>());
   const editorRevisionSequenceRef = useRef(0);
   const editorRevisionsRef = useRef(new Map<string, number>());
-  const stopSequenceRef = useRef(0);
-  const activeStopsRef = useRef(new Map<string, number>());
   const promptContextsRef = useRef(new Map([
     [conversation.id, promptContext ?? null],
   ]));
@@ -245,7 +245,7 @@ export const Composer = memo(function Composer({
       conversationContextPending: conversationContextHandoffEnabled && (conversationContext.draftContextPackets.length > 0 || conversationContext.dialog !== null || agentContextRequest !== null),
       fileReferenceCount: fileReferences.length,
       mutationInFlight: attachmentImportingRef.current || submittingRef.current
-        || stoppingRef.current
+        || stopClaimRef.current !== null
         || creatingRouteConversation
         || routeRepairing
         || conversationUpdatePending,
@@ -310,14 +310,8 @@ export const Composer = memo(function Composer({
       window.clearTimeout(submissionReleaseTimerRef.current);
       submissionReleaseTimerRef.current = null;
     }
-    if (stopReleaseTimerRef.current !== null) {
-      window.clearTimeout(stopReleaseTimerRef.current);
-      stopReleaseTimerRef.current = null;
-    }
     submittingRef.current = false;
-    stoppingRef.current = false;
     setSubmitting(false);
-    setStopping(false);
     const nextDraft = window.localStorage.getItem(
       `inertia:draft:${conversation.id}`,
     ) ?? "";
@@ -368,13 +362,6 @@ export const Composer = memo(function Composer({
       setSubmitting(false);
       return;
     }
-    if (stopReleaseTimerRef.current !== null) {
-      window.clearTimeout(stopReleaseTimerRef.current);
-      stopReleaseTimerRef.current = null;
-    }
-    activeStopsRef.current.delete(conversationIdRef.current);
-    stoppingRef.current = false;
-    setStopping(false);
   }, [dismissMenu, running]);
 
   useEffect(() => {
@@ -431,7 +418,6 @@ export const Composer = memo(function Composer({
 
   useEffect(() => () => {
     if (submissionReleaseTimerRef.current !== null) window.clearTimeout(submissionReleaseTimerRef.current);
-    if (stopReleaseTimerRef.current !== null) window.clearTimeout(stopReleaseTimerRef.current);
   }, []);
 
   useEffect(() => {
@@ -516,7 +502,7 @@ export const Composer = memo(function Composer({
           selectedPreviewUrlRef.current,
           contextPacketIds,
         );
-    if ((!canSend && followUpState !== "ready") || submittingRef.current) return;
+    if ((!canSend && followUpState !== "ready") || submittingRef.current || stopClaimRef.current || stopping) return;
     flushDraftPersistence();
     const submittedAttachments = [...attachmentsRef.current];
     const submittedConversationId = conversation.id;
@@ -611,49 +597,6 @@ export const Composer = memo(function Composer({
     }
   };
 
-  const stop = async (): Promise<void> => {
-    if (stoppingRef.current || !running) return;
-    const stoppedConversationId = conversation.id;
-    const stopSequence = stopSequenceRef.current + 1;
-    stopSequenceRef.current = stopSequence;
-    activeStopsRef.current.set(stoppedConversationId, stopSequence);
-    stoppingRef.current = true;
-    setStopping(true);
-    try {
-      await onStop();
-      if (
-        activeStopsRef.current.get(stoppedConversationId) !== stopSequence
-      ) return;
-      if (
-        !mountedRef.current
-        || conversationIdRef.current !== stoppedConversationId
-      ) {
-        activeStopsRef.current.delete(stoppedConversationId);
-        return;
-      }
-      stopReleaseTimerRef.current = window.setTimeout(() => {
-        stopReleaseTimerRef.current = null;
-        if (
-          activeStopsRef.current.get(stoppedConversationId) !== stopSequence
-        ) return;
-        activeStopsRef.current.delete(stoppedConversationId);
-        stoppingRef.current = false;
-        if (mountedRef.current && conversationIdRef.current === stoppedConversationId) {
-          setStopping(false);
-        }
-      }, COMPOSER_ACTION_STALE_FALLBACK_MS);
-    } catch {
-      if (
-        activeStopsRef.current.get(stoppedConversationId) !== stopSequence
-      ) return;
-      activeStopsRef.current.delete(stoppedConversationId);
-      stoppingRef.current = false;
-      if (mountedRef.current && conversationIdRef.current === stoppedConversationId) {
-        setStopping(false);
-      }
-    }
-  };
-
   const { chooseAttachments, importAttachments, removeAttachment } =
     composerAttachmentActions({
       attachmentAuthorityRef,
@@ -732,6 +675,7 @@ export const Composer = memo(function Composer({
   });
   const followUpState = composerFollowUpState({
     running,
+    stopping,
     harnessId: latestTurn?.harnessId ?? null,
     hasDraft: Boolean(message.trim()) || attachments.length > 0,
     textOnly:

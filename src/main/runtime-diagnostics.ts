@@ -149,6 +149,8 @@ function runtimeFailureSummary(value: unknown): string | undefined {
     "The confirmed runtime cleanup receipt could not be persisted.",
     "The runtime cleanup receipt could not be consumed safely.",
     "The runtime could not confirm complete process cleanup.",
+    "The runtime restarted because owned process containment could not be confirmed.",
+    "The runtime restarted because owned process cleanup could not be confirmed.",
     "Runtime shutdown failed while closing local resources.",
     "Runtime shutdown exceeded its deadline while closing local resources.",
     "Runtime shutdown could not confirm owned-process cleanup.",

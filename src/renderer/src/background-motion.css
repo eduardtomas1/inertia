@@ -1,7 +1,13 @@
-/* Keep animation progress intact while a mapped window is behind another app.
- * Applying this at the document root includes portals and detached chats. */
-:root[data-document-active="false"] *,
-:root[data-document-active="false"] *::before,
-:root[data-document-active="false"] *::after {
+/* Stop hidden-window motion without freezing newly received content at the
+ * transparent first frame of its entry animation. A zero-duration, single
+ * iteration applies each animation's terminal style, including exit effects.
+ * Visible unfocused windows remain live for side-by-side monitoring.
+ * The document root includes portals and detached chats. */
+:root[data-document-visible="false"] *,
+:root[data-document-visible="false"] *::before,
+:root[data-document-visible="false"] *::after {
   animation-play-state: paused !important;
+  animation-duration: 0s !important;
+  animation-delay: 0s !important;
+  animation-iteration-count: 1 !important;
 }

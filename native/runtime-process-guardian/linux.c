@@ -746,7 +746,10 @@ static int exact_signal_mode(int argc, char **argv) {
   close(pidfd); return 0;
 }
 static int bind_selftest_child_to_parent(pid_t expected_parent) {
-  return prctl(PR_SET_PDEATHSIG, SIGKILL) == 0 && getppid() == expected_parent;
+  // RLIMIT_CORE does not suppress piped crash handlers. These deliberate
+  // SIGSYS probes must not invoke them or delay the bounded security preflight.
+  return prctl(PR_SET_PDEATHSIG, SIGKILL) == 0 && getppid() == expected_parent
+    && prctl(PR_SET_DUMPABLE, 0) == 0;
 }
 static int seccomp_selftest(void) {
   const pid_t selftest_parent = getpid();

@@ -294,6 +294,23 @@ describe("Linux runtime process guardian", () => {
     expect(verifyLinuxRuntimeOwnedGuardianSandbox(helper)).toBeNull();
   });
 
+  linuxIt("keeps intentional seccomp denials non-dumpable without hiding the parent identity", () => {
+    const root = mkdtempSync(join(tmpdir(), "inertia-linux-selftest-no-core-"));
+    roots.push(root);
+    const guardian = join(root, "guardian");
+    execFileSync("cc", [
+      "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
+      join(process.cwd(), "tests/fixtures/linux-guardian-selftest-no-core.c"),
+      "-o", guardian,
+    ]);
+    const result = execFileSync(guardian, ["seccomp-selftest"], {
+      encoding: "utf8", timeout: 1_500,
+    });
+    expect(JSON.parse(result)).toEqual({
+      deniedProbes: 3, coreDumps: 0, parentDumpable: 1,
+    });
+  });
+
   linuxIt("hard-kills a timed-out preflight helper", async () => {
     const root = mkdtempSync(join(tmpdir(), "inertia-linux-selftest-timeout-"));
     roots.push(root);

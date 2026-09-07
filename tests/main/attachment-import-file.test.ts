@@ -1,9 +1,11 @@
+import { createHash } from "node:crypto";
 import {
   appendFile,
   chmod,
   lstat,
   mkdtemp,
   open,
+  readFile,
   realpath,
   rm,
   symlink,
@@ -12,6 +14,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { createCanvas } from "@napi-rs/canvas";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -25,6 +28,7 @@ import {
   truncatedXlsxFixture,
   validXlsxFixture,
 } from "../fixtures/attachments/malicious-structures";
+import { withEmptyPngDataChunks } from "../fixtures/attachments/png-chunks";
 
 const directories: string[] = [];
 
@@ -114,6 +118,20 @@ describe("private staged attachment validation", () => {
       size: operation.size,
       digest: expect.stringMatching(/^[0-9a-f]{64}$/u),
     });
+  });
+
+  it("validates a pinned PNG with empty data chunks without altering its bytes", async () => {
+    const bytes = withEmptyPngDataChunks(createCanvas(1, 1).encodeSync("png"));
+    const { operation, path } = await stage("clipboard.png", "image/png", bytes);
+
+    await expect(validateAttachmentImportFile(operation)).resolves.toMatchObject({
+      displayName: "clipboard.png",
+      mimeType: "image/png",
+      extension: "png",
+      size: bytes.length,
+      digest: createHash("sha256").update(bytes).digest("hex"),
+    });
+    expect(await readFile(path)).toEqual(bytes);
   });
 
   it.each([

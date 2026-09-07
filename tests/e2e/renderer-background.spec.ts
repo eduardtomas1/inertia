@@ -123,7 +123,7 @@ async function sample(page: Page, electronApp: ElectronApplication, name: string
 }
 
 for (const { turns, mature } of [{ turns: 2, mature: false }, { turns: 128, mature: false }, { turns: 128, mature: true }]) {
-test(`bounds background motion for ${turns} turns${mature ? " in a mature profile with live subagents" : ""} and resumes on focus`, async ({ browserName: _browserName }, testInfo) => {
+test(`keeps visible motion live while unfocused for ${turns} turns${mature ? " in a mature profile with live subagents" : ""}`, async ({ browserName: _browserName }, testInfo) => {
   test.setTimeout(mature ? 300_000 : 180_000);
   let conversationId = "";
   let seedDurationMs = 0;
@@ -206,7 +206,6 @@ test(`bounds background motion for ${turns} turns${mature ? " in a mature profil
     await mainWindow.evaluate((window) => { window.focus(); window.webContents.focus(); });
     await expect.poll(() => page.evaluate(() => document.hasFocus())).toBe(true);
     const foreground = await sample(page, electronApp, "foreground", testInfo);
-    const backgroundRequestedAt = performance.now();
     await electronApp.evaluate(async ({ BrowserWindow }) => {
       const other = new BrowserWindow({ width: 180, height: 120, x: 0, y: 0, show: true });
       await other.loadURL("data:text/html,<title>Focus fixture</title>");
@@ -216,40 +215,17 @@ test(`bounds background motion for ${turns} turns${mature ? " in a mature profil
     });
     await expect.poll(() => page.evaluate(() => document.hasFocus())).toBe(false);
     expect(await page.evaluate(() => document.visibilityState)).toBe("visible");
-    await expect.poll(() => page.evaluate(() => {
-      const animations = document.getAnimations();
-      return animations.length > 0 && animations.every((animation) => animation.playState === "paused");
-    })).toBe(true);
-    const pauseObservedMs = performance.now() - backgroundRequestedAt;
+    await expect(page.locator("html")).toHaveAttribute("data-document-active", "false");
+    await expect(page.locator("html")).toHaveAttribute("data-document-visible", "true");
     const background = await sample(page, electronApp, "mapped-unfocused", testInfo);
     // Startup GC can overlap the first idle trace even after React/RAF settle.
     // Keep the native state unchanged for an independent consecutive sample.
     const backgroundContinuation = mature
       ? await sample(page, electronApp, "mapped-unfocused-continuation", testInfo)
       : null;
-    await mainWindow.evaluate((window) => window.minimize());
-    try {
-      // Native minimization completes asynchronously, including its macOS
-      // animation. Hiding during that transition can cancel the request.
-      await expect.poll(() => mainWindow.evaluate((window) => window.isMinimized()), {
-        timeout: 5_000,
-      }).toBe(true);
-    } catch (error) {
-      if (process.platform !== "linux") throw error;
-      // Bare Xvfb has no window manager to honor minimization. Native hiding
-      // still exercises an unmapped window there without faking DOM state.
-      await mainWindow.evaluate((window) => window.hide());
-      await expect.poll(() => mainWindow.evaluate((window) => window.isVisible())).toBe(false);
-    }
-    const nativeWindowState = await mainWindow.evaluate((window) => ({
-      minimized: window.isMinimized(), visible: window.isVisible(),
-    }));
-    expect(nativeWindowState.minimized || !nativeWindowState.visible).toBe(true);
-    await expect.poll(() => page.evaluate(() => document.hasFocus())).toBe(false);
-    // Playwright disables Chromium occlusion/background throttling, so record
-    // the actual visibility state instead of assuming minimization hides it.
-    const minimized = { ...await sample(page, electronApp, "minimized-or-hidden", testInfo), nativeWindowState };
-    await mainWindow.evaluate((window) => { window.restore(); window.show(); });
+    // Playwright's own CDP session forces document visibility even after native
+    // hide. renderer-background-content.spec.ts proves the actual hidden/idle
+    // boundary with native Electron and public CDP noDefaults instead.
     await electronApp.evaluate(({ BrowserWindow }, id) => {
       for (const window of BrowserWindow.getAllWindows()) {
         if (window.id !== id) window.destroy();
@@ -266,7 +242,7 @@ test(`bounds background motion for ${turns} turns${mature ? " in a mature profil
     const report = JSON.stringify({ turns, mature, seedDurationMs, generatedProfileTurns: profileTurns, generatedProfileConversations: mature ? 41 : 1,
       generatedActivities: turns * 74 + (mature ? 40 * 22 * 66 : 0), generatedMessages: profileTurns * 8,
       syntheticLiveSubagents: mature ? 6 : 0,
-      pauseObservedMs, runtimeEvents, foreground, background, backgroundContinuation, resumed, minimized }, null, 2);
+      runtimeEvents, foreground, background, backgroundContinuation, resumed }, null, 2);
     await mkdir("performance-results", { recursive: true });
     await writeFile(`performance-results/renderer-background-${process.platform}-${process.arch}-${turns}${mature ? "-mature" : ""}.json`, report);
     await testInfo.attach("renderer-background-profile", {
@@ -274,18 +250,16 @@ test(`bounds background motion for ${turns} turns${mature ? " in a mature profil
       contentType: "application/json",
     });
     expect(background.start.counters.rendererInjected).toBe(true);
-    for (const measurement of [background, ...(backgroundContinuation ? [backgroundContinuation] : []), minimized]) {
+    for (const measurement of [background, ...(backgroundContinuation ? [backgroundContinuation] : [])]) {
       expect(measurement.start.focus).toBe(false);
       expect(measurement.end.focus).toBe(false);
-      expect(measurement.end.animations).toEqual(measurement.start.animations);
-      expect(measurement.end.animations.every((animation) => animation.state === "paused")).toBe(true);
       expect(measurement.end.counters.reactCommits).toBe(measurement.start.counters.reactCommits);
       expect(measurement.end.counters.rafCallbacks).toBe(measurement.start.counters.rafCallbacks);
-      expect(measurement.end.counters.intervalCallbacks).toBe(measurement.start.counters.intervalCallbacks);
-      expect(measurement.end.elapsedLabels).toEqual(measurement.start.elapsedLabels);
-      expect(measurement.end.mountedRows).toBeLessThan(24);
     }
-    for (const measurement of [foreground, resumed]) {
+    for (const measurement of [foreground, background, ...(backgroundContinuation ? [backgroundContinuation] : []), resumed]) {
+      expect(measurement.start.visibility).toBe("visible");
+      expect(measurement.end.visibility).toBe("visible");
+      expect(measurement.end.mountedRows).toBeLessThan(24);
       const start = measurement.start.animations.find((animation) => animation.name === "ultra-reasoning-frame-flow");
       const end = measurement.end.animations.find((animation) => animation.name === "ultra-reasoning-frame-flow");
       expect(start?.state).toBe("running");

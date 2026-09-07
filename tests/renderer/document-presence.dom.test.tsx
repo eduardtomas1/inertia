@@ -35,6 +35,7 @@ describe("document presence", () => {
     const output = view.getByRole("status");
 
     expect(document.documentElement).toHaveAttribute("data-document-active", "true");
+    expect(document.documentElement).toHaveAttribute("data-document-visible", "true");
     expect(output).toHaveAttribute("data-active", "true");
     expect(output).toHaveAttribute("data-visible", "true");
     expect(onRender).toHaveBeenCalledTimes(1);
@@ -42,6 +43,7 @@ describe("document presence", () => {
     focused = false;
     await act(async () => window.dispatchEvent(new Event("blur")));
     expect(document.documentElement).toHaveAttribute("data-document-active", "false");
+    expect(document.documentElement).toHaveAttribute("data-document-visible", "true");
     expect(output).toHaveAttribute("data-active", "false");
     expect(output).toHaveAttribute("data-visible", "true");
     expect(onRender).toHaveBeenCalledTimes(2);
@@ -51,6 +53,7 @@ describe("document presence", () => {
 
     visibility = "hidden";
     await act(async () => document.dispatchEvent(new Event("visibilitychange")));
+    expect(document.documentElement).toHaveAttribute("data-document-visible", "false");
     expect(output).toHaveAttribute("data-active", "false");
     expect(output).toHaveAttribute("data-visible", "false");
     expect(onRender).toHaveBeenCalledTimes(3);
@@ -61,12 +64,14 @@ describe("document presence", () => {
 
     visibility = "visible";
     await act(async () => document.dispatchEvent(new Event("visibilitychange")));
+    expect(document.documentElement).toHaveAttribute("data-document-visible", "true");
     expect(output).toHaveAttribute("data-active", "true");
     expect(output).toHaveAttribute("data-visible", "true");
     expect(onRender).toHaveBeenCalledTimes(4);
     expect(vi.getTimerCount()).toBe(0);
     view.unmount();
     expect(document.documentElement).not.toHaveAttribute("data-document-active");
+    expect(document.documentElement).not.toHaveAttribute("data-document-visible");
   });
 
   it("updates visible elapsed work at most once per second and stops while hidden", async () => {
@@ -94,22 +99,30 @@ describe("document presence", () => {
     expect(view.getByText("3.0s")).toBeInTheDocument();
   });
 
-  it("stops every elapsed timer on visible blur and catches up once on focus", async () => {
+  it("keeps visible elapsed timers live on blur and suspends them only while hidden", async () => {
     vi.useFakeTimers();
     const startedAt = "2026-08-19T08:00:00.000Z";
     vi.setSystemTime(new Date(startedAt));
-    vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
     const view = render(<><LiveElapsed startedAt={startedAt} /><LiveElapsed startedAt={startedAt} /></>);
     await act(async () => vi.advanceTimersByTime(1_000));
     expect(view.getAllByText("1.0s")).toHaveLength(2);
     vi.mocked(document.hasFocus).mockReturnValue(false);
     await act(async () => window.dispatchEvent(new Event("blur")));
+    expect(vi.getTimerCount()).toBe(2);
+    await act(async () => vi.advanceTimersByTime(4_000));
+    expect(view.getAllByText("5.0s")).toHaveLength(2);
+    visibility.mockReturnValue("hidden");
+    await act(async () => document.dispatchEvent(new Event("visibilitychange")));
     expect(vi.getTimerCount()).toBe(0);
     await act(async () => vi.advanceTimersByTime(4_000));
-    expect(view.getAllByText("1.0s")).toHaveLength(2);
+    expect(view.getAllByText("5.0s")).toHaveLength(2);
     vi.mocked(document.hasFocus).mockReturnValue(true);
     await act(async () => window.dispatchEvent(new Event("focus")));
-    expect(view.getAllByText("5.0s")).toHaveLength(2);
+    expect(vi.getTimerCount()).toBe(0);
+    visibility.mockReturnValue("visible");
+    await act(async () => document.dispatchEvent(new Event("visibilitychange")));
+    expect(view.getAllByText("9.0s")).toHaveLength(2);
     expect(vi.getTimerCount()).toBe(2);
     await act(async () => window.dispatchEvent(new Event("focus")));
     expect(vi.getTimerCount()).toBe(2);

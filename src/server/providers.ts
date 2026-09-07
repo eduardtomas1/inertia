@@ -640,10 +640,12 @@ export class ProviderManager {
     this.processEnvironment = environment.env;
     const configured = this.commands[providerId]?.trim() || PROVIDER_INFO[providerId].command;
     const resolvedExecutable = this.resolvedCommands.get(providerId);
-    const cachedExecutable = this.metadataCache.nativeScope(providerId).executable;
-    const admissionExecutable = resolvedExecutable ?? cachedExecutable ?? configured;
+    // Persisted metadata can refer to a native CLI version replaced while the
+    // app was closed. Only this runtime's resolved command establishes active
+    // installation authority; initial discovery must resolve the configured
+    // command again before correlating its historical metadata.
+    const admissionExecutable = resolvedExecutable ?? configured;
     const allowUnboundInitialResolution = !resolvedExecutable
-      && !cachedExecutable
       && canonicalProviderExecutable(configured) === null;
     const backendProfile = providerNativeBackendProfile(providerId);
     const admission = this.installationAuthority.acquire(

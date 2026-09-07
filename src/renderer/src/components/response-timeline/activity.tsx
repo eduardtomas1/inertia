@@ -24,7 +24,7 @@ import {
   Wrench,
 } from "lucide-react";
 import { markTestStreamingStage } from "../../utils/testStreamingTrace";
-import { useDocumentActivity } from "../../hooks/useDocumentPresence";
+import { useDocumentVisibility } from "../../hooks/useDocumentPresence";
 import clsx from "clsx";
 import type {
   AgentActivity,
@@ -101,13 +101,13 @@ export function LiveElapsed({
   excludedMs?: number;
 }): React.JSX.Element {
   const [now, setNow] = useState(Date.now());
-  const documentActive = useDocumentActivity();
+  const documentVisible = useDocumentVisibility();
   useEffect(() => {
-    if (!documentActive) return;
+    if (!documentVisible) return;
     setNow(Date.now());
     const timer = window.setInterval(() => setNow(Date.now()), 1_000);
     return () => window.clearInterval(timer);
-  }, [documentActive]);
+  }, [documentVisible]);
   return (
     <span>
       {formatElapsed(Math.max(0, now - Date.parse(startedAt) - excludedMs), true)}

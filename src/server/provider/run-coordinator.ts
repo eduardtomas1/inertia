@@ -196,6 +196,7 @@ export class ProviderRunCoordinator {
         "This conversation already has an active provider run.",
       );
     }
+    const expectedIdentity = providerRunIdentity(input);
     if (
       input.backendProfile.source === "custom"
       && (
@@ -203,6 +204,7 @@ export class ProviderRunCoordinator {
         || input.model !== input.modelSelection.modelId
       )
     ) {
+      this.rememberCleanupReceipt(expectedIdentity);
       throw new ProviderRuntimeError(
         "invalid_input",
         "The custom backend run does not match the exact probed model identity.",
@@ -242,12 +244,16 @@ export class ProviderRunCoordinator {
         capabilityId === "host-tool-bridge" ? [capabilityId] : [],
       ));
     if (unavailable) {
+      // TurnController persists ownership before calling run(). This explicit
+      // refusal precedes installation admission, launch preparation, and the
+      // harness invocation, so the exact owner has no process to clean up.
+      // Keep arbitrary exceptions and all post-start failures fail-closed.
+      this.rememberCleanupReceipt(expectedIdentity);
       throw new ProviderRuntimeError(
         "invalid_input",
         `The exact provider installation does not attest '${unavailable}'.`,
       );
     }
-    const expectedIdentity = providerRunIdentity(input);
     const executable = this.options.commandFor(providerId);
     const nativeProfile = providerNativeBackendProfile(providerId);
     const ownsLegacyProviderMetadata = input.backendProfile.id === nativeProfile.id

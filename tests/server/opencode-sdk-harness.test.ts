@@ -23,6 +23,8 @@ import {
 } from "../helpers/portable-provider-fixture";
 import { nativeProviderRunInput } from "./model-route-fixture";
 
+const COMPACTION_REQUEST_TIMESTAMP = 4242;
+
 type LifecycleScenario =
   | "resume"
   | "resume-rejected-steer"
@@ -438,34 +440,34 @@ const server = http.createServer((req, res) => {
       return sendEvent({ type: "session.idle", properties: { sessionID } });
     }
     if (req.method === "POST" && url.pathname === "/api/session/" + sessionID + "/compact") {
+      const timestamp = ${COMPACTION_REQUEST_TIMESTAMP};
       json(res, undefined, 204);
       if (scenario === "compact") setTimeout(() => {
         sendEvent({ id: "compact-1", type: "session.next.compaction.started", properties: { timestamp: Date.now(), sessionID, messageID: "summary-1", reason: "manual" } });
         sendEvent({ id: "compact-2", type: "session.next.compaction.ended", properties: { timestamp: Date.now(), sessionID, messageID: "summary-1", reason: "manual", text: "Summary", recent: "" } });
       }, 10);
       if (scenario === "compact-stale") setTimeout(() => {
-        sendEvent({ id: "compact-stale-1", type: "session.next.compaction.started", properties: { timestamp: Date.now() - 60000, sessionID, messageID: "stale-summary", reason: "manual" } });
-        sendEvent({ id: "compact-stale-2", type: "session.next.compaction.ended", properties: { timestamp: Date.now() - 60000, sessionID, messageID: "stale-summary", reason: "manual", text: "Stale", recent: "" } });
+        sendEvent({ id: "compact-stale-1", type: "session.next.compaction.started", properties: { timestamp: timestamp - 1, sessionID, messageID: "stale-summary", reason: "manual" } });
+        sendEvent({ id: "compact-stale-2", type: "session.next.compaction.ended", properties: { timestamp: timestamp - 1, sessionID, messageID: "stale-summary", reason: "manual", text: "Stale", recent: "" } });
       }, 10);
       if (scenario === "compact-equal-timestamp") setTimeout(() => {
-        sendEvent({ id: "compact-equal-1", type: "session.next.compaction.started", properties: { timestamp: 4242, sessionID, messageID: "equal-summary", reason: "manual" } });
-        sendEvent({ id: "compact-equal-2", type: "session.next.compaction.ended", properties: { timestamp: 4242, sessionID, messageID: "equal-summary", reason: "manual", text: "Equal", recent: "" } });
+        sendEvent({ id: "compact-equal-1", type: "session.next.compaction.started", properties: { timestamp, sessionID, messageID: "equal-summary", reason: "manual" } });
+        sendEvent({ id: "compact-equal-2", type: "session.next.compaction.ended", properties: { timestamp, sessionID, messageID: "equal-summary", reason: "manual", text: "Equal", recent: "" } });
       }, 10);
       if (scenario === "compact-auto") setTimeout(() => {
-        sendEvent({ id: "compact-auto-1", type: "session.next.compaction.started", properties: { timestamp: Date.now(), sessionID, messageID: "auto-summary", reason: "auto" } });
-        sendEvent({ id: "compact-auto-2", type: "session.next.compaction.ended", properties: { timestamp: Date.now(), sessionID, messageID: "auto-summary", reason: "auto", text: "Automatic", recent: "" } });
+        sendEvent({ id: "compact-auto-1", type: "session.next.compaction.started", properties: { timestamp, sessionID, messageID: "auto-summary", reason: "auto" } });
+        sendEvent({ id: "compact-auto-2", type: "session.next.compaction.ended", properties: { timestamp, sessionID, messageID: "auto-summary", reason: "auto", text: "Automatic", recent: "" } });
       }, 10);
       if (scenario === "compact-wrong-message") setTimeout(() => {
-        sendEvent({ id: "compact-wrong-1", type: "session.next.compaction.started", properties: { timestamp: Date.now(), sessionID, messageID: "requested-summary", reason: "manual" } });
-        sendEvent({ id: "compact-wrong-2", type: "session.next.compaction.ended", properties: { timestamp: Date.now(), sessionID, messageID: "different-summary", reason: "manual", text: "Wrong", recent: "" } });
+        sendEvent({ id: "compact-wrong-1", type: "session.next.compaction.started", properties: { timestamp, sessionID, messageID: "requested-summary", reason: "manual" } });
+        sendEvent({ id: "compact-wrong-2", type: "session.next.compaction.ended", properties: { timestamp, sessionID, messageID: "different-summary", reason: "manual", text: "Wrong", recent: "" } });
       }, 10);
       if (scenario === "compact-replacement-start") setTimeout(() => {
-        sendEvent({ id: "compact-replacement-1", type: "session.next.compaction.started", properties: { timestamp: Date.now(), sessionID, messageID: "requested-summary", reason: "manual" } });
-        sendEvent({ id: "compact-replacement-2", type: "session.next.compaction.started", properties: { timestamp: Date.now() + 1, sessionID, messageID: "replacement-summary", reason: "manual" } });
-        sendEvent({ id: "compact-replacement-3", type: "session.next.compaction.ended", properties: { timestamp: Date.now() + 2, sessionID, messageID: "replacement-summary", reason: "manual", text: "Replacement", recent: "" } });
+        sendEvent({ id: "compact-replacement-1", type: "session.next.compaction.started", properties: { timestamp, sessionID, messageID: "requested-summary", reason: "manual" } });
+        sendEvent({ id: "compact-replacement-2", type: "session.next.compaction.started", properties: { timestamp: timestamp + 1, sessionID, messageID: "replacement-summary", reason: "manual" } });
+        sendEvent({ id: "compact-replacement-3", type: "session.next.compaction.ended", properties: { timestamp: timestamp + 2, sessionID, messageID: "replacement-summary", reason: "manual", text: "Replacement", recent: "" } });
       }, 10);
       if (scenario === "compact-reversed-time") setTimeout(() => {
-        const timestamp = Date.now();
         sendEvent({ id: "compact-reversed-1", type: "session.next.compaction.started", properties: { timestamp: timestamp + 2, sessionID, messageID: "reversed-summary", reason: "manual" } });
         sendEvent({ id: "compact-reversed-2", type: "session.next.compaction.ended", properties: { timestamp: timestamp + 1, sessionID, messageID: "reversed-summary", reason: "manual", text: "Reversed", recent: "" } });
       }, 10);
@@ -474,8 +476,8 @@ const server = http.createServer((req, res) => {
         sendEvent({ id: "compact-malformed-2", type: "session.next.compaction.ended", properties: { timestamp: "later", sessionID, messageID: "malformed-summary", reason: "manual", text: "Malformed", recent: "" } });
       }, 10);
       if (scenario === "compact-missing-message") setTimeout(() => {
-        sendEvent({ id: "compact-missing-1", type: "session.next.compaction.started", properties: { timestamp: Date.now(), sessionID, reason: "manual" } });
-        sendEvent({ id: "compact-missing-2", type: "session.next.compaction.ended", properties: { timestamp: Date.now(), sessionID, reason: "manual", text: "Missing", recent: "" } });
+        sendEvent({ id: "compact-missing-1", type: "session.next.compaction.started", properties: { timestamp, sessionID, reason: "manual" } });
+        sendEvent({ id: "compact-missing-2", type: "session.next.compaction.ended", properties: { timestamp, sessionID, reason: "manual", text: "Missing", recent: "" } });
       }, 10);
       return;
     }
@@ -1807,6 +1809,9 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       { commands: { opencode: command } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness({
         eventInactivityDeadlineMs: 100,
+        // Both processes share one fixture clock: replacement-start must begin
+        // with an eligible original start, not one made stale by clock skew.
+        compactionTimestampNow: () => COMPACTION_REQUEST_TIMESTAMP,
       })]),
     );
 
@@ -1838,7 +1843,7 @@ setTimeout(() => console.log("opencode server listening on http://127.0.0.1:6553
       { commands: { opencode: command } },
       new AgentHarnessRegistry([createOpenCodeSdkHarness({
         eventInactivityDeadlineMs: 5_000, // Keep cleanup bounded below Vitest's 15-second timeout.
-        compactionTimestampNow: () => 4242,
+        compactionTimestampNow: () => COMPACTION_REQUEST_TIMESTAMP,
       })]),
     );
 

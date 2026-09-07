@@ -576,7 +576,7 @@ describe("delegated-agent timeline disclosure", () => {
     }
   });
 
-  it("suspends folded and background clocks, catches up on return, and preserves live work", async () => {
+  it("keeps visible blurred clocks live but suspends folded and hidden clocks", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(NOW);
     const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
@@ -593,16 +593,16 @@ describe("delegated-agent timeline disclosure", () => {
       expect(vi.getTimerCount()).toBe(1);
       vi.mocked(document.hasFocus).mockReturnValue(false);
       fireEvent(window, new Event("blur"));
-      expect(vi.getTimerCount()).toBe(0);
-      const blurred = labels();
+      expect(vi.getTimerCount()).toBe(1);
       await act(() => vi.advanceTimersByTime(4_000));
-      expect(labels()).toEqual(blurred);
+      expect(labels()).toEqual(["18s", "18s"]);
       visibility.mockReturnValue("hidden");
       fireEvent(document, new Event("visibilitychange"));
       vi.mocked(document.hasFocus).mockReturnValue(true);
       fireEvent(window, new Event("focus"));
       expect(vi.getTimerCount()).toBe(0);
       await act(() => vi.advanceTimersByTime(4_000));
+      expect(labels()).toEqual(["18s", "18s"]);
       visibility.mockReturnValue("visible");
       fireEvent(document, new Event("visibilitychange"));
       expect(labels()).toEqual(["22s", "22s"]);

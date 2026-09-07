@@ -253,6 +253,8 @@ function SidebarView({
       sidebar?.querySelector<HTMLElement>('[aria-label="Close navigation"]')?.focus({ preventScroll: true })
     ));
     const onKeyDown = (event: KeyboardEvent): void => {
+      // Project search is portalled above the drawer and owns its own focus.
+      if (event.target instanceof Node && !sidebar?.contains(event.target)) return;
       if (event.key === "Escape") {
         event.preventDefault();
         onCloseRef.current();

@@ -40,7 +40,7 @@ export function useWorkspaceMentions({
   const searchMentions = useCallback((query: string) => {
     const normalizedQuery = query.trim();
     const generation = ++requestGenerationRef.current;
-    if (!enabled || !project || !conversation || !normalizedQuery) {
+    if (!enabled || !project || !normalizedQuery) {
       setMentionResults([]);
       return;
     }
@@ -48,7 +48,7 @@ export function useWorkspaceMentions({
       type: "workspace.entries",
       payload: {
         projectId: project.id,
-        conversationId: conversation.id,
+        conversationId: conversation?.id,
         query: normalizedQuery,
       },
     }).then(resultEvent).then((event) => {

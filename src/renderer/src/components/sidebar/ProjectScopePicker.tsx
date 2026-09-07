@@ -19,7 +19,10 @@ export function ProjectScopePicker({ projects, selectedId, onSelect, onAdd, disa
     <div className="sidebar-project-scope">
       <button ref={trigger} type="button" className="project-scope-trigger"
         aria-label="Filter work by project" aria-haspopup="dialog" aria-expanded={open}
-        onClick={() => setOpen(true)}>
+        onClick={() => setOpen((current) => !current)}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); setOpen(true); }
+        }}>
         <Folder size={16} /><span>{selected?.name ?? "All projects"}</span><ChevronDown size={14} />
       </button>
       <IconButton label="Add project" disabled={disabled} onClick={onAdd}><FolderPlus size={16} /></IconButton>

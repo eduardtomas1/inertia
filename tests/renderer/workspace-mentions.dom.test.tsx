@@ -70,6 +70,28 @@ function conversation(
 }
 
 describe("useWorkspaceMentions", () => {
+  it("queries the selected project before a local draft has a saved conversation", async () => {
+    const request = vi.fn(async (): Promise<ServerEvent> => ({
+      type: "request.result",
+      requestId: "44444444-4444-4444-8444-444444444444",
+      result: {
+        kind: "workspace.entries", directory: "", truncated: false,
+        entries: [{ path: "README.md", kind: "file" }],
+      },
+    }));
+    const { result } = renderHook(() => useWorkspaceMentions({
+      enabled: true, project, conversation: null, request,
+    }));
+    act(() => result.current.searchMentions("README"));
+    await waitFor(() => expect(result.current.mentionResults).toEqual([
+      { path: "README.md", kind: "file" },
+    ]));
+    expect(request).toHaveBeenCalledWith({
+      type: "workspace.entries",
+      payload: { projectId: project.id, conversationId: undefined, query: "README" },
+    });
+  });
+
   it("keeps simultaneous pane searches scoped to their conversation IDs", async () => {
     const primary = conversation(
       "22222222-2222-4222-8222-222222222222",

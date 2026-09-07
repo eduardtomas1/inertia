@@ -113,6 +113,8 @@ export function useDraftConversation({
   });
   const draftRef = useRef(draft);
   const selectionWhenDraftOpenedRef = useRef(persistedConversationId);
+  const independentDraftRef = useRef(false);
+  const explicitModelRef = useRef(false);
 
   const replaceDraft = useCallback((
     next: DraftConversationState | null,
@@ -123,14 +125,40 @@ export function useDraftConversation({
     if (next && persist) writePersistedDraftConversation(next);
   }, []);
 
-  const start = (projectId: string): void => {
+  const start = (projectId: string, independent = false): void => {
     discard();
+    independentDraftRef.current = independent;
+    explicitModelRef.current = false;
     selectionWhenDraftOpenedRef.current = persistedConversationId;
     const payload = snapshot
       ? defaultConversationPayloadForProject(snapshot, settings, projectId)
       : buildNewConversationPayload(projectId, settings);
     replaceDraft({
       conversation: buildDraftConversation(payload),
+      payload,
+      materialized: null,
+    });
+  };
+
+  const changeProject = (projectId: string): void => {
+    const current = draftRef.current;
+    if (!current || current.materialized || current.conversation.projectId === projectId
+      || !snapshot?.projects.some(({ id }) => id === projectId)) return;
+    const defaults = defaultConversationPayloadForProject(snapshot, settings, projectId);
+    const payload = {
+      ...(explicitModelRef.current
+        ? withNewConversationModelSelection(defaults, current.conversation.modelSelection)
+        : defaults),
+      interactionMode: current.conversation.interactionMode,
+      accessMode: current.conversation.accessMode,
+    };
+    // Keep the composer identity (prompt and attachments), but rebuild the
+    // project-owned checkout and defaults. Selecting a project is not navigation.
+    replaceDraft({
+      conversation: buildDraftConversation(payload, {
+        id: current.conversation.id,
+        now: current.conversation.createdAt,
+      }),
       payload,
       materialized: null,
     });
@@ -294,7 +322,7 @@ export function useDraftConversation({
       );
       if (!projectExists) {
         discard();
-      } else if (
+      } else if (!independentDraftRef.current && (
         (
           persistedConversationId
           // Opening a global draft leaves the prior chat selected. Refreshing
@@ -304,7 +332,7 @@ export function useDraftConversation({
           && current.materialized?.conversationId !== persistedConversationId
         )
         || snapshot.activeProjectId !== current.conversation.projectId
-      ) {
+      )) {
         replaceDraft(null, false);
       }
       return;
@@ -332,6 +360,7 @@ export function useDraftConversation({
 
   const chooseModel = (selection: ModelSelection): boolean => {
     if (!draft || draft.materialized) return false;
+    explicitModelRef.current = true;
     const payload = withNewConversationModelSelection(
       draft.payload,
       selection,
@@ -350,6 +379,9 @@ export function useDraftConversation({
   const updateDraft = (change: ConversationUpdate): void => {
     const current = draftRef.current;
     if (!current || current.materialized) return;
+    if (change.modelSelection || change.reasoningEffort !== undefined || change.providerId) {
+      explicitModelRef.current = true;
+    }
     const next = (() => {
       const selection = change.modelSelection
         ? {
@@ -650,6 +682,7 @@ export function useDraftConversation({
       draft?.payload.useWorktree && !draft.payload.worktreePath,
     ),
     start,
+    changeProject,
     importProject,
     clear,
     discard,

@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type { Project } from "../../src/shared/contracts";
 import { ProjectScopePicker } from "../../src/renderer/src/components/sidebar/ProjectScopePicker";
@@ -8,6 +9,24 @@ const projects = [
   { id: "two", name: "Runtime", path: "/work/runtime" },
 ] as Project[];
 describe("project scope picker", () => {
+  it("reopens after each filter change and toggles closed from the same trigger", () => {
+    function Picker() {
+      const [selectedId, setSelectedId] = useState<string | null>(null);
+      return <ProjectScopePicker projects={projects} selectedId={selectedId} onSelect={setSelectedId} onAdd={vi.fn()} disabled={false} />;
+    }
+    render(<Picker />);
+    const trigger = screen.getByRole("button", { name: "Filter work by project" });
+    for (const name of ["Website", "Runtime", "All projects", "Website"]) {
+      fireEvent.click(trigger);
+      expect(trigger).toHaveAttribute("aria-expanded", "true");
+      fireEvent.click(screen.getByRole("option", { name }));
+      expect(trigger).toHaveTextContent(name);
+      expect(trigger).toHaveAttribute("aria-expanded", "false");
+    }
+    fireEvent.click(trigger);
+    fireEvent.click(trigger);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
   it("searches by project and path, selects with the keyboard, and restores focus", async () => {
     const onSelect = vi.fn();
     render(

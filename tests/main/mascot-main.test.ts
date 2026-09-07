@@ -170,10 +170,12 @@ describe("mascot window ownership", () => {
     await app.invoke(MASCOT_IPC.configure, [{ enabled: true, motion: true }]);
     const overlay = harness.windows[1] as WindowDouble;
     const saved = (): ReturnType<typeof readMascotWindowState> => readMascotWindowState(join(app.directory, "mascot-window-state.json"));
+    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseDown", button: "left", x: 120, y: 184 });
+    // A quick mouse movement can precede the renderer's asynchronous request.
+    harness.cursor = { x: 1100, y: 700 };
     await app.invoke(MASCOT_IPC.action, ["pickup"], overlay);
     expect(app.mascot.snapshot().dragging).toBe(true);
     const sends = overlay.webContents.send.mock.calls.length;
-    harness.cursor = { x: 1100, y: 700 };
     vi.advanceTimersByTime(16);
     expect(overlay.getBounds()).toEqual({ x: 980, y: 516, width: 240, height: 240 });
     vi.advanceTimersByTime(1000); // Holding still must not drop, save, or broadcast.
@@ -201,6 +203,7 @@ describe("mascot window ownership", () => {
     const app = await fixture();
     await app.invoke(MASCOT_IPC.configure, [{ enabled: true, motion: true }]);
     const overlay = harness.windows[1] as WindowDouble;
+    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseDown", button: "left", x: 120, y: 184 });
     await app.invoke(MASCOT_IPC.action, ["pickup"], overlay);
     if (reason === "reload") overlay.webContents.emit("did-start-loading");
     else if (reason === "native release") overlay.webContents.emit("before-mouse-event", {}, { type: "mouseUp", button: "left" });
@@ -219,7 +222,12 @@ describe("mascot window ownership", () => {
     const overlay = harness.windows[1] as WindowDouble;
     await expect(app.invoke(MASCOT_IPC.action, ["pickup"])).rejects.toThrow("untrusted");
     await expect(app.invoke(MASCOT_IPC.action, ["pickup", { x: 0, y: 0 }], overlay)).rejects.toThrow("untrusted");
-    harness.cursor = { x: 0, y: 0 };
+    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseDown", button: "left", x: 120, y: 40 });
+    await app.invoke(MASCOT_IPC.action, ["pickup"], overlay);
+    expect(app.mascot.snapshot().dragging).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseDown", button: "left", x: 120, y: 184 });
+    overlay.webContents.emit("before-mouse-event", {}, { type: "mouseUp", button: "left" });
     await app.invoke(MASCOT_IPC.action, ["pickup"], overlay);
     expect(app.mascot.snapshot().dragging).toBe(false);
     expect(vi.getTimerCount()).toBe(0);

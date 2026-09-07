@@ -31,6 +31,7 @@ export class MascotMain {
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
   private drag: { offset: { x: number; y: number }; started: number } | null = null;
   private dragTimer: ReturnType<typeof setInterval> | null = null;
+  private pickupOffset: { x: number; y: number } | null = null;
   private suspended = false;
   private registered = false;
   private readonly canPosition = supportsMascotPlacement(process.platform, process.env, app.commandLine.getSwitchValue("ozone-platform"));
@@ -130,6 +131,12 @@ export class MascotMain {
     window.webContents.on("will-attach-webview", (event) => event.preventDefault());
     window.webContents.on("context-menu", () => this.menu(window));
     window.webContents.on("before-mouse-event", (_event, mouse) => {
+      // Capture the grab point before dispatching to the renderer. The OS
+      // cursor may already have moved when its asynchronous pickup arrives.
+      if (mouse.type === "mouseDown" && mouse.button === "left") {
+        this.pickupOffset = mouse.x >= 72 && mouse.x < 168 && mouse.y >= 136 && mouse.y < 234
+          ? { x: mouse.x, y: mouse.y } : null;
+      }
       if (mouse.type === "mouseUp" && mouse.button === "left") this.endDrag();
     });
     window.webContents.on("render-process-gone", () => this.failed());
@@ -205,14 +212,13 @@ export class MascotMain {
   private beginDrag(): void {
     const window = this.window;
     if (!this.canPosition || this.drag || !window || window.isDestroyed()) return;
-    const cursor = screen.getCursorScreenPoint();
-    const bounds = window.getBounds();
     // Only the character's input region can start a drag. No renderer-supplied
     // coordinates, global hooks, or persistent polling are needed.
-    const x = cursor.x - bounds.x; const y = cursor.y - bounds.y;
-    if (x < 72 || x >= 168 || y < 136 || y >= 234) return;
+    const offset = this.pickupOffset;
+    this.pickupOffset = null;
+    if (!offset) return;
     if (this.saveTimer) { clearTimeout(this.saveTimer); this.saveTimer = null; }
-    this.drag = { offset: { x, y }, started: Date.now() };
+    this.drag = { offset, started: Date.now() };
     this.dragTimer = setInterval(() => {
       // Bound a lost pointer-up even if a renderer stalls without exiting.
       if (this.drag && Date.now() - this.drag.started >= 120_000) this.endDrag();
@@ -233,12 +239,14 @@ export class MascotMain {
   }
 
   private clearDrag(): void {
+    this.pickupOffset = null;
     if (this.dragTimer) clearInterval(this.dragTimer);
     this.dragTimer = null;
     this.drag = null;
   }
 
   private endDrag(): void {
+    this.pickupOffset = null;
     if (!this.drag) return;
     this.moveDrag();
     this.clearDrag();

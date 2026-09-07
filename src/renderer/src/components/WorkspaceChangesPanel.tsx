@@ -833,9 +833,9 @@ export function WorkspaceChangesPanel({
           <span>
             <strong>{snapshot.truncated ? "Repository discovery was bounded." : "Some repositories could not be read."}</strong>
             {snapshot.discoveredRepositories > snapshot.repositories.length
-              ? ` Showing ${snapshot.repositories.length} of ${snapshot.discoveredRepositories} repository roots after scanning ${snapshot.scannedDirectories} folders. Increase this project's repository display limit from its project menu to show more.`
+              ? ` Showing ${snapshot.repositories.length} of ${snapshot.discoveredRepositories} repository roots after scanning ${snapshot.scannedDirectories} folders. Choose a narrower project folder.`
               : snapshot.truncated
-                ? ` Scanned ${snapshot.scannedDirectories} folders; depth or directory safety limits left part of the workspace uninspected.`
+                ? ` Scanned ${snapshot.scannedDirectories} folders; automatic discovery is limited. Choose a closer project folder.`
               : " Available repository changes are still shown."}
           </span>
         </div>

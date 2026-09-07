@@ -35,7 +35,7 @@ export class ProjectRepository {
       repositoryRoot: identity.repositoryRoot ?? null,
       repositoryRelativePath: identity.repositoryRelativePath ?? ".",
       groupingMode: null,
-      gitRepositoryLimit: 128,
+      gitRepositoryLimit: 16,
       color: PROJECT_COLORS[projectCount % PROJECT_COLORS.length],
       status: "ready",
       createdAt: now,

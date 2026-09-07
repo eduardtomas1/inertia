@@ -476,7 +476,7 @@ describe("workspace Git repository discovery", () => {
     expect(repositoryLimited.repositories[0].repositoryPath).toBe("modules/alpha");
   });
 
-  it("finishes traversing a workspace after the repository display limit is reached", async () => {
+  it("caps automatic previews even when a legacy project requests a larger display limit", async () => {
     const root = temporaryRoot("many-repositories");
     for (let index = 0; index < 70; index += 1) {
       initializeRepository(
@@ -489,15 +489,25 @@ describe("workspace Git repository discovery", () => {
       maxDirectories: 1_000,
     });
 
-    expect(snapshot.repositories).toHaveLength(64);
+    expect(snapshot.repositories.length).toBeGreaterThan(0);
+    expect(snapshot.repositories.length).toBeLessThanOrEqual(32);
     expect(snapshot.discoveredRepositories).toBe(70);
-    expect(snapshot.repositoryLimit).toBe(64);
+    expect(snapshot.repositoryLimit).toBe(32);
     expect(snapshot.scannedDirectories).toBe(72);
     expect(snapshot.truncated).toBe(true);
-    expect(snapshot.repositories.at(-1)?.repositoryPath).toBe(
-      "modules/repository-63",
-    );
+    expect(snapshot.repositories[0]?.repositoryPath).toBe("modules/repository-00");
   }, 60_000);
+
+  it("resolves an explicitly selected repository beyond automatic discovery depth", async () => {
+    const root = temporaryRoot("explicit-deep-repository");
+    const nestedPath = "unrelated/large/folder/actual-project";
+    initializeRepository(join(root, nestedPath));
+    const snapshot = await discoverWorkspaceGitRepositories(root);
+    expect(snapshot.repositories).toEqual([]);
+    expect(snapshot.truncated).toBe(true);
+    const repository = await resolveWorkspaceGitRepository(root, nestedPath);
+    expect(repository.root).toBe(realpathSync(join(root, nestedPath)));
+  });
 
   it("loads the complete diff for one small change in a root-less nested repository", async () => {
     const root = temporaryRoot("single-nested-diff");

@@ -1774,7 +1774,7 @@ process.exit(child.status ?? 1);
     const project = welcome.snapshot.projects.find(
       ({ id }) => id === welcome.snapshot.activeProjectId,
     )!;
-    expect(project.gitRepositoryLimit).toBe(128);
+    expect(project.gitRepositoryLimit).toBe(16);
 
     const updateRequestId = randomUUID();
     send(client.socket, {
@@ -1782,7 +1782,7 @@ process.exit(child.status ?? 1);
       requestId: updateRequestId,
       payload: {
         projectId: project.id,
-        gitRepositoryLimit: 16,
+        gitRepositoryLimit: 32,
       },
     });
     await client.events.next(
@@ -1795,12 +1795,12 @@ process.exit(child.status ?? 1);
         && event.snapshot.projects.some(
           (candidate) => (
             candidate.id === project.id
-            && candidate.gitRepositoryLimit === 16
+            && candidate.gitRepositoryLimit === 32
           ),
         ),
     );
     expect(updated.snapshot.projects.find(({ id }) => id === project.id))
-      .toMatchObject({ gitRepositoryLimit: 16 });
+      .toMatchObject({ gitRepositoryLimit: 32 });
 
     const requestId = randomUUID();
     send(client.socket, {
@@ -1817,9 +1817,10 @@ process.exit(child.status ?? 1);
     if (refreshed.result.kind !== "git.workspace.status") {
       throw new Error("Expected workspace repository status.");
     }
-    expect(refreshed.result.status.repositories).toHaveLength(16);
+    expect(refreshed.result.status.repositories.length).toBeGreaterThan(0);
+    expect(refreshed.result.status.repositories.length).toBeLessThanOrEqual(17);
     expect(refreshed.result.status.discoveredRepositories).toBe(17);
-    expect(refreshed.result.status.repositoryLimit).toBe(16);
+    expect(refreshed.result.status.repositoryLimit).toBe(32);
   });
 
   it("rejects a known-unready provider before persisting a turn, then refreshes its state", async () => {

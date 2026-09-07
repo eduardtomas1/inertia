@@ -368,6 +368,7 @@ class ElectronAppUpdaterAdapter implements AppUpdaterAdapter {
       this.preparedLinux = { transaction, candidate, journal, snapshot };
       return true;
     } catch (error) {
+      if (process.env.NODE_ENV === "test") console.error("Linux update preparation failed", error);
       if (
         error instanceof LinuxAppUpdateCandidateClaimConflictError
         && snapshot

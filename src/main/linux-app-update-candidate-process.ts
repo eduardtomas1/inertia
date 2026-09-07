@@ -542,7 +542,7 @@ export async function startLinuxAppUpdateCandidate(options: {
       stdio: [
         "pipe",
         "pipe",
-        "ignore",
+        process.env.NODE_ENV === "test" ? "inherit" : "ignore",
         "pipe",
         held.fileDescriptor,
         "pipe",

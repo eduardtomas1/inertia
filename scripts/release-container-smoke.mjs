@@ -395,6 +395,9 @@ async function smokeLinux(repositoryRoot, releaseDirectory, names, productName) 
       INERTIA_PACKAGE_SMOKE_NO_SANDBOX: "1",
     }, ["APPIMAGE_EXTRACT_AND_RUN"]);
     console.log(`Linux ${process.arch} AppImage default mount/AppRun smoke passed.`);
+    await runContainerCommand(process.execPath, [join(repositoryRoot, "scripts/linux-installed-update-smoke.mjs"), appImage], {
+      label: "Installed AppImage update and relaunch", echoOutput: true, timeoutMs: 240_000,
+    });
     await runPackageSmoke(repositoryRoot, installedAppImage, resources, "linux-appimage", temporaryRoot, "handoff-wrapper", {
       APPIMAGE_EXTRACT_AND_RUN: "1",
       INERTIA_PACKAGE_SMOKE_NO_SANDBOX: "1",

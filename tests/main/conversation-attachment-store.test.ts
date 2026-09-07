@@ -1215,14 +1215,58 @@ describe("durable conversation attachment storage", () => {
     "retains referenced records that cannot be read with private permissions",
     async () => {
       const dataDirectory = await root();
-      const store = await openTestStore(dataDirectory);
-      const [retained] = await store.retain([image()]);
-      await chmod(retained!.path, 0o644);
+      let holdFirstMaintenanceRead = false;
+      let observingMaintenance = false;
+      let foregroundReadStopped = false;
+      let nativeReadFailure: unknown;
+      let settleNativeRead!: () => void;
+      const nativeReadCompleted = new Promise<void>((resolve) => { settleNativeRead = resolve; });
+      const store = await openTestStore(dataDirectory, {
+        readOperationRunner(operation, signal) {
+          if (holdFirstMaintenanceRead) {
+            holdFirstMaintenanceRead = false;
+            if (!signal) throw new Error("Reconciliation did not provide its batch signal.");
+            const result = new Promise<never>((_resolve, reject) => {
+              const onAbort = (): void => reject(signal.reason);
+              signal.addEventListener("abort", onAbort, { once: true });
+              if (signal.aborted) onAbort();
+            });
+            return {
+              result,
+              stopped: result.then(undefined, () => { foregroundReadStopped = true; }),
+            };
+          }
+          const reading = runConversationAttachmentStoreChild(operation, signal);
+          if (!observingMaintenance) return reading;
+          return {
+            ...reading,
+            result: reading.result.catch((error: unknown) => {
+              nativeReadFailure = error;
+              throw error;
+            }).finally(settleNativeRead),
+          };
+        },
+      });
+      try {
+        const [retained] = await store.retain([image()]);
+        await chmod(retained!.path, 0o644);
 
-      await expect(store.preview(retained!.id)).rejects.toThrow(/unsafe/u);
-      await expect(store.reconcile([retained!])).rejects.toThrow(/unsafe/u);
-      await expect(readFile(retained!.path)).resolves.toEqual(png);
-      await expect(store.retain([image()])).rejects.toThrow(/reconciliation failed/u);
+        await expect(store.preview(retained!.id)).rejects.toThrow(/unsafe/u);
+        holdFirstMaintenanceRead = true;
+        observingMaintenance = true;
+        // A yielded foreground batch is not a completed reconciliation. The
+        // background retry must report unsafe storage and keep writes blocked.
+        await expect(store.reconcile([retained!])).resolves.toBeUndefined();
+        expect(foregroundReadStopped).toBe(true);
+        await nativeReadCompleted;
+        expect(nativeReadFailure).toMatchObject({ message: expect.stringMatching(/unsafe/u) });
+        await vi.waitFor(async () => {
+          await expect(store.retain([image()])).rejects.toThrow(/reconciliation failed/u);
+        });
+        await expect(readFile(retained!.path)).resolves.toEqual(png);
+      } finally {
+        await store.close();
+      }
     },
   );
 

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Bug, Check, Copy, ExternalLink, ShieldCheck, Square } from "lucide-react";
 import type { ModelBackendProfileView, ModelSelection, Project, ProviderInfo, ServerEvent } from "@shared/contracts";
 import { ISSUE_REPOSITORY_URL, reportAllowsAgent, scrubReportText, type IssueReport } from "@shared/issue-report";
-import { providerNativeModelSelection } from "@shared/model-routing";
+import { modelSelectionSchema, providerNativeModelSelection } from "@shared/model-routing";
 import type { CommandWithoutId } from "../lib/runtimeCommands";
 import { buildComposerModelRoutes } from "../utils/modelChooserRoutes";
 import "./IssueReportSettings.css";
@@ -23,6 +23,7 @@ export function IssueReportSettings({ providers, backendProfiles, projects, disa
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [editing, setEditing] = useState(false);
+  const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [copyStatus, setCopyStatus] = useState("");
@@ -32,6 +33,7 @@ export function IssueReportSettings({ providers, backendProfiles, projects, disa
   requestRef.current = request;
   const apply = useCallback((next: IssueReport | null) => {
     if (!mounted.current) return;
+    setLoaded(true);
     setReport(next);
     if (next) {
       setDescription(next.description); setProjectId(next.projectId ?? ""); setSelection(next.selection);
@@ -67,10 +69,10 @@ export function IssueReportSettings({ providers, backendProfiles, projects, disa
   const selectedRoute = routes[selectedIndex];
   const supported = reportAllowsAgent(selection.harnessId);
   const ready = supported && selectedRoute?.selectable === true && providers.some((provider) => provider.id === "claude" && provider.canRun);
-  const locked = busy || disabled || report?.status === "validating" || report?.status === "submitting" || report?.status === "uncertain";
+  const locked = !loaded || busy || disabled || report?.status === "validating" || report?.status === "submitting" || report?.status === "uncertain";
   const submitted = report?.status === "submitted";
   const prepare = async (): Promise<void> => {
-    await command({ type: "support.report.prepare", payload: { description, projectId: projectId || null, selection } });
+    await command({ type: "support.report.prepare", payload: { description, projectId: projectId || null, selection: modelSelectionSchema.parse(selection) } });
     setEditing(false);
   };
   const validate = async (): Promise<void> => {
@@ -89,7 +91,7 @@ export function IssueReportSettings({ providers, backendProfiles, projects, disa
       <div className="issue-report-options">
         <label>Agent and model<select aria-label="Report agent and model" value={selectedIndex < 0 ? "" : selectedIndex} disabled={locked} onChange={(event) => { const route = routes[Number(event.target.value)]; if (route) setSelection(route.selection); }}>
           {selectedIndex < 0 && <option value="">Choose a model</option>}
-          {routes.map((route, index) => <option key={`${route.selection.backendProfileId}:${route.selection.modelId}`} value={index}>{route.providerLabel} · {route.modelLabel}</option>)}
+          {routes.map((route, index) => <option key={`${route.selection.backendProfileId}:${route.selection.modelId}`} value={index}>{route.providerLabel} · {route.displayName}</option>)}
         </select></label>
         <label>Reasoning<select aria-label="Report reasoning" disabled={locked || !selectedRoute?.reasoningOptions.length} value={selection.reasoningEffort ?? ""} onChange={(event) => setSelection({ ...selection, reasoningEffort: event.target.value || null })}>
           <option value="">Provider default</option>{selectedRoute?.reasoningOptions.map((effort) => <option key={effort} value={effort}>{effort}</option>)}

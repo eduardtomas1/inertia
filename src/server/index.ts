@@ -873,7 +873,6 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       }
     }
   };
-
   const webSocketBoundary = attachRuntimeWebSocketBoundary({
     server,
     websocketPath,

@@ -190,6 +190,7 @@ describe("Claude Agent SDK harness", () => {
     });
   });
 
+
   it("fails and cleans up a run that floods bounded provider events", async () => {
     const root = portableFixtureRoot("Claude SDK event flood");
     roots.push(root);

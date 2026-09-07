@@ -373,7 +373,6 @@ export function runtimeMigrationCatalog(): readonly DatabaseMigration[] {
         );
         CREATE INDEX IF NOT EXISTS model_backend_profiles_harness_idx
           ON model_backend_profiles(harness_id, enabled, updated_at DESC);
-
         CREATE TABLE IF NOT EXISTS model_backend_defaults (
           scope TEXT NOT NULL CHECK (scope IN ('global', 'project')),
           project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
@@ -1227,8 +1226,7 @@ export function runtimeMigrationCatalog(): readonly DatabaseMigration[] {
       authoritativeRunStateMigration,
       { name: "RefreshAgentBrowserCapability", up: "DELETE FROM agent_goals WHERE source = 'codex-native' AND conversation_id IN (SELECT id FROM conversations WHERE provider_id = 'codex' AND provider_session_id IS NOT NULL); UPDATE conversations SET provider_session_id = NULL, continuation_identity_json = NULL WHERE provider_id = 'codex' AND provider_session_id IS NOT NULL;" },
       persistSuspendAwareTurnTiming, nativeGeminiProviderMigration,
-      persistTurnContinuationEvidence,
-      issueReportsMigration,
+      persistTurnContinuationEvidence, issueReportsMigration,
     );
     return createRuntimeMigrationCatalog(legacyMigrations, migrationExtensions);
 }

@@ -9,7 +9,7 @@ function resolver(platform: NodeJS.Platform = "darwin", files: Record<string, st
 }
 
 describe("Apple Git executable selection", () => {
-  afterEach(() => { vi.useRealTimers(); });
+  afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
   it("uses one bounded caller-owned lookup for concurrent preparation and caches its exact executable", async () => {
     const { selection } = resolver("darwin", {
       "/usr/bin/git": "/usr/bin/git", [selectedGit]: selectedGit,
@@ -81,6 +81,28 @@ describe("Apple Git executable selection", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(locate).not.toHaveBeenCalled();
     expect(selection.command(applePath)).toBe("git");
+  });
+
+  it("rejects an overdue filesystem result before the delayed timer callback runs", async () => {
+    vi.useFakeTimers();
+    let elapsed = 0;
+    vi.spyOn(performance, "now").mockImplementation(() => elapsed);
+    let finishRead!: (path: string) => void;
+    const read = vi.fn<(path: string) => Promise<string | null>>()
+      .mockImplementationOnce(() => new Promise(resolve => { finishRead = resolve; }))
+      .mockResolvedValue(selectedGit);
+    const selection = new GitExecutableSelection("darwin", read);
+    const locate = vi.fn(async () => selectedGit);
+    const preparing = selection.prepare(applePath, locate);
+    // Simulate a busy event loop: the clock has advanced, but the overdue
+    // timeout callback has not run before this promise continuation.
+    elapsed = 1_001;
+    vi.setSystemTime(Date.now() + elapsed);
+    finishRead("/usr/bin/git");
+    await preparing;
+    expect(locate).not.toHaveBeenCalled();
+    expect(selection.command(applePath)).toBe("git");
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("shares the filesystem budget across entries and cannot promote late validation", async () => {

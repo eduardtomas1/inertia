@@ -9,21 +9,23 @@ async function withinFilesystemBudget(
   operation: (expired: () => boolean) => Promise<string | null>,
 ): Promise<string | null> {
   if (budget.remainingMs <= 0) return null;
-  const started = Date.now();
+  const started = performance.now();
+  const deadline = started + budget.remainingMs;
   let expired = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    return await Promise.race([
-      operation(() => expired),
+    const result = await Promise.race([
+      operation(() => expired || performance.now() >= deadline),
       new Promise<null>(resolve => {
         timer = setTimeout(() => { expired = true; resolve(null); }, budget.remainingMs);
         timer.unref();
       }),
     ]);
+    return expired || performance.now() >= deadline ? null : result;
   } finally {
     expired = true;
     if (timer) clearTimeout(timer);
-    budget.remainingMs -= Math.max(0, Date.now() - started);
+    budget.remainingMs -= Math.max(0, performance.now() - started);
   }
 }
 

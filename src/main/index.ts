@@ -125,7 +125,8 @@ import { handleStartupFailure } from "./startup-failure.js";
 import { createLinuxLifecycleNotices } from "./linux-shutdown-notice.js";
 import { createTestPrivilegedCleanupController } from "./test-privileged-cleanup-controller.js";
 import { installedUpdateTestFixture } from "./test-installed-update.js";
-const installedUpdateFixture = installedUpdateTestFixture(); const { configuration: releaseChannel, packageSmokeRoot } = initializeInertiaReleaseChannel(app, process.env);
+const installedUpdateFixture = installedUpdateTestFixture();
+const { configuration: releaseChannel, packageSmokeRoot } = initializeInertiaReleaseChannel(app, process.env);
 const IPC = {
   getRuntimeConnection: "inertia:runtime-connection",
   runtimeReady: "inertia:runtime-ready",
@@ -1214,6 +1215,7 @@ async function bootstrap(): Promise<void> {
     });
   }
 }
+
 void startApplicationWithUpdateHandoff({
   application: app, platform: process.platform, environment: process.env,
   channel: releaseChannel.channel, version: app.getVersion(),
@@ -1242,8 +1244,5 @@ void startApplicationWithUpdateHandoff({
   showErrorBox: (title, content) => dialog.showErrorBox(title, content),
   quit: () => app.quit(),
 }));
-function recordPackageSmokeStage(stage: string): void {
-  writePackageSmokeStage({
-    marker: packageSmokeFilePath, ownerToken: packageSmokeOwnerToken, stage,
-  });
-}
+
+function recordPackageSmokeStage(stage: string): void { writePackageSmokeStage({ marker: packageSmokeFilePath, ownerToken: packageSmokeOwnerToken, stage }); }

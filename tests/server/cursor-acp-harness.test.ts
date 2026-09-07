@@ -171,7 +171,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   return command;
 }
 
-describe.sequential("Cursor ACP harness", () => {
+describe("Cursor ACP harness", { concurrent: false }, () => {
   const roots: string[] = [];
   afterEach(async () => await Promise.all(roots.splice(0).map(removePortableFixture)));
 
@@ -916,7 +916,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     });
 
     expect(result).toMatchObject({ status: "completed", text: "Cursor response", sessionId: "44444444-4444-4444-8444-444444444444" });
-    expect(approvals).toEqual(["Run tests"]);
+    expect(approvals).toEqual(["Run tests", "Create Cursor plan"]);
     expect(questions).toEqual(["Which scopes?"]);
     expect(plans).toEqual(expect.arrayContaining(["Inspect", "Implement", "Verify"]));
     expect(planExplanations).toContain("Review the final diff.");
@@ -1037,11 +1037,13 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
     expect(captured.find((message) => message.id === 100)).toMatchObject({ result: { outcome: { outcome: "selected", optionId: "allow" } } });
     expect(captured.find((message) => message.id === 101)).toMatchObject({
       result: {
-        outcome: "answered",
-        answers: [
-          { questionId: "scope", selectedOptionIds: ["focused", "broad"] },
-          { questionId: "notes", selectedOptionIds: ["Use the exact free-text answer"] },
-        ],
+        outcome: {
+          outcome: "answered",
+          answers: [
+            { questionId: "scope", selectedOptionIds: ["focused", "broad"] },
+            { questionId: "notes", selectedOptionIds: ["Use the exact free-text answer"] },
+          ],
+        },
       },
     });
     expect(captured.find((message) => message.id === 102)).toMatchObject({

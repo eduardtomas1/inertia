@@ -2,16 +2,13 @@ import { Worker } from "node:worker_threads";
 
 import type { DatabaseRecoveryImportResult } from "./database-export";
 import {
-  DATABASE_RECOVERY_EXPORT_MAX_CONVERSATIONS,
-  DATABASE_RECOVERY_EXPORT_MAX_MESSAGES,
-  DATABASE_RECOVERY_EXPORT_MAX_PROJECTS,
-} from "./database-export";
+  parseRecoveryImportWorkerEvent,
+  parseRecoveryImportWorkerRequest,
+  type RecoveryImportWorkerEvent,
+  type RecoveryImportWorkerFault,
+} from "./database-recovery-import-worker-protocol";
 
-export interface RecoveryImportWorkerFault {
-  phase: "after-staging-publish" | "during-message-import";
-  markerPath: string;
-  stallMs: number;
-}
+export type { RecoveryImportWorkerFault } from "./database-recovery-import-worker-protocol";
 
 export interface RunRecoveryImportWorkerOptions {
   databasePath: string;
@@ -23,30 +20,10 @@ export interface RunRecoveryImportWorkerOptions {
   fault?: RecoveryImportWorkerFault;
 }
 
-type RecoveryImportWorkerEvent =
-  | { type: "result"; ok: true; result: DatabaseRecoveryImportResult }
-  | { type: "result"; ok: false; message: string };
-
 function cancellationError(signal: AbortSignal): Error {
   return signal.reason instanceof Error
     ? signal.reason
     : new Error("The database recovery import was cancelled.");
-}
-
-function validReceipt(value: unknown): value is DatabaseRecoveryImportResult {
-  if (typeof value !== "object" || value === null) return false;
-  const receipt = value as Record<string, unknown>;
-  return Object.keys(receipt).length === 4
-    && Number.isSafeInteger(receipt.projects)
-    && Number(receipt.projects) >= 0
-    && Number(receipt.projects) <= DATABASE_RECOVERY_EXPORT_MAX_PROJECTS
-    && Number.isSafeInteger(receipt.conversations)
-    && Number(receipt.conversations) >= 0
-    && Number(receipt.conversations) <= DATABASE_RECOVERY_EXPORT_MAX_CONVERSATIONS
-    && Number.isSafeInteger(receipt.messages)
-    && Number(receipt.messages) >= 0
-    && Number(receipt.messages) <= DATABASE_RECOVERY_EXPORT_MAX_MESSAGES
-    && typeof receipt.alreadyImported === "boolean";
 }
 
 export function runRecoveryImportWorker(
@@ -55,28 +32,54 @@ export function runRecoveryImportWorker(
   if (options.signal?.aborted) {
     return Promise.reject(cancellationError(options.signal));
   }
+  const request = parseRecoveryImportWorkerRequest({
+    type: "recovery-import.start",
+    version: 1,
+    databasePath: options.databasePath,
+    defaultWorkspacePath: options.defaultWorkspacePath,
+    recoveryPath: options.recoveryPath,
+    targetDirectory: options.targetDirectory,
+    operationId: options.operationId,
+    fault: options.fault,
+  });
+  if (!request) return Promise.reject(new Error("The recovery import worker request is invalid."));
   const worker = new Worker(
     new URL("./database-recovery-import-worker.js", import.meta.url),
-    {
-      workerData: {
-        databasePath: options.databasePath,
-        defaultWorkspacePath: options.defaultWorkspacePath,
-        recoveryPath: options.recoveryPath,
-        targetDirectory: options.targetDirectory,
-        operationId: options.operationId,
-        fault: options.fault,
-      },
-    },
+    { workerData: request },
   );
 
   return new Promise<DatabaseRecoveryImportResult>((resolve, reject) => {
-    let result: Extract<RecoveryImportWorkerEvent, { type: "result" }> | null = null;
+    let result: RecoveryImportWorkerEvent | null = null;
     let workerError: Error | null = null;
     let stopping = false;
 
     const cleanup = (): void => {
       options.signal?.removeEventListener("abort", onAbort);
       worker.removeAllListeners();
+    };
+    const stop = (error: Error, cancellation: boolean): void => {
+      if (stopping) return;
+      stopping = true;
+      // Rejection authorizes journal reconciliation in the caller, so it must
+      // never precede termination of the worker's independent SQLite writer.
+      const confirmedExit = (): void => {
+        cleanup();
+        if (cancellation && options.fault?.phase === "after-staging-publish") {
+          setTimeout(() => reject(error), options.fault.stallMs);
+        } else {
+          reject(error);
+        }
+      };
+      void worker.terminate().then(
+        confirmedExit,
+        () => {
+          // A failed termination request is not proof that SQLite stopped.
+          // Keep reconciliation fenced until this exact worker exits. The
+          // supervisor owns the outer deadline if it never does.
+          if (worker.threadId === -1) confirmedExit();
+          else worker.once("exit", confirmedExit);
+        },
+      );
     };
     const onAbort = (): void => {
       if (stopping) return;
@@ -85,44 +88,25 @@ export function runRecoveryImportWorker(
       // authoritative; let the exit event settle it instead of reporting a
       // cancellation that could not roll the import back.
       if (result?.ok) return;
-      stopping = true;
       const error = options.signal
         ? cancellationError(options.signal)
         : new Error("The database recovery import was cancelled.");
       // Resolve cancellation only after the owned SQLite connection has
       // exited, so rollback and native-handle release are authoritative.
-      void worker.terminate().then(
-        () => {
-          cleanup();
-          if (options.fault?.phase === "after-staging-publish") {
-            // Privileged lifecycle fault: the worker and SQLite handle are
-            // already gone, but cancellation acknowledgement remains pending
-            // long enough for the supervisor to prove forced restart fencing.
-            setTimeout(() => reject(error), options.fault.stallMs);
-          } else {
-            reject(error);
-          }
-        },
-        (terminationError: unknown) => {
-          cleanup();
-          reject(terminationError);
-        },
-      );
+      stop(error, true);
     };
 
-    options.signal?.addEventListener("abort", onAbort, { once: true });
-    if (options.signal?.aborted) {
-      onAbort();
-      return;
-    }
-    worker.on("message", (event: RecoveryImportWorkerEvent) => {
+    worker.on("message", (value: unknown) => {
       if (stopping) return;
-      result = event.ok && !validReceipt(event.result)
-        ? { type: "result", ok: false, message: "The recovery import worker returned an invalid receipt." }
-        : event;
+      const event = parseRecoveryImportWorkerEvent(value);
+      if (!event || event.operationId !== request.operationId || result) {
+        stop(new Error("The recovery import worker returned an invalid receipt."), false);
+        return;
+      }
+      result = event;
     });
-    worker.once("error", (error) => {
-      workerError = error instanceof Error ? error : new Error(String(error));
+    worker.once("error", () => {
+      workerError = new Error("The recovery import worker failed.");
     });
     worker.once("exit", (code) => {
       if (stopping) return;
@@ -136,8 +120,10 @@ export function runRecoveryImportWorker(
       } else if (result.ok) {
         resolve(result.result);
       } else {
-        reject(new Error(result.message));
+        reject(new Error("The database recovery import failed."));
       }
     });
+    options.signal?.addEventListener("abort", onAbort, { once: true });
+    if (options.signal?.aborted) onAbort();
   });
 }

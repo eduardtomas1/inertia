@@ -420,6 +420,7 @@ export async function closeElectronFixtureBounded(options: {
   readonly requestRuntimeQuit: () => Promise<number | null>;
   readonly waitForRuntimeExit: (pid: number) => Promise<void>;
   readonly closeServer: () => Promise<void>;
+  readonly onCleanupFailure?: (signal: AbortSignal) => Promise<void>;
   readonly removeDirectory: () => Promise<void>;
   readonly rpcTimeoutMs?: number;
   readonly cleanupReceiptTimeoutMs?: number;
@@ -611,6 +612,18 @@ export async function closeElectronFixtureBounded(options: {
       cleanupErrors.push(new Error(
         "The Electron fixture preview server did not close in time.",
       ));
+    }
+    if (cleanupErrors.length > 0 && options.onCleanupFailure) {
+      // Preserve failure-only evidence while the private profile still exists.
+      // Reporting has its own bound and cannot replace the cleanup failure or
+      // prevent removal, even if the reporter rejects or never settles.
+      const controller = new AbortController();
+      try {
+        await settleOperationBounded(
+          Promise.resolve().then(() => options.onCleanupFailure!(controller.signal)),
+          1_000,
+        );
+      } finally { controller.abort(); }
     }
     evidence?.record("directory-remove-started");
     const removeResult = await settleOperationBounded(

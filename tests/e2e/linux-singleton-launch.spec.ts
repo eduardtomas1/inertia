@@ -1,3 +1,4 @@
+// @inertia-e2e-resource isolated
 import { spawn, type ChildProcess } from "node:child_process";
 import { constants, existsSync } from "node:fs";
 import { copyFile, link, mkdir, mkdtemp, readdir, readFile, readlink, realpath, rm, symlink, writeFile } from "node:fs/promises";

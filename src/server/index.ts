@@ -14,7 +14,9 @@ import {
   type RuntimeSyncCursor,
 } from "../shared/contracts";
 import { RuntimeStore } from "./database";
+import { prepareGitExecutable } from "./git/runner";
 import { TurnController } from "./runtime/turns/turn-controller";
+import { dispatchSettledTurnOwners } from "./runtime/turns/turn-settled-orchestration";
 import { DuoLaunchCoordinator } from "./runtime/duo/duo-launch-coordinator";
 import { resolveAuthoritativeProjectPath } from "./project-path";
 import { PROVIDER_IDS, ProviderManager } from "./providers";
@@ -148,6 +150,7 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
       runtimeSafetyError("Runtime startup is blocked."),
     );
   }
+  await prepareGitExecutable();
   const generatedAttachments = await PrivateGeneratedAttachmentStore.create(
     dataDirectory,
     {
@@ -649,16 +652,11 @@ export async function startRuntime(options: RuntimeOptions): Promise<RunningRunt
         );
         applyProviderMetadata(providerId, metadata);
       },
-      onTurnSettled: async (turn) => {
-        // The durable turn is already terminal. Backup work stays off the
-        // settlement path and the manager deduplicates it with quiet/hourly
-        // triggers. Failed and cancelled turns restart the same quiet window:
-        // their cleanup writes are just as real as a successful completion.
-        void store.createInitialBackup({ quietGraceMs: 1_000 }).catch(() => undefined);
-        await agentThreads?.manager.onSourceTurnSettled(turn);
-        await duoLaunches?.onTurnSettled(turn);
-        await testOnlyOnTurnSettled?.(turn);
-      },
+      onTurnSettled: (turn) => dispatchSettledTurnOwners(turn, [
+        (settled) => agentThreads?.manager.onSourceTurnSettled(settled),
+        (settled) => duoLaunches?.onTurnSettled(settled),
+        (settled) => testOnlyOnTurnSettled?.(settled),
+      ], () => store.createInitialBackup({ quietGraceMs: 1_000 })),
       testOnlyStreamingTrace: streamingTrace,
     },
     {

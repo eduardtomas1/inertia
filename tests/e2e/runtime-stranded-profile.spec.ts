@@ -1,3 +1,4 @@
+// @inertia-e2e-resource isolated
 import { expect, test } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";

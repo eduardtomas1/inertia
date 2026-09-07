@@ -15,6 +15,7 @@ import {
   type ProcessTreeTerminator,
 } from "../process-lifecycle";
 import { gitProcessEnvironment } from "./environment";
+import { GitExecutableSelection } from "./executable";
 import { withGitScanProcessSlot } from "./scan-coordinator";
 import {
   GIT_PROCESS_TREE_TERMINATION_FAILURE,
@@ -23,8 +24,32 @@ import {
 } from "./types";
 
 const TRUNCATED_OUTPUT_DRAIN_MS = 250;
-const ABORTED_PROCESS_DRAIN_MS = 250;
+const CANCELLED_PROCESS_DRAIN_MS = 250;
 const PREPARED_ABORT_CLEANUP_MS = 500;
+// Admission and a cold Apple tool lookup share this startup-only clock.
+// Leave room within the supervisor's 30 seconds for owned cleanup and the
+// remaining initialization; repository inspection clocks stay independent.
+const APPLE_GIT_STARTUP_TIMEOUT_MS = 10_000;
+const gitExecutable = new GitExecutableSelection();
+
+/** Prewarm Apple's tool selection before command-specific inspection clocks. */
+export async function prepareGitExecutable(environment: NodeJS.ProcessEnv = process.env): Promise<void> {
+  try {
+    await gitExecutable.prepare(environment, async () => {
+      const result = await runGitProcess("/usr/bin/xcrun", process.cwd(), ["--find", "git"], {
+        timeoutMs: APPLE_GIT_STARTUP_TIMEOUT_MS,
+        maxOutputBytes: 4_096,
+        environment,
+        failureMessage: "Git executable discovery failed.",
+      });
+      return result.stdout.toString("utf8");
+    });
+  } catch (error) {
+    // Git may be unavailable without preventing the rest of the workbench
+    // from starting. An unproved helper cleanup remains fatal to ownership.
+    if (isGitProcessTreeTerminationFailure(error)) throw error;
+  }
+}
 export interface GitProcessResult {
   stdout: Buffer;
   stderr: Buffer;
@@ -232,6 +257,17 @@ export function runGit(
   options: RunGitOptions,
   dependencies: GitRunnerDependencies = {},
 ): Promise<GitProcessResult> {
+  return runGitProcess(gitExecutable.command(gitProcessEnvironment(process.env, options.environment)),
+    cwd, args, options, dependencies);
+}
+
+function runGitProcess(
+  command: string,
+  cwd: string,
+  args: readonly string[],
+  options: RunGitOptions,
+  dependencies: GitRunnerDependencies = {},
+): Promise<GitProcessResult> {
   const maxOutputBytes = options.maxOutputBytes ?? DEFAULT_OUTPUT_BYTES;
   const configuredTimeoutMs = options.timeoutMs ?? LOCAL_TIMEOUT_MS;
   const deadlineTimeoutMs = options.deadlineAt === undefined
@@ -254,7 +290,7 @@ export function runGit(
     ?? terminateProcessTreeAndWait;
 
   return new Promise((resolveProcess, rejectProcess) => {
-    const invocation = runtimeOwnedProcessInvocation("git", args);
+    const invocation = runtimeOwnedProcessInvocation(command, args);
     const child = spawnRuntimeOwnedProcess(() => spawn(invocation.command, invocation.args, {
       cwd,
       shell: false,
@@ -272,24 +308,25 @@ export function runGit(
     let termination: Promise<void> | undefined;
     let terminalError: GitError | undefined;
     let truncatedOutputDrainTimer: NodeJS.Timeout | undefined;
-    let abortedProcessDrainTimer: NodeJS.Timeout | undefined;
+    let cancelledProcessDrainTimer: NodeJS.Timeout | undefined;
     const abortError = new GitError(
       "timeout",
       "Git inspection was cancelled.",
     );
-    const onAbort = (): void => {
-      terminalError ??= abortError;
-      if (termination || abortedProcessDrainTimer) return;
-      // Fast Git inspections can have exited while Node is still waiting for
-      // their stdio handles to close. Give that already-finishing child one
-      // bounded window before invoking Windows taskkill, whose PID-not-found
-      // result cannot prove that detached descendants were cleaned up.
-      abortedProcessDrainTimer = setTimeout(() => {
-        abortedProcessDrainTimer = undefined;
+    const drainBeforeTermination = (error: GitError): void => {
+      terminalError ??= error;
+      if (settled || termination || cancelledProcessDrainTimer) return;
+      // Cancellation is final at its deadline, including a timeout. Let an
+      // already-finishing process close within the existing cleanup window
+      // before signalling its guardian or a Windows PID that may have exited.
+      // A late close still rejects the operation with terminalError.
+      cancelledProcessDrainTimer = setTimeout(() => {
+        cancelledProcessDrainTimer = undefined;
         terminateAndFinish();
-      }, ABORTED_PROCESS_DRAIN_MS);
-      abortedProcessDrainTimer.unref();
+      }, CANCELLED_PROCESS_DRAIN_MS);
+      cancelledProcessDrainTimer.unref();
     };
+    const onAbort = (): void => drainBeforeTermination(abortError);
 
     const finish = (
       error?: GitError,
@@ -301,8 +338,8 @@ export function runGit(
       if (truncatedOutputDrainTimer) {
         clearTimeout(truncatedOutputDrainTimer);
       }
-      if (abortedProcessDrainTimer) {
-        clearTimeout(abortedProcessDrainTimer);
+      if (cancelledProcessDrainTimer) {
+        clearTimeout(cancelledProcessDrainTimer);
       }
       options.signal?.removeEventListener("abort", onAbort);
       if (error) rejectProcess(error);
@@ -340,7 +377,7 @@ export function runGit(
     };
 
     const timer = setTimeout(() => {
-      terminateAndFinish(new GitError(
+      drainBeforeTermination(new GitError(
         "timeout",
         "Git took too long to complete the operation.",
       ));
@@ -482,7 +519,7 @@ function runPreparedGitRefTransaction(
   const timeoutMs = Math.min(LOCAL_TIMEOUT_MS, deadlineTimeoutMs);
   const expiresAt = Date.now() + timeoutMs;
   return new Promise((resolve, reject) => {
-    const invocation = runtimeOwnedProcessInvocation("git", ["update-ref", "--stdin"]);
+    const invocation = runtimeOwnedProcessInvocation(gitExecutable.command(gitProcessEnvironment(process.env)), ["update-ref", "--stdin"]);
     const child = spawnRuntimeOwnedProcess(() => spawn(invocation.command, invocation.args, {
       cwd,
       shell: false,

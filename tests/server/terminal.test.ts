@@ -2039,7 +2039,7 @@ describe("TerminalManager", () => {
     }
   });
 
-  it("blocks replacement when a closed guardian retains uncertain ownership", async () => {
+  it("blocks replacement when a closed POSIX guardian retains uncertain ownership", async () => {
     const replacedTerminal = fakeTerminal(42);
     const replacementTerminal = fakeTerminal(43);
     const releaseIfGroupExited = vi.fn();
@@ -2049,6 +2049,7 @@ describe("TerminalManager", () => {
       .mockReturnValueOnce(replacedTerminal.pty)
       .mockReturnValueOnce(replacementTerminal.pty);
     const manager = new TerminalManager({
+      platform: "linux",
       spawnTerminal,
       shutdownTimeoutMs: 20,
       closeTimeoutMs: 20,
@@ -2103,7 +2104,7 @@ describe("TerminalManager", () => {
     expect(replacedTerminal.pty.write).not.toHaveBeenCalled();
   });
 
-  it("replaces a normally closed guardian after its durable claim retires", async () => {
+  it("replaces a normally closed POSIX guardian after its durable claim retires", async () => {
     const replacedTerminal = fakeTerminal(42);
     const replacementTerminal = fakeTerminal(43);
     let ownershipStopped = false;
@@ -2111,6 +2112,7 @@ describe("TerminalManager", () => {
       .mockReturnValueOnce(replacedTerminal.pty)
       .mockReturnValueOnce(replacementTerminal.pty);
     const manager = new TerminalManager({
+      platform: "linux",
       spawnTerminal,
       spawnOwnedTerminalProcess: (spawnProcess) => {
         const process = spawnProcess();

@@ -11,7 +11,7 @@ import {
 } from "node:fs";
 import { realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
 import WebSocket from "ws";
@@ -29,8 +29,10 @@ import {
   parseUnifiedDiff,
 } from "../../src/shared/diff-review";
 import { RuntimeStore } from "../../src/server/database";
+import * as providerEnvironmentModule from "../../src/server/environment";
 import { getUnifiedDiff } from "../../src/server/git";
-import { portableNodeExecutable, writeNodeSubcommand } from "../helpers/portable-provider-fixture";
+import { providerDriftEnvironment, providerDriftEnvironmentDirectories } from "../../scripts/provider-drift-environment.mjs";
+import { portableNodeExecutable, writeNodeFlagExecutable, writeNodeSubcommand } from "../helpers/portable-provider-fixture";
 import {
   connectRuntime as connect,
   RuntimeEventQueue as EventQueue,
@@ -91,13 +93,11 @@ describe("local runtime", () => {
   const cleanup = new RuntimeTestCleanup();
   const temporaryDirectories = cleanup.directories;
   const runtimes = cleanup.runtimes;
-  const restoreEnvironment: Array<() => void> = [];
 
   afterEach(async () => {
     try {
       await cleanup.close();
     } finally {
-      for (const restore of restoreEnvironment.splice(0).reverse()) restore();
       vi.restoreAllMocks();
     }
   });
@@ -234,11 +234,21 @@ process.exit(child.status ?? 1);
       chmodSync(executable, 0o755);
     }
 
-    const previousPath = process.env.PATH;
-    process.env.PATH = [executableDirectory, previousPath ?? ""].filter(Boolean).join(delimiter);
-    restoreEnvironment.push(() => {
-      if (previousPath === undefined) delete process.env.PATH;
-      else process.env.PATH = previousPath;
+    // Domain fixtures must not wait for or authenticate real installed CLIs.
+    // Scope both child credentials/profile paths and discovery candidates;
+    // changing PATH alone still admits home, npm and system fallback roots.
+    const environment = providerDriftEnvironment(join(root, "provider-profile"), {
+      PATH: [executableDirectory, dirname(process.execPath)].join(delimiter),
+      SystemRoot: process.env.SystemRoot,
+      COMSPEC: process.env.COMSPEC,
+      PATHEXT: process.env.PATHEXT,
+    });
+    for (const path of providerDriftEnvironmentDirectories(environment)) {
+      mkdirSync(path, { recursive: true, mode: 0o700 });
+    }
+    vi.spyOn(providerEnvironmentModule, "providerEnvironment").mockResolvedValue({
+      env: environment,
+      pathEntries: [executableDirectory],
     });
 
     return { authFile, executable };
@@ -2083,6 +2093,48 @@ process.exit(child.status ?? 1);
     const detail = await loadConversationDetail(client.socket, client.events, conversationId);
     expect(detail.messages).toEqual([]);
     expect(detail.agentTurns).toEqual([]);
+  });
+
+  summaryRuntimeIt("isolates Codex readiness from unrelated ambient provider installations", async () => {
+    const { root, data, workspace } = temporaryWorkspace();
+    const ambientBin = join(root, "unrelated-provider-bin");
+    const attempted = join(root, "unrelated-provider-probed");
+    mkdirSync(ambientBin);
+    writeNodeFlagExecutable(ambientBin, "claude", `
+require("node:fs").appendFileSync(${JSON.stringify(attempted)}, process.argv.slice(2).join(" ") + "\\n");
+setTimeout(() => {
+  process.stdout.write(process.argv[2] === "--version" ? "Claude Code 2.1.263\\n" : '{"loggedIn":false}\\n');
+}, 3500);
+`);
+    // Reproduce an unrelated installed CLI without consulting any real user
+    // executable or profile. Two valid, individually bounded probes exceed
+    // this fixture's readiness deadline because detectAll publishes together.
+    vi.spyOn(providerEnvironmentModule, "providerEnvironment").mockResolvedValue({
+      env: providerDriftEnvironment(join(root, "ambient-profile"), {
+        PATH: dirname(process.execPath), SystemRoot: process.env.SystemRoot,
+      }),
+      pathEntries: [ambientBin],
+    });
+    const { authFile, executable } = fakeCodex(root);
+    writeFileSync(authFile, "connected");
+    const runtime = await startRuntime({
+      dataDirectory: data, defaultWorkspacePath: workspace, enableProviders: true,
+      ...runtimeIdentity, codexBinaryPath: executable,
+    });
+    runtimes.push(runtime);
+    const client = await connect(runtime.websocketUrl);
+    const welcome = await client.events.next(
+      (event): event is Extract<ServerEvent, { type: "server.welcome" }> => event.type === "server.welcome",
+    );
+    const ready = await providerSnapshot(client.events, welcome.snapshot, "codex", providerReady);
+    expect(ready.providers.filter(({ id }) => id !== "codex")
+      .every(({ installState, canRun }) => installState === "not-installed" && !canRun)).toBe(true);
+    expect(existsSync(attempted)).toBe(false);
+    const scoped = await providerEnvironmentModule.providerEnvironment();
+    expect(scoped.pathEntries).toEqual([join(root, "provider-bin")]);
+    expect(scoped.env.HOME).toBe(join(root, "provider-profile", "home"));
+    expect(scoped.env.USERPROFILE).toBe(scoped.env.HOME);
+    expect(providerDriftEnvironmentDirectories(scoped.env).every(path => existsSync(path))).toBe(true);
   });
 
   summaryRuntimeIt("runs diff summaries in an isolated session, exposes workspace-run status, and cleans up without contaminating the thread", async () => {

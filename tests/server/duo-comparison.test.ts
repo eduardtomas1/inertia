@@ -31,6 +31,7 @@ import {
   type TurnProviderRuntime,
 } from "../../src/server/runtime/turns/turn-controller";
 import { recoverInterruptedTurns } from "../../src/server/runtime/turns/turn-recovery";
+import { dispatchSettledTurnOwners } from "../../src/server/runtime/turns/turn-settled-orchestration";
 import { resolveNativeModelRoute } from "./model-route-fixture";
 
 const temporaryDirectories: string[] = [];
@@ -396,6 +397,96 @@ afterEach(async () => {
 });
 
 describe("Duo third-model comparison", () => {
+  it.each(["throw", "reject"])("dispatches the durable judge once despite a sibling owner's %s", async (mode) => {
+    let launches!: DuoLaunchCoordinator;
+    const sourceOwner = vi.fn(() => {
+      if (mode === "reject") return Promise.reject(new Error("source follow-up unavailable"));
+      throw new Error("source follow-up unavailable");
+    });
+    const runtime = await createRuntime({
+      onTurnSettled: (turn) => dispatchSettledTurnOwners(turn, [
+        sourceOwner, (settled) => launches.onTurnSettled(settled),
+      ]),
+    });
+    launches = comparisonCoordinator(runtime);
+    const prepared = await launches.prepare(comparisonPreparePayload(runtime));
+    await launches.dispatch(prepared.launchId);
+    await settleNextProvider(runtime, "Source A");
+    await settleNextProvider(runtime, "Source B");
+    await runtime.controller.drainSettlementTasks();
+    expect(runtime.store.pairedLaunch(prepared.launchId).comparison)
+      .toMatchObject({ state: "running", attempt: 1 });
+    expect(sourceOwner).toHaveBeenCalledTimes(2);
+    for (const side of prepared.sides) {
+      expect(runtime.store.agentTurn(side.turnId).status).toBe("completed");
+      expect(runtime.store.conversationDetail(side.conversationId)!.activities
+        .some(({ detail }) => detail?.includes('"effect":"orchestration"'))).toBe(true);
+    }
+    await launches.onTurnSettled(runtime.store.agentTurn(prepared.sides[0].turnId));
+    await launches.onTurnSettled(runtime.store.agentTurn(prepared.sides[1].turnId));
+    expect(runtime.provider.inputs).toHaveLength(3);
+    await settleNextProvider(runtime, "Judge result");
+    await runtime.controller.drainSettlementTasks();
+    expect(runtime.store.pairedLaunch(prepared.launchId).comparison)
+      .toMatchObject({ state: "completed", attempt: 1 });
+    await runtime.controller.dispose("runtime-shutdown");
+    runtime.store.close();
+  });
+
+  it("recovers a failed Duo handoff from its existing durable waiting row after restart", async () => {
+    const runtime = await createRuntime({
+      onTurnSettled: (turn) => dispatchSettledTurnOwners(turn, [
+        () => { throw new Error("Duo owner unavailable before accepting handoff"); },
+      ]),
+    });
+    const launches = comparisonCoordinator(runtime);
+    const prepared = await launches.prepare(comparisonPreparePayload(runtime));
+    await launches.dispatch(prepared.launchId);
+    await settleNextProvider(runtime, "Saved source A");
+    await settleNextProvider(runtime, "Saved source B");
+    await runtime.controller.drainSettlementTasks();
+    expect(runtime.store.pairedLaunch(prepared.launchId).comparison)
+      .toMatchObject({ state: "waiting", attempt: 0 });
+    expect(runtime.store.providerRunOwnership.all()).toEqual([]);
+    await runtime.controller.dispose("runtime-shutdown");
+    runtime.store.close();
+
+    const store = new RuntimeStore(runtime.databasePath, runtime.workspace, { recoverInterruptedRuns: false });
+    const provider = new PairProvider();
+    let restarted!: DuoLaunchCoordinator;
+    const controller = new TurnController(store, provider, new Map(), new Map(), new Map(), {
+      providerInfo: () => [providerInfo()], broadcast: () => {}, broadcastSnapshot: () => {},
+      onTurnSettled: (turn) => restarted.onTurnSettled(turn),
+    });
+    const recovered = { ...runtime, store, provider, controller };
+    restarted = comparisonCoordinator(recovered);
+    try {
+      expect(recoverInterruptedTurns(store).recoveredTurns).toEqual([]);
+      for (const side of prepared.sides) {
+        const saved = store.agentTurn(side.turnId);
+        expect(saved.status).toBe("completed");
+        expect(store.conversation(side.conversationId).status).toBe("completed");
+        expect(store.workspaceRun(saved.runId).status).toBe("succeeded");
+        expect(store.conversationDetail(side.conversationId)!.activities
+          .some(({ detail }) => detail?.includes('"effect":"orchestration"'))).toBe(true);
+      }
+      await restarted.resumeComparisons();
+      await restarted.onTurnSettled(store.agentTurn(prepared.sides[1].turnId));
+      expect(store.pairedLaunch(prepared.launchId).comparison)
+        .toMatchObject({ state: "running", attempt: 1 });
+      expect(provider.inputs).toHaveLength(1);
+      expect(provider.inputs[0]!.prompt).toContain("Saved source A");
+      expect(provider.inputs[0]!.prompt).toContain("Saved source B");
+      await settleNextProvider(recovered, "Recovered judge result");
+      await controller.drainSettlementTasks();
+      expect(store.pairedLaunch(prepared.launchId).comparison)
+        .toMatchObject({ state: "completed", attempt: 1 });
+    } finally {
+      await controller.dispose("runtime-shutdown");
+      store.close();
+    }
+  });
+
   it("persists and broadcasts active-turn quarantine when provider cleanup is unconfirmed", async () => {
     const broadcastSnapshot = vi.fn();
     const runtime = await createRuntime({ broadcastSnapshot });

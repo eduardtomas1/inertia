@@ -5,7 +5,6 @@ import "./ComposerCommandMenu.css";
 
 export interface ComposerCommandMenuItem {
   id: string;
-  label: string;
   description: string;
   section: "built-in" | "provider";
   disabled: boolean;
@@ -41,6 +40,34 @@ export function ComposerCommandMenu({
     active?.scrollIntoView({ block: "nearest" });
   }, [activeItemId]);
 
+  const renderItem = (item: ComposerCommandMenuItem): React.JSX.Element => {
+    const active = item.id === activeItemId;
+    const Icon = item.section === "provider" ? Box : Bot;
+    return (
+      <button
+        key={item.id}
+        type="button"
+        role="option"
+        aria-selected={active}
+        aria-disabled={item.disabled}
+        data-active={active ? "true" : undefined}
+        disabled={item.disabled}
+        tabIndex={-1}
+        onPointerEnter={() => {
+          if (!item.disabled) onActiveItemChange(item.id);
+        }}
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={() => onSelect(item.id)}
+      >
+        <Icon size={14} aria-hidden="true" />
+        <span className="composer-command-copy">
+          <strong>{`/${item.id}`}</strong>
+          <small>{item.description}</small>
+        </span>
+      </button>
+    );
+  };
+
   return (
     <div className="composer-command-menu">
       <div
@@ -68,67 +95,15 @@ export function ComposerCommandMenu({
                   {section.label}
                 </div>
                 <div role="group" aria-labelledby={labelId}>
-                  {sectionItems.map((item) => (
-                    <CommandOption
-                      key={item.id}
-                      item={item}
-                      active={item.id === activeItemId}
-                      onActiveItemChange={onActiveItemChange}
-                      onSelect={onSelect}
-                    />
-                  ))}
+                  {sectionItems.map(renderItem)}
                 </div>
               </div>
             );
           })
         ) : (
-          items.map((item) => (
-            <CommandOption
-              key={item.id}
-              item={item}
-              active={item.id === activeItemId}
-              onActiveItemChange={onActiveItemChange}
-              onSelect={onSelect}
-            />
-          ))
+          items.map(renderItem)
         )}
       </div>
     </div>
-  );
-}
-
-function CommandOption({
-  item,
-  active,
-  onActiveItemChange,
-  onSelect,
-}: {
-  item: ComposerCommandMenuItem;
-  active: boolean;
-  onActiveItemChange: (itemId: string) => void;
-  onSelect: (itemId: string) => void;
-}): React.JSX.Element {
-  const Icon = item.section === "provider" ? Box : Bot;
-  return (
-    <button
-      type="button"
-      role="option"
-      aria-selected={active}
-      aria-disabled={item.disabled}
-      data-active={active ? "true" : undefined}
-      disabled={item.disabled}
-      tabIndex={-1}
-      onPointerEnter={() => {
-        if (!item.disabled) onActiveItemChange(item.id);
-      }}
-      onMouseDown={(event) => event.preventDefault()}
-      onClick={() => onSelect(item.id)}
-    >
-      <Icon size={14} aria-hidden="true" />
-      <span className="composer-command-copy">
-        <strong>{item.label}</strong>
-        <small>{item.description}</small>
-      </span>
-    </button>
   );
 }

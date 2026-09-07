@@ -1,5 +1,6 @@
 import { constants as osConstants } from "node:os";
 import { guardianCloseDiagnostic, type RuntimeOwnedProcessDiagnostic } from "./runtime-owned-process-diagnostic.js";
+import { observeNativePhaseScratch } from "./runtime-owned-process-native-scratch.js";
 import type { ChildProcess } from "node:child_process";
 import { isAbsolute } from "node:path";
 import type {
@@ -871,7 +872,9 @@ export function spawnRuntimeOwnedProcess<T extends ChildProcess>(
   }
   if (registry.platform === "darwin") {
     registry.claims.set(child, claim);
+    const recordNativePhase = observeNativePhaseScratch(child);
     child.once("close", (code, signal) => {
+      recordNativePhase(code, signal, claim.stopRequested);
       // Guardian-level signals are the fail-closed containment marker.
       if (typeof code !== "number" || signal !== null) {
         taintRuntimeOwnedProcessRegistry(registry, activeRegistry === registry, guardianCloseDiagnostic("darwin-guardian-close", signal, code));

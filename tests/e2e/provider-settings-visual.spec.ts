@@ -1,3 +1,4 @@
+// @inertia-e2e-resource primary-display
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
 
 import { createAppFixture, type AppFixture } from "./support/app-fixture";

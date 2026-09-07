@@ -137,6 +137,45 @@ export function completedTurnAdmissionProof(snapshot, turn) {
     && owned.interactions === 0;
 }
 
+export async function runPackagedWorkspaceDiscovery(websocketUrl, projectId) {
+  const client = runtimeClient(websocketUrl, Date.now() + 100_000);
+  try {
+    await client.welcome;
+    const result = await client.request("git.workspace.refresh", { projectId });
+    ok(result?.kind === "git.workspace.status", "Packaged workspace discovery returned no status.");
+    ok(result.status.repositories.some((repository) => repository.repositoryPath === "."
+      && repository.state === "ready"), "The existing workspace repository did not open.");
+  } finally { client.close(); }
+}
+
+export async function resumePackagedHistorySmoke(websocketUrl, baseline) {
+  const client = runtimeClient(websocketUrl, Date.now() + 30_000);
+  try {
+    await client.welcome;
+    await client.request("provider.refresh", { providerId: "codex" });
+    assertHistoricalDetail(baseline, client.snapshot(), await detail(client, baseline.conversation.id));
+    const challenge = `package-smoke-candidate-standard:${randomUUID()}`;
+    const acceptance = await client.request("message.send", {
+      conversationId: baseline.conversation.id, content: challenge, activate: false,
+    });
+    let proof;
+    do {
+      proof = completedTurnProof(await detail(client, baseline.conversation.id), acceptance, challenge);
+      if (!proof) await new Promise((resolve) => setTimeout(resolve, 25));
+    } while (!proof);
+    const session = baseline.agentTurns.at(-1).providerSessionAfter;
+    ok(proof.agentTurns[0].providerSessionBefore === session
+      && proof.agentTurns[0].providerSessionAfter === session,
+    "The updated app did not resume the saved provider session.");
+    while (!completedTurnAdmissionProof(client.snapshot(), proof.agentTurns[0])) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    assertHistoricalDetail(baseline, client.snapshot(), await detail(client, baseline.conversation.id));
+    return { ...baseline, messages: [...baseline.messages, ...proof.messages],
+      agentTurns: [...baseline.agentTurns, ...proof.agentTurns] };
+  } finally { client.close(); }
+}
+
 export async function runPackagedHistorySmoke({ websocketUrl, workspaceDirectory, baseline = null,
   deadlineAt = Date.now() + 8_000 }) {
   const client = runtimeClient(websocketUrl, deadlineAt);

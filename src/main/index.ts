@@ -124,6 +124,8 @@ import { MAIN_WINDOW_DEFAULT_STATE, restoreMainWindowState,
 import { handleStartupFailure } from "./startup-failure.js";
 import { createLinuxLifecycleNotices } from "./linux-shutdown-notice.js";
 import { createTestPrivilegedCleanupController } from "./test-privileged-cleanup-controller.js";
+import { installedUpdateTestFixture } from "./test-installed-update.js";
+const installedUpdateFixture = installedUpdateTestFixture();
 const { configuration: releaseChannel, packageSmokeRoot } = initializeInertiaReleaseChannel(app, process.env);
 const IPC = {
   getRuntimeConnection: "inertia:runtime-connection",
@@ -959,7 +961,7 @@ async function bootstrap(): Promise<void> {
     platform: process.platform, architecture: process.arch, activeAppImagePath: process.env.APPIMAGE,
     openPath: async (path) => await shell.openPath(path), revealPath: (path) => shell.showItemInFolder(path),
   });
-  appUpdateService = releaseUpdates.service;
+  appUpdateService = installedUpdateFixture?.service ?? releaseUpdates.service;
   canaryRollbackManager = releaseUpdates.rollbackManager;
   appUpdateService.subscribe((status) => {
     const window = mainWindow;
@@ -1143,7 +1145,8 @@ async function bootstrap(): Promise<void> {
       }
       if (snapshot.phase === "stopped") recordPackageSmokeStage("runtime-stopped");
       liveDarwinRecovery.observe(snapshot, runtimeSupervisor);
-      if (snapshot.phase === "ready" && snapshot.pid && snapshot.websocketUrl && packageSmokeFilePath && packageSmokeOwnerToken && !packageSmokeScheduled) {
+      if (snapshot.phase === "ready" && appUpdateInstallCoordinator) installedUpdateFixture?.ready(snapshot, appUpdateInstallCoordinator);
+      if (!installedUpdateFixture && snapshot.phase === "ready" && snapshot.pid && snapshot.websocketUrl && packageSmokeFilePath && packageSmokeOwnerToken && !packageSmokeScheduled) {
         packageSmokeScheduled = true;
         void writeFile(
           packageSmokeFilePath,
@@ -1242,8 +1245,4 @@ void startApplicationWithUpdateHandoff({
   quit: () => app.quit(),
 }));
 
-function recordPackageSmokeStage(stage: string): void {
-  writePackageSmokeStage({
-    marker: packageSmokeFilePath, ownerToken: packageSmokeOwnerToken, stage,
-  });
-}
+function recordPackageSmokeStage(stage: string): void { writePackageSmokeStage({ marker: packageSmokeFilePath, ownerToken: packageSmokeOwnerToken, stage }); }

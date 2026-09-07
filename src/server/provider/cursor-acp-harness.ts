@@ -1,6 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
 import { extname } from "node:path";
 import { Readable, Writable } from "node:stream";
 
@@ -77,6 +76,7 @@ import {
   isCursorFileMutationKind,
 } from "./cursor-acp-permissions";
 import { emitCursorMetadata } from "./cursor-acp-metadata";
+import { readBoundedProviderImage } from "./provider-image-read";
 
 export {
   cursorOneShotPermissionOption,
@@ -91,7 +91,6 @@ const MAX_WIRE_LINE_BYTES = 1024 * 1024;
 const MAX_EVENT_TEXT_CHARS = 1024 * 1024;
 const MAX_RESULT_TEXT_CHARS = 4 * 1024 * 1024;
 const MAX_STDERR_CHARS = 32 * 1024;
-const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 const MAX_PENDING_INTERACTIONS = 64;
 const MAX_TRACKED_TOOL_ACTIVITIES = 1_024;
 const MAX_TOOL_ACTIVITY_ID_CHARS = 1_000;
@@ -180,6 +179,7 @@ function startCursorRun(
     options.input.cwd,
   );
   const resultText = new CappedProviderBuffer(MAX_RESULT_TEXT_CHARS);
+  const promptPreparationAbort = new AbortController();
   const stderr = new CappedProviderBuffer(MAX_STDERR_CHARS);
   const approvals = new Map<string, PendingApproval>();
   const inputs = new Map<string, PendingInput>();
@@ -328,7 +328,7 @@ function startCursorRun(
       }, "Cursor ACP sent an invalid update.");
     })
     .onRequest("cursor/ask_question", (value) => value, async ({ params: rawParams, signal }) => {
-      if (!ownsActivePrompt()) return { outcome: "cancelled" };
+      if (!ownsActivePrompt()) return { outcome: { outcome: "cancelled" } };
       const providerParams = parseCursorQuestionRequest(rawParams);
       const params = parseCursorQuestionRequest(
         redactHostMcpPayload(rawParams),
@@ -344,31 +344,53 @@ function startCursorRun(
         emitter.capability("structured-input", true);
         emitter.rich({ type: "input", request });
       });
-      if (signal.aborted || !ownsActivePrompt()) return { outcome: "cancelled" };
+      if (signal.aborted || !ownsActivePrompt()) return { outcome: { outcome: "cancelled" } };
       return {
-        outcome: "answered",
-        answers: params.questions.map((question, questionIndex) => ({
-          questionId: providerParams.questions[questionIndex]?.id
-            ?? question.id,
-          selectedOptionIds: (answers[question.id] ?? []).flatMap((answer) => {
-            const optionIndex = question.options.findIndex((candidate) =>
-              candidate.id === answer || candidate.label === answer);
-            // Cursor's extension only names this field for option IDs. Current
-            // agents also accept a raw value here for the native "Other"
-            // answer; dropping it would falsely report that the user answered.
-            return [providerParams.questions[questionIndex]?.options[optionIndex]
-              ?.id ?? answer];
-          }),
-        })),
+        outcome: {
+          outcome: "answered",
+          answers: params.questions.map((question, questionIndex) => ({
+            questionId: providerParams.questions[questionIndex]?.id
+              ?? question.id,
+            selectedOptionIds: (answers[question.id] ?? []).flatMap((answer) => {
+              const optionIndex = question.options.findIndex((candidate) =>
+                candidate.id === answer || candidate.label === answer);
+              // Cursor's extension only names this field for option IDs. Current
+              // agents also accept a raw value here for the native "Other"
+              // answer; dropping it would falsely report that the user answered.
+              return [providerParams.questions[questionIndex]?.options[optionIndex]
+                ?.id ?? answer];
+            }),
+          })),
+        },
       };
     })
-    .onRequest("cursor/create_plan", (value) => value, ({ params: rawParams }) => {
-      if (!ownsActivePrompt()) {
+    .onRequest("cursor/create_plan", (value) => value, async ({ params: rawParams, signal }) => {
+      if (!ownsActivePrompt() || !sessionId) {
         return { outcome: { outcome: "cancelled" } };
       }
       const params = parseCursorPlanRequest(redactHostMcpPayload(rawParams));
       emitter.rich({ type: "plan", explanation: params.plan, steps: cursorTodoSteps(params.todos, params.plan) });
-      return { outcome: { outcome: "accepted" } };
+      // Acceptance lets Cursor persist a plan artifact. Reuse the same
+      // one-shot file-change policy as native ACP edit permission requests;
+      // displaying a plan does not itself grant supervised write authority.
+      const permission: RequestPermissionRequest = {
+        sessionId,
+        toolCall: {
+          toolCallId: params.toolCallId, title: "Create Cursor plan",
+          kind: "edit", status: "pending", rawInput: { plan: params.plan },
+        },
+        options: [
+          { optionId: "accept-plan", name: "Approve once", kind: "allow_once" },
+          { optionId: "reject-plan", name: "Deny", kind: "reject_once" },
+        ],
+      };
+      const decision = await cursorPermission(
+        permission, permission, signal, options, emitter.rich, approvals,
+      );
+      if (!ownsActivePrompt() || signal.aborted || decision.outcome.outcome !== "selected") {
+        return { outcome: { outcome: "cancelled" } };
+      }
+      return { outcome: { outcome: decision.outcome.optionId === "accept-plan" ? "accepted" : "rejected" } };
     })
     .onNotification("cursor/update_todos", (value) => value, ({ params: rawParams }) => {
       if (!ownsActivePrompt()) return;
@@ -575,7 +597,9 @@ function startCursorRun(
     const providerPrompt = options.input.operation?.kind === "compact"
       ? "/summarize"
       : options.input.prompt;
-    const prompt = await cursorPrompt(providerPrompt, options.input.imagePaths ?? [], initialized);
+    const prompt = await cursorPrompt(
+      providerPrompt, options.input.imagePaths ?? [], initialized, promptPreparationAbort.signal,
+    );
     if (cancelRequested) return finish("cancelled");
     sessionReady = true;
     emitter.status("running");
@@ -699,6 +723,7 @@ function startCursorRun(
   const cancel = (force: boolean): void => {
     if (cancelRequested && !force) return;
     cancelRequested = true;
+    promptPreparationAbort.abort();
     hostToolRuntime?.settle();
     void hostMcpSession?.close().catch(() => requestProcessTermination(true));
     emitter.status("cancelling");
@@ -1109,7 +1134,9 @@ export function findCursorAdvertisedConfigValue(
   return selected ? { id: option.id, value: selected.value } : undefined;
 }
 
-async function cursorPrompt(prompt: string, paths: readonly string[], initialized: InitializeResponse): Promise<ContentBlock[]> {
+export async function cursorPrompt(
+  prompt: string, paths: readonly string[], initialized: InitializeResponse, signal?: AbortSignal,
+): Promise<ContentBlock[]> {
   if (paths.length > 0 && initialized.agentCapabilities?.promptCapabilities?.image !== true) {
     throw new Error("This Cursor ACP server did not advertise image prompt support.");
   }
@@ -1118,9 +1145,8 @@ async function cursorPrompt(prompt: string, paths: readonly string[], initialize
   for (const path of paths) {
     const mimeType = imageMediaType(path);
     if (!mimeType) throw new Error(`Cursor does not support the attached image type: ${extname(path) || "unknown"}.`);
-    const data = await readFile(path);
+    const data = await readBoundedProviderImage("Cursor", path, total, signal);
     total += data.byteLength;
-    if (total > MAX_IMAGE_BYTES) throw new Error("Cursor image attachments exceed the 20 MB safety limit.");
     blocks.push({ type: "image", mimeType, data: data.toString("base64") });
   }
   blocks.push({ type: "text", text: prompt });

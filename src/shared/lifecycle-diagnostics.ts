@@ -45,6 +45,16 @@ export const windowsCleanupFailureSchema = z.object({
   outputClassification: z.enum([
     "not-found", "access-denied", "other", "unavailable",
   ]).optional(),
+  taskkillObservation: z.object({
+    rootBefore: z.enum(["present", "absent", "unknown"]),
+    rootAfter: z.enum(["present", "absent", "unknown"]),
+    missingProcessHeader: z.boolean(),
+    noRunningInstanceReason: z.boolean(),
+    rootSuccessReported: z.boolean(),
+    rootErrorReported: z.boolean(),
+    descendantErrorReported: z.boolean(),
+    outputTruncated: z.boolean(),
+  }).strict().optional(),
 }).strict();
 export type WindowsCleanupFailure = z.infer<typeof windowsCleanupFailureSchema>;
 const safeVersion = z

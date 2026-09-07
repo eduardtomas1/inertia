@@ -431,10 +431,11 @@ function terminateWindowsProcessTree(
   // fixed classification alone; localized/unrecognized text remains "other".
   let output = "";
   let remainingOutputBytes = 4_096;
+  let outputTruncated = false;
   const onOutput = (chunk: Buffer | string): void => {
-    if (remainingOutputBytes === 0) return;
     const bytes = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
     const retained = bytes.subarray(0, remainingOutputBytes);
+    outputTruncated ||= retained.length < bytes.length;
     remainingOutputBytes -= retained.length;
     output += retained.toString("utf8");
   };
@@ -449,10 +450,35 @@ function terminateWindowsProcessTree(
     }
     return "other";
   };
+  // Scratch-only native evidence. Numeric PIDs are used only for comparison;
+  // neither these observations nor taskkill text can authorize cleanup.
+  const observeRoot = (): "present" | "absent" | "unknown" => {
+    if (process.platform !== "win32") return "unknown";
+    try {
+      process.kill(pid, 0);
+      return "present";
+    } catch (error) {
+      return (error as NodeJS.ErrnoException).code === "ESRCH" ? "absent" : "unknown";
+    }
+  };
+  const rootBefore = observeRoot();
   const record = (phase: WindowsCleanupFailure["phase"], exitCode: number | null = null): void => {
+    const errorPids = [...output.matchAll(/^ERROR: The process (?:with PID |")([0-9]+)/gimu)]
+      .map((match) => Number(match[1]));
     recordWindowsCleanupFailure({ phase, scope, force, exitCode,
       elapsedMs: windowsCleanupElapsedMs(startedAt),
       ...(phase === "taskkill-exit" ? { outputClassification: classifyOutput() } : {}),
+      taskkillObservation: {
+        rootBefore,
+        rootAfter: observeRoot(),
+        missingProcessHeader: /^ERROR: The process "\d+" not found\.\s*$/imu.test(output),
+        noRunningInstanceReason: /^Reason: There is no running instance of the task\.\s*$/imu.test(output),
+        rootSuccessReported: [...output.matchAll(/^SUCCESS: The process with PID ([0-9]+)/gimu)]
+          .some((match) => Number(match[1]) === pid),
+        rootErrorReported: errorPids.includes(pid),
+        descendantErrorReported: errorPids.some((errorPid) => errorPid !== pid),
+        outputTruncated,
+      },
     });
   };
   return new Promise<boolean>((resolve) => {

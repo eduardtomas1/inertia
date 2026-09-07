@@ -2,11 +2,11 @@ import type {
   ActiveTurn,
   TurnControllerHooks,
 } from "./turn-controller-types";
+import type { TurnSettlementEffects } from "./turn-settlement-effects";
 
 export interface TurnArtifactSequencerOptions {
   hooks: TurnControllerHooks;
   barriers: Map<string, Promise<void>>;
-  track(value: void | Promise<void> | undefined): void;
 }
 
 /**
@@ -36,37 +36,25 @@ export class TurnArtifactSequencer {
     }
   }
 
-  finalize(active: ActiveTurn): void {
-    try {
-      const artifactFinalization =
-        this.options.hooks.captureGitArtifacts?.({
-          turn: active.turn,
-          checkpointId: active.checkpointId,
-          terminalAssistantMessageId: active.latestAssistantMessageId,
-        });
-      if (
-        !artifactFinalization
-        || typeof (artifactFinalization as Promise<void>).then !== "function"
-      ) {
-        return;
+  finalize(active: ActiveTurn, effects: TurnSettlementEffects): void | Promise<void> {
+    const finalization = this.options.hooks.captureGitArtifacts?.({
+      turn: active.turn,
+      checkpointId: active.checkpointId,
+      terminalAssistantMessageId: active.turn.terminalAssistantMessageId,
+    });
+    if (!finalization) return;
+    const barrier = Promise.resolve(finalization).finally(() => {
+      // Retire the exact barrier even if publication fails or a later turn
+      // has already installed its own artifact finalizer.
+      if (this.options.barriers.get(active.conversation.id) === barrier) {
+        this.options.barriers.delete(active.conversation.id);
       }
-      const barrier = Promise.resolve(artifactFinalization)
-        .catch(() => undefined)
-        .finally(() => {
-          this.options.hooks.broadcast({
-            type: "conversation.detail.invalidated",
-            conversationId: active.conversation.id,
-          });
-          if (
-            this.options.barriers.get(active.conversation.id) === barrier
-          ) {
-            this.options.barriers.delete(active.conversation.id);
-          }
-        });
-      this.options.barriers.set(active.conversation.id, barrier);
-      this.options.track(barrier);
-    } catch {
-      // Restart reconciliation owns a pending artifact after sync failure.
-    }
+      effects.run("publication", () => this.options.hooks.broadcast({
+        type: "conversation.detail.invalidated",
+        conversationId: active.conversation.id,
+      }));
+    });
+    this.options.barriers.set(active.conversation.id, barrier);
+    return barrier;
   }
 }

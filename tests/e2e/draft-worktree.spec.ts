@@ -1,3 +1,4 @@
+// @inertia-e2e-resource isolated
 import { openLocalProjectFromDialog } from "./support/add-project";
 import { expect, test } from "@playwright/test";
 import { stat } from "node:fs/promises";

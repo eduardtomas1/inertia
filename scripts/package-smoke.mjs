@@ -9,6 +9,7 @@ import WebSocket from "ws";
 import { parseDocument } from "yaml";
 import { runPackagedHistorySmoke } from "./package-smoke-history-runtime.mjs";
 import { packageSmokePath } from "./package-smoke-path.mjs";
+import { verifyPackagedLegalResources } from "./package-smoke-legal-resources.mjs";
 
 import {
   packageSmokeProcessesExited,
@@ -387,6 +388,7 @@ async function requirePackagedAssets(executable, expectedVersion) {
     throw new Error(`Expected exactly one packaged app.asar next to ${executable}; found ${resources.length}.`);
   }
   const [{ directory: resourcesDirectory, archive }] = resources;
+  await verifyPackagedLegalResources(resourcesDirectory);
   let runtimeGuardian = null;
   if (process.platform === "darwin" || process.platform === "linux") {
     runtimeGuardian = join(

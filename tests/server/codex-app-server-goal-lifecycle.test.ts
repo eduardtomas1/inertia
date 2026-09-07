@@ -11,7 +11,7 @@ import {
   writeNodeSubcommand,
 } from "../helpers/portable-provider-fixture";
 
-describe.sequential("Codex App Server goal lifecycle", () => {
+describe("Codex App Server goal lifecycle", { concurrent: false }, () => {
   const roots: string[] = [];
   const originalCapture = process.env.INERTIA_GOAL_LIFECYCLE_CAPTURE;
   const originalScenario = process.env.INERTIA_GOAL_LIFECYCLE_SCENARIO;

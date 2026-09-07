@@ -1,3 +1,4 @@
+import { parseRuntimeOwnedProcessDiagnostic, type RuntimeRestartRequestedEvent } from "../node/runtime-owned-process-diagnostic.js";
 import { createHash, randomUUID } from "node:crypto";
 import {
   chmodSync,
@@ -73,6 +74,7 @@ export type RuntimeDiagnosticEvent =
   | "logs.reveal"
   | "report.copy"
   | "runtime.failure"
+  | "runtime.restart-requested"
   | "runtime.state";
 
 export interface RuntimeDiagnosticsOptions {
@@ -220,6 +222,7 @@ function parseDiagnosticRecord(
       "logs.reveal",
       "report.copy",
       "runtime.failure",
+      "runtime.restart-requested",
       "runtime.state",
     ].includes(record.event)
     || typeof record.recordDigest !== "string"
@@ -248,9 +251,23 @@ function parseDiagnosticRecord(
     ? detachedDraftKeys
     : record.event === "runtime.failure" || record.event === "runtime.state"
       ? runtimeKeys
-      : baseKeys;
+      : record.event === "runtime.restart-requested"
+        ? [...baseKeys, "generation", "reason", "stage", "signal", "exitCode"] : baseKeys;
   if (Object.keys(record).some((key) => !allowedKeys.includes(key))) {
     return null;
+  }
+
+  if (record.event === "runtime.restart-requested") {
+    if (boundedInteger(record.generation, 0, Number.MAX_SAFE_INTEGER) === undefined
+      || (record.reason !== "owned-process-tainted" && record.reason !== "owned-process-cleanup-unconfirmed")) return null;
+    if (record.stage !== undefined || record.signal !== undefined || record.exitCode !== undefined) {
+      if (record.reason !== "owned-process-tainted" || !parseRuntimeOwnedProcessDiagnostic({
+        stage: record.stage,
+        ...(record.signal !== undefined ? { signal: record.signal } : {}),
+        ...(record.exitCode !== undefined ? { exitCode: record.exitCode } : {}),
+      })) return null;
+    }
+    return record;
   }
 
   if (record.event === "detached-draft.recovery") {
@@ -346,6 +363,17 @@ export class RuntimeDiagnostics {
       const message = event === "runtime.failure"
         ? runtimeFailureSummary(fields.message)
         : undefined;
+      if (event === "runtime.restart-requested") {
+        if (generation === undefined || (fields.reason !== "owned-process-tainted" && fields.reason !== "owned-process-cleanup-unconfirmed")) return;
+        entry.generation = generation;
+        entry.reason = fields.reason as string;
+        const diagnostic = parseRuntimeOwnedProcessDiagnostic({
+          stage: fields.stage,
+          ...(fields.signal !== undefined ? { signal: fields.signal } : {}),
+          ...(fields.exitCode !== undefined ? { exitCode: fields.exitCode } : {}),
+        });
+        if (fields.reason === "owned-process-tainted" && diagnostic) Object.assign(entry, diagnostic);
+      }
       if (event === "runtime.failure" || event === "runtime.state") {
         if (phase) entry.phase = phase;
         if (generation !== undefined) entry.generation = generation;
@@ -393,6 +421,10 @@ export class RuntimeDiagnostics {
     } catch {
       // Diagnostics are best effort and must never affect application startup.
     }
+  }
+
+  recordRestartRequested(event: RuntimeRestartRequestedEvent, generation: number): void {
+    this.record("runtime.restart-requested", { generation, reason: event.reason, ...event.diagnostic });
   }
 
   recordState(snapshot: RuntimeSupervisorSnapshot): void {
@@ -588,6 +620,10 @@ export class RuntimeDiagnostics {
           const at = value.at as string;
           const lifecycleEvent = event !== "detached-draft.recovery";
           const fields = [
+            event === "runtime.restart-requested" ? `reason=${value.reason}` : null,
+            event === "runtime.restart-requested" && value.stage !== undefined ? `stage=${value.stage}` : null,
+            event === "runtime.restart-requested" && value.signal !== undefined ? `signal=${value.signal}` : null,
+            event === "runtime.restart-requested" && value.exitCode !== undefined ? `exit-code=${value.exitCode}` : null,
             lifecycleEvent && typeof value.phase === "string"
               ? `phase=${value.phase}`
               : null,

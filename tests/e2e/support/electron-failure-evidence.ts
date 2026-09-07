@@ -1,5 +1,7 @@
 import type { TestInfo } from "@playwright/test";
 import { ElectronFixtureCloseError, settleOperationBounded } from "./electron-app-lifecycle";
+import { captureBoundedFailureDiagnostic } from "../../helpers/bounded-failure-diagnostic";
+import { readImageSendRuntimeRecords } from "./image-send-failure-diagnostics";
 
 type ReadTestInfo = () => Pick<TestInfo, "attach">;
 
@@ -10,12 +12,28 @@ async function attachElectronFailureEvidence(
   contentType = "text/plain",
   timeoutMs = 250,
 ): Promise<void> {
-  // Called only after fixture cleanup. Bound reporting separately; unavailable
-  // Playwright context, rejection or a hung reporter cannot replace the error.
+  // Failure-only reporting has its own bound; unavailable Playwright context,
+  // rejection or a hung reporter cannot replace the cleanup error.
   if (timeoutMs <= 0) return;
   await settleOperationBounded(Promise.resolve().then(() => readTestInfo().attach(name, {
     body: Buffer.from(body), contentType,
   })), timeoutMs);
+}
+
+export async function attachElectronFixtureRuntimeRecords(
+  readTestInfo: ReadTestInfo,
+  testDirectory: string,
+  signal: AbortSignal,
+): Promise<void> {
+  if (signal.aborted) return;
+  // Reuse the fixed-file, digest-checked allowlist projection. Never retain
+  // raw logs, arbitrary error messages, credentials, or runtime endpoints.
+  const records = await captureBoundedFailureDiagnostic(
+    () => readImageSendRuntimeRecords(testDirectory, signal), 500,
+  );
+  if (signal.aborted) return;
+  await attachElectronFailureEvidence(readTestInfo, "electron-cleanup-runtime-records",
+    JSON.stringify(records, null, 2), "application/json");
 }
 
 async function attachElectronTestBodyFailure(

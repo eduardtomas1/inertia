@@ -79,6 +79,21 @@ describe("runtime diagnostics", () => {
     expect(content).not.toMatch(/prompt|source|tokens?|credential/iu);
   });
 
+  it("drops invalid restart detail and unrelated fields from persisted evidence", () => {
+    const directory = runtimeDiagnosticsDirectory(fixture());
+    const diagnostics = new RuntimeDiagnostics(directory);
+    diagnostics.record("runtime.restart-requested", { generation: 1, reason: "owned-process-tainted",
+      stage: "PRIVATE", signal: "PRIVATE", exitCode: 256, argv: ["PRIVATE"] });
+    diagnostics.record("runtime.restart-requested", { generation: 2, reason: "owned-process-cleanup-unconfirmed",
+      stage: "darwin-guardian-close", signal: "SIGKILL", stderr: "PRIVATE" });
+    diagnostics.record("runtime.restart-requested", { generation: -1, reason: "owned-process-tainted" });
+    diagnostics.record("runtime.restart-requested", { generation: 3, reason: ["owned-process-tainted"] });
+    const content = readFileSync(join(directory, "runtime.log"), "utf8");
+    expect(content.trim().split("\n")).toHaveLength(2);
+    expect(content).not.toMatch(/PRIVATE|stage|signal|exitCode|argv|stderr/u);
+    expect(diagnostics.supportReport({ version: "test", platform: "darwin", architecture: "x64", runtime: null }).eventCount).toBe(2);
+  });
+
   it("redacts credentials, content-shaped fields, paths, and control characters", () => {
     const sanitized = sanitizeRuntimeDiagnosticText(
       "Bearer abc.def prompt:hello source='private code' tokens=987 credential=my-secret at C:\\Users\\Alice\\project, /tmp/inertia/source.ts, and /mnt/customer/private.txt\u0000",

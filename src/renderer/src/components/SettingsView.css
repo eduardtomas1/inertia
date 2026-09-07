@@ -527,6 +527,46 @@
   padding: 7px 2px 26px;
 }
 
+/* Keep these menus in Chromium's top layer instead of a separate OS popup. */
+.provider-settings-advanced select,
+.provider-settings-advanced select::picker(select) {
+  appearance: base-select;
+}
+
+.provider-settings-advanced select {
+  align-items: center;
+  font-family: inherit;
+}
+
+.provider-settings-advanced select::picker(select) {
+  max-height: min(320px, 70dvh);
+  padding: 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-medium);
+  color: var(--text);
+  background: var(--surface-strong);
+  box-shadow: var(--shadow);
+  font-family: inherit;
+}
+
+.provider-settings-advanced select option {
+  min-height: 32px;
+  padding: 7px 9px;
+  border-radius: 4px;
+  overflow-wrap: anywhere;
+}
+
+.provider-settings-advanced select option:hover,
+.provider-settings-advanced select option:focus-visible {
+  outline: none;
+  background: var(--surface-muted);
+}
+
+.provider-settings-advanced select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .provider-settings-advanced-heading {
   display: flex;
   flex-direction: column;

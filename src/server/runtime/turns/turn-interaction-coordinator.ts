@@ -21,6 +21,7 @@ import type {
   TurnTerminalCause,
 } from "./turn-controller-types";
 import { requestProviderCancellation } from "./turn-provider-cancellation";
+import { broadcastTurnSnapshot } from "./turn-controller-support";
 
 function interactionOwner(active: ActiveTurn): PendingInteractionOwner {
   return {
@@ -79,7 +80,7 @@ export class TurnInteractionCoordinator {
       this.options.hooks.broadcastConversationShell(active.conversation.id);
       return;
     }
-    this.options.hooks.broadcastSnapshot();
+    broadcastTurnSnapshot(this.options.hooks);
   }
 
   respondToApproval(

@@ -224,7 +224,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   return command;
 }
 
-describe.sequential("provider compaction adapters", () => {
+describe("provider compaction adapters", { concurrent: false }, () => {
   const roots: string[] = [];
   const managers: ProviderManager[] = [];
   const trackManager = (manager: ProviderManager): ProviderManager => {

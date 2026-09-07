@@ -6,6 +6,7 @@ import {
   ProcessTreeCleanupError,
   runBounded,
 } from "./bounded-process-tree.mjs";
+import { prepareElectronRuntime } from "./electron-runtime-preparation.mjs";
 import {
   acquireGuardianBuildLock,
   beginGuardianBuildChildLaunch,
@@ -109,10 +110,11 @@ function builderInvocation() {
       ? process.env.INERTIA_TEST_ELECTRON_BUILDER_SCRIPT
       : null;
   return testBuilder
-    ? { command: process.execPath, prefix: [testBuilder] }
+    ? { command: process.execPath, prefix: [testBuilder], prepareRuntime: false }
     : {
         command: process.execPath,
         prefix: [join(root, "node_modules", "electron-builder", "cli.js")],
+        prepareRuntime: true,
       };
 }
 
@@ -275,6 +277,35 @@ async function main() {
       },
     ]),
   );
+  function assertBuildAuthority() {
+    if (receivedSignal !== null || heartbeatCompromise !== null) {
+      throw new Error(
+        receivedSignal !== null
+          ? `electron-builder was interrupted by ${String(receivedSignal)}.`
+          : "The runtime guardian build lock was compromised.",
+      );
+    }
+  }
+  async function runPackagingChild({ command, args, env, label, timeoutMs }) {
+    assertBuildAuthority();
+    beginGuardianBuildChildLaunch(lock);
+    childAuthorityActive = true;
+    // Retain authority on unconfirmed cleanup so the outer handler quarantines
+    // this exact child instead of admitting another packaging operation.
+    await runBounded(command, args, {
+      cwd: root,
+      echoOutputLive: true,
+      env,
+      label,
+      onSpawn: (child) => recordGuardianBuildChild(lock, child),
+      signal: abortController.signal,
+      timeoutMs,
+      windowsJobGuardian: {
+        integrityPath: targets.integrity,
+        path: targets.windowsJob,
+      },
+    });
+  }
   try {
     cleanGuardianLockArtifacts(stateDirectory, lock);
     recoverGuardianPublication(stateDirectory, targets);
@@ -292,25 +323,24 @@ async function main() {
     });
     for (const [signal, handler] of signalHandlers) process.on(signal, handler);
     const invocation = builderInvocation();
-    beginGuardianBuildChildLaunch(lock);
-    childAuthorityActive = true;
-    await runBounded(
-      invocation.command,
-      [...invocation.prefix, ...builderArguments],
-      {
-        cwd: root,
-        echoOutputLive: true,
-        env: process.env,
-        label: "electron-builder",
-        onSpawn: (child) => recordGuardianBuildChild(lock, child),
-        signal: abortController.signal,
-        timeoutMs: 4 * 60 * 60_000,
-        windowsJobGuardian: {
-          integrityPath: targets.integrity,
-          path: targets.windowsJob,
+    if (invocation.prepareRuntime) {
+      await prepareElectronRuntime({
+        root,
+        run: async (request) => {
+          await runPackagingChild(request);
+          clearGuardianBuildChild(lock);
+          childAuthorityActive = false;
+          assertBuildAuthority();
         },
-      },
-    );
+      });
+    }
+    await runPackagingChild({
+      command: invocation.command,
+      args: [...invocation.prefix, ...builderArguments],
+      env: process.env,
+      label: "electron-builder",
+      timeoutMs: 4 * 60 * 60_000,
+    });
     if (
       process.env.NODE_ENV === "test" &&
       process.env.INERTIA_TEST_PROCESS_TREE_CLEANUP_UNCONFIRMED === "1"
@@ -327,22 +357,10 @@ async function main() {
     }
     clearGuardianBuildChild(lock);
     childAuthorityActive = false;
-    if (receivedSignal !== null || heartbeatCompromise !== null) {
-      throw new Error(
-        receivedSignal !== null
-          ? `electron-builder was interrupted by ${String(receivedSignal)}.`
-          : "The runtime guardian build lock was compromised.",
-      );
-    }
+    assertBuildAuthority();
     validateGuardianArtifactSet(platform, targets);
     validateBundledGuardianIntegrity();
-    if (receivedSignal !== null || heartbeatCompromise !== null) {
-      throw new Error(
-        receivedSignal !== null
-          ? `electron-builder was interrupted by ${String(receivedSignal)}.`
-          : "The runtime guardian build lock was compromised.",
-      );
-    }
+    assertBuildAuthority();
   } catch (error) {
     cleanupUnconfirmed = error instanceof ProcessTreeCleanupError;
     if (cleanupUnconfirmed && childAuthorityActive) {
@@ -364,13 +382,7 @@ async function main() {
     for (const [signal, handler] of signalHandlers)
       process.off(signal, handler);
   }
-  if (receivedSignal !== null || heartbeatCompromise !== null) {
-    throw new Error(
-      receivedSignal !== null
-        ? `electron-builder was interrupted by ${String(receivedSignal)}.`
-        : "The runtime guardian build lock was compromised.",
-    );
-  }
+  assertBuildAuthority();
 }
 
 await main();

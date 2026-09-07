@@ -1,3 +1,4 @@
+// @inertia-e2e-resource isolated
 import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";

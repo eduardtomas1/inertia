@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { runBounded } from "./bounded-process-tree.mjs";
 
@@ -68,7 +69,7 @@ function validInitializeEnvelope(message) {
     && typeof message.error.message === "string";
 }
 
-function validateInitializeResult(initialized, validation) {
+function validateInitializeResult(initialized, validation, selectTerminalAuth, environment) {
   if (!initialized || typeof initialized !== "object" || Array.isArray(initialized)
     || initialized.protocolVersion !== 1) {
     throw new Error(`${validation.expectedAgent} ACP initialize response is incompatible.`);
@@ -88,6 +89,14 @@ function validateInitializeResult(initialized, validation) {
     && capabilities?.loadSession !== true
     && !hasSessionResumeCapability) {
     throw new Error(`${validation.expectedAgent} ACP does not advertise session resume support.`);
+  }
+  // Only Kimi opts in through the exact bundled production policy. Other
+  // clients still reject terminal auth, and no canary executes a login action.
+  if (selectTerminalAuth) {
+    selectTerminalAuth(initialized.authMethods, environment);
+  } else if (Array.isArray(initialized.authMethods)
+    && initialized.authMethods.some((method) => method && typeof method === "object" && "type" in method)) {
+    throw new Error(`${validation.expectedAgent} ACP advertised terminal authentication without client terminal support.`);
   }
   const agentInfo = initialized.agentInfo;
   // ACP v1 permits omitted/null implementation metadata. Cursor's official
@@ -109,6 +118,20 @@ export async function runAcpInitializeHandshake(
   validation,
   dependencies = {},
 ) {
+  let selectTerminalAuth;
+  if (validation.kimiTerminalAuthPolicyPath !== undefined) {
+    if (validation.expectedAgent !== "Kimi Code CLI"
+      || typeof validation.kimiTerminalAuthPolicyPath !== "string"
+      || !isAbsolute(validation.kimiTerminalAuthPolicyPath)) {
+      throw new Error("Kimi terminal-auth canary policy configuration is invalid.");
+    }
+    // This path is staged by the trusted canary caller, never supplied by ACP.
+    const policy = await import(pathToFileURL(validation.kimiTerminalAuthPolicyPath).href);
+    if (typeof policy.selectKimiAcpAuthMethod !== "function") {
+      throw new Error("Kimi terminal-auth canary policy is unavailable.");
+    }
+    selectTerminalAuth = policy.selectKimiAcpAuthMethod;
+  }
   const spawnImplementation = dependencies.spawn ?? spawn;
   const timeoutMs = dependencies.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const cleanupTimeoutMs = dependencies.cleanupTimeoutMs
@@ -205,9 +228,11 @@ export async function runAcpInitializeHandshake(
           method: "initialize",
           params: {
             protocolVersion: 1,
-            clientCapabilities: validation.advertiseCompaction === false
-              ? { plan: {} }
-              : { plan: {}, session: { compaction: {} } },
+            clientCapabilities: {
+              plan: {},
+              ...(validation.advertiseCompaction === false ? {} : { session: { compaction: {} } }),
+              ...(selectTerminalAuth ? { auth: { terminal: true } } : {}),
+            },
             clientInfo: { name: "Inertia provider drift", version: "1.0.0" },
           },
         })}\n`, (error) => {
@@ -217,7 +242,7 @@ export async function runAcpInitializeHandshake(
         fail(error);
       }
     });
-    validateInitializeResult(initialized, validation);
+    validateInitializeResult(initialized, validation, selectTerminalAuth, options.environment);
   } catch (error) {
     handshakeError = error;
   }

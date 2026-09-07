@@ -1,3 +1,4 @@
+import type { RuntimeOwnedProcessDiagnostic } from "./runtime-owned-process-diagnostic.js";
 import type { ChildProcess } from "node:child_process";
 
 import type { DarwinProcessIdentity } from "./runtime-owned-process-darwin.js";
@@ -36,7 +37,7 @@ export interface ActiveRuntimeOwnedProcessRegistry {
   readonly admissionController: AbortController;
   readonly pendingAdmissions: Set<Promise<boolean>>;
   readonly pendingReleaseConfirmations: Set<Promise<boolean>>;
-  readonly onTainted: () => void;
+  readonly onTainted: (diagnostic: RuntimeOwnedProcessDiagnostic) => void;
   tainted: boolean;
 }
 

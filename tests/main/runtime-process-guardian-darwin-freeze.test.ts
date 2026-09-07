@@ -41,6 +41,7 @@ describe.runIf(process.platform === "darwin")("Darwin guardian freeze exit race"
     expect(run("observer-empty")).toMatchObject({
       forkTainted: 0,
       observerCalls: 2,
+      observer: "none",
     });
   });
 
@@ -50,6 +51,7 @@ describe.runIf(process.platform === "darwin")("Darwin guardian freeze exit race"
       expect(run(`observer-${outcome}`)).toMatchObject({
         forkTainted: 1,
         observerCalls: 2,
+        observer: outcome === "fork" ? "note-fork" : outcome === "hard-error" ? "syscall-error" : "event-error",
       });
     },
   );
@@ -58,6 +60,7 @@ describe.runIf(process.platform === "darwin")("Darwin guardian freeze exit race"
     expect(run("observer-eintr-exhausted")).toMatchObject({
       forkTainted: 1,
       observerCalls: 16,
+      observer: "retry-budget",
     });
   });
 

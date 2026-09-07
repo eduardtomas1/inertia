@@ -26,6 +26,9 @@ jobs:
         run: node -e "console.log(require('electron'))"
       - name: Repeat Kimi with its neighboring isolated fixture
         run: npm exec -- playwright test tests/e2e/kimi-terminal-auth.spec.ts tests/e2e/core-bridge-smoke.spec.ts --project=isolated --repeat-each=6 --max-failures=1 --output=test-results/macos-kimi
+      - name: Compare private Apple Git and resolved toolchain metadata
+        if: always()
+        run: python3 scripts/ci/measure-intel-git-guardian.py
       - name: Upload synthetic fixture diagnostics
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

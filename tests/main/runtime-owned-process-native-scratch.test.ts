@@ -25,7 +25,7 @@ describe.skipIf(process.platform !== "darwin")("scratch native guardian observat
   function fixture(command = "/usr/bin/git") {
     const stderr = new PassThrough();
     const child = {
-      stderr, spawnargs: ["/guardian", "watch", "123", "--", command, "private-argument"],
+      stderr, stdout: new PassThrough(), spawnargs: ["/guardian", "watch", "123", "--", command, "private-argument"],
     };
     return { stderr, finish: observeNativePhaseScratch(child) };
   }
@@ -35,6 +35,7 @@ describe.skipIf(process.platform !== "darwin")("scratch native guardian observat
     stderr.on("data", (chunk: Buffer) => { original += String(chunk); });
     stderr.write("private-output[Inertia guardian cleanup unproved: term-");
     stderr.write("fork-taint/none]\r\n");
+    stderr.write("[Inertia guardian observer taint: note-fork]\r\n");
     finish(null, "SIGUSR2", true);
     expect(original).toContain("private-output");
     const saved = readFileSync(path, "utf8");
@@ -42,6 +43,7 @@ describe.skipIf(process.platform !== "darwin")("scratch native guardian observat
     expect(JSON.parse(saved)).toMatchObject({
       kind: "git", stopRequested: true, signal: "SIGUSR2", code: null,
       failure: { phase: "term-fork-taint", census: "none" },
+      observer: "note-fork",
     });
     expect(stderr.listenerCount("data")).toBe(1);
   });
@@ -66,9 +68,9 @@ describe.skipIf(process.platform !== "darwin")("scratch native guardian observat
   it("bounds file output and does not throw when the fixture disappears", () => {
     const { stderr, finish } = fixture();
     stderr.write("x".repeat(65_537));
-    writeFileSync(path, "x".repeat(16_001));
+    writeFileSync(path, "x".repeat(16_384));
     finish(0, null, false);
-    expect(statSync(path).size).toBe(16_001);
+    expect(statSync(path).size).toBe(16_384);
     rmSync(path);
     expect(() => finish(0, null, false)).not.toThrow();
   });

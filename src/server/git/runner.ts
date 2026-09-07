@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { recordNativePhaseStopScratch } from "../../node/runtime-owned-process-native-scratch";
 import {
   runtimeOwnedProcessInvocation,
   spawnRuntimeOwnedProcess,
@@ -278,6 +279,7 @@ export function runGit(
       "Git inspection was cancelled.",
     );
     const onAbort = (): void => {
+      recordNativePhaseStopScratch(child, "abort");
       terminalError ??= abortError;
       if (termination || abortedProcessDrainTimer) return;
       // Fast Git inspections can have exited while Node is still waiting for
@@ -340,6 +342,7 @@ export function runGit(
     };
 
     const timer = setTimeout(() => {
+      recordNativePhaseStopScratch(child, "timeout");
       terminateAndFinish(new GitError(
         "timeout",
         "Git took too long to complete the operation.",

@@ -246,8 +246,8 @@ int main(int argc, char **argv) {
     memset(&tracker, 0, sizeof(tracker));
     tracker.root_event_queue = 42;
     observe_root_forks(&tracker);
-    printf("{\"forkTainted\":%d,\"observerCalls\":%d}\n",
-      tracker.fork_tainted, observer_calls);
+    printf("{\"forkTainted\":%d,\"observerCalls\":%d,\"observer\":\"%s\"}\n",
+      tracker.fork_tainted, observer_calls, observer_failure_reason);
     return 0;
   }
   const pid_t runner = fork();

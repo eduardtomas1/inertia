@@ -1,4 +1,4 @@
-import { lstatSync, readFileSync, existsSync, writeFileSync } from "node:fs";
+import { lstatSync, readFileSync, existsSync, writeFileSync, unlinkSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { app } from "electron";
 import { AppUpdateService } from "./app-update.js";
@@ -47,12 +47,15 @@ export function installedUpdateTestFixture() {
         websocketUrl: snapshot.websocketUrl, appImage: process.env.APPIMAGE,
         profile: app.getPath("userData"), version: app.getVersion() }), { flag: "wx", mode: 0o600 });
       const timeout = setTimeout(() => app.quit(), 120_000);
+      let installing = false;
       const timer = setInterval(() => {
         const command = join(root, `command-${process.pid}`);
         if (!existsSync(command)) return;
-        clearInterval(timer);
-        clearTimeout(timeout);
-        if (readFileSync(command, "utf8") === "quit") { app.quit(); return; }
+        const action = readFileSync(command, "utf8");
+        unlinkSync(command);
+        if (action === "quit") { clearInterval(timer); clearTimeout(timeout); app.quit(); return; }
+        if (installing) return;
+        installing = true;
         void (async () => {
           await service.check(true);
           await service.download();

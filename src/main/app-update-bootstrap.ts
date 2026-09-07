@@ -724,9 +724,10 @@ function parseCandidateAck(value: unknown): CandidateAckPacket | null {
     : null;
 }
 
-function boundedJsonFromStream(
+export function readAppUpdateBootstrapPacket(
   stream: NodeJS.ReadableStream,
   timeoutMs: number,
+  framing: "eof" | "line" = "eof",
 ): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
@@ -756,6 +757,10 @@ function boundedJsonFromStream(
         return;
       }
       chunks.push(value);
+      // Extract-and-run retains an outer AppImage process with stdout open.
+      // A complete ACK must not wait for that wrapper to exit: the candidate
+      // itself is waiting for the parent to transfer ownership.
+      if (framing === "line" && value.includes(0x0a)) finish();
     };
     const onEnd = (): void => finish();
     const onError = (): void => finish(
@@ -857,7 +862,7 @@ export async function runRestrictedAppUpdateCandidate(options: {
     expectedActiveRuntimeOwner: AppUpdateCandidateExpectedRuntimeOwner | null,
   ) => Promise<void>;
 }): Promise<AppUpdateLinuxCandidateAdmission> {
-  const secretValue = await boundedJsonFromStream(
+  const secretValue = await readAppUpdateBootstrapPacket(
     options.stdin ?? process.stdin,
     10_000,
   );
@@ -968,7 +973,7 @@ export async function runRestrictedAppUpdateCandidate(options: {
           new Error("The app update acknowledgement channel failed."),
         );
         process.stdout.once("error", onError);
-        process.stdout.end(packet, () => {
+        process.stdout.end(`${packet}\n`, () => {
           process.stdout.removeListener("error", onError);
           resolve();
         });
@@ -1067,9 +1072,10 @@ export async function launchRestrictedAppUpdateCandidate(options: {
       Math.max(1, options.timeoutMs ?? 15_000),
       Math.max(1, deadlineAt - Date.now()),
     );
-    const ackValue = await boundedJsonFromStream(
+    const ackValue = await readAppUpdateBootstrapPacket(
       candidate.output,
       acknowledgementBudgetMs,
+      "line",
     );
     const ack = parseCandidateAck(ackValue);
     const snapshot = options.journal.current();

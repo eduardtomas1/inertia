@@ -4,7 +4,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { chmod, copyFile, mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { runPackagedHistorySmoke } from "./package-smoke-history-runtime.mjs";
+import { runPackagedHistorySmoke, runPackagedWorkspaceDiscovery, resumePackagedHistorySmoke } from "./package-smoke-history-runtime.mjs";
 import { assertHistoryAfterShutdown } from "./package-smoke-history-storage.mjs";
 
 if (process.platform !== "linux") throw new Error("Installed AppImage updates require native Linux.");
@@ -62,6 +62,11 @@ async function wait(label, read, timeout = 90_000) {
 const seen = new Set();
 async function ready() {
   return await wait("replacement runtime readiness", async () => {
+    const results = (await readdir(root)).filter((name) => name.startsWith("result-"));
+    for (const name of results) {
+      const result = JSON.parse(await readFile(join(root, name), "utf8"));
+      if (result.state === "failed" || result.installBlocker) throw new Error(`Installed updater rejected the handoff: ${result.message}`);
+    }
     const names = (await readdir(root)).filter((name) => /^ready-\d+\.json$/u.test(name) && !seen.has(name));
     if (!names.length) return null;
     const name = names[0];
@@ -90,8 +95,8 @@ try {
   equal(replacement.profile, old.profile);
   equal(replacement.version, version);
   equal(await digest(stable), await digest(candidate));
-  const newHistory = await runPackagedHistorySmoke({ websocketUrl: replacement.websocketUrl,
-    workspaceDirectory: workspace, baseline: history, deadlineAt: Date.now() + 30_000 });
+  const newHistory = await resumePackagedHistorySmoke(replacement.websocketUrl, history);
+  await runPackagedWorkspaceDiscovery(replacement.websocketUrl, history.project.id);
   await command(replacement, "quit");
   await wait("replacement shutdown", () => !alive(replacement.mainPid) && !alive(replacement.runtimePid));
   await assertHistoryAfterShutdown(root, history);
@@ -100,10 +105,10 @@ try {
   launch(stable);
   const reopened = await ready();
   equal(reopened.profile, old.profile);
-  await runPackagedHistorySmoke({ websocketUrl: reopened.websocketUrl, workspaceDirectory: workspace,
-    baseline: history, deadlineAt: Date.now() + 30_000 });
+  const reopenedHistory = await resumePackagedHistorySmoke(reopened.websocketUrl, newHistory);
   await command(reopened, "quit");
   await wait("reopened installed app shutdown", () => !alive(reopened.mainPid) && !alive(reopened.runtimePid));
+  await assertHistoryAfterShutdown(root, reopenedHistory);
   console.log(`Installed Linux ${process.arch} update passed: real candidate bootstrap, old-owner shutdown, atomic replacement, same profile/history/settings/provider sessions, new turns, and fresh relaunch.`);
 } catch (error) {
   console.error(output);

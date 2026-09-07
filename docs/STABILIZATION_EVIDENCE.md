@@ -56,6 +56,7 @@ historical sample, not an exact-current-main measurement or a projected saving.
 | Sign-in terminal lifecycle | Early exit could arrive before the created receipt; signalled zero-code exits looked successful. | Bounded attempt-owned buffering, exact receipt correlation, synchronous cancellation and signal-aware exit reporting. |
 | Browser preview suggestion | Optional page context had no dismissal control. | Separate keyboard-accessible dismiss/remove button, per-conversation/URL state, outgoing-context and detachment ownership regressions. |
 | Composer duplicate work | Command descriptions, disabled-state checks and menu option rendering were duplicated. | Derive command state only when a slash query exists and render one shared native option; 94 focused DOM tests preserve keyboard and selection behavior. |
+| Runtime fixture discovery | Fake Codex shared discovery with unrelated installed host CLIs, making readiness depend on their probe durations. | A private slow-CLI reproduction fails at the original six-second deadline; fixture-owned discovery candidates and credential-free profiles pass without changing production deadlines. |
 
 The initial complete `npm run check` stopped at the four SBOM assertions:
 7,137 tests passed, 77 skipped, four failed; 169.34 seconds wall time. It did
@@ -205,10 +206,10 @@ pinned application dependency graph. This is Linux type/runtime/help/schema/
 initialize and plugin-isolation evidence, not authenticated turns or native
 Windows/macOS certification.
 
-The complete candidate coverage attempt passed 7,414 tests with 77 skips,
+The earlier complete candidate coverage attempt passed 7,414 tests with 77 skips,
 but failed the same four runtime-summary readiness tests observed on the
-baseline. It is not a green result; their cause is being investigated rather
-than waived as pre-existing. Baseline/candidate totals, with unchanged
+baseline. It was not a green result; the cause and correction are recorded
+below, not waived as pre-existing. Baseline/candidate totals, with unchanged
 thresholds, are:
 
 | Metric | Baseline | Candidate attempt |
@@ -218,16 +219,178 @@ thresholds, are:
 | Functions | 12,660 / 15,524 (81.55%) | 12,739 / 15,592 (81.70%) |
 | Lines | 59,559 / 71,676 (83.09%) | 59,838 / 71,912 (83.21%) |
 
-Final combined check, coverage, desktop and package verification remain
-pending. Antigravity's separately distributed official ACP runtime was
+The final coverage run at `0c8a0123` passed **7,419 tests, 77 skips**, across
+702 passing and eight skipped files, in 728.05 seconds. The preceding baseline
+coverage run had 7,133 passes, eight failures (four SBOM and four readiness)
+and 77 skips; it was not a green baseline. Baseline Vitest 4.1.11 and candidate
+Vitest 5.0.0 are different instrumenter versions. All original thresholds pass.
+
+The runtime readiness issue also reproduced without coverage: two valid
+3.5-second probes of a private unrelated CLI left all providers checking past
+the fixture's six-second deadline. Discovery publishes the aggregate result.
+The fixture now controls both child profiles/credentials and its complete
+candidate-path set; changing PATH alone would still admit fallback roots.
+The 24 runtime tests passed under V8 instrumentation before the full run.
+
+Final covered/total denominators, including every configured area threshold:
+
+| Scope | Statements: baseline → candidate | Branches: baseline → candidate | Functions: baseline → candidate | Lines: baseline → candidate |
+| --- | --- | --- | --- | --- |
+| All source | 64041/79887 → 64412/80186 | 52222/69509 → 52428/69704 | 12660/15524 → 12731/15587 | 59559/71676 → 59868/71910 |
+| Main | 13166/17276 → 13161/17276 | 9868/13599 → 9857/13599 | 2163/2767 → 2163/2767 | 12357/15519 → 12353/15519 |
+| Node | 3215/3892 → 3215/3892 | 3388/4144 → 3388/4144 | 525/570 → 525/570 | 3005/3452 → 3005/3452 |
+| Preload | 98/208 → 98/208 | 18/36 → 18/36 | 47/132 → 47/132 | 90/182 → 90/182 |
+| Renderer | 15038/19430 → 15065/19464 | 13218/18318 → 13220/18352 | 3524/4880 → 3523/4876 | 13629/16927 → 13652/16951 |
+| Server | 29907/35739 → 30257/36005 | 22629/29534 → 22844/29695 | 5811/6497 → 5883/6564 | 28087/32614 → 28378/32825 |
+| Shared | 2617/3342 → 2616/3341 | 3101/3878 → 3101/3878 | 590/678 → 590/678 | 2391/2982 → 2390/2981 |
+| `src/shared/private-connect/*.ts` | 603/626 → 603/626 | 431/473 → 431/473 | 97/98 → 97/98 | 542/550 → 542/550 |
+| `src/server/private-connect/*.ts` | 287/411 → 287/411 | 197/325 → 197/325 | 69/93 → 69/93 | 268/366 → 268/366 |
+| `src/main/private-connect/*.ts` | 1172/1631 → 1167/1631 | 797/1152 → 786/1152 | 226/301 → 226/301 | 1078/1392 → 1074/1392 |
+| `src/{main,server/runtime}/secure-file*.ts` | 953/1164 → 953/1164 | 698/890 → 698/890 | 146/174 → 146/174 | 910/1064 → 910/1064 |
+| `src/main/credential-vault.ts` | 240/346 → 240/346 | 154/226 → 154/226 | 39/63 → 39/63 | 229/309 → 229/309 |
+
+Global percentages are 80.32% statements, 75.21% branches, 81.67% functions,
+83.25% lines. This is not a claim that every area increased: main-process and
+renderer branch percentages declined slightly. The main difference is confined
+to byte-identical `tailscale-command.ts` (statements 91/101 → 86/101, branches
+80/101 → 69/101); summaries alone do not establish the cause. No assertion,
+threshold or reported source file was removed to improve these numbers.
+
+The report contains 956 files versus 946: nine new server modules and the
+already-existing `src/renderer/private-connect/vite.config.ts`, newly reported
+with zero denominators. The latter is an instrumenter report-set difference,
+not an added production module. The nine additions are recovery-worker protocol,
+terminal projection, ACP terminal-auth policy, auth launch, Kimi auth probe,
+bounded image reader, settled orchestration, settlement effects and settlement
+tasks. Existing responsibilities and their proof mappings remain above.
+
+Final quality (all five TypeScript configurations, both lint modes, architecture
+and migration checks), actionlint, Windows-Codex Linux contracts (four passes,
+four native skips), Linux packaging contracts (nine passes), enforced browser
+CPU checks (three passes) and enforced platform benchmark (two passes) passed.
+All three fixed lifecycle repetitions passed 166 tests each. Concurrent host
+work means these durations are validation observations, not speedup estimates.
+
+A separate clean archived checkout at `0c8a0123` passed the exact minimum-Node
+CI contract with verified official Node 22.13.0/npm 10.9.2: fresh-cache/tree
+`npm ci --engine-strict` (41 seconds, zero audit findings), then
+`npm run check:node-runtime`. The latter compiled all five TypeScript projects
+and executed built runtime CLI readiness/help/error cases. Lock identity was
+unchanged; no installed dependency tree was reused.
+
+The literal `npm run check` at `0c8a0123` passed all quality gates, 7,419 tests
+with 77 skips, and the complete build with all unchanged bundle budgets.
+The full native Linux Electron run passed 97 scenarios, with four existing
+macOS-only skips and no failures or retries: 33 display-sensitive, 60 isolated,
+and four runtime-recovery passes. All 101 assignments across 58 spec files
+were retained. The native run used private profiles, a private virtual display
+and synthetic providers; the user's app/profile were untouched.
+
+The native run's entire output inventory was identical before and after its
+three phases. Main, preload, runtime and desktop renderer bytes still match
+the subsequent full build. The PWA difference was traced to the existing asset
+unit test: it invoked the real builder with repository cwd and inherited
+`NODE_ENV=test`, overwriting the shared PWA output with a development bundle.
+A supplementary browser bootstrap crossed that rewrite and timed out waiting
+for the previous asset; that failed attempt is not passed evidence. The asset
+fixture now builds copied inputs in a disposable directory, retaining all
+assertions and its existing framework deadline, and leaving shared output
+byte-identical. Private dependency junctions keep Vite's temporary writes local.
+
+The rebuilt Private Connect desktop scenario separately passed in 15.7 seconds.
+An actual browser bootstrap from a frozen copy then loaded the production PWA,
+rendered its expected offline screen, and produced no uncaught errors or
+external requests. The loaded 309,114-byte module has SHA-256
+`9609a2fb4b828dbfe7a713531fcc975faa386630de384110dc3e8335b284342c`;
+all seven frozen PWA files match the independent clean Node 22 build. All 207
+shared output files stayed unchanged during those successful checks. Earlier
+scratch diagnostics relying on network silence or headed screenshot capture
+did not complete and are not passed evidence. This proves unauthenticated
+bootstrap, not pairing, Tailscale or an authenticated remote session.
+
+After the clean-packaging correction, the literal `npm run check` at `60671dea`
+also passed: 7,459 tests, 77 skips, 704 passing and eight skipped files,
+201.28 seconds for the tests, all quality gates and all bundle budgets. The
+additional 40 tests exercise runtime preparation and packaged legal resources.
+Production `src/` is unchanged from the fully covered `0c8a0123` revision;
+the coverage result above is bound to that revision, not renamed as a new run.
+The final fixture-isolated revision `b9789e1f` then passed another literal
+`npm run check`: the same 7,459 passes and 77 skips in 188.67 seconds, all
+quality gates and all bundle budgets. All 207 rebuilt output files match the
+successful frozen-output desktop/PWA verification exactly.
+
+Antigravity's separately distributed official ACP runtime was
 investigated, including a credential-free native initialize. Its published
 adapter has an independently reproduced terminal-failure ambiguity; no
 Antigravity route or migration is implemented or claimed. See
 `STABILIZATION_PROVIDERS_ANTIGRAVITY.md`. Existing Gemini API-key/enterprise
 history remains unchanged.
 
+## Clean packaging regression
+
+A clean minimum-Node checkout exposed a real Electron 44.2.0 packaging change:
+its npm package no longer installs the development runtime through postinstall.
+`require("electron")` lazily downloads it, but building and packaging without
+an earlier Electron launch does not invoke that path. Electron-builder exited
+successfully while warning that the two declared Electron/Chromium legal
+resource copies were absent. The incomplete artifact was retained as failed
+evidence, not accepted as a successful package.
+
+Packaging now explicitly runs the official installed Electron installer as a
+bounded, supervised child under the existing guardian build lock. Its exact
+platform/version receipt, executable and required legal files must exist before
+the builder is admitted. Redirected distributions and checksum/version overrides
+are rejected; ordinary cache, mirror and proxy settings remain supported with
+the package's embedded checksums. Abort and unconfirmed process-tree cleanup
+retain their existing lock/quarantine authority; no unbounded lazy installer or
+automatic damaged-cache deletion is introduced.
+
+The artifact-only package smoke also validates all four declared legal resources
+before native launch, with bounded regular-file reads and content checks. It
+does not compare historical installed packages against the current checkout's
+dependencies. Reported hashes identify the actual artifact bytes, not a new
+source-authenticity attestation. The corrected command was then verified in a
+new archived checkout at `60671deaeafaec8401ee0c36f4dcf4d1b4161312`, using
+official Node 22.13.0/npm 10.9.2, a fresh installed tree and private profiles.
+Only the npm download cache was reused. Electron `dist` and `path.txt` were
+confirmed absent immediately before normal `npm run package:linux`; no manual
+installer or lazy Electron import preceded it. Install, build and packaging
+passed, all four legal resources matched their exact source/generated bytes,
+and the two previous missing-source warnings were absent.
+
+The resulting local `Inertia-0.0.53.AppImage` is 359,692,677 bytes, SHA-256
+`7c64fbef00fa51ed989c8212ec84c39fb5ad395ce30f25bb5b38c26112263088`.
+Linux package validation, all nine Electron fuse checks in unpacked and
+extracted forms, and all nine Linux packaging tests passed. Native unpacked
+fixture and normal FUSE/AppRun launches proved runtime readiness, real PDF
+extraction, image retention and orderly shutdown. The complete unchanged
+release-container smoke passed, including:
+
+- normal mount/AppRun launch;
+- installed update with real candidate bootstrap, old-owner shutdown, atomic
+  replacement, retained history/settings/provider sessions, new synthetic turns
+  and fresh relaunch;
+- guardian-sealed AppImage descriptor-chain launch;
+- extract-and-run fallback.
+
+Every recorded test main/runtime PID was absent after cleanup; owned process
+groups could no longer execute, and the packaging agent's private virtual
+display was stopped. The later `b9789e1f` change only isolates the asset test;
+it does not change product or build inputs for this artifact.
+
+Important limitation: the default unpacked launch without a sandbox override
+failed on this host because user namespaces are unavailable and the helper is
+user-owned mode 0755. That failure is retained. No system permissions or security
+settings were changed. The distinct existing unpacked fixture uses its explicit
+no-sandbox mode; the normal AppImage uses the inherited AppRun automatic
+fallback. The release-container fixture also uses its existing bypass. These
+passes are **not sandbox-enabled proof**. This local artifact has manual updater
+capability, no signing credentials or provenance attestation; the native
+installed-update fixture does not certify a signed public release.
+
 ## Final evidence
 
-Implementation and integrated verification are in progress. This document does
-not currently claim a green candidate, an installed upgrade, authenticated live
-provider compatibility, or release readiness.
+Local Linux results above include a real isolated installed-update fixture;
+hosted exact-head certification is still separate and pending. No authenticated
+upstream provider compatibility, native Windows/macOS result, public release
+readiness or in-place repair of the user's running installation is claimed.

@@ -161,7 +161,10 @@ describe("Git workflows", () => {
     expect(result.status.branch).toBe("topic/remote");
     expect(result.status.upstream).toBe("team/upstream/topic/remote");
     git(local, "switch", "main");
-    git(local, "remote", "add", "team", join(remote, "missing"));
+    // New Git versions reject this overlap in `remote add`; existing/manual
+    // configurations can still contain it and must fail before branch creation.
+    git(local, "config", "remote.team.url", join(remote, "missing"));
+    git(local, "config", "remote.team.fetch", "+refs/heads/*:refs/remotes/team/*");
     git(remote, "branch", "topic/ambiguous", "main");
     await fetchRepository(local);
     await expect(switchBranch(local, "team/upstream/topic/ambiguous", { remote: true }))

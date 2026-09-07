@@ -14,7 +14,6 @@ jobs:
     env:
       CI: "true"
       INERTIA_E2E_WORKERS: "2"
-      INERTIA_STARTUP_CAPTURE_DIRECTORY: ${{ runner.temp }}/pr309-native-startup
     steps:
       - name: Check out exact failing-source diagnostic branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -27,7 +26,8 @@ jobs:
       - name: Prepare Electron and private diagnostic destination
         run: |
           node -e "console.log(require('electron'))"
-          mkdir -m 700 "$INERTIA_STARTUP_CAPTURE_DIRECTORY"
+          mkdir -m 700 "$RUNNER_TEMP/pr309-native-startup"
+          echo "INERTIA_STARTUP_CAPTURE_DIRECTORY=$RUNNER_TEMP/pr309-native-startup" >> "$GITHUB_ENV"
       - name: Run original display-sensitive prefix
         id: display
         run: npm exec -- playwright test --project=display-sensitive --max-failures=1 --output=test-results/display-sensitive
@@ -41,7 +41,7 @@ jobs:
           DISPLAY_OUTCOME: ${{ steps.display.outcome }}
           ISOLATED_OUTCOME: ${{ steps.isolated.outcome }}
         run: |
-          node -e 'const fs=require("node:fs"), p=require("node:path"); const root=process.env.INERTIA_STARTUP_CAPTURE_DIRECTORY; fs.mkdirSync(root,{recursive:true,mode:0o700}); fs.writeFileSync(p.join(root,"outcome.json"),JSON.stringify({sourceSha:process.env.CAPTURE_SOURCE_SHA,baseline:"f1b423a6",display:process.env.DISPLAY_OUTCOME,isolated:process.env.ISOLATED_OUTCOME,nativeRecordsPresent:fs.existsSync(p.join(root,"native-phase.jsonl"))}),{mode:0o600})'
+          node -e 'const fs=require("node:fs"), p=require("node:path"); const root=process.env.INERTIA_STARTUP_CAPTURE_DIRECTORY || p.join(process.env.RUNNER_TEMP,"pr309-native-startup"); fs.mkdirSync(root,{recursive:true,mode:0o700}); fs.writeFileSync(p.join(root,"outcome.json"),JSON.stringify({sourceSha:process.env.CAPTURE_SOURCE_SHA,baseline:"f1b423a6",display:process.env.DISPLAY_OUTCOME,isolated:process.env.ISOLATED_OUTCOME,nativeRecordsPresent:fs.existsSync(p.join(root,"native-phase.jsonl"))}),{mode:0o600})'
       - name: Retain fixed native startup evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

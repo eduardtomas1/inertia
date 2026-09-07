@@ -86,3 +86,17 @@ The feature-owned Electron scenario in `tests/e2e/git-workflows.spec.ts`
 exercises actual IPC and Git operations and attaches desktop screenshots in
 dark and light themes. CI provides the applicable Linux, macOS and Windows
 evidence; live SSH/HTTPS accounts require separately configured credentials.
+
+The desktop scenario verifies fetch without losing local changes, blocked dirty
+checkout, the existing complete-diff commit dialog, explicit tracking checkout,
+branch-name geometry, compact-window overflow and Escape focus restoration.
+These are actual Electron captures using a temporary repository and local bare
+remote. Before images use main commit `27bbc985`; after images use this PR.
+
+| Original controls | Implemented controls |
+| --- | --- |
+| ![Original Git actions](screenshots/pr-312-git-overview-before.png) | ![Git overview with explicit fetch](screenshots/pr-312-git-overview-dark.png) |
+| ![Original branch list](screenshots/pr-312-git-branches-before.png) | ![Searchable local and remote branches](screenshots/pr-312-git-branches-dark.png) |
+
+[Compact light Git overview](screenshots/pr-312-git-overview-light.png) ·
+[Retained complete-diff commit dialog](screenshots/pr-312-git-commit-review-dark.png)

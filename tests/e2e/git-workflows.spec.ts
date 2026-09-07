@@ -19,6 +19,8 @@ test.beforeAll(async () => {
       const remote = join(testDirectory, "remote.git");
       await git(testDirectory, "init", "--bare", remote);
       await git(workspaceDirectory, "remote", "add", "origin", remote);
+      await git(workspaceDirectory, "config", "user.name", "Inertia Test");
+      await git(workspaceDirectory, "config", "user.email", "test@example.invalid");
       const current = await git(workspaceDirectory, "branch", "--show-current");
       await git(workspaceDirectory, "push", "-u", "origin", current);
       await git(remote, "branch", "feature/remote-review", current);
@@ -55,6 +57,12 @@ test("reviews sync state, fetches safely, searches branches and checks out a rem
   const branches = page.getByRole("menu", { name: "Branches" });
   await expect(branches.getByRole("menuitemradio", { name: /feature\/occupied/u })).toBeDisabled();
   await expect(branches.getByRole("menuitemradio", { name: /origin\/feature\/remote-review/u })).toBeEnabled();
+  const branchGeometry = await branches.locator(".git-branch-results").evaluate((element) => ({
+    overflow: element.scrollWidth - element.clientWidth,
+    nameWidths: [...element.querySelectorAll(".git-branch-name")].map((name) => name.getBoundingClientRect().width),
+  }));
+  expect(branchGeometry.overflow).toBeLessThanOrEqual(1);
+  expect(branchGeometry.nameWidths.every((width) => width > 100)).toBe(true);
   const branchShot = testInfo.outputPath("git-branches-dark.png");
   await page.screenshot({ path: branchShot, animations: "disabled" });
   await testInfo.attach("Searchable local and remote branches", { path: branchShot, contentType: "image/png" });
@@ -64,9 +72,21 @@ test("reviews sync state, fetches safely, searches branches and checks out a rem
   await branches.getByRole("menuitemradio", { name: /origin\/feature\/remote-review/u }).click();
   await expect(page.getByText("Commit or stash local changes before switching branches.", { exact: true }).first()).toBeVisible();
   expect(await readFile(join(workspaceDirectory, "sample.ts"), "utf8")).toBe(before);
+  await page.getByRole("button", { name: "Dismiss error", exact: true }).click();
 
-  await git(workspaceDirectory, "add", "sample.ts");
-  await git(workspaceDirectory, "-c", "user.name=Inertia Test", "-c", "user.email=test@example.invalid", "commit", "-m", "Reviewed fixture change");
+  await openGit();
+  await menu.getByRole("menuitem", { name: /^Commit/u }).click();
+  const commitDialog = page.getByRole("dialog", { name: "Commit changes" });
+  await commitDialog.getByRole("textbox", { name: "Commit message" }).fill("Reviewed fixture change");
+  const commit = commitDialog.getByRole("button", { name: "Commit", exact: true });
+  await expect(commit).toBeEnabled();
+  const commitShot = testInfo.outputPath("git-commit-review-dark.png");
+  await page.screenshot({ path: commitShot, animations: "disabled" });
+  await testInfo.attach("Complete-diff commit review", { path: commitShot, contentType: "image/png" });
+  await commit.click();
+  await expect(commitDialog).toBeHidden();
+  expect(await git(workspaceDirectory, "log", "-1", "--format=%s")).toBe("Reviewed fixture change");
+  expect(await git(workspaceDirectory, "status", "--porcelain")).toBe("");
   await branchTrigger.click();
   await branches.getByRole("searchbox", { name: "Search branches" }).fill("remote-review");
   await branches.getByRole("menuitemradio", { name: /origin\/feature\/remote-review/u }).click();

@@ -120,6 +120,38 @@ describe("Git workflows", () => {
     await expect(pullRepository(local)).rejects.toThrow("no upstream");
   });
 
+  it("fast-forwards a clean checkout and refuses divergence despite configured rebase", async () => {
+    const { root, local, remote } = fixture();
+    const peer = join(root, "peer");
+    git(root, "clone", "--branch", "main", remote, peer);
+    git(peer, "config", "user.name", "Git Workflow Test");
+    git(peer, "config", "user.email", "git@example.invalid");
+    git(local, "config", "pull.rebase", "true");
+    git(local, "config", "rebase.autoStash", "true");
+    writeFileSync(join(peer, "incoming.txt"), "incoming\n");
+    git(peer, "add", "incoming.txt");
+    git(peer, "commit", "-m", "Incoming change");
+    git(peer, "push");
+    const result = await pullRepository(local);
+    expect(result.status).toMatchObject({ ahead: 0, behind: 0, clean: true });
+    expect(git(local, "rev-parse", "HEAD")).toBe(git(peer, "rev-parse", "HEAD"));
+    expect(readFileSync(join(local, "incoming.txt"), "utf8")).toBe("incoming\n");
+
+    writeFileSync(join(local, "local.txt"), "local\n");
+    git(local, "add", "local.txt");
+    git(local, "commit", "-m", "Local change");
+    const localHead = git(local, "rev-parse", "HEAD");
+    writeFileSync(join(peer, "incoming.txt"), "another incoming\n");
+    git(peer, "add", "incoming.txt");
+    git(peer, "commit", "-m", "Another incoming change");
+    git(peer, "push");
+    await fetchRepository(local);
+    await expect(pullRepository(local)).rejects.toThrow("diverged");
+    expect(git(local, "rev-parse", "HEAD")).toBe(localHead);
+    expect(readFileSync(join(local, "incoming.txt"), "utf8")).toBe("incoming\n");
+    expect(git(local, "stash", "list")).toBe("");
+  });
+
   it("supports remote names containing slashes and rejects overlapping tracking namespaces", async () => {
     const { local, remote } = fixture();
     git(local, "remote", "rename", "origin", "team/upstream");

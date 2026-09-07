@@ -1,4 +1,7 @@
 .git-action-popover { width: min(340px, calc(100vw - 24px)); max-height: min(650px, 80vh); }
+.header-popover.git-action-popover > button { justify-content: flex-start; }
+.git-action-popover > button > span { flex: 1; }
+.git-action-popover > button small { width: auto; overflow: visible; white-space: normal; }
 .git-overview { padding: 12px 10px; border-bottom: 1px solid var(--border); }
 .git-overview-heading { display: flex; align-items: center; gap: 8px; }
 .git-overview-heading strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -14,9 +17,12 @@
 .git-branch-search:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
 .git-branch-search input { width: 100%; min-width: 0; border: 0; outline: 0; padding: 9px 0; color: var(--text); background: transparent; font: inherit; }
 .git-branch-results { max-height: 280px; overflow: auto; }
-.git-branch-results button { display: flex; align-items: center; gap: 8px; width: 100%; }
+.git-branch-results button { display: flex; align-items: center; gap: 8px; width: 100%; min-height: var(--ui-control-height); padding: 7px 9px; border-radius: 8px; color: var(--text-soft); background: transparent; font-size: var(--ui-font-secondary); text-align: left; }
+.git-branch-results button:hover { color: var(--text); background: var(--surface-hover); }
+.git-branch-results button:disabled { opacity: .52; cursor: default; }
 .git-branch-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
 .git-branch-results button svg, .git-branch-results button small { flex-shrink: 0; }
+.git-branch-results button small { width: auto; }
 .git-branch-results button[aria-checked="true"] { background: var(--surface-hover); }
 .git-branch-empty { padding: 12px; color: var(--text-muted); font-size: var(--ui-font-micro); }
 

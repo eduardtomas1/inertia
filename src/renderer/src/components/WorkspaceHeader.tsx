@@ -281,7 +281,10 @@ export function WorkspaceHeader({
                   <Suspense fallback={<div className="header-popover" role="status">Loading branches…</div>}>
                     <WorkspaceBranchMenu project={project} conversation={conversation} gitStatus={gitStatus}
                       branches={branches} branchesLoading={branchesLoading} branchesError={branchesError} busy={busy}
-                      onClose={() => setMenu(null)} onRefreshBranches={onRefreshBranches} onSwitchBranch={onSwitchBranch}
+                      onClose={() => {
+                        headerActionsRef.current?.querySelector<HTMLElement>('[data-header-menu="branch"] > button')?.focus();
+                        setMenu(null);
+                      }} onRefreshBranches={onRefreshBranches} onSwitchBranch={onSwitchBranch}
                       onCreateBranch={onCreateBranch} onCreateConversationInWorktree={onCreateConversationInWorktree}
                       onCreateConversationOnBranch={onCreateConversationOnBranch}
                       onCreateConversationInIsolatedWorktree={onCreateConversationInIsolatedWorktree} />

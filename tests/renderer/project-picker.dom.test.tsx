@@ -103,12 +103,12 @@ describe("ProjectPicker", () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
-  it("dismisses with Escape or the backdrop without changing projects", () => {
+  it("dismisses with Escape or the same trigger without changing projects", () => {
     const { search, trigger, onChange } = mount();
     fireEvent.keyDown(search, { key: "Escape" });
     expect(trigger).toHaveFocus();
     fireEvent.click(trigger);
-    fireEvent.mouseDown(screen.getByRole("dialog").parentElement!);
+    fireEvent.click(trigger);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(trigger).toHaveFocus();
     expect(onChange).not.toHaveBeenCalled();

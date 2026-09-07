@@ -1,4 +1,4 @@
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook } from "@testing-library/react";
 import type { Dispatch, SetStateAction } from "react";
 import { describe, expect, it, vi } from "vitest";
 
@@ -30,6 +30,7 @@ function setup() {
   const first = project("first", "First");
   const second = project("second", "Second");
   const start = vi.fn();
+  const changeProject = vi.fn();
   const discard = vi.fn();
   const sendFromComposer = vi.fn(async () => ({
     kind: "message.accepted" as const,
@@ -41,13 +42,13 @@ function setup() {
   const selectionCommandQueue = vi.fn(async () => ({} as ServerEvent));
   const setView = vi.fn() as Dispatch<SetStateAction<AppView>>;
   const setSidebarOpen = vi.fn() as Dispatch<SetStateAction<boolean>>;
-  const setActionError = vi.fn() as Dispatch<SetStateAction<string | null>>;
   const generation = { current: 0 };
   const hook = renderHook(() => useProjectChatNavigation({
     project: first,
     projects: [first, second],
     busyAction: null,
     draftConversation: {
+      changeProject,
       discard,
       importProject: async () => false,
       sendFromComposer,
@@ -58,11 +59,11 @@ function setup() {
     startupSurface: "summary",
     showStartupSurface: vi.fn(),
     updateSplitConversationId: vi.fn(),
-    setActionError,
     setSidebarOpen,
     setView,
   }));
   return {
+    changeProject,
     discard,
     first,
     generation,
@@ -82,25 +83,24 @@ describe("project chat navigation", () => {
 
     act(() => hook.result.current.openGlobalChat());
 
-    expect(start).toHaveBeenCalledWith(first.id);
+    expect(start).toHaveBeenCalledWith(first.id, true);
     expect(setView).toHaveBeenCalledWith("home");
     expect(setSidebarOpen).toHaveBeenCalledWith(false);
     expect(hook.result.current.globalChatActive).toBe(true);
   });
 
-  it("switches only the draft project from the in-chat selector", async () => {
-    const { generation, hook, second, selectionCommandQueue, start } = setup();
+  it("changes the draft target without navigating or creating a replacement draft", () => {
+    const { changeProject, generation, hook, second, first, selectionCommandQueue, start } = setup();
 
     act(() => hook.result.current.openGlobalChat());
     act(() => hook.result.current.selectGlobalChatProject(second));
 
-    expect(selectionCommandQueue).toHaveBeenCalledWith(
-      "project.select:global-chat",
-      { type: "project.select", payload: { projectId: second.id } },
-    );
-    expect(generation.current).toBe(2);
-    await waitFor(() => expect(start).toHaveBeenLastCalledWith(second.id));
-    expect(hook.result.current.globalProjectChangeId).toBeNull();
+    expect(changeProject).toHaveBeenLastCalledWith(second.id);
+    act(() => hook.result.current.selectGlobalChatProject(first));
+    expect(changeProject).toHaveBeenLastCalledWith(first.id);
+    expect(selectionCommandQueue).not.toHaveBeenCalled();
+    expect(start).toHaveBeenCalledOnce();
+    expect(generation.current).toBe(1);
   });
 
   it("enters the workspace after the first accepted message", async () => {
@@ -127,49 +127,50 @@ describe("project chat navigation", () => {
     expect(hook.result.current.globalChatActive).toBe(false);
   });
 
-  it("does not restore a draft after navigation overtakes its project change", async () => {
-    const { hook, second, selectionCommandQueue, setView, start } = setup();
-    let completeSelection: ((event: ServerEvent) => void) | undefined;
-    selectionCommandQueue.mockImplementationOnce(() => new Promise(
+  it("does not redirect after navigation overtakes a draft send", async () => {
+    const { hook, sendFromComposer, setView } = setup();
+    let completeSend: ((event: Awaited<ReturnType<typeof sendFromComposer>>) => void) | undefined;
+    const acceptance = await sendFromComposer();
+    sendFromComposer.mockImplementationOnce(() => new Promise(
       (resolve) => {
-        completeSelection = resolve;
+        completeSend = resolve;
       },
     ));
 
     act(() => hook.result.current.openGlobalChat());
-    act(() => hook.result.current.selectGlobalChatProject(second));
-    act(() => hook.result.current.navigateToView("workspace"));
+    let pending!: ReturnType<typeof hook.result.current.sendMessage>;
+    act(() => { pending = hook.result.current.sendMessage("Build it", []); });
+    act(() => hook.result.current.navigateToView("settings"));
     await act(async () => {
-      completeSelection?.({} as ServerEvent);
-      await Promise.resolve();
+      completeSend?.(acceptance);
+      await pending;
     });
 
-    expect(start).toHaveBeenCalledTimes(1);
-    expect(start).not.toHaveBeenCalledWith(second.id);
-    expect(setView).toHaveBeenLastCalledWith("workspace");
+    expect(setView).toHaveBeenLastCalledWith("settings");
     expect(hook.result.current.globalChatActive).toBe(false);
   });
 
-  it("does not let an older project change replace a reopened draft", async () => {
-    const { first, hook, second, selectionCommandQueue, setView, start } = setup();
-    let completeSelection: ((event: ServerEvent) => void) | undefined;
-    selectionCommandQueue.mockImplementationOnce(() => new Promise(
+  it("does not let an older send replace the draft reopened by the logo", async () => {
+    const { first, hook, sendFromComposer, setView, start } = setup();
+    let completeSend: ((event: Awaited<ReturnType<typeof sendFromComposer>>) => void) | undefined;
+    const acceptance = await sendFromComposer();
+    sendFromComposer.mockImplementationOnce(() => new Promise(
       (resolve) => {
-        completeSelection = resolve;
+        completeSend = resolve;
       },
     ));
 
     act(() => hook.result.current.openGlobalChat());
-    act(() => hook.result.current.selectGlobalChatProject(second));
+    let pending!: ReturnType<typeof hook.result.current.sendMessage>;
+    act(() => { pending = hook.result.current.sendMessage("Build it", []); });
     act(() => hook.result.current.openGlobalChat());
     await act(async () => {
-      completeSelection?.({} as ServerEvent);
-      await Promise.resolve();
+      completeSend?.(acceptance);
+      await pending;
     });
 
     expect(start).toHaveBeenCalledTimes(2);
-    expect(start).toHaveBeenLastCalledWith(first.id);
-    expect(start).not.toHaveBeenCalledWith(second.id);
+    expect(start).toHaveBeenLastCalledWith(first.id, true);
     expect(setView).toHaveBeenLastCalledWith("home");
     expect(hook.result.current.globalChatActive).toBe(true);
   });

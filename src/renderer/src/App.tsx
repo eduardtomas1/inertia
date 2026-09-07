@@ -389,7 +389,6 @@ export default function App(): React.JSX.Element {
   });
   const {
     globalChatActive,
-    globalProjectChangeId,
     deactivateGlobalChat,
     exitGlobalChat,
     importProject: confirmProjectImport,
@@ -408,10 +407,12 @@ export default function App(): React.JSX.Element {
     startupSurface: effectiveWorkspaceStartupSurface,
     showStartupSurface,
     updateSplitConversationId,
-    setActionError,
     setSidebarOpen,
     setView,
   });
+  const composerProject = connection.snapshot?.projects.find(
+    ({ id }) => id === draftConversation.conversation?.projectId,
+  ) ?? project;
   const importProject = async (): Promise<void> => { if (!busyAction) setAddProjectOpen(true); };
   const updateConversation = draftConversation.updateConversation;
   const discardDraftConversation = draftConversation.discard;
@@ -469,9 +470,9 @@ export default function App(): React.JSX.Element {
   const workspaceTools = useStableController(
     useWorkspaceTools({
       enabled: !workspaceToolsUnavailable,
-      project,
-      conversation,
-      detail: conversationDetail,
+      project: composerProject,
+      conversation: draftConversation.conversation ? null : conversation,
+      detail: draftConversation.conversation ? null : conversationDetail,
       online: connection.status === "online",
       ignoreWhitespace: settings.ignoreWhitespace,
       confirmDestructiveActions: settings.confirmDestructiveActions,
@@ -747,7 +748,7 @@ export default function App(): React.JSX.Element {
     dismissActivity,
   } = activityActions;
   const createConversation = (
-    targetProject: Project | null = project,
+    targetProject: Project | null = composerProject,
     location: NewConversationLocation = { kind: "defaults" },
   ) => {
     if (!targetProject) return;
@@ -765,10 +766,10 @@ export default function App(): React.JSX.Element {
       payload,
     })
       .then(() => {
-        discardDraftConversation();
         if (
           creationGeneration === conversationSelectionGenerationRef.current
         ) {
+          discardDraftConversation();
           setView("workspace");
           setSidebarOpen(false);
         }
@@ -979,11 +980,10 @@ export default function App(): React.JSX.Element {
     settingsTarget,
     settings,
     busyAction,
-    project,
+    project: composerProject,
     draftConversation: draftConversation.conversation,
     workspaceToolsUnavailable,
     globalChatActive,
-    globalProjectChangeId,
     connection,
     providerMaintenance,
     projection: conversationProjection,
@@ -1012,10 +1012,9 @@ export default function App(): React.JSX.Element {
     detailLoading,
     draftConversation.conversation,
     globalChatActive,
-    globalProjectChangeId,
     planSteps,
     agentWorkflows,
-    project,
+    composerProject,
     providerMaintenance,
     selectedMaintenanceOperation,
     selectedMaintenanceStatus,
@@ -1187,7 +1186,7 @@ export default function App(): React.JSX.Element {
       setDailyWorkOpen={setDailyWorkOpen}
       paletteOpen={paletteOpen}
       setPaletteOpen={setPaletteOpen}
-      project={project}
+      project={composerProject}
       conversation={conversation}
       headerConversation={draftConversation.conversation ?? conversation}
       splitConversationId={splitConversation?.id ?? null}

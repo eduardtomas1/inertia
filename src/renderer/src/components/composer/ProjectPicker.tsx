@@ -11,7 +11,7 @@ export function ProjectPicker({ picker }: { picker: NewChatProjectPicker }): Rea
     <div className="composer-project-picker">
       <button ref={trigger} type="button" aria-label="Project" aria-haspopup="dialog" aria-expanded={open && !picker.disabled}
         className="composer-project-picker-trigger" disabled={picker.disabled || !picker.projects.length}
-        onClick={() => setOpen(true)}
+        onClick={() => setOpen((current) => !current)}
         onKeyDown={(event) => {
           if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); setOpen(true); }
         }}>

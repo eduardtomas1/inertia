@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useRef,
   useState,
   type Dispatch,
   type MutableRefObject,
@@ -19,6 +20,7 @@ import type { TranscriptMessageSendAcceptance } from "../utils/transcriptNavigat
 import type { WorkspaceStartupSurface } from "../utils/workspaceStartup";
 
 type DraftConversationNavigation = {
+  changeProject: (projectId: string) => void;
   discard: () => void;
   importProject: (input?: ProjectImportInput) => Promise<boolean>;
   sendFromComposer: (
@@ -26,7 +28,7 @@ type DraftConversationNavigation = {
     attachments: ChatAttachment[],
     context?: TurnRequestContext,
   ) => Promise<TranscriptMessageSendAcceptance | null>;
-  start: (projectId: string) => void;
+  start: (projectId: string, independent?: boolean) => void;
 };
 
 type SelectionCommandQueue = (
@@ -44,7 +46,6 @@ export function useProjectChatNavigation({
   startupSurface,
   showStartupSurface,
   updateSplitConversationId,
-  setActionError,
   setSidebarOpen,
   setView,
 }: {
@@ -57,18 +58,16 @@ export function useProjectChatNavigation({
   startupSurface: WorkspaceStartupSurface;
   showStartupSurface: (surface: WorkspaceStartupSurface) => void;
   updateSplitConversationId: (conversationId: string | null) => void;
-  setActionError: Dispatch<SetStateAction<string | null>>;
   setSidebarOpen: Dispatch<SetStateAction<boolean>>;
   setView: Dispatch<SetStateAction<AppView>>;
 }) {
   const [globalChatActive, setGlobalChatActive] = useState(false);
-  const [globalProjectChangeId, setGlobalProjectChangeId] =
-    useState<string | null>(null);
+  const globalChatGenerationRef = useRef(0);
 
   const deactivateGlobalChat = useCallback(() => {
+    globalChatGenerationRef.current += 1;
     conversationSelectionGenerationRef.current += 1;
     setGlobalChatActive(false);
-    setGlobalProjectChangeId(null);
   }, [conversationSelectionGenerationRef]);
   const exitGlobalChat = useCallback(() => {
     deactivateGlobalChat();
@@ -95,8 +94,10 @@ export function useProjectChatNavigation({
   const sendMessage = useCallback(async (
     ...args: Parameters<DraftConversationNavigation["sendFromComposer"]>
   ): ReturnType<DraftConversationNavigation["sendFromComposer"]> => {
+    const generation = globalChatGenerationRef.current;
     const acceptance = await draftConversation.sendFromComposer(...args);
-    if (acceptance && globalChatActive) {
+    if (acceptance && globalChatActive
+      && generation === globalChatGenerationRef.current) {
       setGlobalChatActive(false);
       setView("workspace");
     }
@@ -104,16 +105,17 @@ export function useProjectChatNavigation({
   }, [draftConversation, globalChatActive, setView]);
 
   const openGlobalChat = useCallback((): void => {
+    globalChatGenerationRef.current += 1;
     conversationSelectionGenerationRef.current += 1;
     const targetProject = project ?? projects[0] ?? null;
-    setGlobalProjectChangeId(null);
+    updateSplitConversationId(null);
     setView("home");
     setSidebarOpen(false);
     if (!targetProject) {
       setGlobalChatActive(false);
       return;
     }
-    draftConversation.start(targetProject.id);
+    draftConversation.start(targetProject.id, true);
     setGlobalChatActive(true);
   }, [
     conversationSelectionGenerationRef,
@@ -122,46 +124,12 @@ export function useProjectChatNavigation({
     projects,
     setSidebarOpen,
     setView,
+    updateSplitConversationId,
   ]);
 
   const selectGlobalChatProject = useCallback((nextProject: Project): void => {
-    if (nextProject.id === project?.id || globalProjectChangeId) return;
-    const selectionGeneration =
-      conversationSelectionGenerationRef.current + 1;
-    conversationSelectionGenerationRef.current = selectionGeneration;
-    setGlobalProjectChangeId(nextProject.id);
-    void selectionCommandQueue("project.select:global-chat", {
-      type: "project.select",
-      payload: { projectId: nextProject.id },
-    }).then(() => {
-      if (selectionGeneration !== conversationSelectionGenerationRef.current) {
-        return;
-      }
-      draftConversation.start(nextProject.id);
-      setGlobalChatActive(true);
-      setView("home");
-      setSidebarOpen(false);
-    }).catch((error: unknown) => {
-      if (selectionGeneration === conversationSelectionGenerationRef.current) {
-        setActionError(error instanceof Error
-          ? error.message
-          : "The project could not be selected.");
-      }
-    }).finally(() => {
-      if (selectionGeneration === conversationSelectionGenerationRef.current) {
-        setGlobalProjectChangeId(null);
-      }
-    });
-  }, [
-    conversationSelectionGenerationRef,
-    draftConversation,
-    globalProjectChangeId,
-    project?.id,
-    selectionCommandQueue,
-    setActionError,
-    setSidebarOpen,
-    setView,
-  ]);
+    draftConversation.changeProject(nextProject.id);
+  }, [draftConversation]);
 
   const importProject = useCallback(async (input?: ProjectImportInput) => {
     if (busyAction) {
@@ -211,7 +179,6 @@ export function useProjectChatNavigation({
 
   return {
     globalChatActive,
-    globalProjectChangeId,
     deactivateGlobalChat,
     exitGlobalChat,
     importProject,

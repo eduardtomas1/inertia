@@ -41,6 +41,12 @@
       "poster": "working.png",
       "durationMs": 4000,
       "frameCount": 48
+    },
+    "pickup": {
+      "animation": "pickup.webp",
+      "poster": "pickup.png",
+      "durationMs": 2000,
+      "frameCount": 24
     }
   }
 }

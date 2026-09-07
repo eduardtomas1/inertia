@@ -30,12 +30,14 @@ export interface MascotSnapshot {
   preferences: MascotPreferences;
   /** Native Wayland delegates global placement to the compositor. */
   placement?: "system";
+  /** Transient window interaction, independent of the current agent activity. */
+  dragging?: boolean;
 }
 export type MascotAction = "open-chat" | "hide" | "pause" | "resume" | "focus"
-  | "left" | "right" | "up" | "down" | "reset-position";
+  | "left" | "right" | "up" | "down" | "reset-position" | "pickup" | "drop";
 
 export const MASCOT_ACTIONS: readonly MascotAction[] = [
-  "open-chat", "hide", "pause", "resume", "focus", "left", "right", "up", "down", "reset-position",
+  "open-chat", "hide", "pause", "resume", "focus", "left", "right", "up", "down", "reset-position", "pickup", "drop",
 ];
 export const MASCOT_LABELS: Record<MascotPhase, string> = {
   idle: "Ready when you are",

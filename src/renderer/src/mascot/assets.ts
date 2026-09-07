@@ -6,6 +6,8 @@ import working from "../assets/mascot/working.webp?no-inline";
 import workingPoster from "../assets/mascot/working.png?no-inline";
 import idea from "../assets/mascot/idea.webp?no-inline";
 import ideaPoster from "../assets/mascot/idea.png?no-inline";
+import pickup from "../assets/mascot/pickup.webp?no-inline";
+import pickupPoster from "../assets/mascot/pickup.png?no-inline";
 import type { MascotPhase } from "../../../shared/mascot";
 
 export const mascotAssets = {
@@ -13,6 +15,7 @@ export const mascotAssets = {
   thinking: { animation: thinking, poster: thinkingPoster },
   working: { animation: working, poster: workingPoster },
   idea: { animation: idea, poster: ideaPoster },
+  pickup: { animation: pickup, poster: pickupPoster },
 };
 
 export function mascotArtwork(phase: MascotPhase): keyof typeof mascotAssets {

@@ -31,9 +31,9 @@ test("optional mascot follows runtime states, remembers movement, and owns a res
     await toggle.click();
     let overlay = await opened;
     await expect(overlay.locator(".mascot")).toHaveAttribute("data-phase", "idle");
-    await expect(overlay.locator("img")).toHaveAttribute("data-animated", "false");
+    await expect(overlay.locator(".mascot-activity")).toHaveAttribute("data-animated", "false");
     const bubble = await overlay.locator(".mascot-status").boundingBox();
-    const character = await overlay.locator("img").boundingBox();
+    const character = await overlay.locator(".mascot-activity").boundingBox();
     expect(bubble!.y + bubble!.height).toBeLessThan(character!.y);
     await expect(overlay.locator(".mascot-speech-dots i")).toHaveCount(3);
     await capture(overlay, "idle", info);
@@ -52,7 +52,7 @@ test("optional mascot follows runtime states, remembers movement, and owns a res
       settingsBridge: "inertiaMascot" in window,
       methods: Object.keys((window as unknown as { mascot: MascotBridge }).mascot).sort(),
     }))).toEqual({ mainBridge: false, settingsBridge: false, methods: ["action", "onChanged", "snapshot"] });
-    expect(await overlay.locator(".mascot-drag").evaluate((element) => getComputedStyle(element).getPropertyValue("-webkit-app-region"))).toBe("drag");
+    expect(await overlay.locator(".mascot-drag").evaluate((element) => getComputedStyle(element).getPropertyValue("-webkit-app-region"))).toBe("no-drag");
 
     await main.getByRole("button", { name: "Move with keyboard" }).click();
     await expect(overlay.locator("main")).toBeFocused();
@@ -91,17 +91,54 @@ test("optional mascot follows runtime states, remembers movement, and owns a res
     await state("starting");
     await capture(overlay, "thinking", info);
     await state("running");
-    await expect(overlay.locator("img")).toHaveAttribute("data-animated", "true");
+    await expect(overlay.locator(".mascot-activity")).toHaveAttribute("data-animated", "true");
     await capture(overlay, "working", info);
+    // CDP mouse events do not move the OS cursor. Supply deterministic DIP
+    // samples while exercising real pointer capture, IPC and native window bounds.
+    const cursor = await app.electronApp.evaluateHandle(({ screen, BrowserWindow }) => {
+      const original = screen.getCursorScreenPoint;
+      const window = BrowserWindow.getAllWindows().find((candidate) => candidate.getTitle() === "Inertia mascot")!;
+      const bounds = window.getBounds();
+      let point = { x: bounds.x + 120, y: bounds.y + 184 };
+      screen.getCursorScreenPoint = () => point;
+      return {
+        move: () => { point = { x: point.x - 100, y: point.y - 80 }; },
+        restore: () => { screen.getCursorScreenPoint = original; }, bounds,
+      };
+    });
+    try {
+      await overlay.mouse.move(120, 184);
+      await overlay.mouse.down();
+      await expect(overlay.locator("main")).toHaveAttribute("data-dragging", "true");
+      await cursor.evaluate((value) => value.move());
+      const target = await cursor.evaluate((value) => [value.bounds.x - 100, value.bounds.y - 80]);
+      await expect.poll(() => app.electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((window) => window.getTitle() === "Inertia mascot")!.getPosition())).toEqual(target);
+      await expect(overlay.locator(".mascot-pickup")).toHaveCSS("opacity", "1");
+      await capture(overlay, "pickup", info);
+      await overlay.emulateMedia({ reducedMotion: "reduce" });
+      await expect(overlay.locator(".mascot-pickup")).toHaveAttribute("data-animated", "false");
+      await capture(overlay, "pickup-reduced-motion", info);
+      await overlay.emulateMedia({ reducedMotion: "no-preference" });
+      await overlay.mouse.up();
+      await expect(overlay.locator("main")).toHaveAttribute("data-dragging", "false");
+      await expect(overlay.locator(".mascot-activity")).toHaveCSS("opacity", "1");
+      await expect(overlay.locator(".mascot-activity")).toHaveAttribute("data-animated", "true");
+      await capture(overlay, "dropped-working", info);
+      await expect.poll(async () => JSON.parse(await readFile(join(app.testDirectory, "electron-profile", "mascot-window-state.json"), "utf8")).position).toEqual({ x: target[0], y: target[1] });
+      expect(await app.electronApp.evaluate(({ BrowserWindow }) => {
+        const window = BrowserWindow.getAllWindows().find((candidate) => candidate.getTitle() === "Inertia mascot")!;
+        return { focused: window.isFocused(), focusable: window.isFocusable() };
+      })).toEqual({ focused: false, focusable: false });
+    } finally { await cursor.evaluate((value) => value.restore()); await cursor.dispose(); }
     await overlay.emulateMedia({ reducedMotion: "reduce" });
-    await expect(overlay.locator("img")).toHaveAttribute("data-animated", "false");
+    await expect(overlay.locator(".mascot-activity")).toHaveAttribute("data-animated", "false");
     await overlay.emulateMedia({ reducedMotion: "no-preference" });
     await state("waiting-for-input");
     await capture(overlay, "waiting", info);
     await state("running");
     await state("completed");
     await capture(overlay, "complete", info);
-    await expect(overlay.locator("img")).toHaveAttribute("data-animated", "false");
+    await expect(overlay.locator(".mascot-activity")).toHaveAttribute("data-animated", "false");
     turn = store.beginAgentTurn({
       conversationId: chat.id, runId: "mascot-error-run", content: "Exercise failure status.",
       providerId: "codex", modelSelection: selection, reasoningEffort: "high", interactionMode: "build",

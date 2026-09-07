@@ -1,7 +1,7 @@
 # Inertia pixel mascot
 
 The final pixel-art mascot: a white, cursor-headed stick figure based on Inertia's
-own logo in `resources/icon.svg`. All four states share a 96 × 96 transparent
+own logo in `resources/icon.svg`. All five states share a 96 × 96 transparent
 canvas, a fixed 12-color palette and 12 fps timing. Animated WebP files use
 lossless encoding to retain crisp pixel edges. PNGs are the matching still frames.
 
@@ -11,10 +11,15 @@ lossless encoding to retain crisp pixel edges. PNGs are the matching still frame
 | Thinking | [thinking.webp](thinking.webp) | [thinking.png](thinking.png) | 4 s | 48 |
 | Idea | [idea.webp](idea.webp) | [idea.png](idea.png) | 3 s | 36 |
 | Working | [working.webp](working.webp) | [working.png](working.png) | 4 s | 48 |
+| Pickup | [pickup.webp](pickup.webp) | [pickup.png](pickup.png) | 2 s | 24 |
 
 `manifest.json` records the palette, dimensions and per-state timing. Every
 animation loops; Idea also returns to its starting pose. Thinking includes the
 three moving thought dots, Idea the golden bulb, and Working the adjusted laptop.
+Pickup is a new pose of the original 3D rig, exported onto the same pixel grid.
+Its editable source, provenance and regeneration instructions live in
+[`source-assets/mascot`](../../../../../source-assets/mascot/README.md).
+It is a transient drag interaction; the underlying activity stays current.
 
 ## Renderer use
 

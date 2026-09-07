@@ -6,12 +6,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { BrowserWindow } from "electron";
 import { MascotMain } from "../../src/main/mascot-main";
 import { emptyMascotStatus, MASCOT_IPC } from "../../src/shared/mascot";
+import { readMascotWindowState } from "../../src/main/mascot-placement";
 
 const harness = vi.hoisted(() => ({
   options: [] as BrowserWindowConstructorOptions[],
   windows: [] as unknown[],
   handlers: new Map<string, (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown>(),
   displays: [{ workArea: { x: 0, y: 24, width: 1440, height: 876 } }],
+  cursor: { x: 1296, y: 820 },
+  displayListeners: new Map<string, () => void>(),
 }));
 vi.mock("../../src/main/preview-broker", () => ({ hardenDesktopSession: vi.fn() }));
 vi.mock("electron", async () => {
@@ -46,7 +49,8 @@ vi.mock("electron", async () => {
     app: { commandLine: { getSwitchValue: () => "" } },
     BrowserWindow: Window,
     ipcMain: { handle: (channel: string, listener: (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown) => harness.handlers.set(channel, listener) },
-    screen: { getAllDisplays: () => harness.displays, on: vi.fn() },
+    screen: { getAllDisplays: () => harness.displays, getCursorScreenPoint: () => harness.cursor,
+      on: (event: string, listener: () => void) => harness.displayListeners.set(event, listener) },
     Menu: { buildFromTemplate: () => ({ popup: vi.fn() }) },
   };
 });
@@ -69,6 +73,8 @@ const cleanups: Array<() => void> = [];
 afterEach(() => {
   for (const cleanup of cleanups.splice(0)) cleanup();
   vi.useRealTimers(); harness.windows.length = 0; harness.options.length = 0; harness.handlers.clear();
+  harness.displays = [{ workArea: { x: 0, y: 24, width: 1440, height: 876 } }];
+  harness.cursor = { x: 1296, y: 820 }; harness.displayListeners.clear(); vi.unstubAllGlobals();
 });
 
 async function fixture() {
@@ -88,7 +94,7 @@ async function fixture() {
     } as unknown as IpcMainInvokeEvent, ...value);
   };
   cleanups.push(() => { mascot.suspend(); rmSync(directory, { recursive: true, force: true }); });
-  return { mascot, main, invoke, openChat, unregister };
+  return { mascot, main, invoke, openChat, unregister, directory };
 }
 
 describe("mascot window ownership", () => {
@@ -156,5 +162,76 @@ describe("mascot window ownership", () => {
     app.mascot.attach();
     await Promise.resolve();
     expect(harness.windows).toHaveLength(3);
+  });
+
+  it("moves from the grabbed offset, crosses negative displays, and saves only the final position", async () => {
+    vi.useFakeTimers();
+    const app = await fixture();
+    await app.invoke(MASCOT_IPC.configure, [{ enabled: true, motion: true }]);
+    const overlay = harness.windows[1] as WindowDouble;
+    const saved = (): ReturnType<typeof readMascotWindowState> => readMascotWindowState(join(app.directory, "mascot-window-state.json"));
+    await app.invoke(MASCOT_IPC.action, ["pickup"], overlay);
+    expect(app.mascot.snapshot().dragging).toBe(true);
+    const sends = overlay.webContents.send.mock.calls.length;
+    harness.cursor = { x: 1100, y: 700 };
+    vi.advanceTimersByTime(16);
+    expect(overlay.getBounds()).toEqual({ x: 980, y: 516, width: 240, height: 240 });
+    vi.advanceTimersByTime(1000); // Holding still must not drop, save, or broadcast.
+    expect(saved().position).toBeNull();
+    expect(overlay.webContents.send).toHaveBeenCalledTimes(sends);
+    expect(overlay.focus).not.toHaveBeenCalled();
+    app.mascot.observe({ ...emptyMascotStatus(), phase: "running", activeCount: 1 });
+    expect(app.mascot.snapshot().dragging).toBe(true);
+    harness.displays.push({ workArea: { x: -1920, y: -200, width: 1920, height: 1080 } });
+    harness.cursor = { x: -1, y: 20 };
+    vi.advanceTimersByTime(16);
+    expect(overlay.getBounds()).toEqual({ x: -240, y: -164, width: 240, height: 240 });
+    harness.cursor = { x: -1900, y: -190 };
+    await app.invoke(MASCOT_IPC.action, ["drop"], overlay); // Flush the last cursor sample.
+    expect(overlay.getBounds()).toEqual({ x: -1920, y: -200, width: 240, height: 240 });
+    expect(saved().position).toEqual({ x: -1920, y: -200 });
+    expect(app.mascot.snapshot()).toMatchObject({ dragging: false, status: { phase: "running" } });
+    expect(vi.getTimerCount()).toBe(0);
+    app.mascot.suspend(); app.mascot.attach(); await Promise.resolve();
+    expect((harness.windows[2] as WindowDouble).getBounds()).toEqual(overlay.getBounds());
+  });
+
+  it.each(["blur", "hide", "reload", "display", "timeout", "suspend", "native release"])("ends a lost drag on %s with no background tracking", async (reason) => {
+    vi.useFakeTimers();
+    const app = await fixture();
+    await app.invoke(MASCOT_IPC.configure, [{ enabled: true, motion: true }]);
+    const overlay = harness.windows[1] as WindowDouble;
+    await app.invoke(MASCOT_IPC.action, ["pickup"], overlay);
+    if (reason === "reload") overlay.webContents.emit("did-start-loading");
+    else if (reason === "native release") overlay.webContents.emit("before-mouse-event", {}, { type: "mouseUp", button: "left" });
+    else if (reason === "display") harness.displayListeners.get("display-metrics-changed")!();
+    else if (reason === "timeout") vi.advanceTimersByTime(120_000);
+    else if (reason === "suspend") app.mascot.suspend();
+    else overlay.emit(reason);
+    expect(app.mascot.snapshot().dragging).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("rejects drag requests from settings, extra coordinates, and outside the mascot handle", async () => {
+    vi.useFakeTimers();
+    const app = await fixture();
+    await app.invoke(MASCOT_IPC.configure, [{ enabled: true, motion: true }]);
+    const overlay = harness.windows[1] as WindowDouble;
+    await expect(app.invoke(MASCOT_IPC.action, ["pickup"])).rejects.toThrow("untrusted");
+    await expect(app.invoke(MASCOT_IPC.action, ["pickup", { x: 0, y: 0 }], overlay)).rejects.toThrow("untrusted");
+    harness.cursor = { x: 0, y: 0 };
+    await app.invoke(MASCOT_IPC.action, ["pickup"], overlay);
+    expect(app.mascot.snapshot().dragging).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("leaves Wayland movement to the compositor without starting cursor tracking", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("process", { ...process, platform: "linux", env: { ...process.env, WAYLAND_DISPLAY: "wayland-0" } });
+    const app = await fixture();
+    await app.invoke(MASCOT_IPC.configure, [{ enabled: true, motion: true }]);
+    await app.invoke(MASCOT_IPC.action, ["pickup"], harness.windows[1] as WindowDouble);
+    expect(app.mascot.snapshot()).toMatchObject({ placement: "system", dragging: false });
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

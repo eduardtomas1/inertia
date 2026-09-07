@@ -43,6 +43,7 @@ export function writeMascotWindowState(path: string, state: MascotWindowState): 
 export function mascotBounds(
   position: MascotWindowState["position"],
   displays: readonly WindowBoundsDisplay[],
+  anchor = position,
 ): Rectangle {
   const areas = displays.map(({ workArea }) => workArea)
     .filter(({ width, height }) => width > 0 && height > 0);
@@ -51,9 +52,12 @@ export function mascotBounds(
     x: fallback.x + fallback.width - MASCOT_SIZE.width - 24,
     y: fallback.y + fallback.height - MASCOT_SIZE.height - 24,
   };
+  // While dragging, the cursor chooses the display. Using the overlay's top-left
+  // would trap the mascot on the previous monitor until its whole offset crosses.
+  const target = anchor ?? point;
   const distance = (area: Rectangle): number => (
-    Math.max(area.x - point.x, 0, point.x - area.x - area.width) ** 2
-    + Math.max(area.y - point.y, 0, point.y - area.y - area.height) ** 2
+    Math.max(area.x - target.x, 0, target.x - area.x - area.width + 1) ** 2
+    + Math.max(area.y - target.y, 0, target.y - area.y - area.height + 1) ** 2
   );
   const area = areas.reduce((best, next) => distance(next) < distance(best) ? next : best, fallback);
   const width = Math.min(MASCOT_SIZE.width, area.width);

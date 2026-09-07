@@ -43,12 +43,19 @@ jobs:
           elif [[ "$EVENT_NAME" == merge_group ]] && [[ "$MERGE_GROUP_BASE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
             comparison="$MERGE_GROUP_BASE_SHA"
           else
-            comparison="$(git rev-list --max-parents=0 HEAD | tail -n 1)"
+            comparison=""
           fi
           printf 'commit=%s\n' "$comparison" >> "$GITHUB_OUTPUT"
 
       - name: Reject edited, removed, or reordered released migrations
-        run: node scripts/verify-database-lineage.mjs --base-ref "${{ steps.base.outputs.commit }}"
+        env:
+          COMPARISON_BASE: ${{ steps.base.outputs.commit }}
+        run: |
+          if [[ -n "$COMPARISON_BASE" ]]; then
+            node scripts/verify-database-lineage.mjs --base-ref "$COMPARISON_BASE"
+          else
+            node scripts/verify-database-lineage.mjs --all-history
+          fi
 
       - name: Install locked dependencies
         uses: ./.github/actions/install-dependencies

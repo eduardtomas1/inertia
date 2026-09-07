@@ -55,8 +55,10 @@ from required jobs which did not execute.
 GitHub PR checkouts test the synthetic merge SHA (`github.sha`); Actions REST
 jobs identify the PR source head. The plan records both and every checkout is
 explicitly pinned to the tested SHA. The gate checks its own checkout, both
-plan identities, same-run job identity and source head. Merge groups use the
-actual queue candidate. The PR event list explicitly includes
+plan identities, actual event/draft context, same-run job identity and source
+head. A missing PR draft/source-head context fails closed; a merge plan cannot
+authorize a run whose actual PR is still draft. Merge groups use the actual
+queue candidate. The PR event list explicitly includes
 `ready_for_review`, `synchronize` and `converted_to_draft`; GitHub's defaults
 do not include the ready transition. See
 [GitHub event semantics](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#pull_request)
@@ -86,6 +88,10 @@ Node 22, while the deliberate uncached Node 22.13 install remains separate.
 No runner artifact supplies authority. The lineage reusable job consumes this
 same baseline; unavailable main proof checks full history rather than forgetting
 migration edits in a cancelled predecessor.
+The lineage verifier's explicit `--all-history` fallback compares every reachable
+manifest revision, bounded to 1,000 revisions with bounded Git reads. A root
+commit predating the manifest is not treated as historical proof; unknown formats
+and history exceeding the bound fail closed instead of silently skipping entries.
 
 Git comparisons are NUL-delimited and use `--no-renames`, representing moves as
 deletion plus addition so neither old nor new ownership disappears. Unsafe,
@@ -222,6 +228,27 @@ build with four pre-existing SBOM checkout-basename assertions, and reported
 7,137 passing/77 skipped tests. It is a failed baseline, not a successful timing
 comparison. The historical successful timings above remain historical, and
 their Windows sharding projections are not current-run measurements.
+
+The separate unchanged-MAIN coverage baseline used Node 22.23.2, npm 10.9.8,
+Vitest/coverage-v8 4.1.11 and the original lockfile, with
+`npm run test:coverage -- --maxWorkers=2 --coverage.reportOnFailure`.
+It exited 1 after 502.40 seconds: 7,133 passed, 77 skipped, four original SBOM
+failures and four runtime-event timeouts with providers still checking.
+This failed run still produced the requested all-source denominator evidence:
+
+| Coverage metric | Covered / total | Percentage |
+| --- | ---: | ---: |
+| Statements | 64,041 / 79,887 | 80.16% |
+| Branches | 52,222 / 69,509 | 75.12% |
+| Functions | 12,660 / 15,524 | 81.55% |
+| Lines | 59,559 / 71,676 | 83.09% |
+
+The baseline summary contains 946 source files out of 947 tracked
+`src/**/*.ts(x)` paths; only `src/renderer/private-connect/vite.config.ts` is
+absent under the unchanged Vitest 4 defaults. The original lock SHA-256 is
+`ee1f8e6b7c9fd48194fae1a3ac6248ef45f03014131fa2ab4097fc1f1541e99e`.
+Candidate Vitest 5 coverage must compare normalized source-path inventories
+and denominators, not infer unchanged coverage inputs from percentages alone.
 
 No numeric CI speedup is claimed yet. Before/after reporting must include
 exact source/toolchain, cold/warm dependency state, queue delay, critical-path

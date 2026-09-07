@@ -98,11 +98,13 @@ function providerDomains(path) {
 }
 
 function domainsForTestPath(path) {
-  // Shared fixtures, runners, architecture assertions, and CI discovery can
-  // change the meaning or execution of unrelated suites. Keep those broad.
+  // Shared fixtures, native Electron verifiers, runners, architecture
+  // assertions, and CI discovery can change cross-platform proof. Native E2E
+  // includes OS-only scenarios as well as shared helpers; neither is UI-only.
   if (
     path.startsWith("tests/helpers/")
     || path.startsWith("tests/support/")
+    || path.startsWith("tests/e2e/")
     || path.startsWith("tests/fixtures/")
     || path === "tests/architecture-checker.test.ts"
     || path === "tests/contracts-boundary.test.ts"
@@ -115,7 +117,7 @@ function domainsForTestPath(path) {
   if (path.startsWith("tests/performance/") || path.startsWith("benchmarks/")) {
     return { domains: new Set(["performance"]) };
   }
-  if (path.startsWith("tests/renderer/") || path.startsWith("tests/e2e/")) {
+  if (path.startsWith("tests/renderer/")) {
     return { domains: new Set(["renderer_ui"]) };
   }
   if (

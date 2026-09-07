@@ -97,6 +97,7 @@ describe("CI change classifier", () => {
     for (const path of [
       "src/server/provider/claude-agent-sdk-harness.ts",
       "src/renderer/src/App.tsx",
+      "tests/renderer/app-shell.dom.test.tsx",
       "docs/CI_EVIDENCE.md",
     ]) {
       expect(classifyChangedPaths([path]).fullCertification, path).toBe(false);
@@ -171,6 +172,21 @@ describe("CI change classifier", () => {
       "turn_session",
       "agent_management",
     ]);
+  });
+
+  it.each([
+    "tests/e2e/support/electron-app-lifecycle.ts",
+    "tests/e2e/support/nested/new-helper.ts",
+    "tests\\e2e\\support\\app-fixture.ts",
+    "tests/e2e/runtime-live-recovery.spec.ts",
+    "tests/e2e/app-shell.spec.ts",
+  ])("keeps native Electron verifiers broad rather than treating them as UI-only: %s", (path) => {
+    const selected = classifyChangedPaths([path]);
+    expect(selected.allEvidence).toBe(true);
+    expect(selected.fullCertification).toBe(true);
+    expect(selected.documentationOnly).toBe(false);
+    expect(selected.domains).toEqual(CHANGE_DOMAINS);
+    expect(githubOutputsForClassification(selected)).toContain("ci_test_infrastructure=true\n");
   });
 
   it("emits stable, explicit GitHub job outputs", () => {

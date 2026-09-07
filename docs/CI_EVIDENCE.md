@@ -1,8 +1,9 @@
 # CI evidence lanes and timing record
 
-This describes the implementation relative to current MAIN
-`c9740a517da9636df343902cb4e08d851d9e33c9`, not just the older audit snapshot.
-The current-source baseline retained the audited overlapping PR/full tiers,
+The original implementation baseline was MAIN
+`c9740a517da9636df343902cb4e08d851d9e33c9`; the final integration comparison is
+MAIN `27bbc985a97d9e1857c33ce1585feae597d75ead`. Historical measurements below
+remain tied to their recorded revisions. The original source baseline retained the audited overlapping PR/full tiers,
 six copies of release quality and duplicate Linux coverage instrumentation.
 Implemented scheduling is not a hosted timing result or repository protection.
 
@@ -24,7 +25,7 @@ It does not select only tests whose filenames changed.
 | Release certification | Shared quality once on frozen release SHA; every shipped native target, exact packages/signatures/fuses/upgrades/checksums/provenance | Separate non-cancellable tag owner; no PR artifact reuse or trust-policy change. |
 
 Docs-only changes require quality and immutable migration lineage, but no
-installer or Electron matrix. Renderer-owned changes require full Linux
+installer or Electron matrix. Renderer source and renderer DOM tests require full Linux
 coverage and Linux display-sensitive, isolated and recovery Electron projects,
 without native installers. Provider adapters require Linux coverage plus
 three-OS lifecycle/transport proof; Windows/macOS also run the generated
@@ -32,7 +33,11 @@ portable contracts, and Windows retains native Codex shim/discovery proof.
 OS-specific package paths select both architectures of that OS plus canonical
 coverage. Shared lifecycle, startup, containment, migrations, toolchain,
 workflow/test infrastructure, shared contracts and unknown changes expand to
-all six targets. Mixed changes take the union; a full native target replaces
+all six targets. Native Electron verifier changes under `tests/e2e/`, including
+shared support and OS-only scenarios, also require all six targets: running a
+macOS-only test on Linux would skip its changed assertions. This rule precedes
+renderer matching and does not infer native coverage from a test's UI-facing
+name. Mixed changes take the union; a full native target replaces
 the equivalent same-platform sentinel.
 
 No assertions are removed from full certification. The complete Linux x64
@@ -151,20 +156,29 @@ credentialed PR execution or automatic upstream approval is introduced.
 [Dependabot grouping semantics](https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference#groups)
 distinguish default version groups from security updates.
 
-## Administrative merge protection (not applied)
+## Administrative merge protection (applied with explicit authorization)
 
-The 2026-09-07 read-only API check reports main protection disabled and no
-repository/inherited rulesets. This implementation does not modify settings.
+The initial 2026-09-07 read-only API check reported main protection disabled
+and no repository/inherited rulesets. After explicit owner authorization,
+classic protection was applied to the exact `main` branch and verified through
+both REST and GraphQL:
 
-An administrator must create an active main ruleset/branch protection requiring
-pull requests and the exact `merge-ready` status check from GitHub Actions.
-Require current-base evidence (strict checks or a configured merge queue);
-if queueing is enabled retain the wired `merge_group: checks_requested` event.
-Remove superseded individual matrix/sentinel required-check names only after
-the aggregate is installed and observed on a final candidate. Keep normal
-review requirements, restrict verifier/workflow changes to trusted review,
-and do not grant an urgent-label/admin bypass for missing evidence.
-A changed YAML file cannot itself activate those protections.
+- Pull requests and up-to-date branches are required.
+- The exact `merge-ready` check must come from the observed GitHub Actions app
+  (ID 15368); arbitrary status publishers are not accepted.
+- Administrators are subject to the same rules; no bypass allowance was added.
+- Force pushes and branch deletion are disabled.
+- Review conversations must be resolved; stale approvals are dismissed.
+- Zero independent approvals are required, so the PR boundary does not depend
+  on a second maintainer being available. Code-owner and last-pusher approval
+  requirements were not introduced.
+
+The main commit remained `27bbc985a97d9e1857c33ce1585feae597d75ead`; no merge,
+release, tag or workflow run was authorized by this configuration change.
+Other PRs must also supply the required aggregate, which this stabilization
+branch introduces. Green local tests or historical checks do not satisfy it.
+No merge queue was configured. A changed YAML file cannot itself activate
+repository protection; these are separately verified administrative settings.
 
 ## Generated portable conformance suite
 

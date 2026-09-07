@@ -533,6 +533,37 @@ The final real Linux Electron pass also succeeded for all three Kimi-login/
 restart and window-health scenarios with the updated fixture support
 (20.6 seconds), including clean teardown.
 
+## Review correction: native Electron verifier classification
+
+The external review correctly identified a regression exposed by narrowing
+the old `renderer_ui` full-certification rule. A ready PR changing only
+`tests/e2e/support/electron-app-lifecycle.ts` produced a Linux-only plan. Its
+Windows/macOS cleanup branches would no longer receive native evidence.
+Four new focused regression cases failed before the correction.
+
+The same generic rule also misclassified native scenarios, not just helpers:
+`runtime-live-recovery.spec.ts` skips every changed assertion outside macOS.
+The coherent correction therefore keeps all `tests/e2e/` native verifier
+changes in the existing broad infrastructure branch before renderer matching.
+Renderer source and renderer DOM tests retain the lighter Linux policy. No
+filename exception list or new ownership domain was added.
+
+Regressions assert the exact six platform identities, every required native
+check and all four Windows shards for a helper-only or OS-only-test ready PR.
+The evidence gate rejects each individually missing native check even when its
+aggregate job result claims success. Nested helpers and normalized Windows
+paths are covered. All 44 classifier/planner tests passed; final `npm run check`
+then passed 7,487 tests, 77 existing skips and 705 active files, every quality
+gate and unchanged bundle budgets (104.82-second test phase). No application
+or package bytes changed; fresh exact-head CI remains required.
+
+The owner also explicitly authorized main protection. REST and GraphQL confirm
+required PRs, strict current-base evidence, app-bound `merge-ready`, administrator
+enforcement, resolved conversations and disabled force pushes/deletion. No
+second-maintainer approval quota or bypass was added. Main's commit is unchanged.
+See `docs/CI_EVIDENCE.md` for the exact administrative policy and its distinction
+from the workflow implementation.
+
 ## Final evidence
 
 Local Linux results above include a real isolated installed-update fixture;

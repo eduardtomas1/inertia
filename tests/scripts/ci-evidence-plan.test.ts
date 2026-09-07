@@ -42,6 +42,34 @@ describe("explainable CI plan", () => {
   });
 
   it.each([
+    "tests/e2e/support/electron-app-lifecycle.ts",
+    "tests/e2e/runtime-live-recovery.spec.ts",
+  ])("requires all six native targets for a ready PR changing only %s", (path) => {
+    const selected = plan([path], {
+      event: "pull_request", draft: false,
+    });
+    expect(selected.fullCertification).toBe(true);
+    expect(selected.platforms).toEqual([
+      "linux-x64", "linux-arm64", "windows-x64", "windows-arm64", "macos-arm64", "macos-x64",
+    ]);
+    expect(selected.requiredJobs).toEqual(["gate", "lineage", "node-22-minimum", "test", "windows-unit"]);
+    expect(selected.requiredChecks).toEqual([
+      "Quality gate", "Migration lineage / Reject released migration tamper", "Node 22.13 minimum runtime",
+      "Linux x64", "Linux ARM64", "Windows x64", "Windows ARM64", "macOS arm64", "macOS x64",
+      "Windows unit tests (1/4)", "Windows unit tests (2/4)",
+      "Windows unit tests (3/4)", "Windows unit tests (4/4)",
+    ]);
+    expect(selected.omittedPlatforms).toEqual([]);
+    expect(evaluateMergeEvidence(selected, evidence(selected))).toEqual([]);
+    for (const missingName of ["Linux x64", "Linux ARM64", "Windows x64", "Windows ARM64", "macOS arm64", "macOS x64"]) {
+      const missingNative = evidence(selected);
+      missingNative.jobs = missingNative.jobs.filter(({ name }) => name !== missingName);
+      expect(evaluateMergeEvidence(selected, missingNative))
+        .toContain(`Required check ${missingName} lacks exact successful evidence.`);
+    }
+  });
+
+  it.each([
     ["build/linux/icon.png", ["linux-x64", "linux-arm64"]],
     ["build/windows/icon.ico", ["windows-x64", "windows-arm64"]],
     ["build/macos/icon.icns", ["macos-arm64", "macos-x64"]],

@@ -75,6 +75,7 @@ import { ConversationWorkAuthority, storedConversationWorkspaceResolver } from "
 import { SystemSuspendRepository } from "./persistence/system-suspend-repository";
 import { TranscriptRepository } from "./persistence/transcript-repository";
 import { TurnLedgerRepository, type DailyWorkRange, type UsageDashboardRange } from "./persistence/turn-ledger-repository";
+import { settleProjectedAgentTurn } from "./persistence/turn-settlement-projection";
 import { WorkspaceRunRepository } from "./persistence/workspace-run-repository";
 import type {
   AgentTurnRow,
@@ -274,7 +275,7 @@ export class RuntimeStore {
       this.contextPackets.recoverInterruptedAgentRequests();
       this.projectRepository.enrollMissingPaths();
       reconcileRecoveryImportJournal(this.database);
-      this.initializeState();
+      this.settingsRepository.initialize();
       if (options.recoverInterruptedRuns !== false) this.recoverInterruptedRuns();
     } catch (error) {
       if (this.database.open) this.database.close();
@@ -838,7 +839,7 @@ export class RuntimeStore {
     turnId: string,
     update: AgentTurnSettlementUpdate,
   ): AgentTurnSettlementResult {
-    return this.turnLedgerRepository.settle(turnId, update);
+    return settleProjectedAgentTurn(this.database, this, update.projection, () => this.turnLedgerRepository.settle(turnId, update));
   }
 
   settleConversation(conversationId: string, settled: boolean): Conversation {
@@ -1237,10 +1238,6 @@ export class RuntimeStore {
     const turn = this.database.prepare("SELECT * FROM agent_turns WHERE id = ?").get(turnId) as AgentTurnRow | undefined;
     if (!turn) throw new RecordNotFoundError("Agent turn not found.");
     return turn;
-  }
-
-  private initializeState(): void {
-    this.settingsRepository.initialize();
   }
 
   recoverInterruptedRuns(): void {

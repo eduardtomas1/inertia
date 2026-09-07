@@ -13,6 +13,7 @@ import {
 import type { TurnActivityProjection } from "./turn-activity-projection";
 import {
   boundaryUsage,
+  broadcastTurnSnapshot,
   updateActiveTurnProviderSession,
 } from "./turn-controller-support";
 import type {
@@ -66,7 +67,7 @@ export class TurnProviderEventProjector {
       this.options.hooks.broadcastConversationShell(active.conversation.id);
       return;
     }
-    this.options.hooks.broadcastSnapshot();
+    broadcastTurnSnapshot(this.options.hooks);
   }
 
   project(active: ActiveTurn, event: ProviderEvent): void {
@@ -90,7 +91,7 @@ export class TurnProviderEventProjector {
           type: "conversation.detail.invalidated",
           conversationId: active.conversation.id,
         });
-        this.options.hooks.broadcastSnapshot();
+        broadcastTurnSnapshot(this.options.hooks);
         break;
       }
       case "reasoning-summary":
@@ -254,7 +255,7 @@ export class TurnProviderEventProjector {
         } catch {
           // Metadata projection failures do not change the turn outcome.
         }
-        this.options.hooks.broadcastSnapshot();
+        broadcastTurnSnapshot(this.options.hooks);
         break;
       case "subagent": {
         const persisted = this.options.store.upsertSubagentTrace({

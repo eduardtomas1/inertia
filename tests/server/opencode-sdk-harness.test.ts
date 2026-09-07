@@ -640,7 +640,7 @@ server.listen(port, "127.0.0.1", () => {
 `;
 }
 
-describe.sequential("OpenCode SDK harness", () => {
+describe("OpenCode SDK harness", { concurrent: false }, () => {
   const roots: string[] = [];
   afterEach(async () => await Promise.all(roots.splice(0).map(removePortableFixture)));
 

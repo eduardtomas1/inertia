@@ -73,7 +73,10 @@ function acpFixture(
       requireLoadSession,
     },
     {
-      timeoutMs: 1_000,
+      // These assertions exercise protocol validation, not Node cold-start
+      // speed. The Intel CI unit job can spend over a second starting the
+      // fixture; keep the explicit 20 ms timeout case independent below.
+      timeoutMs: 5_000,
       cleanupTimeoutMs: 250,
       ...dependencies,
     },
@@ -99,6 +102,19 @@ function validResponse(
 }
 
 describe("provider drift process cleanup", () => {
+  it.each([false, true])("rejects unnegotiated terminal authentication even with optional identity=%s", async (allowMissingAgentInfo) => {
+    await expect(acpFixture(validResponse(
+      'agentCapabilities: {}, authMethods: [{ id: "login", name: "Login", type: "terminal", args: ["--login"], env: {} }],',
+      allowMissingAgentInfo ? "" : undefined,
+    ), { allowMissingAgentInfo })).rejects.toThrow("terminal authentication without client terminal support");
+  });
+
+  it("accepts protocol-driven agent authentication without claiming a successful login", async () => {
+    await expect(acpFixture(validResponse(
+      'agentCapabilities: {}, authMethods: [{ id: "login", name: "Login" }],',
+    ))).resolves.toBeUndefined();
+  });
+
   it("recognizes a Linux process group containing only terminal states", () => {
     const processIds = () => ["100", "101", "900"];
     const states = new Map([

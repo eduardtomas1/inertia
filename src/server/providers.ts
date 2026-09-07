@@ -40,10 +40,7 @@ import type {
   AgentHarnessCapabilities,
   AgentHarnessId,
 } from "./provider/agent-harness";
-import {
-  providerAuthLaunchEnvironment,
-  providerAuthLoginArgs,
-} from "./provider/auth";
+import { prepareProviderAuthLaunch } from "./provider/auth-launch";
 import { PROVIDERS, PROVIDER_INFO } from "./provider/catalog";
 import {
   PROVIDER_IDS,
@@ -87,7 +84,6 @@ import {
   recordBackendProbeEvidence,
 } from
   "./provider/custom-backend-probe-admission";
-import { providerProcessInvocation, providerPtyArguments } from "./provider/process";
 import { isProcessTreeTerminationUnconfirmed } from "./process-lifecycle";
 import {
   ProviderRunCoordinator,
@@ -819,34 +815,18 @@ export class ProviderManager {
     return settled.map((result) => (result as PromiseFulfilledResult<ProviderDetection>).value);
   }
 
-  async authLaunch(providerId: ProviderId): Promise<ProviderAuthLaunch> {
-    let executable = this.resolvedCommands.get(providerId);
-    if (!executable) executable = (await this.detect(providerId, { refreshEnvironment: true })).executable;
-    if (!executable) throw new ProviderRuntimeError("invalid_input", `${PROVIDER_INFO[providerId].name} CLI is not installed.`);
-    const environment = await providerEnvironment();
-    this.processEnvironment = environment.env;
-    const childEnvironment = providerAuthLaunchEnvironment(
-      providerId,
-      providerChildEnvironment(providerId, environment.env),
-    );
-    const invocation = providerProcessInvocation(
-      executable,
-      providerAuthLoginArgs(providerId),
-      childEnvironment,
-    );
-    const installationUse = this.installationAuthority.acquire(
-      providerId,
-      executable,
-      providerNativeBackendProfile(providerId),
-      "auth-discovery",
-      this.installationAuthority.operationIdentity("auth-discovery"),
-    );
-    return {
-      executable: invocation.command,
-      args: providerPtyArguments(invocation),
-      env: childEnvironment,
-      installationUse: this.installationAuthority.transfer(installationUse),
-    };
+  authLaunch(providerId: ProviderId, cwd = process.cwd()): Promise<ProviderAuthLaunch> {
+    return this.trackAuxiliary(async () => {
+      let executable = this.resolvedCommands.get(providerId);
+      if (!executable) executable = (await this.detect(providerId, { cwd, refreshEnvironment: true })).executable;
+      if (!executable) throw new ProviderRuntimeError("invalid_input", `${PROVIDER_INFO[providerId].name} CLI is not installed.`);
+      const environment = await providerEnvironment();
+      this.processEnvironment = environment.env;
+      return await prepareProviderAuthLaunch({
+        providerId, executable, cwd, environment: environment.env,
+        signal: this.lifetimeSignal, installationAuthority: this.installationAuthority,
+      });
+    });
   }
 
   async terminalResumeLaunch(
@@ -954,6 +934,7 @@ export class ProviderManager {
     let executable = this.resolvedCommands.get(providerId);
     if (!executable) executable = (await this.detect(providerId, {
       signal,
+      cwd,
       ...(installationVerificationAuthority
         ? { installationVerificationAuthority }
         : {}),
@@ -1052,7 +1033,7 @@ export class ProviderManager {
 
   async codexControlContext(cwd: string): Promise<CodexControlContext> {
     let executable = this.resolvedCommands.get("codex");
-    if (!executable) executable = (await this.detect("codex")).executable;
+    if (!executable) executable = (await this.detect("codex", { cwd })).executable;
     if (!executable) {
       throw new ProviderRuntimeError(
         "invalid_input",
@@ -1083,7 +1064,7 @@ export class ProviderManager {
     context: ProviderInstallationReadContext = {},
   ): Promise<Awaited<ReturnType<typeof readClaudeAgentSdkSkills>>> {
     let executable = this.resolvedCommands.get("claude");
-    if (!executable) executable = (await this.detect("claude", context)).executable;
+    if (!executable) executable = (await this.detect("claude", { ...context, cwd })).executable;
     if (!executable) {
       throw new ProviderRuntimeError(
         "invalid_input",

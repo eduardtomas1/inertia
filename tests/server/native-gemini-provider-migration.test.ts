@@ -395,7 +395,7 @@ async function populatedFixture(schemaVersion = PREVIOUS_SCHEMA_VERSION): Promis
   };
 }
 
-describe.sequential("native Gemini provider migration", () => {
+describe("native Gemini provider migration", { concurrent: false }, () => {
   afterEach(async () => {
     await Promise.all(temporaryDirectories.splice(0).map((directory) =>
       rm(directory, { recursive: true, force: true }),

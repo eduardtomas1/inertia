@@ -1,6 +1,7 @@
 #include <libproc.h>
 #include <signal.h>
 #include <stdint.h>
+#include <sys/event.h>
 #include <sys/sysctl.h>
 #include <sys/wait.h>
 
@@ -8,13 +9,18 @@ static int fixture_proc_pidinfo(int, int, uint64_t, void *, int);
 static int fixture_sysctl(int *, u_int, void *, size_t *, void *, size_t);
 static int fixture_kill(pid_t, int);
 static pid_t fixture_waitpid(pid_t, int *, int);
+static int fixture_kevent(
+  int, const struct kevent *, int, struct kevent *, int, const struct timespec *
+);
 #define proc_pidinfo fixture_proc_pidinfo
 #define sysctl fixture_sysctl
 #define kill fixture_kill
 #define waitpid fixture_waitpid
+#define kevent(...) fixture_kevent(__VA_ARGS__)
 #define main guardian_main
 #include "../../native/runtime-process-guardian/darwin.c"
 #undef main
+#undef kevent
 #undef waitpid
 #undef kill
 #undef sysctl
@@ -28,9 +34,39 @@ static int zombie_observed = 0;
 static int zombie_libproc_bytes = -1;
 static int stop_signals_delivered = 0;
 static int non_child_wait_attempts = 0;
+static int observer_calls = 0;
 
 static int scenario_is(const char *value) {
   return strcmp(scenario, value) == 0;
+}
+
+static int fixture_kevent(
+  int queue, const struct kevent *changes, int change_count,
+  struct kevent *events, int event_count, const struct timespec *timeout
+) {
+  if (strncmp(scenario, "observer-", 9) != 0) {
+    return kevent(queue, changes, change_count, events, event_count, timeout);
+  }
+  if (changes != NULL || change_count != 0 || event_count != 8
+    || timeout == NULL || timeout->tv_sec != 0 || timeout->tv_nsec != 0) {
+    _exit(98);
+  }
+  observer_calls += 1;
+  if (observer_calls == 1 || scenario_is("observer-eintr-exhausted")) {
+    errno = EINTR;
+    return -1;
+  }
+  if (scenario_is("observer-hard-error")) {
+    errno = EBADF;
+    return -1;
+  }
+  if (scenario_is("observer-fork") || scenario_is("observer-event-error")) {
+    memset(events, 0, sizeof(*events));
+    if (scenario_is("observer-fork")) events[0].fflags = NOTE_FORK;
+    else events[0].flags = EV_ERROR;
+    return 1;
+  }
+  return 0;
 }
 
 static int fixture_proc_pidinfo(
@@ -205,6 +241,15 @@ static int run_fixture(void) {
 int main(int argc, char **argv) {
   if (argc != 2) return 64;
   scenario = argv[1];
+  if (strncmp(scenario, "observer-", 9) == 0) {
+    struct owned_tree_tracker tracker;
+    memset(&tracker, 0, sizeof(tracker));
+    tracker.root_event_queue = 42;
+    observe_root_forks(&tracker);
+    printf("{\"forkTainted\":%d,\"observerCalls\":%d}\n",
+      tracker.fork_tainted, observer_calls);
+    return 0;
+  }
   const pid_t runner = fork();
   if (runner < 0) return 87;
   if (runner == 0) return run_fixture();

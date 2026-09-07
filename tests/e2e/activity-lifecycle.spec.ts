@@ -1,3 +1,4 @@
+// @inertia-e2e-resource primary-display
 import { expect, test } from "@playwright/test";
 
 import { RuntimeStore } from "../../src/server/database";

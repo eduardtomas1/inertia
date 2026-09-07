@@ -1,9 +1,10 @@
+import type { Terminal } from "@xterm/xterm";
 import type { ProviderId } from "@shared/contracts";
 
 const MAX_PROVIDER_AUTH_URL_LENGTH = 4_096;
 const PROVIDER_AUTH_SCAN_LENGTH = MAX_PROVIDER_AUTH_URL_LENGTH * 2;
-// A PTY chunk may end in the middle of the query string. Requiring a stream
-// delimiter keeps us from opening a syntactically valid but truncated URL.
+// The cursor may still be in the middle of a query string. Require a printed
+// delimiter instead of opening a syntactically valid but truncated URL.
 const COMPLETE_HTTPS_URL_PATTERN =
   /https:\/\/[^\s\u0000-\u001f\u007f]+(?=[\s\u0000-\u001f\u007f])/gu;
 
@@ -167,24 +168,35 @@ export function providerAuthBrowserUrl(
 }
 
 /**
- * Provider CLIs can split a printed OAuth URL across arbitrary PTY chunks.
- * Retain only enough transient tail data to reassemble one bounded URL.
+ * Read only the bounded text the terminal has actually parsed. ConPTY can
+ * insert cursor/style controls inside a URL: scanning raw PTY bytes misses
+ * those links, or treats an escape as the end of an incomplete query. xterm
+ * already owns VT parsing, cursor edits, hidden OSC payloads, and soft wraps.
+ * Call after a terminal.write callback, never before its data has been parsed.
  */
-export class ProviderAuthBrowserUrlDetector {
-  private buffer = "";
-
-  constructor(private readonly providerId: ProviderId) {}
-
-  push(output: string): string | null {
-    this.buffer = `${this.buffer}${output}`.slice(-PROVIDER_AUTH_SCAN_LENGTH);
-    for (const match of this.buffer.matchAll(COMPLETE_HTTPS_URL_PATTERN)) {
-      const url = providerAuthBrowserUrl(this.providerId, match[0]);
-      if (url) return url;
-    }
-    return null;
+export function providerAuthBrowserUrlFromTerminal(
+  providerId: ProviderId,
+  terminal: Pick<Terminal, "buffer" | "cols">,
+): string | null {
+  if (providerId !== "claude" && providerId !== "gemini") return null;
+  const buffer = terminal.buffer.active;
+  const cursorRow = Math.min(buffer.length - 1, buffer.baseY + buffer.cursorY);
+  let text = "";
+  let separator = "";
+  for (let row = cursorRow, scanned = 0;
+    row >= 0 && scanned < PROVIDER_AUTH_SCAN_LENGTH && text.length < PROVIDER_AUTH_SCAN_LENGTH;
+    row -= 1, scanned += 1) {
+    const line = buffer.getLine(row);
+    if (!line) break;
+    // Padding beyond the cursor is not a printed URL delimiter. Conversely,
+    // spaces explicitly written before it (including at a soft wrap) are.
+    const endColumn = row === cursorRow ? buffer.cursorX : terminal.cols;
+    text = line.translateToString(false, 0, endColumn) + separator + text;
+    separator = line.isWrapped ? "" : "\n";
   }
-
-  clear(): void {
-    this.buffer = "";
+  for (const match of text.slice(-PROVIDER_AUTH_SCAN_LENGTH).matchAll(COMPLETE_HTTPS_URL_PATTERN)) {
+    const url = providerAuthBrowserUrl(providerId, match[0]);
+    if (url) return url;
   }
+  return null;
 }

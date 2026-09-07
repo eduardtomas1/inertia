@@ -715,16 +715,19 @@ export function startCodexAppServerRun(
       || !providerThreadId
       || !activeTurnId
     ) return false;
+    const expectedTurnId = activeTurnId;
     try {
-      await request("turn/steer", {
+      const receipt = await request("turn/steer", {
         threadId: providerThreadId,
         input: [
           { type: "text", text, text_elements: [] },
           ...input.imagePaths.map((path) => ({ type: "localImage", path })),
         ],
-        expectedTurnId: activeTurnId,
+        expectedTurnId,
       }, undefined, false);
-      return true;
+      // Capture ownership before awaiting: completion can share the response's
+      // stdout batch, but only this exact provider turn can acknowledge input.
+      return receipt.turnId === expectedTurnId;
     } catch {
       return false;
     }

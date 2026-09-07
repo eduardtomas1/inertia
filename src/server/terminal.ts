@@ -57,6 +57,7 @@ interface TerminalSession {
   pty: IPty;
   dataListener: IDisposable;
   exitListener: IDisposable;
+  readonly outputObserved: boolean;
   exitObserved: boolean;
   exitCode: number | null;
   exitSignal: number | null;
@@ -136,6 +137,15 @@ function ownershipRetirementFailure(session: TerminalSession): TerminalError {
   return new TerminalError(
     `A terminal process ownership claim could not be retired during runtime shutdown.${outcome}`,
   );
+}
+
+function terminalStopObservation(session: TerminalSession) {
+  return {
+    outputObserved: session.outputObserved,
+    exitObserved: session.exitObserved,
+    exitCode: session.exitCode,
+    naturalExitCode: session.naturalExitCode,
+  };
 }
 
 export class TerminalManager {
@@ -680,7 +690,9 @@ export class TerminalManager {
         else void this.trackFinalDisposal(session);
       },
     });
+    let outputObserved = false;
     const dataListener = pseudoterminal.onData((data) => {
+      outputObserved = true;
       onOutput?.(data);
       output.queue(data);
     });
@@ -692,7 +704,11 @@ export class TerminalManager {
       session.exitSignal = signal ?? null;
       for (const resolveExit of session.exitWaiters) resolveExit();
       session.exitWaiters.clear();
-      releaseOwnedProcessIfExited(signal);
+      // A Windows PTY exit proves only that the root exited. During a stop,
+      // retain its claim until the full-tree termination path confirms cleanup.
+      if (this.platform !== "win32" || !session.terminationRequested) {
+        releaseOwnedProcessIfExited(signal);
+      }
       if (session.terminationRequested) return;
       const ownsProviderInstallation = session.installationUse !== null;
       const ownedProcessStopped = session.confirmOwnedProcessStopped();
@@ -740,6 +756,7 @@ export class TerminalManager {
       pty: pseudoterminal,
       dataListener,
       exitListener,
+      get outputObserved() { return outputObserved; },
       exitObserved: false,
       exitCode: null,
       exitSignal: null,
@@ -983,6 +1000,18 @@ export class TerminalManager {
     session: TerminalSession,
     attemptGracefulReplacement: boolean,
   ): Promise<void> {
+    const windowsTerminalAtStop = this.platform === "win32"
+      ? terminalStopObservation(session)
+      : null;
+    const windowsFailureOptions = (): ErrorOptions | undefined => windowsTerminalAtStop
+      ? { cause: {
+          windowsCleanupFailures: windowsCleanupFailures(),
+          windowsTerminalCleanup: {
+            atStop: windowsTerminalAtStop,
+            atFailure: terminalStopObservation(session),
+          },
+        } }
+      : undefined;
     // Let trackDisposal publish the memoized closing promise before a graceful
     // payload exit can synchronously trigger the PTY exit listener.
     await Promise.resolve();
@@ -1089,9 +1118,7 @@ export class TerminalManager {
             );
             finish(new TerminalError(
               "A terminal process tree could not be confirmed stopped during runtime shutdown.",
-              process.platform === "win32"
-                ? { cause: { windowsCleanupFailures: windowsCleanupFailures() } }
-                : undefined,
+              windowsFailureOptions(),
             ));
             return;
           }
@@ -1131,9 +1158,7 @@ export class TerminalManager {
           );
           finish(new TerminalError(
             "A terminal process tree could not be confirmed stopped during runtime shutdown.",
-            process.platform === "win32"
-              ? { cause: { windowsCleanupFailures: windowsCleanupFailures() } }
-              : undefined,
+            windowsFailureOptions(),
           ));
         },
       );

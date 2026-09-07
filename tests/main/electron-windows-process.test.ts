@@ -71,7 +71,7 @@ describe("owned Windows Electron launcher cleanup", () => {
       .then((result) => { settled = true; return result; });
     expect(f.spawnProcess).toHaveBeenCalledExactlyOnceWith(
       "C:\\Windows\\System32\\taskkill.exe", ["/pid", "424242", "/t", "/f"],
-      { shell: false, windowsHide: true, stdio: "ignore" },
+      { shell: false, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] },
     );
     f.stopTree();
     f.taskkill.emit("close", 0);
